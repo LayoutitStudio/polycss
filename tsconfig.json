@@ -13,11 +13,11 @@
     "forceConsistentCasingInFileNames": true,
     "strict": true,
     "skipLibCheck": true,
-    "baseUrl": "./src",
+    "baseUrl": ".",
     "paths": {
-      "@voxcss/*": ["./*"]
+      "@voxcss-core/*": ["packages/core/src/*"]
     },
     "outDir": "dist"
   },
-  "include": ["src", "react", "vue", "svelte"]
+  "include": ["packages/core/src", "packages/html/src", "packages/html/tests"]
 }
