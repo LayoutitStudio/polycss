@@ -54,6 +54,10 @@
   "scripts": {
     "build": "tsup --clean && node -e \"require('fs').cpSync('svelte','dist/svelte',{recursive:true})\"",
     "watch": "tsup --watch --sourcemap --onSuccess \"node -e \\\"require('fs').cpSync('svelte','dist/svelte',{recursive:true})\\\"\"",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "lint": "eslint .",
     "bench:test": "node scripts/slice-renderer-test.mjs",
     "bench:test:build": "node scripts/slice-renderer-test.mjs --build",
     "prepublishOnly": "npm run build"
@@ -84,8 +88,14 @@
   "devDependencies": {
     "@types/react": "^18.3.26",
     "@types/react-dom": "^18.3.7",
+    "@typescript-eslint/eslint-plugin": "^8.56.1",
+    "@typescript-eslint/parser": "^8.56.1",
+    "@vitest/coverage-v8": "^4.0.18",
+    "eslint": "^10.0.2",
+    "happy-dom": "^20.7.0",
     "tsup": "^8.0.1",
     "typescript": "^5.3.3",
+    "vitest": "^4.0.18",
     "vue": "^3.5.12"
   }
 }
