@@ -1,33 +1,18 @@
 /* Shared lighting helpers for voxcss shapes. */
 import type { CubeFace, WallsMask } from "./types";
+import {
+  type ParsedColor,
+  parsePureColor,
+  parseRgbColor,
+  clampChannel,
+  formatColor
+} from "./color";
 
-interface ParsedColor {
-  rgb: [number, number, number];
-  alpha: number;
-}
+export type { ParsedColor };
 
 const defaultColor: ParsedColor = { rgb: [204, 204, 204], alpha: 1 };
 const colorCache = new Map<string, ParsedColor>();
 let probeEl: HTMLElement | null = null;
-
-function parseHexColor(value: string): ParsedColor | null {
-  const hex = value.replace("#", "");
-  if (hex.length === 3) {
-    const r = parseInt(hex[0] + hex[0], 16);
-    const g = parseInt(hex[1] + hex[1], 16);
-    const b = parseInt(hex[2] + hex[2], 16);
-    if (Number.isNaN(r) || Number.isNaN(g) || Number.isNaN(b)) return null;
-    return { rgb: [r, g, b], alpha: 1 };
-  }
-  if (hex.length === 6) {
-    const r = parseInt(hex.slice(0, 2), 16);
-    const g = parseInt(hex.slice(2, 4), 16);
-    const b = parseInt(hex.slice(4, 6), 16);
-    if (Number.isNaN(r) || Number.isNaN(g) || Number.isNaN(b)) return null;
-    return { rgb: [r, g, b], alpha: 1 };
-  }
-  return null;
-}
 
 function ensureProbe(doc: Document | null = typeof document !== "undefined" ? document : null): HTMLElement | null {
   if (typeof document === "undefined" && !doc) return null;
@@ -45,12 +30,14 @@ export function parseColor(input: string): ParsedColor | null {
   const cached = colorCache.get(key);
   if (cached) return cached;
 
-  const hexParsed = parseHexColor(key);
-  if (hexParsed) {
-    colorCache.set(key, hexParsed);
-    return hexParsed;
+  // Try pure parsing first (hex, rgb/rgba) — no DOM needed
+  const pureParsed = parsePureColor(key);
+  if (pureParsed) {
+    colorCache.set(key, pureParsed);
+    return pureParsed;
   }
 
+  // Fallback: DOM probe for CSS named colors ("red", "tomato", etc.)
   const probe = ensureProbe();
   if (!probe) return null;
   probe.style.color = "";
@@ -60,23 +47,10 @@ export function parseColor(input: string): ParsedColor | null {
   if (!value || value === "rgba(0, 0, 0, 0)" || value === "transparent") {
     return null;
   }
-  const match = value.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?\)/i);
-  if (!match) return null;
-  const parsed: ParsedColor = {
-    rgb: [Number(match[1]), Number(match[2]), Number(match[3])],
-    alpha: match[4] ? Number(match[4]) : 1
-  };
+  const parsed = parseRgbColor(value);
+  if (!parsed) return null;
   colorCache.set(key, parsed);
   return parsed;
-}
-
-function clampChannel(value: number): number {
-  return Math.max(0, Math.min(255, Math.round(value)));
-}
-
-function formatColor(color: ParsedColor): string {
-  const [r, g, b] = color.rgb.map(clampChannel) as [number, number, number];
-  return color.alpha < 1 ? `rgba(${r}, ${g}, ${b}, ${color.alpha})` : `rgb(${r}, ${g}, ${b})`;
 }
 
 export function shadeColor(base: string, delta: number): string {

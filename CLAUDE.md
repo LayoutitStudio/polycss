@@ -577,3 +577,11 @@ A single `<style id="voxcss-base-styles">` is injected into `<head>`. Key rules:
 - Wall color defaults to `#3e3e4d`
 - The `"f"` face key exists in `DEFAULT_OFFSETS` as `[0,0,0]` but is not in `CUBE_FACES` — it appears unused
 - Error messages are prefixed with `"voxcss: "`
+
+---
+
+## Git Conventions
+
+- Commit messages use conventional format: `type: short description` (e.g., `refactor:`, `test:`, `feat:`, `fix:`, `chore:`)
+- One line only, no body, no attribution/co-author tags
+- Do not amend existing commits — always create new ones
