@@ -2,9 +2,12 @@
 
 ## What is VoxCSS?
 
-`@layoutit/voxcss` is a **CSS-based voxel rendering engine for the browser**. It renders 3D voxel scenes entirely using DOM elements and CSS 3D transforms — no WebGL, no canvas. Each voxel becomes a set of `<div>` elements with CSS transforms to position them in 3D space. The library is framework-agnostic at its core, with thin wrappers for Vue 3, React 18, and Svelte 4.
+`@layoutit/voxcss` is a **CSS-based voxel rendering engine for the browser**. It renders 3D voxel scenes entirely using DOM elements and CSS 3D transforms — no WebGL, no canvas. Each voxel becomes a set of `<div>` elements with CSS transforms to position them in 3D space.
 
-**Package:** `@layoutit/voxcss` v0.1.8
+**Monorepo** with two packages:
+- `@layoutit/voxcss-core` — Pure math engine (zero browser globals)
+- `@layoutit/voxcss` — HTML/DOM renderer (depends on core)
+
 **License:** MIT
 **Repository:** https://github.com/LayoutitStudio/voxcss
 **Website:** https://voxcss.com
@@ -15,50 +18,33 @@
 
 ```
 voxcss/
-├── src/                          # Core engine (framework-agnostic)
-│   ├── index.ts                  # Public API re-exports
-│   ├── core/                     # Rendering engine
-│   │   ├── types.ts              # All type definitions and constants
-│   │   ├── context.ts            # Scene context building + voxel lookups
-│   │   ├── camera.ts             # Isometric camera state machine
-│   │   ├── domRenderer.ts        # Main DOM renderer (creates/updates DOM)
-│   │   ├── sliceRenderer.ts      # Volumetric "3D merge" renderer
-│   │   ├── visibility.ts         # Face occlusion culling
-│   │   ├── faceAppearance.ts     # Per-face color/texture resolution
-│   │   ├── lighting.ts           # Directional lighting simulation
-│   │   ├── styles.ts             # Base CSS stylesheet injection
+├── packages/core/                # @layoutit/voxcss-core (pure math)
+│   └── src/
+│       ├── types.ts              # All type definitions and constants
+│       ├── scene/context.ts      # Scene context building + voxel lookups
+│       ├── scene/visibility.ts   # Face occlusion culling
+│       ├── camera/camera.ts      # Isometric camera state machine
+│       ├── color/color.ts        # Pure hex/rgb color parsing
+│       ├── color/lighting.ts     # Directional lighting simulation
+│       ├── color/faceAppearance.ts # Per-face color/texture resolution
+│       ├── merge/mergeVoxels.ts  # 2D voxel merge algorithm
+│       ├── merge/slicePlanner.ts # 3D slice planning (pure)
+│       ├── parser/parseMagicaVoxel.ts # .vox file parser
+│       ├── encoding/png.ts       # Zero-dep PNG encoder
+│       └── controller/sceneController.ts # Central state manager
+├── packages/html/                # @layoutit/voxcss (HTML renderer)
+│   ├── src/
 │   │   ├── headless.ts           # Framework-free imperative API
-│   │   ├── png.ts                # Pure-JS PNG encoder (no dependencies)
-│   │   └── shapes/               # Shape renderers
-│   │       ├── index.ts
-│   │       ├── cube.ts           # Default cube shape
-│   │       ├── ramp.ts           # Sloped ramp shape
-│   │       ├── wedge.ts          # Wedge (two-slope) shape
-│   │       ├── spike.ts          # Spike (pointed) shape
-│   │       └── shapeUtils.ts     # Shared shape helpers (SVG slopes, orientation)
-│   ├── controller/               # State management layer
-│   │   ├── sceneController.ts    # Central controller (camera + scene state)
-│   │   ├── sceneBindings.ts      # Scene DOM mounting + update loop
-│   │   └── domBindings.ts        # Camera DOM mounting + pointer events
-│   └── utils/                    # Utilities
-│       ├── parseMagicaVoxel.ts   # .vox file parser
-│       ├── mergeVoxels.ts        # 2D voxel merge algorithm
-│       └── mergeVoxelsOption.ts  # Merge option normalization
-├── react/                        # React 18 wrapper
-│   ├── index.ts
-│   ├── VoxCamera.tsx
-│   ├── VoxScene.tsx
-│   └── useBindings.ts
-├── vue/                          # Vue 3 wrapper
-│   ├── index.ts
-│   ├── VoxCamera.ts
-│   ├── VoxScene.ts
-│   └── context.ts
-├── svelte/                       # Svelte 4 wrapper
-│   ├── index.ts / index.d.ts
-│   ├── VoxCamera.svelte / .d.ts
-│   ├── VoxScene.svelte / .d.ts
-│   └── context.ts
+│   │   ├── styles.ts             # Base CSS stylesheet injection
+│   │   ├── renderer/
+│   │   │   ├── domRenderer.ts    # Main DOM renderer
+│   │   │   └── sliceRenderer.ts  # Volumetric "3D merge" DOM renderer
+│   │   ├── shapes/               # Shape renderers (cube, ramp, wedge, spike)
+│   │   └── bindings/
+│   │       ├── sceneBindings.ts  # Scene DOM mounting + update loop
+│   │       └── domBindings.ts    # Camera DOM mounting + pointer events
+│   └── tests/e2e/               # End-to-end render tests
+├── src/index.ts                  # Backwards-compat re-export from packages/html
 ├── examples/                     # Usage examples
 │   ├── headless/                 # Plain JS examples
 │   ├── react/
