@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeAll, beforeEach, afterEach } from "vitest";
 import { updateSliceRendererGeometry, clearSliceRenderer } from "./sliceRenderer";
 import type { SliceRendererDomState } from "./sliceRenderer";
-import type { GridContext, RenderState, Voxel, WallsMask } from "@voxcss-core/types";
-import { FLOOR_CLASS } from "@voxcss-core/types";
-import { buildSceneContext } from "@voxcss-core/scene/context";
+import type { GridContext, RenderState, Voxel, WallsMask } from "@layoutit/voxcss-core/types";
+import { FLOOR_CLASS } from "@layoutit/voxcss-core/types";
+import { buildSceneContext } from "@layoutit/voxcss-core/scene/context";
 
 beforeAll(() => {
   // Polyfill Option for happy-dom

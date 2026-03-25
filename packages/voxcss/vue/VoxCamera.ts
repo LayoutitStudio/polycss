@@ -1,11 +1,11 @@
 import { defineComponent, h, computed, onBeforeUnmount, ref, watch, provide } from "vue";
-import type { AutoRotateOption } from "../../core/src/camera/camera";
+import type { AutoRotateOption } from "@layoutit/voxcss-core";
 import {
   CAMERA_HOST_CLASS,
   ensureCameraController,
   type CameraSlotProps
-} from "../../html/src/bindings/domBindings";
-import { mountCameraBinding } from "../../html/src/bindings/domBindings";
+} from "@layoutit/voxcss-html";
+import { mountCameraBinding } from "@layoutit/voxcss-html";
 import { controllerKey } from "./context";
 
 const cameraPropOptions = {

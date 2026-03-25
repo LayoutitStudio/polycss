@@ -1,8 +1,8 @@
 import { useEffect, useLayoutEffect, useRef, createContext, useContext } from "react";
 import type { RefObject } from "react";
-import type { SceneController } from "../../core/src/controller/sceneController";
-import { mountScene, normalizeSceneState, type SceneState } from "../../html/src/bindings/sceneBindings";
-import type { MergeVoxelsOption } from "../../core/src/merge/mergeVoxelsOption";
+import type { SceneController } from "@layoutit/voxcss-core";
+import { mountScene, normalizeSceneState, type SceneState } from "@layoutit/voxcss-html";
+import type { MergeVoxelsOption } from "@layoutit/voxcss-core";
 
 export const SceneControllerContext = createContext<SceneController | null>(null);
 

@@ -1,4 +1,4 @@
-import type { ShapeRenderer } from "@voxcss-core/types";
+import type { ShapeRenderer } from "@layoutit/voxcss-core/types";
 import {
   applyTextureBrightness,
   prepareShapeRoot,

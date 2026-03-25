@@ -1,7 +1,7 @@
-import type { GridContext, Voxel } from "@voxcss-core/types";
-import type { ShapeType, ShapeSurfaceLighting } from "@voxcss-core/color/lighting";
-import { computeShapeLighting } from "@voxcss-core/color/lighting";
-import { getVoxelBounds } from "@voxcss-core/scene/context";
+import type { GridContext, Voxel } from "@layoutit/voxcss-core/types";
+import type { ShapeType, ShapeSurfaceLighting } from "@layoutit/voxcss-core/color/lighting";
+import { computeShapeLighting } from "@layoutit/voxcss-core/color/lighting";
+import { getVoxelBounds } from "@layoutit/voxcss-core/scene/context";
 
 const SHAPE_INNER_CLASS = "voxcss-shape-inner";
 const ORIENTATION_CLASS_NAMES = ["voxcss-east", "voxcss-south", "voxcss-west", "voxcss-north"];

@@ -1,5 +1,5 @@
 /* Base stylesheet injector for voxcss scenes. */
-import { STYLE_ID } from "@voxcss-core/types";
+import { STYLE_ID } from "@layoutit/voxcss-core/types";
 
 export function injectBaseStyles(doc: Document): void {
   if (!doc || doc.getElementById(STYLE_ID)) return;

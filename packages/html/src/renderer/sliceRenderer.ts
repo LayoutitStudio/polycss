@@ -1,5 +1,5 @@
-import type { RenderState, GridContext, Voxel } from "@voxcss-core/types";
-import { DEFAULT_WALLS } from "@voxcss-core/types";
+import type { RenderState, GridContext, Voxel } from "@layoutit/voxcss-core/types";
+import { DEFAULT_WALLS } from "@layoutit/voxcss-core/types";
 import {
   type PlaneAxis,
   type FaceBuffer,
@@ -12,7 +12,7 @@ import {
   buildSlicePlan,
   buildFaceDataFromSnapshot,
   NEXT_LAYER_STEP
-} from "@voxcss-core/merge/slicePlanner";
+} from "@layoutit/voxcss-core/merge/slicePlanner";
 
 export type { Brush, SlicePlan };
 

@@ -1,8 +1,8 @@
-import type { SceneController } from "@voxcss-core/controller/sceneController";
+import type { SceneController } from "@layoutit/voxcss-core/controller/sceneController";
 import { createCamera, type HeadlessCameraHandle } from "../headless";
-import { normalizeInvertMultiplier, type AutoRotateOption } from "@voxcss-core/camera/camera";
-import { SCENE_CLASS } from "@voxcss-core/types";
-import type { ControllerSnapshot } from "@voxcss-core/controller/sceneController";
+import { normalizeInvertMultiplier, type AutoRotateOption } from "@layoutit/voxcss-core/camera/camera";
+import { SCENE_CLASS } from "@layoutit/voxcss-core/types";
+import type { ControllerSnapshot } from "@layoutit/voxcss-core/controller/sceneController";
 
 export interface CameraComponentProps {
   zoom?: number;

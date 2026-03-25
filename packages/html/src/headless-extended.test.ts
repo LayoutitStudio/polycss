@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from "vitest";
 import { createCamera, createScene, renderScene } from "./headless";
-import { STYLE_ID } from "@voxcss-core/types";
+import { STYLE_ID } from "@layoutit/voxcss-core/types";
 
 beforeAll(() => {
   // Polyfill Option for happy-dom (used for color normalization in sliceRenderer / 3d merge)

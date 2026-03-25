@@ -50,6 +50,12 @@ importers:
 
   packages/voxcss:
     dependencies:
+      '@layoutit/voxcss-core':
+        specifier: workspace:*
+        version: link:../core
+      '@layoutit/voxcss-html':
+        specifier: workspace:*
+        version: link:../html
       react:
         specifier: ^18.0.0
         version: 18.3.1

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { mountScene, normalizeSceneState, SCENE_HOST_CLASS } from "./sceneBindings";
-import { sceneController, type SceneController } from "@voxcss-core/controller/sceneController";
-import { STYLE_ID } from "@voxcss-core/types";
+import { sceneController, type SceneController } from "@layoutit/voxcss-core/controller/sceneController";
+import { STYLE_ID } from "@layoutit/voxcss-core/types";
 
 describe("normalizeSceneState", () => {
   it("provides defaults for missing fields", () => {

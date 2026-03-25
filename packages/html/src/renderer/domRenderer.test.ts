@@ -1,9 +1,9 @@
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from "vitest";
 import { createDomRenderer } from "./domRenderer";
 import type { RendererHandle, SceneSnapshot } from "./domRenderer";
-import type { GridContext, Voxel, WallsMask } from "@voxcss-core/types";
-import { STYLE_ID, DEFAULT_OFFSETS, DEFAULT_WALLS } from "@voxcss-core/types";
-import { buildSceneContext } from "@voxcss-core/scene/context";
+import type { GridContext, Voxel, WallsMask } from "@layoutit/voxcss-core/types";
+import { STYLE_ID, DEFAULT_OFFSETS, DEFAULT_WALLS } from "@layoutit/voxcss-core/types";
+import { buildSceneContext } from "@layoutit/voxcss-core/scene/context";
 
 // Option polyfill for happy-dom (used by sliceRenderer during 3d merge paths)
 beforeAll(() => {

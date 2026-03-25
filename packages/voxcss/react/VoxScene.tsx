@@ -1,6 +1,6 @@
 import React from "react";
-import { SCENE_HOST_CLASS, type SceneComponentProps } from "../../html/src/bindings/sceneBindings";
-import type { MergeVoxelsOption } from "../../core/src/merge/mergeVoxelsOption";
+import { SCENE_HOST_CLASS, type SceneComponentProps } from "@layoutit/voxcss-html";
+import type { MergeVoxelsOption } from "@layoutit/voxcss-core";
 import { useSceneBinding, useSceneControllerContext } from "./useBindings";
 
 export type VoxSceneProps = SceneComponentProps & { mergeVoxels?: MergeVoxelsOption };

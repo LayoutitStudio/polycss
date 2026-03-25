@@ -1,8 +1,8 @@
-import type { SceneController, SceneState } from "@voxcss-core/controller/sceneController";
-import type { WallsMask } from "@voxcss-core/types";
+import type { SceneController, SceneState } from "@layoutit/voxcss-core/controller/sceneController";
+import type { WallsMask } from "@layoutit/voxcss-core/types";
 import { createDomRenderer } from "../renderer/domRenderer";
 import { injectBaseStyles } from "../styles";
-import { wallMasksEqual } from "@voxcss-core/scene/context";
+import { wallMasksEqual } from "@layoutit/voxcss-core/scene/context";
 
 export type { SceneState };
 

@@ -9,6 +9,6 @@ export default defineConfig({
   clean: true,
   minify: true,
   target: "es2020",
-  tsconfig: "tsconfig.json",
+  tsconfig: "tsconfig.build.json",
   external: ["@layoutit/voxcss-core"]
 });

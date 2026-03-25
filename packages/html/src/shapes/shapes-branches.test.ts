@@ -7,8 +7,8 @@
  * @vitest-environment happy-dom
  */
 import { describe, it, expect, beforeEach } from "vitest";
-import type { GridContext, Voxel, WallsMask } from "@voxcss-core/types";
-import { DEFAULT_OFFSETS, DEFAULT_WALLS } from "@voxcss-core/types";
+import type { GridContext, Voxel, WallsMask } from "@layoutit/voxcss-core/types";
+import { DEFAULT_OFFSETS, DEFAULT_WALLS } from "@layoutit/voxcss-core/types";
 import {
   rampShapeRenderer,
   wedgeShapeRenderer,

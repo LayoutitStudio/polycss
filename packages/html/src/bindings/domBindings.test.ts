@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { mountCameraBinding, ensureCameraController } from "./domBindings";
-import { sceneController, type SceneController } from "@voxcss-core/controller/sceneController";
+import { sceneController, type SceneController } from "@layoutit/voxcss-core/controller/sceneController";
 
 describe("ensureCameraController", () => {
   it("returns the controller when not null", () => {

@@ -11,8 +11,8 @@
  * @vitest-environment happy-dom
  */
 import { describe, it, expect, beforeEach } from "vitest";
-import type { GridContext, Voxel, WallsMask, CubeFace } from "@voxcss-core/types";
-import { DEFAULT_OFFSETS, DEFAULT_WALLS } from "@voxcss-core/types";
+import type { GridContext, Voxel, WallsMask, CubeFace } from "@layoutit/voxcss-core/types";
+import { DEFAULT_OFFSETS, DEFAULT_WALLS } from "@layoutit/voxcss-core/types";
 
 // Import from index.ts to cover re-exports
 import {

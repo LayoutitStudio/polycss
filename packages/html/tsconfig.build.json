@@ -11,7 +11,9 @@
     "strict": true,
     "skipLibCheck": true,
     "outDir": "dist",
-    "rootDir": "src"
+    "paths": {
+      "@layoutit/voxcss-core/*": ["../core/src/*"]
+    }
   },
   "include": ["src"]
 }

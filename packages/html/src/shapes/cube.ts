@@ -1,7 +1,7 @@
-import type { ShapeRenderer, CubeFace } from "@voxcss-core/types";
-import { CUBE_CLASS, FACE_CLASS } from "@voxcss-core/types";
-import { computeVisibleFaces } from "@voxcss-core/scene/visibility";
-import { applyCubeFaceAppearance } from "@voxcss-core/color/faceAppearance";
+import type { ShapeRenderer, CubeFace } from "@layoutit/voxcss-core/types";
+import { CUBE_CLASS, FACE_CLASS } from "@layoutit/voxcss-core/types";
+import { computeVisibleFaces } from "@layoutit/voxcss-core/scene/visibility";
+import { applyCubeFaceAppearance } from "@layoutit/voxcss-core/color/faceAppearance";
 
 const cubeDomCache = new WeakMap<HTMLElement, Map<CubeFace, HTMLElement>>();
 

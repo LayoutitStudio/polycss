@@ -5,7 +5,7 @@ import type {
   WallsMask,
   Voxel,
   ShapeRenderer
-} from "@voxcss-core/types";
+} from "@layoutit/voxcss-core/types";
 import {
   LAYER_CLASS,
   FLOOR_CLASS,
@@ -13,14 +13,14 @@ import {
   CEILING_CLASS,
   DEFAULT_WALL_COLOR,
   DEFAULT_WALLS
-} from "@voxcss-core/types";
-import { getVoxelBounds, wallMasksEqual } from "@voxcss-core/scene/context";
-import { computeVisibleFaces } from "@voxcss-core/scene/visibility";
+} from "@layoutit/voxcss-core/types";
+import { getVoxelBounds, wallMasksEqual } from "@layoutit/voxcss-core/scene/context";
+import { computeVisibleFaces } from "@layoutit/voxcss-core/scene/visibility";
 import { cubeShapeRenderer, ensureCubeDomCache, disposeCubeDom } from "../shapes";
 import { rampShapeRenderer } from "../shapes/ramp";
 import { wedgeShapeRenderer } from "../shapes/wedge";
 import { spikeShapeRenderer } from "../shapes/spike";
-import { shadeWallFace, shadeColor } from "@voxcss-core/color/lighting";
+import { shadeWallFace, shadeColor } from "@layoutit/voxcss-core/color/lighting";
 import { clearSliceRenderer, updateSliceRendererGeometry, type SliceRendererDomState } from "./sliceRenderer";
 
 interface DomRendererState {
