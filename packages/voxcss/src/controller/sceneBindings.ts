@@ -1,20 +1,10 @@
-import type { SceneController } from "./sceneController";
-import type { ProjectionMode, VoxelGrid, WallsMask } from "../core/types";
+import type { SceneController, SceneState } from "./sceneController";
+import type { WallsMask } from "../core/types";
 import { createDomRenderer } from "../core/domRenderer";
 import { injectBaseStyles } from "../core/styles";
 import { wallMasksEqual } from "../core/context";
-import type { MergeVoxelsOption } from "../utils/mergeVoxelsOption";
 
-export interface SceneState {
-  voxels: VoxelGrid;
-  rows?: number;
-  cols?: number;
-  depth?: number;
-  showWalls: boolean;
-  showFloor: boolean;
-  projection: ProjectionMode;
-  mergeVoxels?: MergeVoxelsOption;
-}
+export type { SceneState };
 
 export type SceneComponentProps = Partial<SceneState>;
 export const SCENE_HOST_CLASS = "voxcss-scene";

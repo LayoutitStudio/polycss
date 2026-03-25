@@ -1,13 +1,24 @@
 import { createIsometricCamera, normalizeInvertMultiplier } from "../core/camera";
 import type { CameraHandle, CameraState } from "../core/camera";
-import type { ProjectionMode, SceneDimensions, WallsMask, Voxel, GridContext } from "../core/types";
+import type { ProjectionMode, SceneDimensions, WallsMask, Voxel, GridContext, VoxelGrid } from "../core/types";
 import { buildSceneContext, computeWallMask, wallMasksEqual } from "../core/context";
-import type { SceneState } from "./sceneBindings";
 import { mergeVoxels as mergeVoxelsGrid } from "../utils/mergeVoxels";
 import { normalizeMergeVoxelsOption, is2dMerge, is3dMerge } from "../utils/mergeVoxelsOption";
 import type { MergeVoxelsOption } from "../utils/mergeVoxelsOption";
-import type { VoxelGrid } from "../core/types";
-import type { RendererMetadata, SceneRenderMode } from "../core/domRenderer";
+
+export interface SceneState {
+  voxels: VoxelGrid;
+  rows?: number;
+  cols?: number;
+  depth?: number;
+  showWalls: boolean;
+  showFloor: boolean;
+  projection: ProjectionMode;
+  mergeVoxels?: MergeVoxelsOption;
+}
+
+export type SceneRenderMode = "cubes" | "slice-renderer";
+export interface RendererMetadata { mode: SceneRenderMode; }
 
 type SnapshotListener = (snapshot: ControllerSnapshot) => void;
 
