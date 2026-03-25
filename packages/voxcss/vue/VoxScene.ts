@@ -1,7 +1,7 @@
 import { defineComponent, h, onBeforeUnmount, ref, watch, computed, inject } from "vue";
-import { mountScene, normalizeSceneState, SCENE_HOST_CLASS, type SceneState } from "@voxcss/controller/sceneBindings";
-import type { SceneController } from "@voxcss/controller/sceneController";
-import { normalizeMergeVoxelsOption, type MergeVoxelsOption } from "@voxcss/utils/mergeVoxelsOption";
+import { mountScene, normalizeSceneState, SCENE_HOST_CLASS, type SceneState } from "../../html/src/bindings/sceneBindings";
+import type { SceneController } from "../../core/src/controller/sceneController";
+import { normalizeMergeVoxelsOption, type MergeVoxelsOption } from "../../core/src/merge/mergeVoxelsOption";
 import { controllerKey } from "./context";
 
 const scenePropOptions = {

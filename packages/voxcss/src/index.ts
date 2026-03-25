@@ -2,7 +2,7 @@ export {
   sceneController,
   type SceneController,
   type SceneControllerOptions
-} from "./controller/sceneController";
+} from "../../core/src/controller/sceneController";
 
 export {
   mountScene,
@@ -10,7 +10,7 @@ export {
   SCENE_HOST_CLASS,
   type SceneState,
   type SceneComponentProps
-} from "./controller/sceneBindings";
+} from "../../html/src/bindings/sceneBindings";
 
 export {
   mountCameraBinding,
@@ -18,7 +18,7 @@ export {
   type CameraComponentProps,
   type CameraSlotProps,
   type CameraBindingSnapshot
-} from "./controller/domBindings";
+} from "../../html/src/bindings/domBindings";
 
 export {
   createCamera,
@@ -31,15 +31,15 @@ export {
   type HeadlessSceneConfig,
   type HeadlessRenderOptions,
   type HeadlessRenderHandle
-} from "./core/headless";
+} from "../../html/src/headless";
 
-export { type AutoRotateOption } from "./core/camera";
-export type { ProjectionMode, VoxelGrid } from "./core/types";
-export { parseMagicaVoxel, type MagicaVoxelParseResult } from "./utils/parseMagicaVoxel";
-export { mergeVoxels } from "./utils/mergeVoxels";
+export { type AutoRotateOption } from "../../core/src/camera/camera";
+export type { ProjectionMode, VoxelGrid } from "../../core/src/types";
+export { parseMagicaVoxel, type MagicaVoxelParseResult } from "../../core/src/parser/parseMagicaVoxel";
+export { mergeVoxels } from "../../core/src/merge/mergeVoxels";
 export {
   normalizeMergeVoxelsOption,
   is2dMerge,
   is3dMerge,
   type MergeVoxelsOption
-} from "./utils/mergeVoxelsOption";
+} from "../../core/src/merge/mergeVoxelsOption";

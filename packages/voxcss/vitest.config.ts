@@ -17,6 +17,7 @@ export default defineConfig({
   resolve: {
     alias: {
       "@voxcss": resolve(__dirname, "src"),
+      "@voxcss-core": resolve(__dirname, "../core/src"),
     },
   },
 });

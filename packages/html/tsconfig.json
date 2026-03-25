@@ -12,6 +12,7 @@
     "skipLibCheck": true,
     "outDir": "dist",
     "rootDir": "src",
+    "composite": true,
     "paths": {
       "@voxcss-core/*": ["../core/src/*"]
     }
