@@ -25,7 +25,8 @@
   "scripts": {
     "build": "tsup",
     "test": "vitest run --passWithNoTests",
-    "test:coverage": "vitest run --coverage --passWithNoTests"
+    "test:coverage": "vitest run --coverage --passWithNoTests",
+    "prepublishOnly": "npm run build"
   },
   "publishConfig": {
     "access": "public"
