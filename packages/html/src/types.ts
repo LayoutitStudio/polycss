@@ -1,4 +1,4 @@
-import type { CubeFace, GridContext, ProjectionMode, Voxel, VoxelGrid, WallsMask } from "@layoutit/voxcss-core/types";
+import type { CubeFace, GridContext, ProjectionMode, Voxel, VoxelGrid, WallsMask } from "@layoutit/voxcss-core";
 
 export type ShapeRenderer = (args: {
   voxel: Voxel;

@@ -1,19 +1,14 @@
-import type { GridContext, Voxel } from "@layoutit/voxcss-core/types";
+import type { GridContext, Voxel, PlaneAxis, FaceBuffer, FaceData, SlicePlan, Brush } from "@layoutit/voxcss-core";
 import type { RenderState } from "../types";
-import { DEFAULT_WALLS } from "@layoutit/voxcss-core/types";
 import {
-  type PlaneAxis,
-  type FaceBuffer,
-  type FaceData,
-  type SlicePlan,
-  type Brush,
+  DEFAULT_WALLS,
   wallsToSig,
   buildSliceCacheKey,
   buffersEqual,
   buildSlicePlan,
   buildFaceDataFromSnapshot,
   NEXT_LAYER_STEP
-} from "@layoutit/voxcss-core/merge/slicePlanner";
+} from "@layoutit/voxcss-core";
 
 export type { Brush, SlicePlan };
 

@@ -6,22 +6,22 @@ export type {
   VoxelGrid,
   CubeFace,
   GridContext,
-  ProjectionMode
-} from "@layoutit/voxcss-core/types";
-export type { AutoRotateOption } from "@layoutit/voxcss-core/camera/camera";
-export type { MergeVoxelsOption } from "@layoutit/voxcss-core/merge/mergeVoxelsOption";
-export type { MagicaVoxelParseResult } from "@layoutit/voxcss-core/parser/parseMagicaVoxel";
-
-export { parseMagicaVoxel } from "@layoutit/voxcss-core/parser/parseMagicaVoxel";
-export { mergeVoxels } from "@layoutit/voxcss-core/merge/mergeVoxels";
+  ProjectionMode,
+  AutoRotateOption,
+  MergeVoxelsOption,
+  MagicaVoxelParseResult,
+  SceneController,
+  SceneControllerOptions
+} from "@layoutit/voxcss-core";
 export {
+  parseMagicaVoxel,
+  mergeVoxels,
   normalizeMergeVoxelsOption,
   is2dMerge,
-  is3dMerge
-} from "@layoutit/voxcss-core/merge/mergeVoxelsOption";
-export { sceneController } from "@layoutit/voxcss-core/controller/sceneController";
-export type { SceneController, SceneControllerOptions } from "@layoutit/voxcss-core/controller/sceneController";
-export { createIsometricCamera } from "@layoutit/voxcss-core/camera/camera";
+  is3dMerge,
+  sceneController,
+  createIsometricCamera
+} from "@layoutit/voxcss-core";
 
 // HTML-specific exports
 export {
@@ -58,3 +58,14 @@ export type {
 } from "./bindings/domBindings";
 
 export { rgbaToPngBlob, rgbToPngBlob } from "./pngBlob";
+
+export type {
+  ShapeRenderer,
+  RenderState,
+  LayerRecord,
+  SceneOptions,
+  CreateVoxcssOptions,
+  VoxcssInstance,
+  VoxIllustrationOptions,
+  VoxIllustrationHandle
+} from "./types";

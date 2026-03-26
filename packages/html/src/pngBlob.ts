@@ -1,4 +1,4 @@
-import { encodeRgbaToPng, encodeRgbToPng } from "@layoutit/voxcss-core/encoding/png";
+import { encodeRgbaToPng, encodeRgbToPng } from "@layoutit/voxcss-core";
 
 export function rgbaToPngBlob(rgba: Uint8Array, width: number, height: number): Blob {
   const bytes = encodeRgbaToPng(rgba, width, height);

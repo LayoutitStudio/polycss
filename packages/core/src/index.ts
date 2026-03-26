@@ -10,9 +10,13 @@ export type {
   ProjectionMode,
   FaceAppearanceOverride
 } from "./types";
-export { CUBE_FACES, DEFAULT_WALLS, DEFAULT_OFFSETS, BASE_TILE, SCENE_CLASS } from "./types";
+export {
+  CUBE_FACES, DEFAULT_WALLS, DEFAULT_OFFSETS, BASE_TILE, SCENE_CLASS,
+  DEFAULT_WALL_COLOR, LAYER_CLASS, FLOOR_CLASS, FACE_CLASS, CUBE_CLASS,
+  WALL_CLASS, CEILING_CLASS, STYLE_ID
+} from "./types";
 
-export { buildSceneContext, getVoxelBounds } from "./scene/context";
+export { buildSceneContext, getVoxelBounds, wallMasksEqual } from "./scene/context";
 export { computeVisibleFaces } from "./scene/visibility";
 
 export { createIsometricCamera, normalizeInvertMultiplier } from "./camera/camera";
@@ -88,5 +92,7 @@ export {
 export type {
   SceneController,
   SceneControllerOptions,
-  PointerInput
+  PointerInput,
+  SceneState,
+  ControllerSnapshot
 } from "./controller/sceneController";

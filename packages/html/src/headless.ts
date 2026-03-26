@@ -1,13 +1,9 @@
-import { sceneController, type SceneController } from "@layoutit/voxcss-core/controller/sceneController";
+import type { SceneController, SceneControllerOptions, AutoRotateOption, MergeVoxelsOption } from "@layoutit/voxcss-core";
+import { sceneController, SCENE_CLASS, createIsometricCamera, normalizeInvertMultiplier } from "@layoutit/voxcss-core";
 import { mountScene, normalizeSceneState, SCENE_HOST_CLASS, type SceneState } from "./bindings/sceneBindings";
-import { SCENE_CLASS } from "@layoutit/voxcss-core/types";
-import type { AutoRotateOption } from "@layoutit/voxcss-core/camera/camera";
-import { createIsometricCamera, normalizeInvertMultiplier } from "@layoutit/voxcss-core/camera/camera";
-import type { SceneControllerOptions } from "@layoutit/voxcss-core/controller/sceneController";
 import type { CameraComponentProps } from "./bindings/domBindings";
-import type { MergeVoxelsOption } from "@layoutit/voxcss-core/merge/mergeVoxelsOption";
 
-export type { MergeVoxelsOption } from "@layoutit/voxcss-core/merge/mergeVoxelsOption";
+export type { MergeVoxelsOption } from "@layoutit/voxcss-core";
 
 export interface HeadlessCameraOptions extends CameraComponentProps {
   controller?: SceneControllerOptions;

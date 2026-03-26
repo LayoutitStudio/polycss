@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeAll, beforeEach, afterEach } from "vitest";
 import { updateSliceRendererGeometry, clearSliceRenderer } from "./sliceRenderer";
 import type { SliceRendererDomState } from "./sliceRenderer";
-import type { GridContext, RenderState, Voxel, WallsMask } from "@layoutit/voxcss-core/types";
+import type { GridContext, Voxel, WallsMask } from "@layoutit/voxcss-core/types";
+import type { RenderState } from "../types";
 import { FLOOR_CLASS } from "@layoutit/voxcss-core/types";
 import { buildSceneContext } from "@layoutit/voxcss-core/scene/context";
 
