@@ -28,9 +28,10 @@ export {
   shadeCubeFace,
   shadeWallFace,
   getCubeFaceLightDelta,
-  computeShapeLighting
+  computeShapeLighting,
+  setColorResolver
 } from "./color/lighting";
-export type { ParsedColor, ShapeType, ShapeSurfaceLighting } from "./color/lighting";
+export type { ParsedColor, ShapeType, ShapeSurfaceLighting, ColorResolver } from "./color/lighting";
 
 export {
   parsePureColor,

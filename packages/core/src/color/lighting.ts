@@ -15,6 +15,14 @@ export type { ParsedColor };
 const defaultColor: ParsedColor = { rgb: [204, 204, 204], alpha: 1 };
 const colorCache = new Map<string, ParsedColor>();
 
+export type ColorResolver = (input: string) => ParsedColor | null;
+let externalResolver: ColorResolver | null = null;
+
+/** Register an external color resolver (e.g. DOM-based) for named CSS colors. */
+export function setColorResolver(resolver: ColorResolver | null): void {
+  externalResolver = resolver;
+}
+
 export function parseColor(input: string): ParsedColor | null {
   if (!input) return null;
   const key = input.trim();
@@ -25,6 +33,14 @@ export function parseColor(input: string): ParsedColor | null {
   if (parsed) {
     colorCache.set(key, parsed);
     return parsed;
+  }
+
+  if (externalResolver) {
+    const resolved = externalResolver(key);
+    if (resolved) {
+      colorCache.set(key, resolved);
+      return resolved;
+    }
   }
 
   return null;

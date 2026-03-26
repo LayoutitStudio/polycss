@@ -1,5 +1,10 @@
 // @layoutit/voxcss-html — CSS-based voxel rendering engine for the browser
 
+// Register DOM-based color resolver for named CSS colors
+import { setColorResolver } from "@layoutit/voxcss-core";
+import { resolveColor } from "./colorResolver";
+setColorResolver(resolveColor);
+
 // Re-export core types and utilities for convenience
 export type {
   Voxel,
@@ -58,6 +63,7 @@ export type {
 } from "./bindings/domBindings";
 
 export { rgbaToPngBlob, rgbToPngBlob } from "./pngBlob";
+export { resolveColor } from "./colorResolver";
 
 export type {
   ShapeRenderer,
