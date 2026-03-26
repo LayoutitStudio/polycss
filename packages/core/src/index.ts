@@ -8,7 +8,8 @@ export type {
   WallsMask,
   OffsetMap,
   RenderState,
-  ProjectionMode
+  ProjectionMode,
+  FaceAppearanceOverride
 } from "./types";
 export { CUBE_FACES, DEFAULT_WALLS, DEFAULT_OFFSETS, BASE_TILE, SCENE_CLASS } from "./types";
 

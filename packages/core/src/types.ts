@@ -37,6 +37,12 @@ export interface WallsMask {
 
 export type OffsetMap = Record<string, [number, number, number]>;
 
+export interface FaceAppearanceOverride {
+  backgroundImage?: string | null;
+  backgroundColor?: string | null;
+  filter?: string | null;
+}
+
 export interface GridContext {
   rows: number;
   cols: number;
@@ -54,7 +60,7 @@ export interface GridContext {
   wallColor: string;
   getVoxel(x: number, y: number, z: number): Voxel | null;
   resolveTexture?(name: string, face: string): string | undefined;
-  lighting?(voxel: Voxel, face: string): Partial<CSSStyleDeclaration> | undefined;
+  lighting?(voxel: Voxel, face: string): FaceAppearanceOverride | undefined;
 }
 
 export type ShapeRenderer = (args: {
