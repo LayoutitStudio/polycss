@@ -90,5 +90,6 @@ export {
 } from "./controller/sceneController";
 export type {
   SceneController,
-  SceneControllerOptions
+  SceneControllerOptions,
+  PointerInput
 } from "./controller/sceneController";

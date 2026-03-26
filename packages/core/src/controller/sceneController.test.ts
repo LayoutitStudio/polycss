@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { sceneController } from "./sceneController";
-import type { ControllerSnapshot, SceneController } from "./sceneController";
+import type { ControllerSnapshot, SceneController, PointerInput } from "./sceneController";
 import type { SceneState } from "./sceneController";
 
 function makeSceneState(overrides: Partial<SceneState> = {}): SceneState {
@@ -14,12 +14,12 @@ function makeSceneState(overrides: Partial<SceneState> = {}): SceneState {
   };
 }
 
-function makePointerEvent(overrides: Partial<PointerEvent> = {}): PointerEvent {
+function makePointerInput(overrides: Partial<PointerInput> = {}): PointerInput {
   return {
     clientX: 0,
     clientY: 0,
     ...overrides,
-  } as PointerEvent;
+  };
 }
 
 describe("sceneController", () => {
@@ -184,17 +184,17 @@ describe("sceneController", () => {
       ctrl.subscribeSnapshot(listener);
       listener.mockClear();
 
-      ctrl.handlePointerDown(makePointerEvent({ clientX: 100, clientY: 100 }));
+      ctrl.handlePointerDown(makePointerInput({ clientX: 100, clientY: 100 }));
       expect(listener).toHaveBeenCalled();
       expect(listener.mock.calls[0][0].cursor).toBe("grabbing");
     });
 
     it("handlePointerMove updates camera rotation", () => {
       const ctrl = sceneController({ camera: { rotX: 65, rotY: 45 } });
-      ctrl.handlePointerDown(makePointerEvent({ clientX: 100, clientY: 100 }));
+      ctrl.handlePointerDown(makePointerInput({ clientX: 100, clientY: 100 }));
 
       const initialState = ctrl.getCameraState();
-      ctrl.handlePointerMove(makePointerEvent({ clientX: 110, clientY: 105 }));
+      ctrl.handlePointerMove(makePointerInput({ clientX: 110, clientY: 105 }));
 
       const newState = ctrl.getCameraState();
       // rotY should have changed (horizontal drag)
@@ -209,13 +209,13 @@ describe("sceneController", () => {
       ctrl.subscribeSnapshot(listener);
       listener.mockClear();
 
-      ctrl.handlePointerMove(makePointerEvent({ clientX: 110, clientY: 105 }));
+      ctrl.handlePointerMove(makePointerInput({ clientX: 110, clientY: 105 }));
       expect(listener).not.toHaveBeenCalled();
     });
 
     it("handlePointerUp restores cursor to grab", () => {
       const ctrl = sceneController();
-      ctrl.handlePointerDown(makePointerEvent({ clientX: 100, clientY: 100 }));
+      ctrl.handlePointerDown(makePointerInput({ clientX: 100, clientY: 100 }));
 
       const listener = vi.fn();
       ctrl.subscribeSnapshot(listener);
@@ -238,10 +238,10 @@ describe("sceneController", () => {
 
     it("rotX is clamped between 0 and 100 during drag", () => {
       const ctrl = sceneController({ camera: { rotX: 5 } });
-      ctrl.handlePointerDown(makePointerEvent({ clientX: 100, clientY: 100 }));
+      ctrl.handlePointerDown(makePointerInput({ clientX: 100, clientY: 100 }));
 
       // Large upward drag (positive dY) should clamp rotX to 0
-      ctrl.handlePointerMove(makePointerEvent({ clientX: 100, clientY: 1000 }));
+      ctrl.handlePointerMove(makePointerInput({ clientX: 100, clientY: 1000 }));
       const state1 = ctrl.getCameraState();
       expect(state1.rotX).toBeGreaterThanOrEqual(0);
       expect(state1.rotX).toBeLessThanOrEqual(100);
@@ -249,10 +249,10 @@ describe("sceneController", () => {
 
     it("rotY wraps around 0-360 during drag", () => {
       const ctrl = sceneController({ camera: { rotY: 10 } });
-      ctrl.handlePointerDown(makePointerEvent({ clientX: 100, clientY: 100 }));
+      ctrl.handlePointerDown(makePointerInput({ clientX: 100, clientY: 100 }));
 
       // Large rightward drag should wrap rotY
-      ctrl.handlePointerMove(makePointerEvent({ clientX: 200, clientY: 100 }));
+      ctrl.handlePointerMove(makePointerInput({ clientX: 200, clientY: 100 }));
       const state = ctrl.getCameraState();
       expect(state.rotY).toBeGreaterThanOrEqual(0);
       expect(state.rotY).toBeLessThan(360);
@@ -341,14 +341,14 @@ describe("sceneController", () => {
       const ctrl = sceneController({ camera: { rotY: 180 } });
       ctrl.setPointerInvert(-1);
 
-      ctrl.handlePointerDown(makePointerEvent({ clientX: 100, clientY: 100 }));
-      ctrl.handlePointerMove(makePointerEvent({ clientX: 110, clientY: 100 }));
+      ctrl.handlePointerDown(makePointerInput({ clientX: 100, clientY: 100 }));
+      ctrl.handlePointerMove(makePointerInput({ clientX: 110, clientY: 100 }));
       const invertedRotY = ctrl.getCameraState().rotY;
 
       const ctrl2 = sceneController({ camera: { rotY: 180 } });
       ctrl2.setPointerInvert(1);
-      ctrl2.handlePointerDown(makePointerEvent({ clientX: 100, clientY: 100 }));
-      ctrl2.handlePointerMove(makePointerEvent({ clientX: 110, clientY: 100 }));
+      ctrl2.handlePointerDown(makePointerInput({ clientX: 100, clientY: 100 }));
+      ctrl2.handlePointerMove(makePointerInput({ clientX: 110, clientY: 100 }));
       const normalRotY = ctrl2.getCameraState().rotY;
 
       // They should move in opposite directions

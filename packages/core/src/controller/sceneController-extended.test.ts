@@ -347,7 +347,7 @@ describe("sceneController — extended coverage", () => {
 
     it("returns 'grabbing' during drag", () => {
       controller.handlePointerDown(
-        new PointerEvent("pointerdown", { clientX: 0, clientY: 0 })
+        ({ clientX: 0, clientY: 0 })
       );
       expect(controller.getCursor()).toBe("grabbing");
 
@@ -356,7 +356,7 @@ describe("sceneController — extended coverage", () => {
 
     it("returns 'grab' after drag ends", () => {
       controller.handlePointerDown(
-        new PointerEvent("pointerdown", { clientX: 0, clientY: 0 })
+        ({ clientX: 0, clientY: 0 })
       );
       controller.handlePointerUp();
       expect(controller.getCursor()).toBe("grab");
@@ -610,7 +610,7 @@ describe("sceneController — extended coverage", () => {
       controller.setPointerInvert(-1);
 
       controller.handlePointerDown(
-        new PointerEvent("pointerdown", { clientX: 100, clientY: 100 })
+        ({ clientX: 100, clientY: 100 })
       );
 
       const listener = vi.fn();
@@ -618,7 +618,7 @@ describe("sceneController — extended coverage", () => {
       listener.mockClear();
 
       controller.handlePointerMove(
-        new PointerEvent("pointermove", { clientX: 125, clientY: 100 })
+        ({ clientX: 125, clientY: 100 })
       );
 
       expect(listener).toHaveBeenCalled();
@@ -635,7 +635,7 @@ describe("sceneController — extended coverage", () => {
   describe("pointer handling", () => {
     it("handlePointerDown sets dragging state", () => {
       controller.handlePointerDown(
-        new PointerEvent("pointerdown", { clientX: 50, clientY: 50 })
+        ({ clientX: 50, clientY: 50 })
       );
 
       expect(controller.getCursor()).toBe("grabbing");
@@ -649,7 +649,7 @@ describe("sceneController — extended coverage", () => {
       listener.mockClear();
 
       controller.handlePointerMove(
-        new PointerEvent("pointermove", { clientX: 100, clientY: 100 })
+        ({ clientX: 100, clientY: 100 })
       );
 
       expect(listener).not.toHaveBeenCalled();
@@ -671,12 +671,12 @@ describe("sceneController — extended coverage", () => {
       listener.mockClear();
 
       controller.handlePointerDown(
-        new PointerEvent("pointerdown", { clientX: 100, clientY: 100 })
+        ({ clientX: 100, clientY: 100 })
       );
       expect(controller.getCursor()).toBe("grabbing");
 
       controller.handlePointerMove(
-        new PointerEvent("pointermove", { clientX: 150, clientY: 120 })
+        ({ clientX: 150, clientY: 120 })
       );
 
       controller.handlePointerUp();
@@ -721,7 +721,7 @@ describe("sceneController — extended coverage", () => {
       const ctrl = sceneController({ pointerInvert: -1 });
       // We can verify indirectly through pointer behavior
       ctrl.handlePointerDown(
-        new PointerEvent("pointerdown", { clientX: 100, clientY: 100 })
+        ({ clientX: 100, clientY: 100 })
       );
 
       const listener = vi.fn();
@@ -729,7 +729,7 @@ describe("sceneController — extended coverage", () => {
       listener.mockClear();
 
       ctrl.handlePointerMove(
-        new PointerEvent("pointermove", { clientX: 125, clientY: 100 })
+        ({ clientX: 125, clientY: 100 })
       );
 
       const snapshot = listener.mock.calls[0][0];

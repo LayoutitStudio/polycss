@@ -45,6 +45,12 @@ export interface SceneControllerOptions {
   projection?: ProjectionMode;
 }
 
+/** Structural type replacing PointerEvent — core has no DOM dependency. */
+export interface PointerInput {
+  clientX: number;
+  clientY: number;
+}
+
 export interface SceneController {
   getDimensions(): Required<SceneDimensions>;
   getProjection(): ProjectionMode;
@@ -61,8 +67,8 @@ export interface SceneController {
   setProjection(mode?: ProjectionMode): void;
   applySceneState(state: SceneState): SceneSnapshot;
 
-  handlePointerDown(event: PointerEvent): void;
-  handlePointerMove(event: PointerEvent): void;
+  handlePointerDown(event: PointerInput): void;
+  handlePointerMove(event: PointerInput): void;
   handlePointerUp(): void;
 }
 
@@ -245,14 +251,14 @@ export function sceneController(options: SceneControllerOptions = {}): SceneCont
     return () => snapshotListeners.delete(listener);
   }
 
-  function handlePointerDown(event: PointerEvent) {
+  function handlePointerDown(event: PointerInput) {
     isDragging = true;
     pointerX = event.clientX;
     pointerY = event.clientY;
     emitSnapshot(true);
   }
 
-  function handlePointerMove(event: PointerEvent) {
+  function handlePointerMove(event: PointerInput) {
     if (!isDragging) return;
     const invert = pointerInvert || DEFAULT_POINTER_INVERT;
     const dX = ((event.clientX - pointerX) * invert) / POINTER_DRAG_SPEED;
