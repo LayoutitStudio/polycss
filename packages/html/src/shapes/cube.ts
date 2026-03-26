@@ -1,4 +1,5 @@
-import type { ShapeRenderer, CubeFace } from "@layoutit/voxcss-core/types";
+import type { CubeFace } from "@layoutit/voxcss-core/types";
+import type { ShapeRenderer } from "../types";
 import { CUBE_CLASS, FACE_CLASS } from "@layoutit/voxcss-core/types";
 import { computeVisibleFaces } from "@layoutit/voxcss-core/scene/visibility";
 import { computeCubeFaceAppearance } from "@layoutit/voxcss-core/color/faceAppearance";

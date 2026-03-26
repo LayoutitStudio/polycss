@@ -1,11 +1,5 @@
-import type {
-  GridContext,
-  LayerRecord,
-  RenderState,
-  WallsMask,
-  Voxel,
-  ShapeRenderer
-} from "@layoutit/voxcss-core/types";
+import type { GridContext, WallsMask, Voxel } from "@layoutit/voxcss-core/types";
+import type { LayerRecord, RenderState, ShapeRenderer } from "../types";
 import {
   LAYER_CLASS,
   FLOOR_CLASS,

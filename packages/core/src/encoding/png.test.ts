@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { encodeRgbaToPng, encodeRgbToPng, rgbaToPngBlob, rgbToPngBlob } from "./png";
+import { encodeRgbaToPng, encodeRgbToPng } from "./png";
 
 const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
 
@@ -176,22 +176,3 @@ describe("encodeRgbToPng", () => {
   });
 });
 
-describe("rgbaToPngBlob", () => {
-  it("returns a Blob with image/png type", () => {
-    const pixel = new Uint8Array([0, 0, 0, 255]);
-    const blob = rgbaToPngBlob(pixel, 1, 1);
-    expect(blob).toBeInstanceOf(Blob);
-    expect(blob.type).toBe("image/png");
-    expect(blob.size).toBeGreaterThan(0);
-  });
-});
-
-describe("rgbToPngBlob", () => {
-  it("returns a Blob with image/png type", () => {
-    const pixel = new Uint8Array([0, 0, 0]);
-    const blob = rgbToPngBlob(pixel, 1, 1);
-    expect(blob).toBeInstanceOf(Blob);
-    expect(blob.type).toBe("image/png");
-    expect(blob.size).toBeGreaterThan(0);
-  });
-});

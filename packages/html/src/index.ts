@@ -56,3 +56,5 @@ export type {
   CameraSlotProps,
   CameraBindingSnapshot
 } from "./bindings/domBindings";
+
+export { rgbaToPngBlob, rgbToPngBlob } from "./pngBlob";

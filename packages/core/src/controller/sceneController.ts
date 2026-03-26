@@ -74,10 +74,10 @@ export interface SceneController {
 
 const DEFAULT_POINTER_INVERT = 1;
 const POINTER_DRAG_SPEED = 5;
-const nowMs = (): number =>
-  typeof performance !== "undefined" && typeof performance.now === "function"
-    ? performance.now()
-    : Date.now();
+const nowMs = (): number => {
+  const perf = (globalThis as { performance?: { now?: () => number } }).performance;
+  return typeof perf?.now === "function" ? perf.now() : Date.now();
+};
 const getSceneProfile = (): Record<string, number | boolean> | null => {
   const root = (globalThis as { __voxcssProfile?: Record<string, unknown> }).__voxcssProfile;
   if (!root || typeof root !== "object") return null;

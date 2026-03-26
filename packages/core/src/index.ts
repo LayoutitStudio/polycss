@@ -7,7 +7,6 @@ export type {
   GridContext,
   WallsMask,
   OffsetMap,
-  RenderState,
   ProjectionMode,
   FaceAppearanceOverride
 } from "./types";
@@ -80,9 +79,7 @@ export type { MagicaVoxelParseResult } from "./parser/parseMagicaVoxel";
 
 export {
   encodeRgbaToPng,
-  encodeRgbToPng,
-  rgbaToPngBlob,
-  rgbToPngBlob
+  encodeRgbToPng
 } from "./encoding/png";
 
 export {

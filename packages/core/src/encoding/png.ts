@@ -194,13 +194,4 @@ export function encodeRgbToPng(rgb: Uint8Array, width: number, height: number): 
   return out;
 }
 
-export function rgbaToPngBlob(rgba: Uint8Array, width: number, height: number): Blob {
-  const bytes = encodeRgbaToPng(rgba, width, height);
-  return new Blob([bytes as BlobPart], { type: "image/png" });
-}
-
-export function rgbToPngBlob(rgb: Uint8Array, width: number, height: number): Blob {
-  const bytes = encodeRgbToPng(rgb, width, height);
-  return new Blob([bytes as BlobPart], { type: "image/png" });
-}
 

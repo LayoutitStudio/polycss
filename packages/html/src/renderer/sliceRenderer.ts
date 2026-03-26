@@ -1,4 +1,5 @@
-import type { RenderState, GridContext, Voxel } from "@layoutit/voxcss-core/types";
+import type { GridContext, Voxel } from "@layoutit/voxcss-core/types";
+import type { RenderState } from "../types";
 import { DEFAULT_WALLS } from "@layoutit/voxcss-core/types";
 import {
   type PlaneAxis,
