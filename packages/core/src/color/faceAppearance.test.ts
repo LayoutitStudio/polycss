@@ -4,7 +4,6 @@
 import { describe, it, expect, vi } from "vitest";
 import {
   computeCubeFaceAppearance,
-  applyCubeFaceAppearance,
   getCubeFaceAppearanceSignature,
 } from "./faceAppearance";
 import { buildSceneContext } from "../scene/context";
@@ -127,34 +126,6 @@ describe("computeCubeFaceAppearance", () => {
     const context = makeContext([voxel], { lighting });
     const appearance = computeCubeFaceAppearance(voxel, "t", context);
     expect(appearance.backgroundImage).toBe("url(custom.png)");
-  });
-});
-
-describe("applyCubeFaceAppearance", () => {
-  it("sets style properties on the element", () => {
-    const voxel: Voxel = { x: 0, y: 0, z: 0, color: "#ff0000" };
-    const context = makeContext([voxel]);
-    const el = document.createElement("div");
-    applyCubeFaceAppearance(el, "t", voxel, context);
-    expect(el.style.backgroundColor).not.toBe("");
-    expect(el.style.backgroundImage).toBeDefined();
-    expect(el.style.filter).toBeDefined();
-  });
-
-  it("sets backgroundImage for textured voxels", () => {
-    const voxel: Voxel = { x: 0, y: 0, z: 0, texture: "tex.png" };
-    const context = makeContext([voxel]);
-    const el = document.createElement("div");
-    applyCubeFaceAppearance(el, "t", voxel, context);
-    expect(el.style.backgroundImage).toContain("tex.png");
-  });
-
-  it("sets filter for textured side faces", () => {
-    const voxel: Voxel = { x: 0, y: 0, z: 0, texture: "tex.png" };
-    const context = makeContext([voxel]);
-    const el = document.createElement("div");
-    applyCubeFaceAppearance(el, "fl", voxel, context);
-    expect(el.style.filter).toContain("brightness(");
   });
 });
 

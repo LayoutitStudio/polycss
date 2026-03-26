@@ -1,7 +1,20 @@
 import type { ShapeRenderer, CubeFace } from "@layoutit/voxcss-core/types";
 import { CUBE_CLASS, FACE_CLASS } from "@layoutit/voxcss-core/types";
 import { computeVisibleFaces } from "@layoutit/voxcss-core/scene/visibility";
-import { applyCubeFaceAppearance } from "@layoutit/voxcss-core/color/faceAppearance";
+import { computeCubeFaceAppearance } from "@layoutit/voxcss-core/color/faceAppearance";
+import type { GridContext, Voxel } from "@layoutit/voxcss-core/types";
+
+function applyCubeFaceAppearance(
+  el: HTMLElement,
+  face: CubeFace,
+  voxel: Voxel,
+  context: GridContext
+): void {
+  const appearance = computeCubeFaceAppearance(voxel, face, context);
+  el.style.backgroundImage = appearance.backgroundImage;
+  el.style.backgroundColor = appearance.backgroundColor;
+  el.style.filter = appearance.filter;
+}
 
 const cubeDomCache = new WeakMap<HTMLElement, Map<CubeFace, HTMLElement>>();
 

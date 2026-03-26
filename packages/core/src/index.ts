@@ -38,8 +38,7 @@ export {
 
 export {
   computeCubeFaceAppearance,
-  getCubeFaceAppearanceSignature,
-  applyCubeFaceAppearance
+  getCubeFaceAppearanceSignature
 } from "./color/faceAppearance";
 export type { CubeFaceAppearance } from "./color/faceAppearance";
 

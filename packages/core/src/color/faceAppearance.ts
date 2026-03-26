@@ -63,17 +63,6 @@ export function getCubeFaceAppearanceSignature(
   return JSON.stringify([appearance.backgroundImage, appearance.backgroundColor, appearance.filter]);
 }
 
-export function applyCubeFaceAppearance(
-  el: HTMLElement,
-  face: CubeFace,
-  voxel: Voxel,
-  context: GridContext
-): void {
-  const appearance = computeCubeFaceAppearance(voxel, face, context);
-  el.style.backgroundImage = appearance.backgroundImage;
-  el.style.backgroundColor = appearance.backgroundColor;
-  el.style.filter = appearance.filter;
-}
 
 function resolveTextureUrl(voxel: Voxel, face: CubeFace, context: GridContext): string | undefined {
   const textureKey = voxel.texture;
