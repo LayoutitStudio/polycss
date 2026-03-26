@@ -32,7 +32,7 @@
     "access": "public"
   },
   "dependencies": {
-    "@layoutit/voxcss-core": "workspace:*"
+    "@layoutit/voxcss-core": "workspace:^"
   },
   "devDependencies": {
     "tsup": "^8.0.1",

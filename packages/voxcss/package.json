@@ -64,8 +64,8 @@
     "access": "public"
   },
   "dependencies": {
-    "@layoutit/voxcss-core": "workspace:*",
-    "@layoutit/voxcss-html": "workspace:*"
+    "@layoutit/voxcss-core": "workspace:^",
+    "@layoutit/voxcss-html": "workspace:^"
   },
   "peerDependencies": {
     "react": "^18.0.0",

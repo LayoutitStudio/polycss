@@ -26,7 +26,7 @@ importers:
   packages/html:
     dependencies:
       '@layoutit/voxcss-core':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../core
     devDependencies:
       '@vitest/coverage-v8':
@@ -51,10 +51,10 @@ importers:
   packages/voxcss:
     dependencies:
       '@layoutit/voxcss-core':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../core
       '@layoutit/voxcss-html':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../html
       react:
         specifier: ^18.0.0
