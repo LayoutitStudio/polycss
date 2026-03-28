@@ -83,9 +83,23 @@ export const VoxScene = defineComponent({
 
     const sceneElLocalRef = ref<HTMLElement | null>(null);
 
-    // Sync local ref to camera context's sceneElRef
+    // Sync local ref to camera context's sceneElRef + apply wall mask classes
+    function applyWallMaskClasses(el: HTMLElement) {
+      const mask = store.getState().wallMask;
+      for (const face of ["t", "b", "bl", "br", "fl", "fr"] as const) {
+        el.classList.toggle(`voxcss-mask-${face}`, mask[face]);
+      }
+    }
+
     watch(sceneElLocalRef, (el) => {
       sceneElRef.value = el;
+      if (el) applyWallMaskClasses(el);
+    });
+
+    // Update mask classes when wall mask changes
+    watch(wallMask, () => {
+      const el = sceneElLocalRef.value;
+      if (el) applyWallMaskClasses(el);
     });
 
     const sceneContextOptions = computed(() => ({
