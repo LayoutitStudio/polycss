@@ -97,7 +97,9 @@ export function useCamera(options: Ref<UseCameraOptions>): UseCameraResult {
       if (Object.keys(partial).length > 0) {
         handle.update(partial);
         applyTransformDirect();
-        store.updateCameraFromRef(handle);
+        if (store.updateCameraFromRef(handle)) {
+          applyWallMaskDirect();
+        }
         store.notifyAll();
       }
     }
@@ -110,6 +112,16 @@ export function useCamera(options: Ref<UseCameraOptions>): UseCameraResult {
     const s = handle.state;
     const depthOffset = Number(el.dataset.voxDepthOffset ?? 0);
     el.style.transform = `scale(${s.zoom}) translateY(${depthOffset}px) translateY(${s.tilt}px) translateX(${s.pan}px) rotateX(${s.rotX}deg) rotate(${s.rotY}deg)`;
+  }
+
+  // Apply wall mask CSS classes on scene element (bypasses Vue reactivity)
+  function applyWallMaskDirect(): void {
+    const el = sceneElRef.value;
+    if (!el) return;
+    const mask = store.getState().wallMask;
+    for (const face of ["t", "b", "bl", "br", "fl", "fr"] as const) {
+      el.classList.toggle(`voxcss-mask-${face}`, mask[face]);
+    }
   }
 
   // Auto-rotate
@@ -133,7 +145,9 @@ export function useCamera(options: Ref<UseCameraOptions>): UseCameraResult {
           handle.update({ rotY: normalizeAngle(handle.state.rotY + config.speed) });
         }
         applyTransformDirect();
-        store.updateCameraFromRef(handle);
+        if (store.updateCameraFromRef(handle)) {
+          applyWallMaskDirect();
+        }
       }
       animFrameId = requestAnimationFrame(tick);
     };
@@ -199,8 +213,10 @@ export function useCamera(options: Ref<UseCameraOptions>): UseCameraResult {
     pointer.x = e.clientX;
     pointer.y = e.clientY;
 
-    // Update store — only notifies Vue if wall mask changed
-    store.updateCameraFromRef(handle);
+    // Update store + toggle CSS classes if wall mask changed
+    if (store.updateCameraFromRef(handle)) {
+      applyWallMaskDirect();
+    }
   }
 
   function onPointerUp(e: PointerEvent): void {
