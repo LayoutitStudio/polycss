@@ -2,7 +2,7 @@ import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
 import { createIsometricCamera } from "@layoutit/voxcss-core";
 import type { CameraState, CameraHandle, AutoRotateOption, AutoRotateConfig } from "@layoutit/voxcss-core";
-import { createSceneStore, type SceneStore } from "./sceneStore";
+import { createSceneStore, type SceneStore } from "../store/sceneStore";
 
 const POINTER_DRAG_SPEED = 5;
 

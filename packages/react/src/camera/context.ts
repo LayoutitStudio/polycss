@@ -1,6 +1,6 @@
 import { createContext, useContext } from "react";
 import type { CameraHandle } from "@layoutit/voxcss-core";
-import type { SceneStore } from "./sceneStore";
+import type { SceneStore } from "../store/sceneStore";
 
 export interface VoxCameraContextValue {
   store: SceneStore;

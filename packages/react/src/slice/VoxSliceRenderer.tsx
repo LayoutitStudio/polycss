@@ -124,7 +124,7 @@ const Z_SET = new Set<PlaneAxis>(["z"]);
 const X_SET = new Set<PlaneAxis>(["x"]);
 const Y_SET = new Set<PlaneAxis>(["y"]);
 
-import type { SceneStore } from "./sceneStore";
+import type { SceneStore } from "../store/sceneStore";
 
 /**
  * Imperatively renders brushes into a host element.

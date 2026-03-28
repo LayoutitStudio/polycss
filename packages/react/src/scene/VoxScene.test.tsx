@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import React, { act } from "react";
 import { createRoot } from "react-dom/client";
 import type { Voxel } from "@layoutit/voxcss-core";
-import { VoxCamera } from "./VoxCamera";
+import { VoxCamera } from "../camera/VoxCamera";
 import { VoxScene } from "./VoxScene";
 
 function renderToDiv(element: React.ReactElement): HTMLElement {

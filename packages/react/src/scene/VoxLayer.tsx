@@ -1,7 +1,7 @@
 import { memo } from "react";
 import type { GridContext, Voxel } from "@layoutit/voxcss-core";
-import { VoxCube } from "./VoxCube";
-import { VoxShape } from "./VoxShape";
+import { VoxCube } from "../shapes/VoxCube";
+import { VoxShape } from "../shapes/VoxShape";
 
 interface VoxLayerProps {
   layerIndex: number;
