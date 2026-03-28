@@ -83,23 +83,9 @@ export const VoxScene = defineComponent({
 
     const sceneElLocalRef = ref<HTMLElement | null>(null);
 
-    // Sync local ref to camera context's sceneElRef + apply wall mask classes
-    function applyWallMaskClasses(el: HTMLElement) {
-      const mask = store.getState().wallMask;
-      for (const face of ["t", "b", "bl", "br", "fl", "fr"] as const) {
-        el.classList.toggle(`voxcss-mask-${face}`, mask[face]);
-      }
-    }
-
+    // Sync local ref to camera context's sceneElRef
     watch(sceneElLocalRef, (el) => {
       sceneElRef.value = el;
-      if (el) applyWallMaskClasses(el);
-    });
-
-    // Update mask classes when wall mask changes
-    watch(wallMask, () => {
-      const el = sceneElLocalRef.value;
-      if (el) applyWallMaskClasses(el);
     });
 
     const sceneContextOptions = computed(() => ({
@@ -146,7 +132,7 @@ export const VoxScene = defineComponent({
     // Apply transform via direct DOM whenever scene element or dimensions change.
     // This is the ONLY place transform is set — Vue never touches it.
     watch(
-      [sceneElLocalRef, dimensions],
+      [sceneElLocalRef, dimensions, () => props.projection],
       ([el, dims]) => {
         if (!el) return;
         const cam = cameraCtx.cameraRef.value;
@@ -179,7 +165,11 @@ export const VoxScene = defineComponent({
       const mask = wallMask.value;
       const tileSize = context.tileSize;
       const layerElevation = context.layerElevation ?? tileSize;
-      const className = `voxcss-scene${props.projection === "dimetric" ? ` ${DIMETRIC_CLASS}` : ""}`;
+      // Include mask classes declaratively so they survive Vue re-renders
+      let className = `voxcss-scene${props.projection === "dimetric" ? ` ${DIMETRIC_CLASS}` : ""}`;
+      for (const face of ["t", "b", "bl", "br", "fl", "fr"] as const) {
+        if (mask[face]) className += ` voxcss-mask-${face}`;
+      }
 
       const disableGrid = dimensions.rows > GRID_DISABLE_THRESHOLD && dimensions.cols > GRID_DISABLE_THRESHOLD;
 
