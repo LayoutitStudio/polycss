@@ -1,8 +1,8 @@
 import { defineComponent, h } from "vue";
 import type { PropType } from "vue";
 import type { GridContext, Voxel } from "@layoutit/voxcss-core";
-import { VoxCube } from "./VoxCube";
-import { VoxShape } from "./VoxShape";
+import { VoxCube } from "../shapes/VoxCube";
+import { VoxShape } from "../shapes/VoxShape";
 
 function voxelKey(voxel: Voxel, index: number): string {
   return `${voxel.x}:${voxel.y}:${voxel.z}:${index}`;

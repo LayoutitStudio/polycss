@@ -1,20 +1,21 @@
 // Register DOM-based color resolver for named CSS colors
 import { setColorResolver } from "@layoutit/voxcss-core";
-import { resolveColor } from "./colorResolver";
+import { resolveColor } from "./styles";
 setColorResolver(resolveColor);
 
-export { VoxCamera } from "./VoxCamera";
-export { VoxScene } from "./VoxScene";
-export { VoxLayer } from "./VoxLayer";
-export { VoxCube } from "./VoxCube";
-export { VoxShape } from "./VoxShape";
-export { useSliceBrushes, SliceZBrushes, SliceAxisHost } from "./VoxSliceRenderer";
-export { useCamera } from "./composables/useCamera";
-export type { UseCameraOptions, UseCameraResult } from "./composables/useCamera";
-export { useSceneContext } from "./composables/useSceneContext";
-export type { UseSceneContextOptions } from "./composables/useSceneContext";
-export { VoxCameraContextKey } from "./context";
-export type { VoxCameraContextValue } from "./context";
+export { VoxCamera } from "./camera";
+export { useCamera } from "./camera";
+export type { UseCameraOptions, UseCameraResult } from "./camera";
+export { VoxCameraContextKey } from "./camera";
+export type { VoxCameraContextValue } from "./camera";
+
+export { VoxScene, VoxLayer, useSceneContext } from "./scene";
+export type { UseSceneContextOptions } from "./scene";
+
+export { VoxCube, VoxShape } from "./shapes";
+
+export { useSliceBrushes, SliceZBrushes, SliceAxisHost } from "./slice";
+
 export { injectBaseStyles } from "./styles";
 
 // Re-export commonly used core types for convenience

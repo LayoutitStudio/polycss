@@ -1,7 +1,7 @@
 import { defineComponent, h, provide, computed } from "vue";
 import type { PropType } from "vue";
 import type { AutoRotateOption } from "@layoutit/voxcss-core";
-import { useCamera } from "./composables/useCamera";
+import { useCamera } from "./useCamera";
 import { VoxCameraContextKey } from "./context";
 
 const DEFAULT_PERSPECTIVE = 8000;

@@ -3,27 +3,22 @@ import type { PropType } from "vue";
 import type { ProjectionMode, VoxelGrid, WallsMask } from "@layoutit/voxcss-core";
 import { DEFAULT_WALL_COLOR, wallMasksEqual } from "@layoutit/voxcss-core";
 import { createIsometricCamera } from "@layoutit/voxcss-core";
-import { shadeColor, shadeWallFace } from "@layoutit/voxcss-core";
-import type { MergeVoxelsOption, PlaneAxis } from "@layoutit/voxcss-core";
-import { VoxCameraContextKey } from "./context";
-import { useSceneContext } from "./composables/useSceneContext";
-import { VoxLayer } from "./VoxLayer";
-import { useSliceBrushes, SliceZBrushes, SliceAxisHost } from "./VoxSliceRenderer";
-import { injectBaseStyles } from "./styles";
-import type { SceneStore } from "./sceneStore";
+import type { MergeVoxelsOption } from "@layoutit/voxcss-core";
+import { VoxCameraContextKey } from "../camera";
+import { useSceneContext } from "./useSceneContext";
+import { useSliceBrushes } from "../slice";
+import { injectBaseStyles } from "../styles";
+import type { SceneStore } from "../store";
+import { renderFloor } from "./Floor";
+import { renderCeiling } from "./Ceiling";
+import { renderWalls } from "./Walls";
 
-const X_AXES = new Set<PlaneAxis>(["x"]);
-const Y_AXES = new Set<PlaneAxis>(["y"]);
-
-const FLOOR_BASE_DELTA = 120;
 const DIMETRIC_CLASS = "voxcss-projection--dimetric";
-const FLOOR_GRID_ALPHA = 0.12;
-const WALL_GRID_ALPHA = 0.1;
 const GRID_DISABLE_THRESHOLD = 20;
 
 const gridSvgCache = new Map<string, string>();
 
-function buildGridSvgDataUrl(width: number, height: number, alpha: number): string {
+export function buildGridSvgDataUrl(width: number, height: number, alpha: number): string {
   const key = `${width}x${height}:${alpha}`;
   const cached = gridSvgCache.get(key);
   if (cached) return cached;
@@ -32,47 +27,6 @@ function buildGridSvgDataUrl(width: number, height: number, alpha: number): stri
   gridSvgCache.set(key, url);
   return url;
 }
-
-const WALL_DEFINITIONS: Array<{
-  key: keyof WallsMask;
-  className: string;
-  useAltGrid: boolean;
-  getSize: (rows: number, cols: number, depth: number, tile: number) => [number, number];
-  getTransform: (rows: number, cols: number, depth: number, halfTile: number) => string;
-}> = [
-  {
-    key: "bl",
-    className: "voxcss-wall voxcss-wall--backLeft",
-    useAltGrid: true,
-    getSize: (rows, _cols, depth, tile) => [depth * tile, rows * tile],
-    getTransform: (_rows, _cols, depth, halfTile) =>
-      `rotateY(-90deg) translateZ(${halfTile * depth}px) translateX(${halfTile * depth}px)`,
-  },
-  {
-    key: "fr",
-    className: "voxcss-wall voxcss-wall--frontRight",
-    useAltGrid: true,
-    getSize: (rows, _cols, depth, tile) => [depth * tile, rows * tile],
-    getTransform: (_rows, _cols, depth, halfTile) =>
-      `rotateY(-90deg) translateZ(-${halfTile * depth}px) translateX(${halfTile * depth}px)`,
-  },
-  {
-    key: "br",
-    className: "voxcss-wall voxcss-wall--backRight",
-    useAltGrid: false,
-    getSize: (_rows, cols, depth, tile) => [cols * tile, depth * tile],
-    getTransform: (_rows, _cols, depth, halfTile) =>
-      `rotateX(90deg) translateZ(${halfTile * depth}px) translateY(${halfTile * depth}px)`,
-  },
-  {
-    key: "fl",
-    className: "voxcss-wall voxcss-wall--frontLeft",
-    useAltGrid: false,
-    getSize: (_rows, cols, depth, tile) => [cols * tile, depth * tile],
-    getTransform: (rows, _cols, depth, halfTile) =>
-      `rotateX(-90deg) translateZ(${halfTile * (2 * rows - depth)}px) translateY(-${halfTile * depth}px)`,
-  },
-];
 
 export const VoxScene = defineComponent({
   name: "VoxScene",
@@ -217,147 +171,52 @@ export const VoxScene = defineComponent({
       const layerElevation = context.layerElevation ?? tileSize;
       const className = `voxcss-scene${props.projection === "dimetric" ? ` ${DIMETRIC_CLASS}` : ""}`;
 
-      const floorVisible = props.showFloor && mask.b;
-      const floorColor = floorVisible ? shadeColor(props.wallColor, FLOOR_BASE_DELTA) : undefined;
       const disableGrid = dimensions.rows > GRID_DISABLE_THRESHOLD && dimensions.cols > GRID_DISABLE_THRESHOLD;
-      const floorGrid = floorVisible && !disableGrid
-        ? buildGridSvgDataUrl(tileSize, tileSize, FLOOR_GRID_ALPHA)
-        : undefined;
 
       const sceneChildren = [];
 
-      // Floor div
-      const floorChildren: any[] = [];
-      if (is3d.value) {
-        floorChildren.push(
-          h(SliceZBrushes, {
-            key: "slice-z",
-            floorRef,
-            plans: sliceBrushes.plans.value,
-            store: store as SceneStore,
-            tileSize,
-            layerElevation,
-          })
-        );
-      } else {
-        for (let i = 0; i < layers.length; i++) {
-          floorChildren.push(
-            h(VoxLayer, { key: i, layerIndex: i, voxels: layers[i], context })
-          );
-        }
-      }
-
-      const floorStyle: Record<string, string | undefined> = {
-        "--voxcss-floor-base": floorColor,
-        "--voxcss-grid-x": floorVisible ? `${tileSize}px` : undefined,
-        "--voxcss-grid-y": floorVisible ? `${tileSize}px` : undefined,
-        "--voxcss-floor-grid": floorGrid,
-        background: floorVisible ? undefined : "none",
-        pointerEvents: "none",
-      };
-
-      if (is3d.value) {
-        floorStyle.display = "grid";
-        floorStyle.gridTemplateColumns = `repeat(${dimensions.cols}, ${tileSize}px)`;
-        floorStyle.gridTemplateRows = `repeat(${dimensions.rows}, ${tileSize}px)`;
-      }
-
+      // Floor + slice hosts
       sceneChildren.push(
-        h("div", {
-          ref: floorRef,
-          class: "voxcss-floor-z",
-          style: floorStyle,
-        }, floorChildren)
+        ...renderFloor({
+          layers,
+          context,
+          dimensions,
+          showFloor: props.showFloor,
+          wallMask: mask,
+          wallColor: props.wallColor,
+          tileSize,
+          layerElevation,
+          disableGrid,
+          is3d: is3d.value,
+          store: store as SceneStore,
+          sliceBrushes,
+          floorRef,
+        })
       );
-
-      // X/Y slice hosts for 3d mode
-      if (is3d.value) {
-        sceneChildren.push(
-          h(SliceAxisHost, {
-            key: "slice-x",
-            className: "voxcss-floor-x",
-            hostStyle: {
-              width: `${dimensions.cols * tileSize}px`,
-              height: `${dimensions.depth * layerElevation}px`,
-              display: "grid",
-              gridTemplateColumns: `repeat(${dimensions.cols}, ${tileSize}px)`,
-              gridTemplateRows: `repeat(${dimensions.depth}, ${layerElevation}px)`,
-            },
-            plans: sliceBrushes.plans.value,
-            store: store as SceneStore,
-            tileSize,
-            layerElevation,
-            axes: X_AXES,
-          })
-        );
-        sceneChildren.push(
-          h(SliceAxisHost, {
-            key: "slice-y",
-            className: "voxcss-floor-y",
-            hostStyle: {
-              width: `${dimensions.depth * layerElevation}px`,
-              height: `${dimensions.rows * tileSize}px`,
-              display: "grid",
-              gridTemplateColumns: `repeat(${dimensions.depth}, ${layerElevation}px)`,
-              gridTemplateRows: `repeat(${dimensions.rows}, ${tileSize}px)`,
-            },
-            plans: sliceBrushes.plans.value,
-            store: store as SceneStore,
-            tileSize,
-            layerElevation,
-            axes: Y_AXES,
-          })
-        );
-      }
 
       // Ceiling
       if (props.showFloor && mask.t) {
-        const ceilingColor = shadeColor(props.wallColor, FLOOR_BASE_DELTA);
         sceneChildren.push(
-          h("div", {
-            key: "ceiling",
-            class: "voxcss-ceiling",
-            style: {
-              width: `${dimensions.cols * tileSize}px`,
-              height: `${dimensions.rows * tileSize}px`,
-              transform: `translateZ(${dimensions.depth * tileSize}px)`,
-              "--voxcss-ceiling-base": ceilingColor,
-              "--voxcss-ceiling-opacity": "0.35",
-            },
+          renderCeiling({
+            wallColor: props.wallColor,
+            dimensions,
+            tileSize,
           })
         );
       }
 
       // Walls
       if (props.showWalls) {
-        const halfTile = tileSize / 2;
-        const { rows, cols, depth } = dimensions;
-        const wallGridUrl = disableGrid ? undefined : buildGridSvgDataUrl(tileSize, layerElevation, WALL_GRID_ALPHA);
-        const wallGridAltUrl = disableGrid ? undefined
-          : tileSize === layerElevation ? wallGridUrl
-          : buildGridSvgDataUrl(layerElevation, tileSize, WALL_GRID_ALPHA);
-
-        for (const def of WALL_DEFINITIONS) {
-          if (!context.walls[def.key]) continue;
-          const [width, height] = def.getSize(rows, cols, depth, tileSize);
-          const transform = def.getTransform(rows, cols, depth, halfTile);
-          const bgColor = shadeWallFace(props.wallColor, def.key);
-          const gridUrl = def.useAltGrid ? wallGridAltUrl : wallGridUrl;
-
-          sceneChildren.push(
-            h("div", {
-              key: def.key,
-              class: def.className,
-              style: {
-                width: `${width}px`,
-                height: `${height}px`,
-                transform,
-                backgroundColor: bgColor,
-                "--voxcss-wall-grid": gridUrl,
-              },
-            })
-          );
-        }
+        sceneChildren.push(
+          ...renderWalls({
+            walls: context.walls,
+            wallColor: props.wallColor,
+            dimensions,
+            tileSize,
+            disableGrid,
+            layerElevation,
+          })
+        );
       }
 
       return h(

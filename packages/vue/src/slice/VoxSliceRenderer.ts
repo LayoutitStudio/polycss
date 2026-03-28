@@ -11,7 +11,7 @@ import {
   buildFaceDataFromSnapshot,
   NEXT_LAYER_STEP,
 } from "@layoutit/voxcss-core";
-import type { SceneStore } from "./sceneStore";
+import type { SceneStore } from "../store";
 
 const BRUSH_CLASS = "voxcss-brush";
 

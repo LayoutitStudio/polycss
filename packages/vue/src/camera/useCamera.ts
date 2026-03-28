@@ -2,7 +2,7 @@ import { ref, shallowRef, watch, onMounted, onBeforeUnmount } from "vue";
 import type { Ref } from "vue";
 import { createIsometricCamera } from "@layoutit/voxcss-core";
 import type { CameraState, CameraHandle, AutoRotateOption, AutoRotateConfig } from "@layoutit/voxcss-core";
-import { createSceneStore, type SceneStore } from "../sceneStore";
+import { createSceneStore, type SceneStore } from "../store";
 
 const POINTER_DRAG_SPEED = 5;
 
