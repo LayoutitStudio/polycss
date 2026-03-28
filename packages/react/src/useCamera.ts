@@ -100,6 +100,13 @@ export function useCamera(options: UseCameraOptions): UseCameraResult {
     if (options.rotY !== undefined) next.rotY = options.rotY;
     if (Object.keys(next).length > 0) {
       handle.update(next);
+      // Apply transform directly to DOM
+      const el = sceneElRef.current;
+      if (el) {
+        const s = handle.state;
+        const depthOffset = Number(el.dataset.voxDepthOffset ?? 0);
+        el.style.transform = `scale(${s.zoom}) translateY(${depthOffset}px) translateY(${s.tilt}px) translateX(${s.pan}px) rotateX(${s.rotX}deg) rotate(${s.rotY}deg)`;
+      }
       store.updateCameraFromRef(handle);
       store.notifyAll(); // props changed — always notify
     }

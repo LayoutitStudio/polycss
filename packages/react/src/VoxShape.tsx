@@ -103,37 +103,21 @@ function VoxShapeInner({ voxel, context }: VoxShapeProps) {
   const lighting = computeShapeLighting(shape, rawRotation, baseColor);
   const showBottom = shouldRenderBottom(voxel, context);
 
+  const shapeClass = shape === "ramp" ? "voxcss-ramp" : shape === "wedge" ? "voxcss-wedge" : "voxcss-spike";
+
   return (
     <div
-      className={`voxcss-shape-inner voxcss-${orientation}`}
+      className={`voxcss-${orientation} ${shapeClass}`}
       style={{ gridArea: `${voxel.x} / ${voxel.y} / ${x2} / ${y2}` }}
     >
       {shape === "ramp" && (
-        <RampShape
-          voxel={voxel}
-          context={context}
-          baseColor={baseColor}
-          lighting={lighting}
-          showBottom={showBottom}
-        />
+        <RampShapeInner voxel={voxel} context={context} baseColor={baseColor} lighting={lighting} showBottom={showBottom} />
       )}
       {shape === "wedge" && (
-        <WedgeShape
-          voxel={voxel}
-          context={context}
-          baseColor={baseColor}
-          lighting={lighting}
-          showBottom={showBottom}
-        />
+        <WedgeShapeInner voxel={voxel} context={context} baseColor={baseColor} lighting={lighting} showBottom={showBottom} />
       )}
       {shape === "spike" && (
-        <SpikeShape
-          voxel={voxel}
-          context={context}
-          baseColor={baseColor}
-          lighting={lighting}
-          showBottom={showBottom}
-        />
+        <SpikeShapeInner voxel={voxel} context={context} baseColor={baseColor} lighting={lighting} showBottom={showBottom} />
       )}
     </div>
   );
@@ -149,14 +133,14 @@ interface ShapeInnerProps {
   showBottom: boolean;
 }
 
-function RampShape({ voxel, context, baseColor, lighting, showBottom }: ShapeInnerProps) {
+function RampShapeInner({ voxel, context, baseColor, lighting, showBottom }: ShapeInnerProps) {
   const slopeColor = getSurfaceColor(lighting, "slope", baseColor);
   const slopeDelta = getSurfaceDelta(lighting, "slope");
   const slopeTexture = resolveSurfaceTexture(voxel, "slope", context);
   const bottomTexture = resolveSurfaceTexture(voxel, "bottom", context);
 
   return (
-    <div className="voxcss-ramp">
+    <>
       {showBottom && (
         <div
           className="voxcss-ramp-bottom"
@@ -176,7 +160,7 @@ function RampShape({ voxel, context, baseColor, lighting, showBottom }: ShapeInn
           filter: slopeTexture ? textureBrightnessFilter(slopeDelta) : undefined,
         }}
       />
-    </div>
+    </>
   );
 }
 
@@ -255,7 +239,7 @@ function SvgSlope({
   );
 }
 
-function WedgeShape({ voxel, context, baseColor, lighting, showBottom }: ShapeInnerProps) {
+function WedgeShapeInner({ voxel, context, baseColor, lighting, showBottom }: ShapeInnerProps) {
   const primaryColor = getSurfaceColor(lighting, "primary", baseColor);
   const secondaryColor = getSurfaceColor(lighting, "secondary", baseColor);
   const primaryDelta = getSurfaceDelta(lighting, "primary");
@@ -265,7 +249,7 @@ function WedgeShape({ voxel, context, baseColor, lighting, showBottom }: ShapeIn
   const bottomTexture = resolveSurfaceTexture(voxel, "bottom", context);
 
   return (
-    <div className="voxcss-wedge">
+    <>
       {showBottom && (
         <div
           className="voxcss-wedge-bottom"
@@ -292,11 +276,11 @@ function WedgeShape({ voxel, context, baseColor, lighting, showBottom }: ShapeIn
         textureUrl={secondaryTexture}
         brightnessDelta={secondaryDelta}
       />
-    </div>
+    </>
   );
 }
 
-function SpikeShape({ voxel, context, baseColor, lighting, showBottom }: ShapeInnerProps) {
+function SpikeShapeInner({ voxel, context, baseColor, lighting, showBottom }: ShapeInnerProps) {
   const primaryColor = getSurfaceColor(lighting, "primary", baseColor);
   const secondaryColor = getSurfaceColor(lighting, "secondary", baseColor);
   const primaryDelta = getSurfaceDelta(lighting, "primary");
@@ -306,7 +290,7 @@ function SpikeShape({ voxel, context, baseColor, lighting, showBottom }: ShapeIn
   const bottomTexture = resolveSurfaceTexture(voxel, "bottom", context);
 
   return (
-    <div className="voxcss-spike">
+    <>
       {showBottom && (
         <div
           className="voxcss-spike-bottom"
@@ -333,6 +317,6 @@ function SpikeShape({ voxel, context, baseColor, lighting, showBottom }: ShapeIn
         textureUrl={secondaryTexture}
         brightnessDelta={secondaryDelta}
       />
-    </div>
+    </>
   );
 }

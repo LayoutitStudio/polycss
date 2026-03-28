@@ -61,7 +61,7 @@ describe("VoxShape", () => {
     const context = makeContext([voxel]);
     const container = renderToDiv(<VoxShape voxel={voxel} context={context} />);
 
-    const inner = container.querySelector(".voxcss-shape-inner");
+    const inner = container.querySelector(".voxcss-ramp");
     expect(inner?.classList.contains("voxcss-south")).toBe(true);
   });
 
