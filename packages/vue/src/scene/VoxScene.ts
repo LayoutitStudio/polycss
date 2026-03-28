@@ -160,10 +160,6 @@ export const VoxScene = defineComponent({
     const floorRef = ref<HTMLElement | null>(null);
 
     return () => {
-      // Don't render until voxels arrive — prevents flash with default zoom
-      if (!props.voxels || props.voxels.length === 0) {
-        return h("div", { ref: sceneElLocalRef, class: "voxcss-scene", style: { display: "none" } });
-      }
 
       const { context, dimensions, layers } = sceneResult.value;
       const mask = wallMask.value;

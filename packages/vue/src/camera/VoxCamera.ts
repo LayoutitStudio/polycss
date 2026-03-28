@@ -17,7 +17,7 @@ export const VoxCamera = defineComponent({
     interactive: { type: Boolean },
     invert: { type: [Boolean, Number] as PropType<boolean | number> },
     animate: { type: [Boolean, Number, Object] as PropType<AutoRotateOption | false> },
-    perspective: { type: [Number, Boolean] as PropType<number | boolean> },
+    perspective: { type: [Number, Boolean] as PropType<number | boolean>, default: undefined },
     class: { type: String },
   },
   setup(props, { slots }) {
