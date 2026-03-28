@@ -24,10 +24,8 @@ describe("VoxCamera behavior", () => {
   });
 
   describe("perspective", () => {
-    it("applies default perspective of 8000px when perspective is explicitly set to true", () => {
-      // In Vue, Boolean props default to false when absent.
-      // Passing perspective={true} triggers the default 8000px path.
-      const container = renderToDiv({ perspective: true });
+    it("applies default perspective of 8000px when perspective is not set", () => {
+      const container = renderToDiv({});
       const camera = container.querySelector(".voxcss-camera") as HTMLElement;
       expect(camera.style.perspective).toBe("8000px");
     });
