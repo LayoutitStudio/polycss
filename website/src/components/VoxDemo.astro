@@ -5,8 +5,6 @@
 //     controls='["zoom","rotX","rotY","pan","tilt","perspective","interactive","animate"]'
 //     defaults='{"zoom":0.65,"rotX":65,"rotY":45,"showFloor":true}' />
 
-import fs from 'fs';
-
 interface Props {
   id: string;
   model?: string;
@@ -15,20 +13,14 @@ interface Props {
   defaults?: string;
 }
 
-const { id, model, voxels: voxelsProp, controls, defaults } = Astro.props;
-
-let resolvedVoxels = voxelsProp;
-if (model && !voxelsProp) {
-  try {
-    const filePath = new URL(`../../public/gallery/${model}.json`, import.meta.url).pathname;
-    resolvedVoxels = fs.readFileSync(filePath, 'utf-8');
-  } catch {
-    resolvedVoxels = '[]';
-  }
-}
+const { id, model, voxels, controls, defaults } = Astro.props;
 ---
 
-<div class="vox-demo" id={id} data-voxels={resolvedVoxels} data-controls={controls} data-defaults={defaults}>
+<div class="vox-demo" id={id}
+  data-model={model || undefined}
+  data-voxels={!model ? voxels : undefined}
+  data-controls={controls}
+  data-defaults={defaults}>
   <div class="vox-demo__viewer">
     <div class="vox-demo__canvas">
       <div class="vox-demo__camera">
@@ -181,14 +173,23 @@ if (model && !voxelsProp) {
   async function initVoxDemos() {
     const lib = await import("@layoutit/voxcss");
 
-    document.querySelectorAll(".vox-demo").forEach((el) => {
+    for (const el of document.querySelectorAll(".vox-demo")) {
       const id = el.id;
+      const modelName = el.getAttribute("data-model");
       const voxelsData = el.getAttribute("data-voxels");
       const controlsData = el.getAttribute("data-controls");
       const defaultsData = el.getAttribute("data-defaults");
 
       let voxels: any[] = [];
-      try { voxels = JSON.parse(voxelsData || "[]"); } catch {}
+      if (modelName) {
+        try {
+          const res = await fetch(`/gallery/${modelName}.json`);
+          voxels = await res.json();
+          if (!Array.isArray(voxels)) voxels = [];
+        } catch { voxels = []; }
+      } else {
+        try { voxels = JSON.parse(voxelsData || "[]"); } catch {}
+      }
 
       let controlList: string[] = [];
       try { controlList = JSON.parse(controlsData || "[]"); } catch {}
@@ -379,7 +380,7 @@ if (model && !voxelsProp) {
         wrapper.append(input, span);
         return wrapper;
       }
-    });
+    }
   }
 
   initVoxDemos();
