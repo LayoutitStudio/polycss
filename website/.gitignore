@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.astro/
+public/gallery/
+public/stacked.mp4
+public/*.png
+public/*.ico
+public/*.svg
+public/static/
