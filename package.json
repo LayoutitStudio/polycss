@@ -15,10 +15,12 @@
   },
   "homepage": "https://github.com/LayoutitStudio/voxcss#readme",
   "scripts": {
-    "build": "pnpm -r build",
-    "test": "pnpm -r --if-present test",
-    "test:coverage": "pnpm -r --if-present test:coverage",
-    "publish:all": "pnpm -r publish --access public"
+    "build": "pnpm --filter './packages/*' -r build",
+    "test": "pnpm --filter './packages/*' -r --if-present test",
+    "test:coverage": "pnpm --filter './packages/*' -r --if-present test:coverage",
+    "publish:all": "pnpm --filter './packages/*' -r publish --access public",
+    "dev:website": "pnpm --filter @layoutit/voxcss-website dev",
+    "build:website": "pnpm --filter @layoutit/voxcss-website build"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
