@@ -192,12 +192,37 @@ const { id, model, voxels, controls, defaults, showStats } = Astro.props;
         statsEl.classList.add("active");
       }
 
+      // FPS counter
+      var currentFps = "-";
+      var fpsFrameId = null;
+      var fpsFrames = 0;
+      var fpsSampleStart = 0;
+
+      function fpsTick(now) {
+        if (fpsFrameId === null) return;
+        if (!fpsSampleStart) fpsSampleStart = now;
+        fpsFrames += 1;
+        var elapsed = now - fpsSampleStart;
+        if (elapsed >= 1000) {
+          currentFps = String(Math.round((fpsFrames * 1000) / elapsed));
+          fpsFrames = 0;
+          fpsSampleStart = now;
+          updateStats();
+        }
+        fpsFrameId = requestAnimationFrame(fpsTick);
+      }
+
+      if (wantStats) {
+        fpsFrameId = requestAnimationFrame(fpsTick);
+      }
+
       function updateStats() {
         if (!wantStats || !statsEl) return;
         var elements = sceneEl.querySelectorAll("*").length;
         statsEl.innerHTML =
-          "DOM elements: <span class='stat-value'>" + elements.toLocaleString() + "</span><br>" +
-          "Voxels: <span class='stat-value'>" + voxels.length.toLocaleString() + "</span><br>" +
+          "FPS: <span class='stat-value'>" + currentFps + "</span> · " +
+          "DOM: <span class='stat-value'>" + elements.toLocaleString() + "</span> · " +
+          "Voxels: <span class='stat-value'>" + voxels.length.toLocaleString() + "</span> · " +
           "Merge: <span class='stat-value'>" + (state.mergeVoxels || "off") + "</span>";
       }
 
