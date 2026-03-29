@@ -23,6 +23,31 @@ export default defineConfig({
           label: 'Getting Started',
           items: [
             { label: 'Introduction', slug: 'introduction' },
+            { label: 'Core Concepts', slug: 'core-concepts' },
+          ],
+        },
+        {
+          label: 'Components',
+          items: [
+            { label: 'VoxCamera', slug: 'components/vox-camera' },
+            { label: 'VoxScene', slug: 'components/vox-scene' },
+          ],
+        },
+        {
+          label: 'Guides',
+          items: [
+            { label: 'Shapes', slug: 'guides/shapes' },
+            { label: 'Textures', slug: 'guides/textures' },
+            { label: 'Projections', slug: 'guides/projections' },
+            { label: 'Performance', slug: 'guides/performance' },
+            { label: 'Loading .vox Files', slug: 'guides/vox-files' },
+          ],
+        },
+        {
+          label: 'API Reference',
+          items: [
+            { label: 'Headless API', slug: 'api/headless' },
+            { label: 'Core Types', slug: 'api/types' },
           ],
         },
       ],

@@ -1,0 +1,146 @@
+---
+title: Projections
+description: Choosing between cubic and dimetric projection modes for different visual styles.
+---
+
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+
+VoxCSS supports two projection modes that control how Z layers are spaced in the scene. The projection affects the overall feel of your voxel world without changing any voxel data.
+
+## Cubic (default)
+
+The standard isometric projection. Each Z layer is spaced **50px** apart — the same as the voxel width and height. This gives a balanced, uniform look where voxels appear as true cubes.
+
+Cubic projection is the default, so you don't need to set it explicitly.
+
+<Tabs syncKey="fw">
+<TabItem label="React">
+```tsx
+import { VoxCamera, VoxScene } from "@layoutit/voxcss/react";
+
+export function App() {
+  const voxels = [
+    { x: 1, y: 1, z: 0, color: "#94a3b8" },
+    { x: 1, y: 1, z: 1, color: "#64748b" },
+    { x: 1, y: 1, z: 2, color: "#475569" },
+  ];
+  return (
+    <VoxCamera interactive>
+      <VoxScene voxels={voxels} projection="cubic" />
+    </VoxCamera>
+  );
+}
+```
+</TabItem>
+<TabItem label="Vue">
+```vue
+<template>
+  <VoxCamera interactive>
+    <VoxScene :voxels="voxels" projection="cubic" />
+  </VoxCamera>
+</template>
+<script setup lang="ts">
+import { VoxCamera, VoxScene } from "@layoutit/voxcss/vue";
+
+const voxels = [
+  { x: 1, y: 1, z: 0, color: "#94a3b8" },
+  { x: 1, y: 1, z: 1, color: "#64748b" },
+  { x: 1, y: 1, z: 2, color: "#475569" },
+];
+</script>
+```
+</TabItem>
+<TabItem label="Vanilla JS">
+```html
+<div id="voxcss"></div>
+<script type="module">
+  import { renderScene } from "@layoutit/voxcss";
+  renderScene({
+    element: document.getElementById("voxcss"),
+    camera: { interactive: true },
+    scene: {
+      voxels: [
+        { x: 1, y: 1, z: 0, color: "#94a3b8" },
+        { x: 1, y: 1, z: 1, color: "#64748b" },
+        { x: 1, y: 1, z: 2, color: "#475569" },
+      ],
+      projection: "cubic",
+    },
+  });
+</script>
+```
+</TabItem>
+</Tabs>
+
+## Dimetric
+
+Dimetric projection halves the Z spacing to **25px**. This creates a flatter, more top-down perspective where vertical height is visually compressed.
+
+<Tabs syncKey="fw">
+<TabItem label="React">
+```tsx
+import { VoxCamera, VoxScene } from "@layoutit/voxcss/react";
+
+export function App() {
+  const voxels = [
+    { x: 1, y: 1, z: 0, color: "#94a3b8" },
+    { x: 1, y: 1, z: 1, color: "#64748b" },
+    { x: 1, y: 1, z: 2, color: "#475569" },
+  ];
+  return (
+    <VoxCamera interactive>
+      <VoxScene voxels={voxels} projection="dimetric" />
+    </VoxCamera>
+  );
+}
+```
+</TabItem>
+<TabItem label="Vue">
+```vue
+<template>
+  <VoxCamera interactive>
+    <VoxScene :voxels="voxels" projection="dimetric" />
+  </VoxCamera>
+</template>
+<script setup lang="ts">
+import { VoxCamera, VoxScene } from "@layoutit/voxcss/vue";
+
+const voxels = [
+  { x: 1, y: 1, z: 0, color: "#94a3b8" },
+  { x: 1, y: 1, z: 1, color: "#64748b" },
+  { x: 1, y: 1, z: 2, color: "#475569" },
+];
+</script>
+```
+</TabItem>
+<TabItem label="Vanilla JS">
+```html
+<div id="voxcss"></div>
+<script type="module">
+  import { renderScene } from "@layoutit/voxcss";
+  renderScene({
+    element: document.getElementById("voxcss"),
+    camera: { interactive: true },
+    scene: {
+      voxels: [
+        { x: 1, y: 1, z: 0, color: "#94a3b8" },
+        { x: 1, y: 1, z: 1, color: "#64748b" },
+        { x: 1, y: 1, z: 2, color: "#475569" },
+      ],
+      projection: "dimetric",
+    },
+  });
+</script>
+```
+</TabItem>
+</Tabs>
+
+## When to use dimetric
+
+Dimetric projection works especially well for:
+
+- **Terrain and landscapes** — flattened height gives a map-like overview of rolling hills and valleys.
+- **Strategy game boards** — the top-down feel suits tile-based game UIs.
+- **Architectural floor plans** — when you want to emphasize the X/Y layout more than vertical height.
+
+If your scene is mostly about the ground plane and vertical detail is secondary, dimetric gives you a cleaner read of the spatial layout.

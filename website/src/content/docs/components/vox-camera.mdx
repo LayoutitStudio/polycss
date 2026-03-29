@@ -1,0 +1,248 @@
+---
+title: VoxCamera
+description: Camera component for controlling the 3D viewport — zoom, rotation, perspective, and pointer interaction.
+---
+
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+
+`VoxCamera` wraps your scene and controls how it is viewed — zoom level, rotation angles, perspective depth, and optional pointer-driven interaction. Every `VoxScene` must be placed inside a `VoxCamera`.
+
+## Props
+
+| Prop | Type | Default | Description |
+|------|------|---------|-------------|
+| zoom | `number` | `0.65` | Scales the scene container |
+| pan | `number` | `0` | Horizontal translation in pixels |
+| tilt | `number` | `0` | Vertical translation in pixels |
+| rotX | `number` | `65` | Rotation around the X axis (0–100°) |
+| rotY | `number` | `45` | Rotation around the Y axis (0–360°) |
+| perspective | `number \| false` | `8000` | CSS perspective depth in pixels. Pass `false` to disable |
+| invert | `boolean \| number` | `false` | Flip pointer drag direction. Pass `true` or `-1` |
+| interactive | `boolean` | `false` | Enable pointer drag controls |
+| animate | `boolean \| number \| object` | `false` | Auto-rotate. `true` for defaults, a number for speed, or `{ axis, speed, pauseOnInteraction }` |
+
+## Usage
+
+### Basic Camera
+
+<Tabs syncKey="fw">
+<TabItem label="React">
+```tsx
+import { VoxCamera, VoxScene } from "@layoutit/voxcss/react";
+
+export function App() {
+  const voxels = [{ x: 1, y: 1, z: 0, color: "#f97316" }];
+  return (
+    <VoxCamera zoom={0.8} rotX={70} rotY={30}>
+      <VoxScene voxels={voxels} />
+    </VoxCamera>
+  );
+}
+```
+</TabItem>
+<TabItem label="Vue">
+```vue
+<template>
+  <VoxCamera :zoom="0.8" :rotX="70" :rotY="30">
+    <VoxScene :voxels="voxels" />
+  </VoxCamera>
+</template>
+<script setup lang="ts">
+import { VoxCamera, VoxScene } from "@layoutit/voxcss/vue";
+const voxels = [{ x: 1, y: 1, z: 0, color: "#f97316" }];
+</script>
+```
+</TabItem>
+<TabItem label="Vanilla JS">
+```html
+<div id="voxcss"></div>
+<script type="module">
+  import { renderScene } from "@layoutit/voxcss";
+  renderScene({
+    element: document.getElementById("voxcss"),
+    camera: { zoom: 0.8, rotX: 70, rotY: 30 },
+    scene: {
+      voxels: [{ x: 1, y: 1, z: 0, color: "#f97316" }],
+    },
+  });
+</script>
+```
+</TabItem>
+</Tabs>
+
+### Interactive Camera with Custom Rotation
+
+<Tabs syncKey="fw">
+<TabItem label="React">
+```tsx
+import { VoxCamera, VoxScene } from "@layoutit/voxcss/react";
+
+export function App() {
+  const voxels = [
+    { x: 1, y: 1, z: 0, color: "#f97316" },
+    { x: 2, y: 1, z: 0, color: "#facc15" },
+  ];
+  return (
+    <VoxCamera interactive rotX={50} rotY={120} zoom={1}>
+      <VoxScene voxels={voxels} />
+    </VoxCamera>
+  );
+}
+```
+</TabItem>
+<TabItem label="Vue">
+```vue
+<template>
+  <VoxCamera interactive :rotX="50" :rotY="120" :zoom="1">
+    <VoxScene :voxels="voxels" />
+  </VoxCamera>
+</template>
+<script setup lang="ts">
+import { VoxCamera, VoxScene } from "@layoutit/voxcss/vue";
+const voxels = [
+  { x: 1, y: 1, z: 0, color: "#f97316" },
+  { x: 2, y: 1, z: 0, color: "#facc15" },
+];
+</script>
+```
+</TabItem>
+<TabItem label="Vanilla JS">
+```html
+<div id="voxcss"></div>
+<script type="module">
+  import { renderScene } from "@layoutit/voxcss";
+  renderScene({
+    element: document.getElementById("voxcss"),
+    camera: { interactive: true, rotX: 50, rotY: 120, zoom: 1 },
+    scene: {
+      voxels: [
+        { x: 1, y: 1, z: 0, color: "#f97316" },
+        { x: 2, y: 1, z: 0, color: "#facc15" },
+      ],
+    },
+  });
+</script>
+```
+</TabItem>
+</Tabs>
+
+### Animated Camera (Auto-Rotate)
+
+Pass `true` to spin with default settings, a number to set the speed, or an object for full control.
+
+<Tabs syncKey="fw">
+<TabItem label="React">
+```tsx
+import { VoxCamera, VoxScene } from "@layoutit/voxcss/react";
+
+export function App() {
+  const voxels = [{ x: 1, y: 1, z: 0, color: "#f97316" }];
+  return (
+    <VoxCamera animate={{ axis: "y", speed: 0.5 }}>
+      <VoxScene voxels={voxels} />
+    </VoxCamera>
+  );
+}
+```
+</TabItem>
+<TabItem label="Vue">
+```vue
+<template>
+  <VoxCamera :animate="{ axis: 'y', speed: 0.5 }">
+    <VoxScene :voxels="voxels" />
+  </VoxCamera>
+</template>
+<script setup lang="ts">
+import { VoxCamera, VoxScene } from "@layoutit/voxcss/vue";
+const voxels = [{ x: 1, y: 1, z: 0, color: "#f97316" }];
+</script>
+```
+</TabItem>
+<TabItem label="Vanilla JS">
+```html
+<div id="voxcss"></div>
+<script type="module">
+  import { renderScene } from "@layoutit/voxcss";
+  renderScene({
+    element: document.getElementById("voxcss"),
+    camera: { animate: { axis: "y", speed: 0.5 } },
+    scene: {
+      voxels: [{ x: 1, y: 1, z: 0, color: "#f97316" }],
+    },
+  });
+</script>
+```
+</TabItem>
+</Tabs>
+
+### Disabling Perspective
+
+Set `perspective` to `false` for an orthographic (flat) projection.
+
+<Tabs syncKey="fw">
+<TabItem label="React">
+```tsx
+import { VoxCamera, VoxScene } from "@layoutit/voxcss/react";
+
+export function App() {
+  const voxels = [{ x: 1, y: 1, z: 0, color: "#f97316" }];
+  return (
+    <VoxCamera perspective={false}>
+      <VoxScene voxels={voxels} />
+    </VoxCamera>
+  );
+}
+```
+</TabItem>
+<TabItem label="Vue">
+```vue
+<template>
+  <VoxCamera :perspective="false">
+    <VoxScene :voxels="voxels" />
+  </VoxCamera>
+</template>
+<script setup lang="ts">
+import { VoxCamera, VoxScene } from "@layoutit/voxcss/vue";
+const voxels = [{ x: 1, y: 1, z: 0, color: "#f97316" }];
+</script>
+```
+</TabItem>
+<TabItem label="Vanilla JS">
+```html
+<div id="voxcss"></div>
+<script type="module">
+  import { renderScene } from "@layoutit/voxcss";
+  renderScene({
+    element: document.getElementById("voxcss"),
+    camera: { perspective: false },
+    scene: {
+      voxels: [{ x: 1, y: 1, z: 0, color: "#f97316" }],
+    },
+  });
+</script>
+```
+</TabItem>
+</Tabs>
+
+## Animate Prop Details
+
+When `animate` is an object, the following properties are available:
+
+```ts
+{
+  axis: "x" | "y",
+  speed: number,
+  pauseOnInteraction: boolean
+}
+```
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| axis | `"x" \| "y"` | `"y"` | The rotation axis to animate |
+| speed | `number` | `0.3` | Degrees per frame |
+| pauseOnInteraction | `boolean` | `true` | Stops the animation while the user is dragging |
+
+Shorthand forms:
+
+- `animate={true}` — spins around the Y axis at 0.3 deg/frame, pausing on interaction.
+- `animate={0.6}` — same as above but at 0.6 deg/frame.

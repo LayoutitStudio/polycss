@@ -1,0 +1,81 @@
+---
+title: Core Concepts
+description: Understanding VoxCSS's voxel grid, camera, scene, and rendering pipeline.
+---
+
+This page covers the mental model behind VoxCSS. For specific props and API details, see the component and guide pages.
+
+## Voxel Grid
+
+VoxCSS works on a **3D coordinate system** defined by three axes: **x** (columns), **y** (rows), and **z** (depth/layers). Every voxel occupies a cell in this grid.
+
+Internally, the engine stacks flat CSS grid layers along the Z axis. Each layer is a 2D grid positioned with a CSS `translateZ` transform. The result is a fully 3D structure built entirely from nested HTML elements — no canvas or WebGL involved.
+
+Coordinates are zero-indexed integers. `z: 0` is the ground layer, and higher Z values move upward.
+
+## Camera
+
+The camera controls how you view the scene. It determines:
+
+- **Zoom** — how close or far the viewport is from the grid.
+- **Pan** — horizontal and vertical offset of the viewport.
+- **Tilt and Rotation** — the angle you're looking at the scene from.
+- **Perspective** — the strength of the 3D perspective effect (higher values feel more "flat"/isometric).
+
+When **interactive mode** is enabled, the user can click and drag to rotate the camera around the scene. This is powered by pointer events on the DOM — no special input handling required on your side.
+
+## Scene
+
+The scene manages the 3D grid itself. Key properties include:
+
+- **Dimensions** — `rows`, `cols`, and `depth` define the size of the grid.
+- **Structural elements** — toggle a **floor** or **walls** to give the scene physical boundaries.
+- **Projection mode** — switch between perspective and orthographic rendering.
+
+The scene is the container for all voxels. It translates your voxel data into positioned HTML cuboids inside the stacked grid layers.
+
+## Voxel Data Model
+
+Each voxel is a plain object. The only required fields are grid coordinates:
+
+- **`x`, `y`, `z`** — position in the grid (required).
+- **`x2`, `y2`, `z2`** — extend the voxel into a rectangular area spanning from `(x, y, z)` to `(x2, y2, z2)`. Useful for floors, walls, or any multi-cell block.
+- **`color`** — any CSS color value.
+- **`texture`** — apply an image or pattern to the voxel faces.
+- **`shape`** — the geometry to render (see Shapes below).
+- **`rot`** — rotation of the shape, snapped to 90-degree increments.
+
+Because voxels are plain objects, you can generate them from loops, load them from JSON, or compute them from any data source.
+
+## Shapes
+
+VoxCSS supports several built-in shapes:
+
+- **cube** — the default. A full cubic voxel.
+- **ramp** — a sloped surface, like a roof or hillside.
+- **wedge** — a triangular prism, half of a cube cut diagonally.
+- **spike** — a pointed shape tapering to a tip.
+
+All shapes snap to **90-degree rotations** via the `rot` property, so you can orient ramps and wedges in four directions without dealing with arbitrary angles.
+
+## Rendering Pipeline
+
+VoxCSS is structured in three layers:
+
+1. **Core** — Pure math and data. Computes merged geometries, face visibility, and grid layout. No DOM dependency — this layer can run anywhere.
+2. **HTML Renderer** — Takes the core output and produces real DOM elements. It creates the CSS grid layers, positions cuboids with transforms, and applies colors and textures.
+3. **Framework Wrappers** — Thin bindings for React and Vue that expose the engine as declarative components (`VoxCamera`, `VoxScene`). These wrap the HTML renderer and handle reactivity, lifecycle, and prop updates for you.
+
+The vanilla JS `renderScene` function uses the HTML renderer directly, skipping the framework layer entirely.
+
+## Merge Modes
+
+When you have many adjacent voxels of the same color, VoxCSS can **merge** them into fewer, larger HTML elements. This reduces DOM node count and improves performance.
+
+Three merge modes are available:
+
+- **`false`** — No merging. Every voxel is its own element. Best for scenes where each voxel needs individual interaction or styling.
+- **`"2d"`** — Merges adjacent same-color voxels within each Z layer. The engine combines rectangular regions on each flat layer independently.
+- **`"3d"`** — Volumetric merging across all three axes. Produces the fewest elements but works best with large, uniform regions.
+
+Choose the mode that balances your need for individual voxel control against rendering performance.
