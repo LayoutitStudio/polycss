@@ -13,6 +13,8 @@ interface Props {
   defaults?: string;
 }
 
+import '../styles/vox-demo.css';
+
 const { id, model, voxels, controls, defaults } = Astro.props;
 ---
 
@@ -36,180 +38,33 @@ const { id, model, voxels, controls, defaults } = Astro.props;
       <button class="vox-demo__tab" data-fw="vue">Vue</button>
     </div>
     <pre class="vox-demo__snippet" data-fw="vanilla"><code></code></pre>
-    <pre class="vox-demo__snippet" data-fw="react" style="display:none"><code></code></pre>
-    <pre class="vox-demo__snippet" data-fw="vue" style="display:none"><code></code></pre>
+    <pre class="vox-demo__snippet vox-demo__snippet--hidden" data-fw="react"><code></code></pre>
+    <pre class="vox-demo__snippet vox-demo__snippet--hidden" data-fw="vue"><code></code></pre>
   </div>
 </div>
 
-<style is:global>
-  .vox-demo {
-    margin: 1.5rem 0;
-    border: 1px solid var(--sl-color-gray-5, rgba(255,255,255,0.08));
-    border-radius: 12px;
-    overflow: hidden;
-    background: #0b0f14;
-  }
-  .vox-demo__viewer {
-    display: grid;
-    grid-template-columns: 1fr auto;
-    min-height: 320px;
-  }
-  .vox-demo__canvas {
-    position: relative;
-    min-height: 320px;
-    overflow: hidden;
-    background: #01030a;
-  }
-  .vox-demo__camera,
-  .vox-demo__scene {
-    width: 100%;
-    height: 100%;
-    min-height: 320px;
-  }
-  .vox-demo__controls {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-    padding: 16px;
-    background: #11141a;
-    border-left: 1px solid rgba(255,255,255,0.06);
-    min-width: 200px;
-    max-width: 240px;
-    font-family: Consolas, Monaco, "Andale Mono", "Ubuntu Mono", monospace;
-    font-size: 13px;
-    overflow-y: auto;
-    max-height: 400px;
-  }
-  .vox-demo__controls label {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    color: #e2e8f0;
-  }
-  .vox-demo__controls .range-heading {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    font-size: 13px;
-    color: #cbd5e1;
-  }
-  .vox-demo__controls .range-value {
-    color: #f8fafc;
-    font-weight: 600;
-  }
-  .vox-demo__controls input[type="range"] {
-    -webkit-appearance: none;
-    appearance: none;
-    width: 100%;
-    height: 5px;
-    border-radius: 999px;
-    background: #334155;
-    border: 1px solid #3f4c62;
-    padding: 0;
-    outline: none;
-  }
-  .vox-demo__controls input[type="range"]::-webkit-slider-thumb {
-    -webkit-appearance: none;
-    appearance: none;
-    width: 14px;
-    height: 14px;
-    border-radius: 50%;
-    background: #94a3b8;
-    border: 1px solid #94a3b8;
-    cursor: pointer;
-  }
-  .vox-demo__controls input[type="range"]::-moz-range-thumb {
-    width: 14px;
-    height: 14px;
-    border-radius: 50%;
-    background: #94a3b8;
-    border: 1px solid #94a3b8;
-    cursor: pointer;
-  }
-  .vox-demo__controls .switch {
-    display: flex;
-    flex-direction: row;
-    align-items: center;
-    gap: 6px;
-    cursor: pointer;
-    color: #cbd5e1;
-    font-size: 13px;
-  }
-  .vox-demo__controls .switch input:not(:checked) + span {
-    color: #64748b;
-  }
-  .vox-demo__code {
-    border-top: 1px solid rgba(255,255,255,0.06);
-    max-height: 300px;
-    overflow: auto;
-  }
-  .vox-demo__tabs {
-    display: flex;
-    border-bottom: 1px solid rgba(255,255,255,0.06);
-    background: #0a0c10;
-  }
-  .vox-demo__tab {
-    background: none;
-    border: none;
-    color: #64748b;
-    padding: 8px 16px;
-    font-size: 13px;
-    font-family: Consolas, Monaco, "Andale Mono", monospace;
-    cursor: pointer;
-    border-bottom: 2px solid transparent;
-  }
-  .vox-demo__tab:hover {
-    color: #cbd5e1;
-  }
-  .vox-demo__tab.active {
-    color: #e2e8f0;
-    border-bottom-color: #38bdf8;
-  }
-  .vox-demo__snippet {
-    margin: 0 !important;
-    padding: 14px 16px !important;
-    background: #000 !important;
-    border-radius: 0 !important;
-    font-size: 13px !important;
-    line-height: 1.5 !important;
-  }
-  .vox-demo__snippet code {
-    font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace !important;
-    color: #e5e9f0 !important;
-    white-space: pre !important;
-    background: none !important;
-    padding: 0 !important;
-  }
-  @media (max-width: 768px) {
-    .vox-demo__viewer {
-      grid-template-columns: 1fr;
-    }
-    .vox-demo__controls {
-      max-width: none;
-      border-left: none;
-      border-top: 1px solid rgba(255,255,255,0.06);
-      max-height: none;
-      flex-direction: row;
-      flex-wrap: wrap;
-    }
-    .vox-demo__controls label {
-      flex: 1 1 45%;
-    }
-  }
-</style>
 
 <script>
   async function initVoxDemos() {
-    const lib = await import("@layoutit/voxcss");
+    var lib;
+    try {
+      lib = await import("@layoutit/voxcss");
+    } catch (err) {
+      console.error("VoxDemo: failed to import @layoutit/voxcss", err);
+      return;
+    }
+    console.log("VoxDemo: lib loaded, demos found:", document.querySelectorAll(".vox-demo:not([data-initialized])").length);
 
     for (const el of document.querySelectorAll(".vox-demo")) {
+      if (el.getAttribute("data-initialized")) continue;
+      el.setAttribute("data-initialized", "1");
       const id = el.id;
       const modelName = el.getAttribute("data-model");
       const voxelsData = el.getAttribute("data-voxels");
       const controlsData = el.getAttribute("data-controls");
       const defaultsData = el.getAttribute("data-defaults");
 
-      let voxels: any[] = [];
+      let voxels = [];
       if (modelName) {
         try {
           const res = await fetch(`/gallery/${modelName}.json`);
@@ -220,32 +75,32 @@ const { id, model, voxels, controls, defaults } = Astro.props;
         try { voxels = JSON.parse(voxelsData || "[]"); } catch {}
       }
 
-      let controlList: string[] = [];
+      let controlList = [];
       try { controlList = JSON.parse(controlsData || "[]"); } catch {}
 
-      let defaults: Record<string, any> = {};
+      let defaults = {};
       try { defaults = JSON.parse(defaultsData || "{}"); } catch {}
 
-      const cameraEl = el.querySelector(".vox-demo__camera") as HTMLElement;
-      const sceneEl = el.querySelector(".vox-demo__scene") as HTMLElement;
-      const canvasEl = el.querySelector(".vox-demo__canvas") as HTMLElement;
-      const controlsEl = el.querySelector(".vox-demo__controls") as HTMLElement;
+      const cameraEl = el.querySelector(".vox-demo__camera");
+      const sceneEl = el.querySelector(".vox-demo__scene");
+      const canvasEl = el.querySelector(".vox-demo__canvas");
+      const controlsEl = el.querySelector(".vox-demo__controls");
       const codeEls = {
-        react: el.querySelector('.vox-demo__snippet[data-fw="react"] code') as HTMLElement,
-        vue: el.querySelector('.vox-demo__snippet[data-fw="vue"] code') as HTMLElement,
-        vanilla: el.querySelector('.vox-demo__snippet[data-fw="vanilla"] code') as HTMLElement,
+        react: el.querySelector('.vox-demo__snippet[data-fw="react"] code'),
+        vue: el.querySelector('.vox-demo__snippet[data-fw="vue"] code'),
+        vanilla: el.querySelector('.vox-demo__snippet[data-fw="vanilla"] code'),
       };
 
       // Tab switching
       el.querySelector(".vox-demo__tabs")?.addEventListener("click", (e) => {
-        const btn = (e.target as HTMLElement).closest(".vox-demo__tab") as HTMLElement | null;
+        const btn = (e.target).closest(".vox-demo__tab");
         if (!btn) return;
         const fw = btn.dataset.fw;
-        el.querySelectorAll(".vox-demo__tab").forEach((t) => t.classList.toggle("active", (t as HTMLElement).dataset.fw === fw));
-        el.querySelectorAll(".vox-demo__snippet").forEach((p) => (p as HTMLElement).style.display = (p as HTMLElement).dataset.fw === fw ? "" : "none");
+        el.querySelectorAll(".vox-demo__tab").forEach((t) => t.classList.toggle("active", (t).dataset.fw === fw));
+        el.querySelectorAll(".vox-demo__snippet").forEach((p) => p.classList.toggle("vox-demo__snippet--hidden", (p).dataset.fw !== fw));
         // Sync with Starlight's tab preference
         if (fw) {
-          const labelMap: Record<string, string> = { react: "React", vue: "Vue", vanilla: "Vanilla JS" };
+          const labelMap = { react: "React", vue: "Vue", vanilla: "Vanilla JS" };
           try { localStorage.setItem("starlight-synced-tabs__fw", labelMap[fw] || fw); } catch {}
         }
       });
@@ -253,18 +108,18 @@ const { id, model, voxels, controls, defaults } = Astro.props;
       // Restore from Starlight's synced tab preference
       try {
         const saved = localStorage.getItem("starlight-synced-tabs__fw");
-        const fwMap: Record<string, string> = { "React": "react", "Vue": "vue", "Vanilla JS": "vanilla" };
+        const fwMap = { "React": "react", "Vue": "vue", "Vanilla JS": "vanilla" };
         const fw = saved ? fwMap[saved] : null;
         if (fw) {
-          el.querySelectorAll(".vox-demo__tab").forEach((t) => t.classList.toggle("active", (t as HTMLElement).dataset.fw === fw));
-          el.querySelectorAll(".vox-demo__snippet").forEach((p) => (p as HTMLElement).style.display = (p as HTMLElement).dataset.fw === fw ? "" : "none");
+          el.querySelectorAll(".vox-demo__tab").forEach((t) => t.classList.toggle("active", (t).dataset.fw === fw));
+          el.querySelectorAll(".vox-demo__snippet").forEach((p) => p.classList.toggle("vox-demo__snippet--hidden", (p).dataset.fw !== fw));
         }
       } catch {}
 
       if (!cameraEl || !sceneEl || !canvasEl) return;
 
       // State
-      const state: Record<string, any> = {
+      const state = {
         zoom: defaults.zoom ?? 0.65,
         pan: defaults.pan ?? 0,
         tilt: defaults.tilt ?? 0,
@@ -293,10 +148,10 @@ const { id, model, voxels, controls, defaults } = Astro.props;
         tilt: state.tilt,
         perspective: state.perspectiveEnabled ? state.perspective : false,
         interactive: state.interactive,
-        animate: state.animate ? { axis: "y" as const, speed: 0.3, pauseOnInteraction: true } : false,
+        animate: state.animate ? { axis: "y", speed: 0.3, pauseOnInteraction: true } : false,
       });
 
-      const sceneOpts: any = {
+      const sceneOpts = {
         element: sceneEl,
         voxels,
         showFloor: state.showFloor,
@@ -320,13 +175,13 @@ const { id, model, voxels, controls, defaults } = Astro.props;
           rotY: state.rotY,
           perspective: state.perspectiveEnabled ? state.perspective : false,
           interactive: state.interactive,
-          animate: state.animate ? { axis: "y" as const, speed: 0.3, pauseOnInteraction: true } : false,
+          animate: state.animate ? { axis: "y", speed: 0.3, pauseOnInteraction: true } : false,
         });
         updateCode();
       }
 
       function updateScene() {
-        const opts: any = {
+        const opts = {
           voxels,
           showFloor: state.showFloor,
           showWalls: state.showWalls,
@@ -342,7 +197,7 @@ const { id, model, voxels, controls, defaults } = Astro.props;
 
       function updateCode() {
         // Build prop lists
-        const cp: Record<string, string> = {};
+        const cp = {};
         if (state.zoom !== 0.65) cp.zoom = state.zoom.toFixed(2);
         if (state.pan !== 0) cp.pan = String(state.pan);
         if (state.tilt !== 0) cp.tilt = String(state.tilt);
@@ -353,7 +208,7 @@ const { id, model, voxels, controls, defaults } = Astro.props;
         if (state.interactive) cp.interactive = "true";
         if (state.animate) cp.animate = '{ axis: "y", speed: 0.3 }';
 
-        const sp: Record<string, string> = {};
+        const sp = {};
         if (state.rows != null) sp.rows = String(state.rows);
         if (state.cols != null) sp.cols = String(state.cols);
         if (state.depth != null) sp.depth = String(state.depth);
@@ -363,69 +218,81 @@ const { id, model, voxels, controls, defaults } = Astro.props;
         if (state.mergeVoxels) sp.mergeVoxels = `"${state.mergeVoxels}"`;
 
         // React
-        const reactCamProps = Object.entries(cp).map(([k, v]) => v === "true" ? `  ${k}` : `  ${k}={${v}}`).join("\n");
-        const reactSceneProps = Object.entries(sp).map(([k, v]) => v === "true" ? `  ${k}` : `  ${k}={${v}}`).join("\n");
-        if (codeEls.react) codeEls.react.textContent =
-`import { VoxCamera, VoxScene } from "@layoutit/voxcss/react";
-
-export function App() {
-  return (
-    <VoxCamera
-${reactCamProps}
-    >
-      <VoxScene
-  voxels={voxels}
-${reactSceneProps}
-      />
-    </VoxCamera>
-  );
-}`;
+        const rcp = Object.entries(cp).map(function(e) { return e[1] === "true" ? "  " + e[0] : "  " + e[0] + "={" + e[1] + "}"; }).join("\n");
+        const rsp = Object.entries(sp).map(function(e) { return e[1] === "true" ? "  " + e[0] : "  " + e[0] + "={" + e[1] + "}"; }).join("\n");
+        if (codeEls.react) {
+          var lines = [
+            'import { VoxCamera, VoxScene } from "@layoutit/voxcss/react";',
+            "",
+            "export function App() {",
+            "  return (",
+            "    <VoxCamera",
+            rcp,
+            "    >",
+            "      <VoxScene",
+            "  voxels={voxels}",
+            rsp,
+            "      />",
+            "    <" + "/VoxCamera>",
+            "  );",
+            "}",
+          ];
+          codeEls.react.textContent = lines.join("\n");
+        }
 
         // Vue
-        const vueCamProps = Object.entries(cp).map(([k, v]) => {
-          const kebab = k.replace(/([A-Z])/g, "-$1").toLowerCase();
-          return v === "true" ? `    ${kebab}` : `    :${kebab}="${v}"`;
+        var vcp = Object.entries(cp).map(function(e) {
+          var kebab = e[0].replace(/([A-Z])/g, "-$1").toLowerCase();
+          return e[1] === "true" ? "    " + kebab : '    :' + kebab + '="' + e[1] + '"';
         }).join("\n");
-        const vueSceneProps = Object.entries(sp).map(([k, v]) => {
-          const kebab = k.replace(/([A-Z])/g, "-$1").toLowerCase();
-          return v === "true" ? `    ${kebab}` : `    :${kebab}="${v}"`;
+        var vsp = Object.entries(sp).map(function(e) {
+          var kebab = e[0].replace(/([A-Z])/g, "-$1").toLowerCase();
+          return e[1] === "true" ? "    " + kebab : '    :' + kebab + '="' + e[1] + '"';
         }).join("\n");
-        if (codeEls.vue) codeEls.vue.textContent =
-`<template>
-  <VoxCamera
-${vueCamProps}
-  >
-    <VoxScene
-    :voxels="voxels"
-${vueSceneProps}
-    />
-  </VoxCamera>
-</template>
-
-<script setup>
-import { VoxCamera, VoxScene } from "@layoutit/voxcss/vue";
-import voxels from "./voxels.json";
-</script>`;
+        if (codeEls.vue) {
+          var vlines = [
+            "<template>",
+            "  <VoxCamera",
+            vcp,
+            "  >",
+            "    <VoxScene",
+            '    :voxels="voxels"',
+            vsp,
+            "    />",
+            "  <" + "/VoxCamera>",
+            "<" + "/template>",
+            "",
+            "<" + "script setup>",
+            'import { VoxCamera, VoxScene } from "@layoutit/voxcss/vue";',
+            'import voxels from "./voxels.json";',
+            "<" + "/script>",
+          ];
+          codeEls.vue.textContent = vlines.join("\n");
+        }
 
         // Vanilla JS
-        const vanillaCam = Object.entries(cp).map(([k, v]) => `    ${k}: ${v},`).join("\n");
-        const vanillaScene = Object.entries(sp).map(([k, v]) => `    ${k}: ${v},`).join("\n");
-        if (codeEls.vanilla) codeEls.vanilla.textContent =
-`import { renderScene } from "@layoutit/voxcss";
-
-renderScene({
-  camera: {
-${vanillaCam}
-  },
-  scene: {
-    voxels,
-${vanillaScene}
-  },
-});`;
+        var vcam = Object.entries(cp).map(function(e) { return "    " + e[0] + ": " + e[1] + ","; }).join("\n");
+        var vscn = Object.entries(sp).map(function(e) { return "    " + e[0] + ": " + e[1] + ","; }).join("\n");
+        if (codeEls.vanilla) {
+          var jlines = [
+            'import { renderScene } from "@layoutit/voxcss";',
+            "",
+            "renderScene({",
+            "  camera: {",
+            vcam,
+            "  },",
+            "  scene: {",
+            "    voxels,",
+            vscn,
+            "  },",
+            "});",
+          ];
+          codeEls.vanilla.textContent = jlines.join("\n");
+        }
       }
 
       // Build controls
-      const controlDefs: Record<string, () => HTMLElement> = {
+      const controlDefs = {
         zoom: () => makeRange("zoom", 0.1, 2, 0.01, state.zoom, (v) => { state.zoom = v; updateCamera(); }),
         pan: () => makeRange("pan", -200, 200, 1, state.pan, (v) => { state.pan = v; updateCamera(); }, "px"),
         tilt: () => makeRange("tilt", -200, 200, 1, state.tilt, (v) => { state.tilt = v; updateCamera(); }, "px"),
@@ -450,12 +317,13 @@ ${vanillaScene}
 
       if (controlList.length === 0) {
         controlsEl.style.display = "none";
-        (el.querySelector(".vox-demo__viewer") as HTMLElement).style.gridTemplateColumns = "1fr";
+        (el.querySelector(".vox-demo__viewer")).style.gridTemplateColumns = "1fr";
       }
 
       updateCode();
 
-      function makeRange(label: string, min: number, max: number, step: number, initial: number, onChange: (v: number) => void, unit = ""): HTMLElement {
+      function makeRange(label, min, max, step, initial, onChange, unit) {
+        unit = unit || "";
         const wrapper = document.createElement("label");
         const heading = document.createElement("span");
         heading.className = "range-heading";
@@ -463,7 +331,7 @@ ${vanillaScene}
         nameSpan.textContent = label;
         const valueSpan = document.createElement("span");
         valueSpan.className = "range-value";
-        const fmt = (v: number) => step < 1 ? v.toFixed(2) : String(Math.round(v));
+        const fmt = (v) => step < 1 ? v.toFixed(2) : String(Math.round(v));
         valueSpan.textContent = fmt(initial) + unit;
         heading.append(nameSpan, valueSpan);
 
@@ -483,7 +351,7 @@ ${vanillaScene}
         return wrapper;
       }
 
-      function makeSwitch(label: string, initial: boolean, onChange: (v: boolean) => void): HTMLElement {
+      function makeSwitch(label, initial, onChange) {
         const wrapper = document.createElement("label");
         wrapper.className = "switch";
         const input = document.createElement("input");
@@ -498,5 +366,12 @@ ${vanillaScene}
     }
   }
 
-  initVoxDemos();
+  // Run on initial load and after Astro View Transitions
+  document.addEventListener("astro:page-load", function() { initVoxDemos(); });
+  // Also run immediately if already loaded (no View Transitions)
+  if (document.readyState !== "loading") {
+    initVoxDemos();
+  } else {
+    document.addEventListener("DOMContentLoaded", function() { initVoxDemos(); });
+  }
 </script>
