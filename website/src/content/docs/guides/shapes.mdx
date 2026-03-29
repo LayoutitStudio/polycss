@@ -4,8 +4,16 @@ description: Using cube, ramp, wedge, and spike shapes to build detailed voxel s
 ---
 
 import { Tabs, TabItem } from '@astrojs/starlight/components';
+import VoxDemo from '../../../components/VoxDemo.astro';
 
-Every voxel has a **shape** that determines its geometry. If you don't specify one, you get the default cube — but VoxCSS ships with four built-in shapes that let you build far more expressive scenes.
+Every voxel has a **shape** that determines its geometry. If you don't specify one, you get the default cube — but VoxCSS ships with four built-in shapes that let you build far more expressive scenes. Drag the scene below to inspect each shape from different angles.
+
+<VoxDemo
+  id="shapes-overview"
+  voxels='[{"x":1,"y":2,"z":0,"color":"#f97316"},{"x":1,"y":2,"z":1,"color":"#fb923c"},{"x":4,"y":2,"z":0,"color":"#94a3b8","shape":"ramp"},{"x":7,"y":2,"z":0,"color":"#22c55e","shape":"wedge"},{"x":10,"y":2,"z":0,"color":"#3b82f6","shape":"spike"},{"x":4,"y":5,"z":0,"color":"#a78bfa","shape":"ramp","rot":90},{"x":7,"y":5,"z":0,"color":"#a78bfa","shape":"ramp","rot":180},{"x":10,"y":5,"z":0,"color":"#22c55e","shape":"wedge","rot":270}]'
+  controls='["zoom","interactive"]'
+  defaults='{"zoom":0.7,"interactive":true,"showFloor":true}'
+/>
 
 ## Cube (default)
 
