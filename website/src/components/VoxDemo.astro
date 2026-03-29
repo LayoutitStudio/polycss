@@ -30,7 +30,14 @@ const { id, model, voxels, controls, defaults } = Astro.props;
     <div class="vox-demo__controls"></div>
   </div>
   <div class="vox-demo__code not-content">
-    <pre class="vox-demo__snippet"><code></code></pre>
+    <div class="vox-demo__tabs">
+      <button class="vox-demo__tab active" data-fw="vanilla">Vanilla JS</button>
+      <button class="vox-demo__tab" data-fw="react">React</button>
+      <button class="vox-demo__tab" data-fw="vue">Vue</button>
+    </div>
+    <pre class="vox-demo__snippet" data-fw="vanilla"><code></code></pre>
+    <pre class="vox-demo__snippet" data-fw="react" style="display:none"><code></code></pre>
+    <pre class="vox-demo__snippet" data-fw="vue" style="display:none"><code></code></pre>
   </div>
 </div>
 
@@ -133,8 +140,30 @@ const { id, model, voxels, controls, defaults } = Astro.props;
   }
   .vox-demo__code {
     border-top: 1px solid rgba(255,255,255,0.06);
-    max-height: 260px;
+    max-height: 300px;
     overflow: auto;
+  }
+  .vox-demo__tabs {
+    display: flex;
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+    background: #0a0c10;
+  }
+  .vox-demo__tab {
+    background: none;
+    border: none;
+    color: #64748b;
+    padding: 8px 16px;
+    font-size: 13px;
+    font-family: Consolas, Monaco, "Andale Mono", monospace;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+  }
+  .vox-demo__tab:hover {
+    color: #cbd5e1;
+  }
+  .vox-demo__tab.active {
+    color: #e2e8f0;
+    border-bottom-color: #38bdf8;
   }
   .vox-demo__snippet {
     margin: 0 !important;
@@ -201,7 +230,36 @@ const { id, model, voxels, controls, defaults } = Astro.props;
       const sceneEl = el.querySelector(".vox-demo__scene") as HTMLElement;
       const canvasEl = el.querySelector(".vox-demo__canvas") as HTMLElement;
       const controlsEl = el.querySelector(".vox-demo__controls") as HTMLElement;
-      const codeEl = el.querySelector(".vox-demo__snippet code") as HTMLElement;
+      const codeEls = {
+        react: el.querySelector('.vox-demo__snippet[data-fw="react"] code') as HTMLElement,
+        vue: el.querySelector('.vox-demo__snippet[data-fw="vue"] code') as HTMLElement,
+        vanilla: el.querySelector('.vox-demo__snippet[data-fw="vanilla"] code') as HTMLElement,
+      };
+
+      // Tab switching
+      el.querySelector(".vox-demo__tabs")?.addEventListener("click", (e) => {
+        const btn = (e.target as HTMLElement).closest(".vox-demo__tab") as HTMLElement | null;
+        if (!btn) return;
+        const fw = btn.dataset.fw;
+        el.querySelectorAll(".vox-demo__tab").forEach((t) => t.classList.toggle("active", (t as HTMLElement).dataset.fw === fw));
+        el.querySelectorAll(".vox-demo__snippet").forEach((p) => (p as HTMLElement).style.display = (p as HTMLElement).dataset.fw === fw ? "" : "none");
+        // Sync with Starlight's tab preference
+        if (fw) {
+          const labelMap: Record<string, string> = { react: "React", vue: "Vue", vanilla: "Vanilla JS" };
+          try { localStorage.setItem("starlight-synced-tabs__fw", labelMap[fw] || fw); } catch {}
+        }
+      });
+
+      // Restore from Starlight's synced tab preference
+      try {
+        const saved = localStorage.getItem("starlight-synced-tabs__fw");
+        const fwMap: Record<string, string> = { "React": "react", "Vue": "vue", "Vanilla JS": "vanilla" };
+        const fw = saved ? fwMap[saved] : null;
+        if (fw) {
+          el.querySelectorAll(".vox-demo__tab").forEach((t) => t.classList.toggle("active", (t as HTMLElement).dataset.fw === fw));
+          el.querySelectorAll(".vox-demo__snippet").forEach((p) => (p as HTMLElement).style.display = (p as HTMLElement).dataset.fw === fw ? "" : "none");
+        }
+      } catch {}
 
       if (!cameraEl || !sceneEl || !canvasEl) return;
 
@@ -283,30 +341,87 @@ const { id, model, voxels, controls, defaults } = Astro.props;
       }
 
       function updateCode() {
-        if (!codeEl) return;
-        const camProps: string[] = [];
-        if (state.zoom !== 0.65) camProps.push(`  zoom: ${state.zoom.toFixed(2)},`);
-        if (state.pan !== 0) camProps.push(`  pan: ${state.pan},`);
-        if (state.tilt !== 0) camProps.push(`  tilt: ${state.tilt},`);
-        if (state.rotX !== 65) camProps.push(`  rotX: ${state.rotX},`);
-        if (state.rotY !== 45) camProps.push(`  rotY: ${state.rotY},`);
-        if (!state.perspectiveEnabled) camProps.push(`  perspective: false,`);
-        else if (state.perspective !== 8000) camProps.push(`  perspective: ${state.perspective},`);
-        if (state.interactive) camProps.push(`  interactive: true,`);
-        if (state.animate) camProps.push(`  animate: { axis: "y", speed: 0.3 },`);
+        // Build prop lists
+        const cp: Record<string, string> = {};
+        if (state.zoom !== 0.65) cp.zoom = state.zoom.toFixed(2);
+        if (state.pan !== 0) cp.pan = String(state.pan);
+        if (state.tilt !== 0) cp.tilt = String(state.tilt);
+        if (state.rotX !== 65) cp.rotX = String(state.rotX);
+        if (state.rotY !== 45) cp.rotY = String(state.rotY);
+        if (!state.perspectiveEnabled) cp.perspective = "false";
+        else if (state.perspective !== 8000) cp.perspective = String(state.perspective);
+        if (state.interactive) cp.interactive = "true";
+        if (state.animate) cp.animate = '{ axis: "y", speed: 0.3 }';
 
-        const sceneProps: string[] = [];
-        sceneProps.push(`  voxels,`);
-        if (state.rows != null) sceneProps.push(`  rows: ${state.rows},`);
-        if (state.cols != null) sceneProps.push(`  cols: ${state.cols},`);
-        if (state.depth != null) sceneProps.push(`  depth: ${state.depth},`);
-        if (state.showFloor) sceneProps.push(`  showFloor: true,`);
-        if (state.showWalls) sceneProps.push(`  showWalls: true,`);
-        if (state.projection !== "cubic") sceneProps.push(`  projection: "${state.projection}",`);
-        if (state.mergeVoxels) sceneProps.push(`  mergeVoxels: "${state.mergeVoxels}",`);
+        const sp: Record<string, string> = {};
+        if (state.rows != null) sp.rows = String(state.rows);
+        if (state.cols != null) sp.cols = String(state.cols);
+        if (state.depth != null) sp.depth = String(state.depth);
+        if (state.showFloor) sp.showFloor = "true";
+        if (state.showWalls) sp.showWalls = "true";
+        if (state.projection !== "cubic") sp.projection = `"${state.projection}"`;
+        if (state.mergeVoxels) sp.mergeVoxels = `"${state.mergeVoxels}"`;
 
-        const code = `renderScene({\n  camera: {\n${camProps.join("\n")}\n  },\n  scene: {\n${sceneProps.join("\n")}\n  },\n});`;
-        codeEl.textContent = code;
+        // React
+        const reactCamProps = Object.entries(cp).map(([k, v]) => v === "true" ? `  ${k}` : `  ${k}={${v}}`).join("\n");
+        const reactSceneProps = Object.entries(sp).map(([k, v]) => v === "true" ? `  ${k}` : `  ${k}={${v}}`).join("\n");
+        if (codeEls.react) codeEls.react.textContent =
+`import { VoxCamera, VoxScene } from "@layoutit/voxcss/react";
+
+export function App() {
+  return (
+    <VoxCamera
+${reactCamProps}
+    >
+      <VoxScene
+  voxels={voxels}
+${reactSceneProps}
+      />
+    </VoxCamera>
+  );
+}`;
+
+        // Vue
+        const vueCamProps = Object.entries(cp).map(([k, v]) => {
+          const kebab = k.replace(/([A-Z])/g, "-$1").toLowerCase();
+          return v === "true" ? `    ${kebab}` : `    :${kebab}="${v}"`;
+        }).join("\n");
+        const vueSceneProps = Object.entries(sp).map(([k, v]) => {
+          const kebab = k.replace(/([A-Z])/g, "-$1").toLowerCase();
+          return v === "true" ? `    ${kebab}` : `    :${kebab}="${v}"`;
+        }).join("\n");
+        if (codeEls.vue) codeEls.vue.textContent =
+`<template>
+  <VoxCamera
+${vueCamProps}
+  >
+    <VoxScene
+    :voxels="voxels"
+${vueSceneProps}
+    />
+  </VoxCamera>
+</template>
+
+<script setup>
+import { VoxCamera, VoxScene } from "@layoutit/voxcss/vue";
+import voxels from "./voxels.json";
+</script>`;
+
+        // Vanilla JS
+        const vanillaCam = Object.entries(cp).map(([k, v]) => `    ${k}: ${v},`).join("\n");
+        const vanillaScene = Object.entries(sp).map(([k, v]) => `    ${k}: ${v},`).join("\n");
+        if (codeEls.vanilla) codeEls.vanilla.textContent =
+`import { renderScene } from "@layoutit/voxcss";
+
+renderScene({
+  camera: {
+${vanillaCam}
+  },
+  scene: {
+    voxels,
+${vanillaScene}
+  },
+});`;
       }
 
       // Build controls

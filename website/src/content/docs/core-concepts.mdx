@@ -23,7 +23,7 @@ The camera controls how you view the scene. Drag the apple below and adjust the 
   id="concept-camera"
   model="apple"
   controls='["zoom","pan","tilt","rotX","rotY","perspective","interactive","animate"]'
-  defaults='{"zoom":0.65,"interactive":true,"showFloor":false}'
+  defaults='{"zoom":0.5,"interactive":true,"showFloor":false}'
 />
 
 - **Zoom** — scales the scene closer or further away.
@@ -97,7 +97,7 @@ When you have many adjacent voxels of the same color, VoxCSS can **merge** them 
   id="concept-merge"
   model="apple"
   controls='["zoom","mergeVoxels","showFloor"]'
-  defaults='{"zoom":0.65,"interactive":true,"showFloor":false,"mergeVoxels":"3d"}'
+  defaults='{"zoom":0.5,"interactive":true,"showFloor":false,"mergeVoxels":"3d"}'
 />
 
 - **`false`** — No merging. Every voxel is its own element. Best for scenes where each voxel needs individual interaction.
