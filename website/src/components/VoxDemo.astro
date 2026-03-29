@@ -234,76 +234,90 @@ const { id, model, voxels, controls, defaults } = Astro.props;
         if (state.mergeVoxels) sp.mergeVoxels = `"${state.mergeVoxels}"`;
 
         // React
-        const rcp = Object.entries(cp).map(function(e) { return e[1] === "true" ? "  " + e[0] : "  " + e[0] + "={" + e[1] + "}"; }).join("\n");
-        const rsp = Object.entries(sp).map(function(e) { return e[1] === "true" ? "  " + e[0] : "  " + e[0] + "={" + e[1] + "}"; }).join("\n");
+        var rCamEntries = Object.entries(cp);
+        var rSceneEntries = Object.entries(sp);
         if (codeEls.react) {
-          var lines = [
-            'import { VoxCamera, VoxScene } from "@layoutit/voxcss/react";',
-            "",
-            "export function App() {",
-            "  return (",
-            "    <VoxCamera",
-            rcp,
-            "    >",
-            "      <VoxScene",
-            "  voxels={voxels}",
-            rsp,
-            "      />",
-            "    <" + "/VoxCamera>",
-            "  );",
-            "}",
-          ];
-          codeEls.react.textContent = lines.join("\n");
+          var r = ['import { VoxCamera, VoxScene } from "@layoutit/voxcss/react";', ""];
+          r.push("export function App() {");
+          r.push("  const voxels = [...];");
+          r.push("  return (");
+          // VoxCamera - inline if few props
+          var camAttrs = rCamEntries.map(function(e) { return e[1] === "true" ? e[0] : e[0] + "={" + e[1] + "}"; });
+          var sceneAttrs = rSceneEntries.map(function(e) { return e[1] === "true" ? e[0] : e[0] + "={" + e[1] + "}"; });
+          if (camAttrs.length <= 3) {
+            r.push("    <VoxCamera " + camAttrs.join(" ") + ">");
+          } else {
+            r.push("    <VoxCamera");
+            camAttrs.forEach(function(a) { r.push("      " + a); });
+            r.push("    >");
+          }
+          if (sceneAttrs.length <= 2) {
+            r.push("      <VoxScene voxels={voxels} " + sceneAttrs.join(" ") + " />");
+          } else {
+            r.push("      <VoxScene");
+            r.push("        voxels={voxels}");
+            sceneAttrs.forEach(function(a) { r.push("        " + a); });
+            r.push("      />");
+          }
+          r.push("    <" + "/VoxCamera>");
+          r.push("  );");
+          r.push("}");
+          codeEls.react.textContent = r.join("\n");
         }
 
         // Vue
-        var vcp = Object.entries(cp).map(function(e) {
-          var kebab = e[0].replace(/([A-Z])/g, "-$1").toLowerCase();
-          return e[1] === "true" ? "    " + kebab : '    :' + kebab + '="' + e[1] + '"';
-        }).join("\n");
-        var vsp = Object.entries(sp).map(function(e) {
-          var kebab = e[0].replace(/([A-Z])/g, "-$1").toLowerCase();
-          return e[1] === "true" ? "    " + kebab : '    :' + kebab + '="' + e[1] + '"';
-        }).join("\n");
         if (codeEls.vue) {
-          var vlines = [
-            "<template>",
-            "  <VoxCamera",
-            vcp,
-            "  >",
-            "    <VoxScene",
-            '    :voxels="voxels"',
-            vsp,
-            "    />",
-            "  <" + "/VoxCamera>",
-            "<" + "/template>",
-            "",
-            "<" + "script setup>",
-            'import { VoxCamera, VoxScene } from "@layoutit/voxcss/vue";',
-            'import voxels from "./voxels.json";',
-            "<" + "/script>",
-          ];
-          codeEls.vue.textContent = vlines.join("\n");
+          var vueCamAttrs = Object.entries(cp).map(function(e) {
+            var k = e[0].replace(/([A-Z])/g, "-$1").toLowerCase();
+            return e[1] === "true" ? k : ":" + k + '="' + e[1] + '"';
+          });
+          var vueSceneAttrs = Object.entries(sp).map(function(e) {
+            var k = e[0].replace(/([A-Z])/g, "-$1").toLowerCase();
+            return e[1] === "true" ? k : ":" + k + '="' + e[1] + '"';
+          });
+          var v = ["<template>"];
+          if (vueCamAttrs.length <= 3) {
+            v.push("  <VoxCamera " + vueCamAttrs.join(" ") + ">");
+          } else {
+            v.push("  <VoxCamera");
+            vueCamAttrs.forEach(function(a) { v.push("    " + a); });
+            v.push("  >");
+          }
+          if (vueSceneAttrs.length <= 2) {
+            v.push('    <VoxScene :voxels="voxels" ' + vueSceneAttrs.join(" ") + " />");
+          } else {
+            v.push("    <VoxScene");
+            v.push('      :voxels="voxels"');
+            vueSceneAttrs.forEach(function(a) { v.push("      " + a); });
+            v.push("    />");
+          }
+          v.push("  <" + "/VoxCamera>");
+          v.push("<" + "/template>");
+          v.push("");
+          v.push("<" + "script setup>");
+          v.push('import { VoxCamera, VoxScene } from "@layoutit/voxcss/vue";');
+          v.push('const voxels = [...];');
+          v.push("<" + "/script>");
+          codeEls.vue.textContent = v.join("\n");
         }
 
         // Vanilla JS
-        var vcam = Object.entries(cp).map(function(e) { return "    " + e[0] + ": " + e[1] + ","; }).join("\n");
-        var vscn = Object.entries(sp).map(function(e) { return "    " + e[0] + ": " + e[1] + ","; }).join("\n");
         if (codeEls.vanilla) {
-          var jlines = [
-            'import { renderScene } from "@layoutit/voxcss";',
-            "",
-            "renderScene({",
-            "  camera: {",
-            vcam,
-            "  },",
-            "  scene: {",
-            "    voxels,",
-            vscn,
-            "  },",
-            "});",
-          ];
-          codeEls.vanilla.textContent = jlines.join("\n");
+          var j = ['import { renderScene } from "@layoutit/voxcss";', ""];
+          j.push("renderScene({");
+          if (rCamEntries.length === 0) {
+            j.push("  camera: {},");
+          } else {
+            j.push("  camera: {");
+            rCamEntries.forEach(function(e) { j.push("    " + e[0] + ": " + e[1] + ","); });
+            j.push("  },");
+          }
+          j.push("  scene: {");
+          j.push("    voxels,");
+          rSceneEntries.forEach(function(e) { j.push("    " + e[0] + ": " + e[1] + ","); });
+          j.push("  },");
+          j.push("});");
+          codeEls.vanilla.textContent = j.join("\n");
         }
 
         // Apply syntax highlighting
