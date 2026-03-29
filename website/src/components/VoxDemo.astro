@@ -21,7 +21,7 @@ const { id, model, voxels, controls, defaults } = Astro.props;
   data-voxels={!model ? voxels : undefined}
   data-controls={controls}
   data-defaults={defaults}>
-  <div class="vox-demo__viewer">
+  <div class="vox-demo__viewer not-content">
     <div class="vox-demo__canvas">
       <div class="vox-demo__camera">
         <div class="vox-demo__scene"></div>
@@ -29,7 +29,7 @@ const { id, model, voxels, controls, defaults } = Astro.props;
     </div>
     <div class="vox-demo__controls"></div>
   </div>
-  <div class="vox-demo__code">
+  <div class="vox-demo__code not-content">
     <pre class="vox-demo__snippet"><code></code></pre>
   </div>
 </div>
