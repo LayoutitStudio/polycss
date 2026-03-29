@@ -4,8 +4,16 @@ description: Applying image textures to voxel faces for richer visual detail.
 ---
 
 import { Tabs, TabItem } from '@astrojs/starlight/components';
+import VoxDemo from '../../../components/VoxDemo.astro';
 
 VoxCSS lets you apply image textures to voxels using the `texture` property. The texture is mapped onto all visible faces of the voxel, giving you a simple way to add visual detail beyond flat colors.
+
+<VoxDemo
+  id="textures-demo"
+  voxels='[{"x":3,"y":3,"z":0,"texture":"/grass2.png"},{"x":4,"y":3,"z":0,"texture":"/grass2.png"},{"x":5,"y":3,"z":0,"texture":"/grass2.png"},{"x":3,"y":4,"z":0,"texture":"/grass2.png"},{"x":4,"y":4,"z":0,"texture":"/grass2.png"},{"x":5,"y":4,"z":0,"texture":"/grass2.png"},{"x":3,"y":5,"z":0,"texture":"/grass2.png"},{"x":4,"y":5,"z":0,"texture":"/grass2.png"},{"x":5,"y":5,"z":0,"texture":"/grass2.png"},{"x":4,"y":4,"z":1,"texture":"/grass2.png"},{"x":5,"y":4,"z":1,"texture":"/grass2.png"},{"x":4,"y":5,"z":1,"texture":"/grass2.png"},{"x":5,"y":5,"z":1,"texture":"/grass2.png"},{"x":5,"y":5,"z":2,"texture":"/grass2.png"},{"x":4,"y":3,"z":1,"texture":"/grass2.png","shape":"ramp"},{"x":3,"y":4,"z":1,"texture":"/grass2.png","shape":"ramp","rot":270},{"x":3,"y":3,"z":1,"texture":"/grass2.png","shape":"spike"}]'
+  controls='["zoom","interactive"]'
+  defaults='{"zoom":0.8,"interactive":true,"showFloor":true}'
+/>
 
 ## Basic usage
 
