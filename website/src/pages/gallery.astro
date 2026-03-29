@@ -6,7 +6,7 @@ const SITE_URL = "https://voxcss.com";
 const OG_IMAGE = `${SITE_URL}/voxcss-intro.png`;
 const SITE_NAME = "VoxCSS";
 
-const galleryDir = new URL('../../public/gallery', import.meta.url).pathname;
+const galleryDir = path.resolve(process.cwd(), 'public/gallery');
 
 const jsonFiles = fs.readdirSync(galleryDir)
   .filter(f => f.endsWith('.json') && f !== 'vox-manifest.json')
