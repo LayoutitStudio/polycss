@@ -53,7 +53,23 @@ const { id, model, voxels, controls, defaults } = Astro.props;
       console.error("VoxDemo: failed to import @layoutit/voxcss", err);
       return;
     }
-    console.log("VoxDemo: lib loaded, demos found:", document.querySelectorAll(".vox-demo:not([data-initialized])").length);
+
+    // Load highlight.js for syntax highlighting
+    var hljs;
+    try {
+      var hljsMod = await import("highlight.js/lib/core");
+      hljs = hljsMod.default;
+      var xmlMod = await import("highlight.js/lib/languages/xml");
+      var jsMod = await import("highlight.js/lib/languages/javascript");
+      var tsMod = await import("highlight.js/lib/languages/typescript");
+      hljs.registerLanguage("html", xmlMod.default);
+      hljs.registerLanguage("xml", xmlMod.default);
+      hljs.registerLanguage("vue", xmlMod.default);
+      hljs.registerLanguage("javascript", jsMod.default);
+      hljs.registerLanguage("tsx", tsMod.default);
+    } catch (e) {
+      hljs = null;
+    }
 
     for (const el of document.querySelectorAll(".vox-demo")) {
       if (el.getAttribute("data-initialized")) continue;
@@ -288,6 +304,20 @@ const { id, model, voxels, controls, defaults } = Astro.props;
             "});",
           ];
           codeEls.vanilla.textContent = jlines.join("\n");
+        }
+
+        // Apply syntax highlighting
+        if (hljs) {
+          var langMap = { react: "tsx", vue: "xml", vanilla: "javascript" };
+          for (var fw in codeEls) {
+            var codeEl = codeEls[fw];
+            if (codeEl && codeEl.textContent) {
+              var lang = langMap[fw] || "javascript";
+              try {
+                codeEl.innerHTML = hljs.highlight(codeEl.textContent, { language: lang }).value;
+              } catch (e) {}
+            }
+          }
         }
       }
 

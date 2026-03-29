@@ -1,4 +1,6 @@
-  .vox-demo {
+@import url("https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css");
+
+.vox-demo {
     margin: 1.5rem 0;
     border: 1px solid var(--sl-color-gray-5, rgba(255,255,255,0.08));
     border-radius: 12px;
