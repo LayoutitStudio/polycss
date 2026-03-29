@@ -23,6 +23,7 @@ export default defineConfig({
           label: 'Getting Started',
           items: [
             { label: 'Introduction', slug: 'introduction' },
+            { label: 'Quickstart', slug: 'quickstart' },
             { label: 'Core Concepts', slug: 'core-concepts' },
           ],
         },

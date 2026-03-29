@@ -1,0 +1,156 @@
+---
+title: Quickstart
+description: Build your first VoxCSS scene in under a minute.
+---
+
+import { Tabs, TabItem, Steps } from '@astrojs/starlight/components';
+import VoxDemo from '../../components/VoxDemo.astro';
+
+Get a 3D voxel scene running in your project in three steps.
+
+<Steps>
+
+1. **Install the package**
+
+   <Tabs syncKey="pkg">
+   <TabItem label="npm">
+   ```bash
+   npm install @layoutit/voxcss
+   ```
+   </TabItem>
+   <TabItem label="yarn">
+   ```bash
+   yarn add @layoutit/voxcss
+   ```
+   </TabItem>
+   <TabItem label="pnpm">
+   ```bash
+   pnpm add @layoutit/voxcss
+   ```
+   </TabItem>
+   </Tabs>
+
+2. **Add a camera and scene**
+
+   The camera controls the viewport (zoom, rotation, drag interaction). The scene holds your voxels.
+
+   <Tabs syncKey="fw">
+   <TabItem label="React">
+   ```tsx
+   import { VoxCamera, VoxScene } from "@layoutit/voxcss/react";
+
+   const voxels = [
+     { x: 0, y: 0, z: 0, color: "#f97316" },
+     { x: 1, y: 0, z: 0, color: "#fb923c" },
+     { x: 0, y: 1, z: 0, color: "#fdba74" },
+     { x: 0, y: 0, z: 1, color: "#ef4444" },
+   ];
+
+   export function App() {
+     return (
+       <VoxCamera interactive zoom={0.8}>
+         <VoxScene voxels={voxels} showFloor />
+       </VoxCamera>
+     );
+   }
+   ```
+   </TabItem>
+   <TabItem label="Vue">
+   ```vue
+   <template>
+     <VoxCamera interactive :zoom="0.8">
+       <VoxScene :voxels="voxels" show-floor />
+     </VoxCamera>
+   </template>
+
+   <script setup lang="ts">
+   import { VoxCamera, VoxScene } from "@layoutit/voxcss/vue";
+
+   const voxels = [
+     { x: 0, y: 0, z: 0, color: "#f97316" },
+     { x: 1, y: 0, z: 0, color: "#fb923c" },
+     { x: 0, y: 1, z: 0, color: "#fdba74" },
+     { x: 0, y: 0, z: 1, color: "#ef4444" },
+   ];
+   </script>
+   ```
+   </TabItem>
+   <TabItem label="Vanilla JS">
+   ```html
+   <div id="voxcss"></div>
+   <script type="module">
+     import { renderScene } from "@layoutit/voxcss";
+
+     renderScene({
+       element: document.getElementById("voxcss"),
+       camera: { interactive: true, zoom: 0.8 },
+       scene: {
+         voxels: [
+           { x: 0, y: 0, z: 0, color: "#f97316" },
+           { x: 1, y: 0, z: 0, color: "#fb923c" },
+           { x: 0, y: 1, z: 0, color: "#fdba74" },
+           { x: 0, y: 0, z: 1, color: "#ef4444" },
+         ],
+         showFloor: true,
+       },
+     });
+   </script>
+   ```
+   </TabItem>
+   </Tabs>
+
+3. **Drag to rotate**
+
+   Pass `interactive` to the camera and your users can drag to rotate the scene. Add `animate` for auto-rotation:
+
+   <Tabs syncKey="fw">
+   <TabItem label="React">
+   ```tsx
+   <VoxCamera interactive animate={{ axis: "y", speed: 0.3 }}>
+     <VoxScene voxels={voxels} showFloor />
+   </VoxCamera>
+   ```
+   </TabItem>
+   <TabItem label="Vue">
+   ```vue
+   <VoxCamera interactive :animate="{ axis: 'y', speed: 0.3 }">
+     <VoxScene :voxels="voxels" show-floor />
+   </VoxCamera>
+   ```
+   </TabItem>
+   <TabItem label="Vanilla JS">
+   ```js
+   renderScene({
+     element: document.getElementById("voxcss"),
+     camera: {
+       interactive: true,
+       animate: { axis: "y", speed: 0.3, pauseOnInteraction: true },
+     },
+     scene: { voxels, showFloor: true },
+   });
+   ```
+   </TabItem>
+   </Tabs>
+
+</Steps>
+
+## Try it live
+
+Drag to rotate. Use the controls on the right to change camera and scene properties — the code below updates in real time.
+
+<VoxDemo
+  id="quickstart-demo"
+  voxels='[{"x":0,"y":0,"z":0,"color":"#f97316"},{"x":1,"y":0,"z":0,"color":"#fb923c"},{"x":0,"y":1,"z":0,"color":"#fdba74"},{"x":0,"y":0,"z":1,"color":"#ef4444"},{"x":1,"y":1,"z":0,"color":"#fbbf24"},{"x":1,"y":0,"z":1,"color":"#f87171"},{"x":0,"y":1,"z":1,"color":"#fca5a5"},{"x":1,"y":1,"z":1,"color":"#dc2626"}]'
+  controls='["zoom","rotX","rotY","interactive","animate","showFloor","showWalls"]'
+  defaults='{"zoom":0.8,"interactive":true,"showFloor":true}'
+/>
+
+## What's next?
+
+Now that you have a scene running:
+
+- **[VoxCamera](/components/vox-camera)** — Control zoom, pan, tilt, rotation, perspective, and pointer interaction.
+- **[VoxScene](/components/vox-scene)** — Configure dimensions, walls, floor, projection, and merge modes.
+- **[Shapes](/guides/shapes)** — Add ramps, wedges, and spikes to your scenes.
+- **[Performance](/guides/performance)** — Optimize large scenes with voxel merging.
+- **[Gallery](/gallery)** — Browse 100+ voxel models for inspiration.

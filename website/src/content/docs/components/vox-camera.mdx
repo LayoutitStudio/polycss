@@ -4,8 +4,20 @@ description: Camera component for controlling the 3D viewport — zoom, rotation
 ---
 
 import { Tabs, TabItem } from '@astrojs/starlight/components';
+import VoxDemo from '../../../components/VoxDemo.astro';
 
 `VoxCamera` wraps your scene and controls how it is viewed — zoom level, rotation angles, perspective depth, and optional pointer-driven interaction. Every `VoxScene` must be placed inside a `VoxCamera`.
+
+### Interactive Demo
+
+Experiment with all camera props. Drag the scene to rotate, and adjust the sliders to see the effect in real time.
+
+<VoxDemo
+  id="camera-demo"
+  voxels='[{"x":1,"y":1,"z":0,"color":"#f97316"},{"x":2,"y":1,"z":0,"color":"#fb923c"},{"x":1,"y":2,"z":0,"color":"#fdba74"},{"x":2,"y":2,"z":0,"color":"#fbbf24"},{"x":1,"y":1,"z":1,"color":"#ef4444"},{"x":2,"y":1,"z":1,"color":"#f87171"},{"x":1,"y":2,"z":1,"color":"#fca5a5"},{"x":2,"y":2,"z":1,"color":"#dc2626"}]'
+  controls='["zoom","pan","tilt","rotX","rotY","perspective","interactive","animate"]'
+  defaults='{"zoom":0.65,"interactive":true,"showFloor":false}'
+/>
 
 ## Props
 

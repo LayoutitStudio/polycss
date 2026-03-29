@@ -4,8 +4,20 @@ description: Scene component that renders a 3D voxel grid — voxel data, grid d
 ---
 
 import { Tabs, TabItem } from '@astrojs/starlight/components';
+import VoxDemo from '../../../components/VoxDemo.astro';
 
 `VoxScene` renders the voxel grid itself. It takes an array of voxel objects and draws them as CSS cuboids on a 3D grid. **VoxScene must always be placed inside a VoxCamera.**
+
+### Interactive Demo
+
+Adjust grid dimensions, toggle walls and floor, and switch projection modes.
+
+<VoxDemo
+  id="scene-demo"
+  voxels='[{"x":4,"y":4,"z":0,"color":"#f97316"}]'
+  controls='["rows","cols","depth","showFloor","showWalls","projection"]'
+  defaults='{"zoom":0.65,"interactive":true,"showFloor":true,"showWalls":true,"rows":8,"cols":8,"depth":6}'
+/>
 
 ## Props
 
