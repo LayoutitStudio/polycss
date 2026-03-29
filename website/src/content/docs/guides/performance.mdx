@@ -4,6 +4,17 @@ description: Optimizing VoxCSS scenes with merge modes and understanding DOM-bas
 ---
 
 import { Tabs, TabItem } from '@astrojs/starlight/components';
+import VoxDemo from '../../../components/VoxDemo.astro';
+
+Toggle the merge mode below and watch the DOM element count change. With 3D merging, the same model renders with dramatically fewer elements.
+
+<VoxDemo
+  id="perf-demo"
+  model="halfapple"
+  controls='["zoom","mergeVoxels","animate","showFloor"]'
+  defaults='{"zoom":0.5,"interactive":true,"showFloor":false,"mergeVoxels":false,"animate":true}'
+  showStats={true}
+/>
 
 VoxCSS renders everything as real DOM elements — every face of every voxel is an HTML element with CSS transforms. This gives you full access to DevTools inspection, DOM events, and CSS styling, but it means **performance scales with element count**. Understanding how to manage that count is key to building smooth scenes.
 

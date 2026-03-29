@@ -11,23 +11,26 @@ interface Props {
   voxels?: string;
   controls?: string;
   defaults?: string;
+  showStats?: boolean;
 }
 
 import '../styles/vox-demo.css';
 
-const { id, model, voxels, controls, defaults } = Astro.props;
+const { id, model, voxels, controls, defaults, showStats } = Astro.props;
 ---
 
 <div class="vox-demo" id={id}
   data-model={model || undefined}
   data-voxels={!model ? voxels : undefined}
   data-controls={controls}
-  data-defaults={defaults}>
+  data-defaults={defaults}
+  data-show-stats={showStats ? "1" : undefined}>
   <div class="vox-demo__viewer not-content">
     <div class="vox-demo__canvas">
       <div class="vox-demo__camera">
         <div class="vox-demo__scene"></div>
       </div>
+      <div class="vox-demo__stats"></div>
     </div>
     <div class="vox-demo__controls"></div>
   </div>
@@ -182,6 +185,22 @@ const { id, model, voxels, controls, defaults } = Astro.props;
       const scene = lib.createScene(sceneOpts);
       const handle = lib.renderScene({ element: canvasEl, camera, scene });
 
+      // Stats
+      var statsEl = el.querySelector(".vox-demo__stats");
+      var wantStats = el.getAttribute("data-show-stats") === "1";
+      if (wantStats && statsEl) {
+        statsEl.classList.add("active");
+      }
+
+      function updateStats() {
+        if (!wantStats || !statsEl) return;
+        var elements = sceneEl.querySelectorAll("*").length;
+        statsEl.innerHTML =
+          "DOM elements: <span class='stat-value'>" + elements.toLocaleString() + "</span><br>" +
+          "Voxels: <span class='stat-value'>" + voxels.length.toLocaleString() + "</span><br>" +
+          "Merge: <span class='stat-value'>" + (state.mergeVoxels || "off") + "</span>";
+      }
+
       function updateCamera() {
         camera.update({
           zoom: state.zoom,
@@ -209,6 +228,7 @@ const { id, model, voxels, controls, defaults } = Astro.props;
         if (state.depth != null) opts.depth = state.depth;
         handle.setScene(opts);
         updateCode();
+        setTimeout(updateStats, 100);
       }
 
       function updateCode() {
@@ -365,6 +385,7 @@ const { id, model, voxels, controls, defaults } = Astro.props;
       }
 
       updateCode();
+      setTimeout(updateStats, 200);
 
       function makeRange(label, min, max, step, initial, onChange, unit) {
         unit = unit || "";

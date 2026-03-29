@@ -18,6 +18,29 @@
     overflow: hidden;
     background: #01030a;
   }
+  .vox-demo__stats {
+    display: none;
+    position: absolute;
+    bottom: 12px;
+    left: 12px;
+    z-index: 10;
+    background: rgba(0, 0, 0, 0.75);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    padding: 8px 12px;
+    font-family: Consolas, Monaco, "Andale Mono", monospace;
+    font-size: 12px;
+    color: #e2e8f0;
+    line-height: 1.6;
+    pointer-events: none;
+  }
+  .vox-demo__stats.active {
+    display: block;
+  }
+  .vox-demo__stats .stat-value {
+    color: #38bdf8;
+    font-weight: 700;
+  }
   .vox-demo__camera,
   .vox-demo__scene {
     width: 100%;
