@@ -61,7 +61,7 @@ const ldJson = {
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <script type="application/ld+json" set:html={JSON.stringify(ldJson)} />
-  <style>
+  <style is:global>
     html { background: #0b0d10; color: #e2e8f0; }
     body { margin: 0; }
   </style>
@@ -688,7 +688,7 @@ const ldJson = {
           <div class="tree-category" data-cat-id="${cat.id}">
             <button type="button" class="tree-heading" aria-expanded="${open}" aria-controls="cat-${cat.id}" data-toggle-cat="${cat.id}">
               <span class="tree-label">
-                <span class="tree-caret${open ? " open" : ""}">&#9658;</span>
+                <span class="tree-caret${open ? " open" : ""}">▸</span>
                 ${cat.label}
               </span>
               <span class="tree-count">${cat.count}</span>
@@ -1092,7 +1092,7 @@ const ldJson = {
     });
   </script>
 
-  <style>
+  <style is:global>
     @import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap");
 
     :root {
@@ -1694,7 +1694,7 @@ const ldJson = {
       margin: 0;
       padding: 4px 0 3px;
       border: 0;
-      background: #11141a;
+      background: transparent;
       color: #e2e8f0;
       font-size: 13px;
       font-weight: 700;
