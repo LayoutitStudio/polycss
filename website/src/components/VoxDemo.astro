@@ -1,21 +1,34 @@
 ---
 // VoxDemo — live interactive voxel scene for docs pages
 // Usage in MDX:
-//   <VoxDemo id="camera-demo" voxels='[{"x":1,"y":1,"z":0,"color":"#f97316"}]'
+//   <VoxDemo id="camera-demo" model="apple"
 //     controls='["zoom","rotX","rotY","pan","tilt","perspective","interactive","animate"]'
 //     defaults='{"zoom":0.65,"rotX":65,"rotY":45,"showFloor":true}' />
 
+import fs from 'fs';
+
 interface Props {
   id: string;
+  model?: string;
   voxels?: string;
   controls?: string;
   defaults?: string;
 }
 
-const { id, voxels, controls, defaults } = Astro.props;
+const { id, model, voxels: voxelsProp, controls, defaults } = Astro.props;
+
+let resolvedVoxels = voxelsProp;
+if (model && !voxelsProp) {
+  try {
+    const filePath = new URL(`../../public/gallery/${model}.json`, import.meta.url).pathname;
+    resolvedVoxels = fs.readFileSync(filePath, 'utf-8');
+  } catch {
+    resolvedVoxels = '[]';
+  }
+}
 ---
 
-<div class="vox-demo" id={id} data-voxels={voxels} data-controls={controls} data-defaults={defaults}>
+<div class="vox-demo" id={id} data-voxels={resolvedVoxels} data-controls={controls} data-defaults={defaults}>
   <div class="vox-demo__viewer">
     <div class="vox-demo__canvas">
       <div class="vox-demo__camera">
