@@ -86,8 +86,16 @@ const { id, model, voxels, controls, defaults, showStats } = Astro.props;
       let voxels = [];
       if (modelName) {
         try {
-          const res = await fetch(`/gallery/${modelName}.json`);
-          voxels = await res.json();
+          var isVox = modelName.endsWith(".vox") || modelName.includes("/");
+          var modelUrl = isVox ? "/gallery/" + modelName : "/gallery/" + modelName + ".json";
+          const res = await fetch(modelUrl);
+          if (isVox) {
+            var buf = await res.arrayBuffer();
+            var parsed = lib.parseMagicaVoxel(buf);
+            voxels = Array.isArray(parsed.voxels) ? parsed.voxels : [];
+          } else {
+            voxels = await res.json();
+          }
           if (!Array.isArray(voxels)) voxels = [];
         } catch { voxels = []; }
       } else {
