@@ -3,7 +3,9 @@ title: Core Concepts
 description: Understanding VoxCSS's voxel grid, camera, scene, and rendering pipeline.
 ---
 
-This page covers the mental model behind VoxCSS. For specific props and API details, see the component and guide pages.
+import VoxDemo from '../../components/VoxDemo.astro';
+
+This page covers the mental model behind VoxCSS. Each section has a live demo — drag the scenes and tweak the controls to see how things work.
 
 ## Voxel Grid
 
@@ -15,24 +17,36 @@ Coordinates are zero-indexed integers. `z: 0` is the ground layer, and higher Z 
 
 ## Camera
 
-The camera controls how you view the scene. It determines:
+The camera controls how you view the scene. Drag the apple below and adjust the sliders to see each property in action.
 
-- **Zoom** — how close or far the viewport is from the grid.
-- **Pan** — horizontal and vertical offset of the viewport.
-- **Tilt and Rotation** — the angle you're looking at the scene from.
-- **Perspective** — the strength of the 3D perspective effect (higher values feel more "flat"/isometric).
+<VoxDemo
+  id="concept-camera"
+  model="apple"
+  controls='["zoom","pan","tilt","rotX","rotY","perspective","interactive","animate"]'
+  defaults='{"zoom":0.65,"interactive":true,"showFloor":false}'
+/>
 
-When **interactive mode** is enabled, the user can click and drag to rotate the camera around the scene. This is powered by pointer events on the DOM — no special input handling required on your side.
+- **Zoom** — scales the scene closer or further away.
+- **Pan / Tilt** — shifts the viewport horizontally and vertically.
+- **rotX / rotY** — rotates the view angle around the X and Y axes.
+- **Perspective** — controls the 3D depth effect. Higher values feel flatter (more isometric).
+- **Interactive** — enables pointer drag to rotate.
+- **Animate** — auto-rotates the camera on the Y axis.
 
 ## Scene
 
-The scene manages the 3D grid itself. Key properties include:
+The scene manages the 3D grid. Use the controls below to change the grid dimensions and toggle structural elements.
 
-- **Dimensions** — `rows`, `cols`, and `depth` define the size of the grid.
-- **Structural elements** — toggle a **floor** or **walls** to give the scene physical boundaries.
-- **Projection mode** — switch between perspective and orthographic rendering.
+<VoxDemo
+  id="concept-scene"
+  voxels='[{"x":4,"y":4,"z":0,"color":"#f97316"}]'
+  controls='["rows","cols","depth","showFloor","showWalls","projection"]'
+  defaults='{"zoom":0.65,"interactive":true,"showFloor":true,"showWalls":true,"rows":8,"cols":8,"depth":6}'
+/>
 
-The scene is the container for all voxels. It translates your voxel data into positioned HTML cuboids inside the stacked grid layers.
+- **Rows / Cols / Depth** — define the grid size. Voxels outside these bounds are clipped.
+- **Show Floor / Show Walls** — toggle structural planes that give the scene physical boundaries.
+- **Projection** — switch between `cubic` (50px layer spacing) and `dimetric` (25px, flatter top-down feel).
 
 ## Voxel Data Model
 
@@ -49,14 +63,21 @@ Because voxels are plain objects, you can generate them from loops, load them fr
 
 ## Shapes
 
-VoxCSS supports several built-in shapes:
+VoxCSS supports several built-in shapes. The demo below shows all four — drag to inspect them from different angles.
+
+<VoxDemo
+  id="concept-shapes"
+  voxels='[{"x":0,"y":0,"z":0,"color":"#f97316"},{"x":2,"y":0,"z":0,"color":"#94a3b8","shape":"ramp"},{"x":4,"y":0,"z":0,"color":"#22c55e","shape":"wedge"},{"x":6,"y":0,"z":0,"color":"#3b82f6","shape":"spike"},{"x":0,"y":2,"z":0,"color":"#94a3b8","shape":"ramp","rot":90},{"x":2,"y":2,"z":0,"color":"#94a3b8","shape":"ramp","rot":180},{"x":4,"y":2,"z":0,"color":"#22c55e","shape":"wedge","rot":90},{"x":6,"y":2,"z":0,"color":"#3b82f6","shape":"spike","rot":270}]'
+  controls='["zoom","interactive"]'
+  defaults='{"zoom":0.9,"interactive":true,"showFloor":true,"rotX":65,"rotY":45}'
+/>
 
 - **cube** — the default. A full cubic voxel.
 - **ramp** — a sloped surface, like a roof or hillside.
 - **wedge** — a triangular prism, half of a cube cut diagonally.
 - **spike** — a pointed shape tapering to a tip.
 
-All shapes snap to **90-degree rotations** via the `rot` property, so you can orient ramps and wedges in four directions without dealing with arbitrary angles.
+All shapes snap to **90-degree rotations** via the `rot` property.
 
 ## Rendering Pipeline
 
@@ -70,12 +91,15 @@ The vanilla JS `renderScene` function uses the HTML renderer directly, skipping 
 
 ## Merge Modes
 
-When you have many adjacent voxels of the same color, VoxCSS can **merge** them into fewer, larger HTML elements. This reduces DOM node count and improves performance.
+When you have many adjacent voxels of the same color, VoxCSS can **merge** them into fewer, larger HTML elements. Toggle merge 3d below to see the difference in rendering.
 
-Three merge modes are available:
+<VoxDemo
+  id="concept-merge"
+  model="apple"
+  controls='["zoom","mergeVoxels","showFloor"]'
+  defaults='{"zoom":0.65,"interactive":true,"showFloor":false,"mergeVoxels":"3d"}'
+/>
 
-- **`false`** — No merging. Every voxel is its own element. Best for scenes where each voxel needs individual interaction or styling.
-- **`"2d"`** — Merges adjacent same-color voxels within each Z layer. The engine combines rectangular regions on each flat layer independently.
-- **`"3d"`** — Volumetric merging across all three axes. Produces the fewest elements but works best with large, uniform regions.
-
-Choose the mode that balances your need for individual voxel control against rendering performance.
+- **`false`** — No merging. Every voxel is its own element. Best for scenes where each voxel needs individual interaction.
+- **`"2d"`** — Merges adjacent same-color voxels within each Z layer.
+- **`"3d"`** — Volumetric merging across all three axes. Fewest elements, best performance.
