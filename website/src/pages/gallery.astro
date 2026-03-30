@@ -8,13 +8,19 @@ const SITE_NAME = "VoxCSS";
 
 const galleryDir = path.resolve(process.cwd(), 'public/gallery');
 
-const jsonFiles = fs.readdirSync(galleryDir)
-  .filter(f => f.endsWith('.json') && f !== 'vox-manifest.json')
-  .map(f => f);
+let jsonFiles: string[] = [];
+let voxManifest: string[] = [];
 
-const voxManifest: string[] = JSON.parse(
-  fs.readFileSync(path.join(galleryDir, 'vox-manifest.json'), 'utf-8')
-);
+try {
+  jsonFiles = fs.readdirSync(galleryDir)
+    .filter(f => f.endsWith('.json') && f !== 'vox-manifest.json');
+  const manifestPath = path.join(galleryDir, 'vox-manifest.json');
+  if (fs.existsSync(manifestPath)) {
+    voxManifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'));
+  }
+} catch {
+  // Gallery assets not present (clean checkout) — page still renders, models load at runtime
+}
 
 const title = "VoxCSS Gallery — CSS voxel models";
 const description =
