@@ -48,6 +48,17 @@ const { id, model, voxels, controls, defaults, showStats } = Astro.props;
 
 
 <script>
+  // Registry of per-demo cleanup functions, invoked on page navigation so the
+  // previous page's renderers / FPS loops don't leak into the next page.
+  var voxDemoCleanups = [];
+
+  function cleanupVoxDemos() {
+    for (var i = 0; i < voxDemoCleanups.length; i++) {
+      try { voxDemoCleanups[i](); } catch (_) {}
+    }
+    voxDemoCleanups = [];
+  }
+
   async function initVoxDemos() {
     var lib;
     try {
@@ -223,6 +234,17 @@ const { id, model, voxels, controls, defaults, showStats } = Astro.props;
       if (wantStats) {
         fpsFrameId = requestAnimationFrame(fpsTick);
       }
+
+      // Register teardown for Astro page navigation
+      voxDemoCleanups.push(function () {
+        if (fpsFrameId !== null) {
+          try { cancelAnimationFrame(fpsFrameId); } catch (_) {}
+          fpsFrameId = null;
+        }
+        try { handle && handle.destroy && handle.destroy(); } catch (_) {}
+        try { camera && camera.destroy && camera.destroy(); } catch (_) {}
+        try { el.removeAttribute("data-initialized"); } catch (_) {}
+      });
 
       function updateStats() {
         if (!wantStats || !statsEl) return;
@@ -474,6 +496,10 @@ const { id, model, voxels, controls, defaults, showStats } = Astro.props;
       }
     }
   }
+
+  // Tear down renderers and FPS loops before Astro swaps pages so they don't
+  // leak into the next page and drag FPS down.
+  document.addEventListener("astro:before-swap", cleanupVoxDemos);
 
   // Run on initial load and after Astro View Transitions
   document.addEventListener("astro:page-load", function() { initVoxDemos(); });
