@@ -291,8 +291,11 @@ const { id, model, voxels, controls, defaults, showStats } = Astro.props;
         var rSceneEntries = Object.entries(sp);
         if (codeEls.react) {
           var r = ['import { VoxCamera, VoxScene } from "@layoutit/voxcss/react";', ""];
+          r.push("const voxels = [");
+          r.push("  // your voxel data — e.g. { x: 1, y: 1, z: 0, color: \"#f97316\" }");
+          r.push("];");
+          r.push("");
           r.push("export function App() {");
-          r.push("  const voxels = [...];");
           r.push("  return (");
           // VoxCamera - inline if few props
           var camAttrs = rCamEntries.map(function(e) { return e[1] === "true" ? e[0] : e[0] + "={" + e[1] + "}"; });
@@ -349,7 +352,10 @@ const { id, model, voxels, controls, defaults, showStats } = Astro.props;
           v.push("");
           v.push("<" + "script setup>");
           v.push('import { VoxCamera, VoxScene } from "@layoutit/voxcss/vue";');
-          v.push('const voxels = [...];');
+          v.push("");
+          v.push("const voxels = [");
+          v.push('  // your voxel data — e.g. { x: 1, y: 1, z: 0, color: "#f97316" }');
+          v.push("];");
           v.push("<" + "/script>");
           codeEls.vue.textContent = v.join("\n");
         }
@@ -357,7 +363,12 @@ const { id, model, voxels, controls, defaults, showStats } = Astro.props;
         // Vanilla JS
         if (codeEls.vanilla) {
           var j = ['import { renderScene } from "@layoutit/voxcss";', ""];
+          j.push("const voxels = [");
+          j.push("  // your voxel data — e.g. { x: 1, y: 1, z: 0, color: \"#f97316\" }");
+          j.push("];");
+          j.push("");
           j.push("renderScene({");
+          j.push('  element: document.getElementById("voxcss"),');
           if (rCamEntries.length === 0) {
             j.push("  camera: {},");
           } else {
