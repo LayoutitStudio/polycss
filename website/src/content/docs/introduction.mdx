@@ -1,6 +1,6 @@
 ---
 title: Introduction
-description: Getting started with VoxCSS — a CSS voxel engine that renders 3D grids in pure DOM/CSS.
+description: VoxCSS is a CSS voxel engine — a 3D grid for the DOM.
 ---
 
 import { Tabs, TabItem } from '@astrojs/starlight/components';
@@ -43,17 +43,16 @@ You can also load VoxCSS directly from a CDN with no build step:
 </script>
 ```
 
-## Hello World
+## A quick taste
 
-A single orange voxel with an interactive camera — drag to rotate the scene.
+A single orange voxel with an interactive camera. Drag it to rotate.
 
-<Tabs syncKey="fw">
-<TabItem label="React">
 ```tsx
 import { VoxCamera, VoxScene } from "@layoutit/voxcss/react";
 
+const voxels = [{ x: 1, y: 1, z: 0, color: "#f97316" }];
+
 export function App() {
-  const voxels = [{ x: 1, y: 1, z: 0, color: "#f97316" }];
   return (
     <VoxCamera interactive>
       <VoxScene voxels={voxels} />
@@ -61,39 +60,12 @@ export function App() {
   );
 }
 ```
-</TabItem>
-<TabItem label="Vue">
-```vue
-<template>
-  <VoxCamera interactive>
-    <VoxScene :voxels="voxels" />
-  </VoxCamera>
-</template>
-<script setup lang="ts">
-import { VoxCamera, VoxScene } from "@layoutit/voxcss/vue";
-const voxels = [{ x: 1, y: 1, z: 0, color: "#f97316" }];
-</script>
-```
-</TabItem>
-<TabItem label="Vanilla JS">
-```html
-<div id="voxcss"></div>
-<script type="module">
-  import { renderScene } from "@layoutit/voxcss";
-  renderScene({
-    element: document.getElementById("voxcss"),
-    camera: { interactive: true },
-    scene: {
-      voxels: [{ x: 1, y: 1, z: 0, color: "#f97316" }],
-      showFloor: true,
-    },
-  });
-</script>
-```
-</TabItem>
-</Tabs>
 
-## Next Steps
+Continue to **[Quickstart →](/quickstart)** for the full walkthrough with React, Vue, and Vanilla JS versions plus a live interactive demo.
 
-- [Quickstart](/quickstart) — Build your first scene in under a minute.
-- [Core Concepts](/core-concepts) — Understand the voxel grid, camera, scene, and rendering pipeline.
+## Related
+
+- [Quickstart](/quickstart) — Full install + first scene walkthrough with a live demo.
+- [Core Concepts](/core-concepts) — The mental model behind VoxCSS: grid, camera, scene, pipeline.
+- [VoxCamera](/components/vox-camera) — Camera component reference.
+- [VoxScene](/components/vox-scene) — Scene component reference.

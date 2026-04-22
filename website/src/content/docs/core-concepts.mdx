@@ -1,11 +1,11 @@
 ---
 title: Core Concepts
-description: Understanding VoxCSS's voxel grid, camera, scene, and rendering pipeline.
+description: The mental model behind VoxCSS — grid, camera, scene, voxel data, and rendering pipeline.
 ---
 
 import VoxDemo from '../../components/VoxDemo.astro';
 
-This page covers the mental model behind VoxCSS. Each section has a live demo — drag the scenes and tweak the controls to see how things work.
+This page covers the mental model behind VoxCSS. Each section has a live demo — drag the scenes and tweak the controls to see how things work. The framework tabs beneath every demo show the exact runnable code for the current control values, so you can copy and paste whatever you see.
 
 ## Voxel Grid
 
@@ -17,7 +17,7 @@ Coordinates are zero-indexed integers. `z: 0` is the ground layer, and higher Z 
 
 ## Camera
 
-The camera controls how you view the scene. Drag the apple below and adjust the sliders to see each property in action.
+The camera controls how you view the scene — zoom, rotation, perspective, and whether the user can drag to rotate. Drag the apple below or adjust the sliders to see each camera prop in action.
 
 <VoxDemo
   id="concept-camera"
@@ -26,27 +26,20 @@ The camera controls how you view the scene. Drag the apple below and adjust the 
   defaults='{"zoom":0.5,"interactive":true,"showFloor":false}'
 />
 
-- **Zoom** — scales the scene closer or further away.
-- **Pan / Tilt** — shifts the viewport horizontally and vertically.
-- **rotX / rotY** — rotates the view angle around the X and Y axes.
-- **Perspective** — controls the 3D depth effect. Higher values feel flatter (more isometric).
-- **Interactive** — enables pointer drag to rotate.
-- **Animate** — auto-rotates the camera on the Y axis.
+See **[VoxCamera](/components/vox-camera)** for the full prop table, defaults, and usage patterns.
 
 ## Scene
 
-The scene manages the 3D grid. Use the controls below to change the grid dimensions and toggle structural elements.
+The scene manages the 3D grid itself — its size, optional walls and floor, and the projection style. Try the controls below to resize the grid and toggle structural elements.
 
 <VoxDemo
   id="concept-scene"
-  voxels='[{"x":4,"y":4,"z":0,"color":"#f97316"}]'
+  voxels='[{"x":1,"y":1,"z":0,"color":"#f97316"}]'
   controls='["rows","cols","depth","showFloor","showWalls","projection"]'
   defaults='{"zoom":0.65,"interactive":true,"showFloor":true,"showWalls":true,"rows":8,"cols":8,"depth":6}'
 />
 
-- **Rows / Cols / Depth** — define the grid size. Voxels outside these bounds are clipped.
-- **Show Floor / Show Walls** — toggle structural planes that give the scene physical boundaries.
-- **Projection** — switch between `cubic` (50px layer spacing) and `dimetric` (25px, flatter top-down feel).
+See **[VoxScene](/components/vox-scene)** for the full prop table, voxel data reference, and usage patterns.
 
 ## Voxel Data Model
 
@@ -63,7 +56,7 @@ Because voxels are plain objects, you can generate them from loops, load them fr
 
 ## Shapes
 
-VoxCSS supports several built-in shapes. The demo below shows all four — drag to inspect them from different angles.
+VoxCSS supports four built-in shapes: **cube** (default), **ramp**, **wedge**, and **spike**. All of them snap to 90-degree rotations via the `rot` property.
 
 <VoxDemo
   id="concept-shapes"
@@ -72,12 +65,7 @@ VoxCSS supports several built-in shapes. The demo below shows all four — drag 
   defaults='{"zoom":0.8,"interactive":true,"showFloor":true,"projection":"dimetric"}'
 />
 
-- **cube** — the default. A full cubic voxel.
-- **ramp** — a sloped surface, like a roof or hillside.
-- **wedge** — a triangular prism, half of a cube cut diagonally.
-- **spike** — a pointed shape tapering to a tip.
-
-All shapes snap to **90-degree rotations** via the `rot` property.
+See the **[Shapes guide](/guides/shapes)** for details on each shape, rotation values, and when to reach for them.
 
 ## Rendering Pipeline
 
@@ -91,7 +79,7 @@ The vanilla JS `renderScene` function uses the HTML renderer directly, skipping 
 
 ## Merge Modes
 
-When you have many adjacent voxels of the same color, VoxCSS can **merge** them into fewer, larger HTML elements. Toggle merge 3d below to see the difference in rendering.
+When many adjacent voxels share a color, VoxCSS can **merge** them into fewer, larger HTML elements. Toggle merge 3d below to see the difference — keep an eye on how the rendered DOM reacts in DevTools.
 
 <VoxDemo
   id="concept-merge"
@@ -103,3 +91,12 @@ When you have many adjacent voxels of the same color, VoxCSS can **merge** them 
 - **`false`** — No merging. Every voxel is its own element. Best for scenes where each voxel needs individual interaction.
 - **`"2d"`** — Merges adjacent same-color voxels within each Z layer.
 - **`"3d"`** — Volumetric merging across all three axes. Fewest elements, best performance.
+
+See the **[Performance guide](/guides/performance)** for a live FPS/DOM stats demo and guidance on choosing a mode.
+
+## Related
+
+- [Quickstart](/quickstart) — Install + first scene walkthrough.
+- [VoxCamera](/components/vox-camera) — Camera props reference.
+- [VoxScene](/components/vox-scene) — Scene props and voxel data reference.
+- [Performance](/guides/performance) — Merge modes with FPS/DOM counter.

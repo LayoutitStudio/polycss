@@ -3,10 +3,11 @@ title: Performance
 description: Optimizing VoxCSS scenes with merge modes and understanding DOM-based rendering tradeoffs.
 ---
 
-import { Tabs, TabItem } from '@astrojs/starlight/components';
 import VoxDemo from '../../../components/VoxDemo.astro';
 
-Toggle the merge mode below and watch the DOM element count change. With 3D merging, the same model renders with dramatically fewer elements.
+VoxCSS renders everything as real DOM elements — every face of every voxel is an HTML element with CSS transforms. That gives you DevTools inspection, DOM events, and CSS styling on every voxel, but it means **performance scales with element count**. Understanding how to manage that count is key to building smooth scenes.
+
+Watch the FPS and DOM element count on the live demo below — the scene is auto-rotating the `dual.vox` spaceship with 3D merging enabled:
 
 <VoxDemo
   id="perf-demo"
@@ -15,8 +16,6 @@ Toggle the merge mode below and watch the DOM element count change. With 3D merg
   defaults='{"zoom":0.1,"interactive":true,"showFloor":false,"mergeVoxels":"3d","animate":true}'
   showStats={true}
 />
-
-VoxCSS renders everything as real DOM elements — every face of every voxel is an HTML element with CSS transforms. This gives you full access to DevTools inspection, DOM events, and CSS styling, but it means **performance scales with element count**. Understanding how to manage that count is key to building smooth scenes.
 
 ## Face culling
 
@@ -29,83 +28,33 @@ This culling is automatic and requires no configuration. It significantly reduce
 
 ## Merge modes
 
-The `mergeVoxels` prop controls how aggressively the engine consolidates adjacent same-color voxels into larger elements.
+The `mergeVoxels` prop on `<VoxScene>` controls how aggressively the engine consolidates adjacent same-color voxels into larger elements.
 
 ### No merging (default)
 
-```ts
-mergeVoxels={false}
-```
+Each voxel is its own DOM element. Full per-voxel control — every voxel can be individually targeted with CSS selectors, event listeners, or animations.
 
-Each voxel is its own DOM element. This gives you full per-voxel control — every voxel can be individually targeted with CSS selectors, event listeners, or animations.
+**Best for:** small scenes, interactive voxels, scenes where each voxel needs distinct behavior.
 
-**Best for:** small scenes, interactive voxels, or scenes where each voxel needs distinct behavior.
+### 2D merging — `"2d"`
 
-### 2D merging
+Merges adjacent same-color voxels **within each Z layer**. The engine finds rectangular regions of identical voxels on each flat layer and combines them into single, larger elements.
 
-```ts
-mergeVoxels="2d"
-```
+**Best for:** medium scenes with large flat areas of uniform color — floors, walls, terrain surfaces.
 
-Merges adjacent same-color voxels **within each Z layer**. The engine finds rectangular regions of identical voxels on each flat layer and combines them into single, larger elements. This can dramatically reduce DOM node count while keeping the layer-based rendering model.
-
-**Best for:** medium scenes with large flat areas of uniform color, like floors, walls, or terrain surfaces.
-
-### 3D merging
-
-```ts
-mergeVoxels="3d"
-```
+### 3D merging — `"3d"`
 
 Volumetric merge across **all three axes**. The engine switches to a slice-based rendering approach, producing the fewest possible elements. Adjacent same-color voxels are combined into large cuboid regions regardless of layer boundaries.
 
-**Best for:** large, dense models where raw performance matters more than per-voxel control.
+**Best for:** large, dense models where raw performance matters more than per-voxel control — imported `.vox` files, detailed scenes, anything visibly laggy at the default setting.
 
 ## Setting merge mode
 
-<Tabs syncKey="fw">
-<TabItem label="React">
-```tsx
-import { VoxCamera, VoxScene } from "@layoutit/voxcss/react";
+`mergeVoxels` is a prop on `<VoxScene>`. See [VoxScene reference](/components/vox-scene#props) for the full prop table.
 
-export function App() {
-  return (
-    <VoxCamera interactive>
-      <VoxScene voxels={voxels} mergeVoxels="2d" />
-    </VoxCamera>
-  );
-}
-```
-</TabItem>
-<TabItem label="Vue">
-```vue
-<template>
-  <VoxCamera interactive>
-    <VoxScene :voxels="voxels" merge-voxels="2d" />
-  </VoxCamera>
-</template>
-<script setup lang="ts">
-import { VoxCamera, VoxScene } from "@layoutit/voxcss/vue";
-</script>
-```
-</TabItem>
-<TabItem label="Vanilla JS">
-```html
-<div id="voxcss"></div>
-<script type="module">
-  import { renderScene } from "@layoutit/voxcss";
-  renderScene({
-    element: document.getElementById("voxcss"),
-    camera: { interactive: true },
-    scene: {
-      voxels: voxels,
-      mergeVoxels: "2d",
-    },
-  });
-</script>
-```
-</TabItem>
-</Tabs>
+- **React:** `<VoxScene voxels={voxels} mergeVoxels="2d" />`
+- **Vue:** `<VoxScene :voxels="voxels" merge-voxels="2d" />`
+- **Vanilla JS:** `scene: { voxels, mergeVoxels: "2d" }`
 
 ## Automatic 3D path
 
@@ -117,6 +66,12 @@ If any voxel in your scene uses `z2` (spanning multiple Z layers with area spans
 |------|-----------|-------------------|---------------|
 | `false` | Most | Full | Small scenes, interactive voxels |
 | `"2d"` | Fewer | Limited | Medium scenes, flat color regions |
-| `"3d"` | Fewest | None | Large dense models, imported .vox files |
+| `"3d"` | Fewest | None | Large dense models, imported `.vox` files |
 
 Start with the default (no merging) and switch to `"2d"` or `"3d"` if you notice rendering lag. In many cases, the automatic face culling alone is enough to keep scenes performant.
+
+## Related
+
+- [VoxScene](/components/vox-scene) — Full `mergeVoxels` prop reference.
+- [Loading .vox Files](/guides/vox-files) — Large imported models typically need 3D merging.
+- [Core Concepts — Merge Modes](/core-concepts#merge-modes) — Conceptual overview.

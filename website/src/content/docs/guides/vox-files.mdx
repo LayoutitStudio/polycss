@@ -132,3 +132,10 @@ onMounted(async () => {
 - **Pass dimensions** from the parsed model (`rows`, `cols`, `depth`) to `VoxScene` so the grid is sized correctly for the model.
 - The parser reads the **first model** in the `.vox` file. Multi-model `.vox` files are not currently supported.
 - `.vox` files include a color palette — the parser maps each voxel to its hex color automatically.
+
+## Related
+
+- [Performance](/guides/performance) — Why imported models almost always want `mergeVoxels="3d"`.
+- [VoxScene](/components/vox-scene) — Props passed to render the imported model.
+- [Headless API](/api/headless) — `parseMagicaVoxel` and `renderScene` signatures.
+- [Gallery](/gallery) — 100+ `.vox` models you can download and render.
