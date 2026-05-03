@@ -17,6 +17,7 @@ import { cubeShapeRenderer, ensureCubeDomCache, disposeCubeDom } from "../shapes
 import { rampShapeRenderer } from "../shapes/ramp";
 import { wedgeShapeRenderer } from "../shapes/wedge";
 import { spikeShapeRenderer } from "../shapes/spike";
+import { triangleShapeRenderer } from "../shapes/triangle";
 import { clearSliceRenderer, updateSliceRendererGeometry, type SliceRendererDomState } from "./sliceRenderer";
 
 interface DomRendererState {
@@ -91,7 +92,16 @@ export interface RendererMetadata { mode: SceneRenderMode; }
 
 export const createDomRenderer: RendererFactory = (options: RendererMountOptions): RendererHandle => {
   const { documentRef, target } = options;
-  const shapes = { cube: cubeShapeRenderer, ramp: rampShapeRenderer, wedge: wedgeShapeRenderer, spike: spikeShapeRenderer };
+  // "triangle" and "polygon" share the same renderer — triangle is just the
+  // strict 3-vertex case, polygon accepts any N >= 3.
+  const shapes = {
+    cube: cubeShapeRenderer,
+    ramp: rampShapeRenderer,
+    wedge: wedgeShapeRenderer,
+    spike: spikeShapeRenderer,
+    triangle: triangleShapeRenderer,
+    polygon: triangleShapeRenderer,
+  };
   const state = ensureDomRendererState(documentRef, target);
 
   return {

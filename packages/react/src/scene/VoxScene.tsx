@@ -1,5 +1,5 @@
 import { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef } from "react";
-import type { ProjectionMode, VoxelGrid } from "@layoutit/voxcss-core";
+import type { ProjectionMode, VoxelGrid, InputVoxelGrid, Voxel, FaceAppearanceOverride, DirectionalLight } from "@layoutit/voxcss-core";
 import { DEFAULT_WALL_COLOR } from "@layoutit/voxcss-core";
 import { createIsometricCamera } from "@layoutit/voxcss-core";
 import type { MergeVoxelsOption } from "@layoutit/voxcss-core";
@@ -27,7 +27,13 @@ export function buildGridSvgDataUrl(width: number, height: number, alpha: number
 }
 
 export interface VoxSceneProps {
-  voxels: VoxelGrid;
+  /**
+   * Voxel data — accepts the loose `InputVoxelGrid` (where x/y/z are
+   * optional for triangle/polygon shapes that ship just `vertices`) or the
+   * strict `VoxelGrid`. Voxcss normalizes at ingress so downstream code
+   * always sees fully-populated x/y/z.
+   */
+  voxels: InputVoxelGrid | VoxelGrid;
   rows?: number;
   cols?: number;
   depth?: number;
@@ -36,6 +42,18 @@ export interface VoxSceneProps {
   projection?: ProjectionMode;
   mergeVoxels?: MergeVoxelsOption;
   wallColor?: string;
+  lighting?: (voxel: Voxel, face: string) => FaceAppearanceOverride | undefined;
+  resolveTexture?: (name: string, face: string) => string | undefined;
+  debugShowOccluded?: boolean;
+  debugShowLabels?: boolean;
+  debugShowBackfaces?: boolean;
+  /**
+   * Optional directional-light setup for triangle/polygon Lambert shading.
+   * If omitted, the renderer uses a sensible default key light. Cubes /
+   * ramps / wedges / spikes still use their own per-face baked lighting
+   * — this only affects triangle/polygon voxels.
+   */
+  directionalLight?: DirectionalLight;
 }
 
 function VoxSceneInner({
@@ -48,6 +66,12 @@ function VoxSceneInner({
   projection = "cubic",
   mergeVoxels: mergeOption,
   wallColor = DEFAULT_WALL_COLOR,
+  lighting,
+  resolveTexture,
+  debugShowOccluded,
+  debugShowLabels,
+  debugShowBackfaces,
+  directionalLight,
 }: VoxSceneProps) {
   const { store, cameraRef, sceneElRef } = useCameraContext();
 
@@ -68,8 +92,31 @@ function VoxSceneInner({
       for (const face of ["t", "b", "bl", "br", "fl", "fr"] as const) {
         el.classList.toggle(`voxcss-mask-${face}`, mask[face]);
       }
+      // Apply initial occlusion direction class.
+      const dirBin = store.getState().dirBin;
+      el.classList.add(`voxcss-cull-dir-${dirBin}`);
+      el.dataset.voxDirBin = String(dirBin);
     }
   }, [sceneElRef, store]);
+
+  // Toggle the "show culled cells" debug class on the scene element whenever
+  // the debug flag changes. CSS uses this together with the active dir class
+  // to override `display: none` on dir-occluded cells, showing them in red.
+  useEffect(() => {
+    const el = sceneElRef.current;
+    if (!el) return;
+    el.classList.toggle("voxcss-debug-show-culled", !!debugShowOccluded);
+  }, [debugShowOccluded, sceneElRef]);
+
+  // Same idea for the back-faces debug. Adds a scene-root class that CSS
+  // uses to flip `backface-visibility` from hidden → visible on shape
+  // slopes (wedge / ramp / spike), so the slope SVGs become visible from
+  // both sides.
+  useEffect(() => {
+    const el = sceneElRef.current;
+    if (!el) return;
+    el.classList.toggle("voxcss-debug-show-backfaces", !!debugShowBackfaces);
+  }, [debugShowBackfaces, sceneElRef]);
 
   // Inject base styles once
   const injectedRef = useRef(false);
@@ -93,6 +140,12 @@ function VoxSceneInner({
     wallColor,
     wallMask,
     mergeVoxels: mergeOption,
+    lighting,
+    resolveTexture,
+    debugShowOccluded,
+    debugShowLabels,
+    debugShowBackfaces,
+    directionalLight,
   });
 
   // Compute camera style for scene positioning
