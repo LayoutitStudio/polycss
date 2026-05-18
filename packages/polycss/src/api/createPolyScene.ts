@@ -55,6 +55,10 @@ import {
   type RenderedPoly,
   type SolidPaintDefaults,
 } from "../render/textureAtlas";
+import {
+  createPolyVoxelSliceRenderer,
+  type PolyVoxelSliceRenderer,
+} from "../render/voxelSliceRenderer";
 import { injectPolyBaseStyles } from "../styles/styles";
 
 // Used only by the internal async mesh update path. Batching DOM insertion
@@ -484,14 +488,17 @@ export function createPolyScene(
      *  separate from `rendered` so they can be removed independently when
      *  castShadow is toggled or lighting mode changes. */
     shadowRendered: HTMLElement[];
+    voxelRenderer?: PolyVoxelSliceRenderer;
     disposeAtlas?: () => void;
     polygons: Polygon[];
+    voxelSource: ParseResult["voxelSource"];
     disposed: boolean;
     stableDom: boolean;
     excludeFromAutoCenter: boolean;
     castShadow: boolean;
     cameraCullGroups: CameraCullNormalGroup[];
     cameraCullSignature: string;
+    lightOverrideSignature: string;
     /** Rotation snapshot used by the baked atlas baker. Advances only when
      *  `rebakeAtlas()` is called — not on every `setTransform`. */
     bakedRotation: Vec3;
@@ -583,6 +590,8 @@ export function createPolyScene(
   }
 
   function clearRendered(entry: MeshEntry): void {
+    entry.voxelRenderer?.dispose();
+    entry.voxelRenderer = undefined;
     disposeRendered(entry.rendered, entry.disposeAtlas);
     entry.disposeAtlas = undefined;
     entry.rendered.length = 0;
@@ -784,6 +793,12 @@ export function createPolyScene(
   }
 
   function syncMountedRenderedForCameraChange(entry: MeshEntry, force = false): void {
+    if (entry.voxelRenderer) {
+      entry.voxelRenderer.syncCamera(cameraCullRotation(entry));
+      entry.cameraCullSignature = "voxel-slice";
+      return;
+    }
+
     if (!canDomCullCamera(entry)) {
       const wasCulled = entry.cameraCullSignature !== "all";
       entry.cameraCullSignature = "all";
@@ -936,23 +951,31 @@ export function createPolyScene(
   // wrapper element, computed by inverse-rotating the world-space light into the
   // mesh's local frame. The cascade means these override the scene-level vars
   // only for polygons inside this wrapper. Cleared when conditions are not met.
-  function applyMeshLightVarOverride(wrapper: HTMLDivElement, rotation: Vec3 | undefined): void {
+  function applyMeshLightVarOverride(entry: MeshEntry, rotation: Vec3 | undefined): void {
     const isDynamic = currentOptions.textureLighting === "dynamic";
     const dir = currentOptions.directionalLight?.direction;
     const hasNonZeroRotation = rotation && (rotation[0] !== 0 || rotation[1] !== 0 || rotation[2] !== 0);
 
     if (!isDynamic || !hasNonZeroRotation || !dir) {
-      wrapper.style.removeProperty("--plx");
-      wrapper.style.removeProperty("--ply");
-      wrapper.style.removeProperty("--plz");
+      if (entry.lightOverrideSignature === "clear") return;
+      entry.wrapper.style.removeProperty("--plx");
+      entry.wrapper.style.removeProperty("--ply");
+      entry.wrapper.style.removeProperty("--plz");
+      entry.lightOverrideSignature = "clear";
       return;
     }
 
     const localDir = inverseRotateVec3(dir as Vec3, rotation as Vec3);
     const len = Math.hypot(localDir[0], localDir[1], localDir[2]) || 1;
-    wrapper.style.setProperty("--plx", (localDir[0] / len).toFixed(4));
-    wrapper.style.setProperty("--ply", (localDir[1] / len).toFixed(4));
-    wrapper.style.setProperty("--plz", (localDir[2] / len).toFixed(4));
+    const plx = (localDir[0] / len).toFixed(4);
+    const ply = (localDir[1] / len).toFixed(4);
+    const plz = (localDir[2] / len).toFixed(4);
+    const signature = `${plx}|${ply}|${plz}`;
+    if (entry.lightOverrideSignature === signature) return;
+    entry.wrapper.style.setProperty("--plx", plx);
+    entry.wrapper.style.setProperty("--ply", ply);
+    entry.wrapper.style.setProperty("--plz", plz);
+    entry.lightOverrideSignature = signature;
   }
 
   function applySolidPaintVars(wrapper: HTMLDivElement, defaults: SolidPaintDefaults): void {
@@ -1066,9 +1089,21 @@ export function createPolyScene(
   }
 
   function remountEntry(entry: MeshEntry): void {
+    if (entry.voxelRenderer) {
+      entry.voxelRenderer.render(cameraCullRotation(entry));
+      entry.cameraCullSignature = "voxel-slice";
+      return;
+    }
     clearShadowLeaves(entry);
     syncMountedRendered(entry);
     emitShadowLeaves(entry);
+  }
+
+  function canRenderVoxelSlice(entry: MeshEntry): boolean {
+    return !!entry.voxelSource &&
+      currentOptions.textureLighting !== "dynamic" &&
+      !entry.stableDom &&
+      !entry.castShadow;
   }
 
   function renderEntry(entry: MeshEntry, lightDirectionOverride?: Vec3): void {
@@ -1077,6 +1112,21 @@ export function createPolyScene(
     const directionalLight: typeof baseDirLight = lightDirectionOverride
       ? { ...baseDirLight, direction: lightDirectionOverride }
       : baseDirLight;
+    if (canRenderVoxelSlice(entry) && entry.voxelSource) {
+      const renderer = createPolyVoxelSliceRenderer({
+        doc,
+        wrapper: entry.wrapper,
+        source: entry.voxelSource,
+        polygons: entry.parseResult.polygons,
+        directionalLight,
+        ambientLight: currentOptions.ambientLight,
+      });
+      entry.voxelRenderer = renderer;
+      renderer.render(cameraCullRotation(entry));
+      entry.cameraCullSignature = "voxel-slice";
+      return;
+    }
+
     const renderOptions = {
       doc,
       directionalLight,
@@ -1274,12 +1324,14 @@ export function createPolyScene(
       rendered: [],
       shadowRendered: [],
       polygons: sourcePolygons,
+      voxelSource: parseResult.voxelSource,
       disposed: false,
       stableDom: stableDomOnUpdate,
       excludeFromAutoCenter: !!transformIn.excludeFromAutoCenter,
       castShadow: !!transformIn.castShadow,
       cameraCullGroups: [],
       cameraCullSignature: "",
+      lightOverrideSignature: "clear",
       bakedRotation: (transformIn.rotation ? [...transformIn.rotation] : [0, 0, 0]) as Vec3,
     };
 
@@ -1306,6 +1358,7 @@ export function createPolyScene(
         mergeOnUpdate = options?.merge ?? mergeOnUpdate;
         stableDomOnUpdate = options?.stableDom ?? stableDomOnUpdate;
         entry.stableDom = stableDomOnUpdate;
+        entry.voxelSource = undefined;
         entry.polygons = preparePolygons(polygons, mergeOnUpdate);
         handle.polygons = entry.polygons;
         applyTransformOrigin(entry.polygons);
@@ -1341,6 +1394,7 @@ export function createPolyScene(
           ? target
           : entry.polygons.indexOf(target);
         if (idx < 0 || idx >= entry.polygons.length) return;
+        entry.voxelSource = undefined;
         Object.assign(entry.polygons[idx], partial);
         renderEntry(entry);
       },
@@ -1353,6 +1407,7 @@ export function createPolyScene(
         mergeOnUpdate = options?.merge ?? mergeOnUpdate;
         stableDomOnUpdate = options?.stableDom ?? stableDomOnUpdate;
         entry.stableDom = stableDomOnUpdate;
+        entry.voxelSource = undefined;
         entry.polygons = preparePolygons(polygons, mergeOnUpdate);
         handle.polygons = entry.polygons;
         applyTransformOrigin(entry.polygons);
@@ -1371,7 +1426,7 @@ export function createPolyScene(
         transform = { ...transform, ...t };
         const css2 = buildMeshTransform(transform);
         wrapper.style.transform = css2 ?? "";
-        applyMeshLightVarOverride(wrapper, transform.rotation);
+        applyMeshLightVarOverride(entry, transform.rotation);
         if (t.rotation !== undefined) syncMountedRenderedForCameraChange(entry);
         if (entry.castShadow !== prevCastShadow) {
           emitShadowLeaves(entry);
@@ -1411,7 +1466,7 @@ export function createPolyScene(
     entry.handle = handle;
     meshes.add(entry);
     renderEntry(entry);
-    applyMeshLightVarOverride(wrapper, transform.rotation);
+    applyMeshLightVarOverride(entry, transform.rotation);
     recomputeAutoCenter();
     recomputeShadowGround();
     return handle;
@@ -1429,7 +1484,7 @@ export function createPolyScene(
     // Re-evaluate per-mesh light overrides when lighting settings change —
     // textureLighting or directionalLight may have changed.
     for (const entry of meshes) {
-      applyMeshLightVarOverride(entry.wrapper, entry.handle.transform.rotation);
+      applyMeshLightVarOverride(entry, entry.handle.transform.rotation);
     }
     // `strategies` controls which leaf tags the renderer emits. A change
     // means we have to re-render every mesh against the new constraint.
@@ -1453,7 +1508,13 @@ export function createPolyScene(
     const textureLightingChanged = partial.textureLighting !== undefined &&
       prevTextureLighting !== currentOptions.textureLighting;
     if (textureLightingChanged) {
-      for (const entry of meshes) emitShadowLeaves(entry);
+      for (const entry of meshes) {
+        if (!strategiesChanged && (entry.voxelSource || entry.voxelRenderer)) {
+          renderEntry(entry);
+        } else {
+          emitShadowLeaves(entry);
+        }
+      }
       recomputeShadowGround();
     }
   }

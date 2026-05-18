@@ -207,7 +207,7 @@ Options for `parseVox`.
 
 ```ts
 interface VoxParseOptions {
-  /** Scale the model so its longest axis is this many world units. Default: 60. */
+  /** Scale near this longest-axis size; snapped to integer voxel CSS cells. Default: 60. */
   targetSize?: number;
   /** Shift all vertices by this amount after scaling. Default: 0. */
   gridShift?: number;

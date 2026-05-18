@@ -150,6 +150,36 @@ const CORE_BASE_STYLES = `
   content: none;
 }
 
+/* ── Voxel slice-brush fast path ────────────────────────────────────────── */
+
+.polycss-voxel-host {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform-origin: 0 0;
+  transform-style: preserve-3d;
+  pointer-events: none;
+}
+
+.polycss-voxel-host-x {
+  transform: rotateX(90deg);
+}
+
+.polycss-voxel-host-y {
+  transform: rotateY(-90deg);
+}
+
+.polycss-voxel-host b {
+  position: absolute;
+  display: block;
+  overflow: visible;
+  transform-origin: 0 0;
+  transform-style: preserve-3d;
+  backface-visibility: visible;
+  pointer-events: none;
+  background-repeat: no-repeat;
+}
+
 /* ── Gizmo override (createTransformControls) ───────────────────────────── */
 
 /*

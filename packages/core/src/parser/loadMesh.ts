@@ -63,6 +63,10 @@ export interface LoadMeshOptions {
 const FETCH_NAME = "loadMesh";
 
 function withMeshResolution(result: ParseResult, options?: LoadMeshOptions): ParseResult {
+  // parseVox already emits greedy axis-aligned quads, and voxel fast paths
+  // need load-time latency dominated by the raw voxel source rather than a
+  // second generic polygon optimizer pass with marginal fallback savings.
+  if (result.voxelSource) return result;
   const polygons = optimizeMeshPolygons(result.polygons, {
     meshResolution: options?.meshResolution,
   });

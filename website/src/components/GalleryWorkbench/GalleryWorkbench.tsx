@@ -676,6 +676,7 @@ export default function GalleryWorkbench() {
             <VanillaScene
               key={rendererDebugKey}
               polygons={renderModelPolygons}
+              parseResult={loaded?.parseResult}
               interiorFillPolygons={renderInteriorFillPolygons}
               options={sceneOptions}
               directionalLight={directionalLight}

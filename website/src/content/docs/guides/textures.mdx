@@ -160,7 +160,7 @@ Generated atlas blob URLs are revoked on unmount (call `dispose()` or let `PolyM
 
 ## Tips
 
-- **`targetSize`**: scale the model so its longest axis fits this many world units (default: `60`). Set it to roughly match the scale of your other scene content.
+- **`targetSize`**: scale the model so its longest axis fits this many world units (default: `60`). `.vox` models snap to the nearest integer voxel CSS cell size, so the final size may differ slightly to keep voxel slice brushes on integer pixel coordinates.
 - **`textureQuality`**: leave at `"auto"` for workload-based bitmap caps, or set a numeric scale for explicit quality. `0.5` uses about one quarter of the atlas bitmap memory of `1`.
 - Shared textured edges are repaired automatically during atlas generation. Geometry stays unchanged; only low-alpha atlas pixels at those shared edges are filled from nearby opaque texels.
 - **`baseUrl`**: for OBJ/glTF files with external texture paths, pass the file's URL so relative paths resolve correctly.

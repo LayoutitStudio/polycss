@@ -2,7 +2,7 @@
 // type declarations that flow between subfolders (presets/, helpers/, the
 // component itself) live here. Component-internal types stay local.
 
-import type { ObjParseOptions, GltfParseOptions, VoxParseOptions, Polygon, ParseAnimationController } from "@layoutit/polycss";
+import type { ObjParseOptions, GltfParseOptions, VoxParseOptions, ParseResult, Polygon, ParseAnimationController } from "@layoutit/polycss";
 
 export type Renderer = "react" | "vanilla";
 export type ModelKind = "obj" | "glb" | "gltf" | "vox";
@@ -44,6 +44,7 @@ export interface DroppedModelSource {
 export interface LoadedModel {
   label: string;
   kind: ModelKind;
+  parseResult: ParseResult;
   rawPolygons: Polygon[];
   polygons: Polygon[];
   sourcePolygons: number;

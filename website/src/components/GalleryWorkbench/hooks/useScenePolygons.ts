@@ -37,6 +37,7 @@ export function useScenePolygons({
         ? reactAnimatedPolygons
         : loaded.rawPolygons;
     }
+    if (loaded.parseResult.voxelSource) return loaded.rawPolygons;
     return optimizeMeshPolygons(loaded.rawPolygons, {
       meshResolution,
     });

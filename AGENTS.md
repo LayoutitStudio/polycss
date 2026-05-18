@@ -22,6 +22,8 @@ Public API is **mirrored** across React and Vue. Adding a hook on one side witho
 
 **One visible `Polygon` → one leaf DOM element.** Leaves use canonical CSS primitives where possible and move scale into `matrix3d`; `border-shape` uses a larger fixed primitive because its paint geometry becomes unstable when collapsed to 1px. Textured polygons still pack their local-2D bounding rect (`canvasW × canvasH`) into the atlas. The HTML tag *is* the render strategy — the renderer picks one tag per polygon based on its shape and material.
 
+Raw MagicaVoxel `.vox` sources have a narrower baked-mode fast path: `parseVox` still returns the polygon mesh for bounds, fallback rendering, and public handles, but also preserves a `PolyVoxelSource`. Eligible vanilla meshes render that source through three axis hosts plus absolutely positioned rectangular brush leaves, using the voxcss `mergeVoxels: "3d"` slice planner rather than one `matrix3d` per polygon. `.vox` normalization snaps to the nearest integer CSS cell size so brush rectangles use integer pixel coordinates without any scale wrapper. Brush colors still receive baked Lambert shading from the scene lights. Dynamic lighting, shadows, stable DOM animation, and geometry replaced via `setPolygons` fall back to the polygon renderer.
+
 Voxel-shaped meshes are the exception to "all polygons stay mounted": meshes with at most the six axis-aligned face normals, excluding helpers/auto-center-exempt meshes, automatically mount only camera-facing leaves and patch the mounted set when the camera or mesh rotation crosses a visible-normal boundary. Non-voxel meshes keep the full leaf DOM mounted; broad camera-dependent DOM culling is not worth the mutation cost.
 
 ### Tag-as-strategy table
@@ -38,12 +40,14 @@ Strategies are ordered cheapest → most expensive. The mesher's job is to maxim
 
 Callers can opt out of specific strategies via `strategies: { disable: ["b" | "i" | "u"] }` on `RenderTextureAtlasOptions`. Disabled strategies fall through the chain (`b → i → s`, `u → i → s`, `i → s`). `<s>` is the universal fallback and cannot be disabled.
 
+The voxel slice-brush fast path emits plain `<b>` quad elements inside axis hosts. They intentionally reuse the cheap quad tag, but they are absolutely positioned brush rectangles rather than polygon strategy leaves and do not use one `matrix3d` per polygon.
+
 ### Lighting modes (`PolyTextureLightingMode = "baked" | "dynamic"`)
 
 - **Baked.** Lambert is computed once on the CPU per polygon, multiplied into the inline `color` (for `<b>`/`<i>`/`<u>`) or into the rasterised atlas pixels (for `<s>`). Moving a light requires re-rasterising affected polys.
 - **Dynamic.** Scene root carries the light setup as custom properties (`--plx/y/z`, `--plr/g/b`, `--pli`, `--par/g/b`, `--pai`). Each leaf embeds its surface normal (`--pnx/y/z`) and base color (`--psr/g/b`) inline. CSS `calc()` resolves the Lambert dot product and per-channel tint at paint time. Moving a light mutates one var on the scene root — zero JS, no atlas redraw.
 
-All solid/atlas tags work in both modes. The full coverage matrix is in `packages/polycss/src/styles/styles.ts`.
+All solid/atlas tags work in both modes. The `.vox` slice-brush fast path is baked-only for now; dynamic mode uses the polygon path so lighting semantics stay correct. The full coverage matrix is in `packages/polycss/src/styles/styles.ts`.
 
 ### Meshing implications (what generators must respect)
 
@@ -77,7 +81,7 @@ If you find yourself wanting a `requestAnimationFrame` loop to update many DOM n
 - **Hooks/composables:** `usePolyCamera`, `usePolyMesh`, `usePolySceneContext`, `usePolySelect`, `usePolySelectionApi`, `usePolyAnimation`.
 - **Components:** `PolyPerspectiveCamera`, `PolyOrthographicCamera`, `PolyOrbitControls`, `PolyMapControls`, `PolyTransformControls`, `PolySelect`, `PolyAxesHelper`, `PolyDirectionalLightHelper`, `PolyControls`.
 - **Types:** `PolyDirectionalLight`, `PolyAmbientLight`, `PolyTextureLightingMode`, `PolyAnimationMixer`.
-- **Functions:** `findPolyMeshHandle`, `injectPolyBaseStyles`.
+- **Functions:** `findPolyMeshHandle`, `injectPolyBaseStyles`, `buildPolyVoxelFaceData`, `buildPolyVoxelSlicePlan`.
 - **Vanilla factories:** `create*` names stay as-is (`createPolyScene`, `createPolyControls`, `createTransformControls`, `createSelect`).
 - **HTML custom elements:** `poly-` prefix + kebab-case. Existing tags: `<poly-scene>`, `<poly-mesh>`, `<poly-polygon>`, `<poly-controls>`, `<poly-axes-helper>`, `<poly-directional-light-helper>`. Any new element follows the same shape (e.g. `<poly-perspective-camera>`, `<poly-transform-controls>`, `<poly-select>`).
 - **Leaf DOM tags (`<b>`, `<i>`, `<s>`, `<u>`):** internal render-strategy tags. Not part of the public API and not user-facing — do not document them as such.

@@ -57,6 +57,11 @@ export const PRESETS = {
     options: { targetSize: 60 },
     zoom: 0.4, rotX: 65, rotY: 45,
   },
+  "apoc-car": {
+    url: "/gallery/glb/apocalypse/car.glb",
+    options: { targetSize: 60 },
+    zoom: 0.4, rotX: 65, rotY: 45,
+  },
   crate: {
     url: "/gallery/obj/opengameart/crate/Box.obj",
     mtlUrl: "/gallery/obj/opengameart/crate/Box.mtl",

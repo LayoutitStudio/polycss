@@ -93,6 +93,18 @@ function texturedTriangle(): Polygon {
   };
 }
 
+function topQuad(color = "#123456"): Polygon {
+  return {
+    vertices: [
+      [0, 0, 1],
+      [1, 0, 1],
+      [1, 1, 1],
+      [0, 1, 1],
+    ],
+    color,
+  };
+}
+
 function makeParseResult(polygons: Polygon[] = [triangle()]): ParseResult {
   let disposed = false;
   return {
@@ -106,6 +118,38 @@ function makeParseResult(polygons: Polygon[] = [triangle()]): ParseResult {
       return disposed;
     },
   } as ParseResult & { readonly _disposed: boolean };
+}
+
+function makeVoxelParseResult(): ParseResult {
+  return {
+    ...makeParseResult([triangle()]),
+    voxelSource: {
+      kind: "magica-vox",
+      cells: [{ x: 0, y: 0, z: 0, color: "#ff0000" }],
+      rows: 1,
+      cols: 1,
+      depth: 1,
+      scale: 1,
+      gridShift: 0,
+      sourceBytes: 64,
+    },
+  };
+}
+
+function makeVoxelExactParseResult(): ParseResult {
+  return {
+    ...makeParseResult([topQuad("#123456")]),
+    voxelSource: {
+      kind: "magica-vox",
+      cells: [{ x: 0, y: 0, z: 0, color: "#ff0000" }],
+      rows: 1,
+      cols: 1,
+      depth: 1,
+      scale: 1,
+      gridShift: 0,
+      sourceBytes: 64,
+    },
+  };
 }
 
 function getSceneEl(host: HTMLElement): HTMLElement {
@@ -250,6 +294,64 @@ describe("createPolyScene", () => {
       expect(host.querySelector(".polycss-poly-textured")).toBeNull();
       expect(host.querySelector("svg")).toBeNull();
       expect(handle.polygons.length).toBe(2);
+    });
+
+    it("routes raw vox sources through the voxel slice-brush renderer", () => {
+      scene = createPolyScene(host);
+      scene.add(makeVoxelParseResult(), { merge: false });
+      const voxelRoot = host.querySelector(".polycss-voxel-host-z");
+      const voxelBrushes = Array.from(host.querySelectorAll(".polycss-voxel-host b"));
+      expect(voxelRoot).not.toBeNull();
+      expect(host.querySelector(".polycss-voxel-slice")).toBeNull();
+      expect(voxelBrushes.length).toBeGreaterThan(0);
+      expect(voxelBrushes.every((el) => el.tagName === "B")).toBe(true);
+      const firstBrush = voxelBrushes[0] as HTMLElement;
+      expect(firstBrush.style.left).toMatch(/px$/);
+      expect(firstBrush.style.top).toMatch(/px$/);
+      expect(firstBrush.style.width).toMatch(/px$/);
+      expect(firstBrush.style.height).toMatch(/px$/);
+      expect(firstBrush.style.gridArea).toBe("");
+      expect(firstBrush.style.transform).toContain("translateZ(");
+      expect(firstBrush.style.getPropertyValue("--polycss-voxel-z")).toBe("");
+      expect(voxelBrushes.every((el) => el.className === "")).toBe(true);
+    });
+
+    it("applies baked lighting to voxel slice-brush quads", () => {
+      scene = createPolyScene(host, {
+        rotX: 0,
+        rotY: 0,
+        directionalLight: { direction: [0, 0, -1], color: "#ffffff", intensity: 1 },
+        ambientLight: { color: "#ffffff", intensity: 0 },
+      });
+      scene.add(makeVoxelParseResult(), { merge: false });
+      const brush = host.querySelector(".polycss-voxel-host b") as HTMLElement | null;
+      expect(brush).not.toBeNull();
+      expect(brush!.style.color).toMatch(/^(#000000|rgb\\(0, 0, 0\\))$/);
+    });
+
+    it("uses exact parsed voxel polygons before falling back to merged source brushes", () => {
+      scene = createPolyScene(host, {
+        rotX: 65,
+        rotY: 45,
+        directionalLight: { direction: [0, 0, 1], color: "#ffffff", intensity: 0 },
+        ambientLight: { color: "#ffffff", intensity: 1 },
+      });
+      scene.add(makeVoxelExactParseResult(), { merge: false });
+      const brush = host.querySelector(".polycss-voxel-host b") as HTMLElement | null;
+      expect(brush).not.toBeNull();
+      expect(brush!.style.color).toMatch(/^(#123456|rgb\\(18, 52, 86\\))$/);
+      expect(brush!.style.width).toBe("50px");
+      expect(brush!.style.height).toBe("50px");
+    });
+
+    it("falls back to polygon rendering after setPolygons replaces vox source geometry", () => {
+      scene = createPolyScene(host);
+      const handle = scene.add(makeVoxelParseResult(), { merge: false });
+      expect(host.querySelector(".polycss-voxel-host-z")).not.toBeNull();
+      handle.setPolygons([triangle()], { merge: false });
+      expect(host.querySelector(".polycss-voxel-host-z")).toBeNull();
+      expect(host.querySelector(".polycss-voxel-host b")).toBeNull();
+      expect(host.querySelector("i,b,s,u")).not.toBeNull();
     });
 
     it("hoists the repeated baked solid paint to the mesh wrapper", () => {

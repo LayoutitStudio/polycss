@@ -53,7 +53,7 @@ npm install @layoutit/polycss-core
 | `parseObj(text, options?)` | Parses OBJ text into `ParseResult`. Supports UV (`vt`), materials, `map_Kd` textures. |
 | `parseMtl(text)` | Parses MTL text into `{ colors, textures }`. |
 | `parseGltf(buffer, options?)` | Parses GLB or glTF `ArrayBuffer` into `ParseResult`. Extracts embedded textures as blob URLs. |
-| `parseVox(buffer, options?)` | Parses MagicaVoxel `.vox` `ArrayBuffer` into `ParseResult`. Face-culls interior voxel faces and fan-triangulates exposed quads. |
+| `parseVox(buffer, options?)` | Parses MagicaVoxel `.vox` `ArrayBuffer` into `ParseResult`. Face-culls interior voxel faces and fan-triangulates exposed quads. `targetSize` snaps to integer voxel CSS cells for the slice-brush renderer. |
 | `loadMesh(url, options?)` | Fetches a URL, dispatches to the right parser by extension (`.obj`, `.glb`, `.gltf`, `.vox`). Returns `Promise<ParseResult>` and defaults to `meshResolution: "lossy"`. |
 | `parseColor(input)` | Parse any CSS color string to `{ r, g, b, a }`. |
 | `shadeColor(input, lambert, ...)` | Apply Lambert shading factor to a color. |

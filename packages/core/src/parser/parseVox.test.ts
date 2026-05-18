@@ -310,6 +310,35 @@ describe("parseVox — minimal synthetic buffer", () => {
     expect(result.polygons.length).toBe(6);
   });
 
+  it("preserves normalized raw voxel source for slice-brush rendering", () => {
+    const buf = buildVoxBuffer([3, 2, 1], [{ x: 2, y: 1, z: 0, colorIndex: 1 }]);
+    const result = parseVox(buf, { targetSize: 30, gridShift: 2 });
+    expect(result.voxelSource).toEqual({
+      kind: "magica-vox",
+      cells: [{ x: 0, y: 0, z: 0, color: "#ffffff" }],
+      rows: 1,
+      cols: 1,
+      depth: 1,
+      scale: 30,
+      gridShift: 2,
+      sourceBytes: buf.byteLength,
+    });
+  });
+
+  it("snaps voxel scale to integer CSS cell sizes", () => {
+    const buf = buildVoxBuffer(
+      [80, 1, 1],
+      [
+        { x: 0, y: 0, z: 0, colorIndex: 1 },
+        { x: 79, y: 0, z: 0, colorIndex: 1 },
+      ],
+    );
+    const result = parseVox(buf, { targetSize: 70, gridShift: 0 });
+    expect(result.voxelSource?.scale).toBe(0.88);
+    const xs = result.polygons.flatMap((p) => p.vertices.map((v) => v[0]));
+    expect(Math.max(...xs) - Math.min(...xs)).toBeCloseTo(70.4, 3);
+  });
+
   it("two adjacent voxels share one face — greedy-meshed to 6 polys", () => {
     // Two voxels side by side on X: (0,0,0) and (1,0,0). Same material →
     // greedy mesh runs each long face as a single 2×1 rectangle:

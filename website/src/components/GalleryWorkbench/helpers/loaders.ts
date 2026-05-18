@@ -97,6 +97,7 @@ export async function loadPresetModel(
     return {
       label: model.label,
       kind: "obj",
+      parseResult: parsed,
       rawPolygons: parsed.polygons,
       polygons: parsed.polygons,
       sourcePolygons: parsed.polygons.length,
@@ -117,6 +118,7 @@ export async function loadPresetModel(
     return {
       label: model.label,
       kind: "vox",
+      parseResult: parsed,
       rawPolygons: parsed.polygons,
       polygons: parsed.polygons,
       sourcePolygons: parsed.polygons.length,
@@ -135,6 +137,7 @@ export async function loadPresetModel(
   return {
     label: model.label,
     kind: model.kind,
+    parseResult: parsed,
     rawPolygons: parsed.polygons,
     polygons: parsed.polygons,
     sourcePolygons: parsed.polygons.length,
@@ -201,21 +204,27 @@ export async function loadDroppedModel(
     });
     const parsed = await bakeSolidTextureSamples(parsedObj);
     let disposed = false;
-    return {
-      label: source.label,
-      kind: "obj",
-      rawPolygons: parsed.polygons,
-      polygons: parsed.polygons,
-      sourcePolygons: parsed.polygons.length,
-      sourceBytes,
+    const parseResult = {
+      ...parsed,
       warnings: [...(parsed.warnings ?? []), ...warnings],
-      parseMs: performance.now() - started,
       dispose: () => {
         if (disposed) return;
         disposed = true;
         parsed.dispose();
         for (const url of objectUrls) URL.revokeObjectURL(url);
       },
+    };
+    return {
+      label: source.label,
+      kind: "obj",
+      parseResult,
+      rawPolygons: parsed.polygons,
+      polygons: parsed.polygons,
+      sourcePolygons: parsed.polygons.length,
+      sourceBytes,
+      warnings: parseResult.warnings,
+      parseMs: performance.now() - started,
+      dispose: parseResult.dispose,
     };
   }
 
@@ -226,6 +235,7 @@ export async function loadDroppedModel(
     return {
       label: source.label,
       kind: "vox",
+      parseResult: parsed,
       rawPolygons: parsed.polygons,
       polygons: parsed.polygons,
       sourcePolygons: parsed.polygons.length,
@@ -241,6 +251,7 @@ export async function loadDroppedModel(
   return {
     label: source.label,
     kind: "glb",
+    parseResult: parsed,
     rawPolygons: parsed.polygons,
     polygons: parsed.polygons,
     sourcePolygons: parsed.polygons.length,

@@ -22,16 +22,19 @@
  * swap). Voxel coordinates are always non-negative (origin at 0), so no
  * shift is required by default.
  *
- * Output mesh is uniformly scaled to fit `targetSize` units along the
- * longest bbox axis.
+ * Output mesh is uniformly scaled near `targetSize` units along the longest
+ * bbox axis, snapped to the nearest integer CSS cell so voxel slice renderers
+ * can avoid fractional brush coordinates without adding scale transforms.
  */
 import type { Polygon, Vec3 } from "../types";
-import type { ParseResult } from "./types";
+import { BASE_TILE } from "../camera/camera";
+import type { ParseResult, PolyVoxelSource } from "./types";
 
 export interface VoxParseOptions {
   /**
-   * Largest mesh extent (in scene-space units). The mesh is uniformly
-   * scaled so its longest bbox dimension equals this. Default: 60.
+   * Largest mesh extent (in scene-space units). For `.vox`, the requested
+   * extent is snapped to the nearest integer CSS cell size to keep voxel
+   * slice brushes on integer pixel coordinates. Default: 60.
    */
   targetSize?: number;
   /**
@@ -406,7 +409,26 @@ export function parseVox(buffer: ArrayBuffer, options?: VoxParseOptions): ParseR
     }
   }
   const maxDim = Math.max(maxX - minX, maxY - minY, maxZ - minZ);
-  const scale = maxDim > 0 ? targetSize / maxDim : 1;
+  const rawScale = maxDim > 0 ? targetSize / maxDim : 1;
+  const targetCellPx = rawScale * BASE_TILE;
+  const scale = Number.isFinite(targetCellPx) && targetCellPx > 0
+    ? Math.max(1, Math.round(targetCellPx)) / BASE_TILE
+    : rawScale;
+  const voxelSource: PolyVoxelSource = {
+    kind: "magica-vox",
+    cells: voxels.map((v) => ({
+      x: v.x - minX,
+      y: v.y - minY,
+      z: v.z - minZ,
+      color: resolveColor(v.colorIndex),
+    })),
+    rows: Math.max(0, maxX - minX),
+    cols: Math.max(0, maxY - minY),
+    depth: Math.max(0, maxZ - minZ),
+    scale,
+    gridShift,
+    sourceBytes,
+  };
 
   const round = (n: number): number => Math.round(n * 1000) / 1000;
   const project = (v: Vec3): Vec3 => [
@@ -422,18 +444,15 @@ export function parseVox(buffer: ArrayBuffer, options?: VoxParseOptions): ParseR
 
   return {
     polygons,
+    voxelSource,
     objectUrls: [],
     dispose: () => { /* no-op: parseVox has no minted blob URLs */ },
     warnings: [],
     metadata: {
       triangleCount: polygons.length,
       sourceBytes,
-      // voxelCount is a vox-specific extension to the base metadata shape.
-      // Cast as any to avoid the structural type mismatch — we keep it in
-      // metadata so callers can access it without polluting the ParseResult type.
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       voxelCount: voxels.length,
-    } as ParseResult["metadata"],
+    },
   };
 }
 

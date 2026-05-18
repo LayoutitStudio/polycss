@@ -140,6 +140,8 @@ export type {
 export type {
   ParseAnimationClip,
   ParseAnimationController,
+  PolyVoxelCell,
+  PolyVoxelSource,
   ParseResult,
 } from "./parser/types";
 export { parseObj } from "./parser/parseObj";
@@ -155,5 +157,20 @@ export {
 export type { SolidTextureSampleOptions } from "./parser/solidTextureSamples";
 export { parseVox } from "./parser/parseVox";
 export type { VoxParseOptions } from "./parser/parseVox";
+export {
+  buildFaceDataFromVoxelSource as buildPolyVoxelFaceData,
+  buildSlicePlan as buildPolyVoxelSlicePlan,
+  NEXT_LAYER_STEP as POLY_VOXEL_NEXT_LAYER_STEP,
+} from "./voxel/voxelSlicePlanner";
+export type {
+  Brush as PolyVoxelBrush,
+  FaceBuffer as PolyVoxelFaceBuffer,
+  FaceData as PolyVoxelFaceData,
+  FaceKey as PolyVoxelFaceKey,
+  PlaneAxis as PolyVoxelPlaneAxis,
+  PolyVoxelFace,
+  PolyVoxelWallsMask,
+  SlicePlan as PolyVoxelSlicePlan,
+} from "./voxel/voxelSlicePlanner";
 export { loadMesh } from "./parser/loadMesh";
 export type { LoadMeshOptions } from "./parser/loadMesh";

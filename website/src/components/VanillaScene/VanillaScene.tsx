@@ -14,6 +14,8 @@ import type {
   PolyControlsHandle,
   PolyFirstPersonControlsHandle,
   PolyMeshHandle as VanillaPolyMeshHandle,
+  PolyMeshTransform,
+  ParseResult,
   PolySceneOptions,
   PolySceneHandle,
   PolySelectionHandle,
@@ -44,6 +46,7 @@ function lightHelperPosition(
 
 export interface VanillaSceneProps {
   polygons: Polygon[];
+  parseResult?: ParseResult;
   interiorFillPolygons: Polygon[];
   options: SceneOptionsState;
   directionalLight: PolyDirectionalLight;
@@ -70,6 +73,7 @@ export interface VanillaSceneProps {
 
 export function VanillaScene({
   polygons,
+  parseResult,
   interiorFillPolygons,
   options,
   directionalLight,
@@ -117,6 +121,12 @@ export function VanillaScene({
   animationPausedRef.current = options.animationPaused;
   const animationTimeScaleRef = useRef(options.animationTimeScale);
   animationTimeScaleRef.current = options.animationTimeScale;
+  const mountedModelRef = useRef<{
+    handle: VanillaPolyMeshHandle;
+    polygons: Polygon[];
+    merge: boolean;
+    stableDom: boolean;
+  } | null>(null);
 
   const mountInteriorFillInsideModel = useCallback(() => {
     const modelEl = meshHandleRef.current?.element;
@@ -155,15 +165,34 @@ export function VanillaScene({
       autoCenter: options.autoCenter,
       textureQuality: options.textureQuality,
       strategies: { disable: options.disableStrategies },
-    };
+    } as PolySceneOptions;
     const scene = createPolyScene(host, sceneOptions);
     sceneRef.current = scene;
-    meshHandleRef.current = scene.add({
+    const meshTransform = {
+      merge: mergePolygonsForMesh,
+      stableDom: stableDomForMesh,
+      id: meshId,
+      castShadow: options.castShadow,
+    } as PolyMeshTransform;
+    const modelParseResult: ParseResult = parseResult
+      ? {
+          ...parseResult,
+          polygons,
+          dispose: () => {},
+        }
+      : {
+          polygons,
+          objectUrls: [],
+          warnings: [],
+          dispose: () => {},
+        };
+    meshHandleRef.current = scene.add(modelParseResult, meshTransform);
+    mountedModelRef.current = {
+      handle: meshHandleRef.current,
       polygons,
-      objectUrls: [],
-      warnings: [],
-      dispose: () => {},
-    }, { merge: mergePolygonsForMesh, stableDom: stableDomForMesh, id: meshId, castShadow: options.castShadow });
+      merge: mergePolygonsForMesh,
+      stableDom: stableDomForMesh,
+    };
     meshHandleRef.current.element.classList.add("dn-model-mesh");
     onMeshHandleChangeRef.current?.(meshHandleRef.current);
     return () => {
@@ -176,6 +205,7 @@ export function VanillaScene({
       lightHandleRef.current = null;
       groundHandleRef.current = null;
       interiorFillHandleRef.current = null;
+      mountedModelRef.current = null;
       meshHandleRef.current = null;
       sceneRef.current = null;
       scene.destroy();
@@ -188,6 +218,7 @@ export function VanillaScene({
     stableDirectionalForRebuild,
     stableAmbientForRebuild,
     stableDomForMesh,
+    parseResult,
   ]);
 
   // Effect 1.5 — replace geometry on the existing mesh. This is the path
@@ -199,10 +230,24 @@ export function VanillaScene({
     const scene = sceneRef.current;
     if (!handle || !scene) return;
     const started = performance.now();
-    handle.setPolygons(polygons, {
-      merge: mergePolygonsForMesh,
-      stableDom: stableDomForMesh,
-    });
+    const mounted = mountedModelRef.current;
+    const modelAlreadyMounted =
+      mounted?.handle === handle &&
+      mounted.polygons === polygons &&
+      mounted.merge === mergePolygonsForMesh &&
+      mounted.stableDom === stableDomForMesh;
+    if (!modelAlreadyMounted) {
+      handle.setPolygons(polygons, {
+        merge: mergePolygonsForMesh,
+        stableDom: stableDomForMesh,
+      });
+      mountedModelRef.current = {
+        handle,
+        polygons,
+        merge: mergePolygonsForMesh,
+        stableDom: stableDomForMesh,
+      };
+    }
 
     let fillHandle = interiorFillHandleRef.current;
     if (interiorFillPolygons.length === 0) {
@@ -238,7 +283,13 @@ export function VanillaScene({
     requestAnimationFrame(() =>
       onBuildRef.current(performance.now() - started),
     );
-  }, [polygons, interiorFillPolygons, mergePolygonsForMesh, stableDomForMesh, mountInteriorFillInsideModel]);
+  }, [
+    polygons,
+    interiorFillPolygons,
+    mergePolygonsForMesh,
+    stableDomForMesh,
+    mountInteriorFillInsideModel,
+  ]);
 
   // Effect 1.6 — live-toggle castShadow without rebuilding the scene.
   useEffect(() => {
@@ -293,6 +344,7 @@ export function VanillaScene({
     stableDirectionalForRebuild,
     stableAmbientForRebuild,
     stableDomForMesh,
+    parseResult,
   ]);
 
   // Forward gizmo mode changes to the live PolyTransformControls handle.
@@ -339,6 +391,7 @@ export function VanillaScene({
     stableDirectionalForRebuild,
     stableAmbientForRebuild,
     stableDomForMesh,
+    parseResult,
   ]);
 
   useEffect(() => {
@@ -472,6 +525,7 @@ export function VanillaScene({
     stableDirectionalForRebuild,
     stableAmbientForRebuild,
     stableDomForMesh,
+    parseResult,
   ]);
 
   // Effect 2.6 — live-update FPV options (booleans + numerics) without
@@ -544,6 +598,7 @@ export function VanillaScene({
     options.perspective,
     stableDirectionalForRebuild,
     stableAmbientForRebuild,
+    parseResult,
   ]);
 
   // Effect 3.5 — ground receiver. A flat quad in the XY plane (Z is "up"
@@ -612,6 +667,7 @@ export function VanillaScene({
     options.perspective,
     stableDirectionalForRebuild,
     stableAmbientForRebuild,
+    parseResult,
   ]);
 
   // Effect 4 — light helper. Octahedron at LOCAL origin so polygons stay
@@ -660,6 +716,7 @@ export function VanillaScene({
     options.perspective,
     stableDirectionalForRebuild,
     stableAmbientForRebuild,
+    parseResult,
   ]);
 
   // Effect 5 — slide the light helper to the new orbit position whenever

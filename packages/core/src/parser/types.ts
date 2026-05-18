@@ -11,6 +11,24 @@
  */
 import type { Polygon } from "../types";
 
+export interface PolyVoxelCell {
+  x: number;
+  y: number;
+  z: number;
+  color: string;
+}
+
+export interface PolyVoxelSource {
+  kind: "magica-vox";
+  cells: PolyVoxelCell[];
+  rows: number;
+  cols: number;
+  depth: number;
+  scale: number;
+  gridShift: number;
+  sourceBytes: number;
+}
+
 export interface ParseAnimationClip {
   /** Stable numeric index in the source file's animation array. */
   index: number;
@@ -35,6 +53,8 @@ export interface ParseAnimationController {
 export interface ParseResult {
   /** The mesh, as a flat polygon list. Already vertex-permuted to polycss space. */
   polygons: Polygon[];
+  /** Optional raw voxel source for `.vox` fast paths; polygon fallback remains authoritative. */
+  voxelSource?: PolyVoxelSource;
   /** Optional animation sampler for formats that carry timeline data. */
   animation?: ParseAnimationController;
   /**
@@ -66,5 +86,7 @@ export interface ParseResult {
     animations?: ParseAnimationClip[];
     /** Source file size in bytes (for diagnostics). */
     sourceBytes?: number;
+    /** Voxel count for `.vox` sources. */
+    voxelCount?: number;
   };
 }
