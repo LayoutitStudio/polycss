@@ -18,7 +18,7 @@
  */
 import { defineComponent, h, computed, inject, onMounted, onBeforeUnmount, ref, watch } from "vue";
 import type { PropType, VNode, CSSProperties } from "vue";
-import type { Polygon, PolyTextureLightingMode, Vec3 } from "@layoutit/polycss-core";
+import type { MeshResolution, Polygon, PolyTextureLightingMode, Vec3 } from "@layoutit/polycss-core";
 import { computeSceneBbox, inverseRotateVec3, findOverlappingPolygonDuplicates, parseHexColor } from "@layoutit/polycss-core";
 import { usePolyMesh } from "./useMesh";
 import {
@@ -83,6 +83,10 @@ export interface PolyMeshProps extends InteractionProps {
    * Defaults to `false`.
    */
   castShadow?: boolean;
+  /** Mesh optimization intent. Defaults to "lossy"; set "lossless" to keep
+   *  authored surface fidelity. Top-level prop wins over any meshResolution
+   *  that might be set inside parseOptions. */
+  meshResolution?: MeshResolution;
   class?: string;
   position?: Vec3;
   scale?: number | Vec3;
@@ -147,6 +151,7 @@ export const PolyMesh = defineComponent({
     textureLighting: { type: String as PropType<PolyTextureLightingMode>, default: undefined },
     textureQuality: { type: [Number, String] as PropType<TextureQuality>, default: undefined },
     castShadow: { type: Boolean as PropType<boolean>, default: false },
+    meshResolution: { type: String as PropType<MeshResolution>, default: undefined },
     class: { type: String },
     position: { type: Array as unknown as PropType<Vec3>, default: undefined },
     scale: { type: [Number, Array] as unknown as PropType<number | Vec3>, default: undefined },
@@ -167,8 +172,16 @@ export const PolyMesh = defineComponent({
   setup(props, { slots, attrs, expose }) {
     // useMesh requires a Ref<string>. Computed ref wraps the src prop.
     const srcRef = computed(() => props.src ?? "");
-    const meshOptions = computed(() => (props.mtl ? { mtlUrl: props.mtl } : undefined));
-    const fetched = usePolyMesh(srcRef, meshOptions.value);
+    // Merge mtl + meshResolution into the options passed to usePolyMesh.
+    // Top-level meshResolution wins over any meshResolution that could come
+    // from a future parseOptions prop (matches React behavior).
+    const meshOptions = computed(() => {
+      const opts: Record<string, unknown> = {};
+      if (props.mtl) opts.mtlUrl = props.mtl;
+      if (props.meshResolution !== undefined) opts.meshResolution = props.meshResolution;
+      return Object.keys(opts).length > 0 ? opts : undefined;
+    });
+    const fetched = usePolyMesh(srcRef, meshOptions.value as import("./useMesh").UseMeshOptions | undefined);
 
     const propPolygons = computed<Polygon[]>(() =>
       props.src ? fetched.polygons.value : (props.polygons ?? [])

@@ -360,3 +360,23 @@ describe("PolyMesh (Vue) — loading and error states", () => {
     expect(meshError).toBeTruthy();
   });
 });
+
+describe("PolyMesh (Vue) — meshResolution prop", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+    document.body.innerHTML = "";
+  });
+
+  it("accepts meshResolution='lossless' and mounts leaf DOM without throwing", () => {
+    const { container } = renderMesh({ polygons: [TRIANGLE], meshResolution: "lossless" });
+    const leaves = container.querySelectorAll("i,b,s,u");
+    expect(leaves.length).toBeGreaterThan(0);
+  });
+
+  it("accepts meshResolution='lossy' and mounts leaf DOM without throwing", () => {
+    const { container } = renderMesh({ polygons: [TRIANGLE, QUAD], meshResolution: "lossy" });
+    const leaves = container.querySelectorAll("i,b,s,u");
+    expect(leaves.length).toBeGreaterThan(0);
+  });
+});
