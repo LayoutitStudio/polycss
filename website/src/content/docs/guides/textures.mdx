@@ -28,9 +28,11 @@ The simplest way to render a mesh is the mesh element with a `src`. It fetches t
 ```html
 <script type="module" src="https://esm.sh/@layoutit/polycss/elements"></script>
 
-<poly-scene rot-x="65" rot-y="45">
-  <poly-mesh src="/cottage.glb"></poly-mesh>
-</poly-scene>
+<poly-camera rot-x="65" rot-y="45">
+  <poly-scene>
+    <poly-mesh src="/cottage.glb"></poly-mesh>
+  </poly-scene>
+</poly-camera>
 ```
 </TabItem>
 <TabItem label="React">
