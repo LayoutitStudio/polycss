@@ -20,6 +20,7 @@
  * the anchor via their own matrix3d translations.
  */
 import type {
+  MeshResolution,
   PolyAmbientLight,
   PolyDirectionalLight,
   ParseResult,
@@ -44,6 +45,7 @@ import {
   isVoxelCameraCullableNormalGroups,
   mergePolygons,
   normalFacesCamera,
+  optimizeMeshPolygons,
   parseHexColor,
   polygonCssSurfaceNormal,
 } from "@layoutit/polycss-core";
@@ -134,6 +136,14 @@ export interface PolyMeshTransform {
    * triangle topology must remain stable from frame to frame.
    */
   merge?: boolean;
+  /**
+   * Mesh optimization intent. Defaults to `"lossy"` (bounded geometric
+   * approximation when it reduces polygon count). Set `"lossless"` to preserve
+   * the authored surface — only exact coplanar merges are applied.
+   * When set, the optimizer runs with this resolution and supersedes the
+   * plain `mergePolygons` pass.
+   */
+  meshResolution?: MeshResolution;
   /**
    * Keep polygon leaf DOM nodes stable across setPolygons() calls when the
    * mesh topology is unchanged. Intended for animated/deforming meshes.
@@ -1280,8 +1290,15 @@ export function createPolyScene(
     const css = buildMeshTransform(transform);
     if (css) wrapper.style.transform = css;
 
-    const preparePolygons = (polygons: Polygon[], merge: boolean): Polygon[] =>
-      merge ? mergePolygons(polygons) : polygons;
+    // When meshResolution is explicitly set, run the full optimizer (which
+    // subsumes mergePolygons) with that resolution intent. Otherwise fall back
+    // to the plain merge pass for backward compatibility.
+    const preparePolygons = (polygons: Polygon[], merge: boolean): Polygon[] => {
+      if (transformIn.meshResolution !== undefined) {
+        return optimizeMeshPolygons(polygons, { meshResolution: transformIn.meshResolution });
+      }
+      return merge ? mergePolygons(polygons) : polygons;
+    };
     const sourcePolygons = preparePolygons(parseResult.polygons, mergeOnUpdate);
 
     // Pivot rotations around the mesh's polygon bbox center, not the

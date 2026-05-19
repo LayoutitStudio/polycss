@@ -1436,3 +1436,32 @@ describe("createPolyScene", () => {
     });
   });
 });
+
+describe("scene.add — meshResolution option", () => {
+  let host: HTMLElement;
+  let scene: PolySceneHandle;
+
+  beforeEach(() => {
+    host = document.createElement("div");
+    document.body.appendChild(host);
+  });
+
+  afterEach(() => {
+    scene?.destroy();
+    if (host.parentNode) host.parentNode.removeChild(host);
+  });
+
+  it("scene.add with meshResolution='lossless' does not throw and produces leaf DOM", () => {
+    scene = makeScene(host);
+    const handle = scene.add(makeParseResult([triangle(), triangle()]), { meshResolution: "lossless" });
+    expect(handle).toBeTruthy();
+    expect(host.querySelectorAll("i,b,s,u").length).toBeGreaterThan(0);
+  });
+
+  it("scene.add with meshResolution='lossy' does not throw and produces leaf DOM", () => {
+    scene = makeScene(host);
+    const handle = scene.add(makeParseResult([triangle()]), { meshResolution: "lossy" });
+    expect(handle).toBeTruthy();
+    expect(host.querySelectorAll("i,b,s,u").length).toBeGreaterThan(0);
+  });
+});
