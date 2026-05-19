@@ -1,8 +1,10 @@
 /**
- * PolyCamera — alias for PolyPerspectiveCamera.
+ * PolyCamera — alias for PolyOrthographicCamera.
  *
- * Kept for compatibility; prefer the explicit PolyPerspectiveCamera or
- * PolyOrthographicCamera names which mirror three.js conventions.
+ * The default camera in polycss is orthographic — the engine's structural
+ * advantages (integer-pixel atlas slicing, DOM-as-render-tree) are most
+ * visible in iso/voxel/diagrammatic scenes. Use PolyPerspectiveCamera
+ * explicitly when depth foreshortening is needed.
  */
-export { PolyPerspectiveCamera as PolyCamera } from "./PolyPerspectiveCamera";
-export type { PolyPerspectiveCameraProps as PolyCameraProps } from "./PolyPerspectiveCamera";
+export { PolyOrthographicCamera as PolyCamera } from "./PolyOrthographicCamera";
+export type { PolyOrthographicCameraProps as PolyCameraProps } from "./PolyOrthographicCamera";

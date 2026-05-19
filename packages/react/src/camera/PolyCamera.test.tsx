@@ -10,9 +10,9 @@ function renderToDiv(element: React.ReactElement): HTMLElement {
   return container;
 }
 
-// PolyCamera is an alias for PolyPerspectiveCamera — these tests confirm
-// the alias renders identically.
-describe("PolyCamera (alias for PolyPerspectiveCamera)", () => {
+// PolyCamera is an alias for PolyOrthographicCamera — these tests confirm
+// the alias renders identically (orthographic projection, perspective: none).
+describe("PolyCamera (alias for PolyOrthographicCamera)", () => {
   it("renders with polycss-camera class", () => {
     const container = renderToDiv(
       <PolyCamera>
@@ -36,18 +36,7 @@ describe("PolyCamera (alias for PolyPerspectiveCamera)", () => {
     expect(child?.textContent).toBe("hello");
   });
 
-  it("applies custom perspective", () => {
-    const container = renderToDiv(
-      <PolyCamera perspective={5000}>
-        <div />
-      </PolyCamera>
-    );
-
-    const camera = container.querySelector(".polycss-camera") as HTMLElement;
-    expect(camera.style.perspective).toBe("5000px");
-  });
-
-  it("applies default perspective of 8000px", () => {
+  it("sets perspective to none (orthographic projection)", () => {
     const container = renderToDiv(
       <PolyCamera>
         <div />
@@ -55,7 +44,7 @@ describe("PolyCamera (alias for PolyPerspectiveCamera)", () => {
     );
 
     const camera = container.querySelector(".polycss-camera") as HTMLElement;
-    expect(camera.style.perspective).toBe("8000px");
+    expect(camera.style.perspective).toBe("none");
   });
 
   it("applies custom className", () => {
