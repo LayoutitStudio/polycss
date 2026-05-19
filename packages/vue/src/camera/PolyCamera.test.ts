@@ -1,7 +1,6 @@
 /**
  * PolyCamera (Vue) — feature tests for the camera wrapper component.
- * Mirrors the deleted voxcss VoxCamera.test.ts pattern + the React
- * PolyCamera.behavior.test.tsx style.
+ * PolyCamera is an alias for PolyOrthographicCamera (orthographic projection).
  */
 import { describe, it, expect } from "vitest";
 import { createApp, h } from "vue";
@@ -33,19 +32,12 @@ describe("PolyCamera (Vue)", () => {
     });
   });
 
-  describe("perspective", () => {
-    it("applies default perspective of 8000px when perspective is not set", () => {
+  describe("projection", () => {
+    it("sets perspective to none (orthographic, the default)", () => {
       const container = renderCamera();
       const camera = container.querySelector(".polycss-camera") as HTMLElement;
-      expect(camera.style.perspective).toBe("8000px");
+      expect(camera.style.perspective).toBe("none");
     });
-
-    it("applies a custom numeric perspective value", () => {
-      const container = renderCamera({ perspective: 3000 });
-      const camera = container.querySelector(".polycss-camera") as HTMLElement;
-      expect(camera.style.perspective).toBe("3000px");
-    });
-
   });
 
   describe("children", () => {
