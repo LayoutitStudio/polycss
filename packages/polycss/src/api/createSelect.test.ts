@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ParseResult, Polygon } from "@layoutit/polycss-core";
 import { createPolyScene, type PolySceneHandle, type PolyMeshHandle } from "./createPolyScene";
 import { createSelect, type PolySelectionHandle } from "./createSelect";
+import { createPolyOrthographicCamera } from "./createPolyCamera";
 
 const TRIANGLE: Polygon = {
   vertices: [[0, 0, 0], [1, 0, 0], [0, 1, 0]],
@@ -30,7 +31,7 @@ describe("createSelect", () => {
   beforeEach(() => {
     host = document.createElement("div");
     document.body.appendChild(host);
-    scene = createPolyScene(host);
+    scene = createPolyScene(host, { camera: createPolyOrthographicCamera() });
   });
   afterEach(() => {
     sel?.destroy();

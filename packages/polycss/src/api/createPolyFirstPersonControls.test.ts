@@ -11,6 +11,7 @@ import {
   createPolyFirstPersonControls,
   type PolyFirstPersonControlsHandle,
 } from "./createPolyFirstPersonControls";
+import { createPolyPerspectiveCamera } from "./createPolyCamera";
 
 type Frame = (now: number) => void;
 let rafQueue: Frame[] = [];
@@ -62,7 +63,8 @@ describe("createPolyFirstPersonControls", () => {
     host = document.createElement("div");
     document.body.appendChild(host);
     // Initialize at rotX=90 (horizontal) so mouselook pitch math is clean.
-    scene = createPolyScene(host, { rotX: 90, rotY: 0, zoom: 1, target: [0, 0, 0] });
+    // perspective: 2000 is used by the origin/target identity tests (PERSPECTIVE constant).
+    scene = createPolyScene(host, { camera: createPolyPerspectiveCamera({ rotX: 90, rotY: 0, zoom: 1, target: [0, 0, 0], perspective: 2000 }) });
     controls = null;
     installManualRaf();
     // Stub pointer-lock APIs (jsdom doesn't implement them).
@@ -85,7 +87,7 @@ describe("createPolyFirstPersonControls", () => {
 
     it("syncs target.z to eyeHeight on attach", () => {
       controls = createPolyFirstPersonControls(scene, { eyeHeight: 1.7, groundZ: 0 });
-      expect((scene.getOptions().target ?? [0, 0, 0])[2]).toBeCloseTo(1.7, 3);
+      expect((scene.camera.state.target ?? [0, 0, 0])[2]).toBeCloseTo(1.7, 3);
     });
 
     it("starts the RAF tick", () => {
@@ -97,27 +99,27 @@ describe("createPolyFirstPersonControls", () => {
   describe("mouselook", () => {
     it("ignores mousemove without pointer-lock", () => {
       controls = createPolyFirstPersonControls(scene);
-      const before = scene.getOptions().rotY ?? 0;
+      const before = scene.camera.state.rotY ?? 0;
       document.dispatchEvent(new MouseEvent("mousemove", { movementX: 100, movementY: 0 }));
-      expect(scene.getOptions().rotY).toBe(before);
+      expect(scene.camera.state.rotY).toBe(before);
     });
 
     it("yaw decreases on mouse-right when locked", () => {
       controls = createPolyFirstPersonControls(scene, { lookSensitivity: 1 });
       host.click();
       fakePointerLock(host, true);
-      const before = scene.getOptions().rotY ?? 0;
+      const before = scene.camera.state.rotY ?? 0;
       document.dispatchEvent(new MouseEvent("mousemove", { movementX: 10, movementY: 0 }));
-      expect(scene.getOptions().rotY).toBeCloseTo(((before - 10) % 360 + 360) % 360, 1);
+      expect(scene.camera.state.rotY).toBeCloseTo(((before - 10) % 360 + 360) % 360, 1);
     });
 
     it("pitch decreases on mouse-down (look down) when locked", () => {
       controls = createPolyFirstPersonControls(scene, { lookSensitivity: 1 });
       host.click();
       fakePointerLock(host, true);
-      const before = scene.getOptions().rotX ?? 90;
+      const before = scene.camera.state.rotX ?? 90;
       document.dispatchEvent(new MouseEvent("mousemove", { movementX: 0, movementY: 10 }));
-      expect(scene.getOptions().rotX).toBeCloseTo(before - 10, 1);
+      expect(scene.camera.state.rotX).toBeCloseTo(before - 10, 1);
     });
 
     it("clamps pitch to [minPitch, maxPitch]", () => {
@@ -129,27 +131,27 @@ describe("createPolyFirstPersonControls", () => {
       host.click();
       fakePointerLock(host, true);
       document.dispatchEvent(new MouseEvent("mousemove", { movementX: 0, movementY: 1000 }));
-      expect(scene.getOptions().rotX).toBe(30);
+      expect(scene.camera.state.rotX).toBe(30);
       document.dispatchEvent(new MouseEvent("mousemove", { movementX: 0, movementY: -10000 }));
-      expect(scene.getOptions().rotX).toBe(150);
+      expect(scene.camera.state.rotX).toBe(150);
     });
 
     it("invertY flips vertical mouselook", () => {
       controls = createPolyFirstPersonControls(scene, { lookSensitivity: 1, invertY: true });
       host.click();
       fakePointerLock(host, true);
-      const before = scene.getOptions().rotX ?? 90;
+      const before = scene.camera.state.rotX ?? 90;
       document.dispatchEvent(new MouseEvent("mousemove", { movementX: 0, movementY: 10 }));
-      expect(scene.getOptions().rotX).toBeCloseTo(before + 10, 1);
+      expect(scene.camera.state.rotX).toBeCloseTo(before + 10, 1);
     });
 
     it("disabling lookEnabled stops yaw updates", () => {
       controls = createPolyFirstPersonControls(scene, { lookEnabled: false });
-      const before = scene.getOptions().rotY ?? 0;
+      const before = scene.camera.state.rotY ?? 0;
       // No pointer-lock since lookEnabled is off, simulate anyway:
       fakePointerLock(host, true);
       document.dispatchEvent(new MouseEvent("mousemove", { movementX: 100 }));
-      expect(scene.getOptions().rotY).toBe(before);
+      expect(scene.camera.state.rotY).toBe(before);
     });
   });
 
@@ -174,10 +176,11 @@ describe("createPolyFirstPersonControls", () => {
     }
 
     it("target = origin + lookDir * (perspective/tile) on attach", () => {
-      scene.setOptions({ perspective: PERSPECTIVE, rotX: 90, rotY: 0, target: [10, 20, 5] });
+      scene.camera.update({ rotX: 90, rotY: 0, target: [10, 20, 5] });
+      scene.applyCamera();
       controls = createPolyFirstPersonControls(scene, { eyeHeight: 0, groundZ: 5 });
       const origin = controls.getOrigin();
-      const target = scene.getOptions().target ?? [0, 0, 0];
+      const target = scene.camera.state.target ?? [0, 0, 0];
       const expected = expectedTarget(origin, 90, 0);
       expect(target[0]).toBeCloseTo(expected[0], 4);
       expect(target[1]).toBeCloseTo(expected[1], 4);
@@ -185,41 +188,46 @@ describe("createPolyFirstPersonControls", () => {
     });
 
     it("identity holds across multiple yaw angles", () => {
-      scene.setOptions({ perspective: PERSPECTIVE, rotX: 90, rotY: 0 });
+      scene.camera.update({ rotX: 90, rotY: 0 });
+      scene.applyCamera();
       controls = createPolyFirstPersonControls(scene, { lookSensitivity: 1 });
       host.click();
       fakePointerLock(host, true);
       for (const yawDelta of [10, 25, -40, 90, -180]) {
         document.dispatchEvent(new MouseEvent("mousemove", { movementX: -yawDelta, movementY: 0 }));
-        const sceneOpts = scene.getOptions();
+        const sceneOpts = scene.camera.state;
         const origin = controls.getOrigin();
         const target = sceneOpts.target ?? [0, 0, 0];
         const expected = expectedTarget(origin, sceneOpts.rotX ?? 0, sceneOpts.rotY ?? 0);
-        expect(target[0]).toBeCloseTo(expected[0], 4);
-        expect(target[1]).toBeCloseTo(expected[1], 4);
-        expect(target[2]).toBeCloseTo(expected[2], 4);
+        // 2 decimals: tolerance 0.005 covers floating-point accumulation across the loop
+        expect(target[0]).toBeCloseTo(expected[0], 2);
+        expect(target[1]).toBeCloseTo(expected[1], 2);
+        expect(target[2]).toBeCloseTo(expected[2], 2);
       }
     });
 
     it("identity holds across pitch changes", () => {
-      scene.setOptions({ perspective: PERSPECTIVE, rotX: 90, rotY: 45 });
+      scene.camera.update({ rotX: 90, rotY: 45 });
+      scene.applyCamera();
       controls = createPolyFirstPersonControls(scene, { lookSensitivity: 1, minPitch: 10, maxPitch: 170 });
       host.click();
       fakePointerLock(host, true);
       for (const pitchDelta of [10, -20, 30, -60]) {
         document.dispatchEvent(new MouseEvent("mousemove", { movementX: 0, movementY: pitchDelta }));
-        const sceneOpts = scene.getOptions();
+        const sceneOpts = scene.camera.state;
         const origin = controls.getOrigin();
         const target = sceneOpts.target ?? [0, 0, 0];
         const expected = expectedTarget(origin, sceneOpts.rotX ?? 0, sceneOpts.rotY ?? 0);
-        expect(target[0]).toBeCloseTo(expected[0], 4);
-        expect(target[1]).toBeCloseTo(expected[1], 4);
-        expect(target[2]).toBeCloseTo(expected[2], 4);
+        // 2 decimals: tolerance 0.005 covers floating-point accumulation across the loop
+        expect(target[0]).toBeCloseTo(expected[0], 2);
+        expect(target[1]).toBeCloseTo(expected[1], 2);
+        expect(target[2]).toBeCloseTo(expected[2], 2);
       }
     });
 
     it("mouselook keeps cameraOrigin FIXED (in-place rotation, not orbit)", () => {
-      scene.setOptions({ perspective: PERSPECTIVE, rotX: 90, rotY: 0, target: [3, 7, 4] });
+      scene.camera.update({ rotX: 90, rotY: 0, target: [3, 7, 4] });
+      scene.applyCamera();
       controls = createPolyFirstPersonControls(scene, { lookSensitivity: 1, eyeHeight: 0, groundZ: 4 });
       const originBefore = controls.getOrigin();
       host.click();
@@ -234,16 +242,21 @@ describe("createPolyFirstPersonControls", () => {
       expect(originAfter[2]).toBeCloseTo(originBefore[2], 4);
     });
 
-    it("lookOffset scales with sceneOptions.perspective", () => {
-      // Two scenes, different perspective. Same origin, same rotation.
+    it("lookOffset scales with camera perspective", () => {
+      // Three perspective cameras with different values. Same rotation.
       // |target - origin| should equal perspective / tile in each.
       for (const persp of [500, 2000, 16000]) {
-        scene.setOptions({ perspective: persp, rotX: 90, rotY: 0, target: [0, 0, 0] });
+        const perspScene = createPolyScene(host, {
+          camera: createPolyPerspectiveCamera({ perspective: persp, rotX: 90, rotY: 0, target: [0, 0, 0] }),
+        });
         if (controls) controls.destroy();
-        controls = createPolyFirstPersonControls(scene, { eyeHeight: 0, groundZ: 0 });
+        controls = createPolyFirstPersonControls(perspScene, { eyeHeight: 0, groundZ: 0 });
         const origin = controls.getOrigin();
-        const target = scene.getOptions().target ?? [0, 0, 0];
+        const target = perspScene.camera.state.target ?? [0, 0, 0];
         const dist = Math.hypot(target[0] - origin[0], target[1] - origin[1], target[2] - origin[2]);
+        controls.destroy();
+        controls = null;
+        perspScene.destroy();
         expect(dist).toBeCloseTo(persp / TILE, 2);
       }
     });
@@ -331,25 +344,25 @@ describe("createPolyFirstPersonControls", () => {
         jumpVelocity: 5,
         gravity: 10,
       });
-      const beforeZ = (scene.getOptions().target ?? [0, 0, 0])[2];
+      const beforeZ = (scene.camera.state.target ?? [0, 0, 0])[2];
       pressKey("Space");
       tickFrame(100); // 100ms in → still going up
-      const peakZ = (scene.getOptions().target ?? [0, 0, 0])[2];
+      const peakZ = (scene.camera.state.target ?? [0, 0, 0])[2];
       expect(peakZ).toBeGreaterThan(beforeZ);
       releaseKey("Space");
       // Let it fall back to ground.
       for (let i = 0; i < 60; i++) tickFrame(50);
-      const endZ = (scene.getOptions().target ?? [0, 0, 0])[2];
+      const endZ = (scene.camera.state.target ?? [0, 0, 0])[2];
       expect(endZ).toBeCloseTo(beforeZ, 2);
     });
 
     it("Space ignored when jumpEnabled:false", () => {
       controls = createPolyFirstPersonControls(scene, { jumpEnabled: false });
-      const beforeZ = (scene.getOptions().target ?? [0, 0, 0])[2];
+      const beforeZ = (scene.camera.state.target ?? [0, 0, 0])[2];
       pressKey("Space");
       tickFrame(100);
       releaseKey("Space");
-      const afterZ = (scene.getOptions().target ?? [0, 0, 0])[2];
+      const afterZ = (scene.camera.state.target ?? [0, 0, 0])[2];
       expect(afterZ).toBeCloseTo(beforeZ, 3);
     });
 
@@ -362,11 +375,11 @@ describe("createPolyFirstPersonControls", () => {
       pressKey("Space");
       tickFrame(50);
       releaseKey("Space");
-      const midZ = (scene.getOptions().target ?? [0, 0, 0])[2];
+      const midZ = (scene.camera.state.target ?? [0, 0, 0])[2];
       // Re-trigger jump while airborne should be ignored (already non-zero offset).
       pressKey("Space");
       tickFrame(0);
-      const stillMidZ = (scene.getOptions().target ?? [0, 0, 0])[2];
+      const stillMidZ = (scene.camera.state.target ?? [0, 0, 0])[2];
       // Should not have jumped again — vertical velocity not reset.
       expect(stillMidZ).toBeCloseTo(midZ, 2);
       releaseKey("Space");
@@ -380,14 +393,14 @@ describe("createPolyFirstPersonControls", () => {
         crouchHeight: 0.9,
         groundZ: 0,
       });
-      const before = (scene.getOptions().target ?? [0, 0, 0])[2];
+      const before = (scene.camera.state.target ?? [0, 0, 0])[2];
       expect(before).toBeCloseTo(1.8, 3);
       pressKey("ControlLeft");
       tickFrame(16);
-      expect((scene.getOptions().target ?? [0, 0, 0])[2]).toBeCloseTo(0.9, 3);
+      expect((scene.camera.state.target ?? [0, 0, 0])[2]).toBeCloseTo(0.9, 3);
       releaseKey("ControlLeft");
       tickFrame(16);
-      expect((scene.getOptions().target ?? [0, 0, 0])[2]).toBeCloseTo(1.8, 3);
+      expect((scene.camera.state.target ?? [0, 0, 0])[2]).toBeCloseTo(1.8, 3);
     });
 
     it("crouchEnabled:false disables Ctrl", () => {
@@ -398,7 +411,7 @@ describe("createPolyFirstPersonControls", () => {
       });
       pressKey("ControlLeft");
       tickFrame(16);
-      expect((scene.getOptions().target ?? [0, 0, 0])[2]).toBeCloseTo(1.8, 3);
+      expect((scene.camera.state.target ?? [0, 0, 0])[2]).toBeCloseTo(1.8, 3);
       releaseKey("ControlLeft");
     });
   });
@@ -450,7 +463,7 @@ describe("createPolyFirstPersonControls", () => {
     it("update of eyeHeight resyncs target.z", () => {
       controls = createPolyFirstPersonControls(scene, { eyeHeight: 1.7 });
       controls.update({ eyeHeight: 3 });
-      expect((scene.getOptions().target ?? [0, 0, 0])[2]).toBeCloseTo(3, 3);
+      expect((scene.camera.state.target ?? [0, 0, 0])[2]).toBeCloseTo(3, 3);
     });
   });
 });

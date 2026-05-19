@@ -109,12 +109,12 @@ describe("PolyMapControlsElement", () => {
     sceneEl.appendChild(controlsEl);
     host.appendChild(sceneEl);
     const scene = sceneEl.getScene()!;
-    const beforeRotY = scene.getOptions().rotY;
+    const beforeRotY = scene.camera.state.rotY;
     sceneEl.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, pointerId: 1, isPrimary: true, clientX: 100, clientY: 100 }));
     sceneEl.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, pointerId: 1, isPrimary: true, clientX: 200, clientY: 100 }));
     sceneEl.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, pointerId: 1, isPrimary: true, clientX: 200, clientY: 100 }));
     // Pan: rotY should be unchanged
-    expect(scene.getOptions().rotY).toBe(beforeRotY);
+    expect(scene.camera.state.rotY).toBe(beforeRotY);
   });
 
   it("dolly attribute enables dolly mode (wheel changes distance not zoom)", () => {
@@ -124,11 +124,11 @@ describe("PolyMapControlsElement", () => {
     sceneEl.appendChild(controlsEl);
     host.appendChild(sceneEl);
     const scene = sceneEl.getScene()!;
-    const beforeZoom = scene.getOptions().zoom;
+    const beforeZoom = scene.camera.state.zoom;
     sceneEl.dispatchEvent(new WheelEvent("wheel", { bubbles: true, cancelable: true, deltaY: 200 }));
     // In dolly mode zoom must remain unchanged
-    expect(scene.getOptions().zoom).toBe(beforeZoom);
-    expect(scene.getOptions().distance ?? 0).toBeGreaterThan(0);
+    expect(scene.camera.state.zoom).toBe(beforeZoom);
+    expect(scene.camera.state.distance ?? 0).toBeGreaterThan(0);
   });
 
   it("min-distance and max-distance attributes are passed to controls", () => {
@@ -144,7 +144,7 @@ describe("PolyMapControlsElement", () => {
     for (let i = 0; i < 20; i++) {
       sceneEl.dispatchEvent(new WheelEvent("wheel", { bubbles: true, cancelable: true, deltaY: 1000 }));
     }
-    const distance = scene.getOptions().distance ?? 0;
+    const distance = scene.camera.state.distance ?? 0;
     expect(distance).toBeLessThanOrEqual(10);
     expect(distance).toBeGreaterThanOrEqual(5);
   });

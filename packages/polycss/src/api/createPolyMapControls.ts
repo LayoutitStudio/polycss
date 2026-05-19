@@ -93,21 +93,21 @@ export function createPolyMapControls(
     const dx = e.clientX - pointer.x;
     const dy = e.clientY - pointer.y;
     pointer = { x: e.clientX, y: e.clientY };
-    const sceneOpts = scene.getOptions();
+    const cameraState = scene.camera.state;
 
     if (e.shiftKey) {
       // Shift+left-drag orbits
       const f = invertFactor(opts.invert);
       const dX = (dx / 4) * f;
       const dY = (dy / 4) * f;
-      const rotX = Math.max(0, Math.min(100, (sceneOpts.rotX ?? 65) - dY));
-      const rotY = ((((sceneOpts.rotY ?? 45) - dX) % 360) + 360) % 360;
-      scene.setOptions({ rotX, rotY });
+      const rotX = Math.max(0, Math.min(100, (cameraState.rotX ?? 65) - dY));
+      const rotY = ((((cameraState.rotY ?? 45) - dX) % 360) + 360) % 360;
+      scene.camera.update({ rotX, rotY });
     } else {
       // Left-drag pans (slippy-map semantics)
-      const rotX = sceneOpts.rotX ?? 65;
-      const rotY = sceneOpts.rotY ?? 45;
-      const z = Math.max(0.01, sceneOpts.zoom ?? 1);
+      const rotX = cameraState.rotX ?? 65;
+      const rotY = cameraState.rotY ?? 45;
+      const z = Math.max(0.01, cameraState.zoom ?? 1);
       const cosRotXRaw = Math.cos((rotX * Math.PI) / 180);
       const cosRotX = cosRotXRaw >= 0 ? Math.max(0.1, cosRotXRaw) : Math.min(-0.1, cosRotXRaw);
       const cZ = Math.cos((rotY * Math.PI) / 180);
@@ -115,9 +115,10 @@ export function createPolyMapControls(
       const k = z * BASE_TILE;
       const targetD0 =  (dx * sZ - dy * cZ / cosRotX) / k;
       const targetD1 = -(dx * cZ + dy * sZ / cosRotX) / k;
-      const t = sceneOpts.target ?? [0, 0, 0];
-      scene.setOptions({ target: [t[0] + targetD0, t[1] + targetD1, t[2]] });
+      const t = cameraState.target ?? [0, 0, 0];
+      scene.camera.update({ target: [t[0] + targetD0, t[1] + targetD1, t[2]] });
     }
+    scene.applyCamera();
     emitChange(snapshot);
   };
 
@@ -153,10 +154,11 @@ export function createPolyMapControls(
     const f = invertFactor(opts.invert);
     const dX = (dx / 4) * f;
     const dY = (dy / 4) * f;
-    const sceneOpts = scene.getOptions();
-    const rotX = Math.max(0, Math.min(100, (sceneOpts.rotX ?? 65) - dY));
-    const rotY = ((((sceneOpts.rotY ?? 45) - dX) % 360) + 360) % 360;
-    scene.setOptions({ rotX, rotY });
+    const cameraState = scene.camera.state;
+    const rotX = Math.max(0, Math.min(100, (cameraState.rotX ?? 65) - dY));
+    const rotY = ((((cameraState.rotY ?? 45) - dX) % 360) + 360) % 360;
+    scene.camera.update({ rotX, rotY });
+    scene.applyCamera();
     emitChange(snapshot);
   };
 

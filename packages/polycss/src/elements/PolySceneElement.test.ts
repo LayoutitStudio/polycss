@@ -125,12 +125,13 @@ describe("PolySceneElement", () => {
       expect(sceneEl.style.transform).toContain("scale(1.5)");
     });
 
-    it("ignores invalid number attribute values", () => {
+    it("ignores invalid perspective value and falls back to orthographic stand-in", () => {
       const el = document.createElement("poly-scene") as PolySceneElement;
       el.setAttribute("perspective", "not-a-number");
       host.appendChild(el);
       const sceneEl = el.querySelector(".polycss-scene") as HTMLElement;
-      expect(sceneEl.style.perspective).toBe("");
+      // Invalid perspective → implicit orthographic camera → 1000000px stand-in
+      expect(sceneEl.style.perspective).toBe("1000000px");
     });
 
     it("parses directional + ambient light attributes independently", () => {

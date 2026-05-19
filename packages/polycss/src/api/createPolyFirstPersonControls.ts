@@ -215,17 +215,18 @@ export function createPolyFirstPersonControls(
   function lookOffset(): number {
     // Distance from camera origin to derived target in world units. For the
     // polycss perspective viewer to coincide with `cameraOrigin`, this must
-    // equal `perspective / tile`. If perspective is `false` (orthographic)
-    // polycss internally clamps to a 1e6 px value — use a sane fallback so
-    // the camera doesn't end up infinitely far from its target.
-    const persp = scene.getOptions().perspective;
-    const n = typeof persp === "number" && persp > 0 ? persp : 2000;
+    // equal `perspective / tile`. If the camera is orthographic (perspectiveStyle
+    // === "none") use a sane fallback so the camera doesn't end up infinitely
+    // far from its target.
+    const perspStyle = scene.camera.perspectiveStyle;
+    const px = perspStyle === "none" ? 0 : parseFloat(perspStyle);
+    const n = Number.isFinite(px) && px > 0 ? px : 2000;
     return n / BASE_TILE;
   }
 
   function deriveTarget(): [number, number, number] {
-    const sceneOpts = scene.getOptions();
-    const f = forwardDir(sceneOpts.rotX ?? 90, sceneOpts.rotY ?? 0);
+    const cameraState = scene.camera.state;
+    const f = forwardDir(cameraState.rotX ?? 90, cameraState.rotY ?? 0);
     const d = lookOffset();
     return [
       cameraOrigin[0] + f[0] * d,
@@ -236,17 +237,17 @@ export function createPolyFirstPersonControls(
 
   function syncTargetFromOrigin(): void {
     const t = deriveTarget();
-    scene.setOptions({ target: t });
+    scene.camera.update({ target: t });
+    scene.applyCamera();
   }
 
-  // On attach, seed `cameraOrigin` from whatever the scene currently has as
+  // On attach, seed `cameraOrigin` from whatever the camera currently has as
   // target — the user's previous control mode (orbit/pan) was treating target
   // as the visual center. We adopt that as the FPV camera position, then snap
   // its Z to eye height above the ground plane. After this, FPV is fully
   // authoritative: we only ever write target as a derived value.
   function initializeOriginFromTarget(): void {
-    const sceneOpts = scene.getOptions();
-    const t = sceneOpts.target ?? [0, 0, 0];
+    const t = scene.camera.state.target ?? [0, 0, 0];
     cameraOrigin = [t[0], t[1], opts.groundZ + opts.eyeHeight];
     syncTargetFromOrigin();
   }
@@ -277,13 +278,13 @@ export function createPolyFirstPersonControls(
     const dx = e.movementX ?? 0;
     const dy = e.movementY ?? 0;
     if (dx === 0 && dy === 0) return;
-    const sceneOpts = scene.getOptions();
+    const cameraState = scene.camera.state;
     const sens = opts.lookSensitivity;
     const dyDir = opts.invertY ? -1 : 1;
     // Yaw: mouse right → look right → rotY decreases (world rotates CW, camera CCW).
-    const rotY = ((((sceneOpts.rotY ?? 0) - dx * sens) % 360) + 360) % 360;
+    const rotY = ((((cameraState.rotY ?? 0) - dx * sens) % 360) + 360) % 360;
     // Pitch: mouse down → look down → rotX decreases below 90 (rotX=90 horizontal).
-    let rotX = (sceneOpts.rotX ?? 90) - dy * sens * dyDir;
+    let rotX = (cameraState.rotX ?? 90) - dy * sens * dyDir;
     if (rotX < opts.minPitch) rotX = opts.minPitch;
     else if (rotX > opts.maxPitch) rotX = opts.maxPitch;
     // Update rotation first, then re-derive target so it lives at
@@ -297,7 +298,8 @@ export function createPolyFirstPersonControls(
       cameraOrigin[1] + f[1] * d,
       cameraOrigin[2] + f[2] * d,
     ];
-    scene.setOptions({ rotX, rotY, target });
+    scene.camera.update({ rotX, rotY, target });
+    scene.applyCamera();
     emitChange(snapshot);
   };
 
@@ -353,7 +355,7 @@ export function createPolyFirstPersonControls(
 
     if (opts.enabled) {
       let dirty = false;
-      const sceneOpts = scene.getOptions();
+      const cameraState = scene.camera.state;
 
       // ── Move (horizontal): WASD walks the camera origin on the XY plane. ──
       if (opts.moveEnabled) {
@@ -366,7 +368,7 @@ export function createPolyFirstPersonControls(
           else if (LEFT_KEYS.has(code)) mr -= 1;
         }
         if (mf !== 0 || mr !== 0) {
-          const rotY = sceneOpts.rotY ?? 0;
+          const rotY = cameraState.rotY ?? 0;
           const r = (rotY * Math.PI) / 180;
           // Horizontal forward (yaw projection onto world XY), independent of
           // pitch — matches three.js PointerLockControls.moveForward which
@@ -411,7 +413,8 @@ export function createPolyFirstPersonControls(
         // `cameraOrigin` but target would stay put, and the visible center
         // would drift behind us.
         const target = deriveTarget();
-        scene.setOptions({ target });
+        scene.camera.update({ target });
+        scene.applyCamera();
         emitChange(snapshot);
       }
     }

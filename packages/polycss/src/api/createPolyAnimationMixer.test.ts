@@ -6,6 +6,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { createPolyScene } from "./createPolyScene";
 import { createPolyAnimationMixer, LoopOnce } from "@layoutit/polycss-core";
 import type { ParseAnimationController, ParseAnimationClip, Polygon } from "@layoutit/polycss-core";
+import { createPolyOrthographicCamera } from "./createPolyCamera";
 
 const TRI: Polygon = {
   vertices: [[0, 0, 0], [1, 0, 0], [0, 1, 0]],
@@ -44,7 +45,7 @@ describe("createPolyAnimationMixer with PolyMeshHandle", () => {
   });
 
   it("mixer.update() calls mesh.setPolygons() on a playing action", () => {
-    const scene = createPolyScene(host, {});
+    const scene = createPolyScene(host, { camera: createPolyOrthographicCamera() });
     const parseResult = {
       polygons: [TRI],
       objectUrls: [],
@@ -79,7 +80,7 @@ describe("createPolyAnimationMixer with PolyMeshHandle", () => {
   });
 
   it("mixer updates mesh polygons to sampled values", () => {
-    const scene = createPolyScene(host, {});
+    const scene = createPolyScene(host, { camera: createPolyOrthographicCamera() });
     const parseResult = {
       polygons: [TRI],
       objectUrls: [],
@@ -114,7 +115,7 @@ describe("createPolyAnimationMixer with PolyMeshHandle", () => {
   });
 
   it("stopAllAction stops mesh updates", () => {
-    const scene = createPolyScene(host, {});
+    const scene = createPolyScene(host, { camera: createPolyOrthographicCamera() });
     const parseResult = {
       polygons: [TRI],
       objectUrls: [],
@@ -139,7 +140,7 @@ describe("createPolyAnimationMixer with PolyMeshHandle", () => {
   });
 
   it("LoopOnce action stops after one full duration", () => {
-    const scene = createPolyScene(host, {});
+    const scene = createPolyScene(host, { camera: createPolyOrthographicCamera() });
     const parseResult = {
       polygons: [TRI],
       objectUrls: [],

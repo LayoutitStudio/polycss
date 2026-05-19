@@ -7,6 +7,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createPolyScene, type PolySceneHandle } from "./createPolyScene";
 import { createPolyMapControls, type PolyMapControlsHandle } from "./createPolyMapControls";
+import { createPolyOrthographicCamera } from "./createPolyCamera";
 
 type Frame = (now: number) => void;
 let rafQueue: Frame[] = [];
@@ -63,7 +64,7 @@ describe("createPolyMapControls", () => {
   beforeEach(() => {
     host = document.createElement("div");
     document.body.appendChild(host);
-    scene = createPolyScene(host, { rotX: 65, rotY: 45, zoom: 1 });
+    scene = createPolyScene(host, { camera: createPolyOrthographicCamera({ rotX: 65, rotY: 45, zoom: 1 }) });
     controls = null;
     installManualRaf();
   });
@@ -94,30 +95,30 @@ describe("createPolyMapControls", () => {
   describe("pan drag", () => {
     it("left-drag moves target (pan), does not change rotY", () => {
       controls = createPolyMapControls(scene);
-      const beforeRotY = scene.getOptions().rotY ?? 45;
-      const beforeTarget = scene.getOptions().target ?? [0, 0, 0];
+      const beforeRotY = scene.camera.state.rotY ?? 45;
+      const beforeTarget = scene.camera.state.target ?? [0, 0, 0];
       dispatchPointer(host, "pointerdown", { x: 100, y: 100 });
       dispatchPointer(host, "pointermove", { x: 200, y: 100 });
       dispatchPointer(host, "pointerup", { x: 200, y: 100 });
       // rotY should be unchanged (pan, not orbit)
-      expect(scene.getOptions().rotY).toBe(beforeRotY);
+      expect(scene.camera.state.rotY).toBe(beforeRotY);
       // target should have changed
-      const afterTarget = scene.getOptions().target ?? [0, 0, 0];
+      const afterTarget = scene.camera.state.target ?? [0, 0, 0];
       expect(afterTarget[0] !== beforeTarget[0] || afterTarget[1] !== beforeTarget[1]).toBe(true);
     });
 
     it("Shift+left-drag orbits (rotY changes, target unchanged)", () => {
       controls = createPolyMapControls(scene);
-      const beforeRotY = scene.getOptions().rotY ?? 45;
-      const beforeTarget = scene.getOptions().target ?? [0, 0, 0];
+      const beforeRotY = scene.camera.state.rotY ?? 45;
+      const beforeTarget = scene.camera.state.target ?? [0, 0, 0];
       dispatchPointer(host, "pointerdown", { x: 100, y: 100 });
       dispatchPointer(host, "pointermove", { x: 200, y: 100, shiftKey: true });
       dispatchPointer(host, "pointerup", { x: 200, y: 100 });
       // rotY should have changed (orbit on shift+drag)
-      const afterRotY = scene.getOptions().rotY ?? 0;
+      const afterRotY = scene.camera.state.rotY ?? 0;
       expect(afterRotY).not.toBe(beforeRotY);
       // target should be unchanged
-      const afterTarget = scene.getOptions().target ?? [0, 0, 0];
+      const afterTarget = scene.camera.state.target ?? [0, 0, 0];
       expect(afterTarget[0]).toBeCloseTo(beforeTarget[0], 4);
       expect(afterTarget[1]).toBeCloseTo(beforeTarget[1], 4);
     });
@@ -127,17 +128,17 @@ describe("createPolyMapControls", () => {
   describe("wheel zoom", () => {
     it("zoom in on negative deltaY", () => {
       controls = createPolyMapControls(scene);
-      const before = scene.getOptions().zoom ?? 1;
+      const before = scene.camera.state.zoom ?? 1;
       dispatchWheel(host, -100);
-      expect(scene.getOptions().zoom ?? 0).toBeGreaterThan(before);
+      expect(scene.camera.state.zoom ?? 0).toBeGreaterThan(before);
     });
 
     it("dolly:true changes distance instead of zoom", () => {
       controls = createPolyMapControls(scene, { dolly: true });
-      const beforeZoom = scene.getOptions().zoom ?? 1;
+      const beforeZoom = scene.camera.state.zoom ?? 1;
       dispatchWheel(host, 100);
-      expect(scene.getOptions().zoom).toBe(beforeZoom);
-      expect(scene.getOptions().distance ?? 0).toBeGreaterThan(0);
+      expect(scene.camera.state.zoom).toBe(beforeZoom);
+      expect(scene.camera.state.distance ?? 0).toBeGreaterThan(0);
     });
   });
 
@@ -150,9 +151,9 @@ describe("createPolyMapControls", () => {
 
     it("rotates rotY per tick", () => {
       controls = createPolyMapControls(scene, { animate: { speed: 1 } });
-      const start = scene.getOptions().rotY ?? 45;
+      const start = scene.camera.state.rotY ?? 45;
       tickFrame(16.67);
-      expect(scene.getOptions().rotY).toBeCloseTo(start + 1, 4);
+      expect(scene.camera.state.rotY).toBeCloseTo(start + 1, 4);
     });
   });
 
@@ -162,10 +163,10 @@ describe("createPolyMapControls", () => {
       controls = createPolyMapControls(scene, { animate: { speed: 1 } });
       controls.pause();
       expect(rafQueue.length).toBe(0);
-      const before = scene.getOptions().rotY;
+      const before = scene.camera.state.rotY;
       dispatchPointer(host, "pointerdown", { x: 100, y: 100 });
       dispatchPointer(host, "pointermove", { x: 200, y: 100 });
-      expect(scene.getOptions().rotY).toBe(before);
+      expect(scene.camera.state.rotY).toBe(before);
     });
 
     it("resume() re-attaches after pause()", () => {
