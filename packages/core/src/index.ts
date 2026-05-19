@@ -1,100 +1,176 @@
-// @layoutit/voxcss-core — Pure-math voxel rendering engine (zero browser globals)
+// @layoutit/polycss-core — Pure-math polygon rendering engine (zero browser globals).
+//
+// Public exports define the supported core package surface. Anything not
+// exported here is implementation detail.
 
+// ── Types ─────────────────────────────────────────────────────────
 export type {
-  Voxel,
-  VoxelGrid,
-  CubeFace,
-  GridContext,
-  WallsMask,
-  OffsetMap,
-  ProjectionMode,
-  FaceAppearanceOverride
+  Vec2,
+  Vec3,
+  TextureTriangle,
+  Polygon,
+  PolyMaterial,
+  PolyDirectionalLight,
+  PolyAmbientLight,
+  PolyTextureLightingMode,
+  MeshResolution,
 } from "./types";
+export { DEFAULT_PROJECTION } from "./types";
+
+// ── Scene context + normalization ────────────────────────────────
 export {
-  CUBE_FACES, DEFAULT_WALLS, DEFAULT_OFFSETS, BASE_TILE, SCENE_CLASS,
-  DEFAULT_WALL_COLOR, LAYER_CLASS, FLOOR_CLASS, FACE_CLASS, CUBE_CLASS,
-  WALL_CLASS, CEILING_CLASS, STYLE_ID
-} from "./types";
+  buildSceneContext,
+  computeSceneBbox,
+  normalizePolygons,
+} from "./scene/context";
+export type {
+  SceneContext,
+  SceneContextBuildArgs,
+  SceneContextBuildResult,
+  SceneBbox,
+  NormalizeResult,
+} from "./scene/context";
 
-export { buildSceneContext, getVoxelBounds, wallMasksEqual, computeWallMask } from "./scene/context";
-export type { SceneContextBuildResult } from "./scene/context";
-export { computeVisibleFaces } from "./scene/visibility";
+// ── Polygon geometry helper ──────────────────────────────────────
+export { polygonFaces, computeTexturePaintMetrics } from "./scene/polygonGeometry";
+export type {
+  PolygonFace,
+  TexturePaintMetrics,
+  TexturePaintMetricsOptions,
+} from "./scene/polygonGeometry";
 
-export { createIsometricCamera, normalizeInvertMultiplier } from "./camera/camera";
-export type { CameraState, CameraHandle, AutoRotateOption, AutoRotateConfig } from "./camera/camera";
+// ── Rotation math ────────────────────────────────────────────────
+export { rotateVec3, inverseRotateVec3 } from "./math/rotation";
+export {
+  quatFromAxisAngle,
+  quatFromEulerXYZ,
+  quatMultiply,
+  eulerXYZFromQuat,
+  QUAT_IDENTITY,
+} from "./math/quaternion";
+export type { Quat } from "./math/quaternion";
 
+// ── Camera ────────────────────────────────────────────────────────
+export {
+  createIsometricCamera,
+  normalizeInvertMultiplier,
+  DEFAULT_CAMERA_STATE,
+  BASE_TILE,
+} from "./camera/camera";
+export type {
+  CameraState,
+  CameraHandle,
+  AutoRotateOption,
+  AutoRotateConfig,
+  CameraStyleInput,
+} from "./camera/camera";
+
+// ── Color & lighting ─────────────────────────────────────────────
 export {
   parseColor,
   shadeColor,
-  shadeCubeFace,
-  shadeWallFace,
-  getCubeFaceLightDelta,
   computeShapeLighting,
-  setColorResolver
 } from "./color/lighting";
-export type { ParsedColor, ShapeType, ShapeSurfaceLighting, ColorResolver } from "./color/lighting";
+export type { ParsedColor } from "./color/lighting";
 
 export {
   parsePureColor,
   parseHexColor,
   parseRgbColor,
   clampChannel,
-  formatColor
+  formatColor,
 } from "./color/color";
 
+// ── Mesh post-processing ──────────────────────────────────────────
+export { mergePolygons } from "./merge/mergePolygons";
 export {
-  computeCubeFaceAppearance,
-  getCubeFaceAppearanceSignature
-} from "./color/faceAppearance";
-export type { CubeFaceAppearance } from "./color/faceAppearance";
-
-export { mergeVoxels } from "./merge/mergeVoxels";
-export {
-  normalizeMergeVoxelsOption,
-  is2dMerge,
-  is3dMerge
-} from "./merge/mergeVoxelsOption";
-export type { MergeVoxelsOption } from "./merge/mergeVoxelsOption";
-
-export {
-  buildSlicePlan,
-  buildFaceDataFromSnapshot,
-  buildSliceCacheKey,
-  buffersEqual,
-  holeFillVariants,
-  runRects,
-  mergeAlignedRects,
-  verify,
-  wallsToSig,
-  SLICE_RENDERER_VERSION,
-  AXIS_ORDER,
-  FACE_ORDER,
-  NEXT_LAYER_STEP
-} from "./merge/slicePlanner";
+  dedupeOverlappingPolygons,
+  findOverlappingPolygonDuplicates,
+} from "./merge/dedupeOverlappingPolygons";
+export type { DedupeOverlappingPolygonsOptions } from "./merge/dedupeOverlappingPolygons";
+export { coverPlanarPolygons } from "./merge/coverPlanarPolygons";
+export type { CoverPlanarPolygonsOptions } from "./merge/coverPlanarPolygons";
+export { optimizeMeshPolygons } from "./merge/optimizePolygons";
 export type {
-  PlaneAxis,
-  FaceKey,
-  FaceBuffer,
-  FaceData,
-  Brush,
-  SlicePlan
-} from "./merge/slicePlanner";
-
-export { parseMagicaVoxel } from "./parser/parseMagicaVoxel";
-export type { MagicaVoxelParseResult } from "./parser/parseMagicaVoxel";
-
+  ApproximateMergeOptions,
+  OptimizeMeshPolygonsOptions,
+} from "./merge/optimizePolygons";
+export { cullInteriorPolygons } from "./cull/cullInteriorPolygons";
+export type { CullInteriorOptions } from "./cull/cullInteriorPolygons";
 export {
-  encodeRgbaToPng,
-  encodeRgbToPng
-} from "./encoding/png";
-
-export {
-  sceneController
-} from "./controller/sceneController";
+  CAMERA_BACKFACE_CULL_EPS,
+  VOXEL_CAMERA_CULL_AXIS_EPS,
+  VOXEL_CAMERA_CULL_NORMAL_LIMIT,
+  cameraCullNormalGroups,
+  cameraCullNormalGroupsFromPolygons,
+  cameraCullNormalKey,
+  cameraCullVisibleSignature,
+  cameraFacingDepth,
+  isAxisAlignedSurfaceNormal,
+  isVoxelCameraCullableNormalGroups,
+  normalFacesCamera,
+  polygonCssSurfaceNormal,
+  polygonFacesCamera,
+} from "./cull/cameraBackfaceCulling";
 export type {
-  SceneController,
-  SceneControllerOptions,
-  PointerInput,
-  SceneState,
-  ControllerSnapshot
-} from "./controller/sceneController";
+  CameraCullNormalGroup,
+  CameraCullRotation,
+} from "./cull/cameraBackfaceCulling";
+
+// ── Helper geometry (boxes, axes, light marker, transform arrows / rings) ─
+export { axesHelperPolygons, boxPolygons, arrowPolygons, ringPolygons, ringQuadPolygons, planePolygons, octahedronPolygons } from "./helpers";
+export type { AxesHelperOptions, BoxFace, BoxFaceOptions, BoxPolygonsOptions, ArrowPolygonsOptions, RingPolygonsOptions, RingQuadPolygonsOptions, PlanePolygonsOptions, OctahedronPolygonsOptions } from "./helpers";
+
+// ── Animation ─────────────────────────────────────────────────────
+export {
+  createPolyAnimationMixer,
+  LoopOnce,
+  LoopRepeat,
+  LoopPingPong,
+} from "./animation";
+export type {
+  PolyAnimationClip,
+  PolyAnimationAction,
+  PolyAnimationMixer,
+  PolyAnimationTarget,
+  LoopMode,
+} from "./animation";
+
+// ── Parsers ───────────────────────────────────────────────────────
+export type {
+  ParseAnimationClip,
+  ParseAnimationController,
+  PolyVoxelCell,
+  PolyVoxelSource,
+  ParseResult,
+} from "./parser/types";
+export { parseObj } from "./parser/parseObj";
+export type { ObjParseOptions } from "./parser/parseObj";
+export { parseMtl } from "./parser/parseMtl";
+export type { MtlParseResult } from "./parser/parseMtl";
+export { parseGltf } from "./parser/parseGltf";
+export type { GltfParseOptions } from "./parser/parseGltf";
+export {
+  bakeSolidTextureSamples,
+  bakeSolidTextureSampledPolygons,
+} from "./parser/solidTextureSamples";
+export type { SolidTextureSampleOptions } from "./parser/solidTextureSamples";
+export { parseVox } from "./parser/parseVox";
+export type { VoxParseOptions } from "./parser/parseVox";
+export {
+  buildFaceDataFromVoxelSource as buildPolyVoxelFaceData,
+  buildSlicePlan as buildPolyVoxelSlicePlan,
+  NEXT_LAYER_STEP as POLY_VOXEL_NEXT_LAYER_STEP,
+} from "./voxel/voxelSlicePlanner";
+export type {
+  Brush as PolyVoxelBrush,
+  FaceBuffer as PolyVoxelFaceBuffer,
+  FaceData as PolyVoxelFaceData,
+  FaceKey as PolyVoxelFaceKey,
+  PlaneAxis as PolyVoxelPlaneAxis,
+  PolyVoxelFace,
+  PolyVoxelWallsMask,
+  SlicePlan as PolyVoxelSlicePlan,
+} from "./voxel/voxelSlicePlanner";
+export { loadMesh } from "./parser/loadMesh";
+export type { LoadMeshOptions } from "./parser/loadMesh";

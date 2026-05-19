@@ -1,28 +1,185 @@
-// Register DOM-based color resolver for named CSS colors
-import { setColorResolver } from "@layoutit/voxcss-core";
-import { resolveColor } from "./styles";
-setColorResolver(resolveColor);
+// @layoutit/polycss-react — React bindings for the polycss CSS-based polygon mesh
+// rendering engine.
+//
+// Public exports define the supported React package surface. Anything not
+// exported here is an implementation detail.
 
-export { VoxCamera, useCamera, VoxCameraContext, useCameraContext } from "./camera";
-export type { VoxCameraProps, UseCameraOptions, UseCameraResult, VoxCameraContextValue } from "./camera";
-
-export { VoxScene, VoxLayer, useSceneContext } from "./scene";
-export type { VoxSceneProps, UseSceneContextOptions } from "./scene";
-
-export { VoxCube, VoxShape } from "./shapes";
-
-export { useSliceBrushes, SliceZBrushes, SliceAxisHost } from "./slice";
-export type { VoxSliceRendererProps, SliceBrushData } from "./slice";
-
-export { injectBaseStyles } from "./styles";
-
-// Re-export commonly used core types for convenience
+// ── Components & hooks ─────────────────────────────────────────────────
+export {
+  PolyPerspectiveCamera,
+  PolyOrthographicCamera,
+  PolyCamera,
+  usePolyCamera,
+  PolyCameraContext,
+  useCameraContext,
+} from "./camera";
 export type {
-  Voxel,
-  VoxelGrid,
-  CubeFace,
-  GridContext,
-  ProjectionMode,
+  PolyPerspectiveCameraProps,
+  PolyOrthographicCameraProps,
+  PolyCameraProps,
+  UseCameraOptions,
+  UseCameraResult,
+  PolyCameraContextValue,
+} from "./camera";
+
+export { PolyScene, PolyMesh, PolyGround, usePolySceneContext, usePolyMesh, findPolyMeshHandle, pointInMeshElement, findMeshUnderPoint, usePolyMaterial } from "./scene";
+export type {
+  PolySceneProps,
+  PolyMeshProps,
+  PolyGroundProps,
+  UseSceneContextOptions,
+  UseSceneContextResult,
+  UseMeshResult,
+  UseMeshOptions,
+  PolyMeshHandle,
+  PolyPointerEvent,
+  PolyMouseEvent,
+  PolyWheelEvent,
+  PolyEventHandler,
+  InteractionProps,
+  PolyRenderStrategy,
+  PolyRenderStrategiesOption,
+} from "./scene";
+
+export { Poly } from "./shapes";
+export type { PolyProps, TransformProps, DOMPassthroughProps } from "./shapes";
+
+export { PolyFirstPersonControls, PolyOrbitControls, PolyMapControls, PolyTransformControls } from "./controls";
+export type {
+  PolyFirstPersonControlsProps,
+  PolyFirstPersonControlsOptions,
+  PolyFirstPersonControlsHandle,
+  PolyOrbitControlsProps,
+  PolyOrbitControlsCamera,
+  PolyMapControlsProps,
+  PolyMapControlsCamera,
+  PolyControlsAnimateOptions,
+  PolyControlsCamera,
+  SharedControlsProps,
+  PolyTransformControlsProps,
+  PolyTransformControlsObject,
+  PolyTransformControlsObjectChangeEvent,
+} from "./controls";
+
+export { PolySelect, usePolySelect, usePolySelectionApi } from "./select";
+export type { PolySelectProps, PolySelectionApi } from "./select";
+
+export { PolyAxesHelper, PolyDirectionalLightHelper } from "./helpers";
+export type {
+  PolyAxesHelperProps,
+  PolyDirectionalLightHelperProps,
+} from "./helpers";
+
+export { injectPolyBaseStyles } from "./styles";
+
+export { usePolyAnimation } from "./animation/usePolyAnimation";
+export type { UsePolyAnimationResult } from "./animation/usePolyAnimation";
+
+// ── Re-exports from @layoutit/polycss-core for convenience ──────────────────
+export type {
+  Vec2,
+  Vec3,
+  Polygon,
+  PolyMaterial,
+  PolyDirectionalLight,
+  PolyAmbientLight,
+  PolyTextureLightingMode,
+  MeshResolution,
+  ParseAnimationClip,
+  ParseAnimationController,
+  ParseResult,
+  PolyAnimationClip,
+  PolyAnimationAction,
+  PolyAnimationMixer,
+  PolyAnimationTarget,
+  LoopMode,
+  ObjParseOptions,
+  GltfParseOptions,
+  MtlParseResult,
+  NormalizeResult,
+  ParsedColor,
+  TextureTriangle,
+  PolygonFace,
+  SceneBbox,
+  SceneContext,
+  SceneContextBuildArgs,
+  SceneContextBuildResult,
+  CameraState,
+  CameraHandle,
+  CameraStyleInput,
   AutoRotateOption,
-  MergeVoxelsOption,
-} from "@layoutit/voxcss-core";
+  AutoRotateConfig,
+  AxesHelperOptions,
+  BoxFace,
+  BoxFaceOptions,
+  BoxPolygonsOptions,
+  ArrowPolygonsOptions,
+  RingPolygonsOptions,
+  OctahedronPolygonsOptions,
+  LoadMeshOptions,
+  VoxParseOptions,
+  SolidTextureSampleOptions,
+  TexturePaintMetrics,
+  TexturePaintMetricsOptions,
+  CoverPlanarPolygonsOptions,
+  CullInteriorOptions,
+  CameraCullNormalGroup,
+  CameraCullRotation,
+  ApproximateMergeOptions,
+  OptimizeMeshPolygonsOptions,
+} from "@layoutit/polycss-core";
+export {
+  CAMERA_BACKFACE_CULL_EPS,
+  VOXEL_CAMERA_CULL_AXIS_EPS,
+  VOXEL_CAMERA_CULL_NORMAL_LIMIT,
+  normalizePolygons,
+  mergePolygons,
+  coverPlanarPolygons,
+  optimizeMeshPolygons,
+  cullInteriorPolygons,
+  cameraCullNormalGroups,
+  cameraCullNormalGroupsFromPolygons,
+  cameraCullNormalKey,
+  cameraCullVisibleSignature,
+  cameraFacingDepth,
+  isAxisAlignedSurfaceNormal,
+  isVoxelCameraCullableNormalGroups,
+  normalFacesCamera,
+  polygonCssSurfaceNormal,
+  polygonFacesCamera,
+  parseObj,
+  parseMtl,
+  parseGltf,
+  bakeSolidTextureSamples,
+  bakeSolidTextureSampledPolygons,
+  loadMesh,
+  createIsometricCamera,
+  parseVox,
+  polygonFaces,
+  computeTexturePaintMetrics,
+  computeShapeLighting,
+  parseColor,
+  parsePureColor,
+  parseHexColor,
+  parseRgbColor,
+  formatColor,
+  clampChannel,
+  shadeColor,
+  rotateVec3,
+  inverseRotateVec3,
+  axesHelperPolygons,
+  boxPolygons,
+  arrowPolygons,
+  ringPolygons,
+  octahedronPolygons,
+  buildSceneContext,
+  computeSceneBbox,
+  BASE_TILE,
+  DEFAULT_CAMERA_STATE,
+  DEFAULT_PROJECTION,
+  normalizeInvertMultiplier,
+  createPolyAnimationMixer,
+  LoopOnce,
+  LoopRepeat,
+  LoopPingPong,
+} from "@layoutit/polycss-core";

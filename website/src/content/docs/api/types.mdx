@@ -1,101 +1,269 @@
 ---
 title: Core Types
-description: TypeScript type definitions for voxels, camera state, walls, projections, and more.
+description: TypeScript type definitions for polygons, camera state, lighting, and parse results.
 ---
 
-All types are exported from `@layoutit/voxcss` and `@layoutit/voxcss-core`.
+All types are exported from `@layoutit/polycss-react`, `@layoutit/polycss-vue`, `@layoutit/polycss`, and `@layoutit/polycss-core`.
 
-## `Voxel`
+## `Polygon`
 
-Represents a single voxel or a merged region of voxels. Use `x2`/`y2`/`z2` to define multi-cell blocks.
+The atomic renderable primitive. Each polygon becomes one atlas-backed `<i>` DOM element for textured and flat-color faces.
 
 ```ts
-interface Voxel {
-  x: number;
-  y: number;
-  z: number;
-  x2?: number;
-  y2?: number;
-  z2?: number;
+interface Polygon {
+  /** Three or more [x, y, z] world-space points, CCW winding from the outside. */
+  vertices: [number, number, number][];
+  /** CSS color. Falls back to "#cccccc" when neither color nor texture is set. */
   color?: string;
+  /** Image URL for UV-mapped rendering. When set with `uvs`, the renderer
+   *  applies an affine UV transform. Without `uvs`, single-tile fill. */
   texture?: string;
-  shape?: "cube" | "ramp" | "wedge" | "spike";
-  rot?: number;
-  data?: Record<string, unknown>;
+  /** Shared material. `material.texture` takes precedence over `texture`. */
+  material?: PolyMaterial;
+  /** UV coordinates: one per vertex. Must match vertices.length.
+   *  Mismatched arrays are stripped during normalizePolygons(). */
+  uvs?: [number, number][];
+  /** User-controlled metadata. Reflected to the DOM as data-* attributes
+   *  when rendering via <Poly>. Keys must have string, number, or boolean values. */
+  data?: Record<string, string | number | boolean>;
 }
 ```
 
 ---
 
-## `CameraState`
+## `PolyMaterial`
 
-Describes the full state of a camera viewport.
+Shared texture material referenced by one or more polygons.
 
 ```ts
-interface CameraState {
-  zoom: number;        // Default: 0.65
-  pan: number;         // Default: 0
-  tilt: number;        // Default: 0
-  rotX: number;        // Default: 65
-  rotY: number;        // Default: 45
-  depthOffset: number; // Default: 20
+interface PolyMaterial {
+  /** Image source. Anything CSS background-image: url(...) can use. */
+  texture: string;
+  /** Optional stable identity for renderer-side dedupe/cache paths. */
+  key?: string;
 }
 ```
 
 ---
 
-## `WallsMask`
+## `PolyDirectionalLight`
 
-Controls which walls are visible around the scene. Each property corresponds to a face of the bounding box.
+Controls the directional light for the scene.
 
 ```ts
-interface WallsMask {
-  t: boolean;   // Top
-  b: boolean;   // Bottom
-  bl: boolean;  // Back-left
-  br: boolean;  // Back-right
-  fl: boolean;  // Front-left
-  fr: boolean;  // Front-right
+interface PolyDirectionalLight {
+  /** Direction the light shines toward. Normalization is handled internally. */
+  direction: [number, number, number];
+  /** Directional light color hex (default: "#ffffff"). */
+  color?: string;
+  /** Directional light intensity (default: 1). */
+  intensity?: number;
 }
 ```
 
 ---
 
-## `ProjectionMode`
+## `PolyAmbientLight`
 
-The projection style used for rendering.
+Ambient-only light (no directional component).
 
 ```ts
-type ProjectionMode = "cubic" | "dimetric";
+interface PolyAmbientLight {
+  /** Ambient light tint hex (default: "#ffffff"). */
+  color?: string;
+  /** Ambient light intensity (default: 0.4). */
+  intensity?: number;
+}
 ```
-
-- **`"cubic"`** — Standard isometric-like projection.
-- **`"dimetric"`** — Dimetric projection with adjusted axis ratios.
 
 ---
 
-## `MergeVoxelsOption`
+## `PolyTextureLightingMode`
 
-Controls whether adjacent same-color voxels are merged to reduce DOM nodes.
+Controls how texture lighting is applied to atlas-backed polygons.
 
 ```ts
-type MergeVoxelsOption = false | "2d" | "3d";
+type PolyTextureLightingMode = "baked" | "dynamic";
 ```
 
-- **`false`** — No merging, one element per voxel.
-- **`"2d"`** — Merge voxels within each layer.
-- **`"3d"`** — Merge voxels across layers for maximum reduction.
+---
+
+## `Vec2`
+
+A 2D point or UV coordinate.
+
+```ts
+type Vec2 = [number, number];
+```
+
+---
+
+## `Vec3`
+
+A 3D point or direction.
+
+```ts
+type Vec3 = [number, number, number];
+```
+
+---
+
+## `ParseResult`
+
+Unified return shape from all mesh parsers (`parseObj`, `parseGltf`, `parseVox`, `loadMesh`).
+
+```ts
+interface ParseResult {
+  /** Parsed and validated polygon array, ready for rendering. */
+  polygons: Polygon[];
+  /** Blob URLs minted during parse (e.g. embedded GLB textures).
+   *  Revoked when dispose() is called. */
+  objectUrls: string[];
+  /** Revoke all objectUrls. Idempotent. Safe to call on unmount. */
+  dispose: () => void;
+  /** Non-fatal warnings raised during parse (dropped polygons, UV mismatches, etc.). */
+  warnings: string[];
+  /** Optional animation sampler for glTF/GLB files with usable animation clips. */
+  animation?: ParseAnimationController;
+  /** Optional format-specific metadata. */
+  metadata?: {
+    triangleCount?: number;
+    meshes?: string[];
+    materials?: string[];
+    animations?: ParseAnimationClip[];
+    sourceBytes?: number;
+  };
+}
+```
+
+---
+
+## `LoadMeshOptions`
+
+Options for the high-level `loadMesh` dispatcher. Format-specific parser settings are nested under the matching key.
+
+```ts
+interface LoadMeshOptions {
+  /** Base URL for resolving relative .gltf textures/buffers. */
+  baseUrl?: string;
+  /** Companion .mtl URL for OBJ models. Ignored for glTF/GLB/VOX. */
+  mtlUrl?: string;
+  /** Forwarded to parseObj; merged with materials from mtlUrl when present. */
+  objOptions?: ObjParseOptions;
+  /** Forwarded to parseGltf. */
+  gltfOptions?: GltfParseOptions;
+  /** Forwarded to parseVox. */
+  voxOptions?: VoxParseOptions;
+  /** Shared mesh-resolution optimizer. Defaults to "lossy". */
+  meshResolution?: "lossless" | "lossy";
+}
+```
+
+---
+
+## `NormalizeResult`
+
+Return type of `normalizePolygons`.
+
+```ts
+interface NormalizeResult {
+  polygons: Polygon[];
+  warnings: string[];
+}
+```
+
+---
+
+## `ObjParseOptions`
+
+Options for `parseObj`.
+
+```ts
+interface ObjParseOptions {
+  /** Scale the model so its longest axis is this many world units. */
+  targetSize?: number;
+  /** Shift all vertices by this amount after scaling. */
+  gridShift?: number;
+  /** Fallback color for un-colored faces (default: "#cccccc"). */
+  defaultColor?: string;
+  /** Override per-material colors (material name → CSS color). */
+  materialColors?: Record<string, string>;
+  /** Override per-material textures (material name → image URL). */
+  materialTextures?: Record<string, string>;
+  /** Only include these named OBJ objects. */
+  includeObjects?: string[];
+  /** Exclude these named OBJ objects. */
+  excludeObjects?: string[];
+  /** Quantize vertex colors to this palette. */
+  palette?: string[];
+}
+```
+
+---
+
+## `VoxParseOptions`
+
+Options for `parseVox`.
+
+```ts
+interface VoxParseOptions {
+  /** Scale near this longest-axis size; snapped to integer voxel CSS cells. Default: 60. */
+  targetSize?: number;
+  /** Shift all vertices by this amount after scaling. Default: 0. */
+  gridShift?: number;
+}
+```
+
+---
+
+## `GltfParseOptions`
+
+Options for `parseGltf`.
+
+```ts
+interface GltfParseOptions {
+  /** Scale the model so its longest axis is this many world units. */
+  targetSize?: number;
+  /** Shift all vertices by this amount after scaling. */
+  gridShift?: number;
+  /** Fallback color for un-colored faces. */
+  defaultColor?: string;
+  /** Override per-material colors. */
+  materialColors?: Record<string, string>;
+  /** Treat the model's up axis as Y or Z. Most GLB files use Y. */
+  upAxis?: "y" | "z";
+  /** Base URL for resolving external texture references in .gltf files. */
+  baseUrl?: string;
+  /** Custom buffer resolver for external .bin files. */
+  resolveBuffer?: (uri: string) => Promise<Uint8Array> | Uint8Array;
+}
+```
+
+---
+
+## `MtlParseResult`
+
+Return type of `parseMtl`.
+
+```ts
+interface MtlParseResult {
+  /** Material name → CSS color. */
+  colors: Record<string, string>;
+  /** Material name → texture image path. */
+  textures: Record<string, string>;
+}
+```
 
 ---
 
 ## `AutoRotateOption`
 
-Configures automatic camera rotation. Pass `true` for defaults, a number for custom speed, or an object for full control.
+Configures automatic camera rotation.
 
 ```ts
 type AutoRotateOption =
-  | boolean
-  | number
+  | boolean          // true = default Y-axis at speed 0.3, pauseOnInteraction
+  | number           // speed in degrees/frame on Y axis
   | {
       axis?: "x" | "y";
       speed?: number;
@@ -103,64 +271,16 @@ type AutoRotateOption =
     };
 ```
 
----
+## `CameraState`
 
-## `SceneDimensions`
-
-Explicit dimensions for the scene grid. When omitted, dimensions are inferred from the voxel data.
+Internal camera state (used by `createIsometricCamera`).
 
 ```ts
-interface SceneDimensions {
-  rows?: number;
-  cols?: number;
-  depth?: number;
+interface CameraState {
+  target: [number, number, number];
+  rotX: number;
+  rotY: number;
+  zoom: number;
+  distance: number;           // dolly pull-back in pixels (default 0); adds translateZ(-distance)px
 }
 ```
-
----
-
-## `MagicaVoxelParseResult`
-
-Returned by [`parseMagicaVoxel`](/api/headless/#parsemagicavoxelbuffer).
-
-```ts
-interface MagicaVoxelParseResult {
-  voxels: Voxel[];
-  rows: number;
-  cols: number;
-  depth: number;
-}
-```
-
----
-
-## `FaceAppearanceOverride`
-
-Overrides the visual appearance of individual cube faces.
-
-```ts
-interface FaceAppearanceOverride {
-  backgroundImage?: string | null;
-  backgroundColor?: string | null;
-  filter?: string | null;
-}
-```
-
----
-
-## `CubeFace`
-
-Identifies one of the six faces of a cube. Uses the same keys as `WallsMask`.
-
-```ts
-type CubeFace = "t" | "b" | "bl" | "br" | "fr" | "fl";
-```
-
-| Value  | Face        |
-| ------ | ----------- |
-| `"t"`  | Top         |
-| `"b"`  | Bottom      |
-| `"bl"` | Back-left   |
-| `"br"` | Back-right  |
-| `"fr"` | Front-right |
-| `"fl"` | Front-left  |

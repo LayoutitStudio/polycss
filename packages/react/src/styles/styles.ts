@@ -1,178 +1,37 @@
-import { STYLE_ID } from "@layoutit/voxcss-core";
+const POLYCSS_STYLE_ID = "polycss-styles";
 
-export function injectBaseStyles(doc: Document): void {
-  if (!doc || doc.getElementById(STYLE_ID)) return;
+export function injectPolyBaseStyles(doc: Document = typeof document !== "undefined" ? document : (null as unknown as Document)): void {
+  if (!doc || doc.getElementById(POLYCSS_STYLE_ID)) return;
   const style = doc.createElement("style");
-  style.id = STYLE_ID;
+  style.id = POLYCSS_STYLE_ID;
   style.textContent = CORE_BASE_STYLES;
   doc.head.appendChild(style);
 }
 
 const CORE_BASE_STYLES = `
-.voxcss-layer {
-  display: grid;
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  width: 100%;
-  height: 100%;
-  pointer-events: none;
-  z-index: 1;
-  grid-template-columns: repeat(var(--voxcss-cols, 8), 50px);
-  grid-template-rows: repeat(var(--voxcss-rows, 8), 50px);
-}
-.voxcss-layer > * {
-  pointer-events: all;
-}
-.voxcss-layer:first-of-type {
-  pointer-events: all;
-}
+/* ── Scene container ────────────────────────────────────────────────────── */
 
-.voxcss-floor-x,
-.voxcss-floor-y {
-  position: absolute;
-  top: 0;
-  left: 0;
-  transform-style: preserve-3d;
-  pointer-events: none;
-  z-index: 1;
-  transform-origin: 0 0;
-}
-
-.voxcss-floor-x {
-  transform: rotateX(90deg);
-}
-
-.voxcss-floor-y {
-  transform: rotateY(-90deg);
-}
-
-.voxcss-floor-z {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  transform-style: preserve-3d;
-  background: var(--voxcss-floor-base, #c2c2f3);
-  background-image: var(--voxcss-floor-grid-image, var(--voxcss-floor-grid, none));
-  background-repeat: repeat;
-  background-size: var(--voxcss-grid-x, 50px) var(--voxcss-grid-y, 50px);
-  z-index: 0;
-}
-
-.voxcss-ceiling {
-  position: absolute;
-  inset: 0;
-  transform-style: preserve-3d;
-  pointer-events: none;
-  background: var(--voxcss-ceiling-base, #c2c2f3);
-  background-image: var(--voxcss-ceiling-grid-image, var(--voxcss-ceiling-grid, none));
-  background-repeat: repeat;
-  background-size: 50px 50px;
-  opacity: var(--voxcss-ceiling-opacity, 0.35);
-  z-index: 0;
-}
-  .voxcss-wall--frontRight,
-.voxcss-wall--backRight {
-  right: 0;
-}
-.voxcss-wall {
-  position: absolute;
-  background-image: var(--voxcss-wall-grid, none);
-  background-repeat: repeat;
-  background-size: 50px var(--voxcss-layer-elevation, 50px);
-}
-.voxcss-wall--backLeft,
-.voxcss-wall--frontRight {
-  background-size: var(--voxcss-layer-elevation, 50px) 50px;
-}
-.voxcss-brush {
-  position: relative;
-  inset: 0;
-  display: block;
-  pointer-events: none;
-  overflow: visible;
-  transform: translateZ(var(--vox-z, 0px));
-  transform-origin: 0 0;
-}
-.voxcss-cube {
-  position: relative;
-  display: block;
-  width: 100%;
-  height: 100%;
-  transform-style: preserve-3d;
-  --voxcss-layer-half: calc(var(--voxcss-layer-elevation, 50px) / 2);
-  transform: translateZ(var(--voxcss-layer-half));
-}
-.voxcss-projection--dimetric .voxcss-cube {
-  --voxcss-layer-half: var(--voxcss-layer-elevation, 50px);
-  transform: translateZ(var(--voxcss-layer-half));
-}
-.voxcss-cube-face,
-.voxcss-plane {
-  position: absolute;
-  inset: 0;
+.polycss-scene,
+.polycss-scene *,
+.polycss-scene *::before,
+.polycss-scene *::after {
   box-sizing: border-box;
-  outline: 1px solid rgba(0, 0, 0, 0.08);
-  outline-offset: -1px;
-  pointer-events: auto;
-  width: 100%;
-  height: 100%;
-  background-size: cover;
-  overflow: visible;
 }
 
-.voxcss-cube-face--t {
-  transform: translateZ(var(--voxcss-layer-half));
+.polycss-scene {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 0;
+  height: 0;
+  transform-style: preserve-3d;
+  perspective: none;
 }
-.voxcss-projection--dimetric .voxcss-cube-face--t {
-  transform: translateZ(0);
-}
-.voxcss-cube-face--b {
-  transform: translateZ(calc(-1 * var(--voxcss-layer-half)));
-}
-.voxcss-cube-face--fr {
-  width: var(--voxcss-layer-elevation, 50px);
-  transform: rotateY(90deg) translateZ(var(--voxcss-side-offset-y, 25px));
-}
-.voxcss-cube-face--fl {
-  height: var(--voxcss-layer-elevation, 50px);
-  transform: rotateX(90deg) translateZ(calc(-1 * var(--voxcss-side-offset-x, 25px)));
-}
-.voxcss-projection--dimetric .voxcss-cube-face--fl {
-  height: var(--voxcss-layer-elevation, 50px);
-  transform-origin: bottom;
-  transform: rotateX(90deg) translateZ(calc(-1 * var(--voxcss-side-offset-x, 25px)));
-}
-.voxcss-cube-face--bl {
-  width: var(--voxcss-layer-elevation, 50px);
-  transform: rotateY(90deg) translateZ(calc(-1 * var(--voxcss-layer-half)));
-}
-.voxcss-projection--dimetric .voxcss-cube-face--bl {
-  transform: rotateY(90deg) translateZ(0px);
-  width: var(--voxcss-layer-elevation, 50px);
-  transform-origin: bottom left;
-}
-.voxcss-cube-face--br {
-  height: var(--voxcss-layer-elevation, 50px);
-  transform: rotateX(90deg) translateZ(var(--voxcss-layer-half));
-}
-.voxcss-projection--dimetric .voxcss-cube-face--br {
-  height: var(--voxcss-layer-elevation, 50px);
-  transform-origin: bottom;
-  transform: rotateX(90deg) translateZ(var(--voxcss-layer-half));
-}
-.voxcss-projection--dimetric .voxcss-cube-face--fr {
-  transform: rotateY(90deg) translateZ(var(--voxcss-fr-offset, var(--voxcss-side-offset-y, 25px)));
-  transform-origin: bottom left;
-  width: var(--voxcss-layer-elevation, 50px);
-}
-.voxcss-camera {
+
+/* ── Camera wrapper (perspective + interactive drag) ────────────────────── */
+
+.polycss-camera {
   display: flex;
-  --voxcss-layer-elevation: 50px;
   width: 100%;
   justify-content: center;
   align-items: center;
@@ -184,203 +43,313 @@ const CORE_BASE_STYLES = `
   contain: paint;
   isolation: isolate;
 }
-.voxcss-camera * {
+.polycss-camera * {
   transform-style: preserve-3d;
   position: absolute;
 }
 
-.voxcss-projection--dimetric {
-  --voxcss-layer-elevation: 25px;
+/* ── First-person controls perspective context ──────────────────────────── */
+
+/* PolyFirstPersonControls toggles this class on its host element (the camera
+   wrapper). FPV needs a real perspective context so scene Z translation
+   produces visible depth motion - without it, walking forward looks like a
+   planar pan. The class wins over inline perspective styles (e.g.
+   PolyOrthographicCamera's perspective: none) via !important. The actual
+   perspective value is set inline by the controls as the
+   --polycss-fpv-perspective custom property; the default of 2000px matches
+   the controls' lookOffset fallback so the FPV math and visual perspective
+   stay in sync. */
+.polycss-fpv-host {
+  perspective: var(--polycss-fpv-perspective, 2000px) !important;
+  transform-style: preserve-3d !important;
 }
 
-.voxcss-shape-inner {
+/* ── Polygon leaf element ───────────────────────────────────────────────── */
+
+/*
+ * Polygon faces render as internal leaf elements inside .polycss-scene.
+ * The element is positioned absolutely within the scene root; its
+ * transform: matrix3d(...) carries the full world-space placement.
+ */
+.polycss-scene b,
+.polycss-scene i,
+.polycss-scene s,
+.polycss-scene u {
   position: absolute;
-  inset: 0;
+  display: block;
+  transform-origin: 0 0;
   transform-style: preserve-3d;
-  pointer-events: none;
-}
-
-.voxcss-shape-inner > * {
-  position: absolute;
-  inset: 0;
-  transform-style: preserve-3d;
-}
-
-.voxcss-east {
-  --voxcss-shape-rotation: 0deg;
-}
-
-.voxcss-south {
-  --voxcss-shape-rotation: 90deg;
-}
-
-.voxcss-west {
-  --voxcss-shape-rotation: 180deg;
-}
-
-.voxcss-north {
-  --voxcss-shape-rotation: 270deg;
-}
-
-.voxcss-ramp .voxcss-ramp-slope,
-.voxcss-ramp .voxcss-ramp-bottom,
-.voxcss-wedge .voxcss-wedge-bottom,
-.voxcss-spike .voxcss-spike-bottom {
-  background-size: cover;
+  margin: 0;
+  padding: 0;
+  font: inherit;
+  font-weight: normal;
+  font-style: normal;
+  line-height: 0;
+  quotes: none;
+  text-decoration: none;
+  backface-visibility: hidden;
   background-repeat: no-repeat;
-  background-position: center;
-}
-.voxcss-ramp .voxcss-ramp-slope {
-  background-size: 70px 50px;
 }
 
-.voxcss-ramp .voxcss-ramp-bottom,
-.voxcss-wedge .voxcss-wedge-bottom,
-.voxcss-spike .voxcss-spike-bottom {
+.polycss-scene b,
+.polycss-scene i,
+.polycss-scene u {
+  color: var(--polycss-paint, currentColor);
+}
+
+.polycss-scene b {
+  background: currentColor;
+  width: 64px;
+  height: 64px;
+}
+
+.polycss-scene i {
+  width: 16px;
+  height: 16px;
+  border-color: currentColor;
+}
+
+.polycss-scene s {
+  width: var(--polycss-atlas-size, 64px);
+  height: var(--polycss-atlas-size, 64px);
+}
+
+.polycss-scene u {
+  width: 0;
+  height: 0;
+  background: transparent;
+  box-sizing: content-box;
+  border: 0 solid transparent;
+  border-color: transparent transparent currentColor transparent;
+  border-width: 0 32px 64px 32px;
+}
+
+/* ── Gizmo override ─────────────────────────────────────────────────────── */
+
+/*
+ * <TransformControls> renders 3D arrows using the same polygon pipeline
+ * as user content, but the gizmo is a UI affordance — both faces of
+ * every polygon should remain visible regardless of which way the
+ * camera is looking. Otherwise the cuboid shafts and pyramid heads end
+ * up half-culled (you see only the side faces, not the caps), and the
+ * arrow looks like a flat strip instead of a 3D bar.
+ *
+ * Transitions on color, border-color, and background-color smooth the
+ * idle → hover → drag alpha changes across rect, border-shape, triangle,
+ * and atlas paths.
+ */
+.polycss-transform-controls i,
+.polycss-transform-controls b,
+.polycss-transform-controls s,
+.polycss-transform-controls u {
+  backface-visibility: visible;
+  transition: color 150ms ease-out, border-color 150ms ease-out, background-color 150ms ease-out;
+}
+
+/*
+ * Rotate rings are rendered as a single square quad per ring, then masked
+ * to a donut via a radial-gradient. --ring-inner-ratio is set inline by
+ * <PolyTransformControls> (= innerR / outerR, where outerR is the edge of
+ * the quad mapped to 50%). Hit-testing also uses the donut shape — see
+ * the ring-aware path in TransformControls.tsx. Single DOM node per ring.
+ */
+.polycss-transform-ring i,
+.polycss-transform-ring b,
+.polycss-transform-ring s,
+.polycss-transform-ring u {
+  --ring-inner-r: calc(var(--ring-inner-ratio, 0.92) * 50%);
+  --ring-outer-r: calc(var(--ring-outer-ratio, 1) * 50%);
+  -webkit-mask: radial-gradient(circle at 50% 50%,
+    transparent 0%,
+    transparent var(--ring-inner-r),
+    black var(--ring-inner-r),
+    black var(--ring-outer-r),
+    transparent var(--ring-outer-r));
+          mask: radial-gradient(circle at 50% 50%,
+    transparent 0%,
+    transparent var(--ring-inner-r),
+    black var(--ring-inner-r),
+    black var(--ring-outer-r),
+    transparent var(--ring-outer-r));
+}
+
+/* ── Dynamic lighting cascade vars (scene root → polygons) ─────────────── */
+
+/*
+ * Dynamic mode: PolyScene writes the directional + ambient light setup to
+ * these custom properties on the scene root. Each polygon leaf bakes its
+ * own normal directly into an inline calc() that reads these vars to
+ * resolve the Lambert dot product and per-channel tint. Sliding the light
+ * only writes these scene-root vars — no JS, no atlas redraw.
+ *
+ * Registering with @property forces the browser to parse the values as
+ * <number>s instead of opaque token streams; that makes the polygon-level
+ * calc() expressions resolve reliably across engines.
+ */
+
+@property --plx { syntax: "<number>"; inherits: true; initial-value: 0; }
+@property --ply { syntax: "<number>"; inherits: true; initial-value: 0; }
+@property --plz { syntax: "<number>"; inherits: true; initial-value: 1; }
+
+/* CSS-space light components (world-Y→cssX, world-X→cssY, world-Z→cssZ).
+   Used by the shadow projection matrix. --clz is clamped away from 0 in JS
+   to avoid divide-by-zero when the light is near-horizontal. */
+@property --clx { syntax: "<number>"; inherits: true; initial-value: 0.01; }
+@property --cly { syntax: "<number>"; inherits: true; initial-value: 0; }
+@property --clz { syntax: "<number>"; inherits: true; initial-value: 1; }
+
+/* Ground-plane position in CSS pixels along the CSS-Z axis (= world-Z, the
+   up axis in polycss's world convention). Stored as a <number> so it can be
+   used directly inside matrix3d() calc() expressions (matrix3d requires
+   dimensionless entries — no px units).
+   Set by PolyScene from the min world-Z of casting meshes. */
+@property --shadow-ground-cssz { syntax: "<number>"; inherits: true; initial-value: 0; }
+@property --plr { syntax: "<number>"; inherits: true; initial-value: 1; }
+@property --plg { syntax: "<number>"; inherits: true; initial-value: 1; }
+@property --plb { syntax: "<number>"; inherits: true; initial-value: 1; }
+@property --pli { syntax: "<number>"; inherits: true; initial-value: 1; }
+@property --par { syntax: "<number>"; inherits: true; initial-value: 1; }
+@property --pag { syntax: "<number>"; inherits: true; initial-value: 1; }
+@property --pab { syntax: "<number>"; inherits: true; initial-value: 1; }
+@property --pai { syntax: "<number>"; inherits: true; initial-value: 0.4; }
+
+/* Per-polygon surface normal — set inline by the renderer. Base RGB channels
+   may be hoisted to a mesh wrapper, so they inherit unless overridden inline. */
+@property --pnx { syntax: "<number>"; inherits: false; initial-value: 0; }
+@property --pny { syntax: "<number>"; inherits: false; initial-value: 0; }
+@property --pnz { syntax: "<number>"; inherits: false; initial-value: 1; }
+@property --psr { syntax: "<number>"; inherits: true; initial-value: 1; }
+@property --psg { syntax: "<number>"; inherits: true; initial-value: 1; }
+@property --psb { syntax: "<number>"; inherits: true; initial-value: 1; }
+
+/* Calc-driven Lambert + tint, scoped to dynamic-lighting scenes. Lives
+   here (not inline per polygon) so each leaf only carries its tiny normal
+   declarations — ~12× smaller per-polygon style payload on big meshes. */
+.polycss-scene[data-polycss-lighting="dynamic"] s {
+  background-color: rgb(
+    calc(255 * (var(--par) * var(--pai)
+         + var(--plr) * var(--pli) * max(0,
+           var(--pnx) * var(--plx) +
+           var(--pny) * var(--ply) +
+           var(--pnz) * var(--plz))))
+    calc(255 * (var(--pag) * var(--pai)
+         + var(--plg) * var(--pli) * max(0,
+           var(--pnx) * var(--plx) +
+           var(--pny) * var(--ply) +
+           var(--pnz) * var(--plz))))
+    calc(255 * (var(--pab) * var(--pai)
+         + var(--plb) * var(--pli) * max(0,
+           var(--pnx) * var(--plx) +
+           var(--pny) * var(--ply) +
+           var(--pnz) * var(--plz))))
+  );
+  background-blend-mode: multiply;
+}
+
+.polycss-scene[data-polycss-lighting="dynamic"] b,
+.polycss-scene[data-polycss-lighting="dynamic"] u {
+  color: rgb(
+    calc(255 * var(--psr) * (var(--par) * var(--pai)
+         + var(--plr) * var(--pli) * max(0,
+           var(--pnx) * var(--plx) +
+           var(--pny) * var(--ply) +
+           var(--pnz) * var(--plz))))
+    calc(255 * var(--psg) * (var(--pag) * var(--pai)
+         + var(--plg) * var(--pli) * max(0,
+           var(--pnx) * var(--plx) +
+           var(--pny) * var(--ply) +
+           var(--pnz) * var(--plz))))
+    calc(255 * var(--psb) * (var(--pab) * var(--pai)
+         + var(--plb) * var(--pli) * max(0,
+           var(--pnx) * var(--plx) +
+           var(--pny) * var(--ply) +
+           var(--pnz) * var(--plz))))
+  );
+}
+
+/* <q> — dedicated shadow leaf. Same border-shape rendering trick as <i>
+   (border-color: currentColor fills the polygon outline) but with its
+   own tag so we don't have to thread :not(.polycss-shadow) exclusions
+   through every dynamic-mode color rule. backface-visibility must be
+   visible because the projection matrix is near-rank-deficient and the
+   resulting plane's normal can read as back-facing under some camera
+   angles; the leaf is intentionally always painted. Strip the UA's
+   default ::before/::after open-/close-quote so the element is just a
+   styled box. */
+.polycss-scene q {
   position: absolute;
-  inset: 0;
+  display: block;
+  transform-origin: 0 0;
   transform-style: preserve-3d;
-  pointer-events: auto;
-  outline: 1px solid rgba(0, 0, 0, 0.08);
-  outline-offset: -1px;
-  backface-visibility: hidden;
-  transform: translateZ(calc(-1 * var(--voxcss-layer-elevation, 50px)))
-    rotateX(180deg);
-}
-
-.voxcss-ramp,
-.voxcss-wedge,
-.voxcss-spike {
-  position: relative;
-  transform-style: preserve-3d;
-  backface-visibility: hidden;
+  margin: 0;
+  padding: 0;
+  font: inherit;
+  font-weight: normal;
+  font-style: normal;
+  line-height: 0;
+  text-decoration: none;
+  backface-visibility: visible;
+  border-color: currentColor;
   pointer-events: none;
-  transform: translateZ(var(--voxcss-layer-elevation, 50px))
-    rotate(var(--voxcss-shape-rotation, 0deg));
+  will-change: transform;
+}
+.polycss-scene q::before,
+.polycss-scene q::after {
+  content: none;
 }
 
-.voxcss-ramp .voxcss-ramp-slope {
-  position: absolute;
-  inset: 0;
-  transform-style: preserve-3d;
-  pointer-events: auto;
-  outline: 1px solid rgba(0, 0, 0, 0.08);
-  outline-offset: -1px;
-  background: transparent;
-  backface-visibility: hidden;
+/* ── Cast shadows (dynamic mode only) ──────────────────────────────────── */
+
+/*
+ * Shadow projection matrix. Projects any 3D point P onto the horizontal
+ * ground plane (cssZ ≈ G) along the CSS-space light direction (--clx/y/z).
+ *
+ * In polycss's world convention world Z is up (red-green plane is the
+ * floor in the axes helper). After the world→CSS swap (Y↔X), world Z stays
+ * as CSS Z, so the ground plane normal in CSS space is +cssZ.
+ *
+ * The strict projection formula would set m22=0 (output.z is a constant G,
+ * the polygon is exactly flat). But Chromium SKIPS rendering elements
+ * whose composed transform matrix is non-invertible (singular). m22=0
+ * makes the matrix singular, so the shadow paints nothing even though it
+ * has a valid layout box. The fix: collapse along z by a near-zero
+ * scale (Z_SQUASH = 0.01) instead of exactly zero — output.z is then
+ * approximately G with ~1% drift from the input, full-rank and renderable.
+ * The shadow still looks flat to the eye (the drift is sub-pixel for
+ * any realistic scene size).
+ *
+ *   out.cssX = P.cssX - (--clx/--clz) * (P.cssZ - G)
+ *   out.cssY = P.cssY - (--cly/--clz) * (P.cssZ - G)
+ *   out.cssZ = Z_SQUASH * P.cssZ + (1 - Z_SQUASH) * G
+ *
+ * As column-major 4×4 (CSS matrix3d order):
+ *   col1: [1, 0, 0, 0]
+ *   col2: [0, 1, 0, 0]
+ *   col3: [-(--clx/--clz), -(--cly/--clz), Z_SQUASH, 0]
+ *   col4: [G*(--clx/--clz), G*(--cly/--clz), G*(1-Z_SQUASH), 1]
+ */
+.polycss-scene[data-polycss-lighting="dynamic"] {
+  --shadow-proj: matrix3d(
+    1, 0, 0, 0,
+    0, 1, 0, 0,
+    calc(-1 * var(--clx) / var(--clz)),
+    calc(-1 * var(--cly) / var(--clz)),
+    0.01,
+    0,
+    calc(var(--shadow-ground-cssz) * var(--clx) / var(--clz)),
+    calc(var(--shadow-ground-cssz) * var(--cly) / var(--clz)),
+    calc(var(--shadow-ground-cssz) * 0.99),
+    1
+  );
 }
 
-.voxcss-wedge .voxcss-wedge-slope,
-.voxcss-spike .voxcss-spike-slope {
-  position: absolute;
-  inset: 0;
-  transform-style: preserve-3d;
-  pointer-events: auto;
-  background: transparent;
-  backface-visibility: hidden;
+/* <q> shadow leaf — Lambert-gated opacity. Polygons facing the light cast
+   full shadow; polygons facing away cast zero shadow (their projection
+   would stack inside the silhouette and produce ugly overdraw). The
+   * 10 multiplier sharpens the cutoff so small positive Lambert values
+   jump quickly to 1, giving a near-binary visibility decision with a
+   smooth edge transition. Pure CSS calc — no JS at light-change time. */
+.polycss-scene q {
+  opacity: clamp(0, calc((var(--pnx) * var(--clx) + var(--pny) * var(--cly) + var(--pnz) * var(--clz)) * 10), 1);
 }
-
-.voxcss-ramp {
-  --voxcss-ramp-offset: 21px;
-  --voxcss-ramp-angle: 45deg;
-}
-
-.voxcss-projection--dimetric .voxcss-ramp {
-  --voxcss-ramp-offset: 6px;
-  --voxcss-ramp-angle: 26.565deg;
-}
-
-.voxcss-ramp .voxcss-ramp-slope {
-  width: calc(100% + var(--voxcss-ramp-offset, 21px));
-  right: calc(-1 * var(--voxcss-ramp-offset, 21px));
-  transform-origin: top left;
-  transform: rotateY(var(--voxcss-ramp-angle, 45deg));
-}
-
-.voxcss-wedge {
-  --voxcss-wedge-offset: 21px;
-  --voxcss-wedge-angle: 45deg;
-  --voxcss-wedge-bottom-offset: 21px;
-  --voxcss-wedge-secondary-angle: 45deg;
-}
-
-.voxcss-projection--dimetric .voxcss-wedge {
-  --voxcss-wedge-offset: 6px;
-  --voxcss-wedge-angle: 26.565deg;
-  --voxcss-wedge-bottom-offset: 6px;
-  --voxcss-wedge-secondary-angle: 26.565deg;
-}
-
-.voxcss-wedge .voxcss-wedge-slope--primary {
-  width: calc(100% + var(--voxcss-wedge-offset, 21px));
-  right: calc(-1 * var(--voxcss-wedge-offset, 21px));
-  transform-origin: bottom left;
-  transform: rotateY(var(--voxcss-wedge-angle, 45deg));
-}
-
-.voxcss-wedge .voxcss-wedge-slope--secondary {
-  bottom: calc(-1 * var(--voxcss-wedge-bottom-offset, 21px));
-  transform-origin: top left;
-  transform: translateZ(calc(-1 * var(--voxcss-layer-elevation, 50px)))
-    rotateX(var(--voxcss-wedge-secondary-angle, 45deg));
-}
-
-.voxcss-spike {
-  --voxcss-spike-offset: 21px;
-  --voxcss-spike-angle: 45deg;
-  --voxcss-spike-bottom-offset: 21px;
-  --voxcss-spike-secondary-angle: 45deg;
-}
-
-.voxcss-projection--dimetric .voxcss-spike {
-  --voxcss-spike-offset: 6px;
-  --voxcss-spike-angle: 26.565deg;
-  --voxcss-spike-bottom-offset: 6px;
-  --voxcss-spike-secondary-angle: 26.565deg;
-}
-
-.voxcss-spike .voxcss-spike-slope--primary {
-  width: calc(100% + var(--voxcss-spike-offset, 21px));
-  right: calc(-1 * var(--voxcss-spike-offset, 21px));
-  transform-origin: bottom left;
-  transform: rotateY(var(--voxcss-spike-angle, 45deg));
-}
-
-.voxcss-spike .voxcss-spike-slope--secondary {
-  bottom: calc(-1 * var(--voxcss-spike-bottom-offset, 21px));
-  transform-origin: top left;
-  transform: translateZ(calc(-1 * var(--voxcss-layer-elevation, 50px)))
-    rotateX(var(--voxcss-spike-secondary-angle, 45deg));
-}
-
-
-/* Wall mask visibility — applied via CSS classes on .voxcss-scene root.
-   Camera rotation toggles these classes directly (no React re-render). */
-/* Cube faces */
-.voxcss-mask-t .voxcss-cube-face--t { display: none; }
-.voxcss-mask-b .voxcss-cube-face--b,
-.voxcss-mask-b .voxcss-ramp-bottom,
-.voxcss-mask-b .voxcss-wedge-bottom,
-.voxcss-mask-b .voxcss-spike-bottom { display: none; }
-.voxcss-mask-bl .voxcss-cube-face--bl { display: none; }
-.voxcss-mask-br .voxcss-cube-face--br { display: none; }
-.voxcss-mask-fl .voxcss-cube-face--fl { display: none; }
-.voxcss-mask-fr .voxcss-cube-face--fr { display: none; }
-
-/* Slice renderer brushes */
-.voxcss-mask-t .voxcss-brush--t { display: none; }
-.voxcss-mask-b .voxcss-brush--b { display: none; }
-.voxcss-mask-bl .voxcss-brush--bl { display: none; }
-.voxcss-mask-br .voxcss-brush--br { display: none; }
-.voxcss-mask-fl .voxcss-brush--fl { display: none; }
-.voxcss-mask-fr .voxcss-brush--fr { display: none; }
-
-/* Shell elements: show when mask bit is set (inverted from faces) */
-/* Floor: hide background only, never display:none (it contains layers/cubes) */
-.voxcss-scene:not(.voxcss-mask-b) .voxcss-floor-z { background: none !important; background-image: none !important; }
-.voxcss-scene:not(.voxcss-mask-t) .voxcss-ceiling { display: none; }
-.voxcss-scene:not(.voxcss-mask-bl) .voxcss-wall--backLeft { display: none; }
-.voxcss-scene:not(.voxcss-mask-br) .voxcss-wall--backRight { display: none; }
-.voxcss-scene:not(.voxcss-mask-fl) .voxcss-wall--frontLeft { display: none; }
-.voxcss-scene:not(.voxcss-mask-fr) .voxcss-wall--frontRight { display: none; }
 `;

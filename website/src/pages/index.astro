@@ -1,47 +1,53 @@
 ---
 import hljs from "highlight.js/lib/core";
-import bash from "highlight.js/lib/languages/bash";
 import xml from "highlight.js/lib/languages/xml";
 import javascript from "highlight.js/lib/languages/javascript";
 import typescript from "highlight.js/lib/languages/typescript";
 
-hljs.registerLanguage("bash", bash);
 hljs.registerLanguage("html", xml);
 hljs.registerLanguage("xml", xml);
 hljs.registerLanguage("javascript", javascript);
 hljs.registerLanguage("tsx", typescript);
 hljs.registerLanguage("vue", xml);
 
+import DocsHeader from "../components/DocsHeader.astro";
+
 function highlight(code: string, lang: string): string {
   return hljs.highlight(code, { language: lang }).value;
 }
 
-const title = "VoxCSS — CSS voxel engine for the DOM";
-const description = "A DOM-based voxel engine that renders HTML cuboids with CSS grids, transforms, textures, and dimetric projections.";
-const siteUrl = "https://voxcss.com";
+const title = "polycss: CSS polygon-mesh renderer for the DOM";
+const description = "Render textured 3D meshes in the DOM. No WebGL: each polygon is a real DOM element you can style, click, and inspect in DevTools.";
+const siteUrl = "https://polycss.com";
+// Reusing the legacy voxcss social card until a polycss-specific image lands.
 const ogImage = `${siteUrl}/voxcss-intro.png`;
 
-const cdnCode = `<script type="module">
-  import { renderScene } from "https://unpkg.com/@layoutit/voxcss@latest/dist/index.js";
-</script>`;
-
-const cdnHighlighted = highlight(cdnCode, "html");
-
 const frameworkTabs = [
+  {
+    id: "vanilla",
+    label: "vanilla js",
+    language: "html",
+    code: `<script type="module" src="https://esm.sh/@layoutit/polycss/elements"></script>
+
+<poly-scene rot-x="65" rot-y="45">
+  <poly-orbit-controls drag wheel animate-speed="0.3"></poly-orbit-controls>
+  <poly-mesh src="/cottage.glb"></poly-mesh>
+</poly-scene>`,
+  },
   {
     id: "react",
     label: "React",
     language: "tsx",
-    code: `import { VoxCamera, VoxScene } from "@layoutit/voxcss/react";
+    code: `import { PolyCamera, PolyScene, PolyOrbitControls, PolyMesh } from "@layoutit/polycss-react";
 
 export function App() {
-  const voxels = [
-    { x: 1, y: 1, z: 0, color: "#f97316" }
-  ];
   return (
-    <VoxCamera interactive>
-      <VoxScene voxels={voxels} />
-    </VoxCamera>
+    <PolyCamera rotX={65} rotY={45}>
+      <PolyScene>
+        <PolyOrbitControls drag wheel animate={{ speed: 0.3 }} />
+        <PolyMesh src="/cottage.glb" />
+      </PolyScene>
+    </PolyCamera>
   );
 }`,
   },
@@ -50,37 +56,15 @@ export function App() {
     label: "Vue",
     language: "vue",
     code: `<template>
-  <VoxCamera interactive>
-    <VoxScene :voxels="voxels" />
-  </VoxCamera>
+  <PolyCamera :rot-x="65" :rot-y="45">
+    <PolyScene>
+      <PolyOrbitControls drag wheel :animate="{ speed: 0.3 }" />
+      <PolyMesh src="/cottage.glb" />
+    </PolyScene>
+  </PolyCamera>
 </template>
 <script setup lang="ts">
-import { VoxCamera, VoxScene } from "@layoutit/voxcss/vue";
-const voxels = [
-  { x: 1, y: 1, z: 0, color: '#f97316' }
-];
-</script>`,
-  },
-  {
-    id: "vanilla",
-    label: "vanilla js",
-    language: "html",
-    code: `<div id="voxcss"></div>
-
-<script type="module">
-  import { renderScene } from "https://unpkg.com/@layoutit/voxcss@latest/dist/index.js";
-
-  renderScene({
-    element: document.getElementById("voxcss"),
-    camera: { interactive: true },
-    scene: {
-      voxels: [
-        { x: 3, y: 3, z: 0 },
-        { x: 3, y: 3, z: 1 }
-      ],
-      showFloor: true
-    }
-  });
+import { PolyCamera, PolyScene, PolyOrbitControls, PolyMesh } from "@layoutit/polycss-vue";
 </script>`,
   },
 ].map(tab => ({
@@ -89,25 +73,25 @@ const voxels = [
 }));
 
 const installCmds = [
-  "npm install @layoutit/voxcss",
-  "yarn add @layoutit/voxcss",
-  "pnpm add @layoutit/voxcss",
-].map(cmd => ({ code: cmd, highlighted: highlight(cmd, "bash") }));
+  "npm install @layoutit/polycss",
+  "npm install @layoutit/polycss-react",
+  "npm install @layoutit/polycss-vue",
+].map(cmd => ({ code: cmd, highlighted: highlight(cmd, "javascript") }));
 
 const ldJson = {
   "@context": "https://schema.org",
   "@type": "SoftwareApplication",
-  name: "VoxCSS",
+  name: "polycss",
   applicationCategory: "DeveloperApplication",
   operatingSystem: "Web",
   description,
   url: siteUrl,
   image: ogImage,
   offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
-  sameAs: ["https://github.com/LayoutitStudio/voxcss"],
+  sameAs: ["https://github.com/LayoutitStudio/polycss"],
   publisher: {
     "@type": "Organization",
-    name: "VoxCSS",
+    name: "polycss",
     url: siteUrl,
   },
 };
@@ -116,7 +100,7 @@ const ldJson = {
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>{title}</title>
   <meta name="description" content={description} />
   <meta property="og:title" content={title} />
@@ -142,39 +126,27 @@ const ldJson = {
 </head>
 <body>
   <div class="docs-shell">
-    <aside class="docs-nav">
-      <nav>
-        <div class="docs-nav__brand"></div>
-        <div class="nav-group">
-          <ul>
-            <li><a href="/" class="active">Home</a></li>
-            <li><a href="/quickstart">Usage</a></li>
-            <li><a href="/api/headless"><span class="nav-label"><span class="nav-label__short">API</span><span class="nav-label__long"> Reference</span></span></a></li>
-            <li><a href="/gallery">Gallery</a></li>
-          </ul>
-        </div>
-        <div class="docs-nav__spacer"></div>
-      </nav>
-    </aside>
+    <DocsHeader />
 
     <main class="docs-content">
       <div class="home">
         <section class="hero" id="hero">
           <div class="hero-copy">
-            <h1><img width="300" height="72" style="width: 300px; height: auto" src="/voxisologo.png" alt="VoxCSS" /></h1>
+            <h1><img width="300" height="72" style="width: 300px; height: auto" src="/voxisologo.png" alt="polycss" /></h1>
             <p>
-              A CSS voxel engine. A 3D grid for the DOM. Renders HTML cuboids by
-              stacking CSS grid layers and applying transforms.
+              Render textured 3D meshes in the DOM with CSS.
+              No WebGL or &lt;canvas&gt; needed: each polygon is a real DOM element.
             </p>
             <p>
-              Supports colors and textures, interactions and culling, plus shapes,
-              areas and projections. All without &lt;/canvas&gt;.
+              Supports OBJ, glTF, GLB, and MagicaVoxel VOX files, including
+              UV textures and material colors. Works with vanilla JS, React,
+              and Vue.
             </p>
             <hr />
             <div class="cta">
               <a
                 class="github-social"
-                href="https://github.com/LayoutitStudio/voxcss"
+                href="https://github.com/LayoutitStudio/polycss"
                 target="_blank"
                 rel="noopener noreferrer"
               >
@@ -194,9 +166,8 @@ const ldJson = {
             </div>
           </div>
           <div class="hero-canvas" id="hero-root">
-            <div class="headless-camera" id="hero-camera">
-              <div class="headless-scene" id="hero-scene"></div>
-            </div>
+            <!-- Apple GLB mounted with createPolyScene + loadMesh,
+                 autoCenter, and drag-to-rotate. -->
           </div>
         </section>
 
@@ -218,7 +189,7 @@ const ldJson = {
             <div class="install-row">
               <p class="install-label">CDN</p>
               <div class="install-content">
-                <pre class="dark-scrollbar"><code class="language-html hljs" set:html={cdnHighlighted} /></pre>
+                <pre class="dark-scrollbar"><code class="language-html hljs" set:html={highlight('<script type="module" src="https://esm.sh/@layoutit/polycss/elements"></script>', "html")} /></pre>
               </div>
             </div>
           </div>
@@ -228,23 +199,21 @@ const ldJson = {
           <div class="stacking-copy">
             <h2>How It Works</h2>
             <p>
-              voxCSS builds a 3D space in the DOM using stacked CSS grids and
-              transforms. A root element sets up perspective and transform-style:
-              preserve-3d, while another container defines the scene bounds and
-              receives the camera rotations.
+              polycss loads OBJ, glTF, GLB, and VOX mesh files. Each polygon
+              becomes a DOM element positioned with <code>transform: matrix3d(...)</code>.
+              UV-textured triangles are packed into generated atlas sprites with
+              CSS background positioning. The browser's compositor handles the
+              3D layering.
             </p>
             <p>
-              Then, each level is a CSS Grid, translated along the Z axis in fixed
-              steps. Their cells define a slice at that depth, so (x, y, z) refers
-              to one point. Voxels are HTML cuboids: a single container plus
-              absolutely positioned faces.
+              The rendered scene is a tree of standard DOM elements: no shadow
+              DOM, no WebGL context, no canvas-as-the-whole-scene. Every polygon
+              is individually addressable: attach click handlers, apply CSS
+              classes, animate with CSS transitions.
             </p>
             <p class="stacking-actions" style="margin: 0">
               <a class="btn ghost" href="/quickstart">View Usage Guidelines &raquo;</a>
             </p>
-          </div>
-          <div class="stacking-media">
-            <video src="/stacked.mp4" autoplay loop muted playsinline></video>
           </div>
         </section>
 
@@ -255,7 +224,7 @@ const ldJson = {
             </div>
           </header>
           <div class="getting-lede">
-            <p>voxCSS provides lightweight components and a headless API. Use the <code>VoxCamera</code> component to set up the viewport (pass <code>interactive</code> when you want drag controls) and the <code>VoxScene</code> component to mount and render your voxels. A voxel scene is a flat array of voxel objects with integer <code>x</code>, <code>y</code>, and <code>z</code> coordinates; bounds are inferred unless you override <code>rows</code>, <code>cols</code>, or <code>depth</code>.</p>
+            <p>polycss provides custom elements (<code>&lt;poly-scene&gt;</code>, <code>&lt;poly-mesh&gt;</code>), an imperative <code>createPolyScene</code> API, and optional React / Vue bindings. Each polygon in the mesh becomes a DOM element you can style and interact with: use whichever entry point fits your stack.</p>
           </div>
           <div class="getting-grid">
             <div class="getting-content">
@@ -287,36 +256,6 @@ const ldJson = {
             </div>
           </div>
         </section>
-
-        <section class="gallery made-with" id="made-with">
-          <div class="gallery-header">
-            <h2>Made with VoxCSS</h2>
-          </div>
-          <div class="grid grid--logos">
-            <a class="card card--logo" href="https://terra.layoutit.com" target="_blank" rel="noopener">
-              <div class="card-media">
-                <img src="/layoutit-terra.png" alt="Layoutit Terra voxel terrain editor screenshot" loading="lazy" />
-              </div>
-              <div class="card-info">
-                <h3>Layoutit Terra</h3>
-                <p>A CSS Terrain Generator.</p>
-              </div>
-            </a>
-            <a class="card card--logo" href="https://voxels.layoutit.com" target="_blank" rel="noopener">
-              <div class="card-media">
-                <img src="/layoutit-voxels.png" alt="Layoutit Voxels playground screenshot" loading="lazy" />
-              </div>
-              <div class="card-info">
-                <h3>Layoutit Voxels</h3>
-                <p>A CSS Voxel Editor.</p>
-              </div>
-            </a>
-          </div>
-          <br />
-          <div class="gallery-actions">
-            <a class="btn ghost" href="/gallery">View Model Gallery &raquo;</a>
-          </div>
-        </section>
       </div>
     </main>
   </div>
@@ -325,17 +264,54 @@ const ldJson = {
     // GitHub star count
     async function fetchStars() {
       try {
-        const res = await fetch("https://api.github.com/repos/LayoutitStudio/voxcss");
+        const res = await fetch("https://api.github.com/repos/LayoutitStudio/polycss");
         if (!res.ok) return;
         const json = await res.json();
         if (typeof json?.stargazers_count === "number") {
-          const text = `\u2605 ${json.stargazers_count}`;
+          const text = `★ ${json.stargazers_count}`;
           const elHero = document.getElementById("star-count-hero");
           if (elHero) elHero.textContent = text;
         }
       } catch (_) {}
     }
     fetchStars();
+
+    // Hero model: loads the Apple GLB and mounts it with createPolyScene.
+    // autoCenter keeps drag gestures pivoted around the mesh centroid.
+    async function mountHeroModel() {
+      const host = document.getElementById("hero-root");
+      if (!host) return;
+      try {
+        const { createPolyScene, createPolyOrbitControls, loadMesh } = await import("@layoutit/polycss");
+        const parseResult = await loadMesh("/gallery/glb/apple.glb", {
+          gltfOptions: {
+            targetSize: 60,
+            defaultColor: "#cccccc",
+          },
+        });
+
+        const scene = createPolyScene(host, {
+          rotX: 74.4,
+          rotY: 301.6,
+          zoom: 0.3,
+          autoCenter: true,
+          perspective: 100000,
+        });
+        scene.add(parseResult);
+
+        // Auto-rotate the hero apple for visual interest.
+        let rotY = 301.6;
+        function tick() {
+          rotY = (rotY + 1.2) % 360;
+          scene.setOptions({ rotY });
+          requestAnimationFrame(tick);
+        }
+        requestAnimationFrame(tick);
+      } catch (err) {
+        console.error("hero model mount failed", err);
+      }
+    }
+    mountHeroModel();
 
     // Framework tabs
     const tablist = document.getElementById("framework-tablist");
@@ -355,37 +331,6 @@ const ldJson = {
         });
       });
     }
-
-    // Hero 3D renderer
-    async function initHero() {
-      try {
-        const lib = await import("@layoutit/voxcss");
-        const rootEl = document.getElementById("hero-root");
-        const cameraEl = document.getElementById("hero-camera");
-        const sceneEl = document.getElementById("hero-scene");
-        if (!rootEl || !cameraEl || !sceneEl) return;
-
-        const res = await fetch("/gallery/halfapple.json");
-        const voxels = await res.json();
-
-        const camera = lib.createCamera({
-          element: cameraEl,
-          interactive: true,
-          zoom: 0.63,
-          rotX: 65,
-          rotY: 45,
-          animate: { axis: "y", speed: 0.3, pauseOnInteraction: true },
-        });
-        const scene = lib.createScene({
-          element: sceneEl,
-          voxels: Array.isArray(voxels) ? voxels : [],
-          showWalls: false,
-          showFloor: false,
-        });
-        lib.renderScene({ element: rootEl, camera, scene });
-      } catch (_) {}
-    }
-    initHero();
   </script>
 </body>
 </html>
@@ -409,6 +354,16 @@ const ldJson = {
     min-height: 100vh;
     background: #0b0d10;
   }
+
+  /* Landing's header is in-flow (scrolls with content), unlike the docs/gallery
+     pages where DocsHeader is position:fixed. Override the fixed positioning. */
+  .docs-shell > .header {
+    position: static;
+    inset-block-start: auto;
+    inset-inline-start: auto;
+    width: auto;
+    background-color: #0f1115;
+  }
   .docs-nav {
     position: fixed;
     z-index: 999;
@@ -416,7 +371,6 @@ const ldJson = {
     right: 0;
     left: 0;
     width: 100%;
-    padding: 11px 0;
     background: #0f1115;
     border-bottom: 1px solid rgba(255, 255, 255, 0.05);
     box-sizing: border-box;
@@ -452,32 +406,34 @@ const ldJson = {
     padding: 0;
     margin: 0;
     display: flex;
-    gap: 44px;
+    gap: 4px;
     justify-content: center;
     flex-wrap: wrap;
-    row-gap: 12px;
+    row-gap: 8px;
   }
   .nav-group li {
     padding: 0;
   }
   .nav-group a {
     display: block;
-    padding: 6px 0;
-    font-family: Consolas, Monaco, "Andale Mono", "Ubuntu Mono", monospace;
-    color: #cbd5f5;
-    opacity: 0.7;
+    padding: 0.55rem 0.7rem;
+    font-family: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, Ubuntu, Cantarell, "Noto Sans", sans-serif;
+    color: #94a3b8;
+    opacity: 1;
     text-decoration: none;
-    font-size: 15px;
+    font-size: 0.9rem;
+    font-weight: 700;
+    line-height: 1;
+    white-space: nowrap;
+    border-radius: 999px;
   }
   .nav-group a:hover {
-    opacity: 1;
-    font-weight: bold;
+    color: #e2e8f0;
+    background: rgba(56, 189, 248, 0.14);
   }
   .nav-group a.active {
-    opacity: 1;
     color: #fff;
-    font-weight: bold;
-    text-decoration: underline;
+    background: rgba(56, 189, 248, 0.14);
   }
 
   /* ── GitHub Social ──────────────────────────────── */
@@ -523,24 +479,14 @@ const ldJson = {
     color: #24292f;
     font-size: 14px;
   }
-  .github-social--compact .github-social__main {
-    padding: 6px 10px;
-    font-size: 13px;
-  }
-  .github-social--compact .github-social__count {
-    min-width: 40px;
-    padding: 6px 8px;
-    font-size: 13px;
-  }
 
   /* ── Content ────────────────────────────────────── */
   .docs-content {
-    padding-top: 72px;
     display: flex;
     flex-direction: column;
     gap: 32px;
-    min-height: calc(100vh - 72px);
   }
+
 
   /* ── Home ───────────────────────────────────────── */
   .home {
@@ -568,10 +514,8 @@ const ldJson = {
     font-size: 4rem;
     line-height: 1.1;
     margin: 5px 0 12px;
-  }
-  .hero-copy h1 img {
-    max-width: 100%;
-    height: auto;
+    font-family: Consolas, Monaco, "Andale Mono", "Ubuntu Mono", monospace;
+    color: #7dd3fc;
   }
   .hero-copy p {
     color: #ccc;
@@ -592,15 +536,19 @@ const ldJson = {
     flex-wrap: wrap;
   }
   .hero-canvas {
-    min-height: 320px;
+    min-height: 960px;
     margin-top: 10px;
     height: 100%;
-  }
-  .headless-camera,
-  .headless-scene {
-    width: 100%;
-    height: 100%;
-    min-height: 320px;
+    /* createPolyScene mounts its 0×0 scene anchor at top:50%/left:50%,
+       requiring the host to be a positioned ancestor or it'll snap to the
+       document root. */
+    position: relative;
+    /* Mobile Chrome compositor workaround: at 1:1 device-px raster, rotating
+       ~266 composited leaves blows the per-frame re-raster budget. CSS `zoom`
+       reduces raster scale at the layer level (cost ≈ zoom²). 1/3 raster
+       scale → ≈ 9× cheaper per-frame raster. Scene zoom and min-height
+       triple to keep visible apple size unchanged. */
+    zoom: 0.333;
   }
   .install-logos {
     display: flex;
@@ -716,12 +664,8 @@ const ldJson = {
     min-width: 0;
   }
 
-  /* ── Stacking / How It Works ────────────────────── */
+  /* ── How It Works ───────────────────────────────── */
   .stacking {
-    display: grid;
-    grid-template-columns: 1.1fr 1fr;
-    gap: 28px;
-    align-items: center;
     margin-top: 30px;
     background: #000;
     border: 1px solid rgba(255, 255, 255, 0.1);
@@ -738,21 +682,6 @@ const ldJson = {
     margin: 0 0 16px;
     padding-right: 5px;
   }
-  .stacking-media {
-    width: 100%;
-    position: relative;
-    border-radius: 12px;
-    overflow: hidden;
-    height: 350px;
-  }
-  .stacking-media video {
-    width: 100%;
-    display: block;
-    position: absolute;
-    top: -50px;
-    background: #090b10;
-  }
-
   /* ── Getting Started ────────────────────────────── */
   .getting-started {
     margin-top: 30px;
@@ -840,69 +769,7 @@ const ldJson = {
     display: none;
   }
 
-  /* ── Gallery / Made With ────────────────────────── */
-  .gallery {
-    background: #11141a;
-    border: 1px solid rgba(255, 255, 255, 0.05);
-    border-radius: 16px;
-    padding: 28px;
-    margin-top: 30px;
-  }
-  .gallery-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin: 0;
-  }
-  .gallery-header h2 {
-    margin: 0;
-  }
-  .gallery-actions {
-    margin-top: 12px;
-    display: flex;
-  }
-  .grid {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 18px;
-  }
-  .grid--logos {
-    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-    margin-top: 24px;
-  }
-  .card--logo {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-    text-decoration: none;
-  }
-  .card--logo .card-media {
-    border-radius: 12px;
-    overflow: hidden;
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    background: #05070b;
-  }
-  .card--logo img {
-    display: block;
-    width: 100%;
-    height: auto;
-  }
-  .card--logo .card-info h3 {
-    margin: 0;
-    font-size: 1rem;
-    color: #94a3b8;
-  }
-  .card--logo .card-info p {
-    margin: 6px 0 0;
-    color: #94a3b8;
-    font-size: 0.95rem;
-  }
-  .card--logo:hover {
-    border-color: rgba(125, 211, 252, 0.4);
-    box-shadow: 0 12px 30px rgba(15, 23, 42, 0.45);
-  }
-
-  /* ── hljs overrides — reset hljs padding/bg so our rules win ── */
+  /* ── hljs overrides ─────────────────────────────── */
   .install-content pre code.hljs {
     padding: 6px 12px;
     background: #050709;
@@ -964,7 +831,7 @@ const ldJson = {
       width: 100%;
     }
     .docs-nav .nav-group ul {
-      gap: 16px;
+      gap: 4px;
       justify-content: flex-start;
       flex-wrap: nowrap;
       overflow-x: auto;
@@ -1020,7 +887,6 @@ const ldJson = {
       min-width: 0;
     }
     .stacking {
-      grid-template-columns: 1fr;
       padding: 24px;
     }
     .install-content {
@@ -1034,18 +900,6 @@ const ldJson = {
     }
     .hero-copy h1 {
       font-size: 2.4rem;
-    }
-    .hero-copy p {
-      font-size: 16px;
-      line-height: 1.6;
-    }
-    .cta {
-      width: 100%;
-      gap: 10px;
-    }
-    .cta .btn {
-      width: 100%;
-      justify-content: center;
     }
     .install-content {
       flex-direction: column;
@@ -1089,9 +943,7 @@ const ldJson = {
       line-height: 1.6;
     }
     .stacking-copy p,
-    .getting-grid p,
-    .gallery-header p,
-    .card--logo .card-info p {
+    .getting-grid p {
       font-size: 16px;
     }
   }
@@ -1101,25 +953,14 @@ const ldJson = {
       padding: 10px 12px;
     }
     .docs-nav .nav-group ul {
-      gap: 12px;
+      gap: 2px;
     }
     .docs-nav .nav-group .nav-label__long {
       display: none;
     }
     .docs-nav .nav-group a {
-      font-size: 14px;
-    }
-    .github-social--compact .github-social__main span {
-      display: none;
-    }
-    .github-social--compact .github-social__main {
-      padding: 6px 8px;
-    }
-  }
-
-  @media (max-width: 360px) {
-    .github-social--compact .github-social__count {
-      display: none;
+      font-size: 0.78rem;
+      padding-inline: 0.45rem;
     }
   }
 </style>

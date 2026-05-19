@@ -1,0 +1,449 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Voxel Renderer Progress</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f8fafc;
+      --ink: #111827;
+      --muted: #64748b;
+      --line: #d8dee9;
+      --panel: #ffffff;
+      --good: #047857;
+      --bad: #b91c1c;
+      --flat: #6b7280;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 14px;
+      line-height: 1.45;
+    }
+    main {
+      width: min(1180px, calc(100vw - 32px));
+      margin: 24px auto 56px;
+    }
+    header {
+      display: flex;
+      justify-content: space-between;
+      gap: 20px;
+      align-items: end;
+      margin-bottom: 18px;
+    }
+    h1, h2 {
+      margin: 0;
+      letter-spacing: 0;
+    }
+    h1 {
+      font-size: 24px;
+      line-height: 1.1;
+    }
+    h2 {
+      font-size: 15px;
+      margin-bottom: 10px;
+    }
+    .meta {
+      color: var(--muted);
+      font-size: 12px;
+      text-align: right;
+    }
+    .summary {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+      margin-bottom: 16px;
+    }
+    .metric, section {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+    }
+    .metric {
+      padding: 12px 14px;
+    }
+    .metric b {
+      display: block;
+      font-size: 24px;
+      line-height: 1.1;
+      margin-bottom: 4px;
+    }
+    .metric span {
+      color: var(--muted);
+      font-size: 12px;
+    }
+    section {
+      padding: 14px;
+      margin-top: 12px;
+      overflow: hidden;
+    }
+    .chart-shell {
+      overflow: hidden;
+    }
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+    }
+    .grid {
+      stroke: #e5e7eb;
+      stroke-width: 1;
+    }
+    .grid.vertical {
+      stroke-dasharray: 3 4;
+    }
+    .axis {
+      fill: #64748b;
+      font-size: 12px;
+    }
+    .axis.strong {
+      fill: #111827;
+      font-weight: 650;
+    }
+    .chart-title {
+      fill: #111827;
+      font-size: 13px;
+      font-weight: 700;
+    }
+    .avg-line {
+      fill: none;
+      stroke: #111827;
+      stroke-width: 3.25;
+      opacity: 0.86;
+    }
+    .legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px 14px;
+      margin-top: -12px;
+      padding: 0 6px 4px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .legend-item {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      white-space: nowrap;
+    }
+    .swatch {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      display: inline-block;
+    }
+    .scroll-x {
+      overflow-x: auto;
+      padding-bottom: 2px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+    }
+    th, td {
+      border-bottom: 1px solid #e5e7eb;
+      padding: 7px 8px;
+      text-align: left;
+      vertical-align: middle;
+      white-space: nowrap;
+    }
+    thead th {
+      color: #334155;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      background: #f8fafc;
+      border-bottom-color: #cbd5e1;
+    }
+    tbody th {
+      font-weight: 650;
+    }
+    .num {
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+    }
+    .good { color: var(--good); font-weight: 700; }
+    .bad { color: var(--bad); font-weight: 700; }
+    .flat { color: var(--flat); font-weight: 650; }
+    .strategy-table {
+      min-width: 940px;
+    }
+    .strategy-head {
+      max-width: 148px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    @media (max-width: 760px) {
+      main { width: min(100vw - 20px, 1180px); margin-top: 14px; }
+      header { display: block; }
+      .meta { text-align: left; margin-top: 6px; }
+      .summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div>
+        <h1>Voxel renderer progress</h1>
+      </div>
+      <div class="meta">
+        generated 2026-05-19T17:24:51.414Z<br>
+        source /Users/ekrof/fed/polycss/bench/results
+      </div>
+    </header>
+
+    <div class="summary">
+      <div class="metric"><b>9</b><span>models with iterated results</span></div>
+      <div class="metric"><b>Baseline / A32 / A33 / A34</b><span>iterations</span></div>
+      <div class="metric"><b>82.1</b><span>A34 average best p95 (-3.0 vs A33)</span></div>
+      <div class="metric"><b>3/9</b><span>models above Baseline</span></div>
+    </div>
+
+    <section>
+      <h2>Progress</h2>
+
+    <div class="chart-shell">
+      <svg viewBox="0 0 1080 360" role="img" aria-label="Best p95 FPS by iteration">
+        <text x="54" y="18" class="chart-title">best p95 FPS by benchmark iteration</text>
+        <line x1="54" y1="290" x2="1052" y2="290" class="grid"/>
+<text x="44" y="294" text-anchor="end" class="axis">25</text>
+<line x1="54" y1="224" x2="1052" y2="224" class="grid"/>
+<text x="44" y="228" text-anchor="end" class="axis">49</text>
+<line x1="54" y1="158" x2="1052" y2="158" class="grid"/>
+<text x="44" y="162" text-anchor="end" class="axis">73</text>
+<line x1="54" y1="92" x2="1052" y2="92" class="grid"/>
+<text x="44" y="96" text-anchor="end" class="axis">96</text>
+<line x1="54" y1="26" x2="1052" y2="26" class="grid"/>
+<text x="44" y="30" text-anchor="end" class="axis">120</text>
+<line x1="54" y1="26" x2="54" y2="290" class="grid vertical"/>
+<text x="54" y="328" text-anchor="middle" class="axis strong">Baseline</text>
+<line x1="386.66666666666663" y1="26" x2="386.66666666666663" y2="290" class="grid vertical"/>
+<text x="386.66666666666663" y="328" text-anchor="middle" class="axis strong">A32</text>
+<line x1="719.3333333333333" y1="26" x2="719.3333333333333" y2="290" class="grid vertical"/>
+<text x="719.3333333333333" y="328" text-anchor="middle" class="axis strong">A33</text>
+<line x1="1052" y1="26" x2="1052" y2="290" class="grid vertical"/>
+<text x="1052" y="328" text-anchor="middle" class="axis strong">A34</text>
+<polyline points="54,129.67506729424662 386.66666666666663,151.53130432942942 719.3333333333333,122.95003739269555 1052,131.20197105564853" class="avg-line"/>
+<polyline points="54,248.51515596484217 386.66666666666663,248.75864961207756 719.3333333333333,248.3157894736842 1052,248.75864961207756" fill="none" stroke="#2563eb" stroke-width="1.55" opacity="0.72"/>
+<circle cx="54" cy="248.51515596484217" r="3.6" fill="#2563eb" opacity="0.95"><title>AncientCrashSite.vox Baseline: 39.9 p95</title></circle>
+<circle cx="386.66666666666663" cy="248.75864961207756" r="3.6" fill="#2563eb" opacity="0.95"><title>AncientCrashSite.vox A32: 39.8 p95</title></circle>
+<circle cx="719.3333333333333" cy="248.3157894736842" r="3.6" fill="#2563eb" opacity="0.95"><title>AncientCrashSite.vox A33: 40.0 p95</title></circle>
+<circle cx="1052" cy="248.75864961207756" r="3.6" fill="#2563eb" opacity="0.95"><title>AncientCrashSite.vox A34: 39.8 p95</title></circle>
+<polyline points="54,222.57993548074592 386.66666666666663,247.73169382631986 719.3333333333333,195.95808497805123 1052,242.58841109081774" fill="none" stroke="#dc2626" stroke-width="1.55" opacity="0.72"/>
+<circle cx="54" cy="222.57993548074592" r="3.6" fill="#dc2626" opacity="0.95"><title>army.vox Baseline: 49.3 p95</title></circle>
+<circle cx="386.66666666666663" cy="247.73169382631986" r="3.6" fill="#dc2626" opacity="0.95"><title>army.vox A32: 40.2 p95</title></circle>
+<circle cx="719.3333333333333" cy="195.95808497805123" r="3.6" fill="#dc2626" opacity="0.95"><title>army.vox A33: 58.8 p95</title></circle>
+<circle cx="1052" cy="242.58841109081774" r="3.6" fill="#dc2626" opacity="0.95"><title>army.vox A34: 42.1 p95</title></circle>
+<polyline points="54,41.70594939515883 386.66666666666663,41.86932849364426 719.3333333333333,32.634800508897044 1052,43.68421052630681" fill="none" stroke="#059669" stroke-width="1.55" opacity="0.72"/>
+<circle cx="54" cy="41.70594939515883" r="3.6" fill="#059669" opacity="0.95"><title>desert2.vox Baseline: 114.3 p95</title></circle>
+<circle cx="386.66666666666663" cy="41.86932849364426" r="3.6" fill="#059669" opacity="0.95"><title>desert2.vox A32: 114.3 p95</title></circle>
+<circle cx="719.3333333333333" cy="32.634800508897044" r="3.6" fill="#059669" opacity="0.95"><title>desert2.vox A33: 117.6 p95</title></circle>
+<circle cx="1052" cy="43.68421052630681" r="3.6" fill="#059669" opacity="0.95"><title>desert2.vox A34: 113.6 p95</title></circle>
+<polyline points="54,47.49508880938704 386.66666666666663,59.03816343101977 719.3333333333333,47.232406859845426 1052,40.60422139687254" fill="none" stroke="#7c3aed" stroke-width="1.55" opacity="0.72"/>
+<circle cx="54" cy="47.49508880938704" r="3.6" fill="#7c3aed" opacity="0.95"><title>house.vox Baseline: 112.3 p95</title></circle>
+<circle cx="386.66666666666663" cy="59.03816343101977" r="3.6" fill="#7c3aed" opacity="0.95"><title>house.vox A32: 108.1 p95</title></circle>
+<circle cx="719.3333333333333" cy="47.232406859845426" r="3.6" fill="#7c3aed" opacity="0.95"><title>house.vox A33: 112.4 p95</title></circle>
+<circle cx="1052" cy="40.60422139687254" r="3.6" fill="#7c3aed" opacity="0.95"><title>house.vox A34: 114.7 p95</title></circle>
+<polyline points="54,54.09485251590971 386.66666666666663,193.8874848917692 719.3333333333333,40.06077284715908 1052,43.68421052631538" fill="none" stroke="#ea580c" stroke-width="1.55" opacity="0.72"/>
+<circle cx="54" cy="54.09485251590971" r="3.6" fill="#ea580c" opacity="0.95"><title>obj_house3.vox Baseline: 109.9 p95</title></circle>
+<circle cx="386.66666666666663" cy="193.8874848917692" r="3.6" fill="#ea580c" opacity="0.95"><title>obj_house3.vox A32: 59.6 p95</title></circle>
+<circle cx="719.3333333333333" cy="40.06077284715908" r="3.6" fill="#ea580c" opacity="0.95"><title>obj_house3.vox A33: 114.9 p95</title></circle>
+<circle cx="1052" cy="43.68421052631538" r="3.6" fill="#ea580c" opacity="0.95"><title>obj_house3.vox A34: 113.6 p95</title></circle>
+<polyline points="54,43.77387250066646 386.66666666666663,48.61545756282783 719.3333333333333,38.1973578694085 1052,44.22157208107973" fill="none" stroke="#0891b2" stroke-width="1.55" opacity="0.72"/>
+<circle cx="54" cy="43.77387250066646" r="3.6" fill="#0891b2" opacity="0.95"><title>obj_house5.vox Baseline: 113.6 p95</title></circle>
+<circle cx="386.66666666666663" cy="48.61545756282783" r="3.6" fill="#0891b2" opacity="0.95"><title>obj_house5.vox A32: 111.9 p95</title></circle>
+<circle cx="719.3333333333333" cy="38.1973578694085" r="3.6" fill="#0891b2" opacity="0.95"><title>obj_house5.vox A33: 115.6 p95</title></circle>
+<circle cx="1052" cy="44.22157208107973" r="3.6" fill="#0891b2" opacity="0.95"><title>obj_house5.vox A34: 113.4 p95</title></circle>
+<polyline points="54,48.96708062290715 386.66666666666663,50.66362968787176 719.3333333333333,34.439484484122424 1052,44.0426548778363" fill="none" stroke="#be123c" stroke-width="1.55" opacity="0.72"/>
+<circle cx="54" cy="48.96708062290715" r="3.6" fill="#be123c" opacity="0.95"><title>scene_mechanic2.vox Baseline: 111.7 p95</title></circle>
+<circle cx="386.66666666666663" cy="50.66362968787176" r="3.6" fill="#be123c" opacity="0.95"><title>scene_mechanic2.vox A32: 111.1 p95</title></circle>
+<circle cx="719.3333333333333" cy="34.439484484122424" r="3.6" fill="#be123c" opacity="0.95"><title>scene_mechanic2.vox A33: 117.0 p95</title></circle>
+<circle cx="1052" cy="44.0426548778363" r="3.6" fill="#be123c" opacity="0.95"><title>scene_mechanic2.vox A34: 113.5 p95</title></circle>
+<polyline points="54,263.6826238485054 386.66666666666663,276.0210587069366 719.3333333333333,276.1467392384509 1052,276.2716671919321" fill="none" stroke="#4d7c0f" stroke-width="1.55" opacity="0.72"/>
+<circle cx="54" cy="263.6826238485054" r="3.6" fill="#4d7c0f" opacity="0.95"><title>skyscraper.vox Baseline: 34.5 p95</title></circle>
+<circle cx="386.66666666666663" cy="276.0210587069366" r="3.6" fill="#4d7c0f" opacity="0.95"><title>skyscraper.vox A32: 30.0 p95</title></circle>
+<circle cx="719.3333333333333" cy="276.1467392384509" r="3.6" fill="#4d7c0f" opacity="0.95"><title>skyscraper.vox A33: 30.0 p95</title></circle>
+<circle cx="1052" cy="276.2716671919321" r="3.6" fill="#4d7c0f" opacity="0.95"><title>skyscraper.vox A34: 29.9 p95</title></circle>
+<polyline points="54,196.26104651009712 386.66666666666663,197.19627275239804 719.3333333333333,193.56490027464093 1052,196.96214219759838" fill="none" stroke="#9333ea" stroke-width="1.55" opacity="0.72"/>
+<circle cx="54" cy="196.26104651009712" r="3.6" fill="#9333ea" opacity="0.95"><title>Treasure.vox Baseline: 58.7 p95</title></circle>
+<circle cx="386.66666666666663" cy="197.19627275239804" r="3.6" fill="#9333ea" opacity="0.95"><title>Treasure.vox A32: 58.4 p95</title></circle>
+<circle cx="719.3333333333333" cy="193.56490027464093" r="3.6" fill="#9333ea" opacity="0.95"><title>Treasure.vox A33: 59.7 p95</title></circle>
+<circle cx="1052" cy="196.96214219759838" r="3.6" fill="#9333ea" opacity="0.95"><title>Treasure.vox A34: 58.5 p95</title></circle>
+        <text x="1052" y="18" text-anchor="end" class="axis">thick line = corpus average</text>
+      </svg>
+      <div class="legend"><span class="legend-item"><span class="swatch" style="background:#2563eb"></span>AncientCrashSite.vox</span><span class="legend-item"><span class="swatch" style="background:#dc2626"></span>army.vox</span><span class="legend-item"><span class="swatch" style="background:#059669"></span>desert2.vox</span><span class="legend-item"><span class="swatch" style="background:#7c3aed"></span>house.vox</span><span class="legend-item"><span class="swatch" style="background:#ea580c"></span>obj_house3.vox</span><span class="legend-item"><span class="swatch" style="background:#0891b2"></span>obj_house5.vox</span><span class="legend-item"><span class="swatch" style="background:#be123c"></span>scene_mechanic2.vox</span><span class="legend-item"><span class="swatch" style="background:#4d7c0f"></span>skyscraper.vox</span><span class="legend-item"><span class="swatch" style="background:#9333ea"></span>Treasure.vox</span></div>
+    </div>
+
+    </section>
+
+    <section>
+      <h2>Best p95 heatmap</h2>
+
+    <table>
+      <thead><tr><th>Model</th><th>Baseline</th><th>A32</th><th>A33</th><th>A34</th><th>Delta</th></tr></thead>
+      <tbody><tr><th>AncientCrashSite.vox</th><td class="num" style="background: hsl(28.7 68% 92.1%); color: #111827;" title="face-order, 2 runs">39.9</td><td class="num" style="background: hsl(28.6 68% 92.1%); color: #111827;" title="source:block64-depth-front, 2 runs">39.8</td><td class="num" style="background: hsl(28.8 68% 92.1%); color: #111827;" title="screen:tile4-depth-front, 2 runs">40.0</td><td class="num" style="background: hsl(28.6 68% 92.1%); color: #111827;" title="screen:tile4-scanline-forward, 5 runs">39.8</td><td class="num flat">-0.1</td></tr><tr><th>army.vox</th><td class="num" style="background: hsl(41.7 68% 90.9%); color: #111827;" title="exact, 2 runs">49.3</td><td class="num" style="background: hsl(29.1 68% 92.1%); color: #111827;" title="source:block256-depth-front, 2 runs">40.2</td><td class="num" style="background: hsl(55.0 68% 89.7%); color: #111827;" title="screen:tile8-scanline-reverse, 2 runs">58.8</td><td class="num" style="background: hsl(31.7 68% 91.8%); color: #111827;" title="screen:tile4-scanline-forward, 5 runs">42.1</td><td class="num bad">-7.2</td></tr><tr><th>desert2.vox</th><td class="num" style="background: hsl(132.1 68% 82.7%); color: #111827;" title="exact, 2 runs">114.3</td><td class="num" style="background: hsl(132.1 68% 82.7%); color: #111827;" title="source:block128-depth-back, 2 runs">114.3</td><td class="num" style="background: hsl(136.7 68% 82.3%); color: #111827;" title="screen:tile4-depth-front, 2 runs">117.6</td><td class="num" style="background: hsl(131.2 68% 82.8%); color: #111827;" title="screen:tile4-scanline-forward, 5 runs">113.6</td><td class="num bad">-0.7</td></tr><tr><th>house.vox</th><td class="num" style="background: hsl(129.3 68% 83.0%); color: #111827;" title="exact, 2 runs">112.3</td><td class="num" style="background: hsl(123.5 68% 83.5%); color: #111827;" title="source:block128-depth-front, 2 runs">108.1</td><td class="num" style="background: hsl(129.4 68% 83.0%); color: #111827;" title="screen:tile8-depth-front, 2 runs">112.4</td><td class="num" style="background: hsl(132.7 68% 82.7%); color: #111827;" title="screen:tile4-scanline-forward, 5 runs">114.7</td><td class="num good">+2.5</td></tr><tr><th>obj_house3.vox</th><td class="num" style="background: hsl(126.0 68% 83.3%); color: #111827;" title="face-normal-front, 2 runs">109.9</td><td class="num" style="background: hsl(56.1 68% 89.6%); color: #111827;" title="source:block128-depth-back, 2 runs">59.6</td><td class="num" style="background: hsl(133.0 68% 82.6%); color: #111827;" title="screen:tile4-scanline-forward, 2 runs">114.9</td><td class="num" style="background: hsl(131.2 68% 82.8%); color: #111827;" title="screen:tile4-scanline-forward, 5 runs">113.6</td><td class="num good">+3.7</td></tr><tr><th>obj_house5.vox</th><td class="num" style="background: hsl(131.1 68% 82.8%); color: #111827;" title="face-order-top-reverse, 2 runs">113.6</td><td class="num" style="background: hsl(128.7 68% 83.0%); color: #111827;" title="source:block64-depth-front, 2 runs">111.9</td><td class="num" style="background: hsl(133.9 68% 82.6%); color: #111827;" title="screen:tile4-scanline-reverse, 2 runs">115.6</td><td class="num" style="background: hsl(130.9 68% 82.8%); color: #111827;" title="screen:tile4-scanline-forward, 5 runs">113.4</td><td class="num flat">-0.2</td></tr><tr><th>scene_mechanic2.vox</th><td class="num" style="background: hsl(128.5 68% 83.0%); color: #111827;" title="exact, 2 runs">111.7</td><td class="num" style="background: hsl(127.7 68% 83.1%); color: #111827;" title="source:block64-depth-front, 2 runs">111.1</td><td class="num" style="background: hsl(135.8 68% 82.4%); color: #111827;" title="screen:tile8-scanline-forward, 2 runs">117.0</td><td class="num" style="background: hsl(131.0 68% 82.8%); color: #111827;" title="screen:tile4-scanline-forward, 5 runs">113.5</td><td class="num good">+1.8</td></tr><tr><th>skyscraper.vox</th><td class="num" style="background: hsl(21.2 68% 92.8%); color: #111827;" title="depth-back, 2 runs">34.5</td><td class="num" style="background: hsl(15.0 68% 93.4%); color: #111827;" title="source:block256-depth-front, 2 runs">30.0</td><td class="num" style="background: hsl(14.9 68% 93.4%); color: #111827;" title="screen:tile4-scanline-forward, 2 runs">30.0</td><td class="num" style="background: hsl(14.9 68% 93.4%); color: #111827;" title="screen:tile4-scanline-forward, 5 runs">29.9</td><td class="num bad">-4.5</td></tr><tr><th>Treasure.vox</th><td class="num" style="background: hsl(54.9 68% 89.7%); color: #111827;" title="depth-front, 2 runs">58.7</td><td class="num" style="background: hsl(54.4 68% 89.8%); color: #111827;" title="source:block64-depth-front, 2 runs">58.4</td><td class="num" style="background: hsl(56.2 68% 89.6%); color: #111827;" title="screen:tile4-depth-back, 2 runs">59.7</td><td class="num" style="background: hsl(54.5 68% 89.8%); color: #111827;" title="screen:tile4-scanline-forward, 5 runs">58.5</td><td class="num bad">-0.3</td></tr></tbody>
+    </table>
+
+    </section>
+
+    <section>
+      <h2>A34 strategy heatmap</h2>
+
+    <div class="scroll-x">
+      <table class="strategy-table">
+        <thead><tr><th>Model</th><th class="strategy-head">screen:tile4-scanline-forward</th><th class="strategy-head">voxlocal</th></tr></thead>
+        <tbody><tr><th>AncientCrashSite.vox</th><td class="num" style="background: hsl(35.6 68% 91.5%); color: #111827;" title="polycss-voxlocal-direct-matrix-screen-tile4-scanline-forward, 5 runs">39.8</td><td class="num" style="background: hsl(35.6 68% 91.5%); color: #111827;" title="polycss-voxlocal, 5 runs">39.8</td></tr><tr><th>army.vox</th><td class="num" style="background: hsl(38.7 68% 91.2%); color: #111827;" title="polycss-voxlocal-direct-matrix-screen-tile4-scanline-forward, 5 runs">42.1</td><td class="num" style="background: hsl(35.6 68% 91.5%); color: #111827;" title="polycss-voxlocal, 5 runs">39.8</td></tr><tr><th>desert2.vox</th><td class="num" style="background: hsl(138.1 68% 82.2%); color: #111827;" title="polycss-voxlocal-direct-matrix-screen-tile4-scanline-forward, 5 runs">113.6</td><td class="num" style="background: hsl(62.9 68% 89.0%); color: #111827;" title="polycss-voxlocal, 5 runs">59.5</td></tr><tr><th>house.vox</th><td class="num" style="background: hsl(139.6 68% 82.0%); color: #111827;" title="polycss-voxlocal-direct-matrix-screen-tile4-scanline-forward, 5 runs">114.7</td><td class="num" style="background: hsl(63.4 68% 89.0%); color: #111827;" title="polycss-voxlocal, 5 runs">59.9</td></tr><tr><th>obj_house3.vox</th><td class="num" style="background: hsl(138.1 68% 82.2%); color: #111827;" title="polycss-voxlocal-direct-matrix-screen-tile4-scanline-forward, 5 runs">113.6</td><td class="num" style="background: hsl(63.4 68% 89.0%); color: #111827;" title="polycss-voxlocal, 5 runs">59.9</td></tr><tr><th>obj_house5.vox</th><td class="num" style="background: hsl(137.8 68% 82.2%); color: #111827;" title="polycss-voxlocal-direct-matrix-screen-tile4-scanline-forward, 5 runs">113.4</td><td class="num" style="background: hsl(63.4 68% 89.0%); color: #111827;" title="polycss-voxlocal, 5 runs">59.9</td></tr><tr><th>scene_mechanic2.vox</th><td class="num" style="background: hsl(137.9 68% 82.2%); color: #111827;" title="polycss-voxlocal-direct-matrix-screen-tile4-scanline-forward, 5 runs">113.5</td><td class="num" style="background: hsl(35.8 68% 91.5%); color: #111827;" title="polycss-voxlocal, 5 runs">40.0</td></tr><tr><th>skyscraper.vox</th><td class="num" style="background: hsl(21.8 68% 92.7%); color: #111827;" title="polycss-voxlocal-direct-matrix-screen-tile4-scanline-forward, 5 runs">29.9</td><td class="num" style="background: hsl(13.2 68% 93.5%); color: #111827;" title="polycss-voxlocal, 5 runs">23.7</td></tr><tr><th>Treasure.vox</th><td class="num" style="background: hsl(61.5 68% 89.1%); color: #111827;" title="polycss-voxlocal-direct-matrix-screen-tile4-scanline-forward, 5 runs">58.5</td><td class="num" style="background: hsl(22.5 68% 92.7%); color: #111827;" title="polycss-voxlocal, 5 runs">30.5</td></tr></tbody>
+      </table>
+    </div>
+
+    </section>
+
+    <section>
+      <h2>Model table</h2>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Model</th>
+          <th>Baseline</th>
+          <th>A33</th>
+          <th>A34</th>
+          <th>Delta base</th>
+          <th>Delta prev</th>
+          <th>Latest best case</th>
+          <th>Nodes</th>
+          <th>Leaves</th>
+          <th>Cases</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <th>AncientCrashSite.vox</th>
+          <td class="num">39.9</td>
+          <td class="num">40.0</td>
+          <td class="num">39.8</td>
+          <td class="num flat">-0.1</td>
+          <td class="num flat">-0.2</td>
+          <td>screen:tile4-scanline-forward</td>
+          <td class="num">5267</td>
+          <td class="num"></td>
+          <td class="num">2</td>
+        </tr>
+
+        <tr>
+          <th>army.vox</th>
+          <td class="num">49.3</td>
+          <td class="num">58.8</td>
+          <td class="num">42.1</td>
+          <td class="num bad">-7.2</td>
+          <td class="num bad">-16.8</td>
+          <td>screen:tile4-scanline-forward</td>
+          <td class="num">3893</td>
+          <td class="num"></td>
+          <td class="num">2</td>
+        </tr>
+
+        <tr>
+          <th>desert2.vox</th>
+          <td class="num">114.3</td>
+          <td class="num">117.6</td>
+          <td class="num">113.6</td>
+          <td class="num bad">-0.7</td>
+          <td class="num bad">-4.0</td>
+          <td>screen:tile4-scanline-forward</td>
+          <td class="num">2011</td>
+          <td class="num"></td>
+          <td class="num">2</td>
+        </tr>
+
+        <tr>
+          <th>house.vox</th>
+          <td class="num">112.3</td>
+          <td class="num">112.4</td>
+          <td class="num">114.7</td>
+          <td class="num good">+2.5</td>
+          <td class="num good">+2.4</td>
+          <td>screen:tile4-scanline-forward</td>
+          <td class="num">2132</td>
+          <td class="num"></td>
+          <td class="num">2</td>
+        </tr>
+
+        <tr>
+          <th>obj_house3.vox</th>
+          <td class="num">109.9</td>
+          <td class="num">114.9</td>
+          <td class="num">113.6</td>
+          <td class="num good">+3.7</td>
+          <td class="num bad">-1.3</td>
+          <td>screen:tile4-scanline-forward</td>
+          <td class="num">1096</td>
+          <td class="num"></td>
+          <td class="num">2</td>
+        </tr>
+
+        <tr>
+          <th>obj_house5.vox</th>
+          <td class="num">113.6</td>
+          <td class="num">115.6</td>
+          <td class="num">113.4</td>
+          <td class="num flat">-0.2</td>
+          <td class="num bad">-2.2</td>
+          <td>screen:tile4-scanline-forward</td>
+          <td class="num">2522</td>
+          <td class="num"></td>
+          <td class="num">2</td>
+        </tr>
+
+        <tr>
+          <th>scene_mechanic2.vox</th>
+          <td class="num">111.7</td>
+          <td class="num">117.0</td>
+          <td class="num">113.5</td>
+          <td class="num good">+1.8</td>
+          <td class="num bad">-3.5</td>
+          <td>screen:tile4-scanline-forward</td>
+          <td class="num">2243</td>
+          <td class="num"></td>
+          <td class="num">2</td>
+        </tr>
+
+        <tr>
+          <th>skyscraper.vox</th>
+          <td class="num">34.5</td>
+          <td class="num">30.0</td>
+          <td class="num">29.9</td>
+          <td class="num bad">-4.5</td>
+          <td class="num flat">-0.0</td>
+          <td>screen:tile4-scanline-forward</td>
+          <td class="num">5793</td>
+          <td class="num"></td>
+          <td class="num">2</td>
+        </tr>
+
+        <tr>
+          <th>Treasure.vox</th>
+          <td class="num">58.7</td>
+          <td class="num">59.7</td>
+          <td class="num">58.5</td>
+          <td class="num bad">-0.3</td>
+          <td class="num bad">-1.2</td>
+          <td>screen:tile4-scanline-forward</td>
+          <td class="num">4037</td>
+          <td class="num"></td>
+          <td class="num">2</td>
+        </tr>
+      </tbody>
+    </table>
+
+    </section>
+  </main>
+</body>
+</html>

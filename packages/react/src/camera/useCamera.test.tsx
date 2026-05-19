@@ -1,19 +1,19 @@
 import { describe, it, expect } from "vitest";
 import React, { act } from "react";
 import { createRoot } from "react-dom/client";
-import { useCamera } from "./useCamera";
+import { usePolyCamera } from "./useCamera";
 import type { UseCameraResult } from "./useCamera";
 
 function CameraTestHarness({
   onResult,
   ...options
-}: Parameters<typeof useCamera>[0] & { onResult: (result: UseCameraResult) => void }) {
-  const result = useCamera(options);
+}: Parameters<typeof usePolyCamera>[0] & { onResult: (result: UseCameraResult) => void }) {
+  const result = usePolyCamera(options);
   onResult(result);
   return null;
 }
 
-function captureHook(options: Parameters<typeof useCamera>[0] = {}): UseCameraResult {
+function captureHook(options: Parameters<typeof usePolyCamera>[0] = {}): UseCameraResult {
   let captured: UseCameraResult | null = null;
   const container = document.createElement("div");
   const root = createRoot(container);
@@ -37,9 +37,7 @@ describe("useCamera", () => {
     expect(state.zoom).toBe(0.65);
     expect(state.rotX).toBe(65);
     expect(state.rotY).toBe(45);
-    expect(state.pan).toBe(0);
-    expect(state.tilt).toBe(0);
-    expect(state.depthOffset).toBe(20);
+    expect(state.target).toEqual([0, 0, 0]);
   });
 
   it("applies initial zoom", () => {
@@ -54,13 +52,8 @@ describe("useCamera", () => {
     expect(state.rotY).toBe(180);
   });
 
-  it("returns grab cursor when interactive", () => {
-    const result = captureHook({ interactive: true });
-    expect(result.cursor).toBe("grab");
-  });
-
-  it("returns default cursor when not interactive", () => {
-    const result = captureHook({ interactive: false });
-    expect(result.cursor).toBe("default");
+  it("applies initial target", () => {
+    const result = captureHook({ target: [1, 2, 0] });
+    expect(result.store.getState().cameraState.target).toEqual([1, 2, 0]);
   });
 });

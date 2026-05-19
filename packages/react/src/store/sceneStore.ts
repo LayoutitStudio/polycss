@@ -1,16 +1,21 @@
 /**
- * Lightweight reactive store for voxcss scene state.
+ * Lightweight reactive store for polycss scene state.
  * Uses useSyncExternalStore under the hood — zero dependencies.
  * Components subscribe to specific slices via selectors,
  * so only the components that care about a changed value re-render.
  */
 import { useSyncExternalStore, useRef, useCallback } from "react";
-import type { CameraState, WallsMask, CameraHandle } from "@layoutit/voxcss-core";
-import { computeWallMask, wallMasksEqual } from "@layoutit/voxcss-core";
+import type { CameraState, CameraHandle, Vec3 } from "@layoutit/polycss-core";
 
 export interface SceneStoreState {
   cameraState: CameraState;
-  wallMask: WallsMask;
+  /**
+   * Bbox-center of all auto-centerable meshes in world coords. Kept separate
+   * from `target` so user pan (written to `target` by controls) survives mesh
+   * add/remove without fighting the auto-managed centering offset.
+   * [0, 0, 0] when autoCenter is off or there are no centerable meshes.
+   */
+  autoCenterOffset: Vec3;
 }
 
 export interface SceneStore {
@@ -18,17 +23,20 @@ export interface SceneStore {
   setState(partial: Partial<SceneStoreState>): void;
   subscribe(listener: () => void): () => void;
 
-  /** Update camera + recompute wall mask. Only notifies if wall mask changed. Returns true if mask changed. */
+  /** Update camera state from the current imperative camera handle. */
   updateCameraFromRef(handle: CameraHandle): boolean;
 
   /** Force notify all subscribers (e.g. after prop-driven camera change). */
   notifyAll(): void;
+
+  /** Update the autoCenterOffset (world coords bbox center). */
+  setAutoCenterOffset(offset: Vec3): void;
 }
 
 export function createSceneStore(initial: CameraState): SceneStore {
   let state: SceneStoreState = {
     cameraState: { ...initial },
-    wallMask: computeWallMask(initial.rotX, initial.rotY),
+    autoCenterOffset: [0, 0, 0],
   };
 
   const listeners = new Set<() => void>();
@@ -53,22 +61,19 @@ export function createSceneStore(initial: CameraState): SceneStore {
     },
 
     updateCameraFromRef(handle) {
-      const nextMask = computeWallMask(handle.state.rotX, handle.state.rotY);
-      const maskChanged = !wallMasksEqual(state.wallMask, nextMask);
-
-      if (maskChanged) {
-        state = {
-          cameraState: { ...handle.state },
-          wallMask: nextMask,
-        };
-        notify();
-      }
-
-      return maskChanged;
+      state = { ...state, cameraState: { ...handle.state } };
+      notify();
+      return true;
     },
 
     notifyAll() {
       notify();
+    },
+
+    setAutoCenterOffset(offset) {
+      state = { ...state, autoCenterOffset: offset };
+      // No notify — the offset is read synchronously by applyTransformDirect;
+      // PolyScene re-renders on its own when the bbox-derived useMemo fires.
     },
   };
 }
