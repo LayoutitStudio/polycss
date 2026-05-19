@@ -1,6 +1,6 @@
 {
   "name": "polycss-monorepo",
-  "version": "0.0.0",
+  "version": "0.2.0",
   "private": true,
   "packageManager": "pnpm@10.32.1",
   "engines": {
