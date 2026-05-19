@@ -118,8 +118,8 @@ export type {
 } from "./cull/cameraBackfaceCulling";
 
 // ── Helper geometry (boxes, axes, light marker, transform arrows / rings) ─
-export { axesHelperPolygons, boxPolygons, arrowPolygons, ringPolygons, ringQuadPolygons, planePolygons, octahedronPolygons } from "./helpers";
-export type { AxesHelperOptions, BoxFace, BoxFaceOptions, BoxPolygonsOptions, ArrowPolygonsOptions, RingPolygonsOptions, RingQuadPolygonsOptions, PlanePolygonsOptions, OctahedronPolygonsOptions } from "./helpers";
+export { axesHelperPolygons, boxPolygons, arrowPolygons, ringPolygons, ringQuadPolygons, planePolygons, octahedronPolygons, tetrahedronPolygons, icosahedronPolygons, dodecahedronPolygons, cylinderPolygons, conePolygons, torusPolygons } from "./helpers";
+export type { AxesHelperOptions, BoxFace, BoxFaceOptions, BoxPolygonsOptions, ArrowPolygonsOptions, RingPolygonsOptions, RingQuadPolygonsOptions, PlanePolygonsOptions, OctahedronPolygonsOptions, TetrahedronPolygonsOptions, IcosahedronPolygonsOptions, DodecahedronPolygonsOptions, CylinderPolygonsOptions, ConePolygonsOptions, TorusPolygonsOptions } from "./helpers";
 
 // ── Animation ─────────────────────────────────────────────────────
 export {
