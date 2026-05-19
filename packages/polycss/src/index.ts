@@ -20,7 +20,7 @@ export type {
 } from "./api/createPolyScene";
 
 // ── Camera factories ──────────────────────────────────────────────
-export { createPolyPerspectiveCamera, createPolyOrthographicCamera } from "./api/createPolyCamera";
+export { createPolyPerspectiveCamera, createPolyOrthographicCamera, createPolyCamera } from "./api/createPolyCamera";
 export type {
   PolyCameraOptions,
   PolyPerspectiveCameraOptions,
@@ -77,8 +77,10 @@ export { PolyMeshElement } from "./elements/PolyMeshElement";
 export { PolyPolygonElement } from "./elements/PolyPolygonElement";
 export { PolyOrbitControlsElement } from "./elements/PolyOrbitControlsElement";
 export { PolyMapControlsElement } from "./elements/PolyMapControlsElement";
+export { PolyFirstPersonControlsElement } from "./elements/PolyFirstPersonControlsElement";
 export { PolyPerspectiveCameraElement } from "./elements/PolyPerspectiveCameraElement";
 export { PolyOrthographicCameraElement } from "./elements/PolyOrthographicCameraElement";
+export { PolyCameraElement } from "./elements/PolyCameraElement";
 export { PolyTransformControlsElement } from "./elements/PolyTransformControlsElement";
 export { PolySelectElement } from "./elements/PolySelectElement";
 

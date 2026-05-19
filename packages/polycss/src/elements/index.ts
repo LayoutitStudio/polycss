@@ -16,8 +16,10 @@ import { PolyAxesHelperElement } from "./PolyAxesHelperElement";
 import { PolyDirectionalLightHelperElement } from "./PolyDirectionalLightHelperElement";
 import { PolyOrbitControlsElement } from "./PolyOrbitControlsElement";
 import { PolyMapControlsElement } from "./PolyMapControlsElement";
+import { PolyFirstPersonControlsElement } from "./PolyFirstPersonControlsElement";
 import { PolyPerspectiveCameraElement } from "./PolyPerspectiveCameraElement";
 import { PolyOrthographicCameraElement } from "./PolyOrthographicCameraElement";
+import { PolyCameraElement } from "./PolyCameraElement";
 import { PolyTransformControlsElement } from "./PolyTransformControlsElement";
 import { PolySelectElement } from "./PolySelectElement";
 
@@ -46,11 +48,17 @@ if (typeof customElements !== "undefined") {
   if (!customElements.get("poly-map-controls")) {
     customElements.define("poly-map-controls", PolyMapControlsElement);
   }
+  if (!customElements.get("poly-first-person-controls")) {
+    customElements.define("poly-first-person-controls", PolyFirstPersonControlsElement);
+  }
   if (!customElements.get("poly-perspective-camera")) {
     customElements.define("poly-perspective-camera", PolyPerspectiveCameraElement);
   }
   if (!customElements.get("poly-orthographic-camera")) {
     customElements.define("poly-orthographic-camera", PolyOrthographicCameraElement);
+  }
+  if (!customElements.get("poly-camera")) {
+    customElements.define("poly-camera", PolyCameraElement);
   }
   if (!customElements.get("poly-transform-controls")) {
     customElements.define("poly-transform-controls", PolyTransformControlsElement);
@@ -68,8 +76,10 @@ export {
   PolyDirectionalLightHelperElement,
   PolyOrbitControlsElement,
   PolyMapControlsElement,
+  PolyFirstPersonControlsElement,
   PolyPerspectiveCameraElement,
   PolyOrthographicCameraElement,
+  PolyCameraElement,
   PolyTransformControlsElement,
   PolySelectElement,
 };
