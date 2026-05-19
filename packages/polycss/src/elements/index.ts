@@ -22,6 +22,18 @@ import { PolyOrthographicCameraElement } from "./PolyOrthographicCameraElement";
 import { PolyCameraElement } from "./PolyCameraElement";
 import { PolyTransformControlsElement } from "./PolyTransformControlsElement";
 import { PolySelectElement } from "./PolySelectElement";
+import {
+  PolyBoxElement,
+  PolyPlaneElement,
+  PolyRingElement,
+  PolyOctahedronElement,
+  PolyTetrahedronElement,
+  PolyIcosahedronElement,
+  PolyDodecahedronElement,
+  PolyCylinderElement,
+  PolyConeElement,
+  PolyTorusElement,
+} from "./PolyShapeElements";
 
 if (typeof customElements !== "undefined") {
   if (!customElements.get("poly-scene")) {
@@ -66,6 +78,36 @@ if (typeof customElements !== "undefined") {
   if (!customElements.get("poly-select")) {
     customElements.define("poly-select", PolySelectElement);
   }
+  if (!customElements.get("poly-box")) {
+    customElements.define("poly-box", PolyBoxElement);
+  }
+  if (!customElements.get("poly-plane")) {
+    customElements.define("poly-plane", PolyPlaneElement);
+  }
+  if (!customElements.get("poly-ring")) {
+    customElements.define("poly-ring", PolyRingElement);
+  }
+  if (!customElements.get("poly-octahedron")) {
+    customElements.define("poly-octahedron", PolyOctahedronElement);
+  }
+  if (!customElements.get("poly-tetrahedron")) {
+    customElements.define("poly-tetrahedron", PolyTetrahedronElement);
+  }
+  if (!customElements.get("poly-icosahedron")) {
+    customElements.define("poly-icosahedron", PolyIcosahedronElement);
+  }
+  if (!customElements.get("poly-dodecahedron")) {
+    customElements.define("poly-dodecahedron", PolyDodecahedronElement);
+  }
+  if (!customElements.get("poly-cylinder")) {
+    customElements.define("poly-cylinder", PolyCylinderElement);
+  }
+  if (!customElements.get("poly-cone")) {
+    customElements.define("poly-cone", PolyConeElement);
+  }
+  if (!customElements.get("poly-torus")) {
+    customElements.define("poly-torus", PolyTorusElement);
+  }
 }
 
 export {
@@ -82,4 +124,14 @@ export {
   PolyCameraElement,
   PolyTransformControlsElement,
   PolySelectElement,
+  PolyBoxElement,
+  PolyPlaneElement,
+  PolyRingElement,
+  PolyOctahedronElement,
+  PolyTetrahedronElement,
+  PolyIcosahedronElement,
+  PolyDodecahedronElement,
+  PolyCylinderElement,
+  PolyConeElement,
+  PolyTorusElement,
 };
