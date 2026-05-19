@@ -69,6 +69,37 @@ describe("PolyMeshElement", () => {
       expect(observed).toContain("scale");
       expect(observed).toContain("rotation");
       expect(observed).toContain("auto-center");
+      expect(observed).toContain("mesh-resolution");
+    });
+  });
+
+  describe("mesh-resolution attribute", () => {
+    it("loads successfully with mesh-resolution='lossless'", async () => {
+      globalThis.fetch = mockFetch(TRIANGLE_OBJ);
+      const scene = document.createElement("poly-scene") as PolySceneElement;
+      const mesh = document.createElement("poly-mesh") as PolyMeshElement;
+      mesh.setAttribute("src", "tri.obj");
+      mesh.setAttribute("mesh-resolution", "lossless");
+      scene.appendChild(mesh);
+      host.appendChild(scene);
+
+      await vi.waitFor(() => {
+        expect(scene.querySelectorAll("i,b,s,u").length).toBeGreaterThan(0);
+      });
+    });
+
+    it("loads successfully with mesh-resolution='lossy' (explicit default)", async () => {
+      globalThis.fetch = mockFetch(TRIANGLE_OBJ);
+      const scene = document.createElement("poly-scene") as PolySceneElement;
+      const mesh = document.createElement("poly-mesh") as PolyMeshElement;
+      mesh.setAttribute("src", "tri.obj");
+      mesh.setAttribute("mesh-resolution", "lossy");
+      scene.appendChild(mesh);
+      host.appendChild(scene);
+
+      await vi.waitFor(() => {
+        expect(scene.querySelectorAll("i,b,s,u").length).toBeGreaterThan(0);
+      });
     });
   });
 

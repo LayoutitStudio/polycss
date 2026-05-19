@@ -10,7 +10,7 @@
  * `auto-center` is currently honored by recentering vertices in-place before
  * registering; this matches `<PolyMesh autoCenter>` semantics.
  */
-import type { ParseResult, Polygon, Vec3 } from "@layoutit/polycss-core";
+import type { MeshResolution, ParseResult, Polygon, Vec3 } from "@layoutit/polycss-core";
 import { computeSceneBbox, loadMesh } from "@layoutit/polycss-core";
 import type { PolyMeshHandle } from "../api/createPolyScene";
 import type { PolySceneElement } from "./PolySceneElement";
@@ -23,6 +23,7 @@ const ELEMENT_BASE: typeof HTMLElement =
 const OBSERVED_ATTRS = [
   "src",
   "mtl",
+  "mesh-resolution",
   "position",
   "scale",
   "rotation",
@@ -105,7 +106,7 @@ export class PolyMeshElement extends ELEMENT_BASE {
     newValue: string | null,
   ): void {
     if (oldValue === newValue) return;
-    if (name === "src" || name === "mtl") {
+    if (name === "src" || name === "mtl" || name === "mesh-resolution") {
       this._tearDown();
       this._maybeLoad();
       return;
@@ -137,9 +138,15 @@ export class PolyMeshElement extends ELEMENT_BASE {
     const token = ++this._loadToken;
 
     const mtl = this.getAttribute("mtl") || undefined;
+    const meshResolutionAttr = this.getAttribute("mesh-resolution");
+    const meshResolution: MeshResolution | undefined =
+      meshResolutionAttr === "lossless" ? "lossless" : undefined;
     let parsed: ParseResult;
     try {
-      parsed = await loadMesh(src, mtl ? { mtlUrl: mtl } : undefined);
+      const loadOpts = (mtl || meshResolution !== undefined)
+        ? { ...(mtl ? { mtlUrl: mtl } : {}), ...(meshResolution !== undefined ? { meshResolution } : {}) }
+        : undefined;
+      parsed = await loadMesh(src, loadOpts);
     } catch (err) {
       this.dispatchEvent(
         new CustomEvent("polycss:error", { detail: err, bubbles: true }),
