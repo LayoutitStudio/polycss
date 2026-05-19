@@ -29,6 +29,12 @@ function sharedEdgeCount(polygons: Polygon[]): number {
   return [...counts.values()].filter((count) => count > 1).length;
 }
 
+function polygonSignature(polygons: Polygon[]): string[] {
+  return polygons.map((polygon) =>
+    `${polygon.color ?? ""}:${polygon.vertices.map((vertex) => vertex.join(",")).join(";")}`
+  ).sort();
+}
+
 function textureTrianglePlaneDistance(polygon: Polygon): number {
   const [a, b, c] = polygon.vertices;
   const ab = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
@@ -228,6 +234,27 @@ describe("optimizeMeshPolygons", () => {
       "12,1,0",
       "0,1,0",
     ]));
+  });
+
+  it("keeps automatic lossy optimization exact for large cardinal quad meshes", () => {
+    const input: Polygon[] = [];
+    for (let y = 0; y < 20; y++) {
+      for (let x = 0; x < 20; x++) {
+        input.push({
+          vertices: [[x, y, 0], [x + 1, y, 0], [x + 1, y + 1, 0], [x, y + 1, 0]],
+          color: (x + y) % 2 === 0 ? "#111111" : "#eeeeee",
+        });
+      }
+    }
+
+    const exact = optimizeMeshPolygons(input, {
+      meshResolution: "lossy",
+      approximateMerge: false,
+    });
+    const automatic = optimizeMeshPolygons(input, { meshResolution: "lossy" });
+
+    expect(automatic).toHaveLength(exact.length);
+    expect(polygonSignature(automatic)).toEqual(polygonSignature(exact));
   });
 
   it("keeps lossy pair-merge neighbor seams on shared geometry", () => {

@@ -99,8 +99,8 @@ const CORE_BASE_STYLES = `
 
 .polycss-scene b {
   background: currentColor;
-  width: 1px;
-  height: 1px;
+  width: 64px;
+  height: 64px;
 }
 
 .polycss-scene i {
@@ -110,8 +110,8 @@ const CORE_BASE_STYLES = `
 }
 
 .polycss-scene s {
-  width: 1px;
-  height: 1px;
+  width: var(--polycss-atlas-size, 64px);
+  height: var(--polycss-atlas-size, 64px);
 }
 
 .polycss-scene u {
@@ -121,7 +121,7 @@ const CORE_BASE_STYLES = `
   box-sizing: content-box;
   border: 0 solid transparent;
   border-color: transparent transparent currentColor transparent;
-  border-width: 0 1px 1px 1px;
+  border-width: 0 32px 64px 32px;
 }
 
 /* ── Gizmo override ─────────────────────────────────────────────────────── */

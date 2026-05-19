@@ -35,11 +35,16 @@ const MAX_ATLAS_SCALE = 1;
 const AUTO_ATLAS_LOW_AREA = ATLAS_MAX_SIZE * ATLAS_MAX_SIZE;
 const AUTO_ATLAS_MEDIUM_AREA = AUTO_ATLAS_LOW_AREA * 3;
 const AUTO_ATLAS_MAX_BITMAP_SIDE = 2048;
-const AUTO_ATLAS_MAX_DECODED_BYTES = 16 * 1024 * 1024;
+const AUTO_ATLAS_MAX_DECODED_BYTES_MOBILE = 4 * 1024 * 1024;
+const AUTO_ATLAS_MAX_DECODED_BYTES_DESKTOP = 16 * 1024 * 1024;
 const AUTO_ATLAS_SCALE_GUARD = 0.995;
 const DEFAULT_MATRIX_DECIMALS = 3;
 const DEFAULT_BORDER_SHAPE_DECIMALS = 2;
 const DEFAULT_ATLAS_CSS_DECIMALS = 4;
+const SOLID_QUAD_CANONICAL_SIZE = 64;
+const SOLID_TRIANGLE_CANONICAL_SIZE = 64;
+const ATLAS_CANONICAL_SIZE_EXPLICIT = 64;
+const ATLAS_CANONICAL_SIZE_AUTO_DESKTOP = 128;
 const BORDER_SHAPE_CENTER_PERCENT = 50;
 const BORDER_SHAPE_POINT_EPS = 1e-7;
 const BORDER_SHAPE_CANONICAL_SIZE = 16;
@@ -91,6 +96,8 @@ export interface TextureAtlasPlan {
   layerElevation: number;
   matrix: string;
   canonicalMatrix: string;
+  atlasMatrix: string;
+  atlasCanonicalSize?: number;
   projectiveMatrix: string | null;
   canvasW: number;
   canvasH: number;
@@ -245,7 +252,7 @@ function atlasArea(pages: PackedPage[]): number {
   return pages.reduce((sum, page) => sum + page.width * page.height, 0);
 }
 
-function autoAtlasScaleCap(pages: PackedPage[]): number {
+function autoAtlasScaleCap(pages: PackedPage[], maxDecodedBytes: number): number {
   const area = atlasArea(pages);
   if (area <= 0) return 1;
 
@@ -254,18 +261,73 @@ function autoAtlasScaleCap(pages: PackedPage[]): number {
     ...pages.map((page) => Math.max(page.width, page.height)),
   );
   const sideScale = AUTO_ATLAS_MAX_BITMAP_SIDE / maxSide;
-  const memoryScale = Math.sqrt(AUTO_ATLAS_MAX_DECODED_BYTES / (area * 4));
+  const memoryScale = Math.sqrt(maxDecodedBytes / (area * 4));
 
   return normalizeAtlasScale(Math.min(sideScale, memoryScale));
 }
 
-function autoAtlasScale(pages: PackedPage[]): number {
+function isMobileDocument(doc: Document | null | undefined): boolean {
+  if (!doc) return false;
+  const win = doc.defaultView ?? (typeof window !== "undefined" ? window : undefined);
+  const media = win?.matchMedia;
+  if (!media) return false;
+  return media("(pointer: coarse)").matches || media("(hover: none)").matches;
+}
+
+function autoAtlasMaxDecodedBytes(doc: Document | null | undefined): number {
+  return isMobileDocument(doc)
+    ? AUTO_ATLAS_MAX_DECODED_BYTES_MOBILE
+    : AUTO_ATLAS_MAX_DECODED_BYTES_DESKTOP;
+}
+
+function atlasCanonicalSizeForTextureQuality(
+  textureQualityInput: TextureQuality | undefined,
+  doc: Document | null | undefined,
+): number {
+  if (textureQualityInput !== undefined && textureQualityInput !== "auto") {
+    return ATLAS_CANONICAL_SIZE_EXPLICIT;
+  }
+  return isMobileDocument(doc)
+    ? ATLAS_CANONICAL_SIZE_EXPLICIT
+    : ATLAS_CANONICAL_SIZE_AUTO_DESKTOP;
+}
+
+function formatAtlasMatrix(
+  entry: TextureAtlasPlan,
+  atlasCanonicalSize: number,
+): string {
+  const values = entry.matrix.split(",").map((value) => Number(value));
+  if (values.length !== 16 || values.some((value) => !Number.isFinite(value))) {
+    return entry.canonicalMatrix;
+  }
+  values[0] *= entry.canvasW / atlasCanonicalSize;
+  values[1] *= entry.canvasW / atlasCanonicalSize;
+  values[2] *= entry.canvasW / atlasCanonicalSize;
+  values[4] *= entry.canvasH / atlasCanonicalSize;
+  values[5] *= entry.canvasH / atlasCanonicalSize;
+  values[6] *= entry.canvasH / atlasCanonicalSize;
+  return values.join(",");
+}
+
+function applyPackedAtlasCanonicalSize(
+  packed: PackedAtlas,
+  atlasCanonicalSize: number,
+): PackedAtlas {
+  for (const entry of packed.entries) {
+    if (!entry) continue;
+    entry.atlasCanonicalSize = atlasCanonicalSize;
+    entry.atlasMatrix = formatAtlasMatrix(entry, atlasCanonicalSize);
+  }
+  return packed;
+}
+
+function autoAtlasScale(pages: PackedPage[], maxDecodedBytes: number): number {
   const area = atlasArea(pages);
   let atlasScale = 0.5;
   if (area <= AUTO_ATLAS_LOW_AREA) atlasScale = 1;
   else if (area <= AUTO_ATLAS_MEDIUM_AREA) atlasScale = 0.75;
 
-  return normalizeAtlasScale(Math.min(atlasScale, autoAtlasScaleCap(pages)));
+  return normalizeAtlasScale(Math.min(atlasScale, autoAtlasScaleCap(pages, maxDecodedBytes)));
 }
 
 function atlasBitmapMaxSide(pages: PackedPage[], atlasScale: number): number {
@@ -285,14 +347,14 @@ function atlasDecodedBytes(pages: PackedPage[], atlasScale: number): number {
   , 0);
 }
 
-function autoAtlasBudgetFactor(pages: PackedPage[], atlasScale: number): number {
+function autoAtlasBudgetFactor(pages: PackedPage[], atlasScale: number, maxDecodedBytes: number): number {
   const maxSide = atlasBitmapMaxSide(pages, atlasScale);
   const decodedBytes = atlasDecodedBytes(pages, atlasScale);
   const sideFactor = maxSide > AUTO_ATLAS_MAX_BITMAP_SIDE
     ? AUTO_ATLAS_MAX_BITMAP_SIDE / maxSide
     : 1;
-  const memoryFactor = decodedBytes > AUTO_ATLAS_MAX_DECODED_BYTES
-    ? Math.sqrt(AUTO_ATLAS_MAX_DECODED_BYTES / decodedBytes)
+  const memoryFactor = decodedBytes > maxDecodedBytes
+    ? Math.sqrt(maxDecodedBytes / decodedBytes)
     : 1;
   return Math.min(sideFactor, memoryFactor);
 }
@@ -300,15 +362,16 @@ function autoAtlasBudgetFactor(pages: PackedPage[], atlasScale: number): number 
 function packTextureAtlasPlansAuto(
   plans: Array<TextureAtlasPlan | null>,
   fullScalePacked: PackedAtlas,
+  maxDecodedBytes: number,
 ): { packed: PackedAtlas; atlasScale: number } {
-  let atlasScale = autoAtlasScale(fullScalePacked.pages);
+  let atlasScale = autoAtlasScale(fullScalePacked.pages, maxDecodedBytes);
   let packed = atlasScale === 1
     ? fullScalePacked
     : packTextureAtlasPlans(plans, atlasScale);
 
   // Lower scales increase padding, so verify the final packed bitmap budget.
   for (let i = 0; i < 4; i++) {
-    const factor = autoAtlasBudgetFactor(packed.pages, atlasScale);
+    const factor = autoAtlasBudgetFactor(packed.pages, atlasScale, maxDecodedBytes);
     if (factor >= 1) break;
 
     const nextAtlasScale = normalizeAtlasScale(atlasScale * factor * AUTO_ATLAS_SCALE_GUARD);
@@ -323,14 +386,25 @@ function packTextureAtlasPlansAuto(
 function packTextureAtlasPlansWithScale(
   plans: Array<TextureAtlasPlan | null>,
   textureQualityInput: TextureQuality | undefined,
-): { packed: PackedAtlas; atlasScale: number } {
+  doc: Document | null | undefined,
+): { packed: PackedAtlas; atlasScale: number; atlasCanonicalSize: number } {
+  const atlasCanonicalSize = atlasCanonicalSizeForTextureQuality(textureQualityInput, doc);
   if (textureQualityInput !== undefined && textureQualityInput !== "auto") {
     const atlasScale = normalizeAtlasScale(textureQualityInput);
-    return { packed: packTextureAtlasPlans(plans, atlasScale), atlasScale };
+    return {
+      packed: applyPackedAtlasCanonicalSize(packTextureAtlasPlans(plans, atlasScale), atlasCanonicalSize),
+      atlasScale,
+      atlasCanonicalSize,
+    };
   }
 
   const fullScalePacked = packTextureAtlasPlans(plans, 1);
-  return packTextureAtlasPlansAuto(plans, fullScalePacked);
+  const autoPacked = packTextureAtlasPlansAuto(plans, fullScalePacked, autoAtlasMaxDecodedBytes(doc));
+  return {
+    packed: applyPackedAtlasCanonicalSize(autoPacked.packed, atlasCanonicalSize),
+    atlasScale: autoPacked.atlasScale,
+    atlasCanonicalSize,
+  };
 }
 
 function atlasPadding(atlasScale: number): number {
@@ -437,6 +511,15 @@ function borderShapeSupported(): boolean {
   return media("(pointer: fine)").matches && media("(hover: hover)").matches;
 }
 
+function solidTriangleSupported(): boolean {
+  const userAgent = (typeof window !== "undefined" ? window.navigator : globalThis.navigator)?.userAgent ?? "";
+  if (!userAgent) return true;
+
+  const isChromiumFamily = /\b(?:Chrome|HeadlessChrome|Chromium|Edg|OPR)\//.test(userAgent);
+  const isSafariFamily = /\bVersion\/[\d.]+.*\bSafari\//.test(userAgent);
+  return !isSafariFamily || isChromiumFamily;
+}
+
 function incrementCount(map: Map<string, number>, key: string): void {
   map.set(key, (map.get(key) ?? 0) + 1);
 }
@@ -488,13 +571,14 @@ export function getSolidPaintDefaults(
   const paintCounts = new Map<string, number>();
   const dynamicCounts = new Map<string, number>();
   const dynamicColors = new Map<string, RGB>();
+  const useStableTriangle = solidTriangleSupported();
   const useBorderShape = textureLighting !== "dynamic" && borderShapeSupported();
 
   for (const plan of plans) {
     if (!plan || plan.texture) continue;
 
     if (textureLighting === "dynamic") {
-      if (!isSolidTrianglePlan(plan) && !isFullRectSolid(plan)) continue;
+      if (!(useStableTriangle && isSolidTrianglePlan(plan)) && !isFullRectSolid(plan)) continue;
       const color = parseHex(plan.polygon.color ?? "#cccccc");
       const key = rgbKey(color);
       incrementCount(dynamicCounts, key);
@@ -502,7 +586,7 @@ export function getSolidPaintDefaults(
       continue;
     }
 
-    if (!isSolidTrianglePlan(plan) && !isFullRectSolid(plan) && !useBorderShape) continue;
+    if (!(useStableTriangle && isSolidTrianglePlan(plan)) && !isFullRectSolid(plan) && !useBorderShape) continue;
     incrementCount(paintCounts, plan.shadedColor);
   }
 
@@ -582,6 +666,14 @@ function formatBorderShapeMatrix(entry: TextureAtlasPlan): string {
     entry,
     (entry.canvasW || 1) / BORDER_SHAPE_CANONICAL_SIZE,
     (entry.canvasH || 1) / BORDER_SHAPE_CANONICAL_SIZE,
+  );
+}
+
+function formatSolidQuadMatrix(entry: TextureAtlasPlan): string {
+  return formatScaledMatrixFromPlan(
+    entry,
+    (entry.canvasW || 1) / SOLID_QUAD_CANONICAL_SIZE,
+    (entry.canvasH || 1) / SOLID_QUAD_CANONICAL_SIZE,
   );
 }
 
@@ -765,12 +857,14 @@ function computeProjectiveQuadMatrix(
     p3[2] * w3 - p0[2],
   ];
 
-  return [
+  const values = [
     xCol[0], xCol[1], xCol[2], g,
     yCol[0], yCol[1], yCol[2], h,
     normal[0], normal[1], normal[2], 0,
     p0[0], p0[1], p0[2], 1,
-  ].join(",");
+  ];
+  for (let i = 0; i < 8; i += 1) values[i] /= SOLID_QUAD_CANONICAL_SIZE;
+  return values.join(",");
 }
 
 function cssPoints(vertices: Vec3[], tile: number, elev: number): Vec3[] {
@@ -993,20 +1087,21 @@ function solidTriangleStyle(
   const apex = worldPoint(apex2);
   const baseLeft = worldPoint([baseLeft2[0], baseY]);
   const baseRight = worldPoint([baseRight2[0], baseY]);
+  const halfBase = SOLID_TRIANGLE_CANONICAL_SIZE / 2;
   const xCol: Vec3 = [
-    (baseRight[0] - baseLeft[0]) / 2,
-    (baseRight[1] - baseLeft[1]) / 2,
-    (baseRight[2] - baseLeft[2]) / 2,
+    (baseRight[0] - baseLeft[0]) / SOLID_TRIANGLE_CANONICAL_SIZE,
+    (baseRight[1] - baseLeft[1]) / SOLID_TRIANGLE_CANONICAL_SIZE,
+    (baseRight[2] - baseLeft[2]) / SOLID_TRIANGLE_CANONICAL_SIZE,
   ];
   const txCol: Vec3 = [
-    apex[0] - xCol[0],
-    apex[1] - xCol[1],
-    apex[2] - xCol[2],
+    apex[0] - xCol[0] * halfBase,
+    apex[1] - xCol[1] * halfBase,
+    apex[2] - xCol[2] * halfBase,
   ];
   const yCol: Vec3 = [
-    baseLeft[0] - txCol[0],
-    baseLeft[1] - txCol[1],
-    baseLeft[2] - txCol[2],
+    (baseLeft[0] - txCol[0]) / SOLID_TRIANGLE_CANONICAL_SIZE,
+    (baseLeft[1] - txCol[1]) / SOLID_TRIANGLE_CANONICAL_SIZE,
+    (baseLeft[2] - txCol[2]) / SOLID_TRIANGLE_CANONICAL_SIZE,
   ];
   const canonicalMatrix = formatMatrix3dValues([
     xCol[0], xCol[1], xCol[2], 0,
@@ -1596,6 +1691,18 @@ export function computeTextureAtlasPlan(
     nx, ny, nz, 0,
     tx, ty, tz, 1,
   ].join(",");
+  const atlasMatrix = [
+    xAxis[0] * canvasW / ATLAS_CANONICAL_SIZE_EXPLICIT,
+    xAxis[1] * canvasW / ATLAS_CANONICAL_SIZE_EXPLICIT,
+    xAxis[2] * canvasW / ATLAS_CANONICAL_SIZE_EXPLICIT,
+    0,
+    yAxis[0] * canvasH / ATLAS_CANONICAL_SIZE_EXPLICIT,
+    yAxis[1] * canvasH / ATLAS_CANONICAL_SIZE_EXPLICIT,
+    yAxis[2] * canvasH / ATLAS_CANONICAL_SIZE_EXPLICIT,
+    0,
+    nx, ny, nz, 0,
+    tx, ty, tz, 1,
+  ].join(",");
   const normal: Vec3 = [nx, ny, nz];
   const projectiveMatrix = !texture && vertices.length === 4
     ? computeProjectiveQuadMatrix(screenPts, xAxis, yAxis, normal, tx, ty, tz)
@@ -1640,6 +1747,7 @@ export function computeTextureAtlasPlan(
     layerElevation: elev,
     matrix,
     canonicalMatrix,
+    atlasMatrix,
     projectiveMatrix,
     canvasW,
     canvasH,
@@ -1858,7 +1966,7 @@ export function useTextureAtlas(
   const disableU = strategies?.disable?.includes("u") ?? false;
   const useFullRectSolid = !disableB;
   const useProjectiveQuad = useFullRectSolid;
-  const useStableTriangle = !disableU;
+  const useStableTriangle = !disableU && solidTriangleSupported();
   const useBorderShape = !disableI && textureLighting !== "dynamic" && borderShapeSupported();
   const atlasPlans = useMemo(
     () => plans.map((plan) => {
@@ -1879,7 +1987,11 @@ export function useTextureAtlas(
     [plans, textureLighting, useFullRectSolid, useProjectiveQuad, useStableTriangle, useBorderShape],
   );
   const { packed, atlasScale } = useMemo(
-    () => packTextureAtlasPlansWithScale(atlasPlans, textureQualityInput),
+    () => packTextureAtlasPlansWithScale(
+      atlasPlans,
+      textureQualityInput,
+      typeof document !== "undefined" ? document : null,
+    ),
     [atlasPlans, textureQualityInput],
   );
   const [pages, setPages] = useState<TextureAtlasPage[]>(
@@ -1958,7 +2070,7 @@ export function TextureBorderShapePoly({
     else el.style.removeProperty("border-shape");
     orderBrushInlineStyle(el);
   }, [borderShape]);
-  const transform = formatMatrix3d(borderShape ? formatBorderShapeMatrix(entry) : entry.canonicalMatrix);
+  const transform = formatMatrix3d(borderShape ? formatBorderShapeMatrix(entry) : formatSolidQuadMatrix(entry));
   const style: CSSProperties = fullRect
     ? {
         transform,
@@ -2129,13 +2241,14 @@ export function TextureAtlasPoly({
   pointerEvents?: "auto" | "none";
 }) {
   const dynamic = textureLighting === "dynamic";
+  const atlasCanonicalSize = entry.atlasCanonicalSize ?? ATLAS_CANONICAL_SIZE_EXPLICIT;
   const atlasWidth = entry.canvasW || 1;
   const atlasHeight = entry.canvasH || 1;
   const atlasPosition = page
-    ? `${formatCssLength(-entry.x / atlasWidth)} ${formatCssLength(-entry.y / atlasHeight)}`
+    ? `${formatCssLength((-entry.x / atlasWidth) * atlasCanonicalSize)} ${formatCssLength((-entry.y / atlasHeight) * atlasCanonicalSize)}`
     : undefined;
   const atlasSize = page
-    ? `${formatCssLength(page.width / atlasWidth)} ${formatCssLength(page.height / atlasHeight)}`
+    ? `${formatCssLength((page.width / atlasWidth) * atlasCanonicalSize)} ${formatCssLength((page.height / atlasHeight) * atlasCanonicalSize)}`
     : undefined;
 
   // Dynamic mode: emit ONLY the per-polygon surface normal vars + the
@@ -2151,7 +2264,8 @@ export function TextureAtlasPoly({
     : undefined;
 
   const style: CSSProperties = {
-    transform: formatMatrix3d(entry.canonicalMatrix),
+    transform: formatMatrix3d(entry.atlasMatrix),
+    ["--polycss-atlas-size" as string]: `${atlasCanonicalSize}px`,
     background,
     backgroundImage: dynamic && page?.url ? `url(${page.url})` : undefined,
     backgroundPosition: dynamic ? atlasPosition : undefined,

@@ -85,6 +85,46 @@ function stubTexturePixels(width: number, height: number, pixels: Uint8Array): v
   });
 }
 
+function stubEarlyDecodeTexturePixels(
+  width: number,
+  height: number,
+  unloadedPixels: Uint8Array,
+  loadedPixels: Uint8Array,
+): void {
+  let loaded = false;
+  vi.stubGlobal("Image", class MockImage {
+    decoding = "";
+    naturalWidth = width;
+    naturalHeight = height;
+    width = width;
+    height = height;
+    onload: (() => void) | null = null;
+    onerror: (() => void) | null = null;
+    set src(_value: string) {
+      setTimeout(() => {
+        loaded = true;
+        this.onload?.();
+      }, 0);
+    }
+    decode() {
+      return Promise.resolve();
+    }
+  });
+  vi.stubGlobal("document", {
+    createElement(tagName: string) {
+      if (tagName !== "canvas") return {};
+      return {
+        width: 0,
+        height: 0,
+        getContext: () => ({
+          drawImage: vi.fn(),
+          getImageData: () => ({ data: loaded ? loadedPixels : unloadedPixels }),
+        }),
+      };
+    },
+  });
+}
+
 // Build a minimal valid GLB (no mesh — just magic + empty JSON chunk +
 // empty BIN chunk). parseGltf requires a BIN chunk to be present, even if
 // the document has no meshes.
@@ -173,6 +213,30 @@ describe("loadMesh", () => {
       expect(result.polygons[0].uvs).toBeUndefined();
       expect(result.polygons[0].color).toBe("#ff0000");
       expect(result.polygons[0].vertices).toHaveLength(4);
+    });
+
+    it("waits for image load before sampling solid texture colors", async () => {
+      vi.stubGlobal("fetch", makeMockFetch({ text: TEXTURED_QUAD_OBJ }));
+      stubEarlyDecodeTexturePixels(
+        2,
+        2,
+        new Uint8Array([
+          0, 0, 0, 0, 0, 0, 0, 0,
+          0, 0, 0, 0, 0, 0, 0, 0,
+        ]),
+        new Uint8Array([
+          255, 0, 0, 255, 255, 0, 0, 255,
+          255, 0, 0, 255, 255, 0, 0, 255,
+        ]),
+      );
+
+      const result = await loadMesh("model.obj", {
+        objOptions: { materialTextures: { Swatch: "swatch.png" } },
+      });
+
+      expect(result.polygons).toHaveLength(1);
+      expect(result.polygons[0].texture).toBeUndefined();
+      expect(result.polygons[0].color).toBe("#ff0000");
     });
 
     it("bakes noisy color-swatch texture samples into solid polygons by default", async () => {

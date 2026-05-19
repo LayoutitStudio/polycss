@@ -1,5 +1,5 @@
 import { cullInteriorPolygons } from "../cull/cullInteriorPolygons";
-import { dedupeOverlappingPolygons } from "./dedupeOverlappingPolygons";
+import { findOverlappingPolygonDuplicates } from "./dedupeOverlappingPolygons";
 import type { MeshResolution, Polygon, TextureTriangle, Vec2, Vec3 } from "../types";
 import { coverPlanarPolygons, type CoverPlanarPolygonsOptions } from "./coverPlanarPolygons";
 import { mergePolygons } from "./mergePolygons";
@@ -101,10 +101,17 @@ interface PlaneGroupReplacements {
 }
 
 interface PreprocessCache {
-  baseline: Polygon[];
+  baseline?: Polygon[];
+  deduped?: Polygon[];
+  dedupedIndices?: IndexFilter;
+  interior?: Polygon[];
+  interiorIndices?: IndexFilter;
   snapped?: Polygon[];
   snappedInterior?: Polygon[];
+  snappedInteriorIndices?: IndexFilter;
 }
+
+type IndexFilter = number[] | null;
 
 interface Segment3 {
   a: Vec3;
@@ -141,6 +148,8 @@ interface CrackMetrics {
   internalBoundaryLength: number;
   excessBoundaryLength: number;
 }
+
+interface CrackMetricLimits extends CrackMetrics {}
 
 interface LossyQualityCandidate {
   polygons: Polygon[];
@@ -181,7 +190,7 @@ const LOSSY_BUDGET_SWEEP: Array<Required<Omit<ApproximateMergeOptions, "isolated
   },
 ];
 
-const LOSSY_COLOR_QUANTIZE_STEPS = [2, 4, 6, 8, 12] as const;
+const LOSSY_COLOR_QUANTIZE_STEPS = [4, 8, 12] as const;
 const LOSSY_RECTANGULATED_MIN_POLYGONS = 300;
 const LOSSY_RECTANGULATED_MAX_TRIANGLE_RATIO = 0.3;
 const LOSSY_AUTOMATIC_GROUP_MAX_POLYGONS = 300;
@@ -190,10 +199,20 @@ const LOSSY_CRACK_RELATIVE_COST_SLACK = 0.015;
 const LOSSY_CRACK_QUALITY_SEARCH_MULTIPLIER = 2.6;
 const LOSSY_POLYGON_PAIR_MAX_PASSES = 3;
 const RECT_COVER_MOSTLY_QUAD_TRIANGLE_LIMIT = 96;
+const AUTOMATIC_RECT_COVER_MAX_POLYGONS = 1800;
+const AUTOMATIC_RECT_COVER_MIN_TRIANGLE_RATIO = 0.65;
+const LOSSY_RECTANGULATED_FAST_EXIT_MIN_POLYGONS = 900;
+const AUTOMATIC_GEOMETRY_SKIP_MIN_POLYGONS = 300;
+const CARDINAL_NORMAL_EPSILON = 1e-5;
 
 const DEFAULT_RECT_COVER_OPTIONS: CoverPlanarPolygonsOptions = {
   minGroupPolygons: 2,
   maxCandidateAxes: 24,
+};
+
+const AUTOMATIC_LOSSY_RECT_COVER_OPTIONS: CoverPlanarPolygonsOptions = {
+  ...DEFAULT_RECT_COVER_OPTIONS,
+  maxCandidateAxes: 1,
 };
 
 const EMPTY_CRACK_METRICS: CrackMetrics = {
@@ -207,8 +226,8 @@ export function optimizeMeshPolygons(
   options: OptimizeMeshPolygonsOptions = {},
 ): Polygon[] {
   const meshResolution = options.meshResolution ?? "lossy";
-  const baseline = preprocessModelPolygons(polygons, false);
-  const preprocessCache: PreprocessCache = { baseline };
+  const preprocessCache: PreprocessCache = {};
+  const baseline = preprocessModelPolygons(polygons, false, preprocessCache);
   let best = baseline;
   let bestCost = polygonRenderCost(baseline);
   const acceptCandidate = (candidate: Polygon[], cost = polygonRenderCost(candidate)): boolean => {
@@ -218,27 +237,57 @@ export function optimizeMeshPolygons(
     return true;
   };
 
-  const rectCovered = applyRectCoverCandidate(baseline, options.rectCover);
+  const initialRectCover = meshResolution === "lossy" && options.rectCover === undefined
+    ? automaticLossyRectCoverOptions(baseline)
+    : options.rectCover;
+  const rectCovered = applyRectCoverCandidate(baseline, initialRectCover);
   if (rectCovered !== baseline) acceptCandidate(rectCovered);
 
   if (meshResolution === "lossy" && options.approximateMerge !== false) {
-    const crackSource = createCrackSourceContext(polygons);
     const qualityCandidates: LossyQualityCandidate[] = [];
-    const referenceCracks = candidateCrackQualityMetrics(
-      crackSource,
-      best,
-      DEFAULT_LOSSY_APPROXIMATE_OPTIONS.maxBoundaryDisplacement,
-    ).metrics;
+    const referenceCandidate = best;
+    let crackSource: CrackSourceContext | null = null;
+    let referenceCracks: CrackMetrics | null = null;
+    const getCrackSource = (): CrackSourceContext => {
+      crackSource ??= createCrackSourceContext(polygons);
+      return crackSource;
+    };
+    const getReferenceCracks = (): CrackMetrics => {
+      referenceCracks ??= candidateCrackQualityMetrics(
+        getCrackSource(),
+        referenceCandidate,
+        DEFAULT_LOSSY_APPROXIMATE_OPTIONS.maxBoundaryDisplacement,
+      ).metrics;
+      return referenceCracks;
+    };
     const automaticApproximate = options.approximateMerge === undefined || options.approximateMerge === true;
     const passesLossyCrackBudget = (
       sample: CrackMetricSample,
       allowReferenceCracks = true,
     ): boolean => !crackMetricsExceed(
-      crackSource,
+      getCrackSource(),
       sample.metrics,
       sample.tolerance,
-      allowReferenceCracks ? referenceCracks : null,
+      allowReferenceCracks ? getReferenceCracks() : null,
     );
+    const sampleCandidateCracks = (
+      candidate: Polygon[],
+      maxBoundaryDisplacement?: number,
+      allowReferenceCracks = true,
+    ): CrackMetricSample => {
+      const source = getCrackSource();
+      const tolerance = crackToleranceForSource(source, maxBoundaryDisplacement);
+      return candidateCrackQualityMetrics(
+        source,
+        candidate,
+        maxBoundaryDisplacement,
+        crackMetricLimits(
+          source,
+          tolerance,
+          allowReferenceCracks ? getReferenceCracks() : null,
+        ),
+      );
+    };
     const acceptLossyCandidate = (
       candidate: Polygon[],
       cost: number,
@@ -249,171 +298,236 @@ export function optimizeMeshPolygons(
       candidate: Polygon[],
       cost: number,
       maxBoundaryDisplacement = DEFAULT_LOSSY_APPROXIMATE_OPTIONS.maxBoundaryDisplacement,
+      metrics?: CrackMetrics,
     ): void => {
       if (!automaticApproximate || cost > bestCost + lossyCrackCostSlack(bestCost)) return;
       qualityCandidates.push({
         polygons: candidate,
         cost,
         maxBoundaryDisplacement,
+        metrics,
       });
     };
-    const approximateCandidates = lossyApproximateCandidates(
-      options.approximateMerge,
-      automaticApproximate ? baseline : undefined,
-    );
+    const coverLossyCandidates = options.rectCover !== undefined && options.rectCover !== false;
+    const skipAutomaticGeometryApproximation =
+      automaticApproximate && shouldSkipAutomaticGeometryApproximation(baseline);
+    const approximateCandidates = skipAutomaticGeometryApproximation
+      ? []
+      : lossyApproximateCandidates(
+          options.approximateMerge,
+          automaticApproximate ? baseline : undefined,
+        );
+    const colorQuantizeCandidates = automaticApproximate
+      ? lossyColorQuantizeCandidates(polygons)
+      : [];
     for (let approximateIndex = 0; approximateIndex < approximateCandidates.length; approximateIndex++) {
       const approximateOptions = approximateCandidates[approximateIndex];
       const approximate = preprocessModelPolygons(polygons, approximateOptions, preprocessCache);
       const approximateCost = polygonRenderCost(approximate);
       let approximateCracks: CrackMetricSample | null = null;
-      const sampleApproximateCracks = (): CrackMetricSample => {
-        approximateCracks ??= candidateCrackQualityMetrics(
-          crackSource,
+      let approximateMetrics: CrackMetrics | undefined;
+      const sampleApproximateCracks = (allowReferenceCracks: boolean): CrackMetricSample => {
+        approximateCracks ??= sampleCandidateCracks(
           approximate,
           approximateOptions.maxBoundaryDisplacement,
+          allowReferenceCracks,
         );
         return approximateCracks;
       };
+      const approximateAllowsReferenceCracks = !!approximateOptions.allowReferenceCracks;
       let approximatePassesCrackBudget = true;
       if (automaticApproximate || approximateOptions.guard) {
-        const sample = sampleApproximateCracks();
-        approximatePassesCrackBudget = passesLossyCrackBudget(sample, !!approximateOptions.allowReferenceCracks);
+        const sample = sampleApproximateCracks(approximateAllowsReferenceCracks);
+        approximateMetrics = sample.metrics;
+        approximatePassesCrackBudget = passesLossyCrackBudget(sample, approximateAllowsReferenceCracks);
       }
       if (!approximatePassesCrackBudget && approximateCost < bestCost) {
         continue;
       }
       if (approximatePassesCrackBudget) {
         acceptLossyCandidate(approximate, approximateCost);
-        considerQualityCandidate(approximate, approximateCost, approximateOptions.maxBoundaryDisplacement);
-      }
-      const coveredApproximate = applyRectCoverCandidate(approximate, options.rectCover);
-      const coveredApproximateCost = polygonRenderCost(coveredApproximate);
-      let coveredApproximateCracks: CrackMetricSample | null = null;
-      const sampleCoveredApproximateCracks = (): CrackMetricSample => {
-        coveredApproximateCracks ??= candidateCrackQualityMetrics(
-          crackSource,
-          coveredApproximate,
+        considerQualityCandidate(
+          approximate,
+          approximateCost,
           approximateOptions.maxBoundaryDisplacement,
+          approximateMetrics,
         );
-        return coveredApproximateCracks;
-      };
-      if (coveredApproximate !== approximate && coveredApproximateCost < bestCost) {
-        let coveredPassesCrackGuard = true;
-        if (automaticApproximate || approximateOptions.guard) {
-          coveredPassesCrackGuard = passesLossyCrackBudget(
-            sampleCoveredApproximateCracks(),
-            !!approximateOptions.allowReferenceCracks,
+      }
+      if (coverLossyCandidates) {
+        const coveredApproximate = applyRectCoverCandidate(approximate, options.rectCover);
+        const coveredApproximateCost = polygonRenderCost(coveredApproximate);
+        let coveredApproximateCracks: CrackMetricSample | null = null;
+        let coveredApproximateMetrics: CrackMetrics | undefined;
+        const sampleCoveredApproximateCracks = (allowReferenceCracks: boolean): CrackMetricSample => {
+          coveredApproximateCracks ??= sampleCandidateCracks(
+            coveredApproximate,
+            approximateOptions.maxBoundaryDisplacement,
+            allowReferenceCracks,
           );
-        }
-        if (coveredPassesCrackGuard) {
-          acceptLossyCandidate(coveredApproximate, coveredApproximateCost);
-          considerQualityCandidate(coveredApproximate, coveredApproximateCost, approximateOptions.maxBoundaryDisplacement);
+          return coveredApproximateCracks;
+        };
+        if (coveredApproximate !== approximate && coveredApproximateCost < bestCost) {
+          let coveredPassesCrackGuard = true;
+          if (automaticApproximate || approximateOptions.guard) {
+            const sample = sampleCoveredApproximateCracks(approximateAllowsReferenceCracks);
+            coveredApproximateMetrics = sample.metrics;
+            coveredPassesCrackGuard = passesLossyCrackBudget(sample, approximateAllowsReferenceCracks);
+          }
+          if (coveredPassesCrackGuard) {
+            acceptLossyCandidate(coveredApproximate, coveredApproximateCost);
+            considerQualityCandidate(
+              coveredApproximate,
+              coveredApproximateCost,
+              approximateOptions.maxBoundaryDisplacement,
+              coveredApproximateMetrics,
+            );
+          }
         }
       }
 
     }
 
+    if (
+      automaticApproximate &&
+      colorQuantizeCandidates.length === 0 &&
+      shouldUseRectangulatedFastExit(baseline)
+    ) {
+      return best;
+    }
+
     if (automaticApproximate) {
-      for (const colorPolygons of lossyColorQuantizeCandidates(polygons)) {
-        const colorCache: PreprocessCache = {
-          baseline: mergePolygons(cullInteriorPolygons(colorPolygons)),
-        };
-        const colorCost = polygonRenderCost(colorCache.baseline);
+      for (const colorPolygons of colorQuantizeCandidates) {
+        const colorCache = createColorPreprocessCache(colorPolygons, preprocessCache);
+        const colorBaseline = colorCache.baseline!;
+        const colorCost = polygonRenderCost(colorBaseline);
         let colorPassesCrackBudget = true;
         let colorCracks: CrackMetricSample | null = null;
+        let colorMetrics: CrackMetrics | undefined;
         const sampleColorCracks = (): CrackMetricSample => {
-          colorCracks ??= candidateCrackQualityMetrics(
-            crackSource,
-            colorCache.baseline,
+          colorCracks ??= sampleCandidateCracks(
+            colorBaseline,
             DEFAULT_LOSSY_APPROXIMATE_OPTIONS.maxBoundaryDisplacement,
           );
           return colorCracks;
         };
-        if (colorCost < bestCost) colorPassesCrackBudget = passesLossyCrackBudget(sampleColorCracks());
-        if (colorPassesCrackBudget) {
-          acceptLossyCandidate(colorCache.baseline, colorCost);
-          considerQualityCandidate(colorCache.baseline, colorCost);
+        if (colorCost < bestCost) {
+          const sample = sampleColorCracks();
+          colorMetrics = sample.metrics;
+          colorPassesCrackBudget = passesLossyCrackBudget(sample);
         }
-        const coveredColor = applyRectCoverCandidate(colorCache.baseline, options.rectCover);
-        if (coveredColor !== colorCache.baseline) {
-          const coveredColorCost = polygonRenderCost(coveredColor);
-          if (
-            coveredColorCost >= bestCost ||
-            passesLossyCrackBudget(candidateCrackQualityMetrics(
-              crackSource,
-              coveredColor,
-              DEFAULT_LOSSY_APPROXIMATE_OPTIONS.maxBoundaryDisplacement,
-            ))
-          ) {
-            acceptLossyCandidate(coveredColor, coveredColorCost);
-            considerQualityCandidate(coveredColor, coveredColorCost);
+        if (colorPassesCrackBudget) {
+          acceptLossyCandidate(colorBaseline, colorCost);
+          considerQualityCandidate(colorBaseline, colorCost, undefined, colorMetrics);
+        }
+        if (coverLossyCandidates) {
+          const coveredColor = applyRectCoverCandidate(colorBaseline, options.rectCover);
+          if (coveredColor !== colorBaseline) {
+            const coveredColorCost = polygonRenderCost(coveredColor);
+            let coveredColorCracks: CrackMetricSample | null = null;
+            let coveredColorMetrics: CrackMetrics | undefined;
+            const sampleCoveredColorCracks = (): CrackMetricSample => {
+              coveredColorCracks ??= sampleCandidateCracks(
+                coveredColor,
+                DEFAULT_LOSSY_APPROXIMATE_OPTIONS.maxBoundaryDisplacement,
+              );
+              return coveredColorCracks;
+            };
+            const coveredColorPassesCrackBudget = (): boolean => {
+              const sample = sampleCoveredColorCracks();
+              coveredColorMetrics = sample.metrics;
+              return passesLossyCrackBudget(sample);
+            };
+            if (
+              coveredColorCost >= bestCost ||
+              coveredColorPassesCrackBudget()
+            ) {
+              acceptLossyCandidate(coveredColor, coveredColorCost);
+              considerQualityCandidate(coveredColor, coveredColorCost, undefined, coveredColorMetrics);
+            }
           }
         }
 
-        for (const approximateOptions of lossyApproximateCandidates(
-          options.approximateMerge,
-          colorCache.baseline,
-        )) {
+        const colorApproximateCandidates = skipAutomaticGeometryApproximation
+          ? []
+          : lossyApproximateCandidates(
+              options.approximateMerge,
+              colorCache.baseline,
+            );
+        for (const approximateOptions of colorApproximateCandidates) {
           const approximate = preprocessModelPolygons(colorPolygons, approximateOptions, colorCache);
           const approximateCost = polygonRenderCost(approximate);
           let approximateCracks: CrackMetricSample | null = null;
-          const sampleApproximateCracks = (): CrackMetricSample => {
-            approximateCracks ??= candidateCrackQualityMetrics(
-              crackSource,
+          let approximateMetrics: CrackMetrics | undefined;
+          const sampleApproximateCracks = (allowReferenceCracks: boolean): CrackMetricSample => {
+            approximateCracks ??= sampleCandidateCracks(
               approximate,
               approximateOptions.maxBoundaryDisplacement,
+              allowReferenceCracks,
             );
             return approximateCracks;
           };
+          const approximateAllowsReferenceCracks = !!approximateOptions.allowReferenceCracks;
           let approximatePassesCrackBudget = true;
           if (automaticApproximate || approximateOptions.guard) {
-            const sample = sampleApproximateCracks();
-            approximatePassesCrackBudget = passesLossyCrackBudget(sample, !!approximateOptions.allowReferenceCracks);
+            const sample = sampleApproximateCracks(approximateAllowsReferenceCracks);
+            approximateMetrics = sample.metrics;
+            approximatePassesCrackBudget = passesLossyCrackBudget(sample, approximateAllowsReferenceCracks);
           }
           if (!approximatePassesCrackBudget && approximateCost < bestCost) {
             continue;
           }
           if (approximatePassesCrackBudget) {
             acceptLossyCandidate(approximate, approximateCost);
-            considerQualityCandidate(approximate, approximateCost, approximateOptions.maxBoundaryDisplacement);
-          }
-          const coveredApproximate = applyRectCoverCandidate(approximate, options.rectCover);
-          const coveredApproximateCost = polygonRenderCost(coveredApproximate);
-          let coveredApproximateCracks: CrackMetricSample | null = null;
-          const sampleCoveredApproximateCracks = (): CrackMetricSample => {
-            coveredApproximateCracks ??= candidateCrackQualityMetrics(
-              crackSource,
-              coveredApproximate,
+            considerQualityCandidate(
+              approximate,
+              approximateCost,
               approximateOptions.maxBoundaryDisplacement,
+              approximateMetrics,
             );
-            return coveredApproximateCracks;
-          };
-          if (coveredApproximate !== approximate && coveredApproximateCost < bestCost) {
-            let coveredPassesCrackGuard = true;
-            if (automaticApproximate || approximateOptions.guard) {
-              coveredPassesCrackGuard = passesLossyCrackBudget(
-                sampleCoveredApproximateCracks(),
-                !!approximateOptions.allowReferenceCracks,
+          }
+          if (coverLossyCandidates) {
+            const coveredApproximate = applyRectCoverCandidate(approximate, options.rectCover);
+            const coveredApproximateCost = polygonRenderCost(coveredApproximate);
+            let coveredApproximateCracks: CrackMetricSample | null = null;
+            let coveredApproximateMetrics: CrackMetrics | undefined;
+            const sampleCoveredApproximateCracks = (allowReferenceCracks: boolean): CrackMetricSample => {
+              coveredApproximateCracks ??= sampleCandidateCracks(
+                coveredApproximate,
+                approximateOptions.maxBoundaryDisplacement,
+                allowReferenceCracks,
               );
-            }
-            if (coveredPassesCrackGuard) {
-              acceptLossyCandidate(coveredApproximate, coveredApproximateCost);
-              considerQualityCandidate(coveredApproximate, coveredApproximateCost, approximateOptions.maxBoundaryDisplacement);
+              return coveredApproximateCracks;
+            };
+            if (coveredApproximate !== approximate && coveredApproximateCost < bestCost) {
+              let coveredPassesCrackGuard = true;
+              if (automaticApproximate || approximateOptions.guard) {
+                const sample = sampleCoveredApproximateCracks(approximateAllowsReferenceCracks);
+                coveredApproximateMetrics = sample.metrics;
+                coveredPassesCrackGuard = passesLossyCrackBudget(sample, approximateAllowsReferenceCracks);
+              }
+              if (coveredPassesCrackGuard) {
+                acceptLossyCandidate(coveredApproximate, coveredApproximateCost);
+                considerQualityCandidate(
+                  coveredApproximate,
+                  coveredApproximateCost,
+                  approximateOptions.maxBoundaryDisplacement,
+                  coveredApproximateMetrics,
+                );
+              }
             }
           }
         }
       }
     }
 
-    if (automaticApproximate) {
+    if (automaticApproximate && !skipAutomaticGeometryApproximation) {
       for (const budget of LOSSY_BUDGET_SWEEP) {
         const polygonPairOptions = resolveNormalizeOptions({ ...budget, isolatedPairs: true });
         const polygonPaired = mergeAdjacentApproximatePolygonPairs(best, polygonPairOptions);
         if (polygonPaired === best) continue;
         const polygonPairCost = polygonRenderCost(polygonPaired);
         if (polygonPairCost >= bestCost) continue;
-        const polygonPairCracks = candidateCrackQualityMetrics(
-          crackSource,
+        const polygonPairCracks = sampleCandidateCracks(
           polygonPaired,
           polygonPairOptions.maxBoundaryDisplacement,
         );
@@ -423,6 +537,7 @@ export function optimizeMeshPolygons(
           polygonPaired,
           polygonPairCost,
           polygonPairOptions.maxBoundaryDisplacement,
+          polygonPairCracks.metrics,
         );
       }
 
@@ -434,14 +549,14 @@ export function optimizeMeshPolygons(
       bestCost,
       (candidate) => {
         candidate.metrics ??= candidateCrackQualityMetrics(
-          crackSource,
+          getCrackSource(),
           candidate.polygons,
           candidate.maxBoundaryDisplacement,
         ).metrics;
         return candidate.metrics;
       },
       () => candidateCrackQualityMetrics(
-        crackSource,
+        getCrackSource(),
         best,
         DEFAULT_LOSSY_APPROXIMATE_OPTIONS.maxBoundaryDisplacement,
       ).metrics,
@@ -601,6 +716,34 @@ function shouldUseRectangulatedLossyPath(baseline: Polygon[]): boolean {
   return triangles / baseline.length <= LOSSY_RECTANGULATED_MAX_TRIANGLE_RATIO;
 }
 
+function shouldUseRectangulatedFastExit(baseline: Polygon[]): boolean {
+  return baseline.length >= LOSSY_RECTANGULATED_FAST_EXIT_MIN_POLYGONS &&
+    shouldUseRectangulatedLossyPath(baseline);
+}
+
+function shouldSkipAutomaticGeometryApproximation(baseline: Polygon[]): boolean {
+  if (baseline.length < AUTOMATIC_GEOMETRY_SKIP_MIN_POLYGONS) return false;
+
+  for (const polygon of baseline) {
+    if (polygon.vertices.length !== 4) return false;
+    if (polygon.texture || polygon.material?.texture || polygon.textureTriangles?.length) return false;
+
+    const plane = planeOfPolygon(polygon);
+    if (!plane || !isCardinalNormal(plane.normal)) return false;
+  }
+
+  return true;
+}
+
+function isCardinalNormal(normal: Vec3): boolean {
+  const ax = Math.abs(normal[0]);
+  const ay = Math.abs(normal[1]);
+  const az = Math.abs(normal[2]);
+  const dominant = Math.max(ax, ay, az);
+  return dominant >= 1 - CARDINAL_NORMAL_EPSILON &&
+    ax + ay + az - dominant <= CARDINAL_NORMAL_EPSILON;
+}
+
 function polygonRenderCost(polygons: Polygon[]): number {
   let cost = 0;
   for (const polygon of polygons) {
@@ -678,8 +821,20 @@ function crackMetricsExceed(
   tolerance: number,
   reference: CrackMetrics | null = null,
 ): boolean {
+  return crackMetricsExceedLimits(metrics, crackMetricLimits(source, tolerance, reference));
+}
+
+function crackMetricLimits(
+  source: CrackSourceContext,
+  tolerance: number,
+  reference: CrackMetrics | null = null,
+): CrackMetricLimits {
   if (!reference) {
-    return metrics.internalBoundaryLength > 0 || metrics.excessBoundaryLength > tolerance;
+    return {
+      maxGap: Infinity,
+      internalBoundaryLength: 0,
+      excessBoundaryLength: tolerance,
+    };
   }
 
   const gapSlack = Math.max(tolerance * 0.1, 1e-6);
@@ -689,10 +844,18 @@ function crackMetricsExceed(
     : referenceGapLimit;
   const lengthSlack = Math.max(tolerance * 2, reference.internalBoundaryLength * 0.15);
   const excessSlack = Math.max(tolerance * 2, reference.excessBoundaryLength * 0.15);
+  return {
+    maxGap: gapLimit,
+    internalBoundaryLength: reference.internalBoundaryLength + lengthSlack,
+    excessBoundaryLength: reference.excessBoundaryLength + excessSlack,
+  };
+}
+
+function crackMetricsExceedLimits(metrics: CrackMetrics, limits: CrackMetricLimits): boolean {
   return (
-    metrics.maxGap > gapLimit ||
-    metrics.internalBoundaryLength > reference.internalBoundaryLength + lengthSlack ||
-    metrics.excessBoundaryLength > reference.excessBoundaryLength + excessSlack
+    metrics.maxGap > limits.maxGap ||
+    metrics.internalBoundaryLength > limits.internalBoundaryLength ||
+    metrics.excessBoundaryLength > limits.excessBoundaryLength
   );
 }
 
@@ -701,6 +864,7 @@ function candidateCrackMetrics(
   candidate: Polygon[],
   maxBoundaryDisplacement = 0,
   searchTolerance = crackToleranceForSource(source, maxBoundaryDisplacement),
+  stopLimits?: CrackMetricLimits,
 ): CrackMetricSample {
   const sourceEdges = source.edges;
   const candidateEdges = collectEdgeStats(candidate);
@@ -712,18 +876,23 @@ function candidateCrackMetrics(
     ...EMPTY_CRACK_METRICS,
     excessBoundaryLength: Math.max(0, candidateEdges.boundaryLength - sourceEdges.boundaryLength),
   };
+  if (stopLimits && crackMetricsExceedLimits(metrics, stopLimits)) {
+    return { metrics, tolerance };
+  }
 
   for (const edge of candidateEdges.boundarySegments) {
     const key = edgeKey(edge.a, edge.b);
     if (sourceEdges.boundaryKeys.has(key)) continue;
     if (sourceEdges.internalKeys.has(key)) {
       metrics.internalBoundaryLength += distanceVec(edge.a, edge.b);
+      if (stopLimits && crackMetricsExceedLimits(metrics, stopLimits)) break;
       continue;
     }
     const gap = internalIndex ? indexedInternalEdgeGap(edge, internalIndex, searchTolerance) : null;
     if (gap !== null) {
       metrics.maxGap = Math.max(metrics.maxGap, gap);
       metrics.internalBoundaryLength += distanceVec(edge.a, edge.b);
+      if (stopLimits && crackMetricsExceedLimits(metrics, stopLimits)) break;
     }
   }
   return { metrics, tolerance };
@@ -733,12 +902,14 @@ function candidateCrackQualityMetrics(
   source: CrackSourceContext,
   candidate: Polygon[],
   maxBoundaryDisplacement = 0,
+  stopLimits?: CrackMetricLimits,
 ): CrackMetricSample {
   return candidateCrackMetrics(
     source,
     candidate,
     maxBoundaryDisplacement,
     crackQualitySearchToleranceForSource(source, maxBoundaryDisplacement),
+    stopLimits,
   );
 }
 
@@ -922,12 +1093,103 @@ function resolveRectCoverOptions(
   return DEFAULT_RECT_COVER_OPTIONS;
 }
 
+function automaticLossyRectCoverOptions(polygons: Polygon[]): CoverPlanarPolygonsOptions | false {
+  if (polygons.length > AUTOMATIC_RECT_COVER_MAX_POLYGONS) return false;
+  if (polygons.length === 0) return false;
+  if (polygonTriangleCount(polygons) / polygons.length < AUTOMATIC_RECT_COVER_MIN_TRIANGLE_RATIO) {
+    return false;
+  }
+  return AUTOMATIC_LOSSY_RECT_COVER_OPTIONS;
+}
+
 function polygonTriangleCount(polygons: Polygon[]): number {
   let triangles = 0;
   for (const polygon of polygons) {
     if (polygon.vertices.length === 3) triangles += 1;
   }
   return triangles;
+}
+
+function applyIndexFilter(polygons: Polygon[], filter: IndexFilter | undefined): Polygon[] {
+  if (filter === undefined || filter === null) return polygons;
+  return filter.map((index) => polygons[index]).filter((polygon): polygon is Polygon => !!polygon);
+}
+
+function keptIndexFilter(input: Polygon[], kept: Polygon[]): IndexFilter {
+  if (kept === input) return null;
+  if (kept.length === input.length && kept.every((polygon, index) => polygon === input[index])) {
+    return null;
+  }
+  const keptSet = new Set(kept);
+  const indices: number[] = [];
+  for (let i = 0; i < input.length; i++) {
+    if (keptSet.has(input[i])) indices.push(i);
+  }
+  return indices.length === input.length ? null : indices;
+}
+
+function dedupedPolygonsForMerge(polygons: Polygon[], cache?: PreprocessCache): Polygon[] {
+  if (cache?.deduped) return cache.deduped;
+  let filter = cache?.dedupedIndices;
+  if (filter === undefined) {
+    const dropped = findOverlappingPolygonDuplicates(polygons);
+    if (dropped.size === 0) {
+      filter = null;
+    } else {
+      filter = [];
+      for (let i = 0; i < polygons.length; i++) {
+        if (!dropped.has(i)) filter.push(i);
+      }
+    }
+    if (cache) cache.dedupedIndices = filter;
+  }
+  const deduped = applyIndexFilter(polygons, filter);
+  if (cache) cache.deduped = deduped;
+  return deduped;
+}
+
+function interiorPolygonsForMerge(polygons: Polygon[], cache?: PreprocessCache): Polygon[] {
+  if (cache?.interior) return cache.interior;
+  let filter = cache?.interiorIndices;
+  if (filter === undefined) {
+    const kept = cullInteriorPolygons(polygons);
+    filter = keptIndexFilter(polygons, kept);
+    if (cache) cache.interiorIndices = filter;
+  }
+  const interior = applyIndexFilter(polygons, filter);
+  if (cache) cache.interior = interior;
+  return interior;
+}
+
+function createColorPreprocessCache(
+  polygons: Polygon[],
+  source: PreprocessCache,
+): PreprocessCache {
+  const cache: PreprocessCache = {
+    dedupedIndices: source.dedupedIndices,
+    interiorIndices: source.interiorIndices,
+    snappedInteriorIndices: source.snappedInteriorIndices,
+  };
+  const deduped = dedupedPolygonsForMerge(polygons, cache);
+  if (source.snapped && source.snapped.length === deduped.length) {
+    cache.snapped = applyGeometryTemplate(deduped, source.snapped);
+  }
+  const interior = interiorPolygonsForMerge(deduped, cache);
+  cache.baseline = mergePolygons(interior);
+  return cache;
+}
+
+function applyGeometryTemplate(polygons: Polygon[], template: Polygon[]): Polygon[] {
+  return polygons.map((polygon, index) => {
+    const geometry = template[index];
+    if (!geometry) return polygon;
+    return {
+      ...polygon,
+      vertices: geometry.vertices,
+      ...(geometry.uvs ? { uvs: geometry.uvs } : {}),
+      ...(geometry.textureTriangles ? { textureTriangles: geometry.textureTriangles } : {}),
+    };
+  });
 }
 
 function preprocessModelPolygons(
@@ -939,8 +1201,10 @@ function preprocessModelPolygons(
   // doubled-up faces that importers emit as artifacts. Doing it before
   // cull + merge means everything downstream operates on the leaner set
   // and gets a free speedup as a bonus. Light-independent, runs once.
-  const deduped = dedupeOverlappingPolygons(polygons);
-  const baseline = cache?.baseline ?? mergePolygons(cullInteriorPolygons(deduped));
+  const deduped = dedupedPolygonsForMerge(polygons, cache);
+  const interior = interiorPolygonsForMerge(deduped, cache);
+  const baseline = cache?.baseline ?? mergePolygons(interior);
+  if (cache && !cache.baseline) cache.baseline = baseline;
   if (!normalizeGeometry) return baseline;
 
   const options = normalizeGeometry === true
@@ -964,7 +1228,14 @@ function snappedPolygonsForMerge(polygons: Polygon[], cache?: PreprocessCache): 
 function snappedInteriorPolygonsForMerge(polygons: Polygon[], cache?: PreprocessCache): Polygon[] {
   if (!cache) return cullInteriorPolygons(snapGeometryForMerge(polygons));
   if (!cache.snappedInterior) {
-    cache.snappedInterior = cullInteriorPolygons(snappedPolygonsForMerge(polygons, cache));
+    const snapped = snappedPolygonsForMerge(polygons, cache);
+    if (cache.snappedInteriorIndices === undefined) {
+      const kept = cullInteriorPolygons(snapped);
+      cache.snappedInteriorIndices = keptIndexFilter(snapped, kept);
+      cache.snappedInterior = kept;
+    } else {
+      cache.snappedInterior = applyIndexFilter(snapped, cache.snappedInteriorIndices);
+    }
   }
   return cache.snappedInterior;
 }

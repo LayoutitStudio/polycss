@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { afterEach, describe, it, expect, vi } from "vitest";
 import React, { act } from "react";
 import { createRoot } from "react-dom/client";
 import {
@@ -6,10 +6,14 @@ import {
   computeTextureAtlasPlan,
   isSolidTrianglePlan,
   useTextureAtlas,
+  type TextureQuality,
   type TextureAtlasPlan,
   type TextureAtlasResult,
 } from "./textureAtlas";
 import type { Polygon } from "@layoutit/polycss-core";
+
+const originalMatchMedia = window.matchMedia;
+const originalUserAgent = window.navigator.userAgent;
 
 const TEXTURED_QUAD_60: Polygon = {
   vertices: [
@@ -28,17 +32,19 @@ function planFor(polygon: Polygon, index = 0): TextureAtlasPlan | null {
 
 function Harness({
   plans,
+  textureQuality,
   onResult,
 }: {
   plans: Array<TextureAtlasPlan | null>;
+  textureQuality?: TextureQuality;
   onResult: (result: TextureAtlasResult) => void;
 }) {
-  const atlas = useTextureAtlas(plans, "baked");
+  const atlas = useTextureAtlas(plans, "baked", textureQuality);
   onResult(atlas);
   return null;
 }
 
-function renderAtlas(plans: Array<TextureAtlasPlan | null>): TextureAtlasResult {
+function renderAtlas(plans: Array<TextureAtlasPlan | null>, textureQuality?: TextureQuality): TextureAtlasResult {
   let captured: TextureAtlasResult | null = null;
   const container = document.createElement("div");
   const root = createRoot(container);
@@ -46,6 +52,7 @@ function renderAtlas(plans: Array<TextureAtlasPlan | null>): TextureAtlasResult 
     root.render(
       React.createElement(Harness, {
         plans,
+        textureQuality,
         onResult: (r) => {
           captured = r;
         },
@@ -55,6 +62,48 @@ function renderAtlas(plans: Array<TextureAtlasPlan | null>): TextureAtlasResult 
   act(() => root.unmount());
   return captured!;
 }
+
+function stubMatchMedia(mobile: boolean): void {
+  Object.defineProperty(window, "matchMedia", {
+    configurable: true,
+    writable: true,
+    value: vi.fn((query: string) => ({
+      matches: mobile && (query.includes("pointer: coarse") || query.includes("hover: none")),
+      media: query,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    })),
+  });
+}
+
+function stubUserAgent(userAgent: string): void {
+  Object.defineProperty(window.navigator, "userAgent", {
+    configurable: true,
+    value: userAgent,
+  });
+}
+
+function stubBorderShapeUnsupported(): void {
+  vi.stubGlobal("CSS", { supports: () => false });
+}
+
+afterEach(() => {
+  Object.defineProperty(window, "matchMedia", {
+    configurable: true,
+    writable: true,
+    value: originalMatchMedia,
+  });
+  Object.defineProperty(window.navigator, "userAgent", {
+    configurable: true,
+    value: originalUserAgent,
+  });
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
 
 describe("computeTextureAtlasPlan", () => {
   it("returns a plan for a textured quad", () => {
@@ -163,11 +212,38 @@ describe("useTextureAtlas", () => {
     expect(atlas.entries.length).toBe(0);
   });
 
+  it("packs solid triangles into the atlas on WebKit", () => {
+    stubUserAgent("Mozilla/5.0 AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15");
+    stubBorderShapeUnsupported();
+    const tri: Polygon = {
+      vertices: [[0, 0, 0], [1, 0, 0], [0, 1, 0]],
+      color: "#ff0000",
+    };
+
+    const atlas = renderAtlas([planFor(tri)]);
+    expect(atlas.entries[0]).not.toBeNull();
+  });
+
   it("filters out null plan entries (degenerate polygons)", () => {
     const plans: Array<TextureAtlasPlan | null> = [...buildSixFaceCrateScene(), null];
     const atlas = renderAtlas(plans);
     // The trailing null produces a null entry, not a packed one.
     expect(atlas.entries.length).toBe(plans.length);
     expect(atlas.entries[atlas.entries.length - 1]).toBeNull();
+  });
+
+  it("sets the atlas primitive from auto and numeric textureQuality", () => {
+    const plans = [planFor(TEXTURED_QUAD_60)];
+
+    stubMatchMedia(false);
+    const desktop = renderAtlas(plans, "auto");
+    expect(desktop.entries[0]?.atlasCanonicalSize).toBe(128);
+
+    stubMatchMedia(true);
+    const mobile = renderAtlas(plans, "auto");
+    expect(mobile.entries[0]?.atlasCanonicalSize).toBe(64);
+
+    const explicit = renderAtlas(plans, 1);
+    expect(explicit.entries[0]?.atlasCanonicalSize).toBe(64);
   });
 });

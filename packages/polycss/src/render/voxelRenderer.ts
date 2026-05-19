@@ -3,36 +3,28 @@ import type {
   PolyAmbientLight,
   PolyDirectionalLight,
   PolyVoxelFace,
-  PolyVoxelSource,
-  PolyVoxelSlicePlan,
   Polygon,
   Vec3,
 } from "@layoutit/polycss-core";
 import {
   BASE_TILE,
-  buildPolyVoxelFaceData,
-  buildPolyVoxelSlicePlan,
-  POLY_VOXEL_NEXT_LAYER_STEP,
   normalFacesCamera,
   parsePureColor,
+  rotateVec3,
 } from "@layoutit/polycss-core";
 
 type Axis = "x" | "y" | "z";
 
 interface BrushState {
-  left?: string;
-  top?: string;
-  width?: string;
-  height?: string;
   color?: string;
-  zOffset?: string;
+  transform?: string;
 }
 
 type BrushElement = HTMLElement & {
   __polycssVoxelBrushState?: BrushState;
 };
 
-export interface PolyVoxelSliceRenderer {
+export interface PolyVoxelRenderer {
   readonly element: HTMLElement;
   readonly brushCount: number;
   render(rotation: CameraCullRotation): void;
@@ -40,10 +32,9 @@ export interface PolyVoxelSliceRenderer {
   dispose(): void;
 }
 
-export interface PolyVoxelSliceRendererOptions {
+export interface PolyVoxelRendererOptions {
   doc: Document;
   wrapper: HTMLElement;
-  source: PolyVoxelSource;
   polygons?: readonly Polygon[];
   directionalLight?: PolyDirectionalLight;
   ambientLight?: PolyAmbientLight;
@@ -51,17 +42,16 @@ export interface PolyVoxelSliceRendererOptions {
 
 interface RGB { r: number; g: number; b: number; alpha: number; }
 
-interface BrushPlan {
+interface DirectMatrixItem {
   axis: Axis;
   face: PolyVoxelFace;
-  brushes: Array<{
-    left: number;
-    top: number;
-    width: number;
-    height: number;
-    z: number;
-    baseColor: string;
-  }>;
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+  z: number;
+  baseColor: string;
+  sourceIndex: number;
 }
 
 const DEFAULT_LIGHT_DIR: Vec3 = [0.4, -0.7, 0.59];
@@ -100,43 +90,18 @@ function visibleFaceSignature(rotation: CameraCullRotation): string {
 
 function applyBrush(
   el: BrushElement,
-  left: string,
-  top: string,
-  width: string,
-  height: string,
   color: string,
-  zOffset: string,
+  transform: string,
 ): void {
   const state = (el.__polycssVoxelBrushState ??= {});
-  if (state.left !== left) {
-    el.style.left = left;
-    state.left = left;
-  }
-  if (state.top !== top) {
-    el.style.top = top;
-    state.top = top;
-  }
-  if (state.width !== width) {
-    el.style.width = width;
-    state.width = width;
-  }
-  if (state.height !== height) {
-    el.style.height = height;
-    state.height = height;
-  }
   if (state.color !== color) {
     el.style.color = color;
     state.color = color;
   }
-  if (state.zOffset !== zOffset) {
-    el.style.transform = `translateZ(${zOffset})`;
-    state.zOffset = zOffset;
+  if (state.transform !== transform) {
+    el.style.transform = transform;
+    state.transform = transform;
   }
-}
-
-function planBrushZ(plan: PolyVoxelSlicePlan, cellPx: number): string {
-  const plane = plan.key.plane * cellPx;
-  return plan.key.axis === "z" ? `${plane}px` : `${-plane}px`;
 }
 
 function cssNormalForPolygon(polygon: Polygon): Vec3 | null {
@@ -168,10 +133,7 @@ function cssNormalForPolygon(polygon: Polygon): Vec3 | null {
   ];
 }
 
-function polygonBrush(polygon: Polygon): (BrushPlan["brushes"][number] & {
-  axis: Axis;
-  face: PolyVoxelFace;
-}) | null {
+function polygonBrush(polygon: Polygon): Omit<DirectMatrixItem, "sourceIndex"> | null {
   if (polygon.texture || polygon.material || polygon.uvs || polygon.textureTriangles) return null;
   if (polygon.vertices.length !== 4) return null;
   const normal = cssNormalForPolygon(polygon);
@@ -286,125 +248,135 @@ function shadeBrushColor(
     : rgbToHex(shaded);
 }
 
-function buildMergedPlans(source: PolyVoxelSource, cellPx: number): BrushPlan[] {
-  const faces = buildPolyVoxelFaceData(source);
-  const faceIndex = new Map<string, (typeof faces)[number]>();
-  for (const face of faces) {
-    faceIndex.set(`${face.key.axis}:${face.key.plane}:${face.key.face}`, face);
-  }
-  return faces.map((face): BrushPlan => {
-    const nextPlane = face.key.plane + POLY_VOXEL_NEXT_LAYER_STEP[face.key.face];
-    const nextFace = faceIndex.get(`${face.key.axis}:${nextPlane}:${face.key.face}`);
-    const plan = buildPolyVoxelSlicePlan(face, nextFace?.buffer ?? null);
-    const z = Number.parseFloat(planBrushZ(plan, cellPx));
-    return {
-      axis: plan.key.axis,
-      face: plan.key.face,
-      brushes: plan.brushes.map((brush) => ({
-        left: (plan.buffer.minCol + brush.c0) * cellPx,
-        top: (plan.buffer.minRow + brush.r0) * cellPx,
-        width: (brush.c1 - brush.c0) * cellPx,
-        height: (brush.r1 - brush.r0) * cellPx,
-        z,
-        baseColor: brush.baseColor,
-      })),
-    };
-  });
-}
-
-function buildPolygonPlans(polygons: readonly Polygon[] | undefined): BrushPlan[] {
+function buildDirectMatrixItems(polygons: readonly Polygon[] | undefined): DirectMatrixItem[] {
   if (!polygons?.length) return [];
-  const plans = new Map<string, BrushPlan>();
-  let accepted = 0;
-  for (const polygon of polygons) {
+  const items: DirectMatrixItem[] = [];
+  for (let sourceIndex = 0; sourceIndex < polygons.length; sourceIndex += 1) {
+    const polygon = polygons[sourceIndex];
     const brush = polygonBrush(polygon);
-    if (!brush || brush.width <= 0 || brush.height <= 0) continue;
-    accepted += 1;
-    const key = `${brush.axis}:${brush.face}`;
-    let plan = plans.get(key);
-    if (!plan) {
-      plan = { axis: brush.axis, face: brush.face, brushes: [] };
-      plans.set(key, plan);
-    }
-    plan.brushes.push({
-      left: brush.left,
-      top: brush.top,
-      width: brush.width,
-      height: brush.height,
-      z: brush.z,
-      baseColor: brush.baseColor,
+    if (!brush || brush.width <= 0 || brush.height <= 0) return [];
+    items.push({
+      ...brush,
+      sourceIndex,
     });
   }
-  return accepted === polygons.length ? Array.from(plans.values()) : [];
+  return items;
 }
 
-function configureHost(
-  host: HTMLElement,
+function directMatrix(
+  axis: Axis,
+  left: number,
+  top: number,
   width: number,
   height: number,
-): void {
-  host.style.width = `${width}px`;
-  host.style.height = `${height}px`;
+  zOffset: number,
+): string {
+  const values = axis === "x"
+    ? [
+        width, 0, 0, 0,
+        0, 0, height, 0,
+        0, -1, 0, 0,
+        left, -zOffset, top, 1,
+      ]
+    : axis === "y"
+      ? [
+          0, 0, width, 0,
+          0, height, 0, 0,
+          -1, 0, 0, 0,
+          -zOffset, top, left, 1,
+        ]
+      : [
+          width, 0, 0, 0,
+          0, height, 0, 0,
+          0, 0, 1, 0,
+          left, top, zOffset, 1,
+        ];
+  return `matrix3d(${values.map((value) => Number(value.toFixed(6))).join(",")})`;
 }
 
-export function createPolyVoxelSliceRenderer(
-  options: PolyVoxelSliceRendererOptions,
-): PolyVoxelSliceRenderer {
-  const { doc, wrapper, source, polygons, directionalLight, ambientLight } = options;
-  const cellPx = Math.max(1, Math.round(source.scale * BASE_TILE));
-  const polygonPlans = buildPolygonPlans(polygons);
-  const plans = polygonPlans.length > 0
-    ? polygonPlans
-    : buildMergedPlans(source, cellPx);
-  const shiftPx = polygonPlans.length > 0 ? 0 : source.gridShift * BASE_TILE;
-  const colorCache = new Map<string, string>();
+function itemCenter(item: DirectMatrixItem): Vec3 {
+  if (item.axis === "x") {
+    return [item.left + item.width / 2, -item.z, item.top + item.height / 2];
+  }
+  if (item.axis === "y") {
+    return [-item.z, item.top + item.height / 2, item.left + item.width / 2];
+  }
+  return [item.left + item.width / 2, item.top + item.height / 2, item.z];
+}
 
-  const hosts: Record<Axis, HTMLElement> = {
-    z: doc.createElement("div"),
-    x: doc.createElement("div"),
-    y: doc.createElement("div"),
-  };
-  hosts.z.className = "polycss-voxel-host polycss-voxel-host-z";
-  hosts.x.className = "polycss-voxel-host polycss-voxel-host-x";
-  hosts.y.className = "polycss-voxel-host polycss-voxel-host-y";
-  const shiftTransform = shiftPx !== 0
-    ? `translate3d(${shiftPx}px, ${shiftPx}px, ${shiftPx}px) `
-    : "";
-  hosts.z.style.transform = shiftTransform.trim();
-  hosts.x.style.transform = `${shiftTransform}rotateX(90deg)`;
-  hosts.y.style.transform = `${shiftTransform}rotateY(-90deg)`;
-  wrapper.append(hosts.z, hosts.x, hosts.y);
+function projectedPoint(item: DirectMatrixItem, rotation: CameraCullRotation): { x: number; y: number } {
+  let center = itemCenter(item);
+  const meshRotation = rotation.meshRotation;
+  if (meshRotation) {
+    center = rotateVec3(center, meshRotation[0] ?? 0, meshRotation[1] ?? 0, meshRotation[2] ?? 0);
+  }
+  const [x, y] = rotateVec3(center, rotation.rotX, 0, rotation.rotY);
+  return { x, y };
+}
 
-  configureHost(
-    hosts.z,
-    source.cols * cellPx,
-    source.rows * cellPx,
-  );
-  configureHost(
-    hosts.x,
-    source.cols * cellPx,
-    source.depth * cellPx,
-  );
-  configureHost(
-    hosts.y,
-    source.depth * cellPx,
-    source.rows * cellPx,
-  );
+function orderDirectMatrixItems(
+  items: readonly DirectMatrixItem[],
+  visibleFaces: Set<PolyVoxelFace>,
+  rotation: CameraCullRotation,
+): DirectMatrixItem[] {
+  const entries = items
+    .filter((item) => visibleFaces.has(item.face))
+    .map((item) => ({ item, ...projectedPoint(item, rotation) }));
+  if (entries.length === 0) return [];
 
-  const pools: Record<Axis, BrushElement[]> = { z: [], x: [], y: [] };
-  let lastSignature = "";
-  let mountedBrushCount = 0;
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minY = Infinity;
+  let maxY = -Infinity;
+  for (const entry of entries) {
+    minX = Math.min(minX, entry.x);
+    maxX = Math.max(maxX, entry.x);
+    minY = Math.min(minY, entry.y);
+    maxY = Math.max(maxY, entry.y);
+  }
 
-  const nextBrush = (axis: Axis, index: number): BrushElement => {
-    let el = pools[axis][index];
-    if (!el) {
-      el = doc.createElement("b") as BrushElement;
-      pools[axis][index] = el;
+  const tileCount = 4;
+  const spanX = Math.max(1e-6, maxX - minX);
+  const spanY = Math.max(1e-6, maxY - minY);
+  const tiles = new Map<string, {
+    tx: number;
+    ty: number;
+    sourceIndex: number;
+    items: DirectMatrixItem[];
+  }>();
+  for (const entry of entries) {
+    const tx = Math.min(
+      tileCount - 1,
+      Math.max(0, Math.floor(((entry.x - minX) / spanX) * tileCount)),
+    );
+    const ty = Math.min(
+      tileCount - 1,
+      Math.max(0, Math.floor(((entry.y - minY) / spanY) * tileCount)),
+    );
+    const key = `${tx}:${ty}`;
+    let tile = tiles.get(key);
+    if (!tile) {
+      tile = { tx, ty, sourceIndex: entry.item.sourceIndex, items: [] };
+      tiles.set(key, tile);
     }
-    if (el.parentElement !== hosts[axis]) hosts[axis].appendChild(el);
-    return el;
-  };
+    tile.items.push(entry.item);
+    tile.sourceIndex = Math.min(tile.sourceIndex, entry.item.sourceIndex);
+  }
 
+  return Array.from(tiles.values())
+    .sort((a, b) => (a.ty - b.ty) || (a.tx - b.tx) || a.sourceIndex - b.sourceIndex)
+    .flatMap((tile) => tile.items);
+}
+
+export function createPolyVoxelRenderer(
+  options: PolyVoxelRendererOptions,
+): PolyVoxelRenderer | null {
+  const { doc, wrapper, polygons, directionalLight, ambientLight } = options;
+  const directMatrixItems = buildDirectMatrixItems(polygons);
+  if (directMatrixItems.length === 0) return null;
+  wrapper.classList.add("polycss-voxel-mesh");
+
+  const colorCache = new Map<string, string>();
   const shadedColor = (face: PolyVoxelFace, baseColor: string): string => {
     const key = `${face}|${baseColor}`;
     const cached = colorCache.get(key);
@@ -414,65 +386,55 @@ export function createPolyVoxelSliceRenderer(
     return shaded;
   };
 
-  const draw = (signature: string): void => {
-    const visibleFaces = new Set(signature.split("|").filter(Boolean) as PolyVoxelFace[]);
-    const used: Record<Axis, number> = { z: 0, x: 0, y: 0 };
-    mountedBrushCount = 0;
+  const pool: BrushElement[] = [];
+  let lastSignature = "";
+  let mountedBrushCount = 0;
 
-    for (const plan of plans) {
-      const axis = plan.axis;
-      if (!visibleFaces.has(plan.face)) continue;
-      for (const brush of plan.brushes) {
-        const left = `${brush.left}px`;
-        const top = `${brush.top}px`;
-        const width = `${brush.width}px`;
-        const height = `${brush.height}px`;
-        const zOffset = `${brush.z}px`;
-        const el = nextBrush(axis, used[axis]);
-        used[axis] += 1;
-        applyBrush(
-          el,
-          left,
-          top,
-          width,
-          height,
-          shadedColor(plan.face, brush.baseColor),
-          zOffset,
-        );
-        mountedBrushCount += 1;
-      }
+  const nextBrush = (index: number): BrushElement => {
+    let el = pool[index];
+    if (!el) {
+      el = doc.createElement("b") as BrushElement;
+      pool[index] = el;
     }
-
-    for (const axis of Object.keys(pools) as Axis[]) {
-      const pool = pools[axis];
-      for (let i = used[axis]; i < pool.length; i += 1) pool[i]?.remove();
-    }
+    if (el.parentElement !== wrapper) wrapper.appendChild(el);
+    return el;
   };
 
-  const renderer: PolyVoxelSliceRenderer = {
-    element: hosts.z,
+  const draw = (signature: string, rotation: CameraCullRotation): void => {
+    const visibleFaces = new Set(signature.split("|").filter(Boolean) as PolyVoxelFace[]);
+    const orderedItems = orderDirectMatrixItems(directMatrixItems, visibleFaces, rotation);
+    mountedBrushCount = 0;
+    for (const item of orderedItems) {
+      const el = nextBrush(mountedBrushCount);
+      applyBrush(
+        el,
+        shadedColor(item.face, item.baseColor),
+        directMatrix(item.axis, item.left, item.top, item.width, item.height, item.z),
+      );
+      mountedBrushCount += 1;
+    }
+    for (let i = mountedBrushCount; i < pool.length; i += 1) pool[i]?.remove();
+  };
+
+  return {
+    element: wrapper,
     get brushCount() { return mountedBrushCount; },
     render(rotation: CameraCullRotation) {
       lastSignature = visibleFaceSignature(rotation);
-      draw(lastSignature);
+      draw(lastSignature, rotation);
     },
     syncCamera(rotation: CameraCullRotation) {
       const nextSignature = visibleFaceSignature(rotation);
       if (nextSignature === lastSignature) return;
       lastSignature = nextSignature;
-      draw(nextSignature);
+      draw(nextSignature, rotation);
     },
     dispose() {
-      hosts.z.remove();
-      hosts.x.remove();
-      hosts.y.remove();
-      pools.x.length = 0;
-      pools.y.length = 0;
-      pools.z.length = 0;
+      for (const el of pool) el.remove();
+      wrapper.classList.remove("polycss-voxel-mesh");
+      pool.length = 0;
       mountedBrushCount = 0;
       lastSignature = "";
     },
   };
-
-  return renderer;
 }

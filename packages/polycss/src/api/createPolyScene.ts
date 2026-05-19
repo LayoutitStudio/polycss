@@ -56,9 +56,9 @@ import {
   type SolidPaintDefaults,
 } from "../render/textureAtlas";
 import {
-  createPolyVoxelSliceRenderer,
-  type PolyVoxelSliceRenderer,
-} from "../render/voxelSliceRenderer";
+  createPolyVoxelRenderer,
+  type PolyVoxelRenderer,
+} from "../render/voxelRenderer";
 import { injectPolyBaseStyles } from "../styles/styles";
 
 // Used only by the internal async mesh update path. Batching DOM insertion
@@ -93,9 +93,10 @@ export interface PolySceneOptions {
   ambientLight?: PolyAmbientLight;
   /** Textured polygon lighting mode. Defaults to "baked". */
   textureLighting?: PolyTextureLightingMode;
-  /** Raster scale for generated atlas pages. `"auto"` reduces large atlases
-   *  to fit a device-appropriate memory budget (~4 MB mobile / ~16 MB desktop).
-   *  Numeric values 0.1..1 force an explicit scale. */
+  /** Atlas bitmap budget and CSS sprite size. `"auto"` uses a
+   *  device-appropriate memory budget (~4 MB mobile / ~16 MB desktop) and
+   *  desktop/mobile sprite sizing. Numeric values 0.1..1 force an explicit
+   *  raster scale and the 64px sprite. */
   textureQuality?: TextureQuality;
   /**
    * Skip specific render-strategy tags. Polygons that would normally use a
@@ -488,7 +489,7 @@ export function createPolyScene(
      *  separate from `rendered` so they can be removed independently when
      *  castShadow is toggled or lighting mode changes. */
     shadowRendered: HTMLElement[];
-    voxelRenderer?: PolyVoxelSliceRenderer;
+    voxelRenderer?: PolyVoxelRenderer;
     disposeAtlas?: () => void;
     polygons: Polygon[];
     voxelSource: ParseResult["voxelSource"];
@@ -795,7 +796,7 @@ export function createPolyScene(
   function syncMountedRenderedForCameraChange(entry: MeshEntry, force = false): void {
     if (entry.voxelRenderer) {
       entry.voxelRenderer.syncCamera(cameraCullRotation(entry));
-      entry.cameraCullSignature = "voxel-slice";
+      entry.cameraCullSignature = "voxel-direct";
       return;
     }
 
@@ -1091,7 +1092,7 @@ export function createPolyScene(
   function remountEntry(entry: MeshEntry): void {
     if (entry.voxelRenderer) {
       entry.voxelRenderer.render(cameraCullRotation(entry));
-      entry.cameraCullSignature = "voxel-slice";
+      entry.cameraCullSignature = "voxel-direct";
       return;
     }
     clearShadowLeaves(entry);
@@ -1099,7 +1100,7 @@ export function createPolyScene(
     emitShadowLeaves(entry);
   }
 
-  function canRenderVoxelSlice(entry: MeshEntry): boolean {
+  function canRenderVoxelDirect(entry: MeshEntry): boolean {
     return !!entry.voxelSource &&
       currentOptions.textureLighting !== "dynamic" &&
       !entry.stableDom &&
@@ -1112,19 +1113,20 @@ export function createPolyScene(
     const directionalLight: typeof baseDirLight = lightDirectionOverride
       ? { ...baseDirLight, direction: lightDirectionOverride }
       : baseDirLight;
-    if (canRenderVoxelSlice(entry) && entry.voxelSource) {
-      const renderer = createPolyVoxelSliceRenderer({
+    if (canRenderVoxelDirect(entry)) {
+      const renderer = createPolyVoxelRenderer({
         doc,
         wrapper: entry.wrapper,
-        source: entry.voxelSource,
         polygons: entry.parseResult.polygons,
         directionalLight,
         ambientLight: currentOptions.ambientLight,
       });
-      entry.voxelRenderer = renderer;
-      renderer.render(cameraCullRotation(entry));
-      entry.cameraCullSignature = "voxel-slice";
-      return;
+      if (renderer) {
+        entry.voxelRenderer = renderer;
+        renderer.render(cameraCullRotation(entry));
+        entry.cameraCullSignature = "voxel-direct";
+        return;
+      }
     }
 
     const renderOptions = {

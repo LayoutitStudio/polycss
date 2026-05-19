@@ -9,6 +9,8 @@ import {
 } from "./textureAtlas";
 import type { Polygon } from "@layoutit/polycss-core";
 
+const originalUserAgent = window.navigator.userAgent;
+
 const TEXTURED_QUAD_60: Polygon = {
   vertices: [
     [0, 0, 0],
@@ -24,7 +26,23 @@ function planFor(polygon: Polygon, index = 0): TextureAtlasPlan | null {
   return computeTextureAtlasPlan(polygon, index, {});
 }
 
+function stubUserAgent(userAgent: string): void {
+  Object.defineProperty(window.navigator, "userAgent", {
+    configurable: true,
+    value: userAgent,
+  });
+}
+
+function stubBorderShapeUnsupported(): void {
+  vi.stubGlobal("CSS", { supports: () => false });
+}
+
 afterEach(() => {
+  Object.defineProperty(window.navigator, "userAgent", {
+    configurable: true,
+    value: originalUserAgent,
+  });
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
 
@@ -122,7 +140,7 @@ describe("useTextureAtlas (auto textureQuality)", () => {
     return Array.from({ length: 6 }, () => ({ ...TEXTURED_QUAD_60 }));
   }
 
-  async function measureAtlas(mobile: boolean): Promise<{ pageBytes: number; pageCount: number }> {
+  async function measureAtlas(mobile: boolean): Promise<{ pageBytes: number; pageCount: number; atlasCanonicalSize: number | null }> {
     vi.stubGlobal("matchMedia", (query: string) => ({
       matches: mobile && (query.includes("pointer: coarse") || query.includes("hover: none")),
       addEventListener: () => {},
@@ -142,7 +160,12 @@ describe("useTextureAtlas (auto textureQuality)", () => {
       // After the synchronous pack the pages ref already exposes packed sizes.
       const pages = atlas.pages.value;
       const pageBytes = pages.reduce((sum, p) => sum + p.width * p.height * 4, 0);
-      result = { pageBytes, pageCount: pages.length };
+      const entry = atlas.entries.value.find((packed) => packed !== null);
+      result = {
+        pageBytes,
+        pageCount: pages.length,
+        atlasCanonicalSize: entry?.atlasCanonicalSize ?? null,
+      };
     });
     await nextTick();
     scope.stop();
@@ -159,10 +182,37 @@ describe("useTextureAtlas (auto textureQuality)", () => {
     expect(mobile.pageCount).toBeGreaterThan(0);
     expect(desktop.pageCount).toBeGreaterThan(0);
     expect(mobile.pageBytes).toBeGreaterThan(0);
+    expect(mobile.atlasCanonicalSize).toBe(64);
+    expect(desktop.atlasCanonicalSize).toBe(128);
+  });
+
+  it("packs solid triangles into the atlas on WebKit", async () => {
+    stubUserAgent("Mozilla/5.0 AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15");
+    stubBorderShapeUnsupported();
+    const tri: Polygon = {
+      vertices: [[0, 0, 0], [1, 0, 0], [0, 1, 0]],
+      color: "#ff0000",
+    };
+
+    let packed = false;
+    const scope = effectScope();
+    scope.run(() => {
+      const plans = computed<Array<TextureAtlasPlan | null>>(() => [
+        computeTextureAtlasPlan(tri, 0, {}),
+      ]);
+      const textureLighting = computed(() => "baked" as const);
+      const atlas = useTextureAtlas(plans, textureLighting);
+      packed = atlas.entries.value[0] !== null;
+    });
+    await nextTick();
+    scope.stop();
+
+    expect(packed).toBe(true);
   });
 
   it("explicit numeric textureQuality applies without auto branches", async () => {
     let pageDims: { width: number; height: number }[] = [];
+    let atlasCanonicalSize: number | null = null;
     const scope = effectScope();
     scope.run(() => {
       const polygons = ref<Polygon[]>(buildSixFaceCrateScene());
@@ -173,10 +223,12 @@ describe("useTextureAtlas (auto textureQuality)", () => {
       const textureQuality = computed<number | "auto">(() => 0.5);
       const atlas = useTextureAtlas(plans, textureLighting, textureQuality);
       pageDims = atlas.pages.value.map((p) => ({ width: p.width, height: p.height }));
+      atlasCanonicalSize = atlas.entries.value.find((packed) => packed !== null)?.atlasCanonicalSize ?? null;
     });
     await nextTick();
     scope.stop();
     expect(pageDims.length).toBeGreaterThan(0);
+    expect(atlasCanonicalSize).toBe(64);
   });
 
   it("rasterizes packed pages to canvas blobs when a 2D context is available", async () => {

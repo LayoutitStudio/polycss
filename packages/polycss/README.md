@@ -95,7 +95,7 @@ poly-polygon.hover { filter: brightness(1.5); }
 | `ambient-intensity` | Ambient light intensity |
 | `ambient-color` | Ambient light color hex |
 | `texture-lighting` | `"baked"` or `"dynamic"` |
-| `atlas-scale` | Raster scale for generated atlas pages; lower values reduce memory/detail |
+| `atlas-scale` | Atlas bitmap budget and compositor sprite size; lower numeric values reduce memory/detail |
 
 For pointer drag, wheel zoom, and autorotate, drop a `<poly-orbit-controls>` child inside the scene (or wire `createPolyOrbitControls(scene, ...)` against the imperative API). For pan-first map-style input use `<poly-map-controls>` / `createPolyMapControls` instead. Mirrors Three.js's split between camera state (`<poly-scene>`) and camera input.
 
@@ -161,7 +161,7 @@ mesh.dispose();
 | `directionalLight` | `PolyDirectionalLight` | Directional light config |
 | `ambientLight` | `PolyAmbientLight` | Ambient light config |
 | `textureLighting` | `"baked" \| "dynamic"` | Texture lighting mode |
-| `textureQuality` | `number \| "auto"` | Raster scale for generated atlas pages |
+| `textureQuality` | `number \| "auto"` | Atlas bitmap budget and compositor sprite size |
 | `autoCenter` | `boolean` | Rotate around the union bbox center of added meshes |
 
 Returns a `PolySceneHandle`:

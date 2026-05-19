@@ -88,9 +88,10 @@ export interface PolyMeshProps extends TransformProps, InteractionProps {
   autoCenter?: boolean;
   /** Textured polygon lighting mode. Defaults to "baked". */
   textureLighting?: PolyTextureLightingMode;
-  /** Raster scale for generated atlas pages. `"auto"` (default) downscales to
-   *  a device-appropriate memory budget (~4 MB mobile / ~16 MB desktop).
-   *  Numeric values 0.1..1 force an explicit scale. */
+  /** Atlas bitmap budget and CSS sprite size. `"auto"` (default) uses a
+   *  device-appropriate memory budget (~4 MB mobile / ~16 MB desktop) and
+   *  desktop/mobile sprite sizing. Numeric values 0.1..1 force an explicit
+   *  raster scale and the 64px sprite. */
   textureQuality?: TextureQuality;
   /** Per-polygon override render, or static children mounted inside the mesh wrapper. */
   children?: ((polygon: Polygon, index: number) => ReactNode) | ReactNode;

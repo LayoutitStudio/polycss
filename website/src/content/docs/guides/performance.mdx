@@ -57,7 +57,7 @@ const result = await loadMesh("/castle.obj", {
 
 ## `textureQuality` and texture memory
 
-Generated atlas pages default to `textureQuality="auto"`. Auto starts from the packed atlas area and then caps oversized runtime bitmaps by page side length and decoded-memory budget. For dense textured meshes this prevents very large canvas/PNG work at mount while keeping DOM geometry and hit areas unchanged.
+Generated atlas pages default to `textureQuality="auto"`. Auto starts from the packed atlas area, caps oversized runtime bitmaps by page side length and decoded-memory budget, and chooses the fixed CSS sprite size used by atlas leaves. Desktop-class auto uses a 128px sprite to avoid Safari/Firefox compositor flattening artifacts; mobile-class auto and explicit numeric quality use 64px to keep layer memory lower.
 
 ```html
 <!-- Vanilla -->
@@ -78,7 +78,7 @@ Generated atlas pages default to `textureQuality="auto"`. Auto starts from the p
 <PolyMesh src="/cottage.glb" textureQuality={0.5} />
 ```
 
-Use explicit numeric values when you want to override auto: `0.5` or `0.75` for distant or dense assets, `1` for close-up inspection when the runtime bitmap cost is acceptable.
+Use explicit numeric values when you want to override auto raster scale: `0.5` or `0.75` for distant or dense assets, `1` for close-up inspection when the runtime bitmap cost is acceptable. Numeric quality keeps the 64px atlas sprite size.
 
 ## Atlas and Blob URL Lifecycle
 

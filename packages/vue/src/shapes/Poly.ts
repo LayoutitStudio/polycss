@@ -129,8 +129,8 @@ export interface PolyProps {
   rotation?: Vec3;
   context?: PolyContext;
   textureLighting?: PolyTextureLightingMode;
-  /** Raster scale for generated atlas pages. `"auto"` (default) downscales to
-   *  a device-appropriate memory budget (~4 MB mobile / ~16 MB desktop). */
+  /** Atlas bitmap budget and CSS sprite size. `"auto"` (default) uses a
+   *  device-appropriate memory budget and desktop/mobile sprite sizing. */
   textureQuality?: TextureQuality;
   baseColor?: string;
   pointerEvents?: "auto" | "none";

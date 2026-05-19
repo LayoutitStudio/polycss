@@ -276,6 +276,11 @@ describe("createPolyScene", () => {
       expect(styleEl?.textContent).toContain("transform-origin: 0 0");
       expect(styleEl?.textContent).toContain("backface-visibility: hidden");
       expect(styleEl?.textContent).toContain("background-repeat: no-repeat");
+      expect(styleEl?.textContent).toContain("width: 64px;");
+      expect(styleEl?.textContent).toContain("height: 64px;");
+      expect(styleEl?.textContent).toContain("width: var(--polycss-atlas-size, 64px);");
+      expect(styleEl?.textContent).toContain("height: var(--polycss-atlas-size, 64px);");
+      expect(styleEl?.textContent).toContain("border-width: 0 32px 64px 32px;");
       expect(styleEl?.textContent).toContain("width: 0;");
       expect(styleEl?.textContent).toContain("height: 0;");
     });
@@ -296,40 +301,41 @@ describe("createPolyScene", () => {
       expect(handle.polygons.length).toBe(2);
     });
 
-    it("routes raw vox sources through the voxel slice-brush renderer", () => {
+    it("routes exact raw vox sources through the direct voxel renderer", () => {
       scene = createPolyScene(host);
-      scene.add(makeVoxelParseResult(), { merge: false });
-      const voxelRoot = host.querySelector(".polycss-voxel-host-z");
-      const voxelBrushes = Array.from(host.querySelectorAll(".polycss-voxel-host b"));
-      expect(voxelRoot).not.toBeNull();
-      expect(host.querySelector(".polycss-voxel-slice")).toBeNull();
+      scene.add(makeVoxelExactParseResult(), { merge: false });
+      const voxelBrushes = Array.from(host.querySelectorAll(".polycss-mesh > b"));
+      expect(host.querySelector(".polycss-voxel-host-z")).toBeNull();
       expect(voxelBrushes.length).toBeGreaterThan(0);
       expect(voxelBrushes.every((el) => el.tagName === "B")).toBe(true);
+      expect(host.querySelector(".polycss-mesh")?.classList.contains("polycss-voxel-mesh")).toBe(true);
       const firstBrush = voxelBrushes[0] as HTMLElement;
-      expect(firstBrush.style.left).toMatch(/px$/);
-      expect(firstBrush.style.top).toMatch(/px$/);
-      expect(firstBrush.style.width).toMatch(/px$/);
-      expect(firstBrush.style.height).toMatch(/px$/);
+      expect(firstBrush.style.left).toBe("");
+      expect(firstBrush.style.top).toBe("");
+      expect(firstBrush.style.width).toBe("");
+      expect(firstBrush.style.height).toBe("");
       expect(firstBrush.style.gridArea).toBe("");
-      expect(firstBrush.style.transform).toContain("translateZ(");
+      expect(firstBrush.style.transform).toContain("matrix3d(");
+      expect(firstBrush.style.backfaceVisibility).toBe("");
+      expect(firstBrush.style.pointerEvents).toBe("");
       expect(firstBrush.style.getPropertyValue("--polycss-voxel-z")).toBe("");
       expect(voxelBrushes.every((el) => el.className === "")).toBe(true);
     });
 
-    it("applies baked lighting to voxel slice-brush quads", () => {
+    it("applies baked lighting to direct voxel quads", () => {
       scene = createPolyScene(host, {
         rotX: 0,
         rotY: 0,
         directionalLight: { direction: [0, 0, -1], color: "#ffffff", intensity: 1 },
         ambientLight: { color: "#ffffff", intensity: 0 },
       });
-      scene.add(makeVoxelParseResult(), { merge: false });
-      const brush = host.querySelector(".polycss-voxel-host b") as HTMLElement | null;
+      scene.add(makeVoxelExactParseResult(), { merge: false });
+      const brush = host.querySelector(".polycss-mesh > b") as HTMLElement | null;
       expect(brush).not.toBeNull();
       expect(brush!.style.color).toMatch(/^(#000000|rgb\\(0, 0, 0\\))$/);
     });
 
-    it("uses exact parsed voxel polygons before falling back to merged source brushes", () => {
+    it("uses exact parsed voxel polygons for direct matrix placement", () => {
       scene = createPolyScene(host, {
         rotX: 65,
         rotY: 45,
@@ -337,20 +343,30 @@ describe("createPolyScene", () => {
         ambientLight: { color: "#ffffff", intensity: 1 },
       });
       scene.add(makeVoxelExactParseResult(), { merge: false });
-      const brush = host.querySelector(".polycss-voxel-host b") as HTMLElement | null;
+      const brush = host.querySelector(".polycss-mesh > b") as HTMLElement | null;
       expect(brush).not.toBeNull();
       expect(brush!.style.color).toMatch(/^(#123456|rgb\\(18, 52, 86\\))$/);
-      expect(brush!.style.width).toBe("50px");
-      expect(brush!.style.height).toBe("50px");
+      expect(brush!.style.width).toBe("");
+      expect(brush!.style.height).toBe("");
+      expect(brush!.style.transform).toContain("matrix3d(50,0,0,0,0,50");
+    });
+
+    it("falls back to polygon rendering when raw vox polygons are not exact direct quads", () => {
+      scene = createPolyScene(host);
+      scene.add(makeVoxelParseResult(), { merge: false });
+      expect(host.querySelector(".polycss-voxel-host-z")).toBeNull();
+      expect(host.querySelector(".polycss-mesh > b")).toBeNull();
+      expect(host.querySelector("i,b,s,u")).not.toBeNull();
     });
 
     it("falls back to polygon rendering after setPolygons replaces vox source geometry", () => {
       scene = createPolyScene(host);
-      const handle = scene.add(makeVoxelParseResult(), { merge: false });
-      expect(host.querySelector(".polycss-voxel-host-z")).not.toBeNull();
+      const handle = scene.add(makeVoxelExactParseResult(), { merge: false });
+      expect(host.querySelector(".polycss-mesh > b")).not.toBeNull();
       handle.setPolygons([triangle()], { merge: false });
       expect(host.querySelector(".polycss-voxel-host-z")).toBeNull();
-      expect(host.querySelector(".polycss-voxel-host b")).toBeNull();
+      expect(host.querySelector(".polycss-mesh > b")).toBeNull();
+      expect(host.querySelector(".polycss-mesh")?.classList.contains("polycss-voxel-mesh")).toBe(false);
       expect(host.querySelector("i,b,s,u")).not.toBeNull();
     });
 

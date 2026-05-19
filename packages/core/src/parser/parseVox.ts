@@ -23,8 +23,8 @@
  * shift is required by default.
  *
  * Output mesh is uniformly scaled near `targetSize` units along the longest
- * bbox axis, snapped to the nearest integer CSS cell so voxel slice renderers
- * can avoid fractional brush coordinates without adding scale transforms.
+ * bbox axis, snapped to the nearest integer CSS cell so voxel renderers can
+ * avoid fractional brush coordinates without adding scale transforms.
  */
 import type { Polygon, Vec3 } from "../types";
 import { BASE_TILE } from "../camera/camera";
@@ -34,7 +34,7 @@ export interface VoxParseOptions {
   /**
    * Largest mesh extent (in scene-space units). For `.vox`, the requested
    * extent is snapped to the nearest integer CSS cell size to keep voxel
-   * slice brushes on integer pixel coordinates. Default: 60.
+   * fast-path coordinates integral. Default: 60.
    */
   targetSize?: number;
   /**

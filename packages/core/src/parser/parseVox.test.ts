@@ -310,7 +310,7 @@ describe("parseVox — minimal synthetic buffer", () => {
     expect(result.polygons.length).toBe(6);
   });
 
-  it("preserves normalized raw voxel source for slice-brush rendering", () => {
+  it("preserves normalized raw voxel source for fast-path rendering", () => {
     const buf = buildVoxBuffer([3, 2, 1], [{ x: 2, y: 1, z: 0, colorIndex: 1 }]);
     const result = parseVox(buf, { targetSize: 30, gridShift: 2 });
     expect(result.voxelSource).toEqual({

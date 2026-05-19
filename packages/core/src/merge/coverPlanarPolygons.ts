@@ -39,6 +39,13 @@ interface DirectedSegment2 {
   b: Vec2;
 }
 
+interface LocalBBox {
+  minX: number;
+  minY: number;
+  maxX: number;
+  maxY: number;
+}
+
 interface BoundaryEdge {
   a: Vec3;
   b: Vec3;
@@ -360,7 +367,7 @@ function signedArea(points: Vec2[]): number {
   return area / 2;
 }
 
-function localBBox(points: Vec2[]): { minX: number; minY: number; maxX: number; maxY: number } {
+function localBBox(points: Vec2[]): LocalBBox {
   let minX = Infinity;
   let minY = Infinity;
   let maxX = -Infinity;
@@ -374,9 +381,7 @@ function localBBox(points: Vec2[]): { minX: number; minY: number; maxX: number; 
   return { minX, minY, maxX, maxY };
 }
 
-function bboxesCanTouch(a: Vec2[], b: Vec2[]): boolean {
-  const ab = localBBox(a);
-  const bb = localBBox(b);
+function localBBoxesCanTouch(ab: LocalBBox, bb: LocalBBox): boolean {
   return !(
     ab.maxX < bb.minX - 1e-7 ||
     bb.maxX < ab.minX - 1e-7 ||
@@ -427,6 +432,48 @@ function pointParameterOnSegment(point: Vec2, a: Vec2, b: Vec2): number {
   return ((point[0] - a[0]) * dx + (point[1] - a[1]) * dy) / denom;
 }
 
+function colinearSegmentsOverlap(a0: Vec2, a1: Vec2, b0: Vec2, b1: Vec2): boolean {
+  const ax = a1[0] - a0[0];
+  const ay = a1[1] - a0[1];
+  const bx = b1[0] - b0[0];
+  const by = b1[1] - b0[1];
+  const aLen = Math.hypot(ax, ay);
+  const bLen = Math.hypot(bx, by);
+  if (aLen <= 1e-9 || bLen <= 1e-9) return false;
+
+  const crossB0 = ax * (b0[1] - a0[1]) - ay * (b0[0] - a0[0]);
+  const crossB1 = ax * (b1[1] - a0[1]) - ay * (b1[0] - a0[0]);
+  const crossAxes = ax * by - ay * bx;
+  const tolerance = Math.max(1e-8, Math.max(aLen, bLen) * 1e-8);
+  if (
+    Math.abs(crossB0) > tolerance ||
+    Math.abs(crossB1) > tolerance ||
+    Math.abs(crossAxes) > tolerance
+  ) {
+    return false;
+  }
+
+  const useX = Math.abs(ax) >= Math.abs(ay);
+  const aMin = Math.min(useX ? a0[0] : a0[1], useX ? a1[0] : a1[1]);
+  const aMax = Math.max(useX ? a0[0] : a0[1], useX ? a1[0] : a1[1]);
+  const bMin = Math.min(useX ? b0[0] : b0[1], useX ? b1[0] : b1[1]);
+  const bMax = Math.max(useX ? b0[0] : b0[1], useX ? b1[0] : b1[1]);
+  return Math.min(aMax, bMax) - Math.max(aMin, bMin) > 1e-8;
+}
+
+function polygonsMayShareBoundary(a: Vec2[], b: Vec2[]): boolean {
+  for (let i = 0; i < a.length; i++) {
+    const a0 = a[i];
+    const a1 = a[(i + 1) % a.length];
+    for (let j = 0; j < b.length; j++) {
+      if (colinearSegmentsOverlap(a0, a1, b[j], b[(j + 1) % b.length])) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 function splitDirectedEdges(polygon: Vec2[], splitPoints: Vec2[]): DirectedSegment2[] {
   const segments: DirectedSegment2[] = [];
   for (let i = 0; i < polygon.length; i++) {
@@ -465,8 +512,8 @@ function splitDirectedEdges(polygon: Vec2[], splitPoints: Vec2[]): DirectedSegme
   return segments;
 }
 
-function unionConvexLocalPair(a: Vec2[], b: Vec2[]): Vec2[] | null {
-  if (!bboxesCanTouch(a, b)) return null;
+function unionConvexLocalPair(a: Vec2[], b: Vec2[], aBBox = localBBox(a), bBBox = localBBox(b)): Vec2[] | null {
+  if (!localBBoxesCanTouch(aBBox, bBBox) || !polygonsMayShareBoundary(a, b)) return null;
   const pieces = [
     ...splitDirectedEdges(a, b),
     ...splitDirectedEdges(b, a),
@@ -529,16 +576,19 @@ function mergeLocalCells(cells: Vec2[][]): Vec2[][] {
   const polygons = cells
     .map(cleanLocalPolygon)
     .filter((polygon) => polygon.length >= 3 && localAreaAbs(polygon) > 1e-8);
+  const bboxes = polygons.map(localBBox);
 
   let changed = true;
   while (changed) {
     changed = false;
     for (let i = 0; i < polygons.length; i++) {
       for (let j = i + 1; j < polygons.length; j++) {
-        const merged = unionConvexLocalPair(polygons[i], polygons[j]);
+        const merged = unionConvexLocalPair(polygons[i], polygons[j], bboxes[i], bboxes[j]);
         if (!merged) continue;
         polygons[i] = merged;
+        bboxes[i] = localBBox(merged);
         polygons.splice(j, 1);
+        bboxes.splice(j, 1);
         changed = true;
         break;
       }

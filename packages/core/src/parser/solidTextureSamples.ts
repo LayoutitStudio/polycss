@@ -22,7 +22,6 @@ interface ImageLike {
   height?: number;
   onload: (() => void) | null;
   onerror: (() => void) | null;
-  decode?: () => Promise<void>;
 }
 
 interface CanvasLike {
@@ -104,14 +103,6 @@ function loadImage(url: string, ImageCtor: new () => ImageLike): Promise<ImageLi
     img.onload = () => done(() => resolve(img));
     img.onerror = () => done(() => reject(new Error(`texture load failed: ${url}`)));
     img.src = url;
-    if (typeof img.decode === "function") {
-      img.decode().then(
-        () => done(() => resolve(img)),
-        () => {
-          // Keep the onload/onerror path authoritative for older/fake images.
-        },
-      );
-    }
   });
 }
 

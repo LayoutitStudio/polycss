@@ -94,8 +94,17 @@ const CORE_BASE_STYLES = `
 
 .polycss-scene b {
   background: currentColor;
+  width: 64px;
+  height: 64px;
+}
+
+.polycss-mesh.polycss-voxel-mesh > b {
+  top: 0;
+  left: 0;
   width: 1px;
   height: 1px;
+  backface-visibility: visible;
+  pointer-events: none;
 }
 
 .polycss-scene i {
@@ -105,8 +114,8 @@ const CORE_BASE_STYLES = `
 }
 
 .polycss-scene s {
-  width: 1px;
-  height: 1px;
+  width: var(--polycss-atlas-size, 64px);
+  height: var(--polycss-atlas-size, 64px);
 }
 
 .polycss-scene u {
@@ -116,7 +125,7 @@ const CORE_BASE_STYLES = `
   box-sizing: content-box;
   border: 0 solid transparent;
   border-color: transparent transparent currentColor transparent;
-  border-width: 0 1px 1px 1px;
+  border-width: 0 32px 64px 32px;
 }
 
 /* <q> — dedicated shadow leaf. Same border-shape rendering trick as <i>
@@ -148,36 +157,6 @@ const CORE_BASE_STYLES = `
 .polycss-scene q::before,
 .polycss-scene q::after {
   content: none;
-}
-
-/* ── Voxel slice-brush fast path ────────────────────────────────────────── */
-
-.polycss-voxel-host {
-  position: absolute;
-  top: 0;
-  left: 0;
-  transform-origin: 0 0;
-  transform-style: preserve-3d;
-  pointer-events: none;
-}
-
-.polycss-voxel-host-x {
-  transform: rotateX(90deg);
-}
-
-.polycss-voxel-host-y {
-  transform: rotateY(-90deg);
-}
-
-.polycss-voxel-host b {
-  position: absolute;
-  display: block;
-  overflow: visible;
-  transform-origin: 0 0;
-  transform-style: preserve-3d;
-  backface-visibility: visible;
-  pointer-events: none;
-  background-repeat: no-repeat;
 }
 
 /* ── Gizmo override (createTransformControls) ───────────────────────────── */

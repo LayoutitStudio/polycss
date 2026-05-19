@@ -40,6 +40,7 @@ npm install @layoutit/polycss-core
 | `CameraState` | Camera target, angles, zoom, and dolly distance |
 | `CameraHandle` | Mutable camera object from `createIsometricCamera` |
 | `AutoRotateOption` | `boolean | number | { axis, speed, pauseOnInteraction }` |
+| `BoxPolygonsOptions` | Options for `boxPolygons`: size/center or min/max bounds, materials, face overrides |
 
 ### Functions
 
@@ -50,10 +51,11 @@ npm install @layoutit/polycss-core
 | `optimizeMeshPolygons(polygons, options?)` | Applies lossless or lossy mesh-resolution optimization and chooses the smallest accepted candidate; defaults to `meshResolution: "lossy"`. |
 | `computeSceneBbox(polygons)` | Computes min/max bounds across all polygon vertices. |
 | `createIsometricCamera(initial?)` | Creates a mutable camera handle with `state`, `update(partial)`, and `getStyle()`. |
+| `boxPolygons(options?)` | Creates six quad `Polygon`s for an axis-aligned box/cuboid. Supports per-face material/data overrides and omitted faces. |
 | `parseObj(text, options?)` | Parses OBJ text into `ParseResult`. Supports UV (`vt`), materials, `map_Kd` textures. |
 | `parseMtl(text)` | Parses MTL text into `{ colors, textures }`. |
 | `parseGltf(buffer, options?)` | Parses GLB or glTF `ArrayBuffer` into `ParseResult`. Extracts embedded textures as blob URLs. |
-| `parseVox(buffer, options?)` | Parses MagicaVoxel `.vox` `ArrayBuffer` into `ParseResult`. Face-culls interior voxel faces and fan-triangulates exposed quads. `targetSize` snaps to integer voxel CSS cells for the slice-brush renderer. |
+| `parseVox(buffer, options?)` | Parses MagicaVoxel `.vox` `ArrayBuffer` into `ParseResult`. Face-culls interior voxel faces and emits exposed quads. `targetSize` snaps to integer voxel CSS cells for the fast-path renderer. |
 | `loadMesh(url, options?)` | Fetches a URL, dispatches to the right parser by extension (`.obj`, `.glb`, `.gltf`, `.vox`). Returns `Promise<ParseResult>` and defaults to `meshResolution: "lossy"`. |
 | `parseColor(input)` | Parse any CSS color string to `{ r, g, b, a }`. |
 | `shadeColor(input, lambert, ...)` | Apply Lambert shading factor to a color. |
@@ -110,4 +112,24 @@ const merged = mergePolygons(polygons);
 console.log(`${polygons.length} triangles → ${merged.length} merged polygons`);
 
 dispose(); // always revoke GLB blob URLs when done
+```
+
+### Create a box shape
+
+```ts
+import { boxPolygons } from "@layoutit/polycss-core";
+
+const polygons = boxPolygons({
+  min: [0, 0, 0],
+  max: [2, 1, 0.5],
+  color: "#d8d2c7",
+  data: { tileId: "tile-1" },
+  faces: {
+    top: {
+      texture: "/tile.png",
+      data: { face: "top" },
+    },
+    bottom: false,
+  },
+});
 ```

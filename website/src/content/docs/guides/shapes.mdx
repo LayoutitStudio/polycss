@@ -17,6 +17,25 @@ Every polygon rendered by polycss is a real DOM element. You can attach standard
   defaults='{"rotX":65,"rotY":45,"zoom":0.08}'
 />
 
+## Box helper
+
+Use `boxPolygons()` when your shape is an axis-aligned box or cuboid. It returns ordinary `Polygon[]`, so the result renders through the same `<PolyMesh>` / `createPolyScene()` path as parsed OBJ, GLB, and VOX meshes.
+
+```ts
+import { boxPolygons } from "@layoutit/polycss-react";
+
+const polygons = boxPolygons({
+  min: [0, 0, 0],
+  max: [2, 1, 0.5],
+  color: "#d8d2c7",
+  data: { tileId: "tile-1" },
+  faces: {
+    top: { texture: "/tile.png", data: { face: "top" } },
+    bottom: false,
+  },
+});
+```
+
 ## The polygon primitive
 
 `<poly-polygon>` (vanilla) and `<Poly>` (React / Vue) render a single polygon as an atlas-backed `<i>` for UV-textured and flat-color faces. They forward standard DOM props (`onclick`, `class`, `style`, `aria-*`, etc.).

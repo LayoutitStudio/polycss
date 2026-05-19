@@ -54,9 +54,10 @@ export interface PolySceneProps {
   directionalLight?: PolyDirectionalLight;
   ambientLight?: PolyAmbientLight;
   textureLighting?: PolyTextureLightingMode;
-  /** Raster scale for generated atlas pages. `"auto"` (default) downscales to
-   *  a device-appropriate memory budget (~4 MB mobile / ~16 MB desktop).
-   *  Numeric values 0.1..1 force an explicit scale. */
+  /** Atlas bitmap budget and CSS sprite size. `"auto"` (default) uses a
+   *  device-appropriate memory budget (~4 MB mobile / ~16 MB desktop) and
+   *  desktop/mobile sprite sizing. Numeric values 0.1..1 force an explicit
+   *  raster scale and the 64px sprite. */
   textureQuality?: TextureQuality;
   /** Opt out of specific render strategies. Disabled strategies fall through the chain (b→i→s, u→i→s, i→s). `<s>` cannot be disabled. */
   strategies?: PolyRenderStrategiesOption;

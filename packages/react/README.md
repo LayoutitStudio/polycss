@@ -41,7 +41,7 @@ Root of every React polycss render tree. Renders polygons and meshes inside a `<
 | `directionalLight` | `PolyDirectionalLight` | None | Directional light config |
 | `ambientLight` | `PolyAmbientLight` | None | Ambient light config |
 | `textureLighting` | `"baked" \| "dynamic"` | `"baked"` | Texture lighting mode |
-| `textureQuality` | `number \| "auto"` | `"auto"` | Raster scale for generated atlas pages |
+| `textureQuality` | `number \| "auto"` | `"auto"` | Atlas bitmap budget and compositor sprite size |
 | `polygons` | `Polygon[]` | None | Static polygon array (composes with `children`) |
 | `children` | `ReactNode` | None | `<PolyMesh>`, `<Poly>`, and/or `<PolyOrbitControls>` |
 
@@ -58,7 +58,7 @@ Loads a mesh from a URL and renders its polygons. Manages blob-URL lifecycle aut
 | `position` | `Vec3` | `[x, y, z]` offset in scene space |
 | `scale` | `number \| Vec3` | Uniform or per-axis scale |
 | `rotation` | `Vec3` | Euler angles in degrees `[x, y, z]` |
-| `textureQuality` | `number \| "auto"` | Raster scale for generated atlas pages |
+| `textureQuality` | `number \| "auto"` | Atlas bitmap budget and compositor sprite size |
 | `autoCenter` | `boolean` | Shift mesh so its bbox center is at origin |
 | `mtl` | `string` | Companion `.mtl` URL for OBJ models |
 | `parseOptions` | `UseMeshOptions` | Forwarded to `loadMesh`; `meshResolution` defaults to `"lossy"` |
@@ -80,7 +80,7 @@ Single polygon. The atomic primitive: renders one atlas-backed `<i>` for UV-text
 | `position` | `Vec3` | Local offset |
 | `scale` | `number \| Vec3` | Scale |
 | `rotation` | `Vec3` | Euler rotation in degrees |
-| `textureQuality` | `number \| "auto"` | Raster scale for generated atlas pages |
+| `textureQuality` | `number \| "auto"` | Atlas bitmap budget and compositor sprite size |
 | `onClick` | `MouseEventHandler` | Standard DOM event handler |
 | `onMouseEnter` | `MouseEventHandler` | |
 | `className` | `string` | CSS class |

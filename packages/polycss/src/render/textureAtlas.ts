@@ -72,6 +72,8 @@ interface TextureAtlasPlan {
   layerElevation: number;
   matrix: string;
   canonicalMatrix: string;
+  atlasMatrix: string;
+  atlasCanonicalSize?: number;
   projectiveMatrix: string | null;
   canvasW: number;
   canvasH: number;
@@ -192,11 +194,11 @@ export interface RenderTextureAtlasOptions {
   ambientLight?: PolyAmbientLight;
   textureLighting?: PolyTextureLightingMode;
   /**
-   * Raster scale for generated atlas pages. `1` keeps one bitmap pixel per CSS
-   * pixel; lower values reduce atlas memory and encode cost at lower texture
-   * detail. Numeric values are clamped to 0.1..1. Omitted / `"auto"` picks
-   * 1 / 0.75 / 0.5 from packed atlas area, then caps oversized runtime
-   * bitmaps by side length and decoded-memory budget.
+   * Atlas bitmap budget and CSS sprite size. Numeric values are clamped to
+   * 0.1..1 and keep the 64px sprite. Omitted / `"auto"` picks a raster scale
+   * from packed atlas area, caps oversized runtime bitmaps by side length and
+   * decoded-memory budget, and uses a 128px sprite on desktop-class documents
+   * or a 64px sprite on mobile-class documents.
    */
   textureQuality?: TextureQuality;
   solidPaintDefaults?: SolidPaintDefaults;
@@ -235,6 +237,10 @@ const SOLID_TRIANGLE_BLEED = 0.75;
 const DEFAULT_MATRIX_DECIMALS = 3;
 const DEFAULT_BORDER_SHAPE_DECIMALS = 2;
 const DEFAULT_ATLAS_CSS_DECIMALS = 4;
+const SOLID_QUAD_CANONICAL_SIZE = 64;
+const SOLID_TRIANGLE_CANONICAL_SIZE = 64;
+const ATLAS_CANONICAL_SIZE_EXPLICIT = 64;
+const ATLAS_CANONICAL_SIZE_AUTO_DESKTOP = 128;
 const BORDER_SHAPE_CENTER_PERCENT = 50;
 const BORDER_SHAPE_POINT_EPS = 1e-7;
 const BORDER_SHAPE_CANONICAL_SIZE = 16;
@@ -530,12 +536,14 @@ function computeProjectiveQuadMatrix(
     (weight - 1) * tz + (weight * x - q0[0]) * xAxis[2] + (weight * y - q0[1]) * yAxis[2],
   ];
 
-  return formatMatrix3dValues([
+  const values = [
     ...projectiveColumn(q1, w1), g,
     ...projectiveColumn(q3, w3), h,
     normal[0], normal[1], normal[2], 0,
     p0[0], p0[1], p0[2], 1,
-  ]);
+  ];
+  for (let i = 0; i < 8; i += 1) values[i] /= SOLID_QUAD_CANONICAL_SIZE;
+  return formatMatrix3dValues(values, 6);
 }
 
 function formatPercent(value: number, decimals = DEFAULT_BORDER_SHAPE_DECIMALS): string {
@@ -659,31 +667,89 @@ function packTextureAtlasPlansAuto(
 }
 
 function autoAtlasMaxDecodedBytes(doc: Document | null | undefined): number {
-  if (!doc) return AUTO_ATLAS_MAX_DECODED_BYTES_DESKTOP;
+  return isMobileDocument(doc)
+    ? AUTO_ATLAS_MAX_DECODED_BYTES_MOBILE
+    : AUTO_ATLAS_MAX_DECODED_BYTES_DESKTOP;
+}
+
+function isMobileDocument(doc: Document | null | undefined): boolean {
+  if (!doc) return false;
   const win = doc.defaultView ?? (typeof window !== "undefined" ? window : undefined);
   const media = win?.matchMedia;
-  if (!media) return AUTO_ATLAS_MAX_DECODED_BYTES_DESKTOP;
+  if (!media) return false;
   // Same device-class heuristic as borderShapeSupported: coarse pointer or
   // no hover capability = phone/tablet, which has a tight GPU-memory budget
   // for composited 3D layers.
-  const isMobile = media("(pointer: coarse)").matches || media("(hover: none)").matches;
-  return isMobile
-    ? AUTO_ATLAS_MAX_DECODED_BYTES_MOBILE
-    : AUTO_ATLAS_MAX_DECODED_BYTES_DESKTOP;
+  return media("(pointer: coarse)").matches || media("(hover: none)").matches;
+}
+
+function atlasCanonicalSizeForTextureQuality(
+  textureQualityInput: TextureQuality | undefined,
+  doc: Document | null | undefined,
+): number {
+  if (textureQualityInput !== undefined && textureQualityInput !== "auto") {
+    return ATLAS_CANONICAL_SIZE_EXPLICIT;
+  }
+  return isMobileDocument(doc)
+    ? ATLAS_CANONICAL_SIZE_EXPLICIT
+    : ATLAS_CANONICAL_SIZE_AUTO_DESKTOP;
+}
+
+function formatAtlasMatrix(
+  entry: TextureAtlasPlan,
+  atlasCanonicalSize: number,
+): string {
+  const values = entry.matrix.split(",").map((value) => Number(value));
+  if (values.length !== 16 || values.some((value) => !Number.isFinite(value))) {
+    return entry.canonicalMatrix;
+  }
+  values[0] *= entry.canvasW / atlasCanonicalSize;
+  values[1] *= entry.canvasW / atlasCanonicalSize;
+  values[2] *= entry.canvasW / atlasCanonicalSize;
+  values[4] *= entry.canvasH / atlasCanonicalSize;
+  values[5] *= entry.canvasH / atlasCanonicalSize;
+  values[6] *= entry.canvasH / atlasCanonicalSize;
+  return formatMatrix3dValues(values);
+}
+
+function applyPackedAtlasCanonicalSize(
+  packed: PackedAtlas,
+  atlasCanonicalSize: number,
+): PackedAtlas {
+  for (const entry of packed.entries) {
+    if (!entry) continue;
+    entry.atlasCanonicalSize = atlasCanonicalSize;
+    entry.atlasMatrix = formatAtlasMatrix(entry, atlasCanonicalSize);
+  }
+  return packed;
+}
+
+function atlasCanonicalSizeForEntry(entry: TextureAtlasPlan): number {
+  return entry.atlasCanonicalSize ?? ATLAS_CANONICAL_SIZE_EXPLICIT;
 }
 
 function packTextureAtlasPlansWithScale(
   plans: Array<TextureAtlasPlan | null>,
   textureQualityInput: TextureQuality | undefined,
   doc: Document | null | undefined,
-): { packed: PackedAtlas; atlasScale: number } {
+): { packed: PackedAtlas; atlasScale: number; atlasCanonicalSize: number } {
+  const atlasCanonicalSize = atlasCanonicalSizeForTextureQuality(textureQualityInput, doc);
   if (textureQualityInput !== undefined && textureQualityInput !== "auto") {
     const atlasScale = normalizeAtlasScale(textureQualityInput);
-    return { packed: packTextureAtlasPlans(plans, atlasScale), atlasScale };
+    return {
+      packed: applyPackedAtlasCanonicalSize(packTextureAtlasPlans(plans, atlasScale), atlasCanonicalSize),
+      atlasScale,
+      atlasCanonicalSize,
+    };
   }
 
   const fullScalePacked = packTextureAtlasPlans(plans, 1);
-  return packTextureAtlasPlansAuto(plans, fullScalePacked, autoAtlasMaxDecodedBytes(doc));
+  const autoPacked = packTextureAtlasPlansAuto(plans, fullScalePacked, autoAtlasMaxDecodedBytes(doc));
+  return {
+    packed: applyPackedAtlasCanonicalSize(autoPacked.packed, atlasCanonicalSize),
+    atlasScale: autoPacked.atlasScale,
+    atlasCanonicalSize,
+  };
 }
 
 function atlasPadding(atlasScale: number): number {
@@ -1515,6 +1581,18 @@ function computeTextureAtlasPlan(
     normal[0], normal[1], normal[2], 0,
     tx, ty, tz, 1,
   ]);
+  const atlasMatrix = formatMatrix3dValues([
+    xAxis[0] * canvasW / ATLAS_CANONICAL_SIZE_EXPLICIT,
+    xAxis[1] * canvasW / ATLAS_CANONICAL_SIZE_EXPLICIT,
+    xAxis[2] * canvasW / ATLAS_CANONICAL_SIZE_EXPLICIT,
+    0,
+    yAxis[0] * canvasH / ATLAS_CANONICAL_SIZE_EXPLICIT,
+    yAxis[1] * canvasH / ATLAS_CANONICAL_SIZE_EXPLICIT,
+    yAxis[2] * canvasH / ATLAS_CANONICAL_SIZE_EXPLICIT,
+    0,
+    normal[0], normal[1], normal[2], 0,
+    tx, ty, tz, 1,
+  ]);
   const projectiveMatrix = !texture && vertices.length === 4
     ? computeProjectiveQuadMatrix(
         screenPts,
@@ -1568,6 +1646,7 @@ function computeTextureAtlasPlan(
     layerElevation: elev,
     matrix,
     canonicalMatrix,
+    atlasMatrix,
     projectiveMatrix,
     canvasW,
     canvasH,
@@ -1732,20 +1811,21 @@ function computeSolidTrianglePlan(
   const apex = worldPoint(apex2);
   const baseLeft = worldPoint([baseLeft2[0], baseY]);
   const baseRight = worldPoint([baseRight2[0], baseY]);
+  const halfBase = SOLID_TRIANGLE_CANONICAL_SIZE / 2;
   const xCol: Vec3 = [
-    (baseRight[0] - baseLeft[0]) / 2,
-    (baseRight[1] - baseLeft[1]) / 2,
-    (baseRight[2] - baseLeft[2]) / 2,
+    (baseRight[0] - baseLeft[0]) / SOLID_TRIANGLE_CANONICAL_SIZE,
+    (baseRight[1] - baseLeft[1]) / SOLID_TRIANGLE_CANONICAL_SIZE,
+    (baseRight[2] - baseLeft[2]) / SOLID_TRIANGLE_CANONICAL_SIZE,
   ];
   const txCol: Vec3 = [
-    apex[0] - xCol[0],
-    apex[1] - xCol[1],
-    apex[2] - xCol[2],
+    apex[0] - xCol[0] * halfBase,
+    apex[1] - xCol[1] * halfBase,
+    apex[2] - xCol[2] * halfBase,
   ];
   const yCol: Vec3 = [
-    baseLeft[0] - txCol[0],
-    baseLeft[1] - txCol[1],
-    baseLeft[2] - txCol[2],
+    (baseLeft[0] - txCol[0]) / SOLID_TRIANGLE_CANONICAL_SIZE,
+    (baseLeft[1] - txCol[1]) / SOLID_TRIANGLE_CANONICAL_SIZE,
+    (baseLeft[2] - txCol[2]) / SOLID_TRIANGLE_CANONICAL_SIZE,
   ];
   const canonicalMatrix = formatMatrix3dValues([
     xCol[0], xCol[1], xCol[2], 0,
@@ -2227,8 +2307,9 @@ function applyAtlasBackground(
   const url = `url(${page.url})`;
   const width = entry.canvasW || 1;
   const height = entry.canvasH || 1;
-  const pos = `${formatCssLength(-entry.x / width)} ${formatCssLength(-entry.y / height)}`;
-  const size = `${formatCssLength(page.width / width)} ${formatCssLength(page.height / height)}`;
+  const atlasCanonicalSize = atlasCanonicalSizeForEntry(entry);
+  const pos = `${formatCssLength((-entry.x / width) * atlasCanonicalSize)} ${formatCssLength((-entry.y / height) * atlasCanonicalSize)}`;
+  const size = `${formatCssLength((page.width / width) * atlasCanonicalSize)} ${formatCssLength((page.height / height) * atlasCanonicalSize)}`;
   if (textureLighting === "dynamic") {
     setInlineStyleProperty(el, "background-image", url);
     setInlineStyleProperty(el, "background-position", pos);
@@ -2279,14 +2360,6 @@ function applyPolygonDataAttrs(el: HTMLElement, polygon: Polygon): void {
   ELEMENT_DATA_KEYS.set(el, nextDataKeys);
 }
 
-function formatPlanElementStyle(
-  entry: TextureAtlasPlan,
-  shapeDeclaration?: string,
-): string {
-  const shape = shapeDeclaration ? `;${shapeDeclaration}` : "";
-  return `transform:matrix3d(${entry.canonicalMatrix})${shape}`;
-}
-
 function formatScaledMatrixFromPlan(
   entry: TextureAtlasPlan,
   scaleX: number,
@@ -2329,24 +2402,20 @@ function formatBorderShapeMatrix(
   );
 }
 
+function formatSolidQuadMatrix(entry: TextureAtlasPlan): string {
+  return formatScaledMatrixFromPlan(
+    entry,
+    (entry.canvasW || 1) / SOLID_QUAD_CANONICAL_SIZE,
+    (entry.canvasH || 1) / SOLID_QUAD_CANONICAL_SIZE,
+  );
+}
+
 function formatBorderShapeElementStyle(entry: TextureAtlasPlan): string {
   const geometry = borderShapeGeometryForPlan(entry);
   return [
     `transform:matrix3d(${formatBorderShapeMatrix(entry, geometry.bounds)})`,
     `border-shape:${cssBorderShapeForGeometry(geometry.points)}`,
   ].join(";");
-}
-
-function applyPlanElementBase(
-  el: HTMLElement,
-  entry: TextureAtlasPlan,
-  shapeDeclaration?: string,
-): void {
-  el.setAttribute(
-    "style",
-    formatPlanElementStyle(entry, shapeDeclaration),
-  );
-  applyPolygonDataAttrs(el, entry.polygon);
 }
 
 // Stable topology can reuse the original atlas raster: keep the element's
@@ -2400,8 +2469,14 @@ function stableMatrixFromPlan(
   return {
     normal,
     matrix: formatMatrix3dValues([
-      xAxis[0], xAxis[1], xAxis[2], 0,
-      yAxis[0], yAxis[1], yAxis[2], 0,
+      xAxis[0] * source.canvasW / atlasCanonicalSizeForEntry(source),
+      xAxis[1] * source.canvasW / atlasCanonicalSizeForEntry(source),
+      xAxis[2] * source.canvasW / atlasCanonicalSizeForEntry(source),
+      0,
+      yAxis[0] * source.canvasH / atlasCanonicalSizeForEntry(source),
+      yAxis[1] * source.canvasH / atlasCanonicalSizeForEntry(source),
+      yAxis[2] * source.canvasH / atlasCanonicalSizeForEntry(source),
+      0,
       normal[0], normal[1], normal[2], 0,
       tx, ty, tz, 1,
     ]),
@@ -2510,6 +2585,16 @@ function borderShapeSupported(doc: Document): boolean {
   return media("(pointer: fine)").matches && media("(hover: hover)").matches;
 }
 
+function solidTriangleSupported(doc: Document): boolean {
+  const win = doc.defaultView ?? (typeof window !== "undefined" ? window : undefined);
+  const userAgent = win?.navigator?.userAgent ?? "";
+  if (!userAgent) return true;
+
+  const isChromiumFamily = /\b(?:Chrome|HeadlessChrome|Chromium|Edg|OPR)\//.test(userAgent);
+  const isSafariFamily = /\bVersion\/[\d.]+.*\bSafari\//.test(userAgent);
+  return !isSafariFamily || isChromiumFamily;
+}
+
 function incrementCount(map: Map<string, number>, key: string): void {
   map.set(key, (map.get(key) ?? 0) + 1);
 }
@@ -2537,7 +2622,7 @@ function getSolidPaintDefaultsForPlans(
   const dynamicColors = new Map<string, RGB>();
   const useFullRectSolid = !disabled.has("b");
   const useProjectiveQuad = useFullRectSolid;
-  const useStableTriangle = !disabled.has("u");
+  const useStableTriangle = !disabled.has("u") && solidTriangleSupported(doc);
   const useBorderShape = !disabled.has("i") && borderShapeSupported(doc);
 
   for (const plan of plans) {
@@ -2723,7 +2808,8 @@ function createSolidElement(
   solidPaintDefaults?: SolidPaintDefaults,
 ): HTMLElement {
   const el = doc.createElement("b");
-  applyPlanElementBase(el, entry);
+  el.setAttribute("style", `transform:matrix3d(${formatSolidQuadMatrix(entry)})`);
+  applyPolygonDataAttrs(el, entry.polygon);
   applySolidPaint(el, entry, textureLighting, solidPaintDefaults);
 
   return el;
@@ -2763,10 +2849,13 @@ function createAtlasElement(
   doc: Document,
 ): HTMLElement {
   const el = doc.createElement("s");
-  applyPlanElementBase(el, entry);
+  el.setAttribute("style", `transform:matrix3d(${entry.atlasMatrix})`);
+  applyPolygonDataAttrs(el, entry.polygon);
   const width = entry.canvasW || 1;
   const height = entry.canvasH || 1;
-  setInlineStyleProperty(el, "background-position", `${formatCssLength(-entry.x / width)} ${formatCssLength(-entry.y / height)}`);
+  const atlasCanonicalSize = atlasCanonicalSizeForEntry(entry);
+  setInlineStyleProperty(el, "--polycss-atlas-size", `${atlasCanonicalSize}px`);
+  setInlineStyleProperty(el, "background-position", `${formatCssLength((-entry.x / width) * atlasCanonicalSize)} ${formatCssLength((-entry.y / height) * atlasCanonicalSize)}`);
   setInlineStyleProperty(el, "opacity", "0");
 
   if (textureLighting === "dynamic") applyDynamicNormalVars(el, entry);
@@ -2784,7 +2873,7 @@ export function renderPolygonsWithTextureAtlas(
   const disabled = new Set(options.strategies?.disable ?? []);
   const useFullRectSolid = !disabled.has("b");
   const useProjectiveQuad = useFullRectSolid;
-  const useStableTriangle = !disabled.has("u");
+  const useStableTriangle = !disabled.has("u") && solidTriangleSupported(doc);
   const useBorderShape = !disabled.has("i") && borderShapeSupported(doc);
   const basisHints = buildBasisHints(polygons, options);
   const projectiveQuadGuards = resolveProjectiveQuadGuards(doc);
@@ -2817,7 +2906,7 @@ export function renderPolygonsWithTextureAtlas(
     if (entry) {
       const element = createAtlasElement(entry, textureLighting, doc);
       atlasElements.set(i, element);
-      rendered.push({ polygonIndex: i, element, kind: "atlas", plan, dispose: () => {} });
+      rendered.push({ polygonIndex: i, element, kind: "atlas", plan: entry, dispose: () => {} });
     } else if (!plan.texture && useFullRectSolid && isFullRectSolid(plan)) {
       const element = createSolidElement(plan, textureLighting, doc, options.solidPaintDefaults);
       rendered.push({ polygonIndex: i, element, kind: "solid", plan, dispose: () => {} });
@@ -2888,7 +2977,7 @@ export async function renderPolygonsWithTextureAtlasAsync(
   const disabled = new Set(options.strategies?.disable ?? []);
   const useFullRectSolid = !disabled.has("b");
   const useProjectiveQuad = useFullRectSolid;
-  const useStableTriangle = !disabled.has("u");
+  const useStableTriangle = !disabled.has("u") && solidTriangleSupported(doc);
   const useBorderShape = !disabled.has("i") && borderShapeSupported(doc);
   await yieldToMainThread();
   if (shouldCancel()) return { rendered: [], solidPaintDefaults: {}, dispose: () => {} };
@@ -2936,7 +3025,7 @@ export async function renderPolygonsWithTextureAtlasAsync(
     if (entry) {
       const element = createAtlasElement(entry, textureLighting, doc);
       atlasElements.set(i, element);
-      rendered.push({ polygonIndex: i, element, kind: "atlas", plan, dispose: () => {} });
+      rendered.push({ polygonIndex: i, element, kind: "atlas", plan: entry, dispose: () => {} });
     } else if (!plan.texture && useFullRectSolid && isFullRectSolid(plan)) {
       const element = createSolidElement(plan, textureLighting, doc, solidPaintDefaults);
       rendered.push({ polygonIndex: i, element, kind: "solid", plan, dispose: () => {} });
@@ -3052,6 +3141,7 @@ export function renderPolygonsWithStableTriangles(
 ): RenderTextureAtlasResult | null {
   const doc = options.doc ?? (typeof document !== "undefined" ? document : null);
   if (!doc) return { rendered: [], dispose: () => {} };
+  if (!solidTriangleSupported(doc)) return null;
 
   const plans = computeStableSolidTriangles(polygons, options);
   if (!plans) return null;
@@ -3077,6 +3167,7 @@ export function updatePolygonsWithStableTriangles(
 ): RenderTextureAtlasResult | null {
   const doc = options.doc ?? (typeof document !== "undefined" ? document : null);
   if (!doc) return { rendered, dispose: () => {} };
+  if (!solidTriangleSupported(doc)) return null;
   if (rendered.some((item) => item.kind !== "triangle")) return null;
 
   const plans = computeStableSolidTriangles(polygons, options);

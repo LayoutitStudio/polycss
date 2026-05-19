@@ -1,7 +1,7 @@
 /* Pure voxel slice planning - zero DOM dependencies.
  * The rectangle optimizer is ported from voxcss mergeVoxels="3d"; polycss
- * feeds it the raw MagicaVoxel cell source and renders the plans in
- * packages/polycss.
+ * keeps it available as a low-level planning utility, though the current
+ * vanilla `.vox` fast path renders exact direct-matrix quads instead.
  */
 import type { PolyVoxelSource } from "../parser/types";
 

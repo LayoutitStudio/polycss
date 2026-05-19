@@ -1,5 +1,7 @@
 export { axesHelperPolygons } from "./axesPolygons";
 export type { AxesHelperOptions } from "./axesPolygons";
+export { boxPolygons } from "./boxPolygons";
+export type { BoxFace, BoxFaceOptions, BoxPolygonsOptions } from "./boxPolygons";
 export { arrowPolygons } from "./arrowPolygons";
 export type { ArrowPolygonsOptions } from "./arrowPolygons";
 export { ringPolygons } from "./ringPolygons";
