@@ -26,6 +26,7 @@ import {
 } from "react";
 import type { CSSProperties, ReactNode, PointerEvent as ReactPointerEvent, MouseEvent as ReactMouseEvent, WheelEvent as ReactWheelEvent } from "react";
 import type {
+  MeshResolution,
   Polygon,
   PolyTextureLightingMode,
   Vec3,
@@ -101,6 +102,10 @@ export interface PolyMeshProps extends TransformProps, InteractionProps {
   errorFallback?: (error: Error) => ReactNode;
   /** Parser options forwarded to parseObj/parseGltf. */
   parseOptions?: UseMeshOptions;
+  /** Mesh optimization intent. Defaults to "lossy"; set "lossless" to keep
+   *  authored surface fidelity. Top-level prop wins over `parseOptions.meshResolution`
+   *  when both are present. */
+  meshResolution?: MeshResolution;
   /**
    * When `true` and the scene is in dynamic lighting mode, emits a flat
    * shadow leaf (`<q class="polycss-shadow">`) sibling for each polygon.
@@ -173,6 +178,7 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
     fallback,
     errorFallback,
     parseOptions,
+    meshResolution,
     position,
     scale,
     rotation,
@@ -193,11 +199,18 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
   }: PolyMeshProps,
   forwardedRef,
 ) {
-  // Compose mtl prop into the parser options threaded to useMesh.
+  // Compose mtl + meshResolution props into the parser options threaded to
+  // useMesh. The top-level meshResolution prop wins over parseOptions.meshResolution
+  // when both are present — top-level is the discoverable route; parseOptions is
+  // for niche parser flags.
   const mergedOptions = useMemo<UseMeshOptions | undefined>(() => {
-    if (!mtl && !parseOptions) return undefined;
-    return { ...(parseOptions ?? {}), ...(mtl ? { mtlUrl: mtl } : {}) };
-  }, [mtl, parseOptions]);
+    if (!mtl && !parseOptions && meshResolution === undefined) return undefined;
+    return {
+      ...(parseOptions ?? {}),
+      ...(mtl ? { mtlUrl: mtl } : {}),
+      ...(meshResolution !== undefined ? { meshResolution } : {}),
+    };
+  }, [mtl, parseOptions, meshResolution]);
 
   // Either fetch via useMesh, or use the supplied polygons array.
   // useMesh tolerates an empty src (sits idle) so we always call it for
