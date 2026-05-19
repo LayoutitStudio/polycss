@@ -26,6 +26,18 @@ export { usePolyMaterial } from "./scene/usePolyMaterial";
 
 export { Poly } from "./shapes";
 export type { PolyProps, PolyContext } from "./shapes";
+export {
+  PolyBox,
+  PolyPlane,
+  PolyRing,
+  PolyOctahedron,
+  PolyTetrahedron,
+  PolyIcosahedron,
+  PolyDodecahedron,
+  PolyCylinder,
+  PolyCone,
+  PolyTorus,
+} from "./shapes";
 
 export { PolyOrbitControls, PolyMapControls, PolyTransformControls, PolyFirstPersonControls } from "./controls";
 export type {
@@ -106,6 +118,13 @@ export type {
   ArrowPolygonsOptions,
   RingPolygonsOptions,
   OctahedronPolygonsOptions,
+  TetrahedronPolygonsOptions,
+  IcosahedronPolygonsOptions,
+  DodecahedronPolygonsOptions,
+  CylinderPolygonsOptions,
+  ConePolygonsOptions,
+  TorusPolygonsOptions,
+  PlanePolygonsOptions,
   LoadMeshOptions,
   VoxParseOptions,
   SolidTextureSampleOptions,
@@ -162,6 +181,13 @@ export {
   arrowPolygons,
   ringPolygons,
   octahedronPolygons,
+  tetrahedronPolygons,
+  icosahedronPolygons,
+  dodecahedronPolygons,
+  cylinderPolygons,
+  conePolygons,
+  torusPolygons,
+  planePolygons,
   buildSceneContext,
   computeSceneBbox,
   BASE_TILE,
