@@ -91,6 +91,35 @@ export type {
   TextureQuality,
 } from "./render/textureAtlas";
 
+// ── Primitive shape factories ─────────────────────────────────────
+export {
+  createPolyBox,
+  createPolyPlane,
+  createPolyRing,
+  createPolyOctahedron,
+  createPolyTetrahedron,
+  createPolyIcosahedron,
+  createPolyDodecahedron,
+  createPolyCylinder,
+  createPolyCone,
+  createPolyTorus,
+} from "./api/createPolyShapes";
+export type { PolyShapeResult } from "./api/createPolyShapes";
+
+// ── Primitive shape element classes ──────────────────────────────
+export {
+  PolyBoxElement,
+  PolyPlaneElement,
+  PolyRingElement,
+  PolyOctahedronElement,
+  PolyTetrahedronElement,
+  PolyIcosahedronElement,
+  PolyDodecahedronElement,
+  PolyCylinderElement,
+  PolyConeElement,
+  PolyTorusElement,
+} from "./elements/PolyShapeElements";
+
 // ── Style injection ───────────────────────────────────────────────
 export { injectPolyBaseStyles } from "./styles/styles";
 
