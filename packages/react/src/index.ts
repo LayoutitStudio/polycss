@@ -43,6 +43,30 @@ export type {
 
 export { Poly } from "./shapes";
 export type { PolyProps, TransformProps, DOMPassthroughProps } from "./shapes";
+export {
+  PolyBox,
+  PolyPlane,
+  PolyRing,
+  PolyOctahedron,
+  PolyTetrahedron,
+  PolyIcosahedron,
+  PolyDodecahedron,
+  PolyCylinder,
+  PolyCone,
+  PolyTorus,
+} from "./shapes";
+export type {
+  PolyBoxProps,
+  PolyPlaneProps,
+  PolyRingProps,
+  PolyOctahedronProps,
+  PolyTetrahedronProps,
+  PolyIcosahedronProps,
+  PolyDodecahedronProps,
+  PolyCylinderProps,
+  PolyConeProps,
+  PolyTorusProps,
+} from "./shapes";
 
 export { PolyFirstPersonControls, PolyOrbitControls, PolyMapControls, PolyTransformControls } from "./controls";
 export type {
@@ -116,6 +140,13 @@ export type {
   ArrowPolygonsOptions,
   RingPolygonsOptions,
   OctahedronPolygonsOptions,
+  TetrahedronPolygonsOptions,
+  IcosahedronPolygonsOptions,
+  DodecahedronPolygonsOptions,
+  CylinderPolygonsOptions,
+  ConePolygonsOptions,
+  TorusPolygonsOptions,
+  PlanePolygonsOptions,
   LoadMeshOptions,
   VoxParseOptions,
   SolidTextureSampleOptions,
@@ -172,6 +203,13 @@ export {
   arrowPolygons,
   ringPolygons,
   octahedronPolygons,
+  tetrahedronPolygons,
+  icosahedronPolygons,
+  dodecahedronPolygons,
+  cylinderPolygons,
+  conePolygons,
+  torusPolygons,
+  planePolygons,
   buildSceneContext,
   computeSceneBbox,
   BASE_TILE,
