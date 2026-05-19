@@ -79,13 +79,13 @@ If you find yourself wanting a `requestAnimationFrame` loop to update many DOM n
 
 - Every public export gets a `Poly` prefix. Exceptions are generic math types: `Vec2`, `Vec3`, `Polygon`, `PolyMaterial` (already prefixed).
 - **Hooks/composables:** `usePolyCamera`, `usePolyMesh`, `usePolySceneContext`, `usePolySelect`, `usePolySelectionApi`, `usePolyAnimation`.
-- **Components:** `PolyPerspectiveCamera`, `PolyOrthographicCamera`, `PolyOrbitControls`, `PolyMapControls`, `PolyTransformControls`, `PolySelect`, `PolyAxesHelper`, `PolyDirectionalLightHelper`, `PolyControls`.
+- **Components:** `PolyPerspectiveCamera`, `PolyOrthographicCamera`, `PolyOrbitControls`, `PolyMapControls`, `PolyTransformControls`, `PolySelect`, `PolyAxesHelper`, `PolyDirectionalLightHelper`.
 - **Types:** `PolyDirectionalLight`, `PolyAmbientLight`, `PolyTextureLightingMode`, `PolyAnimationMixer`.
 - **Functions:** `findPolyMeshHandle`, `injectPolyBaseStyles`, `buildPolyVoxelFaceData`, `buildPolyVoxelSlicePlan`.
-- **Vanilla factories:** `create*` names stay as-is (`createPolyScene`, `createPolyControls`, `createTransformControls`, `createSelect`).
-- **HTML custom elements:** `poly-` prefix + kebab-case. Existing tags: `<poly-scene>`, `<poly-mesh>`, `<poly-polygon>`, `<poly-controls>`, `<poly-axes-helper>`, `<poly-directional-light-helper>`. Any new element follows the same shape (e.g. `<poly-perspective-camera>`, `<poly-transform-controls>`, `<poly-select>`).
+- **Vanilla factories:** `create*` names stay as-is (`createPolyScene`, `createTransformControls`, `createSelect`).
+- **HTML custom elements:** `poly-` prefix + kebab-case. Existing tags: `<poly-scene>`, `<poly-mesh>`, `<poly-polygon>`, `<poly-perspective-camera>`, `<poly-orthographic-camera>`, `<poly-axes-helper>`, `<poly-directional-light-helper>`. Any new element follows the same shape (e.g. `<poly-transform-controls>`, `<poly-select>`).
 - **Leaf DOM tags (`<b>`, `<i>`, `<s>`, `<u>`):** internal render-strategy tags. Not part of the public API and not user-facing — do not document them as such.
-- `PolyCamera` is a kept alias for `PolyPerspectiveCamera` — the ergonomic default. **Not deprecated.**
+- `PolyCamera` is a kept alias for `PolyOrthographicCamera` — the ergonomic default, optimised for iso/voxel/diagrammatic scenes which is polycss's structural strength. **Not deprecated.**
 
 ## Cross-package discipline
 
