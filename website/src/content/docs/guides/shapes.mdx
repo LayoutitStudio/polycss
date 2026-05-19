@@ -45,15 +45,17 @@ const polygons = boxPolygons({
 ```html
 <script type="module" src="https://esm.sh/@layoutit/polycss/elements"></script>
 
-<poly-scene>
-  <!-- Vertices are JSON arrays in the `vertices` attribute. -->
-  <poly-polygon vertices='[[0,0,0],[1,0,0],[0,1,0]]' color="#ff0000"></poly-polygon>
-  <poly-polygon
-    vertices='[[0,0,0],[1,0,0],[0,1,0]]'
-    color="#0000ff"
-    texture="/wood.png"
-    uvs='[[0,0],[1,0],[0,1]]'></poly-polygon>
-</poly-scene>
+<poly-camera rot-x="65" rot-y="45">
+  <poly-scene>
+    <!-- Vertices are JSON arrays in the `vertices` attribute. -->
+    <poly-polygon vertices='[[0,0,0],[1,0,0],[0,1,0]]' color="#ff0000"></poly-polygon>
+    <poly-polygon
+      vertices='[[0,0,0],[1,0,0],[0,1,0]]'
+      color="#0000ff"
+      texture="/wood.png"
+      uvs='[[0,0],[1,0],[0,1]]'></poly-polygon>
+  </poly-scene>
+</poly-camera>
 ```
 </TabItem>
 <TabItem label="React">
@@ -62,7 +64,7 @@ import { PolyCamera, PolyScene, Poly } from "@layoutit/polycss-react";
 
 const triangle: Vec3[] = [[0,0,0], [1,0,0], [0,1,0]];
 
-<PolyCamera>
+<PolyCamera rotX={65} rotY={45}>
   <PolyScene>
     <Poly vertices={triangle} color="#ff0000" />
     <Poly vertices={triangle} color="#0000ff" texture="/wood.png" uvs={[...]} />
@@ -84,9 +86,11 @@ const triangle: Vec3[] = [[0,0,0], [1,0,0], [0,1,0]];
   poly-polygon { transition: filter 0.2s; }
 </style>
 
-<poly-scene rot-x="65" rot-y="45" id="scene">
-  <!-- Polygons are appended programmatically. -->
-</poly-scene>
+<poly-camera rot-x="65" rot-y="45">
+  <poly-scene id="scene">
+    <!-- Polygons are appended programmatically. -->
+  </poly-scene>
+</poly-camera>
 
 <script type="module">
   const scene = document.getElementById("scene");
@@ -184,10 +188,11 @@ To customize specific polygons inside a loaded mesh, use:
 <Tabs syncKey="fw">
 <TabItem label="Vanilla JS">
 ```ts
-  import { loadMesh, createPolyScene } from "@layoutit/polycss";
+  import { loadMesh, createPolyCamera, createPolyScene } from "@layoutit/polycss";
 
   const host = document.getElementById("scene-host");
-  const scene = createPolyScene(host, { rotX: 65, rotY: 45 });
+  const camera = createPolyCamera({ rotX: 65, rotY: 45 });
+  const scene = createPolyScene(host, { camera });
 
   const result = await loadMesh("/character.glb");
   const handles = result.polygons.map((polygon, i) => {
@@ -266,9 +271,10 @@ Load a mesh programmatically when you need control over loading state. The vanil
 
 ```ts
 // Vanilla: works in any framework or no framework
-import { loadMesh, createPolyScene } from "@layoutit/polycss";
+import { loadMesh, createPolyCamera, createPolyScene } from "@layoutit/polycss";
 
-const scene = createPolyScene(document.getElementById("host")!);
+const camera = createPolyCamera({ rotX: 65, rotY: 45 });
+const scene = createPolyScene(document.getElementById("host")!, { camera });
 const result = await loadMesh("/cottage.glb");
 scene.add(result);
 // ... later:

@@ -30,16 +30,18 @@ npm install @layoutit/polycss-vue
 
 ## 2. Add a scene and load a mesh
 
-The vanilla scene element (`<poly-scene>`) sets up the 3D viewport: perspective, camera, lighting. In React and Vue, wrap `<PolyScene>` in `<PolyCamera>` to provide the camera context. The mesh element (`<poly-mesh>` / `PolyMesh`) loads OBJ, glTF, GLB, or VOX files and renders their polygons. Pass `rot-x` / `rot-y` to `<poly-scene>` or `<PolyCamera>` to set the camera angle.
+The camera element (`<poly-camera>` / `PolyCamera`) is always the outer node: it owns the projection and orbital state. `<poly-scene>` / `PolyScene` is nested inside it and carries lighting and atlas options. The mesh element (`<poly-mesh>` / `PolyMesh`) loads OBJ, glTF, GLB, or VOX files and renders their polygons. `PolyCamera` uses orthographic projection by default; use `PolyPerspectiveCamera` for depth foreshortening.
 
 <Tabs syncKey="fw">
 <TabItem label="Vanilla JS">
 ```html
 <script type="module" src="https://esm.sh/@layoutit/polycss/elements"></script>
 
-<poly-scene perspective="1000" rot-x="65" rot-y="45">
-  <poly-mesh src="/cottage.glb"></poly-mesh>
-</poly-scene>
+<poly-camera rot-x="65" rot-y="45">
+  <poly-scene>
+    <poly-mesh src="/cottage.glb"></poly-mesh>
+  </poly-scene>
+</poly-camera>
 ```
 </TabItem>
 <TabItem label="React">
@@ -48,7 +50,7 @@ import { PolyCamera, PolyScene, PolyMesh } from "@layoutit/polycss-react";
 
 export function App() {
   return (
-    <PolyCamera rotX={65} rotY={45} perspective={1000}>
+    <PolyCamera rotX={65} rotY={45}>
       <PolyScene>
         <PolyMesh src="/cottage.glb" />
       </PolyScene>
@@ -60,7 +62,7 @@ export function App() {
 <TabItem label="Vue">
 ```vue
 <template>
-  <PolyCamera :rot-x="65" :rot-y="45" :perspective="1000">
+  <PolyCamera :rot-x="65" :rot-y="45">
     <PolyScene>
       <PolyMesh src="/cottage.glb" />
     </PolyScene>
