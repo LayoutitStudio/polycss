@@ -12,6 +12,8 @@ export { planePolygons } from "./planePolygons";
 export type { PlanePolygonsOptions } from "./planePolygons";
 export { octahedronPolygons } from "./octahedronPolygons";
 export type { OctahedronPolygonsOptions } from "./octahedronPolygons";
+export { spherePolygons } from "./spherePolygons";
+export type { SpherePolygonsOptions } from "./spherePolygons";
 export { tetrahedronPolygons } from "./tetrahedronPolygons";
 export type { TetrahedronPolygonsOptions } from "./tetrahedronPolygons";
 export { icosahedronPolygons } from "./icosahedronPolygons";
