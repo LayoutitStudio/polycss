@@ -54,12 +54,12 @@ The same scene, every path. **If a path can't express this verbatim, it's a bug.
 ### Vanilla JS
 
 ```js
-import { createPolyCamera, createPolyScene, loadMesh } from "@layoutit/polycss";
+import { createPolyCamera, createPolyScene, createPolyIcosahedron } from "@layoutit/polycss";
 
 const camera = createPolyCamera({ rotX: 65, rotY: 45 });
 const scene  = createPolyScene(document.getElementById("app"), { camera });
 
-scene.add(await loadMesh("https://polycss.com/gallery/obj/cottage.obj"));
+scene.add(createPolyIcosahedron({ size: 100, color: "#ff6644" }));
 ```
 
 ### Custom elements (HTML)
@@ -69,7 +69,7 @@ scene.add(await loadMesh("https://polycss.com/gallery/obj/cottage.obj"));
 
 <poly-camera rot-x="65" rot-y="45">
   <poly-scene>
-    <poly-mesh src="https://polycss.com/gallery/obj/cottage.obj"></poly-mesh>
+    <poly-icosahedron size="100" color="#ff6644"></poly-icosahedron>
   </poly-scene>
 </poly-camera>
 ```
@@ -77,11 +77,11 @@ scene.add(await loadMesh("https://polycss.com/gallery/obj/cottage.obj"));
 ### React
 
 ```tsx
-import { PolyCamera, PolyScene, PolyMesh } from "@layoutit/polycss-react";
+import { PolyCamera, PolyScene, PolyIcosahedron } from "@layoutit/polycss-react";
 
 <PolyCamera rotX={65} rotY={45}>
   <PolyScene>
-    <PolyMesh src="https://polycss.com/gallery/obj/cottage.obj" />
+    <PolyIcosahedron size={100} color="#ff6644" />
   </PolyScene>
 </PolyCamera>
 ```
@@ -90,13 +90,13 @@ import { PolyCamera, PolyScene, PolyMesh } from "@layoutit/polycss-react";
 
 ```vue
 <script setup>
-import { PolyCamera, PolyScene, PolyMesh } from "@layoutit/polycss-vue";
+import { PolyCamera, PolyScene, PolyIcosahedron } from "@layoutit/polycss-vue";
 </script>
 
 <template>
   <PolyCamera :rot-x="65" :rot-y="45">
     <PolyScene>
-      <PolyMesh src="https://polycss.com/gallery/obj/cottage.obj" />
+      <PolyIcosahedron :size="100" color="#ff6644" />
     </PolyScene>
   </PolyCamera>
 </template>
@@ -110,14 +110,14 @@ import { PolyCamera, PolyScene, PolyMesh } from "@layoutit/polycss-vue";
 
 ```js
 import {
-  createPolyCamera, createPolyScene, createPolyOrbitControls, loadMesh,
+  createPolyCamera, createPolyScene, createPolyOrbitControls, createPolyTorus,
 } from "@layoutit/polycss";
 
 const camera = createPolyCamera({ rotX: 65, rotY: 45 });
 const scene  = createPolyScene(host, { camera });
 createPolyOrbitControls(scene, { drag: true, wheel: true });
 
-scene.add(await loadMesh("https://polycss.com/gallery/obj/cottage.obj"));
+scene.add(createPolyTorus({ color: "#4ecdc4" }));
 ```
 
 ### Custom elements
@@ -126,7 +126,7 @@ scene.add(await loadMesh("https://polycss.com/gallery/obj/cottage.obj"));
 <poly-camera rot-x="65" rot-y="45">
   <poly-scene>
     <poly-orbit-controls drag wheel></poly-orbit-controls>
-    <poly-mesh src="https://polycss.com/gallery/obj/cottage.obj"></poly-mesh>
+    <poly-torus color="#4ecdc4"></poly-torus>
   </poly-scene>
 </poly-camera>
 ```
@@ -137,7 +137,7 @@ scene.add(await loadMesh("https://polycss.com/gallery/obj/cottage.obj"));
 <PolyCamera rotX={65} rotY={45}>
   <PolyScene>
     <PolyOrbitControls drag wheel />
-    <PolyMesh src="https://polycss.com/gallery/obj/cottage.obj" />
+    <PolyTorus color="#4ecdc4" />
   </PolyScene>
 </PolyCamera>
 ```
@@ -148,7 +148,7 @@ scene.add(await loadMesh("https://polycss.com/gallery/obj/cottage.obj"));
 <PolyCamera :rot-x="65" :rot-y="45">
   <PolyScene>
     <PolyOrbitControls drag wheel />
-    <PolyMesh src="https://polycss.com/gallery/obj/cottage.obj" />
+    <PolyTorus color="#4ecdc4" />
   </PolyScene>
 </PolyCamera>
 ```
@@ -458,14 +458,14 @@ Each polygon on a shadow-casting mesh emits a paired `<q>` leaf (the cast-shadow
 ```tsx
 // React
 <PolyScene textureLighting="dynamic" shadow={{ opacity: 0.4, lift: 0.1 }}>
-  <PolyMesh src="https://polycss.com/gallery/obj/cottage.obj" castShadow />
+  <PolyDodecahedron size={100} color="#a78bfa" castShadow />
 </PolyScene>
 ```
 
 ```html
 <!-- Custom elements -->
 <poly-scene texture-lighting="dynamic" shadow='{"opacity":0.4,"lift":0.1}'>
-  <poly-mesh src="https://polycss.com/gallery/obj/cottage.obj" cast-shadow></poly-mesh>
+  <poly-dodecahedron size="100" color="#a78bfa" cast-shadow></poly-dodecahedron>
 </poly-scene>
 ```
 
@@ -476,8 +476,7 @@ const scene = createPolyScene(host, {
   textureLighting: "dynamic",
   shadow: { opacity: 0.4, lift: 0.1 },
 });
-const mesh = await loadMesh("https://polycss.com/gallery/obj/cottage.obj");
-scene.add(mesh, { castShadow: true });   // ← second arg is mesh transform + flags
+scene.add(createPolyDodecahedron({ size: 100, color: "#a78bfa" }), { castShadow: true });
 ```
 
 ### Texture lighting modes
@@ -512,17 +511,17 @@ scene.add(mesh, { meshResolution: "lossless" });
 
 ```html
 <!-- Custom elements -->
-<poly-mesh src="https://polycss.com/gallery/obj/cottage.obj" mesh-resolution="lossless"></poly-mesh>
+<poly-mesh src="/model.glb" mesh-resolution="lossless"></poly-mesh>
 ```
 
 ```tsx
 // React
-<PolyMesh src="https://polycss.com/gallery/obj/cottage.obj" meshResolution="lossless" />
+<PolyMesh src="/model.glb" meshResolution="lossless" />
 ```
 
 ```vue
 <!-- Vue -->
-<PolyMesh src="https://polycss.com/gallery/obj/cottage.obj" mesh-resolution="lossless" />
+<PolyMesh src="/model.glb" mesh-resolution="lossless" />
 ```
 
 `parseOptions` stays available for niche parser flags but is no longer the route for `meshResolution`.

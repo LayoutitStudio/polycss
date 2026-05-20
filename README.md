@@ -24,14 +24,14 @@ npm install @layoutit/polycss
 ## Quick start: React
 
 ```tsx
-import { PolyCamera, PolyScene, PolyOrbitControls, PolyMesh } from "@layoutit/polycss-react";
+import { PolyCamera, PolyScene, PolyOrbitControls, PolyIcosahedron } from "@layoutit/polycss-react";
 
 export function App() {
   return (
     <PolyCamera rotX={65} rotY={45}>
       <PolyScene>
         <PolyOrbitControls drag wheel />
-        <PolyMesh src="https://polycss.com/gallery/obj/cottage.obj" />
+        <PolyIcosahedron size={100} color="#ff6644" />
       </PolyScene>
     </PolyCamera>
   );
@@ -45,13 +45,13 @@ export function App() {
   <PolyCamera :rot-x="65" :rot-y="45">
     <PolyScene>
       <PolyOrbitControls drag wheel />
-      <PolyMesh src="https://polycss.com/gallery/obj/cottage.obj" />
+      <PolyIcosahedron :size="100" color="#4ecdc4" />
     </PolyScene>
   </PolyCamera>
 </template>
 
 <script setup lang="ts">
-import { PolyCamera, PolyScene, PolyOrbitControls, PolyMesh } from "@layoutit/polycss-vue";
+import { PolyCamera, PolyScene, PolyOrbitControls, PolyIcosahedron } from "@layoutit/polycss-vue";
 </script>
 ```
 
@@ -60,10 +60,12 @@ import { PolyCamera, PolyScene, PolyOrbitControls, PolyMesh } from "@layoutit/po
 ```html
 <script type="module" src="https://esm.sh/@layoutit/polycss/elements"></script>
 
-<poly-scene rot-x="65" rot-y="45">
-  <poly-orbit-controls drag wheel></poly-orbit-controls>
-  <poly-mesh src="https://polycss.com/gallery/obj/cottage.obj"></poly-mesh>
-</poly-scene>
+<poly-camera rot-x="65" rot-y="45">
+  <poly-scene>
+    <poly-orbit-controls drag wheel></poly-orbit-controls>
+    <poly-icosahedron size="100" color="#ffd166"></poly-icosahedron>
+  </poly-scene>
+</poly-camera>
 ```
 
 ## Per-polygon interactivity
