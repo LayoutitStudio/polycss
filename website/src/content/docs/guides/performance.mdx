@@ -63,7 +63,7 @@ Generated atlas pages default to `textureQuality="auto"`. Auto starts from the p
 <!-- Vanilla -->
 <poly-camera rot-x="65" rot-y="45">
   <poly-scene texture-quality="0.5">
-    <poly-mesh src="https://polycss.com/gallery/obj/cottage.obj"></poly-mesh>
+    <poly-mesh src="/model.glb"></poly-mesh>
   </poly-scene>
 </poly-camera>
 ```
@@ -72,12 +72,12 @@ Generated atlas pages default to `textureQuality="auto"`. Auto starts from the p
 // React
 <PolyCamera>
   <PolyScene textureQuality={0.5}>
-    <PolyMesh src="https://polycss.com/gallery/obj/cottage.obj" />
+    <PolyMesh src="/model.glb" />
   </PolyScene>
 </PolyCamera>
 
 // Or per mesh:
-<PolyMesh src="https://polycss.com/gallery/obj/cottage.obj" textureQuality={0.5} />
+<PolyMesh src="/model.glb" textureQuality={0.5} />
 ```
 
 Use explicit numeric values when you want to override auto raster scale: `0.5` or `0.75` for distant or dense assets, `1` for close-up inspection when the runtime bitmap cost is acceptable. Numeric quality keeps the 64px atlas sprite size.
