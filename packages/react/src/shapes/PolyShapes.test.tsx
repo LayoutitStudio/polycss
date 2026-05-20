@@ -8,6 +8,7 @@ import {
   PolyPlane,
   PolyRing,
   PolyOctahedron,
+  PolySphere,
   PolyTetrahedron,
   PolyIcosahedron,
   PolyDodecahedron,
@@ -73,6 +74,13 @@ describe("PolyOctahedron", () => {
 describe("PolyTetrahedron", () => {
   it("renders leaf DOM inside PolyCamera > PolyScene", () => {
     const container = renderShape(<PolyTetrahedron size={100} color="#aabb00" />);
+    expect(hasLeaves(container)).toBe(true);
+  });
+});
+
+describe("PolySphere", () => {
+  it("renders leaf DOM inside PolyCamera > PolyScene", () => {
+    const container = renderShape(<PolySphere radius={50} subdivisions={1} color="#3b82f6" />);
     expect(hasLeaves(container)).toBe(true);
   });
 });

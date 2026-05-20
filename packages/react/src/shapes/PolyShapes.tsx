@@ -12,6 +12,7 @@ import {
   planePolygons,
   ringPolygons,
   octahedronPolygons,
+  spherePolygons,
   tetrahedronPolygons,
   icosahedronPolygons,
   dodecahedronPolygons,
@@ -22,6 +23,7 @@ import {
   type PlanePolygonsOptions,
   type RingPolygonsOptions,
   type OctahedronPolygonsOptions,
+  type SpherePolygonsOptions,
   type TetrahedronPolygonsOptions,
   type IcosahedronPolygonsOptions,
   type DodecahedronPolygonsOptions,
@@ -153,6 +155,22 @@ export function PolyDodecahedron({
     () => dodecahedronPolygons({ size, color }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [size, color],
+  );
+  return <PolyMesh polygons={polygons} {...meshProps} />;
+}
+
+export interface PolySphereProps extends ShapeMeshProps, SpherePolygonsOptions {}
+
+export function PolySphere({
+  radius,
+  subdivisions,
+  color,
+  ...meshProps
+}: PolySphereProps) {
+  const polygons = useMemo(
+    () => spherePolygons({ radius, subdivisions, color }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [radius, subdivisions, color],
   );
   return <PolyMesh polygons={polygons} {...meshProps} />;
 }
