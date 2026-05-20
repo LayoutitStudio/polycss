@@ -62,10 +62,31 @@ export async function loadPresetModel(
   parser: ParserOptionsState,
 ): Promise<LoadedModel> {
   const started = performance.now();
+  if (model.kind === "primitive") {
+    if (!model.generatePolygons) {
+      throw new Error(`Primitive preset "${model.id}" is missing generatePolygons`);
+    }
+    const polygons = model.generatePolygons();
+    return {
+      label: model.label,
+      kind: "primitive",
+      parseResult: { polygons, objectUrls: [], warnings: [], dispose: () => {} },
+      rawPolygons: polygons,
+      polygons,
+      sourcePolygons: polygons.length,
+      sourceBytes: 0,
+      warnings: [],
+      parseMs: performance.now() - started,
+      dispose: () => {},
+    };
+  }
+  const url = model.url;
+  if (!url) throw new Error(`Preset "${model.id}" (kind: ${model.kind}) is missing a url`);
+
   if (model.kind === "obj") {
     const [objText, mtlText] = await Promise.all([
-      fetch(model.url).then((res) => {
-        if (!res.ok) throw new Error(`fetch ${model.url} -> ${res.status}`);
+      fetch(url).then((res) => {
+        if (!res.ok) throw new Error(`fetch ${url} -> ${res.status}`);
         return res.text();
       }),
       model.mtlUrl
@@ -108,8 +129,8 @@ export async function loadPresetModel(
     };
   }
 
-  const buf = await fetch(model.url).then((res) => {
-    if (!res.ok) throw new Error(`fetch ${model.url} -> ${res.status}`);
+  const buf = await fetch(url).then((res) => {
+    if (!res.ok) throw new Error(`fetch ${url} -> ${res.status}`);
     return res.arrayBuffer();
   });
 
@@ -131,7 +152,7 @@ export async function loadPresetModel(
 
   const parsedGltf = parseGltf(buf, {
     ...mergeParserOptions(model.options, parser),
-    baseUrl: new URL(model.url, window.location.href).href,
+    baseUrl: new URL(url, window.location.href).href,
   });
   const parsed = await bakeSolidTextureSamples(parsedGltf);
   return {

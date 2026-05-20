@@ -208,14 +208,14 @@ export function makeListenerRegistry(): {
 
 export function makeCameraSnapshot(scene: PolySceneHandle): () => PolyControlsCamera {
   return (): PolyControlsCamera => {
-    const sceneOpts = scene.getOptions();
-    const t = sceneOpts.target ?? [0, 0, 0];
+    const state = scene.camera.state;
+    const t = state.target ?? [0, 0, 0];
     return {
-      rotX: sceneOpts.rotX ?? 0,
-      rotY: sceneOpts.rotY ?? 0,
-      zoom: sceneOpts.zoom ?? 1,
+      rotX: state.rotX ?? 0,
+      rotY: state.rotY ?? 0,
+      zoom: state.zoom ?? 1,
       target: [t[0], t[1], t[2]],
-      distance: sceneOpts.distance ?? 0,
+      distance: state.distance ?? 0,
     };
   };
 }
@@ -243,17 +243,18 @@ export function makeWheelHandler(
     let delta = e.deltaY * lineFactor;
     if (e.ctrlKey) delta *= PINCH_AMP;
     else delta *= SCROLL_AMP;
-    const sceneOpts = scene.getOptions();
+    const cameraState = scene.camera.state;
     if (opts.dolly) {
-      const cur = sceneOpts.distance ?? 0;
+      const cur = cameraState.distance ?? 0;
       const next = Math.max(opts.minDistance, Math.min(opts.maxDistance, cur + delta * DOLLY_STEP));
-      scene.setOptions({ distance: next });
+      scene.camera.update({ distance: next });
     } else {
       const factor = Math.exp(-delta * ZOOM_STEP);
-      const cur = sceneOpts.zoom ?? 1;
+      const cur = cameraState.zoom ?? 1;
       const next = Math.max(opts.minZoom, Math.min(opts.maxZoom, cur * factor));
-      scene.setOptions({ zoom: next });
+      scene.camera.update({ zoom: next });
     }
+    scene.applyCamera();
     if (!wheelActive) {
       wheelActive = true;
       emitInteraction("start", snapshot);
@@ -306,14 +307,15 @@ export function makeAnimLoop(
       const dt = Math.min(ANIM_DT_CLAMP_MS, animLastTime ? now - animLastTime : ANIM_FRAME_MS);
       animLastTime = now;
       const delta = opts.animate.speed * (dt / ANIM_FRAME_MS);
-      const sceneOpts = scene.getOptions();
+      const cameraState = scene.camera.state;
       if (opts.animate.axis === "x") {
-        const next = (((sceneOpts.rotX ?? 65) + delta) % 360 + 360) % 360;
-        scene.setOptions({ rotX: next });
+        const next = (((cameraState.rotX ?? 65) + delta) % 360 + 360) % 360;
+        scene.camera.update({ rotX: next });
       } else {
-        const next = (((sceneOpts.rotY ?? 45) + delta) % 360 + 360) % 360;
-        scene.setOptions({ rotY: next });
+        const next = (((cameraState.rotY ?? 45) + delta) % 360 + 360) % 360;
+        scene.camera.update({ rotY: next });
       }
+      scene.applyCamera();
       emitChange(snapshot);
     } else {
       animLastTime = now;

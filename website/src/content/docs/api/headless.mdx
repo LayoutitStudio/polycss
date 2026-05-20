@@ -68,8 +68,9 @@ High-level convenience function: fetches a URL, detects OBJ vs glTF/GLB/VOX by e
 ```ts
 import { loadMesh } from "@layoutit/polycss-core";
 
-const { polygons, dispose } = await loadMesh("/cottage.glb", {
-  baseUrl: new URL("/cottage.glb", location.href).href,
+const { polygons, dispose } = await loadMesh("https://polycss.com/gallery/obj/cottage.obj", {
+  mtlUrl: "https://polycss.com/gallery/obj/cottage.mtl",
+  baseUrl: new URL("https://polycss.com/gallery/obj/cottage.obj", location.href).href,
   gltfOptions: { targetSize: 60 },
 });
 // use polygons...
@@ -149,10 +150,13 @@ Attach pointer drag, wheel zoom, and an optional autorotate loop to a scene retu
 Use `createPolyMapControls(scene, options?)` instead when you want map/pan-style drag (pointer pans the camera across a flat surface rather than orbiting the scene center).
 
 ```ts
-import { createPolyScene, createPolyOrbitControls, loadMesh } from "@layoutit/polycss";
+import { createPolyCamera, createPolyScene, createPolyOrbitControls, loadMesh } from "@layoutit/polycss";
 
-const scene = createPolyScene(host, { rotX: 65, rotY: 45 });
-scene.add(await loadMesh("/cottage.glb"));
+const camera = createPolyCamera({ rotX: 65, rotY: 45 });
+const scene = createPolyScene(host, { camera });
+scene.add(await loadMesh("https://polycss.com/gallery/obj/cottage.obj", {
+  mtlUrl: "https://polycss.com/gallery/obj/cottage.mtl",
+}));
 
 const controls = createPolyOrbitControls(scene, {
   drag: true,                                                // default true
@@ -204,11 +208,11 @@ controls.addEventListener("end",   () => endInteraction());
 
 ### Required scene surface
 
-`createPolyOrbitControls` reads from and writes to its scene argument via two members on `PolySceneHandle`:
+`createPolyOrbitControls` reads from and writes to its scene argument via members on `PolySceneHandle`:
 
 - `scene.host: HTMLElement`: the element handlers are attached to.
-- `scene.getOptions()`: read current `rotX` / `rotY` / `zoom` / `target` / `distance`.
-- `scene.setOptions({ rotX, rotY, zoom, target, distance })`: apply state changes.
+- `scene.camera`: the camera handle. Controls read `scene.camera.state` for current `rotX` / `rotY` / `zoom` / `target` / `distance` and call `scene.camera.update({ rotX, rotY, zoom, ... })` to apply input changes.
+- `scene.applyCamera()`: re-applies the scene transform from the current camera state. Controls call this after every `scene.camera.update(...)`.
 
 Anything that satisfies that subset works, so layered helpers can compose multiple controls or build their own input on top.
 
@@ -216,15 +220,17 @@ Anything that satisfies that subset works, so layered helpers can compose multip
 
 ## Custom elements (vanilla)
 
-Register the `<poly-scene>`, `<poly-mesh>`, `<poly-polygon>`, `<poly-orbit-controls>`, and `<poly-map-controls>` custom elements by importing the side-effect entry point:
+Register `<poly-camera>`, `<poly-scene>`, `<poly-mesh>`, `<poly-polygon>`, `<poly-orbit-controls>`, and `<poly-map-controls>` custom elements by importing the side-effect entry point:
 
 ```html
 <script type="module" src="https://esm.sh/@layoutit/polycss/elements"></script>
 
-<poly-scene rot-x="65" rot-y="45">
-  <poly-orbit-controls drag wheel animate-speed="0.3"></poly-orbit-controls>
-  <poly-mesh src="/cottage.glb"></poly-mesh>
-</poly-scene>
+<poly-camera rot-x="65" rot-y="45">
+  <poly-scene>
+    <poly-orbit-controls drag wheel animate-speed="0.3"></poly-orbit-controls>
+    <poly-icosahedron size="100" color="#ff6644"></poly-icosahedron>
+  </poly-scene>
+</poly-camera>
 ```
 
 See the [polycss README](https://github.com/LayoutitStudio/polycss/tree/main/packages/polycss) for the full custom element attribute reference.

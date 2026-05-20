@@ -5,7 +5,7 @@ description: Scene component that sets up the 3D viewport, camera, and lighting 
 
 import { Tabs, TabItem } from '@astrojs/starlight/components';
 
-The scene is the root of every polycss render tree. It applies scene-level lighting and atlas options, then renders its children (typically meshes or individual polygons) in 3D space. Vanilla `<poly-scene>` also accepts camera attributes; React and Vue scenes receive camera state from a surrounding `<PolyCamera>` / `<PolyPerspectiveCamera>` / `<PolyOrthographicCamera>`.
+The scene is the root of every polycss render tree. It applies scene-level lighting and atlas options, then renders its children (typically meshes or individual polygons) in 3D space. `<poly-scene>` / `PolyScene` must always be nested inside a camera element (`<poly-camera>` / `PolyCamera` or the perspective variant): the camera owns the projection and orbital state.
 
 It's available as a custom element (`<poly-scene>`), via the imperative `createPolyScene(host, opts)` API, and as React / Vue components (`<PolyScene>`).
 
@@ -22,7 +22,7 @@ It's available as a custom element (`<poly-scene>`), via the imperative `createP
 | `polygons` | `Polygon[]` | None | (Framework only.) Flat array of polygon objects rendered as direct children. Composes with JSX/slot children. |
 | `children` | None | None | `<poly-mesh>` / `<poly-polygon>` / `<poly-orbit-controls>` (vanilla) or `<PolyMesh>` / `<Poly>` / `<PolyOrbitControls>` (React / Vue). |
 
-**Camera state and input** are separate layers. For vanilla, set camera attributes (`rot-x`, `rot-y`, `zoom`, `perspective`) on `<poly-scene>`. For React/Vue, set those props on `<PolyCamera>`. Add a child `<poly-orbit-controls>` / `<PolyOrbitControls>` to enable drag, wheel, or autorotate: see [PolyOrbitControls](/components/poly-controls).
+**Camera state and input** are set on the wrapping camera element (`<poly-camera>` / `PolyCamera`): `rot-x`, `rot-y`, `zoom`, `distance`. `<poly-scene>` carries no camera attributes. Add a child `<poly-orbit-controls>` / `<PolyOrbitControls>` to enable drag, wheel, or autorotate: see [PolyOrbitControls](/components/poly-controls).
 
 ## Mesh props / attributes
 
@@ -62,27 +62,29 @@ interface PolyAmbientLight {
 
 ### Basic Scene
 
-A scene with a single GLB mesh at default camera angle.
+A scene with a dodecahedron at default camera angle.
 
 <Tabs syncKey="fw">
 <TabItem label="Vanilla JS">
 ```html
 <script type="module" src="https://esm.sh/@layoutit/polycss/elements"></script>
 
-<poly-scene>
-  <poly-mesh src="/cottage.glb"></poly-mesh>
-</poly-scene>
+<poly-camera rot-x="65" rot-y="45">
+  <poly-scene>
+    <poly-dodecahedron size="100" color="#a78bfa"></poly-dodecahedron>
+  </poly-scene>
+</poly-camera>
 ```
 </TabItem>
 <TabItem label="React">
 ```tsx
-import { PolyCamera, PolyScene, PolyMesh } from "@layoutit/polycss-react";
+import { PolyCamera, PolyScene, PolyDodecahedron } from "@layoutit/polycss-react";
 
 export function App() {
   return (
-    <PolyCamera>
+    <PolyCamera rotX={65} rotY={45}>
       <PolyScene>
-        <PolyMesh src="/cottage.glb" />
+        <PolyDodecahedron size={100} color="#a78bfa" />
       </PolyScene>
     </PolyCamera>
   );
@@ -92,15 +94,15 @@ export function App() {
 <TabItem label="Vue">
 ```vue
 <template>
-  <PolyCamera>
+  <PolyCamera :rot-x="65" :rot-y="45">
     <PolyScene>
-      <PolyMesh src="/cottage.glb" />
+      <PolyDodecahedron :size="100" color="#a78bfa" />
     </PolyScene>
   </PolyCamera>
 </template>
 
 <script setup lang="ts">
-import { PolyCamera, PolyScene, PolyMesh } from "@layoutit/polycss-vue";
+import { PolyCamera, PolyScene, PolyDodecahedron } from "@layoutit/polycss-vue";
 </script>
 ```
 </TabItem>
@@ -109,15 +111,17 @@ import { PolyCamera, PolyScene, PolyMesh } from "@layoutit/polycss-vue";
 ### Scene with Camera and Lighting
 
 ```tsx
-<PolyCamera perspective={1000} rotX={65} rotY={45}>
+import { PolyPerspectiveCamera, PolyScene, PolyTorus, PolyBox } from "@layoutit/polycss-react";
+
+<PolyPerspectiveCamera perspective={1000} rotX={65} rotY={45}>
   <PolyScene
     directionalLight={{ direction: [0.5, -0.7, 0.6], color: "#ffe4a8" }}
     ambientLight={{ intensity: 0.4 }}
   >
-    <PolyMesh src="/cottage.glb" position={[0, 0, 0]} />
-    <PolyMesh src="/tree.glb" position={[8, 0, 0]} scale={0.5} />
+    <PolyTorus color="#4ecdc4" position={[0, 0, 0]} />
+    <PolyBox size={60} color="#ffd166" position={[8, 0, 0]} />
   </PolyScene>
-</PolyCamera>
+</PolyPerspectiveCamera>
 ```
 
 ### Multiple Meshes
@@ -125,8 +129,8 @@ import { PolyCamera, PolyScene, PolyMesh } from "@layoutit/polycss-vue";
 ```tsx
 <PolyCamera rotX={65} rotY={45}>
   <PolyScene>
-    <PolyMesh src="/cottage.glb" position={[0, 0, 0]} />
-    <PolyMesh src="/tree.glb" position={[8, 0, 0]} scale={0.5} />
+    <PolyIcosahedron size={80} color="#ff6644" position={[0, 0, 0]} />
+    <PolyBox size={60} color="#7dd3fc" position={[10, 0, 0]} />
   </PolyScene>
 </PolyCamera>
 ```

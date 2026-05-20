@@ -10,8 +10,8 @@ function renderToDiv(element: React.ReactElement): HTMLElement {
   return container;
 }
 
-// PolyCamera is an alias for PolyPerspectiveCamera. Orthographic rendering
-// is available via PolyOrthographicCamera.
+// PolyCamera is an alias for PolyOrthographicCamera. Perspective rendering
+// is available via PolyPerspectiveCamera.
 describe("PolyCamera behavior", () => {
   describe("renders camera wrapper", () => {
     it("has the polycss-camera class", () => {
@@ -24,25 +24,15 @@ describe("PolyCamera behavior", () => {
     });
   });
 
-  describe("perspective", () => {
-    it("applies default perspective of 8000px when no perspective prop given", () => {
+  describe("projection", () => {
+    it("sets perspective to none (orthographic, the default)", () => {
       const container = renderToDiv(
         <PolyCamera>
           <div />
         </PolyCamera>
       );
       const camera = container.querySelector(".polycss-camera") as HTMLElement;
-      expect(camera.style.perspective).toBe("8000px");
-    });
-
-    it("applies a custom numeric perspective value", () => {
-      const container = renderToDiv(
-        <PolyCamera perspective={3000}>
-          <div />
-        </PolyCamera>
-      );
-      const camera = container.querySelector(".polycss-camera") as HTMLElement;
-      expect(camera.style.perspective).toBe("3000px");
+      expect(camera.style.perspective).toBe("none");
     });
   });
 

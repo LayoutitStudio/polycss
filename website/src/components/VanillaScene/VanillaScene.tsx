@@ -5,6 +5,8 @@ import {
   createPolyFirstPersonControls,
   createPolyOrbitControls,
   createPolyMapControls,
+  createPolyOrthographicCamera,
+  createPolyPerspectiveCamera,
   createPolyScene,
   createSelect,
   createTransformControls,
@@ -16,6 +18,8 @@ import type {
   PolyMeshHandle as VanillaPolyMeshHandle,
   PolyMeshTransform,
   ParseResult,
+  PolyOrthographicCameraHandle,
+  PolyPerspectiveCameraHandle,
   PolySceneOptions,
   PolySceneHandle,
   PolySelectionHandle,
@@ -99,6 +103,7 @@ export function VanillaScene({
 }: VanillaSceneProps) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const sceneRef = useRef<PolySceneHandle | null>(null);
+  const cameraRef = useRef<PolyPerspectiveCameraHandle | PolyOrthographicCameraHandle | null>(null);
   const controlsRef = useRef<PolyControlsHandle | PolyFirstPersonControlsHandle | null>(null);
   const meshHandleRef = useRef<VanillaPolyMeshHandle | null>(null);
   const interiorFillHandleRef = useRef<VanillaPolyMeshHandle | null>(null);
@@ -154,18 +159,25 @@ export function VanillaScene({
     const host = hostRef.current;
     if (!host) return;
     host.innerHTML = "";
-    const sceneOptions: PolySceneOptions = {
+    const cameraOpts = {
       rotX: options.rotX,
       rotY: options.rotY,
       zoom: options.zoom,
+      target: options.target as Vec3 | undefined,
+    };
+    const camera = options.perspective
+      ? createPolyPerspectiveCamera({ ...cameraOpts, perspective: options.perspective })
+      : createPolyOrthographicCamera(cameraOpts);
+    cameraRef.current = camera;
+    const sceneOptions: PolySceneOptions = {
+      camera,
       directionalLight,
       ambientLight,
       textureLighting: options.textureLighting,
-      perspective: options.perspective,
       autoCenter: options.autoCenter,
       textureQuality: options.textureQuality,
       strategies: { disable: options.disableStrategies },
-    } as PolySceneOptions;
+    };
     const scene = createPolyScene(host, sceneOptions);
     sceneRef.current = scene;
     const meshTransform = {
@@ -208,6 +220,7 @@ export function VanillaScene({
       mountedModelRef.current = null;
       meshHandleRef.current = null;
       sceneRef.current = null;
+      cameraRef.current = null;
       scene.destroy();
     };
   }, [
@@ -427,12 +440,16 @@ export function VanillaScene({
   // Sliding sliders only flows through this path.
   useEffect(() => {
     const scene = sceneRef.current;
-    if (!scene) return;
-    scene.setOptions({
+    const camera = cameraRef.current;
+    if (!scene || !camera) return;
+    camera.update({
       rotX: options.rotX,
       rotY: options.rotY,
       zoom: options.zoom,
       target: options.target as Vec3,
+    });
+    scene.applyCamera();
+    scene.setOptions({
       directionalLight,
       ambientLight,
       textureLighting: options.textureLighting,

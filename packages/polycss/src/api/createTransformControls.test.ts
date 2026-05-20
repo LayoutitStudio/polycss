@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ParseResult, Polygon } from "@layoutit/polycss-core";
 import { createPolyScene, type PolySceneHandle } from "./createPolyScene";
 import { createTransformControls } from "./createTransformControls";
+import { createPolyOrthographicCamera } from "./createPolyCamera";
 
 const TRIANGLE: Polygon = {
   vertices: [[0, 0, 0], [1, 0, 0], [0, 1, 0]],
@@ -110,7 +111,7 @@ describe("createTransformControls", () => {
   beforeEach(() => {
     host = document.createElement("div");
     document.body.appendChild(host);
-    scene = createPolyScene(host);
+    scene = createPolyScene(host, { camera: createPolyOrthographicCamera() });
   });
 
   afterEach(() => {

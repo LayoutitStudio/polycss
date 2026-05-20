@@ -8,6 +8,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createPolyScene, type PolySceneHandle } from "./createPolyScene";
 import { createPolyOrbitControls, type PolyOrbitControlsHandle } from "./createPolyOrbitControls";
+import { createPolyOrthographicCamera } from "./createPolyCamera";
 
 type Frame = (now: number) => void;
 let rafQueue: Frame[] = [];
@@ -63,7 +64,7 @@ describe("createPolyOrbitControls", () => {
   beforeEach(() => {
     host = document.createElement("div");
     document.body.appendChild(host);
-    scene = createPolyScene(host, { rotX: 65, rotY: 45, zoom: 1 });
+    scene = createPolyScene(host, { camera: createPolyOrthographicCamera({ rotX: 65, rotY: 45, zoom: 1 }) });
     controls = null;
     installManualRaf();
   });
@@ -92,11 +93,11 @@ describe("createPolyOrbitControls", () => {
     it("disables drag when drag:false", () => {
       controls = createPolyOrbitControls(scene, { drag: false });
       expect(host.style.cursor).toBe("");
-      const before = scene.getOptions().rotY;
+      const before = scene.camera.state.rotY;
       dispatchPointer(host, "pointerdown", { x: 100, y: 100 });
       dispatchPointer(host, "pointermove", { x: 150, y: 100 });
       dispatchPointer(host, "pointerup", { x: 150, y: 100 });
-      expect(scene.getOptions().rotY).toBe(before);
+      expect(scene.camera.state.rotY).toBe(before);
     });
   });
 
@@ -104,31 +105,31 @@ describe("createPolyOrbitControls", () => {
   describe("orbit drag", () => {
     it("left-drag updates rotY (orbit)", () => {
       controls = createPolyOrbitControls(scene);
-      const before = scene.getOptions().rotY ?? 45;
+      const before = scene.camera.state.rotY ?? 45;
       dispatchPointer(host, "pointerdown", { x: 100, y: 100 });
       dispatchPointer(host, "pointermove", { x: 200, y: 100 });
       dispatchPointer(host, "pointerup", { x: 200, y: 100 });
       // +100 px → rotY decreases by 100/4 = 25 deg
-      expect(scene.getOptions().rotY).toBeCloseTo(((before - 25) % 360 + 360) % 360, 1);
+      expect(scene.camera.state.rotY).toBeCloseTo(((before - 25) % 360 + 360) % 360, 1);
     });
 
     it("left-drag updates rotX (orbit, clamped to [0, 100])", () => {
       controls = createPolyOrbitControls(scene);
-      const before = scene.getOptions().rotX ?? 65;
+      const before = scene.camera.state.rotX ?? 65;
       dispatchPointer(host, "pointerdown", { x: 100, y: 100 });
       dispatchPointer(host, "pointermove", { x: 100, y: 60 });
       dispatchPointer(host, "pointerup", { x: 100, y: 60 });
       // -40 px / 4 = -10 deg of dY → rotX = before - (-10) = before + 10
-      expect(scene.getOptions().rotX).toBeCloseTo(before + 10, 1);
+      expect(scene.camera.state.rotX).toBeCloseTo(before + 10, 1);
     });
 
     it("does NOT change target on plain left-drag", () => {
       controls = createPolyOrbitControls(scene);
-      const before = scene.getOptions().target ?? [0, 0, 0];
+      const before = scene.camera.state.target ?? [0, 0, 0];
       dispatchPointer(host, "pointerdown", { x: 100, y: 100 });
       dispatchPointer(host, "pointermove", { x: 200, y: 100 });
       dispatchPointer(host, "pointerup", { x: 200, y: 100 });
-      const after = scene.getOptions().target ?? [0, 0, 0];
+      const after = scene.camera.state.target ?? [0, 0, 0];
       expect(after[0]).toBeCloseTo(before[0], 4);
       expect(after[1]).toBeCloseTo(before[1], 4);
     });
@@ -138,13 +139,13 @@ describe("createPolyOrbitControls", () => {
   describe("shift+drag pans target", () => {
     it("Shift+left-drag moves target (pan), not orbit", () => {
       controls = createPolyOrbitControls(scene);
-      const before = scene.getOptions().target ?? [0, 0, 0];
+      const before = scene.camera.state.target ?? [0, 0, 0];
       dispatchPointer(host, "pointerdown", { x: 100, y: 100 });
       dispatchPointer(host, "pointermove", { x: 200, y: 100, shiftKey: true });
       dispatchPointer(host, "pointerup", { x: 200, y: 100 });
-      const after = scene.getOptions().target ?? [0, 0, 0];
+      const after = scene.camera.state.target ?? [0, 0, 0];
       // Target should have shifted; rotY should be unchanged from start
-      const rotYAfter = scene.getOptions().rotY ?? 45;
+      const rotYAfter = scene.camera.state.rotY ?? 45;
       // rotY was not changed by the shift-move (it was changed by the initial orbit-start before shift)
       // — the key test is that target changed
       expect(after[0] !== before[0] || after[1] !== before[1]).toBe(true);
@@ -155,25 +156,25 @@ describe("createPolyOrbitControls", () => {
   describe("wheel zoom", () => {
     it("zoom in on negative deltaY", () => {
       controls = createPolyOrbitControls(scene);
-      const before = scene.getOptions().zoom ?? 1;
+      const before = scene.camera.state.zoom ?? 1;
       dispatchWheel(host, -100);
-      expect((scene.getOptions().zoom ?? 0)).toBeGreaterThan(before);
+      expect((scene.camera.state.zoom ?? 0)).toBeGreaterThan(before);
     });
 
     it("zoom out on positive deltaY", () => {
       controls = createPolyOrbitControls(scene);
-      const before = scene.getOptions().zoom ?? 1;
+      const before = scene.camera.state.zoom ?? 1;
       dispatchWheel(host, 100);
-      expect((scene.getOptions().zoom ?? 0)).toBeLessThan(before);
+      expect((scene.camera.state.zoom ?? 0)).toBeLessThan(before);
     });
 
     it("dolly:true changes distance instead of zoom", () => {
       controls = createPolyOrbitControls(scene, { dolly: true });
-      const beforeZoom = scene.getOptions().zoom ?? 1;
-      const beforeDist = scene.getOptions().distance ?? 0;
+      const beforeZoom = scene.camera.state.zoom ?? 1;
+      const beforeDist = scene.camera.state.distance ?? 0;
       dispatchWheel(host, 100);
-      expect(scene.getOptions().zoom).toBe(beforeZoom);
-      expect((scene.getOptions().distance ?? 0)).toBeGreaterThan(beforeDist);
+      expect(scene.camera.state.zoom).toBe(beforeZoom);
+      expect((scene.camera.state.distance ?? 0)).toBeGreaterThan(beforeDist);
     });
   });
 
@@ -186,18 +187,18 @@ describe("createPolyOrbitControls", () => {
 
     it("rotates rotY per tick", () => {
       controls = createPolyOrbitControls(scene, { animate: { speed: 1 } });
-      const start = scene.getOptions().rotY ?? 45;
+      const start = scene.camera.state.rotY ?? 45;
       tickFrame(16.67);
-      expect(scene.getOptions().rotY).toBeCloseTo(start + 1, 4);
+      expect(scene.camera.state.rotY).toBeCloseTo(start + 1, 4);
     });
 
     it("animate axis 'x' rotates rotX", () => {
       controls = createPolyOrbitControls(scene, { animate: { speed: 1, axis: "x" } });
-      const beforeX = scene.getOptions().rotX ?? 65;
-      const beforeY = scene.getOptions().rotY ?? 45;
+      const beforeX = scene.camera.state.rotX ?? 65;
+      const beforeY = scene.camera.state.rotY ?? 45;
       tickFrame(16.67);
-      expect(scene.getOptions().rotX).toBeCloseTo(beforeX + 1, 4);
-      expect(scene.getOptions().rotY).toBe(beforeY);
+      expect(scene.camera.state.rotX).toBeCloseTo(beforeX + 1, 4);
+      expect(scene.camera.state.rotY).toBe(beforeY);
     });
   });
 
@@ -207,10 +208,10 @@ describe("createPolyOrbitControls", () => {
       controls = createPolyOrbitControls(scene, { animate: { speed: 1 } });
       controls.pause();
       expect(rafQueue.length).toBe(0);
-      const before = scene.getOptions().rotY;
+      const before = scene.camera.state.rotY;
       dispatchPointer(host, "pointerdown", { x: 100, y: 100 });
       dispatchPointer(host, "pointermove", { x: 200, y: 100 });
-      expect(scene.getOptions().rotY).toBe(before);
+      expect(scene.camera.state.rotY).toBe(before);
     });
 
     it("resume() re-attaches after pause()", () => {

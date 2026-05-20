@@ -7,8 +7,26 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ParseResult, Polygon } from "@layoutit/polycss-core";
 import {
   createPolyScene,
+  type PolySceneOptions,
   type PolySceneHandle,
 } from "./createPolyScene";
+import {
+  createPolyOrthographicCamera,
+  createPolyPerspectiveCamera,
+  type PolyCameraOptions,
+} from "./createPolyCamera";
+
+function makeCamera(cameraOpts: PolyCameraOptions = {}) {
+  return createPolyOrthographicCamera(cameraOpts);
+}
+
+function makeScene(
+  host: HTMLElement,
+  sceneOpts: Omit<PolySceneOptions, "camera"> = {},
+  cameraOpts: PolyCameraOptions = {},
+): PolySceneHandle {
+  return createPolyScene(host, { camera: makeCamera(cameraOpts), ...sceneOpts });
+}
 
 function triangle(color = "#ff0000"): Polygon {
   return {
@@ -183,37 +201,43 @@ describe("createPolyScene", () => {
   describe("scene creation", () => {
     it("throws when host is missing", () => {
       expect(() =>
-        createPolyScene(null as unknown as HTMLElement),
+        createPolyScene(null as unknown as HTMLElement, { camera: makeCamera() }),
       ).toThrow(/host must be an HTMLElement/);
     });
 
+    it("throws when camera is missing", () => {
+      expect(() =>
+        createPolyScene(host, {} as unknown as PolySceneOptions),
+      ).toThrow(/camera handle is required/);
+    });
+
     it("exposes the host element on the returned handle", () => {
-      scene = createPolyScene(host);
+      scene = makeScene(host);
       expect(scene.host).toBe(host);
     });
 
-    it("getOptions() returns the current options snapshot including values that were passed", () => {
-      scene = createPolyScene(host, { rotX: 30, rotY: 60, zoom: 2 });
-      const opts = scene.getOptions();
-      expect(opts.rotX).toBe(30);
-      expect(opts.rotY).toBe(60);
-      expect(opts.zoom).toBe(2);
+    it("camera state reflects values passed to createPolyOrthographicCamera", () => {
+      scene = makeScene(host, {}, { rotX: 30, rotY: 60, zoom: 2 });
+      expect(scene.camera.state.rotX).toBe(30);
+      expect(scene.camera.state.rotY).toBe(60);
+      expect(scene.camera.state.zoom).toBe(2);
     });
 
-    it("getOptions() reflects updates made via setOptions", () => {
-      scene = createPolyScene(host, { rotY: 0 });
-      scene.setOptions({ rotY: 90 });
-      expect(scene.getOptions().rotY).toBe(90);
+    it("camera.update() + applyCamera() reflects new camera state", () => {
+      scene = makeScene(host, {}, { rotY: 0 });
+      scene.camera.update({ rotY: 90 });
+      scene.applyCamera();
+      expect(scene.camera.state.rotY).toBe(90);
     });
 
     it("creates a .polycss-scene child under the host", () => {
-      scene = createPolyScene(host);
+      scene = makeScene(host);
       const sceneEl = host.querySelector(".polycss-scene");
       expect(sceneEl).not.toBeNull();
     });
 
     it("renders the scene element as a 0x0 anchor at center (top:50%/left:50%)", () => {
-      scene = createPolyScene(host);
+      scene = makeScene(host);
       const sceneEl = host.querySelector(".polycss-scene") as HTMLElement;
       expect(sceneEl.getAttribute("aria-hidden")).toBe("true");
       expect(sceneEl.style.position).toBe("");
@@ -223,12 +247,9 @@ describe("createPolyScene", () => {
       expect(sceneEl.style.height).toBe("");
     });
 
-    it("applies scene transform from options", () => {
+    it("applies scene transform from camera options", () => {
       scene = createPolyScene(host, {
-        perspective: 1500,
-        rotX: 30,
-        rotY: 60,
-        zoom: 2,
+        camera: createPolyPerspectiveCamera({ perspective: 1500, rotX: 30, rotY: 60, zoom: 2 }),
       });
       const sceneEl = host.querySelector(".polycss-scene") as HTMLElement;
       const transform = sceneEl.style.transform;
@@ -243,11 +264,7 @@ describe("createPolyScene", () => {
     it("folds host CSS zoom into the emitted scene transform", () => {
       host.style.setProperty("zoom", "0.5");
       scene = createPolyScene(host, {
-        distance: 100,
-        perspective: 1500,
-        rotX: 30,
-        rotY: 60,
-        zoom: 2,
+        camera: createPolyPerspectiveCamera({ distance: 100, perspective: 1500, rotX: 30, rotY: 60, zoom: 2 }),
       });
       const sceneEl = host.querySelector(".polycss-scene") as HTMLElement;
       const transform = sceneEl.style.transform;
@@ -257,11 +274,11 @@ describe("createPolyScene", () => {
       expect(transform).toContain("scale(1)");
       expect(transform).toContain("rotateX(30deg)");
       expect(transform).toContain("rotate(60deg)");
-      expect(scene.getOptions().zoom).toBe(2);
+      expect(scene.camera.state.zoom).toBe(2);
     });
 
-    it("inlines a large finite perspective when perspective is false (orthographic)", () => {
-      scene = createPolyScene(host, { perspective: false });
+    it("inlines a large finite perspective when camera is orthographic", () => {
+      scene = makeScene(host);
       const sceneEl = host.querySelector(".polycss-scene") as HTMLElement;
       // perspective: none triggers a Chrome compositor bug that mis-rasterizes
       // <u> border-triangle leaves at initial paint. A very large finite value
@@ -270,7 +287,7 @@ describe("createPolyScene", () => {
     });
 
     it("injects base styles into the document", () => {
-      scene = createPolyScene(host);
+      scene = makeScene(host);
       const styleEl = document.getElementById("polycss-styles");
       expect(styleEl).not.toBeNull();
       expect(styleEl?.textContent).toContain("transform-origin: 0 0");
@@ -288,7 +305,7 @@ describe("createPolyScene", () => {
 
   describe("add / remove mesh", () => {
     it("adds a .polycss-mesh wrapper with one polygon leaf element per polygon", () => {
-      scene = createPolyScene(host);
+      scene = makeScene(host);
       const handle = scene.add(makeParseResult([triangle(), triangle("#00ff00")]));
       const wrappers = host.querySelectorAll(".polycss-mesh");
       expect(wrappers.length).toBe(1);
@@ -302,7 +319,7 @@ describe("createPolyScene", () => {
     });
 
     it("routes exact raw vox sources through the direct voxel renderer", () => {
-      scene = createPolyScene(host);
+      scene = makeScene(host);
       scene.add(makeVoxelExactParseResult(), { merge: false });
       const voxelBrushes = Array.from(host.querySelectorAll(".polycss-mesh > b"));
       expect(host.querySelector(".polycss-voxel-host-z")).toBeNull();
@@ -323,12 +340,10 @@ describe("createPolyScene", () => {
     });
 
     it("applies baked lighting to direct voxel quads", () => {
-      scene = createPolyScene(host, {
-        rotX: 0,
-        rotY: 0,
+      scene = makeScene(host, {
         directionalLight: { direction: [0, 0, -1], color: "#ffffff", intensity: 1 },
         ambientLight: { color: "#ffffff", intensity: 0 },
-      });
+      }, { rotX: 0, rotY: 0 });
       scene.add(makeVoxelExactParseResult(), { merge: false });
       const brush = host.querySelector(".polycss-mesh > b") as HTMLElement | null;
       expect(brush).not.toBeNull();
@@ -336,12 +351,10 @@ describe("createPolyScene", () => {
     });
 
     it("uses exact parsed voxel polygons for direct matrix placement", () => {
-      scene = createPolyScene(host, {
-        rotX: 65,
-        rotY: 45,
+      scene = makeScene(host, {
         directionalLight: { direction: [0, 0, 1], color: "#ffffff", intensity: 0 },
         ambientLight: { color: "#ffffff", intensity: 1 },
-      });
+      }, { rotX: 65, rotY: 45 });
       scene.add(makeVoxelExactParseResult(), { merge: false });
       const brush = host.querySelector(".polycss-mesh > b") as HTMLElement | null;
       expect(brush).not.toBeNull();
@@ -352,7 +365,7 @@ describe("createPolyScene", () => {
     });
 
     it("falls back to polygon rendering when raw vox polygons are not exact direct quads", () => {
-      scene = createPolyScene(host);
+      scene = makeScene(host);
       scene.add(makeVoxelParseResult(), { merge: false });
       expect(host.querySelector(".polycss-voxel-host-z")).toBeNull();
       expect(host.querySelector(".polycss-mesh > b")).toBeNull();
@@ -360,7 +373,7 @@ describe("createPolyScene", () => {
     });
 
     it("falls back to polygon rendering after setPolygons replaces vox source geometry", () => {
-      scene = createPolyScene(host);
+      scene = makeScene(host);
       const handle = scene.add(makeVoxelExactParseResult(), { merge: false });
       expect(host.querySelector(".polycss-mesh > b")).not.toBeNull();
       handle.setPolygons([triangle()], { merge: false });
@@ -371,7 +384,7 @@ describe("createPolyScene", () => {
     });
 
     it("hoists the repeated baked solid paint to the mesh wrapper", () => {
-      scene = createPolyScene(host);
+      scene = makeScene(host);
       scene.add(makeParseResult([triangle(), triangle()]), { merge: false });
       const wrapper = host.querySelector(".polycss-mesh") as HTMLElement;
       const polys = Array.from(host.querySelectorAll("u")) as HTMLElement[];
@@ -382,7 +395,7 @@ describe("createPolyScene", () => {
     });
 
     it("hoists repeated dynamic solid base RGB channels to the mesh wrapper", () => {
-      scene = createPolyScene(host, { textureLighting: "dynamic" });
+      scene = makeScene(host, { textureLighting: "dynamic" });
       scene.add(makeParseResult([triangle(), triangle()]), { merge: false });
       const wrapper = host.querySelector(".polycss-mesh") as HTMLElement;
       const polys = Array.from(host.querySelectorAll("u")) as HTMLElement[];
@@ -394,7 +407,7 @@ describe("createPolyScene", () => {
     });
 
     it("renders textured polygons as polygon s elements", () => {
-      scene = createPolyScene(host);
+      scene = makeScene(host);
       scene.add(makeParseResult([texturedTriangle()]));
       const poly = host.querySelector("s");
       expect(poly).not.toBeNull();
@@ -402,7 +415,7 @@ describe("createPolyScene", () => {
     });
 
     it("applies mesh transform CSS", () => {
-      scene = createPolyScene(host);
+      scene = makeScene(host);
       scene.add(makeParseResult(), {
         position: [10, 20, 30],
         rotation: [45, 0, 0],
@@ -415,7 +428,7 @@ describe("createPolyScene", () => {
     });
 
     it("handle.remove() detaches the wrapper from the DOM", () => {
-      scene = createPolyScene(host);
+      scene = makeScene(host);
       const handle = scene.add(makeParseResult());
       expect(host.querySelectorAll(".polycss-mesh").length).toBe(1);
       handle.remove();
@@ -423,7 +436,7 @@ describe("createPolyScene", () => {
     });
 
     it("handle.setTransform() updates the wrapper transform without re-mount", () => {
-      scene = createPolyScene(host);
+      scene = makeScene(host);
       const handle = scene.add(makeParseResult(), { position: [0, 0, 0] });
       handle.setTransform({ position: [5, 5, 5] });
       const wrapper = host.querySelector(".polycss-mesh") as HTMLElement;
@@ -431,7 +444,7 @@ describe("createPolyScene", () => {
     });
 
     it("can update stableDom mesh geometry without replacing polygon elements", () => {
-      scene = createPolyScene(host);
+      scene = makeScene(host);
       const handle = scene.add(makeParseResult([triangle()]), {
         merge: false,
         stableDom: true,
@@ -456,7 +469,7 @@ describe("createPolyScene", () => {
     });
 
     it("preserves caller-mounted mesh wrapper children across setPolygons()", () => {
-      scene = createPolyScene(host);
+      scene = makeScene(host);
       const handle = scene.add(makeParseResult([triangle()]), { merge: false });
       const nested = document.createElement("div");
       nested.className = "nested-helper";
@@ -470,7 +483,7 @@ describe("createPolyScene", () => {
     });
 
     it("updates stableDom textured triangles without replacing loaded atlas elements", () => {
-      scene = createPolyScene(host);
+      scene = makeScene(host);
       const handle = scene.add(makeParseResult([texturedTriangle()]), {
         merge: false,
         stableDom: true,
@@ -498,7 +511,7 @@ describe("createPolyScene", () => {
     });
 
     it("handle.dispose() detaches the wrapper AND calls parseResult.dispose()", () => {
-      scene = createPolyScene(host);
+      scene = makeScene(host);
       const pr = makeParseResult();
       const handle = scene.add(pr);
       handle.dispose();
@@ -507,7 +520,7 @@ describe("createPolyScene", () => {
     });
 
     it("handle.dispose() is idempotent", () => {
-      scene = createPolyScene(host);
+      scene = makeScene(host);
       const pr = makeParseResult();
       const handle = scene.add(pr);
       handle.dispose();
@@ -515,14 +528,14 @@ describe("createPolyScene", () => {
     });
 
     it("supports vec3 scale", () => {
-      scene = createPolyScene(host);
+      scene = makeScene(host);
       scene.add(makeParseResult(), { scale: [1, 2, 3] });
       const wrapper = host.querySelector(".polycss-mesh") as HTMLElement;
       expect(wrapper.style.transform).toContain("scale3d(1, 2, 3)");
     });
 
     it("renders nothing for degenerate polygons", () => {
-      scene = createPolyScene(host);
+      scene = makeScene(host);
       const degenerate: Polygon = { vertices: [[0, 0, 0]], color: "#ff0000" };
       scene.add(makeParseResult([degenerate]));
       const polys = host.querySelectorAll("i,b,s,u");
@@ -530,7 +543,7 @@ describe("createPolyScene", () => {
     });
 
     it("keeps source polygon alignment when degenerate polygons are skipped", () => {
-      scene = createPolyScene(host);
+      scene = makeScene(host);
       const degenerate: Polygon = { vertices: [[0, 0, 0]], color: "#ff0000" };
       scene.add(makeParseResult([degenerate, triangle()]));
       const poly = host.querySelector("i,b,s,u") as HTMLElement;
@@ -542,13 +555,13 @@ describe("createPolyScene", () => {
 
     describe("rebakeAtlas", () => {
       it("rebakeAtlas() does not throw", () => {
-        scene = createPolyScene(host);
+        scene = makeScene(host);
         const handle = scene.add(makeParseResult([triangle()]));
         expect(() => handle.rebakeAtlas()).not.toThrow();
       });
 
       it("rebakeAtlas() re-renders the mesh (polygon elements are replaced)", () => {
-        scene = createPolyScene(host);
+        scene = makeScene(host);
         const handle = scene.add(makeParseResult([triangle()]));
         handle.setTransform({ rotation: [0, 45, 0] });
 
@@ -564,7 +577,7 @@ describe("createPolyScene", () => {
       });
 
       it("rebakeAtlas() is callable multiple times without throwing", () => {
-        scene = createPolyScene(host);
+        scene = makeScene(host);
         const handle = scene.add(makeParseResult([triangle()]));
         expect(() => {
           handle.setTransform({ rotation: [0, 30, 0] });
@@ -577,7 +590,7 @@ describe("createPolyScene", () => {
       });
 
       it("rebakeAtlas() calls renderEntry (spy on setPolygons verifies re-render pathway)", () => {
-        scene = createPolyScene(host);
+        scene = makeScene(host);
         const handle = scene.add(makeParseResult([triangle()]));
         handle.setTransform({ rotation: [0, 45, 0] });
 
@@ -594,7 +607,7 @@ describe("createPolyScene", () => {
       });
 
       it("rebakeAtlas() on a mesh with no rotation uses zero-rotation inverse (identity light)", () => {
-        scene = createPolyScene(host, {
+        scene = makeScene(host, {
           directionalLight: { direction: [0, 0, 1], color: "#ffffff", intensity: 1 },
         });
         const handle = scene.add(makeParseResult([triangle()]));
@@ -606,7 +619,7 @@ describe("createPolyScene", () => {
       });
 
       it("rebakeAtlas() is a no-op spy target (can be mocked externally)", () => {
-        scene = createPolyScene(host);
+        scene = makeScene(host);
         const handle = scene.add(makeParseResult([triangle()]));
         const spy = vi.spyOn(handle, "rebakeAtlas");
         handle.rebakeAtlas();
@@ -617,13 +630,13 @@ describe("createPolyScene", () => {
 
   describe("PolyMeshHandle getters", () => {
     it("getPolygons() returns the same array as handle.polygons", () => {
-      scene = createPolyScene(host);
+      scene = makeScene(host);
       const handle = scene.add(makeParseResult([triangle()]));
       expect(handle.getPolygons()).toBe(handle.polygons);
     });
 
     it("getPolygons() reflects setPolygons() update", () => {
-      scene = createPolyScene(host);
+      scene = makeScene(host);
       const handle = scene.add(makeParseResult([triangle()]));
       const newPolys = [triangle("#00ff00"), triangle("#0000ff")];
       handle.setPolygons(newPolys, { merge: false });
@@ -632,7 +645,7 @@ describe("createPolyScene", () => {
     });
 
     it("getPosition() returns transform.position", () => {
-      scene = createPolyScene(host);
+      scene = makeScene(host);
       const pos: [number, number, number] = [1, 2, 3];
       const handle = scene.add(makeParseResult(), { position: pos });
       expect(handle.getPosition()).toEqual(pos);
@@ -640,20 +653,20 @@ describe("createPolyScene", () => {
     });
 
     it("getPosition() returns undefined when no position set", () => {
-      scene = createPolyScene(host);
+      scene = makeScene(host);
       const handle = scene.add(makeParseResult());
       expect(handle.getPosition()).toBeUndefined();
     });
 
     it("getPosition() reflects setTransform() update", () => {
-      scene = createPolyScene(host);
+      scene = makeScene(host);
       const handle = scene.add(makeParseResult(), { position: [0, 0, 0] });
       handle.setTransform({ position: [10, 20, 30] });
       expect(handle.getPosition()).toEqual([10, 20, 30]);
     });
 
     it("getRotation() returns transform.rotation", () => {
-      scene = createPolyScene(host);
+      scene = makeScene(host);
       const rot: [number, number, number] = [45, 90, 180];
       const handle = scene.add(makeParseResult(), { rotation: rot });
       expect(handle.getRotation()).toEqual(rot);
@@ -661,27 +674,27 @@ describe("createPolyScene", () => {
     });
 
     it("getRotation() returns undefined when no rotation set", () => {
-      scene = createPolyScene(host);
+      scene = makeScene(host);
       const handle = scene.add(makeParseResult());
       expect(handle.getRotation()).toBeUndefined();
     });
 
     it("getScale() returns transform.scale (number)", () => {
-      scene = createPolyScene(host);
+      scene = makeScene(host);
       const handle = scene.add(makeParseResult(), { scale: 2.5 });
       expect(handle.getScale()).toBe(2.5);
       expect(handle.getScale()).toBe(handle.transform.scale);
     });
 
     it("getScale() returns transform.scale (Vec3)", () => {
-      scene = createPolyScene(host);
+      scene = makeScene(host);
       const scale: [number, number, number] = [1, 2, 3];
       const handle = scene.add(makeParseResult(), { scale });
       expect(handle.getScale()).toEqual(scale);
     });
 
     it("getScale() returns undefined when no scale set", () => {
-      scene = createPolyScene(host);
+      scene = makeScene(host);
       const handle = scene.add(makeParseResult());
       expect(handle.getScale()).toBeUndefined();
     });
@@ -706,7 +719,7 @@ describe("createPolyScene", () => {
         ],
         color: "#ff0000",
       };
-      scene = createPolyScene(host);
+      scene = makeScene(host);
       const handle = scene.add(makeParseResult([tri1, tri2]));
       // After merge there should be 1 polygon, not 2.
       expect(handle.polygons.length).toBe(1);
@@ -714,32 +727,31 @@ describe("createPolyScene", () => {
   });
 
   describe("setOptions", () => {
-    it("updates scene transform when rotation options change", () => {
-      scene = createPolyScene(host, { rotX: 0 });
+    it("updates scene transform when camera.update + applyCamera changes rotation", () => {
+      scene = makeScene(host, {}, { rotX: 0 });
       const sceneEl = host.querySelector(".polycss-scene") as HTMLElement;
       const before = sceneEl.style.transform;
-      scene.setOptions({ rotX: 90 });
+      scene.camera.update({ rotX: 90 });
+      scene.applyCamera();
       expect(sceneEl.style.transform).not.toBe(before);
       expect(sceneEl.style.transform).toContain("rotateX(90deg)");
     });
 
-    it("inlines perspective on setOptions update", () => {
-      scene = createPolyScene(host, { perspective: 1000 });
-      scene.setOptions({ perspective: 2500 });
+    it("perspective camera applies the configured perspective at creation", () => {
+      scene = createPolyScene(host, { camera: createPolyPerspectiveCamera({ perspective: 2500 }) });
       const sceneEl = host.querySelector(".polycss-scene") as HTMLElement;
       expect(sceneEl.style.perspective).toBe("2500px");
     });
 
-    it("updates perspective to orthographic stand-in when setOptions sets perspective=false", () => {
-      scene = createPolyScene(host, { perspective: 1000 });
-      scene.setOptions({ perspective: false });
+    it("orthographic camera produces the 1000000px stand-in perspective", () => {
+      scene = makeScene(host);
       const sceneEl = host.querySelector(".polycss-scene") as HTMLElement;
       // See "inlines a large finite perspective..." for the rationale.
       expect(sceneEl.style.perspective).toBe("1000000px");
     });
 
     it("emits dynamic light cascade vars on the scene element when textureLighting='dynamic'", () => {
-      scene = createPolyScene(host, {
+      scene = makeScene(host, {
         textureLighting: "dynamic",
         directionalLight: { direction: [0, 0, 1], color: "#ff8800", intensity: 1.5 },
         ambientLight: { color: "#222222", intensity: 0.3 },
@@ -757,7 +769,7 @@ describe("createPolyScene", () => {
     });
 
     it("removes dynamic light vars when textureLighting flips back to baked", () => {
-      scene = createPolyScene(host, { textureLighting: "dynamic" });
+      scene = makeScene(host, { textureLighting: "dynamic" });
       const sceneEl = host.querySelector(".polycss-scene") as HTMLElement;
       expect(sceneEl.style.getPropertyValue("--plz")).not.toBe("");
       scene.setOptions({ textureLighting: "baked" });
@@ -766,14 +778,14 @@ describe("createPolyScene", () => {
     });
 
     it("honors strategies.disable at creation time", () => {
-      scene = createPolyScene(host, { strategies: { disable: ["u"] } });
+      scene = makeScene(host, { strategies: { disable: ["u"] } });
       scene.add(makeParseResult([triangle()]));
       expect(host.querySelector("u")).toBeNull();
       expect(host.querySelector("i, s")).not.toBeNull();
     });
 
     it("re-renders meshes when strategies changes via setOptions", () => {
-      scene = createPolyScene(host);
+      scene = makeScene(host);
       scene.add(makeParseResult([triangle()]));
       expect(host.querySelector("u")).not.toBeNull();
       scene.setOptions({ strategies: { disable: ["u"] } });
@@ -782,7 +794,7 @@ describe("createPolyScene", () => {
     });
 
     it("re-enables a strategy when removed from disable list via setOptions", () => {
-      scene = createPolyScene(host, { strategies: { disable: ["u"] } });
+      scene = makeScene(host, { strategies: { disable: ["u"] } });
       scene.add(makeParseResult([triangle()]));
       expect(host.querySelector("u")).toBeNull();
       scene.setOptions({ strategies: { disable: [] } });
@@ -790,7 +802,7 @@ describe("createPolyScene", () => {
     });
 
     it("skips mesh re-render when setOptions is called with equivalent strategies", () => {
-      scene = createPolyScene(host, { strategies: { disable: ["u"] } });
+      scene = makeScene(host, { strategies: { disable: ["u"] } });
       scene.add(makeParseResult([triangle()]));
       const firstLeaf = host.querySelector("i, s");
       expect(firstLeaf).not.toBeNull();
@@ -802,47 +814,41 @@ describe("createPolyScene", () => {
     });
 
     it("mounts only camera-facing voxel leaves by default", () => {
-      scene = createPolyScene(host, {
-        rotX: 0,
-        rotY: 0,
-      });
+      scene = makeScene(host, {}, { rotX: 0, rotY: 0 });
       const handle = scene.add(makeParseResult([triangle(), backTriangle()]), { merge: false });
       expect(handle.polygons.length).toBe(2);
       const firstLeaf = host.querySelector(".polycss-mesh i, .polycss-mesh b, .polycss-mesh s, .polycss-mesh u");
       expect(host.querySelectorAll(".polycss-mesh i, .polycss-mesh b, .polycss-mesh s, .polycss-mesh u").length).toBe(1);
 
-      scene.setOptions({ rotX: 180 });
+      scene.camera.update({ rotX: 180 });
+      scene.applyCamera();
       const nextLeaf = host.querySelector(".polycss-mesh i, .polycss-mesh b, .polycss-mesh s, .polycss-mesh u");
       expect(nextLeaf).not.toBe(firstLeaf);
       expect(host.querySelectorAll(".polycss-mesh i, .polycss-mesh b, .polycss-mesh s, .polycss-mesh u").length).toBe(1);
     });
 
     it("does not remount culling leaves when camera rotation keeps the same visible normal set", () => {
-      scene = createPolyScene(host, {
-        rotX: 0,
-        rotY: 0,
-      });
+      scene = makeScene(host, {}, { rotX: 0, rotY: 0 });
       scene.add(makeParseResult([triangle(), backTriangle()]), { merge: false });
       const firstLeaf = host.querySelector(".polycss-mesh i, .polycss-mesh b, .polycss-mesh s, .polycss-mesh u");
       expect(firstLeaf).not.toBeNull();
 
-      scene.setOptions({ rotY: 10 });
+      scene.camera.update({ rotY: 10 });
+      scene.applyCamera();
 
       expect(host.querySelector(".polycss-mesh i, .polycss-mesh b, .polycss-mesh s, .polycss-mesh u")).toBe(firstLeaf);
       expect(host.querySelectorAll(".polycss-mesh i, .polycss-mesh b, .polycss-mesh s, .polycss-mesh u").length).toBe(1);
     });
 
     it("keeps caller-mounted children when camera culling remounts leaves", () => {
-      scene = createPolyScene(host, {
-        rotX: 0,
-        rotY: 0,
-      });
+      scene = makeScene(host, {}, { rotX: 0, rotY: 0 });
       const handle = scene.add(makeParseResult([triangle(), backTriangle()]), { merge: false });
       const nested = document.createElement("div");
       nested.className = "nested-helper";
       handle.element.appendChild(nested);
 
-      scene.setOptions({ rotX: 180 });
+      scene.camera.update({ rotX: 180 });
+      scene.applyCamera();
 
       expect(handle.element.contains(nested)).toBe(true);
       expect(handle.element.lastElementChild).toBe(nested);
@@ -850,10 +856,7 @@ describe("createPolyScene", () => {
     });
 
     it("patches culling deltas without removing leaves that stayed visible", () => {
-      scene = createPolyScene(host, {
-        rotX: 65,
-        rotY: 45,
-      });
+      scene = makeScene(host, {}, { rotX: 65, rotY: 45 });
       const handle = scene.add(
         makeParseResult([
           triangle("#111111"),
@@ -871,7 +874,8 @@ describe("createPolyScene", () => {
       });
       observer.observe(handle.element, { childList: true });
 
-      scene.setOptions({ rotY: 225 });
+      scene.camera.update({ rotY: 225 });
+      scene.applyCamera();
       observer.disconnect();
 
       expect(handle.element.querySelectorAll("i,b,s,u").length).toBe(2);
@@ -880,24 +884,18 @@ describe("createPolyScene", () => {
     });
 
     it("uses strict culling for low-normal meshes so voxel faces do not linger behind the camera", () => {
-      scene = createPolyScene(host, {
-        rotX: 65,
-        rotY: 179,
-      });
+      scene = makeScene(host, {}, { rotX: 65, rotY: 179 });
       scene.add(makeParseResult([triangle(), sideTriangle()]), { merge: false, stableDom: true });
       expect(host.querySelectorAll(".polycss-mesh i, .polycss-mesh b, .polycss-mesh s, .polycss-mesh u").length).toBe(2);
 
-      scene.setOptions({ rotY: 181 });
+      scene.camera.update({ rotY: 181 });
+      scene.applyCamera();
 
       expect(host.querySelectorAll(".polycss-mesh i, .polycss-mesh b, .polycss-mesh s, .polycss-mesh u").length).toBe(1);
     });
 
     it("leaves high-normal meshes on the stable DOM path", () => {
-      scene = createPolyScene(host, {
-        rotX: 65,
-        rotY: 0,
-        textureLighting: "dynamic",
-      });
+      scene = makeScene(host, { textureLighting: "dynamic" }, { rotX: 65, rotY: 0 });
       const handle = scene.add(makeParseResult(highNormalTrianglePairs()), { merge: false });
       expect(handle.element.querySelector(".polycss-bucket")).not.toBeNull();
       const leafCount = handle.element.querySelectorAll("i,b,s,u").length;
@@ -906,7 +904,8 @@ describe("createPolyScene", () => {
       const observer = new MutationObserver((items) => records.push(...items));
       observer.observe(handle.element, { childList: true, subtree: true });
 
-      scene.setOptions({ rotY: 180 });
+      scene.camera.update({ rotY: 180 });
+      scene.applyCamera();
       observer.disconnect();
 
       expect(records).toHaveLength(0);
@@ -926,20 +925,21 @@ describe("createPolyScene", () => {
     // rotateX, rotate — will update; only the innermost translate3d reflects
     // the autoCenter state).
     describe("autoCenter recomputation diff", () => {
-      it("does not recompute autoCenter on a camera-only setOptions", () => {
-        scene = createPolyScene(host, { autoCenter: true });
+      it("does not recompute autoCenter on a camera-only applyCamera", () => {
+        scene = makeScene(host, { autoCenter: true });
         scene.add(makeParseResult([triangle()]));
         // Capture the translate3d before — autoCenter is on so it should be non-zero.
         const translateBefore = getSceneTranslatePart(host);
         expect(translateBefore).toMatch(/^translate3d/);
         expect(translateBefore).not.toBe("translate3d(0px, 0px, 0px)");
-        scene.setOptions({ rotY: 90 });
+        scene.camera.update({ rotY: 90 });
+        scene.applyCamera();
         // The translate3d (offset) must not change — recomputeAutoCenter was skipped.
         expect(getSceneTranslatePart(host)).toBe(translateBefore);
       });
 
       it("does not recompute autoCenter on a lighting-only setOptions", () => {
-        scene = createPolyScene(host, { autoCenter: true });
+        scene = makeScene(host, { autoCenter: true });
         scene.add(makeParseResult([triangle()]));
         const translateBefore = getSceneTranslatePart(host);
         scene.setOptions({
@@ -949,23 +949,23 @@ describe("createPolyScene", () => {
       });
 
       it("does not recompute autoCenter on textureLighting changes", () => {
-        scene = createPolyScene(host, { autoCenter: true, textureLighting: "dynamic" });
+        scene = makeScene(host, { autoCenter: true, textureLighting: "dynamic" });
         scene.add(makeParseResult([triangle()]));
         const translateBefore = getSceneTranslatePart(host);
         scene.setOptions({ textureLighting: "baked" });
         expect(getSceneTranslatePart(host)).toBe(translateBefore);
       });
 
-      it("does not recompute autoCenter on perspective changes", () => {
-        scene = createPolyScene(host, { autoCenter: true });
+      it("does not recompute autoCenter on applyCamera (perspective does not apply)", () => {
+        scene = makeScene(host, { autoCenter: true });
         scene.add(makeParseResult([triangle()]));
         const translateBefore = getSceneTranslatePart(host);
-        scene.setOptions({ perspective: 4000 });
+        scene.applyCamera();
         expect(getSceneTranslatePart(host)).toBe(translateBefore);
       });
 
       it("DOES recompute autoCenter when autoCenter itself toggles", () => {
-        scene = createPolyScene(host, { autoCenter: false });
+        scene = makeScene(host, { autoCenter: false });
         scene.add(makeParseResult([triangle()]));
         // autoCenter off → translate3d should be zero (no offset).
         expect(getSceneTranslatePart(host)).toBe("translate3d(0px, 0px, 0px)");
@@ -980,7 +980,7 @@ describe("createPolyScene", () => {
         // that need to force a refresh should toggle off-then-on, or
         // change the underlying mesh (which triggers its own recompute
         // via add()/remove()).
-        scene = createPolyScene(host, { autoCenter: true });
+        scene = makeScene(host, { autoCenter: true });
         scene.add(makeParseResult([triangle()]));
         const translateBefore = getSceneTranslatePart(host);
         expect(translateBefore).not.toBe("translate3d(0px, 0px, 0px)");
@@ -989,13 +989,14 @@ describe("createPolyScene", () => {
         expect(getSceneTranslatePart(host)).toBe(translateBefore);
       });
 
-      it("still updates the scene transform on a camera-only setOptions", () => {
-        // Sanity check: skipping recomputeAutoCenter must NOT skip the camera
-        // transform update — the scene element should still reflect new rotY.
-        scene = createPolyScene(host, { autoCenter: true, rotY: 0 });
+      it("applyCamera updates the scene transform without affecting autoCenter offset", () => {
+        // Sanity check: applyCamera must update the scene transform — the scene
+        // element should still reflect new rotY — without triggering a recomputeAutoCenter.
+        scene = makeScene(host, { autoCenter: true }, { rotY: 0 });
         scene.add(makeParseResult([triangle()]));
         const sceneEl = host.querySelector(".polycss-scene") as HTMLElement;
-        scene.setOptions({ rotY: 137 });
+        scene.camera.update({ rotY: 137 });
+        scene.applyCamera();
         expect(sceneEl.style.transform).toContain("rotate(137deg)");
       });
     });
@@ -1003,7 +1004,7 @@ describe("createPolyScene", () => {
 
   describe("destroy", () => {
     it("removes the scene element from the host", () => {
-      scene = createPolyScene(host);
+      scene = makeScene(host);
       expect(host.querySelector(".polycss-scene")).not.toBeNull();
       scene.destroy();
       expect(host.querySelector(".polycss-scene")).toBeNull();
@@ -1011,7 +1012,7 @@ describe("createPolyScene", () => {
     });
 
     it("disposes all registered meshes (calls parseResult.dispose())", () => {
-      scene = createPolyScene(host);
+      scene = makeScene(host);
       const pr1 = makeParseResult();
       const pr2 = makeParseResult();
       scene.add(pr1);
@@ -1033,7 +1034,7 @@ describe("createPolyScene", () => {
     };
 
     it("emits --plx/ly/lz on the mesh wrapper when dynamic + non-zero rotation", () => {
-      scene = createPolyScene(host, dynLight);
+      scene = makeScene(host, dynLight);
       scene.add(makeParseResult([triangle()]), { rotation: [0, 90, 0] });
       const wrapper = host.querySelector(".polycss-mesh") as HTMLElement;
       // inverseRotateVec3([0,0,1], [0,90,0]) = rotateY(-90) on [0,0,1] = [-1,0,0]
@@ -1043,7 +1044,7 @@ describe("createPolyScene", () => {
     });
 
     it("updates the override synchronously when setTransform changes rotation", () => {
-      scene = createPolyScene(host, dynLight);
+      scene = makeScene(host, dynLight);
       const handle = scene.add(makeParseResult([triangle()]), { rotation: [0, 90, 0] });
       const wrapper = host.querySelector(".polycss-mesh") as HTMLElement;
       // Rotate back to zero — override should be removed.
@@ -1054,7 +1055,7 @@ describe("createPolyScene", () => {
     });
 
     it("removes the override when rotation is set back to zero", () => {
-      scene = createPolyScene(host, dynLight);
+      scene = makeScene(host, dynLight);
       const handle = scene.add(makeParseResult([triangle()]), { rotation: [0, 90, 0] });
       const wrapper = host.querySelector(".polycss-mesh") as HTMLElement;
       expect(wrapper.style.getPropertyValue("--plx")).not.toBe("");
@@ -1063,7 +1064,7 @@ describe("createPolyScene", () => {
     });
 
     it("removes the override when scene switches to baked lighting", () => {
-      scene = createPolyScene(host, dynLight);
+      scene = makeScene(host, dynLight);
       scene.add(makeParseResult([triangle()]), { rotation: [0, 90, 0] });
       const wrapper = host.querySelector(".polycss-mesh") as HTMLElement;
       expect(wrapper.style.getPropertyValue("--plx")).not.toBe("");
@@ -1074,7 +1075,7 @@ describe("createPolyScene", () => {
     });
 
     it("does NOT emit override for a mesh with no rotation in a dynamic scene", () => {
-      scene = createPolyScene(host, dynLight);
+      scene = makeScene(host, dynLight);
       scene.add(makeParseResult([triangle()]));
       const wrapper = host.querySelector(".polycss-mesh") as HTMLElement;
       expect(wrapper.style.getPropertyValue("--plx")).toBe("");
@@ -1083,7 +1084,7 @@ describe("createPolyScene", () => {
     });
 
     it("updates the override on all meshes when scene directionalLight changes", () => {
-      scene = createPolyScene(host, dynLight);
+      scene = makeScene(host, dynLight);
       scene.add(makeParseResult([triangle()]), { rotation: [0, 90, 0] });
       const wrapper = host.querySelector(".polycss-mesh") as HTMLElement;
       // Change the world light to +X direction → inverseRotateVec3([1,0,0],[0,90,0])
@@ -1098,7 +1099,7 @@ describe("createPolyScene", () => {
     });
 
     it("does NOT emit override when scene has no directionalLight", () => {
-      scene = createPolyScene(host, { textureLighting: "dynamic" });
+      scene = makeScene(host, { textureLighting: "dynamic" });
       scene.add(makeParseResult([triangle()]), { rotation: [0, 90, 0] });
       const wrapper = host.querySelector(".polycss-mesh") as HTMLElement;
       expect(wrapper.style.getPropertyValue("--plx")).toBe("");
@@ -1107,7 +1108,7 @@ describe("createPolyScene", () => {
 
   describe("updatePolygon", () => {
     it("mutates the polygon's color when targeted by reference", () => {
-      scene = createPolyScene(host);
+      scene = makeScene(host);
       const handle = scene.add(makeParseResult([triangle("#ff0000")]), { merge: false });
       const poly = handle.polygons[0];
       handle.updatePolygon(poly, { color: "#00ff00" });
@@ -1117,7 +1118,7 @@ describe("createPolyScene", () => {
     });
 
     it("mutates the polygon's color when targeted by index", () => {
-      scene = createPolyScene(host);
+      scene = makeScene(host);
       const handle = scene.add(
         makeParseResult([triangle("#ff0000"), triangle("#00ff00")]),
         { merge: false },
@@ -1128,7 +1129,7 @@ describe("createPolyScene", () => {
     });
 
     it("merges partial fields onto the polygon (only updates what's passed)", () => {
-      scene = createPolyScene(host);
+      scene = makeScene(host);
       const handle = scene.add(makeParseResult([triangle("#ff0000")]), { merge: false });
       const originalVerts = handle.polygons[0].vertices;
       handle.updatePolygon(0, { color: "#00ff00" });
@@ -1137,7 +1138,7 @@ describe("createPolyScene", () => {
     });
 
     it("re-renders the mesh DOM (leaf elements are fresh after update)", () => {
-      scene = createPolyScene(host);
+      scene = makeScene(host);
       const handle = scene.add(makeParseResult([triangle("#ff0000")]), { merge: false });
       const before = host.querySelector("u, b, i, s") as HTMLElement;
       handle.updatePolygon(0, { color: "#00ff00" });
@@ -1147,7 +1148,7 @@ describe("createPolyScene", () => {
     });
 
     it("no-ops on a stale polygon reference (not in the current polygons array)", () => {
-      scene = createPolyScene(host);
+      scene = makeScene(host);
       const handle = scene.add(makeParseResult([triangle("#ff0000")]), { merge: false });
       const stale: Polygon = { vertices: triangle().vertices, color: "#abcdef" };
       const elBefore = host.querySelector("u, b, i, s");
@@ -1158,7 +1159,7 @@ describe("createPolyScene", () => {
     });
 
     it("no-ops when index is out of range", () => {
-      scene = createPolyScene(host);
+      scene = makeScene(host);
       const handle = scene.add(makeParseResult([triangle("#ff0000")]), { merge: false });
       expect(() => handle.updatePolygon(99, { color: "#000000" })).not.toThrow();
       expect(() => handle.updatePolygon(-1, { color: "#000000" })).not.toThrow();
@@ -1166,7 +1167,7 @@ describe("createPolyScene", () => {
     });
 
     it("can be called repeatedly to step through colors", () => {
-      scene = createPolyScene(host);
+      scene = makeScene(host);
       const handle = scene.add(makeParseResult([triangle("#ff0000")]), { merge: false });
       handle.updatePolygon(0, { color: "#00ff00" });
       handle.updatePolygon(0, { color: "#0000ff" });
@@ -1177,7 +1178,7 @@ describe("createPolyScene", () => {
 
   describe("autoCenter", () => {
     it("default (no autoCenter) leaves the scene translate3d at origin", () => {
-      scene = createPolyScene(host);
+      scene = makeScene(host);
       scene.add(makeParseResult());
       // Without autoCenter the offset is [0,0,0], so the innermost translate3d is zero.
       expect(getSceneTranslatePart(host)).toBe("translate3d(0px, 0px, 0px)");
@@ -1193,7 +1194,7 @@ describe("createPolyScene", () => {
         ],
         color: "#ff0000",
       };
-      scene = createPolyScene(host, { autoCenter: true });
+      scene = makeScene(host, { autoCenter: true });
       scene.add(makeParseResult([t]));
       // World-Y → CSS-X: cssX = 0.5 * 50 = 25 → translate by -25.
       // World-X → CSS-Y: cssY = 0.5 * 50 = 25 → translate by -25.
@@ -1203,7 +1204,7 @@ describe("createPolyScene", () => {
     });
 
     it("autoCenter recomputes when meshes change", () => {
-      scene = createPolyScene(host, { autoCenter: true });
+      scene = makeScene(host, { autoCenter: true });
       const handle = scene.add(makeParseResult([triangle()]));
       const t1 = getSceneTranslatePart(host);
 
@@ -1232,12 +1233,12 @@ describe("createPolyScene", () => {
     });
 
     it("autoCenter=true with no meshes leaves translate3d at origin", () => {
-      scene = createPolyScene(host, { autoCenter: true });
+      scene = makeScene(host, { autoCenter: true });
       expect(getSceneTranslatePart(host)).toBe("translate3d(0px, 0px, 0px)");
     });
 
     it("setOptions({autoCenter: true}) enables centering after the fact", () => {
-      scene = createPolyScene(host, { autoCenter: false });
+      scene = makeScene(host, { autoCenter: false });
       scene.add(makeParseResult([triangle()]));
       expect(getSceneTranslatePart(host)).toBe("translate3d(0px, 0px, 0px)");
       scene.setOptions({ autoCenter: true });
@@ -1254,7 +1255,7 @@ describe("createPolyScene", () => {
         ],
         color: "#fff",
       };
-      scene = createPolyScene(host, { autoCenter: true });
+      scene = makeScene(host, { autoCenter: true });
       scene.add(makeParseResult([tri]));
       expect(getSceneTranslatePart(host)).toContain("-50px");
     });
@@ -1279,7 +1280,7 @@ describe("createPolyScene", () => {
         ],
         color: "#fff",
       };
-      scene = createPolyScene(host, { autoCenter: true });
+      scene = makeScene(host, { autoCenter: true });
       scene.add(makeParseResult([chicken]));
       const before = getSceneTranslatePart(host);
       scene.add(makeParseResult([farAway]), { excludeFromAutoCenter: true });
@@ -1298,13 +1299,13 @@ describe("createPolyScene", () => {
     };
 
     it("default (no castShadow) emits no .polycss-shadow elements", () => {
-      scene = createPolyScene(host, dynOpts);
+      scene = makeScene(host, dynOpts);
       scene.add(makeParseResult([triangle()]));
       expect(host.querySelectorAll(".polycss-shadow").length).toBe(0);
     });
 
     it("castShadow:true in dynamic mode emits shadow leaves, one per non-textured polygon", () => {
-      scene = createPolyScene(host, dynOpts);
+      scene = makeScene(host, dynOpts);
       // Use spatially distinct triangles so the loose shadow-dedup pass
       // doesn't fold them into one shadow (two triangles at the same
       // location WOULD be deduped, which is the intended behavior).
@@ -1317,13 +1318,13 @@ describe("createPolyScene", () => {
     });
 
     it("castShadow:true in baked mode emits NO shadow leaves", () => {
-      scene = createPolyScene(host, { textureLighting: "baked" });
+      scene = makeScene(host, { textureLighting: "baked" });
       scene.add(makeParseResult([triangle()]), { castShadow: true });
       expect(host.querySelectorAll(".polycss-shadow").length).toBe(0);
     });
 
     it("shadow leaves have the polycss-shadow class", () => {
-      scene = createPolyScene(host, dynOpts);
+      scene = makeScene(host, dynOpts);
       scene.add(makeParseResult([triangle()]), { castShadow: true });
       const shadows = host.querySelectorAll(".polycss-shadow");
       expect(shadows.length).toBeGreaterThan(0);
@@ -1333,7 +1334,7 @@ describe("createPolyScene", () => {
     });
 
     it("shadow leaves are always <q> with border-shape regardless of caster tag", () => {
-      scene = createPolyScene(host, dynOpts);
+      scene = makeScene(host, dynOpts);
       // Mix shapes at distinct 3D positions (otherwise the loose-tolerance
       // shadow dedup pass folds them into one shadow). Each emits a <q>
       // shadow — a dedicated single-letter render strategy in the tag
@@ -1356,7 +1357,7 @@ describe("createPolyScene", () => {
     });
 
     it("shadow leaves transform contains var(--shadow-proj) followed by matrix3d", () => {
-      scene = createPolyScene(host, dynOpts);
+      scene = makeScene(host, dynOpts);
       scene.add(makeParseResult([triangle()]), { castShadow: true });
       const shadow = host.querySelector(".polycss-shadow") as HTMLElement;
       expect(shadow).not.toBeNull();
@@ -1364,7 +1365,7 @@ describe("createPolyScene", () => {
     });
 
     it("adding a casting mesh sets --shadow-ground-cssz on the scene element", () => {
-      scene = createPolyScene(host, dynOpts);
+      scene = makeScene(host, dynOpts);
       scene.add(makeParseResult([triangle()]), { castShadow: true });
       const sceneEl = getSceneEl(host);
       const groundVar = sceneEl.style.getPropertyValue("--shadow-ground-cssz");
@@ -1372,7 +1373,7 @@ describe("createPolyScene", () => {
     });
 
     it("removing the casting mesh clears --shadow-ground-cssz", () => {
-      scene = createPolyScene(host, dynOpts);
+      scene = makeScene(host, dynOpts);
       const handle = scene.add(makeParseResult([triangle()]), { castShadow: true });
       const sceneEl = getSceneEl(host);
       expect(sceneEl.style.getPropertyValue("--shadow-ground-cssz")).not.toBe("");
@@ -1381,7 +1382,7 @@ describe("createPolyScene", () => {
     });
 
     it("toggling castShadow via setTransform adds/removes shadow leaves", () => {
-      scene = createPolyScene(host, dynOpts);
+      scene = makeScene(host, dynOpts);
       const handle = scene.add(makeParseResult([triangle()]), { castShadow: false });
       expect(host.querySelectorAll(".polycss-shadow").length).toBe(0);
       handle.setTransform({ castShadow: true });
@@ -1391,7 +1392,7 @@ describe("createPolyScene", () => {
     });
 
     it("switching from dynamic to baked removes shadow leaves", () => {
-      scene = createPolyScene(host, dynOpts);
+      scene = makeScene(host, dynOpts);
       scene.add(makeParseResult([triangle()]), { castShadow: true });
       expect(host.querySelectorAll(".polycss-shadow").length).toBeGreaterThan(0);
       scene.setOptions({ textureLighting: "baked" });
@@ -1399,7 +1400,7 @@ describe("createPolyScene", () => {
     });
 
     it("switching from baked back to dynamic re-emits shadow leaves", () => {
-      scene = createPolyScene(host, { textureLighting: "baked" });
+      scene = makeScene(host, { textureLighting: "baked" });
       scene.add(makeParseResult([triangle()]), { castShadow: true });
       expect(host.querySelectorAll(".polycss-shadow").length).toBe(0);
       scene.setOptions({ ...dynOpts });
@@ -1407,7 +1408,7 @@ describe("createPolyScene", () => {
     });
 
     it("textured polygons (s) ALSO emit shadow leaves", () => {
-      scene = createPolyScene(host, dynOpts);
+      scene = makeScene(host, dynOpts);
       scene.add(makeParseResult([texturedTriangle()]), { castShadow: true });
       // Shadows depend only on the polygon's outline, not its texture
       // content. Atlas (<s>) polygons cast shadows the same way as
@@ -1417,7 +1418,7 @@ describe("createPolyScene", () => {
     });
 
     it("--clx/--cly/--clz are set on the scene element in dynamic mode", () => {
-      scene = createPolyScene(host, dynOpts);
+      scene = makeScene(host, dynOpts);
       const sceneEl = getSceneEl(host);
       expect(sceneEl.style.getPropertyValue("--clx")).not.toBe("");
       expect(sceneEl.style.getPropertyValue("--cly")).not.toBe("");
@@ -1425,7 +1426,7 @@ describe("createPolyScene", () => {
     });
 
     it("--clx/--cly/--clz are removed when lighting switches to baked", () => {
-      scene = createPolyScene(host, dynOpts);
+      scene = makeScene(host, dynOpts);
       const sceneEl = getSceneEl(host);
       expect(sceneEl.style.getPropertyValue("--clx")).not.toBe("");
       scene.setOptions({ textureLighting: "baked" });
@@ -1433,5 +1434,34 @@ describe("createPolyScene", () => {
       expect(sceneEl.style.getPropertyValue("--cly")).toBe("");
       expect(sceneEl.style.getPropertyValue("--clz")).toBe("");
     });
+  });
+});
+
+describe("scene.add — meshResolution option", () => {
+  let host: HTMLElement;
+  let scene: PolySceneHandle;
+
+  beforeEach(() => {
+    host = document.createElement("div");
+    document.body.appendChild(host);
+  });
+
+  afterEach(() => {
+    scene?.destroy();
+    if (host.parentNode) host.parentNode.removeChild(host);
+  });
+
+  it("scene.add with meshResolution='lossless' does not throw and produces leaf DOM", () => {
+    scene = makeScene(host);
+    const handle = scene.add(makeParseResult([triangle(), triangle()]), { meshResolution: "lossless" });
+    expect(handle).toBeTruthy();
+    expect(host.querySelectorAll("i,b,s,u").length).toBeGreaterThan(0);
+  });
+
+  it("scene.add with meshResolution='lossy' does not throw and produces leaf DOM", () => {
+    scene = makeScene(host);
+    const handle = scene.add(makeParseResult([triangle()]), { meshResolution: "lossy" });
+    expect(handle).toBeTruthy();
+    expect(host.querySelectorAll("i,b,s,u").length).toBeGreaterThan(0);
   });
 });

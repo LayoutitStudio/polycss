@@ -530,20 +530,24 @@ const { id, model, mtl, generator, generatorParams, controls, defaults, showStat
 
       // ── Scene init for generator mode ─────────────────────────────────────
       async function initGeneratorScene() {
-        const { createPolyScene, createPolyOrbitControls } = await import("@layoutit/polycss");
+        const {
+          createPolyOrbitControls,
+          createPolyOrthographicCamera,
+          createPolyPerspectiveCamera,
+          createPolyScene,
+        } = await import("@layoutit/polycss");
 
         sceneEl = document.createElement("div");
         sceneEl.style.cssText = "width:100%;height:100%;position:absolute;inset:0;";
         sceneHost.appendChild(sceneEl);
 
-        const sceneOptions: Record<string, any> = {
-          rotX: state.rotX,
-          rotY: state.rotY,
-          zoom: state.zoom,
-          autoCenter: true,
-        };
+        const cameraOpts = { rotX: state.rotX, rotY: state.rotY, zoom: state.zoom };
         const perspective = perspectiveOverride();
-        if (perspective !== undefined) sceneOptions.perspective = perspective;
+        const camera = perspective !== undefined
+          ? createPolyPerspectiveCamera({ ...cameraOpts, perspective })
+          : createPolyOrthographicCamera(cameraOpts);
+
+        const sceneOptions: Record<string, any> = { camera, autoCenter: true };
         if (state.light) sceneOptions.directionalLight = state.light;
 
         sceneHandle = createPolyScene(sceneEl as HTMLElement, sceneOptions);
@@ -586,14 +590,13 @@ const { id, model, mtl, generator, generatorParams, controls, defaults, showStat
       // ── Update camera from state (model mode uses attributes) ──────────────
       function updateCamera() {
         if (sceneHandle) {
-          // Generator mode — use imperative API
-          sceneHandle.setOptions({
+          // Generator mode — use imperative API; camera state lives on the camera handle
+          sceneHandle.camera?.update({
             rotX: state.rotX,
             rotY: state.rotY,
-            perspective: perspectiveOverride(),
             zoom: state.zoom,
-            autoCenter: true,
           });
+          sceneHandle.applyCamera();
         } else {
           // applySceneAttrs handles rotation/zoom/light attrs on the
           // <poly-scene>. drag/wheel/animate flow through <poly-orbit-controls>
@@ -616,113 +619,145 @@ const { id, model, mtl, generator, generatorParams, controls, defaults, showStat
 
       // ── Code snippet generation ────────────────────────────────────────────
       function updateCode() {
-        const cp: Record<string, string> = {};
-        if (state.zoom !== 1) cp.zoom = state.zoom.toFixed(2);
-        if (state.rotX !== 65) cp.rotX = String(state.rotX);
-        if (state.rotY !== 45) cp.rotY = String(state.rotY);
-        if (state.perspective !== rendererDefaultPerspective) cp.perspective = String(state.perspective);
-        if (state.animate) cp.animate = "true";
+        // Camera props — zoom/rotX/rotY always on camera; perspective on
+        // PolyPerspectiveCamera only (omitted entirely for ortho).
+        // state.perspective === false → orthographic; number → perspective.
+        const isOrtho = state.perspective === false;
+        const perspectivePx = isOrtho ? null : (state.perspective as number);
 
-        const sp: Record<string, string> = {};
+        // Only include non-default camera props in snippets to keep them tidy.
+        const camProps: Record<string, string> = {};
+        if (state.zoom !== 1) camProps.zoom = state.zoom.toFixed(2);
+        if (state.rotX !== 65) camProps.rotX = String(state.rotX);
+        if (state.rotY !== 45) camProps.rotY = String(state.rotY);
+        // Perspective is emitted only when non-default (8000 is the default).
+        if (!isOrtho && perspectivePx !== rendererDefaultPerspective) {
+          camProps.perspective = String(perspectivePx);
+        }
+
+        // Whether to include a controls line in the snippet.
+        const wantControls = state.animate || state.interactive;
 
         // ── React snippet ──────────────────────────────────────────────────
         if (codeEls.react) {
-          const r: string[] = ['import { PolyScene, PolyMesh } from "@layoutit/polycss-react";', ""];
-          r.push("export function App() {");
-          r.push("  return (");
+          const cameraTag = isOrtho ? "PolyCamera" : "PolyPerspectiveCamera";
 
-          const camAttrs = Object.entries(cp).map(([k, v]) =>
-            v === "true" ? k : `${k}={${v}}`
-          );
-          const sceneAttrs = Object.entries(sp).map(([k, v]) =>
-            v === "true" ? k : `${k}={${v}}`
-          );
-          const allAttrs = [...camAttrs, ...sceneAttrs];
+          const reactCamAttrs = Object.entries(camProps).map(([k, v]) => `${k}={${v}}`);
+
+          // Build camera open-tag
+          const reactCamOpen =
+            reactCamAttrs.length <= 2
+              ? `    <${cameraTag}${reactCamAttrs.length ? " " + reactCamAttrs.join(" ") : ""}>`
+              : `    <${cameraTag}\n` + reactCamAttrs.map((a) => "      " + a).join("\n") + "\n    >";
+
+          const r: string[] = [];
 
           if (modelSrc) {
-            if (allAttrs.length <= 3) {
-              r.push("    <PolyScene " + allAttrs.join(" ") + ">");
-            } else {
-              r.push("    <PolyScene");
-              allAttrs.forEach((a) => r.push("      " + a));
-              r.push("    >");
+            const imports = [cameraTag, "PolyScene", "PolyMesh"];
+            if (wantControls) imports.splice(2, 0, "PolyOrbitControls");
+            r.push(`import { ${imports.join(", ")} } from "@layoutit/polycss-react";`);
+            r.push("");
+            r.push("export function App() {");
+            r.push("  return (");
+            r.push(reactCamOpen);
+            r.push("      <PolyScene>");
+            if (wantControls) {
+              const animProp = state.animate ? ' animate={{ speed: 0.3 }}' : '';
+              const dragProp = state.interactive ? ' drag wheel' : '';
+              r.push(`        <PolyOrbitControls${dragProp}${animProp} />`);
             }
-            r.push('      <PolyMesh src="' + modelSrc + '"' + (modelMtl ? ' mtl="' + modelMtl + '"' : '') + ' />');
-            r.push("    <" + "/PolyScene>");
+            r.push('        <PolyMesh src="' + modelSrc + '"' + (modelMtl ? ' mtl="' + modelMtl + '"' : '') + ' />');
+            r.push("      <" + "/PolyScene>");
+            r.push("    <" + `/${cameraTag}>`);
+            r.push("  );");
+            r.push("}");
           } else if (generatorName) {
             const fnCall =
               generatorName === "sphere"
                 ? `buildSpherePolygons(${state.radius}, ${state.subdivisions})`
                 : `build${generatorName.charAt(0).toUpperCase()}${generatorName.slice(1)}Polygons(${state.radius})`;
-            r[0] = 'import { PolyScene, Poly } from "@layoutit/polycss-react";';
-            r.splice(1, 0, '');
-            r.splice(2, 0, `const polygons = ${fnCall};`);
-            r.splice(3, 0, '');
-            if (allAttrs.length <= 3) {
-              r.push("    <PolyScene " + allAttrs.join(" ") + ">");
-            } else {
-              r.push("    <PolyScene");
-              allAttrs.forEach((a) => r.push("      " + a));
-              r.push("    >");
+            const imports = [cameraTag, "PolyScene", "Poly"];
+            if (wantControls) imports.splice(2, 0, "PolyOrbitControls");
+            r.push(`import { ${imports.join(", ")} } from "@layoutit/polycss-react";`);
+            r.push("");
+            r.push(`const polygons = ${fnCall};`);
+            r.push("");
+            r.push("export function App() {");
+            r.push("  return (");
+            r.push(reactCamOpen);
+            r.push("      <PolyScene>");
+            if (wantControls) {
+              const animProp = state.animate ? ' animate={{ speed: 0.3 }}' : '';
+              const dragProp = state.interactive ? ' drag wheel' : '';
+              r.push(`        <PolyOrbitControls${dragProp}${animProp} />`);
             }
-            r.push("      {polygons.map((p, i) => <Poly key={i} {...p} />)}");
-            r.push("    <" + "/PolyScene>");
+            r.push("        {polygons.map((p, i) => <Poly key={i} {...p} />)}");
+            r.push("      <" + "/PolyScene>");
+            r.push("    <" + `/${cameraTag}>`);
+            r.push("  );");
+            r.push("}");
           }
 
-          r.push("  );");
-          r.push("}");
           codeEls.react.textContent = r.join("\n");
         }
 
         // ── Vue snippet ───────────────────────────────────────────────────
         if (codeEls.vue) {
-          const vueCamAttrs = Object.entries(cp).map(([k, v]) => {
+          const cameraTag = isOrtho ? "PolyCamera" : "PolyPerspectiveCamera";
+
+          // kebab-case with : binding for numeric props
+          const vueCamAttrs = Object.entries(camProps).map(([k, v]) => {
             const attr = k.replace(/([A-Z])/g, "-$1").toLowerCase();
-            return v === "true" ? attr : `:${attr}="${v}"`;
+            return `:${attr}="${v}"`;
           });
-          const vueSceneAttrs = Object.entries(sp).map(([k, v]) => {
-            const attr = k.replace(/([A-Z])/g, "-$1").toLowerCase();
-            return v === "true" ? attr : `:${attr}="${v}"`;
-          });
-          const allVue = [...vueCamAttrs, ...vueSceneAttrs];
+
+          const vueCamOpen =
+            vueCamAttrs.length <= 2
+              ? `  <${cameraTag}${vueCamAttrs.length ? " " + vueCamAttrs.join(" ") : ""}>`
+              : `  <${cameraTag}\n` + vueCamAttrs.map((a) => "    " + a).join("\n") + "\n  >";
+
           const v: string[] = ["<template>"];
+          v.push(vueCamOpen);
+          v.push("    <PolyScene>");
 
           if (modelSrc) {
-            if (allVue.length <= 3) {
-              v.push("  <PolyScene " + allVue.join(" ") + ">");
-            } else {
-              v.push("  <PolyScene");
-              allVue.forEach((a) => v.push("    " + a));
-              v.push("  >");
+            if (wantControls) {
+              const animProp = state.animate ? ' :animate="{ speed: 0.3 }"' : '';
+              const dragProp = state.interactive ? ' drag wheel' : '';
+              v.push(`      <PolyOrbitControls${dragProp}${animProp} />`);
             }
-            v.push('    <PolyMesh src="' + modelSrc + '"' + (modelMtl ? ' mtl="' + modelMtl + '"' : '') + ' />');
-            v.push("  <" + "/PolyScene>");
+            v.push('      <PolyMesh src="' + modelSrc + '"' + (modelMtl ? ' mtl="' + modelMtl + '"' : '') + ' />');
           } else if (generatorName) {
-            if (allVue.length <= 3) {
-              v.push("  <PolyScene " + allVue.join(" ") + ">");
-            } else {
-              v.push("  <PolyScene");
-              allVue.forEach((a) => v.push("    " + a));
-              v.push("  >");
+            if (wantControls) {
+              const animProp = state.animate ? ' :animate="{ speed: 0.3 }"' : '';
+              const dragProp = state.interactive ? ' drag wheel' : '';
+              v.push(`      <PolyOrbitControls${dragProp}${animProp} />`);
             }
-            v.push("    <Poly v-for=\"(p, i) in polygons\" :key=\"i\" v-bind=\"p\" />");
-            v.push("  <" + "/PolyScene>");
+            v.push("      <Poly v-for=\"(p, i) in polygons\" :key=\"i\" v-bind=\"p\" />");
           }
 
+          v.push("    <" + "/PolyScene>");
+          v.push("  <" + `/${cameraTag}>`);
           v.push("<" + "/template>");
           v.push("");
           v.push("<" + "script setup lang=\"ts\">");
+
           if (modelSrc) {
-            v.push('import { PolyScene, PolyMesh } from "@layoutit/polycss-vue";');
+            const imports = [cameraTag, "PolyScene", "PolyMesh"];
+            if (wantControls) imports.splice(2, 0, "PolyOrbitControls");
+            v.push(`import { ${imports.join(", ")} } from "@layoutit/polycss-vue";`);
           } else if (generatorName) {
             const fnCall =
               generatorName === "sphere"
                 ? `buildSpherePolygons(${state.radius}, ${state.subdivisions})`
                 : `build${generatorName.charAt(0).toUpperCase()}${generatorName.slice(1)}Polygons(${state.radius})`;
-            v.push('import { PolyScene, Poly } from "@layoutit/polycss-vue";');
+            const imports = [cameraTag, "PolyScene", "Poly"];
+            if (wantControls) imports.splice(2, 0, "PolyOrbitControls");
+            v.push(`import { ${imports.join(", ")} } from "@layoutit/polycss-vue";`);
             v.push("import { computed } from \"vue\";");
             v.push(`const polygons = computed(() => ${fnCall});`);
           }
+
           v.push("<" + "/script>");
           codeEls.vue.textContent = v.join("\n");
         }
@@ -730,43 +765,67 @@ const { id, model, mtl, generator, generatorParams, controls, defaults, showStat
         // ── Vanilla snippet ───────────────────────────────────────────────
         if (codeEls.vanilla) {
           const j: string[] = [];
-          const htmlAttrs: string[] = [];
-          if (state.zoom !== 1) htmlAttrs.push(`  zoom="${state.zoom.toFixed(2)}"`);
-          if (state.rotX !== 65) htmlAttrs.push(`  rot-x="${state.rotX}"`);
-          if (state.rotY !== 45) htmlAttrs.push(`  rot-y="${state.rotY}"`);
-          if (state.perspective !== rendererDefaultPerspective) htmlAttrs.push(`  perspective="${state.perspective}"`);
-          htmlAttrs.push('  auto-center');
 
-          j.push('<script type="module" src="https://esm.sh/@layoutit/polycss/elements"><' + "/script>");
-          j.push("");
+          // Camera element attrs — kebab-case
+          const camHtmlAttrs: string[] = [];
+          if (state.zoom !== 1) camHtmlAttrs.push(`  zoom="${state.zoom.toFixed(2)}"`);
+          if (state.rotX !== 65) camHtmlAttrs.push(`  rot-x="${state.rotX}"`);
+          if (state.rotY !== 45) camHtmlAttrs.push(`  rot-y="${state.rotY}"`);
+          // Perspective: only on <poly-perspective-camera>, only when non-default.
+          if (!isOrtho && perspectivePx !== rendererDefaultPerspective) {
+            camHtmlAttrs.push(`  perspective="${perspectivePx}"`);
+          }
+
+          const cameraEl = isOrtho ? "poly-camera" : "poly-perspective-camera";
+
           if (modelSrc) {
-            if (htmlAttrs.length <= 2) {
-              j.push(`<poly-scene ${htmlAttrs.join(" ").trim()}>`);
+            j.push('<script type="module" src="https://esm.sh/@layoutit/polycss/elements"><' + "/script>");
+            j.push("");
+
+            // Camera open tag
+            if (camHtmlAttrs.length <= 1) {
+              j.push(`<${cameraEl}${camHtmlAttrs.length ? " " + camHtmlAttrs.join(" ").trim() : ""}>`);
             } else {
-              j.push("<poly-scene");
-              htmlAttrs.forEach((a) => j.push(a));
+              j.push(`<${cameraEl}`);
+              camHtmlAttrs.forEach((a) => j.push(a));
               j.push(">");
             }
-            j.push(`  <poly-mesh src="${modelSrc}"${modelMtl ? ` mtl="${modelMtl}"` : ""}></poly-mesh>`);
-            j.push("<" + "/poly-scene>");
+            j.push("  <poly-scene>");
+            if (wantControls) {
+              const animAttr = state.animate ? ' animate-speed="0.3"' : '';
+              const dragAttr = state.interactive ? ' drag wheel' : '';
+              j.push(`    <poly-orbit-controls${dragAttr}${animAttr}></poly-orbit-controls>`);
+            }
+            j.push(`    <poly-mesh src="${modelSrc}"${modelMtl ? ` mtl="${modelMtl}"` : ""} auto-center></poly-mesh>`);
+            j.push("  <" + "/poly-scene>");
+            j.push("<" + `/${cameraEl}>`);
           } else if (generatorName) {
+            // Generator mode — imperative API with createPolyCamera / createPolyScene.
             const fnCall =
               generatorName === "sphere"
                 ? `buildSpherePolygons(${state.radius}, ${state.subdivisions})`
                 : `build${generatorName.charAt(0).toUpperCase()}${generatorName.slice(1)}Polygons(${state.radius})`;
+
             j.push(`<!-- Polygons generated client-side via the imperative API: -->`);
             j.push('<script type="module">');
-            j.push('import { createPolyScene, createPolyOrbitControls } from "https://esm.sh/@layoutit/polycss";');
+
+            const createCameraFn = isOrtho ? "createPolyCamera" : "createPolyPerspectiveCamera";
+            j.push(`import { ${createCameraFn}, createPolyScene, createPolyOrbitControls } from "https://esm.sh/@layoutit/polycss";`);
             j.push("");
             j.push("const host = document.getElementById(\"scene\");");
-            j.push("const scene = createPolyScene(host, {");
-            if (state.rotX !== 65) j.push(`  rotX: ${state.rotX},`);
-            if (state.rotY !== 45) j.push(`  rotY: ${state.rotY},`);
-            if (state.perspective !== rendererDefaultPerspective) j.push(`  perspective: ${state.perspective},`);
-            j.push("  autoCenter: true,");
-            j.push("});");
+
+            // Camera opts
+            const cameraOptParts: string[] = [];
+            if (state.rotX !== 65) cameraOptParts.push(`rotX: ${state.rotX}`);
+            if (state.rotY !== 45) cameraOptParts.push(`rotY: ${state.rotY}`);
+            if (!isOrtho && perspectivePx !== rendererDefaultPerspective) {
+              cameraOptParts.push(`perspective: ${perspectivePx}`);
+            }
+            j.push(`const camera = ${createCameraFn}({${cameraOptParts.length ? " " + cameraOptParts.join(", ") + " " : ""}});`);
+            j.push("const scene = createPolyScene(host, { camera, autoCenter: true });");
             j.push(`const polygons = ${fnCall};`);
             j.push("scene.add({ polygons, dispose: () => {} });");
+
             // Reflect the same drag/wheel/animate state the demo's controls
             // toolbar shows, so the snippet matches what the user sees.
             const animBlock = state.animate

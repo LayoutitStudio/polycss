@@ -20,6 +20,7 @@
  * the anchor via their own matrix3d translations.
  */
 import type {
+  MeshResolution,
   PolyAmbientLight,
   PolyDirectionalLight,
   ParseResult,
@@ -29,6 +30,10 @@ import type {
   CameraCullNormalGroup,
   CameraCullRotation,
 } from "@layoutit/polycss-core";
+import type {
+  PolyPerspectiveCameraHandle,
+  PolyOrthographicCameraHandle,
+} from "./createPolyCamera";
 import {
   BASE_TILE,
   CAMERA_BACKFACE_CULL_EPS,
@@ -40,6 +45,7 @@ import {
   isVoxelCameraCullableNormalGroups,
   mergePolygons,
   normalFacesCamera,
+  optimizeMeshPolygons,
   parseHexColor,
   polygonCssSurfaceNormal,
 } from "@layoutit/polycss-core";
@@ -68,27 +74,12 @@ const ASYNC_MOUNT_BATCH_SIZE = 750;
 const DEFAULT_SCENE_PERSPECTIVE = 8000;
 
 export interface PolySceneOptions {
-  perspective?: number | false;
-  rotX?: number;
-  rotY?: number;
-  zoom?: number;
   /**
-   * Camera pull-back distance in CSS pixels. Increasing distance moves the
-   * camera farther from the target (scene appears smaller), applied as an
-   * outermost `translateZ(-distance)` in the scene transform. Matches the
-   * `distance` field in core's `CameraState`. Default: 0 (no dolly offset).
+   * Camera handle created by `createPolyCamera`, `createPolyOrthographicCamera`,
+   * or `createPolyPerspectiveCamera`. Required — `createPolyScene` will throw if
+   * this field is missing.
    */
-  distance?: number;
-  /**
-   * World-coordinate camera target — the world point that appears at the
-   * viewport centre. Matches React's `CameraState.target`. Defaults to
-   * `[0, 0, 0]` so existing scenes that don't set it keep working.
-   *
-   * Internally encoded as the innermost translate in the scene transform:
-   * `scale(zoom) rotateX(rotX) rotate(rotY) translate3d(-ty*tile, -tx*tile, -tz*tile)`
-   * (world→CSS axis swap: world-X→CSS-Y, world-Y→CSS-X, world-Z→CSS-Z).
-   */
-  target?: Vec3;
+  camera: PolyPerspectiveCameraHandle | PolyOrthographicCameraHandle;
   directionalLight?: PolyDirectionalLight;
   ambientLight?: PolyAmbientLight;
   /** Textured polygon lighting mode. Defaults to "baked". */
@@ -145,6 +136,14 @@ export interface PolyMeshTransform {
    * triangle topology must remain stable from frame to frame.
    */
   merge?: boolean;
+  /**
+   * Mesh optimization intent. Defaults to `"lossy"` (bounded geometric
+   * approximation when it reduces polygon count). Set `"lossless"` to preserve
+   * the authored surface — only exact coplanar merges are applied.
+   * When set, the optimizer runs with this resolution and supersedes the
+   * plain `mergePolygons` pass.
+   */
+  meshResolution?: MeshResolution;
   /**
    * Keep polygon leaf DOM nodes stable across setPolygons() calls when the
    * mesh topology is unchanged. Intended for animated/deforming meshes.
@@ -246,8 +245,8 @@ interface InternalPolyMeshHandle extends PolyMeshHandle {
 export interface PolySceneHandle {
   /** Add a mesh to the scene. Returns a handle for later removal. */
   add(mesh: ParseResult, opts?: PolyMeshTransform): PolyMeshHandle;
-  /** Update scene-level config (rotation, lighting, etc.). */
-  setOptions(partial: Partial<PolySceneOptions>): void;
+  /** Update scene-level config (lighting, autoCenter, strategies, etc.). Camera state is on `scene.camera`. */
+  setOptions(partial: Partial<Omit<PolySceneOptions, "camera">>): void;
   /** Tear down the scene; revokes all blob URLs of registered meshes. */
   destroy(): void;
   /**
@@ -257,13 +256,23 @@ export interface PolySceneHandle {
    */
   readonly host: HTMLElement;
   /**
-   * Snapshot of the current options (camera, lighting, merge, autoCenter,
-   * textureLighting, textureQuality, and perspective). Returned by reference,
-   * so callers must treat it as read-only —
-   * mutations won't propagate. Used by helpers that need to read the current
-   * camera state without duplicating it.
+   * The camera handle this scene is bound to. Controls update camera state
+   * via `scene.camera.update({...})` then call `scene.applyCamera()` to
+   * re-apply the transform.
    */
-  getOptions(): Readonly<PolySceneOptions>;
+  readonly camera: PolyPerspectiveCameraHandle | PolyOrthographicCameraHandle;
+  /**
+   * Re-applies the scene transform from the current camera state. Call this
+   * after mutating `scene.camera.update({...})` to make the change visible.
+   * Controls call this once per interaction event after updating camera state.
+   */
+  applyCamera(): void;
+  /**
+   * Snapshot of the current non-camera scene options (lighting, autoCenter,
+   * textureQuality, strategies, shadow). Returned by reference — treat as
+   * read-only; use `setOptions` to update.
+   */
+  getOptions(): Readonly<Omit<PolySceneOptions, "camera">>;
   /** Snapshot of mesh handles currently in the scene (insertion order).
    *  Used by selection helpers to enumerate hit-test candidates. */
   meshes(): readonly PolyMeshHandle[];
@@ -272,11 +281,6 @@ export interface PolySceneHandle {
   findMeshByElement(element: Element | null): PolyMeshHandle | null;
 }
 
-// Match React's PolyCamera default — 1000px is a strong fish-eye that
-// distorts loaded meshes; 8000px gives the gentle iso look users expect.
-const DEFAULT_PERSPECTIVE = 8000;
-const DEFAULT_ROT_X = 65;
-const DEFAULT_ROT_Y = 45;
 const DEFAULT_ZOOM = 1;
 const DEFAULT_TILE = BASE_TILE;
 
@@ -313,16 +317,17 @@ function buildMeshTransform(t: PolyMeshTransform): string | undefined {
   return parts.length > 0 ? parts.join(" ") : undefined;
 }
 
-function buildSceneTransform(
-  opts: PolySceneOptions,
+function buildSceneTransformFromCamera(
+  camera: PolyPerspectiveCameraHandle | PolyOrthographicCameraHandle,
   autoCenterOffset: Vec3 = [0, 0, 0],
   layoutScale = 1,
 ): string {
-  const rotX = opts.rotX ?? DEFAULT_ROT_X;
-  const rotY = opts.rotY ?? DEFAULT_ROT_Y;
-  const zoom = (opts.zoom ?? DEFAULT_ZOOM) * layoutScale;
-  const distance = (opts.distance ?? 0) * layoutScale;
-  const target = opts.target ?? [0, 0, 0];
+  const state = camera.state;
+  const rotX = state.rotX;
+  const rotY = state.rotY;
+  const zoom = (state.zoom ?? DEFAULT_ZOOM) * layoutScale;
+  const distance = (state.distance ?? 0) * layoutScale;
+  const target = state.target ?? [0, 0, 0];
   // World→CSS axis swap: world[0]→CSS Y, world[1]→CSS X, world[2]→CSS Z.
   // Negate so the scene moves such that `target + autoCenterOffset` appears
   // at viewport centre. `autoCenterOffset` is the bbox-center of all meshes
@@ -441,11 +446,19 @@ function quantizeNormalKey(p: Polygon): { key: string; vec: Vec3 } | null {
 
 export function createPolyScene(
   host: HTMLElement,
-  options: PolySceneOptions = {},
+  options: PolySceneOptions,
 ): PolySceneHandle {
   if (!host || typeof host.appendChild !== "function") {
     throw new Error("createPolyScene: host must be an HTMLElement");
   }
+  if (!options?.camera) {
+    throw new Error(
+      "createPolyScene: a camera handle is required. " +
+      "Use createPolyCamera({...}) or createPolyPerspectiveCamera({...}) and pass as { camera }."
+    );
+  }
+
+  const camera = options.camera;
 
   // Inject base styles into the host's owning document so .polycss-scene
   // has perspective + preserve-3d defaults.
@@ -460,7 +473,10 @@ export function createPolyScene(
     if (computed.position === "static") host.style.position = "relative";
   }
 
-  let currentOptions: PolySceneOptions = { ...options };
+  // currentOptions holds non-camera scene options only.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const { camera: _cameraOption, ...nonCameraOptions } = options;
+  let currentOptions: Omit<PolySceneOptions, "camera"> = { ...nonCameraOptions };
   const layoutScale = effectiveCssZoom(host);
 
   // Bbox-center of all live meshes (helpers opt out). Auto-managed by
@@ -506,24 +522,22 @@ export function createPolyScene(
   }
   const meshes = new Set<MeshEntry>();
 
-  function applySceneStyle(el: HTMLElement, opts: PolySceneOptions): void {
+  function applySceneStyle(el: HTMLElement, opts: Omit<PolySceneOptions, "camera">): void {
     applyCssZoomCompensation(el, layoutScale);
-    el.style.transform = buildSceneTransform(opts, autoCenterOffset, layoutScale);
-    if (typeof opts.perspective === "number") {
-      el.style.perspective = `${scaledCssPixels(opts.perspective, layoutScale)}px`;
-    } else if (opts.perspective === false) {
-      // Orthographic projection — true `perspective: none` triggers a Chrome
-      // compositor fast path that mis-rasterizes <u> border-triangle leaves
-      // (0×0 layout box with asymmetric borders): holes and dropped fragments
-      // at initial paint. A very large finite perspective is visually
-      // indistinguishable from orthographic (no perceptible foreshortening at
-      // this distance) but routes Chrome through the normal compositor path.
+    el.style.transform = buildSceneTransformFromCamera(camera, autoCenterOffset, layoutScale);
+    // Apply CSS perspective from the camera's perspectiveStyle. The orthographic
+    // camera returns "none" — but true `perspective: none` triggers a Chrome
+    // compositor fast path that mis-rasterizes <u> border-triangle leaves.
+    // A very large finite value is visually orthographic but routes Chrome
+    // through the normal compositor path.
+    const perspStyle = camera.perspectiveStyle;
+    if (perspStyle === "none") {
       el.style.perspective = `${scaledCssPixels(1000000, layoutScale)}px`;
     } else {
-      if (Math.abs(layoutScale - 1) < 1e-6) {
-        el.style.removeProperty("perspective");
-      } else {
-        el.style.perspective = `${scaledCssPixels(DEFAULT_SCENE_PERSPECTIVE, layoutScale)}px`;
+      // perspStyle is e.g. "8000px" — strip "px", scale, re-apply.
+      const px = parseFloat(perspStyle);
+      if (Number.isFinite(px)) {
+        el.style.perspective = `${scaledCssPixels(px, layoutScale)}px`;
       }
     }
     applyDynamicLightVars(el, opts);
@@ -543,7 +557,7 @@ export function createPolyScene(
   // in the same frame there; the shadow projection works against 3D positions
   // that have already been through the axis swap, so it needs the light in
   // that same swapped frame.
-  function applyDynamicLightVars(el: HTMLElement, opts: PolySceneOptions): void {
+  function applyDynamicLightVars(el: HTMLElement, opts: Omit<PolySceneOptions, "camera">): void {
     const dynamic = opts.textureLighting === "dynamic";
     el.dataset.polycssLighting = opts.textureLighting ?? "baked";
     const vars = [
@@ -674,8 +688,8 @@ export function createPolyScene(
 
   function cameraCullRotation(entry: MeshEntry): CameraCullRotation {
     return {
-      rotX: currentOptions.rotX ?? DEFAULT_ROT_X,
-      rotY: currentOptions.rotY ?? DEFAULT_ROT_Y,
+      rotX: camera.state.rotX,
+      rotY: camera.state.rotY,
       meshRotation: entry.handle.transform.rotation,
     };
   }
@@ -1276,8 +1290,15 @@ export function createPolyScene(
     const css = buildMeshTransform(transform);
     if (css) wrapper.style.transform = css;
 
-    const preparePolygons = (polygons: Polygon[], merge: boolean): Polygon[] =>
-      merge ? mergePolygons(polygons) : polygons;
+    // When meshResolution is explicitly set, run the full optimizer (which
+    // subsumes mergePolygons) with that resolution intent. Otherwise fall back
+    // to the plain merge pass for backward compatibility.
+    const preparePolygons = (polygons: Polygon[], merge: boolean): Polygon[] => {
+      if (transformIn.meshResolution !== undefined) {
+        return optimizeMeshPolygons(polygons, { meshResolution: transformIn.meshResolution });
+      }
+      return merge ? mergePolygons(polygons) : polygons;
+    };
     const sourcePolygons = preparePolygons(parseResult.polygons, mergeOnUpdate);
 
     // Pivot rotations around the mesh's polygon bbox center, not the
@@ -1474,12 +1495,10 @@ export function createPolyScene(
     return handle;
   }
 
-  function setOptions(partial: Partial<PolySceneOptions>): void {
+  function setOptions(partial: Partial<Omit<PolySceneOptions, "camera">>): void {
     const prevAutoCenter = !!currentOptions.autoCenter;
     const prevStrategies = currentOptions.strategies;
     const prevTextureLighting = currentOptions.textureLighting;
-    const prevRotX = currentOptions.rotX ?? DEFAULT_ROT_X;
-    const prevRotY = currentOptions.rotY ?? DEFAULT_ROT_Y;
     currentOptions = { ...currentOptions, ...partial };
     applySceneStyle(sceneEl, currentOptions);
     const nextAutoCenter = !!currentOptions.autoCenter;
@@ -1498,12 +1517,6 @@ export function createPolyScene(
     if (strategiesChanged) {
       for (const entry of meshes) renderEntry(entry);
     }
-    const cameraRotationChanged =
-      (partial.rotX !== undefined && (currentOptions.rotX ?? DEFAULT_ROT_X) !== prevRotX) ||
-      (partial.rotY !== undefined && (currentOptions.rotY ?? DEFAULT_ROT_Y) !== prevRotY);
-    if (!strategiesChanged && cameraRotationChanged) {
-      for (const entry of meshes) syncMountedRenderedForCameraChange(entry);
-    }
     if (prevAutoCenter !== nextAutoCenter) recomputeAutoCenter();
     // When lighting mode changes, re-emit or clear shadow leaves on all meshes
     // that have castShadow set. Shadow emission is only valid in dynamic mode.
@@ -1521,8 +1534,13 @@ export function createPolyScene(
     }
   }
 
-  function getOptions(): Readonly<PolySceneOptions> {
+  function getOptions(): Readonly<Omit<PolySceneOptions, "camera">> {
     return currentOptions;
+  }
+
+  function applyCamera(): void {
+    applySceneStyle(sceneEl, currentOptions);
+    for (const entry of meshes) syncMountedRenderedForCameraChange(entry);
   }
 
   function listMeshes(): readonly PolyMeshHandle[] {
@@ -1555,5 +1573,5 @@ export function createPolyScene(
     if (sceneEl.parentNode) sceneEl.parentNode.removeChild(sceneEl);
   }
 
-  return { add, setOptions, destroy, host, getOptions, meshes: listMeshes, findMeshByElement };
+  return { add, setOptions, destroy, host, camera, applyCamera, getOptions, meshes: listMeshes, findMeshByElement };
 }

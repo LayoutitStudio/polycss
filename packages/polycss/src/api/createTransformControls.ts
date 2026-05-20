@@ -570,12 +570,12 @@ export function createTransformControls(
       // Strip the shaft for back-facing arrows so the visible-only-from-
       // outside silhouette stays clean. Both halves of a pair otherwise
       // share the same shaft volume at the gizmo origin.
-      const sceneOpts = scene.getOptions();
+      const cameraState = scene.camera.state;
       const backFacing = isAxisBackFacing(
         spec.cssAxis,
         spec.sign,
-        sceneOpts.rotX ?? 65,
-        sceneOpts.rotY ?? 45,
+        cameraState.rotX ?? 65,
+        cameraState.rotY ?? 45,
       );
       return arrowPolygons({
         axis: WORLD_AXIS_FOR_CSS[spec.cssAxis],
@@ -594,9 +594,9 @@ export function createTransformControls(
       // works in WORLD axes (a = (perp+1)%3, b = (perp+2)%3); since
       // WORLD_AXIS_FOR_CSS is involutive, the CSS axis we test for back-
       // facing is just WORLD_AXIS_FOR_CSS[worldA / worldB].
-      const sceneOpts = scene.getOptions();
-      const rotX = sceneOpts.rotX ?? 65;
-      const rotY = sceneOpts.rotY ?? 45;
+      const cameraState = scene.camera.state;
+      const rotX = cameraState.rotX ?? 65;
+      const rotY = cameraState.rotY ?? 45;
       const worldPerp = WORLD_AXIS_FOR_CSS[spec.perpAxis];
       const worldA = ((worldPerp + 1) % 3) as 0 | 1 | 2;
       const worldB = ((worldPerp + 2) % 3) as 0 | 1 | 2;

@@ -29,23 +29,25 @@ const frameworkTabs = [
     language: "html",
     code: `<script type="module" src="https://esm.sh/@layoutit/polycss/elements"></script>
 
-<poly-scene rot-x="65" rot-y="45">
-  <poly-orbit-controls drag wheel animate-speed="0.3"></poly-orbit-controls>
-  <poly-mesh src="/cottage.glb"></poly-mesh>
-</poly-scene>`,
+<poly-camera rot-x="65" rot-y="45">
+  <poly-scene>
+    <poly-orbit-controls drag wheel animate-speed="0.3"></poly-orbit-controls>
+    <poly-icosahedron size="100" color="#ff6644"></poly-icosahedron>
+  </poly-scene>
+</poly-camera>`,
   },
   {
     id: "react",
     label: "React",
     language: "tsx",
-    code: `import { PolyCamera, PolyScene, PolyOrbitControls, PolyMesh } from "@layoutit/polycss-react";
+    code: `import { PolyCamera, PolyScene, PolyOrbitControls, PolyIcosahedron } from "@layoutit/polycss-react";
 
 export function App() {
   return (
     <PolyCamera rotX={65} rotY={45}>
       <PolyScene>
         <PolyOrbitControls drag wheel animate={{ speed: 0.3 }} />
-        <PolyMesh src="/cottage.glb" />
+        <PolyIcosahedron size={100} color="#ff6644" />
       </PolyScene>
     </PolyCamera>
   );
@@ -59,12 +61,12 @@ export function App() {
   <PolyCamera :rot-x="65" :rot-y="45">
     <PolyScene>
       <PolyOrbitControls drag wheel :animate="{ speed: 0.3 }" />
-      <PolyMesh src="/cottage.glb" />
+      <PolyIcosahedron :size="100" color="#ff6644" />
     </PolyScene>
   </PolyCamera>
 </template>
 <script setup lang="ts">
-import { PolyCamera, PolyScene, PolyOrbitControls, PolyMesh } from "@layoutit/polycss-vue";
+import { PolyCamera, PolyScene, PolyOrbitControls, PolyIcosahedron } from "@layoutit/polycss-vue";
 </script>`,
   },
 ].map(tab => ({
@@ -166,8 +168,8 @@ const ldJson = {
             </div>
           </div>
           <div class="hero-canvas" id="hero-root">
-            <!-- Apple GLB mounted with createPolyScene + loadMesh,
-                 autoCenter, and drag-to-rotate. -->
+            <!-- Colored cube mounted with createPolyCamera + createPolyScene + boxPolygons.
+                 Self-contained: no file fetch required. -->
           </div>
         </section>
 
@@ -224,7 +226,7 @@ const ldJson = {
             </div>
           </header>
           <div class="getting-lede">
-            <p>polycss provides custom elements (<code>&lt;poly-scene&gt;</code>, <code>&lt;poly-mesh&gt;</code>), an imperative <code>createPolyScene</code> API, and optional React / Vue bindings. Each polygon in the mesh becomes a DOM element you can style and interact with: use whichever entry point fits your stack.</p>
+            <p>polycss provides custom elements (<code>&lt;poly-camera&gt;</code>, <code>&lt;poly-scene&gt;</code>, <code>&lt;poly-mesh&gt;</code>), an imperative <code>createPolyCamera</code> / <code>createPolyScene</code> API, and optional React / Vue bindings. Each polygon in the mesh becomes a DOM element you can style and interact with: use whichever entry point fits your stack.</p>
           </div>
           <div class="getting-grid">
             <div class="getting-content">
@@ -276,13 +278,13 @@ const ldJson = {
     }
     fetchStars();
 
-    // Hero model: loads the Apple GLB and mounts it with createPolyScene.
+    // Hero model: apple GLB, auto-rotated for visual interest.
     // autoCenter keeps drag gestures pivoted around the mesh centroid.
     async function mountHeroModel() {
       const host = document.getElementById("hero-root");
       if (!host) return;
       try {
-        const { createPolyScene, createPolyOrbitControls, loadMesh } = await import("@layoutit/polycss");
+        const { createPolyPerspectiveCamera, createPolyScene, loadMesh } = await import("@layoutit/polycss");
         const parseResult = await loadMesh("/gallery/glb/apple.glb", {
           gltfOptions: {
             targetSize: 60,
@@ -290,20 +292,21 @@ const ldJson = {
           },
         });
 
-        const scene = createPolyScene(host, {
+        const camera = createPolyPerspectiveCamera({
           rotX: 74.4,
           rotY: 301.6,
           zoom: 0.3,
-          autoCenter: true,
           perspective: 100000,
         });
+        const scene = createPolyScene(host, { camera, autoCenter: true });
         scene.add(parseResult);
 
         // Auto-rotate the hero apple for visual interest.
         let rotY = 301.6;
         function tick() {
           rotY = (rotY + 1.2) % 360;
-          scene.setOptions({ rotY });
+          camera.update({ rotY });
+          scene.applyCamera();
           requestAnimationFrame(tick);
         }
         requestAnimationFrame(tick);

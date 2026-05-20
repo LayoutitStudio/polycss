@@ -39,7 +39,7 @@ Root of every Vue polycss render tree. Renders polygons and meshes inside a `<Po
 | `directional-light` | `PolyDirectionalLight` | None | Directional light config |
 | `ambient-light` | `PolyAmbientLight` | None | Ambient light config |
 | `texture-lighting` | `"baked" \| "dynamic"` | `"baked"` | Texture lighting mode |
-| `atlas-scale` | `number \| "auto"` | `"auto"` | Atlas bitmap budget and compositor sprite size |
+| `textureQuality` | `number \| "auto"` | `"auto"` | Atlas bitmap budget and compositor sprite size |
 | `polygons` | `Polygon[]` | None | Static polygon array (composes with slot) |
 
 For pointer drag, wheel zoom, and autorotate, mount `<PolyOrbitControls>` (or `<PolyMapControls>` for pan-first map-style input) inside `<PolyCamera>`: it receives the camera context. Mirrors Three.js's split between camera state and input.
@@ -55,7 +55,7 @@ Loads a mesh from a URL and renders its polygons. Manages blob-URL lifecycle aut
 | `position` | `Vec3` | `[x, y, z]` offset in scene space |
 | `scale` | `number \| Vec3` | Uniform or per-axis scale |
 | `rotation` | `Vec3` | Euler angles in degrees `[x, y, z]` |
-| `atlas-scale` | `number \| "auto"` | Atlas bitmap budget and compositor sprite size |
+| `textureQuality` | `number \| "auto"` | Atlas bitmap budget and compositor sprite size |
 | `auto-center` | `boolean` | Shift mesh so its bbox center is at origin |
 | `mtl` | `string` | Companion `.mtl` URL for OBJ models |
 
@@ -75,7 +75,7 @@ Single polygon. Renders one atlas-backed `<i>` for UV-textured and flat-color fa
 | `position` | `Vec3` | Local offset |
 | `scale` | `number \| Vec3` | Scale |
 | `rotation` | `Vec3` | Euler rotation in degrees |
-| `atlas-scale` | `number \| "auto"` | Atlas bitmap budget and compositor sprite size |
+| `textureQuality` | `number \| "auto"` | Atlas bitmap budget and compositor sprite size |
 
 ### `<PolyCamera>`
 

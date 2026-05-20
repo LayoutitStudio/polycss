@@ -8,6 +8,7 @@ import { describe, expect, it } from "vitest";
 import {
   createPolyPerspectiveCamera,
   createPolyOrthographicCamera,
+  createPolyCamera,
 } from "./createPolyCamera";
 
 describe("createPolyPerspectiveCamera", () => {
@@ -100,5 +101,24 @@ describe("createPolyOrthographicCamera", () => {
     const style = cam.getStyle();
     expect(typeof style.transform).toBe("string");
     expect(style.transform).toContain("scale(1)");
+  });
+});
+
+describe("createPolyCamera", () => {
+  it("is an alias for createPolyOrthographicCamera — type is 'orthographic'", () => {
+    const cam = createPolyCamera({ rotX: 65, rotY: 45 });
+    expect(cam.type).toBe("orthographic");
+  });
+
+  it("perspectiveStyle is 'none'", () => {
+    const cam = createPolyCamera();
+    expect(cam.perspectiveStyle).toBe("none");
+  });
+
+  it("initializes with provided options", () => {
+    const cam = createPolyCamera({ zoom: 2, rotX: 30, rotY: 90 });
+    expect(cam.state.zoom).toBe(2);
+    expect(cam.state.rotX).toBe(30);
+    expect(cam.state.rotY).toBe(90);
   });
 });

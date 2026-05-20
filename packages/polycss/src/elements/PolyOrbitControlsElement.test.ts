@@ -122,7 +122,7 @@ describe("PolyOrbitControlsElement", () => {
     for (let i = 0; i < 20; i++) {
       sceneEl.dispatchEvent(new WheelEvent("wheel", { bubbles: true, deltaY: -1000 }));
     }
-    expect(scene.getOptions().zoom).toBe(2);
+    expect(scene.camera.state.zoom).toBe(2);
   });
 
   // ── Live attribute changes ────────────────────────────────────────────────
@@ -155,11 +155,11 @@ describe("PolyOrbitControlsElement", () => {
     sceneEl.appendChild(controlsEl);
     host.appendChild(sceneEl);
     const scene = sceneEl.getScene()!;
-    const beforeZoom = scene.getOptions().zoom;
+    const beforeZoom = scene.camera.state.zoom;
     sceneEl.dispatchEvent(new WheelEvent("wheel", { bubbles: true, cancelable: true, deltaY: 200 }));
     // In dolly mode zoom must remain unchanged
-    expect(scene.getOptions().zoom).toBe(beforeZoom);
-    expect(scene.getOptions().distance ?? 0).toBeGreaterThan(0);
+    expect(scene.camera.state.zoom).toBe(beforeZoom);
+    expect(scene.camera.state.distance ?? 0).toBeGreaterThan(0);
   });
 
   it("max-distance attribute clamps the dolly distance", () => {
@@ -173,7 +173,7 @@ describe("PolyOrbitControlsElement", () => {
     for (let i = 0; i < 20; i++) {
       sceneEl.dispatchEvent(new WheelEvent("wheel", { bubbles: true, cancelable: true, deltaY: 1000 }));
     }
-    expect(scene.getOptions().distance ?? 0).toBeLessThanOrEqual(10);
+    expect(scene.camera.state.distance ?? 0).toBeLessThanOrEqual(10);
   });
 
   // ── Disconnect ────────────────────────────────────────────────────────────

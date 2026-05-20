@@ -11,7 +11,7 @@ Internally, polycss uses an off-DOM canvas to pack textured and flat-color polyg
 
 ## Framework Support
 
-polycss is **vanilla-first**. The default entry point is custom elements (`<poly-scene>`, `<poly-mesh>`, `<poly-polygon>`) plus an imperative `createPolyScene` API: no framework required. First-class bindings for **React** and **Vue** ship as separate packages on top of the same engine. Pick whatever fits your stack.
+polycss is **vanilla-first**. The default entry point is custom elements (`<poly-camera>`, `<poly-scene>`, `<poly-mesh>`, `<poly-polygon>`) plus an imperative `createPolyCamera` / `createPolyScene` API: no framework required. First-class bindings for **React** and **Vue** ship as separate packages on top of the same engine. Pick whatever fits your stack.
 
 ## Installation
 
@@ -43,26 +43,28 @@ You can also load polycss directly from a CDN with no build step:
 
 ## A quick taste
 
-Load a GLB mesh into an interactive scene with zero JS: just custom elements:
+Render a 3D shape with zero JS: just custom elements:
 
 ```html
 <script type="module" src="https://esm.sh/@layoutit/polycss/elements"></script>
 
-<poly-scene rot-x="65" rot-y="45" perspective="1000">
-  <poly-mesh src="/cottage.glb"></poly-mesh>
-</poly-scene>
+<poly-camera rot-x="65" rot-y="45">
+  <poly-scene>
+    <poly-icosahedron size="100" color="#ff6644"></poly-icosahedron>
+  </poly-scene>
+</poly-camera>
 ```
 
 Or with React:
 
 ```tsx
-import { PolyCamera, PolyScene, PolyMesh } from "@layoutit/polycss-react";
+import { PolyCamera, PolyScene, PolyIcosahedron } from "@layoutit/polycss-react";
 
 export function App() {
   return (
-    <PolyCamera>
+    <PolyCamera rotX={65} rotY={45}>
       <PolyScene>
-        <PolyMesh src="/cottage.glb" />
+        <PolyIcosahedron size={100} color="#ff6644" />
       </PolyScene>
     </PolyCamera>
   );
