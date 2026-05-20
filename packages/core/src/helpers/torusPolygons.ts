@@ -1,9 +1,9 @@
 /**
- * Torus geometry — Y-axis ring plane.
+ * Torus geometry — Z-axis ring plane.
  *
- * The torus is centered at the origin. The ring lies in the XZ plane (the
- * horizontal plane in polycss world space, where Y is forward/depth). The
- * tube sweeps around the Y axis.
+ * The torus is centered at the origin. The ring lies in the XY plane (the
+ * ground plane in polycss world space, where Z is up). The donut hole points
+ * along the Z axis.
  *
  * Geometry: `radialSegments × tubularSegments` quads on the surface.
  *
@@ -31,29 +31,29 @@ export interface TorusPolygonsOptions {
 /**
  * Compute one point on the torus surface.
  *
- * @param theta  Angle around the main ring (Y axis), in [0, 2π).
+ * @param theta  Angle around the main ring (Z axis), in [0, 2π).
  * @param phi    Angle around the tube cross-section, in [0, 2π).
  * @param R      Main radius.
  * @param r      Tube radius.
  */
 function torusPoint(theta: number, phi: number, R: number, r: number): Vec3 {
-  // Ring lies in XZ plane; tube sweeps around Y axis.
+  // Ring lies in XY plane; tube sweeps around the Z axis.
   // Point on the tube cross-section at angle `theta` around the ring:
-  //   ring center: (R·cos(θ), 0, R·sin(θ))
-  //   tube offset: outward radial direction is (cos(θ), 0, sin(θ))
-  //                tube "up" direction (in the cross-section plane) is (0, 1, 0)
-  // So the full point is:
+  //   ring center: (R·cos(θ), R·sin(θ), 0)
+  //   tube outward radial: (cos(θ), sin(θ), 0)
+  //   tube "up" (cross-section plane): (0, 0, 1)
+  // Full point:
   //   x = (R + r·cos(φ)) · cos(θ)
-  //   y = r · sin(φ)
-  //   z = (R + r·cos(φ)) · sin(θ)
+  //   y = (R + r·cos(φ)) · sin(θ)
+  //   z = r · sin(φ)
   const sinT = Math.sin(theta);
   const cosT = Math.cos(theta);
   const sinP = Math.sin(phi);
   const cosP = Math.cos(phi);
   return [
     (R + r * cosP) * cosT,
-    r * sinP,
     (R + r * cosP) * sinT,
+    r * sinP,
   ];
 }
 
@@ -66,10 +66,8 @@ export function torusPolygons(options: TorusPolygonsOptions = {}): Polygon[] {
     color = "#cccccc",
   } = options;
 
-  const R = Math.max(0, radialSegments);   // re-use var name below
   const nr = Math.max(3, radialSegments);
   const nt = Math.max(3, tubularSegments);
-  void R; // suppress unused warning; use nr/nt below
 
   const polygons: Polygon[] = [];
 
@@ -87,12 +85,10 @@ export function torusPolygons(options: TorusPolygonsOptions = {}): Polygon[] {
       const p11 = torusPoint(theta1, phi1, radius, tube);
       const p01 = torusPoint(theta0, phi1, radius, tube);
 
-      // Wind CCW from outside. The outward normal at point (theta, phi) is
-      // (cos(phi)·cos(theta), sin(phi), cos(phi)·sin(theta)).
-      // Verified: cross((p00→p01), (p00→p10)) opposes this, so the correct
-      // CCW ordering (outward normal = cross(e1, e2) where e1=p00→first, e2=p00→second)
-      // is [p00, p01, p11, p10].
-      polygons.push({ vertices: [p00, p01, p11, p10], color });
+      // CCW from outside in Z-up world space: ordering [p00, p10, p11, p01].
+      // The outward normal at (θ, φ) is (cosφ·cosθ, cosφ·sinθ, sinφ); cross
+      // of edges (p10−p00) × (p01−p00) points in that direction.
+      polygons.push({ vertices: [p00, p10, p11, p01], color });
     }
   }
 

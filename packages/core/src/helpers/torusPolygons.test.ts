@@ -41,11 +41,9 @@ function isCoplanar(vertices: Vec3[], eps = 1e-3): boolean {
  * Returns true if the outward normal of the face (from first-edge cross product)
  * points away from the torus surface interior.
  *
- * For a torus quad, "outward" means the normal points away from the nearest
- * point on the ring axis circle. The outward direction at face center fc is
- * (fc - ringPoint) where ringPoint = (|fc.xz| * normalized(fc.xz), 0) projected
- * onto the XZ plane. Simplified: the component perpendicular to the ring axis
- * circle at that angular position.
+ * In Z-up world space the ring lies in the XY plane; the donut hole points
+ * along Z. The outward direction at face center fc is (fc - ringPoint) where
+ * ringPoint is the nearest point on the ring axis circle in XY.
  */
 function isCCWFromOutside(vertices: Vec3[], radius: number): boolean {
   const [a, b, c] = vertices;
@@ -53,12 +51,12 @@ function isCCWFromOutside(vertices: Vec3[], radius: number): boolean {
   const fc: Vec3 = [0, 0, 0];
   for (const v of vertices) { fc[0] += v[0]; fc[1] += v[1]; fc[2] += v[2]; }
   fc[0] /= vertices.length; fc[1] /= vertices.length; fc[2] /= vertices.length;
-  // Ring center at the same angular position as fc (in XZ plane).
-  const fcXZ = Math.sqrt(fc[0] * fc[0] + fc[2] * fc[2]);
-  if (fcXZ < 1e-10) return true; // degenerate — skip
-  const ringX = (fc[0] / fcXZ) * radius;
-  const ringZ = (fc[2] / fcXZ) * radius;
-  const outDir: Vec3 = [fc[0] - ringX, fc[1], fc[2] - ringZ];
+  // Ring center at the same angular position as fc (in XY plane).
+  const fcXY = Math.sqrt(fc[0] * fc[0] + fc[1] * fc[1]);
+  if (fcXY < 1e-10) return true; // degenerate — skip
+  const ringX = (fc[0] / fcXY) * radius;
+  const ringY = (fc[1] / fcXY) * radius;
+  const outDir: Vec3 = [fc[0] - ringX, fc[1] - ringY, fc[2]];
   return dot(n, outDir) > 0;
 }
 
@@ -85,10 +83,10 @@ describe("torusPolygons", () => {
     const polygons = torusPolygons({ radius: 80, tube: 20, color: "#aabbcc", radialSegments: 4, tubularSegments: 4 });
     expect(polygons).toHaveLength(16);
     for (const p of polygons) expect(p.color).toBe("#aabbcc");
-    // All vertices should be within [radius - tube, radius + tube] of the Y axis.
+    // All vertices should be within [radius - tube, radius + tube] of the Z axis.
     for (const p of polygons) {
-      for (const [x, , z] of p.vertices) {
-        const rDist = Math.sqrt(x * x + z * z);
+      for (const [x, y] of p.vertices) {
+        const rDist = Math.sqrt(x * x + y * y);
         expect(rDist).toBeGreaterThanOrEqual(80 - 20 - 1e-4);
         expect(rDist).toBeLessThanOrEqual(80 + 20 + 1e-4);
       }
@@ -112,10 +110,11 @@ describe("torusPolygons", () => {
     }
   });
 
-  it("Y coordinates span the tube diameter (−tube to +tube)", () => {
+  it("Z coordinates span the tube diameter (−tube to +tube)", () => {
+    // Donut hole is along the Z axis; tube reaches ±tube in Z.
     const polygons = torusPolygons({ tube: 20, radialSegments: 4, tubularSegments: 16 });
-    const yVals = polygons.flatMap((p) => p.vertices.map((v) => v[1]));
-    expect(Math.min(...yVals)).toBeCloseTo(-20, 4);
-    expect(Math.max(...yVals)).toBeCloseTo(20, 4);
+    const zVals = polygons.flatMap((p) => p.vertices.map((v) => v[2]));
+    expect(Math.min(...zVals)).toBeCloseTo(-20, 4);
+    expect(Math.max(...zVals)).toBeCloseTo(20, 4);
   });
 });
