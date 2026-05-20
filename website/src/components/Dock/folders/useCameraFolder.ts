@@ -19,7 +19,7 @@ import {
   useSlider,
   useToggle,
 } from "../primitives";
-import type { DragMode, PerspectiveMode, SceneOptionsState } from "../../types";
+import type { AutoRotateDriver, DragMode, PerspectiveMode, SceneOptionsState } from "../../types";
 
 interface PresetModelMinimal {
   zoom?: number;
@@ -33,8 +33,10 @@ interface LoadedModelMinimal {
 
 export interface CameraFolderInputs {
   autoCenter: boolean;
+  renderer: SceneOptionsState["renderer"];
   showAxes: boolean;
   animate: boolean;
+  autoRotateDriver: AutoRotateDriver;
   dragMode: DragMode;
   fpvLook: boolean;
   fpvMove: boolean;
@@ -76,6 +78,11 @@ const PROJECTION_OPTIONS: Record<string, PerspectiveMode> = {
   Orthographic: "orthographic",
 };
 
+const AUTO_ROTATE_DRIVER_OPTIONS: Record<string, AutoRotateDriver> = {
+  "JS loop": "js",
+  "CSS keyframes test": "css",
+};
+
 const PERSPECTIVE_PX_OPTIONS: Record<string, number> = {
   "500 px": 500,
   "1000 px": 1000,
@@ -90,8 +97,10 @@ const PERSPECTIVE_PX_OPTIONS: Record<string, number> = {
 export function useCameraFolder(parent: GUI | null, inputs: CameraFolderInputs): void {
   const {
     autoCenter,
+    renderer,
     showAxes,
     animate,
+    autoRotateDriver,
     dragMode,
     fpvLook,
     fpvMove,
@@ -155,9 +164,20 @@ export function useCameraFolder(parent: GUI | null, inputs: CameraFolderInputs):
   );
   useToggle(folder, "Axes", showAxes, (value) => onUpdateScene({ showAxes: value }));
   useToggle(folder, "Auto rotate", animate, (value) => onUpdateScene({ animate: value }));
+  const autoRotateDriverCtrl = useOption<AutoRotateDriver>(
+    folder,
+    "Auto rotate mode",
+    AUTO_ROTATE_DRIVER_OPTIONS,
+    autoRotateDriver,
+    (value) => onUpdateScene({ autoRotateDriver: value }),
+  );
   useOption<DragMode>(folder, "Drag", DRAG_MODE_OPTIONS, dragMode, (value) =>
     onUpdateScene({ dragMode: value }),
   );
+
+  useEffect(() => {
+    autoRotateDriverCtrl?.setEnabled(renderer === "vanilla");
+  }, [autoRotateDriverCtrl, renderer]);
 
   // FPV sub-folder — nested directly under the Camera folder. All 11
   // controllers below are dimmed when Drag isn't "fpv" (see effect at end).

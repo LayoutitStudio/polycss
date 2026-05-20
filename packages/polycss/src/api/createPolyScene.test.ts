@@ -364,6 +364,45 @@ describe("createPolyScene", () => {
       expect(brush!.style.transform).toContain("matrix3d(50,0,0,0,0,50");
     });
 
+    it("uses a larger direct voxel primitive on mobile-class documents", () => {
+      const originalMatchMedia = window.matchMedia;
+      Object.defineProperty(window, "matchMedia", {
+        configurable: true,
+        value: (query: string) => ({
+          matches: query === "(pointer: coarse)" || query === "(hover: none)",
+          media: query,
+          onchange: null,
+          addListener: vi.fn(),
+          removeListener: vi.fn(),
+          addEventListener: vi.fn(),
+          removeEventListener: vi.fn(),
+          dispatchEvent: vi.fn(),
+        }) as MediaQueryList,
+      });
+      try {
+        scene = createPolyScene(host, {
+          rotX: 65,
+          rotY: 45,
+          directionalLight: { direction: [0, 0, 1], color: "#ffffff", intensity: 0 },
+          ambientLight: { color: "#ffffff", intensity: 1 },
+        });
+        scene.add(makeVoxelExactParseResult(), { merge: false });
+        const wrapper = host.querySelector(".polycss-mesh") as HTMLElement | null;
+        const brush = host.querySelector(".polycss-mesh > b") as HTMLElement | null;
+        expect(wrapper).not.toBeNull();
+        expect(brush).not.toBeNull();
+        expect(wrapper!.style.getPropertyValue("--polycss-voxel-primitive")).toBe("8px");
+        expect(brush!.style.width).toBe("");
+        expect(brush!.style.height).toBe("");
+        expect(brush!.style.transform).toContain("matrix3d(6.25,0,0,0,0,6.25");
+      } finally {
+        Object.defineProperty(window, "matchMedia", {
+          configurable: true,
+          value: originalMatchMedia,
+        });
+      }
+    });
+
     it("falls back to polygon rendering when raw vox polygons are not exact direct quads", () => {
       scene = makeScene(host);
       scene.add(makeVoxelParseResult(), { merge: false });

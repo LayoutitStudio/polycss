@@ -25,6 +25,7 @@ import { chromium } from "playwright";
 import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
 import { extname } from "node:path";
+import { chromiumArgsWithGpuDefault } from "./chromium-defaults.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, "..");
@@ -64,10 +65,11 @@ const MESH = optStr("mesh", "saucer");
 const HEADED = hasFlag("headed");
 const TRACE = hasFlag("trace");
 const BROWSER_EXECUTABLE = optStr("browser-executable");
-const CHROMIUM_ARGS = [
+const SOFTWARE_BACKEND = hasFlag("software-backend");
+const CHROMIUM_ARGS = chromiumArgsWithGpuDefault([
   ...optAll("chromium-arg"),
   ...optAll("chromium-args").flatMap((value) => value.split(/\s+/).filter(Boolean)),
-];
+], { softwareBackend: SOFTWARE_BACKEND });
 // Filter renderer paths via --renderer html,vanilla,react,vue (default: all).
 const RENDERERS = optStr("renderer", "html,vanilla,react,vue").split(",").map((s) => s.trim()).filter(Boolean);
 // Filter scenarios via --scenario dynamic.camera_rotate,baked.camera_rotate
@@ -371,6 +373,7 @@ async function runScenario(port, scenario) {
 (async () => {
   console.log(`[bench] mesh=${MESH} warmup=${WARMUP_MS}ms sample=${SAMPLE_MS}ms`);
   if (BROWSER_EXECUTABLE) console.log(`[bench] browser=${BROWSER_EXECUTABLE}`);
+  if (SOFTWARE_BACKEND) console.log("[bench] software backend=on");
   if (CHROMIUM_ARGS.length > 0) console.log(`[bench] chromium args=${CHROMIUM_ARGS.join(" ")}`);
   if (SCENARIO_FILTER.size > 0) console.log(`[bench] scenarios=${[...SCENARIO_FILTER].join(",")}`);
   if (TRACE) console.log("[bench] trace=on");
@@ -430,6 +433,7 @@ async function runScenario(port, scenario) {
       polyCount,
       browserExecutable: BROWSER_EXECUTABLE || null,
       chromiumArgs: CHROMIUM_ARGS,
+      softwareBackend: SOFTWARE_BACKEND,
       warmup_ms: WARMUP_MS, sample_ms: SAMPLE_MS,
       ...results,
     };

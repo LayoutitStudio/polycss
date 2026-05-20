@@ -14,6 +14,8 @@ export type DragMode = "orbit" | "pan" | "fpv";
 
 export type PerspectiveMode = "perspective" | "orthographic";
 
+export type AutoRotateDriver = "js" | "css";
+
 export interface DomMetrics {
   measuredAt: number;
   nodeCount: number;
@@ -31,6 +33,7 @@ export interface SceneOptionsState {
   autoCenter: boolean;
   interactive: boolean;
   animate: boolean;
+  autoRotateDriver: AutoRotateDriver;
   showAxes: boolean;
   selection: boolean;
   hoverEffects: boolean;

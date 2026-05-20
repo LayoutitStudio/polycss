@@ -20,6 +20,9 @@ pnpm bench:lossy            # compare lossless / previous lossy / auto lossy cou
 pnpm bench:visual           # screenshot diff against bench/baselines/*.png
 pnpm bench:visual --record  # capture new baselines (after intentional renderer changes)
 pnpm bench:build            # just rebuild the bench bundles (rarely needed alone)
+node bench/nonvoxel-rotation-bench.mjs  # non-voxel vanilla rotation probe
+node bench/nonvoxel-frame-buckets.mjs --no-trace  # non-voxel rAF cadence buckets
+node bench/nonvoxel-visual-compare.mjs  # non-voxel variant visual parity
 ```
 
 All scripts also work directly:
@@ -30,6 +33,9 @@ node bench/perf-bench.mjs --mesh chicken --renderer react,vue
 node bench/lossy-optimizer-bench.mjs --json bench/results/lossy-optimizer.json
 node bench/lossy-optimizer-bench.mjs --models ducky,shark,bicycle
 node bench/perf-visual.mjs --mesh chicken --tolerance 0.005
+node bench/nonvoxel-rotation-bench.mjs --models teapot,bicycle --variants baseline,order-tile4 --run-order round-robin
+node bench/nonvoxel-frame-buckets.mjs --mesh glb:Elephant.glb --variant baseline --no-trace
+node bench/nonvoxel-visual-compare.mjs --models bicycle,elephant,policecar --variants scene-split-target,scene-transform-perspective
 ```
 
 ---
@@ -52,6 +58,26 @@ frame, which is a known disaster, not a meaningful measurement.
 For each scenario, the FPS sampler captures per-frame `dt` for 5 seconds
 after a 2-second warmup, then computes p50, p95, p99 frame times.
 Sampling lives in `perf-shared.mjs` so every page records identically.
+
+## Browser backend
+
+Headless Playwright can run the same DOM through different compositor
+backends. Perf-facing bench scripts default to the GPU lane by adding
+`--use-angle=metal` on macOS and `--enable-gpu-rasterization` for Chromium.
+The bundled browser can otherwise fall back to `SoftwareRenderer`, which is
+useful as a stress lane but can understate real Chrome GPU performance.
+
+Default GPU-path check:
+
+```sh
+node bench/perf-bench.mjs --mesh obj-house3 --renderer vanilla --scenario baked.camera_rotate
+```
+
+Run the old software/stress lane explicitly:
+
+```sh
+node bench/perf-bench.mjs --mesh obj-house3 --renderer vanilla --scenario baked.camera_rotate --software-backend
+```
 
 ---
 
@@ -89,7 +115,7 @@ The pages share a URL contract via `parseUrlParams()` in `perf-shared.mjs`:
 
 ```
 /perf-{html|vanilla|react|vue}.html
-  ?mesh=<id>      saucer|chicken|coliseum|castle|teapot|rock1|synth-Nk
+  ?mesh=<id>      saucer|chicken|coliseum|castle|teapot|rock1|synth-Nk|glb:path|obj:path|vox:path
   &mode=<m>       dynamic|baked    (textureLighting)
   &motion=<m>     light|rot|none   (light direction | camera rotY | idle)
   &az=<deg>       initial light azimuth (default 50)
@@ -102,6 +128,15 @@ preset, follow the existing shape — `url`, `mtlUrl?`, `options`,
 `synth-50k`) are generated in-browser by `synth-mesh.mjs` for stress
 tests above what the gallery's OBJs cover.
 
+`nonvoxel-vanilla.html` also accepts bench-only experiment params:
+`domOrder=source|initial-depth|tile4-screen|area-desc|area-asc|normal-z`,
+`polygonOrder=source|initial-depth|tile4-screen|area-desc|area-asc|normal-z`,
+`disableStrategies=b,i,u`, `leafBucketSize=64|128|256`,
+`rotationDriver=css-keyframes`, and
+`sceneTransformMode=default|matrix3d|split-target|host-perspective|transform-perspective|no-will-change`.
+Use `domOrder` for pure post-render DOM-order probes; `polygonOrder` changes
+the polygon array before render planning and is only for diagnostics.
+
 ---
 
 ## Files
@@ -113,6 +148,8 @@ bench/
                          createPerfRecorder() (FPS counter + window.__perf__)
   perf-html.html         declarative <poly-scene> + <poly-controls>
   perf-vanilla.html      imperative createPolyScene + createPolyOrbitControls
+  nonvoxel-vanilla.html  dedicated vanilla page for non-voxel experiments
+                         with strategy/order/transform diagnostics
   perf-react.html        loads polycss-react.js (JSX entry)
   perf-vue.html          loads polycss-vue.js (Vue entry)
   entries/
@@ -134,6 +171,16 @@ bench/
                          links the four perf-*.html with example params.
   perf-visual.mjs        Screenshot diff guardrail (chicken + rock1 ×
                          3 light azimuths, vanilla path only).
+  nonvoxel-rotation-bench.mjs
+                         Vanilla-only non-voxel rotation corpus runner.
+                         See NON_VOXEL_ROTATION_HYPOTHESES.md.
+  nonvoxel-frame-buckets.mjs
+                         Non-voxel vanilla rAF bucket profiler. Reports
+                         static leaf tag mix by cadence bucket, with optional
+                         Chromium trace attribution.
+  nonvoxel-visual-compare.mjs
+                         Static screenshot parity check for non-voxel bench
+                         variants against the baked baseline.
 
   baselines/             chicken-* / rock1-* PNGs the visual diff compares against.
   results/               (gitignored) per-run JSON output from bench scripts.
@@ -237,6 +284,12 @@ node bench/perf-bench.mjs \
   --headed                    # show the browser (debugging)
   --chromium-arg "--enable-blink-features=CSSBorderShape"
 ```
+
+`nonvoxel-rotation-bench.mjs --json <path>` writes structured output without
+also dumping the full JSON to stdout. Add `--print-json` when you need both.
+Use `--run-order round-robin` or `--run-order random --seed <label>` for
+near-threshold comparisons so one variant does not own a warm/cold browser
+state band.
 
 ---
 

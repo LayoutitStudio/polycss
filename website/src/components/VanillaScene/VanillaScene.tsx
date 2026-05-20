@@ -33,6 +33,19 @@ export type { GizmoMode, SceneOptionsState };
 // Light helper world units → CSS pixels conversion (matches the helper
 // components in @layoutit/polycss-react and @layoutit/polycss-vue).
 const LIGHT_HELPER_TILE = 50;
+const CSS_AUTO_ROTATE_SECONDS = 20;
+
+function transformWithRotateOffset(transform: string, offsetDeg: number): string | null {
+  let changed = false;
+  const next = transform.replace(
+    /(^|\s)rotate\((-?\d+(?:\.\d+)?)deg\)/,
+    (_match, prefix: string, value: string) => {
+      changed = true;
+      return `${prefix}rotate(${Number(value) + offsetDeg}deg)`;
+    },
+  );
+  return changed ? next : null;
+}
 
 function lightHelperPosition(
   light: PolyDirectionalLight,
@@ -112,6 +125,10 @@ export function VanillaScene({
   const groundHandleRef = useRef<VanillaPolyMeshHandle | null>(null);
   const selectionRef = useRef<PolySelectionHandle | null>(null);
   const transformControlsRef = useRef<PolyTransformControlsHandle | null>(null);
+  const cssAutoRotateStyleRef = useRef<HTMLStyleElement | null>(null);
+  const cssAutoRotateNameRef = useRef(
+    `polycss-gallery-auto-rotate-${Math.random().toString(36).slice(2)}`,
+  );
   const onBuildRef = useRef(onBuild);
   onBuildRef.current = onBuild;
   const onCameraChangeRef = useRef(onCameraChange);
@@ -126,6 +143,11 @@ export function VanillaScene({
   animationPausedRef.current = options.animationPaused;
   const animationTimeScaleRef = useRef(options.animationTimeScale);
   animationTimeScaleRef.current = options.animationTimeScale;
+  const cssAutoRotateActive =
+    options.renderer === "vanilla" &&
+    options.animate &&
+    options.autoRotateDriver === "css" &&
+    options.dragMode !== "fpv";
   const mountedModelRef = useRef<{
     handle: VanillaPolyMeshHandle;
     polygons: Polygon[];
@@ -476,6 +498,50 @@ export function VanillaScene({
     });
   }, [options.disableStrategies]);
 
+  useEffect(() => {
+    const host = hostRef.current;
+    const sceneEl = host?.querySelector<HTMLElement>(".polycss-scene") ?? null;
+    const clear = () => {
+      if (sceneEl) {
+        sceneEl.style.removeProperty("animation");
+        delete sceneEl.dataset.polycssAutoRotate;
+      }
+      cssAutoRotateStyleRef.current?.remove();
+      cssAutoRotateStyleRef.current = null;
+    };
+
+    clear();
+    if (!cssAutoRotateActive || !sceneEl) return clear;
+
+    const fromTransform = sceneEl.style.transform;
+    const toTransform = transformWithRotateOffset(fromTransform, 360);
+    if (!fromTransform || !toTransform) return clear;
+
+    const style = sceneEl.ownerDocument.createElement("style");
+    const name = cssAutoRotateNameRef.current;
+    style.textContent = `@keyframes ${name}{from{transform:${fromTransform}}to{transform:${toTransform}}}`;
+    sceneEl.ownerDocument.head.appendChild(style);
+    cssAutoRotateStyleRef.current = style;
+    sceneEl.dataset.polycssAutoRotate = "css";
+    sceneEl.style.animation = `${name} ${CSS_AUTO_ROTATE_SECONDS}s linear infinite`;
+
+    return clear;
+  }, [
+    cssAutoRotateActive,
+    options.rotX,
+    options.rotY,
+    options.zoom,
+    options.target,
+    options.autoCenter,
+    options.textureQuality,
+    options.textureLighting,
+    options.perspective,
+    stableDirectionalForRebuild,
+    stableAmbientForRebuild,
+    stableDomForMesh,
+    parseResult,
+  ]);
+
   // Effect 2.5 — vanilla controls. The React renderer wires interactive +
   // animate through <PolyCamera>; the vanilla path uses createPolyOrbitControls.
   // The handle is created lazily once the scene is ready and we're on the
@@ -513,9 +579,11 @@ export function VanillaScene({
       }
       const factory = options.dragMode === "pan" ? createPolyMapControls : createPolyOrbitControls;
       const controls: PolyControlsHandle = factory(scene, {
-        drag: options.interactive,
-        wheel: options.interactive,
-        animate: options.animate ? { speed: 0.3, axis: "y" as const, pauseOnInteraction: true } : false as const,
+        drag: options.interactive && !cssAutoRotateActive,
+        wheel: options.interactive && !cssAutoRotateActive,
+        animate: options.animate && options.autoRotateDriver !== "css"
+          ? { speed: 0.3, axis: "y" as const, pauseOnInteraction: true }
+          : false as const,
       });
       controls.addEventListener("end", ((e: { camera: { rotX: number; rotY: number; zoom: number; target?: ReactVec3 } }) => {
         onCameraChangeRef.current?.(e.camera);
@@ -533,7 +601,9 @@ export function VanillaScene({
     options.renderer,
     options.interactive,
     options.animate,
+    options.autoRotateDriver,
     options.dragMode,
+    cssAutoRotateActive,
     polygons,
     options.autoCenter,
     options.textureQuality,

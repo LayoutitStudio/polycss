@@ -85,6 +85,7 @@ const DEFAULT_SCENE: SceneOptionsState = {
   autoCenter: true,
   interactive: true,
   animate: false,
+  autoRotateDriver: "js",
   showAxes: false,
   selection: false,
   hoverEffects: false,
@@ -239,6 +240,12 @@ export default function GalleryWorkbench() {
   }, []);
 
   const { handleCameraChange } = useGuiCameraSync({ setSceneOptions });
+
+  useEffect(() => {
+    if (sceneOptions.renderer !== "vanilla" && sceneOptions.autoRotateDriver === "css") {
+      updateScene({ autoRotateDriver: "js" });
+    }
+  }, [sceneOptions.renderer, sceneOptions.autoRotateDriver, updateScene]);
 
   const dropped = useDroppedFiles({
     onDroppedSource: (source) => {
@@ -576,6 +583,11 @@ export default function GalleryWorkbench() {
   }, [animationClips]);
   const perspectiveMode = sceneOptions.perspective === false ? "orthographic" : "perspective";
   const perspectivePx = sceneOptions.perspective === false ? 8000 : sceneOptions.perspective;
+  const cssAutoRotateActive =
+    sceneOptions.renderer === "vanilla" &&
+    sceneOptions.animate &&
+    sceneOptions.autoRotateDriver === "css" &&
+    sceneOptions.dragMode !== "fpv";
 
   // Inspector data — grouped by mesh, then by polygon color. Recomputed
   // when renderModelPolygons or the loaded model change. Mutations to a
@@ -687,7 +699,7 @@ export default function GalleryWorkbench() {
               helperScale={helperScale}
               helperTarget={helperTarget}
               mergePolygonsForMesh={!hasActiveAnimation}
-              stableDomForMesh={hasActiveAnimation}
+              stableDomForMesh={hasActiveAnimation || cssAutoRotateActive}
               animationKey={activeAnimation ? `${selectedAnimation}:${loaded?.label ?? ""}` : undefined}
               animationFrameFactory={vanillaAnimationFrameFactory}
               onBuild={setVanillaBuildMs}
@@ -770,8 +782,10 @@ export default function GalleryWorkbench() {
         />
         <DockCamera
           autoCenter={sceneOptions.autoCenter}
+          renderer={sceneOptions.renderer}
           showAxes={sceneOptions.showAxes}
           animate={sceneOptions.animate}
+          autoRotateDriver={sceneOptions.autoRotateDriver}
           dragMode={sceneOptions.dragMode}
           fpvLook={sceneOptions.fpvLook}
           fpvMove={sceneOptions.fpvMove}

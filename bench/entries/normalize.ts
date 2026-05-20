@@ -1,11 +1,16 @@
 /**
- * Bundled entry that re-exports the in-tree normalize and a small
+ * Bundled entry that exposes the current mesh optimizer and a small
  * "paint everything one color" helper. Used by the crack-finder bench
- * page (`bench/perf-cracks.html`) so it can import the same normalize
- * code the workbench uses, without bypassing the bench build pipeline.
+ * page (`bench/perf-cracks.html`) without depending on website-only debug
+ * files.
  */
-export { preprocessModelPolygons } from "../../website/src/debug/meshDomNormalize";
-import type { Polygon, Vec3 } from "@layoutit/polycss";
+import { optimizeMeshPolygons, type Polygon, type Vec3 } from "@layoutit/polycss";
+
+export function preprocessModelPolygons(polygons: Polygon[], normalizeGeometry: boolean): Polygon[] {
+  return optimizeMeshPolygons(polygons, {
+    meshResolution: normalizeGeometry ? "lossy" : "lossless",
+  });
+}
 
 /**
  * Replace every polygon's color with the given hex string and strip the
