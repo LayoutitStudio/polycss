@@ -61,9 +61,11 @@ Generated atlas pages default to `textureQuality="auto"`. Auto starts from the p
 
 ```html
 <!-- Vanilla -->
-<poly-scene texture-quality="0.5">
-  <poly-mesh src="/cottage.glb"></poly-mesh>
-</poly-scene>
+<poly-camera rot-x="65" rot-y="45">
+  <poly-scene texture-quality="0.5">
+    <poly-mesh src="/cottage.glb"></poly-mesh>
+  </poly-scene>
+</poly-camera>
 ```
 
 ```tsx

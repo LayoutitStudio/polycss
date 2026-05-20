@@ -117,12 +117,13 @@ For programmatic loading with explicit lifecycle, use `loadMesh` from the core p
 
 ```ts
 // Vanilla: works anywhere, no framework
-import { loadMesh, createPolyScene } from "@layoutit/polycss";
+import { createPolyCamera, loadMesh, createPolyScene } from "@layoutit/polycss";
 
 const result = await loadMesh("/cottage.glb", {
   gltfOptions: { targetSize: 60 },
 });
-const scene = createPolyScene(document.getElementById("host")!);
+const camera = createPolyCamera({ rotX: 65, rotY: 45 });
+const scene = createPolyScene(document.getElementById("host")!, { camera });
 scene.add(result);
 // later:
 scene.destroy(); // removes the scene and disposes registered meshes
