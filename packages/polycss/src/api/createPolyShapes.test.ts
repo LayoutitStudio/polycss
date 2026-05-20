@@ -4,6 +4,7 @@ import {
   createPolyPlane,
   createPolyRing,
   createPolyOctahedron,
+  createPolySphere,
   createPolyTetrahedron,
   createPolyIcosahedron,
   createPolyDodecahedron,
@@ -49,6 +50,12 @@ describe("createPolyOctahedron", () => {
     const result = createPolyOctahedron({ center: [0, 0, 0], size: 50 });
     expect(result.polygons).toHaveLength(8);
     expect(result.polygons[0].vertices).toHaveLength(3);
+  });
+});
+
+describe("createPolySphere", () => {
+  it("returns 80 triangular faces at default subdivisions 1", () => {
+    expect(createPolySphere().polygons).toHaveLength(80);
   });
 });
 

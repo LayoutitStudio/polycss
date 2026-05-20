@@ -97,6 +97,7 @@ export {
   createPolyPlane,
   createPolyRing,
   createPolyOctahedron,
+  createPolySphere,
   createPolyTetrahedron,
   createPolyIcosahedron,
   createPolyDodecahedron,

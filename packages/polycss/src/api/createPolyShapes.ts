@@ -9,6 +9,7 @@ import {
   planePolygons,
   ringPolygons,
   octahedronPolygons,
+  spherePolygons,
   tetrahedronPolygons,
   icosahedronPolygons,
   dodecahedronPolygons,
@@ -19,6 +20,7 @@ import {
   type PlanePolygonsOptions,
   type RingPolygonsOptions,
   type OctahedronPolygonsOptions,
+  type SpherePolygonsOptions,
   type TetrahedronPolygonsOptions,
   type IcosahedronPolygonsOptions,
   type DodecahedronPolygonsOptions,
@@ -27,7 +29,7 @@ import {
   type TorusPolygonsOptions,
 } from "@layoutit/polycss-core";
 
-export type { BoxPolygonsOptions, PlanePolygonsOptions, RingPolygonsOptions, OctahedronPolygonsOptions, TetrahedronPolygonsOptions, IcosahedronPolygonsOptions, DodecahedronPolygonsOptions, CylinderPolygonsOptions, ConePolygonsOptions, TorusPolygonsOptions };
+export type { BoxPolygonsOptions, PlanePolygonsOptions, RingPolygonsOptions, OctahedronPolygonsOptions, SpherePolygonsOptions, TetrahedronPolygonsOptions, IcosahedronPolygonsOptions, DodecahedronPolygonsOptions, CylinderPolygonsOptions, ConePolygonsOptions, TorusPolygonsOptions };
 
 // Re-export ParseResult so callers can type the return value without a
 // separate import from polycss-core.
@@ -51,6 +53,10 @@ export function createPolyRing(options: RingPolygonsOptions): ParseResult {
 
 export function createPolyOctahedron(options: OctahedronPolygonsOptions): ParseResult {
   return shapeResult(octahedronPolygons(options));
+}
+
+export function createPolySphere(options: SpherePolygonsOptions = {}): ParseResult {
+  return shapeResult(spherePolygons(options));
 }
 
 export function createPolyTetrahedron(options: TetrahedronPolygonsOptions = {}): ParseResult {
