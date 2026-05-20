@@ -13,6 +13,7 @@ import {
   planePolygons,
   ringPolygons,
   octahedronPolygons,
+  spherePolygons,
   tetrahedronPolygons,
   icosahedronPolygons,
   dodecahedronPolygons,
@@ -246,6 +247,35 @@ export const PolyDodecahedron = defineComponent({
   setup(props) {
     const polygons = computed(() =>
       dodecahedronPolygons({ size: props.size, color: props.color }),
+    );
+    return () =>
+      h(PolyMesh, {
+        polygons: polygons.value,
+        position: props.position,
+        scale: props.scale,
+        rotation: props.rotation,
+        autoCenter: props.autoCenter,
+        id: props.id,
+      });
+  },
+});
+
+export const PolySphere = defineComponent({
+  name: "PolySphere",
+  props: {
+    radius: { type: Number, default: undefined },
+    subdivisions: { type: Number, default: undefined },
+    color: { type: String, default: undefined },
+    // Common mesh props
+    position: { type: Array as unknown as PropType<Vec3>, default: undefined },
+    scale: { type: [Number, Array] as unknown as PropType<number | Vec3>, default: undefined },
+    rotation: { type: Array as unknown as PropType<Vec3>, default: undefined },
+    autoCenter: { type: Boolean, default: false },
+    id: { type: String, default: undefined },
+  },
+  setup(props) {
+    const polygons = computed(() =>
+      spherePolygons({ radius: props.radius, subdivisions: props.subdivisions, color: props.color }),
     );
     return () =>
       h(PolyMesh, {

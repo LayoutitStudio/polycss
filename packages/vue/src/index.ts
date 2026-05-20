@@ -31,6 +31,7 @@ export {
   PolyPlane,
   PolyRing,
   PolyOctahedron,
+  PolySphere,
   PolyTetrahedron,
   PolyIcosahedron,
   PolyDodecahedron,
