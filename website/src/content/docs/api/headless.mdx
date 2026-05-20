@@ -69,6 +69,7 @@ High-level convenience function: fetches a URL, detects OBJ vs glTF/GLB/VOX by e
 import { loadMesh } from "@layoutit/polycss-core";
 
 const { polygons, dispose } = await loadMesh("https://polycss.com/gallery/obj/cottage.obj", {
+  mtlUrl: "https://polycss.com/gallery/obj/cottage.mtl",
   baseUrl: new URL("https://polycss.com/gallery/obj/cottage.obj", location.href).href,
   gltfOptions: { targetSize: 60 },
 });
@@ -153,7 +154,9 @@ import { createPolyCamera, createPolyScene, createPolyOrbitControls, loadMesh } 
 
 const camera = createPolyCamera({ rotX: 65, rotY: 45 });
 const scene = createPolyScene(host, { camera });
-scene.add(await loadMesh("https://polycss.com/gallery/obj/cottage.obj"));
+scene.add(await loadMesh("https://polycss.com/gallery/obj/cottage.obj", {
+  mtlUrl: "https://polycss.com/gallery/obj/cottage.mtl",
+}));
 
 const controls = createPolyOrbitControls(scene, {
   drag: true,                                                // default true
@@ -225,7 +228,7 @@ Register `<poly-camera>`, `<poly-scene>`, `<poly-mesh>`, `<poly-polygon>`, `<pol
 <poly-camera rot-x="65" rot-y="45">
   <poly-scene>
     <poly-orbit-controls drag wheel animate-speed="0.3"></poly-orbit-controls>
-    <poly-mesh src="https://polycss.com/gallery/obj/cottage.obj"></poly-mesh>
+    <poly-icosahedron size="100" color="#ff6644"></poly-icosahedron>
   </poly-scene>
 </poly-camera>
 ```
