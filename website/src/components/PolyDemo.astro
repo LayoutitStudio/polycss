@@ -530,20 +530,24 @@ const { id, model, mtl, generator, generatorParams, controls, defaults, showStat
 
       // ── Scene init for generator mode ─────────────────────────────────────
       async function initGeneratorScene() {
-        const { createPolyScene, createPolyOrbitControls } = await import("@layoutit/polycss");
+        const {
+          createPolyOrbitControls,
+          createPolyOrthographicCamera,
+          createPolyPerspectiveCamera,
+          createPolyScene,
+        } = await import("@layoutit/polycss");
 
         sceneEl = document.createElement("div");
         sceneEl.style.cssText = "width:100%;height:100%;position:absolute;inset:0;";
         sceneHost.appendChild(sceneEl);
 
-        const sceneOptions: Record<string, any> = {
-          rotX: state.rotX,
-          rotY: state.rotY,
-          zoom: state.zoom,
-          autoCenter: true,
-        };
+        const cameraOpts = { rotX: state.rotX, rotY: state.rotY, zoom: state.zoom };
         const perspective = perspectiveOverride();
-        if (perspective !== undefined) sceneOptions.perspective = perspective;
+        const camera = perspective !== undefined
+          ? createPolyPerspectiveCamera({ ...cameraOpts, perspective })
+          : createPolyOrthographicCamera(cameraOpts);
+
+        const sceneOptions: Record<string, any> = { camera, autoCenter: true };
         if (state.light) sceneOptions.directionalLight = state.light;
 
         sceneHandle = createPolyScene(sceneEl as HTMLElement, sceneOptions);
@@ -586,14 +590,13 @@ const { id, model, mtl, generator, generatorParams, controls, defaults, showStat
       // ── Update camera from state (model mode uses attributes) ──────────────
       function updateCamera() {
         if (sceneHandle) {
-          // Generator mode — use imperative API
-          sceneHandle.setOptions({
+          // Generator mode — use imperative API; camera state lives on the camera handle
+          sceneHandle.camera?.update({
             rotX: state.rotX,
             rotY: state.rotY,
-            perspective: perspectiveOverride(),
             zoom: state.zoom,
-            autoCenter: true,
           });
+          sceneHandle.applyCamera();
         } else {
           // applySceneAttrs handles rotation/zoom/light attrs on the
           // <poly-scene>. drag/wheel/animate flow through <poly-orbit-controls>
