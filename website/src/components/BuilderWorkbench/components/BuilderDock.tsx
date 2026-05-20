@@ -63,10 +63,8 @@ export function BuilderDock({
       />
       <DockCamera
         autoCenter={sceneOptions.autoCenter}
-        renderer={sceneOptions.renderer}
         showAxes={sceneOptions.showAxes}
         animate={sceneOptions.animate}
-        autoRotateDriver={sceneOptions.autoRotateDriver}
         dragMode={sceneOptions.dragMode}
         fpvLook={sceneOptions.fpvLook}
         fpvMove={sceneOptions.fpvMove}
