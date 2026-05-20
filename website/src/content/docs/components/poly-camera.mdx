@@ -59,20 +59,20 @@ Set an initial angle. `PolyCamera` (orthographic) is the default.
 
 <poly-camera zoom="0.8" rot-x="70" rot-y="30">
   <poly-scene>
-    <poly-mesh src="https://polycss.com/gallery/obj/cottage.obj"></poly-mesh>
+    <poly-cone color="#ffd166"></poly-cone>
   </poly-scene>
 </poly-camera>
 ```
 </TabItem>
 <TabItem label="React">
 ```tsx
-import { PolyCamera, PolyScene, PolyMesh } from "@layoutit/polycss-react";
+import { PolyCamera, PolyScene, PolyCone } from "@layoutit/polycss-react";
 
 export function App() {
   return (
     <PolyCamera zoom={0.8} rotX={70} rotY={30}>
       <PolyScene>
-        <PolyMesh src="https://polycss.com/gallery/obj/cottage.obj" />
+        <PolyCone color="#ffd166" />
       </PolyScene>
     </PolyCamera>
   );
@@ -84,13 +84,13 @@ export function App() {
 <template>
   <PolyCamera :zoom="0.8" :rot-x="70" :rot-y="30">
     <PolyScene>
-      <PolyMesh src="https://polycss.com/gallery/obj/cottage.obj" />
+      <PolyCone color="#ffd166" />
     </PolyScene>
   </PolyCamera>
 </template>
 
 <script setup lang="ts">
-import { PolyCamera, PolyScene, PolyMesh } from "@layoutit/polycss-vue";
+import { PolyCamera, PolyScene, PolyCone } from "@layoutit/polycss-vue";
 </script>
 ```
 </TabItem>
@@ -105,20 +105,20 @@ import { PolyCamera, PolyScene, PolyMesh } from "@layoutit/polycss-vue";
 ```html
 <poly-camera rot-x="65" rot-y="45">
   <poly-scene>
-    <poly-mesh src="https://polycss.com/gallery/obj/cottage.obj"></poly-mesh>
+    <poly-icosahedron size="100" color="#ff6644"></poly-icosahedron>
   </poly-scene>
 </poly-camera>
 ```
 </TabItem>
 <TabItem label="React">
 ```tsx
-import { PolyCamera, PolyScene, PolyMesh } from "@layoutit/polycss-react";
+import { PolyCamera, PolyScene, PolyIcosahedron } from "@layoutit/polycss-react";
 
 export function App() {
   return (
     <PolyCamera rotX={65} rotY={45}>
       <PolyScene>
-        <PolyMesh src="https://polycss.com/gallery/obj/cottage.obj" />
+        <PolyIcosahedron size={100} color="#ff6644" />
       </PolyScene>
     </PolyCamera>
   );
@@ -130,13 +130,13 @@ export function App() {
 <template>
   <PolyCamera :rot-x="65" :rot-y="45">
     <PolyScene>
-      <PolyMesh src="https://polycss.com/gallery/obj/cottage.obj" />
+      <PolyIcosahedron :size="100" color="#ff6644" />
     </PolyScene>
   </PolyCamera>
 </template>
 
 <script setup lang="ts">
-import { PolyCamera, PolyScene, PolyMesh } from "@layoutit/polycss-vue";
+import { PolyCamera, PolyScene, PolyIcosahedron } from "@layoutit/polycss-vue";
 </script>
 ```
 </TabItem>
@@ -151,7 +151,7 @@ Drop a `<PolyOrbitControls>` child for drag, wheel, and `dt`-clamped autorotate.
 <poly-camera rot-x="65" rot-y="45">
   <poly-scene>
     <poly-orbit-controls drag wheel animate-speed="0.5"></poly-orbit-controls>
-    <poly-mesh src="https://polycss.com/gallery/obj/cottage.obj"></poly-mesh>
+    <poly-torus color="#4ecdc4"></poly-torus>
   </poly-scene>
 </poly-camera>
 ```
@@ -161,7 +161,7 @@ Drop a `<PolyOrbitControls>` child for drag, wheel, and `dt`-clamped autorotate.
 <PolyCamera rotX={65} rotY={45}>
   <PolyScene>
     <PolyOrbitControls drag wheel animate={{ axis: "y", speed: 0.5 }} />
-    <PolyMesh src="https://polycss.com/gallery/obj/cottage.obj" />
+    <PolyTorus color="#4ecdc4" />
   </PolyScene>
 </PolyCamera>
 ```

@@ -50,7 +50,7 @@ They are available as custom elements (`<poly-orbit-controls>` / `<poly-map-cont
 <poly-camera rot-x="65" rot-y="45">
   <poly-scene>
     <poly-orbit-controls drag wheel animate-speed="0.3"></poly-orbit-controls>
-    <poly-mesh src="https://polycss.com/gallery/obj/cottage.obj"></poly-mesh>
+    <poly-torus color="#4ecdc4"></poly-torus>
   </poly-scene>
 </poly-camera>
 ```
@@ -59,14 +59,14 @@ The presence of any `animate-*` attribute (`animate-speed`, `animate-axis`, `ani
 </TabItem>
 <TabItem label="React">
 ```tsx
-import { PolyCamera, PolyScene, PolyOrbitControls, PolyMesh } from "@layoutit/polycss-react";
+import { PolyCamera, PolyScene, PolyOrbitControls, PolyTorus } from "@layoutit/polycss-react";
 
 export function App() {
   return (
     <PolyCamera rotX={65} rotY={45}>
       <PolyScene>
         <PolyOrbitControls drag wheel animate={{ speed: 0.3 }} />
-        <PolyMesh src="https://polycss.com/gallery/obj/cottage.obj" />
+        <PolyTorus color="#4ecdc4" />
       </PolyScene>
     </PolyCamera>
   );
@@ -79,13 +79,13 @@ export function App() {
   <PolyCamera :rot-x="65" :rot-y="45">
     <PolyScene>
       <PolyOrbitControls drag wheel :animate="{ speed: 0.3 }" />
-      <PolyMesh src="https://polycss.com/gallery/obj/cottage.obj" />
+      <PolyTorus color="#4ecdc4" />
     </PolyScene>
   </PolyCamera>
 </template>
 
 <script setup lang="ts">
-import { PolyCamera, PolyScene, PolyOrbitControls, PolyMesh } from "@layoutit/polycss-vue";
+import { PolyCamera, PolyScene, PolyOrbitControls, PolyTorus } from "@layoutit/polycss-vue";
 </script>
 ```
 </TabItem>
@@ -96,11 +96,11 @@ import { PolyCamera, PolyScene, PolyOrbitControls, PolyMesh } from "@layoutit/po
 When you mount a scene through the `createPolyScene` imperative API, pair it with `createPolyOrbitControls(scene, options)`. The controls handle returns a small lifecycle interface for live updates.
 
 ```ts
-import { createPolyCamera, createPolyScene, createPolyOrbitControls, loadMesh } from "@layoutit/polycss";
+import { createPolyCamera, createPolyScene, createPolyOrbitControls, createPolyTorus } from "@layoutit/polycss";
 
 const camera = createPolyCamera({ rotX: 65, rotY: 45 });
 const scene = createPolyScene(host, { camera });
-scene.add(await loadMesh("https://polycss.com/gallery/obj/cottage.obj"));
+scene.add(createPolyTorus({ color: "#4ecdc4" }));
 
 const controls = createPolyOrbitControls(scene, {
   drag: true,
@@ -168,7 +168,7 @@ Disable input but keep autorotate running:
 <poly-camera rot-x="65" rot-y="45">
   <poly-scene>
     <poly-orbit-controls drag="false" wheel="false" animate-speed="0.5"></poly-orbit-controls>
-    <poly-mesh src="https://polycss.com/gallery/obj/cottage.obj"></poly-mesh>
+    <poly-dodecahedron size="100" color="#a78bfa"></poly-dodecahedron>
   </poly-scene>
 </poly-camera>
 ```

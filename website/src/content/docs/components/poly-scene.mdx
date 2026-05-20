@@ -62,7 +62,7 @@ interface PolyAmbientLight {
 
 ### Basic Scene
 
-A scene with a single GLB mesh at default camera angle.
+A scene with a dodecahedron at default camera angle.
 
 <Tabs syncKey="fw">
 <TabItem label="Vanilla JS">
@@ -71,20 +71,20 @@ A scene with a single GLB mesh at default camera angle.
 
 <poly-camera rot-x="65" rot-y="45">
   <poly-scene>
-    <poly-mesh src="https://polycss.com/gallery/obj/cottage.obj"></poly-mesh>
+    <poly-dodecahedron size="100" color="#a78bfa"></poly-dodecahedron>
   </poly-scene>
 </poly-camera>
 ```
 </TabItem>
 <TabItem label="React">
 ```tsx
-import { PolyCamera, PolyScene, PolyMesh } from "@layoutit/polycss-react";
+import { PolyCamera, PolyScene, PolyDodecahedron } from "@layoutit/polycss-react";
 
 export function App() {
   return (
     <PolyCamera rotX={65} rotY={45}>
       <PolyScene>
-        <PolyMesh src="https://polycss.com/gallery/obj/cottage.obj" />
+        <PolyDodecahedron size={100} color="#a78bfa" />
       </PolyScene>
     </PolyCamera>
   );
@@ -96,13 +96,13 @@ export function App() {
 <template>
   <PolyCamera :rot-x="65" :rot-y="45">
     <PolyScene>
-      <PolyMesh src="https://polycss.com/gallery/obj/cottage.obj" />
+      <PolyDodecahedron :size="100" color="#a78bfa" />
     </PolyScene>
   </PolyCamera>
 </template>
 
 <script setup lang="ts">
-import { PolyCamera, PolyScene, PolyMesh } from "@layoutit/polycss-vue";
+import { PolyCamera, PolyScene, PolyDodecahedron } from "@layoutit/polycss-vue";
 </script>
 ```
 </TabItem>
@@ -111,15 +111,15 @@ import { PolyCamera, PolyScene, PolyMesh } from "@layoutit/polycss-vue";
 ### Scene with Camera and Lighting
 
 ```tsx
-import { PolyPerspectiveCamera, PolyScene, PolyMesh } from "@layoutit/polycss-react";
+import { PolyPerspectiveCamera, PolyScene, PolyTorus, PolyBox } from "@layoutit/polycss-react";
 
 <PolyPerspectiveCamera perspective={1000} rotX={65} rotY={45}>
   <PolyScene
     directionalLight={{ direction: [0.5, -0.7, 0.6], color: "#ffe4a8" }}
     ambientLight={{ intensity: 0.4 }}
   >
-    <PolyMesh src="https://polycss.com/gallery/obj/cottage.obj" position={[0, 0, 0]} />
-    <PolyMesh src="/tree.glb" position={[8, 0, 0]} scale={0.5} />
+    <PolyTorus color="#4ecdc4" position={[0, 0, 0]} />
+    <PolyBox size={60} color="#ffd166" position={[8, 0, 0]} />
   </PolyScene>
 </PolyPerspectiveCamera>
 ```
@@ -129,8 +129,8 @@ import { PolyPerspectiveCamera, PolyScene, PolyMesh } from "@layoutit/polycss-re
 ```tsx
 <PolyCamera rotX={65} rotY={45}>
   <PolyScene>
-    <PolyMesh src="https://polycss.com/gallery/obj/cottage.obj" position={[0, 0, 0]} />
-    <PolyMesh src="/tree.glb" position={[8, 0, 0]} scale={0.5} />
+    <PolyIcosahedron size={80} color="#ff6644" position={[0, 0, 0]} />
+    <PolyBox size={60} color="#7dd3fc" position={[10, 0, 0]} />
   </PolyScene>
 </PolyCamera>
 ```
