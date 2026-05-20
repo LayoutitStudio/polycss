@@ -27,6 +27,7 @@ import {
   PolyPlaneElement,
   PolyRingElement,
   PolyOctahedronElement,
+  PolySphereElement,
   PolyTetrahedronElement,
   PolyIcosahedronElement,
   PolyDodecahedronElement,
@@ -93,6 +94,9 @@ if (typeof customElements !== "undefined") {
   if (!customElements.get("poly-tetrahedron")) {
     customElements.define("poly-tetrahedron", PolyTetrahedronElement);
   }
+  if (!customElements.get("poly-sphere")) {
+    customElements.define("poly-sphere", PolySphereElement);
+  }
   if (!customElements.get("poly-icosahedron")) {
     customElements.define("poly-icosahedron", PolyIcosahedronElement);
   }
@@ -128,6 +132,7 @@ export {
   PolyPlaneElement,
   PolyRingElement,
   PolyOctahedronElement,
+  PolySphereElement,
   PolyTetrahedronElement,
   PolyIcosahedronElement,
   PolyDodecahedronElement,

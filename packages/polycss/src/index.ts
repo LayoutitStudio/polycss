@@ -113,6 +113,7 @@ export {
   PolyPlaneElement,
   PolyRingElement,
   PolyOctahedronElement,
+  PolySphereElement,
   PolyTetrahedronElement,
   PolyIcosahedronElement,
   PolyDodecahedronElement,

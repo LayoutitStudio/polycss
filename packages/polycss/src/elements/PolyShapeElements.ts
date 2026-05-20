@@ -16,6 +16,7 @@ import {
   planePolygons,
   ringPolygons,
   octahedronPolygons,
+  spherePolygons,
   tetrahedronPolygons,
   icosahedronPolygons,
   dodecahedronPolygons,
@@ -229,6 +230,20 @@ export class PolyDodecahedronElement extends PolyShapeElement {
   buildPolygons(): Polygon[] {
     return dodecahedronPolygons({
       size: numAttr(this, "size", 100),
+      color: strAttr(this, "color"),
+    });
+  }
+}
+
+export class PolySphereElement extends PolyShapeElement {
+  static get observedAttributes(): string[] {
+    return ["radius", "subdivisions", "color", "auto-center", "position", "scale", "rotation"];
+  }
+
+  buildPolygons(): Polygon[] {
+    return spherePolygons({
+      radius: numAttr(this, "radius", 50),
+      subdivisions: numAttr(this, "subdivisions", 1),
       color: strAttr(this, "color"),
     });
   }

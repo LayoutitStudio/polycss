@@ -9,6 +9,7 @@ import {
   PolyPlaneElement,
   PolyRingElement,
   PolyOctahedronElement,
+  PolySphereElement,
   PolyTetrahedronElement,
   PolyIcosahedronElement,
   PolyDodecahedronElement,
@@ -35,6 +36,9 @@ beforeAll(() => {
   }
   if (!customElements.get("poly-tetrahedron")) {
     customElements.define("poly-tetrahedron", PolyTetrahedronElement);
+  }
+  if (!customElements.get("poly-sphere")) {
+    customElements.define("poly-sphere", PolySphereElement);
   }
   if (!customElements.get("poly-icosahedron")) {
     customElements.define("poly-icosahedron", PolyIcosahedronElement);
@@ -93,6 +97,9 @@ describe("registration", () => {
   it("registers poly-tetrahedron", () => {
     expect(customElements.get("poly-tetrahedron")).toBe(PolyTetrahedronElement);
   });
+  it("registers poly-sphere", () => {
+    expect(customElements.get("poly-sphere")).toBe(PolySphereElement);
+  });
   it("registers poly-icosahedron", () => {
     expect(customElements.get("poly-icosahedron")).toBe(PolyIcosahedronElement);
   });
@@ -133,6 +140,11 @@ describe("leaf DOM production", () => {
 
   it("poly-tetrahedron produces leaf nodes inside poly-scene", () => {
     const scene = mountInScene("poly-tetrahedron", { size: "100" });
+    expect(scene.querySelectorAll("i,b,s,u").length).toBeGreaterThan(0);
+  });
+
+  it("poly-sphere produces leaf nodes inside poly-scene", () => {
+    const scene = mountInScene("poly-sphere", { radius: "50", subdivisions: "1" });
     expect(scene.querySelectorAll("i,b,s,u").length).toBeGreaterThan(0);
   });
 
