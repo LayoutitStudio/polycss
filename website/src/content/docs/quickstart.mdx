@@ -39,20 +39,20 @@ The camera element (`<poly-camera>` / `PolyCamera`) is always the outer node: it
 
 <poly-camera rot-x="65" rot-y="45">
   <poly-scene>
-    <poly-mesh src="https://polycss.com/gallery/obj/cottage.obj"></poly-mesh>
+    <poly-box size="100" color="#ffd166"></poly-box>
   </poly-scene>
 </poly-camera>
 ```
 </TabItem>
 <TabItem label="React">
 ```tsx
-import { PolyCamera, PolyScene, PolyMesh } from "@layoutit/polycss-react";
+import { PolyCamera, PolyScene, PolyBox } from "@layoutit/polycss-react";
 
 export function App() {
   return (
     <PolyCamera rotX={65} rotY={45}>
       <PolyScene>
-        <PolyMesh src="https://polycss.com/gallery/obj/cottage.obj" />
+        <PolyBox size={100} color="#ffd166" />
       </PolyScene>
     </PolyCamera>
   );
@@ -64,13 +64,13 @@ export function App() {
 <template>
   <PolyCamera :rot-x="65" :rot-y="45">
     <PolyScene>
-      <PolyMesh src="https://polycss.com/gallery/obj/cottage.obj" />
+      <PolyBox :size="100" color="#ffd166" />
     </PolyScene>
   </PolyCamera>
 </template>
 
 <script setup lang="ts">
-import { PolyCamera, PolyScene, PolyMesh } from "@layoutit/polycss-vue";
+import { PolyCamera, PolyScene, PolyBox } from "@layoutit/polycss-vue";
 </script>
 ```
 </TabItem>

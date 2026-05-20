@@ -43,14 +43,14 @@ You can also load polycss directly from a CDN with no build step:
 
 ## A quick taste
 
-Load a GLB mesh into an interactive scene with zero JS: just custom elements:
+Render a 3D shape with zero JS: just custom elements:
 
 ```html
 <script type="module" src="https://esm.sh/@layoutit/polycss/elements"></script>
 
 <poly-camera rot-x="65" rot-y="45">
   <poly-scene>
-    <poly-mesh src="https://polycss.com/gallery/obj/cottage.obj"></poly-mesh>
+    <poly-icosahedron size="100" color="#ff6644"></poly-icosahedron>
   </poly-scene>
 </poly-camera>
 ```
@@ -58,13 +58,13 @@ Load a GLB mesh into an interactive scene with zero JS: just custom elements:
 Or with React:
 
 ```tsx
-import { PolyCamera, PolyScene, PolyMesh } from "@layoutit/polycss-react";
+import { PolyCamera, PolyScene, PolyIcosahedron } from "@layoutit/polycss-react";
 
 export function App() {
   return (
     <PolyCamera rotX={65} rotY={45}>
       <PolyScene>
-        <PolyMesh src="https://polycss.com/gallery/obj/cottage.obj" />
+        <PolyIcosahedron size={100} color="#ff6644" />
       </PolyScene>
     </PolyCamera>
   );
