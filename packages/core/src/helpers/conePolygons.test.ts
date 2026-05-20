@@ -86,28 +86,28 @@ describe("conePolygons", () => {
   it("uses default radius 50, height 100, color #cccccc", () => {
     const polygons = conePolygons();
     for (const p of polygons) expect(p.color).toBe("#cccccc");
-    const yVals = polygons.flatMap((p) => p.vertices.map((v) => v[1]));
-    expect(Math.min(...yVals)).toBeCloseTo(-50, 5);
-    expect(Math.max(...yVals)).toBeCloseTo(50, 5);
+    const zVals = polygons.flatMap((p) => p.vertices.map((v) => v[2]));
+    expect(Math.min(...zVals)).toBeCloseTo(-50, 5);
+    expect(Math.max(...zVals)).toBeCloseTo(50, 5);
   });
 
-  it("apex is a single point at the top (+Y)", () => {
+  it("apex is a single point at the top (+Z)", () => {
     const polygons = conePolygons({ radialSegments: 6 });
-    // Side quads are ordered [bl, tl, tr, br] where tl and tr are the apex-level vertices.
+    // Side quads are ordered [bl, br, tr, tl] where tr and tl are the apex-level vertices.
     const apexPoints = new Set<string>();
     for (let i = 0; i < 6; i++) {
-      // vertices[1] = tl, vertices[2] = tr — both collapse to apex when radiusTop = 0.
-      const tl = polygons[i].vertices[1];
+      // vertices[2] = tr, vertices[3] = tl — both collapse to apex when radiusTop = 0.
       const tr = polygons[i].vertices[2];
-      apexPoints.add(tl.map((x) => x.toFixed(6)).join(","));
+      const tl = polygons[i].vertices[3];
       apexPoints.add(tr.map((x) => x.toFixed(6)).join(","));
+      apexPoints.add(tl.map((x) => x.toFixed(6)).join(","));
     }
-    // All apex vertices collapse to one point (0, +height/2, 0) = (0, 50, 0).
+    // All apex vertices collapse to one point (0, 0, +height/2) = (0, 0, 50).
     expect(apexPoints.size).toBe(1);
-    const apex = polygons[0].vertices[1]; // tl of first side quad
+    const apex = polygons[0].vertices[2]; // tr of first side quad
     expect(apex[0]).toBeCloseTo(0, 5);
-    expect(apex[1]).toBeCloseTo(50, 5);
-    expect(apex[2]).toBeCloseTo(0, 5);
+    expect(apex[1]).toBeCloseTo(0, 5);
+    expect(apex[2]).toBeCloseTo(50, 5);
   });
 
   it("every face is coplanar within epsilon", () => {

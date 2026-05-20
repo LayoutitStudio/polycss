@@ -71,14 +71,14 @@ describe("cylinderPolygons", () => {
   it("uses default radius 50, height 100, color #cccccc", () => {
     const polygons = cylinderPolygons();
     for (const p of polygons) expect(p.color).toBe("#cccccc");
-    // All vertices should have |y| ≤ 50 (half height).
+    // All vertices should have |z| ≤ 50 (half height) — axis is Z (up).
     for (const p of polygons) {
-      for (const v of p.vertices) expect(Math.abs(v[1])).toBeLessThanOrEqual(50 + 1e-6);
+      for (const v of p.vertices) expect(Math.abs(v[2])).toBeLessThanOrEqual(50 + 1e-6);
     }
-    // Bottom-cap center is at y = -50; top-cap center at y = +50.
-    const yVals = polygons.flatMap((p) => p.vertices.map((v) => v[1]));
-    expect(Math.min(...yVals)).toBeCloseTo(-50, 5);
-    expect(Math.max(...yVals)).toBeCloseTo(50, 5);
+    // Bottom-cap center is at z = -50; top-cap center at z = +50.
+    const zVals = polygons.flatMap((p) => p.vertices.map((v) => v[2]));
+    expect(Math.min(...zVals)).toBeCloseTo(-50, 5);
+    expect(Math.max(...zVals)).toBeCloseTo(50, 5);
   });
 
   it("respects custom radius, height, radialSegments, and color", () => {
@@ -86,9 +86,9 @@ describe("cylinderPolygons", () => {
     // 6 sides + 6 bottom + 6 top = 18
     expect(polygons).toHaveLength(18);
     for (const p of polygons) expect(p.color).toBe("#112233");
-    const yVals = polygons.flatMap((p) => p.vertices.map((v) => v[1]));
-    expect(Math.min(...yVals)).toBeCloseTo(-30, 5);
-    expect(Math.max(...yVals)).toBeCloseTo(30, 5);
+    const zVals = polygons.flatMap((p) => p.vertices.map((v) => v[2]));
+    expect(Math.min(...zVals)).toBeCloseTo(-30, 5);
+    expect(Math.max(...zVals)).toBeCloseTo(30, 5);
   });
 
   it("every face is coplanar within epsilon", () => {
