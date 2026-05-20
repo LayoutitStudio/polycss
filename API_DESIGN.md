@@ -269,13 +269,14 @@ Sugar over the polygon generators. `<PolyBox size={100} />` is one-liner ergonom
 | Component | Default | Polygon count at default | Core generator |
 |---|---|---|---|
 | `PolyRing` (disc) | `segments: 32` | 32 triangles | `ringPolygons` ✅ |
-| `PolyCylinder` | `radialSegments: 12` | ≈48 (24 side quads + 24 cap triangles) | `cylinderPolygons` ❌ — add |
-| `PolyCone` | `radialSegments: 12` | 24 (12 side + 12 cap) | `conePolygons` ❌ — add. Could share `cylinderPolygons` impl with `radiusTop: 0`. |
-| `PolyTorus` | `radialSegments: 12, tubularSegments: 16` | 192 quads | `torusPolygons` ❌ — add. Heaviest of the set; document. |
+| `PolySphere` | `subdivisions: 1` (cap: 3) | 80 triangles (subdivisions cap at 3 → 1280 triangles; each step quadruples DOM cost) | `spherePolygons` ✅ |
+| `PolyCylinder` | `radialSegments: 12` | ≈48 (24 side quads + 24 cap triangles) | `cylinderPolygons` ✅ |
+| `PolyCone` | `radialSegments: 12` | 24 (12 side + 12 cap) | `conePolygons` ✅ |
+| `PolyTorus` | `radialSegments: 12, tubularSegments: 16` | 192 quads | `torusPolygons` ✅ |
 
 ### Deferred
 
-- **`PolySphere`** — three.js's default (`32×16`) is **1024 DOM nodes per sphere**. Even conservative `16×8` is 256. A sphere in polycss is a DOM-cost problem, not a math one. Hold off until either (a) a geodesic-subdivision generator with reasonable poly count, or (b) clear user demand. Workaround: subdivided icosahedron, or `boxPolygons` for "ball-ish."
+Currently no deferred primitives.
 
 ### Same scene across all four paths — `PolyBox` as the reference
 
