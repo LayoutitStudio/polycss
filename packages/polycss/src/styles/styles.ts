@@ -101,8 +101,8 @@ const CORE_BASE_STYLES = `
 .polycss-mesh.polycss-voxel-mesh > b {
   top: 0;
   left: 0;
-  width: 1px;
-  height: 1px;
+  width: var(--polycss-voxel-primitive, 1px);
+  height: var(--polycss-voxel-primitive, 1px);
   backface-visibility: visible;
   pointer-events: none;
 }

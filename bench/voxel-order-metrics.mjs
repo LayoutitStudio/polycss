@@ -52,7 +52,44 @@ function sourceBlockDepthOrder(items, rotY, blockSize, front) {
     .flatMap((block) => block.items);
 }
 
+function projectedCenter(item, rotY) {
+  const point = projectPoint(itemCenter(item), rotY);
+  return { x: point.x, y: point.y };
+}
+
+function tileScanlineOrder(items, rotY, tileCount) {
+  const entries = items.map((item) => ({ item, ...projectedCenter(item, rotY) }));
+  if (entries.length === 0) return [];
+  const minX = Math.min(...entries.map((entry) => entry.x));
+  const maxX = Math.max(...entries.map((entry) => entry.x));
+  const minY = Math.min(...entries.map((entry) => entry.y));
+  const maxY = Math.max(...entries.map((entry) => entry.y));
+  const spanX = Math.max(1e-6, maxX - minX);
+  const spanY = Math.max(1e-6, maxY - minY);
+  const tiles = new Map();
+  for (const entry of entries) {
+    const tx = Math.min(tileCount - 1, Math.max(0, Math.floor(((entry.x - minX) / spanX) * tileCount)));
+    const ty = Math.min(tileCount - 1, Math.max(0, Math.floor(((entry.y - minY) / spanY) * tileCount)));
+    const key = `${tx}:${ty}`;
+    const tile = tiles.get(key) ?? { tx, ty, sourceIndex: entry.item.sourceIndex, items: [] };
+    tile.items.push(entry.item);
+    tile.sourceIndex = Math.min(tile.sourceIndex, entry.item.sourceIndex);
+    tiles.set(key, tile);
+  }
+  return [...tiles.values()]
+    .sort((a, b) => (a.ty - b.ty) || (a.tx - b.tx) || a.sourceIndex - b.sourceIndex)
+    .flatMap((tile) => tile.items);
+}
+
 const STRATEGIES = [
+  {
+    key: "tile4",
+    caseId: "polycss-voxlocal-direct-matrix-tile4-scanline-forward",
+    label: "Tile4 scanline",
+    order(items, rotY) {
+      return tileScanlineOrder(items, rotY, 4);
+    },
+  },
   {
     key: "exact",
     caseId: "polycss-voxlocal-direct-matrix-exact",
@@ -403,6 +440,7 @@ function projectedItem(item, order, rotY) {
     maxY,
     depth,
     area2d: polygonArea2(points),
+    boundsArea2d: Math.max(0, maxX - minX) * Math.max(0, maxY - minY),
     plane: planeFromProjected(points),
   };
 }
@@ -490,6 +528,14 @@ function analyzeProjected(projected) {
     active.push(current);
   }
 
+  const minX = Math.min(...projected.map((item) => item.minX));
+  const maxX = Math.max(...projected.map((item) => item.maxX));
+  const minY = Math.min(...projected.map((item) => item.minY));
+  const maxY = Math.max(...projected.map((item) => item.maxY));
+  const screenArea = Math.max(1e-6, (maxX - minX) * (maxY - minY));
+  const boundsAreaSum = projected.reduce((sum, item) => sum + item.boundsArea2d, 0);
+  const quadAreaSum = projected.reduce((sum, item) => sum + item.area2d, 0);
+
   let largestComponent = 0;
   const componentSizes = new Map();
   for (let i = 0; i < projected.length; i += 1) {
@@ -513,6 +559,11 @@ function analyzeProjected(projected) {
 
   return {
     activeLeaves: projected.length,
+    screenArea,
+    boundsAreaSum,
+    quadAreaSum,
+    projectedBoundsFill: boundsAreaSum / screenArea,
+    projectedQuadFill: quadAreaSum / screenArea,
     overlapPairs,
     overlapArea,
     invAsc,
@@ -531,6 +582,9 @@ function mergeMetricRows(rows) {
   const total = {
     samples: rows.length,
     activeLeaves: 0,
+    screenAreaMedian: median(rows.map((row) => row.screenArea)),
+    projectedBoundsFillMedian: median(rows.map((row) => row.projectedBoundsFill)),
+    projectedQuadFillMedian: median(rows.map((row) => row.projectedQuadFill)),
     overlapPairs: 0,
     overlapArea: 0,
     invAsc: 0,
@@ -664,8 +718,8 @@ function renderMarkdown(rows) {
     lines.push("");
     lines.push(`Polygons: ${row.polygons}; exact matrix items: ${row.exactItems}`);
     lines.push("");
-    lines.push("| Strategy | Runs | FPS p95 | Frame p99 | Active | Overlap/leaf | Min inv % | Asc inv % | Desc inv % | Cross % | Tie % | Max comp | Face switches | Depth jump |");
-    lines.push("| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |");
+    lines.push("| Strategy | Runs | FPS p95 | Frame p99 | Active | Bounds fill | Quad fill | Overlap/leaf | Min inv % | Asc inv % | Desc inv % | Cross % | Tie % | Max comp | Face switches | Depth jump |");
+    lines.push("| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |");
     for (const strategy of row.strategies) {
       const m = strategy.metrics;
       const b = strategy.bench;
@@ -675,6 +729,8 @@ function renderMarkdown(rows) {
         fmt(b?.fpsP95),
         fmt(b?.frameP99),
         fmt(m.activeLeavesMedian, 0),
+        fmt(m.projectedBoundsFillMedian, 2),
+        fmt(m.projectedQuadFillMedian, 2),
         fmt(m.overlapPairsPerLeaf, 2),
         fmt(m.minDepthInvRate * 100, 2),
         fmt(m.invAscRate * 100, 2),

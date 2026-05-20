@@ -62,6 +62,56 @@ export const PRESETS = {
     options: { targetSize: 60 },
     zoom: 0.4, rotX: 65, rotY: 45,
   },
+  "ancient-crash-site": {
+    url: "/gallery/vox/AncientCrashSite.vox",
+    options: { targetSize: 70, gridShift: 0 },
+    zoom: 0.35, rotX: 65, rotY: 45,
+  },
+  "desert2": {
+    url: "/gallery/vox/desert2.vox",
+    options: { targetSize: 60, gridShift: 0 },
+    zoom: 0.4, rotX: 65, rotY: 45,
+  },
+  "garden": {
+    url: "/gallery/vox/Garden.vox",
+    options: { targetSize: 60, gridShift: 0 },
+    zoom: 0.4, rotX: 65, rotY: 45,
+  },
+  "mecha-golem": {
+    url: "/gallery/vox/MechaGolem.vox",
+    options: { targetSize: 60, gridShift: 0 },
+    zoom: 0.4, rotX: 65, rotY: 45,
+  },
+  "army": {
+    url: "/gallery/vox/army.vox",
+    options: { targetSize: 60, gridShift: 0 },
+    zoom: 0.4, rotX: 65, rotY: 45,
+  },
+  "obj-house3": {
+    url: "/gallery/vox/obj_house3.vox",
+    options: { targetSize: 60, gridShift: 0 },
+    zoom: 0.4, rotX: 65, rotY: 45,
+  },
+  "obj-house5": {
+    url: "/gallery/vox/obj_house5.vox",
+    options: { targetSize: 60, gridShift: 0 },
+    zoom: 0.4, rotX: 65, rotY: 45,
+  },
+  "scene-mechanic2": {
+    url: "/gallery/vox/scene_mechanic2.vox",
+    options: { targetSize: 60, gridShift: 0 },
+    zoom: 0.4, rotX: 65, rotY: 45,
+  },
+  "skyscraper": {
+    url: "/gallery/vox/skyscraper.vox",
+    options: { targetSize: 60, gridShift: 0 },
+    zoom: 0.4, rotX: 65, rotY: 45,
+  },
+  "treasure": {
+    url: "/gallery/vox/Treasure.vox",
+    options: { targetSize: 60, gridShift: 0 },
+    zoom: 0.4, rotX: 65, rotY: 45,
+  },
   crate: {
     url: "/gallery/obj/opengameart/crate/Box.obj",
     mtlUrl: "/gallery/obj/opengameart/crate/Box.mtl",
@@ -70,9 +120,78 @@ export const PRESETS = {
   },
 };
 
+function parseNumberParam(params, name, fallback) {
+  const raw = params.get(name);
+  if (raw === null || raw.trim() === "") return fallback;
+  const value = Number(raw);
+  return Number.isFinite(value) ? value : fallback;
+}
+
+function galleryAssetPath(value, extension) {
+  const cleaned = value
+    .replace(/\\/g, "/")
+    .replace(/^\/+/, "")
+    .replace(/^gallery\//, "")
+    .replace(/^vox\//, "")
+    .replace(/^glb\//, "")
+    .replace(/^obj\//, "");
+  if (!cleaned || cleaned.includes("..")) return null;
+  return cleaned.toLowerCase().endsWith(extension) ? cleaned : `${cleaned}${extension}`;
+}
+
+function genericGalleryPreset(params, meshId) {
+  if (meshId.startsWith("vox:")) {
+    const file = galleryAssetPath(meshId.slice("vox:".length), ".vox");
+    if (!file) return null;
+    return {
+      url: `/gallery/vox/${file}`,
+      options: {
+        targetSize: parseNumberParam(params, "targetSize", 60),
+        gridShift: 0,
+      },
+      zoom: parseNumberParam(params, "zoom", 0.4),
+      rotX: parseNumberParam(params, "rotX", 65),
+      rotY: parseNumberParam(params, "rotY", 45),
+    };
+  }
+
+  if (meshId.startsWith("glb:")) {
+    const file = galleryAssetPath(meshId.slice("glb:".length), ".glb");
+    if (!file) return null;
+    return {
+      url: `/gallery/glb/${file}`,
+      options: { targetSize: parseNumberParam(params, "targetSize", 60) },
+      zoom: parseNumberParam(params, "zoom", 0.35),
+      rotX: parseNumberParam(params, "rotX", 65),
+      rotY: parseNumberParam(params, "rotY", 45),
+    };
+  }
+
+  if (meshId.startsWith("obj:")) {
+    const file = galleryAssetPath(meshId.slice("obj:".length), ".obj");
+    if (!file) return null;
+    const mtl = params.get("mtl");
+    const mtlFile = mtl ? galleryAssetPath(mtl, ".mtl") : null;
+    return {
+      url: `/gallery/obj/${file}`,
+      ...(mtlFile ? { mtlUrl: `/gallery/obj/${mtlFile}` } : {}),
+      options: {
+        targetSize: parseNumberParam(params, "targetSize", 60),
+        defaultColor: params.get("defaultColor") || "#cccccc",
+      },
+      zoom: parseNumberParam(params, "zoom", 0.25),
+      rotX: parseNumberParam(params, "rotX", 65),
+      rotY: parseNumberParam(params, "rotY", 45),
+    };
+  }
+
+  return null;
+}
+
 export function parseUrlParams() {
   const params = new URLSearchParams(window.location.search);
   const meshId = params.get("mesh") || "saucer";
+  const genericPreset = genericGalleryPreset(params, meshId);
   return {
     meshId,
     mode: params.get("mode") === "baked" ? "baked" : "dynamic",
@@ -80,9 +199,9 @@ export function parseUrlParams() {
     az: parseFloat(params.get("az")) || 50,
     el: parseFloat(params.get("el")) || 45,
     isSynth: meshId.startsWith("synth-"),
-    preset: meshId.startsWith("synth-")
+    preset: genericPreset ?? (meshId.startsWith("synth-")
       ? { url: null, options: {}, zoom: 0.2, rotX: 65, rotY: 45 }
-      : (PRESETS[meshId] ?? PRESETS.saucer),
+      : (PRESETS[meshId] ?? PRESETS.saucer)),
   };
 }
 

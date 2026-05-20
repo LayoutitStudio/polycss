@@ -40,7 +40,7 @@ Strategies are ordered cheapest → most expensive. The mesher's job is to maxim
 
 Callers can opt out of specific strategies via `strategies: { disable: ["b" | "i" | "u"] }` on `RenderTextureAtlasOptions`. Disabled or unsupported strategies fall through the chain (`b → i → s`, `u → i → s`, `i → s`). `<s>` is the universal fallback and cannot be disabled.
 
-The `.vox` fast path emits plain `<b>` elements directly inside the mesh wrapper. They intentionally reuse the cheap quad tag, but they are exact voxel quads on a canonical 1px primitive with one `matrix3d(...)` per visible quad, ordered by projected tile4 scanline order.
+The `.vox` fast path emits plain `<b>` elements directly inside the mesh wrapper. They intentionally reuse the cheap quad tag, but they are exact voxel quads with one `matrix3d(...)` per visible quad, ordered by projected tile4 scanline order. Desktop-class documents use a canonical 1px primitive for the cheapest transform shape; mobile-class documents (`pointer: coarse` or `hover: none`) use an 8px primitive and divide the in-plane matrix scale by 8 to preserve identical CSS-space geometry while avoiding large GPU filtering gaps.
 
 ### Lighting modes (`PolyTextureLightingMode = "baked" | "dynamic"`)
 

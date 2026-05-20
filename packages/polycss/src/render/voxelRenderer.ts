@@ -59,6 +59,8 @@ const DEFAULT_LIGHT_COLOR = "#ffffff";
 const DEFAULT_LIGHT_INTENSITY = 1;
 const DEFAULT_AMBIENT_COLOR = "#ffffff";
 const DEFAULT_AMBIENT_INTENSITY = 0.4;
+const DESKTOP_PRIMITIVE_SIZE = 1;
+const MOBILE_PRIMITIVE_SIZE = 8;
 
 const FACE_NORMALS: Record<PolyVoxelFace, Vec3> = {
   t: [0, 0, 1],
@@ -270,28 +272,41 @@ function directMatrix(
   width: number,
   height: number,
   zOffset: number,
+  primitiveSize: number,
 ): string {
+  const scaleX = width / primitiveSize;
+  const scaleY = height / primitiveSize;
   const values = axis === "x"
     ? [
-        width, 0, 0, 0,
-        0, 0, height, 0,
+        scaleX, 0, 0, 0,
+        0, 0, scaleY, 0,
         0, -1, 0, 0,
         left, -zOffset, top, 1,
       ]
     : axis === "y"
       ? [
-          0, 0, width, 0,
-          0, height, 0, 0,
+          0, 0, scaleX, 0,
+          0, scaleY, 0, 0,
           -1, 0, 0, 0,
           -zOffset, top, left, 1,
         ]
       : [
-          width, 0, 0, 0,
-          0, height, 0, 0,
+          scaleX, 0, 0, 0,
+          0, scaleY, 0, 0,
           0, 0, 1, 0,
           left, top, zOffset, 1,
         ];
   return `matrix3d(${values.map((value) => Number(value.toFixed(6))).join(",")})`;
+}
+
+function isMobileDocument(doc: Document): boolean {
+  const media = doc.defaultView?.matchMedia;
+  if (!media) return false;
+  return media("(pointer: coarse)").matches || media("(hover: none)").matches;
+}
+
+function primitiveSizeForDocument(doc: Document): number {
+  return isMobileDocument(doc) ? MOBILE_PRIMITIVE_SIZE : DESKTOP_PRIMITIVE_SIZE;
 }
 
 function itemCenter(item: DirectMatrixItem): Vec3 {
@@ -375,6 +390,10 @@ export function createPolyVoxelRenderer(
   const directMatrixItems = buildDirectMatrixItems(polygons);
   if (directMatrixItems.length === 0) return null;
   wrapper.classList.add("polycss-voxel-mesh");
+  const primitiveSize = primitiveSizeForDocument(doc);
+  if (primitiveSize !== DESKTOP_PRIMITIVE_SIZE) {
+    wrapper.style.setProperty("--polycss-voxel-primitive", `${primitiveSize}px`);
+  }
 
   const colorCache = new Map<string, string>();
   const shadedColor = (face: PolyVoxelFace, baseColor: string): string => {
@@ -409,7 +428,7 @@ export function createPolyVoxelRenderer(
       applyBrush(
         el,
         shadedColor(item.face, item.baseColor),
-        directMatrix(item.axis, item.left, item.top, item.width, item.height, item.z),
+        directMatrix(item.axis, item.left, item.top, item.width, item.height, item.z, primitiveSize),
       );
       mountedBrushCount += 1;
     }
@@ -432,6 +451,7 @@ export function createPolyVoxelRenderer(
     dispose() {
       for (const el of pool) el.remove();
       wrapper.classList.remove("polycss-voxel-mesh");
+      wrapper.style.removeProperty("--polycss-voxel-primitive");
       pool.length = 0;
       mountedBrushCount = 0;
       lastSignature = "";

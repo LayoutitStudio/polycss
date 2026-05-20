@@ -1,5 +1,5 @@
 /**
- * Bundle the four bench renderer paths into self-contained browser ESM
+ * Bundle bench renderer paths and helper entries into self-contained browser ESM
  * files that the perf-*.html pages can `import` directly:
  *
  *   bench/polycss.js          ← imperative API (createPolyScene + controls
