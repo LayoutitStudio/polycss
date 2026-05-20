@@ -1,9 +1,10 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { readFileSync } from "fs";
 import { resolve } from "path";
-import { parseGltf } from "./parseGltf";
+import { filterGltfAnimationController, parseGltf } from "./parseGltf";
 import { bakeSolidTextureSamples } from "./solidTextureSamples";
 import { optimizeAnimatedMeshPolygons } from "../animation/optimizeAnimatedMeshPolygons";
+import { cullInteriorPolygons } from "../cull/cullInteriorPolygons";
 
 // ── Real GLB fixture (lead test — matches voxcss parseMagicaVoxel pattern) ─
 
@@ -170,6 +171,24 @@ describe("parseGltf — animated fixture (FishAnimated.glb)", () => {
     }
   });
 
+  it("can sample a glTF animation through a filtered triangle controller", () => {
+    const result = parseGltf(loadGlbFile("poly-pizza", "animated-robot.glb"), {
+      gridShift: 0,
+      targetSize: 72,
+    });
+    const kept = cullInteriorPolygons(result.polygons);
+    const keptSet = new Set(kept);
+    const keptIndices = result.polygons.flatMap((polygon, index) =>
+      keptSet.has(polygon) ? [index] : []
+    );
+    const filtered = filterGltfAnimationController(result.animation, keptIndices);
+    const running = result.animation?.clips.find((clip) => /running/i.test(clip.name));
+    expect(filtered).toBeDefined();
+    expect(running).toBeDefined();
+    expect(keptIndices.length).toBeLessThan(result.polygons.length);
+    expect(filtered!.sample(running!.name, 0.25)).toHaveLength(keptIndices.length);
+  });
+
   it("can reduce robot animation with a stable animated mesh plan", async () => {
     const parsed = parseGltf(loadGlbFile("poly-pizza", "animated-robot.glb"), {
       gridShift: 0,
@@ -180,11 +199,24 @@ describe("parseGltf — animated fixture (FishAnimated.glb)", () => {
       meshResolution: "lossy",
     });
     const running = optimized.animation?.clips.find((clip) => /running/i.test(clip.name));
+    const kept = cullInteriorPolygons(baked.polygons);
+    const keptSet = new Set(kept);
+    const keptIndices = baked.polygons.flatMap((polygon, index) =>
+      keptSet.has(polygon) ? [index] : []
+    );
     expect(running).toBeDefined();
     expect(optimized.polygons.length).toBeLessThan(baked.polygons.length);
     expect(optimized.polygons.length).toBeGreaterThan(0);
+    expect(optimized.polygons).toHaveLength(keptIndices.length);
     for (const time of [0, 0.25, running!.duration / 2]) {
-      expect(optimized.animation!.sample(running!.name, time)).toHaveLength(optimized.polygons.length);
+      const fullFrame = baked.animation!.sample(running!.name, time);
+      const frame = optimized.animation!.sample(running!.name, time);
+      expect(frame).toHaveLength(optimized.polygons.length);
+      expect(frame.some((polygon) => polygon.texture)).toBe(false);
+      expect(frame[0].color).toBe(optimized.polygons[0].color);
+      for (let i = 0; i < frame.length; i++) {
+        expect(frame[i].vertices).toEqual(fullFrame[keptIndices[i]!]!.vertices);
+      }
     }
   });
 });

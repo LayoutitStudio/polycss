@@ -88,7 +88,7 @@
         : "";
     const stableTriangleColorSteps = params.has("stableTriangleColorSteps")
       ? numberParam("stableTriangleColorSteps", 0)
-      : 0;
+      : 8;
     const stableTriangleColorPolicyRaw = params.get("stableTriangleColorPolicy");
     const stableTriangleColorPolicy =
       stableTriangleColorPolicyRaw === "adaptive" ? "adaptive" : "cadence";
@@ -118,6 +118,7 @@
     const animationFrameCache = boolParam("animationFrameCache", false);
     const animationFrameCacheFrames = Math.max(2, Math.floor(numberParam("animationFrameCacheFrames", 60)));
     const animatedMeshOptimization = boolParam("animatedMeshOptimization", false);
+    const triangleFrame = boolParam("triangleFrame", true);
     const solidTextureSamples = boolParam("solidTextureSamples", true);
     const targetSize = numberParam("targetSize", 72);
     const timeScale = numberParam("timeScale", 1);
@@ -400,6 +401,7 @@
 
       let lastSetPolygonsMs = 0;
       let lastAnimatedPolygons = initialPolygons.length;
+      let lastTriangleFrameApplied = false;
       const keyframeInfo = animationDriver === "css-keyframes"
         ? await installCssKeyframeAnimation(mesh, renderParsed.animation, clip)
         : null;
@@ -434,6 +436,7 @@
         animationDriver,
         animationFrameCache,
         animationFrameCacheFrames,
+        triangleFrame,
         stableTriangleDebug,
         stableTriangleColorPolicy,
         stableTriangleColorSteps,
@@ -583,17 +586,36 @@
         return;
       }
 
+      const triangleFrameTargetSymbol = Symbol.for("polycss.animation.triangleFrameTarget");
+      const meshTriangleFrameTarget = mesh[triangleFrameTargetSymbol];
       const animationTarget = {
         setPolygons(polygons) {
+          lastTriangleFrameApplied = false;
           const start = performance.now();
           mesh.setPolygons(polygons, animationSetPolygonsOptions());
           lastSetPolygonsMs = performance.now() - start;
           lastAnimatedPolygons = polygons.length;
         },
+        [triangleFrameTargetSymbol](frame) {
+          if (!triangleFrame || typeof meshTriangleFrameTarget !== "function") return false;
+          const start = performance.now();
+          const applied = meshTriangleFrameTarget.call(
+            mesh,
+            frame,
+            animationSetPolygonsOptions(),
+          );
+          if (applied) {
+            lastTriangleFrameApplied = true;
+            lastSetPolygonsMs = performance.now() - start;
+            lastAnimatedPolygons = frame.polygonCount;
+          }
+          return applied;
+        },
       };
       const mixer = createPolyAnimationMixer(animationTarget, renderParsed.animation);
       const action = mixer.clipAction(clip.name);
       action.play();
+      const frameCacheStart = performance.now();
       const cachedAnimationFrames = animationFrameCache
         ? Array.from({ length: animationFrameCacheFrames }, (_, index) =>
             renderParsed.animation.sample(
@@ -602,6 +624,19 @@
             )
           )
         : null;
+      if (cachedAnimationFrames) {
+        const cachedPolygons = cachedAnimationFrames.reduce((sum, frame) => sum + frame.length, 0);
+        const cachedVertices = cachedAnimationFrames.reduce(
+          (sum, frame) => sum + frame.reduce((frameSum, polygon) => frameSum + polygon.vertices.length, 0),
+          0,
+        );
+        window.__perf__.animation.animationFrameCacheInfo = {
+          buildMs: performance.now() - frameCacheStart,
+          frameCount: cachedAnimationFrames.length,
+          cachedPolygons,
+          cachedVertices,
+        };
+      }
 
       let last = performance.now();
       let elapsedClipTime = 0;
@@ -627,6 +662,7 @@
           setPolygonsMs: lastSetPolygonsMs,
           nonSetPolygonsMs: Math.max(0, updateMs - lastSetPolygonsMs),
           polygons: lastAnimatedPolygons,
+          triangleFrameApplied: lastTriangleFrameApplied,
         });
         if (window.__perf__.animationSamples.length > 1800) {
           window.__perf__.animationSamples.splice(

@@ -17,11 +17,13 @@ contributors to verify perf claims and catch render regressions.
 pnpm bench:serve            # static server on :4400 with an index page
 pnpm bench:perf             # build bundles + run all 4 renderers × 5 scenarios
 pnpm bench:animated-human   # build bundles + run the animated human run bench
+pnpm bench:nonvoxel-drag-trace  # build bundles + trace a Playwright drag orbit on teapot
 pnpm bench:lossy            # compare lossless / previous lossy / auto lossy counts
 pnpm bench:visual           # screenshot diff against bench/baselines/*.png
 pnpm bench:visual --record  # capture new baselines (after intentional renderer changes)
 pnpm bench:build            # just rebuild the bench bundles (rarely needed alone)
 node bench/nonvoxel-rotation-bench.mjs  # non-voxel vanilla rotation probe
+node bench/nonvoxel-drag-trace.mjs --label teapot-drag  # pointer-drag trace, no auto-rotate
 node bench/nonvoxel-frame-buckets.mjs --no-trace  # non-voxel rAF cadence buckets
 node bench/nonvoxel-visual-compare.mjs  # non-voxel variant visual parity
 ```
@@ -38,6 +40,7 @@ node bench/lossy-optimizer-bench.mjs --json bench/results/lossy-optimizer.json
 node bench/lossy-optimizer-bench.mjs --models ducky,shark,bicycle
 node bench/perf-visual.mjs --mesh chicken --tolerance 0.005
 node bench/nonvoxel-rotation-bench.mjs --models teapot,bicycle --variants baseline,order-tile4 --run-order round-robin
+node bench/nonvoxel-drag-trace.mjs --mesh teapot --degrees 360 --drag-ms 1500 --label teapot-drag --frame-details --no-print-json
 node bench/nonvoxel-frame-buckets.mjs --mesh glb:Elephant.glb --variant baseline --no-trace
 node bench/nonvoxel-visual-compare.mjs --models bicycle,elephant,policecar --variants scene-split-target,scene-transform-perspective
 ```
@@ -141,6 +144,19 @@ tests above what the gallery's OBJs cover.
 Use `domOrder` for pure post-render DOM-order probes; `polygonOrder` changes
 the polygon array before render planning and is only for diagnostics.
 
+`nonvoxel-drag-trace.mjs` is the focused user-input lane for the same page.
+It loads a non-voxel mesh (`teapot` by default), leaves OrbitControls
+auto-rotate off, performs real Playwright mouse drags until the requested
+camera yaw delta is reached, and writes `bench/results/<label>.trace.json`
+plus `bench/results/<label>.json`. A 360 degree run uses clutched drags inside
+the viewport because OrbitControls maps 4 pointer pixels to 1 degree of yaw.
+Pass `--variant <id>` to reuse the non-voxel variant params from the rotation
+bench, or `--trace-out <path>` / `--json <path>` for explicit outputs.
+`--frame-details` aligns page-side frame work with Chrome trace events, adding
+per-frame `rotationFrames` / `slowestFrames` breakdowns; use
+`--frame-details-limit <n>` to keep every rotation frame and `--no-print-json`
+when the full result is too large for terminal output.
+
 `animated-human.html` is the focused animated-model page. It loads
 `/gallery/glb/poly-pizza/animated-human.glb` by default, chooses the run-like
 clip when available, and drives `createPolyAnimationMixer.update(dt)` into
@@ -155,12 +171,12 @@ Playwright runner accepts `--mode baked,dynamic`, `--clip <name|index|run>`,
 `--stable-triangle-color-max-step <channel-delta>`,
 `--animation-driver js|progressive-style-cache|js-style-cache|typed-om-style-cache|css-keyframes`,
 `--compare-stable-triangle-debug`, `--require-solid-triangles`, `--trace`, and
-the same GPU lane flags as the other browser benches. The color freeze option
-keeps exact baked colors but staggers leaf color writes across frames; adaptive
-color policy spends a capped write budget on leaves with the largest accumulated
-color error first. The max-step option caps the per-write RGB channel delta so
-cadence updates drift toward the next baked color instead of jumping directly to
-it. `css-keyframes` is a bench-only prototype that samples the clip into
+the same GPU lane flags as the other browser benches. The default baked color
+policy uses 8-channel quantized colors and staggers leaf color writes over a
+12-frame cadence; adaptive color policy spends a capped write budget on leaves
+with the largest accumulated color error first. The max-step option caps the
+per-write RGB channel delta so cadence updates drift toward the next baked color
+instead of jumping directly to it. `css-keyframes` is a bench-only prototype that samples the clip into
 per-leaf CSS animations, removing per-frame JS playback from the measurement
 window. The solid-triangle guard fails the run if the page leaves the baked
 `<u>` path. Use `--stable-triangle-color-freeze-frames 0` to keep the initial
@@ -199,6 +215,10 @@ bench/
                          GPU-default Playwright runner for the animated
                          human run sequence. Reports FPS, mixer/update cost,
                          setPolygons cost, render stats, and optional trace.
+  nonvoxel-drag-trace.mjs
+                         Vanilla-only non-voxel pointer-input trace bench.
+                         Uses Playwright mouse drags through OrbitControls
+                         instead of scene auto-rotation.
   lossy-optimizer-bench.mjs
                          Polygon-count strategy bench for lossless,
                          previous pair-only lossy, forced grouped lossy,

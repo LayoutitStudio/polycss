@@ -10,6 +10,28 @@
 import type { ParseAnimationClip, ParseAnimationController } from "../parser/types";
 import type { Polygon } from "../types";
 
+const POLY_ANIMATION_TRIANGLE_FRAME_SOURCE = Symbol.for("polycss.animation.triangleFrameSource");
+const POLY_ANIMATION_TRIANGLE_FRAME_TARGET = Symbol.for("polycss.animation.triangleFrameTarget");
+
+interface PolyAnimationTriangleFrame {
+  polygonCount: number;
+  vertices: Float64Array;
+  colors?: readonly (string | undefined)[];
+  textureFlags?: readonly boolean[];
+  solidTriangles?: boolean;
+}
+
+interface PolyAnimationTriangleFrameSource {
+  [POLY_ANIMATION_TRIANGLE_FRAME_SOURCE]?: (
+    clip: number | string,
+    timeSeconds: number,
+  ) => PolyAnimationTriangleFrame | null | undefined;
+}
+
+interface PolyAnimationTriangleFrameTarget {
+  [POLY_ANIMATION_TRIANGLE_FRAME_TARGET]?: (frame: PolyAnimationTriangleFrame) => boolean;
+}
+
 // ── Loop mode constants (match three.js) ────────────────────────────────────
 
 export const LoopOnce = 2200 as const;
@@ -339,6 +361,8 @@ export function createPolyAnimationMixer(
   controller: ParseAnimationController,
 ): PolyAnimationMixer {
   const actionCache = new Map<number, PolyAnimationAction>();
+  const triangleFrameSource = controller as ParseAnimationController & PolyAnimationTriangleFrameSource;
+  const triangleFrameTarget = root as PolyAnimationTarget & PolyAnimationTriangleFrameTarget;
 
   function clipAction(key: number | string): PolyAnimationAction {
     const clip = resolveClip(controller.clips, key);
@@ -378,7 +402,15 @@ export function createPolyAnimationMixer(
     if (active.length === 1) {
       // Fast path: single active action — no blending needed.
       const { internal, clip } = active[0];
-      const polygons = controller.sample(clip.name, internal.sampleTime());
+      const sampleTime = internal.sampleTime();
+      const triangleFrame = triangleFrameSource[POLY_ANIMATION_TRIANGLE_FRAME_SOURCE]?.(clip.name, sampleTime);
+      if (
+        triangleFrame &&
+        triangleFrameTarget[POLY_ANIMATION_TRIANGLE_FRAME_TARGET]?.(triangleFrame)
+      ) {
+        return;
+      }
+      const polygons = controller.sample(clip.name, sampleTime);
       root.setPolygons(polygons);
       return;
     }

@@ -633,6 +633,7 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
         ambientLight: effectiveAmbient,
         textureLighting: effectiveTextureLighting,
         colorFrame: ++stableTriangleColorFrameRef.current,
+        colorSteps: 8,
         colorFreezeFrames: 12,
         colorMaxStep: 8,
       })

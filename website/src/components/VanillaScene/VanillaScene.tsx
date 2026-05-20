@@ -34,7 +34,7 @@ export type { GizmoMode, SceneOptionsState };
 // components in @layoutit/polycss-react and @layoutit/polycss-vue).
 const LIGHT_HELPER_TILE = 50;
 const ANIMATION_STABLE_TRIANGLE_COLOR_POLICY = "cadence";
-const ANIMATION_STABLE_TRIANGLE_COLOR_STEPS = 0;
+const ANIMATION_STABLE_TRIANGLE_COLOR_STEPS = 8;
 const ANIMATION_STABLE_TRIANGLE_COLOR_FREEZE_FRAMES = 12;
 const ANIMATION_STABLE_TRIANGLE_COLOR_MAX_STEP = 8;
 const ANIMATION_TRANSFORM_CACHE_FRAMES = 60;

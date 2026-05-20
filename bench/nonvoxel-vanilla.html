@@ -9,7 +9,7 @@
   <div id="host"></div>
 
   <script type="module">
-    import { createPolyScene, createPolyOrbitControls, loadMesh } from "./polycss.js";
+    import { createPolyCamera, createPolyScene, createPolyOrbitControls, loadMesh } from "./polycss.js";
     import { getSynthMesh } from "./synth-mesh.mjs";
     import {
       parseUrlParams, dirFromAzEl, createPerfRecorder,
@@ -26,6 +26,7 @@
     const polygonOrder = benchParams.get("polygonOrder") || "source";
     const domOrder = benchParams.get("domOrder") || "source";
     const leafBucketSize = Number(benchParams.get("leafBucketSize") || 0);
+    const recordFrameWork = benchParams.get("frameWork") === "1";
     const disabledStrategies = (benchParams.get("disableStrategies") || "")
       .split(",")
       .map((value) => value.trim())
@@ -33,15 +34,76 @@
     let azimuth = az;
 
     const host = document.getElementById("host");
+    const camera = createPolyCamera({ rotX: preset.rotX, rotY: preset.rotY, zoom: preset.zoom });
     const scene = createPolyScene(host, {
-      rotX: preset.rotX, rotY: preset.rotY, zoom: preset.zoom,
+      camera,
       directionalLight: { direction: dirFromAzEl(azimuth, el), color: "#ffffff", intensity: 1 },
       ambientLight: { color: "#ffffff", intensity: 0.4 },
       textureLighting: mode,
       autoCenter: true,
       ...(disabledStrategies.length > 0 ? { strategies: { disable: disabledStrategies } } : {}),
     });
-    createPolyOrbitControls(scene, { drag: true, wheel: true });
+    const frameWork = createFrameWorkRecorder(recordFrameWork);
+    if (recordFrameWork) instrumentCameraAndScene();
+    const controls = createPolyOrbitControls(scene, { drag: true, wheel: true });
+    const interactionStats = {
+      starts: 0,
+      changes: 0,
+      ends: 0,
+      cumulativeRotY: 0,
+      lastRotY: scene.camera.state.rotY ?? preset.rotY,
+    };
+
+    function cloneCameraState() {
+      const state = scene.camera.state;
+      const target = state.target ?? [0, 0, 0];
+      return {
+        rotX: state.rotX ?? 0,
+        rotY: state.rotY ?? 0,
+        zoom: state.zoom ?? 0,
+        distance: state.distance ?? 0,
+        target: [target[0], target[1], target[2]],
+      };
+    }
+
+    function unwrapAngleDelta(next, previous) {
+      let delta = next - previous;
+      if (delta > 180) delta -= 360;
+      if (delta < -180) delta += 360;
+      return delta;
+    }
+
+    function resetInteractionStats() {
+      interactionStats.starts = 0;
+      interactionStats.changes = 0;
+      interactionStats.ends = 0;
+      interactionStats.cumulativeRotY = 0;
+      interactionStats.lastRotY = scene.camera.state.rotY ?? preset.rotY;
+      frameWork.reset();
+    }
+
+    controls.addEventListener("start", () => {
+      frameWork.record("controls.start");
+      interactionStats.starts += 1;
+    });
+    controls.addEventListener("change", ({ camera }) => {
+      frameWork.record("controls.change");
+      interactionStats.cumulativeRotY += unwrapAngleDelta(camera.rotY, interactionStats.lastRotY);
+      interactionStats.lastRotY = camera.rotY;
+      interactionStats.changes += 1;
+    });
+    controls.addEventListener("end", () => {
+      frameWork.record("controls.end");
+      interactionStats.ends += 1;
+    });
+
+    window.__nonvoxelBench = {
+      ready: false,
+      cameraState: cloneCameraState,
+      interactionStats: () => ({ ...interactionStats }),
+      frameWorkSamples: () => frameWork.samples(),
+      resetInteractionStats,
+    };
 
     const sceneEl = host.querySelector(".polycss-scene");
     let splitShell = null;
@@ -53,6 +115,73 @@
 
     function scenePerspective() {
       return sceneEl?.style.perspective || getComputedStyle(sceneEl).perspective || "8000px";
+    }
+
+    function createFrameWorkRecorder(enabled) {
+      let current = {};
+      const frameSamples = [];
+
+      function record(name, durationMs = 0) {
+        if (!enabled) return;
+        const entry = current[name] ?? { count: 0, duration_ms: 0 };
+        entry.count += 1;
+        entry.duration_ms += Number.isFinite(durationMs) ? durationMs : 0;
+        current[name] = entry;
+      }
+
+      function snapshot(now) {
+        if (!enabled) return;
+        frameSamples.push({
+          t: now,
+          ops: Object.fromEntries(Object.entries(current).map(([name, entry]) => [
+            name,
+            {
+              count: entry.count,
+              duration_ms: +entry.duration_ms.toFixed(4),
+            },
+          ])),
+        });
+        current = {};
+        if (frameSamples.length > 1800) {
+          frameSamples.splice(0, frameSamples.length - 1800);
+        }
+      }
+
+      return {
+        record,
+        snapshot,
+        reset() {
+          if (!enabled) return;
+          current = {};
+          frameSamples.length = 0;
+        },
+        samples() {
+          return frameSamples.slice();
+        },
+      };
+    }
+
+    function timedFrameWork(name, fn) {
+      const start = performance.now();
+      try {
+        return fn();
+      } finally {
+        frameWork.record(name, performance.now() - start);
+      }
+    }
+
+    function instrumentCameraAndScene() {
+      const cameraUpdate = camera.update.bind(camera);
+      camera.update = (next) => timedFrameWork("camera.update", () => cameraUpdate(next));
+
+      const sceneApplyCamera = scene.applyCamera.bind(scene);
+      scene.applyCamera = () => timedFrameWork("scene.applyCamera", () => sceneApplyCamera());
+
+      host.addEventListener("pointerdown", () => frameWork.record("input.pointerdown"), { capture: true });
+      host.addEventListener("pointermove", () => frameWork.record("input.pointermove"), { capture: true });
+      host.addEventListener("pointerup", () => frameWork.record("input.pointerup"), { capture: true });
+      host.addEventListener("pointercancel", () => frameWork.record("input.pointercancel"), { capture: true });
+      host.addEventListener("wheel", () => frameWork.record("input.wheel"), { capture: true, passive: true });
     }
 
     function ensureSplitShell() {
@@ -319,6 +448,31 @@
       return true;
     }
 
+    function atlasLeavesReady() {
+      const leaves = Array.from(host.querySelectorAll(".polycss-mesh s"));
+      return leaves.every((leaf) => {
+        const inlineBg = leaf.style.backgroundImage;
+        const bg = inlineBg || getComputedStyle(leaf).backgroundImage;
+        return leaf.style.opacity !== "0" && bg && bg !== "none";
+      });
+    }
+
+    function markReadyWhenRenderPainted() {
+      window.__perf__.ready = false;
+      window.__nonvoxelBench.ready = false;
+
+      function check() {
+        if (atlasLeavesReady()) {
+          window.__perf__.ready = true;
+          window.__nonvoxelBench.ready = true;
+          return;
+        }
+        requestAnimationFrame(check);
+      }
+
+      check();
+    }
+
     const meshPromise = isSynth
       ? Promise.resolve(getSynthMesh(meshId))
       : loadMesh(preset.url, {
@@ -342,9 +496,11 @@
         polyCount: parseResult.polygons.length,
         polygons: parseResult.polygons,
       });
+      markReadyWhenRenderPainted();
 
       let frameCount = 0;
       function tick(now) {
+        frameWork.snapshot(now);
         recorder.onFrame(now);
         frameCount += 1;
         if (motion === "light") {
@@ -355,7 +511,8 @@
         } else if (motion === "rot") {
           const newRotY = ((preset.rotY + frameCount * 0.5) + 360) % 360;
           if (!cssDrivenRotation) {
-            scene.setOptions({ rotY: newRotY });
+            scene.camera.update({ rotY: newRotY });
+            scene.applyCamera();
             applySceneTransformMode();
           }
         }

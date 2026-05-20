@@ -372,6 +372,7 @@ export const PolyMesh = defineComponent({
             ambientLight: atlasAmbient.value,
             textureLighting: atlasTextureLighting.value,
             colorFrame: ++stableTriangleColorFrame.value,
+            colorSteps: 8,
             colorFreezeFrames: 12,
             colorMaxStep: 8,
           })
