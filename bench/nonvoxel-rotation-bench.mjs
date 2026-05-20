@@ -118,9 +118,9 @@ const MODEL_CORPUS = [
     reason: "Mechanical GLB with many rectilinear parts.",
   },
   {
-    id: "bicycle",
-    label: "Bicycle GLB",
-    mesh: "glb:Bicycle.glb",
+    id: "violin",
+    label: "Violin GLB",
+    mesh: "glb:Violin.glb",
     params: { zoom: "0.35", targetSize: "60" },
     reason: "Thin-structure GLB with many separated parts.",
   },

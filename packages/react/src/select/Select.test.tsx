@@ -301,6 +301,9 @@ describe("<PolySelect> handleClick fallback (no PolyCamera)", () => {
       getRotation: () => undefined,
       getScale: () => undefined,
       getPolygons: () => [],
+      setPolygons: () => {},
+      rebakeAtlas: () => {},
+      updatePolygon: () => {},
     };
   }
 

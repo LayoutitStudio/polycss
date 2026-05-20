@@ -69,7 +69,7 @@ const MODELS = [
   { id: "saucer", mesh: "saucer" },
   { id: "teapot", mesh: "teapot" },
   { id: "ducky", mesh: "ducky" },
-  { id: "bicycle", mesh: "glb:Bicycle.glb", params: { zoom: "0.35", targetSize: "60" } },
+  { id: "violin", mesh: "glb:Violin.glb", params: { zoom: "0.35", targetSize: "60" } },
   { id: "elephant", mesh: "glb:Elephant.glb", params: { zoom: "0.35", targetSize: "60" } },
   { id: "policecar", mesh: "glb:Policecar.glb", params: { zoom: "0.35", targetSize: "60" } },
 ];

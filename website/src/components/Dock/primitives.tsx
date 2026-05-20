@@ -237,22 +237,35 @@ export function useOption<T extends string | number>(
     if (!parent) return;
     const proxy = { value };
     const raw = parent.add(proxy, "value", initialOptionsRef.current).name(label);
+    let activeRaw = raw;
     raw.onChange((v: T) => onChangeRef.current(v));
-    const base = makeDockController<T>(raw, proxy);
     const wrapper: DockOptionController<T> = {
-      ...base,
+      get raw() {
+        return activeRaw;
+      },
+      setValue(nextValue) {
+        proxy.value = nextValue;
+        activeRaw.updateDisplay();
+      },
+      setEnabled(enabled, opts) {
+        applyEnabled(activeRaw, enabled, opts?.dim ?? true);
+      },
+      setVisible(visible) {
+        if (visible) activeRaw.show();
+        else activeRaw.hide();
+      },
       setOptions(next) {
         // lil-gui's `.options(newOpts)` REPLACES the controller — the old
-        // `raw` reference is destroyed. Returned controller swaps in.
-        // Callers rarely need the new ref since `setValue/setEnabled` go
-        // through this wrapper's closure; we just rebind internally.
-        const replaced = (raw as unknown as { options: (o: Record<string, T>) => Controller }).options(next);
+        // controller is destroyed and a new one is returned. Keep every
+        // wrapper method pointed at the live controller after that swap.
+        const replaced = (activeRaw as unknown as { options: (o: Record<string, T>) => Controller }).options(next);
+        activeRaw = replaced.name(label);
         replaced.onChange((v: T) => onChangeRef.current(v));
       },
     };
     setCtrl(wrapper);
     return () => {
-      raw.destroy();
+      activeRaw.destroy();
       setCtrl(null);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps

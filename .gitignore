@@ -16,6 +16,7 @@ packages/vue/tsconfig.tsbuildinfo
 /bench/polycss.js
 /bench/polycss-elements.js
 /bench/polycss-react.js
+/bench/polycss-render-stats.js
 /bench/polycss-vue.js
 /bench/results/
 

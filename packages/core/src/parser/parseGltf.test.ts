@@ -2,6 +2,8 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import { readFileSync } from "fs";
 import { resolve } from "path";
 import { parseGltf } from "./parseGltf";
+import { bakeSolidTextureSamples } from "./solidTextureSamples";
+import { optimizeAnimatedMeshPolygons } from "../animation/optimizeAnimatedMeshPolygons";
 
 // ── Real GLB fixture (lead test — matches voxcss parseMagicaVoxel pattern) ─
 
@@ -152,6 +154,38 @@ describe("parseGltf — animated fixture (FishAnimated.glb)", () => {
       }
     }
     expect(totalDelta).toBeGreaterThan(1);
+  });
+
+  it("keeps robot running samples aligned with rest-pose triangle filtering", () => {
+    const result = parseGltf(loadGlbFile("poly-pizza", "animated-robot.glb"), {
+      gridShift: 0,
+      targetSize: 72,
+    });
+    const running = result.animation?.clips.find((clip) => /running/i.test(clip.name));
+    expect(running).toBeDefined();
+    expect(result.polygons.length).toBeGreaterThan(3000);
+    for (const time of [0, 1 / 24, 0.25, running!.duration / 2, running!.duration - 1 / 60]) {
+      const frame = result.animation!.sample(running!.name, time);
+      expect(frame).toHaveLength(result.polygons.length);
+    }
+  });
+
+  it("can reduce robot animation with a stable animated mesh plan", async () => {
+    const parsed = parseGltf(loadGlbFile("poly-pizza", "animated-robot.glb"), {
+      gridShift: 0,
+      targetSize: 72,
+    });
+    const baked = await bakeSolidTextureSamples(parsed);
+    const optimized = optimizeAnimatedMeshPolygons(baked, {
+      meshResolution: "lossy",
+    });
+    const running = optimized.animation?.clips.find((clip) => /running/i.test(clip.name));
+    expect(running).toBeDefined();
+    expect(optimized.polygons.length).toBeLessThan(baked.polygons.length);
+    expect(optimized.polygons.length).toBeGreaterThan(0);
+    for (const time of [0, 0.25, running!.duration / 2]) {
+      expect(optimized.animation!.sample(running!.name, time)).toHaveLength(optimized.polygons.length);
+    }
   });
 });
 
@@ -588,6 +622,31 @@ describe("parseGltf", () => {
       });
       const result = parseGltf(glb, { materialColors: { Red: "#custom" } });
       expect(result.polygons[0].color).toBe("#custom");
+    });
+
+    it("materialTextures override attaches texture and UVs by material name", () => {
+      const { glb } = buildTriangleGlb({
+        materialColor: [1, 1, 1, 1],
+        materialName: "Texture",
+        includeTexcoord: true,
+      });
+      const result = parseGltf(glb, {
+        materialTextures: { Texture: "/textures/atlas.png" },
+      });
+      expect(result.polygons[0].texture).toBe("/textures/atlas.png");
+      expect(result.polygons[0].uvs).toEqual([[0, 1], [1, 1], [0, 0]]);
+    });
+
+    it("materialTextures override takes priority over embedded baseColorTexture", () => {
+      const { glb } = buildTriangleGlb({
+        materialName: "Texture",
+        includeTexcoord: true,
+        textureUrl: "embedded.png",
+      });
+      const result = parseGltf(glb, {
+        materialTextures: { Texture: "/textures/override.png" },
+      });
+      expect(result.polygons[0].texture).toBe("/textures/override.png");
     });
 
     it("custom defaultColor is used when no material", () => {

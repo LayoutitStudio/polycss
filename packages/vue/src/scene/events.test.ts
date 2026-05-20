@@ -43,6 +43,7 @@ function makeHandle(el: HTMLElement, id = "test"): PolyMeshHandle {
     getRotation: () => [0, 0, 0] as Vec3,
     getScale: () => 1,
     getPolygons: () => [] as Polygon[],
+    setPolygons: () => {},
     rebakeAtlas: () => {},
   };
 }

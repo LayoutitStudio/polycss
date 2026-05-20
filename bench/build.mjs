@@ -6,6 +6,8 @@
  *                                + loadMesh) used by perf-vanilla.html
  *   bench/polycss-elements.js ← side-effect bundle that registers the
  *                                custom elements; used by perf-html.html
+ *   bench/polycss-render-stats.js
+ *                              ← shared render stats helper used by perf-shared.mjs
  *   bench/polycss-react.js    ← React entry (bench/entries/react.tsx)
  *                                bundled with React + ReactDOM + @layoutit/polycss-react
  *   bench/polycss-vue.js      ← Vue entry (bench/entries/vue.ts) bundled
@@ -68,6 +70,11 @@ const targets = [
     label: "elements (side-effect register)",
     entry: resolve(repoRoot, "packages/polycss/src/elements/index.ts"),
     out: resolve(__dirname, "polycss-elements.js"),
+  },
+  {
+    label: "render stats helper",
+    entry: resolve(__dirname, "entries/renderStats.ts"),
+    out: resolve(__dirname, "polycss-render-stats.js"),
   },
   {
     label: "react entry",

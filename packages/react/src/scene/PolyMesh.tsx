@@ -46,6 +46,7 @@ import {
   TextureBorderShapePoly,
   TextureAtlasPoly,
   TextureTrianglePoly,
+  updateStableTriangleDom,
   useTextureAtlas,
 } from "./textureAtlas";
 import { usePolySceneContext } from "./sceneContext";
@@ -292,6 +293,8 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
   // `rotation`) from the atlas baker, so we don't re-bake every frame
   // during a drag.
   const [bakedRotation, setBakedRotation] = useState<Vec3 | undefined>(rotation);
+  const stableTriangleColorFrameRef = useRef(0);
+  const setPolygonsImplRef = useRef<(next: Polygon[]) => void>(() => {});
 
   const handle = useMemo<PolyMeshHandle>(() => ({
     get element() { return wrapperRef.current; },
@@ -300,6 +303,9 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
     getRotation: () => propsRef.current.rotation,
     getScale: () => propsRef.current.scale,
     getPolygons: () => polygonsRef.current,
+    setPolygons(nextPolygons: Polygon[]) {
+      setPolygonsImplRef.current(nextPolygons);
+    },
     rebakeAtlas: () => setBakedRotation(propsRef.current.rotation),
     updatePolygon(target: Polygon | number, partial: Partial<Polygon>) {
       const current = polygonsRef.current;
@@ -614,6 +620,27 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
     }
     return leaves;
   }, [castShadow, effectiveTextureLighting, renderPolygon, polygons, atlasPlans, sceneCtx?.shadow]);
+
+  setPolygonsImplRef.current = (nextPolygons: Polygon[]) => {
+    const nextRenderedPolygons = autoCenter ? recenterPolygons(nextPolygons) : nextPolygons;
+    polygonsRef.current = nextRenderedPolygons;
+    const root = wrapperRef.current;
+    if (
+      root &&
+      !renderPolygon &&
+      updateStableTriangleDom(root, nextRenderedPolygons, {
+        directionalLight: bakedDirectional,
+        ambientLight: effectiveAmbient,
+        textureLighting: effectiveTextureLighting,
+        colorFrame: ++stableTriangleColorFrameRef.current,
+        colorFreezeFrames: 12,
+        colorMaxStep: 8,
+      })
+    ) {
+      return;
+    }
+    setLocalPolygons([...nextPolygons]);
+  };
 
   const wrapperStyle: CSSProperties = {
     transform,

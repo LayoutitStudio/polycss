@@ -455,6 +455,20 @@ describe("PolyMesh — updatePolygon", () => {
     expect(ref.current!.getPolygons()[0].color).toBe("#ff0000");
   });
 
+  it("setPolygons updates stable triangle leaves without remounting", () => {
+    const p0: Polygon = { vertices: [[0, 0, 0], [1, 0, 0], [0, 1, 0]], color: "#ff0000" };
+    const p1: Polygon = { vertices: [[0, 0, 0], [2, 0, 0], [0, 1, 0]], color: "#00ff00" };
+    const { ref, container } = mountMesh([p0]);
+    const leafBefore = container.querySelector("u");
+    expect(leafBefore).toBeTruthy();
+    const transformBefore = (leafBefore as HTMLElement).style.transform;
+    act(() => { ref.current!.setPolygons([p1]); });
+    const leafAfter = container.querySelector("u");
+    expect(leafAfter).toBe(leafBefore);
+    expect(ref.current!.getPolygons()[0]).toBe(p1);
+    expect((leafAfter as HTMLElement).style.transform).not.toBe(transformBefore);
+  });
+
   it("merges partial fields — untouched fields are preserved", () => {
     const poly: Polygon = { vertices: [[0, 0, 0], [1, 0, 0], [0, 1, 0]], color: "#ff0000" };
     const { ref } = mountMesh([poly]);

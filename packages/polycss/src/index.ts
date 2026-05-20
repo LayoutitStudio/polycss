@@ -91,6 +91,14 @@ export type {
   TextureQuality,
 } from "./render/textureAtlas";
 
+// ── Render diagnostics ───────────────────────────────────────────
+export { collectPolyRenderStats } from "./render/renderStats";
+export type {
+  PolyRenderStats,
+  PolyRenderStatsOptions,
+  PolyRenderSurfaceLeafCounts,
+} from "./render/renderStats";
+
 // ── Primitive shape factories ─────────────────────────────────────
 export {
   createPolyBox,

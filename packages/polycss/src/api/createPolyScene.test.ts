@@ -123,6 +123,54 @@ function topQuad(color = "#123456"): Polygon {
   };
 }
 
+function translatedTopQuad(x: number, y: number, color: string): Polygon {
+  return {
+    vertices: [
+      [x, y, 1],
+      [x + 1, y, 1],
+      [x + 1, y + 1, 1],
+      [x, y + 1, 1],
+    ],
+    color,
+  };
+}
+
+function backTopQuad(color = "#654321"): Polygon {
+  return {
+    vertices: [
+      [0, 0, 1],
+      [0, 1, 1],
+      [1, 1, 1],
+      [1, 0, 1],
+    ],
+    color,
+  };
+}
+
+function sideQuad(color = "#ff0000"): Polygon {
+  return {
+    vertices: [
+      [0, 0, 0],
+      [0, 0, 1],
+      [1, 0, 1],
+      [1, 0, 0],
+    ],
+    color,
+  };
+}
+
+function backSideQuad(color = "#00ff00"): Polygon {
+  return {
+    vertices: [
+      [0, 0, 0],
+      [1, 0, 0],
+      [1, 0, 1],
+      [0, 0, 1],
+    ],
+    color,
+  };
+}
+
 function makeParseResult(polygons: Polygon[] = [triangle()]): ParseResult {
   let disposed = false;
   return {
@@ -157,6 +205,60 @@ function makeVoxelParseResult(): ParseResult {
 function makeVoxelExactParseResult(): ParseResult {
   return {
     ...makeParseResult([topQuad("#123456")]),
+    voxelSource: {
+      kind: "magica-vox",
+      cells: [{ x: 0, y: 0, z: 0, color: "#ff0000" }],
+      rows: 1,
+      cols: 1,
+      depth: 1,
+      scale: 1,
+      gridShift: 0,
+      sourceBytes: 64,
+    },
+  };
+}
+
+function makeTwoSidedVoxelExactParseResult(): ParseResult {
+  return {
+    ...makeParseResult([topQuad("#ff0000"), backTopQuad("#00ff00")]),
+    voxelSource: {
+      kind: "magica-vox",
+      cells: [{ x: 0, y: 0, z: 0, color: "#ff0000" }],
+      rows: 1,
+      cols: 1,
+      depth: 1,
+      scale: 1,
+      gridShift: 0,
+      sourceBytes: 64,
+    },
+  };
+}
+
+function makeTwoTopVoxelExactParseResult(): ParseResult {
+  return {
+    ...makeParseResult([
+      translatedTopQuad(0, 0, "#ff0000"),
+      translatedTopQuad(10, 0, "#00ff00"),
+    ]),
+    voxelSource: {
+      kind: "magica-vox",
+      cells: [
+        { x: 0, y: 0, z: 0, color: "#ff0000" },
+        { x: 10, y: 0, z: 0, color: "#00ff00" },
+      ],
+      rows: 11,
+      cols: 1,
+      depth: 1,
+      scale: 1,
+      gridShift: 0,
+      sourceBytes: 64,
+    },
+  };
+}
+
+function makeTwoSidedVoxelSideParseResult(): ParseResult {
+  return {
+    ...makeParseResult([sideQuad("#ff0000"), backSideQuad("#00ff00")]),
     voxelSource: {
       kind: "magica-vox",
       cells: [{ x: 0, y: 0, z: 0, color: "#ff0000" }],
@@ -503,6 +605,324 @@ describe("createPolyScene", () => {
       expect(after.length).toBe(1);
       expect(after[0]).toBe(before[0]);
       expect(after[0].style.transform).not.toBe(beforeTransform);
+    });
+
+    it("keeps stableDom triangle leaves mounted when animation frames degenerate", () => {
+      scene = makeScene(host);
+      const firstTriangle: Polygon = {
+        vertices: [
+          [0, 0, 0],
+          [1, 0, 0],
+          [0, 1, 1],
+        ],
+        color: "#ff0000",
+      };
+      const secondTriangle: Polygon = {
+        vertices: [
+          [0, 0, 0],
+          [0, 1, 0],
+          [1, 0, 1],
+        ],
+        color: "#0000ff",
+      };
+      const restoredTriangle: Polygon = {
+        vertices: [
+          [0, 0, 0],
+          [0, 1, 0],
+          [1, 0, 2],
+        ],
+        color: "#ffff00",
+      };
+      const degenerateTriangle: Polygon = {
+        vertices: [
+          [0, 0, 0],
+          [1, 0, 0],
+          [2, 0, 0],
+        ],
+        color: "#00ff00",
+      };
+      const handle = scene.add(makeParseResult([firstTriangle, secondTriangle]), {
+        merge: false,
+        stableDom: true,
+      });
+      const before = Array.from(host.querySelectorAll("u")) as HTMLElement[];
+      expect(before.length).toBe(2);
+
+      handle.setPolygons([firstTriangle, degenerateTriangle], {
+        merge: false,
+        stableDom: true,
+        recomputeAutoCenter: false,
+      });
+
+      const hidden = Array.from(host.querySelectorAll("u")) as HTMLElement[];
+      expect(hidden).toEqual(before);
+      expect(hidden[0].style.visibility).toBe("");
+      expect(hidden[1].style.visibility).toBe("hidden");
+
+      handle.setPolygons([firstTriangle, restoredTriangle], {
+        merge: false,
+        stableDom: true,
+        recomputeAutoCenter: false,
+      });
+
+      const restored = Array.from(host.querySelectorAll("u")) as HTMLElement[];
+      expect(restored).toEqual(before);
+      expect(restored[1].style.visibility).toBe("");
+    });
+
+    it("creates hidden stableDom triangle placeholders for initially degenerate animation frames", () => {
+      scene = makeScene(host);
+      const degenerateTriangle: Polygon = {
+        vertices: [
+          [0, 0, 0],
+          [1, 0, 0],
+          [2, 0, 0],
+        ],
+        color: "#00ff00",
+      };
+      const restoredTriangle: Polygon = {
+        vertices: [
+          [0, 0, 0],
+          [0, 1, 0],
+          [1, 0, 2],
+        ],
+        color: "#ffff00",
+      };
+      const handle = scene.add(makeParseResult([triangle(), degenerateTriangle]), {
+        merge: false,
+        stableDom: true,
+      });
+      const before = Array.from(host.querySelectorAll("u")) as HTMLElement[];
+      expect(before.length).toBe(2);
+      expect(before[1].style.visibility).toBe("hidden");
+
+      handle.setPolygons([triangle(), restoredTriangle], {
+        merge: false,
+        stableDom: true,
+        recomputeAutoCenter: false,
+      });
+
+      const restored = Array.from(host.querySelectorAll("u")) as HTMLElement[];
+      expect(restored).toEqual(before);
+      expect(restored[1].style.visibility).toBe("");
+      expect(restored[1].style.transform).not.toBe("");
+    });
+
+    it("reselects the stableDom triangle basis when an animated triangle changes shape", () => {
+      scene = makeScene(host);
+      const initialTriangle: Polygon = {
+        vertices: [
+          [0, 0, 0],
+          [0, 2, 0],
+          [1, 1, 1],
+        ],
+        color: "#ff0000",
+      };
+      const reshapedTriangle: Polygon = {
+        vertices: [
+          [0, 0, 0],
+          [0, 1, 0],
+          [1, 2, 1],
+        ],
+        color: "#00ff00",
+      };
+      const handle = scene.add(makeParseResult([initialTriangle]), {
+        merge: false,
+        stableDom: true,
+      });
+      const leaf = host.querySelector("u") as HTMLElement;
+      const initialTransform = leaf.style.transform;
+
+      handle.setPolygons([reshapedTriangle], {
+        merge: false,
+        stableDom: true,
+        recomputeAutoCenter: false,
+      });
+
+      expect(host.querySelector("u")).toBe(leaf);
+      expect(leaf.style.visibility).toBe("");
+      expect(leaf.style.transform).not.toBe(initialTransform);
+    });
+
+    it("can refresh stableDom triangle color without changing its transform", () => {
+      scene = makeScene(host);
+      const baseTriangle: Polygon = {
+        vertices: [
+          [0, 0, 0],
+          [1, 0, 0],
+          [0, 1, 1],
+        ],
+        color: "#ff0000",
+      };
+      const nextTriangle: Polygon = {
+        vertices: [
+          [0, 0, 0],
+          [2, 0, 0],
+          [0, 1, 1],
+        ],
+        color: "#0000ff",
+      };
+      const handle = scene.add(makeParseResult([baseTriangle]), {
+        merge: false,
+        stableDom: true,
+      });
+      const leaf = host.querySelector("u") as HTMLElement;
+      const initialTransform = leaf.style.transform;
+      const initialColor = leaf.style.color;
+
+      handle.setPolygons([nextTriangle], {
+        merge: false,
+        stableDom: true,
+        recomputeAutoCenter: false,
+        stableTriangleUpdateMode: "color-only",
+        stableTriangleColorFreezeFrames: 1,
+        stableTriangleColorMaxStep: 0,
+      } as Parameters<typeof handle.setPolygons>[1] & {
+        stableTriangleUpdateMode: "color-only";
+        stableTriangleColorFreezeFrames: number;
+        stableTriangleColorMaxStep: number;
+      });
+
+      expect(host.querySelector("u")).toBe(leaf);
+      expect(leaf.style.visibility).toBe("");
+      expect(leaf.style.transform).toBe(initialTransform);
+      expect(leaf.style.color).not.toBe(initialColor);
+    });
+
+    it("staggers optimized stableDom triangle color writes without quantizing colors", () => {
+      scene = makeScene(host);
+      const baseTriangle: Polygon = {
+        vertices: [
+          [0, 0, 0],
+          [1, 0, 0],
+          [0, 1, 1],
+        ],
+        color: "#ff0000",
+      };
+      const nextTriangle: Polygon = { ...baseTriangle, color: "#0000ff" };
+      const handle = scene.add(makeParseResult([baseTriangle]), {
+        merge: false,
+        stableDom: true,
+      });
+      const leaf = host.querySelector("u") as HTMLElement;
+      const initialColor = leaf.style.color;
+
+      const updateOptions = {
+        merge: false,
+        stableDom: true,
+        recomputeAutoCenter: false,
+        stableTriangleColorSteps: 0,
+        stableTriangleColorFreezeFrames: 3,
+      } as Parameters<typeof handle.setPolygons>[1] & {
+        stableTriangleColorSteps: number;
+        stableTriangleColorFreezeFrames: number;
+      };
+
+      handle.setPolygons([nextTriangle], updateOptions);
+      expect(leaf.style.color).toBe(initialColor);
+      handle.setPolygons([nextTriangle], updateOptions);
+      expect(leaf.style.color).toBe(initialColor);
+      handle.setPolygons([nextTriangle], updateOptions);
+      expect(leaf.style.color).not.toBe(initialColor);
+      expect(leaf.style.color).not.toBe("");
+    });
+
+    it("can skip optimized stableDom triangle color writes", () => {
+      scene = makeScene(host);
+      const baseTriangle: Polygon = {
+        vertices: [
+          [0, 0, 0],
+          [1, 0, 0],
+          [0, 1, 1],
+        ],
+        color: "#ff0000",
+      };
+      const nextTriangle: Polygon = { ...baseTriangle, color: "#0000ff" };
+      const handle = scene.add(makeParseResult([baseTriangle]), {
+        merge: false,
+        stableDom: true,
+      });
+      const leaf = host.querySelector("u") as HTMLElement;
+      const initialColor = leaf.style.color;
+
+      const updateOptions = {
+        merge: false,
+        stableDom: true,
+        recomputeAutoCenter: false,
+        stableTriangleColorSteps: 0,
+        stableTriangleColorFreezeFrames: 0,
+      } as Parameters<typeof handle.setPolygons>[1] & {
+        stableTriangleColorSteps: number;
+        stableTriangleColorFreezeFrames: number;
+      };
+
+      handle.setPolygons([nextTriangle], updateOptions);
+      handle.setPolygons([nextTriangle], updateOptions);
+      handle.setPolygons([nextTriangle], updateOptions);
+
+      expect(leaf.style.color).toBe(initialColor);
+    });
+
+    it("can limit optimized stableDom triangle color jumps", () => {
+      scene = makeScene(host);
+      const baseTriangle: Polygon = {
+        vertices: [
+          [0, 0, 0],
+          [1, 0, 0],
+          [0, 1, 1],
+        ],
+        color: "#ff0000",
+      };
+      const nextTriangle: Polygon = { ...baseTriangle, color: "#0000ff" };
+
+      const exactHandle = scene.add(makeParseResult([baseTriangle]), {
+        merge: false,
+        stableDom: true,
+      });
+      const exactLeaf = exactHandle.element.querySelector("u") as HTMLElement;
+      exactHandle.setPolygons([nextTriangle], {
+        merge: false,
+        stableDom: true,
+        recomputeAutoCenter: false,
+        stableTriangleColorSteps: 0,
+        stableTriangleColorFreezeFrames: 1,
+      } as Parameters<typeof exactHandle.setPolygons>[1] & {
+        stableTriangleColorSteps: number;
+        stableTriangleColorFreezeFrames: number;
+      });
+      const exactColor = exactLeaf.style.color;
+      exactHandle.remove();
+
+      const handle = scene.add(makeParseResult([baseTriangle]), {
+        merge: false,
+        stableDom: true,
+      });
+      const leaf = handle.element.querySelector("u") as HTMLElement;
+      const initialColor = leaf.style.color;
+
+      const updateOptions = {
+        merge: false,
+        stableDom: true,
+        recomputeAutoCenter: false,
+        stableTriangleColorSteps: 0,
+        stableTriangleColorFreezeFrames: 1,
+        stableTriangleColorMaxStep: 8,
+      } as Parameters<typeof handle.setPolygons>[1] & {
+        stableTriangleColorSteps: number;
+        stableTriangleColorFreezeFrames: number;
+        stableTriangleColorMaxStep: number;
+      };
+
+      handle.setPolygons([nextTriangle], updateOptions);
+      const steppedColor = leaf.style.color;
+
+      expect(steppedColor).not.toBe(initialColor);
+      expect(steppedColor).not.toBe(exactColor);
+      expect(steppedColor).not.toBe("");
+
+      handle.setPolygons([nextTriangle], updateOptions);
+
+      expect(leaf.style.color).not.toBe(steppedColor);
     });
 
     it("preserves caller-mounted mesh wrapper children across setPolygons()", () => {
@@ -864,6 +1284,77 @@ describe("createPolyScene", () => {
       expect(host.querySelectorAll(".polycss-mesh i, .polycss-mesh b, .polycss-mesh s, .polycss-mesh u").length).toBe(1);
     });
 
+    it("updates mounted voxel leaves when mesh rotation changes the visible normal set", () => {
+      scene = makeScene(host, {}, { rotX: 0, rotY: 0 });
+      const handle = scene.add(makeParseResult([
+        { ...triangle(), data: { face: "front" } },
+        { ...backTriangle(), data: { face: "back" } },
+      ]), { merge: false });
+      const firstLeaf = host.querySelector(".polycss-mesh i, .polycss-mesh b, .polycss-mesh s, .polycss-mesh u");
+      expect(firstLeaf).not.toBeNull();
+      expect((firstLeaf as HTMLElement).dataset.face).toBe("front");
+
+      handle.setTransform({ rotation: [180, 0, 0] });
+
+      const nextLeaf = host.querySelector(".polycss-mesh i, .polycss-mesh b, .polycss-mesh s, .polycss-mesh u");
+      expect(nextLeaf).not.toBe(firstLeaf);
+      expect((nextLeaf as HTMLElement).dataset.face).toBe("back");
+      expect(host.querySelectorAll(".polycss-mesh i, .polycss-mesh b, .polycss-mesh s, .polycss-mesh u").length).toBe(1);
+    });
+
+    it("updates direct voxel brushes when mesh rotation changes the visible face set", () => {
+      scene = makeScene(host, {
+        directionalLight: { direction: [0, 0, 1], intensity: 0 },
+        ambientLight: { color: "#ffffff", intensity: 1 },
+      }, { rotX: 0, rotY: 0 });
+      const handle = scene.add(makeTwoSidedVoxelExactParseResult());
+      const firstBrush = host.querySelector(".polycss-mesh > b") as HTMLElement | null;
+      expect(firstBrush).not.toBeNull();
+      expect(firstBrush!.style.color).toMatch(/^(#ff0000|rgb\(255, 0, 0\))$/);
+      expect(host.querySelectorAll(".polycss-mesh > b").length).toBe(1);
+
+      handle.setTransform({ rotation: [180, 0, 0] });
+
+      const nextBrush = host.querySelector(".polycss-mesh > b") as HTMLElement | null;
+      expect(nextBrush).not.toBeNull();
+      expect(nextBrush!.style.color).toMatch(/^(#00ff00|rgb\(0, 255, 0\))$/);
+      expect(host.querySelectorAll(".polycss-mesh > b").length).toBe(1);
+    });
+
+    it("updates direct voxel side brushes when mesh z-rotation swaps front and back faces", () => {
+      scene = makeScene(host, {
+        directionalLight: { direction: [0, 0, 1], intensity: 0 },
+        ambientLight: { color: "#ffffff", intensity: 1 },
+      }, { rotX: 65, rotY: 45 });
+      const handle = scene.add(makeTwoSidedVoxelSideParseResult());
+      const firstBrush = host.querySelector(".polycss-mesh > b") as HTMLElement | null;
+      expect(firstBrush).not.toBeNull();
+      expect(firstBrush!.style.color).toMatch(/^(#ff0000|rgb\(255, 0, 0\))$/);
+      expect(host.querySelectorAll(".polycss-mesh > b").length).toBe(1);
+
+      handle.setTransform({ rotation: [0, 0, 180] });
+
+      const nextBrush = host.querySelector(".polycss-mesh > b") as HTMLElement | null;
+      expect(nextBrush).not.toBeNull();
+      expect(nextBrush!.style.color).toMatch(/^(#00ff00|rgb\(0, 255, 0\))$/);
+      expect(host.querySelectorAll(".polycss-mesh > b").length).toBe(1);
+    });
+
+    it("redraws direct voxel brushes on mesh rotation even when visible faces stay the same", () => {
+      scene = makeScene(host, {
+        directionalLight: { direction: [0, 0, 1], intensity: 0 },
+        ambientLight: { color: "#ffffff", intensity: 1 },
+      }, { rotX: 0, rotY: 0 });
+      const handle = scene.add(makeTwoTopVoxelExactParseResult());
+      const brushes = () => Array.from(host.querySelectorAll(".polycss-mesh > b")) as HTMLElement[];
+      expect(brushes().map((brush) => brush.style.color)).toEqual(["#ff0000", "#00ff00"]);
+
+      handle.setTransform({ rotation: [0, 0, 180] });
+
+      expect(brushes().map((brush) => brush.style.color)).toEqual(["#00ff00", "#ff0000"]);
+      expect(brushes().length).toBe(2);
+    });
+
     it("does not remount culling leaves when camera rotation keeps the same visible normal set", () => {
       scene = makeScene(host, {}, { rotX: 0, rotY: 0 });
       scene.add(makeParseResult([triangle(), backTriangle()]), { merge: false });
@@ -947,6 +1438,17 @@ describe("createPolyScene", () => {
 
       expect(records).toHaveLength(0);
       expect(handle.element.querySelectorAll("i,b,s,u").length).toBe(leafCount);
+    });
+
+    it("keeps replacement high-normal meshes non-cullable after setPolygons", () => {
+      scene = makeScene(host, {}, { rotX: 65, rotY: 45 });
+      const handle = scene.add(makeParseResult(highNormalTrianglePairs()), { merge: false });
+      const initialLeafCount = handle.element.querySelectorAll("i,b,s,u").length;
+      expect(initialLeafCount).toBe(handle.polygons.length);
+
+      handle.setPolygons(highNormalTrianglePairs(), { merge: false });
+
+      expect(handle.element.querySelectorAll("i,b,s,u").length).toBe(handle.polygons.length);
     });
 
     // Perf-fix tests: setOptions used to call recomputeAutoCenter() on every

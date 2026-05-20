@@ -61,16 +61,16 @@ export const CITY_BLOCK: ScenePreset = {
     // Back row (north edge of the block) — taller anchors facing outward
     { presetId: glb("city/Skyscraper.glb"), position: [0, 10, 0], rotation: [0, 0, 180] },
     { presetId: glb("city/Large Building.glb"), position: [-10, 10, 0], rotation: [0, 0, 180] },
-    { presetId: glb("city/Large Building-3IhrYZp6tP.glb"), position: [10, 10, 0], rotation: [0, 0, 180] },
+    { presetId: glb("city/Skyscraper.glb"), position: [10, 10, 0], rotation: [0, 0, 180] },
 
     // Side rows — small/low buildings facing east and west
     { presetId: glb("city/Small Building.glb"), position: [-10, 0, 0], rotation: [0, 0, 90] },
-    { presetId: glb("city/Small Building-QjL4Fo9dU9.glb"), position: [10, 0, 0], rotation: [0, 0, -90] },
+    { presetId: glb("city/Small Building.glb"), position: [10, 0, 0], rotation: [0, 0, -90] },
 
     // Front row (south edge) — mid-height buildings facing the camera default
-    { presetId: glb("city/Low Building.glb"), position: [-10, -10, 0] },
-    { presetId: glb("city/Sign Hospital.glb"), position: [0, -10, 0] },
-    { presetId: glb("city/Low Wide.glb"), position: [10, -10, 0] },
+    { presetId: glb("city/Large Building.glb"), position: [-10, -10, 0] },
+    { presetId: glb("city/Small Building.glb"), position: [0, -10, 0] },
+    { presetId: glb("city/Large Building.glb"), position: [10, -10, 0] },
   ],
 };
 
@@ -103,27 +103,6 @@ export const CITY_STREET: ScenePreset = {
     { presetId: glb("urban/Road Bits.glb"), position: [8, 0, 0], rotation: [0, 0, 90] },
     { presetId: glb("urban/Road Bits.glb"), position: [16, 0, 0], rotation: [0, 0, 90] },
     { presetId: glb("urban/Road Bits.glb"), position: [24, 0, 0], rotation: [0, 0, 90] },
-
-    // Trees in each quadrant — corners of the cross
-    { presetId: glb("urban/Tree.glb"), position: [-8, 8, 0] },
-    { presetId: glb("urban/Tree.glb"), position: [-14, 12, 0] },
-    { presetId: glb("urban/Tree.glb"), position: [-6, 16, 0] },
-    { presetId: glb("urban/Tree.glb"), position: [-18, 6, 0] },
-
-    { presetId: glb("urban/Tree.glb"), position: [8, 8, 0] },
-    { presetId: glb("urban/Tree.glb"), position: [14, 14, 0] },
-    { presetId: glb("urban/Tree.glb"), position: [18, 6, 0] },
-    { presetId: glb("urban/Tree.glb"), position: [6, 18, 0] },
-
-    { presetId: glb("urban/Tree.glb"), position: [-8, -8, 0] },
-    { presetId: glb("urban/Tree.glb"), position: [-14, -14, 0] },
-    { presetId: glb("urban/Tree.glb"), position: [-18, -6, 0] },
-    { presetId: glb("urban/Tree.glb"), position: [-6, -16, 0] },
-
-    { presetId: glb("urban/Tree.glb"), position: [8, -8, 0] },
-    { presetId: glb("urban/Tree.glb"), position: [16, -12, 0] },
-    { presetId: glb("urban/Tree.glb"), position: [18, -18, 0] },
-    { presetId: glb("urban/Tree.glb"), position: [6, -20, 0] },
 
     // A couple of cars on the road just for life
     { presetId: glb("urban/Car.glb"), position: [0, -12, 0] },

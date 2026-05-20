@@ -1,0 +1,648 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>polycss bench - animated human</title>
+  <style id="overlay-css"></style>
+</head>
+<body>
+  <div id="host"></div>
+
+  <script type="module">
+    import {
+      bakeSolidTextureSamples,
+      createPolyAnimationMixer,
+      createPolyCamera,
+      createPolyOrbitControls,
+      createPolyScene,
+      optimizeAnimatedMeshPolygons,
+      parseGltf,
+    } from "./polycss.js";
+    import {
+      collectRenderStats,
+      createPerfRecorder,
+      dirFromAzEl,
+      PERF_OVERLAY_CSS,
+      PERF_OVERLAY_HTML,
+    } from "./perf-shared.mjs";
+
+    document.getElementById("overlay-css").textContent = PERF_OVERLAY_CSS;
+    document.body.insertAdjacentHTML("beforeend", PERF_OVERLAY_HTML);
+
+    const params = new URLSearchParams(window.location.search);
+
+    function numberParam(name, fallback) {
+      const raw = params.get(name);
+      if (raw === null || raw.trim() === "") return fallback;
+      const value = Number(raw);
+      return Number.isFinite(value) ? value : fallback;
+    }
+
+    function boolParam(name, fallback) {
+      const raw = params.get(name);
+      if (raw === null) return fallback;
+      return raw !== "0" && raw !== "false" && raw !== "no";
+    }
+
+    function galleryGlbPath(value) {
+      if (!value) return "/gallery/glb/poly-pizza/animated-human.glb";
+      if (value.startsWith("/gallery/")) return value;
+      const cleaned = value
+        .replace(/\\/g, "/")
+        .replace(/^\/+/, "")
+        .replace(/^gallery\//, "")
+        .replace(/^glb\//, "");
+      if (!cleaned || cleaned.includes("..")) return "/gallery/glb/poly-pizza/animated-human.glb";
+      return `/gallery/glb/${cleaned.toLowerCase().endsWith(".glb") ? cleaned : `${cleaned}.glb`}`;
+    }
+
+    function chooseClip(controller, requested) {
+      const clips = controller?.clips ?? [];
+      if (clips.length === 0) return null;
+      const key = (requested || "run").trim();
+      if (key) {
+        const numeric = Number(key);
+        if (Number.isInteger(numeric)) {
+          const byIndex = clips.find((clip) => clip.index === numeric) ?? clips[numeric];
+          if (byIndex) return byIndex;
+        }
+        const exact = clips.find((clip) => clip.name.toLowerCase() === key.toLowerCase());
+        if (exact) return exact;
+        if (key.toLowerCase() === "run") {
+          const run = clips.find((clip) => /run|jog|sprint/i.test(clip.name));
+          if (run) return run;
+        }
+      }
+      return clips[0];
+    }
+
+    const meshUrl = galleryGlbPath(params.get("mesh"));
+    const meshId = params.get("mesh") || "poly-pizza/animated-human.glb";
+    const requestedClip = params.get("clip") || "run";
+    const mode = params.get("mode") === "dynamic" ? "dynamic" : "baked";
+    const stableDom = boolParam("stableDom", true);
+    const stableTriangleDebugRaw = params.get("stableTriangleDebug");
+    const stableTriangleDebug =
+      stableTriangleDebugRaw === "transform-only" || stableTriangleDebugRaw === "plan-only"
+        ? stableTriangleDebugRaw
+        : "";
+    const stableTriangleColorSteps = params.has("stableTriangleColorSteps")
+      ? numberParam("stableTriangleColorSteps", 0)
+      : 0;
+    const stableTriangleColorPolicyRaw = params.get("stableTriangleColorPolicy");
+    const stableTriangleColorPolicy =
+      stableTriangleColorPolicyRaw === "adaptive" ? "adaptive" : "cadence";
+    const stableTriangleColorFreezeFrames = params.has("stableTriangleColorFreezeFrames")
+      ? numberParam("stableTriangleColorFreezeFrames", 1)
+      : 12;
+    const stableTriangleColorBudget = params.has("stableTriangleColorBudget")
+      ? numberParam("stableTriangleColorBudget", 0)
+      : (stableTriangleColorPolicy === "adaptive" ? 0.16 : 0);
+    const stableTriangleColorMaxAge = params.has("stableTriangleColorMaxAge")
+      ? numberParam("stableTriangleColorMaxAge", 0)
+      : (stableTriangleColorPolicy === "adaptive" ? 8 : 0);
+    const stableTriangleColorMaxStep = params.has("stableTriangleColorMaxStep")
+      ? numberParam("stableTriangleColorMaxStep", 0)
+      : 8;
+    const stableTriangleMatrixDecimals = params.has("stableTriangleMatrixDecimals")
+      ? numberParam("stableTriangleMatrixDecimals", 3)
+      : 3;
+    const animationDriverRaw = params.get("animationDriver");
+    const animationDriver =
+      animationDriverRaw === "css-keyframes" ||
+      animationDriverRaw === "js-style-cache" ||
+      animationDriverRaw === "typed-om-style-cache" ||
+      animationDriverRaw === "progressive-style-cache"
+        ? animationDriverRaw
+        : "js";
+    const animationFrameCache = boolParam("animationFrameCache", false);
+    const animationFrameCacheFrames = Math.max(2, Math.floor(numberParam("animationFrameCacheFrames", 60)));
+    const animatedMeshOptimization = boolParam("animatedMeshOptimization", false);
+    const solidTextureSamples = boolParam("solidTextureSamples", true);
+    const targetSize = numberParam("targetSize", 72);
+    const timeScale = numberParam("timeScale", 1);
+    const az = numberParam("az", 50);
+    const el = numberParam("el", 45);
+    const zoom = numberParam("zoom", 0.42);
+    const rotX = numberParam("rotX", 66);
+    const rotY = numberParam("rotY", 25);
+    const upAxis = params.get("upAxis") === "z" ? "z" : "y";
+
+    const disableStrategies = (params.get("disableStrategies") || "")
+      .split(",")
+      .map((value) => value.trim())
+      .filter(Boolean);
+
+    async function loadAnimatedGlb(url) {
+      const startedAt = performance.now();
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`fetch ${url} -> ${res.status}`);
+      const buf = await res.arrayBuffer();
+      const parsedGltf = parseGltf(buf, {
+        baseUrl: new URL(url, window.location.href).href,
+        targetSize,
+        upAxis,
+      });
+      const parsed = solidTextureSamples
+        ? await bakeSolidTextureSamples(parsedGltf)
+        : parsedGltf;
+      return {
+        parsed,
+        parseMs: performance.now() - startedAt,
+        sourceBytes: buf.byteLength,
+      };
+    }
+
+    function animationSetPolygonsOptions(overrides = {}) {
+      return {
+        merge: false,
+        stableDom,
+        recomputeAutoCenter: false,
+        ...(stableTriangleDebug ? { stableTriangleDebug } : {}),
+        stableTriangleColorPolicy,
+        stableTriangleColorSteps,
+        stableTriangleColorFreezeFrames,
+        stableTriangleColorBudget,
+        stableTriangleColorMaxAge,
+        stableTriangleColorMaxStep,
+        stableTriangleMatrixDecimals,
+        ...overrides,
+      };
+    }
+
+    function keyframeCssValue(value, fallback) {
+      return value && value.trim() ? value : fallback;
+    }
+
+    function nextFrame() {
+      return new Promise((resolve) => requestAnimationFrame(resolve));
+    }
+
+    async function installCssKeyframeAnimation(mesh, animation, clip) {
+      const startedAt = performance.now();
+      const sampleCount = Math.max(2, Math.floor(numberParam("keyframeSamples", 24)));
+      const frames = [];
+      let leafCount = 0;
+
+      for (let sample = 0; sample <= sampleCount; sample++) {
+        const t = clip.duration * (sample / sampleCount);
+        mesh.setPolygons(
+          animation.sample(clip.index, t),
+          animationSetPolygonsOptions({
+            stableTriangleColorPolicy: "cadence",
+            stableTriangleColorFreezeFrames: 1,
+            stableTriangleColorBudget: 0,
+            stableTriangleColorMaxAge: 0,
+          }),
+        );
+        const leaves = Array.from(mesh.element.querySelectorAll("u"));
+        if (sample === 0) leafCount = leaves.length;
+        if (leaves.length !== leafCount) {
+          throw new Error(`CSS keyframe capture changed leaf count ${leafCount} -> ${leaves.length}`);
+        }
+        frames.push(leaves.map((leaf) => ({
+          transform: keyframeCssValue(leaf.style.transform, "none"),
+          color: keyframeCssValue(leaf.style.color, "currentColor"),
+          visibility: leaf.style.visibility === "hidden" ? "hidden" : "visible",
+        })));
+        if (sample % 4 === 3) await nextFrame();
+      }
+
+      const leaves = Array.from(mesh.element.querySelectorAll("u"));
+      for (let i = 0; i < leaves.length; i++) {
+        leaves[i].dataset.polycssAnimIndex = String(i);
+      }
+
+      const durationSeconds = Math.max(0.001, clip.duration / Math.max(0.001, timeScale));
+      let css = "";
+      for (let i = 0; i < leafCount; i++) {
+        const name = `polycss-human-run-${i}`;
+        css += `@keyframes ${name}{`;
+        for (let sample = 0; sample < frames.length; sample++) {
+          const frame = frames[sample][i];
+          const pct = (sample * 100 / sampleCount).toFixed(4).replace(/\.?0+$/, "") || "0";
+          css += `${pct}%{transform:${frame.transform};color:${frame.color};visibility:${frame.visibility};}`;
+        }
+        css += "}\n";
+        css += `[data-polycss-anim-index="${i}"]{animation:${name} ${durationSeconds}s linear infinite;}\n`;
+      }
+      const style = document.createElement("style");
+      style.id = "polycss-human-keyframes";
+      style.textContent = css;
+      document.head.appendChild(style);
+      return {
+        driver: "css-keyframes",
+        keyframeSamples: sampleCount,
+        keyframeBuildMs: performance.now() - startedAt,
+        keyframeCssBytes: css.length,
+        keyframeLeafCount: leafCount,
+      };
+    }
+
+    async function buildStyleFrameCache(mesh, animation, clip, useTypedOm) {
+      const startedAt = performance.now();
+      const sampleCount = Math.max(2, animationFrameCacheFrames);
+      const frames = [];
+      let leafCount = 0;
+      const canUseTypedOm = useTypedOm && window.CSSStyleValue;
+
+      for (let sample = 0; sample < sampleCount; sample++) {
+        const t = clip.duration * (sample / sampleCount);
+        mesh.setPolygons(
+          animation.sample(clip.index, t),
+          animationSetPolygonsOptions({
+            stableTriangleColorPolicy: "cadence",
+            stableTriangleColorFreezeFrames: 1,
+            stableTriangleColorBudget: 0,
+            stableTriangleColorMaxAge: 0,
+          }),
+        );
+        const leaves = Array.from(mesh.element.querySelectorAll("u"));
+        if (sample === 0) leafCount = leaves.length;
+        if (leaves.length !== leafCount) {
+          throw new Error(`style frame cache changed leaf count ${leafCount} -> ${leaves.length}`);
+        }
+        frames.push(leaves.map((leaf) => {
+          const transform = keyframeCssValue(leaf.style.transform, "none");
+          return {
+            transform,
+            visibility: leaf.style.visibility === "hidden" ? "hidden" : "",
+            transformValue: canUseTypedOm ? CSSStyleValue.parse("transform", transform) : null,
+          };
+        }));
+        if (sample % 4 === 3) await nextFrame();
+      }
+
+      return {
+        driver: useTypedOm && canUseTypedOm ? "typed-om-style-cache" : "js-style-cache",
+        frames,
+        sampleCount,
+        leafCount,
+        buildMs: performance.now() - startedAt,
+        typedOm: useTypedOm && canUseTypedOm,
+      };
+    }
+
+    function directStableTriangleLeaves(mesh) {
+      return Array.from(mesh.element.querySelectorAll(":scope > u"));
+    }
+
+    function createProgressiveStyleCache() {
+      return {
+        driver: "progressive-style-cache",
+        frames: Array.from({ length: animationFrameCacheFrames }),
+        leaves: null,
+        leafCount: 0,
+        filled: 0,
+        disabled: false,
+        lastAppliedFrameIndex: -1,
+        skippedFrameApplies: 0,
+        colorRefreshFrames: Math.max(1, stableTriangleColorFreezeFrames || 12),
+      };
+    }
+
+    function resetProgressiveStyleCache(cache) {
+      cache.frames.fill(undefined);
+      cache.leaves = null;
+      cache.leafCount = 0;
+      cache.filled = 0;
+      cache.lastAppliedFrameIndex = -1;
+      cache.skippedFrameApplies = 0;
+    }
+
+    function captureProgressiveStyleCacheFrame(mesh, cache, frameIndex) {
+      if (cache.disabled) return;
+      const leaves = directStableTriangleLeaves(mesh);
+      const expectedCount = mesh.polygons.length;
+      if (
+        expectedCount <= 0 ||
+        leaves.length !== expectedCount
+      ) {
+        cache.disabled = true;
+        resetProgressiveStyleCache(cache);
+        return;
+      }
+      if (cache.leafCount !== 0 && leaves.length !== cache.leafCount) {
+        resetProgressiveStyleCache(cache);
+      }
+      cache.leaves = leaves;
+      cache.leafCount = leaves.length;
+      if (!cache.frames[frameIndex]) cache.filled += 1;
+      cache.frames[frameIndex] = leaves.map((leaf) => ({
+        transform: leaf.style.transform || "none",
+        visibility: leaf.style.visibility === "hidden" ? "hidden" : "",
+      }));
+      cache.lastAppliedFrameIndex = frameIndex;
+    }
+
+    function applyProgressiveStyleCacheFrame(mesh, cache, frameIndex) {
+      if (cache.disabled) return false;
+      const frame = cache.frames[frameIndex];
+      if (!frame) return false;
+      if (
+        cache.lastAppliedFrameIndex === frameIndex &&
+        cache.leaves &&
+        cache.leafCount === frame.length
+      ) {
+        cache.skippedFrameApplies += 1;
+        return true;
+      }
+      const leaves = cache.leaves || directStableTriangleLeaves(mesh);
+      if (leaves.length !== frame.length) {
+        resetProgressiveStyleCache(cache);
+        return false;
+      }
+      cache.leaves = leaves;
+      cache.leafCount = leaves.length;
+      for (let i = 0; i < leaves.length; i++) {
+        const leaf = leaves[i];
+        const next = frame[i];
+        leaf.style.transform = next.transform;
+        if (leaf.style.visibility !== next.visibility) {
+          leaf.style.visibility = next.visibility;
+        }
+      }
+      cache.lastAppliedFrameIndex = frameIndex;
+      return true;
+    }
+
+    async function main() {
+      const host = document.getElementById("host");
+      const camera = createPolyCamera({ zoom, rotX, rotY });
+      const scene = createPolyScene(host, {
+        camera,
+        directionalLight: { direction: dirFromAzEl(az, el), color: "#ffffff", intensity: 1 },
+        ambientLight: { color: "#ffffff", intensity: 0.45 },
+        textureLighting: mode,
+        autoCenter: true,
+        ...(disableStrategies.length > 0 ? { strategies: { disable: disableStrategies } } : {}),
+      });
+      createPolyOrbitControls(scene, { drag: true, wheel: true });
+
+      const { parsed, parseMs, sourceBytes } = await loadAnimatedGlb(meshUrl);
+      const clip = chooseClip(parsed.animation, requestedClip);
+      if (!parsed.animation || !clip) {
+        throw new Error(`No animation clips found in ${meshUrl}`);
+      }
+      const optimizationStart = performance.now();
+      const renderParsed = animatedMeshOptimization
+        ? optimizeAnimatedMeshPolygons(parsed, {
+            meshResolution: "lossy",
+          })
+        : parsed;
+      const animatedMeshOptimizationMs = performance.now() - optimizationStart;
+
+      const initialPolygons = renderParsed.animation.sample(clip.index, 0);
+      const mesh = scene.add(
+        { ...renderParsed, polygons: initialPolygons },
+        { id: "animated-human", merge: false, stableDom },
+      );
+
+      let lastSetPolygonsMs = 0;
+      let lastAnimatedPolygons = initialPolygons.length;
+      const keyframeInfo = animationDriver === "css-keyframes"
+        ? await installCssKeyframeAnimation(mesh, renderParsed.animation, clip)
+        : null;
+      const styleFrameCache = animationDriver === "js-style-cache" ||
+          animationDriver === "typed-om-style-cache"
+        ? await buildStyleFrameCache(mesh, renderParsed.animation, clip, animationDriver === "typed-om-style-cache")
+        : null;
+      const progressiveStyleCache = animationDriver === "progressive-style-cache"
+        ? createProgressiveStyleCache()
+        : null;
+
+      const renderStats = collectRenderStats({
+        polygons: initialPolygons,
+        root: host.querySelector(".polycss-scene"),
+      });
+      const recorder = createPerfRecorder({
+        rendererLabel: stableDom ? "vanilla-stable-animation" : "vanilla-remount-animation",
+        meshId,
+        mode,
+        motion: `clip:${clip.name}`,
+        polyCount: initialPolygons.length,
+        polygons: initialPolygons,
+        renderStats,
+      });
+
+      window.__perf__.animation = {
+        meshUrl,
+        requestedClip,
+        clip,
+        clips: parsed.animation.clips,
+        stableDom,
+        animationDriver,
+        animationFrameCache,
+        animationFrameCacheFrames,
+        stableTriangleDebug,
+        stableTriangleColorPolicy,
+        stableTriangleColorSteps,
+        stableTriangleColorFreezeFrames,
+        stableTriangleColorBudget,
+        stableTriangleColorMaxAge,
+        stableTriangleColorMaxStep,
+        stableTriangleMatrixDecimals,
+        animatedMeshOptimization,
+        animatedMeshOptimizationMs,
+        sourcePolygons: parsed.polygons.length,
+        solidTextureSamples,
+        targetSize,
+        timeScale,
+        parseMs,
+        sourceBytes,
+        keyframeInfo,
+        styleFrameCache: styleFrameCache ? {
+          driver: styleFrameCache.driver,
+          sampleCount: styleFrameCache.sampleCount,
+          leafCount: styleFrameCache.leafCount,
+          buildMs: styleFrameCache.buildMs,
+          typedOm: styleFrameCache.typedOm,
+        } : null,
+        progressiveStyleCache: progressiveStyleCache ? {
+          driver: progressiveStyleCache.driver,
+          sampleCount: progressiveStyleCache.frames.length,
+          colorRefreshFrames: progressiveStyleCache.colorRefreshFrames,
+        } : null,
+      };
+      window.__perf__.animationSamples = [];
+
+      if (animationDriver === "css-keyframes" || styleFrameCache) {
+        const leaves = styleFrameCache ? Array.from(mesh.element.querySelectorAll("u")) : [];
+        let elapsedClipTime = 0;
+        function tick(now) {
+          let updateMs = 0;
+          if (styleFrameCache) {
+            const dt = Math.max(0, (now - lastStyleCacheFrame) / 1000) * timeScale;
+            lastStyleCacheFrame = now;
+            elapsedClipTime = (elapsedClipTime + dt) % Math.max(0.001, clip.duration);
+            const frameIndex = Math.floor((elapsedClipTime / clip.duration) * styleFrameCache.frames.length) %
+              styleFrameCache.frames.length;
+            const frame = styleFrameCache.frames[frameIndex];
+            const updateStart = performance.now();
+            for (let i = 0; i < leaves.length; i++) {
+              const leaf = leaves[i];
+              const next = frame[i];
+              if (styleFrameCache.typedOm && next.transformValue) {
+                leaf.attributeStyleMap.set("transform", next.transformValue);
+              } else {
+                leaf.style.transform = next.transform;
+              }
+              if (leaf.style.visibility !== next.visibility) {
+                leaf.style.visibility = next.visibility;
+              }
+            }
+            updateMs = performance.now() - updateStart;
+          }
+          recorder.onFrame(now);
+          window.__perf__.animationSamples.push({
+            t: now,
+            updateMs,
+            setPolygonsMs: 0,
+            nonSetPolygonsMs: updateMs,
+            polygons: lastAnimatedPolygons,
+          });
+          if (window.__perf__.animationSamples.length > 1800) {
+            window.__perf__.animationSamples.splice(
+              0,
+              window.__perf__.animationSamples.length - 1800,
+            );
+          }
+          requestAnimationFrame(tick);
+        }
+        let lastStyleCacheFrame = performance.now();
+        requestAnimationFrame(tick);
+        return;
+      }
+
+      if (progressiveStyleCache) {
+        let lastProgressiveFrame = performance.now();
+        let elapsedClipTime = 0;
+        let animationFrameCount = 0;
+        function tick(now) {
+          const dt = Math.max(0, (now - lastProgressiveFrame) / 1000) * timeScale;
+          lastProgressiveFrame = now;
+          elapsedClipTime = (elapsedClipTime + dt) % Math.max(0.001, clip.duration);
+          animationFrameCount += 1;
+          const frameIndex = Math.floor(
+            (elapsedClipTime / clip.duration) * progressiveStyleCache.frames.length,
+          ) % progressiveStyleCache.frames.length;
+          const shouldRefreshColor =
+            animationFrameCount % progressiveStyleCache.colorRefreshFrames === 0;
+          let cacheHit = false;
+          let cacheMs = 0;
+          let sampleMs = 0;
+          let setPolygonsMs = 0;
+          const updateStart = performance.now();
+          const cacheStart = performance.now();
+          cacheHit = applyProgressiveStyleCacheFrame(mesh, progressiveStyleCache, frameIndex);
+          cacheMs = performance.now() - cacheStart;
+          if (cacheHit && shouldRefreshColor) {
+            const sampleStart = performance.now();
+            const polygons = renderParsed.animation.sample(clip.index, elapsedClipTime);
+            sampleMs = performance.now() - sampleStart;
+            const setStart = performance.now();
+            mesh.setPolygons(
+              polygons,
+              animationSetPolygonsOptions({ stableTriangleUpdateMode: "color-only" }),
+            );
+            setPolygonsMs = performance.now() - setStart;
+            lastAnimatedPolygons = polygons.length;
+          } else if (!cacheHit) {
+            const sampleStart = performance.now();
+            const polygons = renderParsed.animation.sample(clip.index, elapsedClipTime);
+            sampleMs = performance.now() - sampleStart;
+            const setStart = performance.now();
+            mesh.setPolygons(polygons, animationSetPolygonsOptions());
+            setPolygonsMs = performance.now() - setStart;
+            lastAnimatedPolygons = polygons.length;
+            captureProgressiveStyleCacheFrame(mesh, progressiveStyleCache, frameIndex);
+          }
+          const updateMs = performance.now() - updateStart;
+          recorder.onFrame(now);
+          window.__perf__.animationSamples.push({
+            t: now,
+            updateMs,
+            setPolygonsMs,
+            nonSetPolygonsMs: Math.max(0, updateMs - setPolygonsMs),
+            polygons: lastAnimatedPolygons,
+            cacheHit,
+            cacheMs,
+            sampleMs,
+            cacheFilled: progressiveStyleCache.filled,
+            cacheSkipped: progressiveStyleCache.skippedFrameApplies,
+          });
+          if (window.__perf__.animationSamples.length > 1800) {
+            window.__perf__.animationSamples.splice(
+              0,
+              window.__perf__.animationSamples.length - 1800,
+            );
+          }
+          requestAnimationFrame(tick);
+        }
+        requestAnimationFrame(tick);
+        return;
+      }
+
+      const animationTarget = {
+        setPolygons(polygons) {
+          const start = performance.now();
+          mesh.setPolygons(polygons, animationSetPolygonsOptions());
+          lastSetPolygonsMs = performance.now() - start;
+          lastAnimatedPolygons = polygons.length;
+        },
+      };
+      const mixer = createPolyAnimationMixer(animationTarget, renderParsed.animation);
+      const action = mixer.clipAction(clip.name);
+      action.play();
+      const cachedAnimationFrames = animationFrameCache
+        ? Array.from({ length: animationFrameCacheFrames }, (_, index) =>
+            renderParsed.animation.sample(
+              clip.index,
+              clip.duration * (index / animationFrameCacheFrames),
+            )
+          )
+        : null;
+
+      let last = performance.now();
+      let elapsedClipTime = 0;
+      function tick(now) {
+        const dt = Math.max(0, (now - last) / 1000) * timeScale;
+        last = now;
+
+        const updateStart = performance.now();
+        if (cachedAnimationFrames) {
+          elapsedClipTime = (elapsedClipTime + dt) % Math.max(0.001, clip.duration);
+          const frameIndex = Math.floor((elapsedClipTime / clip.duration) * cachedAnimationFrames.length) %
+            cachedAnimationFrames.length;
+          animationTarget.setPolygons(cachedAnimationFrames[frameIndex]);
+        } else {
+          mixer.update(dt);
+        }
+        const updateMs = performance.now() - updateStart;
+
+        recorder.onFrame(now);
+        window.__perf__.animationSamples.push({
+          t: now,
+          updateMs,
+          setPolygonsMs: lastSetPolygonsMs,
+          nonSetPolygonsMs: Math.max(0, updateMs - lastSetPolygonsMs),
+          polygons: lastAnimatedPolygons,
+        });
+        if (window.__perf__.animationSamples.length > 1800) {
+          window.__perf__.animationSamples.splice(
+            0,
+            window.__perf__.animationSamples.length - 1800,
+          );
+        }
+        requestAnimationFrame(tick);
+      }
+      requestAnimationFrame(tick);
+    }
+
+    main().catch((err) => {
+      console.error("animated-human bench failed", err);
+      document.getElementById("fps-now").textContent = "ERR";
+    });
+  </script>
+</body>
+</html>

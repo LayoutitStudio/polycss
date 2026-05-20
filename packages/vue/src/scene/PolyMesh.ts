@@ -32,6 +32,7 @@ import {
   renderTextureBorderShapePoly,
   renderTextureAtlasPoly,
   renderTextureTrianglePoly,
+  updateStableTriangleDom,
   useTextureAtlas,
 } from "./textureAtlas";
 import { usePolySceneContext } from "./sceneContext";
@@ -191,7 +192,11 @@ export const PolyMesh = defineComponent({
     // is called. Reset to null whenever the upstream polygon source changes so
     // a fresh prop assignment or a completed src-fetch wins over stale edits.
     const polygonOverride = ref<Polygon[] | null>(null);
-    watch(propPolygons, () => { polygonOverride.value = null; });
+    let imperativePolygons: Polygon[] | null = null;
+    watch(propPolygons, () => {
+      polygonOverride.value = null;
+      imperativePolygons = null;
+    });
 
     const sourcePolygons = computed<Polygon[]>(() =>
       polygonOverride.value ?? propPolygons.value
@@ -245,20 +250,20 @@ export const PolyMesh = defineComponent({
     // The visual wrapper uses the live `rotation` prop (smooth feedback);
     // the atlas uses bakedRotation (jumps to current rotation on release).
     const bakedRotation = ref<Vec3 | undefined>(props.rotation);
+    const stableTriangleColorFrame = ref(0);
+
+    const bakedDirectional = computed(() => {
+      const baseLight = atlasDirectional.value;
+      if (!baseLight || !bakedRotation.value) return baseLight;
+      return { ...baseLight, direction: inverseRotateVec3(baseLight.direction, bakedRotation.value) };
+    });
 
     const textureAtlasPlans = computed(() => {
       if (!atlasAutoRender) return [];
-      const baseLight = atlasDirectional.value;
-      // Inverse-rotate the world light into the mesh-local frame so the
-      // pre-multiplied Lambert term stays correct after the mesh rotates.
-      // dot(localNormal, localLight) === dot(worldNormal, worldLight).
-      const effectiveLight = baseLight && bakedRotation.value
-        ? { ...baseLight, direction: inverseRotateVec3(baseLight.direction, bakedRotation.value) }
-        : baseLight;
       const repairEdges = buildTextureEdgeRepairSets(polygons.value);
       return polygons.value.map((p, i) =>
         computeTextureAtlasPlan(p, i, {
-          directionalLight: effectiveLight,
+          directionalLight: bakedDirectional.value,
           ambientLight: atlasAmbient.value,
           textureEdgeRepairEdges: repairEdges[i],
         }),
@@ -354,9 +359,29 @@ export const PolyMesh = defineComponent({
       getPosition: () => props.position,
       getRotation: () => props.rotation,
       getScale: () => props.scale,
-      getPolygons: () => polygons.value,
+      getPolygons: () => imperativePolygons ?? polygons.value,
+      setPolygons(nextPolygons: Polygon[]) {
+        const nextRenderedPolygons = props.autoCenter ? recenterPolygons(nextPolygons) : nextPolygons;
+        imperativePolygons = nextRenderedPolygons;
+        const root = wrapperRef.value;
+        if (
+          root &&
+          atlasAutoRender &&
+          updateStableTriangleDom(root, nextRenderedPolygons, {
+            directionalLight: bakedDirectional.value,
+            ambientLight: atlasAmbient.value,
+            textureLighting: atlasTextureLighting.value,
+            colorFrame: ++stableTriangleColorFrame.value,
+            colorFreezeFrames: 12,
+            colorMaxStep: 8,
+          })
+        ) {
+          return;
+        }
+        polygonOverride.value = nextPolygons.slice();
+      },
       updatePolygon(target: Polygon | number, partial: Partial<Polygon>) {
-        const current = polygons.value;
+        const current = imperativePolygons ?? polygons.value;
         const idx = typeof target === "number"
           ? target
           : current.indexOf(target);
@@ -366,6 +391,7 @@ export const PolyMesh = defineComponent({
         // re-renders the atlas (the polygon object itself is mutated
         // in place to preserve identity for callers holding a ref).
         polygonOverride.value = current.slice();
+        imperativePolygons = null;
       },
       rebakeAtlas: () => {
         bakedRotation.value = props.rotation;

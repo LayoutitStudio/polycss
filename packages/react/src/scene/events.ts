@@ -38,6 +38,12 @@ export interface PolyMeshHandle {
   /** Polygons currently being rendered (post-autoCenter). */
   getPolygons(): Polygon[];
   /**
+   * Replace the mesh polygons imperatively. Animated solid-triangle meshes use
+   * a stable DOM update path that mutates mounted leaves directly; unsupported
+   * topology falls back to the normal framework render path.
+   */
+  setPolygons(polygons: Polygon[]): void;
+  /**
    * Snapshot the current `rotation` prop as the new "baked rotation" and
    * trigger an atlas re-rasterization with the directional light
    * inverse-rotated into the mesh's local frame.

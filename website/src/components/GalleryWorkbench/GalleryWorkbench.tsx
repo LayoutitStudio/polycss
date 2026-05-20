@@ -7,6 +7,7 @@ import type {
 import type {
   PolyMeshHandle as VanillaPolyMeshHandle,
 } from "@layoutit/polycss";
+import { optimizeAnimatedMeshPolygons } from "@layoutit/polycss";
 import {
   Inspector as InspectorPanel,
   type InspectorColorGroup,
@@ -66,6 +67,8 @@ import {
 } from "./hooks";
 import { useFpvHost } from "../fpv";
 import type { ObjParseOptions, GltfParseOptions, VoxParseOptions } from "@layoutit/polycss";
+
+type AnimationClip = NonNullable<LoadedModel["animation"]>["clips"][number];
 
 function presetPickerItem(preset: PresetModel, local = false) {
   return {
@@ -180,6 +183,35 @@ function withSolidMaterials(polygons: Polygon[], fallbackColor: string): Polygon
 
 function polygonHasTextureData(polygon: Polygon): boolean {
   return Boolean(polygon.texture || polygon.uvs?.length || polygon.textureTriangles?.length);
+}
+
+function displayAnimationName(name: string): string {
+  const localName = (name.split("|").pop() ?? name).trim();
+  return localName
+    .replace(/^(Animal|Character|Fish|Human|Monster|Robot|Snake)[ _-]+/i, "")
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim() || name;
+}
+
+function animationOptionKey(name: string): string {
+  return displayAnimationName(name).toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+function animationNameHasArmaturePrefix(name: string): boolean {
+  return name.includes("|");
+}
+
+function dedupeAnimationClips(clips: AnimationClip[]): AnimationClip[] {
+  const byName = new Map<string, AnimationClip>();
+  for (const clip of clips) {
+    const key = animationOptionKey(clip.name);
+    const existing = byName.get(key);
+    if (!existing || (animationNameHasArmaturePrefix(existing.name) && !animationNameHasArmaturePrefix(clip.name))) {
+      byName.set(key, clip);
+    }
+  }
+  return Array.from(byName.values());
 }
 
 function resolveInitialPreset(): PresetModel {
@@ -382,22 +414,41 @@ export default function GalleryWorkbench() {
   const textureQuality = sceneOptions.textureQuality;
 
   const animationClips = loaded?.animation?.clips ?? [];
+  const selectableAnimationClips = useMemo(
+    () => dedupeAnimationClips(animationClips),
+    [animationClips],
+  );
   const activeAnimation = useMemo(
     () => animationClips.find((clip) => String(clip.index) === selectedAnimation) ?? null,
     [animationClips, selectedAnimation],
   );
   const hasActiveAnimation = activeAnimation !== null;
+  const renderLoaded = useMemo(() => {
+    if (!loaded || !activeAnimation || sceneOptions.meshResolution !== "lossy") return loaded;
+    const optimized = optimizeAnimatedMeshPolygons(loaded.parseResult, {
+      meshResolution: sceneOptions.meshResolution,
+    });
+    if (optimized === loaded.parseResult) return loaded;
+    return {
+      ...loaded,
+      parseResult: optimized,
+      rawPolygons: optimized.polygons,
+      polygons: optimized.polygons,
+      animation: optimized.animation,
+    };
+  }, [loaded, activeAnimation, sceneOptions.meshResolution]);
 
   const animation = useAnimationFrames({
-    loaded,
+    loaded: renderLoaded,
     activeAnimation,
     renderer: sceneOptions.renderer,
     animationPaused: sceneOptions.animationPaused,
     animationTimeScale: sceneOptions.animationTimeScale,
+    reactMeshRef: meshRef,
   });
 
   const { modelPolygons, interiorFillPolygons, scenePolygons, helperScale, helperTarget } = useScenePolygons({
-    loaded,
+    loaded: renderLoaded,
     hasActiveAnimation,
     meshResolution: sceneOptions.meshResolution,
     renderer: sceneOptions.renderer,
@@ -569,11 +620,11 @@ export default function GalleryWorkbench() {
 
   const animationOptions = useMemo(() => {
     const options: Record<string, string> = { None: "" };
-    for (const clip of animationClips) {
-      options[`${clip.name} (${clip.duration.toFixed(2)}s)`] = String(clip.index);
+    for (const clip of selectableAnimationClips) {
+      options[`${displayAnimationName(clip.name)} (${clip.duration.toFixed(2)}s)`] = String(clip.index);
     }
     return options;
-  }, [animationClips]);
+  }, [selectableAnimationClips]);
   const perspectiveMode = sceneOptions.perspective === false ? "orthographic" : "perspective";
   const perspectivePx = sceneOptions.perspective === false ? 8000 : sceneOptions.perspective;
 
@@ -676,7 +727,7 @@ export default function GalleryWorkbench() {
             <VanillaScene
               key={rendererDebugKey}
               polygons={renderModelPolygons}
-              parseResult={loaded?.parseResult}
+              parseResult={renderLoaded?.parseResult}
               interiorFillPolygons={renderInteriorFillPolygons}
               options={sceneOptions}
               directionalLight={directionalLight}
@@ -688,12 +739,13 @@ export default function GalleryWorkbench() {
               helperTarget={helperTarget}
               mergePolygonsForMesh={!hasActiveAnimation}
               stableDomForMesh={hasActiveAnimation}
-              animationKey={activeAnimation ? `${selectedAnimation}:${loaded?.label ?? ""}` : undefined}
+              animationKey={activeAnimation ? `${selectedAnimation}:${renderLoaded?.label ?? ""}` : undefined}
+              animationDurationSeconds={activeAnimation?.duration}
               animationFrameFactory={vanillaAnimationFrameFactory}
               onBuild={setVanillaBuildMs}
               onCameraChange={handleCameraChange}
               enableSelection={sceneOptions.selection}
-              meshId={loaded?.label ?? "model"}
+              meshId={renderLoaded?.label ?? "model"}
               onSelectionChange={setVanillaSelectedIds}
               gizmoMode={gizmoMode}
               enableHover={sceneOptions.hoverEffects}
@@ -754,7 +806,7 @@ export default function GalleryWorkbench() {
           animationOptions={animationOptions}
           animationPaused={sceneOptions.animationPaused}
           animationTimeScale={sceneOptions.animationTimeScale}
-          animationClipCount={animationClips.length}
+          animationClipCount={selectableAnimationClips.length}
           onAnimationChange={setSelectedAnimation}
           onResetAnimatedPolygons={() => animation.setReactAnimatedPolygons(null)}
           onSelectAnimationClear={() => setSelectedAnimation("")}

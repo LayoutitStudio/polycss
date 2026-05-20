@@ -120,6 +120,19 @@ Override material colors or textures without modifying the source files (React /
 />
 ```
 
+For glTF/GLB files that preserved UVs but lost an external image reference, use the same material-name texture override under `gltfOptions`:
+
+```tsx
+<PolyMesh
+  src="/character.glb"
+  parseOptions={{
+    gltfOptions: {
+      materialTextures: { Texture: "/character-atlas.png" },
+    },
+  }}
+/>
+```
+
 ## Imperative loading
 
 For programmatic loading with explicit lifecycle, use `loadMesh` from the core parser. This is the universal vanilla path; React adds a `usePolyMesh` hook on top:

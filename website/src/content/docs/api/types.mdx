@@ -3,7 +3,7 @@ title: Core Types
 description: TypeScript type definitions for polygons, camera state, lighting, and parse results.
 ---
 
-All types are exported from `@layoutit/polycss-react`, `@layoutit/polycss-vue`, `@layoutit/polycss`, and `@layoutit/polycss-core`.
+Core parser and math types are exported from `@layoutit/polycss-react`, `@layoutit/polycss-vue`, `@layoutit/polycss`, and `@layoutit/polycss-core`. DOM render diagnostic types are exported from the renderer packages: `@layoutit/polycss-react`, `@layoutit/polycss-vue`, and `@layoutit/polycss`.
 
 ## `Polygon`
 
@@ -84,6 +84,49 @@ Controls how texture lighting is applied to atlas-backed polygons.
 
 ```ts
 type PolyTextureLightingMode = "baked" | "dynamic";
+```
+
+---
+
+## `PolyRenderStats`
+
+One-shot DOM diagnostic snapshot returned by `collectPolyRenderStats`.
+
+```ts
+interface PolyRenderSurfaceLeafCounts {
+  quad: number;
+  clippedSolid: number;
+  atlas: number;
+  stableTriangle: number;
+}
+
+interface PolyRenderStats {
+  /** Input polygon count when supplied, otherwise mounted polygon leaf count. */
+  polygonCount: number;
+  /** Mounted surface leaves, equal to the sum of surfaceLeafCounts. */
+  mountedPolygonLeafCount: number;
+  /** Mounted cast-shadow leaves. */
+  shadowLeafCount: number;
+  /** Surface leaf categories used by the renderer. */
+  surfaceLeafCounts: PolyRenderSurfaceLeafCounts;
+  /** Number of polycss bucket wrapper nodes under the measured scope. */
+  bucketCount: number;
+}
+```
+
+---
+
+## `PolyRenderStatsOptions`
+
+Options for `collectPolyRenderStats`.
+
+```ts
+interface PolyRenderStatsOptions {
+  /** Source polygon count to include in the returned snapshot. */
+  polygonCount?: number;
+  /** Optional selector used to count only matching rendered subtrees. */
+  scopeSelector?: string;
+}
 ```
 
 ---
@@ -230,6 +273,8 @@ interface GltfParseOptions {
   defaultColor?: string;
   /** Override per-material colors. */
   materialColors?: Record<string, string>;
+  /** Override per-material textures (material name -> image URL). */
+  materialTextures?: Record<string, string>;
   /** Treat the model's up axis as Y or Z. Most GLB files use Y. */
   upAxis?: "y" | "z";
   /** Base URL for resolving external texture references in .gltf files. */

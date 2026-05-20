@@ -128,6 +128,8 @@ export {
   LoopRepeat,
   LoopPingPong,
 } from "./animation";
+export { optimizeAnimatedMeshPolygons } from "./animation/optimizeAnimatedMeshPolygons";
+export type { OptimizeAnimatedMeshPolygonsOptions } from "./animation/optimizeAnimatedMeshPolygons";
 export type {
   PolyAnimationClip,
   PolyAnimationAction,
