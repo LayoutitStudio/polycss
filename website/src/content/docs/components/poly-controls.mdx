@@ -50,7 +50,7 @@ They are available as custom elements (`<poly-orbit-controls>` / `<poly-map-cont
 <poly-camera rot-x="65" rot-y="45">
   <poly-scene>
     <poly-orbit-controls drag wheel animate-speed="0.3"></poly-orbit-controls>
-    <poly-mesh src="/cottage.glb"></poly-mesh>
+    <poly-mesh src="https://polycss.com/gallery/obj/cottage.obj"></poly-mesh>
   </poly-scene>
 </poly-camera>
 ```
@@ -66,7 +66,7 @@ export function App() {
     <PolyCamera rotX={65} rotY={45}>
       <PolyScene>
         <PolyOrbitControls drag wheel animate={{ speed: 0.3 }} />
-        <PolyMesh src="/cottage.glb" />
+        <PolyMesh src="https://polycss.com/gallery/obj/cottage.obj" />
       </PolyScene>
     </PolyCamera>
   );
@@ -79,7 +79,7 @@ export function App() {
   <PolyCamera :rot-x="65" :rot-y="45">
     <PolyScene>
       <PolyOrbitControls drag wheel :animate="{ speed: 0.3 }" />
-      <PolyMesh src="/cottage.glb" />
+      <PolyMesh src="https://polycss.com/gallery/obj/cottage.obj" />
     </PolyScene>
   </PolyCamera>
 </template>
@@ -100,7 +100,7 @@ import { createPolyCamera, createPolyScene, createPolyOrbitControls, loadMesh } 
 
 const camera = createPolyCamera({ rotX: 65, rotY: 45 });
 const scene = createPolyScene(host, { camera });
-scene.add(await loadMesh("/cottage.glb"));
+scene.add(await loadMesh("https://polycss.com/gallery/obj/cottage.obj"));
 
 const controls = createPolyOrbitControls(scene, {
   drag: true,
@@ -168,7 +168,7 @@ Disable input but keep autorotate running:
 <poly-camera rot-x="65" rot-y="45">
   <poly-scene>
     <poly-orbit-controls drag="false" wheel="false" animate-speed="0.5"></poly-orbit-controls>
-    <poly-mesh src="/cottage.glb"></poly-mesh>
+    <poly-mesh src="https://polycss.com/gallery/obj/cottage.obj"></poly-mesh>
   </poly-scene>
 </poly-camera>
 ```

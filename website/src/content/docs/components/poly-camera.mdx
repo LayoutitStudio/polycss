@@ -59,7 +59,7 @@ Set an initial angle. `PolyCamera` (orthographic) is the default.
 
 <poly-camera zoom="0.8" rot-x="70" rot-y="30">
   <poly-scene>
-    <poly-mesh src="/cottage.glb"></poly-mesh>
+    <poly-mesh src="https://polycss.com/gallery/obj/cottage.obj"></poly-mesh>
   </poly-scene>
 </poly-camera>
 ```
@@ -72,7 +72,7 @@ export function App() {
   return (
     <PolyCamera zoom={0.8} rotX={70} rotY={30}>
       <PolyScene>
-        <PolyMesh src="/cottage.glb" />
+        <PolyMesh src="https://polycss.com/gallery/obj/cottage.obj" />
       </PolyScene>
     </PolyCamera>
   );
@@ -84,7 +84,7 @@ export function App() {
 <template>
   <PolyCamera :zoom="0.8" :rot-x="70" :rot-y="30">
     <PolyScene>
-      <PolyMesh src="/cottage.glb" />
+      <PolyMesh src="https://polycss.com/gallery/obj/cottage.obj" />
     </PolyScene>
   </PolyCamera>
 </template>
@@ -105,7 +105,7 @@ import { PolyCamera, PolyScene, PolyMesh } from "@layoutit/polycss-vue";
 ```html
 <poly-camera rot-x="65" rot-y="45">
   <poly-scene>
-    <poly-mesh src="/cottage.glb"></poly-mesh>
+    <poly-mesh src="https://polycss.com/gallery/obj/cottage.obj"></poly-mesh>
   </poly-scene>
 </poly-camera>
 ```
@@ -118,7 +118,7 @@ export function App() {
   return (
     <PolyCamera rotX={65} rotY={45}>
       <PolyScene>
-        <PolyMesh src="/cottage.glb" />
+        <PolyMesh src="https://polycss.com/gallery/obj/cottage.obj" />
       </PolyScene>
     </PolyCamera>
   );
@@ -130,7 +130,7 @@ export function App() {
 <template>
   <PolyCamera :rot-x="65" :rot-y="45">
     <PolyScene>
-      <PolyMesh src="/cottage.glb" />
+      <PolyMesh src="https://polycss.com/gallery/obj/cottage.obj" />
     </PolyScene>
   </PolyCamera>
 </template>
@@ -151,7 +151,7 @@ Drop a `<PolyOrbitControls>` child for drag, wheel, and `dt`-clamped autorotate.
 <poly-camera rot-x="65" rot-y="45">
   <poly-scene>
     <poly-orbit-controls drag wheel animate-speed="0.5"></poly-orbit-controls>
-    <poly-mesh src="/cottage.glb"></poly-mesh>
+    <poly-mesh src="https://polycss.com/gallery/obj/cottage.obj"></poly-mesh>
   </poly-scene>
 </poly-camera>
 ```
@@ -161,7 +161,7 @@ Drop a `<PolyOrbitControls>` child for drag, wheel, and `dt`-clamped autorotate.
 <PolyCamera rotX={65} rotY={45}>
   <PolyScene>
     <PolyOrbitControls drag wheel animate={{ axis: "y", speed: 0.5 }} />
-    <PolyMesh src="/cottage.glb" />
+    <PolyMesh src="https://polycss.com/gallery/obj/cottage.obj" />
   </PolyScene>
 </PolyCamera>
 ```

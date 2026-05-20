@@ -31,21 +31,21 @@ Higher `perspective` values feel flatter (more isometric-like); lower values exa
 <!-- Orthographic (default) -->
 <poly-camera rot-x="65" rot-y="45">
   <poly-scene>
-    <poly-mesh src="/cottage.glb"></poly-mesh>
+    <poly-mesh src="https://polycss.com/gallery/obj/cottage.obj"></poly-mesh>
   </poly-scene>
 </poly-camera>
 
 <!-- Standard perspective -->
 <poly-perspective-camera perspective="1000" rot-x="65" rot-y="45">
   <poly-scene>
-    <poly-mesh src="/cottage.glb"></poly-mesh>
+    <poly-mesh src="https://polycss.com/gallery/obj/cottage.obj"></poly-mesh>
   </poly-scene>
 </poly-perspective-camera>
 
 <!-- Very flat / near-isometric perspective -->
 <poly-perspective-camera perspective="8000" rot-x="65" rot-y="45">
   <poly-scene>
-    <poly-mesh src="/cottage.glb"></poly-mesh>
+    <poly-mesh src="https://polycss.com/gallery/obj/cottage.obj"></poly-mesh>
   </poly-scene>
 </poly-perspective-camera>
 ```
@@ -57,21 +57,21 @@ import { PolyCamera, PolyPerspectiveCamera, PolyScene, PolyMesh } from "@layouti
 // Orthographic (default)
 <PolyCamera rotX={65} rotY={45}>
   <PolyScene>
-    <PolyMesh src="/cottage.glb" />
+    <PolyMesh src="https://polycss.com/gallery/obj/cottage.obj" />
   </PolyScene>
 </PolyCamera>
 
 // Standard perspective
 <PolyPerspectiveCamera perspective={1000} rotX={65} rotY={45}>
   <PolyScene>
-    <PolyMesh src="/cottage.glb" />
+    <PolyMesh src="https://polycss.com/gallery/obj/cottage.obj" />
   </PolyScene>
 </PolyPerspectiveCamera>
 
 // Very flat / near-isometric perspective
 <PolyPerspectiveCamera perspective={8000} rotX={65} rotY={45}>
   <PolyScene>
-    <PolyMesh src="/cottage.glb" />
+    <PolyMesh src="https://polycss.com/gallery/obj/cottage.obj" />
   </PolyScene>
 </PolyPerspectiveCamera>
 ```
@@ -82,14 +82,14 @@ import { PolyCamera, PolyPerspectiveCamera, PolyScene, PolyMesh } from "@layouti
   <!-- Orthographic (default) -->
   <PolyCamera :rot-x="65" :rot-y="45">
     <PolyScene>
-      <PolyMesh src="/cottage.glb" />
+      <PolyMesh src="https://polycss.com/gallery/obj/cottage.obj" />
     </PolyScene>
   </PolyCamera>
 
   <!-- Perspective -->
   <PolyPerspectiveCamera :perspective="1000" :rot-x="65" :rot-y="45">
     <PolyScene>
-      <PolyMesh src="/cottage.glb" />
+      <PolyMesh src="https://polycss.com/gallery/obj/cottage.obj" />
     </PolyScene>
   </PolyPerspectiveCamera>
 </template>

@@ -31,7 +31,7 @@ export function App() {
     <PolyCamera rotX={65} rotY={45}>
       <PolyScene>
         <PolyOrbitControls drag wheel />
-        <PolyMesh src="/cottage.glb" />
+        <PolyMesh src="https://polycss.com/gallery/obj/cottage.obj" />
       </PolyScene>
     </PolyCamera>
   );
@@ -45,7 +45,7 @@ export function App() {
   <PolyCamera :rot-x="65" :rot-y="45">
     <PolyScene>
       <PolyOrbitControls drag wheel />
-      <PolyMesh src="/cottage.glb" />
+      <PolyMesh src="https://polycss.com/gallery/obj/cottage.obj" />
     </PolyScene>
   </PolyCamera>
 </template>
@@ -62,7 +62,7 @@ import { PolyCamera, PolyScene, PolyOrbitControls, PolyMesh } from "@layoutit/po
 
 <poly-scene rot-x="65" rot-y="45">
   <poly-orbit-controls drag wheel></poly-orbit-controls>
-  <poly-mesh src="/cottage.glb"></poly-mesh>
+  <poly-mesh src="https://polycss.com/gallery/obj/cottage.obj"></poly-mesh>
 </poly-scene>
 ```
 

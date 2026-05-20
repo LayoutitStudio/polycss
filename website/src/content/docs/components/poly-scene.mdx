@@ -71,7 +71,7 @@ A scene with a single GLB mesh at default camera angle.
 
 <poly-camera rot-x="65" rot-y="45">
   <poly-scene>
-    <poly-mesh src="/cottage.glb"></poly-mesh>
+    <poly-mesh src="https://polycss.com/gallery/obj/cottage.obj"></poly-mesh>
   </poly-scene>
 </poly-camera>
 ```
@@ -84,7 +84,7 @@ export function App() {
   return (
     <PolyCamera rotX={65} rotY={45}>
       <PolyScene>
-        <PolyMesh src="/cottage.glb" />
+        <PolyMesh src="https://polycss.com/gallery/obj/cottage.obj" />
       </PolyScene>
     </PolyCamera>
   );
@@ -96,7 +96,7 @@ export function App() {
 <template>
   <PolyCamera :rot-x="65" :rot-y="45">
     <PolyScene>
-      <PolyMesh src="/cottage.glb" />
+      <PolyMesh src="https://polycss.com/gallery/obj/cottage.obj" />
     </PolyScene>
   </PolyCamera>
 </template>
@@ -118,7 +118,7 @@ import { PolyPerspectiveCamera, PolyScene, PolyMesh } from "@layoutit/polycss-re
     directionalLight={{ direction: [0.5, -0.7, 0.6], color: "#ffe4a8" }}
     ambientLight={{ intensity: 0.4 }}
   >
-    <PolyMesh src="/cottage.glb" position={[0, 0, 0]} />
+    <PolyMesh src="https://polycss.com/gallery/obj/cottage.obj" position={[0, 0, 0]} />
     <PolyMesh src="/tree.glb" position={[8, 0, 0]} scale={0.5} />
   </PolyScene>
 </PolyPerspectiveCamera>
@@ -129,7 +129,7 @@ import { PolyPerspectiveCamera, PolyScene, PolyMesh } from "@layoutit/polycss-re
 ```tsx
 <PolyCamera rotX={65} rotY={45}>
   <PolyScene>
-    <PolyMesh src="/cottage.glb" position={[0, 0, 0]} />
+    <PolyMesh src="https://polycss.com/gallery/obj/cottage.obj" position={[0, 0, 0]} />
     <PolyMesh src="/tree.glb" position={[8, 0, 0]} scale={0.5} />
   </PolyScene>
 </PolyCamera>

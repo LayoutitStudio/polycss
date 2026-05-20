@@ -275,7 +275,7 @@ import { loadMesh, createPolyCamera, createPolyScene } from "@layoutit/polycss";
 
 const camera = createPolyCamera({ rotX: 65, rotY: 45 });
 const scene = createPolyScene(document.getElementById("host")!, { camera });
-const result = await loadMesh("/cottage.glb");
+const result = await loadMesh("https://polycss.com/gallery/obj/cottage.obj");
 scene.add(result);
 // ... later:
 scene.destroy(); // removes the scene and disposes registered meshes
@@ -286,7 +286,7 @@ scene.destroy(); // removes the scene and disposes registered meshes
 import { PolyCamera, PolyScene, Poly, usePolyMesh } from "@layoutit/polycss-react";
 
 function Viewer() {
-  const { polygons, loading, error } = usePolyMesh("/cottage.glb");
+  const { polygons, loading, error } = usePolyMesh("https://polycss.com/gallery/obj/cottage.obj");
 
   if (loading) return <Spinner />;
   if (error) return <div>Error: {error}</div>;

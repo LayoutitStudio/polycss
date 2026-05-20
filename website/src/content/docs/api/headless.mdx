@@ -68,8 +68,8 @@ High-level convenience function: fetches a URL, detects OBJ vs glTF/GLB/VOX by e
 ```ts
 import { loadMesh } from "@layoutit/polycss-core";
 
-const { polygons, dispose } = await loadMesh("/cottage.glb", {
-  baseUrl: new URL("/cottage.glb", location.href).href,
+const { polygons, dispose } = await loadMesh("https://polycss.com/gallery/obj/cottage.obj", {
+  baseUrl: new URL("https://polycss.com/gallery/obj/cottage.obj", location.href).href,
   gltfOptions: { targetSize: 60 },
 });
 // use polygons...
@@ -153,7 +153,7 @@ import { createPolyCamera, createPolyScene, createPolyOrbitControls, loadMesh } 
 
 const camera = createPolyCamera({ rotX: 65, rotY: 45 });
 const scene = createPolyScene(host, { camera });
-scene.add(await loadMesh("/cottage.glb"));
+scene.add(await loadMesh("https://polycss.com/gallery/obj/cottage.obj"));
 
 const controls = createPolyOrbitControls(scene, {
   drag: true,                                                // default true
@@ -225,7 +225,7 @@ Register `<poly-camera>`, `<poly-scene>`, `<poly-mesh>`, `<poly-polygon>`, `<pol
 <poly-camera rot-x="65" rot-y="45">
   <poly-scene>
     <poly-orbit-controls drag wheel animate-speed="0.3"></poly-orbit-controls>
-    <poly-mesh src="/cottage.glb"></poly-mesh>
+    <poly-mesh src="https://polycss.com/gallery/obj/cottage.obj"></poly-mesh>
   </poly-scene>
 </poly-camera>
 ```

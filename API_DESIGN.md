@@ -59,7 +59,7 @@ import { createPolyCamera, createPolyScene, loadMesh } from "@layoutit/polycss";
 const camera = createPolyCamera({ rotX: 65, rotY: 45 });
 const scene  = createPolyScene(document.getElementById("app"), { camera });
 
-scene.add(await loadMesh("/cottage.glb"));
+scene.add(await loadMesh("https://polycss.com/gallery/obj/cottage.obj"));
 ```
 
 ### Custom elements (HTML)
@@ -69,7 +69,7 @@ scene.add(await loadMesh("/cottage.glb"));
 
 <poly-camera rot-x="65" rot-y="45">
   <poly-scene>
-    <poly-mesh src="/cottage.glb"></poly-mesh>
+    <poly-mesh src="https://polycss.com/gallery/obj/cottage.obj"></poly-mesh>
   </poly-scene>
 </poly-camera>
 ```
@@ -81,7 +81,7 @@ import { PolyCamera, PolyScene, PolyMesh } from "@layoutit/polycss-react";
 
 <PolyCamera rotX={65} rotY={45}>
   <PolyScene>
-    <PolyMesh src="/cottage.glb" />
+    <PolyMesh src="https://polycss.com/gallery/obj/cottage.obj" />
   </PolyScene>
 </PolyCamera>
 ```
@@ -96,7 +96,7 @@ import { PolyCamera, PolyScene, PolyMesh } from "@layoutit/polycss-vue";
 <template>
   <PolyCamera :rot-x="65" :rot-y="45">
     <PolyScene>
-      <PolyMesh src="/cottage.glb" />
+      <PolyMesh src="https://polycss.com/gallery/obj/cottage.obj" />
     </PolyScene>
   </PolyCamera>
 </template>
@@ -117,7 +117,7 @@ const camera = createPolyCamera({ rotX: 65, rotY: 45 });
 const scene  = createPolyScene(host, { camera });
 createPolyOrbitControls(scene, { drag: true, wheel: true });
 
-scene.add(await loadMesh("/cottage.glb"));
+scene.add(await loadMesh("https://polycss.com/gallery/obj/cottage.obj"));
 ```
 
 ### Custom elements
@@ -126,7 +126,7 @@ scene.add(await loadMesh("/cottage.glb"));
 <poly-camera rot-x="65" rot-y="45">
   <poly-scene>
     <poly-orbit-controls drag wheel></poly-orbit-controls>
-    <poly-mesh src="/cottage.glb"></poly-mesh>
+    <poly-mesh src="https://polycss.com/gallery/obj/cottage.obj"></poly-mesh>
   </poly-scene>
 </poly-camera>
 ```
@@ -137,7 +137,7 @@ scene.add(await loadMesh("/cottage.glb"));
 <PolyCamera rotX={65} rotY={45}>
   <PolyScene>
     <PolyOrbitControls drag wheel />
-    <PolyMesh src="/cottage.glb" />
+    <PolyMesh src="https://polycss.com/gallery/obj/cottage.obj" />
   </PolyScene>
 </PolyCamera>
 ```
@@ -148,7 +148,7 @@ scene.add(await loadMesh("/cottage.glb"));
 <PolyCamera :rot-x="65" :rot-y="45">
   <PolyScene>
     <PolyOrbitControls drag wheel />
-    <PolyMesh src="/cottage.glb" />
+    <PolyMesh src="https://polycss.com/gallery/obj/cottage.obj" />
   </PolyScene>
 </PolyCamera>
 ```
@@ -458,14 +458,14 @@ Each polygon on a shadow-casting mesh emits a paired `<q>` leaf (the cast-shadow
 ```tsx
 // React
 <PolyScene textureLighting="dynamic" shadow={{ opacity: 0.4, lift: 0.1 }}>
-  <PolyMesh src="/cottage.glb" castShadow />
+  <PolyMesh src="https://polycss.com/gallery/obj/cottage.obj" castShadow />
 </PolyScene>
 ```
 
 ```html
 <!-- Custom elements -->
 <poly-scene texture-lighting="dynamic" shadow='{"opacity":0.4,"lift":0.1}'>
-  <poly-mesh src="/cottage.glb" cast-shadow></poly-mesh>
+  <poly-mesh src="https://polycss.com/gallery/obj/cottage.obj" cast-shadow></poly-mesh>
 </poly-scene>
 ```
 
@@ -476,7 +476,7 @@ const scene = createPolyScene(host, {
   textureLighting: "dynamic",
   shadow: { opacity: 0.4, lift: 0.1 },
 });
-const mesh = await loadMesh("/cottage.glb");
+const mesh = await loadMesh("https://polycss.com/gallery/obj/cottage.obj");
 scene.add(mesh, { castShadow: true });   // ← second arg is mesh transform + flags
 ```
 
@@ -512,17 +512,17 @@ scene.add(mesh, { meshResolution: "lossless" });
 
 ```html
 <!-- Custom elements -->
-<poly-mesh src="/cottage.glb" mesh-resolution="lossless"></poly-mesh>
+<poly-mesh src="https://polycss.com/gallery/obj/cottage.obj" mesh-resolution="lossless"></poly-mesh>
 ```
 
 ```tsx
 // React
-<PolyMesh src="/cottage.glb" meshResolution="lossless" />
+<PolyMesh src="https://polycss.com/gallery/obj/cottage.obj" meshResolution="lossless" />
 ```
 
 ```vue
 <!-- Vue -->
-<PolyMesh src="/cottage.glb" mesh-resolution="lossless" />
+<PolyMesh src="https://polycss.com/gallery/obj/cottage.obj" mesh-resolution="lossless" />
 ```
 
 `parseOptions` stays available for niche parser flags but is no longer the route for `meshResolution`.

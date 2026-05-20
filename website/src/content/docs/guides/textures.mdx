@@ -30,7 +30,7 @@ The simplest way to render a mesh is the mesh element with a `src`. It fetches t
 
 <poly-camera rot-x="65" rot-y="45">
   <poly-scene>
-    <poly-mesh src="/cottage.glb"></poly-mesh>
+    <poly-mesh src="https://polycss.com/gallery/obj/cottage.obj"></poly-mesh>
   </poly-scene>
 </poly-camera>
 ```
@@ -43,7 +43,7 @@ export function App() {
   return (
     <PolyCamera rotX={65} rotY={45}>
       <PolyScene>
-        <PolyMesh src="/cottage.glb" />
+        <PolyMesh src="https://polycss.com/gallery/obj/cottage.obj" />
       </PolyScene>
     </PolyCamera>
   );
@@ -55,7 +55,7 @@ export function App() {
 <template>
   <PolyCamera :rot-x="65" :rot-y="45">
     <PolyScene>
-      <PolyMesh src="/cottage.glb" />
+      <PolyMesh src="https://polycss.com/gallery/obj/cottage.obj" />
     </PolyScene>
   </PolyCamera>
 </template>
@@ -119,7 +119,7 @@ For programmatic loading with explicit lifecycle, use `loadMesh` from the core p
 // Vanilla: works anywhere, no framework
 import { createPolyCamera, loadMesh, createPolyScene } from "@layoutit/polycss";
 
-const result = await loadMesh("/cottage.glb", {
+const result = await loadMesh("https://polycss.com/gallery/obj/cottage.obj", {
   gltfOptions: { targetSize: 60 },
 });
 const camera = createPolyCamera({ rotX: 65, rotY: 45 });
@@ -134,7 +134,7 @@ scene.destroy(); // removes the scene and disposes registered meshes
 import { PolyCamera, PolyScene, Poly, usePolyMesh } from "@layoutit/polycss-react";
 
 function Viewer() {
-  const { polygons, loading, error } = usePolyMesh("/cottage.glb");
+  const { polygons, loading, error } = usePolyMesh("https://polycss.com/gallery/obj/cottage.obj");
 
   if (loading) return <div>Loading...</div>;
   if (error) return <div>Error: {error}</div>;

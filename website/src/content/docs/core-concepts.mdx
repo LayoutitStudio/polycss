@@ -39,7 +39,7 @@ The camera element (`<poly-camera>` / `PolyCamera`) is always the **outer** node
   <poly-scene
     directional-light='{"direction":[0.5,-0.7,0.6],"color":"#ffe4a8"}'
     ambient-light='{"intensity":0.4}'>
-    <poly-mesh src="/cottage.glb"></poly-mesh>
+    <poly-mesh src="https://polycss.com/gallery/obj/cottage.obj"></poly-mesh>
   </poly-scene>
 </poly-camera>
 ```
@@ -54,7 +54,7 @@ The camera element (`<poly-camera>` / `PolyCamera`) is always the **outer** node
     }}
     ambientLight={{ intensity: 0.4 }}
   >
-    <PolyMesh src="/cottage.glb" />
+    <PolyMesh src="https://polycss.com/gallery/obj/cottage.obj" />
   </PolyScene>
 </PolyCamera>
 ```
@@ -87,12 +87,12 @@ Scene content renders relative to the (0,0,0) origin. Most mesh files are author
 
 ```html
 <!-- Vanilla -->
-<poly-mesh src="/cottage.glb" auto-center position="[0,0,0]"></poly-mesh>
+<poly-mesh src="https://polycss.com/gallery/obj/cottage.obj" auto-center position="[0,0,0]"></poly-mesh>
 ```
 
 ```tsx
 // React
-<PolyMesh src="/cottage.glb" autoCenter position={[0, 0, 0]} />
+<PolyMesh src="https://polycss.com/gallery/obj/cottage.obj" autoCenter position={[0, 0, 0]} />
 ```
 
 ## Rendering Pipeline
