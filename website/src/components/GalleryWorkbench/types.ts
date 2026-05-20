@@ -5,8 +5,8 @@
 import type { ObjParseOptions, GltfParseOptions, VoxParseOptions, ParseResult, Polygon, ParseAnimationController } from "@layoutit/polycss";
 
 export type Renderer = "react" | "vanilla";
-export type ModelKind = "obj" | "glb" | "gltf" | "vox";
-export type GalleryBucket = "Solid" | "Textured" | "Animated" | "Voxel";
+export type ModelKind = "obj" | "glb" | "gltf" | "vox" | "primitive";
+export type GalleryBucket = "Primitives" | "Solid" | "Textured" | "Animated" | "Voxel";
 export type MatrixPrecision = "exact" | "2" | "3" | "4" | "5" | "6";
 export type BorderShapePrecision = "exact" | "2" | "3" | "4" | "5" | "6";
 
@@ -22,7 +22,7 @@ export interface PresetModel {
   label: string;
   kind: ModelKind;
   category: string;
-  url: string;
+  url?: string;
   mtlUrl?: string;
   zoom?: number;
   rotX?: number;
@@ -30,12 +30,14 @@ export interface PresetModel {
   options?: ObjParseOptions | GltfParseOptions | VoxParseOptions;
   galleryBucket?: GalleryBucket;
   attribution?: ModelAttribution;
+  /** For kind: "primitive". Returns the polygon array for this primitive. */
+  generatePolygons?: () => Polygon[];
 }
 
 export interface DroppedModelSource {
   id: string;
   label: string;
-  kind: Exclude<ModelKind, "gltf">;
+  kind: Exclude<ModelKind, "gltf" | "primitive">;
   primaryFile: File;
   files: File[];
   preset: PresetModel;
