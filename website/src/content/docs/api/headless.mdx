@@ -205,11 +205,11 @@ controls.addEventListener("end",   () => endInteraction());
 
 ### Required scene surface
 
-`createPolyOrbitControls` reads from and writes to its scene argument via two members on `PolySceneHandle`:
+`createPolyOrbitControls` reads from and writes to its scene argument via members on `PolySceneHandle`:
 
 - `scene.host: HTMLElement`: the element handlers are attached to.
-- `scene.getOptions()`: read current `rotX` / `rotY` / `zoom` / `target` / `distance`.
-- `scene.setOptions({ rotX, rotY, zoom, target, distance })`: apply state changes.
+- `scene.camera`: the camera handle. Controls read `scene.camera.state` for current `rotX` / `rotY` / `zoom` / `target` / `distance` and call `scene.camera.update({ rotX, rotY, zoom, ... })` to apply input changes.
+- `scene.applyCamera()`: re-applies the scene transform from the current camera state. Controls call this after every `scene.camera.update(...)`.
 
 Anything that satisfies that subset works, so layered helpers can compose multiple controls or build their own input on top.
 
