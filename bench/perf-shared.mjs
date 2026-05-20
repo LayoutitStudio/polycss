@@ -13,6 +13,7 @@
  * specific. Each page handles its own mount and its own per-frame state
  * update; this module just provides the measurement surface.
  */
+import { collectPolyRenderStats } from "./polycss-render-stats.js";
 
 export const PRESETS = {
   saucer: {
@@ -248,12 +249,18 @@ export function collectPolygonStats(polygons = []) {
 
 export function collectRenderStats({ polygons, root } = {}) {
   const sceneRoot = root ?? document.querySelector(".polycss-scene");
-  const tags = { b: 0, i: 0, s: 0, u: 0, q: 0 };
+  const render = collectPolyRenderStats(sceneRoot, {
+    polygonCount: polygons?.length ?? 0,
+  });
+  const tags = {
+    b: render.surfaceLeafCounts.quad,
+    i: render.surfaceLeafCounts.clippedSolid,
+    s: render.surfaceLeafCounts.atlas,
+    u: render.surfaceLeafCounts.stableTriangle,
+    q: render.shadowLeafCount,
+  };
   let inlineStyleChars = 0;
   if (sceneRoot) {
-    for (const tag of Object.keys(tags)) {
-      tags[tag] = sceneRoot.querySelectorAll(tag).length;
-    }
     for (const el of sceneRoot.querySelectorAll("b,i,s,u,q")) {
       inlineStyleChars += el.getAttribute("style")?.length ?? 0;
     }
@@ -268,9 +275,9 @@ export function collectRenderStats({ polygons, root } = {}) {
     polygons: collectPolygonStats(polygons ?? []),
     dom: {
       tags,
-      leafCount: tags.b + tags.i + tags.s + tags.u,
-      shadowCount: tags.q,
-      buckets: sceneRoot?.querySelectorAll(".polycss-bucket").length ?? 0,
+      leafCount: render.mountedPolygonLeafCount,
+      shadowCount: render.shadowLeafCount,
+      buckets: render.bucketCount,
       inlineStyleChars,
     },
   };

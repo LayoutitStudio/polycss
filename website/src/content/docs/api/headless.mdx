@@ -218,6 +218,26 @@ Anything that satisfies that subset works, so layered helpers can compose multip
 
 ---
 
+## `collectPolyRenderStats(root, options?)`
+
+Reads an already-rendered polycss DOM subtree and returns a one-shot diagnostic snapshot. It counts mounted polygon leaves, shadow leaves, surface leaf categories, and bucket wrappers; it does not observe changes or mutate the scene.
+
+```ts
+import { collectPolyRenderStats } from "@layoutit/polycss";
+
+const stats = collectPolyRenderStats(document.querySelector(".polycss-scene"), {
+  polygonCount: polygons.length,
+});
+
+console.log(stats.mountedPolygonLeafCount, stats.surfaceLeafCounts);
+```
+
+`scopeSelector` narrows the count to matching subtrees, which is useful when helpers, floors, or gizmos share the same scene root. The same utility is exported from `@layoutit/polycss-react` and `@layoutit/polycss-vue`.
+
+**Options:** See [`PolyRenderStatsOptions`](/api/types/#polyrenderstatsoptions).
+
+---
+
 ## Custom elements (vanilla)
 
 Register `<poly-camera>`, `<poly-scene>`, `<poly-mesh>`, `<poly-polygon>`, `<poly-orbit-controls>`, and `<poly-map-controls>` custom elements by importing the side-effect entry point:
@@ -241,8 +261,8 @@ See the [polycss README](https://github.com/LayoutitStudio/polycss/tree/main/pac
 
 | Import path | Contents |
 |---|---|
-| `@layoutit/polycss-react` | React components: `PolyScene`, `PolyMesh`, `Poly`, `PolyCamera`, hooks |
-| `@layoutit/polycss-vue` | Vue components: `PolyScene`, `PolyMesh`, `Poly`, `PolyCamera` |
-| `@layoutit/polycss` | Vanilla imperative API + custom element classes |
+| `@layoutit/polycss-react` | React components: `PolyScene`, `PolyMesh`, `Poly`, `PolyCamera`, hooks, render diagnostics |
+| `@layoutit/polycss-vue` | Vue components: `PolyScene`, `PolyMesh`, `Poly`, `PolyCamera`, render diagnostics |
+| `@layoutit/polycss` | Vanilla imperative API + custom element classes + render diagnostics |
 | `@layoutit/polycss/elements` | Side-effect: registers the polycss custom elements |
 | `@layoutit/polycss-core` | Pure parsers / math, zero DOM: `parseObj`, `parseGltf`, `parseVox`, `loadMesh`, types |

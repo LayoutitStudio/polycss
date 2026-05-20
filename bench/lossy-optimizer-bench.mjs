@@ -35,7 +35,7 @@ const MODELS = [
   { id: "duck", label: "Duck", path: "website/public/gallery/glb/Duck.glb" },
   { id: "fish-animated", label: "FishAnimated", path: "website/public/gallery/glb/FishAnimated.glb" },
   { id: "mushnub-animated", label: "AnimatedMushnub", path: "website/public/gallery/glb/AnimatedMushnub.glb" },
-  { id: "animated-fox", label: "AnimatedFox", path: "website/public/gallery/glb/khronos/animated-fox.glb" },
+  { id: "fox", label: "Fox", path: "website/public/gallery/glb/poly-pizza/animated-fox-quaternius.glb" },
   { id: "shark", label: "Shark", path: "website/public/gallery/glb/Shark.glb" },
   { id: "cactus-a", label: "Cactus A", path: "website/public/gallery/glb/poly-pizza/cactus-a.glb" },
   { id: "glass", label: "Glass", path: "website/public/gallery/glb/poly-pizza/glass.glb" },
@@ -56,7 +56,6 @@ const MODELS = [
   { id: "bear", label: "Bear", path: "website/public/gallery/glb/Bear.glb" },
   { id: "horse", label: "Horse", path: "website/public/gallery/glb/Horse.glb" },
   { id: "cheetah", label: "Cheetah", path: "website/public/gallery/glb/Cheetah.glb" },
-  { id: "bicycle", label: "Bicycle", path: "website/public/gallery/glb/Bicycle.glb" },
 ];
 
 const DEFAULT_LOSSY_APPROXIMATE = {

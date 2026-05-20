@@ -16,6 +16,7 @@ contributors to verify perf claims and catch render regressions.
 ```sh
 pnpm bench:serve            # static server on :4400 with an index page
 pnpm bench:perf             # build bundles + run all 4 renderers × 5 scenarios
+pnpm bench:animated-human   # build bundles + run the animated human run bench
 pnpm bench:lossy            # compare lossless / previous lossy / auto lossy counts
 pnpm bench:visual           # screenshot diff against bench/baselines/*.png
 pnpm bench:visual --record  # capture new baselines (after intentional renderer changes)
@@ -30,6 +31,9 @@ All scripts also work directly:
 ```sh
 node bench/perf-bench.mjs --mesh saucer --label run1
 node bench/perf-bench.mjs --mesh chicken --renderer react,vue
+node bench/animated-human-bench.mjs --mode baked,dynamic --label human-run
+node bench/animated-human-bench.mjs --compare-stable-dom --trace
+node bench/animated-human-bench.mjs --mesh poly-pizza/animated-robot.glb --clip run --animation-driver progressive-style-cache
 node bench/lossy-optimizer-bench.mjs --json bench/results/lossy-optimizer.json
 node bench/lossy-optimizer-bench.mjs --models ducky,shark,bicycle
 node bench/perf-visual.mjs --mesh chicken --tolerance 0.005
@@ -137,6 +141,33 @@ tests above what the gallery's OBJs cover.
 Use `domOrder` for pure post-render DOM-order probes; `polygonOrder` changes
 the polygon array before render planning and is only for diagnostics.
 
+`animated-human.html` is the focused animated-model page. It loads
+`/gallery/glb/poly-pizza/animated-human.glb` by default, chooses the run-like
+clip when available, and drives `createPolyAnimationMixer.update(dt)` into
+`PolyMeshHandle.setPolygons(..., { merge:false, stableDom:true })`. The
+Playwright runner accepts `--mode baked,dynamic`, `--clip <name|index|run>`,
+`--target-size <n>`, `--compare-stable-dom`,
+`--stable-triangle-color-steps <n>`,
+`--stable-triangle-color-policy cadence|adaptive`,
+`--stable-triangle-color-freeze-frames <n>`,
+`--stable-triangle-color-budget <ratio|count>`,
+`--stable-triangle-color-max-age <n>`,
+`--stable-triangle-color-max-step <channel-delta>`,
+`--animation-driver js|progressive-style-cache|js-style-cache|typed-om-style-cache|css-keyframes`,
+`--compare-stable-triangle-debug`, `--require-solid-triangles`, `--trace`, and
+the same GPU lane flags as the other browser benches. The color freeze option
+keeps exact baked colors but staggers leaf color writes across frames; adaptive
+color policy spends a capped write budget on leaves with the largest accumulated
+color error first. The max-step option caps the per-write RGB channel delta so
+cadence updates drift toward the next baked color instead of jumping directly to
+it. `css-keyframes` is a bench-only prototype that samples the clip into
+per-leaf CSS animations, removing per-frame JS playback from the measurement
+window. The solid-triangle guard fails the run if the page leaves the baked
+`<u>` path. Use `--stable-triangle-color-freeze-frames 0` to keep the initial
+baked colors and skip color writes during animation. The stable-triangle debug
+comparison is diagnostic: it splits normal updates, transform-only writes, and
+plan-only updates to attribute animation bottlenecks.
+
 ---
 
 ## Files
@@ -152,6 +183,7 @@ bench/
                          with strategy/order/transform diagnostics
   perf-react.html        loads polycss-react.js (JSX entry)
   perf-vue.html          loads polycss-vue.js (Vue entry)
+  animated-human.html    vanilla animated GLB page for the human run sequence
   entries/
     react.tsx            React 19 entry: useState-driven per-frame updates
     vue.ts               Vue 3 entry: ref() + render funcs (no SFC compiler)
@@ -163,6 +195,10 @@ bench/
                          a single instance.
   perf-bench.mjs         Playwright runner. Fresh chromium per scenario,
                          ephemeral port, structured JSON output.
+  animated-human-bench.mjs
+                         GPU-default Playwright runner for the animated
+                         human run sequence. Reports FPS, mixer/update cost,
+                         setPolygons cost, render stats, and optional trace.
   lossy-optimizer-bench.mjs
                          Polygon-count strategy bench for lossless,
                          previous pair-only lossy, forced grouped lossy,
@@ -209,10 +245,10 @@ solid-color count per stage. Use `--models <ids>` for targeted iteration.
 
 The default corpus starts with the previous hand-checked models
 (`Elephant.glb`, `Dog.glb`, `ducky.glb`) and now runs 28 models. `Duck.glb`,
-`FishAnimated.glb`, `AnimatedMushnub.glb`, the Khronos animated fox, and
+`FishAnimated.glb`, `AnimatedMushnub.glb`, the Quaternius fox, and
 `Shark.glb` cover known regression/safety cases; `poly-pizza/cactus-a.glb` and
 `poly-pizza/glass.glb` are small grouped-plane wins; `Electricguitar.glb`,
-`Dump truck.glb`, `Policecar.glb`, `Violin.glb`, and `Bicycle.glb` cover
+`Dump truck.glb`, `Policecar.glb`, and `Violin.glb` cover
 mostly-rectangulated and mechanical runtime cases; `AnimatedSnake.glb`,
 `AnimatedWizard.glb`, `Zebra.glb`, `Bear.glb`, `Horse.glb`, `Cheetah.glb`,
 `Dinosaur.glb`, `Gorilla.glb`, `Hippo.glb`, `Dragon.glb`, `Lobster.glb`,

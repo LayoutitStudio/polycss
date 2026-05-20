@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type Dispatch, type RefObject, type SetStateAction } from "react";
-import type { Polygon } from "@layoutit/polycss-react";
+import type { Polygon, PolyMeshHandle } from "@layoutit/polycss-react";
 import type { LoadedModel } from "../types";
 
 export interface UseAnimationFramesOptions {
@@ -8,6 +8,7 @@ export interface UseAnimationFramesOptions {
   renderer: "react" | "vanilla";
   animationPaused: boolean;
   animationTimeScale: number;
+  reactMeshRef?: RefObject<PolyMeshHandle | null>;
 }
 
 export interface UseAnimationFramesResult {
@@ -24,6 +25,7 @@ export function useAnimationFrames({
   renderer,
   animationPaused,
   animationTimeScale,
+  reactMeshRef,
 }: UseAnimationFramesOptions): UseAnimationFramesResult {
   const [reactAnimatedPolygons, setReactAnimatedPolygons] = useState<Polygon[] | null>(null);
   const animationPausedRef = useRef(animationPaused);
@@ -38,6 +40,7 @@ export function useAnimationFrames({
     let last = performance.now();
     let elapsedSeconds = 0;
     let sampledSeconds: number | null = null;
+    let usingImperativeReactMesh = false;
 
     const tick = (now: number) => {
       const deltaSeconds = Math.max(0, (now - last) / 1000);
@@ -47,14 +50,25 @@ export function useAnimationFrames({
       }
       if (sampledSeconds !== elapsedSeconds) {
         sampledSeconds = elapsedSeconds;
-        setReactAnimatedPolygons(loaded.animation!.sample(activeAnimation.index, elapsedSeconds));
+        const frame = loaded.animation!.sample(activeAnimation.index, elapsedSeconds);
+        const handle = reactMeshRef?.current;
+        if (handle) {
+          if (!usingImperativeReactMesh) {
+            usingImperativeReactMesh = true;
+            setReactAnimatedPolygons(null);
+          }
+          handle.setPolygons(frame);
+        } else {
+          usingImperativeReactMesh = false;
+          setReactAnimatedPolygons(frame);
+        }
       }
       raf = requestAnimationFrame(tick);
     };
 
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [loaded, activeAnimation, renderer]);
+  }, [loaded, activeAnimation, renderer, reactMeshRef]);
 
   const vanillaAnimationFrameFactory = useMemo(() => {
     if (!loaded?.animation || !activeAnimation || renderer !== "vanilla") return undefined;

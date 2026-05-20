@@ -75,6 +75,13 @@ export type {
 
 export { injectPolyBaseStyles } from "./styles";
 
+export { collectPolyRenderStats } from "./renderStats";
+export type {
+  PolyRenderStats,
+  PolyRenderStatsOptions,
+  PolyRenderSurfaceLeafCounts,
+} from "./renderStats";
+
 export { usePolyAnimation } from "./animation/usePolyAnimation";
 export type { UsePolyAnimationResultVue } from "./animation/usePolyAnimation";
 
@@ -137,6 +144,7 @@ export type {
   CameraCullRotation,
   ApproximateMergeOptions,
   OptimizeMeshPolygonsOptions,
+  OptimizeAnimatedMeshPolygonsOptions,
 } from "@layoutit/polycss-core";
 export {
   CAMERA_BACKFACE_CULL_EPS,
@@ -196,6 +204,7 @@ export {
   DEFAULT_PROJECTION,
   normalizeInvertMultiplier,
   createPolyAnimationMixer,
+  optimizeAnimatedMeshPolygons,
   LoopOnce,
   LoopRepeat,
   LoopPingPong,

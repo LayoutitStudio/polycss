@@ -37,11 +37,13 @@ import type {
 import {
   BASE_TILE,
   CAMERA_BACKFACE_CULL_EPS,
-  cameraCullNormalGroups,
+  VOXEL_CAMERA_CULL_NORMAL_LIMIT,
+  cameraCullNormalKey,
   cameraCullVisibleSignature,
   computeSceneBbox,
   findOverlappingPolygonDuplicates,
   inverseRotateVec3,
+  isAxisAlignedSurfaceNormal,
   isVoxelCameraCullableNormalGroups,
   mergePolygons,
   normalFacesCamera,
@@ -283,6 +285,31 @@ export interface PolySceneHandle {
 
 const DEFAULT_ZOOM = 1;
 const DEFAULT_TILE = BASE_TILE;
+// Sentinel that keeps broad camera DOM culling disabled once a mesh proves
+// it has non-voxel normals; callers never inspect group contents directly.
+const NON_CULLABLE_CAMERA_GROUP: CameraCullNormalGroup = {
+  key: "non-cullable",
+  normal: [1, 1, 0],
+};
+
+function nonCullableCameraGroups(): CameraCullNormalGroup[] {
+  return [NON_CULLABLE_CAMERA_GROUP];
+}
+
+interface InternalSetPolygonsOptions {
+  merge?: boolean;
+  stableDom?: boolean;
+  recomputeAutoCenter?: boolean;
+  stableTriangleDebug?: "transform-only" | "plan-only";
+  stableTriangleUpdateMode?: "full" | "transform-only" | "color-only";
+  stableTriangleColorPolicy?: "cadence" | "adaptive";
+  stableTriangleColorSteps?: number;
+  stableTriangleColorFreezeFrames?: number;
+  stableTriangleColorBudget?: number;
+  stableTriangleColorMaxAge?: number;
+  stableTriangleColorMaxStep?: number;
+  stableTriangleMatrixDecimals?: number;
+}
 
 function strategiesEqual(
   a: PolyRenderStrategiesOption | undefined,
@@ -511,11 +538,13 @@ export function createPolyScene(
     voxelSource: ParseResult["voxelSource"];
     disposed: boolean;
     stableDom: boolean;
+    hasBuckets: boolean;
     excludeFromAutoCenter: boolean;
     castShadow: boolean;
     cameraCullGroups: CameraCullNormalGroup[];
     cameraCullSignature: string;
     lightOverrideSignature: string;
+    stableTriangleColorFrame: number;
     /** Rotation snapshot used by the baked atlas baker. Advances only when
      *  `rebakeAtlas()` is called — not on every `setTransform`. */
     bakedRotation: Vec3;
@@ -610,7 +639,7 @@ export function createPolyScene(
     disposeRendered(entry.rendered, entry.disposeAtlas);
     entry.disposeAtlas = undefined;
     entry.rendered.length = 0;
-    entry.cameraCullGroups.length = 0;
+    entry.cameraCullGroups = [];
     entry.cameraCullSignature = "";
     clearShadowLeaves(entry);
     for (const child of Array.from(entry.wrapper.children)) {
@@ -618,6 +647,7 @@ export function createPolyScene(
         child.remove();
       }
     }
+    entry.hasBuckets = false;
   }
 
   function firstPreservedChild(entry: MeshEntry): ChildNode | null {
@@ -638,12 +668,6 @@ export function createPolyScene(
     } else {
       entry.wrapper.appendChild(fragment);
     }
-  }
-
-  function hasDirectBucket(wrapper: HTMLDivElement): boolean {
-    return Array.from(wrapper.children).some(
-      (child) => child instanceof HTMLElement && child.classList.contains("polycss-bucket"),
-    );
   }
 
   function clearShadowLeaves(entry: MeshEntry): void {
@@ -667,6 +691,7 @@ export function createPolyScene(
         child.remove();
       }
     }
+    entry.hasBuckets = false;
     for (const item of entry.rendered) {
       if (item.element.parentNode) item.element.parentNode.removeChild(item.element);
     }
@@ -705,9 +730,28 @@ export function createPolyScene(
   }
 
   function recomputeCameraCullGroups(entry: MeshEntry): void {
-    entry.cameraCullGroups = cameraCullNormalGroups(
-      entry.rendered.map((item) => normalForRendered(entry, item)),
-    );
+    if (entry.excludeFromAutoCenter) {
+      entry.cameraCullGroups = [];
+      return;
+    }
+    const groups = new Map<string, Vec3>();
+    for (const item of entry.rendered) {
+      const normal = normalForRendered(entry, item);
+      if (!normal) continue;
+      if (!isAxisAlignedSurfaceNormal(normal)) {
+        entry.cameraCullGroups = nonCullableCameraGroups();
+        return;
+      }
+      const key = cameraCullNormalKey(normal);
+      if (!groups.has(key)) {
+        groups.set(key, normal);
+        if (groups.size > VOXEL_CAMERA_CULL_NORMAL_LIMIT) {
+          entry.cameraCullGroups = nonCullableCameraGroups();
+          return;
+        }
+      }
+    }
+    entry.cameraCullGroups = Array.from(groups, ([key, normal]) => ({ key, normal }));
   }
 
   function cameraCullSignature(entry: MeshEntry): string {
@@ -809,7 +853,8 @@ export function createPolyScene(
 
   function syncMountedRenderedForCameraChange(entry: MeshEntry, force = false): void {
     if (entry.voxelRenderer) {
-      entry.voxelRenderer.syncCamera(cameraCullRotation(entry));
+      if (force) entry.voxelRenderer.render(cameraCullRotation(entry));
+      else entry.voxelRenderer.syncCamera(cameraCullRotation(entry));
       entry.cameraCullSignature = "voxel-direct";
       return;
     }
@@ -821,7 +866,7 @@ export function createPolyScene(
       return;
     }
 
-    if (hasDirectBucket(entry.wrapper)) {
+    if (entry.hasBuckets) {
       remountEntryIfCullSignatureChanged(entry, force);
       return;
     }
@@ -857,6 +902,7 @@ export function createPolyScene(
 
   function syncMountedRendered(entry: MeshEntry): void {
     clearMountedRendered(entry);
+    entry.hasBuckets = false;
     const fragment = doc.createDocumentFragment();
 
     // Lambert-bucketing only pays off in dynamic mode, where the cascade
@@ -906,6 +952,7 @@ export function createPolyScene(
       }
       const bucketEl = doc.createElement("div");
       bucketEl.className = "polycss-bucket";
+      entry.hasBuckets = true;
       bucketEl.style.setProperty("--pnx", String(group.vec[0]));
       bucketEl.style.setProperty("--pny", String(group.vec[1]));
       bucketEl.style.setProperty("--pnz", String(group.vec[2]));
@@ -1350,11 +1397,13 @@ export function createPolyScene(
       voxelSource: parseResult.voxelSource,
       disposed: false,
       stableDom: stableDomOnUpdate,
+      hasBuckets: false,
       excludeFromAutoCenter: !!transformIn.excludeFromAutoCenter,
       castShadow: !!transformIn.castShadow,
       cameraCullGroups: [],
       cameraCullSignature: "",
       lightOverrideSignature: "clear",
+      stableTriangleColorFrame: 0,
       bakedRotation: (transformIn.rotation ? [...transformIn.rotation] : [0, 0, 0]) as Vec3,
     };
 
@@ -1372,11 +1421,7 @@ export function createPolyScene(
         recomputeAutoCenter();
         recomputeShadowGround();
       },
-      setPolygons(polygons: Polygon[], options?: {
-        merge?: boolean;
-        stableDom?: boolean;
-        recomputeAutoCenter?: boolean;
-      }) {
+      setPolygons(polygons: Polygon[], options?: InternalSetPolygonsOptions) {
         polygonUpdateVersion++;
         mergeOnUpdate = options?.merge ?? mergeOnUpdate;
         stableDomOnUpdate = options?.stableDom ?? stableDomOnUpdate;
@@ -1384,9 +1429,14 @@ export function createPolyScene(
         entry.voxelSource = undefined;
         entry.polygons = preparePolygons(polygons, mergeOnUpdate);
         handle.polygons = entry.polygons;
-        applyTransformOrigin(entry.polygons);
         const shouldRecomputeAutoCenter = options?.recomputeAutoCenter ?? true;
-        if (entry.stableDom && !hasDirectBucket(entry.wrapper)) {
+        const colorOnlyStableTriangleUpdate =
+          options?.stableTriangleUpdateMode === "color-only";
+        entry.stableTriangleColorFrame++;
+        const shouldSkipTransformOrigin =
+          entry.stableDom && !shouldRecomputeAutoCenter;
+        if (!shouldSkipTransformOrigin) applyTransformOrigin(entry.polygons);
+        if (entry.stableDom && !entry.hasBuckets) {
           const renderOptions = {
             doc,
             directionalLight: currentOptions.directionalLight,
@@ -1394,21 +1444,58 @@ export function createPolyScene(
             textureLighting: currentOptions.textureLighting,
             textureQuality: currentOptions.textureQuality,
           };
-          const solidPaintDefaults = getSolidPaintDefaults(entry.polygons, renderOptions);
-          applySolidPaintVars(entry.wrapper, solidPaintDefaults);
+          const allStableTriangles =
+            entry.rendered.length === entry.polygons.length &&
+            entry.rendered.every((item) => item.kind === "triangle");
+          const optimizeStableTopology =
+            entry.stableDom && !shouldRecomputeAutoCenter;
+          const solidPaintDefaults = allStableTriangles || optimizeStableTopology
+            ? {}
+            : getSolidPaintDefaults(entry.polygons, renderOptions);
+          if (!allStableTriangles) applySolidPaintVars(entry.wrapper, solidPaintDefaults);
+          const stableTopologyOptions = {
+            ...renderOptions,
+            solidPaintDefaults,
+            optimizeStableTriangleStyle: true,
+            stableTriangleDebug: options?.stableTriangleDebug,
+            stableTriangleUpdateMode: options?.stableTriangleUpdateMode,
+            stableTriangleColorPolicy: options?.stableTriangleColorPolicy,
+            stableTriangleColorSteps: options?.stableTriangleColorSteps,
+            stableTriangleColorFreezeFrames: options?.stableTriangleColorFreezeFrames,
+            stableTriangleColorBudget: options?.stableTriangleColorBudget,
+            stableTriangleColorMaxAge: options?.stableTriangleColorMaxAge,
+            stableTriangleColorMaxStep: options?.stableTriangleColorMaxStep,
+            stableTriangleMatrixDecimals: options?.stableTriangleMatrixDecimals,
+            stableTriangleColorFrame: entry.stableTriangleColorFrame,
+          } as Parameters<typeof updatePolygonsWithStableTopology>[2] & {
+            optimizeStableTriangleStyle: boolean;
+            stableTriangleDebug?: "transform-only" | "plan-only";
+            stableTriangleUpdateMode?: "full" | "transform-only" | "color-only";
+            stableTriangleColorPolicy?: "cadence" | "adaptive";
+            stableTriangleColorSteps?: number;
+            stableTriangleColorFreezeFrames?: number;
+            stableTriangleColorBudget?: number;
+            stableTriangleColorMaxAge?: number;
+            stableTriangleColorMaxStep?: number;
+            stableTriangleMatrixDecimals?: number;
+            stableTriangleColorFrame?: number;
+          };
           if (
             updatePolygonsWithStableTopology(
               entry.rendered,
               entry.polygons,
-              { ...renderOptions, solidPaintDefaults },
+              stableTopologyOptions,
             )
           ) {
-            recomputeCameraCullGroups(entry);
-            syncMountedRenderedForCameraChange(entry, true);
-            if (shouldRecomputeAutoCenter) recomputeAutoCenter();
+            if (!colorOnlyStableTriangleUpdate) {
+              recomputeCameraCullGroups(entry);
+              syncMountedRenderedForCameraChange(entry, true);
+              if (shouldRecomputeAutoCenter) recomputeAutoCenter();
+            }
             return;
           }
         }
+        if (shouldSkipTransformOrigin) applyTransformOrigin(entry.polygons);
         renderEntry(entry);
         if (shouldRecomputeAutoCenter) recomputeAutoCenter();
       },
@@ -1450,7 +1537,7 @@ export function createPolyScene(
         const css2 = buildMeshTransform(transform);
         wrapper.style.transform = css2 ?? "";
         applyMeshLightVarOverride(entry, transform.rotation);
-        if (t.rotation !== undefined) syncMountedRenderedForCameraChange(entry);
+        if (t.rotation !== undefined) syncMountedRenderedForCameraChange(entry, true);
         if (entry.castShadow !== prevCastShadow) {
           emitShadowLeaves(entry);
           recomputeShadowGround();

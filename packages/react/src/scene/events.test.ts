@@ -23,6 +23,9 @@ function makeHandle(el: HTMLDivElement, id?: string): PolyMeshHandle {
     getRotation: () => undefined,
     getScale: () => undefined,
     getPolygons: (): Polygon[] => [],
+    setPolygons: () => {},
+    rebakeAtlas: () => {},
+    updatePolygon: () => {},
   };
 }
 

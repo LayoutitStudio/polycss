@@ -217,7 +217,6 @@ export const GLB_PRESET_ATTRIBUTIONS: Record<string, ModelAttribution> = {
   "Saxophone.glb": POLY_PIZZA_SAXOPHONE_ATTRIBUTION,
   "Snail.glb": polyPizzaJeremyAttribution("abd7jfOGZ94"),
   "Zebra.glb": polyPizzaJeremyAttribution("cKi5RxMBUxO"),
-  "Bicycle.glb": polyPizzaJeremyAttribution("axc03j3xKfz"),
   "Dump truck.glb": polyPizzaJeremyAttribution("1BpGYg14QGD"),
   "Taxi.glb": polyPizzaJeremyAttribution("coQbjlCqWY9"),
   "Truck.glb": polyPizzaJeremyAttribution("cPVFA5uTr9l"),

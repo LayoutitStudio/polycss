@@ -1,4 +1,5 @@
 import type { DomMetrics } from "../../types";
+import { collectPolyRenderStats } from "@layoutit/polycss";
 import { cssUrlValue, cssPxValue, cssNumberValue, cssPaintAlpha, localElementSize } from "./cssValues";
 
 export const DOM_OVERPAINT_CACHE_EVENT = "polycss:dom-overpaint-cache";
@@ -184,17 +185,16 @@ export function measureDom(root: HTMLElement | null): DomMetrics {
   const modelScopes = Array.from(root.querySelectorAll<HTMLElement>(".dn-model-mesh"));
   if (modelScopes.length === 0) return EMPTY_METRICS;
   const scopes = modelScopes;
-  const countInScopes = (selector: string): number =>
-    scopes.reduce((sum, scope) => sum + scope.querySelectorAll(selector).length, 0);
+  const stats = collectPolyRenderStats(root, { scopeSelector: ".dn-model-mesh" });
   const nodeCount = scopes.reduce((sum, scope) => sum + 1 + scope.querySelectorAll("*").length, 0);
 
   return {
     measuredAt: performance.now(),
     nodeCount,
-    sprites: countInScopes("s"),
-    rects: countInScopes("b"),
-    triangles: countInScopes("u"),
-    irregular: countInScopes("i"),
+    sprites: stats.surfaceLeafCounts.atlas,
+    rects: stats.surfaceLeafCounts.quad,
+    triangles: stats.surfaceLeafCounts.stableTriangle,
+    irregular: stats.surfaceLeafCounts.clippedSolid,
     overpaintPercent: measureDomOverpaintPercent(scopes),
   };
 }

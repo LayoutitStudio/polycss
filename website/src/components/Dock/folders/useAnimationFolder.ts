@@ -1,8 +1,8 @@
 /**
- * Animation folder — extracted from the legacy Dock.tsx mega-effect.
+ * Animation folder — extracted from the Dock.tsx mega-effect.
  *
- * Owns three controllers (Sequence / Paused / Playback speed) plus the folder
- * shell itself. When the model has no animation clips the whole folder is
+ * Owns the sequence, pause, and speed controllers plus the
+ * folder shell itself. When the model has no animation clips the whole folder is
  * hidden via lil-gui's `.hide()` and the three controllers are dimmed so any
  * direct DOM access doesn't fire stale onChange callbacks. The Sequence
  * dropdown's option list is refreshed at runtime whenever `animationOptions`
@@ -23,7 +23,10 @@ export interface AnimationFolderInputs {
   onAnimationChange: (value: string) => void;
   onResetAnimatedPolygons: () => void;
   onSelectAnimationClear: () => void;
-  onUpdateScene: (partial: { animationPaused?: boolean; animationTimeScale?: number }) => void;
+  onUpdateScene: (partial: {
+    animationPaused?: boolean;
+    animationTimeScale?: number;
+  }) => void;
 }
 
 export function useAnimationFolder(parent: GUI | null, inputs: AnimationFolderInputs): void {
@@ -100,5 +103,10 @@ export function useAnimationFolder(parent: GUI | null, inputs: AnimationFolderIn
     sequenceController?.setEnabled(enabled, { dim: true });
     pausedController?.setEnabled(enabled, { dim: true });
     speedController?.setEnabled(enabled, { dim: true });
-  }, [animationClipCount, sequenceController, pausedController, speedController]);
+  }, [
+    animationClipCount,
+    sequenceController,
+    pausedController,
+    speedController,
+  ]);
 }

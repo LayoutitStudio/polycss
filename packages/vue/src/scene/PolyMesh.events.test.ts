@@ -399,6 +399,22 @@ describe("PolyMesh (Vue) — updatePolygon", () => {
     expect(handle.getPolygons()[0].color).toBe("#ff0000");
   });
 
+  it("setPolygons updates stable triangle leaves without remounting", async () => {
+    const p0: Polygon = { vertices: TRIANGLE.vertices, color: "#ff0000" };
+    const p1: Polygon = { vertices: [[0, 0, 0], [2, 0, 0], [0, 1, 0]], color: "#00ff00" };
+    const { container, getHandle } = mountMesh({ polygons: [p0] });
+    const handle = getHandle()!;
+    const leafBefore = container.querySelector("u");
+    expect(leafBefore).toBeTruthy();
+    const transformBefore = (leafBefore as HTMLElement).style.transform;
+    handle.setPolygons([p1]);
+    await nextTick();
+    const leafAfter = container.querySelector("u");
+    expect(leafAfter).toBe(leafBefore);
+    expect(handle.getPolygons()[0]).toBe(p1);
+    expect((leafAfter as HTMLElement).style.transform).not.toBe(transformBefore);
+  });
+
   it("merges partial fields onto the polygon without touching other fields", async () => {
     const poly: Polygon = { vertices: TRIANGLE.vertices, color: "#ff0000" };
     const { getHandle } = mountMesh({ polygons: [poly] });

@@ -62,26 +62,28 @@ All solid/atlas tags work in both modes. The `.vox` direct-matrix fast path is b
 
 ## The "no JS in the render loop" principle
 
-This is the load-bearing constraint behind the whole engine. **JavaScript never runs per-frame to paint polygons.** Once the scene is built and the atlas is rasterised, the browser drives the render entirely through CSS — `matrix3d` transforms, `calc()`-driven custom properties, `background-blend-mode`, `border-shape`, etc.
+This is the load-bearing constraint behind the whole engine. **JavaScript should not run per-frame to paint polygons when the motion can be expressed as a scene, mesh, camera, or light update.** Once the scene is built and the atlas is rasterised, the browser drives most rendering through CSS — `matrix3d` transforms, `calc()`-driven custom properties, `background-blend-mode`, `border-shape`, etc.
+
+The current exception is imported skeletal animation. glTF/GLB skinning changes each polygon independently, so the vanilla stable-DOM animation path samples the active clip in JS, keeps the leaf set mounted, caches baked stable-triangle transform frames, and refreshes baked color on a cadence. That optimized path is the default; do not add a user-facing "baseline vs optimized" toggle or maintain a legacy slow path in product UI.
 
 | Where JS runs | Where JS does NOT run |
 |---|---|
 | Scene construction (`createPolyScene`, mesh ops, vertex snapping) | Per-frame polygon paint |
 | OBJ/glTF/GLB import, mesh optimisation, coplanar merging | Per-frame Lambert evaluation (dynamic mode is pure CSS) |
 | Atlas planning + rasterisation (one-shot to `<canvas>`, then `toBlob`) | Per-frame atlas redraw (only on baked-mode light changes) |
-| Control input handling (`PolyOrbitControls`, `PolyMapControls`, `PolyTransformControls`) | Per-frame transform recomputation of every polygon — only the scene-root or mesh-root transform changes |
+| Control input handling (`PolyOrbitControls`, `PolyMapControls`, `PolyTransformControls`) | Per-frame transform recomputation of every polygon for camera/mesh motion — only the scene-root or mesh-root transform changes |
 | Camera math (matrix4 product → scene-root `transform` CSS var) | Per-polygon JS in any hot path |
 | Hover/selection raycasting (only on pointer events, not per frame) | Continuous re-rendering "ticks" |
 
-If you find yourself wanting a `requestAnimationFrame` loop to update many DOM nodes, stop. Find the CSS variable that should be carrying the change, and update that single variable on a single ancestor. Cascading + `@property`-registered custom properties do the rest.
+If you find yourself wanting a `requestAnimationFrame` loop to update many DOM nodes outside skeletal animation, stop. Find the CSS variable that should be carrying the change, and update that single variable on a single ancestor. Cascading + `@property`-registered custom properties do the rest.
 
 ## Naming (three.js parity)
 
 - Every public export gets a `Poly` prefix. Exceptions are generic math types: `Vec2`, `Vec3`, `Polygon`, `PolyMaterial` (already prefixed).
 - **Hooks/composables:** `usePolyCamera`, `usePolyMesh`, `usePolySceneContext`, `usePolySelect`, `usePolySelectionApi`, `usePolyAnimation`.
 - **Components:** `PolyPerspectiveCamera`, `PolyOrthographicCamera`, `PolyOrbitControls`, `PolyMapControls`, `PolyTransformControls`, `PolySelect`, `PolyAxesHelper`, `PolyDirectionalLightHelper`.
-- **Types:** `PolyDirectionalLight`, `PolyAmbientLight`, `PolyTextureLightingMode`, `PolyAnimationMixer`.
-- **Functions:** `findPolyMeshHandle`, `injectPolyBaseStyles`, `buildPolyVoxelFaceData`, `buildPolyVoxelSlicePlan`.
+- **Types:** `PolyDirectionalLight`, `PolyAmbientLight`, `PolyTextureLightingMode`, `PolyAnimationMixer`, `PolyRenderStats`.
+- **Functions:** `findPolyMeshHandle`, `injectPolyBaseStyles`, `collectPolyRenderStats`, `buildPolyVoxelFaceData`, `buildPolyVoxelSlicePlan`.
 - **Vanilla factories:** `create*` names stay as-is (`createPolyScene`, `createTransformControls`, `createSelect`).
 - **HTML custom elements:** `poly-` prefix + kebab-case. Existing tags: `<poly-scene>`, `<poly-mesh>`, `<poly-polygon>`, `<poly-perspective-camera>`, `<poly-orthographic-camera>`, `<poly-axes-helper>`, `<poly-directional-light-helper>`. Any new element follows the same shape (e.g. `<poly-transform-controls>`, `<poly-select>`).
 - **Leaf DOM tags (`<b>`, `<i>`, `<s>`, `<u>`):** internal render-strategy tags. Not part of the public API and not user-facing — do not document them as such.

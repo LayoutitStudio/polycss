@@ -33,6 +33,122 @@ export type { GizmoMode, SceneOptionsState };
 // Light helper world units → CSS pixels conversion (matches the helper
 // components in @layoutit/polycss-react and @layoutit/polycss-vue).
 const LIGHT_HELPER_TILE = 50;
+const ANIMATION_STABLE_TRIANGLE_COLOR_POLICY = "cadence";
+const ANIMATION_STABLE_TRIANGLE_COLOR_STEPS = 0;
+const ANIMATION_STABLE_TRIANGLE_COLOR_FREEZE_FRAMES = 12;
+const ANIMATION_STABLE_TRIANGLE_COLOR_MAX_STEP = 8;
+const ANIMATION_TRANSFORM_CACHE_FRAMES = 60;
+
+interface StableTriangleTransformFrameItem {
+  transform: string;
+  visibility: string;
+}
+
+interface StableTriangleTransformCache {
+  frames: Array<StableTriangleTransformFrameItem[] | undefined>;
+  leaves: HTMLElement[] | null;
+  leafCount: number;
+  filled: number;
+  disabled: boolean;
+  lastAppliedFrameIndex: number;
+}
+
+function createStableTriangleTransformCache(): StableTriangleTransformCache {
+  return {
+    frames: Array.from({ length: ANIMATION_TRANSFORM_CACHE_FRAMES }),
+    leaves: null,
+    leafCount: 0,
+    filled: 0,
+    disabled: false,
+    lastAppliedFrameIndex: -1,
+  };
+}
+
+function resetStableTriangleTransformCache(cache: StableTriangleTransformCache): void {
+  cache.frames.fill(undefined);
+  cache.leaves = null;
+  cache.leafCount = 0;
+  cache.filled = 0;
+  cache.lastAppliedFrameIndex = -1;
+}
+
+function directStableTriangleLeaves(handle: VanillaPolyMeshHandle): HTMLElement[] {
+  return Array.from(handle.element.querySelectorAll<HTMLElement>(":scope > u"));
+}
+
+function captureStableTriangleTransformFrame(
+  handle: VanillaPolyMeshHandle,
+  cache: StableTriangleTransformCache,
+  frameIndex: number,
+): void {
+  if (cache.disabled) return;
+  const leaves = directStableTriangleLeaves(handle);
+  const expectedCount = handle.polygons.length;
+  if (
+    expectedCount <= 0 ||
+    leaves.length !== expectedCount
+  ) {
+    cache.disabled = true;
+    resetStableTriangleTransformCache(cache);
+    return;
+  }
+  if (cache.leafCount !== 0 && leaves.length !== cache.leafCount) {
+    resetStableTriangleTransformCache(cache);
+  }
+  cache.leaves = leaves;
+  cache.leafCount = leaves.length;
+  if (!cache.frames[frameIndex]) cache.filled += 1;
+  cache.frames[frameIndex] = leaves.map((leaf) => ({
+    transform: leaf.style.transform || "none",
+    visibility: leaf.style.visibility === "hidden" ? "hidden" : "",
+  }));
+  cache.lastAppliedFrameIndex = frameIndex;
+}
+
+function applyStableTriangleTransformFrame(
+  handle: VanillaPolyMeshHandle,
+  cache: StableTriangleTransformCache,
+  frameIndex: number,
+): boolean {
+  if (cache.disabled) return false;
+  const frame = cache.frames[frameIndex];
+  if (!frame) return false;
+  if (
+    cache.lastAppliedFrameIndex === frameIndex &&
+    cache.leaves &&
+    cache.leafCount === frame.length
+  ) {
+    return true;
+  }
+  const leaves = cache.leaves ?? directStableTriangleLeaves(handle);
+  if (leaves.length !== frame.length) {
+    resetStableTriangleTransformCache(cache);
+    return false;
+  }
+  cache.leaves = leaves;
+  cache.leafCount = leaves.length;
+  for (let i = 0; i < leaves.length; i += 1) {
+    const leaf = leaves[i];
+    const next = frame[i];
+    leaf.style.transform = next.transform;
+    if (leaf.style.visibility !== next.visibility) {
+      leaf.style.visibility = next.visibility;
+    }
+  }
+  cache.lastAppliedFrameIndex = frameIndex;
+  return true;
+}
+
+function animationCacheFrameIndex(
+  timeSeconds: number,
+  durationSeconds: number,
+): number {
+  const duration = Math.max(0.001, durationSeconds);
+  const localTime = ((timeSeconds % duration) + duration) % duration;
+  return Math.floor(
+    (localTime / duration) * ANIMATION_TRANSFORM_CACHE_FRAMES,
+  ) % ANIMATION_TRANSFORM_CACHE_FRAMES;
+}
 
 function lightHelperPosition(
   light: PolyDirectionalLight,
@@ -63,6 +179,7 @@ export interface VanillaSceneProps {
   mergePolygonsForMesh: boolean;
   stableDomForMesh: boolean;
   animationKey?: string;
+  animationDurationSeconds?: number;
   animationFrameFactory?: (timeSeconds: number) => Polygon[];
   onBuild: (ms: number) => void;
   onCameraChange?: (camera: { rotX: number; rotY: number; zoom: number; target?: ReactVec3 }) => void;
@@ -90,6 +207,7 @@ export function VanillaScene({
   mergePolygonsForMesh,
   stableDomForMesh,
   animationKey,
+  animationDurationSeconds,
   animationFrameFactory,
   onBuild,
   onCameraChange,
@@ -413,6 +531,15 @@ export function VanillaScene({
     let last = performance.now();
     let elapsedSeconds = 0;
     let sampledSeconds: number | null = null;
+    let animationFrameCount = 0;
+    let lastAnimatedPolygonCount = 0;
+    const transformCache =
+      stableDomForMesh &&
+      options.textureLighting === "baked" &&
+      typeof animationDurationSeconds === "number" &&
+      animationDurationSeconds > 0
+        ? createStableTriangleTransformCache()
+        : null;
 
     const tick = (now: number) => {
       const deltaSeconds = Math.max(0, (now - last) / 1000);
@@ -423,18 +550,112 @@ export function VanillaScene({
       const handle = meshHandleRef.current;
       if (handle && sampledSeconds !== elapsedSeconds) {
         sampledSeconds = elapsedSeconds;
-        handle.setPolygons(animationFrameFactory(elapsedSeconds), {
+        animationFrameCount += 1;
+        const debugTarget = window as unknown as {
+          __polycssGalleryAnimationSamples?: Array<{
+            t: number;
+            sampleMs: number;
+            setPolygonsMs: number;
+            polygons: number;
+            transformCacheHit?: boolean;
+            transformCacheFilled?: number;
+            transformCacheMs?: number;
+          }>;
+          __polycssStableTriangleDebug?: "transform-only" | "plan-only";
+        };
+        const stableTriangleDebug = debugTarget.__polycssStableTriangleDebug;
+        const setPolygonsOptions = {
           merge: false,
           stableDom: true,
           recomputeAutoCenter: false,
-        });
+          ...(stableTriangleDebug === "transform-only" || stableTriangleDebug === "plan-only"
+            ? { stableTriangleDebug }
+            : {}),
+          stableTriangleColorSteps: ANIMATION_STABLE_TRIANGLE_COLOR_STEPS,
+          stableTriangleColorPolicy: ANIMATION_STABLE_TRIANGLE_COLOR_POLICY,
+          stableTriangleColorFreezeFrames: ANIMATION_STABLE_TRIANGLE_COLOR_FREEZE_FRAMES,
+          stableTriangleColorMaxStep: ANIMATION_STABLE_TRIANGLE_COLOR_MAX_STEP,
+        } satisfies Parameters<VanillaPolyMeshHandle["setPolygons"]>[1] & {
+          stableTriangleDebug?: "transform-only" | "plan-only";
+          stableTriangleUpdateMode?: "full" | "transform-only" | "color-only";
+          stableTriangleColorPolicy: "cadence" | "adaptive";
+          stableTriangleColorSteps: number;
+          stableTriangleColorFreezeFrames: number;
+          stableTriangleColorMaxStep: number;
+        };
+        const canUseTransformCache =
+          transformCache &&
+          !transformCache.disabled &&
+          !stableTriangleDebug &&
+          animationDurationSeconds !== undefined;
+        const frameIndex = canUseTransformCache
+          ? animationCacheFrameIndex(elapsedSeconds, animationDurationSeconds)
+          : -1;
+        const shouldRefreshColor =
+          canUseTransformCache &&
+          animationFrameCount % ANIMATION_STABLE_TRIANGLE_COLOR_FREEZE_FRAMES === 0;
+        const samples = debugTarget.__polycssGalleryAnimationSamples;
+        let sampleMs = 0;
+        let setPolygonsMs = 0;
+        let transformCacheMs = 0;
+        let transformCacheHit = false;
+        if (canUseTransformCache) {
+          const cacheStart = samples ? performance.now() : 0;
+          transformCacheHit = applyStableTriangleTransformFrame(
+            handle,
+            transformCache,
+            frameIndex,
+          );
+          transformCacheMs = samples ? performance.now() - cacheStart : 0;
+        }
+        if (transformCacheHit && shouldRefreshColor) {
+          const sampleStart = samples ? performance.now() : 0;
+          const animatedPolygons = animationFrameFactory(elapsedSeconds);
+          sampleMs = samples ? performance.now() - sampleStart : 0;
+          lastAnimatedPolygonCount = animatedPolygons.length;
+          const setStart = samples ? performance.now() : 0;
+          handle.setPolygons(animatedPolygons, {
+            ...setPolygonsOptions,
+            stableTriangleUpdateMode: "color-only",
+          });
+          setPolygonsMs = samples ? performance.now() - setStart : 0;
+        } else if (!transformCacheHit) {
+          const sampleStart = samples ? performance.now() : 0;
+          const animatedPolygons = animationFrameFactory(elapsedSeconds);
+          sampleMs = samples ? performance.now() - sampleStart : 0;
+          lastAnimatedPolygonCount = animatedPolygons.length;
+          const setStart = samples ? performance.now() : 0;
+          handle.setPolygons(animatedPolygons, setPolygonsOptions);
+          setPolygonsMs = samples ? performance.now() - setStart : 0;
+          if (canUseTransformCache) {
+            captureStableTriangleTransformFrame(handle, transformCache, frameIndex);
+          }
+        }
+        if (samples) {
+          samples.push({
+            t: now,
+            sampleMs,
+            setPolygonsMs,
+            polygons: lastAnimatedPolygonCount,
+            transformCacheHit,
+            transformCacheFilled: transformCache?.filled,
+            transformCacheMs,
+          });
+          if (samples.length > 1800) samples.splice(0, samples.length - 1800);
+        }
       }
       raf = requestAnimationFrame(tick);
     };
 
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [animationKey, animationFrameFactory]);
+  }, [
+    animationKey,
+    animationFrameFactory,
+    animationDurationSeconds,
+    options.textureLighting,
+    stableDomForMesh,
+  ]);
 
   // Effect 2 — cheap: live transform + lighting updates via setOptions.
   // Sliding sliders only flows through this path.

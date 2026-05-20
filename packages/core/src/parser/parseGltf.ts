@@ -37,6 +37,12 @@ export interface GltfParseOptions {
    */
   materialColors?: Record<string, string>;
   /**
+   * Override map: glTF material name → texture image URL. Takes priority over
+   * `pbrMetallicRoughness.baseColorTexture`; useful for GLB/GLTF exports that
+   * preserved UVs but dropped external image references.
+   */
+  materialTextures?: Record<string, string>;
+  /**
    * Which axis is "up" in the source mesh.
    *  - "y" (default, glTF spec): cyclic permutation (x,y,z) → (z,x,y) so
    *    +Y ends up on polycss's +Z (elevation).
@@ -538,6 +544,7 @@ interface AnimatedPrimitiveSource {
   skinIndex?: number;
   positions: Vec3[];
   indices: number[];
+  triangleMask: boolean[];
   color: string;
   texture?: string;
   uvs?: Vec2[];
@@ -561,6 +568,14 @@ interface RuntimeAnimationChannel {
 interface RuntimeAnimationClip {
   info: ParseAnimationClip;
   channels: RuntimeAnimationChannel[];
+}
+
+function sameProjectedVertex(a: Vec3, b: Vec3): boolean {
+  return a[0] === b[0] && a[1] === b[1] && a[2] === b[2];
+}
+
+function isDegenerateProjectedTriangle(v0: Vec3, v1: Vec3, v2: Vec3): boolean {
+  return sameProjectedVertex(v0, v1) || sameProjectedVertex(v0, v2) || sameProjectedVertex(v1, v2);
 }
 
 function readAccessorTupleArray(
@@ -701,11 +716,6 @@ function buildAnimationController(
     const v0 = project(v0World);
     const v1 = project(v1World);
     const v2 = project(v2World);
-    if (
-      (v0[0] === v1[0] && v0[1] === v1[1] && v0[2] === v1[2]) ||
-      (v0[0] === v2[0] && v0[1] === v2[1] && v0[2] === v2[2]) ||
-      (v1[0] === v2[0] && v1[1] === v2[1] && v1[2] === v2[2])
-    ) return null;
     const polygon: Polygon = { vertices: [v0, v1, v2], color };
     if (texture) polygon.texture = texture;
     if (uvs) polygon.uvs = uvs;
@@ -785,7 +795,9 @@ function buildAnimationController(
         }
       }
 
-      for (let i = 0; i + 2 < source.indices.length; i += 3) {
+      let triangleOrdinal = 0;
+      for (let i = 0; i + 2 < source.indices.length; i += 3, triangleOrdinal++) {
+        if (!source.triangleMask[triangleOrdinal]) continue;
         const i0 = source.indices[i];
         const i1 = source.indices[i + 1];
         const i2 = source.indices[i + 2];
@@ -813,6 +825,7 @@ export function parseGltf(input: ArrayBuffer | Uint8Array, options?: GltfParseOp
   const gridShift = options?.gridShift ?? 1;
   const defaultColor = options?.defaultColor ?? "#888888";
   const materialOverrides = options?.materialColors ?? {};
+  const materialTextureOverrides = options?.materialTextures ?? {};
 
   const buf: ArrayBuffer = input instanceof Uint8Array
     ? input.buffer.slice(input.byteOffset, input.byteOffset + input.byteLength) as ArrayBuffer
@@ -834,7 +847,16 @@ export function parseGltf(input: ArrayBuffer | Uint8Array, options?: GltfParseOp
   const { urls: imageUrls, objectUrls } = extractImageUrls(doc, bin, options?.baseUrl);
   const matTexMap = buildMaterialTextureMap(doc, imageUrls);
 
-  interface RawTri { v0: Vec3; v1: Vec3; v2: Vec3; color: string; texture?: string; uvs?: Vec2[]; }
+  interface RawTri {
+    v0: Vec3;
+    v1: Vec3;
+    v2: Vec3;
+    color: string;
+    texture?: string;
+    uvs?: Vec2[];
+    source?: AnimatedPrimitiveSource;
+    sourceTriangleIndex?: number;
+  }
   const rawTris: RawTri[] = [];
   const animatedSources: AnimatedPrimitiveSource[] = [];
   const meshNames: string[] = (doc.meshes ?? []).map((m, i) => m.name ?? `mesh_${i}`);
@@ -853,7 +875,11 @@ export function parseGltf(input: ArrayBuffer | Uint8Array, options?: GltfParseOp
         prim.material !== undefined ? doc.materials?.[prim.material] : undefined,
         defaultColor
       );
-      const texture = prim.material !== undefined ? matTexMap.get(prim.material) : undefined;
+      const texture = matName && materialTextureOverrides[matName]
+        ? materialTextureOverrides[matName]
+        : prim.material !== undefined
+          ? matTexMap.get(prim.material)
+          : undefined;
 
       const { array: posArr, count: vertCount } = readAccessor(doc, bin!, prim.attributes.POSITION);
       if (!(posArr instanceof Float32Array)) continue;
@@ -889,24 +915,29 @@ export function parseGltf(input: ArrayBuffer | Uint8Array, options?: GltfParseOp
         indices = positions.map((_, i) => i);
       }
 
+      let animatedSource: AnimatedPrimitiveSource | undefined;
       if ((doc.animations?.length ?? 0) > 0) {
         const joints = readAccessorTupleArray(doc, bin, prim.attributes.JOINTS_0, 4, vertCount);
         const weights = readAccessorTupleArray(doc, bin, prim.attributes.WEIGHTS_0, 4, vertCount);
-        animatedSources.push({
+        animatedSource = {
           meshNode,
           meshBindWorld: world,
           skinIndex: meshNode !== null ? doc.nodes?.[meshNode]?.skin : undefined,
           positions: localPositions,
           indices,
+          triangleMask: [],
           color,
           texture,
           uvs: uvs ?? undefined,
           joints,
           weights,
-        });
+        };
+        animatedSources.push(animatedSource);
       }
 
       for (let i = 0; i + 2 < indices.length; i += 3) {
+        const sourceTriangleIndex = animatedSource ? animatedSource.triangleMask.length : undefined;
+        if (animatedSource) animatedSource.triangleMask.push(false);
         const v0 = positions[indices[i]];
         const v1 = positions[indices[i + 1]];
         const v2 = positions[indices[i + 2]];
@@ -916,7 +947,7 @@ export function parseGltf(input: ArrayBuffer | Uint8Array, options?: GltfParseOp
           const u0 = uvs[indices[i]], u1 = uvs[indices[i + 1]], u2 = uvs[indices[i + 2]];
           if (u0 && u1 && u2) triUvs = [u0, u1, u2];
         }
-        rawTris.push({ v0, v1, v2, color, texture, uvs: triUvs });
+        rawTris.push({ v0, v1, v2, color, texture, uvs: triUvs, source: animatedSource, sourceTriangleIndex });
       }
     }
   }
@@ -979,18 +1010,16 @@ export function parseGltf(input: ArrayBuffer | Uint8Array, options?: GltfParseOp
         round((x - minX) * scale + gridShift),
         round((y - minY) * scale + gridShift),
       ];
-  const animation = buildAnimationController(doc, bin, animatedSources, project);
-
   const polygons: Polygon[] = [];
   for (const t of rawTris) {
     const v0 = project(t.v0);
     const v1 = project(t.v1);
     const v2 = project(t.v2);
-    if (
-      (v0[0] === v1[0] && v0[1] === v1[1] && v0[2] === v1[2]) ||
-      (v0[0] === v2[0] && v0[1] === v2[1] && v0[2] === v2[2]) ||
-      (v1[0] === v2[0] && v1[1] === v2[1] && v1[2] === v2[2])
-    ) continue;
+    const degenerate = isDegenerateProjectedTriangle(v0, v1, v2);
+    if (t.source && t.sourceTriangleIndex !== undefined) {
+      t.source.triangleMask[t.sourceTriangleIndex] = !degenerate;
+    }
+    if (degenerate) continue;
     const p: Polygon = {
       vertices: [v0, v1, v2],
       color: t.color,
@@ -999,6 +1028,7 @@ export function parseGltf(input: ArrayBuffer | Uint8Array, options?: GltfParseOp
     if (t.uvs) p.uvs = t.uvs;
     polygons.push(p);
   }
+  const animation = buildAnimationController(doc, bin, animatedSources, project);
 
   return {
     polygons,

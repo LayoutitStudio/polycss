@@ -58,6 +58,10 @@ export type TextureQuality = number | "auto";
 
 interface RGB { r: number; g: number; b: number; }
 interface RGBFactors { r: number; g: number; b: number; }
+interface StableTriangleDomElement extends HTMLElement {
+  __polycssStableTriangleColor?: string;
+  __polycssStableTriangleColorRgb?: RGB;
+}
 
 interface UvAffine {
   a: number;
@@ -1121,6 +1125,19 @@ function rgbToHex({ r, g, b }: RGB): string {
   return `#${f(r)}${f(g)}${f(b)}`;
 }
 
+function stepRgbToward(current: RGB, target: RGB, maxStep: number): RGB {
+  const step = (from: number, to: number) => {
+    if (from === to) return from;
+    const delta = to - from;
+    return from + Math.sign(delta) * Math.min(Math.abs(delta), maxStep);
+  };
+  return {
+    r: step(current.r, target.r),
+    g: step(current.g, target.g),
+    b: step(current.b, target.b),
+  };
+}
+
 function shadePolygon(
   baseColor: string,
   directScale: number,
@@ -1164,6 +1181,92 @@ function textureTintFactors(
 function tintToCss({ r, g, b }: RGBFactors): string {
   const f = (n: number) => Math.round(Math.max(0, Math.min(1, n)) * 255);
   return `rgb(${f(r)} ${f(g)} ${f(b)})`;
+}
+
+export interface StableTriangleDomUpdateOptions {
+  directionalLight?: PolyDirectionalLight;
+  ambientLight?: PolyAmbientLight;
+  textureLighting?: PolyTextureLightingMode;
+  colorFrame?: number;
+  colorFreezeFrames?: number;
+  colorMaxStep?: number;
+}
+
+function stableTriangleColorAllowed(index: number, colorFrame: number, freezeFrames: number): boolean {
+  return freezeFrames > 0 && (freezeFrames <= 1 || (colorFrame + index) % freezeFrames === 0);
+}
+
+function applyStableTriangleColor(
+  el: StableTriangleDomElement,
+  index: number,
+  nextColor: string,
+  options: StableTriangleDomUpdateOptions,
+): void {
+  const freezeFrames = Math.floor(options.colorFreezeFrames ?? 1);
+  if (freezeFrames === 0) return;
+
+  const currentColor = el.__polycssStableTriangleColor;
+  const shouldWrite = currentColor === undefined ||
+    stableTriangleColorAllowed(
+      index,
+      Math.max(0, Math.floor(options.colorFrame ?? 0)),
+      Math.max(1, freezeFrames),
+    );
+  if (!shouldWrite || currentColor === nextColor) return;
+
+  let writeColor = nextColor;
+  let writeRgb = nextColor ? parseHex(nextColor) : undefined;
+  const currentRgb = el.__polycssStableTriangleColorRgb;
+  const maxStep = Math.max(0, Math.floor(options.colorMaxStep ?? 0));
+  if (maxStep > 0 && currentRgb && writeRgb && nextColor) {
+    writeRgb = stepRgbToward(currentRgb, writeRgb, maxStep);
+    writeColor = rgbToHex(writeRgb);
+  }
+
+  el.style.color = writeColor;
+  el.__polycssStableTriangleColor = writeColor;
+  el.__polycssStableTriangleColorRgb = writeRgb;
+}
+
+export function updateStableTriangleDom(
+  root: HTMLElement,
+  polygons: Polygon[],
+  options: StableTriangleDomUpdateOptions = {},
+): boolean {
+  if ((options.textureLighting ?? "baked") !== "baked") return false;
+  if (!solidTriangleSupported()) return false;
+  const leaves = Array.from(root.children).filter(
+    (child): child is StableTriangleDomElement =>
+      child instanceof HTMLElement && child.localName === "u",
+  );
+  if (leaves.length !== polygons.length) return false;
+
+  const plans = polygons.map((polygon, index) => {
+    if (polygon.texture || polygon.vertices.length !== 3) return null;
+    const plan = computeTextureAtlasPlan(polygon, index, {
+      directionalLight: options.directionalLight,
+      ambientLight: options.ambientLight,
+    });
+    if (!plan || !isSolidTrianglePlan(plan)) return null;
+    const style = solidTriangleStyle(plan, "baked", "auto", {});
+    if (!style?.transform) return null;
+    return style;
+  });
+  if (plans.some((plan) => !plan)) return false;
+
+  for (let i = 0; i < leaves.length; i += 1) {
+    const style = plans[i]!;
+    const el = leaves[i];
+    if (el.style.visibility) el.style.visibility = "";
+    el.style.transform = String(style.transform);
+    applyStableTriangleColor(
+      el,
+      i,
+      typeof style.color === "string" ? style.color : "",
+      options,
+    );
+  }
+  return true;
 }
 
 function applyTextureTint(

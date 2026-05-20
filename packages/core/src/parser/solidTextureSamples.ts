@@ -58,12 +58,16 @@ interface ColorStats {
   min: SampledColor;
   max: SampledColor;
   sum: SampledColor;
+  colors: Map<string, { color: SampledColor; count: number }>;
   count: number;
 }
 
 const DEFAULT_MAX_TEXTURE_PIXELS = 16 * 1024 * 1024;
 const DEFAULT_COLOR_TOLERANCE = 2;
 const SMOOTH_SWATCH_TOLERANCE = 32;
+const DOMINANT_SWATCH_MAX_COLOR_COUNT = 2;
+const DOMINANT_SWATCH_MAX_OUTLIER_RATIO = 0.08;
+const DOMINANT_SWATCH_MIN_SAMPLES = 8;
 const DETAIL_SAMPLE_TARGET = 128;
 const DETAIL_EDGE_THRESHOLD = 32;
 const LOW_DETAIL_MAX_EDGE_RATIO = 0.045;
@@ -273,8 +277,13 @@ function createColorStats(): ColorStats {
     min: { r: 255, g: 255, b: 255, a: 255 },
     max: { r: 0, g: 0, b: 0, a: 0 },
     sum: { r: 0, g: 0, b: 0, a: 0 },
+    colors: new Map(),
     count: 0,
   };
+}
+
+function colorKey(color: SampledColor): string {
+  return `${color.r},${color.g},${color.b},${color.a}`;
 }
 
 function addColor(stats: ColorStats, color: SampledColor): void {
@@ -290,6 +299,9 @@ function addColor(stats: ColorStats, color: SampledColor): void {
   stats.sum.g += color.g;
   stats.sum.b += color.b;
   stats.sum.a += color.a;
+  const key = colorKey(color);
+  const prev = stats.colors.get(key);
+  stats.colors.set(key, { color, count: (prev?.count ?? 0) + 1 });
   stats.count++;
 }
 
@@ -302,6 +314,21 @@ function statsColor(stats: ColorStats): SampledColor {
   };
 }
 
+function dominantSwatchColor(stats: ColorStats): SampledColor | null {
+  if (stats.count < DOMINANT_SWATCH_MIN_SAMPLES) return null;
+  if (stats.colors.size <= 1 || stats.colors.size > DOMINANT_SWATCH_MAX_COLOR_COUNT) return null;
+
+  let dominant: { color: SampledColor; count: number } | null = null;
+  for (const entry of stats.colors.values()) {
+    if (!dominant || entry.count > dominant.count) dominant = entry;
+  }
+  if (!dominant) return null;
+
+  const outliers = stats.count - dominant.count;
+  const maxOutliers = Math.max(1, Math.floor(stats.count * DOMINANT_SWATCH_MAX_OUTLIER_RATIO));
+  return outliers <= maxOutliers ? dominant.color : null;
+}
+
 function solidColorForPolygon(
   polygon: Polygon,
   sampler: TextureSampler,
@@ -310,7 +337,6 @@ function solidColorForPolygon(
 ): string | null {
   const triangles = polygonTextureTriangles(polygon);
   if (triangles.length === 0) return null;
-  if (!explicitTolerance && !sampler.lowDetail) return null;
 
   const stats = createColorStats();
 
@@ -324,7 +350,12 @@ function solidColorForPolygon(
 
   if (stats.count === 0) return null;
   if (colorsClose(stats.min, stats.max, tolerance)) return colorToCss(statsColor(stats));
-  if (explicitTolerance) return null;
+  // Skinny UV islands in swatch atlases can graze one neighboring swatch texel.
+  if (!explicitTolerance) {
+    const dominant = dominantSwatchColor(stats);
+    if (dominant) return colorToCss(dominant);
+  }
+  if (explicitTolerance || !sampler.lowDetail) return null;
   if (!colorsClose(stats.min, stats.max, SMOOTH_SWATCH_TOLERANCE)) return null;
   return colorToCss(statsColor(stats));
 }

@@ -25,6 +25,12 @@ export interface PolyMeshHandle {
   getScale(): number | Vec3 | undefined;
   getPolygons(): Polygon[];
   /**
+   * Replace the mesh polygons imperatively. Animated solid-triangle meshes use
+   * a stable DOM update path that mutates mounted leaves directly; unsupported
+   * topology falls back to the normal framework render path.
+   */
+  setPolygons(polygons: Polygon[]): void;
+  /**
    * Update a single polygon in place. `target` is either a polygon
    * reference (as returned by `getPolygons()`) or its index. `partial`
    * fields are merged onto the polygon; the mesh is then re-rendered.
