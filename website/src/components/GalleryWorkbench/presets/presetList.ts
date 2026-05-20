@@ -13,7 +13,7 @@ import { GLB_PRESET_FILES, POLY_PIZZA_PRESET_FILES, VOX_PRESET_FILES, OBJ_PRESET
 import { glbPreset, objPreset, voxPreset } from "./presetBuilders";
 import {
   boxPolygons, planePolygons, ringPolygons,
-  tetrahedronPolygons, octahedronPolygons, icosahedronPolygons, dodecahedronPolygons,
+  spherePolygons, tetrahedronPolygons, octahedronPolygons, icosahedronPolygons, dodecahedronPolygons,
   cylinderPolygons, conePolygons, torusPolygons,
 } from "@layoutit/polycss";
 
@@ -52,6 +52,17 @@ export const PRESETS: PresetModel[] = [
     rotX: 65,
     rotY: 45,
     generatePolygons: () => ringPolygons({ axis: 2, radius: 50, halfThickness: 10, segments: 32, color: COLOR }),
+  },
+  {
+    id: "primitive-sphere",
+    label: "Sphere",
+    category: "Primitives",
+    kind: "primitive",
+    galleryBucket: "Primitives",
+    zoom: 0.05,
+    rotX: 65,
+    rotY: 45,
+    generatePolygons: () => spherePolygons({ radius: 50, subdivisions: 1, color: COLOR }),
   },
   {
     id: "primitive-tetrahedron",
