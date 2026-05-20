@@ -86,7 +86,7 @@ const ANIMATION_FRAME_CACHE_FRAMES = optNum(
   optNum("animationFrameCacheFrames", 60),
 );
 const KEYFRAME_SAMPLES = optNum("keyframe-samples", optNum("keyframeSamples", 24));
-const DEFAULT_STABLE_TRIANGLE_COLOR_STEPS = 0;
+const DEFAULT_STABLE_TRIANGLE_COLOR_STEPS = 8;
 const DEFAULT_STABLE_TRIANGLE_COLOR_POLICY = "cadence";
 const DEFAULT_STABLE_TRIANGLE_COLOR_FREEZE_FRAMES = 12;
 const DEFAULT_STABLE_TRIANGLE_COLOR_BUDGET = 0.16;
@@ -96,7 +96,7 @@ const HAS_STABLE_TRIANGLE_COLOR_STEPS =
   hasOpt("stable-triangle-color-steps") || hasOpt("stableTriangleColorSteps");
 const STABLE_TRIANGLE_COLOR_STEPS = optNum(
   "stable-triangle-color-steps",
-  optNum("stableTriangleColorSteps", 0),
+  optNum("stableTriangleColorSteps", DEFAULT_STABLE_TRIANGLE_COLOR_STEPS),
 );
 const HAS_STABLE_TRIANGLE_COLOR_POLICY =
   hasOpt("stable-triangle-color-policy") || hasOpt("stableTriangleColorPolicy");
@@ -610,6 +610,9 @@ async function runScenario(port, scenario) {
       animation_update: summarizeDurations(pageResult.animationSamples, "updateMs"),
       set_polygons: summarizeDurations(pageResult.animationSamples, "setPolygonsMs"),
       sample_and_mixer: summarizeDurations(pageResult.animationSamples, "nonSetPolygonsMs"),
+      triangleFrameApplied: pageResult.animationSamples.filter((sample) =>
+        sample?.triangleFrameApplied === true
+      ).length,
       animation_sample_count: pageResult.animationSamples.length,
       polyCount: pageResult.polyCount,
       renderStats: pageResult.renderStats,
@@ -697,6 +700,7 @@ try {
       `p95=${result.fps_p95.toFixed(1).padStart(5)}fps ` +
       `update p50=${result.animation_update.p50_ms.toFixed(2)}ms ` +
       `setPolys p50=${result.set_polygons.p50_ms.toFixed(2)}ms ` +
+      `typed=${result.triangleFrameApplied}/${result.animation_sample_count} ` +
       `clip=${result.animation?.clip?.name ?? "?"}${tagNote}${traceNote}${profileNote}\n`,
     );
   }

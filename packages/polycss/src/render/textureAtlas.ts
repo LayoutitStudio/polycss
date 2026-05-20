@@ -150,6 +150,8 @@ interface SolidTriangleBasis {
 interface SolidTriangleComputeOptions {
   basis?: SolidTriangleBasis;
   includeColor?: boolean;
+  matrixDecimals?: number;
+  color?: string;
 }
 
 interface SolidTriangleElement extends HTMLElement {
@@ -158,6 +160,8 @@ interface SolidTriangleElement extends HTMLElement {
   __polycssSolidTriangleColorRgb?: RGB;
   __polycssSolidTriangleColorAlpha?: number;
   __polycssSolidTriangleColorFrame?: number;
+  __polycssSolidTriangleHidden?: boolean;
+  __polycssHasDataAttrs?: boolean;
 }
 
 interface StableTriangleColorState {
@@ -165,6 +169,12 @@ interface StableTriangleColorState {
   freezeFrames: number;
   colorFrame: number;
   maxStep: number;
+}
+
+export interface SolidTriangleFrame {
+  polygonCount: number;
+  vertices: ArrayLike<number>;
+  colors?: readonly (string | undefined)[];
 }
 
 export interface SolidPaintDefaults {
@@ -303,6 +313,13 @@ const PROJECTIVE_QUAD_DENOM_EPS = 0.05;
 const PROJECTIVE_QUAD_MAX_WEIGHT_RATIO = Number.POSITIVE_INFINITY;
 const PROJECTIVE_QUAD_BLEED = 0.6;
 
+function stableTriangleMatrixDecimals(options: InternalRenderTextureAtlasOptions): number {
+  return Math.max(
+    0,
+    Math.min(6, Math.floor(options.stableTriangleMatrixDecimals ?? DEFAULT_MATRIX_DECIMALS)),
+  );
+}
+
 interface BorderShapeBounds {
   minX: number;
   minY: number;
@@ -398,10 +415,94 @@ function formatAffineMatrix3dColumns(
   txCol: Vec3,
   decimals = DEFAULT_MATRIX_DECIMALS,
 ): string {
-  return `${roundDecimal(xCol[0], decimals)},${roundDecimal(xCol[1], decimals)},${roundDecimal(xCol[2], decimals)},0,` +
-    `${roundDecimal(yCol[0], decimals)},${roundDecimal(yCol[1], decimals)},${roundDecimal(yCol[2], decimals)},0,` +
-    `${roundDecimal(zCol[0], decimals)},${roundDecimal(zCol[1], decimals)},${roundDecimal(zCol[2], decimals)},0,` +
-    `${roundDecimal(txCol[0], decimals)},${roundDecimal(txCol[1], decimals)},${roundDecimal(txCol[2], decimals)},1`;
+  return formatAffineMatrix3dScalars(
+    xCol[0], xCol[1], xCol[2],
+    yCol[0], yCol[1], yCol[2],
+    zCol[0], zCol[1], zCol[2],
+    txCol[0], txCol[1], txCol[2],
+    decimals,
+  );
+}
+
+function formatAffineMatrix3dScalars(
+  x0: number,
+  x1: number,
+  x2: number,
+  y0: number,
+  y1: number,
+  y2: number,
+  z0: number,
+  z1: number,
+  z2: number,
+  tx0: number,
+  tx1: number,
+  tx2: number,
+  decimals = DEFAULT_MATRIX_DECIMALS,
+): string {
+  if (decimals === 3) {
+    const rx0 = Math.round(x0 * 1000) / 1000 || 0;
+    const rx1 = Math.round(x1 * 1000) / 1000 || 0;
+    const rx2 = Math.round(x2 * 1000) / 1000 || 0;
+    const ry0 = Math.round(y0 * 1000) / 1000 || 0;
+    const ry1 = Math.round(y1 * 1000) / 1000 || 0;
+    const ry2 = Math.round(y2 * 1000) / 1000 || 0;
+    const rz0 = Math.round(z0 * 1000) / 1000 || 0;
+    const rz1 = Math.round(z1 * 1000) / 1000 || 0;
+    const rz2 = Math.round(z2 * 1000) / 1000 || 0;
+    const rtx0 = Math.round(tx0 * 1000) / 1000 || 0;
+    const rtx1 = Math.round(tx1 * 1000) / 1000 || 0;
+    const rtx2 = Math.round(tx2 * 1000) / 1000 || 0;
+    return `${rx0},${rx1},${rx2},0,` +
+      `${ry0},${ry1},${ry2},0,` +
+      `${rz0},${rz1},${rz2},0,` +
+      `${rtx0},${rtx1},${rtx2},1`;
+  }
+  return `${roundDecimal(x0, decimals)},${roundDecimal(x1, decimals)},${roundDecimal(x2, decimals)},0,` +
+    `${roundDecimal(y0, decimals)},${roundDecimal(y1, decimals)},${roundDecimal(y2, decimals)},0,` +
+    `${roundDecimal(z0, decimals)},${roundDecimal(z1, decimals)},${roundDecimal(z2, decimals)},0,` +
+    `${roundDecimal(tx0, decimals)},${roundDecimal(tx1, decimals)},${roundDecimal(tx2, decimals)},1`;
+}
+
+function formatAffineMatrix3dTransformScalars(
+  x0: number,
+  x1: number,
+  x2: number,
+  y0: number,
+  y1: number,
+  y2: number,
+  z0: number,
+  z1: number,
+  z2: number,
+  tx0: number,
+  tx1: number,
+  tx2: number,
+  decimals = DEFAULT_MATRIX_DECIMALS,
+): string {
+  if (decimals !== 3) {
+    return `matrix3d(${formatAffineMatrix3dScalars(
+      x0, x1, x2,
+      y0, y1, y2,
+      z0, z1, z2,
+      tx0, tx1, tx2,
+      decimals,
+    )})`;
+  }
+  const rx0 = Math.round(x0 * 1000) / 1000 || 0;
+  const rx1 = Math.round(x1 * 1000) / 1000 || 0;
+  const rx2 = Math.round(x2 * 1000) / 1000 || 0;
+  const ry0 = Math.round(y0 * 1000) / 1000 || 0;
+  const ry1 = Math.round(y1 * 1000) / 1000 || 0;
+  const ry2 = Math.round(y2 * 1000) / 1000 || 0;
+  const rz0 = Math.round(z0 * 1000) / 1000 || 0;
+  const rz1 = Math.round(z1 * 1000) / 1000 || 0;
+  const rz2 = Math.round(z2 * 1000) / 1000 || 0;
+  const rtx0 = Math.round(tx0 * 1000) / 1000 || 0;
+  const rtx1 = Math.round(tx1 * 1000) / 1000 || 0;
+  const rtx2 = Math.round(tx2 * 1000) / 1000 || 0;
+  return `matrix3d(${rx0},${rx1},${rx2},0,` +
+    `${ry0},${ry1},${ry2},0,` +
+    `${rz0},${rz1},${rz2},0,` +
+    `${rtx0},${rtx1},${rtx2},1)`;
 }
 
 function isConvexPolygonPoints(points: Array<[number, number]>): boolean {
@@ -532,47 +633,171 @@ function offsetTrianglePoints(
 ): number[] {
   if (amount <= 0) return [x0, y0, x1, y1, x2, y2];
   const area = (x0 * y1 - y0 * x1 + x1 * y2 - y1 * x2 + x2 * y0 - y2 * x0) / 2;
-  if (Math.abs(area) <= BASIS_EPS) return expandClipPoints([x0, y0, x1, y1, x2, y2], amount);
+  const fallback = () => expandClipPoints([x0, y0, x1, y1, x2, y2], amount);
+  if (Math.abs(area) <= BASIS_EPS) return fallback();
 
   const outwardSign = area > 0 ? 1 : -1;
-  const line = (ax: number, ay: number, bx: number, by: number) => {
-    const dx = bx - ax;
-    const dy = by - ay;
-    const length = Math.hypot(dx, dy);
-    if (length <= BASIS_EPS) return null;
-    const ox = outwardSign * (dy / length) * amount;
-    const oy = outwardSign * (-dx / length) * amount;
-    return {
-      ax: ax + ox,
-      ay: ay + oy,
-      bx: bx + ox,
-      by: by + oy,
-    };
-  };
 
-  const l0 = line(x0, y0, x1, y1);
-  const l1 = line(x1, y1, x2, y2);
-  const l2 = line(x2, y2, x0, y0);
-  if (!l0 || !l1 || !l2) return expandClipPoints([x0, y0, x1, y1, x2, y2], amount);
+  const dx0 = x1 - x0;
+  const dy0 = y1 - y0;
+  const len0 = Math.sqrt(dx0 * dx0 + dy0 * dy0);
+  const dx1 = x2 - x1;
+  const dy1 = y2 - y1;
+  const len1 = Math.sqrt(dx1 * dx1 + dy1 * dy1);
+  const dx2 = x0 - x2;
+  const dy2 = y0 - y2;
+  const len2 = Math.sqrt(dx2 * dx2 + dy2 * dy2);
+  if (len0 <= BASIS_EPS || len1 <= BASIS_EPS || len2 <= BASIS_EPS) return fallback();
 
-  const p0 = intersect2DLinesRaw(l2.ax, l2.ay, l2.bx, l2.by, l0.ax, l0.ay, l0.bx, l0.by);
-  const p1 = intersect2DLinesRaw(l0.ax, l0.ay, l0.bx, l0.by, l1.ax, l1.ay, l1.bx, l1.by);
-  const p2 = intersect2DLinesRaw(l1.ax, l1.ay, l1.bx, l1.by, l2.ax, l2.ay, l2.bx, l2.by);
-  if (!p0 || !p1 || !p2) return expandClipPoints([x0, y0, x1, y1, x2, y2], amount);
+  const ox0 = outwardSign * (dy0 / len0) * amount;
+  const oy0 = outwardSign * (-dx0 / len0) * amount;
+  const l0ax = x0 + ox0;
+  const l0ay = y0 + oy0;
+  const l0bx = x1 + ox0;
+  const l0by = y1 + oy0;
+
+  const ox1 = outwardSign * (dy1 / len1) * amount;
+  const oy1 = outwardSign * (-dx1 / len1) * amount;
+  const l1ax = x1 + ox1;
+  const l1ay = y1 + oy1;
+  const l1bx = x2 + ox1;
+  const l1by = y2 + oy1;
+
+  const ox2 = outwardSign * (dy2 / len2) * amount;
+  const oy2 = outwardSign * (-dx2 / len2) * amount;
+  const l2ax = x2 + ox2;
+  const l2ay = y2 + oy2;
+  const l2bx = x0 + ox2;
+  const l2by = y0 + oy2;
+
+  const r0x = l2bx - l2ax;
+  const r0y = l2by - l2ay;
+  const s0x = l0bx - l0ax;
+  const s0y = l0by - l0ay;
+  const det0 = r0x * s0y - r0y * s0x;
+  if (Math.abs(det0) <= BASIS_EPS) return fallback();
+  const q0x = l0ax - l2ax;
+  const q0y = l0ay - l2ay;
+  const t0 = (q0x * s0y - q0y * s0x) / det0;
+  let p0x = l2ax + t0 * r0x;
+  let p0y = l2ay + t0 * r0y;
+
+  const r1x = l0bx - l0ax;
+  const r1y = l0by - l0ay;
+  const s1x = l1bx - l1ax;
+  const s1y = l1by - l1ay;
+  const det1 = r1x * s1y - r1y * s1x;
+  if (Math.abs(det1) <= BASIS_EPS) return fallback();
+  const q1x = l1ax - l0ax;
+  const q1y = l1ay - l0ay;
+  const t1 = (q1x * s1y - q1y * s1x) / det1;
+  let p1x = l0ax + t1 * r1x;
+  let p1y = l0ay + t1 * r1y;
+
+  const r2x = l1bx - l1ax;
+  const r2y = l1by - l1ay;
+  const s2x = l2bx - l2ax;
+  const s2y = l2by - l2ay;
+  const det2 = r2x * s2y - r2y * s2x;
+  if (Math.abs(det2) <= BASIS_EPS) return fallback();
+  const q2x = l2ax - l1ax;
+  const q2y = l2ay - l1ay;
+  const t2 = (q2x * s2y - q2y * s2x) / det2;
+  let p2x = l1ax + t2 * r2x;
+  let p2y = l1ay + t2 * r2y;
 
   const maxMiter = Math.max(2, amount * 4);
-  const clamp = (px: number, py: number, ox: number, oy: number): Vec2 => {
-    const dx = px - ox;
-    const dy = py - oy;
-    const miter = Math.hypot(dx, dy);
-    return miter > maxMiter
-      ? [ox + (dx / miter) * maxMiter, oy + (dy / miter) * maxMiter]
-      : [px, py];
-  };
-  const c0 = clamp(p0[0], p0[1], x0, y0);
-  const c1 = clamp(p1[0], p1[1], x1, y1);
-  const c2 = clamp(p2[0], p2[1], x2, y2);
-  return [c0[0], c0[1], c1[0], c1[1], c2[0], c2[1]];
+  const m0x = p0x - x0;
+  const m0y = p0y - y0;
+  const m0 = Math.sqrt(m0x * m0x + m0y * m0y);
+  if (m0 > maxMiter) {
+    p0x = x0 + (m0x / m0) * maxMiter;
+    p0y = y0 + (m0y / m0) * maxMiter;
+  }
+  const m1x = p1x - x1;
+  const m1y = p1y - y1;
+  const m1 = Math.sqrt(m1x * m1x + m1y * m1y);
+  if (m1 > maxMiter) {
+    p1x = x1 + (m1x / m1) * maxMiter;
+    p1y = y1 + (m1y / m1) * maxMiter;
+  }
+  const m2x = p2x - x2;
+  const m2y = p2y - y2;
+  const m2 = Math.sqrt(m2x * m2x + m2y * m2y);
+  if (m2 > maxMiter) {
+    p2x = x2 + (m2x / m2) * maxMiter;
+    p2y = y2 + (m2y / m2) * maxMiter;
+  }
+
+  return [p0x, p0y, p1x, p1y, p2x, p2y];
+}
+
+function offsetStableTrianglePoints(
+  left: number,
+  right: number,
+  height: number,
+  amount: number,
+): number[] {
+  const baseWidth = left + right;
+  if (
+    amount <= 0 ||
+    height <= BASIS_EPS ||
+    baseWidth <= BASIS_EPS ||
+    !Number.isFinite(left + right + height + amount)
+  ) {
+    return offsetTrianglePoints(left, 0, 0, height, baseWidth, height, amount);
+  }
+
+  const leftLen = Math.sqrt(left * left + height * height);
+  const rightLen = Math.sqrt(right * right + height * height);
+  if (leftLen <= BASIS_EPS || rightLen <= BASIS_EPS) {
+    return offsetTrianglePoints(left, 0, 0, height, baseWidth, height, amount);
+  }
+
+  const leftOffsetX = -amount * height / leftLen;
+  const leftOffsetY = -amount * left / leftLen;
+  const rightOffsetX = amount * height / rightLen;
+  const rightOffsetY = -amount * right / rightLen;
+  const apexLineLeftX = left + leftOffsetX;
+  const apexLineLeftY = leftOffsetY;
+  const apexLineRightX = baseWidth + rightOffsetX;
+  const apexLineRightY = height + rightOffsetY;
+  const det = -height * baseWidth;
+  if (Math.abs(det) <= BASIS_EPS) {
+    return offsetTrianglePoints(left, 0, 0, height, baseWidth, height, amount);
+  }
+
+  const qx = apexLineLeftX - apexLineRightX;
+  const qy = apexLineLeftY - apexLineRightY;
+  const t = (qx * height + qy * left) / det;
+  let apexX = apexLineRightX - t * right;
+  let apexY = apexLineRightY - t * height;
+  let baseLeftX = -amount * (left + leftLen) / height;
+  let baseLeftY = height + amount;
+  let baseRightX = baseWidth + amount * (right + rightLen) / height;
+  let baseRightY = baseLeftY;
+
+  const maxMiter = Math.max(2, amount * 4);
+  const apexDx = apexX - left;
+  const apexDy = apexY;
+  const apexMiter = Math.sqrt(apexDx * apexDx + apexDy * apexDy);
+  if (apexMiter > maxMiter) {
+    apexX = left + (apexDx / apexMiter) * maxMiter;
+    apexY = (apexDy / apexMiter) * maxMiter;
+  }
+  const leftMiter = Math.sqrt(baseLeftX * baseLeftX + amount * amount);
+  if (leftMiter > maxMiter) {
+    baseLeftX = (baseLeftX / leftMiter) * maxMiter;
+    baseLeftY = height + (amount / leftMiter) * maxMiter;
+  }
+  const rightDx = baseRightX - baseWidth;
+  const rightMiter = Math.sqrt(rightDx * rightDx + amount * amount);
+  if (rightMiter > maxMiter) {
+    baseRightX = baseWidth + (rightDx / rightMiter) * maxMiter;
+    baseRightY = height + (amount / rightMiter) * maxMiter;
+  }
+
+  return [apexX, apexY, baseLeftX, baseLeftY, baseRightX, baseRightY];
 }
 
 function finiteNumber(value: unknown, fallback: number): number {
@@ -1910,9 +2135,12 @@ function computeTextureAtlasPlan(
 function computeSolidTriangleColorPlanFromNormal(
   polygon: Polygon,
   index: number,
-  normal: Vec3,
+  nx: number,
+  ny: number,
+  nz: number,
   options: RenderTextureAtlasOptions,
   includeColor: boolean,
+  colorOverride?: string,
 ): SolidTriangleColorPlan {
   const internalOptions = options as InternalRenderTextureAtlasOptions;
   let bakedColorValue = "";
@@ -1920,6 +2148,7 @@ function computeSolidTriangleColorPlanFromNormal(
   let bakedAlpha: number | undefined;
   let dynamicVars = "";
   if (includeColor) {
+    const baseColor = colorOverride ?? polygon.color ?? "#cccccc";
     const directionalCfg = options.directionalLight;
     const ambientCfg = options.ambientLight;
     const lightDir = directionalCfg?.direction ?? DEFAULT_LIGHT_DIR;
@@ -1929,13 +2158,13 @@ function computeSolidTriangleColorPlanFromNormal(
     const ambientIntensity = Math.max(0, ambientCfg?.intensity ?? DEFAULT_AMBIENT_INTENSITY);
     const lLen = Math.hypot(lightDir[0], lightDir[1], lightDir[2]) || 1;
     const lx = lightDir[0] / lLen, ly = lightDir[1] / lLen, lz = lightDir[2] / lLen;
-    const directScale = lightIntensity * Math.max(0, normal[0] * lx + normal[1] * ly + normal[2] * lz);
-    const shadedColorRaw = shadePolygon(polygon.color ?? "#cccccc", directScale, lightColor, ambientColor, ambientIntensity);
+    const directScale = lightIntensity * Math.max(0, nx * lx + ny * ly + nz * lz);
+    const shadedColorRaw = shadePolygon(baseColor, directScale, lightColor, ambientColor, ambientIntensity);
     const textureLighting = options.textureLighting ?? "baked";
     const shadedColor = textureLighting === "baked" && internalOptions.stableTriangleColorSteps
       ? quantizeCssColor(shadedColorRaw, internalOptions.stableTriangleColorSteps)
       : shadedColorRaw;
-    const base = parseHex(polygon.color ?? "#cccccc");
+    const base = parseHex(baseColor);
     const useDefaultPaint = shadedColor === options.solidPaintDefaults?.paintColor;
     const useDefaultDynamicColor =
       textureLighting === "dynamic" && rgbKey(base) === options.solidPaintDefaults?.dynamicColorKey;
@@ -1945,7 +2174,7 @@ function computeSolidTriangleColorPlanFromNormal(
     bakedRgb = bakedColorValue ? parseHex(bakedColorValue) : undefined;
     bakedAlpha = bakedColorValue ? parseAlpha(bakedColorValue) : undefined;
     dynamicVars = textureLighting === "dynamic"
-      ? `--pnx:${normal[0].toFixed(4)};--pny:${normal[1].toFixed(4)};--pnz:${normal[2].toFixed(4)};` +
+      ? `--pnx:${nx.toFixed(4)};--pny:${ny.toFixed(4)};--pnz:${nz.toFixed(4)};` +
         (useDefaultDynamicColor
           ? ""
           : `--psr:${(base.r / 255).toFixed(4)};--psg:${(base.g / 255).toFixed(4)};--psb:${(base.b / 255).toFixed(4)};`)
@@ -1985,12 +2214,12 @@ function computeSolidTriangleColorPlan(
   let nx = -(e10y * e20z - e10z * e20y);
   let ny = -(e10z * e20x - e10x * e20z);
   let nz = -(e10x * e20y - e10y * e20x);
-  const nLen = Math.hypot(nx, ny, nz);
+  const nLen = Math.sqrt(nx * nx + ny * ny + nz * nz);
   if (nLen <= BASIS_EPS) return null;
   nx /= nLen;
   ny /= nLen;
   nz /= nLen;
-  return computeSolidTriangleColorPlanFromNormal(polygon, index, [nx, ny, nz], options, true);
+  return computeSolidTriangleColorPlanFromNormal(polygon, index, nx, ny, nz, options, true);
 }
 
 function computeSolidTrianglePlan(
@@ -2001,32 +2230,67 @@ function computeSolidTrianglePlan(
 ): SolidTrianglePlan | null {
   if (polygon.texture || polygon.vertices.length !== 3) return null;
 
-  const internalOptions = options as InternalRenderTextureAtlasOptions;
   const tile = options.tileSize ?? DEFAULT_TILE;
   const elev = options.layerElevation ?? tile;
   const v0 = polygon.vertices[0];
   const v1 = polygon.vertices[1];
   const v2 = polygon.vertices[2];
-  const pts: Vec3[] = [
-    [v0[1] * tile, v0[0] * tile, v0[2] * elev],
-    [v1[1] * tile, v1[0] * tile, v1[2] * elev],
-    [v2[1] * tile, v2[0] * tile, v2[2] * elev],
-  ];
-  const e10x = pts[1][0] - pts[0][0];
-  const e10y = pts[1][1] - pts[0][1];
-  const e10z = pts[1][2] - pts[0][2];
-  const e20x = pts[2][0] - pts[0][0];
-  const e20y = pts[2][1] - pts[0][1];
-  const e20z = pts[2][2] - pts[0][2];
+  const p0x = v0[1] * tile;
+  const p0y = v0[0] * tile;
+  const p0z = v0[2] * elev;
+  const p1x = v1[1] * tile;
+  const p1y = v1[0] * tile;
+  const p1z = v1[2] * elev;
+  const p2x = v2[1] * tile;
+  const p2y = v2[0] * tile;
+  const p2z = v2[2] * elev;
+  return computeSolidTrianglePlanFromCssPoints(
+    polygon,
+    index,
+    options,
+    computeOptions,
+    p0x,
+    p0y,
+    p0z,
+    p1x,
+    p1y,
+    p1z,
+    p2x,
+    p2y,
+    p2z,
+  );
+}
+
+function computeSolidTrianglePlanFromCssPoints(
+  polygon: Polygon,
+  index: number,
+  options: RenderTextureAtlasOptions,
+  computeOptions: SolidTriangleComputeOptions,
+  p0x: number,
+  p0y: number,
+  p0z: number,
+  p1x: number,
+  p1y: number,
+  p1z: number,
+  p2x: number,
+  p2y: number,
+  p2z: number,
+): SolidTrianglePlan | null {
+  const internalOptions = options as InternalRenderTextureAtlasOptions;
+  const e10x = p1x - p0x;
+  const e10y = p1y - p0y;
+  const e10z = p1z - p0z;
+  const e20x = p2x - p0x;
+  const e20y = p2y - p0y;
+  const e20z = p2z - p0z;
   let nx = -(e10y * e20z - e10z * e20y);
   let ny = -(e10z * e20x - e10x * e20z);
   let nz = -(e10x * e20y - e10y * e20x);
-  const nLen = Math.hypot(nx, ny, nz);
+  const nLen = Math.sqrt(nx * nx + ny * ny + nz * nz);
   if (nLen <= BASIS_EPS) return null;
   nx /= nLen;
   ny /= nLen;
   nz /= nLen;
-  const normal: Vec3 = [nx, ny, nz];
 
   let basisHint = computeOptions.basis;
   let a = basisHint?.a ?? 0;
@@ -2042,23 +2306,48 @@ function computeSolidTrianglePlan(
     a = 0;
     b = 1;
     c = 2;
+  } else if (
+    !(
+      (a === 0 && b === 1 && c === 2) ||
+      (a === 1 && b === 2 && c === 0) ||
+      (a === 2 && b === 0 && c === 1)
+    )
+  ) {
+    basisHint = undefined;
+    a = 0;
+    b = 1;
+    c = 2;
   }
   const retryWithoutBasis = (): SolidTrianglePlan | null =>
     basisHint
-      ? computeSolidTrianglePlan(polygon, index, options, {
-          ...computeOptions,
-          basis: undefined,
-        })
+      ? computeSolidTrianglePlanFromCssPoints(
+          polygon,
+          index,
+          options,
+          {
+            ...computeOptions,
+            basis: undefined,
+          },
+          p0x,
+          p0y,
+          p0z,
+          p1x,
+          p1y,
+          p1z,
+          p2x,
+          p2y,
+          p2z,
+        )
       : null;
 
   if (!basisHint) {
     const len01Sq = e10x * e10x + e10y * e10y + e10z * e10z;
-    const e21x = pts[2][0] - pts[1][0];
-    const e21y = pts[2][1] - pts[1][1];
-    const e21z = pts[2][2] - pts[1][2];
-    const e02x = pts[0][0] - pts[2][0];
-    const e02y = pts[0][1] - pts[2][1];
-    const e02z = pts[0][2] - pts[2][2];
+    const e21x = p2x - p1x;
+    const e21y = p2y - p1y;
+    const e21z = p2z - p1z;
+    const e02x = p0x - p2x;
+    const e02y = p0y - p2y;
+    const e02z = p0z - p2z;
     const len12Sq = e21x * e21x + e21y * e21y + e21z * e21z;
     const len20Sq = e02x * e02x + e02y * e02y + e02z * e02z;
     let baseLengthSq = len01Sq;
@@ -2075,92 +2364,59 @@ function computeSolidTrianglePlan(
     }
   }
 
-  let av = pts[a];
-  let bv = pts[b];
-  const cv = pts[c];
-  let baseDx = bv[0] - av[0];
-  let baseDy = bv[1] - av[1];
-  let baseDz = bv[2] - av[2];
-  let baseLength = Math.hypot(baseDx, baseDy, baseDz);
+  let avx: number;
+  let avy: number;
+  let avz: number;
+  let bvx: number;
+  let bvy: number;
+  let bvz: number;
+  const cvx = c === 0 ? p0x : c === 1 ? p1x : p2x;
+  const cvy = c === 0 ? p0y : c === 1 ? p1y : p2y;
+  const cvz = c === 0 ? p0z : c === 1 ? p1z : p2z;
+  if (a === 0) {
+    avx = p0x; avy = p0y; avz = p0z;
+  } else if (a === 1) {
+    avx = p1x; avy = p1y; avz = p1z;
+  } else {
+    avx = p2x; avy = p2y; avz = p2z;
+  }
+  if (b === 0) {
+    bvx = p0x; bvy = p0y; bvz = p0z;
+  } else if (b === 1) {
+    bvx = p1x; bvy = p1y; bvz = p1z;
+  } else {
+    bvx = p2x; bvy = p2y; bvz = p2z;
+  }
+
+  let baseDx = bvx - avx;
+  let baseDy = bvy - avy;
+  let baseDz = bvz - avz;
+  let baseLength = Math.sqrt(baseDx * baseDx + baseDy * baseDy + baseDz * baseDz);
   if (baseLength <= BASIS_EPS) return retryWithoutBasis();
 
-  let xAxis: Vec3 = [
-    baseDx / baseLength,
-    baseDy / baseLength,
-    baseDz / baseLength,
-  ];
-  const ac: Vec3 = [cv[0] - av[0], cv[1] - av[1], cv[2] - av[2]];
-  let apexX = dotVec(ac, xAxis);
-  let foot: Vec3 = [
-    av[0] + xAxis[0] * apexX,
-    av[1] + xAxis[1] * apexX,
-    av[2] + xAxis[2] * apexX,
-  ];
-  let yAxisRaw: Vec3 = [
-    foot[0] - cv[0],
-    foot[1] - cv[1],
-    foot[2] - cv[2],
-  ];
-  let height = Math.hypot(yAxisRaw[0], yAxisRaw[1], yAxisRaw[2]);
+  let x0 = baseDx / baseLength;
+  let x1 = baseDy / baseLength;
+  let x2 = baseDz / baseLength;
+  let apexX = (cvx - avx) * x0 + (cvy - avy) * x1 + (cvz - avz) * x2;
+  let y0 = ny * x2 - nz * x1;
+  let y1 = nz * x0 - nx * x2;
+  let y2 = nx * x1 - ny * x0;
+  let height = nLen / baseLength;
   if (height <= BASIS_EPS) return retryWithoutBasis();
-  let yAxis: Vec3 = [
-    yAxisRaw[0] / height,
-    yAxisRaw[1] / height,
-    yAxisRaw[2] / height,
-  ];
-
-  if (dotVec(crossVec(xAxis, yAxis), normal) < 0) {
-    const nextA = b;
-    b = a;
-    a = nextA;
-    av = pts[a];
-    bv = pts[b];
-    baseDx = bv[0] - av[0];
-    baseDy = bv[1] - av[1];
-    baseDz = bv[2] - av[2];
-    baseLength = Math.hypot(baseDx, baseDy, baseDz);
-    if (baseLength <= BASIS_EPS) return retryWithoutBasis();
-    xAxis = [
-      baseDx / baseLength,
-      baseDy / baseLength,
-      baseDz / baseLength,
-    ];
-    const nextAc: Vec3 = [cv[0] - av[0], cv[1] - av[1], cv[2] - av[2]];
-    apexX = dotVec(nextAc, xAxis);
-    foot = [
-      av[0] + xAxis[0] * apexX,
-      av[1] + xAxis[1] * apexX,
-      av[2] + xAxis[2] * apexX,
-    ];
-    yAxisRaw = [
-      foot[0] - cv[0],
-      foot[1] - cv[1],
-      foot[2] - cv[2],
-    ];
-    height = Math.hypot(yAxisRaw[0], yAxisRaw[1], yAxisRaw[2]);
-    if (height <= BASIS_EPS) return retryWithoutBasis();
-    yAxis = [
-      yAxisRaw[0] / height,
-      yAxisRaw[1] / height,
-      yAxisRaw[2] / height,
-    ];
-  }
 
   const left = Math.max(0, Math.min(baseLength, apexX));
   const right = Math.max(0, baseLength - left);
-  const expanded = offsetTrianglePoints(
-    left, 0,
-    0, height,
-    left + right, height,
-    SOLID_TRIANGLE_BLEED,
-  );
-  const apex2: Vec2 = [expanded[0], expanded[1]];
-  const baseLeft2: Vec2 = [expanded[2], expanded[3]];
-  const baseRight2: Vec2 = [expanded[4], expanded[5]];
-  const baseY = (baseLeft2[1] + baseRight2[1]) / 2;
-  const leftPx = apex2[0] - baseLeft2[0];
-  const rightPx = baseRight2[0] - apex2[0];
-  const heightPx = baseY - apex2[1];
+  const expanded = offsetStableTrianglePoints(left, right, height, SOLID_TRIANGLE_BLEED);
+  const apex2x = expanded[0];
+  const apex2y = expanded[1];
+  const baseLeft2x = expanded[2];
+  const baseLeft2y = expanded[3];
+  const baseRight2x = expanded[4];
+  const baseRight2y = expanded[5];
+  const baseY = (baseLeft2y + baseRight2y) / 2;
+  const leftPx = apex2x - baseLeft2x;
+  const rightPx = baseRight2x - apex2x;
+  const heightPx = baseY - apex2y;
   if (
     leftPx <= BASIS_EPS ||
     rightPx <= BASIS_EPS ||
@@ -2169,59 +2425,54 @@ function computeSolidTrianglePlan(
   ) {
     return retryWithoutBasis();
   }
-  const colorPlan = computeSolidTriangleColorPlanFromNormal(
-    polygon,
-    index,
-    normal,
-    options,
-    computeOptions.includeColor ?? true,
+  const includeColor = computeOptions.includeColor ?? true;
+  let colorComputed = false;
+  let bakedColorValue: string | undefined;
+  let bakedRgb: RGB | undefined;
+  let bakedAlpha: number | undefined;
+  let dynamicVars = "";
+  if (includeColor) {
+    const colorPlan = computeSolidTriangleColorPlanFromNormal(
+      polygon,
+      index,
+      nx,
+      ny,
+      nz,
+      options,
+      true,
+      computeOptions.color,
+    );
+    colorComputed = colorPlan.colorComputed;
+    bakedColorValue = colorPlan.bakedColor;
+    bakedRgb = colorPlan.bakedRgb;
+    bakedAlpha = colorPlan.bakedAlpha;
+    dynamicVars = colorPlan.dynamicVars ?? "";
+  }
+  const bakedColor = bakedColorValue ? `color:${bakedColorValue};` : "";
+  const invCanonicalSize = 1 / SOLID_TRIANGLE_CANONICAL_SIZE;
+  const baseWidthPx = leftPx + rightPx;
+  const xScale = baseWidthPx * invCanonicalSize;
+  const yXScale = (rightPx - leftPx) * 0.5 * invCanonicalSize;
+  const yYScale = heightPx * invCanonicalSize;
+  const txXOffset = apex2x - left - baseWidthPx * 0.5;
+  const txYOffset = apex2y;
+  const xCol0 = x0 * xScale;
+  const xCol1 = x1 * xScale;
+  const xCol2 = x2 * xScale;
+  const yCol0 = x0 * yXScale + y0 * yYScale;
+  const yCol1 = x1 * yXScale + y1 * yYScale;
+  const yCol2 = x2 * yXScale + y2 * yYScale;
+  const txCol0 = cvx + x0 * txXOffset + y0 * txYOffset;
+  const txCol1 = cvy + x1 * txXOffset + y1 * txYOffset;
+  const txCol2 = cvz + x2 * txXOffset + y2 * txYOffset;
+  const matrixDecimals = computeOptions.matrixDecimals ?? stableTriangleMatrixDecimals(internalOptions);
+  const transformText = formatAffineMatrix3dTransformScalars(
+    xCol0, xCol1, xCol2,
+    yCol0, yCol1, yCol2,
+    nx, ny, nz,
+    txCol0, txCol1, txCol2,
+    matrixDecimals,
   );
-  const bakedColor = colorPlan.bakedColor ? `color:${colorPlan.bakedColor};` : "";
-  const dynamicVars = colorPlan.dynamicVars ?? "";
-  const cv0 = cv[0];
-  const cv1 = cv[1];
-  const cv2 = cv[2];
-  const apexOffsetX = apex2[0] - left;
-  const apexY = apex2[1];
-  const baseLeftOffsetX = baseLeft2[0] - left;
-  const baseRightOffsetX = baseRight2[0] - left;
-  const apex: Vec3 = [
-    cv0 + apexOffsetX * xAxis[0] + apexY * yAxis[0],
-    cv1 + apexOffsetX * xAxis[1] + apexY * yAxis[1],
-    cv2 + apexOffsetX * xAxis[2] + apexY * yAxis[2],
-  ];
-  const baseLeft: Vec3 = [
-    cv0 + baseLeftOffsetX * xAxis[0] + baseY * yAxis[0],
-    cv1 + baseLeftOffsetX * xAxis[1] + baseY * yAxis[1],
-    cv2 + baseLeftOffsetX * xAxis[2] + baseY * yAxis[2],
-  ];
-  const baseRight: Vec3 = [
-    cv0 + baseRightOffsetX * xAxis[0] + baseY * yAxis[0],
-    cv1 + baseRightOffsetX * xAxis[1] + baseY * yAxis[1],
-    cv2 + baseRightOffsetX * xAxis[2] + baseY * yAxis[2],
-  ];
-  const halfBase = SOLID_TRIANGLE_CANONICAL_SIZE / 2;
-  const xCol: Vec3 = [
-    (baseRight[0] - baseLeft[0]) / SOLID_TRIANGLE_CANONICAL_SIZE,
-    (baseRight[1] - baseLeft[1]) / SOLID_TRIANGLE_CANONICAL_SIZE,
-    (baseRight[2] - baseLeft[2]) / SOLID_TRIANGLE_CANONICAL_SIZE,
-  ];
-  const txCol: Vec3 = [
-    apex[0] - xCol[0] * halfBase,
-    apex[1] - xCol[1] * halfBase,
-    apex[2] - xCol[2] * halfBase,
-  ];
-  const yCol: Vec3 = [
-    (baseLeft[0] - txCol[0]) / SOLID_TRIANGLE_CANONICAL_SIZE,
-    (baseLeft[1] - txCol[1]) / SOLID_TRIANGLE_CANONICAL_SIZE,
-    (baseLeft[2] - txCol[2]) / SOLID_TRIANGLE_CANONICAL_SIZE,
-  ];
-  const matrixDecimals = Math.max(
-    0,
-    Math.min(6, Math.floor(internalOptions.stableTriangleMatrixDecimals ?? DEFAULT_MATRIX_DECIMALS)),
-  );
-  const canonicalMatrix = formatAffineMatrix3dColumns(xCol, yCol, normal, txCol, matrixDecimals);
-  const transformText = `matrix3d(${canonicalMatrix})`;
   const textureLighting = options.textureLighting ?? "baked";
   const optimizeStyleText =
     internalOptions.optimizeStableTriangleStyle === true &&
@@ -2230,17 +2481,20 @@ function computeSolidTrianglePlan(
     ? ""
     : `transform:${transformText};` + bakedColor + dynamicVars;
 
+  const basis = basisHint && basisHint.a === a && basisHint.b === b && basisHint.c === c
+    ? basisHint
+    : { a, b, c };
   return {
     index,
     polygon,
     styleText,
     transformText,
-    basis: { a, b, c },
-    colorComputed: colorPlan.colorComputed,
-    bakedColor: colorPlan.bakedColor,
-    bakedRgb: colorPlan.bakedRgb,
-    bakedAlpha: colorPlan.bakedAlpha,
-    dynamicVars: colorPlan.dynamicVars,
+    basis,
+    colorComputed,
+    bakedColor: bakedColorValue,
+    bakedRgb,
+    bakedAlpha,
+    dynamicVars,
   };
 }
 
@@ -2758,6 +3012,11 @@ function applyPolygonDataAttrs(el: HTMLElement, polygon: Polygon): void {
     }
   }
   ELEMENT_DATA_KEYS.set(el, nextDataKeys);
+  (el as SolidTriangleElement).__polycssHasDataAttrs = nextDataKeys.length > 0;
+}
+
+function hasPolygonDataAttrs(el: HTMLElement): boolean {
+  return (el as SolidTriangleElement).__polycssHasDataAttrs === true;
 }
 
 function formatScaledMatrixFromPlan(
@@ -3617,13 +3876,14 @@ function applySolidTriangleElement(
   el.setAttribute("style", entry.styleText);
   const triangleEl = el as SolidTriangleElement;
   triangleEl.__polycssSolidTriangleBasis = entry.basis;
+  triangleEl.__polycssSolidTriangleHidden = false;
   if (entry.colorComputed) {
     triangleEl.__polycssSolidTriangleColor = entry.bakedColor ?? "";
     triangleEl.__polycssSolidTriangleColorRgb = entry.bakedRgb;
     triangleEl.__polycssSolidTriangleColorAlpha = entry.bakedAlpha;
   }
   triangleEl.__polycssSolidTriangleColorFrame = undefined;
-  if (entry.polygon.data || ELEMENT_DATA_KEYS.get(el)?.length) {
+  if (entry.polygon.data || hasPolygonDataAttrs(el)) {
     applyPolygonDataAttrs(el, entry.polygon);
   }
 }
@@ -3635,7 +3895,7 @@ function applySolidTriangleElementColor(
   colorUpdateAllowed?: boolean,
 ): void {
   if (!entry.colorComputed) {
-    if (entry.polygon.data || ELEMENT_DATA_KEYS.get(el)?.length) {
+    if (entry.polygon.data || hasPolygonDataAttrs(el)) {
       applyPolygonDataAttrs(el, entry.polygon);
     }
     return;
@@ -3669,7 +3929,7 @@ function applySolidTriangleElementColor(
     triangleEl.__polycssSolidTriangleColorAlpha = nextAlpha;
     triangleEl.__polycssSolidTriangleColorFrame = colorState.colorFrame;
   }
-  if (entry.polygon.data || ELEMENT_DATA_KEYS.get(el)?.length) {
+  if (entry.polygon.data || hasPolygonDataAttrs(el)) {
     applyPolygonDataAttrs(el, entry.polygon);
   }
 }
@@ -3681,10 +3941,14 @@ function applySolidTriangleElementFast(
   colorUpdateAllowed?: boolean,
 ): void {
   const triangleEl = el as SolidTriangleElement;
-  triangleEl.__polycssSolidTriangleBasis = entry.basis;
-  if (el.style.visibility) el.style.visibility = "";
+  if (triangleEl.__polycssSolidTriangleBasis !== entry.basis) {
+    triangleEl.__polycssSolidTriangleBasis = entry.basis;
+  }
+  showSolidTriangleElement(el);
   el.style.transform = entry.transformText;
-  applySolidTriangleElementColor(el, entry, colorState, colorUpdateAllowed);
+  if (entry.colorComputed || entry.polygon.data || hasPolygonDataAttrs(el)) {
+    applySolidTriangleElementColor(el, entry, colorState, colorUpdateAllowed);
+  }
 }
 
 function applySolidTriangleElementColorOnly(
@@ -3693,7 +3957,7 @@ function applySolidTriangleElementColorOnly(
   colorState: StableTriangleColorState,
   colorUpdateAllowed?: boolean,
 ): void {
-  if (el.style.visibility) el.style.visibility = "";
+  showSolidTriangleElement(el);
   applySolidTriangleElementColor(el, entry, colorState, colorUpdateAllowed);
 }
 
@@ -3702,16 +3966,28 @@ function applySolidTriangleElementTransformOnly(
   entry: SolidTrianglePlan,
 ): void {
   const triangleEl = el as SolidTriangleElement;
-  triangleEl.__polycssSolidTriangleBasis = entry.basis;
-  if (el.style.visibility) el.style.visibility = "";
+  if (triangleEl.__polycssSolidTriangleBasis !== entry.basis) {
+    triangleEl.__polycssSolidTriangleBasis = entry.basis;
+  }
+  showSolidTriangleElement(el);
   el.style.transform = entry.transformText;
-  if (entry.polygon.data || ELEMENT_DATA_KEYS.get(el)?.length) {
+  if (entry.polygon.data || hasPolygonDataAttrs(el)) {
     applyPolygonDataAttrs(el, entry.polygon);
   }
 }
 
+function showSolidTriangleElement(el: HTMLElement): void {
+  const triangleEl = el as SolidTriangleElement;
+  if (!triangleEl.__polycssSolidTriangleHidden) return;
+  el.style.visibility = "";
+  triangleEl.__polycssSolidTriangleHidden = false;
+}
+
 function hideSolidTriangleElement(el: HTMLElement): void {
+  const triangleEl = el as SolidTriangleElement;
+  if (triangleEl.__polycssSolidTriangleHidden) return;
   el.style.visibility = "hidden";
+  triangleEl.__polycssSolidTriangleHidden = true;
 }
 
 function stableTriangleColorBudgetCount(
@@ -3789,6 +4065,185 @@ function createHiddenSolidTriangleElement(
   return el;
 }
 
+function updateStableTriangleElementsStreaming(
+  rendered: RenderedPoly[],
+  polygons: Polygon[],
+  options: RenderTextureAtlasOptions,
+  optimizeTriangleStyle: boolean,
+  stableTriangleUpdateMode: "full" | "transform-only" | "color-only" | "plan-only",
+  colorState: StableTriangleColorState,
+): boolean {
+  const internalOptions = options as InternalRenderTextureAtlasOptions;
+  const stableTriangleDebug = internalOptions.stableTriangleDebug;
+  const colorOnly = optimizeTriangleStyle && stableTriangleUpdateMode === "color-only";
+  if (internalOptions.stableTriangleColorPolicy === "adaptive") return false;
+  if (rendered.length !== polygons.length) return false;
+  const matrixDecimals = stableTriangleMatrixDecimals(internalOptions);
+
+  for (let i = 0; i < rendered.length; i++) {
+    const item = rendered[i];
+    if (item.kind !== "triangle" || item.polygonIndex !== i || !polygons[i]) return false;
+  }
+
+  for (let i = 0; i < rendered.length; i++) {
+    const element = rendered[i].element as SolidTriangleElement;
+    const polygon = polygons[i];
+    if (colorOnly) {
+      if (
+        shouldComputeStableTriangleColor(
+          element,
+          i,
+          optimizeTriangleStyle,
+          stableTriangleDebug,
+          internalOptions.stableTriangleColorPolicy,
+          colorState,
+        )
+      ) {
+        const plan = computeSolidTriangleColorPlan(polygon, i, options);
+        if (!plan) continue;
+        applySolidTriangleElementColorOnly(
+          element,
+          plan,
+          colorState,
+        );
+      }
+      continue;
+    }
+
+    const plan = computeSolidTrianglePlan(polygon, i, options, {
+      basis: element.__polycssSolidTriangleBasis,
+      matrixDecimals,
+      includeColor: stableTriangleUpdateMode !== "plan-only" &&
+        stableTriangleUpdateMode !== "transform-only" &&
+        shouldComputeStableTriangleColor(
+          element,
+          i,
+          optimizeTriangleStyle,
+          stableTriangleDebug,
+          internalOptions.stableTriangleColorPolicy,
+          colorState,
+        ),
+    });
+    if (!plan) {
+      hideSolidTriangleElement(element);
+      continue;
+    }
+    if (optimizeTriangleStyle && stableTriangleUpdateMode === "plan-only") {
+      continue;
+    } else if (optimizeTriangleStyle && stableTriangleUpdateMode === "transform-only") {
+      applySolidTriangleElementTransformOnly(element, plan);
+    } else if (optimizeTriangleStyle) {
+      applySolidTriangleElementFast(element, plan, colorState);
+    } else {
+      applySolidTriangleElement(element, plan);
+    }
+  }
+
+  return true;
+}
+
+export function updateStableTriangleFrame(
+  rendered: RenderedPoly[],
+  polygons: Polygon[],
+  frame: SolidTriangleFrame,
+  options: RenderTextureAtlasOptions = {},
+): boolean {
+  const textureLighting = options.textureLighting ?? "baked";
+  const internalOptions = options as InternalRenderTextureAtlasOptions;
+  const optimizeTriangleStyle =
+    internalOptions.optimizeStableTriangleStyle === true &&
+    textureLighting === "baked";
+  if (!optimizeTriangleStyle) return false;
+  if (internalOptions.stableTriangleColorPolicy === "adaptive") return false;
+  if (rendered.length !== frame.polygonCount || polygons.length !== frame.polygonCount) return false;
+  if (frame.vertices.length < frame.polygonCount * 9) return false;
+
+  const stableTriangleDebug = internalOptions.stableTriangleDebug;
+  const stableTriangleUpdateMode = internalOptions.stableTriangleUpdateMode ??
+    (stableTriangleDebug === "plan-only" || stableTriangleDebug === "transform-only"
+      ? stableTriangleDebug
+      : "full");
+  if (stableTriangleUpdateMode === "color-only") return false;
+
+  const matrixDecimals = stableTriangleMatrixDecimals(internalOptions);
+  const colorState = stableTriangleColorState(internalOptions);
+  const tile = options.tileSize ?? DEFAULT_TILE;
+  const elev = options.layerElevation ?? tile;
+
+  for (let i = 0; i < rendered.length; i++) {
+    const item = rendered[i];
+    const polygon = polygons[i];
+    if (
+      item.kind !== "triangle" ||
+      item.polygonIndex !== i ||
+      !polygon ||
+      polygon.vertices.length !== 3 ||
+      polygon.texture ||
+      polygon.material?.texture
+    ) {
+      return false;
+    }
+  }
+
+  const values = frame.vertices;
+  for (let i = 0; i < rendered.length; i++) {
+    const element = rendered[i].element as SolidTriangleElement;
+    const polygon = polygons[i]!;
+    const offset = i * 9;
+    const p0x = values[offset + 1]! * tile;
+    const p0y = values[offset]! * tile;
+    const p0z = values[offset + 2]! * elev;
+    const p1x = values[offset + 4]! * tile;
+    const p1y = values[offset + 3]! * tile;
+    const p1z = values[offset + 5]! * elev;
+    const p2x = values[offset + 7]! * tile;
+    const p2y = values[offset + 6]! * tile;
+    const p2z = values[offset + 8]! * elev;
+    const plan = computeSolidTrianglePlanFromCssPoints(
+      polygon,
+      i,
+      options,
+      {
+        basis: element.__polycssSolidTriangleBasis,
+        matrixDecimals,
+        color: frame.colors?.[i],
+        includeColor: stableTriangleUpdateMode !== "plan-only" &&
+          stableTriangleUpdateMode !== "transform-only" &&
+          shouldComputeStableTriangleColor(
+            element,
+            i,
+            optimizeTriangleStyle,
+            stableTriangleDebug,
+            internalOptions.stableTriangleColorPolicy,
+            colorState,
+          ),
+      },
+      p0x,
+      p0y,
+      p0z,
+      p1x,
+      p1y,
+      p1z,
+      p2x,
+      p2y,
+      p2z,
+    );
+    if (!plan) {
+      hideSolidTriangleElement(element);
+      continue;
+    }
+    if (stableTriangleUpdateMode === "plan-only") {
+      continue;
+    } else if (stableTriangleUpdateMode === "transform-only") {
+      applySolidTriangleElementTransformOnly(element, plan);
+    } else {
+      applySolidTriangleElementFast(element, plan, colorState);
+    }
+  }
+
+  return true;
+}
+
 export function renderPolygonsWithStableTriangles(
   polygons: Polygon[],
   options: RenderTextureAtlasOptions = {},
@@ -3799,11 +4254,12 @@ export function renderPolygonsWithStableTriangles(
   if (polygons.some((polygon) => polygon.texture || polygon.vertices.length !== 3)) {
     return null;
   }
+  const matrixDecimals = stableTriangleMatrixDecimals(options as InternalRenderTextureAtlasOptions);
   const rendered: RenderedPoly[] = [];
 
   for (let i = 0; i < polygons.length; i += 1) {
     const polygon = polygons[i];
-    const plan = computeSolidTrianglePlan(polygon, i, options);
+    const plan = computeSolidTrianglePlan(polygon, i, options, { matrixDecimals });
     const element = plan
       ? createSolidTriangleElement(plan, doc)
       : createHiddenSolidTriangleElement(polygon, doc);
@@ -3841,6 +4297,22 @@ export function updatePolygonsWithStableTriangles(
       : "full");
   const colorOnly = optimizeTriangleStyle && stableTriangleUpdateMode === "color-only";
   const colorState = stableTriangleColorState(internalOptions);
+  const matrixDecimals = stableTriangleMatrixDecimals(internalOptions);
+  if (
+    updateStableTriangleElementsStreaming(
+      rendered,
+      polygons,
+      options,
+      optimizeTriangleStyle,
+      stableTriangleUpdateMode,
+      colorState,
+    )
+  ) {
+    return {
+      rendered,
+      dispose() {},
+    };
+  }
   const nextTrianglePlans: Array<SolidTrianglePlan | null> = new Array(rendered.length);
   const nextTriangleColorPlans: Array<SolidTriangleColorPlan | null> = new Array(rendered.length);
   for (let i = 0; i < rendered.length; i++) {
@@ -3862,6 +4334,7 @@ export function updatePolygonsWithStableTriangles(
     }
     nextTrianglePlans[i] = computeSolidTrianglePlan(polygons[i], i, options, {
       basis: element.__polycssSolidTriangleBasis,
+      matrixDecimals,
       includeColor: stableTriangleUpdateMode !== "plan-only" &&
         stableTriangleUpdateMode !== "transform-only" &&
         shouldComputeStableTriangleColor(
@@ -3954,6 +4427,19 @@ export function updatePolygonsWithStableTopology(
       : "full");
   const colorOnly = optimizeTriangleStyle && stableTriangleUpdateMode === "color-only";
   const colorState = stableTriangleColorState(internalOptions);
+  const matrixDecimals = stableTriangleMatrixDecimals(internalOptions);
+  if (
+    updateStableTriangleElementsStreaming(
+      rendered,
+      polygons,
+      options,
+      optimizeTriangleStyle,
+      stableTriangleUpdateMode,
+      colorState,
+    )
+  ) {
+    return true;
+  }
   const nextTrianglePlans: Array<SolidTrianglePlan | null> = [];
   const nextTriangleColorPlans: Array<SolidTriangleColorPlan | null> = [];
   const nextTexturePlans: Array<TextureAtlasPlan | null> = [];
@@ -3992,6 +4478,7 @@ export function updatePolygonsWithStableTopology(
       }
       const plan = computeSolidTrianglePlan(polygon, i, options, {
         basis: element.__polycssSolidTriangleBasis,
+        matrixDecimals,
         includeColor: stableTriangleUpdateMode !== "plan-only" &&
           stableTriangleUpdateMode !== "transform-only" &&
           shouldComputeStableTriangleColor(

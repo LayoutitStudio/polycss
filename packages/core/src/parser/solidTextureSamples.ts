@@ -1,5 +1,5 @@
 import type { Polygon, TextureTriangle, Vec2 } from "../types";
-import type { ParseResult } from "./types";
+import type { ParseAnimationController, ParseResult } from "./types";
 
 export interface SolidTextureSampleOptions {
   /**
@@ -60,6 +60,37 @@ interface ColorStats {
   sum: SampledColor;
   colors: Map<string, { color: SampledColor; count: number }>;
   count: number;
+}
+
+export interface SolidTextureBakedColorEntry {
+  index: number;
+  color: string;
+}
+
+export interface SolidTextureBakedAnimationInfo {
+  source: ParseAnimationController;
+  bakedColorEntries: readonly SolidTextureBakedColorEntry[];
+}
+
+export const SOLID_TEXTURE_BAKED_ANIMATION_INFO: unique symbol = Symbol(
+  "polycss.solidTextureBakedAnimationInfo",
+);
+const POLY_ANIMATION_TRIANGLE_FRAME_SOURCE = Symbol.for("polycss.animation.triangleFrameSource");
+
+interface PolyAnimationTriangleFrame {
+  polygonCount: number;
+  vertices: Float64Array;
+  colors?: readonly (string | undefined)[];
+  textureFlags?: readonly boolean[];
+  solidTriangles?: boolean;
+}
+
+interface SolidTextureBakedAnimation extends ParseAnimationController {
+  [SOLID_TEXTURE_BAKED_ANIMATION_INFO]?: SolidTextureBakedAnimationInfo;
+  [POLY_ANIMATION_TRIANGLE_FRAME_SOURCE]?: (
+    clip: number | string,
+    timeSeconds: number,
+  ) => PolyAnimationTriangleFrame | null | undefined;
 }
 
 const DEFAULT_MAX_TEXTURE_PIXELS = 16 * 1024 * 1024;
@@ -374,6 +405,27 @@ function bakePolygon(polygon: Polygon, color: string): Polygon {
   };
 }
 
+export function bakeSolidTextureSampledAnimationFrame(
+  frame: Polygon[],
+  bakedColorEntries: readonly SolidTextureBakedColorEntry[],
+): Polygon[] {
+  const nextFrame = frame.slice();
+  for (let i = 0; i < bakedColorEntries.length; i++) {
+    const entry = bakedColorEntries[i]!;
+    const polygon = frame[entry.index];
+    if (polygon) nextFrame[entry.index] = bakePolygon(polygon, entry.color);
+  }
+  return nextFrame;
+}
+
+export function getSolidTextureBakedAnimationInfo(
+  animation: ParseAnimationController | undefined,
+): SolidTextureBakedAnimationInfo | undefined {
+  return animation
+    ? (animation as SolidTextureBakedAnimation)[SOLID_TEXTURE_BAKED_ANIMATION_INFO]
+    : undefined;
+}
+
 interface SolidTextureBaker {
   bake(polygons: Polygon[]): { polygons: Polygon[]; changed: boolean };
 }
@@ -436,18 +488,72 @@ export async function bakeSolidTextureSamples(
   if (!baker) return result;
 
   const baked = baker.bake(result.polygons);
-  if (!baked.changed && !result.animation) return result;
+  if (!baked.changed) return result;
+  const bakedColorEntries: SolidTextureBakedColorEntry[] = [];
+  for (let index = 0; index < baked.polygons.length; index++) {
+    const polygon = baked.polygons[index]!;
+    const color = polygon.color;
+    if (polygon !== result.polygons[index] && color) {
+      bakedColorEntries.push({ index, color });
+    }
+  }
+  const animation = result.animation;
+  const bakedAnimation: ParseAnimationController | undefined = animation
+    ? {
+        ...animation,
+        sample(clip, timeSeconds) {
+          return bakeSolidTextureSampledAnimationFrame(
+            animation.sample(clip, timeSeconds),
+            bakedColorEntries,
+          );
+        },
+      }
+    : animation;
+  if (bakedAnimation && animation) {
+    const sourceFrameSampler =
+      (animation as SolidTextureBakedAnimation)[POLY_ANIMATION_TRIANGLE_FRAME_SOURCE];
+    if (sourceFrameSampler) {
+      const bakedColorByIndex = new Map(bakedColorEntries.map((entry) => [entry.index, entry.color]));
+      let colors: Array<string | undefined> = [];
+      const bakedFrame: PolyAnimationTriangleFrame = {
+        polygonCount: 0,
+        vertices: new Float64Array(0),
+        colors,
+        solidTriangles: false,
+      };
+      (bakedAnimation as SolidTextureBakedAnimation)[POLY_ANIMATION_TRIANGLE_FRAME_SOURCE] = (
+        clip,
+        timeSeconds,
+      ) => {
+        const frame = sourceFrameSampler(clip, timeSeconds);
+        if (!frame) return frame;
+        if (colors.length < frame.polygonCount) {
+          colors = new Array(frame.polygonCount);
+          bakedFrame.colors = colors;
+        }
+        const textureFlags = frame.textureFlags;
+        let solidTriangles = frame.solidTriangles === true || !!textureFlags;
+        for (let i = 0; i < frame.polygonCount; i++) {
+          const bakedColor = bakedColorByIndex.get(i);
+          colors[i] = bakedColor ?? frame.colors?.[i];
+          if (textureFlags?.[i] && !bakedColor) solidTriangles = false;
+        }
+        bakedFrame.polygonCount = frame.polygonCount;
+        bakedFrame.vertices = frame.vertices;
+        bakedFrame.textureFlags = textureFlags;
+        bakedFrame.solidTriangles = solidTriangles;
+        return bakedFrame;
+      };
+    }
+    (bakedAnimation as SolidTextureBakedAnimation)[SOLID_TEXTURE_BAKED_ANIMATION_INFO] = {
+      source: animation,
+      bakedColorEntries,
+    };
+  }
 
   return {
     ...result,
     polygons: baked.polygons,
-    animation: result.animation
-      ? {
-          ...result.animation,
-          sample(clip, timeSeconds) {
-            return baker.bake(result.animation!.sample(clip, timeSeconds)).polygons;
-          },
-        }
-      : result.animation,
+    animation: bakedAnimation,
   };
 }

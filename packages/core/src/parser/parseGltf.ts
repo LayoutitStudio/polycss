@@ -539,6 +539,7 @@ function computeWorldMatrices(doc: GltfDoc, localMatrices: Mat4[]): Mat4[] {
 }
 
 interface AnimatedPrimitiveSource {
+  sourceIndex: number;
   meshNode: number | null;
   meshBindWorld: Mat4;
   skinIndex?: number;
@@ -568,6 +569,48 @@ interface RuntimeAnimationChannel {
 interface RuntimeAnimationClip {
   info: ParseAnimationClip;
   channels: RuntimeAnimationChannel[];
+}
+
+interface AnimatedPolygonSourceRef {
+  sourceIndex: number;
+  triangleIndex: number;
+}
+
+interface RuntimeSourceTriangleMask {
+  triangleMask: readonly boolean[];
+  activeVertices: readonly number[];
+}
+
+interface GltfAnimationRuntimeInfo {
+  withPolygonFilter(indices: readonly number[]): ParseAnimationController | undefined;
+}
+
+const GLTF_ANIMATION_RUNTIME_INFO = Symbol("polycss.gltfAnimationRuntimeInfo");
+const POLY_ANIMATION_TRIANGLE_FRAME_SOURCE = Symbol.for("polycss.animation.triangleFrameSource");
+
+interface PolyAnimationTriangleFrame {
+  polygonCount: number;
+  vertices: Float64Array;
+  colors?: readonly (string | undefined)[];
+  textureFlags?: readonly boolean[];
+  solidTriangles?: boolean;
+}
+
+interface GltfAnimationController extends ParseAnimationController {
+  [GLTF_ANIMATION_RUNTIME_INFO]?: GltfAnimationRuntimeInfo;
+  [POLY_ANIMATION_TRIANGLE_FRAME_SOURCE]?: (
+    clip: number | string,
+    timeSeconds: number,
+  ) => PolyAnimationTriangleFrame | null | undefined;
+}
+
+export function filterGltfAnimationController(
+  animation: ParseAnimationController | undefined,
+  indices: readonly number[],
+): ParseAnimationController | undefined {
+  return animation
+    ? (animation as GltfAnimationController)[GLTF_ANIMATION_RUNTIME_INFO]?.withPolygonFilter(indices)
+    : undefined;
 }
 
 function sameProjectedVertex(a: Vec3, b: Vec3): boolean {
@@ -652,7 +695,9 @@ function buildAnimationController(
   doc: GltfDoc,
   bin: Uint8Array,
   sources: AnimatedPrimitiveSource[],
+  polygonRefs: Array<AnimatedPolygonSourceRef | undefined>,
   project: (v: Vec3) => Vec3,
+  projectFrameVertex: (v: Vec3, out: Float64Array, offset: number) => void,
 ): ParseAnimationController | undefined {
   const animations = doc.animations ?? [];
   if (animations.length === 0 || sources.length === 0) return undefined;
@@ -705,6 +750,35 @@ function buildAnimationController(
   const clips = runtimeClips.map((clip) => clip.info);
   if (clips.length === 0) return undefined;
 
+  const sourceMasksFromPolygonFilter = (
+    indices: readonly number[],
+  ): RuntimeSourceTriangleMask[] | undefined => {
+    const masks = sources.map((source) => new Array(source.triangleMask.length).fill(false));
+    for (const index of indices) {
+      const ref = polygonRefs[index];
+      if (!ref) return undefined;
+      const sourceMask = masks[ref.sourceIndex];
+      if (!sourceMask || ref.triangleIndex < 0 || ref.triangleIndex >= sourceMask.length) return undefined;
+      sourceMask[ref.triangleIndex] = true;
+    }
+
+    return masks.map((triangleMask, sourceIndex): RuntimeSourceTriangleMask => {
+      const source = sources[sourceIndex]!;
+      const used = new Set<number>();
+      let triangleOrdinal = 0;
+      for (let i = 0; i + 2 < source.indices.length; i += 3, triangleOrdinal++) {
+        if (!triangleMask[triangleOrdinal]) continue;
+        used.add(source.indices[i]!);
+        used.add(source.indices[i + 1]!);
+        used.add(source.indices[i + 2]!);
+      }
+      return {
+        triangleMask,
+        activeVertices: Array.from(used).sort((a, b) => a - b),
+      };
+    });
+  };
+
   const polygonFromWorldTri = (
     v0World: Vec3,
     v1World: Vec3,
@@ -722,41 +796,68 @@ function buildAnimationController(
     return polygon;
   };
 
-  const sample = (clipRef: number | string, timeSecondsIn: number): Polygon[] => {
-    const clip = typeof clipRef === "number"
-      ? runtimeClips[clipRef]
-      : runtimeClips.find((candidate) => candidate.info.name === clipRef);
-    if (!clip) return [];
-    const duration = clip.info.duration;
-    const timeSeconds = duration > 0
-      ? ((timeSecondsIn % duration) + duration) % duration
-      : Math.max(0, timeSecondsIn);
+  const createController = (
+    sourceMaskOverrides?: RuntimeSourceTriangleMask[],
+  ): ParseAnimationController => {
+    const activeTriangleCapacity = sources.reduce((sum, source, sourceIndex) => {
+      const mask = sourceMaskOverrides?.[sourceIndex]?.triangleMask ?? source.triangleMask;
+      let count = 0;
+      for (let i = 0; i < mask.length; i++) {
+        if (mask[i]) count++;
+      }
+      return sum + count;
+    }, 0);
+    let triangleFrameVertices = new Float64Array(Math.max(0, activeTriangleCapacity * 9));
+    let triangleFrameColors: Array<string | undefined> = new Array(activeTriangleCapacity);
+    let triangleFrameTextureFlags: boolean[] = new Array(activeTriangleCapacity).fill(false);
+    const triangleFrame: PolyAnimationTriangleFrame = {
+      polygonCount: 0,
+      vertices: triangleFrameVertices,
+      colors: triangleFrameColors,
+      textureFlags: triangleFrameTextureFlags,
+      solidTriangles: true,
+    };
 
-    const poses = basePoses.map((pose): NodePose => ({
-      translation: pose.translation.slice(),
-      rotation: pose.rotation.slice(),
-      scale: pose.scale.slice(),
-      matrix: pose.matrix ? pose.matrix.slice() as Mat4 : undefined,
-    }));
+    const sampleWorldMatrices = (clipRef: number | string, timeSecondsIn: number): Mat4[] | null => {
+      const clip = typeof clipRef === "number"
+        ? runtimeClips[clipRef]
+        : runtimeClips.find((candidate) => candidate.info.name === clipRef);
+      if (!clip) return null;
+      const duration = clip.info.duration;
+      const timeSeconds = duration > 0
+        ? ((timeSecondsIn % duration) + duration) % duration
+        : Math.max(0, timeSecondsIn);
 
-    for (const channel of clip.channels) {
-      const pose = poses[channel.targetNode];
-      if (!pose) continue;
-      const value = sampleAnimationChannel(channel.sampler, timeSeconds, channel.path);
-      // Animated TRS channels override matrix-based locals per glTF's node
-      // animation model; converting arbitrary matrices to TRS is intentionally
-      // out of scope for this minimal runtime.
-      pose.matrix = undefined;
-      if (channel.path === "translation") pose.translation = value.slice(0, 3);
-      else if (channel.path === "rotation") pose.rotation = normalizeQuat(value.slice(0, 4));
-      else if (channel.path === "scale") pose.scale = value.slice(0, 3);
-    }
+      const poses = basePoses.map((pose): NodePose => ({
+        translation: pose.translation.slice(),
+        rotation: pose.rotation.slice(),
+        scale: pose.scale.slice(),
+        matrix: pose.matrix ? pose.matrix.slice() as Mat4 : undefined,
+      }));
 
-    const worldMatrices = computeWorldMatrices(doc, poses.map(poseLocalMatrix));
-    const polygons: Polygon[] = [];
+      for (const channel of clip.channels) {
+        const pose = poses[channel.targetNode];
+        if (!pose) continue;
+        const value = sampleAnimationChannel(channel.sampler, timeSeconds, channel.path);
+        // Animated TRS channels override matrix-based locals per glTF's node
+        // animation model; converting arbitrary matrices to TRS is intentionally
+        // out of scope for this minimal runtime.
+        pose.matrix = undefined;
+        if (channel.path === "translation") pose.translation = value.slice(0, 3);
+        else if (channel.path === "rotation") pose.rotation = normalizeQuat(value.slice(0, 4));
+        else if (channel.path === "scale") pose.scale = value.slice(0, 3);
+      }
 
-    for (const source of sources) {
-      const worldPositions: Vec3[] = [];
+      return computeWorldMatrices(doc, poses.map(poseLocalMatrix));
+    };
+
+    const computeSourceWorldPositions = (
+      source: AnimatedPrimitiveSource,
+      sourceMask: RuntimeSourceTriangleMask | undefined,
+      worldMatrices: Mat4[],
+    ): Array<Vec3 | undefined> => {
+      const activeVertices = sourceMask?.activeVertices;
+      const worldPositions: Array<Vec3 | undefined> = new Array(source.positions.length);
       if (
         source.skinIndex !== undefined &&
         source.joints &&
@@ -764,12 +865,14 @@ function buildAnimationController(
         skins[source.skinIndex]
       ) {
         const skin = skins[source.skinIndex];
-        for (let i = 0; i < source.positions.length; i++) {
+        const sourceJoints = source.joints;
+        const sourceWeights = source.weights;
+        const skinVertex = (i: number): void => {
           const bindPosition = source.positions[i];
           let blended: Vec3 = [0, 0, 0];
           let weightSum = 0;
-          const joints = source.joints[i] ?? [];
-          const weights = source.weights[i] ?? [];
+          const joints = sourceJoints[i] ?? [];
+          const weights = sourceWeights[i] ?? [];
           for (let j = 0; j < 4; j++) {
             const weight = weights[j] ?? 0;
             if (weight <= 0) continue;
@@ -782,42 +885,131 @@ function buildAnimationController(
             blended = addVec3(blended, scaleVec3(transformPoint(jointMatrix, bindPosition), weight));
             weightSum += weight;
           }
-          worldPositions.push(weightSum > 0
+          worldPositions[i] = weightSum > 0
             ? scaleVec3(blended, 1 / weightSum)
-            : transformPoint(source.meshBindWorld, bindPosition));
+            : transformPoint(source.meshBindWorld, bindPosition);
+        };
+        if (activeVertices) {
+          for (const vertexIndex of activeVertices) skinVertex(vertexIndex);
+        } else {
+          for (let i = 0; i < source.positions.length; i++) skinVertex(i);
         }
       } else {
         const meshWorld = source.meshNode !== null
           ? (worldMatrices[source.meshNode] ?? source.meshBindWorld)
           : source.meshBindWorld;
-        for (const position of source.positions) {
-          worldPositions.push(transformPoint(meshWorld, position));
+        const transformVertex = (i: number): void => {
+          worldPositions[i] = transformPoint(meshWorld, source.positions[i]);
+        };
+        if (activeVertices) {
+          for (const vertexIndex of activeVertices) transformVertex(vertexIndex);
+        } else {
+          for (let i = 0; i < source.positions.length; i++) transformVertex(i);
+        }
+      }
+      return worldPositions;
+    };
+
+    const sample = (clipRef: number | string, timeSecondsIn: number): Polygon[] => {
+      const worldMatrices = sampleWorldMatrices(clipRef, timeSecondsIn);
+      if (!worldMatrices) return [];
+      const polygons: Polygon[] = [];
+
+      for (let sourceIndex = 0; sourceIndex < sources.length; sourceIndex++) {
+        const source = sources[sourceIndex]!;
+        const sourceMask = sourceMaskOverrides?.[sourceIndex];
+        const triangleMask = sourceMask?.triangleMask ?? source.triangleMask;
+        const worldPositions = computeSourceWorldPositions(source, sourceMask, worldMatrices);
+
+        let triangleOrdinal = 0;
+        for (let i = 0; i + 2 < source.indices.length; i += 3, triangleOrdinal++) {
+          if (!triangleMask[triangleOrdinal]) continue;
+          const i0 = source.indices[i];
+          const i1 = source.indices[i + 1];
+          const i2 = source.indices[i + 2];
+          const v0 = worldPositions[i0];
+          const v1 = worldPositions[i1];
+          const v2 = worldPositions[i2];
+          if (!v0 || !v1 || !v2) continue;
+          let triUvs: Vec2[] | undefined;
+          if (source.uvs && source.texture) {
+            const u0 = source.uvs[i0], u1 = source.uvs[i1], u2 = source.uvs[i2];
+            if (u0 && u1 && u2) triUvs = [u0, u1, u2];
+          }
+          const polygon = polygonFromWorldTri(v0, v1, v2, source.color, source.texture, triUvs);
+          if (polygon) polygons.push(polygon);
+        }
+      }
+      return polygons;
+    };
+
+    const sampleTriangleFrame = (
+      clipRef: number | string,
+      timeSecondsIn: number,
+    ): PolyAnimationTriangleFrame | null => {
+      const worldMatrices = sampleWorldMatrices(clipRef, timeSecondsIn);
+      if (!worldMatrices) return null;
+      if (triangleFrameVertices.length < activeTriangleCapacity * 9) {
+        triangleFrameVertices = new Float64Array(activeTriangleCapacity * 9);
+        triangleFrame.vertices = triangleFrameVertices;
+      }
+      if (triangleFrameColors.length < activeTriangleCapacity) {
+        triangleFrameColors = new Array(activeTriangleCapacity);
+        triangleFrame.colors = triangleFrameColors;
+      }
+      if (triangleFrameTextureFlags.length < activeTriangleCapacity) {
+        triangleFrameTextureFlags = new Array(activeTriangleCapacity).fill(false);
+        triangleFrame.textureFlags = triangleFrameTextureFlags;
+      }
+      let polygonCount = 0;
+      let writeOffset = 0;
+      let hasTexture = false;
+
+      for (let sourceIndex = 0; sourceIndex < sources.length; sourceIndex++) {
+        const source = sources[sourceIndex]!;
+        const sourceMask = sourceMaskOverrides?.[sourceIndex];
+        const triangleMask = sourceMask?.triangleMask ?? source.triangleMask;
+        const worldPositions = computeSourceWorldPositions(source, sourceMask, worldMatrices);
+
+        let triangleOrdinal = 0;
+        for (let i = 0; i + 2 < source.indices.length; i += 3, triangleOrdinal++) {
+          if (!triangleMask[triangleOrdinal]) continue;
+          const i0 = source.indices[i]!;
+          const i1 = source.indices[i + 1]!;
+          const i2 = source.indices[i + 2]!;
+          const v0 = worldPositions[i0];
+          const v1 = worldPositions[i1];
+          const v2 = worldPositions[i2];
+          if (!v0 || !v1 || !v2) continue;
+          projectFrameVertex(v0, triangleFrameVertices, writeOffset);
+          projectFrameVertex(v1, triangleFrameVertices, writeOffset + 3);
+          projectFrameVertex(v2, triangleFrameVertices, writeOffset + 6);
+          triangleFrameColors[polygonCount] = source.color;
+          const textured = !!source.texture;
+          triangleFrameTextureFlags[polygonCount] = textured;
+          if (textured) hasTexture = true;
+          polygonCount++;
+          writeOffset += 9;
         }
       }
 
-      let triangleOrdinal = 0;
-      for (let i = 0; i + 2 < source.indices.length; i += 3, triangleOrdinal++) {
-        if (!source.triangleMask[triangleOrdinal]) continue;
-        const i0 = source.indices[i];
-        const i1 = source.indices[i + 1];
-        const i2 = source.indices[i + 2];
-        const v0 = worldPositions[i0];
-        const v1 = worldPositions[i1];
-        const v2 = worldPositions[i2];
-        if (!v0 || !v1 || !v2) continue;
-        let triUvs: Vec2[] | undefined;
-        if (source.uvs && source.texture) {
-          const u0 = source.uvs[i0], u1 = source.uvs[i1], u2 = source.uvs[i2];
-          if (u0 && u1 && u2) triUvs = [u0, u1, u2];
-        }
-        const polygon = polygonFromWorldTri(v0, v1, v2, source.color, source.texture, triUvs);
-        if (polygon) polygons.push(polygon);
-      }
-    }
-    return polygons;
+      triangleFrame.polygonCount = polygonCount;
+      triangleFrame.solidTriangles = !hasTexture;
+      return triangleFrame;
+    };
+
+    const controller: GltfAnimationController = { clips, sample };
+    controller[POLY_ANIMATION_TRIANGLE_FRAME_SOURCE] = sampleTriangleFrame;
+    controller[GLTF_ANIMATION_RUNTIME_INFO] = {
+      withPolygonFilter(indices) {
+        const masks = sourceMasksFromPolygonFilter(indices);
+        return masks ? createController(masks) : undefined;
+      },
+    };
+    return controller;
   };
 
-  return { clips, sample };
+  return createController();
 }
 
 export function parseGltf(input: ArrayBuffer | Uint8Array, options?: GltfParseOptions): ParseResult {
@@ -855,10 +1047,12 @@ export function parseGltf(input: ArrayBuffer | Uint8Array, options?: GltfParseOp
     texture?: string;
     uvs?: Vec2[];
     source?: AnimatedPrimitiveSource;
+    sourceIndex?: number;
     sourceTriangleIndex?: number;
   }
   const rawTris: RawTri[] = [];
   const animatedSources: AnimatedPrimitiveSource[] = [];
+  const animatedPolygonRefs: Array<AnimatedPolygonSourceRef | undefined> = [];
   const meshNames: string[] = (doc.meshes ?? []).map((m, i) => m.name ?? `mesh_${i}`);
   const materialNames: string[] = (doc.materials ?? []).map((m, i) => m.name ?? `material_${i}`);
 
@@ -920,6 +1114,7 @@ export function parseGltf(input: ArrayBuffer | Uint8Array, options?: GltfParseOp
         const joints = readAccessorTupleArray(doc, bin, prim.attributes.JOINTS_0, 4, vertCount);
         const weights = readAccessorTupleArray(doc, bin, prim.attributes.WEIGHTS_0, 4, vertCount);
         animatedSource = {
+          sourceIndex: animatedSources.length,
           meshNode,
           meshBindWorld: world,
           skinIndex: meshNode !== null ? doc.nodes?.[meshNode]?.skin : undefined,
@@ -947,7 +1142,17 @@ export function parseGltf(input: ArrayBuffer | Uint8Array, options?: GltfParseOp
           const u0 = uvs[indices[i]], u1 = uvs[indices[i + 1]], u2 = uvs[indices[i + 2]];
           if (u0 && u1 && u2) triUvs = [u0, u1, u2];
         }
-        rawTris.push({ v0, v1, v2, color, texture, uvs: triUvs, source: animatedSource, sourceTriangleIndex });
+        rawTris.push({
+          v0,
+          v1,
+          v2,
+          color,
+          texture,
+          uvs: triUvs,
+          source: animatedSource,
+          sourceIndex: animatedSource?.sourceIndex,
+          sourceTriangleIndex,
+        });
       }
     }
   }
@@ -1010,6 +1215,17 @@ export function parseGltf(input: ArrayBuffer | Uint8Array, options?: GltfParseOp
         round((x - minX) * scale + gridShift),
         round((y - minY) * scale + gridShift),
       ];
+  const projectFrameVertex = upAxis === "z"
+    ? (v: Vec3, out: Float64Array, offset: number): void => {
+        out[offset] = round((v[0] - minX) * scale + gridShift);
+        out[offset + 1] = round((v[1] - minY) * scale + gridShift);
+        out[offset + 2] = round((v[2] - minZ) * scale + gridShift);
+      }
+    : (v: Vec3, out: Float64Array, offset: number): void => {
+        out[offset] = round((v[2] - minZ) * scale + gridShift);
+        out[offset + 1] = round((v[0] - minX) * scale + gridShift);
+        out[offset + 2] = round((v[1] - minY) * scale + gridShift);
+      };
   const polygons: Polygon[] = [];
   for (const t of rawTris) {
     const v0 = project(t.v0);
@@ -1027,8 +1243,20 @@ export function parseGltf(input: ArrayBuffer | Uint8Array, options?: GltfParseOp
     if (t.texture) p.texture = t.texture;
     if (t.uvs) p.uvs = t.uvs;
     polygons.push(p);
+    animatedPolygonRefs.push(
+      t.sourceIndex !== undefined && t.sourceTriangleIndex !== undefined
+        ? { sourceIndex: t.sourceIndex, triangleIndex: t.sourceTriangleIndex }
+        : undefined,
+    );
   }
-  const animation = buildAnimationController(doc, bin, animatedSources, project);
+  const animation = buildAnimationController(
+    doc,
+    bin,
+    animatedSources,
+    animatedPolygonRefs,
+    project,
+    projectFrameVertex,
+  );
 
   return {
     polygons,

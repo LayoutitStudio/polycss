@@ -88,7 +88,7 @@
         : "";
     const stableTriangleColorSteps = params.has("stableTriangleColorSteps")
       ? numberParam("stableTriangleColorSteps", 0)
-      : 0;
+      : 8;
     const stableTriangleColorPolicyRaw = params.get("stableTriangleColorPolicy");
     const stableTriangleColorPolicy =
       stableTriangleColorPolicyRaw === "adaptive" ? "adaptive" : "cadence";
@@ -400,6 +400,7 @@
 
       let lastSetPolygonsMs = 0;
       let lastAnimatedPolygons = initialPolygons.length;
+      let lastTriangleFrameApplied = false;
       const keyframeInfo = animationDriver === "css-keyframes"
         ? await installCssKeyframeAnimation(mesh, renderParsed.animation, clip)
         : null;
@@ -583,12 +584,30 @@
         return;
       }
 
+      const triangleFrameTargetSymbol = Symbol.for("polycss.animation.triangleFrameTarget");
+      const meshTriangleFrameTarget = mesh[triangleFrameTargetSymbol];
       const animationTarget = {
         setPolygons(polygons) {
+          lastTriangleFrameApplied = false;
           const start = performance.now();
           mesh.setPolygons(polygons, animationSetPolygonsOptions());
           lastSetPolygonsMs = performance.now() - start;
           lastAnimatedPolygons = polygons.length;
+        },
+        [triangleFrameTargetSymbol](frame) {
+          if (typeof meshTriangleFrameTarget !== "function") return false;
+          const start = performance.now();
+          const applied = meshTriangleFrameTarget.call(
+            mesh,
+            frame,
+            animationSetPolygonsOptions(),
+          );
+          if (applied) {
+            lastTriangleFrameApplied = true;
+            lastSetPolygonsMs = performance.now() - start;
+            lastAnimatedPolygons = frame.polygonCount;
+          }
+          return applied;
         },
       };
       const mixer = createPolyAnimationMixer(animationTarget, renderParsed.animation);
@@ -627,6 +646,7 @@
           setPolygonsMs: lastSetPolygonsMs,
           nonSetPolygonsMs: Math.max(0, updateMs - lastSetPolygonsMs),
           polygons: lastAnimatedPolygons,
+          triangleFrameApplied: lastTriangleFrameApplied,
         });
         if (window.__perf__.animationSamples.length > 1800) {
           window.__perf__.animationSamples.splice(

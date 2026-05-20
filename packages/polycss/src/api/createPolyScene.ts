@@ -57,6 +57,7 @@ import {
   renderPolygonsWithTextureAtlas,
   renderPolygonsWithTextureAtlasAsync,
   renderPolygonsWithStableTriangles,
+  updateStableTriangleFrame,
   updatePolygonsWithStableTopology,
   type TextureQuality,
   type PolyRenderStrategiesOption,
@@ -236,7 +237,7 @@ export interface PolyMeshHandle {
 // Internal-only async update hook for large imperative scene users. Keeping it
 // off PolyMeshHandle avoids turning a debug-workbench long-task fix into a
 // public API contract that React/Vue also need to mirror.
-interface InternalPolyMeshHandle extends PolyMeshHandle {
+interface InternalPolyMeshHandle extends PolyMeshHandle, PolyAnimationTriangleFrameTarget {
   setPolygonsChunked(polygons: Polygon[], options?: {
     merge?: boolean;
     stableDom?: boolean;
@@ -285,6 +286,7 @@ export interface PolySceneHandle {
 
 const DEFAULT_ZOOM = 1;
 const DEFAULT_TILE = BASE_TILE;
+const POLY_ANIMATION_TRIANGLE_FRAME_TARGET = Symbol.for("polycss.animation.triangleFrameTarget");
 // Sentinel that keeps broad camera DOM culling disabled once a mesh proves
 // it has non-voxel normals; callers never inspect group contents directly.
 const NON_CULLABLE_CAMERA_GROUP: CameraCullNormalGroup = {
@@ -309,6 +311,20 @@ interface InternalSetPolygonsOptions {
   stableTriangleColorMaxAge?: number;
   stableTriangleColorMaxStep?: number;
   stableTriangleMatrixDecimals?: number;
+}
+
+interface PolyAnimationTriangleFrame {
+  polygonCount: number;
+  vertices: ArrayLike<number>;
+  colors?: readonly (string | undefined)[];
+  solidTriangles?: boolean;
+}
+
+interface PolyAnimationTriangleFrameTarget {
+  [POLY_ANIMATION_TRIANGLE_FRAME_TARGET]?: (
+    frame: PolyAnimationTriangleFrame,
+    options?: InternalSetPolygonsOptions,
+  ) => boolean;
 }
 
 function strategiesEqual(
@@ -1407,8 +1423,125 @@ export function createPolyScene(
       bakedRotation: (transformIn.rotation ? [...transformIn.rotation] : [0, 0, 0]) as Vec3,
     };
 
+    let currentTriangleFrame: PolyAnimationTriangleFrame | null = null;
+    let currentTriangleFrameVersion = 0;
+    let materializedTriangleFrameVersion = -1;
+    let materializedTriangleFramePolygons: Polygon[] | null = null;
+
+    function clearCurrentTriangleFrame(): void {
+      currentTriangleFrame = null;
+      materializedTriangleFramePolygons = null;
+      materializedTriangleFrameVersion = -1;
+    }
+
+    function currentPolygons(): Polygon[] {
+      const frame = currentTriangleFrame;
+      if (!frame || frame.polygonCount !== entry.polygons.length) return entry.polygons;
+      if (
+        materializedTriangleFramePolygons &&
+        materializedTriangleFrameVersion === currentTriangleFrameVersion
+      ) {
+        return materializedTriangleFramePolygons;
+      }
+      const values = frame.vertices;
+      const out: Polygon[] = new Array(frame.polygonCount);
+      for (let polygonIndex = 0; polygonIndex < frame.polygonCount; polygonIndex++) {
+        const base = entry.polygons[polygonIndex]!;
+        const offset = polygonIndex * 9;
+        out[polygonIndex] = {
+          ...base,
+          color: frame.colors?.[polygonIndex] ?? base.color,
+          vertices: [
+            [values[offset]!, values[offset + 1]!, values[offset + 2]!] as Vec3,
+            [values[offset + 3]!, values[offset + 4]!, values[offset + 5]!] as Vec3,
+            [values[offset + 6]!, values[offset + 7]!, values[offset + 8]!] as Vec3,
+          ],
+        };
+      }
+      materializedTriangleFramePolygons = out;
+      materializedTriangleFrameVersion = currentTriangleFrameVersion;
+      return out;
+    }
+
+    function applyStableTopologyUpdate(
+      options: InternalSetPolygonsOptions | undefined,
+      shouldRecomputeAutoCenter: boolean,
+    ): boolean {
+      const colorOnlyStableTriangleUpdate =
+        options?.stableTriangleUpdateMode === "color-only";
+      entry.stableTriangleColorFrame++;
+      const shouldSkipTransformOrigin =
+        entry.stableDom && !shouldRecomputeAutoCenter;
+      if (!shouldSkipTransformOrigin) applyTransformOrigin(entry.polygons);
+      if (entry.stableDom && !entry.hasBuckets) {
+        const renderOptions = {
+          doc,
+          directionalLight: currentOptions.directionalLight,
+          ambientLight: currentOptions.ambientLight,
+          textureLighting: currentOptions.textureLighting,
+          textureQuality: currentOptions.textureQuality,
+        };
+        const allStableTriangles =
+          entry.rendered.length === entry.polygons.length &&
+          entry.rendered.every((item) => item.kind === "triangle");
+        const optimizeStableTopology =
+          entry.stableDom && !shouldRecomputeAutoCenter;
+        const solidPaintDefaults = allStableTriangles || optimizeStableTopology
+          ? {}
+          : getSolidPaintDefaults(entry.polygons, renderOptions);
+        if (!allStableTriangles) applySolidPaintVars(entry.wrapper, solidPaintDefaults);
+        const stableTopologyOptions = {
+          ...renderOptions,
+          solidPaintDefaults,
+          optimizeStableTriangleStyle: true,
+          stableTriangleDebug: options?.stableTriangleDebug,
+          stableTriangleUpdateMode: options?.stableTriangleUpdateMode,
+          stableTriangleColorPolicy: options?.stableTriangleColorPolicy,
+          stableTriangleColorSteps: options?.stableTriangleColorSteps,
+          stableTriangleColorFreezeFrames: options?.stableTriangleColorFreezeFrames,
+          stableTriangleColorBudget: options?.stableTriangleColorBudget,
+          stableTriangleColorMaxAge: options?.stableTriangleColorMaxAge,
+          stableTriangleColorMaxStep: options?.stableTriangleColorMaxStep,
+          stableTriangleMatrixDecimals: options?.stableTriangleMatrixDecimals,
+          stableTriangleColorFrame: entry.stableTriangleColorFrame,
+        } as Parameters<typeof updatePolygonsWithStableTopology>[2] & {
+          optimizeStableTriangleStyle: boolean;
+          stableTriangleDebug?: "transform-only" | "plan-only";
+          stableTriangleUpdateMode?: "full" | "transform-only" | "color-only";
+          stableTriangleColorPolicy?: "cadence" | "adaptive";
+          stableTriangleColorSteps?: number;
+          stableTriangleColorFreezeFrames?: number;
+          stableTriangleColorBudget?: number;
+          stableTriangleColorMaxAge?: number;
+          stableTriangleColorMaxStep?: number;
+          stableTriangleMatrixDecimals?: number;
+          stableTriangleColorFrame?: number;
+        };
+        if (
+          updatePolygonsWithStableTopology(
+            entry.rendered,
+            entry.polygons,
+            stableTopologyOptions,
+          )
+        ) {
+          if (!colorOnlyStableTriangleUpdate) {
+            recomputeCameraCullGroups(entry);
+            syncMountedRenderedForCameraChange(entry, true);
+            if (shouldRecomputeAutoCenter) recomputeAutoCenter();
+          }
+          return true;
+        }
+      }
+      if (shouldSkipTransformOrigin) applyTransformOrigin(entry.polygons);
+      return false;
+    }
+
     const handle: InternalPolyMeshHandle = {
-      polygons: sourcePolygons,
+      get polygons() { return currentPolygons(); },
+      set polygons(polygons: Polygon[]) {
+        clearCurrentTriangleFrame();
+        entry.polygons = polygons;
+      },
       element: wrapper,
       id: transformIn.id,
       get transform() { return transform; },
@@ -1428,34 +1561,56 @@ export function createPolyScene(
         entry.stableDom = stableDomOnUpdate;
         entry.voxelSource = undefined;
         entry.polygons = preparePolygons(polygons, mergeOnUpdate);
+        clearCurrentTriangleFrame();
         handle.polygons = entry.polygons;
         const shouldRecomputeAutoCenter = options?.recomputeAutoCenter ?? true;
-        const colorOnlyStableTriangleUpdate =
-          options?.stableTriangleUpdateMode === "color-only";
-        entry.stableTriangleColorFrame++;
-        const shouldSkipTransformOrigin =
-          entry.stableDom && !shouldRecomputeAutoCenter;
-        if (!shouldSkipTransformOrigin) applyTransformOrigin(entry.polygons);
-        if (entry.stableDom && !entry.hasBuckets) {
-          const renderOptions = {
+        if (applyStableTopologyUpdate(options, shouldRecomputeAutoCenter)) return;
+        renderEntry(entry);
+        if (shouldRecomputeAutoCenter) recomputeAutoCenter();
+      },
+      [POLY_ANIMATION_TRIANGLE_FRAME_TARGET](
+        frame: PolyAnimationTriangleFrame,
+        options?: InternalSetPolygonsOptions,
+      ) {
+        const nextMergeOnUpdate = options?.merge ?? mergeOnUpdate;
+        const nextStableDomOnUpdate = options?.stableDom ?? stableDomOnUpdate;
+        if (
+          !frame.solidTriangles ||
+          !nextStableDomOnUpdate ||
+          nextMergeOnUpdate ||
+          transformIn.meshResolution !== undefined ||
+          entry.hasBuckets ||
+          frame.polygonCount !== entry.polygons.length ||
+          frame.vertices.length < frame.polygonCount * 9 ||
+          entry.rendered.length !== frame.polygonCount
+        ) {
+          return false;
+        }
+        for (let i = 0; i < entry.rendered.length; i++) {
+          const rendered = entry.rendered[i];
+          const polygon = entry.polygons[i];
+          if (
+            rendered?.kind !== "triangle" ||
+            rendered.polygonIndex !== i ||
+            !polygon ||
+            polygon.vertices.length !== 3 ||
+            polygon.texture ||
+            polygon.material?.texture
+          ) {
+            return false;
+          }
+        }
+
+        const shouldRecomputeAutoCenter = options?.recomputeAutoCenter ?? true;
+        if (!shouldRecomputeAutoCenter) {
+          const colorFrame = entry.stableTriangleColorFrame + 1;
+          const stableTopologyOptions = {
             doc,
             directionalLight: currentOptions.directionalLight,
             ambientLight: currentOptions.ambientLight,
             textureLighting: currentOptions.textureLighting,
             textureQuality: currentOptions.textureQuality,
-          };
-          const allStableTriangles =
-            entry.rendered.length === entry.polygons.length &&
-            entry.rendered.every((item) => item.kind === "triangle");
-          const optimizeStableTopology =
-            entry.stableDom && !shouldRecomputeAutoCenter;
-          const solidPaintDefaults = allStableTriangles || optimizeStableTopology
-            ? {}
-            : getSolidPaintDefaults(entry.polygons, renderOptions);
-          if (!allStableTriangles) applySolidPaintVars(entry.wrapper, solidPaintDefaults);
-          const stableTopologyOptions = {
-            ...renderOptions,
-            solidPaintDefaults,
+            solidPaintDefaults: {},
             optimizeStableTriangleStyle: true,
             stableTriangleDebug: options?.stableTriangleDebug,
             stableTriangleUpdateMode: options?.stableTriangleUpdateMode,
@@ -1466,8 +1621,8 @@ export function createPolyScene(
             stableTriangleColorMaxAge: options?.stableTriangleColorMaxAge,
             stableTriangleColorMaxStep: options?.stableTriangleColorMaxStep,
             stableTriangleMatrixDecimals: options?.stableTriangleMatrixDecimals,
-            stableTriangleColorFrame: entry.stableTriangleColorFrame,
-          } as Parameters<typeof updatePolygonsWithStableTopology>[2] & {
+            stableTriangleColorFrame: colorFrame,
+          } as Parameters<typeof updateStableTriangleFrame>[3] & {
             optimizeStableTriangleStyle: boolean;
             stableTriangleDebug?: "transform-only" | "plan-only";
             stableTriangleUpdateMode?: "full" | "transform-only" | "color-only";
@@ -1481,29 +1636,68 @@ export function createPolyScene(
             stableTriangleColorFrame?: number;
           };
           if (
-            updatePolygonsWithStableTopology(
+            updateStableTriangleFrame(
               entry.rendered,
               entry.polygons,
+              frame,
               stableTopologyOptions,
             )
           ) {
-            if (!colorOnlyStableTriangleUpdate) {
-              recomputeCameraCullGroups(entry);
-              syncMountedRenderedForCameraChange(entry, true);
-              if (shouldRecomputeAutoCenter) recomputeAutoCenter();
-            }
-            return;
+            polygonUpdateVersion++;
+            mergeOnUpdate = nextMergeOnUpdate;
+            stableDomOnUpdate = nextStableDomOnUpdate;
+            entry.stableDom = stableDomOnUpdate;
+            entry.voxelSource = undefined;
+            entry.stableTriangleColorFrame = colorFrame;
+            currentTriangleFrame = frame;
+            currentTriangleFrameVersion++;
+            materializedTriangleFramePolygons = null;
+            materializedTriangleFrameVersion = -1;
+            recomputeCameraCullGroups(entry);
+            syncMountedRenderedForCameraChange(entry, true);
+            return true;
           }
         }
-        if (shouldSkipTransformOrigin) applyTransformOrigin(entry.polygons);
-        renderEntry(entry);
-        if (shouldRecomputeAutoCenter) recomputeAutoCenter();
+
+        polygonUpdateVersion++;
+        mergeOnUpdate = nextMergeOnUpdate;
+        stableDomOnUpdate = nextStableDomOnUpdate;
+        entry.stableDom = stableDomOnUpdate;
+        entry.voxelSource = undefined;
+
+        const values = frame.vertices;
+        for (let polygonIndex = 0; polygonIndex < frame.polygonCount; polygonIndex++) {
+          const polygon = entry.polygons[polygonIndex]!;
+          const color = frame.colors?.[polygonIndex];
+          if (color) polygon.color = color;
+          const vertices = polygon.vertices;
+          const offset = polygonIndex * 9;
+          vertices[0]![0] = values[offset]!;
+          vertices[0]![1] = values[offset + 1]!;
+          vertices[0]![2] = values[offset + 2]!;
+          vertices[1]![0] = values[offset + 3]!;
+          vertices[1]![1] = values[offset + 4]!;
+          vertices[1]![2] = values[offset + 5]!;
+          vertices[2]![0] = values[offset + 6]!;
+          vertices[2]![1] = values[offset + 7]!;
+          vertices[2]![2] = values[offset + 8]!;
+        }
+        clearCurrentTriangleFrame();
+        handle.polygons = entry.polygons;
+        return applyStableTopologyUpdate(
+          options,
+          shouldRecomputeAutoCenter,
+        );
       },
       updatePolygon(target: Polygon | number, partial: Partial<Polygon>) {
-        const idx = typeof target === "number"
+        let idx = typeof target === "number"
           ? target
           : entry.polygons.indexOf(target);
+        if (idx < 0 && typeof target !== "number" && currentTriangleFrame) {
+          idx = currentPolygons().indexOf(target);
+        }
         if (idx < 0 || idx >= entry.polygons.length) return;
+        clearCurrentTriangleFrame();
         entry.voxelSource = undefined;
         Object.assign(entry.polygons[idx], partial);
         renderEntry(entry);
@@ -1519,6 +1713,7 @@ export function createPolyScene(
         entry.stableDom = stableDomOnUpdate;
         entry.voxelSource = undefined;
         entry.polygons = preparePolygons(polygons, mergeOnUpdate);
+        clearCurrentTriangleFrame();
         handle.polygons = entry.polygons;
         applyTransformOrigin(entry.polygons);
         const shouldRecomputeAutoCenter = options?.recomputeAutoCenter ?? true;
