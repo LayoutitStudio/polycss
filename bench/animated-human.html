@@ -118,7 +118,6 @@
     const animationFrameCache = boolParam("animationFrameCache", false);
     const animationFrameCacheFrames = Math.max(2, Math.floor(numberParam("animationFrameCacheFrames", 60)));
     const animatedMeshOptimization = boolParam("animatedMeshOptimization", false);
-    const triangleFrame = boolParam("triangleFrame", true);
     const solidTextureSamples = boolParam("solidTextureSamples", true);
     const targetSize = numberParam("targetSize", 72);
     const timeScale = numberParam("timeScale", 1);
@@ -436,7 +435,6 @@
         animationDriver,
         animationFrameCache,
         animationFrameCacheFrames,
-        triangleFrame,
         stableTriangleDebug,
         stableTriangleColorPolicy,
         stableTriangleColorSteps,
@@ -597,7 +595,7 @@
           lastAnimatedPolygons = polygons.length;
         },
         [triangleFrameTargetSymbol](frame) {
-          if (!triangleFrame || typeof meshTriangleFrameTarget !== "function") return false;
+          if (typeof meshTriangleFrameTarget !== "function") return false;
           const start = performance.now();
           const applied = meshTriangleFrameTarget.call(
             mesh,
@@ -615,7 +613,6 @@
       const mixer = createPolyAnimationMixer(animationTarget, renderParsed.animation);
       const action = mixer.clipAction(clip.name);
       action.play();
-      const frameCacheStart = performance.now();
       const cachedAnimationFrames = animationFrameCache
         ? Array.from({ length: animationFrameCacheFrames }, (_, index) =>
             renderParsed.animation.sample(
@@ -624,19 +621,6 @@
             )
           )
         : null;
-      if (cachedAnimationFrames) {
-        const cachedPolygons = cachedAnimationFrames.reduce((sum, frame) => sum + frame.length, 0);
-        const cachedVertices = cachedAnimationFrames.reduce(
-          (sum, frame) => sum + frame.reduce((frameSum, polygon) => frameSum + polygon.vertices.length, 0),
-          0,
-        );
-        window.__perf__.animation.animationFrameCacheInfo = {
-          buildMs: performance.now() - frameCacheStart,
-          frameCount: cachedAnimationFrames.length,
-          cachedPolygons,
-          cachedVertices,
-        };
-      }
 
       let last = performance.now();
       let elapsedClipTime = 0;

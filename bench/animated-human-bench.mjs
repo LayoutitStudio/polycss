@@ -81,7 +81,6 @@ const DISABLE_STRATEGIES = optStr("disable-strategies", optStr("disableStrategie
 const STABLE_TRIANGLE_DEBUG = optStr("stable-triangle-debug", optStr("stableTriangleDebug"));
 const ANIMATION_DRIVER = optStr("animation-driver", optStr("animationDriver", "js"));
 const ANIMATION_FRAME_CACHE = hasFlag("animation-frame-cache") || hasFlag("animationFrameCache");
-const TRIANGLE_FRAME = !hasFlag("no-triangle-frame") && !hasFlag("noTriangleFrame");
 const ANIMATION_FRAME_CACHE_FRAMES = optNum(
   "animation-frame-cache-frames",
   optNum("animationFrameCacheFrames", 60),
@@ -520,7 +519,6 @@ function buildUrl(port, scenario) {
     stableDom: scenario.stableDom ? "1" : "0",
     animationDriver: scenario.animationDriver,
     animationFrameCache: scenario.animationFrameCache ? "1" : "0",
-    triangleFrame: TRIANGLE_FRAME ? "1" : "0",
     animationFrameCacheFrames: String(ANIMATION_FRAME_CACHE_FRAMES),
     keyframeSamples: String(KEYFRAME_SAMPLES),
     animatedMeshOptimization: scenario.animatedMeshOptimization ? "1" : "0",
@@ -655,7 +653,7 @@ for (const mode of MODES) {
   }
 }
 
-console.log(`[animated-human] mesh=${MESH} clip=${CLIP} targetSize=${TARGET_SIZE} warmup=${WARMUP_MS}ms sample=${SAMPLE_MS}ms animatedMeshOptimization=${ANIMATED_MESH_OPTIMIZATION_VARIANTS.join(",")} animationDriver=${ANIMATION_DRIVER_VARIANTS.join(",")} animationFrameCache=${ANIMATION_FRAME_CACHE_VARIANTS.join(",")} triangleFrame=${TRIANGLE_FRAME ? "on" : "off"} animationFrameCacheFrames=${ANIMATION_FRAME_CACHE_FRAMES} keyframeSamples=${KEYFRAME_SAMPLES} stableTriangleDebug=${STABLE_TRIANGLE_DEBUG_VARIANTS.map((value) => value || "normal").join(",")} colorPolicy=${STABLE_TRIANGLE_COLOR_POLICY_LABEL} colorSteps=${STABLE_TRIANGLE_COLOR_STEPS_LABEL} colorFreezeFrames=${STABLE_TRIANGLE_COLOR_FREEZE_FRAMES_LABEL} colorBudget=${STABLE_TRIANGLE_COLOR_BUDGET_LABEL} colorMaxAge=${STABLE_TRIANGLE_COLOR_MAX_AGE_LABEL} colorMaxStep=${STABLE_TRIANGLE_COLOR_MAX_STEP_LABEL} matrixDecimals=${STABLE_TRIANGLE_MATRIX_DECIMALS_LABEL}`);
+console.log(`[animated-human] mesh=${MESH} clip=${CLIP} targetSize=${TARGET_SIZE} warmup=${WARMUP_MS}ms sample=${SAMPLE_MS}ms animatedMeshOptimization=${ANIMATED_MESH_OPTIMIZATION_VARIANTS.join(",")} animationDriver=${ANIMATION_DRIVER_VARIANTS.join(",")} animationFrameCache=${ANIMATION_FRAME_CACHE_VARIANTS.join(",")} animationFrameCacheFrames=${ANIMATION_FRAME_CACHE_FRAMES} keyframeSamples=${KEYFRAME_SAMPLES} stableTriangleDebug=${STABLE_TRIANGLE_DEBUG_VARIANTS.map((value) => value || "normal").join(",")} colorPolicy=${STABLE_TRIANGLE_COLOR_POLICY_LABEL} colorSteps=${STABLE_TRIANGLE_COLOR_STEPS_LABEL} colorFreezeFrames=${STABLE_TRIANGLE_COLOR_FREEZE_FRAMES_LABEL} colorBudget=${STABLE_TRIANGLE_COLOR_BUDGET_LABEL} colorMaxAge=${STABLE_TRIANGLE_COLOR_MAX_AGE_LABEL} colorMaxStep=${STABLE_TRIANGLE_COLOR_MAX_STEP_LABEL} matrixDecimals=${STABLE_TRIANGLE_MATRIX_DECIMALS_LABEL}`);
 if (BROWSER_EXECUTABLE) console.log(`[animated-human] browser=${BROWSER_EXECUTABLE}`);
 if (SOFTWARE_BACKEND) console.log("[animated-human] software backend=on");
 if (CHROMIUM_ARGS.length > 0) console.log(`[animated-human] chromium args=${CHROMIUM_ARGS.join(" ")}`);
@@ -723,7 +721,6 @@ try {
     animationFrameCache: ANIMATION_FRAME_CACHE_VARIANTS.length === 1
       ? ANIMATION_FRAME_CACHE_VARIANTS[0]
       : "compare",
-    triangleFrame: TRIANGLE_FRAME,
     animationFrameCacheFrames: ANIMATION_FRAME_CACHE_FRAMES,
     keyframeSamples: KEYFRAME_SAMPLES,
     stableTriangleDebug: STABLE_TRIANGLE_DEBUG || null,

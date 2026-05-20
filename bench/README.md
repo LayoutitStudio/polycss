@@ -172,11 +172,10 @@ Playwright runner accepts `--mode baked,dynamic`, `--clip <name|index|run>`,
 `--animation-driver js|progressive-style-cache|js-style-cache|typed-om-style-cache|css-keyframes`,
 `--compare-stable-triangle-debug`, `--require-solid-triangles`, `--trace`, and
 the same GPU lane flags as the other browser benches. The default baked color
-policy uses 8-channel quantized colors and staggers leaf color writes over a
-12-frame cadence; adaptive color policy spends a capped write budget on leaves
-with the largest accumulated color error first. The max-step option caps the
-per-write RGB channel delta so cadence updates drift toward the next baked color
-instead of jumping directly to it. `css-keyframes` is a bench-only prototype that samples the clip into
+path uses 8-channel quantized colors, staggers leaf color writes over a
+12-frame cadence, and caps the per-write RGB channel delta so updates drift
+toward the next baked color instead of jumping directly to it. `css-keyframes`
+is a bench-only prototype that samples the clip into
 per-leaf CSS animations, removing per-frame JS playback from the measurement
 window. The solid-triangle guard fails the run if the page leaves the baked
 `<u>` path. Use `--stable-triangle-color-freeze-frames 0` to keep the initial
