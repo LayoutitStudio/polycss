@@ -380,12 +380,10 @@ describe("createPolyScene", () => {
         }) as MediaQueryList,
       });
       try {
-        scene = createPolyScene(host, {
-          rotX: 65,
-          rotY: 45,
+        scene = makeScene(host, {
           directionalLight: { direction: [0, 0, 1], color: "#ffffff", intensity: 0 },
           ambientLight: { color: "#ffffff", intensity: 1 },
-        });
+        }, { rotX: 65, rotY: 45 });
         scene.add(makeVoxelExactParseResult(), { merge: false });
         const wrapper = host.querySelector(".polycss-mesh") as HTMLElement | null;
         const brush = host.querySelector(".polycss-mesh > b") as HTMLElement | null;
