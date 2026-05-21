@@ -1,4 +1,15 @@
-import type { PolyTextureLightingMode, Polygon } from "@layoutit/polycss-core";
+import type { PolyTextureLightingMode } from "@layoutit/polycss-core";
+import {
+  isFullRectSolid,
+  isSolidTrianglePlan,
+  isProjectiveQuadPlan,
+  fullRectBounds,
+  safariCssProjectiveUnsupported,
+  incrementCount,
+  dominantCountKey,
+  filterAtlasPlans as filterAtlasPlansCore,
+  getSolidPaintDefaultsForPlansCore,
+} from "@layoutit/polycss-core";
 import type {
   TextureAtlasPlan,
   PolyRenderStrategy,
@@ -14,63 +25,16 @@ import {
   buildBasisHints,
 } from "./plan";
 
-export function fullRectBounds(entry: TextureAtlasPlan): { left: number; top: number; width: number; height: number } | null {
-  if (entry.screenPts.length !== 8) return null;
-
-  const xs: number[] = [];
-  const ys: number[] = [];
-  const RECT_EPS = 1e-3;
-  const addUnique = (list: number[], value: number): void => {
-    for (const existing of list) {
-      if (Math.abs(existing - value) <= RECT_EPS) return;
-    }
-    list.push(value);
-  };
-
-  for (let i = 0; i < entry.screenPts.length; i += 2) {
-    addUnique(xs, entry.screenPts[i]);
-    addUnique(ys, entry.screenPts[i + 1]);
-  }
-  if (xs.length !== 2 || ys.length !== 2) return null;
-
-  xs.sort((a, b) => a - b);
-  ys.sort((a, b) => a - b);
-  if (
-    Math.abs(xs[0]) > RECT_EPS ||
-    Math.abs(ys[0]) > RECT_EPS ||
-    xs[1] - xs[0] <= RECT_EPS ||
-    ys[1] - ys[0] <= RECT_EPS
-  ) {
-    return null;
-  }
-
-  for (let i = 0; i < entry.screenPts.length; i += 2) {
-    const x = entry.screenPts[i];
-    const y = entry.screenPts[i + 1];
-    const onX = Math.abs(x - xs[0]) <= RECT_EPS || Math.abs(x - xs[1]) <= RECT_EPS;
-    const onY = Math.abs(y - ys[0]) <= RECT_EPS || Math.abs(y - ys[1]) <= RECT_EPS;
-    if (!onX || !onY) return null;
-  }
-
-  return {
-    left: xs[0],
-    top: ys[0],
-    width: xs[1] - xs[0],
-    height: ys[1] - ys[0],
-  };
-}
-
-export function isFullRectSolid(entry: TextureAtlasPlan): boolean {
-  return !!fullRectBounds(entry);
-}
-
-export function isSolidTrianglePlan(entry: TextureAtlasPlan): boolean {
-  return !entry.texture && entry.polygon.vertices.length === 3;
-}
-
-export function isProjectiveQuadPlan(entry: TextureAtlasPlan): entry is TextureAtlasPlan & { projectiveMatrix: string } {
-  return !entry.texture && !!entry.projectiveMatrix && !isFullRectSolid(entry);
-}
+// Pure predicates re-exported from core.
+export {
+  fullRectBounds,
+  isFullRectSolid,
+  isSolidTrianglePlan,
+  isProjectiveQuadPlan,
+  safariCssProjectiveUnsupported,
+  incrementCount,
+  dominantCountKey,
+};
 
 export function borderShapeSupported(doc: Document): boolean {
   const css = doc.defaultView?.CSS ?? (typeof CSS !== "undefined" ? CSS : undefined);
@@ -126,28 +90,6 @@ export function projectiveQuadSupported(doc: Document): boolean {
   return !safariCssProjectiveUnsupported(userAgent);
 }
 
-export function safariCssProjectiveUnsupported(userAgent: string): boolean {
-  const isChromiumFamily = /\b(?:Chrome|HeadlessChrome|Chromium|Edg|OPR)\//.test(userAgent);
-  const isSafariFamily = /\bVersion\/[\d.]+.*\bSafari\//.test(userAgent);
-  return isSafariFamily && !isChromiumFamily;
-}
-
-export function incrementCount(map: Map<string, number>, key: string): void {
-  map.set(key, (map.get(key) ?? 0) + 1);
-}
-
-export function dominantCountKey(map: Map<string, number>): string | undefined {
-  let bestKey: string | undefined;
-  let bestCount = 1;
-  for (const [key, count] of map) {
-    if (count > bestCount) {
-      bestKey = key;
-      bestCount = count;
-    }
-  }
-  return bestKey;
-}
-
 export function getSolidPaintDefaultsForPlans(
   plans: Array<TextureAtlasPlan | null>,
   textureLighting: PolyTextureLightingMode,
@@ -155,52 +97,21 @@ export function getSolidPaintDefaultsForPlans(
   strategies?: PolyRenderStrategiesOption,
   cornerShapeGeometryForPlanFn?: (plan: TextureAtlasPlan) => unknown,
 ): SolidPaintDefaults {
-  const paintCounts = new Map<string, number>();
-  const dynamicCounts = new Map<string, number>();
-  const dynamicColors = new Map<string, RGB>();
   const disabled = new Set(strategies?.disable ?? []);
-  const useFullRectSolid = !disabled.has("b");
-  const useProjectiveQuad = useFullRectSolid && projectiveQuadSupported(doc);
-  const useStableTriangle = resolveSolidTrianglePrimitive(doc, strategies) !== null;
-  const useCornerShapeSolid = !disabled.has("i") && cornerShapeSupported(doc);
-  const useBorderShape = !disabled.has("i") && borderShapeSupported(doc);
-
-  for (const plan of plans) {
-    if (!plan || plan.texture) continue;
-    const usesCornerShape = useCornerShapeSolid && !!cornerShapeGeometryForPlanFn?.(plan);
-
-    if (textureLighting === "dynamic") {
-      if (
-        !(useStableTriangle && isSolidTrianglePlan(plan)) &&
-        !(useFullRectSolid && isFullRectSolid(plan)) &&
-        !(useProjectiveQuad && isProjectiveQuadPlan(plan)) &&
-        !usesCornerShape &&
-        !useBorderShape
-      ) continue;
-      const color = parseHex(plan.polygon.color ?? "#cccccc");
-      const key = rgbKey(color);
-      incrementCount(dynamicCounts, key);
-      if (!dynamicColors.has(key)) dynamicColors.set(key, color);
-      continue;
-    }
-
-    if (
-      !(useStableTriangle && isSolidTrianglePlan(plan)) &&
-      !(useFullRectSolid && isFullRectSolid(plan)) &&
-      !(useProjectiveQuad && isProjectiveQuadPlan(plan)) &&
-      !usesCornerShape &&
-      !useBorderShape
-    ) continue;
-    incrementCount(paintCounts, plan.shadedColor);
-  }
-
-  const paintColor = dominantCountKey(paintCounts);
-  const dynamicColorKey = dominantCountKey(dynamicCounts);
-  return {
-    paintColor,
-    dynamicColorKey,
-    dynamicColor: dynamicColorKey ? dynamicColors.get(dynamicColorKey) : undefined,
-  };
+  return getSolidPaintDefaultsForPlansCore(
+    plans,
+    textureLighting,
+    disabled,
+    {
+      solidTriangleSupported: solidTriangleSupported(doc),
+      projectiveQuadSupported: projectiveQuadSupported(doc),
+      cornerShapeSupported: cornerShapeSupported(doc),
+      borderShapeSupported: borderShapeSupported(doc),
+    },
+    parseHex,
+    rgbKey,
+    cornerShapeGeometryForPlanFn,
+  );
 }
 
 /**
@@ -270,26 +181,14 @@ export function filterAtlasPlans(
   disabled: ReadonlySet<PolyRenderStrategy>,
   doc?: Document | null,
 ): Array<TextureAtlasPlan | null> {
-  const useFullRectSolid = !disabled.has("b");
-  const useProjectiveQuad = useFullRectSolid;
-  const useStableTriangle = !disabled.has("u") && isSolidTriangleSupported(doc);
-  const useBorderShape = !disabled.has("i") && textureLighting !== "dynamic" && isBorderShapeSupported(doc);
-  const disableB = disabled.has("b");
-  return plans.map((plan) => {
-    if (!plan || plan.texture) return plan;
-    if (useStableTriangle && isSolidTrianglePlan(plan)) return null;
-    const fullRect = isFullRectSolid(plan);
-    if (
-      (useFullRectSolid && fullRect) ||
-      (useProjectiveQuad && isProjectiveQuadPlan(plan)) ||
-      (textureLighting !== "dynamic" && useBorderShape && (!fullRect || disableB))
-    ) return null;
-    return plan;
+  return filterAtlasPlansCore(plans, textureLighting, disabled, {
+    solidTriangleSupported: isSolidTriangleSupported(doc),
+    borderShapeSupported: isBorderShapeSupported(doc),
   });
 }
 
 export function getSolidPaintDefaults(
-  polygons: Polygon[],
+  polygons: import("@layoutit/polycss-core").Polygon[],
   options: import("./types.ts").RenderTextureAtlasOptions,
   cornerShapeGeometryForPlanFn?: (plan: TextureAtlasPlan) => unknown,
 ): SolidPaintDefaults {

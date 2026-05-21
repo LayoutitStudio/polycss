@@ -300,3 +300,18 @@ export {
   rgbToCss,
   colorErrorScore,
 } from "./atlas/paintDefaults";
+export {
+  fullRectBounds,
+  isFullRectSolid,
+  isSolidTrianglePlan,
+  isProjectiveQuadPlan,
+  safariCssProjectiveUnsupported,
+  incrementCount,
+  dominantCountKey,
+  filterAtlasPlans,
+  getSolidPaintDefaultsForPlansCore,
+} from "./atlas/strategy";
+export type {
+  FilterAtlasPlansEnv,
+  GetSolidPaintDefaultsEnv,
+} from "./atlas/strategy";
