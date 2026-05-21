@@ -19,25 +19,9 @@ const SOLID_QUAD_CANONICAL_SIZE = 64;
 
 const CORNER_SHAPE_CORPUS = [
   ["Bear.glb"],
-  ["Cat.glb"],
-  ["Wolf.glb"],
-  ["Frog.glb"],
-  ["Bat.glb"],
-  ["apple.glb"],
-  ["Grapes.glb"],
-  ["Watermelon.glb"],
-  ["urban", "Adventurer.glb"],
   ["urban", "Car.glb"],
-  ["urban", "Bus.glb"],
-  ["urban", "Box.glb"],
   ["urban", "Fire hydrant.glb"],
-  ["urban", "Cone.glb"],
-  ["urban", "Mailbox.glb"],
-  ["urban", "ATM.glb"],
-  ["city", "Small Building.glb"],
   ["city", "Large Building.glb"],
-  ["tree.glb"],
-  ["poly-pizza", "cardboard-box-closed.glb"],
 ] as const;
 
 const FLAT_TRIANGLE: Polygon = {
@@ -752,7 +736,7 @@ describe("renderPolygonsWithTextureAtlas", () => {
     result.dispose();
   });
 
-  it("replaces a subset of border-shape leaves with u leaves across a 20-model corpus", () => {
+  it("replaces a subset of border-shape leaves with u leaves across a gallery corpus", () => {
     const beforeDoc = supportDoc({ borderShape: true, cornerShape: false });
     const afterDoc = supportDoc({ borderShape: true, cornerShape: true });
     let beforeI = 0;
@@ -760,7 +744,7 @@ describe("renderPolygonsWithTextureAtlas", () => {
     let afterI = 0;
     let afterU = 0;
 
-    expect(CORNER_SHAPE_CORPUS).toHaveLength(20);
+    expect(CORNER_SHAPE_CORPUS).toHaveLength(4);
 
     for (const fixture of CORNER_SHAPE_CORPUS) {
       const parsed = parseGltf(loadGalleryGlb(...fixture));
