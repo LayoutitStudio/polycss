@@ -353,9 +353,11 @@ describe("createPolyScene", () => {
       scene = createPolyScene(host, {
         camera: createPolyPerspectiveCamera({ perspective: 1500, rotX: 30, rotY: 60, zoom: 2 }),
       });
+      const cameraEl = host.querySelector(".polycss-camera") as HTMLElement;
       const sceneEl = host.querySelector(".polycss-scene") as HTMLElement;
       const transform = sceneEl.style.transform;
-      expect(sceneEl.style.perspective).toBe("1500px");
+      // Perspective lives on the .polycss-camera wrapper, not on .polycss-scene.
+      expect(cameraEl.style.perspective).toBe("1500px");
       expect(transform).toContain("scale(2)");
       expect(transform).toContain("rotateX(30deg)");
       // rotY in our API maps to CSS rotate() (i.e. rotateZ) so the model
@@ -368,9 +370,11 @@ describe("createPolyScene", () => {
       scene = createPolyScene(host, {
         camera: createPolyPerspectiveCamera({ distance: 100, perspective: 1500, rotX: 30, rotY: 60, zoom: 2 }),
       });
+      const cameraEl = host.querySelector(".polycss-camera") as HTMLElement;
       const sceneEl = host.querySelector(".polycss-scene") as HTMLElement;
       const transform = sceneEl.style.transform;
-      expect(sceneEl.style.perspective).toBe("750px");
+      // Perspective lives on the .polycss-camera wrapper, not on .polycss-scene.
+      expect(cameraEl.style.perspective).toBe("750px");
       expect(sceneEl.style.getPropertyValue("zoom")).toBe("2");
       expect(transform).toContain("translateZ(-50px)");
       expect(transform).toContain("scale(1)");
@@ -381,11 +385,12 @@ describe("createPolyScene", () => {
 
     it("inlines a large finite perspective when camera is orthographic", () => {
       scene = makeScene(host);
-      const sceneEl = host.querySelector(".polycss-scene") as HTMLElement;
+      const cameraEl = host.querySelector(".polycss-camera") as HTMLElement;
       // perspective: none triggers a Chrome compositor bug that mis-rasterizes
       // <u> border-triangle leaves at initial paint. A very large finite value
       // is visually orthographic but avoids the broken fast path.
-      expect(sceneEl.style.perspective).toBe("1000000px");
+      // Perspective lives on the .polycss-camera wrapper.
+      expect(cameraEl.style.perspective).toBe("1000000px");
     });
 
     it("injects base styles into the document", () => {
@@ -1196,15 +1201,17 @@ describe("createPolyScene", () => {
 
     it("perspective camera applies the configured perspective at creation", () => {
       scene = createPolyScene(host, { camera: createPolyPerspectiveCamera({ perspective: 2500 }) });
-      const sceneEl = host.querySelector(".polycss-scene") as HTMLElement;
-      expect(sceneEl.style.perspective).toBe("2500px");
+      const cameraEl = host.querySelector(".polycss-camera") as HTMLElement;
+      // Perspective lives on the .polycss-camera wrapper, not on .polycss-scene.
+      expect(cameraEl.style.perspective).toBe("2500px");
     });
 
     it("orthographic camera produces the 1000000px stand-in perspective", () => {
       scene = makeScene(host);
-      const sceneEl = host.querySelector(".polycss-scene") as HTMLElement;
+      const cameraEl = host.querySelector(".polycss-camera") as HTMLElement;
       // See "inlines a large finite perspective..." for the rationale.
-      expect(sceneEl.style.perspective).toBe("1000000px");
+      // Perspective lives on the .polycss-camera wrapper.
+      expect(cameraEl.style.perspective).toBe("1000000px");
     });
 
     it("emits dynamic light cascade vars on the scene element when textureLighting='dynamic'", () => {
