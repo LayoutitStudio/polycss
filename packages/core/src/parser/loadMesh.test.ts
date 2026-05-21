@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { loadMesh } from "./loadMesh";
+import { mergePolygons } from "../merge/mergePolygons";
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -206,6 +207,31 @@ describe("loadMesh", () => {
       const explicit = await loadMesh("model.obj", { meshResolution: "lossy" });
       expect(implicit.polygons).toHaveLength(1);
       expect(implicit.polygons).toHaveLength(explicit.polygons.length);
+    });
+
+    it("returns fully merged polygons — no additional merges possible after load", async () => {
+      // Two strictly coplanar triangles sharing an edge. mergePolygons merges
+      // them into a single quad. This test verifies that loadMesh always returns
+      // polygons in their merged form so React/Vue callers get the same result
+      // as vanilla scene.add() which applies a second mergePolygons pass.
+      // Regression: withMeshResolution used to bail early when optimizeMeshPolygons
+      // returned the same polygon count as the input, silently passing unmerged
+      // polygons to callers that don't apply a post-load merge.
+      const COPLANAR_PAIR_OBJ = [
+        "v 0 0 0",
+        "v 1 0 0",
+        "v 1 1 0",
+        "v 0 1 0",
+        "f 1 2 3",
+        "f 1 3 4",
+        "",
+      ].join("\n");
+      vi.stubGlobal("fetch", makeMockFetch({ text: COPLANAR_PAIR_OBJ }));
+      const result = await loadMesh("model.obj", { meshResolution: "lossless" });
+      // Merged into one quad.
+      expect(result.polygons).toHaveLength(1);
+      // Invariant: a second mergePolygons pass produces no further reductions.
+      expect(mergePolygons(result.polygons)).toHaveLength(result.polygons.length);
     });
 
     it("bakes uniform texture samples into solid polygons before merging", async () => {

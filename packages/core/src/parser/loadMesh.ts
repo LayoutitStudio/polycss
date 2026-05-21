@@ -70,7 +70,14 @@ function withMeshResolution(result: ParseResult, options?: LoadMeshOptions): Par
   const polygons = optimizeMeshPolygons(result.polygons, {
     meshResolution: options?.meshResolution,
   });
-  if (polygons.length === result.polygons.length) return result;
+  // Always use the optimized polygon array. optimizeMeshPolygons runs
+  // mergePolygons internally so the result is the canonical merged form
+  // regardless of whether the count changed. Returning the original when
+  // counts match was wrong: same-count-but-different-content (e.g. two
+  // triangles merged into a quad that then got split differently) would
+  // silently pass unmerged polygons to callers that don't apply a second
+  // merge pass (React / Vue PolyMesh).
+  if (polygons === result.polygons) return result;
   return { ...result, polygons };
 }
 
