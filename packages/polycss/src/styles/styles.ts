@@ -25,6 +25,18 @@ const CORE_BASE_STYLES = `
   box-sizing: border-box;
 }
 
+/* Camera wrapper (mounted by createPolyCamera / PolyPerspectiveCamera /
+   PolyOrthographicCamera). Fills its parent so the scene inside has a
+   positioned, sized layout context for its top: 50% / left: 50% pin to
+   resolve against. Inline styles win on specificity if the user sizes
+   the camera explicitly. */
+.polycss-camera {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
 .polycss-scene {
   position: absolute;
   top: 50%;
