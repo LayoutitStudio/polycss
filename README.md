@@ -4,7 +4,7 @@
 
 # polycss
 
-A CSS polygon mesh engine. A 3D renderer for the DOM. Renders OBJ, glTF, GLB and VOX as real HTML elements transformed with CSS `matrix3d(...)`. Supports colors, textures, lighting, shadows, controls, shapes and animation. Works with React, Vue, custom elements, or plain JavaScript.
+A CSS polygon mesh engine. A 3D renderer for the DOM. Renders OBJ, glTF, GLB and VOX as real HTML elements transformed with CSS `matrix3d(...)`. Supports colors, textures, lighting, shadows, controls, shapes and animations. Works with React, Vue, custom elements, or plain JavaScript.
 
 Visit [polycss.com](https://polycss.com) for docs and model examples.
 
@@ -53,23 +53,6 @@ export default function App() {
     </PolyCamera>
   );
 }
-```
-
-The Vue package mirrors the same names and props with Vue casing:
-
-```vue
-<template>
-  <PolyCamera :rot-x="65" :rot-y="45">
-    <PolyScene texture-lighting="dynamic">
-      <PolyOrbitControls drag wheel />
-      <PolyMesh src="/gallery/obj/cottage.obj" mtl="/gallery/obj/cottage.mtl" />
-    </PolyScene>
-  </PolyCamera>
-</template>
-
-<script setup lang="ts">
-import { PolyCamera, PolyScene, PolyOrbitControls, PolyMesh } from "@layoutit/polycss-vue";
-</script>
 ```
 
 ## API Reference
@@ -178,8 +161,6 @@ polycss renders in the DOM, so performance is mostly determined by how many poly
 - Dynamic lighting runs through CSS custom properties instead of per-frame JavaScript.
 - Voxel-shaped meshes mount only camera-facing leaves when the mesh is eligible.
 - `meshResolution: "lossy"` can merge compatible polygons to reduce DOM node count.
-
-For diagnostics, all renderer packages export `collectPolyRenderStats(root)`, which returns mounted polygon leaf counts, shadow counts, surface categories, and bucket counts for an already-rendered scene.
 
 ## Packages
 
