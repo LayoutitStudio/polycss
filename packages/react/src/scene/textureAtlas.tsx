@@ -927,9 +927,11 @@ export function TextureBorderShapePoly({
     else el.style.removeProperty("border-shape");
     orderBrushInlineStyle(el);
   }, [borderShape]);
-  const transform = formatMatrix3d(
-    borderShape ? formatBorderShapeEntryMatrix(entry) : formatSolidQuadEntryMatrix(entry),
-  );
+  // formatBorderShapeEntryMatrix / formatSolidQuadEntryMatrix already return a
+  // wrapped `matrix3d(...)` string. Wrapping again via formatMatrix3d would
+  // produce `matrix3d(matrix3d(...))` — invalid CSS, silently dropped by the
+  // browser, leaving the leaf with no transform.
+  const transform = borderShape ? formatBorderShapeEntryMatrix(entry) : formatSolidQuadEntryMatrix(entry);
   const style: CSSProperties = {
     transform,
     color: useDefaultPaint ? undefined : entry.shadedColor,

@@ -1065,9 +1065,11 @@ export function renderTextureBorderShapePoly({
   const useIForFullRect = fullRect && forceBorderShape && isBorderShapeSupported();
   const borderShape = (!fullRect || useIForFullRect) ? cssBorderShapeForPlan(entry) : null;
   const useDefaultPaint = entry.shadedColor === solidPaintDefaults?.paintColor;
-  const transform = formatMatrix3d(
-    borderShape ? formatBorderShapeEntryMatrix(entry) : formatSolidQuadEntryMatrix(entry),
-  );
+  // formatBorderShapeEntryMatrix / formatSolidQuadEntryMatrix already return a
+  // wrapped `matrix3d(...)` string. Wrapping again via formatMatrix3d would
+  // produce `matrix3d(matrix3d(...))` — invalid CSS, silently dropped by the
+  // browser, leaving the leaf with no transform.
+  const transform = borderShape ? formatBorderShapeEntryMatrix(entry) : formatSolidQuadEntryMatrix(entry);
   const style: CSSProperties = {
     transform,
     color: useDefaultPaint ? undefined : entry.shadedColor,
