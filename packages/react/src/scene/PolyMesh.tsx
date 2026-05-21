@@ -501,6 +501,7 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
   // global CSS rule with default normals.
   const sceneCtx = usePolySceneContext();
   const effectiveTextureLighting = textureLighting ?? sceneCtx?.textureLighting ?? "baked";
+  const effectiveStrategies = sceneCtx?.strategies;
   const effectiveDirectional =
     effectiveTextureLighting === "dynamic" ? undefined : sceneCtx?.directionalLight;
   const effectiveAmbient =
@@ -558,10 +559,11 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
     atlasPlans,
     effectiveTextureLighting,
     textureQuality,
+    effectiveStrategies,
   );
   const solidPaintDefaults = useMemo(
-    () => !renderPolygon ? getSolidPaintDefaults(atlasPlans, effectiveTextureLighting) : {},
-    [renderPolygon, atlasPlans, effectiveTextureLighting],
+    () => !renderPolygon ? getSolidPaintDefaults(atlasPlans, effectiveTextureLighting, effectiveStrategies) : {},
+    [renderPolygon, atlasPlans, effectiveTextureLighting, effectiveStrategies],
   );
   const defaultPaintVars = useMemo(
     () => solidPaintVars(solidPaintDefaults),
@@ -634,6 +636,7 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
         directionalLight: bakedDirectional,
         ambientLight: effectiveAmbient,
         textureLighting: effectiveTextureLighting,
+        strategies: effectiveStrategies,
         colorFrame: ++stableTriangleColorFrameRef.current,
         colorSteps: 8,
         colorFreezeFrames: 12,
@@ -669,6 +672,7 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
               entry={entry}
               page={textureAtlas.pages[entry.pageIndex]}
               textureLighting={effectiveTextureLighting}
+              solidPaintDefaults={solidPaintDefaults}
             />
           );
         }

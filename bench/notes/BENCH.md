@@ -18,13 +18,16 @@ pnpm bench:serve            # static server on :4400 with an index page
 pnpm bench:perf             # build bundles + run all 4 renderers × 5 scenarios
 pnpm bench:animated-human   # build bundles + run the animated human run bench
 pnpm bench:nonvoxel-drag-trace  # build bundles + trace a Playwright drag orbit on teapot
+pnpm bench:trace            # build bundles + run the trace analysis bucket profiler
 pnpm bench:lossy            # compare lossless / previous lossy / auto lossy counts
+pnpm bench:lossy:corpus     # scan gallery GLB/OBJ lossy counts + crack diagnostics
+pnpm bench:voxel-report     # summarize voxel cadence results
 pnpm bench:visual           # screenshot diff against bench/baselines/*.png
 pnpm bench:visual --record  # capture new baselines (after intentional renderer changes)
 pnpm bench:build            # just rebuild the bench bundles (rarely needed alone)
 node bench/nonvoxel-rotation-bench.mjs  # non-voxel vanilla rotation probe
 node bench/nonvoxel-drag-trace.mjs --label teapot-drag  # pointer-drag trace, no auto-rotate
-node bench/nonvoxel-frame-buckets.mjs --no-trace  # non-voxel rAF cadence buckets
+node bench/trace-analysis.mjs --page nonvoxel --no-trace  # non-voxel rAF cadence buckets
 node bench/nonvoxel-visual-compare.mjs  # non-voxel variant visual parity
 ```
 
@@ -38,10 +41,14 @@ node bench/animated-human-bench.mjs --compare-stable-dom --trace
 node bench/animated-human-bench.mjs --mesh poly-pizza/animated-robot.glb --clip run --animation-driver progressive-style-cache
 node bench/lossy-optimizer-bench.mjs --json bench/results/lossy-optimizer.json
 node bench/lossy-optimizer-bench.mjs --models ducky,shark,bicycle
+node bench/lossy-corpus-bench.mjs --root /tmp/polycss-model-corpus --json /tmp/polycss-temp-corpus.json
+node bench/lossy-corpus-bench.mjs --from-json bench/results/lossy-corpus.json --opportunities
+node bench/voxel-report.mjs all
+node bench/trace-analysis.mjs --mesh garden --runs 3 --dom-samples --label garden-trace
 node bench/perf-visual.mjs --mesh chicken --tolerance 0.005
 node bench/nonvoxel-rotation-bench.mjs --models teapot,bicycle --variants baseline,order-tile4 --run-order round-robin
 node bench/nonvoxel-drag-trace.mjs --mesh teapot --degrees 360 --drag-ms 1500 --label teapot-drag --frame-details --no-print-json
-node bench/nonvoxel-frame-buckets.mjs --mesh glb:Elephant.glb --variant baseline --no-trace
+node bench/trace-analysis.mjs --page nonvoxel --mesh glb:Elephant.glb --variant baseline --no-trace
 node bench/nonvoxel-visual-compare.mjs --models bicycle,elephant,policecar --variants scene-split-target,scene-transform-perspective
 ```
 
@@ -98,7 +105,7 @@ would actually pay.
 | Page                  | Render path                            | Per-frame state update            |
 | --------------------- | -------------------------------------- | --------------------------------- |
 | `perf-html.html`      | Declarative `<poly-scene>` + `<poly-mesh>` + `<poly-controls>` custom elements | `sceneEl.setAttribute(...)` — exercises the custom-element attribute observer + reflection pipeline |
-| `perf-vanilla.html`   | Imperative `createPolyScene` + `createPolyOrbitControls` + `loadMesh` | `scene.setOptions({...})` — exercises just the imperative API + the renderer's internal cascade |
+| `perf-vanilla.html`   | Imperative `createPolyCamera` + `createPolyScene` + `createPolyOrbitControls` + `loadMesh` | `camera.update({...})` for camera motion, `scene.setOptions({...})` for light changes |
 | `perf-react.html`     | `<PolyCamera><PolyScene><PolyOrbitControls>` JSX (React 19) | `useState` setter — full React reconciliation each frame |
 | `perf-vue.html`       | `<PolyCamera><PolyScene><PolyOrbitControls>` Vue 3 (`defineComponent` + render funcs) | `ref().value = ...` — Vue's reactivity flush each frame |
 
@@ -189,27 +196,36 @@ plan-only updates to attribute animation bottlenecks.
 
 ```
 bench/
-  README.md              ← you are here
+  notes/
+    BENCH.md            ← you are here
+    PERF_INVESTIGATION.md
+    results/            (gitignored) local Markdown run summaries
+
   perf-shared.mjs        PRESETS, dirFromAzEl, parseUrlParams,
                          createPerfRecorder() (FPS counter + window.__perf__)
   perf-html.html         declarative <poly-scene> + <poly-controls>
   perf-vanilla.html      imperative createPolyScene + createPolyOrbitControls
   nonvoxel-vanilla.html  dedicated vanilla page for non-voxel experiments
                          with strategy/order/transform diagnostics
-  perf-react.html        loads polycss-react.js (JSX entry)
-  perf-vue.html          loads polycss-vue.js (Vue entry)
+  nonvoxel-variants.mjs  shared non-voxel bench variant table used by
+                         rotation, drag, trace, and visual runners
+  perf-react.html        loads .generated/polycss-react.js (JSX entry)
+  perf-vue.html          loads .generated/polycss-vue.js (Vue entry)
   animated-human.html    vanilla animated GLB page for the human run sequence
   entries/
     react.tsx            React 19 entry: useState-driven per-frame updates
     vue.ts               Vue 3 entry: ref() + render funcs (no SFC compiler)
   synth-mesh.mjs         UV-sphere generator (synth-10k/30k/50k presets)
 
-  build.mjs              esbuild driver: emits 4 bundles (vanilla,
-                         elements, react, vue). React/ReactDOM aliased
-                         to workspace-root copies so esbuild de-dupes
-                         a single instance.
+  build.mjs              esbuild driver: emits ignored bundles under
+                         bench/.generated/ (vanilla, elements,
+                         render-stats, react, vue). React/ReactDOM
+                         aliased to workspace-root copies so esbuild
+                         de-dupes a single instance.
   perf-bench.mjs         Playwright runner. Fresh chromium per scenario,
                          ephemeral port, structured JSON output.
+  voxel-report.mjs       Consolidated voxel cadence/browser report over
+                         existing bench/results JSON.
   animated-human-bench.mjs
                          GPU-default Playwright runner for the animated
                          human run sequence. Reports FPS, mixer/update cost,
@@ -226,13 +242,12 @@ bench/
                          links the four perf-*.html with example params.
   perf-visual.mjs        Screenshot diff guardrail (chicken + rock1 ×
                          3 light azimuths, vanilla path only).
+  trace-analysis.mjs     Trace/rAF bucket profiler for camera-motion runs.
+                         Reports per-cadence-bucket compositor, style,
+                         raster, script, and key trace event costs.
   nonvoxel-rotation-bench.mjs
                          Vanilla-only non-voxel rotation corpus runner.
-                         See NON_VOXEL_ROTATION_HYPOTHESES.md.
-  nonvoxel-frame-buckets.mjs
-                         Non-voxel vanilla rAF bucket profiler. Reports
-                         static leaf tag mix by cadence bucket, with optional
-                         Chromium trace attribution.
+                         See bench/notes/PERF_INVESTIGATION.md.
   nonvoxel-visual-compare.mjs
                          Static screenshot parity check for non-voxel bench
                          variants against the baked baseline.
@@ -240,10 +255,10 @@ bench/
   baselines/             chicken-* / rock1-* PNGs the visual diff compares against.
   results/               (gitignored) per-run JSON output from bench scripts.
 
-  polycss.js             (gitignored) vanilla + elements bundle, output of build.mjs.
-  polycss-elements.js    (gitignored) custom-element side-effect register bundle.
-  polycss-react.js       (gitignored) React entry bundle.
-  polycss-vue.js         (gitignored) Vue entry bundle.
+  .generated/            (gitignored) browser ESM bundles output by build.mjs:
+                         polycss.js, polycss-elements.js,
+                         polycss-render-stats.js, polycss-react.js,
+                         polycss-vue.js.
 ```
 
 ## Lossy Optimizer Bench
@@ -273,12 +288,26 @@ mostly-rectangulated and mechanical runtime cases; `AnimatedSnake.glb`,
 `Dinosaur.glb`, `Gorilla.glb`, `Hippo.glb`, `Dragon.glb`, `Lobster.glb`,
 `Octopus.glb`, and `Rat.glb` keep pressure on larger pair-heavy organic meshes.
 
+`lossy-corpus-bench.mjs` is the heavier gallery-wide version. It scans every
+GLB/GLTF/OBJ under `website/public/gallery`, excludes VOX because `loadMesh`
+bypasses the generic optimizer for voxel sources, and emits per-model
+lossless/current lossy/forced-candidate rows. JSON rows include crack-budget
+diagnostics for forced candidates plus per-model optimizer timings, so a
+proposed local crack-aware selector can be checked against the same failure
+reasons without relaxing global crack limits or hiding load-time cost.
+Use `--from-json <file> --opportunities` to mine an existing run without
+rescanning, `--compare <baseline>` to compare two corpus JSON files, and
+`--sweep` on a small `--models` subset to run a wider lossy candidate grid.
+Use `--root <dir>` to scan a temporary external GLB/GLTF/OBJ corpus without
+copying it into `website/public/gallery`; labels are relative to that root and
+the absolute root path is stored in JSON output.
+
 ---
 
 ## How a bench run works (`perf-bench.mjs`)
 
-1. **Build bundles** (`bench:build`). esbuild emits four files in
-   `bench/`. Each consumes the polycss workspace packages aliased to
+1. **Build bundles** (`bench:build`). esbuild emits browser ESM bundles in
+   `bench/.generated/`. Each consumes the polycss workspace packages aliased to
    their **source** (`packages/*/src/index.ts`), so editing source
    lands in the next `pnpm bench:build` without a tsup pass.
 
@@ -418,14 +447,15 @@ alias-resolved `@layoutit/polycss-react` source's nearest node_modules), which
 causes `Cannot read properties of null (reading 'useRef')` because each
 copy keeps its own internal hook dispatcher.
 
-Four bundles produced, all gitignored:
+Five bundles produced, all gitignored:
 
 | File                   | Size hint   | What's in it                         |
 | ---------------------- | ----------- | ------------------------------------ |
-| `polycss.js`           | ~30 KB      | Vanilla createPolyScene + controls + loadMesh + parsers |
-| `polycss-elements.js`  | ~36 KB      | Custom-element auto-register side effect |
-| `polycss-react.js`     | ~290 KB     | + React 19 + ReactDOM + @layoutit/polycss-react + entry |
-| `polycss-vue.js`       | ~150 KB     | + Vue 3 runtime + @layoutit/polycss-vue + entry |
+| `.generated/polycss.js`           | ~30 KB      | Vanilla createPolyScene + controls + loadMesh + parsers |
+| `.generated/polycss-elements.js`  | ~36 KB      | Custom-element auto-register side effect |
+| `.generated/polycss-render-stats.js` | ~1 KB    | Render stats helper re-export for browser pages |
+| `.generated/polycss-react.js`     | ~290 KB     | + React 19 + ReactDOM + @layoutit/polycss-react + entry |
+| `.generated/polycss-vue.js`       | ~150 KB     | + Vue 3 runtime + @layoutit/polycss-vue + entry |
 
 ---
 

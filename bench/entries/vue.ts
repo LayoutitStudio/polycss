@@ -1,5 +1,5 @@
 /**
- * Bench entry — Vue 3. Bundled by bench/build.mjs into bench/polycss-vue.js
+ * Bench entry — Vue 3. Bundled by bench/build.mjs into bench/.generated/polycss-vue.js
  * and loaded by bench/perf-vue.html.
  *
  * Mounts a <PolyCamera><PolyScene><PolyOrbitControls + mesh> tree and drives

@@ -18,13 +18,24 @@ export function useSidebarItems(): UseSidebarItemsResult {
   const presetItems = useMemo(
     () => PRESETS
       .filter((p) => BUILDER_KIT_CATEGORIES.includes(p.category))
-      .map((p) => ({ id: p.id, label: stripParenthesizedText(p.label), category: p.category })),
+      .map((p) => {
+        const label = stripParenthesizedText(p.label);
+        return {
+          id: p.id,
+          label,
+          category: p.category,
+          searchText: [label, p.label, p.category, p.kind, p.attribution?.creator, p.attribution?.license]
+            .filter(Boolean)
+            .join(" ")
+            .toLowerCase(),
+        };
+      }),
     [],
   );
   const trimmedSearch = modelSearch.trim().toLowerCase();
   const modelCategories = useMemo(() => {
     const filtered = trimmedSearch
-      ? presetItems.filter((p) => p.label.toLowerCase().includes(trimmedSearch))
+      ? presetItems.filter((p) => p.searchText.includes(trimmedSearch))
       : presetItems;
     const byCat = new Map<string, typeof filtered>();
     for (const p of filtered) {

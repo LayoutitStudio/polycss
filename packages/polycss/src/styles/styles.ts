@@ -136,7 +136,18 @@ const CORE_BASE_STYLES = `
   box-sizing: content-box;
   border: 0 solid transparent;
   border-color: transparent transparent currentColor transparent;
-  border-width: 0 32px 64px 32px;
+  border-width: 0 16px 32px 16px;
+}
+
+.polycss-scene u.polycss-corner-triangle {
+  width: 32px;
+  height: 32px;
+  background: currentColor;
+  border: 0;
+  border-top-left-radius: 50% 100%;
+  border-top-right-radius: 50% 100%;
+  corner-top-left-shape: bevel;
+  corner-top-right-shape: bevel;
 }
 
 /* <q> — dedicated shadow leaf. Same border-shape rendering trick as <i>

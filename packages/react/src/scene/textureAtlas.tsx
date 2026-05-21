@@ -73,8 +73,9 @@ export function computeTextureAtlasPlan(
 export function getSolidPaintDefaults(
   plans: Array<TextureAtlasPlan | null>,
   textureLighting: PolyTextureLightingMode,
+  strategies?: PolyRenderStrategiesOption,
 ): SolidPaintDefaults {
-  const disabled = new Set<PolyRenderStrategy>();
+  const disabled = new Set<PolyRenderStrategy>((strategies?.disable ?? []) as PolyRenderStrategy[]);
   return getSolidPaintDefaultsFromPlans(plans, textureLighting, disabled);
 }
 
@@ -110,6 +111,7 @@ export interface StableTriangleDomUpdateOptions {
   directionalLight?: PolyDirectionalLight;
   ambientLight?: PolyAmbientLight;
   textureLighting?: PolyTextureLightingMode;
+  strategies?: PolyRenderStrategiesOption;
   colorFrame?: number;
   colorSteps?: number;
   colorFreezeFrames?: number;
@@ -1083,6 +1085,7 @@ export function TextureAtlasPoly({
   entry,
   page,
   textureLighting,
+  solidPaintDefaults: _solidPaintDefaults,
   className,
   style: styleProp,
   domAttrs,
@@ -1092,6 +1095,7 @@ export function TextureAtlasPoly({
   entry: PackedTextureAtlasEntry;
   page: TextureAtlasPage | undefined;
   textureLighting: PolyTextureLightingMode;
+  solidPaintDefaults?: SolidPaintDefaults;
   className?: string;
   style?: CSSProperties;
   domAttrs?: Record<string, unknown>;

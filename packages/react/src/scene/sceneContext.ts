@@ -12,6 +12,7 @@ import type {
   PolyTextureLightingMode,
   Polygon,
 } from "@layoutit/polycss-core";
+import type { PolyRenderStrategiesOption } from "./textureAtlas";
 
 export interface ShadowOptions {
   color?: string;
@@ -23,6 +24,7 @@ export interface PolySceneContextValue {
   textureLighting: PolyTextureLightingMode;
   directionalLight?: PolyDirectionalLight;
   ambientLight?: PolyAmbientLight;
+  strategies?: PolyRenderStrategiesOption;
   shadow?: ShadowOptions;
   /**
    * Called by PolyMesh to register/unregister itself as a shadow caster.

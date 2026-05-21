@@ -322,6 +322,14 @@ describe("PolyScene — strategies.disable", () => {
     expect(fallback).toBeTruthy();
   });
 
+  it("renders triangles as u elements by default when supported", () => {
+    const container = renderScene({
+      polygons: [TRIANGLE],
+    });
+    const poly = container.querySelector("u") as HTMLElement | null;
+    expect(poly).toBeTruthy();
+  });
+
   it("disabling b renders a rect through border-shape when supported", () => {
     vi.stubGlobal("CSS", {
       supports: vi.fn((property: string) => property === "border-shape"),

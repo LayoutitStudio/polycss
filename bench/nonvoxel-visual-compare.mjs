@@ -12,6 +12,7 @@ import { readFile } from "node:fs/promises";
 import { dirname, extname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
+import { getNonVoxelVariantParams, knownNonVoxelVariantIds } from "./nonvoxel-variants.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, "..");
@@ -74,18 +75,6 @@ const MODELS = [
   { id: "policecar", mesh: "glb:Policecar.glb", params: { zoom: "0.35", targetSize: "60" } },
 ];
 
-const VARIANT_PARAMS = {
-  baseline: {},
-  "scene-matrix3d": { sceneTransformMode: "matrix3d" },
-  "scene-split-target": { sceneTransformMode: "split-target" },
-  "scene-host-perspective": { sceneTransformMode: "host-perspective" },
-  "scene-transform-perspective": { sceneTransformMode: "transform-perspective" },
-  "no-will-change": { sceneTransformMode: "no-will-change" },
-  "leaf-buckets-64": { leafBucketSize: "64" },
-  "leaf-buckets-128": { leafBucketSize: "128" },
-  "leaf-buckets-256": { leafBucketSize: "256" },
-};
-
 const MIME = {
   ".html": "text/html; charset=utf-8",
   ".js": "application/javascript; charset=utf-8",
@@ -126,8 +115,8 @@ function selectedModels() {
 function selectedVariants() {
   const requested = splitList(optStr("variants", "scene-split-target,scene-transform-perspective"));
   return requested.map((id) => {
-    const params = VARIANT_PARAMS[id];
-    if (!params) throw new Error(`Unknown variant "${id}". Known: ${Object.keys(VARIANT_PARAMS).join(", ")}`);
+    const params = getNonVoxelVariantParams(id);
+    if (!params) throw new Error(`Unknown variant "${id}". Known: ${knownNonVoxelVariantIds().join(", ")}`);
     if (id === "baseline") throw new Error("Baseline is implicit; do not include it in --variants.");
     return { id, params };
   });

@@ -1,8 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "fs";
 import { resolve } from "path";
-import type { Polygon } from "../types";
+import { pathToFileURL } from "url";
+import type { Polygon, Vec3 } from "../types";
+import { parseGltf } from "../parser/parseGltf";
 import { parseObj } from "../parser/parseObj";
+import { bakeSolidTextureSamples } from "../parser/solidTextureSamples";
 import { optimizeMeshPolygons } from "./optimizePolygons";
 
 function rect(x0: number, y0: number, x1: number, y1: number): Polygon[] {
@@ -69,6 +72,99 @@ function loadObjGalleryFile(name: string): string {
   );
 }
 
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
+function galleryGlbPath(name: string): string {
+  return resolve(__dirname, "../../../../website/public/gallery/glb", name);
+}
+
+function loadGlbGalleryFile(name: string): ArrayBuffer {
+  const bytes = readFileSync(galleryGlbPath(name));
+  return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+}
+
+function installSolidTextureEnv(color: [number, number, number, number]): void {
+  class FakeImage {
+    naturalWidth = 1;
+    naturalHeight = 1;
+    width = 1;
+    height = 1;
+    onload: (() => void) | null = null;
+
+    set src(_value: string) {
+      queueMicrotask(() => this.onload?.());
+    }
+  }
+
+  vi.stubGlobal("Image", FakeImage);
+  vi.stubGlobal("document", {
+    createElement(tagName: string) {
+      if (tagName !== "canvas") throw new Error(`unexpected element ${tagName}`);
+      return {
+        width: 0,
+        height: 0,
+        getContext(type: string) {
+          if (type !== "2d") return null;
+          return {
+            drawImage() {},
+            getImageData() {
+              return { data: color };
+            },
+          };
+        },
+      };
+    },
+  });
+}
+
+function renderCost(polygons: Polygon[]): number {
+  let cost = 0;
+  for (const polygon of polygons) {
+    const vertexCount = polygon.vertices.length;
+    const irregularPenalty = vertexCount <= 4 ? 0 : Math.min(4, vertexCount - 4) * 0.12;
+    const texturePenalty = polygon.texture || polygon.material?.texture || polygon.textureTriangles?.length
+      ? 0.15
+      : 0;
+    cost += 1 + irregularPenalty + texturePenalty;
+  }
+  return cost;
+}
+
+function triangulatedPatchHalf(
+  x0: number,
+  x1: number,
+  y0: number,
+  y1: number,
+  zAt: (x: number, y: number) => number,
+): Polygon[] {
+  const polygons: Polygon[] = [];
+  const columns = 3;
+  const point = (x: number, y: number): Vec3 => [x, y, zAt(x, y)];
+  for (let column = 0; column < columns; column++) {
+    const xa = x0 + ((x1 - x0) * column) / columns;
+    const xb = x0 + ((x1 - x0) * (column + 1)) / columns;
+    polygons.push(
+      { vertices: [point(xa, y0), point(xb, y0), point(xb, y1)], color: "#f00" },
+      { vertices: [point(xa, y0), point(xb, y1), point(xa, y1)], color: "#f00" },
+    );
+  }
+  return polygons;
+}
+
+function lowValueApproximationCorpus(): Polygon[] {
+  const polygons: Polygon[] = [];
+  for (let patch = 0; patch < 90; patch++) {
+    const x = patch * 3;
+    polygons.push(
+      ...triangulatedPatchHalf(x, x + 1, 0, 1, () => 0),
+      ...triangulatedPatchHalf(x + 1, x + 2, 0, 1, (px) => (px - x - 1) * 0.08),
+    );
+  }
+  return polygons;
+}
+
 describe("optimizeMeshPolygons", () => {
   it("uses exact planar cover candidates for lossless resolution", () => {
     const input = [
@@ -103,6 +199,26 @@ describe("optimizeMeshPolygons", () => {
     ];
 
     expect(optimizeMeshPolygons(input)).toHaveLength(1);
+  });
+
+  it("skips low-value automatic lossy approximation after a small exact result", () => {
+    const input = lowValueApproximationCorpus();
+    const lossless = optimizeMeshPolygons(input, { meshResolution: "lossless" });
+    const automatic = optimizeMeshPolygons(input, { meshResolution: "lossy" });
+    const explicit = optimizeMeshPolygons(input, {
+      meshResolution: "lossy",
+      approximateMerge: {
+        maxAngleDeg: 15,
+        maxPlaneDisplacement: 0.35,
+        maxBoundaryDisplacement: 0.0725,
+        isolatedPairs: false,
+      },
+    });
+
+    expect(input.length).toBeGreaterThanOrEqual(1000);
+    expect(renderCost(lossless)).toBeLessThanOrEqual(300);
+    expect(automatic).toHaveLength(lossless.length);
+    expect(explicit.length).toBeLessThan(lossless.length);
   });
 
   it("allows lossy approximate merge for same-texture UV polygons", () => {
@@ -255,6 +371,76 @@ describe("optimizeMeshPolygons", () => {
 
     expect(automatic).toHaveLength(exact.length);
     expect(polygonSignature(automatic)).toEqual(polygonSignature(exact));
+  });
+
+  it("does not let default lossy rect-cover heuristics regress below lossless", () => {
+    const raw = parseGltf(loadGlbGalleryFile("poly-pizza/cardboard-box-closed.glb")).polygons;
+
+    const lossless = optimizeMeshPolygons(raw, { meshResolution: "lossless" });
+    const lossy = optimizeMeshPolygons(raw, { meshResolution: "lossy" });
+
+    expect(lossless).toHaveLength(10);
+    expect(lossy.length).toBeLessThanOrEqual(lossless.length);
+  });
+
+  it("keeps automatic lossy quality fallback under the exact lossless floor", async () => {
+    installSolidTextureEnv([10, 20, 30, 255]);
+
+    for (const file of ["poly-pizza/arrow.glb", "poly-pizza/bucket.glb"]) {
+      const parsed = parseGltf(loadGlbGalleryFile(file), {
+        baseUrl: pathToFileURL(galleryGlbPath(file)).href,
+      });
+      const baked = await bakeSolidTextureSamples(parsed);
+
+      const lossless = optimizeMeshPolygons(baked.polygons, { meshResolution: "lossless" });
+      const lossy = optimizeMeshPolygons(baked.polygons, { meshResolution: "lossy" });
+
+      expect(lossy.length, file).toBeLessThanOrEqual(lossless.length);
+      expect(renderCost(lossy), file).toBeLessThanOrEqual(renderCost(lossless) + 1e-9);
+    }
+  });
+
+  it("does not keep searching lossy candidates after reaching one polygon", () => {
+    const input: Polygon[] = [];
+    const segments = 12;
+    const ring: Vec3[] = [];
+    for (let i = 0; i < segments; i++) {
+      const angle = (i / segments) * Math.PI * 2;
+      ring.push([Math.cos(angle), Math.sin(angle), 0]);
+    }
+    for (let i = 0; i < segments; i++) {
+      input.push({
+        vertices: [[0, 0, 0], ring[i], ring[(i + 1) % segments]],
+        color: "#abcdef",
+      });
+    }
+
+    const lossless = optimizeMeshPolygons(input, { meshResolution: "lossless" });
+    const lossy = optimizeMeshPolygons(input, { meshResolution: "lossy" });
+
+    expect(lossless).toHaveLength(1);
+    expect(lossy).toHaveLength(1);
+    expect(polygonSignature(lossy)).toEqual(polygonSignature(lossless));
+  });
+
+  it("salvages safe local pair wins without accepting the unsafe full pair set", () => {
+    const raw = parseGltf(loadGlbGalleryFile("Snail.glb")).polygons;
+
+    const lossless = optimizeMeshPolygons(raw, { meshResolution: "lossless" });
+    const forced = optimizeMeshPolygons(raw, {
+      meshResolution: "lossy",
+      approximateMerge: {
+        maxAngleDeg: 45,
+        maxPlaneDisplacement: 1,
+        maxBoundaryDisplacement: 0.0725,
+        isolatedPairs: true,
+      },
+    });
+    const automatic = optimizeMeshPolygons(raw, { meshResolution: "lossy" });
+
+    expect(forced.length).toBeLessThan(lossless.length);
+    expect(automatic.length).toBeGreaterThan(forced.length);
+    expect(automatic.length).toBeLessThan(lossless.length);
   });
 
   it("keeps lossy pair-merge neighbor seams on shared geometry", () => {

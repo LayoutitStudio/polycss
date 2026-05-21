@@ -2,8 +2,9 @@
  * polyDOM — compatibility wrapper for rendering a single Polygon.
  *
  * The vanilla package renders every valid polygon through the same brush
- * dispatch used by mesh rendering: rects use <b>, solid triangles use <u>,
- * sprites use <s>, and other irregular solid polygons use <i> when available.
+ * dispatch used by mesh rendering: rects use <b>, solid triangles and exact
+ * corner-shape solids use <u>, sprites use <s>, and remaining irregular solid
+ * polygons use <i> when available.
  */
 import type { Polygon } from "@layoutit/polycss-core";
 import {

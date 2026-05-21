@@ -31,6 +31,9 @@ const EPS_NORMAL = 1e-3;   // dot product tolerance for "same plane"
 const EPS_DISTANCE = 0.05; // signed-distance tolerance (in scene-space units)
 const EPS_TEXTURE_DISTANCE = 1e-3;
 const EPS_RENDER_DISTANCE = 1e-3;
+const MAX_MERGED_VERTEX_COUNT = 96;
+const MERGE_WORK_UNIT_LIMIT = 8_000_000;
+const MERGE_PASS_LIMIT = 16;
 
 interface PolyState {
   vertices: Vec3[];
@@ -48,9 +51,16 @@ interface PolyState {
   normal: Vec3;
   /** Plane offset: distance from origin along the normal. */
   d: number;
+  directedEdges: Set<string>;
   alive: boolean;
   /** Original Polygon's `data` field, preserved through the merge. */
   data?: Record<string, string | number | boolean>;
+}
+
+interface EdgeOwners {
+  a: Vec3;
+  b: Vec3;
+  owners: number[];
 }
 
 const sub = (a: Vec3, b: Vec3): Vec3 => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
@@ -65,10 +75,26 @@ const eqVec = (a: Vec3, b: Vec3): boolean =>
   a[0] === b[0] && a[1] === b[1] && a[2] === b[2];
 
 /** Canonical key for an undirected edge between two vertex positions. */
+function vertexKey(vertex: Vec3): string {
+  return `${vertex[0]},${vertex[1]},${vertex[2]}`;
+}
+
 function edgeKey(a: Vec3, b: Vec3): string {
-  const ka = `${a[0]},${a[1]},${a[2]}`;
-  const kb = `${b[0]},${b[1]},${b[2]}`;
+  const ka = vertexKey(a);
+  const kb = vertexKey(b);
   return ka < kb ? `${ka}|${kb}` : `${kb}|${ka}`;
+}
+
+function directedEdgeKey(a: Vec3, b: Vec3): string {
+  return `${vertexKey(a)}>${vertexKey(b)}`;
+}
+
+function directedEdgeSet(vertices: Vec3[]): Set<string> {
+  const edges = new Set<string>();
+  for (let k = 0; k < vertices.length; k++) {
+    edges.add(directedEdgeKey(vertices[k], vertices[(k + 1) % vertices.length]));
+  }
+  return edges;
 }
 
 function planeOf(vertices: Vec3[]): { normal: Vec3; d: number } | null {
@@ -277,6 +303,14 @@ function rotateToNonCollinearStart(vertices: Vec3[], uvs?: Vec2[]): { vertices: 
 export function mergePolygons(input: Polygon[]): Polygon[] {
   const out: Polygon[] = [];
   const polys: PolyState[] = [];
+  let workUnits = 0;
+  let workBudgetExhausted = false;
+  const consumeWork = (units: number): boolean => {
+    workUnits += units;
+    if (workUnits <= MERGE_WORK_UNIT_LIMIT) return true;
+    workBudgetExhausted = true;
+    return false;
+  };
 
   // Pass 1: collect each polygon, seed PolyState. Skip polygons without
   // a usable plane (degenerate; should have been removed by normalize).
@@ -311,6 +345,7 @@ export function mergePolygons(input: Polygon[]): Polygon[] {
       textureTriangles,
       normal: plane.normal,
       d: plane.d,
+      directedEdges: directedEdgeSet(verts),
       alive: true,
       data: polygon.data,
     });
@@ -329,42 +364,37 @@ export function mergePolygons(input: Polygon[]): Polygon[] {
   // wouldn't merge). Re-validation per candidate gives both speed AND the
   // chain merging the original (slow) algo had.
   const tryMergePass = (): boolean => {
-    const edgeIndex = new Map<string, number[]>();
+    const edgeIndex = new Map<string, EdgeOwners>();
     for (let i = 0; i < polys.length; i++) {
       const p = polys[i];
       if (!p.alive) continue;
       const n = p.vertices.length;
+      if (!consumeWork(n)) return false;
+      p.directedEdges = new Set();
       for (let k = 0; k < n; k++) {
         const a = p.vertices[k];
         const b = p.vertices[(k + 1) % n];
+        p.directedEdges.add(directedEdgeKey(a, b));
         const key = edgeKey(a, b);
-        let arr = edgeIndex.get(key);
-        if (!arr) { arr = []; edgeIndex.set(key, arr); }
-        arr.push(i);
+        let edge = edgeIndex.get(key);
+        if (!edge) {
+          edge = { a, b, owners: [] };
+          edgeIndex.set(key, edge);
+        }
+        edge.owners.push(i);
       }
     }
 
     let mergedThisPass = false;
 
-    // findSharedEdge returns the (e0, e1) endpoints of the edge a and b
-    // currently share, or null if a's vertex list has been mutated since
-    // edgeIndex was built and no longer touches b. Because polycss CCW
-    // winding faces opposite directions on the two sides of a shared edge,
-    // a's edge va→vb matches b's edge vb→va.
-    const findSharedEdge = (a: PolyState, b: PolyState): [Vec3, Vec3] | null => {
-      for (let k = 0; k < a.vertices.length; k++) {
-        const va = a.vertices[k];
-        const vb = a.vertices[(k + 1) % a.vertices.length];
-        for (let j = 0; j < b.vertices.length; j++) {
-          const ub = b.vertices[j];
-          const uc = b.vertices[(j + 1) % b.vertices.length];
-          if (eqVec(va, uc) && eqVec(vb, ub)) return [va, vb];
-        }
-      }
-      return null;
+    const edgeDirection = (poly: PolyState, e0: Vec3, e1: Vec3): 1 | -1 | 0 => {
+      if (poly.directedEdges.has(directedEdgeKey(e0, e1))) return 1;
+      if (poly.directedEdges.has(directedEdgeKey(e1, e0))) return -1;
+      return 0;
     };
 
-    for (const [, owners] of edgeIndex) {
+    for (const edge of edgeIndex.values()) {
+      const { owners } = edge;
       // owners can have >2 if a degenerate input had three+ polys sharing
       // an edge; we still try each pair below — but the simple dedupe
       // skips index entries where both polys were already merged away.
@@ -382,20 +412,28 @@ export function mergePolygons(input: Polygon[]): Polygon[] {
       // states can't merge cleanly.
       if (!!a.uvs !== !!b.uvs) continue;
       if (hasTexture ? !sameTexturePlane(a, b) : !samePlane(a, b)) continue;
+      if (!consumeWork(a.vertices.length + b.vertices.length)) return false;
 
-      // Re-validate the shared edge — a or b may have grown since the
-      // edge index was built (chain merge within this pass).
-      const shared = findSharedEdge(a, b);
-      if (!shared) continue;
-      const [e0, e1] = shared;
+      // Re-validate the indexed edge — a or b may have grown since this
+      // pass began. Use the snapshot endpoints directly instead of scanning
+      // every edge of both polygons against each other; large merged rings
+      // can otherwise make this check dominate real-world meshes.
+      const aDirection = edgeDirection(a, edge.a, edge.b);
+      if (aDirection === 0) continue;
+      const bDirection = edgeDirection(b, edge.a, edge.b);
+      if (bDirection === 0 || aDirection === bDirection) continue;
+      const [e0, e1] = aDirection === 1 ? [edge.a, edge.b] : [edge.b, edge.a];
 
       const merged = mergeAlongEdge(a, b, e0, e1);
       if (!merged) continue;
+      if (!consumeWork(merged.vertices.length)) return false;
+      if (merged.vertices.length > MAX_MERGED_VERTEX_COUNT) continue;
       if (!mergeIsPlanar(merged.vertices, hasTexture ? EPS_TEXTURE_DISTANCE : EPS_RENDER_DISTANCE)) continue;
       if (!isConvex(merged.vertices, a.normal)) continue;
 
       a.vertices = merged.vertices;
       a.uvs = merged.uvs;
+      a.directedEdges = directedEdgeSet(merged.vertices);
       a.textureTriangles = hasTexture
         ? [...(a.textureTriangles ?? []), ...(b.textureTriangles ?? [])]
         : undefined;
@@ -407,7 +445,11 @@ export function mergePolygons(input: Polygon[]): Polygon[] {
 
   // Iterate to fixed point — each pass merges as much as it can while
   // working from a single snapshot of the edge index.
-  while (tryMergePass()) { /* loop */ }
+  let passCount = 0;
+  while (!workBudgetExhausted && passCount < MERGE_PASS_LIMIT) {
+    if (!tryMergePass()) break;
+    passCount++;
+  }
 
   // Pass 3: emit surviving polygons.
   for (const p of polys) {

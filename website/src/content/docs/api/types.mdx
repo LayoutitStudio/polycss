@@ -95,8 +95,10 @@ One-shot DOM diagnostic snapshot returned by `collectPolyRenderStats`.
 ```ts
 interface PolyRenderSurfaceLeafCounts {
   quad: number;
+  /** Border-shape `<i>` leaves. */
   clippedSolid: number;
   atlas: number;
+  /** `<u>` leaves, including triangles and exact corner-shape solids. */
   stableTriangle: number;
 }
 

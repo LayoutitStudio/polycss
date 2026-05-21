@@ -17,7 +17,10 @@
  */
 import { useEffect, useRef } from "react";
 import type { GUI } from "lil-gui";
-import type { MeshResolution, PolyTextureLightingMode } from "@layoutit/polycss-react";
+import type {
+  MeshResolution,
+  PolyTextureLightingMode,
+} from "@layoutit/polycss-react";
 
 import { useFolder, useOption, useSlider, useToggle } from "../primitives";
 

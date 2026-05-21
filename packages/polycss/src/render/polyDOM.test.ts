@@ -1,12 +1,28 @@
+import { readFileSync } from "fs";
+import { resolve } from "path";
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { renderPoly } from "./polyDOM";
-import { renderPolygonsWithTextureAtlas, renderPolygonsWithTextureAtlasAsync } from "./textureAtlas";
-import type { Polygon } from "@layoutit/polycss-core";
+import {
+  renderPolygonsWithTextureAtlas,
+  renderPolygonsWithTextureAtlasAsync,
+  updatePolygonsWithStableTopology,
+} from "./textureAtlas";
+import {
+  optimizeMeshPolygons,
+  parseGltf,
+  type Polygon,
+} from "@layoutit/polycss-core";
 
 const ATLAS_CANONICAL_SIZE_EXPLICIT = 64;
 const ATLAS_CANONICAL_SIZE_AUTO_DESKTOP = 128;
 const SOLID_QUAD_CANONICAL_SIZE = 64;
-const SOLID_TRIANGLE_CANONICAL_SIZE = 64;
+
+const CORNER_SHAPE_CORPUS = [
+  ["Bear.glb"],
+  ["urban", "Car.glb"],
+  ["urban", "Fire hydrant.glb"],
+  ["city", "Large Building.glb"],
+] as const;
 
 const FLAT_TRIANGLE: Polygon = {
   vertices: [
@@ -66,6 +82,17 @@ const UNSTABLE_PROJECTIVE_QUAD: Polygon = {
   color: "#ff00ff",
 };
 
+const CHAMFERED_SOLID: Polygon = {
+  vertices: [
+    [0, 0.4, 0],
+    [0, 2, 0],
+    [2, 2, 0],
+    [2, 0, 0],
+    [0.6, 0, 0],
+  ],
+  color: "#0f766e",
+};
+
 const OFFAXIS_TRIANGLE: Polygon = {
   vertices: [
     [0, 0, 0],
@@ -98,6 +125,44 @@ function expectPointClose(actual: [number, number, number], expected: [number, n
 
 function roundedMatrix(values: number[], decimals = 3): number[] {
   return values.map((value) => Number(value.toFixed(decimals)));
+}
+
+function loadGalleryGlb(...parts: string[]): ArrayBuffer {
+  const filePath = resolve(__dirname, "../../../../website/public/gallery/glb", ...parts);
+  const buffer = readFileSync(filePath);
+  return buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength);
+}
+
+function supportDoc(options: { borderShape?: boolean; cornerShape?: boolean }): Document {
+  return {
+    defaultView: {
+      CSS: {
+        supports: (property: string, value?: string) => {
+          if (property === "border-shape") return options.borderShape === true;
+          if (property.startsWith("corner-") && value === "bevel") return options.cornerShape === true;
+          return false;
+        },
+      },
+      matchMedia: (query: string) => ({
+        matches: query.includes("pointer: fine") || query.includes("hover: hover"),
+      }),
+    },
+    createElement(tagName: string) {
+      if (tagName === "canvas") {
+        return { width: 0, height: 0, getContext: () => null };
+      }
+      return document.createElement(tagName);
+    },
+  } as unknown as Document;
+}
+
+function leafTagCounts(result: ReturnType<typeof renderPolygonsWithTextureAtlas>): Record<string, number> {
+  const counts: Record<string, number> = { b: 0, i: 0, s: 0, u: 0 };
+  for (const { element } of result.rendered) {
+    const tag = element.tagName.toLowerCase();
+    counts[tag] = (counts[tag] ?? 0) + 1;
+  }
+  return counts;
 }
 
 function computeExpectedPlan(
@@ -350,14 +415,14 @@ describe("renderPolygonsWithTextureAtlas", () => {
     const element = result.rendered[0].element;
     const styleText = element.getAttribute("style") ?? "";
     expect(element.tagName.toLowerCase()).toBe("u");
-    expect(styleText).toMatch(/^transform:[^;]+;color:/);
+    expect(styleText).toMatch(/^transform:/);
     expect(styleText).not.toContain("border-width:");
     expect(styleText).not.toContain("background:linear-gradient");
     expect(styleText).not.toMatch(/(^|;)width:/);
     expect(styleText).not.toMatch(/(^|;)height:/);
     const matrix = extractMatrix(element);
-    expect(Math.hypot(matrix[0], matrix[1], matrix[2])).toBeLessThan(2);
-    expect(Math.hypot(matrix[4], matrix[5], matrix[6])).toBeLessThan(2);
+    expect(Math.hypot(matrix[0], matrix[1], matrix[2])).toBeLessThan(3);
+    expect(Math.hypot(matrix[4], matrix[5], matrix[6])).toBeLessThan(3);
     result.dispose();
   });
 
@@ -383,6 +448,108 @@ describe("renderPolygonsWithTextureAtlas", () => {
     const result = renderPolygonsWithTextureAtlas([FLAT_TRIANGLE], { doc });
     expect(result.rendered[0].element.tagName.toLowerCase()).toBe("s");
     expect(canvases.length).toBeGreaterThan(0);
+    result.dispose();
+  });
+
+  it("updates WebKit solid atlas fallbacks without replacing the loaded atlas", () => {
+    const doc = {
+      defaultView: {
+        navigator: {
+          userAgent: "Mozilla/5.0 AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15",
+        },
+        CSS: { supports: () => false },
+      },
+      createElement(tagName: string) {
+        if (tagName === "canvas") {
+          return { width: 0, height: 0, getContext: () => null };
+        }
+        return document.createElement(tagName);
+      },
+    } as unknown as Document;
+
+    const result = renderPolygonsWithTextureAtlas([FLAT_TRIANGLE], { doc });
+    const element = result.rendered[0].element;
+    element.style.background = 'url("blob:solid-atlas") 0px 0px / 8px 8px no-repeat';
+    element.style.opacity = "";
+    const beforeTransform = element.style.transform;
+
+    const updated = updatePolygonsWithStableTopology(
+      result.rendered,
+      [{
+        ...FLAT_TRIANGLE,
+        vertices: [
+          [0, 0, 0],
+          [2, 0, 0],
+          [0, 1, 0],
+        ],
+      }],
+      { doc },
+    );
+
+    expect(updated).toBe(true);
+    expect(result.rendered[0].element).toBe(element);
+    expect(element.style.background).toContain("blob:solid-atlas");
+    expect(element.style.opacity).toBe("");
+    expect(element.style.transform).not.toBe(beforeTransform);
+    result.dispose();
+  });
+
+  it("keeps WebKit solid atlas fallbacks mounted through degenerate frames", () => {
+    const doc = {
+      defaultView: {
+        navigator: {
+          userAgent: "Mozilla/5.0 AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15",
+        },
+        CSS: { supports: () => false },
+      },
+      createElement(tagName: string) {
+        if (tagName === "canvas") {
+          return { width: 0, height: 0, getContext: () => null };
+        }
+        return document.createElement(tagName);
+      },
+    } as unknown as Document;
+
+    const result = renderPolygonsWithTextureAtlas([FLAT_TRIANGLE], { doc });
+    const element = result.rendered[0].element;
+    element.style.background = 'url("blob:solid-atlas") 0px 0px / 8px 8px no-repeat';
+    element.style.opacity = "";
+    const beforeTransform = element.style.transform;
+
+    const degenerateUpdated = updatePolygonsWithStableTopology(
+      result.rendered,
+      [{
+        ...FLAT_TRIANGLE,
+        vertices: [
+          [0, 0, 0],
+          [0, 0, 0],
+          [0, 1, 0],
+        ],
+      }],
+      { doc },
+    );
+    expect(degenerateUpdated).toBe(true);
+    expect(result.rendered[0].element).toBe(element);
+    expect(element.style.background).toContain("blob:solid-atlas");
+    expect(element.style.visibility).toBe("hidden");
+
+    const restoredUpdated = updatePolygonsWithStableTopology(
+      result.rendered,
+      [{
+        ...FLAT_TRIANGLE,
+        vertices: [
+          [0, 0, 0],
+          [2, 0, 0],
+          [0, 1, 0],
+        ],
+      }],
+      { doc },
+    );
+    expect(restoredUpdated).toBe(true);
+    expect(result.rendered[0].element).toBe(element);
+    expect(element.style.background).toContain("blob:solid-atlas");
+    expect(element.style.visibility).toBe("");
+    expect(element.style.transform).not.toBe(beforeTransform);
     result.dispose();
   });
 
@@ -530,6 +697,80 @@ describe("renderPolygonsWithTextureAtlas", () => {
     expect(element.style.getPropertyValue("border-shape")).toContain("polygon(");
     result.dispose();
   });
+
+  it("uses bare u corner-shape boxes for exact chamfered solids", () => {
+    const doc = supportDoc({ borderShape: true, cornerShape: true });
+
+    const chamfered = renderPolygonsWithTextureAtlas([CHAMFERED_SOLID], { doc });
+    const chamferedElement = chamfered.rendered[0].element;
+    expect(chamferedElement.tagName.toLowerCase()).toBe("u");
+    expect(chamferedElement.className).toBe("");
+    expect(chamferedElement.getAttribute("style") ?? "").toMatch(/corner-[a-z-]+-shape:bevel/);
+    expect(chamferedElement.style.getPropertyValue("border-shape")).toBe("");
+    chamfered.dispose();
+
+    const fallback = renderPolygonsWithTextureAtlas([CHAMFERED_SOLID], {
+      doc: supportDoc({ borderShape: true, cornerShape: false }),
+    });
+    expect(fallback.rendered[0].element.tagName.toLowerCase()).toBe("i");
+    fallback.dispose();
+  });
+
+  it("keeps non-chamfered n-gons on border-shape when corner-shape is supported", () => {
+    const irregularSolid: Polygon = {
+      vertices: [
+        [0, 0, 0],
+        [0, 2, 0],
+        [1, 1.4, 0],
+        [2, 2, 0],
+        [2, 0, 0],
+      ],
+      color: "#f59e0b",
+    };
+    const result = renderPolygonsWithTextureAtlas([irregularSolid], {
+      doc: supportDoc({ borderShape: true, cornerShape: true }),
+    });
+    const element = result.rendered[0].element;
+    expect(element.tagName.toLowerCase()).toBe("i");
+    expect(element.style.getPropertyValue("border-shape")).toContain("polygon(");
+    result.dispose();
+  });
+
+  it("replaces a subset of border-shape leaves with u leaves across a gallery corpus", () => {
+    const beforeDoc = supportDoc({ borderShape: true, cornerShape: false });
+    const afterDoc = supportDoc({ borderShape: true, cornerShape: true });
+    let beforeI = 0;
+    let beforeU = 0;
+    let afterI = 0;
+    let afterU = 0;
+
+    expect(CORNER_SHAPE_CORPUS).toHaveLength(4);
+
+    for (const fixture of CORNER_SHAPE_CORPUS) {
+      const parsed = parseGltf(loadGalleryGlb(...fixture));
+      const polygons = optimizeMeshPolygons(parsed.polygons, { meshResolution: "lossy" });
+      parsed.dispose();
+
+      const before = renderPolygonsWithTextureAtlas(polygons, { doc: beforeDoc });
+      const after = renderPolygonsWithTextureAtlas(polygons, { doc: afterDoc });
+      const beforeCounts = leafTagCounts(before);
+      const afterCounts = leafTagCounts(after);
+
+      beforeI += beforeCounts.i;
+      beforeU += beforeCounts.u;
+      afterI += afterCounts.i;
+      afterU += afterCounts.u;
+      expect(afterCounts.i + afterCounts.u).toBe(beforeCounts.i + beforeCounts.u);
+
+      before.dispose();
+      after.dispose();
+    }
+
+    const replaced = beforeI - afterI;
+    expect(beforeI).toBeGreaterThan(0);
+    expect(replaced).toBeGreaterThan(0);
+    expect(afterU - beforeU).toBe(replaced);
+  }, 15000);
 
   it("uses the atlas fallback for solid non-rect polygons on non-desktop pointers when projective quads are disabled", () => {
     const canvases: Array<{ width: number; height: number; getContext: () => null }> = [];
@@ -1292,6 +1533,44 @@ describe("renderPolygonsWithTextureAtlas — strategies.disable", () => {
     result.dispose();
   });
 
+  it("paints solid triangles with the corner class when corner-shape is supported", () => {
+    const doc = {
+      defaultView: {
+        CSS: {
+          supports: (property: string, value?: string) =>
+            value === "bevel" &&
+            (property === "corner-top-left-shape" || property === "corner-top-right-shape"),
+        },
+      },
+      createElement: document.createElement.bind(document),
+    } as unknown as Document;
+
+    const result = renderPolygonsWithTextureAtlas(
+      [FLAT_TRIANGLE],
+      { doc },
+    );
+    const element = result.rendered[0].element;
+    expect(element.tagName.toLowerCase()).toBe("u");
+    expect(element.classList.contains("polycss-corner-triangle")).toBe(true);
+    result.dispose();
+  });
+
+  it("progressively falls back to the border triangle when corner-shape is unsupported", () => {
+    const doc = {
+      defaultView: { CSS: { supports: () => false } },
+      createElement: document.createElement.bind(document),
+    } as unknown as Document;
+
+    const result = renderPolygonsWithTextureAtlas(
+      [FLAT_TRIANGLE],
+      { doc },
+    );
+    const element = result.rendered[0].element;
+    expect(element.tagName.toLowerCase()).toBe("u");
+    expect(element.classList.contains("polycss-corner-triangle")).toBe(false);
+    result.dispose();
+  });
+
   it("axis-aligned solid rect with disable:b renders as atlas when border-shape is unsupported", () => {
     const canvases: Array<{ width: number; height: number; getContext: () => null }> = [];
     const doc = {
@@ -1399,6 +1678,36 @@ describe("renderPolygonsWithTextureAtlas — strategies.disable", () => {
     expect(style).not.toContain("height");
     expect(style).not.toContain("border-shape");
     expect(canvases).toHaveLength(0);
+    result.dispose();
+  });
+
+  it("falls back to atlas for projective solid quads on Safari", () => {
+    const canvases: Array<{ width: number; height: number; getContext: () => null }> = [];
+    const doc = {
+      defaultView: {
+        navigator: {
+          userAgent: "Mozilla/5.0 AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15",
+        },
+        CSS: { supports: () => false },
+      },
+      createElement(tagName: string) {
+        if (tagName === "canvas") {
+          const canvas = { width: 0, height: 0, getContext: () => null };
+          canvases.push(canvas);
+          return canvas;
+        }
+        return document.createElement(tagName);
+      },
+    } as unknown as Document;
+
+    const result = renderPolygonsWithTextureAtlas(
+      [NON_RECT_QUAD],
+      { doc },
+    );
+    const element = result.rendered[0].element;
+    expect(element.tagName.toLowerCase()).toBe("s");
+    expect(result.rendered[0].kind).toBe("atlas");
+    expect(canvases).toHaveLength(1);
     result.dispose();
   });
 
@@ -1589,6 +1898,7 @@ describe("renderPolygonsWithTextureAtlas — strategies.disable", () => {
     expect(element.getAttribute("style")).not.toContain("border-width:");
     result.dispose();
   });
+
 });
 
 describe("renderPoly — data attributes and lighting", () => {

@@ -10,9 +10,8 @@
 
   <script type="module">
     // Vanilla path: createPolyScene(host, opts) + createPolyOrbitControls + loadMesh.
-    // Per-frame state changes go through scene.setOptions(...) — exercises
-    // only the imperative API + the renderer's internal cascade.
-    import { createPolyScene, createPolyOrbitControls, loadMesh } from "./polycss.js";
+    // Per-frame state changes go through the imperative scene/camera handles.
+    import { createPolyCamera, createPolyScene, createPolyOrbitControls, loadMesh } from "./.generated/polycss.js";
     import { getSynthMesh } from "./synth-mesh.mjs";
     import {
       parseUrlParams, dirFromAzEl, createPerfRecorder,
@@ -26,8 +25,9 @@
     let azimuth = az;
 
     const host = document.getElementById("host");
+    const camera = createPolyCamera({ rotX: preset.rotX, rotY: preset.rotY, zoom: preset.zoom });
     const scene = createPolyScene(host, {
-      rotX: preset.rotX, rotY: preset.rotY, zoom: preset.zoom,
+      camera,
       directionalLight: { direction: dirFromAzEl(azimuth, el), color: "#ffffff", intensity: 1 },
       ambientLight: { color: "#ffffff", intensity: 0.4 },
       textureLighting: mode,
@@ -66,7 +66,7 @@
           });
         } else if (motion === "rot") {
           const newRotY = ((preset.rotY + frameCount * 0.5) + 360) % 360;
-          scene.setOptions({ rotY: newRotY });
+          camera.update({ rotY: newRotY });
         }
         requestAnimationFrame(tick);
       }

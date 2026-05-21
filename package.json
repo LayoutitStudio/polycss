@@ -22,7 +22,7 @@
     "build:packages": "pnpm --filter './packages/*' -r build",
     "test": "pnpm --filter './packages/*' -r --if-present test",
     "test:coverage": "pnpm --filter './packages/*' -r --if-present test:coverage",
-    "sync:readmes": "node tools/sync-package-readmes.mjs",
+    "sync:readmes": "node .github/scripts/sync-package-readmes.mjs",
     "publish:all": "pnpm sync:readmes && pnpm --filter './packages/*' -r publish --access public",
     "dev:website": "pnpm --filter @layoutit/polycss-website dev",
     "build:website": "pnpm --filter @layoutit/polycss-website build",
@@ -31,7 +31,10 @@
     "bench:perf": "node bench/build.mjs && node bench/perf-bench.mjs",
     "bench:animated-human": "node bench/build.mjs && node bench/animated-human-bench.mjs",
     "bench:nonvoxel-drag-trace": "node bench/build.mjs && node bench/nonvoxel-drag-trace.mjs",
+    "bench:trace": "node bench/build.mjs && node bench/trace-analysis.mjs",
     "bench:lossy": "pnpm --filter @layoutit/polycss-core build && node bench/lossy-optimizer-bench.mjs",
+    "bench:lossy:corpus": "pnpm --filter @layoutit/polycss-core build && node bench/lossy-corpus-bench.mjs",
+    "bench:voxel-report": "node bench/voxel-report.mjs",
     "bench:visual": "node bench/build.mjs && node bench/perf-visual.mjs"
   },
   "pnpm": {

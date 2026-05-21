@@ -157,6 +157,7 @@ export const PolyScene = defineComponent({
       textureLighting: props.textureLighting ?? "baked",
       directionalLight: props.directionalLight,
       ambientLight: props.ambientLight,
+      strategies: props.strategies,
       shadow: props.shadow,
       shadowRegistry,
     }));
