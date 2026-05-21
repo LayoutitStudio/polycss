@@ -66,7 +66,7 @@ interface UvSampleRect {
   maxV: number;
 }
 
-interface TextureAtlasPlan {
+export interface TextureAtlasPlan {
   index: number;
   polygon: Polygon;
   texture?: string;
@@ -97,13 +97,13 @@ interface TextureTrianglePlan {
   uvSampleRect: UvSampleRect | null;
 }
 
-interface PackedTextureAtlasEntry extends TextureAtlasPlan {
+export interface PackedTextureAtlasEntry extends TextureAtlasPlan {
   pageIndex: number;
   x: number;
   y: number;
 }
 
-interface PackedPage {
+export interface PackedPage {
   width: number;
   height: number;
   entries: PackedTextureAtlasEntry[];
@@ -120,7 +120,7 @@ interface PackingPage extends PackedPage {
   sealed?: boolean;
 }
 
-interface PackedAtlas {
+export interface PackedAtlas {
   entries: Array<PackedTextureAtlasEntry | null>;
   pages: PackedPage[];
 }
@@ -183,7 +183,7 @@ export interface SolidPaintDefaults {
   dynamicColorKey?: string;
 }
 
-interface TextureAtlasPage {
+export interface TextureAtlasPage {
   width: number;
   height: number;
   url: string | null;
@@ -1111,7 +1111,7 @@ function atlasCanonicalSizeForEntry(entry: TextureAtlasPlan): number {
   return entry.atlasCanonicalSize ?? ATLAS_CANONICAL_SIZE_EXPLICIT;
 }
 
-function packTextureAtlasPlansWithScale(
+export function packTextureAtlasPlansWithScale(
   plans: Array<TextureAtlasPlan | null>,
   textureQualityInput: TextureQuality | undefined,
   doc: Document | null | undefined,
@@ -1396,6 +1396,32 @@ function edgeKey(a: Vec3, b: Vec3): string {
   const ak = pointKey(a);
   const bk = pointKey(b);
   return ak < bk ? `${ak}|${bk}` : `${bk}|${ak}`;
+}
+
+export function buildTextureEdgeRepairSets(polygons: Polygon[]): Array<Set<number> | undefined> {
+  const edgeOwners = new Map<string, Array<{ polygon: number; edge: number }>>();
+  for (let polygonIndex = 0; polygonIndex < polygons.length; polygonIndex++) {
+    const vertices = polygons[polygonIndex].vertices;
+    if (!vertices || vertices.length < 3 || !polygons[polygonIndex].texture) continue;
+    for (let edgeIndex = 0; edgeIndex < vertices.length; edgeIndex++) {
+      const key = edgeKey(vertices[edgeIndex], vertices[(edgeIndex + 1) % vertices.length]);
+      const owners = edgeOwners.get(key);
+      const owner = { polygon: polygonIndex, edge: edgeIndex };
+      if (owners) owners.push(owner);
+      else edgeOwners.set(key, [owner]);
+    }
+  }
+  const repairEdges = polygons.map(() => new Set<number>());
+  for (const owners of edgeOwners.values()) {
+    if (owners.length < 2) continue;
+    for (let i = 0; i < owners.length; i++) {
+      for (let j = i + 1; j < owners.length; j++) {
+        repairEdges[owners[i].polygon].add(owners[i].edge);
+        repairEdges[owners[j].polygon].add(owners[j].edge);
+      }
+    }
+  }
+  return repairEdges.map((edges) => edges.size > 0 ? edges : undefined);
 }
 
 function canonicalEdgeVector(a: Vec3, b: Vec3): Vec3 {
@@ -2942,7 +2968,7 @@ async function buildAtlasPage(
   };
 }
 
-async function buildAtlasPages(
+export async function buildAtlasPages(
   pages: PackedPage[],
   textureLighting: PolyTextureLightingMode,
   doc: Document,
@@ -3271,15 +3297,15 @@ function fullRectBounds(entry: TextureAtlasPlan): RectBrush | null {
   };
 }
 
-function isFullRectSolid(entry: TextureAtlasPlan): boolean {
+export function isFullRectSolid(entry: TextureAtlasPlan): boolean {
   return !!fullRectBounds(entry);
 }
 
-function isSolidTrianglePlan(entry: TextureAtlasPlan): boolean {
+export function isSolidTrianglePlan(entry: TextureAtlasPlan): boolean {
   return !entry.texture && entry.polygon.vertices.length === 3;
 }
 
-function isProjectiveQuadPlan(entry: TextureAtlasPlan): entry is TextureAtlasPlan & { projectiveMatrix: string } {
+export function isProjectiveQuadPlan(entry: TextureAtlasPlan): entry is TextureAtlasPlan & { projectiveMatrix: string } {
   return !entry.texture && !!entry.projectiveMatrix && !isFullRectSolid(entry);
 }
 
@@ -3401,6 +3427,160 @@ export function getSolidPaintDefaults(
     doc,
     disabled,
   );
+}
+
+/** Options accepted by the public {@link computeTextureAtlasPlanPublic} wrapper. */
+export interface ComputeTextureAtlasPlanOptions {
+  tileSize?: number;
+  layerElevation?: number;
+  directionalLight?: PolyDirectionalLight;
+  ambientLight?: PolyAmbientLight;
+  /** Shared-edge set returned by {@link buildTextureEdgeRepairSets}. */
+  textureEdgeRepairEdges?: Set<number>;
+}
+
+/**
+ * Compute the per-polygon layout plan for one polygon in isolation.
+ *
+ * This is the public single-polygon variant used by React and Vue components.
+ * It does not run the cross-polygon basis-optimisation or seam-detection that
+ * the full `renderPolygonsWithTextureAtlas` pipeline performs, but the
+ * strategy selection (projective-quad, rect, etc.) is identical to the
+ * canonical renderer.
+ */
+export function computeTextureAtlasPlanPublic(
+  polygon: Polygon,
+  index: number,
+  options: ComputeTextureAtlasPlanOptions = {},
+): TextureAtlasPlan | null {
+  const doc = typeof document !== "undefined" ? document : null;
+  const projectiveQuadGuards: ProjectiveQuadGuardSettings = doc
+    ? resolveProjectiveQuadGuards(doc)
+    : {
+        denomEps: PROJECTIVE_QUAD_DENOM_EPS,
+        maxWeightRatio: PROJECTIVE_QUAD_MAX_WEIGHT_RATIO,
+        bleed: PROJECTIVE_QUAD_BLEED,
+        disableGuards: false,
+      };
+  const basisHint: BasisHint | undefined = options.textureEdgeRepairEdges?.size
+    ? { seamEdges: new Set<number>(), textureEdgeRepairEdges: options.textureEdgeRepairEdges }
+    : undefined;
+  return computeTextureAtlasPlan(polygon, index, options, projectiveQuadGuards, basisHint);
+}
+
+/**
+ * Compute the dominant paint defaults from an already-computed array of plans.
+ *
+ * React and Vue compute plans first (to drive the atlas packing), then pass
+ * the plan array here so they don't need access to the raw polygon list.
+ * Requires access to a Document to check browser support for solid-triangle
+ * and border-shape strategies.
+ */
+export function getSolidPaintDefaultsFromPlans(
+  plans: Array<TextureAtlasPlan | null>,
+  textureLighting: PolyTextureLightingMode,
+  disabled: ReadonlySet<PolyRenderStrategy> = new Set(),
+  doc?: Document | null,
+): SolidPaintDefaults {
+  const resolvedDoc = doc ?? (typeof document !== "undefined" ? document : null);
+  if (!resolvedDoc) return {};
+  return getSolidPaintDefaultsForPlans(plans, textureLighting, resolvedDoc, disabled);
+}
+
+/** Format a raw comma-separated matrix3d value string with rounded decimals. */
+export function formatMatrix3d(matrix: string, decimals = DEFAULT_MATRIX_DECIMALS): string {
+  return `matrix3d(${matrix.split(",").map((value) => {
+    const parsed = Number(value.trim());
+    return Number.isFinite(parsed) ? roundDecimal(parsed, decimals) : value.trim();
+  }).join(",")})`;
+}
+
+/** Format a pixel CSS length value. */
+export function formatCssLengthPx(value: number, decimals = DEFAULT_ATLAS_CSS_DECIMALS): string {
+  const next = roundDecimal(value, decimals);
+  return Number(next) === 0 || Object.is(Number(next), -0) ? "0" : `${next}px`;
+}
+
+/**
+ * Produce the CSS matrix3d transform for a solid-quad (`<b>`) leaf, including
+ * the canonical 64px primitive scale.
+ */
+export function formatSolidQuadEntryMatrix(entry: TextureAtlasPlan): string {
+  return `matrix3d(${formatSolidQuadMatrix(entry)})`;
+}
+
+/**
+ * Produce the CSS matrix3d transform for a border-shape (`<i>`) leaf.
+ * Uses the canonical BORDER_SHAPE_BLEED-expanded geometry so the transform
+ * matches the border-shape polygon produced by {@link cssBorderShapeForPlan}.
+ */
+export function formatBorderShapeEntryMatrix(entry: TextureAtlasPlan): string {
+  const geometry = borderShapeGeometryForPlan(entry);
+  return `matrix3d(${formatBorderShapeMatrix(entry, geometry.bounds)})`;
+}
+
+/**
+ * Returns true when the browser supports the `border-shape` CSS property and
+ * the pointer/hover media queries indicate a fine-pointer device (desktop-class).
+ * Falls back to a globalThis-based check when no Document is available.
+ */
+export function isBorderShapeSupported(doc?: Document | null): boolean {
+  const d = doc ?? (typeof document !== "undefined" ? document : null);
+  if (!d) {
+    const css = typeof CSS !== "undefined" ? CSS : undefined;
+    const supportsBorderShape = !!css?.supports?.("border-shape", "polygon(0 0, 100% 0, 0 100%) circle(0)");
+    if (!supportsBorderShape) return false;
+    const media = typeof matchMedia !== "undefined" ? matchMedia : undefined;
+    if (!media) return true;
+    return media("(pointer: fine)").matches && media("(hover: hover)").matches;
+  }
+  return borderShapeSupported(d);
+}
+
+/**
+ * Returns true when the browser renders CSS border-trick triangles correctly.
+ * WebKit/Safari renders them incorrectly when transformed — this check gates
+ * the `<u>` strategy path.
+ */
+export function isSolidTriangleSupported(doc?: Document | null): boolean {
+  const d = doc ?? (typeof document !== "undefined" ? document : null);
+  if (!d) {
+    const userAgent = (typeof navigator !== "undefined" ? navigator : globalThis.navigator)?.userAgent ?? "";
+    if (!userAgent) return true;
+    const isChromiumFamily = /\b(?:Chrome|HeadlessChrome|Chromium|Edg|OPR)\//.test(userAgent);
+    const isSafariFamily = /\bVersion\/[\d.]+.*\bSafari\//.test(userAgent);
+    return !isSafariFamily || isChromiumFamily;
+  }
+  return solidTriangleSupported(d);
+}
+
+/**
+ * Filter a plan array to the subset that needs atlas packing, given the active
+ * render strategies and texture-lighting mode. Plans excluded from the atlas
+ * will be rendered via `<b>`, `<i>`, or `<u>` by the framework components.
+ */
+export function filterAtlasPlans(
+  plans: Array<TextureAtlasPlan | null>,
+  textureLighting: PolyTextureLightingMode,
+  disabled: ReadonlySet<PolyRenderStrategy>,
+  doc?: Document | null,
+): Array<TextureAtlasPlan | null> {
+  const useFullRectSolid = !disabled.has("b");
+  const useProjectiveQuad = useFullRectSolid;
+  const useStableTriangle = !disabled.has("u") && isSolidTriangleSupported(doc);
+  const useBorderShape = !disabled.has("i") && textureLighting !== "dynamic" && isBorderShapeSupported(doc);
+  const disableB = disabled.has("b");
+  return plans.map((plan) => {
+    if (!plan || plan.texture) return plan;
+    if (useStableTriangle && isSolidTrianglePlan(plan)) return null;
+    const fullRect = isFullRectSolid(plan);
+    if (
+      (useFullRectSolid && fullRect) ||
+      (useProjectiveQuad && isProjectiveQuadPlan(plan)) ||
+      (textureLighting !== "dynamic" && useBorderShape && (!fullRect || disableB))
+    ) return null;
+    return plan;
+  });
 }
 
 function borderShapeBoundsFromPoints(
