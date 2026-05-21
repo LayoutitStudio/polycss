@@ -128,7 +128,7 @@ Render polygons directly when you need per-face DOM events or custom styling:
 
 ## Loading Mesh Files
 
-Use `loadMesh()` from `@layoutit/polycss`, `@layoutit/polycss-react`, or `@layoutit/polycss-vue` to parse supported model formats:
+Use `loadMesh()` to parse supported model formats:
 
 ```ts
 import { createPolyCamera, createPolyScene, loadMesh } from "@layoutit/polycss";
