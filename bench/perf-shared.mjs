@@ -13,7 +13,7 @@
  * specific. Each page handles its own mount and its own per-frame state
  * update; this module just provides the measurement surface.
  */
-import { collectPolyRenderStats } from "./polycss-render-stats.js";
+import { collectPolyRenderStats } from "./.generated/polycss-render-stats.js";
 
 export const PRESETS = {
   saucer: {

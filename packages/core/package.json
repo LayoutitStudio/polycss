@@ -31,7 +31,7 @@
     "build": "tsup",
     "test": "vitest run --passWithNoTests",
     "test:coverage": "vitest run --coverage --passWithNoTests",
-    "prepack": "node ../../tools/sync-package-readmes.mjs",
+    "prepack": "node ../../.github/scripts/sync-package-readmes.mjs",
     "prepublishOnly": "npm run build"
   },
   "publishConfig": {

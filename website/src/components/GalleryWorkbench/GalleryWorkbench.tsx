@@ -71,10 +71,21 @@ import type { ObjParseOptions, GltfParseOptions, VoxParseOptions } from "@layout
 type AnimationClip = NonNullable<LoadedModel["animation"]>["clips"][number];
 
 function presetPickerItem(preset: PresetModel, local = false) {
+  const label = local ? `Dropped: ${stripParenthesizedText(preset.label)}` : stripParenthesizedText(preset.label);
+  const category = galleryBucketForPreset(preset);
   return {
     id: preset.id,
-    label: local ? `Dropped: ${stripParenthesizedText(preset.label)}` : stripParenthesizedText(preset.label),
-    category: galleryBucketForPreset(preset),
+    label,
+    category,
+    searchText: [
+      label,
+      preset.label,
+      category,
+      preset.category,
+      preset.kind,
+      preset.attribution?.creator,
+      preset.attribution?.license,
+    ].filter(Boolean).join(" ").toLowerCase(),
   };
 }
 
@@ -310,8 +321,7 @@ export default function GalleryWorkbench() {
   const filteredPresetItems = useMemo(() => {
     if (!trimmedModelSearch) return pickerItems;
     return pickerItems.filter((preset) =>
-      preset.label.toLowerCase().includes(trimmedModelSearch) ||
-      preset.category.toLowerCase().includes(trimmedModelSearch),
+      preset.searchText.includes(trimmedModelSearch),
     );
   }, [pickerItems, trimmedModelSearch]);
   const modelCategories = useMemo(() => {

@@ -142,6 +142,23 @@ describe("Poly (Vue) — non-horizontal geometry", () => {
     expect(poly.style.width).toBe("");
     expect(poly.style.height).toBe("");
   });
+
+  it("falls back to atlas for solid non-rect quads on Safari", () => {
+    const userAgent = vi.spyOn(window.navigator, "userAgent", "get").mockReturnValue(
+      "Mozilla/5.0 AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15",
+    );
+    vi.stubGlobal("CSS", { supports: () => false });
+
+    try {
+      const container = renderPoly({ vertices: NON_RECT_QUAD });
+      const poly = getPoly(container);
+      expect(poly.tagName.toLowerCase()).toBe("s");
+      expect(poly.style.getPropertyValue("border-shape")).toBe("");
+    } finally {
+      userAgent.mockRestore();
+      vi.unstubAllGlobals();
+    }
+  });
 });
 
 describe("Poly (Vue) — texture without UVs", () => {

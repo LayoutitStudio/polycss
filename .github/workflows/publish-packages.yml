@@ -1,7 +1,7 @@
 name: Publish packages
 
 # Manual-only. Bumps every package under `packages/*` in lockstep (using
-# scripts/bump-versions.mjs), builds them, publishes to npm, then commits
+# .github/scripts/bump-versions.mjs), builds them, publishes to npm, then commits
 # the version change and pushes a `v<X.Y.Z>` tag back to main.
 on:
   workflow_dispatch:

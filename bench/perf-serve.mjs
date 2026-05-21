@@ -4,7 +4,7 @@
  * Serves:
  *   /                      → small index page that links the four perf-*.html
  *   /perf-{path}.html      → bench/perf-{path}.html   (vanilla / html / react / vue)
- *   /polycss*.js           → bench/polycss*.js        (built by bench/build.mjs)
+ *   /.generated/*.js       → bench/.generated/*.js    (built by bench/build.mjs)
  *   /gallery/...           → website/public/gallery/...  (mesh assets)
  *   anything else under /  → bench/<path>
  *

@@ -364,10 +364,17 @@ function PolySceneInner({
     // When "u" is disabled they fall to <i> (border-shape, if supported) or
     // <s> (atlas). The atlas path is handled above via packed.entries; the <i>
     // fallback lands here via TextureBorderShapePoly (same as non-rect solids).
-    const useU = !disabledStrategies?.has("u");
+    const useU = textureAtlas.solidTrianglePrimitive !== null;
     const useProjectiveSolid = !disabledStrategies?.has("b");
     if (useU && isSolidTrianglePlan(plan)) {
-      return <TextureTrianglePoly key={plan.index} entry={plan} textureLighting={textureLighting} />;
+      return (
+        <TextureTrianglePoly
+          key={plan.index}
+          entry={plan}
+          textureLighting={textureLighting}
+          solidTrianglePrimitive={textureAtlas.solidTrianglePrimitive}
+        />
+      );
     }
     if (useProjectiveSolid && isProjectiveQuadPlan(plan)) {
       return <TextureProjectiveSolidPoly key={plan.index} entry={plan} textureLighting={textureLighting} />;
@@ -381,8 +388,15 @@ function PolySceneInner({
   // while the scene's global CSS rule paints over it with the dynamic
   // calc — producing corrupt tints.
   const sceneCtxValue = useMemo(
-    () => ({ textureLighting, directionalLight, ambientLight, shadow, registerShadowCaster }),
-    [textureLighting, directionalLight, ambientLight, shadow, registerShadowCaster],
+    () => ({
+      textureLighting,
+      directionalLight,
+      ambientLight,
+      strategies,
+      shadow,
+      registerShadowCaster,
+    }),
+    [textureLighting, directionalLight, ambientLight, strategies, shadow, registerShadowCaster],
   );
 
   return (

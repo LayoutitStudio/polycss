@@ -10,13 +10,17 @@ import {
   MONOGON_VOXEL_MECHAS_ATTRIBUTION,
   MONOGON_VOXEL_SPACESHIPS_ATTRIBUTION,
   SONA_SAR_VOXEL_ANIMALS_ITEMS_ATTRIBUTION,
+  MAGICAVOXEL_TEST_MODELS_ATTRIBUTION,
+  OPENGAMEART_VOXEL_BUILDINGS_ATTRIBUTION,
+  OPENHV_VOXELS_ATTRIBUTION,
+  FLOOOH_VOXEL_DATA_ATTRIBUTION,
   QUATERNIUS_ULTIMATE_SPACESHIPS_ATTRIBUTION,
   openGameArtAttribution,
   quaterniusAttribution,
 } from "./attributions";
 
 export const GLB_PRESET_FILES: GalleryPresetFile[] = [
-  { file: "FishAnimated.glb", label: "Fish", category: "Animated" },
+  { file: "FishAnimated.glb", label: "Animated Fish", category: "Animated" },
   {
     file: "opengameart/animated-pliers.glb",
     label: "Pliers",
@@ -89,7 +93,7 @@ export const GLB_PRESET_FILES: GalleryPresetFile[] = [
   { file: "medieval/Bonfire.glb", category: "Medieval Village" },
   { file: "medieval/Cart.glb", category: "Medieval Village" },
   { file: "medieval/Cauldron.glb", category: "Medieval Village" },
-  { file: "medieval/Crate.glb", category: "Medieval Village" },
+  { file: "medieval/Crate.glb", label: "Medieval Crate", category: "Medieval Village" },
   { file: "medieval/Package.glb", category: "Medieval Village" },
   { file: "medieval/Package-kYvD6QCQRd.glb", label: "Package (Small)", category: "Medieval Village" },
   { file: "medieval/Path Straight.glb", label: "Path Straight", category: "Medieval Village" },
@@ -116,9 +120,9 @@ export const GLB_PRESET_FILES: GalleryPresetFile[] = [
   { file: "urban/SUV.glb", category: "Urban Pack" },
   { file: "urban/Van.glb", category: "Urban Pack" },
   { file: "urban/Pickup Truck.glb", label: "Pickup Truck", category: "Urban Pack" },
-  { file: "urban/Bus.glb", category: "Urban Pack" },
+  { file: "urban/Bus.glb", label: "City Bus", category: "Urban Pack" },
   { file: "urban/Sports Car.glb", label: "Sports Car", category: "Urban Pack" },
-  { file: "urban/Police Car.glb", label: "Police Car", category: "Urban Pack" },
+  { file: "urban/Police Car.glb", label: "Police Cruiser", category: "Urban Pack" },
   { file: "urban/Motorcycle.glb", category: "Urban Pack" },
   { file: "urban/Stop sign.glb", label: "Stop Sign", category: "Urban Pack" },
   { file: "urban/Billboard.glb", category: "Urban Pack" },
@@ -128,12 +132,12 @@ export const GLB_PRESET_FILES: GalleryPresetFile[] = [
   { file: "urban/Mailbox.glb", category: "Urban Pack" },
   { file: "urban/Fire hydrant.glb", label: "Fire Hydrant", category: "Urban Pack" },
   { file: "urban/Cone.glb", label: "Traffic Cone", category: "Urban Pack" },
-  { file: "urban/Box.glb", category: "Urban Pack" },
+  { file: "urban/Box.glb", label: "Urban Box", category: "Urban Pack" },
   { file: "urban/Power Box.glb", label: "Power Box", category: "Urban Pack" },
   { file: "urban/Air conditioner.glb", label: "Air Conditioner", category: "Urban Pack" },
   { file: "urban/ATM.glb", category: "Urban Pack" },
   { file: "urban/Planter & Bushes.glb", label: "Planter & Bushes", category: "Urban Pack" },
-  { file: "urban/Man.glb", category: "Urban Pack" },
+  { file: "urban/Man.glb", label: "Urban Man", category: "Urban Pack" },
   { file: "urban/Adventurer.glb", category: "Urban Pack" },
   { file: "urban/Animated Woman.glb", label: "Woman", category: "Urban Pack" },
 ];
@@ -174,7 +178,7 @@ export const POLY_PIZZA_PRESET_FILES: GalleryPresetFile[] = [
   },
   {
     file: "poly-pizza/animated-robot.glb",
-    label: "Robot",
+    label: "Animated Robot",
     category: "Animated",
     attribution: {
       creator: "Quaternius",
@@ -209,7 +213,7 @@ export const POLY_PIZZA_PRESET_FILES: GalleryPresetFile[] = [
   },
   {
     file: "poly-pizza/animated-shark.glb",
-    label: "Shark",
+    label: "Animated Shark",
     category: "Animated",
     attribution: quaterniusAttribution("https://poly.pizza/m/sZR8AMLMz5", 1310),
   },
@@ -249,7 +253,7 @@ export const POLY_PIZZA_PRESET_FILES: GalleryPresetFile[] = [
   },
   {
     file: "poly-pizza/fish.glb",
-    label: "Fish",
+    label: "Low Poly Fish",
     category: "Animals",
     attribution: {
       creator: "Kenney",
@@ -337,7 +341,7 @@ export const POLY_PIZZA_PRESET_FILES: GalleryPresetFile[] = [
   },
   {
     file: "poly-pizza/rock.glb",
-    label: "Rock",
+    label: "Low Poly Rock",
     category: "Environment",
     attribution: {
       creator: "Kenney",
@@ -360,7 +364,7 @@ export const POLY_PIZZA_PRESET_FILES: GalleryPresetFile[] = [
   },
   {
     file: "poly-pizza/box.glb",
-    label: "Box",
+    label: "Cardboard Box",
     category: "Objects",
     galleryBucket: "Textured",
     attribution: {
@@ -416,7 +420,7 @@ export const POLY_PIZZA_PRESET_FILES: GalleryPresetFile[] = [
   },
   {
     file: "poly-pizza/man.glb",
-    label: "Man",
+    label: "Animated Man",
     category: "Characters",
     attribution: {
       creator: "Quaternius",
@@ -460,6 +464,111 @@ export const POLY_PIZZA_PRESET_FILES: GalleryPresetFile[] = [
   },
 ];
 
+function voxFiles(
+  files: string[],
+  attribution: GalleryPresetFile["attribution"],
+): GalleryPresetFile[] {
+  return files.map((file) => ({ file, category: "VOX", attribution }));
+}
+
+const MINI_MIKES_METRO_MINIS_VOX_FILES: string[] = [
+  "alien_bot1.vox",
+  "alien_engi1a.vox",
+  "alien_eye1a.vox",
+  "chr_chef.vox",
+  "chr_cop1.vox",
+  "chr_hazmat1.vox",
+  "chr_janitor.vox",
+  "chr_paramedic2.vox",
+  "chr_punk.vox",
+  "chr_riotcop.vox",
+  "chr_scientist.vox",
+  "chr_super1.vox",
+  "chr_thief.vox",
+  "chr_zombie4.vox",
+  "mob_cat1.vox",
+  "mob_penguin.vox",
+  "obj_arcade1.vox",
+  "obj_boxingring.vox",
+  "obj_busstop.vox",
+  "obj_candle.vox",
+  "obj_cart1a.vox",
+  "obj_container4.vox",
+  "obj_pumpkin.vox",
+  "piano.vox",
+  "scene_checkpoint.vox",
+  "scene_coffee.vox",
+  "scene_hazmat.vox",
+  "scene_protest.vox",
+  "scene_zombies.vox",
+  "veh_ambulance.vox",
+  "veh_cab1.vox",
+  "veh_car1.vox",
+  "veh_fire.vox",
+  "veh_lunch1.vox",
+  "veh_mini1.vox",
+  "veh_police1.vox",
+  "veh_suv1.vox",
+  "veh_train.vox",
+  "veh_truck1.vox",
+];
+
+const MAGICAVOXEL_TEST_MODEL_FILES: string[] = [
+  "chr_knight.vox",
+];
+
+const OPENGAMEART_BUILDING_VOX_FILES: GalleryPresetFile[] = [
+  {
+    file: "opengameart-buildings/building-01.vox",
+    label: "Building 01",
+    category: "VOX",
+    attribution: OPENGAMEART_VOXEL_BUILDINGS_ATTRIBUTION,
+  },
+  {
+    file: "opengameart-buildings/building-02.vox",
+    label: "Building 02",
+    category: "VOX",
+    attribution: OPENGAMEART_VOXEL_BUILDINGS_ATTRIBUTION,
+  },
+  {
+    file: "opengameart-buildings/tower-01.vox",
+    label: "Tower",
+    category: "VOX",
+    attribution: OPENGAMEART_VOXEL_BUILDINGS_ATTRIBUTION,
+  },
+  {
+    file: "opengameart-buildings/mini-building-01.vox",
+    label: "Small Building 01",
+    category: "VOX",
+    targetSize: 45,
+    zoom: 0.55,
+    attribution: OPENGAMEART_VOXEL_BUILDINGS_ATTRIBUTION,
+  },
+  {
+    file: "opengameart-buildings/mini-building-02.vox",
+    label: "Small Building 02",
+    category: "VOX",
+    targetSize: 45,
+    zoom: 0.55,
+    attribution: OPENGAMEART_VOXEL_BUILDINGS_ATTRIBUTION,
+  },
+];
+
+const OPENHV_VOX_FILES: GalleryPresetFile[] = [
+  { file: "openhv/battleship.vox", label: "Battleship", category: "VOX", attribution: OPENHV_VOXELS_ATTRIBUTION },
+  { file: "openhv/dropship.vox", label: "Dropship", category: "VOX", attribution: OPENHV_VOXELS_ATTRIBUTION },
+  { file: "openhv/firetruck.vox", label: "Fire Truck", category: "VOX", attribution: OPENHV_VOXELS_ATTRIBUTION },
+  { file: "openhv/saucer.vox", label: "Saucer", category: "VOX", attribution: OPENHV_VOXELS_ATTRIBUTION },
+  { file: "openhv/turtle.vox", label: "Turtle", category: "VOX", attribution: OPENHV_VOXELS_ATTRIBUTION },
+];
+
+const FLOOOH_VOX_FILES: GalleryPresetFile[] = [
+  { file: "floooh/cassette.vox", label: "Cassette", category: "VOX", targetSize: 35, zoom: 0.7, attribution: FLOOOH_VOXEL_DATA_ATTRIBUTION },
+  { file: "floooh/kc85-computer.vox", label: "KC85 Computer", category: "VOX", attribution: FLOOOH_VOXEL_DATA_ATTRIBUTION },
+  { file: "floooh/kc85-keyboard.vox", label: "KC85 Keyboard", category: "VOX", targetSize: 35, zoom: 0.6, attribution: FLOOOH_VOXEL_DATA_ATTRIBUTION },
+  { file: "floooh/lcr-c.vox", label: "LCR-C", category: "VOX", targetSize: 45, zoom: 0.5, attribution: FLOOOH_VOXEL_DATA_ATTRIBUTION },
+];
+
 export const VOX_PRESET_FILES: GalleryPresetFile[] = [
   {
     file: "AncientCrashSite.vox",
@@ -473,22 +582,32 @@ export const VOX_PRESET_FILES: GalleryPresetFile[] = [
   { file: "desert.vox", label: "Desert", category: "VOX", attribution: MONOGON_DESERT_TOWN_ATTRIBUTION },
   { file: "desert2.vox", label: "Desert 2", category: "VOX", attribution: MONOGON_DESERT_TOWN_ATTRIBUTION },
   { file: "Garden.vox", category: "VOX", attribution: MONOGON_TINY_VOXEL_DUNGEON_ATTRIBUTION },
-  { file: "Building03.vox", label: "Building 03", category: "VOX", attribution: MONOGON_DESERT_TOWN_ATTRIBUTION },
+  { file: "Building03.vox", label: "Desert Building", category: "VOX", attribution: MONOGON_DESERT_TOWN_ATTRIBUTION },
   { file: "HUT.vox", label: "Hut", category: "VOX", attribution: MONOGON_COUNTRY_SIDE_ATTRIBUTION },
   { file: "house.vox", label: "House", category: "VOX", attribution: MINI_MIKES_METRO_MINIS_ATTRIBUTION },
   { file: "pyramid.vox", label: "Pyramid", category: "VOX", attribution: MONOGON_ANCIENT_ENVIRONMENT_ATTRIBUTION },
-  { file: "skyscraper.vox", label: "Skyscraper", category: "VOX", attribution: MONOGON_CYBERPUNK_CITY_ATTRIBUTION },
-  { file: "Plane_03.vox", label: "Plane 03", category: "VOX", attribution: MONOGON_VOXEL_PLANE_ATTRIBUTION },
-  { file: "bus.vox", label: "Bus", category: "VOX", attribution: MINI_MIKES_METRO_MINIS_ATTRIBUTION },
+  { file: "skyscraper.vox", label: "Voxel Skyscraper", category: "VOX", attribution: MONOGON_CYBERPUNK_CITY_ATTRIBUTION },
+  { file: "Plane_03.vox", label: "Voxel Plane", category: "VOX", attribution: MONOGON_VOXEL_PLANE_ATTRIBUTION },
+  { file: "bus.vox", label: "Voxel Bus", category: "VOX", attribution: MINI_MIKES_METRO_MINIS_ATTRIBUTION },
   { file: "tank.vox", label: "Tank", category: "VOX", attribution: MINI_MIKES_METRO_MINIS_ATTRIBUTION },
   { file: "arachnoid.vox", label: "Arachnoid", category: "VOX", attribution: MONOGON_VOXEL_MECHAS_ATTRIBUTION },
   { file: "MechaGolem.vox", label: "Mecha Golem", category: "VOX", attribution: MONOGON_VOXEL_MECHAS_ATTRIBUTION },
   { file: "mecha.vox", label: "Mecha", category: "VOX", attribution: MONOGON_VOXEL_MECHAS_ATTRIBUTION },
   { file: "StarMarineTrooper.vox", label: "Star Marine Trooper", category: "VOX", attribution: MONOGON_VOXEL_SPACESHIPS_ATTRIBUTION },
-  { file: "apple.vox", label: "Apple", category: "VOX", attribution: SONA_SAR_VOXEL_ANIMALS_ITEMS_ATTRIBUTION },
-  { file: "dual.vox", label: "Dual", category: "VOX", attribution: MONOGON_VOXEL_SPACESHIPS_ATTRIBUTION },
+  { file: "apple.vox", label: "Voxel Apple", category: "VOX", attribution: SONA_SAR_VOXEL_ANIMALS_ITEMS_ATTRIBUTION },
+  { file: "dual.vox", label: "Dual Ship", category: "VOX", attribution: MONOGON_VOXEL_SPACESHIPS_ATTRIBUTION },
   { file: "Treasure.vox", category: "VOX", attribution: MONOGON_ANCIENT_ENVIRONMENT_ATTRIBUTION },
-  { file: "tree.vox", label: "Tree", category: "VOX", attribution: MINI_MIKES_METRO_MINIS_ATTRIBUTION },
+  { file: "tree.vox", label: "Voxel Tree", category: "VOX", attribution: MINI_MIKES_METRO_MINIS_ATTRIBUTION },
+  ...OPENGAMEART_BUILDING_VOX_FILES,
+  ...OPENHV_VOX_FILES,
+  ...FLOOOH_VOX_FILES,
+  { file: "chr_robot.vox", label: "Voxel Robot", category: "VOX", attribution: MINI_MIKES_METRO_MINIS_ATTRIBUTION },
+  { file: "horse.vox", label: "Voxel Horse", category: "VOX", attribution: MAGICAVOXEL_TEST_MODELS_ATTRIBUTION },
+  { file: "mob_bear.vox", label: "Voxel Bear", category: "VOX", attribution: MINI_MIKES_METRO_MINIS_ATTRIBUTION },
+  { file: "obj_campfire.vox", label: "Voxel Campfire", category: "VOX", attribution: MINI_MIKES_METRO_MINIS_ATTRIBUTION },
+  { file: "scene_train.vox", label: "Train Scene", category: "VOX", attribution: MINI_MIKES_METRO_MINIS_ATTRIBUTION },
+  ...voxFiles(MINI_MIKES_METRO_MINIS_VOX_FILES, MINI_MIKES_METRO_MINIS_ATTRIBUTION),
+  ...voxFiles(MAGICAVOXEL_TEST_MODEL_FILES, MAGICAVOXEL_TEST_MODELS_ATTRIBUTION),
 ];
 
 const ULTIMATE_SPACESHIPS_ROOT = "quaternius/ultimate-spaceships";

@@ -21,6 +21,23 @@ export function labelFromFile(file: string): string {
     .replace(/\.[^.]+$/, "")
     .replace(/([a-z])([A-Z])/g, "$1 $2")
     .replace(/[_-]+/g, " ");
+  return labelFromBase(base);
+}
+
+function voxLabelFromFile(file: string): string {
+  const base = file
+    .split("/")
+    .pop()!
+    .replace(/\.[^.]+$/, "")
+    .replace(/^(?:chr|mob|obj|veh|scene)_/i, "")
+    .replace(/([a-z])([0-9])/gi, "$1 $2")
+    .replace(/([0-9])([a-z])/gi, "$1 $2")
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .replace(/[_-]+/g, " ");
+  return labelFromBase(base);
+}
+
+function labelFromBase(base: string): string {
   return base
     .split(" ")
     .filter(Boolean)
@@ -71,7 +88,7 @@ export function objPreset(input: ObjGalleryPresetFile): PresetModel {
 export function voxPreset(input: GalleryPresetFile): PresetModel {
   return {
     id: presetIdFromFile("vox", input.file),
-    label: input.label ?? labelFromFile(input.file),
+    label: input.label ?? voxLabelFromFile(input.file),
     category: input.category,
     kind: "vox",
     url: galleryFileUrl("vox", input.file),

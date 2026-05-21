@@ -42,12 +42,14 @@ const DEFAULT_MATRIX_DECIMALS = 3;
 const DEFAULT_BORDER_SHAPE_DECIMALS = 2;
 const DEFAULT_ATLAS_CSS_DECIMALS = 4;
 const SOLID_QUAD_CANONICAL_SIZE = 64;
-const SOLID_TRIANGLE_CANONICAL_SIZE = 64;
+const SOLID_TRIANGLE_CANONICAL_SIZE = 32;
 const ATLAS_CANONICAL_SIZE_EXPLICIT = 64;
 const ATLAS_CANONICAL_SIZE_AUTO_DESKTOP = 128;
 const BORDER_SHAPE_CENTER_PERCENT = 50;
 const BORDER_SHAPE_POINT_EPS = 1e-7;
 const BORDER_SHAPE_CANONICAL_SIZE = 16;
+const CORNER_SHAPE_POINT_EPS = 0.75;
+const CORNER_SHAPE_DUPLICATE_EPS = 0.2;
 const PROJECTIVE_QUAD_DENOM_EPS = 0.05;
 const PROJECTIVE_QUAD_MAX_WEIGHT_RATIO = 4;
 const PROJECTIVE_QUAD_BLEED = 0.6;
@@ -57,6 +59,7 @@ const SOLID_TRIANGLE_BLEED = 0.6;
 export type TextureQuality = number | "auto";
 
 export type PolyRenderStrategy = "b" | "i" | "u";
+type SolidTrianglePrimitive = "border" | "corner-bevel";
 
 export interface PolyRenderStrategiesOption {
   /** Strategies to skip; polygons that would normally use them fall through
@@ -105,6 +108,18 @@ interface ProjectiveQuadCoefficients {
   h: number;
   w1: number;
   w3: number;
+}
+
+type CornerShapeCorner = "topLeft" | "topRight" | "bottomRight" | "bottomLeft";
+type CornerShapeSide = "left" | "right" | "top" | "bottom";
+
+interface CornerShapeRadius {
+  x: number;
+  y: number;
+}
+
+interface CornerShapeGeometry {
+  radii: Partial<Record<CornerShapeCorner, CornerShapeRadius>>;
 }
 
 export interface TextureAtlasPlan {
@@ -173,6 +188,7 @@ export interface TextureAtlasResult {
   useFullRectSolid: ComputedRef<boolean>;
   useProjectiveQuad: ComputedRef<boolean>;
   useStableTriangle: ComputedRef<boolean>;
+  solidTrianglePrimitive: ComputedRef<SolidTrianglePrimitive | null>;
   useBorderShape: ComputedRef<boolean>;
 }
 
@@ -533,9 +549,40 @@ function solidTriangleSupported(): boolean {
   const userAgent = (typeof window !== "undefined" ? window.navigator : globalThis.navigator)?.userAgent ?? "";
   if (!userAgent) return true;
 
+  return !safariCssProjectiveUnsupported(userAgent);
+}
+
+function cornerTriangleSupported(): boolean {
+  return !!globalThis.CSS?.supports?.("corner-top-left-shape", "bevel") &&
+    !!globalThis.CSS.supports("corner-top-right-shape", "bevel");
+}
+
+function cornerShapeSupported(): boolean {
+  return !!globalThis.CSS?.supports?.("corner-top-left-shape", "bevel") &&
+    !!globalThis.CSS.supports("corner-top-right-shape", "bevel") &&
+    !!globalThis.CSS.supports("corner-bottom-right-shape", "bevel") &&
+    !!globalThis.CSS.supports("corner-bottom-left-shape", "bevel");
+}
+
+function resolveSolidTrianglePrimitive(
+  strategies?: PolyRenderStrategiesOption,
+): SolidTrianglePrimitive | null {
+  if (strategies?.disable?.includes("u")) return null;
+  if (cornerTriangleSupported()) return "corner-bevel";
+  return solidTriangleSupported() ? "border" : null;
+}
+
+function projectiveQuadSupported(): boolean {
+  const userAgent = (typeof window !== "undefined" ? window.navigator : globalThis.navigator)?.userAgent ?? "";
+  if (!userAgent) return true;
+
+  return !safariCssProjectiveUnsupported(userAgent);
+}
+
+function safariCssProjectiveUnsupported(userAgent: string): boolean {
   const isChromiumFamily = /\b(?:Chrome|HeadlessChrome|Chromium|Edg|OPR)\//.test(userAgent);
   const isSafariFamily = /\bVersion\/[\d.]+.*\bSafari\//.test(userAgent);
-  return !isSafariFamily || isChromiumFamily;
+  return isSafariFamily && !isChromiumFamily;
 }
 
 function incrementCount(map: Map<string, number>, key: string): void {
@@ -585,15 +632,19 @@ function orderBrushInlineStyle(el: HTMLElement): void {
 export function getSolidPaintDefaults(
   plans: Array<TextureAtlasPlan | null>,
   textureLighting: PolyTextureLightingMode,
+  strategies?: PolyRenderStrategiesOption,
 ): SolidPaintDefaults {
   const paintCounts = new Map<string, number>();
   const dynamicCounts = new Map<string, number>();
   const dynamicColors = new Map<string, RGB>();
-  const useStableTriangle = solidTriangleSupported();
-  const useBorderShape = textureLighting !== "dynamic" && borderShapeSupported();
+  const disabled = new Set(strategies?.disable ?? []);
+  const useStableTriangle = resolveSolidTrianglePrimitive(strategies) !== null;
+  const useCornerShapeSolid = textureLighting !== "dynamic" && !disabled.has("i") && cornerShapeSupported();
+  const useBorderShape = textureLighting !== "dynamic" && !disabled.has("i") && borderShapeSupported();
 
   for (const plan of plans) {
     if (!plan || plan.texture) continue;
+    const usesCornerShape = useCornerShapeSolid && !!cornerShapeGeometryForPlan(plan);
 
     if (textureLighting === "dynamic") {
       if (!(useStableTriangle && isSolidTrianglePlan(plan)) && !isFullRectSolid(plan)) continue;
@@ -604,7 +655,12 @@ export function getSolidPaintDefaults(
       continue;
     }
 
-    if (!(useStableTriangle && isSolidTrianglePlan(plan)) && !isFullRectSolid(plan) && !useBorderShape) continue;
+    if (
+      !(useStableTriangle && isSolidTrianglePlan(plan)) &&
+      !isFullRectSolid(plan) &&
+      !usesCornerShape &&
+      !useBorderShape
+    ) continue;
     incrementCount(paintCounts, plan.shadedColor);
   }
 
@@ -657,6 +713,125 @@ export function cssBorderShapeForPlan(entry: TextureAtlasPlan): string {
   return `${cssPolygonShapeForPoints(points)} ${cssCollapsedInnerShapeForPoints(points)}`;
 }
 
+function simplifyCornerShapePoints(points: Array<[number, number]>): Array<[number, number]> {
+  const simplified: Array<[number, number]> = [];
+  for (const point of points) {
+    const previous = simplified[simplified.length - 1];
+    if (
+      previous &&
+      Math.hypot(previous[0] - point[0], previous[1] - point[1]) <= CORNER_SHAPE_DUPLICATE_EPS
+    ) {
+      continue;
+    }
+    simplified.push(point);
+  }
+  if (simplified.length > 1) {
+    const first = simplified[0];
+    const last = simplified[simplified.length - 1];
+    if (Math.hypot(first[0] - last[0], first[1] - last[1]) <= CORNER_SHAPE_DUPLICATE_EPS) {
+      simplified.pop();
+    }
+  }
+  return simplified;
+}
+
+function cornerShapePointSides([x, y]: [number, number]): Set<CornerShapeSide> | null {
+  const sides = new Set<CornerShapeSide>();
+  if (Math.abs(x) <= CORNER_SHAPE_POINT_EPS) sides.add("left");
+  if (Math.abs(x - 100) <= CORNER_SHAPE_POINT_EPS) sides.add("right");
+  if (Math.abs(y) <= CORNER_SHAPE_POINT_EPS) sides.add("top");
+  if (Math.abs(y - 100) <= CORNER_SHAPE_POINT_EPS) sides.add("bottom");
+  return sides.size > 0 ? sides : null;
+}
+
+function sharedCornerShapeSide(a: Set<CornerShapeSide>, b: Set<CornerShapeSide>): boolean {
+  for (const side of a) {
+    if (b.has(side)) return true;
+  }
+  return false;
+}
+
+function cornerShapeDiagonal(
+  aPoint: [number, number],
+  aSides: Set<CornerShapeSide>,
+  bPoint: [number, number],
+  bSides: Set<CornerShapeSide>,
+): [CornerShapeCorner, CornerShapeRadius] | null {
+  const read = (
+    corner: CornerShapeCorner,
+    horizontal: CornerShapeSide,
+    vertical: CornerShapeSide,
+  ): [CornerShapeCorner, CornerShapeRadius] | null => {
+    const horizontalPoint = aSides.has(horizontal) ? aPoint : bSides.has(horizontal) ? bPoint : null;
+    const verticalPoint = aSides.has(vertical) ? aPoint : bSides.has(vertical) ? bPoint : null;
+    if (!horizontalPoint || !verticalPoint) return null;
+    const radius = (() => {
+      switch (corner) {
+        case "topLeft":
+          return { x: horizontalPoint[0], y: verticalPoint[1] };
+        case "topRight":
+          return { x: 100 - horizontalPoint[0], y: verticalPoint[1] };
+        case "bottomRight":
+          return { x: 100 - horizontalPoint[0], y: 100 - verticalPoint[1] };
+        case "bottomLeft":
+          return { x: horizontalPoint[0], y: 100 - verticalPoint[1] };
+      }
+    })();
+    return radius.x > CORNER_SHAPE_POINT_EPS &&
+        radius.y > CORNER_SHAPE_POINT_EPS &&
+        radius.x < 100 - CORNER_SHAPE_POINT_EPS &&
+        radius.y < 100 - CORNER_SHAPE_POINT_EPS
+      ? [corner, radius]
+      : null;
+  };
+
+  if ((aSides.has("top") || bSides.has("top")) && (aSides.has("left") || bSides.has("left"))) {
+    return read("topLeft", "top", "left");
+  }
+  if ((aSides.has("top") || bSides.has("top")) && (aSides.has("right") || bSides.has("right"))) {
+    return read("topRight", "top", "right");
+  }
+  if ((aSides.has("bottom") || bSides.has("bottom")) && (aSides.has("right") || bSides.has("right"))) {
+    return read("bottomRight", "bottom", "right");
+  }
+  if ((aSides.has("bottom") || bSides.has("bottom")) && (aSides.has("left") || bSides.has("left"))) {
+    return read("bottomLeft", "bottom", "left");
+  }
+  return null;
+}
+
+function cornerShapeGeometryForPlan(entry: TextureAtlasPlan): CornerShapeGeometry | null {
+  if (entry.texture || isSolidTrianglePlan(entry) || isFullRectSolid(entry)) return null;
+  const points = simplifyCornerShapePoints(borderShapePointsForPlan(entry));
+  if (points.length < 4) return null;
+
+  const sides = points.map(cornerShapePointSides);
+  if (sides.some((side) => !side)) return null;
+
+  const radii: Partial<Record<CornerShapeCorner, CornerShapeRadius>> = {};
+  let diagonalCount = 0;
+  for (let i = 0; i < points.length; i += 1) {
+    const aSides = sides[i]!;
+    const bSides = sides[(i + 1) % points.length]!;
+    if (sharedCornerShapeSide(aSides, bSides)) continue;
+    const diagonal = cornerShapeDiagonal(points[i], aSides, points[(i + 1) % points.length], bSides);
+    if (!diagonal) return null;
+    const [corner, radius] = diagonal;
+    const previous = radii[corner];
+    if (
+      previous &&
+      (Math.abs(previous.x - radius.x) > CORNER_SHAPE_POINT_EPS ||
+        Math.abs(previous.y - radius.y) > CORNER_SHAPE_POINT_EPS)
+    ) {
+      return null;
+    }
+    radii[corner] = radius;
+    diagonalCount += 1;
+  }
+
+  return diagonalCount > 0 ? { radii } : null;
+}
+
 function formatMatrix3dValues(values: readonly number[], decimals = DEFAULT_MATRIX_DECIMALS): string {
   return values.map((value) => roundDecimal(value, decimals)).join(",");
 }
@@ -693,6 +868,31 @@ function formatSolidQuadMatrix(entry: TextureAtlasPlan): string {
     (entry.canvasW || 1) / SOLID_QUAD_CANONICAL_SIZE,
     (entry.canvasH || 1) / SOLID_QUAD_CANONICAL_SIZE,
   );
+}
+
+function cornerShapeRadiusStyle(geometry: CornerShapeGeometry): CSSProperties {
+  const style: CSSProperties = {};
+  for (const [corner, radius] of Object.entries(geometry.radii) as Array<[CornerShapeCorner, CornerShapeRadius]>) {
+    const property = `border${corner[0].toUpperCase()}${corner.slice(1)}Radius`;
+    (style as Record<string, string>)[property] = `${formatPercent(radius.x)} ${formatPercent(radius.y)}`;
+  }
+  return style;
+}
+
+const CORNER_SHAPE_PROPERTIES = [
+  "corner-top-left-shape",
+  "corner-top-right-shape",
+  "corner-bottom-right-shape",
+  "corner-bottom-left-shape",
+] as const;
+
+function applyCornerShapeProperties(el: HTMLElement, geometry: CornerShapeGeometry | null): void {
+  for (const property of CORNER_SHAPE_PROPERTIES) el.style.removeProperty(property);
+  if (!geometry) return;
+  for (const corner of Object.keys(geometry.radii) as CornerShapeCorner[]) {
+    const cssCorner = corner.replace(/[A-Z]/g, (char) => `-${char.toLowerCase()}`);
+    el.style.setProperty(`corner-${cssCorner}-shape`, "bevel");
+  }
 }
 
 function isConvexPolygonPoints(points: Array<[number, number]>): boolean {
@@ -1218,6 +1418,7 @@ export interface StableTriangleDomUpdateOptions {
   directionalLight?: PolyDirectionalLight;
   ambientLight?: PolyAmbientLight;
   textureLighting?: PolyTextureLightingMode;
+  strategies?: PolyRenderStrategiesOption;
   colorFrame?: number;
   colorSteps?: number;
   colorFreezeFrames?: number;
@@ -1550,7 +1751,7 @@ export function updateStableTriangleDom(
   options: StableTriangleDomUpdateOptions = {},
 ): boolean {
   if ((options.textureLighting ?? "baked") !== "baked") return false;
-  if (!solidTriangleSupported()) return false;
+  if (!resolveSolidTrianglePrimitive(options.strategies)) return false;
   const leaves = Array.from(root.children).filter(
     (child): child is StableTriangleDomElement =>
       child instanceof HTMLElement && child.localName === "u",
@@ -2374,8 +2575,12 @@ export function useTextureAtlas(
 ): TextureAtlasResult {
   const disabled = computed(() => new Set(strategies.value?.disable ?? []));
   const useFullRectSolid = computed(() => !disabled.value.has("b"));
-  const useProjectiveQuad = computed(() => useFullRectSolid.value);
-  const useStableTriangle = computed(() => !disabled.value.has("u") && solidTriangleSupported());
+  const useProjectiveQuad = computed(() => useFullRectSolid.value && projectiveQuadSupported());
+  const solidTrianglePrimitive = computed(() => resolveSolidTrianglePrimitive(strategies.value));
+  const useStableTriangle = computed(() => solidTrianglePrimitive.value !== null);
+  const useCornerShapeSolid = computed(() =>
+    !disabled.value.has("i") && textureLighting.value !== "dynamic" && cornerShapeSupported()
+  );
   const useBorderShape = computed(() => !disabled.value.has("i") && textureLighting.value !== "dynamic" && borderShapeSupported());
 
   const atlasState = computed(() => {
@@ -2383,9 +2588,16 @@ export function useTextureAtlas(
       if (!plan) return plan;
       if (plan.texture) return plan;
       if (useStableTriangle.value && isSolidTrianglePlan(plan)) return null;
+      const fullRect = isFullRectSolid(plan);
+      const cornerShape = useCornerShapeSolid.value &&
+        !fullRect &&
+        !isSolidTrianglePlan(plan) &&
+        !(useProjectiveQuad.value && isProjectiveQuadPlan(plan)) &&
+        cornerShapeGeometryForPlan(plan);
       if (
-        (useFullRectSolid.value && isFullRectSolid(plan)) ||
+        (useFullRectSolid.value && fullRect) ||
         (useProjectiveQuad.value && isProjectiveQuadPlan(plan)) ||
+        cornerShape ||
         (textureLighting.value !== "dynamic" && useBorderShape.value)
       ) return null;
       return plan;
@@ -2456,6 +2668,7 @@ export function useTextureAtlas(
     useFullRectSolid,
     useProjectiveQuad,
     useStableTriangle,
+    solidTrianglePrimitive,
     useBorderShape,
   };
 }
@@ -2464,6 +2677,7 @@ export function renderTextureAtlasPoly({
   entry,
   page,
   textureLighting,
+  solidPaintDefaults: _solidPaintDefaults,
   className,
   style: styleProp,
   domAttrs,
@@ -2472,6 +2686,7 @@ export function renderTextureAtlasPoly({
   entry: PackedTextureAtlasEntry;
   page: TextureAtlasPage | undefined;
   textureLighting: PolyTextureLightingMode;
+  solidPaintDefaults?: SolidPaintDefaults;
   className?: string;
   style?: CSSProperties;
   domAttrs?: Record<string, unknown>;
@@ -2566,12 +2781,26 @@ export function renderTextureBorderShapePoly({
 }): VNode {
   const fullRect = isFullRectSolid(entry);
   const useIForFullRect = fullRect && forceBorderShape && borderShapeSupported();
-  const borderShape = (!fullRect || useIForFullRect) ? cssBorderShapeForPlan(entry) : null;
+  const cornerShape = !fullRect && cornerShapeSupported() ? cornerShapeGeometryForPlan(entry) : null;
+  const borderShape = !cornerShape && (!fullRect || useIForFullRect) ? cssBorderShapeForPlan(entry) : null;
   const useDefaultPaint = entry.shadedColor === solidPaintDefaults?.paintColor;
-  const transform = formatMatrix3d(borderShape ? formatBorderShapeMatrix(entry) : formatSolidQuadMatrix(entry));
+  const transform = formatMatrix3d(borderShape || cornerShape ? formatBorderShapeMatrix(entry) : formatSolidQuadMatrix(entry));
   const style: CSSProperties = fullRect
     ? {
         transform,
+        color: useDefaultPaint ? undefined : entry.shadedColor,
+        pointerEvents: pointerEvents === "none" ? "none" : undefined,
+        ...styleProp,
+      }
+    : cornerShape
+    ? {
+        transform,
+        width: `${BORDER_SHAPE_CANONICAL_SIZE}px`,
+        height: `${BORDER_SHAPE_CANONICAL_SIZE}px`,
+        border: 0,
+        boxSizing: "border-box",
+        background: "currentColor",
+        ...cornerShapeRadiusStyle(cornerShape),
         color: useDefaultPaint ? undefined : entry.shadedColor,
         pointerEvents: pointerEvents === "none" ? "none" : undefined,
         ...styleProp,
@@ -2595,10 +2824,11 @@ export function renderTextureBorderShapePoly({
     if (!el) return;
     if (borderShape) el.style.setProperty("border-shape", borderShape);
     else el.style.removeProperty("border-shape");
+    applyCornerShapeProperties(el, cornerShape);
     orderBrushInlineStyle(el);
   };
 
-  return h(fullRect && !useIForFullRect ? "b" : "i", {
+  return h(fullRect && !useIForFullRect ? "b" : cornerShape ? "u" : "i", {
     class: elementClassName,
     style,
     ...dataAttrs,
@@ -2672,6 +2902,7 @@ export function renderTextureTrianglePoly({
   entry,
   textureLighting,
   solidPaintDefaults,
+  solidTrianglePrimitive,
   className,
   style: styleProp,
   domAttrs,
@@ -2680,12 +2911,18 @@ export function renderTextureTrianglePoly({
   entry: TextureAtlasPlan;
   textureLighting: PolyTextureLightingMode;
   solidPaintDefaults?: SolidPaintDefaults;
+  solidTrianglePrimitive?: SolidTrianglePrimitive | null;
   className?: string;
   style?: CSSProperties;
   domAttrs?: Record<string, unknown>;
   pointerEvents?: "auto" | "none";
 }): VNode | null {
-  const triangleStyle = solidTriangleStyle(entry, textureLighting, pointerEvents, solidPaintDefaults);
+  const triangleStyle = solidTriangleStyle(
+    entry,
+    textureLighting,
+    pointerEvents,
+    solidPaintDefaults,
+  );
   if (!triangleStyle) return null;
 
   const dataAttrs = entry.polygon.data
@@ -2693,7 +2930,10 @@ export function renderTextureTrianglePoly({
         Object.entries(entry.polygon.data).map(([k, v]) => [`data-${k}`, String(v)]),
       )
     : {};
-  const elementClassName = className?.trim() || undefined;
+  const elementClassName = [
+    className?.trim(),
+    solidTrianglePrimitive === "corner-bevel" ? "polycss-corner-triangle" : "",
+  ].filter(Boolean).join(" ") || undefined;
 
   return h("u", {
     class: elementClassName,

@@ -1,17 +1,15 @@
 #!/usr/bin/env node
 /**
- * Trace/rAF bucket profiler for non-voxel rotation experiments.
+ * Chrome trace analysis for polycss camera-motion runs.
  *
- * This is intentionally separate from trace-frame-buckets.mjs because that
- * script samples voxel direct-renderer DOM. Here we sample the real polycss
- * leaf tag mix (`b/i/s/u/q`) so slow frame buckets can be compared against the
- * strategy mix emitted by normal GLB/OBJ rendering.
+ * Captures a perf or non-voxel bench page, aligns trace events to rAF frame
+ * samples, and reports compositor/style/raster/script cost per cadence bucket.
  *
  * Usage:
- *   node bench/nonvoxel-frame-buckets.mjs --mesh glb:Elephant.glb --variant order-tile4
- *   node bench/nonvoxel-frame-buckets.mjs --mesh glb:Elephant.glb --variant order-tile4 --no-trace
- *   node bench/nonvoxel-frame-buckets.mjs --mesh glb:Elephant.glb --variant order-tile4 --dom-samples
- *   node bench/nonvoxel-frame-buckets.mjs --mesh teapot --variant force-atlas --label nv-teapot-atlas
+ *   node bench/trace-analysis.mjs
+ *   node bench/trace-analysis.mjs --mesh ancient-crash-site --runs 3 --dom-samples
+ *   node bench/trace-analysis.mjs --mesh obj-house3 --renderer vanilla --label obj-house3-trace
+ *   node bench/trace-analysis.mjs --page nonvoxel --mesh glb:Elephant.glb --variant order-tile4 --no-trace
  */
 import { createServer } from "node:http";
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -20,6 +18,7 @@ import { dirname, extname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 import { chromiumArgsWithGpuDefault } from "./chromium-defaults.mjs";
+import { getNonVoxelVariantParams, knownNonVoxelVariantIds } from "./nonvoxel-variants.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, "..");
@@ -30,15 +29,7 @@ const argv = process.argv.slice(2);
 const flag = (name) => argv.indexOf(`--${name}`);
 const optStr = (name, dflt = "") => {
   const i = flag(name);
-  if (i >= 0) return argv[i + 1] ?? dflt;
-  const prefixed = argv.find((arg) => arg.startsWith(`--${name}=`));
-  return prefixed ? prefixed.slice(name.length + 3) : dflt;
-};
-const optNum = (name, dflt) => {
-  const raw = optStr(name);
-  if (raw.trim() === "") return dflt;
-  const value = Number(raw);
-  return Number.isFinite(value) ? value : dflt;
+  return i >= 0 ? argv[i + 1] : dflt;
 };
 const optAll = (name) => {
   const values = [];
@@ -53,15 +44,22 @@ const optAll = (name) => {
   }
   return values;
 };
-const hasFlag = (name) => flag(name) >= 0 || argv.includes(`--${name}=true`);
+const optNum = (name, dflt) => {
+  const v = optStr(name);
+  return v ? Number(v) : dflt;
+};
+const hasFlag = (name) => flag(name) >= 0;
 
-const MESH = optStr("mesh", "glb:Elephant.glb");
+const HELP = argv.includes("--help") || argv.includes("-h");
+const PAGE = optStr("page", "perf");
+const MESH = optStr("mesh", PAGE === "nonvoxel" ? "glb:Elephant.glb" : "garden");
 const MODE = optStr("mode", "baked");
 const MOTION = optStr("motion", "rot");
+const RENDERER = optStr("renderer", "vanilla");
 const VARIANT = optStr("variant", "baseline");
-const WARMUP_MS = optNum("warmup", 2000);
-const SAMPLE_MS = optNum("sample", 5000);
-const RUNS = Math.max(1, optNum("runs", 1));
+const WARMUP_MS = optNum("warmup", 1500);
+const SAMPLE_MS = optNum("sample", 6000);
+const RUNS = optNum("runs", 1);
 const LABEL = optStr("label");
 const HEADED = hasFlag("headed");
 const JSON_ONLY = hasFlag("json");
@@ -73,25 +71,6 @@ const CHROMIUM_ARGS = chromiumArgsWithGpuDefault([
   ...optAll("chromium-arg"),
   ...optAll("chromium-args").flatMap((value) => value.split(/\s+/).filter(Boolean)),
 ], { softwareBackend: SOFTWARE_BACKEND });
-
-const VARIANT_PARAMS = {
-  baseline: {},
-  "css-keyframes": { rotationDriver: "css-keyframes" },
-  "order-depth": { domOrder: "initial-depth" },
-  "order-tile4": { domOrder: "tile4-screen" },
-  "order-area": { domOrder: "area-desc" },
-  "no-border-shape": { disableStrategies: "i" },
-  "no-stable-tri": { disableStrategies: "u" },
-  "force-atlas": { disableStrategies: "b,i,u" },
-  "no-will-change": { sceneTransformMode: "no-will-change" },
-  "leaf-buckets-64": { leafBucketSize: "64" },
-  "leaf-buckets-128": { leafBucketSize: "128" },
-  "leaf-buckets-256": { leafBucketSize: "256" },
-  "scene-matrix3d": { sceneTransformMode: "matrix3d" },
-  "scene-split-target": { sceneTransformMode: "split-target" },
-  "scene-host-perspective": { sceneTransformMode: "host-perspective" },
-  "scene-transform-perspective": { sceneTransformMode: "transform-perspective" },
-};
 
 const MIME = {
   ".html": "text/html; charset=utf-8",
@@ -158,8 +137,38 @@ const KEY_EVENTS = [
   "LayerTreeHostImpl::PrepareToDraw",
   "MainFrame.Draw",
   "SubmitCompositorFrame",
+  "Graphics.Pipeline",
+  "DisplayScheduler::DrawAndSwap",
+  "DirectRenderer::DrawFrame",
+  "DirectRenderer::DrawRenderPass",
+  "SoftwareRenderer::DoDrawQuad",
+  "RunTask",
   "RasterTask",
 ];
+
+function printHelp() {
+  console.log(`Usage: node bench/trace-analysis.mjs [options]
+
+Options:
+  --page <name>               perf | nonvoxel. Default: perf
+  --mesh <id>                 Mesh id or path accepted by the selected page.
+  --renderer <name>           html | vanilla | react | vue. Default: vanilla
+  --variant <name>            Non-voxel page variant. Default: baseline
+  --mode <name>               baked | dynamic. Default: baked
+  --motion <name>             rot | light | none. Default: rot
+  --runs <n>                  Repeat count. Default: 1
+  --warmup <ms>               Warmup window. Default: 1500
+  --sample <ms>               Trace sample window. Default: 6000
+  --label <name>              Write bench/results/<name>.json
+  --no-trace                  Collect rAF bucket stats without Chrome tracing
+  --dom-samples               Sample mounted leaf/tag counts by rAF frame
+  --headed                    Run headed Chromium
+  --browser-executable <path> Use a specific Chromium/Chrome executable
+  --software-backend          Force the old software/stress backend
+  --chromium-arg <arg>        Extra Chromium arg, repeatable
+  --json                      Print only JSON
+`);
+}
 
 function startServer() {
   return new Promise((resolveStart, rejectStart) => {
@@ -172,18 +181,20 @@ function startServer() {
           res.end();
           return;
         }
-        const abs = safe.startsWith("/gallery/")
-          ? resolve(galleryDir, safe.slice("/gallery/".length))
-          : resolve(benchDir, safe === "/" ? "nonvoxel-vanilla.html" : safe.slice(1));
+        const abs = safe === "/" || safe === ""
+          ? resolve(benchDir, "perf.html")
+          : safe.startsWith("/gallery/")
+            ? resolve(galleryDir, safe.slice("/gallery/".length))
+            : resolve(benchDir, safe.slice(1));
         const data = await readFile(abs);
         res.writeHead(200, {
           "Content-Type": MIME[extname(abs).toLowerCase()] || "application/octet-stream",
           "Cache-Control": "no-store",
         });
         res.end(data);
-      } catch (error) {
+      } catch (err) {
         res.writeHead(404);
-        res.end(String(error?.message ?? error));
+        res.end(String(err?.message ?? err));
       }
     });
     server.on("error", rejectStart);
@@ -247,7 +258,7 @@ function findTraceMark(events, name) {
 }
 
 function makeFrames(samples, startPerfNow, endPerfNow) {
-  const frames = samples
+  const raw = samples
     .filter((sample) => Number.isFinite(sample?.dt) && sample.dt > 0 && sample.dt < 2000)
     .filter((sample) => sample.t - sample.dt >= startPerfNow && sample.t <= endPerfNow)
     .map((sample, index) => ({
@@ -256,9 +267,9 @@ function makeFrames(samples, startPerfNow, endPerfNow) {
       end: sample.t,
       dt: sample.dt,
     }));
-  const baseFrameMs = estimateBaseFrameMs(frames.map((frame) => frame.dt));
-  for (const frame of frames) frame.bucket = bucketName(frame.dt, baseFrameMs);
-  return { frames, baseFrameMs };
+  const baseFrameMs = estimateBaseFrameMs(raw.map((frame) => frame.dt));
+  for (const frame of raw) frame.bucket = bucketName(frame.dt, baseFrameMs);
+  return { frames: raw, baseFrameMs };
 }
 
 function attachDomSamples(frames, domSamples) {
@@ -270,8 +281,8 @@ function attachDomSamples(frames, domSamples) {
     }
     const sample = domSamples[sampleIndex];
     if (sample && sample.t >= frame.start - 1 && sample.t <= frame.end + 1) {
+      frame.leaves = sample.leaves ?? sample.leafCount;
       frame.tags = sample.tags;
-      frame.leafCount = sample.leafCount;
       frame.bucketCount = sample.bucketCount;
       frame.inlineStyleChars = sample.inlineStyleChars;
     }
@@ -297,7 +308,8 @@ function emptyBucket(bucket) {
     frameCount: 0,
     frame_time_p50_ms: null,
     frame_time_p95_ms: null,
-    leafCount_p50: null,
+    leaves_p50: null,
+    leaves_p95: null,
     bucketCount_p50: null,
     tags_p50: { b: null, i: null, s: null, u: null, q: null },
     inlineStyleChars_p50: null,
@@ -316,7 +328,7 @@ function addDuration(map, name, durationMs) {
 
 function summarizeBuckets(events, frames, tracePerfOffsetMs, renderStats) {
   const fallbackTags = renderStats?.dom?.tags ?? null;
-  const fallbackLeafCount = renderStats?.dom?.leafCount ?? null;
+  const fallbackLeaves = renderStats?.dom?.leafCount ?? null;
   const fallbackBucketCount = renderStats?.dom?.buckets ?? null;
   const fallbackInlineStyleChars = renderStats?.dom?.inlineStyleChars ?? null;
   const buckets = new Map();
@@ -324,7 +336,7 @@ function summarizeBuckets(events, frames, tracePerfOffsetMs, renderStats) {
     const bucket = buckets.get(frame.bucket) ?? {
       ...emptyBucket(frame.bucket),
       frameDts: [],
-      leafCounts: [],
+      leaves: [],
       bucketCounts: [],
       inlineStyleChars: [],
       tagCounts: { b: [], i: [], s: [], u: [], q: [] },
@@ -333,7 +345,7 @@ function summarizeBuckets(events, frames, tracePerfOffsetMs, renderStats) {
     };
     bucket.frameCount += 1;
     bucket.frameDts.push(frame.dt);
-    if (Number.isFinite(frame.leafCount)) bucket.leafCounts.push(frame.leafCount);
+    if (Number.isFinite(frame.leaves)) bucket.leaves.push(frame.leaves);
     if (Number.isFinite(frame.bucketCount)) bucket.bucketCounts.push(frame.bucketCount);
     if (Number.isFinite(frame.inlineStyleChars)) bucket.inlineStyleChars.push(frame.inlineStyleChars);
     for (const tag of ["b", "i", "s", "u", "q"]) {
@@ -360,48 +372,69 @@ function summarizeBuckets(events, frames, tracePerfOffsetMs, renderStats) {
     if (group) addDuration(bucket.groupTotals, group, durationMs);
   }
 
-  return ["x1", "x2", "x3", "x4_plus"].map((name) => {
-    const bucket = buckets.get(name);
-    if (!bucket) return emptyBucket(name);
-    const frameCount = bucket.frameCount || 1;
-    const events_ms_per_frame = {};
-    for (const event of KEY_EVENTS) {
-      events_ms_per_frame[event] = +((bucket.eventTotals.get(event)?.duration_ms ?? 0) / frameCount).toFixed(4);
-    }
-    const groups_ms_per_frame = {};
-    for (const group of Object.keys(EVENT_GROUPS)) {
-      groups_ms_per_frame[group] = +((bucket.groupTotals.get(group)?.duration_ms ?? 0) / frameCount).toFixed(4);
-    }
-    const tags_p50 = {};
-    for (const tag of ["b", "i", "s", "u", "q"]) {
-      tags_p50[tag] = bucket.tagCounts[tag].length ? +(median(bucket.tagCounts[tag]) ?? 0).toFixed(0) : null;
-    }
-    const topEvents = [...bucket.eventTotals.entries()]
-      .map(([event, total]) => ({
-        event,
-        count: total.count,
-        ms_per_frame: +(total.duration_ms / frameCount).toFixed(4),
-      }))
-      .sort((a, b) => b.ms_per_frame - a.ms_per_frame)
-      .slice(0, 12);
-    const out = {
-      bucket: name,
-      frameCount: bucket.frameCount,
-      frame_time_p50_ms: +(median(bucket.frameDts) ?? 0).toFixed(3),
-      frame_time_p95_ms: +(quantile(bucket.frameDts, 0.95) ?? 0).toFixed(3),
-      leafCount_p50: bucket.leafCounts.length ? +(median(bucket.leafCounts) ?? 0).toFixed(0) : fallbackLeafCount,
-      bucketCount_p50: bucket.bucketCounts.length ? +(median(bucket.bucketCounts) ?? 0).toFixed(0) : fallbackBucketCount,
-      tags_p50,
-      inlineStyleChars_p50: bucket.inlineStyleChars.length ? +(median(bucket.inlineStyleChars) ?? 0).toFixed(0) : fallbackInlineStyleChars,
-      groups_ms_per_frame,
-      events_ms_per_frame,
-      topEvents,
-    };
-    if (fallbackTags && Object.values(tags_p50).every((value) => value === null)) {
-      out.tags_p50 = fallbackTags;
-    }
-    return out;
-  });
+  return ["x1", "x2", "x3", "x4_plus"]
+    .map((name) => {
+      const bucket = buckets.get(name);
+      if (!bucket) return emptyBucket(name);
+      const frameCount = bucket.frameCount || 1;
+      const events_ms_per_frame = {};
+      for (const event of KEY_EVENTS) {
+        events_ms_per_frame[event] = +((bucket.eventTotals.get(event)?.duration_ms ?? 0) / frameCount).toFixed(4);
+      }
+      const groups_ms_per_frame = {};
+      for (const group of Object.keys(EVENT_GROUPS)) {
+        groups_ms_per_frame[group] = +((bucket.groupTotals.get(group)?.duration_ms ?? 0) / frameCount).toFixed(4);
+      }
+      const tags_p50 = {};
+      for (const tag of ["b", "i", "s", "u", "q"]) {
+        tags_p50[tag] = bucket.tagCounts[tag].length ? +(median(bucket.tagCounts[tag]) ?? 0).toFixed(0) : null;
+      }
+      const topEvents = [...bucket.eventTotals.entries()]
+        .map(([event, total]) => ({
+          event,
+          count: total.count,
+          ms_per_frame: +(total.duration_ms / frameCount).toFixed(4),
+        }))
+        .sort((a, b) => b.ms_per_frame - a.ms_per_frame)
+        .slice(0, 12);
+      const summary = {
+        bucket: name,
+        frameCount: bucket.frameCount,
+        frame_time_p50_ms: +(median(bucket.frameDts) ?? 0).toFixed(3),
+        frame_time_p95_ms: +(quantile(bucket.frameDts, 0.95) ?? 0).toFixed(3),
+        leaves_p50: bucket.leaves.length ? +(median(bucket.leaves) ?? 0).toFixed(0) : fallbackLeaves,
+        leaves_p95: bucket.leaves.length ? +(quantile(bucket.leaves, 0.95) ?? 0).toFixed(0) : null,
+        bucketCount_p50: bucket.bucketCounts.length ? +(median(bucket.bucketCounts) ?? 0).toFixed(0) : fallbackBucketCount,
+        tags_p50,
+        inlineStyleChars_p50: bucket.inlineStyleChars.length ? +(median(bucket.inlineStyleChars) ?? 0).toFixed(0) : fallbackInlineStyleChars,
+        groups_ms_per_frame,
+        events_ms_per_frame,
+        topEvents,
+      };
+      if (fallbackTags && Object.values(tags_p50).every((value) => value === null)) {
+        summary.tags_p50 = fallbackTags;
+      }
+      return summary;
+    });
+}
+
+function aggregateEventTotals(events, tracePerfOffsetMs, startPerfNow, endPerfNow) {
+  const totals = new Map();
+  for (const event of events) {
+    if (event?.ph !== "X" || typeof event.dur !== "number" || !Number.isFinite(event.ts)) continue;
+    const midpointPerfNow = ((event.ts + event.dur / 2) / 1000) - tracePerfOffsetMs;
+    if (midpointPerfNow < startPerfNow || midpointPerfNow > endPerfNow) continue;
+    addDuration(totals, event.name, event.dur / 1000);
+  }
+  return [...totals.entries()]
+    .map(([event, total]) => ({ event, count: total.count, duration_ms: +total.duration_ms.toFixed(3) }))
+    .sort((a, b) => b.duration_ms - a.duration_ms)
+    .slice(0, 40);
+}
+
+function tagText(tags) {
+  if (!tags) return "";
+  return `b/i/s/u/q=${tags.b ?? ""}/${tags.i ?? ""}/${tags.s ?? ""}/${tags.u ?? ""}/${tags.q ?? ""}`;
 }
 
 async function startTrace(cdp) {
@@ -425,16 +458,23 @@ async function stopTrace(cdp) {
 }
 
 function pageUrl(port) {
-  const params = new URLSearchParams({
-    mesh: MESH,
-    mode: MODE,
-    motion: MOTION,
-    ...VARIANT_PARAMS[VARIANT],
-  });
-  if (!VARIANT_PARAMS[VARIANT]) {
-    throw new Error(`Unknown --variant "${VARIANT}". Known: ${Object.keys(VARIANT_PARAMS).join(", ")}`);
+  if (PAGE === "nonvoxel") {
+    const variantParams = getNonVoxelVariantParams(VARIANT);
+    if (!variantParams) {
+      throw new Error(`Unknown --variant "${VARIANT}". Known: ${knownNonVoxelVariantIds().join(", ")}`);
+    }
+    const params = new URLSearchParams({
+      mesh: MESH,
+      mode: MODE,
+      motion: MOTION,
+      ...variantParams,
+    });
+    return `http://127.0.0.1:${port}/nonvoxel-vanilla.html?${params.toString()}`;
   }
-  return `http://127.0.0.1:${port}/nonvoxel-vanilla.html?${params.toString()}`;
+  if (PAGE !== "perf") {
+    throw new Error(`Unknown --page "${PAGE}". Expected "perf" or "nonvoxel".`);
+  }
+  return `http://127.0.0.1:${port}/perf-${RENDERER}.html?mesh=${encodeURIComponent(MESH)}&mode=${encodeURIComponent(MODE)}&motion=${encodeURIComponent(MOTION)}`;
 }
 
 async function runOnce(port, repeat) {
@@ -444,9 +484,22 @@ async function runOnce(port, repeat) {
   try {
     const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
     const page = await ctx.newPage();
+    const pageDiagnostics = [];
+    page.on("console", (message) => {
+      if (message.type() === "error") pageDiagnostics.push(`[console:${message.type()}] ${message.text()}`);
+    });
+    page.on("pageerror", (error) => {
+      pageDiagnostics.push(`[pageerror] ${error?.stack || error?.message || error}`);
+    });
     const cdp = TRACE ? await ctx.newCDPSession(page) : null;
-    await page.goto(pageUrl(port), { waitUntil: "load" });
-    await page.waitForFunction(() => window.__perf__?.ready === true, null, { timeout: 30000 });
+    const url = pageUrl(port);
+    await page.goto(url, { waitUntil: "load" });
+    try {
+      await page.waitForFunction(() => window.__perf__?.ready === true, null, { timeout: 30000 });
+    } catch (error) {
+      const details = pageDiagnostics.length ? `\n${pageDiagnostics.join("\n")}` : "";
+      throw new Error(`Perf page did not become ready for ${url}.${details}`, { cause: error });
+    }
     await page.waitForTimeout(WARMUP_MS);
 
     const events = TRACE ? await startTrace(cdp) : [];
@@ -455,7 +508,8 @@ async function runOnce(port, repeat) {
       if (domSamples) {
         window.__polycssDomSamples = [];
         window.__polycssDomSampling = true;
-        const sampleDom = (now) => {
+        const tick = (now) => {
+          const mesh = document.querySelector(".polycss-voxel-mesh");
           const sceneRoot = document.querySelector(".polycss-scene");
           const tags = { b: 0, i: 0, s: 0, u: 0, q: 0 };
           let inlineStyleChars = 0;
@@ -467,30 +521,29 @@ async function runOnce(port, repeat) {
           }
           window.__polycssDomSamples.push({
             t: now,
+            leaves: mesh?.childElementCount ?? tags.b + tags.i + tags.s + tags.u,
             tags,
-            leafCount: tags.b + tags.i + tags.s + tags.u,
-            shadowCount: tags.q,
             bucketCount: sceneRoot?.querySelectorAll(".polycss-bucket").length ?? 0,
             inlineStyleChars,
           });
-          if (window.__polycssDomSampling) requestAnimationFrame(sampleDom);
+          if (window.__polycssDomSampling) requestAnimationFrame(tick);
         };
-        requestAnimationFrame(sampleDom);
+        requestAnimationFrame(tick);
       } else {
         window.__polycssDomSamples = [];
         window.__polycssDomSampling = false;
       }
       if (traceEnabled) {
-        performance.mark("__polycss_nonvoxel_bucket_start__");
-        console.timeStamp("__polycss_nonvoxel_bucket_start__");
+        performance.mark("__polycss_trace_analysis_start__");
+        console.timeStamp("__polycss_trace_analysis_start__");
       }
       return performance.now();
     }, { traceEnabled: TRACE, domSamples: DOM_SAMPLES });
     await page.waitForTimeout(SAMPLE_MS);
     const endPerfNow = await page.evaluate((traceEnabled) => {
       if (traceEnabled) {
-        performance.mark("__polycss_nonvoxel_bucket_end__");
-        console.timeStamp("__polycss_nonvoxel_bucket_end__");
+        performance.mark("__polycss_trace_analysis_end__");
+        console.timeStamp("__polycss_trace_analysis_end__");
       }
       window.__polycssDomSampling = false;
       return performance.now();
@@ -501,7 +554,7 @@ async function runOnce(port, repeat) {
       samples: window.__perf__.samples.slice(from),
       polyCount: window.__perf__.polyCount,
       renderStats: window.__perf__.renderStats ?? null,
-      domSamples: window.__polycssDomSamples ?? [],
+      domSamples: window.__polycssDomSamples ?? null,
     }), startIdx);
     await ctx.close();
 
@@ -509,8 +562,8 @@ async function runOnce(port, repeat) {
     let alignedStartPerfNow = startPerfNow;
     let alignedEndPerfNow = endPerfNow;
     if (TRACE) {
-      const startMark = findTraceMark(events, "__polycss_nonvoxel_bucket_start__");
-      const endMark = findTraceMark(events, "__polycss_nonvoxel_bucket_end__");
+      const startMark = findTraceMark(events, "__polycss_trace_analysis_start__");
+      const endMark = findTraceMark(events, "__polycss_trace_analysis_end__");
       if (!startMark?.args?.data?.startTime || !endMark?.args?.data?.startTime) {
         throw new Error("Trace markers were not captured; cannot align trace to rAF samples.");
       }
@@ -519,14 +572,17 @@ async function runOnce(port, repeat) {
       alignedEndPerfNow = endMark.args.data.startTime;
     }
     const { frames, baseFrameMs } = makeFrames(pageResult.samples, alignedStartPerfNow, alignedEndPerfNow);
-    if (DOM_SAMPLES) attachDomSamples(frames, pageResult.domSamples);
+    attachDomSamples(frames, pageResult.domSamples);
     const frameStats = summarizeFrameTimes(frames);
     const buckets = summarizeBuckets(events, frames, tracePerfOffsetMs, pageResult.renderStats);
+    const eventTotals = aggregateEventTotals(events, tracePerfOffsetMs, alignedStartPerfNow, alignedEndPerfNow);
 
     return {
       repeat,
+      page: PAGE,
       mesh: MESH,
-      variant: VARIANT,
+      renderer: RENDERER,
+      ...(PAGE === "nonvoxel" ? { variant: VARIANT } : {}),
       mode: MODE,
       motion: MOTION,
       trace: TRACE,
@@ -537,16 +593,13 @@ async function runOnce(port, repeat) {
       ...frameStats,
       polyCount: pageResult.polyCount,
       renderStats: pageResult.renderStats,
+      domSamples: DOM_SAMPLES ? pageResult.domSamples : undefined,
       buckets,
+      eventTotals,
     };
   } finally {
     await browser.close();
   }
-}
-
-function tagText(tags) {
-  if (!tags) return "";
-  return `b/i/s/u/q=${tags.b ?? ""}/${tags.i ?? ""}/${tags.s ?? ""}/${tags.u ?? ""}/${tags.q ?? ""}`;
 }
 
 function printRun(run) {
@@ -555,9 +608,9 @@ function printRun(run) {
     .map((bucket) => `${bucket.bucket}:${bucket.frameCount}`)
     .join(" ");
   console.log(
-    `[nv-buckets] ${run.mesh} ${run.variant} r${run.repeat} p50=${fmt(run.fps_p50, 1)} p95=${fmt(run.fps_p95, 1)} p99=${fmt(run.frame_time_p99_ms, 1)}ms base=${fmt(run.baseFrameMs, 3)}ms ${bucketText}`,
+    `[trace-analysis] ${run.mesh}${run.variant ? ` ${run.variant}` : ""} r${run.repeat} p50=${fmt(run.fps_p50, 1)} p95=${fmt(run.fps_p95, 1)} p99=${fmt(run.frame_time_p99_ms, 1)}ms base=${fmt(run.baseFrameMs, 3)}ms ${bucketText}`,
   );
-  console.log("| Bucket | Frames | Leaves | Tags p50 | dt p50 | dt p95 | style | prePaint | PAC | layerize | drawProps | visible | prepareDraw | draw | raster | script |");
+  console.log("| Bucket | Frames | Leaves p50 | Tags p50 | dt p50 | dt p95 | style | prePaint | PAC | layerize | drawProps | visible | prepareDraw | draw | raster | script |");
   console.log("| --- | ---: | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |");
   for (const bucket of run.buckets) {
     if (bucket.frameCount === 0) continue;
@@ -566,7 +619,7 @@ function printRun(run) {
     console.log([
       `| ${bucket.bucket}`,
       bucket.frameCount,
-      bucket.leafCount_p50 ?? "",
+      fmt(bucket.leaves_p50, 0),
       tagText(bucket.tags_p50),
       fmt(bucket.frame_time_p50_ms),
       fmt(bucket.frame_time_p95_ms),
@@ -584,13 +637,16 @@ function printRun(run) {
   }
 }
 
+if (HELP) {
+  printHelp();
+  process.exit(0);
+}
+
 const { server, port } = await startServer();
 try {
   if (!JSON_ONLY) {
-    console.log(`[nv-buckets] server :${port}`);
-    console.log(`[nv-buckets] mesh=${MESH} variant=${VARIANT} mode=${MODE} motion=${MOTION} trace=${TRACE ? "on" : "off"} domSamples=${DOM_SAMPLES ? "on" : "off"} runs=${RUNS} warmup=${WARMUP_MS}ms sample=${SAMPLE_MS}ms`);
-    if (SOFTWARE_BACKEND) console.log("[nv-buckets] software backend=on");
-    if (CHROMIUM_ARGS.length > 0) console.log(`[nv-buckets] chromium args=${CHROMIUM_ARGS.join(" ")}`);
+    console.log(`[trace-analysis] server :${port}`);
+    console.log(`[trace-analysis] page=${PAGE} mesh=${MESH} renderer=${RENDERER} variant=${PAGE === "nonvoxel" ? VARIANT : "n/a"} mode=${MODE} motion=${MOTION} trace=${TRACE ? "on" : "off"} domSamples=${DOM_SAMPLES ? "on" : "off"} runs=${RUNS} warmup=${WARMUP_MS}ms sample=${SAMPLE_MS}ms`);
   }
   const runs = [];
   for (let repeat = 1; repeat <= RUNS; repeat += 1) {
@@ -599,9 +655,11 @@ try {
     if (!JSON_ONLY) printRun(run);
   }
   const out = {
-    kind: "nonvoxel-frame-buckets",
+    kind: "trace-analysis",
+    page: PAGE,
     mesh: MESH,
-    variant: VARIANT,
+    renderer: RENDERER,
+    ...(PAGE === "nonvoxel" ? { variant: VARIANT } : {}),
     mode: MODE,
     motion: MOTION,
     trace: TRACE,
@@ -618,7 +676,7 @@ try {
     mkdirSync(dir, { recursive: true });
     const file = resolve(dir, `${LABEL}.json`);
     writeFileSync(file, JSON.stringify(out, null, 2) + "\n");
-    if (!JSON_ONLY) console.log(`[nv-buckets] wrote ${file}`);
+    if (!JSON_ONLY) console.log(`[trace-analysis] wrote ${file}`);
   }
   if (JSON_ONLY) console.log(JSON.stringify(out, null, 2));
 } finally {

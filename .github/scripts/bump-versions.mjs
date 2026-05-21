@@ -3,7 +3,7 @@
  * Bump the version of every package under `packages/*` in lockstep.
  *
  * Usage:
- *   node scripts/bump-versions.mjs <patch|minor|major>
+ *   node .github/scripts/bump-versions.mjs <patch|minor|major>
  *
  * Reads the current version from the first package, applies the requested
  * semver bump, writes the new version back to every package.json with a
@@ -16,7 +16,6 @@ import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-// __dirname is .github/scripts — repo root is two levels up.
 const root = resolve(__dirname, "..", "..");
 const packages = ["core", "polycss", "react", "vue"].map((d) =>
   resolve(root, "packages", d, "package.json"),

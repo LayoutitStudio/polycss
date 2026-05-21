@@ -322,6 +322,21 @@ describe("PolyScene — strategies.disable", () => {
     expect(fallback).toBeTruthy();
   });
 
+  it("renders corner-shape triangles by default when supported", () => {
+    vi.stubGlobal("CSS", {
+      supports: vi.fn((property: string, value?: string) =>
+        value === "bevel" &&
+        (property === "corner-top-left-shape" || property === "corner-top-right-shape")
+      ),
+    });
+    const container = renderScene({
+      polygons: [TRIANGLE],
+    });
+    const poly = container.querySelector("u") as HTMLElement | null;
+    expect(poly).toBeTruthy();
+    expect(poly!.classList.contains("polycss-corner-triangle")).toBe(true);
+  });
+
   it("disabling b renders a rect through border-shape when supported", () => {
     vi.stubGlobal("CSS", {
       supports: vi.fn((property: string) => property === "border-shape"),

@@ -20,6 +20,7 @@ describe("collectPolyRenderStats", () => {
         <i></i>
         <s></s>
         <u></u>
+        <u style="width:16px;height:16px;corner-bottom-left-shape:bevel"></u>
         <q></q>
         <div class="polycss-bucket"><b></b><s></s></div>
       </div>
@@ -27,9 +28,9 @@ describe("collectPolyRenderStats", () => {
 
     expect(collectPolyRenderStats(root, { polygonCount: 12 })).toEqual({
       polygonCount: 12,
-      mountedPolygonLeafCount: 6,
+      mountedPolygonLeafCount: 7,
       shadowLeafCount: 1,
-      surfaceLeafCounts: { quad: 2, clippedSolid: 1, atlas: 2, stableTriangle: 1 },
+      surfaceLeafCounts: { quad: 2, clippedSolid: 1, atlas: 2, stableTriangle: 2 },
       bucketCount: 1,
     });
   });

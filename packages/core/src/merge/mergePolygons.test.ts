@@ -476,6 +476,28 @@ describe("mergePolygons", () => {
       expect(result).toHaveLength(1);
       expect(result[0].vertices).toHaveLength(6);
     });
+
+    it("does not grow unbounded rings on large coplanar fans", () => {
+      const tris: Polygon[] = [];
+      const segments = 160;
+      const ring: Vec3[] = [];
+      for (let i = 0; i < segments; i++) {
+        const angle = (i / segments) * Math.PI * 2;
+        ring.push([Math.cos(angle), Math.sin(angle), 0]);
+      }
+      for (let i = 0; i < segments; i++) {
+        tris.push({
+          vertices: [[0, 0, 0], ring[i], ring[(i + 1) % segments]],
+          color: "#abc",
+        });
+      }
+
+      const result = mergePolygons(tris);
+
+      expect(result.length).toBeGreaterThan(1);
+      expect(result.length).toBeLessThan(tris.length);
+      expect(Math.max(...result.map((polygon) => polygon.vertices.length))).toBeLessThanOrEqual(96);
+    });
   });
 
   describe("output structure", () => {
