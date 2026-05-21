@@ -1,5 +1,5 @@
 /**
- * Bench entry — React. Bundled by bench/build.mjs into bench/polycss-react.js
+ * Bench entry — React. Bundled by bench/build.mjs into bench/.generated/polycss-react.js
  * and loaded by bench/perf-react.html.
  *
  * Mounts a <PolyCamera><PolyScene><PolyOrbitControls + mesh> tree and drives

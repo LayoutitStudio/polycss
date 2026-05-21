@@ -20,6 +20,7 @@ import { dirname, extname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 import { chromiumArgsWithGpuDefault } from "./chromium-defaults.mjs";
+import { getNonVoxelVariantParams, knownNonVoxelVariantIds } from "./nonvoxel-variants.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, "..");
@@ -88,27 +89,9 @@ if (!Number.isFinite(DEGREES) || DEGREES === 0) {
   throw new Error("--degrees must be a non-zero number");
 }
 
-const VARIANT_PARAMS = {
-  baseline: {},
-  "css-keyframes": { rotationDriver: "css-keyframes" },
-  "order-depth": { domOrder: "initial-depth" },
-  "order-tile4": { domOrder: "tile4-screen" },
-  "order-area": { domOrder: "area-desc" },
-  "no-border-shape": { disableStrategies: "i" },
-  "no-stable-tri": { disableStrategies: "u" },
-  "force-atlas": { disableStrategies: "b,i,u" },
-  "no-will-change": { sceneTransformMode: "no-will-change" },
-  "leaf-buckets-64": { leafBucketSize: "64" },
-  "leaf-buckets-128": { leafBucketSize: "128" },
-  "leaf-buckets-256": { leafBucketSize: "256" },
-  "scene-matrix3d": { sceneTransformMode: "matrix3d" },
-  "scene-split-target": { sceneTransformMode: "split-target" },
-  "scene-host-perspective": { sceneTransformMode: "host-perspective" },
-  "scene-transform-perspective": { sceneTransformMode: "transform-perspective" },
-};
-
-if (!VARIANT_PARAMS[VARIANT]) {
-  throw new Error(`Unknown --variant "${VARIANT}". Known: ${Object.keys(VARIANT_PARAMS).join(", ")}`);
+const VARIANT_PARAMS = getNonVoxelVariantParams(VARIANT);
+if (!VARIANT_PARAMS) {
+  throw new Error(`Unknown --variant "${VARIANT}". Known: ${knownNonVoxelVariantIds().join(", ")}`);
 }
 
 const MIME = {
@@ -242,7 +225,7 @@ function urlFor(port) {
     mode: MODE,
     motion: "drag",
     ...(FRAME_DETAILS ? { frameWork: "1" } : {}),
-    ...VARIANT_PARAMS[VARIANT],
+    ...VARIANT_PARAMS,
   });
   return `http://127.0.0.1:${port}/nonvoxel-vanilla.html?${params.toString()}`;
 }

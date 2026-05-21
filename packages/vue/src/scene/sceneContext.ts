@@ -12,6 +12,7 @@ import type {
   PolyTextureLightingMode,
   Polygon,
 } from "@layoutit/polycss-core";
+import type { PolyRenderStrategiesOption } from "./textureAtlas";
 
 export interface PolyShadowOptions {
   color?: string;
@@ -34,6 +35,7 @@ export interface PolySceneContextValue {
   textureLighting: PolyTextureLightingMode;
   directionalLight?: PolyDirectionalLight;
   ambientLight?: PolyAmbientLight;
+  strategies?: PolyRenderStrategiesOption;
   shadow?: PolyShadowOptions;
   shadowRegistry?: PolyShadowRegistry;
 }

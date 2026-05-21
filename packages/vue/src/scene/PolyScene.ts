@@ -157,6 +157,7 @@ export const PolyScene = defineComponent({
       textureLighting: props.textureLighting ?? "baked",
       directionalLight: props.directionalLight,
       ambientLight: props.ambientLight,
+      strategies: props.strategies,
       shadow: props.shadow,
       shadowRegistry,
     }));
@@ -382,6 +383,7 @@ export const PolyScene = defineComponent({
           return renderTextureTrianglePoly({
             entry: plan,
             textureLighting: ctx.textureLighting ?? "baked",
+            solidTrianglePrimitive: textureAtlas.solidTrianglePrimitive.value,
           });
         }
         if (textureAtlas.useProjectiveQuad.value && isProjectiveQuadPlan(plan)) {

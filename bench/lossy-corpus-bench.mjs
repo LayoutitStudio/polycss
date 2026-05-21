@@ -1,0 +1,998 @@
+#!/usr/bin/env node
+/**
+ * Deep corpus report for meshResolution="lossy".
+ *
+ * This is a count/quality bench, not a browser FPS bench. It scans gallery
+ * GLB/GLTF/OBJ assets, compares lossless/current lossy/forced lossy candidate
+ * families, and records crack-budget diagnostics for the forced candidates.
+ *
+ * Usage:
+ *   node bench/lossy-corpus-bench.mjs
+ *   node bench/lossy-corpus-bench.mjs --models adventurer,snail
+ *   node bench/lossy-corpus-bench.mjs --json bench/results/lossy-corpus.json
+ *   node bench/lossy-corpus-bench.mjs --from-json bench/results/lossy-corpus.json --opportunities
+ *   node bench/lossy-corpus-bench.mjs --from-json after.json --compare before.json
+ *   node bench/lossy-corpus-bench.mjs --models animated-shark --sweep
+ *   node bench/lossy-corpus-bench.mjs --root /tmp/polycss-model-corpus --json /tmp/corpus.json
+ */
+import { createRequire } from "node:module";
+import { spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, extname, join, relative, resolve } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { performance } from "node:perf_hooks";
+import {
+  bakeSolidTextureSamples,
+  optimizeAnimatedMeshPolygons,
+  optimizeMeshPolygons,
+  parseGltf,
+  parseMtl,
+  parseObj,
+} from "../packages/core/dist/index.js";
+
+const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const galleryRoot = resolve(repoRoot, "website/public/gallery");
+const glbRoot = join(galleryRoot, "glb");
+const objRoot = join(galleryRoot, "obj");
+const requireFromWebsite = createRequire(resolve(repoRoot, "website/package.json"));
+
+const argv = process.argv.slice(2);
+const flag = (name) => argv.indexOf(`--${name}`);
+const hasFlag = (name) => flag(name) >= 0;
+const optStr = (name, dflt = "") => {
+  const index = flag(name);
+  return index >= 0 ? argv[index + 1] : dflt;
+};
+
+if (hasFlag("help")) {
+  console.log(`Usage: node bench/lossy-corpus-bench.mjs [--models filter] [--json file] [--sweep]
+       node bench/lossy-corpus-bench.mjs --from-json file [--opportunities] [--compare baseline]
+
+Options:
+  --models <list>       Comma-separated case-insensitive substrings to include.
+  --models-file <file>  Newline-separated model paths or substrings to include.
+  --root <dir>          Scan GLB/GLTF/OBJ files under a temporary corpus root.
+  --json <file>         Write full summary + rows as JSON.
+  --from-json <file>    Read an existing corpus JSON instead of scanning models.
+  --compare <file>      Compare this run/JSON against a prior corpus JSON.
+  --opportunities       Print ranked lossy opportunity and timing tables.
+  --quick               Only compute raw/lossless/current stats and current timings.
+  --sweep               Run an expanded lossy candidate sweep. Use with --models first.
+  --limit <n>           Number of rows to print for opportunity/compare tables.
+  --file-offset <n>     Skip the first n selected files before scanning.
+  --file-limit <n>      Scan at most n selected files.
+  --timeout-ms <n>      Kill and record a model row if it exceeds n ms.
+  --progress <n>        Print progress to stderr every n scanned files.
+`);
+  process.exit(0);
+}
+
+const PRINT_LIMIT = Number(optStr("limit", "12")) || 12;
+const FILE_OFFSET = Math.max(0, Number(optStr("file-offset", "0")) || 0);
+const FILE_LIMIT = Math.max(0, Number(optStr("file-limit", "0")) || 0);
+const PROGRESS_EVERY = Math.max(0, Number(optStr("progress", "0")) || 0);
+const MODEL_TIMEOUT_MS = Math.max(0, Number(optStr("timeout-ms", optStr("timeout", "0"))) || 0);
+const QUICK_MODE = hasFlag("quick");
+const INCLUDE_SWEEP = hasFlag("sweep");
+const sourceRoot = optStr("root") ? resolve(repoRoot, optStr("root")) : galleryRoot;
+
+const FORCED_OPTIONS = [
+  ["pair-tight", { maxAngleDeg: 15, maxPlaneDisplacement: 0.35, maxBoundaryDisplacement: 0.02, isolatedPairs: true }],
+  ["pair-default", { maxAngleDeg: 15, maxPlaneDisplacement: 0.35, maxBoundaryDisplacement: 0.0725, isolatedPairs: true }],
+  ["pair-wide", { maxAngleDeg: 45, maxPlaneDisplacement: 1, maxBoundaryDisplacement: 0.0725, isolatedPairs: true }],
+  ["group-default", { maxAngleDeg: 15, maxPlaneDisplacement: 0.35, maxBoundaryDisplacement: 0.0725, isolatedPairs: false }],
+  ["group-wide", { maxAngleDeg: 45, maxPlaneDisplacement: 1, maxBoundaryDisplacement: 0.0725, isolatedPairs: false }],
+];
+
+const SWEEP_BUDGETS = [
+  { maxAngleDeg: 8, maxPlaneDisplacement: 0.12, maxBoundaryDisplacement: 0.015 },
+  { maxAngleDeg: 12, maxPlaneDisplacement: 0.25, maxBoundaryDisplacement: 0.02 },
+  { maxAngleDeg: 15, maxPlaneDisplacement: 0.35, maxBoundaryDisplacement: 0.04 },
+  { maxAngleDeg: 20, maxPlaneDisplacement: 0.5, maxBoundaryDisplacement: 0.04 },
+  { maxAngleDeg: 25, maxPlaneDisplacement: 0.65, maxBoundaryDisplacement: 0.055 },
+  { maxAngleDeg: 35, maxPlaneDisplacement: 0.85, maxBoundaryDisplacement: 0.0725 },
+  { maxAngleDeg: 45, maxPlaneDisplacement: 1, maxBoundaryDisplacement: 0.0725 },
+];
+
+function sweepOptions(losslessStats) {
+  const out = [];
+  for (const budget of SWEEP_BUDGETS) {
+    out.push([
+      `pair-a${budget.maxAngleDeg}-p${budget.maxPlaneDisplacement}-b${budget.maxBoundaryDisplacement}`,
+      { ...budget, isolatedPairs: true },
+    ]);
+    if (shouldMeasureGroupCandidates(losslessStats)) {
+      out.push([
+        `group-a${budget.maxAngleDeg}-p${budget.maxPlaneDisplacement}-b${budget.maxBoundaryDisplacement}`,
+        { ...budget, isolatedPairs: false },
+      ]);
+    }
+  }
+  return out;
+}
+
+function candidateKey(options) {
+  return [
+    options.maxAngleDeg,
+    options.maxPlaneDisplacement,
+    options.maxBoundaryDisplacement,
+    options.isolatedPairs,
+  ].join("|");
+}
+
+function walk(dir, exts) {
+  const out = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const path = join(dir, entry.name);
+    if (entry.isDirectory()) out.push(...walk(path, exts));
+    else if (exts.has(extname(entry.name).toLowerCase())) out.push(path);
+  }
+  return out.sort((a, b) => a.localeCompare(b));
+}
+
+function selectedFiles() {
+  const exts = new Set([".glb", ".gltf", ".obj"]);
+  const files = optStr("root")
+    ? walk(sourceRoot, exts)
+    : [
+        ...walk(glbRoot, new Set([".glb", ".gltf"])),
+        ...walk(objRoot, new Set([".obj"])),
+      ];
+  const needles = selectedModelNeedles();
+  if (needles.length === 0) return sliceSelectedFiles(files);
+  const filtered = files.filter((file) => {
+    const label = relative(sourceRoot, file).toLowerCase();
+    return needles.some((needle) => label.includes(needle));
+  });
+  return sliceSelectedFiles(filtered);
+}
+
+function selectedModelNeedles() {
+  const needles = [];
+  const filter = optStr("models").trim();
+  if (filter) {
+    needles.push(...filter.split(",").map((value) => value.trim().toLowerCase()).filter(Boolean));
+  }
+  const modelsFile = optStr("models-file").trim();
+  if (modelsFile) {
+    const file = resolve(repoRoot, modelsFile);
+    const lines = readFileSync(file, "utf8")
+      .split(/\r?\n/)
+      .map((line) => line.replace(/#.*$/, "").trim().toLowerCase())
+      .filter(Boolean);
+    needles.push(...lines);
+  }
+  return needles;
+}
+
+function sliceSelectedFiles(files) {
+  const start = Math.min(FILE_OFFSET, files.length);
+  const end = FILE_LIMIT > 0 ? Math.min(files.length, start + FILE_LIMIT) : files.length;
+  return files.slice(start, end);
+}
+
+function readBytes(path) {
+  const bytes = readFileSync(path);
+  return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+}
+
+let textureSamplingReady = false;
+let textureSamplingUnavailable = false;
+
+function installTextureSamplingEnv() {
+  if (textureSamplingReady) return true;
+  if (textureSamplingUnavailable) return false;
+
+  let sharp;
+  try {
+    sharp = requireFromWebsite("sharp");
+  } catch {
+    textureSamplingUnavailable = true;
+    return false;
+  }
+
+  class BenchImage {
+    onload = null;
+    onerror = null;
+    decoding = "async";
+    width = 0;
+    height = 0;
+    naturalWidth = 0;
+    naturalHeight = 0;
+    data = null;
+    #decodePromise = null;
+    #src = "";
+
+    set src(value) {
+      this.#src = value;
+      this.#decodePromise = (async () => {
+        const input = await readImageBytes(value);
+        const { data, info } = await sharp(input).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+        this.width = this.naturalWidth = info.width;
+        this.height = this.naturalHeight = info.height;
+        this.data = data;
+        this.onload?.();
+      })().catch((error) => {
+        this.onerror?.();
+        throw error;
+      });
+    }
+
+    get src() {
+      return this.#src;
+    }
+
+    decode() {
+      return this.#decodePromise ?? Promise.resolve();
+    }
+  }
+
+  class BenchCanvas {
+    width = 0;
+    height = 0;
+    image = null;
+
+    getContext() {
+      return {
+        drawImage: (image) => {
+          this.image = image;
+        },
+        getImageData: () => ({
+          data: this.image?.data ?? new Uint8ClampedArray(this.width * this.height * 4),
+        }),
+      };
+    }
+  }
+
+  globalThis.Image = BenchImage;
+  globalThis.document = {
+    createElement: (tagName) => tagName === "canvas" ? new BenchCanvas() : {},
+  };
+  textureSamplingReady = true;
+  return true;
+}
+
+async function readImageBytes(url) {
+  if (/^(blob:|data:|https?:)/.test(url)) {
+    const response = await fetch(url);
+    if (!response.ok) throw new Error(`image fetch failed: ${response.status}`);
+    return Buffer.from(await response.arrayBuffer());
+  }
+  return readFileSync(url.startsWith("file://") ? fileURLToPath(url) : url);
+}
+
+async function applyGalleryTexturePrepass(result) {
+  if (!installTextureSamplingEnv()) return result;
+  return bakeSolidTextureSamples(result);
+}
+
+function inferObjTextureOverrides(modelPath) {
+  const overrides = {};
+  if (modelPath.includes("/quaternius/ultimate-spaceships/")) {
+    const dir = dirname(modelPath);
+    const texture = readdirSync(dir).find((name) =>
+      /\.(png|jpe?g)$/i.test(name) && !/normal|rough|metal|ao/i.test(name)
+    );
+    if (texture) overrides.Texture = join(dir, texture);
+  }
+  return overrides;
+}
+
+async function parseModel(modelPath) {
+  const ext = extname(modelPath).toLowerCase();
+  if (ext === ".glb" || ext === ".gltf") {
+    return applyGalleryTexturePrepass(parseGltf(readBytes(modelPath), {
+      baseUrl: pathToFileURL(modelPath).href,
+      resolveBuffer: (uri) => readFileSync(resolve(dirname(modelPath), uri)),
+    }));
+  }
+
+  if (ext === ".obj") {
+    const text = readFileSync(modelPath, "utf8");
+    const mtlPath = modelPath.replace(/\.obj$/i, ".mtl");
+    const materialColors = {};
+    const materialTextures = inferObjTextureOverrides(modelPath);
+    if (existsSync(mtlPath)) {
+      const mtl = parseMtl(readFileSync(mtlPath, "utf8"));
+      Object.assign(materialColors, mtl.colors);
+      for (const [name, texture] of Object.entries(mtl.textures)) {
+        materialTextures[name] = resolve(dirname(mtlPath), texture);
+      }
+    }
+    return applyGalleryTexturePrepass(parseObj(text, {
+      targetSize: /coliseum\.obj$/.test(modelPath) ? 80 : 60,
+      defaultColor: "#8b95a1",
+      materialColors,
+      materialTextures,
+    }));
+  }
+
+  throw new Error(`Unsupported model: ${modelPath}`);
+}
+
+function polygonRenderCost(polygons) {
+  let cost = 0;
+  for (const polygon of polygons) {
+    const vertexCount = polygon.vertices.length;
+    const irregularPenalty = vertexCount <= 4 ? 0 : Math.min(4, vertexCount - 4) * 0.12;
+    const texturePenalty = polygon.texture || polygon.material?.texture || polygon.textureTriangles?.length ? 0.15 : 0;
+    cost += 1 + irregularPenalty + texturePenalty;
+  }
+  return cost;
+}
+
+function polygonStats(polygons) {
+  let triangles = 0;
+  let quads = 0;
+  let textured = 0;
+  let maxVertices = 0;
+  for (const polygon of polygons) {
+    if (polygon.vertices.length === 3) triangles += 1;
+    else if (polygon.vertices.length === 4) quads += 1;
+    if (polygon.texture || polygon.material?.texture || polygon.uvs || polygon.textureTriangles?.length) textured += 1;
+    maxVertices = Math.max(maxVertices, polygon.vertices.length);
+  }
+  return {
+    count: polygons.length,
+    cost: Number(polygonRenderCost(polygons).toFixed(2)),
+    triangles,
+    quads,
+    textured,
+    maxVertices,
+  };
+}
+
+function vertexKey(vertex) {
+  return `${vertex[0]},${vertex[1]},${vertex[2]}`;
+}
+
+function edgeKey(a, b) {
+  const ak = vertexKey(a);
+  const bk = vertexKey(b);
+  return ak < bk ? `${ak}|${bk}` : `${bk}|${ak}`;
+}
+
+function distanceVec(a, b) {
+  return Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+}
+
+function collectEdgeStats(polygons) {
+  const edges = new Map();
+  for (const polygon of polygons) {
+    for (let i = 0; i < polygon.vertices.length; i++) {
+      const a = polygon.vertices[i];
+      const b = polygon.vertices[(i + 1) % polygon.vertices.length];
+      const key = edgeKey(a, b);
+      const current = edges.get(key);
+      if (current) current.count += 1;
+      else edges.set(key, { count: 1, a, b });
+    }
+  }
+
+  const boundaryKeys = new Set();
+  const internalKeys = new Set();
+  const boundarySegments = [];
+  const internalSegments = [];
+  let boundaryLength = 0;
+  for (const [key, edge] of edges) {
+    const segment = { a: edge.a, b: edge.b };
+    if (edge.count === 1) {
+      boundaryKeys.add(key);
+      boundarySegments.push(segment);
+      boundaryLength += distanceVec(segment.a, segment.b);
+    } else {
+      internalKeys.add(key);
+      internalSegments.push(segment);
+    }
+  }
+  return { boundaryKeys, internalKeys, boundarySegments, internalSegments, boundaryLength };
+}
+
+function modelDiagonal(polygons) {
+  let minX = Infinity;
+  let minY = Infinity;
+  let minZ = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  let maxZ = -Infinity;
+  for (const polygon of polygons) {
+    for (const [x, y, z] of polygon.vertices) {
+      minX = Math.min(minX, x);
+      minY = Math.min(minY, y);
+      minZ = Math.min(minZ, z);
+      maxX = Math.max(maxX, x);
+      maxY = Math.max(maxY, y);
+      maxZ = Math.max(maxZ, z);
+    }
+  }
+  return Number.isFinite(minX) ? Math.hypot(maxX - minX, maxY - minY, maxZ - minZ) : 0;
+}
+
+function segmentCell(segment, cellSize) {
+  return [
+    Math.floor(((segment.a[0] + segment.b[0]) / 2) / cellSize),
+    Math.floor(((segment.a[1] + segment.b[1]) / 2) / cellSize),
+    Math.floor(((segment.a[2] + segment.b[2]) / 2) / cellSize),
+  ];
+}
+
+function cellKey(x, y, z) {
+  return `${x},${y},${z}`;
+}
+
+function buildSegmentIndex(segments, tolerance) {
+  const cellSize = Math.max(tolerance * 2, 1e-6);
+  const cells = new Map();
+  for (const segment of segments) {
+    const [cx, cy, cz] = segmentCell(segment, cellSize);
+    const key = cellKey(cx, cy, cz);
+    const bucket = cells.get(key);
+    if (bucket) bucket.push(segment);
+    else cells.set(key, [segment]);
+  }
+  return { cellSize, cells };
+}
+
+function segmentEndpointGap(a, b) {
+  return Math.min(
+    Math.max(distanceVec(a.a, b.a), distanceVec(a.b, b.b)),
+    Math.max(distanceVec(a.a, b.b), distanceVec(a.b, b.a)),
+  );
+}
+
+function indexedInternalEdgeGap(segment, index, tolerance) {
+  const [cx, cy, cz] = segmentCell(segment, index.cellSize);
+  let best = null;
+  for (let dx = -1; dx <= 1; dx++) {
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dz = -1; dz <= 1; dz++) {
+        const bucket = index.cells.get(cellKey(cx + dx, cy + dy, cz + dz));
+        if (!bucket) continue;
+        for (const candidate of bucket) {
+          const gap = segmentEndpointGap(segment, candidate);
+          if (gap <= tolerance) best = best === null ? gap : Math.min(best, gap);
+        }
+      }
+    }
+  }
+  return best;
+}
+
+function crackTolerances(polygons, maxBoundaryDisplacement = 0.0725) {
+  const diagonal = modelDiagonal(polygons);
+  const baseTolerance = diagonal > 0 ? Math.min(0.08, Math.max(0.001, diagonal * 0.001)) : 0;
+  const tolerance = Math.max(baseTolerance, maxBoundaryDisplacement * 1.05);
+  const searchTolerance = Math.max(tolerance, baseTolerance * 2.6, maxBoundaryDisplacement * 2.6);
+  return { baseTolerance, tolerance, searchTolerance };
+}
+
+function crackMetrics(sourcePolygons, candidatePolygons, maxBoundaryDisplacement = 0.0725) {
+  const sourceEdges = collectEdgeStats(sourcePolygons);
+  const candidateEdges = collectEdgeStats(candidatePolygons);
+  const { baseTolerance, tolerance, searchTolerance } = crackTolerances(sourcePolygons, maxBoundaryDisplacement);
+  const index = buildSegmentIndex(sourceEdges.internalSegments, searchTolerance);
+  const metrics = {
+    maxGap: 0,
+    internalBoundaryLength: 0,
+    excessBoundaryLength: Math.max(0, candidateEdges.boundaryLength - sourceEdges.boundaryLength),
+    baseTolerance,
+    tolerance,
+    searchTolerance,
+    nearInternal: 0,
+    over04: 0,
+    over08: 0,
+    over12: 0,
+  };
+
+  for (const edge of candidateEdges.boundarySegments) {
+    const key = edgeKey(edge.a, edge.b);
+    if (sourceEdges.boundaryKeys.has(key)) continue;
+    if (sourceEdges.internalKeys.has(key)) {
+      metrics.nearInternal += 1;
+      metrics.internalBoundaryLength += distanceVec(edge.a, edge.b);
+      continue;
+    }
+    const gap = indexedInternalEdgeGap(edge, index, searchTolerance);
+    if (gap === null) continue;
+    metrics.nearInternal += 1;
+    metrics.maxGap = Math.max(metrics.maxGap, gap);
+    metrics.internalBoundaryLength += distanceVec(edge.a, edge.b);
+    if (gap > 0.04) metrics.over04 += 1;
+    if (gap > 0.08) metrics.over08 += 1;
+    if (gap > 0.12) metrics.over12 += 1;
+  }
+  return metrics;
+}
+
+function crackLimits(sourcePolygons, reference, maxBoundaryDisplacement = 0.0725) {
+  const { tolerance } = crackTolerances(sourcePolygons, maxBoundaryDisplacement);
+  const gapSlack = Math.max(tolerance * 0.1, 1e-6);
+  const referenceGapLimit = reference.maxGap + gapSlack;
+  const maxGap = tolerance <= 0.08
+    ? Math.max(referenceGapLimit, Math.min(tolerance * 0.75, 0.04))
+    : referenceGapLimit;
+  const lengthSlack = Math.max(tolerance * 2, reference.internalBoundaryLength * 0.15);
+  const excessSlack = Math.max(tolerance * 2, reference.excessBoundaryLength * 0.15);
+  return {
+    maxGap,
+    internalBoundaryLength: reference.internalBoundaryLength + lengthSlack,
+    excessBoundaryLength: reference.excessBoundaryLength + excessSlack,
+  };
+}
+
+function compactCrack(metrics, limits) {
+  const pass =
+    metrics.maxGap <= limits.maxGap &&
+    metrics.internalBoundaryLength <= limits.internalBoundaryLength &&
+    metrics.excessBoundaryLength <= limits.excessBoundaryLength;
+  const failureReasons = [];
+  if (metrics.maxGap > limits.maxGap) failureReasons.push("gap");
+  if (metrics.internalBoundaryLength > limits.internalBoundaryLength) failureReasons.push("internal");
+  if (metrics.excessBoundaryLength > limits.excessBoundaryLength) failureReasons.push("excess");
+  return {
+    pass,
+    failureReasons,
+    maxGap: Number(metrics.maxGap.toFixed(6)),
+    maxGapLimit: Number(limits.maxGap.toFixed(6)),
+    internalBoundaryLength: Number(metrics.internalBoundaryLength.toFixed(2)),
+    internalBoundaryLimit: Number(limits.internalBoundaryLength.toFixed(2)),
+    excessBoundaryLength: Number(metrics.excessBoundaryLength.toFixed(2)),
+    excessBoundaryLimit: Number(limits.excessBoundaryLength.toFixed(2)),
+    over04: metrics.over04,
+    over08: metrics.over08,
+    over12: metrics.over12,
+    nearInternal: metrics.nearInternal,
+  };
+}
+
+function pctDrop(after, before) {
+  return before > 0 ? ((before - after) / before) * 100 : 0;
+}
+
+function timed(fn) {
+  const started = performance.now();
+  const value = fn();
+  return {
+    value,
+    ms: Number((performance.now() - started).toFixed(1)),
+  };
+}
+
+function shouldMeasureGroupCandidates(losslessStats) {
+  return losslessStats.count <= 800;
+}
+
+function summarizeCandidate(name, raw, losslessStats, referenceCracks, approximateMerge) {
+  const run = timed(() => optimizeMeshPolygons(raw, { meshResolution: "lossy", approximateMerge }));
+  const polygons = run.value;
+  const stats = polygonStats(polygons);
+  const metrics = crackMetrics(raw, polygons, approximateMerge.maxBoundaryDisplacement);
+  const limits = crackLimits(raw, referenceCracks, approximateMerge.maxBoundaryDisplacement);
+  return {
+    name,
+    count: stats.count,
+    cost: stats.cost,
+    ms: run.ms,
+    dropPct: Number(pctDrop(stats.cost, losslessStats.cost).toFixed(1)),
+    crack: compactCrack(metrics, limits),
+  };
+}
+
+async function summarizeModel(modelPath) {
+  const label = relative(sourceRoot, modelPath);
+  const started = performance.now();
+  const parseStarted = performance.now();
+  const parsed = await parseModel(modelPath);
+  const parseMs = Number((performance.now() - parseStarted).toFixed(1));
+  const raw = parsed.polygons;
+  const losslessRun = timed(() => optimizeMeshPolygons(raw, { meshResolution: "lossless" }));
+  const currentRun = timed(() => optimizeMeshPolygons(raw, { meshResolution: "lossy" }));
+  const lossless = losslessRun.value;
+  const current = currentRun.value;
+  const rawStats = polygonStats(raw);
+  const losslessStats = polygonStats(lossless);
+  const currentStats = polygonStats(current);
+  if (QUICK_MODE) {
+    const currentDropPct = pctDrop(currentStats.cost, losslessStats.cost);
+    return {
+      model: label,
+      ext: extname(modelPath).slice(1).toLowerCase(),
+      raw: rawStats,
+      lossless: losslessStats,
+      noApprox: null,
+      current: currentStats,
+      currentDropPct: Number(currentDropPct.toFixed(1)),
+      forced: [],
+      sweep: null,
+      bestForced: null,
+      bestPassingForced: null,
+      classification: currentStats.cost < losslessStats.cost
+        ? "auto-gain"
+        : "no-observed-geometry-potential",
+      animated: null,
+      timings: {
+        parseMs,
+        losslessMs: losslessRun.ms,
+        noApproxMs: 0,
+        currentMs: currentRun.ms,
+        forcedMs: 0,
+        sweepMs: 0,
+        animatedMs: 0,
+        totalMs: Number((performance.now() - started).toFixed(1)),
+      },
+    };
+  }
+
+  const noApproxRun = timed(() => optimizeMeshPolygons(raw, { meshResolution: "lossy", approximateMerge: false }));
+  const noApprox = noApproxRun.value;
+  const noApproxStats = polygonStats(noApprox);
+  const referenceCracks = crackMetrics(raw, noApprox);
+
+  const forced = [];
+  let forcedMs = 0;
+  for (const [name, approximateMerge] of FORCED_OPTIONS) {
+    if (name.startsWith("group") && !shouldMeasureGroupCandidates(losslessStats)) continue;
+    const candidate = summarizeCandidate(name, raw, losslessStats, referenceCracks, approximateMerge);
+    forcedMs += candidate.ms;
+    forced.push(candidate);
+  }
+  forced.sort((a, b) => a.cost - b.cost || a.count - b.count);
+
+  let sweep = null;
+  let sweepMs = 0;
+  if (INCLUDE_SWEEP) {
+    const seen = new Set(FORCED_OPTIONS.map(([, options]) => candidateKey(options)));
+    sweep = [];
+    for (const [name, approximateMerge] of sweepOptions(losslessStats)) {
+      const key = candidateKey(approximateMerge);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const candidate = summarizeCandidate(name, raw, losslessStats, referenceCracks, approximateMerge);
+      sweepMs += candidate.ms;
+      sweep.push(candidate);
+    }
+    sweep.sort((a, b) => a.cost - b.cost || a.count - b.count || a.ms - b.ms);
+  }
+
+  let animated = null;
+  let animatedMs = 0;
+  if (parsed.animation?.clips?.length) {
+    const run = timed(() => optimizeAnimatedMeshPolygons(parsed, { meshResolution: "lossy" }));
+    animatedMs = run.ms;
+    const optimized = run.value;
+    const stats = polygonStats(optimized.polygons);
+    animated = {
+      clips: parsed.animation.clips.length,
+      count: stats.count,
+      dropPct: Number(pctDrop(stats.cost, rawStats.cost).toFixed(1)),
+    };
+  }
+
+  const bestForced = forced[0] ?? null;
+  const bestPassingForced = forced.find((candidate) => candidate.crack.pass) ?? null;
+  const currentDropPct = pctDrop(currentStats.cost, losslessStats.cost);
+  const classification =
+    currentStats.cost >= losslessStats.cost && bestForced && bestForced.cost < losslessStats.cost
+      ? "blocked-no-auto-gain"
+      : bestForced && currentStats.cost < losslessStats.cost && bestForced.cost < currentStats.cost - Math.max(1, currentStats.cost * 0.05)
+        ? "auto-gain-but-forced-potential"
+        : currentStats.cost < losslessStats.cost
+          ? "auto-gain"
+          : "no-observed-geometry-potential";
+
+  return {
+    model: label,
+    ext: extname(modelPath).slice(1).toLowerCase(),
+    raw: rawStats,
+    lossless: losslessStats,
+    noApprox: noApproxStats,
+    current: currentStats,
+    currentDropPct: Number(currentDropPct.toFixed(1)),
+    forced,
+    sweep,
+    bestForced,
+    bestPassingForced,
+    classification,
+    animated,
+    timings: {
+      parseMs,
+      losslessMs: losslessRun.ms,
+      noApproxMs: noApproxRun.ms,
+      currentMs: currentRun.ms,
+      forcedMs: Number(forcedMs.toFixed(1)),
+      sweepMs: Number(sweepMs.toFixed(1)),
+      animatedMs,
+      totalMs: Number((performance.now() - started).toFixed(1)),
+    },
+  };
+}
+
+async function summarizeSingleModelAndExit() {
+  const singleModelPath = optStr("single-model");
+  if (!singleModelPath) return false;
+  const row = await summarizeModel(resolve(repoRoot, singleModelPath));
+  process.stdout.write(`${JSON.stringify(row)}\n`);
+  return true;
+}
+
+function summarizeModelInWorker(modelPath) {
+  if (MODEL_TIMEOUT_MS <= 0) return null;
+  const args = [
+    fileURLToPath(import.meta.url),
+    "--single-model",
+    modelPath,
+  ];
+  if (optStr("root")) args.push("--root", sourceRoot);
+  if (QUICK_MODE) args.push("--quick");
+  if (INCLUDE_SWEEP) args.push("--sweep");
+
+  const result = spawnSync(process.execPath, args, {
+    cwd: repoRoot,
+    encoding: "utf8",
+    maxBuffer: 64 * 1024 * 1024,
+    timeout: MODEL_TIMEOUT_MS,
+  });
+
+  if (result.error) {
+    if (result.error.code === "ETIMEDOUT") {
+      throw new Error(`timeout after ${MODEL_TIMEOUT_MS}ms`);
+    }
+    throw result.error;
+  }
+  if (result.status !== 0) {
+    const message = (result.stderr || result.stdout || `worker exited with status ${result.status}`).trim();
+    throw new Error(message);
+  }
+  return JSON.parse(result.stdout);
+}
+
+function summarizeRows(rows, errors, elapsedMs) {
+  const byClass = {};
+  for (const row of rows) byClass[row.classification] = (byClass[row.classification] ?? 0) + 1;
+  const total = (field) => rows.reduce((sum, row) => sum + row[field].count, 0);
+  return {
+    scanned: rows.length,
+    errors: errors.length,
+    elapsedMs: Number(elapsedMs.toFixed(1)),
+    byClass,
+    aggregate: {
+      raw: total("raw"),
+      lossless: total("lossless"),
+      current: total("current"),
+      bestForced: rows.reduce((sum, row) => sum + (row.bestForced?.count ?? row.current.count), 0),
+    },
+    blocked: rows
+      .filter((row) => row.classification === "blocked-no-auto-gain")
+      .sort((a, b) => (b.bestForced?.dropPct ?? 0) - (a.bestForced?.dropPct ?? 0))
+      .map((row) => ({
+        model: row.model,
+        lossless: row.lossless.count,
+        current: row.current.count,
+        bestForced: row.bestForced?.count,
+        forcedDropPct: row.bestForced?.dropPct,
+        crack: row.bestForced?.crack,
+      })),
+    forcedPotentialTop: rows
+      .filter((row) => row.classification === "auto-gain-but-forced-potential")
+      .sort((a, b) =>
+        ((b.bestForced?.dropPct ?? 0) - b.currentDropPct) -
+        ((a.bestForced?.dropPct ?? 0) - a.currentDropPct)
+      )
+      .slice(0, 20)
+      .map((row) => ({
+        model: row.model,
+        lossless: row.lossless.count,
+        current: row.current.count,
+        currentDropPct: row.currentDropPct,
+        bestForced: row.bestForced?.count,
+        forcedDropPct: row.bestForced?.dropPct,
+        crack: row.bestForced?.crack,
+      })),
+  };
+}
+
+function readCorpusJson(path) {
+  return JSON.parse(readFileSync(resolve(repoRoot, path), "utf8"));
+}
+
+function totalCost(rows, field) {
+  return Number(rows.reduce((sum, row) => sum + row[field].cost, 0).toFixed(2));
+}
+
+function totalTiming(rows, field) {
+  return Number(rows.reduce((sum, row) => sum + (row.timings?.[field] ?? 0), 0).toFixed(1));
+}
+
+function bestCandidate(row, field) {
+  const candidates = row[field] ?? [];
+  return candidates.length > 0 ? candidates[0] : null;
+}
+
+function printCorpusSummary(output) {
+  const { summary } = output;
+  console.log("lossy corpus benchmark");
+  console.log(`models=${summary.scanned} errors=${summary.errors} elapsedMs=${summary.elapsedMs}`);
+  console.log(`classes=${JSON.stringify(summary.byClass)}`);
+  console.log(`aggregate raw=${summary.aggregate.raw} lossless=${summary.aggregate.lossless} current=${summary.aggregate.current} forced=${summary.aggregate.bestForced}`);
+  if (output.rows?.length) {
+    console.log(`costs lossless=${totalCost(output.rows, "lossless")} current=${totalCost(output.rows, "current")}`);
+    if (output.rows.some((row) => row.timings)) {
+      console.log(`timings currentMs=${totalTiming(output.rows, "currentMs")} forcedMs=${totalTiming(output.rows, "forcedMs")} sweepMs=${totalTiming(output.rows, "sweepMs")}`);
+    }
+  }
+  const blocked = summary.blocked ?? [];
+  if (blocked.length === 0) return;
+  console.log("");
+  console.log("blocked no-auto-gain candidates");
+  for (const row of blocked) {
+    console.log(`${row.model}: lossless=${row.lossless} current=${row.current} forced=${row.bestForced} maxGap=${row.crack?.maxGap}/${row.crack?.maxGapLimit}`);
+  }
+}
+
+function opportunityRows(output, candidateField) {
+  return output.rows
+    .map((row) => {
+      const candidate = bestCandidate(row, candidateField);
+      const delta = candidate ? row.current.cost - candidate.cost : 0;
+      return { row, candidate, delta };
+    })
+    .filter((item) => item.candidate && item.delta > 1)
+    .sort((a, b) => b.delta - a.delta);
+}
+
+function failureReasonCounts(output) {
+  const counts = new Map();
+  for (const row of output.rows) {
+    for (const candidate of [...(row.forced ?? []), ...(row.sweep ?? [])]) {
+      if (candidate.crack.pass) continue;
+      const key = candidate.crack.failureReasons.join("+") || "unknown";
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+  }
+  return [...counts.entries()].sort((a, b) => b[1] - a[1]);
+}
+
+function printOpportunityReport(output, limit = PRINT_LIMIT) {
+  console.log("");
+  console.log("opportunity report");
+  const forced = opportunityRows(output, "forced");
+  const sweep = opportunityRows(output, "sweep");
+  const printRows = (title, rows) => {
+    if (rows.length === 0) return;
+    console.log("");
+    console.log(title);
+    for (const item of rows.slice(0, limit)) {
+      const { row, candidate, delta } = item;
+      console.log(`${row.model}: current=${row.current.cost} candidate=${candidate.cost} delta=${Number(delta.toFixed(2))} ${candidate.name} pass=${candidate.crack.pass} fail=${candidate.crack.failureReasons.join("+") || "-"}`);
+    }
+  };
+  printRows("forced potential", forced);
+  printRows("sweep potential", sweep);
+
+  const timingRows = [...output.rows]
+    .filter((row) => row.timings)
+    .sort((a, b) => (b.timings.currentMs ?? 0) - (a.timings.currentMs ?? 0));
+  if (timingRows.length > 0) {
+    console.log("");
+    console.log("slow current optimizer rows");
+    for (const row of timingRows.slice(0, limit)) {
+      console.log(`${row.model}: currentMs=${row.timings.currentMs} current=${row.current.count} lossless=${row.lossless.count}`);
+    }
+  }
+
+  const reasons = failureReasonCounts(output);
+  if (reasons.length > 0) {
+    console.log("");
+    console.log(`failed candidate reasons ${JSON.stringify(Object.fromEntries(reasons))}`);
+  }
+}
+
+function printCompareReport(current, baseline, limit = PRINT_LIMIT) {
+  const baselineRows = new Map(baseline.rows.map((row) => [row.model, row]));
+  const deltas = [];
+  for (const row of current.rows) {
+    const before = baselineRows.get(row.model);
+    if (!before) continue;
+    deltas.push({
+      model: row.model,
+      currentCostDelta: Number((row.current.cost - before.current.cost).toFixed(2)),
+      currentCountDelta: row.current.count - before.current.count,
+      currentMsDelta: row.timings?.currentMs !== undefined && before.timings?.currentMs !== undefined
+        ? Number((row.timings.currentMs - before.timings.currentMs).toFixed(1))
+        : null,
+      beforeClass: before.classification,
+      afterClass: row.classification,
+      beforeCost: before.current.cost,
+      afterCost: row.current.cost,
+    });
+  }
+  const totalCostDelta = Number(deltas.reduce((sum, row) => sum + row.currentCostDelta, 0).toFixed(2));
+  const totalCountDelta = deltas.reduce((sum, row) => sum + row.currentCountDelta, 0);
+  const timingDeltas = deltas.filter((row) => row.currentMsDelta !== null);
+  const totalMsDelta = Number(timingDeltas.reduce((sum, row) => sum + row.currentMsDelta, 0).toFixed(1));
+  console.log("");
+  console.log("compare report");
+  console.log(`matched=${deltas.length} currentCostDelta=${totalCostDelta} currentCountDelta=${totalCountDelta} currentMsDelta=${timingDeltas.length > 0 ? totalMsDelta : "n/a"}`);
+
+  const improved = [...deltas].filter((row) => row.currentCostDelta < 0).sort((a, b) => a.currentCostDelta - b.currentCostDelta);
+  const regressed = [...deltas].filter((row) => row.currentCostDelta > 0).sort((a, b) => b.currentCostDelta - a.currentCostDelta);
+  const slower = [...timingDeltas].filter((row) => row.currentMsDelta > 0).sort((a, b) => b.currentMsDelta - a.currentMsDelta);
+  const classChanges = deltas.filter((row) => row.beforeClass !== row.afterClass);
+  const printRows = (title, rows, format) => {
+    if (rows.length === 0) return;
+    console.log("");
+    console.log(title);
+    for (const row of rows.slice(0, limit)) console.log(format(row));
+  };
+  printRows("largest improvements", improved, (row) =>
+    `${row.model}: ${row.beforeCost}->${row.afterCost} delta=${row.currentCostDelta}`
+  );
+  printRows("largest regressions", regressed, (row) =>
+    `${row.model}: ${row.beforeCost}->${row.afterCost} delta=+${row.currentCostDelta}`
+  );
+  printRows("largest currentMs increases", slower, (row) =>
+    `${row.model}: currentMsDelta=+${row.currentMsDelta} costDelta=${row.currentCostDelta}`
+  );
+  printRows("classification changes", classChanges, (row) =>
+    `${row.model}: ${row.beforeClass}->${row.afterClass} costDelta=${row.currentCostDelta}`
+  );
+}
+
+async function runCorpus() {
+  const started = performance.now();
+  const rows = [];
+  const errors = [];
+  const files = selectedFiles();
+  let scanned = 0;
+  for (const file of files) {
+    scanned += 1;
+    try {
+      rows.push(summarizeModelInWorker(file) ?? await summarizeModel(file));
+    } catch (error) {
+      errors.push({
+        model: relative(sourceRoot, file),
+        error: error instanceof Error ? error.message : String(error),
+        ...(error instanceof Error && /^timeout after \d+ms$/.test(error.message)
+          ? { timeoutMs: MODEL_TIMEOUT_MS }
+          : {}),
+      });
+    }
+    if (PROGRESS_EVERY > 0 && (scanned % PROGRESS_EVERY === 0 || scanned === files.length)) {
+      const elapsedMs = Number((performance.now() - started).toFixed(1));
+      console.error(`lossy-corpus progress ${scanned}/${files.length} rows=${rows.length} errors=${errors.length} elapsedMs=${elapsedMs}`);
+    }
+  }
+
+  return {
+    summary: summarizeRows(rows, errors, performance.now() - started),
+    rows,
+    errors,
+    options: {
+      sweep: INCLUDE_SWEEP,
+      quick: QUICK_MODE,
+      models: optStr("models").trim() || null,
+      root: optStr("root") ? sourceRoot : null,
+      fileOffset: FILE_OFFSET,
+      fileLimit: FILE_LIMIT || null,
+      timeoutMs: MODEL_TIMEOUT_MS || null,
+    },
+  };
+}
+
+const fromJson = optStr("from-json");
+if (await summarizeSingleModelAndExit()) process.exit(0);
+const output = fromJson ? readCorpusJson(fromJson) : await runCorpus();
+
+printCorpusSummary(output);
+if (hasFlag("opportunities")) printOpportunityReport(output);
+
+const comparePath = optStr("compare");
+if (comparePath) printCompareReport(output, readCorpusJson(comparePath));
+
+const jsonPath = optStr("json");
+if (jsonPath && !fromJson) {
+  const outputPath = resolve(repoRoot, jsonPath);
+  mkdirSync(dirname(outputPath), { recursive: true });
+  writeFileSync(outputPath, `${JSON.stringify(output, null, 2)}\n`);
+  console.log(`wrote ${jsonPath}`);
+}

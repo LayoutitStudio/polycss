@@ -57,6 +57,9 @@ const DEFAULT_PLANE_EPSILON = 1e-3;
 const EPS = 1e-9;
 const LOCAL_ROUND = 1e6;
 const WORLD_ROUND = 1e6;
+// Highly fragmented scanline covers spend most time merging cells and usually
+// expand back past the source group; tiny groups can still collapse to one leaf.
+const MAX_LOCAL_CELL_GROUP_RATIO = 8;
 
 const sub = (a: Vec3, b: Vec3): Vec3 => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
 const add = (a: Vec3, b: Vec3): Vec3 => [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
@@ -583,6 +586,7 @@ function mergeLocalCells(cells: Vec2[][]): Vec2[][] {
     changed = false;
     for (let i = 0; i < polygons.length; i++) {
       for (let j = i + 1; j < polygons.length; j++) {
+        if (!localBBoxesCanTouch(bboxes[i], bboxes[j])) continue;
         const merged = unionConvexLocalPair(polygons[i], polygons[j], bboxes[i], bboxes[j]);
         if (!merged) continue;
         polygons[i] = merged;
@@ -685,6 +689,7 @@ function decomposeWithAxis(
   }
 
   if (localCells.length === 0) return null;
+  if (group.length > 2 && localCells.length > group.length * MAX_LOCAL_CELL_GROUP_RATIO) return null;
   const toWorld = localToWorldFactory(origin, xAxisProjected, yAxis);
   const cells = mergeLocalCells(localCells).map((local): Polygon => ({
     vertices: local.map(toWorld),

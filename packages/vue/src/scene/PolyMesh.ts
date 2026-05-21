@@ -215,6 +215,7 @@ export const PolyMesh = defineComponent({
     const atlasTextureLighting = computed<PolyTextureLightingMode>(
       () => props.textureLighting ?? sceneCtx?.value.textureLighting ?? "baked",
     );
+    const atlasStrategies = computed(() => sceneCtx?.value.strategies);
     const atlasDirectional = computed(() =>
       atlasTextureLighting.value === "dynamic" ? undefined : sceneCtx?.value.directionalLight,
     );
@@ -270,9 +271,9 @@ export const PolyMesh = defineComponent({
       );
     });
     const atlasTextureQuality = computed(() => props.textureQuality);
-    const textureAtlas = useTextureAtlas(textureAtlasPlans, atlasTextureLighting, atlasTextureQuality);
+    const textureAtlas = useTextureAtlas(textureAtlasPlans, atlasTextureLighting, atlasTextureQuality, atlasStrategies);
     const solidPaintDefaults = computed<SolidPaintDefaults>(() =>
-      atlasAutoRender ? getSolidPaintDefaults(textureAtlasPlans.value, atlasTextureLighting.value) : {},
+      atlasAutoRender ? getSolidPaintDefaults(textureAtlasPlans.value, atlasTextureLighting.value, atlasStrategies.value) : {},
     );
     const defaultPaintVars = computed(() => solidPaintVars(solidPaintDefaults.value));
 
@@ -371,6 +372,7 @@ export const PolyMesh = defineComponent({
             directionalLight: bakedDirectional.value,
             ambientLight: atlasAmbient.value,
             textureLighting: atlasTextureLighting.value,
+            strategies: atlasStrategies.value,
             colorFrame: ++stableTriangleColorFrame.value,
             colorSteps: 8,
             colorFreezeFrames: 12,
@@ -623,15 +625,17 @@ export const PolyMesh = defineComponent({
                 entry,
                 page: textureAtlas.pages.value[entry.pageIndex],
                 textureLighting: atlasTextureLighting.value,
+                solidPaintDefaults: solidPaintDefaults.value,
               });
             }
             const plan = textureAtlasPlans.value[index];
             if (!plan || plan.texture) return null;
-            return isSolidTrianglePlan(plan)
+            return textureAtlas.solidTrianglePrimitive.value && isSolidTrianglePlan(plan)
               ? renderTextureTrianglePoly({
                   entry: plan,
                   textureLighting: atlasTextureLighting.value,
                   solidPaintDefaults: solidPaintDefaults.value,
+                  solidTrianglePrimitive: textureAtlas.solidTrianglePrimitive.value,
                 })
               : renderTextureBorderShapePoly({
                   entry: plan,

@@ -2,15 +2,19 @@
  * Bundle bench renderer paths and helper entries into self-contained browser ESM
  * files that the perf-*.html pages can `import` directly:
  *
- *   bench/polycss.js          ← imperative API (createPolyScene + controls
- *                                + loadMesh) used by perf-vanilla.html
- *   bench/polycss-elements.js ← side-effect bundle that registers the
+ *   bench/.generated/polycss.js
+ *                              ← imperative API (createPolyScene + controls
+ *                                + loadMesh) used by vanilla bench pages
+ *   bench/.generated/polycss-elements.js
+ *                              ← side-effect bundle that registers the
  *                                custom elements; used by perf-html.html
- *   bench/polycss-render-stats.js
+ *   bench/.generated/polycss-render-stats.js
  *                              ← shared render stats helper used by perf-shared.mjs
- *   bench/polycss-react.js    ← React entry (bench/entries/react.tsx)
+ *   bench/.generated/polycss-react.js
+ *                              ← React entry (bench/entries/react.tsx)
  *                                bundled with React + ReactDOM + @layoutit/polycss-react
- *   bench/polycss-vue.js      ← Vue entry (bench/entries/vue.ts) bundled
+ *   bench/.generated/polycss-vue.js
+ *                              ← Vue entry (bench/entries/vue.ts) bundled
  *                                with Vue 3 + @layoutit/polycss-vue
  *
  * Why not reuse the published dists? The packages keep workspace-peer
@@ -22,11 +26,13 @@
  * Run: `node bench/build.mjs`  (or `pnpm bench:build`).
  */
 import { build } from "esbuild";
+import { mkdir } from "node:fs/promises";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, "..");
+const bundleDir = resolve(__dirname, ".generated");
 
 const ALIASES = {
   "@layoutit/polycss-core":     resolve(repoRoot, "packages/core/src/index.ts"),
@@ -64,36 +70,32 @@ const targets = [
   {
     label: "vanilla (createPolyScene + controls + loadMesh)",
     entry: resolve(repoRoot, "packages/polycss/src/index.ts"),
-    out: resolve(__dirname, "polycss.js"),
+    out: resolve(bundleDir, "polycss.js"),
   },
   {
     label: "elements (side-effect register)",
     entry: resolve(repoRoot, "packages/polycss/src/elements/index.ts"),
-    out: resolve(__dirname, "polycss-elements.js"),
+    out: resolve(bundleDir, "polycss-elements.js"),
   },
   {
     label: "render stats helper",
     entry: resolve(__dirname, "entries/renderStats.ts"),
-    out: resolve(__dirname, "polycss-render-stats.js"),
+    out: resolve(bundleDir, "polycss-render-stats.js"),
   },
   {
     label: "react entry",
     entry: resolve(__dirname, "entries/react.tsx"),
-    out: resolve(__dirname, "polycss-react.js"),
+    out: resolve(bundleDir, "polycss-react.js"),
   },
   {
     label: "vue entry",
     entry: resolve(__dirname, "entries/vue.ts"),
-    out: resolve(__dirname, "polycss-vue.js"),
-  },
-  {
-    label: "normalize (preprocessModelPolygons + paint helper)",
-    entry: resolve(__dirname, "entries/normalize.ts"),
-    out: resolve(__dirname, "polycss-normalize.js"),
+    out: resolve(bundleDir, "polycss-vue.js"),
   },
 ];
 
 const t0 = performance.now();
+await mkdir(bundleDir, { recursive: true });
 for (const t of targets) {
   process.stdout.write(`[bench/build] bundling ${t.label} … `);
   const start = performance.now();

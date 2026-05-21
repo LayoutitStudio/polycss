@@ -50,6 +50,7 @@ interface StableTriangleTransformCache {
   leafCount: number;
   filled: number;
   disabled: boolean;
+  canRefreshColor: boolean;
   lastAppliedFrameIndex: number;
 }
 
@@ -60,6 +61,7 @@ function createStableTriangleTransformCache(): StableTriangleTransformCache {
     leafCount: 0,
     filled: 0,
     disabled: false,
+    canRefreshColor: false,
     lastAppliedFrameIndex: -1,
   };
 }
@@ -69,11 +71,12 @@ function resetStableTriangleTransformCache(cache: StableTriangleTransformCache):
   cache.leaves = null;
   cache.leafCount = 0;
   cache.filled = 0;
+  cache.canRefreshColor = false;
   cache.lastAppliedFrameIndex = -1;
 }
 
-function directStableTriangleLeaves(handle: VanillaPolyMeshHandle): HTMLElement[] {
-  return Array.from(handle.element.querySelectorAll<HTMLElement>(":scope > u"));
+function directStableAnimationLeaves(handle: VanillaPolyMeshHandle): HTMLElement[] {
+  return Array.from(handle.element.querySelectorAll<HTMLElement>(":scope > u,:scope > s"));
 }
 
 function captureStableTriangleTransformFrame(
@@ -82,7 +85,7 @@ function captureStableTriangleTransformFrame(
   frameIndex: number,
 ): void {
   if (cache.disabled) return;
-  const leaves = directStableTriangleLeaves(handle);
+  const leaves = directStableAnimationLeaves(handle);
   const expectedCount = handle.polygons.length;
   if (
     expectedCount <= 0 ||
@@ -92,11 +95,16 @@ function captureStableTriangleTransformFrame(
     resetStableTriangleTransformCache(cache);
     return;
   }
-  if (cache.leafCount !== 0 && leaves.length !== cache.leafCount) {
+  const canRefreshColor = leaves.every((leaf) => leaf.tagName === "U");
+  if (
+    cache.leafCount !== 0 &&
+    (leaves.length !== cache.leafCount || cache.canRefreshColor !== canRefreshColor)
+  ) {
     resetStableTriangleTransformCache(cache);
   }
   cache.leaves = leaves;
   cache.leafCount = leaves.length;
+  cache.canRefreshColor = canRefreshColor;
   if (!cache.frames[frameIndex]) cache.filled += 1;
   cache.frames[frameIndex] = leaves.map((leaf) => ({
     transform: leaf.style.transform || "none",
@@ -120,18 +128,24 @@ function applyStableTriangleTransformFrame(
   ) {
     return true;
   }
-  const leaves = cache.leaves ?? directStableTriangleLeaves(handle);
+  const leaves = cache.leaves ?? directStableAnimationLeaves(handle);
   if (leaves.length !== frame.length) {
     resetStableTriangleTransformCache(cache);
     return false;
   }
+  const previousFrame = cache.lastAppliedFrameIndex >= 0
+    ? cache.frames[cache.lastAppliedFrameIndex]
+    : undefined;
   cache.leaves = leaves;
   cache.leafCount = leaves.length;
   for (let i = 0; i < leaves.length; i += 1) {
     const leaf = leaves[i];
     const next = frame[i];
-    leaf.style.transform = next.transform;
-    if (leaf.style.visibility !== next.visibility) {
+    const previous = previousFrame?.[i];
+    if (previous?.transform !== next.transform) {
+      leaf.style.transform = next.transform;
+    }
+    if (previous?.visibility !== next.visibility) {
       leaf.style.visibility = next.visibility;
     }
   }
@@ -593,6 +607,7 @@ export function VanillaScene({
           : -1;
         const shouldRefreshColor =
           canUseTransformCache &&
+          transformCache.canRefreshColor &&
           animationFrameCount % ANIMATION_STABLE_TRIANGLE_COLOR_FREEZE_FRAMES === 0;
         const samples = debugTarget.__polycssGalleryAnimationSamples;
         let sampleMs = 0;
@@ -685,8 +700,8 @@ export function VanillaScene({
     ambientLight,
   ]);
 
-  // Effect 2b — strategy toggles. Kept separate from Effect 2 because
-  // `setOptions({ strategies })` triggers a full mesh re-render in
+  // Effect 2b — render strategy toggles. Kept separate from Effect 2 because
+  // these options trigger a full mesh re-render in
   // createPolyScene; folding it into the camera/lighting effect would
   // re-render on every rotation/zoom tick.
   useEffect(() => {

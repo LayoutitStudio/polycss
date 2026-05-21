@@ -2,7 +2,7 @@ import { copyFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const source = resolve(repoRoot, "README.md");
 const targets = [
   "packages/core/README.md",

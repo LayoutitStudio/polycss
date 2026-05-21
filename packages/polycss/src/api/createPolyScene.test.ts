@@ -399,7 +399,7 @@ describe("createPolyScene", () => {
       expect(styleEl?.textContent).toContain("height: 64px;");
       expect(styleEl?.textContent).toContain("width: var(--polycss-atlas-size, 64px);");
       expect(styleEl?.textContent).toContain("height: var(--polycss-atlas-size, 64px);");
-      expect(styleEl?.textContent).toContain("border-width: 0 32px 64px 32px;");
+      expect(styleEl?.textContent).toContain("border-width: 0 16px 32px 16px;");
       expect(styleEl?.textContent).toContain("width: 0;");
       expect(styleEl?.textContent).toContain("height: 0;");
     });
