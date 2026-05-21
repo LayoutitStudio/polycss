@@ -368,7 +368,7 @@ export function computeSolidTrianglePlanFromCssPoints(
   const txCol0 = cvx + x0 * txXOffset + y0 * txYOffset;
   const txCol1 = cvy + x1 * txXOffset + y1 * txYOffset;
   const txCol2 = cvz + x2 * txXOffset + y2 * txYOffset;
-  const matrixDecimals = computeOptions.matrixDecimals ?? stableTriangleMatrixDecimals(internalOptions);
+  const matrixDecimals = computeOptions.matrixDecimals ?? stableTriangleMatrixDecimals(internalOptions.stableTriangleMatrixDecimals);
   const transformText = formatAffineMatrix3dTransformScalars(
     xCol0, xCol1, xCol2,
     yCol0, yCol1, yCol2,

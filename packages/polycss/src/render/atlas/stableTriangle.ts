@@ -283,7 +283,7 @@ export function updateStableTriangleElementsStreaming(
   const colorOnly = optimizeTriangleStyle && stableTriangleUpdateMode === "color-only";
   if (internalOptions.stableTriangleColorPolicy === "adaptive") return false;
   if (rendered.length !== polygons.length) return false;
-  const matrixDecimals = stableTriangleMatrixDecimals(internalOptions);
+  const matrixDecimals = stableTriangleMatrixDecimals(internalOptions.stableTriangleMatrixDecimals);
 
   for (let i = 0; i < rendered.length; i++) {
     const item = rendered[i];
@@ -370,7 +370,7 @@ export function captureStableTriangleTransformFrame(
       : "full");
   if (stableTriangleUpdateMode === "color-only") return false;
 
-  const matrixDecimals = stableTriangleMatrixDecimals(internalOptions);
+  const matrixDecimals = stableTriangleMatrixDecimals(internalOptions.stableTriangleMatrixDecimals);
   const colorState = stableTriangleColorState(internalOptions);
   const tile = options.tileSize ?? DEFAULT_TILE;
   const elev = options.layerElevation ?? tile;
@@ -460,7 +460,7 @@ export function renderPolygonsWithStableTriangles(
   if (polygons.some((polygon) => polygon.texture || polygon.vertices.length !== 3)) {
     return null;
   }
-  const matrixDecimals = stableTriangleMatrixDecimals(options as InternalRenderTextureAtlasOptions);
+  const matrixDecimals = stableTriangleMatrixDecimals((options as InternalRenderTextureAtlasOptions).stableTriangleMatrixDecimals);
   const rendered: RenderedPoly[] = [];
 
   for (let i = 0; i < polygons.length; i += 1) {
@@ -507,7 +507,7 @@ export function updatePolygonsWithStableTriangles(
       : "full");
   const colorOnly = optimizeTriangleStyle && stableTriangleUpdateMode === "color-only";
   const colorState = stableTriangleColorState(internalOptions);
-  const matrixDecimals = stableTriangleMatrixDecimals(internalOptions);
+  const matrixDecimals = stableTriangleMatrixDecimals(internalOptions.stableTriangleMatrixDecimals);
   if (
     updateStableTriangleElementsStreaming(
       rendered,

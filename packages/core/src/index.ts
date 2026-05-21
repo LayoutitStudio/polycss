@@ -315,3 +315,32 @@ export type {
   FilterAtlasPlansEnv,
   GetSolidPaintDefaultsEnv,
 } from "./atlas/strategy";
+export {
+  cssPoints,
+  computeSurfaceNormal,
+  isConvexPolygonPoints,
+  signedArea2D,
+  intersect2DLines,
+  intersect2DLinesRaw,
+  expandClipPoints,
+  offsetConvexPolygonPoints,
+  offsetTrianglePoints,
+  offsetStableTrianglePoints,
+  stableBasisFromPlan,
+  stableTriangleMatrixDecimals,
+} from "./atlas/solidTriangle";
+export {
+  polygonContainsPoint,
+  borderShapeBoundsFromPoints,
+  borderShapeGeometryForPlan,
+  simplifyCornerShapePoints,
+  cornerShapePointSides,
+  sharedCornerShapeSide,
+  cornerShapeDiagonal,
+  cornerShapeGeometryForPlan,
+  cssBorderShapeForGeometry,
+  cssBorderShapeForPlan,
+  formatBorderShapeEntryMatrix,
+  formatBorderShapeElementStyle,
+  formatCornerShapeElementStyle,
+} from "./atlas/borderShape";

@@ -379,7 +379,7 @@ export function updateStableTriangleFrame(
       : "full");
   if (stableTriangleUpdateMode === "color-only") return false;
 
-  const matrixDecimals = stableTriangleMatrixDecimals(internalOptions);
+  const matrixDecimals = stableTriangleMatrixDecimals(internalOptions.stableTriangleMatrixDecimals);
   const colorState = stableTriangleColorState(internalOptions);
   const tile = options.tileSize ?? DEFAULT_TILE;
   const elev = options.layerElevation ?? tile;
@@ -490,7 +490,7 @@ export function updatePolygonsWithStableTopology(
       : "full");
   const colorOnly = optimizeTriangleStyle && stableTriangleUpdateMode === "color-only";
   const colorState = stableTriangleColorState(internalOptions);
-  const matrixDecimals = stableTriangleMatrixDecimals(internalOptions);
+  const matrixDecimals = stableTriangleMatrixDecimals(internalOptions.stableTriangleMatrixDecimals);
   if (
     updateStableTriangleElementsStreaming(
       rendered,
