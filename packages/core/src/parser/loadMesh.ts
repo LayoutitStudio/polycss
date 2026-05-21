@@ -24,6 +24,7 @@ import { parseGltf } from "./parseGltf";
 import { parseMtl } from "./parseMtl";
 import { parseVox } from "./parseVox";
 import { bakeSolidTextureSamples, type SolidTextureSampleOptions } from "./solidTextureSamples";
+import { mergePolygons } from "../merge/mergePolygons";
 import { optimizeMeshPolygons } from "../merge/optimizePolygons";
 
 export interface LoadMeshOptions {
@@ -67,16 +68,17 @@ function withMeshResolution(result: ParseResult, options?: LoadMeshOptions): Par
   // need load-time latency dominated by the raw voxel source rather than a
   // second generic polygon optimizer pass with marginal fallback savings.
   if (result.voxelSource) return result;
-  const polygons = optimizeMeshPolygons(result.polygons, {
+  const optimized = optimizeMeshPolygons(result.polygons, {
     meshResolution: options?.meshResolution,
   });
-  // Always use the optimized polygon array. optimizeMeshPolygons runs
-  // mergePolygons internally so the result is the canonical merged form
-  // regardless of whether the count changed. Returning the original when
-  // counts match was wrong: same-count-but-different-content (e.g. two
-  // triangles merged into a quad that then got split differently) would
-  // silently pass unmerged polygons to callers that don't apply a second
-  // merge pass (React / Vue PolyMesh).
+  // Final canonicalising merge so every caller — vanilla scene.add(), React
+  // <PolyMesh>, Vue <PolyMesh>, custom-element <poly-mesh> — receives the
+  // same merged polygon list. optimizeMeshPolygons runs mergePolygons on its
+  // baseline, but lossy candidates (rect cover, approximate merge, color
+  // quantize) can pick a different polygon set that still has merge-eligible
+  // pairs; running mergePolygons one more time closes those without
+  // affecting already-canonical baselines (idempotent).
+  const polygons = mergePolygons(optimized);
   if (polygons === result.polygons) return result;
   return { ...result, polygons };
 }
