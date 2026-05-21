@@ -444,7 +444,7 @@ function solidTriangleStyle(
     yAxis = [yAxisRaw[0] / nextHeight, yAxisRaw[1] / nextHeight, yAxisRaw[2] / nextHeight];
   }
 
-  const SOLID_TRIANGLE_CANONICAL_SIZE = 64;
+  const SOLID_TRIANGLE_CANONICAL_SIZE = 32;
   const left = Math.max(0, Math.min(baseLength, apexX));
   const right = Math.max(0, baseLength - left);
   const expanded = offsetConvexPolygonPoints([left, 0, 0, height, left + right, height], SOLID_TRIANGLE_BLEED);
@@ -719,7 +719,7 @@ function computeStableTriangleDomStyle(
     return retryWithoutBasis();
   }
 
-  const SOLID_TRIANGLE_CANONICAL_SIZE = 64;
+  const SOLID_TRIANGLE_CANONICAL_SIZE = 32;
   const invCanonicalSize = 1 / SOLID_TRIANGLE_CANONICAL_SIZE;
   const baseWidthPx = leftPx + rightPx;
   const xScale = baseWidthPx * invCanonicalSize;
