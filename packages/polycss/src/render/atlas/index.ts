@@ -14,11 +14,11 @@ export type {
   RenderTextureAtlasResult,
   RenderTextureAtlasAsyncResult,
   ComputeTextureAtlasPlanOptions,
-} from "./atlas/index.ts";
+} from "./types";
+export { packTextureAtlasPlansWithScale } from "./packing";
+export { buildTextureEdgeRepairSets } from "./edgeRepair";
+export { buildAtlasPages } from "./rasterise";
 export {
-  packTextureAtlasPlansWithScale,
-  buildTextureEdgeRepairSets,
-  buildAtlasPages,
   isFullRectSolid,
   isSolidTrianglePlan,
   isProjectiveQuadPlan,
@@ -26,17 +26,22 @@ export {
   isBorderShapeSupported,
   isSolidTriangleSupported,
   filterAtlasPlans,
+} from "./strategy";
+export {
   getSolidPaintDefaults,
   renderPolygonsWithTextureAtlas,
   renderPolygonsWithTextureAtlasAsync,
   updateStableTriangleFrame,
   updatePolygonsWithStableTopology,
-  computeTextureAtlasPlanPublic,
+} from "./renderPolygons";
+export { computeTextureAtlasPlanPublic } from "./plan";
+export {
   formatMatrix3d,
   formatCssLengthPx,
   formatSolidQuadEntryMatrix,
-  formatBorderShapeEntryMatrix,
-  cssBorderShapeForPlan,
+} from "./matrix";
+export { formatBorderShapeEntryMatrix, cssBorderShapeForPlan } from "./borderShape";
+export {
   renderPolygonsWithStableTriangles,
   updatePolygonsWithStableTriangles,
-} from "./atlas/index";
+} from "./stableTriangle";
