@@ -285,3 +285,18 @@ export {
   formatSolidQuadEntryMatrix,
 } from "./atlas/matrix";
 export { buildTextureEdgeRepairSets } from "./atlas/edgeRepair";
+export {
+  cachedParsePureColor,
+  parseHex,
+  rgbKey,
+  parseAlpha,
+  rgbToHex,
+  textureTintFactors,
+  tintToCss,
+  shadePolygon,
+  quantizeCssColor,
+  rgbEqual,
+  stepRgbToward,
+  rgbToCss,
+  colorErrorScore,
+} from "./atlas/paintDefaults";
