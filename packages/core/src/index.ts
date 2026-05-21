@@ -251,3 +251,4 @@ export {
   formatCssLengthPx,
   formatSolidQuadEntryMatrix,
 } from "./atlas/matrix";
+export { buildTextureEdgeRepairSets } from "./atlas/edgeRepair";
