@@ -991,7 +991,11 @@ export function TextureProjectiveSolidPoly({
   const base = parseHex(entry.polygon.color ?? "#cccccc");
   const useDefaultDynamicColor = dynamic && rgbKey(base) === solidPaintDefaults?.dynamicColorKey;
   const style: CSSProperties = {
-    transform: formatMatrix3d(entry.projectiveMatrix),
+    // Emit projectiveMatrix verbatim — it's already formatted with 6-decimal
+    // precision by computeTextureAtlasPlan. Re-rounding via formatMatrix3d
+    // would drop it to 3 decimals and leave visible seam gaps between
+    // adjacent projective quads at zoom-out (matches vanilla scene.add).
+    transform: `matrix3d(${entry.projectiveMatrix})`,
     color: dynamic || entry.shadedColor === solidPaintDefaults?.paintColor
       ? undefined
       : entry.shadedColor,
