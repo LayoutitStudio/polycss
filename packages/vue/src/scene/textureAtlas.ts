@@ -1000,10 +1000,18 @@ export function renderTextureAtlasPoly({
   const style: CSSProperties = {
     transform: formatMatrix3d(entry.atlasMatrix),
     "--polycss-atlas-size": `${atlasCanonicalSize}px`,
-    background,
-    backgroundImage: dynamic && page?.url ? `url(${page.url})` : undefined,
-    backgroundPosition: dynamic ? atlasPosition : undefined,
-    backgroundSize: dynamic ? atlasSize : undefined,
+    // Vue note: setting `background` shorthand alongside `backgroundImage:
+    // undefined` (or the other longhand undefined values) makes Vue clear
+    // the longhand pieces of the just-applied shorthand, leaving only
+    // `no-repeat` and dropping the image URL. Branch instead so only the
+    // properties relevant to the current mode get assigned.
+    ...(dynamic
+      ? {
+          backgroundImage: page?.url ? `url(${page.url})` : undefined,
+          backgroundPosition: atlasPosition,
+          backgroundSize: atlasSize,
+        }
+      : { background }),
     ...(dynamic
       ? {
           "--pnx": entry.normal[0].toFixed(4),
