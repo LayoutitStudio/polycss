@@ -1,6 +1,6 @@
 <template>
   <div class="scene-host">
-    <PolyCamera :rot-x="65" :rot-y="45">
+    <PolyCamera :rot-x="65" :rot-y="45" :zoom="0.3">
       <PolyOrbitControls :animate="{ speed: 0.3 }" />
       <PolyScene>
         <PolyIcosahedron :size="100" color="#ff6644" />

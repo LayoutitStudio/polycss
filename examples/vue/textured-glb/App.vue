@@ -1,6 +1,6 @@
 <template>
   <div class="scene-host">
-    <PolyPerspectiveCamera :rot-x="65" :rot-y="45">
+    <PolyPerspectiveCamera :rot-x="65" :rot-y="45" :zoom="0.3">
       <PolyOrbitControls />
       <PolyScene>
         <PolyMesh

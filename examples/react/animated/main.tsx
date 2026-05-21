@@ -51,7 +51,7 @@ function AnimatedScene() {
 
 function App() {
   return (
-    <PolyPerspectiveCamera rotX={65} rotY={45} style={{ width: "100%", height: "100vh" }}>
+    <PolyPerspectiveCamera rotX={65} rotY={45} zoom={0.3} style={{ width: "100%", height: "100vh" }}>
       <PolyOrbitControls />
       <PolyScene>
         <AnimatedScene />

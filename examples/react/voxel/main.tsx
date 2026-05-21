@@ -8,7 +8,7 @@ import {
 
 function App() {
   return (
-    <PolyCamera rotX={65} rotY={45} style={{ width: "100%", height: "100vh" }}>
+    <PolyCamera rotX={65} rotY={45} zoom={0.3} style={{ width: "100%", height: "100vh" }}>
       <PolyOrbitControls />
       <PolyScene>
         <PolyMesh src="https://polycss.com/gallery/vox/apple.vox" autoCenter />
