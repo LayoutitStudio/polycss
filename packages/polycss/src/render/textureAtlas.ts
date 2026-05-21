@@ -363,6 +363,12 @@ function loadTextureImage(url: string): Promise<HTMLImageElement> {
     p = new Promise<HTMLImageElement>((resolve, reject) => {
       const img = new Image();
       img.decoding = "async";
+      // Request CORS so cross-origin textures can be drawn to the atlas canvas
+      // without tainting it (atlas rasterisation reads pixels via toBlob /
+      // getImageData). Same-origin loads ignore the attribute; cross-origin
+      // servers need `Access-Control-Allow-Origin` set, which is standard for
+      // public CDNs like esm.sh / polycss.com.
+      img.crossOrigin = "anonymous";
       img.onload = () => resolve(img);
       img.onerror = () => reject(new Error(`texture load failed: ${url}`));
       img.src = url;
