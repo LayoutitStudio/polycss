@@ -226,3 +226,28 @@ export {
   PROJECTIVE_QUAD_MAX_WEIGHT_RATIO,
   PROJECTIVE_QUAD_BLEED,
 } from "./atlas/constants";
+export type {
+  RGB,
+  RGBFactors,
+  UvAffine,
+  UvSampleRect,
+  TextureTrianglePlan,
+  TextureAtlasPlan,
+  BorderShapeBounds,
+} from "./atlas/types";
+export {
+  roundDecimal,
+  formatCssLength,
+  formatMatrix3dValues,
+  formatAffineMatrix3dColumns,
+  formatAffineMatrix3dScalars,
+  formatAffineMatrix3dTransformScalars,
+  formatScaledMatrixFromPlan,
+  formatBorderShapeMatrix,
+  formatSolidQuadMatrix,
+  formatAtlasMatrix,
+  formatPercent,
+  formatMatrix3d,
+  formatCssLengthPx,
+  formatSolidQuadEntryMatrix,
+} from "./atlas/matrix";
