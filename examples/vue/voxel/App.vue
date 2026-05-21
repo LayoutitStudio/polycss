@@ -1,6 +1,6 @@
 <template>
   <div class="scene-host">
-    <PolyCamera :rot-x="65" :rot-y="45" :zoom="0.3">
+    <PolyCamera :rot-x="65" :rot-y="45" :zoom="0.1">
       <PolyOrbitControls />
       <PolyScene>
         <PolyMesh src="https://polycss.com/gallery/vox/apple.vox" :auto-center="true" />

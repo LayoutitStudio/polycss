@@ -6,7 +6,7 @@ import {
 } from "@layoutit/polycss";
 
 const host = document.getElementById("host")!;
-const camera = createPolyPerspectiveCamera({ rotX: 65, rotY: 45, zoom: 0.3 });
+const camera = createPolyPerspectiveCamera({ rotX: 65, rotY: 45, zoom: 0.1 });
 const scene = createPolyScene(host, { camera, autoCenter: true });
 
 createPolyOrbitControls(scene);
