@@ -38,6 +38,7 @@
     "access": "public"
   },
   "dependencies": {
+    "@layoutit/polycss": "workspace:^",
     "@layoutit/polycss-core": "workspace:^"
   },
   "peerDependencies": {
