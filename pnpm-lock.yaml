@@ -145,6 +145,9 @@ importers:
 
   packages/react:
     dependencies:
+      '@layoutit/polycss':
+        specifier: workspace:^
+        version: link:../polycss
       '@layoutit/polycss-core':
         specifier: workspace:^
         version: link:../core
@@ -179,6 +182,9 @@ importers:
 
   packages/vue:
     dependencies:
+      '@layoutit/polycss':
+        specifier: workspace:^
+        version: link:../polycss
       '@layoutit/polycss-core':
         specifier: workspace:^
         version: link:../core
