@@ -43,7 +43,7 @@ import {
   renderTextureProjectiveSolidPoly,
   renderTextureTrianglePoly,
   useTextureAtlas,
-} from "./textureAtlas";
+} from "./atlas";
 
 export interface PolySceneProps {
   polygons?: Polygon[];

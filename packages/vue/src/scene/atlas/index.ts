@@ -1,3 +1,20 @@
+// Re-exports from @layoutit/polycss-core needed by callers of this barrel
+export type {
+  TextureAtlasPlan,
+  PackedTextureAtlasEntry,
+  TextureAtlasPage,
+  SolidPaintDefaults,
+  PolyRenderStrategy,
+  PolyRenderStrategiesOption,
+  TextureQuality,
+} from "@layoutit/polycss-core";
+export {
+  isSolidTrianglePlan,
+  isProjectiveQuadPlan,
+  buildTextureEdgeRepairSets,
+  cssBorderShapeForPlan,
+} from "@layoutit/polycss-core";
+
 // Detection
 export {
   borderShapeSupported,
