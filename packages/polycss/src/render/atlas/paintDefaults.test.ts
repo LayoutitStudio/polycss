@@ -7,11 +7,8 @@
  */
 import { describe, it, expect } from "vitest";
 import type { Polygon } from "@layoutit/polycss-core";
-import {
-  getSolidPaintDefaults,
-  getSolidPaintDefaultsFromPlans,
-  computeTextureAtlasPlanPublic,
-} from "../textureAtlas";
+import { computeTextureAtlasPlanPublic } from "@layoutit/polycss-core";
+import { getSolidPaintDefaults, getSolidPaintDefaultsFromPlans } from "./strategy";
 
 // ---------------------------------------------------------------------------
 // Helpers

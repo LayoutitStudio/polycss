@@ -15,8 +15,8 @@ import type { Polygon } from "@layoutit/polycss-core";
 import {
   renderPolygonsWithStableTriangles,
   updatePolygonsWithStableTriangles,
-  updateStableTriangleFrame,
-} from "../textureAtlas";
+} from "./stableTriangle";
+import { updateStableTriangleFrame } from "./renderPolygons";
 
 // ---------------------------------------------------------------------------
 // Helpers

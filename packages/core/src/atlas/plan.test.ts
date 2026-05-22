@@ -5,8 +5,8 @@
  * downstream rely on — not the internal call graph.
  */
 import { describe, it, expect } from "vitest";
-import type { Polygon } from "@layoutit/polycss-core";
-import { computeTextureAtlasPlanPublic } from "../textureAtlas";
+import type { Polygon } from "../types";
+import { computeTextureAtlasPlanPublic } from "./plan";
 
 // ---------------------------------------------------------------------------
 // Helpers / shared fixtures

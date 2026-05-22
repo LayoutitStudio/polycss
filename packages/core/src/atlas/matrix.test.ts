@@ -9,14 +9,14 @@
  * hit repeatedly (primitive size mismatch, matrix double-wrap).
  */
 import { describe, it, expect } from "vitest";
-import type { Polygon } from "@layoutit/polycss-core";
+import type { Polygon } from "../types";
 import {
   formatMatrix3d,
   formatCssLengthPx,
   formatSolidQuadEntryMatrix,
-  formatBorderShapeEntryMatrix,
-  computeTextureAtlasPlanPublic,
-} from "../textureAtlas";
+} from "./matrix";
+import { formatBorderShapeEntryMatrix } from "./borderShape";
+import { computeTextureAtlasPlanPublic } from "./plan";
 
 // ---------------------------------------------------------------------------
 // formatMatrix3d

@@ -10,10 +10,8 @@
  */
 import { describe, it, expect } from "vitest";
 import type { Polygon } from "@layoutit/polycss-core";
-import {
-  renderPolygonsWithStableTriangles,
-  renderPolygonsWithTextureAtlas,
-} from "../textureAtlas";
+import { renderPolygonsWithStableTriangles } from "./stableTriangle";
+import { renderPolygonsWithTextureAtlas } from "./renderPolygons";
 
 // ---------------------------------------------------------------------------
 // Helpers

@@ -6,11 +6,8 @@
  */
 import { describe, it, expect } from "vitest";
 import type { Polygon } from "@layoutit/polycss-core";
-import {
-  packTextureAtlasPlansWithScale,
-  computeTextureAtlasPlanPublic,
-  buildTextureEdgeRepairSets,
-} from "../textureAtlas";
+import { computeTextureAtlasPlanPublic, buildTextureEdgeRepairSets } from "@layoutit/polycss-core";
+import { packTextureAtlasPlansWithScale } from "./packing";
 
 // ---------------------------------------------------------------------------
 // Helpers

@@ -10,12 +10,12 @@
  * invariants that define the <i> strategy rendering contract.
  */
 import { describe, it, expect } from "vitest";
-import type { Polygon } from "@layoutit/polycss-core";
+import type { Polygon } from "../types";
 import {
   cssBorderShapeForPlan,
-  computeTextureAtlasPlanPublic,
   formatBorderShapeEntryMatrix,
-} from "../textureAtlas";
+} from "./borderShape";
+import { computeTextureAtlasPlanPublic } from "./plan";
 
 // ---------------------------------------------------------------------------
 // Helpers

@@ -20,9 +20,9 @@ import {
   isFullRectSolid,
   isProjectiveQuadPlan,
   isSolidTrianglePlan,
-  computeTextureAtlasPlanPublic,
-  renderPolygonsWithTextureAtlas,
-} from "../textureAtlas";
+} from "./strategy";
+import { computeTextureAtlasPlanPublic } from "@layoutit/polycss-core";
+import { renderPolygonsWithTextureAtlas } from "./renderPolygons";
 
 // ---------------------------------------------------------------------------
 // Helpers
