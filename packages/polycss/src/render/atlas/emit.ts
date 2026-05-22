@@ -3,7 +3,6 @@ import type { Vec3 } from "@layoutit/polycss-core";
 import type {
   TextureAtlasPlan,
   PackedTextureAtlasEntry,
-  SolidTrianglePlan,
   SolidTriangleElement,
   SolidPaintDefaults,
   TextureAtlasPage,
