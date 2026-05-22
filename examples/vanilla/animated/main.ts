@@ -10,7 +10,7 @@ const host = document.getElementById("host")!;
 const camera = createPolyPerspectiveCamera({ rotX: 65, rotY: 45, zoom: 0.1 });
 const scene = createPolyScene(host, { camera, autoCenter: true });
 
-createPolyOrbitControls(scene);
+createPolyOrbitControls(scene, { animate: { speed: 0.3 } });
 
 loadMesh("https://polycss.com/gallery/glb/AnimatedWizard.glb").then((result) => {
   const mesh = scene.add(result, { merge: false, stableDom: true });

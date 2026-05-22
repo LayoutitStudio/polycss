@@ -1,7 +1,7 @@
 <template>
   <div class="scene-host">
     <PolyCamera :rot-x="65" :rot-y="45" :zoom="0.1">
-      <PolyOrbitControls />
+      <PolyOrbitControls :animate="{ speed: 0.3 }" />
       <PolyScene>
         <PolyBox  :size="80" color="#4ecdc4" :position="[-120, 0, 0]" />
         <PolyTorus color="#ff6644" :position="[0, 0, 0]" />

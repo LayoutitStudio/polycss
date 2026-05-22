@@ -1,7 +1,7 @@
 <template>
   <div class="scene-host">
     <PolyPerspectiveCamera :rot-x="65" :rot-y="45" :zoom="0.1">
-      <PolyOrbitControls />
+      <PolyOrbitControls :animate="{ speed: 0.3 }" />
       <PolyScene>
         <PolyMesh
           v-if="parseResult"
