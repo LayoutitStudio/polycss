@@ -24,6 +24,12 @@ interface EdgeRecord {
   key: string;
   a: Vec3;
   b: Vec3;
+  minX: number;
+  minY: number;
+  minZ: number;
+  maxX: number;
+  maxY: number;
+  maxZ: number;
   length: number;
   dir: Vec3;
   normal: Vec3;
@@ -503,6 +509,12 @@ function buildEdgeRecords(
         key: edgeKey(a, b),
         a,
         b,
+        minX: Math.min(a[0], b[0]),
+        minY: Math.min(a[1], b[1]),
+        minZ: Math.min(a[2], b[2]),
+        maxX: Math.max(a[0], b[0]),
+        maxY: Math.max(a[1], b[1]),
+        maxZ: Math.max(a[2], b[2]),
         length: edgeLength,
         dir,
         normal,
@@ -673,17 +685,30 @@ function buildNearSeamEdgeAmounts(
     }
   }
 
-  for (const record of records) {
-    const seen = new Set<number>();
-    for (const queryKey of segmentCellKeys(record, cellSize, maxGap)) {
-      const bucket = cells.get(queryKey);
-      if (!bucket) continue;
-      for (const candidate of bucket) {
-        if (seen.has(candidate.index)) continue;
-        seen.add(candidate.index);
-        if (candidate.index <= record.index) continue;
+  const exactSharedKeys = new Set<string>();
+  for (const [key, owners] of edgeOwners) {
+    if (owners.length > 1) exactSharedKeys.add(key);
+  }
+
+  const seenPairs = new Set<number>();
+  const recordCount = records.length;
+  for (const bucket of cells.values()) {
+    for (let i = 0; i + 1 < bucket.length; i += 1) {
+      for (let j = i + 1; j < bucket.length; j += 1) {
+        const first = bucket[i];
+        const second = bucket[j];
+        const record = first.index < second.index ? first : second;
+        const candidate = first.index < second.index ? second : first;
         if (candidate.polygon === record.polygon) continue;
-        if (record.key === candidate.key && (edgeOwners.get(record.key)?.length ?? 0) > 1) continue;
+        if (record.key === candidate.key && exactSharedKeys.has(record.key)) continue;
+        if (!candidates && !compatibleRepairMaterials(record, candidate)) continue;
+        if (!edgeBoundsCouldOverlap(record, candidate, maxGap)) continue;
+        if (Math.abs(dot(record.dir, candidate.dir)) < MIN_PARALLEL_DOT) continue;
+
+        const pairKey = record.index * recordCount + candidate.index;
+        if (seenPairs.has(pairKey)) continue;
+        seenPairs.add(pairKey);
+
         const info = nearSeamInfo(record, candidate, maxGap);
         if (!info) continue;
         const kind = classifyCandidate(record, candidate);
@@ -728,6 +753,15 @@ function buildNearSeamEdgeAmounts(
       }
     }
   }
+}
+
+function edgeBoundsCouldOverlap(a: EdgeRecord, b: EdgeRecord, maxGap: number): boolean {
+  return a.minX <= b.maxX + maxGap &&
+    b.minX <= a.maxX + maxGap &&
+    a.minY <= b.maxY + maxGap &&
+    b.minY <= a.maxY + maxGap &&
+    a.minZ <= b.maxZ + maxGap &&
+    b.minZ <= a.maxZ + maxGap;
 }
 
 function cellCoords(point: Vec3, cellSize: number): [number, number, number] {
