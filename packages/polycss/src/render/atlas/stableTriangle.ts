@@ -8,14 +8,16 @@ import {
 import type {
   SolidTrianglePlan,
   SolidTriangleColorPlan,
-  SolidTriangleElement,
+  SolidTriangleFrame,
+  SolidTrianglePrimitive,
   StableTriangleColorState,
+} from "@layoutit/polycss-core";
+import type {
+  SolidTriangleElement,
   InternalRenderTextureAtlasOptions,
   RenderTextureAtlasOptions,
   RenderedPoly,
   RenderTextureAtlasResult,
-  SolidTriangleFrame,
-  SolidTrianglePrimitive,
 } from "./types";
 import {
   rgbEqual,

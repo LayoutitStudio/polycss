@@ -5,50 +5,6 @@ import type {
   PolyTextureLightingMode,
 } from "@layoutit/polycss-core";
 
-// Pure types re-exported from core — no DOM dependency.
-export type {
-  TextureQuality,
-  PolyRenderStrategy,
-  SolidTrianglePrimitive,
-  PolyRenderStrategiesOption,
-  RGB,
-  RGBFactors,
-  UvAffine,
-  UvSampleRect,
-  TextureAtlasPlan,
-  TextureTrianglePlan,
-  PackedTextureAtlasEntry,
-  PackedPage,
-  PackingShelf,
-  PackingPage,
-  PackedAtlas,
-  SolidTriangleBasis,
-  SolidTriangleColorPlan,
-  SolidTrianglePlan,
-  SolidTriangleComputeOptions,
-  StableTriangleColorState,
-  SolidTriangleFrame,
-  SolidPaintDefaults,
-  TextureAtlasPage,
-  RectBrush,
-  LocalBasis,
-  BasisOptions,
-  BasisHint,
-  PolygonBasisInfo,
-  ProjectiveQuadGuardSettings,
-  ProjectiveQuadGuardOverrides,
-  ProjectiveQuadGuardGlobal,
-  ProjectiveQuadCoefficients,
-  StablePlanBasis,
-  ComputeTextureAtlasPlanOptions,
-  BorderShapeBounds,
-  BorderShapeGeometry,
-  CornerShapeCorner,
-  CornerShapeSide,
-  CornerShapeRadius,
-  CornerShapeGeometry,
-} from "@layoutit/polycss-core";
-
 export interface RenderTextureAtlasOptions {
   doc?: Document;
   tileSize?: number;
@@ -109,3 +65,4 @@ export interface RenderTextureAtlasResult {
 export interface RenderTextureAtlasAsyncResult extends RenderTextureAtlasResult {
   solidPaintDefaults: import("@layoutit/polycss-core").SolidPaintDefaults;
 }
+

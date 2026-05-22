@@ -9,11 +9,13 @@ export type {
   SolidTriangleFrame,
   SolidPaintDefaults,
   TextureAtlasPage,
+  ComputeTextureAtlasPlanOptions,
+} from "@layoutit/polycss-core";
+export type {
   RenderTextureAtlasOptions,
   RenderedPoly,
   RenderTextureAtlasResult,
   RenderTextureAtlasAsyncResult,
-  ComputeTextureAtlasPlanOptions,
 } from "./types";
 export { packTextureAtlasPlansWithScale } from "./packing";
 export { buildTextureEdgeRepairSets } from "@layoutit/polycss-core";

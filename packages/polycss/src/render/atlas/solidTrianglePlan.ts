@@ -6,8 +6,8 @@ import {
 import type {
   SolidTrianglePlan,
   SolidTriangleComputeOptions,
-  RenderTextureAtlasOptions,
-} from "./types";
+} from "@layoutit/polycss-core";
+import type { RenderTextureAtlasOptions } from "./types";
 import { resolveSolidTrianglePrimitive } from "./strategy";
 
 /**

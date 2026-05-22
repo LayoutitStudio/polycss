@@ -16,7 +16,7 @@ import type {
   PolyRenderStrategiesOption,
   SolidPaintDefaults,
   RGB,
-} from "./types";
+} from "@layoutit/polycss-core";
 import { parseHex, rgbKey } from "@layoutit/polycss-core";
 import {
   isFullRectBasis,

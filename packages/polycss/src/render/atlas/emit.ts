@@ -3,12 +3,14 @@ import type { Vec3 } from "@layoutit/polycss-core";
 import type {
   TextureAtlasPlan,
   PackedTextureAtlasEntry,
-  SolidTriangleElement,
   SolidPaintDefaults,
   TextureAtlasPage,
   CornerShapeGeometry,
-  RenderTextureAtlasOptions,
   ProjectiveQuadGuardSettings,
+} from "@layoutit/polycss-core";
+import type {
+  SolidTriangleElement,
+  RenderTextureAtlasOptions,
 } from "./types";
 import { formatCssLength, formatMatrix3dValues, formatSolidQuadMatrix } from "@layoutit/polycss-core";
 import { shadePolygon } from "@layoutit/polycss-core";

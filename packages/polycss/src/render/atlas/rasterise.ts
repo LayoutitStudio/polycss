@@ -11,7 +11,7 @@ import type {
   TextureAtlasPage,
   UvSampleRect,
   RGBFactors,
-} from "./types";
+} from "@layoutit/polycss-core";
 import { tintToCss } from "@layoutit/polycss-core";
 import { expandClipPoints } from "@layoutit/polycss-core";
 import { BASIS_EPS } from "@layoutit/polycss-core";

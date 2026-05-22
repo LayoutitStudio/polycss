@@ -1,17 +1,19 @@
 import type { Polygon } from "@layoutit/polycss-core";
 import type {
   TextureAtlasPlan,
+  SolidPaintDefaults,
+  SolidTrianglePlan,
+  SolidTriangleColorPlan,
+  SolidTriangleFrame,
+  CornerShapeGeometry,
+} from "@layoutit/polycss-core";
+import type {
   RenderTextureAtlasOptions,
   InternalRenderTextureAtlasOptions,
   RenderedPoly,
   RenderTextureAtlasResult,
   RenderTextureAtlasAsyncResult,
-  SolidPaintDefaults,
-  SolidTrianglePlan,
-  SolidTriangleColorPlan,
-  SolidTriangleFrame,
   SolidTriangleElement,
-  CornerShapeGeometry,
 } from "./types";
 import {
   ASYNC_RENDER_BUDGET_MS,

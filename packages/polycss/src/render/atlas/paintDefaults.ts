@@ -6,7 +6,7 @@ import type { PolyTextureLightingMode } from "@layoutit/polycss-core";
 import type {
   TextureAtlasPlan,
   SolidPaintDefaults,
-} from "./types";
+} from "@layoutit/polycss-core";
 
 export function setInlineStyleProperty(el: HTMLElement, property: string, value: string): void {
   const current = el.getAttribute("style") ?? "";
