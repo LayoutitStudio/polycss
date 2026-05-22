@@ -8,23 +8,6 @@ import type {
   SolidPaintDefaults,
 } from "./types";
 
-// Pure math functions re-exported from core — no DOM dependency.
-export {
-  cachedParsePureColor,
-  parseHex,
-  rgbKey,
-  parseAlpha,
-  rgbToHex,
-  textureTintFactors,
-  tintToCss,
-  shadePolygon,
-  quantizeCssColor,
-  rgbEqual,
-  stepRgbToward,
-  rgbToCss,
-  colorErrorScore,
-} from "@layoutit/polycss-core";
-
 export function setInlineStyleProperty(el: HTMLElement, property: string, value: string): void {
   const current = el.getAttribute("style") ?? "";
   const declaration = `${property}:${value}`;

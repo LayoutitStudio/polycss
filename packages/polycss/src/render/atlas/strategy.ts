@@ -17,7 +17,7 @@ import type {
   SolidPaintDefaults,
   RGB,
 } from "./types";
-import { parseHex, rgbKey } from "./paintDefaults";
+import { parseHex, rgbKey } from "@layoutit/polycss-core";
 import {
   isFullRectBasis,
   computeTextureAtlasPlan,

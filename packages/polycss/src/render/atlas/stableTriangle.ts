@@ -22,7 +22,7 @@ import {
   stepRgbToward,
   rgbToCss,
   colorErrorScore,
-} from "./paintDefaults";
+} from "@layoutit/polycss-core";
 import { computeSolidTriangleColorPlan } from "@layoutit/polycss-core";
 import {
   computeSolidTrianglePlan,

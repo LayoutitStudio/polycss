@@ -12,11 +12,11 @@ import type {
   ProjectiveQuadGuardSettings,
 } from "./types";
 import { formatCssLength, formatMatrix3dValues, formatSolidQuadMatrix } from "@layoutit/polycss-core";
+import { shadePolygon } from "@layoutit/polycss-core";
 import {
   setInlineStyleProperty,
   removeInlineStyleProperty,
   applySolidPaint,
-  shadePolygon,
   applyDynamicNormalVars,
 } from "./paintDefaults";
 import {

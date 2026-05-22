@@ -12,7 +12,7 @@ import type {
   UvSampleRect,
   RGBFactors,
 } from "./types";
-import { tintToCss } from "./paintDefaults";
+import { tintToCss } from "@layoutit/polycss-core";
 import { expandClipPoints } from "@layoutit/polycss-core";
 import { BASIS_EPS } from "@layoutit/polycss-core";
 
