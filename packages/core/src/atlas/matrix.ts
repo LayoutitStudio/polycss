@@ -171,10 +171,15 @@ export function formatBorderShapeMatrix(
 }
 
 export function formatSolidQuadMatrix(entry: TextureAtlasPlan): string {
+  const bleed = entry.seamBleedInsets ?? { left: 0, right: 0, top: 0, bottom: 0 };
+  const canvasW = entry.canvasW || 1;
+  const canvasH = entry.canvasH || 1;
   return formatScaledMatrixFromPlan(
     entry,
-    (entry.canvasW || 1) / SOLID_QUAD_CANONICAL_SIZE,
-    (entry.canvasH || 1) / SOLID_QUAD_CANONICAL_SIZE,
+    (canvasW + bleed.left + bleed.right) / SOLID_QUAD_CANONICAL_SIZE,
+    (canvasH + bleed.top + bleed.bottom) / SOLID_QUAD_CANONICAL_SIZE,
+    -bleed.left,
+    -bleed.top,
   );
 }
 

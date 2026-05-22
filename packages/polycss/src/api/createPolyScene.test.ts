@@ -5,6 +5,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ParseResult, Polygon } from "@layoutit/polycss-core";
+import { DEFAULT_SEAM_BLEED } from "@layoutit/polycss-core";
 import {
   createPolyScene,
   type PolySceneOptions,
@@ -413,7 +414,7 @@ describe("createPolyScene", () => {
   describe("add / remove mesh", () => {
     it("adds a .polycss-mesh wrapper with one polygon leaf element per polygon", () => {
       scene = makeScene(host);
-      const handle = scene.add(makeParseResult([triangle(), triangle("#00ff00")]));
+      const handle = scene.add(makeParseResult([triangle(), triangle("#00ff00")]), { merge: false });
       const wrappers = host.querySelectorAll(".polycss-mesh");
       expect(wrappers.length).toBe(1);
       const polys = host.querySelectorAll("i,b,s,u");
@@ -1275,6 +1276,32 @@ describe("createPolyScene", () => {
       // `strategies` into every camera-update setOptions call.
       scene.setOptions({ strategies: { disable: ["u"] } });
       expect(host.querySelector("i, s")).toBe(firstLeaf);
+    });
+
+    it("re-renders meshes when seamBleed is set and explicitly unset", () => {
+      scene = makeScene(host, { seamBleed: 0 });
+      scene.add(makeParseResult([
+        triangle(),
+        {
+          vertices: [
+            [1, 0, 0],
+            [1, 1, 0],
+            [0, 1, 0],
+          ],
+          color: "#ff0000",
+        },
+      ]), { merge: false });
+      const leaf = host.querySelector(".polycss-mesh u") as HTMLElement;
+      const baseTransform = leaf.style.transform;
+
+      scene.setOptions({ seamBleed: DEFAULT_SEAM_BLEED });
+      const bleedLeaf = host.querySelector(".polycss-mesh u") as HTMLElement;
+      expect(bleedLeaf.style.transform).not.toBe(baseTransform);
+      const bleedTransform = bleedLeaf.style.transform;
+
+      scene.setOptions({ seamBleed: undefined });
+      const resetLeaf = host.querySelector(".polycss-mesh u") as HTMLElement;
+      expect(resetLeaf.style.transform).toBe(bleedTransform);
     });
 
     it("mounts only camera-facing voxel leaves by default", () => {

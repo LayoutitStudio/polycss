@@ -1,9 +1,10 @@
 /**
  * "Rendering" folder of the Dock GUI.
  *
- * Mesh resolution + Interior fill toggles, plus a single "Texture mode"
- * dropdown that collapses the old separate Solid-materials toggle and
- * Texture-lighting selector into one row (disabled | baked | dynamic).
+ * Mesh resolution + interior fill, plus a single
+ * "Texture mode" dropdown that collapses the old separate Solid-materials
+ * toggle and Texture-lighting selector into one row (disabled | baked |
+ * dynamic).
  *
  * Texture quality is a slider with an Auto checkbox injected inside the
  * slider's `.widget`. Auto handling: the React-side `textureQuality` value
@@ -18,17 +19,17 @@
 import { useEffect, useRef } from "react";
 import type { GUI } from "lil-gui";
 import type {
-  MeshResolution,
   PolyTextureLightingMode,
 } from "@layoutit/polycss-react";
 
 import { useFolder, useOption, useSlider, useToggle } from "../primitives";
+import type { WorkbenchMeshResolution } from "../../types";
 
 export type TextureMode = "disabled" | PolyTextureLightingMode;
 
 export interface RenderingFolderInputs {
-  meshResolution: MeshResolution;
-  meshInteriorFill: boolean;
+  meshResolution: WorkbenchMeshResolution;
+  interiorFill: boolean;
   solidMaterials: boolean;
   textureLighting: PolyTextureLightingMode;
   /** Either "auto" or a number in [0.1, 1]. */
@@ -36,17 +37,18 @@ export interface RenderingFolderInputs {
   hasActiveAnimation: boolean;
   hasSpriteLeaves: boolean;
   onUpdateScene: (partial: {
-    meshResolution?: MeshResolution;
-    meshInteriorFill?: boolean;
+    meshResolution?: WorkbenchMeshResolution;
+    interiorFill?: boolean;
     solidMaterials?: boolean;
     textureLighting?: PolyTextureLightingMode;
     textureQuality?: "auto" | number;
   }) => void;
 }
 
-const MESH_RESOLUTION_OPTIONS: Record<string, MeshResolution> = {
+const MESH_RESOLUTION_OPTIONS: Record<string, WorkbenchMeshResolution> = {
   Lossless: "lossless",
   Lossy: "lossy",
+  Disabled: "disabled",
 };
 
 const TEXTURE_MODE_OPTIONS: Record<string, TextureMode> = {
@@ -62,7 +64,7 @@ function textureModeFor(solidMaterials: boolean, textureLighting: PolyTextureLig
 export function useRenderingFolder(parent: GUI | null, inputs: RenderingFolderInputs): void {
   const {
     meshResolution,
-    meshInteriorFill,
+    interiorFill,
     solidMaterials,
     textureLighting,
     textureQuality,
@@ -87,8 +89,8 @@ export function useRenderingFolder(parent: GUI | null, inputs: RenderingFolderIn
     (value) => onUpdateScene({ meshResolution: value }),
   );
 
-  const meshInteriorFillCtrl = useToggle(folder, "Interior fill", meshInteriorFill, (value) =>
-    onUpdateScene({ meshInteriorFill: value }),
+  const interiorFillCtrl = useToggle(folder, "Interior fill", interiorFill, (value) =>
+    onUpdateScene({ interiorFill: value }),
   );
 
   const textureMode = textureModeFor(solidMaterials, textureLighting);
@@ -122,8 +124,12 @@ export function useRenderingFolder(parent: GUI | null, inputs: RenderingFolderIn
 
   useEffect(() => {
     meshResolutionCtrl?.setEnabled(!hasActiveAnimation);
-    meshInteriorFillCtrl?.setEnabled(!hasActiveAnimation);
-  }, [meshResolutionCtrl, meshInteriorFillCtrl, hasActiveAnimation]);
+    interiorFillCtrl?.setEnabled(!hasActiveAnimation);
+  }, [
+    meshResolutionCtrl,
+    interiorFillCtrl,
+    hasActiveAnimation,
+  ]);
 
   useEffect(() => {
     textureModeCtrl?.setVisible(hasSpriteLeaves);

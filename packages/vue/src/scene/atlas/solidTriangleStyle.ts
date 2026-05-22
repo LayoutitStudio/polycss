@@ -1,4 +1,10 @@
-import { parsePureColor } from "@layoutit/polycss-core";
+import {
+  isSolidTrianglePlan,
+  offsetConvexPolygonPointsByEdgeAmounts,
+  parsePureColor,
+  resolveSeamBleed,
+  safePlanSeamBleedAmount,
+} from "@layoutit/polycss-core";
 import type {
   TextureAtlasPlan,
   PolyTextureLightingMode,
@@ -6,7 +12,6 @@ import type {
   Vec2,
   Vec3,
 } from "@layoutit/polycss-core";
-import { isSolidTrianglePlan } from "@layoutit/polycss-core";
 import type { CSSProperties } from "vue";
 
 // ---------------------------------------------------------------------------
@@ -250,6 +255,97 @@ export function offsetConvexPolygonPoints(points: number[], amount: number): num
   return expanded;
 }
 
+function offsetStableTrianglePoints(
+  left: number,
+  right: number,
+  height: number,
+  amount: number,
+): number[] {
+  const baseWidth = left + right;
+  if (
+    amount <= 0 ||
+    height <= BASIS_EPS ||
+    baseWidth <= BASIS_EPS ||
+    !Number.isFinite(left + right + height + amount)
+  ) {
+    return offsetConvexPolygonPoints([left, 0, 0, height, baseWidth, height], amount);
+  }
+  const leftLen = Math.sqrt(left * left + height * height);
+  const rightLen = Math.sqrt(right * right + height * height);
+  if (leftLen <= BASIS_EPS || rightLen <= BASIS_EPS) {
+    return offsetConvexPolygonPoints([left, 0, 0, height, baseWidth, height], amount);
+  }
+  const leftOffsetX = -amount * height / leftLen;
+  const leftOffsetY = -amount * left / leftLen;
+  const rightOffsetX = amount * height / rightLen;
+  const rightOffsetY = -amount * right / rightLen;
+  const apexLineLeftX = left + leftOffsetX;
+  const apexLineLeftY = leftOffsetY;
+  const apexLineRightX = baseWidth + rightOffsetX;
+  const apexLineRightY = height + rightOffsetY;
+  const det = -height * baseWidth;
+  if (Math.abs(det) <= BASIS_EPS) {
+    return offsetConvexPolygonPoints([left, 0, 0, height, baseWidth, height], amount);
+  }
+  const qx = apexLineLeftX - apexLineRightX;
+  const qy = apexLineLeftY - apexLineRightY;
+  const t = (qx * height + qy * left) / det;
+  let apexX = apexLineRightX - t * right;
+  let apexY = apexLineRightY - t * height;
+  let baseLeftX = -amount * (left + leftLen) / height;
+  let baseLeftY = height + amount;
+  let baseRightX = baseWidth + amount * (right + rightLen) / height;
+  let baseRightY = baseLeftY;
+  const maxMiter = Math.max(2, amount * 4);
+  const apexDx = apexX - left;
+  const apexDy = apexY;
+  const apexMiter = Math.sqrt(apexDx * apexDx + apexDy * apexDy);
+  if (apexMiter > maxMiter) {
+    apexX = left + (apexDx / apexMiter) * maxMiter;
+    apexY = (apexDy / apexMiter) * maxMiter;
+  }
+  const leftMiter = Math.sqrt(baseLeftX * baseLeftX + amount * amount);
+  if (leftMiter > maxMiter) {
+    baseLeftX = (baseLeftX / leftMiter) * maxMiter;
+    baseLeftY = height + (amount / leftMiter) * maxMiter;
+  }
+  const rightDx = baseRightX - baseWidth;
+  const rightMiter = Math.sqrt(rightDx * rightDx + amount * amount);
+  if (rightMiter > maxMiter) {
+    baseRightX = baseWidth + (rightDx / rightMiter) * maxMiter;
+    baseRightY = height + (amount / rightMiter) * maxMiter;
+  }
+  return [apexX, apexY, baseLeftX, baseLeftY, baseRightX, baseRightY];
+}
+
+function triangleEdgeIndexForPair(a: number, b: number): number | undefined {
+  if ((a + 1) % 3 === b) return a;
+  if ((b + 1) % 3 === a) return b;
+  return undefined;
+}
+
+function stableTriangleEdgeAmounts(
+  entry: TextureAtlasPlan,
+  a: number,
+  b: number,
+  c: number,
+  screenPts: number[],
+): number[] | null {
+  const seamEdges = entry.seamBleedEdges;
+  if (!seamEdges?.size) return null;
+  const seamAmount = entry.seamBleed === undefined
+    ? SOLID_TRIANGLE_BLEED
+    : entry.seamBleed;
+  const edgePairs: Array<[number, number]> = [[c, a], [a, b], [b, c]];
+  return edgePairs.map(([from, to], localEdgeIndex) => {
+    const edgeIndex = triangleEdgeIndexForPair(from, to);
+    const requested = edgeIndex !== undefined && seamEdges.has(edgeIndex)
+      ? entry.seamBleedEdgeAmounts?.get(edgeIndex) ?? resolveSeamBleed(seamAmount, SOLID_TRIANGLE_BLEED)
+      : 0;
+    return safePlanSeamBleedAmount(screenPts, localEdgeIndex, requested);
+  });
+}
+
 function cssPoints(vertices: Vec3[], tile: number, elev: number): Vec3[] {
   return vertices.map((v) => [v[1] * tile, v[0] * tile, v[2] * elev]);
 }
@@ -338,7 +434,16 @@ export function solidTriangleStyle(
   const SOLID_TRIANGLE_CANONICAL_SIZE = 32;
   const left = Math.max(0, Math.min(baseLength, apexX));
   const right = Math.max(0, baseLength - left);
-  const expanded = offsetConvexPolygonPoints([left, 0, 0, height, left + right, height], SOLID_TRIANGLE_BLEED);
+  const screenPts = [left, 0, 0, height, left + right, height];
+  const edgeAmounts = stableTriangleEdgeAmounts(entry, a, b, c, screenPts);
+  const expanded = edgeAmounts
+    ? offsetConvexPolygonPointsByEdgeAmounts(screenPts, edgeAmounts)
+    : offsetStableTrianglePoints(
+        left,
+        right,
+        height,
+        resolveSeamBleed(entry.seamBleed, SOLID_TRIANGLE_BLEED),
+      );
   const apex2: Vec2 = [expanded[0], expanded[1]];
   const baseLeft2: Vec2 = [expanded[2], expanded[3]];
   const baseRight2: Vec2 = [expanded[4], expanded[5]];

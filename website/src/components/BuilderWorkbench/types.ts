@@ -6,8 +6,8 @@ export interface PlacedItem {
   id: string;
   preset: PresetModel;
   /** Pre-optimization polygons from the parser. Stored so we can re-apply
-   *  `optimizeMeshPolygons` + interior-fill at render time when the Dock's
-   *  meshResolution / meshInteriorFill change without re-fetching the asset.
+   *  `optimizeMeshPolygons` at render time when the Dock's meshResolution
+   *  changes without re-fetching the asset.
    *  `null` means the item is placed but its model hasn't been fetched yet —
    *  scene-preset items load lazily on proximity (see the lazy-load effect
    *  below). Pending items have placeholder `position` + `fitScale` until

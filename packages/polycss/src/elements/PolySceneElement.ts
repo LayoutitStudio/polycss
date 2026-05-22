@@ -48,6 +48,7 @@ const OBSERVED_ATTRS = [
   "ambient-intensity",
   "texture-lighting",
   "texture-quality",
+  "seam-bleed",
   "auto-center",
 ] as const;
 
@@ -77,6 +78,11 @@ function parseTextureLighting(value: string | null): PolyTextureLightingMode | u
 }
 
 function parseTextureQuality(value: string | null): PolySceneOptions["textureQuality"] | undefined {
+  if (value === "auto") return "auto";
+  return parseNumber(value);
+}
+
+function parseSeamBleed(value: string | null): PolySceneOptions["seamBleed"] | undefined {
   if (value === "auto") return "auto";
   return parseNumber(value);
 }
@@ -150,6 +156,8 @@ export class PolySceneElement extends ELEMENT_BASE {
     opts.textureLighting = parseTextureLighting(this.getAttribute("texture-lighting")) ?? "baked";
     const textureQuality = parseTextureQuality(this.getAttribute("texture-quality"));
     if (textureQuality !== undefined) opts.textureQuality = textureQuality;
+    const seamBleed = parseSeamBleed(this.getAttribute("seam-bleed"));
+    opts.seamBleed = seamBleed;
     opts.autoCenter = this.hasAttribute("auto-center");
     if (directionalLight) opts.directionalLight = directionalLight;
     if (ambientLight) opts.ambientLight = ambientLight;

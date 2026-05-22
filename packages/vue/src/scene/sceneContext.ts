@@ -12,7 +12,7 @@ import type {
   PolyTextureLightingMode,
   Polygon,
 } from "@layoutit/polycss-core";
-import type { PolyRenderStrategiesOption } from "./atlas";
+import type { PolyRenderStrategiesOption, PolySeamBleed } from "./atlas";
 
 export interface PolyShadowOptions {
   color?: string;
@@ -36,6 +36,7 @@ export interface PolySceneContextValue {
   directionalLight?: PolyDirectionalLight;
   ambientLight?: PolyAmbientLight;
   strategies?: PolyRenderStrategiesOption;
+  seamBleed?: PolySeamBleed;
   shadow?: PolyShadowOptions;
   shadowRegistry?: PolyShadowRegistry;
 }

@@ -71,6 +71,7 @@ export default function App() {
 - `directionalLight` and `ambientLight` control scene lighting.
 - `textureLighting` chooses `"baked"` or `"dynamic"`.
 - `textureQuality` controls atlas raster budget.
+- Seam bleed defaults to `1.5` CSS px on detected shared solid edges; `seamBleed="auto"` fits the amount from each polygon plan.
 - `strategies` can disable selected render strategies for diagnostics.
 - `autoCenter` rotates around the rendered mesh bounds instead of world origin.
 
@@ -160,7 +161,7 @@ polycss renders in the DOM, so performance is mostly determined by how many poly
 - Textured polygons are packed into generated texture atlases.
 - Dynamic lighting runs through CSS custom properties instead of per-frame JavaScript.
 - Voxel-shaped meshes mount only camera-facing leaves when the mesh is eligible.
-- `meshResolution: "lossy"` can merge compatible polygons to reduce DOM node count.
+- `meshResolution: "lossy"` merges compatible polygons, then may spend a small split budget to repair high-risk seams.
 
 ## Packages
 

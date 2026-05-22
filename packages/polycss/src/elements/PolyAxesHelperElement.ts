@@ -84,7 +84,7 @@ export class PolyAxesHelperElement extends ELEMENT_BASE {
       dispose: () => {},
       warnings: [],
     };
-    this._handle = scene.add(parsed, { excludeFromAutoCenter: true });
+    this._handle = scene.add(parsed, { excludeFromAutoCenter: true, merge: false });
   }
 
   private _remount(): void {

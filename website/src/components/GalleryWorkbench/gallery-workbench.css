@@ -377,20 +377,6 @@
   outline: 1px solid rgba(248, 113, 113, 0.75) !important;
 }
 
-.dn-viewport .dn-interior-fill-mesh {
-  pointer-events: none;
-}
-
-.dn-viewport .dn-interior-fill-mesh i {
-  border-shape: circle(50% at 50% 50%) circle(0 at 50% 50%) !important;
-}
-
-.dn-viewport .dn-interior-fill-mesh b,
-.dn-viewport .dn-interior-fill-mesh s {
-  border-radius: 50% !important;
-  overflow: hidden;
-}
-
 .dn-viewport .polycss-camera,
 .dn-vanilla-host {
   width: 100%;
@@ -473,6 +459,31 @@
   filter: brightness(1.25);
   transition: filter 150ms ease-out;
 }
+
+.dn-interior-shell-mesh,
+.dn-interior-shell-mesh *,
+.dn-seam-patches-mesh,
+.dn-seam-patches-mesh * {
+  pointer-events: none !important;
+}
+
+.dn-seam-patches-mesh b,
+.dn-seam-patches-mesh i,
+.dn-seam-patches-mesh s,
+.dn-seam-patches-mesh u {
+  backface-visibility: visible !important;
+  -webkit-backface-visibility: visible !important;
+}
+
+.dn-model-mesh.is-mesh-hidden > b,
+.dn-model-mesh.is-mesh-hidden > i,
+.dn-model-mesh.is-mesh-hidden > s,
+.dn-model-mesh.is-mesh-hidden > u,
+.dn-model-mesh.is-mesh-hidden > q,
+.dn-model-mesh.is-mesh-hidden > .polycss-bucket {
+  display: none !important;
+}
+
 .polycss-mesh i,
 .polycss-mesh b,
 .polycss-mesh s,

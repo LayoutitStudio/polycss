@@ -22,6 +22,7 @@ export interface RenderTextureAtlasOptions {
   textureQuality?: import("@layoutit/polycss-core").TextureQuality;
   solidPaintDefaults?: import("@layoutit/polycss-core").SolidPaintDefaults;
   strategies?: import("@layoutit/polycss-core").PolyRenderStrategiesOption;
+  seamBleed?: import("@layoutit/polycss-core").PolySeamBleed;
 }
 
 export interface InternalRenderTextureAtlasOptions extends RenderTextureAtlasOptions {
@@ -65,4 +66,3 @@ export interface RenderTextureAtlasResult {
 export interface RenderTextureAtlasAsyncResult extends RenderTextureAtlasResult {
   solidPaintDefaults: import("@layoutit/polycss-core").SolidPaintDefaults;
 }
-

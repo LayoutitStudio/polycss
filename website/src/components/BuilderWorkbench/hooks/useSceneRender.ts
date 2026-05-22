@@ -1,9 +1,9 @@
 import { useMemo, type RefObject } from "react";
 import { optimizeMeshPolygons } from "@layoutit/polycss-react";
 import type { PolyFirstPersonControlsHandle, Polygon } from "@layoutit/polycss-react";
-import { interiorFillPolygons } from "../../GalleryWorkbench/helpers/interiorFill";
+import { interiorShellPolygons } from "../../helpers/interiorShell";
 import { useFpvHost, useFpvCull } from "../../fpv";
-import type { SceneOptionsState } from "../../types";
+import { activeMeshResolution, type SceneOptionsState } from "../../types";
 import { buildGridPolygons } from "../geometry/grid";
 import type { TerrainVertices } from "../geometry/terrain";
 import type { PlacedItem } from "../types";
@@ -22,6 +22,7 @@ export interface UseSceneRenderOptions {
 
 export interface UseSceneRenderResult {
   renderedPolygonsById: Map<string, Polygon[]>;
+  interiorShellPolygonsById: Map<string, Polygon[]>;
   renderItems: Array<PlacedItem & { rawPolygons: Polygon[] }>;
   gridPolygons: Polygon[];
 }
@@ -34,17 +35,43 @@ export function useSceneRender({
   updateScene,
   terrainVertices,
 }: UseSceneRenderOptions): UseSceneRenderResult {
+  const effectiveMeshResolution = activeMeshResolution(sceneOptions.meshResolution);
   const renderedPolygonsById = useMemo(() => {
     const out = new Map<string, Polygon[]>();
     for (const it of placedItems) {
       if (it.rawPolygons === null) continue;
       const optimized = optimizeMeshPolygons(it.rawPolygons, {
-        meshResolution: sceneOptions.meshResolution,
+        meshResolution: effectiveMeshResolution,
       });
-      out.set(it.id, sceneOptions.meshInteriorFill ? [...optimized, ...interiorFillPolygons(optimized)] : optimized);
+      if (it.preset.kind === "vox") {
+        out.set(it.id, optimized);
+        continue;
+      }
+      out.set(it.id, optimized);
     }
     return out;
-  }, [placedItems, sceneOptions.meshResolution, sceneOptions.meshInteriorFill]);
+  }, [
+    placedItems,
+    effectiveMeshResolution,
+  ]);
+
+  const interiorShellPolygonsById = useMemo(() => {
+    const out = new Map<string, Polygon[]>();
+    if (!sceneOptions.interiorFill) return out;
+    for (const it of placedItems) {
+      if (it.rawPolygons === null || it.preset.kind === "vox") continue;
+      const optimized = optimizeMeshPolygons(it.rawPolygons, {
+        meshResolution: effectiveMeshResolution,
+      });
+      const shell = interiorShellPolygons(optimized);
+      if (shell.length > 0) out.set(it.id, shell);
+    }
+    return out;
+  }, [
+    placedItems,
+    sceneOptions.interiorFill,
+    effectiveMeshResolution,
+  ]);
 
   // World-space polygons for FPV bbox sampling. `useFpvHost` only reads
   // vertex extents when `dragMode` transitions to "fpv".
@@ -94,5 +121,5 @@ export function useSceneRender({
     [sceneOptions.gridResolution, terrainVertices],
   );
 
-  return { renderedPolygonsById, renderItems, gridPolygons };
+  return { renderedPolygonsById, interiorShellPolygonsById, renderItems, gridPolygons };
 }

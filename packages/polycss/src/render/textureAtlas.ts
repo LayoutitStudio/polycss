@@ -9,6 +9,7 @@ export type {
   SolidTriangleFrame,
   SolidPaintDefaults,
   TextureAtlasPage,
+  PolySeamBleed,
   RenderTextureAtlasOptions,
   RenderedPoly,
   RenderTextureAtlasResult,
@@ -18,6 +19,8 @@ export type {
 export {
   packTextureAtlasPlansWithScale,
   buildTextureEdgeRepairSets,
+  buildSeamBleedPolygonEdges,
+  buildSeamBleedPolygonSet,
   buildAtlasPages,
   isFullRectSolid,
   isSolidTrianglePlan,

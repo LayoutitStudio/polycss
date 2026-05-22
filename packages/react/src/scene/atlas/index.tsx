@@ -6,12 +6,15 @@ export type {
   SolidPaintDefaults,
   PolyRenderStrategy,
   PolyRenderStrategiesOption,
+  PolySeamBleed,
   TextureQuality,
 } from "@layoutit/polycss-core";
 export {
   isSolidTrianglePlan,
   isProjectiveQuadPlan,
   buildTextureEdgeRepairSets,
+  buildSeamBleedPolygonEdges,
+  buildSeamBleedPolygonSet,
   cssBorderShapeForPlan,
 } from "@layoutit/polycss-core";
 
