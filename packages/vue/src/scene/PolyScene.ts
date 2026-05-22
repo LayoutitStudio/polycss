@@ -16,6 +16,7 @@ import {
   watch,
   watchEffect,
   onMounted,
+  onUpdated,
   onBeforeUnmount,
 } from "vue";
 import type { PropType } from "vue";
@@ -26,7 +27,7 @@ import type {
   PolyTextureLightingMode,
   Vec3,
 } from "@layoutit/polycss-core";
-import { createIsometricCamera, parseHexColor, BASE_TILE } from "@layoutit/polycss-core";
+import { parseHexColor } from "@layoutit/polycss-core";
 import { PolyCameraContextKey } from "../camera";
 import { usePolySceneContext } from "./useSceneContext";
 import { injectPolyBaseStyles } from "../styles";
@@ -125,7 +126,7 @@ export const PolyScene = defineComponent({
       throw new Error("polycss: PolyScene must be used inside a PolyCamera.");
     }
 
-    const { store, sceneElRef } = cameraCtx;
+    const { sceneElRef, applyTransformDirect } = cameraCtx;
 
     // Shadow registry: child PolyMesh components register their polygon
     // getters here when castShadow=true. The scene reads registered polygons
@@ -163,12 +164,10 @@ export const PolyScene = defineComponent({
     }));
     provide(PolySceneContextKey, sceneCtxValue);
 
-    // Read camera state once for initial render — transform updates go via direct DOM
-    const cameraState = store.getState().cameraState;
-
     const sceneElLocalRef = ref<HTMLElement | null>(null);
 
-    // Sync local ref to camera context's sceneElRef
+    // Sync local ref to camera context's sceneElRef so controls that call
+    // applyTransformDirect can reach the element.
     watch(sceneElLocalRef, (el) => {
       sceneElRef.value = el;
     });
@@ -202,29 +201,27 @@ export const PolyScene = defineComponent({
 
     const sceneResult = usePolySceneContext(inputPolygons, sceneContextOptions);
 
-    // Scene element is a 0×0 anchor at world (0,0,0). Pinning to top:50%/
-    // left:50% places that point at the visible center of .polycss-camera —
-    // mirrors React's PolyScene anchor pattern.
+    // Scene transform is applied imperatively via applyTransformDirect, not via
+    // Vue's reactive style binding. The sceneStyle computed previously read
+    // autoCenterOffset (reactive) but used cameraState (plain snapshot), so any
+    // write to autoCenterOffset — even to the same value — would trigger a Vue
+    // re-render that patched a stale transform onto the DOM, overwriting the
+    // current value that applyTransformDirect had written on the previous rAF
+    // tick. Solid-triangle <u> elements are always visible (no opacity:0 phase),
+    // so the one-frame stale transform is immediately perceivable as flicker.
     //
-    // autoCenterOffset (bbox-center in world coords) is folded into the
-    // innermost translate3d alongside `target`. Keeping them separate means
-    // user pan survives mesh add/remove — the same split used in vanilla
-    // createPolyScene.ts's buildSceneTransform.
-    const sceneStyle = computed(() => {
-      const s = cameraState;
-      const offset = cameraCtx.autoCenterOffset.value;
-      const tileSize = BASE_TILE;
-      // world→CSS axis swap: world[0]→CSS Y, world[1]→CSS X, world[2]→CSS Z
-      const wx = s.target[0] + offset[0];
-      const wy = s.target[1] + offset[1];
-      const wz = s.target[2] + offset[2];
-      const cssX = wy * tileSize;
-      const cssY = wx * tileSize;
-      const cssZ = wz * tileSize;
-      const distancePart = s.distance !== 0 ? `translateZ(${-s.distance}px) ` : "";
-      const transform = `${distancePart}scale(${s.zoom}) rotateX(${s.rotX}deg) rotate(${s.rotY}deg) translate3d(${-cssX}px, ${-cssY}px, ${-cssZ}px)`;
-      return { transform };
+    // The watch on sceneElLocalRef syncs the element to the camera context ref
+    // asynchronously (next tick after mount). To ensure applyTransformDirect has
+    // the element on the very first mounted call, we sync sceneElRef.value
+    // directly here before calling it.
+    onMounted(() => {
+      sceneElRef.value = sceneElLocalRef.value;
+      applyTransformDirect();
     });
+    // On subsequent re-renders the ref is already synced; applyTransformDirect
+    // writes the current camera state to the DOM before the browser paints,
+    // correcting any stale transform committed by Vue's patch.
+    onUpdated(applyTransformDirect);
 
     // Per-polygon context: lighting + scene units.
     const polyContext = computed(() => {
@@ -410,7 +407,6 @@ export const PolyScene = defineComponent({
           "data-polycss-lighting": ctx.textureLighting ?? "baked",
           "aria-hidden": "true",
           style: {
-            ...sceneStyle.value,
             ...(dynamicLightVars.value ?? null),
             ...(attrs.style as Record<string, unknown> | undefined),
           },

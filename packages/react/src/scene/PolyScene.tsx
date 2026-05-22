@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useRef } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import type { CSSProperties, ReactNode } from "react";
 import type {
   Polygon,
@@ -112,18 +112,7 @@ function PolySceneInner({
   debugShowLabels: _debugShowLabels,
   debugShowBackfaces,
 }: PolySceneProps) {
-  const { store, sceneElRef } = useCameraContext();
-
-  // Read camera state fresh on every render. The store is kept in sync with
-  // cameraRef by useCamera's prop-sync effect AND by controls (PolyOrbitControls,
-  // PolyMapControls call store.updateCameraFromRef on every move). So whenever
-  // PolyScene re-renders, getState().cameraState is the current truth.
-  //
-  // This prevents the on-release flicker that happened when PolyScene cached
-  // the initial state: a re-render after a drag would apply the stale initial
-  // transform inline, snap the scene back, and then useCamera's effect would
-  // jump it forward again the next frame.
-  const cameraState = store.getState().cameraState;
+  const { store, sceneElRef, applyTransformDirect } = useCameraContext();
 
   const localSceneRef = useCallback(
     (el: HTMLDivElement | null) => {
@@ -216,31 +205,19 @@ function PolySceneInner({
     store.setAutoCenterOffset(autoCenterOffset);
   }, [store, autoCenterOffset]);
 
-  // Scene element is a 0×0 anchor at world (0,0,0). Pinning to top:50%/
-  // left:50% places that point at the visible center of .polycss-camera
-  // — flex centering is unreliable for position:absolute children with no
-  // flow box. transform-origin defaults to the element's own (0,0,0),
-  // so rotations pivot around world origin (Three.js convention). Polygons
-  // render around the anchor via their own matrix3d translations.
+  // Scene transform is applied imperatively via applyTransformDirect (below),
+  // not via React's style prop. This prevents Concurrent Mode from committing
+  // a stale snapshot-time transform and overwriting the current DOM value that
+  // applyTransformDirect wrote on the previous rAF tick — which is the root
+  // cause of the baked-shapes flicker on solid-triangle meshes (always visible,
+  // unlike atlas <s> elements which hide behind opacity:0 until loaded).
   //
-  // autoCenterOffset is folded into the innermost translate3d alongside
-  // `target`. Camera orbits `target + autoCenterOffset` — no extra DOM layer,
-  // no shifted mesh polygons.
-  const sceneStyle = useMemo(() => {
-    const s = cameraState;
-    const [ox, oy, oz] = autoCenterOffset;
-    const tileSize = BASE_TILE;
-    // World→CSS axis swap: world[0]→CSS Y, world[1]→CSS X, world[2]→CSS Z.
-    const wx = s.target[0] + ox;
-    const wy = s.target[1] + oy;
-    const wz = s.target[2] + oz;
-    const cssX = wy * tileSize;
-    const cssY = wx * tileSize;
-    const cssZ = wz * tileSize;
-    const distancePart = s.distance !== 0 ? `translateZ(${-s.distance}px) ` : "";
-    const transform = `${distancePart}scale(${s.zoom}) rotateX(${s.rotX}deg) rotate(${s.rotY}deg) translate3d(${-cssX}px, ${-cssY}px, ${-cssZ}px)`;
-    return { transform };
-  }, [cameraState, autoCenterOffset]);
+  // useLayoutEffect (no deps) fires synchronously after every commit, before
+  // the browser paints, ensuring the scene element always reflects the current
+  // camera state regardless of when React chose to schedule the render.
+  useLayoutEffect(() => {
+    applyTransformDirect();
+  });
 
   const computedClassName = `polycss-scene${className ? ` ${className}` : ""}`;
 
@@ -407,11 +384,8 @@ function PolySceneInner({
         aria-hidden="true"
         style={
           {
-            ...sceneStyle,
             ...(dynamicLightVars ?? null),
             ...style,
-            // No more --polycss-rows / --polycss-cols — CSS Grid was dropped
-            // in Phase 4 (per §Design.4a).
           } as CSSProperties
         }
       >
