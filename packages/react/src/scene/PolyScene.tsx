@@ -24,7 +24,7 @@ import {
   TextureProjectiveSolidPoly,
   TextureTrianglePoly,
   useTextureAtlas,
-} from "./textureAtlas";
+} from "./atlas";
 import { PolySceneContext } from "./sceneContext";
 
 export interface PolySceneProps extends TransformProps {

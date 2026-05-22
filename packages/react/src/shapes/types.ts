@@ -12,7 +12,7 @@ import type {
   FocusEventHandler,
   KeyboardEventHandler,
 } from "react";
-import type { TextureQuality } from "../scene/textureAtlas";
+import type { TextureQuality } from "../scene/atlas";
 
 // ── TransformProps ──────────────────────────────────────────────────────────
 

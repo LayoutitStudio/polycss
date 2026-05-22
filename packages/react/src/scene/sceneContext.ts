@@ -12,7 +12,7 @@ import type {
   PolyTextureLightingMode,
   Polygon,
 } from "@layoutit/polycss-core";
-import type { PolyRenderStrategiesOption } from "./textureAtlas";
+import type { PolyRenderStrategiesOption } from "./atlas";
 
 export interface ShadowOptions {
   color?: string;

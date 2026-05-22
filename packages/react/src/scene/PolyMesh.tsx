@@ -50,7 +50,7 @@ import {
   TextureTrianglePoly,
   updateStableTriangleDom,
   useTextureAtlas,
-} from "./textureAtlas";
+} from "./atlas";
 import { usePolySceneContext } from "./sceneContext";
 import { PolyCameraContext } from "../camera/context";
 import {

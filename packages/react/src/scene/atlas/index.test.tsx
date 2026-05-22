@@ -9,7 +9,7 @@ import {
   type TextureQuality,
   type TextureAtlasPlan,
   type TextureAtlasResult,
-} from "./textureAtlas";
+} from "./index";
 import type { Polygon } from "@layoutit/polycss-core";
 
 const originalMatchMedia = window.matchMedia;
