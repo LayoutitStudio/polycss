@@ -6,7 +6,7 @@ import {
   computeTextureAtlasPlan,
   isSolidTrianglePlan,
   type TextureAtlasPlan,
-} from "./textureAtlas";
+} from "./index";
 import type { Polygon } from "@layoutit/polycss-core";
 
 const originalUserAgent = window.navigator.userAgent;

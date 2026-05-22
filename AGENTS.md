@@ -10,11 +10,12 @@ Monorepo layout (pnpm workspaces):
 
 | Package | npm name | Role |
 |---|---|---|
-| `packages/core` | `@layoutit/polycss-core` | Pure math: Vec3, Polygon, scene, camera, mesh ops, atlas planning. Zero browser globals. |
-| `packages/polycss` | `@layoutit/polycss` | Vanilla renderer + custom elements (`<poly-scene>`, etc.). Owns DOM emission, CSS injection, atlas rasterisation. |
-| `packages/react` | `@layoutit/polycss-react` | React components + hooks. Thin wrapper over core + polycss. |
-| `packages/vue` | `@layoutit/polycss-vue` | Vue 3 mirror of the React package. |
+| `packages/core` | `@layoutit/polycss-core` | Pure math: Vec3, Polygon, scene, camera, mesh ops, atlas planning. Zero browser globals (lib: ES2020 only). |
+| `packages/polycss` | `@layoutit/polycss` | Vanilla renderer + custom elements (`<poly-scene>`, etc.). Owns DOM emission, CSS injection, its own copy of atlas rasterisation. Depends on `core` only. |
+| `packages/react` | `@layoutit/polycss-react` | React components + hooks. Owns its own copy of atlas rasterisation. Depends on `core` only — **NOT on `polycss`.** |
+| `packages/vue` | `@layoutit/polycss-vue` | Vue 3 mirror of the React package. Owns its own copy of atlas rasterisation. Depends on `core` only. |
 | `website` | `@layoutit/polycss-website` | Astro + Starlight docs site. Not published. |
+| `examples/{html,vanilla,react,vue}` | private | Per-framework Vite apps demonstrating the minimal usage for each renderer. Workspace members so they resolve to local `workspace:^` packages. Not published. |
 
 Public API is **mirrored** across React and Vue. Adding a hook on one side without adding the matching composable on the other is not acceptable (see "Cross-package discipline" below).
 
@@ -95,13 +96,16 @@ The React and Vue packages are mirror images. **Any public API change in one mus
 
 When you change `packages/polycss` or `packages/core` in a way that affects the public surface (new option, renamed export, changed default), the React and Vue bindings update in the same PR. Don't ship a polycss change that leaves the bindings stale.
 
+**Renderer-owned browser glue.** The canvas atlas pipeline (`buildAtlasPages` + helpers), browser-feature detection (`isBorderShapeSupported`, `isSolidTriangleSupported`, `resolveSolidTrianglePrimitive`), and the injected `.polycss-scene` / `.polycss-camera` base styles exist as **independent copies** in three places: `packages/polycss/src/render/atlas/`, `packages/react/src/scene/atlas/`, `packages/vue/src/scene/atlas/` (plus three sibling `styles.ts` files). This is deliberate — each renderer is self-contained on its dep graph (React/Vue do not import from polycss). The trade-off is that a bug fix in any of these files MUST be mirrored into the other two. Coverage is pinned per copy by the co-located test files.
+
 Before opening a PR:
 
 - [ ] If I touched a React component/hook, the Vue composable/component matches.
 - [ ] If I touched a Vue component/composable, the React component/hook matches.
 - [ ] If I added an option to a `polycss` factory, both bindings expose it.
 - [ ] If I renamed a `core` export, every package that imports it is updated.
-- [ ] If I touched the renderer, `packages/polycss/src/styles/styles.ts` is consistent with the new behavior (CSS rules cover every emitted tag for both lighting modes).
+- [ ] If I touched the canvas atlas pipeline (`rasterise.ts` / `buildAtlasPages.ts`) or browser-feature detection in ONE renderer, the same fix lands in the other two renderers (polycss + react + vue) in this PR.
+- [ ] If I touched any of the three `styles.ts` (`packages/polycss/src/styles/styles.ts`, `packages/react/src/styles/styles.ts`, `packages/vue/src/styles/styles.ts`), the other two are consistent — CSS rules cover every emitted tag for both lighting modes, and shared properties like `will-change: transform` on `.polycss-scene` exist in all three.
 - [ ] Website docs (`website/src/content/docs/**`) and READMEs reflect any user-visible change.
 - [ ] If I changed a render strategy, lighting mode, naming convention, or the JS-in-render-loop rules, `AGENTS.md` reflects the new state in this same PR.
 

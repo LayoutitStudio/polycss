@@ -13,7 +13,7 @@ import {
   TextureTrianglePoly,
   useTextureAtlas,
   type TextureAtlasPlan,
-} from "../scene/textureAtlas";
+} from "../scene/atlas";
 
 // ── Material / direct render path ────────────────────────────────────────────
 

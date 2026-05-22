@@ -25,6 +25,18 @@ const CORE_BASE_STYLES = `
   box-sizing: border-box;
 }
 
+/* Camera wrapper (mounted by createPolyCamera / PolyPerspectiveCamera /
+   PolyOrthographicCamera). Fills its parent so the scene inside has a
+   positioned, sized layout context for its top: 50% / left: 50% pin to
+   resolve against. Inline styles win on specificity if the user sizes
+   the camera explicitly. */
+.polycss-camera {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
 .polycss-scene {
   position: absolute;
   top: 50%;
@@ -32,7 +44,6 @@ const CORE_BASE_STYLES = `
   width: 0;
   height: 0;
   transform-style: preserve-3d;
-  perspective: 8000px;
   /* Pin the scene as a composited layer. Without this, mobile Chrome
      re-rasterizes every descendant tile when the scene transform changes
      each animation frame, which overruns the raster budget on textured
@@ -43,8 +54,8 @@ const CORE_BASE_STYLES = `
 
 /* ── First-person controls perspective context ──────────────────────────── */
 
-/* PolyFirstPersonControls toggles this class on its host element (vanilla:
-   scene.host; react/vue: the camera wrapper). FPV needs a real perspective
+/* PolyFirstPersonControls toggles this class on the camera wrapper
+   (scene.cameraEl in vanilla; the camera wrapper div in react/vue). FPV needs a real perspective
    context so scene Z translation produces visible depth motion - without
    it, walking forward looks like a planar pan. The class wins over inline
    perspective styles (e.g. PolyOrthographicCamera's perspective: none)
