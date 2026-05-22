@@ -54,6 +54,11 @@ const TRIANGLE_B: Polygon = {
   color: "#00ff00",
 };
 
+const ADJACENT_TRIANGLE_A: Polygon = {
+  vertices: [[1, 0, 0], [1, 1, 0], [0, 1, 0]],
+  color: "#ff0000",
+};
+
 const MOVED_TRIANGLE_A: Polygon = {
   vertices: [[0.1, 0, 0], [1.1, 0, 0], [0.1, 1, 0]],
   color: "#ff0000",
@@ -118,6 +123,21 @@ describe("renderPolygonsWithStableTriangles — initial render", () => {
     const el = result!.rendered[0].element;
     expect(el.style.transform).toContain("matrix3d(");
     result!.dispose();
+  });
+
+  it("applies seamBleed to detected shared triangle edges", () => {
+    const doc = makeDoc();
+    const base = renderPolygonsWithStableTriangles([TRIANGLE_A, ADJACENT_TRIANGLE_A], { doc })!;
+    const bleed = renderPolygonsWithStableTriangles([TRIANGLE_A, ADJACENT_TRIANGLE_A], {
+      doc,
+      seamBleed: 2,
+    })!;
+    expect(bleed.rendered[0].element.style.transform)
+      .not.toBe(base.rendered[0].element.style.transform);
+    expect(bleed.rendered[1].element.style.transform)
+      .not.toBe(base.rendered[1].element.style.transform);
+    base.dispose();
+    bleed.dispose();
   });
 
   it("adds polycss-corner-triangle class when corner-shape is supported", () => {

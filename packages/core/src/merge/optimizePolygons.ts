@@ -3,6 +3,7 @@ import { findOverlappingPolygonDuplicates } from "./dedupeOverlappingPolygons";
 import type { MeshResolution, Polygon, TextureTriangle, Vec2, Vec3 } from "../types";
 import { coverPlanarPolygons, type CoverPlanarPolygonsOptions } from "./coverPlanarPolygons";
 import { mergePolygons } from "./mergePolygons";
+import { repairMeshSeams } from "./seamRepair";
 
 const NORMALIZE_MAX_ANGLE_DEG = 3;
 const NORMALIZE_MAX_PLANE_DISPLACEMENT = 0.03;
@@ -253,6 +254,8 @@ export function optimizeMeshPolygons(
   options: OptimizeMeshPolygonsOptions = {},
 ): Polygon[] {
   const meshResolution = options.meshResolution ?? "lossy";
+  const finish = (candidate: Polygon[]): Polygon[] =>
+    meshResolution === "lossy" ? repairMeshSeams(candidate) : candidate;
   const preprocessCache: PreprocessCache = {};
   const baseline = preprocessModelPolygons(polygons, false, preprocessCache);
   let best = baseline;
@@ -277,13 +280,13 @@ export function optimizeMeshPolygons(
     if (losslessRectCovered !== baseline) acceptCandidate(losslessRectCovered);
   }
   const exactCostCeiling = bestCost;
-  if (meshResolution === "lossy" && (best.length <= 1 || bestCost <= 1 + 1e-9)) return best;
+  if (meshResolution === "lossy" && (best.length <= 1 || bestCost <= 1 + 1e-9)) return finish(best);
   if (
     meshResolution === "lossy" &&
     options.approximateMerge === undefined &&
     polygons.length >= LOSSY_AUTOMATIC_LOW_VALUE_SOURCE_MIN_POLYGONS &&
     bestCost <= LOSSY_AUTOMATIC_APPROXIMATE_LOW_VALUE_EXACT_COST
-  ) return best;
+  ) return finish(best);
 
   if (meshResolution === "lossy" && options.approximateMerge !== false) {
     const qualityCandidates: LossyQualityCandidate[] = [];
@@ -505,7 +508,7 @@ export function optimizeMeshPolygons(
       colorQuantizeCandidates.length === 0 &&
       shouldUseRectangulatedFastExit(baseline)
     ) {
-      return best;
+      return finish(best);
     }
 
     if (automaticApproximate) {
@@ -684,7 +687,7 @@ export function optimizeMeshPolygons(
     }
   }
 
-  return best;
+  return finish(best);
 }
 
 function lossyColorQuantizeCandidates(polygons: Polygon[], baseline?: Polygon[]): Polygon[][] {

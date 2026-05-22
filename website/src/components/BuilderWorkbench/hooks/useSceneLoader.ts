@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, type RefObject } from "react";
 import { optimizeMeshPolygons } from "@layoutit/polycss-react";
-import type { MeshResolution, PolyFirstPersonControlsHandle, Vec3 } from "@layoutit/polycss-react";
+import type { PolyFirstPersonControlsHandle, Vec3 } from "@layoutit/polycss-react";
 import type { PresetModel } from "../../GalleryWorkbench/types";
 import { loadPresetModel } from "../../GalleryWorkbench/helpers/loaders";
 import { PARSER_DEFAULTS, NORMALIZED_MAX_DIM } from "../defaults";
@@ -9,7 +9,11 @@ import { placeMeshOnFloor } from "../geometry/placement";
 import { SCENE_PRESETS } from "../scenes";
 import { PRESETS } from "../../GalleryWorkbench/presets";
 import type { PlacedItem } from "../types";
-import type { SceneOptionsState } from "../../types";
+import {
+  activeMeshResolution,
+  type SceneOptionsState,
+  type WorkbenchMeshResolution,
+} from "../../types";
 import type { DragMode } from "../../types";
 
 export interface UseSceneLoaderOptions {
@@ -27,7 +31,7 @@ export interface UseSceneLoaderOptions {
   fpvRenderDistance: number;
   targetWorld: Vec3;
   fpvControlsRef: RefObject<PolyFirstPersonControlsHandle | null>;
-  meshResolution: MeshResolution;
+  meshResolution: WorkbenchMeshResolution;
   updateScene: (partial: Partial<SceneOptionsState>) => void;
 }
 
@@ -47,8 +51,8 @@ export function useSceneLoader({
   meshResolution,
   updateScene,
 }: UseSceneLoaderOptions): UseSceneLoaderResult {
-  const meshResolutionRef = useRef(meshResolution);
-  meshResolutionRef.current = meshResolution;
+  const meshResolutionRef = useRef(activeMeshResolution(meshResolution));
+  meshResolutionRef.current = activeMeshResolution(meshResolution);
 
   // Dedupe in-flight loads so the same item can't kick off twice between
   // the setState callback and the next effect tick.

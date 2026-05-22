@@ -14,6 +14,16 @@ export type DragMode = "orbit" | "pan" | "fpv";
 
 export type PerspectiveMode = "perspective" | "orthographic";
 
+export type WorkbenchMeshResolution = MeshResolution | "disabled";
+
+export function activeMeshResolution(meshResolution: WorkbenchMeshResolution): MeshResolution {
+  return meshResolution === "disabled" ? "lossy" : meshResolution;
+}
+
+export function meshResolutionShowsMesh(meshResolution: WorkbenchMeshResolution): boolean {
+  return meshResolution !== "disabled";
+}
+
 export interface DomMetrics {
   measuredAt: number;
   nodeCount: number;
@@ -50,8 +60,8 @@ export interface SceneOptionsState {
   solidMaterials: boolean;
   matrixPrecision: "exact" | "2" | "3" | "4" | "5" | "6";
   borderShapePrecision: "exact" | "2" | "3" | "4" | "5" | "6";
-  meshResolution: MeshResolution;
-  meshInteriorFill: boolean;
+  meshResolution: WorkbenchMeshResolution;
+  interiorFill: boolean;
   outlinePolygons: boolean;
   dragMode: "orbit" | "pan" | "fpv";
   target: ReactVec3;

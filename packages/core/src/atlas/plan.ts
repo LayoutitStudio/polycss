@@ -44,9 +44,16 @@ import {
   computeSurfaceNormal,
   isConvexPolygonPoints,
   offsetConvexPolygonPoints,
+  offsetConvexPolygonPointsByEdgeAmounts,
   stableBasisFromPlan,
 } from "./solidTriangle";
 import { textureTintFactors, shadePolygon } from "./paintDefaults";
+import {
+  computePlanSeamBleedEdgeAmounts,
+  computeSeamBleedInsets,
+  seamBleedAmountArray,
+  normalizedSeamBleed,
+} from "./edgeRepair";
 
 function finiteNumber(value: unknown, fallback: number): number {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
@@ -126,6 +133,7 @@ export function computeProjectiveQuadMatrix(
   ty: number,
   tz: number,
   guards: ProjectiveQuadGuardSettings,
+  seamBleedEdgeAmounts?: ReadonlyMap<number, number>,
 ): string | null {
   if (screenPts.length !== 8) return null;
   const rawQ: Array<[number, number]> = [
@@ -136,7 +144,10 @@ export function computeProjectiveQuadMatrix(
   ];
   if (!computeProjectiveQuadCoefficients(rawQ, guards)) return null;
 
-  const expandedPts = offsetConvexPolygonPoints(screenPts, guards.bleed);
+  const edgeAmounts = seamBleedAmountArray(4, seamBleedEdgeAmounts);
+  const expandedPts = edgeAmounts
+    ? offsetConvexPolygonPointsByEdgeAmounts(screenPts, edgeAmounts)
+    : offsetConvexPolygonPoints(screenPts, guards.bleed);
   const q: Array<[number, number]> = [
     [expandedPts[0], expandedPts[1]],
     [expandedPts[2], expandedPts[3]],
@@ -771,6 +782,19 @@ export function computeTextureAtlasPlan(
     normal[0], normal[1], normal[2], 0,
     tx, ty, tz, 1,
   ]);
+  const seamBleedRequest = normalizedSeamBleed(options.seamBleed);
+  const seamBleedEdgeAmounts = computePlanSeamBleedEdgeAmounts(
+    screenPts,
+    options.seamEdges ?? basisHint?.seamEdges,
+    seamBleedRequest,
+  );
+  const seamBleedEdges = seamBleedEdgeAmounts
+    ? new Set(seamBleedEdgeAmounts.keys())
+    : undefined;
+  const seamBleed = seamBleedEdgeAmounts
+    ? Math.max(...seamBleedEdgeAmounts.values())
+    : undefined;
+  const seamBleedInsets = computeSeamBleedInsets(screenPts, seamBleedEdgeAmounts);
   const projectiveMatrix = !texture && vertices.length === 4
     ? computeProjectiveQuadMatrix(
         screenPts,
@@ -781,6 +805,7 @@ export function computeTextureAtlasPlan(
         ty,
         tz,
         projectiveQuadGuards,
+        seamBleedEdgeAmounts,
       )
     : null;
 
@@ -834,6 +859,10 @@ export function computeTextureAtlasPlan(
     textureTriangles,
     textureEdgeRepairEdges,
     textureEdgeRepair,
+    seamBleed,
+    seamBleedEdges,
+    seamBleedEdgeAmounts,
+    seamBleedInsets,
     normal,
     textureTint,
     shadedColor,
@@ -861,8 +890,11 @@ export function computeTextureAtlasPlanPublic(
   projectiveQuadOverrides?: ProjectiveQuadGuardOverrides,
 ): TextureAtlasPlan | null {
   const projectiveQuadGuards = resolveProjectiveQuadGuards(projectiveQuadOverrides);
-  const basisHint: BasisHint | undefined = options.textureEdgeRepairEdges?.size
-    ? { seamEdges: new Set<number>(), textureEdgeRepairEdges: options.textureEdgeRepairEdges }
+  const basisHint: BasisHint | undefined = options.textureEdgeRepairEdges?.size || options.seamEdges?.size
+    ? {
+        seamEdges: options.seamEdges ?? new Set<number>(),
+        textureEdgeRepairEdges: options.textureEdgeRepairEdges,
+      }
     : undefined;
   return computeTextureAtlasPlan(polygon, index, options, projectiveQuadGuards, basisHint);
 }

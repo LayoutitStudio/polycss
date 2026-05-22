@@ -24,7 +24,6 @@ import { parseGltf } from "./parseGltf";
 import { parseMtl } from "./parseMtl";
 import { parseVox } from "./parseVox";
 import { bakeSolidTextureSamples, type SolidTextureSampleOptions } from "./solidTextureSamples";
-import { mergePolygons } from "../merge/mergePolygons";
 import { optimizeMeshPolygons } from "../merge/optimizePolygons";
 
 export interface LoadMeshOptions {
@@ -71,16 +70,8 @@ function withMeshResolution(result: ParseResult, options?: LoadMeshOptions): Par
   const optimized = optimizeMeshPolygons(result.polygons, {
     meshResolution: options?.meshResolution,
   });
-  // Final canonicalising merge so every caller — vanilla scene.add(), React
-  // <PolyMesh>, Vue <PolyMesh>, custom-element <poly-mesh> — receives the
-  // same merged polygon list. optimizeMeshPolygons runs mergePolygons on its
-  // baseline, but lossy candidates (rect cover, approximate merge, color
-  // quantize) can pick a different polygon set that still has merge-eligible
-  // pairs; running mergePolygons one more time closes those without
-  // affecting already-canonical baselines (idempotent).
-  const polygons = mergePolygons(optimized);
-  if (polygons === result.polygons) return result;
-  return { ...result, polygons };
+  if (optimized === result.polygons) return result;
+  return { ...result, polygons: optimized };
 }
 
 async function withSolidTextureSamples(result: ParseResult, options?: LoadMeshOptions): Promise<ParseResult> {

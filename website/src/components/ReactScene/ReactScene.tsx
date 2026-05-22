@@ -24,7 +24,7 @@ import {
   polygonFacesCamera,
   type TextureQuality,
 } from "@layoutit/polycss";
-import type { GizmoMode, SceneOptionsState } from "../types";
+import { meshResolutionShowsMesh, type GizmoMode, type SceneOptionsState } from "../types";
 
 function canCullCameraBackfaces(polygons: Polygon[]): boolean {
   return isVoxelCameraCullableNormalGroups(cameraCullNormalGroupsFromPolygons(polygons));
@@ -43,7 +43,7 @@ export interface ReactSceneProps {
   rendererDebugKey: string;
   sceneOptions: SceneOptionsState;
   scenePolygons: Polygon[];
-  interiorFillPolygons: Polygon[];
+  interiorShellPolygons: Polygon[];
   directionalLight: PolyDirectionalLight;
   ambientLight: PolyAmbientLight;
   textureQuality: TextureQuality;
@@ -69,7 +69,7 @@ export function ReactScene({
   rendererDebugKey,
   sceneOptions,
   scenePolygons,
-  interiorFillPolygons,
+  interiorShellPolygons,
   directionalLight,
   ambientLight,
   textureQuality,
@@ -94,20 +94,11 @@ export function ReactScene({
   const camProps = sceneOptions.perspective === false
     ? { zoom: sceneOptions.zoom, rotX: sceneOptions.rotX, rotY: sceneOptions.rotY, target: sceneOptions.target }
     : { zoom: sceneOptions.zoom, rotX: sceneOptions.rotX, rotY: sceneOptions.rotY, target: sceneOptions.target, perspective: sceneOptions.perspective };
-  const centerPolygons = useMemo(
-    () => interiorFillPolygons.length > 0
-      ? [...scenePolygons, ...interiorFillPolygons]
-      : scenePolygons,
-    [scenePolygons, interiorFillPolygons],
-  );
+  const centerPolygons = scenePolygons;
   const effectiveMeshRotation = sceneOptions.selection ? meshRotation : undefined;
   const canCullScenePolygons = useMemo(
     () => canCullCameraBackfaces(scenePolygons),
     [scenePolygons],
-  );
-  const canCullInteriorFillPolygons = useMemo(
-    () => canCullCameraBackfaces(interiorFillPolygons),
-    [interiorFillPolygons],
   );
   const visibleScenePolygons = useMemo(
     () => canCullScenePolygons
@@ -115,18 +106,17 @@ export function ReactScene({
       : scenePolygons,
     [scenePolygons, canCullScenePolygons, sceneOptions.rotX, sceneOptions.rotY, effectiveMeshRotation],
   );
-  const visibleInteriorFillPolygons = useMemo(
-    () => canCullInteriorFillPolygons
-      ? cullCameraBackfaces(interiorFillPolygons, sceneOptions.rotX, sceneOptions.rotY, effectiveMeshRotation)
-      : interiorFillPolygons,
-    [interiorFillPolygons, canCullInteriorFillPolygons, sceneOptions.rotX, sceneOptions.rotY, effectiveMeshRotation],
-  );
-  const fillMesh = visibleInteriorFillPolygons.length > 0 ? (
+  const shellMesh = interiorShellPolygons.length > 0 ? (
     <PolyMesh
-      polygons={visibleInteriorFillPolygons}
-      className="dn-interior-fill-mesh"
+      polygons={interiorShellPolygons}
+      className="dn-interior-shell-mesh"
     />
   ) : null;
+  const modelClassName = [
+    "dn-model-mesh",
+    !meshResolutionShowsMesh(sceneOptions.meshResolution) ? "is-mesh-hidden" : "",
+    sceneOptions.hoverEffects && hoveredMeshId === (loaded?.label ?? "model") ? "is-hovered" : "",
+  ].filter(Boolean).join(" ");
   return (
     <Cam key={rendererDebugKey} {...camProps}>
       {sceneOptions.dragMode === "pan" ? (
@@ -164,11 +154,7 @@ export function ReactScene({
               polygons={visibleScenePolygons}
               position={meshPosition}
               rotation={meshRotation}
-              className={
-                sceneOptions.hoverEffects && hoveredMeshId === (loaded?.label ?? "model")
-                  ? "dn-model-mesh is-hovered"
-                  : "dn-model-mesh"
-              }
+              className={modelClassName}
               style={sceneOptions.hoverEffects ? { cursor: "pointer" } : undefined}
               onPointerOver={
                 sceneOptions.hoverEffects
@@ -179,7 +165,7 @@ export function ReactScene({
                 sceneOptions.hoverEffects ? () => setHoveredMeshId(null) : undefined
               }
             >
-              {fillMesh}
+              {shellMesh}
             </PolyMesh>
           </PolySelect>
         ) : null}
@@ -187,9 +173,9 @@ export function ReactScene({
           <PolyMesh
             id={loaded?.label ?? "model"}
             polygons={visibleScenePolygons}
-            className="dn-model-mesh"
+            className={modelClassName}
           >
-            {fillMesh}
+            {shellMesh}
           </PolyMesh>
         ) : null}
         {sceneOptions.selection && selectedMeshes.length > 0 && (

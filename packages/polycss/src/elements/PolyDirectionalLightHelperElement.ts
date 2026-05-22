@@ -113,6 +113,7 @@ export class PolyDirectionalLightHelperElement extends ELEMENT_BASE {
     this._handle = scene.add(parsed, {
       position: this._meshPosition(),
       excludeFromAutoCenter: true,
+      merge: false,
     });
   }
 

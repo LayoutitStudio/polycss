@@ -41,7 +41,7 @@ export const DEFAULT_SCENE: SceneOptionsState = {
   matrixPrecision: "exact",
   borderShapePrecision: "exact",
   meshResolution: "lossy",
-  meshInteriorFill: false,
+  interiorFill: false,
   outlinePolygons: false,
   dragMode: "orbit",
   target: [0, 0, 0],

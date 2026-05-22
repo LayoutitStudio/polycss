@@ -95,6 +95,26 @@ export type {
   ApproximateMergeOptions,
   OptimizeMeshPolygonsOptions,
 } from "./merge/optimizePolygons";
+export {
+  DEFAULT_SEAM_FACET_SPLIT_OPTIONS,
+  DEFAULT_SEAM_OVERLAP_OPTIONS,
+  repairMeshSeams,
+  seamFacetSplitPolygons,
+  seamFacetSplitReport,
+  seamOverlapDiagnostics,
+  seamOverlapPolygons,
+  seamOverlapReport,
+} from "./merge/seamRepair";
+export type {
+  SeamFacetSplitCandidate,
+  SeamFacetSplitCandidateReason,
+  SeamFacetSplitOptions,
+  SeamFacetSplitReport,
+  SeamOverlapCandidate,
+  SeamOverlapCandidateKind,
+  SeamOverlapDiagnostics,
+  SeamOverlapOptions,
+} from "./merge/seamRepair";
 export { cullInteriorPolygons } from "./cull/cullInteriorPolygons";
 export type { CullInteriorOptions } from "./cull/cullInteriorPolygons";
 export {
@@ -225,6 +245,7 @@ export {
   PROJECTIVE_QUAD_DENOM_EPS,
   PROJECTIVE_QUAD_MAX_WEIGHT_RATIO,
   PROJECTIVE_QUAD_BLEED,
+  DEFAULT_SEAM_BLEED,
 } from "./atlas/constants";
 export type {
   RGB,
@@ -240,9 +261,13 @@ export type {
   CornerShapeRadius,
   CornerShapeGeometry,
   TextureQuality,
+  PolySeamBleed,
+  PolySeamBleedEdgeValue,
+  PolySeamBleedEdges,
   PolyRenderStrategy,
   SolidTrianglePrimitive,
   PolyRenderStrategiesOption,
+  SeamBleedInsets,
   PackedTextureAtlasEntry,
   PackedPage,
   PackingShelf,
@@ -286,7 +311,17 @@ export {
   formatCssLengthPx,
   formatSolidQuadEntryMatrix,
 } from "./atlas/matrix";
-export { buildTextureEdgeRepairSets } from "./atlas/edgeRepair";
+export {
+  buildTextureEdgeRepairSets,
+  resolveSeamBleed,
+  normalizedSeamBleed,
+  safePlanSeamBleedAmount,
+  computePlanSeamBleedEdgeAmounts,
+  seamBleedAmountArray,
+  computeSeamBleedInsets,
+  buildSeamBleedPolygonSet,
+  buildSeamBleedPolygonEdges,
+} from "./atlas/edgeRepair";
 export {
   cachedParsePureColor,
   parseHex,
@@ -326,6 +361,7 @@ export {
   intersect2DLinesRaw,
   expandClipPoints,
   offsetConvexPolygonPoints,
+  offsetConvexPolygonPointsByEdgeAmounts,
   offsetTrianglePoints,
   offsetStableTrianglePoints,
   stableBasisFromPlan,

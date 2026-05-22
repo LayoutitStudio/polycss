@@ -31,10 +31,17 @@ import type {
   PolyTextureLightingMode,
   Vec3,
 } from "@layoutit/polycss-core";
-import { computeSceneBbox, findOverlappingPolygonDuplicates, inverseRotateVec3, parseHexColor } from "@layoutit/polycss-core";
+import {
+  computeSceneBbox,
+  DEFAULT_SEAM_BLEED,
+  findOverlappingPolygonDuplicates,
+  inverseRotateVec3,
+  parseHexColor,
+} from "@layoutit/polycss-core";
 import type { TransformProps } from "../shapes/types";
 import { usePolyMesh, type UseMeshOptions } from "./useMesh";
 import {
+  buildSeamBleedPolygonEdges,
   buildTextureEdgeRepairSets,
   computeTextureAtlasPlan,
   cssBorderShapeForPlan,
@@ -43,6 +50,7 @@ import {
   isSolidTrianglePlan,
   type TextureAtlasPlan,
   type TextureQuality,
+  type PolySeamBleed,
   type SolidPaintDefaults,
   TextureBorderShapePoly,
   TextureAtlasPoly,
@@ -97,6 +105,8 @@ export interface PolyMeshProps extends TransformProps, InteractionProps {
    *  desktop/mobile sprite sizing. Numeric values 0.1..1 force an explicit
    *  raster scale and the 64px sprite. */
   textureQuality?: TextureQuality;
+  /** Solid seam overscan. `"auto"` computes a fitted per-edge amount from the polygon plan. */
+  seamBleed?: PolySeamBleed;
   /** Per-polygon override render, or static children mounted inside the mesh wrapper. */
   children?: ((polygon: Polygon, index: number) => ReactNode) | ReactNode;
   /** Loading slot — rendered while `src` is being fetched/parsed. */
@@ -176,6 +186,7 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
     autoCenter,
     textureLighting,
     textureQuality,
+    seamBleed,
     castShadow,
     children,
     fallback,
@@ -502,6 +513,7 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
   const sceneCtx = usePolySceneContext();
   const effectiveTextureLighting = textureLighting ?? sceneCtx?.textureLighting ?? "baked";
   const effectiveStrategies = sceneCtx?.strategies;
+  const effectiveSeamBleed = seamBleed ?? sceneCtx?.seamBleed ?? DEFAULT_SEAM_BLEED;
   const effectiveDirectional =
     effectiveTextureLighting === "dynamic" ? undefined : sceneCtx?.directionalLight;
   const effectiveAmbient =
@@ -547,13 +559,25 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
     () => {
       if (renderPolygon) return [];
       const repairEdges = buildTextureEdgeRepairSets(polygons);
+      const seamBleedEdges = effectiveSeamBleed === "auto" || (
+        typeof effectiveSeamBleed === "number" &&
+        Number.isFinite(effectiveSeamBleed) &&
+        effectiveSeamBleed > 0
+      )
+        ? buildSeamBleedPolygonEdges(polygons, {
+            directionalLight: bakedDirectional,
+            ambientLight: effectiveAmbient,
+          })
+        : null;
       return polygons.map((p, i) => computeTextureAtlasPlan(p, i, {
         directionalLight: bakedDirectional,
         ambientLight: effectiveAmbient,
+        seamBleed: seamBleedEdges?.has(i) ? effectiveSeamBleed : undefined,
+        seamEdges: seamBleedEdges?.get(i),
         textureEdgeRepairEdges: repairEdges[i],
       }));
     },
-    [renderPolygon, polygons, bakedDirectional, effectiveAmbient],
+    [renderPolygon, polygons, bakedDirectional, effectiveAmbient, effectiveSeamBleed],
   );
   const textureAtlas = useTextureAtlas(
     atlasPlans,
@@ -637,6 +661,7 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
         ambientLight: effectiveAmbient,
         textureLighting: effectiveTextureLighting,
         strategies: effectiveStrategies,
+        seamBleed: effectiveSeamBleed,
         colorFrame: ++stableTriangleColorFrameRef.current,
         colorSteps: 8,
         colorFreezeFrames: 12,

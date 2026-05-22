@@ -53,7 +53,7 @@ export function BuilderDock({
       />
       <DockRendering
         meshResolution={sceneOptions.meshResolution}
-        meshInteriorFill={sceneOptions.meshInteriorFill}
+        interiorFill={sceneOptions.interiorFill}
         solidMaterials={sceneOptions.solidMaterials}
         textureLighting={sceneOptions.textureLighting}
         textureQuality={sceneOptions.textureQuality}

@@ -88,6 +88,7 @@ import { PolyCamera, PolyScene, PolyOrbitControls, PolyMesh } from "@layoutit/po
 - `directionalLight` and `ambientLight` control scene lighting.
 - `textureLighting` chooses `"baked"` or `"dynamic"`.
 - `textureQuality` controls atlas raster budget.
+- Seam bleed defaults to `1.5` CSS px on detected shared solid edges; `seamBleed="auto"` fits the amount from each polygon plan.
 - `strategies` can disable selected render strategies for diagnostics.
 - `autoCenter` rotates around the rendered mesh bounds instead of world origin.
 
@@ -98,7 +99,7 @@ import { PolyCamera, PolyScene, PolyOrbitControls, PolyMesh } from "@layoutit/po
 - `polygons` accepts pre-parsed geometry.
 - `position`, `scale`, and `rotation` transform the mesh wrapper.
 - `autoCenter` shifts the mesh bbox center to local origin.
-- `meshResolution` chooses `"lossy"` (default) or `"lossless"` optimization.
+- `meshResolution` chooses `"lossy"` (default) or `"lossless"` optimization. Lossy also applies bounded seam repair.
 - `castShadow` emits CSS-projected shadows in dynamic lighting mode.
 
 ### Controls
@@ -177,7 +178,7 @@ polycss renders in the DOM, so performance is mostly determined by how many poly
 - Textured polygons are packed into generated texture atlases.
 - Dynamic lighting runs through CSS custom properties instead of per-frame JavaScript.
 - Voxel-shaped meshes mount only camera-facing leaves when the mesh is eligible.
-- `meshResolution: "lossy"` can merge compatible polygons to reduce DOM node count.
+- `meshResolution: "lossy"` merges compatible polygons, then may spend a small split budget to repair high-risk seams.
 
 For diagnostics, all renderer packages export `collectPolyRenderStats(root)`, which returns mounted polygon leaf counts, shadow counts, surface categories, and bucket counts for an already-rendered scene.
 

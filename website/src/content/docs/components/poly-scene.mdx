@@ -19,6 +19,7 @@ It's available as a custom element (`<poly-scene>`), via the imperative `createP
 | `ambientLight` | `PolyAmbientLight` | None | Ambient fill light. |
 | `textureLighting` | `"baked" \| "dynamic"` | `"baked"` | Whether texture lighting is rasterized into atlases or computed with CSS variables. |
 | `textureQuality` | `number \| "auto"` | `"auto"` | Atlas bitmap budget and compositor sprite size. Auto caps large runtime bitmaps and uses a larger desktop sprite to avoid Safari/Firefox flattening artifacts; lower numeric values reduce texture memory and detail. |
+| `seamBleed` | `number \| "auto"` | `1.5` | Solid-primitive overscan for detected shared seam edges. `"auto"` fits each edge from the polygon plan; numbers clamp the CSS-pixel amount. |
 | `polygons` | `Polygon[]` | None | (Framework only.) Flat array of polygon objects rendered as direct children. Composes with JSX/slot children. |
 | `children` | None | None | `<poly-mesh>` / `<poly-polygon>` / `<poly-orbit-controls>` (vanilla) or `<PolyMesh>` / `<Poly>` / `<PolyOrbitControls>` (React / Vue). |
 
@@ -36,6 +37,7 @@ It's available as a custom element (`<poly-scene>`), via the imperative `createP
 | `scale` | `number \| Vec3` | Uniform or per-axis scale. |
 | `rotation` | `Vec3` | Euler rotation in degrees `[x, y, z]`. |
 | `textureQuality` | `number \| "auto"` | Atlas bitmap budget and compositor sprite size. React / Vue only; vanilla meshes inherit the scene's `texture-quality`. |
+| `seamBleed` | `number \| "auto"` | Solid-primitive overscan for detected shared seam edges. Defaults to the scene value (`1.5`). `"auto"` fits each edge from the polygon plan; numbers clamp the CSS-pixel amount. React / Vue only; vanilla meshes inherit the scene's `seam-bleed`. |
 | `autoCenter` | `boolean` | Shift the loaded mesh so its bounding-box center sits at the local origin before applying `position`. Useful when assets aren't centered in their file coordinates. |
 | `mtl` | `string` | Companion `.mtl` URL for OBJ models. |
 | `parseOptions` | `UseMeshOptions` | Parser options forwarded to `loadMesh`; `meshResolution` defaults to `"lossy"`. |

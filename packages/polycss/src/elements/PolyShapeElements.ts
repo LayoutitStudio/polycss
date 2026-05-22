@@ -125,6 +125,7 @@ abstract class PolyShapeElement extends ELEMENT_BASE {
           return Number.isFinite(n) ? n : undefined;
         })(),
         rotation: parseVec3Attr(this, "rotation"),
+        merge: false,
       },
     );
   }

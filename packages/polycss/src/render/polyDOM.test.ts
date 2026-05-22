@@ -42,12 +42,40 @@ const SECOND_FLAT_TRIANGLE: Polygon = {
   color: "#ff0000",
 };
 
+const ADJACENT_FLAT_TRIANGLE: Polygon = {
+  vertices: [
+    [1, 0, 0],
+    [1, 1, 0],
+    [0, 1, 0],
+  ],
+  color: "#ff0000",
+};
+
+const HINGED_TRIANGLE: Polygon = {
+  vertices: [
+    [1, 0, 0],
+    [1, 1, 1],
+    [0, 1, 0],
+  ],
+  color: "#ff0000",
+};
+
 const VERTICAL_QUAD: Polygon = {
   vertices: [
     [0, 0, 0],
     [1, 0, 0],
     [1, 0, 1],
     [0, 0, 1],
+  ],
+  color: "#00ff00",
+};
+
+const ADJACENT_VERTICAL_QUAD: Polygon = {
+  vertices: [
+    [1, 0, 0],
+    [2, 0, 0],
+    [2, 0, 1],
+    [1, 0, 1],
   ],
   color: "#00ff00",
 };
@@ -426,6 +454,91 @@ describe("renderPolygonsWithTextureAtlas", () => {
     result.dispose();
   });
 
+  it("applies seamBleed only to solid primitives with valid shared edges", () => {
+    const baseQuad = renderPolygonsWithTextureAtlas([VERTICAL_QUAD], { tileSize: 1, seamBleed: 0 });
+    const bleedQuad = renderPolygonsWithTextureAtlas([VERTICAL_QUAD], { tileSize: 1, seamBleed: 2 });
+    const baseTriangle = renderPolygonsWithTextureAtlas([FLAT_TRIANGLE, ADJACENT_FLAT_TRIANGLE], {
+      tileSize: 1,
+      seamBleed: 0,
+    });
+    const bleedTriangle = renderPolygonsWithTextureAtlas([FLAT_TRIANGLE, ADJACENT_FLAT_TRIANGLE], { tileSize: 1, seamBleed: 2 });
+    const autoTriangle = renderPolygonsWithTextureAtlas([FLAT_TRIANGLE, ADJACENT_FLAT_TRIANGLE], {
+      tileSize: 1,
+      seamBleed: "auto",
+    });
+
+    expect(bleedQuad.rendered).toHaveLength(baseQuad.rendered.length);
+    expect(bleedTriangle.rendered).toHaveLength(baseTriangle.rendered.length);
+    expect(bleedQuad.rendered[0].element.tagName.toLowerCase()).toBe("b");
+    expect(bleedTriangle.rendered[0].element.tagName.toLowerCase()).toBe("u");
+
+    const baseQuadMatrix = extractMatrix(baseQuad.rendered[0].element);
+    const bleedQuadMatrix = extractMatrix(bleedQuad.rendered[0].element);
+    const baseTriangleMatrix = extractMatrix(baseTriangle.rendered[0].element);
+    const bleedTriangleMatrix = extractMatrix(bleedTriangle.rendered[0].element);
+    const baseTriangleX = Math.hypot(baseTriangleMatrix[0], baseTriangleMatrix[1], baseTriangleMatrix[2]);
+    const baseTriangleY = Math.hypot(baseTriangleMatrix[4], baseTriangleMatrix[5], baseTriangleMatrix[6]);
+    const bleedTriangleX = Math.hypot(bleedTriangleMatrix[0], bleedTriangleMatrix[1], bleedTriangleMatrix[2]);
+    const bleedTriangleY = Math.hypot(bleedTriangleMatrix[4], bleedTriangleMatrix[5], bleedTriangleMatrix[6]);
+    expect(bleedQuad.rendered[0].element.style.transform).toBe(baseQuad.rendered[0].element.style.transform);
+    expect(Math.hypot(bleedQuadMatrix[0], bleedQuadMatrix[1], bleedQuadMatrix[2]))
+      .toBe(Math.hypot(baseQuadMatrix[0], baseQuadMatrix[1], baseQuadMatrix[2]));
+    expect(bleedTriangle.rendered[0].element.style.transform)
+      .not.toBe(baseTriangle.rendered[0].element.style.transform);
+    expect(
+      Math.abs(bleedTriangleX - baseTriangleX) > 1e-6 ||
+      Math.abs(bleedTriangleY - baseTriangleY) > 1e-6,
+    ).toBe(true);
+    expect(autoTriangle.rendered[0].element.style.transform)
+      .not.toBe(baseTriangle.rendered[0].element.style.transform);
+
+    baseQuad.dispose();
+    bleedQuad.dispose();
+    baseTriangle.dispose();
+    bleedTriangle.dispose();
+    autoTriangle.dispose();
+  });
+
+  it("applies seamBleed only along shared sides for rectangular solids", () => {
+    const base = renderPolygonsWithTextureAtlas([VERTICAL_QUAD, ADJACENT_VERTICAL_QUAD], {
+      tileSize: 10,
+      seamBleed: 0,
+    });
+    const bleed = renderPolygonsWithTextureAtlas([VERTICAL_QUAD, ADJACENT_VERTICAL_QUAD], { tileSize: 10, seamBleed: 2 });
+
+    for (let i = 0; i < 2; i += 1) {
+      expect(bleed.rendered[i].element.tagName.toLowerCase()).toBe("b");
+      const baseMatrix = extractMatrix(base.rendered[i].element);
+      const bleedMatrix = extractMatrix(bleed.rendered[i].element);
+      const baseX = Math.hypot(baseMatrix[0], baseMatrix[1], baseMatrix[2]);
+      const baseY = Math.hypot(baseMatrix[4], baseMatrix[5], baseMatrix[6]);
+      const bleedX = Math.hypot(bleedMatrix[0], bleedMatrix[1], bleedMatrix[2]);
+      const bleedY = Math.hypot(bleedMatrix[4], bleedMatrix[5], bleedMatrix[6]);
+      const xChanged = bleedX > baseX + 1e-6;
+      const yChanged = bleedY > baseY + 1e-6;
+      expect([xChanged, yChanged].filter(Boolean)).toHaveLength(1);
+      if (xChanged) expect(bleedY).toBeCloseTo(baseY, 6);
+      else expect(bleedX).toBeCloseTo(baseX, 6);
+    }
+
+    base.dispose();
+    bleed.dispose();
+  });
+
+  it("applies seamBleed to both sides of non-coplanar shared edges", () => {
+    const base = renderPolygonsWithTextureAtlas([FLAT_TRIANGLE, HINGED_TRIANGLE], { tileSize: 1, seamBleed: 0 });
+    const bleed = renderPolygonsWithTextureAtlas([FLAT_TRIANGLE, HINGED_TRIANGLE], { tileSize: 1, seamBleed: 2 });
+
+    expect(bleed.rendered).toHaveLength(base.rendered.length);
+    expect(bleed.rendered[0].element.tagName.toLowerCase()).toBe("u");
+    expect(bleed.rendered[1].element.tagName.toLowerCase()).toBe("u");
+    expect(bleed.rendered[0].element.style.transform).not.toBe(base.rendered[0].element.style.transform);
+    expect(bleed.rendered[1].element.style.transform).not.toBe(base.rendered[1].element.style.transform);
+
+    base.dispose();
+    bleed.dispose();
+  });
+
   it("falls back to atlas for solid triangles on WebKit", () => {
     const canvases: Array<{ width: number; height: number; getContext: () => null }> = [];
     const doc = {
@@ -748,7 +861,7 @@ describe("renderPolygonsWithTextureAtlas", () => {
 
     for (const fixture of CORNER_SHAPE_CORPUS) {
       const parsed = parseGltf(loadGalleryGlb(...fixture));
-      const polygons = optimizeMeshPolygons(parsed.polygons, { meshResolution: "lossy" });
+      const polygons = optimizeMeshPolygons(parsed.polygons, { meshResolution: "lossless" });
       parsed.dispose();
 
       const before = renderPolygonsWithTextureAtlas(polygons, { doc: beforeDoc });

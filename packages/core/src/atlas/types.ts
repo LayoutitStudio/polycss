@@ -44,6 +44,10 @@ export interface TextureAtlasPlan {
   textureTriangles: TextureTrianglePlan[] | null;
   textureEdgeRepairEdges: Set<number> | null;
   textureEdgeRepair: boolean;
+  seamBleed?: number;
+  seamBleedEdges?: Set<number>;
+  seamBleedEdgeAmounts?: Map<number, number>;
+  seamBleedInsets?: SeamBleedInsets;
   /** World-space surface normal — stable across light changes, used by dynamic mode. */
   normal: Vec3;
   textureTint: RGBFactors;
@@ -76,6 +80,11 @@ export interface CornerShapeGeometry {
 }
 
 export type TextureQuality = number | "auto";
+export type PolySeamBleed = number | "auto";
+export type PolySeamBleedEdgeValue = ReadonlySet<number> | ReadonlyMap<number, number>;
+export type PolySeamBleedEdges =
+  | ReadonlyMap<number, PolySeamBleedEdgeValue>
+  | readonly (PolySeamBleedEdgeValue | undefined)[];
 
 export type PolyRenderStrategy = "b" | "i" | "u";
 export type SolidTrianglePrimitive = "border" | "corner-bevel";
@@ -85,6 +94,13 @@ export interface PolyRenderStrategiesOption {
    *  the chain (b → i → s, u → i → s, i → s). `<s>` is the universal
    *  fallback and cannot be disabled — textured polys have no other path. */
   disable?: readonly PolyRenderStrategy[];
+}
+
+export interface SeamBleedInsets {
+  left: number;
+  right: number;
+  top: number;
+  bottom: number;
 }
 
 export interface PackedTextureAtlasEntry extends TextureAtlasPlan {
@@ -259,6 +275,8 @@ export interface SolidTrianglePlanOptions {
   textureLighting?: import("../types").PolyTextureLightingMode;
   solidPaintDefaults?: SolidPaintDefaults;
   strategies?: PolyRenderStrategiesOption;
+  seamBleed?: PolySeamBleed;
+  seamEdges?: Set<number>;
 }
 
 /** Internal solid-triangle plan options (extends SolidTrianglePlanOptions). */
@@ -276,4 +294,6 @@ export interface ComputeTextureAtlasPlanOptions {
   ambientLight?: import("../types").PolyAmbientLight;
   /** Shared-edge set returned by {@link buildTextureEdgeRepairSets}. */
   textureEdgeRepairEdges?: Set<number>;
+  seamBleed?: PolySeamBleed;
+  seamEdges?: Set<number>;
 }

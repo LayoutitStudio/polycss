@@ -11,7 +11,7 @@ import type { Bbox } from "../geometry/ghost";
 import { projectScreenToWorldGround } from "../geometry/screenToWorld";
 import { sampleTerrain, rotationForSlope, type TerrainVertices } from "../geometry/terrain";
 import type { PlacedItem, PlacementDraft, TargetMode } from "../types";
-import type { SceneOptionsState } from "../../types";
+import { activeMeshResolution, type SceneOptionsState } from "../../types";
 
 export interface UsePlacementModeOptions {
   sceneOptions: SceneOptionsState;
@@ -65,7 +65,7 @@ export function usePlacementMode({
     try {
       const loaded = await loadPresetModel(preset, PARSER_DEFAULTS);
       const optimized = optimizeMeshPolygons(loaded.rawPolygons, {
-        meshResolution: sceneOptions.meshResolution,
+        meshResolution: activeMeshResolution(sceneOptions.meshResolution),
       });
       const bboxResult = meshBbox(optimized);
       const fitScale = bboxResult.span > 0 ? NORMALIZED_MAX_DIM / bboxResult.span : 1;

@@ -27,17 +27,19 @@ import type {
   PolyTextureLightingMode,
   Vec3,
 } from "@layoutit/polycss-core";
-import { parseHexColor } from "@layoutit/polycss-core";
+import { DEFAULT_SEAM_BLEED, parseHexColor } from "@layoutit/polycss-core";
 import { PolyCameraContextKey } from "../camera";
 import { usePolySceneContext } from "./useSceneContext";
 import { injectPolyBaseStyles } from "../styles";
 import { PolySceneContextKey, type PolyShadowOptions, type PolyShadowRegistry } from "./sceneContext";
 import {
+  buildSeamBleedPolygonEdges,
   buildTextureEdgeRepairSets,
   computeTextureAtlasPlan,
   isProjectiveQuadPlan,
   isSolidTrianglePlan,
   type TextureQuality,
+  type PolySeamBleed,
   type PolyRenderStrategiesOption,
   renderTextureBorderShapePoly,
   renderTextureAtlasPoly,
@@ -60,6 +62,8 @@ export interface PolySceneProps {
    *  desktop/mobile sprite sizing. Numeric values 0.1..1 force an explicit
    *  raster scale and the 64px sprite. */
   textureQuality?: TextureQuality;
+  /** Solid seam overscan. `"auto"` computes a fitted per-edge amount from the polygon plan. */
+  seamBleed?: PolySeamBleed;
   /** Opt out of specific render strategies. Disabled strategies fall through the chain (b→i→s, u→i→s, i→s). `<s>` cannot be disabled. */
   strategies?: PolyRenderStrategiesOption;
   /**
@@ -107,6 +111,7 @@ export const PolyScene = defineComponent({
       default: "baked",
     },
     textureQuality: { type: [Number, String] as PropType<TextureQuality>, default: undefined },
+    seamBleed: { type: [Number, String] as PropType<PolySeamBleed>, default: undefined },
     strategies: { type: Object as PropType<PolyRenderStrategiesOption>, default: undefined },
     autoCenter: { type: Boolean, default: false },
     shadow: { type: Object as PropType<PolyShadowOptions>, default: undefined },
@@ -159,6 +164,7 @@ export const PolyScene = defineComponent({
       directionalLight: props.directionalLight,
       ambientLight: props.ambientLight,
       strategies: props.strategies,
+      seamBleed: props.seamBleed ?? DEFAULT_SEAM_BLEED,
       shadow: props.shadow,
       shadowRegistry,
     }));
@@ -244,12 +250,27 @@ export const PolyScene = defineComponent({
       const directionalForAtlas = dynamic ? undefined : props.directionalLight;
       const ambientForAtlas = dynamic ? undefined : props.ambientLight;
       const repairEdges = buildTextureEdgeRepairSets(sceneResult.value.polygons);
+      const seamBleed = props.seamBleed ?? DEFAULT_SEAM_BLEED;
+      const seamBleedEdges = seamBleed === "auto" || (
+        typeof seamBleed === "number" &&
+        Number.isFinite(seamBleed) &&
+        seamBleed > 0
+      )
+        ? buildSeamBleedPolygonEdges(sceneResult.value.polygons, {
+            tileSize: polyContext.value.tileSize,
+            layerElevation: polyContext.value.layerElevation,
+            directionalLight: directionalForAtlas,
+            ambientLight: ambientForAtlas,
+          })
+        : null;
       return sceneResult.value.polygons.map((p, i) =>
         computeTextureAtlasPlan(p, i, {
           tileSize: polyContext.value.tileSize,
           layerElevation: polyContext.value.layerElevation,
           directionalLight: directionalForAtlas,
           ambientLight: ambientForAtlas,
+          seamBleed: seamBleedEdges?.has(i) ? seamBleed : undefined,
+          seamEdges: seamBleedEdges?.get(i),
           textureEdgeRepairEdges: repairEdges[i],
         })
       );

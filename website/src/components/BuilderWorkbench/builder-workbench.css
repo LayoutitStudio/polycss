@@ -162,6 +162,30 @@
   pointer-events: none;
 }
 
+.dn-interior-shell-mesh,
+.dn-interior-shell-mesh *,
+.dn-seam-patches-mesh,
+.dn-seam-patches-mesh * {
+  pointer-events: none !important;
+}
+
+.dn-seam-patches-mesh b,
+.dn-seam-patches-mesh i,
+.dn-seam-patches-mesh s,
+.dn-seam-patches-mesh u {
+  backface-visibility: visible !important;
+  -webkit-backface-visibility: visible !important;
+}
+
+.builder-placed.is-mesh-hidden > b,
+.builder-placed.is-mesh-hidden > i,
+.builder-placed.is-mesh-hidden > s,
+.builder-placed.is-mesh-hidden > u,
+.builder-placed.is-mesh-hidden > q,
+.builder-placed.is-mesh-hidden > .polycss-bucket {
+  display: none !important;
+}
+
 /* Force both faces of every wireframe edge to render. polycss applies
    `backface-visibility: hidden` to polygon leaves via a rule
    `.polycss-scene b/i/s/u {...}` that gets injected at runtime AFTER

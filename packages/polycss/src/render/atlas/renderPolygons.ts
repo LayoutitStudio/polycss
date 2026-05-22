@@ -21,8 +21,13 @@ import {
   PROJECTIVE_QUAD_DENOM_EPS,
   PROJECTIVE_QUAD_MAX_WEIGHT_RATIO,
   PROJECTIVE_QUAD_BLEED,
+  DEFAULT_SEAM_BLEED,
 } from "@layoutit/polycss-core";
-import { buildBasisHints, computeTextureAtlasPlan } from "@layoutit/polycss-core";
+import {
+  buildBasisHints,
+  buildSeamBleedPolygonEdges,
+  computeTextureAtlasPlan,
+} from "@layoutit/polycss-core";
 import { resolveProjectiveQuadGuards } from "./plan";
 import {
   getSolidPaintDefaultsForPlans,
@@ -70,6 +75,10 @@ import {
 } from "./stableTriangle";
 import { stableTriangleMatrixDecimals } from "@layoutit/polycss-core";
 
+type RenderTextureAtlasOptionsWithSeams = RenderTextureAtlasOptions & {
+  seamEdges?: Set<number>;
+};
+
 function yieldToMainThread(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0));
 }
@@ -78,6 +87,59 @@ async function yieldIfOverBudget(started: number): Promise<number> {
   if (performance.now() - started < ASYNC_RENDER_BUDGET_MS) return started;
   await yieldToMainThread();
   return performance.now();
+}
+
+function seamTriangleOptions(
+  plan: TextureAtlasPlan,
+  options: RenderTextureAtlasOptions,
+): RenderTextureAtlasOptionsWithSeams {
+  const seamBleed = effectiveSeamBleed(options);
+  return plan.seamBleedEdges?.size
+    ? { ...options, seamBleed, seamEdges: plan.seamBleedEdges }
+    : { ...options, seamBleed: undefined, seamEdges: undefined };
+}
+
+function effectiveSeamBleed(options: RenderTextureAtlasOptions): RenderTextureAtlasOptions["seamBleed"] {
+  return Object.prototype.hasOwnProperty.call(options, "seamBleed")
+    ? options.seamBleed
+    : DEFAULT_SEAM_BLEED;
+}
+
+function shouldApplySeamBleed(seamBleed: RenderTextureAtlasOptions["seamBleed"]): boolean {
+  return seamBleed === "auto" || (
+    typeof seamBleed === "number" &&
+    Number.isFinite(seamBleed) &&
+    seamBleed > 0
+  );
+}
+
+function buildRenderSeamBleedEdges(
+  polygons: Polygon[],
+  options: RenderTextureAtlasOptions,
+): Map<number, Set<number>> | null {
+  return shouldApplySeamBleed(effectiveSeamBleed(options))
+    ? buildSeamBleedPolygonEdges(polygons, {
+        tileSize: options.tileSize,
+        layerElevation: options.layerElevation,
+        directionalLight: options.directionalLight,
+        ambientLight: options.ambientLight,
+      })
+    : null;
+}
+
+function seamAtlasOptions(
+  index: number,
+  seamBleedEdges: Map<number, Set<number>> | null,
+  options: RenderTextureAtlasOptions,
+): RenderTextureAtlasOptionsWithSeams {
+  const seamBleed = effectiveSeamBleed(options);
+  return seamBleedEdges
+    ? {
+        ...options,
+        seamBleed: seamBleedEdges.has(index) ? seamBleed : undefined,
+        seamEdges: seamBleedEdges.get(index),
+      }
+    : options;
 }
 
 export function getSolidPaintDefaults(
@@ -116,12 +178,19 @@ export function renderPolygonsWithTextureAtlas(
   const useBorderShape = !disabled.has("i") && borderShapeSupported(doc);
   const basisHints = buildBasisHints(polygons, options);
   const projectiveQuadGuards = resolveProjectiveQuadGuards(doc);
+  const seamBleedEdges = buildRenderSeamBleedEdges(polygons, options);
   const plans = polygons.map((polygon, index) =>
-    computeTextureAtlasPlan(polygon, index, options, projectiveQuadGuards, basisHints[index])
+    computeTextureAtlasPlan(
+      polygon,
+      index,
+      seamAtlasOptions(index, seamBleedEdges, options),
+      projectiveQuadGuards,
+      basisHints[index],
+    )
   );
   const trianglePlans = plans.map((plan) =>
     plan && useStableTriangle && isSolidTrianglePlan(plan)
-      ? computeSolidTrianglePlan(plan.polygon, plan.index, options, {
+      ? computeSolidTrianglePlan(plan.polygon, plan.index, seamTriangleOptions(plan, options), {
           primitive: solidTrianglePrimitive ?? undefined,
         })
       : null
@@ -240,10 +309,17 @@ export async function renderPolygonsWithTextureAtlasAsync(
 
   const basisHints = buildBasisHints(polygons, options);
   const projectiveQuadGuards = resolveProjectiveQuadGuards(doc);
+  const seamBleedEdges = buildRenderSeamBleedEdges(polygons, options);
   let batchStarted = performance.now();
   const plans: Array<TextureAtlasPlan | null> = new Array(polygons.length);
   for (let i = 0; i < polygons.length; i++) {
-    plans[i] = computeTextureAtlasPlan(polygons[i], i, options, projectiveQuadGuards, basisHints[i]);
+    plans[i] = computeTextureAtlasPlan(
+      polygons[i],
+      i,
+      seamAtlasOptions(i, seamBleedEdges, options),
+      projectiveQuadGuards,
+      basisHints[i],
+    );
     batchStarted = await yieldIfOverBudget(batchStarted);
     if (shouldCancel()) return { rendered: [], solidPaintDefaults: {}, dispose: () => {} };
   }
@@ -256,7 +332,7 @@ export async function renderPolygonsWithTextureAtlasAsync(
   for (let i = 0; i < plans.length; i++) {
     const plan = plans[i];
     const trianglePlan = plan && useStableTriangle && isSolidTrianglePlan(plan)
-      ? computeSolidTrianglePlan(plan.polygon, plan.index, { ...options, solidPaintDefaults }, {
+      ? computeSolidTrianglePlan(plan.polygon, plan.index, seamTriangleOptions(plan, { ...options, solidPaintDefaults }), {
           primitive: solidTrianglePrimitive ?? undefined,
         })
       : null;

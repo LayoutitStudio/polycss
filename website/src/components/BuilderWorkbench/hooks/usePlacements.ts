@@ -1,15 +1,16 @@
 import { useCallback, useRef, useState, type RefObject } from "react";
 import { optimizeMeshPolygons } from "@layoutit/polycss-react";
-import type { MeshResolution, PolyMeshHandle, Vec3 } from "@layoutit/polycss-react";
+import type { PolyMeshHandle, Vec3 } from "@layoutit/polycss-react";
 import type { PresetModel } from "../../GalleryWorkbench/types";
 import { loadPresetModel } from "../../GalleryWorkbench/helpers/loaders";
 import { PARSER_DEFAULTS, NORMALIZED_MAX_DIM } from "../defaults";
 import { meshBbox } from "../geometry/meshBbox";
 import { placeMeshOnFloor } from "../geometry/placement";
 import type { PlacedItem } from "../types";
+import { activeMeshResolution, type WorkbenchMeshResolution } from "../../types";
 
 export interface UsePlacementsOptions {
-  meshResolution: MeshResolution;
+  meshResolution: WorkbenchMeshResolution;
 }
 
 export interface UsePlacementsResult {
@@ -36,6 +37,7 @@ export interface UsePlacementsResult {
 }
 
 export function usePlacements({ meshResolution }: UsePlacementsOptions): UsePlacementsResult {
+  const effectiveMeshResolution = activeMeshResolution(meshResolution);
   const [placedItems, setPlacedItems] = useState<PlacedItem[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [meshHandlesTick, setMeshHandlesTick] = useState(0);
@@ -93,7 +95,7 @@ export function usePlacements({ meshResolution }: UsePlacementsOptions): UsePlac
     ): Promise<PlacedItem | null> => {
       try {
         const loaded = await loadPresetModel(preset, PARSER_DEFAULTS);
-        const optimized = optimizeMeshPolygons(loaded.rawPolygons, { meshResolution });
+        const optimized = optimizeMeshPolygons(loaded.rawPolygons, { meshResolution: effectiveMeshResolution });
         const bbox = meshBbox(optimized);
         const fitScale = bbox.span > 0 ? NORMALIZED_MAX_DIM / bbox.span : 1;
         const placement = placeMeshOnFloor(worldX, worldY, bbox, fitScale);
@@ -114,7 +116,7 @@ export function usePlacements({ meshResolution }: UsePlacementsOptions): UsePlac
         return null;
       }
     },
-    [meshResolution],
+    [effectiveMeshResolution],
   );
 
   const appendItems = useCallback((items: PlacedItem[]) => {

@@ -3,6 +3,7 @@
  * connect/disconnect lifecycle, attribute changes.
  */
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { DEFAULT_SEAM_BLEED } from "@layoutit/polycss-core";
 import { PolySceneElement } from "./PolySceneElement";
 
 beforeAll(() => {
@@ -35,6 +36,7 @@ describe("PolySceneElement", () => {
       expect(observed).toContain("rot-y");
       expect(observed).toContain("zoom");
       expect(observed).toContain("texture-quality");
+      expect(observed).toContain("seam-bleed");
       expect(observed).toContain("directional-direction");
       expect(observed).toContain("directional-color");
       expect(observed).toContain("directional-intensity");
@@ -161,6 +163,22 @@ describe("PolySceneElement", () => {
       el.setAttribute("auto-center", "");
       host.appendChild(el);
       expect(el.getScene()?.getOptions().autoCenter).toBe(true);
+    });
+
+    it("resets seam-bleed to the default when the attribute is removed", () => {
+      const el = document.createElement("poly-scene") as PolySceneElement;
+      el.setAttribute("seam-bleed", "2");
+      host.appendChild(el);
+      expect(el.getScene()?.getOptions().seamBleed).toBe(2);
+      el.removeAttribute("seam-bleed");
+      expect(el.getScene()?.getOptions().seamBleed).toBe(DEFAULT_SEAM_BLEED);
+    });
+
+    it("parses seam-bleed auto", () => {
+      const el = document.createElement("poly-scene") as PolySceneElement;
+      el.setAttribute("seam-bleed", "auto");
+      host.appendChild(el);
+      expect(el.getScene()?.getOptions().seamBleed).toBe("auto");
     });
 
   });
