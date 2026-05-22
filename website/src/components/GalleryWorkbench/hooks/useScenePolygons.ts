@@ -40,6 +40,9 @@ export function useScenePolygons({
         : loaded.rawPolygons;
     }
     if (loaded.parseResult.voxelSource) return loaded.rawPolygons;
+    if (loaded.kind === "primitive") {
+      return optimizeMeshPolygons(loaded.rawPolygons, { meshResolution: "lossless" });
+    }
     return optimizeMeshPolygons(loaded.rawPolygons, {
       meshResolution: effectiveMeshResolution,
     });
