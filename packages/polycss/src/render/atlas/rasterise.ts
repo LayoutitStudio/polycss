@@ -13,7 +13,7 @@ import type {
   RGBFactors,
 } from "./types";
 import { tintToCss } from "./paintDefaults";
-import { expandClipPoints } from "./solidTriangle";
+import { expandClipPoints } from "@layoutit/polycss-core";
 import { BASIS_EPS } from "@layoutit/polycss-core";
 
 export const TEXTURE_IMAGE_CACHE = new Map<string, Promise<HTMLImageElement>>();

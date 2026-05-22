@@ -28,7 +28,7 @@ import {
   computeSolidTrianglePlanFromCssPoints,
   computeSolidTriangleColorPlan,
 } from "./solidTrianglePlan";
-import { stableTriangleMatrixDecimals } from "./solidTriangle";
+import { stableTriangleMatrixDecimals } from "@layoutit/polycss-core";
 import { applyPolygonDataAttrs, hasPolygonDataAttrs, clearAtlasImageStyles } from "./emit";
 import { resolveSolidTrianglePrimitive } from "./strategy";
 

@@ -65,7 +65,7 @@ import {
   selectAdaptiveTriangleColorUpdates,
   updateStableTriangleElementsStreaming,
 } from "./stableTriangle";
-import { stableTriangleMatrixDecimals } from "./solidTriangle";
+import { stableTriangleMatrixDecimals } from "@layoutit/polycss-core";
 
 function yieldToMainThread(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0));
