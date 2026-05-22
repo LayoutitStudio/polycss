@@ -7,23 +7,6 @@ import {
   packTextureAtlasPlansWithScaleCore,
 } from "@layoutit/polycss-core";
 
-// Pure packing functions re-exported from core.
-export {
-  normalizeAtlasScale,
-  atlasArea,
-  autoAtlasScaleCap,
-  autoAtlasScale,
-  atlasBitmapMaxSide,
-  atlasDecodedBytes,
-  autoAtlasBudgetFactor,
-  autoAtlasMaxDecodedBytes,
-  atlasCanonicalSizeForTextureQuality,
-  applyPackedAtlasCanonicalSize,
-  atlasCanonicalSizeForEntry,
-  atlasPadding,
-  packTextureAtlasPlans,
-} from "@layoutit/polycss-core";
-
 export function isMobileDocument(doc: Document | null | undefined): boolean {
   if (!doc) return false;
   const win = doc.defaultView ?? (typeof window !== "undefined" ? window : undefined);

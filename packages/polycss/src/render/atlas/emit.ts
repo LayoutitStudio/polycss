@@ -23,7 +23,7 @@ import {
   formatBorderShapeElementStyle,
   formatCornerShapeElementStyle,
 } from "@layoutit/polycss-core";
-import { atlasCanonicalSizeForEntry } from "./packing";
+import { atlasCanonicalSizeForEntry } from "@layoutit/polycss-core";
 import { computeProjectiveQuadMatrix, stableBasisFromPlan as stableBasisFromPlanImpl } from "./plan";
 import {
   DEFAULT_LIGHT_DIR,
