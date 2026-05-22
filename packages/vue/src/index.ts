@@ -13,7 +13,7 @@ export type { PolyCameraContextValue } from "./camera";
 
 export { PolyScene } from "./scene";
 export type { PolySceneProps } from "./scene";
-export type { PolyRenderStrategy, PolyRenderStrategiesOption } from "@layoutit/polycss";
+export type { PolyRenderStrategy, PolyRenderStrategiesOption } from "@layoutit/polycss-core";
 export { PolyMesh } from "./scene";
 export type { PolyMeshProps } from "./scene";
 export { PolyGround } from "./scene";
