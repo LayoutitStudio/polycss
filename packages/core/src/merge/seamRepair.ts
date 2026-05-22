@@ -4,6 +4,7 @@ type Vec2 = [number, number];
 
 interface LocalBasis {
   origin: Vec3;
+  normal: Vec3;
   xAxis: Vec3;
   yAxis: Vec3;
   local: Vec2[];
@@ -47,10 +48,6 @@ interface NearSeamInfo {
   aEnd: number;
   bStart: number;
   bEnd: number;
-  a0: Vec3;
-  a1: Vec3;
-  b0: Vec3;
-  b1: Vec3;
 }
 
 export type SeamOverlapCandidateKind = "true-gap" | "connected-facet" | "material-boundary";
@@ -173,6 +170,8 @@ const MIN_PARALLEL_DOT = 0.985;
 const MIN_FACING_DOT = 0.5;
 const TRUE_GAP_OVERLAP_AMOUNT_RATIO = 0.175;
 const DEFAULT_TRUE_GAP_OVERLAP_PX = 1.25;
+const NEAR_SEAM_SWEEP_RECORD_LIMIT = 10000;
+const NEAR_SEAM_SWEEP_PAIR_LIMIT = 2_000_000;
 const EPS = 1e-6;
 const TOPOLOGY_EPS = 1e-4;
 
@@ -343,7 +342,7 @@ function localBasis(points: Vec3[]): LocalBasis | null {
     return [dot(d, xAxis), dot(d, yAxis)];
   });
   const area = signedArea(local);
-  return Math.abs(area) > EPS ? { origin, xAxis, yAxis, local, area } : null;
+  return Math.abs(area) > EPS ? { origin, normal, xAxis, yAxis, local, area } : null;
 }
 
 function signedArea(points: Vec2[]): number {
@@ -499,7 +498,7 @@ function buildEdgeRecords(
       const edgeLength = length(edge);
       const dir = normalize(edge);
       const outward = edgeOutward3D(meta.basis, edgeIndex);
-      const normal = surfaceNormal(meta.cssPoints);
+      const normal = meta.basis.normal;
       const capacity = (meta.capacities[edgeIndex] ?? 0) * capacityScale;
       if (!dir || !outward || !normal || capacity <= EPS || edgeLength <= EPS) continue;
       records.push({
@@ -675,19 +674,90 @@ function buildNearSeamEdgeAmounts(
   candidates: SeamOverlapCandidate[] | undefined,
 ): void {
   const maxGap = options.maxGapPx;
-  const cellSize = Math.max(MAX_NEAR_SEAM_GAP_PX * 2, maxGap * 2);
-  const cells = new Map<string, EdgeRecord[]>();
-  for (const record of records) {
-    for (const key of segmentCellKeys(record, cellSize, maxGap)) {
-      const bucket = cells.get(key);
-      if (bucket) bucket.push(record);
-      else cells.set(key, [record]);
-    }
-  }
-
   const exactSharedKeys = new Set<string>();
   for (const [key, owners] of edgeOwners) {
     if (owners.length > 1) exactSharedKeys.add(key);
+  }
+
+  const measurePair = (first: EdgeRecord, second: EdgeRecord): void => {
+    const record = first.index < second.index ? first : second;
+    const candidate = first.index < second.index ? second : first;
+    if (candidate.polygon === record.polygon) return;
+    if (record.key === candidate.key && exactSharedKeys.has(record.key)) return;
+    if (!candidates && !compatibleRepairMaterials(record, candidate)) return;
+    if (!edgeBoundsCouldOverlap(record, candidate, maxGap)) return;
+    if (Math.abs(dot(record.dir, candidate.dir)) < MIN_PARALLEL_DOT) return;
+
+    const info = nearSeamInfo(record, candidate, maxGap);
+    if (!info) return;
+    const kind = classifyCandidate(record, candidate);
+    const targetClosure = info.gap + options.overlapPx;
+    if (kind === "material-boundary") {
+      candidates?.push(seamOverlapCandidate(kind, record, candidate, info, targetClosure, 0));
+      return;
+    }
+
+    let remainingClosure = targetClosure;
+    if (remainingClosure <= MIN_RESIDUAL_PATCH_GAP_PX) {
+      candidates?.push(seamOverlapCandidate(kind, record, candidate, info, targetClosure, 0));
+      return;
+    }
+
+    const maxClosureA = record.capacity * info.facingA;
+    const maxClosureB = candidate.capacity * info.facingB;
+    let closureA = Math.min(maxClosureA, remainingClosure / 2);
+    let closureB = Math.min(maxClosureB, remainingClosure / 2);
+    remainingClosure -= closureA + closureB;
+    if (remainingClosure > EPS) {
+      const extraA = Math.min(maxClosureA - closureA, remainingClosure);
+      closureA += extraA;
+      remainingClosure -= extraA;
+    }
+    if (remainingClosure > EPS) {
+      const extraB = Math.min(maxClosureB - closureB, remainingClosure);
+      closureB += extraB;
+      remainingClosure -= extraB;
+    }
+
+    const appliedClosure = closureA + closureB;
+    candidates?.push(seamOverlapCandidate(kind, record, candidate, info, targetClosure, appliedClosure));
+    if (closureA > EPS) addEdgeRepair(repairs, record, info.aStart, info.aEnd, closureA / info.facingA);
+    if (closureB > EPS) addEdgeRepair(repairs, candidate, info.bStart, info.bEnd, closureB / info.facingB);
+    diagnostics.nearPairs += 1;
+    diagnostics.maxMeasuredGapPx = Math.max(diagnostics.maxMeasuredGapPx, info.gap);
+    if (remainingClosure > MIN_RESIDUAL_PATCH_GAP_PX) {
+      diagnostics.unclosedPairs += 1;
+      diagnostics.maxResidualGapPx = Math.max(diagnostics.maxResidualGapPx, remainingClosure);
+    }
+  };
+
+  if (records.length <= NEAR_SEAM_SWEEP_RECORD_LIMIT) {
+    const sorted = [...records].sort((a, b) => a.minX - b.minX);
+    const sweepEnds = new Int32Array(sorted.length);
+    let sweepPairCount = 0;
+    for (let i = 0; i + 1 < sorted.length; i += 1) {
+      const record = sorted[i];
+      const maxX = record.maxX + maxGap;
+      let end = i + 1;
+      while (end < sorted.length && sorted[end].minX <= maxX) end += 1;
+      sweepEnds[i] = end;
+      sweepPairCount += end - i - 1;
+      if (sweepPairCount > NEAR_SEAM_SWEEP_PAIR_LIMIT) break;
+    }
+    if (sweepPairCount <= NEAR_SEAM_SWEEP_PAIR_LIMIT) {
+      for (let i = 0; i + 1 < sorted.length; i += 1) {
+        for (let j = i + 1; j < sweepEnds[i]; j += 1) {
+          measurePair(sorted[i], sorted[j]);
+        }
+      }
+      return;
+    }
+  }
+
+  const cellSize = Math.max(MAX_NEAR_SEAM_GAP_PX * 2, maxGap * 2);
+  const cells = new Map<string, EdgeRecord[]>();
+  for (const record of records) {
+    addRecordToSegmentCells(cells, record, cellSize, maxGap);
   }
 
   const seenPairs = new Set<number>();
@@ -699,57 +769,10 @@ function buildNearSeamEdgeAmounts(
         const second = bucket[j];
         const record = first.index < second.index ? first : second;
         const candidate = first.index < second.index ? second : first;
-        if (candidate.polygon === record.polygon) continue;
-        if (record.key === candidate.key && exactSharedKeys.has(record.key)) continue;
-        if (!candidates && !compatibleRepairMaterials(record, candidate)) continue;
-        if (!edgeBoundsCouldOverlap(record, candidate, maxGap)) continue;
-        if (Math.abs(dot(record.dir, candidate.dir)) < MIN_PARALLEL_DOT) continue;
-
         const pairKey = record.index * recordCount + candidate.index;
         if (seenPairs.has(pairKey)) continue;
         seenPairs.add(pairKey);
-
-        const info = nearSeamInfo(record, candidate, maxGap);
-        if (!info) continue;
-        const kind = classifyCandidate(record, candidate);
-        const targetClosure = info.gap + options.overlapPx;
-        if (kind === "material-boundary") {
-          candidates?.push(seamOverlapCandidate(kind, record, candidate, info, targetClosure, 0));
-          continue;
-        }
-
-        let remainingClosure = targetClosure;
-        if (remainingClosure <= MIN_RESIDUAL_PATCH_GAP_PX) {
-          candidates?.push(seamOverlapCandidate(kind, record, candidate, info, targetClosure, 0));
-          continue;
-        }
-
-        const maxClosureA = record.capacity * info.facingA;
-        const maxClosureB = candidate.capacity * info.facingB;
-        let closureA = Math.min(maxClosureA, remainingClosure / 2);
-        let closureB = Math.min(maxClosureB, remainingClosure / 2);
-        remainingClosure -= closureA + closureB;
-        if (remainingClosure > EPS) {
-          const extraA = Math.min(maxClosureA - closureA, remainingClosure);
-          closureA += extraA;
-          remainingClosure -= extraA;
-        }
-        if (remainingClosure > EPS) {
-          const extraB = Math.min(maxClosureB - closureB, remainingClosure);
-          closureB += extraB;
-          remainingClosure -= extraB;
-        }
-
-        const appliedClosure = closureA + closureB;
-        candidates?.push(seamOverlapCandidate(kind, record, candidate, info, targetClosure, appliedClosure));
-        if (closureA > EPS) addEdgeRepair(repairs, record, info.aStart, info.aEnd, closureA / info.facingA);
-        if (closureB > EPS) addEdgeRepair(repairs, candidate, info.bStart, info.bEnd, closureB / info.facingB);
-        diagnostics.nearPairs += 1;
-        diagnostics.maxMeasuredGapPx = Math.max(diagnostics.maxMeasuredGapPx, info.gap);
-        if (remainingClosure > MIN_RESIDUAL_PATCH_GAP_PX) {
-          diagnostics.unclosedPairs += 1;
-          diagnostics.maxResidualGapPx = Math.max(diagnostics.maxResidualGapPx, remainingClosure);
-        }
+        measurePair(record, candidate);
       }
     }
   }
@@ -772,56 +795,84 @@ function cellCoords(point: Vec3, cellSize: number): [number, number, number] {
   ];
 }
 
-function segmentCellKeys(record: EdgeRecord, cellSize: number, padding: number): string[] {
-  const minX = Math.min(record.a[0], record.b[0]) - padding;
-  const minY = Math.min(record.a[1], record.b[1]) - padding;
-  const minZ = Math.min(record.a[2], record.b[2]) - padding;
-  const maxX = Math.max(record.a[0], record.b[0]) + padding;
-  const maxY = Math.max(record.a[1], record.b[1]) + padding;
-  const maxZ = Math.max(record.a[2], record.b[2]) + padding;
+function addRecordToSegmentCells(
+  cells: Map<string, EdgeRecord[]>,
+  record: EdgeRecord,
+  cellSize: number,
+  padding: number,
+): void {
+  const minX = record.minX - padding;
+  const minY = record.minY - padding;
+  const minZ = record.minZ - padding;
+  const maxX = record.maxX + padding;
+  const maxY = record.maxY + padding;
+  const maxZ = record.maxZ + padding;
   const [minCx, minCy, minCz] = cellCoords([minX, minY, minZ], cellSize);
   const [maxCx, maxCy, maxCz] = cellCoords([maxX, maxY, maxZ], cellSize);
-  const keys: string[] = [];
   for (let x = minCx; x <= maxCx; x += 1) {
     for (let y = minCy; y <= maxCy; y += 1) {
       for (let z = minCz; z <= maxCz; z += 1) {
-        keys.push(`${x},${y},${z}`);
+        const key = `${x},${y},${z}`;
+        const bucket = cells.get(key);
+        if (bucket) bucket.push(record);
+        else cells.set(key, [record]);
       }
     }
   }
-  return keys;
+}
+
+function dotFromPointToEdge(point: Vec3, edgeOrigin: Vec3, edgeDir: Vec3): number {
+  return (
+    (point[0] - edgeOrigin[0]) * edgeDir[0] +
+    (point[1] - edgeOrigin[1]) * edgeDir[1] +
+    (point[2] - edgeOrigin[2]) * edgeDir[2]
+  );
+}
+
+function dotEdgePointToEdge(source: EdgeRecord, distance: number, target: EdgeRecord): number {
+  return (
+    (source.a[0] + source.dir[0] * distance - target.a[0]) * target.dir[0] +
+    (source.a[1] + source.dir[1] * distance - target.a[1]) * target.dir[1] +
+    (source.a[2] + source.dir[2] * distance - target.a[2]) * target.dir[2]
+  );
 }
 
 function nearSeamInfo(a: EdgeRecord, b: EdgeRecord, maxGap: number): NearSeamInfo | null {
-  if (Math.abs(dot(a.dir, b.dir)) < MIN_PARALLEL_DOT) return null;
-
-  const bStart = dot(sub(b.a, a.a), a.dir);
-  const bEnd = dot(sub(b.b, a.a), a.dir);
+  const bStart = dotFromPointToEdge(b.a, a.a, a.dir);
+  const bEnd = dotFromPointToEdge(b.b, a.a, a.dir);
   const overlapStart = Math.max(0, Math.min(bStart, bEnd));
   const overlapEnd = Math.min(a.length, Math.max(bStart, bEnd));
   const overlap = overlapEnd - overlapStart;
   const minLength = Math.min(a.length, b.length);
   if (overlap < Math.max(0.75, minLength * 0.12)) return null;
 
-  const a0 = add(a.a, scale(a.dir, overlapStart));
-  const a1 = add(a.a, scale(a.dir, overlapEnd));
-  const aPoint = add(a.a, scale(a.dir, (overlapStart + overlapEnd) / 2));
-  const bT = Math.max(0, Math.min(b.length, dot(sub(aPoint, b.a), b.dir)));
-  const bPoint = add(b.a, scale(b.dir, bT));
-  const gapVector = sub(bPoint, aPoint);
-  const gap = length(gapVector);
+  const aMidT = (overlapStart + overlapEnd) / 2;
+  const aMidX = a.a[0] + a.dir[0] * aMidT;
+  const aMidY = a.a[1] + a.dir[1] * aMidT;
+  const aMidZ = a.a[2] + a.dir[2] * aMidT;
+  const bT = Math.max(0, Math.min(
+    b.length,
+    (aMidX - b.a[0]) * b.dir[0] +
+      (aMidY - b.a[1]) * b.dir[1] +
+      (aMidZ - b.a[2]) * b.dir[2],
+  ));
+  const gapX = b.a[0] + b.dir[0] * bT - aMidX;
+  const gapY = b.a[1] + b.dir[1] * bT - aMidY;
+  const gapZ = b.a[2] + b.dir[2] * bT - aMidZ;
+  const gap = Math.hypot(gapX, gapY, gapZ);
   if (gap <= EPS) return null;
   if (gap > maxGap) return null;
   if (gap > Math.min(maxGap, Math.max(4, minLength * 0.28))) return null;
 
-  const gapDir = scale(gapVector, 1 / gap);
-  const facingA = dot(a.outward, gapDir);
-  const facingB = dot(b.outward, scale(gapDir, -1));
+  const invGap = 1 / gap;
+  const gapDirX = gapX * invGap;
+  const gapDirY = gapY * invGap;
+  const gapDirZ = gapZ * invGap;
+  const facingA = a.outward[0] * gapDirX + a.outward[1] * gapDirY + a.outward[2] * gapDirZ;
+  const facingB = -(b.outward[0] * gapDirX + b.outward[1] * gapDirY + b.outward[2] * gapDirZ);
   if (facingA < MIN_FACING_DOT || facingB < MIN_FACING_DOT) return null;
-  const b0T = Math.max(0, Math.min(b.length, dot(sub(a0, b.a), b.dir)));
-  const b1T = Math.max(0, Math.min(b.length, dot(sub(a1, b.a), b.dir)));
-  const b0 = add(b.a, scale(b.dir, b0T));
-  const b1 = add(b.a, scale(b.dir, b1T));
+  const b0T = Math.max(0, Math.min(b.length, dotEdgePointToEdge(a, overlapStart, b)));
+  const b1T = Math.max(0, Math.min(b.length, dotEdgePointToEdge(a, overlapEnd, b)));
   return {
     gap,
     facingA,
@@ -830,10 +881,6 @@ function nearSeamInfo(a: EdgeRecord, b: EdgeRecord, maxGap: number): NearSeamInf
     aEnd: overlapEnd,
     bStart: Math.min(b0T, b1T),
     bEnd: Math.max(b0T, b1T),
-    a0,
-    a1,
-    b0,
-    b1,
   };
 }
 
