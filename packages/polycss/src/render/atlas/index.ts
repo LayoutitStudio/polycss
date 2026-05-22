@@ -16,7 +16,7 @@ export type {
   ComputeTextureAtlasPlanOptions,
 } from "./types";
 export { packTextureAtlasPlansWithScale } from "./packing";
-export { buildTextureEdgeRepairSets } from "./edgeRepair";
+export { buildTextureEdgeRepairSets } from "@layoutit/polycss-core";
 export { buildAtlasPages } from "./rasterise";
 export {
   isFullRectSolid,
