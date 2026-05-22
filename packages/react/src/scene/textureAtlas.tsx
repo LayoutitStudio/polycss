@@ -26,18 +26,20 @@ import {
   isFullRectSolid,
   buildTextureEdgeRepairSets,
   computeTextureAtlasPlanPublic,
-  getSolidPaintDefaultsFromPlans,
   cssBorderShapeForPlan,
   formatMatrix3d,
   formatCssLengthPx,
   formatSolidQuadEntryMatrix,
   formatBorderShapeEntryMatrix,
+} from "@layoutit/polycss-core";
+import {
   isBorderShapeSupported,
   isSolidTriangleSupported,
   filterAtlasPlans,
   packTextureAtlasPlansWithScale,
   buildAtlasPages,
-} from "@layoutit/polycss";
+  getSolidPaintDefaultsFromPlans,
+} from "./atlasBrowser";
 
 // Re-export pure types and functions so existing consumers of this module's
 // public surface still get them without changing their import paths.
