@@ -267,6 +267,8 @@ export type {
   ProjectiveQuadCoefficients,
   StablePlanBasis,
   ComputeTextureAtlasPlanOptions,
+  SolidTrianglePlanOptions,
+  InternalSolidTrianglePlanOptions,
 } from "./atlas/types";
 export {
   roundDecimal,
@@ -344,3 +346,9 @@ export {
   formatBorderShapeElementStyle,
   formatCornerShapeElementStyle,
 } from "./atlas/borderShape";
+export {
+  computeSolidTriangleColorPlanFromNormal,
+  computeSolidTriangleColorPlan,
+  computeSolidTrianglePlan,
+  computeSolidTrianglePlanFromCssPoints,
+} from "./atlas/solidTrianglePlan";

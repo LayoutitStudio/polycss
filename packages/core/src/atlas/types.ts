@@ -144,6 +144,9 @@ export interface SolidTriangleComputeOptions {
   matrixDecimals?: number;
   color?: string;
   primitive?: SolidTrianglePrimitive;
+  /** Pre-resolved primitive used when `primitive` is not set — replaces the
+   *  browser-global resolution that formerly happened inside the function. */
+  resolvedPrimitive?: SolidTrianglePrimitive | null;
 }
 
 export interface StableTriangleColorState {
@@ -244,6 +247,25 @@ export interface StablePlanBasis {
   tx: number;
   ty: number;
   tz: number;
+}
+
+/** Options for solidTrianglePlan computation — the pure-math subset of
+ *  RenderTextureAtlasOptions with no DOM reference. */
+export interface SolidTrianglePlanOptions {
+  tileSize?: number;
+  layerElevation?: number;
+  directionalLight?: import("../types").PolyDirectionalLight;
+  ambientLight?: import("../types").PolyAmbientLight;
+  textureLighting?: import("../types").PolyTextureLightingMode;
+  solidPaintDefaults?: SolidPaintDefaults;
+  strategies?: PolyRenderStrategiesOption;
+}
+
+/** Internal solid-triangle plan options (extends SolidTrianglePlanOptions). */
+export interface InternalSolidTrianglePlanOptions extends SolidTrianglePlanOptions {
+  optimizeStableTriangleStyle?: boolean;
+  stableTriangleColorSteps?: number;
+  stableTriangleMatrixDecimals?: number;
 }
 
 /** Options accepted by the public {@link computeTextureAtlasPlanPublic} wrapper. */
