@@ -88,6 +88,9 @@ export function usePolyCamera(options: UseCameraOptions): UseCameraResult {
   // Reads autoCenterOffset from the store so orbit/pan always pivots around
   // target + autoCenterOffset — the same point PolyScene writes to the scene transform.
   const applyTransformDirect = useCallback(() => {
+    // Diagnostic: count calls per second. Cast via globalThis to avoid import.
+    const diag = (typeof window !== "undefined" ? (window as Record<string, unknown>).__polycssDiag : null) as { applyTransformDirect?: number } | null;
+    if (diag) diag.applyTransformDirect = (diag.applyTransformDirect ?? 0) + 1;
     const el = sceneElRef.current;
     if (!el) return;
     const handle = handleRef.current!;

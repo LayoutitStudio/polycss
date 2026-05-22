@@ -143,6 +143,9 @@ export function makeAnimateEffect({
   let lastTime = 0;
   const tick = (now: number): void => {
     if (stopped) return;
+    // Diagnostic counter
+    const diag = (typeof window !== "undefined" ? (window as Record<string, unknown>).__polycssDiag : null) as { animateTick?: number } | null;
+    if (diag) diag.animateTick = (diag.animateTick ?? 0) + 1;
     const a = animateRef.current;
     if (!a) {
       rafId = requestAnimationFrame(tick);

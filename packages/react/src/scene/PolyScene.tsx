@@ -1,5 +1,31 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import type { CSSProperties, ReactNode } from "react";
+
+// ── Diagnostic counters ──────────────────────────────────────────────────────
+// Temporary instrumentation to count per-second render activity.
+// Remove after diagnosis.
+const _diagCounters: Record<string, number> = {
+  polysceneRender: 0,
+  polymeshRender: 0,
+  trianglePolyRender: 0,
+  applyTransformDirect: 0,
+  animateTick: 0,
+};
+if (typeof window !== "undefined") {
+  (window as Record<string, unknown>).__polycssDiag = _diagCounters;
+  setInterval(() => {
+    console.log(
+      "[polycss-diag] /sec —",
+      `PolyScene=${_diagCounters.polysceneRender}`,
+      `PolyMesh=${_diagCounters.polymeshRender}`,
+      `TrianglePoly=${_diagCounters.trianglePolyRender}`,
+      `applyTransformDirect=${_diagCounters.applyTransformDirect}`,
+      `animateTick=${_diagCounters.animateTick}`,
+    );
+    for (const k of Object.keys(_diagCounters)) _diagCounters[k] = 0;
+  }, 1000);
+}
+// ────────────────────────────────────────────────────────────────────────────
 import type {
   Polygon,
   PolyDirectionalLight,
@@ -112,6 +138,7 @@ function PolySceneInner({
   debugShowLabels: _debugShowLabels,
   debugShowBackfaces,
 }: PolySceneProps) {
+  _diagCounters.polysceneRender++;
   const { store, sceneElRef, applyTransformDirect } = useCameraContext();
 
   const localSceneRef = useCallback(

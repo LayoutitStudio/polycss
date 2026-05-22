@@ -202,6 +202,11 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
   }: PolyMeshProps,
   forwardedRef,
 ) {
+  // Diagnostic: count renders per second
+  {
+    const diag = (typeof window !== "undefined" ? (window as Record<string, unknown>).__polycssDiag : null) as Record<string, number> | null;
+    if (diag) diag.polymeshRender = (diag.polymeshRender ?? 0) + 1;
+  }
   // Compose mtl + meshResolution props into the parser options threaded to
   // useMesh. The top-level meshResolution prop wins over parseOptions.meshResolution
   // when both are present — top-level is the discoverable route; parseOptions is

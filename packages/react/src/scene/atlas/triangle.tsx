@@ -26,6 +26,11 @@ export function TextureTrianglePoly({
   domEventHandlers?: React.DOMAttributes<Element>;
   pointerEvents?: "auto" | "none";
 }) {
+  // Diagnostic
+  {
+    const diag = (typeof window !== "undefined" ? (window as Record<string, unknown>).__polycssDiag : null) as Record<string, number> | null;
+    if (diag) diag.trianglePolyRender = (diag.trianglePolyRender ?? 0) + 1;
+  }
   const triangleStyle = solidTriangleStyle(entry, textureLighting, pointerEvents, solidPaintDefaults);
   if (!triangleStyle) return null;
 
