@@ -19,7 +19,7 @@ import {
   PROJECTIVE_QUAD_DENOM_EPS,
   PROJECTIVE_QUAD_MAX_WEIGHT_RATIO,
   PROJECTIVE_QUAD_BLEED,
-} from "./constants";
+} from "@layoutit/polycss-core";
 import { buildBasisHints, resolveProjectiveQuadGuards, computeTextureAtlasPlan } from "./plan";
 import {
   getSolidPaintDefaultsForPlans,

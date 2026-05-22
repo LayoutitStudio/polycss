@@ -4,7 +4,7 @@ import {
   SOLID_TRIANGLE_CORNER_CLASS,
   DEFAULT_MATRIX_DECIMALS,
   BASIS_EPS,
-} from "./constants";
+} from "@layoutit/polycss-core";
 import type {
   SolidTrianglePlan,
   SolidTriangleColorPlan,

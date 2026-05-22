@@ -4,7 +4,7 @@ import {
   TEXTURE_EDGE_REPAIR_ALPHA_MIN,
   TEXTURE_EDGE_REPAIR_SOURCE_ALPHA_MIN,
   TEXTURE_EDGE_REPAIR_RADIUS,
-} from "./constants";
+} from "@layoutit/polycss-core";
 import type {
   PackedTextureAtlasEntry,
   PackedPage,
@@ -14,7 +14,7 @@ import type {
 } from "./types";
 import { tintToCss } from "./paintDefaults";
 import { expandClipPoints } from "./solidTriangle";
-import { BASIS_EPS } from "./constants";
+import { BASIS_EPS } from "@layoutit/polycss-core";
 
 export const TEXTURE_IMAGE_CACHE = new Map<string, Promise<HTMLImageElement>>();
 

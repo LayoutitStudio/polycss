@@ -31,7 +31,7 @@ import {
   DEFAULT_LIGHT_INTENSITY,
   DEFAULT_AMBIENT_COLOR,
   DEFAULT_AMBIENT_INTENSITY,
-} from "./constants";
+} from "@layoutit/polycss-core";
 
 export const ELEMENT_DATA_KEYS = new WeakMap<HTMLElement, string[]>();
 
