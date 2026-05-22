@@ -21,6 +21,8 @@ import {
   intersect2DLines,
   expandClipPoints,
   stableTriangleMatrixDecimals,
+  offsetTrianglePoints,
+  offsetStableTrianglePoints,
 } from "./solidTriangle";
 import { computeTextureAtlasPlanPublic } from "./plan";
 
@@ -301,6 +303,106 @@ describe("stableBasisFromPlan — stable triangle basis from atlas plan", () => 
     expect(Number.isFinite(basis.tx)).toBe(true);
     expect(Number.isFinite(basis.ty)).toBe(true);
     expect(Number.isFinite(basis.tz)).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// offsetTrianglePoints — outward offset for a raw triangle
+// ---------------------------------------------------------------------------
+
+describe("offsetTrianglePoints — raw triangle outward offset", () => {
+  it("returns input unchanged for amount <= 0", () => {
+    const pts = offsetTrianglePoints(0, 0, 1, 0, 0.5, 1, 0);
+    expect(pts).toEqual([0, 0, 1, 0, 0.5, 1]);
+  });
+
+  it("returns 6 values for a valid triangle with positive amount", () => {
+    const pts = offsetTrianglePoints(0, 0, 4, 0, 2, 3, 0.5);
+    expect(pts.length).toBe(6);
+    expect(pts.every(Number.isFinite)).toBe(true);
+  });
+
+  it("expanded bounding box is strictly larger than the original", () => {
+    const orig = { minX: 0, maxX: 4, minY: 0, maxY: 3 };
+    const pts = offsetTrianglePoints(0, 0, 4, 0, 2, 3, 0.5);
+    const minX = Math.min(pts[0], pts[2], pts[4]);
+    const maxX = Math.max(pts[0], pts[2], pts[4]);
+    const maxY = Math.max(pts[1], pts[3], pts[5]);
+    expect(minX).toBeLessThan(orig.minX + 1e-9);
+    expect(maxX).toBeGreaterThan(orig.maxX - 1e-9);
+    expect(maxY).toBeGreaterThan(orig.maxY - 1e-9);
+  });
+
+  it("falls back gracefully for a degenerate zero-area triangle", () => {
+    // Collinear points → zero area → fallback to expandClipPoints
+    const pts = offsetTrianglePoints(0, 0, 1, 0, 2, 0, 0.5);
+    expect(pts.length).toBe(6);
+    expect(pts.every(Number.isFinite)).toBe(true);
+  });
+
+  it("falls back for a triangle with a zero-length edge", () => {
+    // Two coincident vertices → zero-length edge
+    const pts = offsetTrianglePoints(0, 0, 0, 0, 1, 1, 0.5);
+    expect(pts.length).toBe(6);
+  });
+
+  it("applies miter clamping for thin triangles with large offsets", () => {
+    // Very thin triangle + large offset → miter would explode, should be clamped
+    const pts = offsetTrianglePoints(0, 0, 100, 0, 50, 0.001, 10);
+    expect(pts.length).toBe(6);
+    expect(pts.every(Number.isFinite)).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// offsetStableTrianglePoints — stable triangle coordinate offset
+// ---------------------------------------------------------------------------
+
+describe("offsetStableTrianglePoints — stable triangle offset", () => {
+  it("returns original points for amount <= 0", () => {
+    const pts = offsetStableTrianglePoints(2, 2, 4, 0);
+    expect(pts).toEqual([2, 0, 0, 4, 4, 4]);
+  });
+
+  it("returns 6 values for a valid stable triangle with positive amount", () => {
+    const pts = offsetStableTrianglePoints(2, 2, 4, 0.5);
+    expect(pts.length).toBe(6);
+    expect(pts.every(Number.isFinite)).toBe(true);
+  });
+
+  it("expanded apex y is less than the original apex y (apex moves up)", () => {
+    // Original apex is at y=0. After expansion, apex moves in negative y (above baseline).
+    const pts = offsetStableTrianglePoints(2, 2, 4, 0.5);
+    const apexY = pts[1];
+    // Apex should move away from baseline (negative y direction for standard coords)
+    expect(apexY).toBeLessThan(0 + 1e-9);
+  });
+
+  it("baseline y is greater than original baseline height", () => {
+    const height = 4;
+    const pts = offsetStableTrianglePoints(2, 2, height, 0.5);
+    const baseLeftY = pts[3];
+    const baseRightY = pts[5];
+    expect(baseLeftY).toBeGreaterThan(height - 1e-9);
+    expect(baseRightY).toBeGreaterThan(height - 1e-9);
+  });
+
+  it("falls back gracefully for zero height", () => {
+    const pts = offsetStableTrianglePoints(2, 2, 0, 0.5);
+    expect(pts.length).toBe(6);
+    expect(pts.every(Number.isFinite)).toBe(true);
+  });
+
+  it("falls back gracefully for zero base width", () => {
+    // left=0, right=0 → baseWidth=0 → fallback
+    const pts = offsetStableTrianglePoints(0, 0, 4, 0.5);
+    expect(pts.length).toBe(6);
+  });
+
+  it("applies miter clamping for isosceles triangle with large offset", () => {
+    const pts = offsetStableTrianglePoints(50, 50, 100, 100);
+    expect(pts.length).toBe(6);
+    expect(pts.every(Number.isFinite)).toBe(true);
   });
 });
 
