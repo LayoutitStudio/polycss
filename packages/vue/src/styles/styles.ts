@@ -26,6 +26,13 @@ const CORE_BASE_STYLES = `
   height: 0;
   transform-style: preserve-3d;
   perspective: none;
+  /* Promote the scene to its own GPU compositing layer. Without this the
+     browser re-rasterizes every descendant leaf when the scene transform
+     updates each animation frame, causing visible flicker on solid-shape
+     meshes (triangles, quads) that have no opacity:0 loading phase to
+     hide the re-paint. Matches the same declaration in the vanilla
+     polycss stylesheet. */
+  will-change: transform;
 }
 
 /* ── Camera wrapper (perspective + interactive drag) ────────────────────── */
