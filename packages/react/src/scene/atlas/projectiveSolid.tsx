@@ -1,3 +1,4 @@
+import { memo } from "react";
 import type React from "react";
 import type { CSSProperties } from "react";
 import type {
@@ -7,7 +8,7 @@ import type {
 } from "@layoutit/polycss-core";
 import { parseHex, rgbKey } from "./solidTriangleStyle";
 
-export function TextureProjectiveSolidPoly({
+export const TextureProjectiveSolidPoly = memo(function TextureProjectiveSolidPoly({
   entry,
   textureLighting,
   solidPaintDefaults,
@@ -74,4 +75,4 @@ export function TextureProjectiveSolidPoly({
       {...domAttrs}
     />
   );
-}
+});

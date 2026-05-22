@@ -1,3 +1,4 @@
+import { memo } from "react";
 import type React from "react";
 import type { CSSProperties } from "react";
 import type {
@@ -7,7 +8,7 @@ import type {
 } from "@layoutit/polycss-core";
 import { solidTriangleStyle } from "./solidTriangleStyle";
 
-export function TextureTrianglePoly({
+export const TextureTrianglePoly = memo(function TextureTrianglePoly({
   entry,
   textureLighting,
   solidPaintDefaults,
@@ -50,4 +51,4 @@ export function TextureTrianglePoly({
       {...domAttrs}
     />
   );
-}
+});

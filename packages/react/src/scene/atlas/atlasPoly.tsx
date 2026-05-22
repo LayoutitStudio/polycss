@@ -1,3 +1,4 @@
+import { memo } from "react";
 import type React from "react";
 import type { CSSProperties } from "react";
 import type {
@@ -8,7 +9,7 @@ import type {
 } from "@layoutit/polycss-core";
 import { formatMatrix3d, formatCssLengthPx } from "@layoutit/polycss-core";
 
-export function TextureAtlasPoly({
+export const TextureAtlasPoly = memo(function TextureAtlasPoly({
   entry,
   page,
   textureLighting,
@@ -94,4 +95,4 @@ export function TextureAtlasPoly({
       {...domAttrs}
     />
   );
-}
+});

@@ -1,4 +1,4 @@
-import { useCallback } from "react";
+import { memo, useCallback } from "react";
 import type React from "react";
 import type { CSSProperties } from "react";
 import type {
@@ -41,7 +41,7 @@ function orderBrushInlineStyle(el: HTMLElement): void {
   if (next !== current) el.setAttribute("style", next);
 }
 
-export function TextureBorderShapePoly({
+export const TextureBorderShapePoly = memo(function TextureBorderShapePoly({
   entry,
   solidPaintDefaults,
   className,
@@ -113,4 +113,4 @@ export function TextureBorderShapePoly({
       {...domAttrs}
     />
   );
-}
+});
