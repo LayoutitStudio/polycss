@@ -21,9 +21,9 @@ import { parseHex, rgbKey } from "./paintDefaults";
 import {
   isFullRectBasis,
   computeTextureAtlasPlan,
-  resolveProjectiveQuadGuards,
   buildBasisHints,
-} from "./plan";
+} from "@layoutit/polycss-core";
+import { resolveProjectiveQuadGuards } from "./plan";
 
 // Pure predicates re-exported from core.
 export {

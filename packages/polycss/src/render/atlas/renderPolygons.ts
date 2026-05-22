@@ -20,7 +20,8 @@ import {
   PROJECTIVE_QUAD_MAX_WEIGHT_RATIO,
   PROJECTIVE_QUAD_BLEED,
 } from "@layoutit/polycss-core";
-import { buildBasisHints, resolveProjectiveQuadGuards, computeTextureAtlasPlan } from "./plan";
+import { buildBasisHints, computeTextureAtlasPlan } from "@layoutit/polycss-core";
+import { resolveProjectiveQuadGuards } from "./plan";
 import {
   getSolidPaintDefaultsForPlans,
   isFullRectSolid,

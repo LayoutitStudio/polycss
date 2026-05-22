@@ -34,7 +34,7 @@ export {
   updateStableTriangleFrame,
   updatePolygonsWithStableTopology,
 } from "./renderPolygons";
-export { computeTextureAtlasPlanPublic } from "./plan";
+export { computeTextureAtlasPlanPublic } from "@layoutit/polycss-core";
 export {
   formatMatrix3d,
   formatCssLengthPx,

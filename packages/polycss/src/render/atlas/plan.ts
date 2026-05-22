@@ -7,32 +7,6 @@ import {
   resolveProjectiveQuadGuards as resolveProjectiveQuadGuardsCore,
 } from "@layoutit/polycss-core";
 
-// Pure plan functions — all math, no DOM.
-export {
-  computeProjectiveQuadCoefficients,
-  computeProjectiveQuadMatrix,
-  dotVec,
-  crossVec,
-  isBasisOptimizable,
-  getPolygonBasisInfo,
-  compatibleSurface,
-  compatibleBleedSurface,
-  seamLightBrightness,
-  basisAxisKey,
-  makeLocalBasis,
-  evaluateIslandAxis,
-  chooseIslandXAxis,
-  buildBasisHints,
-  chooseLocalBasis,
-  isFullRectBasis,
-  computeUvAffine,
-  computeUvSampleRect,
-  projectTextureTriangle,
-  computeTextureAtlasPlan,
-  computeTextureAtlasPlanPublic,
-  stableBasisFromPlan,
-} from "@layoutit/polycss-core";
-
 /**
  * Polycss wrapper: extracts the `__polycssProjectiveQuadGuards` override bag
  * from `doc.defaultView` and delegates to the pure-math core function.
