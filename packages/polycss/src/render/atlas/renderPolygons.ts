@@ -48,10 +48,10 @@ import {
   updateCornerShapeElementWithStablePlan,
 } from "./emit";
 import { removeInlineStyleProperty, setInlineStyleProperty } from "./paintDefaults";
+import { computeSolidTriangleColorPlan } from "@layoutit/polycss-core";
 import {
   computeSolidTrianglePlan,
   computeSolidTrianglePlanFromCssPoints,
-  computeSolidTriangleColorPlan,
 } from "./solidTrianglePlan";
 import {
   createSolidTriangleElement,

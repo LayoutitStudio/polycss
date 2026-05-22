@@ -1,21 +1,14 @@
 import type { Polygon } from "@layoutit/polycss-core";
 import {
-  computeSolidTriangleColorPlanFromNormal,
-  computeSolidTriangleColorPlan,
   computeSolidTrianglePlanFromCssPoints as computeSolidTrianglePlanFromCssPointsCore,
   computeSolidTrianglePlan as computeSolidTrianglePlanCore,
 } from "@layoutit/polycss-core";
 import type {
   SolidTrianglePlan,
-  SolidTriangleColorPlan,
   SolidTriangleComputeOptions,
-  InternalRenderTextureAtlasOptions,
   RenderTextureAtlasOptions,
 } from "./types";
 import { resolveSolidTrianglePrimitive } from "./strategy";
-
-// Pure color/math functions re-exported from core.
-export { computeSolidTriangleColorPlanFromNormal, computeSolidTriangleColorPlan };
 
 /**
  * Polycss wrapper for computeSolidTrianglePlan that pre-resolves the primitive

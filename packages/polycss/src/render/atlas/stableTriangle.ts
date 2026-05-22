@@ -23,10 +23,10 @@ import {
   rgbToCss,
   colorErrorScore,
 } from "./paintDefaults";
+import { computeSolidTriangleColorPlan } from "@layoutit/polycss-core";
 import {
   computeSolidTrianglePlan,
   computeSolidTrianglePlanFromCssPoints,
-  computeSolidTriangleColorPlan,
 } from "./solidTrianglePlan";
 import { stableTriangleMatrixDecimals } from "@layoutit/polycss-core";
 import { applyPolygonDataAttrs, hasPolygonDataAttrs, clearAtlasImageStyles } from "./emit";
