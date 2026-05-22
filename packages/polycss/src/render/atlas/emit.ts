@@ -11,7 +11,7 @@ import type {
   RenderTextureAtlasOptions,
   ProjectiveQuadGuardSettings,
 } from "./types";
-import { formatCssLength, formatMatrix3dValues, formatSolidQuadMatrix } from "./matrix";
+import { formatCssLength, formatMatrix3dValues, formatSolidQuadMatrix } from "@layoutit/polycss-core";
 import {
   setInlineStyleProperty,
   removeInlineStyleProperty,

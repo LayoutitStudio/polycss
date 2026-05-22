@@ -39,7 +39,7 @@ export {
   formatMatrix3d,
   formatCssLengthPx,
   formatSolidQuadEntryMatrix,
-} from "./matrix";
+} from "@layoutit/polycss-core";
 export { formatBorderShapeEntryMatrix, cssBorderShapeForPlan } from "./borderShape";
 export {
   renderPolygonsWithStableTriangles,
