@@ -861,7 +861,7 @@ describe("renderPolygonsWithTextureAtlas", () => {
 
     for (const fixture of CORNER_SHAPE_CORPUS) {
       const parsed = parseGltf(loadGalleryGlb(...fixture));
-      const polygons = optimizeMeshPolygons(parsed.polygons, { meshResolution: "lossy" });
+      const polygons = optimizeMeshPolygons(parsed.polygons, { meshResolution: "lossless" });
       parsed.dispose();
 
       const before = renderPolygonsWithTextureAtlas(polygons, { doc: beforeDoc });
