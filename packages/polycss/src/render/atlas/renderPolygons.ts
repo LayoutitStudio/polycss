@@ -31,7 +31,7 @@ import {
   borderShapeSupported,
   resolveSolidTrianglePrimitive,
 } from "./strategy";
-import { cornerShapeGeometryForPlan } from "./borderShape";
+import { cornerShapeGeometryForPlan } from "@layoutit/polycss-core";
 import { packTextureAtlasPlansWithScale } from "./packing";
 import { buildAtlasPages } from "./rasterise";
 import {
