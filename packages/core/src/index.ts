@@ -376,3 +376,19 @@ export {
   computeTextureAtlasPlan,
   computeTextureAtlasPlanPublic,
 } from "./atlas/plan";
+export {
+  normalizeAtlasScale,
+  atlasArea,
+  autoAtlasScaleCap,
+  autoAtlasScale,
+  atlasBitmapMaxSide,
+  atlasDecodedBytes,
+  autoAtlasBudgetFactor,
+  autoAtlasMaxDecodedBytes,
+  atlasCanonicalSizeForTextureQuality,
+  applyPackedAtlasCanonicalSize,
+  atlasCanonicalSizeForEntry,
+  atlasPadding,
+  packTextureAtlasPlans,
+  packTextureAtlasPlansWithScaleCore,
+} from "./atlas/packing";
