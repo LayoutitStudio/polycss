@@ -1,21 +1,22 @@
 import { useMemo } from "react";
 import { optimizeMeshPolygons } from "@layoutit/polycss-react";
 import type { Polygon } from "@layoutit/polycss-react";
+import { interiorShellPolygons as buildInteriorShellPolygons } from "../../helpers/interiorShell";
+import { activeMeshResolution, type WorkbenchMeshResolution } from "../../types";
 import type { LoadedModel } from "../types";
-import { interiorFillPolygons as buildInteriorFillPolygons } from "../helpers/interiorFill";
 
 export interface UseScenePolygonsOptions {
   loaded: LoadedModel | null;
   hasActiveAnimation: boolean;
-  meshResolution: "lossy" | "lossless";
+  meshResolution: WorkbenchMeshResolution;
   renderer: "react" | "vanilla";
   reactAnimatedPolygons: Polygon[] | null;
-  meshInteriorFill: boolean;
+  interiorFill: boolean;
 }
 
 export interface UseScenePolygonsResult {
   modelPolygons: Polygon[];
-  interiorFillPolygons: Polygon[];
+  interiorShellPolygons: Polygon[];
   scenePolygons: Polygon[];
   helperBbox: { minX: number; minY: number; minZ: number; maxX: number; maxY: number; maxZ: number } | null;
   helperScale: number;
@@ -28,8 +29,9 @@ export function useScenePolygons({
   meshResolution,
   renderer,
   reactAnimatedPolygons,
-  meshInteriorFill,
+  interiorFill,
 }: UseScenePolygonsOptions): UseScenePolygonsResult {
+  const effectiveMeshResolution = activeMeshResolution(meshResolution);
   const modelPolygons = useMemo(() => {
     if (!loaded) return [];
     if (hasActiveAnimation) {
@@ -39,36 +41,30 @@ export function useScenePolygons({
     }
     if (loaded.parseResult.voxelSource) return loaded.rawPolygons;
     return optimizeMeshPolygons(loaded.rawPolygons, {
-      meshResolution,
+      meshResolution: effectiveMeshResolution,
     });
   }, [
     loaded,
     hasActiveAnimation,
-    meshResolution,
+    effectiveMeshResolution,
     renderer,
     reactAnimatedPolygons,
   ]);
 
-  const interiorFillPolygons = useMemo(() => {
-    if (hasActiveAnimation || !meshInteriorFill) {
-      return [];
-    }
-    return buildInteriorFillPolygons(modelPolygons);
-  }, [
-    hasActiveAnimation,
-    modelPolygons,
-    meshInteriorFill,
-  ]);
-
-  const scenePolygons = useMemo(
-    () => interiorFillPolygons.length > 0
-      ? [...modelPolygons, ...interiorFillPolygons]
-      : modelPolygons,
-    [modelPolygons, interiorFillPolygons],
+  const interiorShellPolygons = useMemo(
+    () => interiorFill && !hasActiveAnimation && !loaded?.parseResult.voxelSource
+      ? buildInteriorShellPolygons(modelPolygons)
+      : [],
+    [
+      modelPolygons,
+      interiorFill,
+      hasActiveAnimation,
+      loaded,
+    ],
   );
 
   const helperBbox = useMemo(() => {
-    const polygons = scenePolygons;
+    const polygons = modelPolygons;
     if (polygons.length === 0) return null;
     let minX = Infinity, minY = Infinity, minZ = Infinity;
     let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
@@ -80,7 +76,7 @@ export function useScenePolygons({
       }
     }
     return { minX, minY, minZ, maxX, maxY, maxZ };
-  }, [scenePolygons]);
+  }, [modelPolygons]);
 
   const helperScale = useMemo(() => {
     if (!helperBbox) return 30;
@@ -101,5 +97,12 @@ export function useScenePolygons({
     ];
   }, [helperBbox]);
 
-  return { modelPolygons, interiorFillPolygons, scenePolygons, helperBbox, helperScale, helperTarget };
+  return {
+    modelPolygons,
+    interiorShellPolygons,
+    scenePolygons: modelPolygons,
+    helperBbox,
+    helperScale,
+    helperTarget,
+  };
 }

@@ -27,7 +27,12 @@ import {
 import { ModelsSidebar } from "../ModelsSidebar";
 import { DropOverlay } from "../DropOverlay";
 import { StatsOverlay } from "../StatsOverlay";
-import type { GizmoMode, SceneOptionsState, DomMetrics } from "../types";
+import {
+  activeMeshResolution,
+  type GizmoMode,
+  type SceneOptionsState,
+  type DomMetrics,
+} from "../types";
 import "./gallery-workbench.css";
 import type {
   PresetModel,
@@ -119,7 +124,7 @@ const DEFAULT_SCENE: SceneOptionsState = {
   matrixPrecision: "exact",
   borderShapePrecision: "exact",
   meshResolution: "lossy",
-  meshInteriorFill: false,
+  interiorFill: false,
   outlinePolygons: false,
   dragMode: "orbit",
   target: [0, 0, 0],
@@ -433,10 +438,11 @@ export default function GalleryWorkbench() {
     [animationClips, selectedAnimation],
   );
   const hasActiveAnimation = activeAnimation !== null;
+  const effectiveMeshResolution = activeMeshResolution(sceneOptions.meshResolution);
   const renderLoaded = useMemo(() => {
-    if (!loaded || !activeAnimation || sceneOptions.meshResolution !== "lossy") return loaded;
+    if (!loaded || !activeAnimation || effectiveMeshResolution !== "lossy") return loaded;
     const optimized = optimizeAnimatedMeshPolygons(loaded.parseResult, {
-      meshResolution: sceneOptions.meshResolution,
+      meshResolution: effectiveMeshResolution,
     });
     if (optimized === loaded.parseResult) return loaded;
     return {
@@ -446,7 +452,7 @@ export default function GalleryWorkbench() {
       polygons: optimized.polygons,
       animation: optimized.animation,
     };
-  }, [loaded, activeAnimation, sceneOptions.meshResolution]);
+  }, [loaded, activeAnimation, effectiveMeshResolution]);
 
   const animation = useAnimationFrames({
     loaded: renderLoaded,
@@ -457,13 +463,19 @@ export default function GalleryWorkbench() {
     reactMeshRef: meshRef,
   });
 
-  const { modelPolygons, interiorFillPolygons, scenePolygons, helperScale, helperTarget } = useScenePolygons({
+  const {
+    modelPolygons,
+    interiorShellPolygons,
+    scenePolygons,
+    helperScale,
+    helperTarget,
+  } = useScenePolygons({
     loaded: renderLoaded,
     hasActiveAnimation,
     meshResolution: sceneOptions.meshResolution,
     renderer: sceneOptions.renderer,
     reactAnimatedPolygons: animation.reactAnimatedPolygons,
-    meshInteriorFill: sceneOptions.meshInteriorFill,
+    interiorFill: sceneOptions.interiorFill,
   });
   const renderModelPolygons = useMemo(
     () => sceneOptions.solidMaterials
@@ -471,17 +483,9 @@ export default function GalleryWorkbench() {
       : modelPolygons,
     [modelPolygons, sceneOptions.solidMaterials, parserOptions.defaultColor],
   );
-  const renderInteriorFillPolygons = useMemo(
-    () => sceneOptions.solidMaterials
-      ? withSolidMaterials(interiorFillPolygons, parserOptions.defaultColor)
-      : interiorFillPolygons,
-    [interiorFillPolygons, sceneOptions.solidMaterials, parserOptions.defaultColor],
-  );
   const renderPolygons = useMemo(
-    () => renderInteriorFillPolygons.length > 0
-      ? [...renderModelPolygons, ...renderInteriorFillPolygons]
-      : renderModelPolygons,
-    [renderModelPolygons, renderInteriorFillPolygons],
+    () => renderModelPolygons,
+    [renderModelPolygons],
   );
   const hasSpriteLeaves = useMemo(
     () => metrics.sprites > 0 || scenePolygons.some(polygonHasTextureData),
@@ -611,6 +615,7 @@ export default function GalleryWorkbench() {
       sceneOptions.textureLighting,
       sceneOptions.textureQuality,
       sceneOptions.solidMaterials ? "solid-materials" : "authored-materials",
+      sceneOptions.interiorFill ? "interior-fill" : "no-interior-fill",
       sceneOptions.autoCenter,
       sceneOptions.perspective === false ? "none" : sceneOptions.perspective,
       loaded?.label ?? "none",
@@ -622,6 +627,7 @@ export default function GalleryWorkbench() {
       sceneOptions.textureLighting,
       sceneOptions.textureQuality,
       sceneOptions.solidMaterials,
+      sceneOptions.interiorFill,
       sceneOptions.autoCenter,
       sceneOptions.perspective,
       loaded?.label,
@@ -737,8 +743,8 @@ export default function GalleryWorkbench() {
             <VanillaScene
               key={rendererDebugKey}
               polygons={renderModelPolygons}
+              interiorShellPolygons={interiorShellPolygons}
               parseResult={renderLoaded?.parseResult}
-              interiorFillPolygons={renderInteriorFillPolygons}
               options={sceneOptions}
               directionalLight={directionalLight}
               ambientLight={ambientLight}
@@ -767,7 +773,7 @@ export default function GalleryWorkbench() {
               rendererDebugKey={rendererDebugKey}
               sceneOptions={sceneOptions}
               scenePolygons={renderModelPolygons}
-              interiorFillPolygons={renderInteriorFillPolygons}
+              interiorShellPolygons={interiorShellPolygons}
               directionalLight={directionalLight}
               ambientLight={ambientLight}
               textureQuality={textureQuality}
@@ -803,7 +809,7 @@ export default function GalleryWorkbench() {
         />
         <DockRendering
           meshResolution={sceneOptions.meshResolution}
-          meshInteriorFill={sceneOptions.meshInteriorFill}
+          interiorFill={sceneOptions.interiorFill}
           solidMaterials={sceneOptions.solidMaterials}
           textureLighting={sceneOptions.textureLighting}
           textureQuality={sceneOptions.textureQuality}

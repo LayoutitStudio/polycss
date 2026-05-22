@@ -26,7 +26,7 @@ import type {
   PolyTransformControlsHandle,
   Vec3,
 } from "@layoutit/polycss";
-import type { GizmoMode, SceneOptionsState } from "../types";
+import { meshResolutionShowsMesh, type GizmoMode, type SceneOptionsState } from "../types";
 
 export type { GizmoMode, SceneOptionsState };
 
@@ -180,8 +180,8 @@ function lightHelperPosition(
 
 export interface VanillaSceneProps {
   polygons: Polygon[];
+  interiorShellPolygons: Polygon[];
   parseResult?: ParseResult;
-  interiorFillPolygons: Polygon[];
   options: SceneOptionsState;
   directionalLight: PolyDirectionalLight;
   ambientLight: PolyAmbientLight;
@@ -208,8 +208,8 @@ export interface VanillaSceneProps {
 
 export function VanillaScene({
   polygons,
+  interiorShellPolygons,
   parseResult,
-  interiorFillPolygons,
   options,
   directionalLight,
   ambientLight,
@@ -238,7 +238,7 @@ export function VanillaScene({
   const cameraRef = useRef<PolyPerspectiveCameraHandle | PolyOrthographicCameraHandle | null>(null);
   const controlsRef = useRef<PolyControlsHandle | PolyFirstPersonControlsHandle | null>(null);
   const meshHandleRef = useRef<VanillaPolyMeshHandle | null>(null);
-  const interiorFillHandleRef = useRef<VanillaPolyMeshHandle | null>(null);
+  const interiorShellHandleRef = useRef<VanillaPolyMeshHandle | null>(null);
   const axesHandleRef = useRef<VanillaPolyMeshHandle | null>(null);
   const lightHandleRef = useRef<VanillaPolyMeshHandle | null>(null);
   const groundHandleRef = useRef<VanillaPolyMeshHandle | null>(null);
@@ -265,12 +265,12 @@ export function VanillaScene({
     stableDom: boolean;
   } | null>(null);
 
-  const mountInteriorFillInsideModel = useCallback(() => {
+  const mountChildMeshInsideModel = useCallback((child: VanillaPolyMeshHandle | null) => {
     const modelEl = meshHandleRef.current?.element;
-    const fillEl = interiorFillHandleRef.current?.element;
-    if (!modelEl || !fillEl) return;
-    if (fillEl.parentElement !== modelEl || fillEl.nextSibling !== null) {
-      modelEl.appendChild(fillEl);
+    const childEl = child?.element;
+    if (!modelEl || !childEl) return;
+    if (childEl.parentElement !== modelEl || childEl.nextSibling !== null) {
+      modelEl.appendChild(childEl);
     }
   }, []);
 
@@ -338,6 +338,7 @@ export function VanillaScene({
       stableDom: stableDomForMesh,
     };
     meshHandleRef.current.element.classList.add("dn-model-mesh");
+    meshHandleRef.current.element.classList.toggle("is-mesh-hidden", !meshResolutionShowsMesh(options.meshResolution));
     onMeshHandleChangeRef.current?.(meshHandleRef.current);
     return () => {
       // Tear controls down BEFORE destroying the scene — otherwise the
@@ -348,7 +349,7 @@ export function VanillaScene({
       axesHandleRef.current = null;
       lightHandleRef.current = null;
       groundHandleRef.current = null;
-      interiorFillHandleRef.current = null;
+      interiorShellHandleRef.current = null;
       mountedModelRef.current = null;
       meshHandleRef.current = null;
       sceneRef.current = null;
@@ -366,10 +367,15 @@ export function VanillaScene({
     parseResult,
   ]);
 
+  useEffect(() => {
+    meshHandleRef.current?.element.classList.toggle("is-mesh-hidden", !meshResolutionShowsMesh(options.meshResolution));
+  }, [options.meshResolution]);
+
   // Effect 1.5 — replace geometry on the existing mesh. This is the path
-  // used by animated GLB playback. Interior fill remains a non-shadow mesh,
-  // but its wrapper is mounted inside the model mesh wrapper so it inherits
-  // the same mesh transform.
+  // used by animated GLB playback; seam bleed is already baked into the
+  // polygon list before the mesh reaches this renderer. The interior shell
+  // is a separate non-shadow mesh mounted inside the model wrapper so it
+  // inherits the same mesh transform without changing auto-centering.
   useEffect(() => {
     const handle = meshHandleRef.current;
     const scene = sceneRef.current;
@@ -394,21 +400,21 @@ export function VanillaScene({
       };
     }
 
-    let fillHandle = interiorFillHandleRef.current;
-    if (interiorFillPolygons.length === 0) {
-      fillHandle?.dispose();
-      interiorFillHandleRef.current = null;
-    } else if (fillHandle) {
-      fillHandle.setPolygons(interiorFillPolygons, {
+    let shellHandle = interiorShellHandleRef.current;
+    if (interiorShellPolygons.length === 0) {
+      shellHandle?.dispose();
+      interiorShellHandleRef.current = null;
+    } else if (shellHandle) {
+      shellHandle.setPolygons(interiorShellPolygons, {
         merge: false,
         stableDom: stableDomForMesh,
         recomputeAutoCenter: false,
       });
-      mountInteriorFillInsideModel();
+      mountChildMeshInsideModel(shellHandle);
     } else {
-      fillHandle = scene.add(
+      shellHandle = scene.add(
         {
-          polygons: interiorFillPolygons,
+          polygons: interiorShellPolygons,
           objectUrls: [],
           warnings: [],
           dispose: () => {},
@@ -420,9 +426,9 @@ export function VanillaScene({
           castShadow: false,
         },
       );
-      fillHandle.element.classList.add("dn-interior-fill-mesh");
-      interiorFillHandleRef.current = fillHandle;
-      mountInteriorFillInsideModel();
+      shellHandle.element.classList.add("dn-interior-shell-mesh");
+      interiorShellHandleRef.current = shellHandle;
+      mountChildMeshInsideModel(shellHandle);
     }
 
     requestAnimationFrame(() =>
@@ -430,10 +436,10 @@ export function VanillaScene({
     );
   }, [
     polygons,
-    interiorFillPolygons,
+    interiorShellPolygons,
     mergePolygonsForMesh,
     stableDomForMesh,
-    mountInteriorFillInsideModel,
+    mountChildMeshInsideModel,
   ]);
 
   // Effect 1.6 — live-toggle castShadow without rebuilding the scene.
@@ -700,7 +706,7 @@ export function VanillaScene({
     ambientLight,
   ]);
 
-  // Effect 2b — render strategy toggles. Kept separate from Effect 2 because
+  // Effect 2b — render strategy controls. Kept separate from Effect 2 because
   // these options trigger a full mesh re-render in
   // createPolyScene; folding it into the camera/lighting effect would
   // re-render on every rotation/zoom tick.

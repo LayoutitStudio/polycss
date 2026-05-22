@@ -29,10 +29,42 @@ import {
 } from "./paintDefaults";
 import {
   cssPoints,
+  offsetConvexPolygonPointsByEdgeAmounts,
   offsetStableTrianglePoints,
   stableTriangleMatrixDecimals,
 } from "./solidTriangle";
+import {
+  resolveSeamBleed,
+  safePlanSeamBleedAmount,
+} from "./edgeRepair";
 import { formatAffineMatrix3dTransformScalars } from "./matrix";
+
+function triangleEdgeIndexForPair(a: number, b: number): number | undefined {
+  if ((a + 1) % 3 === b) return a;
+  if ((b + 1) % 3 === a) return b;
+  return undefined;
+}
+
+function stableTriangleEdgeAmounts(
+  seamEdges: ReadonlySet<number> | undefined,
+  seamBleed: SolidTrianglePlanOptions["seamBleed"],
+  fallback: number,
+  a: number,
+  b: number,
+  c: number,
+  screenPts: number[],
+): number[] | null {
+  if (!seamEdges?.size) return null;
+  const seamAmount = seamBleed === "auto"
+    ? Number.POSITIVE_INFINITY
+    : resolveSeamBleed(seamBleed, fallback);
+  const edgePairs: Array<[number, number]> = [[c, a], [a, b], [b, c]];
+  return edgePairs.map(([from, to], localEdgeIndex) => {
+    const edgeIndex = triangleEdgeIndexForPair(from, to);
+    const requested = edgeIndex !== undefined && seamEdges.has(edgeIndex) ? seamAmount : 0;
+    return safePlanSeamBleedAmount(screenPts, localEdgeIndex, requested);
+  });
+}
 
 export function computeSolidTriangleColorPlanFromNormal(
   polygon: Polygon,
@@ -308,7 +340,24 @@ export function computeSolidTrianglePlanFromCssPoints(
 
   const left = Math.max(0, Math.min(baseLength, apexX));
   const right = Math.max(0, baseLength - left);
-  const expanded = offsetStableTrianglePoints(left, right, height, SOLID_TRIANGLE_BLEED);
+  const screenPts = [left, 0, 0, height, left + right, height];
+  const edgeAmounts = stableTriangleEdgeAmounts(
+    options.seamEdges,
+    options.seamBleed,
+    SOLID_TRIANGLE_BLEED,
+    a,
+    b,
+    c,
+    screenPts,
+  );
+  const expanded = edgeAmounts
+    ? offsetConvexPolygonPointsByEdgeAmounts(screenPts, edgeAmounts)
+    : offsetStableTrianglePoints(
+        left,
+        right,
+        height,
+        resolveSeamBleed(options.seamBleed, SOLID_TRIANGLE_BLEED),
+      );
   const apex2x = expanded[0];
   const apex2y = expanded[1];
   const baseLeft2x = expanded[2];

@@ -1,9 +1,11 @@
 import type { Polygon } from "@layoutit/polycss-core";
 import {
+  buildSeamBleedPolygonEdges,
   DEFAULT_TILE,
   SOLID_TRIANGLE_CORNER_CLASS,
   DEFAULT_MATRIX_DECIMALS,
   BASIS_EPS,
+  DEFAULT_SEAM_BLEED,
 } from "@layoutit/polycss-core";
 import type {
   SolidTrianglePlan,
@@ -33,6 +35,53 @@ import {
 import { stableTriangleMatrixDecimals } from "@layoutit/polycss-core";
 import { applyPolygonDataAttrs, hasPolygonDataAttrs, clearAtlasImageStyles } from "./emit";
 import { resolveSolidTrianglePrimitive } from "./strategy";
+
+type RenderTextureAtlasOptionsWithSeams = RenderTextureAtlasOptions & {
+  seamEdges?: Set<number>;
+};
+
+function effectiveSeamBleed(options: RenderTextureAtlasOptions): RenderTextureAtlasOptions["seamBleed"] {
+  return Object.prototype.hasOwnProperty.call(options, "seamBleed")
+    ? options.seamBleed
+    : DEFAULT_SEAM_BLEED;
+}
+
+function shouldApplySeamBleed(seamBleed: RenderTextureAtlasOptions["seamBleed"]): boolean {
+  return seamBleed === "auto" || (
+    typeof seamBleed === "number" &&
+    Number.isFinite(seamBleed) &&
+    seamBleed > 0
+  );
+}
+
+function buildStableTriangleSeamEdges(
+  polygons: Polygon[],
+  options: RenderTextureAtlasOptions,
+): Map<number, Set<number>> | null {
+  return shouldApplySeamBleed(effectiveSeamBleed(options))
+    ? buildSeamBleedPolygonEdges(polygons, {
+        tileSize: options.tileSize,
+        layerElevation: options.layerElevation,
+        directionalLight: options.directionalLight,
+        ambientLight: options.ambientLight,
+      })
+    : null;
+}
+
+function stableTriangleSeamOptions(
+  index: number,
+  seamBleedEdges: Map<number, Set<number>> | null,
+  options: RenderTextureAtlasOptions,
+): RenderTextureAtlasOptionsWithSeams {
+  const seamBleed = effectiveSeamBleed(options);
+  return seamBleedEdges
+    ? {
+        ...options,
+        seamBleed: seamBleedEdges.has(index) ? seamBleed : undefined,
+        seamEdges: seamBleedEdges.get(index),
+      }
+    : options;
+}
 
 export function stableTriangleColorState(options: InternalRenderTextureAtlasOptions): StableTriangleColorState {
   return {
@@ -292,6 +341,7 @@ export function updateStableTriangleElementsStreaming(
     if (item.kind !== "triangle" || item.polygonIndex !== i || !polygons[i]) return false;
   }
 
+  const seamBleedEdges = buildStableTriangleSeamEdges(polygons, options);
   for (let i = 0; i < rendered.length; i++) {
     const element = rendered[i].element as SolidTriangleElement;
     const polygon = polygons[i];
@@ -317,7 +367,7 @@ export function updateStableTriangleElementsStreaming(
       continue;
     }
 
-    const plan = computeSolidTrianglePlan(polygon, i, options, {
+    const plan = computeSolidTrianglePlan(polygon, i, stableTriangleSeamOptions(i, seamBleedEdges, options), {
       basis: element.__polycssSolidTriangleBasis,
       matrixDecimals,
       includeColor: stableTriangleUpdateMode !== "plan-only" &&
@@ -393,6 +443,7 @@ export function captureStableTriangleTransformFrame(
   }
 
   const values = frame.vertices;
+  const seamBleedEdges = buildStableTriangleSeamEdges(polygons, options);
   for (let i = 0; i < rendered.length; i++) {
     const element = rendered[i].element as SolidTriangleElement;
     const polygon = polygons[i]!;
@@ -409,7 +460,7 @@ export function captureStableTriangleTransformFrame(
     const plan = computeSolidTrianglePlanFromCssPoints(
       polygon,
       i,
-      options,
+      stableTriangleSeamOptions(i, seamBleedEdges, options),
       {
         basis: element.__polycssSolidTriangleBasis,
         matrixDecimals,
@@ -464,10 +515,11 @@ export function renderPolygonsWithStableTriangles(
   }
   const matrixDecimals = stableTriangleMatrixDecimals((options as InternalRenderTextureAtlasOptions).stableTriangleMatrixDecimals);
   const rendered: RenderedPoly[] = [];
+  const seamBleedEdges = buildStableTriangleSeamEdges(polygons, options);
 
   for (let i = 0; i < polygons.length; i += 1) {
     const polygon = polygons[i];
-    const plan = computeSolidTrianglePlan(polygon, i, options, {
+    const plan = computeSolidTrianglePlan(polygon, i, stableTriangleSeamOptions(i, seamBleedEdges, options), {
       matrixDecimals,
       primitive: solidTrianglePrimitive,
     });
@@ -527,6 +579,7 @@ export function updatePolygonsWithStableTriangles(
   }
   const nextTrianglePlans: Array<SolidTrianglePlan | null> = new Array(rendered.length);
   const nextTriangleColorPlans: Array<SolidTriangleColorPlan | null> = new Array(rendered.length);
+  const seamBleedEdges = buildStableTriangleSeamEdges(polygons, options);
   for (let i = 0; i < rendered.length; i++) {
     const element = rendered[i].element as SolidTriangleElement;
     if (colorOnly) {
@@ -544,7 +597,7 @@ export function updatePolygonsWithStableTriangles(
         : null;
       continue;
     }
-    nextTrianglePlans[i] = computeSolidTrianglePlan(polygons[i], i, options, {
+    nextTrianglePlans[i] = computeSolidTrianglePlan(polygons[i], i, stableTriangleSeamOptions(i, seamBleedEdges, options), {
       basis: element.__polycssSolidTriangleBasis,
       matrixDecimals,
       includeColor: stableTriangleUpdateMode !== "plan-only" &&

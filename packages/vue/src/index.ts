@@ -13,7 +13,7 @@ export type { PolyCameraContextValue } from "./camera";
 
 export { PolyScene } from "./scene";
 export type { PolySceneProps } from "./scene";
-export type { PolyRenderStrategy, PolyRenderStrategiesOption } from "@layoutit/polycss-core";
+export type { PolyRenderStrategy, PolyRenderStrategiesOption, PolySeamBleed } from "@layoutit/polycss-core";
 export { PolyMesh } from "./scene";
 export type { PolyMeshProps } from "./scene";
 export { PolyGround } from "./scene";
@@ -140,6 +140,14 @@ export type {
   TexturePaintMetricsOptions,
   CoverPlanarPolygonsOptions,
   CullInteriorOptions,
+  SeamFacetSplitCandidate,
+  SeamFacetSplitCandidateReason,
+  SeamFacetSplitOptions,
+  SeamFacetSplitReport,
+  SeamOverlapCandidate,
+  SeamOverlapCandidateKind,
+  SeamOverlapDiagnostics,
+  SeamOverlapOptions,
   CameraCullNormalGroup,
   CameraCullRotation,
   ApproximateMergeOptions,
@@ -154,6 +162,12 @@ export {
   mergePolygons,
   coverPlanarPolygons,
   optimizeMeshPolygons,
+  repairMeshSeams,
+  seamFacetSplitPolygons,
+  seamFacetSplitReport,
+  seamOverlapDiagnostics,
+  seamOverlapPolygons,
+  seamOverlapReport,
   cullInteriorPolygons,
   cameraCullNormalGroups,
   cameraCullNormalGroupsFromPolygons,
@@ -200,11 +214,14 @@ export {
   buildSceneContext,
   computeSceneBbox,
   BASE_TILE,
+  DEFAULT_SEAM_BLEED,
   DEFAULT_CAMERA_STATE,
   DEFAULT_PROJECTION,
   normalizeInvertMultiplier,
   createPolyAnimationMixer,
   optimizeAnimatedMeshPolygons,
+  DEFAULT_SEAM_FACET_SPLIT_OPTIONS,
+  DEFAULT_SEAM_OVERLAP_OPTIONS,
   LoopOnce,
   LoopRepeat,
   LoopPingPong,

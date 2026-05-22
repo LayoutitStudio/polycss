@@ -6,18 +6,20 @@ import type {
   PolyAmbientLight,
   PolyTextureLightingMode,
 } from "@layoutit/polycss-core";
-import { BASE_TILE, parseHexColor } from "@layoutit/polycss-core";
+import { BASE_TILE, DEFAULT_SEAM_BLEED, parseHexColor } from "@layoutit/polycss-core";
 import type { ShadowOptions } from "./sceneContext";
 import { useCameraContext } from "../camera/context";
 import { usePolySceneContext } from "./useSceneContext";
 import { injectPolyBaseStyles } from "../styles/styles";
 import type { TransformProps } from "../shapes/types";
 import {
+  buildSeamBleedPolygonEdges,
   buildTextureEdgeRepairSets,
   computeTextureAtlasPlan,
   isProjectiveQuadPlan,
   isSolidTrianglePlan,
   type TextureQuality,
+  type PolySeamBleed,
   type PolyRenderStrategiesOption,
   TextureBorderShapePoly,
   TextureAtlasPoly,
@@ -57,6 +59,8 @@ export interface PolySceneProps extends TransformProps {
    *  desktop/mobile sprite sizing. Numeric values 0.1..1 force an explicit
    *  raster scale and the 64px sprite. */
   textureQuality?: TextureQuality;
+  /** Solid seam overscan. `"auto"` computes a fitted per-edge amount from the polygon plan. */
+  seamBleed?: PolySeamBleed;
   /**
    * Render strategy overrides. Use `{ disable: ["u"] }` to force solid
    * triangles through the atlas path (`<s>`), or `{ disable: ["b", "i", "u"] }`
@@ -100,6 +104,7 @@ function PolySceneInner({
   ambientLight,
   textureLighting = "baked",
   textureQuality,
+  seamBleed = DEFAULT_SEAM_BLEED,
   strategies,
   autoCenter = false,
   shadow,
@@ -182,8 +187,9 @@ function PolySceneInner({
       directionalLight: directionalForAtlas,
       ambientLight: ambientForAtlas,
       textureLighting,
+      seamBleed,
     };
-  }, [directionalForAtlas, ambientForAtlas, textureLighting]);
+  }, [directionalForAtlas, ambientForAtlas, textureLighting, seamBleed]);
 
   // Bbox center of all auto-centerable meshes in world coords. Kept as a Vec3
   // so it can be added to `target` inside the scene transform — same
@@ -224,12 +230,26 @@ function PolySceneInner({
   const textureAtlasPlans = useMemo(
     () => {
       const repairEdges = buildTextureEdgeRepairSets(polygons);
+      const seamBleedEdges = seamBleed === "auto" || (
+        typeof seamBleed === "number" &&
+        Number.isFinite(seamBleed) &&
+        seamBleed > 0
+      )
+        ? buildSeamBleedPolygonEdges(polygons, {
+            tileSize: polyContext.tileSize,
+            layerElevation: polyContext.layerElevation,
+            directionalLight: directionalForAtlas,
+            ambientLight: ambientForAtlas,
+          })
+        : null;
       return polygons.map((p, i) => computeTextureAtlasPlan(p, i, {
         ...polyContext,
+        seamBleed: seamBleedEdges?.has(i) ? seamBleed : undefined,
+        seamEdges: seamBleedEdges?.get(i),
         textureEdgeRepairEdges: repairEdges[i],
       }));
     },
-    [polygons, polyContext],
+    [polygons, polyContext, seamBleed, directionalForAtlas, ambientForAtlas],
   );
   const textureAtlas = useTextureAtlas(textureAtlasPlans, textureLighting, textureQuality, strategies);
 
@@ -369,10 +389,11 @@ function PolySceneInner({
       directionalLight,
       ambientLight,
       strategies,
+      seamBleed,
       shadow,
       registerShadowCaster,
     }),
-    [textureLighting, directionalLight, ambientLight, strategies, shadow, registerShadowCaster],
+    [textureLighting, directionalLight, ambientLight, strategies, seamBleed, shadow, registerShadowCaster],
   );
 
   return (

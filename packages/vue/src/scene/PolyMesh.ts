@@ -19,9 +19,16 @@
 import { defineComponent, h, computed, inject, onMounted, onBeforeUnmount, ref, watch } from "vue";
 import type { PropType, VNode, CSSProperties } from "vue";
 import type { MeshResolution, Polygon, PolyTextureLightingMode, Vec3 } from "@layoutit/polycss-core";
-import { computeSceneBbox, inverseRotateVec3, findOverlappingPolygonDuplicates, parseHexColor } from "@layoutit/polycss-core";
+import {
+  computeSceneBbox,
+  DEFAULT_SEAM_BLEED,
+  inverseRotateVec3,
+  findOverlappingPolygonDuplicates,
+  parseHexColor,
+} from "@layoutit/polycss-core";
 import { usePolyMesh } from "./useMesh";
 import {
+  buildSeamBleedPolygonEdges,
   buildTextureEdgeRepairSets,
   computeTextureAtlasPlan,
   cssBorderShapeForPlan,
@@ -29,6 +36,7 @@ import {
   isProjectiveQuadPlan,
   isSolidTrianglePlan,
   type TextureQuality,
+  type PolySeamBleed,
   type SolidPaintDefaults,
   renderTextureBorderShapePoly,
   renderTextureAtlasPoly,
@@ -79,6 +87,8 @@ export interface PolyMeshProps extends InteractionProps {
    *  desktop/mobile sprite sizing. Numeric values 0.1..1 force an explicit
    *  raster scale and the 64px sprite. */
   textureQuality?: TextureQuality;
+  /** Solid seam overscan. `"auto"` computes a fitted per-edge amount from the polygon plan. */
+  seamBleed?: PolySeamBleed;
   /**
    * When `true` and the scene is in dynamic lighting mode, the renderer emits
    * a flat shadow leaf sibling for each non-duplicate polygon. The shadow is
@@ -153,6 +163,7 @@ export const PolyMesh = defineComponent({
     autoCenter: { type: Boolean, default: false },
     textureLighting: { type: String as PropType<PolyTextureLightingMode>, default: undefined },
     textureQuality: { type: [Number, String] as PropType<TextureQuality>, default: undefined },
+    seamBleed: { type: [Number, String] as PropType<PolySeamBleed>, default: undefined },
     castShadow: { type: Boolean as PropType<boolean>, default: false },
     meshResolution: { type: String as PropType<MeshResolution>, default: undefined },
     class: { type: String },
@@ -218,6 +229,7 @@ export const PolyMesh = defineComponent({
       () => props.textureLighting ?? sceneCtx?.value.textureLighting ?? "baked",
     );
     const atlasStrategies = computed(() => sceneCtx?.value.strategies);
+    const atlasSeamBleed = computed(() => props.seamBleed ?? sceneCtx?.value.seamBleed ?? DEFAULT_SEAM_BLEED);
     const atlasDirectional = computed(() =>
       atlasTextureLighting.value === "dynamic" ? undefined : sceneCtx?.value.directionalLight,
     );
@@ -264,10 +276,22 @@ export const PolyMesh = defineComponent({
     const textureAtlasPlans = computed(() => {
       if (!atlasAutoRender) return [];
       const repairEdges = buildTextureEdgeRepairSets(polygons.value);
+      const seamBleedEdges = atlasSeamBleed.value === "auto" || (
+        typeof atlasSeamBleed.value === "number" &&
+        Number.isFinite(atlasSeamBleed.value) &&
+        atlasSeamBleed.value > 0
+      )
+        ? buildSeamBleedPolygonEdges(polygons.value, {
+            directionalLight: bakedDirectional.value,
+            ambientLight: atlasAmbient.value,
+          })
+        : null;
       return polygons.value.map((p, i) =>
         computeTextureAtlasPlan(p, i, {
           directionalLight: bakedDirectional.value,
           ambientLight: atlasAmbient.value,
+          seamBleed: seamBleedEdges?.has(i) ? atlasSeamBleed.value : undefined,
+          seamEdges: seamBleedEdges?.get(i),
           textureEdgeRepairEdges: repairEdges[i],
         }),
       );
@@ -375,6 +399,7 @@ export const PolyMesh = defineComponent({
             ambientLight: atlasAmbient.value,
             textureLighting: atlasTextureLighting.value,
             strategies: atlasStrategies.value,
+            seamBleed: atlasSeamBleed.value,
             colorFrame: ++stableTriangleColorFrame.value,
             colorSteps: 8,
             colorFreezeFrames: 12,

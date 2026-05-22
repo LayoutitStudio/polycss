@@ -10,6 +10,7 @@ export type {
   SolidPaintDefaults,
   TextureAtlasPage,
   ComputeTextureAtlasPlanOptions,
+  PolySeamBleed,
 } from "@layoutit/polycss-core";
 export type {
   RenderTextureAtlasOptions,
@@ -18,7 +19,7 @@ export type {
   RenderTextureAtlasAsyncResult,
 } from "./types";
 export { packTextureAtlasPlansWithScale } from "./packing";
-export { buildTextureEdgeRepairSets } from "@layoutit/polycss-core";
+export { buildTextureEdgeRepairSets, buildSeamBleedPolygonEdges, buildSeamBleedPolygonSet } from "@layoutit/polycss-core";
 export { buildAtlasPages } from "./rasterise";
 export {
   isFullRectSolid,

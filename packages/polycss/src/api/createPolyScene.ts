@@ -37,6 +37,7 @@ import type {
 import {
   BASE_TILE,
   CAMERA_BACKFACE_CULL_EPS,
+  DEFAULT_SEAM_BLEED,
   VOXEL_CAMERA_CULL_NORMAL_LIMIT,
   cameraCullNormalKey,
   cameraCullVisibleSignature,
@@ -45,7 +46,6 @@ import {
   inverseRotateVec3,
   isAxisAlignedSurfaceNormal,
   isVoxelCameraCullableNormalGroups,
-  mergePolygons,
   normalFacesCamera,
   optimizeMeshPolygons,
   parseHexColor,
@@ -60,6 +60,7 @@ import {
   updateStableTriangleFrame,
   updatePolygonsWithStableTopology,
   type TextureQuality,
+  type PolySeamBleed,
   type PolyRenderStrategiesOption,
   type RenderedPoly,
   type SolidPaintDefaults,
@@ -75,6 +76,13 @@ import { injectPolyBaseStyles } from "../styles/styles";
 // without changing the synchronous public setPolygons() contract.
 const ASYNC_MOUNT_BATCH_SIZE = 750;
 const DEFAULT_SCENE_PERSPECTIVE = 8000;
+
+function normalizeSceneOptions<T extends Partial<Omit<PolySceneOptions, "camera">>>(options: T): T {
+  if (!Object.prototype.hasOwnProperty.call(options, "seamBleed") || options.seamBleed !== undefined) {
+    return options;
+  }
+  return { ...options, seamBleed: DEFAULT_SEAM_BLEED };
+}
 
 export interface PolySceneOptions {
   /**
@@ -92,6 +100,8 @@ export interface PolySceneOptions {
    *  desktop/mobile sprite sizing. Numeric values 0.1..1 force an explicit
    *  raster scale and the 64px sprite. */
   textureQuality?: TextureQuality;
+  /** Solid seam overscan. `"auto"` computes a fitted per-edge amount from the polygon plan. */
+  seamBleed?: PolySeamBleed;
   /**
    * Skip specific render-strategy tags. Polygons that would normally use a
    * disabled tag fall through the chain (b → i → s, u → i → s, i → s).
@@ -143,8 +153,6 @@ export interface PolyMeshTransform {
    * Mesh optimization intent. Defaults to `"lossy"` (bounded geometric
    * approximation when it reduces polygon count). Set `"lossless"` to preserve
    * the authored surface — only exact coplanar merges are applied.
-   * When set, the optimizer runs with this resolution and supersedes the
-   * plain `mergePolygons` pass.
    */
   meshResolution?: MeshResolution;
   /**
@@ -526,7 +534,10 @@ export function createPolyScene(
   // currentOptions holds non-camera scene options only.
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const { camera: _cameraOption, ...nonCameraOptions } = options;
-  let currentOptions: Omit<PolySceneOptions, "camera"> = { ...nonCameraOptions };
+  let currentOptions: Omit<PolySceneOptions, "camera"> = normalizeSceneOptions({
+    seamBleed: DEFAULT_SEAM_BLEED,
+    ...nonCameraOptions,
+  });
   const layoutScale = effectiveCssZoom(host);
 
   // Bbox-center of all live meshes (helpers opt out). Auto-managed by
@@ -1233,6 +1244,7 @@ export function createPolyScene(
       ambientLight: currentOptions.ambientLight,
       textureLighting: currentOptions.textureLighting,
       textureQuality: currentOptions.textureQuality,
+      seamBleed: currentOptions.seamBleed,
       strategies: currentOptions.strategies,
     };
     const solidPaintDefaults = getSolidPaintDefaults(entry.polygons, renderOptions);
@@ -1300,6 +1312,7 @@ export function createPolyScene(
       ambientLight: currentOptions.ambientLight,
       textureLighting: currentOptions.textureLighting,
       textureQuality: currentOptions.textureQuality,
+      seamBleed: currentOptions.seamBleed,
       strategies: currentOptions.strategies,
     };
     const atlas = entry.stableDom
@@ -1374,14 +1387,12 @@ export function createPolyScene(
     const css = buildMeshTransform(transform);
     if (css) wrapper.style.transform = css;
 
-    // When meshResolution is explicitly set, run the full optimizer (which
-    // subsumes mergePolygons) with that resolution intent. Otherwise fall back
-    // to the plain merge pass for backward compatibility.
+    // Static meshes use the full optimizer by default; meshResolution selects
+    // the quality intent. Explicit merge:false remains the escape hatch for
+    // animated topology updates and helper meshes that are already prepared.
     const preparePolygons = (polygons: Polygon[], merge: boolean): Polygon[] => {
-      if (transformIn.meshResolution !== undefined) {
-        return optimizeMeshPolygons(polygons, { meshResolution: transformIn.meshResolution });
-      }
-      return merge ? mergePolygons(polygons) : polygons;
+      if (parseResult.voxelSource || !merge) return polygons;
+      return optimizeMeshPolygons(polygons, { meshResolution: transformIn.meshResolution });
     };
     const sourcePolygons = preparePolygons(parseResult.polygons, mergeOnUpdate);
 
@@ -1501,6 +1512,7 @@ export function createPolyScene(
           ambientLight: currentOptions.ambientLight,
           textureLighting: currentOptions.textureLighting,
           textureQuality: currentOptions.textureQuality,
+          seamBleed: currentOptions.seamBleed,
         };
         const allStableTriangles =
           entry.rendered.length === entry.polygons.length &&
@@ -1631,6 +1643,7 @@ export function createPolyScene(
             ambientLight: currentOptions.ambientLight,
             textureLighting: currentOptions.textureLighting,
             textureQuality: currentOptions.textureQuality,
+            seamBleed: currentOptions.seamBleed,
             solidPaintDefaults: {},
             optimizeStableTriangleStyle: true,
             stableTriangleDebug: options?.stableTriangleDebug,
@@ -1801,8 +1814,10 @@ export function createPolyScene(
   function setOptions(partial: Partial<Omit<PolySceneOptions, "camera">>): void {
     const prevAutoCenter = !!currentOptions.autoCenter;
     const prevStrategies = currentOptions.strategies;
+    const prevSeamBleed = currentOptions.seamBleed;
     const prevTextureLighting = currentOptions.textureLighting;
-    currentOptions = { ...currentOptions, ...partial };
+    const normalizedPartial = normalizeSceneOptions(partial);
+    currentOptions = { ...currentOptions, ...normalizedPartial };
     applySceneStyle(sceneEl, currentOptions);
     const nextAutoCenter = !!currentOptions.autoCenter;
     // Re-evaluate per-mesh light overrides when lighting settings change —
@@ -1817,7 +1832,9 @@ export function createPolyScene(
     // updates) don't blow up the atlas every frame.
     const strategiesChanged = partial.strategies !== undefined &&
       !strategiesEqual(partial.strategies, prevStrategies);
-    if (strategiesChanged) {
+    const seamBleedChanged = Object.prototype.hasOwnProperty.call(partial, "seamBleed") &&
+      normalizedPartial.seamBleed !== prevSeamBleed;
+    if (strategiesChanged || seamBleedChanged) {
       for (const entry of meshes) renderEntry(entry);
     }
     if (prevAutoCenter !== nextAutoCenter) recomputeAutoCenter();
@@ -1827,7 +1844,7 @@ export function createPolyScene(
       prevTextureLighting !== currentOptions.textureLighting;
     if (textureLightingChanged) {
       for (const entry of meshes) {
-        if (!strategiesChanged && (entry.voxelSource || entry.voxelRenderer)) {
+        if (!strategiesChanged && !seamBleedChanged && (entry.voxelSource || entry.voxelRenderer)) {
           renderEntry(entry);
         } else {
           emitShadowLeaves(entry);

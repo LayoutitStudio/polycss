@@ -204,15 +204,22 @@ export function useSlider(
   range: { min: number; max: number; step?: number },
   value: number,
   onChange: (next: number) => void,
+  options?: { commit?: "change" | "finish" },
 ): DockController<number> | null {
   // Range captured at mount — changing it would require destroying and re-
   // adding the controller. None of our uses change range at runtime.
   const rangeRef = useRef(range);
   rangeRef.current = range;
+  const commitRef = useRef(options?.commit ?? "change");
+  commitRef.current = options?.commit ?? "change";
   return useControllerLifecycle(parent, label, value, onChange, (folder, proxy, cb) => {
     const r = rangeRef.current;
     const ctrl = folder.add(proxy, "value", r.min, r.max, r.step);
-    ctrl.onChange((v: number) => cb(v));
+    if (commitRef.current === "finish") {
+      ctrl.onFinishChange((v: number) => cb(v));
+    } else {
+      ctrl.onChange((v: number) => cb(v));
+    }
     return ctrl;
   });
 }

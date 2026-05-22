@@ -6,6 +6,7 @@ import type { Polygon, Vec3 } from "../types";
 import { parseGltf } from "../parser/parseGltf";
 import { parseObj } from "../parser/parseObj";
 import { bakeSolidTextureSamples } from "../parser/solidTextureSamples";
+import { DEFAULT_SEAM_FACET_SPLIT_OPTIONS } from "./seamRepair";
 import { optimizeMeshPolygons } from "./optimizePolygons";
 
 function rect(x0: number, y0: number, x1: number, y1: number): Polygon[] {
@@ -380,10 +381,10 @@ describe("optimizeMeshPolygons", () => {
     const lossy = optimizeMeshPolygons(raw, { meshResolution: "lossy" });
 
     expect(lossless).toHaveLength(10);
-    expect(lossy.length).toBeLessThanOrEqual(lossless.length);
+    expect(renderCost(lossy)).toBeLessThanOrEqual(renderCost(lossless) + 1e-9);
   });
 
-  it("keeps automatic lossy quality fallback under the exact lossless floor", async () => {
+  it("keeps automatic lossy seam repair within the split budget over the exact lossless floor", async () => {
     installSolidTextureEnv([10, 20, 30, 255]);
 
     for (const file of ["poly-pizza/arrow.glb", "poly-pizza/bucket.glb"]) {
@@ -395,8 +396,9 @@ describe("optimizeMeshPolygons", () => {
       const lossless = optimizeMeshPolygons(baked.polygons, { meshResolution: "lossless" });
       const lossy = optimizeMeshPolygons(baked.polygons, { meshResolution: "lossy" });
 
-      expect(lossy.length, file).toBeLessThanOrEqual(lossless.length);
-      expect(renderCost(lossy), file).toBeLessThanOrEqual(renderCost(lossless) + 1e-9);
+      expect(lossy.length, file).toBeLessThanOrEqual(
+        lossless.length + DEFAULT_SEAM_FACET_SPLIT_OPTIONS.budget,
+      );
     }
   });
 
@@ -439,8 +441,9 @@ describe("optimizeMeshPolygons", () => {
     const automatic = optimizeMeshPolygons(raw, { meshResolution: "lossy" });
 
     expect(forced.length).toBeLessThan(lossless.length);
-    expect(automatic.length).toBeGreaterThan(forced.length);
     expect(automatic.length).toBeLessThan(lossless.length);
+    expect(renderCost(automatic)).toBeLessThan(renderCost(lossless));
+    expect(polygonSignature(automatic)).not.toEqual(polygonSignature(forced));
   });
 
   it("keeps lossy pair-merge neighbor seams on shared geometry", () => {

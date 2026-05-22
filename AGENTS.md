@@ -39,7 +39,7 @@ Voxel-shaped meshes are the exception to "all polygons stay mounted": meshes wit
 
 Strategies are ordered cheapest → most expensive. The mesher's job is to maximise `<b>` / `<u>` / `<i>` and minimise `<s>` (see "Meshing implications" below).
 
-Callers can opt out of specific strategies via `strategies: { disable: ["b" | "i" | "u"] }` on `RenderTextureAtlasOptions`. Disabled or unsupported strategies fall through the chain (`b → i → s`, `u → i → s`, `i → s`). Disabling `"i"` also disables the exact corner-shape solid branch even though that branch emits a bare `<u>`, because it belongs to the non-triangle clipped-solid family. `<s>` is the universal fallback and cannot be disabled.
+Callers can opt out of specific strategies via `strategies: { disable: ["b" | "i" | "u"] }` on `RenderTextureAtlasOptions`. Disabled or unsupported strategies fall through the chain (`b → i → s`, `u → i → s`, `i → s`). Disabling `"i"` also disables the exact corner-shape solid branch even though that branch emits a bare `<u>`, because it belongs to the non-triangle clipped-solid family. `<s>` is the universal fallback and cannot be disabled. Solid seam bleed defaults to `1.5` CSS px on detected shared edges; callers can set `seamBleed`, where `"auto"` computes a fitted amount from each polygon plan and numeric values clamp the per-side CSS-pixel overscan. The renderer applies bleed only to detected shared seam edges of solid primitives, rather than inflating every side of each participating polygon.
 
 The `.vox` fast path emits plain `<b>` elements directly inside the mesh wrapper. They intentionally reuse the cheap quad tag, but they are exact voxel quads with one `matrix3d(...)` per visible quad, ordered by projected tile4 scanline order. Desktop-class documents use a canonical 1px primitive for the cheapest transform shape; mobile-class documents (`pointer: coarse` or `hover: none`) use an 8px primitive and divide the in-plane matrix scale by 8 to preserve identical CSS-space geometry while avoiding large GPU filtering gaps.
 
@@ -53,6 +53,7 @@ All solid/atlas tags work in both modes. The `.vox` direct-matrix fast path is b
 ### Meshing implications (what generators must respect)
 
 - **Polygon count is the dominant cost.** Each polygon is one DOM node, one `matrix3d`, one paint. Halving the polygon count is almost always worth a more complex mesher.
+- **Lossy optimization includes bounded seam repair.** The default `"lossy"` path merges compatible polygons, then repairs high-risk seams with targeted overlap and a small split budget. This can add a few triangles back when it prevents visible cracks; the goal is lower visible seam risk, not a strict guarantee that lossy always has fewer polygons than lossless.
 - **Fill ratio matters.** A textured polygon's atlas slice equals its local-2D bounding rect. Empty space inside that slice is wasted bitmap pixels. Prefer shapes with high `area / boundingRect.area`:
   - axis-aligned rectangle = 1.0 (and hits the fastest path)
   - right-isosceles triangle = 0.5

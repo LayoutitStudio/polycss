@@ -12,7 +12,7 @@ import type {
   PolyTextureLightingMode,
   Polygon,
 } from "@layoutit/polycss-core";
-import type { PolyRenderStrategiesOption } from "./atlas";
+import type { PolyRenderStrategiesOption, PolySeamBleed } from "./atlas";
 
 export interface ShadowOptions {
   color?: string;
@@ -25,6 +25,7 @@ export interface PolySceneContextValue {
   directionalLight?: PolyDirectionalLight;
   ambientLight?: PolyAmbientLight;
   strategies?: PolyRenderStrategiesOption;
+  seamBleed?: PolySeamBleed;
   shadow?: ShadowOptions;
   /**
    * Called by PolyMesh to register/unregister itself as a shadow caster.

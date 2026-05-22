@@ -1,4 +1,10 @@
-import { parsePureColor } from "@layoutit/polycss-core";
+import {
+  isSolidTrianglePlan,
+  offsetConvexPolygonPointsByEdgeAmounts,
+  parsePureColor,
+  resolveSeamBleed,
+  safePlanSeamBleedAmount,
+} from "@layoutit/polycss-core";
 import type {
   TextureAtlasPlan,
   PolyTextureLightingMode,
@@ -6,7 +12,6 @@ import type {
   Vec2,
   Vec3,
 } from "@layoutit/polycss-core";
-import { isSolidTrianglePlan } from "@layoutit/polycss-core";
 import type { CSSProperties } from "react";
 
 // ---------------------------------------------------------------------------
@@ -297,6 +302,34 @@ function offsetStableTrianglePoints(
   return [apexX, apexY, baseLeftX, baseLeftY, baseRightX, baseRightY];
 }
 
+function triangleEdgeIndexForPair(a: number, b: number): number | undefined {
+  if ((a + 1) % 3 === b) return a;
+  if ((b + 1) % 3 === a) return b;
+  return undefined;
+}
+
+function stableTriangleEdgeAmounts(
+  entry: TextureAtlasPlan,
+  a: number,
+  b: number,
+  c: number,
+  screenPts: number[],
+): number[] | null {
+  const seamEdges = entry.seamBleedEdges;
+  if (!seamEdges?.size) return null;
+  const seamAmount = entry.seamBleed === undefined
+    ? SOLID_TRIANGLE_BLEED
+    : entry.seamBleed;
+  const edgePairs: Array<[number, number]> = [[c, a], [a, b], [b, c]];
+  return edgePairs.map(([from, to], localEdgeIndex) => {
+    const edgeIndex = triangleEdgeIndexForPair(from, to);
+    const requested = edgeIndex !== undefined && seamEdges.has(edgeIndex)
+      ? entry.seamBleedEdgeAmounts?.get(edgeIndex) ?? resolveSeamBleed(seamAmount, SOLID_TRIANGLE_BLEED)
+      : 0;
+    return safePlanSeamBleedAmount(screenPts, localEdgeIndex, requested);
+  });
+}
+
 export function formatStableTriangleTransformScalars(
   x0: number, x1: number, x2: number,
   y0: number, y1: number, y2: number,
@@ -406,7 +439,16 @@ export function solidTriangleStyle(
   const SOLID_TRIANGLE_CANONICAL_SIZE = 32;
   const left = Math.max(0, Math.min(baseLength, apexX));
   const right = Math.max(0, baseLength - left);
-  const expanded = offsetConvexPolygonPoints([left, 0, 0, height, left + right, height], SOLID_TRIANGLE_BLEED);
+  const screenPts = [left, 0, 0, height, left + right, height];
+  const edgeAmounts = stableTriangleEdgeAmounts(entry, a, b, c, screenPts);
+  const expanded = edgeAmounts
+    ? offsetConvexPolygonPointsByEdgeAmounts(screenPts, edgeAmounts)
+    : offsetStableTrianglePoints(
+        left,
+        right,
+        height,
+        resolveSeamBleed(entry.seamBleed, SOLID_TRIANGLE_BLEED),
+      );
   const apex2: Vec2 = [expanded[0], expanded[1]];
   const baseLeft2: Vec2 = [expanded[2], expanded[3]];
   const baseRight2: Vec2 = [expanded[4], expanded[5]];

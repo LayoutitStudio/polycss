@@ -134,7 +134,7 @@ export default function BuilderWorkbench() {
     mapItems((it) => snapPlacement(it, terrainVertices, sceneOptions.gridResolution));
   }, [terrainVertices, mapItems, sceneOptions.gridResolution]);
 
-  const { renderedPolygonsById, renderItems, gridPolygons } = useSceneRender({
+  const { renderedPolygonsById, interiorShellPolygonsById, renderItems, gridPolygons } = useSceneRender({
     placedItems,
     selectedId,
     sceneOptions,
@@ -281,6 +281,7 @@ export default function BuilderWorkbench() {
             placementDraft={!!placementDraft}
             renderItems={renderItems}
             renderedPolygonsById={renderedPolygonsById}
+            interiorShellPolygonsById={interiorShellPolygonsById}
             selectedId={selectedId}
             gizmoMode={gizmoMode}
             gizmoDragging={gizmoDragging}

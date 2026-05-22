@@ -20,7 +20,7 @@ import type {
   Polygon,
 } from "@layoutit/polycss-react";
 import { type RefObject } from "react";
-import type { SceneOptionsState, GizmoMode } from "../../types";
+import { meshResolutionShowsMesh, type SceneOptionsState, type GizmoMode } from "../../types";
 import type { PlacedItem } from "../types";
 
 export interface BuilderSceneProps {
@@ -38,6 +38,7 @@ export interface BuilderSceneProps {
   placementDraft: boolean;
   renderItems: Array<PlacedItem & { rawPolygons: Polygon[] }>;
   renderedPolygonsById: Map<string, Polygon[]>;
+  interiorShellPolygonsById: Map<string, Polygon[]>;
   selectedId: string | null;
   gizmoMode: GizmoMode;
   gizmoDragging: boolean;
@@ -61,6 +62,7 @@ export function BuilderScene({
   placementDraft,
   renderItems,
   renderedPolygonsById,
+  interiorShellPolygonsById,
   selectedId,
   gizmoMode,
   gizmoDragging,
@@ -73,12 +75,13 @@ export function BuilderScene({
   selected,
 }: BuilderSceneProps) {
   const Cam = sceneOptions.perspective === false ? PolyOrthographicCamera : PolyPerspectiveCamera;
+  const sceneKey = sceneOptions.meshResolution;
   const camProps = sceneOptions.perspective === false
     ? { zoom: sceneOptions.zoom, rotX: sceneOptions.rotX, rotY: sceneOptions.rotY, target: sceneOptions.target }
     : { zoom: sceneOptions.zoom, rotX: sceneOptions.rotX, rotY: sceneOptions.rotY, target: sceneOptions.target, perspective: sceneOptions.perspective };
 
   return (
-    <Cam {...camProps}>
+    <Cam key={sceneKey} {...camProps}>
       {sceneOptions.dragMode === "pan" ? (
         <PolyMapControls
           drag={sceneOptions.interactive && !gizmoDragging}
@@ -158,20 +161,31 @@ export function BuilderScene({
           />
         )}
         <PolySelect onChange={onSelectionChange} clearOnMiss={true}>
-          {renderItems.map((it) => (
-            <PolyMesh
-              key={it.id}
-              ref={getMeshRefCallback(it.id)}
-              id={it.id}
-              polygons={renderedPolygonsById.get(it.id) ?? it.rawPolygons}
-              position={it.position}
-              rotation={it.rotation}
-              scale={it.fitScale * it.scale}
-              castShadow={sceneOptions.castShadow}
-              style={{ cursor: "pointer" }}
-              className={`builder-placed${it.id === selectedId ? " is-selected" : ""}`}
-            />
-          ))}
+          {renderItems.map((it) => {
+            const shell = interiorShellPolygonsById.get(it.id) ?? [];
+            return (
+              <PolyMesh
+                key={it.id}
+                ref={getMeshRefCallback(it.id)}
+                id={it.id}
+                polygons={renderedPolygonsById.get(it.id) ?? it.rawPolygons}
+                position={it.position}
+                rotation={it.rotation}
+                scale={it.fitScale * it.scale}
+                castShadow={sceneOptions.castShadow}
+                style={{ cursor: "pointer" }}
+                className={[
+                  "builder-placed",
+                  it.id === selectedId ? "is-selected" : "",
+                  !meshResolutionShowsMesh(sceneOptions.meshResolution) ? "is-mesh-hidden" : "",
+                ].filter(Boolean).join(" ")}
+              >
+                {shell.length > 0 ? (
+                  <PolyMesh polygons={shell} className="dn-interior-shell-mesh" />
+                ) : null}
+              </PolyMesh>
+            );
+          })}
         </PolySelect>
         {selected && (
           <PolyTransformControls

@@ -177,6 +177,72 @@ export function offsetConvexPolygonPoints(points: number[], amount: number): num
   return expanded;
 }
 
+export function offsetConvexPolygonPointsByEdgeAmounts(
+  points: number[],
+  amounts: readonly number[],
+): number[] {
+  if (points.length < 6 || points.length % 2 !== 0) return points;
+  const count = points.length / 2;
+  if (amounts.length !== count) return points;
+  const cleanAmounts = amounts.map((amount) =>
+    typeof amount === "number" && Number.isFinite(amount)
+      ? Math.max(0, amount)
+      : 0
+  );
+  const maxAmount = Math.max(0, ...cleanAmounts);
+  if (maxAmount <= 0) return points;
+  if (cleanAmounts.every((amount) => Math.abs(amount - cleanAmounts[0]) <= BASIS_EPS)) {
+    return offsetConvexPolygonPoints(points, cleanAmounts[0]);
+  }
+
+  const q: Array<[number, number]> = [];
+  for (let i = 0; i < points.length; i += 2) q.push([points[i], points[i + 1]]);
+  if (!isConvexPolygonPoints(q)) return points;
+
+  const area = signedArea2D(q);
+  if (Math.abs(area) <= BASIS_EPS) return points;
+  const outwardSign = area > 0 ? 1 : -1;
+  const offsetLines: Array<{ a: [number, number]; b: [number, number] }> = [];
+  for (let i = 0; i < q.length; i++) {
+    const a = q[i];
+    const b = q[(i + 1) % q.length];
+    const dx = b[0] - a[0];
+    const dy = b[1] - a[1];
+    const length = Math.hypot(dx, dy);
+    if (length <= BASIS_EPS) return points;
+    const amount = cleanAmounts[i];
+    const ox = outwardSign * (dy / length) * amount;
+    const oy = outwardSign * (-dx / length) * amount;
+    offsetLines.push({
+      a: [a[0] + ox, a[1] + oy],
+      b: [b[0] + ox, b[1] + oy],
+    });
+  }
+
+  const expanded: number[] = [];
+  const maxMiter = Math.max(2, maxAmount * 4);
+  for (let i = 0; i < q.length; i++) {
+    const prev = offsetLines[(i + q.length - 1) % q.length];
+    const next = offsetLines[i];
+    const intersection = intersect2DLines(prev.a, prev.b, next.a, next.b);
+    if (!intersection) return points;
+
+    const original = q[i];
+    const dx = intersection[0] - original[0];
+    const dy = intersection[1] - original[1];
+    const miter = Math.hypot(dx, dy);
+    if (miter > maxMiter) {
+      expanded.push(
+        original[0] + (dx / miter) * maxMiter,
+        original[1] + (dy / miter) * maxMiter,
+      );
+    } else {
+      expanded.push(intersection[0], intersection[1]);
+    }
+  }
+  return expanded;
+}
+
 export function offsetTrianglePoints(
   x0: number,
   y0: number,

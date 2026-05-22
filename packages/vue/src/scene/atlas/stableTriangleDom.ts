@@ -4,6 +4,7 @@ import type {
   PolyAmbientLight,
   PolyTextureLightingMode,
   PolyRenderStrategiesOption,
+  PolySeamBleed,
 } from "@layoutit/polycss-core";
 import { isSolidTriangleSupported } from "./detection";
 import {
@@ -36,6 +37,7 @@ export interface StableTriangleDomUpdateOptions {
   ambientLight?: PolyAmbientLight;
   textureLighting?: PolyTextureLightingMode;
   strategies?: PolyRenderStrategiesOption;
+  seamBleed?: PolySeamBleed;
   colorFrame?: number;
   colorSteps?: number;
   colorFreezeFrames?: number;
