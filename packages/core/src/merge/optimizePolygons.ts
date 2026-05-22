@@ -143,6 +143,7 @@ interface CrackSourceContext {
   baseTolerance: number;
   polygonCount: number;
   indexes: Map<string, SegmentIndex>;
+  candidateEdgeStats: WeakMap<Polygon[], EdgeStats>;
 }
 
 interface CrackMetrics {
@@ -999,7 +1000,7 @@ function candidateCrackMetrics(
   stopLimits?: CrackMetricLimits,
 ): CrackMetricSample {
   const sourceEdges = source.edges;
-  const candidateEdges = collectEdgeStats(candidate);
+  const candidateEdges = candidateEdgeStatsForSource(source, candidate);
   const tolerance = crackToleranceForSource(source, maxBoundaryDisplacement);
   const internalIndex = searchTolerance > 0
     ? internalSegmentIndexForSource(source, searchTolerance)
@@ -1055,7 +1056,16 @@ function createCrackSourceContext(polygons: Polygon[]): CrackSourceContext {
     baseTolerance,
     polygonCount: polygons.length,
     indexes: new Map(),
+    candidateEdgeStats: new WeakMap(),
   };
+}
+
+function candidateEdgeStatsForSource(source: CrackSourceContext, candidate: Polygon[]): EdgeStats {
+  const current = source.candidateEdgeStats.get(candidate);
+  if (current) return current;
+  const stats = collectEdgeStats(candidate);
+  source.candidateEdgeStats.set(candidate, stats);
+  return stats;
 }
 
 function crackToleranceForSource(source: CrackSourceContext, maxBoundaryDisplacement = 0): number {
@@ -1967,18 +1977,18 @@ function applyVertexPositionMovesToOrigins(
   origins: Map<string, Vec3[]>,
 ): Map<string, Vec3[]> {
   const moved = new Map<string, Vec3[]>();
+  const recordVertex = (vertex: Vec3): void => {
+    const sourceKey = vertexKey(vertex);
+    const target = moves.get(sourceKey) ?? vertex;
+    const targetKey = vertexKey(target);
+    for (const origin of origins.get(sourceKey) ?? [vertex]) {
+      addVertexOrigin(moved, targetKey, origin);
+    }
+  };
   for (const polygon of polygons) {
-    const vertices = [
-      ...polygon.vertices,
-      ...(polygon.textureTriangles ?? []).flatMap((triangle) => triangle.vertices),
-    ];
-    for (const vertex of vertices) {
-      const sourceKey = vertexKey(vertex);
-      const target = moves.get(sourceKey) ?? vertex;
-      const targetKey = vertexKey(target);
-      for (const origin of origins.get(sourceKey) ?? [vertex]) {
-        addVertexOrigin(moved, targetKey, origin);
-      }
+    for (const vertex of polygon.vertices) recordVertex(vertex);
+    for (const triangle of polygon.textureTriangles ?? []) {
+      for (const vertex of triangle.vertices) recordVertex(vertex);
     }
   }
   return moved;
@@ -1989,16 +1999,16 @@ function pruneVertexOriginsToPolygons(
   origins: Map<string, Vec3[]>,
 ): Map<string, Vec3[]> {
   const pruned = new Map<string, Vec3[]>();
+  const recordVertex = (vertex: Vec3): void => {
+    const key = vertexKey(vertex);
+    for (const origin of origins.get(key) ?? [vertex]) {
+      addVertexOrigin(pruned, key, origin);
+    }
+  };
   for (const polygon of polygons) {
-    const vertices = [
-      ...polygon.vertices,
-      ...(polygon.textureTriangles ?? []).flatMap((triangle) => triangle.vertices),
-    ];
-    for (const vertex of vertices) {
-      const key = vertexKey(vertex);
-      for (const origin of origins.get(key) ?? [vertex]) {
-        addVertexOrigin(pruned, key, origin);
-      }
+    for (const vertex of polygon.vertices) recordVertex(vertex);
+    for (const triangle of polygon.textureTriangles ?? []) {
+      for (const vertex of triangle.vertices) recordVertex(vertex);
     }
   }
   return pruned;
