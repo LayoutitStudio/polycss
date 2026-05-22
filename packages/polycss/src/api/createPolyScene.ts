@@ -259,6 +259,13 @@ export interface PolySceneHandle {
    */
   readonly host: HTMLElement;
   /**
+   * The `.polycss-camera` wrapper element created by `createPolyScene` between
+   * the host and the `.polycss-scene` element. Carries the CSS `perspective`
+   * that matches React/Vue's `<div class="polycss-camera">` wrapper shape.
+   * FPV controls toggle `.polycss-fpv-host` on this element.
+   */
+  readonly cameraEl: HTMLElement;
+  /**
    * The camera handle this scene is bound to. Controls update camera state
    * via `scene.camera.update({...})` then call `scene.applyCamera()` to
    * re-apply the transform.
@@ -531,13 +538,21 @@ export function createPolyScene(
   let autoCenterOffset: Vec3 = [0, 0, 0];
 
   const doc = host.ownerDocument ?? document;
+  // Camera wrapper: carries the CSS `perspective` so it foreshortens the
+  // scene's direct 3D children correctly. Matches React/Vue's
+  // `<div class="polycss-camera">` wrapper emitted by PolyPerspectiveCamera.
+  const cameraEl = doc.createElement("div");
+  cameraEl.className = "polycss-camera";
+  applyCameraStyle(cameraEl, currentOptions);
+  host.appendChild(cameraEl);
+
   const sceneEl = doc.createElement("div");
   sceneEl.className = "polycss-scene";
   sceneEl.setAttribute("aria-hidden", "true");
   // 0×0 anchor at the host's visible center. Polygons render around it.
   applySceneStyle(sceneEl, currentOptions);
 
-  host.appendChild(sceneEl);
+  cameraEl.appendChild(sceneEl);
 
   interface MeshEntry {
     handle: PolyMeshHandle;
@@ -567,14 +582,15 @@ export function createPolyScene(
   }
   const meshes = new Set<MeshEntry>();
 
-  function applySceneStyle(el: HTMLElement, opts: Omit<PolySceneOptions, "camera">): void {
-    applyCssZoomCompensation(el, layoutScale);
-    el.style.transform = buildSceneTransformFromCamera(camera, autoCenterOffset, layoutScale);
-    // Apply CSS perspective from the camera's perspectiveStyle. The orthographic
-    // camera returns "none" — but true `perspective: none` triggers a Chrome
-    // compositor fast path that mis-rasterizes <u> border-triangle leaves.
-    // A very large finite value is visually orthographic but routes Chrome
-    // through the normal compositor path.
+  // Apply CSS perspective on the camera wrapper, not the scene element.
+  // CSS `perspective` only foreshortens direct children's 3D transforms, so
+  // the wrapper must be the perspective context for .polycss-scene to work
+  // correctly — matching React/Vue's PolyPerspectiveCamera wrapper shape.
+  function applyCameraStyle(el: HTMLElement, _opts: Omit<PolySceneOptions, "camera">): void {
+    // The orthographic camera returns "none" — but true `perspective: none`
+    // triggers a Chrome compositor fast path that mis-rasterizes <u>
+    // border-triangle leaves. A very large finite value is visually
+    // orthographic but routes Chrome through the normal compositor path.
     const perspStyle = camera.perspectiveStyle;
     if (perspStyle === "none") {
       el.style.perspective = `${scaledCssPixels(1000000, layoutScale)}px`;
@@ -585,6 +601,11 @@ export function createPolyScene(
         el.style.perspective = `${scaledCssPixels(px, layoutScale)}px`;
       }
     }
+  }
+
+  function applySceneStyle(el: HTMLElement, opts: Omit<PolySceneOptions, "camera">): void {
+    applyCssZoomCompensation(el, layoutScale);
+    el.style.transform = buildSceneTransformFromCamera(camera, autoCenterOffset, layoutScale);
     applyDynamicLightVars(el, opts);
   }
 
@@ -1852,8 +1873,10 @@ export function createPolyScene(
     for (const m of snapshot) {
       try { m.handle.dispose(); } catch { /* ignore */ }
     }
-    if (sceneEl.parentNode) sceneEl.parentNode.removeChild(sceneEl);
+    // Remove the camera wrapper (cameraEl is the host-level child; sceneEl is
+    // inside it, so removing the wrapper also removes the scene element).
+    if (cameraEl.parentNode) cameraEl.parentNode.removeChild(cameraEl);
   }
 
-  return { add, setOptions, destroy, host, camera, applyCamera, getOptions, meshes: listMeshes, findMeshByElement };
+  return { add, setOptions, destroy, host, camera, cameraEl, applyCamera, getOptions, meshes: listMeshes, findMeshByElement };
 }

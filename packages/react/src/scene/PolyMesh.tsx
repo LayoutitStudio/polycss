@@ -39,16 +39,18 @@ import {
   computeTextureAtlasPlan,
   cssBorderShapeForPlan,
   getSolidPaintDefaults,
+  isProjectiveQuadPlan,
   isSolidTrianglePlan,
   type TextureAtlasPlan,
   type TextureQuality,
   type SolidPaintDefaults,
   TextureBorderShapePoly,
   TextureAtlasPoly,
+  TextureProjectiveSolidPoly,
   TextureTrianglePoly,
   updateStableTriangleDom,
   useTextureAtlas,
-} from "./textureAtlas";
+} from "./atlas";
 import { usePolySceneContext } from "./sceneContext";
 import { PolyCameraContext } from "../camera/context";
 import {
@@ -677,14 +679,23 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
 
         const plan = atlasPlans[index];
         if (!plan || plan.texture) return null;
-        return textureAtlas.solidTrianglePrimitive && isSolidTrianglePlan(plan)
+        if (isProjectiveQuadPlan(plan)) {
+          return (
+            <TextureProjectiveSolidPoly
+              key={plan.index}
+              entry={plan}
+              textureLighting={effectiveTextureLighting}
+              solidPaintDefaults={solidPaintDefaults}
+            />
+          );
+        }
+        return isSolidTrianglePlan(plan)
           ? (
               <TextureTrianglePoly
                 key={plan.index}
                 entry={plan}
                 textureLighting={effectiveTextureLighting}
                 solidPaintDefaults={solidPaintDefaults}
-                solidTrianglePrimitive={textureAtlas.solidTrianglePrimitive}
               />
             )
           : (

@@ -92,16 +92,18 @@ describe("PolySceneElement", () => {
       const el = document.createElement("poly-scene") as PolySceneElement;
       el.setAttribute("perspective", "2000");
       host.appendChild(el);
-      const sceneEl = el.querySelector(".polycss-scene") as HTMLElement;
-      expect(sceneEl.style.perspective).toBe("2000px");
+      // Perspective lives on the .polycss-camera wrapper, not on .polycss-scene.
+      const cameraEl = el.querySelector(".polycss-camera") as HTMLElement;
+      expect(cameraEl.style.perspective).toBe("2000px");
     });
 
     it("parses perspective=false as the orthographic-stand-in finite perspective", () => {
       const el = document.createElement("poly-scene") as PolySceneElement;
       el.setAttribute("perspective", "false");
       host.appendChild(el);
-      const sceneEl = el.querySelector(".polycss-scene") as HTMLElement;
-      expect(sceneEl.style.perspective).toBe("1000000px");
+      // Perspective lives on the .polycss-camera wrapper, not on .polycss-scene.
+      const cameraEl = el.querySelector(".polycss-camera") as HTMLElement;
+      expect(cameraEl.style.perspective).toBe("1000000px");
     });
 
     it("parses rot-x and rot-y as numbers", () => {
@@ -129,9 +131,10 @@ describe("PolySceneElement", () => {
       const el = document.createElement("poly-scene") as PolySceneElement;
       el.setAttribute("perspective", "not-a-number");
       host.appendChild(el);
-      const sceneEl = el.querySelector(".polycss-scene") as HTMLElement;
+      // Perspective lives on the .polycss-camera wrapper, not on .polycss-scene.
       // Invalid perspective → implicit orthographic camera → 1000000px stand-in
-      expect(sceneEl.style.perspective).toBe("1000000px");
+      const cameraEl = el.querySelector(".polycss-camera") as HTMLElement;
+      expect(cameraEl.style.perspective).toBe("1000000px");
     });
 
     it("parses directional + ambient light attributes independently", () => {
