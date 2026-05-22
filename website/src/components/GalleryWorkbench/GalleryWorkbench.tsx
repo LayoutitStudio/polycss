@@ -753,7 +753,7 @@ export default function GalleryWorkbench() {
               showGround={sceneOptions.showGround}
               helperScale={helperScale}
               helperTarget={helperTarget}
-              mergePolygonsForMesh={!hasActiveAnimation}
+              mergePolygonsForMesh={!hasActiveAnimation && renderLoaded?.kind !== "primitive"}
               stableDomForMesh={hasActiveAnimation}
               animationKey={activeAnimation ? `${selectedAnimation}:${renderLoaded?.label ?? ""}` : undefined}
               animationDurationSeconds={activeAnimation?.duration}
