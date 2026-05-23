@@ -32,10 +32,13 @@ import type {
   Vec3,
 } from "@layoutit/polycss-core";
 import {
+  buildBakedShadowProjectionMatrix,
   computeSceneBbox,
   DEFAULT_SEAM_BLEED,
   findOverlappingPolygonDuplicates,
+  formatMatrix3dValues,
   inverseRotateVec3,
+  isBakedShadowCaster,
   parseHexColor,
 } from "@layoutit/polycss-core";
 import type { TransformProps } from "../shapes/types";
@@ -600,10 +603,12 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
   const sceneRegisterShadowCaster = sceneCtx?.registerShadowCaster;
 
   // Register/unregister as a shadow caster whenever castShadow or polygons change.
-  // Cleanup on unmount passes null to deregister.
+  // Both lighting modes need the registration so the scene can derive the
+  // shadow ground plane from caster bboxes. Cleanup on unmount passes null
+  // to deregister.
   useEffect(() => {
     if (!sceneRegisterShadowCaster) return;
-    if (castShadow && effectiveTextureLighting === "dynamic") {
+    if (castShadow) {
       sceneRegisterShadowCaster(meshIdRef.current, polygons);
     } else {
       sceneRegisterShadowCaster(meshIdRef.current, null);
@@ -611,19 +616,37 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
     return () => {
       sceneRegisterShadowCaster(meshIdRef.current, null);
     };
-  }, [sceneRegisterShadowCaster, castShadow, effectiveTextureLighting, polygons]);
+  }, [sceneRegisterShadowCaster, castShadow, polygons]);
 
-  // Build shadow leaf elements. Only emitted when castShadow is true and the
-  // scene is in dynamic mode. Uses the same plans as the caster polygons so
-  // the outlines are identical. Deduplication removes stacked coplanar
-  // shadow leaves that would produce visible double-shadows on the receiver.
+  // Build shadow leaf elements. Emitted in both lighting modes:
+  //   - Dynamic: transform uses `var(--shadow-proj) matrix3d(...)`; the CSS
+  //     opacity calc on the scene root gates back-facing polys at paint time.
+  //   - Baked: transform is `matrix3d(<bakedProj>) matrix3d(...)` with the
+  //     projection CPU-baked from the fixed light + ground; back-facing
+  //     polys are dropped from the output entirely (no opacity gate needed).
+  // Uses the same plans as the caster polygons so the outlines are identical.
+  // Deduplication removes stacked coplanar shadow leaves that would produce
+  // visible double-shadows on the receiver.
+  const bakedShadowGroundCssZ = sceneCtx?.groundCssZ ?? null;
   const shadowLeaves = useMemo<ReactNode[]>(() => {
-    if (!castShadow || effectiveTextureLighting !== "dynamic" || renderPolygon) return [];
+    if (!castShadow || renderPolygon) return [];
+    const isDynamic = effectiveTextureLighting === "dynamic";
+    // Baked mode needs a ground plane to project onto. Until the scene's
+    // recomputeGroundCssZ runs, fall through and let the next render emit.
+    if (!isDynamic && bakedShadowGroundCssZ === null) return [];
 
     const shadowColor = sceneCtx?.shadow?.color ?? "#000000";
     const shadowOpacity = sceneCtx?.shadow?.opacity ?? 0.25;
     const parsed = parseHexColor(shadowColor)?.rgb ?? [0, 0, 0];
     const shadowColorCss = `rgba(${parsed[0]},${parsed[1]},${parsed[2]},${shadowOpacity})`;
+
+    const lightDir = sceneDirectionalLight?.direction
+      ?? ([0.4, -0.7, 0.59] as Vec3);
+    const bakedProjStr = isDynamic
+      ? null
+      : `matrix3d(${formatMatrix3dValues(
+          buildBakedShadowProjectionMatrix(lightDir, bakedShadowGroundCssZ ?? 0),
+        )})`;
 
     const shadowDedupDrop = findOverlappingPolygonDuplicates(polygons, {
       normalTolerance: 0.1,
@@ -635,6 +658,8 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
     for (const plan of atlasPlans) {
       if (!plan) continue;
       if (shadowDedupDrop.has(plan.index)) continue;
+      // Baked mode: drop back-facing polys before reaching the DOM.
+      if (!isDynamic && !isBakedShadowCaster(plan.normal, lightDir)) continue;
 
       const borderShape = cssBorderShapeForPlan(plan);
       leaves.push(
@@ -643,11 +668,12 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
           plan={plan}
           shadowColorCss={shadowColorCss}
           borderShape={borderShape}
+          bakedProjStr={bakedProjStr}
         />
       );
     }
     return leaves;
-  }, [castShadow, effectiveTextureLighting, renderPolygon, polygons, atlasPlans, sceneCtx?.shadow]);
+  }, [castShadow, effectiveTextureLighting, renderPolygon, polygons, atlasPlans, sceneCtx?.shadow, sceneDirectionalLight, bakedShadowGroundCssZ]);
 
   setPolygonsImplRef.current = (nextPolygons: Polygon[]) => {
     const nextRenderedPolygons = autoCenter ? recenterPolygons(nextPolygons) : nextPolygons;
@@ -792,41 +818,58 @@ function RenderPropPolygon({
   return <>{children(polygon, index)}</>;
 }
 
-// Shadow leaf — a <q> element that projects the caster polygon's outline onto
-// the ground plane via `var(--shadow-proj)`. The transform chain is:
-// `var(--shadow-proj) matrix3d(...)` where matrix3d is the original polygon
-// placement. border-shape clips the element to the polygon's outline (same
-// mechanism as <i>). The normal is pinned inline as --pnx/y/z so the CSS
-// opacity gate in styles.ts can skip back-facing polygons without JS.
-// Uses a ref callback for border-shape (non-standard CSS property, must be
-// set via setProperty).
+// Shadow leaf — a <q> element that projects the caster polygon's outline
+// onto the ground plane. border-shape clips the element to the polygon's
+// outline (same mechanism as <i>).
+//
+// Dynamic mode: transform is `var(--shadow-proj) matrix3d(...)` so the
+// projection follows live light vars on the scene root; --pnx/y/z is
+// pinned so the CSS opacity gate in styles.ts skips back-facing polys.
+//
+// Baked mode: `bakedProjStr` carries a CPU-baked `matrix3d(<numbers>)`
+// for the projection; back-facing polys are dropped by the caller and
+// no normal vars are needed.
+//
+// Uses a ref callback for border-shape (non-standard CSS property, must
+// be set via setProperty).
 function ShadowLeaf({
   plan,
   shadowColorCss,
   borderShape,
+  bakedProjStr,
 }: {
   plan: TextureAtlasPlan;
   shadowColorCss: string;
   borderShape: string;
+  bakedProjStr: string | null;
 }) {
   const setRef = useCallback((el: HTMLElement | null) => {
     if (!el) return;
     el.style.setProperty("border-shape", borderShape);
   }, [borderShape]);
 
+  const baseStyle: CSSProperties = {
+    transform: bakedProjStr
+      ? `${bakedProjStr} matrix3d(${plan.matrix})`
+      : `var(--shadow-proj) matrix3d(${plan.matrix})`,
+    color: shadowColorCss,
+    width: plan.canvasW,
+    height: plan.canvasH,
+  };
+  const style: CSSProperties = bakedProjStr
+    ? baseStyle
+    : {
+        ...baseStyle,
+        ["--pnx" as string]: plan.normal[0].toFixed(4),
+        ["--pny" as string]: plan.normal[1].toFixed(4),
+        ["--pnz" as string]: plan.normal[2].toFixed(4),
+      } as CSSProperties;
+
   return (
     <q
       ref={setRef}
       className="polycss-shadow"
-      style={{
-        transform: `var(--shadow-proj) matrix3d(${plan.matrix})`,
-        color: shadowColorCss,
-        width: plan.canvasW,
-        height: plan.canvasH,
-        ["--pnx" as string]: plan.normal[0].toFixed(4),
-        ["--pny" as string]: plan.normal[1].toFixed(4),
-        ["--pnz" as string]: plan.normal[2].toFixed(4),
-      } as CSSProperties}
+      style={style}
     />
   );
 }

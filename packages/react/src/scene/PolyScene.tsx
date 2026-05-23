@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
 import type {
   Polygon,
@@ -295,22 +295,13 @@ function PolySceneInner({
 
   // Shadow caster registry. PolyMesh children call registerShadowCaster when
   // their castShadow prop or polygon list changes. The scene accumulates the
-  // polygon lists and writes --shadow-ground-cssz to the scene element.
+  // polygon lists, derives the ground-plane CSS-Z, and mirrors it into either
+  // the `--shadow-ground-cssz` CSS var (dynamic mode) or the scene context
+  // (baked mode, where each mesh embeds the value in its inline matrix3d).
   const shadowCastersRef = useRef<Map<symbol, Polygon[]>>(new Map());
+  const [groundCssZ, setGroundCssZ] = useState<number | null>(null);
 
-  const registerShadowCaster = useCallback((meshId: symbol, meshPolygons: Polygon[] | null) => {
-    if (meshPolygons === null) {
-      shadowCastersRef.current.delete(meshId);
-    } else {
-      shadowCastersRef.current.set(meshId, meshPolygons);
-    }
-    // Recompute --shadow-ground-cssz immediately.
-    const el = sceneElRef.current;
-    if (!el) return;
-    if (textureLighting !== "dynamic") {
-      el.style.removeProperty("--shadow-ground-cssz");
-      return;
-    }
+  const recomputeGroundCssZ = useCallback(() => {
     let minWorldZ = Infinity;
     for (const polys of shadowCastersRef.current.values()) {
       for (const poly of polys) {
@@ -319,24 +310,52 @@ function PolySceneInner({
         }
       }
     }
-    if (!Number.isFinite(minWorldZ)) {
-      el.style.removeProperty("--shadow-ground-cssz");
-      return;
-    }
+    if (!Number.isFinite(minWorldZ)) return null;
     const lift = shadow?.lift ?? 0.05;
-    const groundCssZ = (minWorldZ + lift) * BASE_TILE;
-    el.style.setProperty("--shadow-ground-cssz", groundCssZ.toFixed(3));
-  }, [sceneElRef, textureLighting, shadow]);
+    return (minWorldZ + lift) * BASE_TILE;
+  }, [shadow]);
 
-  // When lighting mode switches away from dynamic, clear --shadow-ground-cssz
-  // from the scene element (shadow projection is only active in dynamic mode).
+  const registerShadowCaster = useCallback((meshId: symbol, meshPolygons: Polygon[] | null) => {
+    if (meshPolygons === null) {
+      shadowCastersRef.current.delete(meshId);
+    } else {
+      shadowCastersRef.current.set(meshId, meshPolygons);
+    }
+    const next = recomputeGroundCssZ();
+    setGroundCssZ((prev) => (prev === next ? prev : next));
+    const el = sceneElRef.current;
+    if (!el) return;
+    if (textureLighting === "dynamic" && next !== null) {
+      el.style.setProperty("--shadow-ground-cssz", next.toFixed(3));
+    } else {
+      // Baked mode (no CSS var needed — the value flows through context)
+      // or no casters left.
+      el.style.removeProperty("--shadow-ground-cssz");
+    }
+  }, [sceneElRef, textureLighting, recomputeGroundCssZ]);
+
+  // Re-sync the CSS var on lighting-mode swaps. Dynamic mode needs the var
+  // (the --shadow-proj calc reads it); baked mode strips it so a stale
+  // value can't accidentally drive --shadow-proj for legacy leaves.
   useEffect(() => {
     const el = sceneElRef.current;
     if (!el) return;
-    if (textureLighting !== "dynamic") {
+    if (textureLighting === "dynamic" && groundCssZ !== null) {
+      el.style.setProperty("--shadow-ground-cssz", groundCssZ.toFixed(3));
+    } else {
       el.style.removeProperty("--shadow-ground-cssz");
     }
-  }, [textureLighting, sceneElRef]);
+  }, [textureLighting, sceneElRef, groundCssZ]);
+
+  // Lift change in baked mode: recompute groundCssZ so meshes re-derive
+  // their inline matrix3d. (Dynamic mode handles it via the CSS var path
+  // — recomputeGroundCssZ + the useEffect above keeps that consistent too.)
+  useEffect(() => {
+    setGroundCssZ((prev) => {
+      const next = recomputeGroundCssZ();
+      return prev === next ? prev : next;
+    });
+  }, [recomputeGroundCssZ]);
 
   const disabledStrategies = useMemo(
     () => strategies?.disable?.length ? new Set(strategies.disable) : undefined,
@@ -392,8 +411,9 @@ function PolySceneInner({
       seamBleed,
       shadow,
       registerShadowCaster,
+      groundCssZ,
     }),
-    [textureLighting, directionalLight, ambientLight, strategies, seamBleed, shadow, registerShadowCaster],
+    [textureLighting, directionalLight, ambientLight, strategies, seamBleed, shadow, registerShadowCaster, groundCssZ],
   );
 
   return (
