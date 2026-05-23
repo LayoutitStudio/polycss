@@ -4,6 +4,7 @@ import {
   BAKED_SHADOW_Z_SQUASH,
   buildBakedShadowProjectionMatrix,
   isBakedShadowCaster,
+  projectCssVertexToGround,
 } from "./projection";
 
 describe("buildBakedShadowProjectionMatrix", () => {
@@ -82,5 +83,38 @@ describe("isBakedShadowCaster", () => {
 
   it("is robust to an un-normalized light direction", () => {
     expect(isBakedShadowCaster([0, 0, -1], [0, 0, -10])).toBe(true);
+  });
+});
+
+describe("projectCssVertexToGround", () => {
+  it("returns the vertex's own XY when it sits on the ground plane", () => {
+    const [x, y] = projectCssVertexToGround([10, 20, 50], [0, 0, 1], 50);
+    expect(x).toBeCloseTo(10, 6);
+    expect(y).toBeCloseTo(20, 6);
+  });
+
+  it("returns the vertex's own XY for a straight top-down light regardless of height", () => {
+    // Light TO-source = [0, 0, 1] (sun directly overhead) → no shear; the
+    // shadow of any point lands directly below it on the ground.
+    const [x, y] = projectCssVertexToGround([10, 20, 150], [0, 0, 1], 0);
+    expect(x).toBeCloseTo(10, 6);
+    expect(y).toBeCloseTo(20, 6);
+  });
+
+  it("shears the XY proportionally to height above ground for oblique lights", () => {
+    // Light TO-source = [1, 0, 1] (up-right). For a point at height H above
+    // the ground, the shadow lands at x - H (because lx/lz = 1) and y unchanged.
+    const [x, y] = projectCssVertexToGround([100, 50, 25], [1, 0, 1], 0);
+    expect(x).toBeCloseTo(75, 6); // 100 - 25*(1/1)
+    expect(y).toBeCloseTo(50, 6);
+  });
+
+  it("clamps near-horizontal light's up-axis to BAKED_SHADOW_MIN_UP", () => {
+    // Very near-horizontal light: lz ≈ 0.001 → clamped to 0.01. For a point
+    // 25 above ground, x-shear is 25 * (1 / 0.01) = 2500. With clamp this is
+    // bounded; without it the projection would shoot to infinity.
+    const [x] = projectCssVertexToGround([100, 0, 25], [1, 0, 0.001], 0);
+    expect(Math.abs(x - 100)).toBeLessThanOrEqual(25 / BAKED_SHADOW_MIN_UP + 1);
+    expect(Math.abs(x - 100)).toBeGreaterThan(100);
   });
 });

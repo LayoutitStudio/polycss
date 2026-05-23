@@ -147,6 +147,7 @@ export {
   BAKED_SHADOW_Z_SQUASH,
   buildBakedShadowProjectionMatrix,
   isBakedShadowCaster,
+  projectCssVertexToGround,
 } from "./shadow/projection";
 
 // ── Animation ─────────────────────────────────────────────────────

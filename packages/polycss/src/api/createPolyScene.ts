@@ -39,12 +39,10 @@ import {
   CAMERA_BACKFACE_CULL_EPS,
   DEFAULT_SEAM_BLEED,
   VOXEL_CAMERA_CULL_NORMAL_LIMIT,
-  buildBakedShadowProjectionMatrix,
   cameraCullNormalKey,
   cameraCullVisibleSignature,
   computeSceneBbox,
   findOverlappingPolygonDuplicates,
-  formatMatrix3dValues,
   inverseRotateVec3,
   isAxisAlignedSurfaceNormal,
   isBakedShadowCaster,
@@ -53,6 +51,7 @@ import {
   optimizeMeshPolygons,
   parseHexColor,
   polygonCssSurfaceNormal,
+  projectCssVertexToGround,
 } from "@layoutit/polycss-core";
 import {
   cssBorderShapeForPlan,
@@ -358,6 +357,17 @@ function strategiesEqual(
   return true;
 }
 
+function pointsToSvgPath(points: Array<[number, number]>, originX: number, originY: number): string {
+  if (points.length === 0) return "";
+  const [x0, y0] = points[0]!;
+  let d = `M${(x0 - originX).toFixed(3)},${(y0 - originY).toFixed(3)}`;
+  for (let i = 1; i < points.length; i++) {
+    const [x, y] = points[i]!;
+    d += `L${(x - originX).toFixed(3)},${(y - originY).toFixed(3)}`;
+  }
+  return d + "Z";
+}
+
 function vec3Equal(a: Vec3 | undefined, b: Vec3 | undefined): boolean {
   if (a === b) return true;
   if (!a || !b) return false;
@@ -591,10 +601,16 @@ export function createPolyScene(
     wrapper: HTMLDivElement;
     parseResult: ParseResult;
     rendered: RenderedPoly[];
-    /** Shadow leaf elements, one per non-textured non-atlas polygon. Kept
-     *  separate from `rendered` so they can be removed independently when
-     *  castShadow is toggled or lighting mode changes. */
+    /** Dynamic-mode shadow `<q>` leaves, one per non-deduped casting
+     *  polygon. Empty in baked mode (which uses `shadowSvg` instead). */
     shadowRendered: HTMLElement[];
+    /** Baked-mode shadow `<svg>` — a single per-mesh element whose `<g>`
+     *  composites every casting polygon's projected outline into one
+     *  silhouette before applying `shadow.opacity`. Carries the same
+     *  overall visual as a stack of per-polygon `<q>` leaves but avoids
+     *  the alpha-accumulation darkening at polygon intersections, and
+     *  reduces DOM weight to a single element per mesh. */
+    shadowSvg?: SVGSVGElement;
     voxelRenderer?: PolyVoxelRenderer;
     disposeAtlas?: () => void;
     polygons: Polygon[];
@@ -751,6 +767,10 @@ export function createPolyScene(
       if (el.parentNode) el.parentNode.removeChild(el);
     }
     entry.shadowRendered.length = 0;
+    if (entry.shadowSvg?.parentNode) {
+      entry.shadowSvg.parentNode.removeChild(entry.shadowSvg);
+    }
+    entry.shadowSvg = undefined;
   }
 
   function disposeRendered(rendered: RenderedPoly[], disposeAtlas?: () => void): void {
@@ -1134,20 +1154,25 @@ export function createPolyScene(
     }
   }
 
-  // Emits shadow leaves for all rendered polys in the entry. Each shadow
-  // leaf uses the same border-shape as the original but with a flat shadow
-  // color and a transform that projects the polygon onto the ground plane
-  // along the directional light.
+  // Emits shadow leaves for all rendered polys in the entry.
   //
-  // Dynamic mode prepends `var(--shadow-proj)` so the projection follows
-  // the live light vars on the scene root (zero JS at light-change time).
-  // Baked mode pre-composes the projection matrix on the CPU and inlines
-  // it as a literal `matrix3d(...)` — and drops back-facing polygons from
-  // the DOM entirely instead of using a CSS opacity gate.
+  // Dynamic mode emits one `<q>` per casting polygon whose transform
+  // chains `var(--shadow-proj)` so the projection follows the live light
+  // vars on the scene root (zero JS at light-change time). A CSS opacity
+  // calc on the scene root hides back-facing polys at paint time.
   //
-  // Shadow leaves are inserted BEFORE their caster siblings so they sit
-  // below in DOM order, which keeps them behind the casters when both are
-  // coplanar in 3D (painter-order tie-breaking favors earlier nodes).
+  // Baked mode emits a single `<svg>` per mesh containing one `<path>`
+  // per casting polygon (projected to ground on the CPU). The shared
+  // `<g opacity>` collapses overlapping outlines into one solid silhouette
+  // before applying the alpha — no per-leaf alpha accumulation at
+  // polygon intersections, and no `opacity + preserve-3d` flatten trap
+  // because SVG content is internally 2D. Back-facing polys are dropped
+  // up front.
+  //
+  // Shadow elements are inserted BEFORE the first non-shadow child so
+  // they sit below casters in DOM order, which keeps them behind the
+  // casters when both are coplanar in 3D (painter-order tie-breaking
+  // favors earlier nodes).
   function emitShadowLeaves(entry: MeshEntry): void {
     clearShadowLeaves(entry);
     if (!entry.castShadow) return;
@@ -1159,21 +1184,8 @@ export function createPolyScene(
 
     const shadowColor = currentOptions.shadow?.color ?? "#000000";
     const shadowOpacity = currentOptions.shadow?.opacity ?? 0.25;
-    // Build a CSS rgba color from the hex + opacity.
     const parsed = parseHexColor(shadowColor)?.rgb ?? [0, 0, 0];
     const r = parsed[0], g = parsed[1], b = parsed[2];
-    const shadowColorCss = `rgba(${r},${g},${b},${shadowOpacity})`;
-
-    // Pre-compute the baked projection matrix once per emit pass — the
-    // light + ground are fixed so it's identical for every leaf in this
-    // entry. In dynamic mode the matrix lives in CSS and we skip this.
-    const lightDir = currentOptions.directionalLight?.direction
-      ?? ([0.4, -0.7, 0.59] as Vec3);
-    const bakedProjStr = isDynamic
-      ? null
-      : `matrix3d(${formatMatrix3dValues(
-          buildBakedShadowProjectionMatrix(lightDir, currentGroundCssZ ?? 0),
-        )})`;
 
     // Loose-tolerance dedup for shadow casting ONLY — much more permissive
     // than the parse-time dedup that affects the rendered model. Multiple
@@ -1191,6 +1203,22 @@ export function createPolyScene(
       overlapFraction: 0.4,
     });
 
+    const lightDir = currentOptions.directionalLight?.direction
+      ?? ([0.4, -0.7, 0.59] as Vec3);
+
+    if (!isDynamic) {
+      emitBakedShadowSvg(
+        entry,
+        shadowDedupDrop,
+        lightDir,
+        currentGroundCssZ ?? 0,
+        r, g, b,
+        shadowOpacity,
+      );
+      return;
+    }
+
+    const shadowColorCss = `rgba(${r},${g},${b},${shadowOpacity})`;
     const fragment = doc.createDocumentFragment();
     for (const item of renderedItemsForCamera(entry)) {
       // Atlas (<s>) polygons cast shadows too — the shadow only needs
@@ -1201,12 +1229,6 @@ export function createPolyScene(
       if (shadowDedupDrop.has(item.polygonIndex)) continue;
       const plan = item.plan;
       if (!plan) continue;
-
-      // Baked mode: skip polygons facing AWAY from the receiver entirely
-      // (they don't contribute to the silhouette). Dynamic mode keeps them
-      // mounted and uses a CSS opacity calc to hide them so the gate
-      // updates live with the light.
-      if (!isDynamic && !isBakedShadowCaster(plan.normal, lightDir)) continue;
 
       // Read the original matrix3d from the plan (not from the element
       // style string) so we never parse strings.
@@ -1223,21 +1245,16 @@ export function createPolyScene(
       // preserve-3d = ~15 s/frame on Chromium).
       const shadowEl = doc.createElement("q");
       shadowEl.className = "polycss-shadow";
-      shadowEl.style.transform = isDynamic
-        ? `var(--shadow-proj) ${origMatrix}`
-        : `${bakedProjStr} ${origMatrix}`;
+      shadowEl.style.transform = `var(--shadow-proj) ${origMatrix}`;
       shadowEl.style.color = shadowColorCss;
       shadowEl.style.width = `${plan.canvasW}px`;
       shadowEl.style.height = `${plan.canvasH}px`;
       shadowEl.style.setProperty("border-shape", cssBorderShapeForPlan(plan));
       // Dynamic mode pins the caster's normal so the per-element opacity
-      // calc can Lambert-gate back-facing polys. Baked mode already
-      // dropped those above, so no normal vars are needed.
-      if (isDynamic) {
-        shadowEl.style.setProperty("--pnx", plan.normal[0].toFixed(4));
-        shadowEl.style.setProperty("--pny", plan.normal[1].toFixed(4));
-        shadowEl.style.setProperty("--pnz", plan.normal[2].toFixed(4));
-      }
+      // calc can Lambert-gate back-facing polys.
+      shadowEl.style.setProperty("--pnx", plan.normal[0].toFixed(4));
+      shadowEl.style.setProperty("--pny", plan.normal[1].toFixed(4));
+      shadowEl.style.setProperty("--pnz", plan.normal[2].toFixed(4));
 
       fragment.appendChild(shadowEl);
       entry.shadowRendered.push(shadowEl);
@@ -1251,6 +1268,93 @@ export function createPolyScene(
       entry.wrapper.insertBefore(fragment, firstChild);
     } else {
       entry.wrapper.appendChild(fragment);
+    }
+  }
+
+  // Builds a single per-mesh <svg> for baked-mode shadows. Projects every
+  // casting polygon to the ground plane on the CPU, then drops one <path>
+  // per polygon into a shared <g opacity="..." fill="..."> so overlapping
+  // outlines composite as one silhouette (no alpha accumulation at
+  // intersections). SVG content is internally 2D so this sidesteps the
+  // `opacity + transform-style: preserve-3d` flatten trap that breaks
+  // CSS-only shadow grouping in a 3D scene.
+  function emitBakedShadowSvg(
+    entry: MeshEntry,
+    dedupDrop: Set<number>,
+    lightDir: Vec3,
+    groundCssZ: number,
+    r: number,
+    g: number,
+    b: number,
+    opacity: number,
+  ): void {
+    const polyProjections: Array<Array<[number, number]>> = [];
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const item of renderedItemsForCamera(entry)) {
+      if (dedupDrop.has(item.polygonIndex)) continue;
+      const plan = item.plan;
+      if (!plan) continue;
+      if (!isBakedShadowCaster(plan.normal, lightDir)) continue;
+      const polygon = entry.polygons[item.polygonIndex];
+      if (!polygon) continue;
+
+      const projected: Array<[number, number]> = [];
+      for (const v of polygon.vertices) {
+        // World → CSS-3D: swap X and Y, scale by BASE_TILE. Matches the
+        // axis convention used by plan.matrix / --shadow-proj so the
+        // projected output sits where the dynamic-mode shadow would.
+        const cssVertex: Vec3 = [
+          v[1] * DEFAULT_TILE,
+          v[0] * DEFAULT_TILE,
+          v[2] * DEFAULT_TILE,
+        ];
+        const p = projectCssVertexToGround(cssVertex, lightDir, groundCssZ);
+        projected.push(p);
+        if (p[0] < minX) minX = p[0];
+        if (p[1] < minY) minY = p[1];
+        if (p[0] > maxX) maxX = p[0];
+        if (p[1] > maxY) maxY = p[1];
+      }
+      polyProjections.push(projected);
+    }
+
+    if (polyProjections.length === 0) return;
+    const width = maxX - minX;
+    const height = maxY - minY;
+    if (!(width > 0) || !(height > 0)) return;
+
+    const svgNS = "http://www.w3.org/2000/svg";
+    const svg = doc.createElementNS(svgNS, "svg");
+    svg.setAttribute("class", "polycss-shadow polycss-shadow-svg");
+    svg.setAttribute("width", String(width));
+    svg.setAttribute("height", String(height));
+    svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+    // CSS-Z places the SVG plane at the ground in the mesh's local frame;
+    // the mesh wrapper's own transform is applied above this. X/Y origin
+    // shifts the SVG so its (0,0) lines up with the projected bbox corner.
+    svg.setAttribute(
+      "style",
+      `position:absolute;top:0;left:0;display:block;overflow:visible;` +
+      `transform-origin:0 0;pointer-events:none;` +
+      `transform:translate3d(${minX.toFixed(3)}px,${minY.toFixed(3)}px,${groundCssZ.toFixed(3)}px)`,
+    );
+
+    const group = doc.createElementNS(svgNS, "g");
+    group.setAttribute("fill", `rgb(${r},${g},${b})`);
+    group.setAttribute("opacity", opacity.toFixed(4));
+    for (const verts of polyProjections) {
+      const path = doc.createElementNS(svgNS, "path");
+      path.setAttribute("d", pointsToSvgPath(verts, minX, minY));
+      group.appendChild(path);
+    }
+    svg.appendChild(group);
+
+    entry.shadowSvg = svg;
+    const firstChild = entry.wrapper.firstChild;
+    if (firstChild) {
+      entry.wrapper.insertBefore(svg, firstChild);
+    } else {
+      entry.wrapper.appendChild(svg);
     }
   }
 

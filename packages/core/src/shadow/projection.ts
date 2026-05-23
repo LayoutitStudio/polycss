@@ -81,3 +81,34 @@ export function isBakedShadowCaster(
   const lz = lightDir[2] / len;
   return normal[0] * lx + normal[1] * ly + normal[2] * lz > 0;
 }
+
+/**
+ * Projects a single CSS-3D vertex onto the shadow ground plane, returning
+ * the resulting 2D point in CSS coordinates. Mirrors the per-element
+ * matrix3d that the dynamic-mode `--shadow-proj` builds, but evaluated on
+ * the CPU for a fixed light + ground — handy when many projected vertices
+ * are needed at once (e.g. rendering shadow outlines into a single SVG
+ * per mesh instead of one DOM leaf per casting polygon).
+ *
+ * `cssVertex` is a 3D point that has already been through the world→CSS
+ * axis swap and unit scale (so its components are dimensionless CSS-space
+ * coordinates). `lightDir` follows the same `--clx/--cly/--clz` convention
+ * as `buildBakedShadowProjectionMatrix`.
+ */
+export function projectCssVertexToGround(
+  cssVertex: Vec3,
+  lightDir: Vec3,
+  groundCssZ: number,
+): [number, number] {
+  const len = Math.hypot(lightDir[0], lightDir[1], lightDir[2]) || 1;
+  const lx = lightDir[0] / len;
+  const ly = lightDir[1] / len;
+  const lzRaw = lightDir[2] / len;
+  const lz =
+    Math.sign(lzRaw || 1) * Math.max(Math.abs(lzRaw), BAKED_SHADOW_MIN_UP);
+  const zDelta = cssVertex[2] - groundCssZ;
+  return [
+    cssVertex[0] - (lx / lz) * zDelta,
+    cssVertex[1] - (ly / lz) * zDelta,
+  ];
+}
