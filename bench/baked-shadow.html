@@ -99,6 +99,12 @@
           color: el.style.color,
         });
       }
+      // Dump SVG inner structure for baked-mode debugging.
+      const svgs = Array.from(host.querySelectorAll("svg.polycss-shadow"));
+      const svgInfo = svgs.map((svg) => ({
+        pathCount: svg.querySelectorAll("path").length,
+        outerHTML: svg.outerHTML.slice(0, 800),
+      }));
       return {
         mode,
         castShadow: cast,
@@ -109,6 +115,7 @@
         leafCount: leaves.length,
         shadowCount: shadows.length,
         sample,
+        svgInfo,
       };
     }
 
