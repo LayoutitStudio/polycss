@@ -655,6 +655,11 @@ export function createPolyScene(
       if (svg.parentNode) svg.parentNode.removeChild(svg);
     }
     sceneShadowSvgs.length = 0;
+    // Mark all cached receiver-face SVGs as hidden. Per-frame
+    // emitSceneReceiverShadows will reveal the ones with shadow
+    // content and leave the rest in `display:none`, which keeps the
+    // compositor layer count low without tearing the elements down.
+    hideAllReceiverFaceSvgs();
   }
 
   // Per-receiver cached face geometry. Each entry holds one record
@@ -678,16 +683,44 @@ export function createPolyScene(
     width: number;
     height: number;
     matrixCss: string;
+    // Mount-once SVG + path: created on first non-empty frame for
+    // this face, then kept in the DOM. Per-frame we just mutate
+    // `d`/`fill`/`opacity` and toggle `display`. Avoids per-frame
+    // ~248 createElementNS + insertBefore + 248 layer churn that
+    // dominated gpuViz (~40 ms/frame).
+    svg: SVGSVGElement | null;
+    path: SVGPathElement | null;
+    visible: boolean;
   }
   const receiverShadowCache = new Map<MeshEntry, ReceiverFacePlane[]>();
   const receiverShadowCacheKey = new Map<MeshEntry, string>();
+  function disposeReceiverPlanes(planes: ReceiverFacePlane[]): void {
+    for (const p of planes) {
+      if (p.svg && p.svg.parentNode) p.svg.parentNode.removeChild(p.svg);
+      p.svg = null;
+      p.path = null;
+    }
+  }
   function clearReceiverShadowCache(entry?: MeshEntry): void {
     if (entry) {
+      const planes = receiverShadowCache.get(entry);
+      if (planes) disposeReceiverPlanes(planes);
       receiverShadowCache.delete(entry);
       receiverShadowCacheKey.delete(entry);
     } else {
+      for (const planes of receiverShadowCache.values()) disposeReceiverPlanes(planes);
       receiverShadowCache.clear();
       receiverShadowCacheKey.clear();
+    }
+  }
+  function hideAllReceiverFaceSvgs(): void {
+    for (const planes of receiverShadowCache.values()) {
+      for (const p of planes) {
+        if (p.svg && p.visible) {
+          p.svg.style.display = "none";
+          p.visible = false;
+        }
+      }
     }
   }
 
@@ -1612,10 +1645,52 @@ export function createPolyScene(
           Ox,   Oy,   Oz,   1,
         ];
         const matrixCss = `matrix3d(${m.map((x) => x.toFixed(4)).join(",")})`;
-        return { O, n, u, v, outlineUv, minU, minV, width, height, matrixCss };
+        return {
+          O, n, u, v, outlineUv, minU, minV, width, height, matrixCss,
+          svg: null, path: null, visible: false,
+        };
       });
       receiverShadowCache.set(receiverEntry, cachedPlanes);
       receiverShadowCacheKey.set(receiverEntry, cacheKey);
+    }
+
+    // Pre-build per-caster-polygon items once per frame: world-space
+    // vertices and 3D AABB. We need both for every face anyway, so
+    // doing it inside the face loop redundantly transforms the same
+    // mesh-local vertices N_faces times. The AABB also lets us
+    // bbox-cull a polygon against the face plane before per-tri SH.
+    interface CasterPolyItem {
+      wv: Vec3[];
+      // 8 corners of axis-aligned 3D bbox in CSS world.
+      bboxCorners: Vec3[];
+    }
+    const casterItems: CasterPolyItem[] = [];
+    for (const caster of casters) {
+      if (caster === receiverEntry) continue;
+      const dedupDrop = dedupByCaster.get(caster)!;
+      const cpos = caster.handle.transform.position ?? [0, 0, 0];
+      for (const item of caster.rendered) {
+        if (dedupDrop.has(item.polygonIndex)) continue;
+        const plan = item.plan;
+        if (!plan) continue;
+        const polygon = caster.polygons[item.polygonIndex];
+        if (!polygon) continue;
+        const wv = polygon.vertices.map((vert) => worldCss(vert, cpos));
+        let minX = Infinity, minY = Infinity, minZ = Infinity;
+        let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+        for (const w of wv) {
+          if (w[0] < minX) minX = w[0]; if (w[0] > maxX) maxX = w[0];
+          if (w[1] < minY) minY = w[1]; if (w[1] > maxY) maxY = w[1];
+          if (w[2] < minZ) minZ = w[2]; if (w[2] > maxZ) maxZ = w[2];
+        }
+        const bboxCorners: Vec3[] = [
+          [minX, minY, minZ], [maxX, minY, minZ],
+          [minX, maxY, minZ], [maxX, maxY, minZ],
+          [minX, minY, maxZ], [maxX, minY, maxZ],
+          [minX, maxY, maxZ], [maxX, maxY, maxZ],
+        ];
+        casterItems.push({ wv, bboxCorners });
+      }
     }
 
     for (const group of cachedPlanes) {
@@ -1669,79 +1744,99 @@ export function createPolyScene(
         return [dx * u[0] + dy * u[1] + dz * u[2], dx * v[0] + dy * v[1] + dz * v[2]];
       };
       const clipped: Array<Array<[number, number]>> = [];
-      for (const caster of casters) {
-        if (caster === receiverEntry) continue;
-        const dedupDrop = dedupByCaster.get(caster)!;
-        const cpos = caster.handle.transform.position ?? [0, 0, 0];
-        for (const item of caster.rendered) {
-          if (dedupDrop.has(item.polygonIndex)) continue;
-          const plan = item.plan;
-          if (!plan) continue;
-          const polygon = caster.polygons[item.polygonIndex];
-          if (!polygon) continue;
-          const wv = polygon.vertices.map((vert) => worldCss(vert, cpos));
-          // Fan-triangulate the polygon.
-          for (let triIdx = 1; triIdx < wv.length - 1; triIdx++) {
-            const tA = wv[0]!, tB = wv[triIdx]!, tC = wv[triIdx + 1]!;
-            const dA = planeDist(tA), dB = planeDist(tB), dC = planeDist(tC);
-            // 3D-clip the tri against the receiver plane half-space.
-            // Keep vertices with dist >= 0; emit edge-plane
-            // intersections when an edge crosses. Result is the
-            // tri's above-plane polygon (triangle if 1 vertex was
-            // above + 2 below, quad if 2 above + 1 below, the
-            // original triangle if all 3 above, empty if all below).
-            const above: Vec3[] = [];
-            const cycle: Array<[Vec3, number]> = [[tA, dA], [tB, dB], [tC, dC]];
-            for (let k = 0; k < 3; k++) {
-              const [p, dp] = cycle[k]!;
-              const [q, dq] = cycle[(k + 1) % 3]!;
-              if (dp >= 0) above.push(p);
-              if ((dp >= 0) !== (dq >= 0)) above.push(planeCross(p, q, dp, dq));
-            }
-            if (above.length < 3) continue;
-            const projected = above.map(projectOntoPlane);
-            const subjectCcw = ensureCcw2D(projected);
-            const clip = clipPolygonToConvex2D(subjectCcw, outlineUv);
-            if (clip.length < 3) continue;
-            clipped.push(clip);
+      const fMinU = minU, fMinV = minV;
+      const fMaxU = group.minU + width;
+      const fMaxV = group.minV + height;
+      for (const item of casterItems) {
+        // Project 3D bbox corners onto the face plane; if the bbox of
+        // those projections is disjoint from the face outline bbox in
+        // (u, v), this polygon casts no shadow on this face. Cheap
+        // 8-projection prefilter that skips the per-tri 3D-clip + SH.
+        // Also confirms the polygon has at least one corner ABOVE the
+        // receiver plane — if all 8 corners are below, no shadow.
+        const corners = item.bboxCorners;
+        let anyAbove = false;
+        let pMinU = Infinity, pMinV = Infinity, pMaxU = -Infinity, pMaxV = -Infinity;
+        for (let ci = 0; ci < 8; ci++) {
+          const c = corners[ci]!;
+          if (planeDist(c) >= 0) anyAbove = true;
+          const pr = projectOntoPlane(c);
+          if (pr[0] < pMinU) pMinU = pr[0];
+          if (pr[0] > pMaxU) pMaxU = pr[0];
+          if (pr[1] < pMinV) pMinV = pr[1];
+          if (pr[1] > pMaxV) pMaxV = pr[1];
+        }
+        if (!anyAbove) continue;
+        if (pMaxU < fMinU || pMinU > fMaxU || pMaxV < fMinV || pMinV > fMaxV) continue;
+        const wv = item.wv;
+        // Fan-triangulate the polygon.
+        for (let triIdx = 1; triIdx < wv.length - 1; triIdx++) {
+          const tA = wv[0]!, tB = wv[triIdx]!, tC = wv[triIdx + 1]!;
+          const dA = planeDist(tA), dB = planeDist(tB), dC = planeDist(tC);
+          const above: Vec3[] = [];
+          const cycle: Array<[Vec3, number]> = [[tA, dA], [tB, dB], [tC, dC]];
+          for (let k = 0; k < 3; k++) {
+            const [p, dp] = cycle[k]!;
+            const [q, dq] = cycle[(k + 1) % 3]!;
+            if (dp >= 0) above.push(p);
+            if ((dp >= 0) !== (dq >= 0)) above.push(planeCross(p, q, dp, dq));
           }
+          if (above.length < 3) continue;
+          const projected = above.map(projectOntoPlane);
+          const subjectCcw = ensureCcw2D(projected);
+          const clip = clipPolygonToConvex2D(subjectCcw, outlineUv);
+          if (clip.length < 3) continue;
+          clipped.push(clip);
         }
       }
 
       if (clipped.length === 0 || !(width > 0) || !(height > 0)) continue;
 
+      // Coordinate precision of 1 decimal is sub-pixel for typical
+      // CSS-px values; the path is sized in receiver-plane CSS px
+      // (often 100-1000). Cutting from .toFixed(3) drops path string
+      // size by ~30%, less browser parsing + raster fast path.
       let d = "";
       for (const verts of clipped) {
-        d += `M${(verts[0]![0] - minU).toFixed(3)},${(verts[0]![1] - minV).toFixed(3)}`;
+        d += `M${(verts[0]![0] - minU).toFixed(1)},${(verts[0]![1] - minV).toFixed(1)}`;
         for (let i = 1; i < verts.length; i++) {
-          d += `L${(verts[i]![0] - minU).toFixed(3)},${(verts[i]![1] - minV).toFixed(3)}`;
+          d += `L${(verts[i]![0] - minU).toFixed(1)},${(verts[i]![1] - minV).toFixed(1)}`;
         }
         d += "Z";
       }
 
-      const svg = doc.createElementNS(svgNS, "svg");
-      svg.setAttribute("class", "polycss-shadow polycss-shadow-svg polycss-shadow-receiver");
-      svg.setAttribute("width", String(width));
-      svg.setAttribute("height", String(height));
-      svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
-      svg.setAttribute(
-        "style",
-        `position:absolute;top:0;left:0;display:block;overflow:hidden;` +
-        `transform-origin:0 0;pointer-events:none;will-change:transform;` +
-        `transform:${matrixCss}`,
-      );
-      const path = doc.createElementNS(svgNS, "path");
+      // Mount-once SVG + path. First frame this face has a shadow
+      // we allocate the elements and parent them; subsequent frames
+      // mutate `d`/`fill`/`opacity` and just flip `display`.
+      let svg = group.svg;
+      let path = group.path;
+      if (!svg || !path) {
+        svg = doc.createElementNS(svgNS, "svg");
+        svg.setAttribute("class", "polycss-shadow polycss-shadow-svg polycss-shadow-receiver");
+        svg.setAttribute("width", String(width));
+        svg.setAttribute("height", String(height));
+        svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+        svg.setAttribute(
+          "style",
+          `position:absolute;top:0;left:0;display:block;overflow:hidden;` +
+          `transform-origin:0 0;pointer-events:none;will-change:transform;` +
+          `transform:${matrixCss}`,
+        );
+        path = doc.createElementNS(svgNS, "path");
+        path.setAttribute("fill-rule", "nonzero");
+        svg.appendChild(path);
+        sceneEl.insertBefore(svg, sceneEl.firstChild);
+        group.svg = svg;
+        group.path = path;
+      } else if (!group.visible) {
+        svg.style.display = "block";
+      }
+      group.visible = true;
       path.setAttribute("d", d);
       const fillColor = `rgb(${r},${g},${b})`;
-      path.setAttribute("fill", fillColor);
-      path.setAttribute("fill-rule", "nonzero");
-      path.setAttribute("stroke", fillColor);
-      path.setAttribute("stroke-width", "2");
-      path.setAttribute("stroke-linejoin", "round");
-      path.setAttribute("opacity", opacity.toFixed(4));
-      svg.appendChild(path);
-      sceneShadowSvgs.push(svg);
-      sceneEl.insertBefore(svg, sceneEl.firstChild);
+      if (path.getAttribute("fill") !== fillColor) path.setAttribute("fill", fillColor);
+      const opStr = opacity.toFixed(4);
+      if (path.getAttribute("opacity") !== opStr) path.setAttribute("opacity", opStr);
     }
   }
 
