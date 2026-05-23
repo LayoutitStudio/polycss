@@ -34,6 +34,7 @@ import type {
 import {
   BASE_TILE,
   computeSceneBbox,
+  convexHull2D,
   DEFAULT_SEAM_BLEED,
   findOverlappingPolygonDuplicates,
   inverseRotateVec3,
@@ -664,7 +665,12 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
     return leaves;
   }, [castShadow, effectiveTextureLighting, renderPolygon, polygons, atlasPlans, sceneCtx?.shadow]);
 
-  // Baked-mode SVG shadow: single per-mesh element.
+  // Baked-mode SVG shadow: single per-mesh <svg> with one merged
+  // silhouette <path> (convex hull of every caster polygon's projected
+  // vertices). Avoids the alpha-stacking that overlapping per-polygon
+  // paths would otherwise produce; over-approximates concave meshes
+  // (silhouette fills internal cavities) but is correct for the common
+  // convex/low-poly hero case.
   const sceneShadow = sceneCtx?.shadow;
   const shadowSvgNode = useMemo<ReactNode>(() => {
     if (!castShadow || renderPolygon) return null;
@@ -679,31 +685,33 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
       overlapFraction: 0.4,
     });
 
-    const projections: Array<Array<[number, number]>> = [];
-    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    const points: Array<[number, number]> = [];
     for (let i = 0; i < polygons.length; i++) {
       const polygon = polygons[i]!;
       if (shadowDedupDrop.has(i)) continue;
       const plan = atlasPlans[i];
       if (!plan) continue;
       if (!isBakedShadowCaster(plan.normal, lightDir)) continue;
-      const projected: Array<[number, number]> = [];
       for (const v of polygon.vertices) {
         const cssVertex: Vec3 = [
           v[1] * BASE_TILE,
           v[0] * BASE_TILE,
           v[2] * BASE_TILE,
         ];
-        const p = projectCssVertexToGround(cssVertex, lightDir, bakedShadowGroundCssZ);
-        projected.push(p);
-        if (p[0] < minX) minX = p[0];
-        if (p[1] < minY) minY = p[1];
-        if (p[0] > maxX) maxX = p[0];
-        if (p[1] > maxY) maxY = p[1];
+        points.push(projectCssVertexToGround(cssVertex, lightDir, bakedShadowGroundCssZ));
       }
-      projections.push(projected);
     }
-    if (projections.length === 0) return null;
+    if (points.length < 3) return null;
+    const hull = convexHull2D(points);
+    if (hull.length < 3) return null;
+
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const [x, y] of hull) {
+      if (x < minX) minX = x;
+      if (y < minY) minY = y;
+      if (x > maxX) maxX = x;
+      if (y > maxY) maxY = y;
+    }
     const width = maxX - minX;
     const height = maxY - minY;
     if (!(width > 0) || !(height > 0)) return null;
@@ -712,14 +720,11 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
     const shadowOpacity = sceneShadow?.opacity ?? 0.25;
     const parsed = parseHexColor(shadowColor)?.rgb ?? [0, 0, 0];
 
-    const paths = projections.map((verts, idx) => {
-      let d = `M${(verts[0]![0] - minX).toFixed(3)},${(verts[0]![1] - minY).toFixed(3)}`;
-      for (let j = 1; j < verts.length; j++) {
-        d += `L${(verts[j]![0] - minX).toFixed(3)},${(verts[j]![1] - minY).toFixed(3)}`;
-      }
-      d += "Z";
-      return <path key={idx} d={d} />;
-    });
+    let d = `M${(hull[0]![0] - minX).toFixed(3)},${(hull[0]![1] - minY).toFixed(3)}`;
+    for (let j = 1; j < hull.length; j++) {
+      d += `L${(hull[j]![0] - minX).toFixed(3)},${(hull[j]![1] - minY).toFixed(3)}`;
+    }
+    d += "Z";
 
     return (
       <svg
@@ -739,9 +744,11 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
           transform: `translate3d(${minX.toFixed(3)}px,${minY.toFixed(3)}px,${bakedShadowGroundCssZ.toFixed(3)}px)`,
         }}
       >
-        <g fill={`rgb(${parsed[0]},${parsed[1]},${parsed[2]})`} opacity={shadowOpacity.toFixed(4)}>
-          {paths}
-        </g>
+        <path
+          d={d}
+          fill={`rgb(${parsed[0]},${parsed[1]},${parsed[2]})`}
+          opacity={shadowOpacity.toFixed(4)}
+        />
       </svg>
     );
   }, [castShadow, renderPolygon, effectiveTextureLighting, polygons, atlasPlans, sceneDirectionalLight, bakedShadowGroundCssZ, sceneShadow]);

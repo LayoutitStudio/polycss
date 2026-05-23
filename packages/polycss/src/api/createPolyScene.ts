@@ -42,6 +42,7 @@ import {
   cameraCullNormalKey,
   cameraCullVisibleSignature,
   computeSceneBbox,
+  convexHull2D,
   findOverlappingPolygonDuplicates,
   inverseRotateVec3,
   isAxisAlignedSurfaceNormal,
@@ -1291,8 +1292,12 @@ export function createPolyScene(
     b: number,
     opacity: number,
   ): void {
-    const polyProjections: Array<Array<[number, number]>> = [];
-    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    // Project every light-facing caster polygon's vertices to the ground,
+    // collected into one flat point cloud. The convex hull of that cloud
+    // is the mesh's silhouette outline — one merged shape instead of
+    // many overlapping per-polygon rectangles. Convex meshes (cubes,
+    // hero shapes) collapse cleanly; concave meshes over-approximate.
+    const points: Array<[number, number]> = [];
     // Iterate all rendered polys (not camera-filtered) — a casting polygon
     // hidden from the camera can still project a visible shadow onto the
     // ground. The light-facing filter below does the real culling.
@@ -1304,7 +1309,6 @@ export function createPolyScene(
       const polygon = entry.polygons[item.polygonIndex];
       if (!polygon) continue;
 
-      const projected: Array<[number, number]> = [];
       for (const v of polygon.vertices) {
         // World → CSS-3D: swap X and Y, scale by BASE_TILE. Matches the
         // axis convention used by plan.matrix / --shadow-proj so the
@@ -1314,17 +1318,21 @@ export function createPolyScene(
           v[0] * DEFAULT_TILE,
           v[2] * DEFAULT_TILE,
         ];
-        const p = projectCssVertexToGround(cssVertex, lightDir, groundCssZ);
-        projected.push(p);
-        if (p[0] < minX) minX = p[0];
-        if (p[1] < minY) minY = p[1];
-        if (p[0] > maxX) maxX = p[0];
-        if (p[1] > maxY) maxY = p[1];
+        points.push(projectCssVertexToGround(cssVertex, lightDir, groundCssZ));
       }
-      polyProjections.push(projected);
     }
 
-    if (polyProjections.length === 0) return;
+    if (points.length < 3) return;
+    const hull = convexHull2D(points);
+    if (hull.length < 3) return;
+
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const [x, y] of hull) {
+      if (x < minX) minX = x;
+      if (y < minY) minY = y;
+      if (x > maxX) maxX = x;
+      if (y > maxY) maxY = y;
+    }
     const width = maxX - minX;
     const height = maxY - minY;
     if (!(width > 0) || !(height > 0)) return;
@@ -1337,7 +1345,7 @@ export function createPolyScene(
     svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
     // CSS-Z places the SVG plane at the ground in the mesh's local frame;
     // the mesh wrapper's own transform is applied above this. X/Y origin
-    // shifts the SVG so its (0,0) lines up with the projected bbox corner.
+    // shifts the SVG so its (0,0) lines up with the silhouette bbox corner.
     svg.setAttribute(
       "style",
       `position:absolute;top:0;left:0;display:block;overflow:visible;` +
@@ -1345,15 +1353,11 @@ export function createPolyScene(
       `transform:translate3d(${minX.toFixed(3)}px,${minY.toFixed(3)}px,${groundCssZ.toFixed(3)}px)`,
     );
 
-    const group = doc.createElementNS(svgNS, "g");
-    group.setAttribute("fill", `rgb(${r},${g},${b})`);
-    group.setAttribute("opacity", opacity.toFixed(4));
-    for (const verts of polyProjections) {
-      const path = doc.createElementNS(svgNS, "path");
-      path.setAttribute("d", pointsToSvgPath(verts, minX, minY));
-      group.appendChild(path);
-    }
-    svg.appendChild(group);
+    const path = doc.createElementNS(svgNS, "path");
+    path.setAttribute("d", pointsToSvgPath(hull, minX, minY));
+    path.setAttribute("fill", `rgb(${r},${g},${b})`);
+    path.setAttribute("opacity", opacity.toFixed(4));
+    svg.appendChild(path);
 
     entry.shadowSvg = svg;
     const firstChild = entry.wrapper.firstChild;

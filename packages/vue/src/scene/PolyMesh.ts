@@ -22,6 +22,7 @@ import type { MeshResolution, Polygon, PolyTextureLightingMode, Vec3 } from "@la
 import {
   BASE_TILE,
   computeSceneBbox,
+  convexHull2D,
   DEFAULT_SEAM_BLEED,
   inverseRotateVec3,
   findOverlappingPolygonDuplicates,
@@ -360,10 +361,10 @@ export const PolyMesh = defineComponent({
       });
     });
 
-    // Baked-mode SVG shadow — single per-mesh <svg> with one <path> per
-    // caster polygon. Overlapping outlines composite as one silhouette
-    // inside the <g opacity="..."> before alpha is applied, sidestepping
-    // the `opacity + preserve-3d` flatten trap.
+    // Baked-mode SVG shadow — single per-mesh <svg> with one merged
+    // silhouette <path> (convex hull of every caster polygon's projected
+    // vertices). Correct for convex/low-poly meshes; over-approximates
+    // concave ones by filling internal cavities.
     const shadowSvg = computed<VNode | null>(() => {
       if (!props.castShadow) return null;
       if (atlasTextureLighting.value === "dynamic") return null;
@@ -379,8 +380,7 @@ export const PolyMesh = defineComponent({
         overlapFraction: 0.4,
       });
 
-      const projections: Array<Array<[number, number]>> = [];
-      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      const points: Array<[number, number]> = [];
       const polys = polygons.value;
       const plans = textureAtlasPlans.value;
       for (let i = 0; i < polys.length; i++) {
@@ -389,23 +389,26 @@ export const PolyMesh = defineComponent({
         if (!plan) continue;
         if (!isBakedShadowCaster(plan.normal, lightDir)) continue;
         const polygon = polys[i]!;
-        const projected: Array<[number, number]> = [];
         for (const v of polygon.vertices) {
           const cssVertex: Vec3 = [
             v[1] * BASE_TILE,
             v[0] * BASE_TILE,
             v[2] * BASE_TILE,
           ];
-          const p = projectCssVertexToGround(cssVertex, lightDir, groundCssZ);
-          projected.push(p);
-          if (p[0] < minX) minX = p[0];
-          if (p[1] < minY) minY = p[1];
-          if (p[0] > maxX) maxX = p[0];
-          if (p[1] > maxY) maxY = p[1];
+          points.push(projectCssVertexToGround(cssVertex, lightDir, groundCssZ));
         }
-        projections.push(projected);
       }
-      if (projections.length === 0) return null;
+      if (points.length < 3) return null;
+      const hull = convexHull2D(points);
+      if (hull.length < 3) return null;
+
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      for (const [x, y] of hull) {
+        if (x < minX) minX = x;
+        if (y < minY) minY = y;
+        if (x > maxX) maxX = x;
+        if (y > maxY) maxY = y;
+      }
       const width = maxX - minX;
       const height = maxY - minY;
       if (!(width > 0) || !(height > 0)) return null;
@@ -415,14 +418,11 @@ export const PolyMesh = defineComponent({
       const shadowOpacity = shadowOpts?.opacity ?? 0.25;
       const parsed = parseHexColor(shadowColor)?.rgb ?? [0, 0, 0];
 
-      const pathNodes = projections.map((verts, idx) => {
-        let d = `M${(verts[0]![0] - minX).toFixed(3)},${(verts[0]![1] - minY).toFixed(3)}`;
-        for (let j = 1; j < verts.length; j++) {
-          d += `L${(verts[j]![0] - minX).toFixed(3)},${(verts[j]![1] - minY).toFixed(3)}`;
-        }
-        d += "Z";
-        return h("path", { key: idx, d });
-      });
+      let d = `M${(hull[0]![0] - minX).toFixed(3)},${(hull[0]![1] - minY).toFixed(3)}`;
+      for (let j = 1; j < hull.length; j++) {
+        d += `L${(hull[j]![0] - minX).toFixed(3)},${(hull[j]![1] - minY).toFixed(3)}`;
+      }
+      d += "Z";
 
       return h(
         "svg",
@@ -443,14 +443,11 @@ export const PolyMesh = defineComponent({
           } as CSSProperties,
         },
         [
-          h(
-            "g",
-            {
-              fill: `rgb(${parsed[0]},${parsed[1]},${parsed[2]})`,
-              opacity: shadowOpacity.toFixed(4),
-            },
-            pathNodes,
-          ),
+          h("path", {
+            d,
+            fill: `rgb(${parsed[0]},${parsed[1]},${parsed[2]})`,
+            opacity: shadowOpacity.toFixed(4),
+          }),
         ],
       );
     });

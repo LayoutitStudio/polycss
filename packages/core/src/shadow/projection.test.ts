@@ -3,6 +3,7 @@ import {
   BAKED_SHADOW_MIN_UP,
   BAKED_SHADOW_Z_SQUASH,
   buildBakedShadowProjectionMatrix,
+  convexHull2D,
   isBakedShadowCaster,
   projectCssVertexToGround,
 } from "./projection";
@@ -116,5 +117,55 @@ describe("projectCssVertexToGround", () => {
     const [x] = projectCssVertexToGround([100, 0, 25], [1, 0, 0.001], 0);
     expect(Math.abs(x - 100)).toBeLessThanOrEqual(25 / BAKED_SHADOW_MIN_UP + 1);
     expect(Math.abs(x - 100)).toBeGreaterThan(100);
+  });
+});
+
+describe("convexHull2D", () => {
+  it("returns input unchanged for ≤ 1 points", () => {
+    expect(convexHull2D([])).toEqual([]);
+    expect(convexHull2D([[5, 7]])).toEqual([[5, 7]]);
+  });
+
+  it("returns the unit square's 4 corners for a dense interior cloud", () => {
+    const pts: Array<[number, number]> = [
+      [0, 0], [1, 0], [1, 1], [0, 1],
+      [0.5, 0.5], [0.25, 0.75], [0.8, 0.2], [0.3, 0.3],
+    ];
+    const hull = convexHull2D(pts);
+    expect(hull.length).toBe(4);
+    // Must contain all 4 corners (in some CCW rotation).
+    const set = new Set(hull.map((p) => p.join(",")));
+    expect(set.has("0,0")).toBe(true);
+    expect(set.has("1,0")).toBe(true);
+    expect(set.has("1,1")).toBe(true);
+    expect(set.has("0,1")).toBe(true);
+  });
+
+  it("drops collinear-edge points", () => {
+    // Square with an extra collinear point on the bottom edge. The hull
+    // should still be the 4 corners.
+    const hull = convexHull2D([[0, 0], [0.5, 0], [1, 0], [1, 1], [0, 1]]);
+    expect(hull.length).toBe(4);
+    const set = new Set(hull.map((p) => p.join(",")));
+    expect(set.has("0.5,0")).toBe(false);
+  });
+
+  it("handles a tilted parallelogram", () => {
+    // The convex hull of a sheared square (typical baked-shadow output)
+    // should still be 4 corners.
+    const hull = convexHull2D([[0, 0], [10, 5], [12, 9], [2, 4]]);
+    expect(hull.length).toBe(4);
+  });
+
+  it("returns the vertices CCW", () => {
+    const hull = convexHull2D([[0, 0], [1, 0], [1, 1], [0, 1]]);
+    // Sum of signed cross products of consecutive edges → positive for CCW.
+    let signedArea = 0;
+    for (let i = 0; i < hull.length; i++) {
+      const a = hull[i]!;
+      const b = hull[(i + 1) % hull.length]!;
+      signedArea += a[0] * b[1] - b[0] * a[1];
+    }
+    expect(signedArea).toBeGreaterThan(0);
   });
 });

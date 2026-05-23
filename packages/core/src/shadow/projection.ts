@@ -83,6 +83,56 @@ export function isBakedShadowCaster(
 }
 
 /**
+ * Computes the 2D convex hull of a set of points using Andrew's monotone
+ * chain (O(n log n)). Returns the hull vertices in counter-clockwise order
+ * with no repeated endpoints. Used to merge a mesh's per-polygon shadow
+ * projections into one silhouette outline — convex meshes (cubes, spheres,
+ * low-poly hero shapes) collapse cleanly; concave shapes over-approximate.
+ *
+ * Collinear points on the hull edge are dropped. Input may contain
+ * duplicates and is left unmodified.
+ */
+export function convexHull2D(
+  points: ReadonlyArray<readonly [number, number]>,
+): Array<[number, number]> {
+  const n = points.length;
+  if (n <= 1) return points.map((p) => [p[0], p[1]]);
+  // Stable sort by x then y so collinear-on-edge points sort consistently.
+  const sorted = points.map((p) => [p[0], p[1]] as [number, number]);
+  sorted.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  const cross = (
+    o: [number, number],
+    a: [number, number],
+    b: [number, number],
+  ): number => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+  const lower: Array<[number, number]> = [];
+  for (const p of sorted) {
+    while (
+      lower.length >= 2 &&
+      cross(lower[lower.length - 2]!, lower[lower.length - 1]!, p) <= 0
+    ) {
+      lower.pop();
+    }
+    lower.push(p);
+  }
+  const upper: Array<[number, number]> = [];
+  for (let i = sorted.length - 1; i >= 0; i--) {
+    const p = sorted[i]!;
+    while (
+      upper.length >= 2 &&
+      cross(upper[upper.length - 2]!, upper[upper.length - 1]!, p) <= 0
+    ) {
+      upper.pop();
+    }
+    upper.push(p);
+  }
+  // Drop the last point of each chain (it's the first of the other).
+  lower.pop();
+  upper.pop();
+  return lower.concat(upper);
+}
+
+/**
  * Projects a single CSS-3D vertex onto the shadow ground plane, returning
  * the resulting 2D point in CSS coordinates. Mirrors the per-element
  * matrix3d that the dynamic-mode `--shadow-proj` builds, but evaluated on
