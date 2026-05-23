@@ -1,0 +1,120 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>polycss baked-shadow diagnose</title>
+  <style>
+    html, body { margin: 0; padding: 0; height: 100%; background: #ddd; }
+    #host { position: fixed; inset: 0; }
+    #status {
+      position: fixed; bottom: 8px; left: 8px;
+      font: 12px ui-monospace, monospace;
+      background: rgba(0,0,0,0.6); color: #fff;
+      padding: 6px 10px; border-radius: 4px;
+      white-space: pre; pointer-events: none;
+    }
+  </style>
+</head>
+<body>
+  <div id="host"></div>
+  <pre id="status"></pre>
+
+  <script type="module">
+    import {
+      createPolyCamera,
+      createPolyScene,
+    } from "./.generated/polycss.js";
+
+    const query = new URLSearchParams(location.search);
+    // Default: baked + castShadow — the failing case.
+    const mode = query.get("mode") || "baked";   // baked | dynamic
+    const cast = query.get("cast") !== "0";       // 1 (default) | 0
+    const includeGround = query.get("ground") !== "0";
+
+    const host = document.getElementById("host");
+    const camera = createPolyCamera({ rotX: 35, rotY: -45, zoom: 1.5 });
+    const scene = createPolyScene(host, {
+      camera,
+      directionalLight: { direction: [0.4, -0.7, 0.59], color: "#ffffff", intensity: 1 },
+      ambientLight: { color: "#ffffff", intensity: 0.4 },
+      textureLighting: mode,
+      autoCenter: false,
+    });
+
+    // ── Cube: 6 axis-aligned face polygons of a unit cube. Bottom sits
+    // ON the ground (Z=0) so the shadow plane (derived from caster min Z
+    // + lift) aligns with the ground mesh.
+    const C = 1.5;      // half-size in world units (CSS pixels at BASE_TILE=50)
+    const ZBOTTOM = 0;
+    const ZTOP = ZBOTTOM + C * 2;
+    function quad(p0, p1, p2, p3, color) {
+      return { vertices: [p0, p1, p2, p3], color };
+    }
+    const cubePolys = [
+      // Top (normal +Z)
+      quad([-C, -C, ZTOP], [ C, -C, ZTOP], [ C,  C, ZTOP], [-C,  C, ZTOP], "#ef4444"),
+      // Bottom (normal -Z)
+      quad([-C,  C, ZBOTTOM], [ C,  C, ZBOTTOM], [ C, -C, ZBOTTOM], [-C, -C, ZBOTTOM], "#7f1d1d"),
+      // +X
+      quad([ C, -C, ZBOTTOM], [ C,  C, ZBOTTOM], [ C,  C, ZTOP], [ C, -C, ZTOP], "#3b82f6"),
+      // -X
+      quad([-C,  C, ZBOTTOM], [-C, -C, ZBOTTOM], [-C, -C, ZTOP], [-C,  C, ZTOP], "#1e3a8a"),
+      // +Y
+      quad([ C,  C, ZBOTTOM], [-C,  C, ZBOTTOM], [-C,  C, ZTOP], [ C,  C, ZTOP], "#22c55e"),
+      // -Y
+      quad([-C, -C, ZBOTTOM], [ C, -C, ZBOTTOM], [ C, -C, ZTOP], [-C, -C, ZTOP], "#14532d"),
+    ];
+
+    // Ground plane (gray, larger than the cube footprint).
+    const G = 6;
+    const groundPolys = [
+      quad([-G, -G, 0], [ G, -G, 0], [ G,  G, 0], [-G,  G, 0], "#cbd5e1"),
+    ];
+
+    function makeParseResult(polygons) {
+      return { polygons, dispose() {} };
+    }
+
+    if (includeGround) {
+      scene.add(makeParseResult(groundPolys), { castShadow: false });
+    }
+    const cubeHandle = scene.add(makeParseResult(cubePolys), {
+      castShadow: cast,
+    });
+
+    // Surface state for the diagnose script to read.
+    function snapshot() {
+      const sceneEl = host.querySelector(".polycss-scene");
+      const meshes = host.querySelectorAll(".polycss-mesh");
+      const shadows = host.querySelectorAll(".polycss-shadow");
+      const leaves = host.querySelectorAll(".polycss-scene > .polycss-mesh > :is(b, i, s, u)");
+      const sample = [];
+      const sampleSize = Math.min(3, shadows.length);
+      for (let i = 0; i < sampleSize; i++) {
+        const el = shadows[i];
+        sample.push({
+          transform: el.style.transform,
+          width: el.style.width,
+          height: el.style.height,
+          color: el.style.color,
+        });
+      }
+      return {
+        mode,
+        castShadow: cast,
+        groundCssZ_var: sceneEl?.style.getPropertyValue("--shadow-ground-cssz") || "(unset)",
+        clx_var: sceneEl?.style.getPropertyValue("--clx") || "(unset)",
+        lightingAttr: sceneEl?.dataset.polycssLighting || "(unset)",
+        meshCount: meshes.length,
+        leafCount: leaves.length,
+        shadowCount: shadows.length,
+        sample,
+      };
+    }
+
+    window.__polySnapshot = snapshot;
+    document.getElementById("status").textContent =
+      JSON.stringify(snapshot(), null, 2);
+  </script>
+</body>
+</html>
