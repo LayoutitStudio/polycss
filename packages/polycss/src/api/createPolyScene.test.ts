@@ -2036,6 +2036,32 @@ describe("createPolyScene", () => {
       expect(sceneEl.style.getPropertyValue("--cly")).toBe("");
       expect(sceneEl.style.getPropertyValue("--clz")).toBe("");
     });
+
+    it("baked mode re-emits shadow leaves when directionalLight.direction changes", () => {
+      // Light direction is folded into the CPU-baked matrix, so changing
+      // it must rewrite the inline transform — otherwise the shadows
+      // would stay frozen at the original light angle.
+      scene = makeScene(host, {
+        textureLighting: "baked",
+        directionalLight: { direction: [0, 0, 1] },
+      });
+      scene.add(makeParseResult([triangle()]), { castShadow: true });
+      const initial = (host.querySelector(".polycss-shadow") as HTMLElement).style.transform;
+      scene.setOptions({ directionalLight: { direction: [1, 0, 1] } });
+      const next = (host.querySelector(".polycss-shadow") as HTMLElement).style.transform;
+      expect(next).not.toBe(initial);
+      expect(next).toMatch(/^matrix3d\(.+\)\s+matrix3d\(/);
+    });
+
+    it("baked mode does NOT set --shadow-ground-cssz on the scene element", () => {
+      // Ground Z lives inside each leaf's baked matrix3d, not on the
+      // scene root — the CSS var is dynamic-mode-only and would
+      // accidentally drive --shadow-proj for any stale dynamic leaves.
+      scene = makeScene(host, { textureLighting: "baked" });
+      scene.add(makeParseResult([triangle()]), { castShadow: true });
+      const sceneEl = getSceneEl(host);
+      expect(sceneEl.style.getPropertyValue("--shadow-ground-cssz")).toBe("");
+    });
   });
 });
 
