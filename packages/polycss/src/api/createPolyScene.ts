@@ -1220,7 +1220,10 @@ export function createPolyScene(
 
     const shadowColorCss = `rgba(${r},${g},${b},${shadowOpacity})`;
     const fragment = doc.createDocumentFragment();
-    for (const item of renderedItemsForCamera(entry)) {
+    // Iterate all rendered polys (not camera-filtered) — a polygon on the
+    // lit side of the mesh that's currently camera-culled still casts a
+    // valid shadow on the ground.
+    for (const item of entry.rendered) {
       // Atlas (<s>) polygons cast shadows too — the shadow only needs
       // the polygon's OUTLINE (border-shape) and a flat dark color, not
       // the texture content. So fully textured meshes like the Frog Guy
@@ -1290,7 +1293,10 @@ export function createPolyScene(
   ): void {
     const polyProjections: Array<Array<[number, number]>> = [];
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-    for (const item of renderedItemsForCamera(entry)) {
+    // Iterate all rendered polys (not camera-filtered) — a casting polygon
+    // hidden from the camera can still project a visible shadow onto the
+    // ground. The light-facing filter below does the real culling.
+    for (const item of entry.rendered) {
       if (dedupDrop.has(item.polygonIndex)) continue;
       const plan = item.plan;
       if (!plan) continue;
