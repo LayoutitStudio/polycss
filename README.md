@@ -36,6 +36,8 @@ You can also load polycss directly from a CDN. Here is a minimal custom-element 
 </poly-camera>
 ```
 
+<img width="2500" height="1145" alt="polycss-intro" src="https://github.com/user-attachments/assets/0e5df0d8-04a8-4e50-8e3a-1097a96ce42f" />
+
 ## Framework Components
 
 React and Vue expose the same component model. `<PolyCamera>` owns the viewpoint, `<PolyScene>` owns lighting and atlas options, and `<PolyMesh>` loads or receives polygon data.
