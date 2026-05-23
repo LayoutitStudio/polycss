@@ -724,6 +724,27 @@ export function createPolyScene(
     }
   }
 
+  // Per-caster cached per-polygon data: world-space vertices + 3D
+  // AABB corners. Invariant under light direction; depends only on
+  // the caster mesh's geometry and position. Reused across every
+  // receiver-face SH-clip in a frame and across frames within a
+  // drag, so the caching pays for itself many times over.
+  interface CasterPolyItem {
+    wv: Vec3[];
+    bboxCorners: Vec3[];
+  }
+  const casterItemsCache = new Map<MeshEntry, CasterPolyItem[]>();
+  const casterItemsCacheKey = new Map<MeshEntry, string>();
+  function clearCasterItemsCache(entry?: MeshEntry): void {
+    if (entry) {
+      casterItemsCache.delete(entry);
+      casterItemsCacheKey.delete(entry);
+    } else {
+      casterItemsCache.clear();
+      casterItemsCacheKey.clear();
+    }
+  }
+
   // Apply CSS perspective on the camera wrapper, not the scene element.
   // CSS `perspective` only foreshortens direct children's 3D transforms, so
   // the wrapper must be the perspective context for .polycss-scene to work
@@ -1654,43 +1675,46 @@ export function createPolyScene(
       receiverShadowCacheKey.set(receiverEntry, cacheKey);
     }
 
-    // Pre-build per-caster-polygon items once per frame: world-space
-    // vertices and 3D AABB. We need both for every face anyway, so
-    // doing it inside the face loop redundantly transforms the same
-    // mesh-local vertices N_faces times. The AABB also lets us
-    // bbox-cull a polygon against the face plane before per-tri SH.
-    interface CasterPolyItem {
-      wv: Vec3[];
-      // 8 corners of axis-aligned 3D bbox in CSS world.
-      bboxCorners: Vec3[];
-    }
+    // Per-caster cached items: world-vertices + 3D AABB per polygon.
+    // Geometry is invariant under light direction, so once cached
+    // every receiver-face SH-clip across every drag tick reads from
+    // the cache. Invalidated when a caster mesh changes geometry or
+    // position (clearCasterItemsCache from mesh setters).
     const casterItems: CasterPolyItem[] = [];
     for (const caster of casters) {
       if (caster === receiverEntry) continue;
-      const dedupDrop = dedupByCaster.get(caster)!;
       const cpos = caster.handle.transform.position ?? [0, 0, 0];
-      for (const item of caster.rendered) {
-        if (dedupDrop.has(item.polygonIndex)) continue;
-        const plan = item.plan;
-        if (!plan) continue;
-        const polygon = caster.polygons[item.polygonIndex];
-        if (!polygon) continue;
-        const wv = polygon.vertices.map((vert) => worldCss(vert, cpos));
-        let minX = Infinity, minY = Infinity, minZ = Infinity;
-        let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
-        for (const w of wv) {
-          if (w[0] < minX) minX = w[0]; if (w[0] > maxX) maxX = w[0];
-          if (w[1] < minY) minY = w[1]; if (w[1] > maxY) maxY = w[1];
-          if (w[2] < minZ) minZ = w[2]; if (w[2] > maxZ) maxZ = w[2];
+      const ckey = `${caster.polygons.length}|${cpos.join(",")}`;
+      let cached = casterItemsCache.get(caster);
+      if (cached === undefined || casterItemsCacheKey.get(caster) !== ckey) {
+        const dedupDrop = dedupByCaster.get(caster)!;
+        cached = [];
+        for (const item of caster.rendered) {
+          if (dedupDrop.has(item.polygonIndex)) continue;
+          const plan = item.plan;
+          if (!plan) continue;
+          const polygon = caster.polygons[item.polygonIndex];
+          if (!polygon) continue;
+          const wv = polygon.vertices.map((vert) => worldCss(vert, cpos));
+          let minX = Infinity, minY = Infinity, minZ = Infinity;
+          let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+          for (const w of wv) {
+            if (w[0] < minX) minX = w[0]; if (w[0] > maxX) maxX = w[0];
+            if (w[1] < minY) minY = w[1]; if (w[1] > maxY) maxY = w[1];
+            if (w[2] < minZ) minZ = w[2]; if (w[2] > maxZ) maxZ = w[2];
+          }
+          const bboxCorners: Vec3[] = [
+            [minX, minY, minZ], [maxX, minY, minZ],
+            [minX, maxY, minZ], [maxX, maxY, minZ],
+            [minX, minY, maxZ], [maxX, minY, maxZ],
+            [minX, maxY, maxZ], [maxX, maxY, maxZ],
+          ];
+          cached.push({ wv, bboxCorners });
         }
-        const bboxCorners: Vec3[] = [
-          [minX, minY, minZ], [maxX, minY, minZ],
-          [minX, maxY, minZ], [maxX, maxY, minZ],
-          [minX, minY, maxZ], [maxX, minY, maxZ],
-          [minX, maxY, maxZ], [maxX, maxY, maxZ],
-        ];
-        casterItems.push({ wv, bboxCorners });
+        casterItemsCache.set(caster, cached);
+        casterItemsCacheKey.set(caster, ckey);
       }
+      for (const it of cached) casterItems.push(it);
     }
 
     for (const group of cachedPlanes) {
@@ -2240,6 +2264,7 @@ export function createPolyScene(
         clearRendered(entry);
         meshes.delete(entry);
         clearReceiverShadowCache(entry);
+        clearCasterItemsCache(entry);
         recomputeAutoCenter();
         recomputeShadowGround();
       },
@@ -2250,6 +2275,8 @@ export function createPolyScene(
         entry.stableDom = stableDomOnUpdate;
         entry.voxelSource = undefined;
         entry.polygons = preparePolygons(polygons, mergeOnUpdate);
+        clearCasterItemsCache(entry);
+        clearReceiverShadowCache(entry);
         clearCurrentTriangleFrame();
         handle.polygons = entry.polygons;
         const shouldRecomputeAutoCenter = options?.recomputeAutoCenter ?? true;
