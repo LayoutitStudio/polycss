@@ -60,7 +60,8 @@ interface PolyState {
 interface EdgeOwners {
   a: Vec3;
   b: Vec3;
-  owners: number[];
+  first: number;
+  second: number;
 }
 
 const sub = (a: Vec3, b: Vec3): Vec3 => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
@@ -303,6 +304,28 @@ function rotateToNonCollinearStart(vertices: Vec3[], uvs?: Vec2[]): { vertices: 
 export function mergePolygons(input: Polygon[]): Polygon[] {
   const out: Polygon[] = [];
   const polys: PolyState[] = [];
+  const vertexKeyCache = new WeakMap<Vec3, string>();
+  const cachedVertexKey = (vertex: Vec3): string => {
+    const current = vertexKeyCache.get(vertex);
+    if (current) return current;
+    const key = vertexKey(vertex);
+    vertexKeyCache.set(vertex, key);
+    return key;
+  };
+  const cachedEdgeKey = (a: Vec3, b: Vec3): string => {
+    const ka = cachedVertexKey(a);
+    const kb = cachedVertexKey(b);
+    return ka < kb ? `${ka}|${kb}` : `${kb}|${ka}`;
+  };
+  const cachedDirectedEdgeKey = (a: Vec3, b: Vec3): string =>
+    `${cachedVertexKey(a)}>${cachedVertexKey(b)}`;
+  const cachedDirectedEdgeSet = (vertices: Vec3[]): Set<string> => {
+    const edges = new Set<string>();
+    for (let k = 0; k < vertices.length; k++) {
+      edges.add(cachedDirectedEdgeKey(vertices[k], vertices[(k + 1) % vertices.length]));
+    }
+    return edges;
+  };
   let workUnits = 0;
   let workBudgetExhausted = false;
   const consumeWork = (units: number): boolean => {
@@ -319,7 +342,7 @@ export function mergePolygons(input: Polygon[]): Polygon[] {
       if (polygon) out.push(polygon);
       continue;
     }
-    const verts = polygon.vertices.map((v) => [v[0], v[1], v[2]] as Vec3);
+    const verts = polygon.vertices;
     const plane = planeOf(verts);
     if (!plane) {
       out.push(polygon);
@@ -345,7 +368,7 @@ export function mergePolygons(input: Polygon[]): Polygon[] {
       textureTriangles,
       normal: plane.normal,
       d: plane.d,
-      directedEdges: directedEdgeSet(verts),
+      directedEdges: cachedDirectedEdgeSet(verts),
       alive: true,
       data: polygon.data,
     });
@@ -370,36 +393,35 @@ export function mergePolygons(input: Polygon[]): Polygon[] {
       if (!p.alive) continue;
       const n = p.vertices.length;
       if (!consumeWork(n)) return false;
-      p.directedEdges = new Set();
       for (let k = 0; k < n; k++) {
         const a = p.vertices[k];
         const b = p.vertices[(k + 1) % n];
-        p.directedEdges.add(directedEdgeKey(a, b));
-        const key = edgeKey(a, b);
+        const key = cachedEdgeKey(a, b);
         let edge = edgeIndex.get(key);
         if (!edge) {
-          edge = { a, b, owners: [] };
+          edge = { a, b, first: i, second: -1 };
           edgeIndex.set(key, edge);
+        } else if (edge.second < 0) {
+          edge.second = i;
         }
-        edge.owners.push(i);
       }
     }
 
     let mergedThisPass = false;
 
     const edgeDirection = (poly: PolyState, e0: Vec3, e1: Vec3): 1 | -1 | 0 => {
-      if (poly.directedEdges.has(directedEdgeKey(e0, e1))) return 1;
-      if (poly.directedEdges.has(directedEdgeKey(e1, e0))) return -1;
+      if (poly.directedEdges.has(cachedDirectedEdgeKey(e0, e1))) return 1;
+      if (poly.directedEdges.has(cachedDirectedEdgeKey(e1, e0))) return -1;
       return 0;
     };
 
     for (const edge of edgeIndex.values()) {
-      const { owners } = edge;
-      // owners can have >2 if a degenerate input had three+ polys sharing
-      // an edge; we still try each pair below — but the simple dedupe
-      // skips index entries where both polys were already merged away.
-      if (owners.length < 2) continue;
-      const [ai, bi] = owners;
+      // Degenerate inputs can have three+ polys sharing an edge. The old
+      // array path only tried the first two owners, so the fixed slots keep
+      // that behavior without allocating for every boundary edge.
+      if (edge.second < 0) continue;
+      const ai = edge.first;
+      const bi = edge.second;
       if (ai === bi) continue;
       const a = polys[ai];
       const b = polys[bi];
@@ -433,7 +455,7 @@ export function mergePolygons(input: Polygon[]): Polygon[] {
 
       a.vertices = merged.vertices;
       a.uvs = merged.uvs;
-      a.directedEdges = directedEdgeSet(merged.vertices);
+      a.directedEdges = cachedDirectedEdgeSet(merged.vertices);
       a.textureTriangles = hasTexture
         ? [...(a.textureTriangles ?? []), ...(b.textureTriangles ?? [])]
         : undefined;
@@ -455,11 +477,11 @@ export function mergePolygons(input: Polygon[]): Polygon[] {
   for (const p of polys) {
     if (!p.alive) continue;
     const out_p: Polygon = {
-      vertices: p.vertices,
+      vertices: p.vertices.map((vertex) => [vertex[0], vertex[1], vertex[2]] as Vec3),
       color: p.color,
     };
     if (p.texture) out_p.texture = p.texture;
-    if (p.uvs) out_p.uvs = p.uvs;
+    if (p.uvs) out_p.uvs = p.uvs.map((uv) => [uv[0], uv[1]] as Vec2);
     if (p.textureTriangles?.length) out_p.textureTriangles = p.textureTriangles;
     if (p.data) out_p.data = p.data;
     out.push(out_p);
