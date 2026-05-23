@@ -1144,33 +1144,27 @@ export function createPolyScene(
     }
   }
 
-  // Emits shadow leaves for all rendered polys in the entry.
+  // Emits the per-mesh shadow `<svg>`. Same path for both lighting modes:
+  // every casting polygon is projected to the ground on the CPU and
+  // concatenated into a single compound `<path>` (M…L…Z subpaths) under
+  // fill-rule=nonzero. Overlapping outlines composite as one filled
+  // silhouette without alpha stacking; gaps between subpaths remain as
+  // gaps (silhouette holes are preserved); back-facing polys are dropped
+  // up front. One SVG element per mesh regardless of polygon count.
   //
-  // Dynamic mode emits one `<q>` per casting polygon whose transform
-  // chains `var(--shadow-proj)` so the projection follows the live light
-  // vars on the scene root (zero JS at light-change time). A CSS opacity
-  // calc on the scene root hides back-facing polys at paint time.
-  //
-  // Baked mode emits a single `<svg>` per mesh containing one `<path>`
-  // per casting polygon (projected to ground on the CPU). The shared
-  // `<g opacity>` collapses overlapping outlines into one solid silhouette
-  // before applying the alpha — no per-leaf alpha accumulation at
-  // polygon intersections, and no `opacity + preserve-3d` flatten trap
-  // because SVG content is internally 2D. Back-facing polys are dropped
-  // up front.
-  //
-  // Shadow elements are inserted BEFORE the first non-shadow child so
-  // they sit below casters in DOM order, which keeps them behind the
-  // casters when both are coplanar in 3D (painter-order tie-breaking
-  // favors earlier nodes).
+  // Trade-off vs. the old dynamic-mode per-`<q>` CSS path: live light
+  // updates now require a JS re-projection pass (`setOptions` triggers
+  // re-emit when directionalLight.direction changes) instead of being
+  // free CSS variable updates. The visual upside (no alpha stacking,
+  // preserved holes, fewer DOM nodes) is worth the JS cost for typical
+  // scenes — huge meshes during light-slider drag can profile if needed.
   function emitShadowLeaves(entry: MeshEntry): void {
     clearShadowLeaves(entry);
     if (!entry.castShadow) return;
-    const isDynamic = currentOptions.textureLighting === "dynamic";
-    // Baked mode needs a ground plane to project onto. If none has been
-    // computed yet (no caster meshes), bail and wait for the next
+    // Need a ground plane to project onto. If none has been computed
+    // yet (no caster meshes), bail and wait for the next
     // recomputeShadowGround pass to drive emission.
-    if (!isDynamic && currentGroundCssZ === null) return;
+    if (currentGroundCssZ === null) return;
 
     const shadowColor = currentOptions.shadow?.color ?? "#000000";
     const shadowOpacity = currentOptions.shadow?.opacity ?? 0.25;
@@ -1185,8 +1179,7 @@ export function createPolyScene(
     // plane-offset drift, catching back-to-back doubled faces and minor
     // importer artifacts without false-positively dropping legitimate
     // inner/outer wall pairs that cast genuinely distinct shadows.
-    // Light-independent — runs once per mesh-polygon change, never per
-    // camera tick or light slider tick.
+    // Light-independent — runs once per mesh-polygon change.
     const shadowDedupDrop = findOverlappingPolygonDuplicates(entry.polygons, {
       normalTolerance: 0.1,
       distanceTolerance: 0.5,
@@ -1196,82 +1189,24 @@ export function createPolyScene(
     const lightDir = currentOptions.directionalLight?.direction
       ?? ([0.4, -0.7, 0.59] as Vec3);
 
-    if (!isDynamic) {
-      emitBakedShadowSvg(
-        entry,
-        shadowDedupDrop,
-        lightDir,
-        currentGroundCssZ ?? 0,
-        r, g, b,
-        shadowOpacity,
-      );
-      return;
-    }
-
-    const shadowColorCss = `rgba(${r},${g},${b},${shadowOpacity})`;
-    const fragment = doc.createDocumentFragment();
-    // Iterate all rendered polys (not camera-filtered) — a polygon on the
-    // lit side of the mesh that's currently camera-culled still casts a
-    // valid shadow on the ground.
-    for (const item of entry.rendered) {
-      // Atlas (<s>) polygons cast shadows too — the shadow only needs
-      // the polygon's OUTLINE (border-shape) and a flat dark color, not
-      // the texture content. So fully textured meshes like the Frog Guy
-      // get proper shadows just like solid-color meshes.
-      // Skip polygons identified as shadow-duplicates of another caster.
-      if (shadowDedupDrop.has(item.polygonIndex)) continue;
-      const plan = item.plan;
-      if (!plan) continue;
-
-      // Read the original matrix3d from the plan (not from the element
-      // style string) so we never parse strings.
-      const origMatrix = `matrix3d(${plan.matrix})`;
-
-      // Shadow leaves emit as <q> — a dedicated single-letter element
-      // that lives alongside <b>/<i>/<s>/<u> in the tag-as-strategy
-      // taxonomy. Using its own tag means we don't have to thread
-      // `:not(.polycss-shadow)` exclusions through every dynamic-mode
-      // color rule (regular polygon leaves get relit by Lambert; shadow
-      // leaves shouldn't). Rendering rides the <q> + border-shape path
-      // mirrored from <i>'s border-color: currentColor mechanism.
-      // clip-path is forbidden by repo policy (4000+ clip-paths inside
-      // preserve-3d = ~15 s/frame on Chromium).
-      const shadowEl = doc.createElement("q");
-      shadowEl.className = "polycss-shadow";
-      shadowEl.style.transform = `var(--shadow-proj) ${origMatrix}`;
-      shadowEl.style.color = shadowColorCss;
-      shadowEl.style.width = `${plan.canvasW}px`;
-      shadowEl.style.height = `${plan.canvasH}px`;
-      shadowEl.style.setProperty("border-shape", cssBorderShapeForPlan(plan));
-      // Dynamic mode pins the caster's normal so the per-element opacity
-      // calc can Lambert-gate back-facing polys.
-      shadowEl.style.setProperty("--pnx", plan.normal[0].toFixed(4));
-      shadowEl.style.setProperty("--pny", plan.normal[1].toFixed(4));
-      shadowEl.style.setProperty("--pnz", plan.normal[2].toFixed(4));
-
-      fragment.appendChild(shadowEl);
-      entry.shadowRendered.push(shadowEl);
-    }
-
-    // Insert all shadow leaves BEFORE the first normal polygon child so
-    // they appear below casters in DOM order. appendChild would put them
-    // after; insertBefore(fragment, firstChild) puts them at the front.
-    const firstChild = entry.wrapper.firstChild;
-    if (firstChild) {
-      entry.wrapper.insertBefore(fragment, firstChild);
-    } else {
-      entry.wrapper.appendChild(fragment);
-    }
+    emitShadowSvg(
+      entry,
+      shadowDedupDrop,
+      lightDir,
+      currentGroundCssZ,
+      r, g, b,
+      shadowOpacity,
+    );
   }
 
-  // Builds a single per-mesh <svg> for baked-mode shadows. Projects every
-  // casting polygon to the ground plane on the CPU, then drops one <path>
-  // per polygon into a shared <g opacity="..." fill="..."> so overlapping
-  // outlines composite as one silhouette (no alpha accumulation at
-  // intersections). SVG content is internally 2D so this sidesteps the
-  // `opacity + transform-style: preserve-3d` flatten trap that breaks
-  // CSS-only shadow grouping in a 3D scene.
-  function emitBakedShadowSvg(
+  // Builds a single per-mesh <svg> for the mesh's shadow. Projects every
+  // casting polygon to the ground on the CPU, concatenates the outlines
+  // into one compound <path d="M…L…Z M…L…Z …"> under fill-rule=nonzero so
+  // overlapping CCW subpaths composite as one filled silhouette (no alpha
+  // accumulation at intersections). SVG content is internally 2D so this
+  // sidesteps the `opacity + transform-style: preserve-3d` flatten trap
+  // that breaks CSS-only shadow grouping in a 3D scene.
+  function emitShadowSvg(
     entry: MeshEntry,
     dedupDrop: Set<number>,
     lightDir: Vec3,
@@ -1442,10 +1377,8 @@ export function createPolyScene(
   // plane slightly above the bbox floor to prevent z-fighting with
   // receiver polygons.
   //
-  // Dynamic mode writes the result to `--shadow-ground-cssz` and lets the
-  // CSS `--shadow-proj` calc expression rebuild the matrix on the GPU side.
-  // Baked mode caches it in `currentGroundCssZ` and re-emits all casting
-  // entries' shadow leaves so the inline matrix3d transforms refresh.
+  // The ground value is folded into each mesh's SVG shadow path on the
+  // CPU, so a change requires re-emission of every caster's shadow.
   function recomputeShadowGround(): void {
     let minWorldZ = Infinity;
     for (const m of meshes) {
@@ -1458,13 +1391,12 @@ export function createPolyScene(
       }
     }
     if (!Number.isFinite(minWorldZ)) {
-      sceneEl.style.removeProperty("--shadow-ground-cssz");
       const hadGround = currentGroundCssZ !== null;
       currentGroundCssZ = null;
-      // No casters left: drop any baked shadow leaves still mounted.
-      if (hadGround && currentOptions.textureLighting !== "dynamic") {
+      // No casters left: drop any shadow elements still mounted.
+      if (hadGround) {
         for (const entry of meshes) {
-          if (entry.shadowRendered.length) clearShadowLeaves(entry);
+          if (entry.shadowSvg) clearShadowLeaves(entry);
         }
       }
       return;
@@ -1474,19 +1406,9 @@ export function createPolyScene(
     // (not subtracted) so the shadow plane sits slightly *above* the model
     // bbox floor — putting it on top of a receiver mesh placed at minZ
     // rather than below it, where the receiver would occlude the shadow.
-    // Stored as a unitless number (not px) because matrix3d() calc() entries
-    // must be dimensionless — see styles.ts @property --shadow-ground-cssz.
     const groundCssZ = (minWorldZ + lift) * DEFAULT_TILE;
     const prevGround = currentGroundCssZ;
     currentGroundCssZ = groundCssZ;
-    if (currentOptions.textureLighting === "dynamic") {
-      sceneEl.style.setProperty("--shadow-ground-cssz", groundCssZ.toFixed(3));
-      return;
-    }
-    // Baked mode: the ground value is folded into each leaf's inline
-    // matrix3d, so a change requires re-emission of every caster's shadows.
-    // Strip the dynamic-only CSS var in case lighting just toggled.
-    sceneEl.style.removeProperty("--shadow-ground-cssz");
     if (prevGround !== groundCssZ) {
       for (const entry of meshes) {
         if (entry.castShadow) emitShadowLeaves(entry);
@@ -2033,13 +1955,12 @@ export function createPolyScene(
       for (const entry of meshes) renderEntry(entry);
     }
     if (prevAutoCenter !== nextAutoCenter) recomputeAutoCenter();
-    // Shadow emission depends on lighting mode, light direction, and the
-    // shadow appearance options. Dynamic mode handles light + shadow-color
-    // changes purely through CSS vars updated above; the cases that need
-    // explicit re-emission are:
-    //  - lighting mode toggled (different transform / DOM shape)
-    //  - light direction changed in baked mode (matrix is CPU-baked)
-    //  - shadow color/opacity/lift changed in baked mode (color is inline)
+    // Shadows now use the same per-mesh SVG path in both lighting modes,
+    // so any of these changes require explicit re-emission:
+    //  - lighting mode toggled (the regular leaves change)
+    //  - light direction changed (projection is CPU-baked into each path)
+    //  - shadow color/opacity/lift changed (color/opacity are inline on the
+    //    <path>; lift shifts the ground plane and rebuilds geometry)
     const textureLightingChanged = partial.textureLighting !== undefined &&
       prevTextureLighting !== currentOptions.textureLighting;
     const nextLightDir = currentOptions.directionalLight?.direction;
@@ -2048,9 +1969,7 @@ export function createPolyScene(
     const nextShadow = currentOptions.shadow;
     const shadowAppearanceChanged = partial.shadow !== undefined
       && !shadowOptsEqual(prevShadow, nextShadow);
-    const isBaked = currentOptions.textureLighting !== "dynamic";
-    const bakedShadowResetNeeded = isBaked
-      && (lightDirChanged || shadowAppearanceChanged);
+    const shadowReemitNeeded = lightDirChanged || shadowAppearanceChanged;
     if (textureLightingChanged) {
       for (const entry of meshes) {
         if (!strategiesChanged && !seamBleedChanged && (entry.voxelSource || entry.voxelRenderer)) {
@@ -2060,17 +1979,7 @@ export function createPolyScene(
         }
       }
       recomputeShadowGround();
-    } else if (bakedShadowResetNeeded) {
-      // Light direction or shadow appearance changed in baked mode —
-      // re-emit all casters' shadow leaves with the new inline matrix /
-      // color. Cheap: DOM-only, no atlas re-rasterise.
-      for (const entry of meshes) {
-        if (entry.castShadow) emitShadowLeaves(entry);
-      }
-    } else if (shadowAppearanceChanged && !isBaked) {
-      // Dynamic mode: shadow color/opacity is per-leaf inline, so a
-      // change still needs re-emission. Lift affects --shadow-ground-cssz
-      // which recomputeShadowGround handles below.
+    } else if (shadowReemitNeeded) {
       for (const entry of meshes) {
         if (entry.castShadow) emitShadowLeaves(entry);
       }

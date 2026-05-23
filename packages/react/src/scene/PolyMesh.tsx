@@ -619,57 +619,17 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
     };
   }, [sceneRegisterShadowCaster, castShadow, polygons]);
 
-  // Build shadow leaf elements. Two paths:
-  //   - Dynamic: one `<q>` per casting polygon, transform chains
-  //     `var(--shadow-proj) matrix3d(...)` so the projection follows
-  //     live light updates on the scene root; CSS opacity calc gates
-  //     back-facing polys.
-  //   - Baked: a single `<svg>` per mesh containing one `<path>` per
-  //     caster polygon (projected to ground on the CPU), grouped under
-  //     `<g opacity="...">` so overlapping outlines composite as one
-  //     silhouette before alpha is applied. SVG content is internally
-  //     2D so this sidesteps the `opacity + preserve-3d` flatten trap.
-  //     Back-facing polys are dropped up front.
+  // Per-mesh shadow `<svg>` — same path for both lighting modes. Every
+  // casting polygon is projected to the ground on the CPU and
+  // concatenated into one compound <path d="M…L…Z M…L…Z …"> under
+  // fill-rule=nonzero, so overlapping CCW outlines composite as one
+  // filled silhouette without alpha stacking; gaps between subpaths
+  // remain as gaps (the shadow preserves the silhouette's holes for
+  // free); back-facing polys are dropped up front.
   const bakedShadowGroundCssZ = sceneCtx?.groundCssZ ?? null;
-  const shadowLeaves = useMemo<ReactNode[]>(() => {
-    if (!castShadow || renderPolygon) return [];
-    const isDynamic = effectiveTextureLighting === "dynamic";
-    if (!isDynamic) return [];
-
-    const shadowColor = sceneCtx?.shadow?.color ?? "#000000";
-    const shadowOpacity = sceneCtx?.shadow?.opacity ?? 0.25;
-    const parsed = parseHexColor(shadowColor)?.rgb ?? [0, 0, 0];
-    const shadowColorCss = `rgba(${parsed[0]},${parsed[1]},${parsed[2]},${shadowOpacity})`;
-
-    const shadowDedupDrop = findOverlappingPolygonDuplicates(polygons, {
-      normalTolerance: 0.1,
-      distanceTolerance: 0.5,
-      overlapFraction: 0.4,
-    });
-
-    const leaves: React.ReactNode[] = [];
-    for (const plan of atlasPlans) {
-      if (!plan) continue;
-      if (shadowDedupDrop.has(plan.index)) continue;
-
-      const borderShape = cssBorderShapeForPlan(plan);
-      leaves.push(
-        <ShadowLeaf
-          key={`shadow-${plan.index}`}
-          plan={plan}
-          shadowColorCss={shadowColorCss}
-          borderShape={borderShape}
-        />
-      );
-    }
-    return leaves;
-  }, [castShadow, effectiveTextureLighting, renderPolygon, polygons, atlasPlans, sceneCtx?.shadow]);
-
-  // Baked-mode SVG shadow: single per-mesh element.
   const sceneShadow = sceneCtx?.shadow;
   const shadowSvgNode = useMemo<ReactNode>(() => {
     if (!castShadow || renderPolygon) return null;
-    if (effectiveTextureLighting === "dynamic") return null;
     if (bakedShadowGroundCssZ === null) return null;
 
     const lightDir = sceneDirectionalLight?.direction
@@ -755,7 +715,7 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
         />
       </svg>
     );
-  }, [castShadow, renderPolygon, effectiveTextureLighting, polygons, atlasPlans, sceneDirectionalLight, bakedShadowGroundCssZ, sceneShadow]);
+  }, [castShadow, renderPolygon, polygons, atlasPlans, sceneDirectionalLight, bakedShadowGroundCssZ, sceneShadow]);
 
   setPolygonsImplRef.current = (nextPolygons: Polygon[]) => {
     const nextRenderedPolygons = autoCenter ? recenterPolygons(nextPolygons) : nextPolygons;
@@ -879,7 +839,6 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
       {...wrapperHandlers}
     >
       {shadowSvgNode}
-      {shadowLeaves}
       {renderedPolygons}
       {staticChildren}
     </div>
@@ -901,41 +860,3 @@ function RenderPropPolygon({
   return <>{children(polygon, index)}</>;
 }
 
-// Dynamic-mode shadow leaf — one <q> per caster polygon, transform
-// chains `var(--shadow-proj) matrix3d(...)` so the projection follows
-// the live light vars on the scene root. --pnx/y/z is pinned so the CSS
-// opacity gate in styles.ts hides back-facing polys at paint time.
-// Baked mode uses a single per-mesh <svg> instead (see shadowSvgNode in
-// PolyMeshInner above).
-// Uses a ref callback for border-shape (non-standard CSS property, must
-// be set via setProperty).
-function ShadowLeaf({
-  plan,
-  shadowColorCss,
-  borderShape,
-}: {
-  plan: TextureAtlasPlan;
-  shadowColorCss: string;
-  borderShape: string;
-}) {
-  const setRef = useCallback((el: HTMLElement | null) => {
-    if (!el) return;
-    el.style.setProperty("border-shape", borderShape);
-  }, [borderShape]);
-
-  return (
-    <q
-      ref={setRef}
-      className="polycss-shadow"
-      style={{
-        transform: `var(--shadow-proj) matrix3d(${plan.matrix})`,
-        color: shadowColorCss,
-        width: plan.canvasW,
-        height: plan.canvasH,
-        ["--pnx" as string]: plan.normal[0].toFixed(4),
-        ["--pny" as string]: plan.normal[1].toFixed(4),
-        ["--pnz" as string]: plan.normal[2].toFixed(4),
-      } as CSSProperties}
-    />
-  );
-}

@@ -86,12 +86,16 @@ describe("PolyMesh (Vue) — castShadow", () => {
     expect(container.querySelectorAll(".polycss-shadow").length).toBe(0);
   });
 
-  it("castShadow:true in dynamic mode emits shadow leaves, one per non-duplicate polygon", () => {
+  it("castShadow:true in dynamic mode emits a single <svg> shadow per mesh (same path as baked)", async () => {
     const { container } = mount(DYNAMIC_SCENE_PROPS, {
       polygons: [TRIANGLE, DISTINCT_TRIANGLE],
       castShadow: true,
     });
-    expect(container.querySelectorAll(".polycss-shadow").length).toBe(2);
+    await nextTick();
+    await nextTick();
+    const shadows = container.querySelectorAll(".polycss-shadow");
+    expect(shadows.length).toBe(1);
+    expect(shadows[0]!.tagName.toLowerCase()).toBe("svg");
   });
 
   it("castShadow:true in baked mode emits a single <svg> shadow per mesh with one compound <path>", async () => {
@@ -124,39 +128,19 @@ describe("PolyMesh (Vue) — castShadow", () => {
     expect((d.match(/Z/g) || []).length).toBe(1);
   });
 
-  it("shadow leaves are always <q> with class polycss-shadow", () => {
+  it("shadow elements are always <svg> with class polycss-shadow regardless of mode", async () => {
     const { container } = mount(DYNAMIC_SCENE_PROPS, {
       polygons: [TRIANGLE, DISTINCT_TRIANGLE],
       castShadow: true,
     });
+    await nextTick();
+    await nextTick();
     const shadows = Array.from(container.querySelectorAll(".polycss-shadow"));
     expect(shadows.length).toBeGreaterThan(0);
     for (const el of shadows) {
-      expect(el.tagName.toLowerCase()).toBe("q");
-      expect(el.classList.contains("polycss-shadow")).toBe(true);
+      expect(el.tagName.toLowerCase()).toBe("svg");
+      expect(el.classList.contains("polycss-shadow-svg")).toBe(true);
     }
-  });
-
-  it("shadow leaves have border-shape set", () => {
-    const { container } = mount(DYNAMIC_SCENE_PROPS, {
-      polygons: [TRIANGLE, DISTINCT_TRIANGLE],
-      castShadow: true,
-    });
-    const shadows = Array.from(container.querySelectorAll(".polycss-shadow")) as HTMLElement[];
-    expect(shadows.length).toBeGreaterThan(0);
-    for (const el of shadows) {
-      expect(el.style.getPropertyValue("border-shape")).not.toBe("");
-    }
-  });
-
-  it("shadow leaves transform contains var(--shadow-proj) followed by matrix3d", () => {
-    const { container } = mount(DYNAMIC_SCENE_PROPS, {
-      polygons: [TRIANGLE],
-      castShadow: true,
-    });
-    const shadow = container.querySelector(".polycss-shadow") as HTMLElement;
-    expect(shadow).not.toBeNull();
-    expect(shadow.style.transform).toMatch(/^var\(--shadow-proj\)\s+matrix3d\(/);
   });
 
   it("adding a casting mesh sets --shadow-ground-cssz on the scene element", async () => {
@@ -212,11 +196,13 @@ describe("PolyMesh (Vue) — castShadow", () => {
     expect(container.querySelectorAll(".polycss-shadow").length).toBe(0);
   });
 
-  it("textured polygons (s) ALSO emit shadow leaves", () => {
+  it("textured polygons (s) ALSO emit shadow leaves", async () => {
     const { container } = mount(DYNAMIC_SCENE_PROPS, {
       polygons: [TEXTURED_TRIANGLE],
       castShadow: true,
     });
+    await nextTick();
+    await nextTick();
     expect(container.querySelectorAll(".polycss-shadow").length).toBe(1);
   });
 
@@ -236,24 +222,15 @@ describe("PolyMesh (Vue) — castShadow", () => {
     expect(sceneEl.style.getPropertyValue("--clz")).toBe("");
   });
 
-  it("shadow leaves have --pnx/--pny/--pnz inline for Lambert gate", () => {
-    const { container } = mount(DYNAMIC_SCENE_PROPS, {
-      polygons: [TRIANGLE],
-      castShadow: true,
-    });
-    const shadow = container.querySelector(".polycss-shadow") as HTMLElement;
-    expect(shadow).not.toBeNull();
-    expect(shadow.style.getPropertyValue("--pnx")).not.toBe("");
-    expect(shadow.style.getPropertyValue("--pny")).not.toBe("");
-    expect(shadow.style.getPropertyValue("--pnz")).not.toBe("");
-  });
-
-  it("duplicate coincident polygons emit only one shadow leaf", () => {
-    // Two triangles at the same position should be deduped to one shadow leaf.
+  it("duplicate coincident polygons collapse into the same per-mesh shadow <svg>", async () => {
+    // Two triangles at the same position both contribute to the same
+    // mesh's compound SVG path (the loose dedup pass drops the second).
     const { container } = mount(DYNAMIC_SCENE_PROPS, {
       polygons: [TRIANGLE, { ...TRIANGLE }],
       castShadow: true,
     });
+    await nextTick();
+    await nextTick();
     expect(container.querySelectorAll(".polycss-shadow").length).toBe(1);
   });
 

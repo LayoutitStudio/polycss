@@ -307,67 +307,13 @@ export const PolyMesh = defineComponent({
     );
     const defaultPaintVars = computed(() => solidPaintVars(solidPaintDefaults.value));
 
-    // Dynamic-mode shadow leaves — one <q> per casting polygon whose
-    // transform chains var(--shadow-proj) so shadows reflow as the light
-    // moves. --pnx/y/z drive the CSS opacity gate that hides back-facing
-    // polys. Baked mode uses the per-mesh <svg> below instead.
-    const shadowNodes = computed<Array<VNode | null>>(() => {
-      if (!props.castShadow) return [];
-      if (atlasTextureLighting.value !== "dynamic") return [];
-
-      const ctx = sceneCtx?.value;
-      const shadowOpts = ctx?.shadow;
-      const shadowColor = shadowOpts?.color ?? "#000000";
-      const shadowOpacity = shadowOpts?.opacity ?? 0.25;
-      const parsed = parseHexColor(shadowColor)?.rgb ?? [0, 0, 0];
-      const shadowColorCss = `rgba(${parsed[0]},${parsed[1]},${parsed[2]},${shadowOpacity})`;
-
-      const plans = textureAtlasPlans.value;
-      if (plans.length === 0) return [];
-
-      const dedupDrop = findOverlappingPolygonDuplicates(polygons.value, {
-        normalTolerance: 0.1,
-        distanceTolerance: 0.5,
-        overlapFraction: 0.4,
-      });
-
-      return plans.map((plan, index) => {
-        if (!plan) return null;
-        if (dedupDrop.has(index)) return null;
-        const origMatrix = `matrix3d(${plan.matrix})`;
-        const borderShape = cssBorderShapeForPlan(plan);
-        const style: CSSProperties = {
-          transform: `var(--shadow-proj) ${origMatrix}`,
-          color: shadowColorCss,
-          width: `${plan.canvasW}px`,
-          height: `${plan.canvasH}px`,
-          "--pnx": plan.normal[0].toFixed(4),
-          "--pny": plan.normal[1].toFixed(4),
-          "--pnz": plan.normal[2].toFixed(4),
-        };
-
-        const applyShadowBorderShape = (vnode: VNode) => {
-          const el = vnode.el as HTMLElement | null;
-          if (!el) return;
-          el.style.setProperty("border-shape", borderShape);
-        };
-
-        return h("q", {
-          class: "polycss-shadow",
-          style,
-          onVnodeMounted: applyShadowBorderShape,
-          onVnodeUpdated: applyShadowBorderShape,
-        });
-      });
-    });
-
-    // Baked-mode SVG shadow — single per-mesh <svg> with one <path> per
-    // caster polygon. Overlapping outlines composite as one silhouette
-    // inside the <g opacity="..."> before alpha is applied, sidestepping
-    // the `opacity + preserve-3d` flatten trap.
+    // Per-mesh SVG shadow — same path for both lighting modes. Every
+    // casting polygon is projected to the ground on the CPU and
+    // concatenated into one compound <path d="M…L…Z M…L…Z …"> under
+    // fill-rule=nonzero so overlapping CCW outlines composite as one
+    // filled silhouette without alpha stacking; gaps remain as gaps.
     const shadowSvg = computed<VNode | null>(() => {
       if (!props.castShadow) return null;
-      if (atlasTextureLighting.value === "dynamic") return null;
       const ctx = sceneCtx?.value;
       const groundCssZ = ctx?.groundCssZ ?? null;
       if (groundCssZ === null) return null;
@@ -787,11 +733,9 @@ export const PolyMesh = defineComponent({
       // Static default slot children (e.g. additional <PolyMesh> children)
       const defaultChildren = slots.default?.() ?? [];
 
-      // Shadow elements go before polygon nodes so they sit below casters
-      // in DOM order — painter-order tie-breaking favors earlier nodes when
-      // both are coplanar in 3D. Dynamic mode emits per-polygon <q>; baked
-      // mode emits a single <svg> per mesh (see shadowSvg above).
-      const shadows = shadowNodes.value;
+      // Shadow goes before polygon nodes so it sits below casters in DOM
+      // order — painter-order tie-breaking favors earlier nodes when both
+      // are coplanar in 3D. Single <svg> per mesh (see shadowSvg above).
       const svgNode = shadowSvg.value;
       const shadowChildren: VNode[] = svgNode ? [svgNode] : [];
 
@@ -805,7 +749,7 @@ export const PolyMesh = defineComponent({
           ...handlers,
           ...extraAttrs,
         },
-        [...shadowChildren, ...shadows, ...polyNodes, ...defaultChildren]
+        [...shadowChildren, ...polyNodes, ...defaultChildren]
       );
     };
   },
