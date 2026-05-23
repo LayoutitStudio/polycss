@@ -1,4 +1,4 @@
-# polycss
+# PolyCSS
 
 A CSS polygon mesh engine. A 3D engine for the DOM. Renders OBJ, glTF, GLB and VOX as real HTML elements transformed with CSS `matrix3d(...)`. Supports colors, textures, lighting, shadows, controls, shapes and animations. Works with React, Vue, custom elements, or plain JavaScript.
 
@@ -9,19 +9,21 @@ Visit [polycss.com](https://polycss.com) for docs and model examples.
 ## Installation
 
 ```bash
+
+# Vanilla
+npm install @layoutit/polycss
+
 # React
 npm install @layoutit/polycss-react
 
 # Vue
 npm install @layoutit/polycss-vue
 
-# Vanilla / custom elements
-npm install @layoutit/polycss
 ```
 
 <img width="2500" height="1145" alt="polycss-intro" src="https://github.com/user-attachments/assets/0e5df0d8-04a8-4e50-8e3a-1097a96ce42f" />
 
-You can also load polycss directly from a CDN. Here is a minimal custom-element scene:
+You can also load PolyCSS directly from a CDN. Here is a minimal custom-element scene:
 
 ```html
 <script type="module" src="https://esm.sh/@layoutit/polycss/elements"></script>
@@ -152,7 +154,7 @@ Supported formats:
 
 ## Performance
 
-polycss renders in the DOM, so performance is mostly determined by how many polygons are mounted and how much texture atlas area they consume. The renderer uses several CSS strategies so simple surfaces stay cheap and textured or irregular surfaces fall back to atlas slices.
+PolyCSS renders in the DOM, so performance is mostly determined by how many polygons are mounted and how much texture atlas area they consume. The renderer uses several CSS strategies so simple surfaces stay cheap and textured or irregular surfaces fall back to atlas slices.
 
 - One visible polygon becomes one leaf DOM element.
 - Flat rectangles and stable quads use solid CSS leaves.
@@ -170,7 +172,7 @@ polycss renders in the DOM, so performance is mostly determined by how many poly
 | `@layoutit/polycss-react` | React components, hooks, controls, and core re-exports. |
 | `@layoutit/polycss-vue` | Vue 3 components, composables, controls, and core re-exports. |
 
-## Made with polycss
+## Made with PolyCSS
 
 [Layoutit Voxels](https://voxels.layoutit.com)
 -> A CSS Voxel editor
