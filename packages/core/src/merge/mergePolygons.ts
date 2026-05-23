@@ -25,7 +25,7 @@
  * expected to have run `normalizePolygons` first; this is a defensive copy).
  */
 
-import type { Polygon, TextureTriangle, Vec2, Vec3 } from "../types";
+import type { Polygon, PolyTextureAlphaMode, PolyTextureWrap, TextureTriangle, Vec2, Vec3 } from "../types";
 
 const EPS_NORMAL = 1e-3;   // dot product tolerance for "same plane"
 const EPS_DISTANCE = 0.05; // signed-distance tolerance (in scene-space units)
@@ -47,12 +47,15 @@ interface PolyState {
   color: string;
   /** Texture URL — must match between two polys for them to merge. */
   texture?: string;
+  textureWrap?: PolyTextureWrap;
+  textureAlphaMode?: PolyTextureAlphaMode;
   textureTriangles?: TextureTriangle[];
   normal: Vec3;
   /** Plane offset: distance from origin along the normal. */
   d: number;
   directedEdges: Set<string>;
   alive: boolean;
+  doubleSided?: boolean;
   /** Original Polygon's `data` field, preserved through the merge. */
   data?: Record<string, string | number | boolean>;
 }
@@ -267,6 +270,17 @@ function cloneTextureTriangles(triangles: TextureTriangle[]): TextureTriangle[] 
   }));
 }
 
+function sameTextureWrap(a: PolyTextureWrap | undefined, b: PolyTextureWrap | undefined): boolean {
+  return (a?.s ?? "") === (b?.s ?? "") && (a?.t ?? "") === (b?.t ?? "");
+}
+
+function sameTextureAlphaMode(
+  a: PolyTextureAlphaMode | undefined,
+  b: PolyTextureAlphaMode | undefined,
+): boolean {
+  return (a ?? "") === (b ?? "");
+}
+
 function fanTextureTriangles(vertices: Vec3[], uvs: Vec2[]): TextureTriangle[] {
   const triangles: TextureTriangle[] = [];
   for (let i = 1; i < vertices.length - 1; i++) {
@@ -365,11 +379,14 @@ export function mergePolygons(input: Polygon[]): Polygon[] {
       uvs,
       color: polygon.color ?? "#cccccc",
       texture: polygon.texture,
+      textureWrap: polygon.texture ? polygon.textureWrap : undefined,
+      textureAlphaMode: polygon.texture ? polygon.textureAlphaMode : undefined,
       textureTriangles,
       normal: plane.normal,
       d: plane.d,
       directedEdges: cachedDirectedEdgeSet(verts),
       alive: true,
+      doubleSided: polygon.doubleSided === true,
       data: polygon.data,
     });
   }
@@ -428,6 +445,9 @@ export function mergePolygons(input: Polygon[]): Polygon[] {
       if (!a.alive || !b.alive) continue;
       if (a.color !== b.color) continue;
       if (a.texture !== b.texture) continue;
+      if (!sameTextureWrap(a.textureWrap, b.textureWrap)) continue;
+      if (!sameTextureAlphaMode(a.textureAlphaMode, b.textureAlphaMode)) continue;
+      if (a.doubleSided !== b.doubleSided) continue;
       const hasTexture = Boolean(a.texture || b.texture);
       if (hasTexture && (!a.textureTriangles || !b.textureTriangles)) continue;
       // Either both textured-with-uvs or both untextured — mismatched
@@ -481,8 +501,11 @@ export function mergePolygons(input: Polygon[]): Polygon[] {
       color: p.color,
     };
     if (p.texture) out_p.texture = p.texture;
+    if (p.texture && p.textureWrap) out_p.textureWrap = { ...p.textureWrap };
+    if (p.texture && p.textureAlphaMode) out_p.textureAlphaMode = p.textureAlphaMode;
     if (p.uvs) out_p.uvs = p.uvs.map((uv) => [uv[0], uv[1]] as Vec2);
     if (p.textureTriangles?.length) out_p.textureTriangles = p.textureTriangles;
+    if (p.doubleSided) out_p.doubleSided = true;
     if (p.data) out_p.data = p.data;
     out.push(out_p);
   }

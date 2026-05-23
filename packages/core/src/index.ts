@@ -8,6 +8,9 @@ export type {
   Vec2,
   Vec3,
   TextureTriangle,
+  PolyTextureAlphaMode,
+  PolyTextureWrap,
+  PolyTextureWrapMode,
   Polygon,
   PolyMaterial,
   PolyDirectionalLight,
@@ -92,7 +95,6 @@ export { coverPlanarPolygons } from "./merge/coverPlanarPolygons";
 export type { CoverPlanarPolygonsOptions } from "./merge/coverPlanarPolygons";
 export { optimizeMeshPolygons } from "./merge/optimizePolygons";
 export type {
-  ApproximateMergeOptions,
   OptimizeMeshPolygonsOptions,
 } from "./merge/optimizePolygons";
 export {

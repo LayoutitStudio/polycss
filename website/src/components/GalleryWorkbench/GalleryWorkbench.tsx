@@ -7,12 +7,8 @@ import type {
 import type {
   PolyMeshHandle as VanillaPolyMeshHandle,
 } from "@layoutit/polycss";
-import { optimizeAnimatedMeshPolygons } from "@layoutit/polycss";
-import {
-  Inspector as InspectorPanel,
-  type InspectorColorGroup,
-  type InspectorMesh,
-} from "../Inspector";
+import { optimizeAnimatedMeshPolygons, parsePureColor } from "@layoutit/polycss";
+import type { InspectorColorGroup, InspectorMesh } from "../Inspector";
 import { VanillaScene } from "../VanillaScene";
 import { ReactScene } from "../ReactScene";
 import {
@@ -23,6 +19,7 @@ import {
   DockInteraction,
   DockCamera,
   DockLighting,
+  DockMaterials,
 } from "../Dock";
 import { ModelsSidebar } from "../ModelsSidebar";
 import { DropOverlay } from "../DropOverlay";
@@ -184,12 +181,13 @@ function parserStateFor(model: PresetModel): ParserOptionsState {
 
 function withSolidMaterials(polygons: Polygon[], fallbackColor: string): Polygon[] {
   return polygons.map((polygon) => {
-    if (!polygon.texture && !polygon.uvs?.length && !polygon.textureTriangles?.length) {
+    if (!polygonHasTextureData(polygon)) {
       return polygon;
     }
     return {
       ...polygon,
       texture: undefined,
+      material: undefined,
       uvs: undefined,
       textureTriangles: undefined,
       color: polygon.color ?? fallbackColor,
@@ -198,7 +196,22 @@ function withSolidMaterials(polygons: Polygon[], fallbackColor: string): Polygon
 }
 
 function polygonHasTextureData(polygon: Polygon): boolean {
-  return Boolean(polygon.texture || polygon.uvs?.length || polygon.textureTriangles?.length);
+  return Boolean(
+    polygonHasTexturePaint(polygon) ||
+    polygon.uvs?.length
+  );
+}
+
+function polygonHasTexturePaint(polygon: Polygon): boolean {
+  return Boolean(polygon.texture || polygon.material?.texture || polygon.textureTriangles?.length);
+}
+
+function inspectorColorKey(color: string): string {
+  const parsed = parsePureColor(color);
+  if (!parsed || parsed.alpha < 1) return color.trim().toLowerCase();
+  return `#${parsed.rgb
+    .map((channel) => Math.max(0, Math.min(255, Math.round(channel))).toString(16).padStart(2, "0"))
+    .join("")}`;
 }
 
 function displayAnimationName(name: string): string {
@@ -276,6 +289,7 @@ export default function GalleryWorkbench() {
   // Inspector folder uses this to push color-group edits back into the
   // scene via setPolygons. Set by VanillaScene's onMeshHandleChange.
   const activeMeshHandleRef = useRef<VanillaPolyMeshHandle | null>(null);
+  const [materialEditVersion, setMaterialEditVersion] = useState(0);
   // Vanilla selection state — kept separate from React's
   // `selectedMeshes` because vanilla MeshHandles aren't comparable to
   // React PolyMeshHandles. Stored as IDs since that's what both paths
@@ -644,25 +658,22 @@ export default function GalleryWorkbench() {
   const perspectiveMode = sceneOptions.perspective === false ? "orthographic" : "perspective";
   const perspectivePx = sceneOptions.perspective === false ? 8000 : sceneOptions.perspective;
 
-  // Inspector data — grouped by mesh, then by polygon color. Recomputed
-  // when renderModelPolygons or the loaded model change. Mutations to a
-  // polygon's color via the picker do NOT change the renderModelPolygons
-  // reference, so this memo doesn't re-fire on each tweak and the swatch
-  // local state stays in sync.
+  // Materials data — grouped by mesh, then by canonical polygon color.
   const inspectorMeshes = useMemo<InspectorMesh[]>(() => {
     if (renderModelPolygons.length === 0) return [];
     const colorGroups = new Map<string, Polygon[]>();
     const textured: Polygon[] = [];
     for (const p of renderModelPolygons) {
-      if (p.texture) {
+      if (polygonHasTexturePaint(p)) {
         textured.push(p);
         continue;
       }
       if (!p.color) continue;
-      let arr = colorGroups.get(p.color);
+      const key = inspectorColorKey(p.color);
+      let arr = colorGroups.get(key);
       if (!arr) {
         arr = [];
-        colorGroups.set(p.color, arr);
+        colorGroups.set(key, arr);
       }
       arr.push(p);
     }
@@ -686,7 +697,7 @@ export default function GalleryWorkbench() {
     }
     const label = loaded?.label ?? "model";
     return [{ id: label, label, groups }];
-  }, [renderModelPolygons, loaded?.label]);
+  }, [renderModelPolygons, loaded?.label, materialEditVersion]);
 
   const handleInspectorColorChange = useCallback(
     (
@@ -701,6 +712,7 @@ export default function GalleryWorkbench() {
       // an explicit merge flag reuses the mesh's current merge setting
       // (true for static models, false during animation playback).
       if (handle) handle.setPolygons(renderModelPolygons);
+      setMaterialEditVersion((version) => version + 1);
     },
     [renderModelPolygons],
   );
@@ -729,11 +741,6 @@ export default function GalleryWorkbench() {
         attribution={selectedPreset.attribution}
       />
 
-      <InspectorPanel
-        meshes={inspectorMeshes}
-        onColorChange={handleInspectorColorChange}
-      />
-
       <main className="dn-main">
         <div
           className={`dn-viewport${sceneOptions.outlinePolygons ? " dn-viewport--outline-polygons" : ""}`}
@@ -753,7 +760,7 @@ export default function GalleryWorkbench() {
               showGround={sceneOptions.showGround}
               helperScale={helperScale}
               helperTarget={helperTarget}
-              mergePolygonsForMesh={!hasActiveAnimation && renderLoaded?.kind !== "primitive"}
+              mergePolygonsForMesh={false}
               stableDomForMesh={hasActiveAnimation}
               animationKey={activeAnimation ? `${selectedAnimation}:${renderLoaded?.label ?? ""}` : undefined}
               animationDurationSeconds={activeAnimation?.duration}
@@ -806,6 +813,10 @@ export default function GalleryWorkbench() {
           metrics={metrics}
           disableStrategies={sceneOptions.disableStrategies}
           onUpdateScene={updateScene}
+        />
+        <DockMaterials
+          meshes={inspectorMeshes}
+          onColorChange={handleInspectorColorChange}
         />
         <DockRendering
           meshResolution={sceneOptions.meshResolution}

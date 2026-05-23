@@ -17,17 +17,16 @@ contributors to verify perf claims and catch render regressions.
 pnpm bench:serve            # static server on :4400 with an index page
 pnpm bench:perf             # build bundles + run all 4 renderers × 5 scenarios
 pnpm bench:animated-human   # build bundles + run the animated human run bench
-pnpm bench:nonvoxel-drag-trace  # build bundles + trace a Playwright drag orbit on teapot
 pnpm bench:trace            # build bundles + run the trace analysis bucket profiler
-pnpm bench:lossy            # compare lossless / previous lossy / auto lossy counts
+pnpm bench:lossy            # compare lossless / current lossy counts
 pnpm bench:lossy:corpus     # scan gallery GLB/OBJ lossy counts + crack diagnostics
 pnpm bench:voxel-report     # summarize voxel cadence results
 pnpm bench:visual           # screenshot diff against bench/baselines/*.png
 pnpm bench:visual --record  # capture new baselines (after intentional renderer changes)
 pnpm bench:build            # just rebuild the bench bundles (rarely needed alone)
 node bench/nonvoxel-rotation-bench.mjs  # non-voxel vanilla rotation probe
-node bench/nonvoxel-drag-trace.mjs --label teapot-drag  # pointer-drag trace, no auto-rotate
-node bench/trace-analysis.mjs --page nonvoxel --no-trace  # non-voxel rAF cadence buckets
+node .agents/skills/chrome-capture-trace/scripts/trace.mjs drag --label teapot-drag  # pointer-drag trace, no auto-rotate
+node .agents/skills/chrome-capture-trace/scripts/trace.mjs motion --page nonvoxel --no-trace  # non-voxel rAF cadence buckets
 node bench/nonvoxel-visual-compare.mjs  # non-voxel variant visual parity
 ```
 
@@ -44,11 +43,11 @@ node bench/lossy-optimizer-bench.mjs --models ducky,shark,bicycle
 node bench/lossy-corpus-bench.mjs --root /tmp/polycss-model-corpus --json /tmp/polycss-temp-corpus.json
 node bench/lossy-corpus-bench.mjs --from-json bench/results/lossy-corpus.json --opportunities
 node bench/voxel-report.mjs all
-node bench/trace-analysis.mjs --mesh garden --runs 3 --dom-samples --label garden-trace
+node .agents/skills/chrome-capture-trace/scripts/trace.mjs motion --mesh garden --runs 3 --dom-samples --report --markdown-out bench/results/garden-trace.md
 node bench/perf-visual.mjs --mesh chicken --tolerance 0.005
 node bench/nonvoxel-rotation-bench.mjs --models teapot,bicycle --variants baseline,order-tile4 --run-order round-robin
-node bench/nonvoxel-drag-trace.mjs --mesh teapot --degrees 360 --drag-ms 1500 --label teapot-drag --frame-details --no-print-json
-node bench/trace-analysis.mjs --page nonvoxel --mesh glb:Elephant.glb --variant baseline --no-trace
+node .agents/skills/chrome-capture-trace/scripts/trace.mjs drag --mesh teapot --degrees 360 --drag-ms 1500 --label teapot-drag --frame-details --no-print-json
+node .agents/skills/chrome-capture-trace/scripts/trace.mjs motion --page nonvoxel --mesh glb:Elephant.glb --variant baseline --no-trace
 node bench/nonvoxel-visual-compare.mjs --models bicycle,elephant,policecar --variants scene-split-target,scene-transform-perspective
 ```
 
@@ -151,7 +150,13 @@ tests above what the gallery's OBJs cover.
 Use `domOrder` for pure post-render DOM-order probes; `polygonOrder` changes
 the polygon array before render planning and is only for diagnostics.
 
-`nonvoxel-drag-trace.mjs` is the focused user-input lane for the same page.
+`.agents/skills/chrome-capture-trace/scripts/trace.mjs motion` is the
+steady-motion trace lane for perf and non-voxel pages. It aligns Chrome trace
+events to rAF samples and reports per-cadence-bucket compositor, style, raster,
+script, DOM, and tag-count costs.
+
+`.agents/skills/chrome-capture-trace/scripts/trace.mjs drag` is the focused
+user-input lane for the same page.
 It loads a non-voxel mesh (`teapot` by default), leaves OrbitControls
 auto-rotate off, performs real Playwright mouse drags until the requested
 camera yaw delta is reached, and writes `bench/results/<label>.trace.json`
@@ -208,7 +213,7 @@ bench/
   nonvoxel-vanilla.html  dedicated vanilla page for non-voxel experiments
                          with strategy/order/transform diagnostics
   nonvoxel-variants.mjs  shared non-voxel bench variant table used by
-                         rotation, drag, trace, and visual runners
+                         rotation, skill drag, trace, and visual runners
   perf-react.html        loads .generated/polycss-react.js (JSX entry)
   perf-vue.html          loads .generated/polycss-vue.js (Vue entry)
   animated-human.html    vanilla animated GLB page for the human run sequence
@@ -230,21 +235,13 @@ bench/
                          GPU-default Playwright runner for the animated
                          human run sequence. Reports FPS, mixer/update cost,
                          setPolygons cost, render stats, and optional trace.
-  nonvoxel-drag-trace.mjs
-                         Vanilla-only non-voxel pointer-input trace bench.
-                         Uses Playwright mouse drags through OrbitControls
-                         instead of scene auto-rotation.
   lossy-optimizer-bench.mjs
-                         Polygon-count strategy bench for lossless,
-                         previous pair-only lossy, forced grouped lossy,
-                         and current automatic lossy.
+                         Polygon-count strategy bench for lossless and
+                         current library-default lossy.
   perf-serve.mjs         Static :4400 server with an index page that
                          links the four perf-*.html with example params.
   perf-visual.mjs        Screenshot diff guardrail (chicken + rock1 ×
                          3 light azimuths, vanilla path only).
-  trace-analysis.mjs     Trace/rAF bucket profiler for camera-motion runs.
-                         Reports per-cadence-bucket compositor, style,
-                         raster, script, and key trace event costs.
   nonvoxel-rotation-bench.mjs
                          Vanilla-only non-voxel rotation corpus runner.
                          See bench/notes/PERF_INVESTIGATION.md.
@@ -263,17 +260,15 @@ bench/
 
 ## Lossy Optimizer Bench
 
-`lossy-optimizer-bench.mjs` is a count-and-choice benchmark for mesh
-optimization, separate from browser FPS. It keeps the isolated-pair lossy
-path visible in the pair-only column by forcing
-`approximateMerge.isolatedPairs: true`, then compares that against forced
-grouped planes and the current automatic lossy chooser.
+`lossy-optimizer-bench.mjs` is a count-and-timing benchmark for mesh
+optimization, separate from browser FPS. It compares lossless output against
+the current library-default lossy path.
 When `sharp` is available through the website workspace, GLB/OBJ texture
 swatches are first baked with the same `solidTextureSamples` prepass used by
 `loadMesh`, so texture-atlas color models like `ducky.glb` match the gallery
 path instead of the raw parser-only path.
 The table also reports render-cost delta, total vertices, max polygon
-vertex count, gap diagnostics, and optimization time for the automatic path.
+vertex count, gap diagnostics, and optimization time for the default path.
 JSON output also includes triangle count, textured polygon count, and
 solid-color count per stage. Use `--models <ids>` for targeted iteration.
 
@@ -291,13 +286,11 @@ mostly-rectangulated and mechanical runtime cases; `AnimatedSnake.glb`,
 `lossy-corpus-bench.mjs` is the heavier gallery-wide version. It scans every
 GLB/GLTF/OBJ under `website/public/gallery`, excludes VOX because `loadMesh`
 bypasses the generic optimizer for voxel sources, and emits per-model
-lossless/current lossy/forced-candidate rows. JSON rows include crack-budget
-diagnostics for forced candidates plus per-model optimizer timings, so a
-proposed local crack-aware selector can be checked against the same failure
-reasons without relaxing global crack limits or hiding load-time cost.
+lossless/current lossy rows. JSON rows include per-model optimizer timings and
+current-vs-lossless crack diagnostics, so optimizer changes can be compared
+without hiding load-time cost.
 Use `--from-json <file> --opportunities` to mine an existing run without
 rescanning, `--compare <baseline>` to compare two corpus JSON files, and
-`--sweep` on a small `--models` subset to run a wider lossy candidate grid.
 Use `--root <dir>` to scan a temporary external GLB/GLTF/OBJ corpus without
 copying it into `website/public/gallery`; labels are relative to that root and
 the absolute root path is stored in JSON output.

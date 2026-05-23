@@ -16,23 +16,6 @@ function rect(x0: number, y0: number, x1: number, y1: number): Polygon[] {
   ];
 }
 
-function edgeKey(a: Polygon["vertices"][number], b: Polygon["vertices"][number]): string {
-  const ak = a.join(",");
-  const bk = b.join(",");
-  return ak < bk ? `${ak}|${bk}` : `${bk}|${ak}`;
-}
-
-function sharedEdgeCount(polygons: Polygon[]): number {
-  const counts = new Map<string, number>();
-  for (const polygon of polygons) {
-    for (let i = 0; i < polygon.vertices.length; i++) {
-      const key = edgeKey(polygon.vertices[i], polygon.vertices[(i + 1) % polygon.vertices.length]);
-      counts.set(key, (counts.get(key) ?? 0) + 1);
-    }
-  }
-  return [...counts.values()].filter((count) => count > 1).length;
-}
-
 function polygonSignature(polygons: Polygon[]): string[] {
   return polygons.map((polygon) =>
     `${polygon.color ?? ""}:${polygon.vertices.map((vertex) => vertex.join(",")).join(";")}`
@@ -202,39 +185,6 @@ function polygonNormal(vertices: Vec3[]): Vec3 | null {
   return length > 1e-12 ? [nx / length, ny / length, nz / length] : null;
 }
 
-function triangulatedPatchHalf(
-  x0: number,
-  x1: number,
-  y0: number,
-  y1: number,
-  zAt: (x: number, y: number) => number,
-): Polygon[] {
-  const polygons: Polygon[] = [];
-  const columns = 3;
-  const point = (x: number, y: number): Vec3 => [x, y, zAt(x, y)];
-  for (let column = 0; column < columns; column++) {
-    const xa = x0 + ((x1 - x0) * column) / columns;
-    const xb = x0 + ((x1 - x0) * (column + 1)) / columns;
-    polygons.push(
-      { vertices: [point(xa, y0), point(xb, y0), point(xb, y1)], color: "#f00" },
-      { vertices: [point(xa, y0), point(xb, y1), point(xa, y1)], color: "#f00" },
-    );
-  }
-  return polygons;
-}
-
-function lowValueApproximationCorpus(): Polygon[] {
-  const polygons: Polygon[] = [];
-  for (let patch = 0; patch < 90; patch++) {
-    const x = patch * 3;
-    polygons.push(
-      ...triangulatedPatchHalf(x, x + 1, 0, 1, () => 0),
-      ...triangulatedPatchHalf(x + 1, x + 2, 0, 1, (px) => (px - x - 1) * 0.08),
-    );
-  }
-  return polygons;
-}
-
 describe("optimizeMeshPolygons", () => {
   it("uses exact planar cover candidates for lossless resolution", () => {
     const input = [
@@ -247,6 +197,22 @@ describe("optimizeMeshPolygons", () => {
 
     expect(result).toHaveLength(1);
     expect(result[0].vertices).toHaveLength(4);
+  });
+
+  it("preserves double-sided reverse-wound polygons through optimization", () => {
+    const front: Polygon = {
+      vertices: [[0, 0, 0], [1, 0, 0], [0, 1, 0]],
+      color: "#f00",
+      doubleSided: true,
+    };
+    const back: Polygon = {
+      vertices: [[0, 0, 0], [0, 1, 0], [1, 0, 0]],
+      color: "#f00",
+      doubleSided: true,
+    };
+
+    expect(optimizeMeshPolygons([front, back], { meshResolution: "lossless" })).toHaveLength(2);
+    expect(optimizeMeshPolygons([front, back], { meshResolution: "lossy" })).toHaveLength(2);
   });
 
   it("allows approximate merge candidates only for lossy resolution", () => {
@@ -269,26 +235,6 @@ describe("optimizeMeshPolygons", () => {
     ];
 
     expect(optimizeMeshPolygons(input)).toHaveLength(1);
-  });
-
-  it("skips low-value automatic lossy approximation after a small exact result", () => {
-    const input = lowValueApproximationCorpus();
-    const lossless = optimizeMeshPolygons(input, { meshResolution: "lossless" });
-    const automatic = optimizeMeshPolygons(input, { meshResolution: "lossy" });
-    const explicit = optimizeMeshPolygons(input, {
-      meshResolution: "lossy",
-      approximateMerge: {
-        maxAngleDeg: 15,
-        maxPlaneDisplacement: 0.35,
-        maxBoundaryDisplacement: 0.0725,
-        isolatedPairs: false,
-      },
-    });
-
-    expect(input.length).toBeGreaterThanOrEqual(1000);
-    expect(renderCost(lossless)).toBeLessThanOrEqual(300);
-    expect(automatic).toHaveLength(lossless.length);
-    expect(explicit.length).toBeLessThan(lossless.length);
   });
 
   it("allows lossy approximate merge for same-texture UV polygons", () => {
@@ -318,6 +264,79 @@ describe("optimizeMeshPolygons", () => {
     expect(textureTrianglePlaneDistance(lossy[0])).toBeLessThan(1e-8);
   });
 
+  it("preserves texture wrap through lossy textured merges", () => {
+    const input: Polygon[] = [
+      {
+        vertices: [[0, 0, 0], [1, 0, 0], [1, 1, 0]],
+        color: "#fff",
+        texture: "texture.png",
+        textureWrap: { s: "repeat", t: "repeat" },
+        textureAlphaMode: "opaque",
+        uvs: [[0, 0], [1, 0], [1, 1]],
+      },
+      {
+        vertices: [[0, 0, 0], [1, 1, 0], [0, 1, 0.04]],
+        color: "#fff",
+        texture: "texture.png",
+        textureWrap: { s: "repeat", t: "repeat" },
+        textureAlphaMode: "opaque",
+        uvs: [[0, 0], [1, 1], [0, 1]],
+      },
+    ];
+
+    const lossy = optimizeMeshPolygons(input, { meshResolution: "lossy" });
+
+    expect(lossy).toHaveLength(1);
+    expect(lossy[0].textureWrap).toEqual({ s: "repeat", t: "repeat" });
+    expect(lossy[0].textureAlphaMode).toBe("opaque");
+  });
+
+  it("does not lossy-merge textured polygons across different texture wraps", () => {
+    const input: Polygon[] = [
+      {
+        vertices: [[0, 0, 0], [1, 0, 0], [1, 1, 0]],
+        color: "#fff",
+        texture: "texture.png",
+        textureWrap: { s: "repeat", t: "repeat" },
+        uvs: [[0, 0], [1, 0], [1, 1]],
+      },
+      {
+        vertices: [[0, 0, 0], [1, 1, 0], [0, 1, 0.04]],
+        color: "#fff",
+        texture: "texture.png",
+        textureWrap: { s: "clamp-to-edge", t: "repeat" },
+        uvs: [[0, 0], [1, 1], [0, 1]],
+      },
+    ];
+
+    const lossy = optimizeMeshPolygons(input, { meshResolution: "lossy" });
+
+    expect(lossy).toHaveLength(2);
+  });
+
+  it("does not lossy-merge textured polygons across different texture alpha modes", () => {
+    const input: Polygon[] = [
+      {
+        vertices: [[0, 0, 0], [1, 0, 0], [1, 1, 0]],
+        color: "#fff",
+        texture: "texture.png",
+        textureAlphaMode: "opaque",
+        uvs: [[0, 0], [1, 0], [1, 1]],
+      },
+      {
+        vertices: [[0, 0, 0], [1, 1, 0], [0, 1, 0.04]],
+        color: "#fff",
+        texture: "texture.png",
+        textureAlphaMode: "blend",
+        uvs: [[0, 0], [1, 1], [0, 1]],
+      },
+    ];
+
+    const lossy = optimizeMeshPolygons(input, { meshResolution: "lossy" });
+
+    expect(lossy).toHaveLength(2);
+  });
+
   it("does not lossy-merge textured polygons across mismatched UV seams", () => {
     const input: Polygon[] = [
       {
@@ -339,60 +358,7 @@ describe("optimizeMeshPolygons", () => {
     expect(lossy).toHaveLength(2);
   });
 
-  it("auto-selects the best lossy approximation strategy", () => {
-    const input: Polygon[] = [
-      { vertices: [[0, 0, 0], [1, 0, 0], [0.5, 0.5, 0.01]], color: "#f00" },
-      { vertices: [[1, 0, 0], [1, 1, 0], [0.5, 0.5, 0.01]], color: "#f00" },
-      { vertices: [[1, 1, 0], [0, 1, 0], [0.5, 0.5, 0.01]], color: "#f00" },
-      { vertices: [[0, 1, 0], [0, 0, 0], [0.5, 0.5, 0.01]], color: "#f00" },
-    ];
-
-    const pairs = optimizeMeshPolygons(input, {
-      meshResolution: "lossy",
-      approximateMerge: {
-        maxAngleDeg: 15,
-        maxPlaneDisplacement: 0.35,
-        maxBoundaryDisplacement: 0.075,
-        isolatedPairs: true,
-      },
-    });
-    const groups = optimizeMeshPolygons(input, {
-      meshResolution: "lossy",
-      approximateMerge: {
-        maxAngleDeg: 15,
-        maxPlaneDisplacement: 0.35,
-        maxBoundaryDisplacement: 0.075,
-        isolatedPairs: false,
-      },
-    });
-    const auto = optimizeMeshPolygons(input, { meshResolution: "lossy" });
-
-    expect(auto.length).toBeLessThanOrEqual(pairs.length);
-    expect(auto).toHaveLength(groups.length);
-  });
-
-  it("uses wider angle candidates without widening the historical boundary budget", () => {
-    const input: Polygon[] = [
-      { vertices: [[0, 0, 0], [1, 0, 0], [1, 1, 0]], color: "#f00" },
-      { vertices: [[0, 0, 0], [1, 1, 0], [0, 1, 0.2]], color: "#f00" },
-    ];
-
-    const previousLossy = optimizeMeshPolygons(input, {
-      meshResolution: "lossy",
-      approximateMerge: {
-        maxAngleDeg: 15,
-        maxPlaneDisplacement: 0.35,
-        maxBoundaryDisplacement: 0.075,
-        isolatedPairs: true,
-      },
-    });
-    const auto = optimizeMeshPolygons(input, { meshResolution: "lossy" });
-
-    expect(previousLossy).toHaveLength(2);
-    expect(auto).toHaveLength(1);
-  });
-
-  it("uses tiny lossy color snapping to unlock exact merges without moving geometry", () => {
+  it("keeps tiny color differences as material boundaries", () => {
     const palette = [
       "#fcca48",
       "#fdca48",
@@ -413,16 +379,10 @@ describe("optimizeMeshPolygons", () => {
     const lossy = optimizeMeshPolygons(input, { meshResolution: "lossy" });
 
     expect(lossless).toHaveLength(12);
-    expect(lossy).toHaveLength(1);
-    expect(new Set(lossy[0].vertices.map((vertex) => vertex.join(",")))).toEqual(new Set([
-      "0,0,0",
-      "12,0,0",
-      "12,1,0",
-      "0,1,0",
-    ]));
+    expect(lossy).toHaveLength(12);
   });
 
-  it("keeps automatic lossy optimization exact for large cardinal quad meshes", () => {
+  it("keeps default lossy optimization exact for large cardinal quad meshes", () => {
     const input: Polygon[] = [];
     for (let y = 0; y < 20; y++) {
       for (let x = 0; x < 20; x++) {
@@ -433,14 +393,11 @@ describe("optimizeMeshPolygons", () => {
       }
     }
 
-    const exact = optimizeMeshPolygons(input, {
-      meshResolution: "lossy",
-      approximateMerge: false,
-    });
-    const automatic = optimizeMeshPolygons(input, { meshResolution: "lossy" });
+    const exact = optimizeMeshPolygons(input, { meshResolution: "lossless" });
+    const lossy = optimizeMeshPolygons(input, { meshResolution: "lossy" });
 
-    expect(automatic).toHaveLength(exact.length);
-    expect(polygonSignature(automatic)).toEqual(polygonSignature(exact));
+    expect(lossy).toHaveLength(exact.length);
+    expect(polygonSignature(lossy)).toEqual(polygonSignature(exact));
   });
 
   it("does not let default lossy rect-cover heuristics regress below lossless", () => {
@@ -453,7 +410,7 @@ describe("optimizeMeshPolygons", () => {
     expect(renderCost(lossy)).toBeLessThanOrEqual(renderCost(lossless) + 1e-9);
   });
 
-  it("keeps automatic lossy seam repair within the split budget over the exact lossless floor", async () => {
+  it("keeps default lossy seam repair within the split budget over the exact lossless floor", async () => {
     installSolidTextureEnv([10, 20, 30, 255]);
 
     for (const file of ["poly-pizza/arrow.glb", "poly-pizza/bucket.glb"]) {
@@ -470,6 +427,26 @@ describe("optimizeMeshPolygons", () => {
       );
     }
   });
+
+  it("keeps lossy seam repair tractable on long mechanical NASA geometry", () => {
+    const raw = parseGltf(loadGlbGalleryFile("nasa/opportunity.glb"), { targetSize: 60 }).polygons;
+
+    const lossless = optimizeMeshPolygons(raw, { meshResolution: "lossless" });
+    const lossy = optimizeMeshPolygons(raw, { meshResolution: "lossy" });
+
+    expect(lossy.length).toBeLessThanOrEqual(
+      lossless.length + DEFAULT_SEAM_FACET_SPLIT_OPTIONS.budget,
+    );
+  }, 10_000);
+
+  it("keeps lossless optimization from culling open spacecraft geometry", () => {
+    const raw = parseGltf(loadGlbGalleryFile("nasa/cubesat-1u.glb"), { targetSize: 60 }).polygons;
+
+    const lossless = optimizeMeshPolygons(raw, { meshResolution: "lossless" });
+
+    expect(raw).toHaveLength(6063);
+    expect(lossless.length).toBeGreaterThan(1500);
+  }, 10_000);
 
   it("does not turn castle seam overlap repairs into concave render polygons", () => {
     const raw = parseObj(loadObjGalleryFile("castle.obj"), { targetSize: 60 }).polygons;
@@ -505,52 +482,17 @@ describe("optimizeMeshPolygons", () => {
     expect(polygonSignature(lossy)).toEqual(polygonSignature(lossless));
   });
 
-  it("salvages safe local pair wins without accepting the unsafe full pair set", () => {
+  it("keeps default lossy pair wins on the Snail fixture", () => {
     const raw = parseGltf(loadGlbGalleryFile("Snail.glb")).polygons;
 
     const lossless = optimizeMeshPolygons(raw, { meshResolution: "lossless" });
-    const forced = optimizeMeshPolygons(raw, {
-      meshResolution: "lossy",
-      approximateMerge: {
-        maxAngleDeg: 45,
-        maxPlaneDisplacement: 1,
-        maxBoundaryDisplacement: 0.0725,
-        isolatedPairs: true,
-      },
-    });
-    const automatic = optimizeMeshPolygons(raw, { meshResolution: "lossy" });
+    const lossy = optimizeMeshPolygons(raw, { meshResolution: "lossy" });
 
-    expect(forced.length).toBeLessThan(lossless.length);
-    expect(automatic.length).toBeLessThan(lossless.length);
-    expect(renderCost(automatic)).toBeLessThan(renderCost(lossless));
-    expect(polygonSignature(automatic)).not.toEqual(polygonSignature(forced));
+    expect(lossy.length).toBeLessThan(lossless.length);
+    expect(renderCost(lossy)).toBeLessThan(renderCost(lossless));
   });
 
-  it("keeps lossy pair-merge neighbor seams on shared geometry", () => {
-    const input: Polygon[] = [
-      { vertices: [[0, 0, 0.02], [1, 0, 0], [1, 1, 0.11]], color: "#f00" },
-      { vertices: [[0, 0, 0.02], [1, 1, 0.11], [0, 1, -0.03]], color: "#f00" },
-      { vertices: [[1, 0, 0], [2, 0, 0.04], [2, 1, -0.02]], color: "#0f0" },
-      { vertices: [[1, 0, 0], [2, 1, -0.02], [1, 1, 0.11]], color: "#0f0" },
-    ];
-
-    const baseOptions = {
-      meshResolution: "lossy",
-      rectCover: false,
-      approximateMerge: {
-        maxAngleDeg: 45,
-        maxPlaneDisplacement: 1,
-        maxBoundaryDisplacement: 0.2,
-        isolatedPairs: true,
-      },
-    } as const;
-    const lossy = optimizeMeshPolygons(input, baseOptions);
-
-    expect(lossy).toHaveLength(2);
-    expect(sharedEdgeCount(lossy)).toBe(1);
-  });
-
-  it("keeps finding guarded lossy wins on the coliseum fixture after triangle pairs are exhausted", () => {
+  it("keeps default lossy wins on the coliseum fixture", () => {
     const raw = parseObj(loadObjGalleryFile("coliseum.obj"), {
       targetSize: 80,
       palette: ["#c9a876", "#a78760", "#8b6f47", "#6b5538"],
@@ -559,6 +501,6 @@ describe("optimizeMeshPolygons", () => {
     const lossless = optimizeMeshPolygons(raw, { meshResolution: "lossless" });
     const lossy = optimizeMeshPolygons(raw, { meshResolution: "lossy" });
 
-    expect(lossless.length - lossy.length).toBeGreaterThanOrEqual(480);
+    expect(lossless.length - lossy.length).toBeGreaterThanOrEqual(400);
   });
 });

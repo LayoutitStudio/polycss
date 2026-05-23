@@ -46,6 +46,15 @@ export interface TextureTriangle {
   uvs: [Vec2, Vec2, Vec2];
 }
 
+export type PolyTextureWrapMode = "repeat" | "clamp-to-edge" | "mirrored-repeat";
+
+export interface PolyTextureWrap {
+  s: PolyTextureWrapMode;
+  t: PolyTextureWrapMode;
+}
+
+export type PolyTextureAlphaMode = "opaque" | "mask" | "blend";
+
 /**
  * Directional light — simulates a single distant source (sun, key light).
  * Contributes Lambert shading scaled by `intensity`. `direction` is in
@@ -118,6 +127,20 @@ export interface Polygon {
    */
   texture?: string;
   /**
+   * Texture sampler wrap mode for UVs outside [0, 1]. glTF imports preserve
+   * sampler.wrapS / wrapT here so the atlas rasterizer can tile repeated UVs.
+   * When unset, renderers keep the historical single-image behavior.
+   * @internal
+   */
+  textureWrap?: PolyTextureWrap;
+  /**
+   * Texture alpha interpretation imported from glTF `material.alphaMode`.
+   * Opaque textures can use transparent PNG padding without cutting holes in
+   * the rendered polygon.
+   * @internal
+   */
+  textureAlphaMode?: PolyTextureAlphaMode;
+  /**
    * Shared material. When set, `material.texture` takes precedence over the
    * inline `texture` field. If the polygon's UVs form an axis-aligned
    * rectangle, polycss uses the direct CSS background-image path (no per-
@@ -137,6 +160,12 @@ export interface Polygon {
    * @internal
    */
   textureTriangles?: TextureTriangle[];
+  /**
+   * Source material requested two-sided rendering. Importers use this so
+   * optimization passes do not collapse intentional reverse-wound faces.
+   * @internal
+   */
+  doubleSided?: boolean;
   /**
    * User-controlled metadata. Reflected to DOM as `data-*` attributes via
    * stringification by the framework wrappers. Only string|number|boolean

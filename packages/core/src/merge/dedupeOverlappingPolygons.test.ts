@@ -59,6 +59,38 @@ describe("dedupeOverlappingPolygons", () => {
     expect(out.length).toBe(1);
   });
 
+  it("keeps authored double-sided backfaces", () => {
+    const front = { ...quad([0, 0, 0], [1, 0, 0], [0, 1, 0]), doubleSided: true };
+    const back: Polygon = {
+      vertices: [...front.vertices].reverse(),
+      color: front.color,
+      doubleSided: true,
+    };
+    const out = dedupeOverlappingPolygons([front, back]);
+    expect(out).toHaveLength(2);
+    expect(out).toEqual([front, back]);
+  });
+
+  it("can collapse double-sided backfaces for shadow dedupe", () => {
+    const front = { ...quad([0, 0, 0], [1, 0, 0], [0, 1, 0]), doubleSided: true };
+    const back: Polygon = {
+      vertices: [...front.vertices].reverse(),
+      color: front.color,
+      doubleSided: true,
+    };
+    const out = dedupeOverlappingPolygons([front, back], {
+      preserveDoubleSidedBackfaces: false,
+    });
+    expect(out).toHaveLength(1);
+  });
+
+  it("still drops same-orientation duplicates from double-sided materials", () => {
+    const a = { ...quad([0, 0, 0], [1, 0, 0], [0, 1, 0]), doubleSided: true };
+    const b = { ...quad([0, 0, 0], [1, 0, 0], [0, 1, 0]), doubleSided: true };
+    const out = dedupeOverlappingPolygons([a, b]);
+    expect(out).toHaveLength(1);
+  });
+
   it("keeps both polygons when they're coplanar but their 2D outlines don't overlap", () => {
     // Two quads on the same z=0 plane, side by side, no overlap.
     const a = quad([0, 0, 0], [1, 0, 0], [0, 1, 0]);

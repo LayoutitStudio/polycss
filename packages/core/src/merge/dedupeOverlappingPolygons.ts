@@ -62,6 +62,10 @@ export interface DedupeOverlappingPolygonsOptions {
    *  containment ratios) for a pair to count as a duplicate.
    *  Default 0.7. Lower (~0.4) is liberal; higher (~0.9) is strict. */
   overlapFraction?: number;
+  /** Preserve reverse-wound faces from authored double-sided materials.
+   *  Geometry dedupe keeps these by default; shadow dedupe can disable it
+   *  because coincident front/back casters produce stacked shadows. */
+  preserveDoubleSidedBackfaces?: boolean;
 }
 
 const DEFAULT_NORMAL_TOLERANCE = 1e-3;
@@ -133,6 +137,14 @@ function computeMeta(polygon: Polygon, index: number): PolyMeta | null {
     bbox2D: null,
     basis: null,
   };
+}
+
+function preservesAuthoredBackface(a: PolyMeta, b: PolyMeta): boolean {
+  return (
+    a.polygon.doubleSided === true &&
+    b.polygon.doubleSided === true &&
+    dot(a.normal, b.normal) < 0
+  );
 }
 
 /** Pick a deterministic 2D basis (u, v) orthogonal to the plane normal.
@@ -313,6 +325,7 @@ export function findOverlappingPolygonDuplicates(
   const normalTolerance = options?.normalTolerance ?? DEFAULT_NORMAL_TOLERANCE;
   const distanceTolerance = options?.distanceTolerance ?? DEFAULT_DISTANCE_TOLERANCE;
   const overlapFraction = options?.overlapFraction ?? DEFAULT_OVERLAP_FRACTION;
+  const preserveDoubleSidedBackfaces = options?.preserveDoubleSidedBackfaces ?? true;
 
   const metas: PolyMeta[] = [];
   for (let i = 0; i < input.length; i++) {
@@ -353,6 +366,7 @@ export function findOverlappingPolygonDuplicates(
         const b = arr[j];
         if (dropped.has(b.index)) continue;
         if (!coplanar(a, b, normalTolerance, distanceTolerance)) continue;
+        if (preserveDoubleSidedBackfaces && preservesAuthoredBackface(a, b)) continue;
         // Both polygons project into A's basis — using each polygon's own
         // basis breaks for back-to-back faces (anti-parallel normals
         // produce mirrored basis vectors and the bboxes don't overlap).

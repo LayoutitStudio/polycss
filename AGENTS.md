@@ -130,6 +130,8 @@ The rendering model, tag table, lighting modes, and naming conventions described
 - **NO `Co-Authored-By: Claude` trailer.**
 - **NO "🤖 Generated with Claude Code" footer in PR bodies, commit messages, issue comments, or anywhere else.**
 - Never amend commits. New follow-up commits only. (Pre-commit hook failures: fix and create a new commit, don't `--amend`.)
+- Branch names should not use a `codex/` prefix. Use plain descriptive branch names unless the user explicitly asks for a different naming convention.
+- Never push without explicit user approval in the current conversation, even for an existing PR branch or a small follow-up fix. Commit locally and stop for review unless the user clearly asks to push.
 - Don't auto-push subagent exploration branches — local commits only. The user pushes when ready.
 - `main` is protected. All work lands via PR.
 
