@@ -57,6 +57,16 @@ function texturedTriangle(vertices: Polygon["vertices"]): Polygon {
   };
 }
 
+function pointSampledTexturedTriangle(vertices: Polygon["vertices"], uv: [number, number]): Polygon {
+  return {
+    vertices,
+    color: "#000000",
+    texture: "texture.png",
+    uvs: [uv, uv, uv],
+    textureTriangles: [{ uvs: [uv, uv, uv] }],
+  };
+}
+
 describe("bakeSolidTextureSamples", () => {
   it("reuses baked solid texture colors for animated samples", async () => {
     installSolidTextureEnv([10, 20, 30, 255]);
@@ -91,6 +101,40 @@ describe("bakeSolidTextureSamples", () => {
     expect(frame[0].texture).toBeUndefined();
     expect(frame[0].uvs).toBeUndefined();
     expect(frame[0].textureTriangles).toBeUndefined();
+  });
+
+  it("normalizes close baked texture swatch colors", async () => {
+    installSolidTextureDataEnv(2, 1, [
+      254, 202, 74, 255,
+      254, 193, 68, 255,
+    ]);
+    const dominantUv: [number, number] = [0.25, 0.5];
+    const closeUv: [number, number] = [0.75, 0.5];
+    const authoredCloseColor: Polygon = {
+      vertices: [[0, 2, 0], [1, 2, 0], [0, 3, 0]],
+      color: "#fec144",
+    };
+    const result: ParseResult = {
+      polygons: [
+        pointSampledTexturedTriangle([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dominantUv),
+        pointSampledTexturedTriangle([[1, 0, 0], [2, 0, 0], [1, 1, 0]], dominantUv),
+        pointSampledTexturedTriangle([[2, 0, 0], [3, 0, 0], [2, 1, 0]], closeUv),
+        authoredCloseColor,
+      ],
+      objectUrls: [],
+      dispose() {},
+      warnings: [],
+    };
+
+    const baked = await bakeSolidTextureSamples(result);
+
+    expect(baked.polygons.map((polygon) => polygon.color)).toEqual([
+      "#feca4a",
+      "#feca4a",
+      "#feca4a",
+      "#fec144",
+    ]);
+    expect(baked.polygons.slice(0, 3).every((polygon) => polygon.texture === undefined)).toBe(true);
   });
 
   it("uses texture wrap when baking repeated UVs into solid colors", async () => {

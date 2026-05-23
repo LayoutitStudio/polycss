@@ -295,6 +295,9 @@ function buildTriangleGlb(opts?: {
   mode?: number;
   includeTexcoord?: boolean;
   texcoords?: number[];
+  includeTexcoord1?: boolean;
+  texcoords1?: number[];
+  textureTexCoord?: number;
   textureUrl?: string;
   alphaMode?: string;
   doubleSided?: boolean;
@@ -310,12 +313,16 @@ function buildTriangleGlb(opts?: {
   const texcoords = opts?.includeTexcoord
     ? (opts.texcoords ?? [0, 0, 1, 0, 0, 1])  // 3 UV pairs
     : [];
+  const texcoords1 = opts?.includeTexcoord1
+    ? (opts.texcoords1 ?? [0, 0, 1, 0, 0, 1])
+    : [];
 
   // Build binary buffer
   let totalBytes = positions.length * 4;
   const posStart = 0;
   let idxStart = -1, idxBytes = 0;
   let uvStart = -1;
+  let uv1Start = -1;
 
   if (opts?.indexed !== false) {
     idxBytes = indices.length * 2; // UNSIGNED_SHORT
@@ -327,6 +334,10 @@ function buildTriangleGlb(opts?: {
   if (opts?.includeTexcoord) {
     uvStart = totalBytes;
     totalBytes += texcoords.length * 4;
+  }
+  if (opts?.includeTexcoord1) {
+    uv1Start = totalBytes;
+    totalBytes += texcoords1.length * 4;
   }
 
   const bin = new Uint8Array(totalBytes);
@@ -346,6 +357,11 @@ function buildTriangleGlb(opts?: {
   if (opts?.includeTexcoord && uvStart >= 0) {
     for (let i = 0; i < texcoords.length; i++) {
       binView.setFloat32(uvStart + i * 4, texcoords[i], true);
+    }
+  }
+  if (opts?.includeTexcoord1 && uv1Start >= 0) {
+    for (let i = 0; i < texcoords1.length; i++) {
+      binView.setFloat32(uv1Start + i * 4, texcoords1[i], true);
     }
   }
 
@@ -390,6 +406,18 @@ function buildTriangleGlb(opts?: {
     });
     bufferViews.push({ buffer: 0, byteOffset: uvStart, byteLength: texcoords.length * 4 });
   }
+  let uv1AccessorIdx: number | undefined = undefined;
+  if (opts?.includeTexcoord1 && uv1Start >= 0) {
+    uv1AccessorIdx = accessors.length;
+    accessors.push({
+      bufferView: bufferViews.length,
+      byteOffset: 0,
+      componentType: 5126,
+      count: 3,
+      type: "VEC2",
+    });
+    bufferViews.push({ buffer: 0, byteOffset: uv1Start, byteLength: texcoords1.length * 4 });
+  }
 
   const materials: object[] = [];
   let materialIdx: number | undefined = undefined;
@@ -405,7 +433,10 @@ function buildTriangleGlb(opts?: {
     if (opts?.textureUrl) {
       mat.pbrMetallicRoughness = {
         ...((mat.pbrMetallicRoughness as object | undefined) ?? {}),
-        baseColorTexture: { index: 0 },
+        baseColorTexture: {
+          index: 0,
+          ...(opts.textureTexCoord !== undefined ? { texCoord: opts.textureTexCoord } : {}),
+        },
       };
     }
     materials.push(mat);
@@ -413,6 +444,7 @@ function buildTriangleGlb(opts?: {
 
   const primitiveAttrs: Record<string, number> = { POSITION: 0 };
   if (uvAccessorIdx !== undefined) primitiveAttrs.TEXCOORD_0 = uvAccessorIdx;
+  if (uv1AccessorIdx !== undefined) primitiveAttrs.TEXCOORD_1 = uv1AccessorIdx;
 
   const primitive: Record<string, unknown> = {
     attributes: primitiveAttrs,
@@ -841,9 +873,18 @@ describe("parseGltf", () => {
       expect(result.polygons[0].color).toBe("#ff0000");
     });
 
-    it("PBR baseColorFactor alpha is preserved in the polygon color", () => {
+    it("PBR baseColorFactor alpha is ignored for default opaque materials", () => {
       const { glb } = buildTriangleGlb({
         materialColor: [0, 0.5, 1, 0.25],
+      });
+      const result = parseGltf(glb);
+      expect(result.polygons[0].color).toBe("#0080ff");
+    });
+
+    it("PBR baseColorFactor alpha is preserved for blend materials", () => {
+      const { glb } = buildTriangleGlb({
+        materialColor: [0, 0.5, 1, 0.25],
+        alphaMode: "BLEND",
       });
       const result = parseGltf(glb);
       expect(result.polygons[0].color).toBe("rgba(0, 128, 255, 0.25)");
@@ -1187,6 +1228,21 @@ describe("parseGltf", () => {
       expect(poly.textureWrap).toEqual({ s: "repeat", t: "repeat" });
       expect(poly.textureAlphaMode).toBe("opaque");
       expect(poly.uvs?.some(([u]) => u > 1)).toBe(true);
+    });
+
+    it("uses the baseColorTexture texCoord set instead of always TEXCOORD_0", () => {
+      const { glb } = buildTriangleGlb({
+        includeTexcoord: true,
+        texcoords: [0, 0, 0, 0, 0, 0],
+        includeTexcoord1: true,
+        texcoords1: [0.25, 0.75, 0.5, 0.75, 0.25, 0.5],
+        textureTexCoord: 1,
+        textureUrl: "texture.png",
+      });
+
+      const result = parseGltf(glb);
+
+      expect(result.polygons[0].uvs).toEqual([[0.25, 0.25], [0.5, 0.25], [0.25, 0.5]]);
     });
 
     it("no texture → uvs not set on polygon", () => {

@@ -370,6 +370,17 @@
   background: #000;
 }
 
+.dn-light-helper,
+.dn-light-helper * {
+  cursor: grab;
+}
+
+.dn-viewport.is-light-rotating,
+.dn-viewport.is-light-rotating .dn-light-helper,
+.dn-viewport.is-light-rotating .dn-light-helper * {
+  cursor: grabbing;
+}
+
 .dn-viewport--outline-polygons .polycss-scene i,
 .dn-viewport--outline-polygons .polycss-scene b,
 .dn-viewport--outline-polygons .polycss-scene s,

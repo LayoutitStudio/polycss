@@ -2,7 +2,8 @@
  * Z-axis cylinder geometry with optional radius taper.
  *
  * Geometry:
- *   - `radialSegments` side quads (one per angular segment).
+ *   - `radialSegments` side faces (quads for cylinders/frustums, triangles
+ *     when one radius collapses to a cone tip).
  *   - `radialSegments` bottom-cap triangles (fan from center).
  *   - `radialSegments` top-cap triangles (fan from center), omitted when
  *     radiusTop ≈ 0 (i.e. cone tip).
@@ -24,13 +25,13 @@ export interface CylinderPolygonsOptions {
   radiusTop?: number;
   /** Height along the Z axis. Default 100. */
   height?: number;
-  /** Number of radial segments (quads on the side). Default 12. */
+  /** Number of radial segments. Default 12. */
   radialSegments?: number;
   /** Fill color applied to all polygons. */
   color?: string;
 }
 
-/** Threshold below which `radiusTop` is treated as zero (cone tip, no cap). */
+/** Threshold below which a radius is treated as zero (cone tip, no cap). */
 const RADIUS_ZERO_EPS = 1e-6;
 
 export function cylinderPolygons(options: CylinderPolygonsOptions = {}): Polygon[] {
@@ -51,10 +52,16 @@ export function cylinderPolygons(options: CylinderPolygonsOptions = {}): Polygon
   // Pre-compute the angle for each segment boundary.
   const angles: number[] = Array.from({ length: n + 1 }, (_, i) => (i / n) * Math.PI * 2);
 
-  // ── Side quads ───────────────────────────────────────────────────────────
-  // One quad per segment. Order [bl, br, tr, tl] is CCW from outside in
-  // Z-up world space: the outward normal points radially away from the axis.
+  const bottomIsPoint = radius <= RADIUS_ZERO_EPS;
+  const topIsPoint = radiusTop <= RADIUS_ZERO_EPS;
+
+  // ── Side faces ───────────────────────────────────────────────────────────
+  // One face per segment. Quads use [bl, br, tr, tl]; cone-tip sides use
+  // triangles so renderers don't receive degenerate quads with duplicate apex
+  // vertices.
   for (let i = 0; i < n; i++) {
+    if (bottomIsPoint && topIsPoint) break;
+
     const a0 = angles[i];
     const a1 = angles[i + 1];
     const bx0 = Math.cos(a0) * radius;
@@ -71,8 +78,16 @@ export function cylinderPolygons(options: CylinderPolygonsOptions = {}): Polygon
     const tr: Vec3 = [tx1, ty1, zTop];
     const tl: Vec3 = [tx0, ty0, zTop];
 
-    // CCW from outside: cross((br - bl), (tr - bl)) points radially outward.
-    polygons.push({ vertices: [bl, br, tr, tl], color });
+    if (topIsPoint) {
+      const apex: Vec3 = [0, 0, zTop];
+      polygons.push({ vertices: [bl, br, apex], color });
+    } else if (bottomIsPoint) {
+      const apex: Vec3 = [0, 0, zBottom];
+      polygons.push({ vertices: [apex, tr, tl], color });
+    } else {
+      // CCW from outside: cross((br - bl), (tr - bl)) points radially outward.
+      polygons.push({ vertices: [bl, br, tr, tl], color });
+    }
   }
 
   // ── Bottom cap (radius > 0) ──────────────────────────────────────────────

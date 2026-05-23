@@ -118,6 +118,7 @@ interface GltfBufferView {
 }
 interface GltfTextureInfo {
   index: number; // index into doc.textures[]
+  texCoord?: number;
 }
 interface GltfMaterial {
   name?: string;
@@ -538,6 +539,7 @@ interface GltfMaterialTextureInfo {
   url: string;
   wrap: PolyTextureWrap;
   alphaMode: PolyTextureAlphaMode;
+  texCoord: number;
 }
 
 function gltfWrapMode(value: number | undefined): PolyTextureWrapMode {
@@ -581,19 +583,24 @@ function buildMaterialTextureMap(doc: GltfDoc, imageUrls: string[]): Map<number,
         url,
         wrap: textureWrapForTexture(doc, texture),
         alphaMode: gltfAlphaMode(mats[i].alphaMode),
+        texCoord: mats[i].pbrMetallicRoughness?.baseColorTexture?.texCoord ?? 0,
       });
     }
   }
   return out;
 }
 
-function colorFromMaterial(mat: GltfMaterial | undefined, fallback: string): string {
+function colorFromMaterial(
+  mat: GltfMaterial | undefined,
+  fallback: string,
+  alphaMode: PolyTextureAlphaMode,
+): string {
   const c = mat?.pbrMetallicRoughness?.baseColorFactor;
   if (!c || c.length < 3) return fallback;
   const clamp01 = (n: number) => Math.max(0, Math.min(1, n));
   const toHex = (n: number) => Math.round(clamp01(n) * 255).toString(16).padStart(2, "0");
   const toByte = (n: number) => Math.round(clamp01(n) * 255);
-  const alpha = clamp01(c[3] ?? 1);
+  const alpha = alphaMode === "opaque" ? 1 : clamp01(c[3] ?? 1);
   return alpha < 1
     ? `rgba(${toByte(c[0])}, ${toByte(c[1])}, ${toByte(c[2])}, ${Math.round(alpha * 1000) / 1000})`
     : `#${toHex(c[0])}${toHex(c[1])}${toHex(c[2])}`;
@@ -1343,11 +1350,13 @@ export function parseGltf(input: ArrayBuffer | Uint8Array, options?: GltfParseOp
       }
 
       const material = prim.material !== undefined ? doc.materials?.[prim.material] : undefined;
+      const materialAlphaMode = gltfAlphaMode(material?.alphaMode);
       const matName = material?.name;
       const matOverride = matName ? materialOverrides[matName] : undefined;
       const color = matOverride ?? colorFromMaterial(
         material,
-        defaultColor
+        defaultColor,
+        materialAlphaMode,
       );
       const doubleSided = material?.doubleSided === true;
       const materialTextureInfo = prim.material !== undefined ? matTexMap.get(prim.material) : undefined;
@@ -1360,8 +1369,9 @@ export function parseGltf(input: ArrayBuffer | Uint8Array, options?: GltfParseOp
         ? materialTextureInfo?.wrap
         : undefined;
       const textureAlphaMode = texture
-        ? materialTextureInfo?.alphaMode ?? gltfAlphaMode(material?.alphaMode)
+        ? materialTextureInfo?.alphaMode ?? materialAlphaMode
         : undefined;
+      const textureTexCoord = texture ? materialTextureInfo?.texCoord ?? 0 : 0;
 
       const { array: posArr, count: vertCount } = readAccessor(doc, buffers, prim.attributes.POSITION);
       if (!(posArr instanceof Float32Array)) continue;
@@ -1374,7 +1384,7 @@ export function parseGltf(input: ArrayBuffer | Uint8Array, options?: GltfParseOp
       }
 
       let uvs: Vec2[] | null = null;
-      const uvAccIdx = prim.attributes.TEXCOORD_0;
+      const uvAccIdx = prim.attributes[`TEXCOORD_${textureTexCoord}`];
       if (texture && uvAccIdx !== undefined) {
         const { array: uvArr, count: uvCount } = readAccessor(doc, buffers, uvAccIdx);
         uvs = [];

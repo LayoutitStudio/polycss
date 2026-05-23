@@ -104,6 +104,13 @@ const DETAIL_EDGE_THRESHOLD = 32;
 const LOW_DETAIL_MAX_EDGE_RATIO = 0.045;
 const LOW_DETAIL_MAX_AVERAGE_DELTA = 10;
 const TRIANGLE_GRID_STEPS = 6;
+const BAKED_SWATCH_COLOR_TOLERANCE = 16;
+
+interface SolidTextureBakeResult {
+  polygons: Polygon[];
+  changed: boolean;
+  bakedIndices: number[];
+}
 
 function textureForPolygon(polygon: Polygon): string | undefined {
   return polygon.material?.texture ?? polygon.texture;
@@ -474,6 +481,53 @@ function bakePolygon(polygon: Polygon, color: string): Polygon {
   };
 }
 
+function normalizeBakedSolidTextureColors(polygons: Polygon[], bakedIndices: readonly number[]): Polygon[] {
+  if (bakedIndices.length < 2) return polygons;
+
+  const entries: Array<{ index: number; key: string }> = [];
+  const counts = new Map<string, { color: SampledColor; count: number }>();
+  for (const index of bakedIndices) {
+    const parsed = cssColorToSampledColor(polygons[index]?.color);
+    if (!parsed || parsed.a < 255) continue;
+    const key = colorKey(parsed);
+    entries.push({ index, key });
+    const current = counts.get(key);
+    if (current) current.count += 1;
+    else counts.set(key, { color: parsed, count: 1 });
+  }
+  if (counts.size < 2) return polygons;
+
+  const representatives: SampledColor[] = [];
+  const canonicalByKey = new Map<string, string>();
+  const colorsByFrequency = [...counts.entries()]
+    .sort((a, b) => b[1].count - a[1].count || a[0].localeCompare(b[0]));
+  for (const [key, entry] of colorsByFrequency) {
+    let representative: SampledColor | null = null;
+    for (const candidate of representatives) {
+      if (colorsClose(entry.color, candidate, BAKED_SWATCH_COLOR_TOLERANCE)) {
+        representative = candidate;
+        break;
+      }
+    }
+    if (!representative) {
+      representative = entry.color;
+      representatives.push(representative);
+    }
+    canonicalByKey.set(key, colorToCss(representative));
+  }
+
+  let changed = false;
+  const next = polygons.slice();
+  for (const entry of entries) {
+    const canonical = canonicalByKey.get(entry.key);
+    const polygon = polygons[entry.index];
+    if (!canonical || !polygon || polygon.color === canonical) continue;
+    next[entry.index] = { ...polygon, color: canonical };
+    changed = true;
+  }
+  return changed ? next : polygons;
+}
+
 export function bakeSolidTextureSampledAnimationFrame(
   frame: Polygon[],
   bakedColorEntries: readonly SolidTextureBakedColorEntry[],
@@ -496,7 +550,7 @@ export function getSolidTextureBakedAnimationInfo(
 }
 
 interface SolidTextureBaker {
-  bake(polygons: Polygon[]): { polygons: Polygon[]; changed: boolean };
+  bake(polygons: Polygon[]): SolidTextureBakeResult;
 }
 
 async function createSolidTextureBaker(
@@ -523,9 +577,10 @@ async function createSolidTextureBaker(
   const tolerance = options.colorTolerance ?? DEFAULT_COLOR_TOLERANCE;
   const explicitTolerance = options.colorTolerance !== undefined;
   return {
-    bake(nextPolygons: Polygon[]): { polygons: Polygon[]; changed: boolean } {
+    bake(nextPolygons: Polygon[]): SolidTextureBakeResult {
       let changed = false;
-      const baked = nextPolygons.map((polygon) => {
+      const bakedIndices: number[] = [];
+      const baked = nextPolygons.map((polygon, index) => {
         const texture = textureForPolygon(polygon);
         if (!texture) return polygon;
         const sampler = samplerByTexture.get(texture);
@@ -533,9 +588,15 @@ async function createSolidTextureBaker(
         const color = solidColorForPolygon(polygon, sampler, tolerance, explicitTolerance);
         if (!color) return polygon;
         changed = true;
+        bakedIndices.push(index);
         return bakePolygon(polygon, color);
       });
-      return { polygons: changed ? baked : nextPolygons, changed };
+      if (!changed) return { polygons: nextPolygons, changed: false, bakedIndices };
+      return {
+        polygons: normalizeBakedSolidTextureColors(baked, bakedIndices),
+        changed: true,
+        bakedIndices,
+      };
     },
   };
 }
@@ -559,12 +620,10 @@ export async function bakeSolidTextureSamples(
   const baked = baker.bake(result.polygons);
   if (!baked.changed) return result;
   const bakedColorEntries: SolidTextureBakedColorEntry[] = [];
-  for (let index = 0; index < baked.polygons.length; index++) {
+  for (const index of baked.bakedIndices) {
     const polygon = baked.polygons[index]!;
     const color = polygon.color;
-    if (polygon !== result.polygons[index] && color) {
-      bakedColorEntries.push({ index, color });
-    }
+    if (color) bakedColorEntries.push({ index, color });
   }
   const animation = result.animation;
   const bakedAnimation: ParseAnimationController | undefined = animation
