@@ -367,7 +367,7 @@ export const PolyMesh = defineComponent({
       // store on every repaint. The footprint stays fully inside the
       // SVG so the shadow under/next to the mesh is preserved; only the
       // sheared end (off-screen anyway) gets clipped by overflow:hidden.
-      const SHADOW_MAX_EXTEND = 4000;
+      const SHADOW_MAX_EXTEND = 2000;
       const bx0 = Math.max(minX, fpMinX - SHADOW_MAX_EXTEND);
       const by0 = Math.max(minY, fpMinY - SHADOW_MAX_EXTEND);
       const bx1 = Math.min(maxX, fpMaxX + SHADOW_MAX_EXTEND);

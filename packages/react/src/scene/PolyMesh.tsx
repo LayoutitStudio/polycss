@@ -684,7 +684,7 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
     // inside the SVG so the shadow under/next to the mesh is preserved
     // — we only truncate the sheared end that's off-screen anyway.
     // overflow:hidden does the actual clipping.
-    const SHADOW_MAX_EXTEND = 4000;
+    const SHADOW_MAX_EXTEND = 2000;
     const bx0 = Math.max(minX, fpMinX - SHADOW_MAX_EXTEND);
     const by0 = Math.max(minY, fpMinY - SHADOW_MAX_EXTEND);
     const bx1 = Math.min(maxX, fpMaxX + SHADOW_MAX_EXTEND);
