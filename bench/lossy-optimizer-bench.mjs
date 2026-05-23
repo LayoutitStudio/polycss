@@ -1,9 +1,7 @@
 #!/usr/bin/env node
 /**
- * Compare lossy mesh optimization strategies on a small gallery corpus.
- *
- * "Pair-only" is the isolated-pair approximation path. Current lossy evaluates
- * the public automatic chooser.
+ * Compare lossless and default lossy mesh optimization on a small gallery
+ * corpus.
  *
  * Usage:
  *   node bench/lossy-optimizer-bench.mjs
@@ -58,11 +56,6 @@ const MODELS = [
   { id: "cheetah", label: "Cheetah", path: "website/public/gallery/glb/Cheetah.glb" },
 ];
 
-const DEFAULT_LOSSY_APPROXIMATE = {
-  maxAngleDeg: 15,
-  maxPlaneDisplacement: 0.35,
-  maxBoundaryDisplacement: 0.0725,
-};
 const GAP_DETECTION_TOLERANCE = 0.2;
 
 const argv = process.argv.slice(2);
@@ -226,20 +219,6 @@ async function parseModel(model) {
   if (ext === ".vox") return parseVox(readBytes(modelPath));
 
   throw new Error(`Unsupported model extension "${ext}" for ${model.path}`);
-}
-
-function pairOnlyLossyOptions() {
-  return {
-    meshResolution: "lossy",
-    approximateMerge: { ...DEFAULT_LOSSY_APPROXIMATE, isolatedPairs: true },
-  };
-}
-
-function groupedLossyOptions() {
-  return {
-    meshResolution: "lossy",
-    approximateMerge: { ...DEFAULT_LOSSY_APPROXIMATE, isolatedPairs: false },
-  };
 }
 
 function timed(fn) {
@@ -412,17 +391,6 @@ function gapMetrics(sourcePolygons, candidatePolygons) {
   };
 }
 
-function choiceFor(current, pairOnly, grouped, lossless) {
-  const currentCost = polygonRenderCost(current);
-  const candidates = [
-    ["pair", polygonRenderCost(pairOnly)],
-    ["groups", polygonRenderCost(grouped)],
-    ["lossless", polygonRenderCost(lossless)],
-  ];
-  const match = candidates.find(([, cost]) => Math.abs(cost - currentCost) < 1e-9);
-  return match?.[0] ?? "auto";
-}
-
 function pctDrop(after, before) {
   return before > 0 ? Number((((before - after) / before) * 100).toFixed(1)) : 0;
 }
@@ -441,14 +409,10 @@ async function summarizeModel(model) {
   const parsed = await timedAsync(() => parseModel(model));
   const raw = parsed.value.polygons;
   const lossless = timed(() => optimizeMeshPolygons(raw, { meshResolution: "lossless" }));
-  const pairOnly = timed(() => optimizeMeshPolygons(raw, pairOnlyLossyOptions()));
-  const grouped = timed(() => optimizeMeshPolygons(raw, groupedLossyOptions()));
   const current = timed(() => optimizeMeshPolygons(raw, { meshResolution: "lossy" }));
   const stats = {
     raw: polygonStats(raw),
     lossless: polygonStats(lossless.value),
-    pairOnlyLossy: polygonStats(pairOnly.value),
-    groupedLossy: polygonStats(grouped.value),
     currentLossy: polygonStats(current.value),
   };
 
@@ -458,25 +422,16 @@ async function summarizeModel(model) {
     path: model.path,
     raw: stats.raw.count,
     lossless: stats.lossless.count,
-    pairOnlyLossy: stats.pairOnlyLossy.count,
-    groupedLossy: stats.groupedLossy.count,
     currentLossy: stats.currentLossy.count,
-    autoChoice: choiceFor(current.value, pairOnly.value, grouped.value, lossless.value),
     currentVsLosslessPct: pctDrop(current.value.length, lossless.value.length),
-    currentVsPairDelta: current.value.length - pairOnly.value.length,
-    currentVsPairCostDelta: Number((stats.currentLossy.renderCost - stats.pairOnlyLossy.renderCost).toFixed(2)),
     stats,
     gaps: {
       lossless: gapMetrics(raw, lossless.value),
-      pairOnlyLossy: gapMetrics(raw, pairOnly.value),
-      groupedLossy: gapMetrics(raw, grouped.value),
       currentLossy: gapMetrics(raw, current.value),
     },
     timingsMs: {
       parse: Number(parsed.ms.toFixed(2)),
       lossless: Number(lossless.ms.toFixed(2)),
-      pairOnlyLossy: Number(pairOnly.ms.toFixed(2)),
-      groupedLossy: Number(grouped.ms.toFixed(2)),
       currentLossy: Number(current.ms.toFixed(2)),
     },
     warnings: parsed.value.warnings ?? [],
@@ -489,40 +444,30 @@ for (const model of selectedModels()) {
 }
 
 console.log("lossy optimizer benchmark");
-console.log("pair-only = forced isolated-pair lossy; groups = forced plane-group lossy; current = automatic lossy chooser");
+console.log("current = library default lossy path");
 console.log("texture swatches are baked with the same solidTextureSamples prepass used by loadMesh when sharp is available");
 console.log("");
 console.log([
   "model".padEnd(17),
   pad("raw", 5),
   pad("lossless", 8),
-  pad("pair", 8),
-  pad("groups", 8),
   pad("current", 8),
-  "choice".padEnd(8),
   pad("vs lossless", 11),
-  pad("poly Δ", 7),
-  pad("cost Δ", 7),
   pad("verts", 7),
   pad("maxV", 5),
   pad("gap", 7),
   pad("crackL", 8),
   pad("current ms", 10),
 ].join("  "));
-console.log("-".repeat(141));
+console.log("-".repeat(94));
 
 for (const row of rows) {
   console.log([
     row.label.padEnd(17),
     pad(row.raw, 5),
     pad(row.lossless, 8),
-    pad(row.pairOnlyLossy, 8),
-    pad(row.groupedLossy, 8),
     pad(row.currentLossy, 8),
-    row.autoChoice.padEnd(8),
     pad(`${row.currentVsLosslessPct.toFixed(1)}%`, 11),
-    pad(row.currentVsPairDelta, 7),
-    pad(row.currentVsPairCostDelta.toFixed(2), 7),
     pad(row.stats.currentLossy.totalVertices, 7),
     pad(row.stats.currentLossy.maxVertices, 5),
     pad(row.gaps.currentLossy.maxGap.toFixed(4), 7),

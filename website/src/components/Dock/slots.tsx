@@ -15,6 +15,7 @@ import { useInteractionFolder, type InteractionFolderInputs } from "./folders/us
 import { useCameraFolder, type CameraFolderInputs } from "./folders/useCameraFolder";
 import { useLightingFolder, type LightingFolderInputs } from "./folders/useLightingFolder";
 import { useSceneFolder, type SceneFolderInputs } from "./folders/useSceneFolder";
+import { useMaterialsFolder, type MaterialsFolderInputs } from "./folders/useMaterialsFolder";
 
 export const DockGuiContext = createContext<GUI | null>(null);
 
@@ -50,6 +51,10 @@ export function DockCamera(inputs: CameraFolderInputs): null {
 export function DockLighting(inputs: LightingFolderInputs): null {
   useLightingFolder(useDockGui(), inputs);
   return null;
+}
+
+export function DockMaterials(inputs: MaterialsFolderInputs): ReactNode {
+  return useMaterialsFolder(useDockGui(), inputs);
 }
 
 export function DockScene(inputs: SceneFolderInputs): ReactNode {

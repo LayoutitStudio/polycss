@@ -266,6 +266,55 @@ describe("mergePolygons", () => {
       expect(result[0].textureTriangles).toHaveLength(2);
     });
 
+    it("preserves texture wrap on merged textured polygons", () => {
+      const a: Polygon = {
+        ...makeTexPoly([[0,0,0],[1,0,0],[1,1,0]], [[0,0],[1,0],[1,1]], "tex.png"),
+        textureWrap: { s: "repeat", t: "repeat" },
+        textureAlphaMode: "opaque",
+      };
+      const b: Polygon = {
+        ...makeTexPoly([[0,0,0],[1,1,0],[0,1,0]], [[0,0],[1,1],[0,1]], "tex.png"),
+        textureWrap: { s: "repeat", t: "repeat" },
+        textureAlphaMode: "opaque",
+      };
+
+      const result = mergePolygons([a, b]);
+
+      expect(result).toHaveLength(1);
+      expect(result[0].textureWrap).toEqual({ s: "repeat", t: "repeat" });
+      expect(result[0].textureAlphaMode).toBe("opaque");
+    });
+
+    it("does not merge textured polygons with different texture wraps", () => {
+      const a: Polygon = {
+        ...makeTexPoly([[0,0,0],[1,0,0],[1,1,0]], [[0,0],[1,0],[1,1]], "tex.png"),
+        textureWrap: { s: "repeat", t: "repeat" },
+      };
+      const b: Polygon = {
+        ...makeTexPoly([[0,0,0],[1,1,0],[0,1,0]], [[0,0],[1,1],[0,1]], "tex.png"),
+        textureWrap: { s: "clamp-to-edge", t: "repeat" },
+      };
+
+      const result = mergePolygons([a, b]);
+
+      expect(result).toHaveLength(2);
+    });
+
+    it("does not merge textured polygons with different texture alpha modes", () => {
+      const a: Polygon = {
+        ...makeTexPoly([[0,0,0],[1,0,0],[1,1,0]], [[0,0],[1,0],[1,1]], "tex.png"),
+        textureAlphaMode: "opaque",
+      };
+      const b: Polygon = {
+        ...makeTexPoly([[0,0,0],[1,1,0],[0,1,0]], [[0,0],[1,1],[0,1]], "tex.png"),
+        textureAlphaMode: "blend",
+      };
+
+      const result = mergePolygons([a, b]);
+
+      expect(result).toHaveLength(2);
+    });
+
     it("different textures are NOT merged", () => {
       const a: Polygon = makeTexPoly([[0,0,0],[1,0,0],[1,1,0]], [[0,0],[1,0],[1,1]], "texA.png");
       const b: Polygon = makeTexPoly([[0,0,0],[1,1,0],[0,1,0]], [[0,0],[1,1],[0,1]], "texB.png");

@@ -26,60 +26,43 @@ function len(v: Vec3): number {
 
 function isCoplanar(vertices: Vec3[], eps = 1e-4): boolean {
   if (vertices.length <= 3) return true;
-  // Find first non-degenerate triplet (some vertices may coincide at the cone apex).
-  let n: Vec3 | null = null;
-  let ref: Vec3 | null = null;
-  for (let i = 0; i < vertices.length && n === null; i++) {
-    for (let j = i + 1; j < vertices.length && n === null; j++) {
-      for (let k = j + 1; k < vertices.length && n === null; k++) {
-        const candidate = cross(sub(vertices[j], vertices[i]), sub(vertices[k], vertices[i]));
-        if (len(candidate) > 1e-10) { n = candidate; ref = vertices[i]; }
-      }
-    }
-  }
-  if (n === null || ref === null) return true; // all points coincide — trivially coplanar
+  const [a, b, c, ...rest] = vertices;
+  const n = cross(sub(b, a), sub(c, a));
   const nl = len(n);
-  for (const v of vertices) {
-    const dist = Math.abs(dot(n, sub(v, ref!))) / nl;
+  if (nl < 1e-10) return false;
+  for (const v of rest) {
+    const dist = Math.abs(dot(n, sub(v, a))) / nl;
     if (dist > eps) return false;
   }
   return true;
 }
 
 function isCCWFromOutside(vertices: Vec3[], solidCentroid: Vec3): boolean {
-  // Find the first non-degenerate cross product (some quads are degenerate at cone apex).
-  let n: Vec3 | null = null;
-  for (let i = 0; i < vertices.length && n === null; i++) {
-    const a = vertices[i];
-    const b = vertices[(i + 1) % vertices.length];
-    const c = vertices[(i + 2) % vertices.length];
-    const candidate = cross(sub(b, a), sub(c, a));
-    if (len(candidate) > 1e-10) n = candidate;
-  }
-  if (n === null) return true; // fully degenerate — skip
+  const [a, b, c] = vertices;
+  const n = cross(sub(b, a), sub(c, a));
   const fc: Vec3 = [0, 0, 0];
-  // Use only unique vertices for face center (avoid bias from duplicate apex point).
-  const unique = vertices.filter((v, i) =>
-    !vertices.slice(0, i).some((u) => u[0] === v[0] && u[1] === v[1] && u[2] === v[2]),
-  );
-  for (const v of unique) { fc[0] += v[0]; fc[1] += v[1]; fc[2] += v[2]; }
-  fc[0] /= unique.length; fc[1] /= unique.length; fc[2] /= unique.length;
+  for (const v of vertices) { fc[0] += v[0]; fc[1] += v[1]; fc[2] += v[2]; }
+  fc[0] /= vertices.length; fc[1] /= vertices.length; fc[2] /= vertices.length;
   return dot(n, sub(fc, solidCentroid)) > 0;
+}
+
+function uniqueVertexCount(vertices: Vec3[]): number {
+  return new Set(vertices.map((v) => v.map((x) => x.toFixed(6)).join(","))).size;
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 describe("conePolygons", () => {
-  it("returns n side quads + n bottom triangles for default 12 segments (no top cap)", () => {
+  it("returns n side triangles + n bottom triangles for default 12 segments (no top cap)", () => {
     // 12 sides + 12 bottom (radiusTop = 0 → no top cap) = 24
     const polygons = conePolygons();
     expect(polygons).toHaveLength(24);
   });
 
-  it("side polygons have 4 vertices; cap triangles have 3 vertices", () => {
+  it("side polygons and cap polygons are triangles", () => {
     const n = 6;
     const polygons = conePolygons({ radialSegments: n });
-    for (let i = 0; i < n; i++) expect(polygons[i].vertices).toHaveLength(4);
+    for (let i = 0; i < n; i++) expect(polygons[i].vertices).toHaveLength(3);
     for (let i = n; i < 2 * n; i++) expect(polygons[i].vertices).toHaveLength(3);
   });
 
@@ -93,21 +76,24 @@ describe("conePolygons", () => {
 
   it("apex is a single point at the top (+Z)", () => {
     const polygons = conePolygons({ radialSegments: 6 });
-    // Side quads are ordered [bl, br, tr, tl] where tr and tl are the apex-level vertices.
+    // Side triangles are ordered [bl, br, apex].
     const apexPoints = new Set<string>();
     for (let i = 0; i < 6; i++) {
-      // vertices[2] = tr, vertices[3] = tl — both collapse to apex when radiusTop = 0.
-      const tr = polygons[i].vertices[2];
-      const tl = polygons[i].vertices[3];
-      apexPoints.add(tr.map((x) => x.toFixed(6)).join(","));
-      apexPoints.add(tl.map((x) => x.toFixed(6)).join(","));
+      const apex = polygons[i].vertices[2];
+      apexPoints.add(apex.map((x) => x.toFixed(6)).join(","));
     }
     // All apex vertices collapse to one point (0, 0, +height/2) = (0, 0, 50).
     expect(apexPoints.size).toBe(1);
-    const apex = polygons[0].vertices[2]; // tr of first side quad
+    const apex = polygons[0].vertices[2];
     expect(apex[0]).toBeCloseTo(0, 5);
     expect(apex[1]).toBeCloseTo(0, 5);
     expect(apex[2]).toBeCloseTo(50, 5);
+  });
+
+  it("does not emit degenerate duplicate-vertex side polygons", () => {
+    const n = 12;
+    const polygons = conePolygons({ radialSegments: n });
+    for (let i = 0; i < n; i++) expect(uniqueVertexCount(polygons[i].vertices)).toBe(3);
   });
 
   it("every face is coplanar within epsilon", () => {

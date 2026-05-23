@@ -5,11 +5,11 @@ import {
   PolyPerspectiveCamera,
   PolyMapControls,
   PolyOrbitControls,
-  PolyDirectionalLightHelper,
   PolyMesh,
   PolyScene,
   PolySelect,
   PolyTransformControls,
+  octahedronPolygons,
 } from "@layoutit/polycss-react";
 import type {
   PolyAmbientLight,
@@ -25,6 +25,44 @@ import {
   type TextureQuality,
 } from "@layoutit/polycss";
 import { meshResolutionShowsMesh, type GizmoMode, type SceneOptionsState } from "../types";
+
+const LIGHT_HELPER_TILE = 50;
+
+function LightHelperMesh({
+  light,
+  target,
+  distance,
+  size,
+}: {
+  light: PolyDirectionalLight;
+  target: Vec3;
+  distance: number;
+  size: number;
+}) {
+  const swatch = light.color ?? "#ffd54a";
+  const polygons = useMemo(
+    () => octahedronPolygons({ center: [0, 0, 0], size, color: swatch }),
+    [size, swatch],
+  );
+  const position = useMemo<Vec3>(() => {
+    const [dx, dy, dz] = light.direction;
+    const len = Math.hypot(dx, dy, dz) || 1;
+    return [
+      (target[1] + (dx / len) * distance) * LIGHT_HELPER_TILE,
+      (target[0] + (dy / len) * distance) * LIGHT_HELPER_TILE,
+      (target[2] + (dz / len) * distance) * LIGHT_HELPER_TILE,
+    ];
+  }, [light.direction, target, distance]);
+
+  return (
+    <PolyMesh
+      id="light-helper"
+      className="dn-light-helper"
+      polygons={polygons}
+      position={position}
+    />
+  );
+}
 
 function canCullCameraBackfaces(polygons: Polygon[]): boolean {
   return isVoxelCameraCullableNormalGroups(cameraCullNormalGroupsFromPolygons(polygons));
@@ -94,6 +132,8 @@ export function ReactScene({
   const camProps = sceneOptions.perspective === false
     ? { zoom: sceneOptions.zoom, rotX: sceneOptions.rotX, rotY: sceneOptions.rotY, target: sceneOptions.target }
     : { zoom: sceneOptions.zoom, rotX: sceneOptions.rotX, rotY: sceneOptions.rotY, target: sceneOptions.target, perspective: sceneOptions.perspective };
+  const orbitCameraDrag = sceneOptions.interactive && !gizmoDragging;
+  const mapCameraDrag = sceneOptions.interactive && !gizmoDragging;
   const centerPolygons = scenePolygons;
   const effectiveMeshRotation = sceneOptions.selection ? meshRotation : undefined;
   const canCullScenePolygons = useMemo(
@@ -121,7 +161,7 @@ export function ReactScene({
     <Cam key={rendererDebugKey} {...camProps}>
       {sceneOptions.dragMode === "pan" ? (
         <PolyMapControls
-          drag={sceneOptions.interactive && !gizmoDragging}
+          drag={mapCameraDrag}
           wheel={sceneOptions.interactive && !gizmoDragging}
           animate={sceneOptions.animate ? { speed: 0.35, axis: "y", pauseOnInteraction: true } : false}
           onInteractionEnd={handleCameraChange}
@@ -130,7 +170,7 @@ export function ReactScene({
         // FPV control mode is vanilla-only in this spike; the React
         // renderer keeps orbit semantics for now.
         <PolyOrbitControls
-          drag={sceneOptions.interactive && !gizmoDragging}
+          drag={orbitCameraDrag}
           wheel={sceneOptions.interactive && !gizmoDragging}
           animate={sceneOptions.animate ? { speed: 0.35, axis: "y", pauseOnInteraction: true } : false}
           onInteractionEnd={handleCameraChange}
@@ -192,7 +232,7 @@ export function ReactScene({
         )}
         {sceneOptions.showAxes && <PolyAxesHelper size={helperScale * 0.6} />}
         {sceneOptions.showLight && (
-          <PolyDirectionalLightHelper
+          <LightHelperMesh
             light={directionalLight}
             target={helperTarget}
             distance={helperScale * 0.7}

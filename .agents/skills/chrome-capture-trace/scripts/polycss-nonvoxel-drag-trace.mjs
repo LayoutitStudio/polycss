@@ -7,11 +7,11 @@
  * and writes both a Chrome trace file and a compact JSON summary.
  *
  * Usage:
- *   node bench/nonvoxel-drag-trace.mjs
- *   node bench/nonvoxel-drag-trace.mjs --mesh teapot --mode baked --label teapot-drag
- *   node bench/nonvoxel-drag-trace.mjs --degrees 360 --drag-ms 1500 --steps 120
- *   node bench/nonvoxel-drag-trace.mjs --variant force-atlas --trace-out bench/results/teapot.trace.json
- *   node bench/nonvoxel-drag-trace.mjs --frame-details --no-print-json
+ *   node .agents/skills/chrome-capture-trace/scripts/polycss-nonvoxel-drag-trace.mjs
+ *   node .agents/skills/chrome-capture-trace/scripts/polycss-nonvoxel-drag-trace.mjs --mesh teapot --mode baked --label teapot-drag
+ *   node .agents/skills/chrome-capture-trace/scripts/polycss-nonvoxel-drag-trace.mjs --degrees 360 --drag-ms 1500 --steps 120
+ *   node .agents/skills/chrome-capture-trace/scripts/polycss-nonvoxel-drag-trace.mjs --variant force-atlas --trace-out bench/results/teapot.trace.json
+ *   node .agents/skills/chrome-capture-trace/scripts/polycss-nonvoxel-drag-trace.mjs --frame-details --no-print-json
  */
 import { createServer } from "node:http";
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -19,12 +19,12 @@ import { readFile } from "node:fs/promises";
 import { dirname, extname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
-import { chromiumArgsWithGpuDefault } from "./chromium-defaults.mjs";
-import { getNonVoxelVariantParams, knownNonVoxelVariantIds } from "./nonvoxel-variants.mjs";
+import { chromiumArgsWithGpuDefault } from "../../../../bench/chromium-defaults.mjs";
+import { getNonVoxelVariantParams, knownNonVoxelVariantIds } from "../../../../bench/nonvoxel-variants.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const repoRoot = resolve(__dirname, "..");
-const benchDir = resolve(repoRoot, "bench");
+const benchDir = resolve(__dirname, "../../../../bench");
+const repoRoot = resolve(benchDir, "..");
 const galleryDir = resolve(repoRoot, "website/public/gallery");
 
 const argv = process.argv.slice(2);
@@ -68,7 +68,7 @@ const STEPS = Math.max(1, Math.round(optNum("steps", 120)));
 const VIEWPORT_WIDTH = Math.max(320, Math.round(optNum("viewport-width", 1280)));
 const VIEWPORT_HEIGHT = Math.max(240, Math.round(optNum("viewport-height", 800)));
 const LABEL = optStr("label");
-const JSON_PATH = optStr("json");
+const JSON_PATH = optStr("json") || optStr("summary-out");
 const TRACE_PATH = optStr("trace-out");
 const FRAME_DETAILS = hasFlag("frame-details");
 const FRAME_DETAILS_LIMIT = Math.max(0, Math.round(optNum("frame-details-limit", 24)));
@@ -751,7 +751,7 @@ async function run() {
         traceEvents: events,
         displayTimeUnit: "ms",
         metadata: {
-          source: "bench/nonvoxel-drag-trace.mjs",
+          source: ".agents/skills/chrome-capture-trace/scripts/polycss-nonvoxel-drag-trace.mjs",
           mesh: MESH,
           mode: MODE,
           variant: VARIANT,

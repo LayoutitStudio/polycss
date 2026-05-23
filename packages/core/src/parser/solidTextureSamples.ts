@@ -1,4 +1,4 @@
-import type { Polygon, TextureTriangle, Vec2 } from "../types";
+import type { Polygon, PolyTextureWrap, PolyTextureWrapMode, TextureTriangle, Vec2 } from "../types";
 import type { ParseAnimationController, ParseResult } from "./types";
 
 export interface SolidTextureSampleOptions {
@@ -104,6 +104,13 @@ const DETAIL_EDGE_THRESHOLD = 32;
 const LOW_DETAIL_MAX_EDGE_RATIO = 0.045;
 const LOW_DETAIL_MAX_AVERAGE_DELTA = 10;
 const TRIANGLE_GRID_STEPS = 6;
+const BAKED_SWATCH_COLOR_TOLERANCE = 16;
+
+interface SolidTextureBakeResult {
+  polygons: Polygon[];
+  changed: boolean;
+  bakedIndices: number[];
+}
 
 function textureForPolygon(polygon: Polygon): string | undefined {
   return polygon.material?.texture ?? polygon.texture;
@@ -214,12 +221,30 @@ function clampInt(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
 }
 
-function sampleUv(sampler: TextureSampler, uv: Vec2): SampledColor | null {
+function wrapTextureCoord(value: number, mode: PolyTextureWrapMode | undefined): number | null {
+  if (!Number.isFinite(value)) return null;
+  switch (mode) {
+    case "repeat":
+      return value - Math.floor(value);
+    case "mirrored-repeat": {
+      const tile = Math.floor(value);
+      const fraction = value - tile;
+      return Math.abs(tile % 2) === 1 ? 1 - fraction : fraction;
+    }
+    case "clamp-to-edge":
+    default:
+      return Math.max(0, Math.min(1, value));
+  }
+}
+
+function sampleUv(sampler: TextureSampler, uv: Vec2, wrap: PolyTextureWrap | undefined): SampledColor | null {
   const u = uv[0];
   const imageV = 1 - uv[1];
-  if (!Number.isFinite(u) || !Number.isFinite(imageV)) return null;
-  const x = clampInt(Math.floor(u * sampler.width), 0, sampler.width - 1);
-  const y = clampInt(Math.floor(imageV * sampler.height), 0, sampler.height - 1);
+  const wrappedU = wrapTextureCoord(u, wrap?.s);
+  const wrappedImageV = wrapTextureCoord(imageV, wrap?.t);
+  if (wrappedU === null || wrappedImageV === null) return null;
+  const x = clampInt(Math.floor(wrappedU * sampler.width), 0, sampler.width - 1);
+  const y = clampInt(Math.floor(wrappedImageV * sampler.height), 0, sampler.height - 1);
   const offset = (y * sampler.width + x) * 4;
   return {
     r: sampler.data[offset] ?? 0,
@@ -303,6 +328,43 @@ function colorToCss(color: SampledColor): string {
   return `rgba(${Math.round(color.r)}, ${Math.round(color.g)}, ${Math.round(color.b)}, ${alpha})`;
 }
 
+function cssColorToSampledColor(value: string | undefined): SampledColor | null {
+  if (!value) return null;
+  const color = value.trim().toLowerCase();
+  const hex = color.match(/^#([0-9a-f]{3}|[0-9a-f]{4}|[0-9a-f]{6}|[0-9a-f]{8})$/i);
+  if (hex) {
+    const raw = hex[1]!;
+    const expand = (index: number) => {
+      const part = raw.length <= 4
+        ? raw[index]! + raw[index]!
+        : raw.slice(index * 2, index * 2 + 2);
+      return parseInt(part, 16);
+    };
+    return {
+      r: expand(0),
+      g: expand(1),
+      b: expand(2),
+      a: raw.length === 4 || raw.length === 8 ? expand(3) : 255,
+    };
+  }
+
+  const rgba = color.match(
+    /^rgba?\(\s*([0-9.]+)\s*,\s*([0-9.]+)\s*,\s*([0-9.]+)(?:\s*,\s*([0-9.]+)\s*)?\)$/,
+  );
+  if (!rgba) return null;
+  const alpha = rgba[4] === undefined
+    ? 255
+    : Number(rgba[4]) <= 1
+      ? Number(rgba[4]) * 255
+      : Number(rgba[4]);
+  return {
+    r: Number(rgba[1]!),
+    g: Number(rgba[2]!),
+    b: Number(rgba[3]!),
+    a: alpha,
+  };
+}
+
 function createColorStats(): ColorStats {
   return {
     min: { r: 255, g: 255, b: 255, a: 255 },
@@ -370,16 +432,28 @@ function solidColorForPolygon(
   if (triangles.length === 0) return null;
 
   const stats = createColorStats();
+  const opaqueBaseColor = polygon.textureAlphaMode === "opaque"
+    ? cssColorToSampledColor(polygon.color)
+    : null;
 
   for (const triangle of triangles) {
     for (const uv of triangleGridSampleUvs(triangle.uvs)) {
-      const color = sampleUv(sampler, uv);
+      const color = sampleUv(sampler, uv, polygon.textureWrap);
       if (!color) return null;
+      if (polygon.textureAlphaMode === "opaque" && color.a === 0 && polygon.color) {
+        if (opaqueBaseColor) addColor(stats, { ...opaqueBaseColor, a: 255 });
+        continue;
+      }
+      if (polygon.textureAlphaMode === "opaque") color.a = 255;
       addColor(stats, color);
     }
   }
 
-  if (stats.count === 0) return null;
+  if (stats.count === 0) {
+    if (polygon.textureAlphaMode === "opaque" && polygon.color) return polygon.color;
+    return null;
+  }
+  if (polygon.textureAlphaMode === "opaque" && stats.max.a === 0 && polygon.color) return polygon.color;
   if (colorsClose(stats.min, stats.max, tolerance)) return colorToCss(statsColor(stats));
   // Skinny UV islands in swatch atlases can graze one neighboring swatch texel.
   if (!explicitTolerance) {
@@ -394,6 +468,8 @@ function solidColorForPolygon(
 function bakePolygon(polygon: Polygon, color: string): Polygon {
   const {
     texture: _texture,
+    textureWrap: _textureWrap,
+    textureAlphaMode: _textureAlphaMode,
     material: _material,
     uvs: _uvs,
     textureTriangles: _textureTriangles,
@@ -403,6 +479,53 @@ function bakePolygon(polygon: Polygon, color: string): Polygon {
     ...rest,
     color,
   };
+}
+
+function normalizeBakedSolidTextureColors(polygons: Polygon[], bakedIndices: readonly number[]): Polygon[] {
+  if (bakedIndices.length < 2) return polygons;
+
+  const entries: Array<{ index: number; key: string }> = [];
+  const counts = new Map<string, { color: SampledColor; count: number }>();
+  for (const index of bakedIndices) {
+    const parsed = cssColorToSampledColor(polygons[index]?.color);
+    if (!parsed || parsed.a < 255) continue;
+    const key = colorKey(parsed);
+    entries.push({ index, key });
+    const current = counts.get(key);
+    if (current) current.count += 1;
+    else counts.set(key, { color: parsed, count: 1 });
+  }
+  if (counts.size < 2) return polygons;
+
+  const representatives: SampledColor[] = [];
+  const canonicalByKey = new Map<string, string>();
+  const colorsByFrequency = [...counts.entries()]
+    .sort((a, b) => b[1].count - a[1].count || a[0].localeCompare(b[0]));
+  for (const [key, entry] of colorsByFrequency) {
+    let representative: SampledColor | null = null;
+    for (const candidate of representatives) {
+      if (colorsClose(entry.color, candidate, BAKED_SWATCH_COLOR_TOLERANCE)) {
+        representative = candidate;
+        break;
+      }
+    }
+    if (!representative) {
+      representative = entry.color;
+      representatives.push(representative);
+    }
+    canonicalByKey.set(key, colorToCss(representative));
+  }
+
+  let changed = false;
+  const next = polygons.slice();
+  for (const entry of entries) {
+    const canonical = canonicalByKey.get(entry.key);
+    const polygon = polygons[entry.index];
+    if (!canonical || !polygon || polygon.color === canonical) continue;
+    next[entry.index] = { ...polygon, color: canonical };
+    changed = true;
+  }
+  return changed ? next : polygons;
 }
 
 export function bakeSolidTextureSampledAnimationFrame(
@@ -427,7 +550,7 @@ export function getSolidTextureBakedAnimationInfo(
 }
 
 interface SolidTextureBaker {
-  bake(polygons: Polygon[]): { polygons: Polygon[]; changed: boolean };
+  bake(polygons: Polygon[]): SolidTextureBakeResult;
 }
 
 async function createSolidTextureBaker(
@@ -454,9 +577,10 @@ async function createSolidTextureBaker(
   const tolerance = options.colorTolerance ?? DEFAULT_COLOR_TOLERANCE;
   const explicitTolerance = options.colorTolerance !== undefined;
   return {
-    bake(nextPolygons: Polygon[]): { polygons: Polygon[]; changed: boolean } {
+    bake(nextPolygons: Polygon[]): SolidTextureBakeResult {
       let changed = false;
-      const baked = nextPolygons.map((polygon) => {
+      const bakedIndices: number[] = [];
+      const baked = nextPolygons.map((polygon, index) => {
         const texture = textureForPolygon(polygon);
         if (!texture) return polygon;
         const sampler = samplerByTexture.get(texture);
@@ -464,9 +588,15 @@ async function createSolidTextureBaker(
         const color = solidColorForPolygon(polygon, sampler, tolerance, explicitTolerance);
         if (!color) return polygon;
         changed = true;
+        bakedIndices.push(index);
         return bakePolygon(polygon, color);
       });
-      return { polygons: changed ? baked : nextPolygons, changed };
+      if (!changed) return { polygons: nextPolygons, changed: false, bakedIndices };
+      return {
+        polygons: normalizeBakedSolidTextureColors(baked, bakedIndices),
+        changed: true,
+        bakedIndices,
+      };
     },
   };
 }
@@ -490,12 +620,10 @@ export async function bakeSolidTextureSamples(
   const baked = baker.bake(result.polygons);
   if (!baked.changed) return result;
   const bakedColorEntries: SolidTextureBakedColorEntry[] = [];
-  for (let index = 0; index < baked.polygons.length; index++) {
+  for (const index of baked.bakedIndices) {
     const polygon = baked.polygons[index]!;
     const color = polygon.color;
-    if (polygon !== result.polygons[index] && color) {
-      bakedColorEntries.push({ index, color });
-    }
+    if (color) bakedColorEntries.push({ index, color });
   }
   const animation = result.animation;
   const bakedAnimation: ParseAnimationController | undefined = animation

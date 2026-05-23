@@ -24,6 +24,9 @@ const DEFAULT_HEMISPHERE_SAMPLES = 8;
 const RAY_ORIGIN_OFFSET = 1e-3;
 const MIN_HIT_T = 1e-3;
 const PARALLEL_EPS = 1e-9;
+const OPEN_TOPOLOGY_MIN_POLYGONS = 100;
+const OPEN_TOPOLOGY_MIN_BOUNDARY_EDGES = 128;
+const OPEN_TOPOLOGY_BOUNDARY_RATIO = 0.2;
 
 interface PolyMeta {
   centroid: Vec3;
@@ -39,6 +42,34 @@ interface PolyMeta {
 }
 
 const ORIGIN_INSET = 0.08;
+
+function edgeKey(a: Vec3, b: Vec3): string {
+  const ak = `${a[0]},${a[1]},${a[2]}`;
+  const bk = `${b[0]},${b[1]},${b[2]}`;
+  return ak < bk ? `${ak}|${bk}` : `${bk}|${ak}`;
+}
+
+function hasLargeOpenTopology(polygons: Polygon[]): boolean {
+  if (polygons.length < OPEN_TOPOLOGY_MIN_POLYGONS) return false;
+
+  const edges = new Map<string, number>();
+  for (const polygon of polygons) {
+    const vertices = polygon.vertices;
+    for (let i = 0; i < vertices.length; i++) {
+      const key = edgeKey(vertices[i], vertices[(i + 1) % vertices.length]);
+      edges.set(key, (edges.get(key) ?? 0) + 1);
+    }
+  }
+
+  let boundaryEdges = 0;
+  for (const count of edges.values()) {
+    if (count === 1) boundaryEdges += 1;
+  }
+  return (
+    boundaryEdges >= OPEN_TOPOLOGY_MIN_BOUNDARY_EDGES &&
+    boundaryEdges / Math.max(1, edges.size) > OPEN_TOPOLOGY_BOUNDARY_RATIO
+  );
+}
 
 function precompute(p: Polygon): PolyMeta | null {
   const verts = p.vertices;
@@ -440,7 +471,7 @@ function basis(n: Vec3): { ux: number; uy: number; uz: number; vx: number; vy: n
 }
 
 export interface CullInteriorOptions {
-  /** Hemisphere ray samples per polygon. Higher = fewer false positives, slower. Default 12. */
+  /** Hemisphere ray samples per polygon. Higher = fewer false positives, slower. Default 8. */
   samples?: number;
 }
 
@@ -450,6 +481,7 @@ export function cullInteriorPolygons(
 ): Polygon[] {
   const k = options?.samples ?? DEFAULT_HEMISPHERE_SAMPLES;
   if (polygons.length < 4 || k < 1) return polygons;
+  if (hasLargeOpenTopology(polygons)) return polygons;
 
   const meta: Array<PolyMeta | null> = polygons.map(precompute);
   const samplesFlat = hemisphereSamplesFlat(k);

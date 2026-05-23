@@ -104,11 +104,22 @@ describe("cylinderPolygons", () => {
     }
   });
 
-  it("omits top cap when radiusTop is 0", () => {
+  it("omits top cap and triangulates sides when radiusTop is 0", () => {
     const n = 6;
     const polygons = cylinderPolygons({ radialSegments: n, radiusTop: 0 });
     // n sides + n bottom cap (no top cap) = 2n
     expect(polygons).toHaveLength(2 * n);
+    for (let i = 0; i < n; i++) expect(polygons[i].vertices).toHaveLength(3);
+    for (let i = n; i < 2 * n; i++) expect(polygons[i].vertices).toHaveLength(3);
+  });
+
+  it("omits bottom cap and triangulates sides when radius is 0", () => {
+    const n = 6;
+    const polygons = cylinderPolygons({ radius: 0, radiusTop: 40, radialSegments: n });
+    // n sides + n top cap (no bottom cap) = 2n
+    expect(polygons).toHaveLength(2 * n);
+    for (let i = 0; i < n; i++) expect(polygons[i].vertices).toHaveLength(3);
+    for (let i = n; i < 2 * n; i++) expect(polygons[i].vertices).toHaveLength(3);
   });
 
   it("supports a tapered cylinder (frustum)", () => {

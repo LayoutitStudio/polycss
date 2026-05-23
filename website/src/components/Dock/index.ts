@@ -9,6 +9,7 @@ export {
   DockInteraction,
   DockCamera,
   DockLighting,
+  DockMaterials,
   DockScene,
 } from "./slots";
 export {

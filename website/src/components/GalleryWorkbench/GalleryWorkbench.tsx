@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import type {
   PolyMeshHandle as ReactPolyMeshHandle,
   Polygon,
@@ -7,12 +7,8 @@ import type {
 import type {
   PolyMeshHandle as VanillaPolyMeshHandle,
 } from "@layoutit/polycss";
-import { optimizeAnimatedMeshPolygons } from "@layoutit/polycss";
-import {
-  Inspector as InspectorPanel,
-  type InspectorColorGroup,
-  type InspectorMesh,
-} from "../Inspector";
+import { optimizeAnimatedMeshPolygons, parsePureColor } from "@layoutit/polycss";
+import type { InspectorColorGroup, InspectorMesh } from "../Inspector";
 import { VanillaScene } from "../VanillaScene";
 import { ReactScene } from "../ReactScene";
 import {
@@ -23,6 +19,7 @@ import {
   DockInteraction,
   DockCamera,
   DockLighting,
+  DockMaterials,
 } from "../Dock";
 import { ModelsSidebar } from "../ModelsSidebar";
 import { DropOverlay } from "../DropOverlay";
@@ -154,6 +151,215 @@ const DEFAULT_PARSER: ParserOptionsState = {
   defaultColor: "#8b95a1",
 };
 
+const LIGHT_HELPER_TILE = 50;
+const LIGHT_HELPER_SELECTOR = ".dn-light-helper";
+
+interface ScreenPoint {
+  x: number;
+  y: number;
+}
+
+function wrapDegrees(value: number): number {
+  return ((value % 360) + 360) % 360;
+}
+
+function clampLightElevation(value: number): number {
+  return Math.max(-90, Math.min(90, value));
+}
+
+function lightDirectionFromAngles(azimuth: number, elevation: number): ReactVec3 {
+  const az = (azimuth * Math.PI) / 180;
+  const el = (elevation * Math.PI) / 180;
+  const cosEl = Math.cos(el);
+  return [
+    cosEl * Math.sin(az),
+    cosEl * Math.cos(az),
+    Math.sin(el),
+  ];
+}
+
+function projectLightDirectionToScreen(
+  direction: ReactVec3,
+  sceneOptions: SceneOptionsState,
+  radiusCss: number,
+): ReactVec3 {
+  const [dx, dy, dz] = direction;
+  const x = dx * radiusCss;
+  const y = dy * radiusCss;
+  const z = dz * radiusCss;
+  const rotY = (sceneOptions.rotY * Math.PI) / 180;
+  const rotX = (sceneOptions.rotX * Math.PI) / 180;
+  const cosY = Math.cos(rotY);
+  const sinY = Math.sin(rotY);
+  const cosX = Math.cos(rotX);
+  const sinX = Math.sin(rotX);
+  const x1 = x * cosY - y * sinY;
+  const y1 = x * sinY + y * cosY;
+  const y2 = y1 * cosX - z * sinX;
+  const z2 = y1 * sinX + z * cosX;
+  return [x1 * sceneOptions.zoom, y2 * sceneOptions.zoom, z2 * sceneOptions.zoom];
+}
+
+function lightAnglesFromScreenOffset(
+  offset: ScreenPoint,
+  sceneOptions: SceneOptionsState,
+  radiusCss: number,
+): { lightAzimuth: number; lightElevation: number } {
+  const zoomedRadius = Math.max(1, radiusCss * Math.max(0.001, sceneOptions.zoom));
+  let qx = offset.x / zoomedRadius;
+  let qy = offset.y / zoomedRadius;
+  const len = Math.hypot(qx, qy);
+  if (len > 1) {
+    qx /= len;
+    qy /= len;
+  }
+
+  const currentDirection = lightDirectionFromAngles(
+    sceneOptions.lightAzimuth,
+    sceneOptions.lightElevation,
+  );
+  const currentProjected = projectLightDirectionToScreen(currentDirection, sceneOptions, 1);
+  const qzSign = currentProjected[2] >= 0 ? 1 : -1;
+  const qz = qzSign * Math.sqrt(Math.max(0, 1 - qx * qx - qy * qy));
+
+  const rotY = (sceneOptions.rotY * Math.PI) / 180;
+  const rotX = (sceneOptions.rotX * Math.PI) / 180;
+  const cosY = Math.cos(rotY);
+  const sinY = Math.sin(rotY);
+  const cosX = Math.cos(rotX);
+  const sinX = Math.sin(rotX);
+
+  const x1 = qx;
+  const y1 = qy * cosX + qz * sinX;
+  const z = -qy * sinX + qz * cosX;
+  const dx = x1 * cosY + y1 * sinY;
+  const dy = -x1 * sinY + y1 * cosY;
+  const dz = Math.max(-1, Math.min(1, z));
+  return {
+    lightAzimuth: wrapDegrees((Math.atan2(dx, dy) * 180) / Math.PI),
+    lightElevation: clampLightElevation((Math.asin(dz) * 180) / Math.PI),
+  };
+}
+
+function elementScreenCenter(element: HTMLElement): ScreenPoint {
+  const leaves = Array.from(element.querySelectorAll<HTMLElement>("b,i,s,u"));
+  const rects = (leaves.length > 0 ? leaves : [element])
+    .map((el) => el.getBoundingClientRect())
+    .filter((rect) => rect.width > 0 || rect.height > 0);
+  if (rects.length === 0) {
+    const rect = element.getBoundingClientRect();
+    return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+  }
+  const minX = Math.min(...rects.map((rect) => rect.left));
+  const maxX = Math.max(...rects.map((rect) => rect.right));
+  const minY = Math.min(...rects.map((rect) => rect.top));
+  const maxY = Math.max(...rects.map((rect) => rect.bottom));
+  return { x: (minX + maxX) / 2, y: (minY + maxY) / 2 };
+}
+
+function useLightRotationDrag(
+  viewportRef: RefObject<HTMLDivElement | null>,
+  sceneOptions: SceneOptionsState,
+  helperScale: number,
+  gizmoDragging: boolean,
+  onUpdateScene: (partial: Partial<SceneOptionsState>) => void,
+): void {
+  const sceneOptionsRef = useRef(sceneOptions);
+  const helperScaleRef = useRef(helperScale);
+  const gizmoDraggingRef = useRef(gizmoDragging);
+  const onUpdateSceneRef = useRef(onUpdateScene);
+  sceneOptionsRef.current = sceneOptions;
+  helperScaleRef.current = helperScale;
+  gizmoDraggingRef.current = gizmoDragging;
+  onUpdateSceneRef.current = onUpdateScene;
+
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+
+    let activePointerId: number | null = null;
+    let helperTargetScreen = { x: 0, y: 0 };
+    let helperGrabOffset = { x: 0, y: 0 };
+    let helperRadiusCss = 1;
+
+    const helperDragEnabled = (): boolean => {
+      const options = sceneOptionsRef.current;
+      return options.interactive && options.showLight && !gizmoDraggingRef.current;
+    };
+
+    const stopDrag = (event: PointerEvent): void => {
+      if (activePointerId !== event.pointerId) return;
+      activePointerId = null;
+      viewport.classList.remove("is-light-rotating");
+      try { viewport.releasePointerCapture(event.pointerId); } catch { /* ignore */ }
+    };
+
+    const onPointerDown = (event: PointerEvent): void => {
+      if (activePointerId !== null) return;
+      if (event.isPrimary === false) return;
+      if (event.button !== 0) return;
+      const target = event.target instanceof Element ? event.target : null;
+      if (target?.closest("[data-poly-transform-controls]")) return;
+      const helper = target?.closest<HTMLElement>(LIGHT_HELPER_SELECTOR) ?? null;
+      if (!helper || !helperDragEnabled()) return;
+      event.preventDefault();
+      event.stopPropagation();
+      activePointerId = event.pointerId;
+      const options = sceneOptionsRef.current;
+      helperRadiusCss = Math.max(1, helperScaleRef.current * 0.7 * LIGHT_HELPER_TILE);
+      const helperCenter = elementScreenCenter(helper);
+      const currentOffset = projectLightDirectionToScreen(
+        lightDirectionFromAngles(options.lightAzimuth, options.lightElevation),
+        options,
+        helperRadiusCss,
+      );
+      helperTargetScreen = {
+        x: helperCenter.x - currentOffset[0],
+        y: helperCenter.y - currentOffset[1],
+      };
+      helperGrabOffset = {
+        x: event.clientX - helperCenter.x,
+        y: event.clientY - helperCenter.y,
+      };
+      viewport.classList.add("is-light-rotating");
+      try { viewport.setPointerCapture(event.pointerId); } catch { /* ignore */ }
+    };
+
+    const onPointerMove = (event: PointerEvent): void => {
+      if (activePointerId !== event.pointerId) return;
+      if (!helperDragEnabled()) {
+        stopDrag(event);
+        return;
+      }
+      event.preventDefault();
+      const helperCenter = {
+        x: event.clientX - helperGrabOffset.x,
+        y: event.clientY - helperGrabOffset.y,
+      };
+      onUpdateSceneRef.current(lightAnglesFromScreenOffset(
+        {
+          x: helperCenter.x - helperTargetScreen.x,
+          y: helperCenter.y - helperTargetScreen.y,
+        },
+        sceneOptionsRef.current,
+        helperRadiusCss,
+      ));
+    };
+
+    viewport.addEventListener("pointerdown", onPointerDown, { capture: true });
+    viewport.addEventListener("pointermove", onPointerMove);
+    viewport.addEventListener("pointerup", stopDrag);
+    viewport.addEventListener("pointercancel", stopDrag);
+    return () => {
+      viewport.removeEventListener("pointerdown", onPointerDown, { capture: true });
+      viewport.removeEventListener("pointermove", onPointerMove);
+      viewport.removeEventListener("pointerup", stopDrag);
+      viewport.removeEventListener("pointercancel", stopDrag);
+      viewport.classList.remove("is-light-rotating");
+    };
+  }, [viewportRef]);
+}
+
 function parserDefaultsFor(model: PresetModel): Partial<ParserOptionsState> {
   const options = model.options as (ObjParseOptions & GltfParseOptions & VoxParseOptions) | undefined;
   return {
@@ -185,12 +391,13 @@ function parserStateFor(model: PresetModel): ParserOptionsState {
 
 function withSolidMaterials(polygons: Polygon[], fallbackColor: string): Polygon[] {
   return polygons.map((polygon) => {
-    if (!polygon.texture && !polygon.uvs?.length && !polygon.textureTriangles?.length) {
+    if (!polygonHasTextureData(polygon)) {
       return polygon;
     }
     return {
       ...polygon,
       texture: undefined,
+      material: undefined,
       uvs: undefined,
       textureTriangles: undefined,
       color: polygon.color ?? fallbackColor,
@@ -199,7 +406,22 @@ function withSolidMaterials(polygons: Polygon[], fallbackColor: string): Polygon
 }
 
 function polygonHasTextureData(polygon: Polygon): boolean {
-  return Boolean(polygon.texture || polygon.uvs?.length || polygon.textureTriangles?.length);
+  return Boolean(
+    polygonHasTexturePaint(polygon) ||
+    polygon.uvs?.length
+  );
+}
+
+function polygonHasTexturePaint(polygon: Polygon): boolean {
+  return Boolean(polygon.texture || polygon.material?.texture || polygon.textureTriangles?.length);
+}
+
+function inspectorColorKey(color: string): string {
+  const parsed = parsePureColor(color);
+  if (!parsed || parsed.alpha < 1) return color.trim().toLowerCase();
+  return `#${parsed.rgb
+    .map((channel) => Math.max(0, Math.min(255, Math.round(channel))).toString(16).padStart(2, "0"))
+    .join("")}`;
 }
 
 function displayAnimationName(name: string): string {
@@ -277,6 +499,7 @@ export default function GalleryWorkbench() {
   // Inspector folder uses this to push color-group edits back into the
   // scene via setPolygons. Set by VanillaScene's onMeshHandleChange.
   const activeMeshHandleRef = useRef<VanillaPolyMeshHandle | null>(null);
+  const [materialEditVersion, setMaterialEditVersion] = useState(0);
   // Vanilla selection state — kept separate from React's
   // `selectedMeshes` because vanilla MeshHandles aren't comparable to
   // React PolyMeshHandles. Stored as IDs since that's what both paths
@@ -478,6 +701,7 @@ export default function GalleryWorkbench() {
     reactAnimatedPolygons: animation.reactAnimatedPolygons,
     interiorFill: sceneOptions.interiorFill,
   });
+  useLightRotationDrag(viewportRef, sceneOptions, helperScale, gizmoDragging, updateScene);
   const renderModelPolygons = useMemo(
     () => sceneOptions.solidMaterials
       ? withSolidMaterials(modelPolygons, parserOptions.defaultColor)
@@ -645,25 +869,22 @@ export default function GalleryWorkbench() {
   const perspectiveMode = sceneOptions.perspective === false ? "orthographic" : "perspective";
   const perspectivePx = sceneOptions.perspective === false ? 8000 : sceneOptions.perspective;
 
-  // Inspector data — grouped by mesh, then by polygon color. Recomputed
-  // when renderModelPolygons or the loaded model change. Mutations to a
-  // polygon's color via the picker do NOT change the renderModelPolygons
-  // reference, so this memo doesn't re-fire on each tweak and the swatch
-  // local state stays in sync.
+  // Materials data — grouped by mesh, then by canonical polygon color.
   const inspectorMeshes = useMemo<InspectorMesh[]>(() => {
     if (renderModelPolygons.length === 0) return [];
     const colorGroups = new Map<string, Polygon[]>();
     const textured: Polygon[] = [];
     for (const p of renderModelPolygons) {
-      if (p.texture) {
+      if (polygonHasTexturePaint(p)) {
         textured.push(p);
         continue;
       }
       if (!p.color) continue;
-      let arr = colorGroups.get(p.color);
+      const key = inspectorColorKey(p.color);
+      let arr = colorGroups.get(key);
       if (!arr) {
         arr = [];
-        colorGroups.set(p.color, arr);
+        colorGroups.set(key, arr);
       }
       arr.push(p);
     }
@@ -687,7 +908,7 @@ export default function GalleryWorkbench() {
     }
     const label = loaded?.label ?? "model";
     return [{ id: label, label, groups }];
-  }, [renderModelPolygons, loaded?.label]);
+  }, [renderModelPolygons, loaded?.label, materialEditVersion]);
 
   const handleInspectorColorChange = useCallback(
     (
@@ -702,6 +923,7 @@ export default function GalleryWorkbench() {
       // an explicit merge flag reuses the mesh's current merge setting
       // (true for static models, false during animation playback).
       if (handle) handle.setPolygons(renderModelPolygons);
+      setMaterialEditVersion((version) => version + 1);
     },
     [renderModelPolygons],
   );
@@ -730,11 +952,6 @@ export default function GalleryWorkbench() {
         attribution={selectedPreset.attribution}
       />
 
-      <InspectorPanel
-        meshes={inspectorMeshes}
-        onColorChange={handleInspectorColorChange}
-      />
-
       <main className="dn-main">
         <div
           className={`dn-viewport${sceneOptions.outlinePolygons ? " dn-viewport--outline-polygons" : ""}`}
@@ -754,7 +971,7 @@ export default function GalleryWorkbench() {
               showGround={sceneOptions.showGround}
               helperScale={helperScale}
               helperTarget={helperTarget}
-              mergePolygonsForMesh={!hasActiveAnimation && renderLoaded?.kind !== "primitive"}
+              mergePolygonsForMesh={false}
               stableDomForMesh={hasActiveAnimation}
               animationKey={activeAnimation ? `${selectedAnimation}:${renderLoaded?.label ?? ""}` : undefined}
               animationDurationSeconds={activeAnimation?.duration}
@@ -807,6 +1024,10 @@ export default function GalleryWorkbench() {
           metrics={metrics}
           disableStrategies={sceneOptions.disableStrategies}
           onUpdateScene={updateScene}
+        />
+        <DockMaterials
+          meshes={inspectorMeshes}
+          onColorChange={handleInspectorColorChange}
         />
         <DockRendering
           meshResolution={sceneOptions.meshResolution}

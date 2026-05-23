@@ -1,4 +1,4 @@
-import type { PolyTextureLightingMode } from "@layoutit/polycss-core";
+import type { PolyTextureLightingMode, PolyTextureWrapMode } from "@layoutit/polycss-core";
 import {
   expandClipPoints,
   tintToCss,
@@ -155,6 +155,53 @@ export function drawImageUvSample(
   ctx.drawImage(img, sx, sy, sw, sh, x, y, width, height);
 }
 
+function isTiledWrapMode(mode: PolyTextureWrapMode | undefined): boolean {
+  return mode === "repeat" || mode === "mirrored-repeat";
+}
+
+function tiledRangeStart(mode: PolyTextureWrapMode | undefined, min: number): number {
+  return isTiledWrapMode(mode) ? Math.floor(min) : 0;
+}
+
+function tiledRangeEnd(mode: PolyTextureWrapMode | undefined, max: number): number {
+  return isTiledWrapMode(mode) ? Math.ceil(max) - 1 : 0;
+}
+
+function isMirroredTile(mode: PolyTextureWrapMode | undefined, tile: number): boolean {
+  return mode === "mirrored-repeat" && Math.abs(tile % 2) === 1;
+}
+
+export function drawWrappedImageTiles(
+  ctx: CanvasRenderingContext2D,
+  img: HTMLImageElement,
+  imgW: number,
+  imgH: number,
+  uvSampleRect: UvSampleRect | null | undefined,
+  wrapS: PolyTextureWrapMode | undefined,
+  wrapT: PolyTextureWrapMode | undefined,
+): void {
+  const startS = uvSampleRect ? tiledRangeStart(wrapS, uvSampleRect.minU) : 0;
+  const endS = uvSampleRect ? tiledRangeEnd(wrapS, uvSampleRect.maxU) : 0;
+  const startT = uvSampleRect ? tiledRangeStart(wrapT, uvSampleRect.minV) : 0;
+  const endT = uvSampleRect ? tiledRangeEnd(wrapT, uvSampleRect.maxV) : 0;
+
+  for (let s = startS; s <= endS; s++) {
+    for (let t = startT; t <= endT; t++) {
+      const flipS = isMirroredTile(wrapS, s);
+      const flipT = isMirroredTile(wrapT, t);
+      if (!flipS && !flipT) {
+        ctx.drawImage(img, s * imgW, t * imgH);
+        continue;
+      }
+      ctx.save();
+      ctx.translate((flipS ? s + 1 : s) * imgW, (flipT ? t + 1 : t) * imgH);
+      ctx.scale(flipS ? -1 : 1, flipT ? -1 : 1);
+      ctx.drawImage(img, 0, 0);
+      ctx.restore();
+    }
+  }
+}
+
 export function tracePolygonPath(
   ctx: CanvasRenderingContext2D,
   x: number,
@@ -206,6 +253,19 @@ export function paintSolidAtlasEntry(
   ctx.fillRect(entry.x, entry.y, entry.canvasW, entry.canvasH);
 }
 
+function paintOpaqueTextureBase(
+  ctx: CanvasRenderingContext2D,
+  entry: PackedTextureAtlasEntry,
+  atlasScale: number,
+  offsetX: number,
+  offsetY: number,
+): void {
+  if (entry.polygon.textureAlphaMode !== "opaque") return;
+  setCssTransform(ctx, atlasScale);
+  ctx.fillStyle = entry.polygon.color ?? "#cccccc";
+  ctx.fillRect(entry.x + offsetX, entry.y + offsetY, entry.canvasW, entry.canvasH);
+}
+
 export function drawTexturedAtlasEntry(
   ctx: CanvasRenderingContext2D,
   entry: PackedTextureAtlasEntry,
@@ -224,6 +284,7 @@ export function drawTexturedAtlasEntry(
       ctx.beginPath();
       traceOffsetPolygonPath(ctx, entry.x, entry.y, clipPts, offsetX, offsetY);
       ctx.clip();
+      paintOpaqueTextureBase(ctx, entry, atlasScale, offsetX, offsetY);
       if (triangle.uvAffine) {
         setCssTransform(
           ctx,
@@ -233,7 +294,15 @@ export function drawTexturedAtlasEntry(
           entry.x + triangle.uvAffine.e + offsetX,
           entry.y + triangle.uvAffine.f + offsetY,
         );
-        ctx.drawImage(srcImg, 0, 0);
+        drawWrappedImageTiles(
+          ctx,
+          srcImg,
+          imgW,
+          imgH,
+          triangle.uvSampleRect,
+          entry.polygon.textureWrap?.s,
+          entry.polygon.textureWrap?.t,
+        );
       } else if (triangle.uvSampleRect) {
         drawImageUvSample(
           ctx,
@@ -251,6 +320,15 @@ export function drawTexturedAtlasEntry(
   } else if (entry.uvAffine) {
     const imgW = srcImg.naturalWidth || srcImg.width || 1;
     const imgH = srcImg.naturalHeight || srcImg.height || 1;
+    const clipOpaque = entry.polygon.textureAlphaMode === "opaque";
+    if (clipOpaque) {
+      ctx.save();
+      setCssTransform(ctx, atlasScale);
+      ctx.beginPath();
+      traceOffsetPolygonPath(ctx, entry.x, entry.y, entry.screenPts, offsetX, offsetY);
+      ctx.clip();
+      paintOpaqueTextureBase(ctx, entry, atlasScale, offsetX, offsetY);
+    }
     setCssTransform(
       ctx,
       atlasScale,
@@ -259,8 +337,26 @@ export function drawTexturedAtlasEntry(
       entry.x + entry.uvAffine.e + offsetX,
       entry.y + entry.uvAffine.f + offsetY,
     );
-    ctx.drawImage(srcImg, 0, 0);
+    drawWrappedImageTiles(
+      ctx,
+      srcImg,
+      imgW,
+      imgH,
+      entry.uvSampleRect,
+      entry.polygon.textureWrap?.s,
+      entry.polygon.textureWrap?.t,
+    );
+    if (clipOpaque) ctx.restore();
   } else if (entry.uvSampleRect) {
+    const clipOpaque = entry.polygon.textureAlphaMode === "opaque";
+    if (clipOpaque) {
+      ctx.save();
+      setCssTransform(ctx, atlasScale);
+      ctx.beginPath();
+      traceOffsetPolygonPath(ctx, entry.x, entry.y, entry.screenPts, offsetX, offsetY);
+      ctx.clip();
+      paintOpaqueTextureBase(ctx, entry, atlasScale, offsetX, offsetY);
+    }
     drawImageUvSample(
       ctx,
       srcImg,
@@ -271,7 +367,17 @@ export function drawTexturedAtlasEntry(
       entry.canvasH,
       atlasScale,
     );
+    if (clipOpaque) ctx.restore();
   } else {
+    const clipOpaque = entry.polygon.textureAlphaMode === "opaque";
+    if (clipOpaque) {
+      ctx.save();
+      setCssTransform(ctx, atlasScale);
+      ctx.beginPath();
+      traceOffsetPolygonPath(ctx, entry.x, entry.y, entry.screenPts, offsetX, offsetY);
+      ctx.clip();
+      paintOpaqueTextureBase(ctx, entry, atlasScale, offsetX, offsetY);
+    }
     drawImageCover(
       ctx,
       srcImg,
@@ -281,6 +387,7 @@ export function drawTexturedAtlasEntry(
       entry.canvasH,
       atlasScale,
     );
+    if (clipOpaque) ctx.restore();
   }
 }
 

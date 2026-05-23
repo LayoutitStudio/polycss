@@ -637,6 +637,7 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
       normalTolerance: 0.1,
       distanceTolerance: 0.5,
       overlapFraction: 0.4,
+      preserveDoubleSidedBackfaces: false,
     });
 
     const projections: Array<Array<[number, number]>> = [];

@@ -79,6 +79,13 @@ export const GOOGLE_POLY_FLYING_SAUCER_ATTRIBUTION: ModelAttribution = {
   sourceUrl: "https://poly.pizza/m/6hu2h8v78mO",
 };
 
+export const GOOGLE_POLY_ASTRONAUT_ATTRIBUTION: ModelAttribution = {
+  creator: "Poly by Google",
+  license: "CC-BY",
+  sourceUrl: "https://modelviewer.dev/examples/augmentedreality/",
+  tris: 3208,
+};
+
 export const POLY_PIZZA_DUCK_ATTRIBUTION: ModelAttribution = {
   creator: "jeremy",
   license: "CC-BY 3.0",
@@ -248,6 +255,28 @@ export function quaterniusAttribution(sourceUrl: string, tris: number): ModelAtt
   return {
     creator: "Quaternius",
     license: "CC0 1.0",
+    sourceUrl,
+    tris,
+  };
+}
+
+export function nasa3dAttribution(
+  creator: string,
+  sourceUrl: string,
+  tris: number,
+): ModelAttribution {
+  return {
+    creator,
+    license: "NASA Images and Media Usage Guidelines",
+    sourceUrl,
+    tris,
+  };
+}
+
+export function smithsonianOpenAccessAttribution(sourceUrl: string, tris: number): ModelAttribution {
+  return {
+    creator: "Smithsonian Institution",
+    license: "Public domain / CC0",
     sourceUrl,
     tris,
   };

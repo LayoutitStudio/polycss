@@ -90,6 +90,7 @@ describe("parseGltf — real fixture (tree.glb)", () => {
     const result = parseGltf(new Uint8Array(buf));
     expect(result.polygons.length).toBeGreaterThan(0);
   });
+
 });
 
 describe("parseGltf — animated fixture (FishAnimated.glb)", () => {
@@ -293,7 +294,13 @@ function buildTriangleGlb(opts?: {
   indexed?: boolean;
   mode?: number;
   includeTexcoord?: boolean;
+  texcoords?: number[];
+  includeTexcoord1?: boolean;
+  texcoords1?: number[];
+  textureTexCoord?: number;
   textureUrl?: string;
+  alphaMode?: string;
+  doubleSided?: boolean;
   upAxis?: "y" | "z";
 }): { glb: ArrayBuffer; positions: number[] } {
   // Triangle vertices in OBJ/glTF order: 3 Vec3 floats = 36 bytes
@@ -304,7 +311,10 @@ function buildTriangleGlb(opts?: {
   ];
   const indices = opts?.indexed !== false ? [0, 1, 2] : [];
   const texcoords = opts?.includeTexcoord
-    ? [0, 0, 1, 0, 0, 1]  // 3 UV pairs
+    ? (opts.texcoords ?? [0, 0, 1, 0, 0, 1])  // 3 UV pairs
+    : [];
+  const texcoords1 = opts?.includeTexcoord1
+    ? (opts.texcoords1 ?? [0, 0, 1, 0, 0, 1])
     : [];
 
   // Build binary buffer
@@ -312,6 +322,7 @@ function buildTriangleGlb(opts?: {
   const posStart = 0;
   let idxStart = -1, idxBytes = 0;
   let uvStart = -1;
+  let uv1Start = -1;
 
   if (opts?.indexed !== false) {
     idxBytes = indices.length * 2; // UNSIGNED_SHORT
@@ -323,6 +334,10 @@ function buildTriangleGlb(opts?: {
   if (opts?.includeTexcoord) {
     uvStart = totalBytes;
     totalBytes += texcoords.length * 4;
+  }
+  if (opts?.includeTexcoord1) {
+    uv1Start = totalBytes;
+    totalBytes += texcoords1.length * 4;
   }
 
   const bin = new Uint8Array(totalBytes);
@@ -342,6 +357,11 @@ function buildTriangleGlb(opts?: {
   if (opts?.includeTexcoord && uvStart >= 0) {
     for (let i = 0; i < texcoords.length; i++) {
       binView.setFloat32(uvStart + i * 4, texcoords[i], true);
+    }
+  }
+  if (opts?.includeTexcoord1 && uv1Start >= 0) {
+    for (let i = 0; i < texcoords1.length; i++) {
+      binView.setFloat32(uv1Start + i * 4, texcoords1[i], true);
     }
   }
 
@@ -386,20 +406,37 @@ function buildTriangleGlb(opts?: {
     });
     bufferViews.push({ buffer: 0, byteOffset: uvStart, byteLength: texcoords.length * 4 });
   }
+  let uv1AccessorIdx: number | undefined = undefined;
+  if (opts?.includeTexcoord1 && uv1Start >= 0) {
+    uv1AccessorIdx = accessors.length;
+    accessors.push({
+      bufferView: bufferViews.length,
+      byteOffset: 0,
+      componentType: 5126,
+      count: 3,
+      type: "VEC2",
+    });
+    bufferViews.push({ buffer: 0, byteOffset: uv1Start, byteLength: texcoords1.length * 4 });
+  }
 
   const materials: object[] = [];
   let materialIdx: number | undefined = undefined;
-  if (opts?.materialColor || opts?.materialName || opts?.textureUrl) {
+  if (opts?.materialColor || opts?.materialName || opts?.textureUrl || opts?.doubleSided) {
     materialIdx = 0;
     const mat: Record<string, unknown> = {};
     if (opts?.materialName) mat.name = opts.materialName;
+    if (opts?.doubleSided) mat.doubleSided = true;
+    if (opts?.alphaMode) mat.alphaMode = opts.alphaMode;
     if (opts?.materialColor) {
       mat.pbrMetallicRoughness = { baseColorFactor: opts.materialColor };
     }
     if (opts?.textureUrl) {
       mat.pbrMetallicRoughness = {
         ...((mat.pbrMetallicRoughness as object | undefined) ?? {}),
-        baseColorTexture: { index: 0 },
+        baseColorTexture: {
+          index: 0,
+          ...(opts.textureTexCoord !== undefined ? { texCoord: opts.textureTexCoord } : {}),
+        },
       };
     }
     materials.push(mat);
@@ -407,6 +444,7 @@ function buildTriangleGlb(opts?: {
 
   const primitiveAttrs: Record<string, number> = { POSITION: 0 };
   if (uvAccessorIdx !== undefined) primitiveAttrs.TEXCOORD_0 = uvAccessorIdx;
+  if (uv1AccessorIdx !== undefined) primitiveAttrs.TEXCOORD_1 = uv1AccessorIdx;
 
   const primitive: Record<string, unknown> = {
     attributes: primitiveAttrs,
@@ -481,6 +519,16 @@ describe("parseGltf", () => {
       expect(() => parseGltf(buf)).toThrow("glTF v2");
     });
 
+    it("rejects non-v2 JSON asset versions even when the GLB container is v2", () => {
+      const buf = buildGlb({ doc: { asset: { version: "1.0" } } });
+      expect(() => parseGltf(buf)).toThrow("asset v2");
+    });
+
+    it("rejects unsupported JSON asset minVersion requirements", () => {
+      const buf = buildGlb({ doc: { asset: { version: "2.0", minVersion: "2.1" } } });
+      expect(() => parseGltf(buf)).toThrow("minVersion 2.1");
+    });
+
     it("throws when JSON chunk is missing", () => {
       // Build a GLB with only BIN chunk (tamper JSON chunk type)
       const { glb } = buildTriangleGlb();
@@ -533,19 +581,25 @@ describe("parseGltf", () => {
       expect(result.polygons).toHaveLength(1);
     });
 
-    it("throws when JSON doc has no buffers[0]", () => {
+    it("parses an empty glTF JSON asset without buffers", () => {
       const doc = {
         asset: { version: "2.0" },
         meshes: [],
       };
       const jsonBytes = new TextEncoder().encode(JSON.stringify(doc));
-      expect(() => parseGltf(jsonBytes.buffer as ArrayBuffer)).toThrow("no buffers");
+      const result = parseGltf(jsonBytes.buffer as ArrayBuffer);
+      expect(result.polygons).toEqual([]);
     });
 
-    it("throws when buffer[0] has no uri and no resolveBuffer", () => {
+    it("throws when a referenced JSON buffer has no uri and no GLB BIN chunk", () => {
       const doc = {
         asset: { version: "2.0" },
-        meshes: [],
+        scene: 0,
+        scenes: [{ nodes: [0] }],
+        nodes: [{ mesh: 0 }],
+        meshes: [{ primitives: [{ attributes: { POSITION: 0 }, mode: 4 }] }],
+        accessors: [{ bufferView: 0, byteOffset: 0, componentType: 5126, count: 3, type: "VEC3" }],
+        bufferViews: [{ buffer: 0, byteOffset: 0, byteLength: 36 }],
         buffers: [{ byteLength: 0 }],
       };
       const jsonBytes = new TextEncoder().encode(JSON.stringify(doc));
@@ -580,6 +634,32 @@ describe("parseGltf", () => {
       expect(result.polygons).toHaveLength(1);
     });
 
+    it("reads bufferViews from their referenced buffer index", () => {
+      const junk = new Uint8Array(8);
+      const positions = [0, 0, 0, 2, 0, 0, 0, 1, 0];
+      const positionBytes = new Uint8Array(positions.length * 4);
+      const positionView = new DataView(positionBytes.buffer);
+      for (let i = 0; i < positions.length; i++) {
+        positionView.setFloat32(i * 4, positions[i], true);
+      }
+      const doc = {
+        asset: { version: "2.0" },
+        scene: 0,
+        scenes: [{ nodes: [0] }],
+        nodes: [{ mesh: 0 }],
+        meshes: [{ primitives: [{ attributes: { POSITION: 0 }, mode: 4 }] }],
+        accessors: [{ bufferView: 0, byteOffset: 0, componentType: 5126, count: 3, type: "VEC3" }],
+        bufferViews: [{ buffer: 1, byteOffset: 0, byteLength: positionBytes.length }],
+        buffers: [
+          { byteLength: junk.length, uri: encodeDataUri(junk) },
+          { byteLength: positionBytes.length, uri: encodeDataUri(positionBytes) },
+        ],
+      };
+      const jsonBytes = new TextEncoder().encode(JSON.stringify(doc));
+      const result = parseGltf(jsonBytes.buffer as ArrayBuffer, { upAxis: "z", targetSize: 10, gridShift: 0 });
+      expect(result.polygons[0].vertices).toEqual([[0, 0, 0], [10, 0, 0], [0, 5, 0]]);
+    });
+
     it("throws when resolveBuffer returns a Promise (async not supported)", () => {
       const doc = {
         asset: { version: "2.0" },
@@ -610,17 +690,177 @@ describe("parseGltf", () => {
     });
   });
 
-  describe("non-TRIANGLES mode", () => {
-    it("mode=5 (TRIANGLE_STRIP) is skipped, no polygons emitted", () => {
-      const { glb } = buildTriangleGlb({ mode: 5 });
-      const result = parseGltf(glb);
-      expect(result.polygons).toHaveLength(0);
+  describe("strided accessors", () => {
+    it("reads interleaved POSITION data using bufferView.byteStride", () => {
+      const positions = [
+        [0, 0, 0],
+        [2, 0, 0],
+        [0, 1, 0],
+      ];
+      const normals = [
+        [9, 9, 9],
+        [8, 8, 8],
+        [7, 7, 7],
+      ];
+      const stride = 24;
+      const bin = new Uint8Array(positions.length * stride);
+      const view = new DataView(bin.buffer);
+      for (let i = 0; i < positions.length; i++) {
+        const offset = i * stride;
+        view.setFloat32(offset, positions[i][0], true);
+        view.setFloat32(offset + 4, positions[i][1], true);
+        view.setFloat32(offset + 8, positions[i][2], true);
+        view.setFloat32(offset + 12, normals[i][0], true);
+        view.setFloat32(offset + 16, normals[i][1], true);
+        view.setFloat32(offset + 20, normals[i][2], true);
+      }
+
+      const doc = {
+        asset: { version: "2.0" },
+        scene: 0,
+        scenes: [{ nodes: [0] }],
+        nodes: [{ mesh: 0 }],
+        meshes: [{ primitives: [{ attributes: { POSITION: 0 }, mode: 4 }] }],
+        accessors: [{
+          bufferView: 0,
+          byteOffset: 0,
+          componentType: 5126,
+          count: 3,
+          type: "VEC3",
+        }],
+        bufferViews: [{
+          buffer: 0,
+          byteOffset: 0,
+          byteLength: bin.length,
+          byteStride: stride,
+        }],
+        buffers: [{ byteLength: bin.length }],
+      };
+      const glb = buildGlb({ doc, binData: bin });
+
+      const result = parseGltf(glb, { upAxis: "z", targetSize: 10, gridShift: 0 });
+
+      expect(result.polygons).toHaveLength(1);
+      expect(result.polygons[0].vertices).toEqual([
+        [0, 0, 0],
+        [10, 0, 0],
+        [0, 5, 0],
+      ]);
+    });
+  });
+
+  describe("sparse accessors", () => {
+    it("applies sparse accessor replacements over a zero-filled base", () => {
+      const sparseIndices = [0, 1, 2];
+      const sparseValues = [
+        0, 0, 0,
+        2, 0, 0,
+        0, 1, 0,
+      ];
+      const indexBytes = new Uint8Array(sparseIndices.length);
+      indexBytes.set(sparseIndices);
+      const valueBytes = new Uint8Array(sparseValues.length * 4);
+      const valueView = new DataView(valueBytes.buffer);
+      for (let i = 0; i < sparseValues.length; i++) {
+        valueView.setFloat32(i * 4, sparseValues[i], true);
+      }
+      const bin = new Uint8Array(indexBytes.length + valueBytes.length);
+      bin.set(indexBytes, 0);
+      bin.set(valueBytes, indexBytes.length);
+      const doc = {
+        asset: { version: "2.0" },
+        scene: 0,
+        scenes: [{ nodes: [0] }],
+        nodes: [{ mesh: 0 }],
+        meshes: [{ primitives: [{ attributes: { POSITION: 0 }, mode: 4 }] }],
+        accessors: [{
+          componentType: 5126,
+          count: 3,
+          type: "VEC3",
+          sparse: {
+            count: 3,
+            indices: { bufferView: 0, componentType: 5121 },
+            values: { bufferView: 1 },
+          },
+        }],
+        bufferViews: [
+          { buffer: 0, byteOffset: 0, byteLength: indexBytes.length },
+          { buffer: 0, byteOffset: indexBytes.length, byteLength: valueBytes.length },
+        ],
+        buffers: [{ byteLength: bin.length }],
+      };
+      const glb = buildGlb({ doc, binData: bin });
+      const result = parseGltf(glb, { upAxis: "z", targetSize: 10, gridShift: 0 });
+      expect(result.polygons[0].vertices).toEqual([[0, 0, 0], [10, 0, 0], [0, 5, 0]]);
+    });
+  });
+
+  describe("triangle topology modes", () => {
+    function buildFourVertexModeGlb(mode: 5 | 6): ArrayBuffer {
+      const positions = [
+        0, 0, 0,
+        1, 0, 0,
+        0, 1, 0,
+        1, 1, 0,
+      ];
+      const bin = new Uint8Array(positions.length * 4);
+      const view = new DataView(bin.buffer);
+      for (let i = 0; i < positions.length; i++) {
+        view.setFloat32(i * 4, positions[i], true);
+      }
+      const doc = {
+        asset: { version: "2.0" },
+        scene: 0,
+        scenes: [{ nodes: [0] }],
+        nodes: [{ mesh: 0 }],
+        meshes: [{ primitives: [{ attributes: { POSITION: 0 }, mode }] }],
+        accessors: [{ bufferView: 0, byteOffset: 0, componentType: 5126, count: 4, type: "VEC3" }],
+        bufferViews: [{ buffer: 0, byteOffset: 0, byteLength: bin.length }],
+        buffers: [{ byteLength: bin.length }],
+      };
+      return buildGlb({ doc, binData: bin });
+    }
+
+    it("mode=5 (TRIANGLE_STRIP) expands to triangle polygons", () => {
+      const result = parseGltf(buildFourVertexModeGlb(5));
+      expect(result.polygons).toHaveLength(2);
     });
 
-    it("mode=6 (TRIANGLE_FAN) is skipped", () => {
-      const { glb } = buildTriangleGlb({ mode: 6 });
+    it("mode=6 (TRIANGLE_FAN) expands to triangle polygons", () => {
+      const result = parseGltf(buildFourVertexModeGlb(6));
+      expect(result.polygons).toHaveLength(2);
+    });
+  });
+
+  describe("unsupported extensions", () => {
+    it("skips required Draco-compressed primitives with a warning instead of reading extension-only accessors", () => {
+      const doc = {
+        asset: { version: "2.0" },
+        extensionsRequired: ["KHR_draco_mesh_compression"],
+        scene: 0,
+        scenes: [{ nodes: [0] }],
+        nodes: [{ mesh: 0 }],
+        meshes: [{
+          name: "Compressed",
+          primitives: [{
+            attributes: { POSITION: 0 },
+            extensions: {
+              KHR_draco_mesh_compression: {
+                bufferView: 0,
+                attributes: { POSITION: 0 },
+              },
+            },
+            mode: 4,
+          }],
+        }],
+        accessors: [{ componentType: 5126, count: 3, type: "VEC3" }],
+        bufferViews: [{ buffer: 0, byteOffset: 0, byteLength: 4 }],
+        buffers: [{ byteLength: 4 }],
+      };
+      const glb = buildGlb({ doc, binData: new Uint8Array(4) });
       const result = parseGltf(glb);
-      expect(result.polygons).toHaveLength(0);
+      expect(result.polygons).toEqual([]);
+      expect(result.warnings.some((warning) => warning.includes("KHR_draco_mesh_compression"))).toBe(true);
     });
   });
 
@@ -633,9 +873,18 @@ describe("parseGltf", () => {
       expect(result.polygons[0].color).toBe("#ff0000");
     });
 
-    it("PBR baseColorFactor alpha is preserved in the polygon color", () => {
+    it("PBR baseColorFactor alpha is ignored for default opaque materials", () => {
       const { glb } = buildTriangleGlb({
         materialColor: [0, 0.5, 1, 0.25],
+      });
+      const result = parseGltf(glb);
+      expect(result.polygons[0].color).toBe("#0080ff");
+    });
+
+    it("PBR baseColorFactor alpha is preserved for blend materials", () => {
+      const { glb } = buildTriangleGlb({
+        materialColor: [0, 0.5, 1, 0.25],
+        alphaMode: "BLEND",
       });
       const result = parseGltf(glb);
       expect(result.polygons[0].color).toBe("rgba(0, 128, 255, 0.25)");
@@ -685,6 +934,18 @@ describe("parseGltf", () => {
       const { glb } = buildTriangleGlb();
       const result = parseGltf(glb, { defaultColor: "#334455" });
       expect(result.polygons[0].color).toBe("#334455");
+    });
+
+    it("doubleSided materials emit reverse-winding polygons", () => {
+      const { glb } = buildTriangleGlb({
+        doubleSided: true,
+      });
+      const result = parseGltf(glb, { upAxis: "z", targetSize: 1, gridShift: 0 });
+      expect(result.polygons).toHaveLength(2);
+      expect(result.polygons[0].vertices).toEqual([[0, 0, 0], [1, 0, 0], [0, 1, 0]]);
+      expect(result.polygons[1].vertices).toEqual([[0, 0, 0], [0, 1, 0], [1, 0, 0]]);
+      expect(result.polygons[0].doubleSided).toBe(true);
+      expect(result.polygons[1].doubleSided).toBe(true);
     });
   });
 
@@ -954,6 +1215,36 @@ describe("parseGltf", () => {
       expect(poly.uvs).toHaveLength(3);
     });
 
+    it("preserves glTF default repeat wrapping and opaque alpha mode", () => {
+      const { glb } = buildTriangleGlb({
+        includeTexcoord: true,
+        texcoords: [0, 0, 1.25, 0, 0, 1],
+        textureUrl: "texture.png",
+      });
+
+      const result = parseGltf(glb);
+      const poly = result.polygons[0];
+
+      expect(poly.textureWrap).toEqual({ s: "repeat", t: "repeat" });
+      expect(poly.textureAlphaMode).toBe("opaque");
+      expect(poly.uvs?.some(([u]) => u > 1)).toBe(true);
+    });
+
+    it("uses the baseColorTexture texCoord set instead of always TEXCOORD_0", () => {
+      const { glb } = buildTriangleGlb({
+        includeTexcoord: true,
+        texcoords: [0, 0, 0, 0, 0, 0],
+        includeTexcoord1: true,
+        texcoords1: [0.25, 0.75, 0.5, 0.75, 0.25, 0.5],
+        textureTexCoord: 1,
+        textureUrl: "texture.png",
+      });
+
+      const result = parseGltf(glb);
+
+      expect(result.polygons[0].uvs).toEqual([[0.25, 0.25], [0.5, 0.25], [0.25, 0.5]]);
+    });
+
     it("no texture → uvs not set on polygon", () => {
       const { glb } = buildTriangleGlb({ includeTexcoord: true });
       const result = parseGltf(glb);
@@ -1169,7 +1460,7 @@ describe("parseGltf", () => {
         buffers: [{ byteLength: bin.length }],
       };
       const glb = buildGlb({ doc, binData: bin });
-      expect(() => parseGltf(glb)).toThrow("bad accessor");
+      expect(() => parseGltf(glb)).toThrow("bad bufferView");
     });
 
     it("throws for unsupported accessor type", () => {
@@ -1198,7 +1489,7 @@ describe("parseGltf", () => {
       expect(() => parseGltf(glb)).toThrow("unsupported accessor type");
     });
 
-    it("throws for unhandled componentType", () => {
+    it("skips POSITION accessors that use a component type invalid for POSITION", () => {
       const positions = [0, 0, 0, 1, 0, 0, 0, 1, 0];
       const bin = new Uint8Array(positions.length * 4);
       const bv = new DataView(bin.buffer);
@@ -1221,7 +1512,8 @@ describe("parseGltf", () => {
         buffers: [{ byteLength: bin.length }],
       };
       const glb = buildGlb({ doc, binData: bin });
-      expect(() => parseGltf(glb)).toThrow("unhandled componentType");
+      const result = parseGltf(glb);
+      expect(result.polygons).toEqual([]);
     });
   });
 

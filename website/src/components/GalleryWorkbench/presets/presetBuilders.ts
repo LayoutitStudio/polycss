@@ -38,7 +38,8 @@ function voxLabelFromFile(file: string): string {
 }
 
 function labelFromBase(base: string): string {
-  return base
+  const cleanBase = base.replace(/^(?:animated|apocalypse)\s+/i, "");
+  return cleanBase
     .split(" ")
     .filter(Boolean)
     .map((word) => word.charAt(0).toUpperCase() + word.slice(1))

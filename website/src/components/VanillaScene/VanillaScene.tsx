@@ -944,7 +944,7 @@ export function VanillaScene({
       return;
     }
     const swatch = directionalLight.color ?? "#ffd54a";
-    lightHandleRef.current = scene.add(
+    const handle = scene.add(
       {
         polygons: octahedronPolygons({ center: [0, 0, 0], size: helperScale * 0.05, color: swatch }),
         objectUrls: [],
@@ -960,6 +960,8 @@ export function VanillaScene({
         excludeFromAutoCenter: true,
       },
     );
+    handle.element.classList.add("dn-light-helper");
+    lightHandleRef.current = handle;
     return () => {
       lightHandleRef.current?.dispose();
       lightHandleRef.current = null;

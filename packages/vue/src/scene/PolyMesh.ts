@@ -324,6 +324,7 @@ export const PolyMesh = defineComponent({
         normalTolerance: 0.1,
         distanceTolerance: 0.5,
         overlapFraction: 0.4,
+        preserveDoubleSidedBackfaces: false,
       });
 
       const projections: Array<Array<[number, number]>> = [];

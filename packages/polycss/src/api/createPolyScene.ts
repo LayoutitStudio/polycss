@@ -1228,6 +1228,10 @@ export function createPolyScene(
         normalTolerance: 0.1,
         distanceTolerance: 0.5,
         overlapFraction: 0.4,
+        // Authored double-sided backfaces would project coincident
+        // shadows that stack their alpha against the front face — drop
+        // them at the dedup step instead of in the SVG fill rule.
+        preserveDoubleSidedBackfaces: false,
       }));
     }
 

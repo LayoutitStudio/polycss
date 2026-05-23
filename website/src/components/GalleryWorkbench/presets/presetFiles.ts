@@ -10,17 +10,223 @@ import {
   MONOGON_VOXEL_MECHAS_ATTRIBUTION,
   MONOGON_VOXEL_SPACESHIPS_ATTRIBUTION,
   SONA_SAR_VOXEL_ANIMALS_ITEMS_ATTRIBUTION,
+  GOOGLE_POLY_ASTRONAUT_ATTRIBUTION,
   MAGICAVOXEL_TEST_MODELS_ATTRIBUTION,
   OPENGAMEART_VOXEL_BUILDINGS_ATTRIBUTION,
   OPENHV_VOXELS_ATTRIBUTION,
   FLOOOH_VOXEL_DATA_ATTRIBUTION,
   QUATERNIUS_ULTIMATE_SPACESHIPS_ATTRIBUTION,
+  nasa3dAttribution,
   openGameArtAttribution,
   quaterniusAttribution,
+  smithsonianOpenAccessAttribution,
 } from "./attributions";
 
+const NASA_GLB_PRESET_FILES: GalleryPresetFile[] = [
+  {
+    file: "nasa/opportunity.glb",
+    label: "Mars Rover Opportunity",
+    category: "Vehicles",
+    attribution: nasa3dAttribution(
+      "NASA/Ames Research Center",
+      "https://science.nasa.gov/3d-resources/mars-exploration-rover-opportunity-mer-b/",
+      3754,
+    ),
+  },
+  {
+    file: "nasa/cubesat-1u.glb",
+    label: "CubeSat 1U",
+    category: "Vehicles",
+    attribution: nasa3dAttribution(
+      "NASA/Christopher R. Meaney",
+      "https://science.nasa.gov/3d-resources/cubesat-1-ru-generic/",
+      6063,
+    ),
+  },
+  {
+    file: "nasa/tdrs-a.glb",
+    label: "Tracking and Data Relay Satellite",
+    category: "Vehicles",
+    attribution: nasa3dAttribution(
+      "NASA/Ames Research Center",
+      "https://science.nasa.gov/3d-resources/tracking-and-data-relay-satellites-tdrs-a/",
+      2936,
+    ),
+  },
+  {
+    file: "nasa/hubble-space-telescope.glb",
+    label: "Hubble Space Telescope",
+    category: "Vehicles",
+    attribution: nasa3dAttribution(
+      "DigitalSpace Corporation",
+      "https://science.nasa.gov/3d-resources/hubble-space-telescope-a/",
+      7670,
+    ),
+  },
+  {
+    file: "nasa/international-space-station.glb",
+    label: "International Space Station",
+    category: "Vehicles",
+    attribution: nasa3dAttribution(
+      "NASA/Ames Research Center",
+      "https://science.nasa.gov/3d-resources/international-space-station-iss-a/",
+      6628,
+    ),
+  },
+  {
+    file: "nasa/space-shuttle.glb",
+    label: "Space Shuttle",
+    category: "Vehicles",
+    attribution: nasa3dAttribution(
+      "NASA/Johnson Space Center",
+      "https://science.nasa.gov/3d-resources/space-shuttle-b/",
+      2473,
+    ),
+  },
+  {
+    file: "nasa/kepler.glb",
+    label: "Kepler Space Telescope",
+    category: "Vehicles",
+    attribution: nasa3dAttribution(
+      "NASA/Ames Research Center",
+      "https://science.nasa.gov/3d-resources/kepler-b/",
+      372,
+    ),
+  },
+  {
+    file: "nasa/mars-global-surveyor.glb",
+    label: "Mars Global Surveyor",
+    category: "Vehicles",
+    attribution: nasa3dAttribution(
+      "NASA/JPL/Eyes on the Solar System",
+      "https://science.nasa.gov/3d-resources/mars-global-surveyor/",
+      6194,
+    ),
+  },
+  {
+    file: "nasa/grace.glb",
+    label: "GRACE",
+    category: "Vehicles",
+    attribution: nasa3dAttribution(
+      "NASA/Brian E. Kumanchik; NASA/Christian A. Lopez",
+      "https://science.nasa.gov/3d-resources/gravity-recovery-and-climate-experiment-grace-a/",
+      3439,
+    ),
+  },
+  {
+    file: "nasa/icesat-a.glb",
+    label: "ICESat",
+    category: "Vehicles",
+    galleryBucket: "Textured",
+    attribution: nasa3dAttribution(
+      "NASA/Ames Research Center",
+      "https://science.nasa.gov/3d-resources/ice-clouds-and-land-elevation-satellite-icesat-a/",
+      976,
+    ),
+  },
+  {
+    file: "nasa/gamma-ray-observatory.glb",
+    label: "Gamma Ray Observatory",
+    category: "Vehicles",
+    attribution: nasa3dAttribution(
+      "NASA/Christopher R. Meaney",
+      "https://science.nasa.gov/3d-resources/gamma-ray-observatory/",
+      4244,
+    ),
+  },
+  {
+    file: "nasa/wide-field-planetary-camera.glb",
+    label: "Wide Field Planetary Camera",
+    category: "Objects",
+    galleryBucket: "Textured",
+    attribution: nasa3dAttribution(
+      "DigitalSpace Corporation",
+      "https://science.nasa.gov/3d-resources/wide-field-planetary-camera/",
+      224,
+    ),
+  },
+  {
+    file: "nasa/crew-lock-bag.glb",
+    label: "Crew Lock Bag",
+    category: "Objects",
+    galleryBucket: "Textured",
+    attribution: nasa3dAttribution(
+      "DigitalSpace Corporation",
+      "https://science.nasa.gov/3d-resources/crew-lock-bag/",
+      506,
+    ),
+  },
+  {
+    file: "nasa/flight-system-support.glb",
+    label: "Flight System Support",
+    category: "Objects",
+    galleryBucket: "Textured",
+    attribution: nasa3dAttribution(
+      "DigitalSpace Corporation",
+      "https://science.nasa.gov/3d-resources/flight-system-support/",
+      1292,
+    ),
+  },
+  {
+    file: "nasa/space-shuttle-eva-suit.glb",
+    label: "EVA Suit",
+    category: "Objects",
+    attribution: nasa3dAttribution(
+      "NASA/Johnson Space Center",
+      "https://science.nasa.gov/3d-resources/space-shuttle-parts/",
+      6430,
+    ),
+  },
+  {
+    file: "nasa/orbiter-docking-system.glb",
+    label: "Orbiter Docking System",
+    category: "Objects",
+    galleryBucket: "Textured",
+    attribution: nasa3dAttribution(
+      "NASA/Johnson Space Center",
+      "https://science.nasa.gov/3d-resources/space-shuttle-parts/",
+      5635,
+    ),
+  },
+  {
+    file: "nasa/space-shuttle-external-tank.glb",
+    label: "Space Shuttle External Tank",
+    category: "Vehicles",
+    galleryBucket: "Textured",
+    attribution: nasa3dAttribution(
+      "NASA/Johnson Space Center",
+      "https://science.nasa.gov/3d-resources/space-shuttle-parts/",
+      6326,
+    ),
+  },
+  {
+    file: "nasa/solid-rocket-booster.glb",
+    label: "Solid Rocket Booster",
+    category: "Vehicles",
+    galleryBucket: "Textured",
+    attribution: nasa3dAttribution(
+      "NASA/Johnson Space Center",
+      "https://science.nasa.gov/3d-resources/space-shuttle-parts/",
+      4136,
+    ),
+  },
+];
+
+const SMITHSONIAN_GLB_PRESET_FILES: GalleryPresetFile[] = [
+  {
+    file: "smithsonian/morse-telegraph-key.glb",
+    label: "Morse-Vail Telegraph Key",
+    category: "Objects",
+    galleryBucket: "Textured",
+    attribution: smithsonianOpenAccessAttribution(
+      "https://www.si.edu/object/morse-vail-telegraph-key%3Anmah_1096762",
+      3600,
+    ),
+  },
+];
+
 export const GLB_PRESET_FILES: GalleryPresetFile[] = [
-  { file: "FishAnimated.glb", label: "Animated Fish", category: "Animated" },
+  { file: "FishAnimated.glb", label: "Fish", category: "Animated" },
   {
     file: "opengameart/animated-pliers.glb",
     label: "Pliers",
@@ -68,11 +274,20 @@ export const GLB_PRESET_FILES: GalleryPresetFile[] = [
   { file: "Policecar.glb", label: "Police Car", category: "Vehicles" },
   { file: "Taxi.glb", category: "Vehicles" },
   { file: "Truck.glb", category: "Vehicles" },
+  ...NASA_GLB_PRESET_FILES,
+  {
+    file: "model-viewer/astronaut.glb",
+    label: "Astronaut",
+    category: "Characters",
+    galleryBucket: "Textured",
+    attribution: GOOGLE_POLY_ASTRONAUT_ATTRIBUTION,
+  },
   { file: "Acousticguitar.glb", label: "Guitar (Acoustic)", category: "Instruments" },
   { file: "Electricguitar.glb", label: "Guitar (Electric)", category: "Instruments" },
   { file: "Saxophone.glb", category: "Instruments" },
   { file: "Trumpet.glb", category: "Instruments" },
   { file: "Violin.glb", category: "Instruments" },
+  ...SMITHSONIAN_GLB_PRESET_FILES,
   { file: "apple.glb", label: "Apple", category: "Food & Drink" },
   { file: "BottleChampagne.glb", label: "Champagne Bottle", category: "Food & Drink" },
   { file: "Eggplant.glb", category: "Food & Drink" },
@@ -125,7 +340,7 @@ export const GLB_PRESET_FILES: GalleryPresetFile[] = [
   { file: "urban/Police Car.glb", label: "Police Cruiser", category: "Urban Pack" },
   { file: "urban/Motorcycle.glb", category: "Urban Pack" },
   { file: "urban/Stop sign.glb", label: "Stop Sign", category: "Urban Pack" },
-  { file: "urban/Billboard.glb", category: "Urban Pack" },
+  { file: "urban/Billboard.glb", category: "Urban Pack", galleryBucket: "Textured" },
   { file: "urban/Rock band poster.glb", label: "Poster", category: "Urban Pack" },
 
   { file: "urban/Dumpster.glb", category: "Urban Pack" },
@@ -178,7 +393,7 @@ export const POLY_PIZZA_PRESET_FILES: GalleryPresetFile[] = [
   },
   {
     file: "poly-pizza/animated-robot.glb",
-    label: "Animated Robot",
+    label: "Robot",
     category: "Animated",
     attribution: {
       creator: "Quaternius",
@@ -213,7 +428,7 @@ export const POLY_PIZZA_PRESET_FILES: GalleryPresetFile[] = [
   },
   {
     file: "poly-pizza/animated-shark.glb",
-    label: "Animated Shark",
+    label: "Shark",
     category: "Animated",
     attribution: quaterniusAttribution("https://poly.pizza/m/sZR8AMLMz5", 1310),
   },
@@ -366,7 +581,6 @@ export const POLY_PIZZA_PRESET_FILES: GalleryPresetFile[] = [
     file: "poly-pizza/box.glb",
     label: "Cardboard Box",
     category: "Objects",
-    galleryBucket: "Textured",
     attribution: {
       creator: "Kay Lousberg",
       license: "CC0 1.0",
@@ -420,7 +634,7 @@ export const POLY_PIZZA_PRESET_FILES: GalleryPresetFile[] = [
   },
   {
     file: "poly-pizza/man.glb",
-    label: "Animated Man",
+    label: "Man",
     category: "Characters",
     attribution: {
       creator: "Quaternius",

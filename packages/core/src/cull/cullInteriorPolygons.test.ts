@@ -87,4 +87,15 @@ describe("cullInteriorPolygons", () => {
     const out = cullInteriorPolygons(tiny);
     expect(out).toBe(tiny); // referential equality — short-circuit path
   });
+
+  it("does not ray-cull large open topology", () => {
+    const openPanels: Polygon[] = [];
+    for (let i = 0; i < 130; i += 1) {
+      openPanels.push(axisQuad(i * 2, 0, 0, "z", 1, 1));
+    }
+
+    const out = cullInteriorPolygons(openPanels);
+
+    expect(out).toBe(openPanels);
+  });
 });

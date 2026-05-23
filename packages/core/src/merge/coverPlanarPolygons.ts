@@ -127,6 +127,7 @@ function materialKey(polygon: Polygon): string {
     polygon.color ?? "#cccccc",
     polygon.texture ?? "",
     polygon.uvs ? "uv" : "plain",
+    polygon.doubleSided === true ? "double-sided" : "single-sided",
     dataKey(polygon.data),
   ].join("|");
 }
@@ -159,6 +160,10 @@ function sharedData(group: number[], polygons: Polygon[]): Polygon["data"] | und
     if (dataKey(polygons[index].data) !== firstKey) return undefined;
   }
   return first ? { ...first } : undefined;
+}
+
+function sharedDoubleSided(group: number[], polygons: Polygon[]): boolean {
+  return group.every((index) => polygons[index].doubleSided === true);
 }
 
 function buildGroups(polygons: Polygon[], planeEpsilon: number): GroupBuild {
@@ -647,6 +652,7 @@ function decomposeWithAxis(
 
   const color = polygons[group[0]].color;
   const data = sharedData(group, polygons);
+  const doubleSided = sharedDoubleSided(group, polygons);
   const localCells: Vec2[][] = [];
 
   for (let i = 0; i < sortedXs.length - 1; i++) {
@@ -694,6 +700,7 @@ function decomposeWithAxis(
   const cells = mergeLocalCells(localCells).map((local): Polygon => ({
     vertices: local.map(toWorld),
     ...(color ? { color } : {}),
+    ...(doubleSided ? { doubleSided: true } : {}),
     ...(data ? { data } : {}),
   }));
   return mergePolygons(cells);
