@@ -667,8 +667,27 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
       projections.push(projected);
     }
     if (projections.length === 0) return null;
-    const width = maxX - minX;
-    const height = maxY - minY;
+    // Cap the SVG's intrinsic dimensions. Low-elevation lights shear
+    // projected polygons across the ground so far that the bbox can
+    // exceed tens of thousands of pixels each side, which forces the
+    // browser to rasterize a >100M-pixel backing store on every repaint
+    // (visible as scene-wide flicker when the camera or light moves).
+    // overflow:hidden clips paths that land outside the (already
+    // off-screen) cap.
+    const SHADOW_MAX_DIM = 8000;
+    let bx0 = minX, by0 = minY, bx1 = maxX, by1 = maxY;
+    if (bx1 - bx0 > SHADOW_MAX_DIM) {
+      const cx = (bx0 + bx1) / 2;
+      bx0 = cx - SHADOW_MAX_DIM / 2;
+      bx1 = cx + SHADOW_MAX_DIM / 2;
+    }
+    if (by1 - by0 > SHADOW_MAX_DIM) {
+      const cy = (by0 + by1) / 2;
+      by0 = cy - SHADOW_MAX_DIM / 2;
+      by1 = cy + SHADOW_MAX_DIM / 2;
+    }
+    const width = bx1 - bx0;
+    const height = by1 - by0;
     if (!(width > 0) || !(height > 0)) return null;
 
     const shadowColor = sceneShadow?.color ?? "#000000";
@@ -684,9 +703,9 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
     let d = "";
     for (const verts of projections) {
       const ccw = ensureCcw2D(verts);
-      d += `M${(ccw[0]![0] - minX).toFixed(3)},${(ccw[0]![1] - minY).toFixed(3)}`;
+      d += `M${(ccw[0]![0] - bx0).toFixed(3)},${(ccw[0]![1] - by0).toFixed(3)}`;
       for (let j = 1; j < ccw.length; j++) {
-        d += `L${(ccw[j]![0] - minX).toFixed(3)},${(ccw[j]![1] - minY).toFixed(3)}`;
+        d += `L${(ccw[j]![0] - bx0).toFixed(3)},${(ccw[j]![1] - by0).toFixed(3)}`;
       }
       d += "Z";
     }
@@ -703,10 +722,11 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
           top: 0,
           left: 0,
           display: "block",
-          overflow: "visible",
+          overflow: "hidden",
           transformOrigin: "0 0",
           pointerEvents: "none",
-          transform: `translate3d(${minX.toFixed(3)}px,${minY.toFixed(3)}px,${bakedShadowGroundCssZ.toFixed(3)}px)`,
+          willChange: "transform",
+          transform: `translate3d(${bx0.toFixed(3)}px,${by0.toFixed(3)}px,${bakedShadowGroundCssZ.toFixed(3)}px)`,
         }}
       >
         <path

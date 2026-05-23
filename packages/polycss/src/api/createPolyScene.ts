@@ -1252,8 +1252,28 @@ export function createPolyScene(
     }
 
     if (polyProjections.length === 0) return;
-    const width = maxX - minX;
-    const height = maxY - minY;
+    // Cap the SVG's intrinsic dimensions. Low-elevation lights shear
+    // projected polygons across the ground so far that the bbox can
+    // exceed tens of thousands of pixels each side, which forces the
+    // browser to rasterize a >100M-pixel backing store on every repaint
+    // (visible as scene-wide flicker when the camera or light moves).
+    // We clamp the bbox around its center and let SVG's default
+    // overflow:hidden clip any path data that lands outside — at this
+    // size the clipped region is far off-screen anyway.
+    const SHADOW_MAX_DIM = 8000;
+    let bx0 = minX, by0 = minY, bx1 = maxX, by1 = maxY;
+    if (bx1 - bx0 > SHADOW_MAX_DIM) {
+      const cx = (bx0 + bx1) / 2;
+      bx0 = cx - SHADOW_MAX_DIM / 2;
+      bx1 = cx + SHADOW_MAX_DIM / 2;
+    }
+    if (by1 - by0 > SHADOW_MAX_DIM) {
+      const cy = (by0 + by1) / 2;
+      by0 = cy - SHADOW_MAX_DIM / 2;
+      by1 = cy + SHADOW_MAX_DIM / 2;
+    }
+    const width = bx1 - bx0;
+    const height = by1 - by0;
     if (!(width > 0) || !(height > 0)) return;
 
     // Concatenate every projected polygon into ONE compound `d` string —
@@ -1266,9 +1286,9 @@ export function createPolyScene(
     let d = "";
     for (const verts of polyProjections) {
       const ccw = ensureCcw2D(verts);
-      d += `M${(ccw[0]![0] - minX).toFixed(3)},${(ccw[0]![1] - minY).toFixed(3)}`;
+      d += `M${(ccw[0]![0] - bx0).toFixed(3)},${(ccw[0]![1] - by0).toFixed(3)}`;
       for (let i = 1; i < ccw.length; i++) {
-        d += `L${(ccw[i]![0] - minX).toFixed(3)},${(ccw[i]![1] - minY).toFixed(3)}`;
+        d += `L${(ccw[i]![0] - bx0).toFixed(3)},${(ccw[i]![1] - by0).toFixed(3)}`;
       }
       d += "Z";
     }
@@ -1281,12 +1301,15 @@ export function createPolyScene(
     svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
     // CSS-Z places the SVG plane at the ground in the mesh's local frame;
     // the mesh wrapper's own transform is applied above this. X/Y origin
-    // shifts the SVG so its (0,0) lines up with the projected bbox corner.
+    // shifts the SVG so its (0,0) lines up with the (clamped) bbox corner.
+    // overflow:hidden + will-change:transform: bound the backing store
+    // and keep the SVG on its own GPU layer so scene repaints don't
+    // re-rasterize the whole sheet.
     svg.setAttribute(
       "style",
-      `position:absolute;top:0;left:0;display:block;overflow:visible;` +
-      `transform-origin:0 0;pointer-events:none;` +
-      `transform:translate3d(${minX.toFixed(3)}px,${minY.toFixed(3)}px,${groundCssZ.toFixed(3)}px)`,
+      `position:absolute;top:0;left:0;display:block;overflow:hidden;` +
+      `transform-origin:0 0;pointer-events:none;will-change:transform;` +
+      `transform:translate3d(${bx0.toFixed(3)}px,${by0.toFixed(3)}px,${groundCssZ.toFixed(3)}px)`,
     );
 
     const path = doc.createElementNS(svgNS, "path");
