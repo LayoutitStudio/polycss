@@ -8,7 +8,7 @@ A CSS polygon mesh engine. A 3D renderer for the DOM. Renders OBJ, glTF, GLB and
 
 Visit [polycss.com](https://polycss.com) for docs and model examples.
 
-<img width="1600" height="520" alt="polycss-primitives-banner" src="https://github.com/user-attachments/assets/608a888a-d5a2-43d0-a597-28828169fa24" />
+<img width="1600" height="300" alt="polycss-primitives-banner" src="https://github.com/user-attachments/assets/b05e2204-9323-4f83-8d1b-01ea0dd000db" />
 
 ## Installation
 
