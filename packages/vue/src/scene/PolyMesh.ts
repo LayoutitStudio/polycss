@@ -20,10 +20,13 @@ import { defineComponent, h, computed, inject, onMounted, onBeforeUnmount, ref, 
 import type { PropType, VNode, CSSProperties } from "vue";
 import type { MeshResolution, Polygon, PolyTextureLightingMode, Vec3 } from "@layoutit/polycss-core";
 import {
+  buildBakedShadowProjectionMatrix,
   computeSceneBbox,
   DEFAULT_SEAM_BLEED,
   inverseRotateVec3,
   findOverlappingPolygonDuplicates,
+  formatMatrix3dValues,
+  isBakedShadowCaster,
   parseHexColor,
 } from "@layoutit/polycss-core";
 import { usePolyMesh } from "./useMesh";
@@ -303,17 +306,35 @@ export const PolyMesh = defineComponent({
     );
     const defaultPaintVars = computed(() => solidPaintVars(solidPaintDefaults.value));
 
-    // Shadow leaf emission. Only active when castShadow=true and the scene is
-    // in dynamic lighting mode. Computed from textureAtlasPlans so every
-    // polygon (including textured <s> polygons) gets a shadow leaf based on
-    // its outline.
+    // Shadow leaf emission. Active when castShadow=true in either lighting
+    // mode. Dynamic mode emits leaves whose transform uses var(--shadow-proj)
+    // and whose --pnx/y/z drive a CSS opacity calc that hides back-facing
+    // polys at paint time. Baked mode CPU-bakes the projection matrix
+    // (using the scene's fixed light + ground) and drops back-facing polys
+    // from the DOM entirely instead of opacity-gating them.
     const shadowNodes = computed<Array<VNode | null>>(() => {
-      if (!props.castShadow || atlasTextureLighting.value !== "dynamic") return [];
-      const shadowOpts = sceneCtx?.value.shadow;
+      if (!props.castShadow) return [];
+      const lighting = atlasTextureLighting.value;
+      const isDynamic = lighting === "dynamic";
+      const ctx = sceneCtx?.value;
+      const groundCssZ = ctx?.groundCssZ ?? null;
+      // Baked mode needs a ground plane to project onto. The scene's
+      // watchEffect will populate it on the next tick after registration.
+      if (!isDynamic && groundCssZ === null) return [];
+
+      const shadowOpts = ctx?.shadow;
       const shadowColor = shadowOpts?.color ?? "#000000";
       const shadowOpacity = shadowOpts?.opacity ?? 0.25;
       const parsed = parseHexColor(shadowColor)?.rgb ?? [0, 0, 0];
       const shadowColorCss = `rgba(${parsed[0]},${parsed[1]},${parsed[2]},${shadowOpacity})`;
+
+      const lightDir = ctx?.directionalLight?.direction
+        ?? ([0.4, -0.7, 0.59] as Vec3);
+      const bakedProjStr = isDynamic
+        ? null
+        : `matrix3d(${formatMatrix3dValues(
+            buildBakedShadowProjectionMatrix(lightDir, groundCssZ ?? 0),
+          )})`;
 
       const plans = textureAtlasPlans.value;
       if (plans.length === 0) return [];
@@ -327,17 +348,25 @@ export const PolyMesh = defineComponent({
       return plans.map((plan, index) => {
         if (!plan) return null;
         if (dedupDrop.has(index)) return null;
+        if (!isDynamic && !isBakedShadowCaster(plan.normal, lightDir)) return null;
         const origMatrix = `matrix3d(${plan.matrix})`;
         const borderShape = cssBorderShapeForPlan(plan);
-        const style: CSSProperties = {
-          transform: `var(--shadow-proj) ${origMatrix}`,
-          color: shadowColorCss,
-          width: `${plan.canvasW}px`,
-          height: `${plan.canvasH}px`,
-          "--pnx": plan.normal[0].toFixed(4),
-          "--pny": plan.normal[1].toFixed(4),
-          "--pnz": plan.normal[2].toFixed(4),
-        };
+        const style: CSSProperties = isDynamic
+          ? {
+              transform: `var(--shadow-proj) ${origMatrix}`,
+              color: shadowColorCss,
+              width: `${plan.canvasW}px`,
+              height: `${plan.canvasH}px`,
+              "--pnx": plan.normal[0].toFixed(4),
+              "--pny": plan.normal[1].toFixed(4),
+              "--pnz": plan.normal[2].toFixed(4),
+            }
+          : {
+              transform: `${bakedProjStr} ${origMatrix}`,
+              color: shadowColorCss,
+              width: `${plan.canvasW}px`,
+              height: `${plan.canvasH}px`,
+            };
 
         const applyShadowBorderShape = (vnode: VNode) => {
           const el = vnode.el as HTMLElement | null;
@@ -354,15 +383,16 @@ export const PolyMesh = defineComponent({
       });
     });
 
-    // Register this mesh with the shadow registry when castShadow=true so
-    // PolyScene can compute --shadow-ground-cssz reactively.
+    // Register this mesh with the shadow registry when castShadow=true in
+    // either lighting mode — the scene needs caster polygons to derive
+    // the ground plane regardless of how shadows are projected.
     const shadowRegistryId = Symbol();
     watch(
-      () => [props.castShadow, atlasTextureLighting.value] as const,
-      ([castShadow, lighting], _, onCleanup) => {
+      () => props.castShadow,
+      (castShadow, _, onCleanup) => {
         const registry = sceneCtx?.value.shadowRegistry;
         if (!registry) return;
-        if (castShadow && lighting === "dynamic") {
+        if (castShadow) {
           registry.register(shadowRegistryId, () => polygons.value);
         } else {
           registry.unregister(shadowRegistryId);

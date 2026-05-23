@@ -39,6 +39,14 @@ export interface PolySceneContextValue {
   seamBleed?: PolySeamBleed;
   shadow?: PolyShadowOptions;
   shadowRegistry?: PolyShadowRegistry;
+  /**
+   * Computed CSS-Z of the shadow ground plane (= min world Z across all
+   * casting meshes + scene.shadow.lift, in CSS pixels). Dynamic mode also
+   * mirrors this into `--shadow-ground-cssz`. Baked mode reads it here to
+   * bake the inline `matrix3d(...)` on each shadow leaf. `null` when no
+   * casting meshes are registered.
+   */
+  groundCssZ?: number | null;
 }
 
 /**
