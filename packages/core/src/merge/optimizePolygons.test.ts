@@ -133,6 +133,75 @@ function renderCost(polygons: Polygon[]): number {
   return cost;
 }
 
+function strictNonConvexPolygonCount(polygons: Polygon[]): number {
+  let count = 0;
+  for (const polygon of polygons) {
+    if (polygon.vertices.length < 3 || polygonTriangleFanArea(polygon.vertices) <= 1e-8) continue;
+    if (!isStrictlyWeakConvexPolygon(polygon.vertices)) count += 1;
+  }
+  return count;
+}
+
+function polygonTriangleFanArea(vertices: Vec3[]): number {
+  let area = 0;
+  const origin = vertices[0];
+  for (let i = 1; i + 1 < vertices.length; i++) {
+    const ab = [
+      vertices[i][0] - origin[0],
+      vertices[i][1] - origin[1],
+      vertices[i][2] - origin[2],
+    ];
+    const ac = [
+      vertices[i + 1][0] - origin[0],
+      vertices[i + 1][1] - origin[1],
+      vertices[i + 1][2] - origin[2],
+    ];
+    area += Math.hypot(
+      ab[1] * ac[2] - ab[2] * ac[1],
+      ab[2] * ac[0] - ab[0] * ac[2],
+      ab[0] * ac[1] - ab[1] * ac[0],
+    ) * 0.5;
+  }
+  return area;
+}
+
+function isStrictlyWeakConvexPolygon(vertices: Vec3[]): boolean {
+  const normal = polygonNormal(vertices);
+  if (!normal) return false;
+  let sign = 0;
+  for (let i = 0; i < vertices.length; i++) {
+    const a = vertices[i];
+    const b = vertices[(i + 1) % vertices.length];
+    const c = vertices[(i + 2) % vertices.length];
+    const ab = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+    const bc = [c[0] - b[0], c[1] - b[1], c[2] - b[2]];
+    const turn =
+      (ab[1] * bc[2] - ab[2] * bc[1]) * normal[0] +
+      (ab[2] * bc[0] - ab[0] * bc[2]) * normal[1] +
+      (ab[0] * bc[1] - ab[1] * bc[0]) * normal[2];
+    if (Math.abs(turn) <= 1e-9) continue;
+    const nextSign = Math.sign(turn);
+    if (sign === 0) sign = nextSign;
+    else if (nextSign !== sign) return false;
+  }
+  return true;
+}
+
+function polygonNormal(vertices: Vec3[]): Vec3 | null {
+  let nx = 0;
+  let ny = 0;
+  let nz = 0;
+  for (let i = 0; i < vertices.length; i++) {
+    const a = vertices[i];
+    const b = vertices[(i + 1) % vertices.length];
+    nx += (a[1] - b[1]) * (a[2] + b[2]);
+    ny += (a[2] - b[2]) * (a[0] + b[0]);
+    nz += (a[0] - b[0]) * (a[1] + b[1]);
+  }
+  const length = Math.hypot(nx, ny, nz);
+  return length > 1e-12 ? [nx / length, ny / length, nz / length] : null;
+}
+
 function triangulatedPatchHalf(
   x0: number,
   x1: number,
@@ -400,6 +469,17 @@ describe("optimizeMeshPolygons", () => {
         lossless.length + DEFAULT_SEAM_FACET_SPLIT_OPTIONS.budget,
       );
     }
+  });
+
+  it("does not turn castle seam overlap repairs into concave render polygons", () => {
+    const raw = parseObj(loadObjGalleryFile("castle.obj"), { targetSize: 60 }).polygons;
+
+    const lossless = optimizeMeshPolygons(raw, { meshResolution: "lossless" });
+    const lossy = optimizeMeshPolygons(raw, { meshResolution: "lossy" });
+
+    expect(strictNonConvexPolygonCount(lossy)).toBeLessThanOrEqual(
+      strictNonConvexPolygonCount(lossless) + 1,
+    );
   });
 
   it("does not keep searching lossy candidates after reaching one polygon", () => {
