@@ -711,6 +711,9 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
           d={d}
           fill={`rgb(${parsed[0]},${parsed[1]},${parsed[2]})`}
           fillRule="nonzero"
+          stroke={`rgb(${parsed[0]},${parsed[1]},${parsed[2]})`}
+          strokeWidth="2"
+          strokeLinejoin="round"
           opacity={shadowOpacity.toFixed(4)}
         />
       </svg>

@@ -1289,8 +1289,16 @@ export function createPolyScene(
 
     const path = doc.createElementNS(svgNS, "path");
     path.setAttribute("d", d);
-    path.setAttribute("fill", `rgb(${r},${g},${b})`);
+    const fillColor = `rgb(${r},${g},${b})`;
+    path.setAttribute("fill", fillColor);
     path.setAttribute("fill-rule", "nonzero");
+    // Hairline stroke in the same color as the fill: covers the
+    // sub-pixel cracks between adjacent projected polygons (their shared
+    // edges don't rasterize exactly under nonzero fill, leaving visible
+    // 1-px slivers when zoomed out). Round joins smooth sharp corners.
+    path.setAttribute("stroke", fillColor);
+    path.setAttribute("stroke-width", "2");
+    path.setAttribute("stroke-linejoin", "round");
     path.setAttribute("opacity", opacity.toFixed(4));
     svg.appendChild(path);
 
