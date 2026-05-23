@@ -19,6 +19,8 @@ npm install @layoutit/polycss-vue
 npm install @layoutit/polycss
 ```
 
+<img width="2500" height="1145" alt="polycss-intro" src="https://github.com/user-attachments/assets/0e5df0d8-04a8-4e50-8e3a-1097a96ce42f" />
+
 You can also load polycss directly from a CDN. Here is a minimal custom-element scene:
 
 ```html
@@ -31,8 +33,6 @@ You can also load polycss directly from a CDN. Here is a minimal custom-element 
   </poly-scene>
 </poly-camera>
 ```
-
-<img width="2500" height="1145" alt="polycss-intro" src="https://github.com/user-attachments/assets/0e5df0d8-04a8-4e50-8e3a-1097a96ce42f" />
 
 ## Framework Components
 
