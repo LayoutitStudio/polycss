@@ -172,6 +172,9 @@ const TRUE_GAP_OVERLAP_AMOUNT_RATIO = 0.175;
 const DEFAULT_TRUE_GAP_OVERLAP_PX = 1.25;
 const NEAR_SEAM_SWEEP_RECORD_LIMIT = 10000;
 const NEAR_SEAM_SWEEP_PAIR_LIMIT = 2_000_000;
+const NEAR_SEAM_EXTENDED_SWEEP_PAIR_LIMIT = 25_000_000;
+const NEAR_SEAM_GRID_AVG_CELLS_PER_RECORD_LIMIT = 256;
+const NEAR_SEAM_GRID_MAX_CELLS_PER_RECORD_LIMIT = 8192;
 const EPS = 1e-6;
 const TOPOLOGY_EPS = 1e-4;
 
@@ -731,6 +734,8 @@ function buildNearSeamEdgeAmounts(
     }
   };
 
+  const cellSize = Math.max(MAX_NEAR_SEAM_GAP_PX * 2, maxGap * 2);
+
   if (records.length <= NEAR_SEAM_SWEEP_RECORD_LIMIT) {
     const sorted = [...records].sort((a, b) => a.minX - b.minX);
     const sweepEnds = new Int32Array(sorted.length);
@@ -742,9 +747,15 @@ function buildNearSeamEdgeAmounts(
       while (end < sorted.length && sorted[end].minX <= maxX) end += 1;
       sweepEnds[i] = end;
       sweepPairCount += end - i - 1;
-      if (sweepPairCount > NEAR_SEAM_SWEEP_PAIR_LIMIT) break;
+      if (sweepPairCount > NEAR_SEAM_EXTENDED_SWEEP_PAIR_LIMIT) break;
     }
-    if (sweepPairCount <= NEAR_SEAM_SWEEP_PAIR_LIMIT) {
+    if (
+      sweepPairCount <= NEAR_SEAM_SWEEP_PAIR_LIMIT ||
+      (
+        sweepPairCount <= NEAR_SEAM_EXTENDED_SWEEP_PAIR_LIMIT &&
+        shouldUseExtendedSweep(records, cellSize, maxGap)
+      )
+    ) {
       for (let i = 0; i + 1 < sorted.length; i += 1) {
         for (let j = i + 1; j < sweepEnds[i]; j += 1) {
           measurePair(sorted[i], sorted[j]);
@@ -754,7 +765,6 @@ function buildNearSeamEdgeAmounts(
     }
   }
 
-  const cellSize = Math.max(MAX_NEAR_SEAM_GAP_PX * 2, maxGap * 2);
   const cells = new Map<string, EdgeRecord[]>();
   for (const record of records) {
     addRecordToSegmentCells(cells, record, cellSize, maxGap);
@@ -819,6 +829,34 @@ function addRecordToSegmentCells(
       }
     }
   }
+}
+
+function recordSegmentCellCount(record: EdgeRecord, cellSize: number, padding: number): number {
+  const minX = record.minX - padding;
+  const minY = record.minY - padding;
+  const minZ = record.minZ - padding;
+  const maxX = record.maxX + padding;
+  const maxY = record.maxY + padding;
+  const maxZ = record.maxZ + padding;
+  const [minCx, minCy, minCz] = cellCoords([minX, minY, minZ], cellSize);
+  const [maxCx, maxCy, maxCz] = cellCoords([maxX, maxY, maxZ], cellSize);
+  return (maxCx - minCx + 1) * (maxCy - minCy + 1) * (maxCz - minCz + 1);
+}
+
+function shouldUseExtendedSweep(
+  records: EdgeRecord[],
+  cellSize: number,
+  padding: number,
+): boolean {
+  let totalCells = 0;
+  let maxCells = 0;
+  for (const record of records) {
+    const cells = recordSegmentCellCount(record, cellSize, padding);
+    totalCells += cells;
+    if (cells > maxCells) maxCells = cells;
+    if (maxCells > NEAR_SEAM_GRID_MAX_CELLS_PER_RECORD_LIMIT) return true;
+  }
+  return totalCells / Math.max(1, records.length) > NEAR_SEAM_GRID_AVG_CELLS_PER_RECORD_LIMIT;
 }
 
 function dotFromPointToEdge(point: Vec3, edgeOrigin: Vec3, edgeDir: Vec3): number {

@@ -8,11 +8,15 @@ afterEach(() => {
 });
 
 function installSolidTextureEnv(color: [number, number, number, number]): void {
+  installSolidTextureDataEnv(1, 1, color);
+}
+
+function installSolidTextureDataEnv(width: number, height: number, data: ArrayLike<number>): void {
   class FakeImage {
-    naturalWidth = 1;
-    naturalHeight = 1;
-    width = 1;
-    height = 1;
+    naturalWidth = width;
+    naturalHeight = height;
+    width = width;
+    height = height;
     onload: (() => void) | null = null;
     onerror: (() => void) | null = null;
 
@@ -33,7 +37,7 @@ function installSolidTextureEnv(color: [number, number, number, number]): void {
           return {
             drawImage() {},
             getImageData() {
-              return { data: color };
+              return { data };
             },
           };
         },
@@ -87,5 +91,85 @@ describe("bakeSolidTextureSamples", () => {
     expect(frame[0].texture).toBeUndefined();
     expect(frame[0].uvs).toBeUndefined();
     expect(frame[0].textureTriangles).toBeUndefined();
+  });
+
+  it("uses texture wrap when baking repeated UVs into solid colors", async () => {
+    installSolidTextureDataEnv(2, 1, [
+      10, 20, 30, 255,
+      0, 0, 0, 0,
+    ]);
+    const uv: [number, number] = [1.25, 0.5];
+    const polygon: Polygon = {
+      vertices: [[0, 0, 0], [1, 0, 0], [0, 1, 0]],
+      color: "#000000",
+      texture: "texture.png",
+      textureWrap: { s: "repeat", t: "repeat" },
+      uvs: [uv, uv, uv],
+      textureTriangles: [{ uvs: [uv, uv, uv] }],
+    };
+    const result: ParseResult = {
+      polygons: [polygon],
+      objectUrls: [],
+      dispose() {},
+      warnings: [],
+    };
+
+    const baked = await bakeSolidTextureSamples(result);
+
+    expect(baked.polygons[0].color).toBe("#0a141e");
+    expect(baked.polygons[0].texture).toBeUndefined();
+    expect(baked.polygons[0].textureWrap).toBeUndefined();
+  });
+
+  it("uses the polygon base color for opaque texture padding", async () => {
+    installSolidTextureDataEnv(1, 1, [0, 0, 0, 0]);
+    const uv: [number, number] = [0.5, 0.5];
+    const polygon: Polygon = {
+      vertices: [[0, 0, 0], [1, 0, 0], [0, 1, 0]],
+      color: "#fef1e2",
+      texture: "texture.png",
+      textureAlphaMode: "opaque",
+      uvs: [uv, uv, uv],
+      textureTriangles: [{ uvs: [uv, uv, uv] }],
+    };
+    const result: ParseResult = {
+      polygons: [polygon],
+      objectUrls: [],
+      dispose() {},
+      warnings: [],
+    };
+
+    const baked = await bakeSolidTextureSamples(result);
+
+    expect(baked.polygons[0].color).toBe("#fef1e2");
+    expect(baked.polygons[0].texture).toBeUndefined();
+    expect(baked.polygons[0].textureAlphaMode).toBeUndefined();
+  });
+
+  it("uses the polygon base color for mixed opaque texture padding", async () => {
+    installSolidTextureDataEnv(2, 1, [
+      254, 241, 226, 255,
+      0, 0, 0, 0,
+    ]);
+    const polygon: Polygon = {
+      vertices: [[0, 0, 0], [1, 0, 0], [0, 1, 0]],
+      color: "#fef1e2",
+      texture: "texture.png",
+      textureAlphaMode: "opaque",
+      uvs: [[0.25, 0.5], [0.75, 0.5], [0.75, 0.5]],
+      textureTriangles: [{ uvs: [[0.25, 0.5], [0.75, 0.5], [0.75, 0.5]] }],
+    };
+    const result: ParseResult = {
+      polygons: [polygon],
+      objectUrls: [],
+      dispose() {},
+      warnings: [],
+    };
+
+    const baked = await bakeSolidTextureSamples(result);
+
+    expect(baked.polygons[0].color).toBe("#fef1e2");
+    expect(baked.polygons[0].texture).toBeUndefined();
+    expect(baked.polygons[0].textureAlphaMode).toBeUndefined();
   });
 });

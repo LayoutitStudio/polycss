@@ -166,6 +166,19 @@ describe("normalizePolygons — texture handling", () => {
     expect(r.polygons[0].color).toBe("#abcdef");
     expect(r.polygons[0].texture).toBe("t.png");
   });
+
+  it("preserves texture wrap metadata with textured polygons", () => {
+    const r = normalizePolygons([
+      {
+        vertices: [[0, 0, 0], [1, 0, 0], [0, 1, 0]],
+        texture: "t.png",
+        textureWrap: { s: "repeat", t: "mirrored-repeat" },
+        textureAlphaMode: "opaque",
+      },
+    ]);
+    expect(r.polygons[0].textureWrap).toEqual({ s: "repeat", t: "mirrored-repeat" });
+    expect(r.polygons[0].textureAlphaMode).toBe("opaque");
+  });
 });
 
 describe("normalizePolygons — data sanitization", () => {

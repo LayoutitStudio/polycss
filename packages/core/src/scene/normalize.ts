@@ -198,6 +198,16 @@ function sanitizeFields(p: Polygon, originalIndex: number, warnings: string[]): 
 
   if (texture !== undefined) {
     out.texture = texture;
+    if (p.textureWrap) {
+      out.textureWrap = { ...p.textureWrap };
+    }
+    if (p.textureAlphaMode) {
+      out.textureAlphaMode = p.textureAlphaMode;
+    }
+  }
+
+  if (p.doubleSided === true) {
+    out.doubleSided = true;
   }
 
   // Rule: uvs.length !== vertices.length → strip uvs, warn.

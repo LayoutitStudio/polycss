@@ -3,8 +3,8 @@
  * Deep corpus report for meshResolution="lossy".
  *
  * This is a count/quality bench, not a browser FPS bench. It scans gallery
- * GLB/GLTF/OBJ assets, compares lossless/current lossy/forced lossy candidate
- * families, and records crack-budget diagnostics for the forced candidates.
+ * GLB/GLTF/OBJ assets, compares lossless/current lossy output, and records
+ * current-path timing and crack diagnostics.
  *
  * Usage:
  *   node bench/lossy-corpus-bench.mjs
@@ -12,7 +12,6 @@
  *   node bench/lossy-corpus-bench.mjs --json bench/results/lossy-corpus.json
  *   node bench/lossy-corpus-bench.mjs --from-json bench/results/lossy-corpus.json --opportunities
  *   node bench/lossy-corpus-bench.mjs --from-json after.json --compare before.json
- *   node bench/lossy-corpus-bench.mjs --models animated-shark --sweep
  *   node bench/lossy-corpus-bench.mjs --root /tmp/polycss-model-corpus --json /tmp/corpus.json
  */
 import { createRequire } from "node:module";
@@ -45,7 +44,7 @@ const optStr = (name, dflt = "") => {
 };
 
 if (hasFlag("help")) {
-  console.log(`Usage: node bench/lossy-corpus-bench.mjs [--models filter] [--json file] [--sweep]
+  console.log(`Usage: node bench/lossy-corpus-bench.mjs [--models filter] [--json file]
        node bench/lossy-corpus-bench.mjs --from-json file [--opportunities] [--compare baseline]
 
 Options:
@@ -57,7 +56,6 @@ Options:
   --compare <file>      Compare this run/JSON against a prior corpus JSON.
   --opportunities       Print ranked lossy opportunity and timing tables.
   --quick               Only compute raw/lossless/current stats and current timings.
-  --sweep               Run an expanded lossy candidate sweep. Use with --models first.
   --limit <n>           Number of rows to print for opportunity/compare tables.
   --file-offset <n>     Skip the first n selected files before scanning.
   --file-limit <n>      Scan at most n selected files.
@@ -73,52 +71,9 @@ const FILE_LIMIT = Math.max(0, Number(optStr("file-limit", "0")) || 0);
 const PROGRESS_EVERY = Math.max(0, Number(optStr("progress", "0")) || 0);
 const MODEL_TIMEOUT_MS = Math.max(0, Number(optStr("timeout-ms", optStr("timeout", "0"))) || 0);
 const QUICK_MODE = hasFlag("quick");
-const INCLUDE_SWEEP = hasFlag("sweep");
 const sourceRoot = optStr("root") ? resolve(repoRoot, optStr("root")) : galleryRoot;
-
-const FORCED_OPTIONS = [
-  ["pair-tight", { maxAngleDeg: 15, maxPlaneDisplacement: 0.35, maxBoundaryDisplacement: 0.02, isolatedPairs: true }],
-  ["pair-default", { maxAngleDeg: 15, maxPlaneDisplacement: 0.35, maxBoundaryDisplacement: 0.0725, isolatedPairs: true }],
-  ["pair-wide", { maxAngleDeg: 45, maxPlaneDisplacement: 1, maxBoundaryDisplacement: 0.0725, isolatedPairs: true }],
-  ["group-default", { maxAngleDeg: 15, maxPlaneDisplacement: 0.35, maxBoundaryDisplacement: 0.0725, isolatedPairs: false }],
-  ["group-wide", { maxAngleDeg: 45, maxPlaneDisplacement: 1, maxBoundaryDisplacement: 0.0725, isolatedPairs: false }],
-];
-
-const SWEEP_BUDGETS = [
-  { maxAngleDeg: 8, maxPlaneDisplacement: 0.12, maxBoundaryDisplacement: 0.015 },
-  { maxAngleDeg: 12, maxPlaneDisplacement: 0.25, maxBoundaryDisplacement: 0.02 },
-  { maxAngleDeg: 15, maxPlaneDisplacement: 0.35, maxBoundaryDisplacement: 0.04 },
-  { maxAngleDeg: 20, maxPlaneDisplacement: 0.5, maxBoundaryDisplacement: 0.04 },
-  { maxAngleDeg: 25, maxPlaneDisplacement: 0.65, maxBoundaryDisplacement: 0.055 },
-  { maxAngleDeg: 35, maxPlaneDisplacement: 0.85, maxBoundaryDisplacement: 0.0725 },
-  { maxAngleDeg: 45, maxPlaneDisplacement: 1, maxBoundaryDisplacement: 0.0725 },
-];
-
-function sweepOptions(losslessStats) {
-  const out = [];
-  for (const budget of SWEEP_BUDGETS) {
-    out.push([
-      `pair-a${budget.maxAngleDeg}-p${budget.maxPlaneDisplacement}-b${budget.maxBoundaryDisplacement}`,
-      { ...budget, isolatedPairs: true },
-    ]);
-    if (shouldMeasureGroupCandidates(losslessStats)) {
-      out.push([
-        `group-a${budget.maxAngleDeg}-p${budget.maxPlaneDisplacement}-b${budget.maxBoundaryDisplacement}`,
-        { ...budget, isolatedPairs: false },
-      ]);
-    }
-  }
-  return out;
-}
-
-function candidateKey(options) {
-  return [
-    options.maxAngleDeg,
-    options.maxPlaneDisplacement,
-    options.maxBoundaryDisplacement,
-    options.isolatedPairs,
-  ].join("|");
-}
+const LOSSY_CRACK_DIAGNOSTIC_BOUNDARY = 0.04;
+const CRACK_SEARCH_MULTIPLIER = 2.6;
 
 function walk(dir, exts) {
   const out = [];
@@ -458,15 +413,15 @@ function indexedInternalEdgeGap(segment, index, tolerance) {
   return best;
 }
 
-function crackTolerances(polygons, maxBoundaryDisplacement = 0.0725) {
+function crackTolerances(polygons, maxBoundaryDisplacement = LOSSY_CRACK_DIAGNOSTIC_BOUNDARY) {
   const diagonal = modelDiagonal(polygons);
   const baseTolerance = diagonal > 0 ? Math.min(0.08, Math.max(0.001, diagonal * 0.001)) : 0;
   const tolerance = Math.max(baseTolerance, maxBoundaryDisplacement * 1.05);
-  const searchTolerance = Math.max(tolerance, baseTolerance * 2.6, maxBoundaryDisplacement * 2.6);
+  const searchTolerance = Math.max(tolerance, baseTolerance * CRACK_SEARCH_MULTIPLIER, maxBoundaryDisplacement * CRACK_SEARCH_MULTIPLIER);
   return { baseTolerance, tolerance, searchTolerance };
 }
 
-function crackMetrics(sourcePolygons, candidatePolygons, maxBoundaryDisplacement = 0.0725) {
+function crackMetrics(sourcePolygons, candidatePolygons, maxBoundaryDisplacement = LOSSY_CRACK_DIAGNOSTIC_BOUNDARY) {
   const sourceEdges = collectEdgeStats(sourcePolygons);
   const candidateEdges = collectEdgeStats(candidatePolygons);
   const { baseTolerance, tolerance, searchTolerance } = crackTolerances(sourcePolygons, maxBoundaryDisplacement);
@@ -504,44 +459,40 @@ function crackMetrics(sourcePolygons, candidatePolygons, maxBoundaryDisplacement
   return metrics;
 }
 
-function crackLimits(sourcePolygons, reference, maxBoundaryDisplacement = 0.0725) {
-  const { tolerance } = crackTolerances(sourcePolygons, maxBoundaryDisplacement);
-  const gapSlack = Math.max(tolerance * 0.1, 1e-6);
-  const referenceGapLimit = reference.maxGap + gapSlack;
-  const maxGap = tolerance <= 0.08
-    ? Math.max(referenceGapLimit, Math.min(tolerance * 0.75, 0.04))
-    : referenceGapLimit;
-  const lengthSlack = Math.max(tolerance * 2, reference.internalBoundaryLength * 0.15);
-  const excessSlack = Math.max(tolerance * 2, reference.excessBoundaryLength * 0.15);
+function compactCrackMetrics(metrics) {
   return {
-    maxGap,
-    internalBoundaryLength: reference.internalBoundaryLength + lengthSlack,
-    excessBoundaryLength: reference.excessBoundaryLength + excessSlack,
-  };
-}
-
-function compactCrack(metrics, limits) {
-  const pass =
-    metrics.maxGap <= limits.maxGap &&
-    metrics.internalBoundaryLength <= limits.internalBoundaryLength &&
-    metrics.excessBoundaryLength <= limits.excessBoundaryLength;
-  const failureReasons = [];
-  if (metrics.maxGap > limits.maxGap) failureReasons.push("gap");
-  if (metrics.internalBoundaryLength > limits.internalBoundaryLength) failureReasons.push("internal");
-  if (metrics.excessBoundaryLength > limits.excessBoundaryLength) failureReasons.push("excess");
-  return {
-    pass,
-    failureReasons,
     maxGap: Number(metrics.maxGap.toFixed(6)),
-    maxGapLimit: Number(limits.maxGap.toFixed(6)),
     internalBoundaryLength: Number(metrics.internalBoundaryLength.toFixed(2)),
-    internalBoundaryLimit: Number(limits.internalBoundaryLength.toFixed(2)),
     excessBoundaryLength: Number(metrics.excessBoundaryLength.toFixed(2)),
-    excessBoundaryLimit: Number(limits.excessBoundaryLength.toFixed(2)),
+    baseTolerance: Number(metrics.baseTolerance.toFixed(6)),
+    tolerance: Number(metrics.tolerance.toFixed(6)),
+    searchTolerance: Number(metrics.searchTolerance.toFixed(6)),
+    nearInternal: metrics.nearInternal,
     over04: metrics.over04,
     over08: metrics.over08,
     over12: metrics.over12,
-    nearInternal: metrics.nearInternal,
+  };
+}
+
+function crackDelta(current, reference) {
+  return {
+    maxGap: Number((current.maxGap - reference.maxGap).toFixed(6)),
+    internalBoundaryLength: Number((current.internalBoundaryLength - reference.internalBoundaryLength).toFixed(2)),
+    excessBoundaryLength: Number((current.excessBoundaryLength - reference.excessBoundaryLength).toFixed(2)),
+    nearInternal: current.nearInternal - reference.nearInternal,
+    over04: current.over04 - reference.over04,
+    over08: current.over08 - reference.over08,
+    over12: current.over12 - reference.over12,
+  };
+}
+
+function crackReport(sourcePolygons, losslessPolygons, currentPolygons) {
+  const lossless = compactCrackMetrics(crackMetrics(sourcePolygons, losslessPolygons));
+  const current = compactCrackMetrics(crackMetrics(sourcePolygons, currentPolygons));
+  return {
+    lossless,
+    current,
+    delta: crackDelta(current, lossless),
   };
 }
 
@@ -555,26 +506,6 @@ function timed(fn) {
   return {
     value,
     ms: Number((performance.now() - started).toFixed(1)),
-  };
-}
-
-function shouldMeasureGroupCandidates(losslessStats) {
-  return losslessStats.count <= 800;
-}
-
-function summarizeCandidate(name, raw, losslessStats, referenceCracks, approximateMerge) {
-  const run = timed(() => optimizeMeshPolygons(raw, { meshResolution: "lossy", approximateMerge }));
-  const polygons = run.value;
-  const stats = polygonStats(polygons);
-  const metrics = crackMetrics(raw, polygons, approximateMerge.maxBoundaryDisplacement);
-  const limits = crackLimits(raw, referenceCracks, approximateMerge.maxBoundaryDisplacement);
-  return {
-    name,
-    count: stats.count,
-    cost: stats.cost,
-    ms: run.ms,
-    dropPct: Number(pctDrop(stats.cost, losslessStats.cost).toFixed(1)),
-    crack: compactCrack(metrics, limits),
   };
 }
 
@@ -592,6 +523,7 @@ async function summarizeModel(modelPath) {
   const rawStats = polygonStats(raw);
   const losslessStats = polygonStats(lossless);
   const currentStats = polygonStats(current);
+  const cracks = QUICK_MODE ? null : crackReport(raw, lossless, current);
   if (QUICK_MODE) {
     const currentDropPct = pctDrop(currentStats.cost, losslessStats.cost);
     return {
@@ -599,13 +531,9 @@ async function summarizeModel(modelPath) {
       ext: extname(modelPath).slice(1).toLowerCase(),
       raw: rawStats,
       lossless: losslessStats,
-      noApprox: null,
       current: currentStats,
       currentDropPct: Number(currentDropPct.toFixed(1)),
-      forced: [],
-      sweep: null,
-      bestForced: null,
-      bestPassingForced: null,
+      cracks: null,
       classification: currentStats.cost < losslessStats.cost
         ? "auto-gain"
         : "no-observed-geometry-potential",
@@ -613,45 +541,11 @@ async function summarizeModel(modelPath) {
       timings: {
         parseMs,
         losslessMs: losslessRun.ms,
-        noApproxMs: 0,
         currentMs: currentRun.ms,
-        forcedMs: 0,
-        sweepMs: 0,
         animatedMs: 0,
         totalMs: Number((performance.now() - started).toFixed(1)),
       },
     };
-  }
-
-  const noApproxRun = timed(() => optimizeMeshPolygons(raw, { meshResolution: "lossy", approximateMerge: false }));
-  const noApprox = noApproxRun.value;
-  const noApproxStats = polygonStats(noApprox);
-  const referenceCracks = crackMetrics(raw, noApprox);
-
-  const forced = [];
-  let forcedMs = 0;
-  for (const [name, approximateMerge] of FORCED_OPTIONS) {
-    if (name.startsWith("group") && !shouldMeasureGroupCandidates(losslessStats)) continue;
-    const candidate = summarizeCandidate(name, raw, losslessStats, referenceCracks, approximateMerge);
-    forcedMs += candidate.ms;
-    forced.push(candidate);
-  }
-  forced.sort((a, b) => a.cost - b.cost || a.count - b.count);
-
-  let sweep = null;
-  let sweepMs = 0;
-  if (INCLUDE_SWEEP) {
-    const seen = new Set(FORCED_OPTIONS.map(([, options]) => candidateKey(options)));
-    sweep = [];
-    for (const [name, approximateMerge] of sweepOptions(losslessStats)) {
-      const key = candidateKey(approximateMerge);
-      if (seen.has(key)) continue;
-      seen.add(key);
-      const candidate = summarizeCandidate(name, raw, losslessStats, referenceCracks, approximateMerge);
-      sweepMs += candidate.ms;
-      sweep.push(candidate);
-    }
-    sweep.sort((a, b) => a.cost - b.cost || a.count - b.count || a.ms - b.ms);
   }
 
   let animated = null;
@@ -668,39 +562,25 @@ async function summarizeModel(modelPath) {
     };
   }
 
-  const bestForced = forced[0] ?? null;
-  const bestPassingForced = forced.find((candidate) => candidate.crack.pass) ?? null;
   const currentDropPct = pctDrop(currentStats.cost, losslessStats.cost);
-  const classification =
-    currentStats.cost >= losslessStats.cost && bestForced && bestForced.cost < losslessStats.cost
-      ? "blocked-no-auto-gain"
-      : bestForced && currentStats.cost < losslessStats.cost && bestForced.cost < currentStats.cost - Math.max(1, currentStats.cost * 0.05)
-        ? "auto-gain-but-forced-potential"
-        : currentStats.cost < losslessStats.cost
-          ? "auto-gain"
-          : "no-observed-geometry-potential";
+  const classification = currentStats.cost < losslessStats.cost
+    ? "auto-gain"
+    : "no-observed-geometry-potential";
 
   return {
     model: label,
     ext: extname(modelPath).slice(1).toLowerCase(),
     raw: rawStats,
     lossless: losslessStats,
-    noApprox: noApproxStats,
     current: currentStats,
     currentDropPct: Number(currentDropPct.toFixed(1)),
-    forced,
-    sweep,
-    bestForced,
-    bestPassingForced,
+    cracks,
     classification,
     animated,
     timings: {
       parseMs,
       losslessMs: losslessRun.ms,
-      noApproxMs: noApproxRun.ms,
       currentMs: currentRun.ms,
-      forcedMs: Number(forcedMs.toFixed(1)),
-      sweepMs: Number(sweepMs.toFixed(1)),
       animatedMs,
       totalMs: Number((performance.now() - started).toFixed(1)),
     },
@@ -724,7 +604,6 @@ function summarizeModelInWorker(modelPath) {
   ];
   if (optStr("root")) args.push("--root", sourceRoot);
   if (QUICK_MODE) args.push("--quick");
-  if (INCLUDE_SWEEP) args.push("--sweep");
 
   const result = spawnSync(process.execPath, args, {
     cwd: repoRoot,
@@ -750,6 +629,7 @@ function summarizeRows(rows, errors, elapsedMs) {
   const byClass = {};
   for (const row of rows) byClass[row.classification] = (byClass[row.classification] ?? 0) + 1;
   const total = (field) => rows.reduce((sum, row) => sum + row[field].count, 0);
+  const crackRows = rows.filter((row) => row.cracks);
   return {
     scanned: rows.length,
     errors: errors.length,
@@ -759,35 +639,18 @@ function summarizeRows(rows, errors, elapsedMs) {
       raw: total("raw"),
       lossless: total("lossless"),
       current: total("current"),
-      bestForced: rows.reduce((sum, row) => sum + (row.bestForced?.count ?? row.current.count), 0),
     },
-    blocked: rows
-      .filter((row) => row.classification === "blocked-no-auto-gain")
-      .sort((a, b) => (b.bestForced?.dropPct ?? 0) - (a.bestForced?.dropPct ?? 0))
-      .map((row) => ({
-        model: row.model,
-        lossless: row.lossless.count,
-        current: row.current.count,
-        bestForced: row.bestForced?.count,
-        forcedDropPct: row.bestForced?.dropPct,
-        crack: row.bestForced?.crack,
-      })),
-    forcedPotentialTop: rows
-      .filter((row) => row.classification === "auto-gain-but-forced-potential")
-      .sort((a, b) =>
-        ((b.bestForced?.dropPct ?? 0) - b.currentDropPct) -
-        ((a.bestForced?.dropPct ?? 0) - a.currentDropPct)
-      )
-      .slice(0, 20)
-      .map((row) => ({
-        model: row.model,
-        lossless: row.lossless.count,
-        current: row.current.count,
-        currentDropPct: row.currentDropPct,
-        bestForced: row.bestForced?.count,
-        forcedDropPct: row.bestForced?.dropPct,
-        crack: row.bestForced?.crack,
-      })),
+    cracks: crackRows.length > 0
+      ? {
+          measured: crackRows.length,
+          maxCurrentGap: Math.max(...crackRows.map((row) => row.cracks.current.maxGap)),
+          maxCurrentInternalBoundaryLength: Math.max(...crackRows.map((row) => row.cracks.current.internalBoundaryLength)),
+          totalCurrentInternalBoundaryLength: Number(crackRows.reduce((sum, row) => sum + row.cracks.current.internalBoundaryLength, 0).toFixed(2)),
+          totalInternalBoundaryDelta: Number(crackRows.reduce((sum, row) => sum + row.cracks.delta.internalBoundaryLength, 0).toFixed(2)),
+          totalOver04Delta: crackRows.reduce((sum, row) => sum + row.cracks.delta.over04, 0),
+          totalOver08Delta: crackRows.reduce((sum, row) => sum + row.cracks.delta.over08, 0),
+        }
+      : null,
   };
 }
 
@@ -803,71 +666,39 @@ function totalTiming(rows, field) {
   return Number(rows.reduce((sum, row) => sum + (row.timings?.[field] ?? 0), 0).toFixed(1));
 }
 
-function bestCandidate(row, field) {
-  const candidates = row[field] ?? [];
-  return candidates.length > 0 ? candidates[0] : null;
-}
-
 function printCorpusSummary(output) {
   const { summary } = output;
   console.log("lossy corpus benchmark");
   console.log(`models=${summary.scanned} errors=${summary.errors} elapsedMs=${summary.elapsedMs}`);
   console.log(`classes=${JSON.stringify(summary.byClass)}`);
-  console.log(`aggregate raw=${summary.aggregate.raw} lossless=${summary.aggregate.lossless} current=${summary.aggregate.current} forced=${summary.aggregate.bestForced}`);
+  console.log(`aggregate raw=${summary.aggregate.raw} lossless=${summary.aggregate.lossless} current=${summary.aggregate.current}`);
+  if (summary.cracks) {
+    console.log(`cracks measured=${summary.cracks.measured} maxGap=${summary.cracks.maxCurrentGap} totalInternal=${summary.cracks.totalCurrentInternalBoundaryLength} deltaInternal=${summary.cracks.totalInternalBoundaryDelta} deltaOver04=${summary.cracks.totalOver04Delta} deltaOver08=${summary.cracks.totalOver08Delta}`);
+  }
   if (output.rows?.length) {
     console.log(`costs lossless=${totalCost(output.rows, "lossless")} current=${totalCost(output.rows, "current")}`);
     if (output.rows.some((row) => row.timings)) {
-      console.log(`timings currentMs=${totalTiming(output.rows, "currentMs")} forcedMs=${totalTiming(output.rows, "forcedMs")} sweepMs=${totalTiming(output.rows, "sweepMs")}`);
+      console.log(`timings currentMs=${totalTiming(output.rows, "currentMs")}`);
     }
   }
-  const blocked = summary.blocked ?? [];
-  if (blocked.length === 0) return;
-  console.log("");
-  console.log("blocked no-auto-gain candidates");
-  for (const row of blocked) {
-    console.log(`${row.model}: lossless=${row.lossless} current=${row.current} forced=${row.bestForced} maxGap=${row.crack?.maxGap}/${row.crack?.maxGapLimit}`);
-  }
-}
-
-function opportunityRows(output, candidateField) {
-  return output.rows
-    .map((row) => {
-      const candidate = bestCandidate(row, candidateField);
-      const delta = candidate ? row.current.cost - candidate.cost : 0;
-      return { row, candidate, delta };
-    })
-    .filter((item) => item.candidate && item.delta > 1)
-    .sort((a, b) => b.delta - a.delta);
-}
-
-function failureReasonCounts(output) {
-  const counts = new Map();
-  for (const row of output.rows) {
-    for (const candidate of [...(row.forced ?? []), ...(row.sweep ?? [])]) {
-      if (candidate.crack.pass) continue;
-      const key = candidate.crack.failureReasons.join("+") || "unknown";
-      counts.set(key, (counts.get(key) ?? 0) + 1);
-    }
-  }
-  return [...counts.entries()].sort((a, b) => b[1] - a[1]);
 }
 
 function printOpportunityReport(output, limit = PRINT_LIMIT) {
   console.log("");
   console.log("opportunity report");
-  const forced = opportunityRows(output, "forced");
-  const sweep = opportunityRows(output, "sweep");
-  const printRows = (title, rows) => {
-    if (rows.length === 0) return;
+  const crackRows = [...output.rows]
+    .filter((row) => row.cracks)
+    .sort((a, b) =>
+      b.cracks.delta.internalBoundaryLength - a.cracks.delta.internalBoundaryLength ||
+      b.cracks.current.maxGap - a.cracks.current.maxGap
+    );
+  if (crackRows.length > 0) {
     console.log("");
-    console.log(title);
-    for (const item of rows.slice(0, limit)) {
-      const { row, candidate, delta } = item;
-      console.log(`${row.model}: current=${row.current.cost} candidate=${candidate.cost} delta=${Number(delta.toFixed(2))} ${candidate.name} pass=${candidate.crack.pass} fail=${candidate.crack.failureReasons.join("+") || "-"}`);
+    console.log("largest current crack deltas");
+    for (const row of crackRows.slice(0, limit)) {
+      console.log(`${row.model}: maxGap=${row.cracks.current.maxGap} internalDelta=${row.cracks.delta.internalBoundaryLength} over04Delta=${row.cracks.delta.over04} current=${row.current.count} lossless=${row.lossless.count}`);
     }
-  };
-  printRows("forced potential", forced);
-  printRows("sweep potential", sweep);
+  }
 
   const timingRows = [...output.rows]
     .filter((row) => row.timings)
@@ -878,12 +709,6 @@ function printOpportunityReport(output, limit = PRINT_LIMIT) {
     for (const row of timingRows.slice(0, limit)) {
       console.log(`${row.model}: currentMs=${row.timings.currentMs} current=${row.current.count} lossless=${row.lossless.count}`);
     }
-  }
-
-  const reasons = failureReasonCounts(output);
-  if (reasons.length > 0) {
-    console.log("");
-    console.log(`failed candidate reasons ${JSON.stringify(Object.fromEntries(reasons))}`);
   }
 }
 
@@ -968,7 +793,6 @@ async function runCorpus() {
     rows,
     errors,
     options: {
-      sweep: INCLUDE_SWEEP,
       quick: QUICK_MODE,
       models: optStr("models").trim() || null,
       root: optStr("root") ? sourceRoot : null,

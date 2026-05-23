@@ -6,10 +6,10 @@
  * samples, and reports compositor/style/raster/script cost per cadence bucket.
  *
  * Usage:
- *   node bench/trace-analysis.mjs
- *   node bench/trace-analysis.mjs --mesh ancient-crash-site --runs 3 --dom-samples
- *   node bench/trace-analysis.mjs --mesh obj-house3 --renderer vanilla --label obj-house3-trace
- *   node bench/trace-analysis.mjs --page nonvoxel --mesh glb:Elephant.glb --variant order-tile4 --no-trace
+ *   node .agents/skills/chrome-capture-trace/scripts/polycss-trace-analysis.mjs
+ *   node .agents/skills/chrome-capture-trace/scripts/polycss-trace-analysis.mjs --mesh ancient-crash-site --runs 3 --dom-samples
+ *   node .agents/skills/chrome-capture-trace/scripts/polycss-trace-analysis.mjs --mesh obj-house3 --renderer vanilla --label obj-house3-trace
+ *   node .agents/skills/chrome-capture-trace/scripts/polycss-trace-analysis.mjs --page nonvoxel --mesh glb:Elephant.glb --variant order-tile4 --no-trace
  */
 import { createServer } from "node:http";
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -17,12 +17,12 @@ import { readFile } from "node:fs/promises";
 import { dirname, extname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
-import { chromiumArgsWithGpuDefault } from "./chromium-defaults.mjs";
-import { getNonVoxelVariantParams, knownNonVoxelVariantIds } from "./nonvoxel-variants.mjs";
+import { chromiumArgsWithGpuDefault } from "../../../../bench/chromium-defaults.mjs";
+import { getNonVoxelVariantParams, knownNonVoxelVariantIds } from "../../../../bench/nonvoxel-variants.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const repoRoot = resolve(__dirname, "..");
-const benchDir = resolve(repoRoot, "bench");
+const benchDir = resolve(__dirname, "../../../../bench");
+const repoRoot = resolve(benchDir, "..");
 const galleryDir = resolve(repoRoot, "website/public/gallery");
 
 const argv = process.argv.slice(2);
@@ -61,6 +61,7 @@ const WARMUP_MS = optNum("warmup", 1500);
 const SAMPLE_MS = optNum("sample", 6000);
 const RUNS = optNum("runs", 1);
 const LABEL = optStr("label");
+const SUMMARY_PATH = optStr("summary-out");
 const HEADED = hasFlag("headed");
 const JSON_ONLY = hasFlag("json");
 const TRACE = !hasFlag("no-trace");
@@ -147,7 +148,7 @@ const KEY_EVENTS = [
 ];
 
 function printHelp() {
-  console.log(`Usage: node bench/trace-analysis.mjs [options]
+  console.log(`Usage: node .agents/skills/chrome-capture-trace/scripts/polycss-trace-analysis.mjs [options]
 
 Options:
   --page <name>               perf | nonvoxel. Default: perf
@@ -160,6 +161,7 @@ Options:
   --warmup <ms>               Warmup window. Default: 1500
   --sample <ms>               Trace sample window. Default: 6000
   --label <name>              Write bench/results/<name>.json
+  --summary-out <file>        Write summary JSON to an explicit file
   --no-trace                  Collect rAF bucket stats without Chrome tracing
   --dom-samples               Sample mounted leaf/tag counts by rAF frame
   --headed                    Run headed Chromium
@@ -671,10 +673,10 @@ try {
     sample_ms: SAMPLE_MS,
     runs,
   };
-  if (LABEL) {
-    const dir = resolve(repoRoot, "bench/results");
+  if (LABEL || SUMMARY_PATH) {
+    const file = SUMMARY_PATH ? resolve(SUMMARY_PATH) : resolve(repoRoot, "bench/results", `${LABEL}.json`);
+    const dir = dirname(file);
     mkdirSync(dir, { recursive: true });
-    const file = resolve(dir, `${LABEL}.json`);
     writeFileSync(file, JSON.stringify(out, null, 2) + "\n");
     if (!JSON_ONLY) console.log(`[trace-analysis] wrote ${file}`);
   }

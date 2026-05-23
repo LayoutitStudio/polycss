@@ -150,7 +150,6 @@ export type {
   SeamOverlapOptions,
   CameraCullNormalGroup,
   CameraCullRotation,
-  ApproximateMergeOptions,
   OptimizeMeshPolygonsOptions,
   OptimizeAnimatedMeshPolygonsOptions,
 } from "@layoutit/polycss-core";

@@ -21,7 +21,14 @@
  * polycss's +Z-up without inverting handedness — a single y↔z swap would
  * flip every triangle's winding and break backface culling).
  */
-import type { Polygon, Vec2, Vec3 } from "../types";
+import type {
+  Polygon,
+  PolyTextureAlphaMode,
+  PolyTextureWrap,
+  PolyTextureWrapMode,
+  Vec2,
+  Vec3,
+} from "../types";
 import type { ParseAnimationController, ParseAnimationClip, ParseResult } from "./types";
 
 export interface GltfParseOptions {
@@ -84,12 +91,24 @@ const TYPE_COUNT: Record<string, number> = {
 };
 
 interface GltfAccessor {
-  bufferView: number;
+  bufferView?: number;
   byteOffset?: number;
   componentType: number;
   count: number;
   type: string;
   normalized?: boolean;
+  sparse?: {
+    count: number;
+    indices: {
+      bufferView: number;
+      byteOffset?: number;
+      componentType: number;
+    };
+    values: {
+      bufferView: number;
+      byteOffset?: number;
+    };
+  };
 }
 interface GltfBufferView {
   buffer: number;
@@ -102,6 +121,8 @@ interface GltfTextureInfo {
 }
 interface GltfMaterial {
   name?: string;
+  doubleSided?: boolean;
+  alphaMode?: string;
   pbrMetallicRoughness?: {
     baseColorFactor?: number[];
     baseColorTexture?: GltfTextureInfo;
@@ -114,12 +135,18 @@ interface GltfImage {
 }
 interface GltfTexture {
   source?: number; // index into doc.images[]
+  sampler?: number; // index into doc.samplers[]
+}
+interface GltfSampler {
+  wrapS?: number;
+  wrapT?: number;
 }
 interface GltfPrimitive {
   attributes: { POSITION: number;[k: string]: number };
   indices?: number;
   material?: number;
-  /** glTF mode: 4 = TRIANGLES, 5 = TRIANGLE_STRIP, 6 = TRIANGLE_FAN. We only handle 4. */
+  extensions?: Record<string, unknown>;
+  /** glTF mode: 4 = TRIANGLES, 5 = TRIANGLE_STRIP, 6 = TRIANGLE_FAN. */
   mode?: number;
 }
 interface GltfMesh {
@@ -164,6 +191,12 @@ interface GltfScene {
   nodes?: number[];
 }
 interface GltfDoc {
+  asset?: {
+    version?: string;
+    minVersion?: string;
+  };
+  extensionsRequired?: string[];
+  extensionsUsed?: string[];
   scene?: number;
   scenes?: GltfScene[];
   nodes?: GltfNode[];
@@ -174,6 +207,7 @@ interface GltfDoc {
   buffers?: { byteLength: number; uri?: string }[];
   images?: GltfImage[];
   textures?: GltfTexture[];
+  samplers?: GltfSampler[];
   skins?: GltfSkin[];
   animations?: GltfAnimation[];
 }
@@ -204,23 +238,6 @@ function dataUriToBytes(uri: string): Uint8Array {
   return out;
 }
 
-function resolveJsonBuffer(
-  doc: GltfDoc,
-  resolveBuffer?: (uri: string) => Uint8Array | Promise<Uint8Array>,
-): Uint8Array {
-  const buf = doc.buffers?.[0];
-  if (!buf) throw new Error("parseGltf: JSON doc has no buffers[0]");
-  const uri = buf.uri;
-  if (!uri) throw new Error("parseGltf: JSON doc buffer has no uri (and there's no GLB BIN chunk)");
-  if (uri.startsWith("data:")) return dataUriToBytes(uri);
-  if (resolveBuffer) {
-    const result = resolveBuffer(uri);
-    if (result instanceof Uint8Array) return result;
-    throw new Error("parseGltf: resolveBuffer returned a Promise; use parseGltf via async if your buffers are external");
-  }
-  throw new Error(`parseGltf: external buffer URI "${uri}" — provide options.resolveBuffer`);
-}
-
 function parseGlbContainer(buf: ArrayBuffer): { doc: GltfDoc; bin: Uint8Array | null } {
   const view = new DataView(buf);
   if (view.getUint32(0, true) !== GLB_MAGIC) throw new Error("parseGltf: not a GLB (bad magic)");
@@ -246,30 +263,148 @@ function parseGlbContainer(buf: ArrayBuffer): { doc: GltfDoc; bin: Uint8Array | 
   return { doc, bin };
 }
 
-function readAccessor(doc: GltfDoc, bin: Uint8Array, accessorIdx: number): {
-  array: Float32Array | Uint16Array | Uint32Array | Uint8Array;
+function parseVersionString(value: string | undefined): [number, number] | null {
+  if (!value) return null;
+  const match = /^(\d+)\.(\d+)(?:\D.*)?$/.exec(value);
+  if (!match) return null;
+  return [Number(match[1]), Number(match[2])];
+}
+
+function validateGltfAsset(doc: GltfDoc): void {
+  const version = parseVersionString(doc.asset?.version);
+  if (!version || version[0] !== 2) {
+    throw new Error(`parseGltf: only glTF asset v2 supported (got ${doc.asset?.version ?? "missing"})`);
+  }
+  const minVersion = parseVersionString(doc.asset?.minVersion);
+  if (doc.asset?.minVersion && (!minVersion || minVersion[0] > 2 || (minVersion[0] === 2 && minVersion[1] > 0))) {
+    throw new Error(`parseGltf: glTF asset requires minVersion ${doc.asset.minVersion}`);
+  }
+}
+
+function resolveBuffers(
+  doc: GltfDoc,
+  glbBin: Uint8Array | null,
+  resolveBuffer?: (uri: string) => Uint8Array | Promise<Uint8Array>,
+): Uint8Array[] {
+  const specs = doc.buffers ?? [];
+  return specs.map((buffer, index) => {
+    const uri = buffer.uri;
+    if (uri) {
+      if (uri.startsWith("data:")) return dataUriToBytes(uri);
+      if (resolveBuffer) {
+        const result = resolveBuffer(uri);
+        if (result instanceof Uint8Array) return result;
+        throw new Error("parseGltf: resolveBuffer returned a Promise; use parseGltf via async if your buffers are external");
+      }
+      throw new Error(`parseGltf: external buffer URI "${uri}" — provide options.resolveBuffer`);
+    }
+    if (index === 0 && glbBin) return glbBin;
+    throw new Error(`parseGltf: buffer[${index}] has no uri and no GLB BIN chunk`);
+  });
+}
+
+function resolveBufferView(
+  doc: GltfDoc,
+  buffers: Uint8Array[],
+  bufferViewIdx: number,
+): { buffer: Uint8Array; view: GltfBufferView } {
+  const view = doc.bufferViews?.[bufferViewIdx];
+  const buffer = view ? buffers[view.buffer] : undefined;
+  if (!view || !buffer) throw new Error(`parseGltf: bad bufferView ${bufferViewIdx}`);
+  const offset = view.byteOffset ?? 0;
+  if (offset < 0 || view.byteLength < 0 || offset + view.byteLength > buffer.byteLength) {
+    throw new Error(`parseGltf: bufferView ${bufferViewIdx} outside buffer ${view.buffer}`);
+  }
+  return { buffer, view };
+}
+
+function assertAccessorFits(acc: GltfAccessor, view: GltfBufferView, stride: number, packedBytes: number): void {
+  if (acc.count <= 0) return;
+  const relativeOffset = acc.byteOffset ?? 0;
+  const byteEnd = relativeOffset + stride * (acc.count - 1) + packedBytes;
+  if (relativeOffset < 0 || byteEnd > view.byteLength) {
+    throw new Error("parseGltf: accessor does not fit bufferView");
+  }
+}
+
+type AccessorArray = Float32Array | Uint16Array | Uint32Array | Uint8Array | Int8Array | Int16Array;
+
+function typedArrayFromValues(componentType: number, values: number[], normalized: boolean | undefined): AccessorArray {
+  if (normalized || componentType === 5126) return new Float32Array(values);
+  switch (componentType) {
+    case 5120: return new Int8Array(values);
+    case 5121: return new Uint8Array(values);
+    case 5122: return new Int16Array(values);
+    case 5123: return new Uint16Array(values);
+    case 5125: return new Uint32Array(values);
+    default: throw new Error(`parseGltf: unhandled componentType ${componentType}`);
+  }
+}
+
+function readAccessor(doc: GltfDoc, buffers: Uint8Array[], accessorIdx: number): {
+  array: AccessorArray;
   count: number;
   componentCount: number;
 } {
   const acc = doc.accessors?.[accessorIdx];
-  const view = doc.bufferViews?.[acc?.bufferView ?? -1];
-  if (!acc || !view) throw new Error(`parseGltf: bad accessor/bufferView ${accessorIdx}`);
+  if (!acc) throw new Error(`parseGltf: bad accessor ${accessorIdx}`);
   const bytesPerComponent = COMPONENT_BYTES[acc.componentType];
   const componentCount = TYPE_COUNT[acc.type];
   if (!bytesPerComponent || !componentCount) {
     throw new Error(`parseGltf: unsupported accessor type ${acc.type}/${acc.componentType}`);
   }
+  if (acc.sparse || acc.normalized || acc.bufferView === undefined) {
+    const { values } = readAccessorComponents(doc, buffers, accessorIdx);
+    return { array: typedArrayFromValues(acc.componentType, values, acc.normalized), count: acc.count, componentCount };
+  }
+  const { buffer: bin, view } = resolveBufferView(doc, buffers, acc.bufferView);
   const offset = (view.byteOffset ?? 0) + (acc.byteOffset ?? 0);
   const elements = acc.count * componentCount;
-  const slice = bin.buffer.slice(bin.byteOffset + offset, bin.byteOffset + offset + elements * bytesPerComponent);
+  const packedBytes = bytesPerComponent * componentCount;
+  const stride = view.byteStride ?? packedBytes;
+  assertAccessorFits(acc, view, stride, packedBytes);
 
-  let array: Float32Array | Uint16Array | Uint32Array | Uint8Array;
+  if (stride === packedBytes) {
+    const slice = bin.buffer.slice(
+      bin.byteOffset + offset,
+      bin.byteOffset + offset + elements * bytesPerComponent,
+    );
+    let array: AccessorArray;
+    switch (acc.componentType) {
+      case 5120: array = new Int8Array(slice); break;
+      case 5121: array = new Uint8Array(slice); break;
+      case 5122: array = new Int16Array(slice); break;
+      case 5123: array = new Uint16Array(slice); break;
+      case 5125: array = new Uint32Array(slice); break;
+      case 5126: array = new Float32Array(slice); break;
+      default: throw new Error(`parseGltf: unhandled componentType ${acc.componentType}`);
+    }
+    return { array, count: acc.count, componentCount };
+  }
+
+  let array: AccessorArray;
   switch (acc.componentType) {
-    case 5126: array = new Float32Array(slice); break;
-    case 5123: array = new Uint16Array(slice); break;
-    case 5125: array = new Uint32Array(slice); break;
-    case 5121: array = new Uint8Array(slice); break;
+    case 5120: array = new Int8Array(elements); break;
+    case 5121: array = new Uint8Array(elements); break;
+    case 5122: array = new Int16Array(elements); break;
+    case 5123: array = new Uint16Array(elements); break;
+    case 5125: array = new Uint32Array(elements); break;
+    case 5126: array = new Float32Array(elements); break;
     default: throw new Error(`parseGltf: unhandled componentType ${acc.componentType}`);
+  }
+
+  const data = new DataView(bin.buffer);
+  const start = bin.byteOffset + offset;
+  let write = 0;
+  for (let i = 0; i < acc.count; i++) {
+    const elementOffset = start + i * stride;
+    for (let c = 0; c < componentCount; c++) {
+      array[write++] = readRawComponent(
+        data,
+        elementOffset + c * bytesPerComponent,
+        acc.componentType,
+      );
+    }
   }
   return { array, count: acc.count, componentCount };
 }
@@ -296,29 +431,58 @@ function normalizeComponent(value: number, componentType: number): number {
   }
 }
 
-function readAccessorComponents(doc: GltfDoc, bin: Uint8Array, accessorIdx: number): {
+function readAccessorComponents(doc: GltfDoc, buffers: Uint8Array[], accessorIdx: number): {
   values: number[];
   count: number;
   componentCount: number;
 } {
   const acc = doc.accessors?.[accessorIdx];
-  const bufferView = doc.bufferViews?.[acc?.bufferView ?? -1];
-  if (!acc || !bufferView) throw new Error(`parseGltf: bad accessor/bufferView ${accessorIdx}`);
+  if (!acc) throw new Error(`parseGltf: bad accessor ${accessorIdx}`);
   const bytesPerComponent = COMPONENT_BYTES[acc.componentType];
   const componentCount = TYPE_COUNT[acc.type];
   if (!bytesPerComponent || !componentCount) {
     throw new Error(`parseGltf: unsupported accessor type ${acc.type}/${acc.componentType}`);
   }
-  const start = bin.byteOffset + (bufferView.byteOffset ?? 0) + (acc.byteOffset ?? 0);
-  const stride = bufferView.byteStride ?? bytesPerComponent * componentCount;
-  const data = new DataView(bin.buffer);
-  const values = new Array(acc.count * componentCount);
-  let write = 0;
-  for (let i = 0; i < acc.count; i++) {
-    const elementOffset = start + i * stride;
-    for (let c = 0; c < componentCount; c++) {
-      const raw = readRawComponent(data, elementOffset + c * bytesPerComponent, acc.componentType);
-      values[write++] = acc.normalized ? normalizeComponent(raw, acc.componentType) : raw;
+  const packedBytes = bytesPerComponent * componentCount;
+  const values = new Array(acc.count * componentCount).fill(0);
+  if (acc.bufferView !== undefined) {
+    const { buffer, view } = resolveBufferView(doc, buffers, acc.bufferView);
+    const start = buffer.byteOffset + (view.byteOffset ?? 0) + (acc.byteOffset ?? 0);
+    const stride = view.byteStride ?? packedBytes;
+    assertAccessorFits(acc, view, stride, packedBytes);
+    const data = new DataView(buffer.buffer);
+    let write = 0;
+    for (let i = 0; i < acc.count; i++) {
+      const elementOffset = start + i * stride;
+      for (let c = 0; c < componentCount; c++) {
+        const raw = readRawComponent(data, elementOffset + c * bytesPerComponent, acc.componentType);
+        values[write++] = acc.normalized ? normalizeComponent(raw, acc.componentType) : raw;
+      }
+    }
+  }
+  if (acc.sparse) {
+    const sparse = acc.sparse;
+    const sparseIndices = sparse.indices;
+    const sparseIndexBytes = COMPONENT_BYTES[sparseIndices.componentType];
+    if (
+      sparseIndices.componentType !== 5121 &&
+      sparseIndices.componentType !== 5123 &&
+      sparseIndices.componentType !== 5125
+    ) {
+      throw new Error(`parseGltf: unhandled sparse index componentType ${sparseIndices.componentType}`);
+    }
+    const { buffer: indexBuffer, view: indexView } = resolveBufferView(doc, buffers, sparseIndices.bufferView);
+    const indexStart = indexBuffer.byteOffset + (indexView.byteOffset ?? 0) + (sparseIndices.byteOffset ?? 0);
+    const indexData = new DataView(indexBuffer.buffer);
+    const { buffer: valueBuffer, view: valueView } = resolveBufferView(doc, buffers, sparse.values.bufferView);
+    const valueStart = valueBuffer.byteOffset + (valueView.byteOffset ?? 0) + (sparse.values.byteOffset ?? 0);
+    const valueData = new DataView(valueBuffer.buffer);
+    for (let i = 0; i < sparse.count; i++) {
+      const targetIndex = readRawComponent(indexData, indexStart + i * sparseIndexBytes, sparseIndices.componentType);
+      for (let c = 0; c < componentCount; c++) {
+        const raw = readRawComponent(valueData, valueStart + (i * componentCount + c) * bytesPerComponent, acc.componentType);
+        values[targetIndex * componentCount + c] = acc.normalized ? normalizeComponent(raw, acc.componentType) : raw;
+      }
     }
   }
   return { values, count: acc.count, componentCount };
@@ -326,7 +490,7 @@ function readAccessorComponents(doc: GltfDoc, bin: Uint8Array, accessorIdx: numb
 
 function extractImageUrls(
   doc: GltfDoc,
-  bin: Uint8Array,
+  buffers: Uint8Array[],
   baseUrl?: string,
 ): { urls: string[]; objectUrls: string[] } {
   const urls: string[] = [];
@@ -349,10 +513,15 @@ function extractImageUrls(
       continue;
     }
     if (img.bufferView !== undefined) {
-      const bv = doc.bufferViews?.[img.bufferView];
-      if (!bv) { urls.push(""); continue; }
-      const offset = bv.byteOffset ?? 0;
-      const bytes = bin.subarray(offset, offset + bv.byteLength);
+      let bytes: Uint8Array;
+      try {
+        const { buffer, view } = resolveBufferView(doc, buffers, img.bufferView);
+        const offset = view.byteOffset ?? 0;
+        bytes = buffer.subarray(offset, offset + view.byteLength);
+      } catch {
+        urls.push("");
+        continue;
+      }
       const mime = img.mimeType ?? "image/png";
       const blob = new g.Blob([bytes], { type: mime });
       const url = g.URL.createObjectURL(blob);
@@ -365,16 +534,55 @@ function extractImageUrls(
   return { urls, objectUrls };
 }
 
-function buildMaterialTextureMap(doc: GltfDoc, imageUrls: string[]): Map<number, string> {
-  const out = new Map<number, string>();
+interface GltfMaterialTextureInfo {
+  url: string;
+  wrap: PolyTextureWrap;
+  alphaMode: PolyTextureAlphaMode;
+}
+
+function gltfWrapMode(value: number | undefined): PolyTextureWrapMode {
+  switch (value ?? 10497) {
+    case 33071: return "clamp-to-edge";
+    case 33648: return "mirrored-repeat";
+    case 10497: return "repeat";
+    default: return "repeat";
+  }
+}
+
+function textureWrapForTexture(doc: GltfDoc, texture: GltfTexture | undefined): PolyTextureWrap {
+  const sampler = texture?.sampler !== undefined ? doc.samplers?.[texture.sampler] : undefined;
+  return {
+    s: gltfWrapMode(sampler?.wrapS),
+    t: gltfWrapMode(sampler?.wrapT),
+  };
+}
+
+function gltfAlphaMode(value: string | undefined): PolyTextureAlphaMode {
+  switch (value) {
+    case "BLEND": return "blend";
+    case "MASK": return "mask";
+    case "OPAQUE":
+    default: return "opaque";
+  }
+}
+
+function buildMaterialTextureMap(doc: GltfDoc, imageUrls: string[]): Map<number, GltfMaterialTextureInfo> {
+  const out = new Map<number, GltfMaterialTextureInfo>();
   const mats = doc.materials ?? [];
   for (let i = 0; i < mats.length; i++) {
     const texIdx = mats[i].pbrMetallicRoughness?.baseColorTexture?.index;
     if (texIdx === undefined) continue;
-    const sourceIdx = doc.textures?.[texIdx]?.source;
+    const texture = doc.textures?.[texIdx];
+    const sourceIdx = texture?.source;
     if (sourceIdx === undefined) continue;
     const url = imageUrls[sourceIdx];
-    if (url) out.set(i, url);
+    if (url) {
+      out.set(i, {
+        url,
+        wrap: textureWrapForTexture(doc, texture),
+        alphaMode: gltfAlphaMode(mats[i].alphaMode),
+      });
+    }
   }
   return out;
 }
@@ -548,6 +756,9 @@ interface AnimatedPrimitiveSource {
   triangleMask: boolean[];
   color: string;
   texture?: string;
+  textureWrap?: PolyTextureWrap;
+  textureAlphaMode?: PolyTextureAlphaMode;
+  doubleSided?: boolean;
   uvs?: Vec2[];
   joints?: number[][];
   weights?: number[][];
@@ -623,13 +834,13 @@ function isDegenerateProjectedTriangle(v0: Vec3, v1: Vec3, v2: Vec3): boolean {
 
 function readAccessorTupleArray(
   doc: GltfDoc,
-  bin: Uint8Array,
+  buffers: Uint8Array[],
   accessorIdx: number | undefined,
   expectedComponents: number,
   expectedCount: number,
 ): number[][] | undefined {
   if (accessorIdx === undefined) return undefined;
-  const { values, count, componentCount } = readAccessorComponents(doc, bin, accessorIdx);
+  const { values, count, componentCount } = readAccessorComponents(doc, buffers, accessorIdx);
   if (count !== expectedCount || componentCount < 1) return undefined;
   const out: number[][] = [];
   for (let i = 0; i < count; i++) {
@@ -642,11 +853,11 @@ function readAccessorTupleArray(
   return out;
 }
 
-function readMat4Array(doc: GltfDoc, bin: Uint8Array, accessorIdx: number | undefined, count: number): Mat4[] {
+function readMat4Array(doc: GltfDoc, buffers: Uint8Array[], accessorIdx: number | undefined, count: number): Mat4[] {
   if (accessorIdx === undefined) {
     return Array.from({ length: count }, () => IDENTITY4.slice() as Mat4);
   }
-  const { values, componentCount, count: accCount } = readAccessorComponents(doc, bin, accessorIdx);
+  const { values, componentCount, count: accCount } = readAccessorComponents(doc, buffers, accessorIdx);
   if (componentCount !== 16) {
     throw new Error(`parseGltf: inverseBindMatrices accessor ${accessorIdx} is not MAT4`);
   }
@@ -693,7 +904,7 @@ function sampleAnimationChannel(sampler: RuntimeAnimationSampler, timeSeconds: n
 
 function buildAnimationController(
   doc: GltfDoc,
-  bin: Uint8Array,
+  buffers: Uint8Array[],
   sources: AnimatedPrimitiveSource[],
   polygonRefs: Array<AnimatedPolygonSourceRef | undefined>,
   project: (v: Vec3) => Vec3,
@@ -707,15 +918,15 @@ function buildAnimationController(
   const bindWorldMatrices = computeWorldMatrices(doc, baseLocalMatrices);
   const skins = (doc.skins ?? []).map((skin) => ({
     joints: skin.joints ?? [],
-    inverseBindMatrices: readMat4Array(doc, bin, skin.inverseBindMatrices, skin.joints?.length ?? 0),
+    inverseBindMatrices: readMat4Array(doc, buffers, skin.inverseBindMatrices, skin.joints?.length ?? 0),
   }));
 
   const runtimeClips: RuntimeAnimationClip[] = [];
   for (let i = 0; i < animations.length; i++) {
     const animation = animations[i];
     const runtimeSamplers = (animation.samplers ?? []).map((sampler): RuntimeAnimationSampler => {
-      const input = readAccessorComponents(doc, bin, sampler.input);
-      const output = readAccessorComponents(doc, bin, sampler.output);
+      const input = readAccessorComponents(doc, buffers, sampler.input);
+      const output = readAccessorComponents(doc, buffers, sampler.output);
       return {
         input: input.values,
         output: output.values,
@@ -785,6 +996,9 @@ function buildAnimationController(
     v2World: Vec3,
     color: string,
     texture: string | undefined,
+    textureWrap: PolyTextureWrap | undefined,
+    textureAlphaMode: PolyTextureAlphaMode | undefined,
+    doubleSided: boolean | undefined,
     uvs: Vec2[] | undefined,
   ): Polygon | null => {
     const v0 = project(v0World);
@@ -792,6 +1006,9 @@ function buildAnimationController(
     const v2 = project(v2World);
     const polygon: Polygon = { vertices: [v0, v1, v2], color };
     if (texture) polygon.texture = texture;
+    if (texture && textureWrap) polygon.textureWrap = textureWrap;
+    if (texture && textureAlphaMode) polygon.textureAlphaMode = textureAlphaMode;
+    if (doubleSided) polygon.doubleSided = true;
     if (uvs) polygon.uvs = uvs;
     return polygon;
   };
@@ -936,7 +1153,17 @@ function buildAnimationController(
             const u0 = source.uvs[i0], u1 = source.uvs[i1], u2 = source.uvs[i2];
             if (u0 && u1 && u2) triUvs = [u0, u1, u2];
           }
-          const polygon = polygonFromWorldTri(v0, v1, v2, source.color, source.texture, triUvs);
+          const polygon = polygonFromWorldTri(
+            v0,
+            v1,
+            v2,
+            source.color,
+            source.texture,
+            source.textureWrap,
+            source.textureAlphaMode,
+            source.doubleSided,
+            triUvs,
+          );
           if (polygon) polygons.push(polygon);
         }
       }
@@ -1025,19 +1252,28 @@ export function parseGltf(input: ArrayBuffer | Uint8Array, options?: GltfParseOp
   const sourceBytes = buf.byteLength;
 
   let doc: GltfDoc;
-  let bin: Uint8Array;
+  let glbBin: Uint8Array | null = null;
   if (buf.byteLength >= 4 && new DataView(buf).getUint32(0, true) === GLB_MAGIC) {
     const parsed = parseGlbContainer(buf);
     doc = parsed.doc;
-    if (!parsed.bin) throw new Error("parseGltf: GLB has no binary chunk");
-    bin = parsed.bin;
+    glbBin = parsed.bin;
   } else {
     doc = JSON.parse(decodeUtf8(new Uint8Array(buf)));
-    bin = resolveJsonBuffer(doc, options?.resolveBuffer);
   }
+  validateGltfAsset(doc);
+  const buffers = resolveBuffers(doc, glbBin, options?.resolveBuffer);
 
-  const { urls: imageUrls, objectUrls } = extractImageUrls(doc, bin, options?.baseUrl);
+  const { urls: imageUrls, objectUrls } = extractImageUrls(doc, buffers, options?.baseUrl);
   const matTexMap = buildMaterialTextureMap(doc, imageUrls);
+  const warnings: string[] = [];
+  const warningKeys = new Set<string>();
+  const requiredExtensions = new Set(doc.extensionsRequired ?? []);
+
+  function pushWarningOnce(key: string, warning: string): void {
+    if (warningKeys.has(key)) return;
+    warningKeys.add(key);
+    warnings.push(warning);
+  }
 
   interface RawTri {
     v0: Vec3;
@@ -1045,6 +1281,9 @@ export function parseGltf(input: ArrayBuffer | Uint8Array, options?: GltfParseOp
     v2: Vec3;
     color: string;
     texture?: string;
+    textureWrap?: PolyTextureWrap;
+    textureAlphaMode?: PolyTextureAlphaMode;
+    doubleSided?: boolean;
     uvs?: Vec2[];
     source?: AnimatedPrimitiveSource;
     sourceIndex?: number;
@@ -1056,26 +1295,75 @@ export function parseGltf(input: ArrayBuffer | Uint8Array, options?: GltfParseOp
   const meshNames: string[] = (doc.meshes ?? []).map((m, i) => m.name ?? `mesh_${i}`);
   const materialNames: string[] = (doc.materials ?? []).map((m, i) => m.name ?? `material_${i}`);
 
+  function triangulatePrimitiveIndices(indices: number[], mode: number): number[] {
+    if (mode === 4) return indices;
+    const out: number[] = [];
+    if (mode === 5) {
+      for (let i = 0; i + 2 < indices.length; i++) {
+        out.push(indices[i], indices[i + 1 + (i % 2)], indices[i + 2 - (i % 2)]);
+      }
+    } else if (mode === 6) {
+      for (let i = 0; i + 2 < indices.length; i++) {
+        out.push(indices[i + 1], indices[i + 2], indices[0]);
+      }
+    }
+    return out;
+  }
+
+  function makeDoubleSidedTriangleIndices(indices: number[]): number[] {
+    const out: number[] = [];
+    for (let i = 0; i + 2 < indices.length; i += 3) {
+      const i0 = indices[i];
+      const i1 = indices[i + 1];
+      const i2 = indices[i + 2];
+      out.push(i0, i1, i2, i0, i2, i1);
+    }
+    return out;
+  }
+
   function emitMesh(meshIdx: number, world: Mat4, meshNode: number | null): void {
     const mesh = doc.meshes?.[meshIdx];
     if (!mesh) return;
     for (const prim of mesh.primitives) {
       const mode = prim.mode ?? 4;
-      if (mode !== 4) continue;
+      if (mode !== 4 && mode !== 5 && mode !== 6) continue;
+      if (prim.extensions?.KHR_draco_mesh_compression && requiredExtensions.has("KHR_draco_mesh_compression")) {
+        pushWarningOnce(
+          "KHR_draco_mesh_compression",
+          "Skipped primitives with unsupported required extension KHR_draco_mesh_compression",
+        );
+        continue;
+      }
+      if (prim.attributes.POSITION === undefined) {
+        pushWarningOnce(
+          `missing-position:${meshIdx}`,
+          `Mesh ${mesh.name ?? meshIdx}: skipped primitive without POSITION attribute`,
+        );
+        continue;
+      }
 
-      const matName = prim.material !== undefined ? doc.materials?.[prim.material]?.name : undefined;
+      const material = prim.material !== undefined ? doc.materials?.[prim.material] : undefined;
+      const matName = material?.name;
       const matOverride = matName ? materialOverrides[matName] : undefined;
       const color = matOverride ?? colorFromMaterial(
-        prim.material !== undefined ? doc.materials?.[prim.material] : undefined,
+        material,
         defaultColor
       );
+      const doubleSided = material?.doubleSided === true;
+      const materialTextureInfo = prim.material !== undefined ? matTexMap.get(prim.material) : undefined;
       const texture = matName && materialTextureOverrides[matName]
         ? materialTextureOverrides[matName]
         : prim.material !== undefined
-          ? matTexMap.get(prim.material)
+          ? materialTextureInfo?.url
           : undefined;
+      const textureWrap = texture && prim.material !== undefined
+        ? materialTextureInfo?.wrap
+        : undefined;
+      const textureAlphaMode = texture
+        ? materialTextureInfo?.alphaMode ?? gltfAlphaMode(material?.alphaMode)
+        : undefined;
 
-      const { array: posArr, count: vertCount } = readAccessor(doc, bin!, prim.attributes.POSITION);
+      const { array: posArr, count: vertCount } = readAccessor(doc, buffers, prim.attributes.POSITION);
       if (!(posArr instanceof Float32Array)) continue;
       const localPositions: Vec3[] = [];
       const positions: Vec3[] = [];
@@ -1088,7 +1376,7 @@ export function parseGltf(input: ArrayBuffer | Uint8Array, options?: GltfParseOp
       let uvs: Vec2[] | null = null;
       const uvAccIdx = prim.attributes.TEXCOORD_0;
       if (texture && uvAccIdx !== undefined) {
-        const { array: uvArr, count: uvCount } = readAccessor(doc, bin!, uvAccIdx);
+        const { array: uvArr, count: uvCount } = readAccessor(doc, buffers, uvAccIdx);
         uvs = [];
         let scale = 1;
         if (uvArr instanceof Uint8Array) scale = 1 / 255;
@@ -1102,17 +1390,19 @@ export function parseGltf(input: ArrayBuffer | Uint8Array, options?: GltfParseOp
 
       let indices: number[];
       if (prim.indices !== undefined) {
-        const { array: idxArr, count: idxCount } = readAccessor(doc, bin!, prim.indices);
+        const { array: idxArr, count: idxCount } = readAccessor(doc, buffers, prim.indices);
         indices = [];
         for (let i = 0; i < idxCount; i++) indices.push(Number(idxArr[i]));
       } else {
         indices = positions.map((_, i) => i);
       }
+      indices = triangulatePrimitiveIndices(indices, mode);
+      if (doubleSided) indices = makeDoubleSidedTriangleIndices(indices);
 
       let animatedSource: AnimatedPrimitiveSource | undefined;
       if ((doc.animations?.length ?? 0) > 0) {
-        const joints = readAccessorTupleArray(doc, bin, prim.attributes.JOINTS_0, 4, vertCount);
-        const weights = readAccessorTupleArray(doc, bin, prim.attributes.WEIGHTS_0, 4, vertCount);
+        const joints = readAccessorTupleArray(doc, buffers, prim.attributes.JOINTS_0, 4, vertCount);
+        const weights = readAccessorTupleArray(doc, buffers, prim.attributes.WEIGHTS_0, 4, vertCount);
         animatedSource = {
           sourceIndex: animatedSources.length,
           meshNode,
@@ -1123,6 +1413,9 @@ export function parseGltf(input: ArrayBuffer | Uint8Array, options?: GltfParseOp
           triangleMask: [],
           color,
           texture,
+          textureWrap,
+          textureAlphaMode,
+          doubleSided,
           uvs: uvs ?? undefined,
           joints,
           weights,
@@ -1148,6 +1441,9 @@ export function parseGltf(input: ArrayBuffer | Uint8Array, options?: GltfParseOp
           v2,
           color,
           texture,
+          textureWrap,
+          textureAlphaMode,
+          doubleSided,
           uvs: triUvs,
           source: animatedSource,
           sourceIndex: animatedSource?.sourceIndex,
@@ -1180,7 +1476,7 @@ export function parseGltf(input: ArrayBuffer | Uint8Array, options?: GltfParseOp
       polygons: [],
       objectUrls,
       dispose,
-      warnings: [],
+      warnings,
       metadata: {
         triangleCount: 0,
         meshes: meshNames,
@@ -1241,6 +1537,9 @@ export function parseGltf(input: ArrayBuffer | Uint8Array, options?: GltfParseOp
       color: t.color,
     };
     if (t.texture) p.texture = t.texture;
+    if (t.texture && t.textureWrap) p.textureWrap = t.textureWrap;
+    if (t.texture && t.textureAlphaMode) p.textureAlphaMode = t.textureAlphaMode;
+    if (t.doubleSided) p.doubleSided = true;
     if (t.uvs) p.uvs = t.uvs;
     polygons.push(p);
     animatedPolygonRefs.push(
@@ -1251,7 +1550,7 @@ export function parseGltf(input: ArrayBuffer | Uint8Array, options?: GltfParseOp
   }
   const animation = buildAnimationController(
     doc,
-    bin,
+    buffers,
     animatedSources,
     animatedPolygonRefs,
     project,
@@ -1263,7 +1562,7 @@ export function parseGltf(input: ArrayBuffer | Uint8Array, options?: GltfParseOp
     animation,
     objectUrls,
     dispose,
-    warnings: [],
+    warnings,
     metadata: {
       triangleCount: polygons.length,
       meshes: meshNames,

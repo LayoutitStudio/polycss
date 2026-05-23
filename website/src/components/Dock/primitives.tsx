@@ -74,7 +74,7 @@ export function useGui(
     instance.open();
     setGui(instance);
     return () => {
-      instance.destroy();
+      safeDestroy(instance);
       setGui(null);
     };
   }, [hostRef]);
@@ -101,7 +101,7 @@ export function useFolder(
     else f.open();
     setFolder(f);
     return () => {
-      f.destroy();
+      safeDestroy(f);
       setFolder(null);
     };
   }, [parent, title]);
@@ -118,6 +118,21 @@ function applyEnabled(c: Controller, enabled: boolean, dim: boolean): void {
   else {
     c.disable();
     if (!dim) c.domElement.classList.remove("disabled");
+  }
+}
+
+function safeDestroy(target: { destroy(): void }): void {
+  try {
+    target.destroy();
+  } catch (error) {
+    if (
+      !error ||
+      typeof error !== "object" ||
+      !("name" in error) ||
+      error.name !== "NotFoundError"
+    ) {
+      throw error;
+    }
   }
 }
 
@@ -165,7 +180,7 @@ function useControllerLifecycle<T>(
     const wrapper = makeDockController<T>(raw, proxy);
     setCtrl(wrapper);
     return () => {
-      raw.destroy();
+      safeDestroy(raw);
       setCtrl(null);
     };
     // Intentionally skip `value` and `onChange` — value is mirrored via the
@@ -272,7 +287,7 @@ export function useOption<T extends string | number>(
     };
     setCtrl(wrapper);
     return () => {
-      activeRaw.destroy();
+      safeDestroy(activeRaw);
       setCtrl(null);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -314,7 +329,7 @@ export function useButton(
     const raw = parent.add(proxy, "value").name(label);
     setCtrl(makeDockController<never>(raw, proxy as unknown as { value: never }));
     return () => {
-      raw.destroy();
+      safeDestroy(raw);
       setCtrl(null);
     };
   }, [parent, label]);
@@ -341,7 +356,7 @@ export function useReadonlyNumber(
     wrapper.setEnabled(false, { dim: false });
     setCtrl(wrapper);
     return () => {
-      raw.destroy();
+      safeDestroy(raw);
       setCtrl(null);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps

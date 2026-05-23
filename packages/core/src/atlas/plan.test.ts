@@ -415,6 +415,18 @@ describe("computeProjectiveQuadCoefficients — projective homography", () => {
     expect(typeof result!.g).toBe("number");
     expect(typeof result!.h).toBe("number");
   });
+
+  it("keeps moderate homogeneous weight variation on the projective path", () => {
+    const guards = resolveProjectiveQuadGuards(undefined);
+    const q: [number, number][] = [[0, 0], [1, 0], [1, 1], [0, 6]];
+    expect(computeProjectiveQuadCoefficients(q, guards)).not.toBeNull();
+  });
+
+  it("rejects near-singular projective quads by default", () => {
+    const guards = resolveProjectiveQuadGuards(undefined);
+    const q: [number, number][] = [[0, 0], [1, 0], [1, 1], [0, 1000]];
+    expect(computeProjectiveQuadCoefficients(q, guards)).toBeNull();
+  });
 });
 
 // ---------------------------------------------------------------------------

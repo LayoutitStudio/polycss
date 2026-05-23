@@ -53,7 +53,7 @@ pnpm bench:visual
 pnpm bench:trace
 pnpm bench:voxel-report
 node bench/nonvoxel-rotation-bench.mjs --run-order random
-node bench/trace-analysis.mjs --page nonvoxel --no-trace
+node .agents/skills/chrome-capture-trace/scripts/trace.mjs motion --page nonvoxel --no-trace
 node bench/nonvoxel-visual-compare.mjs
 ```
 
@@ -313,9 +313,9 @@ Next useful work:
 
 Next useful work:
 
-1. Use `trace-analysis.mjs --page nonvoxel --no-trace` to identify the slow
-   cadence buckets first; trace only after a signal survives repeated clean
-   runs.
+1. Use `.agents/skills/chrome-capture-trace/scripts/trace.mjs motion --page nonvoxel --no-trace`
+   to identify the slow cadence buckets first; trace only after a signal
+   survives repeated clean runs.
 2. Investigate Teapot-like dense curved solid meshes separately from broad
    default policy. Leaf buckets are a clue, not a product feature.
 3. Prefer leaf-count reduction, merge quality, simplification, or LOD over more

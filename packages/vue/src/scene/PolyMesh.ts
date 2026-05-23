@@ -322,6 +322,7 @@ export const PolyMesh = defineComponent({
         normalTolerance: 0.1,
         distanceTolerance: 0.5,
         overlapFraction: 0.4,
+        preserveDoubleSidedBackfaces: false,
       });
 
       return plans.map((plan, index) => {
