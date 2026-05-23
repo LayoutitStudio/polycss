@@ -366,8 +366,13 @@ const CORE_BASE_STYLES = `
    would stack inside the silhouette and produce ugly overdraw). The
    * 10 multiplier sharpens the cutoff so small positive Lambert values
    jump quickly to 1, giving a near-binary visibility decision with a
-   smooth edge transition. Pure CSS calc — no JS at light-change time. */
-.polycss-scene q {
+   smooth edge transition. Pure CSS calc — no JS at light-change time.
+
+   Scoped to dynamic mode: baked-mode shadow leaves are dropped up-front
+   by isBakedShadowCaster() and don't carry --pnx/--pny/--pnz, so an
+   unscoped gate would silently zero them via the @property initial
+   values. */
+.polycss-scene[data-polycss-lighting="dynamic"] q {
   opacity: clamp(0, calc((var(--pnx) * var(--clx) + var(--pny) * var(--cly) + var(--pnz) * var(--clz)) * 10), 1);
 }
 `;

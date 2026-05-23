@@ -39,12 +39,15 @@ import {
   CAMERA_BACKFACE_CULL_EPS,
   DEFAULT_SEAM_BLEED,
   VOXEL_CAMERA_CULL_NORMAL_LIMIT,
+  buildBakedShadowProjectionMatrix,
   cameraCullNormalKey,
   cameraCullVisibleSignature,
   computeSceneBbox,
   findOverlappingPolygonDuplicates,
+  formatMatrix3dValues,
   inverseRotateVec3,
   isAxisAlignedSurfaceNormal,
+  isBakedShadowCaster,
   isVoxelCameraCullableNormalGroups,
   normalFacesCamera,
   optimizeMeshPolygons,
@@ -353,6 +356,22 @@ function strategiesEqual(
   return true;
 }
 
+function vec3Equal(a: Vec3 | undefined, b: Vec3 | undefined): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  return a[0] === b[0] && a[1] === b[1] && a[2] === b[2];
+}
+
+function shadowOptsEqual(
+  a: PolySceneOptions["shadow"] | undefined,
+  b: PolySceneOptions["shadow"] | undefined,
+): boolean {
+  if (a === b) return true;
+  return (a?.color ?? "#000000") === (b?.color ?? "#000000")
+    && (a?.opacity ?? 0.25) === (b?.opacity ?? 0.25)
+    && (a?.lift ?? 0.05) === (b?.lift ?? 0.05);
+}
+
 function buildMeshTransform(t: PolyMeshTransform): string | undefined {
   const parts: string[] = [];
   if (t.position) {
@@ -592,6 +611,13 @@ export function createPolyScene(
     bakedRotation: Vec3;
   }
   const meshes = new Set<MeshEntry>();
+
+  // Cached CSS-Z of the shadow ground plane. Set by `recomputeShadowGround`.
+  // In dynamic mode this also flows into the `--shadow-ground-cssz` CSS var
+  // that drives `--shadow-proj`. In baked mode it's read by `emitShadowLeaves`
+  // to bake the per-leaf inline projection matrix on the CPU. `null` means
+  // no casting mesh exists yet, so no shadow leaves should be emitted.
+  let currentGroundCssZ: number | null = null;
 
   // Apply CSS perspective on the camera wrapper, not the scene element.
   // CSS `perspective` only foreshortens direct children's 3D transforms, so
@@ -1106,17 +1132,28 @@ export function createPolyScene(
     }
   }
 
-  // Emits shadow leaves for all non-textured rendered polys in the entry.
-  // Each shadow leaf uses the same tag and shape as the original but with a
-  // flat shadow color and a transform prepended by var(--shadow-proj) so it
-  // projects onto the ground plane driven entirely by CSS vars.
+  // Emits shadow leaves for all rendered polys in the entry. Each shadow
+  // leaf uses the same border-shape as the original but with a flat shadow
+  // color and a transform that projects the polygon onto the ground plane
+  // along the directional light.
+  //
+  // Dynamic mode prepends `var(--shadow-proj)` so the projection follows
+  // the live light vars on the scene root (zero JS at light-change time).
+  // Baked mode pre-composes the projection matrix on the CPU and inlines
+  // it as a literal `matrix3d(...)` — and drops back-facing polygons from
+  // the DOM entirely instead of using a CSS opacity gate.
   //
   // Shadow leaves are inserted BEFORE their caster siblings so they sit
   // below in DOM order, which keeps them behind the casters when both are
   // coplanar in 3D (painter-order tie-breaking favors earlier nodes).
   function emitShadowLeaves(entry: MeshEntry): void {
     clearShadowLeaves(entry);
-    if (!entry.castShadow || currentOptions.textureLighting !== "dynamic") return;
+    if (!entry.castShadow) return;
+    const isDynamic = currentOptions.textureLighting === "dynamic";
+    // Baked mode needs a ground plane to project onto. If none has been
+    // computed yet (no caster meshes), bail and wait for the next
+    // recomputeShadowGround pass to drive emission.
+    if (!isDynamic && currentGroundCssZ === null) return;
 
     const shadowColor = currentOptions.shadow?.color ?? "#000000";
     const shadowOpacity = currentOptions.shadow?.opacity ?? 0.25;
@@ -1124,6 +1161,17 @@ export function createPolyScene(
     const parsed = parseHexColor(shadowColor)?.rgb ?? [0, 0, 0];
     const r = parsed[0], g = parsed[1], b = parsed[2];
     const shadowColorCss = `rgba(${r},${g},${b},${shadowOpacity})`;
+
+    // Pre-compute the baked projection matrix once per emit pass — the
+    // light + ground are fixed so it's identical for every leaf in this
+    // entry. In dynamic mode the matrix lives in CSS and we skip this.
+    const lightDir = currentOptions.directionalLight?.direction
+      ?? ([0.4, -0.7, 0.59] as Vec3);
+    const bakedProjStr = isDynamic
+      ? null
+      : `matrix3d(${formatMatrix3dValues(
+          buildBakedShadowProjectionMatrix(lightDir, currentGroundCssZ ?? 0),
+        )})`;
 
     // Loose-tolerance dedup for shadow casting ONLY — much more permissive
     // than the parse-time dedup that affects the rendered model. Multiple
@@ -1152,6 +1200,12 @@ export function createPolyScene(
       const plan = item.plan;
       if (!plan) continue;
 
+      // Baked mode: skip polygons facing AWAY from the receiver entirely
+      // (they don't contribute to the silhouette). Dynamic mode keeps them
+      // mounted and uses a CSS opacity calc to hide them so the gate
+      // updates live with the light.
+      if (!isDynamic && !isBakedShadowCaster(plan.normal, lightDir)) continue;
+
       // Read the original matrix3d from the plan (not from the element
       // style string) so we never parse strings.
       const origMatrix = `matrix3d(${plan.matrix})`;
@@ -1165,23 +1219,23 @@ export function createPolyScene(
       // mirrored from <i>'s border-color: currentColor mechanism.
       // clip-path is forbidden by repo policy (4000+ clip-paths inside
       // preserve-3d = ~15 s/frame on Chromium).
-      //
-      // The caster's normal is pinned inline as --pnx/--pny/--pnz so the
-      // cascade can compute a Lambert factor and gate the shadow's
-      // opacity: polygons facing AWAY from the light don't cast a
-      // shadow on the receiver (their projection is inside the
-      // silhouette of the front-facing parts anyway, just adding
-      // overdraw). Pure CSS — no JS at light-change time.
       const shadowEl = doc.createElement("q");
       shadowEl.className = "polycss-shadow";
-      shadowEl.style.transform = `var(--shadow-proj) ${origMatrix}`;
+      shadowEl.style.transform = isDynamic
+        ? `var(--shadow-proj) ${origMatrix}`
+        : `${bakedProjStr} ${origMatrix}`;
       shadowEl.style.color = shadowColorCss;
       shadowEl.style.width = `${plan.canvasW}px`;
       shadowEl.style.height = `${plan.canvasH}px`;
       shadowEl.style.setProperty("border-shape", cssBorderShapeForPlan(plan));
-      shadowEl.style.setProperty("--pnx", plan.normal[0].toFixed(4));
-      shadowEl.style.setProperty("--pny", plan.normal[1].toFixed(4));
-      shadowEl.style.setProperty("--pnz", plan.normal[2].toFixed(4));
+      // Dynamic mode pins the caster's normal so the per-element opacity
+      // calc can Lambert-gate back-facing polys. Baked mode already
+      // dropped those above, so no normal vars are needed.
+      if (isDynamic) {
+        shadowEl.style.setProperty("--pnx", plan.normal[0].toFixed(4));
+        shadowEl.style.setProperty("--pny", plan.normal[1].toFixed(4));
+        shadowEl.style.setProperty("--pnz", plan.normal[2].toFixed(4));
+      }
 
       fragment.appendChild(shadowEl);
       entry.shadowRendered.push(shadowEl);
@@ -1265,17 +1319,18 @@ export function createPolyScene(
     emitShadowLeaves(entry);
   }
 
-  // Recomputes --shadow-ground-cssz from the minimum world-Z across all
+  // Recomputes the shadow ground plane from the minimum world-Z across all
   // casting meshes. World Z stays as CSS Z under the world→CSS axis swap.
   // In polycss's world convention Z is up — the red-green plane in the axes
   // helper is the floor. An optional `lift` (in world units) raises the
   // plane slightly above the bbox floor to prevent z-fighting with
   // receiver polygons.
+  //
+  // Dynamic mode writes the result to `--shadow-ground-cssz` and lets the
+  // CSS `--shadow-proj` calc expression rebuild the matrix on the GPU side.
+  // Baked mode caches it in `currentGroundCssZ` and re-emits all casting
+  // entries' shadow leaves so the inline matrix3d transforms refresh.
   function recomputeShadowGround(): void {
-    if (currentOptions.textureLighting !== "dynamic") {
-      sceneEl.style.removeProperty("--shadow-ground-cssz");
-      return;
-    }
     let minWorldZ = Infinity;
     for (const m of meshes) {
       if (!m.disposed && m.castShadow) {
@@ -1288,6 +1343,14 @@ export function createPolyScene(
     }
     if (!Number.isFinite(minWorldZ)) {
       sceneEl.style.removeProperty("--shadow-ground-cssz");
+      const hadGround = currentGroundCssZ !== null;
+      currentGroundCssZ = null;
+      // No casters left: drop any baked shadow leaves still mounted.
+      if (hadGround && currentOptions.textureLighting !== "dynamic") {
+        for (const entry of meshes) {
+          if (entry.shadowRendered.length) clearShadowLeaves(entry);
+        }
+      }
       return;
     }
     const lift = currentOptions.shadow?.lift ?? 0.05;
@@ -1298,7 +1361,21 @@ export function createPolyScene(
     // Stored as a unitless number (not px) because matrix3d() calc() entries
     // must be dimensionless — see styles.ts @property --shadow-ground-cssz.
     const groundCssZ = (minWorldZ + lift) * DEFAULT_TILE;
-    sceneEl.style.setProperty("--shadow-ground-cssz", groundCssZ.toFixed(3));
+    const prevGround = currentGroundCssZ;
+    currentGroundCssZ = groundCssZ;
+    if (currentOptions.textureLighting === "dynamic") {
+      sceneEl.style.setProperty("--shadow-ground-cssz", groundCssZ.toFixed(3));
+      return;
+    }
+    // Baked mode: the ground value is folded into each leaf's inline
+    // matrix3d, so a change requires re-emission of every caster's shadows.
+    // Strip the dynamic-only CSS var in case lighting just toggled.
+    sceneEl.style.removeProperty("--shadow-ground-cssz");
+    if (prevGround !== groundCssZ) {
+      for (const entry of meshes) {
+        if (entry.castShadow) emitShadowLeaves(entry);
+      }
+    }
   }
 
   async function renderEntryChunked(
@@ -1816,6 +1893,8 @@ export function createPolyScene(
     const prevStrategies = currentOptions.strategies;
     const prevSeamBleed = currentOptions.seamBleed;
     const prevTextureLighting = currentOptions.textureLighting;
+    const prevLightDir = currentOptions.directionalLight?.direction;
+    const prevShadow = currentOptions.shadow;
     const normalizedPartial = normalizeSceneOptions(partial);
     currentOptions = { ...currentOptions, ...normalizedPartial };
     applySceneStyle(sceneEl, currentOptions);
@@ -1838,10 +1917,24 @@ export function createPolyScene(
       for (const entry of meshes) renderEntry(entry);
     }
     if (prevAutoCenter !== nextAutoCenter) recomputeAutoCenter();
-    // When lighting mode changes, re-emit or clear shadow leaves on all meshes
-    // that have castShadow set. Shadow emission is only valid in dynamic mode.
+    // Shadow emission depends on lighting mode, light direction, and the
+    // shadow appearance options. Dynamic mode handles light + shadow-color
+    // changes purely through CSS vars updated above; the cases that need
+    // explicit re-emission are:
+    //  - lighting mode toggled (different transform / DOM shape)
+    //  - light direction changed in baked mode (matrix is CPU-baked)
+    //  - shadow color/opacity/lift changed in baked mode (color is inline)
     const textureLightingChanged = partial.textureLighting !== undefined &&
       prevTextureLighting !== currentOptions.textureLighting;
+    const nextLightDir = currentOptions.directionalLight?.direction;
+    const lightDirChanged = partial.directionalLight !== undefined
+      && !vec3Equal(prevLightDir, nextLightDir);
+    const nextShadow = currentOptions.shadow;
+    const shadowAppearanceChanged = partial.shadow !== undefined
+      && !shadowOptsEqual(prevShadow, nextShadow);
+    const isBaked = currentOptions.textureLighting !== "dynamic";
+    const bakedShadowResetNeeded = isBaked
+      && (lightDirChanged || shadowAppearanceChanged);
     if (textureLightingChanged) {
       for (const entry of meshes) {
         if (!strategiesChanged && !seamBleedChanged && (entry.voxelSource || entry.voxelRenderer)) {
@@ -1850,6 +1943,23 @@ export function createPolyScene(
           emitShadowLeaves(entry);
         }
       }
+      recomputeShadowGround();
+    } else if (bakedShadowResetNeeded) {
+      // Light direction or shadow appearance changed in baked mode —
+      // re-emit all casters' shadow leaves with the new inline matrix /
+      // color. Cheap: DOM-only, no atlas re-rasterise.
+      for (const entry of meshes) {
+        if (entry.castShadow) emitShadowLeaves(entry);
+      }
+    } else if (shadowAppearanceChanged && !isBaked) {
+      // Dynamic mode: shadow color/opacity is per-leaf inline, so a
+      // change still needs re-emission. Lift affects --shadow-ground-cssz
+      // which recomputeShadowGround handles below.
+      for (const entry of meshes) {
+        if (entry.castShadow) emitShadowLeaves(entry);
+      }
+    }
+    if (shadowAppearanceChanged && partial.shadow?.lift !== prevShadow?.lift) {
       recomputeShadowGround();
     }
   }

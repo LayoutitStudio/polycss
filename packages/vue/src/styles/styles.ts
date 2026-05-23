@@ -321,8 +321,10 @@ const CORE_BASE_STYLES = `
 /* <q> shadow leaf — Lambert-gated opacity. Polygons facing the light cast
    full shadow; polygons facing away cast zero shadow. The * 10 multiplier
    sharpens the cutoff so small positive Lambert values jump quickly to 1,
-   giving a near-binary visibility decision with a smooth edge transition. */
-.polycss-scene q {
+   giving a near-binary visibility decision with a smooth edge transition.
+   Scoped to dynamic mode: baked-mode shadow leaves are dropped up-front
+   by isBakedShadowCaster() and don't carry --pnx/--pny/--pnz. */
+.polycss-scene[data-polycss-lighting="dynamic"] q {
   opacity: clamp(0, calc((var(--pnx) * var(--clx) + var(--pny) * var(--cly) + var(--pnz) * var(--clz)) * 10), 1);
 }
 `;

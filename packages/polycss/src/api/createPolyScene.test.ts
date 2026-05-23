@@ -1890,9 +1890,31 @@ describe("createPolyScene", () => {
       expect(host.querySelectorAll(".polycss-shadow").length).toBe(2);
     });
 
-    it("castShadow:true in baked mode emits NO shadow leaves", () => {
+    it("castShadow:true in baked mode emits shadow leaves with a CPU-baked matrix3d transform", () => {
+      // Baked mode bakes the shadow projection into each leaf's inline
+      // transform on the CPU — no var(--shadow-proj), no --pnx/--pny/--pnz
+      // opacity gate. The default light has +Z so the +Z-facing triangle
+      // is a caster and emits one shadow.
       scene = makeScene(host, { textureLighting: "baked" });
       scene.add(makeParseResult([triangle()]), { castShadow: true });
+      const shadow = host.querySelector(".polycss-shadow") as HTMLElement;
+      expect(shadow).not.toBeNull();
+      // Inline transform is a literal matrix3d() chain — no CSS var.
+      expect(shadow.style.transform).toMatch(/^matrix3d\(.+\)\s+matrix3d\(/);
+      expect(shadow.style.transform).not.toContain("var(--shadow-proj)");
+      // Back-facing polys are skipped, not opacity-gated — no normal vars.
+      expect(shadow.style.getPropertyValue("--pnx")).toBe("");
+      expect(shadow.style.getPropertyValue("--pny")).toBe("");
+      expect(shadow.style.getPropertyValue("--pnz")).toBe("");
+    });
+
+    it("baked mode skips shadow leaves for polygons facing away from the light", () => {
+      // backTriangle wound CW from +Z → surface normal is -Z. Default light
+      // has +Z component, so the triangle is on the lit-AWAY side and
+      // should NOT emit a shadow leaf (its projection would land inside
+      // any other caster's silhouette anyway).
+      scene = makeScene(host, { textureLighting: "baked" });
+      scene.add(makeParseResult([backTriangle()]), { castShadow: true });
       expect(host.querySelectorAll(".polycss-shadow").length).toBe(0);
     });
 
@@ -1964,20 +1986,27 @@ describe("createPolyScene", () => {
       expect(host.querySelectorAll(".polycss-shadow").length).toBe(0);
     });
 
-    it("switching from dynamic to baked removes shadow leaves", () => {
+    it("switching from dynamic to baked rebuilds shadow leaves with inline matrix3d", () => {
       scene = makeScene(host, dynOpts);
       scene.add(makeParseResult([triangle()]), { castShadow: true });
-      expect(host.querySelectorAll(".polycss-shadow").length).toBeGreaterThan(0);
+      const dynamicShadow = host.querySelector(".polycss-shadow") as HTMLElement;
+      expect(dynamicShadow.style.transform).toContain("var(--shadow-proj)");
       scene.setOptions({ textureLighting: "baked" });
-      expect(host.querySelectorAll(".polycss-shadow").length).toBe(0);
+      const bakedShadow = host.querySelector(".polycss-shadow") as HTMLElement;
+      expect(bakedShadow).not.toBeNull();
+      expect(bakedShadow.style.transform).not.toContain("var(--shadow-proj)");
+      expect(bakedShadow.style.transform).toMatch(/^matrix3d\(.+\)\s+matrix3d\(/);
     });
 
-    it("switching from baked back to dynamic re-emits shadow leaves", () => {
+    it("switching from baked back to dynamic re-emits shadow leaves using var(--shadow-proj)", () => {
       scene = makeScene(host, { textureLighting: "baked" });
       scene.add(makeParseResult([triangle()]), { castShadow: true });
-      expect(host.querySelectorAll(".polycss-shadow").length).toBe(0);
+      const bakedShadow = host.querySelector(".polycss-shadow") as HTMLElement;
+      expect(bakedShadow.style.transform).not.toContain("var(--shadow-proj)");
       scene.setOptions({ ...dynOpts });
-      expect(host.querySelectorAll(".polycss-shadow").length).toBeGreaterThan(0);
+      const dynamicShadow = host.querySelector(".polycss-shadow") as HTMLElement;
+      expect(dynamicShadow).not.toBeNull();
+      expect(dynamicShadow.style.transform).toContain("var(--shadow-proj)");
     });
 
     it("textured polygons (s) ALSO emit shadow leaves", () => {
