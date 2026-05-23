@@ -1217,6 +1217,10 @@ export function createPolyScene(
   ): void {
     const polyProjections: Array<Array<[number, number]>> = [];
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    // Footprint = the mesh's straight-down (no-shear) silhouette bbox,
+    // i.e. the XY of every vertex. Used by the cap below as the anchor
+    // the shadow must always fully contain.
+    let fpMinX = Infinity, fpMinY = Infinity, fpMaxX = -Infinity, fpMaxY = -Infinity;
     // Iterate all rendered polys. We deliberately do NOT cull by Lambert
     // facing here: closed convex meshes have their lit-side polys alone
     // tile the silhouette, but thin/open meshes (a bat with spread
@@ -1241,6 +1245,10 @@ export function createPolyScene(
           v[0] * DEFAULT_TILE,
           v[2] * DEFAULT_TILE,
         ];
+        if (cssVertex[0] < fpMinX) fpMinX = cssVertex[0];
+        if (cssVertex[1] < fpMinY) fpMinY = cssVertex[1];
+        if (cssVertex[0] > fpMaxX) fpMaxX = cssVertex[0];
+        if (cssVertex[1] > fpMaxY) fpMaxY = cssVertex[1];
         const p = projectCssVertexToGround(cssVertex, lightDir, groundCssZ);
         projected.push(p);
         if (p[0] < minX) minX = p[0];
@@ -1252,26 +1260,20 @@ export function createPolyScene(
     }
 
     if (polyProjections.length === 0) return;
-    // Cap the SVG's intrinsic dimensions. Low-elevation lights shear
-    // projected polygons across the ground so far that the bbox can
-    // exceed tens of thousands of pixels each side, which forces the
-    // browser to rasterize a >100M-pixel backing store on every repaint
-    // (visible as scene-wide flicker when the camera or light moves).
-    // We clamp the bbox around its center and let SVG's default
-    // overflow:hidden clip any path data that lands outside — at this
-    // size the clipped region is far off-screen anyway.
-    const SHADOW_MAX_DIM = 8000;
-    let bx0 = minX, by0 = minY, bx1 = maxX, by1 = maxY;
-    if (bx1 - bx0 > SHADOW_MAX_DIM) {
-      const cx = (bx0 + bx1) / 2;
-      bx0 = cx - SHADOW_MAX_DIM / 2;
-      bx1 = cx + SHADOW_MAX_DIM / 2;
-    }
-    if (by1 - by0 > SHADOW_MAX_DIM) {
-      const cy = (by0 + by1) / 2;
-      by0 = cy - SHADOW_MAX_DIM / 2;
-      by1 = cy + SHADOW_MAX_DIM / 2;
-    }
+    // Cap how far the shadow can extend BEYOND THE MESH FOOTPRINT.
+    // Low-elevation lights shear projections across the ground so far
+    // that the bbox can exceed tens of thousands of pixels each side,
+    // which forces the browser to rasterize a >100M-pixel backing store
+    // on every repaint (visible as scene-wide flicker when the camera
+    // or light moves). The footprint (no-shear silhouette) must stay
+    // fully inside the SVG so the shadow under/next to the mesh is
+    // preserved — we only truncate the sheared end that's off-screen
+    // anyway. SVG overflow:hidden does the actual clipping.
+    const SHADOW_MAX_EXTEND = 4000;
+    const bx0 = Math.max(minX, fpMinX - SHADOW_MAX_EXTEND);
+    const by0 = Math.max(minY, fpMinY - SHADOW_MAX_EXTEND);
+    const bx1 = Math.min(maxX, fpMaxX + SHADOW_MAX_EXTEND);
+    const by1 = Math.min(maxY, fpMaxY + SHADOW_MAX_EXTEND);
     const width = bx1 - bx0;
     const height = by1 - by0;
     if (!(width > 0) || !(height > 0)) return;

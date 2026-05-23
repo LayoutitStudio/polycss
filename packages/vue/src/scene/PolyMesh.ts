@@ -327,10 +327,13 @@ export const PolyMesh = defineComponent({
 
       const projections: Array<Array<[number, number]>> = [];
       let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      let fpMinX = Infinity, fpMinY = Infinity, fpMaxX = -Infinity, fpMaxY = -Infinity;
       const polys = polygons.value;
       const plans = textureAtlasPlans.value;
       // No Lambert cull — thin/open meshes (bat wings, cloth, single
       // quad) need both sides projected or the silhouette gets holes.
+      // We also track the footprint (no-shear XY bbox) so the cap below
+      // keeps the area near the mesh fully inside the SVG.
       for (let i = 0; i < polys.length; i++) {
         if (dedupDrop.has(i)) continue;
         const plan = plans[i];
@@ -343,6 +346,10 @@ export const PolyMesh = defineComponent({
             v[0] * BASE_TILE,
             v[2] * BASE_TILE,
           ];
+          if (cssVertex[0] < fpMinX) fpMinX = cssVertex[0];
+          if (cssVertex[1] < fpMinY) fpMinY = cssVertex[1];
+          if (cssVertex[0] > fpMaxX) fpMaxX = cssVertex[0];
+          if (cssVertex[1] > fpMaxY) fpMaxY = cssVertex[1];
           const p = projectCssVertexToGround(cssVertex, lightDir, groundCssZ);
           projected.push(p);
           if (p[0] < minX) minX = p[0];
@@ -353,24 +360,18 @@ export const PolyMesh = defineComponent({
         projections.push(projected);
       }
       if (projections.length === 0) return null;
-      // Cap the SVG's intrinsic dimensions. Low-elevation lights shear
-      // projected polygons across the ground so far that the bbox can
-      // exceed tens of thousands of pixels each side, which forces the
-      // browser to rasterize a >100M-pixel backing store on every
-      // repaint (visible as scene-wide flicker when the camera or light
-      // moves). overflow:hidden clips paths that land outside the cap.
-      const SHADOW_MAX_DIM = 8000;
-      let bx0 = minX, by0 = minY, bx1 = maxX, by1 = maxY;
-      if (bx1 - bx0 > SHADOW_MAX_DIM) {
-        const cx = (bx0 + bx1) / 2;
-        bx0 = cx - SHADOW_MAX_DIM / 2;
-        bx1 = cx + SHADOW_MAX_DIM / 2;
-      }
-      if (by1 - by0 > SHADOW_MAX_DIM) {
-        const cy = (by0 + by1) / 2;
-        by0 = cy - SHADOW_MAX_DIM / 2;
-        by1 = cy + SHADOW_MAX_DIM / 2;
-      }
+      // Cap how far the shadow can extend BEYOND THE MESH FOOTPRINT.
+      // Low-elevation lights shear projections across the ground so far
+      // that the bbox can exceed tens of thousands of pixels each side,
+      // which forces the browser to rasterize a >100M-pixel backing
+      // store on every repaint. The footprint stays fully inside the
+      // SVG so the shadow under/next to the mesh is preserved; only the
+      // sheared end (off-screen anyway) gets clipped by overflow:hidden.
+      const SHADOW_MAX_EXTEND = 4000;
+      const bx0 = Math.max(minX, fpMinX - SHADOW_MAX_EXTEND);
+      const by0 = Math.max(minY, fpMinY - SHADOW_MAX_EXTEND);
+      const bx1 = Math.min(maxX, fpMaxX + SHADOW_MAX_EXTEND);
+      const by1 = Math.min(maxY, fpMaxY + SHADOW_MAX_EXTEND);
       const width = bx1 - bx0;
       const height = by1 - by0;
       if (!(width > 0) || !(height > 0)) return null;
