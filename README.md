@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://polycss.com/voxisologo.png" alt="polycss" width="300" />
+  <img src="https://polycss.com/voxisologo.png" alt="polycss" width="200" />
 </p>
 
 # polycss
@@ -8,7 +8,7 @@ A CSS polygon mesh engine. A 3D renderer for the DOM. Renders OBJ, glTF, GLB and
 
 Visit [polycss.com](https://polycss.com) for docs and model examples.
 
-<img width="1600" height="520" alt="polycss-primitives-banner" src="https://github.com/user-attachments/assets/69655318-3f2a-44ce-a525-6521e1d0fd0f" />
+<img width="1600" height="520" alt="polycss-primitives-banner" src="https://github.com/user-attachments/assets/608a888a-d5a2-43d0-a597-28828169fa24" />
 
 ## Installation
 
