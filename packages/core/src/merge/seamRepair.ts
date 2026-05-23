@@ -933,6 +933,7 @@ function normalizeRepairSegments(
 
 function isValidRepairedPolygon(source: Vec2[], repaired: Vec2[]): boolean {
   if (repaired.length < 3) return false;
+  if (!isWeaklyConvex(repaired)) return false;
   const sourceArea = signedArea(source);
   const repairedArea = signedArea(repaired);
   return Math.sign(repairedArea) === Math.sign(sourceArea) && Math.abs(repairedArea) >= Math.abs(sourceArea) - EPS;
