@@ -32,14 +32,14 @@ import type {
   Vec3,
 } from "@layoutit/polycss-core";
 import {
-  buildBakedShadowProjectionMatrix,
+  BASE_TILE,
   computeSceneBbox,
   DEFAULT_SEAM_BLEED,
   findOverlappingPolygonDuplicates,
-  formatMatrix3dValues,
   inverseRotateVec3,
   isBakedShadowCaster,
   parseHexColor,
+  projectCssVertexToGround,
 } from "@layoutit/polycss-core";
 import type { TransformProps } from "../shapes/types";
 import { usePolyMesh, type UseMeshOptions } from "./useMesh";
@@ -618,35 +618,27 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
     };
   }, [sceneRegisterShadowCaster, castShadow, polygons]);
 
-  // Build shadow leaf elements. Emitted in both lighting modes:
-  //   - Dynamic: transform uses `var(--shadow-proj) matrix3d(...)`; the CSS
-  //     opacity calc on the scene root gates back-facing polys at paint time.
-  //   - Baked: transform is `matrix3d(<bakedProj>) matrix3d(...)` with the
-  //     projection CPU-baked from the fixed light + ground; back-facing
-  //     polys are dropped from the output entirely (no opacity gate needed).
-  // Uses the same plans as the caster polygons so the outlines are identical.
-  // Deduplication removes stacked coplanar shadow leaves that would produce
-  // visible double-shadows on the receiver.
+  // Build shadow leaf elements. Two paths:
+  //   - Dynamic: one `<q>` per casting polygon, transform chains
+  //     `var(--shadow-proj) matrix3d(...)` so the projection follows
+  //     live light updates on the scene root; CSS opacity calc gates
+  //     back-facing polys.
+  //   - Baked: a single `<svg>` per mesh containing one `<path>` per
+  //     caster polygon (projected to ground on the CPU), grouped under
+  //     `<g opacity="...">` so overlapping outlines composite as one
+  //     silhouette before alpha is applied. SVG content is internally
+  //     2D so this sidesteps the `opacity + preserve-3d` flatten trap.
+  //     Back-facing polys are dropped up front.
   const bakedShadowGroundCssZ = sceneCtx?.groundCssZ ?? null;
   const shadowLeaves = useMemo<ReactNode[]>(() => {
     if (!castShadow || renderPolygon) return [];
     const isDynamic = effectiveTextureLighting === "dynamic";
-    // Baked mode needs a ground plane to project onto. Until the scene's
-    // recomputeGroundCssZ runs, fall through and let the next render emit.
-    if (!isDynamic && bakedShadowGroundCssZ === null) return [];
+    if (!isDynamic) return [];
 
     const shadowColor = sceneCtx?.shadow?.color ?? "#000000";
     const shadowOpacity = sceneCtx?.shadow?.opacity ?? 0.25;
     const parsed = parseHexColor(shadowColor)?.rgb ?? [0, 0, 0];
     const shadowColorCss = `rgba(${parsed[0]},${parsed[1]},${parsed[2]},${shadowOpacity})`;
-
-    const lightDir = sceneDirectionalLight?.direction
-      ?? ([0.4, -0.7, 0.59] as Vec3);
-    const bakedProjStr = isDynamic
-      ? null
-      : `matrix3d(${formatMatrix3dValues(
-          buildBakedShadowProjectionMatrix(lightDir, bakedShadowGroundCssZ ?? 0),
-        )})`;
 
     const shadowDedupDrop = findOverlappingPolygonDuplicates(polygons, {
       normalTolerance: 0.1,
@@ -658,8 +650,6 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
     for (const plan of atlasPlans) {
       if (!plan) continue;
       if (shadowDedupDrop.has(plan.index)) continue;
-      // Baked mode: drop back-facing polys before reaching the DOM.
-      if (!isDynamic && !isBakedShadowCaster(plan.normal, lightDir)) continue;
 
       const borderShape = cssBorderShapeForPlan(plan);
       leaves.push(
@@ -668,12 +658,93 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
           plan={plan}
           shadowColorCss={shadowColorCss}
           borderShape={borderShape}
-          bakedProjStr={bakedProjStr}
         />
       );
     }
     return leaves;
-  }, [castShadow, effectiveTextureLighting, renderPolygon, polygons, atlasPlans, sceneCtx?.shadow, sceneDirectionalLight, bakedShadowGroundCssZ]);
+  }, [castShadow, effectiveTextureLighting, renderPolygon, polygons, atlasPlans, sceneCtx?.shadow]);
+
+  // Baked-mode SVG shadow: single per-mesh element.
+  const sceneShadow = sceneCtx?.shadow;
+  const shadowSvgNode = useMemo<ReactNode>(() => {
+    if (!castShadow || renderPolygon) return null;
+    if (effectiveTextureLighting === "dynamic") return null;
+    if (bakedShadowGroundCssZ === null) return null;
+
+    const lightDir = sceneDirectionalLight?.direction
+      ?? ([0.4, -0.7, 0.59] as Vec3);
+    const shadowDedupDrop = findOverlappingPolygonDuplicates(polygons, {
+      normalTolerance: 0.1,
+      distanceTolerance: 0.5,
+      overlapFraction: 0.4,
+    });
+
+    const projections: Array<Array<[number, number]>> = [];
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (let i = 0; i < polygons.length; i++) {
+      const polygon = polygons[i]!;
+      if (shadowDedupDrop.has(i)) continue;
+      const plan = atlasPlans[i];
+      if (!plan) continue;
+      if (!isBakedShadowCaster(plan.normal, lightDir)) continue;
+      const projected: Array<[number, number]> = [];
+      for (const v of polygon.vertices) {
+        const cssVertex: Vec3 = [
+          v[1] * BASE_TILE,
+          v[0] * BASE_TILE,
+          v[2] * BASE_TILE,
+        ];
+        const p = projectCssVertexToGround(cssVertex, lightDir, bakedShadowGroundCssZ);
+        projected.push(p);
+        if (p[0] < minX) minX = p[0];
+        if (p[1] < minY) minY = p[1];
+        if (p[0] > maxX) maxX = p[0];
+        if (p[1] > maxY) maxY = p[1];
+      }
+      projections.push(projected);
+    }
+    if (projections.length === 0) return null;
+    const width = maxX - minX;
+    const height = maxY - minY;
+    if (!(width > 0) || !(height > 0)) return null;
+
+    const shadowColor = sceneShadow?.color ?? "#000000";
+    const shadowOpacity = sceneShadow?.opacity ?? 0.25;
+    const parsed = parseHexColor(shadowColor)?.rgb ?? [0, 0, 0];
+
+    const paths = projections.map((verts, idx) => {
+      let d = `M${(verts[0]![0] - minX).toFixed(3)},${(verts[0]![1] - minY).toFixed(3)}`;
+      for (let j = 1; j < verts.length; j++) {
+        d += `L${(verts[j]![0] - minX).toFixed(3)},${(verts[j]![1] - minY).toFixed(3)}`;
+      }
+      d += "Z";
+      return <path key={idx} d={d} />;
+    });
+
+    return (
+      <svg
+        key="shadow-svg"
+        className="polycss-shadow polycss-shadow-svg"
+        width={width}
+        height={height}
+        viewBox={`0 0 ${width} ${height}`}
+        style={{
+          position: "absolute",
+          top: 0,
+          left: 0,
+          display: "block",
+          overflow: "visible",
+          transformOrigin: "0 0",
+          pointerEvents: "none",
+          transform: `translate3d(${minX.toFixed(3)}px,${minY.toFixed(3)}px,${bakedShadowGroundCssZ.toFixed(3)}px)`,
+        }}
+      >
+        <g fill={`rgb(${parsed[0]},${parsed[1]},${parsed[2]})`} opacity={shadowOpacity.toFixed(4)}>
+          {paths}
+        </g>
+      </svg>
+    );
+  }, [castShadow, renderPolygon, effectiveTextureLighting, polygons, atlasPlans, sceneDirectionalLight, bakedShadowGroundCssZ, sceneShadow]);
 
   setPolygonsImplRef.current = (nextPolygons: Polygon[]) => {
     const nextRenderedPolygons = autoCenter ? recenterPolygons(nextPolygons) : nextPolygons;
@@ -796,6 +867,7 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
       style={wrapperStyle}
       {...wrapperHandlers}
     >
+      {shadowSvgNode}
       {shadowLeaves}
       {renderedPolygons}
       {staticChildren}
@@ -818,58 +890,41 @@ function RenderPropPolygon({
   return <>{children(polygon, index)}</>;
 }
 
-// Shadow leaf — a <q> element that projects the caster polygon's outline
-// onto the ground plane. border-shape clips the element to the polygon's
-// outline (same mechanism as <i>).
-//
-// Dynamic mode: transform is `var(--shadow-proj) matrix3d(...)` so the
-// projection follows live light vars on the scene root; --pnx/y/z is
-// pinned so the CSS opacity gate in styles.ts skips back-facing polys.
-//
-// Baked mode: `bakedProjStr` carries a CPU-baked `matrix3d(<numbers>)`
-// for the projection; back-facing polys are dropped by the caller and
-// no normal vars are needed.
-//
+// Dynamic-mode shadow leaf — one <q> per caster polygon, transform
+// chains `var(--shadow-proj) matrix3d(...)` so the projection follows
+// the live light vars on the scene root. --pnx/y/z is pinned so the CSS
+// opacity gate in styles.ts hides back-facing polys at paint time.
+// Baked mode uses a single per-mesh <svg> instead (see shadowSvgNode in
+// PolyMeshInner above).
 // Uses a ref callback for border-shape (non-standard CSS property, must
 // be set via setProperty).
 function ShadowLeaf({
   plan,
   shadowColorCss,
   borderShape,
-  bakedProjStr,
 }: {
   plan: TextureAtlasPlan;
   shadowColorCss: string;
   borderShape: string;
-  bakedProjStr: string | null;
 }) {
   const setRef = useCallback((el: HTMLElement | null) => {
     if (!el) return;
     el.style.setProperty("border-shape", borderShape);
   }, [borderShape]);
 
-  const baseStyle: CSSProperties = {
-    transform: bakedProjStr
-      ? `${bakedProjStr} matrix3d(${plan.matrix})`
-      : `var(--shadow-proj) matrix3d(${plan.matrix})`,
-    color: shadowColorCss,
-    width: plan.canvasW,
-    height: plan.canvasH,
-  };
-  const style: CSSProperties = bakedProjStr
-    ? baseStyle
-    : {
-        ...baseStyle,
-        ["--pnx" as string]: plan.normal[0].toFixed(4),
-        ["--pny" as string]: plan.normal[1].toFixed(4),
-        ["--pnz" as string]: plan.normal[2].toFixed(4),
-      } as CSSProperties;
-
   return (
     <q
       ref={setRef}
       className="polycss-shadow"
-      style={style}
+      style={{
+        transform: `var(--shadow-proj) matrix3d(${plan.matrix})`,
+        color: shadowColorCss,
+        width: plan.canvasW,
+        height: plan.canvasH,
+        ["--pnx" as string]: plan.normal[0].toFixed(4),
+        ["--pny" as string]: plan.normal[1].toFixed(4),
+        ["--pnz" as string]: plan.normal[2].toFixed(4),
+      } as CSSProperties}
     />
   );
 }

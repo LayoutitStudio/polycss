@@ -20,14 +20,14 @@ import { defineComponent, h, computed, inject, onMounted, onBeforeUnmount, ref, 
 import type { PropType, VNode, CSSProperties } from "vue";
 import type { MeshResolution, Polygon, PolyTextureLightingMode, Vec3 } from "@layoutit/polycss-core";
 import {
-  buildBakedShadowProjectionMatrix,
+  BASE_TILE,
   computeSceneBbox,
   DEFAULT_SEAM_BLEED,
   inverseRotateVec3,
   findOverlappingPolygonDuplicates,
-  formatMatrix3dValues,
   isBakedShadowCaster,
   parseHexColor,
+  projectCssVertexToGround,
 } from "@layoutit/polycss-core";
 import { usePolyMesh } from "./useMesh";
 import {
@@ -306,35 +306,20 @@ export const PolyMesh = defineComponent({
     );
     const defaultPaintVars = computed(() => solidPaintVars(solidPaintDefaults.value));
 
-    // Shadow leaf emission. Active when castShadow=true in either lighting
-    // mode. Dynamic mode emits leaves whose transform uses var(--shadow-proj)
-    // and whose --pnx/y/z drive a CSS opacity calc that hides back-facing
-    // polys at paint time. Baked mode CPU-bakes the projection matrix
-    // (using the scene's fixed light + ground) and drops back-facing polys
-    // from the DOM entirely instead of opacity-gating them.
+    // Dynamic-mode shadow leaves — one <q> per casting polygon whose
+    // transform chains var(--shadow-proj) so shadows reflow as the light
+    // moves. --pnx/y/z drive the CSS opacity gate that hides back-facing
+    // polys. Baked mode uses the per-mesh <svg> below instead.
     const shadowNodes = computed<Array<VNode | null>>(() => {
       if (!props.castShadow) return [];
-      const lighting = atlasTextureLighting.value;
-      const isDynamic = lighting === "dynamic";
-      const ctx = sceneCtx?.value;
-      const groundCssZ = ctx?.groundCssZ ?? null;
-      // Baked mode needs a ground plane to project onto. The scene's
-      // watchEffect will populate it on the next tick after registration.
-      if (!isDynamic && groundCssZ === null) return [];
+      if (atlasTextureLighting.value !== "dynamic") return [];
 
+      const ctx = sceneCtx?.value;
       const shadowOpts = ctx?.shadow;
       const shadowColor = shadowOpts?.color ?? "#000000";
       const shadowOpacity = shadowOpts?.opacity ?? 0.25;
       const parsed = parseHexColor(shadowColor)?.rgb ?? [0, 0, 0];
       const shadowColorCss = `rgba(${parsed[0]},${parsed[1]},${parsed[2]},${shadowOpacity})`;
-
-      const lightDir = ctx?.directionalLight?.direction
-        ?? ([0.4, -0.7, 0.59] as Vec3);
-      const bakedProjStr = isDynamic
-        ? null
-        : `matrix3d(${formatMatrix3dValues(
-            buildBakedShadowProjectionMatrix(lightDir, groundCssZ ?? 0),
-          )})`;
 
       const plans = textureAtlasPlans.value;
       if (plans.length === 0) return [];
@@ -348,25 +333,17 @@ export const PolyMesh = defineComponent({
       return plans.map((plan, index) => {
         if (!plan) return null;
         if (dedupDrop.has(index)) return null;
-        if (!isDynamic && !isBakedShadowCaster(plan.normal, lightDir)) return null;
         const origMatrix = `matrix3d(${plan.matrix})`;
         const borderShape = cssBorderShapeForPlan(plan);
-        const style: CSSProperties = isDynamic
-          ? {
-              transform: `var(--shadow-proj) ${origMatrix}`,
-              color: shadowColorCss,
-              width: `${plan.canvasW}px`,
-              height: `${plan.canvasH}px`,
-              "--pnx": plan.normal[0].toFixed(4),
-              "--pny": plan.normal[1].toFixed(4),
-              "--pnz": plan.normal[2].toFixed(4),
-            }
-          : {
-              transform: `${bakedProjStr} ${origMatrix}`,
-              color: shadowColorCss,
-              width: `${plan.canvasW}px`,
-              height: `${plan.canvasH}px`,
-            };
+        const style: CSSProperties = {
+          transform: `var(--shadow-proj) ${origMatrix}`,
+          color: shadowColorCss,
+          width: `${plan.canvasW}px`,
+          height: `${plan.canvasH}px`,
+          "--pnx": plan.normal[0].toFixed(4),
+          "--pny": plan.normal[1].toFixed(4),
+          "--pnz": plan.normal[2].toFixed(4),
+        };
 
         const applyShadowBorderShape = (vnode: VNode) => {
           const el = vnode.el as HTMLElement | null;
@@ -381,6 +358,101 @@ export const PolyMesh = defineComponent({
           onVnodeUpdated: applyShadowBorderShape,
         });
       });
+    });
+
+    // Baked-mode SVG shadow — single per-mesh <svg> with one <path> per
+    // caster polygon. Overlapping outlines composite as one silhouette
+    // inside the <g opacity="..."> before alpha is applied, sidestepping
+    // the `opacity + preserve-3d` flatten trap.
+    const shadowSvg = computed<VNode | null>(() => {
+      if (!props.castShadow) return null;
+      if (atlasTextureLighting.value === "dynamic") return null;
+      const ctx = sceneCtx?.value;
+      const groundCssZ = ctx?.groundCssZ ?? null;
+      if (groundCssZ === null) return null;
+
+      const lightDir = ctx?.directionalLight?.direction
+        ?? ([0.4, -0.7, 0.59] as Vec3);
+      const dedupDrop = findOverlappingPolygonDuplicates(polygons.value, {
+        normalTolerance: 0.1,
+        distanceTolerance: 0.5,
+        overlapFraction: 0.4,
+      });
+
+      const projections: Array<Array<[number, number]>> = [];
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      const polys = polygons.value;
+      const plans = textureAtlasPlans.value;
+      for (let i = 0; i < polys.length; i++) {
+        if (dedupDrop.has(i)) continue;
+        const plan = plans[i];
+        if (!plan) continue;
+        if (!isBakedShadowCaster(plan.normal, lightDir)) continue;
+        const polygon = polys[i]!;
+        const projected: Array<[number, number]> = [];
+        for (const v of polygon.vertices) {
+          const cssVertex: Vec3 = [
+            v[1] * BASE_TILE,
+            v[0] * BASE_TILE,
+            v[2] * BASE_TILE,
+          ];
+          const p = projectCssVertexToGround(cssVertex, lightDir, groundCssZ);
+          projected.push(p);
+          if (p[0] < minX) minX = p[0];
+          if (p[1] < minY) minY = p[1];
+          if (p[0] > maxX) maxX = p[0];
+          if (p[1] > maxY) maxY = p[1];
+        }
+        projections.push(projected);
+      }
+      if (projections.length === 0) return null;
+      const width = maxX - minX;
+      const height = maxY - minY;
+      if (!(width > 0) || !(height > 0)) return null;
+
+      const shadowOpts = ctx?.shadow;
+      const shadowColor = shadowOpts?.color ?? "#000000";
+      const shadowOpacity = shadowOpts?.opacity ?? 0.25;
+      const parsed = parseHexColor(shadowColor)?.rgb ?? [0, 0, 0];
+
+      const pathNodes = projections.map((verts, idx) => {
+        let d = `M${(verts[0]![0] - minX).toFixed(3)},${(verts[0]![1] - minY).toFixed(3)}`;
+        for (let j = 1; j < verts.length; j++) {
+          d += `L${(verts[j]![0] - minX).toFixed(3)},${(verts[j]![1] - minY).toFixed(3)}`;
+        }
+        d += "Z";
+        return h("path", { key: idx, d });
+      });
+
+      return h(
+        "svg",
+        {
+          class: "polycss-shadow polycss-shadow-svg",
+          width: String(width),
+          height: String(height),
+          viewBox: `0 0 ${width} ${height}`,
+          style: {
+            position: "absolute",
+            top: "0",
+            left: "0",
+            display: "block",
+            overflow: "visible",
+            transformOrigin: "0 0",
+            pointerEvents: "none",
+            transform: `translate3d(${minX.toFixed(3)}px,${minY.toFixed(3)}px,${groundCssZ.toFixed(3)}px)`,
+          } as CSSProperties,
+        },
+        [
+          h(
+            "g",
+            {
+              fill: `rgb(${parsed[0]},${parsed[1]},${parsed[2]})`,
+              opacity: shadowOpacity.toFixed(4),
+            },
+            pathNodes,
+          ),
+        ],
+      );
     });
 
     // Register this mesh with the shadow registry when castShadow=true in
@@ -709,10 +781,13 @@ export const PolyMesh = defineComponent({
       // Static default slot children (e.g. additional <PolyMesh> children)
       const defaultChildren = slots.default?.() ?? [];
 
-      // Shadow leaves go before polygon nodes so they sit below casters in
-      // DOM order — painter-order tie-breaking favors earlier nodes when both
-      // are coplanar in 3D.
+      // Shadow elements go before polygon nodes so they sit below casters
+      // in DOM order — painter-order tie-breaking favors earlier nodes when
+      // both are coplanar in 3D. Dynamic mode emits per-polygon <q>; baked
+      // mode emits a single <svg> per mesh (see shadowSvg above).
       const shadows = shadowNodes.value;
+      const svgNode = shadowSvg.value;
+      const shadowChildren: VNode[] = svgNode ? [svgNode] : [];
 
       return h(
         "div",
@@ -724,7 +799,7 @@ export const PolyMesh = defineComponent({
           ...handlers,
           ...extraAttrs,
         },
-        [...shadows, ...polyNodes, ...defaultChildren]
+        [...shadowChildren, ...shadows, ...polyNodes, ...defaultChildren]
       );
     };
   },
