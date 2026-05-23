@@ -115,9 +115,9 @@ describe("PolyMesh — castShadow", () => {
     expect(container.querySelectorAll(".polycss-shadow").length).toBe(2);
   });
 
-  it("castShadow in baked mode emits a single <svg> shadow per mesh with one merged silhouette <path>", () => {
-    // Baked mode builds a per-mesh <svg> with the convex hull of every
-    // caster polygon's projected vertices — one merged silhouette.
+  it("castShadow in baked mode emits a single <svg> shadow per mesh containing one <path> per caster polygon", () => {
+    // Baked mode builds a per-mesh <svg> with CPU-projected outlines so
+    // overlapping leaves composite as one silhouette (no alpha stacking).
     // The default light has positive Z, so the +Z-facing triangle is a caster.
     const { container } = renderScene(
       { textureLighting: "baked" },
@@ -130,9 +130,10 @@ describe("PolyMesh — castShadow", () => {
     expect(shadow.classList.contains("polycss-shadow-svg")).toBe(true);
     expect(shadow.style.transform).toMatch(/^translate3d\(/);
     expect(shadow.style.transform).not.toContain("var(--shadow-proj)");
-    const paths = shadow.querySelectorAll("path");
-    expect(paths.length).toBe(1);
-    expect(paths[0]!.getAttribute("opacity")).toBe("0.2500");
+    const group = shadow.querySelector("g");
+    expect(group).not.toBeNull();
+    expect(group!.getAttribute("opacity")).toBe("0.2500");
+    expect(group!.querySelectorAll("path").length).toBe(1);
   });
 
   it("shadow leaves are <q> elements", () => {

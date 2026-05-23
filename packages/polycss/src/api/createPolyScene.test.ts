@@ -1890,10 +1890,10 @@ describe("createPolyScene", () => {
       expect(host.querySelectorAll(".polycss-shadow").length).toBe(2);
     });
 
-    it("castShadow:true in baked mode emits a single <svg> shadow per mesh with one merged silhouette <path>", () => {
-      // Baked mode builds a per-mesh <svg> with the convex hull of every
-      // caster polygon's projected vertices — one merged silhouette
-      // instead of overlapping rectangles.
+    it("castShadow:true in baked mode emits a single <svg> shadow per mesh containing one <path> per caster polygon", () => {
+      // Baked mode builds a per-mesh <svg> with CPU-projected outlines so
+      // overlapping leaves composite as one silhouette (no alpha stacking).
+      // The default light has +Z so the +Z-facing triangle is a caster.
       scene = makeScene(host, { textureLighting: "baked" });
       scene.add(makeParseResult([triangle()]), { castShadow: true });
       const shadows = host.querySelectorAll(".polycss-shadow");
@@ -1904,10 +1904,12 @@ describe("createPolyScene", () => {
       // SVG positioning is a translate3d at the ground plane (no var(--shadow-proj)).
       expect(shadow.style.transform).toMatch(/^translate3d\(/);
       expect(shadow.style.transform).not.toContain("var(--shadow-proj)");
-      // Single merged silhouette path, opacity baked into the path itself.
-      const paths = shadow.querySelectorAll("path");
-      expect(paths.length).toBe(1);
-      expect(paths[0]!.getAttribute("opacity")).toBe("0.2500");
+      // One path per caster polygon, grouped under a <g opacity=...> so
+      // overlapping outlines collapse to one silhouette before alpha applies.
+      const group = shadow.querySelector("g");
+      expect(group).not.toBeNull();
+      expect(group!.getAttribute("opacity")).toBe("0.2500");
+      expect(group!.querySelectorAll("path").length).toBe(1);
     });
 
     it("baked mode skips shadow leaves for polygons facing away from the light", () => {
