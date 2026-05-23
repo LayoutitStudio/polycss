@@ -23,6 +23,7 @@ import {
   BASE_TILE,
   computeSceneBbox,
   DEFAULT_SEAM_BLEED,
+  ensureCcw2D,
   inverseRotateVec3,
   findOverlappingPolygonDuplicates,
   isBakedShadowCaster,
@@ -415,14 +416,21 @@ export const PolyMesh = defineComponent({
       const shadowOpacity = shadowOpts?.opacity ?? 0.25;
       const parsed = parseHexColor(shadowColor)?.rgb ?? [0, 0, 0];
 
-      const pathNodes = projections.map((verts, idx) => {
-        let d = `M${(verts[0]![0] - minX).toFixed(3)},${(verts[0]![1] - minY).toFixed(3)}`;
-        for (let j = 1; j < verts.length; j++) {
-          d += `L${(verts[j]![0] - minX).toFixed(3)},${(verts[j]![1] - minY).toFixed(3)}`;
+      // Concatenate every projection into ONE compound `d` string. Each
+      // polygon becomes its own M…L…Z subpath, normalized to CCW so all
+      // windings agree and fill-rule=nonzero paints overlapping outlines
+      // as one filled silhouette without alpha stacking. Gaps between
+      // subpaths remain as holes — the shadow inherits the silhouette's
+      // holes for free.
+      let d = "";
+      for (const verts of projections) {
+        const ccw = ensureCcw2D(verts);
+        d += `M${(ccw[0]![0] - minX).toFixed(3)},${(ccw[0]![1] - minY).toFixed(3)}`;
+        for (let j = 1; j < ccw.length; j++) {
+          d += `L${(ccw[j]![0] - minX).toFixed(3)},${(ccw[j]![1] - minY).toFixed(3)}`;
         }
         d += "Z";
-        return h("path", { key: idx, d });
-      });
+      }
 
       return h(
         "svg",
@@ -443,14 +451,12 @@ export const PolyMesh = defineComponent({
           } as CSSProperties,
         },
         [
-          h(
-            "g",
-            {
-              fill: `rgb(${parsed[0]},${parsed[1]},${parsed[2]})`,
-              opacity: shadowOpacity.toFixed(4),
-            },
-            pathNodes,
-          ),
+          h("path", {
+            d,
+            fill: `rgb(${parsed[0]},${parsed[1]},${parsed[2]})`,
+            "fill-rule": "nonzero",
+            opacity: shadowOpacity.toFixed(4),
+          }),
         ],
       );
     });

@@ -3,7 +3,9 @@ import {
   BAKED_SHADOW_MIN_UP,
   BAKED_SHADOW_Z_SQUASH,
   buildBakedShadowProjectionMatrix,
+  ensureCcw2D,
   isBakedShadowCaster,
+  polygonSignedArea2D,
   projectCssVertexToGround,
 } from "./projection";
 
@@ -116,5 +118,40 @@ describe("projectCssVertexToGround", () => {
     const [x] = projectCssVertexToGround([100, 0, 25], [1, 0, 0.001], 0);
     expect(Math.abs(x - 100)).toBeLessThanOrEqual(25 / BAKED_SHADOW_MIN_UP + 1);
     expect(Math.abs(x - 100)).toBeGreaterThan(100);
+  });
+});
+
+describe("polygonSignedArea2D", () => {
+  it("returns +1 for a unit square in CCW order", () => {
+    expect(polygonSignedArea2D([[0, 0], [1, 0], [1, 1], [0, 1]])).toBeCloseTo(1, 9);
+  });
+
+  it("returns -1 for a unit square in CW order", () => {
+    expect(polygonSignedArea2D([[0, 0], [0, 1], [1, 1], [1, 0]])).toBeCloseTo(-1, 9);
+  });
+
+  it("returns 0.5 for the standard CCW right triangle", () => {
+    expect(polygonSignedArea2D([[0, 0], [1, 0], [0, 1]])).toBeCloseTo(0.5, 9);
+  });
+});
+
+describe("ensureCcw2D", () => {
+  it("leaves CCW input unchanged", () => {
+    const input: Array<[number, number]> = [[0, 0], [1, 0], [1, 1], [0, 1]];
+    expect(ensureCcw2D(input)).toEqual(input);
+  });
+
+  it("reverses CW input to CCW", () => {
+    const input: Array<[number, number]> = [[0, 0], [0, 1], [1, 1], [1, 0]];
+    const out = ensureCcw2D(input);
+    expect(polygonSignedArea2D(out)).toBeGreaterThan(0);
+    expect(out).toEqual([[1, 0], [1, 1], [0, 1], [0, 0]]);
+  });
+
+  it("does not mutate input", () => {
+    const input: Array<[number, number]> = [[0, 0], [0, 1], [1, 1], [1, 0]];
+    const snap = JSON.stringify(input);
+    ensureCcw2D(input);
+    expect(JSON.stringify(input)).toBe(snap);
   });
 });

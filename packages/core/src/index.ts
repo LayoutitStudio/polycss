@@ -146,7 +146,9 @@ export {
   BAKED_SHADOW_MIN_UP,
   BAKED_SHADOW_Z_SQUASH,
   buildBakedShadowProjectionMatrix,
+  ensureCcw2D,
   isBakedShadowCaster,
+  polygonSignedArea2D,
   projectCssVertexToGround,
 } from "./shadow/projection";
 

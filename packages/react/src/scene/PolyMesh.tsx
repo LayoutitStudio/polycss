@@ -35,6 +35,7 @@ import {
   BASE_TILE,
   computeSceneBbox,
   DEFAULT_SEAM_BLEED,
+  ensureCcw2D,
   findOverlappingPolygonDuplicates,
   inverseRotateVec3,
   isBakedShadowCaster,
@@ -712,14 +713,21 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
     const shadowOpacity = sceneShadow?.opacity ?? 0.25;
     const parsed = parseHexColor(shadowColor)?.rgb ?? [0, 0, 0];
 
-    const paths = projections.map((verts, idx) => {
-      let d = `M${(verts[0]![0] - minX).toFixed(3)},${(verts[0]![1] - minY).toFixed(3)}`;
-      for (let j = 1; j < verts.length; j++) {
-        d += `L${(verts[j]![0] - minX).toFixed(3)},${(verts[j]![1] - minY).toFixed(3)}`;
+    // Concatenate every projection into ONE compound `d` string. Each
+    // polygon becomes its own M…L…Z subpath, normalized to CCW so all
+    // windings agree and fill-rule=nonzero paints overlapping outlines
+    // as one filled silhouette without alpha stacking. Gaps between
+    // subpaths remain as gaps (the shadow preserves the silhouette's
+    // holes for free).
+    let d = "";
+    for (const verts of projections) {
+      const ccw = ensureCcw2D(verts);
+      d += `M${(ccw[0]![0] - minX).toFixed(3)},${(ccw[0]![1] - minY).toFixed(3)}`;
+      for (let j = 1; j < ccw.length; j++) {
+        d += `L${(ccw[j]![0] - minX).toFixed(3)},${(ccw[j]![1] - minY).toFixed(3)}`;
       }
       d += "Z";
-      return <path key={idx} d={d} />;
-    });
+    }
 
     return (
       <svg
@@ -739,9 +747,12 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
           transform: `translate3d(${minX.toFixed(3)}px,${minY.toFixed(3)}px,${bakedShadowGroundCssZ.toFixed(3)}px)`,
         }}
       >
-        <g fill={`rgb(${parsed[0]},${parsed[1]},${parsed[2]})`} opacity={shadowOpacity.toFixed(4)}>
-          {paths}
-        </g>
+        <path
+          d={d}
+          fill={`rgb(${parsed[0]},${parsed[1]},${parsed[2]})`}
+          fillRule="nonzero"
+          opacity={shadowOpacity.toFixed(4)}
+        />
       </svg>
     );
   }, [castShadow, renderPolygon, effectiveTextureLighting, polygons, atlasPlans, sceneDirectionalLight, bakedShadowGroundCssZ, sceneShadow]);

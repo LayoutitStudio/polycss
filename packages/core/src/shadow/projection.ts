@@ -83,6 +83,38 @@ export function isBakedShadowCaster(
 }
 
 /**
+ * Signed area of a 2D polygon (positive for CCW vertex order, negative
+ * for CW). Used by `ensureCcw2D` to normalize winding before concatenating
+ * polygons into a compound SVG path under `fill-rule="nonzero"`: mixed
+ * CCW/CW subpaths would cancel each other's winding in the overlap
+ * region and paint an unintended hole.
+ */
+export function polygonSignedArea2D(
+  vertices: ReadonlyArray<readonly [number, number]>,
+): number {
+  let a = 0;
+  const n = vertices.length;
+  for (let i = 0; i < n; i++) {
+    const p = vertices[i]!;
+    const q = vertices[(i + 1) % n]!;
+    a += p[0] * q[1] - q[0] * p[1];
+  }
+  return a / 2;
+}
+
+/**
+ * Returns the polygon's vertices in CCW order, reversing if necessary.
+ * Operates on a copy — input is left unmodified.
+ */
+export function ensureCcw2D(
+  vertices: ReadonlyArray<readonly [number, number]>,
+): Array<[number, number]> {
+  const copy = vertices.map((v) => [v[0], v[1]] as [number, number]);
+  if (polygonSignedArea2D(copy) < 0) copy.reverse();
+  return copy;
+}
+
+/**
  * Projects a single CSS-3D vertex onto the shadow ground plane, returning
  * the resulting 2D point in CSS coordinates. Mirrors the per-element
  * matrix3d that the dynamic-mode `--shadow-proj` builds, but evaluated on

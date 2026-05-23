@@ -1890,10 +1890,12 @@ describe("createPolyScene", () => {
       expect(host.querySelectorAll(".polycss-shadow").length).toBe(2);
     });
 
-    it("castShadow:true in baked mode emits a single <svg> shadow per mesh containing one <path> per caster polygon", () => {
-      // Baked mode builds a per-mesh <svg> with CPU-projected outlines so
-      // overlapping leaves composite as one silhouette (no alpha stacking).
-      // The default light has +Z so the +Z-facing triangle is a caster.
+    it("castShadow:true in baked mode emits a single <svg> shadow per mesh with one compound <path>", () => {
+      // Baked mode concatenates every casting polygon's projected outline
+      // into ONE compound `d` (M…L…Z subpaths) rendered under
+      // fill-rule=nonzero, so overlapping CCW outlines composite as one
+      // filled silhouette without alpha stacking while gaps remain holes.
+      // One <path> per mesh regardless of polygon count.
       scene = makeScene(host, { textureLighting: "baked" });
       scene.add(makeParseResult([triangle()]), { castShadow: true });
       const shadows = host.querySelectorAll(".polycss-shadow");
@@ -1901,15 +1903,18 @@ describe("createPolyScene", () => {
       const shadow = shadows[0] as SVGSVGElement;
       expect(shadow.tagName.toLowerCase()).toBe("svg");
       expect(shadow.classList.contains("polycss-shadow-svg")).toBe(true);
-      // SVG positioning is a translate3d at the ground plane (no var(--shadow-proj)).
       expect(shadow.style.transform).toMatch(/^translate3d\(/);
       expect(shadow.style.transform).not.toContain("var(--shadow-proj)");
-      // One path per caster polygon, grouped under a <g opacity=...> so
-      // overlapping outlines collapse to one silhouette before alpha applies.
-      const group = shadow.querySelector("g");
-      expect(group).not.toBeNull();
-      expect(group!.getAttribute("opacity")).toBe("0.2500");
-      expect(group!.querySelectorAll("path").length).toBe(1);
+      const paths = shadow.querySelectorAll("path");
+      expect(paths.length).toBe(1);
+      const path = paths[0]!;
+      expect(path.getAttribute("opacity")).toBe("0.2500");
+      expect(path.getAttribute("fill-rule")).toBe("nonzero");
+      const d = path.getAttribute("d") || "";
+      // Triangle (3 verts) → one M, two Ls, one Z.
+      expect((d.match(/M/g) || []).length).toBe(1);
+      expect((d.match(/L/g) || []).length).toBe(2);
+      expect((d.match(/Z/g) || []).length).toBe(1);
     });
 
     it("baked mode skips shadow leaves for polygons facing away from the light", () => {

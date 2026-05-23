@@ -42,6 +42,7 @@ import {
   cameraCullNormalKey,
   cameraCullVisibleSignature,
   computeSceneBbox,
+  ensureCcw2D,
   findOverlappingPolygonDuplicates,
   inverseRotateVec3,
   isAxisAlignedSurfaceNormal,
@@ -355,17 +356,6 @@ function strategiesEqual(
   if (da.length !== db.length) return false;
   for (const s of da) if (!db.includes(s)) return false;
   return true;
-}
-
-function pointsToSvgPath(points: Array<[number, number]>, originX: number, originY: number): string {
-  if (points.length === 0) return "";
-  const [x0, y0] = points[0]!;
-  let d = `M${(x0 - originX).toFixed(3)},${(y0 - originY).toFixed(3)}`;
-  for (let i = 1; i < points.length; i++) {
-    const [x, y] = points[i]!;
-    d += `L${(x - originX).toFixed(3)},${(y - originY).toFixed(3)}`;
-  }
-  return d + "Z";
 }
 
 function vec3Equal(a: Vec3 | undefined, b: Vec3 | undefined): boolean {
@@ -1329,6 +1319,23 @@ export function createPolyScene(
     const height = maxY - minY;
     if (!(width > 0) || !(height > 0)) return;
 
+    // Concatenate every projected polygon into ONE compound `d` string —
+    // each subpath as its own `M…L…Z` block. Under `fill-rule="nonzero"`
+    // overlapping CCW subpaths composite as one filled region without
+    // alpha stacking, AND gaps between subpaths remain as gaps (the
+    // shadow inherits the silhouette's holes for free). We normalize
+    // each projected polygon to CCW so any back-projected (CW) ones
+    // don't cancel adjacent winding and punch unwanted holes.
+    let d = "";
+    for (const verts of polyProjections) {
+      const ccw = ensureCcw2D(verts);
+      d += `M${(ccw[0]![0] - minX).toFixed(3)},${(ccw[0]![1] - minY).toFixed(3)}`;
+      for (let i = 1; i < ccw.length; i++) {
+        d += `L${(ccw[i]![0] - minX).toFixed(3)},${(ccw[i]![1] - minY).toFixed(3)}`;
+      }
+      d += "Z";
+    }
+
     const svgNS = "http://www.w3.org/2000/svg";
     const svg = doc.createElementNS(svgNS, "svg");
     svg.setAttribute("class", "polycss-shadow polycss-shadow-svg");
@@ -1345,15 +1352,12 @@ export function createPolyScene(
       `transform:translate3d(${minX.toFixed(3)}px,${minY.toFixed(3)}px,${groundCssZ.toFixed(3)}px)`,
     );
 
-    const group = doc.createElementNS(svgNS, "g");
-    group.setAttribute("fill", `rgb(${r},${g},${b})`);
-    group.setAttribute("opacity", opacity.toFixed(4));
-    for (const verts of polyProjections) {
-      const path = doc.createElementNS(svgNS, "path");
-      path.setAttribute("d", pointsToSvgPath(verts, minX, minY));
-      group.appendChild(path);
-    }
-    svg.appendChild(group);
+    const path = doc.createElementNS(svgNS, "path");
+    path.setAttribute("d", d);
+    path.setAttribute("fill", `rgb(${r},${g},${b})`);
+    path.setAttribute("fill-rule", "nonzero");
+    path.setAttribute("opacity", opacity.toFixed(4));
+    svg.appendChild(path);
 
     entry.shadowSvg = svg;
     const firstChild = entry.wrapper.firstChild;

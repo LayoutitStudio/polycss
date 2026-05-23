@@ -94,10 +94,10 @@ describe("PolyMesh (Vue) — castShadow", () => {
     expect(container.querySelectorAll(".polycss-shadow").length).toBe(2);
   });
 
-  it("castShadow:true in baked mode emits a single <svg> shadow per mesh containing one <path> per caster polygon", async () => {
-    // Baked mode builds a per-mesh <svg> with CPU-projected outlines so
-    // overlapping leaves composite as one silhouette (no alpha stacking).
-    // The default light has positive Z so the +Z-facing triangle is a caster.
+  it("castShadow:true in baked mode emits a single <svg> shadow per mesh with one compound <path>", async () => {
+    // Baked mode concatenates every casting polygon's projected outline
+    // into ONE compound `d` (M…L…Z subpaths) rendered under
+    // fill-rule=nonzero. One <path> per mesh regardless of polygon count.
     // nextTick lets the scene's watchEffect derive groundCssZ from the
     // child's registration before the shadow nodes recompute.
     const { container } = mount(
@@ -113,10 +113,15 @@ describe("PolyMesh (Vue) — castShadow", () => {
     expect(shadow.classList.contains("polycss-shadow-svg")).toBe(true);
     expect(shadow.style.transform).toMatch(/^translate3d\(/);
     expect(shadow.style.transform).not.toContain("var(--shadow-proj)");
-    const group = shadow.querySelector("g");
-    expect(group).not.toBeNull();
-    expect(group!.getAttribute("opacity")).toBe("0.2500");
-    expect(group!.querySelectorAll("path").length).toBe(1);
+    const paths = shadow.querySelectorAll("path");
+    expect(paths.length).toBe(1);
+    const path = paths[0]!;
+    expect(path.getAttribute("opacity")).toBe("0.2500");
+    expect(path.getAttribute("fill-rule")).toBe("nonzero");
+    const d = path.getAttribute("d") || "";
+    expect((d.match(/M/g) || []).length).toBe(1);
+    expect((d.match(/L/g) || []).length).toBe(2);
+    expect((d.match(/Z/g) || []).length).toBe(1);
   });
 
   it("shadow leaves are always <q> with class polycss-shadow", () => {
