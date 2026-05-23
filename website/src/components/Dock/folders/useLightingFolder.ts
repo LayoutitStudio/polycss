@@ -56,7 +56,7 @@ export function useLightingFolder(parent: GUI | null, inputs: LightingFolderInpu
   useSlider(folder, "Azimuth", { min: 0, max: 360, step: 1 }, lightAzimuth, (value) =>
     onUpdateScene({ lightAzimuth: value }),
   );
-  useSlider(folder, "Elev.", { min: -90, max: 90, step: 1 }, lightElevation, (value) =>
+  useSlider(folder, "Elev.", { min: 0, max: 90, step: 1 }, lightElevation, (value) =>
     onUpdateScene({ lightElevation: value }),
   );
   useSlider(folder, "Key", { min: 0, max: 2, step: 0.05 }, lightIntensity, (value) =>
