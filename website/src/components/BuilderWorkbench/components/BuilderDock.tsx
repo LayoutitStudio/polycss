@@ -92,6 +92,7 @@ export function BuilderDock({
       />
       <DockLighting
         castShadow={sceneOptions.castShadow}
+        shadowMaxExtend={sceneOptions.shadowMaxExtend}
         showGround={sceneOptions.showGround}
         showLight={sceneOptions.showLight}
         lightAzimuth={sceneOptions.lightAzimuth}

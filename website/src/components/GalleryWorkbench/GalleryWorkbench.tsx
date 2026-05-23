@@ -130,6 +130,7 @@ const DEFAULT_SCENE: SceneOptionsState = {
   target: [0, 0, 0],
   disableStrategies: [],
   castShadow: false,
+  shadowMaxExtend: 2000,
   showGround: false,
   fpvLook: true,
   fpvMove: true,
@@ -867,6 +868,7 @@ export default function GalleryWorkbench() {
         />
         <DockLighting
           castShadow={sceneOptions.castShadow}
+          shadowMaxExtend={sceneOptions.shadowMaxExtend}
           showGround={sceneOptions.showGround}
           showLight={sceneOptions.showLight}
           lightAzimuth={sceneOptions.lightAzimuth}

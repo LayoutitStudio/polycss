@@ -309,6 +309,7 @@ export function VanillaScene({
       autoCenter: options.autoCenter,
       textureQuality: options.textureQuality,
       strategies: { disable: options.disableStrategies },
+      shadow: { maxExtend: options.shadowMaxExtend },
     };
     const scene = createPolyScene(host, sceneOptions);
     sceneRef.current = scene;
@@ -695,6 +696,7 @@ export function VanillaScene({
       directionalLight,
       ambientLight,
       textureLighting: options.textureLighting,
+      shadow: { maxExtend: options.shadowMaxExtend },
     });
   }, [
     options.rotX,
@@ -702,6 +704,7 @@ export function VanillaScene({
     options.zoom,
     options.target,
     options.textureLighting,
+    options.shadowMaxExtend,
     directionalLight,
     ambientLight,
   ]);
