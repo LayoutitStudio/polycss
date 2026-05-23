@@ -60,7 +60,8 @@ interface PolyState {
 interface EdgeOwners {
   a: Vec3;
   b: Vec3;
-  owners: number[];
+  first: number;
+  second: number;
 }
 
 const sub = (a: Vec3, b: Vec3): Vec3 => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
@@ -341,7 +342,7 @@ export function mergePolygons(input: Polygon[]): Polygon[] {
       if (polygon) out.push(polygon);
       continue;
     }
-    const verts = polygon.vertices.map((v) => [v[0], v[1], v[2]] as Vec3);
+    const verts = polygon.vertices;
     const plane = planeOf(verts);
     if (!plane) {
       out.push(polygon);
@@ -398,10 +399,11 @@ export function mergePolygons(input: Polygon[]): Polygon[] {
         const key = cachedEdgeKey(a, b);
         let edge = edgeIndex.get(key);
         if (!edge) {
-          edge = { a, b, owners: [] };
+          edge = { a, b, first: i, second: -1 };
           edgeIndex.set(key, edge);
+        } else if (edge.second < 0) {
+          edge.second = i;
         }
-        edge.owners.push(i);
       }
     }
 
@@ -414,12 +416,12 @@ export function mergePolygons(input: Polygon[]): Polygon[] {
     };
 
     for (const edge of edgeIndex.values()) {
-      const { owners } = edge;
-      // owners can have >2 if a degenerate input had three+ polys sharing
-      // an edge; we still try each pair below — but the simple dedupe
-      // skips index entries where both polys were already merged away.
-      if (owners.length < 2) continue;
-      const [ai, bi] = owners;
+      // Degenerate inputs can have three+ polys sharing an edge. The old
+      // array path only tried the first two owners, so the fixed slots keep
+      // that behavior without allocating for every boundary edge.
+      if (edge.second < 0) continue;
+      const ai = edge.first;
+      const bi = edge.second;
       if (ai === bi) continue;
       const a = polys[ai];
       const b = polys[bi];
@@ -475,11 +477,11 @@ export function mergePolygons(input: Polygon[]): Polygon[] {
   for (const p of polys) {
     if (!p.alive) continue;
     const out_p: Polygon = {
-      vertices: p.vertices,
+      vertices: p.vertices.map((vertex) => [vertex[0], vertex[1], vertex[2]] as Vec3),
       color: p.color,
     };
     if (p.texture) out_p.texture = p.texture;
-    if (p.uvs) out_p.uvs = p.uvs;
+    if (p.uvs) out_p.uvs = p.uvs.map((uv) => [uv[0], uv[1]] as Vec2);
     if (p.textureTriangles?.length) out_p.textureTriangles = p.textureTriangles;
     if (p.data) out_p.data = p.data;
     out.push(out_p);
