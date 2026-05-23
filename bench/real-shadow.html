@@ -78,6 +78,8 @@
       };
     }
 
+    const NO_SHADOW = new URLSearchParams(location.search).has("noshadow");
+
     const PLANE_R = 12;
     const planeHandle = scene.add(
       {
@@ -90,7 +92,7 @@
         }],
         dispose() {},
       },
-      { castShadow: false, receiveShadow: true, merge: false },
+      { castShadow: false, receiveShadow: !NO_SHADOW, merge: false },
     );
 
     // ──────────────────────────────────────────────────────────────────
@@ -502,7 +504,14 @@
       return { tp, fp, fn, tn, fnFaces, fpFaces, ldotnHist };
     }
 
+    // URL toggles for trace/debug runs:
+    //   ?norayt     skip the brute-force raytracer + overlay
+    //   ?noshadow   disable cast/receive on apple+pole (baseline)
+    const URL_FLAGS = new URLSearchParams(location.search);
+    const SKIP_RAYTRACE = URL_FLAGS.has("norayt");
+    const SKIP_SHADOWS = URL_FLAGS.has("noshadow");
     function runRaytraceAndOverlay() {
+      if (SKIP_RAYTRACE) return;
       if (!meshes.apple || !meshes.pole) return;
       const t0 = performance.now();
       // Pole-only occlusion. Receiver self-occlusion is handled by
@@ -544,13 +553,13 @@
       const applePos = [2.5, 0, 0];
       const polePos = [-50, 1000, 0];
       const appleHandle = scene.add(scalePolygons(appleRaw, 0.5), {
-        castShadow: true,
-        receiveShadow: true,
+        castShadow: !NO_SHADOW,
+        receiveShadow: !NO_SHADOW,
         merge: false,
         position: applePos,
       });
       const poleHandle = scene.add(scalePolygons(poleRaw, 2), {
-        castShadow: true,
+        castShadow: !NO_SHADOW,
         receiveShadow: false,
         merge: false,
         position: polePos,

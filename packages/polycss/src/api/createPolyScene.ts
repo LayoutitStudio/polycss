@@ -657,6 +657,40 @@ export function createPolyScene(
     sceneShadowSvgs.length = 0;
   }
 
+  // Per-receiver cached face geometry. Each entry holds one record
+  // per coplanar face group on the receiver: plane (O, n, u, v),
+  // outline polygon (used as Sutherland-Hodgman clip), bbox in (u, v)
+  // for SVG sizing, and the pre-stringified matrix3d transform that
+  // places an SVG on that face plane.
+  //
+  // All of this is invariant under light/caster changes. Per light
+  // tick we just re-run the per-tri SH and build the path `d` —
+  // never recompute groups or basis. Cache invalidated when the
+  // receiver's polygon count or position changes.
+  interface ReceiverFacePlane {
+    O: Vec3;
+    n: Vec3;
+    u: Vec3;
+    v: Vec3;
+    outlineUv: Array<[number, number]>;
+    minU: number;
+    minV: number;
+    width: number;
+    height: number;
+    matrixCss: string;
+  }
+  const receiverShadowCache = new Map<MeshEntry, ReceiverFacePlane[]>();
+  const receiverShadowCacheKey = new Map<MeshEntry, string>();
+  function clearReceiverShadowCache(entry?: MeshEntry): void {
+    if (entry) {
+      receiverShadowCache.delete(entry);
+      receiverShadowCacheKey.delete(entry);
+    } else {
+      receiverShadowCache.clear();
+      receiverShadowCacheKey.clear();
+    }
+  }
+
   // Apply CSS perspective on the camera wrapper, not the scene element.
   // CSS `perspective` only foreshortens direct children's 3D transforms, so
   // the wrapper must be the perspective context for .polycss-scene to work
@@ -1547,17 +1581,45 @@ export function createPolyScene(
     // stay at 6 surfaces (each face is its own group); a flat plane
     // subdivided into N triangles collapses to 1 surface; an apple
     // shrinks from O(triangles) to O(distinct normals * planes).
-    // One surface per coplanar group on the receiver. For flat-faced
-    // receivers (cubes, planes) groupReceiverFaceGroups merges into
-    // few groups. For curved/tessellated receivers (apple, sphere)
-    // each face becomes its own group → one shadow per face on its
-    // actual surface plane. The shadow projects in the real light
-    // direction onto each face's exact plane and is clipped to that
-    // face's outline — accurate by polygon, no flat-blob faking.
-    const surfaces = groupReceiverFaceGroups(receiverEntry, rpos, worldCss);
+    // Per-receiver face cache: plane data invariant under light. We
+    // recompute groups (which is O(F²) and allocates lots of vectors)
+    // only when receiver polygons or position change. The SVG element
+    // is still created per-frame for non-empty paths — pre-mounting
+    // an SVG per face balloons compositor layers (248 → +33ms gpuViz).
+    const cacheKey = `${receiverEntry.polygons.length}|${rpos.join(",")}`;
+    let cachedPlanes = receiverShadowCache.get(receiverEntry);
+    if (cachedPlanes === undefined || receiverShadowCacheKey.get(receiverEntry) !== cacheKey) {
+      const surfaces = groupReceiverFaceGroups(receiverEntry, rpos, worldCss);
+      cachedPlanes = surfaces.map((group): ReceiverFacePlane => {
+        const { O, n, u, v, outlineUv } = group;
+        let minU = Infinity, minV = Infinity, maxU = -Infinity, maxV = -Infinity;
+        for (const pt of outlineUv) {
+          if (pt[0] < minU) minU = pt[0];
+          if (pt[1] < minV) minV = pt[1];
+          if (pt[0] > maxU) maxU = pt[0];
+          if (pt[1] > maxV) maxV = pt[1];
+        }
+        const width = maxU - minU;
+        const height = maxV - minV;
+        const lift = 5;
+        const Ox = O[0] + minU * u[0] + minV * v[0] + lift * n[0];
+        const Oy = O[1] + minU * u[1] + minV * v[1] + lift * n[1];
+        const Oz = O[2] + minU * u[2] + minV * v[2] + lift * n[2];
+        const m = [
+          u[0], u[1], u[2], 0,
+          v[0], v[1], v[2], 0,
+          n[0], n[1], n[2], 0,
+          Ox,   Oy,   Oz,   1,
+        ];
+        const matrixCss = `matrix3d(${m.map((x) => x.toFixed(4)).join(",")})`;
+        return { O, n, u, v, outlineUv, minU, minV, width, height, matrixCss };
+      });
+      receiverShadowCache.set(receiverEntry, cachedPlanes);
+      receiverShadowCacheKey.set(receiverEntry, cacheKey);
+    }
 
-    for (const group of surfaces) {
-      const { O, n, u, v, outlineUv } = group;
+    for (const group of cachedPlanes) {
+      const { O, n, u, v, outlineUv, minU, minV, width, height, matrixCss } = group;
       // Cull back-facing surfaces. A back-facing receiver face has
       // its outward normal pointing AWAY from the light — physically
       // it can't receive light at all (the receiver's own body
@@ -1568,17 +1630,6 @@ export function createPolyScene(
       // already sit in their own self-shadow.
       const Ldotn = Lx * n[0] + Ly * n[1] + Lz * n[2];
       if (Ldotn <= 1e-6) continue;
-
-      // Group outline → bbox cap for the SVG viewport. Inflated slightly
-      // (1 CSS px) so clipped subjects that touch the outline edge don't
-      // get sliced off by rounding.
-      let minU = Infinity, minV = Infinity, maxU = -Infinity, maxV = -Infinity;
-      for (const pt of outlineUv) {
-        if (pt[0] < minU) minU = pt[0];
-        if (pt[1] < minV) minV = pt[1];
-        if (pt[0] > maxU) maxU = pt[0];
-        if (pt[1] > maxV) maxV = pt[1];
-      }
 
       // Per-triangle 3D-clip then project. For each caster polygon
       // (fan-triangulated), 3D-clip the tri against the receiver
@@ -1657,12 +1708,8 @@ export function createPolyScene(
         }
       }
 
-      if (clipped.length === 0) continue;
-      const width = maxU - minU;
-      const height = maxV - minV;
-      if (!(width > 0) || !(height > 0)) continue;
+      if (clipped.length === 0 || !(width > 0) || !(height > 0)) continue;
 
-      // Compound path offset to start at (0, 0) inside the SVG.
       let d = "";
       for (const verts of clipped) {
         d += `M${(verts[0]![0] - minU).toFixed(3)},${(verts[0]![1] - minV).toFixed(3)}`;
@@ -1671,26 +1718,6 @@ export function createPolyScene(
         }
         d += "Z";
       }
-
-      // SVG matrix3d places the 2D layout box onto the face plane in 3D:
-      //   svg(x, y) → world = O' + x*u + y*v
-      // where O' = O + minU*u + minV*v (anchor at the clipped bbox corner)
-      // plus a push along the face normal so the shadow sits IN FRONT
-      // of the receiver surface. Without enough lift, CSS Z-fighting
-      // resolves the shadow BEHIND the receiver polygon — the shadow
-      // exists but the receiver's lit color is painted on top, hiding
-      // it. 5px is enough to win the depth test reliably without being
-      // visibly detached.
-      const lift = 5;
-      const Ox = O[0] + minU * u[0] + minV * v[0] + lift * n[0];
-      const Oy = O[1] + minU * u[1] + minV * v[1] + lift * n[1];
-      const Oz = O[2] + minU * u[2] + minV * v[2] + lift * n[2];
-      const m = [
-        u[0], u[1], u[2], 0,
-        v[0], v[1], v[2], 0,
-        n[0], n[1], n[2], 0,
-        Ox,   Oy,   Oz,   1,
-      ];
 
       const svg = doc.createElementNS(svgNS, "svg");
       svg.setAttribute("class", "polycss-shadow polycss-shadow-svg polycss-shadow-receiver");
@@ -1701,9 +1728,8 @@ export function createPolyScene(
         "style",
         `position:absolute;top:0;left:0;display:block;overflow:hidden;` +
         `transform-origin:0 0;pointer-events:none;will-change:transform;` +
-        `transform:matrix3d(${m.map((x) => x.toFixed(4)).join(",")})`,
+        `transform:${matrixCss}`,
       );
-
       const path = doc.createElementNS(svgNS, "path");
       path.setAttribute("d", d);
       const fillColor = `rgb(${r},${g},${b})`;
@@ -1714,11 +1740,8 @@ export function createPolyScene(
       path.setAttribute("stroke-linejoin", "round");
       path.setAttribute("opacity", opacity.toFixed(4));
       svg.appendChild(path);
-
       sceneShadowSvgs.push(svg);
-      const first = sceneEl.firstChild;
-      if (first) sceneEl.insertBefore(svg, first);
-      else sceneEl.appendChild(svg);
+      sceneEl.insertBefore(svg, sceneEl.firstChild);
     }
   }
 
@@ -2121,6 +2144,7 @@ export function createPolyScene(
         // Removing from DOM doesn't auto-dispose generated atlas/blob URLs.
         clearRendered(entry);
         meshes.delete(entry);
+        clearReceiverShadowCache(entry);
         recomputeAutoCenter();
         recomputeShadowGround();
       },

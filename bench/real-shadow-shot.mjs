@@ -15,7 +15,7 @@ try {
   page.on("console", (msg) => {
     if (msg.type() === "error") console.log(`[console.error] ${msg.text()}`);
   });
-  await page.goto("http://localhost:4400/real-shadow.html", { waitUntil: "networkidle", timeout: 15000 });
+  await page.goto("http://localhost:4400/real-shadow.html?norayt", { waitUntil: "networkidle", timeout: 15000 });
   await page.waitForTimeout(1500);
   await page.waitForTimeout(300);
   const status = await page.evaluate(() => document.getElementById("status")?.textContent ?? "");
