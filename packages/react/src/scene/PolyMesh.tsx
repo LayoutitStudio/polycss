@@ -38,7 +38,6 @@ import {
   ensureCcw2D,
   findOverlappingPolygonDuplicates,
   inverseRotateVec3,
-  isBakedShadowCaster,
   parseHexColor,
   projectCssVertexToGround,
 } from "@layoutit/polycss-core";
@@ -642,12 +641,15 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
 
     const projections: Array<Array<[number, number]>> = [];
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    // Iterate every casting polygon — no Lambert cull. Closed convex
+    // meshes don't need the back side, but thin/open meshes (bat wings,
+    // cloth, single quad) need both sides projected or the silhouette
+    // gets real holes.
     for (let i = 0; i < polygons.length; i++) {
       const polygon = polygons[i]!;
       if (shadowDedupDrop.has(i)) continue;
       const plan = atlasPlans[i];
       if (!plan) continue;
-      if (!isBakedShadowCaster(plan.normal, lightDir)) continue;
       const projected: Array<[number, number]> = [];
       for (const v of polygon.vertices) {
         const cssVertex: Vec3 = [

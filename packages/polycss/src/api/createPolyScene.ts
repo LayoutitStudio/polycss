@@ -46,7 +46,6 @@ import {
   findOverlappingPolygonDuplicates,
   inverseRotateVec3,
   isAxisAlignedSurfaceNormal,
-  isBakedShadowCaster,
   isVoxelCameraCullableNormalGroups,
   normalFacesCamera,
   optimizeMeshPolygons,
@@ -1218,14 +1217,17 @@ export function createPolyScene(
   ): void {
     const polyProjections: Array<Array<[number, number]>> = [];
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-    // Iterate all rendered polys (not camera-filtered) — a casting polygon
-    // hidden from the camera can still project a visible shadow onto the
-    // ground. The light-facing filter below does the real culling.
+    // Iterate all rendered polys. We deliberately do NOT cull by Lambert
+    // facing here: closed convex meshes have their lit-side polys alone
+    // tile the silhouette, but thin/open meshes (a bat with spread
+    // wings, cloth, a single quad) have both sides contributing to the
+    // outline — culling one side leaves real holes in the shadow. The
+    // extra projections cost is cheap, and SVG's nonzero rule merges
+    // any overlap into a single silhouette.
     for (const item of entry.rendered) {
       if (dedupDrop.has(item.polygonIndex)) continue;
       const plan = item.plan;
       if (!plan) continue;
-      if (!isBakedShadowCaster(plan.normal, lightDir)) continue;
       const polygon = entry.polygons[item.polygonIndex];
       if (!polygon) continue;
 

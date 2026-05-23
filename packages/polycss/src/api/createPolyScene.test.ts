@@ -1918,14 +1918,17 @@ describe("createPolyScene", () => {
       expect((d.match(/Z/g) || []).length).toBe(1);
     });
 
-    it("baked mode skips shadow leaves for polygons facing away from the light", () => {
-      // backTriangle wound CW from +Z → surface normal is -Z. Default light
-      // has +Z component, so the triangle is on the lit-AWAY side and
-      // should NOT emit a shadow leaf (its projection would land inside
-      // any other caster's silhouette anyway).
+    it("baked mode projects every polygon (no Lambert cull) so thin/open meshes don't get silhouette holes", () => {
+      // backTriangle has its surface normal pointing AWAY from the
+      // default light. We deliberately do NOT cull these by Lambert
+      // facing in the SVG path — a thin mesh (cloth, bat wings) needs
+      // both sides projected, or its silhouette gets visible holes
+      // where the back-facing piece would have contributed. With SVG
+      // fill-rule=nonzero merging overlap into one solid silhouette,
+      // including the back-facing polys is geometrically correct.
       scene = makeScene(host, { textureLighting: "baked" });
       scene.add(makeParseResult([backTriangle()]), { castShadow: true });
-      expect(host.querySelectorAll(".polycss-shadow").length).toBe(0);
+      expect(host.querySelectorAll(".polycss-shadow").length).toBe(1);
     });
 
     it("shadow leaves have the polycss-shadow class", () => {

@@ -26,7 +26,6 @@ import {
   ensureCcw2D,
   inverseRotateVec3,
   findOverlappingPolygonDuplicates,
-  isBakedShadowCaster,
   parseHexColor,
   projectCssVertexToGround,
 } from "@layoutit/polycss-core";
@@ -330,11 +329,12 @@ export const PolyMesh = defineComponent({
       let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
       const polys = polygons.value;
       const plans = textureAtlasPlans.value;
+      // No Lambert cull — thin/open meshes (bat wings, cloth, single
+      // quad) need both sides projected or the silhouette gets holes.
       for (let i = 0; i < polys.length; i++) {
         if (dedupDrop.has(i)) continue;
         const plan = plans[i];
         if (!plan) continue;
-        if (!isBakedShadowCaster(plan.normal, lightDir)) continue;
         const polygon = polys[i]!;
         const projected: Array<[number, number]> = [];
         for (const v of polygon.vertices) {
