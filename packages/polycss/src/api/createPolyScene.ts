@@ -122,7 +122,7 @@ export interface PolySceneOptions {
    * lighting modes — dynamic mode projects via CSS vars so shadows
    * follow a moving light, baked mode CPU-bakes the projection into
    * each leaf's inline `matrix3d` and drops back-facing polys from the
-   * DOM entirely. Defaults: `{ color: "#000000", opacity: 0.25, lift: 0.05 }`.
+   * DOM entirely. Defaults: `{ color: "#000000", opacity: 0.25, lift: 0.05, maxExtend: 2000 }`.
    */
   shadow?: {
     /** Shadow color as a CSS hex string. Default: `"#000000"`. */
@@ -136,6 +136,18 @@ export interface PolySceneOptions {
      * shadow. In world units. Default: `0.05`.
      */
     lift?: number;
+    /**
+     * Maximum CSS pixels the shadow may extend beyond the mesh's
+     * footprint (the no-shear silhouette directly under the mesh). The
+     * footprint area is always preserved; only the sheared tail at low
+     * light elevations is truncated. Default: `2000`.
+     *
+     * **Trade-off:** larger values give longer shadows but the SVG
+     * backing store grows quadratically with this value, which can
+     * cause repaint flicker at extreme low-elevation angles. Pass a
+     * very large number (e.g. `Infinity`) to disable the cap entirely.
+     */
+    maxExtend?: number;
   };
 }
 
@@ -370,7 +382,8 @@ function shadowOptsEqual(
   if (a === b) return true;
   return (a?.color ?? "#000000") === (b?.color ?? "#000000")
     && (a?.opacity ?? 0.25) === (b?.opacity ?? 0.25)
-    && (a?.lift ?? 0.05) === (b?.lift ?? 0.05);
+    && (a?.lift ?? 0.05) === (b?.lift ?? 0.05)
+    && (a?.maxExtend ?? 2000) === (b?.maxExtend ?? 2000);
 }
 
 function buildMeshTransform(t: PolyMeshTransform): string | undefined {
@@ -1268,12 +1281,13 @@ export function createPolyScene(
     // or light moves). The footprint (no-shear silhouette) must stay
     // fully inside the SVG so the shadow under/next to the mesh is
     // preserved — we only truncate the sheared end that's off-screen
-    // anyway. SVG overflow:hidden does the actual clipping.
-    const SHADOW_MAX_EXTEND = 2000;
-    const bx0 = Math.max(minX, fpMinX - SHADOW_MAX_EXTEND);
-    const by0 = Math.max(minY, fpMinY - SHADOW_MAX_EXTEND);
-    const bx1 = Math.min(maxX, fpMaxX + SHADOW_MAX_EXTEND);
-    const by1 = Math.min(maxY, fpMaxY + SHADOW_MAX_EXTEND);
+    // anyway. SVG overflow:hidden does the actual clipping. Callers
+    // can disable the cap by setting shadow.maxExtend to Infinity.
+    const maxExtend = currentOptions.shadow?.maxExtend ?? 2000;
+    const bx0 = Math.max(minX, fpMinX - maxExtend);
+    const by0 = Math.max(minY, fpMinY - maxExtend);
+    const bx1 = Math.min(maxX, fpMaxX + maxExtend);
+    const by1 = Math.min(maxY, fpMaxY + maxExtend);
     const width = bx1 - bx0;
     const height = by1 - by0;
     if (!(width > 0) || !(height > 0)) return;

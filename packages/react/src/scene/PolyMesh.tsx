@@ -683,12 +683,13 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
     // or light moves). The footprint (no-shear silhouette) stays fully
     // inside the SVG so the shadow under/next to the mesh is preserved
     // — we only truncate the sheared end that's off-screen anyway.
-    // overflow:hidden does the actual clipping.
-    const SHADOW_MAX_EXTEND = 2000;
-    const bx0 = Math.max(minX, fpMinX - SHADOW_MAX_EXTEND);
-    const by0 = Math.max(minY, fpMinY - SHADOW_MAX_EXTEND);
-    const bx1 = Math.min(maxX, fpMaxX + SHADOW_MAX_EXTEND);
-    const by1 = Math.min(maxY, fpMaxY + SHADOW_MAX_EXTEND);
+    // overflow:hidden does the actual clipping. Callers can disable
+    // the cap by passing shadow.maxExtend=Infinity on PolyScene.
+    const maxExtend = sceneShadow?.maxExtend ?? 2000;
+    const bx0 = Math.max(minX, fpMinX - maxExtend);
+    const by0 = Math.max(minY, fpMinY - maxExtend);
+    const bx1 = Math.min(maxX, fpMaxX + maxExtend);
+    const by1 = Math.min(maxY, fpMaxY + maxExtend);
     const width = bx1 - bx0;
     const height = by1 - by0;
     if (!(width > 0) || !(height > 0)) return null;

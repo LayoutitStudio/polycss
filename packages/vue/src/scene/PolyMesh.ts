@@ -316,6 +316,7 @@ export const PolyMesh = defineComponent({
       const ctx = sceneCtx?.value;
       const groundCssZ = ctx?.groundCssZ ?? null;
       if (groundCssZ === null) return null;
+      const shadowOpts = ctx?.shadow;
 
       const lightDir = ctx?.directionalLight?.direction
         ?? ([0.4, -0.7, 0.59] as Vec3);
@@ -367,16 +368,16 @@ export const PolyMesh = defineComponent({
       // store on every repaint. The footprint stays fully inside the
       // SVG so the shadow under/next to the mesh is preserved; only the
       // sheared end (off-screen anyway) gets clipped by overflow:hidden.
-      const SHADOW_MAX_EXTEND = 2000;
-      const bx0 = Math.max(minX, fpMinX - SHADOW_MAX_EXTEND);
-      const by0 = Math.max(minY, fpMinY - SHADOW_MAX_EXTEND);
-      const bx1 = Math.min(maxX, fpMaxX + SHADOW_MAX_EXTEND);
-      const by1 = Math.min(maxY, fpMaxY + SHADOW_MAX_EXTEND);
+      // Callers can disable the cap by passing shadow.maxExtend=Infinity.
+      const maxExtend = shadowOpts?.maxExtend ?? 2000;
+      const bx0 = Math.max(minX, fpMinX - maxExtend);
+      const by0 = Math.max(minY, fpMinY - maxExtend);
+      const bx1 = Math.min(maxX, fpMaxX + maxExtend);
+      const by1 = Math.min(maxY, fpMaxY + maxExtend);
       const width = bx1 - bx0;
       const height = by1 - by0;
       if (!(width > 0) || !(height > 0)) return null;
 
-      const shadowOpts = ctx?.shadow;
       const shadowColor = shadowOpts?.color ?? "#000000";
       const shadowOpacity = shadowOpts?.opacity ?? 0.25;
       const parsed = parseHexColor(shadowColor)?.rgb ?? [0, 0, 0];

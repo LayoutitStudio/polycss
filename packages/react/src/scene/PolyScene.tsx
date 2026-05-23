@@ -83,7 +83,7 @@ export interface PolySceneProps extends TransformProps {
    * lighting modes — dynamic mode projects via CSS vars so shadows
    * follow a moving light, baked mode CPU-bakes the projection into
    * each leaf's inline `matrix3d` and drops back-facing polys from the
-   * DOM entirely. Defaults: `{ color: "#000000", opacity: 0.25, lift: 0.05 }`.
+   * DOM entirely. Defaults: `{ color: "#000000", opacity: 0.25, lift: 0.05, maxExtend: 2000 }`.
    */
   shadow?: ShadowOptions;
   className?: string;

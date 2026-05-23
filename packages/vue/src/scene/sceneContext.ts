@@ -18,6 +18,13 @@ export interface PolyShadowOptions {
   color?: string;
   opacity?: number;
   lift?: number;
+  /**
+   * Maximum CSS pixels the shadow may extend beyond the mesh's
+   * footprint. Caps the SVG backing store at low light elevations to
+   * prevent repaint flicker. Default: `2000`. Pass `Infinity` to
+   * disable the cap entirely.
+   */
+  maxExtend?: number;
 }
 
 export interface PolyShadowRegistry {
