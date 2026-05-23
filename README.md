@@ -1,10 +1,6 @@
-<p align="center">
-  <img src="https://polycss.com/voxisologo.png" alt="polycss" width="200" />
-</p>
-
 # polycss
 
-A CSS polygon mesh engine. A 3D renderer for the DOM. Renders OBJ, glTF, GLB and VOX as real HTML elements transformed with CSS `matrix3d(...)`. Supports colors, textures, lighting, shadows, controls, shapes and animations. Works with React, Vue, custom elements, or plain JavaScript.
+A CSS polygon mesh engine. A 3D engine for the DOM. Renders OBJ, glTF, GLB and VOX as real HTML elements transformed with CSS `matrix3d(...)`. Supports colors, textures, lighting, shadows, controls, shapes and animations. Works with React, Vue, custom elements, or plain JavaScript.
 
 Visit [polycss.com](https://polycss.com) for docs and model examples.
 
