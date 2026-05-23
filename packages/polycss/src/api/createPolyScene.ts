@@ -119,9 +119,11 @@ export interface PolySceneOptions {
    */
   autoCenter?: boolean;
   /**
-   * Shadow appearance for meshes with `castShadow: true`. Only applies in
-   * dynamic lighting mode — baked mode does not emit shadow leaves.
-   * Defaults: `{ color: "#000000", opacity: 0.25, lift: 0.05 }`.
+   * Shadow appearance for meshes with `castShadow: true`. Works in both
+   * lighting modes — dynamic mode projects via CSS vars so shadows
+   * follow a moving light, baked mode CPU-bakes the projection into
+   * each leaf's inline `matrix3d` and drops back-facing polys from the
+   * DOM entirely. Defaults: `{ color: "#000000", opacity: 0.25, lift: 0.05 }`.
    */
   shadow?: {
     /** Shadow color as a CSS hex string. Default: `"#000000"`. */

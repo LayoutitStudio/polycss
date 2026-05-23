@@ -237,7 +237,7 @@ const CORE_BASE_STYLES = `
   );
 }
 
-/* ── Cast shadows (dynamic mode only) ──────────────────────────────────── */
+/* ── Cast shadow projection (dynamic-mode CSS path) ────────────────────── */
 
 /* <q> — dedicated shadow leaf. Same border-shape rendering trick as <i>
    (border-color: currentColor fills the polygon outline) but with its

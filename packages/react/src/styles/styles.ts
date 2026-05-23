@@ -316,7 +316,7 @@ const CORE_BASE_STYLES = `
   content: none;
 }
 
-/* ── Cast shadows (dynamic mode only) ──────────────────────────────────── */
+/* ── Cast shadow projection (dynamic-mode CSS path) ────────────────────── */
 
 /*
  * Shadow projection matrix. Projects any 3D point P onto the horizontal
