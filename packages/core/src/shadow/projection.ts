@@ -83,6 +83,41 @@ export function isBakedShadowCaster(
 }
 
 /**
+ * 2D convex hull (Andrew's monotone chain, O(n log n)). Returns the
+ * hull vertices in CCW order. Used to compute a receiver mesh's XY
+ * footprint when subtracting it from the global ground shadow.
+ */
+export function convexHull2D(
+  points: ReadonlyArray<readonly [number, number]>,
+): Array<[number, number]> {
+  const n = points.length;
+  if (n <= 1) return points.map((p) => [p[0], p[1]]);
+  const sorted = points.map((p) => [p[0], p[1]] as [number, number]);
+  sorted.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  const cross = (
+    o: [number, number],
+    a: [number, number],
+    b: [number, number],
+  ): number => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+  const lower: Array<[number, number]> = [];
+  for (const p of sorted) {
+    while (lower.length >= 2 &&
+      cross(lower[lower.length - 2]!, lower[lower.length - 1]!, p) <= 0) lower.pop();
+    lower.push(p);
+  }
+  const upper: Array<[number, number]> = [];
+  for (let i = sorted.length - 1; i >= 0; i--) {
+    const p = sorted[i]!;
+    while (upper.length >= 2 &&
+      cross(upper[upper.length - 2]!, upper[upper.length - 1]!, p) <= 0) upper.pop();
+    upper.push(p);
+  }
+  lower.pop();
+  upper.pop();
+  return lower.concat(upper);
+}
+
+/**
  * Signed area of a 2D polygon (positive for CCW vertex order, negative
  * for CW). Used by `ensureCcw2D` to normalize winding before concatenating
  * polygons into a compound SVG path under `fill-rule="nonzero"`: mixed

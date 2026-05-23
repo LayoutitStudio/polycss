@@ -146,11 +146,13 @@ export {
   BAKED_SHADOW_MIN_UP,
   BAKED_SHADOW_Z_SQUASH,
   buildBakedShadowProjectionMatrix,
+  convexHull2D,
   ensureCcw2D,
   isBakedShadowCaster,
   polygonSignedArea2D,
   projectCssVertexToGround,
 } from "./shadow/projection";
+export { clipPolygonToConvex2D } from "./shadow/clipping";
 
 // ── Animation ─────────────────────────────────────────────────────
 export {
