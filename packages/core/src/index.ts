@@ -141,6 +141,14 @@ export type {
 export { axesHelperPolygons, boxPolygons, arrowPolygons, ringPolygons, ringQuadPolygons, planePolygons, octahedronPolygons, spherePolygons, tetrahedronPolygons, icosahedronPolygons, dodecahedronPolygons, cylinderPolygons, conePolygons, torusPolygons } from "./helpers";
 export type { AxesHelperOptions, BoxFace, BoxFaceOptions, BoxPolygonsOptions, ArrowPolygonsOptions, RingPolygonsOptions, RingQuadPolygonsOptions, PlanePolygonsOptions, OctahedronPolygonsOptions, SpherePolygonsOptions, TetrahedronPolygonsOptions, IcosahedronPolygonsOptions, DodecahedronPolygonsOptions, CylinderPolygonsOptions, ConePolygonsOptions, TorusPolygonsOptions } from "./helpers";
 
+// ── Shadow ────────────────────────────────────────────────────────
+export {
+  BAKED_SHADOW_MIN_UP,
+  BAKED_SHADOW_Z_SQUASH,
+  buildBakedShadowProjectionMatrix,
+  isBakedShadowCaster,
+} from "./shadow/projection";
+
 // ── Animation ─────────────────────────────────────────────────────
 export {
   createPolyAnimationMixer,
