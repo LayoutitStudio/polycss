@@ -27,6 +27,13 @@ function optNum(name, dflt) {
   return Number.isFinite(value) ? value : dflt;
 }
 
+function optFlagValue(name, dflt = "") {
+  const exact = flag(name);
+  if (exact >= 0 && argv[exact + 1] && !argv[exact + 1].startsWith("--")) return argv[exact + 1];
+  const prefixed = argv.find((arg) => arg.startsWith(`--${name}=`));
+  return prefixed ? prefixed.slice(name.length + 3) : dflt;
+}
+
 function optAll(name) {
   const values = [];
   for (let i = 0; i < argv.length; i += 1) {
@@ -57,20 +64,59 @@ const VIEWPORT = optStr("viewport", "1280x800");
 const TRACE_OUT = optStr("trace-out", "chrome-trace.json");
 const SUMMARY_OUT = optStr("summary-out", "chrome-trace-summary.json");
 const BROWSER_EXECUTABLE = optStr("browser-executable");
+const GPU_DETAILS_MODE = resolveGpuDetailsMode();
+const GPU_DETAILS = GPU_DETAILS_MODE !== "off";
 const HEADLESS = !hasFlag("headed");
 const CHROMIUM_ARGS = optAll("chromium-arg");
 const MARK_START = "__chrome_capture_trace_start__";
 const MARK_END = "__chrome_capture_trace_end__";
 
-const TRACE_CATEGORIES = [
+function resolveGpuDetailsMode() {
+  const raw = (optFlagValue("gpu-details") || optFlagValue("gpu-viz-details")).toLowerCase();
+  if (raw === "off" || raw === "false" || raw === "no" || raw === "0") return "off";
+  if (hasFlag("deep-gpu") || raw === "full" || raw === "deep" || raw === "heavy") return "full";
+  if (hasFlag("gpu-details") || hasFlag("gpu-viz-details") || raw === "light" || raw === "summary") return "light";
+  return "off";
+}
+
+const BASE_TRACE_CATEGORIES = [
   "devtools.timeline",
   "disabled-by-default-devtools.timeline",
+  "benchmark",
   "blink",
+  "blink.console",
   "blink.user_timing",
   "cc",
   "gpu",
   "viz",
+  "v8.console",
   "renderer.scheduler",
+];
+
+const GPU_DETAIL_TRACE_CATEGORIES = [
+  "disabled-by-default-viz.gpu_composite_time",
+];
+
+const DEEP_GPU_TRACE_CATEGORIES = [
+  ...GPU_DETAIL_TRACE_CATEGORIES,
+  "disabled-by-default-devtools.timeline.picture",
+  "disabled-by-default-cc.debug",
+  "disabled-by-default-cc.debug.display_items",
+  "disabled-by-default-cc.debug.picture",
+  "disabled-by-default-gpu.debug",
+  "disabled-by-default-skia",
+  "disabled-by-default-skia.gpu",
+  "disabled-by-default-skia.gpu.cache",
+  "disabled-by-default-viz.debug.overlay_planes",
+  "disabled-by-default-viz.overdraw",
+  "disabled-by-default-viz.quads",
+  "disabled-by-default-viz.triangles",
+];
+
+const TRACE_CATEGORIES = [
+  ...BASE_TRACE_CATEGORIES,
+  ...(GPU_DETAILS_MODE === "light" ? GPU_DETAIL_TRACE_CATEGORIES : []),
+  ...(GPU_DETAILS_MODE === "full" ? DEEP_GPU_TRACE_CATEGORIES : []),
 ].join(",");
 
 const EVENT_GROUPS = {
@@ -98,11 +144,60 @@ const EVENT_GROUPS = {
   ],
   gpuViz: [
     "Graphics.Pipeline",
+    "DisplayScheduler::OnBeginFrameDeadline",
     "DisplayScheduler::DrawAndSwap",
+    "Display::DrawAndSwap",
     "DirectRenderer::DrawFrame",
     "DirectRenderer::DrawRenderPass",
+    "SoftwareRenderer::DoDrawQuad",
+    "SkiaOutputSurfaceImplOnGpu::SwapBuffers",
   ],
 };
+
+const EVENT_GROUP_PATTERNS = {
+  gpuVizRenderPass: [
+    /RenderPass/i,
+    /CalculateRenderPass/i,
+    /DrawFrame/i,
+    /DrawAndSwap/i,
+  ],
+  gpuVizQuads: [
+    /Quad/i,
+    /AppendQuads/i,
+  ],
+  gpuVizTiles: [
+    /Tile/i,
+    /RasterTask/i,
+    /RasterBuffer/i,
+    /RasterSource/i,
+    /PlaybackToMemory/i,
+  ],
+  gpuVizSkia: [
+    /Skia/i,
+    /GrContext/i,
+    /Graphite/i,
+  ],
+  gpuVizGpuService: [
+    /SwapBuffers/i,
+    /CommandBuffer/i,
+    /SharedImage/i,
+    /Gpu/i,
+    /Metal/i,
+  ],
+};
+
+const EXACT_EVENT_GROUPS = new Map();
+for (const [group, names] of Object.entries(EVENT_GROUPS)) {
+  for (const name of names) {
+    const groups = EXACT_EVENT_GROUPS.get(name) ?? [];
+    groups.push(group);
+    EXACT_EVENT_GROUPS.set(name, groups);
+  }
+}
+
+function allGroupNames() {
+  return [...Object.keys(EVENT_GROUPS), ...Object.keys(EVENT_GROUP_PATTERNS)];
+}
 
 function printHelp() {
   console.log(`Usage:
@@ -125,6 +220,8 @@ Options:
   --eval <body>                JavaScript body for action=eval.
   --trace-out <file>           Raw trace output. Default: chrome-trace.json
   --summary-out <file>         Summary JSON output. Default: chrome-trace-summary.json
+  --gpu-details [light|full]   Include GPU/viz detail categories. Default when present: light.
+  --deep-gpu                   Alias for --gpu-details full; much larger and timing-intrusive.
   --browser-executable <path>  Use a specific Chrome/Chromium executable.
   --chromium-arg <arg>         Extra Chromium arg, repeatable.
   --headed                     Run headed.
@@ -160,6 +257,20 @@ function addDuration(map, name, durationMs) {
   entry.count += 1;
   entry.durationMs += durationMs;
   map.set(name, entry);
+}
+
+function eventGroups(eventName) {
+  const out = new Set(EXACT_EVENT_GROUPS.get(eventName) ?? []);
+  for (const [group, patterns] of Object.entries(EVENT_GROUP_PATTERNS)) {
+    if (patterns.some((pattern) => pattern.test(eventName))) out.add(group);
+  }
+  return [...out];
+}
+
+function addEventGroups(map, eventName, durationMs) {
+  for (const group of eventGroups(eventName)) {
+    addDuration(map, group, durationMs);
+  }
 }
 
 function serializeTotals(map, limit = 20) {
@@ -224,11 +335,6 @@ function summarizeFrames(frames) {
 }
 
 function summarizeEvents(events, tracePerfOffsetMs, startPerfNow, endPerfNow, frames) {
-  const eventToGroup = new Map();
-  for (const [group, names] of Object.entries(EVENT_GROUPS)) {
-    for (const name of names) eventToGroup.set(name, group);
-  }
-
   const groupTotals = new Map();
   const eventTotals = new Map();
   let completeEventCount = 0;
@@ -242,14 +348,13 @@ function summarizeEvents(events, tracePerfOffsetMs, startPerfNow, endPerfNow, fr
     completeEventCount += 1;
     completeDurationMs += durationMs;
     addDuration(eventTotals, event.name, durationMs);
-    const group = eventToGroup.get(event.name);
-    if (group) addDuration(groupTotals, group, durationMs);
+    addEventGroups(groupTotals, event.name, durationMs);
 
     const frameIndex = frameIndexAt(frames, perfNow);
     if (frameIndex >= 0) {
       const frame = frames[frameIndex];
       addDuration(frame.events, event.name, durationMs);
-      if (group) addDuration(frame.groups, group, durationMs);
+      addEventGroups(frame.groups, event.name, durationMs);
     }
   }
 
@@ -260,7 +365,7 @@ function summarizeEvents(events, tracePerfOffsetMs, startPerfNow, endPerfNow, fr
       end_ms: +frame.end.toFixed(3),
       dt_ms: +frame.dt.toFixed(3),
       groups: Object.fromEntries(
-        Object.keys(EVENT_GROUPS).map((group) => [group, +(frame.groups.get(group)?.durationMs ?? 0).toFixed(4)]),
+        allGroupNames().map((group) => [group, +(frame.groups.get(group)?.durationMs ?? 0).toFixed(4)]),
       ),
       topEvents: serializeTotals(frame.events, 8),
     }))
@@ -271,7 +376,7 @@ function summarizeEvents(events, tracePerfOffsetMs, startPerfNow, endPerfNow, fr
     complete_event_count: completeEventCount,
     complete_duration_ms: +completeDurationMs.toFixed(3),
     groups: Object.fromEntries(
-      Object.keys(EVENT_GROUPS).map((group) => {
+      allGroupNames().map((group) => {
         const total = groupTotals.get(group);
         return [group, {
           count: total?.count ?? 0,
@@ -464,6 +569,7 @@ async function run() {
       action,
       warmup_ms: WARMUP_MS,
       settle_ms: SETTLE_MS,
+      gpuDetails: GPU_DETAILS_MODE,
       trace_aligned_to_marks: aligned,
       trace_perf_offset_ms: aligned ? +tracePerfOffsetMs.toFixed(3) : null,
       action_window_ms: +(alignedEndPerfNow - alignedStartPerfNow).toFixed(3),
@@ -487,6 +593,7 @@ async function run() {
         source: "chrome-capture-trace/scripts/capture-trace.mjs",
         url: URL,
         action,
+        gpuDetails: GPU_DETAILS_MODE,
       },
     }));
 

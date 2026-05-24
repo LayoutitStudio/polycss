@@ -27,12 +27,20 @@ Use `scripts/trace.mjs` as the front door:
 ```bash
 pnpm bench:build
 node .agents/skills/chrome-capture-trace/scripts/trace.mjs motion --page nonvoxel --mesh glb:Elephant.glb --variant baseline --dom-samples --label elephant-baseline
+node .agents/skills/chrome-capture-trace/scripts/trace.mjs motion --page nonvoxel --mesh teapot --variant baseline --dom-samples --frame-details --layer-details --gpu-details --trace-out bench/results/teapot.trace.json --label teapot-enriched --report
+node .agents/skills/chrome-capture-trace/scripts/trace.mjs motion --page nonvoxel --mesh teapot --variant baseline --gpu-details full --trace-out bench/results/teapot-full-gpu.trace.json --label teapot-full-gpu
 node .agents/skills/chrome-capture-trace/scripts/trace.mjs drag --mesh teapot --mode baked --frame-details --label teapot-drag
 node .agents/skills/chrome-capture-trace/scripts/trace.mjs motion --mesh garden --report --markdown-out bench/results/garden-trace.md
 node .agents/skills/chrome-capture-trace/scripts/trace.mjs compare bench/results/before.json bench/results/after.json --markdown-out bench/results/trace-compare.md
 ```
 
 Use `trace.mjs motion` for steady bench motion across `perf` and `nonvoxel` pages, cadence buckets, DOM samples, render stats, and tag counts.
+
+Add `--frame-details` to motion traces when you need slowest/fastest frame attribution instead of only bucket averages. On `nonvoxel` pages this also enables page-work samples for `camera.update`, `scene.applyCamera`, and input/control callbacks when available. Add `--layer-details` when compositor/layer shape is part of the question; it records LayerTree counts, layer aggregates by DOM tag/class (`leaf:b`, `leaf:u`, `polycss-camera`, etc.), largest layers, and compositing reasons. Add `--trace-out` when the raw Chrome trace should be preserved for DevTools.
+
+Add `--gpu-details` when render pass timing is the current question and the trace still needs to stay reasonably sized. Light mode keeps the normal GPU/viz timeline categories and adds only `disabled-by-default-viz.gpu_composite_time`; render-pass attribution still comes from base events such as `DirectRenderer::DrawFrame` and `DirectRenderer::DrawRenderPass`. It intentionally avoids per-quad, Skia command, and GPU service spam.
+
+Use `--deep-gpu` or `--gpu-details full` only for rare forensic runs that truly need per-quad/Skia/overdraw detail. Full mode also enables `disabled-by-default-viz.quads`, `disabled-by-default-viz.triangles`, `disabled-by-default-viz.overdraw`, `disabled-by-default-gpu.debug`, and `disabled-by-default-skia.gpu`; raw traces can become hundreds of MB and timing can be heavily perturbed.
 
 Use `trace.mjs drag` for real `PolyOrbitControls` pointer-drag traces on `nonvoxel-vanilla.html`. This runner knows the non-voxel readiness hooks, camera state, interaction stats, and per-frame page-work samples.
 
@@ -45,7 +53,12 @@ When interpreting polycss traces, map the result back to the render model:
 - `Layout`: layout; should stay low for transform/CSS-var-driven motion.
 - `PrePaint`, `Paint`, `PaintArtifactCompositor::Update`, `Layerize`: paint/compositing setup.
 - `LayerTreeImpl::UpdateDrawProperties`, `draw_property_utils::ComputeDrawPropertiesOfVisibleLayers`, `LayerTreeHostImpl::PrepareToDraw`, `MainFrame.Draw`, `SubmitCompositorFrame`: compositor-side cost.
+- `Graphics.Pipeline`, `DisplayScheduler::DrawAndSwap`, `DirectRenderer::DrawFrame`, `DirectRenderer::DrawRenderPass`: GPU/viz drawing pipeline. Treat these as browser output work, and compare them against layer details before changing app JS.
+- `gpuVizRenderPass`, `gpuVizTiles`, `gpuVizGpuService`: opt-in `--gpu-details` attribution buckets for render pass, coarse tile/raster playback, and GPU service events.
+- `gpuVizQuads` and `gpuVizSkia`: usually require `--gpu-details full` / `--deep-gpu`; treat them as high-overhead forensic signals.
 - `RasterTask`, image decode events: raster/bitmap work, usually atlas or tile work.
+
+Trace event durations are inclusive and often nested, especially GPU/viz and scheduler events. Use group `ms/frame` as attribution evidence and for before/after deltas, not as exclusive slices that must add up to frame time.
 
 ## Generic Capture
 
