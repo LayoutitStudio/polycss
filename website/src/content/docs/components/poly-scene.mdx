@@ -20,8 +20,12 @@ It's available as a custom element (`<poly-scene>`), via the imperative `createP
 | `textureLighting` | `"baked" \| "dynamic"` | `"baked"` | Whether texture lighting is rasterized into atlases or computed with CSS variables. |
 | `textureQuality` | `number \| "auto"` | `"auto"` | Atlas bitmap budget and compositor sprite size. Auto caps large runtime bitmaps and uses a larger desktop sprite to avoid Safari/Firefox flattening artifacts; lower numeric values reduce texture memory and detail. |
 | `seamBleed` | `number \| "auto"` | `1.5` | Solid-primitive overscan for detected shared seam edges. `"auto"` fits each edge from the polygon plan; numbers clamp the CSS-pixel amount. |
+| `strategies` | `{ disable?: ("b" \| "i" \| "u")[] }` | None | Diagnostic override for render strategy selection. Disabled solid strategies fall through to `<s>` atlas slices; `<s>` cannot be disabled. |
+| `autoCenter` | `boolean` | `false` | Rotate around the content bbox center instead of world origin. Polygon data is not mutated. |
+| `centerPolygons` | `Polygon[]` | None | (Framework only.) Bbox source for `autoCenter` when renderable polygons live inside child meshes. |
+| `shadow` | `{ color?, opacity?, lift? }` | `{ color:"#000000", opacity:0.25, lift:0.05 }` | Appearance for dynamic-lighting cast shadows emitted by meshes with `castShadow`. |
 | `polygons` | `Polygon[]` | None | (Framework only.) Flat array of polygon objects rendered as direct children. Composes with JSX/slot children. |
-| `children` | None | None | `<poly-mesh>` / `<poly-polygon>` / `<poly-orbit-controls>` (vanilla) or `<PolyMesh>` / `<Poly>` / `<PolyOrbitControls>` (React / Vue). |
+| `children` | None | None | Meshes, polygons, controls, helpers, selection wrappers, and transform controls. |
 
 **Camera state and input** are set on the wrapping camera element (`<poly-camera>` / `PolyCamera`): `rot-x`, `rot-y`, `zoom`, `distance`. `<poly-scene>` carries no camera attributes. Add a child `<poly-orbit-controls>` / `<PolyOrbitControls>` to enable drag, wheel, or autorotate: see [PolyOrbitControls](/components/poly-controls).
 
@@ -31,16 +35,20 @@ It's available as a custom element (`<poly-scene>`), via the imperative `createP
 
 | Prop | Type | Description |
 |------|------|-------------|
+| `id` | `string` | Stable mesh identifier. Reflected as `data-poly-mesh-id` and exposed on mesh handles for selection / transform tools. |
 | `src` | `string` | URL to `.obj`, `.glb`, `.gltf`, or `.vox`. |
 | `polygons` | `Polygon[]` | Pre-parsed polygons (alternative to `src`). Framework only. |
 | `position` | `Vec3` | `[x, y, z]` offset in scene space. |
 | `scale` | `number \| Vec3` | Uniform or per-axis scale. |
 | `rotation` | `Vec3` | Euler rotation in degrees `[x, y, z]`. |
+| `textureLighting` | `"baked" \| "dynamic"` | Per-mesh lighting mode override. Defaults to the scene value. |
 | `textureQuality` | `number \| "auto"` | Atlas bitmap budget and compositor sprite size. React / Vue only; vanilla meshes inherit the scene's `texture-quality`. |
 | `seamBleed` | `number \| "auto"` | Solid-primitive overscan for detected shared seam edges. Defaults to the scene value (`1.5`). `"auto"` fits each edge from the polygon plan; numbers clamp the CSS-pixel amount. React / Vue only; vanilla meshes inherit the scene's `seam-bleed`. |
 | `autoCenter` | `boolean` | Shift the loaded mesh so its bounding-box center sits at the local origin before applying `position`. Useful when assets aren't centered in their file coordinates. |
 | `mtl` | `string` | Companion `.mtl` URL for OBJ models. |
 | `parseOptions` | `UseMeshOptions` | Parser options forwarded to `loadMesh`; `meshResolution` defaults to `"lossy"`. |
+| `meshResolution` | `"lossless" \| "lossy"` | Top-level optimizer intent. Wins over `parseOptions.meshResolution`; defaults to `"lossy"`. |
+| `castShadow` | `boolean` | Emit one `<q>` shadow leaf per non-duplicate polygon when the scene uses `textureLighting="dynamic"`. |
 | `fallback` | `ReactNode` | Rendered while `src` is loading. (React / Vue only.) |
 | `errorFallback` | `(error: Error) => ReactNode` | Rendered if parse fails. (React / Vue only.) |
 | `children` | `(polygon, index) => ReactNode` | Per-polygon render prop / scoped slot. (React / Vue only.) |
@@ -124,6 +132,35 @@ import { PolyPerspectiveCamera, PolyScene, PolyTorus, PolyBox } from "@layoutit/
     <PolyBox size={60} color="#ffd166" position={[8, 0, 0]} />
   </PolyScene>
 </PolyPerspectiveCamera>
+```
+
+### Dynamic Shadows
+
+Shadows are CSS-projected leaves. They are emitted only in dynamic lighting mode.
+
+```tsx
+import { PolyCamera, PolyScene, PolyGround, PolyMesh } from "@layoutit/polycss-react";
+
+<PolyCamera rotX={65} rotY={45}>
+  <PolyScene
+    textureLighting="dynamic"
+    directionalLight={{ direction: [0.4, -0.6, 1], intensity: 1 }}
+    shadow={{ opacity: 0.28, lift: 0.04 }}
+  >
+    <PolyGround size={8} color="#d8d2c7" />
+    <PolyMesh src="/model.glb" castShadow />
+  </PolyScene>
+</PolyCamera>
+```
+
+### Strategy Diagnostics
+
+Use `strategies.disable` when you need to compare paths or isolate browser rendering issues.
+
+```tsx
+<PolyScene strategies={{ disable: ["b", "i", "u"] }}>
+  <PolyMesh src="/model.glb" />
+</PolyScene>
 ```
 
 ### Multiple Meshes

@@ -7,7 +7,7 @@ Core parser and math types are exported from `@layoutit/polycss-react`, `@layout
 
 ## `Polygon`
 
-The atomic renderable primitive. Each polygon becomes one atlas-backed `<i>` DOM element for textured and flat-color faces.
+The atomic renderable primitive. Each visible polygon becomes one renderer-owned DOM leaf. The exact tag is an internal strategy choice: solid CSS primitives where possible, atlas slices for textured or irregular faces.
 
 ```ts
 interface Polygon {
@@ -80,13 +80,25 @@ interface PolyAmbientLight {
 
 ## `PolyTextureLightingMode`
 
-Controls how texture lighting is applied to atlas-backed polygons.
+Controls whether polygon lighting is baked into generated paint output or evaluated through CSS variables at runtime.
 
 ```ts
 type PolyTextureLightingMode = "baked" | "dynamic";
 ```
 
 ---
+
+## `PolyRenderStrategiesOption`
+
+Diagnostic render-strategy override accepted by scenes and atlas renderers. Disabled strategies fall through to the atlas path; `<s>` is the universal fallback and cannot be disabled.
+
+```ts
+type PolyRenderStrategy = "b" | "i" | "u";
+
+interface PolyRenderStrategiesOption {
+  disable?: PolyRenderStrategy[];
+}
+```
 
 ## `PolyRenderStats`
 
@@ -161,6 +173,8 @@ Unified return shape from all mesh parsers (`parseObj`, `parseGltf`, `parseVox`,
 interface ParseResult {
   /** Parsed and validated polygon array, ready for rendering. */
   polygons: Polygon[];
+  /** Optional raw voxel source for .vox fast paths; polygon fallback remains authoritative. */
+  voxelSource?: PolyVoxelSource;
   /** Blob URLs minted during parse (e.g. embedded GLB textures).
    *  Revoked when dispose() is called. */
   objectUrls: string[];
@@ -177,9 +191,99 @@ interface ParseResult {
     materials?: string[];
     animations?: ParseAnimationClip[];
     sourceBytes?: number;
+    voxelCount?: number;
   };
 }
 ```
+
+---
+
+## `PolyVoxelSource`
+
+Raw `.vox` metadata preserved by `parseVox` for renderer fast paths. The polygon list remains the fallback and public geometry.
+
+```ts
+interface PolyVoxelCell {
+  x: number;
+  y: number;
+  z: number;
+  color: string;
+}
+
+interface PolyVoxelSource {
+  kind: "magica-vox";
+  cells: PolyVoxelCell[];
+  rows: number;
+  cols: number;
+  depth: number;
+  scale: number;
+  gridShift: number;
+  sourceBytes: number;
+}
+```
+
+---
+
+## `ParseAnimationController`
+
+glTF / GLB parses can expose a lightweight sampler for animation clips. Framework hooks and the core animation mixer consume this controller.
+
+```ts
+interface ParseAnimationClip {
+  index: number;
+  name: string;
+  duration: number;
+  channelCount: number;
+}
+
+interface ParseAnimationController {
+  clips: ParseAnimationClip[];
+  sample: (clip: number | string, timeSeconds: number) => Polygon[];
+}
+```
+
+---
+
+## `PolyAnimationMixer`
+
+Core animation API used by `usePolyAnimation` and vanilla animation loops.
+
+```ts
+interface PolyAnimationTarget {
+  setPolygons(polygons: Polygon[]): void;
+}
+
+interface PolyAnimationAction {
+  play(): PolyAnimationAction;
+  stop(): PolyAnimationAction;
+  reset(): PolyAnimationAction;
+  fadeIn(durationSeconds: number): PolyAnimationAction;
+  fadeOut(durationSeconds: number): PolyAnimationAction;
+  crossFadeTo(target: PolyAnimationAction, durationSeconds: number): PolyAnimationAction;
+  crossFadeFrom(from: PolyAnimationAction, durationSeconds: number): PolyAnimationAction;
+  setLoop(mode: LoopMode, repetitions: number): PolyAnimationAction;
+  setEffectiveTimeScale(scale: number): PolyAnimationAction;
+  setEffectiveWeight(weight: number): PolyAnimationAction;
+  clampWhenFinished: boolean;
+  timeScale: number;
+  weight: number;
+  time: number;
+  enabled: boolean;
+  paused: boolean;
+  readonly isRunning: boolean;
+}
+
+interface PolyAnimationMixer {
+  clipAction(clip: number | string): PolyAnimationAction;
+  existingAction(clip: number | string): PolyAnimationAction | null;
+  update(deltaSeconds: number): void;
+  stopAllAction(): void;
+  uncacheClip(clip: number | string): void;
+  uncacheRoot(): void;
+}
+```
+
+`LoopOnce`, `LoopRepeat`, and `LoopPingPong` are exported constants matching three.js loop modes.
 
 ---
 
@@ -199,8 +303,27 @@ interface LoadMeshOptions {
   gltfOptions?: GltfParseOptions;
   /** Forwarded to parseVox. */
   voxOptions?: VoxParseOptions;
+  /** Convert uniform texture-backed faces into solid-color polygons before optimization. */
+  solidTextureSamples?: boolean | SolidTextureSampleOptions;
   /** Shared mesh-resolution optimizer. Defaults to "lossy", including bounded seam repair. */
   meshResolution?: "lossless" | "lossy";
+}
+```
+
+---
+
+## `SolidTextureSampleOptions`
+
+Optional `loadMesh` optimization that converts texture-backed faces whose sampled UV region is effectively a uniform color into solid-color polygons before culling and merging.
+
+```ts
+interface SolidTextureSampleOptions {
+  /** Set false to keep every textured polygon texture-backed. */
+  enabled?: boolean;
+  /** Per-channel tolerance for declaring sampled texels uniform. Default: 2. */
+  colorTolerance?: number;
+  /** Skip decoding very large textures for this optimization. Default: 16 MP. */
+  maxTexturePixels?: number;
 }
 ```
 
@@ -229,7 +352,7 @@ interface ObjParseOptions {
   targetSize?: number;
   /** Shift all vertices by this amount after scaling. */
   gridShift?: number;
-  /** Fallback color for un-colored faces (default: "#cccccc"). */
+  /** Fallback color for un-colored faces (default: "#888888"). */
   defaultColor?: string;
   /** Override per-material colors (material name → CSS color). */
   materialColors?: Record<string, string>;
@@ -256,6 +379,10 @@ interface VoxParseOptions {
   targetSize?: number;
   /** Shift all vertices by this amount after scaling. Default: 0. */
   gridShift?: number;
+  /** Lossy RGB distance for folding nearby opaque palette colors before greedy meshing. Default: disabled. */
+  paletteMergeDistance?: number;
+  /** Lossy RGB distance for recoloring small local color islands/streaks before greedy meshing. Default: disabled. */
+  colorRegionMergeDistance?: number;
 }
 ```
 
@@ -271,7 +398,7 @@ interface GltfParseOptions {
   targetSize?: number;
   /** Shift all vertices by this amount after scaling. */
   gridShift?: number;
-  /** Fallback color for un-colored faces. */
+  /** Fallback color for un-colored faces (default: "#888888"). */
   defaultColor?: string;
   /** Override per-material colors. */
   materialColors?: Record<string, string>;

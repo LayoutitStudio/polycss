@@ -38,7 +38,7 @@ const polygons = boxPolygons({
 
 ## The polygon primitive
 
-`<poly-polygon>` (vanilla) and `<Poly>` (React / Vue) render a single polygon as an atlas-backed `<i>` for UV-textured and flat-color faces. They forward standard DOM props (`onclick`, `class`, `style`, `aria-*`, etc.).
+`<poly-polygon>` (vanilla) and `<Poly>` (React / Vue) render a single polygon as one internal leaf element. The renderer picks the cheapest strategy for that polygon: solid CSS primitives where possible, atlas slices for textured or irregular faces. They forward standard DOM props (`onclick`, `class`, `style`, `aria-*`, etc.).
 
 <Tabs syncKey="fw">
 <TabItem label="Vanilla JS">
@@ -264,6 +264,39 @@ const selected = ref<number | null>(null);
 ```
 </TabItem>
 </Tabs>
+
+## Mesh selection
+
+For whole-mesh selection, use `PolySelect` / `<poly-select>` instead of wiring every polygon manually. It tracks selected `PolyMeshHandle`s, supports multi-select, and exposes an imperative selection API for sidebars and transform gizmos.
+
+```tsx
+import { useState } from "react";
+import {
+  PolyCamera,
+  PolyScene,
+  PolyMesh,
+  PolySelect,
+  PolyTransformControls,
+  type PolyMeshHandle,
+} from "@layoutit/polycss-react";
+
+export function SelectAndMove() {
+  const [selected, setSelected] = useState<PolyMeshHandle | null>(null);
+
+  return (
+    <PolyCamera rotX={65} rotY={45}>
+      <PolyScene>
+        <PolySelect multiple={false} onChange={(meshes) => setSelected(meshes[0] ?? null)}>
+          <PolyMesh id="cottage" src="/cottage.glb" />
+        </PolySelect>
+        <PolyTransformControls object={selected} mode="translate" />
+      </PolyScene>
+    </PolyCamera>
+  );
+}
+```
+
+Use `usePolySelect()` to read the current selection inside a React subtree and `usePolySelectionApi()` when a nested toolbar needs to call `set`, `add`, `remove`, `toggle`, or `clear`.
 
 ## Imperative loading
 

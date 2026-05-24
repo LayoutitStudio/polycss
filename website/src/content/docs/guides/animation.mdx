@@ -1,0 +1,118 @@
+---
+title: Animation
+description: Playing glTF and GLB animation clips with polycss mesh handles.
+---
+
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+
+polycss can sample usable glTF / GLB animation clips into fresh polygon frames. The parser exposes `ParseResult.animation`; the animation mixer drives a mesh handle by calling `setPolygons()` as clips play.
+
+This is the main exception to the "no per-polygon JavaScript in the render loop" rule. Skinning changes polygon vertices independently, so animation samples in JavaScript while the renderer keeps the mounted DOM topology stable where possible.
+
+## React
+
+`usePolyAnimation` mirrors drei's `useAnimations`: it returns `clips`, `names`, `actions`, `mixer`, and a `ref`. Load the mesh yourself when you need access to both `polygons` and the parser's animation controller.
+
+```tsx
+import { useEffect, useRef, useState } from "react";
+import {
+  PolyCamera,
+  PolyScene,
+  PolyMesh,
+  PolyOrbitControls,
+  loadMesh,
+  usePolyAnimation,
+  type ParseResult,
+  type PolyMeshHandle,
+} from "@layoutit/polycss-react";
+
+export function AnimatedModel() {
+  const [result, setResult] = useState<ParseResult | null>(null);
+  const meshRef = useRef<PolyMeshHandle | null>(null);
+  const { actions, names } = usePolyAnimation(
+    result?.animation?.clips,
+    result?.animation,
+    meshRef,
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    let active: ParseResult | null = null;
+    loadMesh("/character.glb").then((next) => {
+      active = next;
+      if (cancelled) next.dispose();
+      else setResult(next);
+    });
+    return () => {
+      cancelled = true;
+      active?.dispose();
+    };
+  }, []);
+
+  useEffect(() => {
+    const first = names[0];
+    if (!first) return;
+    actions[first]?.reset().play();
+  }, [actions, names]);
+
+  return (
+    <PolyCamera rotX={65} rotY={45}>
+      <PolyScene>
+        <PolyOrbitControls drag wheel />
+        {result && (
+          <PolyMesh
+            ref={meshRef}
+            polygons={result.polygons}
+            meshResolution="lossless"
+          />
+        )}
+      </PolyScene>
+    </PolyCamera>
+  );
+}
+```
+
+## Vanilla
+
+Use the core mixer directly. The mesh handle returned by `scene.add()` satisfies `PolyAnimationTarget`.
+
+```ts
+import {
+  createPolyCamera,
+  createPolyScene,
+  createPolyAnimationMixer,
+  loadMesh,
+} from "@layoutit/polycss";
+
+const camera = createPolyCamera({ rotX: 65, rotY: 45 });
+const scene = createPolyScene(host, { camera });
+const result = await loadMesh("/character.glb", { meshResolution: "lossless" });
+const mesh = scene.add(result, { merge: false, stableDom: true });
+
+if (result.animation?.clips.length) {
+  const mixer = createPolyAnimationMixer(mesh, result.animation);
+  mixer.clipAction(result.animation.clips[0].name).reset().play();
+
+  let last = performance.now();
+  function tick(now: number) {
+    mixer.update((now - last) / 1000);
+    last = now;
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+```
+
+## Notes
+
+- `meshResolution="lossless"` or `merge: false` keeps authored topology predictable for animated meshes.
+- Solid triangle animation keeps each mounted triangle's baked color stable while vertices move, avoiding low-poly lighting flicker from rapidly changing face normals.
+- `usePolyAnimation` and the core mixer expose familiar action methods: `play`, `stop`, `reset`, `fadeIn`, `fadeOut`, `crossFadeTo`, `setLoop`, `setEffectiveTimeScale`, and `setEffectiveWeight`.
+- `LoopOnce`, `LoopRepeat`, and `LoopPingPong` match the three.js numeric constants.
+- `dispose()` still matters: parser-created blob URLs should be revoked when the model is no longer used.
+
+## Related
+
+- [Loading Meshes](/guides/textures): Parser options and mesh lifecycle.
+- [Core Types](/api/types): `ParseAnimationController`, `PolyAnimationMixer`, and clip types.
+- [Performance](/guides/performance): Why skeletal animation is the render-loop exception.

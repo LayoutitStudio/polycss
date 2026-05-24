@@ -5,7 +5,7 @@ description: Optimizing polycss scenes and understanding DOM-based rendering tra
 
 import PolyDemo from '../../../components/PolyDemo.astro';
 
-polycss renders everything as real DOM elements: every polygon of every mesh is an HTML element with CSS transforms. That gives you DevTools inspection, DOM events, and CSS styling on every polygon, but it means **performance scales with element count**. Understanding how to manage that count is key to building smooth scenes.
+polycss renders meshes as real DOM elements: every visible polygon is an HTML leaf with a CSS transform. That gives you DevTools inspection, DOM events, and CSS styling on every polygon, but it means **performance scales with mounted element count and atlas area**. Understanding both is key to building smooth scenes.
 
 ## Live demo: polygon count vs. performance
 
@@ -22,21 +22,38 @@ The sphere below starts at subdivision level 3 (320 triangles). Bump subdivision
 
 ## Polygon count matters
 
-The dominant rendering cost in polycss is **style recalc + layout** (not paint or compositing). Each camera rotation triggers a CSS class change on the scene root, which re-evaluates descendant selectors. The more DOM nodes, the heavier this recalc.
+The dominant cost in polycss is usually browser work over the DOM tree: style, layout, paint, and compositing over many transformed leaves. Camera and mesh motion are expressed as ancestor transforms where possible, so the hot path avoids per-polygon JavaScript, but the browser still has to process every mounted leaf.
 
 Confirmed during benchmarking on a 10k-triangle mesh with auto-rotate:
 - **Scripting**: ~579ms / 7s (mostly React re-renders)
 - **Rendering (style recalc + layout)**: ~2,130ms / 7s: the dominant cost
 
-## Automatic polygon merge
+## Automatic mesh optimization
 
-polycss automatically merges contiguous coplanar polygons that share the same material (color + texture). The engine finds flat regions and combines them into larger elements before rendering.
+polycss automatically optimizes loaded meshes before rendering. The default `meshResolution: "lossy"` path merges compatible polygons, can use bounded geometric approximation, and may add a small repair split budget to reduce high-risk visible seams. `meshResolution: "lossless"` keeps exact planar candidates only.
 
 This is most useful for architectural meshes with large flat surfaces: walls, floors, ceilings, voxel faces, and other areas where many same-material triangles can collapse without visual change.
 
 **Limitations:**
 - Per-polygon DOM addressing is lost for merged groups.
-- UV-textured polygons only merge with same-texture neighbors whose shared-edge UVs match. Lossless mode requires coplanarity; lossy mode may project near-coplanar textured neighbors into one atlas sprite within the configured displacement budget.
+- UV-textured polygons only merge when texture mapping can be preserved. Lossless mode requires exact coplanarity; lossy mode may project near-coplanar textured neighbors into one atlas sprite within the configured displacement budget.
+- Per-polygon DOM addressing is not available inside a merged flat region.
+
+## Render strategies
+
+Simple polygons are cheaper than textured or irregular polygons. The renderer uses CSS primitives where possible:
+
+- Axis-aligned rectangles and stable quads use solid `<b>` leaves.
+- Solid triangles and exact corner-shape solids use `<u>` leaves when supported.
+- Other supported solid clipped polygons use `<i>` leaves.
+- Textured polygons and fallbacks use atlas `<s>` leaves.
+- Dynamic shadows use `<q>` leaves only for meshes with `castShadow`.
+
+Use `collectPolyRenderStats(root)` to inspect the mounted leaf mix. For diagnostics, `strategies={{ disable: ["b", "i", "u"] }}` forces fallback atlas rendering so you can compare output or isolate browser compositor bugs.
+
+## Voxel fast paths
+
+Voxel-shaped meshes are special. Generic voxel-shaped polygon meshes can mount only camera-facing normals and patch the mounted set as the camera or mesh rotation crosses a face boundary. Raw `.vox` sources also preserve `voxelSource`; eligible vanilla baked-mode meshes render visible voxel quads directly as `<b>` leaves inside face wrappers. Dynamic lighting, shadows, animation, non-exact voxel geometry, or geometry replaced via `setPolygons()` fall back to the polygon renderer.
 
 ## `targetSize` and polygon count
 
@@ -87,6 +104,7 @@ Use explicit numeric values when you want to override auto raster scale: `0.5` o
 UV-textured polygons share generated atlas blob URLs (created during the canvas rasterization pass at mount). These are revoked on unmount. Keep these rules in mind:
 
 - Textured meshes do a one-time atlas generation pass at mount; very large texture footprints can still cost memory and startup time.
+- `solidTextureSamples` can convert uniform texture swatches into solid-color polygons before optimization, avoiding unnecessary atlas slices for low-poly assets that use a texture atlas as a color palette.
 - Call `dispose()` on `ParseResult` (or `usePolyMesh` result) when you've loaded the mesh imperatively.
 - The mesh element (`<poly-mesh>` / `<PolyMesh>`) handles disposal automatically on unmount or `src` change.
 

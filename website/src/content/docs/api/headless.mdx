@@ -47,6 +47,24 @@ dispose(); // always call on cleanup
 
 ---
 
+## `parseVox(buffer, options?)`
+
+Parses a MagicaVoxel `.vox` file into greedy colored polygon quads. The result also carries `voxelSource` metadata used by the vanilla baked-mode voxel fast path when the mesh remains eligible.
+
+```ts
+import { parseVox } from "@layoutit/polycss-core";
+
+const buf = await fetch("/model.vox").then(r => r.arrayBuffer());
+const { polygons, voxelSource } = parseVox(buf, {
+  targetSize: 60,
+  paletteMergeDistance: 10,
+});
+```
+
+**Options:** See [`VoxParseOptions`](/api/types/#voxparseoptions).
+
+---
+
 ## `parseMtl(text)`
 
 Parses an MTL file text string into a material map.
@@ -147,7 +165,7 @@ const cam = createIsometricCamera({
 
 Attach pointer drag, wheel zoom, and an optional autorotate loop to a scene returned by `createPolyScene`. Pure additive layer: the renderer stays free of input concerns. Modelled on Three.js `OrbitControls`.
 
-Use `createPolyMapControls(scene, options?)` instead when you want map/pan-style drag (pointer pans the camera across a flat surface rather than orbiting the scene center).
+Use `createPolyMapControls(scene, options?)` instead when you want map/pan-style drag (pointer pans the camera across a flat surface rather than orbiting the scene center). Use `createPolyFirstPersonControls(scene, options?)` for pointer-lock mouselook and keyboard movement.
 
 ```ts
 import { createPolyCamera, createPolyScene, createPolyOrbitControls, loadMesh } from "@layoutit/polycss";
@@ -218,6 +236,72 @@ Anything that satisfies that subset works, so layered helpers can compose multip
 
 ---
 
+## `createPolyFirstPersonControls(scene, options?)`
+
+Adds pointer-lock mouselook, WASD / arrow movement, Space jump, and Ctrl crouch to an imperative scene. The handle can be paused/resumed, pointer-locked programmatically from a user gesture, and teleported with `setOrigin()`.
+
+```ts
+import {
+  createPolyPerspectiveCamera,
+  createPolyScene,
+  createPolyFirstPersonControls,
+} from "@layoutit/polycss";
+
+const camera = createPolyPerspectiveCamera({ rotX: 90, rotY: 0, perspective: 1200 });
+const scene = createPolyScene(host, { camera });
+const fpv = createPolyFirstPersonControls(scene, {
+  moveSpeed: 8,
+  eyeHeight: 1.7,
+});
+
+button.addEventListener("click", () => fpv.lock());
+fpv.setOrigin([10, 5, 1.7]);
+```
+
+---
+
+## `createSelect(scene, options?)`
+
+Adds mesh selection to an imperative scene. It tracks selected `PolyMeshHandle`s, supports optional multi-select, background clearing, and a DOM bbox fallback for clicks that do not land on a polygon leaf directly.
+
+```ts
+import { createSelect } from "@layoutit/polycss";
+
+const selection = createSelect(scene, {
+  multiple: true,
+  onChange(meshes) {
+    console.log(meshes.map((mesh) => mesh.id));
+  },
+});
+
+selection.set([meshHandle]);
+selection.clear();
+```
+
+---
+
+## `createTransformControls(scene, options?)`
+
+Adds a translate / rotate gizmo for a mesh handle. The gizmo mutates the attached mesh with `setTransform()` and emits object-change callbacks so application state can mirror the transform.
+
+```ts
+import { createTransformControls } from "@layoutit/polycss";
+
+const transform = createTransformControls(scene, {
+  mode: "translate",
+  translationSnap: 10,
+  onObjectChange(event) {
+    console.log(event.position, event.rotation);
+  },
+});
+
+transform.attach(meshHandle);
+transform.setMode("rotate");
+transform.detach();
+```
+
+---
+
 ## `collectPolyRenderStats(root, options?)`
 
 Reads an already-rendered polycss DOM subtree and returns a one-shot diagnostic snapshot. It counts mounted polygon leaves, shadow leaves, surface leaf categories, and bucket wrappers; it does not observe changes or mutate the scene.
@@ -240,7 +324,7 @@ console.log(stats.mountedPolygonLeafCount, stats.surfaceLeafCounts);
 
 ## Custom elements (vanilla)
 
-Register `<poly-camera>`, `<poly-scene>`, `<poly-mesh>`, `<poly-polygon>`, `<poly-orbit-controls>`, and `<poly-map-controls>` custom elements by importing the side-effect entry point:
+Register the custom elements by importing the side-effect entry point:
 
 ```html
 <script type="module" src="https://esm.sh/@layoutit/polycss/elements"></script>
@@ -255,14 +339,22 @@ Register `<poly-camera>`, `<poly-scene>`, `<poly-mesh>`, `<poly-polygon>`, `<pol
 
 See the [polycss README](https://github.com/LayoutitStudio/polycss/tree/main/packages/polycss) for the full custom element attribute reference.
 
+Registered element families include:
+
+- Cameras: `<poly-camera>`, `<poly-orthographic-camera>`, `<poly-perspective-camera>`.
+- Scene and geometry: `<poly-scene>`, `<poly-mesh>`, `<poly-polygon>`.
+- Controls: `<poly-orbit-controls>`, `<poly-map-controls>`, `<poly-first-person-controls>`, `<poly-transform-controls>`, `<poly-select>`.
+- Helpers: `<poly-axes-helper>`, `<poly-directional-light-helper>`.
+- Shapes: `<poly-box>`, `<poly-plane>`, `<poly-ring>`, `<poly-sphere>`, `<poly-tetrahedron>`, `<poly-octahedron>`, `<poly-icosahedron>`, `<poly-dodecahedron>`, `<poly-cylinder>`, `<poly-cone>`, `<poly-torus>`.
+
 ---
 
 ## Package Exports
 
 | Import path | Contents |
 |---|---|
-| `@layoutit/polycss-react` | React components: `PolyScene`, `PolyMesh`, `Poly`, `PolyCamera`, hooks, render diagnostics |
-| `@layoutit/polycss-vue` | Vue components: `PolyScene`, `PolyMesh`, `Poly`, `PolyCamera`, render diagnostics |
-| `@layoutit/polycss` | Vanilla imperative API + custom element classes + render diagnostics |
+| `@layoutit/polycss-react` | React components, hooks, controls, selection, animation, core re-exports, render diagnostics |
+| `@layoutit/polycss-vue` | Vue components, composables, controls, selection, animation, core re-exports, render diagnostics |
+| `@layoutit/polycss` | Vanilla imperative API + custom element classes + controls + selection + render diagnostics |
 | `@layoutit/polycss/elements` | Side-effect: registers the polycss custom elements |
 | `@layoutit/polycss-core` | Pure parsers / math, zero DOM: `parseObj`, `parseGltf`, `parseVox`, `loadMesh`, types |

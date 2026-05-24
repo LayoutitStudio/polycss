@@ -25,7 +25,7 @@ polycss exposes three composable concepts. Each one ships as a custom element (v
 
 - **Scene** (`<poly-scene>` / `PolyScene`): the render tree root. Always nested inside a camera element. Sets up lighting and fills its parent element.
 - **Mesh** (`<poly-mesh>` / `PolyMesh`): loads a mesh from a URL (OBJ / glTF / GLB / VOX). Internally expands to one polygon child per face. Convenience wrapper around the parser + renderer.
-- **Polygon** (`<poly-polygon>` / `Poly`): one polygon. The atomic primitive. Renders one atlas-backed `<i>` with `transform: matrix3d(...)`. Accepts standard DOM event handlers, classes, and styles: this is what makes polycss "DOM-native 3D" rather than "3D inside a black-box canvas".
+- **Polygon** (`<poly-polygon>` / `Poly`): one polygon. The atomic primitive. Renders as one internal DOM leaf with `transform: matrix3d(...)`. Accepts standard DOM event handlers, classes, and styles: this is what makes polycss "DOM-native 3D" rather than "3D inside a black-box canvas".
 
 A mesh element is internally `polygons.map(p => <poly-polygon …>)`, so any rendered mesh can be inspected, styled, or handled per-polygon.
 
@@ -70,6 +70,7 @@ interface Polygon {
   vertices: [number, number, number][];  // Required: 3+ [x, y, z] points in world space
   color?: string;                        // CSS color ("#f97316", "tomato")
   texture?: string;                      // Image URL for UV-mapped face
+  material?: PolyMaterial;               // Shared texture material
   uvs?: [number, number][];             // UV coordinates (one per vertex)
   data?: Record<string, string | number | boolean>;  // Reflected as data-* DOM attributes
 }
@@ -100,12 +101,26 @@ Scene content renders relative to the (0,0,0) origin. Most mesh files are author
 polycss is structured in three layers:
 
 1. **Core** (`@layoutit/polycss-core`): Pure math and parsing. Handles OBJ / glTF / GLB / VOX parsing, UV decoding, lighting math, and polygon normalization. No DOM dependency.
-2. **Triangle Renderer**: Takes parsed polygons and produces DOM elements. It runs a one-time off-DOM canvas atlas pass for both textured and flat-color polygons (UV affine transform when available → clip → drawImage or fill → atlas Blob URL → CSS background-position).
-3. **Entry points**: The vanilla `polycss` package exposes custom elements (`<poly-camera>`, `<poly-scene>`, `<poly-mesh>`, `<poly-polygon>`) plus an imperative `createPolyCamera` / `createPolyScene` API; this is the default surface and what the rest of these docs use first. Thin React (`@layoutit/polycss-react`) and Vue (`@layoutit/polycss-vue`) bindings (`PolyCamera`, `PolyScene`, `PolyMesh`, `Poly`) wrap the same renderer with framework-native reactivity, lifecycle, and prop updates.
+2. **DOM renderer**: Takes parsed polygons and produces one leaf DOM element per visible polygon. The renderer prefers CSS primitives for solid quads, triangles, and clipped solids, then falls back to atlas slices for textures or unsupported shapes. Atlas canvas work is one-shot; camera, mesh, and dynamic-light updates use transforms and CSS custom properties.
+3. **Entry points**: The vanilla `polycss` package exposes custom elements (`<poly-camera>`, `<poly-scene>`, `<poly-mesh>`, `<poly-polygon>`, controls, helpers, shapes) plus imperative APIs such as `createPolyCamera`, `createPolyScene`, `createSelect`, and `createTransformControls`. React (`@layoutit/polycss-react`) and Vue (`@layoutit/polycss-vue`) bindings mirror that surface with framework-native reactivity, lifecycle, and prop updates.
+
+## Render Strategies
+
+The internal leaf tag is a strategy, not public API:
+
+| Tag | Strategy | Typical use |
+|-----|----------|-------------|
+| `<b>` | Solid quad | Axis-aligned rectangles and stable projective quads. |
+| `<u>` | Stable triangle / corner-shape solid | Solid triangles and exact beveled-corner solids. |
+| `<i>` | Border-shape clipped solid | Solid non-rect polygons on browsers with `border-shape`. |
+| `<s>` | Atlas slice | Textured polygons and fallback solids. |
+| `<q>` | Cast shadow | Dynamic-lighting shadow leaves for meshes with `castShadow`. |
+
+You normally do not target these tags directly; use `Poly`, `PolyMesh`, classes, data attributes, or render stats.
 
 ## Automatic Polygon Merge
 
-Before rendering, polycss automatically merges contiguous coplanar polygons that share the same material. This keeps DOM element counts low for flat surfaces without changing the rendered shape.
+Before rendering, polycss automatically optimizes loaded meshes. `meshResolution: "lossless"` keeps exact planar candidates only; the default `"lossy"` mode can merge near-coplanar candidates within a bounded displacement budget and then spend a small repair budget on high-risk seams. This keeps DOM element counts low for flat surfaces without changing the intended rendered shape.
 
 Per-polygon DOM identity is preserved for polygons that cannot merge; polygons inside a merged flat region become one rendered element.
 

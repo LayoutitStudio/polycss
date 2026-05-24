@@ -88,7 +88,7 @@ import { PolyCamera, PolyScene, PolyBox } from "@layoutit/polycss-vue";
 
 ## What you get
 
-Every polygon in the loaded mesh becomes a real DOM element: an atlas-backed `<i>` for UV-textured and flat-color polygons, positioned with `transform: matrix3d(...)`. You can:
+Every visible polygon in the loaded mesh becomes a real DOM element positioned with `transform: matrix3d(...)`. The renderer chooses an internal leaf strategy for each face: CSS solids for cheap rectangles/quads/triangles when possible, and atlas slices for textured or irregular faces. You can:
 
 - Inspect individual polygons in DevTools.
 - Target them with CSS selectors.
