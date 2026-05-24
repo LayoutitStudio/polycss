@@ -454,61 +454,40 @@ describe("renderPolygonsWithTextureAtlas", () => {
     result.dispose();
   });
 
-  it("applies seamBleed only to solid primitives with valid shared edges", () => {
-    const baseQuad = renderPolygonsWithTextureAtlas([VERTICAL_QUAD], { tileSize: 1, seamBleed: 0 });
-    const bleedQuad = renderPolygonsWithTextureAtlas([VERTICAL_QUAD], { tileSize: 1, seamBleed: 2 });
-    const baseTriangle = renderPolygonsWithTextureAtlas([FLAT_TRIANGLE, ADJACENT_FLAT_TRIANGLE], {
-      tileSize: 1,
-      seamBleed: 0,
-    });
-    const bleedTriangle = renderPolygonsWithTextureAtlas([FLAT_TRIANGLE, ADJACENT_FLAT_TRIANGLE], { tileSize: 1, seamBleed: 2 });
-    const autoTriangle = renderPolygonsWithTextureAtlas([FLAT_TRIANGLE, ADJACENT_FLAT_TRIANGLE], {
-      tileSize: 1,
-      seamBleed: "auto",
-    });
+  it("applies internal seam bleed to detected shared triangle edges", () => {
+    const isolatedTriangle = renderPolygonsWithTextureAtlas([FLAT_TRIANGLE], { tileSize: 1 });
+    const sharedTriangle = renderPolygonsWithTextureAtlas([FLAT_TRIANGLE, ADJACENT_FLAT_TRIANGLE], { tileSize: 1 });
 
-    expect(bleedQuad.rendered).toHaveLength(baseQuad.rendered.length);
-    expect(bleedTriangle.rendered).toHaveLength(baseTriangle.rendered.length);
-    expect(bleedQuad.rendered[0].element.tagName.toLowerCase()).toBe("b");
-    expect(bleedTriangle.rendered[0].element.tagName.toLowerCase()).toBe("u");
+    expect(sharedTriangle.rendered).toHaveLength(2);
+    expect(sharedTriangle.rendered[0].element.tagName.toLowerCase()).toBe("u");
 
-    const baseQuadMatrix = extractMatrix(baseQuad.rendered[0].element);
-    const bleedQuadMatrix = extractMatrix(bleedQuad.rendered[0].element);
-    const baseTriangleMatrix = extractMatrix(baseTriangle.rendered[0].element);
-    const bleedTriangleMatrix = extractMatrix(bleedTriangle.rendered[0].element);
+    const baseTriangleMatrix = extractMatrix(isolatedTriangle.rendered[0].element);
+    const bleedTriangleMatrix = extractMatrix(sharedTriangle.rendered[0].element);
     const baseTriangleX = Math.hypot(baseTriangleMatrix[0], baseTriangleMatrix[1], baseTriangleMatrix[2]);
     const baseTriangleY = Math.hypot(baseTriangleMatrix[4], baseTriangleMatrix[5], baseTriangleMatrix[6]);
     const bleedTriangleX = Math.hypot(bleedTriangleMatrix[0], bleedTriangleMatrix[1], bleedTriangleMatrix[2]);
     const bleedTriangleY = Math.hypot(bleedTriangleMatrix[4], bleedTriangleMatrix[5], bleedTriangleMatrix[6]);
-    expect(bleedQuad.rendered[0].element.style.transform).toBe(baseQuad.rendered[0].element.style.transform);
-    expect(Math.hypot(bleedQuadMatrix[0], bleedQuadMatrix[1], bleedQuadMatrix[2]))
-      .toBe(Math.hypot(baseQuadMatrix[0], baseQuadMatrix[1], baseQuadMatrix[2]));
-    expect(bleedTriangle.rendered[0].element.style.transform)
-      .not.toBe(baseTriangle.rendered[0].element.style.transform);
+    expect(sharedTriangle.rendered[0].element.style.transform)
+      .not.toBe(isolatedTriangle.rendered[0].element.style.transform);
     expect(
       Math.abs(bleedTriangleX - baseTriangleX) > 1e-6 ||
       Math.abs(bleedTriangleY - baseTriangleY) > 1e-6,
     ).toBe(true);
-    expect(autoTriangle.rendered[0].element.style.transform)
-      .not.toBe(baseTriangle.rendered[0].element.style.transform);
 
-    baseQuad.dispose();
-    bleedQuad.dispose();
-    baseTriangle.dispose();
-    bleedTriangle.dispose();
-    autoTriangle.dispose();
+    isolatedTriangle.dispose();
+    sharedTriangle.dispose();
   });
 
-  it("applies seamBleed only along shared sides for rectangular solids", () => {
-    const base = renderPolygonsWithTextureAtlas([VERTICAL_QUAD, ADJACENT_VERTICAL_QUAD], {
-      tileSize: 10,
-      seamBleed: 0,
-    });
-    const bleed = renderPolygonsWithTextureAtlas([VERTICAL_QUAD, ADJACENT_VERTICAL_QUAD], { tileSize: 10, seamBleed: 2 });
+  it("applies internal seam bleed only along shared sides for rectangular solids", () => {
+    const base = [
+      renderPolygonsWithTextureAtlas([VERTICAL_QUAD], { tileSize: 10 }),
+      renderPolygonsWithTextureAtlas([ADJACENT_VERTICAL_QUAD], { tileSize: 10 }),
+    ];
+    const bleed = renderPolygonsWithTextureAtlas([VERTICAL_QUAD, ADJACENT_VERTICAL_QUAD], { tileSize: 10 });
 
     for (let i = 0; i < 2; i += 1) {
       expect(bleed.rendered[i].element.tagName.toLowerCase()).toBe("b");
-      const baseMatrix = extractMatrix(base.rendered[i].element);
+      const baseMatrix = extractMatrix(base[i].rendered[0].element);
       const bleedMatrix = extractMatrix(bleed.rendered[i].element);
       const baseX = Math.hypot(baseMatrix[0], baseMatrix[1], baseMatrix[2]);
       const baseY = Math.hypot(baseMatrix[4], baseMatrix[5], baseMatrix[6]);
@@ -521,21 +500,23 @@ describe("renderPolygonsWithTextureAtlas", () => {
       else expect(bleedX).toBeCloseTo(baseX, 6);
     }
 
-    base.dispose();
+    for (const result of base) result.dispose();
     bleed.dispose();
   });
 
-  it("applies seamBleed to both sides of non-coplanar shared edges", () => {
-    const base = renderPolygonsWithTextureAtlas([FLAT_TRIANGLE, HINGED_TRIANGLE], { tileSize: 1, seamBleed: 0 });
-    const bleed = renderPolygonsWithTextureAtlas([FLAT_TRIANGLE, HINGED_TRIANGLE], { tileSize: 1, seamBleed: 2 });
+  it("applies internal seam bleed to both sides of non-coplanar shared edges", () => {
+    const baseA = renderPolygonsWithTextureAtlas([FLAT_TRIANGLE], { tileSize: 1 });
+    const baseB = renderPolygonsWithTextureAtlas([HINGED_TRIANGLE], { tileSize: 1 });
+    const bleed = renderPolygonsWithTextureAtlas([FLAT_TRIANGLE, HINGED_TRIANGLE], { tileSize: 1 });
 
-    expect(bleed.rendered).toHaveLength(base.rendered.length);
+    expect(bleed.rendered).toHaveLength(2);
     expect(bleed.rendered[0].element.tagName.toLowerCase()).toBe("u");
     expect(bleed.rendered[1].element.tagName.toLowerCase()).toBe("u");
-    expect(bleed.rendered[0].element.style.transform).not.toBe(base.rendered[0].element.style.transform);
-    expect(bleed.rendered[1].element.style.transform).not.toBe(base.rendered[1].element.style.transform);
+    expect(bleed.rendered[0].element.style.transform).not.toBe(baseA.rendered[0].element.style.transform);
+    expect(bleed.rendered[1].element.style.transform).not.toBe(baseB.rendered[0].element.style.transform);
 
-    base.dispose();
+    baseA.dispose();
+    baseB.dispose();
     bleed.dispose();
   });
 

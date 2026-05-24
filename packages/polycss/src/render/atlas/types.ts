@@ -22,10 +22,11 @@ export interface RenderTextureAtlasOptions {
   textureQuality?: import("@layoutit/polycss-core").TextureQuality;
   solidPaintDefaults?: import("@layoutit/polycss-core").SolidPaintDefaults;
   strategies?: import("@layoutit/polycss-core").PolyRenderStrategiesOption;
-  seamBleed?: import("@layoutit/polycss-core").PolySeamBleed;
 }
 
 export interface InternalRenderTextureAtlasOptions extends RenderTextureAtlasOptions {
+  seamBleed?: number;
+  seamEdges?: Set<number>;
   optimizeStableTriangleStyle?: boolean;
   stableTriangleDebug?: "transform-only" | "plan-only";
   stableTriangleUpdateMode?: "full" | "transform-only" | "color-only";

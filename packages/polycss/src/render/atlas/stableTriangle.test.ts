@@ -125,18 +125,17 @@ describe("renderPolygonsWithStableTriangles — initial render", () => {
     result!.dispose();
   });
 
-  it("applies seamBleed to detected shared triangle edges", () => {
+  it("applies internal seam bleed to detected shared triangle edges", () => {
     const doc = makeDoc();
-    const base = renderPolygonsWithStableTriangles([TRIANGLE_A, ADJACENT_TRIANGLE_A], { doc })!;
-    const bleed = renderPolygonsWithStableTriangles([TRIANGLE_A, ADJACENT_TRIANGLE_A], {
-      doc,
-      seamBleed: 2,
-    })!;
+    const baseA = renderPolygonsWithStableTriangles([TRIANGLE_A], { doc })!;
+    const baseB = renderPolygonsWithStableTriangles([ADJACENT_TRIANGLE_A], { doc })!;
+    const bleed = renderPolygonsWithStableTriangles([TRIANGLE_A, ADJACENT_TRIANGLE_A], { doc })!;
     expect(bleed.rendered[0].element.style.transform)
-      .not.toBe(base.rendered[0].element.style.transform);
+      .not.toBe(baseA.rendered[0].element.style.transform);
     expect(bleed.rendered[1].element.style.transform)
-      .not.toBe(base.rendered[1].element.style.transform);
-    base.dispose();
+      .not.toBe(baseB.rendered[0].element.style.transform);
+    baseA.dispose();
+    baseB.dispose();
     bleed.dispose();
   });
 

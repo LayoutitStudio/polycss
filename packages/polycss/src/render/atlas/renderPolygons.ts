@@ -21,7 +21,6 @@ import {
   PROJECTIVE_QUAD_DENOM_EPS,
   PROJECTIVE_QUAD_MAX_WEIGHT_RATIO,
   PROJECTIVE_QUAD_BLEED,
-  DEFAULT_SEAM_BLEED,
 } from "@layoutit/polycss-core";
 import {
   buildBasisHints,
@@ -75,7 +74,10 @@ import {
 } from "./stableTriangle";
 import { stableTriangleMatrixDecimals } from "@layoutit/polycss-core";
 
+const DEFAULT_SOLID_SEAM_BLEED = 1.5;
+
 type RenderTextureAtlasOptionsWithSeams = RenderTextureAtlasOptions & {
+  seamBleed?: number;
   seamEdges?: Set<number>;
 };
 
@@ -93,38 +95,21 @@ function seamTriangleOptions(
   plan: TextureAtlasPlan,
   options: RenderTextureAtlasOptions,
 ): RenderTextureAtlasOptionsWithSeams {
-  const seamBleed = effectiveSeamBleed(options);
   return plan.seamBleedEdges?.size
-    ? { ...options, seamBleed, seamEdges: plan.seamBleedEdges }
+    ? { ...options, seamBleed: DEFAULT_SOLID_SEAM_BLEED, seamEdges: plan.seamBleedEdges }
     : { ...options, seamBleed: undefined, seamEdges: undefined };
-}
-
-function effectiveSeamBleed(options: RenderTextureAtlasOptions): RenderTextureAtlasOptions["seamBleed"] {
-  return Object.prototype.hasOwnProperty.call(options, "seamBleed")
-    ? options.seamBleed
-    : DEFAULT_SEAM_BLEED;
-}
-
-function shouldApplySeamBleed(seamBleed: RenderTextureAtlasOptions["seamBleed"]): boolean {
-  return seamBleed === "auto" || (
-    typeof seamBleed === "number" &&
-    Number.isFinite(seamBleed) &&
-    seamBleed > 0
-  );
 }
 
 function buildRenderSeamBleedEdges(
   polygons: Polygon[],
   options: RenderTextureAtlasOptions,
 ): Map<number, Set<number>> | null {
-  return shouldApplySeamBleed(effectiveSeamBleed(options))
-    ? buildSeamBleedPolygonEdges(polygons, {
-        tileSize: options.tileSize,
-        layerElevation: options.layerElevation,
-        directionalLight: options.directionalLight,
-        ambientLight: options.ambientLight,
-      })
-    : null;
+  return buildSeamBleedPolygonEdges(polygons, {
+    tileSize: options.tileSize,
+    layerElevation: options.layerElevation,
+    directionalLight: options.directionalLight,
+    ambientLight: options.ambientLight,
+  });
 }
 
 function seamAtlasOptions(
@@ -132,11 +117,10 @@ function seamAtlasOptions(
   seamBleedEdges: Map<number, Set<number>> | null,
   options: RenderTextureAtlasOptions,
 ): RenderTextureAtlasOptionsWithSeams {
-  const seamBleed = effectiveSeamBleed(options);
   return seamBleedEdges
     ? {
         ...options,
-        seamBleed: seamBleedEdges.has(index) ? seamBleed : undefined,
+        seamBleed: seamBleedEdges.has(index) ? DEFAULT_SOLID_SEAM_BLEED : undefined,
         seamEdges: seamBleedEdges.get(index),
       }
     : options;
@@ -462,6 +446,10 @@ export function updateStableTriangleFrame(
   const colorState = stableTriangleColorState(internalOptions);
   const tile = options.tileSize ?? DEFAULT_TILE;
   const elev = options.layerElevation ?? tile;
+  const doc = options.doc ?? (typeof document !== "undefined" ? document : null);
+  const solidTrianglePrimitive = doc
+    ? resolveSolidTrianglePrimitive(doc, options.strategies) ?? "border"
+    : "border";
 
   for (let i = 0; i < rendered.length; i++) {
     const item = rendered[i];
@@ -499,6 +487,7 @@ export function updateStableTriangleFrame(
       {
         basis: element.__polycssSolidTriangleBasis,
         matrixDecimals,
+        primitive: solidTrianglePrimitive,
         color: frame.colors?.[i],
         includeColor: stableTriangleUpdateMode !== "plan-only" &&
           stableTriangleUpdateMode !== "transform-only" &&
@@ -570,6 +559,9 @@ export function updatePolygonsWithStableTopology(
   const colorOnly = optimizeTriangleStyle && stableTriangleUpdateMode === "color-only";
   const colorState = stableTriangleColorState(internalOptions);
   const matrixDecimals = stableTriangleMatrixDecimals(internalOptions.stableTriangleMatrixDecimals);
+  const solidTrianglePrimitive = doc
+    ? resolveSolidTrianglePrimitive(doc, options.strategies) ?? "border"
+    : "border";
   if (
     updateStableTriangleElementsStreaming(
       rendered,
@@ -621,6 +613,7 @@ export function updatePolygonsWithStableTopology(
       const plan = computeSolidTrianglePlan(polygon, i, options, {
         basis: element.__polycssSolidTriangleBasis,
         matrixDecimals,
+        primitive: solidTrianglePrimitive,
         includeColor: stableTriangleUpdateMode !== "plan-only" &&
           stableTriangleUpdateMode !== "transform-only" &&
           shouldComputeStableTriangleColor(

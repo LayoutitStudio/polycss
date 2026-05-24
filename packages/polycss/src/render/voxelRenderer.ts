@@ -187,7 +187,7 @@ function polygonBrush(polygon: Polygon): Omit<DirectMatrixItem, "sourceIndex"> |
   }
 
   const eps = 1e-6;
-  const baseColor = polygon.color || "#cccccc";
+  const baseColor = canonicalBrushColor(polygon.color);
   if (Math.abs(maxZ - minZ) <= eps) {
     return {
       axis: "z",
@@ -347,6 +347,23 @@ function parseColor(input: string): RGB {
     b: parsed.rgb[2],
     alpha: parsed.alpha,
   };
+}
+
+function canonicalBrushColor(input: string | undefined): string {
+  if (!input) return "#cccccc";
+  const parsed = parsePureColor(input);
+  if (!parsed) return input;
+  const rgb: RGB = {
+    r: parsed.rgb[0],
+    g: parsed.rgb[1],
+    b: parsed.rgb[2],
+    alpha: parsed.alpha,
+  };
+  if (rgb.alpha < 1) {
+    const alpha = Math.round(Math.max(0, rgb.alpha) * 1000) / 1000;
+    return `rgba(${clampChannel(rgb.r)}, ${clampChannel(rgb.g)}, ${clampChannel(rgb.b)}, ${alpha})`;
+  }
+  return rgbToHex(rgb);
 }
 
 function rgbToHex({ r, g, b }: RGB): string {

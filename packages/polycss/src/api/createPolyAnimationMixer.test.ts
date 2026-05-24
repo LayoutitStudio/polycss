@@ -8,6 +8,22 @@ import { createPolyAnimationMixer, LoopOnce } from "@layoutit/polycss-core";
 import type { ParseAnimationController, ParseAnimationClip, Polygon } from "@layoutit/polycss-core";
 import { createPolyOrthographicCamera } from "./createPolyCamera";
 
+const POLY_ANIMATION_TRIANGLE_FRAME_SOURCE = Symbol.for("polycss.animation.triangleFrameSource");
+
+interface PolyAnimationTriangleFrame {
+  polygonCount: number;
+  vertices: Float64Array;
+  colors?: readonly (string | undefined)[];
+  solidTriangles?: boolean;
+}
+
+interface PolyAnimationTriangleFrameSource {
+  [POLY_ANIMATION_TRIANGLE_FRAME_SOURCE]?: (
+    clip: number | string,
+    timeSeconds: number,
+  ) => PolyAnimationTriangleFrame | null | undefined;
+}
+
 const TRI: Polygon = {
   vertices: [[0, 0, 0], [1, 0, 0], [0, 1, 0]],
   color: "#ff0000",
@@ -30,6 +46,18 @@ function makeController(
     clips,
     sample: (_clip, t) => polygonsByTime ? polygonsByTime(t) : [TRI],
   };
+}
+
+function frameVertices(polygon: Polygon): Float64Array {
+  const vertices = new Float64Array(9);
+  for (let vertexIndex = 0; vertexIndex < 3; vertexIndex++) {
+    const vertex = polygon.vertices[vertexIndex]!;
+    const offset = vertexIndex * 3;
+    vertices[offset] = vertex[0];
+    vertices[offset + 1] = vertex[1];
+    vertices[offset + 2] = vertex[2];
+  }
+  return vertices;
 }
 
 describe("createPolyAnimationMixer with PolyMeshHandle", () => {
@@ -109,6 +137,53 @@ describe("createPolyAnimationMixer with PolyMeshHandle", () => {
     mixer.update(0.6);
     // At t=1.1, second frame
     expect(mesh.polygons[0].color).toBe("#00ff00");
+
+    mesh.dispose();
+    scene.destroy();
+  });
+
+  it("keeps stable triangle baked color pinned on the triangle-frame fast path", () => {
+    const scene = createPolyScene(host, {
+      camera: createPolyOrthographicCamera(),
+      directionalLight: { direction: [0, 0, 1], color: "#ffffff", intensity: 1 },
+      ambientLight: { color: "#ffffff", intensity: 0 },
+    });
+    const restTriangle: Polygon = {
+      vertices: [[0, 0, 0], [1, 0, 0], [0, 1, 1]],
+      color: "#ff0000",
+    };
+    const animatedTriangle: Polygon = {
+      vertices: [[0, 0, 0], [2, 0, 0], [0, 1, 1]],
+      color: "#ff0000",
+    };
+    const parseResult = {
+      polygons: [restTriangle],
+      objectUrls: [],
+      dispose: () => {},
+      warnings: [],
+    };
+    const mesh = scene.add(parseResult, { merge: false, stableDom: true });
+    const leaf = host.querySelector("u") as HTMLElement;
+    const initialTransform = leaf.style.transform;
+    const initialColor = leaf.style.color;
+    const clip = makeClip(0, "bend");
+    const ctrl = {
+      clips: [clip],
+      sample: () => [animatedTriangle],
+      [POLY_ANIMATION_TRIANGLE_FRAME_SOURCE]: () => ({
+        polygonCount: 1,
+        vertices: frameVertices(animatedTriangle),
+        colors: [animatedTriangle.color],
+        solidTriangles: true,
+      }),
+    } satisfies ParseAnimationController & PolyAnimationTriangleFrameSource;
+    const mixer = createPolyAnimationMixer(mesh, ctrl);
+
+    mixer.clipAction("bend").play();
+    mixer.update(0.1);
+
+    expect(leaf.style.transform).not.toBe(initialTransform);
+    expect(leaf.style.color).toBe(initialColor);
 
     mesh.dispose();
     scene.destroy();
