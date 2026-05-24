@@ -1,7 +1,7 @@
 import type { Polygon } from "../types";
 import type { Vec3 } from "../types";
 import { DEFAULT_TILE, RECT_EPS } from "./constants";
-import type { PolySeamBleed, SeamBleedInsets } from "./types";
+import type { SeamBleedInsets } from "./types";
 import { computeSurfaceNormal, cssPoints } from "./solidTriangle";
 
 function pointKey(point: Vec3): string {
@@ -41,15 +41,12 @@ export function buildTextureEdgeRepairSets(polygons: Polygon[]): Array<Set<numbe
 }
 
 export function resolveSeamBleed(value: unknown, fallback: number): number {
-  return value === "auto"
-    ? fallback
-    : typeof value === "number" && Number.isFinite(value)
-      ? Math.max(0, value)
-      : fallback;
+  return typeof value === "number" && Number.isFinite(value)
+    ? Math.max(0, value)
+    : fallback;
 }
 
-export function normalizedSeamBleed(value: unknown): PolySeamBleed | undefined {
-  if (value === "auto") return "auto";
+export function normalizedSeamBleed(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) && value > 0
     ? value
     : undefined;
@@ -110,13 +107,12 @@ export function safePlanSeamBleedAmount(
 export function computePlanSeamBleedEdgeAmounts(
   screenPts: number[],
   seamEdges: ReadonlySet<number> | undefined,
-  seamBleed: PolySeamBleed | undefined,
+  seamBleed: number | undefined,
 ): Map<number, number> | undefined {
   if (!seamEdges?.size || seamBleed === undefined) return undefined;
   const amounts = new Map<number, number>();
-  const request = seamBleed === "auto" ? Number.POSITIVE_INFINITY : seamBleed;
   for (const edgeIndex of seamEdges) {
-    const amount = safePlanSeamBleedAmount(screenPts, edgeIndex, request);
+    const amount = safePlanSeamBleedAmount(screenPts, edgeIndex, seamBleed);
     if (amount > 0) amounts.set(edgeIndex, amount);
   }
   return amounts.size > 0 ? amounts : undefined;

@@ -450,6 +450,103 @@ describe("parseVox — default palette", () => {
   });
 });
 
+describe("parseVox — palette merging", () => {
+  it("folds nearby opaque colors before greedy meshing", () => {
+    const palette: [number, number, number, number][] = Array.from(
+      { length: 256 },
+      () => [0, 0, 0, 255] as [number, number, number, number],
+    );
+    palette[0] = [100, 100, 100, 255];
+    palette[1] = [110, 110, 110, 255];
+    const buf = buildVoxBuffer(
+      [2, 1, 1],
+      [
+        { x: 0, y: 0, z: 0, colorIndex: 1 },
+        { x: 1, y: 0, z: 0, colorIndex: 2 },
+      ],
+      palette,
+    );
+
+    const exact = parseVox(buf);
+    const merged = parseVox(buf, { paletteMergeDistance: 20 });
+
+    expect(new Set(exact.polygons.map((p) => p.color))).toEqual(new Set(["#646464", "#6e6e6e"]));
+    expect(exact.polygons.length).toBe(10);
+    expect(new Set(merged.polygons.map((p) => p.color))).toEqual(new Set(["#646464"]));
+    expect(merged.polygons.length).toBe(6);
+  });
+
+  it("keeps hue-incompatible nearby colors separate", () => {
+    const palette: [number, number, number, number][] = Array.from(
+      { length: 256 },
+      () => [0, 0, 0, 255] as [number, number, number, number],
+    );
+    palette[0] = [16, 16, 16, 255];
+    palette[1] = [32, 0, 0, 255];
+    const buf = buildVoxBuffer(
+      [2, 1, 1],
+      [
+        { x: 0, y: 0, z: 0, colorIndex: 1 },
+        { x: 1, y: 0, z: 0, colorIndex: 2 },
+      ],
+      palette,
+    );
+
+    const merged = parseVox(buf, { paletteMergeDistance: 40 });
+
+    expect(new Set(merged.polygons.map((p) => p.color))).toEqual(new Set(["#101010", "#200000"]));
+    expect(merged.polygons.length).toBe(10);
+  });
+});
+
+describe("parseVox — color region merging", () => {
+  it("recolors small face-plane regions before greedy meshing", () => {
+    const palette: [number, number, number, number][] = Array.from(
+      { length: 256 },
+      () => [0, 0, 0, 255] as [number, number, number, number],
+    );
+    palette[0] = [100, 100, 100, 255];
+    palette[1] = [110, 110, 110, 255];
+    const buf = buildVoxBuffer(
+      [3, 1, 1],
+      [
+        { x: 0, y: 0, z: 0, colorIndex: 1 },
+        { x: 1, y: 0, z: 0, colorIndex: 1 },
+        { x: 2, y: 0, z: 0, colorIndex: 2 },
+      ],
+      palette,
+    );
+
+    const exact = parseVox(buf);
+    const cleaned = parseVox(buf, { colorRegionMergeDistance: 20 });
+
+    expect(new Set(cleaned.polygons.map((p) => p.color))).toEqual(new Set(["#646464", "#6e6e6e"]));
+    expect(cleaned.polygons.length).toBeLessThan(exact.polygons.length);
+  });
+
+  it("keeps equal-size close color boundaries in lossless local cleanup", () => {
+    const palette: [number, number, number, number][] = Array.from(
+      { length: 256 },
+      () => [0, 0, 0, 255] as [number, number, number, number],
+    );
+    palette[0] = [100, 100, 100, 255];
+    palette[1] = [110, 110, 110, 255];
+    const buf = buildVoxBuffer(
+      [2, 1, 1],
+      [
+        { x: 0, y: 0, z: 0, colorIndex: 1 },
+        { x: 1, y: 0, z: 0, colorIndex: 2 },
+      ],
+      palette,
+    );
+
+    const cleaned = parseVox(buf, { colorRegionMergeDistance: 20 });
+
+    expect(new Set(cleaned.polygons.map((p) => p.color))).toEqual(new Set(["#646464", "#6e6e6e"]));
+    expect(cleaned.polygons.length).toBe(10);
+  });
+});
+
 describe("parseVox — custom RGBA palette", () => {
   it("custom palette overrides default — colorIndex 1 uses custom entry 0", () => {
     // Build a custom palette where entry 0 (= colorIndex 1) is pure red

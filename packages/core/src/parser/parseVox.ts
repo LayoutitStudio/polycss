@@ -43,6 +43,19 @@ export interface VoxParseOptions {
    * non-negative integers so zero makes sensible default.
    */
   gridShift?: number;
+  /**
+   * Optional lossy palette simplification. When > 0, opaque, hue-compatible
+   * palette colors within this RGB distance are folded into the most-used
+   * nearby color before greedy voxel meshing. Default: disabled.
+   */
+  paletteMergeDistance?: number;
+  /**
+   * Optional lossy local cleanup. When > 0, small face-plane color islands
+   * and thin streaks are recolored to a neighboring dominant hue-compatible
+   * color within this RGB distance before greedy voxel meshing. Default:
+   * disabled.
+   */
+  colorRegionMergeDistance?: number;
 }
 
 // ── Default MagicaVoxel palette ──────────────────────────────────────────────
@@ -116,6 +129,237 @@ function colorFromRgba(r: number, g: number, b: number, a: number): string {
   if (a >= 255) return colorFromRgb(r, g, b);
   const alpha = Math.round((Math.max(0, Math.min(255, a)) / 255) * 1000) / 1000;
   return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
+interface ResolvedVoxColor {
+  rgb: [number, number, number];
+  alpha: number;
+}
+
+interface HsvColor {
+  hue: number;
+  saturation: number;
+  value: number;
+}
+
+function parseResolvedVoxColor(color: string): ResolvedVoxColor | null {
+  const hex = color.match(/^#([0-9a-f]{6})$/i);
+  if (hex) {
+    const value = hex[1];
+    return {
+      rgb: [
+        parseInt(value.slice(0, 2), 16),
+        parseInt(value.slice(2, 4), 16),
+        parseInt(value.slice(4, 6), 16),
+      ],
+      alpha: 1,
+    };
+  }
+  const rgba = color.match(/^rgba\((\d+),\s*(\d+),\s*(\d+),\s*([\d.]+)\)$/i);
+  if (!rgba) return null;
+  return {
+    rgb: [Number(rgba[1]), Number(rgba[2]), Number(rgba[3])],
+    alpha: Number(rgba[4]),
+  };
+}
+
+function colorDistance(a: ResolvedVoxColor, b: ResolvedVoxColor): number {
+  return Math.hypot(
+    a.rgb[0] - b.rgb[0],
+    a.rgb[1] - b.rgb[1],
+    a.rgb[2] - b.rgb[2],
+  );
+}
+
+function hsvFromColor(color: ResolvedVoxColor): HsvColor {
+  const r = color.rgb[0] / 255;
+  const g = color.rgb[1] / 255;
+  const b = color.rgb[2] / 255;
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const delta = max - min;
+  let hue = 0;
+  if (delta !== 0) {
+    if (max === r) hue = 60 * (((g - b) / delta) % 6);
+    else if (max === g) hue = 60 * ((b - r) / delta + 2);
+    else hue = 60 * ((r - g) / delta + 4);
+  }
+  if (hue < 0) hue += 360;
+  return {
+    hue,
+    saturation: max === 0 ? 0 : delta / max,
+    value: max,
+  };
+}
+
+function hueDistance(a: number, b: number): number {
+  const delta = Math.abs(a - b) % 360;
+  return delta > 180 ? 360 - delta : delta;
+}
+
+function canMergeVoxColors(a: ResolvedVoxColor, b: ResolvedVoxColor): boolean {
+  if (a.alpha < 1 || b.alpha < 1) return false;
+  const ah = hsvFromColor(a);
+  const bh = hsvFromColor(b);
+  const aNeutral = ah.saturation < 0.08;
+  const bNeutral = bh.saturation < 0.08;
+  if (aNeutral || bNeutral) return aNeutral === bNeutral;
+  const tolerance = Math.min(ah.value, bh.value) < 0.16 ? 35 : 24;
+  return hueDistance(ah.hue, bh.hue) <= tolerance;
+}
+
+function buildPaletteMergeMap(
+  colorCounts: Map<string, number>,
+  paletteMergeDistance: number | undefined,
+): Map<string, string> | null {
+  const maxDistance = paletteMergeDistance ?? 0;
+  if (!Number.isFinite(maxDistance) || maxDistance <= 0) return null;
+  const parsedColors = new Map<string, ResolvedVoxColor>();
+  for (const color of colorCounts.keys()) {
+    const parsed = parseResolvedVoxColor(color);
+    if (parsed) parsedColors.set(color, parsed);
+  }
+  const representatives: Array<{ color: string; parsed: ResolvedVoxColor }> = [];
+  const remap = new Map<string, string>();
+  const entries = Array.from(colorCounts.entries())
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  for (const [color] of entries) {
+    const parsed = parsedColors.get(color);
+    if (!parsed) {
+      remap.set(color, color);
+      continue;
+    }
+    let best: { color: string; distance: number } | null = null;
+    for (const representative of representatives) {
+      if (!canMergeVoxColors(parsed, representative.parsed)) continue;
+      const distance = colorDistance(parsed, representative.parsed);
+      if (distance > maxDistance) continue;
+      if (!best || distance < best.distance) {
+        best = { color: representative.color, distance };
+      }
+    }
+    if (best) {
+      remap.set(color, best.color);
+    } else {
+      representatives.push({ color, parsed });
+      remap.set(color, color);
+    }
+  }
+  return remap;
+}
+
+const FACE_REGION_NEIGHBORS: ReadonlyArray<readonly [number, number]> = [
+  [1, 0],
+  [-1, 0],
+  [0, 1],
+  [0, -1],
+];
+
+function cellKey(u: number, v: number): string {
+  return `${u},${v}`;
+}
+
+function parseCellKey(key: string): [number, number] {
+  const comma = key.indexOf(",");
+  return [Number(key.slice(0, comma)), Number(key.slice(comma + 1))];
+}
+
+function isCleanupRegion(size: number, width: number, height: number): boolean {
+  if (size <= 4) return true;
+  if ((width === 1 || height === 1) && size <= 12) return true;
+  return Math.min(width, height) <= 2 && Math.max(width, height) >= 4 && size <= 18;
+}
+
+function cleanupFacePlaneRegions(
+  facePlanes: Map<string, Map<string, string>>,
+  colorRegionMergeDistance: number | undefined,
+): void {
+  const maxDistance = colorRegionMergeDistance ?? 0;
+  if (!Number.isFinite(maxDistance) || maxDistance <= 0) return;
+  const parsedColors = new Map<string, ResolvedVoxColor | null>();
+  const parsedColor = (color: string): ResolvedVoxColor | null => {
+    if (!parsedColors.has(color)) parsedColors.set(color, parseResolvedVoxColor(color));
+    return parsedColors.get(color) ?? null;
+  };
+
+  for (const cells of facePlanes.values()) {
+    if (cells.size < 3) continue;
+    const planeColorCounts = new Map<string, number>();
+    for (const color of cells.values()) {
+      planeColorCounts.set(color, (planeColorCounts.get(color) ?? 0) + 1);
+    }
+    const visited = new Set<string>();
+    const updates: Array<[string, string]> = [];
+
+    for (const [startKey, sourceColor] of cells) {
+      if (visited.has(startKey)) continue;
+      const stack = [startKey];
+      const component: string[] = [];
+      const neighborContacts = new Map<string, number>();
+      let minU = Infinity, maxU = -Infinity, minV = Infinity, maxV = -Infinity;
+      visited.add(startKey);
+
+      while (stack.length > 0) {
+        const key = stack.pop()!;
+        component.push(key);
+        const [u, v] = parseCellKey(key);
+        minU = Math.min(minU, u);
+        maxU = Math.max(maxU, u);
+        minV = Math.min(minV, v);
+        maxV = Math.max(maxV, v);
+
+        for (const [du, dv] of FACE_REGION_NEIGHBORS) {
+          const nextKey = cellKey(u + du, v + dv);
+          const nextColor = cells.get(nextKey);
+          if (!nextColor) continue;
+          if (nextColor === sourceColor) {
+            if (!visited.has(nextKey)) {
+              visited.add(nextKey);
+              stack.push(nextKey);
+            }
+            continue;
+          }
+          neighborContacts.set(nextColor, (neighborContacts.get(nextColor) ?? 0) + 1);
+        }
+      }
+
+      const width = maxU - minU + 1;
+      const height = maxV - minV + 1;
+      if (!isCleanupRegion(component.length, width, height) || neighborContacts.size === 0) continue;
+      const source = parsedColor(sourceColor);
+      if (!source) continue;
+
+      let best: { color: string; contacts: number; distance: number; count: number } | null = null;
+      for (const [targetColor, contacts] of neighborContacts) {
+        const targetCount = planeColorCounts.get(targetColor) ?? 0;
+        if (targetCount <= component.length) continue;
+        const target = parsedColor(targetColor);
+        if (!target || !canMergeVoxColors(source, target)) continue;
+        const distance = colorDistance(source, target);
+        if (distance > maxDistance) continue;
+        const candidate = { color: targetColor, contacts, distance, count: targetCount };
+        if (
+          !best ||
+          candidate.contacts > best.contacts ||
+          (candidate.contacts === best.contacts && candidate.count > best.count) ||
+          (candidate.contacts === best.contacts && candidate.count === best.count && candidate.distance < best.distance) ||
+          (
+            candidate.contacts === best.contacts &&
+            candidate.count === best.count &&
+            candidate.distance === best.distance &&
+            candidate.color.localeCompare(best.color) < 0
+          )
+        ) {
+          best = candidate;
+        }
+      }
+
+      if (!best) continue;
+      for (const key of component) updates.push([key, best.color]);
+    }
+
+    for (const [key, color] of updates) cells.set(key, color);
+  }
 }
 
 const VOX_MAGIC = 0x20584f56; // "VOX " as little-endian uint32
@@ -267,15 +511,34 @@ export function parseVox(buffer: ArrayBuffer, options?: VoxParseOptions): ParseR
   // colorIndex in XYZI is 1-based → palette[colorIndex - 1].
   // Custom RGBA palette: entry[0] is palette[0] (for colorIndex 1), etc.
   // Default palette: index 0 is unused dummy, index 1 = first real color.
-  const resolveColor = (colorIndex: number): string => {
+  const colorCache = new Map<number, string>();
+  const exactColorFor = (colorIndex: number): string => {
+    const cached = colorCache.get(colorIndex);
+    if (cached) return cached;
     const idx = colorIndex - 1; // 0-based
+    let color: string;
     if (customPalette !== null) {
-      return customPalette[idx] ?? "#888888";
+      color = customPalette[idx] ?? "#888888";
+    } else {
+      // Default palette is a uint32 array; entry 0 unused.
+      const packed = DEFAULT_PALETTE_RGBA[colorIndex] ?? 0;
+      const [r, g, b] = rgbFromPacked(packed);
+      color = colorFromRgb(r, g, b);
     }
-    // Default palette is a uint32 array; entry 0 unused.
-    const packed = DEFAULT_PALETTE_RGBA[colorIndex] ?? 0;
-    const [r, g, b] = rgbFromPacked(packed);
-    return colorFromRgb(r, g, b);
+    colorCache.set(colorIndex, color);
+    return color;
+  };
+
+  const colorCounts = new Map<string, number>();
+  for (const voxel of voxels) {
+    const color = exactColorFor(voxel.colorIndex);
+    colorCounts.set(color, (colorCounts.get(color) ?? 0) + 1);
+  }
+  const paletteMergeMap = buildPaletteMergeMap(colorCounts, options?.paletteMergeDistance);
+
+  const resolveColor = (colorIndex: number): string => {
+    const exact = exactColorFor(colorIndex);
+    return paletteMergeMap?.get(exact) ?? exact;
   };
 
   // 4. Use the deduped occupancy set for face-culling.
@@ -292,14 +555,15 @@ export function parseVox(buffer: ArrayBuffer, options?: VoxParseOptions): ParseR
   //   +X / -X: plane = x, in-plane = (y, z)
   //   +Y / -Y: plane = y, in-plane = (x, z)
   //   +Z / -Z: plane = z, in-plane = (x, y)
+  type PlaneKey = string; // `${dir}:${plane}`
   type GroupKey = string; // `${dir}:${plane}:${color}`
-  const groups = new Map<GroupKey, Set<string>>(); // key → set of "u,v" cells
+  const facePlanes = new Map<PlaneKey, Map<string, string>>(); // key → "u,v" cell color
 
   const addCell = (dir: number, plane: number, u: number, v: number, color: string): void => {
-    const key = `${dir}:${plane}:${color}`;
-    let cells = groups.get(key);
-    if (!cells) { cells = new Set(); groups.set(key, cells); }
-    cells.add(`${u},${v}`);
+    const key = `${dir}:${plane}`;
+    let cells = facePlanes.get(key);
+    if (!cells) { cells = new Map(); facePlanes.set(key, cells); }
+    cells.set(cellKey(u, v), color);
   };
 
   for (const v of voxels) {
@@ -312,6 +576,18 @@ export function parseVox(buffer: ArrayBuffer, options?: VoxParseOptions): ParseR
     if (!hasNeighbor(x, y - 1, z)) addCell(3, y,     x, z, color); // -Y
     if (!hasNeighbor(x, y, z + 1)) addCell(4, z + 1, x, y, color); // +Z
     if (!hasNeighbor(x, y, z - 1)) addCell(5, z,     x, y, color); // -Z
+  }
+
+  cleanupFacePlaneRegions(facePlanes, options?.colorRegionMergeDistance);
+
+  const groups = new Map<GroupKey, Set<string>>();
+  for (const [planeKey, cells] of facePlanes) {
+    for (const [key, color] of cells) {
+      const groupKey = `${planeKey}:${color}`;
+      let group = groups.get(groupKey);
+      if (!group) { group = new Set(); groups.set(groupKey, group); }
+      group.add(key);
+    }
   }
 
   // Greedy-mesh a 2D occupancy set into maximal axis-aligned rectangles.
