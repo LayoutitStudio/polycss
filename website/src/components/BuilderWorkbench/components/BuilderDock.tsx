@@ -62,11 +62,9 @@ export function BuilderDock({
         onUpdateScene={updateScene}
       />
       <DockCamera
-        renderer={sceneOptions.renderer}
         autoCenter={sceneOptions.autoCenter}
         showAxes={sceneOptions.showAxes}
         animate={sceneOptions.animate}
-        normalBucketCull={sceneOptions.normalBucketCull}
         dragMode={sceneOptions.dragMode}
         fpvLook={sceneOptions.fpvLook}
         fpvMove={sceneOptions.fpvMove}

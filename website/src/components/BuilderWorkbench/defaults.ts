@@ -18,7 +18,6 @@ export const DEFAULT_SCENE: SceneOptionsState = {
   autoCenter: true,
   interactive: true,
   animate: false,
-  normalBucketCull: false,
   showAxes: true,
   // Selection is always on in the builder — picking a placed mesh is core
   // to its workflow. The Interaction folder is hidden in this surface so

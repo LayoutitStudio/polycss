@@ -32,11 +32,9 @@ interface LoadedModelMinimal {
 }
 
 export interface CameraFolderInputs {
-  renderer: SceneOptionsState["renderer"];
   autoCenter: boolean;
   showAxes: boolean;
   animate: boolean;
-  normalBucketCull: boolean;
   dragMode: DragMode;
   fpvLook: boolean;
   fpvMove: boolean;
@@ -91,11 +89,9 @@ const PERSPECTIVE_PX_OPTIONS: Record<string, number> = {
 
 export function useCameraFolder(parent: GUI | null, inputs: CameraFolderInputs): void {
   const {
-    renderer,
     autoCenter,
     showAxes,
     animate,
-    normalBucketCull,
     dragMode,
     fpvLook,
     fpvMove,
@@ -159,9 +155,6 @@ export function useCameraFolder(parent: GUI | null, inputs: CameraFolderInputs):
   );
   useToggle(folder, "Axes", showAxes, (value) => onUpdateScene({ showAxes: value }));
   useToggle(folder, "Auto rotate", animate, (value) => onUpdateScene({ animate: value }));
-  const normalBucketCullCtrl = useToggle(folder, "Normal bucket cull", normalBucketCull, (value) =>
-    onUpdateScene({ normalBucketCull: value }),
-  );
   useOption<DragMode>(folder, "Drag", DRAG_MODE_OPTIONS, dragMode, (value) =>
     onUpdateScene({ dragMode: value }),
   );
@@ -323,10 +316,6 @@ export function useCameraFolder(parent: GUI | null, inputs: CameraFolderInputs):
     fpvLookSensitivityCtrl,
     fpvInvertYCtrl,
   ]);
-
-  useEffect(() => {
-    normalBucketCullCtrl?.setEnabled(renderer === "vanilla", { dim: true });
-  }, [normalBucketCullCtrl, renderer]);
 
   // Perspective-px row only makes sense in perspective projection; hide it
   // outright when projection is orthographic (`perspective === false`).

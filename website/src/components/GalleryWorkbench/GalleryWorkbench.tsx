@@ -102,7 +102,6 @@ const DEFAULT_SCENE: SceneOptionsState = {
   autoCenter: true,
   interactive: true,
   animate: false,
-  normalBucketCull: false,
   showAxes: false,
   selection: false,
   hoverEffects: false,
@@ -1181,11 +1180,9 @@ export default function GalleryWorkbench() {
           onGizmoModeChange={setGizmoMode}
         />
         <DockCamera
-          renderer={sceneOptions.renderer}
           autoCenter={sceneOptions.autoCenter}
           showAxes={sceneOptions.showAxes}
           animate={sceneOptions.animate}
-          normalBucketCull={sceneOptions.normalBucketCull}
           dragMode={sceneOptions.dragMode}
           fpvLook={sceneOptions.fpvLook}
           fpvMove={sceneOptions.fpvMove}
