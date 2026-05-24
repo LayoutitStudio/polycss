@@ -18,6 +18,7 @@ import type {
   PolyMeshHandle,
   PolyTransformControlsObjectChangeEvent,
   Polygon,
+  Vec3,
 } from "@layoutit/polycss-react";
 import { type RefObject } from "react";
 import { meshResolutionShowsMesh, type SceneOptionsState, type GizmoMode } from "../../types";
@@ -79,6 +80,12 @@ export function BuilderScene({
   const camProps = sceneOptions.perspective === false
     ? { zoom: sceneOptions.zoom, rotX: sceneOptions.rotX, rotY: sceneOptions.rotY, target: sceneOptions.target }
     : { zoom: sceneOptions.zoom, rotX: sceneOptions.rotX, rotY: sceneOptions.rotY, target: sceneOptions.target, perspective: sceneOptions.perspective };
+  const handleCameraChange = (cam: { rotX: number; rotY: number; zoom: number; target?: Vec3 }) => updateScene({
+    rotX: cam.rotX,
+    rotY: cam.rotY,
+    zoom: cam.zoom,
+    ...(cam.target ? { target: cam.target } : {}),
+  });
 
   return (
     <Cam key={sceneKey} {...camProps}>
@@ -87,12 +94,7 @@ export function BuilderScene({
           drag={sceneOptions.interactive && !gizmoDragging}
           wheel={sceneOptions.interactive && !gizmoDragging}
           animate={sceneOptions.animate ? { speed: 0.35, axis: "y", pauseOnInteraction: true } : false}
-          onInteractionEnd={(cam) => updateScene({
-            rotX: cam.rotX,
-            rotY: cam.rotY,
-            zoom: cam.zoom,
-            ...(cam.target ? { target: cam.target } : {}),
-          })}
+          onInteractionEnd={handleCameraChange}
         />
       ) : sceneOptions.dragMode === "fpv" ? (
         <PolyFirstPersonControls
@@ -114,12 +116,7 @@ export function BuilderScene({
           drag={sceneOptions.interactive && !gizmoDragging}
           wheel={sceneOptions.interactive && !gizmoDragging}
           animate={sceneOptions.animate ? { speed: 0.35, axis: "y", pauseOnInteraction: true } : false}
-          onInteractionEnd={(cam) => updateScene({
-            rotX: cam.rotX,
-            rotY: cam.rotY,
-            zoom: cam.zoom,
-            ...(cam.target ? { target: cam.target } : {}),
-          })}
+          onInteractionEnd={handleCameraChange}
         />
       )}
       <PolyScene

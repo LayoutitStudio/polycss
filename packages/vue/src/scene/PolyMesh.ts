@@ -16,7 +16,7 @@
  * When no `polygon` slot is provided, atlas-backed polygon i elements are rendered
  * automatically for each polygon.
  */
-import { defineComponent, h, computed, inject, onMounted, onBeforeUnmount, ref, watch } from "vue";
+import { defineComponent, h, computed, inject, onMounted, onBeforeUnmount, ref, watch, watchEffect } from "vue";
 import type { PropType, VNode, CSSProperties } from "vue";
 import type { MeshResolution, Polygon, PolyTextureLightingMode, Vec3 } from "@layoutit/polycss-core";
 import {
@@ -49,6 +49,7 @@ import {
   useTextureAtlas,
 } from "./atlas";
 import { usePolySceneContext } from "./sceneContext";
+import { createPolyVoxelRenderer, type PolyVoxelRenderer } from "./voxelRenderer";
 import { PolyCameraContextKey } from "../camera";
 import {
   findPolyMeshHandle,
@@ -239,6 +240,15 @@ export const PolyMesh = defineComponent({
     const atlasAmbient = computed(() =>
       atlasTextureLighting.value === "dynamic" ? undefined : sceneCtx?.value.ambientLight,
     );
+    const directVoxelEnabled = computed(() => Boolean(
+      props.src &&
+      fetched.voxelSource.value &&
+      polygonOverride.value === null &&
+      !slots.polygon &&
+      !slots.default &&
+      atlasTextureLighting.value === "baked" &&
+      !props.castShadow,
+    ));
 
     // Dynamic lighting override: when textureLighting is "dynamic" AND the
     // mesh has a non-zero rotation, we emit overridden --plx/ly/lz
@@ -277,7 +287,7 @@ export const PolyMesh = defineComponent({
     });
 
     const textureAtlasPlans = computed(() => {
-      if (!atlasAutoRender) return [];
+      if (!atlasAutoRender || directVoxelEnabled.value) return [];
       const repairEdges = buildTextureEdgeRepairSets(polygons.value);
       const seamBleedEdges = atlasSeamBleed.value === "auto" || (
         typeof atlasSeamBleed.value === "number" &&
@@ -480,9 +490,9 @@ export const PolyMesh = defineComponent({
             strategies: atlasStrategies.value,
             seamBleed: atlasSeamBleed.value,
             colorFrame: ++stableTriangleColorFrame.value,
-            colorSteps: 8,
-            colorFreezeFrames: 12,
-            colorMaxStep: 8,
+            // Animated low-poly triangles can swing face normals sharply; keep the
+            // mounted baked color pinned and animate transforms only.
+            colorFreezeFrames: 0,
           })
         ) {
           return;
@@ -522,6 +532,44 @@ export const PolyMesh = defineComponent({
     // mesh stacked under the pointer; `pointer` is NDC against the
     // camera viewport (falls back to (0,0) outside a <PolyCamera>).
     const cameraCtx = inject(PolyCameraContextKey, null);
+    const voxelRenderer = ref<PolyVoxelRenderer | null>(null);
+    watchEffect((onCleanup) => {
+      const root = wrapperRef.value;
+      voxelRenderer.value?.dispose();
+      voxelRenderer.value = null;
+      if (!directVoxelEnabled.value || !root) return;
+
+      const renderer = createPolyVoxelRenderer({
+        doc: root.ownerDocument,
+        wrapper: root,
+        polygons: polygons.value,
+        directionalLight: bakedDirectional.value,
+        ambientLight: atlasAmbient.value,
+      });
+      if (!renderer) return;
+
+      const cameraRotation = () => {
+        const cameraState = cameraCtx?.store.getState().cameraState;
+        return {
+          rotX: cameraState?.rotX ?? 65,
+          rotY: cameraState?.rotY ?? 45,
+          meshRotation: props.rotation,
+        };
+      };
+
+      voxelRenderer.value = renderer;
+      renderer.render(cameraRotation());
+      const unsubscribe = cameraCtx?.store.subscribe(() => {
+        renderer.syncCamera(cameraRotation());
+      });
+
+      onCleanup(() => {
+        unsubscribe?.();
+        renderer.dispose();
+        if (voxelRenderer.value === renderer) voxelRenderer.value = null;
+      });
+    });
+
     let pointerDownAt: { x: number; y: number } | null = null;
 
     function makeEvent<E extends Event>(
@@ -614,7 +662,7 @@ export const PolyMesh = defineComponent({
         Object.entries(attrs).filter(([k]) => k !== "style" && k !== "class")
       );
 
-      const wrapperClass = `polycss-mesh${props.class ? ` ${props.class}` : ""}`;
+      const wrapperClass = `polycss-mesh${directVoxelEnabled.value ? " polycss-voxel-mesh" : ""}${props.class ? ` ${props.class}` : ""}`;
 
       // Build the union of DOM handlers we need to attach. Each
       // registered prop becomes a `onXxx` attr on the wrapper div;
@@ -725,6 +773,8 @@ export const PolyMesh = defineComponent({
       // Build polygon nodes: use `polygon` scoped slot if provided, else auto-render atlas elements.
       const polyNodes: Array<VNode | null> = slots.polygon
         ? polys.map((p, i) => h("template", { key: i }, slots.polygon?.({ polygon: p, index: i })))
+        : directVoxelEnabled.value
+          ? []
         : textureAtlas.entries.value.map((entry, index) => {
             if (entry) {
               return renderTextureAtlasPoly({

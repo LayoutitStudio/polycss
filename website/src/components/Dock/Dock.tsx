@@ -3,6 +3,8 @@ import { useGui } from "./primitives";
 import { DockGuiContext } from "./slots";
 
 export interface DockProps {
+  id?: string;
+  className?: string;
   children?: ReactNode;
   loading?: boolean;
   loadError?: string | null;
@@ -19,12 +21,15 @@ export interface DockProps {
  * the GUI (status notes for model loading), which is Dock-level UI
  * rather than per-folder state.
  */
-export function Dock({ children, loading, loadError }: DockProps) {
+export function Dock({ id, className, children, loading, loadError }: DockProps) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const gui = useGui(hostRef);
   return (
-    <div className="dn-floating-controls">
-      <div ref={hostRef} />
+    <div
+      id={id}
+      className={["dn-floating-controls", className].filter(Boolean).join(" ")}
+    >
+      <div className="dn-lil-gui-host" ref={hostRef} />
       <DockGuiContext.Provider value={gui}>
         {children}
       </DockGuiContext.Provider>

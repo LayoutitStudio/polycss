@@ -1,6 +1,7 @@
 import {
   computed,
-  onBeforeUnmount,
+  getCurrentScope,
+  onScopeDispose,
   ref,
   watch,
 } from "vue";
@@ -116,10 +117,12 @@ export function useTextureAtlas(
     { immediate: true },
   );
 
-  onBeforeUnmount(() => {
-    revokeUrls(activeUrls);
-    activeUrls = [];
-  });
+  if (getCurrentScope()) {
+    onScopeDispose(() => {
+      revokeUrls(activeUrls);
+      activeUrls = [];
+    });
+  }
 
   return {
     entries: computed(() => atlasState.value.packed.entries),

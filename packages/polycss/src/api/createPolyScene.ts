@@ -2333,7 +2333,9 @@ export function createPolyScene(
             stableTriangleUpdateMode: options?.stableTriangleUpdateMode,
             stableTriangleColorPolicy: options?.stableTriangleColorPolicy,
             stableTriangleColorSteps: options?.stableTriangleColorSteps,
-            stableTriangleColorFreezeFrames: options?.stableTriangleColorFreezeFrames,
+            // Triangle-frame animation updates transforms directly; pin baked
+            // color unless an internal caller opts into color refresh.
+            stableTriangleColorFreezeFrames: options?.stableTriangleColorFreezeFrames ?? 0,
             stableTriangleColorBudget: options?.stableTriangleColorBudget,
             stableTriangleColorMaxAge: options?.stableTriangleColorMaxAge,
             stableTriangleColorMaxStep: options?.stableTriangleColorMaxStep,

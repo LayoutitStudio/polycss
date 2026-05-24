@@ -5,7 +5,6 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ParseResult, Polygon } from "@layoutit/polycss-core";
-import { DEFAULT_SEAM_BLEED } from "@layoutit/polycss-core";
 import {
   createPolyScene,
   type PolySceneOptions,
@@ -508,6 +507,24 @@ describe("createPolyScene", () => {
       scene.add(makeVoxelExactPolygonsParseResult([
         topQuad("#123456"),
         sideQuad("#123456"),
+      ]), { merge: false });
+
+      const brushes = Array.from(host.querySelectorAll(DIRECT_VOXEL_BRUSH_SELECTOR)) as HTMLElement[];
+      expect(brushes.length).toBeGreaterThan(0);
+      const matrices = brushes.map(matrixValues);
+      expect(matrices.some((values) =>
+        values.some((value) => Math.abs(value - 50.6) <= 1e-6)
+      )).toBe(true);
+    });
+
+    it("normalizes direct voxel seam colors before matching shared edges", () => {
+      scene = makeScene(host, {
+        directionalLight: { direction: [0, 0, 1], color: "#ffffff", intensity: 0 },
+        ambientLight: { color: "#ffffff", intensity: 1 },
+      }, { rotX: 65, rotY: 45 });
+      scene.add(makeVoxelExactPolygonsParseResult([
+        topQuad("#123456"),
+        sideQuad("rgb(18, 52, 86)"),
       ]), { merge: false });
 
       const brushes = Array.from(host.querySelectorAll(DIRECT_VOXEL_BRUSH_SELECTOR)) as HTMLElement[];
@@ -1343,32 +1360,6 @@ describe("createPolyScene", () => {
       // `strategies` into every camera-update setOptions call.
       scene.setOptions({ strategies: { disable: ["u"] } });
       expect(host.querySelector("i, s")).toBe(firstLeaf);
-    });
-
-    it("re-renders meshes when seamBleed is set and explicitly unset", () => {
-      scene = makeScene(host, { seamBleed: 0 });
-      scene.add(makeParseResult([
-        triangle(),
-        {
-          vertices: [
-            [1, 0, 0],
-            [1, 1, 0],
-            [0, 1, 0],
-          ],
-          color: "#ff0000",
-        },
-      ]), { merge: false });
-      const leaf = host.querySelector(".polycss-mesh u") as HTMLElement;
-      const baseTransform = leaf.style.transform;
-
-      scene.setOptions({ seamBleed: DEFAULT_SEAM_BLEED });
-      const bleedLeaf = host.querySelector(".polycss-mesh u") as HTMLElement;
-      expect(bleedLeaf.style.transform).not.toBe(baseTransform);
-      const bleedTransform = bleedLeaf.style.transform;
-
-      scene.setOptions({ seamBleed: undefined });
-      const resetLeaf = host.querySelector(".polycss-mesh u") as HTMLElement;
-      expect(resetLeaf.style.transform).toBe(bleedTransform);
     });
 
     it("mounts only camera-facing voxel leaves by default", () => {

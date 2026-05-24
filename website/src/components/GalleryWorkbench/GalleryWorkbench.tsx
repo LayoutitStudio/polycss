@@ -71,6 +71,7 @@ import { useFpvHost } from "../fpv";
 import type { ObjParseOptions, GltfParseOptions, VoxParseOptions } from "@layoutit/polycss";
 
 type AnimationClip = NonNullable<LoadedModel["animation"]>["clips"][number];
+type MobileGalleryPanel = "models" | "controls" | null;
 
 function presetPickerItem(preset: PresetModel, local = false) {
   const label = local ? `Dropped: ${stripParenthesizedText(preset.label)}` : stripParenthesizedText(preset.label);
@@ -424,6 +425,51 @@ function inspectorColorKey(color: string): string {
     .join("")}`;
 }
 
+interface InspectorColorSortKey {
+  bucket: number;
+  hue: number;
+  saturation: number;
+  value: number;
+  label: string;
+}
+
+function inspectorColorSortKey(color: string): InspectorColorSortKey {
+  const parsed = parsePureColor(color);
+  if (!parsed) return { bucket: 2, hue: 0, saturation: 0, value: 0, label: color };
+  const [r, g, b] = parsed.rgb.map((channel) => Math.max(0, Math.min(255, channel)) / 255);
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const delta = max - min;
+  const saturation = max === 0 ? 0 : delta / max;
+  let hue = 0;
+  if (delta !== 0) {
+    if (max === r) hue = 60 * (((g - b) / delta) % 6);
+    else if (max === g) hue = 60 * ((b - r) / delta + 2);
+    else hue = 60 * ((r - g) / delta + 4);
+  }
+  if (hue < 0) hue += 360;
+  const neutral = saturation < 0.08;
+  return {
+    bucket: neutral ? 0 : 1,
+    hue: neutral ? 0 : hue,
+    saturation: neutral ? 0 : saturation,
+    value: max,
+    label: color,
+  };
+}
+
+function compareInspectorColors(a: string, b: string): number {
+  const ak = inspectorColorSortKey(a);
+  const bk = inspectorColorSortKey(b);
+  return (
+    ak.bucket - bk.bucket ||
+    ak.hue - bk.hue ||
+    bk.saturation - ak.saturation ||
+    ak.value - bk.value ||
+    ak.label.localeCompare(bk.label)
+  );
+}
+
 function displayAnimationName(name: string): string {
   const localName = (name.split("|").pop() ?? name).trim();
   return localName
@@ -453,6 +499,37 @@ function dedupeAnimationClips(clips: AnimationClip[]): AnimationClip[] {
   return Array.from(byName.values());
 }
 
+function animationClipValue(clip: AnimationClip): string {
+  return String(clip.index);
+}
+
+function animationSearchText(name: string): string {
+  return `${name} ${displayAnimationName(name)}`
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function isWalkingAnimationClip(clip: AnimationClip): boolean {
+  return /\bwalk(?:ing)?\b/.test(animationSearchText(clip.name));
+}
+
+function isIdleAnimationClip(clip: AnimationClip): boolean {
+  return /\bidle\b/.test(animationSearchText(clip.name));
+}
+
+function firstSelectableAnimationValue(model: LoadedModel): string {
+  const clips = dedupeAnimationClips(model.animation?.clips ?? []);
+  const preferred = clips.find(isWalkingAnimationClip) ?? clips.find((clip) => !isIdleAnimationClip(clip)) ?? clips[0];
+  return preferred ? animationClipValue(preferred) : "";
+}
+
+function hasAnimationValue(model: LoadedModel, value: string): boolean {
+  if (value === "") return true;
+  return dedupeAnimationClips(model.animation?.clips ?? []).some((clip) => animationClipValue(clip) === value);
+}
+
 function resolveInitialPreset(): PresetModel {
   const id = routeInitialPresetId(ALL_PRESET_IDS);
   return (id ? PRESETS.find((p) => p.id === id) : null) ?? randomPreset();
@@ -471,10 +548,12 @@ export default function GalleryWorkbench() {
   const [vanillaBuildMs, setVanillaBuildMs] = useState(0);
   const [modelSearch, setModelSearch] = useState("");
   const [openModelCategory, setOpenModelCategory] = useState<string | null>(null);
+  const [mobilePanel, setMobilePanel] = useState<MobileGalleryPanel>(null);
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const autoZoomPresetRef = useRef<string | null>(null);
   const autoAmbientPresetRef = useRef<string | null>(null);
   const autoKeyPresetRef = useRef<string | null>(null);
+  const loadedModelKeyRef = useRef<string | null>(null);
 
   // Selection + drag state for the React renderer's <PolyMesh> wrapper.
   // Lives at this level so a model swap can reset both — the gizmo
@@ -519,6 +598,7 @@ export default function GalleryWorkbench() {
       autoKeyPresetRef.current = null;
       setRoutePresetId(null);
       setPresetId(source.id);
+      if (loadedModelKeyRef.current !== source.id) loadedModelKeyRef.current = null;
       setSelectedAnimation("");
       setParserOptions((current) => ({
         ...current,
@@ -543,6 +623,19 @@ export default function GalleryWorkbench() {
   );
   const selectedPreset = availablePresets.find((preset) => preset.id === presetId) ?? PRESETS[0];
   const selectedDroppedSource = dropped.droppedSource?.id === selectedPreset.id ? dropped.droppedSource : null;
+  const loadMeshResolution = activeMeshResolution(sceneOptions.meshResolution);
+  const handleLoaded = useCallback((model: LoadedModel) => {
+    const modelKey = selectedPreset.id;
+    const modelChanged = loadedModelKeyRef.current !== modelKey;
+    loadedModelKeyRef.current = modelKey;
+    setLoaded(model);
+    setSelectedAnimation((current) => {
+      const first = firstSelectableAnimationValue(model);
+      if (!first) return "";
+      if (!modelChanged && hasAnimationValue(model, current)) return current;
+      return first;
+    });
+  }, [selectedPreset.id]);
   const selectedPresetPickerCategory =
     pickerItems.find((preset) => preset.id === selectedPreset.id)?.category ??
     galleryBucketForPreset(selectedPreset);
@@ -603,7 +696,8 @@ export default function GalleryWorkbench() {
     selectedPreset,
     selectedDroppedSource,
     parserOptions,
-    onLoaded: setLoaded,
+    meshResolution: loadMeshResolution,
+    onLoaded: handleLoaded,
     onLoadError: (msg) => {
       setLoaded(null);
       setLoadError(msg || null);
@@ -742,6 +836,7 @@ export default function GalleryWorkbench() {
     autoAmbientPresetRef.current = null;
     autoKeyPresetRef.current = null;
     setPresetId(id);
+    if (loadedModelKeyRef.current !== id) loadedModelKeyRef.current = null;
     setSelectedAnimation("");
     animation.setReactAnimatedPolygons(null);
     if (!next) return;
@@ -763,7 +858,22 @@ export default function GalleryWorkbench() {
   const handleRandomPreset = useCallback(() => {
     const next = randomPreset();
     resetToPreset(next.id, { updateRoute: true });
+    setMobilePanel(null);
   }, [resetToPreset]);
+
+  const handlePresetClick = useCallback((id: string) => {
+    resetToPreset(id, { updateRoute: true });
+    setMobilePanel(null);
+  }, [resetToPreset]);
+
+  useEffect(() => {
+    if (!mobilePanel) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setMobilePanel(null);
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [mobilePanel]);
 
   useRouteSync({
     presetId,
@@ -890,7 +1000,7 @@ export default function GalleryWorkbench() {
     }
     if (colorGroups.size === 0 && textured.length === 0) return [];
     const sortedColors = [...colorGroups.entries()]
-      .sort((a, b) => b[1].length - a[1].length)
+      .sort((a, b) => compareInspectorColors(a[0], b[0]) || b[1].length - a[1].length)
       .map(([color, polys]) => ({
         color,
         count: polys.length,
@@ -930,13 +1040,19 @@ export default function GalleryWorkbench() {
 
   return (
     <div
-      className={`dn-root${dropped.dropActive ? " dn-root--drop-active" : ""}`}
+      className={[
+        "dn-root",
+        "dn-root--gallery",
+        dropped.dropActive ? "dn-root--drop-active" : "",
+      ].filter(Boolean).join(" ")}
       onDragEnter={dropped.handleDragEnter}
       onDragOver={dropped.handleDragOver}
       onDragLeave={dropped.handleDragLeave}
       onDrop={dropped.handleDrop}
     >
       <ModelsSidebar
+        id="gallery-models-panel"
+        className={mobilePanel === "models" ? "is-mobile-open" : ""}
         modelSearch={modelSearch}
         onModelSearchChange={setModelSearch}
         onImportClick={() => dropped.fileInputRef.current?.click()}
@@ -948,7 +1064,7 @@ export default function GalleryWorkbench() {
         onToggleCategory={handleToggleCategory}
         modelTreeId={modelTreeId}
         presetId={presetId}
-        onPresetClick={(id) => resetToPreset(id, { updateRoute: true })}
+        onPresetClick={handlePresetClick}
         attribution={selectedPreset.attribution}
       />
 
@@ -1019,7 +1135,12 @@ export default function GalleryWorkbench() {
 
       <StatsOverlay />
 
-      <Dock loading={loading} loadError={loadError}>
+      <Dock
+        id="gallery-controls-panel"
+        className={mobilePanel === "controls" ? "is-mobile-open" : ""}
+        loading={loading}
+        loadError={loadError}
+      >
         <DockModel
           metrics={metrics}
           disableStrategies={sceneOptions.disableStrategies}
@@ -1101,6 +1222,35 @@ export default function GalleryWorkbench() {
           onUpdateScene={updateScene}
         />
       </Dock>
+
+      <nav className="dn-mobile-tabs" aria-label="Gallery panels">
+        <button
+          type="button"
+          className={`dn-mobile-tabs__button${mobilePanel === "models" ? " is-active" : ""}`}
+          aria-controls="gallery-models-panel"
+          aria-expanded={mobilePanel === "models"}
+          onClick={() => setMobilePanel((current) => current === "models" ? null : "models")}
+        >
+          Models
+        </button>
+        <button
+          type="button"
+          className="dn-mobile-tabs__button dn-mobile-tabs__button--random"
+          aria-label="Load random model"
+          onClick={handleRandomPreset}
+        >
+          Random
+        </button>
+        <button
+          type="button"
+          className={`dn-mobile-tabs__button${mobilePanel === "controls" ? " is-active" : ""}`}
+          aria-controls="gallery-controls-panel"
+          aria-expanded={mobilePanel === "controls"}
+          onClick={() => setMobilePanel((current) => current === "controls" ? null : "controls")}
+        >
+          Controls
+        </button>
+      </nav>
     </div>
   );
 }

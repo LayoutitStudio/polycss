@@ -1,5 +1,6 @@
 import { useEffect, useRef, type RefObject } from "react";
 import type { DroppedModelSource, LoadedModel, ParserOptionsState, PresetModel } from "../types";
+import type { WorkbenchMeshResolution } from "../../types";
 import { loadPresetModel, loadDroppedModel } from "../helpers/loaders";
 import {
   smartAmbientForModel,
@@ -11,6 +12,7 @@ export interface UsePresetLoaderOptions {
   selectedPreset: PresetModel;
   selectedDroppedSource: DroppedModelSource | null;
   parserOptions: ParserOptionsState;
+  meshResolution: WorkbenchMeshResolution;
   onLoaded: (model: LoadedModel) => void;
   onLoadError: (message: string) => void;
   onLoadingChange: (loading: boolean) => void;
@@ -24,6 +26,7 @@ export function usePresetLoader({
   selectedPreset,
   selectedDroppedSource,
   parserOptions,
+  meshResolution,
   onLoaded,
   onLoadError,
   onLoadingChange,
@@ -45,8 +48,8 @@ export function usePresetLoader({
         disposeRef.current?.();
         disposeRef.current = null;
         const next = selectedDroppedSource
-          ? await loadDroppedModel(selectedDroppedSource, parserOptions)
-          : await loadPresetModel(presetForLoad, parserOptions);
+          ? await loadDroppedModel(selectedDroppedSource, parserOptions, meshResolution)
+          : await loadPresetModel(presetForLoad, parserOptions, meshResolution);
         if (cancelled) {
           next.dispose();
           return;
@@ -81,7 +84,7 @@ export function usePresetLoader({
     return () => {
       cancelled = true;
     };
-  }, [selectedPreset, selectedDroppedSource, parserOptions]);
+  }, [selectedPreset, selectedDroppedSource, parserOptions, meshResolution]);
 
   useEffect(() => {
     return () => {

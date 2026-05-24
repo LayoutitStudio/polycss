@@ -35,6 +35,7 @@ import type {
   ProjectiveQuadGuardOverrides,
   ProjectiveQuadCoefficients,
   SolidTrianglePlanOptions,
+  InternalSolidTrianglePlanOptions,
   StablePlanBasis,
   ComputeTextureAtlasPlanOptions,
 } from "./types";
@@ -713,6 +714,7 @@ export function computeTextureAtlasPlan(
   projectiveQuadGuards: ProjectiveQuadGuardSettings,
   basisHint?: BasisHint,
 ): TextureAtlasPlan | null {
+  const internalOptions = options as InternalSolidTrianglePlanOptions;
   const { vertices, texture, uvs } = polygon;
   if (!vertices || vertices.length < 3) return null;
 
@@ -782,10 +784,10 @@ export function computeTextureAtlasPlan(
     normal[0], normal[1], normal[2], 0,
     tx, ty, tz, 1,
   ]);
-  const seamBleedRequest = normalizedSeamBleed(options.seamBleed);
+  const seamBleedRequest = normalizedSeamBleed(internalOptions.seamBleed);
   const seamBleedEdgeAmounts = computePlanSeamBleedEdgeAmounts(
     screenPts,
-    options.seamEdges ?? basisHint?.seamEdges,
+    internalOptions.seamEdges ?? basisHint?.seamEdges,
     seamBleedRequest,
   );
   const seamBleedEdges = seamBleedEdgeAmounts
@@ -890,13 +892,14 @@ export function computeTextureAtlasPlanPublic(
   projectiveQuadOverrides?: ProjectiveQuadGuardOverrides,
 ): TextureAtlasPlan | null {
   const projectiveQuadGuards = resolveProjectiveQuadGuards(projectiveQuadOverrides);
-  const basisHint: BasisHint | undefined = options.textureEdgeRepairEdges?.size || options.seamEdges?.size
+  const internalOptions = options as ComputeTextureAtlasPlanOptions & InternalSolidTrianglePlanOptions;
+  const basisHint: BasisHint | undefined = options.textureEdgeRepairEdges?.size || internalOptions.seamEdges?.size
     ? {
-        seamEdges: options.seamEdges ?? new Set<number>(),
+        seamEdges: internalOptions.seamEdges ?? new Set<number>(),
         textureEdgeRepairEdges: options.textureEdgeRepairEdges,
       }
     : undefined;
-  return computeTextureAtlasPlan(polygon, index, options, projectiveQuadGuards, basisHint);
+  return computeTextureAtlasPlan(polygon, index, internalOptions, projectiveQuadGuards, basisHint);
 }
 
 // Re-export from solidTriangle so callers that import from plan continue to work.

@@ -209,9 +209,10 @@ function PolySceneInner({
 
   // Push the current autoCenterOffset into the store so applyTransformDirect
   // (called by controls during drag, bypassing React render) uses the same offset.
-  useEffect(() => {
+  useLayoutEffect(() => {
     store.setAutoCenterOffset(autoCenterOffset);
-  }, [store, autoCenterOffset]);
+    applyTransformDirect();
+  }, [store, autoCenterOffset, applyTransformDirect]);
 
   // Scene transform is applied imperatively via applyTransformDirect (below),
   // not via React's style prop. This prevents Concurrent Mode from committing

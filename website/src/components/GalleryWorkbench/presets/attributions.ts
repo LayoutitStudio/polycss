@@ -25,6 +25,13 @@ export const KHRONOS_FOX_ATTRIBUTION: ModelAttribution = {
   tris: 576,
 };
 
+export const KHRONOS_AVOCADO_ATTRIBUTION: ModelAttribution = {
+  creator: "Microsoft",
+  license: "CC0 1.0",
+  sourceUrl: "https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/Avocado",
+  tris: 682,
+};
+
 export const QUATERNIUS_ULTIMATE_SPACESHIPS_ATTRIBUTION: ModelAttribution = {
   creator: "Quaternius",
   license: "CC0 1.0",

@@ -1,6 +1,6 @@
 export { PolyScene } from "./PolyScene";
 export type { PolySceneProps } from "./PolyScene";
-export type { PolyRenderStrategy, PolyRenderStrategiesOption, PolySeamBleed } from "./atlas";
+export type { PolyRenderStrategy, PolyRenderStrategiesOption } from "./atlas";
 export { PolyMesh } from "./PolyMesh";
 export type { PolyMeshProps } from "./PolyMesh";
 export { PolyGround } from "./PolyGround";

@@ -44,6 +44,7 @@ export default defineConfig({
     starlight({
       title: 'Polycss',
       description: 'A CSS polygon mesh engine. DOM-native 3D rendering.',
+      disable404Route: true,
       components: {
         Header: './src/components/DocsHeader.astro',
         ThemeSelect: './src/components/EmptyThemeSelect.astro',
@@ -67,7 +68,7 @@ export default defineConfig({
           items: [
             { label: 'PolyScene', slug: 'components/poly-scene' },
             { label: 'PolyCamera', slug: 'components/poly-camera' },
-            { label: 'PolyOrbitControls / PolyMapControls', slug: 'components/poly-controls' },
+            { label: 'Controls', slug: 'components/poly-controls' },
           ],
         },
         {
@@ -77,6 +78,7 @@ export default defineConfig({
             { label: 'Per-polygon Interaction', slug: 'guides/shapes' },
             { label: 'Performance', slug: 'guides/performance' },
             { label: 'Projections', slug: 'guides/projections' },
+            { label: 'Animation', slug: 'guides/animation' },
           ],
         },
         {

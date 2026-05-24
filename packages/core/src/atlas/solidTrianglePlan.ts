@@ -47,7 +47,7 @@ function triangleEdgeIndexForPair(a: number, b: number): number | undefined {
 
 function stableTriangleEdgeAmounts(
   seamEdges: ReadonlySet<number> | undefined,
-  seamBleed: SolidTrianglePlanOptions["seamBleed"],
+  seamBleed: InternalSolidTrianglePlanOptions["seamBleed"],
   fallback: number,
   a: number,
   b: number,
@@ -55,9 +55,7 @@ function stableTriangleEdgeAmounts(
   screenPts: number[],
 ): number[] | null {
   if (!seamEdges?.size) return null;
-  const seamAmount = seamBleed === "auto"
-    ? Number.POSITIVE_INFINITY
-    : resolveSeamBleed(seamBleed, fallback);
+  const seamAmount = resolveSeamBleed(seamBleed, fallback);
   const edgePairs: Array<[number, number]> = [[c, a], [a, b], [b, c]];
   return edgePairs.map(([from, to], localEdgeIndex) => {
     const edgeIndex = triangleEdgeIndexForPair(from, to);
@@ -342,8 +340,8 @@ export function computeSolidTrianglePlanFromCssPoints(
   const right = Math.max(0, baseLength - left);
   const screenPts = [left, 0, 0, height, left + right, height];
   const edgeAmounts = stableTriangleEdgeAmounts(
-    options.seamEdges,
-    options.seamBleed,
+    internalOptions.seamEdges,
+    internalOptions.seamBleed,
     SOLID_TRIANGLE_BLEED,
     a,
     b,
@@ -356,7 +354,7 @@ export function computeSolidTrianglePlanFromCssPoints(
         left,
         right,
         height,
-        resolveSeamBleed(options.seamBleed, SOLID_TRIANGLE_BLEED),
+        resolveSeamBleed(internalOptions.seamBleed, SOLID_TRIANGLE_BLEED),
       );
   const apex2x = expanded[0];
   const apex2y = expanded[1];

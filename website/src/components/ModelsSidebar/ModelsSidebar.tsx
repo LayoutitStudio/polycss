@@ -20,6 +20,8 @@ export interface ModelCategory {
 }
 
 export interface ModelsSidebarProps {
+  id?: string;
+  className?: string;
   modelSearch: string;
   onModelSearchChange: (value: string) => void;
   onImportClick: () => void;
@@ -60,6 +62,8 @@ function AttributionCredit({ attribution }: { attribution?: ModelAttribution }) 
 }
 
 export function ModelsSidebar({
+  id,
+  className,
   modelSearch,
   onModelSearchChange,
   onImportClick,
@@ -75,7 +79,11 @@ export function ModelsSidebar({
   attribution,
 }: ModelsSidebarProps) {
   return (
-    <aside className="models-sidebar" aria-label="Models">
+    <aside
+      id={id}
+      className={["models-sidebar", className].filter(Boolean).join(" ")}
+      aria-label="Models"
+    >
       <div className="models-sidebar__body dark-scrollbar">
         <div className="models-sidebar__header">
           <input

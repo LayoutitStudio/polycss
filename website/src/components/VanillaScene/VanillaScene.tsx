@@ -34,9 +34,9 @@ export type { GizmoMode, SceneOptionsState };
 // components in @layoutit/polycss-react and @layoutit/polycss-vue).
 const LIGHT_HELPER_TILE = 50;
 const ANIMATION_STABLE_TRIANGLE_COLOR_POLICY = "cadence";
-const ANIMATION_STABLE_TRIANGLE_COLOR_STEPS = 8;
-const ANIMATION_STABLE_TRIANGLE_COLOR_FREEZE_FRAMES = 12;
-const ANIMATION_STABLE_TRIANGLE_COLOR_MAX_STEP = 8;
+// Deforming low-poly triangles can swing face normals sharply; keep the
+// mounted baked color pinned and animate transforms only.
+const ANIMATION_STABLE_TRIANGLE_COLOR_FREEZE_FRAMES = 0;
 const ANIMATION_TRANSFORM_CACHE_FRAMES = 60;
 
 interface StableTriangleTransformFrameItem {
@@ -264,7 +264,6 @@ export function VanillaScene({
     merge: boolean;
     stableDom: boolean;
   } | null>(null);
-
   const mountChildMeshInsideModel = useCallback((child: VanillaPolyMeshHandle | null) => {
     const modelEl = meshHandleRef.current?.element;
     const childEl = child?.element;
@@ -592,17 +591,13 @@ export function VanillaScene({
           ...(stableTriangleDebug === "transform-only" || stableTriangleDebug === "plan-only"
             ? { stableTriangleDebug }
             : {}),
-          stableTriangleColorSteps: ANIMATION_STABLE_TRIANGLE_COLOR_STEPS,
           stableTriangleColorPolicy: ANIMATION_STABLE_TRIANGLE_COLOR_POLICY,
           stableTriangleColorFreezeFrames: ANIMATION_STABLE_TRIANGLE_COLOR_FREEZE_FRAMES,
-          stableTriangleColorMaxStep: ANIMATION_STABLE_TRIANGLE_COLOR_MAX_STEP,
         } satisfies Parameters<VanillaPolyMeshHandle["setPolygons"]>[1] & {
           stableTriangleDebug?: "transform-only" | "plan-only";
           stableTriangleUpdateMode?: "full" | "transform-only" | "color-only";
           stableTriangleColorPolicy: "cadence" | "adaptive";
-          stableTriangleColorSteps: number;
           stableTriangleColorFreezeFrames: number;
-          stableTriangleColorMaxStep: number;
         };
         const canUseTransformCache =
           transformCache &&
@@ -615,6 +610,7 @@ export function VanillaScene({
         const shouldRefreshColor =
           canUseTransformCache &&
           transformCache.canRefreshColor &&
+          ANIMATION_STABLE_TRIANGLE_COLOR_FREEZE_FRAMES > 0 &&
           animationFrameCount % ANIMATION_STABLE_TRIANGLE_COLOR_FREEZE_FRAMES === 0;
         const samples = debugTarget.__polycssGalleryAnimationSamples;
         let sampleMs = 0;
@@ -760,7 +756,9 @@ export function VanillaScene({
       const controls: PolyControlsHandle = factory(scene, {
         drag: options.interactive,
         wheel: options.interactive,
-        animate: options.animate ? { speed: 0.3, axis: "y" as const, pauseOnInteraction: true } : false as const,
+        animate: options.animate
+          ? { speed: 0.3, axis: "y" as const, pauseOnInteraction: true }
+          : false as const,
       });
       controls.addEventListener("end", ((e: { camera: { rotX: number; rotY: number; zoom: number; target?: ReactVec3 } }) => {
         onCameraChangeRef.current?.(e.camera);

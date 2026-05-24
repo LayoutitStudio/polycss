@@ -26,6 +26,13 @@
     const polygonOrder = benchParams.get("polygonOrder") || "source";
     const domOrder = benchParams.get("domOrder") || "source";
     const leafBucketSize = Number(benchParams.get("leafBucketSize") || 0);
+    const islandBucketMode = benchParams.get("islandBucket") || "none";
+    const islandBucketSize = Number(benchParams.get("islandBucketSize") || 128);
+    const islandBucketSurface = benchParams.get("islandBucketSurface") || "none";
+    const displayCullMode = benchParams.get("displayCull") || "none";
+    const displayCullBias = Number(benchParams.get("displayCullBias") || 0);
+    const displayCullDecimals = Number(benchParams.get("displayCullDecimals") || 1);
+    const displayCullMinBucketSize = Number(benchParams.get("displayCullMinBucketSize") || 2);
     const recordFrameWork = benchParams.get("frameWork") === "1";
     const disabledStrategies = (benchParams.get("disableStrategies") || "")
       .split(",")
@@ -103,10 +110,19 @@
       interactionStats: () => ({ ...interactionStats }),
       frameWorkSamples: () => frameWork.samples(),
       resetInteractionStats,
+      cullStats: () => displayCullStats,
+      setRotY(rotY) {
+        scene.camera.update({ rotY });
+        scene.applyCamera();
+        applySceneTransformMode();
+        displayCullController?.update(rotY, scene.camera.state.rotX ?? preset.rotX);
+      },
     };
 
     const sceneEl = host.querySelector(".polycss-scene");
     let splitShell = null;
+    let displayCullController = null;
+    let displayCullStats = null;
 
     function formatMatrixTransform(transform) {
       const matrix = new DOMMatrix(transform || "none");
@@ -266,18 +282,25 @@
     }
 
     function polygonNormalZ(polygon) {
+      return polygonNormal(polygon)[2];
+    }
+
+    function polygonNormal(polygon) {
       const vertices = polygon.vertices;
-      if (vertices.length < 3) return 0;
+      if (vertices.length < 3) return [0, 0, 0];
       const v0 = vertices[0];
-      let nz = 0;
+      let nx = 0, ny = 0, nz = 0;
       for (let i = 1; i + 1 < vertices.length; i++) {
         const v1 = vertices[i];
         const v2 = vertices[i + 1];
         const e1x = v1[1] - v0[1], e1y = v1[0] - v0[0], e1z = v1[2] - v0[2];
         const e2x = v2[1] - v0[1], e2y = v2[0] - v0[0], e2z = v2[2] - v0[2];
+        nx -= e1y * e2z - e1z * e2y;
+        ny -= e1z * e2x - e1x * e2z;
         nz -= e1x * e2y - e1y * e2x;
       }
-      return nz;
+      const len = Math.hypot(nx, ny, nz) || 1;
+      return [nx / len, ny / len, nz / len];
     }
 
     function projectedCentroid(polygon) {
@@ -428,6 +451,285 @@
       }
     }
 
+    function brushKey(polygon) {
+      return polygon.material?.key ?? polygon.material?.name ?? polygon.color ?? polygon.texture ?? "none";
+    }
+
+    function vertexKey(vertex) {
+      return `${vertex[0].toFixed(5)},${vertex[1].toFixed(5)},${vertex[2].toFixed(5)}`;
+    }
+
+    function connectedComponentIds(polygons) {
+      const parent = polygons.map((_polygon, index) => index);
+      const find = (index) => {
+        while (parent[index] !== index) {
+          parent[index] = parent[parent[index]];
+          index = parent[index];
+        }
+        return index;
+      };
+      const union = (a, b) => {
+        const ar = find(a);
+        const br = find(b);
+        if (ar !== br) parent[br] = ar;
+      };
+      const byVertex = new Map();
+      polygons.forEach((polygon, index) => {
+        const seen = new Set();
+        for (const vertex of polygon.vertices) {
+          const key = vertexKey(vertex);
+          if (seen.has(key)) continue;
+          seen.add(key);
+          const prev = byVertex.get(key);
+          if (prev === undefined) byVertex.set(key, index);
+          else union(index, prev);
+        }
+      });
+      return polygons.map((_polygon, index) => find(index));
+    }
+
+    function splitSpatialItems(items, maxSize) {
+      if (items.length <= maxSize) return [items];
+      const bounds = [
+        [Infinity, -Infinity],
+        [Infinity, -Infinity],
+        [Infinity, -Infinity],
+      ];
+      for (const item of items) {
+        const c = item.centroid;
+        for (let axis = 0; axis < 3; axis += 1) {
+          bounds[axis][0] = Math.min(bounds[axis][0], c[axis]);
+          bounds[axis][1] = Math.max(bounds[axis][1], c[axis]);
+        }
+      }
+      let axis = 0;
+      if (bounds[1][1] - bounds[1][0] > bounds[axis][1] - bounds[axis][0]) axis = 1;
+      if (bounds[2][1] - bounds[2][0] > bounds[axis][1] - bounds[axis][0]) axis = 2;
+      const sorted = items.slice().sort((a, b) => a.centroid[axis] - b.centroid[axis] || a.index - b.index);
+      const mid = Math.ceil(sorted.length / 2);
+      return [
+        ...splitSpatialItems(sorted.slice(0, mid), maxSize),
+        ...splitSpatialItems(sorted.slice(mid), maxSize),
+      ];
+    }
+
+    function islandGroups(polygons) {
+      if (islandBucketMode === "none") return [];
+      const maxSize = Math.max(2, Math.floor(Number.isFinite(islandBucketSize) ? islandBucketSize : 128));
+      const componentIds = islandBucketMode.includes("connected")
+        ? connectedComponentIds(polygons)
+        : polygons.map(() => 0);
+      const baseGroups = new Map();
+      polygons.forEach((polygon, index) => {
+        const keyParts = [];
+        if (islandBucketMode.includes("brush")) keyParts.push(brushKey(polygon));
+        if (islandBucketMode.includes("connected")) keyParts.push(componentIds[index]);
+        if (keyParts.length === 0) keyParts.push("all");
+        const key = keyParts.join("|");
+        const item = {
+          index,
+          centroid: centroid(polygon),
+        };
+        const group = baseGroups.get(key);
+        if (group) group.push(item);
+        else baseGroups.set(key, [item]);
+      });
+
+      const out = [];
+      for (const group of baseGroups.values()) {
+        if (islandBucketMode.includes("spatial")) {
+          out.push(...splitSpatialItems(group, maxSize));
+        } else {
+          out.push(group);
+        }
+      }
+      return out.filter((group) => group.length > 1);
+    }
+
+    function applyIslandBuckets(parseResult) {
+      const groups = islandGroups(parseResult.polygons);
+      if (groups.length === 0) return;
+      const leafByIndex = new Map();
+      for (const leaf of host.querySelectorAll(".polycss-mesh b,.polycss-mesh i,.polycss-mesh s,.polycss-mesh u")) {
+        const index = Number(leaf.getAttribute("data-bench-index"));
+        if (Number.isFinite(index)) leafByIndex.set(index, leaf);
+      }
+      for (const group of groups) {
+        const leaves = group
+          .map((item) => leafByIndex.get(item.index))
+          .filter((leaf) => leaf instanceof HTMLElement && leaf.parentElement);
+        if (leaves.length < 2) continue;
+        leaves.sort((a, b) => {
+          const position = a.compareDocumentPosition(b);
+          if (position & Node.DOCUMENT_POSITION_FOLLOWING) return -1;
+          if (position & Node.DOCUMENT_POSITION_PRECEDING) return 1;
+          return 0;
+        });
+        const parent = leaves[0].parentElement;
+        if (!parent) continue;
+        const bucket = document.createElement("div");
+        bucket.className = "polycss-bucket polycss-bench-island-bucket";
+        bucket.style.position = "absolute";
+        bucket.style.transformStyle = islandBucketSurface === "flat" ? "flat" : "preserve-3d";
+        if (islandBucketSurface === "opacity") {
+          bucket.style.opacity = "0.999";
+          bucket.style.willChange = "transform";
+        } else if (islandBucketSurface === "contain") {
+          bucket.style.contain = "paint";
+          bucket.style.willChange = "transform";
+        }
+        parent.insertBefore(bucket, leaves[0]);
+        for (const leaf of leaves) bucket.appendChild(leaf);
+      }
+    }
+
+    function rotateNormal(normal, rotXDeg, rotYDeg) {
+      let [x, y, z] = normal;
+      const rz = (rotYDeg * Math.PI) / 180;
+      const cosZ = Math.cos(rz);
+      const sinZ = Math.sin(rz);
+      const zx = x * cosZ - y * sinZ;
+      const zy = x * sinZ + y * cosZ;
+      x = zx;
+      y = zy;
+      const rx = (rotXDeg * Math.PI) / 180;
+      const cosX = Math.cos(rx);
+      const sinX = Math.sin(rx);
+      return [x, y * cosX - z * sinX, y * sinX + z * cosX];
+    }
+
+    function normalBucketKey(normal) {
+      const decimals = Math.max(0, Math.min(4, Math.floor(Number.isFinite(displayCullDecimals) ? displayCullDecimals : 1)));
+      return normal.map((value) => value.toFixed(decimals)).join(",");
+    }
+
+    function applyNormalCullBuckets(parseResult) {
+      if (!displayCullMode.startsWith("normal-bucket")) return;
+      const minBucketSize = Math.max(2, Math.floor(Number.isFinite(displayCullMinBucketSize) ? displayCullMinBucketSize : 2));
+      const groups = new Map();
+      parseResult.polygons.forEach((polygon, index) => {
+        const normal = polygonNormal(polygon);
+        const key = normalBucketKey(normal);
+        const group = groups.get(key) ?? { normal: [0, 0, 0], indexes: [] };
+        group.normal[0] += normal[0];
+        group.normal[1] += normal[1];
+        group.normal[2] += normal[2];
+        group.indexes.push(index);
+        groups.set(key, group);
+      });
+      const leafByIndex = new Map();
+      for (const leaf of host.querySelectorAll(".polycss-mesh b,.polycss-mesh i,.polycss-mesh s,.polycss-mesh u")) {
+        const index = Number(leaf.getAttribute("data-bench-index"));
+        if (Number.isFinite(index)) leafByIndex.set(index, leaf);
+      }
+      for (const group of groups.values()) {
+        if (group.indexes.length < minBucketSize) continue;
+        const len = Math.hypot(group.normal[0], group.normal[1], group.normal[2]) || 1;
+        const normal = group.normal.map((value) => value / len);
+        const leaves = group.indexes
+          .map((index) => leafByIndex.get(index))
+          .filter((leaf) => leaf instanceof HTMLElement && leaf.parentElement);
+        if (leaves.length < 2) continue;
+        leaves.sort((a, b) => {
+          const position = a.compareDocumentPosition(b);
+          if (position & Node.DOCUMENT_POSITION_FOLLOWING) return -1;
+          if (position & Node.DOCUMENT_POSITION_PRECEDING) return 1;
+          return 0;
+        });
+        const parent = leaves[0].parentElement;
+        if (!parent) continue;
+        const bucket = document.createElement("div");
+        bucket.className = "polycss-bucket polycss-bench-normal-cull-bucket";
+        bucket.style.cssText = "position:absolute;transform-style:preserve-3d";
+        bucket.dataset.cullNormal = normal.join(",");
+        parent.insertBefore(bucket, leaves[0]);
+        for (const leaf of leaves) bucket.appendChild(leaf);
+      }
+    }
+
+    function createDisplayCullController(polygons) {
+      if (displayCullMode === "none") return null;
+      const visibleWhenPositive = displayCullMode.endsWith("positive");
+      if (displayCullMode.startsWith("normal-bucket")) {
+        const entries = Array.from(host.querySelectorAll(".polycss-bench-normal-cull-bucket"))
+          .map((bucket) => {
+            const normal = (bucket.dataset.cullNormal ?? "")
+              .split(",")
+              .map((value) => Number(value));
+            return normal.length === 3 && normal.every(Number.isFinite)
+              ? { leaf: bucket, normal, size: bucket.querySelectorAll("b,i,s,u").length, visible: true }
+              : null;
+          })
+          .filter(Boolean);
+        return {
+          update(rotY, rotX) {
+            let visibleCount = 0;
+            let visibleLeaves = 0;
+            let changed = 0;
+            for (const entry of entries) {
+              const z = rotateNormal(entry.normal, rotX, rotY)[2];
+              const visible = visibleWhenPositive ? z >= displayCullBias : z <= -displayCullBias;
+              if (visible) {
+                visibleCount += 1;
+                visibleLeaves += entry.size;
+              }
+              if (entry.visible !== visible) {
+                entry.leaf.style.display = visible ? "" : "none";
+                entry.visible = visible;
+                changed += 1;
+              }
+            }
+            displayCullStats = {
+              kind: "normal-bucket",
+              total: entries.length,
+              visible: visibleCount,
+              hidden: entries.length - visibleCount,
+              leaves: entries.reduce((sum, entry) => sum + entry.size, 0),
+              visibleLeaves,
+              hiddenLeaves: entries.reduce((sum, entry) => sum + entry.size, 0) - visibleLeaves,
+              changed,
+            };
+            return displayCullStats;
+          },
+        };
+      }
+      const entries = [];
+      for (const polygon of polygons) {
+        const index = polygon.data?.["bench-index"];
+        const leaf = index == null ? null : host.querySelector(`[data-bench-index="${index}"]`);
+        if (!(leaf instanceof HTMLElement)) continue;
+        entries.push({
+          leaf,
+          normal: polygonNormal(polygon),
+          visible: true,
+        });
+      }
+      return {
+        update(rotY, rotX) {
+          let visibleCount = 0;
+          let changed = 0;
+          for (const entry of entries) {
+            const z = rotateNormal(entry.normal, rotX, rotY)[2];
+            const visible = visibleWhenPositive ? z >= displayCullBias : z <= -displayCullBias;
+            if (visible) visibleCount += 1;
+            if (entry.visible !== visible) {
+              entry.leaf.style.display = visible ? "" : "none";
+              entry.visible = visible;
+              changed += 1;
+            }
+          }
+          displayCullStats = {
+            kind: "leaf",
+            total: entries.length,
+            visible: visibleCount,
+            hidden: entries.length - visibleCount,
+            changed,
+          };
+          return displayCullStats;
+        },
+      };
+    }
+
     function offsetRotate(transform, offsetDeg) {
       return transform.replace(
         /(^|\s)rotate\((-?\d+(?:\.\d+)?)deg\)/,
@@ -486,8 +788,12 @@
       const parseResult = applyPolygonOrder(indexedParseResult);
       scene.add(parseResult);
       applyDomOrder(indexedParseResult);
+      applyIslandBuckets(indexedParseResult);
+      applyNormalCullBuckets(indexedParseResult);
       applyLeafBuckets();
       applySceneTransformMode();
+      displayCullController = createDisplayCullController(indexedParseResult.polygons);
+      displayCullController?.update(scene.camera.state.rotY ?? preset.rotY, scene.camera.state.rotX ?? preset.rotX);
       const cssDrivenRotation = installCssKeyframeRotation();
 
       const recorder = createPerfRecorder({
@@ -514,6 +820,7 @@
             scene.camera.update({ rotY: newRotY });
             scene.applyCamera();
             applySceneTransformMode();
+            displayCullController?.update(newRotY, scene.camera.state.rotX ?? preset.rotX);
           }
         }
         requestAnimationFrame(tick);

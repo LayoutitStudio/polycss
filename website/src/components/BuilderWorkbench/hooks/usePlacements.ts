@@ -94,7 +94,7 @@ export function usePlacements({ meshResolution }: UsePlacementsOptions): UsePlac
       opts: { rotation?: Vec3; scale?: number } = {},
     ): Promise<PlacedItem | null> => {
       try {
-        const loaded = await loadPresetModel(preset, PARSER_DEFAULTS);
+        const loaded = await loadPresetModel(preset, PARSER_DEFAULTS, effectiveMeshResolution);
         const optimized = optimizeMeshPolygons(loaded.rawPolygons, { meshResolution: effectiveMeshResolution });
         const bbox = meshBbox(optimized);
         const fitScale = bbox.span > 0 ? NORMALIZED_MAX_DIM / bbox.span : 1;

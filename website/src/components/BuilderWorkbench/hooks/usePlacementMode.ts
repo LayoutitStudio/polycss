@@ -63,7 +63,7 @@ export function usePlacementMode({
     // Exit any existing placement mode before entering a new one.
     setPlacementDraft(null);
     try {
-      const loaded = await loadPresetModel(preset, PARSER_DEFAULTS);
+      const loaded = await loadPresetModel(preset, PARSER_DEFAULTS, activeMeshResolution(sceneOptions.meshResolution));
       const optimized = optimizeMeshPolygons(loaded.rawPolygons, {
         meshResolution: activeMeshResolution(sceneOptions.meshResolution),
       });

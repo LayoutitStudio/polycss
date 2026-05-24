@@ -95,6 +95,13 @@ function rerender(
   );
 }
 
+async function flushReactWork(): Promise<void> {
+  await act(async () => {
+    await Promise.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+}
+
 describe("PolyMesh — castShadow", () => {
   afterEach(() => {
     document.body.innerHTML = "";
@@ -186,13 +193,14 @@ describe("PolyMesh — castShadow", () => {
     expect(after.style.transform).toMatch(/^translate3d\(/);
   });
 
-  it("textured polygons (s) ALSO emit shadow leaves (Frog Guy regression)", () => {
+  it("textured polygons (s) ALSO emit shadow leaves (Frog Guy regression)", async () => {
     // Shadows depend only on the polygon outline, not the texture content.
     // Fully textured meshes must cast shadows or the Frog Guy gets no shadow.
     const { container } = renderScene(DYN_SCENE_PROPS, {
       polygons: [TEXTURED_TRIANGLE],
       castShadow: true,
     });
+    await flushReactWork();
     expect(container.querySelectorAll(".polycss-shadow").length).toBe(1);
   });
 

@@ -41,6 +41,12 @@ const optNum = (name, dflt) => {
   const value = Number(raw);
   return Number.isFinite(value) ? value : dflt;
 };
+const optFlagValue = (name, dflt = "") => {
+  const i = flag(name);
+  if (i >= 0 && argv[i + 1] && !argv[i + 1].startsWith("--")) return argv[i + 1];
+  const prefixed = argv.find((arg) => arg.startsWith(`--${name}=`));
+  return prefixed ? prefixed.slice(name.length + 3) : dflt;
+};
 const optAll = (name) => {
   const values = [];
   for (let i = 0; i < argv.length; i += 1) {
@@ -74,6 +80,8 @@ const FRAME_DETAILS = hasFlag("frame-details");
 const FRAME_DETAILS_LIMIT = Math.max(0, Math.round(optNum("frame-details-limit", 24)));
 const PRINT_JSON = !hasFlag("no-print-json");
 const TRACE = !hasFlag("no-trace");
+const GPU_DETAILS_MODE = resolveGpuDetailsMode();
+const GPU_DETAILS = GPU_DETAILS_MODE !== "off";
 const HEADED = hasFlag("headed");
 const BROWSER_EXECUTABLE = optStr("browser-executable");
 const SOFTWARE_BACKEND = hasFlag("software-backend");
@@ -81,6 +89,14 @@ const CHROMIUM_ARGS = chromiumArgsWithGpuDefault([
   ...optAll("chromium-arg"),
   ...optAll("chromium-args").flatMap((value) => value.split(/\s+/).filter(Boolean)),
 ], { softwareBackend: SOFTWARE_BACKEND });
+
+function resolveGpuDetailsMode() {
+  const raw = (optFlagValue("gpu-details") || optFlagValue("gpu-viz-details")).toLowerCase();
+  if (raw === "off" || raw === "false" || raw === "no" || raw === "0") return "off";
+  if (hasFlag("deep-gpu") || raw === "full" || raw === "deep" || raw === "heavy") return "full";
+  if (hasFlag("gpu-details") || hasFlag("gpu-viz-details") || raw === "light" || raw === "summary") return "light";
+  return "off";
+}
 
 if (MODE !== "baked" && MODE !== "dynamic") {
   throw new Error(`--mode must be baked or dynamic; got "${MODE}"`);
@@ -110,15 +126,44 @@ const MIME = {
   ".vox": "application/octet-stream",
 };
 
-const TRACE_CATEGORIES = [
+const BASE_TRACE_CATEGORIES = [
   "devtools.timeline",
   "disabled-by-default-devtools.timeline",
+  "benchmark",
   "blink",
+  "blink.console",
   "blink.user_timing",
   "cc",
   "gpu",
   "viz",
+  "v8.console",
   "renderer.scheduler",
+];
+
+const GPU_DETAIL_TRACE_CATEGORIES = [
+  "disabled-by-default-viz.gpu_composite_time",
+];
+
+const DEEP_GPU_TRACE_CATEGORIES = [
+  ...GPU_DETAIL_TRACE_CATEGORIES,
+  "disabled-by-default-devtools.timeline.picture",
+  "disabled-by-default-cc.debug",
+  "disabled-by-default-cc.debug.display_items",
+  "disabled-by-default-cc.debug.picture",
+  "disabled-by-default-gpu.debug",
+  "disabled-by-default-skia",
+  "disabled-by-default-skia.gpu",
+  "disabled-by-default-skia.gpu.cache",
+  "disabled-by-default-viz.debug.overlay_planes",
+  "disabled-by-default-viz.overdraw",
+  "disabled-by-default-viz.quads",
+  "disabled-by-default-viz.triangles",
+];
+
+const TRACE_CATEGORIES = [
+  ...BASE_TRACE_CATEGORIES,
+  ...(GPU_DETAILS_MODE === "light" ? GPU_DETAIL_TRACE_CATEGORIES : []),
+  ...(GPU_DETAILS_MODE === "full" ? DEEP_GPU_TRACE_CATEGORIES : []),
 ].join(",");
 
 const EVENT_GROUPS = {
@@ -144,7 +189,62 @@ const EVENT_GROUPS = {
     "MainFrame.Draw",
     "SubmitCompositorFrame",
   ],
+  gpuViz: [
+    "Graphics.Pipeline",
+    "DisplayScheduler::OnBeginFrameDeadline",
+    "DisplayScheduler::DrawAndSwap",
+    "Display::DrawAndSwap",
+    "DirectRenderer::DrawFrame",
+    "DirectRenderer::DrawRenderPass",
+    "SoftwareRenderer::DoDrawQuad",
+    "SkiaOutputSurfaceImplOnGpu::SwapBuffers",
+  ],
 };
+
+const EVENT_GROUP_PATTERNS = {
+  gpuVizRenderPass: [
+    /RenderPass/i,
+    /CalculateRenderPass/i,
+    /DrawFrame/i,
+    /DrawAndSwap/i,
+  ],
+  gpuVizQuads: [
+    /Quad/i,
+    /AppendQuads/i,
+  ],
+  gpuVizTiles: [
+    /Tile/i,
+    /RasterTask/i,
+    /RasterBuffer/i,
+    /RasterSource/i,
+    /PlaybackToMemory/i,
+  ],
+  gpuVizSkia: [
+    /Skia/i,
+    /GrContext/i,
+    /Graphite/i,
+  ],
+  gpuVizGpuService: [
+    /SwapBuffers/i,
+    /CommandBuffer/i,
+    /SharedImage/i,
+    /Gpu/i,
+    /Metal/i,
+  ],
+};
+
+const EXACT_EVENT_GROUPS = new Map();
+for (const [group, names] of Object.entries(EVENT_GROUPS)) {
+  for (const name of names) {
+    const groups = EXACT_EVENT_GROUPS.get(name) ?? [];
+    groups.push(group);
+    EXACT_EVENT_GROUPS.set(name, groups);
+  }
+}
+
+function allGroupNames() {
+  return [...Object.keys(EVENT_GROUPS), ...Object.keys(EVENT_GROUP_PATTERNS)];
+}
 
 const KEY_EVENTS = [
   "EventDispatch",
@@ -165,8 +265,23 @@ const KEY_EVENTS = [
   "MainFrame.Draw",
   "SubmitCompositorFrame",
   "RasterTask",
+  "Graphics.Pipeline",
+  "DisplayScheduler::OnBeginFrameDeadline",
+  "DisplayScheduler::DrawAndSwap",
+  "Display::DrawAndSwap",
   "DirectRenderer::DrawFrame",
   "DirectRenderer::DrawRenderPass",
+  "SoftwareRenderer::DoDrawQuad",
+  "SkiaRenderer::DoDrawQuad",
+  "GLRenderer::DoDrawQuad",
+  "SkiaOutputSurfaceImplOnGpu::SwapBuffers",
+  "LayerTreeHostImpl::CalculateRenderPasses",
+  "PictureLayerImpl::AppendQuads",
+  "TileManager::PrepareTiles",
+  "TileManager::AssignGpuMemoryToTiles",
+  "TileTaskManagerImpl::ScheduleTasks",
+  "RasterTaskImpl::RunOnWorkerThread",
+  "RasterBufferProvider::PlaybackToMemory",
 ];
 
 function startServer() {
@@ -298,6 +413,20 @@ function addDuration(map, name, durationMs) {
   map.set(name, entry);
 }
 
+function eventGroups(eventName) {
+  const out = new Set(EXACT_EVENT_GROUPS.get(eventName) ?? []);
+  for (const [group, patterns] of Object.entries(EVENT_GROUP_PATTERNS)) {
+    if (patterns.some((pattern) => pattern.test(eventName))) out.add(group);
+  }
+  return [...out];
+}
+
+function addEventGroups(map, eventName, durationMs) {
+  for (const group of eventGroups(eventName)) {
+    addDuration(map, group, durationMs);
+  }
+}
+
 function addAggregate(map, name, count, durationMs) {
   const entry = map.get(name) ?? { count: 0, duration_ms: 0 };
   entry.count += count;
@@ -347,11 +476,6 @@ function summarizeFrameDetails(events, samples, frameWorkSamples, startPerfNow, 
   const alignedStartPerfNow = startMark.args.data.startTime || startPerfNow;
   const alignedEndPerfNow = endMark.args.data.startTime || endPerfNow;
   const frames = makeFrameWindows(samples, alignedStartPerfNow, alignedEndPerfNow);
-  const groupByEvent = new Map();
-  for (const [group, names] of Object.entries(EVENT_GROUPS)) {
-    for (const name of names) groupByEvent.set(name, group);
-  }
-
   const frameTotals = frames.map((frame) => ({
     ...frame,
     groups: new Map(),
@@ -376,8 +500,7 @@ function summarizeFrameDetails(events, samples, frameWorkSamples, startPerfNow, 
     const frame = frameTotals[index];
     frame.completeEventMs += durationMs;
     addDuration(frame.events, event.name, durationMs);
-    const group = groupByEvent.get(event.name);
-    if (group) addDuration(frame.groups, group, durationMs);
+    addEventGroups(frame.groups, event.name, durationMs);
   }
 
   const serializeMap = (map, keys) => {
@@ -385,7 +508,7 @@ function summarizeFrameDetails(events, samples, frameWorkSamples, startPerfNow, 
     for (const key of keys) out[key] = +((map.get(key)?.duration_ms ?? 0)).toFixed(4);
     return out;
   };
-  const serializeGroups = (map) => serializeMap(map, Object.keys(EVENT_GROUPS));
+  const serializeGroups = (map) => serializeMap(map, allGroupNames());
   const serializeKeyEvents = (map) => serializeMap(map, KEY_EVENTS);
   const topEvents = (map) => [...map.entries()]
     .map(([event, total]) => ({
@@ -465,21 +588,23 @@ function summarizeTraceEvents(events) {
     byName.set(event.name, prev);
   }
 
-  const group = (names) => {
-    let count = 0;
-    let durationUs = 0;
-    for (const name of names) {
-      const entry = byName.get(name);
-      if (!entry) continue;
-      count += entry.count;
-      durationUs += entry.durationUs;
+  const groupTotals = new Map();
+  for (const [eventName, entry] of byName.entries()) {
+    for (const groupName of eventGroups(eventName)) {
+      const total = groupTotals.get(groupName) ?? { count: 0, durationUs: 0 };
+      total.count += entry.count;
+      total.durationUs += entry.durationUs;
+      groupTotals.set(groupName, total);
     }
-    return { count, duration_ms: +(durationUs / 1000).toFixed(3) };
-  };
+  }
 
-  const groups = Object.fromEntries(
-    Object.entries(EVENT_GROUPS).map(([name, names]) => [name, group(names)]),
-  );
+  const groups = Object.fromEntries(allGroupNames().map((name) => {
+    const total = groupTotals.get(name);
+    return [name, {
+      count: total?.count ?? 0,
+      duration_ms: +((total?.durationUs ?? 0) / 1000).toFixed(3),
+    }];
+  }));
 
   const topEvents = [...byName.entries()]
     .sort((a, b) => b[1].durationUs - a[1].durationUs)
@@ -626,7 +751,7 @@ async function run() {
   const paths = outputPaths();
   const { server, port } = await startServer();
   console.log(`[drag-trace] server :${port}`);
-  console.log(`[drag-trace] mesh=${MESH} mode=${MODE} variant=${VARIANT} degrees=${DEGREES} warmup=${WARMUP_MS}ms drag=${DRAG_MS}ms settle=${SETTLE_MS}ms`);
+  console.log(`[drag-trace] mesh=${MESH} mode=${MODE} variant=${VARIANT} degrees=${DEGREES} warmup=${WARMUP_MS}ms drag=${DRAG_MS}ms settle=${SETTLE_MS}ms gpuDetails=${GPU_DETAILS_MODE}`);
   if (BROWSER_EXECUTABLE) console.log(`[drag-trace] browser=${BROWSER_EXECUTABLE}`);
   if (SOFTWARE_BACKEND) console.log("[drag-trace] software backend=on");
   if (CHROMIUM_ARGS.length > 0) console.log(`[drag-trace] chromium args=${CHROMIUM_ARGS.join(" ")}`);
@@ -716,6 +841,7 @@ async function run() {
       browserExecutable: BROWSER_EXECUTABLE || null,
       chromiumArgs: CHROMIUM_ARGS,
       softwareBackend: SOFTWARE_BACKEND,
+      gpuDetails: GPU_DETAILS_MODE,
       drag: {
         ...dragPlan,
         gestures: dragPlan.gestures.map((gesture) => ({
@@ -758,6 +884,7 @@ async function run() {
           requestedDegrees: DEGREES,
           dragMs: DRAG_MS,
           steps: STEPS,
+          gpuDetails: GPU_DETAILS_MODE,
         },
       };
       mkdirSync(dirname(paths.trace), { recursive: true });

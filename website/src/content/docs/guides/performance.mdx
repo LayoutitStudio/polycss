@@ -53,7 +53,7 @@ Use `collectPolyRenderStats(root)` to inspect the mounted leaf mix. For diagnost
 
 ## Voxel fast paths
 
-Voxel-shaped meshes are special. Generic voxel-shaped polygon meshes can mount only camera-facing normals and patch the mounted set as the camera or mesh rotation crosses a face boundary. Raw `.vox` sources also preserve `voxelSource`; eligible vanilla baked-mode meshes render visible voxel quads directly as `<b>` leaves inside face wrappers. Dynamic lighting, shadows, animation, non-exact voxel geometry, or geometry replaced via `setPolygons()` fall back to the polygon renderer.
+Voxel-shaped meshes are special. Generic voxel-shaped polygon meshes can mount only camera-facing normals and patch the mounted set as the camera or mesh rotation crosses a face boundary. Raw `.vox` sources also preserve `voxelSource`; eligible baked-mode meshes in vanilla, React, and Vue render visible voxel quads directly as `<b>` leaves inside face wrappers. Dynamic lighting, shadows, animation, non-exact voxel geometry, or geometry replaced via `setPolygons()` fall back to the polygon renderer.
 
 ## `targetSize` and polygon count
 

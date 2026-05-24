@@ -88,7 +88,6 @@ export { PolySelectElement } from "./elements/PolySelectElement";
 export type {
   PolyRenderStrategy,
   PolyRenderStrategiesOption,
-  PolySeamBleed,
   TextureQuality,
   TextureAtlasPlan,
   PackedTextureAtlasEntry,

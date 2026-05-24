@@ -20,6 +20,7 @@ import {
   useContext,
   useEffect,
   useImperativeHandle,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -64,6 +65,7 @@ import {
 } from "./atlas";
 import { usePolySceneContext } from "./sceneContext";
 import { PolyCameraContext } from "../camera/context";
+import { createPolyVoxelRenderer, type PolyVoxelRenderer } from "./voxelRenderer";
 import {
   findPolyMeshHandle,
   registerMeshElement,
@@ -235,6 +237,7 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
   const fetched = usePolyMesh(src ?? "", mergedOptions);
 
   const externalPolygons = src ? fetched.polygons : (polygonsProp ?? []);
+  const externalVoxelSource = src ? fetched.voxelSource : undefined;
 
   // Local override array written by updatePolygon(). Null means no
   // imperative edits have been applied — the external source is used as-is.
@@ -256,6 +259,7 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
     ? children as (polygon: Polygon, index: number) => ReactNode
     : null;
   const staticChildren: ReactNode = hasRenderProp ? null : children as ReactNode;
+  const hasStaticChildren = staticChildren !== null && staticChildren !== undefined && staticChildren !== false;
 
   // Re-center vertices into mesh-local space if autoCenter is set. Done
   // once per polygon-list identity — bake into vertices, not per frame.
@@ -522,6 +526,15 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
   const effectiveAmbient =
     effectiveTextureLighting === "dynamic" ? undefined : sceneCtx?.ambientLight;
 
+  const directVoxelEnabled = Boolean(
+    externalVoxelSource &&
+    localPolygons === null &&
+    !renderPolygon &&
+    !hasStaticChildren &&
+    effectiveTextureLighting === "baked" &&
+    !castShadow,
+  );
+
   // Dynamic-mode rotation fix: when the mesh has a non-zero rotation the
   // world-space light vars cascaded from <PolyScene> are wrong for the
   // per-polygon Lambert calc (which uses mesh-local normals). Override
@@ -560,7 +573,7 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
 
   const atlasPlans = useMemo(
     () => {
-      if (renderPolygon) return [];
+      if (renderPolygon || directVoxelEnabled) return [];
       const repairEdges = buildTextureEdgeRepairSets(polygons);
       const seamBleedEdges = effectiveSeamBleed === "auto" || (
         typeof effectiveSeamBleed === "number" &&
@@ -580,7 +593,7 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
         textureEdgeRepairEdges: repairEdges[i],
       }));
     },
-    [renderPolygon, polygons, bakedDirectional, effectiveAmbient, effectiveSeamBleed],
+    [renderPolygon, directVoxelEnabled, polygons, bakedDirectional, effectiveAmbient, effectiveSeamBleed],
   );
   const textureAtlas = useTextureAtlas(
     atlasPlans,
@@ -761,15 +774,60 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
         strategies: effectiveStrategies,
         seamBleed: effectiveSeamBleed,
         colorFrame: ++stableTriangleColorFrameRef.current,
-        colorSteps: 8,
-        colorFreezeFrames: 12,
-        colorMaxStep: 8,
+        // Animated low-poly triangles can swing face normals sharply; keep the
+        // mounted baked color pinned and animate transforms only.
+        colorFreezeFrames: 0,
       })
     ) {
       return;
     }
     setLocalPolygons([...nextPolygons]);
   };
+
+  const voxelRendererRef = useRef<PolyVoxelRenderer | null>(null);
+  useLayoutEffect(() => {
+    const root = wrapperRef.current;
+    voxelRendererRef.current?.dispose();
+    voxelRendererRef.current = null;
+    if (!directVoxelEnabled || !root) return;
+
+    const renderer = createPolyVoxelRenderer({
+      doc: root.ownerDocument,
+      wrapper: root,
+      polygons,
+      directionalLight: bakedDirectional,
+      ambientLight: effectiveAmbient,
+    });
+    if (!renderer) return;
+
+    const cameraRotation = () => {
+      const cameraState = cameraCtx?.store.getState().cameraState;
+      return {
+        rotX: cameraState?.rotX ?? 65,
+        rotY: cameraState?.rotY ?? 45,
+        meshRotation: rotation,
+      };
+    };
+
+    voxelRendererRef.current = renderer;
+    renderer.render(cameraRotation());
+    const unsubscribe = cameraCtx?.store.subscribe(() => {
+      renderer.syncCamera(cameraRotation());
+    });
+
+    return () => {
+      unsubscribe?.();
+      renderer.dispose();
+      if (voxelRendererRef.current === renderer) voxelRendererRef.current = null;
+    };
+  }, [
+    directVoxelEnabled,
+    polygons,
+    bakedDirectional,
+    effectiveAmbient,
+    cameraCtx?.store,
+    rotation,
+  ]);
 
   const wrapperStyle: CSSProperties = {
     transform,
@@ -864,7 +922,7 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
     <div
       ref={wrapperRef}
       data-poly-mesh-id={id}
-      className={`polycss-mesh${className ? ` ${className}` : ""}`}
+      className={`polycss-mesh${directVoxelEnabled ? " polycss-voxel-mesh" : ""}${className ? ` ${className}` : ""}`}
       style={wrapperStyle}
       {...wrapperHandlers}
     >
@@ -889,4 +947,3 @@ function RenderPropPolygon({
 }) {
   return <>{children(polygon, index)}</>;
 }
-

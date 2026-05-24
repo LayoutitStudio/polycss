@@ -40,6 +40,8 @@ Aliases:
 
 Examples:
   node .agents/skills/chrome-capture-trace/scripts/trace.mjs motion --page nonvoxel --mesh glb:Elephant.glb --dom-samples --label elephant
+  node .agents/skills/chrome-capture-trace/scripts/trace.mjs motion --page nonvoxel --mesh teapot --dom-samples --frame-details --layer-details --gpu-details --trace-out bench/results/teapot.trace.json --label teapot-enriched --report
+  node .agents/skills/chrome-capture-trace/scripts/trace.mjs motion --page nonvoxel --mesh teapot --gpu-details full --trace-out bench/results/teapot-full-gpu.trace.json --label teapot-full-gpu
   node .agents/skills/chrome-capture-trace/scripts/trace.mjs drag --mesh teapot --degrees 360 --frame-details --label teapot-drag
   node .agents/skills/chrome-capture-trace/scripts/trace.mjs generic --url http://127.0.0.1:3000 --action drag --selector "#viewport"
   node .agents/skills/chrome-capture-trace/scripts/trace.mjs motion --report --markdown-out bench/results/garden.md
@@ -183,6 +185,11 @@ function groupHint(group) {
     compositorMain: "main-thread compositing setup",
     compositorImpl: "compositor impl-thread work",
     gpuViz: "GPU/viz drawing pipeline",
+    gpuVizRenderPass: "GPU/viz render pass drawing",
+    gpuVizQuads: "GPU/viz quad emission or drawing",
+    gpuVizTiles: "tile/raster scheduling and playback",
+    gpuVizSkia: "Skia/GPU drawing backend work",
+    gpuVizGpuService: "GPU service or swap-buffer work",
   };
   return hints[group] ?? "trace event work";
 }
@@ -205,15 +212,48 @@ function quickRead(summary) {
 function topEvents(summary, limit = 12) {
   const run = firstRun(summary);
   const raw = summary.trace?.topEvents ?? run.trace?.topEvents ?? run.eventTotals ?? [];
+  const frames = frameMetrics(summary).frame_count ?? 0;
   return raw
     .map((event) => ({
       name: event.name ?? event.event ?? "",
       count: numberOrNull(event.count),
       duration_ms: numberOrNull(event.duration_ms),
-      ms_per_frame: numberOrNull(event.ms_per_frame),
+      ms_per_frame: numberOrNull(event.ms_per_frame) ??
+        (Number.isFinite(event.duration_ms) && frames > 0 ? Number(event.duration_ms) / frames : null),
     }))
     .filter((event) => event.name)
     .slice(0, limit);
+}
+
+function frameDetails(summary) {
+  const run = firstRun(summary);
+  if (summary.frameDetails) return summary.frameDetails;
+  if (run.frameDetails) return run.frameDetails;
+  if (summary.trace?.slowestFrames) {
+    return {
+      frameCount: summary.frames?.count ?? null,
+      slowestFrames: summary.trace.slowestFrames,
+      topEvents: summary.trace.topEvents,
+    };
+  }
+  return null;
+}
+
+function layerDetails(summary) {
+  const run = firstRun(summary);
+  return summary.layerDetails ?? run.layerDetails ?? null;
+}
+
+function frameGroups(frame) {
+  return frame.groups_ms ?? frame.groups ?? {};
+}
+
+function frameTopEvent(frame) {
+  const event = frame.topEvents?.[0];
+  if (!event) return "";
+  const name = event.name ?? event.event ?? "";
+  const duration = fmt(numberOrNull(event.duration_ms), 3);
+  return duration ? `${name} (${duration}ms)` : name;
 }
 
 function summaryMetadata(summary) {
@@ -227,6 +267,9 @@ function summaryMetadata(summary) {
     variant: summary.variant ?? run.variant ?? "",
     mode: summary.mode ?? run.mode ?? "",
     motion: summary.motion ?? run.motion ?? "",
+    gpuDetails: summary.gpuDetails ?? run.gpuDetails ?? "",
+    traceAligned: summary.traceAligned ?? run.traceAligned ?? "",
+    traceAlignmentSource: run.traceAlignmentSource ?? summary.traceAlignmentSource ?? "",
     action,
     url: summary.url ?? run.url ?? "",
   };
@@ -253,8 +296,14 @@ function summaryMarkdown(summary, file = "") {
   const frames = frameMetrics(summary);
   const groups = groupMsPerFrame(summary);
   const events = topEvents(summary);
+  const details = frameDetails(summary);
+  const layers = layerDetails(summary);
   const contextRows = Object.entries(meta).filter(([, value]) => value);
   const groupRows = Object.entries(groups).sort((a, b) => b[1] - a[1]);
+  const slowestFrames = details?.slowestFrames?.slice?.(0, 12) ?? [];
+  const topPageOps = details?.topPageOps?.slice?.(0, 12) ?? [];
+  const topLayers = layers?.topLayers?.slice?.(0, 12) ?? [];
+  const layerAggregates = layers?.layerAggregates?.slice?.(0, 16) ?? [];
 
   const lines = [
     "# Chrome Trace Report",
@@ -284,6 +333,8 @@ function summaryMarkdown(summary, file = "") {
     "",
     "## Trace Groups",
     "",
+    "Chrome trace durations are inclusive and can contain nested events, so group totals can exceed wall-clock frame time. Use them for attribution and deltas, not as exclusive time slices.",
+    "",
     "| Group | ms/frame |",
     "| --- | ---: |",
     ...groupRows.map(([group, value]) => `| ${group} | ${fmt(value, 4)} |`),
@@ -296,6 +347,107 @@ function summaryMarkdown(summary, file = "") {
       `| ${event.name.replaceAll("|", "\\|")} | ${fmt(event.count, 0)} | ${fmt(event.duration_ms)} | ${fmt(event.ms_per_frame, 4)} |`
     ),
     "",
+    ...(details ? [
+      "## Frame Details",
+      "",
+      `Frame details captured: ${fmt(details.frameCount, 0) || "unknown"} frames.`,
+      "",
+      ...(topPageOps.length ? [
+        "### Page Work",
+        "",
+        "| Operation | Count | Duration ms | ms/frame |",
+        "| --- | ---: | ---: | ---: |",
+        ...topPageOps.map((op) => {
+          const name = op.operation ?? op.name ?? "";
+          const duration = numberOrNull(op.duration_ms);
+          const count = numberOrNull(op.count);
+          const perFrame = Number.isFinite(duration) && Number.isFinite(details.frameCount) && details.frameCount > 0
+            ? duration / details.frameCount
+            : null;
+          return `| ${String(name).replaceAll("|", "\\|")} | ${fmt(count, 0)} | ${fmt(duration)} | ${fmt(perFrame, 4)} |`;
+        }),
+        "",
+      ] : []),
+      ...(slowestFrames.length ? [
+        "### Slowest Frames",
+        "",
+        "| Frame | Bucket | dt ms | script | compositorMain | compositorImpl | gpuViz | top event |",
+        "| ---: | --- | ---: | ---: | ---: | ---: | ---: | --- |",
+        ...slowestFrames.map((frame) => {
+          const fg = frameGroups(frame);
+          return [
+            `| ${fmt(numberOrNull(frame.index), 0)}`,
+            frame.bucket ?? "",
+            fmt(numberOrNull(frame.dt_ms)),
+            fmt(numberOrNull(fg.script), 4),
+            fmt(numberOrNull(fg.compositorMain), 4),
+            fmt(numberOrNull(fg.compositorImpl), 4),
+            fmt(numberOrNull(fg.gpuViz), 4),
+            `${frameTopEvent(frame).replaceAll("|", "\\|")} |`,
+          ].join(" | ");
+        }),
+        "",
+      ] : []),
+    ] : []),
+    ...(layers ? [
+      "## Layer Details",
+      "",
+      "| Metric | Value |",
+      "| --- | ---: |",
+      `| layerCount | ${fmt(numberOrNull(layers.layerCount), 0)} |`,
+      `| aggregatedLayerCount | ${fmt(numberOrNull(layers.aggregatedLayerCount), 0)} |`,
+      `| inspectedLayerCount | ${fmt(numberOrNull(layers.inspectedLayerCount), 0)} |`,
+      `| drawsContentCount | ${fmt(numberOrNull(layers.drawsContentCount), 0)} |`,
+      `| invisibleCount | ${fmt(numberOrNull(layers.invisibleCount), 0)} |`,
+      `| maxArea | ${fmt(numberOrNull(layers.maxArea), 0)} |`,
+      "",
+      ...(layerAggregates.length ? [
+        "### Layer Aggregates",
+        "",
+        "| Group | Layers | Draws | Total area | Max area | Paints | Top reasons |",
+        "| --- | ---: | ---: | ---: | ---: | ---: | --- |",
+        ...layerAggregates.map((entry) => {
+          const reasons = (entry.reasonCounts ?? [])
+            .slice(0, 3)
+            .map((reason) => `${reason.reason} (${reason.count})`)
+            .join("; ");
+          return [
+            `| ${String(entry.group).replaceAll("|", "\\|")}`,
+            fmt(numberOrNull(entry.layerCount), 0),
+            fmt(numberOrNull(entry.drawsContentCount), 0),
+            fmt(numberOrNull(entry.totalArea), 0),
+            fmt(numberOrNull(entry.maxArea), 0),
+            fmt(numberOrNull(entry.paintCountTotal), 0),
+            `${reasons.replaceAll("|", "\\|")} |`,
+          ].join(" | ");
+        }),
+        "",
+      ] : []),
+      ...(layers.reasonCounts?.length ? [
+        "### Compositing Reasons",
+        "",
+        "| Reason | Count |",
+        "| --- | ---: |",
+        ...layers.reasonCounts.slice(0, 12).map((entry) =>
+          `| ${String(entry.reason).replaceAll("|", "\\|")} | ${fmt(numberOrNull(entry.count), 0)} |`
+        ),
+        "",
+      ] : []),
+      ...(topLayers.length ? [
+        "### Largest Layers",
+        "",
+        "| Layer | Node | Size | Draws | Paints | Reasons |",
+        "| --- | --- | ---: | --- | ---: | --- |",
+        ...topLayers.map((layer) => {
+          const node = layer.node
+            ? `${layer.node.nodeName}${layer.node.id ? `#${layer.node.id}` : ""}${layer.node.className ? `.${String(layer.node.className).split(/\s+/).filter(Boolean).join(".")}` : ""}`
+            : "";
+          const reasons = (layer.compositingReasons ?? []).slice(0, 3).join("; ");
+          return `| ${layer.layerId} | ${node.replaceAll("|", "\\|")} | ${fmt(numberOrNull(layer.width), 0)}x${fmt(numberOrNull(layer.height), 0)} | ${layer.drawsContent ? "yes" : "no"} | ${fmt(numberOrNull(layer.paintCount), 0)} | ${reasons.replaceAll("|", "\\|")} |`;
+        }),
+        "",
+      ] : []),
+    ] : []),
   ];
 
   return `${lines.join("\n")}\n`;

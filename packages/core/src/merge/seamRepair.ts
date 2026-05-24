@@ -1,166 +1,24 @@
 import type { Polygon, Vec3 } from "../types";
+import type { SeamFacetSplitCandidateReason as SplitReason, SeamFacetSplitOptions as SplitOptions, SeamFacetSplitReport as SplitReport, SeamOverlapCandidate as OverlapCandidate, SeamOverlapCandidateKind as OverlapKind, SeamOverlapDiagnostics as OverlapDiagnostics, SeamOverlapOptions as OverlapOptions } from "./seamRepairTypes";
+export type * from "./seamRepairTypes";
 
-type Vec2 = [number, number];
+type Vec2=[number,number];
 
-interface LocalBasis {
-  origin: Vec3;
-  normal: Vec3;
-  xAxis: Vec3;
-  yAxis: Vec3;
-  local: Vec2[];
-  area: number;
-}
+type Basis={origin:Vec3;normal:Vec3;xAxis:Vec3;yAxis:Vec3;local:Vec2[];area:number};
 
-interface PolygonMeta {
-  basis: LocalBasis | null;
-  cssPoints: Vec3[];
-  capacities: number[];
-  patchable: boolean;
-}
+type Meta={basis:Basis|null;cssPoints:Vec3[];capacities:number[];patchable:boolean};
 
-interface EdgeRecord {
-  index: number;
-  polygon: number;
-  edge: number;
-  key: string;
-  a: Vec3;
-  b: Vec3;
-  minX: number;
-  minY: number;
-  minZ: number;
-  maxX: number;
-  maxY: number;
-  maxZ: number;
-  length: number;
-  dir: Vec3;
-  normal: Vec3;
-  outward: Vec3;
-  capacity: number;
-  materialKey: string;
-  color?: string;
-}
+type Edge={index:number;polygon:number;edge:number;key:string;a:Vec3;b:Vec3;minX:number;minY:number;minZ:number;maxX:number;maxY:number;maxZ:number;length:number;dir:Vec3;normal:Vec3;outward:Vec3;capacity:number;materialKey:string;color?:string};
 
-interface NearSeamInfo {
-  gap: number;
-  facingA: number;
-  facingB: number;
-  aStart: number;
-  aEnd: number;
-  bStart: number;
-  bEnd: number;
-}
+type Near={gap:number;facingA:number;facingB:number;aStart:number;aEnd:number;bStart:number;bEnd:number};
 
-export type SeamOverlapCandidateKind = "true-gap" | "connected-facet" | "material-boundary";
+type Repair={start:number;end:number;amount:number};
 
-export interface SeamOverlapCandidate {
-  kind: SeamOverlapCandidateKind;
-  aPolygon: number;
-  aEdge: number;
-  bPolygon: number;
-  bEdge: number;
-  aColor?: string;
-  bColor?: string;
-  aMaterialKey: string;
-  bMaterialKey: string;
-  gapPx: number;
-  spanPx: number;
-  aStartPx: number;
-  aEndPx: number;
-  bStartPx: number;
-  bEndPx: number;
-  targetClosurePx: number;
-  appliedClosurePx: number;
-  residualGapPx: number;
-  residualTargetPx: number;
-}
+type Split={rotX:number;rotY:number;viewAware:boolean;passes:number;budget:number};
 
-export interface SeamOverlapDiagnostics {
-  exactPairs: number;
-  nearPairs: number;
-  patchedPolygons: number;
-  patchedEdges: number;
-  maxMeasuredGapPx: number;
-  maxAppliedAmountPx: number;
-  unclosedPairs: number;
-  maxResidualGapPx: number;
-}
-
-interface SeamBuildResult {
-  edgeRepairs: Array<Map<number, EdgeRepairSegment[]>>;
-  diagnostics: SeamOverlapDiagnostics;
-  candidates?: SeamOverlapCandidate[];
-}
-
-interface EdgeRepairSegment {
-  start: number;
-  end: number;
-  amount: number;
-}
-
-export interface SeamOverlapOptions {
-  overlapPx?: number;
-  maxGapPx?: number;
-  capacityScale?: number;
-}
-
-export interface SeamFacetSplitOptions {
-  rotX?: number;
-  rotY?: number;
-  viewAware?: boolean;
-  passes?: number;
-  budget?: number;
-}
-
-export type SeamFacetSplitCandidateReason =
-  | "component-anchor"
-  | "global-outlier"
-  | "local-follow-up"
-  | "shared-polygon"
-  | "below-threshold";
-
-export interface SeamFacetSplitCandidate {
-  key: string;
-  aPolygon: number;
-  aEdge: number;
-  bPolygon: number;
-  bEdge: number;
-  color?: string;
-  materialKey: string;
-  lengthPx: number;
-  projectedLengthPx: number;
-  score: number;
-  normalRisk: number;
-  shapeRisk: number;
-  viewRisk: number;
-  component: number;
-  marginalCost: number;
-  selected: boolean;
-  reason: SeamFacetSplitCandidateReason;
-}
-
-export interface SeamFacetSplitReport {
-  candidates: SeamFacetSplitCandidate[];
-  selectedPolygons: number;
-  selectedEdges: number;
-  addedPolygons: number;
-}
-
-interface ResolvedSeamFacetSplitOptions {
-  rotX: number;
-  rotY: number;
-  viewAware: boolean;
-  passes: number;
-  budget: number;
-}
-
-interface ResolvedSeamOverlapOptions {
-  overlapPx: number;
-  maxGapPx: number;
-  capacityScale: number;
-}
+type Overlap={overlapPx:number;maxGapPx:number;capacityScale:number};
 
 const DEFAULT_TILE = 50;
-const DEFAULT_SEAM_OVERLAP_PX = 2;
 const MAX_NEAR_SEAM_GAP_PX = 14;
 const MIN_RESIDUAL_PATCH_GAP_PX = 0.25;
 const SEAM_SPLIT_INTERNAL_OVERLAP_PX = 1.25;
@@ -182,19 +40,19 @@ export const DEFAULT_SEAM_OVERLAP_OPTIONS = {
   overlapPx: DEFAULT_TRUE_GAP_OVERLAP_PX,
   maxGapPx: MAX_NEAR_SEAM_GAP_PX,
   capacityScale: 1,
-} as const satisfies SeamOverlapOptions;
+} as const satisfies OverlapOptions;
 
 export const DEFAULT_SEAM_FACET_SPLIT_OPTIONS = {
   budget: DEFAULT_SEAM_SPLIT_BUDGET,
-} as const satisfies SeamFacetSplitOptions;
+} as const satisfies SplitOptions;
 
-function finiteOr(value: number | undefined, fallback: number): number {
+function finiteOr(value: number | undefined, fallback: number) {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
 }
 
 function resolveSeamOverlapOptions(
-  options?: number | SeamOverlapOptions,
-): ResolvedSeamOverlapOptions {
+  options?: number | OverlapOptions,
+) {
   if (typeof options === "number") {
     return {
       overlapPx: Math.max(0, options) * TRUE_GAP_OVERLAP_AMOUNT_RATIO,
@@ -211,14 +69,13 @@ function resolveSeamOverlapOptions(
 }
 
 function seamOverlapEnabled(
-  options: ResolvedSeamOverlapOptions,
-  rawOptions?: number | SeamOverlapOptions,
-): boolean {
-  if (typeof rawOptions === "number" && rawOptions <= 0) return false;
-  return options.maxGapPx > EPS && options.capacityScale > EPS;
+  options: Overlap,
+  rawOptions?: number | OverlapOptions,
+) {
+  return !(typeof rawOptions === "number" && rawOptions <= 0) && options.maxGapPx > EPS && options.capacityScale > EPS;
 }
 
-function resolveSeamFacetSplitOptions(options?: SeamFacetSplitOptions): ResolvedSeamFacetSplitOptions {
+function resolveSeamFacetSplitOptions(options?: SplitOptions) {
   return {
     rotX: finiteOr(options?.rotX, 65),
     rotY: finiteOr(options?.rotY, 45),
@@ -236,29 +93,21 @@ function fromCssPoint(point: Vec3): Vec3 {
   return [point[1] / DEFAULT_TILE, point[0] / DEFAULT_TILE, point[2] / DEFAULT_TILE];
 }
 
-function pointKey(point: Vec3): string {
+function pointKey(point: Vec3) {
   return `${point[0]},${point[1]},${point[2]}`;
 }
 
-function edgeKey(a: Vec3, b: Vec3): string {
+function edgeKey(a: Vec3, b: Vec3) {
   const ak = pointKey(a);
   const bk = pointKey(b);
   return ak < bk ? `${ak}|${bk}` : `${bk}|${ak}`;
-}
-
-function add(a: Vec3, b: Vec3): Vec3 {
-  return [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
 }
 
 function sub(a: Vec3, b: Vec3): Vec3 {
   return [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
 }
 
-function scale(a: Vec3, value: number): Vec3 {
-  return [a[0] * value, a[1] * value, a[2] * value];
-}
-
-function length(a: Vec3): number {
+function length(a: Vec3) {
   return Math.hypot(a[0], a[1], a[2]);
 }
 
@@ -267,7 +116,7 @@ function normalize(a: Vec3): Vec3 | null {
   return len > EPS ? [a[0] / len, a[1] / len, a[2] / len] : null;
 }
 
-function dot(a: Vec3, b: Vec3): number {
+function dot(a: Vec3, b: Vec3) {
   return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 }
 
@@ -314,7 +163,7 @@ function surfaceNormal(points: Vec3[]): Vec3 | null {
   return normalize(normal);
 }
 
-function localBasis(points: Vec3[]): LocalBasis | null {
+function localBasis(points: Vec3[]): Basis | null {
   const origin = points[0];
   const normal = surfaceNormal(points);
   if (!normal) return null;
@@ -348,7 +197,7 @@ function localBasis(points: Vec3[]): LocalBasis | null {
   return Math.abs(area) > EPS ? { origin, normal, xAxis, yAxis, local, area } : null;
 }
 
-function signedArea(points: Vec2[]): number {
+function signedArea(points: Vec2[]) {
   let area = 0;
   for (let i = 0; i < points.length; i += 1) {
     const a = points[i];
@@ -358,7 +207,7 @@ function signedArea(points: Vec2[]): number {
   return area / 2;
 }
 
-function isWeaklyConvex(points: Vec2[]): boolean {
+function isWeaklyConvex(points: Vec2[]) {
   if (points.length < 3) return false;
   let sign = 0;
   for (let i = 0; i < points.length; i += 1) {
@@ -388,7 +237,7 @@ function edgeOutward2D(points: Vec2[], area: number, edgeIndex: number): Vec2 | 
   ];
 }
 
-function edgeOutward3D(basis: LocalBasis, edgeIndex: number): Vec3 | null {
+function edgeOutward3D(basis: Basis, edgeIndex: number): Vec3 | null {
   const outward = edgeOutward2D(basis.local, basis.area, edgeIndex);
   if (!outward) return null;
   return normalize([
@@ -398,7 +247,7 @@ function edgeOutward3D(basis: LocalBasis, edgeIndex: number): Vec3 | null {
   ]);
 }
 
-function edgeSafeCapacity(points: Vec2[], edgeIndex: number): number {
+function edgeSafeCapacity(points: Vec2[], edgeIndex: number) {
   const count = points.length;
   const a = points[edgeIndex];
   const b = points[(edgeIndex + 1) % count];
@@ -430,11 +279,11 @@ function edgeSafeCapacity(points: Vec2[], edgeIndex: number): number {
     if (sin > EPS) limits.push(adjacentLength * sin * 0.32);
   }
 
-  return Math.max(0, Math.min(...limits.filter((value) => Number.isFinite(value) && value > 0)));
+  return Math.min(...limits);
 }
 
-function buildPolygonMetas(polygons: Polygon[]): PolygonMeta[] {
-  return polygons.map((polygon): PolygonMeta => {
+function buildPolygonMetas(polygons: Polygon[]) {
+  return polygons.map((polygon): Meta => {
     const css = cssPoints(polygon.vertices);
     const basis = localBasis(css);
     const patchable = !hasTexture(polygon) && !!basis && isWeaklyConvex(basis.local);
@@ -450,47 +299,20 @@ function buildPolygonMetas(polygons: Polygon[]): PolygonMeta[] {
   });
 }
 
-function hasTexture(polygon: Polygon): boolean {
+function hasTexture(polygon: Polygon) {
   return !!(polygon.texture || polygon.material?.texture || polygon.textureTriangles?.length);
 }
 
-function materialKey(polygon: Polygon): string {
+function materialKey(polygon: Polygon) {
   return polygon.material?.key ?? polygon.color ?? "";
-}
-
-function polygonSurfaceArea(polygon: Polygon): number {
-  if (polygon.vertices.length < 3) return 0;
-  const origin = polygon.vertices[0];
-  let area = 0;
-  for (let i = 1; i + 1 < polygon.vertices.length; i += 1) {
-    area += length(cross(sub(polygon.vertices[i], origin), sub(polygon.vertices[i + 1], origin))) * 0.5;
-  }
-  return area;
-}
-
-function dominantSolidColor(polygons: Polygon[]): string | undefined {
-  const weights = new Map<string, number>();
-  for (const polygon of polygons) {
-    if (hasTexture(polygon) || !polygon.color) continue;
-    weights.set(polygon.color, (weights.get(polygon.color) ?? 0) + Math.max(polygonSurfaceArea(polygon), EPS));
-  }
-  let bestColor: string | undefined;
-  let bestWeight = 0;
-  for (const [color, weight] of weights) {
-    if (weight > bestWeight) {
-      bestColor = color;
-      bestWeight = weight;
-    }
-  }
-  return bestColor;
 }
 
 function buildEdgeRecords(
   polygons: Polygon[],
-  metas: PolygonMeta[],
+  metas: Meta[],
   capacityScale: number,
-): EdgeRecord[] {
-  const records: EdgeRecord[] = [];
+) {
+  const records: Edge[] = [];
   for (let polygonIndex = 0; polygonIndex < metas.length; polygonIndex += 1) {
     const meta = metas[polygonIndex];
     if (!meta.patchable || !meta.basis) continue;
@@ -501,9 +323,8 @@ function buildEdgeRecords(
       const edgeLength = length(edge);
       const dir = normalize(edge);
       const outward = edgeOutward3D(meta.basis, edgeIndex);
-      const normal = meta.basis.normal;
       const capacity = (meta.capacities[edgeIndex] ?? 0) * capacityScale;
-      if (!dir || !outward || !normal || capacity <= EPS || edgeLength <= EPS) continue;
+      if (!dir || !outward || capacity <= EPS || edgeLength <= EPS) continue;
       records.push({
         index: records.length,
         polygon: polygonIndex,
@@ -519,7 +340,7 @@ function buildEdgeRecords(
         maxZ: Math.max(a[2], b[2]),
         length: edgeLength,
         dir,
-        normal,
+        normal: meta.basis.normal,
         outward,
         capacity,
         materialKey: materialKey(polygons[polygonIndex]),
@@ -530,34 +351,35 @@ function buildEdgeRecords(
   return records;
 }
 
-function compatibleRepairMaterials(a: EdgeRecord, b: EdgeRecord): boolean {
+function compatibleRepairMaterials(a: Edge, b: Edge) {
   return a.materialKey === b.materialKey && a.color === b.color;
 }
 
-function sameTopologyPoint(a: Vec3, b: Vec3): boolean {
+function sameTopologyPoint(a: Vec3, b: Vec3) {
   return length(sub(a, b)) <= TOPOLOGY_EPS;
 }
 
-function edgeRecordsTouch(a: EdgeRecord, b: EdgeRecord): boolean {
+function edgeRecordsTouch(a: Edge, b: Edge) {
   return sameTopologyPoint(a.a, b.a) ||
     sameTopologyPoint(a.a, b.b) ||
     sameTopologyPoint(a.b, b.a) ||
     sameTopologyPoint(a.b, b.b);
 }
 
-function classifyCandidate(a: EdgeRecord, b: EdgeRecord): SeamOverlapCandidateKind {
-  if (!compatibleRepairMaterials(a, b)) return "material-boundary";
-  return edgeRecordsTouch(a, b) ? "connected-facet" : "true-gap";
+function classifyCandidate(a: Edge, b: Edge) {
+  return compatibleRepairMaterials(a, b)
+    ? edgeRecordsTouch(a, b) ? "connected-facet" : "true-gap"
+    : "material-boundary";
 }
 
 function seamOverlapCandidate(
-  kind: SeamOverlapCandidateKind,
-  a: EdgeRecord,
-  b: EdgeRecord,
-  info: NearSeamInfo,
+  kind: OverlapKind,
+  a: Edge,
+  b: Edge,
+  info: Near,
   targetClosurePx: number,
   appliedClosurePx: number,
-): SeamOverlapCandidate {
+) {
   return {
     kind,
     aPolygon: a.polygon,
@@ -582,12 +404,12 @@ function seamOverlapCandidate(
 }
 
 function addEdgeRepair(
-  repairs: Array<Map<number, EdgeRepairSegment[]>>,
-  record: EdgeRecord,
+  repairs: Array<Map<number, Repair[]>>,
+  record: Edge,
   start: number,
   end: number,
   amount: number,
-): void {
+) {
   const clippedStart = Math.max(0, Math.min(record.length, Math.min(start, end)));
   const clippedEnd = Math.max(0, Math.min(record.length, Math.max(start, end)));
   if (amount <= EPS || clippedEnd - clippedStart <= EPS) return;
@@ -597,7 +419,7 @@ function addEdgeRepair(
   else repairs[record.polygon].set(record.edge, [segment]);
 }
 
-function emptyDiagnostics(): SeamOverlapDiagnostics {
+function emptyDiagnostics() {
   return {
     exactPairs: 0,
     nearPairs: 0,
@@ -611,9 +433,9 @@ function emptyDiagnostics(): SeamOverlapDiagnostics {
 }
 
 function finishDiagnostics(
-  repairs: Array<Map<number, EdgeRepairSegment[]>>,
-  diagnostics: SeamOverlapDiagnostics,
-): SeamOverlapDiagnostics {
+  repairs: Array<Map<number, Repair[]>>,
+  diagnostics: OverlapDiagnostics,
+) {
   let maxAppliedAmountPx = 0;
   let patchedEdges = 0;
   let patchedPolygons = 0;
@@ -636,19 +458,19 @@ function finishDiagnostics(
 
 function buildSeamEdgeAmounts(
   polygons: Polygon[],
-  options: ResolvedSeamOverlapOptions,
+  options: Overlap,
   collectCandidates = false,
-): SeamBuildResult {
+) {
   const metas = buildPolygonMetas(polygons);
   const records = buildEdgeRecords(polygons, metas, options.capacityScale);
-  const repairs = polygons.map(() => new Map<number, EdgeRepairSegment[]>());
+  const repairs = polygons.map(() => new Map<number, Repair[]>());
   const diagnostics = emptyDiagnostics();
-  const candidates = collectCandidates ? [] as SeamOverlapCandidate[] : undefined;
+  const candidates = collectCandidates ? [] as OverlapCandidate[] : undefined;
   if (records.length === 0) {
     return { edgeRepairs: repairs, diagnostics, candidates };
   }
 
-  const edgeOwners = new Map<string, EdgeRecord[]>();
+  const edgeOwners = new Map<string, Edge[]>();
   for (const record of records) {
     const owners = edgeOwners.get(record.key);
     if (owners) owners.push(record);
@@ -669,20 +491,20 @@ function buildSeamEdgeAmounts(
 }
 
 function buildNearSeamEdgeAmounts(
-  records: EdgeRecord[],
-  edgeOwners: ReadonlyMap<string, EdgeRecord[]>,
-  repairs: Array<Map<number, EdgeRepairSegment[]>>,
-  diagnostics: SeamOverlapDiagnostics,
-  options: ResolvedSeamOverlapOptions,
-  candidates: SeamOverlapCandidate[] | undefined,
-): void {
+  records: Edge[],
+  edgeOwners: ReadonlyMap<string, Edge[]>,
+  repairs: Array<Map<number, Repair[]>>,
+  diagnostics: OverlapDiagnostics,
+  options: Overlap,
+  candidates: OverlapCandidate[] | undefined,
+) {
   const maxGap = options.maxGapPx;
   const exactSharedKeys = new Set<string>();
   for (const [key, owners] of edgeOwners) {
     if (owners.length > 1) exactSharedKeys.add(key);
   }
 
-  const measurePair = (first: EdgeRecord, second: EdgeRecord): void => {
+  const measurePair = (first: Edge, second: Edge) => {
     const record = first.index < second.index ? first : second;
     const candidate = first.index < second.index ? second : first;
     if (candidate.polygon === record.polygon) return;
@@ -722,8 +544,7 @@ function buildNearSeamEdgeAmounts(
       remainingClosure -= extraB;
     }
 
-    const appliedClosure = closureA + closureB;
-    candidates?.push(seamOverlapCandidate(kind, record, candidate, info, targetClosure, appliedClosure));
+    candidates?.push(seamOverlapCandidate(kind, record, candidate, info, targetClosure, closureA + closureB));
     if (closureA > EPS) addEdgeRepair(repairs, record, info.aStart, info.aEnd, closureA / info.facingA);
     if (closureB > EPS) addEdgeRepair(repairs, candidate, info.bStart, info.bEnd, closureB / info.facingB);
     diagnostics.nearPairs += 1;
@@ -765,7 +586,7 @@ function buildNearSeamEdgeAmounts(
     }
   }
 
-  const cells = new Map<string, EdgeRecord[]>();
+  const cells = new Map<string, Edge[]>();
   for (const record of records) {
     addRecordToSegmentCells(cells, record, cellSize, maxGap);
   }
@@ -788,7 +609,7 @@ function buildNearSeamEdgeAmounts(
   }
 }
 
-function edgeBoundsCouldOverlap(a: EdgeRecord, b: EdgeRecord, maxGap: number): boolean {
+function edgeBoundsCouldOverlap(a: Edge, b: Edge, maxGap: number) {
   return a.minX <= b.maxX + maxGap &&
     b.minX <= a.maxX + maxGap &&
     a.minY <= b.maxY + maxGap &&
@@ -806,19 +627,12 @@ function cellCoords(point: Vec3, cellSize: number): [number, number, number] {
 }
 
 function addRecordToSegmentCells(
-  cells: Map<string, EdgeRecord[]>,
-  record: EdgeRecord,
+  cells: Map<string, Edge[]>,
+  record: Edge,
   cellSize: number,
   padding: number,
-): void {
-  const minX = record.minX - padding;
-  const minY = record.minY - padding;
-  const minZ = record.minZ - padding;
-  const maxX = record.maxX + padding;
-  const maxY = record.maxY + padding;
-  const maxZ = record.maxZ + padding;
-  const [minCx, minCy, minCz] = cellCoords([minX, minY, minZ], cellSize);
-  const [maxCx, maxCy, maxCz] = cellCoords([maxX, maxY, maxZ], cellSize);
+) {
+  const [minCx, minCy, minCz, maxCx, maxCy, maxCz] = recordSegmentCellBounds(record, cellSize, padding);
   for (let x = minCx; x <= maxCx; x += 1) {
     for (let y = minCy; y <= maxCy; y += 1) {
       for (let z = minCz; z <= maxCz; z += 1) {
@@ -831,23 +645,22 @@ function addRecordToSegmentCells(
   }
 }
 
-function recordSegmentCellCount(record: EdgeRecord, cellSize: number, padding: number): number {
-  const minX = record.minX - padding;
-  const minY = record.minY - padding;
-  const minZ = record.minZ - padding;
-  const maxX = record.maxX + padding;
-  const maxY = record.maxY + padding;
-  const maxZ = record.maxZ + padding;
-  const [minCx, minCy, minCz] = cellCoords([minX, minY, minZ], cellSize);
-  const [maxCx, maxCy, maxCz] = cellCoords([maxX, maxY, maxZ], cellSize);
+function recordSegmentCellBounds(record: Edge, cellSize: number, padding: number): [number, number, number, number, number, number] {
+  const [minCx, minCy, minCz] = cellCoords([record.minX - padding, record.minY - padding, record.minZ - padding], cellSize);
+  const [maxCx, maxCy, maxCz] = cellCoords([record.maxX + padding, record.maxY + padding, record.maxZ + padding], cellSize);
+  return [minCx, minCy, minCz, maxCx, maxCy, maxCz];
+}
+
+function recordSegmentCellCount(record: Edge, cellSize: number, padding: number) {
+  const [minCx, minCy, minCz, maxCx, maxCy, maxCz] = recordSegmentCellBounds(record, cellSize, padding);
   return (maxCx - minCx + 1) * (maxCy - minCy + 1) * (maxCz - minCz + 1);
 }
 
 function shouldUseExtendedSweep(
-  records: EdgeRecord[],
+  records: Edge[],
   cellSize: number,
   padding: number,
-): boolean {
+) {
   let totalCells = 0;
   let maxCells = 0;
   for (const record of records) {
@@ -859,7 +672,7 @@ function shouldUseExtendedSweep(
   return totalCells / Math.max(1, records.length) > NEAR_SEAM_GRID_AVG_CELLS_PER_RECORD_LIMIT;
 }
 
-function dotFromPointToEdge(point: Vec3, edgeOrigin: Vec3, edgeDir: Vec3): number {
+function dotFromPointToEdge(point: Vec3, edgeOrigin: Vec3, edgeDir: Vec3) {
   return (
     (point[0] - edgeOrigin[0]) * edgeDir[0] +
     (point[1] - edgeOrigin[1]) * edgeDir[1] +
@@ -867,7 +680,7 @@ function dotFromPointToEdge(point: Vec3, edgeOrigin: Vec3, edgeDir: Vec3): numbe
   );
 }
 
-function dotEdgePointToEdge(source: EdgeRecord, distance: number, target: EdgeRecord): number {
+function dotEdgePointToEdge(source: Edge, distance: number, target: Edge) {
   return (
     (source.a[0] + source.dir[0] * distance - target.a[0]) * target.dir[0] +
     (source.a[1] + source.dir[1] * distance - target.a[1]) * target.dir[1] +
@@ -875,7 +688,7 @@ function dotEdgePointToEdge(source: EdgeRecord, distance: number, target: EdgeRe
   );
 }
 
-function nearSeamInfo(a: EdgeRecord, b: EdgeRecord, maxGap: number): NearSeamInfo | null {
+function nearSeamInfo(a: Edge, b: Edge, maxGap: number) {
   const bStart = dotFromPointToEdge(b.a, a.a, a.dir);
   const bEnd = dotFromPointToEdge(b.b, a.a, a.dir);
   const overlapStart = Math.max(0, Math.min(bStart, bEnd));
@@ -930,17 +743,17 @@ function repairPoint(a: Vec2, b: Vec2, edgeLength: number, distance: number): Ve
   ];
 }
 
-function pushUniquePoint(points: Vec2[], point: Vec2): void {
+function pushUniquePoint(points: Vec2[], point: Vec2) {
   const last = points[points.length - 1];
   if (last && Math.hypot(last[0] - point[0], last[1] - point[1]) <= EPS) return;
   points.push(point);
 }
 
 function normalizeRepairSegments(
-  segments: EdgeRepairSegment[] | undefined,
+  segments: Repair[] | undefined,
   edgeLength: number,
   capacity: number,
-): EdgeRepairSegment[] {
+) {
   if (!segments?.length || edgeLength <= EPS || capacity <= EPS) return [];
   const stops = new Set<number>([0, edgeLength]);
   for (const segment of segments) {
@@ -952,7 +765,7 @@ function normalizeRepairSegments(
   }
 
   const sortedStops = Array.from(stops).sort((a, b) => a - b);
-  const normalized: EdgeRepairSegment[] = [];
+  const normalized: Repair[] = [];
   for (let i = 0; i + 1 < sortedStops.length; i += 1) {
     const start = sortedStops[i];
     const end = sortedStops[i + 1];
@@ -969,9 +782,8 @@ function normalizeRepairSegments(
   return normalized;
 }
 
-function isValidRepairedPolygon(source: Vec2[], repaired: Vec2[]): boolean {
-  if (repaired.length < 3) return false;
-  if (!isWeaklyConvex(repaired)) return false;
+function isValidRepairedPolygon(source: Vec2[], repaired: Vec2[]) {
+  if (repaired.length < 3 || !isWeaklyConvex(repaired)) return false;
   const sourceArea = signedArea(source);
   const repairedArea = signedArea(repaired);
   return Math.sign(repairedArea) === Math.sign(sourceArea) && Math.abs(repairedArea) >= Math.abs(sourceArea) - EPS;
@@ -979,11 +791,10 @@ function isValidRepairedPolygon(source: Vec2[], repaired: Vec2[]): boolean {
 
 function patchPolygon(
   polygon: Polygon,
-  edgeRepairs: ReadonlyMap<number, EdgeRepairSegment[]>,
+  edgeRepairs: ReadonlyMap<number, Repair[]>,
   capacityScale: number,
-): Polygon {
-  if (edgeRepairs.size === 0 || polygon.vertices.length < 3) return polygon;
-  if (hasTexture(polygon)) return polygon;
+) {
+  if (edgeRepairs.size === 0 || polygon.vertices.length < 3 || hasTexture(polygon)) return polygon;
 
   const points = cssPoints(polygon.vertices);
   const basis = localBasis(points);
@@ -1037,11 +848,11 @@ function patchPolygon(
   return { ...polygon, vertices };
 }
 
-function isRefinableSeamQuad(polygon: Polygon): boolean {
+function isRefinableSeamQuad(polygon: Polygon) {
   return polygon.vertices.length === 4 && !hasTexture(polygon);
 }
 
-function quadShapeRisk(meta: PolygonMeta): number {
+function quadShapeRisk(meta: Meta) {
   const local = meta.basis?.local;
   if (!local || local.length !== 4) return 1;
   let minX = Infinity;
@@ -1055,15 +866,15 @@ function quadShapeRisk(meta: PolygonMeta): number {
     maxY = Math.max(maxY, y);
   }
   const bboxArea = Math.max(EPS, (maxX - minX) * (maxY - minY));
-  const fillRatio = Math.max(0, Math.min(1, Math.abs(meta.basis?.area ?? 0) / bboxArea));
+  const fillRatio = Math.max(0, Math.min(1, Math.abs(meta.basis!.area) / bboxArea));
   return 0.75 + (1 - fillRatio) * 2.5;
 }
 
-function cssDistance(a: Vec3, b: Vec3): number {
+function cssDistance(a: Vec3, b: Vec3) {
   return length(sub(cssPoints([a])[0], cssPoints([b])[0]));
 }
 
-function triangleQuality(a: Vec3, b: Vec3, c: Vec3): number {
+function triangleQuality(a: Vec3, b: Vec3, c: Vec3) {
   const ab = cssDistance(a, b);
   const bc = cssDistance(b, c);
   const ca = cssDistance(c, a);
@@ -1086,7 +897,7 @@ function intersectLocalLines(a0: Vec2, a1: Vec2, b0: Vec2, b1: Vec2): Vec2 | nul
   return [a0[0] + t * rx, a0[1] + t * ry];
 }
 
-function offsetLocalConvexPointsByEdgeAmounts(points: Vec2[], amounts: number[]): Vec2[] | null {
+function offsetLocalConvexPointsByEdgeAmounts(points: Vec2[], amounts: number[]) {
   if (points.length < 3 || points.length !== amounts.length) return null;
   const maxAmount = Math.max(0, ...amounts);
   if (maxAmount <= EPS) return points;
@@ -1130,7 +941,7 @@ function offsetLocalConvexPointsByEdgeAmounts(points: Vec2[], amounts: number[])
   return expanded;
 }
 
-function cssPointFromLocal(basis: LocalBasis, point: Vec2): Vec3 {
+function cssPointFromLocal(basis: Basis, point: Vec2): Vec3 {
   return [
     basis.origin[0] + basis.xAxis[0] * point[0] + basis.yAxis[0] * point[1],
     basis.origin[1] + basis.xAxis[1] * point[0] + basis.yAxis[1] * point[1],
@@ -1138,7 +949,7 @@ function cssPointFromLocal(basis: LocalBasis, point: Vec2): Vec3 {
   ];
 }
 
-function offsetTriangleVertices(vertices: Vec3[], amounts: [number, number, number]): Vec3[] {
+function offsetTriangleVertices(vertices: Vec3[], amounts: [number, number, number]) {
   const basis = localBasis(cssPoints(vertices));
   if (!basis) return vertices;
   const expanded = offsetLocalConvexPointsByEdgeAmounts(basis.local, amounts);
@@ -1147,12 +958,12 @@ function offsetTriangleVertices(vertices: Vec3[], amounts: [number, number, numb
     : vertices;
 }
 
-function splitQuadIntoTriangles(polygon: Polygon, edges: ReadonlySet<number>): Polygon[] {
+function splitQuadIntoTriangles(polygon: Polygon, edges: ReadonlySet<number>) {
   const solid: Polygon = { ...polygon, uvs: undefined, textureTriangles: undefined };
   const [a, b, c, d] = polygon.vertices;
   const acQuality = Math.min(triangleQuality(a, b, c), triangleQuality(a, c, d));
   const bdQuality = Math.min(triangleQuality(a, b, d), triangleQuality(b, c, d));
-  const seamAmount = (edge: number): number => edges.has(edge) ? SEAM_SPLIT_EDGE_OVERLAP_PX : 0;
+  const seamAmount = (edge: number) => edges.has(edge) ? SEAM_SPLIT_EDGE_OVERLAP_PX : 0;
   return acQuality >= bdQuality
     ? [
         { ...solid, vertices: offsetTriangleVertices([a, b, c], [seamAmount(0), seamAmount(1), SEAM_SPLIT_INTERNAL_OVERLAP_PX]) },
@@ -1164,53 +975,15 @@ function splitQuadIntoTriangles(polygon: Polygon, edges: ReadonlySet<number>): P
       ];
 }
 
-interface SeamFacetSplitCandidateInternal {
-  key: string;
-  owners: EdgeRecord[];
-  records: EdgeRecord[];
-  length: number;
-  rankLength: number;
-  projectedLength: number;
-  score: number;
-  normalRisk: number;
-  shapeRisk: number;
-  viewRisk: number;
-  component: number;
-  selected: boolean;
-  reason: SeamFacetSplitCandidateReason;
-  marginalCost: number;
-}
+type Cand={key:string;e:[string,string];o:Edge[];r:Edge[];len:number;rank:number;proj:number;s:number;nr:number;sr:number;vr:number;comp:number;sel:boolean;why:SplitReason;cost:number};
 
-interface SeamFacetSplitPlan {
-  selected: Map<number, Set<number>>;
-  candidates: SeamFacetSplitCandidateInternal[];
-  budgetLimit: number;
-}
+type FollowUp={endpoints:ReadonlySet<string>};
 
-interface SeamFacetSplitFollowUpContext {
-  endpoints: ReadonlySet<string>;
-}
+type SplitMode="primary"|"follow-up";
 
-type SeamFacetSplitSelectionMode = "primary" | "follow-up";
+type Dist={q1:number;median:number;q3:number;p70:number;p80:number;p88:number;p95:number;p97:number;max:number};
 
-interface SeamFacetSplitBudgetPlan {
-  budgetLimit: number;
-  componentBudgets: ReadonlyMap<number, number> | null;
-}
-
-interface NumericDistribution {
-  q1: number;
-  median: number;
-  q3: number;
-  p70: number;
-  p80: number;
-  p88: number;
-  p95: number;
-  p97: number;
-  max: number;
-}
-
-function numericDistribution(values: number[]): NumericDistribution {
+function numericDistribution(values: number[]) {
   if (values.length === 0) {
     return {
       q1: Infinity,
@@ -1239,69 +1012,50 @@ function numericDistribution(values: number[]): NumericDistribution {
   };
 }
 
-class UnionFind {
-  private parents: number[];
-
-  constructor(size: number) {
-    this.parents = Array.from({ length: size }, (_, index) => index);
-  }
-
-  find(index: number): number {
-    const parent = this.parents[index];
-    if (parent === index) return index;
-    const root = this.find(parent);
-    this.parents[index] = root;
-    return root;
-  }
-
-  union(a: number, b: number): void {
-    const rootA = this.find(a);
-    const rootB = this.find(b);
-    if (rootA !== rootB) this.parents[rootB] = rootA;
-  }
+function unionFindRoot(parents: number[], index: number): number {
+  const parent = parents[index];
+  if (parent === index) return index;
+  const root = unionFindRoot(parents, parent);
+  parents[index] = root;
+  return root;
 }
 
-function splitCandidateEndpointKeys(candidate: SeamFacetSplitCandidateInternal): string[] {
-  const first = candidate.records[0];
-  if (!first) return [];
-  return [pointKey(first.a), pointKey(first.b)];
-}
-
-function splitPlanFollowUpContext(candidates: SeamFacetSplitCandidateInternal[]): SeamFacetSplitFollowUpContext {
+function splitPlanFollowUpContext(candidates: Cand[]) {
   const endpoints = new Set<string>();
   const components = new Set<number>();
   for (const candidate of candidates) {
-    if (!candidate.selected) continue;
-    components.add(candidate.component);
+    if (!candidate.sel) continue;
+    components.add(candidate.comp);
   }
   for (const candidate of candidates) {
-    if (!components.has(candidate.component)) continue;
-    for (const endpoint of splitCandidateEndpointKeys(candidate)) endpoints.add(endpoint);
+    if (!components.has(candidate.comp)) continue;
+    for (const endpoint of candidate.e) endpoints.add(endpoint);
   }
   return { endpoints };
 }
 
 function splitCandidateTouchesFollowUp(
-  candidate: SeamFacetSplitCandidateInternal,
-  context: SeamFacetSplitFollowUpContext | undefined,
-): boolean {
+  candidate: Cand,
+  context: FollowUp | undefined,
+) {
   if (!context) return true;
-  return splitCandidateEndpointKeys(candidate).some((endpoint) => context.endpoints.has(endpoint));
+  return candidate.e.some((endpoint) => context.endpoints.has(endpoint));
 }
 
 function buildSeamFacetSplitCandidates(
   polygons: Polygon[],
-  metas: PolygonMeta[],
-  edgeOwners: ReadonlyMap<string, EdgeRecord[]>,
-  splitOptions: ResolvedSeamFacetSplitOptions,
-): SeamFacetSplitCandidateInternal[] {
-  const candidates: SeamFacetSplitCandidateInternal[] = [];
+  metas: Meta[],
+  edgeOwners: ReadonlyMap<string, Edge[]>,
+  splitOptions: Split,
+) {
+  const candidates: Cand[] = [];
   for (const [key, owners] of edgeOwners) {
     if (owners.length !== 2) continue;
     const [a, b] = owners;
     if (!compatibleRepairMaterials(a, b)) continue;
     const refinable = owners.filter((record) => isRefinableSeamQuad(polygons[record.polygon]));
     if (refinable.length === 0) continue;
+    const firstRefinable = refinable[0];
 
     const normalRisk = 1 - Math.min(1, Math.abs(dot(a.normal, b.normal)));
     const seamLength = Math.max(a.length, b.length);
@@ -1312,57 +1066,63 @@ function buildSeamFacetSplitCandidates(
     const seamRisk = Math.max(0.08, normalRisk);
     const projected = splitOptions.viewAware
       ? splitCandidateViewMetrics(a, b, splitOptions.rotX, splitOptions.rotY)
-      : { projectedLength: seamLength, viewRisk: 1 };
-    const rankLength = splitOptions.viewAware ? Math.max(projected.projectedLength, seamLength * 0.12) : seamLength;
-    const viewWeight = splitOptions.viewAware ? 0.18 + projected.viewRisk * 1.82 : 1;
+      : { proj: seamLength, vr: 1 };
+    const rankLength = splitOptions.viewAware ? Math.max(projected.proj, seamLength * 0.12) : seamLength;
+    const viewWeight = splitOptions.viewAware ? 0.18 + projected.vr * 1.82 : 1;
     candidates.push({
       key,
-      owners,
-      records: refinable,
-      length: seamLength,
-      rankLength,
-      projectedLength: projected.projectedLength,
-      score: rankLength * (0.58 + seamRisk * 2.8) * shapeRisk * bothSidesRefinable * viewWeight,
-      normalRisk,
-      shapeRisk,
-      viewRisk: projected.viewRisk,
-      component: -1,
-      selected: false,
-      reason: "below-threshold",
-      marginalCost: refinable.length,
+      e: [pointKey(firstRefinable.a), pointKey(firstRefinable.b)],
+      o: owners,
+      r: refinable,
+      len: seamLength,
+      rank: rankLength,
+      proj: projected.proj,
+      s: rankLength * (0.58 + seamRisk * 2.8) * shapeRisk * bothSidesRefinable * viewWeight,
+      nr: normalRisk,
+      sr: shapeRisk,
+      vr: projected.vr,
+      comp: -1,
+      sel: false,
+      why: "below-threshold",
+      cost: refinable.length,
     });
   }
 
-  const union = new UnionFind(candidates.length);
+  const parents = Array.from({ length: candidates.length }, (_, index) => index);
   const byEndpoint = new Map<string, number>();
   for (let index = 0; index < candidates.length; index += 1) {
-    for (const endpoint of splitCandidateEndpointKeys(candidates[index])) {
+    for (const endpoint of candidates[index].e) {
       const previous = byEndpoint.get(endpoint);
-      if (previous !== undefined) union.union(previous, index);
-      else byEndpoint.set(endpoint, index);
+      if (previous === undefined) {
+        byEndpoint.set(endpoint, index);
+      } else {
+        const rootA = unionFindRoot(parents, previous);
+        const rootB = unionFindRoot(parents, index);
+        if (rootA !== rootB) parents[rootB] = rootA;
+      }
     }
   }
 
   const componentIds = new Map<number, number>();
   for (let index = 0; index < candidates.length; index += 1) {
-    const root = union.find(index);
+    const root = unionFindRoot(parents, index);
     let component = componentIds.get(root);
     if (component === undefined) {
       component = componentIds.size;
       componentIds.set(root, component);
     }
-    candidates[index].component = component;
+    candidates[index].comp = component;
   }
 
   return candidates;
 }
 
 function splitCandidateViewMetrics(
-  a: EdgeRecord,
-  b: EdgeRecord,
+  a: Edge,
+  b: Edge,
   rotX: number,
   rotY: number,
-): { projectedLength: number; viewRisk: number } {
+) {
   const p0 = rotateCssVec3(a.a, rotX, 0, rotY);
   const p1 = rotateCssVec3(a.b, rotX, 0, rotY);
   const projectedLength = Math.hypot(p1[0] - p0[0], p1[1] - p0[1]);
@@ -1371,87 +1131,87 @@ function splitCandidateViewMetrics(
   const frontness = Math.max(0, depthA, depthB);
   const silhouette = Math.min(1, Math.abs(depthA - depthB));
   return {
-    projectedLength,
-    viewRisk: Math.max(0.04, Math.min(1, frontness * 0.85 + silhouette * 0.45)),
+    proj: projectedLength,
+    vr: Math.max(0.04, Math.min(1, frontness * 0.85 + silhouette * 0.45)),
   };
 }
 
 function strongestCandidatesByComponent(
-  candidates: SeamFacetSplitCandidateInternal[],
-): Set<SeamFacetSplitCandidateInternal> {
-  const strongest = new Map<number, SeamFacetSplitCandidateInternal>();
+  candidates: Cand[],
+) {
+  const strongest = new Map<number, Cand>();
   for (const candidate of candidates) {
-    const current = strongest.get(candidate.component);
-    if (!current || candidate.score > current.score || (candidate.score === current.score && candidate.length > current.length)) {
-      strongest.set(candidate.component, candidate);
+    const current = strongest.get(candidate.comp);
+    if (!current || candidate.s > current.s || (candidate.s === current.s && candidate.len > current.len)) {
+      strongest.set(candidate.comp, candidate);
     }
   }
   return new Set(strongest.values());
 }
 
-function splitCandidateBudgetPriority(candidate: SeamFacetSplitCandidateInternal): number {
-  const coplanar = Math.max(0, 1 - Math.min(1, candidate.normalRisk));
+function splitCandidateBudgetPriority(candidate: Cand) {
+  const coplanar = Math.max(0, 1 - Math.min(1, candidate.nr));
   const coplanarWeight = 0.35 + coplanar * coplanar * coplanar * 3.65;
-  const oneSidedWeight = candidate.records.length === 1 ? 1.08 : 1;
-  return (candidate.rankLength * coplanarWeight * oneSidedWeight) / Math.sqrt(Math.max(1, candidate.records.length));
+  const oneSidedWeight = candidate.r.length === 1 ? 1.08 : 1;
+  return (candidate.rank * coplanarWeight * oneSidedWeight) / Math.sqrt(Math.max(1, candidate.r.length));
 }
 
-function splitCandidateLikelyCrackPriority(candidate: SeamFacetSplitCandidateInternal): number {
-  const coplanar = Math.max(0, 1 - Math.min(1, candidate.normalRisk));
-  const visibleWeight = 0.35 + Math.min(1, candidate.viewRisk) * 1.65;
-  const shapeWeight = 0.7 + Math.min(2.6, candidate.shapeRisk) * 0.3;
-  const oneSidedWeight = candidate.records.length === 1 ? 1.1 : 1;
+function splitCandidateLikelyCrackPriority(candidate: Cand) {
+  const coplanar = Math.max(0, 1 - Math.min(1, candidate.nr));
+  const visibleWeight = 0.35 + Math.min(1, candidate.vr) * 1.65;
+  const shapeWeight = 0.7 + Math.min(2.6, candidate.sr) * 0.3;
+  const oneSidedWeight = candidate.r.length === 1 ? 1.1 : 1;
   const visiblePriority = (
-    candidate.rankLength *
+    candidate.rank *
     (0.6 + coplanar * coplanar * 1.4) *
     visibleWeight *
     shapeWeight *
     oneSidedWeight
-  ) / Math.sqrt(Math.max(1, candidate.records.length));
+  ) / Math.sqrt(Math.max(1, candidate.r.length));
   return Math.max(visiblePriority, splitCandidateBudgetPriority(candidate) * 0.75);
 }
 
-function uniqueSplitPolygonCost(candidates: SeamFacetSplitCandidateInternal[]): number {
+function uniqueSplitPolygonCost(candidates: Cand[]) {
   const polygons = new Set<number>();
   for (const candidate of candidates) {
-    for (const record of candidate.records) polygons.add(record.polygon);
+    for (const record of candidate.r) polygons.add(record.polygon);
   }
   return polygons.size;
 }
 
-function splitCandidateLikelyCrack(candidate: SeamFacetSplitCandidateInternal, lengthStats: NumericDistribution): boolean {
-  return candidate.normalRisk <= 0.25 &&
-    candidate.rankLength >= lengthStats.median * 1.08 &&
-    candidate.projectedLength >= 24;
+function splitCandidateLikelyCrack(candidate: Cand, lengthStats: Dist) {
+  return candidate.nr <= 0.25 &&
+    candidate.rank >= lengthStats.median * 1.08 &&
+    candidate.proj >= 24;
 }
 
 function splitCandidateGlobalSeed(
-  candidate: SeamFacetSplitCandidateInternal,
+  candidate: Cand,
   strongScore: number,
   strongLength: number,
-): boolean {
-  return candidate.score >= strongScore || candidate.rankLength >= strongLength;
+) {
+  return candidate.s >= strongScore || candidate.rank >= strongLength;
 }
 
 function seamFacetSplitBudgetPlan(
-  candidates: SeamFacetSplitCandidateInternal[],
-  mode: SeamFacetSplitSelectionMode,
+  candidates: Cand[],
+  mode: SplitMode,
   maxBudget: number,
-  scoreStats: NumericDistribution,
-  lengthStats: NumericDistribution,
+  scoreStats: Dist,
+  lengthStats: Dist,
   strongScore: number,
   strongLength: number,
-): SeamFacetSplitBudgetPlan {
+) {
   const budgetLimit = Math.max(0, Math.floor(maxBudget));
   if (budgetLimit <= 0 || candidates.length === 0 || mode === "follow-up") {
     return { budgetLimit, componentBudgets: null };
   }
 
-  const byComponent = new Map<number, SeamFacetSplitCandidateInternal[]>();
+  const byComponent = new Map<number, Cand[]>();
   for (const candidate of candidates) {
-    const group = byComponent.get(candidate.component);
+    const group = byComponent.get(candidate.comp);
     if (group) group.push(candidate);
-    else byComponent.set(candidate.component, [candidate]);
+    else byComponent.set(candidate.comp, [candidate]);
   }
 
   const componentBudgets = new Map<number, number>();
@@ -1461,7 +1221,7 @@ function seamFacetSplitBudgetPlan(
   for (const [component, group] of byComponent) {
     const primary = group.filter((candidate) =>
       splitCandidateGlobalSeed(candidate, strongScore, strongLength) ||
-      candidate.score >= fallbackSeedScore
+      candidate.s >= fallbackSeedScore
     );
     if (primary.length === 0) continue;
 
@@ -1486,15 +1246,15 @@ function seamFacetSplitBudgetPlan(
 }
 
 function selectSeamFacetSplitCandidates(
-  candidates: SeamFacetSplitCandidateInternal[],
-  mode: SeamFacetSplitSelectionMode,
+  candidates: Cand[],
+  mode: SplitMode,
   budget: number,
-): { selected: Map<number, Set<number>>; budgetLimit: number } {
+) {
   const selected = new Map<number, Set<number>>();
   if (candidates.length === 0 || budget <= 0) return { selected, budgetLimit: 0 };
 
-  const scoreStats = numericDistribution(candidates.map((candidate) => candidate.score));
-  const lengthStats = numericDistribution(candidates.map((candidate) => candidate.rankLength));
+  const scoreStats = numericDistribution(candidates.map((candidate) => candidate.s));
+  const lengthStats = numericDistribution(candidates.map((candidate) => candidate.rank));
   const scoreSpread = Math.max(EPS, scoreStats.q3 - scoreStats.q1);
   const strongScore = Math.min(scoreStats.max, Math.max(scoreStats.p95, scoreStats.q3 + scoreSpread * 0.85));
   const anchorScore = Math.min(scoreStats.max, Math.max(scoreStats.p80, scoreStats.q3 + scoreSpread * 0.15));
@@ -1524,21 +1284,21 @@ function selectSeamFacetSplitCandidates(
 
   const sorted = [...candidates].sort((a, b) =>
     splitCandidateBudgetPriority(b) - splitCandidateBudgetPriority(a) ||
-    (b.score / Math.max(1, b.records.length)) - (a.score / Math.max(1, a.records.length)) ||
-    b.length - a.length
+    (b.s / Math.max(1, b.r.length)) - (a.s / Math.max(1, a.r.length)) ||
+    b.len - a.len
   );
   const likelyCrackSorted = [...candidates].sort((a, b) =>
     splitCandidateLikelyCrackPriority(b) - splitCandidateLikelyCrackPriority(a) ||
     splitCandidateBudgetPriority(b) - splitCandidateBudgetPriority(a) ||
-    b.length - a.length
+    b.len - a.len
   );
 
-  const selectCandidate = (candidate: SeamFacetSplitCandidateInternal, reason: SeamFacetSplitCandidateReason): void => {
-    candidate.selected = true;
-    candidate.reason = reason;
-    selectedComponents.add(candidate.component);
-    for (const endpoint of splitCandidateEndpointKeys(candidate)) selectedEndpoints.add(endpoint);
-    for (const record of candidate.records) {
+  const selectCandidate = (candidate: Cand, reason: SplitReason) => {
+    candidate.sel = true;
+    candidate.why = reason;
+    selectedComponents.add(candidate.comp);
+    for (const endpoint of candidate.e) selectedEndpoints.add(endpoint);
+    for (const record of candidate.r) {
       alreadySplit.add(record.polygon);
       const edges = selected.get(record.polygon);
       if (edges) edges.add(record.edge);
@@ -1546,24 +1306,24 @@ function selectSeamFacetSplitCandidates(
     }
   };
 
-  const withinComponentBudget = (candidate: SeamFacetSplitCandidateInternal, marginalCost: number): boolean => {
+  const withinComponentBudget = (candidate: Cand, marginalCost: number) => {
     const componentBudgets = budgetPlan.componentBudgets;
     if (marginalCost <= 0 || !componentBudgets) return true;
-    const componentBudget = componentBudgets.get(candidate.component) ?? 0;
-    return (componentSpend.get(candidate.component) ?? 0) + marginalCost <= componentBudget;
+    const componentBudget = componentBudgets.get(candidate.comp) ?? 0;
+    return (componentSpend.get(candidate.comp) ?? 0) + marginalCost <= componentBudget;
   };
 
-  const recordComponentSpend = (candidate: SeamFacetSplitCandidateInternal, marginalCost: number): void => {
+  const recordComponentSpend = (candidate: Cand, marginalCost: number) => {
     if (marginalCost <= 0 || !budgetPlan.componentBudgets) return;
-    componentSpend.set(candidate.component, (componentSpend.get(candidate.component) ?? 0) + marginalCost);
+    componentSpend.set(candidate.comp, (componentSpend.get(candidate.comp) ?? 0) + marginalCost);
   };
 
   for (const candidate of likelyCrackSorted) {
-    const marginalCost = candidate.records.reduce(
+    const marginalCost = candidate.r.reduce(
       (total, record) => total + (alreadySplit.has(record.polygon) ? 0 : 1),
       0,
     );
-    candidate.marginalCost = marginalCost;
+    candidate.cost = marginalCost;
     if (marginalCost > remainingBudget) continue;
     if (!withinComponentBudget(candidate, marginalCost)) continue;
     if (marginalCost > 0 && remainingBudget - marginalCost < localReserve) continue;
@@ -1576,32 +1336,32 @@ function selectSeamFacetSplitCandidates(
   }
 
   for (const candidate of sorted) {
-    if (candidate.selected) continue;
-    const marginalCost = candidate.records.reduce(
+    if (candidate.sel) continue;
+    const marginalCost = candidate.r.reduce(
       (total, record) => total + (alreadySplit.has(record.polygon) ? 0 : 1),
       0,
     );
-    candidate.marginalCost = marginalCost;
+    candidate.cost = marginalCost;
     if (marginalCost > remainingBudget) continue;
     if (!withinComponentBudget(candidate, marginalCost)) continue;
     if (marginalCost > 0 && remainingBudget - marginalCost < localReserve) continue;
 
-    const twoSided = candidate.records.length === 2;
+    const twoSided = candidate.r.length === 2;
     const isAnchor = anchors.has(candidate) && (
       mode === "primary" ||
-      (mode === "follow-up" && candidate.score >= anchorScore * 1.08 && candidate.rankLength >= anchorLength)
+      (mode === "follow-up" && candidate.s >= anchorScore * 1.08 && candidate.rank >= anchorLength)
     ) && (
       twoSided
-        ? candidate.score >= anchorScore || candidate.rankLength >= anchorLength
-        : candidate.score >= anchorScore * 1.18 || candidate.rankLength >= anchorLength * 1.12
+        ? candidate.s >= anchorScore || candidate.rank >= anchorLength
+        : candidate.s >= anchorScore * 1.18 || candidate.rank >= anchorLength * 1.12
     );
     const isGlobalOutlier = twoSided
-      ? candidate.score >= strongScore || candidate.rankLength >= strongLength
-      : candidate.score >= strongScore * 1.35 || candidate.rankLength >= strongLength * 1.2;
+      ? candidate.s >= strongScore || candidate.rank >= strongLength
+      : candidate.s >= strongScore * 1.35 || candidate.rank >= strongLength * 1.2;
     const isSharedPolygonFollowUp = marginalCost === 0 && (
       twoSided
-        ? candidate.score >= sharedPolygonScore || candidate.rankLength >= anchorLength
-        : candidate.score >= sharedPolygonScore * 1.25 || candidate.rankLength >= anchorLength * 1.12
+        ? candidate.s >= sharedPolygonScore || candidate.rank >= anchorLength
+        : candidate.s >= sharedPolygonScore * 1.25 || candidate.rank >= anchorLength * 1.12
     );
     if (!isAnchor && !isGlobalOutlier && !isSharedPolygonFollowUp) continue;
 
@@ -1616,23 +1376,23 @@ function selectSeamFacetSplitCandidates(
   }
 
   for (const candidate of sorted) {
-    if (candidate.selected) continue;
-    const marginalCost = candidate.records.reduce(
+    if (candidate.sel) continue;
+    const marginalCost = candidate.r.reduce(
       (total, record) => total + (alreadySplit.has(record.polygon) ? 0 : 1),
       0,
     );
-    candidate.marginalCost = marginalCost;
+    candidate.cost = marginalCost;
     if (marginalCost > 1 || marginalCost > remainingBudget) continue;
     if (!withinComponentBudget(candidate, marginalCost)) continue;
-    const touchesSelectedPolygon = candidate.records.some((record) => alreadySplit.has(record.polygon));
-    const touchesSelectedEndpoint = splitCandidateEndpointKeys(candidate).some((endpoint) => selectedEndpoints.has(endpoint));
+    const touchesSelectedPolygon = candidate.r.some((record) => alreadySplit.has(record.polygon));
+    const touchesSelectedEndpoint = candidate.e.some((endpoint) => selectedEndpoints.has(endpoint));
     const isOneSidedTail = mode === "primary" &&
-      candidate.records.length === 1 &&
+      candidate.r.length === 1 &&
       marginalCost === 1 &&
-      (selectedComponents.has(candidate.component) || touchesSelectedEndpoint || touchesSelectedPolygon) &&
-      candidate.rankLength >= anchorLength * 1.05 &&
-      candidate.normalRisk >= 0.16 &&
-      candidate.viewRisk <= 0.32;
+      (selectedComponents.has(candidate.comp) || touchesSelectedEndpoint || touchesSelectedPolygon) &&
+      candidate.rank >= anchorLength * 1.05 &&
+      candidate.nr >= 0.16 &&
+      candidate.vr <= 0.32;
     if (isOneSidedTail) {
       selectCandidate(candidate, "local-follow-up");
       recordComponentSpend(candidate, marginalCost);
@@ -1640,16 +1400,16 @@ function selectSeamFacetSplitCandidates(
       if (remainingBudget <= 0) return { selected, budgetLimit: budgetPlan.budgetLimit };
       continue;
     }
-    if (candidate.records.length !== 2) continue;
+    if (candidate.r.length !== 2) continue;
     const isProjectedNeighbor = touchesSelectedPolygon &&
       marginalCost === 1 &&
-      candidate.projectedLength >= anchorLength * 1.45 &&
-      candidate.viewRisk <= 0.18;
+      candidate.proj >= anchorLength * 1.45 &&
+      candidate.vr <= 0.18;
     if (!touchesSelectedEndpoint && !isProjectedNeighbor) continue;
     const isLocalFollowUp = (
-      candidate.score >= sharedPolygonScore * 0.42 ||
-      candidate.rankLength >= anchorLength * 0.62
-    ) && candidate.score <= sharedPolygonScore * 1.1 && candidate.projectedLength >= 24;
+      candidate.s >= sharedPolygonScore * 0.42 ||
+      candidate.rank >= anchorLength * 0.62
+    ) && candidate.s <= sharedPolygonScore * 1.1 && candidate.proj >= 24;
     if (isLocalFollowUp) {
       selectCandidate(candidate, "local-follow-up");
       recordComponentSpend(candidate, marginalCost);
@@ -1663,14 +1423,14 @@ function selectSeamFacetSplitCandidates(
 
 function seamFacetSplitPlan(
   polygons: Polygon[],
-  seamOptions: ResolvedSeamOverlapOptions,
-  splitOptions: ResolvedSeamFacetSplitOptions,
+  seamOptions: Overlap,
+  splitOptions: Split,
   budget: number,
-  followUpContext?: SeamFacetSplitFollowUpContext,
-): SeamFacetSplitPlan {
+  followUpContext?: FollowUp,
+) {
   const metas = buildPolygonMetas(polygons);
   const records = buildEdgeRecords(polygons, metas, seamOptions.capacityScale);
-  const edgeOwners = new Map<string, EdgeRecord[]>();
+  const edgeOwners = new Map<string, Edge[]>();
   for (const record of records) {
     const owners = edgeOwners.get(record.key);
     if (owners) owners.push(record);
@@ -1683,18 +1443,10 @@ function seamFacetSplitPlan(
   return { selected: selection.selected, candidates, budgetLimit: selection.budgetLimit };
 }
 
-function seamFacetSplitSelection(
-  polygons: Polygon[],
-  seamOptions: ResolvedSeamOverlapOptions,
-  splitOptions: ResolvedSeamFacetSplitOptions,
-): Map<number, Set<number>> {
-  return seamFacetSplitPlan(polygons, seamOptions, splitOptions, splitOptions.budget).selected;
-}
-
 function applySeamFacetSplitSelection(
   polygons: Polygon[],
   selected: ReadonlyMap<number, ReadonlySet<number>>,
-): Polygon[] {
+) {
   const out: Polygon[] = [];
   for (let i = 0; i < polygons.length; i += 1) {
     const polygon = polygons[i];
@@ -1705,8 +1457,8 @@ function applySeamFacetSplitSelection(
   return out;
 }
 
-function seamFacetSplitPublicCandidate(candidate: SeamFacetSplitCandidateInternal): SeamFacetSplitCandidate {
-  const [a, b] = candidate.owners;
+function seamFacetSplitPublicCandidate(candidate: Cand) {
+  const [a, b] = candidate.o;
   const first = a ?? b;
   const second = b ?? a;
   return {
@@ -1717,29 +1469,29 @@ function seamFacetSplitPublicCandidate(candidate: SeamFacetSplitCandidateInterna
     bEdge: second?.edge ?? -1,
     color: first?.color ?? second?.color,
     materialKey: first?.materialKey ?? second?.materialKey ?? "",
-    lengthPx: candidate.length,
-    projectedLengthPx: candidate.projectedLength,
-    score: candidate.score,
-    normalRisk: candidate.normalRisk,
-    shapeRisk: candidate.shapeRisk,
-    viewRisk: candidate.viewRisk,
-    component: candidate.component,
-    marginalCost: candidate.marginalCost,
-    selected: candidate.selected,
-    reason: candidate.reason,
+    lengthPx: candidate.len,
+    projectedLengthPx: candidate.proj,
+    score: candidate.s,
+    normalRisk: candidate.nr,
+    shapeRisk: candidate.sr,
+    viewRisk: candidate.vr,
+    component: candidate.comp,
+    marginalCost: candidate.cost,
+    selected: candidate.sel,
+    reason: candidate.why,
   };
 }
 
 export function seamFacetSplitPolygons(
   polygons: Polygon[],
-  seamOptions?: number | SeamOverlapOptions,
-  splitOptions?: SeamFacetSplitOptions,
-): Polygon[] {
+  seamOptions?: number | OverlapOptions,
+  splitOptions?: SplitOptions,
+) {
   const resolved = resolveSeamOverlapOptions(seamOptions);
   const split = resolveSeamFacetSplitOptions(splitOptions);
   if (!seamOverlapEnabled(resolved, seamOptions) || polygons.length === 0) return polygons;
   let current = polygons;
-  let followUpContext: SeamFacetSplitFollowUpContext | undefined;
+  let followUpContext: FollowUp | undefined;
   let remainingBudget = split.budget;
   for (let pass = 0; pass < split.passes; pass += 1) {
     const plan = seamFacetSplitPlan(current, resolved, split, remainingBudget, followUpContext);
@@ -1760,9 +1512,9 @@ export function seamFacetSplitPolygons(
 
 export function seamFacetSplitReport(
   polygons: Polygon[],
-  seamOptions?: number | SeamOverlapOptions,
-  splitOptions?: SeamFacetSplitOptions,
-): SeamFacetSplitReport {
+  seamOptions?: number | OverlapOptions,
+  splitOptions?: SplitOptions,
+): SplitReport {
   const resolved = resolveSeamOverlapOptions(seamOptions);
   const split = resolveSeamFacetSplitOptions(splitOptions);
   if (!seamOverlapEnabled(resolved, seamOptions) || polygons.length === 0) {
@@ -1782,8 +1534,8 @@ export function seamFacetSplitReport(
 
 export function seamOverlapPolygons(
   polygons: Polygon[],
-  options?: number | SeamOverlapOptions,
-): Polygon[] {
+  options?: number | OverlapOptions,
+) {
   const resolved = resolveSeamOverlapOptions(options);
   if (!seamOverlapEnabled(resolved, options) || polygons.length === 0) return polygons;
   const { edgeRepairs } = buildSeamEdgeAmounts(polygons, resolved);
@@ -1793,9 +1545,9 @@ export function seamOverlapPolygons(
 
 export function repairMeshSeams(
   polygons: Polygon[],
-  seamOptions: number | SeamOverlapOptions = DEFAULT_SEAM_OVERLAP_OPTIONS,
-  splitOptions: SeamFacetSplitOptions = DEFAULT_SEAM_FACET_SPLIT_OPTIONS,
-): Polygon[] {
+  seamOptions: number | OverlapOptions = DEFAULT_SEAM_OVERLAP_OPTIONS,
+  splitOptions: SplitOptions = DEFAULT_SEAM_FACET_SPLIT_OPTIONS,
+) {
   if (polygons.length === 0) return polygons;
   const split = seamFacetSplitPolygons(polygons, seamOptions, splitOptions);
   return seamOverlapPolygons(split, seamOptions);
@@ -1803,8 +1555,8 @@ export function repairMeshSeams(
 
 export function seamOverlapDiagnostics(
   polygons: Polygon[],
-  options?: number | SeamOverlapOptions,
-): SeamOverlapDiagnostics {
+  options?: number | OverlapOptions,
+): OverlapDiagnostics {
   const resolved = resolveSeamOverlapOptions(options);
   if (!seamOverlapEnabled(resolved, options) || polygons.length === 0) return emptyDiagnostics();
   return buildSeamEdgeAmounts(polygons, resolved).diagnostics;
@@ -1812,8 +1564,8 @@ export function seamOverlapDiagnostics(
 
 export function seamOverlapReport(
   polygons: Polygon[],
-  options?: number | SeamOverlapOptions,
-): { diagnostics: SeamOverlapDiagnostics; candidates: SeamOverlapCandidate[] } {
+  options?: number | OverlapOptions,
+): { diagnostics: OverlapDiagnostics; candidates: OverlapCandidate[] } {
   const resolved = resolveSeamOverlapOptions(options);
   if (!seamOverlapEnabled(resolved, options) || polygons.length === 0) {
     return { diagnostics: emptyDiagnostics(), candidates: [] };

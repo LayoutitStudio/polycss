@@ -25,6 +25,7 @@ export type UseMeshOptions = LoadMeshOptions;
 
 export interface UseMeshResult {
   polygons: Ref<Polygon[]>;
+  voxelSource: Ref<ParseResult["voxelSource"]>;
   loading: Ref<boolean>;
   error: Ref<Error | null>;
   warnings: Ref<string[]>;
@@ -37,6 +38,7 @@ const EMPTY_WARNINGS: string[] = [];
 
 export function usePolyMesh(src: Ref<string>, options?: UseMeshOptions): UseMeshResult {
   const polygons = ref<Polygon[]>(EMPTY_POLYGONS);
+  const voxelSource = ref<ParseResult["voxelSource"]>(undefined);
   const loading = ref<boolean>(!!src.value);
   const error = ref<Error | null>(null);
   const warnings = ref<string[]>(EMPTY_WARNINGS);
@@ -63,6 +65,7 @@ export function usePolyMesh(src: Ref<string>, options?: UseMeshOptions): UseMesh
         // No src — clear any prior result and reset to idle.
         dispose();
         polygons.value = EMPTY_POLYGONS;
+        voxelSource.value = undefined;
         loading.value = false;
         error.value = null;
         warnings.value = EMPTY_WARNINGS;
@@ -91,6 +94,7 @@ export function usePolyMesh(src: Ref<string>, options?: UseMeshOptions): UseMesh
           }
           activeResult = result;
           polygons.value = result.polygons;
+          voxelSource.value = result.voxelSource;
           loading.value = false;
           error.value = null;
           warnings.value = result.warnings ?? EMPTY_WARNINGS;
@@ -116,6 +120,7 @@ export function usePolyMesh(src: Ref<string>, options?: UseMeshOptions): UseMesh
 
   return {
     polygons: polygons as Ref<Polygon[]>,
+    voxelSource: voxelSource as Ref<ParseResult["voxelSource"]>,
     loading,
     error,
     warnings: warnings as Ref<string[]>,

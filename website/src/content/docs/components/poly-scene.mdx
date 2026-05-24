@@ -43,7 +43,6 @@ It's available as a custom element (`<poly-scene>`), via the imperative `createP
 | `rotation` | `Vec3` | Euler rotation in degrees `[x, y, z]`. |
 | `textureLighting` | `"baked" \| "dynamic"` | Per-mesh lighting mode override. Defaults to the scene value. |
 | `textureQuality` | `number \| "auto"` | Atlas bitmap budget and compositor sprite size. React / Vue only; vanilla meshes inherit the scene's `texture-quality`. |
-| `seamBleed` | `number \| "auto"` | Solid-primitive overscan for detected shared seam edges. Defaults to the scene value (`1.5`). `"auto"` fits each edge from the polygon plan; numbers clamp the CSS-pixel amount. React / Vue only; vanilla meshes inherit the scene's `seam-bleed`. |
 | `autoCenter` | `boolean` | Shift the loaded mesh so its bounding-box center sits at the local origin before applying `position`. Useful when assets aren't centered in their file coordinates. |
 | `mtl` | `string` | Companion `.mtl` URL for OBJ models. |
 | `parseOptions` | `UseMeshOptions` | Parser options forwarded to `loadMesh`; `meshResolution` defaults to `"lossy"`. |

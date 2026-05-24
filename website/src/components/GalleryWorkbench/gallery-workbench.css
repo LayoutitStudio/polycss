@@ -491,7 +491,8 @@
 .dn-model-mesh.is-mesh-hidden > s,
 .dn-model-mesh.is-mesh-hidden > u,
 .dn-model-mesh.is-mesh-hidden > q,
-.dn-model-mesh.is-mesh-hidden > .polycss-bucket {
+.dn-model-mesh.is-mesh-hidden > .polycss-bucket,
+.dn-model-mesh.is-mesh-hidden > .polycss-normal-cull-bucket {
   display: none !important;
 }
 
@@ -1236,6 +1237,10 @@
   color: #64748b;
 }
 
+.dn-mobile-tabs {
+  display: none;
+}
+
 @media (max-width: 1100px) {
   .dn-floating-controls {
     width: fit-content;
@@ -1273,5 +1278,129 @@
     top: 8px;
     left: 8px;
     max-height: calc(100% - 16px);
+  }
+
+  .dn-root--gallery {
+    --mobile-tabs-height: 52px;
+    --mobile-panel-bottom: calc(var(--overlay-bottom) + var(--mobile-tabs-height) + 8px);
+  }
+
+  .dn-root--gallery .models-sidebar,
+  .dn-root--gallery .dn-floating-controls {
+    display: none;
+    top: auto;
+    right: var(--overlay-right);
+    bottom: var(--mobile-panel-bottom);
+    left: var(--overlay-left);
+    width: auto;
+    max-width: none;
+    z-index: 25;
+  }
+
+  .dn-root--gallery .models-sidebar {
+    height: min(58vh, calc(100% - var(--overlay-top) - var(--mobile-panel-bottom) - 8px));
+    max-height: none;
+  }
+
+  .dn-root--gallery .models-sidebar.is-mobile-open {
+    display: block;
+  }
+
+  .dn-root--gallery .models-sidebar__body {
+    height: 100%;
+    max-height: none;
+  }
+
+  .dn-root--gallery .models-sidebar__header {
+    align-items: stretch;
+    gap: 6px;
+  }
+
+  .dn-root--gallery .models-sidebar .model-search {
+    height: 34px;
+  }
+
+  .dn-root--gallery .control-btn {
+    min-height: 34px;
+    padding-inline: 8px;
+  }
+
+  .dn-root--gallery .model-button-list {
+    max-height: none;
+  }
+
+  .dn-root--gallery .dn-floating-controls {
+    height: min(66vh, calc(100% - var(--overlay-top) - var(--mobile-panel-bottom) - 8px));
+    max-height: none;
+  }
+
+  .dn-root--gallery .dn-floating-controls.is-mobile-open {
+    display: flex;
+  }
+
+  .dn-root--gallery .dn-floating-controls .dn-lil-gui-host,
+  .dn-root--gallery .dn-floating-controls .dn-lil-gui-host > .lil-gui.root {
+    width: 100% !important;
+    max-width: 100%;
+  }
+
+  .dn-root--gallery .dn-floating-controls .dn-lil-gui-host {
+    flex: 1 1 auto;
+    max-height: inherit;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .dn-root--gallery .dn-floating-controls .dn-lil-gui-host > .lil-gui.root {
+    box-sizing: border-box;
+    height: 100% !important;
+    max-height: inherit;
+  }
+
+  .dn-root--gallery .dn-floating-controls .dn-note {
+    margin: 4px 0 0;
+    padding: 0 4px;
+  }
+
+  .dn-mobile-tabs {
+    position: absolute;
+    right: var(--overlay-right);
+    bottom: var(--overlay-bottom);
+    left: var(--overlay-left);
+    z-index: 30;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+    pointer-events: auto;
+  }
+
+  .dn-mobile-tabs__button {
+    min-width: 0;
+    min-height: 44px;
+    padding: 0 10px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    background: rgba(17, 19, 22, 0.92);
+    color: #d8e2ec;
+    font: 700 13px/1 Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    cursor: pointer;
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+  }
+
+  .dn-mobile-tabs__button.is-active {
+    border-color: rgba(34, 211, 238, 0.55);
+    background: #12313a;
+    color: #ecfeff;
+  }
+
+  .dn-mobile-tabs__button--random {
+    border-color: rgba(74, 222, 128, 0.55);
+    background: #14532d;
+    color: #dcfce7;
+  }
+
+  .dn-stats-overlay {
+    display: none !important;
   }
 }
