@@ -35,7 +35,6 @@
     "bench:lossy:corpus": "pnpm --filter @layoutit/polycss-core build && node bench/lossy-corpus-bench.mjs",
     "bench:seams": "pnpm --filter @layoutit/polycss-core build && node bench/seam-gap-bench.mjs",
     "bench:seams:render": "pnpm --filter @layoutit/polycss-core build && node bench/seam-gap-bench.mjs --render",
-    "bench:voxel-report": "node bench/voxel-report.mjs",
     "bench:visual": "node bench/build.mjs && node bench/perf-visual.mjs"
   },
   "pnpm": {

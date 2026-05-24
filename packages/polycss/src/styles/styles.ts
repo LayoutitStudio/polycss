@@ -109,7 +109,23 @@ const CORE_BASE_STYLES = `
   height: 64px;
 }
 
-.polycss-mesh.polycss-voxel-mesh > b {
+.polycss-mesh.polycss-voxel-mesh > .polycss-voxel-face {
+  position: absolute;
+  display: block;
+  top: 0;
+  left: 0;
+  width: 0;
+  height: 0;
+  transform-style: preserve-3d;
+  transform-origin: 0 0;
+  margin: 0;
+  padding: 0;
+  font: inherit;
+  line-height: 0;
+  pointer-events: none;
+}
+
+.polycss-mesh.polycss-voxel-mesh > .polycss-voxel-face > b {
   top: 0;
   left: 0;
   width: var(--polycss-voxel-primitive, 1px);
