@@ -76,9 +76,6 @@ importers:
       '@layoutit/polycss':
         specifier: workspace:^
         version: link:../../packages/polycss
-      stats-js:
-        specifier: ^1.0.1
-        version: 1.0.1
     devDependencies:
       typescript:
         specifier: ^5.3.3
