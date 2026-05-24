@@ -1,20 +1,22 @@
 ---
-title: PolyOrbitControls / PolyMapControls
-description: "Additive camera input: pointer drag, wheel zoom, and frame-rate-independent autorotate."
+title: Controls
+description: "Camera and object controls: orbit, map, first-person, and transform gizmos."
 ---
 
 import { Tabs, TabItem } from '@astrojs/starlight/components';
 
-polycss ships two controls components that follow the three.js split:
+polycss ships additive controls that follow the three.js split:
 
 - **`PolyOrbitControls`**: orbit-style drag (pointer drag rotates around the scene center) + wheel zoom + autorotate. This is the default pick for most scenes.
 - **`PolyMapControls`**: map/pan-style drag (pointer drag pans the camera across the surface). Use for top-down or flat layouts.
+- **`PolyFirstPersonControls`**: pointer-lock mouselook plus WASD / arrow movement, jump, and crouch.
+- **`PolyTransformControls`**: translate / rotate gizmo for a selected mesh handle.
 
-Both are modelled on the Three.js `OrbitControls` / `MapControls` pattern: the wrapping `<poly-camera>` / `PolyCamera` element owns camera state across all paths. The controls component listens for pointer/wheel input and runs an optional `requestAnimationFrame` autorotate loop, then mutates that shared camera state.
+Camera controls mutate the wrapping `<poly-camera>` / `PolyCamera` state. Transform controls mutate the attached mesh handle via `setTransform`.
 
-They are available as custom elements (`<poly-orbit-controls>` / `<poly-map-controls>`), via the imperative `createPolyOrbitControls` / `createPolyMapControls` API, and as React / Vue components.
+They are available as custom elements, imperative APIs, and React / Vue components.
 
-## Props
+## Orbit / Map Props
 
 (React / Vue prop names use camelCase; the `<poly-orbit-controls>` / `<poly-map-controls>` custom elements accept the kebab-case form, e.g. `animate.speed` → `animate-speed`.)
 
@@ -232,6 +234,78 @@ const controls = createPolyOrbitControls(scene, {
 `PolyOrbitControls` and `PolyMapControls` are purely additive: they attach their own pointer/wheel listeners and run their own `requestAnimationFrame` loop when `animate` is on. In vanilla, state changes flow through `scene.setOptions(...)`; in React/Vue, they mutate the shared camera context and apply the transform directly.
 
 The animate tick is `dt`-clamped at 50 ms per frame and normalized to 60 Hz. That makes `speed: 0.3` produce the same ~18 deg/sec on every monitor refresh rate (60, 120, 144 Hz) and survives a tab regaining focus without a giant catch-up jump.
+
+## First-person Controls
+
+Use `PolyFirstPersonControls` for walkable scenes. Click the scene to acquire pointer lock; Escape releases it. Movement is keyboard-driven (`WASD` / arrows, Space jump, Ctrl crouch) and mouselook updates camera pitch/yaw.
+
+| Prop | Type | Default | Description |
+|------|------|---------|-------------|
+| `enabled` | `boolean` | `true` | Master switch. |
+| `lookEnabled` | `boolean` | `true` | Pointer-lock mouselook. |
+| `moveEnabled` | `boolean` | `true` | WASD / arrow-key planar movement. |
+| `jumpEnabled` | `boolean` | `true` | Space-bar jump arc. |
+| `crouchEnabled` | `boolean` | `true` | Ctrl crouch. |
+| `lookSensitivity` | `number` | `0.15` | Degrees per pointer pixel. |
+| `invertY` | `boolean` | `false` | Invert vertical look. |
+| `moveSpeed` | `number` | `5` | World units per second. |
+| `jumpVelocity` | `number` | `7` | Initial jump velocity. |
+| `gravity` | `number` | `18` | Jump gravity. |
+| `eyeHeight` | `number` | `1.7` | Standing eye height above `groundZ`. |
+| `crouchHeight` | `number` | `1` | Crouched eye height. |
+| `groundZ` | `number` | `0` | Walk plane height. |
+| `minPitch` / `maxPitch` | `number` | `5` / `175` | Pitch clamp in degrees. |
+
+```tsx
+import {
+  PolyPerspectiveCamera,
+  PolyScene,
+  PolyFirstPersonControls,
+  PolyMesh,
+} from "@layoutit/polycss-react";
+
+<PolyPerspectiveCamera perspective={1200} rotX={90} rotY={0}>
+  <PolyScene>
+    <PolyFirstPersonControls moveSpeed={8} eyeHeight={1.7} />
+    <PolyMesh src="/level.glb" />
+  </PolyScene>
+</PolyPerspectiveCamera>
+```
+
+Imperative handles expose `lock()`, `unlock()`, `isLocked()`, `getOrigin()`, `setOrigin()`, `pause()`, `resume()`, `destroy()`, and `update(partial)`.
+
+## Transform Controls
+
+`PolyTransformControls` attaches to a `PolyMeshHandle` and renders a polycss gizmo. Translate mode provides axis arrows and plane handles; rotate mode provides axis rings. Dragging updates the attached mesh directly and emits transform-change callbacks.
+
+```tsx
+import { useState } from "react";
+import {
+  PolyCamera,
+  PolyScene,
+  PolyMesh,
+  PolySelect,
+  PolyTransformControls,
+  type PolyMeshHandle,
+} from "@layoutit/polycss-react";
+
+function Editor() {
+  const [selected, setSelected] = useState<PolyMeshHandle | null>(null);
+
+  return (
+    <PolyCamera rotX={65} rotY={45}>
+      <PolyScene>
+        <PolySelect onChange={(meshes) => setSelected(meshes[0] ?? null)}>
+          <PolyMesh id="asset" src="/model.glb" />
+        </PolySelect>
+        <PolyTransformControls object={selected} mode="translate" translationSnap={10} />
+      </PolyScene>
+    </PolyCamera>
+  );
+}
+```
+
+Key props: `object`, `mode`, `size`, `showX`, `showY`, `showZ`, `translationSnap`, `rotationSnap`, `enabled`, `onChange`, `onObjectChange`, `onMouseDown`, `onMouseUp`, and `onDraggingChanged`.
 
 ## Related
 
