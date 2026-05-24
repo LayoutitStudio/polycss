@@ -63,6 +63,13 @@ function renderScene(
   return container;
 }
 
+async function flushReactWork(): Promise<void> {
+  await act(async () => {
+    await Promise.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+}
+
 describe("PolyScene — basic rendering", () => {
   afterEach(() => {
     vi.restoreAllMocks();
@@ -208,7 +215,7 @@ describe("PolyScene — autoCenter", () => {
     expect(container.querySelector(".polycss-offset")).toBeNull();
   });
 
-  it("autoCenter contributes a non-zero translate3d inside scene transform for off-center polygons", () => {
+  it("autoCenter contributes a non-zero translate3d inside scene transform for off-center polygons", async () => {
     // With autoCenter=false the translate3d for QUAD at centroid (1,1,1) reflects
     // only target=[0,0,0], so it is translate3d(0px, 0px, 0px).
     const containerOff = renderScene({ polygons: [QUAD], autoCenter: false });
@@ -222,12 +229,13 @@ describe("PolyScene — autoCenter", () => {
     // CSS: cssX = worldY*50 = 50, cssY = worldX*50 = 50, cssZ = worldZ*50 = 50.
     // Expected translate3d(-50px, -50px, -50px).
     const containerOn = renderScene({ polygons: [QUAD], autoCenter: true });
+    await flushReactWork();
     const sceneOn = containerOn.querySelector(".polycss-scene") as HTMLElement;
     const transformOn = sceneOn.style.transform;
     expect(transformOn).toContain("translate3d(-50px, -50px, -50px)");
   });
 
-  it("target and autoCenterOffset are independent: pan survives mesh bbox change", () => {
+  it("target and autoCenterOffset are independent: pan survives mesh bbox change", async () => {
     // Render with TRIANGLE (centroid ~[0.33, 0.33, 0]) centered.
     // Then switch to QUAD (centroid [1, 1, 1]) — the centering offset updates
     // but any user pan delta in target remains unaffected. The two contributions
@@ -236,6 +244,7 @@ describe("PolyScene — autoCenter", () => {
     // We verify this at the level of what matters: the scene element's
     // scene transform includes the bbox contribution without a wrapper div.
     const containerA = renderScene({ polygons: [QUAD], autoCenter: true });
+    await flushReactWork();
     const sceneA = containerA.querySelector(".polycss-scene") as HTMLElement;
     const tA = sceneA.style.transform;
     // QUAD centroid contributes (-50px, -50px, -50px)

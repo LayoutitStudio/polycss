@@ -348,12 +348,17 @@ describe("PolyScene (Vue) — strategies", () => {
 describe("PolyScene (Vue) — error (no camera context)", () => {
   it("throws when used outside PolyCamera", () => {
     const container = document.createElement("div");
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     const app = createApp({
       setup() {
         return () => h(PolyScene, {});
       },
     });
-    expect(() => app.mount(container)).toThrow();
-    document.body.innerHTML = "";
+    try {
+      expect(() => app.mount(container)).toThrow();
+    } finally {
+      warnSpy.mockRestore();
+      document.body.innerHTML = "";
+    }
   });
 });

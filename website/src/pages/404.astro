@@ -1,0 +1,73 @@
+---
+const title = "Page not found | polycss";
+const description = "The requested page could not be found.";
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title}</title>
+    <meta name="description" content={description} />
+  </head>
+  <body>
+    <main>
+      <p class="eyebrow">404</p>
+      <h1>Page not found</h1>
+      <p>The page you requested could not be found.</p>
+      <a href="/">Go home</a>
+    </main>
+  </body>
+</html>
+
+<style>
+  :global(body) {
+    margin: 0;
+    min-height: 100vh;
+    background: #0f1117;
+    color: #f4f6fb;
+    font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+
+  main {
+    min-height: 100vh;
+    display: grid;
+    align-content: center;
+    justify-items: start;
+    box-sizing: border-box;
+    width: min(100%, 720px);
+    padding: 48px 24px;
+    margin: 0 auto;
+  }
+
+  .eyebrow {
+    margin: 0 0 12px;
+    color: #9fb3d9;
+    font-size: 14px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+
+  h1 {
+    margin: 0;
+    font-size: clamp(40px, 8vw, 72px);
+    line-height: 1;
+    letter-spacing: 0;
+  }
+
+  p {
+    margin: 20px 0 0;
+    color: #c7cede;
+    font-size: 18px;
+    line-height: 1.5;
+  }
+
+  a {
+    display: inline-flex;
+    margin-top: 28px;
+    color: #f4f6fb;
+    text-decoration: underline;
+    text-underline-offset: 4px;
+  }
+</style>

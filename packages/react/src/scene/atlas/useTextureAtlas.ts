@@ -19,6 +19,17 @@ export interface TextureAtlasResult {
   ready: boolean;
 }
 
+function pageShells(pages: readonly { width: number; height: number }[]): TextureAtlasPage[] {
+  return pages.map((page) => ({ width: page.width, height: page.height, url: null }));
+}
+
+function textureAtlasPagesEqual(a: readonly TextureAtlasPage[], b: readonly TextureAtlasPage[]): boolean {
+  return a.length === b.length && a.every((page, index) => {
+    const other = b[index];
+    return page.width === other.width && page.height === other.height && page.url === other.url;
+  });
+}
+
 // ---------------------------------------------------------------------------
 // useTextureAtlas — React hook that packs plans into atlas pages with blob URLs
 // ---------------------------------------------------------------------------
@@ -50,13 +61,14 @@ export function useTextureAtlas(
   );
 
   const [pages, setPages] = useState<TextureAtlasPage[]>(
-    () => packed.pages.map((page) => ({ width: page.width, height: page.height, url: null })),
+    () => pageShells(packed.pages),
   );
 
   useEffect(() => {
     let cancelled = false;
     let urls: string[] = [];
-    setPages(packed.pages.map((page) => ({ width: page.width, height: page.height, url: null })));
+    const nextPageShells = pageShells(packed.pages);
+    setPages((prev) => textureAtlasPagesEqual(prev, nextPageShells) ? prev : nextPageShells);
 
     if (packed.pages.length === 0 || typeof document === "undefined") {
       return () => {};
@@ -71,11 +83,11 @@ export function useTextureAtlas(
           return;
         }
         urls = nextPages.flatMap((page) => page.url?.startsWith("blob:") ? [page.url] : []);
-        setPages(nextPages);
+        setPages((prev) => textureAtlasPagesEqual(prev, nextPages) ? prev : nextPages);
       })
       .catch(() => {
         if (!cancelled) {
-          setPages(packed.pages.map((page) => ({ width: page.width, height: page.height, url: null })));
+          setPages((prev) => textureAtlasPagesEqual(prev, nextPageShells) ? prev : nextPageShells);
         }
       });
 
