@@ -51,7 +51,6 @@ Useful commands are documented in `bench/notes/BENCH.md`; the common ones are:
 pnpm bench:perf
 pnpm bench:visual
 pnpm bench:trace
-pnpm bench:voxel-report
 node bench/nonvoxel-rotation-bench.mjs --run-order random
 node .agents/skills/chrome-capture-trace/scripts/trace.mjs motion --page nonvoxel --no-trace
 node bench/nonvoxel-visual-compare.mjs
@@ -85,25 +84,26 @@ Eligible baked `.vox` meshes render through the dedicated voxel path.
 | --- | --- |
 | Scene | One transform/perspective scene root. |
 | Mesh | One `.polycss-mesh` wrapper. |
-| Voxel hosts | None. |
-| Leaves | Plain hostless `<b>` direct-matrix exact voxel quads. |
+| Voxel hosts | Persistent signed-face `.polycss-voxel-face-*` wrappers (`t`, `b`, `fl`, `br`, `fr`, `bl`). |
+| Leaves | Plain `<b>` direct-matrix exact voxel quads inside the mounted signed-face wrappers. |
 | Primitive | 1px on desktop-class documents; 8px on mobile-class documents with matrix scale divided by 8. |
 | Matrix | One canonical non-degenerate `matrix3d(...)` per mounted quad, including an exact `+/-1` normal column. |
-| DOM order | Projected screen-space `tile4-scanline-forward`. |
-| Culling | Only camera-facing face directions are mounted. |
+| DOM order | Projected screen-space tile4 scanline order inside each face wrapper. |
+| Culling | Only camera-facing signed-face wrappers are mounted; camera flips patch entering/departing wrappers only. |
 
 Accepted voxel decisions:
 
 | ID | Decision | Why it stays |
 | --- | --- | --- |
 | D1 | Preserve `PolyVoxelSource` and route eligible `.vox` meshes through the dedicated path. | It avoids the general polygon path for exact voxel quads and keeps public polygon handles for fallback/bounds. |
-| D2 | Keep hostless direct-matrix leaves as the default voxel shape. | Removing axis hosts and folding orientation/depth/scale into the leaf matrix is the strongest visual-correct one-shape baseline. |
-| D3 | Keep `tile4-scanline-forward` as the default DOM order. | It is the broadest validated one-policy order; nearby tile sizes, traversal orders, depth orders, and face orders all have hard counterexamples. |
+| D2 | Keep direct-matrix `<b>` leaves grouped by signed face. | The leaf still carries the exact surface transform, while culling mutates six coarse groups instead of thousands of brush nodes. |
+| D3 | Keep tile4 scanline order inside each mounted face wrapper. | It is the current validated one-policy order for exact raw `.vox` quads. |
 | D4 | Use exact parsed voxel quads, not source overpaint, for default rendering. | Source variants reduced nodes in places but did not reliably win and carry visual risk. |
-| D5 | Keep camera-facing culling. | Mounting all six faces costs more than it saves. |
+| D5 | Keep camera-facing culling at the signed-face-wrapper level. | Mounting all six faces costs more than it saves; patching wrappers avoids the old per-brush removal stutter. |
 | D6 | Keep integer CSS cell snapping during `.vox` normalization. | It preserves direct integer matrix coordinates without adding a scale wrapper. |
 | D7 | Normalize visual fit before comparing voxel FPS. | Fixed zoom can crop or resize large voxel scenes enough to change the benchmark. |
 | D8 | Treat GPU as the default bench lane and software as an explicit stress lane. | Software-renderer ceilings produced false bottlenecks on medium scenes. |
+| D9 | Keep same-color shared-edge matrix overscan for direct voxel quads. | It repairs compositor seams without adding atlas work or fattening isolated exterior edges. |
 
 ### Non-Voxel Polygon Path
 
@@ -240,40 +240,13 @@ plane count, especially `AncientCrashSite`, `skyscraper`, and long-window
 These are the few historical tables worth keeping inline because they prevent
 old ideas from being re-argued.
 
-### Voxel Order Baseline
+### Voxel Direct Path
 
-Validation that made `tile4-scanline-forward` the one-strategy default:
-
-| Model | Prior slice p95 | Tile4 scanline p95 | Read |
-| --- | ---: | ---: | --- |
-| `obj_house3.vox` | 59.9 | 113.6 | Rescues the face/locality counterexample. |
-| `obj_house5.vox` | 59.9 | 113.4 | Validated win. |
-| `desert2.vox` | 59.5 | 113.6 | Validated win. |
-| `house.vox` | 59.9 | 114.7 | Validated win. |
-| `scene_mechanic2.vox` | 40.0 | 113.5 | Validated win. |
-| `Treasure.vox` | 30.5 | 58.5 | Moves into the about-60 FPS class. |
-| `army.vox` | 39.8 | 42.1 | Weak; still needs better interval analysis. |
-| `AncientCrashSite.vox` | 39.8 | 39.8 | Neutral; remains hard. |
-| `skyscraper.vox` | 23.7 | 29.9 | Modest; still hard. |
-
-Rejected replacements after this result: `tile4-depth-front`, tile3/tile5/tile6
-scanlines, tile4 serpentine, Morton traversal, full face order, full depth
-order, dense-tile face order, and centered/lookahead interval phases.
-
-### Old Matrix-Vs-Slice Selector
-
-Do not revive the old `.vox` matrix-vs-slice router without new GPU-hard proof.
-
-The 86-model cadence corpus found matrix p95 wins on `desert2`,
-`scene_hazmat`, `scene_house`, `scene_mechanic2`, `scene_sidewalk`, and
-`Treasure`; slice p95 wins on `AncientCrashSite`, `armchair`,
-`christmas_tree`, `ff1`, `mailbox`, `obj_house3`, `obj_house8`,
-`obj_trashcan4`, `pyramid`, and `scene_park`; 66 models were flat or capped.
-
-`visibleShadedColors >= 52 && visiblePlanes < 200` was the safest partial
-gate. It caught several high-shaded matrix wins and avoided known p99 risk, but
-it missed `desert2`, hit many capped models, and changed with browser mode.
-Hostless direct matrix plus tile4 order superseded the router direction.
+The current voxel path is one implementation: exact raw `.vox` quads render as
+direct-matrix `<b>` leaves inside persistent signed-face wrappers. There is no
+runtime matrix-vs-alternate renderer selector, no source-overpaint planner, and
+no alternate voxel planner. Experiments that did not become this path should stay
+out of product code and out of benchmark scripts.
 
 ### Non-Voxel Rotation
 
@@ -354,14 +327,14 @@ visual-correct implementation that changes the premise.
 | Root transform spelling changes (`matrix3d`, perspective placement, inner target shell, transform-function perspective) | Longer validation was flat or worse. |
 | CSS variables, registered variables, or individual `rotate` for interactive camera motion | They still hit PAC/layerize like normal JS transform mutation. |
 | JS-scrubbed WAAPI or scroll-timeline camera controls | Scrubbing from JS still hit PAC once per frame. |
-| Leaf `transform-style: flat` | Catastrophic regressions, including hostless direct-matrix voxel leaves. |
+| Leaf `transform-style: flat` | Catastrophic regressions on direct-matrix voxel leaves. |
 | Leaf or host `backface-visibility: hidden` | Fast-looking variants either failed visual checks or lost the win once oriented correctly. |
 
 ### Voxel DOM Shape
 
 | Direction | Why closed |
 | --- | --- |
-| Axis hosts, host+brush matrix, or voxel slice hosts as the main shape | Hostless direct canonical matrix leaves are the transferable win. |
+| Axis hosts or host+brush matrix as the main shape | The current path uses signed-face hosts only as culling groups; each brush remains a direct canonical matrix leaf. |
 | Mount all six face directions | Extra active DOM dominates mutation savings. |
 | Hide pooled leaves instead of removing unused faces | Flat to worse. |
 | Split large brushes or source-overpaint planners | More leaves or visual risk without reliable p95/p99 wins. |

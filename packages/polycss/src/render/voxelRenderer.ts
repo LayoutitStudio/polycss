@@ -8,12 +8,25 @@ import type {
 } from "@layoutit/polycss-core";
 import {
   BASE_TILE,
+  computeProjectiveQuadMatrix,
   normalFacesCamera,
   parsePureColor,
+  PROJECTIVE_QUAD_BLEED,
+  resolveProjectiveQuadGuards,
   rotateVec3,
+  SOLID_QUAD_CANONICAL_SIZE,
 } from "@layoutit/polycss-core";
 
 type Axis = "x" | "y" | "z";
+type VoxelSeamSide = "left" | "right" | "top" | "bottom";
+type WorldAxisIndex = 0 | 1 | 2;
+
+interface VoxelSeamBleed {
+  left: number;
+  right: number;
+  top: number;
+  bottom: number;
+}
 
 interface BrushState {
   color?: string;
@@ -24,8 +37,11 @@ type BrushElement = HTMLElement & {
   __polycssVoxelBrushState?: BrushState;
 };
 
+type FaceHostElement = HTMLElement & {
+  __polycssVoxelFaceHost?: true;
+};
+
 export interface PolyVoxelRenderer {
-  readonly element: HTMLElement;
   readonly brushCount: number;
   render(rotation: CameraCullRotation): void;
   syncCamera(rotation: CameraCullRotation): void;
@@ -52,6 +68,16 @@ interface DirectMatrixItem {
   z: number;
   baseColor: string;
   sourceIndex: number;
+  bleed: VoxelSeamBleed;
+}
+
+interface VoxelSeamSegment {
+  item: DirectMatrixItem;
+  side: VoxelSeamSide;
+  variableAxis: WorldAxisIndex;
+  fixed: [number, number, number];
+  start: number;
+  end: number;
 }
 
 const DEFAULT_LIGHT_DIR: Vec3 = [0.4, -0.7, 0.59];
@@ -61,6 +87,9 @@ const DEFAULT_AMBIENT_COLOR = "#ffffff";
 const DEFAULT_AMBIENT_INTENSITY = 0.4;
 const DESKTOP_PRIMITIVE_SIZE = 1;
 const MOBILE_PRIMITIVE_SIZE = 8;
+const VOXEL_SEAM_BLEED = PROJECTIVE_QUAD_BLEED;
+const VOXEL_SEAM_EPS = 1e-6;
+const VOXEL_PROJECTIVE_QUAD_GUARDS = resolveProjectiveQuadGuards({ bleed: 0 });
 
 const FACE_NORMALS: Record<PolyVoxelFace, Vec3> = {
   t: [0, 0, 1],
@@ -169,6 +198,7 @@ function polygonBrush(polygon: Polygon): Omit<DirectMatrixItem, "sourceIndex"> |
       height: Math.max(0, (maxX - minX) * BASE_TILE),
       z: minZ * BASE_TILE,
       baseColor,
+      bleed: zeroVoxelSeamBleed(),
     };
   }
   if (Math.abs(maxX - minX) <= eps) {
@@ -181,6 +211,7 @@ function polygonBrush(polygon: Polygon): Omit<DirectMatrixItem, "sourceIndex"> |
       height: Math.max(0, (maxZ - minZ) * BASE_TILE),
       z: -minX * BASE_TILE,
       baseColor,
+      bleed: zeroVoxelSeamBleed(),
     };
   }
   if (Math.abs(maxY - minY) <= eps) {
@@ -193,9 +224,118 @@ function polygonBrush(polygon: Polygon): Omit<DirectMatrixItem, "sourceIndex"> |
       height: Math.max(0, (maxX - minX) * BASE_TILE),
       z: -minY * BASE_TILE,
       baseColor,
+      bleed: zeroVoxelSeamBleed(),
     };
   }
   return null;
+}
+
+function zeroVoxelSeamBleed(): VoxelSeamBleed {
+  return { left: 0, right: 0, top: 0, bottom: 0 };
+}
+
+function worldLineKey(segment: VoxelSeamSegment): string {
+  const coordKey = (value: number): string => String(Number(value.toFixed(6)));
+  let key = `${segment.item.baseColor}|${segment.variableAxis}`;
+  for (let axis = 0; axis < 3; axis += 1) {
+    if (axis === segment.variableAxis) continue;
+    key += `|${axis}:${coordKey(segment.fixed[axis])}`;
+  }
+  return key;
+}
+
+function cssPointForVertex(v: Vec3): Vec3 {
+  return [v[1] * BASE_TILE, v[0] * BASE_TILE, v[2] * BASE_TILE];
+}
+
+function localPointForItem(item: DirectMatrixItem, p: Vec3): [number, number] {
+  if (item.axis === "x") return [p[0], p[2]];
+  if (item.axis === "y") return [p[2], p[1]];
+  return [p[0], p[1]];
+}
+
+function sideForLocalEdge(
+  item: DirectMatrixItem,
+  a: [number, number],
+  b: [number, number],
+): VoxelSeamSide | null {
+  const left = item.left;
+  const right = item.left + item.width;
+  const top = item.top;
+  const bottom = item.top + item.height;
+  if (Math.abs(a[0] - b[0]) <= VOXEL_SEAM_EPS) {
+    if (Math.abs(a[0] - left) <= VOXEL_SEAM_EPS) return "left";
+    if (Math.abs(a[0] - right) <= VOXEL_SEAM_EPS) return "right";
+  }
+  if (Math.abs(a[1] - b[1]) <= VOXEL_SEAM_EPS) {
+    if (Math.abs(a[1] - top) <= VOXEL_SEAM_EPS) return "top";
+    if (Math.abs(a[1] - bottom) <= VOXEL_SEAM_EPS) return "bottom";
+  }
+  return null;
+}
+
+function variableAxisForSegment(a: Vec3, b: Vec3): WorldAxisIndex | null {
+  let axis: WorldAxisIndex | null = null;
+  for (let i = 0; i < 3; i += 1) {
+    if (Math.abs(a[i] - b[i]) <= VOXEL_SEAM_EPS) continue;
+    if (axis !== null) return null;
+    axis = i as WorldAxisIndex;
+  }
+  return axis;
+}
+
+function voxelSeamSegmentForEdge(
+  item: DirectMatrixItem,
+  polygon: Polygon,
+  edgeIndex: number,
+): VoxelSeamSegment | null {
+  const vertices = polygon.vertices;
+  const a = cssPointForVertex(vertices[edgeIndex]);
+  const b = cssPointForVertex(vertices[(edgeIndex + 1) % vertices.length]);
+  const side = sideForLocalEdge(item, localPointForItem(item, a), localPointForItem(item, b));
+  if (!side) return null;
+  const variableAxis = variableAxisForSegment(a, b);
+  if (variableAxis === null) return null;
+  const start = Math.min(a[variableAxis], b[variableAxis]);
+  const end = Math.max(a[variableAxis], b[variableAxis]);
+  return end - start > VOXEL_SEAM_EPS
+    ? { item, side, variableAxis, fixed: a, start, end }
+    : null;
+}
+
+function markVoxelSeam(segment: VoxelSeamSegment): void {
+  segment.item.bleed[segment.side] = Math.max(segment.item.bleed[segment.side], VOXEL_SEAM_BLEED);
+}
+
+function applyVoxelSeamBleed(polygons: readonly Polygon[], items: DirectMatrixItem[]): void {
+  const groups = new Map<string, VoxelSeamSegment[]>();
+  for (const item of items) {
+    const polygon = polygons[item.sourceIndex];
+    if (!polygon) continue;
+    for (let edgeIndex = 0; edgeIndex < polygon.vertices.length; edgeIndex += 1) {
+      const segment = voxelSeamSegmentForEdge(item, polygon, edgeIndex);
+      if (!segment) continue;
+      const key = worldLineKey(segment);
+      const group = groups.get(key);
+      if (group) group.push(segment);
+      else groups.set(key, [segment]);
+    }
+  }
+
+  for (const segments of groups.values()) {
+    if (segments.length < 2) continue;
+    segments.sort((a, b) => a.start - b.start || a.end - b.end);
+    let active: VoxelSeamSegment[] = [];
+    for (const segment of segments) {
+      active = active.filter((candidate) => candidate.end > segment.start + VOXEL_SEAM_EPS);
+      for (const candidate of active) {
+        if (candidate.item.sourceIndex === segment.item.sourceIndex) continue;
+        markVoxelSeam(candidate);
+        markVoxelSeam(segment);
+      }
+      active.push(segment);
+    }
+  }
 }
 
 function parseColor(input: string): RGB {
@@ -262,28 +402,94 @@ function buildDirectMatrixItems(polygons: readonly Polygon[] | undefined): Direc
       sourceIndex,
     });
   }
+  applyVoxelSeamBleed(polygons, items);
   return items;
 }
 
-function directMatrix(
-  axis: Axis,
-  left: number,
-  top: number,
-  width: number,
-  height: number,
-  zOffset: number,
-  primitiveSize: number,
-): string {
+function voxelProjectiveBasis(item: DirectMatrixItem): {
+  xAxis: Vec3;
+  yAxis: Vec3;
+  normal: Vec3;
+  tx: number;
+  ty: number;
+  tz: number;
+} {
+  if (item.axis === "x") {
+    return {
+      xAxis: [1, 0, 0],
+      yAxis: [0, 0, 1],
+      normal: [0, -1, 0],
+      tx: 0,
+      ty: -item.z,
+      tz: 0,
+    };
+  }
+  if (item.axis === "y") {
+    return {
+      xAxis: [0, 0, 1],
+      yAxis: [0, 1, 0],
+      normal: [-1, 0, 0],
+      tx: -item.z,
+      ty: 0,
+      tz: 0,
+    };
+  }
+  return {
+    xAxis: [1, 0, 0],
+    yAxis: [0, 1, 0],
+    normal: [0, 0, 1],
+    tx: 0,
+    ty: 0,
+    tz: item.z,
+  };
+}
+
+function voxelScreenPts(item: DirectMatrixItem): number[] {
+  const left = item.left;
+  const top = item.top;
+  const right = item.left + item.width;
+  const bottom = item.top + item.height;
+  return [
+    left, top,
+    right, top,
+    right, bottom,
+    left, bottom,
+  ];
+}
+
+function voxelSeamEdgeAmounts(item: DirectMatrixItem): Map<number, number> {
+  return new Map([
+    [0, item.bleed.top],
+    [1, item.bleed.right],
+    [2, item.bleed.bottom],
+    [3, item.bleed.left],
+  ]);
+}
+
+function rescaleProjectiveMatrix(matrix: string, primitiveSize: number): string | null {
+  const values = matrix.split(",").map(Number);
+  if (values.length !== 16 || values.some((value) => !Number.isFinite(value))) return null;
+  const scale = SOLID_QUAD_CANONICAL_SIZE / primitiveSize;
+  for (let i = 0; i < 8; i += 1) values[i] *= scale;
+  return `matrix3d(${values.map((value) => Number(value.toFixed(6))).join(",")})`;
+}
+
+function affineVoxelMatrix(item: DirectMatrixItem, primitiveSize: number): string {
+  const left = item.left - item.bleed.left;
+  const top = item.top - item.bleed.top;
+  const width = item.width + item.bleed.left + item.bleed.right;
+  const height = item.height + item.bleed.top + item.bleed.bottom;
+  const zOffset = item.z;
   const scaleX = width / primitiveSize;
   const scaleY = height / primitiveSize;
-  const values = axis === "x"
+  const values = item.axis === "x"
     ? [
         scaleX, 0, 0, 0,
         0, 0, scaleY, 0,
         0, -1, 0, 0,
         left, -zOffset, top, 1,
       ]
-    : axis === "y"
+    : item.axis === "y"
       ? [
           0, 0, scaleX, 0,
           0, scaleY, 0, 0,
@@ -297,6 +503,24 @@ function directMatrix(
           left, top, zOffset, 1,
         ];
   return `matrix3d(${values.map((value) => Number(value.toFixed(6))).join(",")})`;
+}
+
+function directMatrix(item: DirectMatrixItem, primitiveSize: number): string {
+  const { xAxis, yAxis, normal, tx, ty, tz } = voxelProjectiveBasis(item);
+  const projective = computeProjectiveQuadMatrix(
+    voxelScreenPts(item),
+    xAxis,
+    yAxis,
+    normal,
+    tx,
+    ty,
+    tz,
+    VOXEL_PROJECTIVE_QUAD_GUARDS,
+    voxelSeamEdgeAmounts(item),
+  );
+  return projective
+    ? rescaleProjectiveMatrix(projective, primitiveSize) ?? affineVoxelMatrix(item, primitiveSize)
+    : affineVoxelMatrix(item, primitiveSize);
 }
 
 function isMobileDocument(doc: Document): boolean {
@@ -389,6 +613,7 @@ export function createPolyVoxelRenderer(
   const { doc, wrapper, polygons, directionalLight, ambientLight } = options;
   const directMatrixItems = buildDirectMatrixItems(polygons);
   if (directMatrixItems.length === 0) return null;
+  const itemFaces = new Set(directMatrixItems.map((item) => item.face));
   wrapper.classList.add("polycss-voxel-mesh");
   const primitiveSize = primitiveSizeForDocument(doc);
   if (primitiveSize !== DESKTOP_PRIMITIVE_SIZE) {
@@ -405,55 +630,183 @@ export function createPolyVoxelRenderer(
     return shaded;
   };
 
-  const pool: BrushElement[] = [];
+  const elementBySourceIndex = new Map<number, BrushElement>();
+  const hostByFace = new Map<PolyVoxelFace, FaceHostElement>();
+  const faceOrderKeys = new Map<PolyVoxelFace, string>();
+  const directMatrixItemsByFace = new Map<PolyVoxelFace, DirectMatrixItem[]>();
+  for (const item of directMatrixItems) {
+    let faceItems = directMatrixItemsByFace.get(item.face);
+    if (!faceItems) {
+      faceItems = [];
+      directMatrixItemsByFace.set(item.face, faceItems);
+    }
+    faceItems.push(item);
+  }
   let lastSignature = "";
   let mountedBrushCount = 0;
+  let mountedFaces = new Set<PolyVoxelFace>();
 
-  const nextBrush = (index: number): BrushElement => {
-    let el = pool[index];
+  const brushForItem = (item: DirectMatrixItem): BrushElement => {
+    let el = elementBySourceIndex.get(item.sourceIndex);
     if (!el) {
       el = doc.createElement("b") as BrushElement;
-      pool[index] = el;
-    }
-    if (el.parentElement !== wrapper) wrapper.appendChild(el);
-    return el;
-  };
-
-  const draw = (signature: string, rotation: CameraCullRotation): void => {
-    const visibleFaces = new Set(signature.split("|").filter(Boolean) as PolyVoxelFace[]);
-    const orderedItems = orderDirectMatrixItems(directMatrixItems, visibleFaces, rotation);
-    mountedBrushCount = 0;
-    for (const item of orderedItems) {
-      const el = nextBrush(mountedBrushCount);
+      elementBySourceIndex.set(item.sourceIndex, el);
       applyBrush(
         el,
         shadedColor(item.face, item.baseColor),
-        directMatrix(item.axis, item.left, item.top, item.width, item.height, item.z, primitiveSize),
+        directMatrix(item, primitiveSize),
       );
-      mountedBrushCount += 1;
     }
-    for (let i = mountedBrushCount; i < pool.length; i += 1) pool[i]?.remove();
+    return el;
   };
 
+  const hostForFace = (face: PolyVoxelFace): FaceHostElement => {
+    let host = hostByFace.get(face);
+    if (!host) {
+      host = doc.createElement("span") as FaceHostElement;
+      host.className = `polycss-voxel-face polycss-voxel-face-${face}`;
+      host.dataset.polycssVoxelFace = face;
+      host.__polycssVoxelFaceHost = true;
+      hostByFace.set(face, host);
+    }
+    return host;
+  };
+
+  const firstPreservedChild = (): ChildNode | null => {
+    for (const child of Array.from(wrapper.childNodes)) {
+      if ((child as FaceHostElement).__polycssVoxelFaceHost) continue;
+      return child;
+    }
+    return null;
+  };
+
+  const syncFaceHost = (face: PolyVoxelFace, items: readonly DirectMatrixItem[]): void => {
+    const nextOrderKey = items.map((item) => item.sourceIndex).join(",");
+    if (faceOrderKeys.get(face) === nextOrderKey) return;
+    const host = hostForFace(face);
+    const fragment = doc.createDocumentFragment();
+    for (const item of items) fragment.appendChild(brushForItem(item));
+    host.replaceChildren(fragment);
+    faceOrderKeys.set(face, nextOrderKey);
+  };
+
+  const prebuildFaceHosts = (): void => {
+    for (const face of FACE_ORDER) {
+      if (!itemFaces.has(face)) continue;
+      syncFaceHost(face, directMatrixItemsByFace.get(face) ?? []);
+    }
+  };
+
+  const facesForSignature = (signature: string): Set<PolyVoxelFace> =>
+    new Set(signature.split("|").filter(Boolean) as PolyVoxelFace[]);
+
+  const faceOrderForSignature = (signature: string): PolyVoxelFace[] => {
+    const visibleFaces = facesForSignature(signature);
+    return FACE_ORDER.filter((face) => visibleFaces.has(face) && itemFaces.has(face));
+  };
+
+  const countBrushesForFaces = (faces: Iterable<PolyVoxelFace>): number => {
+    let count = 0;
+    for (const face of faces) count += directMatrixItemsByFace.get(face)?.length ?? 0;
+    return count;
+  };
+
+  const itemsByFaceOrder = (
+    orderedItems: readonly DirectMatrixItem[],
+  ): { orderedFaces: PolyVoxelFace[]; itemsByFace: Map<PolyVoxelFace, DirectMatrixItem[]> } => {
+    const seen = new Set<PolyVoxelFace>();
+    const orderedFaces: PolyVoxelFace[] = [];
+    const itemsByFace = new Map<PolyVoxelFace, DirectMatrixItem[]>();
+    for (const item of orderedItems) {
+      if (!seen.has(item.face)) {
+        seen.add(item.face);
+        orderedFaces.push(item.face);
+      }
+      let faceItems = itemsByFace.get(item.face);
+      if (!faceItems) {
+        faceItems = [];
+        itemsByFace.set(item.face, faceItems);
+      }
+      faceItems.push(item);
+    }
+    return { orderedFaces, itemsByFace };
+  };
+
+  const mountFaceHosts = (orderedFaces: readonly PolyVoxelFace[], reorderMountedFaces: boolean): void => {
+    const nextFaces = new Set(orderedFaces);
+    for (const face of mountedFaces) {
+      if (nextFaces.has(face)) continue;
+      const host = hostByFace.get(face);
+      if (host?.parentNode === wrapper) wrapper.removeChild(host);
+    }
+
+    if (reorderMountedFaces) {
+      const fragment = doc.createDocumentFragment();
+      for (const face of orderedFaces) fragment.appendChild(hostForFace(face));
+      wrapper.insertBefore(fragment, firstPreservedChild());
+      mountedFaces = nextFaces;
+      return;
+    }
+
+    for (let i = 0; i < orderedFaces.length; i += 1) {
+      const face = orderedFaces[i];
+      const host = hostForFace(face);
+      if (host.parentNode === wrapper) continue;
+      let reference: ChildNode | null = null;
+      for (let j = i + 1; j < orderedFaces.length; j += 1) {
+        const nextHost = hostByFace.get(orderedFaces[j]);
+        if (nextHost?.parentNode === wrapper) {
+          reference = nextHost;
+          break;
+        }
+      }
+      wrapper.insertBefore(host, reference ?? firstPreservedChild());
+    }
+    mountedFaces = nextFaces;
+  };
+
+  const draw = (signature: string, rotation: CameraCullRotation, syncOrder: boolean): void => {
+    if (!syncOrder) {
+      const orderedFaces = faceOrderForSignature(signature);
+      mountFaceHosts(orderedFaces, false);
+      mountedBrushCount = countBrushesForFaces(orderedFaces);
+      return;
+    }
+
+    const visibleFaces = new Set(signature.split("|").filter(Boolean) as PolyVoxelFace[]);
+    const orderedItems = orderDirectMatrixItems(directMatrixItems, visibleFaces, rotation);
+    const { orderedFaces, itemsByFace } = itemsByFaceOrder(orderedItems);
+
+    for (const face of orderedFaces) {
+      syncFaceHost(face, itemsByFace.get(face) ?? []);
+    }
+    mountFaceHosts(orderedFaces, true);
+    mountedBrushCount = orderedItems.length;
+  };
+
+  prebuildFaceHosts();
+
   return {
-    element: wrapper,
     get brushCount() { return mountedBrushCount; },
     render(rotation: CameraCullRotation) {
       lastSignature = visibleFaceSignature(rotation);
-      draw(lastSignature, rotation);
+      draw(lastSignature, rotation, true);
     },
     syncCamera(rotation: CameraCullRotation) {
       const nextSignature = visibleFaceSignature(rotation);
       if (nextSignature === lastSignature) return;
       lastSignature = nextSignature;
-      draw(nextSignature, rotation);
+      draw(nextSignature, rotation, false);
     },
     dispose() {
-      for (const el of pool) el.remove();
+      for (const host of hostByFace.values()) host.remove();
       wrapper.classList.remove("polycss-voxel-mesh");
       wrapper.style.removeProperty("--polycss-voxel-primitive");
-      pool.length = 0;
+      elementBySourceIndex.clear();
+      hostByFace.clear();
+      faceOrderKeys.clear();
       mountedBrushCount = 0;
+      mountedFaces = new Set();
       lastSignature = "";
     },
   };

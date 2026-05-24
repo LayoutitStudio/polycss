@@ -20,7 +20,6 @@ pnpm bench:animated-human   # build bundles + run the animated human run bench
 pnpm bench:trace            # build bundles + run the trace analysis bucket profiler
 pnpm bench:lossy            # compare lossless / current lossy counts
 pnpm bench:lossy:corpus     # scan gallery GLB/OBJ lossy counts + crack diagnostics
-pnpm bench:voxel-report     # summarize voxel cadence results
 pnpm bench:visual           # screenshot diff against bench/baselines/*.png
 pnpm bench:visual --record  # capture new baselines (after intentional renderer changes)
 pnpm bench:build            # just rebuild the bench bundles (rarely needed alone)
@@ -42,7 +41,6 @@ node bench/lossy-optimizer-bench.mjs --json bench/results/lossy-optimizer.json
 node bench/lossy-optimizer-bench.mjs --models ducky,shark,bicycle
 node bench/lossy-corpus-bench.mjs --root /tmp/polycss-model-corpus --json /tmp/polycss-temp-corpus.json
 node bench/lossy-corpus-bench.mjs --from-json bench/results/lossy-corpus.json --opportunities
-node bench/voxel-report.mjs all
 node .agents/skills/chrome-capture-trace/scripts/trace.mjs motion --mesh garden --runs 3 --dom-samples --report --markdown-out bench/results/garden-trace.md
 node bench/perf-visual.mjs --mesh chicken --tolerance 0.005
 node bench/nonvoxel-rotation-bench.mjs --models teapot,bicycle --variants baseline,order-tile4 --run-order round-robin
@@ -229,8 +227,6 @@ bench/
                          de-dupes a single instance.
   perf-bench.mjs         Playwright runner. Fresh chromium per scenario,
                          ephemeral port, structured JSON output.
-  voxel-report.mjs       Consolidated voxel cadence/browser report over
-                         existing bench/results JSON.
   animated-human-bench.mjs
                          GPU-default Playwright runner for the animated
                          human run sequence. Reports FPS, mixer/update cost,

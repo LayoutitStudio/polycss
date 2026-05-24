@@ -29,6 +29,9 @@ function makeScene(
   return createPolyScene(host, { camera: makeCamera(cameraOpts), ...sceneOpts });
 }
 
+const DIRECT_VOXEL_FACE_SELECTOR = ".polycss-mesh > .polycss-voxel-face";
+const DIRECT_VOXEL_BRUSH_SELECTOR = `${DIRECT_VOXEL_FACE_SELECTOR} > b`;
+
 function triangle(color = "#ff0000"): Polygon {
   return {
     vertices: [
@@ -219,6 +222,22 @@ function makeVoxelExactParseResult(): ParseResult {
   };
 }
 
+function makeVoxelExactPolygonsParseResult(polygons: Polygon[]): ParseResult {
+  return {
+    ...makeParseResult(polygons),
+    voxelSource: {
+      kind: "magica-vox",
+      cells: [{ x: 0, y: 0, z: 0, color: "#ff0000" }],
+      rows: 1,
+      cols: 1,
+      depth: 1,
+      scale: 1,
+      gridShift: 0,
+      sourceBytes: 64,
+    },
+  };
+}
+
 function makeTwoSidedVoxelExactParseResult(): ParseResult {
   return {
     ...makeParseResult([topQuad("#ff0000"), backTopQuad("#00ff00")]),
@@ -277,6 +296,12 @@ function getSceneEl(host: HTMLElement): HTMLElement {
   const sceneEl = host.querySelector(".polycss-scene") as HTMLElement | null;
   expect(sceneEl).not.toBeNull();
   return sceneEl!;
+}
+
+function matrixValues(el: HTMLElement): number[] {
+  const match = el.style.transform.match(/^matrix3d\(([^)]+)\)$/);
+  expect(match).not.toBeNull();
+  return match![1].split(",").map(Number);
 }
 
 /** Extract the innermost translate3d(...) from the scene transform value. */
@@ -429,8 +454,11 @@ describe("createPolyScene", () => {
     it("routes exact raw vox sources through the direct voxel renderer", () => {
       scene = makeScene(host);
       scene.add(makeVoxelExactParseResult(), { merge: false });
-      const voxelBrushes = Array.from(host.querySelectorAll(".polycss-mesh > b"));
+      const voxelBrushes = Array.from(host.querySelectorAll(DIRECT_VOXEL_BRUSH_SELECTOR));
+      const faceHosts = Array.from(host.querySelectorAll(DIRECT_VOXEL_FACE_SELECTOR));
       expect(host.querySelector(".polycss-voxel-host-z")).toBeNull();
+      expect(faceHosts.length).toBeGreaterThan(0);
+      expect(host.querySelector(".polycss-mesh > b")).toBeNull();
       expect(voxelBrushes.length).toBeGreaterThan(0);
       expect(voxelBrushes.every((el) => el.tagName === "B")).toBe(true);
       expect(host.querySelector(".polycss-mesh")?.classList.contains("polycss-voxel-mesh")).toBe(true);
@@ -453,7 +481,7 @@ describe("createPolyScene", () => {
         ambientLight: { color: "#ffffff", intensity: 0 },
       }, { rotX: 0, rotY: 0 });
       scene.add(makeVoxelExactParseResult(), { merge: false });
-      const brush = host.querySelector(".polycss-mesh > b") as HTMLElement | null;
+      const brush = host.querySelector(DIRECT_VOXEL_BRUSH_SELECTOR) as HTMLElement | null;
       expect(brush).not.toBeNull();
       expect(brush!.style.color).toMatch(/^(#000000|rgb\\(0, 0, 0\\))$/);
     });
@@ -464,12 +492,51 @@ describe("createPolyScene", () => {
         ambientLight: { color: "#ffffff", intensity: 1 },
       }, { rotX: 65, rotY: 45 });
       scene.add(makeVoxelExactParseResult(), { merge: false });
-      const brush = host.querySelector(".polycss-mesh > b") as HTMLElement | null;
+      const brush = host.querySelector(DIRECT_VOXEL_BRUSH_SELECTOR) as HTMLElement | null;
       expect(brush).not.toBeNull();
       expect(brush!.style.color).toMatch(/^(#123456|rgb\\(18, 52, 86\\))$/);
       expect(brush!.style.width).toBe("");
       expect(brush!.style.height).toBe("");
       expect(brush!.style.transform).toContain("matrix3d(50,0,0,0,0,50");
+    });
+
+    it("adds tiny overscan to same-color shared direct voxel edges", () => {
+      scene = makeScene(host, {
+        directionalLight: { direction: [0, 0, 1], color: "#ffffff", intensity: 0 },
+        ambientLight: { color: "#ffffff", intensity: 1 },
+      }, { rotX: 65, rotY: 45 });
+      scene.add(makeVoxelExactPolygonsParseResult([
+        topQuad("#123456"),
+        sideQuad("#123456"),
+      ]), { merge: false });
+
+      const brushes = Array.from(host.querySelectorAll(DIRECT_VOXEL_BRUSH_SELECTOR)) as HTMLElement[];
+      expect(brushes.length).toBeGreaterThan(0);
+      const matrices = brushes.map(matrixValues);
+      expect(matrices.some((values) =>
+        values.some((value) => Math.abs(value - 50.6) <= 1e-6)
+      )).toBe(true);
+    });
+
+    it("keeps different-color shared direct voxel edges exact", () => {
+      scene = makeScene(host, {
+        directionalLight: { direction: [0, 0, 1], color: "#ffffff", intensity: 0 },
+        ambientLight: { color: "#ffffff", intensity: 1 },
+      }, { rotX: 65, rotY: 45 });
+      scene.add(makeVoxelExactPolygonsParseResult([
+        topQuad("#123456"),
+        sideQuad("#654321"),
+      ]), { merge: false });
+
+      const brushes = Array.from(host.querySelectorAll(DIRECT_VOXEL_BRUSH_SELECTOR)) as HTMLElement[];
+      expect(brushes.length).toBeGreaterThan(0);
+      const matrices = brushes.map(matrixValues);
+      expect(matrices.every((values) =>
+        values.every((value) => Math.abs(value - 50.6) > 1e-6)
+      )).toBe(true);
+      expect(matrices.every((values) =>
+        values.every((value) => Math.abs(value + 0.6) > 1e-6)
+      )).toBe(true);
     });
 
     it("uses a larger direct voxel primitive on mobile-class documents", () => {
@@ -494,7 +561,7 @@ describe("createPolyScene", () => {
         }, { rotX: 65, rotY: 45 });
         scene.add(makeVoxelExactParseResult(), { merge: false });
         const wrapper = host.querySelector(".polycss-mesh") as HTMLElement | null;
-        const brush = host.querySelector(".polycss-mesh > b") as HTMLElement | null;
+        const brush = host.querySelector(DIRECT_VOXEL_BRUSH_SELECTOR) as HTMLElement | null;
         expect(wrapper).not.toBeNull();
         expect(brush).not.toBeNull();
         expect(wrapper!.style.getPropertyValue("--polycss-voxel-primitive")).toBe("8px");
@@ -513,17 +580,17 @@ describe("createPolyScene", () => {
       scene = makeScene(host);
       scene.add(makeVoxelParseResult(), { merge: false });
       expect(host.querySelector(".polycss-voxel-host-z")).toBeNull();
-      expect(host.querySelector(".polycss-mesh > b")).toBeNull();
+      expect(host.querySelector(DIRECT_VOXEL_BRUSH_SELECTOR)).toBeNull();
       expect(host.querySelector("i,b,s,u")).not.toBeNull();
     });
 
     it("falls back to polygon rendering after setPolygons replaces vox source geometry", () => {
       scene = makeScene(host);
       const handle = scene.add(makeVoxelExactParseResult(), { merge: false });
-      expect(host.querySelector(".polycss-mesh > b")).not.toBeNull();
+      expect(host.querySelector(DIRECT_VOXEL_BRUSH_SELECTOR)).not.toBeNull();
       handle.setPolygons([triangle()], { merge: false });
       expect(host.querySelector(".polycss-voxel-host-z")).toBeNull();
-      expect(host.querySelector(".polycss-mesh > b")).toBeNull();
+      expect(host.querySelector(DIRECT_VOXEL_BRUSH_SELECTOR)).toBeNull();
       expect(host.querySelector(".polycss-mesh")?.classList.contains("polycss-voxel-mesh")).toBe(false);
       expect(host.querySelector("i,b,s,u")).not.toBeNull();
     });
@@ -1342,17 +1409,17 @@ describe("createPolyScene", () => {
         ambientLight: { color: "#ffffff", intensity: 1 },
       }, { rotX: 0, rotY: 0 });
       const handle = scene.add(makeTwoSidedVoxelExactParseResult());
-      const firstBrush = host.querySelector(".polycss-mesh > b") as HTMLElement | null;
+      const firstBrush = host.querySelector(DIRECT_VOXEL_BRUSH_SELECTOR) as HTMLElement | null;
       expect(firstBrush).not.toBeNull();
       expect(firstBrush!.style.color).toMatch(/^(#ff0000|rgb\(255, 0, 0\))$/);
-      expect(host.querySelectorAll(".polycss-mesh > b").length).toBe(1);
+      expect(host.querySelectorAll(DIRECT_VOXEL_BRUSH_SELECTOR).length).toBe(1);
 
       handle.setTransform({ rotation: [180, 0, 0] });
 
-      const nextBrush = host.querySelector(".polycss-mesh > b") as HTMLElement | null;
+      const nextBrush = host.querySelector(DIRECT_VOXEL_BRUSH_SELECTOR) as HTMLElement | null;
       expect(nextBrush).not.toBeNull();
       expect(nextBrush!.style.color).toMatch(/^(#00ff00|rgb\(0, 255, 0\))$/);
-      expect(host.querySelectorAll(".polycss-mesh > b").length).toBe(1);
+      expect(host.querySelectorAll(DIRECT_VOXEL_BRUSH_SELECTOR).length).toBe(1);
     });
 
     it("updates direct voxel side brushes when mesh z-rotation swaps front and back faces", () => {
@@ -1361,17 +1428,17 @@ describe("createPolyScene", () => {
         ambientLight: { color: "#ffffff", intensity: 1 },
       }, { rotX: 65, rotY: 45 });
       const handle = scene.add(makeTwoSidedVoxelSideParseResult());
-      const firstBrush = host.querySelector(".polycss-mesh > b") as HTMLElement | null;
+      const firstBrush = host.querySelector(DIRECT_VOXEL_BRUSH_SELECTOR) as HTMLElement | null;
       expect(firstBrush).not.toBeNull();
       expect(firstBrush!.style.color).toMatch(/^(#ff0000|rgb\(255, 0, 0\))$/);
-      expect(host.querySelectorAll(".polycss-mesh > b").length).toBe(1);
+      expect(host.querySelectorAll(DIRECT_VOXEL_BRUSH_SELECTOR).length).toBe(1);
 
       handle.setTransform({ rotation: [0, 0, 180] });
 
-      const nextBrush = host.querySelector(".polycss-mesh > b") as HTMLElement | null;
+      const nextBrush = host.querySelector(DIRECT_VOXEL_BRUSH_SELECTOR) as HTMLElement | null;
       expect(nextBrush).not.toBeNull();
       expect(nextBrush!.style.color).toMatch(/^(#00ff00|rgb\(0, 255, 0\))$/);
-      expect(host.querySelectorAll(".polycss-mesh > b").length).toBe(1);
+      expect(host.querySelectorAll(DIRECT_VOXEL_BRUSH_SELECTOR).length).toBe(1);
     });
 
     it("redraws direct voxel brushes on mesh rotation even when visible faces stay the same", () => {
@@ -1380,7 +1447,7 @@ describe("createPolyScene", () => {
         ambientLight: { color: "#ffffff", intensity: 1 },
       }, { rotX: 0, rotY: 0 });
       const handle = scene.add(makeTwoTopVoxelExactParseResult());
-      const brushes = () => Array.from(host.querySelectorAll(".polycss-mesh > b")) as HTMLElement[];
+      const brushes = () => Array.from(host.querySelectorAll(DIRECT_VOXEL_BRUSH_SELECTOR)) as HTMLElement[];
       expect(brushes().map((brush) => brush.style.color)).toEqual(["#ff0000", "#00ff00"]);
 
       handle.setTransform({ rotation: [0, 0, 180] });
