@@ -49,7 +49,7 @@ dispose(); // always call on cleanup
 
 ## `parseVox(buffer, options?)`
 
-Parses a MagicaVoxel `.vox` file into greedy colored polygon quads. The result also carries `voxelSource` metadata used by the vanilla baked-mode voxel fast path when the mesh remains eligible.
+Parses a MagicaVoxel `.vox` file into greedy colored polygon quads. The result also carries `voxelSource` metadata used by the baked-mode voxel fast path across vanilla, React, and Vue when the mesh remains eligible.
 
 ```ts
 import { parseVox } from "@layoutit/polycss-core";

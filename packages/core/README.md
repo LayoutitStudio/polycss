@@ -88,7 +88,7 @@ import { PolyCamera, PolyScene, PolyOrbitControls, PolyMesh } from "@layoutit/po
 - `directionalLight` and `ambientLight` control scene lighting.
 - `textureLighting` chooses `"baked"` or `"dynamic"`.
 - `textureQuality` controls atlas raster budget.
-- `seamBleed="auto"` computes solid-primitive overscan from each polygon plan; numeric values clamp detected shared seam edges.
+- Solid seam bleed is automatic on detected shared solid edges.
 - `strategies` can disable selected render strategies for diagnostics.
 - `autoCenter` rotates around the rendered mesh bounds instead of world origin.
 
@@ -179,6 +179,15 @@ polycss renders in the DOM, so performance is mostly determined by how many poly
 - Dynamic lighting runs through CSS custom properties instead of per-frame JavaScript.
 - Voxel-shaped meshes mount only camera-facing leaves when the mesh is eligible.
 - `meshResolution: "lossy"` merges compatible polygons, then may spend a small split budget to repair high-risk seams.
+
+Renderer internals:
+
+Each visible polygon is emitted as one leaf element; the renderer chooses the least expensive CSS primitive that can represent the polygon, then uses `matrix3d(...)` to place that primitive in 3D space.
+
+- `<b>` uses `background: currentColor` on a fixed box for solid rectangles and stable quads.
+- `<u>` uses `corner-shape` for stable triangles and beveled-corner solids, with a `border-width` triangle fallback when needed.
+- `<i>` clips solid polygons with `border-shape: polygon(...)` when the browser supports it.
+- `<s>` maps a packed texture-atlas slice with `background-image`, and is the fallback for textured or unsupported shapes.
 
 For diagnostics, all renderer packages export `collectPolyRenderStats(root)`, which returns mounted polygon leaf counts, shadow counts, surface categories, and bucket counts for an already-rendered scene.
 
