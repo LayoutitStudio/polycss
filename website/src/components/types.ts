@@ -67,6 +67,9 @@ export interface SceneOptionsState {
   target: ReactVec3;
   disableStrategies: PolyRenderStrategy[];
   castShadow: boolean;
+  /** Maximum CSS pixels the shadow may extend beyond the mesh footprint.
+   *  Caps the SVG backing store at low light elevations. */
+  shadowMaxExtend: number;
   showGround: boolean;
   fpvLook: boolean;
   fpvMove: boolean;

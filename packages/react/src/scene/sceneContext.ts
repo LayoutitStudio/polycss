@@ -18,6 +18,13 @@ export interface ShadowOptions {
   color?: string;
   opacity?: number;
   lift?: number;
+  /**
+   * Maximum CSS pixels the shadow may extend beyond the mesh's
+   * footprint. Caps the SVG backing store at low light elevations to
+   * prevent repaint flicker. Default: `2000`. Pass `Infinity` to
+   * disable the cap entirely.
+   */
+  maxExtend?: number;
 }
 
 export interface PolySceneContextValue {
@@ -32,6 +39,14 @@ export interface PolySceneContextValue {
    * `polygons` is null when unregistering or when castShadow is false.
    */
   registerShadowCaster?: (meshId: symbol, polygons: Polygon[] | null) => void;
+  /**
+   * Computed CSS-Z of the shadow ground plane (= min world Z across all
+   * casting meshes + scene.shadow.lift, in CSS pixels). Dynamic mode also
+   * mirrors this into the `--shadow-ground-cssz` CSS var. Baked-mode
+   * mesh code reads it directly to bake the inline `matrix3d(...)` on
+   * each shadow leaf. `null` means there are no caster meshes yet.
+   */
+  groundCssZ?: number | null;
 }
 
 export const PolySceneContext = createContext<PolySceneContextValue | null>(null);

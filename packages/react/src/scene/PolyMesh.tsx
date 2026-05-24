@@ -32,11 +32,14 @@ import type {
   Vec3,
 } from "@layoutit/polycss-core";
 import {
+  BASE_TILE,
   computeSceneBbox,
   DEFAULT_SEAM_BLEED,
+  ensureCcw2D,
   findOverlappingPolygonDuplicates,
   inverseRotateVec3,
   parseHexColor,
+  projectCssVertexToGround,
 } from "@layoutit/polycss-core";
 import type { TransformProps } from "../shapes/types";
 import { usePolyMesh, type UseMeshOptions } from "./useMesh";
@@ -600,10 +603,12 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
   const sceneRegisterShadowCaster = sceneCtx?.registerShadowCaster;
 
   // Register/unregister as a shadow caster whenever castShadow or polygons change.
-  // Cleanup on unmount passes null to deregister.
+  // Both lighting modes need the registration so the scene can derive the
+  // shadow ground plane from caster bboxes. Cleanup on unmount passes null
+  // to deregister.
   useEffect(() => {
     if (!sceneRegisterShadowCaster) return;
-    if (castShadow && effectiveTextureLighting === "dynamic") {
+    if (castShadow) {
       sceneRegisterShadowCaster(meshIdRef.current, polygons);
     } else {
       sceneRegisterShadowCaster(meshIdRef.current, null);
@@ -611,20 +616,23 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
     return () => {
       sceneRegisterShadowCaster(meshIdRef.current, null);
     };
-  }, [sceneRegisterShadowCaster, castShadow, effectiveTextureLighting, polygons]);
+  }, [sceneRegisterShadowCaster, castShadow, polygons]);
 
-  // Build shadow leaf elements. Only emitted when castShadow is true and the
-  // scene is in dynamic mode. Uses the same plans as the caster polygons so
-  // the outlines are identical. Deduplication removes stacked coplanar
-  // shadow leaves that would produce visible double-shadows on the receiver.
-  const shadowLeaves = useMemo<ReactNode[]>(() => {
-    if (!castShadow || effectiveTextureLighting !== "dynamic" || renderPolygon) return [];
+  // Per-mesh shadow `<svg>` — same path for both lighting modes. Every
+  // casting polygon is projected to the ground on the CPU and
+  // concatenated into one compound <path d="M…L…Z M…L…Z …"> under
+  // fill-rule=nonzero, so overlapping CCW outlines composite as one
+  // filled silhouette without alpha stacking; gaps between subpaths
+  // remain as gaps (the shadow preserves the silhouette's holes for
+  // free); back-facing polys are dropped up front.
+  const bakedShadowGroundCssZ = sceneCtx?.groundCssZ ?? null;
+  const sceneShadow = sceneCtx?.shadow;
+  const shadowSvgNode = useMemo<ReactNode>(() => {
+    if (!castShadow || renderPolygon) return null;
+    if (bakedShadowGroundCssZ === null) return null;
 
-    const shadowColor = sceneCtx?.shadow?.color ?? "#000000";
-    const shadowOpacity = sceneCtx?.shadow?.opacity ?? 0.25;
-    const parsed = parseHexColor(shadowColor)?.rgb ?? [0, 0, 0];
-    const shadowColorCss = `rgba(${parsed[0]},${parsed[1]},${parsed[2]},${shadowOpacity})`;
-
+    const lightDir = sceneDirectionalLight?.direction
+      ?? ([0.4, -0.7, 0.59] as Vec3);
     const shadowDedupDrop = findOverlappingPolygonDuplicates(polygons, {
       normalTolerance: 0.1,
       distanceTolerance: 0.5,
@@ -632,23 +640,112 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
       preserveDoubleSidedBackfaces: false,
     });
 
-    const leaves: React.ReactNode[] = [];
-    for (const plan of atlasPlans) {
+    const projections: Array<Array<[number, number]>> = [];
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    // Footprint = the mesh's straight-down (no-shear) silhouette bbox,
+    // used by the cap below as the anchor the shadow must always fully
+    // contain.
+    let fpMinX = Infinity, fpMinY = Infinity, fpMaxX = -Infinity, fpMaxY = -Infinity;
+    // Iterate every casting polygon — no Lambert cull. Closed convex
+    // meshes don't need the back side, but thin/open meshes (bat wings,
+    // cloth, single quad) need both sides projected or the silhouette
+    // gets real holes.
+    for (let i = 0; i < polygons.length; i++) {
+      const polygon = polygons[i]!;
+      if (shadowDedupDrop.has(i)) continue;
+      const plan = atlasPlans[i];
       if (!plan) continue;
-      if (shadowDedupDrop.has(plan.index)) continue;
-
-      const borderShape = cssBorderShapeForPlan(plan);
-      leaves.push(
-        <ShadowLeaf
-          key={`shadow-${plan.index}`}
-          plan={plan}
-          shadowColorCss={shadowColorCss}
-          borderShape={borderShape}
-        />
-      );
+      const projected: Array<[number, number]> = [];
+      for (const v of polygon.vertices) {
+        const cssVertex: Vec3 = [
+          v[1] * BASE_TILE,
+          v[0] * BASE_TILE,
+          v[2] * BASE_TILE,
+        ];
+        if (cssVertex[0] < fpMinX) fpMinX = cssVertex[0];
+        if (cssVertex[1] < fpMinY) fpMinY = cssVertex[1];
+        if (cssVertex[0] > fpMaxX) fpMaxX = cssVertex[0];
+        if (cssVertex[1] > fpMaxY) fpMaxY = cssVertex[1];
+        const p = projectCssVertexToGround(cssVertex, lightDir, bakedShadowGroundCssZ);
+        projected.push(p);
+        if (p[0] < minX) minX = p[0];
+        if (p[1] < minY) minY = p[1];
+        if (p[0] > maxX) maxX = p[0];
+        if (p[1] > maxY) maxY = p[1];
+      }
+      projections.push(projected);
     }
-    return leaves;
-  }, [castShadow, effectiveTextureLighting, renderPolygon, polygons, atlasPlans, sceneCtx?.shadow]);
+    if (projections.length === 0) return null;
+    // Cap how far the shadow can extend BEYOND THE MESH FOOTPRINT.
+    // Low-elevation lights shear projections across the ground so far
+    // that the bbox can exceed tens of thousands of pixels each side,
+    // which forces the browser to rasterize a >100M-pixel backing store
+    // on every repaint (visible as scene-wide flicker when the camera
+    // or light moves). The footprint (no-shear silhouette) stays fully
+    // inside the SVG so the shadow under/next to the mesh is preserved
+    // — we only truncate the sheared end that's off-screen anyway.
+    // overflow:hidden does the actual clipping. Callers can disable
+    // the cap by passing shadow.maxExtend=Infinity on PolyScene.
+    const maxExtend = sceneShadow?.maxExtend ?? 2000;
+    const bx0 = Math.max(minX, fpMinX - maxExtend);
+    const by0 = Math.max(minY, fpMinY - maxExtend);
+    const bx1 = Math.min(maxX, fpMaxX + maxExtend);
+    const by1 = Math.min(maxY, fpMaxY + maxExtend);
+    const width = bx1 - bx0;
+    const height = by1 - by0;
+    if (!(width > 0) || !(height > 0)) return null;
+
+    const shadowColor = sceneShadow?.color ?? "#000000";
+    const shadowOpacity = sceneShadow?.opacity ?? 0.25;
+    const parsed = parseHexColor(shadowColor)?.rgb ?? [0, 0, 0];
+
+    // Concatenate every projection into ONE compound `d` string. Each
+    // polygon becomes its own M…L…Z subpath, normalized to CCW so all
+    // windings agree and fill-rule=nonzero paints overlapping outlines
+    // as one filled silhouette without alpha stacking. Gaps between
+    // subpaths remain as gaps (the shadow preserves the silhouette's
+    // holes for free).
+    let d = "";
+    for (const verts of projections) {
+      const ccw = ensureCcw2D(verts);
+      d += `M${(ccw[0]![0] - bx0).toFixed(3)},${(ccw[0]![1] - by0).toFixed(3)}`;
+      for (let j = 1; j < ccw.length; j++) {
+        d += `L${(ccw[j]![0] - bx0).toFixed(3)},${(ccw[j]![1] - by0).toFixed(3)}`;
+      }
+      d += "Z";
+    }
+
+    return (
+      <svg
+        key="shadow-svg"
+        className="polycss-shadow polycss-shadow-svg"
+        width={width}
+        height={height}
+        viewBox={`0 0 ${width} ${height}`}
+        style={{
+          position: "absolute",
+          top: 0,
+          left: 0,
+          display: "block",
+          overflow: "hidden",
+          transformOrigin: "0 0",
+          pointerEvents: "none",
+          willChange: "transform",
+          transform: `translate3d(${bx0.toFixed(3)}px,${by0.toFixed(3)}px,${bakedShadowGroundCssZ.toFixed(3)}px)`,
+        }}
+      >
+        <path
+          d={d}
+          fill={`rgb(${parsed[0]},${parsed[1]},${parsed[2]})`}
+          fillRule="nonzero"
+          stroke={`rgb(${parsed[0]},${parsed[1]},${parsed[2]})`}
+          strokeWidth="2"
+          strokeLinejoin="round"
+          opacity={shadowOpacity.toFixed(4)}
+        />
+      </svg>
+    );
+  }, [castShadow, renderPolygon, polygons, atlasPlans, sceneDirectionalLight, bakedShadowGroundCssZ, sceneShadow]);
 
   setPolygonsImplRef.current = (nextPolygons: Polygon[]) => {
     const nextRenderedPolygons = autoCenter ? recenterPolygons(nextPolygons) : nextPolygons;
@@ -771,7 +868,7 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
       style={wrapperStyle}
       {...wrapperHandlers}
     >
-      {shadowLeaves}
+      {shadowSvgNode}
       {renderedPolygons}
       {staticChildren}
     </div>
@@ -793,41 +890,3 @@ function RenderPropPolygon({
   return <>{children(polygon, index)}</>;
 }
 
-// Shadow leaf — a <q> element that projects the caster polygon's outline onto
-// the ground plane via `var(--shadow-proj)`. The transform chain is:
-// `var(--shadow-proj) matrix3d(...)` where matrix3d is the original polygon
-// placement. border-shape clips the element to the polygon's outline (same
-// mechanism as <i>). The normal is pinned inline as --pnx/y/z so the CSS
-// opacity gate in styles.ts can skip back-facing polygons without JS.
-// Uses a ref callback for border-shape (non-standard CSS property, must be
-// set via setProperty).
-function ShadowLeaf({
-  plan,
-  shadowColorCss,
-  borderShape,
-}: {
-  plan: TextureAtlasPlan;
-  shadowColorCss: string;
-  borderShape: string;
-}) {
-  const setRef = useCallback((el: HTMLElement | null) => {
-    if (!el) return;
-    el.style.setProperty("border-shape", borderShape);
-  }, [borderShape]);
-
-  return (
-    <q
-      ref={setRef}
-      className="polycss-shadow"
-      style={{
-        transform: `var(--shadow-proj) matrix3d(${plan.matrix})`,
-        color: shadowColorCss,
-        width: plan.canvasW,
-        height: plan.canvasH,
-        ["--pnx" as string]: plan.normal[0].toFixed(4),
-        ["--pny" as string]: plan.normal[1].toFixed(4),
-        ["--pnz" as string]: plan.normal[2].toFixed(4),
-      } as CSSProperties}
-    />
-  );
-}

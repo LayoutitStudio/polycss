@@ -1944,23 +1944,58 @@ describe("createPolyScene", () => {
       expect(host.querySelectorAll(".polycss-shadow").length).toBe(0);
     });
 
-    it("castShadow:true in dynamic mode emits shadow leaves, one per non-textured polygon", () => {
-      scene = makeScene(host, dynOpts);
-      // Use spatially distinct triangles so the loose shadow-dedup pass
-      // doesn't fold them into one shadow (two triangles at the same
-      // location WOULD be deduped, which is the intended behavior).
+    it("castShadow:true in dynamic mode emits a single <svg> shadow per mesh (same path as baked)", () => {
+      // Dynamic mode now uses the same per-mesh compound SVG path as baked
+      // mode — one <svg> per casting mesh regardless of polygon count.
       const distinctTri: Polygon = {
         vertices: [[10, 10, 5], [11, 10, 5], [10, 11, 5]],
         color: "#00ff00",
       };
+      scene = makeScene(host, dynOpts);
       scene.add(makeParseResult([triangle(), distinctTri]), { castShadow: true, merge: false });
-      expect(host.querySelectorAll(".polycss-shadow").length).toBe(2);
+      const shadows = host.querySelectorAll(".polycss-shadow");
+      expect(shadows.length).toBe(1);
+      expect(shadows[0]!.tagName.toLowerCase()).toBe("svg");
     });
 
-    it("castShadow:true in baked mode emits NO shadow leaves", () => {
+    it("castShadow:true in baked mode emits a single <svg> shadow per mesh with one compound <path>", () => {
+      // Baked mode concatenates every casting polygon's projected outline
+      // into ONE compound `d` (M…L…Z subpaths) rendered under
+      // fill-rule=nonzero, so overlapping CCW outlines composite as one
+      // filled silhouette without alpha stacking while gaps remain holes.
+      // One <path> per mesh regardless of polygon count.
       scene = makeScene(host, { textureLighting: "baked" });
       scene.add(makeParseResult([triangle()]), { castShadow: true });
-      expect(host.querySelectorAll(".polycss-shadow").length).toBe(0);
+      const shadows = host.querySelectorAll(".polycss-shadow");
+      expect(shadows.length).toBe(1);
+      const shadow = shadows[0] as SVGSVGElement;
+      expect(shadow.tagName.toLowerCase()).toBe("svg");
+      expect(shadow.classList.contains("polycss-shadow-svg")).toBe(true);
+      expect(shadow.style.transform).toMatch(/^translate3d\(/);
+      expect(shadow.style.transform).not.toContain("var(--shadow-proj)");
+      const paths = shadow.querySelectorAll("path");
+      expect(paths.length).toBe(1);
+      const path = paths[0]!;
+      expect(path.getAttribute("opacity")).toBe("0.2500");
+      expect(path.getAttribute("fill-rule")).toBe("nonzero");
+      const d = path.getAttribute("d") || "";
+      // Triangle (3 verts) → one M, two Ls, one Z.
+      expect((d.match(/M/g) || []).length).toBe(1);
+      expect((d.match(/L/g) || []).length).toBe(2);
+      expect((d.match(/Z/g) || []).length).toBe(1);
+    });
+
+    it("baked mode projects every polygon (no Lambert cull) so thin/open meshes don't get silhouette holes", () => {
+      // backTriangle has its surface normal pointing AWAY from the
+      // default light. We deliberately do NOT cull these by Lambert
+      // facing in the SVG path — a thin mesh (cloth, bat wings) needs
+      // both sides projected, or its silhouette gets visible holes
+      // where the back-facing piece would have contributed. With SVG
+      // fill-rule=nonzero merging overlap into one solid silhouette,
+      // including the back-facing polys is geometrically correct.
+      scene = makeScene(host, { textureLighting: "baked" });
+      scene.add(makeParseResult([backTriangle()]), { castShadow: true });
+      expect(host.querySelectorAll(".polycss-shadow").length).toBe(1);
     });
 
     it("shadow leaves have the polycss-shadow class", () => {
@@ -1973,17 +2008,13 @@ describe("createPolyScene", () => {
       }
     });
 
-    it("shadow leaves are always <q> with border-shape regardless of caster tag", () => {
-      scene = makeScene(host, dynOpts);
-      // Mix shapes at distinct 3D positions (otherwise the loose-tolerance
-      // shadow dedup pass folds them into one shadow). Each emits a <q>
-      // shadow — a dedicated single-letter render strategy in the tag
-      // taxonomy alongside <b>/<i>/<s>/<u>, kept clear of the dynamic-
-      // mode Lambert color rule.
+    it("shadow elements are always <svg> with class polycss-shadow regardless of caster tag or mode", () => {
+      // Both lighting modes use the same per-mesh <svg> shadow now.
       const distinctTri: Polygon = {
         vertices: [[10, 10, 5], [11, 10, 5], [10, 11, 5]],
         color: "#00ff00",
       };
+      scene = makeScene(host, dynOpts);
       scene.add(makeParseResult([triangle(), distinctTri]), {
         castShadow: true,
         merge: false,
@@ -1991,34 +2022,20 @@ describe("createPolyScene", () => {
       const shadows = Array.from(host.querySelectorAll(".polycss-shadow"));
       expect(shadows.length).toBeGreaterThan(0);
       for (const el of shadows) {
-        expect((el as HTMLElement).tagName.toLowerCase()).toBe("q");
-        expect((el as HTMLElement).style.getPropertyValue("border-shape")).not.toBe("");
+        expect(el.tagName.toLowerCase()).toBe("svg");
+        expect(el.classList.contains("polycss-shadow-svg")).toBe(true);
       }
     });
 
-    it("shadow leaves transform contains var(--shadow-proj) followed by matrix3d", () => {
-      scene = makeScene(host, dynOpts);
-      scene.add(makeParseResult([triangle()]), { castShadow: true });
-      const shadow = host.querySelector(".polycss-shadow") as HTMLElement;
-      expect(shadow).not.toBeNull();
-      expect(shadow.style.transform).toMatch(/^var\(--shadow-proj\)\s+matrix3d\(/);
-    });
-
-    it("adding a casting mesh sets --shadow-ground-cssz on the scene element", () => {
+    it("adding a casting mesh in dynamic mode does NOT need --shadow-ground-cssz on the scene", () => {
+      // Dynamic mode no longer uses --shadow-ground-cssz / --shadow-proj —
+      // the projection is CPU-baked into the per-mesh SVG path same as in
+      // baked mode.
       scene = makeScene(host, dynOpts);
       scene.add(makeParseResult([triangle()]), { castShadow: true });
       const sceneEl = getSceneEl(host);
-      const groundVar = sceneEl.style.getPropertyValue("--shadow-ground-cssz");
-      expect(groundVar).not.toBe("");
-    });
-
-    it("removing the casting mesh clears --shadow-ground-cssz", () => {
-      scene = makeScene(host, dynOpts);
-      const handle = scene.add(makeParseResult([triangle()]), { castShadow: true });
-      const sceneEl = getSceneEl(host);
-      expect(sceneEl.style.getPropertyValue("--shadow-ground-cssz")).not.toBe("");
-      handle.remove();
       expect(sceneEl.style.getPropertyValue("--shadow-ground-cssz")).toBe("");
+      expect(host.querySelectorAll(".polycss-shadow").length).toBe(1);
     });
 
     it("toggling castShadow via setTransform adds/removes shadow leaves", () => {
@@ -2031,20 +2048,29 @@ describe("createPolyScene", () => {
       expect(host.querySelectorAll(".polycss-shadow").length).toBe(0);
     });
 
-    it("switching from dynamic to baked removes shadow leaves", () => {
+    it("switching from dynamic to baked keeps the shadow as a translated <svg>", () => {
       scene = makeScene(host, dynOpts);
       scene.add(makeParseResult([triangle()]), { castShadow: true });
-      expect(host.querySelectorAll(".polycss-shadow").length).toBeGreaterThan(0);
+      const before = host.querySelector(".polycss-shadow") as SVGSVGElement;
+      expect(before.tagName.toLowerCase()).toBe("svg");
+      expect(before.style.transform).toMatch(/^translate3d\(/);
       scene.setOptions({ textureLighting: "baked" });
-      expect(host.querySelectorAll(".polycss-shadow").length).toBe(0);
+      const after = host.querySelector(".polycss-shadow") as SVGSVGElement;
+      expect(after).not.toBeNull();
+      expect(after.tagName.toLowerCase()).toBe("svg");
+      expect(after.style.transform).toMatch(/^translate3d\(/);
     });
 
-    it("switching from baked back to dynamic re-emits shadow leaves", () => {
+    it("switching from baked back to dynamic keeps the shadow as a translated <svg>", () => {
       scene = makeScene(host, { textureLighting: "baked" });
       scene.add(makeParseResult([triangle()]), { castShadow: true });
-      expect(host.querySelectorAll(".polycss-shadow").length).toBe(0);
+      const before = host.querySelector(".polycss-shadow") as SVGSVGElement;
+      expect(before.tagName.toLowerCase()).toBe("svg");
       scene.setOptions({ ...dynOpts });
-      expect(host.querySelectorAll(".polycss-shadow").length).toBeGreaterThan(0);
+      const dynamicShadow = host.querySelector(".polycss-shadow") as SVGSVGElement;
+      expect(dynamicShadow).not.toBeNull();
+      expect(dynamicShadow.tagName.toLowerCase()).toBe("svg");
+      expect(dynamicShadow.style.transform).toMatch(/^translate3d\(/);
     });
 
     it("textured polygons (s) ALSO emit shadow leaves", () => {
@@ -2073,6 +2099,39 @@ describe("createPolyScene", () => {
       expect(sceneEl.style.getPropertyValue("--clx")).toBe("");
       expect(sceneEl.style.getPropertyValue("--cly")).toBe("");
       expect(sceneEl.style.getPropertyValue("--clz")).toBe("");
+    });
+
+    it("baked mode re-emits SVG shadows when directionalLight.direction changes", () => {
+      // Light direction is folded into the CPU projection that builds the
+      // SVG paths, so changing it must rewrite the SVG outlines (and the
+      // SVG's translate3d) — otherwise the shadows stay frozen at the
+      // original light angle.
+      scene = makeScene(host, {
+        textureLighting: "baked",
+        directionalLight: { direction: [0, 0, 1] },
+      });
+      scene.add(makeParseResult([triangle()]), { castShadow: true });
+      const initialSvg = host.querySelector(".polycss-shadow") as SVGSVGElement;
+      const initialTransform = initialSvg.style.transform;
+      const initialPathD = initialSvg.querySelector("path")?.getAttribute("d");
+      scene.setOptions({ directionalLight: { direction: [1, 0, 1] } });
+      const nextSvg = host.querySelector(".polycss-shadow") as SVGSVGElement;
+      const nextTransform = nextSvg.style.transform;
+      const nextPathD = nextSvg.querySelector("path")?.getAttribute("d");
+      expect(nextTransform).toMatch(/^translate3d\(/);
+      // EITHER the SVG positioning OR the path geometry must have changed
+      // — both encode the projection so both should reflect the new light.
+      expect(nextTransform !== initialTransform || nextPathD !== initialPathD).toBe(true);
+    });
+
+    it("baked mode does NOT set --shadow-ground-cssz on the scene element", () => {
+      // Ground Z lives inside each leaf's baked matrix3d, not on the
+      // scene root — the CSS var is dynamic-mode-only and would
+      // accidentally drive --shadow-proj for any stale dynamic leaves.
+      scene = makeScene(host, { textureLighting: "baked" });
+      scene.add(makeParseResult([triangle()]), { castShadow: true });
+      const sceneEl = getSceneEl(host);
+      expect(sceneEl.style.getPropertyValue("--shadow-ground-cssz")).toBe("");
     });
   });
 });

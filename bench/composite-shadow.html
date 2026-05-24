@@ -1,0 +1,192 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>polycss composite shadow — caster on receiver</title>
+  <style>
+    html, body { margin: 0; padding: 0; height: 100%; background: #e2e8f0; }
+    #host { position: fixed; inset: 0; }
+    #status {
+      position: fixed; bottom: 8px; left: 8px;
+      font: 12px ui-monospace, monospace;
+      background: rgba(0,0,0,0.6); color: #fff;
+      padding: 6px 10px; border-radius: 4px;
+      white-space: pre; pointer-events: none;
+      max-width: 50vw;
+    }
+    #controls {
+      position: fixed; top: 8px; right: 8px;
+      font: 12px ui-sans-serif, system-ui;
+      background: rgba(0,0,0,0.7); color: #fff;
+      padding: 12px 14px; border-radius: 6px;
+      display: grid; grid-template-columns: auto 1fr auto; gap: 6px 10px;
+      align-items: center; min-width: 280px;
+    }
+    #controls input[type="range"] { width: 140px; }
+    #controls .hint {
+      grid-column: 1 / -1; font-size: 11px; color: #aaa;
+      padding-top: 4px; border-top: 1px solid rgba(255,255,255,0.15);
+    }
+  </style>
+</head>
+<body>
+  <div id="host"></div>
+  <div id="controls">
+    <label for="az">Light az</label>
+    <input id="az" type="range" min="0" max="360" step="1" value="60" />
+    <span id="azv">60°</span>
+    <label for="el">Light elev</label>
+    <input id="el" type="range" min="5" max="90" step="1" value="45" />
+    <span id="elv">45°</span>
+    <label for="px">Pole X</label>
+    <input id="px" type="range" min="-4" max="4" step="0.1" value="0" />
+    <span id="pxv">0</span>
+    <label for="py">Pole Y</label>
+    <input id="py" type="range" min="-4" max="4" step="0.1" value="0" />
+    <span id="pyv">0</span>
+    <label for="pz">Pole Z</label>
+    <input id="pz" type="range" min="-2" max="6" step="0.1" value="0" />
+    <span id="pzv">0</span>
+    <label for="cubeCast">Cube casts</label>
+    <input id="cubeCast" type="checkbox" checked />
+    <span></span>
+    <div class="hint">Drag the canvas to orbit · scroll to zoom</div>
+  </div>
+  <pre id="status"></pre>
+
+  <script type="module">
+    import {
+      createPolyCamera,
+      createPolyScene,
+      createPolyOrbitControls,
+    } from "./.generated/polycss.js";
+
+    const host = document.getElementById("host");
+    const camera = createPolyCamera({ rotX: 30, rotY: -40, zoom: 0.8 });
+
+    // Light direction in spherical (azimuth/elevation) — sliders below
+    // mutate these and re-apply via scene.setOptions.
+    let lightAz = 60;   // degrees, around the Z axis (counter-clockwise from +X)
+    let lightEl = 45;   // degrees, above horizon
+    function lightDir() {
+      const az = (lightAz * Math.PI) / 180;
+      const el = (lightEl * Math.PI) / 180;
+      const cz = Math.sin(el);
+      const cxy = Math.cos(el);
+      return [cxy * Math.cos(az), cxy * Math.sin(az), cz];
+    }
+
+    const scene = createPolyScene(host, {
+      camera,
+      directionalLight: { direction: lightDir(), color: "#ffffff", intensity: 1 },
+      ambientLight: { color: "#ffffff", intensity: 0.4 },
+      textureLighting: "baked",
+      autoCenter: false,
+    });
+    createPolyOrbitControls(scene, { drag: true, wheel: true });
+
+    function quad(p0, p1, p2, p3, color) {
+      return { vertices: [p0, p1, p2, p3], color };
+    }
+
+    // ── Receiver cube ──────────────────────────────────────────────
+    // 8×8 footprint, 2 tall, sitting on the ground (z=0..2).
+    const R = 4; // half-width
+    const RZ_BOTTOM = 0;
+    const RZ_TOP = 2;
+    const receiverPolys = [
+      quad([-R, -R, RZ_TOP], [ R, -R, RZ_TOP], [ R,  R, RZ_TOP], [-R,  R, RZ_TOP], "#a0aec0"),
+      quad([-R,  R, RZ_BOTTOM], [ R,  R, RZ_BOTTOM], [ R, -R, RZ_BOTTOM], [-R, -R, RZ_BOTTOM], "#4a5568"),
+      quad([ R, -R, RZ_BOTTOM], [ R,  R, RZ_BOTTOM], [ R,  R, RZ_TOP], [ R, -R, RZ_TOP], "#718096"),
+      quad([-R,  R, RZ_BOTTOM], [-R, -R, RZ_BOTTOM], [-R, -R, RZ_TOP], [-R,  R, RZ_TOP], "#718096"),
+      quad([ R,  R, RZ_BOTTOM], [-R,  R, RZ_BOTTOM], [-R,  R, RZ_TOP], [ R,  R, RZ_TOP], "#718096"),
+      quad([-R, -R, RZ_BOTTOM], [ R, -R, RZ_BOTTOM], [ R, -R, RZ_TOP], [-R, -R, RZ_TOP], "#718096"),
+    ];
+
+    // ── Caster "pole" ──────────────────────────────────────────────
+    // 1×1 footprint, 6 tall, sitting on top of the receiver (z=2..8).
+    const P = 0.6; // half-width
+    const PZ_BOTTOM = RZ_TOP;
+    const PZ_TOP = PZ_BOTTOM + 6;
+    const polePolys = [
+      quad([-P, -P, PZ_TOP], [ P, -P, PZ_TOP], [ P,  P, PZ_TOP], [-P,  P, PZ_TOP], "#dd6b20"),
+      quad([-P,  P, PZ_BOTTOM], [ P,  P, PZ_BOTTOM], [ P, -P, PZ_BOTTOM], [-P, -P, PZ_BOTTOM], "#9c4221"),
+      quad([ P, -P, PZ_BOTTOM], [ P,  P, PZ_BOTTOM], [ P,  P, PZ_TOP], [ P, -P, PZ_TOP], "#c05621"),
+      quad([-P,  P, PZ_BOTTOM], [-P, -P, PZ_BOTTOM], [-P, -P, PZ_TOP], [-P,  P, PZ_TOP], "#c05621"),
+      quad([ P,  P, PZ_BOTTOM], [-P,  P, PZ_BOTTOM], [-P,  P, PZ_TOP], [ P,  P, PZ_TOP], "#c05621"),
+      quad([-P, -P, PZ_BOTTOM], [ P, -P, PZ_BOTTOM], [ P, -P, PZ_TOP], [-P, -P, PZ_TOP], "#c05621"),
+    ];
+
+    function makeParseResult(polygons) {
+      return { polygons, dispose() {} };
+    }
+
+    // Receiver: catches the pole's shadow on its surfaces AND casts its
+    // own shadow onto the ground (toggleable via the "Cube casts" checkbox).
+    const cubeHandle = scene.add(makeParseResult(receiverPolys), {
+      castShadow: true,
+      receiveShadow: true,
+      merge: false,
+    });
+
+    // Caster: throws a shadow onto the receiver. Handle kept so the
+    // slider can translate it live.
+    const poleHandle = scene.add(makeParseResult(polePolys), {
+      castShadow: true,
+      receiveShadow: false,
+      merge: false,
+    });
+
+    // ── Slider wiring ──────────────────────────────────────────────
+    const azInput = document.getElementById("az");
+    const elInput = document.getElementById("el");
+    const pxInput = document.getElementById("px");
+    const pyInput = document.getElementById("py");
+    const pzInput = document.getElementById("pz");
+    const azv = document.getElementById("azv");
+    const elv = document.getElementById("elv");
+    const pxv = document.getElementById("pxv");
+    const pyv = document.getElementById("pyv");
+    const pzv = document.getElementById("pzv");
+
+    function updateLight() {
+      lightAz = +azInput.value;
+      lightEl = +elInput.value;
+      azv.textContent = `${lightAz}°`;
+      elv.textContent = `${lightEl}°`;
+      scene.setOptions({
+        directionalLight: { direction: lightDir(), color: "#ffffff", intensity: 1 },
+      });
+    }
+    function updatePole() {
+      const x = +pxInput.value, y = +pyInput.value, z = +pzInput.value;
+      pxv.textContent = x.toFixed(1);
+      pyv.textContent = y.toFixed(1);
+      pzv.textContent = z.toFixed(1);
+      poleHandle.setTransform({ position: [x, y, z] });
+    }
+    const cubeCastInput = document.getElementById("cubeCast");
+    function updateCubeCast() {
+      cubeHandle.setTransform({ castShadow: cubeCastInput.checked });
+    }
+    azInput.addEventListener("input", updateLight);
+    elInput.addEventListener("input", updateLight);
+    pxInput.addEventListener("input", updatePole);
+    pyInput.addEventListener("input", updatePole);
+    pzInput.addEventListener("input", updatePole);
+    cubeCastInput.addEventListener("change", updateCubeCast);
+
+    function snapshot() {
+      const meshes = host.querySelectorAll(".polycss-mesh");
+      const shadows = host.querySelectorAll(".polycss-shadow");
+      return {
+        meshCount: meshes.length,
+        shadowCount: shadows.length,
+        shadowTransforms: Array.from(shadows).slice(0, 4).map((s) => s.style.transform.slice(0, 80)),
+      };
+    }
+    window.__polySnapshot = snapshot;
+    document.getElementById("status").textContent = JSON.stringify(snapshot(), null, 2);
+  </script>
+</body>
+</html>

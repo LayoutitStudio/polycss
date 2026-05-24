@@ -47,6 +47,7 @@ export const DEFAULT_SCENE: SceneOptionsState = {
   target: [0, 0, 0],
   disableStrategies: [],
   castShadow: false,
+  shadowMaxExtend: 2000,
   showGround: true,
   fpvLook: true,
   fpvMove: true,

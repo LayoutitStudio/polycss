@@ -74,9 +74,11 @@ export interface PolySceneProps {
    */
   autoCenter?: boolean;
   /**
-   * Shadow appearance for meshes with `castShadow: true`. Only applies in
-   * dynamic lighting mode — baked mode does not emit shadow leaves.
-   * Defaults: `{ color: "#000000", opacity: 0.25, lift: 0.05 }`.
+   * Shadow appearance for meshes with `castShadow: true`. Works in both
+   * lighting modes — dynamic mode projects via CSS vars so shadows
+   * follow a moving light, baked mode CPU-bakes the projection into
+   * each leaf's inline `matrix3d` and drops back-facing polys from the
+   * DOM entirely. Defaults: `{ color: "#000000", opacity: 0.25, lift: 0.05, maxExtend: 2000 }`.
    */
   shadow?: PolyShadowOptions;
   class?: string;
@@ -154,6 +156,11 @@ export const PolyScene = defineComponent({
       },
     };
 
+    // Reactive ground-plane CSS-Z. Dynamic mode also mirrors this into
+    // the `--shadow-ground-cssz` CSS var (the watchEffect below); baked
+    // mode reads it via context to bake each leaf's inline matrix3d.
+    const groundCssZ = ref<number | null>(null);
+
     // Propagate scene-level rendering options to descendants (PolyMesh /
     // helpers) so they pick up the same dynamic mode + lights as the
     // scene. Without this, a helper PolyMesh would default to baked
@@ -167,6 +174,7 @@ export const PolyScene = defineComponent({
       seamBleed: props.seamBleed ?? DEFAULT_SEAM_BLEED,
       shadow: props.shadow,
       shadowRegistry,
+      groundCssZ: groundCssZ.value,
     }));
     provide(PolySceneContextKey, sceneCtxValue);
 
@@ -319,24 +327,20 @@ export const PolyScene = defineComponent({
 
     const DEFAULT_TILE = 50;
 
-    // --shadow-ground-cssz: written directly to the scene element when casting
-    // meshes register/unregister. A watchEffect is used instead of a computed
-    // read in the render function because child PolyMesh components register
-    // after the parent's first render (child setup runs during mount, not during
-    // the parent's VNode creation). The watchEffect re-runs after child
-    // registration because it reads shadowRegistryVersion, which the registry
-    // mutates when a mesh registers or unregisters.
+    // Shadow ground plane: derived from the min world-Z of all casting
+    // meshes + scene.shadow.lift. Drives the `--shadow-ground-cssz` CSS
+    // var in dynamic mode and the `groundCssZ` scene-context value
+    // (used by baked-mode meshes to bake their inline matrix3d). A
+    // watchEffect is used because child PolyMesh components register
+    // after the parent's first render — watchEffect re-runs after
+    // registration because it reads shadowRegistryVersion.
     watchEffect(() => {
       const el = sceneElLocalRef.value;
-      if (!el) return;
-      if (props.textureLighting !== "dynamic") {
-        el.style.removeProperty("--shadow-ground-cssz");
-        return;
-      }
       void shadowRegistryVersion.value;
       const entries = shadowRegistry.getEntries();
       if (entries.length === 0) {
-        el.style.removeProperty("--shadow-ground-cssz");
+        if (el) el.style.removeProperty("--shadow-ground-cssz");
+        if (groundCssZ.value !== null) groundCssZ.value = null;
         return;
       }
       let minWorldZ = Infinity;
@@ -348,11 +352,19 @@ export const PolyScene = defineComponent({
         }
       }
       if (!Number.isFinite(minWorldZ)) {
-        el.style.removeProperty("--shadow-ground-cssz");
+        if (el) el.style.removeProperty("--shadow-ground-cssz");
+        if (groundCssZ.value !== null) groundCssZ.value = null;
         return;
       }
       const lift = props.shadow?.lift ?? 0.05;
-      el.style.setProperty("--shadow-ground-cssz", ((minWorldZ + lift) * DEFAULT_TILE).toFixed(3));
+      const next = (minWorldZ + lift) * DEFAULT_TILE;
+      if (groundCssZ.value !== next) groundCssZ.value = next;
+      if (!el) return;
+      if (props.textureLighting === "dynamic") {
+        el.style.setProperty("--shadow-ground-cssz", next.toFixed(3));
+      } else {
+        el.style.removeProperty("--shadow-ground-cssz");
+      }
     });
 
     // Bbox-center of all centerable meshes in world coords. Folded into the

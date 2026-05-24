@@ -20,11 +20,14 @@ import { defineComponent, h, computed, inject, onMounted, onBeforeUnmount, ref, 
 import type { PropType, VNode, CSSProperties } from "vue";
 import type { MeshResolution, Polygon, PolyTextureLightingMode, Vec3 } from "@layoutit/polycss-core";
 import {
+  BASE_TILE,
   computeSceneBbox,
   DEFAULT_SEAM_BLEED,
+  ensureCcw2D,
   inverseRotateVec3,
   findOverlappingPolygonDuplicates,
   parseHexColor,
+  projectCssVertexToGround,
 } from "@layoutit/polycss-core";
 import { usePolyMesh } from "./useMesh";
 import {
@@ -303,21 +306,20 @@ export const PolyMesh = defineComponent({
     );
     const defaultPaintVars = computed(() => solidPaintVars(solidPaintDefaults.value));
 
-    // Shadow leaf emission. Only active when castShadow=true and the scene is
-    // in dynamic lighting mode. Computed from textureAtlasPlans so every
-    // polygon (including textured <s> polygons) gets a shadow leaf based on
-    // its outline.
-    const shadowNodes = computed<Array<VNode | null>>(() => {
-      if (!props.castShadow || atlasTextureLighting.value !== "dynamic") return [];
-      const shadowOpts = sceneCtx?.value.shadow;
-      const shadowColor = shadowOpts?.color ?? "#000000";
-      const shadowOpacity = shadowOpts?.opacity ?? 0.25;
-      const parsed = parseHexColor(shadowColor)?.rgb ?? [0, 0, 0];
-      const shadowColorCss = `rgba(${parsed[0]},${parsed[1]},${parsed[2]},${shadowOpacity})`;
+    // Per-mesh SVG shadow — same path for both lighting modes. Every
+    // casting polygon is projected to the ground on the CPU and
+    // concatenated into one compound <path d="M…L…Z M…L…Z …"> under
+    // fill-rule=nonzero so overlapping CCW outlines composite as one
+    // filled silhouette without alpha stacking; gaps remain as gaps.
+    const shadowSvg = computed<VNode | null>(() => {
+      if (!props.castShadow) return null;
+      const ctx = sceneCtx?.value;
+      const groundCssZ = ctx?.groundCssZ ?? null;
+      if (groundCssZ === null) return null;
+      const shadowOpts = ctx?.shadow;
 
-      const plans = textureAtlasPlans.value;
-      if (plans.length === 0) return [];
-
+      const lightDir = ctx?.directionalLight?.direction
+        ?? ([0.4, -0.7, 0.59] as Vec3);
       const dedupDrop = findOverlappingPolygonDuplicates(polygons.value, {
         normalTolerance: 0.1,
         distanceTolerance: 0.5,
@@ -325,45 +327,121 @@ export const PolyMesh = defineComponent({
         preserveDoubleSidedBackfaces: false,
       });
 
-      return plans.map((plan, index) => {
-        if (!plan) return null;
-        if (dedupDrop.has(index)) return null;
-        const origMatrix = `matrix3d(${plan.matrix})`;
-        const borderShape = cssBorderShapeForPlan(plan);
-        const style: CSSProperties = {
-          transform: `var(--shadow-proj) ${origMatrix}`,
-          color: shadowColorCss,
-          width: `${plan.canvasW}px`,
-          height: `${plan.canvasH}px`,
-          "--pnx": plan.normal[0].toFixed(4),
-          "--pny": plan.normal[1].toFixed(4),
-          "--pnz": plan.normal[2].toFixed(4),
-        };
+      const projections: Array<Array<[number, number]>> = [];
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      let fpMinX = Infinity, fpMinY = Infinity, fpMaxX = -Infinity, fpMaxY = -Infinity;
+      const polys = polygons.value;
+      const plans = textureAtlasPlans.value;
+      // No Lambert cull — thin/open meshes (bat wings, cloth, single
+      // quad) need both sides projected or the silhouette gets holes.
+      // We also track the footprint (no-shear XY bbox) so the cap below
+      // keeps the area near the mesh fully inside the SVG.
+      for (let i = 0; i < polys.length; i++) {
+        if (dedupDrop.has(i)) continue;
+        const plan = plans[i];
+        if (!plan) continue;
+        const polygon = polys[i]!;
+        const projected: Array<[number, number]> = [];
+        for (const v of polygon.vertices) {
+          const cssVertex: Vec3 = [
+            v[1] * BASE_TILE,
+            v[0] * BASE_TILE,
+            v[2] * BASE_TILE,
+          ];
+          if (cssVertex[0] < fpMinX) fpMinX = cssVertex[0];
+          if (cssVertex[1] < fpMinY) fpMinY = cssVertex[1];
+          if (cssVertex[0] > fpMaxX) fpMaxX = cssVertex[0];
+          if (cssVertex[1] > fpMaxY) fpMaxY = cssVertex[1];
+          const p = projectCssVertexToGround(cssVertex, lightDir, groundCssZ);
+          projected.push(p);
+          if (p[0] < minX) minX = p[0];
+          if (p[1] < minY) minY = p[1];
+          if (p[0] > maxX) maxX = p[0];
+          if (p[1] > maxY) maxY = p[1];
+        }
+        projections.push(projected);
+      }
+      if (projections.length === 0) return null;
+      // Cap how far the shadow can extend BEYOND THE MESH FOOTPRINT.
+      // Low-elevation lights shear projections across the ground so far
+      // that the bbox can exceed tens of thousands of pixels each side,
+      // which forces the browser to rasterize a >100M-pixel backing
+      // store on every repaint. The footprint stays fully inside the
+      // SVG so the shadow under/next to the mesh is preserved; only the
+      // sheared end (off-screen anyway) gets clipped by overflow:hidden.
+      // Callers can disable the cap by passing shadow.maxExtend=Infinity.
+      const maxExtend = shadowOpts?.maxExtend ?? 2000;
+      const bx0 = Math.max(minX, fpMinX - maxExtend);
+      const by0 = Math.max(minY, fpMinY - maxExtend);
+      const bx1 = Math.min(maxX, fpMaxX + maxExtend);
+      const by1 = Math.min(maxY, fpMaxY + maxExtend);
+      const width = bx1 - bx0;
+      const height = by1 - by0;
+      if (!(width > 0) || !(height > 0)) return null;
 
-        const applyShadowBorderShape = (vnode: VNode) => {
-          const el = vnode.el as HTMLElement | null;
-          if (!el) return;
-          el.style.setProperty("border-shape", borderShape);
-        };
+      const shadowColor = shadowOpts?.color ?? "#000000";
+      const shadowOpacity = shadowOpts?.opacity ?? 0.25;
+      const parsed = parseHexColor(shadowColor)?.rgb ?? [0, 0, 0];
 
-        return h("q", {
-          class: "polycss-shadow",
-          style,
-          onVnodeMounted: applyShadowBorderShape,
-          onVnodeUpdated: applyShadowBorderShape,
-        });
-      });
+      // Concatenate every projection into ONE compound `d` string. Each
+      // polygon becomes its own M…L…Z subpath, normalized to CCW so all
+      // windings agree and fill-rule=nonzero paints overlapping outlines
+      // as one filled silhouette without alpha stacking. Gaps between
+      // subpaths remain as holes — the shadow inherits the silhouette's
+      // holes for free.
+      let d = "";
+      for (const verts of projections) {
+        const ccw = ensureCcw2D(verts);
+        d += `M${(ccw[0]![0] - bx0).toFixed(3)},${(ccw[0]![1] - by0).toFixed(3)}`;
+        for (let j = 1; j < ccw.length; j++) {
+          d += `L${(ccw[j]![0] - bx0).toFixed(3)},${(ccw[j]![1] - by0).toFixed(3)}`;
+        }
+        d += "Z";
+      }
+
+      return h(
+        "svg",
+        {
+          class: "polycss-shadow polycss-shadow-svg",
+          width: String(width),
+          height: String(height),
+          viewBox: `0 0 ${width} ${height}`,
+          style: {
+            position: "absolute",
+            top: "0",
+            left: "0",
+            display: "block",
+            overflow: "hidden",
+            transformOrigin: "0 0",
+            pointerEvents: "none",
+            willChange: "transform",
+            transform: `translate3d(${bx0.toFixed(3)}px,${by0.toFixed(3)}px,${groundCssZ.toFixed(3)}px)`,
+          } as CSSProperties,
+        },
+        [
+          h("path", {
+            d,
+            fill: `rgb(${parsed[0]},${parsed[1]},${parsed[2]})`,
+            "fill-rule": "nonzero",
+            stroke: `rgb(${parsed[0]},${parsed[1]},${parsed[2]})`,
+            "stroke-width": "2",
+            "stroke-linejoin": "round",
+            opacity: shadowOpacity.toFixed(4),
+          }),
+        ],
+      );
     });
 
-    // Register this mesh with the shadow registry when castShadow=true so
-    // PolyScene can compute --shadow-ground-cssz reactively.
+    // Register this mesh with the shadow registry when castShadow=true in
+    // either lighting mode — the scene needs caster polygons to derive
+    // the ground plane regardless of how shadows are projected.
     const shadowRegistryId = Symbol();
     watch(
-      () => [props.castShadow, atlasTextureLighting.value] as const,
-      ([castShadow, lighting], _, onCleanup) => {
+      () => props.castShadow,
+      (castShadow, _, onCleanup) => {
         const registry = sceneCtx?.value.shadowRegistry;
         if (!registry) return;
-        if (castShadow && lighting === "dynamic") {
+        if (castShadow) {
           registry.register(shadowRegistryId, () => polygons.value);
         } else {
           registry.unregister(shadowRegistryId);
@@ -680,10 +758,11 @@ export const PolyMesh = defineComponent({
       // Static default slot children (e.g. additional <PolyMesh> children)
       const defaultChildren = slots.default?.() ?? [];
 
-      // Shadow leaves go before polygon nodes so they sit below casters in
-      // DOM order — painter-order tie-breaking favors earlier nodes when both
-      // are coplanar in 3D.
-      const shadows = shadowNodes.value;
+      // Shadow goes before polygon nodes so it sits below casters in DOM
+      // order — painter-order tie-breaking favors earlier nodes when both
+      // are coplanar in 3D. Single <svg> per mesh (see shadowSvg above).
+      const svgNode = shadowSvg.value;
+      const shadowChildren: VNode[] = svgNode ? [svgNode] : [];
 
       return h(
         "div",
@@ -695,7 +774,7 @@ export const PolyMesh = defineComponent({
           ...handlers,
           ...extraAttrs,
         },
-        [...shadows, ...polyNodes, ...defaultChildren]
+        [...shadowChildren, ...polyNodes, ...defaultChildren]
       );
     };
   },

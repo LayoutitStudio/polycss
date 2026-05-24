@@ -381,7 +381,7 @@ const CORE_BASE_STYLES = `
   );
 }
 
-/* ── Cast shadows (dynamic mode only) ──────────────────────────────────── */
+/* ── Cast shadow projection (dynamic-mode CSS path) ────────────────────── */
 
 /*
  * Shadow projection matrix. Projects any 3D point P onto the horizontal
@@ -433,11 +433,12 @@ const CORE_BASE_STYLES = `
    jump quickly to 1, giving a near-binary visibility decision with a
    smooth edge transition. Pure CSS calc — no JS at light-change time.
 
-   The base layout / positioning / pseudo-element-strip rules for <q>
-   live in the polygon-leaf section above. This rule only adds the
-   dynamic-light Lambert gating, separated so it's easy to disable the
-   gate for debugging by commenting out a single block. */
-.polycss-scene q {
+   Scoped to dynamic mode: baked-mode shadow leaves are dropped from the
+   DOM up-front by isBakedShadowCaster() and don't carry --pnx/--pny/--pnz,
+   so an unscoped gate would silently zero them via the @property
+   initial values. The base layout / positioning / pseudo-element-strip
+   rules for <q> live in the polygon-leaf section above. */
+.polycss-scene[data-polycss-lighting="dynamic"] q {
   opacity: clamp(0, calc((var(--pnx) * var(--clx) + var(--pny) * var(--cly) + var(--pnz) * var(--clz)) * 10), 1);
 }
 `;

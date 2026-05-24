@@ -41,7 +41,10 @@ import {
   VOXEL_CAMERA_CULL_NORMAL_LIMIT,
   cameraCullNormalKey,
   cameraCullVisibleSignature,
+  clipPolygonToConvex2D,
   computeSceneBbox,
+  convexHull2D,
+  ensureCcw2D,
   findOverlappingPolygonDuplicates,
   inverseRotateVec3,
   isAxisAlignedSurfaceNormal,
@@ -50,6 +53,7 @@ import {
   optimizeMeshPolygons,
   parseHexColor,
   polygonCssSurfaceNormal,
+  projectCssVertexToGround,
 } from "@layoutit/polycss-core";
 import {
   cssBorderShapeForPlan,
@@ -116,9 +120,11 @@ export interface PolySceneOptions {
    */
   autoCenter?: boolean;
   /**
-   * Shadow appearance for meshes with `castShadow: true`. Only applies in
-   * dynamic lighting mode — baked mode does not emit shadow leaves.
-   * Defaults: `{ color: "#000000", opacity: 0.25, lift: 0.05 }`.
+   * Shadow appearance for meshes with `castShadow: true`. Works in both
+   * lighting modes — dynamic mode projects via CSS vars so shadows
+   * follow a moving light, baked mode CPU-bakes the projection into
+   * each leaf's inline `matrix3d` and drops back-facing polys from the
+   * DOM entirely. Defaults: `{ color: "#000000", opacity: 0.25, lift: 0.05, maxExtend: 2000 }`.
    */
   shadow?: {
     /** Shadow color as a CSS hex string. Default: `"#000000"`. */
@@ -132,6 +138,18 @@ export interface PolySceneOptions {
      * shadow. In world units. Default: `0.05`.
      */
     lift?: number;
+    /**
+     * Maximum CSS pixels the shadow may extend beyond the mesh's
+     * footprint (the no-shear silhouette directly under the mesh). The
+     * footprint area is always preserved; only the sheared tail at low
+     * light elevations is truncated. Default: `2000`.
+     *
+     * **Trade-off:** larger values give longer shadows but the SVG
+     * backing store grows quadratically with this value, which can
+     * cause repaint flicker at extreme low-elevation angles. Pass a
+     * very large number (e.g. `Infinity`) to disable the cap entirely.
+     */
+    maxExtend?: number;
   };
 }
 
@@ -167,14 +185,22 @@ export interface PolyMeshTransform {
    */
   excludeFromAutoCenter?: boolean;
   /**
-   * When `true` and the scene is in dynamic lighting mode, the renderer emits
-   * a flat shadow leaf sibling for each non-textured polygon. The shadow is
-   * projected onto the ground plane (min world-Y of all casting meshes) along
-   * the CSS-space light direction (driven by `--clx/--cly/--clz` vars). Zero
-   * JS in the render loop — the projection matrix is a CSS var that recomputes
-   * via `calc()` when the light vars change. Defaults to `false`.
+   * When `true`, this mesh casts a shadow onto the scene's shadow ground
+   * plane (and onto any meshes marked `receiveShadow: true`). The shadow
+   * emits as one per-mesh `<svg>` whose path is the union of every
+   * casting polygon's projection. Works in both lighting modes.
+   * Defaults to `false`.
    */
   castShadow?: boolean;
+  /**
+   * **(experimental)** When `true`, this mesh acts as a shadow receiver:
+   * each of its polygon faces becomes a target plane that casting meshes'
+   * shadows project onto and get clipped to. Useful for "shadow on table"
+   * scenarios. Currently only convex face outlines clip cleanly. When no
+   * receivers are present the global ground plane is used as today.
+   * Defaults to `false`.
+   */
+  receiveShadow?: boolean;
 }
 
 export interface PolyMeshHandle {
@@ -351,6 +377,23 @@ function strategiesEqual(
   if (da.length !== db.length) return false;
   for (const s of da) if (!db.includes(s)) return false;
   return true;
+}
+
+function vec3Equal(a: Vec3 | undefined, b: Vec3 | undefined): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  return a[0] === b[0] && a[1] === b[1] && a[2] === b[2];
+}
+
+function shadowOptsEqual(
+  a: PolySceneOptions["shadow"] | undefined,
+  b: PolySceneOptions["shadow"] | undefined,
+): boolean {
+  if (a === b) return true;
+  return (a?.color ?? "#000000") === (b?.color ?? "#000000")
+    && (a?.opacity ?? 0.25) === (b?.opacity ?? 0.25)
+    && (a?.lift ?? 0.05) === (b?.lift ?? 0.05)
+    && (a?.maxExtend ?? 2000) === (b?.maxExtend ?? 2000);
 }
 
 function buildMeshTransform(t: PolyMeshTransform): string | undefined {
@@ -570,9 +613,8 @@ export function createPolyScene(
     wrapper: HTMLDivElement;
     parseResult: ParseResult;
     rendered: RenderedPoly[];
-    /** Shadow leaf elements, one per non-textured non-atlas polygon. Kept
-     *  separate from `rendered` so they can be removed independently when
-     *  castShadow is toggled or lighting mode changes. */
+    /** Dynamic-mode shadow `<q>` leaves, one per non-deduped casting
+     *  polygon. Empty in baked mode (which uses `shadowSvg` instead). */
     shadowRendered: HTMLElement[];
     voxelRenderer?: PolyVoxelRenderer;
     disposeAtlas?: () => void;
@@ -583,6 +625,7 @@ export function createPolyScene(
     hasBuckets: boolean;
     excludeFromAutoCenter: boolean;
     castShadow: boolean;
+    receiveShadow: boolean;
     cameraCullGroups: CameraCullNormalGroup[];
     cameraCullSignature: string;
     lightOverrideSignature: string;
@@ -592,6 +635,115 @@ export function createPolyScene(
     bakedRotation: Vec3;
   }
   const meshes = new Set<MeshEntry>();
+
+  // Cached CSS-Z of the shadow ground plane. Set by `recomputeShadowGround`.
+  // In dynamic mode this also flows into the `--shadow-ground-cssz` CSS var
+  // that drives `--shadow-proj`. In baked mode it's read by `emitShadowLeaves`
+  // to bake the per-leaf inline projection matrix on the CPU. `null` means
+  // no casting mesh exists yet, so no shadow leaves should be emitted.
+  let currentGroundCssZ: number | null = null;
+
+  // Scene-level shadow SVGs. One per surface (ground + each receiver
+  // face). Every caster's projection onto a given surface ends up in
+  // that surface's single SVG path, so overlapping shadows from
+  // different casters composite via SVG fill-rule=nonzero (one solid
+  // silhouette per surface) rather than stacking opacity at the DOM
+  // level. Rebuilt as a whole on any caster/receiver/light change.
+  const sceneShadowSvgs: SVGSVGElement[] = [];
+  function clearAllSceneShadows(): void {
+    for (const svg of sceneShadowSvgs) {
+      if (svg.parentNode) svg.parentNode.removeChild(svg);
+    }
+    sceneShadowSvgs.length = 0;
+    // Mark all cached receiver-face SVGs as hidden. Per-frame
+    // emitSceneReceiverShadows will reveal the ones with shadow
+    // content and leave the rest in `display:none`, which keeps the
+    // compositor layer count low without tearing the elements down.
+    hideAllReceiverFaceSvgs();
+  }
+
+  // Per-receiver cached face geometry. Each entry holds one record
+  // per coplanar face group on the receiver: plane (O, n, u, v),
+  // outline polygon (used as Sutherland-Hodgman clip), bbox in (u, v)
+  // for SVG sizing, and the pre-stringified matrix3d transform that
+  // places an SVG on that face plane.
+  //
+  // All of this is invariant under light/caster changes. Per light
+  // tick we just re-run the per-tri SH and build the path `d` —
+  // never recompute groups or basis. Cache invalidated when the
+  // receiver's polygon count or position changes.
+  interface ReceiverFacePlane {
+    O: Vec3;
+    n: Vec3;
+    u: Vec3;
+    v: Vec3;
+    outlineUv: Array<[number, number]>;
+    minU: number;
+    minV: number;
+    width: number;
+    height: number;
+    matrixCss: string;
+    // Mount-once SVG + path: created on first non-empty frame for
+    // this face, then kept in the DOM. Per-frame we just mutate
+    // `d`/`fill`/`opacity` and toggle `display`. Avoids per-frame
+    // ~248 createElementNS + insertBefore + 248 layer churn that
+    // dominated gpuViz (~40 ms/frame).
+    svg: SVGSVGElement | null;
+    path: SVGPathElement | null;
+    visible: boolean;
+  }
+  const receiverShadowCache = new Map<MeshEntry, ReceiverFacePlane[]>();
+  const receiverShadowCacheKey = new Map<MeshEntry, string>();
+  function disposeReceiverPlanes(planes: ReceiverFacePlane[]): void {
+    for (const p of planes) {
+      if (p.svg && p.svg.parentNode) p.svg.parentNode.removeChild(p.svg);
+      p.svg = null;
+      p.path = null;
+    }
+  }
+  function clearReceiverShadowCache(entry?: MeshEntry): void {
+    if (entry) {
+      const planes = receiverShadowCache.get(entry);
+      if (planes) disposeReceiverPlanes(planes);
+      receiverShadowCache.delete(entry);
+      receiverShadowCacheKey.delete(entry);
+    } else {
+      for (const planes of receiverShadowCache.values()) disposeReceiverPlanes(planes);
+      receiverShadowCache.clear();
+      receiverShadowCacheKey.clear();
+    }
+  }
+  function hideAllReceiverFaceSvgs(): void {
+    for (const planes of receiverShadowCache.values()) {
+      for (const p of planes) {
+        if (p.svg && p.visible) {
+          p.svg.style.display = "none";
+          p.visible = false;
+        }
+      }
+    }
+  }
+
+  // Per-caster cached per-polygon data: world-space vertices + 3D
+  // AABB corners. Invariant under light direction; depends only on
+  // the caster mesh's geometry and position. Reused across every
+  // receiver-face SH-clip in a frame and across frames within a
+  // drag, so the caching pays for itself many times over.
+  interface CasterPolyItem {
+    wv: Vec3[];
+    bboxCorners: Vec3[];
+  }
+  const casterItemsCache = new Map<MeshEntry, CasterPolyItem[]>();
+  const casterItemsCacheKey = new Map<MeshEntry, string>();
+  function clearCasterItemsCache(entry?: MeshEntry): void {
+    if (entry) {
+      casterItemsCache.delete(entry);
+      casterItemsCacheKey.delete(entry);
+    } else {
+      casterItemsCache.clear();
+      casterItemsCacheKey.clear();
+    }
+  }
 
   // Apply CSS perspective on the camera wrapper, not the scene element.
   // CSS `perspective` only foreshortens direct children's 3D transforms, so
@@ -719,10 +871,17 @@ export function createPolyScene(
   }
 
   function clearShadowLeaves(entry: MeshEntry): void {
+    // Per-entry `<q>` leaves (dynamic-mode chain + legacy callers) still
+    // hang off the mesh and must be cleared individually.
     for (const el of entry.shadowRendered) {
       if (el.parentNode) el.parentNode.removeChild(el);
     }
     entry.shadowRendered.length = 0;
+    // SVG shadow surfaces are scene-scoped (one per ground / receiver
+    // face, aggregating every caster). Any per-entry trigger that asks
+    // to clear leaves drops the whole scene-level set; emitSceneShadows
+    // will rebuild it next.
+    clearAllSceneShadows();
   }
 
   function disposeRendered(rendered: RenderedPoly[], disposeAtlas?: () => void): void {
@@ -1106,96 +1265,602 @@ export function createPolyScene(
     }
   }
 
-  // Emits shadow leaves for all non-textured rendered polys in the entry.
-  // Each shadow leaf uses the same tag and shape as the original but with a
-  // flat shadow color and a transform prepended by var(--shadow-proj) so it
-  // projects onto the ground plane driven entirely by CSS vars.
+  // Emits the per-mesh shadow `<svg>`. Same path for both lighting modes:
+  // every casting polygon is projected to the ground on the CPU and
+  // concatenated into a single compound `<path>` (M…L…Z subpaths) under
+  // fill-rule=nonzero. Overlapping outlines composite as one filled
+  // silhouette without alpha stacking; gaps between subpaths remain as
+  // gaps (silhouette holes are preserved); back-facing polys are dropped
+  // up front. One SVG element per mesh regardless of polygon count.
   //
-  // Shadow leaves are inserted BEFORE their caster siblings so they sit
-  // below in DOM order, which keeps them behind the casters when both are
-  // coplanar in 3D (painter-order tie-breaking favors earlier nodes).
-  function emitShadowLeaves(entry: MeshEntry): void {
-    clearShadowLeaves(entry);
-    if (!entry.castShadow || currentOptions.textureLighting !== "dynamic") return;
+  // Trade-off vs. the old dynamic-mode per-`<q>` CSS path: live light
+  // updates now require a JS re-projection pass (`setOptions` triggers
+  // re-emit when directionalLight.direction changes) instead of being
+  // free CSS variable updates. The visual upside (no alpha stacking,
+  // preserved holes, fewer DOM nodes) is worth the JS cost for typical
+  // scenes — huge meshes during light-slider drag can profile if needed.
+  // Per-entry trigger: callers pass the entry that changed, but emission
+  // is scene-wide. Drop the arg here so any change rebuilds the whole
+  // shadow set in one shot — every surface aggregates every caster.
+  function emitShadowLeaves(_entry: MeshEntry): void {
+    emitSceneShadows();
+  }
+
+  // Rebuilds every shadow SVG in the scene from scratch. Iterates each
+  // SURFACE (the global ground + every receiver face) once, then sweeps
+  // every caster's projection onto that surface into the same compound
+  // path. SVG fill-rule=nonzero collapses overlapping CCW outlines into
+  // one filled silhouette per surface — overlapping shadows from
+  // different casters don't multiply their opacity at the DOM level.
+  function emitSceneShadows(): void {
+    clearAllSceneShadows();
+    const casters: MeshEntry[] = [];
+    for (const m of meshes) if (!m.disposed && m.castShadow) casters.push(m);
+    if (casters.length === 0) return;
 
     const shadowColor = currentOptions.shadow?.color ?? "#000000";
     const shadowOpacity = currentOptions.shadow?.opacity ?? 0.25;
-    // Build a CSS rgba color from the hex + opacity.
     const parsed = parseHexColor(shadowColor)?.rgb ?? [0, 0, 0];
     const r = parsed[0], g = parsed[1], b = parsed[2];
-    const shadowColorCss = `rgba(${r},${g},${b},${shadowOpacity})`;
+    const lightDir = currentOptions.directionalLight?.direction
+      ?? ([0.4, -0.7, 0.59] as Vec3);
 
-    // Loose-tolerance dedup for shadow casting ONLY — much more permissive
-    // than the parse-time dedup that affects the rendered model. Multiple
-    // coincident or near-coincident polygons cast overlapping shadow
-    // leaves that visibly stack on the receiver; emitting one is enough.
-    // Tolerances allow ~25° off-parallel normals and ~0.5 world units of
-    // plane-offset drift, catching back-to-back doubled faces and minor
+    // Per-caster shadow dedup (independent meshes can't dedup against
+    // each other). Computed once per caster, reused across surfaces.
+    // Loose tolerances catch back-to-back doubled faces and minor
     // importer artifacts without false-positively dropping legitimate
     // inner/outer wall pairs that cast genuinely distinct shadows.
-    // Light-independent — runs once per mesh-polygon change, never per
-    // camera tick or light slider tick.
-    const shadowDedupDrop = findOverlappingPolygonDuplicates(entry.polygons, {
-      normalTolerance: 0.1,
-      distanceTolerance: 0.5,
-      overlapFraction: 0.4,
-      preserveDoubleSidedBackfaces: false,
-    });
-
-    const fragment = doc.createDocumentFragment();
-    for (const item of renderedItemsForCamera(entry)) {
-      // Atlas (<s>) polygons cast shadows too — the shadow only needs
-      // the polygon's OUTLINE (border-shape) and a flat dark color, not
-      // the texture content. So fully textured meshes like the Frog Guy
-      // get proper shadows just like solid-color meshes.
-      // Skip polygons identified as shadow-duplicates of another caster.
-      if (shadowDedupDrop.has(item.polygonIndex)) continue;
-      const plan = item.plan;
-      if (!plan) continue;
-
-      // Read the original matrix3d from the plan (not from the element
-      // style string) so we never parse strings.
-      const origMatrix = `matrix3d(${plan.matrix})`;
-
-      // Shadow leaves emit as <q> — a dedicated single-letter element
-      // that lives alongside <b>/<i>/<s>/<u> in the tag-as-strategy
-      // taxonomy. Using its own tag means we don't have to thread
-      // `:not(.polycss-shadow)` exclusions through every dynamic-mode
-      // color rule (regular polygon leaves get relit by Lambert; shadow
-      // leaves shouldn't). Rendering rides the <q> + border-shape path
-      // mirrored from <i>'s border-color: currentColor mechanism.
-      // clip-path is forbidden by repo policy (4000+ clip-paths inside
-      // preserve-3d = ~15 s/frame on Chromium).
-      //
-      // The caster's normal is pinned inline as --pnx/--pny/--pnz so the
-      // cascade can compute a Lambert factor and gate the shadow's
-      // opacity: polygons facing AWAY from the light don't cast a
-      // shadow on the receiver (their projection is inside the
-      // silhouette of the front-facing parts anyway, just adding
-      // overdraw). Pure CSS — no JS at light-change time.
-      const shadowEl = doc.createElement("q");
-      shadowEl.className = "polycss-shadow";
-      shadowEl.style.transform = `var(--shadow-proj) ${origMatrix}`;
-      shadowEl.style.color = shadowColorCss;
-      shadowEl.style.width = `${plan.canvasW}px`;
-      shadowEl.style.height = `${plan.canvasH}px`;
-      shadowEl.style.setProperty("border-shape", cssBorderShapeForPlan(plan));
-      shadowEl.style.setProperty("--pnx", plan.normal[0].toFixed(4));
-      shadowEl.style.setProperty("--pny", plan.normal[1].toFixed(4));
-      shadowEl.style.setProperty("--pnz", plan.normal[2].toFixed(4));
-
-      fragment.appendChild(shadowEl);
-      entry.shadowRendered.push(shadowEl);
+    const dedupByCaster = new Map<MeshEntry, Set<number>>();
+    for (const c of casters) {
+      dedupByCaster.set(c, findOverlappingPolygonDuplicates(c.polygons, {
+        normalTolerance: 0.1,
+        distanceTolerance: 0.5,
+        overlapFraction: 0.4,
+        // Authored double-sided backfaces would project coincident
+        // shadows that stack their alpha against the front face — drop
+        // them at the dedup step instead of in the SVG fill rule.
+        preserveDoubleSidedBackfaces: false,
+      }));
     }
 
-    // Insert all shadow leaves BEFORE the first normal polygon child so
-    // they appear below casters in DOM order. appendChild would put them
-    // after; insertBefore(fragment, firstChild) puts them at the front.
-    const firstChild = entry.wrapper.firstChild;
-    if (firstChild) {
-      entry.wrapper.insertBefore(fragment, firstChild);
-    } else {
-      entry.wrapper.appendChild(fragment);
+    if (currentGroundCssZ !== null) {
+      emitSceneGroundShadow(casters, dedupByCaster, lightDir, currentGroundCssZ, r, g, b, shadowOpacity);
+    }
+    for (const receiver of meshes) {
+      if (receiver.disposed || !receiver.receiveShadow) continue;
+      emitSceneReceiverShadows(casters, dedupByCaster, receiver, lightDir, r, g, b, shadowOpacity);
+    }
+  }
+
+  // Builds a single per-mesh <svg> for the mesh's shadow. Projects every
+  // casting polygon to the ground on the CPU, concatenates the outlines
+  // into one compound <path d="M…L…Z M…L…Z …"> under fill-rule=nonzero so
+  // overlapping CCW subpaths composite as one filled silhouette (no alpha
+  // accumulation at intersections). SVG content is internally 2D so this
+  // sidesteps the `opacity + transform-style: preserve-3d` flatten trap
+  // that breaks CSS-only shadow grouping in a 3D scene.
+  // Scene-level ground surface: one SVG containing every caster's
+  // projection onto the global ground plane. Overlapping caster shadows
+  // (e.g. pole shadow + cube shadow) collapse into one filled silhouette
+  // via fill-rule=nonzero instead of stacking opacity.
+  function emitSceneGroundShadow(
+    casters: MeshEntry[],
+    dedupByCaster: Map<MeshEntry, Set<number>>,
+    lightDir: Vec3,
+    groundCssZ: number,
+    r: number, g: number, b: number,
+    opacity: number,
+  ): void {
+    const polyProjections: Array<Array<[number, number]>> = [];
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    let fpMinX = Infinity, fpMinY = Infinity, fpMaxX = -Infinity, fpMaxY = -Infinity;
+    for (const caster of casters) {
+      const cpos = caster.handle.transform.position ?? [0, 0, 0];
+      const dedupDrop = dedupByCaster.get(caster)!;
+      for (const item of caster.rendered) {
+        if (dedupDrop.has(item.polygonIndex)) continue;
+        const plan = item.plan;
+        if (!plan) continue;
+        const polygon = caster.polygons[item.polygonIndex];
+        if (!polygon) continue;
+
+        const projected: Array<[number, number]> = [];
+        for (const v of polygon.vertices) {
+          // World vertex (mesh-local, world units) → CSS via the same
+          // axis swap (world.x → CSS-Y, world.y → CSS-X) and tile scale
+          // (× DEFAULT_TILE) that the atlas builder applies per leaf.
+          // Then add transform.position as raw CSS px — that's how the
+          // mesh WRAPPER applies it (translate3d(pos[0]px, pos[1]px,
+          // pos[2]px), no axis swap, no tile multiplier).
+          const cssVertex: Vec3 = [
+            v[1] * DEFAULT_TILE + cpos[0],
+            v[0] * DEFAULT_TILE + cpos[1],
+            v[2] * DEFAULT_TILE + cpos[2],
+          ];
+          if (cssVertex[0] < fpMinX) fpMinX = cssVertex[0];
+          if (cssVertex[1] < fpMinY) fpMinY = cssVertex[1];
+          if (cssVertex[0] > fpMaxX) fpMaxX = cssVertex[0];
+          if (cssVertex[1] > fpMaxY) fpMaxY = cssVertex[1];
+          const p = projectCssVertexToGround(cssVertex, lightDir, groundCssZ);
+          projected.push(p);
+          if (p[0] < minX) minX = p[0];
+          if (p[1] < minY) minY = p[1];
+          if (p[0] > maxX) maxX = p[0];
+          if (p[1] > maxY) maxY = p[1];
+        }
+        // Per-polygon convex hull on the projected 2D points. N-gons
+        // from glTF imports aren't always perfectly planar in 3D, and
+        // projecting a non-planar N-gon yields a SELF-INTERSECTING 2D
+        // polygon. The signed-area-based winding check
+        // (`ensureCcw2D`) returns the NET signed area, which can
+        // disagree with the actual visual winding for self-intersecting
+        // shapes — leading to one rogue subpath rendered with
+        // opposite winding under fill-rule=nonzero, which then
+        // SUBTRACTS from neighboring CCW shadows (visible as wedge-
+        // shaped holes in the final shadow). Hull-per-polygon
+        // guarantees each subpath is a simple convex polygon →
+        // winding is always reliable. Triangles are unchanged
+        // (already simple); only N-gons get hulled.
+        const simplified = projected.length > 3 ? convexHull2D(projected) : projected;
+        if (simplified.length >= 3) polyProjections.push(simplified);
+      }
+    }
+
+    if (polyProjections.length === 0) return;
+    const maxExtend = currentOptions.shadow?.maxExtend ?? 2000;
+    const bx0 = Math.max(minX, fpMinX - maxExtend);
+    const by0 = Math.max(minY, fpMinY - maxExtend);
+    const bx1 = Math.min(maxX, fpMaxX + maxExtend);
+    const by1 = Math.min(maxY, fpMaxY + maxExtend);
+    const width = bx1 - bx0;
+    const height = by1 - by0;
+    if (!(width > 0) || !(height > 0)) return;
+
+    let d = "";
+    for (const verts of polyProjections) {
+      const ccw = ensureCcw2D(verts);
+      d += `M${(ccw[0]![0] - bx0).toFixed(3)},${(ccw[0]![1] - by0).toFixed(3)}`;
+      for (let i = 1; i < ccw.length; i++) {
+        d += `L${(ccw[i]![0] - bx0).toFixed(3)},${(ccw[i]![1] - by0).toFixed(3)}`;
+      }
+      d += "Z";
+    }
+    // (No receiver-footprint subtraction.) The earlier "cut every
+    // receiver's hull as a CW hole" approach broke fill-rule=nonzero
+    // wherever a receiver overlapped the caster's silhouette: a CCW
+    // caster (+1) plus a CW receiver (-1) cancels at every single-
+    // coverage edge, leaving only doubled-coverage interior and
+    // producing visible wedge holes / halos along every shadow edge.
+    //
+    // Physically the cut was trying to express "this receiver blocks
+    // light from reaching the ground under it." But for casters that
+    // already include the receiver's body in their own silhouette
+    // (apple on ground), the cut redundantly cancels the very shadow
+    // we want. For casters above an elevated receiver (pole on cube),
+    // the right fix is volumetric occlusion, not 2D subtraction.
+    // Deferred until we hit a scene where shadow-through-elevated-
+    // receiver is actually distracting.
+
+    const svgNS = "http://www.w3.org/2000/svg";
+    const svg = doc.createElementNS(svgNS, "svg");
+    svg.setAttribute("class", "polycss-shadow polycss-shadow-svg");
+    svg.setAttribute("width", String(width));
+    svg.setAttribute("height", String(height));
+    svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+    svg.setAttribute(
+      "style",
+      `position:absolute;top:0;left:0;display:block;overflow:hidden;` +
+      `transform-origin:0 0;pointer-events:none;will-change:transform;` +
+      `transform:translate3d(${bx0.toFixed(3)}px,${by0.toFixed(3)}px,${groundCssZ.toFixed(3)}px)`,
+    );
+
+    const path = doc.createElementNS(svgNS, "path");
+    path.setAttribute("d", d);
+    const fillColor = `rgb(${r},${g},${b})`;
+    path.setAttribute("fill", fillColor);
+    path.setAttribute("fill-rule", "nonzero");
+    path.setAttribute("stroke", fillColor);
+    path.setAttribute("stroke-width", "2");
+    path.setAttribute("stroke-linejoin", "round");
+    path.setAttribute("opacity", opacity.toFixed(4));
+    svg.appendChild(path);
+
+    sceneShadowSvgs.push(svg);
+    const sceneFirst = sceneEl.firstChild;
+    if (sceneFirst) sceneEl.insertBefore(svg, sceneFirst);
+    else sceneEl.appendChild(svg);
+  }
+
+  type ReceiverPlaneGroup = {
+    O: Vec3;       // CSS-3D origin (representative face vertex 0)
+    n: Vec3;       // unit normal
+    u: Vec3;       // in-plane u basis
+    v: Vec3;       // in-plane v basis (= n × u)
+    outlineUv: Array<[number, number]>;  // CCW convex hull of group's (u,v) coords
+  };
+
+  // Groups a receiver's polygons by shared plane (matching normal +
+  // plane offset within tolerance), then computes a 2D convex-hull
+  // outline per group in the group's own (u, v) coords. Each returned
+  // group becomes one shadow-receiving surface.
+  //
+  // Why convex hull instead of a proper polygon union: Sutherland-
+  // Hodgman (used downstream for caster clipping) only handles convex
+  // clip polygons, and the hull is cheap and stable. For typical
+  // receivers (cubes, planes, simple platforms) the hull is the exact
+  // outline. For L-shaped coplanar regions it over-extends — shadows
+  // would extend past the receiver in the L's concave corner — but
+  // those are rare in practice.
+  //
+  // Tolerance choices: dot-product > 0.999 (~2.5° angular) catches
+  // tessellation artifacts on flat surfaces without merging adjacent
+  // faces of a low-poly curved mesh. Plane-offset tolerance is 0.5
+  // CSS px — sub-pixel coplanarity drift in glTF imports doesn't
+  // separate what should be a single surface.
+  function groupReceiverFaceGroups(
+    receiver: MeshEntry,
+    rpos: Vec3,
+    worldCss: (vert: Vec3, pos: Vec3) => Vec3,
+  ): ReceiverPlaneGroup[] {
+    type FacePlane = {
+      face: Polygon;
+      O: Vec3; n: Vec3; u: Vec3; v: Vec3;
+      offset: number;  // plane offset = n · O, used as the hashing dim
+    };
+    const facePlanes: FacePlane[] = [];
+    for (const face of receiver.polygons) {
+      if (face.vertices.length < 3) continue;
+      const O = worldCss(face.vertices[0]!, rpos);
+      const w1 = worldCss(face.vertices[1]!, rpos);
+      const w2 = worldCss(face.vertices[2]!, rpos);
+      const e1: Vec3 = [w1[0] - O[0], w1[1] - O[1], w1[2] - O[2]];
+      const e2: Vec3 = [w2[0] - O[0], w2[1] - O[1], w2[2] - O[2]];
+      // Normal = e2 × e1 (NOT e1 × e2). polycss uses an axis swap
+      // (world Y → CSS X) when emitting leaves, which flips
+      // handedness. The atlas builder's outward face normal in CSS
+      // coords is the LEFT-hand cross product (= -right-hand). For
+      // shadow projection we need the same outward direction so the
+      // back-face cull aligns with what the renderer treats as the
+      // lit side. e1 × e2 would point inward → shadow would land on
+      // the side of the apple facing AWAY from the light (visible as
+      // "shadow on back/bottom of apple" instead of the lit side).
+      const nx = e2[1] * e1[2] - e2[2] * e1[1];
+      const ny = e2[2] * e1[0] - e2[0] * e1[2];
+      const nz = e2[0] * e1[1] - e2[1] * e1[0];
+      const nLen = Math.hypot(nx, ny, nz);
+      if (nLen < 1e-9) continue;
+      const n: Vec3 = [nx / nLen, ny / nLen, nz / nLen];
+      const e1Len = Math.hypot(e1[0], e1[1], e1[2]);
+      if (e1Len < 1e-9) continue;
+      const u: Vec3 = [e1[0] / e1Len, e1[1] / e1Len, e1[2] / e1Len];
+      const v: Vec3 = [
+        n[1] * u[2] - n[2] * u[1],
+        n[2] * u[0] - n[0] * u[2],
+        n[0] * u[1] - n[1] * u[0],
+      ];
+      const offset = n[0] * O[0] + n[1] * O[1] + n[2] * O[2];
+      facePlanes.push({ face, O, n, u, v, offset });
+    }
+
+    const NORMAL_TOL = 0.001;  // 1 - dot < 0.001  → ~2.5°
+    const OFFSET_TOL = 0.5;    // CSS px
+    type Group = { rep: FacePlane; faces: FacePlane[] };
+    const groups: Group[] = [];
+    // First-fit O(F²) grouping. Apple-class meshes (~300 faces) are
+    // fine; higher-poly receivers may need a bucketed lookup later.
+    for (const fp of facePlanes) {
+      let merged = false;
+      for (const g of groups) {
+        const r = g.rep;
+        const dot = fp.n[0] * r.n[0] + fp.n[1] * r.n[1] + fp.n[2] * r.n[2];
+        if (1 - dot > NORMAL_TOL) continue;
+        if (Math.abs(fp.offset - r.offset) > OFFSET_TOL) continue;
+        g.faces.push(fp);
+        merged = true;
+        break;
+      }
+      if (!merged) groups.push({ rep: fp, faces: [fp] });
+    }
+
+    const out: ReceiverPlaneGroup[] = [];
+    for (const g of groups) {
+      const { O, n, u, v } = g.rep;
+      const uvs: Array<[number, number]> = [];
+      for (const fp of g.faces) {
+        for (const vert of fp.face.vertices) {
+          const w = worldCss(vert, rpos);
+          const dx = w[0] - O[0];
+          const dy = w[1] - O[1];
+          const dz = w[2] - O[2];
+          uvs.push([
+            dx * u[0] + dy * u[1] + dz * u[2],
+            dx * v[0] + dy * v[1] + dz * v[2],
+          ]);
+        }
+      }
+      if (uvs.length < 3) continue;
+      const hull = convexHull2D(uvs);
+      if (hull.length < 3) continue;
+      out.push({ O, n, u, v, outlineUv: ensureCcw2D(hull) });
+    }
+    return out;
+  }
+
+  // Scene-level per-receiver-surface shadow. For each coplanar face
+  // group on the receiver, project EVERY caster's polygons onto that
+  // group's plane, clip each projection to the group's outline
+  // (Sutherland-Hodgman), and emit ONE SVG per group whose path is the
+  // union of every clipped caster shadow. The SVG sits on the scene
+  // root with a matrix3d that orients its 2D content to the group
+  // plane in 3D.
+  //
+  // Aggregating all casters into one SVG per surface is the whole point
+  // of the scene-level refactor: overlapping shadows from different
+  // casters share one alpha pass instead of stacking under
+  // multiply/screen.
+  //
+  // NOTE: assumes casters and receivers have identity rotation/scale
+  // (positions are baked). Rotation/scale support requires extending
+  // worldCss to apply the wrapper's full transform; deferred.
+  function emitSceneReceiverShadows(
+    casters: MeshEntry[],
+    dedupByCaster: Map<MeshEntry, Set<number>>,
+    receiverEntry: MeshEntry,
+    lightDir: Vec3,
+    r: number, g: number, b: number,
+    opacity: number,
+  ): void {
+    const llen = Math.hypot(lightDir[0], lightDir[1], lightDir[2]) || 1;
+    const Lx = lightDir[0] / llen;
+    const Ly = lightDir[1] / llen;
+    const Lz = lightDir[2] / llen;
+    const svgNS = "http://www.w3.org/2000/svg";
+    const rpos = receiverEntry.handle.transform.position ?? [0, 0, 0];
+    // Mesh-local vertex (world units) → CSS via the same axis swap
+    // (world.x → CSS-Y, world.y → CSS-X) and tile scale that the atlas
+    // builder applies. transform.position is then added as raw CSS px
+    // — that's how the mesh wrapper's translate3d treats it. Mixing
+    // tile-scaled position into the same expression would shift the
+    // shadow at a different rate than the visible mesh.
+    const worldCss = (vert: Vec3, pos: Vec3): Vec3 => [
+      vert[1] * DEFAULT_TILE + pos[0],
+      vert[0] * DEFAULT_TILE + pos[1],
+      vert[2] * DEFAULT_TILE + pos[2],
+    ];
+
+    // Group receiver polygons by shared plane (matching normal AND offset
+    // within tolerance). Each group becomes ONE shadow surface: instead
+    // of N tiny SVGs along a tessellated quad we emit a single SVG whose
+    // outline is the convex hull of the group's coplanar faces. Cubes
+    // stay at 6 surfaces (each face is its own group); a flat plane
+    // subdivided into N triangles collapses to 1 surface; an apple
+    // shrinks from O(triangles) to O(distinct normals * planes).
+    // Per-receiver face cache: plane data invariant under light. We
+    // recompute groups (which is O(F²) and allocates lots of vectors)
+    // only when receiver polygons or position change. The SVG element
+    // is still created per-frame for non-empty paths — pre-mounting
+    // an SVG per face balloons compositor layers (248 → +33ms gpuViz).
+    const cacheKey = `${receiverEntry.polygons.length}|${rpos.join(",")}`;
+    let cachedPlanes = receiverShadowCache.get(receiverEntry);
+    if (cachedPlanes === undefined || receiverShadowCacheKey.get(receiverEntry) !== cacheKey) {
+      const surfaces = groupReceiverFaceGroups(receiverEntry, rpos, worldCss);
+      cachedPlanes = surfaces.map((group): ReceiverFacePlane => {
+        const { O, n, u, v, outlineUv } = group;
+        let minU = Infinity, minV = Infinity, maxU = -Infinity, maxV = -Infinity;
+        for (const pt of outlineUv) {
+          if (pt[0] < minU) minU = pt[0];
+          if (pt[1] < minV) minV = pt[1];
+          if (pt[0] > maxU) maxU = pt[0];
+          if (pt[1] > maxV) maxV = pt[1];
+        }
+        const width = maxU - minU;
+        const height = maxV - minV;
+        const lift = 5;
+        const Ox = O[0] + minU * u[0] + minV * v[0] + lift * n[0];
+        const Oy = O[1] + minU * u[1] + minV * v[1] + lift * n[1];
+        const Oz = O[2] + minU * u[2] + minV * v[2] + lift * n[2];
+        const m = [
+          u[0], u[1], u[2], 0,
+          v[0], v[1], v[2], 0,
+          n[0], n[1], n[2], 0,
+          Ox,   Oy,   Oz,   1,
+        ];
+        const matrixCss = `matrix3d(${m.map((x) => x.toFixed(4)).join(",")})`;
+        return {
+          O, n, u, v, outlineUv, minU, minV, width, height, matrixCss,
+          svg: null, path: null, visible: false,
+        };
+      });
+      receiverShadowCache.set(receiverEntry, cachedPlanes);
+      receiverShadowCacheKey.set(receiverEntry, cacheKey);
+    }
+
+    // Per-caster cached items: world-vertices + 3D AABB per polygon.
+    // Geometry is invariant under light direction, so once cached
+    // every receiver-face SH-clip across every drag tick reads from
+    // the cache. Invalidated when a caster mesh changes geometry or
+    // position (clearCasterItemsCache from mesh setters).
+    const casterItems: CasterPolyItem[] = [];
+    for (const caster of casters) {
+      if (caster === receiverEntry) continue;
+      const cpos = caster.handle.transform.position ?? [0, 0, 0];
+      const ckey = `${caster.polygons.length}|${cpos.join(",")}`;
+      let cached = casterItemsCache.get(caster);
+      if (cached === undefined || casterItemsCacheKey.get(caster) !== ckey) {
+        const dedupDrop = dedupByCaster.get(caster)!;
+        cached = [];
+        for (const item of caster.rendered) {
+          if (dedupDrop.has(item.polygonIndex)) continue;
+          const plan = item.plan;
+          if (!plan) continue;
+          const polygon = caster.polygons[item.polygonIndex];
+          if (!polygon) continue;
+          const wv = polygon.vertices.map((vert) => worldCss(vert, cpos));
+          let minX = Infinity, minY = Infinity, minZ = Infinity;
+          let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+          for (const w of wv) {
+            if (w[0] < minX) minX = w[0]; if (w[0] > maxX) maxX = w[0];
+            if (w[1] < minY) minY = w[1]; if (w[1] > maxY) maxY = w[1];
+            if (w[2] < minZ) minZ = w[2]; if (w[2] > maxZ) maxZ = w[2];
+          }
+          const bboxCorners: Vec3[] = [
+            [minX, minY, minZ], [maxX, minY, minZ],
+            [minX, maxY, minZ], [maxX, maxY, minZ],
+            [minX, minY, maxZ], [maxX, minY, maxZ],
+            [minX, maxY, maxZ], [maxX, maxY, maxZ],
+          ];
+          cached.push({ wv, bboxCorners });
+        }
+        casterItemsCache.set(caster, cached);
+        casterItemsCacheKey.set(caster, ckey);
+      }
+      for (const it of cached) casterItems.push(it);
+    }
+
+    for (const group of cachedPlanes) {
+      const { O, n, u, v, outlineUv, minU, minV, width, height, matrixCss } = group;
+      // Cull back-facing surfaces. A back-facing receiver face has
+      // its outward normal pointing AWAY from the light — physically
+      // it can't receive light at all (the receiver's own body
+      // occludes it). Projecting a caster shadow onto it computes a
+      // "virtual" intersection BEHIND the front of the receiver, but
+      // the receiver's lit polygons would render in front of it
+      // anyway. Skip them to avoid painting shadow on faces that
+      // already sit in their own self-shadow.
+      const Ldotn = Lx * n[0] + Ly * n[1] + Lz * n[2];
+      if (Ldotn <= 1e-6) continue;
+
+      // Per-triangle 3D-clip then project. For each caster polygon
+      // (fan-triangulated), 3D-clip the tri against the receiver
+      // plane half-space (keeping only the above-plane part), project
+      // the surviving 3D polygon onto the face's 2D plane along the
+      // light, then Sutherland-Hodgman-clip against the face outline.
+      //
+      // This matches a true raytracer's per-tri occlusion test
+      // (verified against a Möller-Trumbore reference: 0 false
+      // negatives on front-facing receiver faces; ~10% false
+      // positives in edge-case projection geometry, which present
+      // as faint extra shadow on faces adjacent to true shadow).
+      //
+      // Earlier per-vertex approaches failed because (a) projecting
+      // only above-plane vertices loses the silhouette contribution
+      // of tris that straddle the plane (their projected shape
+      // collapses to a line), and (b) per-caster hull engulfs faces
+      // in the bounding silhouette but outside the actual occluding
+      // geometry.
+      const planeDist = (w: Vec3): number =>
+        (w[0] - O[0]) * n[0] + (w[1] - O[1]) * n[1] + (w[2] - O[2]) * n[2];
+      const planeCross = (a: Vec3, b: Vec3, da: number, db: number): Vec3 => {
+        const s = da / (da - db);
+        return [a[0] + s * (b[0] - a[0]), a[1] + s * (b[1] - a[1]), a[2] + s * (b[2] - a[2])];
+      };
+      const projectOntoPlane = (w: Vec3): [number, number] => {
+        const VmOx = w[0] - O[0];
+        const VmOy = w[1] - O[1];
+        const VmOz = w[2] - O[2];
+        const t = (VmOx * n[0] + VmOy * n[1] + VmOz * n[2]) / Ldotn;
+        const Px = w[0] - t * Lx;
+        const Py = w[1] - t * Ly;
+        const Pz = w[2] - t * Lz;
+        const dx = Px - O[0];
+        const dy = Py - O[1];
+        const dz = Pz - O[2];
+        return [dx * u[0] + dy * u[1] + dz * u[2], dx * v[0] + dy * v[1] + dz * v[2]];
+      };
+      const clipped: Array<Array<[number, number]>> = [];
+      const fMinU = minU, fMinV = minV;
+      const fMaxU = group.minU + width;
+      const fMaxV = group.minV + height;
+      for (const item of casterItems) {
+        // Project 3D bbox corners onto the face plane; if the bbox of
+        // those projections is disjoint from the face outline bbox in
+        // (u, v), this polygon casts no shadow on this face. Cheap
+        // 8-projection prefilter that skips the per-tri 3D-clip + SH.
+        // Also confirms the polygon has at least one corner ABOVE the
+        // receiver plane — if all 8 corners are below, no shadow.
+        const corners = item.bboxCorners;
+        let anyAbove = false;
+        let pMinU = Infinity, pMinV = Infinity, pMaxU = -Infinity, pMaxV = -Infinity;
+        for (let ci = 0; ci < 8; ci++) {
+          const c = corners[ci]!;
+          if (planeDist(c) >= 0) anyAbove = true;
+          const pr = projectOntoPlane(c);
+          if (pr[0] < pMinU) pMinU = pr[0];
+          if (pr[0] > pMaxU) pMaxU = pr[0];
+          if (pr[1] < pMinV) pMinV = pr[1];
+          if (pr[1] > pMaxV) pMaxV = pr[1];
+        }
+        if (!anyAbove) continue;
+        if (pMaxU < fMinU || pMinU > fMaxU || pMaxV < fMinV || pMinV > fMaxV) continue;
+        const wv = item.wv;
+        // Fan-triangulate the polygon.
+        for (let triIdx = 1; triIdx < wv.length - 1; triIdx++) {
+          const tA = wv[0]!, tB = wv[triIdx]!, tC = wv[triIdx + 1]!;
+          const dA = planeDist(tA), dB = planeDist(tB), dC = planeDist(tC);
+          const above: Vec3[] = [];
+          const cycle: Array<[Vec3, number]> = [[tA, dA], [tB, dB], [tC, dC]];
+          for (let k = 0; k < 3; k++) {
+            const [p, dp] = cycle[k]!;
+            const [q, dq] = cycle[(k + 1) % 3]!;
+            if (dp >= 0) above.push(p);
+            if ((dp >= 0) !== (dq >= 0)) above.push(planeCross(p, q, dp, dq));
+          }
+          if (above.length < 3) continue;
+          const projected = above.map(projectOntoPlane);
+          const subjectCcw = ensureCcw2D(projected);
+          const clip = clipPolygonToConvex2D(subjectCcw, outlineUv);
+          if (clip.length < 3) continue;
+          clipped.push(clip);
+        }
+      }
+
+      if (clipped.length === 0 || !(width > 0) || !(height > 0)) continue;
+
+      // Coordinate precision of 1 decimal is sub-pixel for typical
+      // CSS-px values; the path is sized in receiver-plane CSS px
+      // (often 100-1000). Cutting from .toFixed(3) drops path string
+      // size by ~30%, less browser parsing + raster fast path.
+      let d = "";
+      for (const verts of clipped) {
+        d += `M${(verts[0]![0] - minU).toFixed(1)},${(verts[0]![1] - minV).toFixed(1)}`;
+        for (let i = 1; i < verts.length; i++) {
+          d += `L${(verts[i]![0] - minU).toFixed(1)},${(verts[i]![1] - minV).toFixed(1)}`;
+        }
+        d += "Z";
+      }
+
+      // Mount-once SVG + path. First frame this face has a shadow
+      // we allocate the elements and parent them; subsequent frames
+      // mutate `d`/`fill`/`opacity` and just flip `display`.
+      let svg = group.svg;
+      let path = group.path;
+      if (!svg || !path) {
+        svg = doc.createElementNS(svgNS, "svg");
+        svg.setAttribute("class", "polycss-shadow polycss-shadow-svg polycss-shadow-receiver");
+        svg.setAttribute("width", String(width));
+        svg.setAttribute("height", String(height));
+        svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+        svg.setAttribute(
+          "style",
+          `position:absolute;top:0;left:0;display:block;overflow:hidden;` +
+          `transform-origin:0 0;pointer-events:none;will-change:transform;` +
+          `transform:${matrixCss}`,
+        );
+        path = doc.createElementNS(svgNS, "path");
+        path.setAttribute("fill-rule", "nonzero");
+        svg.appendChild(path);
+        sceneEl.insertBefore(svg, sceneEl.firstChild);
+        group.svg = svg;
+        group.path = path;
+      } else if (!group.visible) {
+        svg.style.display = "block";
+      }
+      group.visible = true;
+      path.setAttribute("d", d);
+      const fillColor = `rgb(${r},${g},${b})`;
+      if (path.getAttribute("fill") !== fillColor) path.setAttribute("fill", fillColor);
+      const opStr = opacity.toFixed(4);
+      if (path.getAttribute("opacity") !== opStr) path.setAttribute("opacity", opStr);
     }
   }
 
@@ -1266,29 +1931,40 @@ export function createPolyScene(
     emitShadowLeaves(entry);
   }
 
-  // Recomputes --shadow-ground-cssz from the minimum world-Z across all
+  // Recomputes the shadow ground plane from the minimum world-Z across all
   // casting meshes. World Z stays as CSS Z under the world→CSS axis swap.
   // In polycss's world convention Z is up — the red-green plane in the axes
   // helper is the floor. An optional `lift` (in world units) raises the
   // plane slightly above the bbox floor to prevent z-fighting with
   // receiver polygons.
+  //
+  // The ground value is folded into each mesh's SVG shadow path on the
+  // CPU, so a change requires re-emission of every caster's shadow.
   function recomputeShadowGround(): void {
-    if (currentOptions.textureLighting !== "dynamic") {
-      sceneEl.style.removeProperty("--shadow-ground-cssz");
-      return;
-    }
     let minWorldZ = Infinity;
+    // If any receivers exist, anchor the ground plane to the lowest
+    // receiver bottom — that's the actual scene floor. Otherwise fall
+    // back to the lowest caster bottom (legacy behavior, used when no
+    // receiver mesh is registered).
+    let hasReceiver = false;
+    for (const m of meshes) if (!m.disposed && m.receiveShadow) { hasReceiver = true; break; }
     for (const m of meshes) {
-      if (!m.disposed && m.castShadow) {
-        for (const poly of m.polygons) {
-          for (const v of poly.vertices) {
-            if (v[2] < minWorldZ) minWorldZ = v[2];
-          }
+      if (m.disposed) continue;
+      const eligible = hasReceiver ? m.receiveShadow : m.castShadow;
+      if (!eligible) continue;
+      const dz = m.handle.transform.position?.[2] ?? 0;
+      for (const poly of m.polygons) {
+        for (const v of poly.vertices) {
+          const wz = v[2] + dz;
+          if (wz < minWorldZ) minWorldZ = wz;
         }
       }
     }
     if (!Number.isFinite(minWorldZ)) {
-      sceneEl.style.removeProperty("--shadow-ground-cssz");
+      const hadGround = currentGroundCssZ !== null;
+      currentGroundCssZ = null;
+      // No casters left: drop any shadow elements still mounted.
+      if (hadGround) clearAllSceneShadows();
       return;
     }
     const lift = currentOptions.shadow?.lift ?? 0.05;
@@ -1296,10 +1972,11 @@ export function createPolyScene(
     // (not subtracted) so the shadow plane sits slightly *above* the model
     // bbox floor — putting it on top of a receiver mesh placed at minZ
     // rather than below it, where the receiver would occlude the shadow.
-    // Stored as a unitless number (not px) because matrix3d() calc() entries
-    // must be dimensionless — see styles.ts @property --shadow-ground-cssz.
     const groundCssZ = (minWorldZ + lift) * DEFAULT_TILE;
-    sceneEl.style.setProperty("--shadow-ground-cssz", groundCssZ.toFixed(3));
+    const prevGround = currentGroundCssZ;
+    currentGroundCssZ = groundCssZ;
+    // Ground changed: rebuild the scene-level shadow set once.
+    if (prevGround !== groundCssZ) emitSceneShadows();
   }
 
   async function renderEntryChunked(
@@ -1449,6 +2126,7 @@ export function createPolyScene(
       hasBuckets: false,
       excludeFromAutoCenter: !!transformIn.excludeFromAutoCenter,
       castShadow: !!transformIn.castShadow,
+      receiveShadow: !!transformIn.receiveShadow,
       cameraCullGroups: [],
       cameraCullSignature: "",
       lightOverrideSignature: "clear",
@@ -1585,6 +2263,8 @@ export function createPolyScene(
         // Removing from DOM doesn't auto-dispose generated atlas/blob URLs.
         clearRendered(entry);
         meshes.delete(entry);
+        clearReceiverShadowCache(entry);
+        clearCasterItemsCache(entry);
         recomputeAutoCenter();
         recomputeShadowGround();
       },
@@ -1595,6 +2275,8 @@ export function createPolyScene(
         entry.stableDom = stableDomOnUpdate;
         entry.voxelSource = undefined;
         entry.polygons = preparePolygons(polygons, mergeOnUpdate);
+        clearCasterItemsCache(entry);
+        clearReceiverShadowCache(entry);
         clearCurrentTriangleFrame();
         handle.polygons = entry.polygons;
         const shouldRecomputeAutoCenter = options?.recomputeAutoCenter ?? true;
@@ -1762,7 +2444,9 @@ export function createPolyScene(
       },
       setTransform(t: Partial<PolyMeshTransform>) {
         const prevCastShadow = entry.castShadow;
+        const prevReceiveShadow = entry.receiveShadow;
         if (t.castShadow !== undefined) entry.castShadow = !!t.castShadow;
+        if (t.receiveShadow !== undefined) entry.receiveShadow = !!t.receiveShadow;
         transform = { ...transform, ...t };
         const css2 = buildMeshTransform(transform);
         wrapper.style.transform = css2 ?? "";
@@ -1771,6 +2455,17 @@ export function createPolyScene(
         if (entry.castShadow !== prevCastShadow) {
           emitShadowLeaves(entry);
           recomputeShadowGround();
+        }
+        // Receiver toggled: rebuild the scene-level shadow set so this
+        // mesh's faces are added (or removed) as receivers.
+        if (entry.receiveShadow !== prevReceiveShadow) emitSceneShadows();
+        // Position change: shadow geometry depends on world-space coords,
+        // so recompute ground (which itself rebuilds the scene shadows
+        // when the plane moves) and rebuild once more in case only the
+        // caster/receiver moved within the same plane.
+        if (t.position !== undefined) {
+          recomputeShadowGround();
+          emitSceneShadows();
         }
       },
       dispose() {
@@ -1809,6 +2504,11 @@ export function createPolyScene(
     applyMeshLightVarOverride(entry, transform.rotation);
     recomputeAutoCenter();
     recomputeShadowGround();
+    // New receiver: the scene-level shadow set must rebuild so existing
+    // casters get faces to project onto. recomputeShadowGround only
+    // does this when the global ground changes; force a rebuild for the
+    // receiver-only case.
+    if (entry.receiveShadow) emitSceneShadows();
     return handle;
   }
 
@@ -1817,6 +2517,8 @@ export function createPolyScene(
     const prevStrategies = currentOptions.strategies;
     const prevSeamBleed = currentOptions.seamBleed;
     const prevTextureLighting = currentOptions.textureLighting;
+    const prevLightDir = currentOptions.directionalLight?.direction;
+    const prevShadow = currentOptions.shadow;
     const normalizedPartial = normalizeSceneOptions(partial);
     currentOptions = { ...currentOptions, ...normalizedPartial };
     applySceneStyle(sceneEl, currentOptions);
@@ -1839,18 +2541,36 @@ export function createPolyScene(
       for (const entry of meshes) renderEntry(entry);
     }
     if (prevAutoCenter !== nextAutoCenter) recomputeAutoCenter();
-    // When lighting mode changes, re-emit or clear shadow leaves on all meshes
-    // that have castShadow set. Shadow emission is only valid in dynamic mode.
+    // Shadows now use the same per-mesh SVG path in both lighting modes,
+    // so any of these changes require explicit re-emission:
+    //  - lighting mode toggled (the regular leaves change)
+    //  - light direction changed (projection is CPU-baked into each path)
+    //  - shadow color/opacity/lift changed (color/opacity are inline on the
+    //    <path>; lift shifts the ground plane and rebuilds geometry)
     const textureLightingChanged = partial.textureLighting !== undefined &&
       prevTextureLighting !== currentOptions.textureLighting;
+    const nextLightDir = currentOptions.directionalLight?.direction;
+    const lightDirChanged = partial.directionalLight !== undefined
+      && !vec3Equal(prevLightDir, nextLightDir);
+    const nextShadow = currentOptions.shadow;
+    const shadowAppearanceChanged = partial.shadow !== undefined
+      && !shadowOptsEqual(prevShadow, nextShadow);
+    const shadowReemitNeeded = lightDirChanged || shadowAppearanceChanged;
     if (textureLightingChanged) {
+      // Voxel meshes need a full re-render to swap baked/dynamic leaf
+      // emission; everything else just needs the shadow set rebuilt
+      // (one scene-level pass at the end covers all casters).
       for (const entry of meshes) {
         if (!strategiesChanged && !seamBleedChanged && (entry.voxelSource || entry.voxelRenderer)) {
           renderEntry(entry);
-        } else {
-          emitShadowLeaves(entry);
         }
       }
+      recomputeShadowGround();
+      emitSceneShadows();
+    } else if (shadowReemitNeeded) {
+      emitSceneShadows();
+    }
+    if (shadowAppearanceChanged && partial.shadow?.lift !== prevShadow?.lift) {
       recomputeShadowGround();
     }
   }

@@ -1,0 +1,604 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>polycss real-mesh shadow — plane + apple + electric pole</title>
+  <style>
+    html, body { margin: 0; padding: 0; height: 100%; background: #e2e8f0; }
+    #host { position: fixed; inset: 0; }
+    #controls {
+      position: fixed; top: 8px; right: 8px;
+      font: 12px ui-sans-serif, system-ui;
+      background: rgba(0,0,0,0.7); color: #fff;
+      padding: 12px 14px; border-radius: 6px;
+      display: grid; grid-template-columns: 130px 160px 50px; gap: 6px 10px;
+      align-items: center; width: 360px; box-sizing: border-box;
+    }
+    #controls input[type="range"] { width: 160px; }
+    #controls .row-status {
+      grid-column: 1 / -1; padding-top: 6px;
+      border-top: 1px solid rgba(255, 255, 255, 0.15);
+      font: 11px ui-monospace, monospace; color: #cbd5e1;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+  </style>
+</head>
+<body>
+  <div id="host"></div>
+  <div id="controls">
+    <label for="az">Light az</label>
+    <input id="az" type="range" min="0" max="360" step="1" value="60" />
+    <span id="azv">60°</span>
+    <label for="el">Light elev</label>
+    <input id="el" type="range" min="5" max="90" step="1" value="56" />
+    <span id="elv">56°</span>
+    <label for="rt">Raytrace overlay</label>
+    <input id="rt" type="checkbox" checked />
+    <span></span>
+    <label for="poly">Hide polycss shadows</label>
+    <input id="poly" type="checkbox" />
+    <span></span>
+    <div id="rtv" class="row-status"></div>
+  </div>
+
+  <script type="module">
+    import {
+      createPolyCamera,
+      createPolyScene,
+      createPolyOrbitControls,
+      loadMesh,
+    } from "./.generated/polycss.js";
+
+    const host = document.getElementById("host");
+    const camera = createPolyCamera({ rotX: 0, rotY: 90, zoom: 0.15 });
+
+    let lightAz = 60, lightEl = 56;
+    function lightDir() {
+      const az = lightAz * Math.PI / 180, el = lightEl * Math.PI / 180;
+      return [Math.cos(el) * Math.cos(az), Math.cos(el) * Math.sin(az), Math.sin(el)];
+    }
+
+    const scene = createPolyScene(host, {
+      camera,
+      directionalLight: { direction: lightDir(), color: "#ffffff", intensity: 1 },
+      ambientLight: { color: "#ffffff", intensity: 0.45 },
+      textureLighting: "baked",
+      autoCenter: false,
+      shadow: { color: "#000000", opacity: 0.35 },
+    });
+    createPolyOrbitControls(scene, { drag: true, wheel: true });
+
+    function scalePolygons(parsed, s) {
+      return {
+        ...parsed,
+        polygons: parsed.polygons.map((p) => ({
+          ...p,
+          vertices: p.vertices.map((v) => [v[0] * s, v[1] * s, v[2] * s]),
+        })),
+      };
+    }
+
+    const NO_SHADOW = new URLSearchParams(location.search).has("noshadow");
+
+    const PLANE_R = 12;
+    const planeHandle = scene.add(
+      {
+        polygons: [{
+          vertices: [
+            [-PLANE_R, -PLANE_R, 0], [PLANE_R, -PLANE_R, 0],
+            [PLANE_R, PLANE_R, 0], [-PLANE_R, PLANE_R, 0],
+          ],
+          color: "#94a3b8",
+        }],
+        dispose() {},
+      },
+      { castShadow: false, receiveShadow: !NO_SHADOW, merge: false },
+    );
+
+    // ──────────────────────────────────────────────────────────────────
+    // Ground-truth raytraced shadow coverage
+    // ──────────────────────────────────────────────────────────────────
+    // For each receiver polygon, sample N points on its surface, cast a
+    // ray from each toward the sun, and check Möller-Trumbore against
+    // every caster triangle. The result is a "shadow coverage ratio"
+    // per face (0 = fully lit, 1 = fully in shadow). Slow (O(samples ×
+    // caster-triangles)) but physically correct. Used as the source of
+    // truth to compare against polycss's fast projection-based shadow.
+
+    function rayTriangleIntersect(origin, dir, v0, v1, v2) {
+      const EPS = 1e-7;
+      const e1x = v1[0] - v0[0], e1y = v1[1] - v0[1], e1z = v1[2] - v0[2];
+      const e2x = v2[0] - v0[0], e2y = v2[1] - v0[1], e2z = v2[2] - v0[2];
+      const hx = dir[1] * e2z - dir[2] * e2y;
+      const hy = dir[2] * e2x - dir[0] * e2z;
+      const hz = dir[0] * e2y - dir[1] * e2x;
+      const a = e1x * hx + e1y * hy + e1z * hz;
+      if (Math.abs(a) < EPS) return null;
+      const f = 1 / a;
+      const sx = origin[0] - v0[0], sy = origin[1] - v0[1], sz = origin[2] - v0[2];
+      const u = f * (sx * hx + sy * hy + sz * hz);
+      if (u < 0 || u > 1) return null;
+      const qx = sy * e1z - sz * e1y;
+      const qy = sz * e1x - sx * e1z;
+      const qz = sx * e1y - sy * e1x;
+      const v = f * (dir[0] * qx + dir[1] * qy + dir[2] * qz);
+      if (v < 0 || u + v > 1) return null;
+      const t = f * (e2x * qx + e2y * qy + e2z * qz);
+      return t > EPS ? t : null;
+    }
+
+    // Sample positions on a polygon: centroid + each vertex pulled
+    // 30% toward centroid (avoids self-occlusion at exact vertices).
+    function samplePoints(polygon) {
+      const n = polygon.length;
+      let cx = 0, cy = 0, cz = 0;
+      for (const v of polygon) { cx += v[0]; cy += v[1]; cz += v[2]; }
+      cx /= n; cy /= n; cz /= n;
+      const samples = [[cx, cy, cz]];
+      for (const v of polygon) {
+        samples.push([
+          cx * 0.3 + v[0] * 0.7,
+          cy * 0.3 + v[1] * 0.7,
+          cz * 0.3 + v[2] * 0.7,
+        ]);
+      }
+      return samples;
+    }
+
+    // Bake mesh-local vertex → world coord (apply position offset).
+    // The user's axis-swap convention (vy → world X, vx → world Y, vz
+    // → world Z) IS the world for the raytracer — we just need a
+    // consistent space. Use the same coord system polycss renders in.
+    function meshToWorld(vert, pos) {
+      return [
+        vert[1] * 50 + pos[0],
+        vert[0] * 50 + pos[1],
+        vert[2] * 50 + pos[2],
+      ];
+    }
+
+    // Triangulate a polygon via fan from vertex 0.
+    function* fanTriangulate(polygon) {
+      for (let i = 1; i < polygon.length - 1; i++) {
+        yield [polygon[0], polygon[i], polygon[i + 1]];
+      }
+    }
+
+    function traceFaceShadowCoverage(receiverPolygons, receiverPos, casterMeshes, lightDir) {
+      // Collect all caster triangles in WORLD coords.
+      const casterTris = [];
+      for (const c of casterMeshes) {
+        for (const polygon of c.polygons) {
+          const worldVerts = polygon.vertices.map((v) => meshToWorld(v, c.pos));
+          for (const tri of fanTriangulate(worldVerts)) casterTris.push(tri);
+        }
+      }
+      // For each receiver face, compute coverage.
+      const result = new Array(receiverPolygons.length);
+      for (let i = 0; i < receiverPolygons.length; i++) {
+        const polygon = receiverPolygons[i];
+        const worldVerts = polygon.vertices.map((v) => meshToWorld(v, receiverPos));
+        const samples = samplePoints(worldVerts);
+        let occluded = 0;
+        for (const sample of samples) {
+          // Push origin slightly TOWARD the light to avoid self-occlusion
+          // against the receiver face itself.
+          const origin = [
+            sample[0] + lightDir[0] * 0.1,
+            sample[1] + lightDir[1] * 0.1,
+            sample[2] + lightDir[2] * 0.1,
+          ];
+          let hit = false;
+          for (const tri of casterTris) {
+            if (rayTriangleIntersect(origin, lightDir, tri[0], tri[1], tri[2]) !== null) {
+              hit = true;
+              break;
+            }
+          }
+          if (hit) occluded++;
+        }
+        result[i] = occluded / samples.length;
+      }
+      return result;
+    }
+
+    // ──────────────────────────────────────────────────────────────────
+    // Visualization: per-face overlay quads colored by coverage
+    // ──────────────────────────────────────────────────────────────────
+    const overlayLayer = document.createElement("div");
+    overlayLayer.style.cssText =
+      "position:absolute;top:0;left:0;width:0;height:0;transform-style:preserve-3d;pointer-events:none;";
+    let rtScene = null;
+
+    function clearOverlay() {
+      while (overlayLayer.firstChild) overlayLayer.removeChild(overlayLayer.firstChild);
+    }
+
+    // Builds one DOM element per receiver polygon, positioned + oriented
+    // on the polygon's face plane with a colored background showing the
+    // raytraced coverage. Same coord/plane math the shadow code uses,
+    // so the overlay sits on the actual face — easy to compare against
+    // polycss's emitted receiver SVGs.
+    function renderOverlay(receiverPolygons, receiverPos, coverage) {
+      clearOverlay();
+      for (let i = 0; i < receiverPolygons.length; i++) {
+        const polygon = receiverPolygons[i];
+        const cov = coverage[i];
+        if (polygon.vertices.length < 3) continue;
+        // Plane setup: use the same e2 × e1 normal convention as the
+        // shadow code so overlay aligns with polycss receivers.
+        const v0 = meshToWorld(polygon.vertices[0], receiverPos);
+        const v1 = meshToWorld(polygon.vertices[1], receiverPos);
+        const v2 = meshToWorld(polygon.vertices[2], receiverPos);
+        const e1 = [v1[0] - v0[0], v1[1] - v0[1], v1[2] - v0[2]];
+        const e2 = [v2[0] - v0[0], v2[1] - v0[1], v2[2] - v0[2]];
+        const nx = e2[1] * e1[2] - e2[2] * e1[1];
+        const ny = e2[2] * e1[0] - e2[0] * e1[2];
+        const nz = e2[0] * e1[1] - e2[1] * e1[0];
+        const nLen = Math.hypot(nx, ny, nz);
+        if (nLen < 1e-9) continue;
+        const n = [nx / nLen, ny / nLen, nz / nLen];
+        const e1Len = Math.hypot(e1[0], e1[1], e1[2]);
+        if (e1Len < 1e-9) continue;
+        const u = [e1[0] / e1Len, e1[1] / e1Len, e1[2] / e1Len];
+        const v = [
+          n[1] * u[2] - n[2] * u[1],
+          n[2] * u[0] - n[0] * u[2],
+          n[0] * u[1] - n[1] * u[0],
+        ];
+        // Polygon outline in (u, v) coords relative to v0.
+        const uv = polygon.vertices.map((vert) => {
+          const w = meshToWorld(vert, receiverPos);
+          const dx = w[0] - v0[0], dy = w[1] - v0[1], dz = w[2] - v0[2];
+          return [
+            dx * u[0] + dy * u[1] + dz * u[2],
+            dx * v[0] + dy * v[1] + dz * v[2],
+          ];
+        });
+        const minU = Math.min(...uv.map((p) => p[0]));
+        const maxU = Math.max(...uv.map((p) => p[0]));
+        const minV = Math.min(...uv.map((p) => p[1]));
+        const maxV = Math.max(...uv.map((p) => p[1]));
+        const width = maxU - minU;
+        const height = maxV - minV;
+        if (width < 1 || height < 1) continue;
+        const lift = 5;
+        const Ox = v0[0] + minU * u[0] + minV * v[0] + lift * n[0];
+        const Oy = v0[1] + minU * u[1] + minV * v[1] + lift * n[1];
+        const Oz = v0[2] + minU * u[2] + minV * v[2] + lift * n[2];
+        const svgNS = "http://www.w3.org/2000/svg";
+        const svg = document.createElementNS(svgNS, "svg");
+        svg.setAttribute("width", String(width));
+        svg.setAttribute("height", String(height));
+        svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+        svg.setAttribute(
+          "style",
+          `position:absolute;top:0;left:0;display:block;` +
+          `transform-origin:0 0;pointer-events:none;` +
+          `transform:matrix3d(${u[0]},${u[1]},${u[2]},0,${v[0]},${v[1]},${v[2]},0,${n[0]},${n[1]},${n[2]},0,${Ox},${Oy},${Oz},1)`,
+        );
+        const path = document.createElementNS(svgNS, "path");
+        let d = `M${uv[0][0] - minU},${uv[0][1] - minV}`;
+        for (let j = 1; j < uv.length; j++) d += `L${uv[j][0] - minU},${uv[j][1] - minV}`;
+        d += "Z";
+        path.setAttribute("d", d);
+        // Yellow = fully lit, blue = fully shadowed. Avoid red (the
+        // apple is red — they'd blend) and avoid green (the leaf is
+        // green). Yellow/blue is high-contrast against red apple.
+        const litR = 255, litG = 240, litB = 0;
+        const shadowR = 30, shadowG = 80, shadowB = 220;
+        const r = Math.floor(litR * (1 - cov) + shadowR * cov);
+        const g = Math.floor(litG * (1 - cov) + shadowG * cov);
+        const b = Math.floor(litB * (1 - cov) + shadowB * cov);
+        path.setAttribute("fill", `rgb(${r},${g},${b})`);
+        path.setAttribute("opacity", "0.55");
+        svg.appendChild(path);
+        overlayLayer.appendChild(svg);
+      }
+    }
+
+    function mountOverlayLayer() {
+      if (rtScene && !rtScene.contains(overlayLayer)) rtScene.appendChild(overlayLayer);
+    }
+
+    const meshes = { apple: null, pole: null };
+
+    // ──────────────────────────────────────────────────────────────────
+    // Candidate fast algorithm — run per face, classify each face as
+    // "emits shadow" or not. We iterate this implementation to converge
+    // to the raytraced ground truth.
+    // ──────────────────────────────────────────────────────────────────
+    function signedArea2D(verts) {
+      let a = 0;
+      for (let i = 0; i < verts.length; i++) {
+        const p = verts[i]; const q = verts[(i + 1) % verts.length];
+        a += p[0] * q[1] - q[0] * p[1];
+      }
+      return a / 2;
+    }
+    function ensureCcw(verts) {
+      const copy = verts.map((v) => [v[0], v[1]]);
+      if (signedArea2D(copy) < 0) copy.reverse();
+      return copy;
+    }
+    function convexHull(points) {
+      if (points.length <= 1) return points.map((p) => [p[0], p[1]]);
+      const sorted = points.map((p) => [p[0], p[1]]);
+      sorted.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+      const cross = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+      const lower = [];
+      for (const p of sorted) {
+        while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], p) <= 0) lower.pop();
+        lower.push(p);
+      }
+      const upper = [];
+      for (let i = sorted.length - 1; i >= 0; i--) {
+        const p = sorted[i];
+        while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], p) <= 0) upper.pop();
+        upper.push(p);
+      }
+      lower.pop(); upper.pop();
+      return lower.concat(upper);
+    }
+    function clipSH(subject, clip) {
+      if (subject.length === 0 || clip.length < 3) return [];
+      let output = subject.map((v) => [v[0], v[1]]);
+      const n = clip.length;
+      for (let i = 0; i < n; i++) {
+        if (output.length === 0) return [];
+        const input = output; output = [];
+        const a = clip[i]; const b = clip[(i + 1) % n];
+        const inside = (p) => (b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0]) >= 0;
+        const intersect = (p, q) => {
+          const denom = (a[0] - b[0]) * (p[1] - q[1]) - (a[1] - b[1]) * (p[0] - q[0]);
+          if (Math.abs(denom) < 1e-12) return [p[0], p[1]];
+          const t = ((a[0] - p[0]) * (p[1] - q[1]) - (a[1] - p[1]) * (p[0] - q[0])) / denom;
+          return [a[0] + t * (b[0] - a[0]), a[1] + t * (b[1] - a[1])];
+        };
+        const inLen = input.length;
+        for (let j = 0; j < inLen; j++) {
+          const current = input[j]; const prev = input[(j + inLen - 1) % inLen];
+          const currIn = inside(current); const prevIn = inside(prev);
+          if (currIn) {
+            if (!prevIn) output.push(intersect(prev, current));
+            output.push([current[0], current[1]]);
+          } else if (prevIn) {
+            output.push(intersect(prev, current));
+          }
+        }
+      }
+      return output;
+    }
+
+    function fastEmitsShadowDebug(facePolygon, receiverPos, caster, lightDir) {
+      const r = fastEmitsShadow(facePolygon, receiverPos, caster, lightDir, true);
+      return r;
+    }
+    // Mirror of the current emitSceneReceiverShadows decision per
+    // receiver face. Returns true if the algorithm would emit a
+    // shadow on this face. Debug mode returns intermediate state.
+    function fastEmitsShadow(facePolygon, receiverPos, caster, lightDir, debug = false) {
+      if (facePolygon.vertices.length < 3) return debug ? { result: false, reason: "nverts<3" } : false;
+      const v0 = meshToWorld(facePolygon.vertices[0], receiverPos);
+      const v1 = meshToWorld(facePolygon.vertices[1], receiverPos);
+      const v2 = meshToWorld(facePolygon.vertices[2], receiverPos);
+      const e1 = [v1[0] - v0[0], v1[1] - v0[1], v1[2] - v0[2]];
+      const e2 = [v2[0] - v0[0], v2[1] - v0[1], v2[2] - v0[2]];
+      const nx = e2[1] * e1[2] - e2[2] * e1[1];
+      const ny = e2[2] * e1[0] - e2[0] * e1[2];
+      const nz = e2[0] * e1[1] - e2[1] * e1[0];
+      const nLen = Math.hypot(nx, ny, nz);
+      if (nLen < 1e-9) return debug ? { result: false, reason: "degenerate normal" } : false;
+      const n = [nx / nLen, ny / nLen, nz / nLen];
+      const Ldotn = lightDir[0] * n[0] + lightDir[1] * n[1] + lightDir[2] * n[2];
+      if (Ldotn <= 1e-6) return debug ? { result: false, reason: "back-facing", Ldotn } : false;
+      const e1Len = Math.hypot(e1[0], e1[1], e1[2]);
+      const u = [e1[0] / e1Len, e1[1] / e1Len, e1[2] / e1Len];
+      const v = [
+        n[1] * u[2] - n[2] * u[1],
+        n[2] * u[0] - n[0] * u[2],
+        n[0] * u[1] - n[1] * u[0],
+      ];
+      const faceUv = facePolygon.vertices.map((vert) => {
+        const w = meshToWorld(vert, receiverPos);
+        const dx = w[0] - v0[0], dy = w[1] - v0[1], dz = w[2] - v0[2];
+        return [dx * u[0] + dy * u[1] + dz * u[2], dx * v[0] + dy * v[1] + dz * v[2]];
+      });
+      const outline = ensureCcw(convexHull(faceUv));
+      if (outline.length < 3) return debug ? { result: false, reason: "outline<3" } : false;
+      // Per-triangle projection with 3D clipping. For each pole tri:
+      // 1. 3D-clip the tri against the receiver plane half-space
+      //    (keep only the part on the light side of the plane).
+      // 2. Project the surviving 3D polygon to the face's 2D plane.
+      // 3. Sutherland-Hodgman clip against the face outline.
+      // 4. If non-empty, the face is in cast shadow.
+      //
+      // Naively projecting all 3 vertices when one is below the plane
+      // over-extends the 2D shadow (the below-plane vertex projects
+      // to the OPPOSITE side of where the tri actually shadows),
+      // producing FP over-shadowing on faces the tri doesn't really
+      // occlude. The 3D clip step produces the exact above-plane
+      // polygon (triangle or quad) whose projection IS the tri's
+      // true cast shadow on the receiver plane.
+      const projectPlanarPoint = (w) => {
+        // Assumes w is already on/above the receiver plane.
+        const VmO = [w[0] - v0[0], w[1] - v0[1], w[2] - v0[2]];
+        const t = (VmO[0] * n[0] + VmO[1] * n[1] + VmO[2] * n[2]) / Ldotn;
+        const Px = w[0] - t * lightDir[0];
+        const Py = w[1] - t * lightDir[1];
+        const Pz = w[2] - t * lightDir[2];
+        const dx = Px - v0[0], dy = Py - v0[1], dz = Pz - v0[2];
+        return [dx * u[0] + dy * u[1] + dz * u[2], dx * v[0] + dy * v[1] + dz * v[2]];
+      };
+      // Classify a 3D point: signed distance to plane (positive = above).
+      const planeDist = (w) => (w[0] - v0[0]) * n[0] + (w[1] - v0[1]) * n[1] + (w[2] - v0[2]) * n[2];
+      // Interpolate between two 3D points where the plane crosses.
+      const planeCross = (a, b, da, db) => {
+        const s = da / (da - db);
+        return [a[0] + s * (b[0] - a[0]), a[1] + s * (b[1] - a[1]), a[2] + s * (b[2] - a[2])];
+      };
+      let triCount = 0;
+      for (const polygon of caster.polygons) {
+        const wv = polygon.vertices.map((vert) => meshToWorld(vert, caster.pos));
+        for (let i = 1; i < wv.length - 1; i++) {
+          triCount++;
+          const tA = wv[0], tB = wv[i], tC = wv[i + 1];
+          const dA = planeDist(tA), dB = planeDist(tB), dC = planeDist(tC);
+          // 3D-clip the tri against the half-space "above the receiver plane".
+          // Keep vertices with dist >= 0; add intersection points for edges
+          // that cross. The result is the above-plane polygon (3 verts if
+          // all above, 0 verts if all below, 3-4 verts if straddle).
+          const above = [];
+          const cycle = [[tA, dA], [tB, dB], [tC, dC]];
+          for (let k = 0; k < 3; k++) {
+            const [p, dp] = cycle[k];
+            const [q, dq] = cycle[(k + 1) % 3];
+            if (dp >= 0) above.push(p);
+            if ((dp >= 0) !== (dq >= 0)) above.push(planeCross(p, q, dp, dq));
+          }
+          if (above.length < 3) continue;
+          const proj = above.map(projectPlanarPoint);
+          const triCcw = ensureCcw(proj);
+          const clip = clipSH(triCcw, outline);
+          if (clip.length >= 3) {
+            return debug ? { result: true, reason: "ok", triCount } : true;
+          }
+        }
+      }
+      return debug ? { result: false, reason: "no tri clips", triCount } : false;
+    }
+
+    function compareAlgorithms(receiverPolygons, receiverPos, caster, lightDir, coverage, shadowThresh = 0.3) {
+      let tp = 0, fp = 0, fn = 0, tn = 0;
+      const fnFaces = [], fpFaces = [];
+      const ldotnHist = { fn_pos: 0, fn_neg: 0, fp_pos: 0, fp_neg: 0 };
+      for (let i = 0; i < receiverPolygons.length; i++) {
+        const gt = coverage[i] > shadowThresh;
+        const fast = fastEmitsShadow(receiverPolygons[i], receiverPos, caster, lightDir);
+        // Also compute Ldotn for this face to bucket by orientation
+        const poly = receiverPolygons[i];
+        let ldotn = 0;
+        if (poly.vertices.length >= 3) {
+          const v0 = meshToWorld(poly.vertices[0], receiverPos);
+          const v1 = meshToWorld(poly.vertices[1], receiverPos);
+          const v2 = meshToWorld(poly.vertices[2], receiverPos);
+          const e1 = [v1[0]-v0[0], v1[1]-v0[1], v1[2]-v0[2]];
+          const e2 = [v2[0]-v0[0], v2[1]-v0[1], v2[2]-v0[2]];
+          const nx = e2[1]*e1[2] - e2[2]*e1[1];
+          const ny = e2[2]*e1[0] - e2[0]*e1[2];
+          const nz = e2[0]*e1[1] - e2[1]*e1[0];
+          const nLen = Math.hypot(nx, ny, nz);
+          if (nLen > 1e-9) ldotn = (lightDir[0]*nx + lightDir[1]*ny + lightDir[2]*nz) / nLen;
+        }
+        if (gt && fast) tp++;
+        else if (gt && !fast) {
+          fn++; fnFaces.push({ i, cov: coverage[i], ldotn });
+          if (ldotn > 0) ldotnHist.fn_pos++; else ldotnHist.fn_neg++;
+        }
+        else if (!gt && fast) {
+          fp++; fpFaces.push({ i, cov: coverage[i], ldotn });
+          if (ldotn > 0) ldotnHist.fp_pos++; else ldotnHist.fp_neg++;
+        }
+        else tn++;
+      }
+      return { tp, fp, fn, tn, fnFaces, fpFaces, ldotnHist };
+    }
+
+    // URL toggles for trace/debug runs:
+    //   ?norayt     skip the brute-force raytracer + overlay
+    //   ?noshadow   disable cast/receive on apple+pole (baseline)
+    const URL_FLAGS = new URLSearchParams(location.search);
+    const SKIP_RAYTRACE = URL_FLAGS.has("norayt");
+    const SKIP_SHADOWS = URL_FLAGS.has("noshadow");
+    function runRaytraceAndOverlay() {
+      if (SKIP_RAYTRACE) return;
+      if (!meshes.apple || !meshes.pole) return;
+      const t0 = performance.now();
+      // Pole-only occlusion. Receiver self-occlusion is handled by
+      // Lambert in the rendered output (back-facing faces are dark
+      // from shading), so we don't need to flag them in the cast-
+      // shadow algorithm.
+      const coverage = traceFaceShadowCoverage(
+        meshes.apple.handle.getPolygons(),
+        meshes.apple.pos,
+        [{ polygons: meshes.pole.handle.getPolygons(), pos: meshes.pole.pos }],
+        lightDir(),
+      );
+      const t1 = performance.now();
+      // Programmatic comparison: how many faces does the fast algo
+      // miss (false negatives) or over-shadow (false positives)?
+      const apple = meshes.apple.handle.getPolygons();
+      const caster = { polygons: meshes.pole.handle.getPolygons(), pos: meshes.pole.pos };
+      const cmp = compareAlgorithms(apple, meshes.apple.pos, caster, lightDir(), coverage);
+      window.__cmp = cmp;
+      window.__debugFaces = {
+        apple, applePos: meshes.apple.pos, caster, lightDir: lightDir(),
+        debug: (faceIdx) => fastEmitsShadow(apple[faceIdx], meshes.apple.pos, caster, lightDir(), true),
+      };
+      console.log("[fast vs raytrace]", cmp);
+      if (rtInput.checked) {
+        renderOverlay(apple, meshes.apple.pos, coverage);
+        mountOverlayLayer();
+      } else {
+        clearOverlay();
+      }
+      const shadowed = coverage.filter((c) => c > 0.3).length;
+      rtv.textContent = `${shadowed}/${coverage.length} dark (${(t1 - t0).toFixed(0)}ms) · diff TP=${cmp.tp} FN=${cmp.fn} FP=${cmp.fp}`;
+    }
+
+    Promise.all([
+      loadMesh("/gallery/glb/apple.glb"),
+      loadMesh("/gallery/glb/apocalypse/electric_pole_1.glb"),
+    ]).then(([appleRaw, poleRaw]) => {
+      const applePos = [2.5, 0, 0];
+      const polePos = [-50, 1000, 0];
+      const appleHandle = scene.add(scalePolygons(appleRaw, 0.5), {
+        castShadow: !NO_SHADOW,
+        receiveShadow: !NO_SHADOW,
+        merge: false,
+        position: applePos,
+      });
+      const poleHandle = scene.add(scalePolygons(poleRaw, 2), {
+        castShadow: !NO_SHADOW,
+        receiveShadow: false,
+        merge: false,
+        position: polePos,
+      });
+      meshes.apple = { handle: appleHandle, pos: applePos };
+      meshes.pole = { handle: poleHandle, pos: polePos };
+      // Mount overlay layer as a sibling of the polycss scene so it
+      // shares the same camera perspective.
+      rtScene = document.querySelector(".polycss-scene");
+      if (rtScene) rtScene.appendChild(overlayLayer);
+      runRaytraceAndOverlay();
+    });
+
+    const azInput = document.getElementById("az");
+    const elInput = document.getElementById("el");
+    const azv = document.getElementById("azv");
+    const elv = document.getElementById("elv");
+    const rtInput = document.getElementById("rt");
+    const rtv = document.getElementById("rtv");
+    const polyInput = document.getElementById("poly");
+    function updateLight() {
+      lightAz = +azInput.value;
+      lightEl = +elInput.value;
+      azv.textContent = `${lightAz}°`;
+      elv.textContent = `${lightEl}°`;
+      scene.setOptions({
+        directionalLight: { direction: lightDir(), color: "#ffffff", intensity: 1 },
+      });
+      runRaytraceAndOverlay();
+    }
+    function updatePolyVis() {
+      document.querySelectorAll("svg.polycss-shadow").forEach((s) => {
+        s.style.display = polyInput.checked ? "none" : "";
+      });
+    }
+    azInput.addEventListener("input", updateLight);
+    elInput.addEventListener("input", updateLight);
+    rtInput.addEventListener("change", runRaytraceAndOverlay);
+    polyInput.addEventListener("change", updatePolyVis);
+  </script>
+</body>
+</html>
