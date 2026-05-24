@@ -26,6 +26,66 @@ const QUAD: Polygon = {
   color: "#00ff00",
 };
 
+interface VoxelInput {
+  x: number;
+  y: number;
+  z: number;
+  colorIndex: number;
+}
+
+function buildVoxBuffer(size: [number, number, number], voxels: VoxelInput[]): ArrayBuffer {
+  const sizeChunkBytes = 12 + 12;
+  const xyziChunkBytes = 12 + 4 + voxels.length * 4;
+  const childrenSize = sizeChunkBytes + xyziChunkBytes;
+  const buf = new ArrayBuffer(8 + 12 + childrenSize);
+  const dv = new DataView(buf);
+  const u8 = new Uint8Array(buf);
+  let off = 0;
+  const writeId = (id: string) => {
+    for (let i = 0; i < 4; i += 1) u8[off++] = id.charCodeAt(i);
+  };
+  const writeU32 = (value: number) => {
+    dv.setUint32(off, value, true);
+    off += 4;
+  };
+  const writeU8 = (value: number) => {
+    u8[off++] = value;
+  };
+
+  writeId("VOX ");
+  writeU32(150);
+  writeId("MAIN");
+  writeU32(0);
+  writeU32(childrenSize);
+  writeId("SIZE");
+  writeU32(12);
+  writeU32(0);
+  writeU32(size[0]);
+  writeU32(size[1]);
+  writeU32(size[2]);
+  writeId("XYZI");
+  writeU32(4 + voxels.length * 4);
+  writeU32(0);
+  writeU32(voxels.length);
+  for (const voxel of voxels) {
+    writeU8(voxel.x);
+    writeU8(voxel.y);
+    writeU8(voxel.z);
+    writeU8(voxel.colorIndex);
+  }
+  return buf;
+}
+
+function mockFetchVox(): void {
+  const buffer = buildVoxBuffer([1, 1, 1], [{ x: 0, y: 0, z: 0, colorIndex: 1 }]);
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+    ok: true,
+    status: 200,
+    text: () => Promise.resolve(""),
+    arrayBuffer: () => Promise.resolve(buffer),
+  }));
+}
+
 const OFFSET_TEXTURED_TRIANGLE: Polygon = {
   vertices: [
     [10, 0, 0],
@@ -361,6 +421,46 @@ describe("PolyMesh — loading and error states (with src)", () => {
 
     const meshError = container.querySelector(".polycss-mesh-error");
     expect(meshError).toBeTruthy();
+  });
+});
+
+describe("PolyMesh — direct voxel fast path", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+    document.body.innerHTML = "";
+  });
+
+  it("routes eligible .vox src meshes through face-wrapper direct brushes", async () => {
+    mockFetchVox();
+    const container = renderMesh({ src: "https://example.com/model.vox" });
+
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    });
+
+    const mesh = container.querySelector(".polycss-mesh") as HTMLElement | null;
+    const faceHosts = container.querySelectorAll(".polycss-mesh > .polycss-voxel-face");
+    const brushes = container.querySelectorAll(".polycss-mesh > .polycss-voxel-face > b");
+    expect(mesh?.classList.contains("polycss-voxel-mesh")).toBe(true);
+    expect(faceHosts.length).toBeGreaterThan(0);
+    expect(brushes.length).toBeGreaterThan(0);
+    expect(container.querySelector(".polycss-mesh > b")).toBeNull();
+  });
+
+  it("falls back to polygon rendering for .vox src meshes in dynamic lighting", async () => {
+    mockFetchVox();
+    const container = renderMesh({
+      src: "https://example.com/model.vox",
+      textureLighting: "dynamic",
+    });
+
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    });
+
+    expect(container.querySelector(".polycss-mesh > .polycss-voxel-face")).toBeNull();
+    expect(container.querySelector(".polycss-mesh > b,.polycss-mesh > i,.polycss-mesh > s,.polycss-mesh > u")).not.toBeNull();
   });
 });
 

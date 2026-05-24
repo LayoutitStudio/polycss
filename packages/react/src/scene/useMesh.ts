@@ -26,6 +26,7 @@ export type UseMeshOptions = LoadMeshOptions;
 
 export interface UseMeshResult {
   polygons: Polygon[];
+  voxelSource: ParseResult["voxelSource"];
   loading: boolean;
   error: Error | null;
   warnings: string[];
@@ -39,11 +40,13 @@ const EMPTY_WARNINGS: string[] = [];
 export function usePolyMesh(src: string, options?: UseMeshOptions): UseMeshResult {
   const [state, setState] = useState<{
     polygons: Polygon[];
+    voxelSource: ParseResult["voxelSource"];
     loading: boolean;
     error: Error | null;
     warnings: string[];
   }>({
     polygons: EMPTY_POLYGONS,
+    voxelSource: undefined,
     loading: !!src,
     error: null,
     warnings: EMPTY_WARNINGS,
@@ -72,6 +75,7 @@ export function usePolyMesh(src: string, options?: UseMeshOptions): UseMeshResul
       dispose();
       setState({
         polygons: EMPTY_POLYGONS,
+        voxelSource: undefined,
         loading: false,
         error: null,
         warnings: EMPTY_WARNINGS,
@@ -112,6 +116,7 @@ export function usePolyMesh(src: string, options?: UseMeshOptions): UseMeshResul
         activeResultRef.current = result;
         setState({
           polygons: result.polygons,
+          voxelSource: result.voxelSource,
           loading: false,
           error: null,
           warnings: result.warnings ?? EMPTY_WARNINGS,
@@ -125,6 +130,7 @@ export function usePolyMesh(src: string, options?: UseMeshOptions): UseMeshResul
         const error = err instanceof Error ? err : new Error(String(err));
         setState((prev) => ({
           polygons: prev.polygons,
+          voxelSource: prev.voxelSource,
           loading: false,
           error,
           warnings: prev.warnings,
@@ -143,6 +149,7 @@ export function usePolyMesh(src: string, options?: UseMeshOptions): UseMeshResul
 
   return {
     polygons: state.polygons,
+    voxelSource: state.voxelSource,
     loading: state.loading,
     error: state.error,
     warnings: state.warnings,

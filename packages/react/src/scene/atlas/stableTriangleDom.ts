@@ -69,7 +69,7 @@ function isStableTriangleBasis(value: StableTriangleBasis | undefined): value is
 
 interface StableTriangleDomStyle {
   transform: string;
-  color: string;
+  color?: string;
   basis: StableTriangleBasis;
 }
 
@@ -235,28 +235,31 @@ function computeStableTriangleDomStyle(
     cvz + x2 * txXOffset + y2 * txYOffset,
   );
 
-  const directionalCfg = options.directionalLight;
-  const ambientCfg = options.ambientLight;
-  const lightDir = directionalCfg?.direction ?? DEFAULT_LIGHT_DIR;
-  const lightColor = directionalCfg?.color ?? DEFAULT_LIGHT_COLOR;
-  const lightIntensity = Math.max(0, directionalCfg?.intensity ?? DEFAULT_LIGHT_INTENSITY);
-  const ambientColor = ambientCfg?.color ?? DEFAULT_AMBIENT_COLOR;
-  const ambientIntensity = Math.max(0, ambientCfg?.intensity ?? DEFAULT_AMBIENT_INTENSITY);
-  const lLen = Math.sqrt(
-    lightDir[0] * lightDir[0] + lightDir[1] * lightDir[1] + lightDir[2] * lightDir[2],
-  ) || 1;
-  const lx = lightDir[0] / lLen, ly = lightDir[1] / lLen, lz = lightDir[2] / lLen;
-  const directScale = lightIntensity * Math.max(0, nx * lx + ny * ly + nz * lz);
-  const shadedColor = shadePolygon(
-    polygon.color ?? "#cccccc",
-    directScale,
-    lightColor,
-    ambientColor,
-    ambientIntensity,
-  );
-  const color = options.colorSteps
-    ? quantizeCssColor(shadedColor, options.colorSteps)
-    : shadedColor;
+  let color: string | undefined;
+  if (Math.floor(options.colorFreezeFrames ?? 1) !== 0) {
+    const directionalCfg = options.directionalLight;
+    const ambientCfg = options.ambientLight;
+    const lightDir = directionalCfg?.direction ?? DEFAULT_LIGHT_DIR;
+    const lightColor = directionalCfg?.color ?? DEFAULT_LIGHT_COLOR;
+    const lightIntensity = Math.max(0, directionalCfg?.intensity ?? DEFAULT_LIGHT_INTENSITY);
+    const ambientColor = ambientCfg?.color ?? DEFAULT_AMBIENT_COLOR;
+    const ambientIntensity = Math.max(0, ambientCfg?.intensity ?? DEFAULT_AMBIENT_INTENSITY);
+    const lLen = Math.sqrt(
+      lightDir[0] * lightDir[0] + lightDir[1] * lightDir[1] + lightDir[2] * lightDir[2],
+    ) || 1;
+    const lx = lightDir[0] / lLen, ly = lightDir[1] / lLen, lz = lightDir[2] / lLen;
+    const directScale = lightIntensity * Math.max(0, nx * lx + ny * ly + nz * lz);
+    const shadedColor = shadePolygon(
+      polygon.color ?? "#cccccc",
+      directScale,
+      lightColor,
+      ambientColor,
+      ambientIntensity,
+    );
+    color = options.colorSteps
+      ? quantizeCssColor(shadedColor, options.colorSteps)
+      : shadedColor;
+  }
   return { transform, color, basis: { a, b, c } };
 }
 
@@ -317,7 +320,7 @@ export function updateStableTriangleDom(
     if (el.style.visibility) el.style.visibility = "";
     el.__polycssStableTriangleBasis = style.basis;
     el.style.transform = style.transform;
-    applyStableTriangleColor(el, i, style.color, options);
+    if (style.color !== undefined) applyStableTriangleColor(el, i, style.color, options);
   }
   return true;
 }

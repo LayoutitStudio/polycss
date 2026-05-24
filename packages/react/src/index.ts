@@ -39,7 +39,6 @@ export type {
   InteractionProps,
   PolyRenderStrategy,
   PolyRenderStrategiesOption,
-  PolySeamBleed,
 } from "./scene";
 
 export { Poly } from "./shapes";
@@ -237,7 +236,6 @@ export {
   buildSceneContext,
   computeSceneBbox,
   BASE_TILE,
-  DEFAULT_SEAM_BLEED,
   DEFAULT_CAMERA_STATE,
   DEFAULT_PROJECTION,
   normalizeInvertMultiplier,
