@@ -12,7 +12,28 @@ import type {
   ParserOptionsState,
   PresetModel,
 } from "../types";
+import { activeMeshResolution, type WorkbenchMeshResolution } from "../../types";
+import { cleanupLossyBakedTextureColors } from "./lossyColorCleanup";
 import { mergeParserOptions } from "./parserOptions";
+
+const VOX_LOSSY_PALETTE_MERGE_DISTANCE = 28;
+const VOX_LOSSY_COLOR_REGION_MERGE_DISTANCE = 36;
+
+function mergeVoxParserOptions(
+  base: PresetModel["options"],
+  parser: ParserOptionsState,
+  meshResolution: WorkbenchMeshResolution,
+) {
+  const options = mergeParserOptions(base, parser);
+  if (activeMeshResolution(meshResolution) === "lossless") {
+    delete options.paletteMergeDistance;
+    delete options.colorRegionMergeDistance;
+    return options;
+  }
+  options.paletteMergeDistance ??= VOX_LOSSY_PALETTE_MERGE_DISTANCE;
+  options.colorRegionMergeDistance ??= VOX_LOSSY_COLOR_REGION_MERGE_DISTANCE;
+  return options;
+}
 
 /**
  * Find every .mtl file referenced by an OBJ via its `mtllib` directives.
@@ -60,6 +81,7 @@ function findDroppedFile(index: Map<string, File>, path: string): File | undefin
 export async function loadPresetModel(
   model: PresetModel,
   parser: ParserOptionsState,
+  meshResolution: WorkbenchMeshResolution = "lossy",
 ): Promise<LoadedModel> {
   const started = performance.now();
   if (model.kind === "primitive") {
@@ -114,7 +136,8 @@ export async function loadPresetModel(
         ...((model.options as ObjParseOptions | undefined)?.materialTextures ?? {}),
       },
     });
-    const parsed = await bakeSolidTextureSamples(parsedObj);
+    const baked = await bakeSolidTextureSamples(parsedObj);
+    const parsed = cleanupLossyBakedTextureColors(parsedObj, baked, { meshResolution });
     return {
       label: model.label,
       kind: "obj",
@@ -135,7 +158,7 @@ export async function loadPresetModel(
   });
 
   if (model.kind === "vox") {
-    const parsed = parseVox(buf, mergeParserOptions(model.options, parser));
+    const parsed = parseVox(buf, mergeVoxParserOptions(model.options, parser, meshResolution));
     return {
       label: model.label,
       kind: "vox",
@@ -154,7 +177,8 @@ export async function loadPresetModel(
     ...mergeParserOptions(model.options, parser),
     baseUrl: new URL(url, window.location.href).href,
   });
-  const parsed = await bakeSolidTextureSamples(parsedGltf);
+  const baked = await bakeSolidTextureSamples(parsedGltf);
+  const parsed = cleanupLossyBakedTextureColors(parsedGltf, baked, { meshResolution });
   return {
     label: model.label,
     kind: model.kind,
@@ -173,6 +197,7 @@ export async function loadPresetModel(
 export async function loadDroppedModel(
   source: DroppedModelSource,
   parser: ParserOptionsState,
+  meshResolution: WorkbenchMeshResolution = "lossy",
 ): Promise<LoadedModel> {
   const started = performance.now();
   const options = mergeParserOptions(source.preset.options, parser);
@@ -223,7 +248,8 @@ export async function loadDroppedModel(
         ...(presetOptions?.materialTextures ?? {}),
       },
     });
-    const parsed = await bakeSolidTextureSamples(parsedObj);
+    const baked = await bakeSolidTextureSamples(parsedObj);
+    const parsed = cleanupLossyBakedTextureColors(parsedObj, baked, { meshResolution });
     let disposed = false;
     const parseResult = {
       ...parsed,
@@ -252,7 +278,7 @@ export async function loadDroppedModel(
   const buf = await source.primaryFile.arrayBuffer();
 
   if (source.kind === "vox") {
-    const parsed = parseVox(buf, options);
+    const parsed = parseVox(buf, mergeVoxParserOptions(source.preset.options, parser, meshResolution));
     return {
       label: source.label,
       kind: "vox",
@@ -268,7 +294,8 @@ export async function loadDroppedModel(
   }
 
   const parsedGltf = parseGltf(buf, options);
-  const parsed = await bakeSolidTextureSamples(parsedGltf);
+  const baked = await bakeSolidTextureSamples(parsedGltf);
+  const parsed = cleanupLossyBakedTextureColors(parsedGltf, baked, { meshResolution });
   return {
     label: source.label,
     kind: "glb",

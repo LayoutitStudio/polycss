@@ -41,6 +41,7 @@ export interface SceneOptionsState {
   autoCenter: boolean;
   interactive: boolean;
   animate: boolean;
+  normalBucketCull: boolean;
   showAxes: boolean;
   selection: boolean;
   hoverEffects: boolean;

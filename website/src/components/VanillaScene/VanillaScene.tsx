@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import type { ParseAnimationController, PolyAmbientLight, PolyDirectionalLight, Polygon, Vec3 as ReactVec3 } from "@layoutit/polycss-react";
 import {
   axesHelperPolygons,
@@ -27,6 +27,11 @@ import type {
   Vec3,
 } from "@layoutit/polycss";
 import { meshResolutionShowsMesh, type GizmoMode, type SceneOptionsState } from "../types";
+import {
+  createNormalBucketCullController,
+  withNormalBucketCullIndexes,
+  type NormalBucketCullController,
+} from "./normalBucketCull";
 
 export type { GizmoMode, SceneOptionsState };
 
@@ -34,9 +39,9 @@ export type { GizmoMode, SceneOptionsState };
 // components in @layoutit/polycss-react and @layoutit/polycss-vue).
 const LIGHT_HELPER_TILE = 50;
 const ANIMATION_STABLE_TRIANGLE_COLOR_POLICY = "cadence";
-const ANIMATION_STABLE_TRIANGLE_COLOR_STEPS = 8;
-const ANIMATION_STABLE_TRIANGLE_COLOR_FREEZE_FRAMES = 12;
-const ANIMATION_STABLE_TRIANGLE_COLOR_MAX_STEP = 8;
+// Deforming low-poly triangles can swing face normals sharply; keep the
+// mounted baked color pinned and animate transforms only.
+const ANIMATION_STABLE_TRIANGLE_COLOR_FREEZE_FRAMES = 0;
 const ANIMATION_TRANSFORM_CACHE_FRAMES = 60;
 
 interface StableTriangleTransformFrameItem {
@@ -244,6 +249,8 @@ export function VanillaScene({
   const groundHandleRef = useRef<VanillaPolyMeshHandle | null>(null);
   const selectionRef = useRef<PolySelectionHandle | null>(null);
   const transformControlsRef = useRef<PolyTransformControlsHandle | null>(null);
+  const normalBucketCullRef = useRef<NormalBucketCullController | null>(null);
+  const cameraStateRef = useRef({ rotX: options.rotX, rotY: options.rotY });
   const onBuildRef = useRef(onBuild);
   onBuildRef.current = onBuild;
   const onCameraChangeRef = useRef(onCameraChange);
@@ -258,13 +265,20 @@ export function VanillaScene({
   animationPausedRef.current = options.animationPaused;
   const animationTimeScaleRef = useRef(options.animationTimeScale);
   animationTimeScaleRef.current = options.animationTimeScale;
+  const modelPolygons = useMemo(
+    () => options.normalBucketCull ? withNormalBucketCullIndexes(polygons) : polygons,
+    [options.normalBucketCull, polygons],
+  );
   const mountedModelRef = useRef<{
     handle: VanillaPolyMeshHandle;
     polygons: Polygon[];
     merge: boolean;
     stableDom: boolean;
   } | null>(null);
-
+  const syncNormalBucketCull = useCallback((camera: { rotX: number; rotY: number }) => {
+    cameraStateRef.current = { rotX: camera.rotX, rotY: camera.rotY };
+    normalBucketCullRef.current?.update(camera.rotX, camera.rotY);
+  }, []);
   const mountChildMeshInsideModel = useCallback((child: VanillaPolyMeshHandle | null) => {
     const modelEl = meshHandleRef.current?.element;
     const childEl = child?.element;
@@ -322,11 +336,11 @@ export function VanillaScene({
     const modelParseResult: ParseResult = parseResult
       ? {
           ...parseResult,
-          polygons,
+          polygons: modelPolygons,
           dispose: () => {},
         }
       : {
-          polygons,
+          polygons: modelPolygons,
           objectUrls: [],
           warnings: [],
           dispose: () => {},
@@ -334,7 +348,7 @@ export function VanillaScene({
     meshHandleRef.current = scene.add(modelParseResult, meshTransform);
     mountedModelRef.current = {
       handle: meshHandleRef.current,
-      polygons,
+      polygons: modelPolygons,
       merge: mergePolygonsForMesh,
       stableDom: stableDomForMesh,
     };
@@ -351,6 +365,8 @@ export function VanillaScene({
       lightHandleRef.current = null;
       groundHandleRef.current = null;
       interiorShellHandleRef.current = null;
+      normalBucketCullRef.current?.dispose();
+      normalBucketCullRef.current = null;
       mountedModelRef.current = null;
       meshHandleRef.current = null;
       sceneRef.current = null;
@@ -385,17 +401,17 @@ export function VanillaScene({
     const mounted = mountedModelRef.current;
     const modelAlreadyMounted =
       mounted?.handle === handle &&
-      mounted.polygons === polygons &&
+      mounted.polygons === modelPolygons &&
       mounted.merge === mergePolygonsForMesh &&
       mounted.stableDom === stableDomForMesh;
     if (!modelAlreadyMounted) {
-      handle.setPolygons(polygons, {
+      handle.setPolygons(modelPolygons, {
         merge: mergePolygonsForMesh,
         stableDom: stableDomForMesh,
       });
       mountedModelRef.current = {
         handle,
-        polygons,
+        polygons: modelPolygons,
         merge: mergePolygonsForMesh,
         stableDom: stableDomForMesh,
       };
@@ -436,7 +452,7 @@ export function VanillaScene({
       onBuildRef.current(performance.now() - started),
     );
   }, [
-    polygons,
+    modelPolygons,
     interiorShellPolygons,
     mergePolygonsForMesh,
     stableDomForMesh,
@@ -592,17 +608,13 @@ export function VanillaScene({
           ...(stableTriangleDebug === "transform-only" || stableTriangleDebug === "plan-only"
             ? { stableTriangleDebug }
             : {}),
-          stableTriangleColorSteps: ANIMATION_STABLE_TRIANGLE_COLOR_STEPS,
           stableTriangleColorPolicy: ANIMATION_STABLE_TRIANGLE_COLOR_POLICY,
           stableTriangleColorFreezeFrames: ANIMATION_STABLE_TRIANGLE_COLOR_FREEZE_FRAMES,
-          stableTriangleColorMaxStep: ANIMATION_STABLE_TRIANGLE_COLOR_MAX_STEP,
         } satisfies Parameters<VanillaPolyMeshHandle["setPolygons"]>[1] & {
           stableTriangleDebug?: "transform-only" | "plan-only";
           stableTriangleUpdateMode?: "full" | "transform-only" | "color-only";
           stableTriangleColorPolicy: "cadence" | "adaptive";
-          stableTriangleColorSteps: number;
           stableTriangleColorFreezeFrames: number;
-          stableTriangleColorMaxStep: number;
         };
         const canUseTransformCache =
           transformCache &&
@@ -615,6 +627,7 @@ export function VanillaScene({
         const shouldRefreshColor =
           canUseTransformCache &&
           transformCache.canRefreshColor &&
+          ANIMATION_STABLE_TRIANGLE_COLOR_FREEZE_FRAMES > 0 &&
           animationFrameCount % ANIMATION_STABLE_TRIANGLE_COLOR_FREEZE_FRAMES === 0;
         const samples = debugTarget.__polycssGalleryAnimationSamples;
         let sampleMs = 0;
@@ -692,6 +705,7 @@ export function VanillaScene({
       target: options.target as Vec3,
     });
     scene.applyCamera();
+    syncNormalBucketCull({ rotX: options.rotX, rotY: options.rotY });
     scene.setOptions({
       directionalLight,
       ambientLight,
@@ -707,6 +721,7 @@ export function VanillaScene({
     options.shadowMaxExtend,
     directionalLight,
     ambientLight,
+    syncNormalBucketCull,
   ]);
 
   // Effect 2b — render strategy controls. Kept separate from Effect 2 because
@@ -720,6 +735,62 @@ export function VanillaScene({
       strategies: { disable: options.disableStrategies },
     });
   }, [options.disableStrategies]);
+
+  // Effect 2c — experimental normal-bucket display culling. This is a
+  // gallery-only comparison toggle for the Chromium preserve-3d BSP bottleneck:
+  // bucket leaves by coarse polygon normal, then hide buckets facing away from
+  // the camera on camera changes. It stays out of package APIs while we verify
+  // whether the trace signal survives real interaction.
+  useEffect(() => {
+    normalBucketCullRef.current?.dispose();
+    normalBucketCullRef.current = null;
+
+    if (
+      !options.normalBucketCull ||
+      options.renderer !== "vanilla" ||
+      options.textureLighting !== "baked" ||
+      stableDomForMesh
+    ) {
+      return;
+    }
+
+    const handle = meshHandleRef.current;
+    if (!handle) return;
+
+    let cancelled = false;
+    let frame = requestAnimationFrame(() => {
+      frame = 0;
+      if (cancelled) return;
+      const controller = createNormalBucketCullController(handle.element, modelPolygons);
+      if (cancelled) {
+        controller?.dispose();
+        return;
+      }
+      normalBucketCullRef.current = controller;
+      syncNormalBucketCull(cameraStateRef.current);
+    });
+
+    return () => {
+      cancelled = true;
+      if (frame) cancelAnimationFrame(frame);
+      normalBucketCullRef.current?.dispose();
+      normalBucketCullRef.current = null;
+    };
+  }, [
+    options.normalBucketCull,
+    options.renderer,
+    options.textureLighting,
+    stableDomForMesh,
+    modelPolygons,
+    options.autoCenter,
+    options.textureQuality,
+    options.perspective,
+    options.disableStrategies,
+    stableDirectionalForRebuild,
+    stableAmbientForRebuild,
+    parseResult,
+    syncNormalBucketCull,
+  ]);
 
   // Effect 2.5 — vanilla controls. The React renderer wires interactive +
   // animate through <PolyCamera>; the vanilla path uses createPolyOrbitControls.
@@ -754,15 +825,24 @@ export function VanillaScene({
         // the rAF tick and causes visible jitter on mouselook and walk.
         // The React side picks up the final camera state when the user
         // exits FPV mode (next controls rebuild reads scene.getOptions()).
+        fpv.addEventListener("change", ((e: { camera: { rotX: number; rotY: number } }) => {
+          syncNormalBucketCull(e.camera);
+        }) as any);
         return fpv;
       }
       const factory = options.dragMode === "pan" ? createPolyMapControls : createPolyOrbitControls;
       const controls: PolyControlsHandle = factory(scene, {
         drag: options.interactive,
         wheel: options.interactive,
-        animate: options.animate ? { speed: 0.3, axis: "y" as const, pauseOnInteraction: true } : false as const,
+        animate: options.animate
+          ? { speed: 0.3, axis: "y" as const, pauseOnInteraction: true }
+          : false as const,
       });
+      controls.addEventListener("change", ((e: { camera: { rotX: number; rotY: number } }) => {
+        syncNormalBucketCull(e.camera);
+      }) as any);
       controls.addEventListener("end", ((e: { camera: { rotX: number; rotY: number; zoom: number; target?: ReactVec3 } }) => {
+        syncNormalBucketCull(e.camera);
         onCameraChangeRef.current?.(e.camera);
       }) as any);
       return controls;
@@ -788,6 +868,7 @@ export function VanillaScene({
     stableAmbientForRebuild,
     stableDomForMesh,
     parseResult,
+    syncNormalBucketCull,
   ]);
 
   // Effect 2.6 — live-update FPV options (booleans + numerics) without

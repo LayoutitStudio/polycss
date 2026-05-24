@@ -53,6 +53,8 @@ export function useSceneLoader({
 }: UseSceneLoaderOptions): UseSceneLoaderResult {
   const meshResolutionRef = useRef(activeMeshResolution(meshResolution));
   meshResolutionRef.current = activeMeshResolution(meshResolution);
+  const loadMeshResolutionRef = useRef(meshResolutionRef.current);
+  loadMeshResolutionRef.current = meshResolutionRef.current;
 
   // Dedupe in-flight loads so the same item can't kick off twice between
   // the setState callback and the next effect tick.
@@ -114,7 +116,7 @@ export function useSceneLoader({
 
     const loadOne = async (item: PlacedItem): Promise<void> => {
       try {
-        const loaded = await loadPresetModel(item.preset, PARSER_DEFAULTS);
+        const loaded = await loadPresetModel(item.preset, PARSER_DEFAULTS, loadMeshResolutionRef.current);
         const optimized = optimizeMeshPolygons(loaded.rawPolygons, {
           meshResolution: meshResolutionRef.current,
         });

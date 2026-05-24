@@ -182,7 +182,8 @@
 .builder-placed.is-mesh-hidden > s,
 .builder-placed.is-mesh-hidden > u,
 .builder-placed.is-mesh-hidden > q,
-.builder-placed.is-mesh-hidden > .polycss-bucket {
+.builder-placed.is-mesh-hidden > .polycss-bucket,
+.builder-placed.is-mesh-hidden > .polycss-normal-cull-bucket {
   display: none !important;
 }
 
