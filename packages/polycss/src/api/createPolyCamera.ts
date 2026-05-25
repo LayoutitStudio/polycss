@@ -99,7 +99,7 @@ export function createPolyOrthographicCamera(
 
 /**
  * Ergonomic alias for `createPolyOrthographicCamera`. The default camera in
- * polycss is orthographic because the engine's structural advantages
+ * PolyCSS is orthographic because the engine's structural advantages
  * (integer-pixel atlas slicing, DOM-as-render-tree) are most visible in
  * iso/voxel/diagrammatic scenes. Use `createPolyPerspectiveCamera` explicitly
  * when depth foreshortening is needed.

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Compat Hunter"
+  short_description: "Stream model parser compatibility hunts"
+  default_prompt: "Use $compat-hunter to stream OBJ/GLB/glTF/VOX models until a parser compatibility issue appears."

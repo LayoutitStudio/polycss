@@ -8,7 +8,7 @@ import {
 } from "@layoutit/polycss-core";
 
 /**
- * Polycss wrapper: extracts the `__polycssProjectiveQuadGuards` override bag
+ * PolyCSS wrapper: extracts the `__polycssProjectiveQuadGuards` override bag
  * from `doc.defaultView` and delegates to the pure-math core function.
  */
 export function resolveProjectiveQuadGuards(

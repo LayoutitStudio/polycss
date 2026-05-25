@@ -5,7 +5,7 @@ description: "Camera components for controlling the 3D viewport: perspective, or
 
 import { Tabs, TabItem } from '@astrojs/starlight/components';
 
-polycss provides two camera components: `<PolyCamera>` (alias `<PolyOrthographicCamera>`) for parallel projection, and `<PolyPerspectiveCamera>` for scenes with depth foreshortening. The camera element is always the **outer** node — `<poly-scene>` / `PolyScene` is nested inside it. This is required by the CSS rendering model: CSS `perspective` only applies to descendants, so the scene's `transform: matrix3d(...)` must be a child of the camera.
+PolyCSS provides two camera components: `<PolyCamera>` (alias `<PolyOrthographicCamera>`) for parallel projection, and `<PolyPerspectiveCamera>` for scenes with depth foreshortening. The camera element is always the **outer** node — `<poly-scene>` / `PolyScene` is nested inside it. This is required by the CSS rendering model: CSS `perspective` only applies to descendants, so the scene's `transform: matrix3d(...)` must be a child of the camera.
 
 `<PolyCamera>` is orthographic by default. Use `<PolyPerspectiveCamera>` when depth foreshortening is needed (e.g. first-person or game-like scenes).
 
@@ -18,7 +18,7 @@ For pointer drag, wheel zoom, and autorotate, drop a `<PolyOrbitControls>` child
 | Isometric / voxel / diagrammatic scenes | `<PolyCamera>` (alias `<PolyOrthographicCamera>`) — **default** |
 | 3D scenes with depth foreshortening | `<PolyPerspectiveCamera>` |
 
-polycss defaults to orthographic rather than perspective — polycss's strengths (integer-pixel atlas, no per-frame JS, DOM stacking) are most visible in ortho scenes. This deliberately diverges from three.js's default.
+PolyCSS defaults to orthographic rather than perspective — PolyCSS's strengths (integer-pixel atlas, no per-frame JS, DOM stacking) are most visible in ortho scenes. This deliberately diverges from three.js's default.
 
 ## `PolyCamera` / `PolyOrthographicCamera`
 

@@ -1,17 +1,17 @@
 ---
 title: Introduction
-description: "polycss is a CSS polygon-mesh renderer: DOM-native 3D without WebGL."
+description: "PolyCSS is a CSS polygon-mesh renderer: DOM-native 3D without WebGL."
 ---
 
 import { Tabs, TabItem } from '@astrojs/starlight/components';
 
-**polycss** renders 3D meshes in the DOM. No WebGL, no canvas-as-scene: the rendered output is a tree of standard DOM elements positioned with `transform: matrix3d(...)`. Each visible polygon becomes one leaf DOM node you can inspect in DevTools, target with CSS, or attach events to.
+**PolyCSS** renders 3D meshes in the DOM. No WebGL, no canvas-as-scene: the rendered output is a tree of standard DOM elements positioned with `transform: matrix3d(...)`. Each visible polygon becomes one leaf DOM node you can inspect in DevTools, target with CSS, or attach events to.
 
 Internally, the renderer chooses the cheapest CSS strategy per polygon. Solid rectangles, stable quads, triangles, and clipped solids can render as CSS primitives; textured polygons and unsupported shapes fall back to generated atlas slices. Atlas rasterization happens once at mount, then camera, mesh, and light updates flow through CSS transforms and custom properties.
 
 ## Framework Support
 
-polycss is **vanilla-first**. The default entry point is custom elements (`<poly-camera>`, `<poly-scene>`, `<poly-mesh>`, `<poly-polygon>`, controls, helpers, and shapes) plus imperative APIs such as `createPolyCamera`, `createPolyScene`, and `createPolyOrbitControls`: no framework required. First-class bindings for **React** and **Vue** ship as separate packages on top of the same engine. Pick whatever fits your stack.
+PolyCSS is **vanilla-first**. The default entry point is custom elements (`<poly-camera>`, `<poly-scene>`, `<poly-mesh>`, `<poly-polygon>`, controls, helpers, and shapes) plus imperative APIs such as `createPolyCamera`, `createPolyScene`, and `createPolyOrbitControls`: no framework required. First-class bindings for **React** and **Vue** ship as separate packages on top of the same engine. Pick whatever fits your stack.
 
 ## Installation
 
@@ -35,7 +35,7 @@ npm install @layoutit/polycss-vue
 
 ### CDN (custom elements)
 
-You can also load polycss directly from a CDN with no build step:
+You can also load PolyCSS directly from a CDN with no build step:
 
 ```html
 <script type="module" src="https://esm.sh/@layoutit/polycss/elements"></script>

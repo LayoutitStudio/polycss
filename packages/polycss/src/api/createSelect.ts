@@ -1,5 +1,5 @@
 /**
- * createSelect — additive selection layer for vanilla polycss scenes.
+ * createSelect — additive selection layer for vanilla PolyCSS scenes.
  * Mirrors the React `<Select>` API: tracks one or more selected
  * meshes, fires `onChange` whenever the set changes, supports
  * single-click toggle (re-clicking the selected mesh deselects it),

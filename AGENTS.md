@@ -1,10 +1,10 @@
-# Polycss — agent guide
+# PolyCSS — agent guide
 
 This file is the single source of truth for AI coding agents (Claude Code, Cursor, etc.). `CLAUDE.md` is a symlink to this file — **always edit `AGENTS.md`, never `CLAUDE.md`**. The constraints below describe the current design and the rules we work under; if a request conflicts with one of them, push back before doing it.
 
 ## What this repo is
 
-`polycss` is a CSS-based polygon mesh rendering engine. It paints 3D meshes by emitting one DOM element per polygon, transforming it with `matrix3d`, and letting the browser composite the result. No WebGL, no canvas-per-frame. Rasterisation only happens once, into a texture atlas; everything after that is pure DOM + CSS.
+PolyCSS is a CSS-based polygon mesh rendering engine. It paints 3D meshes by emitting one DOM element per polygon, transforming it with `matrix3d`, and letting the browser composite the result. No WebGL, no canvas-per-frame. Rasterisation only happens once, into a texture atlas; everything after that is pure DOM + CSS.
 
 Monorepo layout (pnpm workspaces):
 
@@ -81,6 +81,7 @@ If you find yourself wanting a `requestAnimationFrame` loop to update many DOM n
 
 ## Naming (three.js parity)
 
+- Brand text is **PolyCSS**. Keep lowercase `polycss` only for literal package names, import paths, CSS classes, domains, and other code identifiers.
 - Every public export gets a `Poly` prefix. Exceptions are generic math types: `Vec2`, `Vec3`, `Polygon`, `PolyMaterial` (already prefixed).
 - **Hooks/composables:** `usePolyCamera`, `usePolyMesh`, `usePolySceneContext`, `usePolySelect`, `usePolySelectionApi`, `usePolyAnimation`.
 - **Components:** `PolyPerspectiveCamera`, `PolyOrthographicCamera`, `PolyOrbitControls`, `PolyMapControls`, `PolyTransformControls`, `PolySelect`, `PolyAxesHelper`, `PolyDirectionalLightHelper`.
@@ -89,15 +90,15 @@ If you find yourself wanting a `requestAnimationFrame` loop to update many DOM n
 - **Vanilla factories:** `create*` names stay as-is (`createPolyScene`, `createTransformControls`, `createSelect`).
 - **HTML custom elements:** `poly-` prefix + kebab-case. Existing tags: `<poly-scene>`, `<poly-mesh>`, `<poly-polygon>`, `<poly-perspective-camera>`, `<poly-orthographic-camera>`, `<poly-axes-helper>`, `<poly-directional-light-helper>`. Any new element follows the same shape (e.g. `<poly-transform-controls>`, `<poly-select>`).
 - **Leaf DOM tags (`<b>`, `<i>`, `<s>`, `<u>`):** internal render-strategy tags. Not part of the public API and not user-facing — do not document them as such.
-- `PolyCamera` is a kept alias for `PolyOrthographicCamera` — the ergonomic default, optimised for iso/voxel/diagrammatic scenes which is polycss's structural strength. **Not deprecated.**
+- `PolyCamera` is a kept alias for `PolyOrthographicCamera` — the ergonomic default, optimised for iso/voxel/diagrammatic scenes which is PolyCSS's structural strength. **Not deprecated.**
 
 ## Cross-package discipline
 
 The React and Vue packages are mirror images. **Any public API change in one must land in the other in the same PR.** Same names, same arguments, same defaults, same return shapes (allowing for idiomatic differences — refs vs reactives, `useEffect` vs `watchEffect`).
 
-When you change `packages/polycss` or `packages/core` in a way that affects the public surface (new option, renamed export, changed default), the React and Vue bindings update in the same PR. Don't ship a polycss change that leaves the bindings stale.
+When you change `packages/polycss` or `packages/core` in a way that affects the public surface (new option, renamed export, changed default), the React and Vue bindings update in the same PR. Don't ship a PolyCSS change that leaves the bindings stale.
 
-**Renderer-owned browser glue.** The canvas atlas pipeline (`buildAtlasPages` + helpers), browser-feature detection (`isBorderShapeSupported`, `isSolidTriangleSupported`, `resolveSolidTrianglePrimitive`), direct voxel renderer (`voxelRenderer.ts`), and injected `.polycss-scene` / `.polycss-camera` base styles exist as **independent copies** across the three renderers. This includes `packages/polycss/src/render/atlas/`, `packages/react/src/scene/atlas/`, `packages/vue/src/scene/atlas/`, the three renderer-local `voxelRenderer.ts` files, and the three sibling `styles.ts` files. This is deliberate — each renderer is self-contained on its dep graph (React/Vue do not import from polycss). The trade-off is that a bug fix in any of these files MUST be mirrored into the other two. Coverage is pinned per copy by the co-located test files.
+**Renderer-owned browser glue.** The canvas atlas pipeline (`buildAtlasPages` + helpers), browser-feature detection (`isBorderShapeSupported`, `isSolidTriangleSupported`, `resolveSolidTrianglePrimitive`), direct voxel renderer (`voxelRenderer.ts`), and injected `.polycss-scene` / `.polycss-camera` base styles exist as **independent copies** across the three renderers. This includes `packages/polycss/src/render/atlas/`, `packages/react/src/scene/atlas/`, `packages/vue/src/scene/atlas/`, the three renderer-local `voxelRenderer.ts` files, and the three sibling `styles.ts` files. This is deliberate — each renderer is self-contained on its dep graph (React/Vue do not import from the `polycss` package). The trade-off is that a bug fix in any of these files MUST be mirrored into the other two. Coverage is pinned per copy by the co-located test files.
 
 Before opening a PR:
 
@@ -105,7 +106,7 @@ Before opening a PR:
 - [ ] If I touched a Vue component/composable, the React component/hook matches.
 - [ ] If I added an option to a `polycss` factory, both bindings expose it.
 - [ ] If I renamed a `core` export, every package that imports it is updated.
-- [ ] If I touched the canvas atlas pipeline (`rasterise.ts` / `buildAtlasPages.ts`), browser-feature detection, or direct voxel renderer in ONE renderer, the same fix lands in the other two renderers (polycss + react + vue) in this PR.
+- [ ] If I touched the canvas atlas pipeline (`rasterise.ts` / `buildAtlasPages.ts`), browser-feature detection, or direct voxel renderer in ONE renderer, the same fix lands in the other two renderers (`polycss` + react + vue) in this PR.
 - [ ] If I touched any of the three `styles.ts` (`packages/polycss/src/styles/styles.ts`, `packages/react/src/styles/styles.ts`, `packages/vue/src/styles/styles.ts`), the other two are consistent — CSS rules cover every emitted tag for both lighting modes, and shared properties like `will-change: transform` on `.polycss-scene` exist in all three.
 - [ ] Website docs (`website/src/content/docs/**`) and READMEs reflect any user-visible change.
 - [ ] If I changed a render strategy, lighting mode, naming convention, or the JS-in-render-loop rules, `AGENTS.md` reflects the new state in this same PR.

@@ -5,7 +5,7 @@ description: "Camera and object controls: orbit, map, first-person, and transfor
 
 import { Tabs, TabItem } from '@astrojs/starlight/components';
 
-polycss ships additive controls that follow the three.js split:
+PolyCSS ships additive controls that follow the three.js split:
 
 - **`PolyOrbitControls`**: orbit-style drag (pointer drag rotates around the scene center) + wheel zoom + autorotate. This is the default pick for most scenes.
 - **`PolyMapControls`**: map/pan-style drag (pointer drag pans the camera across the surface). Use for top-down or flat layouts.
@@ -276,7 +276,7 @@ Imperative handles expose `lock()`, `unlock()`, `isLocked()`, `getOrigin()`, `se
 
 ## Transform Controls
 
-`PolyTransformControls` attaches to a `PolyMeshHandle` and renders a polycss gizmo. Translate mode provides axis arrows and plane handles; rotate mode provides axis rings. Dragging updates the attached mesh directly and emits transform-change callbacks.
+`PolyTransformControls` attaches to a `PolyMeshHandle` and renders a PolyCSS gizmo. Translate mode provides axis arrows and plane handles; rotate mode provides axis rings. Dragging updates the attached mesh directly and emits transform-change callbacks.
 
 ```tsx
 import { useState } from "react";

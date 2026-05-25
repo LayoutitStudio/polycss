@@ -1,7 +1,7 @@
 /**
  * Pointer event API for <PolyMesh>. Mirrors @react-three/fiber's mesh
  * event surface (handler names + payload shape) so devs migrating from
- * three.js use the same mental model. polycss is DOM-native so we get
+ * three.js use the same mental model. PolyCSS is DOM-native so we get
  * native pointer events for free — no raycaster, no canvas event
  * synthesis.
  *

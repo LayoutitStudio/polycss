@@ -2,7 +2,7 @@
  * Torus geometry — Z-axis ring plane.
  *
  * The torus is centered at the origin. The ring lies in the XY plane (the
- * ground plane in polycss world space, where Z is up). The donut hole points
+ * ground plane in PolyCSS world space, where Z is up). The donut hole points
  * along the Z axis.
  *
  * Geometry: `radialSegments × tubularSegments` quads on the surface.
@@ -11,7 +11,7 @@
  * heaviest of the built-in primitives. Reduce radialSegments / tubularSegments
  * if render budget is tight.
  *
- * Polycss world space: +X right, +Y forward, +Z up.
+ * PolyCSS world space: +X right, +Y forward, +Z up.
  */
 import type { Polygon, Vec3 } from "../types";
 

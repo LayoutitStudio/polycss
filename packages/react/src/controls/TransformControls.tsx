@@ -154,7 +154,7 @@ function gizmoLengthForMesh(polygons: Polygon[]): number {
 
 /**
  * Return the bbox center of `polygons` in scene-CSS pixels, mapped via the
- * standard polycss world→CSS axis remap (vertex[1]→CSS X, vertex[0]→CSS Y,
+ * standard PolyCSS world→CSS axis remap (vertex[1]→CSS X, vertex[0]→CSS Y,
  * vertex[2]→CSS Z).
  *
  * Used to offset the gizmo wrapper so it sits at the mesh's visual center
@@ -257,7 +257,7 @@ function snap(value: number, step: number | null | undefined): number {
  * user sees the arrow and the direction `<PolyMesh position>` deltas
  * apply along, since position is in scene-CSS pixels.
  *
- * polycss's world→CSS remap (core/src/scene/polygonGeometry.ts) sends
+ * PolyCSS's world→CSS remap (core/src/scene/polygonGeometry.ts) sends
  * world-Y → CSS-x and world-X → CSS-y, so to draw an arrow visually
  * along CSS-x we have to feed `arrowPolygons` axis=1 (world-Y), and
  * vice versa. `WORLD_AXIS_FOR_CSS` is that lookup — used only when

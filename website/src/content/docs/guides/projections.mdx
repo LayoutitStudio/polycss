@@ -6,7 +6,7 @@ description: Choosing perspective depth and camera angles for different visual s
 import { Tabs, TabItem } from '@astrojs/starlight/components';
 import PolyDemo from '../../../components/PolyDemo.astro';
 
-polycss uses CSS 3D perspective to project the scene. Camera attributes (`rot-x`, `rot-y`, `zoom`, `perspective`) live on the wrapping camera element — `<poly-camera>` for orthographic (default) or `<poly-perspective-camera>` for perspective — never on `<poly-scene>`. `PolyCamera` is orthographic by default; pick `PolyPerspectiveCamera` when depth foreshortening is needed.
+PolyCSS uses CSS 3D perspective to project the scene. Camera attributes (`rot-x`, `rot-y`, `zoom`, `perspective`) live on the wrapping camera element — `<poly-camera>` for orthographic (default) or `<poly-perspective-camera>` for perspective — never on `<poly-scene>`. `PolyCamera` is orthographic by default; pick `PolyPerspectiveCamera` when depth foreshortening is needed.
 
 ## Live demo: camera controls
 

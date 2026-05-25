@@ -27,7 +27,7 @@
  *      M^-1 = translate(+cssTarget) * rotate(-rotY) * rotateX(-rotX) * scale(1/zoom)
  *      Apply to eye and a far point (t=2) on the ray.
  *   4. In scene-local space, CSS-Z = planeWorldZ * BASE_TILE (because the
- *      polycss axis swap maps worldZ to cssZ). Parameterise the scene-local
+ *      PolyCSS axis swap maps worldZ to cssZ). Parameterise the scene-local
  *      ray and solve for the t that gives that cssZ.
  *   5. Read cssX, cssY at that t. Convert back:
  *        worldX = cssY / BASE_TILE
@@ -179,7 +179,7 @@ export function projectScreenToWorldGround({
   const hitCssX = rayOriginScene[0] + t * (rayFarScene[0] - rayOriginScene[0]);
   const hitCssY = rayOriginScene[1] + t * (rayFarScene[1] - rayOriginScene[1]);
 
-  // polycss axis swap: cssX = worldY * tile, cssY = worldX * tile.
+  // PolyCSS axis swap: cssX = worldY * tile, cssY = worldX * tile.
   const worldX = hitCssY / BASE_TILE;
   const worldY = hitCssX / BASE_TILE;
 

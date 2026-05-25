@@ -3,7 +3,7 @@ title: Headless API
 description: Vanilla JavaScript API for loading meshes and rendering polygon scenes without a framework.
 ---
 
-The headless API (`@layoutit/polycss-core`) gives you direct access to polycss parsers and utilities without React, Vue, or any framework. All exports are also available from `@layoutit/polycss` (the vanilla package) so vanilla users install just one package.
+The headless API (`@layoutit/polycss-core`) gives you direct access to PolyCSS parsers and utilities without React, Vue, or any framework. All exports are also available from `@layoutit/polycss` (the vanilla package) so vanilla users install just one package.
 
 ## `parseObj(text, options?)`
 
@@ -304,7 +304,7 @@ transform.detach();
 
 ## `collectPolyRenderStats(root, options?)`
 
-Reads an already-rendered polycss DOM subtree and returns a one-shot diagnostic snapshot. It counts mounted polygon leaves, shadow leaves, surface leaf categories, and bucket wrappers; it does not observe changes or mutate the scene.
+Reads an already-rendered PolyCSS DOM subtree and returns a one-shot diagnostic snapshot. It counts mounted polygon leaves, shadow leaves, surface leaf categories, and bucket wrappers; it does not observe changes or mutate the scene.
 
 ```ts
 import { collectPolyRenderStats } from "@layoutit/polycss";
@@ -337,7 +337,7 @@ Register the custom elements by importing the side-effect entry point:
 </poly-camera>
 ```
 
-See the [polycss README](https://github.com/LayoutitStudio/polycss/tree/main/packages/polycss) for the full custom element attribute reference.
+See the [PolyCSS README](https://github.com/LayoutitStudio/polycss/tree/main/packages/polycss) for the full custom element attribute reference.
 
 Registered element families include:
 
@@ -356,5 +356,5 @@ Registered element families include:
 | `@layoutit/polycss-react` | React components, hooks, controls, selection, animation, core re-exports, render diagnostics |
 | `@layoutit/polycss-vue` | Vue components, composables, controls, selection, animation, core re-exports, render diagnostics |
 | `@layoutit/polycss` | Vanilla imperative API + custom element classes + controls + selection + render diagnostics |
-| `@layoutit/polycss/elements` | Side-effect: registers the polycss custom elements |
+| `@layoutit/polycss/elements` | Side-effect: registers the PolyCSS custom elements |
 | `@layoutit/polycss-core` | Pure parsers / math, zero DOM: `parseObj`, `parseGltf`, `parseVox`, `loadMesh`, types |

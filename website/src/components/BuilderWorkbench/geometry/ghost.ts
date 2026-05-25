@@ -11,7 +11,7 @@
  * Earlier attempts passed polygons in model-local coords and let
  * PolyMesh's `scale` + `position` transform place them. That kept
  * collapsing the box to the floor — most likely because the scale+
- * position-around-bbox-center wrapping interacts with polycss's
+ * position-around-bbox-center wrapping interacts with PolyCSS's
  * basis chooser in a way I can't easily debug. Direct world coords
  * sidestep all of that.
  */
@@ -65,7 +65,7 @@ export interface WireframeStyle {
 
 /** Build the 6 axis-aligned face quads of an arbitrary cuboid using
  *  axisBox's vertex labelling + CCW-from-outside winding. Each face's
- *  surface normal points OUTWARD so polycss's basis chooser keeps the
+ *  surface normal points OUTWARD so PolyCSS's basis chooser keeps the
  *  matrix3d determinant positive (negative determinants flatten). */
 function cuboidFaces(
   x0: number, x1: number,
@@ -259,7 +259,7 @@ export function rotatePolygonsAroundPivot(
  * mirrors `axisBox` in core/helpers/axesPolygons.ts — the same helper
  * `<PolyAxesHelper>` uses to render its thin cuboids in 3D. Each face's
  * winding is CCW from the OUTWARD-facing side so the surface normal
- * points outward and polycss's basis chooser keeps the matrix3d
+ * points outward and PolyCSS's basis chooser keeps the matrix3d
  * determinant positive (negative determinants get treated as
  * back-facing and silently flatten).
  *

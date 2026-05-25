@@ -29,7 +29,7 @@ export type MeshResolution = "lossless" | "lossy";
  * and the difference adds up. Destructure with `const [x, y, z] = v` when
  * you need named axes.
  *
- * Polycss world space convention: +X right, +Y forward, +Z up.
+ * PolyCSS world space convention: +X right, +Y forward, +Z up.
  */
 export type Vec3 = [number, number, number];
 
@@ -88,7 +88,7 @@ export interface PolyAmbientLight {
  *
  * In CSS terms, a material bundles the `background-image` source plus paint
  * config. When a polygon references a material AND its UVs form an
- * axis-aligned rectangle, polycss renders the polygon as an <i> with
+ * axis-aligned rectangle, PolyCSS renders the polygon as an <i> with
  * `background-image: url(material.texture)` directly — no per-polygon canvas
  * rasterization, browser-cached texture, mounting / unmounting one polygon
  * does not affect any other.
@@ -100,7 +100,7 @@ export interface PolyAmbientLight {
 export interface PolyMaterial {
   /** Image source. Anything `background-image: url(...)` can use. */
   texture: string;
-  /** Optional unique key (used by polycss to dedupe / cache). Caller can
+  /** Optional unique key (used by PolyCSS to dedupe / cache). Caller can
    *  pass a stable string; if omitted, the material's identity is its object
    *  reference. */
   key?: string;
@@ -143,7 +143,7 @@ export interface Polygon {
   /**
    * Shared material. When set, `material.texture` takes precedence over the
    * inline `texture` field. If the polygon's UVs form an axis-aligned
-   * rectangle, polycss uses the direct CSS background-image path (no per-
+   * rectangle, PolyCSS uses the direct CSS background-image path (no per-
    * polygon canvas rasterization). Falls back to the atlas path otherwise.
    */
   material?: PolyMaterial;

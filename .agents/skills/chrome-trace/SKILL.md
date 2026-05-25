@@ -20,7 +20,7 @@ Use Playwright with Chromium and the Chrome DevTools Protocol `Tracing` domain t
 
 Do not draw conclusions from FPS alone. Use FPS/frame-time summaries only as the symptom; use trace groups and top events as the explanation.
 
-## Polycss Trace Runners
+## PolyCSS Trace Runners
 
 Use `scripts/trace.mjs` as the front door:
 
@@ -46,7 +46,7 @@ Use `trace.mjs drag` for real `PolyOrbitControls` pointer-drag traces on `nonvox
 
 Use `trace.mjs generic` for arbitrary pages and interactions that are not covered by a polycss bench page.
 
-When interpreting polycss traces, map the result back to the render model:
+When interpreting PolyCSS traces, map the result back to the render model:
 
 - `FunctionCall`, `EventDispatch`, `FireAnimationFrame`: JS/input work. Unexpected sustained per-frame work is suspicious outside imported skeletal animation.
 - `UpdateLayoutTree`, `RecalculateStyles`: style recalculation, often CSS variable or selector invalidation cost.

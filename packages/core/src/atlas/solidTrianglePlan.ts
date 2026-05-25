@@ -434,7 +434,7 @@ export function computeSolidTrianglePlanFromCssPoints(
     ? basisHint
     : { a, b, c };
   // Use the pre-resolved primitive from computeOptions — the browser-global
-  // resolution that formerly happened here now happens in the polycss wrapper.
+  // resolution that formerly happened here now happens in the PolyCSS wrapper.
   const primitive = computeOptions.primitive ?? computeOptions.resolvedPrimitive ?? "border";
   return {
     index,

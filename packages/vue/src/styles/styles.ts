@@ -193,7 +193,7 @@ const CORE_BASE_STYLES = `
 @property --clz { syntax: "<number>"; inherits: true; initial-value: 1; }
 
 /* Ground-plane position in CSS pixels along the CSS-Z axis (= world-Z, the
-   up axis in polycss's world convention). Stored as a <number> so it can be
+   up axis in PolyCSS's world convention). Stored as a <number> so it can be
    used directly inside matrix3d() calc() expressions (matrix3d requires
    dimensionless entries — no px units).
    Set from the min world-Z of casting meshes. */

@@ -4,7 +4,7 @@ A CSS polygon mesh library. A 3D engine for the DOM. Renders OBJ/MTL, GLB and VO
 
 Visit [polycss.com](https://polycss.com) for docs and model examples.
 
-<img width="1600" height="300" alt="polycss-primitives-banner" src="https://github.com/user-attachments/assets/b05e2204-9323-4f83-8d1b-01ea0dd000db" />
+<img width="1600" height="300" alt="PolyCSS primitives banner" src="https://github.com/user-attachments/assets/b05e2204-9323-4f83-8d1b-01ea0dd000db" />
 
 ## Installation
 
@@ -35,7 +35,7 @@ You can also load PolyCSS directly from a CDN. Here is a minimal custom-element 
 </poly-camera>
 ```
 
-<img width="2500" height="1145" alt="polycss-intro" src="https://github.com/user-attachments/assets/0e5df0d8-04a8-4e50-8e3a-1097a96ce42f" />
+<img width="2500" height="1145" alt="PolyCSS intro" src="https://github.com/user-attachments/assets/0e5df0d8-04a8-4e50-8e3a-1097a96ce42f" />
 
 ## Framework Components
 

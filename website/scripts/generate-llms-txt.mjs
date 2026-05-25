@@ -56,7 +56,7 @@ for (const file of files) {
 }
 
 const indexLines = [
-  '# Polycss',
+  '# PolyCSS',
   '',
   '> A CSS polygon mesh engine. DOM-native 3D rendering. MIT licensed.',
   '',
@@ -79,7 +79,7 @@ indexLines.push('', '## Source', '', '- GitHub: https://github.com/LayoutitStudi
 writeFileSync(join(DIST_DIR, 'llms.txt'), indexLines.join('\n'));
 
 const fullLines = [
-  '# Polycss -- Full Documentation',
+  '# PolyCSS -- Full Documentation',
   '',
   '> A CSS polygon mesh engine. DOM-native 3D rendering.',
   '',

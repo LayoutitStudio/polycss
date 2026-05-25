@@ -3,7 +3,7 @@
  * triangular faces. Each subdivision step quadruples the face count:
  *   subdivisions 0 → 20, 1 → 80, 2 → 320, 3 → 1280 (capped).
  *
- * Vertex coordinates use polycss world space: +X right, +Y forward, +Z up.
+ * Vertex coordinates use PolyCSS world space: +X right, +Y forward, +Z up.
  * The sphere is centered at the origin; all vertices sit at distance `radius`.
  * Faces wind CCW from the outside (outward normal = away from origin).
  */

@@ -16,10 +16,10 @@ function highlight(code: string, lang: string): string {
   return hljs.highlight(code, { language: lang }).value;
 }
 
-const title = "polycss: CSS polygon-mesh renderer for the DOM";
+const title = "PolyCSS: CSS polygon-mesh renderer for the DOM";
 const description = "Render textured 3D meshes in the DOM. No WebGL: each polygon is a real DOM element you can style, click, and inspect in DevTools.";
 const siteUrl = "https://polycss.com";
-// Reusing the legacy voxcss social card until a polycss-specific image lands.
+// Reusing the legacy voxcss social card until a PolyCSS-specific image lands.
 const ogImage = `${siteUrl}/voxcss-intro.png`;
 
 const frameworkTabs = [
@@ -83,7 +83,7 @@ const installCmds = [
 const ldJson = {
   "@context": "https://schema.org",
   "@type": "SoftwareApplication",
-  name: "polycss",
+  name: "PolyCSS",
   applicationCategory: "DeveloperApplication",
   operatingSystem: "Web",
   description,
@@ -93,7 +93,7 @@ const ldJson = {
   sameAs: ["https://github.com/LayoutitStudio/polycss"],
   publisher: {
     "@type": "Organization",
-    name: "polycss",
+    name: "PolyCSS",
     url: siteUrl,
   },
 };
@@ -134,7 +134,7 @@ const ldJson = {
       <div class="home">
         <section class="hero" id="hero">
           <div class="hero-copy">
-            <h1><img width="300" height="72" style="width: 300px; height: auto" src="/voxisologo.png" alt="polycss" /></h1>
+            <h1><img width="300" height="72" style="width: 300px; height: auto" src="/voxisologo.png" alt="PolyCSS" /></h1>
             <p>
               Render textured 3D meshes in the DOM with CSS.
               No WebGL or &lt;canvas&gt; needed: each polygon is a real DOM element.
@@ -201,7 +201,7 @@ const ldJson = {
           <div class="stacking-copy">
             <h2>How It Works</h2>
             <p>
-              polycss loads OBJ, glTF, GLB, and VOX mesh files. Each polygon
+              PolyCSS loads OBJ, glTF, GLB, and VOX mesh files. Each polygon
               becomes a DOM element positioned with <code>transform: matrix3d(...)</code>.
               UV-textured triangles are packed into generated atlas sprites with
               CSS background positioning. The browser's compositor handles the
@@ -226,7 +226,7 @@ const ldJson = {
             </div>
           </header>
           <div class="getting-lede">
-            <p>polycss provides custom elements (<code>&lt;poly-camera&gt;</code>, <code>&lt;poly-scene&gt;</code>, <code>&lt;poly-mesh&gt;</code>), an imperative <code>createPolyCamera</code> / <code>createPolyScene</code> API, and optional React / Vue bindings. Each polygon in the mesh becomes a DOM element you can style and interact with: use whichever entry point fits your stack.</p>
+            <p>PolyCSS provides custom elements (<code>&lt;poly-camera&gt;</code>, <code>&lt;poly-scene&gt;</code>, <code>&lt;poly-mesh&gt;</code>), an imperative <code>createPolyCamera</code> / <code>createPolyScene</code> API, and optional React / Vue bindings. Each polygon in the mesh becomes a DOM element you can style and interact with: use whichever entry point fits your stack.</p>
           </div>
           <div class="getting-grid">
             <div class="getting-content">

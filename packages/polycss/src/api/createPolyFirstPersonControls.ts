@@ -190,14 +190,14 @@ export function createPolyFirstPersonControls(
   // True first-person model (matches three.js PointerLockControls semantics):
   //   - `cameraOrigin` is the camera's WORLD position (the eye).
   //   - `target` is a DERIVED point ahead of the camera along its look
-  //     direction at offset `perspective / tile`, so polycss's perspective
+  //     direction at offset `perspective / tile`, so PolyCSS's perspective
   //     viewer (located at +CSS_Z from scene origin) mathematically coincides
   //     with `cameraOrigin` in world space.
   //   - Mouselook rotates `target` AROUND `cameraOrigin` (origin fixed) →
   //     in-place rotation, not orbit.
   //   - WASD moves `cameraOrigin` (target follows via the same offset).
   //
-  // Without this separation, polycss's rotation pivots around `target` itself,
+  // Without this separation, PolyCSS's rotation pivots around `target` itself,
   // which is camera position with distance=0 — that's orbit-style and reads
   // as "the camera circles a point in front of itself" when you mouselook.
   let cameraOrigin: [number, number, number] = [0, 0, opts.groundZ + opts.eyeHeight];
@@ -205,7 +205,7 @@ export function createPolyFirstPersonControls(
   function forwardDir(rotX: number, rotY: number): [number, number, number] {
     const rx = (rotX * Math.PI) / 180;
     const ry = (rotY * Math.PI) / 180;
-    // Derived from polycss's scene transform inverse: the world direction
+    // Derived from PolyCSS's scene transform inverse: the world direction
     // that maps to CSS -Z (into the screen) under `rotateX(rotX) rotate(rotY)`
     // + the axis swap (worldY→CSS X, worldX→CSS Y).
     return [
@@ -411,7 +411,7 @@ export function createPolyFirstPersonControls(
       }
 
       if (dirty) {
-        // Re-derive target from the new origin so polycss's perspective viewer
+        // Re-derive target from the new origin so PolyCSS's perspective viewer
         // tracks the camera. Without this, walking forward would move
         // `cameraOrigin` but target would stay put, and the visible center
         // would drift behind us.

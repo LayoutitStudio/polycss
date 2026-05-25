@@ -862,7 +862,7 @@ export function VanillaScene({
   ]);
 
   // Effect 3.5 — ground receiver. A flat quad in the XY plane (Z is "up"
-  // in polycss's world convention — the red-green plane in the axes helper
+  // in PolyCSS's world convention — the red-green plane in the axes helper
   // is the floor) at the model's min-Z, sized to ~3× the model's horizontal
   // span. Gives shadows something to land on. excludeFromAutoCenter so
   // toggling it doesn't shift the camera pivot; castShadow:false because

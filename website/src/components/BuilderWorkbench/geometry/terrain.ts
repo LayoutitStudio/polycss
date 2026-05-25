@@ -90,7 +90,7 @@ export function buildTerrainPolygons(opts: TerrainRenderOptions): Polygon[] {
     const p11: [number, number, number] = [x1, y1, z11];
     const p01: [number, number, number] = [x0, y1, z01];
     // Split each cell into 2 triangles along the (p00 → p11) diagonal.
-    // A non-planar quad would be auto-snapped by polycss (see CLAUDE.md
+    // A non-planar quad would be auto-snapped by PolyCSS (see AGENTS.md
     // "Coplanarity is a hard requirement at render time…") which opens
     // visible seams with neighbouring cells; triangles are inherently
     // planar so the warped surface stays gap-free. CCW from +Z on both

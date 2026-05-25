@@ -5,7 +5,7 @@ description: Scene component that sets up the 3D viewport, camera, and lighting 
 
 import { Tabs, TabItem } from '@astrojs/starlight/components';
 
-The scene is the root of every polycss render tree. It applies scene-level lighting and atlas options, then renders its children (typically meshes or individual polygons) in 3D space. `<poly-scene>` / `PolyScene` must always be nested inside a camera element (`<poly-camera>` / `PolyCamera` or the perspective variant): the camera owns the projection and orbital state.
+The scene is the root of every PolyCSS render tree. It applies scene-level lighting and atlas options, then renders its children (typically meshes or individual polygons) in 3D space. `<poly-scene>` / `PolyScene` must always be nested inside a camera element (`<poly-camera>` / `PolyCamera` or the perspective variant): the camera owns the projection and orbital state.
 
 It's available as a custom element (`<poly-scene>`), via the imperative `createPolyScene(host, opts)` API, and as React / Vue components (`<PolyScene>`).
 

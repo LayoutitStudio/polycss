@@ -12,7 +12,7 @@
  * Z = +height/2. Side quads are axis-aligned in the cylinder's own local
  * frame, which maximises the chance of hitting the <b> quad fast-path.
  *
- * Polycss world space: +X right, +Y forward, +Z up. The cylinder axis is
+ * PolyCSS world space: +X right, +Y forward, +Z up. The cylinder axis is
  * the Z axis so a typical upright pillar stands without any extra rotation.
  */
 import type { Polygon, Vec3 } from "../types";

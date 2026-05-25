@@ -16,7 +16,7 @@ export interface UseSceneContextResult {
 }
 
 /**
- * React hook that runs the polycss scene-context pipeline:
+ * React hook that runs the PolyCSS scene-context pipeline:
  *   normalizePolygons → mergePolygons by default → bbox compute.
  *
  * Returns the processed polygons + the scene-wide axis-aligned bbox. Memoized

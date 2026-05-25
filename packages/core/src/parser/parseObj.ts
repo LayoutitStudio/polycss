@@ -16,7 +16,7 @@
  *    `Plane` next to the actual model) that shouldn't render.
  *
  * The mesh is fit to `targetSize` units and remapped from OBJ's +Y-up
- * convention to polycss's +Z-up via the cyclic permutation (x,y,z) → (z,x,y),
+ * convention to PolyCSS's +Z-up via the cyclic permutation (x,y,z) → (z,x,y),
  * which preserves handedness so triangle winding stays consistent.
  *
  * Vertex coords are kept as floats; bbox is NOT computed per-polygon
@@ -115,6 +115,12 @@ export function parseObj(text: string, options?: ObjParseOptions): ParseResult {
     return materialColor.get(name)!;
   };
 
+  const resolveIndex = (rawIndex: string, length: number): number => {
+    const index = parseInt(rawIndex, 10);
+    if (!Number.isFinite(index)) return NaN;
+    return index < 0 ? length + index : index - 1;
+  };
+
   const lines = text.split("\n");
   for (const raw of lines) {
     if (raw.length === 0 || raw.charCodeAt(0) === 35) continue; // skip "" and "#"
@@ -137,10 +143,10 @@ export function parseObj(text: string, options?: ObjParseOptions): ParseResult {
       const uvIdx: (number | null)[] = [];
       for (const p of parts) {
         const slash = p.split("/");
-        idx.push(parseInt(slash[0], 10) - 1);
+        idx.push(resolveIndex(slash[0], verts.length));
         const vtRaw = slash[1];
         if (vtRaw && vtRaw.length > 0) {
-          const v = parseInt(vtRaw, 10) - 1;
+          const v = resolveIndex(vtRaw, uvs.length);
           uvIdx.push(Number.isFinite(v) ? v : null);
         } else {
           uvIdx.push(null);
@@ -173,7 +179,7 @@ export function parseObj(text: string, options?: ObjParseOptions): ParseResult {
   const scale = maxDim > 0 ? targetSize / maxDim : 1;
 
   // Cyclic axis permutation (x,y,z) → (z,x,y) puts OBJ's +Y up axis into
-  // polycss's +Z (elevation). Single axis swaps invert handedness; a cyclic
+  // PolyCSS's +Z (elevation). Single axis swaps invert handedness; a cyclic
   // shift doesn't, so triangle CCW-from-outside winding survives.
   const round = (n: number) => Math.round(n * 1000) / 1000;
   const grid: Vec3[] = verts.map(([x, y, z]) => [
