@@ -7,11 +7,11 @@
  * and writes both a Chrome trace file and a compact JSON summary.
  *
  * Usage:
- *   node .agents/skills/chrome-capture-trace/scripts/polycss-nonvoxel-drag-trace.mjs
- *   node .agents/skills/chrome-capture-trace/scripts/polycss-nonvoxel-drag-trace.mjs --mesh teapot --mode baked --label teapot-drag
- *   node .agents/skills/chrome-capture-trace/scripts/polycss-nonvoxel-drag-trace.mjs --degrees 360 --drag-ms 1500 --steps 120
- *   node .agents/skills/chrome-capture-trace/scripts/polycss-nonvoxel-drag-trace.mjs --variant force-atlas --trace-out bench/results/teapot.trace.json
- *   node .agents/skills/chrome-capture-trace/scripts/polycss-nonvoxel-drag-trace.mjs --frame-details --no-print-json
+ *   node .agents/skills/chrome-trace/scripts/polycss-nonvoxel-drag-trace.mjs
+ *   node .agents/skills/chrome-trace/scripts/polycss-nonvoxel-drag-trace.mjs --mesh teapot --mode baked --label teapot-drag
+ *   node .agents/skills/chrome-trace/scripts/polycss-nonvoxel-drag-trace.mjs --degrees 360 --drag-ms 1500 --steps 120
+ *   node .agents/skills/chrome-trace/scripts/polycss-nonvoxel-drag-trace.mjs --variant force-atlas --trace-out bench/results/teapot.trace.json
+ *   node .agents/skills/chrome-trace/scripts/polycss-nonvoxel-drag-trace.mjs --frame-details --no-print-json
  */
 import { createServer } from "node:http";
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -877,7 +877,7 @@ async function run() {
         traceEvents: events,
         displayTimeUnit: "ms",
         metadata: {
-          source: ".agents/skills/chrome-capture-trace/scripts/polycss-nonvoxel-drag-trace.mjs",
+          source: ".agents/skills/chrome-trace/scripts/polycss-nonvoxel-drag-trace.mjs",
           mesh: MESH,
           mode: MODE,
           variant: VARIANT,

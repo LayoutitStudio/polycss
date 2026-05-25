@@ -563,7 +563,7 @@ async function run() {
       : summarizeEvents(traceEvents, 0, -Infinity, Infinity, frames);
 
     const summary = {
-      kind: "chrome-capture-trace",
+      kind: "chrome-trace",
       url: URL,
       viewport,
       action,
@@ -590,7 +590,7 @@ async function run() {
       traceEvents,
       displayTimeUnit: "ms",
       metadata: {
-        source: "chrome-capture-trace/scripts/capture-trace.mjs",
+        source: "chrome-trace/scripts/capture-trace.mjs",
         url: URL,
         action,
         gpuDetails: GPU_DETAILS_MODE,

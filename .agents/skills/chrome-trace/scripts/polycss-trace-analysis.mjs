@@ -6,11 +6,11 @@
  * samples, and reports compositor/style/raster/script cost per cadence bucket.
  *
  * Usage:
- *   node .agents/skills/chrome-capture-trace/scripts/polycss-trace-analysis.mjs
- *   node .agents/skills/chrome-capture-trace/scripts/polycss-trace-analysis.mjs --mesh ancient-crash-site --runs 3 --dom-samples
- *   node .agents/skills/chrome-capture-trace/scripts/polycss-trace-analysis.mjs --mesh obj-house3 --renderer vanilla --label obj-house3-trace
- *   node .agents/skills/chrome-capture-trace/scripts/polycss-trace-analysis.mjs --page nonvoxel --mesh glb:Elephant.glb --variant order-tile4 --no-trace
- *   node .agents/skills/chrome-capture-trace/scripts/polycss-trace-analysis.mjs --page nonvoxel --mesh teapot --frame-details --layer-details
+ *   node .agents/skills/chrome-trace/scripts/polycss-trace-analysis.mjs
+ *   node .agents/skills/chrome-trace/scripts/polycss-trace-analysis.mjs --mesh ancient-crash-site --runs 3 --dom-samples
+ *   node .agents/skills/chrome-trace/scripts/polycss-trace-analysis.mjs --mesh obj-house3 --renderer vanilla --label obj-house3-trace
+ *   node .agents/skills/chrome-trace/scripts/polycss-trace-analysis.mjs --page nonvoxel --mesh glb:Elephant.glb --variant order-tile4 --no-trace
+ *   node .agents/skills/chrome-trace/scripts/polycss-trace-analysis.mjs --page nonvoxel --mesh teapot --frame-details --layer-details
  */
 import { createServer } from "node:http";
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -64,6 +64,7 @@ const MODE = optStr("mode", "baked");
 const MOTION = optStr("motion", "rot");
 const RENDERER = optStr("renderer", "vanilla");
 const VARIANT = optStr("variant", "baseline");
+const DISABLE_STRATEGIES = optStr("disable-strategies", optStr("disableStrategies", ""));
 const WARMUP_MS = optNum("warmup", 1500);
 const SAMPLE_MS = optNum("sample", 6000);
 const RUNS = optNum("runs", 1);
@@ -266,7 +267,7 @@ const KEY_EVENTS = [
 ];
 
 function printHelp() {
-  console.log(`Usage: node .agents/skills/chrome-capture-trace/scripts/polycss-trace-analysis.mjs [options]
+  console.log(`Usage: node .agents/skills/chrome-trace/scripts/polycss-trace-analysis.mjs [options]
 
 Options:
   --page <name>               perf | nonvoxel. Default: perf
@@ -953,7 +954,13 @@ function pageUrl(port) {
   if (PAGE !== "perf") {
     throw new Error(`Unknown --page "${PAGE}". Expected "perf" or "nonvoxel".`);
   }
-  return `http://127.0.0.1:${port}/perf-${RENDERER}.html?mesh=${encodeURIComponent(MESH)}&mode=${encodeURIComponent(MODE)}&motion=${encodeURIComponent(MOTION)}`;
+  const params = new URLSearchParams({
+    mesh: MESH,
+    mode: MODE,
+    motion: MOTION,
+    ...(DISABLE_STRATEGIES ? { disableStrategies: DISABLE_STRATEGIES } : {}),
+  });
+  return `http://127.0.0.1:${port}/perf-${RENDERER}.html?${params.toString()}`;
 }
 
 function traceOutputPath(repeat) {
@@ -1085,7 +1092,7 @@ async function runOnce(port, repeat) {
         traceEvents: events,
         displayTimeUnit: "ms",
         metadata: {
-          source: ".agents/skills/chrome-capture-trace/scripts/polycss-trace-analysis.mjs",
+          source: ".agents/skills/chrome-trace/scripts/polycss-trace-analysis.mjs",
           page: PAGE,
           mesh: MESH,
           renderer: RENDERER,

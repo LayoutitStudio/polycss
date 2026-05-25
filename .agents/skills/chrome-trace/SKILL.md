@@ -1,9 +1,9 @@
 ---
-name: chrome-capture-trace
+name: chrome-trace
 description: Capture and analyze Chrome/Chromium performance traces with Playwright around a concrete browser interaction. Use when Codex needs to answer where frame time is spent during an update, drag, rotation, scroll, animation, camera movement, light movement, DOM/CSS render change, or other performance-sensitive UI action; especially when the right answer requires per-frame Chrome trace evidence instead of FPS-only guesses.
 ---
 
-# Chrome Capture Trace
+# Chrome Trace
 
 ## Core Workflow
 
@@ -26,12 +26,12 @@ Use `scripts/trace.mjs` as the front door:
 
 ```bash
 pnpm bench:build
-node .agents/skills/chrome-capture-trace/scripts/trace.mjs motion --page nonvoxel --mesh glb:Elephant.glb --variant baseline --dom-samples --label elephant-baseline
-node .agents/skills/chrome-capture-trace/scripts/trace.mjs motion --page nonvoxel --mesh teapot --variant baseline --dom-samples --frame-details --layer-details --gpu-details --trace-out bench/results/teapot.trace.json --label teapot-enriched --report
-node .agents/skills/chrome-capture-trace/scripts/trace.mjs motion --page nonvoxel --mesh teapot --variant baseline --gpu-details full --trace-out bench/results/teapot-full-gpu.trace.json --label teapot-full-gpu
-node .agents/skills/chrome-capture-trace/scripts/trace.mjs drag --mesh teapot --mode baked --frame-details --label teapot-drag
-node .agents/skills/chrome-capture-trace/scripts/trace.mjs motion --mesh garden --report --markdown-out bench/results/garden-trace.md
-node .agents/skills/chrome-capture-trace/scripts/trace.mjs compare bench/results/before.json bench/results/after.json --markdown-out bench/results/trace-compare.md
+node .agents/skills/chrome-trace/scripts/trace.mjs motion --page nonvoxel --mesh glb:Elephant.glb --variant baseline --dom-samples --label elephant-baseline
+node .agents/skills/chrome-trace/scripts/trace.mjs motion --page nonvoxel --mesh teapot --variant baseline --dom-samples --frame-details --layer-details --gpu-details --trace-out bench/results/teapot.trace.json --label teapot-enriched --report
+node .agents/skills/chrome-trace/scripts/trace.mjs motion --page nonvoxel --mesh teapot --variant baseline --gpu-details full --trace-out bench/results/teapot-full-gpu.trace.json --label teapot-full-gpu
+node .agents/skills/chrome-trace/scripts/trace.mjs drag --mesh teapot --mode baked --frame-details --label teapot-drag
+node .agents/skills/chrome-trace/scripts/trace.mjs motion --mesh garden --report --markdown-out bench/results/garden-trace.md
+node .agents/skills/chrome-trace/scripts/trace.mjs compare bench/results/before.json bench/results/after.json --markdown-out bench/results/trace-compare.md
 ```
 
 Use `trace.mjs motion` for steady bench motion across `perf` and `nonvoxel` pages, cadence buckets, DOM samples, render stats, and tag counts.
@@ -65,7 +65,7 @@ Trace event durations are inclusive and often nested, especially GPU/viz and sch
 For arbitrary pages, use `trace.mjs generic`:
 
 ```bash
-node .agents/skills/chrome-capture-trace/scripts/trace.mjs generic \
+node .agents/skills/chrome-trace/scripts/trace.mjs generic \
   --url http://127.0.0.1:3000 \
   --ready-js "window.appReady === true" \
   --action drag \
@@ -80,9 +80,9 @@ node .agents/skills/chrome-capture-trace/scripts/trace.mjs generic \
 Useful alternatives:
 
 ```bash
-node .agents/skills/chrome-capture-trace/scripts/trace.mjs generic --url http://127.0.0.1:3000 --action wait --sample 3000
-node .agents/skills/chrome-capture-trace/scripts/trace.mjs generic --url http://127.0.0.1:3000 --action eval --eval "window.rotateScene?.(Math.PI / 2)"
-node .agents/skills/chrome-capture-trace/scripts/trace.mjs generic --url http://127.0.0.1:3000 --action scroll --scroll "0,900"
+node .agents/skills/chrome-trace/scripts/trace.mjs generic --url http://127.0.0.1:3000 --action wait --sample 3000
+node .agents/skills/chrome-trace/scripts/trace.mjs generic --url http://127.0.0.1:3000 --action eval --eval "window.rotateScene?.(Math.PI / 2)"
+node .agents/skills/chrome-trace/scripts/trace.mjs generic --url http://127.0.0.1:3000 --action scroll --scroll "0,900"
 ```
 
 ## Comparing Runs
@@ -90,13 +90,13 @@ node .agents/skills/chrome-capture-trace/scripts/trace.mjs generic --url http://
 Use `--report` on a runner to generate a Markdown report after capture, or use `trace.mjs report` on an existing summary JSON:
 
 ```bash
-node .agents/skills/chrome-capture-trace/scripts/trace.mjs report bench/results/garden.json --markdown-out bench/results/garden.md
+node .agents/skills/chrome-trace/scripts/trace.mjs report bench/results/garden.json --markdown-out bench/results/garden.md
 ```
 
 Use `trace.mjs compare` on summary JSON files from any runner:
 
 ```bash
-node .agents/skills/chrome-capture-trace/scripts/trace.mjs compare before.json after.json --markdown-out trace-compare.md
+node .agents/skills/chrome-trace/scripts/trace.mjs compare before.json after.json --markdown-out trace-compare.md
 ```
 
 Read positive deltas in `frame_time_*_ms` and trace group `ms/frame` as more expensive after the change. Read positive FPS deltas as better.

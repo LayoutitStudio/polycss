@@ -1,4 +1,0 @@
-interface:
-  display_name: "Chrome Capture Trace"
-  short_description: "Capture and analyze Chrome performance traces"
-  default_prompt: "Use $chrome-capture-trace to capture a Chrome trace around an interaction and identify where frame time is spent."
