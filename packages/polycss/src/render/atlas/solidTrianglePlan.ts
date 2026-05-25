@@ -11,7 +11,7 @@ import type { RenderTextureAtlasOptions } from "./types";
 import { resolveSolidTrianglePrimitive } from "./strategy";
 
 /**
- * Polycss wrapper for computeSolidTrianglePlan that pre-resolves the primitive
+ * PolyCSS wrapper for computeSolidTrianglePlan that pre-resolves the primitive
  * from options.doc before delegating to the pure core function.
  */
 export function computeSolidTrianglePlan(
@@ -33,7 +33,7 @@ export function computeSolidTrianglePlan(
 }
 
 /**
- * Polycss wrapper for computeSolidTrianglePlanFromCssPoints that pre-resolves
+ * PolyCSS wrapper for computeSolidTrianglePlanFromCssPoints that pre-resolves
  * the primitive from options.doc before delegating to the pure core function.
  */
 export function computeSolidTrianglePlanFromCssPoints(

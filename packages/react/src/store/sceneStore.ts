@@ -1,5 +1,5 @@
 /**
- * Lightweight reactive store for polycss scene state.
+ * Lightweight reactive store for PolyCSS scene state.
  * Uses useSyncExternalStore under the hood — zero dependencies.
  * Components subscribe to specific slices via selectors,
  * so only the components that care about a changed value re-render.

@@ -479,7 +479,7 @@
   display: none !important;
 }
 
-/* Force both faces of every wireframe edge to render. polycss applies
+/* Force both faces of every wireframe edge to render. PolyCSS applies
    `backface-visibility: hidden` to polygon leaves via a rule
    `.polycss-scene b/i/s/u {...}` that gets injected at runtime AFTER
    this stylesheet loads, so equal-specificity overrides lose. The

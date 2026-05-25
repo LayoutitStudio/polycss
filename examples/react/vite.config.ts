@@ -14,6 +14,7 @@ export default defineConfig({
         "textured-glb": resolve(__dirname, "textured-glb/index.html"),
         animated: resolve(__dirname, "animated/index.html"),
         voxel: resolve(__dirname, "voxel/index.html"),
+        "core-runner": resolve(__dirname, "core-runner/index.html"),
       },
     },
   },

@@ -379,7 +379,7 @@ describe("PolyFirstPersonControls (Vue)", () => {
   });
 
   // ── Origin/target identity ───────────────────────────────────────────────
-  // The cameraOrigin model exists so polycss's perspective viewer coincides
+  // The cameraOrigin model exists so PolyCSS's perspective viewer coincides
   // with `cameraOrigin` in world space. Invariant:
   //   target = origin + lookDir(rotX, rotY) * (perspective_css / BASE_TILE)
   // Mouselook must rotate target around the FIXED origin. These pin both

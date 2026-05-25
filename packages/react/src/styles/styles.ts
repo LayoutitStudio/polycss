@@ -242,7 +242,7 @@ const CORE_BASE_STYLES = `
 @property --clz { syntax: "<number>"; inherits: true; initial-value: 1; }
 
 /* Ground-plane position in CSS pixels along the CSS-Z axis (= world-Z, the
-   up axis in polycss's world convention). Stored as a <number> so it can be
+   up axis in PolyCSS's world convention). Stored as a <number> so it can be
    used directly inside matrix3d() calc() expressions (matrix3d requires
    dimensionless entries — no px units).
    Set by PolyScene from the min world-Z of casting meshes. */
@@ -360,7 +360,7 @@ const CORE_BASE_STYLES = `
  * Shadow projection matrix. Projects any 3D point P onto the horizontal
  * ground plane (cssZ ≈ G) along the CSS-space light direction (--clx/y/z).
  *
- * In polycss's world convention world Z is up (red-green plane is the
+ * In PolyCSS's world convention world Z is up (red-green plane is the
  * floor in the axes helper). After the world→CSS swap (Y↔X), world Z stays
  * as CSS Z, so the ground plane normal in CSS space is +cssZ.
  *

@@ -8,7 +8,7 @@
  * lies on a single tangent plane. No triangulation is needed. The renderer
  * uses <i> (border-shape) on Chromium and <s> elsewhere for non-quad polygons.
  *
- * Polycss world space: +X right, +Y forward, +Z up.
+ * PolyCSS world space: +X right, +Y forward, +Z up.
  */
 import type { Polygon, Vec3 } from "../types";
 

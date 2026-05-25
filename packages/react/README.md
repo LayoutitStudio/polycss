@@ -1,14 +1,14 @@
 <p align="center">
-  <img src="https://polycss.com/voxisologo.png" alt="polycss" width="300" />
+  <img src="https://polycss.com/voxisologo.png" alt="PolyCSS" width="300" />
 </p>
 
-# polycss
+# PolyCSS
 
 A CSS polygon mesh engine. A 3D renderer for the DOM. Renders OBJ, glTF, GLB, MagicaVoxel `.vox`, and generated primitives as real HTML elements transformed with CSS `matrix3d(...)`. Supports colors, textures, lighting, shadows, controls, selection, animation, and per-polygon interaction. Works with React, Vue, custom elements, or plain JavaScript.
 
 Visit [polycss.com](https://polycss.com) for docs and model examples.
 
-<img width="1915" height="900" alt="polycss scene" src="https://polycss.com/voxcss-intro.png" />
+<img width="1915" height="900" alt="PolyCSS scene" src="https://polycss.com/voxcss-intro.png" />
 
 ## Installation
 
@@ -23,7 +23,7 @@ npm install @layoutit/polycss-vue
 npm install @layoutit/polycss
 ```
 
-You can also load polycss directly from a CDN. Here is a minimal custom-element scene:
+You can also load PolyCSS directly from a CDN. Here is a minimal custom-element scene:
 
 ```html
 <script type="module" src="https://esm.sh/@layoutit/polycss/elements"></script>
@@ -171,7 +171,7 @@ Supported formats:
 
 ## Performance
 
-polycss renders in the DOM, so performance is mostly determined by how many polygons are mounted and how much texture atlas area they consume. The renderer uses several CSS strategies so simple surfaces stay cheap and textured or irregular surfaces fall back to atlas slices.
+PolyCSS renders in the DOM, so performance is mostly determined by how many polygons are mounted and how much texture atlas area they consume. The renderer uses several CSS strategies so simple surfaces stay cheap and textured or irregular surfaces fall back to atlas slices.
 
 - One visible polygon becomes one leaf DOM element.
 - Flat rectangles and stable quads use solid CSS leaves.
@@ -200,7 +200,7 @@ For diagnostics, all renderer packages export `collectPolyRenderStats(root)`, wh
 | `@layoutit/polycss-react` | React components, hooks, controls, and core re-exports. |
 | `@layoutit/polycss-vue` | Vue 3 components, composables, controls, and core re-exports. |
 
-## Made with polycss
+## Made with PolyCSS
 
 [Layoutit Voxels](https://voxels.layoutit.com)
 -> A CSS Voxel editor

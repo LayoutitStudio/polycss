@@ -209,6 +209,24 @@ describe("parseObj — face index formats (v, v/vt, v/vt/vn, v//vn)", () => {
     expect(r.polygons).toHaveLength(1);
     expect(r.polygons[0].uvs).toBeUndefined();
   });
+
+  it("negative vertex and texture indices resolve relative to the current OBJ lists", () => {
+    const obj = [
+      "v 0 0 0",
+      "v 1 0 0",
+      "v 0 1 0",
+      "vt 0 0",
+      "vt 1 0",
+      "vt 0 1",
+      "usemtl Tex",
+      "f -3/-3 -2/-2 -1/-1",
+    ].join("\n");
+    const r = parseObj(obj, { materialTextures: { Tex: "img.png" } });
+
+    expect(r.polygons).toHaveLength(1);
+    expect(r.polygons[0].texture).toBe("img.png");
+    expect(r.polygons[0].uvs).toEqual([[0, 0], [1, 0], [0, 1]]);
+  });
 });
 
 describe("parseObj — usemtl color resolution", () => {

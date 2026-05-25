@@ -1,7 +1,7 @@
 /**
  * Axis-aligned box/cuboid geometry as six quad polygons.
  *
- * Returned polygons are in standard polycss world space:
+ * Returned polygons are in standard PolyCSS world space:
  * +X = right, +Y = front/forward, +Z = top/up.
  */
 import type { Polygon, Vec2, Vec3 } from "../types";

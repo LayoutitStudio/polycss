@@ -1,7 +1,7 @@
 /**
  * Feature tests: packTextureAtlasPlansWithScale wrapper (React atlasBrowser copy)
  *
- * Mirrors polycss's atlasPacking.test.ts.
+ * Mirrors PolyCSS's atlasPacking.test.ts.
  * Imports from the React-local copy so drift surfaces immediately.
  */
 import { describe, it, expect } from "vitest";

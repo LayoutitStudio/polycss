@@ -1,7 +1,7 @@
 /**
  * Feature tests: getSolidPaintDefaultsFromPlans wrapper (React atlasBrowser copy)
  *
- * Mirrors polycss's solidPaintDefaults.test.ts.
+ * Mirrors PolyCSS's solidPaintDefaults.test.ts.
  * Imports from the React-local copy so drift surfaces immediately.
  */
 import { describe, it, expect } from "vitest";

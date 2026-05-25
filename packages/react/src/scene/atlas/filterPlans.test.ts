@@ -1,7 +1,7 @@
 /**
  * Feature tests: filterAtlasPlans wrapper (React atlasBrowser copy)
  *
- * Mirrors polycss's strategySelection.test.ts filter section.
+ * Mirrors PolyCSS's strategySelection.test.ts filter section.
  * Imports from the React-local copy so drift surfaces immediately.
  */
 import { describe, it, expect } from "vitest";

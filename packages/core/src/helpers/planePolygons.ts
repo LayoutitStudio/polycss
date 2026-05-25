@@ -5,7 +5,7 @@
  * attached mesh along two axes simultaneously (XY, XZ, or YZ), instead of
  * the single-axis motion the arrow shafts provide.
  *
- * The polygon lives in standard polycss world space; wrap it in the
+ * The polygon lives in standard PolyCSS world space; wrap it in the
  * framework's PolyMesh equivalent for rendering.
  */
 import type { Polygon, Vec3 } from "../types";

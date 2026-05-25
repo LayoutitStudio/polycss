@@ -1,12 +1,12 @@
 ---
 title: Loading Meshes
-description: Loading OBJ, glTF, GLB, and VOX meshes into polycss with UV textures and material colors.
+description: Loading OBJ, glTF, GLB, and VOX meshes into PolyCSS with UV textures and material colors.
 ---
 
 import { Tabs, TabItem } from '@astrojs/starlight/components';
 import PolyDemo from '../../../components/PolyDemo.astro';
 
-polycss loads 3D mesh files (OBJ, glTF, GLB, and MagicaVoxel VOX) and renders them as DOM elements. UV textures are extracted from OBJ/glTF/GLB files and packed into generated atlas pages; each atlas-backed polygon is an internal `<s>` leaf that uses CSS background positioning.
+PolyCSS loads 3D mesh files (OBJ, glTF, GLB, and MagicaVoxel VOX) and renders them as DOM elements. UV textures are extracted from OBJ/glTF/GLB files and packed into generated atlas pages; each atlas-backed polygon is an internal `<s>` leaf that uses CSS background positioning.
 
 ## Live demo: UV-textured GLB
 
@@ -87,7 +87,7 @@ import { PolyCamera, PolyScene, PolyMesh } from "@layoutit/polycss-vue";
 
 ## OBJ with MTL
 
-When your OBJ has a companion MTL file with textures, polycss reads `map_Kd` entries and applies them as UV-mapped textures. Pass the `mtl` attribute / prop:
+When your OBJ has a companion MTL file with textures, PolyCSS reads `map_Kd` entries and applies them as UV-mapped textures. Pass the `mtl` attribute / prop:
 
 ```html
 <!-- Vanilla -->
@@ -176,7 +176,7 @@ function Viewer() {
 
 ## Atlas pipeline
 
-For textured polygons, polycss runs a one-time atlas canvas pass at mount. Flat-color polygons can bypass the atlas when they can render as CSS solids or `border-shape` polygons.
+For textured polygons, PolyCSS runs a one-time atlas canvas pass at mount. Flat-color polygons can bypass the atlas when they can render as CSS solids or `border-shape` polygons.
 
 1. Extract the texture image from the file (or fetch it by URL) when the polygon has a texture.
 2. Solve a 6-DOF affine transform from the polygon's UV coordinates to its 2D screen footprint when UVs are available.
@@ -195,7 +195,7 @@ Generated atlas blob URLs are revoked on unmount (call `dispose()` or let `PolyM
 - **`textureQuality`**: leave at `"auto"` for workload-based bitmap caps and browser/device sprite sizing, or set a numeric raster scale for explicit quality. `0.5` uses about one quarter of the atlas bitmap memory of `1`.
 - Shared textured edges are repaired automatically during atlas generation. Geometry stays unchanged; only low-alpha atlas pixels at those shared edges are filled from nearby opaque texels.
 - **`baseUrl`**: for OBJ/glTF files with external texture paths, pass the file's URL so relative paths resolve correctly.
-- For large meshes: blob URLs for embedded textures and generated atlases are revoked when `dispose()` is called. Always let polycss manage this: don't hold references to blob URLs across remounts.
+- For large meshes: blob URLs for embedded textures and generated atlases are revoked when `dispose()` is called. Always let PolyCSS manage this: don't hold references to blob URLs across remounts.
 
 ## Related
 

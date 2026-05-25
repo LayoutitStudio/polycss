@@ -18,7 +18,7 @@
  *
  * After parsing, the mesh is uniformly scaled to fit `targetSize` units
  * and the y/z axes are cyclically permuted (so glTF's +Y-up becomes
- * polycss's +Z-up without inverting handedness — a single y↔z swap would
+ * PolyCSS's +Z-up without inverting handedness — a single y↔z swap would
  * flip every triangle's winding and break backface culling).
  */
 import type {
@@ -52,7 +52,7 @@ export interface GltfParseOptions {
   /**
    * Which axis is "up" in the source mesh.
    *  - "y" (default, glTF spec): cyclic permutation (x,y,z) → (z,x,y) so
-   *    +Y ends up on polycss's +Z (elevation).
+   *    +Y ends up on PolyCSS's +Z (elevation).
    *  - "z" (Blender-style, FBX2glTF often emits this): identity, no swap.
    * Pick "z" if the model lands on its side / lies down instead of
    * standing.
@@ -90,6 +90,16 @@ const TYPE_COUNT: Record<string, number> = {
   SCALAR: 1, VEC2: 2, VEC3: 3, VEC4: 4, MAT2: 4, MAT3: 9, MAT4: 16,
 };
 
+const PRIMITIVE_MODE_NAMES: Record<number, string> = {
+  0: "POINTS",
+  1: "LINES",
+  2: "LINE_LOOP",
+  3: "LINE_STRIP",
+  4: "TRIANGLES",
+  5: "TRIANGLE_STRIP",
+  6: "TRIANGLE_FAN",
+};
+
 interface GltfAccessor {
   bufferView?: number;
   byteOffset?: number;
@@ -115,6 +125,12 @@ interface GltfBufferView {
   byteOffset?: number;
   byteLength: number;
   byteStride?: number;
+  extensions?: Record<string, unknown>;
+}
+interface GltfBuffer {
+  byteLength: number;
+  uri?: string;
+  extensions?: Record<string, unknown>;
 }
 interface GltfTextureInfo {
   index: number; // index into doc.textures[]
@@ -159,7 +175,7 @@ interface GltfNode {
   mesh?: number;
   skin?: number;
   children?: number[];
-  /** TRS — polycss reads either matrix or these three components. */
+  /** TRS — PolyCSS reads either matrix or these three components. */
   matrix?: number[];
   translation?: number[];
   rotation?: number[]; // quaternion (x, y, z, w)
@@ -205,7 +221,7 @@ interface GltfDoc {
   materials?: GltfMaterial[];
   accessors?: GltfAccessor[];
   bufferViews?: GltfBufferView[];
-  buffers?: { byteLength: number; uri?: string }[];
+  buffers?: GltfBuffer[];
   images?: GltfImage[];
   textures?: GltfTexture[];
   samplers?: GltfSampler[];
@@ -288,6 +304,7 @@ function resolveBuffers(
   resolveBuffer?: (uri: string) => Uint8Array | Promise<Uint8Array>,
 ): Uint8Array[] {
   const specs = doc.buffers ?? [];
+  const canSkipMeshoptFallbackBuffers = (doc.extensionsRequired ?? []).includes("EXT_meshopt_compression");
   return specs.map((buffer, index) => {
     const uri = buffer.uri;
     if (uri) {
@@ -300,6 +317,9 @@ function resolveBuffers(
       throw new Error(`parseGltf: external buffer URI "${uri}" — provide options.resolveBuffer`);
     }
     if (index === 0 && glbBin) return glbBin;
+    if (canSkipMeshoptFallbackBuffers && buffer.extensions?.EXT_meshopt_compression) {
+      return new Uint8Array(0);
+    }
     throw new Error(`parseGltf: buffer[${index}] has no uri and no GLB BIN chunk`);
   });
 }
@@ -326,6 +346,10 @@ function assertAccessorFits(acc: GltfAccessor, view: GltfBufferView, stride: num
   if (relativeOffset < 0 || byteEnd > view.byteLength) {
     throw new Error("parseGltf: accessor does not fit bufferView");
   }
+}
+
+function resolveAccessorStride(view: GltfBufferView, packedBytes: number): number {
+  return view.byteStride !== undefined && view.byteStride > 0 ? view.byteStride : packedBytes;
 }
 
 type AccessorArray = Float32Array | Uint16Array | Uint32Array | Uint8Array | Int8Array | Int16Array;
@@ -362,7 +386,7 @@ function readAccessor(doc: GltfDoc, buffers: Uint8Array[], accessorIdx: number):
   const offset = (view.byteOffset ?? 0) + (acc.byteOffset ?? 0);
   const elements = acc.count * componentCount;
   const packedBytes = bytesPerComponent * componentCount;
-  const stride = view.byteStride ?? packedBytes;
+  const stride = resolveAccessorStride(view, packedBytes);
   assertAccessorFits(acc, view, stride, packedBytes);
 
   if (stride === packedBytes) {
@@ -449,7 +473,7 @@ function readAccessorComponents(doc: GltfDoc, buffers: Uint8Array[], accessorIdx
   if (acc.bufferView !== undefined) {
     const { buffer, view } = resolveBufferView(doc, buffers, acc.bufferView);
     const start = buffer.byteOffset + (view.byteOffset ?? 0) + (acc.byteOffset ?? 0);
-    const stride = view.byteStride ?? packedBytes;
+    const stride = resolveAccessorStride(view, packedBytes);
     assertAccessorFits(acc, view, stride, packedBytes);
     const data = new DataView(buffer.buffer);
     let write = 0;
@@ -1353,6 +1377,29 @@ export function parseGltf(input: ArrayBuffer | Uint8Array, options?: GltfParseOp
     warnings.push(warning);
   }
 
+  function accessorUsesBufferViewExtension(accessorIdx: number | undefined, extensionName: string): boolean {
+    if (accessorIdx === undefined) return false;
+    const acc = doc.accessors?.[accessorIdx];
+    if (!acc) return false;
+    const bufferViewHasExtension = (bufferViewIdx: number): boolean =>
+      doc.bufferViews?.[bufferViewIdx]?.extensions?.[extensionName] !== undefined;
+    if (acc.bufferView !== undefined && bufferViewHasExtension(acc.bufferView)) return true;
+    if (acc.sparse) {
+      if (bufferViewHasExtension(acc.sparse.indices.bufferView)) return true;
+      if (bufferViewHasExtension(acc.sparse.values.bufferView)) return true;
+    }
+    return false;
+  }
+
+  function primitiveUsesRequiredMeshopt(prim: GltfPrimitive): boolean {
+    if (!requiredExtensions.has("EXT_meshopt_compression")) return false;
+    if (prim.extensions?.EXT_meshopt_compression) return true;
+    if (accessorUsesBufferViewExtension(prim.indices, "EXT_meshopt_compression")) return true;
+    return Object.values(prim.attributes ?? {}).some((accessorIdx) =>
+      accessorUsesBufferViewExtension(accessorIdx, "EXT_meshopt_compression")
+    );
+  }
+
   interface RawTri {
     v0: Vec3;
     v1: Vec3;
@@ -1404,11 +1451,25 @@ export function parseGltf(input: ArrayBuffer | Uint8Array, options?: GltfParseOp
     if (!mesh) return;
     for (const prim of mesh.primitives) {
       const mode = prim.mode ?? 4;
-      if (mode !== 4 && mode !== 5 && mode !== 6) continue;
+      if (mode !== 4 && mode !== 5 && mode !== 6) {
+        const modeName = PRIMITIVE_MODE_NAMES[mode] ?? `mode ${mode}`;
+        pushWarningOnce(
+          `unsupported-mode:${mode}`,
+          `Skipped primitives with unsupported mode ${mode} (${modeName})`,
+        );
+        continue;
+      }
       if (prim.extensions?.KHR_draco_mesh_compression && requiredExtensions.has("KHR_draco_mesh_compression")) {
         pushWarningOnce(
           "KHR_draco_mesh_compression",
           "Skipped primitives with unsupported required extension KHR_draco_mesh_compression",
+        );
+        continue;
+      }
+      if (primitiveUsesRequiredMeshopt(prim)) {
+        pushWarningOnce(
+          "EXT_meshopt_compression",
+          "Skipped primitives with unsupported required extension EXT_meshopt_compression",
         );
         continue;
       }

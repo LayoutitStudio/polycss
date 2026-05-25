@@ -1,5 +1,5 @@
 /**
- * polycss — vanilla / custom-elements / imperative entry point.
+ * PolyCSS — vanilla / custom-elements / imperative entry point.
  *
  * Public surface:
  *   - `createPolyScene(host, options)` — imperative scene API

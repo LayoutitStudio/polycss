@@ -62,7 +62,7 @@ const ALPHA_IDLE = 0.6;
 const ALPHA_HOVER = 0.8;
 const ALPHA_DRAGGING = 1.0;
 
-/** polycss world→CSS remap. Match TransformControls in @layoutit/polycss-react. */
+/** PolyCSS world→CSS remap. Match TransformControls in @layoutit/polycss-react. */
 const WORLD_AXIS_FOR_CSS: Record<0 | 1 | 2, 0 | 1 | 2> = { 0: 1, 1: 0, 2: 2 };
 
 /** Six arrow specs (translate mode). `cssAxis` is the visible direction
@@ -145,7 +145,7 @@ function snap(value: number, step: number | null | undefined): number {
 }
 
 /** Compute the bbox center of a mesh's polygons in scene-CSS pixels.
- *  polycss world→CSS axis remap: world-Y → CSS-x, world-X → CSS-y,
+ *  PolyCSS world→CSS axis remap: world-Y → CSS-x, world-X → CSS-y,
  *  world-Z → CSS-z. The result is the offset we add to the gizmo
  *  position so the gizmo overlays the visible center of the mesh. The
  *  mesh wrapper sets `transform-origin: var(--origin)` to the same bbox

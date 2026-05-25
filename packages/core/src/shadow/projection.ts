@@ -32,7 +32,7 @@ export const BAKED_SHADOW_MIN_UP = 0.01;
  * shadow leaf.
  *
  * `lightDir` is the direction the light TRAVELS (e.g. `[0, 0, -1]` is
- * straight down). Polycss world Z is up, and the world→CSS axis swap
+ * straight down). PolyCSS world Z is up, and the world→CSS axis swap
  * leaves Z alone — see styles.ts for the full convention.
  *
  * `groundCssZ` is the receiver plane in CSS-Z (= world-Z) coordinates,

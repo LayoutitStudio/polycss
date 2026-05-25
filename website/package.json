@@ -3,7 +3,7 @@
   "type": "module",
   "version": "0.2.0",
   "private": true,
-  "description": "Polycss documentation and landing page.",
+  "description": "PolyCSS documentation and landing page.",
   "license": "MIT",
   "scripts": {
     "dev": "astro dev",

@@ -5,7 +5,7 @@
  * borderShapeSupported / solidTriangleSupported / cornerShapeSupported helpers
  * that the wrappers delegate to.
  *
- * These match the semantics verified in polycss's strategySelection.test.ts
+ * These match the semantics verified in PolyCSS's strategySelection.test.ts
  * (detection sections). We import from the React-local copy so drift between
  * the three copies surfaces immediately.
  */

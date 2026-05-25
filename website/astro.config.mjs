@@ -42,7 +42,7 @@ export default defineConfig({
     react(),
     sitemap(),
     starlight({
-      title: 'Polycss',
+      title: 'PolyCSS',
       description: 'A CSS polygon mesh engine. DOM-native 3D rendering.',
       disable404Route: true,
       components: {

@@ -13,7 +13,7 @@ export interface UseSceneContextResult {
 }
 
 /**
- * Vue 3 composable that runs the polycss scene-context pipeline:
+ * Vue 3 composable that runs the PolyCSS scene-context pipeline:
  *   normalizePolygons → mergePolygons by default → bbox compute.
  *
  * Returns a Ref to the processed polygons + the scene-wide axis-aligned bbox.

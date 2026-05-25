@@ -4,7 +4,7 @@
  * Vertices are placed so the tetrahedron is centered at the origin.
  * Faces wind CCW from the outside.
  *
- * Polycss world space: +X right, +Y forward, +Z up.
+ * PolyCSS world space: +X right, +Y forward, +Z up.
  */
 import type { Polygon, Vec3 } from "../types";
 

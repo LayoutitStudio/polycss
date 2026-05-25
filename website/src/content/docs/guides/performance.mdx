@@ -1,11 +1,11 @@
 ---
 title: Performance
-description: Optimizing polycss scenes and understanding DOM-based rendering tradeoffs.
+description: Optimizing PolyCSS scenes and understanding DOM-based rendering tradeoffs.
 ---
 
 import PolyDemo from '../../../components/PolyDemo.astro';
 
-polycss renders meshes as real DOM elements: every visible polygon is an HTML leaf with a CSS transform. That gives you DevTools inspection, DOM events, and CSS styling on every polygon, but it means **performance scales with mounted element count and atlas area**. Understanding both is key to building smooth scenes.
+PolyCSS renders meshes as real DOM elements: every visible polygon is an HTML leaf with a CSS transform. That gives you DevTools inspection, DOM events, and CSS styling on every polygon, but it means **performance scales with mounted element count and atlas area**. Understanding both is key to building smooth scenes.
 
 ## Live demo: polygon count vs. performance
 
@@ -22,7 +22,7 @@ The sphere below starts at subdivision level 3 (320 triangles). Bump subdivision
 
 ## Polygon count matters
 
-The dominant cost in polycss is usually browser work over the DOM tree: style, layout, paint, and compositing over many transformed leaves. Camera and mesh motion are expressed as ancestor transforms where possible, so the hot path avoids per-polygon JavaScript, but the browser still has to process every mounted leaf.
+The dominant cost in PolyCSS is usually browser work over the DOM tree: style, layout, paint, and compositing over many transformed leaves. Camera and mesh motion are expressed as ancestor transforms where possible, so the hot path avoids per-polygon JavaScript, but the browser still has to process every mounted leaf.
 
 Confirmed during benchmarking on a 10k-triangle mesh with auto-rotate:
 - **Scripting**: ~579ms / 7s (mostly React re-renders)
@@ -30,7 +30,7 @@ Confirmed during benchmarking on a 10k-triangle mesh with auto-rotate:
 
 ## Automatic mesh optimization
 
-polycss automatically optimizes loaded meshes before rendering. The default `meshResolution: "lossy"` path merges compatible polygons, can use bounded geometric approximation, and may add a small repair split budget to reduce high-risk visible seams. `meshResolution: "lossless"` keeps exact planar candidates only.
+PolyCSS automatically optimizes loaded meshes before rendering. The default `meshResolution: "lossy"` path merges compatible polygons, can use bounded geometric approximation, and may add a small repair split budget to reduce high-risk visible seams. `meshResolution: "lossless"` keeps exact planar candidates only.
 
 This is most useful for architectural meshes with large flat surfaces: walls, floors, ceilings, voxel faces, and other areas where many same-material triangles can collapse without visual change.
 

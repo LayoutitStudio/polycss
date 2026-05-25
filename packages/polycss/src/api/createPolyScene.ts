@@ -1620,7 +1620,7 @@ export function createPolyScene(
       const w2 = worldCss(face.vertices[2]!, rpos);
       const e1: Vec3 = [w1[0] - O[0], w1[1] - O[1], w1[2] - O[2]];
       const e2: Vec3 = [w2[0] - O[0], w2[1] - O[1], w2[2] - O[2]];
-      // Normal = e2 × e1 (NOT e1 × e2). polycss uses an axis swap
+      // Normal = e2 × e1 (NOT e1 × e2). PolyCSS uses an axis swap
       // (world Y → CSS X) when emitting leaves, which flips
       // handedness. The atlas builder's outward face normal in CSS
       // coords is the LEFT-hand cross product (= -right-hand). For
@@ -2051,7 +2051,7 @@ export function createPolyScene(
 
   // Recomputes the shadow ground plane from the minimum world-Z across all
   // casting meshes. World Z stays as CSS Z under the world→CSS axis swap.
-  // In polycss's world convention Z is up — the red-green plane in the axes
+  // In PolyCSS's world convention Z is up — the red-green plane in the axes
   // helper is the floor. An optional `lift` (in world units) raises the
   // plane slightly above the bbox floor to prevent z-fighting with
   // receiver polygons.

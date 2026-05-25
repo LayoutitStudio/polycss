@@ -5,7 +5,7 @@
  * to zero. The top cap is omitted (no area at the tip), and side faces are
  * emitted as triangles.
  *
- * Polycss world space: +X right, +Y forward, +Z up. Cone axis is Z; the apex
+ * PolyCSS world space: +X right, +Y forward, +Z up. Cone axis is Z; the apex
  * is at Z = +height/2 and the base at Z = -height/2.
  */
 import type { Polygon } from "../types";

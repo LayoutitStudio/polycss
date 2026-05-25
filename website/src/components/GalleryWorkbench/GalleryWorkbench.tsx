@@ -573,7 +573,7 @@ export default function GalleryWorkbench() {
   // Hover state for the mesh — wired the r3f / three.js way via
   // onPointerOver / onPointerOut on <PolyMesh>. Demonstrates the
   // mesh-event API (events.ts → InteractionProps) — same shape as
-  // r3f, no raycasting needed because polycss uses DOM events.
+  // r3f, no raycasting needed because PolyCSS uses DOM events.
   const [hoveredMeshId, setHoveredMeshId] = useState<string | null>(null);
   // Mesh handle for the currently rendered model (vanilla path only). The
   // Inspector folder uses this to push color-group edits back into the

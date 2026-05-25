@@ -757,6 +757,52 @@ describe("parseGltf", () => {
         [0, 5, 0],
       ]);
     });
+
+    it("treats byteStride: 0 as tightly packed data", () => {
+      const positions = [
+        0, 0, 0,
+        2, 0, 0,
+        0, 1, 0,
+      ];
+      const bin = new Uint8Array(positions.length * 4);
+      const view = new DataView(bin.buffer);
+      for (let i = 0; i < positions.length; i++) {
+        view.setFloat32(i * 4, positions[i], true);
+      }
+      const doc = {
+        asset: { version: "2.0" },
+        scene: 0,
+        scenes: [{ nodes: [0] }],
+        nodes: [{ mesh: 0 }],
+        meshes: [{ primitives: [{ attributes: { POSITION: 0 }, mode: 4 }] }],
+        accessors: [{
+          bufferView: 0,
+          byteOffset: 0,
+          componentType: 5126,
+          count: 3,
+          type: "VEC3",
+        }],
+        bufferViews: [{
+          buffer: 0,
+          byteOffset: 0,
+          byteLength: bin.length,
+          byteStride: 0,
+        }],
+        buffers: [{ byteLength: bin.length }],
+      };
+      const result = parseGltf(buildGlb({ doc, binData: bin }), {
+        upAxis: "z",
+        targetSize: 10,
+        gridShift: 0,
+      });
+
+      expect(result.polygons).toHaveLength(1);
+      expect(result.polygons[0].vertices).toEqual([
+        [0, 0, 0],
+        [10, 0, 0],
+        [0, 5, 0],
+      ]);
+    });
   });
 
   describe("sparse accessors", () => {
@@ -806,7 +852,7 @@ describe("parseGltf", () => {
   });
 
   describe("triangle topology modes", () => {
-    function buildFourVertexModeGlb(mode: 5 | 6): ArrayBuffer {
+    function buildFourVertexModeGlb(mode: number): ArrayBuffer {
       const positions = [
         0, 0, 0,
         1, 0, 0,
@@ -840,6 +886,18 @@ describe("parseGltf", () => {
       const result = parseGltf(buildFourVertexModeGlb(6));
       expect(result.polygons).toHaveLength(2);
     });
+
+    it.each([
+      [0, "POINTS"],
+      [1, "LINES"],
+    ])("mode=%i (%s) is skipped with a warning", (mode, modeName) => {
+      const result = parseGltf(buildFourVertexModeGlb(mode));
+
+      expect(result.polygons).toEqual([]);
+      expect(result.warnings).toEqual([
+        `Skipped primitives with unsupported mode ${mode} (${modeName})`,
+      ]);
+    });
   });
 
   describe("unsupported extensions", () => {
@@ -871,6 +929,72 @@ describe("parseGltf", () => {
       const result = parseGltf(glb);
       expect(result.polygons).toEqual([]);
       expect(result.warnings.some((warning) => warning.includes("KHR_draco_mesh_compression"))).toBe(true);
+    });
+
+    it("skips required meshopt-compressed bufferView primitives before reading extension fallback buffers", () => {
+      const doc = {
+        asset: { version: "2.0" },
+        extensionsRequired: ["EXT_meshopt_compression"],
+        scene: 0,
+        scenes: [{ nodes: [0] }],
+        nodes: [{ mesh: 0 }],
+        meshes: [{
+          name: "MeshoptCompressed",
+          primitives: [{
+            attributes: { POSITION: 0 },
+            indices: 1,
+            mode: 4,
+          }],
+        }],
+        accessors: [
+          { bufferView: 0, componentType: 5126, count: 3, type: "VEC3" },
+          { bufferView: 1, componentType: 5123, count: 3, type: "SCALAR" },
+        ],
+        bufferViews: [
+          {
+            buffer: 1,
+            byteOffset: 0,
+            byteLength: 36,
+            byteStride: 12,
+            extensions: {
+              EXT_meshopt_compression: {
+                buffer: 0,
+                byteOffset: 0,
+                byteLength: 4,
+                byteStride: 12,
+                mode: "ATTRIBUTES",
+                count: 3,
+              },
+            },
+          },
+          {
+            buffer: 1,
+            byteOffset: 36,
+            byteLength: 6,
+            extensions: {
+              EXT_meshopt_compression: {
+                buffer: 0,
+                byteOffset: 0,
+                byteLength: 4,
+                byteStride: 2,
+                mode: "TRIANGLES",
+                count: 3,
+              },
+            },
+          },
+        ],
+        buffers: [
+          { byteLength: 4 },
+          {
+            byteLength: 42,
+            extensions: { EXT_meshopt_compression: { fallback: true } },
+          },
+        ],
+      };
+      const result = parseGltf(buildGlb({ doc, binData: new Uint8Array(4) }));
+
+      expect(result.polygons).toEqual([]);
+      expect(result.warnings.some((warning) => warning.includes("EXT_meshopt_compression"))).toBe(true);
     });
   });
 

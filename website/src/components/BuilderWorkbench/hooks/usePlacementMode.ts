@@ -173,7 +173,7 @@ export function usePlacementMode({
   // We attach to `.dn-viewport` (the wrapper element around <PolyScene>) so
   // events outside the viewport (over the sidebar, dock, etc.) are not
   // captured — only pointer activity over the 3D area drives placement.
-  // A transparent PolyMesh catcher used to handle this, but polycss's color
+  // A transparent PolyMesh catcher used to handle this, but PolyCSS's color
   // pipeline doesn't render "transparent" colors as truly invisible (they
   // came out opaque white), so we now drive placement entirely from DOM
   // events without a catcher mesh.

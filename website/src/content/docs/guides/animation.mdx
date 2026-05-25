@@ -1,11 +1,11 @@
 ---
 title: Animation
-description: Playing glTF and GLB animation clips with polycss mesh handles.
+description: Playing glTF and GLB animation clips with PolyCSS mesh handles.
 ---
 
 import { Tabs, TabItem } from '@astrojs/starlight/components';
 
-polycss can sample usable glTF / GLB animation clips into fresh polygon frames. The parser exposes `ParseResult.animation`; the animation mixer drives a mesh handle by calling `setPolygons()` as clips play.
+PolyCSS can sample usable glTF / GLB animation clips into fresh polygon frames. The parser exposes `ParseResult.animation`; the animation mixer drives a mesh handle by calling `setPolygons()` as clips play.
 
 This is the main exception to the "no per-polygon JavaScript in the render loop" rule. Skinning changes polygon vertices independently, so animation samples in JavaScript while the renderer keeps the mounted DOM topology stable where possible.
 

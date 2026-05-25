@@ -1,15 +1,15 @@
 ---
 title: Core Concepts
-description: "The mental model behind polycss: PolyScene, PolyCamera, PolyMesh, Poly, and the rendering pipeline."
+description: "The mental model behind PolyCSS: PolyScene, PolyCamera, PolyMesh, Poly, and the rendering pipeline."
 ---
 
 import PolyDemo from '../../components/PolyDemo.astro';
 
-This page covers the mental model behind polycss. Each section describes a building block and how it composes with the others.
+This page covers the mental model behind PolyCSS. Each section describes a building block and how it composes with the others.
 
 ## A single block
 
-Where voxcss used to render a single voxel cube, polycss renders any regular polyhedron the same way: each face becomes one DOM element. The dodecahedron below is 12 native pentagons (not 36 triangles): flip the shape selector to see how the same renderer handles every Platonic solid.
+Where voxcss used to render a single voxel cube, PolyCSS renders any regular polyhedron the same way: each face becomes one DOM element. The dodecahedron below is 12 native pentagons (not 36 triangles): flip the shape selector to see how the same renderer handles every Platonic solid.
 
 <PolyDemo
   id="block-demo"
@@ -21,11 +21,11 @@ Where voxcss used to render a single voxel cube, polycss renders any regular pol
 
 ## Three building blocks
 
-polycss exposes three composable concepts. Each one ships as a custom element (vanilla) and as a React / Vue component:
+PolyCSS exposes three composable concepts. Each one ships as a custom element (vanilla) and as a React / Vue component:
 
 - **Scene** (`<poly-scene>` / `PolyScene`): the render tree root. Always nested inside a camera element. Sets up lighting and fills its parent element.
 - **Mesh** (`<poly-mesh>` / `PolyMesh`): loads a mesh from a URL (OBJ / glTF / GLB / VOX). Internally expands to one polygon child per face. Convenience wrapper around the parser + renderer.
-- **Polygon** (`<poly-polygon>` / `Poly`): one polygon. The atomic primitive. Renders as one internal DOM leaf with `transform: matrix3d(...)`. Accepts standard DOM event handlers, classes, and styles: this is what makes polycss "DOM-native 3D" rather than "3D inside a black-box canvas".
+- **Polygon** (`<poly-polygon>` / `Poly`): one polygon. The atomic primitive. Renders as one internal DOM leaf with `transform: matrix3d(...)`. Accepts standard DOM event handlers, classes, and styles: this is what makes PolyCSS "DOM-native 3D" rather than "3D inside a black-box canvas".
 
 A mesh element is internally `polygons.map(p => <poly-polygon …>)`, so any rendered mesh can be inspected, styled, or handled per-polygon.
 
@@ -80,7 +80,7 @@ Because polygons are plain objects, you can generate them from loops, load them 
 
 ### World coordinate convention
 
-Polycss world space: **+X right, +Y forward (into screen), +Z up**. The camera's default `rotX=65, rotY=45` gives a classic isometric angle. Parsers (`parseObj`, `parseGltf`) normalize imported coordinates to this convention.
+PolyCSS world space: **+X right, +Y forward (into screen), +Z up**. The camera's default `rotX=65, rotY=45` gives a classic isometric angle. Parsers (`parseObj`, `parseGltf`) normalize imported coordinates to this convention.
 
 ### `(0,0,0)` origin and `autoCenter`
 
@@ -98,11 +98,11 @@ Scene content renders relative to the (0,0,0) origin. Most mesh files are author
 
 ## Rendering Pipeline
 
-polycss is structured in three layers:
+PolyCSS is structured in three layers:
 
 1. **Core** (`@layoutit/polycss-core`): Pure math and parsing. Handles OBJ / glTF / GLB / VOX parsing, UV decoding, lighting math, and polygon normalization. No DOM dependency.
 2. **DOM renderer**: Takes parsed polygons and produces one leaf DOM element per visible polygon. The renderer prefers CSS primitives for solid quads, triangles, and clipped solids, then falls back to atlas slices for textures or unsupported shapes. Atlas canvas work is one-shot; camera, mesh, and dynamic-light updates use transforms and CSS custom properties.
-3. **Entry points**: The vanilla `polycss` package exposes custom elements (`<poly-camera>`, `<poly-scene>`, `<poly-mesh>`, `<poly-polygon>`, controls, helpers, shapes) plus imperative APIs such as `createPolyCamera`, `createPolyScene`, `createSelect`, and `createTransformControls`. React (`@layoutit/polycss-react`) and Vue (`@layoutit/polycss-vue`) bindings mirror that surface with framework-native reactivity, lifecycle, and prop updates.
+3. **Entry points**: The vanilla `@layoutit/polycss` package exposes custom elements (`<poly-camera>`, `<poly-scene>`, `<poly-mesh>`, `<poly-polygon>`, controls, helpers, shapes) plus imperative APIs such as `createPolyCamera`, `createPolyScene`, `createSelect`, and `createTransformControls`. React (`@layoutit/polycss-react`) and Vue (`@layoutit/polycss-vue`) bindings mirror that surface with framework-native reactivity, lifecycle, and prop updates.
 
 ## Render Strategies
 
@@ -120,7 +120,7 @@ You normally do not target these tags directly; use `Poly`, `PolyMesh`, classes,
 
 ## Automatic Polygon Merge
 
-Before rendering, polycss automatically optimizes loaded meshes. `meshResolution: "lossless"` keeps exact planar candidates only; the default `"lossy"` mode can merge near-coplanar candidates within a bounded displacement budget and then spend a small repair budget on high-risk seams. This keeps DOM element counts low for flat surfaces without changing the intended rendered shape.
+Before rendering, PolyCSS automatically optimizes loaded meshes. `meshResolution: "lossless"` keeps exact planar candidates only; the default `"lossy"` mode can merge near-coplanar candidates within a bounded displacement budget and then spend a small repair budget on high-risk seams. This keeps DOM element counts low for flat surfaces without changing the intended rendered shape.
 
 Per-polygon DOM identity is preserved for polygons that cannot merge; polygons inside a merged flat region become one rendered element.
 

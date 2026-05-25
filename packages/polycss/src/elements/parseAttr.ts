@@ -1,5 +1,5 @@
 /**
- * Shared attribute-parsing helpers for polycss custom elements.
+ * Shared attribute-parsing helpers for PolyCSS custom elements.
  * Used by PolyOrbitControlsElement, PolyMapControlsElement,
  * PolyPerspectiveCameraElement, and PolyOrthographicCameraElement.
  */
