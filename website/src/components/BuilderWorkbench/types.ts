@@ -17,6 +17,14 @@ export interface PlacedItem {
   rotation: Vec3;
   /** User-facing scale multiplier. 1× = normalized-fit size. */
   scale: number;
+  /** Extra vertical offset above the sampled floor, in world units. */
+  elevation: number;
+  /** Solid color override for builder primitives. */
+  color: string;
+  /** Imported models keep source materials until the user edits color. */
+  colorOverride?: boolean;
+  /** Cleanup for local imported model object URLs. */
+  dispose?: () => void;
   /** Per-mesh normalization factor so different presets render at similar size. */
   fitScale: number;
   /** World-space center of the placement (the bbox center after scale).
@@ -38,6 +46,8 @@ export interface PlacementDraft {
 }
 
 export type ToolMode = "pointer" | "raise" | "lower" | "smooth";
+
+export type BuilderToolMode = "move" | "add" | "remove";
 
 /** What a terrain-tool click targets. Independent of `ToolMode` so the
  *  user can raise/lower/smooth either a single grid VERTEX (deforms 4

@@ -4,8 +4,8 @@
  * When `toolMode` is anything other than "pointer", the user is editing
  * the heightmap rather than placing meshes. We capture pointermove (to
  * update the hover ghost) and click (to apply the active tool) on the
- * viewport in CAPTURE phase, mirroring `usePlacementMode` so orbit
- * drag / mesh selection don't double-fire.
+ * viewport in CAPTURE phase so orbit drag / mesh selection don't
+ * double-fire.
  *
  * Heightmap is VERTEX-based: clicks snap to the nearest grid vertex
  * and raise / lower / smooth that vertex. The 4 cells touching the
@@ -41,8 +41,8 @@ export interface UseTerrainOptions {
 
 export interface UseTerrainResult {
   /** All vertices with non-zero elevation. Consumed by useSceneRender
-   *  (to build the warped grid) and usePlacementMode (to land meshes
-   *  on top of the terrain with the local slope tilt). */
+   *  to build the warped grid, and by BuilderWorkbench shape placement
+   *  to land meshes on top of the terrain with the local slope tilt. */
   vertices: TerrainVertices;
   /** Polygons for the hover vertex marker (empty when not editing). */
   hoverPolygons: Polygon[];

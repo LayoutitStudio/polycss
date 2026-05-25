@@ -144,6 +144,7 @@ const DEFAULT_SCENE: SceneOptionsState = {
   fpvRenderDistance: 40,
   snapToGrid: true,
   gridResolution: 5,
+  gridTone: "gray",
 };
 
 const DEFAULT_PARSER: ParserOptionsState = {

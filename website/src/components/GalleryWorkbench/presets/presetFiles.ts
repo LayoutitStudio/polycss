@@ -349,7 +349,6 @@ export const GLB_PRESET_FILES: GalleryPresetFile[] = [
   { file: "urban/Motorcycle.glb", category: "Urban Pack" },
   { file: "urban/Stop sign.glb", label: "Stop Sign", category: "Urban Pack" },
   { file: "urban/Billboard.glb", category: "Urban Pack", galleryBucket: "Textured" },
-  { file: "urban/Rock band poster.glb", label: "Poster", category: "Urban Pack" },
 
   { file: "urban/Dumpster.glb", category: "Urban Pack" },
   { file: "urban/Mailbox.glb", category: "Urban Pack" },

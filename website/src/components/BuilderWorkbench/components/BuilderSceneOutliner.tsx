@@ -1,28 +1,23 @@
 import { stripParenthesizedText } from "../../GalleryWorkbench/presets";
-import type { GizmoMode } from "../../types";
 import type { PlacedItem } from "../types";
 
 export interface BuilderSceneOutlinerProps {
   placedItems: PlacedItem[];
   selectedId: string | null;
-  gizmoMode: GizmoMode;
   onSelectItem: (id: string) => void;
   onDeleteItem: (id: string) => void;
-  onGizmoModeChange: (mode: GizmoMode) => void;
 }
 
 export function BuilderSceneOutliner({
   placedItems,
   selectedId,
-  gizmoMode,
   onSelectItem,
   onDeleteItem,
-  onGizmoModeChange,
 }: BuilderSceneOutlinerProps) {
   return (
     <div className="builder-scene-folder">
       {placedItems.length === 0 ? (
-        <p className="builder-scene-folder__empty">Click a model on the left to add it.</p>
+        <p className="builder-scene-folder__empty">No shapes placed.</p>
       ) : (
         <ul className="builder-scene-folder__list">
           {placedItems.map((it) => (
@@ -50,20 +45,6 @@ export function BuilderSceneOutliner({
           ))}
         </ul>
       )}
-      <div className="builder-scene-folder__gizmo">
-        <button
-          type="button"
-          className={`builder-scene-folder__gizmo-btn${gizmoMode === "translate" ? " is-active" : ""}`}
-          onClick={() => onGizmoModeChange("translate")}
-          disabled={!selectedId}
-        >Translate</button>
-        <button
-          type="button"
-          className={`builder-scene-folder__gizmo-btn${gizmoMode === "rotate" ? " is-active" : ""}`}
-          onClick={() => onGizmoModeChange("rotate")}
-          disabled={!selectedId}
-        >Rotate</button>
-      </div>
     </div>
   );
 }

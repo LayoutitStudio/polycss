@@ -88,6 +88,8 @@ export function useSceneLoader({
           position: [0, 0, 0],
           rotation: item.rotation ?? [0, 0, 0],
           scale: item.scale ?? 1,
+          elevation: item.position[2] ?? 0,
+          color: "#8b95a1",
           fitScale: 1,
           worldX: item.position[0],
           worldY: item.position[1],
@@ -122,8 +124,13 @@ export function useSceneLoader({
         });
         const bbox = meshBbox(optimized);
         const fitScale = bbox.span > 0 ? NORMALIZED_MAX_DIM / bbox.span : 1;
-        const placement = placeMeshOnFloor(item.worldX, item.worldY, bbox, fitScale);
-        updateItem(item.id, { rawPolygons: loaded.rawPolygons, fitScale, position: placement });
+        const placement = placeMeshOnFloor(item.worldX, item.worldY, bbox, fitScale, item.elevation);
+        updateItem(item.id, {
+          rawPolygons: loaded.rawPolygons,
+          color: item.color ?? loaded.rawPolygons.find((polygon) => polygon.color)?.color ?? "#8b95a1",
+          fitScale,
+          position: placement,
+        });
       } catch (e) {
         console.error("[builder] lazy load failed", item.preset.id, e);
       } finally {

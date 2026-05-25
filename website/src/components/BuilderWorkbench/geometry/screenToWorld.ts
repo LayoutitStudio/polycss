@@ -1,6 +1,6 @@
 /**
- * Project a screen-space pointer position to a world-space point on the
- * Z=0 ground plane.
+ * Project a screen-space pointer position to a world-space point on a
+ * horizontal world-Z plane.
  *
  * The polycss CSS transform stack (on the `.polycss-scene` element) is:
  *
@@ -26,9 +26,9 @@
  *   3. Apply M^-1 to bring both points into scene-local space.
  *      M^-1 = translate(+cssTarget) * rotate(-rotY) * rotateX(-rotX) * scale(1/zoom)
  *      Apply to eye and a far point (t=2) on the ray.
- *   4. In scene-local space, CSS-Z = 0 IS world Z = 0 (because the
+ *   4. In scene-local space, CSS-Z = planeWorldZ * BASE_TILE (because the
  *      polycss axis swap maps worldZ to cssZ). Parameterise the scene-local
- *      ray and solve for the t that gives cssZ = 0.
+ *      ray and solve for the t that gives that cssZ.
  *   5. Read cssX, cssY at that t. Convert back:
  *        worldX = cssY / BASE_TILE
  *        worldY = cssX / BASE_TILE
@@ -108,10 +108,12 @@ export interface ProjectScreenToWorldGroundArgs {
   sceneOptions: Pick<SceneOptionsState, "zoom" | "rotX" | "rotY" | "target">;
   /** autoCenterOffset from the scene store — [worldX, worldY, worldZ]. */
   autoCenterOffset: [number, number, number];
+  /** World-space horizontal plane to project onto. Defaults to ground Z=0. */
+  planeWorldZ?: number;
 }
 
 /**
- * Returns [worldX, worldY] on the Z=0 ground plane for a pointer event, or
+ * Returns [worldX, worldY] on the requested horizontal plane for a pointer event, or
  * `null` if the ray is parallel to the ground (degenerate camera angle).
  */
 export function projectScreenToWorldGround({
@@ -120,6 +122,7 @@ export function projectScreenToWorldGround({
   cameraEl,
   sceneOptions,
   autoCenterOffset,
+  planeWorldZ = 0,
 }: ProjectScreenToWorldGroundArgs): [number, number] | null {
   const rect = cameraEl.getBoundingClientRect();
   if (rect.width === 0 || rect.height === 0) return null;
@@ -162,15 +165,16 @@ export function projectScreenToWorldGround({
     rayFarScene = applyInverseTransform(far, zoom, rotX, rotY, cssX, cssY, cssZ);
   }
 
-  // In scene-local space, CSS-Z = 0 IS world Z = 0.
+  // In scene-local space, CSS-Z maps directly to world Z.
   // Ray: R(t) = rayOriginScene + t * (rayFarScene - rayOriginScene)
-  // Solve for t such that R(t)[2] = 0.
+  // Solve for t such that R(t)[2] = planeWorldZ * BASE_TILE.
   const dz = rayFarScene[2] - rayOriginScene[2];
   if (Math.abs(dz) < 1e-10) {
     // Ray is parallel to the ground plane — can't intersect.
     return null;
   }
-  const t = -rayOriginScene[2] / dz;
+  const planeCssZ = planeWorldZ * BASE_TILE;
+  const t = (planeCssZ - rayOriginScene[2]) / dz;
 
   const hitCssX = rayOriginScene[0] + t * (rayFarScene[0] - rayOriginScene[0]);
   const hitCssY = rayOriginScene[1] + t * (rayFarScene[1] - rayOriginScene[1]);

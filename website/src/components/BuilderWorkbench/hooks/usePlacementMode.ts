@@ -9,6 +9,7 @@ import { placeMeshOnFloor } from "../geometry/placement";
 import { buildGhostWireframePolygons, ghostRectFromBbox, GHOST_COLOR, rotatePolygonsAroundPivot } from "../geometry/ghost";
 import type { Bbox } from "../geometry/ghost";
 import { projectScreenToWorldGround } from "../geometry/screenToWorld";
+import { snapWorldToCellCenter } from "../geometry/snap";
 import { sampleTerrain, rotationForSlope, type TerrainVertices } from "../geometry/terrain";
 import type { PlacedItem, PlacementDraft, TargetMode } from "../types";
 import { activeMeshResolution, type SceneOptionsState } from "../../types";
@@ -113,6 +114,8 @@ export function usePlacementMode({
       position,
       rotation,
       scale: 1,
+      elevation: 0,
+      color: rawPolygons.find((polygon) => polygon.color)?.color ?? "#8b95a1",
       fitScale,
       worldX: wx,
       worldY: wy,
@@ -194,7 +197,7 @@ export function usePlacementMode({
       // Face target → snap to cell CENTRE (floor + ½ step). Vertex
       // target → snap to nearest grid intersection (round).
       if (targetMode === "face") {
-        return [Math.floor(hit[0] / step) * step + step / 2, Math.floor(hit[1] / step) * step + step / 2];
+        return snapWorldToCellCenter(hit[0], hit[1], step);
       }
       return [Math.round(hit[0] / step) * step, Math.round(hit[1] / step) * step];
     };

@@ -1,8 +1,13 @@
 import type { GalleryPresetFile, ObjGalleryPresetFile, PresetModel } from "../types";
 import { GLB_PRESET_ATTRIBUTIONS } from "./attributions";
 
+function encodeGallerySegment(segment: string): string {
+  // Astro/Vite serve public assets with a literal "&" in the path; "%26" misses the file.
+  return encodeURIComponent(segment).replace(/%26/g, "&");
+}
+
 export function galleryFileUrl(folder: "glb" | "obj" | "vox", file: string): string {
-  return `/gallery/${folder}/${file.split("/").map(encodeURIComponent).join("/")}`;
+  return `/gallery/${folder}/${file.split("/").map(encodeGallerySegment).join("/")}`;
 }
 
 export function presetIdFromFile(prefix: string, file: string): string {
