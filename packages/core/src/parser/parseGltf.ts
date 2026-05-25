@@ -614,6 +614,10 @@ const IDENTITY4: Mat4 = [1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1];
 
 function mulMat4(a: Mat4, b: Mat4): Mat4 {
   const out = new Array(16) as Mat4;
+  return mulMat4Into(out, a, b);
+}
+
+function mulMat4Into(out: Mat4, a: Mat4, b: Mat4): Mat4 {
   for (let row = 0; row < 4; row++) {
     for (let col = 0; col < 4; col++) {
       out[col * 4 + row] =
@@ -655,14 +659,6 @@ function trsToMat4(t?: number[], r?: number[], s?: number[]): Mat4 {
 function nodeLocalMatrix(n: GltfNode): Mat4 {
   if (n.matrix && n.matrix.length === 16) return n.matrix.slice() as Mat4;
   return trsToMat4(n.translation, n.rotation, n.scale);
-}
-
-function addVec3(a: Vec3, b: Vec3): Vec3 {
-  return [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
-}
-
-function scaleVec3(v: Vec3, s: number): Vec3 {
-  return [v[0] * s, v[1] * s, v[2] * s];
 }
 
 function lerpArray(a: number[], b: number[], t: number): number[] {
@@ -1041,6 +1037,12 @@ function buildAnimationController(
       textureFlags: triangleFrameTextureFlags,
       solidTriangles: true,
     };
+    const sourceWorldPositionCaches = sources.map(
+      (source) => new Array<Vec3 | undefined>(source.positions.length),
+    );
+    const skinJointMatrixCaches: Array<Array<Mat4 | undefined>> = skins.map((skin) =>
+      skin.joints.map(() => new Array(16) as Mat4)
+    );
 
     const sampleWorldMatrices = (clipRef: number | string, timeSecondsIn: number): Mat4[] | null => {
       const clip = typeof clipRef === "number"
@@ -1076,12 +1078,23 @@ function buildAnimationController(
     };
 
     const computeSourceWorldPositions = (
+      sourceIndex: number,
       source: AnimatedPrimitiveSource,
       sourceMask: RuntimeSourceTriangleMask | undefined,
       worldMatrices: Mat4[],
     ): Array<Vec3 | undefined> => {
       const activeVertices = sourceMask?.activeVertices;
-      const worldPositions: Array<Vec3 | undefined> = new Array(source.positions.length);
+      const worldPositions = sourceWorldPositionCaches[sourceIndex]!;
+      const writeWorldPosition = (i: number, x: number, y: number, z: number): void => {
+        const out = worldPositions[i];
+        if (out) {
+          out[0] = x;
+          out[1] = y;
+          out[2] = z;
+        } else {
+          worldPositions[i] = [x, y, z];
+        }
+      };
       if (
         source.skinIndex !== undefined &&
         source.joints &&
@@ -1091,9 +1104,21 @@ function buildAnimationController(
         const skin = skins[source.skinIndex];
         const sourceJoints = source.joints;
         const sourceWeights = source.weights;
+        const jointMatrices = skinJointMatrixCaches[source.skinIndex] ?? [];
+        for (let jointSlot = 0; jointSlot < skin.joints.length; jointSlot++) {
+          const jointNode = skin.joints[jointSlot]!;
+          const jointWorld = worldMatrices[jointNode];
+          const inverseBind = skin.inverseBindMatrices[jointSlot];
+          const out = jointMatrices[jointSlot] ?? (jointMatrices[jointSlot] = new Array(16) as Mat4);
+          jointMatrices[jointSlot] = jointWorld && inverseBind
+            ? mulMat4Into(out, jointWorld, inverseBind)
+            : undefined;
+        }
         const skinVertex = (i: number): void => {
           const bindPosition = source.positions[i];
-          let blended: Vec3 = [0, 0, 0];
+          let blendedX = 0;
+          let blendedY = 0;
+          let blendedZ = 0;
           let weightSum = 0;
           const joints = sourceJoints[i] ?? [];
           const weights = sourceWeights[i] ?? [];
@@ -1101,17 +1126,48 @@ function buildAnimationController(
             const weight = weights[j] ?? 0;
             if (weight <= 0) continue;
             const jointSlot = Math.round(joints[j] ?? 0);
-            const jointNode = skin.joints[jointSlot];
-            const jointWorld = worldMatrices[jointNode];
-            const inverseBind = skin.inverseBindMatrices[jointSlot];
-            if (!jointWorld || !inverseBind) continue;
-            const jointMatrix = mulMat4(jointWorld, inverseBind);
-            blended = addVec3(blended, scaleVec3(transformPoint(jointMatrix, bindPosition), weight));
+            const jointMatrix = jointMatrices[jointSlot];
+            if (!jointMatrix) continue;
+            const x =
+              jointMatrix[0] * bindPosition[0] +
+              jointMatrix[4] * bindPosition[1] +
+              jointMatrix[8] * bindPosition[2] +
+              jointMatrix[12];
+            const y =
+              jointMatrix[1] * bindPosition[0] +
+              jointMatrix[5] * bindPosition[1] +
+              jointMatrix[9] * bindPosition[2] +
+              jointMatrix[13];
+            const z =
+              jointMatrix[2] * bindPosition[0] +
+              jointMatrix[6] * bindPosition[1] +
+              jointMatrix[10] * bindPosition[2] +
+              jointMatrix[14];
+            blendedX += x * weight;
+            blendedY += y * weight;
+            blendedZ += z * weight;
             weightSum += weight;
           }
-          worldPositions[i] = weightSum > 0
-            ? scaleVec3(blended, 1 / weightSum)
-            : transformPoint(source.meshBindWorld, bindPosition);
+          if (weightSum > 0) {
+            const invWeight = 1 / weightSum;
+            writeWorldPosition(i, blendedX * invWeight, blendedY * invWeight, blendedZ * invWeight);
+          } else {
+            writeWorldPosition(
+              i,
+              source.meshBindWorld[0] * bindPosition[0] +
+                source.meshBindWorld[4] * bindPosition[1] +
+                source.meshBindWorld[8] * bindPosition[2] +
+                source.meshBindWorld[12],
+              source.meshBindWorld[1] * bindPosition[0] +
+                source.meshBindWorld[5] * bindPosition[1] +
+                source.meshBindWorld[9] * bindPosition[2] +
+                source.meshBindWorld[13],
+              source.meshBindWorld[2] * bindPosition[0] +
+                source.meshBindWorld[6] * bindPosition[1] +
+                source.meshBindWorld[10] * bindPosition[2] +
+                source.meshBindWorld[14],
+            );
+          }
         };
         if (activeVertices) {
           for (const vertexIndex of activeVertices) skinVertex(vertexIndex);
@@ -1123,7 +1179,22 @@ function buildAnimationController(
           ? (worldMatrices[source.meshNode] ?? source.meshBindWorld)
           : source.meshBindWorld;
         const transformVertex = (i: number): void => {
-          worldPositions[i] = transformPoint(meshWorld, source.positions[i]);
+          const sourcePosition = source.positions[i];
+          writeWorldPosition(
+            i,
+            meshWorld[0] * sourcePosition[0] +
+              meshWorld[4] * sourcePosition[1] +
+              meshWorld[8] * sourcePosition[2] +
+              meshWorld[12],
+            meshWorld[1] * sourcePosition[0] +
+              meshWorld[5] * sourcePosition[1] +
+              meshWorld[9] * sourcePosition[2] +
+              meshWorld[13],
+            meshWorld[2] * sourcePosition[0] +
+              meshWorld[6] * sourcePosition[1] +
+              meshWorld[10] * sourcePosition[2] +
+              meshWorld[14],
+          );
         };
         if (activeVertices) {
           for (const vertexIndex of activeVertices) transformVertex(vertexIndex);
@@ -1143,7 +1214,7 @@ function buildAnimationController(
         const source = sources[sourceIndex]!;
         const sourceMask = sourceMaskOverrides?.[sourceIndex];
         const triangleMask = sourceMask?.triangleMask ?? source.triangleMask;
-        const worldPositions = computeSourceWorldPositions(source, sourceMask, worldMatrices);
+        const worldPositions = computeSourceWorldPositions(sourceIndex, source, sourceMask, worldMatrices);
 
         let triangleOrdinal = 0;
         for (let i = 0; i + 2 < source.indices.length; i += 3, triangleOrdinal++) {
@@ -1203,7 +1274,7 @@ function buildAnimationController(
         const source = sources[sourceIndex]!;
         const sourceMask = sourceMaskOverrides?.[sourceIndex];
         const triangleMask = sourceMask?.triangleMask ?? source.triangleMask;
-        const worldPositions = computeSourceWorldPositions(source, sourceMask, worldMatrices);
+        const worldPositions = computeSourceWorldPositions(sourceIndex, source, sourceMask, worldMatrices);
 
         let triangleOrdinal = 0;
         for (let i = 0; i + 2 < source.indices.length; i += 3, triangleOrdinal++) {
