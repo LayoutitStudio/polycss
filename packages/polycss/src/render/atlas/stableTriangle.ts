@@ -32,7 +32,7 @@ import {
   computeSolidTrianglePlanFromCssPoints,
 } from "./solidTrianglePlan";
 import { stableTriangleMatrixDecimals } from "@layoutit/polycss-core";
-import { applyPolygonDataAttrs, hasPolygonDataAttrs, clearAtlasImageStyles } from "./emit";
+import { applyPolygonDataAttrs, hasPolygonDataAttrs } from "./emit";
 import { resolveSolidTrianglePrimitive } from "./strategy";
 
 const DEFAULT_SOLID_SEAM_BLEED = 1.5;
@@ -290,9 +290,7 @@ export function createSolidTriangleElement(
   doc: Document,
 ): HTMLElement {
   const el = doc.createElement("u");
-  clearAtlasImageStyles(el);
   applySolidTriangleElement(el, entry);
-  applyPolygonDataAttrs(el, entry.polygon);
   return el;
 }
 
@@ -301,9 +299,8 @@ export function createHiddenSolidTriangleElement(
   doc: Document,
 ): HTMLElement {
   const el = doc.createElement("u");
-  clearAtlasImageStyles(el);
   hideSolidTriangleElement(el);
-  applyPolygonDataAttrs(el, polygon);
+  if (polygon.data) applyPolygonDataAttrs(el, polygon);
   return el;
 }
 

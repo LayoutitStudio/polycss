@@ -239,6 +239,19 @@ const CORE_BASE_STYLES = `
            var(--pnz) * var(--plz))))
   );
   background-blend-mode: multiply;
+  background-image: var(--polycss-atlas-url);
+  background-position: var(--polycss-atlas-position);
+  background-repeat: no-repeat;
+  background-size: var(--polycss-atlas-image-size);
+  mask-image: var(--polycss-atlas-url);
+  mask-mode: alpha;
+  mask-position: var(--polycss-atlas-position);
+  mask-repeat: no-repeat;
+  mask-size: var(--polycss-atlas-image-size);
+  -webkit-mask-image: var(--polycss-atlas-url);
+  -webkit-mask-position: var(--polycss-atlas-position);
+  -webkit-mask-repeat: no-repeat;
+  -webkit-mask-size: var(--polycss-atlas-image-size);
 }
 
 .polycss-scene[data-polycss-lighting="dynamic"] b,
