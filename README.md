@@ -1,6 +1,6 @@
 # PolyCSS
 
-A CSS polygon mesh library. A 3D engine for the DOM. Renders OBJ, glTF, GLB and VOX as real HTML elements transformed with CSS `matrix3d(...)`. Supports colors, textures, lighting, shadows, shapes and animations. Works with React, Vue or plain JavaScript.
+A CSS polygon mesh library. A 3D engine for the DOM. Renders OBJ/MTL, GLB and VOX as real HTML elements transformed with CSS `matrix3d(...)`. Supports colors, textures, lighting, shadows, shapes and animations. Works with React, Vue or plain JavaScript.
 
 Visit [polycss.com](https://polycss.com) for docs and model examples.
 
