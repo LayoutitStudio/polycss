@@ -76,6 +76,10 @@ const INDEX_HTML = `<!doctype html>
   <li><a href='/perf-vanilla.html?mesh=saucer&mode=dynamic&motion=light'>/perf-vanilla.html</a> &nbsp;<small>imperative createPolyScene</small></li>
   <li><a href='/perf-react.html?mesh=saucer&mode=dynamic&motion=light'>/perf-react.html</a> &nbsp;<small>React @layoutit/polycss-react</small></li>
   <li><a href='/perf-vue.html?mesh=saucer&mode=dynamic&motion=light'>/perf-vue.html</a> &nbsp;<small>Vue @layoutit/polycss-vue</small></li>
+  <li><a href='/html-mount.html?autorun=1&count=10000&repeats=5'>/html-mount.html</a> &nbsp;<small>experimental HTML chunk mount</small></li>
+  <li><a href='/async-scene-mount.html?autorun=1&count=10000&repeats=5'>/async-scene-mount.html</a> &nbsp;<small>internal async scene mount</small></li>
+  <li><a href='/sync-scene-add.html?autorun=1&count=10000&repeats=5'>/sync-scene-add.html</a> &nbsp;<small>synchronous scene.add render</small></li>
+  <li><a href='/atlas-background.html'>/atlas-background.html</a> &nbsp;<small>atlas background reveal style application</small></li>
 </ul>
 </body></html>`;
 

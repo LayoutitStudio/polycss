@@ -193,6 +193,10 @@ export function parseUrlParams() {
   const params = new URLSearchParams(window.location.search);
   const meshId = params.get("mesh") || "saucer";
   const genericPreset = genericGalleryPreset(params, meshId);
+  const disabledStrategies = (params.get("disableStrategies") || "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter((value) => value === "b" || value === "i" || value === "u");
   return {
     meshId,
     mode: params.get("mode") === "baked" ? "baked" : "dynamic",
@@ -200,6 +204,7 @@ export function parseUrlParams() {
     az: parseFloat(params.get("az")) || 50,
     el: parseFloat(params.get("el")) || 45,
     isSynth: meshId.startsWith("synth-"),
+    strategies: disabledStrategies.length > 0 ? { disable: disabledStrategies } : undefined,
     preset: genericPreset ?? (meshId.startsWith("synth-")
       ? { url: null, options: {}, zoom: 0.2, rotX: 65, rotY: 45 }
       : (PRESETS[meshId] ?? PRESETS.saucer)),

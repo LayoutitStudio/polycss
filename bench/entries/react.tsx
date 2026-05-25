@@ -25,7 +25,7 @@ import { getSynthMesh } from "../synth-mesh.mjs";
 interface ParseResult { polygons: Polygon[]; dispose?: () => void }
 
 function PerfApp({
-  meshId, mode, motion, az, el, preset, parseResult,
+  meshId, mode, motion, az, el, preset, parseResult, strategies,
 }: {
   meshId: string;
   mode: "dynamic" | "baked";
@@ -34,6 +34,7 @@ function PerfApp({
   el: number;
   preset: { rotX: number; rotY: number; zoom: number; url: string | null; mtlUrl?: string };
   parseResult: ParseResult | null;
+  strategies?: { disable: Array<"b" | "i" | "u"> };
 }) {
   // Per-frame reactive state — React's render pipeline runs each tick.
   const [rotY, setRotY] = useState(preset.rotY);
@@ -80,6 +81,7 @@ function PerfApp({
         directionalLight={directionalLight}
         ambientLight={ambientLight}
         textureLighting={mode}
+        strategies={strategies}
         autoCenter
       >
         <PolyOrbitControls drag wheel animate={false} />
@@ -108,6 +110,7 @@ async function main(): Promise<void> {
     az: number;
     el: number;
     isSynth: boolean;
+    strategies?: { disable: Array<"b" | "i" | "u"> };
     preset: any;
   };
 
@@ -135,6 +138,7 @@ async function main(): Promise<void> {
       el={params.el}
       preset={params.preset}
       parseResult={parseResult}
+      strategies={params.strategies}
     />,
   );
 }

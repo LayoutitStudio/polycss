@@ -1,0 +1,56 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>polycss async scene mount bench</title>
+    <style>
+      body {
+        margin: 0;
+        background: #111;
+        color: #e5e7eb;
+        font: 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      }
+      #bench-target {
+        position: fixed;
+        inset: 0;
+        overflow: hidden;
+        transform-style: preserve-3d;
+        contain: layout paint style;
+      }
+      #status {
+        position: fixed;
+        z-index: 10;
+        top: 12px;
+        left: 12px;
+        max-width: 720px;
+        white-space: pre-wrap;
+        background: rgba(17, 24, 39, 0.9);
+        border: 1px solid rgba(148, 163, 184, 0.3);
+        padding: 10px 12px;
+      }
+    </style>
+  </head>
+  <body>
+    <pre id="status">ready</pre>
+    <div id="bench-target"></div>
+    <script type="module">
+      import { runPolycssAsyncSceneMountBench } from "./.generated/polycss-async-scene-mount.js";
+
+      const params = new URLSearchParams(location.search);
+      if (params.get("autorun") === "1") {
+        const status = document.getElementById("status");
+        const result = await runPolycssAsyncSceneMountBench({
+          count: Number(params.get("count") || 10000),
+          repeats: Number(params.get("repeats") || 5),
+          chunkSize: Number(params.get("chunkSize") || params.get("chunk-size") || 750),
+          mode: params.get("mode") === "dynamic" ? "dynamic" : "baked",
+          strategies: (params.get("strategies") || "")
+            .split(",")
+            .map((value) => value.trim())
+            .filter(Boolean),
+        });
+        status.textContent = JSON.stringify(result, null, 2);
+      }
+    </script>
+  </body>
+</html>
