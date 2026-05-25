@@ -21,7 +21,7 @@
     document.getElementById("overlay-css").textContent = PERF_OVERLAY_CSS;
     document.body.insertAdjacentHTML("beforeend", PERF_OVERLAY_HTML);
 
-    const { meshId, mode, motion, az, el, isSynth, preset } = parseUrlParams();
+    const { meshId, mode, motion, az, el, isSynth, preset, strategies } = parseUrlParams();
     let azimuth = az;
 
     const host = document.getElementById("host");
@@ -31,6 +31,7 @@
       directionalLight: { direction: dirFromAzEl(azimuth, el), color: "#ffffff", intensity: 1 },
       ambientLight: { color: "#ffffff", intensity: 0.4 },
       textureLighting: mode,
+      strategies,
       autoCenter: true,
     });
     // Drag + wheel for human inspection via perf-serve. Headless bench

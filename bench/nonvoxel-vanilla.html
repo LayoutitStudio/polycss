@@ -111,6 +111,14 @@
       frameWorkSamples: () => frameWork.samples(),
       resetInteractionStats,
       cullStats: () => displayCullStats,
+      setMeshPosition(_position) {},
+      setMeshRotation(_rotation) {},
+      setMeshPolygonsSame() {},
+      updateMeshColor(_index, _color) {},
+      updateMeshData(_index, _data) {},
+      updateMeshDataBatch(_start, _count, _frame) {},
+      updateMeshColorData(_index, _color, _data) {},
+      updateMeshColorDataBatch(_start, _count, _frame) {},
       setRotY(rotY) {
         scene.camera.update({ rotY });
         scene.applyCamera();
@@ -786,7 +794,57 @@
       if (!rawParseResult) throw new Error(`Unknown synth mesh: ${meshId}`);
       const indexedParseResult = applyPolygonBenchIndexes(rawParseResult);
       const parseResult = applyPolygonOrder(indexedParseResult);
-      scene.add(parseResult);
+      const meshTransform = motion === "mesh-set-polygons-same"
+        ? { merge: false, stableDom: true }
+        : undefined;
+      const meshHandle = scene.add(parseResult, meshTransform);
+      window.__nonvoxelBench.setMeshPosition = (position) => {
+        meshHandle.setTransform({ position });
+      };
+      window.__nonvoxelBench.setMeshRotation = (rotation) => {
+        meshHandle.setTransform({ rotation });
+      };
+      window.__nonvoxelBench.setMeshPolygonsSame = () => {
+        meshHandle.setPolygons(parseResult.polygons, {
+          merge: false,
+          stableDom: true,
+          recomputeAutoCenter: false,
+        });
+      };
+      window.__nonvoxelBench.updateMeshColor = (index, color) => {
+        meshHandle.updatePolygon(index, { color });
+      };
+      window.__nonvoxelBench.updateMeshData = (index, data) => {
+        meshHandle.updatePolygon(index, { data });
+      };
+      window.__nonvoxelBench.updateMeshDataBatch = (start, count, frame) => {
+        for (let offset = 0; offset < count; offset += 1) {
+          const idx = (start + offset) % parseResult.polygons.length;
+          meshHandle.updatePolygon(idx, {
+            data: {
+              "bench-index": idx,
+              "bench-frame": frame,
+            },
+          });
+        }
+      };
+      window.__nonvoxelBench.updateMeshColorData = (index, color, data) => {
+        meshHandle.updatePolygon(index, { color, data });
+      };
+      window.__nonvoxelBench.updateMeshColorDataBatch = (start, count, frame) => {
+        for (let offset = 0; offset < count; offset += 1) {
+          const idx = (start + offset) % parseResult.polygons.length;
+          const seed = (frame * 2654435761 + idx * 2246822519) >>> 0;
+          const color = `#${(seed & 0xffffff).toString(16).padStart(6, "0")}`;
+          meshHandle.updatePolygon(idx, {
+            color,
+            data: {
+              "bench-index": idx,
+              "bench-frame": frame,
+            },
+          });
+        }
+      };
       applyDomOrder(indexedParseResult);
       applyIslandBuckets(indexedParseResult);
       applyNormalCullBuckets(indexedParseResult);
@@ -814,6 +872,35 @@
           scene.setOptions({
             directionalLight: { direction: dirFromAzEl(azimuth, el), color: "#ffffff", intensity: 1 },
           });
+        } else if (motion === "mesh-position") {
+          const x = Math.sin(frameCount * 0.05) * 120;
+          const y = Math.cos(frameCount * 0.04) * 80;
+          window.__nonvoxelBench.setMeshPosition([x, y, 0]);
+        } else if (motion === "mesh-rotation") {
+          window.__nonvoxelBench.setMeshRotation([0, (frameCount * 0.5) % 360, 0]);
+        } else if (motion === "mesh-set-polygons-same") {
+          window.__nonvoxelBench.setMeshPolygonsSame();
+        } else if (motion === "mesh-update-color" && window.__perf__.ready) {
+          const idx = frameCount % parseResult.polygons.length;
+          const color = `#${((frameCount * 2654435761) & 0xffffff).toString(16).padStart(6, "0")}`;
+          window.__nonvoxelBench.updateMeshColor(idx, color);
+        } else if (motion === "mesh-update-data" && window.__perf__.ready) {
+          const idx = frameCount % parseResult.polygons.length;
+          window.__nonvoxelBench.updateMeshData(idx, {
+            "bench-index": idx,
+            "bench-frame": frameCount,
+          });
+        } else if (motion === "mesh-update-data-batch" && window.__perf__.ready) {
+          window.__nonvoxelBench.updateMeshDataBatch(frameCount * 257, 256, frameCount);
+        } else if (motion === "mesh-update-color-data" && window.__perf__.ready) {
+          const idx = frameCount % parseResult.polygons.length;
+          const color = `#${((frameCount * 2654435761) & 0xffffff).toString(16).padStart(6, "0")}`;
+          window.__nonvoxelBench.updateMeshColorData(idx, color, {
+            "bench-index": idx,
+            "bench-frame": frameCount,
+          });
+        } else if (motion === "mesh-update-color-data-batch" && window.__perf__.ready) {
+          window.__nonvoxelBench.updateMeshColorDataBatch(frameCount * 257, 256, frameCount);
         } else if (motion === "rot") {
           const newRotY = ((preset.rotY + frameCount * 0.5) + 360) % 360;
           if (!cssDrivenRotation) {

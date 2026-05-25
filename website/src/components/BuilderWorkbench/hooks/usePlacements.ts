@@ -1,8 +1,8 @@
-import { useCallback, useRef, useState, type RefObject } from "react";
+import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import { optimizeMeshPolygons } from "@layoutit/polycss-react";
 import type { PolyMeshHandle, Vec3 } from "@layoutit/polycss-react";
-import type { PresetModel } from "../../GalleryWorkbench/types";
-import { loadPresetModel } from "../../GalleryWorkbench/helpers/loaders";
+import type { DroppedModelSource, PresetModel } from "../../GalleryWorkbench/types";
+import { loadDroppedModel, loadPresetModel } from "../../GalleryWorkbench/helpers/loaders";
 import { PARSER_DEFAULTS, NORMALIZED_MAX_DIM } from "../defaults";
 import { meshBbox } from "../geometry/meshBbox";
 import { placeMeshOnFloor } from "../geometry/placement";
@@ -11,6 +11,7 @@ import { activeMeshResolution, type WorkbenchMeshResolution } from "../../types"
 
 export interface UsePlacementsOptions {
   meshResolution: WorkbenchMeshResolution;
+  gridResolution: number;
 }
 
 export interface UsePlacementsResult {
@@ -22,9 +23,16 @@ export interface UsePlacementsResult {
     preset: PresetModel,
     worldX: number,
     worldY: number,
-    opts?: { rotation?: Vec3; scale?: number },
+    opts?: { rotation?: Vec3; scale?: number; elevation?: number; color?: string },
+  ) => Promise<PlacedItem | null>;
+  buildDroppedPlacement: (
+    source: DroppedModelSource,
+    worldX: number,
+    worldY: number,
+    opts?: { rotation?: Vec3; scale?: number; elevation?: number; color?: string },
   ) => Promise<PlacedItem | null>;
   appendItems: (items: PlacedItem[]) => void;
+  replaceItems: (items: PlacedItem[]) => void;
   updateItem: (id: string, partial: Partial<PlacedItem>) => void;
   mapItems: (updater: (item: PlacedItem) => PlacedItem) => void;
   handleDeleteItem: (id: string) => void;
@@ -36,12 +44,17 @@ export interface UsePlacementsResult {
   meshHandlesTick: number;
 }
 
-export function usePlacements({ meshResolution }: UsePlacementsOptions): UsePlacementsResult {
+export function usePlacements({ meshResolution, gridResolution }: UsePlacementsOptions): UsePlacementsResult {
   const effectiveMeshResolution = activeMeshResolution(meshResolution);
   const [placedItems, setPlacedItems] = useState<PlacedItem[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [meshHandlesTick, setMeshHandlesTick] = useState(0);
   const placementCounter = useRef(0);
+  const placedItemsRef = useRef<PlacedItem[]>([]);
+
+  const disposeItem = (item: PlacedItem): void => {
+    item.dispose?.();
+  };
 
   // Per-item handles indexed by id. Populated by each PolyMesh's callback
   // ref on mount and updated/removed on unmount. Storing in a Map (instead of
@@ -91,13 +104,14 @@ export function usePlacements({ meshResolution }: UsePlacementsOptions): UsePlac
       preset: PresetModel,
       worldX: number,
       worldY: number,
-      opts: { rotation?: Vec3; scale?: number } = {},
+      opts: { rotation?: Vec3; scale?: number; elevation?: number; color?: string } = {},
     ): Promise<PlacedItem | null> => {
       try {
         const loaded = await loadPresetModel(preset, PARSER_DEFAULTS, effectiveMeshResolution);
         const optimized = optimizeMeshPolygons(loaded.rawPolygons, { meshResolution: effectiveMeshResolution });
         const bbox = meshBbox(optimized);
-        const fitScale = bbox.span > 0 ? NORMALIZED_MAX_DIM / bbox.span : 1;
+        const targetSize = gridResolution > 0 ? gridResolution : NORMALIZED_MAX_DIM;
+        const fitScale = bbox.span > 0 ? targetSize / bbox.span : 1;
         const placement = placeMeshOnFloor(worldX, worldY, bbox, fitScale);
         const n = placementCounter.current++;
         return {
@@ -107,20 +121,75 @@ export function usePlacements({ meshResolution }: UsePlacementsOptions): UsePlac
           position: placement,
           rotation: opts.rotation ?? [0, 0, 0],
           scale: opts.scale ?? 1,
+          elevation: opts.elevation ?? 0,
+          color: opts.color ?? loaded.rawPolygons.find((polygon) => polygon.color)?.color ?? "#8b95a1",
+          colorOverride: true,
           fitScale,
           worldX,
           worldY,
+          dispose: loaded.dispose,
         };
       } catch (e) {
         console.error("[builder] failed to load preset", preset.id, e);
         return null;
       }
     },
-    [effectiveMeshResolution],
+    [effectiveMeshResolution, gridResolution],
+  );
+
+  const buildDroppedPlacement = useCallback(
+    async (
+      source: DroppedModelSource,
+      worldX: number,
+      worldY: number,
+      opts: { rotation?: Vec3; scale?: number; elevation?: number; color?: string } = {},
+    ): Promise<PlacedItem | null> => {
+      let loaded: Awaited<ReturnType<typeof loadDroppedModel>> | null = null;
+      try {
+        loaded = await loadDroppedModel(source, PARSER_DEFAULTS, effectiveMeshResolution);
+        const optimized = optimizeMeshPolygons(loaded.rawPolygons, { meshResolution: effectiveMeshResolution });
+        const bbox = meshBbox(optimized);
+        const targetSize = gridResolution > 0 ? gridResolution : NORMALIZED_MAX_DIM;
+        const fitScale = bbox.span > 0 ? targetSize / bbox.span : 1;
+        const placement = placeMeshOnFloor(worldX, worldY, bbox, fitScale);
+        const n = placementCounter.current++;
+        return {
+          id: `placed-${Date.now()}-${n}`,
+          preset: source.preset,
+          rawPolygons: loaded.rawPolygons,
+          position: placement,
+          rotation: opts.rotation ?? [0, 0, 0],
+          scale: opts.scale ?? 1,
+          elevation: opts.elevation ?? 0,
+          color: opts.color ?? loaded.rawPolygons.find((polygon) => polygon.color)?.color ?? "#8b95a1",
+          colorOverride: Boolean(opts.color),
+          fitScale,
+          worldX,
+          worldY,
+          dispose: loaded.dispose,
+        };
+      } catch (e) {
+        loaded?.dispose();
+        console.error("[builder] failed to import model", source.primaryFile.name, e);
+        return null;
+      }
+    },
+    [effectiveMeshResolution, gridResolution],
   );
 
   const appendItems = useCallback((items: PlacedItem[]) => {
     setPlacedItems((prev) => [...prev, ...items]);
+  }, []);
+
+  const replaceItems = useCallback((items: PlacedItem[]) => {
+    setPlacedItems((prev) => {
+      for (const item of prev) disposeItem(item);
+      return items;
+    });
+    setSelectedId(null);
+    meshHandlesRef.current.clear();
+    meshRefCallbacksRef.current.clear();
+    setMeshHandlesTick((n) => n + 1);
   }, []);
 
   const updateItem = useCallback((id: string, partial: Partial<PlacedItem>) => {
@@ -136,7 +205,11 @@ export function usePlacements({ meshResolution }: UsePlacementsOptions): UsePlac
   }, []);
 
   const handleDeleteItem = useCallback((id: string) => {
-    setPlacedItems((items) => items.filter((it) => it.id !== id));
+    setPlacedItems((items) => {
+      const removed = items.find((it) => it.id === id);
+      if (removed) disposeItem(removed);
+      return items.filter((it) => it.id !== id);
+    });
     setSelectedId((cur) => (cur === id ? null : cur));
     meshRefCallbacksRef.current.delete(id);
     meshHandlesRef.current.delete(id);
@@ -153,13 +226,25 @@ export function usePlacements({ meshResolution }: UsePlacementsOptions): UsePlac
     if (id) handleDeleteItem(id);
   };
 
+  useEffect(() => {
+    placedItemsRef.current = placedItems;
+  }, [placedItems]);
+
+  useEffect(() => {
+    return () => {
+      for (const item of placedItemsRef.current) disposeItem(item);
+    };
+  }, []);
+
   return {
     placedItems,
     selectedId,
     setSelectedId,
     placementCounter,
     buildPlacement,
+    buildDroppedPlacement,
     appendItems,
+    replaceItems,
     updateItem,
     mapItems,
     handleDeleteItem,

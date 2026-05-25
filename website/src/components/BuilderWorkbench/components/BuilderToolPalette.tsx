@@ -4,7 +4,6 @@ const TOOLS: Array<{ mode: ToolMode; glyph: string; label: string }> = [
   { mode: "pointer", glyph: "↖", label: "Pointer" },
   { mode: "raise", glyph: "↑", label: "Raise" },
   { mode: "lower", glyph: "↓", label: "Lower" },
-  { mode: "smooth", glyph: "~", label: "Smooth" },
 ];
 
 export interface BuilderToolPaletteProps {

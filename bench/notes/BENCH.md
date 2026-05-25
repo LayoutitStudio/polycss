@@ -24,8 +24,8 @@ pnpm bench:visual           # screenshot diff against bench/baselines/*.png
 pnpm bench:visual --record  # capture new baselines (after intentional renderer changes)
 pnpm bench:build            # just rebuild the bench bundles (rarely needed alone)
 node bench/nonvoxel-rotation-bench.mjs  # non-voxel vanilla rotation probe
-node .agents/skills/chrome-capture-trace/scripts/trace.mjs drag --label teapot-drag  # pointer-drag trace, no auto-rotate
-node .agents/skills/chrome-capture-trace/scripts/trace.mjs motion --page nonvoxel --no-trace  # non-voxel rAF cadence buckets
+node .agents/skills/chrome-trace/scripts/trace.mjs drag --label teapot-drag  # pointer-drag trace, no auto-rotate
+node .agents/skills/chrome-trace/scripts/trace.mjs motion --page nonvoxel --no-trace  # non-voxel rAF cadence buckets
 node bench/nonvoxel-visual-compare.mjs  # non-voxel variant visual parity
 ```
 
@@ -41,11 +41,11 @@ node bench/lossy-optimizer-bench.mjs --json bench/results/lossy-optimizer.json
 node bench/lossy-optimizer-bench.mjs --models ducky,shark,bicycle
 node bench/lossy-corpus-bench.mjs --root /tmp/polycss-model-corpus --json /tmp/polycss-temp-corpus.json
 node bench/lossy-corpus-bench.mjs --from-json bench/results/lossy-corpus.json --opportunities
-node .agents/skills/chrome-capture-trace/scripts/trace.mjs motion --mesh garden --runs 3 --dom-samples --report --markdown-out bench/results/garden-trace.md
+node .agents/skills/chrome-trace/scripts/trace.mjs motion --mesh garden --runs 3 --dom-samples --report --markdown-out bench/results/garden-trace.md
 node bench/perf-visual.mjs --mesh chicken --tolerance 0.005
 node bench/nonvoxel-rotation-bench.mjs --models teapot,bicycle --variants baseline,order-tile4 --run-order round-robin
-node .agents/skills/chrome-capture-trace/scripts/trace.mjs drag --mesh teapot --degrees 360 --drag-ms 1500 --label teapot-drag --frame-details --no-print-json
-node .agents/skills/chrome-capture-trace/scripts/trace.mjs motion --page nonvoxel --mesh glb:Elephant.glb --variant baseline --no-trace
+node .agents/skills/chrome-trace/scripts/trace.mjs drag --mesh teapot --degrees 360 --drag-ms 1500 --label teapot-drag --frame-details --no-print-json
+node .agents/skills/chrome-trace/scripts/trace.mjs motion --page nonvoxel --mesh glb:Elephant.glb --variant baseline --no-trace
 node bench/nonvoxel-visual-compare.mjs --models bicycle,elephant,policecar --variants scene-split-target,scene-transform-perspective
 ```
 
@@ -148,12 +148,12 @@ tests above what the gallery's OBJs cover.
 Use `domOrder` for pure post-render DOM-order probes; `polygonOrder` changes
 the polygon array before render planning and is only for diagnostics.
 
-`.agents/skills/chrome-capture-trace/scripts/trace.mjs motion` is the
+`.agents/skills/chrome-trace/scripts/trace.mjs motion` is the
 steady-motion trace lane for perf and non-voxel pages. It aligns Chrome trace
 events to rAF samples and reports per-cadence-bucket compositor, style, raster,
 script, DOM, and tag-count costs.
 
-`.agents/skills/chrome-capture-trace/scripts/trace.mjs drag` is the focused
+`.agents/skills/chrome-trace/scripts/trace.mjs drag` is the focused
 user-input lane for the same page.
 It loads a non-voxel mesh (`teapot` by default), leaves OrbitControls
 auto-rotate off, performs real Playwright mouse drags until the requested

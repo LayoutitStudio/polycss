@@ -1768,14 +1768,97 @@ describe("createPolyScene", () => {
       expect(handle.polygons[0].vertices).toBe(originalVerts);
     });
 
-    it("re-renders the mesh DOM (leaf elements are fresh after update)", () => {
+    it("re-renders the mesh DOM for geometry updates", () => {
       scene = makeScene(host);
       const handle = scene.add(makeParseResult([triangle("#ff0000")]), { merge: false });
       const before = host.querySelector("u, b, i, s") as HTMLElement;
-      handle.updatePolygon(0, { color: "#00ff00" });
+      handle.updatePolygon(0, {
+        vertices: [
+          [0, 0, 0],
+          [2, 0, 0],
+          [0, 1, 0],
+        ],
+      });
       const after = host.querySelector("u, b, i, s") as HTMLElement;
       // renderEntry tears down and re-emits; the leaf is a fresh node.
       expect(after).not.toBe(before);
+    });
+
+    it("updates dynamic color-only changes without replacing the leaf", () => {
+      scene = makeScene(host, { textureLighting: "dynamic" });
+      const handle = scene.add(makeParseResult([triangle("#ff0000")]), { merge: false });
+      const before = host.querySelector("u, b, i, s") as HTMLElement;
+
+      handle.updatePolygon(0, { color: "#0000ff" });
+
+      const after = host.querySelector("u, b, i, s") as HTMLElement;
+      expect(after).toBe(before);
+      expect(after.style.getPropertyValue("--psr")).toBe("0.0000");
+      expect(after.style.getPropertyValue("--psg")).toBe("0.0000");
+      expect(after.style.getPropertyValue("--psb")).toBe("1.0000");
+    });
+
+    it("updates baked solid color-only changes without replacing the leaf", () => {
+      scene = makeScene(host, { textureLighting: "baked" });
+      const handle = scene.add(makeParseResult([triangle("#ff0000")]), { merge: false });
+      const before = host.querySelector("u, b, i, s") as HTMLElement;
+
+      handle.updatePolygon(0, { color: "#0000ff" });
+
+      const after = host.querySelector("u, b, i, s") as HTMLElement;
+      expect(after).toBe(before);
+      expect(handle.polygons[0].color).toBe("#0000ff");
+      expect(after.style.color).not.toBe("");
+    });
+
+    it("updates data-only changes without replacing the leaf", () => {
+      scene = makeScene(host);
+      const poly = triangle("#ff0000");
+      poly.data = { old: "1" };
+      const handle = scene.add(makeParseResult([poly]), { merge: false });
+      const before = host.querySelector("u, b, i, s") as HTMLElement;
+
+      handle.updatePolygon(0, { data: { next: 2 } });
+
+      const after = host.querySelector("u, b, i, s") as HTMLElement;
+      expect(after).toBe(before);
+      expect(after.getAttribute("data-old")).toBeNull();
+      expect(after.getAttribute("data-next")).toBe("2");
+    });
+
+    it("does not rewrite unchanged data attributes", () => {
+      scene = makeScene(host);
+      const poly = triangle("#ff0000");
+      poly.data = { stable: "1", changing: "a" };
+      const handle = scene.add(makeParseResult([poly]), { merge: false });
+      const before = host.querySelector("u, b, i, s") as HTMLElement;
+      const setAttribute = vi.spyOn(before, "setAttribute");
+      const removeAttribute = vi.spyOn(before, "removeAttribute");
+
+      handle.updatePolygon(0, { data: { stable: "1", changing: "b" } });
+
+      expect(host.querySelector("u, b, i, s")).toBe(before);
+      expect(setAttribute).not.toHaveBeenCalledWith("data-stable", "1");
+      expect(setAttribute).toHaveBeenCalledWith("data-changing", "b");
+      expect(removeAttribute).not.toHaveBeenCalled();
+    });
+
+    it("updates combined dynamic color and data changes without replacing the leaf", () => {
+      scene = makeScene(host, { textureLighting: "dynamic" });
+      const poly = triangle("#ff0000");
+      poly.data = { old: "1" };
+      const handle = scene.add(makeParseResult([poly]), { merge: false });
+      const before = host.querySelector("u, b, i, s") as HTMLElement;
+
+      handle.updatePolygon(0, { color: "#0000ff", data: { next: 2 } });
+
+      const after = host.querySelector("u, b, i, s") as HTMLElement;
+      expect(after).toBe(before);
+      expect(after.style.getPropertyValue("--psr")).toBe("0.0000");
+      expect(after.style.getPropertyValue("--psg")).toBe("0.0000");
+      expect(after.style.getPropertyValue("--psb")).toBe("1.0000");
+      expect(after.getAttribute("data-old")).toBeNull();
+      expect(after.getAttribute("data-next")).toBe("2");
     });
 
     it("no-ops on a stale polygon reference (not in the current polygons array)", () => {

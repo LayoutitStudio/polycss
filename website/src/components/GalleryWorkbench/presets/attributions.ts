@@ -377,7 +377,6 @@ export const GLB_PRESET_ATTRIBUTIONS: Record<string, ModelAttribution> = {
   "urban/Motorcycle.glb": polyPizzaCityPackAttribution("Poly by Google", "Creative Commons Attribution"),
   "urban/Stop sign.glb": polyPizzaCityPackAttribution("Poly by Google", "Creative Commons Attribution"),
   "urban/Billboard.glb": polyPizzaCityPackAttribution("Poly by Google", "Creative Commons Attribution"),
-  "urban/Rock band poster.glb": polyPizzaCityPackAttribution("jeremy", "Creative Commons Attribution"),
   "urban/Dumpster.glb": polyPizzaCityPackAttribution("Quaternius", "CC0 1.0"),
   "urban/Mailbox.glb": polyPizzaCityPackAttribution("J-Toastie", "Creative Commons Attribution"),
   "urban/Fire hydrant.glb": polyPizzaCityPackAttribution("Poly by Google", "Creative Commons Attribution"),

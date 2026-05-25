@@ -53,7 +53,7 @@ import {
   updateBorderShapeElementWithStablePlan,
   updateCornerShapeElementWithStablePlan,
 } from "./emit";
-import { removeInlineStyleProperty, setInlineStyleProperty } from "./paintDefaults";
+import { setInlineStyleProperty } from "./paintDefaults";
 import { computeSolidTriangleColorPlan } from "@layoutit/polycss-core";
 import {
   computeSolidTrianglePlan,
@@ -153,6 +153,9 @@ export function renderPolygonsWithTextureAtlas(
   if (!doc) return { rendered: [], dispose: () => {} };
 
   const textureLighting = options.textureLighting ?? "baked";
+  const internalOptions = options as InternalRenderTextureAtlasOptions;
+  const skipDynamicNormalVars =
+    textureLighting === "dynamic" && internalOptions.skipDynamicNormalVars === true;
   const disabled = new Set(options.strategies?.disable ?? []);
   const useFullRectSolid = !disabled.has("b");
   const useProjectiveQuad = useFullRectSolid && projectiveQuadSupported(doc);
@@ -172,9 +175,16 @@ export function renderPolygonsWithTextureAtlas(
       basisHints[index],
     )
   );
+  const solidPaintDefaults = options.solidPaintDefaults ??
+    (internalOptions.computeSolidPaintDefaults
+      ? getSolidPaintDefaultsForPlans(plans, textureLighting, doc, options.strategies)
+      : undefined);
+  const triangleOptions = solidPaintDefaults
+    ? { ...options, solidPaintDefaults }
+    : options;
   const trianglePlans = plans.map((plan) =>
     plan && useStableTriangle && isSolidTrianglePlan(plan)
-      ? computeSolidTrianglePlan(plan.polygon, plan.index, seamTriangleOptions(plan, options), {
+      ? computeSolidTrianglePlan(plan.polygon, plan.index, seamTriangleOptions(plan, triangleOptions), {
           primitive: solidTrianglePrimitive ?? undefined,
         })
       : null
@@ -208,23 +218,23 @@ export function renderPolygonsWithTextureAtlas(
 
     const entry = packed.entries[i];
     if (entry) {
-      const element = createAtlasElement(entry, textureLighting, doc);
+      const element = createAtlasElement(entry, textureLighting, doc, skipDynamicNormalVars);
       atlasElements.set(i, element);
       rendered.push({ polygonIndex: i, element, kind: "atlas", plan: entry, dispose: () => {} });
     } else if (!plan.texture && useFullRectSolid && isFullRectSolid(plan)) {
-      const element = createSolidElement(plan, textureLighting, doc, options.solidPaintDefaults);
+      const element = createSolidElement(plan, textureLighting, doc, solidPaintDefaults, skipDynamicNormalVars);
       rendered.push({ polygonIndex: i, element, kind: "solid", plan, dispose: () => {} });
     } else if (!plan.texture && trianglePlan) {
       const element = createSolidTriangleElement(trianglePlan, doc);
       rendered.push({ polygonIndex: i, element, kind: "triangle", plan, dispose: () => {} });
     } else if (!plan.texture && useProjectiveQuad && isProjectiveQuadPlan(plan)) {
-      const element = createProjectiveSolidElement(plan, textureLighting, doc, options.solidPaintDefaults);
+      const element = createProjectiveSolidElement(plan, textureLighting, doc, solidPaintDefaults, skipDynamicNormalVars);
       rendered.push({ polygonIndex: i, element, kind: "solid", plan, dispose: () => {} });
     } else if (!plan.texture && cornerShapePlan) {
-      const element = createCornerShapeSolidElement(plan, cornerShapePlan, textureLighting, doc, options.solidPaintDefaults);
+      const element = createCornerShapeSolidElement(plan, cornerShapePlan, textureLighting, doc, solidPaintDefaults, skipDynamicNormalVars);
       rendered.push({ polygonIndex: i, element, kind: "corner", plan, dispose: () => {} });
     } else if (!plan.texture && useBorderShape) {
-      const element = createBorderShapeSolidElement(plan, textureLighting, doc, options.solidPaintDefaults);
+      const element = createBorderShapeSolidElement(plan, textureLighting, doc, solidPaintDefaults, skipDynamicNormalVars);
       rendered.push({ polygonIndex: i, element, kind: "border", plan, dispose: () => {} });
     }
   }
@@ -247,8 +257,7 @@ export function renderPolygonsWithTextureAtlas(
         for (const entry of page.entries) {
           const el = atlasElements.get(entry.index);
           if (!el || !built.url) continue;
-          applyAtlasBackground(el, built, textureLighting, entry);
-          removeInlineStyleProperty(el, "opacity");
+          applyAtlasBackground(el, built, textureLighting, entry, !skipDynamicNormalVars);
         }
       }
     })
@@ -260,14 +269,16 @@ export function renderPolygonsWithTextureAtlas(
       }
     });
 
-  return {
+  const result = {
     rendered,
+    solidPaintDefaults: solidPaintDefaults ?? {},
     dispose() {
       cancelled = true;
       for (const url of urls) URL.revokeObjectURL(url);
       urls = [];
     },
   };
+  return result;
 }
 
 export async function renderPolygonsWithTextureAtlasAsync(
@@ -281,6 +292,9 @@ export async function renderPolygonsWithTextureAtlasAsync(
   }
 
   const textureLighting = options.textureLighting ?? "baked";
+  const internalOptions = options as InternalRenderTextureAtlasOptions;
+  const skipDynamicNormalVars =
+    textureLighting === "dynamic" && internalOptions.skipDynamicNormalVars === true;
   const disabled = new Set(options.strategies?.disable ?? []);
   const useFullRectSolid = !disabled.has("b");
   const useProjectiveQuad = useFullRectSolid && projectiveQuadSupported(doc);
@@ -351,23 +365,23 @@ export async function renderPolygonsWithTextureAtlasAsync(
 
     const entry = packed.entries[i];
     if (entry) {
-      const element = createAtlasElement(entry, textureLighting, doc);
+      const element = createAtlasElement(entry, textureLighting, doc, skipDynamicNormalVars);
       atlasElements.set(i, element);
       rendered.push({ polygonIndex: i, element, kind: "atlas", plan: entry, dispose: () => {} });
     } else if (!plan.texture && useFullRectSolid && isFullRectSolid(plan)) {
-      const element = createSolidElement(plan, textureLighting, doc, solidPaintDefaults);
+      const element = createSolidElement(plan, textureLighting, doc, solidPaintDefaults, skipDynamicNormalVars);
       rendered.push({ polygonIndex: i, element, kind: "solid", plan, dispose: () => {} });
     } else if (!plan.texture && trianglePlan) {
       const element = createSolidTriangleElement(trianglePlan, doc);
       rendered.push({ polygonIndex: i, element, kind: "triangle", plan, dispose: () => {} });
     } else if (!plan.texture && useProjectiveQuad && isProjectiveQuadPlan(plan)) {
-      const element = createProjectiveSolidElement(plan, textureLighting, doc, solidPaintDefaults);
+      const element = createProjectiveSolidElement(plan, textureLighting, doc, solidPaintDefaults, skipDynamicNormalVars);
       rendered.push({ polygonIndex: i, element, kind: "solid", plan, dispose: () => {} });
     } else if (!plan.texture && cornerShapePlan) {
-      const element = createCornerShapeSolidElement(plan, cornerShapePlan, textureLighting, doc, solidPaintDefaults);
+      const element = createCornerShapeSolidElement(plan, cornerShapePlan, textureLighting, doc, solidPaintDefaults, skipDynamicNormalVars);
       rendered.push({ polygonIndex: i, element, kind: "corner", plan, dispose: () => {} });
     } else if (!plan.texture && useBorderShape) {
-      const element = createBorderShapeSolidElement(plan, textureLighting, doc, solidPaintDefaults);
+      const element = createBorderShapeSolidElement(plan, textureLighting, doc, solidPaintDefaults, skipDynamicNormalVars);
       rendered.push({ polygonIndex: i, element, kind: "border", plan, dispose: () => {} });
     }
     batchStarted = await yieldIfOverBudget(batchStarted);
@@ -395,8 +409,7 @@ export async function renderPolygonsWithTextureAtlasAsync(
         for (const entry of page.entries) {
           const el = atlasElements.get(entry.index);
           if (!el || !built.url) continue;
-          applyAtlasBackground(el, built, textureLighting, entry);
-          removeInlineStyleProperty(el, "opacity");
+          applyAtlasBackground(el, built, textureLighting, entry, !skipDynamicNormalVars);
         }
       }
     })

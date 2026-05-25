@@ -57,6 +57,12 @@ const DOT_LENGTH = 0.5;
 /** Approx gap between consecutive dots. */
 const GAP_LENGTH = 0.5;
 
+export interface WireframeStyle {
+  edgeHalf?: number;
+  dotLength?: number;
+  gapLength?: number;
+}
+
 /** Build the 6 axis-aligned face quads of an arbitrary cuboid using
  *  axisBox's vertex labelling + CCW-from-outside winding. Each face's
  *  surface normal points OUTWARD so polycss's basis chooser keeps the
@@ -90,12 +96,12 @@ function cuboidFaces(
  *  across edges of different lengths — short edges get fewer dots.
  *  Dots always include both endpoints (so corners of the bbox always
  *  have visible markers). */
-function dotSpans(length: number): Array<[number, number]> {
-  const pattern = DOT_LENGTH + GAP_LENGTH;
+function dotSpans(length: number, dotLength: number = DOT_LENGTH, gapLength: number = GAP_LENGTH): Array<[number, number]> {
+  const pattern = dotLength + gapLength;
   const count = Math.max(2, Math.round(length / pattern));
   // Distribute evenly: the centres of `count` dots sit at fractions
   // i/(count-1) of the edge for i=0..count-1.
-  const halfDot = DOT_LENGTH / 2;
+  const halfDot = dotLength / 2;
   const spans: Array<[number, number]> = [];
   for (let i = 0; i < count; i++) {
     const centre = (i / (count - 1)) * length;
@@ -111,7 +117,11 @@ function dotSpans(length: number): Array<[number, number]> {
  *  outline reads as a dashed bbox at the placement cursor. Closed
  *  cuboids (not flat slabs) so each dot stays 3D regardless of the
  *  camera angle, with axisBox winding for stable rendering. */
-export function buildGhostWireframePolygons(rect: GhostWorldRect, color: string = GHOST_COLOR): Polygon[] {
+export function buildGhostWireframePolygons(
+  rect: GhostWorldRect,
+  color: string = GHOST_COLOR,
+  style: WireframeStyle = {},
+): Polygon[] {
   const { worldX, worldY, hx, hy, height } = rect;
   const x0 = worldX - hx;
   const x1 = worldX + hx;
@@ -119,12 +129,14 @@ export function buildGhostWireframePolygons(rect: GhostWorldRect, color: string 
   const y1 = worldY + hy;
   const z0 = rect.baseZ ?? 0;
   const z1 = z0 + height;
-  const t = EDGE_HALF;
+  const t = style.edgeHalf ?? EDGE_HALF;
+  const dotLength = style.dotLength ?? DOT_LENGTH;
+  const gapLength = style.gapLength ?? GAP_LENGTH;
 
   const polys: Polygon[] = [];
 
   // 4 X-direction edges — dot spans run along X.
-  const xSpans = dotSpans(x1 - x0);
+  const xSpans = dotSpans(x1 - x0, dotLength, gapLength);
   for (const y of [y0, y1]) {
     for (const z of [z0, z1]) {
       for (const [a, b] of xSpans) {
@@ -133,7 +145,7 @@ export function buildGhostWireframePolygons(rect: GhostWorldRect, color: string 
     }
   }
   // 4 Y-direction edges — dot spans run along Y.
-  const ySpans = dotSpans(y1 - y0);
+  const ySpans = dotSpans(y1 - y0, dotLength, gapLength);
   for (const x of [x0, x1]) {
     for (const z of [z0, z1]) {
       for (const [a, b] of ySpans) {
@@ -142,12 +154,49 @@ export function buildGhostWireframePolygons(rect: GhostWorldRect, color: string 
     }
   }
   // 4 Z-direction edges — dot spans run along Z.
-  const zSpans = dotSpans(z1 - z0);
+  const zSpans = dotSpans(z1 - z0, dotLength, gapLength);
   for (const x of [x0, x1]) {
     for (const y of [y0, y1]) {
       for (const [a, b] of zSpans) {
         polys.push(...cuboidFaces(x - t, x + t, y - t, y + t, z0 + a, z0 + b, color));
       }
+    }
+  }
+
+  return polys;
+}
+
+/** Build one continuous cuboid stick for each bbox edge. This is used
+ *  for selected-shape highlighting, where a solid cage is easier to see
+ *  than the dotted placement preview. */
+export function buildSolidWireframePolygons(
+  rect: GhostWorldRect,
+  color: string = GHOST_COLOR,
+  edgeHalf: number = EDGE_HALF,
+): Polygon[] {
+  const { worldX, worldY, hx, hy, height } = rect;
+  const x0 = worldX - hx;
+  const x1 = worldX + hx;
+  const y0 = worldY - hy;
+  const y1 = worldY + hy;
+  const z0 = rect.baseZ ?? 0;
+  const z1 = z0 + height;
+  const t = edgeHalf;
+  const polys: Polygon[] = [];
+
+  for (const y of [y0, y1]) {
+    for (const z of [z0, z1]) {
+      polys.push(...cuboidFaces(x0, x1, y - t, y + t, z - t, z + t, color));
+    }
+  }
+  for (const x of [x0, x1]) {
+    for (const z of [z0, z1]) {
+      polys.push(...cuboidFaces(x - t, x + t, y0, y1, z - t, z + t, color));
+    }
+  }
+  for (const x of [x0, x1]) {
+    for (const y of [y0, y1]) {
+      polys.push(...cuboidFaces(x - t, x + t, y - t, y + t, z0, z1, color));
     }
   }
 
@@ -266,4 +315,3 @@ export function ghostRectFromBbox(
     baseZ,
   };
 }
-

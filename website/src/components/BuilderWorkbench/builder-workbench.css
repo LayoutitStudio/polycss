@@ -1,12 +1,297 @@
+@import url("https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20,500,0,0");
+
 /* Placement mode — cursor feedback on the viewport */
 .dn-viewport.is-placement-mode {
   cursor: crosshair;
 }
 
-/* Floating tool palette — top-centre of the builder viewport.
-   Four buttons (Pointer / Raise / Lower / Smooth). The target-mode
-   toggle (Vertex / Face) sits in a sibling pill 8px below this one,
-   anchored at the same top region — same glass styling. */
+.dn-root.is-tool-add .dn-viewport {
+  cursor: crosshair;
+}
+
+.dn-root.is-tool-remove .dn-viewport {
+  cursor: not-allowed;
+}
+
+.dn-root.is-grid-gray .dn-viewport {
+  background: #f5f3ea;
+}
+
+.dn-root.is-grid-dark .dn-viewport {
+  background: #05070b;
+}
+
+.builder-tool-ribbon {
+  position: absolute;
+  top: var(--overlay-top);
+  left: var(--overlay-left);
+  z-index: 18;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 8px;
+  background: rgba(17, 20, 26, 0.98);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 14px 38px rgba(0, 0, 0, 0.35);
+}
+
+.builder-tool-ribbon__button {
+  height: 30px;
+  min-width: 64px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: rgba(232, 237, 242, 0.72);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 750;
+  padding: 0 10px;
+}
+
+.builder-tool-ribbon__button:hover {
+  color: #e8edf2;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.builder-tool-ribbon__button.is-active {
+  color: #071014;
+  background: #22d3ee;
+}
+
+.builder-tool-ribbon__button--restart {
+  min-width: 82px;
+}
+
+.builder-tool-ribbon__divider {
+  width: 1px;
+  height: 20px;
+  margin: 0 2px;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.builder-tool-ribbon__icon {
+  font-family: "Material Symbols Rounded";
+  font-weight: normal;
+  font-style: normal;
+  font-size: 16px;
+  line-height: 1;
+  letter-spacing: 0;
+  text-transform: none;
+  display: inline-block;
+  white-space: nowrap;
+  direction: ltr;
+  font-feature-settings: "liga";
+  -webkit-font-feature-settings: "liga";
+  -webkit-font-smoothing: antialiased;
+}
+
+.shape-picker {
+  position: absolute;
+  top: calc(var(--overlay-top) + 46px);
+  left: var(--overlay-left);
+  width: clamp(260px, 21vw, 330px);
+  height: max-content;
+  max-height: max-content;
+  min-height: 0;
+  overflow: clip;
+  z-index: 15;
+  background: #11141a;
+  border-radius: 8px;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.45);
+  transform: translateZ(0);
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+  contain: paint;
+  isolation: isolate;
+}
+
+.shape-picker__body {
+  box-sizing: border-box;
+  max-height: none;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px;
+  overflow: clip;
+}
+
+.shape-picker__header {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+}
+
+.shape-picker__title {
+  margin: 0;
+  color: #e8edf2;
+  font-size: 13px;
+  font-weight: 750;
+  letter-spacing: 0;
+  line-height: 1;
+}
+
+.shape-picker__grid {
+  flex: 0 0 auto;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(108px, 1fr));
+  align-content: start;
+  gap: 8px;
+  overflow-y: visible;
+  padding-right: 4px;
+}
+
+.shape-picker__item {
+  min-width: 0;
+  min-height: 110px;
+  display: grid;
+  grid-template-rows: 74px auto;
+  align-items: center;
+  justify-items: center;
+  gap: 6px;
+  padding: 8px 6px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 8px;
+  background: #0b0f18;
+  color: #e2e8f0;
+  font: inherit;
+  cursor: pointer;
+}
+
+.shape-picker__item:hover:not(:disabled) {
+  background: #131a26;
+  border-color: rgba(125, 211, 252, 0.22);
+}
+
+.shape-picker__item.is-active {
+  background: #142033;
+  border-color: rgba(34, 211, 238, 0.62);
+}
+
+.shape-picker__item:disabled {
+  cursor: wait;
+  opacity: 0.58;
+}
+
+.shape-picker__item.is-active:disabled {
+  opacity: 1;
+}
+
+.shape-picker__item--import {
+  border-style: dashed;
+  background: #0d121b;
+}
+
+.shape-picker__item--import:hover {
+  background: #141c29;
+}
+
+.shape-picker__thumb {
+  width: 65px;
+  height: 65px;
+  display: grid;
+  place-items: center;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.shape-picker__thumb img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+}
+
+.shape-picker__thumb--import {
+  border: 0;
+}
+
+.shape-picker__import-icon {
+  color: #dce4ed;
+  font-size: 30px;
+  line-height: 1;
+}
+
+.shape-picker__label {
+  max-width: 100%;
+  color: #dce4ed;
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.15;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+
+.shape-picker__empty {
+  padding: 10px 4px;
+  color: #94a3b8;
+  font-weight: 600;
+}
+
+.shape-picker__surface {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 2px 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.shape-picker__surface-label {
+  color: rgba(226, 232, 240, 0.74);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.shape-picker__surface-button {
+  height: 28px;
+  min-width: 78px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.04);
+  color: #e8edf2;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 750;
+  padding: 0 9px;
+}
+
+.shape-picker__surface-button:hover {
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.shape-picker__surface-swatch {
+  width: 13px;
+  height: 13px;
+  box-sizing: border-box;
+  border-radius: 3px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.18);
+}
+
+.shape-picker__surface-swatch.is-gray {
+  background: #f5f3ea;
+}
+
+.shape-picker__surface-swatch.is-dark {
+  background: #05070b;
+}
+
+/* Floating tool palette — top-centre of the builder viewport. */
 .builder-tool-palette {
   position: absolute;
   left: 50%;
@@ -147,6 +432,12 @@
 .builder-terrain-hover {
   pointer-events: none;
 }
+.builder-ground-fill,
+.builder-ground-fill *,
+.builder-add-hover,
+.builder-add-hover * {
+  pointer-events: none;
+}
 .builder-terrain {
   pointer-events: none;
 }
@@ -158,7 +449,8 @@
    you only see the bottom face of the bbox. Bake transparency into the
    polygon color (rgba in GHOST_COLOR) instead. Same trap that's
    documented at the top of PolyTransformControls.tsx. */
-.builder-ghost {
+.builder-ghost,
+.builder-selection-wireframe {
   pointer-events: none;
 }
 
@@ -196,15 +488,15 @@
 .builder-ghost b,
 .builder-ghost i,
 .builder-ghost s,
-.builder-ghost u {
+.builder-ghost u,
+.builder-selection-wireframe b,
+.builder-selection-wireframe i,
+.builder-selection-wireframe s,
+.builder-selection-wireframe u {
   backface-visibility: visible !important;
 }
 
-/* The Scene folder body is built in two halves inside one lil-gui folder:
-   a React block (this stylesheet) for the items list + gizmo button set,
-   then the lil-gui-native Scale slider below it. The styles below mimic the
-   Inspector panel idiom (.dn-mesh-* in gallery-workbench.css) so the rows
-   read consistently with the rest of the app. */
+/* Scene folder list rendered inside a lil-gui folder. */
 
 .builder-placed.is-selected {
   outline: none;
@@ -306,39 +598,186 @@
   color: #fff;
 }
 
-.builder-scene-folder__gizmo {
+.builder-mesh-panel {
+  width: 360px;
+  max-width: 100%;
+  box-sizing: border-box;
+  padding: 10px;
+  border-radius: 8px;
+  background: rgba(17, 20, 26, 0.98);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.35);
+  color: #e8edf2;
+}
+
+.builder-mesh-panel__header {
   display: flex;
-  gap: 4px;
-  padding: 4px 8px 2px;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
 }
 
-.dn-scene-folder-content .builder-scene-folder__gizmo-btn {
-  flex: 1 1 0;
-  width: auto;
+.builder-mesh-panel__title-group {
   min-width: 0;
-  background: rgba(17, 19, 22, 0.85);
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  color: rgba(232, 237, 242, 0.75);
-  font: inherit;
+}
+
+.builder-mesh-panel__title {
+  margin: 0 0 3px;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0;
+  line-height: 1;
+}
+
+.builder-mesh-panel__name {
+  margin: 0;
+  color: rgba(232, 237, 242, 0.58);
   font-size: 11px;
-  padding: 5px 8px;
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.builder-mesh-panel__delete {
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border: 0;
   border-radius: 4px;
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(232, 237, 242, 0.64);
   cursor: pointer;
-  height: auto;
+  font-size: 17px;
+  line-height: 1;
+  padding: 0;
 }
 
-.dn-scene-folder-content .builder-scene-folder__gizmo-btn:hover:not(:disabled) {
+.builder-mesh-panel__delete:hover {
+  background: rgba(220, 50, 50, 0.65);
+  color: #fff;
+}
+
+.builder-mesh-panel__field {
+  padding: 9px 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.builder-mesh-panel__field-row {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.builder-mesh-panel__label {
+  color: rgba(232, 237, 242, 0.72);
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 1;
+}
+
+.builder-mesh-panel__number {
+  width: 74px;
+  height: 26px;
+  box-sizing: border-box;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 4px;
+  background: #090b10;
   color: #e8edf2;
-  border-color: rgba(255, 255, 255, 0.12);
+  font-size: 12px;
+  padding: 0 7px;
 }
 
-.dn-scene-folder-content .builder-scene-folder__gizmo-btn.is-active {
-  background: rgba(34, 211, 238, 0.18);
-  border-color: rgba(34, 211, 238, 0.5);
+.builder-mesh-panel__number:focus {
+  outline: 1px solid rgba(34, 211, 238, 0.55);
+  outline-offset: 0;
+}
+
+.builder-mesh-panel__color {
+  width: 42px;
+  height: 28px;
+  box-sizing: border-box;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+  background: #090b10;
+  cursor: pointer;
+  padding: 3px;
+}
+
+.builder-mesh-panel__color::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+
+.builder-mesh-panel__color::-webkit-color-swatch {
+  border: 0;
+  border-radius: 2px;
+}
+
+.builder-mesh-panel__color-text {
+  width: 82px;
+  height: 28px;
+  box-sizing: border-box;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 4px;
+  background: #090b10;
   color: #e8edf2;
+  font-size: 12px;
+  padding: 0 7px;
+  text-transform: lowercase;
 }
 
-.dn-scene-folder-content .builder-scene-folder__gizmo-btn:disabled {
-  opacity: 0.4;
+.builder-mesh-panel__color-text:focus {
+  outline: 1px solid rgba(34, 211, 238, 0.55);
+  outline-offset: 0;
+}
+
+.builder-mesh-panel__range {
+  width: 100%;
+  margin: 10px 0 0;
+  accent-color: #22d3ee;
+}
+
+.builder-mesh-panel__stepper {
+  display: grid;
+  grid-template-columns: 28px 54px 28px;
+  align-items: center;
+  gap: 4px;
+}
+
+.builder-mesh-panel__stepper button {
+  width: 28px;
+  height: 26px;
+  border: 0;
+  border-radius: 4px;
+  background: rgba(34, 211, 238, 0.14);
+  color: #dffbff;
+  cursor: pointer;
+  font-size: 15px;
+  line-height: 1;
+  padding: 0;
+}
+
+.builder-mesh-panel__stepper button:hover:not(:disabled) {
+  background: rgba(34, 211, 238, 0.24);
+}
+
+.builder-mesh-panel__stepper button:disabled {
   cursor: not-allowed;
+  opacity: 0.38;
+}
+
+.builder-mesh-panel__stepper output {
+  min-width: 0;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  border-radius: 4px;
+  background: #090b10;
+  color: #e8edf2;
+  font-size: 12px;
 }

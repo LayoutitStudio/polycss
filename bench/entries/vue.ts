@@ -37,6 +37,7 @@ const PerfApp = defineComponent({
     el: { type: Number, required: true },
     preset: { type: Object as () => any, required: true },
     parseResult: { type: Object as () => ParseResult | null, default: null },
+    strategies: { type: Object as () => { disable: Array<"b" | "i" | "u"> } | undefined, default: undefined },
   },
   setup(props) {
     const rotY = ref(props.preset.rotY);
@@ -90,6 +91,7 @@ const PerfApp = defineComponent({
             directionalLight: directionalLight.value,
             ambientLight,
             textureLighting: props.mode,
+            strategies: props.strategies,
             autoCenter: true,
           },
           {
@@ -121,6 +123,7 @@ async function main(): Promise<void> {
     az: number;
     el: number;
     isSynth: boolean;
+    strategies?: { disable: Array<"b" | "i" | "u"> };
     preset: any;
   };
 
@@ -143,6 +146,7 @@ async function main(): Promise<void> {
     el: params.el,
     preset: params.preset,
     parseResult,
+    strategies: params.strategies,
   }).mount(host);
 }
 

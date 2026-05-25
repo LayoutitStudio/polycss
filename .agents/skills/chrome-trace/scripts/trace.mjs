@@ -24,7 +24,7 @@ const RUNNERS = new Map([
 
 function printHelp() {
   console.log(`Usage:
-  node .agents/skills/chrome-capture-trace/scripts/trace.mjs <command> [options]
+  node .agents/skills/chrome-trace/scripts/trace.mjs <command> [options]
 
 Commands:
   polycss-motion  Steady perf/nonvoxel bench trace buckets.
@@ -39,14 +39,14 @@ Aliases:
   capture         -> generic
 
 Examples:
-  node .agents/skills/chrome-capture-trace/scripts/trace.mjs motion --page nonvoxel --mesh glb:Elephant.glb --dom-samples --label elephant
-  node .agents/skills/chrome-capture-trace/scripts/trace.mjs motion --page nonvoxel --mesh teapot --dom-samples --frame-details --layer-details --gpu-details --trace-out bench/results/teapot.trace.json --label teapot-enriched --report
-  node .agents/skills/chrome-capture-trace/scripts/trace.mjs motion --page nonvoxel --mesh teapot --gpu-details full --trace-out bench/results/teapot-full-gpu.trace.json --label teapot-full-gpu
-  node .agents/skills/chrome-capture-trace/scripts/trace.mjs drag --mesh teapot --degrees 360 --frame-details --label teapot-drag
-  node .agents/skills/chrome-capture-trace/scripts/trace.mjs generic --url http://127.0.0.1:3000 --action drag --selector "#viewport"
-  node .agents/skills/chrome-capture-trace/scripts/trace.mjs motion --report --markdown-out bench/results/garden.md
-  node .agents/skills/chrome-capture-trace/scripts/trace.mjs report bench/results/garden.json --markdown-out bench/results/garden.md
-  node .agents/skills/chrome-capture-trace/scripts/trace.mjs compare before.json after.json --markdown-out report.md
+  node .agents/skills/chrome-trace/scripts/trace.mjs motion --page nonvoxel --mesh glb:Elephant.glb --dom-samples --label elephant
+  node .agents/skills/chrome-trace/scripts/trace.mjs motion --page nonvoxel --mesh teapot --dom-samples --frame-details --layer-details --gpu-details --trace-out bench/results/teapot.trace.json --label teapot-enriched --report
+  node .agents/skills/chrome-trace/scripts/trace.mjs motion --page nonvoxel --mesh teapot --gpu-details full --trace-out bench/results/teapot-full-gpu.trace.json --label teapot-full-gpu
+  node .agents/skills/chrome-trace/scripts/trace.mjs drag --mesh teapot --degrees 360 --frame-details --label teapot-drag
+  node .agents/skills/chrome-trace/scripts/trace.mjs generic --url http://127.0.0.1:3000 --action drag --selector "#viewport"
+  node .agents/skills/chrome-trace/scripts/trace.mjs motion --report --markdown-out bench/results/garden.md
+  node .agents/skills/chrome-trace/scripts/trace.mjs report bench/results/garden.json --markdown-out bench/results/garden.md
+  node .agents/skills/chrome-trace/scripts/trace.mjs compare before.json after.json --markdown-out report.md
 `);
 }
 
@@ -565,7 +565,7 @@ function ensureReportSummaryPath(cmd, args) {
   if (cmd === "polycss-motion" || cmd === "motion" || cmd === "polycss-buckets" || cmd === "buckets") {
     const label = argValue(args, "label");
     if (label) return { childArgs: args, summaryPath: inferSummaryPath(cmd, args) };
-    const file = resolve(tmpdir(), `chrome-capture-trace-${Date.now()}.json`);
+    const file = resolve(tmpdir(), `chrome-trace-${Date.now()}.json`);
     return { childArgs: appendArg(args, "summary-out", file), summaryPath: file };
   }
 

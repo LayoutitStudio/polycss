@@ -4,9 +4,19 @@ import type { PolyFirstPersonControlsHandle, Polygon } from "@layoutit/polycss-r
 import { interiorShellPolygons } from "../../helpers/interiorShell";
 import { useFpvHost, useFpvCull } from "../../fpv";
 import { activeMeshResolution, type SceneOptionsState } from "../../types";
+import { BUILDER_GROUND_SPAN } from "../defaults";
 import { buildGridPolygons } from "../geometry/grid";
 import type { TerrainVertices } from "../geometry/terrain";
 import type { PlacedItem } from "../types";
+
+const GRID_LINE_COLORS = {
+  gray: "#9aa3ad",
+  dark: "#1f2937",
+} as const;
+
+function applySolidColor(polygons: Polygon[], color: string): Polygon[] {
+  return polygons.map((polygon) => ({ ...polygon, color }));
+}
 
 export interface UseSceneRenderOptions {
   placedItems: PlacedItem[];
@@ -43,11 +53,7 @@ export function useSceneRender({
       const optimized = optimizeMeshPolygons(it.rawPolygons, {
         meshResolution: effectiveMeshResolution,
       });
-      if (it.preset.kind === "vox") {
-        out.set(it.id, optimized);
-        continue;
-      }
-      out.set(it.id, optimized);
+      out.set(it.id, it.colorOverride === false ? optimized : applySolidColor(optimized, it.color));
     }
     return out;
   }, [
@@ -117,8 +123,14 @@ export function useSceneRender({
   }, [placedItems, visibleIds]);
 
   const gridPolygons = useMemo(
-    () => buildGridPolygons({ spacing: sceneOptions.gridResolution, vertices: terrainVertices }),
-    [sceneOptions.gridResolution, terrainVertices],
+    () => buildGridPolygons({
+      size: BUILDER_GROUND_SPAN,
+      spacing: sceneOptions.gridResolution,
+      center: [sceneOptions.target[0], sceneOptions.target[1]],
+      color: GRID_LINE_COLORS[sceneOptions.gridTone],
+      vertices: terrainVertices,
+    }),
+    [sceneOptions.gridResolution, sceneOptions.gridTone, sceneOptions.target, terrainVertices],
   );
 
   return { renderedPolygonsById, interiorShellPolygonsById, renderItems, gridPolygons };

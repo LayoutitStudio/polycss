@@ -51,6 +51,7 @@ import {
   isVoxelCameraCullableNormalGroups,
   normalFacesCamera,
   optimizeMeshPolygons,
+  parseHex,
   parseHexColor,
   polygonCssSurfaceNormal,
   projectCssVertexToGround,
@@ -69,6 +70,11 @@ import {
   type RenderedPoly,
   type SolidPaintDefaults,
 } from "../render/textureAtlas";
+import { applySolidPaint } from "../render/atlas/paintDefaults";
+import {
+  applyPolygonDataAttrs,
+  shadedSolidPlanForNormal,
+} from "../render/atlas/emit";
 import {
   createPolyVoxelRenderer,
   type PolyVoxelRenderer,
@@ -613,6 +619,7 @@ export function createPolyScene(
     wrapper: HTMLDivElement;
     parseResult: ParseResult;
     rendered: RenderedPoly[];
+    renderedByPolygonIndex: Array<RenderedPoly | undefined>;
     /** Dynamic-mode shadow `<q>` leaves, one per non-deduped casting
      *  polygon. Empty in baked mode (which uses `shadowSvg` instead). */
     shadowRendered: HTMLElement[];
@@ -623,6 +630,7 @@ export function createPolyScene(
     disposed: boolean;
     stableDom: boolean;
     hasBuckets: boolean;
+    skipBucketNormalCleanupOnce: boolean;
     excludeFromAutoCenter: boolean;
     castShadow: boolean;
     receiveShadow: boolean;
@@ -772,6 +780,10 @@ export function createPolyScene(
     applyDynamicLightVars(el, opts);
   }
 
+  function applySceneCameraTransform(el: HTMLElement): void {
+    el.style.transform = buildSceneTransformFromCamera(camera, autoCenterOffset, layoutScale);
+  }
+
   // Dynamic lighting cascade vars: PolyScene writes the directional + ambient
   // light setup to these custom properties on the scene root. Each polygon's
   // <i> bakes its own normal directly into an inline calc() that reads these
@@ -839,6 +851,7 @@ export function createPolyScene(
     disposeRendered(entry.rendered, entry.disposeAtlas);
     entry.disposeAtlas = undefined;
     entry.rendered.length = 0;
+    entry.renderedByPolygonIndex = [];
     entry.cameraCullGroups = [];
     entry.cameraCullSignature = "";
     clearShadowLeaves(entry);
@@ -890,6 +903,20 @@ export function createPolyScene(
       try { r.dispose(); } catch { /* ignore */ }
       if (r.element.parentNode) r.element.parentNode.removeChild(r.element);
     }
+  }
+
+  function setRendered(entry: MeshEntry, rendered: RenderedPoly[], disposeAtlas?: () => void): void {
+    entry.rendered = rendered;
+    entry.renderedByPolygonIndex = [];
+    for (const item of rendered) {
+      entry.renderedByPolygonIndex[item.polygonIndex] = item;
+    }
+    entry.disposeAtlas = disposeAtlas;
+  }
+
+  function renderedItemForPolygon(entry: MeshEntry, polygonIndex: number): RenderedPoly | undefined {
+    const item = entry.renderedByPolygonIndex[polygonIndex];
+    return item?.polygonIndex === polygonIndex ? item : undefined;
   }
 
   function clearMountedRendered(entry: MeshEntry): void {
@@ -1110,6 +1137,8 @@ export function createPolyScene(
   function syncMountedRendered(entry: MeshEntry): void {
     clearMountedRendered(entry);
     entry.hasBuckets = false;
+    const skipBucketNormalCleanup = entry.skipBucketNormalCleanupOnce;
+    entry.skipBucketNormalCleanupOnce = false;
     const fragment = doc.createDocumentFragment();
 
     // Lambert-bucketing only pays off in dynamic mode, where the cascade
@@ -1169,9 +1198,11 @@ export function createPolyScene(
         // dynamic-lighting path used by other consumers). Inside a bucket
         // those inline values are dead weight — the lambert is computed at
         // the wrapper and inherited. Strip them.
-        item.element.style.removeProperty("--pnx");
-        item.element.style.removeProperty("--pny");
-        item.element.style.removeProperty("--pnz");
+        if (!skipBucketNormalCleanup || item.kind === "triangle") {
+          item.element.style.removeProperty("--pnx");
+          item.element.style.removeProperty("--pny");
+          item.element.style.removeProperty("--pnz");
+        }
       }
       fragment.appendChild(bucketEl);
     }
@@ -1250,7 +1281,7 @@ export function createPolyScene(
   function applySolidPaintVars(wrapper: HTMLDivElement, defaults: SolidPaintDefaults): void {
     if (defaults.paintColor) {
       wrapper.style.setProperty("--polycss-paint", defaults.paintColor);
-    } else {
+    } else if (wrapper.style.getPropertyValue("--polycss-paint")) {
       wrapper.style.removeProperty("--polycss-paint");
     }
 
@@ -1258,11 +1289,85 @@ export function createPolyScene(
       wrapper.style.setProperty("--psr", (defaults.dynamicColor.r / 255).toFixed(4));
       wrapper.style.setProperty("--psg", (defaults.dynamicColor.g / 255).toFixed(4));
       wrapper.style.setProperty("--psb", (defaults.dynamicColor.b / 255).toFixed(4));
-    } else {
+    } else if (
+      wrapper.style.getPropertyValue("--psr") ||
+      wrapper.style.getPropertyValue("--psg") ||
+      wrapper.style.getPropertyValue("--psb")
+    ) {
       wrapper.style.removeProperty("--psr");
       wrapper.style.removeProperty("--psg");
       wrapper.style.removeProperty("--psb");
     }
+  }
+
+  function applyDynamicColorVars(el: HTMLElement, color: string | undefined): void {
+    const rgb = parseHex(color ?? "#cccccc");
+    el.style.setProperty("--psr", (rgb.r / 255).toFixed(4));
+    el.style.setProperty("--psg", (rgb.g / 255).toFixed(4));
+    el.style.setProperty("--psb", (rgb.b / 255).toFixed(4));
+  }
+
+  function applyBakedSolidColor(item: RenderedPoly, polygon: Polygon): boolean {
+    if (!item.plan || item.kind === "atlas" || item.plan.texture) return false;
+    const textureLighting: PolyTextureLightingMode = currentOptions.textureLighting ?? "baked";
+    const renderOptions = {
+      directionalLight: currentOptions.directionalLight,
+      ambientLight: currentOptions.ambientLight,
+      textureLighting,
+      textureQuality: currentOptions.textureQuality,
+      seamBleed: currentOptions.seamBleed,
+      strategies: currentOptions.strategies,
+    };
+    const shaded = shadedSolidPlanForNormal(
+      item.plan,
+      polygon,
+      item.plan.normal,
+      textureLighting,
+      renderOptions,
+    );
+    applySolidPaint(item.element, shaded, textureLighting);
+    return true;
+  }
+
+  function tryUpdatePolygonColorOnly(entry: MeshEntry, polygonIndex: number, color: string | undefined): boolean {
+    const polygon = entry.polygons[polygonIndex];
+    if (!polygon) return false;
+    const item = renderedItemForPolygon(entry, polygonIndex);
+    if (!item) return false;
+    const textureLighting = currentOptions.textureLighting ?? "baked";
+    if (textureLighting === "dynamic") {
+      applyDynamicColorVars(item.element, color);
+      return true;
+    }
+    if (textureLighting === "baked") {
+      return applyBakedSolidColor(item, polygon);
+    }
+    return false;
+  }
+
+  function tryUpdatePolygonDataOnly(entry: MeshEntry, polygonIndex: number): boolean {
+    const polygon = entry.polygons[polygonIndex];
+    if (!polygon) return false;
+    const item = renderedItemForPolygon(entry, polygonIndex);
+    if (!item) return false;
+    applyPolygonDataAttrs(item.element, polygon);
+    return true;
+  }
+
+  function tryUpdatePolygonLeafOnly(entry: MeshEntry, polygonIndex: number, partialKeys: string[]): boolean {
+    if (partialKeys.length === 0 || !partialKeys.every((key) => key === "color" || key === "data")) {
+      return false;
+    }
+    if (
+      partialKeys.includes("color") &&
+      !tryUpdatePolygonColorOnly(entry, polygonIndex, entry.polygons[polygonIndex]?.color)
+    ) {
+      return false;
+    }
+    if (partialKeys.includes("data") && !tryUpdatePolygonDataOnly(entry, polygonIndex)) {
+      return false;
+    }
+    return true;
   }
 
   // Emits the per-mesh shadow `<svg>`. Same path for both lighting modes:
@@ -1913,19 +2018,32 @@ export function createPolyScene(
       seamBleed: currentOptions.seamBleed,
       strategies: currentOptions.strategies,
     };
-    const solidPaintDefaults = getSolidPaintDefaults(entry.polygons, renderOptions);
-    applySolidPaintVars(entry.wrapper, solidPaintDefaults);
-    const renderOptionsWithDefaults = {
-      ...renderOptions,
-      solidPaintDefaults,
-    };
-    const atlas = (
-      entry.stableDom
-        ? renderPolygonsWithStableTriangles(entry.polygons, renderOptionsWithDefaults)
-        : null
-    ) ?? renderPolygonsWithTextureAtlas(entry.polygons, renderOptionsWithDefaults);
-    entry.rendered = atlas.rendered;
-    entry.disposeAtlas = atlas.dispose;
+    const atlas = entry.stableDom
+      ? (() => {
+          const solidPaintDefaults = getSolidPaintDefaults(entry.polygons, renderOptions);
+          applySolidPaintVars(entry.wrapper, solidPaintDefaults);
+          return renderPolygonsWithStableTriangles(entry.polygons, {
+            ...renderOptions,
+            solidPaintDefaults,
+          }) ?? renderPolygonsWithTextureAtlas(entry.polygons, {
+            ...renderOptions,
+            solidPaintDefaults,
+          });
+        })()
+      : renderPolygonsWithTextureAtlas(entry.polygons, {
+          ...renderOptions,
+          computeSolidPaintDefaults: true,
+          skipDynamicNormalVars: currentOptions.textureLighting === "dynamic",
+        } as typeof renderOptions & { computeSolidPaintDefaults: true });
+    if (!entry.stableDom) {
+      applySolidPaintVars(
+        entry.wrapper,
+        (atlas as { solidPaintDefaults?: SolidPaintDefaults }).solidPaintDefaults ?? {},
+      );
+    }
+    setRendered(entry, atlas.rendered, atlas.dispose);
+    entry.skipBucketNormalCleanupOnce =
+      currentOptions.textureLighting === "dynamic" && !entry.stableDom;
     recomputeCameraCullGroups(entry);
     syncMountedRendered(entry);
     emitShadowLeaves(entry);
@@ -1999,8 +2117,7 @@ export function createPolyScene(
     if (atlas) {
       const solidPaintDefaults = getSolidPaintDefaults(entry.polygons, renderOptions);
       applySolidPaintVars(entry.wrapper, solidPaintDefaults);
-      entry.rendered = atlas.rendered;
-      entry.disposeAtlas = atlas.dispose;
+      setRendered(entry, atlas.rendered, atlas.dispose);
       recomputeCameraCullGroups(entry);
       syncMountedRendered(entry);
       emitShadowLeaves(entry);
@@ -2009,7 +2126,10 @@ export function createPolyScene(
 
     const asyncAtlas = await renderPolygonsWithTextureAtlasAsync(
       entry.polygons,
-      renderOptions,
+      {
+        ...renderOptions,
+        skipDynamicNormalVars: currentOptions.textureLighting === "dynamic",
+      } as typeof renderOptions & { skipDynamicNormalVars: boolean },
       shouldCancel,
     );
     if (shouldCancel()) {
@@ -2017,8 +2137,9 @@ export function createPolyScene(
       return false;
     }
     applySolidPaintVars(entry.wrapper, asyncAtlas.solidPaintDefaults);
-    entry.rendered = asyncAtlas.rendered;
-    entry.disposeAtlas = asyncAtlas.dispose;
+    setRendered(entry, asyncAtlas.rendered, asyncAtlas.dispose);
+    entry.skipBucketNormalCleanupOnce =
+      currentOptions.textureLighting === "dynamic" && !entry.stableDom;
     recomputeCameraCullGroups(entry);
     const mounted = await syncMountedRenderedChunked(entry, shouldCancel);
     if (mounted) emitShadowLeaves(entry);
@@ -2118,12 +2239,14 @@ export function createPolyScene(
       wrapper,
       parseResult,
       rendered: [],
+      renderedByPolygonIndex: [],
       shadowRendered: [],
       polygons: sourcePolygons,
       voxelSource: parseResult.voxelSource,
       disposed: false,
       stableDom: stableDomOnUpdate,
       hasBuckets: false,
+      skipBucketNormalCleanupOnce: false,
       excludeFromAutoCenter: !!transformIn.excludeFromAutoCenter,
       castShadow: !!transformIn.castShadow,
       receiveShadow: !!transformIn.receiveShadow,
@@ -2372,8 +2495,12 @@ export function createPolyScene(
             currentTriangleFrameVersion++;
             materializedTriangleFramePolygons = null;
             materializedTriangleFrameVersion = -1;
-            recomputeCameraCullGroups(entry);
-            syncMountedRenderedForCameraChange(entry, true);
+            if (canDomCullCamera(entry)) {
+              recomputeCameraCullGroups(entry);
+              syncMountedRenderedForCameraChange(entry, true);
+            } else {
+              syncCameraCullSignature(entry);
+            }
             return true;
           }
         }
@@ -2419,6 +2546,10 @@ export function createPolyScene(
         clearCurrentTriangleFrame();
         entry.voxelSource = undefined;
         Object.assign(entry.polygons[idx], partial);
+        const partialKeys = Object.keys(partial);
+        if (tryUpdatePolygonLeafOnly(entry, idx, partialKeys)) {
+          return;
+        }
         renderEntry(entry);
       },
       async setPolygonsChunked(polygons: Polygon[], options?: {
@@ -2582,7 +2713,7 @@ export function createPolyScene(
   }
 
   function applyCamera(): void {
-    applySceneStyle(sceneEl, currentOptions);
+    applySceneCameraTransform(sceneEl);
     for (const entry of meshes) syncMountedRenderedForCameraChange(entry);
   }
 

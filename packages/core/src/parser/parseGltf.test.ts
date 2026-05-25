@@ -158,6 +158,16 @@ describe("parseGltf — animated fixture (FishAnimated.glb)", () => {
     expect(totalDelta).toBeGreaterThan(1);
   });
 
+  it("does not mutate previously sampled polygons when reusing animation caches", () => {
+    const result = parseGltf(loadGlbFile("FishAnimated.glb"));
+    const first = result.animation!.sample(0, 0.125);
+    const firstVertexSnapshot = first[0]!.vertices.map((vertex) => [...vertex]);
+
+    result.animation!.sample(0, 0.375);
+
+    expect(first[0]!.vertices).toEqual(firstVertexSnapshot);
+  });
+
   it("keeps robot running samples aligned with rest-pose triangle filtering", () => {
     const result = parseGltf(loadGlbFile("poly-pizza", "animated-robot.glb"), {
       gridShift: 0,

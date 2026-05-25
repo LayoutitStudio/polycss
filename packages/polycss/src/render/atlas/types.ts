@@ -27,6 +27,8 @@ export interface RenderTextureAtlasOptions {
 export interface InternalRenderTextureAtlasOptions extends RenderTextureAtlasOptions {
   seamBleed?: number;
   seamEdges?: Set<number>;
+  computeSolidPaintDefaults?: boolean;
+  skipDynamicNormalVars?: boolean;
   optimizeStableTriangleStyle?: boolean;
   stableTriangleDebug?: "transform-only" | "plan-only";
   stableTriangleUpdateMode?: "full" | "transform-only" | "color-only";

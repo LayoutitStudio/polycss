@@ -22,6 +22,7 @@ export function setInlineStyleProperty(el: HTMLElement, property: string, value:
 export function removeInlineStyleProperty(el: HTMLElement, property: string): void {
   const current = el.getAttribute("style") ?? "";
   if (!current) return;
+  if (!current.toLowerCase().includes(property.toLowerCase())) return;
   const escaped = property.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const matcher = new RegExp(`^\\s*${escaped}\\s*:`, "i");
   const next = current
@@ -31,6 +32,32 @@ export function removeInlineStyleProperty(el: HTMLElement, property: string): vo
     .join(";");
   if (next) el.setAttribute("style", next);
   else el.removeAttribute("style");
+}
+
+export function formatInitialSolidPaintStyle(
+  entry: TextureAtlasPlan,
+  textureLighting: PolyTextureLightingMode,
+  solidPaintDefaults?: SolidPaintDefaults,
+  skipDynamicNormalVars = false,
+): string {
+  if (textureLighting === "dynamic") {
+    const base = parseHex(entry.polygon.color ?? "#cccccc");
+    let style = skipDynamicNormalVars
+      ? ""
+      : `;--pnx:${entry.normal[0].toFixed(4)}` +
+        `;--pny:${entry.normal[1].toFixed(4)}` +
+        `;--pnz:${entry.normal[2].toFixed(4)}`;
+    if (rgbKey(base) !== solidPaintDefaults?.dynamicColorKey) {
+      style +=
+        `;--psr:${(base.r / 255).toFixed(4)}` +
+        `;--psg:${(base.g / 255).toFixed(4)}` +
+        `;--psb:${(base.b / 255).toFixed(4)}`;
+    }
+    return style;
+  }
+  return entry.shadedColor && entry.shadedColor !== solidPaintDefaults?.paintColor
+    ? `;color:${entry.shadedColor}`
+    : "";
 }
 
 export function applyDynamicNormalVars(el: HTMLElement, entry: TextureAtlasPlan): void {

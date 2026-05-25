@@ -16,9 +16,8 @@ import { formatCssLength, formatMatrix3dValues, formatSolidQuadMatrix } from "@l
 import { shadePolygon } from "@layoutit/polycss-core";
 import {
   setInlineStyleProperty,
-  removeInlineStyleProperty,
   applySolidPaint,
-  applyDynamicNormalVars,
+  formatInitialSolidPaintStyle,
 } from "./paintDefaults";
 import {
   formatBorderShapeElementStyle,
@@ -35,20 +34,36 @@ import {
 } from "@layoutit/polycss-core";
 
 export const ELEMENT_DATA_KEYS = new WeakMap<HTMLElement, string[]>();
+const ELEMENT_DATA_VALUES = new WeakMap<HTMLElement, Map<string, string>>();
 
 export function applyPolygonDataAttrs(el: HTMLElement, polygon: Polygon): void {
   const previousDataKeys = ELEMENT_DATA_KEYS.get(el);
-  if (previousDataKeys) {
-    for (const key of previousDataKeys) el.removeAttribute(`data-${key}`);
+  const previousDataValues = ELEMENT_DATA_VALUES.get(el);
+  if (!polygon.data && (!previousDataKeys || previousDataKeys.length === 0)) {
+    (el as SolidTriangleElement).__polycssHasDataAttrs = false;
+    return;
   }
-  const nextDataKeys: string[] = [];
+  const nextDataValues = new Map<string, string>();
   if (polygon.data) {
     for (const [k, v] of Object.entries(polygon.data)) {
-      el.setAttribute(`data-${k}`, String(v));
-      nextDataKeys.push(k);
+      nextDataValues.set(k, String(v));
     }
   }
-  ELEMENT_DATA_KEYS.set(el, nextDataKeys);
+  if (previousDataKeys) {
+    for (const key of previousDataKeys) {
+      if (!nextDataValues.has(key)) el.removeAttribute(`data-${key}`);
+    }
+  }
+  for (const [key, value] of nextDataValues) {
+    if (previousDataValues?.get(key) !== value) {
+      el.setAttribute(`data-${key}`, value);
+    }
+  }
+  const nextDataKeys = Array.from(nextDataValues.keys());
+  if (nextDataKeys.length > 0) ELEMENT_DATA_KEYS.set(el, nextDataKeys);
+  else ELEMENT_DATA_KEYS.delete(el);
+  if (nextDataValues.size > 0) ELEMENT_DATA_VALUES.set(el, nextDataValues);
+  else ELEMENT_DATA_VALUES.delete(el);
   (el as SolidTriangleElement).__polycssHasDataAttrs = nextDataKeys.length > 0;
 }
 
@@ -61,6 +76,7 @@ export function applyAtlasBackground(
   page: TextureAtlasPage,
   textureLighting: PolyTextureLightingMode,
   entry: PackedTextureAtlasEntry,
+  preserveDynamicNormalVars = textureLighting === "dynamic",
 ): void {
   if (!page.url) return;
   const url = `url(${page.url})`;
@@ -69,38 +85,33 @@ export function applyAtlasBackground(
   const atlasCanonicalSize = atlasCanonicalSizeForEntry(entry);
   const pos = `${formatCssLength((-entry.x / width) * atlasCanonicalSize)} ${formatCssLength((-entry.y / height) * atlasCanonicalSize)}`;
   const size = `${formatCssLength((page.width / width) * atlasCanonicalSize)} ${formatCssLength((page.height / height) * atlasCanonicalSize)}`;
+  const atlasBaseStyle =
+    `transform:matrix3d(${entry.atlasMatrix})` +
+    `;--polycss-atlas-size:${atlasCanonicalSize}px`;
+  const dynamicBaseStyle =
+    `${atlasBaseStyle}` +
+    `;--polycss-atlas-position:${pos}` +
+    `;--polycss-atlas-image-size:${size}`;
   if (textureLighting === "dynamic") {
-    setInlineStyleProperty(el, "background-image", url);
-    setInlineStyleProperty(el, "background-position", pos);
-    setInlineStyleProperty(el, "background-size", size);
+    const normalStyle = preserveDynamicNormalVars
+      ? `;--pnx:${entry.normal[0].toFixed(4)}` +
+        `;--pny:${entry.normal[1].toFixed(4)}` +
+        `;--pnz:${entry.normal[2].toFixed(4)}`
+      : "";
+    // Dynamic mode masks the atlas image so the background-color tint only
+    // paints inside the polygon shape.
+    el.setAttribute(
+      "style",
+      dynamicBaseStyle +
+        `;--polycss-atlas-url:${url}` +
+        normalStyle,
+    );
   } else {
-    setInlineStyleProperty(el, "background", `${url} ${pos} / ${size} no-repeat`);
-  }
-  // Dynamic mode also masks the entire <i> by the atlas image so the
-  // background-color tint only paints inside the polygon shape (W3C
-  // multiply with transparent backdrop reduces to source).
-  if (textureLighting === "dynamic") {
-    setInlineStyleProperty(el, "mask-image", url);
-    setInlineStyleProperty(el, "mask-mode", "alpha");
-    setInlineStyleProperty(el, "mask-position", pos);
-    setInlineStyleProperty(el, "mask-size", size);
-    setInlineStyleProperty(el, "mask-repeat", "no-repeat");
-    // Vendor-prefixed twins for older Safari. setProperty avoids the
-    // deprecation warnings on the camelCase properties in lib.dom.
-    setInlineStyleProperty(el, "-webkit-mask-image", url);
-    setInlineStyleProperty(el, "-webkit-mask-position", pos);
-    setInlineStyleProperty(el, "-webkit-mask-size", size);
-    setInlineStyleProperty(el, "-webkit-mask-repeat", "no-repeat");
-  } else {
-    removeInlineStyleProperty(el, "mask-image");
-    removeInlineStyleProperty(el, "mask-mode");
-    removeInlineStyleProperty(el, "mask-position");
-    removeInlineStyleProperty(el, "mask-size");
-    removeInlineStyleProperty(el, "mask-repeat");
-    removeInlineStyleProperty(el, "-webkit-mask-image");
-    removeInlineStyleProperty(el, "-webkit-mask-position");
-    removeInlineStyleProperty(el, "-webkit-mask-size");
-    removeInlineStyleProperty(el, "-webkit-mask-repeat");
+    el.setAttribute(
+      "style",
+      atlasBaseStyle +
+        `;background:${url} ${pos} / ${size} no-repeat`,
+    );
   }
 }
 
@@ -130,21 +141,6 @@ export function updateAtlasElementWithStablePlan(
   }
   applyPolygonDataAttrs(el, polygon);
   return true;
-}
-
-export function clearAtlasImageStyles(el: HTMLElement): void {
-  el.style.backgroundImage = "";
-  el.style.backgroundPosition = "";
-  el.style.backgroundSize = "";
-  el.style.maskImage = "";
-  el.style.maskMode = "";
-  el.style.maskPosition = "";
-  el.style.maskSize = "";
-  el.style.maskRepeat = "";
-  el.style.removeProperty("-webkit-mask-image");
-  el.style.removeProperty("-webkit-mask-position");
-  el.style.removeProperty("-webkit-mask-size");
-  el.style.removeProperty("-webkit-mask-repeat");
 }
 
 export function shadedSolidPlanForNormal(
@@ -230,11 +226,15 @@ export function createSolidElement(
   textureLighting: PolyTextureLightingMode,
   doc: Document,
   solidPaintDefaults?: SolidPaintDefaults,
+  skipDynamicNormalVars = false,
 ): HTMLElement {
   const el = doc.createElement("b");
-  el.setAttribute("style", `transform:matrix3d(${formatSolidQuadMatrix(entry)})`);
+  el.setAttribute(
+    "style",
+    `transform:matrix3d(${formatSolidQuadMatrix(entry)})` +
+      formatInitialSolidPaintStyle(entry, textureLighting, solidPaintDefaults, skipDynamicNormalVars),
+  );
   applyPolygonDataAttrs(el, entry.polygon);
-  applySolidPaint(el, entry, textureLighting, solidPaintDefaults);
 
   return el;
 }
@@ -244,11 +244,15 @@ export function createBorderShapeSolidElement(
   textureLighting: PolyTextureLightingMode,
   doc: Document,
   solidPaintDefaults?: SolidPaintDefaults,
+  skipDynamicNormalVars = false,
 ): HTMLElement {
   const el = doc.createElement("i");
-  el.setAttribute("style", formatBorderShapeElementStyle(entry));
+  el.setAttribute(
+    "style",
+    formatBorderShapeElementStyle(entry) +
+      formatInitialSolidPaintStyle(entry, textureLighting, solidPaintDefaults, skipDynamicNormalVars),
+  );
   applyPolygonDataAttrs(el, entry.polygon);
-  applySolidPaint(el, entry, textureLighting, solidPaintDefaults);
 
   return el;
 }
@@ -259,12 +263,15 @@ export function createCornerShapeSolidElement(
   textureLighting: PolyTextureLightingMode,
   doc: Document,
   solidPaintDefaults?: SolidPaintDefaults,
+  skipDynamicNormalVars = false,
 ): HTMLElement {
   const el = doc.createElement("u");
-  el.setAttribute("style", formatCornerShapeElementStyle(entry, geometry));
+  el.setAttribute(
+    "style",
+    formatCornerShapeElementStyle(entry, geometry) +
+      formatInitialSolidPaintStyle(entry, textureLighting, solidPaintDefaults, skipDynamicNormalVars),
+  );
   applyPolygonDataAttrs(el, entry.polygon);
-  applySolidPaint(el, entry, textureLighting, solidPaintDefaults);
-  setInlineStyleProperty(el, "background", "currentColor");
 
   return el;
 }
@@ -274,11 +281,15 @@ export function createProjectiveSolidElement(
   textureLighting: PolyTextureLightingMode,
   doc: Document,
   solidPaintDefaults?: SolidPaintDefaults,
+  skipDynamicNormalVars = false,
 ): HTMLElement {
   const el = doc.createElement("b");
-  el.setAttribute("style", `transform:matrix3d(${entry.projectiveMatrix})`);
+  el.setAttribute(
+    "style",
+    `transform:matrix3d(${entry.projectiveMatrix})` +
+      formatInitialSolidPaintStyle(entry, textureLighting, solidPaintDefaults, skipDynamicNormalVars),
+  );
   applyPolygonDataAttrs(el, entry.polygon);
-  applySolidPaint(el, entry, textureLighting, solidPaintDefaults);
 
   return el;
 }
@@ -334,17 +345,22 @@ export function createAtlasElement(
   entry: PackedTextureAtlasEntry,
   textureLighting: PolyTextureLightingMode,
   doc: Document,
+  skipDynamicNormalVars = false,
 ): HTMLElement {
   const el = doc.createElement("s");
-  el.setAttribute("style", `transform:matrix3d(${entry.atlasMatrix})`);
-  applyPolygonDataAttrs(el, entry.polygon);
-  const width = entry.canvasW || 1;
-  const height = entry.canvasH || 1;
   const atlasCanonicalSize = atlasCanonicalSizeForEntry(entry);
-  setInlineStyleProperty(el, "--polycss-atlas-size", `${atlasCanonicalSize}px`);
-  setInlineStyleProperty(el, "background-position", `${formatCssLength((-entry.x / width) * atlasCanonicalSize)} ${formatCssLength((-entry.y / height) * atlasCanonicalSize)}`);
-  setInlineStyleProperty(el, "opacity", "0");
-
-  if (textureLighting === "dynamic") applyDynamicNormalVars(el, entry);
+  const dynamicNormalStyle = textureLighting === "dynamic" && !skipDynamicNormalVars
+    ? `;--pnx:${entry.normal[0].toFixed(4)}` +
+      `;--pny:${entry.normal[1].toFixed(4)}` +
+      `;--pnz:${entry.normal[2].toFixed(4)}`
+    : "";
+  el.setAttribute(
+    "style",
+    `transform:matrix3d(${entry.atlasMatrix})` +
+      `;--polycss-atlas-size:${atlasCanonicalSize}px` +
+      `;opacity:0` +
+      dynamicNormalStyle,
+  );
+  applyPolygonDataAttrs(el, entry.polygon);
   return el;
 }

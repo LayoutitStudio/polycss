@@ -16,6 +16,14 @@
  *   bench/.generated/polycss-vue.js
  *                              ← Vue entry (bench/entries/vue.ts) bundled
  *                                with Vue 3 + @layoutit/polycss-vue
+ *   bench/.generated/polycss-html-mount.js
+ *                              ← leaf HTML chunk mount benchmark entry
+ *   bench/.generated/polycss-async-scene-mount.js
+ *                              ← internal async scene chunk mount benchmark entry
+ *   bench/.generated/polycss-sync-scene-add.js
+ *                              ← synchronous scene.add renderer benchmark entry
+ *   bench/.generated/polycss-atlas-background.js
+ *                              ← atlas page background reveal benchmark entry
  *
  * Why not reuse the published dists? The packages keep workspace-peer
  * imports as bare specifiers (e.g. `@layoutit/polycss-core`), which the browser
@@ -91,6 +99,26 @@ const targets = [
     label: "vue entry",
     entry: resolve(__dirname, "entries/vue.ts"),
     out: resolve(bundleDir, "polycss-vue.js"),
+  },
+  {
+    label: "HTML chunk mount bench entry",
+    entry: resolve(__dirname, "entries/htmlMount.ts"),
+    out: resolve(bundleDir, "polycss-html-mount.js"),
+  },
+  {
+    label: "async scene mount bench entry",
+    entry: resolve(__dirname, "entries/asyncSceneMount.ts"),
+    out: resolve(bundleDir, "polycss-async-scene-mount.js"),
+  },
+  {
+    label: "sync scene.add bench entry",
+    entry: resolve(__dirname, "entries/syncSceneAdd.ts"),
+    out: resolve(bundleDir, "polycss-sync-scene-add.js"),
+  },
+  {
+    label: "atlas background bench entry",
+    entry: resolve(__dirname, "entries/atlasBackground.ts"),
+    out: resolve(bundleDir, "polycss-atlas-background.js"),
   },
 ];
 

@@ -16,6 +16,8 @@ export type PerspectiveMode = "perspective" | "orthographic";
 
 export type WorkbenchMeshResolution = MeshResolution | "disabled";
 
+export type BuilderGridTone = "gray" | "dark";
+
 export function activeMeshResolution(meshResolution: WorkbenchMeshResolution): MeshResolution {
   return meshResolution === "disabled" ? "lossy" : meshResolution;
 }
@@ -92,4 +94,6 @@ export interface SceneOptionsState {
   /** Grid resolution in world units (cell side length). Drives both
    *  the rendered grid and snap-to-grid rounding. */
   gridResolution: number;
+  /** Builder-only grid line color preset. */
+  gridTone: BuilderGridTone;
 }
