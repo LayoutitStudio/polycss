@@ -66,5 +66,5 @@ export const DEFAULT_SCENE: SceneOptionsState = {
   fpvRenderDistance: 40,
   snapToGrid: true,
   gridResolution: BUILDER_DEFAULT_GRID_RESOLUTION,
-  gridTone: "gray",
+  gridTone: "dark",
 };

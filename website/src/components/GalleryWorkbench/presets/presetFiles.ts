@@ -3,7 +3,6 @@ import {
   MONOGON_ANCIENT_ENVIRONMENT_ATTRIBUTION,
   MINI_MIKES_METRO_MINIS_ATTRIBUTION,
   MONOGON_DESERT_TOWN_ATTRIBUTION,
-  MONOGON_TINY_VOXEL_DUNGEON_ATTRIBUTION,
   MONOGON_COUNTRY_SIDE_ATTRIBUTION,
   MONOGON_CYBERPUNK_CITY_ATTRIBUTION,
   MONOGON_VOXEL_PLANE_ATTRIBUTION,
@@ -92,16 +91,6 @@ const NASA_GLB_PRESET_FILES: GalleryPresetFile[] = [
       "NASA/Ames Research Center",
       "https://science.nasa.gov/3d-resources/kepler-b/",
       372,
-    ),
-  },
-  {
-    file: "nasa/mars-global-surveyor.glb",
-    label: "Mars Global Surveyor",
-    category: "Vehicles",
-    attribution: nasa3dAttribution(
-      "NASA/JPL/Eyes on the Solar System",
-      "https://science.nasa.gov/3d-resources/mars-global-surveyor/",
-      6194,
     ),
   },
   {
@@ -361,7 +350,6 @@ export const GLB_PRESET_FILES: GalleryPresetFile[] = [
   { file: "urban/ATM.glb", category: "Urban Pack" },
   { file: "urban/Planter & Bushes.glb", label: "Planter & Bushes", category: "Urban Pack" },
   { file: "urban/Man.glb", label: "Urban Man", category: "Urban Pack" },
-  { file: "urban/Adventurer.glb", category: "Urban Pack" },
   { file: "urban/Animated Woman.glb", label: "Woman", category: "Urban Pack" },
 ];
 
@@ -443,7 +431,8 @@ export const POLY_PIZZA_PRESET_FILES: GalleryPresetFile[] = [
   {
     file: "poly-pizza/animated-enemy-small.glb",
     label: "Enemy Small",
-    category: "Animated",
+    category: "Characters",
+    galleryBucket: "Solid",
     attribution: quaterniusAttribution("https://poly.pizza/m/4LjT020LQh", 1572),
   },
   {
@@ -619,17 +608,6 @@ export const POLY_PIZZA_PRESET_FILES: GalleryPresetFile[] = [
     },
   },
   {
-    file: "poly-pizza/character-animated.glb",
-    label: "Character",
-    category: "Characters",
-    attribution: {
-      creator: "Quaternius",
-      license: "CC0 1.0",
-      sourceUrl: "https://poly.pizza/m/DgOCW9ZCRJ",
-      tris: 1246,
-    },
-  },
-  {
     file: "poly-pizza/human-dude-guy.glb",
     label: "Human Dude Guy",
     category: "Characters",
@@ -649,17 +627,6 @@ export const POLY_PIZZA_PRESET_FILES: GalleryPresetFile[] = [
       license: "CC0 1.0",
       sourceUrl: "https://poly.pizza/m/HMnuH5geEG",
       tris: 1216,
-    },
-  },
-  {
-    file: "poly-pizza/rabbit-blond.glb",
-    label: "Rabbit Blond",
-    category: "Characters",
-    attribution: {
-      creator: "Quaternius",
-      license: "CC0 1.0",
-      sourceUrl: "https://poly.pizza/m/cMsI6FDhNx",
-      tris: 1570,
     },
   },
   {
@@ -801,9 +768,7 @@ export const VOX_PRESET_FILES: GalleryPresetFile[] = [
     attribution: MONOGON_ANCIENT_ENVIRONMENT_ATTRIBUTION,
   },
   { file: "army.vox", label: "Army", category: "VOX", attribution: MINI_MIKES_METRO_MINIS_ATTRIBUTION },
-  { file: "desert.vox", label: "Desert", category: "VOX", attribution: MONOGON_DESERT_TOWN_ATTRIBUTION },
   { file: "desert2.vox", label: "Desert 2", category: "VOX", attribution: MONOGON_DESERT_TOWN_ATTRIBUTION },
-  { file: "Garden.vox", category: "VOX", attribution: MONOGON_TINY_VOXEL_DUNGEON_ATTRIBUTION },
   { file: "Building03.vox", label: "Desert Building", category: "VOX", attribution: MONOGON_DESERT_TOWN_ATTRIBUTION },
   { file: "HUT.vox", label: "Hut", category: "VOX", attribution: MONOGON_COUNTRY_SIDE_ATTRIBUTION },
   { file: "house.vox", label: "House", category: "VOX", attribution: MINI_MIKES_METRO_MINIS_ATTRIBUTION },

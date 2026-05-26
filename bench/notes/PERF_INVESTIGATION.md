@@ -72,7 +72,7 @@ node bench/nonvoxel-visual-compare.mjs
 | Standard perf | `chicken`, `rock1`, `saucer` | Cross-renderer and dynamic-light smoke. |
 | Non-voxel rotation | `chicken`, `rock1`, `saucer`, `teapot`, `ducky`, `elephant`, `policecar`, `bicycle` | Broad baked camera-rotation triage. |
 | Voxel GPU-hard | `AncientCrashSite`, `skyscraper`, long-window `army` | Current target class for voxel renderer work. |
-| Voxel counterexamples | `obj_house3`, `scene_mechanic2`, `Treasure`, `desert2`, `Garden` | Catch order, wrapper, and backend-specific false positives. |
+| Voxel counterexamples | `obj_house3`, `scene_mechanic2`, `Treasure`, `desert2` | Catch order, wrapper, and backend-specific false positives. |
 
 ## Current Baselines
 

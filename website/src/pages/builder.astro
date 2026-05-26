@@ -2,11 +2,35 @@
 import { BuilderWorkbench } from '../components/BuilderWorkbench';
 import DocsHeader from '../components/DocsHeader.astro';
 import '../styles/custom.css';
+
+const title = 'Builder | PolyCSS';
+const description = 'Compose PolyCSS scenes in the browser with primitive shapes, imported meshes, terrain, lighting, and DOM-rendered 3D controls.';
+const canonical = 'https://polycss.com/builder/';
+const socialImage = 'https://polycss.com/polycss-github.png';
+const socialImageAlt = 'PolyCSS logo, a rendered polygon duck, and DOM markup.';
 ---
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>Builder</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{title}</title>
+    <meta name="description" content={description} />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:url" content={canonical} />
+    <meta property="og:image" content={socialImage} />
+    <meta property="og:image:width" content="1280" />
+    <meta property="og:image:height" content="640" />
+    <meta property="og:image:alt" content={socialImageAlt} />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="PolyCSS" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content={title} />
+    <meta name="twitter:description" content={description} />
+    <meta name="twitter:image" content={socialImage} />
+    <meta name="twitter:image:alt" content={socialImageAlt} />
+    <link rel="canonical" href={canonical} />
+    <link rel="icon" type="image/x-icon" href="/favicon.ico" />
   </head>
   <body>
     <div class="page">
@@ -19,6 +43,12 @@ import '../styles/custom.css';
   <style>
     :global(:root) {
       --sl-nav-height: 72px;
+    }
+
+    @media (max-width: 38rem) {
+      :global(:root) {
+        --sl-nav-height: 90px;
+      }
     }
 
     :global(html, body) {

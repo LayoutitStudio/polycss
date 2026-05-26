@@ -8,15 +8,16 @@ import PolyDemo from '../../../components/PolyDemo.astro';
 
 PolyCSS loads 3D mesh files (OBJ, glTF, GLB, and MagicaVoxel VOX) and renders them as DOM elements. UV textures are extracted from OBJ/glTF/GLB files and packed into generated atlas pages; each atlas-backed polygon is an internal `<s>` leaf that uses CSS background positioning.
 
-## Live demo: UV-textured GLB
+## Live demo: UV-textured OBJ
 
-The tree below uses `tree.glb`, which has embedded UV textures. Each textured triangle is a DOM sprite whose background is a generated atlas page.
+The broken stone slab below uses `stone.obj` with a companion `stone.mtl` file that points at `stone_low_Material_Diffuse.png`. Each UV-mapped face is a DOM sprite whose background is a generated atlas page.
 
 <PolyDemo
-  id="textures-tree-demo"
-  model="/gallery/glb/tree.glb"
-  controls='["zoom","rotX","rotY","perspective","animate"]'
-  defaults='{"rotX":65,"rotY":45,"zoom":0.1}'
+  id="textures-stone-slab-demo"
+  model="/gallery/obj/opengameart/broken-stone-slab/stone.obj"
+  mtl="/gallery/obj/opengameart/broken-stone-slab/stone.mtl"
+  controls='["zoom","rotX","rotY","animate","interactive"]'
+  defaults='{"rotX":65,"rotY":45,"zoom":0.08,"interactive":true}'
 />
 
 ## Declarative loading: the mesh element

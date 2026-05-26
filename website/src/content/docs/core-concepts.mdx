@@ -9,11 +9,11 @@ This page covers the mental model behind PolyCSS. Each section describes a build
 
 ## A single block
 
-Where voxcss used to render a single voxel cube, PolyCSS renders any regular polyhedron the same way: each face becomes one DOM element. The dodecahedron below is 12 native pentagons (not 36 triangles): flip the shape selector to see how the same renderer handles every Platonic solid.
+Where voxcss used to render a single voxel cube, PolyCSS renders any regular polyhedron the same way: each face becomes one DOM element. The demo starts on an icosahedron; flip the shape selector to see how the same renderer handles every Platonic solid, including a dodecahedron with 12 native pentagons.
 
 <PolyDemo
   id="block-demo"
-  generator="dodecahedron"
+  generator="icosahedron"
   generatorParams='{"radius":16}'
   controls='["shape","rotX","rotY","zoom","animate","interactive"]'
   defaults='{"rotX":65,"rotY":45,"interactive":true,"zoom":0.1,"animate":true}'

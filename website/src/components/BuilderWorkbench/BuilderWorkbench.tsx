@@ -140,6 +140,7 @@ export default function BuilderWorkbench() {
   const [builderTool, setBuilderTool] = useState<BuilderToolMode>("move");
   const [selectedShapeId, setSelectedShapeId] = useState<string | null>(null);
   const [placingShapeId, setPlacingShapeId] = useState<string | null>(null);
+  const [importError, setImportError] = useState<string | null>(null);
   const targetMode: TargetMode = "face";
 
   const {
@@ -160,6 +161,7 @@ export default function BuilderWorkbench() {
   } = usePlacements({
     meshResolution: sceneOptions.meshResolution,
     gridResolution: sceneOptions.gridResolution,
+    onImportError: setImportError,
   });
 
   // Terrain editor — engaged when toolMode is anything other than "pointer".
@@ -283,10 +285,13 @@ export default function BuilderWorkbench() {
 
     const source = importedSourceFromFiles(files);
     if (!source) {
-      console.warn("[builder] import ignored: choose a .vox, .obj, or .glb file");
+      const message = "Choose a .vox, .obj, or .glb file.";
+      setImportError(message);
+      console.warn("[builder] import ignored:", message);
       return;
     }
 
+    setImportError(null);
     void (async () => {
       const placement = await buildDroppedPlacement(source, sceneOptions.target[0], sceneOptions.target[1]);
       if (!placement) return;
@@ -295,6 +300,7 @@ export default function BuilderWorkbench() {
       setSelectedId(snapped.id);
       setSelectedShapeId(null);
       setBuilderTool("move");
+      setImportError(null);
     })();
   }, [
     appendItems,
@@ -507,6 +513,12 @@ export default function BuilderWorkbench() {
             onRemoveItem={handleDeleteItem}
             selected={selected}
           />
+          {importError ? (
+            <div className="dn-viewport-notice dn-viewport-notice--error" role="alert">
+              <span className="dn-viewport-notice__title">Import skipped</span>
+              <span className="dn-viewport-notice__body">{importError}</span>
+            </div>
+          ) : null}
           <BuilderCameraModePill dragMode={sceneOptions.dragMode} updateScene={updateScene} />
         </div>
       </main>

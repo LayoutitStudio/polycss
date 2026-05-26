@@ -12,6 +12,7 @@ import { activeMeshResolution, type WorkbenchMeshResolution } from "../../types"
 export interface UsePlacementsOptions {
   meshResolution: WorkbenchMeshResolution;
   gridResolution: number;
+  onImportError?: (message: string) => void;
 }
 
 export interface UsePlacementsResult {
@@ -44,7 +45,7 @@ export interface UsePlacementsResult {
   meshHandlesTick: number;
 }
 
-export function usePlacements({ meshResolution, gridResolution }: UsePlacementsOptions): UsePlacementsResult {
+export function usePlacements({ meshResolution, gridResolution, onImportError }: UsePlacementsOptions): UsePlacementsResult {
   const effectiveMeshResolution = activeMeshResolution(meshResolution);
   const [placedItems, setPlacedItems] = useState<PlacedItem[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -170,11 +171,12 @@ export function usePlacements({ meshResolution, gridResolution }: UsePlacementsO
         };
       } catch (e) {
         loaded?.dispose();
+        onImportError?.(e instanceof Error ? e.message : String(e));
         console.error("[builder] failed to import model", source.primaryFile.name, e);
         return null;
       }
     },
-    [effectiveMeshResolution, gridResolution],
+    [effectiveMeshResolution, gridResolution, onImportError],
   );
 
   const appendItems = useCallback((items: PlacedItem[]) => {

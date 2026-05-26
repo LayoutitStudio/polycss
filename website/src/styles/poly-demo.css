@@ -165,11 +165,16 @@
   border-radius: 0 !important;
   font-size: 13px !important;
   line-height: 1.5 !important;
+  max-width: 100%;
+  overflow-x: auto;
 }
 .poly-demo__snippet--hidden {
   display: none;
 }
 .poly-demo__snippet code {
+  display: block;
+  min-width: 100%;
+  width: max-content;
   font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace !important;
   color: #e5e9f0 !important;
   white-space: pre !important;

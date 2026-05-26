@@ -73,11 +73,6 @@ export const PRESETS = {
     options: { targetSize: 60, gridShift: 0 },
     zoom: 0.4, rotX: 65, rotY: 45,
   },
-  "garden": {
-    url: "/gallery/vox/Garden.vox",
-    options: { targetSize: 60, gridShift: 0 },
-    zoom: 0.4, rotX: 65, rotY: 45,
-  },
   "mecha-golem": {
     url: "/gallery/vox/MechaGolem.vox",
     options: { targetSize: 60, gridShift: 0 },
