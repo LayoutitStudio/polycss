@@ -13,6 +13,7 @@ import type {
   PresetModel,
 } from "../types";
 import { activeMeshResolution, type WorkbenchMeshResolution } from "../../types";
+import { assertImportedRenderedPolygonLimit } from "./importLimits";
 import { cleanupLossyBakedTextureColors } from "./lossyColorCleanup";
 import { mergeParserOptions } from "./parserOptions";
 
@@ -261,6 +262,12 @@ export async function loadDroppedModel(
         for (const url of objectUrls) URL.revokeObjectURL(url);
       },
     };
+    try {
+      assertImportedRenderedPolygonLimit(parseResult, meshResolution, source.label);
+    } catch (error) {
+      parseResult.dispose();
+      throw error;
+    }
     return {
       label: source.label,
       kind: "obj",
@@ -279,6 +286,12 @@ export async function loadDroppedModel(
 
   if (source.kind === "vox") {
     const parsed = parseVox(buf, mergeVoxParserOptions(source.preset.options, parser, meshResolution));
+    try {
+      assertImportedRenderedPolygonLimit(parsed, meshResolution, source.label);
+    } catch (error) {
+      parsed.dispose();
+      throw error;
+    }
     return {
       label: source.label,
       kind: "vox",
@@ -296,6 +309,12 @@ export async function loadDroppedModel(
   const parsedGltf = parseGltf(buf, options);
   const baked = await bakeSolidTextureSamples(parsedGltf);
   const parsed = cleanupLossyBakedTextureColors(parsedGltf, baked, { meshResolution });
+  try {
+    assertImportedRenderedPolygonLimit(parsed, meshResolution, source.label);
+  } catch (error) {
+    parsed.dispose();
+    throw error;
+  }
   return {
     label: source.label,
     kind: "glb",

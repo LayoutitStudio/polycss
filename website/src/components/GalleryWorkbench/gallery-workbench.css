@@ -370,6 +370,40 @@
   background: #000;
 }
 
+.dn-viewport-notice {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  z-index: 24;
+  width: min(520px, calc(100% - 48px));
+  max-width: calc(100vw - 48px);
+  box-sizing: border-box;
+  transform: translate(-50%, -50%);
+  display: grid;
+  gap: 8px;
+  padding: 14px 16px;
+  border-radius: 8px;
+  border: 1px solid rgba(248, 113, 113, 0.42);
+  background: rgba(16, 18, 24, 0.94);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.42);
+  color: #f8fafc;
+  pointer-events: none;
+}
+
+.dn-viewport-notice__title {
+  color: #fecaca;
+  font-size: 13px;
+  font-weight: 760;
+  line-height: 1.2;
+}
+
+.dn-viewport-notice__body {
+  color: #fca5a5;
+  font-size: 13px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
 .dn-light-helper,
 .dn-light-helper * {
   cursor: grab;

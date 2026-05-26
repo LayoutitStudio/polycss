@@ -155,6 +155,73 @@ const DEFAULT_PARSER: ParserOptionsState = {
 
 const LIGHT_HELPER_TILE = 50;
 const LIGHT_HELPER_SELECTOR = ".dn-light-helper";
+const RESPONSIVE_ZOOM_BREAKPOINT = 900;
+const RESPONSIVE_ZOOM_BOTTOM_RESERVE = 72;
+const RESPONSIVE_ZOOM_MIN_SCALE = 0.42;
+
+function clamp(value: number, min: number, max: number): number {
+  if (!Number.isFinite(value)) return min;
+  return Math.min(Math.max(value, min), max);
+}
+
+function responsiveZoomScaleForViewport(width: number, height: number): number {
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+    return 1;
+  }
+  const effectiveHeight = Math.max(1, height - RESPONSIVE_ZOOM_BOTTOM_RESERVE);
+  const widthScale = width < RESPONSIVE_ZOOM_BREAKPOINT
+    ? width / RESPONSIVE_ZOOM_BREAKPOINT
+    : 1;
+  const heightScale = effectiveHeight < RESPONSIVE_ZOOM_BREAKPOINT
+    ? effectiveHeight / RESPONSIVE_ZOOM_BREAKPOINT
+    : 1;
+  return clamp(Math.min(widthScale, heightScale), RESPONSIVE_ZOOM_MIN_SCALE, 1);
+}
+
+function initialResponsiveZoomScale(): number {
+  if (typeof window === "undefined") return 1;
+  return responsiveZoomScaleForViewport(window.innerWidth, window.innerHeight);
+}
+
+function useResponsiveViewportZoomScale(
+  viewportRef: RefObject<HTMLDivElement | null>,
+): number {
+  const [scale, setScale] = useState(initialResponsiveZoomScale);
+
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+
+    const updateScale = (width: number, height: number): void => {
+      const next = responsiveZoomScaleForViewport(width, height);
+      setScale((current) => Math.abs(current - next) < 0.005 ? current : next);
+    };
+    const readScale = (): void => {
+      const rect = viewport.getBoundingClientRect();
+      updateScale(rect.width, rect.height);
+    };
+
+    readScale();
+    window.addEventListener("resize", readScale);
+
+    let observer: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== "undefined") {
+      observer = new ResizeObserver((entries) => {
+        const rect = entries[0]?.contentRect;
+        if (rect) updateScale(rect.width, rect.height);
+        else readScale();
+      });
+      observer.observe(viewport);
+    }
+
+    return () => {
+      window.removeEventListener("resize", readScale);
+      observer?.disconnect();
+    };
+  }, [viewportRef]);
+
+  return scale;
+}
 
 interface ScreenPoint {
   x: number;
@@ -591,6 +658,23 @@ export default function GalleryWorkbench() {
   }, []);
 
   const { handleCameraChange } = useGuiCameraSync({ setSceneOptions });
+  const responsiveZoomScale = useResponsiveViewportZoomScale(viewportRef);
+  const renderSceneOptions = useMemo<SceneOptionsState>(() => {
+    if (responsiveZoomScale === 1) return sceneOptions;
+    return {
+      ...sceneOptions,
+      zoom: sceneOptions.zoom * responsiveZoomScale,
+    };
+  }, [sceneOptions, responsiveZoomScale]);
+  const handleRenderCameraChange = useCallback(
+    (camera: { rotX: number; rotY: number; zoom: number; target?: ReactVec3 }) => {
+      handleCameraChange({
+        ...camera,
+        zoom: camera.zoom / Math.max(responsiveZoomScale, 0.001),
+      });
+    },
+    [handleCameraChange, responsiveZoomScale],
+  );
 
   const dropped = useDroppedFiles({
     onDroppedSource: (source) => {
@@ -796,7 +880,7 @@ export default function GalleryWorkbench() {
     reactAnimatedPolygons: animation.reactAnimatedPolygons,
     interiorFill: sceneOptions.interiorFill,
   });
-  useLightRotationDrag(viewportRef, sceneOptions, helperScale, gizmoDragging, updateScene);
+  useLightRotationDrag(viewportRef, renderSceneOptions, helperScale, gizmoDragging, updateScene);
   const renderModelPolygons = useMemo(
     () => sceneOptions.solidMaterials
       ? withSolidMaterials(modelPolygons, parserOptions.defaultColor)
@@ -1080,7 +1164,7 @@ export default function GalleryWorkbench() {
               polygons={renderModelPolygons}
               interiorShellPolygons={interiorShellPolygons}
               parseResult={renderLoaded?.parseResult}
-              options={sceneOptions}
+              options={renderSceneOptions}
               directionalLight={directionalLight}
               ambientLight={ambientLight}
               showAxes={sceneOptions.showAxes}
@@ -1094,7 +1178,7 @@ export default function GalleryWorkbench() {
               animationDurationSeconds={activeAnimation?.duration}
               animationFrameFactory={vanillaAnimationFrameFactory}
               onBuild={setVanillaBuildMs}
-              onCameraChange={handleCameraChange}
+              onCameraChange={handleRenderCameraChange}
               enableSelection={sceneOptions.selection}
               meshId={renderLoaded?.label ?? "model"}
               onSelectionChange={setVanillaSelectedIds}
@@ -1106,7 +1190,7 @@ export default function GalleryWorkbench() {
           ) : (
             <ReactScene
               rendererDebugKey={rendererDebugKey}
-              sceneOptions={sceneOptions}
+              sceneOptions={renderSceneOptions}
               scenePolygons={renderModelPolygons}
               interiorShellPolygons={interiorShellPolygons}
               directionalLight={directionalLight}
@@ -1114,7 +1198,7 @@ export default function GalleryWorkbench() {
               textureQuality={textureQuality}
               gizmoDragging={gizmoDragging}
               setGizmoDragging={setGizmoDragging}
-              handleCameraChange={handleCameraChange}
+              handleCameraChange={handleRenderCameraChange}
               loaded={loaded}
               selectedMeshes={selectedMeshes}
               setSelectedMeshes={setSelectedMeshes}
@@ -1130,6 +1214,12 @@ export default function GalleryWorkbench() {
               helperTarget={helperTarget}
             />
           )}
+          {loadError ? (
+            <div className="dn-viewport-notice dn-viewport-notice--error" role="alert">
+              <span className="dn-viewport-notice__title">Import skipped</span>
+              <span className="dn-viewport-notice__body">{loadError}</span>
+            </div>
+          ) : null}
         </div>
         <DropOverlay active={dropped.dropActive} />
       </main>
@@ -1140,7 +1230,6 @@ export default function GalleryWorkbench() {
         id="gallery-controls-panel"
         className={mobilePanel === "controls" ? "is-mobile-open" : ""}
         loading={loading}
-        loadError={loadError}
       >
         <DockModel
           metrics={metrics}
