@@ -291,6 +291,7 @@ export function smithsonianOpenAccessAttribution(sourceUrl: string, tris: number
 
 export const GLB_PRESET_ATTRIBUTIONS: Record<string, ModelAttribution> = {
   "FishAnimated.glb": QUATERNIUS_ANIMATED_FISH_ATTRIBUTION,
+  "ClownfishAnimated.glb": QUATERNIUS_ANIMATED_FISH_ATTRIBUTION,
   "AnimatedMushnub.glb": QUATERNIUS_ANIMATED_MONSTERS_ATTRIBUTION,
   "AnimatedSnake.glb": QUATERNIUS_EASY_ENEMIES_ATTRIBUTION,
   "AnimatedWizard.glb": QUATERNIUS_ANIMATED_MONSTERS_ATTRIBUTION,

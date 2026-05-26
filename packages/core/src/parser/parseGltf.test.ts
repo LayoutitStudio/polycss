@@ -96,6 +96,7 @@ describe("parseGltf — real fixture (tree.glb)", () => {
 describe("parseGltf — animated fixture (FishAnimated.glb)", () => {
   const animatedGalleryFixtures = [
     ["FishAnimated.glb", 1],
+    ["ClownfishAnimated.glb", 1],
     ["AnimatedMushnub.glb", 9],
     ["AnimatedWizard.glb", 9],
     ["AnimatedSnake.glb", 4],
