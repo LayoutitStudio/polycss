@@ -3,6 +3,10 @@ name: Publish packages
 # Manual-only. Bumps every package under `packages/*` in lockstep (using
 # .github/scripts/bump-versions.mjs), builds them, publishes to npm, then commits
 # the version change and pushes a `v<X.Y.Z>` tag back to main.
+#
+# Trigger from the Actions tab ("Run workflow") or:
+#   gh workflow run publish-packages.yml -f bump=patch
+# (gh needs the `workflow` token scope: gh auth refresh -s workflow)
 on:
   workflow_dispatch:
     inputs:
