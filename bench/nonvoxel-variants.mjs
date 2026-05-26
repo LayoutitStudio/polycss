@@ -6,6 +6,12 @@ export const NONVOXEL_VARIANTS = [
     hypothesis: "Current vanilla JS scene-root rotation.",
   },
   {
+    id: "camera-perspective-none",
+    label: "Camera Perspective None",
+    params: { cameraPerspective: "none" },
+    hypothesis: "Use true orthographic perspective on the camera wrapper instead of the large finite stand-in.",
+  },
+  {
     id: "css-keyframes",
     label: "CSS Keyframes",
     params: { rotationDriver: "css-keyframes" },
