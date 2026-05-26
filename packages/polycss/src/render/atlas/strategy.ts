@@ -73,13 +73,20 @@ export function cornerTriangleSupported(doc: Document): boolean {
     !!css.supports("corner-top-right-shape", "bevel");
 }
 
+function firefoxNeedsLargeBorderTriangle(doc: Document): boolean {
+  const win = doc.defaultView ?? (typeof window !== "undefined" ? window : undefined);
+  const userAgent = win?.navigator?.userAgent ?? "";
+  return /\bFirefox\//.test(userAgent);
+}
+
 export function resolveSolidTrianglePrimitive(
   doc: Document,
   strategies?: PolyRenderStrategiesOption,
-): "border" | "corner-bevel" | null {
+): "border" | "border-large" | "corner-bevel" | null {
   if (strategies?.disable?.includes("u")) return null;
   if (cornerTriangleSupported(doc)) return "corner-bevel";
-  return solidTriangleSupported(doc) ? "border" : null;
+  if (!solidTriangleSupported(doc)) return null;
+  return firefoxNeedsLargeBorderTriangle(doc) ? "border-large" : "border";
 }
 
 export function projectiveQuadSupported(doc: Document): boolean {

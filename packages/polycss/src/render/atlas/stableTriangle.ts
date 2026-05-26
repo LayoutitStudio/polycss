@@ -3,6 +3,7 @@ import {
   buildSeamBleedPolygonEdges,
   DEFAULT_TILE,
   SOLID_TRIANGLE_CORNER_CLASS,
+  SOLID_TRIANGLE_LARGE_BORDER_CLASS,
   DEFAULT_MATRIX_DECIMALS,
   BASIS_EPS,
 } from "@layoutit/polycss-core";
@@ -105,6 +106,7 @@ export function applySolidTrianglePrimitive(
   const triangleEl = el as SolidTriangleElement;
   if (triangleEl.__polycssSolidTrianglePrimitive === primitive) return;
   el.classList.toggle(SOLID_TRIANGLE_CORNER_CLASS, primitive === "corner-bevel");
+  el.classList.toggle(SOLID_TRIANGLE_LARGE_BORDER_CLASS, primitive === "border-large");
   triangleEl.__polycssSolidTrianglePrimitive = primitive;
 }
 
