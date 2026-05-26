@@ -162,12 +162,6 @@ export const MONOGON_ANCIENT_ENVIRONMENT_ATTRIBUTION: ModelAttribution = {
   sourceUrl: "https://maxparata.itch.io/voxel-ancient-environment",
 };
 
-export const MONOGON_TINY_VOXEL_DUNGEON_ATTRIBUTION: ModelAttribution = {
-  creator: "monogon / Max Parata",
-  license: "CC-BY-ND 4.0",
-  sourceUrl: "https://maxparata.itch.io/tinyvoxeldungeon",
-};
-
 export const MONOGON_DESERT_TOWN_ATTRIBUTION: ModelAttribution = {
   creator: "monogon / Max Parata",
   license: "CC-BY-ND 4.0",
@@ -388,6 +382,5 @@ export const GLB_PRESET_ATTRIBUTIONS: Record<string, ModelAttribution> = {
   "urban/ATM.glb": polyPizzaCityPackAttribution("J-Toastie", "Creative Commons Attribution"),
   "urban/Planter & Bushes.glb": polyPizzaCityPackAttribution("J-Toastie", "Creative Commons Attribution"),
   "urban/Man.glb": polyPizzaCityPackAttribution("Quaternius", "CC0 1.0"),
-  "urban/Adventurer.glb": polyPizzaCityPackAttribution("Quaternius", "CC0 1.0"),
   "urban/Animated Woman.glb": polyPizzaCityPackAttribution("Quaternius", "CC0 1.0"),
 };

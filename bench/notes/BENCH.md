@@ -41,7 +41,6 @@ node bench/lossy-optimizer-bench.mjs --json bench/results/lossy-optimizer.json
 node bench/lossy-optimizer-bench.mjs --models ducky,shark,bicycle
 node bench/lossy-corpus-bench.mjs --root /tmp/polycss-model-corpus --json /tmp/polycss-temp-corpus.json
 node bench/lossy-corpus-bench.mjs --from-json bench/results/lossy-corpus.json --opportunities
-node .agents/skills/chrome-trace/scripts/trace.mjs motion --mesh garden --runs 3 --dom-samples --report --markdown-out bench/results/garden-trace.md
 node bench/perf-visual.mjs --mesh chicken --tolerance 0.005
 node bench/nonvoxel-rotation-bench.mjs --models teapot,bicycle --variants baseline,order-tile4 --run-order round-robin
 node .agents/skills/chrome-trace/scripts/trace.mjs drag --mesh teapot --degrees 360 --drag-ms 1500 --label teapot-drag --frame-details --no-print-json

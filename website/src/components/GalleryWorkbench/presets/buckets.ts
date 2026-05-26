@@ -7,11 +7,14 @@ export const ANIMATED_PRESET_IDS = new Set([
   "glb-poly-pizza-llama",
   "glb-poly-pizza-man",
   "glb-poly-pizza-pug",
-  "glb-poly-pizza-rabbit-blond",
   "glb-poly-pizza-sheep",
 ]);
 
-export function isAnimatedPreset(preset: Pick<PresetModel, "label" | "id" | "category" | "url">): boolean {
+export function isAnimatedPreset(
+  preset: Pick<PresetModel, "label" | "id" | "category" | "url" | "galleryBucket">,
+): boolean {
+  if (preset.galleryBucket) return preset.galleryBucket === "Animated";
+
   return (
     ANIMATED_PRESET_IDS.has(preset.id) ||
     preset.category === "Animated" ||
@@ -22,9 +25,10 @@ export function isAnimatedPreset(preset: Pick<PresetModel, "label" | "id" | "cat
 
 export function galleryBucketForPreset(preset: PresetModel): GalleryBucket {
   if (preset.kind === "primitive") return "Primitives";
-  if (isAnimatedPreset(preset)) return "Animated";
   if (preset.kind === "vox") return "Voxel";
-  return preset.galleryBucket ?? "Solid";
+  if (preset.galleryBucket) return preset.galleryBucket;
+  if (isAnimatedPreset(preset)) return "Animated";
+  return "Solid";
 }
 
 export function galleryBucketRank(category: string): number {
