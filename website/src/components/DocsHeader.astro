@@ -34,7 +34,7 @@ const topLinks = [
 ];
 ---
 
-<div class="header">
+<div class:list={["header", { "header--landing": isLanding }]}>
   {!isLanding && (
     <div class="title-wrapper sl-flex">
       <SiteTitle />
@@ -212,6 +212,10 @@ const topLinks = [
     }
 
     @media (max-width: 38rem) {
+      :global(:root) {
+        --sl-nav-height: 90px;
+      }
+
       .header {
         grid-template-areas:
           "brand spacer"
@@ -219,6 +223,10 @@ const topLinks = [
         grid-template-columns: minmax(0, 1fr) auto;
         row-gap: 10px;
         column-gap: 12px;
+      }
+
+      .header--landing {
+        height: 72px;
       }
 
       .title-wrapper {

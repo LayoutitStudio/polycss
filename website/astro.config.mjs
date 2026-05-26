@@ -44,6 +44,15 @@ export default defineConfig({
     starlight({
       title: 'PolyCSS',
       description: 'A CSS polygon mesh engine. DOM-native 3D rendering.',
+      favicon: '/favicon.ico',
+      head: [
+        { tag: 'meta', attrs: { property: 'og:image', content: 'https://polycss.com/polycss-github.png' } },
+        { tag: 'meta', attrs: { property: 'og:image:width', content: '1280' } },
+        { tag: 'meta', attrs: { property: 'og:image:height', content: '640' } },
+        { tag: 'meta', attrs: { property: 'og:image:alt', content: 'PolyCSS logo, a rendered polygon duck, and DOM markup.' } },
+        { tag: 'meta', attrs: { name: 'twitter:image', content: 'https://polycss.com/polycss-github.png' } },
+        { tag: 'meta', attrs: { name: 'twitter:image:alt', content: 'PolyCSS logo, a rendered polygon duck, and DOM markup.' } },
+      ],
       disable404Route: true,
       components: {
         Header: './src/components/DocsHeader.astro',
