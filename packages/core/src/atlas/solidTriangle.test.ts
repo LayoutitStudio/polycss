@@ -12,6 +12,13 @@
 import { describe, it, expect } from "vitest";
 import type { Polygon } from "../types";
 import {
+  SOLID_TRIANGLE_CANONICAL_SIZE,
+  SOLID_TRIANGLE_LARGE_BORDER_CANONICAL_SIZE,
+} from "./constants";
+import {
+  computeSolidTrianglePlan,
+} from "./solidTrianglePlan";
+import {
   computeSurfaceNormal,
   cssPoints,
   offsetConvexPolygonPoints,
@@ -25,6 +32,12 @@ import {
   offsetStableTrianglePoints,
 } from "./solidTriangle";
 import { computeTextureAtlasPlanPublic } from "./plan";
+
+function matrixValues(transform: string): number[] {
+  const match = /^matrix3d\((.*)\)$/.exec(transform);
+  if (!match) return [];
+  return match[1].split(",").map((value) => Number(value));
+}
 
 // ---------------------------------------------------------------------------
 // computeSurfaceNormal
@@ -303,6 +316,41 @@ describe("stableBasisFromPlan — stable triangle basis from atlas plan", () => 
     expect(Number.isFinite(basis.tx)).toBe(true);
     expect(Number.isFinite(basis.ty)).toBe(true);
     expect(Number.isFinite(basis.tz)).toBe(true);
+  });
+});
+
+describe("computeSolidTrianglePlan — primitive sizing", () => {
+  const FLAT_TRIANGLE: Polygon = {
+    vertices: [[0, 0, 0], [1, 0, 0], [0, 1, 0]],
+    color: "#ff0000",
+  };
+
+  it("keeps border-large geometry stable by reducing x/y matrix scale", () => {
+    const border = computeSolidTrianglePlan(
+      FLAT_TRIANGLE,
+      0,
+      {},
+      { primitive: "border", matrixDecimals: 6 },
+    )!;
+    const large = computeSolidTrianglePlan(
+      FLAT_TRIANGLE,
+      0,
+      {},
+      { primitive: "border-large", matrixDecimals: 6 },
+    )!;
+    const ratio = SOLID_TRIANGLE_CANONICAL_SIZE / SOLID_TRIANGLE_LARGE_BORDER_CANONICAL_SIZE;
+    const borderValues = matrixValues(border.transformText);
+    const largeValues = matrixValues(large.transformText);
+
+    expect(large.primitive).toBe("border-large");
+    expect(borderValues).toHaveLength(16);
+    expect(largeValues).toHaveLength(16);
+    for (const index of [0, 1, 2, 4, 5, 6]) {
+      expect(largeValues[index]).toBeCloseTo(borderValues[index] * ratio, 6);
+    }
+    for (const index of [8, 9, 10, 12, 13, 14]) {
+      expect(largeValues[index]).toBeCloseTo(borderValues[index], 6);
+    }
   });
 });
 

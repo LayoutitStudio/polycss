@@ -21,15 +21,18 @@ function makeDoc(options: {
   cornerShape?: boolean;
   solidTriangleSupported?: boolean;
   borderShape?: boolean;
+  userAgent?: string;
 } = {}): Document {
   const solidTriangleOk = options.solidTriangleSupported !== false;
+  const userAgent = options.userAgent ?? (
+    solidTriangleOk
+      ? "Mozilla/5.0 Chrome/120"
+      : "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"
+  );
   return {
     defaultView: {
       navigator: {
-        // Safari UA → solid triangles NOT supported (compositing bug)
-        userAgent: solidTriangleOk
-          ? "Mozilla/5.0 Chrome/120"
-          : "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15",
+        userAgent,
       },
       CSS: {
         supports: (property: string, value?: string) => {
@@ -79,6 +82,17 @@ describe("solid triangle primitive — corner-bevel vs border", () => {
     const doc = makeDoc({ cornerShape: false });
     const result = renderPolygonsWithStableTriangles([TRIANGLE], { doc });
     expect(result).not.toBeNull();
+    expect(result!.rendered[0].element.classList.contains("polycss-corner-triangle")).toBe(false);
+    result!.dispose();
+  });
+
+  it("Firefox UA → uses the large border triangle primitive", () => {
+    const doc = makeDoc({
+      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:146.0) Gecko/20100101 Firefox/146.0",
+    });
+    const result = renderPolygonsWithStableTriangles([TRIANGLE], { doc });
+    expect(result).not.toBeNull();
+    expect(result!.rendered[0].element.classList.contains("polycss-large-border-triangle")).toBe(true);
     expect(result!.rendered[0].element.classList.contains("polycss-corner-triangle")).toBe(false);
     result!.dispose();
   });

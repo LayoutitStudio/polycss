@@ -21,6 +21,7 @@
 
     const { meshId, mode, motion, az, el, isSynth, preset } = parseUrlParams();
     const benchParams = new URLSearchParams(window.location.search);
+    const cameraPerspectiveMode = benchParams.get("cameraPerspective") || "default";
     const sceneTransformMode = benchParams.get("sceneTransformMode") || "default";
     const rotationDriver = benchParams.get("rotationDriver") || "js";
     const polygonOrder = benchParams.get("polygonOrder") || "source";
@@ -111,6 +112,7 @@
       frameWorkSamples: () => frameWork.samples(),
       resetInteractionStats,
       cullStats: () => displayCullStats,
+      cameraPerspective: () => cameraPerspective(),
       setMeshPosition(_position) {},
       setMeshRotation(_rotation) {},
       setMeshPolygonsSame() {},
@@ -127,6 +129,7 @@
       },
     };
 
+    const cameraEl = host.querySelector(".polycss-camera");
     const sceneEl = host.querySelector(".polycss-scene");
     let splitShell = null;
     let displayCullController = null;
@@ -140,6 +143,24 @@
     function scenePerspective() {
       return sceneEl?.style.perspective || getComputedStyle(sceneEl).perspective || "8000px";
     }
+
+    function cameraPerspective() {
+      return cameraEl?.style.perspective || getComputedStyle(cameraEl).perspective || "";
+    }
+
+    function applyCameraPerspectiveMode() {
+      if (!(cameraEl instanceof HTMLElement) || cameraPerspectiveMode === "default") return;
+      if (cameraPerspectiveMode === "none") {
+        cameraEl.style.perspective = "none";
+        return;
+      }
+      const px = Number(cameraPerspectiveMode);
+      if (Number.isFinite(px) && px > 0) {
+        cameraEl.style.perspective = `${px}px`;
+      }
+    }
+
+    applyCameraPerspectiveMode();
 
     function createFrameWorkRecorder(enabled) {
       let current = {};

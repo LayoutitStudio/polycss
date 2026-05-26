@@ -228,6 +228,7 @@ const SMITHSONIAN_GLB_PRESET_FILES: GalleryPresetFile[] = [
 
 export const GLB_PRESET_FILES: GalleryPresetFile[] = [
   { file: "FishAnimated.glb", label: "Fish", category: "Animated" },
+  { file: "ClownfishAnimated.glb", label: "Clownfish", category: "Animated" },
   {
     file: "opengameart/animated-pliers.glb",
     label: "Pliers",

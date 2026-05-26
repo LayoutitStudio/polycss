@@ -87,7 +87,7 @@ export type PolySeamBleedEdges =
   | readonly (PolySeamBleedEdgeValue | undefined)[];
 
 export type PolyRenderStrategy = "b" | "i" | "u";
-export type SolidTrianglePrimitive = "border" | "corner-bevel";
+export type SolidTrianglePrimitive = "border" | "border-large" | "corner-bevel";
 
 export interface PolyRenderStrategiesOption {
   /** Strategies to skip; polygons that would normally use them fall through

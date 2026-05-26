@@ -27,6 +27,28 @@ export const DEFAULT_AMBIENT_INTENSITY = 0.4;
 export const BASIS_EPS = 1e-9;
 // Matches the canonical SOLID_TRIANGLE_BLEED constant.
 export const SOLID_TRIANGLE_BLEED = 0.75;
+const SOLID_TRIANGLE_CANONICAL_SIZE = 32;
+const SOLID_TRIANGLE_LARGE_BORDER_CANONICAL_SIZE = 96;
+const SOLID_TRIANGLE_LARGE_BORDER_WIDTH = "0 48px 96px 48px";
+let cachedSolidTriangleUserAgent: string | undefined;
+let cachedSolidTriangleCanonicalSize = SOLID_TRIANGLE_CANONICAL_SIZE;
+
+export function solidTriangleCanonicalSize(): number {
+  const ua = typeof navigator !== "undefined" ? navigator.userAgent : "";
+  if (ua !== cachedSolidTriangleUserAgent) {
+    cachedSolidTriangleUserAgent = ua;
+    cachedSolidTriangleCanonicalSize = /\bFirefox\//.test(ua)
+      ? SOLID_TRIANGLE_LARGE_BORDER_CANONICAL_SIZE
+      : SOLID_TRIANGLE_CANONICAL_SIZE;
+  }
+  return cachedSolidTriangleCanonicalSize;
+}
+
+export function solidTriangleBorderWidth(): string | undefined {
+  return solidTriangleCanonicalSize() === SOLID_TRIANGLE_LARGE_BORDER_CANONICAL_SIZE
+    ? SOLID_TRIANGLE_LARGE_BORDER_WIDTH
+    : undefined;
+}
 
 export interface RGB { r: number; g: number; b: number; }
 
@@ -436,7 +458,7 @@ export function solidTriangleStyle(
     yAxis = [yAxisRaw[0] / nextHeight, yAxisRaw[1] / nextHeight, yAxisRaw[2] / nextHeight];
   }
 
-  const SOLID_TRIANGLE_CANONICAL_SIZE = 32;
+  const canonicalSize = solidTriangleCanonicalSize();
   const left = Math.max(0, Math.min(baseLength, apexX));
   const right = Math.max(0, baseLength - left);
   const screenPts = [left, 0, 0, height, left + right, height];
@@ -499,11 +521,11 @@ export function solidTriangleStyle(
   const baseLeft = worldPoint([baseLeft2[0], baseY]);
   const baseRight = worldPoint([baseRight2[0], baseY]);
 
-  const halfBase = SOLID_TRIANGLE_CANONICAL_SIZE / 2;
+  const halfBase = canonicalSize / 2;
   const xCol: Vec3 = [
-    (baseRight[0] - baseLeft[0]) / SOLID_TRIANGLE_CANONICAL_SIZE,
-    (baseRight[1] - baseLeft[1]) / SOLID_TRIANGLE_CANONICAL_SIZE,
-    (baseRight[2] - baseLeft[2]) / SOLID_TRIANGLE_CANONICAL_SIZE,
+    (baseRight[0] - baseLeft[0]) / canonicalSize,
+    (baseRight[1] - baseLeft[1]) / canonicalSize,
+    (baseRight[2] - baseLeft[2]) / canonicalSize,
   ];
   const txCol: Vec3 = [
     apex[0] - xCol[0] * halfBase,
@@ -511,9 +533,9 @@ export function solidTriangleStyle(
     apex[2] - xCol[2] * halfBase,
   ];
   const yCol: Vec3 = [
-    (baseLeft[0] - txCol[0]) / SOLID_TRIANGLE_CANONICAL_SIZE,
-    (baseLeft[1] - txCol[1]) / SOLID_TRIANGLE_CANONICAL_SIZE,
-    (baseLeft[2] - txCol[2]) / SOLID_TRIANGLE_CANONICAL_SIZE,
+    (baseLeft[0] - txCol[0]) / canonicalSize,
+    (baseLeft[1] - txCol[1]) / canonicalSize,
+    (baseLeft[2] - txCol[2]) / canonicalSize,
   ];
   const canonicalMatrix = [
     xCol[0], xCol[1], xCol[2], 0,
@@ -523,6 +545,7 @@ export function solidTriangleStyle(
   ].map((v) => (Math.round(v * 1000) / 1000 || 0).toString()).join(",");
   return {
     transform: `matrix3d(${canonicalMatrix})`,
+    borderWidth: solidTriangleBorderWidth(),
     ...sharedStyle,
   };
 }

@@ -24,6 +24,8 @@ import {
   stepRgbToward,
   offsetConvexPolygonPoints,
   formatStableTriangleTransformScalars,
+  solidTriangleBorderWidth,
+  solidTriangleCanonicalSize,
 } from "./solidTriangleStyle";
 import type { RGB } from "./solidTriangleStyle";
 
@@ -69,6 +71,7 @@ function isStableTriangleBasis(value: StableTriangleBasis | undefined): value is
 
 interface StableTriangleDomStyle {
   transform: string;
+  borderWidth?: string;
   color?: string;
   basis: StableTriangleBasis;
 }
@@ -218,8 +221,8 @@ function computeStableTriangleDomStyle(
     return retryWithoutBasis();
   }
 
-  const SOLID_TRIANGLE_CANONICAL_SIZE = 32;
-  const invCanonicalSize = 1 / SOLID_TRIANGLE_CANONICAL_SIZE;
+  const canonicalSize = solidTriangleCanonicalSize();
+  const invCanonicalSize = 1 / canonicalSize;
   const baseWidthPx = leftPx + rightPx;
   const xScale = baseWidthPx * invCanonicalSize;
   const yXScale = (rightPx - leftPx) * 0.5 * invCanonicalSize;
@@ -260,7 +263,7 @@ function computeStableTriangleDomStyle(
       ? quantizeCssColor(shadedColor, options.colorSteps)
       : shadedColor;
   }
-  return { transform, color, basis: { a, b, c } };
+  return { transform, borderWidth: solidTriangleBorderWidth(), color, basis: { a, b, c } };
 }
 
 function stableTriangleColorAllowed(index: number, colorFrame: number, freezeFrames: number): boolean {
@@ -320,6 +323,7 @@ export function updateStableTriangleDom(
     if (el.style.visibility) el.style.visibility = "";
     el.__polycssStableTriangleBasis = style.basis;
     el.style.transform = style.transform;
+    if (style.borderWidth !== undefined) el.style.borderWidth = style.borderWidth;
     if (style.color !== undefined) applyStableTriangleColor(el, i, style.color, options);
   }
   return true;

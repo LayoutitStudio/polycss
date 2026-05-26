@@ -155,6 +155,10 @@ const CORE_BASE_STYLES = `
   border-width: 0 16px 32px 16px;
 }
 
+.polycss-scene u.polycss-large-border-triangle {
+  border-width: 0 48px 96px 48px;
+}
+
 .polycss-scene u.polycss-corner-triangle {
   width: 32px;
   height: 32px;

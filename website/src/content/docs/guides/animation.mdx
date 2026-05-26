@@ -5,12 +5,50 @@ description: Playing glTF and GLB animation clips with PolyCSS mesh handles.
 
 import { Tabs, TabItem } from '@astrojs/starlight/components';
 
-PolyCSS can sample usable glTF / GLB animation clips into fresh polygon frames. The parser exposes `ParseResult.animation`; the animation mixer drives a mesh handle by calling `setPolygons()` as clips play.
+PolyCSS can play usable glTF / GLB animation clips by sampling them into polygon frames. The parser exposes `ParseResult.animation`; `usePolyAnimation` and `createPolyAnimationMixer` drive a mesh handle over time.
 
-This is the main exception to the "no per-polygon JavaScript in the render loop" rule. Skinning changes polygon vertices independently, so animation samples in JavaScript while the renderer keeps the mounted DOM topology stable where possible.
+## How It Works
 
-## React
+Animation in PolyCSS is a polygon-frame pipeline: the parser turns glTF / GLB animation data into a sampler, and the renderer receives ordinary `Polygon[]` frames.
 
+When `loadMesh()` or `parseGltf()` finds usable animation clips, the returned `ParseResult.animation` exposes clip metadata and a `sample()` function. Sampling evaluates the source animation at a given time, applies the animated pose to the mesh, and returns polygons for that moment.
+
+`usePolyAnimation` and `createPolyAnimationMixer` sit on top of that sampler. They manage actions, looping, playback speed, fades, and cross-fades, then apply each sampled frame to a mesh handle.
+
+## Usage
+
+<Tabs syncKey="fw">
+<TabItem label="Vanilla JS">
+Use the core mixer directly. The mesh handle returned by `scene.add()` satisfies `PolyAnimationTarget`.
+
+```ts
+import {
+  createPolyCamera,
+  createPolyScene,
+  createPolyAnimationMixer,
+  loadMesh,
+} from "@layoutit/polycss";
+
+const camera = createPolyCamera({ rotX: 65, rotY: 45 });
+const scene = createPolyScene(host, { camera });
+const result = await loadMesh("/character.glb", { meshResolution: "lossless" });
+const mesh = scene.add(result, { merge: false, stableDom: true });
+
+if (result.animation?.clips.length) {
+  const mixer = createPolyAnimationMixer(mesh, result.animation);
+  mixer.clipAction(result.animation.clips[0].name).reset().play();
+
+  let last = performance.now();
+  function tick(now: number) {
+    mixer.update((now - last) / 1000);
+    last = now;
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+```
+</TabItem>
+<TabItem label="React">
 `usePolyAnimation` mirrors drei's `useAnimations`: it returns `clips`, `names`, `actions`, `mixer`, and a `ref`. Load the mesh yourself when you need access to both `polygons` and the parser's animation controller.
 
 ```tsx
@@ -71,43 +109,75 @@ export function AnimatedModel() {
   );
 }
 ```
+</TabItem>
+<TabItem label="Vue">
 
-## Vanilla
+The Vue composable exposes the same concepts as the React hook, but `clips`, `names`, `actions`, and `mixer` are Vue computed refs.
 
-Use the core mixer directly. The mesh handle returned by `scene.add()` satisfies `PolyAnimationTarget`.
+```vue
+<template>
+  <PolyCamera :rot-x="65" :rot-y="45">
+    <PolyScene>
+      <PolyOrbitControls drag wheel />
+      <PolyMesh
+        v-if="result"
+        ref="meshRef"
+        :polygons="result.polygons"
+        mesh-resolution="lossless"
+      />
+    </PolyScene>
+  </PolyCamera>
+</template>
 
-```ts
+<script setup lang="ts">
+import { computed, onBeforeUnmount, shallowRef, watchEffect } from "vue";
 import {
-  createPolyCamera,
-  createPolyScene,
-  createPolyAnimationMixer,
+  PolyCamera,
+  PolyScene,
+  PolyMesh,
+  PolyOrbitControls,
   loadMesh,
-} from "@layoutit/polycss";
+  usePolyAnimation,
+  type ParseResult,
+  type PolyMeshHandle,
+} from "@layoutit/polycss-vue";
 
-const camera = createPolyCamera({ rotX: 65, rotY: 45 });
-const scene = createPolyScene(host, { camera });
-const result = await loadMesh("/character.glb", { meshResolution: "lossless" });
-const mesh = scene.add(result, { merge: false, stableDom: true });
+const result = shallowRef<ParseResult | null>(null);
+const meshRef = shallowRef<PolyMeshHandle | null>(null);
 
-if (result.animation?.clips.length) {
-  const mixer = createPolyAnimationMixer(mesh, result.animation);
-  mixer.clipAction(result.animation.clips[0].name).reset().play();
+let cancelled = false;
+let active: ParseResult | null = null;
 
-  let last = performance.now();
-  function tick(now: number) {
-    mixer.update((now - last) / 1000);
-    last = now;
-    requestAnimationFrame(tick);
-  }
-  requestAnimationFrame(tick);
-}
+void loadMesh("/character.glb").then((next) => {
+  active = next;
+  if (cancelled) next.dispose();
+  else result.value = next;
+});
+
+onBeforeUnmount(() => {
+  cancelled = true;
+  active?.dispose();
+});
+
+const clips = computed(() => result.value?.animation?.clips);
+const controller = computed(() => result.value?.animation);
+const { actions, names } = usePolyAnimation(clips, controller, meshRef);
+
+watchEffect(() => {
+  const first = names.value[0];
+  if (!first) return;
+  actions.value[first]?.reset().play();
+});
+</script>
 ```
+</TabItem>
+</Tabs>
 
-## Notes
+## Practical Notes
 
-- `meshResolution="lossless"` or `merge: false` keeps authored topology predictable for animated meshes.
-- Solid triangle animation keeps each mounted triangle's baked color stable while vertices move, avoiding low-poly lighting flicker from rapidly changing face normals.
+- `usePolyAnimation` owns its `requestAnimationFrame` loop. Vanilla callers own the loop and call `mixer.update(deltaSeconds)` themselves.
 - `usePolyAnimation` and the core mixer expose familiar action methods: `play`, `stop`, `reset`, `fadeIn`, `fadeOut`, `crossFadeTo`, `setLoop`, `setEffectiveTimeScale`, and `setEffectiveWeight`.
+- Cross-fading assumes the sampled clips share matching polygon counts and vertex order. That is true for clips from the same parsed mesh.
 - `LoopOnce`, `LoopRepeat`, and `LoopPingPong` match the three.js numeric constants.
 - `dispose()` still matters: parser-created blob URLs should be revoked when the model is no longer used.
 

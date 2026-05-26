@@ -5,6 +5,7 @@ import {
   buildTextureEdgeRepairSets,
   computeTextureAtlasPlan,
   isSolidTrianglePlan,
+  updateStableTriangleDom,
   useTextureAtlas,
   type TextureQuality,
   type TextureAtlasPlan,
@@ -14,6 +15,7 @@ import type { Polygon } from "@layoutit/polycss-core";
 
 const originalMatchMedia = window.matchMedia;
 const originalUserAgent = window.navigator.userAgent;
+const FIREFOX_UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:146.0) Gecko/20100101 Firefox/146.0";
 
 const TEXTURED_QUAD_60: Polygon = {
   vertices: [
@@ -188,6 +190,22 @@ describe("isSolidTrianglePlan", () => {
     const quad: Polygon = { ...TEXTURED_QUAD_60, texture: undefined };
     const plan = planFor(quad)!;
     expect(isSolidTrianglePlan(plan)).toBe(false);
+  });
+});
+
+describe("updateStableTriangleDom", () => {
+  it("applies the large border triangle primitive on Firefox", () => {
+    stubUserAgent(FIREFOX_UA);
+    const root = document.createElement("div");
+    const leaf = document.createElement("u");
+    root.append(leaf);
+    const tri: Polygon = {
+      vertices: [[0, 0, 0], [1, 0, 0], [0, 1, 0]],
+      color: "#ff0000",
+    };
+
+    expect(updateStableTriangleDom(root, [tri])).toBe(true);
+    expect(leaf.style.borderWidth).toBe("0px 48px 96px");
   });
 });
 

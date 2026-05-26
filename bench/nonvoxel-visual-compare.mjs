@@ -187,10 +187,12 @@ async function screenshotVariant(page, port, model, variant) {
     renderStats: await page.evaluate(() => window.__perf__?.renderStats ?? null),
     sceneTransform: await page.evaluate(() => {
       const scene = document.querySelector(".polycss-scene");
+      const camera = document.querySelector(".polycss-camera");
       const host = document.getElementById("host");
       return {
         scene: scene instanceof HTMLElement ? scene.style.transform : "",
         scenePerspective: scene instanceof HTMLElement ? scene.style.perspective : "",
+        cameraPerspective: camera instanceof HTMLElement ? camera.style.perspective : "",
         hostPerspective: host instanceof HTMLElement ? host.style.perspective : "",
         shell: document.querySelector(".polycss-scene > div") instanceof HTMLElement
           ? document.querySelector(".polycss-scene > div").style.transform

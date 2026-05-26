@@ -10,6 +10,7 @@ import {
   BASIS_EPS,
   SOLID_TRIANGLE_BLEED,
   SOLID_TRIANGLE_CANONICAL_SIZE,
+  SOLID_TRIANGLE_LARGE_BORDER_CANONICAL_SIZE,
 } from "./constants";
 import type {
   SolidTrianglePlan,
@@ -398,7 +399,11 @@ export function computeSolidTrianglePlanFromCssPoints(
     dynamicVars = colorPlan.dynamicVars ?? "";
   }
   const bakedColor = bakedColorValue ? `color:${bakedColorValue};` : "";
-  const invCanonicalSize = 1 / SOLID_TRIANGLE_CANONICAL_SIZE;
+  const primitive = computeOptions.primitive ?? computeOptions.resolvedPrimitive ?? "border";
+  const canonicalSize = primitive === "border-large"
+    ? SOLID_TRIANGLE_LARGE_BORDER_CANONICAL_SIZE
+    : SOLID_TRIANGLE_CANONICAL_SIZE;
+  const invCanonicalSize = 1 / canonicalSize;
   const baseWidthPx = leftPx + rightPx;
   const xScale = baseWidthPx * invCanonicalSize;
   const yXScale = (rightPx - leftPx) * 0.5 * invCanonicalSize;
@@ -433,9 +438,6 @@ export function computeSolidTrianglePlanFromCssPoints(
   const basis = basisHint && basisHint.a === a && basisHint.b === b && basisHint.c === c
     ? basisHint
     : { a, b, c };
-  // Use the pre-resolved primitive from computeOptions — the browser-global
-  // resolution that formerly happened here now happens in the PolyCSS wrapper.
-  const primitive = computeOptions.primitive ?? computeOptions.resolvedPrimitive ?? "border";
   return {
     index,
     polygon,
