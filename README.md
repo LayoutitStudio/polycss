@@ -155,16 +155,7 @@ Supported formats:
 
 ## Performance
 
-PolyCSS renders in the DOM, so performance is mostly determined by how many polygons are mounted and how much texture atlas area they consume. The renderer uses several CSS strategies so simple surfaces stay cheap and textured or irregular surfaces fall back to atlas slices.
-
-- One visible polygon becomes one leaf DOM element.
-- Flat rectangles and stable quads use solid CSS leaves.
-- Textured polygons are packed into generated texture atlases.
-- Dynamic lighting runs through CSS custom properties instead of per-frame JavaScript.
-- Voxel-shaped meshes mount only camera-facing leaves when the mesh is eligible.
-- `meshResolution: "lossy"` merges compatible polygons, then may spend a small split budget to repair high-risk seams.
-
-Renderer internals:
+PolyCSS renders through the DOM, so performance is mostly shaped by two things: the number of mounted leaves, and the amount of texture atlas area the browser has to paint. The renderer tries to keep the common cases cheap. Simple surfaces stay as solid CSS elements, while textured, irregular, or high-detail geometry falls back to atlas-backed slices only when needed.
 
 Each visible polygon is emitted as one leaf element; the renderer chooses the least expensive CSS primitive that can represent the polygon, then uses `matrix3d(...)` to place that primitive in 3D space.
 
