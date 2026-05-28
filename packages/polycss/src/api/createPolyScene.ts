@@ -55,6 +55,8 @@ import {
   parseHexColor,
   polygonCssSurfaceNormal,
   projectCssVertexToGround,
+  parsePureColor,
+  shadePolygon,
 } from "@layoutit/polycss-core";
 import {
   cssBorderShapeForPlan,
@@ -86,6 +88,22 @@ import { injectPolyBaseStyles } from "../styles/styles";
 // without changing the synchronous public setPolygons() contract.
 const ASYNC_MOUNT_BATCH_SIZE = 750;
 const DEFAULT_SCENE_PERSPECTIVE = 32000;
+const BAKED_SOLID_PREVIEW_ACTIVE_VAR = "--polycss-light-preview-active";
+const BAKED_SOLID_PREVIEW_ACTIVE = `var(${BAKED_SOLID_PREVIEW_ACTIVE_VAR}, 0)`;
+const BAKED_SOLID_PREVIEW_LAMBERT =
+  "max(0, calc(var(--pnx, 0) * var(--plx, 0) + var(--pny, 0) * var(--ply, 0) + var(--pnz, 1) * var(--plz, 1)))";
+const BAKED_SOLID_PREVIEW_R =
+  "calc(255 * var(--psr, 1) * (var(--par, 1) * var(--pai, 0.4) + var(--plr, 1) * var(--pli, 1) * var(--plam, 0)))";
+const BAKED_SOLID_PREVIEW_G =
+  "calc(255 * var(--psg, 1) * (var(--pag, 1) * var(--pai, 0.4) + var(--plg, 1) * var(--pli, 1) * var(--plam, 0)))";
+const BAKED_SOLID_PREVIEW_B =
+  "calc(255 * var(--psb, 1) * (var(--pab, 1) * var(--pai, 0.4) + var(--plb, 1) * var(--pli, 1) * var(--plam, 0)))";
+const LIGHTING_VAR_NAMES = [
+  "--plx", "--ply", "--plz",
+  "--plr", "--plg", "--plb", "--pli",
+  "--par", "--pag", "--pab", "--pai",
+  "--clx", "--cly", "--clz",
+] as const;
 
 function normalizeSceneOptions<T extends Partial<Omit<PolySceneOptions, "camera">>>(options: T): T {
   if (!Object.prototype.hasOwnProperty.call(options, "seamBleed") || options.seamBleed !== undefined) {
@@ -634,6 +652,8 @@ export function createPolyScene(
     cameraCullSignature: string;
     lightOverrideSignature: string;
     stableTriangleColorFrame: number;
+    solidLightingPreviewPrepared: boolean;
+    solidLightingPreviewActive: boolean;
     /** Rotation snapshot used by the baked atlas baker. Advances only when
      *  `rebakeAtlas()` is called — not on every `setTransform`. */
     bakedRotation: Vec3;
@@ -652,13 +672,61 @@ export function createPolyScene(
   // that surface's single SVG path, so overlapping shadows from
   // different casters composite via SVG fill-rule=nonzero (one solid
   // silhouette per surface) rather than stacking opacity at the DOM
-  // level. Rebuilt as a whole on any caster/receiver/light change.
-  const sceneShadowSvgs: SVGSVGElement[] = [];
-  function clearAllSceneShadows(): void {
-    for (const svg of sceneShadowSvgs) {
-      if (svg.parentNode) svg.parentNode.removeChild(svg);
+  // level. Surface elements are reused across light changes; only the
+  // SVG attributes/path data change.
+  let groundShadowSvg: SVGSVGElement | null = null;
+  let groundShadowPath: SVGPathElement | null = null;
+  let groundShadowVisible = false;
+  function disposeGroundShadow(): void {
+    if (groundShadowSvg?.parentNode) groundShadowSvg.parentNode.removeChild(groundShadowSvg);
+    groundShadowSvg = null;
+    groundShadowPath = null;
+    groundShadowVisible = false;
+  }
+  function hideGroundShadow(): void {
+    if (groundShadowSvg && groundShadowVisible) {
+      groundShadowSvg.style.display = "none";
+      groundShadowVisible = false;
     }
-    sceneShadowSvgs.length = 0;
+  }
+  function ensureGroundShadow(): { svg: SVGSVGElement; path: SVGPathElement } {
+    const svgNS = "http://www.w3.org/2000/svg";
+    let svg = groundShadowSvg;
+    let path = groundShadowPath;
+    if (!svg || !path) {
+      svg = doc.createElementNS(svgNS, "svg");
+      svg.setAttribute("class", "polycss-shadow polycss-shadow-svg");
+      svg.style.position = "absolute";
+      svg.style.top = "0";
+      svg.style.left = "0";
+      svg.style.display = "block";
+      svg.style.overflow = "hidden";
+      svg.style.transformOrigin = "0 0";
+      svg.style.pointerEvents = "none";
+      svg.style.willChange = "transform";
+      path = doc.createElementNS(svgNS, "path");
+      path.setAttribute("fill-rule", "nonzero");
+      path.setAttribute("stroke-width", "2");
+      path.setAttribute("stroke-linejoin", "round");
+      svg.appendChild(path);
+      groundShadowSvg = svg;
+      groundShadowPath = path;
+      const sceneFirst = sceneEl.firstChild;
+      if (sceneFirst) sceneEl.insertBefore(svg, sceneFirst);
+      else sceneEl.appendChild(svg);
+    } else if (!svg.parentNode) {
+      const sceneFirst = sceneEl.firstChild;
+      if (sceneFirst) sceneEl.insertBefore(svg, sceneFirst);
+      else sceneEl.appendChild(svg);
+    }
+    if (!groundShadowVisible) {
+      svg.style.display = "block";
+      groundShadowVisible = true;
+    }
+    return { svg, path };
+  }
+  function clearAllSceneShadows(): void {
+    disposeGroundShadow();
     // Mark all cached receiver-face SVGs as hidden. Per-frame
     // emitSceneReceiverShadows will reveal the ones with shadow
     // content and leave the rest in `display:none`, which keeps the
@@ -794,19 +862,19 @@ export function createPolyScene(
   // in the same frame there; the shadow projection works against 3D positions
   // that have already been through the axis swap, so it needs the light in
   // that same swapped frame.
-  function applyDynamicLightVars(el: HTMLElement, opts: Omit<PolySceneOptions, "camera">): void {
-    const dynamic = opts.textureLighting === "dynamic";
-    el.dataset.polycssLighting = opts.textureLighting ?? "baked";
-    const vars = [
-      "--plx", "--ply", "--plz",
-      "--plr", "--plg", "--plb", "--pli",
-      "--par", "--pag", "--pab", "--pai",
-      "--clx", "--cly", "--clz",
-    ] as const;
-    if (!dynamic) {
-      for (const v of vars) el.style.removeProperty(v);
-      return;
+  function clearLightingVars(el: HTMLElement): void {
+    for (const v of LIGHTING_VAR_NAMES) {
+      if (el.style.getPropertyValue(v)) el.style.removeProperty(v);
     }
+  }
+
+  function setStylePropertyIfChanged(el: HTMLElement, name: string, value: string): boolean {
+    if (el.style.getPropertyValue(name) === value) return false;
+    el.style.setProperty(name, value);
+    return true;
+  }
+
+  function applyLightingVars(el: HTMLElement, opts: Omit<PolySceneOptions, "camera">): void {
     const dir = opts.directionalLight?.direction ?? [0.4, -0.7, 0.59];
     const len = Math.hypot(dir[0], dir[1], dir[2]) || 1;
     const lx = dir[0] / len, ly = dir[1] / len, lz = dir[2] / len;
@@ -815,17 +883,17 @@ export function createPolyScene(
     const lightIntensity = opts.directionalLight?.intensity ?? 1;
     const ambientIntensity = opts.ambientLight?.intensity ?? 0.4;
     const ch = (n: number) => (n / 255).toFixed(4);
-    el.style.setProperty("--plx", lx.toFixed(4));
-    el.style.setProperty("--ply", ly.toFixed(4));
-    el.style.setProperty("--plz", lz.toFixed(4));
-    el.style.setProperty("--plr", ch(lightRgb[0]));
-    el.style.setProperty("--plg", ch(lightRgb[1]));
-    el.style.setProperty("--plb", ch(lightRgb[2]));
-    el.style.setProperty("--pli", lightIntensity.toFixed(4));
-    el.style.setProperty("--par", ch(ambRgb[0]));
-    el.style.setProperty("--pag", ch(ambRgb[1]));
-    el.style.setProperty("--pab", ch(ambRgb[2]));
-    el.style.setProperty("--pai", ambientIntensity.toFixed(4));
+    setStylePropertyIfChanged(el, "--plx", lx.toFixed(4));
+    setStylePropertyIfChanged(el, "--ply", ly.toFixed(4));
+    setStylePropertyIfChanged(el, "--plz", lz.toFixed(4));
+    setStylePropertyIfChanged(el, "--plr", ch(lightRgb[0]));
+    setStylePropertyIfChanged(el, "--plg", ch(lightRgb[1]));
+    setStylePropertyIfChanged(el, "--plb", ch(lightRgb[2]));
+    setStylePropertyIfChanged(el, "--pli", lightIntensity.toFixed(4));
+    setStylePropertyIfChanged(el, "--par", ch(ambRgb[0]));
+    setStylePropertyIfChanged(el, "--pag", ch(ambRgb[1]));
+    setStylePropertyIfChanged(el, "--pab", ch(ambRgb[2]));
+    setStylePropertyIfChanged(el, "--pai", ambientIntensity.toFixed(4));
     // Light direction vars for the shadow projection. These match the
     // axis convention used by Lambert (`--plx/--ply/--plz`) where the
     // X and Y component naming follows the user-facing light direction
@@ -836,9 +904,19 @@ export function createPolyScene(
     // shadows to infinity.
     const rawClz = lz;
     const clz = Math.sign(rawClz || 1) * Math.max(Math.abs(rawClz), 0.01);
-    el.style.setProperty("--clx", lx.toFixed(4));
-    el.style.setProperty("--cly", ly.toFixed(4));
-    el.style.setProperty("--clz", clz.toFixed(4));
+    setStylePropertyIfChanged(el, "--clx", lx.toFixed(4));
+    setStylePropertyIfChanged(el, "--cly", ly.toFixed(4));
+    setStylePropertyIfChanged(el, "--clz", clz.toFixed(4));
+  }
+
+  function applyDynamicLightVars(el: HTMLElement, opts: Omit<PolySceneOptions, "camera">): void {
+    const dynamic = opts.textureLighting === "dynamic";
+    el.dataset.polycssLighting = opts.textureLighting ?? "baked";
+    if (!dynamic) {
+      clearLightingVars(el);
+      return;
+    }
+    applyLightingVars(el, opts);
   }
 
   function clearRendered(entry: MeshEntry): void {
@@ -850,6 +928,8 @@ export function createPolyScene(
     entry.renderedByPolygonIndex = [];
     entry.cameraCullGroups = [];
     entry.cameraCullSignature = "";
+    entry.solidLightingPreviewPrepared = false;
+    entry.solidLightingPreviewActive = false;
     clearShadowLeaves(entry);
     for (const child of Array.from(entry.wrapper.children)) {
       if (child instanceof HTMLElement && child.classList.contains("polycss-bucket")) {
@@ -908,6 +988,8 @@ export function createPolyScene(
       entry.renderedByPolygonIndex[item.polygonIndex] = item;
     }
     entry.disposeAtlas = disposeAtlas;
+    entry.solidLightingPreviewPrepared = false;
+    prepareBakedSolidLightingPreview(entry);
   }
 
   function renderedItemForPolygon(entry: MeshEntry, polygonIndex: number): RenderedPoly | undefined {
@@ -1321,8 +1403,172 @@ export function createPolyScene(
       textureLighting,
       renderOptions,
     );
+    if (textureLighting === "baked") {
+      return applyBakedSolidPreviewPaint(item, polygon, shaded.shadedColor);
+    }
     applySolidPaint(item.element, shaded, textureLighting);
     return true;
+  }
+
+  function bakedSolidPreviewPaintColor(bakedColor: string): string {
+    const parsed = parsePureColor(bakedColor) ?? { rgb: [255, 255, 255] as [number, number, number], alpha: 1 };
+    const [r, g, b] = parsed.rgb;
+    const mix = (baked: number, previewVar: string) =>
+      `calc(${baked} * (1 - ${BAKED_SOLID_PREVIEW_ACTIVE}) + var(${previewVar}, ${baked}) * ${BAKED_SOLID_PREVIEW_ACTIVE})`;
+    const alpha = parsed.alpha < 1 ? ` / ${parsed.alpha}` : "";
+    return `rgb(${mix(r, "--polycss-preview-r")} ${mix(g, "--polycss-preview-g")} ${mix(b, "--polycss-preview-b")}${alpha})`;
+  }
+
+  function applyBakedSolidPreviewPaint(item: RenderedPoly, polygon: Polygon, bakedColor: string): boolean {
+    if (!item.plan || item.kind === "atlas" || item.plan.texture) return false;
+    const el = item.element;
+    const normal = item.plan.normal;
+    const rgb = parseHex(polygon.color ?? "#cccccc");
+    let changed = false;
+    changed = setStylePropertyIfChanged(el, "--pnx", normal[0].toFixed(4)) || changed;
+    changed = setStylePropertyIfChanged(el, "--pny", normal[1].toFixed(4)) || changed;
+    changed = setStylePropertyIfChanged(el, "--pnz", normal[2].toFixed(4)) || changed;
+    changed = setStylePropertyIfChanged(el, "--psr", (rgb.r / 255).toFixed(4)) || changed;
+    changed = setStylePropertyIfChanged(el, "--psg", (rgb.g / 255).toFixed(4)) || changed;
+    changed = setStylePropertyIfChanged(el, "--psb", (rgb.b / 255).toFixed(4)) || changed;
+    changed = setStylePropertyIfChanged(el, "--plam", BAKED_SOLID_PREVIEW_LAMBERT) || changed;
+    changed = setStylePropertyIfChanged(el, "--polycss-preview-r", BAKED_SOLID_PREVIEW_R) || changed;
+    changed = setStylePropertyIfChanged(el, "--polycss-preview-g", BAKED_SOLID_PREVIEW_G) || changed;
+    changed = setStylePropertyIfChanged(el, "--polycss-preview-b", BAKED_SOLID_PREVIEW_B) || changed;
+    changed = setStylePropertyIfChanged(el, "--polycss-paint", bakedSolidPreviewPaintColor(bakedColor)) || changed;
+    if (el.style.getPropertyValue("color")) {
+      el.style.removeProperty("color");
+      changed = true;
+    }
+    return changed;
+  }
+
+  function prepareBakedSolidLightingPreview(entry: MeshEntry): boolean {
+    if ((currentOptions.textureLighting ?? "baked") !== "baked") return false;
+    let prepared = false;
+    for (const item of entry.rendered) {
+      if (!item.plan || item.kind === "atlas" || item.plan.texture) continue;
+      const polygon = entry.polygons[item.polygonIndex];
+      if (!polygon) continue;
+      applyBakedSolidPreviewPaint(item, polygon, item.plan.shadedColor);
+      prepared = true;
+    }
+    entry.solidLightingPreviewPrepared = prepared;
+    return prepared;
+  }
+
+  function installBakedSolidLightingPreview(entry: MeshEntry): boolean {
+    if ((currentOptions.textureLighting ?? "baked") !== "baked") return false;
+    if (!entry.solidLightingPreviewPrepared && !prepareBakedSolidLightingPreview(entry)) return false;
+    entry.solidLightingPreviewActive = true;
+    return true;
+  }
+
+  function bakedSolidColorForPlan(item: RenderedPoly, polygon: Polygon): string {
+    const directionalCfg = currentOptions.directionalLight;
+    const ambientCfg = currentOptions.ambientLight;
+    const lightDir = directionalCfg?.direction ?? [0.4, -0.7, 0.59] as Vec3;
+    const lightColor = directionalCfg?.color ?? "#ffffff";
+    const lightIntensity = Math.max(0, directionalCfg?.intensity ?? 1);
+    const ambientColor = ambientCfg?.color ?? "#ffffff";
+    const ambientIntensity = Math.max(0, ambientCfg?.intensity ?? 0.4);
+    const lLen = Math.hypot(lightDir[0], lightDir[1], lightDir[2]) || 1;
+    const normal = item.plan!.normal;
+    const directScale = lightIntensity * Math.max(
+      0,
+      normal[0] * (lightDir[0] / lLen) +
+      normal[1] * (lightDir[1] / lLen) +
+      normal[2] * (lightDir[2] / lLen),
+    );
+    return shadePolygon(
+      polygon.color ?? "#cccccc",
+      directScale,
+      lightColor,
+      ambientColor,
+      ambientIntensity,
+    );
+  }
+
+  function needsBakedAtlasCommit(item: RenderedPoly): boolean {
+    return item.kind === "atlas" || !!item.plan?.texture;
+  }
+
+  function commitBakedSolidLighting(): boolean {
+    if ((currentOptions.textureLighting ?? "baked") !== "baked") return false;
+    let updated = false;
+    for (const entry of meshes) {
+      if (entry.rendered.some(needsBakedAtlasCommit)) {
+        renderEntry(entry);
+        updated = true;
+        continue;
+      }
+      for (const item of entry.rendered) {
+        if (!item.plan || item.kind === "atlas" || item.plan.texture) continue;
+        const polygon = entry.polygons[item.polygonIndex];
+        if (!polygon) continue;
+        const color = bakedSolidColorForPlan(item, polygon);
+        updated = applyBakedSolidPreviewPaint(item, polygon, color) || updated;
+      }
+    }
+    sceneEl.style.removeProperty(BAKED_SOLID_PREVIEW_ACTIVE_VAR);
+    for (const entry of meshes) {
+      clearLightingVars(entry.wrapper);
+      entry.solidLightingPreviewActive = false;
+    }
+    clearLightingVars(sceneEl);
+    return updated;
+  }
+
+  function clearBakedSolidLightingPreview(): void {
+    sceneEl.style.removeProperty(BAKED_SOLID_PREVIEW_ACTIVE_VAR);
+    for (const entry of meshes) {
+      if (!entry.solidLightingPreviewActive) continue;
+      clearLightingVars(entry.wrapper);
+      entry.solidLightingPreviewActive = false;
+    }
+    if ((currentOptions.textureLighting ?? "baked") !== "dynamic") {
+      clearLightingVars(sceneEl);
+      emitSceneShadows();
+    }
+  }
+
+  function applyPreviewMeshLightVars(
+    entry: MeshEntry,
+    next: Pick<Omit<PolySceneOptions, "camera">, "directionalLight" | "ambientLight">,
+  ): void {
+    const rotation = entry.handle.transform.rotation;
+    const dir = next.directionalLight?.direction ?? currentOptions.directionalLight?.direction;
+    const hasNonZeroRotation = rotation && (rotation[0] !== 0 || rotation[1] !== 0 || rotation[2] !== 0);
+    if (!hasNonZeroRotation || !dir) {
+      clearLightingVars(entry.wrapper);
+      return;
+    }
+    const localDir = inverseRotateVec3(dir as Vec3, rotation as Vec3);
+    applyLightingVars(entry.wrapper, {
+      ...currentOptions,
+      ...next,
+      directionalLight: {
+        ...currentOptions.directionalLight,
+        ...next.directionalLight,
+        direction: localDir,
+      },
+    });
+  }
+
+  function previewBakedSolidLighting(
+    next: Pick<Omit<PolySceneOptions, "camera">, "directionalLight" | "ambientLight">,
+  ): boolean {
+    if ((currentOptions.textureLighting ?? "baked") !== "baked") return false;
+    applyLightingVars(sceneEl, { ...currentOptions, ...next });
+    if (next.directionalLight?.direction) emitSceneShadows(next.directionalLight.direction as Vec3);
+    let installed = false;
+    for (const entry of meshes) {
+      applyPreviewMeshLightVars(entry, next);
+      installed = installBakedSolidLightingPreview(entry) || installed;
+    }
+    if (installed) setStylePropertyIfChanged(sceneEl, BAKED_SOLID_PREVIEW_ACTIVE_VAR, "1");
+    else sceneEl.style.removeProperty(BAKED_SOLID_PREVIEW_ACTIVE_VAR);
+    return installed;
   }
 
   function tryUpdatePolygonColorOnly(entry: MeshEntry, polygonIndex: number, color: string | undefined): boolean {
@@ -1387,23 +1633,26 @@ export function createPolyScene(
     emitSceneShadows();
   }
 
-  // Rebuilds every shadow SVG in the scene from scratch. Iterates each
-  // SURFACE (the global ground + every receiver face) once, then sweeps
-  // every caster's projection onto that surface into the same compound
-  // path. SVG fill-rule=nonzero collapses overlapping CCW outlines into
-  // one filled silhouette per surface — overlapping shadows from
-  // different casters don't multiply their opacity at the DOM level.
-  function emitSceneShadows(): void {
-    clearAllSceneShadows();
+  // Refreshes every shadow SVG in the scene. Iterates each SURFACE (the
+  // global ground + every receiver face) once, then sweeps every caster's
+  // projection onto that surface into the same compound path. Mounted SVG
+  // elements are reused across light changes; fill-rule=nonzero collapses
+  // overlapping CCW outlines into one filled silhouette per surface.
+  function emitSceneShadows(lightDirectionOverride?: Vec3): void {
     const casters: MeshEntry[] = [];
     for (const m of meshes) if (!m.disposed && m.castShadow) casters.push(m);
-    if (casters.length === 0) return;
+    if (casters.length === 0) {
+      clearAllSceneShadows();
+      return;
+    }
+    hideAllReceiverFaceSvgs();
 
     const shadowColor = currentOptions.shadow?.color ?? "#000000";
     const shadowOpacity = currentOptions.shadow?.opacity ?? 0.25;
     const parsed = parseHexColor(shadowColor)?.rgb ?? [0, 0, 0];
     const r = parsed[0], g = parsed[1], b = parsed[2];
-    const lightDir = currentOptions.directionalLight?.direction
+    const lightDir = lightDirectionOverride
+      ?? currentOptions.directionalLight?.direction
       ?? ([0.4, -0.7, 0.59] as Vec3);
 
     // Per-caster shadow dedup (independent meshes can't dedup against
@@ -1425,7 +1674,8 @@ export function createPolyScene(
     }
 
     if (currentGroundCssZ !== null) {
-      emitSceneGroundShadow(casters, dedupByCaster, lightDir, currentGroundCssZ, r, g, b, shadowOpacity);
+      const emittedGround = emitSceneGroundShadow(casters, dedupByCaster, lightDir, currentGroundCssZ, r, g, b, shadowOpacity);
+      if (!emittedGround) hideGroundShadow();
     }
     for (const receiver of meshes) {
       if (receiver.disposed || !receiver.receiveShadow) continue;
@@ -1451,7 +1701,7 @@ export function createPolyScene(
     groundCssZ: number,
     r: number, g: number, b: number,
     opacity: number,
-  ): void {
+  ): boolean {
     const polyProjections: Array<Array<[number, number]>> = [];
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     let fpMinX = Infinity, fpMinY = Infinity, fpMaxX = -Infinity, fpMaxY = -Infinity;
@@ -1507,7 +1757,7 @@ export function createPolyScene(
       }
     }
 
-    if (polyProjections.length === 0) return;
+    if (polyProjections.length === 0) return false;
     const maxExtend = currentOptions.shadow?.maxExtend ?? 2000;
     const bx0 = Math.max(minX, fpMinX - maxExtend);
     const by0 = Math.max(minY, fpMinY - maxExtend);
@@ -1515,7 +1765,7 @@ export function createPolyScene(
     const by1 = Math.min(maxY, fpMaxY + maxExtend);
     const width = bx1 - bx0;
     const height = by1 - by0;
-    if (!(width > 0) || !(height > 0)) return;
+    if (!(width > 0) || !(height > 0)) return false;
 
     let d = "";
     for (const verts of polyProjections) {
@@ -1542,34 +1792,22 @@ export function createPolyScene(
     // Deferred until we hit a scene where shadow-through-elevated-
     // receiver is actually distracting.
 
-    const svgNS = "http://www.w3.org/2000/svg";
-    const svg = doc.createElementNS(svgNS, "svg");
-    svg.setAttribute("class", "polycss-shadow polycss-shadow-svg");
-    svg.setAttribute("width", String(width));
-    svg.setAttribute("height", String(height));
-    svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
-    svg.setAttribute(
-      "style",
-      `position:absolute;top:0;left:0;display:block;overflow:hidden;` +
-      `transform-origin:0 0;pointer-events:none;will-change:transform;` +
-      `transform:translate3d(${bx0.toFixed(3)}px,${by0.toFixed(3)}px,${groundCssZ.toFixed(3)}px)`,
-    );
-
-    const path = doc.createElementNS(svgNS, "path");
+    const { svg, path } = ensureGroundShadow();
+    const widthStr = String(width);
+    const heightStr = String(height);
+    const viewBox = `0 0 ${width} ${height}`;
+    if (svg.getAttribute("width") !== widthStr) svg.setAttribute("width", widthStr);
+    if (svg.getAttribute("height") !== heightStr) svg.setAttribute("height", heightStr);
+    if (svg.getAttribute("viewBox") !== viewBox) svg.setAttribute("viewBox", viewBox);
+    const transform = `translate3d(${bx0.toFixed(3)}px,${by0.toFixed(3)}px,${groundCssZ.toFixed(3)}px)`;
+    if (svg.style.transform !== transform) svg.style.transform = transform;
     path.setAttribute("d", d);
     const fillColor = `rgb(${r},${g},${b})`;
-    path.setAttribute("fill", fillColor);
-    path.setAttribute("fill-rule", "nonzero");
-    path.setAttribute("stroke", fillColor);
-    path.setAttribute("stroke-width", "2");
-    path.setAttribute("stroke-linejoin", "round");
-    path.setAttribute("opacity", opacity.toFixed(4));
-    svg.appendChild(path);
-
-    sceneShadowSvgs.push(svg);
-    const sceneFirst = sceneEl.firstChild;
-    if (sceneFirst) sceneEl.insertBefore(svg, sceneFirst);
-    else sceneEl.appendChild(svg);
+    if (path.getAttribute("fill") !== fillColor) path.setAttribute("fill", fillColor);
+    if (path.getAttribute("stroke") !== fillColor) path.setAttribute("stroke", fillColor);
+    const opStr = opacity.toFixed(4);
+    if (path.getAttribute("opacity") !== opStr) path.setAttribute("opacity", opStr);
+    return true;
   }
 
   type ReceiverPlaneGroup = {
@@ -1738,9 +1976,9 @@ export function createPolyScene(
     // shrinks from O(triangles) to O(distinct normals * planes).
     // Per-receiver face cache: plane data invariant under light. We
     // recompute groups (which is O(F²) and allocates lots of vectors)
-    // only when receiver polygons or position change. The SVG element
-    // is still created per-frame for non-empty paths — pre-mounting
-    // an SVG per face balloons compositor layers (248 → +33ms gpuViz).
+    // only when receiver polygons or position change. SVGs are created
+    // lazily the first time a face has shadow content, then hidden when
+    // later light positions do not project onto that face.
     const cacheKey = `${receiverEntry.polygons.length}|${rpos.join(",")}`;
     let cachedPlanes = receiverShadowCache.get(receiverEntry);
     if (cachedPlanes === undefined || receiverShadowCacheKey.get(receiverEntry) !== cacheKey) {
@@ -2250,6 +2488,8 @@ export function createPolyScene(
       cameraCullSignature: "",
       lightOverrideSignature: "clear",
       stableTriangleColorFrame: 0,
+      solidLightingPreviewPrepared: false,
+      solidLightingPreviewActive: false,
       bakedRotation: (transformIn.rotation ? [...transformIn.rotation] : [0, 0, 0]) as Vec3,
     };
 
@@ -2589,10 +2829,9 @@ export function createPolyScene(
         // mesh's faces are added (or removed) as receivers.
         if (entry.receiveShadow !== prevReceiveShadow) emitSceneShadows();
         // Position change: shadow geometry depends on world-space coords,
-        // so recompute ground (which itself rebuilds the scene shadows
-        // when the plane moves) and rebuild once more in case only the
-        // caster/receiver moved within the same plane.
-        if (t.position !== undefined) {
+        // but non-shadow helpers (e.g. the light helper) must not overwrite
+        // transient preview shadows with the committed light.
+        if (t.position !== undefined && (entry.castShadow || entry.receiveShadow)) {
           recomputeShadowGround();
           emitSceneShadows();
         }
@@ -2745,5 +2984,20 @@ export function createPolyScene(
     if (cameraEl.parentNode) cameraEl.parentNode.removeChild(cameraEl);
   }
 
-  return { add, setOptions, destroy, host, camera, cameraEl, applyCamera, getOptions, meshes: listMeshes, findMeshByElement };
+  const handle = {
+    add,
+    setOptions,
+    destroy,
+    host,
+    camera,
+    cameraEl,
+    applyCamera,
+    getOptions,
+    meshes: listMeshes,
+    findMeshByElement,
+    previewBakedSolidLighting,
+    commitBakedSolidLighting,
+    clearBakedSolidLightingPreview,
+  };
+  return handle;
 }
