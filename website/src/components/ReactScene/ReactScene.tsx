@@ -131,7 +131,13 @@ export function ReactScene({
   const Cam = sceneOptions.perspective === false ? PolyOrthographicCamera : PolyPerspectiveCamera;
   const camProps = sceneOptions.perspective === false
     ? { zoom: sceneOptions.zoom, rotX: sceneOptions.rotX, rotY: sceneOptions.rotY, target: sceneOptions.target }
-    : { zoom: sceneOptions.zoom, rotX: sceneOptions.rotX, rotY: sceneOptions.rotY, target: sceneOptions.target, perspective: sceneOptions.perspective };
+    : {
+      zoom: sceneOptions.zoom,
+      rotX: sceneOptions.rotX,
+      rotY: sceneOptions.rotY,
+      target: sceneOptions.target,
+      ...(typeof sceneOptions.perspective === "number" ? { perspective: sceneOptions.perspective } : {}),
+    };
   const orbitCameraDrag = sceneOptions.interactive && !gizmoDragging;
   const mapCameraDrag = sceneOptions.interactive && !gizmoDragging;
   const centerPolygons = scenePolygons;

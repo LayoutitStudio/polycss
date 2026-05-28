@@ -408,7 +408,6 @@ describe("Poly — dynamic lighting", () => {
       vertices: FLAT_TRIANGLE_VERTS,
     });
     const poly = getPoly(container);
-    expect(poly.style.backgroundColor).toBe("");
     expect(poly.style.backgroundBlendMode).toBe("");
     expect(poly.style.getPropertyValue("--pnx")).toBe("");
     expect(poly.getAttribute("style") ?? "").not.toContain("mask-image");

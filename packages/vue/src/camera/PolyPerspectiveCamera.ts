@@ -2,7 +2,7 @@
  * PolyPerspectiveCamera — Vue camera component with CSS perspective projection.
  * Mirrors React's PolyPerspectiveCamera.
  *
- * Uses `perspective: <n>px` on the wrapper element (defaults to 8000px).
+ * Uses `perspective: <n>px` on the wrapper element (defaults to 32000px).
  * Prefer this over the generic PolyCamera alias for explicit three.js-style naming.
  */
 import { defineComponent, h, provide, computed } from "vue";
@@ -11,7 +11,7 @@ import type { Vec3 } from "@layoutit/polycss-core";
 import { usePolyCamera } from "./useCamera";
 import { PolyCameraContextKey } from "./context";
 
-const DEFAULT_PERSPECTIVE = 8000;
+const DEFAULT_PERSPECTIVE = 32000;
 
 export interface PolyPerspectiveCameraProps {
   zoom?: number;
@@ -20,7 +20,7 @@ export interface PolyPerspectiveCameraProps {
   rotY?: number;
   /** Camera pull-back in CSS pixels (dolly). Default 0. */
   distance?: number;
-  /** CSS perspective distance in pixels. Defaults to 8000. */
+  /** CSS perspective distance in pixels. Defaults to 32000. */
   perspective?: number;
   class?: string;
 }

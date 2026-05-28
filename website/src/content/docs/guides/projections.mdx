@@ -16,7 +16,7 @@ Use the sliders below to explore how `perspective`, `rotX`, and `rotY` interact.
   id="projections-demo"
   model="/gallery/glb/tree.glb"
   controls='["perspective","rotX","rotY","zoom","animate"]'
-  defaults='{"rotX":65,"animate": true,"rotY":45,"perspective":8000,"zoom":0.1,"light":{"ambient":0.7}}'
+  defaults='{"rotX":65,"animate": true,"rotY":45,"zoom":0.1,"light":{"ambient":0.7}}'
 />
 
 ## Perspective depth
@@ -43,7 +43,7 @@ Higher `perspective` values feel flatter (more isometric-like); lower values exa
 </poly-perspective-camera>
 
 <!-- Very flat / near-isometric perspective -->
-<poly-perspective-camera perspective="8000" rot-x="65" rot-y="45">
+<poly-perspective-camera perspective="32000" rot-x="65" rot-y="45">
   <poly-scene>
     <poly-icosahedron size="100" color="#ff6644"></poly-icosahedron>
   </poly-scene>
@@ -69,7 +69,7 @@ import { PolyCamera, PolyPerspectiveCamera, PolyScene, PolyIcosahedron } from "@
 </PolyPerspectiveCamera>
 
 // Very flat / near-isometric perspective
-<PolyPerspectiveCamera perspective={8000} rotX={65} rotY={45}>
+<PolyPerspectiveCamera perspective={32000} rotX={65} rotY={45}>
   <PolyScene>
     <PolyIcosahedron size={100} color="#ff6644" />
   </PolyScene>

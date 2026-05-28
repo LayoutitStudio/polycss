@@ -7,7 +7,7 @@ import type {
 import type {
   PolyMeshHandle as VanillaPolyMeshHandle,
 } from "@layoutit/polycss";
-import { optimizeAnimatedMeshPolygons, parsePureColor } from "@layoutit/polycss";
+import { exportPolySceneSnapshot, optimizeAnimatedMeshPolygons, parsePureColor } from "@layoutit/polycss";
 import type { InspectorColorGroup, InspectorMesh } from "../Inspector";
 import { VanillaScene } from "../VanillaScene";
 import { ReactScene } from "../ReactScene";
@@ -26,6 +26,7 @@ import { DropOverlay } from "../DropOverlay";
 import { StatsOverlay } from "../StatsOverlay";
 import {
   activeMeshResolution,
+  POLYCSS_DEFAULT_PERSPECTIVE,
   type GizmoMode,
   type SceneOptionsState,
   type DomMetrics,
@@ -109,7 +110,7 @@ const DEFAULT_SCENE: SceneOptionsState = {
   zoom: PRESETS[0].zoom ?? 0.35,
   rotX: PRESETS[0].rotX ?? 65,
   rotY: PRESETS[0].rotY ?? 45,
-  perspective: false,
+  perspective: undefined,
   lightAzimuth: 50,
   lightElevation: 45,
   lightIntensity: 1,
@@ -603,6 +604,39 @@ function resolveInitialPreset(): PresetModel {
   return (id ? PRESETS.find((p) => p.id === id) : null) ?? randomPreset();
 }
 
+function codePenPayload(snapshotHtml: string, title: string): string {
+  const parsed = new DOMParser().parseFromString(snapshotHtml, "text/html");
+  const css = Array.from(parsed.querySelectorAll("style"))
+    .map((style) => style.textContent ?? "")
+    .filter(Boolean)
+    .join("\n\n");
+  const html = parsed.body.innerHTML.trim() || snapshotHtml;
+  return JSON.stringify({
+    title,
+    html,
+    css,
+    editors: "100",
+    layout: "left",
+  });
+}
+
+function openCodePen(html: string, title: string, target: string): void {
+  const form = document.createElement("form");
+  const input = document.createElement("input");
+  form.action = "https://codepen.io/pen/define";
+  form.method = "POST";
+  form.target = target;
+  form.setAttribute("rel", "noopener noreferrer");
+  form.style.display = "none";
+  input.type = "hidden";
+  input.name = "data";
+  input.value = codePenPayload(html, title);
+  form.appendChild(input);
+  document.body.appendChild(form);
+  form.submit();
+  form.remove();
+}
+
 export default function GalleryWorkbench() {
   const [initialPreset] = useState<PresetModel>(resolveInitialPreset);
   const [sceneOptions, setSceneOptions] = useState<SceneOptionsState>(() => sceneDefaultsFor(initialPreset));
@@ -617,6 +651,8 @@ export default function GalleryWorkbench() {
   const [modelSearch, setModelSearch] = useState("");
   const [openModelCategory, setOpenModelCategory] = useState<string | null>(null);
   const [mobilePanel, setMobilePanel] = useState<MobileGalleryPanel>(null);
+  const [codePenState, setCodePenState] = useState<"idle" | "exporting">("idle");
+  const [codePenError, setCodePenError] = useState<string | null>(null);
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const autoZoomPresetRef = useRef<string | null>(null);
   const autoAmbientPresetRef = useRef<string | null>(null);
@@ -951,6 +987,28 @@ export default function GalleryWorkbench() {
     setMobilePanel(null);
   }, [resetToPreset]);
 
+  const handleOpenCodePen = useCallback(async () => {
+    const viewport = viewportRef.current;
+    if (!viewport || codePenState === "exporting") return;
+    setCodePenState("exporting");
+    setCodePenError(null);
+    try {
+      const html = await exportPolySceneSnapshot(viewport);
+      openCodePen(
+        html,
+        `PolyCSS Gallery - ${loaded?.label ?? selectedPreset.label}`,
+        "_blank",
+      );
+    } catch (error) {
+      const message = error instanceof Error
+        ? error.message
+        : "Could not create a CodePen snapshot.";
+      setCodePenError(message);
+    } finally {
+      setCodePenState("idle");
+    }
+  }, [codePenState, loaded?.label, selectedPreset.label]);
+
   useEffect(() => {
     if (!mobilePanel) return;
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -1062,7 +1120,9 @@ export default function GalleryWorkbench() {
     return options;
   }, [selectableAnimationClips]);
   const perspectiveMode = sceneOptions.perspective === false ? "orthographic" : "perspective";
-  const perspectivePx = sceneOptions.perspective === false ? 8000 : sceneOptions.perspective;
+  const perspectivePx = typeof sceneOptions.perspective === "number"
+    ? sceneOptions.perspective
+    : POLYCSS_DEFAULT_PERSPECTIVE;
 
   // Materials data — grouped by mesh, then by canonical polygon color.
   const inspectorMeshes = useMemo<InspectorMesh[]>(() => {
@@ -1220,6 +1280,19 @@ export default function GalleryWorkbench() {
               <span className="dn-viewport-notice__body">{loadError}</span>
             </div>
           ) : null}
+          <div className="dn-codepen">
+            <button
+              type="button"
+              className="dn-codepen__button"
+              onClick={handleOpenCodePen}
+              disabled={codePenState === "exporting"}
+            >
+              {codePenState === "exporting" ? "Exporting..." : "Open in CodePen"}
+            </button>
+            {codePenError ? (
+              <div className="dn-codepen__error" role="alert">{codePenError}</div>
+            ) : null}
+          </div>
         </div>
         <DropOverlay active={dropped.dropActive} />
       </main>

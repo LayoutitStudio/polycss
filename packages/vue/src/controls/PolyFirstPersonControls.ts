@@ -266,7 +266,7 @@ export const PolyFirstPersonControls = defineComponent({
       const host = cameraElRef.value;
       const perspStr = host ? getComputedStyle(host).perspective : "";
       const n = parseFloat(perspStr);
-      return (Number.isFinite(n) && n > 0 ? n : 8000) / BASE_TILE;
+      return (Number.isFinite(n) && n > 0 ? n : 32000) / BASE_TILE;
     }
 
     function deriveTarget(): [number, number, number] {

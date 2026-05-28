@@ -14,6 +14,8 @@ export type DragMode = "orbit" | "pan" | "fpv";
 
 export type PerspectiveMode = "perspective" | "orthographic";
 
+export const POLYCSS_DEFAULT_PERSPECTIVE = 32000;
+
 export type WorkbenchMeshResolution = MeshResolution | "disabled";
 
 export type BuilderGridTone = "gray" | "dark";
@@ -50,7 +52,7 @@ export interface SceneOptionsState {
   zoom: number;
   rotX: number;
   rotY: number;
-  perspective: number | false;
+  perspective: number | false | undefined;
   lightAzimuth: number;
   lightElevation: number;
   lightIntensity: number;

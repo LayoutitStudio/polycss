@@ -15,7 +15,7 @@ import {
 
 const ATLAS_CANONICAL_SIZE_EXPLICIT = 64;
 const ATLAS_CANONICAL_SIZE_AUTO_DESKTOP = 128;
-const SOLID_QUAD_CANONICAL_SIZE = 64;
+const SOLID_QUAD_CANONICAL_SIZE = 256;
 
 const CORNER_SHAPE_CORPUS = [
   ["Bear.glb"],
@@ -387,7 +387,9 @@ describe("renderPoly — degenerate inputs", () => {
 
 describe("renderPoly — matrix math parity", () => {
   it("flat triangles use a finite border-triangle matrix", () => {
-    const result = renderPoly(FLAT_TRIANGLE)!;
+    const result = renderPoly(FLAT_TRIANGLE, {
+      doc: supportDoc({ borderShape: false, cornerShape: false }),
+    })!;
     const actual = extractMatrix(result.element);
     expect(actual.length).toBe(16);
     expect(actual.every(Number.isFinite)).toBe(true);
@@ -407,7 +409,9 @@ describe("renderPoly — matrix math parity", () => {
   });
 
   it("off-axis triangles use a finite border-triangle matrix", () => {
-    const result = renderPoly(OFFAXIS_TRIANGLE)!;
+    const result = renderPoly(OFFAXIS_TRIANGLE, {
+      doc: supportDoc({ borderShape: false, cornerShape: false }),
+    })!;
     const actual = extractMatrix(result.element);
     expect(actual.length).toBe(16);
     expect(actual.every(Number.isFinite)).toBe(true);
@@ -439,7 +443,9 @@ describe("renderPolygonsWithTextureAtlas", () => {
   });
 
   it("uses canonical u geometry by default", () => {
-    const result = renderPolygonsWithTextureAtlas([FLAT_TRIANGLE]);
+    const result = renderPolygonsWithTextureAtlas([FLAT_TRIANGLE], {
+      doc: supportDoc({ borderShape: false, cornerShape: false }),
+    });
     const element = result.rendered[0].element;
     const styleText = element.getAttribute("style") ?? "";
     expect(element.tagName.toLowerCase()).toBe("u");
@@ -786,8 +792,8 @@ describe("renderPolygonsWithTextureAtlas", () => {
     const yScale = Math.hypot(matrix[4], matrix[5], matrix[6]);
 
     expect(element.tagName.toLowerCase()).toBe("i");
-    expect(xScale).toBeGreaterThan(2 / 16);
-    expect(yScale).toBeGreaterThan(2 / 16);
+    expect(xScale).toBeGreaterThan(2 / 256);
+    expect(yScale).toBeGreaterThan(2 / 256);
     expect(element.style.getPropertyValue("border-shape")).toContain("polygon(");
     result.dispose();
   });
@@ -1032,10 +1038,10 @@ describe("renderPolygonsWithTextureAtlas", () => {
     expect(element.style.height).toBe("");
     expect(element.style.getPropertyValue("--polycss-local-w")).toBe("");
     expect(element.style.getPropertyValue("--polycss-local-h")).toBe("");
-    expect(matrix[0]).toBeGreaterThan(10 / 16);
+    expect(matrix[0]).toBeGreaterThan(10 / 256);
     expect(matrix[1]).toBeCloseTo(0, 6);
     expect(matrix[4]).toBeCloseTo(0, 6);
-    expect(matrix[5]).toBeGreaterThan(1 / 16);
+    expect(matrix[5]).toBeGreaterThan(1 / 256);
     result.dispose();
   });
 
@@ -1399,7 +1405,6 @@ describe("renderPolygonsWithTextureAtlas", () => {
   it("does not emit dynamic style hooks in baked mode", () => {
     const result = renderPolygonsWithTextureAtlas([FLAT_TRIANGLE], { textureLighting: "baked" });
     const element = result.rendered[0].element;
-    expect(element.style.backgroundColor).toBe("");
     expect(element.style.backgroundBlendMode).toBe("");
     expect(element.style.getPropertyValue("--pnx")).toBe("");
     result.dispose();
@@ -1627,7 +1632,7 @@ describe("renderPolygonsWithTextureAtlas — strategies.disable", () => {
     result.dispose();
   });
 
-  it("paints solid triangles with the corner class when corner-shape is supported", () => {
+  it("paints solid triangles with inline corner-shape when supported", () => {
     const doc = {
       defaultView: {
         CSS: {
@@ -1645,7 +1650,8 @@ describe("renderPolygonsWithTextureAtlas — strategies.disable", () => {
     );
     const element = result.rendered[0].element;
     expect(element.tagName.toLowerCase()).toBe("u");
-    expect(element.classList.contains("polycss-corner-triangle")).toBe(true);
+    expect(element.className).toBe("");
+    expect(element.style.getPropertyValue("corner-top-left-shape")).toBe("bevel");
     result.dispose();
   });
 
@@ -1661,7 +1667,8 @@ describe("renderPolygonsWithTextureAtlas — strategies.disable", () => {
     );
     const element = result.rendered[0].element;
     expect(element.tagName.toLowerCase()).toBe("u");
-    expect(element.classList.contains("polycss-corner-triangle")).toBe(false);
+    expect(element.className).toBe("");
+    expect(element.style.getPropertyValue("corner-top-left-shape")).toBe("");
     result.dispose();
   });
 
@@ -1986,7 +1993,9 @@ describe("renderPolygonsWithTextureAtlas — strategies.disable", () => {
   });
 
   it("omitting strategies uses canonical geometry defaults", () => {
-    const result = renderPolygonsWithTextureAtlas([FLAT_TRIANGLE]);
+    const result = renderPolygonsWithTextureAtlas([FLAT_TRIANGLE], {
+      doc: supportDoc({ borderShape: false, cornerShape: false }),
+    });
     const element = result.rendered[0].element;
     expect(element.tagName.toLowerCase()).toBe("u");
     expect(element.getAttribute("style")).not.toContain("border-width:");

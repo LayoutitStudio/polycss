@@ -13,7 +13,7 @@
 import { createIsometricCamera } from "@layoutit/polycss-core";
 import type { CameraHandle, CameraState, CameraStyleInput, Vec3 } from "@layoutit/polycss-core";
 
-const DEFAULT_PERSPECTIVE = 8000;
+const DEFAULT_PERSPECTIVE = 32000;
 
 export interface PolyCameraOptions {
   zoom?: number;
@@ -25,7 +25,7 @@ export interface PolyCameraOptions {
 }
 
 export interface PolyPerspectiveCameraOptions extends PolyCameraOptions {
-  /** CSS perspective distance in pixels. Default 8000. */
+  /** CSS perspective distance in pixels. Default 32000. */
   perspective?: number;
 }
 
@@ -47,7 +47,7 @@ export interface PolyOrthographicCameraHandle extends CameraHandle {
 /**
  * Creates a perspective camera handle. The `perspectiveStyle` property
  * returns the CSS value to apply to the camera container's `perspective`
- * property (default `"8000px"`).
+ * property (default `"32000px"`).
  */
 export function createPolyPerspectiveCamera(
   options: PolyPerspectiveCameraOptions = {},

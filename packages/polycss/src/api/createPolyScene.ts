@@ -85,7 +85,7 @@ import { injectPolyBaseStyles } from "../styles/styles";
 // keeps large gallery meshes below Chrome's long-task warning threshold
 // without changing the synchronous public setPolygons() contract.
 const ASYNC_MOUNT_BATCH_SIZE = 750;
-const DEFAULT_SCENE_PERSPECTIVE = 8000;
+const DEFAULT_SCENE_PERSPECTIVE = 32000;
 
 function normalizeSceneOptions<T extends Partial<Omit<PolySceneOptions, "camera">>>(options: T): T {
   if (!Object.prototype.hasOwnProperty.call(options, "seamBleed") || options.seamBleed !== undefined) {
@@ -479,14 +479,10 @@ function effectiveCssZoom(element: HTMLElement): number {
   return Number.isFinite(zoom) && zoom > 0 ? zoom : 1;
 }
 
-function scaledCssPixels(value: number, scale: number): number {
-  return scale === 1 ? value : value * scale;
-}
-
 function applyCssZoomCompensation(el: HTMLElement, scale: number): void {
   // Chromium's CSS zoom can scale layout metrics without scaling the
   // preserve-3d rasterization path consistently. Neutralize zoom on the scene
-  // root, then fold the same scale into the matrix/perspective explicitly.
+  // root, then fold the same scale into scene geometry transforms explicitly.
   if (Math.abs(scale - 1) < 1e-6) {
     el.style.removeProperty("zoom");
   } else {
@@ -764,12 +760,12 @@ export function createPolyScene(
     // orthographic but routes Chrome through the normal compositor path.
     const perspStyle = camera.perspectiveStyle;
     if (perspStyle === "none") {
-      el.style.perspective = `${scaledCssPixels(1000000, layoutScale)}px`;
+      el.style.perspective = "1000000px";
     } else {
-      // perspStyle is e.g. "8000px" — strip "px", scale, re-apply.
+      // perspStyle is e.g. "32000px" — strip "px", normalize, re-apply.
       const px = parseFloat(perspStyle);
       if (Number.isFinite(px)) {
-        el.style.perspective = `${scaledCssPixels(px, layoutScale)}px`;
+        el.style.perspective = `${px}px`;
       }
     }
   }

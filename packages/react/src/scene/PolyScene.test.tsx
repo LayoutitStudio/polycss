@@ -136,7 +136,7 @@ describe("PolyScene — polygon rendering", () => {
     });
     const poly = container.querySelector("u");
     const style = poly?.getAttribute("style") ?? "";
-    expect(style).not.toContain("border-width");
+    expect(poly?.className).toBe("");
     expect(style).not.toContain("background: linear-gradient");
   });
 

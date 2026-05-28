@@ -139,20 +139,23 @@ describe("renderPolygonsWithStableTriangles — initial render", () => {
     bleed.dispose();
   });
 
-  it("adds polycss-corner-triangle class when corner-shape is supported", () => {
+  it("applies corner-shape triangle paint inline when supported", () => {
     const doc = makeDoc({ cornerShape: true });
     const result = renderPolygonsWithStableTriangles([TRIANGLE_A], { doc });
     expect(result).not.toBeNull();
     const el = result!.rendered[0].element;
-    expect(el.classList.contains("polycss-corner-triangle")).toBe(true);
+    expect(el.className).toBe("");
+    expect(el.style.getPropertyValue("corner-top-left-shape")).toBe("bevel");
+    expect(el.style.backgroundColor).toBe("currentcolor");
     result!.dispose();
   });
 
-  it("does NOT add polycss-corner-triangle class when corner-shape is unsupported", () => {
+  it("keeps border-triangle paint classless when corner-shape is unsupported", () => {
     const doc = makeDoc({ cornerShape: false });
     const result = renderPolygonsWithStableTriangles([TRIANGLE_A], { doc });
     const el = result!.rendered[0].element;
-    expect(el.classList.contains("polycss-corner-triangle")).toBe(false);
+    expect(el.className).toBe("");
+    expect(el.style.getPropertyValue("corner-top-left-shape")).toBe("");
     result!.dispose();
   });
 });

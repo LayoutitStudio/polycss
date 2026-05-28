@@ -7,7 +7,7 @@
  * CSS `perspective` property set.
  *
  * Attributes (all optional):
- *   perspective   — number, CSS perspective in pixels (default 8000)
+ *   perspective   — number, CSS perspective in pixels (default 32000)
  *   zoom          — number
  *   rot-x         — number, degrees (default 65)
  *   rot-y         — number, degrees (default 45)

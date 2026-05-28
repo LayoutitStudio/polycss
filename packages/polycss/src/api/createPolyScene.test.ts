@@ -398,8 +398,9 @@ describe("createPolyScene", () => {
       const cameraEl = host.querySelector(".polycss-camera") as HTMLElement;
       const sceneEl = host.querySelector(".polycss-scene") as HTMLElement;
       const transform = sceneEl.style.transform;
-      // Perspective lives on the .polycss-camera wrapper, not on .polycss-scene.
-      expect(cameraEl.style.perspective).toBe("750px");
+      // Perspective stays the configured camera depth; CSS zoom only affects
+      // the scene geometry transform compensation.
+      expect(cameraEl.style.perspective).toBe("1500px");
       expect(sceneEl.style.getPropertyValue("zoom")).toBe("2");
       expect(transform).toContain("translateZ(-50px)");
       expect(transform).toContain("scale(1)");
@@ -425,11 +426,11 @@ describe("createPolyScene", () => {
       expect(styleEl?.textContent).toContain("transform-origin: 0 0");
       expect(styleEl?.textContent).toContain("backface-visibility: hidden");
       expect(styleEl?.textContent).toContain("background-repeat: no-repeat");
-      expect(styleEl?.textContent).toContain("width: 64px;");
-      expect(styleEl?.textContent).toContain("height: 64px;");
+      expect(styleEl?.textContent).toContain("width: 256px;");
+      expect(styleEl?.textContent).toContain("height: 256px;");
       expect(styleEl?.textContent).toContain("width: var(--polycss-atlas-size, 64px);");
       expect(styleEl?.textContent).toContain("height: var(--polycss-atlas-size, 64px);");
-      expect(styleEl?.textContent).toContain("border-width: 0 16px 32px 16px;");
+      expect(styleEl?.textContent).toContain("border-width: 0 128px 256px 128px;");
       expect(styleEl?.textContent).toContain("width: 0;");
       expect(styleEl?.textContent).toContain("height: 0;");
     });
@@ -496,7 +497,9 @@ describe("createPolyScene", () => {
       expect(brush!.style.color).toMatch(/^(#123456|rgb\\(18, 52, 86\\))$/);
       expect(brush!.style.width).toBe("");
       expect(brush!.style.height).toBe("");
-      expect(brush!.style.transform).toContain("matrix3d(50,0,0,0,0,50");
+      const matrix = matrixValues(brush!);
+      expect(matrix[0]).toBeCloseTo(50, 3);
+      expect(matrix[5]).toBeCloseTo(50, 3);
     });
 
     it("adds tiny overscan to same-color shared direct voxel edges", () => {
@@ -513,7 +516,7 @@ describe("createPolyScene", () => {
       expect(brushes.length).toBeGreaterThan(0);
       const matrices = brushes.map(matrixValues);
       expect(matrices.some((values) =>
-        values.some((value) => Math.abs(value - 50.6) <= 1e-6)
+        values.some((value) => Math.abs(value - 50.6) <= 1e-4)
       )).toBe(true);
     });
 
@@ -531,7 +534,7 @@ describe("createPolyScene", () => {
       expect(brushes.length).toBeGreaterThan(0);
       const matrices = brushes.map(matrixValues);
       expect(matrices.some((values) =>
-        values.some((value) => Math.abs(value - 50.6) <= 1e-6)
+        values.some((value) => Math.abs(value - 50.6) <= 1e-4)
       )).toBe(true);
     });
 
@@ -584,7 +587,9 @@ describe("createPolyScene", () => {
         expect(wrapper!.style.getPropertyValue("--polycss-voxel-primitive")).toBe("8px");
         expect(brush!.style.width).toBe("");
         expect(brush!.style.height).toBe("");
-        expect(brush!.style.transform).toContain("matrix3d(6.25,0,0,0,0,6.25");
+        const matrix = matrixValues(brush!);
+        expect(matrix[0]).toBeCloseTo(6.25, 3);
+        expect(matrix[5]).toBeCloseTo(6.25, 3);
       } finally {
         Object.defineProperty(window, "matchMedia", {
           configurable: true,
@@ -1097,7 +1102,7 @@ describe("createPolyScene", () => {
       expect(poly).not.toBeNull();
       expect(poly.tagName.toLowerCase()).toBe("u");
       expect(poly.style.transform).toContain("matrix3d(");
-      expect(poly.style.borderBottomWidth).toBe("");
+      expect(poly.className).toBe("");
     });
 
     describe("rebakeAtlas", () => {

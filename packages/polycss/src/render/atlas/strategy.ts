@@ -52,6 +52,7 @@ export function borderShapeSupported(doc: Document): boolean {
 }
 
 export function solidTriangleSupported(doc: Document): boolean {
+  if (cornerTriangleSupported(doc)) return true;
   const win = doc.defaultView ?? (typeof window !== "undefined" ? window : undefined);
   const userAgent = win?.navigator?.userAgent ?? "";
   if (!userAgent) return true;
@@ -168,6 +169,11 @@ export function isBorderShapeSupported(doc?: Document | null): boolean {
 export function isSolidTriangleSupported(doc?: Document | null): boolean {
   const d = doc ?? (typeof document !== "undefined" ? document : null);
   if (!d) {
+    const css = typeof CSS !== "undefined" ? CSS : undefined;
+    if (
+      !!css?.supports?.("corner-top-left-shape", "bevel") &&
+      !!css.supports("corner-top-right-shape", "bevel")
+    ) return true;
     const userAgent = (typeof navigator !== "undefined" ? navigator : globalThis.navigator)?.userAgent ?? "";
     if (!userAgent) return true;
     const isChromiumFamily = /\b(?:Chrome|HeadlessChrome|Chromium|Edg|OPR)\//.test(userAgent);

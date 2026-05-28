@@ -97,6 +97,20 @@ dispose(); // always call on cleanup
 
 ---
 
+## `exportPolySceneSnapshot(target)`
+
+Serializes an already-rendered PolyCSS scene to a standalone HTML document string. The function is exported by `@layoutit/polycss`. Pass the camera wrapper, scene element, host, or any descendant of the rendered scene. It can snapshot scenes rendered by the React and Vue packages because it operates on the final DOM.
+
+```ts
+import { exportPolySceneSnapshot } from "@layoutit/polycss";
+
+const html = await exportPolySceneSnapshot(scene.host);
+```
+
+The snapshot clones the current rendered `.polycss-camera` / `.polycss-scene` DOM, injects only the PolyCSS CSS needed by that snapshot, inlines CSS `url(...)` image assets as `data:image/...;base64,...`, strips scripts and inline event handlers, and emits no PolyCSS runtime import. If an asset cannot be inlined, it throws `PolySceneSnapshotError` with `code: "ASSET_INLINE_FAILED"` and the failing `url`.
+
+---
+
 ## `normalizePolygons(polygons)`
 
 Validates a polygon array. Drops degenerate polygons (collinear, zero-area), auto-triangulates non-coplanar N-gons via fan decomposition, and strips UV arrays that don't match `vertices.length`. Returns the validated polygons plus a list of human-readable warnings describing every change made.

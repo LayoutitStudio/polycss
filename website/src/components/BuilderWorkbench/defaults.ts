@@ -31,7 +31,7 @@ export const DEFAULT_SCENE: SceneOptionsState = {
   zoom: 0.3,
   rotX: 65,
   rotY: 45,
-  perspective: false,
+  perspective: undefined,
   lightAzimuth: 50,
   lightElevation: 45,
   lightIntensity: 1,

@@ -17,9 +17,9 @@ describe("createPolyPerspectiveCamera", () => {
     expect(cam.type).toBe("perspective");
   });
 
-  it("returns default perspectiveStyle of '8000px'", () => {
+  it("returns default perspectiveStyle of '32000px'", () => {
     const cam = createPolyPerspectiveCamera();
-    expect(cam.perspectiveStyle).toBe("8000px");
+    expect(cam.perspectiveStyle).toBe("32000px");
   });
 
   it("accepts a custom perspective value", () => {

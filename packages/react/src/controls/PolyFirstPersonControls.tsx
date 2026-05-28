@@ -324,7 +324,7 @@ export const PolyFirstPersonControls = forwardRef<
     const host = cameraElRef.current;
     const perspStr = host ? getComputedStyle(host).perspective : "";
     const n = parseFloat(perspStr);
-    return (Number.isFinite(n) && n > 0 ? n : 8000) / BASE_TILE;
+    return (Number.isFinite(n) && n > 0 ? n : 32000) / BASE_TILE;
   }
 
   function deriveTarget(): [number, number, number] {

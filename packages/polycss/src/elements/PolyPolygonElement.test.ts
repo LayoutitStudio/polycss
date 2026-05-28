@@ -130,7 +130,7 @@ describe("PolyPolygonElement — inside poly-scene", () => {
 
     const rendered = sceneEl.querySelector("u");
     expect(rendered).toBeTruthy();
-    expect(rendered?.className === "" || rendered?.className === "polycss-corner-triangle").toBe(true);
+    expect(rendered?.className).toBe("");
     cleanup();
   });
 

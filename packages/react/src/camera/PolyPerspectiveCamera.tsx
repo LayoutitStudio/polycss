@@ -11,14 +11,14 @@ export interface PolyPerspectiveCameraProps {
   rotY?: number;
   /** Camera pull-back in CSS pixels (dolly). Default 0. */
   distance?: number;
-  /** CSS perspective distance in pixels. Defaults to 8000. */
+  /** CSS perspective distance in pixels. Defaults to 32000. */
   perspective?: number;
   children?: ReactNode;
   className?: string;
   style?: React.CSSProperties;
 }
 
-const DEFAULT_PERSPECTIVE = 8000;
+const DEFAULT_PERSPECTIVE = 32000;
 
 function PolyPerspectiveCameraInner({
   zoom,

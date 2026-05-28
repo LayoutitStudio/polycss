@@ -9,6 +9,7 @@ import type {
   TextureAtlasPlan,
   PolyTextureLightingMode,
   SolidPaintDefaults,
+  SolidTrianglePrimitive,
   Vec2,
   Vec3,
 } from "@layoutit/polycss-core";
@@ -28,11 +29,33 @@ export const BASIS_EPS = 1e-9;
 const RECT_EPS = 1e-3;
 // Matches the canonical SOLID_TRIANGLE_BLEED constant.
 export const SOLID_TRIANGLE_BLEED = 0.75;
-const SOLID_TRIANGLE_CANONICAL_SIZE = 32;
-const SOLID_TRIANGLE_LARGE_BORDER_CANONICAL_SIZE = 96;
-const SOLID_TRIANGLE_LARGE_BORDER_WIDTH = "0 48px 96px 48px";
+const SOLID_TRIANGLE_CANONICAL_SIZE = 256;
+const SOLID_TRIANGLE_LARGE_BORDER_CANONICAL_SIZE = 256;
+const SOLID_TRIANGLE_LARGE_BORDER_WIDTH = "0 128px 256px 128px";
+const CORNER_TRIANGLE_STYLE = {
+  width: "256px",
+  height: "256px",
+  backgroundColor: "currentColor",
+  borderWidth: "0",
+  borderTopLeftRadius: "50% 100%",
+  borderTopRightRadius: "50% 100%",
+  "corner-top-left-shape": "bevel",
+  "corner-top-right-shape": "bevel",
+} as CSSProperties;
 let cachedSolidTriangleUserAgent: string | undefined;
 let cachedSolidTriangleCanonicalSize = SOLID_TRIANGLE_CANONICAL_SIZE;
+
+function cornerTriangleSupported(): boolean {
+  const css = typeof CSS !== "undefined" ? CSS : undefined;
+  return !!css?.supports?.("corner-top-left-shape", "bevel") &&
+    !!css.supports("corner-top-right-shape", "bevel");
+}
+
+function solidTrianglePrimitive(): SolidTrianglePrimitive {
+  if (cornerTriangleSupported()) return "corner-bevel";
+  const ua = typeof navigator !== "undefined" ? navigator.userAgent : "";
+  return /\bFirefox\//.test(ua) ? "border-large" : "border";
+}
 
 export function solidTriangleCanonicalSize(): number {
   const ua = typeof navigator !== "undefined" ? navigator.userAgent : "";
@@ -46,9 +69,39 @@ export function solidTriangleCanonicalSize(): number {
 }
 
 export function solidTriangleBorderWidth(): string | undefined {
-  return solidTriangleCanonicalSize() === SOLID_TRIANGLE_LARGE_BORDER_CANONICAL_SIZE
+  return solidTrianglePrimitive() === "border-large"
     ? SOLID_TRIANGLE_LARGE_BORDER_WIDTH
     : undefined;
+}
+
+export function solidTrianglePaintStyle(): CSSProperties | undefined {
+  const primitive = solidTrianglePrimitive();
+  if (primitive === "corner-bevel") return CORNER_TRIANGLE_STYLE;
+  const borderWidth = primitive === "border-large" ? SOLID_TRIANGLE_LARGE_BORDER_WIDTH : undefined;
+  return borderWidth ? { borderWidth } : undefined;
+}
+
+export function applySolidTrianglePaintStyle(el: HTMLElement): void {
+  const primitive = solidTrianglePrimitive();
+  if (primitive === "corner-bevel") {
+    el.style.width = "256px";
+    el.style.height = "256px";
+    el.style.backgroundColor = "currentColor";
+    el.style.borderWidth = "0";
+    el.style.borderTopLeftRadius = "50% 100%";
+    el.style.borderTopRightRadius = "50% 100%";
+    el.style.setProperty("corner-top-left-shape", "bevel");
+    el.style.setProperty("corner-top-right-shape", "bevel");
+  } else {
+    el.style.width = "";
+    el.style.height = "";
+    el.style.backgroundColor = "";
+    el.style.borderTopLeftRadius = "";
+    el.style.borderTopRightRadius = "";
+    el.style.removeProperty("corner-top-left-shape");
+    el.style.removeProperty("corner-top-right-shape");
+    el.style.borderWidth = primitive === "border-large" ? SOLID_TRIANGLE_LARGE_BORDER_WIDTH : "";
+  }
 }
 
 export interface RGB { r: number; g: number; b: number; }
@@ -538,9 +591,10 @@ export function solidTriangleStyle(
     normal[0], normal[1], normal[2], 0,
     txCol[0], txCol[1], txCol[2], 1,
   ].map((v) => (Math.round(v * 1000) / 1000 || 0).toString()).join(",");
+  const primitiveStyle = solidTrianglePaintStyle();
   return {
     transform: `matrix3d(${canonicalMatrix})`,
-    borderWidth: solidTriangleBorderWidth(),
+    ...(primitiveStyle ?? {}),
     ...sharedStyle,
   };
 }

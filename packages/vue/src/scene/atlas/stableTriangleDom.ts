@@ -23,6 +23,7 @@ import {
   quantizeCssColor,
   stepRgbToward,
   offsetConvexPolygonPoints,
+  applySolidTrianglePaintStyle,
   solidTriangleBorderWidth,
   solidTriangleCanonicalSize,
 } from "./solidTriangleStyle";
@@ -347,6 +348,7 @@ export function updateStableTriangleDom(
     const el = leaves[i];
     if (el.style.visibility) el.style.visibility = "";
     el.__polycssStableTriangleBasis = style.basis;
+    applySolidTrianglePaintStyle(el);
     el.style.transform = style.transform;
     if (style.borderWidth !== undefined) el.style.borderWidth = style.borderWidth;
     if (style.color !== undefined) applyStableTriangleColor(el, i, style.color, options);

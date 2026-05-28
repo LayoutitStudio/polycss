@@ -2,8 +2,8 @@
  * Feature tests: solid triangle primitive dispatch (border vs corner-bevel)
  *
  * Covers the resolveSolidTrianglePrimitive observable result via the public
- * renderPolygonsWithStableTriangles API — whether the element gets the
- * polycss-corner-triangle class (corner-bevel) or not (border).
+ * renderPolygonsWithStableTriangles API — whether the element gets inline
+ * corner-shape paint (corner-bevel) or keeps border-triangle paint (border).
  *
  * We also verify the dispatch from renderPolygonsWithTextureAtlas:
  * triangles use the cheapest supported primitive and fall through correctly.
@@ -70,30 +70,35 @@ const TRIANGLE_2: Polygon = {
 // ---------------------------------------------------------------------------
 
 describe("solid triangle primitive — corner-bevel vs border", () => {
-  it("corner-shape supported → polycss-corner-triangle class is present", () => {
+  it("corner-shape supported → corner paint is inline and classless", () => {
     const doc = makeDoc({ cornerShape: true });
     const result = renderPolygonsWithStableTriangles([TRIANGLE], { doc });
     expect(result).not.toBeNull();
-    expect(result!.rendered[0].element.classList.contains("polycss-corner-triangle")).toBe(true);
+    const element = result!.rendered[0].element;
+    expect(element.className).toBe("");
+    expect(element.style.getPropertyValue("corner-top-left-shape")).toBe("bevel");
     result!.dispose();
   });
 
-  it("corner-shape NOT supported → polycss-corner-triangle class is absent", () => {
+  it("corner-shape NOT supported → border paint is classless", () => {
     const doc = makeDoc({ cornerShape: false });
     const result = renderPolygonsWithStableTriangles([TRIANGLE], { doc });
     expect(result).not.toBeNull();
-    expect(result!.rendered[0].element.classList.contains("polycss-corner-triangle")).toBe(false);
+    const element = result!.rendered[0].element;
+    expect(element.className).toBe("");
+    expect(element.style.getPropertyValue("corner-top-left-shape")).toBe("");
     result!.dispose();
   });
 
-  it("Firefox UA → uses the large border triangle primitive", () => {
+  it("Firefox UA → uses the large border triangle primitive inline", () => {
     const doc = makeDoc({
       userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:146.0) Gecko/20100101 Firefox/146.0",
     });
     const result = renderPolygonsWithStableTriangles([TRIANGLE], { doc });
     expect(result).not.toBeNull();
-    expect(result!.rendered[0].element.classList.contains("polycss-large-border-triangle")).toBe(true);
-    expect(result!.rendered[0].element.classList.contains("polycss-corner-triangle")).toBe(false);
+    const element = result!.rendered[0].element;
+    expect(element.className).toBe("");
+    expect(element.style.borderWidth).toBe("0px 128px 256px");
     result!.dispose();
   });
 
@@ -165,12 +170,13 @@ describe("solid triangle primitive — strategy disable interactions", () => {
     expect(result).toBeNull();
   });
 
-  it("multiple triangles: all get the same primitive class consistently", () => {
+  it("multiple triangles: all get the same inline primitive consistently", () => {
     const doc = makeDoc({ cornerShape: true });
     const result = renderPolygonsWithStableTriangles([TRIANGLE, TRIANGLE_2], { doc });
     expect(result).not.toBeNull();
     for (const { element } of result!.rendered) {
-      expect(element.classList.contains("polycss-corner-triangle")).toBe(true);
+      expect(element.className).toBe("");
+      expect(element.style.getPropertyValue("corner-top-left-shape")).toBe("bevel");
     }
     result!.dispose();
   });
