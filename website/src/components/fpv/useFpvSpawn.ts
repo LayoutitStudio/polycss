@@ -8,7 +8,7 @@ export const FPV_PERSPECTIVE = 2000;
 export interface UseFpvSpawnOptions {
   dragMode: SceneOptionsState["dragMode"];
   autoCenter: boolean;
-  perspective: number | false;
+  perspective: number | false | undefined;
   rotY: number;
   scenePolygons: Polygon[];
   updateScene: (partial: Partial<SceneOptionsState>) => void;
@@ -24,7 +24,7 @@ export function useFpvSpawn({
 }: UseFpvSpawnOptions): void {
   const prevDragModeRef = useRef<SceneOptionsState["dragMode"]>(dragMode);
   const fpvSavedAutoCenterRef = useRef<boolean | null>(null);
-  const fpvSavedPerspectiveRef = useRef<number | false | null>(null);
+  const fpvSavedPerspectiveRef = useRef<number | false | undefined | null>(null);
 
   useEffect(() => {
     const prev = prevDragModeRef.current;

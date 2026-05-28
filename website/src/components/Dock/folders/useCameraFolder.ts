@@ -19,7 +19,12 @@ import {
   useSlider,
   useToggle,
 } from "../primitives";
-import type { DragMode, PerspectiveMode, SceneOptionsState } from "../../types";
+import {
+  POLYCSS_DEFAULT_PERSPECTIVE,
+  type DragMode,
+  type PerspectiveMode,
+  type SceneOptionsState,
+} from "../../types";
 
 interface PresetModelMinimal {
   zoom?: number;
@@ -50,7 +55,7 @@ export interface CameraFolderInputs {
   fpvRenderDistance: number;
   perspectiveMode: PerspectiveMode;
   perspectivePx: number;
-  perspective: number | false;
+  perspective: number | false | undefined;
   zoom: number;
   rotX: number;
   rotY: number;
@@ -236,7 +241,9 @@ export function useCameraFolder(parent: GUI | null, inputs: CameraFolderInputs):
     perspectiveMode,
     (value) =>
       onUpdateScene({
-        perspective: value === "perspective" ? perspectivePxRef.current : false,
+        perspective: value === "perspective"
+          ? (perspectivePxRef.current === POLYCSS_DEFAULT_PERSPECTIVE ? undefined : perspectivePxRef.current)
+          : false,
       }),
   );
   const perspectivePxCtrl = useOption<number>(
@@ -244,7 +251,9 @@ export function useCameraFolder(parent: GUI | null, inputs: CameraFolderInputs):
     "Perspective px",
     PERSPECTIVE_PX_OPTIONS,
     perspectivePx,
-    (value) => onUpdateScene({ perspective: value }),
+    (value) => onUpdateScene({
+      perspective: value === POLYCSS_DEFAULT_PERSPECTIVE ? undefined : value,
+    }),
   );
 
   useSlider(folder, "Zoom", { min: 0.05, max: 2.5, step: 0.01 }, zoom, (value) =>

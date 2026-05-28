@@ -18,7 +18,7 @@ import { useFpvSpawn } from "./useFpvSpawn";
 export interface UseFpvHostOptions {
   dragMode: SceneOptionsState["dragMode"];
   autoCenter: boolean;
-  perspective: number | false;
+  perspective: number | false | undefined;
   rotY: number;
   /** World-space polygons used to compute the spawn bbox. Caller is
    *  responsible for applying per-mesh transforms (position/scale) before

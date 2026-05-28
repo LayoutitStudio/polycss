@@ -42,7 +42,7 @@ const CORE_BASE_STYLES = `
   width: 100%;
   justify-content: center;
   align-items: center;
-  perspective: 8000px;
+  perspective: 32000px;
   min-height: inherit;
   height: 100%;
   position: relative;

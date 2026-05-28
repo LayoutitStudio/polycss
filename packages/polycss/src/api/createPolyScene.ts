@@ -85,7 +85,7 @@ import { injectPolyBaseStyles } from "../styles/styles";
 // keeps large gallery meshes below Chrome's long-task warning threshold
 // without changing the synchronous public setPolygons() contract.
 const ASYNC_MOUNT_BATCH_SIZE = 750;
-const DEFAULT_SCENE_PERSPECTIVE = 8000;
+const DEFAULT_SCENE_PERSPECTIVE = 32000;
 
 function normalizeSceneOptions<T extends Partial<Omit<PolySceneOptions, "camera">>>(options: T): T {
   if (!Object.prototype.hasOwnProperty.call(options, "seamBleed") || options.seamBleed !== undefined) {
@@ -766,7 +766,7 @@ export function createPolyScene(
     if (perspStyle === "none") {
       el.style.perspective = `${scaledCssPixels(1000000, layoutScale)}px`;
     } else {
-      // perspStyle is e.g. "8000px" — strip "px", scale, re-apply.
+      // perspStyle is e.g. "32000px" — strip "px", scale, re-apply.
       const px = parseFloat(perspStyle);
       if (Number.isFinite(px)) {
         el.style.perspective = `${scaledCssPixels(px, layoutScale)}px`;

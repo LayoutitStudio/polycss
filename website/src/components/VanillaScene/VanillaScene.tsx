@@ -298,9 +298,11 @@ export function VanillaScene({
       target: options.target as Vec3 | undefined,
     };
     const perspective = options.dragMode === "fpv" ? FPV_PERSPECTIVE : options.perspective;
-    const camera = perspective
-      ? createPolyPerspectiveCamera({ ...cameraOpts, perspective })
-      : createPolyOrthographicCamera(cameraOpts);
+    const camera = perspective === false
+      ? createPolyOrthographicCamera(cameraOpts)
+      : createPolyPerspectiveCamera(
+        typeof perspective === "number" ? { ...cameraOpts, perspective } : cameraOpts,
+      );
     cameraRef.current = camera;
     const sceneOptions: PolySceneOptions = {
       camera,

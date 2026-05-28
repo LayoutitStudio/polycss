@@ -20,14 +20,14 @@ describe("PolyPerspectiveCamera", () => {
     expect(container.querySelector(".polycss-camera")).toBeTruthy();
   });
 
-  it("applies default perspective of 8000px", () => {
+  it("applies default perspective of 32000px", () => {
     const container = renderToDiv(
       <PolyPerspectiveCamera>
         <div />
       </PolyPerspectiveCamera>
     );
     const camera = container.querySelector(".polycss-camera") as HTMLElement;
-    expect(camera.style.perspective).toBe("8000px");
+    expect(camera.style.perspective).toBe("32000px");
   });
 
   it("applies a custom numeric perspective value", () => {

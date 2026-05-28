@@ -180,11 +180,11 @@ describe("PolyPerspectiveCameraElement", () => {
     expect(wrapper).not.toBeNull();
   });
 
-  it("applies default perspective of 8000px to wrapper", () => {
+  it("applies default perspective of 32000px to wrapper", () => {
     const el = document.createElement("poly-perspective-camera") as PolyPerspectiveCameraElement;
     host.appendChild(el);
     const wrapper = el.querySelector(".polycss-camera") as HTMLElement;
-    expect(wrapper.style.perspective).toBe("8000px");
+    expect(wrapper.style.perspective).toBe("32000px");
   });
 
   it("applies custom perspective attribute", () => {

@@ -423,7 +423,13 @@ export function BuilderScene({
   const [addHoverCell, setAddHoverCell] = useState<[number, number] | null>(null);
   const camProps = perspective === false
     ? { zoom: sceneOptions.zoom, rotX: sceneOptions.rotX, rotY: sceneOptions.rotY, target: sceneOptions.target }
-    : { zoom: sceneOptions.zoom, rotX: sceneOptions.rotX, rotY: sceneOptions.rotY, target: sceneOptions.target, perspective };
+    : {
+      zoom: sceneOptions.zoom,
+      rotX: sceneOptions.rotX,
+      rotY: sceneOptions.rotY,
+      target: sceneOptions.target,
+      ...(typeof perspective === "number" ? { perspective } : {}),
+    };
   const handleCameraChange = (cam: { rotX: number; rotY: number; zoom: number; target?: Vec3 }) => updateScene({
     rotX: cam.rotX,
     rotY: cam.rotY,

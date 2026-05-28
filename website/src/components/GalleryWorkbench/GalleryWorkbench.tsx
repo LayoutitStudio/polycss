@@ -26,6 +26,7 @@ import { DropOverlay } from "../DropOverlay";
 import { StatsOverlay } from "../StatsOverlay";
 import {
   activeMeshResolution,
+  POLYCSS_DEFAULT_PERSPECTIVE,
   type GizmoMode,
   type SceneOptionsState,
   type DomMetrics,
@@ -109,7 +110,7 @@ const DEFAULT_SCENE: SceneOptionsState = {
   zoom: PRESETS[0].zoom ?? 0.35,
   rotX: PRESETS[0].rotX ?? 65,
   rotY: PRESETS[0].rotY ?? 45,
-  perspective: 10000,
+  perspective: undefined,
   lightAzimuth: 50,
   lightElevation: 45,
   lightIntensity: 1,
@@ -1062,7 +1063,9 @@ export default function GalleryWorkbench() {
     return options;
   }, [selectableAnimationClips]);
   const perspectiveMode = sceneOptions.perspective === false ? "orthographic" : "perspective";
-  const perspectivePx = sceneOptions.perspective === false ? 10000 : sceneOptions.perspective;
+  const perspectivePx = typeof sceneOptions.perspective === "number"
+    ? sceneOptions.perspective
+    : POLYCSS_DEFAULT_PERSPECTIVE;
 
   // Materials data — grouped by mesh, then by canonical polygon color.
   const inspectorMeshes = useMemo<InspectorMesh[]>(() => {
