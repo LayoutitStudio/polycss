@@ -82,6 +82,7 @@ const PERSPECTIVE_PX_OPTIONS: Record<string, number> = {
   "2000 px": 2000,
   "4000 px": 4000,
   "8000 px": 8000,
+  "10000 px": 10000,
   "16000 px": 16000,
   "32000 px": 32000,
   "64000 px": 64000,

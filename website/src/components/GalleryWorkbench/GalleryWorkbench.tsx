@@ -109,7 +109,7 @@ const DEFAULT_SCENE: SceneOptionsState = {
   zoom: PRESETS[0].zoom ?? 0.35,
   rotX: PRESETS[0].rotX ?? 65,
   rotY: PRESETS[0].rotY ?? 45,
-  perspective: false,
+  perspective: 10000,
   lightAzimuth: 50,
   lightElevation: 45,
   lightIntensity: 1,
@@ -1062,7 +1062,7 @@ export default function GalleryWorkbench() {
     return options;
   }, [selectableAnimationClips]);
   const perspectiveMode = sceneOptions.perspective === false ? "orthographic" : "perspective";
-  const perspectivePx = sceneOptions.perspective === false ? 8000 : sceneOptions.perspective;
+  const perspectivePx = sceneOptions.perspective === false ? 10000 : sceneOptions.perspective;
 
   // Materials data — grouped by mesh, then by canonical polygon color.
   const inspectorMeshes = useMemo<InspectorMesh[]>(() => {

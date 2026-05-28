@@ -27,6 +27,7 @@ import type {
   Vec3,
 } from "@layoutit/polycss";
 import { meshResolutionShowsMesh, type GizmoMode, type SceneOptionsState } from "../types";
+import { FPV_PERSPECTIVE } from "../fpv";
 
 export type { GizmoMode, SceneOptionsState };
 
@@ -296,8 +297,9 @@ export function VanillaScene({
       zoom: options.zoom,
       target: options.target as Vec3 | undefined,
     };
-    const camera = options.perspective
-      ? createPolyPerspectiveCamera({ ...cameraOpts, perspective: options.perspective })
+    const perspective = options.dragMode === "fpv" ? FPV_PERSPECTIVE : options.perspective;
+    const camera = perspective
+      ? createPolyPerspectiveCamera({ ...cameraOpts, perspective })
       : createPolyOrthographicCamera(cameraOpts);
     cameraRef.current = camera;
     const sceneOptions: PolySceneOptions = {

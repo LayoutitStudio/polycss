@@ -2,6 +2,9 @@ import { useEffect, useRef } from "react";
 import type { Polygon } from "@layoutit/polycss-react";
 import type { SceneOptionsState } from "../types";
 
+// FPV uses its own first-person projection instead of inheriting the orbit/gallery camera.
+export const FPV_PERSPECTIVE = 2000;
+
 export interface UseFpvSpawnOptions {
   dragMode: SceneOptionsState["dragMode"];
   autoCenter: boolean;
@@ -47,6 +50,7 @@ export function useFpvSpawn({
       }
       const partial: Partial<SceneOptionsState> = {
         autoCenter: false,
+        perspective: FPV_PERSPECTIVE,
       };
       if (Number.isFinite(minZ)) {
         // Three.js-style spawn: place the CAMERA ORIGIN outside the mesh,
@@ -84,5 +88,5 @@ export function useFpvSpawn({
       }
       if (Object.keys(restored).length > 0) updateScene(restored);
     }
-  }, [dragMode, autoCenter, scenePolygons, updateScene]);
+  }, [dragMode, autoCenter, perspective, rotY, scenePolygons, updateScene]);
 }

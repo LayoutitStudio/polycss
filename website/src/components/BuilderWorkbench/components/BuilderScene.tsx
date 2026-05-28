@@ -24,6 +24,7 @@ import type {
 } from "@layoutit/polycss-react";
 import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { meshResolutionShowsMesh, type SceneOptionsState } from "../../types";
+import { FPV_PERSPECTIVE } from "../../fpv";
 import { BUILDER_GROUND_SPAN, BUILDER_MAX_CAMERA_ROT_X } from "../defaults";
 import { buildSolidWireframePolygons } from "../geometry/ghost";
 import { meshBbox } from "../geometry/meshBbox";
@@ -416,12 +417,13 @@ export function BuilderScene({
   onRemoveItem,
   selected,
 }: BuilderSceneProps) {
-  const Cam = sceneOptions.perspective === false ? PolyOrthographicCamera : PolyPerspectiveCamera;
+  const perspective = sceneOptions.dragMode === "fpv" ? FPV_PERSPECTIVE : sceneOptions.perspective;
+  const Cam = perspective === false ? PolyOrthographicCamera : PolyPerspectiveCamera;
   const sceneKey = sceneOptions.meshResolution;
   const [addHoverCell, setAddHoverCell] = useState<[number, number] | null>(null);
-  const camProps = sceneOptions.perspective === false
+  const camProps = perspective === false
     ? { zoom: sceneOptions.zoom, rotX: sceneOptions.rotX, rotY: sceneOptions.rotY, target: sceneOptions.target }
-    : { zoom: sceneOptions.zoom, rotX: sceneOptions.rotX, rotY: sceneOptions.rotY, target: sceneOptions.target, perspective: sceneOptions.perspective };
+    : { zoom: sceneOptions.zoom, rotX: sceneOptions.rotX, rotY: sceneOptions.rotY, target: sceneOptions.target, perspective };
   const handleCameraChange = (cam: { rotX: number; rotY: number; zoom: number; target?: Vec3 }) => updateScene({
     rotX: cam.rotX,
     rotY: cam.rotY,
