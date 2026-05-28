@@ -398,8 +398,9 @@ describe("createPolyScene", () => {
       const cameraEl = host.querySelector(".polycss-camera") as HTMLElement;
       const sceneEl = host.querySelector(".polycss-scene") as HTMLElement;
       const transform = sceneEl.style.transform;
-      // Perspective lives on the .polycss-camera wrapper, not on .polycss-scene.
-      expect(cameraEl.style.perspective).toBe("750px");
+      // Perspective stays the configured camera depth; CSS zoom only affects
+      // the scene geometry transform compensation.
+      expect(cameraEl.style.perspective).toBe("1500px");
       expect(sceneEl.style.getPropertyValue("zoom")).toBe("2");
       expect(transform).toContain("translateZ(-50px)");
       expect(transform).toContain("scale(1)");
