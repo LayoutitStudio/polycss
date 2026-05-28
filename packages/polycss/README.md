@@ -109,6 +109,18 @@ import { PolyCamera, PolyScene, PolyOrbitControls, PolyMesh } from "@layoutit/po
 - `<PolyFirstPersonControls>` provides keyboard and pointer-look navigation.
 - `<PolyTransformControls>` adds translate/rotate gizmos for selected mesh handles.
 
+### Snapshot Export
+
+The vanilla package exports `exportPolySceneSnapshot(target)`. It clones the current rendered `.polycss-camera` / `.polycss-scene` DOM, injects only the PolyCSS CSS needed by that snapshot, inlines CSS `url(...)` image assets as `data:image/...;base64,...`, strips scripts and inline event handlers, and returns a standalone HTML document string with no PolyCSS runtime import. It works with rendered React/Vue scenes too; import it from `@layoutit/polycss` and pass the rendered camera or scene element.
+
+```ts
+import { exportPolySceneSnapshot } from "@layoutit/polycss";
+
+const html = await exportPolySceneSnapshot(scene.host);
+```
+
+If any referenced asset cannot be inlined, the function throws `PolySceneSnapshotError` with `code: "ASSET_INLINE_FAILED"`.
+
 ### Polygon Data Model
 
 Each polygon describes one renderable face:

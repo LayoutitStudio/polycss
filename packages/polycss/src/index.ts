@@ -138,6 +138,15 @@ export type {
   PolyRenderSurfaceLeafCounts,
 } from "./render/renderStats";
 
+// ── Standalone scene snapshots ───────────────────────────────────
+export {
+  exportPolySceneSnapshot,
+  PolySceneSnapshotError,
+} from "./snapshot/exportPolySceneSnapshot";
+export type {
+  PolySceneSnapshotErrorCode,
+} from "./snapshot/exportPolySceneSnapshot";
+
 // ── Primitive shape factories ─────────────────────────────────────
 export {
   createPolyBox,

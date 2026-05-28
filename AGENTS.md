@@ -86,7 +86,7 @@ If you find yourself wanting a `requestAnimationFrame` loop to update many DOM n
 - **Hooks/composables:** `usePolyCamera`, `usePolyMesh`, `usePolySceneContext`, `usePolySelect`, `usePolySelectionApi`, `usePolyAnimation`.
 - **Components:** `PolyPerspectiveCamera`, `PolyOrthographicCamera`, `PolyOrbitControls`, `PolyMapControls`, `PolyTransformControls`, `PolySelect`, `PolyAxesHelper`, `PolyDirectionalLightHelper`.
 - **Types:** `PolyDirectionalLight`, `PolyAmbientLight`, `PolyTextureLightingMode`, `PolyAnimationMixer`, `PolyRenderStats`.
-- **Functions:** `findPolyMeshHandle`, `injectPolyBaseStyles`, `collectPolyRenderStats`.
+- **Functions:** `findPolyMeshHandle`, `injectPolyBaseStyles`, `collectPolyRenderStats`, `exportPolySceneSnapshot`.
 - **Vanilla factories:** `create*` names stay as-is (`createPolyScene`, `createTransformControls`, `createSelect`).
 - **HTML custom elements:** `poly-` prefix + kebab-case. Existing tags: `<poly-scene>`, `<poly-mesh>`, `<poly-polygon>`, `<poly-perspective-camera>`, `<poly-orthographic-camera>`, `<poly-axes-helper>`, `<poly-directional-light-helper>`. Any new element follows the same shape (e.g. `<poly-transform-controls>`, `<poly-select>`).
 - **Leaf DOM tags (`<b>`, `<i>`, `<s>`, `<u>`):** internal render-strategy tags. Not part of the public API and not user-facing — do not document them as such.
@@ -97,6 +97,8 @@ If you find yourself wanting a `requestAnimationFrame` loop to update many DOM n
 The React and Vue packages are mirror images. **Any public API change in one must land in the other in the same PR.** Same names, same arguments, same defaults, same return shapes (allowing for idiomatic differences — refs vs reactives, `useEffect` vs `watchEffect`).
 
 When you change `packages/polycss` or `packages/core` in a way that affects the public surface (new option, renamed export, changed default), the React and Vue bindings update in the same PR. Don't ship a PolyCSS change that leaves the bindings stale.
+
+The DOM snapshot exporter is the current exception to mirrored React/Vue public exports: `exportPolySceneSnapshot` lives in `@layoutit/polycss` because it is browser DOM serialization, not component API. React/Vue callers import it from `@layoutit/polycss` and pass the rendered `.polycss-camera` / `.polycss-scene` element.
 
 **Renderer-owned browser glue.** The canvas atlas pipeline (`buildAtlasPages` + helpers), browser-feature detection (`isBorderShapeSupported`, `isSolidTriangleSupported`, `resolveSolidTrianglePrimitive`), direct voxel renderer (`voxelRenderer.ts`), and injected `.polycss-scene` / `.polycss-camera` base styles exist as **independent copies** across the three renderers. This includes `packages/polycss/src/render/atlas/`, `packages/react/src/scene/atlas/`, `packages/vue/src/scene/atlas/`, the three renderer-local `voxelRenderer.ts` files, and the three sibling `styles.ts` files. This is deliberate — each renderer is self-contained on its dep graph (React/Vue do not import from the `polycss` package). The trade-off is that a bug fix in any of these files MUST be mirrored into the other two. Coverage is pinned per copy by the co-located test files.
 
