@@ -2,8 +2,7 @@ import type { Polygon } from "@layoutit/polycss-core";
 import {
   buildSeamBleedPolygonEdges,
   DEFAULT_TILE,
-  SOLID_TRIANGLE_CORNER_CLASS,
-  SOLID_TRIANGLE_LARGE_BORDER_CLASS,
+  SOLID_TRIANGLE_CANONICAL_SIZE,
   DEFAULT_MATRIX_DECIMALS,
   BASIS_EPS,
 } from "@layoutit/polycss-core";
@@ -37,6 +36,7 @@ import { applyPolygonDataAttrs, hasPolygonDataAttrs } from "./emit";
 import { resolveSolidTrianglePrimitive } from "./strategy";
 
 const DEFAULT_SOLID_SEAM_BLEED = 1.5;
+const SOLID_TRIANGLE_BORDER_WIDTH = "0 128px 256px 128px";
 
 type RenderTextureAtlasOptionsWithSeams = RenderTextureAtlasOptions & {
   seamBleed?: number;
@@ -105,8 +105,25 @@ export function applySolidTrianglePrimitive(
 ): void {
   const triangleEl = el as SolidTriangleElement;
   if (triangleEl.__polycssSolidTrianglePrimitive === primitive) return;
-  el.classList.toggle(SOLID_TRIANGLE_CORNER_CLASS, primitive === "corner-bevel");
-  el.classList.toggle(SOLID_TRIANGLE_LARGE_BORDER_CLASS, primitive === "border-large");
+  if (primitive === "corner-bevel") {
+    el.style.width = `${SOLID_TRIANGLE_CANONICAL_SIZE}px`;
+    el.style.height = `${SOLID_TRIANGLE_CANONICAL_SIZE}px`;
+    el.style.backgroundColor = "currentColor";
+    el.style.borderWidth = "0";
+    el.style.borderTopLeftRadius = "50% 100%";
+    el.style.borderTopRightRadius = "50% 100%";
+    el.style.setProperty("corner-top-left-shape", "bevel");
+    el.style.setProperty("corner-top-right-shape", "bevel");
+  } else {
+    el.style.width = "";
+    el.style.height = "";
+    el.style.backgroundColor = "";
+    el.style.borderTopLeftRadius = "";
+    el.style.borderTopRightRadius = "";
+    el.style.removeProperty("corner-top-left-shape");
+    el.style.removeProperty("corner-top-right-shape");
+    el.style.borderWidth = primitive === "border-large" ? SOLID_TRIANGLE_BORDER_WIDTH : "";
+  }
   triangleEl.__polycssSolidTrianglePrimitive = primitive;
 }
 

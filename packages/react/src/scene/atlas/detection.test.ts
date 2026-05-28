@@ -90,6 +90,11 @@ describe("solidTriangleSupported — direct doc variant", () => {
     expect(solidTriangleSupported(doc)).toBe(false);
   });
 
+  it("returns true for Safari when corner-shape triangles are supported", () => {
+    const doc = makeDoc({ userAgent: SAFARI_UA, cornerShape: true });
+    expect(solidTriangleSupported(doc)).toBe(true);
+  });
+
   it("returns true when userAgent string is empty (unknown UA → optimistic)", () => {
     const doc = makeDoc({ userAgent: "" });
     expect(solidTriangleSupported(doc)).toBe(true);
@@ -146,6 +151,11 @@ describe("isSolidTriangleSupported — wrapper", () => {
   it("returns false when doc has a Safari UA", () => {
     const doc = makeDoc({ userAgent: SAFARI_UA });
     expect(isSolidTriangleSupported(doc)).toBe(false);
+  });
+
+  it("returns true when doc has Safari UA with corner-shape triangle support", () => {
+    const doc = makeDoc({ userAgent: SAFARI_UA, cornerShape: true });
+    expect(isSolidTriangleSupported(doc)).toBe(true);
   });
 });
 

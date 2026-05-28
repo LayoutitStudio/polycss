@@ -1101,7 +1101,7 @@ describe("createPolyScene", () => {
       expect(poly).not.toBeNull();
       expect(poly.tagName.toLowerCase()).toBe("u");
       expect(poly.style.transform).toContain("matrix3d(");
-      expect(poly.style.borderBottomWidth).toBe("");
+      expect(poly.className).toBe("");
     });
 
     describe("rebakeAtlas", () => {

@@ -156,21 +156,6 @@ const CORE_BASE_STYLES = `
   border-width: 0 128px 256px 128px;
 }
 
-.polycss-scene u.polycss-large-border-triangle {
-  border-width: 0 128px 256px 128px;
-}
-
-.polycss-scene u.polycss-corner-triangle {
-  width: 256px;
-  height: 256px;
-  background: currentColor;
-  border: 0;
-  border-top-left-radius: 50% 100%;
-  border-top-right-radius: 50% 100%;
-  corner-top-left-shape: bevel;
-  corner-top-right-shape: bevel;
-}
-
 /* ── Gizmo override ─────────────────────────────────────────────────────── */
 
 /*

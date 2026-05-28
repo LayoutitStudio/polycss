@@ -5,6 +5,7 @@ import {
   useTextureAtlas,
   computeTextureAtlasPlan,
   isSolidTrianglePlan,
+  solidTriangleStyle,
   updateStableTriangleDom,
   type TextureAtlasPlan,
 } from "./index";
@@ -37,6 +38,14 @@ function stubUserAgent(userAgent: string): void {
 
 function stubBorderShapeUnsupported(): void {
   vi.stubGlobal("CSS", { supports: () => false });
+}
+
+function stubCornerTriangleSupported(): void {
+  vi.stubGlobal("CSS", {
+    supports: (property: string, value?: string) =>
+      value === "bevel" &&
+      (property === "corner-top-left-shape" || property === "corner-top-right-shape"),
+  });
 }
 
 afterEach(() => {
@@ -138,7 +147,23 @@ describe("isSolidTrianglePlan", () => {
 });
 
 describe("updateStableTriangleDom", () => {
+  it("applies corner triangle paint inline when corner-shape is supported", () => {
+    stubCornerTriangleSupported();
+    const tri: Polygon = {
+      vertices: [[0, 0, 0], [1, 0, 0], [0, 1, 0]],
+      color: "#ff0000",
+    };
+    const plan = planFor(tri)!;
+
+    const style = solidTriangleStyle(plan, "baked", "auto")!;
+
+    expect(style.borderWidth).toBe("0");
+    expect(style.backgroundColor).toBe("currentColor");
+    expect((style as Record<string, unknown>)["corner-top-left-shape"]).toBe("bevel");
+  });
+
   it("applies the large border triangle primitive on Firefox", () => {
+    stubBorderShapeUnsupported();
     stubUserAgent(FIREFOX_UA);
     const root = document.createElement("div");
     const leaf = document.createElement("u");
