@@ -9,7 +9,7 @@ import type {
 } from "@layoutit/polycss";
 import { exportPolySceneSnapshot, optimizeAnimatedMeshPolygons, parsePureColor } from "@layoutit/polycss";
 import type { InspectorColorGroup, InspectorMesh } from "../Inspector";
-import { VanillaScene } from "../VanillaScene";
+import { VanillaScene, type VanillaSceneTransientHandle } from "../VanillaScene";
 import { ReactScene } from "../ReactScene";
 import {
   Dock,
@@ -327,21 +327,36 @@ function elementScreenCenter(element: HTMLElement): ScreenPoint {
   return { x: (minX + maxX) / 2, y: (minY + maxY) / 2 };
 }
 
+function applyGalleryDebugDom(root: HTMLElement, options: SceneOptionsState): void {
+  applyDebugMatrixPrecision(root, options.matrixPrecision);
+  applyDebugBorderShapePrecision(root, options.borderShapePrecision);
+  applyDebugTriangleBrushPrecision(root);
+  applyDebugSolidColorHex(root);
+  applyDebugInlineStyleOrder(root);
+  applyDebugInlineStyleMinify(root);
+}
+
 function useLightRotationDrag(
   viewportRef: RefObject<HTMLDivElement | null>,
   sceneOptions: SceneOptionsState,
   helperScale: number,
   gizmoDragging: boolean,
-  onUpdateScene: (partial: Partial<SceneOptionsState>) => void,
+  onCommitScene: (partial: Partial<SceneOptionsState>) => void,
+  canPreviewSceneOptions: (options: SceneOptionsState) => boolean,
+  onPreviewSceneOptions: (options: SceneOptionsState) => void,
 ): void {
   const sceneOptionsRef = useRef(sceneOptions);
   const helperScaleRef = useRef(helperScale);
   const gizmoDraggingRef = useRef(gizmoDragging);
-  const onUpdateSceneRef = useRef(onUpdateScene);
+  const onCommitSceneRef = useRef(onCommitScene);
+  const canPreviewSceneOptionsRef = useRef(canPreviewSceneOptions);
+  const onPreviewSceneOptionsRef = useRef(onPreviewSceneOptions);
   sceneOptionsRef.current = sceneOptions;
   helperScaleRef.current = helperScale;
   gizmoDraggingRef.current = gizmoDragging;
-  onUpdateSceneRef.current = onUpdateScene;
+  onCommitSceneRef.current = onCommitScene;
+  canPreviewSceneOptionsRef.current = canPreviewSceneOptions;
+  onPreviewSceneOptionsRef.current = onPreviewSceneOptions;
 
   useEffect(() => {
     const viewport = viewportRef.current;
@@ -351,6 +366,28 @@ function useLightRotationDrag(
     let helperTargetScreen = { x: 0, y: 0 };
     let helperGrabOffset = { x: 0, y: 0 };
     let helperRadiusCss = 1;
+    let previewRaf = 0;
+    let dragOptions: SceneOptionsState | null = null;
+    let pendingPreviewOptions: SceneOptionsState | null = null;
+    let pendingCommit: Pick<SceneOptionsState, "lightAzimuth" | "lightElevation"> | null = null;
+
+    const flushPreview = (): void => {
+      previewRaf = 0;
+      const options = pendingPreviewOptions;
+      pendingPreviewOptions = null;
+      if (options) onPreviewSceneOptionsRef.current(options);
+    };
+
+    const schedulePreview = (options: SceneOptionsState): void => {
+      pendingPreviewOptions = options;
+      if (!previewRaf) previewRaf = requestAnimationFrame(flushPreview);
+    };
+
+    const cancelPreview = (): void => {
+      if (previewRaf) cancelAnimationFrame(previewRaf);
+      previewRaf = 0;
+      pendingPreviewOptions = null;
+    };
 
     const helperDragEnabled = (): boolean => {
       const options = sceneOptionsRef.current;
@@ -359,7 +396,16 @@ function useLightRotationDrag(
 
     const stopDrag = (event: PointerEvent): void => {
       if (activePointerId !== event.pointerId) return;
+      const commit = pendingCommit;
+      if (pendingPreviewOptions) {
+        if (previewRaf) cancelAnimationFrame(previewRaf);
+        flushPreview();
+      }
+      if (commit) onCommitSceneRef.current(commit);
       activePointerId = null;
+      dragOptions = null;
+      pendingCommit = null;
+      cancelPreview();
       viewport.classList.remove("is-light-rotating");
       try { viewport.releasePointerCapture(event.pointerId); } catch { /* ignore */ }
     };
@@ -376,6 +422,8 @@ function useLightRotationDrag(
       event.stopPropagation();
       activePointerId = event.pointerId;
       const options = sceneOptionsRef.current;
+      dragOptions = options;
+      pendingCommit = null;
       helperRadiusCss = Math.max(1, helperScaleRef.current * 0.7 * LIGHT_HELPER_TILE);
       const helperCenter = elementScreenCenter(helper);
       const currentOffset = projectLightDirectionToScreen(
@@ -406,14 +454,25 @@ function useLightRotationDrag(
         x: event.clientX - helperGrabOffset.x,
         y: event.clientY - helperGrabOffset.y,
       };
-      onUpdateSceneRef.current(lightAnglesFromScreenOffset(
+      const baseOptions = dragOptions ?? sceneOptionsRef.current;
+      const nextAngles = lightAnglesFromScreenOffset(
         {
           x: helperCenter.x - helperTargetScreen.x,
           y: helperCenter.y - helperTargetScreen.y,
         },
-        sceneOptionsRef.current,
+        baseOptions,
         helperRadiusCss,
-      ));
+      );
+      if (!canPreviewSceneOptionsRef.current(baseOptions)) {
+        onCommitSceneRef.current(nextAngles);
+        dragOptions = { ...baseOptions, ...nextAngles };
+        pendingCommit = null;
+        return;
+      }
+      const nextOptions = { ...baseOptions, ...nextAngles };
+      dragOptions = nextOptions;
+      pendingCommit = nextAngles;
+      schedulePreview(nextOptions);
     };
 
     viewport.addEventListener("pointerdown", onPointerDown, { capture: true });
@@ -426,6 +485,7 @@ function useLightRotationDrag(
       viewport.removeEventListener("pointerup", stopDrag);
       viewport.removeEventListener("pointercancel", stopDrag);
       viewport.classList.remove("is-light-rotating");
+      cancelPreview();
     };
   }, [viewportRef]);
 }
@@ -647,7 +707,6 @@ export default function GalleryWorkbench() {
   const [loading, setLoading] = useState(false);
   const [selectedAnimation, setSelectedAnimation] = useState("");
   const [metrics, setMetrics] = useState<DomMetrics>(EMPTY_METRICS);
-  const [vanillaBuildMs, setVanillaBuildMs] = useState(0);
   const [modelSearch, setModelSearch] = useState("");
   const [openModelCategory, setOpenModelCategory] = useState<string | null>(null);
   const [mobilePanel, setMobilePanel] = useState<MobileGalleryPanel>(null);
@@ -682,15 +741,44 @@ export default function GalleryWorkbench() {
   // Inspector folder uses this to push color-group edits back into the
   // scene via setPolygons. Set by VanillaScene's onMeshHandleChange.
   const activeMeshHandleRef = useRef<VanillaPolyMeshHandle | null>(null);
+  const transientSceneHandleRef = useRef<VanillaSceneTransientHandle | null>(null);
   const [materialEditVersion, setMaterialEditVersion] = useState(0);
   // Vanilla selection state — kept separate from React's
   // `selectedMeshes` because vanilla MeshHandles aren't comparable to
   // React PolyMeshHandles. Stored as IDs since that's what both paths
   // can agree on for the toolbar display.
   const [, setVanillaSelectedIds] = useState<string[]>([]);
+  const sceneOptionsRef = useRef(sceneOptions);
+  sceneOptionsRef.current = sceneOptions;
+  const domRefreshRafRef = useRef<number>(0);
+
+  const requestGalleryDomRefresh = useCallback(() => {
+    if (domRefreshRafRef.current) return;
+    domRefreshRafRef.current = requestAnimationFrame(() => {
+      domRefreshRafRef.current = 0;
+      const root = viewportRef.current;
+      if (!root) return;
+      applyGalleryDebugDom(root, sceneOptionsRef.current);
+      setMetrics(measureDom(root));
+    });
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (domRefreshRafRef.current) cancelAnimationFrame(domRefreshRafRef.current);
+    };
+  }, []);
 
   const updateScene = useCallback((partial: Partial<SceneOptionsState>) => {
     setSceneOptions((current) => ({ ...current, ...partial }));
+  }, []);
+  const canPreviewSceneOptions = useCallback(
+    (options: SceneOptionsState) =>
+      options.renderer === "vanilla" && transientSceneHandleRef.current !== null,
+    [],
+  );
+  const previewSceneOptions = useCallback((options: SceneOptionsState) => {
+    transientSceneHandleRef.current?.applyLightOptions(options);
   }, []);
 
   const { handleCameraChange } = useGuiCameraSync({ setSceneOptions });
@@ -916,16 +1004,20 @@ export default function GalleryWorkbench() {
     reactAnimatedPolygons: animation.reactAnimatedPolygons,
     interiorFill: sceneOptions.interiorFill,
   });
-  useLightRotationDrag(viewportRef, renderSceneOptions, helperScale, gizmoDragging, updateScene);
+  useLightRotationDrag(
+    viewportRef,
+    renderSceneOptions,
+    helperScale,
+    gizmoDragging,
+    updateScene,
+    canPreviewSceneOptions,
+    previewSceneOptions,
+  );
   const renderModelPolygons = useMemo(
     () => sceneOptions.solidMaterials
       ? withSolidMaterials(modelPolygons, parserOptions.defaultColor)
       : modelPolygons,
     [modelPolygons, sceneOptions.solidMaterials, parserOptions.defaultColor],
-  );
-  const renderPolygons = useMemo(
-    () => renderModelPolygons,
-    [renderModelPolygons],
   );
   const hasSpriteLeaves = useMemo(
     () => metrics.sprites > 0 || scenePolygons.some(polygonHasTextureData),
@@ -1025,64 +1117,11 @@ export default function GalleryWorkbench() {
   });
 
   useEffect(() => {
-    const root = viewportRef.current;
-    if (!root) return;
-    let raf = 0;
-    const update = () => {
-      raf = 0;
-      setMetrics(measureDom(root));
-    };
-    const schedule = () => {
-      if (!raf) raf = requestAnimationFrame(update);
-    };
-    schedule();
-    const observer = new MutationObserver(schedule);
-    observer.observe(root, {
-      childList: true,
-      subtree: true,
-    });
-    return () => {
-      observer.disconnect();
-      if (raf) cancelAnimationFrame(raf);
-    };
-  }, []);
-
-  useEffect(() => {
-    const root = viewportRef.current;
-    if (!root) return;
-    let raf = 0;
-    const apply = () => {
-      raf = 0;
-      applyDebugMatrixPrecision(root, sceneOptions.matrixPrecision);
-      applyDebugBorderShapePrecision(root, sceneOptions.borderShapePrecision);
-      applyDebugTriangleBrushPrecision(root);
-      applyDebugSolidColorHex(root);
-      applyDebugInlineStyleOrder(root);
-      applyDebugInlineStyleMinify(root);
-    };
-    const schedule = () => {
-      if (!raf) raf = requestAnimationFrame(apply);
-    };
-    schedule();
-    const observer = new MutationObserver(schedule);
-    observer.observe(root, {
-      childList: true,
-      subtree: true,
-    });
-    return () => {
-      observer.disconnect();
-      if (raf) cancelAnimationFrame(raf);
-    };
+    requestGalleryDomRefresh();
   }, [
+    requestGalleryDomRefresh,
     sceneOptions.matrixPrecision,
     sceneOptions.borderShapePrecision,
-    sceneOptions.renderer,
-    sceneOptions.textureLighting,
-    sceneOptions.textureQuality,
-    sceneOptions.solidMaterials,
-    scenePolygons,
-    renderPolygons,
-    vanillaBuildMs,
   ]);
 
   const rendererDebugKey = useMemo(
@@ -1178,9 +1217,10 @@ export default function GalleryWorkbench() {
       // an explicit merge flag reuses the mesh's current merge setting
       // (true for static models, false during animation playback).
       if (handle) handle.setPolygons(renderModelPolygons);
+      requestGalleryDomRefresh();
       setMaterialEditVersion((version) => version + 1);
     },
-    [renderModelPolygons],
+    [renderModelPolygons, requestGalleryDomRefresh],
   );
 
   return (
@@ -1237,7 +1277,7 @@ export default function GalleryWorkbench() {
               animationKey={activeAnimation ? `${selectedAnimation}:${renderLoaded?.label ?? ""}` : undefined}
               animationDurationSeconds={activeAnimation?.duration}
               animationFrameFactory={vanillaAnimationFrameFactory}
-              onBuild={setVanillaBuildMs}
+              onSceneDomChange={requestGalleryDomRefresh}
               onCameraChange={handleRenderCameraChange}
               enableSelection={sceneOptions.selection}
               meshId={renderLoaded?.label ?? "model"}
@@ -1246,6 +1286,7 @@ export default function GalleryWorkbench() {
               enableHover={sceneOptions.hoverEffects}
               onHoverChange={setHoveredMeshId}
               onMeshHandleChange={(h) => { activeMeshHandleRef.current = h; }}
+              onTransientHandleChange={(h) => { transientSceneHandleRef.current = h; }}
             />
           ) : (
             <ReactScene
@@ -1272,6 +1313,7 @@ export default function GalleryWorkbench() {
               gizmoMode={gizmoMode}
               helperScale={helperScale}
               helperTarget={helperTarget}
+              onSceneDomChange={requestGalleryDomRefresh}
             />
           )}
           {loadError ? (
