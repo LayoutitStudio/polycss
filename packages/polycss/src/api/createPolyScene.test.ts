@@ -1331,6 +1331,92 @@ describe("createPolyScene", () => {
       expect(sceneEl.dataset.polycssLighting).toBe("baked");
     });
 
+    it("can preview baked solid lighting through CSS vars without switching scene mode", () => {
+      scene = makeScene(host, { textureLighting: "baked" });
+      scene.add(makeParseResult([triangle("#336699")]), { merge: false });
+      const sceneEl = host.querySelector(".polycss-scene") as HTMLElement;
+      const leaf = host.querySelector("b, i, u") as HTMLElement;
+      const triangleLeaf = host.querySelector("u") as HTMLElement;
+      const initialColor = leaf.style.color;
+      const initialLeafStyle = leaf.getAttribute("style");
+      const initialTriangleBackgroundColor = triangleLeaf.style.backgroundColor;
+      const previewScene = scene as PolySceneHandle & {
+        previewBakedSolidLighting(next: Pick<PolySceneOptions, "directionalLight" | "ambientLight">): boolean;
+        clearBakedSolidLightingPreview(): void;
+      };
+
+      expect(previewScene.previewBakedSolidLighting({
+        directionalLight: { direction: [0, 0, 1], color: "#ffffff", intensity: 1 },
+        ambientLight: { color: "#ffffff", intensity: 0.4 },
+      })).toBe(true);
+
+      expect(sceneEl.dataset.polycssLighting).toBe("baked");
+      expect(sceneEl.style.getPropertyValue("--plz")).toBe("1.0000");
+      expect(sceneEl.style.getPropertyValue("--polycss-light-preview-active")).toBe("1");
+      expect(leaf.style.getPropertyValue("--pnz")).not.toBe("");
+      expect(leaf.style.getPropertyValue("--plam")).toContain("var(--plz, 1)");
+      expect(leaf.style.getPropertyValue("--polycss-preview-r")).toContain("var(--plam, 0)");
+      expect(leaf.style.getPropertyValue("--polycss-paint")).toContain("var(--polycss-light-preview-active");
+      expect(leaf.style.color).toBe(initialColor);
+      expect(leaf.getAttribute("style")).toBe(initialLeafStyle);
+      expect(triangleLeaf.style.backgroundColor).toBe(initialTriangleBackgroundColor);
+
+      previewScene.clearBakedSolidLightingPreview();
+
+      expect(sceneEl.style.getPropertyValue("--plz")).toBe("");
+      expect(sceneEl.style.getPropertyValue("--polycss-light-preview-active")).toBe("");
+      expect(leaf.style.color).toBe(initialColor);
+      expect(leaf.style.getPropertyValue("--plam")).toContain("var(--plz, 1)");
+      expect(leaf.style.getPropertyValue("--polycss-preview-r")).toContain("var(--plam, 0)");
+      expect(triangleLeaf.style.backgroundColor).toBe(initialTriangleBackgroundColor);
+    });
+
+    it("can commit baked solid lighting in place after a preview", () => {
+      scene = makeScene(host, { textureLighting: "baked" });
+      scene.add(makeParseResult([triangle("#336699")]), { merge: false });
+      const leaf = host.querySelector("b, i, u") as HTMLElement;
+      const triangleLeaf = host.querySelector("u") as HTMLElement;
+      const initialLeaf = leaf;
+      const initialTriangleBackgroundColor = triangleLeaf.style.backgroundColor;
+      const previewScene = scene as PolySceneHandle & {
+        previewBakedSolidLighting(next: Pick<PolySceneOptions, "directionalLight" | "ambientLight">): boolean;
+        commitBakedSolidLighting(): boolean;
+      };
+
+      previewScene.previewBakedSolidLighting({
+        directionalLight: { direction: [0, 0, 1], color: "#ffffff", intensity: 1 },
+        ambientLight: { color: "#ffffff", intensity: 0.4 },
+      });
+      scene.setOptions({
+        directionalLight: { direction: [0, 0, 1], color: "#ffffff", intensity: 1 },
+        ambientLight: { color: "#ffffff", intensity: 0.4 },
+      });
+      expect(previewScene.commitBakedSolidLighting()).toBe(true);
+
+      expect(host.querySelector("b, i, u")).toBe(initialLeaf);
+      expect(leaf.style.color).toBe("");
+      expect(leaf.style.getPropertyValue("--polycss-paint")).toContain("var(--polycss-light-preview-active");
+      expect(leaf.style.getPropertyValue("--polycss-preview-r")).toContain("var(--plam, 0)");
+      expect(leaf.style.getPropertyValue("--plam")).toContain("var(--plz, 1)");
+      expect(triangleLeaf.style.backgroundColor).toBe(initialTriangleBackgroundColor);
+    });
+
+    it("rebakes atlas leaves when committing baked lighting", () => {
+      scene = makeScene(host, { textureLighting: "baked" });
+      scene.add(makeParseResult([texturedTriangle()]), { merge: false });
+      const initialLeaf = host.querySelector("s") as HTMLElement;
+      const previewScene = scene as PolySceneHandle & {
+        commitBakedSolidLighting(): boolean;
+      };
+
+      scene.setOptions({
+        directionalLight: { direction: [0, 0, 1], color: "#ffffff", intensity: 1 },
+      });
+
+      expect(previewScene.commitBakedSolidLighting()).toBe(true);
+      expect(host.querySelector("s")).not.toBe(initialLeaf);
+    });
+
     it("honors strategies.disable at creation time", () => {
       scene = makeScene(host, { strategies: { disable: ["u"] } });
       scene.add(makeParseResult([triangle()]));
@@ -1813,7 +1899,8 @@ describe("createPolyScene", () => {
       const after = host.querySelector("u, b, i, s") as HTMLElement;
       expect(after).toBe(before);
       expect(handle.polygons[0].color).toBe("#0000ff");
-      expect(after.style.color).not.toBe("");
+      expect(after.style.getPropertyValue("--polycss-paint")).not.toBe("");
+      expect(after.style.getPropertyValue("--psb")).toBe("1.0000");
     });
 
     it("updates data-only changes without replacing the leaf", () => {
@@ -2180,11 +2267,36 @@ describe("createPolyScene", () => {
       expect(sceneEl.style.getPropertyValue("--clz")).toBe("");
     });
 
-    it("baked mode re-emits SVG shadows when directionalLight.direction changes", () => {
+    it("baked mode rewrites the same SVG shadow when directionalLight.direction changes", () => {
       // Light direction is folded into the CPU projection that builds the
-      // SVG paths, so changing it must rewrite the SVG outlines (and the
-      // SVG's translate3d) — otherwise the shadows stay frozen at the
-      // original light angle.
+      // SVG paths, so changing it must rewrite the existing SVG outline
+      // and translate3d without tearing down the mounted shadow node.
+      scene = makeScene(host, {
+        textureLighting: "baked",
+        directionalLight: { direction: [0, 0, 1] },
+      });
+      scene.add(makeParseResult([triangle()]), { castShadow: true });
+      const sceneEl = getSceneEl(host);
+      const initialSvg = host.querySelector(".polycss-shadow") as SVGSVGElement;
+      const initialTransform = initialSvg.style.transform;
+      const initialPathD = initialSvg.querySelector("path")?.getAttribute("d");
+      const observer = new MutationObserver(() => undefined);
+      observer.observe(sceneEl, { childList: true });
+      scene.setOptions({ directionalLight: { direction: [1, 0, 1] } });
+      const records = observer.takeRecords();
+      observer.disconnect();
+      const nextSvg = host.querySelector(".polycss-shadow") as SVGSVGElement;
+      const nextTransform = nextSvg.style.transform;
+      const nextPathD = nextSvg.querySelector("path")?.getAttribute("d");
+      expect(nextSvg).toBe(initialSvg);
+      expect(records.some((record) => record.addedNodes.length > 0 || record.removedNodes.length > 0)).toBe(false);
+      expect(nextTransform).toMatch(/^translate3d\(/);
+      // EITHER the SVG positioning OR the path geometry must have changed
+      // — both encode the projection so both should reflect the new light.
+      expect(nextTransform !== initialTransform || nextPathD !== initialPathD).toBe(true);
+    });
+
+    it("baked preview rewrites the existing SVG shadow without changing scene options", () => {
       scene = makeScene(host, {
         textureLighting: "baked",
         directionalLight: { direction: [0, 0, 1] },
@@ -2193,14 +2305,53 @@ describe("createPolyScene", () => {
       const initialSvg = host.querySelector(".polycss-shadow") as SVGSVGElement;
       const initialTransform = initialSvg.style.transform;
       const initialPathD = initialSvg.querySelector("path")?.getAttribute("d");
-      scene.setOptions({ directionalLight: { direction: [1, 0, 1] } });
+      const initialDirection = scene.getOptions().directionalLight?.direction;
+      const previewScene = scene as PolySceneHandle & {
+        previewBakedSolidLighting(next: Pick<PolySceneOptions, "directionalLight" | "ambientLight">): boolean;
+        clearBakedSolidLightingPreview(): void;
+      };
+
+      previewScene.previewBakedSolidLighting({
+        directionalLight: { direction: [1, 0, 1] },
+      });
+
       const nextSvg = host.querySelector(".polycss-shadow") as SVGSVGElement;
       const nextTransform = nextSvg.style.transform;
       const nextPathD = nextSvg.querySelector("path")?.getAttribute("d");
-      expect(nextTransform).toMatch(/^translate3d\(/);
-      // EITHER the SVG positioning OR the path geometry must have changed
-      // — both encode the projection so both should reflect the new light.
+      expect(nextSvg).toBe(initialSvg);
       expect(nextTransform !== initialTransform || nextPathD !== initialPathD).toBe(true);
+      expect(scene.getOptions().directionalLight?.direction).toBe(initialDirection);
+
+      previewScene.clearBakedSolidLightingPreview();
+
+      expect(initialSvg.style.transform).toBe(initialTransform);
+      expect(initialSvg.querySelector("path")?.getAttribute("d")).toBe(initialPathD);
+    });
+
+    it("non-shadow helper movement does not overwrite baked preview shadows", () => {
+      scene = makeScene(host, {
+        textureLighting: "baked",
+        directionalLight: { direction: [0, 0, 1] },
+      });
+      scene.add(makeParseResult([triangle()]), { castShadow: true });
+      const helper = scene.add(makeParseResult([triangle()]));
+      const initialSvg = host.querySelector(".polycss-shadow") as SVGSVGElement;
+      const initialTransform = initialSvg.style.transform;
+      const initialPathD = initialSvg.querySelector("path")?.getAttribute("d");
+      const previewScene = scene as PolySceneHandle & {
+        previewBakedSolidLighting(next: Pick<PolySceneOptions, "directionalLight" | "ambientLight">): boolean;
+      };
+
+      previewScene.previewBakedSolidLighting({
+        directionalLight: { direction: [1, 0, 1] },
+      });
+      const previewTransform = initialSvg.style.transform;
+      const previewPathD = initialSvg.querySelector("path")?.getAttribute("d");
+      helper.setTransform({ position: [10, 20, 30] });
+
+      expect(previewTransform !== initialTransform || previewPathD !== initialPathD).toBe(true);
+      expect(initialSvg.style.transform).toBe(previewTransform);
+      expect(initialSvg.querySelector("path")?.getAttribute("d")).toBe(previewPathD);
     });
 
     it("baked mode does NOT set --shadow-ground-cssz on the scene element", () => {

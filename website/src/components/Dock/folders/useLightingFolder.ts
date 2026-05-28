@@ -52,7 +52,12 @@ export function useLightingFolder(parent: GUI | null, inputs: LightingFolderInpu
 
   const folder = useFolder(parent, "Lighting", { open: true });
 
-  useToggle(folder, "Cast shadow", castShadow, (value) => onUpdateScene({ castShadow: value }));
+  useToggle(folder, "Cast shadow", castShadow, (value) =>
+    onUpdateScene({
+      castShadow: value,
+      ...(value ? { showGround: true } : null),
+    }),
+  );
   useSlider(
     folder,
     "Shadow reach",

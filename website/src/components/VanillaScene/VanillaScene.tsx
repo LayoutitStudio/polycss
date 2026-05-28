@@ -34,6 +34,13 @@ export type { GizmoMode, SceneOptionsState };
 // Light helper world units → CSS pixels conversion (matches the helper
 // components in @layoutit/polycss-react and @layoutit/polycss-vue).
 const LIGHT_HELPER_TILE = 50;
+// Keep the visible ground just below the model floor; coplanar ground/car
+// faces z-fight during repaint-heavy light drags.
+const GROUND_Z_OFFSET = -0.04;
+// The shadow plane should sit above the visible ground, not above the model
+// floor, otherwise large live-updated SVG shadows can intersect low geometry.
+const SHADOW_GROUND_LIFT = 0.01;
+const GALLERY_SHADOW_LIFT = GROUND_Z_OFFSET + SHADOW_GROUND_LIFT;
 const ANIMATION_STABLE_TRIANGLE_COLOR_POLICY = "cadence";
 // Deforming low-poly triangles can swing face normals sharply; keep the
 // mounted baked color pinned and animate transforms only.
@@ -179,6 +186,54 @@ function lightHelperPosition(
   ];
 }
 
+function directionalFromOptions(options: SceneOptionsState): PolyDirectionalLight {
+  const az = (options.lightAzimuth * Math.PI) / 180;
+  const el = (options.lightElevation * Math.PI) / 180;
+  const cosEl = Math.cos(el);
+  return {
+    direction: [
+      cosEl * Math.sin(az),
+      cosEl * Math.cos(az),
+      Math.sin(el),
+    ],
+    color: options.lightColor,
+    intensity: options.lightIntensity,
+  };
+}
+
+function ambientFromOptions(options: SceneOptionsState): PolyAmbientLight {
+  return {
+    color: options.ambientColor,
+    intensity: options.ambientIntensity,
+  };
+}
+
+function bakedLightingSignature(
+  directionalLight: PolyDirectionalLight,
+  ambientLight: PolyAmbientLight,
+): string {
+  return [
+    directionalLight.direction.map((value) => value.toFixed(4)).join(","),
+    directionalLight.color ?? "",
+    directionalLight.intensity ?? "",
+    ambientLight.color ?? "",
+    ambientLight.intensity ?? "",
+  ].join("|");
+}
+
+export interface VanillaSceneTransientHandle {
+  applySceneOptions(options: SceneOptionsState): void;
+  applyLightOptions(options: SceneOptionsState): void;
+}
+
+type BakedSolidLightingPreviewSceneHandle = PolySceneHandle & {
+  previewBakedSolidLighting?: (next: {
+    directionalLight?: PolyDirectionalLight;
+    ambientLight?: PolyAmbientLight;
+  }) => boolean;
+  commitBakedSolidLighting?: () => boolean;
+};
+
 export interface VanillaSceneProps {
   polygons: Polygon[];
   interiorShellPolygons: Polygon[];
@@ -196,7 +251,7 @@ export interface VanillaSceneProps {
   animationKey?: string;
   animationDurationSeconds?: number;
   animationFrameFactory?: (timeSeconds: number) => Polygon[];
-  onBuild: (ms: number) => void;
+  onBuild?: (ms: number) => void;
   onCameraChange?: (camera: { rotX: number; rotY: number; zoom: number; target?: ReactVec3 }) => void;
   enableSelection?: boolean;
   meshId?: string;
@@ -205,6 +260,8 @@ export interface VanillaSceneProps {
   enableHover?: boolean;
   onHoverChange?: (id: string | null) => void;
   onMeshHandleChange?: (handle: VanillaPolyMeshHandle | null) => void;
+  onTransientHandleChange?: (handle: VanillaSceneTransientHandle | null) => void;
+  onSceneDomChange?: () => void;
 }
 
 export function VanillaScene({
@@ -233,6 +290,8 @@ export function VanillaScene({
   enableHover,
   onHoverChange,
   onMeshHandleChange,
+  onTransientHandleChange,
+  onSceneDomChange,
 }: VanillaSceneProps) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const sceneRef = useRef<PolySceneHandle | null>(null);
@@ -245,6 +304,7 @@ export function VanillaScene({
   const groundHandleRef = useRef<VanillaPolyMeshHandle | null>(null);
   const selectionRef = useRef<PolySelectionHandle | null>(null);
   const transformControlsRef = useRef<PolyTransformControlsHandle | null>(null);
+  const committedBakedLightingRef = useRef("");
   const onBuildRef = useRef(onBuild);
   onBuildRef.current = onBuild;
   const onCameraChangeRef = useRef(onCameraChange);
@@ -255,6 +315,17 @@ export function VanillaScene({
   onHoverChangeRef.current = onHoverChange;
   const onMeshHandleChangeRef = useRef(onMeshHandleChange);
   onMeshHandleChangeRef.current = onMeshHandleChange;
+  const onTransientHandleChangeRef = useRef(onTransientHandleChange);
+  onTransientHandleChangeRef.current = onTransientHandleChange;
+  const onSceneDomChangeRef = useRef(onSceneDomChange);
+  onSceneDomChangeRef.current = onSceneDomChange;
+  const helperScaleRef = useRef(helperScale);
+  helperScaleRef.current = helperScale;
+  const helperTargetRef = useRef(helperTarget);
+  helperTargetRef.current = helperTarget;
+  const notifySceneDomChange = useCallback(() => {
+    onSceneDomChangeRef.current?.();
+  }, []);
   const animationPausedRef = useRef(options.animationPaused);
   animationPausedRef.current = options.animationPaused;
   const animationTimeScaleRef = useRef(options.animationTimeScale);
@@ -274,15 +345,67 @@ export function VanillaScene({
     }
   }, []);
 
-  // Split things into "structural" (require destroying the scene) vs
-  // "incremental" (can be applied via setOptions / setTransform). In
-  // dynamic mode the chicken's atlas is light-independent, so we drop the
-  // light from the structural deps — sliding the light then only flows
-  // through the cheap setOptions effect, no flicker.
-  const stableDirectionalForRebuild =
-    options.textureLighting === "dynamic" ? null : directionalLight;
-  const stableAmbientForRebuild =
-    options.textureLighting === "dynamic" ? null : ambientLight;
+  const applyTransientLightOptions = useCallback((nextOptions: SceneOptionsState): void => {
+    const scene = sceneRef.current;
+    if (!scene) return;
+    const nextDirectionalLight = directionalFromOptions(nextOptions);
+    if (nextOptions.textureLighting === "dynamic") {
+      scene.setOptions({ directionalLight: nextDirectionalLight });
+    } else {
+      (scene as BakedSolidLightingPreviewSceneHandle).previewBakedSolidLighting?.({
+        directionalLight: nextDirectionalLight,
+        ambientLight: ambientFromOptions(nextOptions),
+      });
+    }
+    lightHandleRef.current?.setTransform({
+      position: lightHelperPosition(
+        nextDirectionalLight,
+        helperTargetRef.current,
+        helperScaleRef.current * 0.7,
+      ),
+    });
+  }, []);
+
+  const applyTransientSceneOptions = useCallback((nextOptions: SceneOptionsState): void => {
+    const scene = sceneRef.current;
+    const camera = cameraRef.current;
+    if (!scene || !camera) return;
+    const nextDirectionalLight = directionalFromOptions(nextOptions);
+    camera.update({
+      rotX: nextOptions.rotX,
+      rotY: nextOptions.rotY,
+      zoom: nextOptions.zoom,
+      target: nextOptions.target as Vec3,
+    });
+    scene.applyCamera();
+    scene.setOptions({
+      directionalLight: nextDirectionalLight,
+      ambientLight: ambientFromOptions(nextOptions),
+      textureLighting: nextOptions.textureLighting,
+      shadow: { maxExtend: nextOptions.shadowMaxExtend, lift: GALLERY_SHADOW_LIFT },
+    });
+    lightHandleRef.current?.setTransform({
+      position: lightHelperPosition(
+        nextDirectionalLight,
+        helperTargetRef.current,
+        helperScaleRef.current * 0.7,
+      ),
+    });
+  }, []);
+
+  useEffect(() => {
+    onTransientHandleChangeRef.current?.({
+      applySceneOptions: applyTransientSceneOptions,
+      applyLightOptions: applyTransientLightOptions,
+    });
+    return () => onTransientHandleChangeRef.current?.(null);
+  }, [applyTransientLightOptions, applyTransientSceneOptions]);
+
+  // Split structural options (require destroying the scene) from incremental
+  // lighting/camera options. Baked light changes commit solid colors in place;
+  // rebuilding the whole mesh on mouseup causes visible polygon flicker.
+  const stableDirectionalForRebuild = null;
+  const stableAmbientForRebuild = null;
 
   // Effect 1 — heavy: create the scene + add the current polygons once.
   // Polygon replacement is handled by Effect 1.5 so animation frames do not
@@ -312,10 +435,11 @@ export function VanillaScene({
       autoCenter: options.autoCenter,
       textureQuality: options.textureQuality,
       strategies: { disable: options.disableStrategies },
-      shadow: { maxExtend: options.shadowMaxExtend },
+      shadow: { maxExtend: options.shadowMaxExtend, lift: GALLERY_SHADOW_LIFT },
     };
     const scene = createPolyScene(host, sceneOptions);
     sceneRef.current = scene;
+    committedBakedLightingRef.current = bakedLightingSignature(directionalLight, ambientLight);
     const meshTransform = {
       merge: mergePolygonsForMesh,
       stableDom: stableDomForMesh,
@@ -344,6 +468,7 @@ export function VanillaScene({
     meshHandleRef.current.element.classList.add("dn-model-mesh");
     meshHandleRef.current.element.classList.toggle("is-mesh-hidden", !meshResolutionShowsMesh(options.meshResolution));
     onMeshHandleChangeRef.current?.(meshHandleRef.current);
+    notifySceneDomChange();
     return () => {
       // Tear controls down BEFORE destroying the scene — otherwise the
       // controls' rAF tick could fire one more time against a stale handle.
@@ -369,6 +494,7 @@ export function VanillaScene({
     stableAmbientForRebuild,
     stableDomForMesh,
     parseResult,
+    notifySceneDomChange,
   ]);
 
   useEffect(() => {
@@ -436,14 +562,16 @@ export function VanillaScene({
     }
 
     requestAnimationFrame(() =>
-      onBuildRef.current(performance.now() - started),
+      onBuildRef.current?.(performance.now() - started),
     );
+    notifySceneDomChange();
   }, [
     polygons,
     interiorShellPolygons,
     mergePolygonsForMesh,
     stableDomForMesh,
     mountChildMeshInsideModel,
+    notifySceneDomChange,
   ]);
 
   // Effect 1.6 — live-toggle castShadow without rebuilding the scene.
@@ -464,6 +592,7 @@ export function VanillaScene({
       transformControlsRef.current?.destroy();
       transformControlsRef.current = null;
       onSelectionChangeRef.current?.([]);
+      notifySceneDomChange();
       return;
     }
     const scene = sceneRef.current;
@@ -482,11 +611,13 @@ export function VanillaScene({
       },
     });
     selectionRef.current = select;
+    notifySceneDomChange();
     return () => {
       select.destroy();
       tc.destroy();
       selectionRef.current = null;
       transformControlsRef.current = null;
+      notifySceneDomChange();
     };
   }, [
     enableSelection,
@@ -500,6 +631,7 @@ export function VanillaScene({
     stableAmbientForRebuild,
     stableDomForMesh,
     parseResult,
+    notifySceneDomChange,
   ]);
 
   // Forward gizmo mode changes to the live PolyTransformControls handle.
@@ -696,8 +828,18 @@ export function VanillaScene({
       directionalLight,
       ambientLight,
       textureLighting: options.textureLighting,
-      shadow: { maxExtend: options.shadowMaxExtend },
+      shadow: { maxExtend: options.shadowMaxExtend, lift: GALLERY_SHADOW_LIFT },
     });
+    const nextLightingSignature = bakedLightingSignature(directionalLight, ambientLight);
+    if (
+      options.textureLighting === "baked" &&
+      committedBakedLightingRef.current !== nextLightingSignature
+    ) {
+      (scene as BakedSolidLightingPreviewSceneHandle).commitBakedSolidLighting?.();
+      committedBakedLightingRef.current = nextLightingSignature;
+    } else if (options.textureLighting !== "baked") {
+      committedBakedLightingRef.current = nextLightingSignature;
+    }
   }, [
     options.rotX,
     options.rotY,
@@ -719,7 +861,8 @@ export function VanillaScene({
     scene.setOptions({
       strategies: { disable: options.disableStrategies },
     });
-  }, [options.disableStrategies]);
+    notifySceneDomChange();
+  }, [options.disableStrategies, notifySceneDomChange]);
 
   // Effect 2.5 — vanilla controls. The React renderer wires interactive +
   // animate through <PolyCamera>; the vanilla path uses createPolyOrbitControls.
@@ -835,8 +978,11 @@ export function VanillaScene({
     const scene = sceneRef.current;
     if (!scene) return;
     if (!showAxes) {
-      axesHandleRef.current?.dispose();
-      axesHandleRef.current = null;
+      if (axesHandleRef.current) {
+        axesHandleRef.current.dispose();
+        axesHandleRef.current = null;
+        notifySceneDomChange();
+      }
       return;
     }
     axesHandleRef.current = scene.add(
@@ -848,9 +994,11 @@ export function VanillaScene({
       },
       { excludeFromAutoCenter: true },
     );
+    notifySceneDomChange();
     return () => {
       axesHandleRef.current?.dispose();
       axesHandleRef.current = null;
+      notifySceneDomChange();
     };
   }, [
     showAxes,
@@ -863,6 +1011,7 @@ export function VanillaScene({
     stableDirectionalForRebuild,
     stableAmbientForRebuild,
     parseResult,
+    notifySceneDomChange,
   ]);
 
   // Effect 3.5 — ground receiver. A flat quad in the XY plane (Z is "up"
@@ -875,8 +1024,11 @@ export function VanillaScene({
     const scene = sceneRef.current;
     if (!scene) return;
     if (!showGround || polygons.length === 0) {
-      groundHandleRef.current?.dispose();
-      groundHandleRef.current = null;
+      if (groundHandleRef.current) {
+        groundHandleRef.current.dispose();
+        groundHandleRef.current = null;
+        notifySceneDomChange();
+      }
       return;
     }
     let minX = Infinity, minY = Infinity, minZ = Infinity;
@@ -889,15 +1041,18 @@ export function VanillaScene({
       }
     }
     if (!Number.isFinite(minZ)) {
-      groundHandleRef.current?.dispose();
-      groundHandleRef.current = null;
+      if (groundHandleRef.current) {
+        groundHandleRef.current.dispose();
+        groundHandleRef.current = null;
+        notifySceneDomChange();
+      }
       return;
     }
     const span = Math.max(maxX - minX, maxY - minY, 1);
     const pad = span * 1.5;
     const cx = (minX + maxX) / 2;
     const cy = (minY + maxY) / 2;
-    const z = minZ;
+    const z = minZ + GROUND_Z_OFFSET;
     const groundPoly: Polygon = {
       vertices: [
         [cx - pad, cy - pad, z],
@@ -918,9 +1073,11 @@ export function VanillaScene({
       },
       { excludeFromAutoCenter: true, castShadow: false },
     );
+    notifySceneDomChange();
     return () => {
       groundHandleRef.current?.dispose();
       groundHandleRef.current = null;
+      notifySceneDomChange();
     };
   }, [
     showGround,
@@ -932,6 +1089,7 @@ export function VanillaScene({
     stableDirectionalForRebuild,
     stableAmbientForRebuild,
     parseResult,
+    notifySceneDomChange,
   ]);
 
   // Effect 4 — light helper. Octahedron at LOCAL origin so polygons stay
@@ -941,8 +1099,11 @@ export function VanillaScene({
     const scene = sceneRef.current;
     if (!scene) return;
     if (!showLight) {
-      lightHandleRef.current?.dispose();
-      lightHandleRef.current = null;
+      if (lightHandleRef.current) {
+        lightHandleRef.current.dispose();
+        lightHandleRef.current = null;
+        notifySceneDomChange();
+      }
       return;
     }
     const swatch = directionalLight.color ?? "#ffd54a";
@@ -964,9 +1125,11 @@ export function VanillaScene({
     );
     handle.element.classList.add("dn-light-helper");
     lightHandleRef.current = handle;
+    notifySceneDomChange();
     return () => {
       lightHandleRef.current?.dispose();
       lightHandleRef.current = null;
+      notifySceneDomChange();
     };
     // directionalLight.color triggers a remount because the swatch is
     // baked into polygon data; direction is handled by Effect 5 below.
@@ -983,6 +1146,7 @@ export function VanillaScene({
     stableDirectionalForRebuild,
     stableAmbientForRebuild,
     parseResult,
+    notifySceneDomChange,
   ]);
 
   // Effect 5 — slide the light helper to the new orbit position whenever

@@ -68,6 +68,10 @@ const LIGHTING_CUSTOM_PROPS = [
   "--pnx", "--pny", "--pnz",
   "--psr", "--psg", "--psb",
   "--plam",
+  "--polycss-light-preview-active",
+  "--polycss-preview-r",
+  "--polycss-preview-g",
+  "--polycss-preview-b",
 ] as const;
 const SHADOW_CUSTOM_PROPS = [
   "--clx", "--cly", "--clz", "--shadow-ground-cssz",
@@ -551,7 +555,12 @@ function inlineSnapshotStaticStyleHints(
       }
     } else if (tag === "b" || tag === "i" || tag === "u") {
       const paint = inheritedInlineCustomProperty(sourceEl, "--polycss-paint");
-      if (paint && !cloneStyle.getPropertyValue("color")) {
+      const computedColor = !features.hasDynamicLighting
+        ? sourceEl.ownerDocument.defaultView?.getComputedStyle(sourceEl).color
+        : "";
+      if (computedColor) {
+        cloneStyle.setProperty("color", computedColor);
+      } else if (paint && !cloneStyle.getPropertyValue("color")) {
         cloneStyle.setProperty("color", paint);
       }
     }

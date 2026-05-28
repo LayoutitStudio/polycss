@@ -1,4 +1,4 @@
-import { useMemo, type RefObject } from "react";
+import { useEffect, useMemo, type RefObject } from "react";
 import {
   PolyAxesHelper,
   PolyOrthographicCamera,
@@ -101,6 +101,7 @@ export interface ReactSceneProps {
   gizmoMode: GizmoMode;
   helperScale: number;
   helperTarget: [number, number, number];
+  onSceneDomChange?: () => void;
 }
 
 export function ReactScene({
@@ -127,6 +128,7 @@ export function ReactScene({
   gizmoMode,
   helperScale,
   helperTarget,
+  onSceneDomChange,
 }: ReactSceneProps) {
   const Cam = sceneOptions.perspective === false ? PolyOrthographicCamera : PolyPerspectiveCamera;
   const camProps = sceneOptions.perspective === false
@@ -163,6 +165,23 @@ export function ReactScene({
     !meshResolutionShowsMesh(sceneOptions.meshResolution) ? "is-mesh-hidden" : "",
     sceneOptions.hoverEffects && hoveredMeshId === (loaded?.label ?? "model") ? "is-hovered" : "",
   ].filter(Boolean).join(" ");
+  useEffect(() => {
+    onSceneDomChange?.();
+  }, [
+    onSceneDomChange,
+    rendererDebugKey,
+    visibleScenePolygons,
+    interiorShellPolygons,
+    sceneOptions.disableStrategies,
+    sceneOptions.meshResolution,
+    sceneOptions.selection,
+    selectedMeshes.length,
+    sceneOptions.showAxes,
+    sceneOptions.showLight,
+    helperScale,
+    directionalLight.color,
+    textureQuality,
+  ]);
   return (
     <Cam key={rendererDebugKey} {...camProps}>
       {sceneOptions.dragMode === "pan" ? (
