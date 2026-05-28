@@ -205,7 +205,7 @@ describe("updateStableTriangleDom", () => {
     };
 
     expect(updateStableTriangleDom(root, [tri])).toBe(true);
-    expect(leaf.style.borderWidth).toBe("0px 48px 96px");
+    expect(leaf.style.borderWidth).toBe("0px 128px 256px");
   });
 });
 

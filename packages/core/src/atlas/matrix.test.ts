@@ -116,7 +116,7 @@ const FLAT_RECT: Polygon = {
   color: "#00ff00",
 };
 
-describe("formatSolidQuadEntryMatrix — canonical 64px quad wrap", () => {
+describe("formatSolidQuadEntryMatrix — canonical quad wrap", () => {
   it("returns a matrix3d(...) wrapped string", () => {
     const plan = computeTextureAtlasPlanPublic(FLAT_RECT, 0)!;
     const result = formatSolidQuadEntryMatrix(plan);
@@ -147,7 +147,7 @@ describe("formatSolidQuadEntryMatrix — canonical 64px quad wrap", () => {
 });
 
 // ---------------------------------------------------------------------------
-// formatBorderShapeEntryMatrix — canonical 16px border-shape wrap
+// formatBorderShapeEntryMatrix — canonical border-shape wrap
 // ---------------------------------------------------------------------------
 
 const NON_RECT_POLYGON: Polygon = {
@@ -160,7 +160,7 @@ const NON_RECT_POLYGON: Polygon = {
   color: "#0000ff",
 };
 
-describe("formatBorderShapeEntryMatrix — canonical 16px border-shape wrap", () => {
+describe("formatBorderShapeEntryMatrix — canonical border-shape wrap", () => {
   it("returns a matrix3d(...) wrapped string", () => {
     const plan = computeTextureAtlasPlanPublic(NON_RECT_POLYGON, 0)!;
     const result = formatBorderShapeEntryMatrix(plan);
@@ -183,11 +183,10 @@ describe("formatBorderShapeEntryMatrix — canonical 16px border-shape wrap", ()
     expect(values.every(Number.isFinite)).toBe(true);
   });
 
-  it("solid-quad and border-shape matrices differ due to different canonical sizes (64px vs 16px)", () => {
+  it("solid-quad and border-shape matrices differ because border-shape uses clipped bounds", () => {
     const plan = computeTextureAtlasPlanPublic(NON_RECT_POLYGON, 0)!;
     const quadMatrix = formatSolidQuadEntryMatrix(plan);
     const borderMatrix = formatBorderShapeEntryMatrix(plan);
-    // Border-shape canonical size is 16, solid-quad is 64 — scale differs by 4x
     expect(quadMatrix).not.toBe(borderMatrix);
   });
 });

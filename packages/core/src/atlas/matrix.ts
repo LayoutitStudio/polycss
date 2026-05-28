@@ -221,7 +221,7 @@ export function formatCssLengthPx(value: number, decimals = DEFAULT_ATLAS_CSS_DE
 
 /**
  * Produce the CSS matrix3d transform for a solid-quad (`<b>`) leaf, including
- * the canonical 64px primitive scale.
+ * the canonical primitive scale.
  */
 export function formatSolidQuadEntryMatrix(entry: TextureAtlasPlan): string {
   return `matrix3d(${formatSolidQuadMatrix(entry)})`;

@@ -28,9 +28,9 @@ export const BASIS_EPS = 1e-9;
 const RECT_EPS = 1e-3;
 // Matches the canonical SOLID_TRIANGLE_BLEED constant.
 export const SOLID_TRIANGLE_BLEED = 0.75;
-const SOLID_TRIANGLE_CANONICAL_SIZE = 32;
-const SOLID_TRIANGLE_LARGE_BORDER_CANONICAL_SIZE = 96;
-const SOLID_TRIANGLE_LARGE_BORDER_WIDTH = "0 48px 96px 48px";
+const SOLID_TRIANGLE_CANONICAL_SIZE = 256;
+const SOLID_TRIANGLE_LARGE_BORDER_CANONICAL_SIZE = 256;
+const SOLID_TRIANGLE_LARGE_BORDER_WIDTH = "0 128px 256px 128px";
 let cachedSolidTriangleUserAgent: string | undefined;
 let cachedSolidTriangleCanonicalSize = SOLID_TRIANGLE_CANONICAL_SIZE;
 
@@ -46,7 +46,8 @@ export function solidTriangleCanonicalSize(): number {
 }
 
 export function solidTriangleBorderWidth(): string | undefined {
-  return solidTriangleCanonicalSize() === SOLID_TRIANGLE_LARGE_BORDER_CANONICAL_SIZE
+  const ua = typeof navigator !== "undefined" ? navigator.userAgent : "";
+  return /\bFirefox\//.test(ua)
     ? SOLID_TRIANGLE_LARGE_BORDER_WIDTH
     : undefined;
 }

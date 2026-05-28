@@ -106,8 +106,8 @@ const CORE_BASE_STYLES = `
 
 .polycss-scene b {
   background: currentColor;
-  width: 64px;
-  height: 64px;
+  width: 256px;
+  height: 256px;
 }
 
 .polycss-mesh.polycss-voxel-mesh > .polycss-voxel-face {
@@ -136,8 +136,8 @@ const CORE_BASE_STYLES = `
 }
 
 .polycss-scene i {
-  width: 16px;
-  height: 16px;
+  width: 256px;
+  height: 256px;
   border-color: currentColor;
 }
 
@@ -153,16 +153,16 @@ const CORE_BASE_STYLES = `
   box-sizing: content-box;
   border: 0 solid transparent;
   border-color: transparent transparent currentColor transparent;
-  border-width: 0 16px 32px 16px;
+  border-width: 0 128px 256px 128px;
 }
 
 .polycss-scene u.polycss-large-border-triangle {
-  border-width: 0 48px 96px 48px;
+  border-width: 0 128px 256px 128px;
 }
 
 .polycss-scene u.polycss-corner-triangle {
-  width: 32px;
-  height: 32px;
+  width: 256px;
+  height: 256px;
   background: currentColor;
   border: 0;
   border-top-left-radius: 50% 100%;

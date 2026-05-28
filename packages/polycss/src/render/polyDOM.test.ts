@@ -15,7 +15,7 @@ import {
 
 const ATLAS_CANONICAL_SIZE_EXPLICIT = 64;
 const ATLAS_CANONICAL_SIZE_AUTO_DESKTOP = 128;
-const SOLID_QUAD_CANONICAL_SIZE = 64;
+const SOLID_QUAD_CANONICAL_SIZE = 256;
 
 const CORNER_SHAPE_CORPUS = [
   ["Bear.glb"],
@@ -786,8 +786,8 @@ describe("renderPolygonsWithTextureAtlas", () => {
     const yScale = Math.hypot(matrix[4], matrix[5], matrix[6]);
 
     expect(element.tagName.toLowerCase()).toBe("i");
-    expect(xScale).toBeGreaterThan(2 / 16);
-    expect(yScale).toBeGreaterThan(2 / 16);
+    expect(xScale).toBeGreaterThan(2 / 256);
+    expect(yScale).toBeGreaterThan(2 / 256);
     expect(element.style.getPropertyValue("border-shape")).toContain("polygon(");
     result.dispose();
   });
@@ -1032,10 +1032,10 @@ describe("renderPolygonsWithTextureAtlas", () => {
     expect(element.style.height).toBe("");
     expect(element.style.getPropertyValue("--polycss-local-w")).toBe("");
     expect(element.style.getPropertyValue("--polycss-local-h")).toBe("");
-    expect(matrix[0]).toBeGreaterThan(10 / 16);
+    expect(matrix[0]).toBeGreaterThan(10 / 256);
     expect(matrix[1]).toBeCloseTo(0, 6);
     expect(matrix[4]).toBeCloseTo(0, 6);
-    expect(matrix[5]).toBeGreaterThan(1 / 16);
+    expect(matrix[5]).toBeGreaterThan(1 / 256);
     result.dispose();
   });
 
