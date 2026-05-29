@@ -129,9 +129,19 @@ describe("parseAlpha — alpha extraction from CSS color strings", () => {
 // ---------------------------------------------------------------------------
 
 describe("shadePolygon — Lambert shading outputs", () => {
-  it("white polygon with white light at full intensity and zero ambient → shaded to full white from front", () => {
-    // White polygon + white directional light + zero ambient, full exposure
+  it("white polygon with white light at intensity=1, zero ambient → ~mid grey (physical Lambert / π)", () => {
+    // Lambert is now physically based: `lit_linear = albedo_linear × intensity ×
+    // max(n·L, 0) / π`. At intensity=1, lambert=1, a perfectly white surface
+    // reaches `1 / π ≈ 0.318` in linear-light space, which sRGB-encodes to
+    // ~#999999 (mid-grey). Matches Three.js MeshLambertMaterial.
     const result = shadePolygon("#ffffff", 1, "#ffffff", "#000000", 0);
+    expect(result).toBe("#999999");
+  });
+
+  it("white polygon with white light at intensity=π, zero ambient → full white", () => {
+    // Multiplying intensity by π cancels the BRDF normalization for callers
+    // that still want the pre-physical "intensity=1 = saturated" behavior.
+    const result = shadePolygon("#ffffff", Math.PI, "#ffffff", "#000000", 0);
     expect(result).toBe("#ffffff");
   });
 
