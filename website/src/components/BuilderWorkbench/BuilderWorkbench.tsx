@@ -170,7 +170,7 @@ export default function BuilderWorkbench() {
   // tilt. The grid polygons in useSceneRender also consume this so the
   // floor grid bends with the terrain — there's no separate solid-fill
   // mesh anymore, the grid IS the terrain.
-  const { hoverPolygons, vertices: terrainVertices } = useTerrain({ toolMode, targetMode, sceneOptions });
+  const { vertices: terrainVertices } = useTerrain({ toolMode, targetMode, sceneOptions });
 
   useCameraShortcuts({ dragMode: sceneOptions.dragMode, updateScene });
 
@@ -220,8 +220,9 @@ export default function BuilderWorkbench() {
 
   useEffect(() => {
     if (!urlSyncReady) return;
+    if (gizmoDragging) return;
     updateBuilderSceneUrl(serializeBuilderSceneToParam(placedItems, sceneOptions));
-  }, [placedItems, sceneOptions, urlSyncReady]);
+  }, [gizmoDragging, placedItems, sceneOptions, urlSyncReady]);
 
   // Terrain-follow: when the heightmap changes, re-snap every placed
   // item to the current surface at its (worldX, worldY). Note: this
@@ -493,7 +494,6 @@ export default function BuilderWorkbench() {
             ambientLight={ambientLight}
             gridPolygons={gridPolygons}
             ghostPolygons={[]}
-            terrainHoverPolygons={hoverPolygons}
             placementDraft={false}
             renderItems={renderItems}
             renderedPolygonsById={renderedPolygonsById}

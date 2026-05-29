@@ -42,10 +42,8 @@ export interface GhostWorldRect {
   baseZ?: number;
 }
 
-/** Solid cyan wireframe edge color. Alpha must live in the COLOR (rgba)
- *  if we ever want transparency — never set CSS `opacity` on the ghost
- *  wrapper because it would flatten the 3D context. See
- *  builder-workbench.css for the long-form warning. */
+/** Solid cyan wireframe edge color. Never set CSS `opacity` on the ghost
+ *  wrapper because it would flatten the 3D context. */
 export const GHOST_COLOR = "#00d9ff";
 
 /** Edge half-thickness in world units. ~0.06 world units ≈ 3 CSS px at

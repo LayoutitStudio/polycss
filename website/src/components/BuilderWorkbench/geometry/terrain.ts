@@ -19,9 +19,6 @@
  *   corner, and the cells on the other sides of the raised vertex
  *   form matching ramps. No box rendering, no z-fighting with the
  *   floor — the warp emerges from sharing vertex heights.
- *
- * The hover ghost marks the nearest VERTEX (where the next click
- * will land) — a small translucent cyan square at the vertex.
  */
 
 import type { Polygon } from "@layoutit/polycss-react";
@@ -41,9 +38,7 @@ export function worldToVertex(worldX: number, worldY: number, cellSize: number):
   return [Math.round(worldX / cellSize), Math.round(worldY / cellSize)];
 }
 
-/** Project a world XY to the CELL index that contains it. Used to
- *  determine which cells touch the hovered vertex (the cell whose
- *  corners are (i, j), (i+1, j), (i+1, j+1), (i, j+1)). */
+/** Project a world XY to the CELL index that contains it. */
 export function worldToCell(worldX: number, worldY: number, cellSize: number): [number, number] {
   return [Math.floor(worldX / cellSize), Math.floor(worldY / cellSize)];
 }
@@ -58,7 +53,7 @@ export interface TerrainRenderOptions {
 }
 
 export function buildTerrainPolygons(opts: TerrainRenderOptions): Polygon[] {
-  const color = opts.color ?? "rgba(34, 211, 238, 0.35)";
+  const color = opts.color ?? "#12343c";
   const polys: Polygon[] = [];
 
   // Walk the set of CELLS that have at least one non-zero corner. A
@@ -174,66 +169,4 @@ export function rotationForSlope(slopeX: number, slopeY: number): [number, numbe
   const rotX = (Math.atan(slopeX) * 180) / Math.PI;
   const rotY = (-Math.atan(slopeY) * 180) / Math.PI;
   return [rotX, rotY, 0];
-}
-
-/** Build the hover ghost — visual feedback for where the next click
- *  will land. Vertex target = a small cyan square centred on the
- *  vertex. Face target = a translucent quad covering the cell at its
- *  current corner heights (2 triangles to stay planar). */
-export type HoverTarget =
-  | { kind: "vertex"; i: number; j: number }
-  | { kind: "face";   i: number; j: number };
-
-export interface HoverGhostOptions {
-  target: HoverTarget | null;
-  cellSize: number;
-  /** Heightmap. Used to read the cell's corner heights in face mode
-   *  and the vertex elevation in vertex mode (so the marker doesn't
-   *  sink inside a raised surface). */
-  vertices: TerrainVertices;
-  /** Half-side of the vertex marker, in world units. Default 0.4. */
-  size?: number;
-  color?: string;
-}
-
-export function buildHoverGhostPolygons(opts: HoverGhostOptions): Polygon[] {
-  if (!opts.target) return [];
-  const color = opts.color ?? "rgba(0, 217, 255, 0.5)";
-  if (opts.target.kind === "face") {
-    const { i, j } = opts.target;
-    const x0 = i * opts.cellSize;
-    const x1 = (i + 1) * opts.cellSize;
-    const y0 = j * opts.cellSize;
-    const y1 = (j + 1) * opts.cellSize;
-    const z00 = opts.vertices.get(vertexKey(i,     j)) ?? 0;
-    const z10 = opts.vertices.get(vertexKey(i + 1, j)) ?? 0;
-    const z11 = opts.vertices.get(vertexKey(i + 1, j + 1)) ?? 0;
-    const z01 = opts.vertices.get(vertexKey(i,     j + 1)) ?? 0;
-    // Slight z-offset so the highlight doesn't z-fight with the grid.
-    const off = 0.05;
-    const p00: [number, number, number] = [x0, y0, z00 + off];
-    const p10: [number, number, number] = [x1, y0, z10 + off];
-    const p11: [number, number, number] = [x1, y1, z11 + off];
-    const p01: [number, number, number] = [x0, y1, z01 + off];
-    return [
-      { vertices: [p00, p10, p11], color },
-      { vertices: [p00, p11, p01], color },
-    ];
-  }
-  // Vertex target — small marker square at the vertex's current
-  // elevation so it doesn't disappear inside a raised surface.
-  const size = opts.size ?? 0.4;
-  const { i, j } = opts.target;
-  const cx = i * opts.cellSize;
-  const cy = j * opts.cellSize;
-  const z = (opts.vertices.get(vertexKey(i, j)) ?? 0) + 0.05;
-  return [{
-    vertices: [
-      [cx - size, cy - size, z],
-      [cx + size, cy - size, z],
-      [cx + size, cy + size, z],
-      [cx - size, cy + size, z],
-    ],
-    color,
-  }];
 }

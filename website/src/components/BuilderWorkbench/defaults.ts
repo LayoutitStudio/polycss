@@ -2,8 +2,8 @@ import type { SceneOptionsState } from "../types";
 
 export const BUILDER_KIT_CATEGORIES: string[] = ["City Kit", "Urban Pack", "Medieval Village"];
 
-export const PARSER_DEFAULTS = { targetSize: 60, gridShift: 1, defaultColor: "#8b95a1" };
 export const NORMALIZED_MAX_DIM = 10;
+export const PARSER_DEFAULTS = { targetSize: NORMALIZED_MAX_DIM, gridShift: 1, defaultColor: "#8b95a1" };
 export const GRID_STEP = 10;
 export const GRID_COLS = 3;
 export const BUILDER_GROUND_SPAN = 1600;
@@ -12,7 +12,7 @@ export const BUILDER_DEFAULT_GRID_RESOLUTION = 10;
 
 // Builder starts with the same scene defaults as the gallery's chicken preset
 // so the camera / lighting / strategies feel familiar to anyone coming from
-// /gallery. The fields the builder doesn't currently use (selection/hover/
+// /gallery. The fields the builder doesn't currently use (selection/
 // animation/etc.) still have to be present because the Dock reads them.
 export const DEFAULT_SCENE: SceneOptionsState = {
   renderer: "react",
@@ -50,7 +50,7 @@ export const DEFAULT_SCENE: SceneOptionsState = {
   target: [0, 0, 0],
   disableStrategies: [],
   castShadow: true,
-  shadowMaxExtend: 2000,
+  shadowMaxExtend: 600,
   showGround: true,
   fpvLook: true,
   fpvMove: true,

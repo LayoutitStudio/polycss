@@ -22,14 +22,14 @@ import type {
   Polygon,
   Vec3,
 } from "@layoutit/polycss-react";
-import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { useEffect, useMemo, useRef, type RefObject } from "react";
 import { meshResolutionShowsMesh, type SceneOptionsState } from "../../types";
 import { FPV_PERSPECTIVE } from "../../fpv";
 import { BUILDER_GROUND_SPAN, BUILDER_MAX_CAMERA_ROT_X } from "../defaults";
 import { buildSolidWireframePolygons } from "../geometry/ghost";
 import { meshBbox } from "../geometry/meshBbox";
 import { projectScreenToWorldGround } from "../geometry/screenToWorld";
-import { snapWorldToCellCenter, worldToGridCell } from "../geometry/snap";
+import { snapWorldToCellCenter } from "../geometry/snap";
 import type { BuilderToolMode, PlacedItem } from "../types";
 import { BuilderCameraDragControls } from "./BuilderCameraDragControls";
 
@@ -46,9 +46,6 @@ export interface BuilderSceneProps {
   /** One polygon per visible grid line, terrain-aware when raised. */
   gridPolygons: Polygon[];
   ghostPolygons: Polygon[];
-  /** Single-quad outline showing the vertex the terrain-tool cursor is
-   *  currently over. Empty when no terrain tool is active. */
-  terrainHoverPolygons: Polygon[];
   placementDraft: boolean;
   renderItems: Array<PlacedItem & { rawPolygons: Polygon[] }>;
   renderedPolygonsById: Map<string, Polygon[]>;
@@ -274,7 +271,6 @@ interface BuilderViewportToolControlsProps {
   onAddShapeAt: (worldX: number, worldY: number) => void;
   onRemoveItem: (id: string) => void;
   onDraggingChanged: (dragging: boolean) => void;
-  onHoverCellChange: (cell: [number, number] | null) => void;
 }
 
 function BuilderViewportToolControls({
@@ -283,13 +279,11 @@ function BuilderViewportToolControls({
   onAddShapeAt,
   onRemoveItem,
   onDraggingChanged,
-  onHoverCellChange,
 }: BuilderViewportToolControlsProps): null {
   const { store, cameraElRef } = useCameraContext();
-  const stateRef = useRef({ tool, sceneOptions, onAddShapeAt, onRemoveItem, onDraggingChanged, onHoverCellChange });
-  stateRef.current = { tool, sceneOptions, onAddShapeAt, onRemoveItem, onDraggingChanged, onHoverCellChange };
+  const stateRef = useRef({ tool, sceneOptions, onAddShapeAt, onRemoveItem, onDraggingChanged });
+  stateRef.current = { tool, sceneOptions, onAddShapeAt, onRemoveItem, onDraggingChanged };
   const downRef = useRef<{ x: number; y: number; target: EventTarget | null } | null>(null);
-  const hoverCellRef = useRef<[number, number] | null>(null);
 
   useEffect(() => {
     const cameraEl = cameraElRef.current;
@@ -313,27 +307,6 @@ function BuilderViewportToolControls({
       if (!hit) return null;
       if (!state.sceneOptions.snapToGrid || state.sceneOptions.gridResolution <= 0) return hit;
       return snapWorldToCellCenter(hit[0], hit[1], state.sceneOptions.gridResolution);
-    };
-
-    const setHoverCell = (cell: [number, number] | null): void => {
-      const prev = hoverCellRef.current;
-      if (prev?.[0] === cell?.[0] && prev?.[1] === cell?.[1]) return;
-      hoverCellRef.current = cell;
-      stateRef.current.onHoverCellChange(cell);
-    };
-
-    const onPointerMove = (event: PointerEvent): void => {
-      const state = stateRef.current;
-      if (state.tool !== "add" || isUiOverlay(event.target)) {
-        setHoverCell(null);
-        return;
-      }
-      const hit = projectAt(event.clientX, event.clientY);
-      if (!hit) {
-        setHoverCell(null);
-        return;
-      }
-      setHoverCell(worldToGridCell(hit[0], hit[1], state.sceneOptions.gridResolution));
     };
 
     const onPointerDown = (event: PointerEvent): void => {
@@ -370,19 +343,13 @@ function BuilderViewportToolControls({
       event.stopImmediatePropagation();
       state.onAddShapeAt(hit[0], hit[1]);
     };
-    const onPointerLeave = (): void => setHoverCell(null);
 
     cameraEl.addEventListener("pointerdown", onPointerDown, true);
-    cameraEl.addEventListener("pointermove", onPointerMove, true);
-    cameraEl.addEventListener("pointerleave", onPointerLeave, true);
     cameraEl.addEventListener("click", onClick, true);
     return () => {
       cameraEl.removeEventListener("pointerdown", onPointerDown, true);
-      cameraEl.removeEventListener("pointermove", onPointerMove, true);
-      cameraEl.removeEventListener("pointerleave", onPointerLeave, true);
       cameraEl.removeEventListener("click", onClick, true);
       downRef.current = null;
-      setHoverCell(null);
       stateRef.current.onDraggingChanged(false);
     };
   }, [cameraElRef, store]);
@@ -397,7 +364,6 @@ export function BuilderScene({
   ambientLight,
   gridPolygons,
   ghostPolygons,
-  terrainHoverPolygons,
   placementDraft,
   renderItems,
   renderedPolygonsById,
@@ -420,7 +386,6 @@ export function BuilderScene({
   const perspective = sceneOptions.dragMode === "fpv" ? FPV_PERSPECTIVE : sceneOptions.perspective;
   const Cam = perspective === false ? PolyOrthographicCamera : PolyPerspectiveCamera;
   const sceneKey = sceneOptions.meshResolution;
-  const [addHoverCell, setAddHoverCell] = useState<[number, number] | null>(null);
   const camProps = perspective === false
     ? { zoom: sceneOptions.zoom, rotX: sceneOptions.rotX, rotY: sceneOptions.rotY, target: sceneOptions.target }
     : {
@@ -453,26 +418,6 @@ export function BuilderScene({
       baseZ: bbox.minZ,
     }, "#00d9ff", edgeHalf);
   }, [renderedPolygonsById, sceneOptions.gridResolution, selected]);
-  const addHoverPolygons = useMemo<Polygon[]>(() => {
-    if (!addHoverCell || builderTool !== "add" || !sceneOptions.showGround) return [];
-    const [cellX, cellY] = addHoverCell;
-    const cellSize = sceneOptions.gridResolution > 0 ? sceneOptions.gridResolution : 10;
-    const x0 = cellX * cellSize;
-    const x1 = (cellX + 1) * cellSize;
-    const y0 = cellY * cellSize;
-    const y1 = (cellY + 1) * cellSize;
-    const z = 0.04;
-    const color = "rgba(34, 211, 238, 0.22)";
-    return [{
-      vertices: [
-        [x0, y0, z],
-        [x1, y0, z],
-        [x1, y1, z],
-        [x0, y1, z],
-      ],
-      color,
-    }];
-  }, [addHoverCell, builderTool, sceneOptions.gridResolution, sceneOptions.showGround]);
   const groundFillPolygons = useMemo<Polygon[]>(() => {
     const half = BUILDER_GROUND_SPAN / 2;
     const [cx, cy] = sceneOptions.target;
@@ -486,10 +431,6 @@ export function BuilderScene({
       color: GROUND_FILL_COLORS[sceneOptions.gridTone],
     }];
   }, [sceneOptions.gridTone, sceneOptions.target]);
-
-  useEffect(() => {
-    if (builderTool !== "add") setAddHoverCell(null);
-  }, [builderTool]);
 
   return (
     <Cam key={sceneKey} {...camProps}>
@@ -507,7 +448,6 @@ export function BuilderScene({
         onAddShapeAt={onAddShapeAt}
         onRemoveItem={onRemoveItem}
         onDraggingChanged={onGizmoDraggingChanged}
-        onHoverCellChange={setAddHoverCell}
       />
       {sceneOptions.dragMode === "pan" ? (
         <>
@@ -563,20 +503,13 @@ export function BuilderScene({
         textureLighting={sceneOptions.textureLighting}
         textureQuality={sceneOptions.textureQuality}
         strategies={{ disable: sceneOptions.disableStrategies }}
+        shadow={{ maxExtend: sceneOptions.shadowMaxExtend }}
       >
         {sceneOptions.showGround && (
           <>
             <PolyMesh polygons={groundFillPolygons} className="builder-ground-fill" />
             <PolyMesh polygons={gridPolygons} />
           </>
-        )}
-        {addHoverPolygons.length > 0 && (
-          <PolyMesh polygons={addHoverPolygons} className="builder-add-hover" />
-        )}
-        {/* Terrain hover ghost — small cyan marker over the vertex the
-            next click will modify. */}
-        {terrainHoverPolygons.length > 0 && (
-          <PolyMesh polygons={terrainHoverPolygons} className="builder-terrain-hover" />
         )}
         {sceneOptions.showAxes && <PolyAxesHelper size={3} />}
         {sceneOptions.showLight && (

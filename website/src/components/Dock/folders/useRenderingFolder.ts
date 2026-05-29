@@ -92,7 +92,6 @@ export function useRenderingFolder(parent: GUI | null, inputs: RenderingFolderIn
   const interiorFillCtrl = useToggle(folder, "Interior fill", interiorFill, (value) =>
     onUpdateScene({ interiorFill: value }),
   );
-
   const textureMode = textureModeFor(solidMaterials, textureLighting);
   const textureModeCtrl = useOption<TextureMode>(
     folder,
