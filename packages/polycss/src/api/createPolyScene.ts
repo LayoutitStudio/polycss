@@ -56,7 +56,6 @@ import {
   polygonCssSurfaceNormal,
   projectCssVertexToGround,
   parsePureColor,
-  shadePolygon,
 } from "@layoutit/polycss-core";
 import {
   cssBorderShapeForPlan,
@@ -989,7 +988,6 @@ export function createPolyScene(
     }
     entry.disposeAtlas = disposeAtlas;
     entry.solidLightingPreviewPrepared = false;
-    prepareBakedSolidLightingPreview(entry);
   }
 
   function renderedItemForPolygon(entry: MeshEntry, polygonIndex: number): RenderedPoly | undefined {
@@ -1403,10 +1401,8 @@ export function createPolyScene(
       textureLighting,
       renderOptions,
     );
-    if (textureLighting === "baked") {
-      return applyBakedSolidPreviewPaint(item, polygon, shaded.shadedColor);
-    }
     applySolidPaint(item.element, shaded, textureLighting);
+    if (textureLighting === "baked") clearBakedSolidPreviewPaintVars(item.element);
     return true;
   }
 
@@ -1443,6 +1439,33 @@ export function createPolyScene(
     return changed;
   }
 
+  function clearBakedSolidPreviewPaintVars(el: HTMLElement): void {
+    el.style.removeProperty("--pnx");
+    el.style.removeProperty("--pny");
+    el.style.removeProperty("--pnz");
+    el.style.removeProperty("--psr");
+    el.style.removeProperty("--psg");
+    el.style.removeProperty("--psb");
+    el.style.removeProperty("--plam");
+    el.style.removeProperty("--polycss-preview-r");
+    el.style.removeProperty("--polycss-preview-g");
+    el.style.removeProperty("--polycss-preview-b");
+    el.style.removeProperty("--polycss-paint");
+  }
+
+  function restoreBakedSolidPaint(entry: MeshEntry): boolean {
+    let changed = false;
+    for (const item of entry.rendered) {
+      if (!item.plan || item.kind === "atlas" || item.plan.texture) continue;
+      const polygon = entry.polygons[item.polygonIndex];
+      if (!polygon) continue;
+      changed = applyBakedSolidColor(item, polygon) || changed;
+    }
+    entry.solidLightingPreviewPrepared = false;
+    entry.solidLightingPreviewActive = false;
+    return changed;
+  }
+
   function prepareBakedSolidLightingPreview(entry: MeshEntry): boolean {
     if ((currentOptions.textureLighting ?? "baked") !== "baked") return false;
     let prepared = false;
@@ -1464,31 +1487,6 @@ export function createPolyScene(
     return true;
   }
 
-  function bakedSolidColorForPlan(item: RenderedPoly, polygon: Polygon): string {
-    const directionalCfg = currentOptions.directionalLight;
-    const ambientCfg = currentOptions.ambientLight;
-    const lightDir = directionalCfg?.direction ?? [0.4, -0.7, 0.59] as Vec3;
-    const lightColor = directionalCfg?.color ?? "#ffffff";
-    const lightIntensity = Math.max(0, directionalCfg?.intensity ?? 1);
-    const ambientColor = ambientCfg?.color ?? "#ffffff";
-    const ambientIntensity = Math.max(0, ambientCfg?.intensity ?? 0.4);
-    const lLen = Math.hypot(lightDir[0], lightDir[1], lightDir[2]) || 1;
-    const normal = item.plan!.normal;
-    const directScale = lightIntensity * Math.max(
-      0,
-      normal[0] * (lightDir[0] / lLen) +
-      normal[1] * (lightDir[1] / lLen) +
-      normal[2] * (lightDir[2] / lLen),
-    );
-    return shadePolygon(
-      polygon.color ?? "#cccccc",
-      directScale,
-      lightColor,
-      ambientColor,
-      ambientIntensity,
-    );
-  }
-
   function needsBakedAtlasCommit(item: RenderedPoly): boolean {
     return item.kind === "atlas" || !!item.plan?.texture;
   }
@@ -1502,13 +1500,7 @@ export function createPolyScene(
         updated = true;
         continue;
       }
-      for (const item of entry.rendered) {
-        if (!item.plan || item.kind === "atlas" || item.plan.texture) continue;
-        const polygon = entry.polygons[item.polygonIndex];
-        if (!polygon) continue;
-        const color = bakedSolidColorForPlan(item, polygon);
-        updated = applyBakedSolidPreviewPaint(item, polygon, color) || updated;
-      }
+      updated = restoreBakedSolidPaint(entry) || updated;
     }
     sceneEl.style.removeProperty(BAKED_SOLID_PREVIEW_ACTIVE_VAR);
     for (const entry of meshes) {
@@ -1523,8 +1515,8 @@ export function createPolyScene(
     sceneEl.style.removeProperty(BAKED_SOLID_PREVIEW_ACTIVE_VAR);
     for (const entry of meshes) {
       if (!entry.solidLightingPreviewActive) continue;
+      restoreBakedSolidPaint(entry);
       clearLightingVars(entry.wrapper);
-      entry.solidLightingPreviewActive = false;
     }
     if ((currentOptions.textureLighting ?? "baked") !== "dynamic") {
       clearLightingVars(sceneEl);
