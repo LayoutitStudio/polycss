@@ -47,6 +47,16 @@ const ANIMATION_STABLE_TRIANGLE_COLOR_POLICY = "cadence";
 const ANIMATION_STABLE_TRIANGLE_COLOR_FREEZE_FRAMES = 0;
 const ANIMATION_TRANSFORM_CACHE_FRAMES = 60;
 
+// Transitional compat: the polycss vanilla camera was updated to interpret
+// `zoom` as "px per world unit" (Three.js convention) rather than a raw CSS
+// scale factor. The shared workbench presets / sceneOptions still carry
+// CSS-scale-tuned values that ALSO drive the React renderer (which keeps the
+// old semantic until the parity refactor is mirrored there). Multiply by 50
+// going into the vanilla camera and divide on the way back out so both
+// renderers can keep reading from the same `sceneOptions.zoom` field.
+// Remove once @layoutit/polycss-react has been mirrored.
+const LEGACY_ZOOM_COMPAT = 50;
+
 interface StableTriangleTransformFrameItem {
   transform: string;
   visibility: string;
@@ -374,7 +384,7 @@ export function VanillaScene({
     camera.update({
       rotX: nextOptions.rotX,
       rotY: nextOptions.rotY,
-      zoom: nextOptions.zoom,
+      zoom: nextOptions.zoom * LEGACY_ZOOM_COMPAT,
       target: nextOptions.target as Vec3,
     });
     scene.applyCamera();
@@ -417,7 +427,7 @@ export function VanillaScene({
     const cameraOpts = {
       rotX: options.rotX,
       rotY: options.rotY,
-      zoom: options.zoom,
+      zoom: options.zoom * LEGACY_ZOOM_COMPAT,
       target: options.target as Vec3 | undefined,
     };
     const perspective = options.dragMode === "fpv" ? FPV_PERSPECTIVE : options.perspective;
@@ -820,7 +830,7 @@ export function VanillaScene({
     camera.update({
       rotX: options.rotX,
       rotY: options.rotY,
-      zoom: options.zoom,
+      zoom: options.zoom * LEGACY_ZOOM_COMPAT,
       target: options.target as Vec3,
     });
     scene.applyCamera();
@@ -908,7 +918,8 @@ export function VanillaScene({
           : false as const,
       });
       controls.addEventListener("end", ((e: { camera: { rotX: number; rotY: number; zoom: number; target?: ReactVec3 } }) => {
-        onCameraChangeRef.current?.(e.camera);
+        // Convert back to legacy CSS-scale zoom on the way out — see LEGACY_ZOOM_COMPAT.
+        onCameraChangeRef.current?.({ ...e.camera, zoom: e.camera.zoom / LEGACY_ZOOM_COMPAT });
       }) as any);
       return controls;
     };
