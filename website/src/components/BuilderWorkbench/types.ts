@@ -35,7 +35,7 @@ export interface PlacedItem {
   worldY: number;
 }
 
-/** Transient state while the user is hovering a preset over the floor. */
+/** Transient state while the user is positioning a preset over the floor. */
 export interface PlacementDraft {
   preset: PresetModel;
   rawPolygons: Polygon[];

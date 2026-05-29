@@ -53,7 +53,7 @@ All solid/atlas tags work in both modes. The `.vox` direct-matrix fast path is b
 ### Meshing implications (what generators must respect)
 
 - **Polygon count is the dominant cost.** Each polygon is one DOM node, one `matrix3d`, one paint. Halving the polygon count is almost always worth a more complex mesher.
-- **Lossy optimization includes bounded seam repair.** The default `"lossy"` path merges compatible polygons, then repairs high-risk seams with targeted overlap and a small split budget. This can add a few triangles back when it prevents visible cracks; the goal is lower visible seam risk, not a strict guarantee that lossy always has fewer polygons than lossless.
+- **Lossy optimization favors low DOM render cost.** The default `"lossy"` path scores exact and approximate merge candidates by estimated render cost and keeps the cheapest direct candidate. It can also try a more aggressive triangle-pair merge candidate inside the same boundary displacement budget, but accepts it only when the render-cost win is material and whole-mesh seam diagnostics do not get worse. It avoids per-candidate seam-repair passes in the import path; targeted seam repair remains a lower-level helper for explicit repair workflows.
 - **Fill ratio matters.** A textured polygon's atlas slice equals its local-2D bounding rect. Empty space inside that slice is wasted bitmap pixels. Prefer shapes with high `area / boundingRect.area`:
   - axis-aligned rectangle = 1.0 (and hits the fastest path)
   - right-isosceles triangle = 0.5

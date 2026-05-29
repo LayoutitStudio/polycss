@@ -21,6 +21,13 @@
   background: #05070b;
 }
 
+.dn-root:not(.dn-root--gallery) .lil-gui.root {
+  border-color: #252b36;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
 .builder-tool-ribbon {
   position: absolute;
   top: var(--overlay-top);
@@ -31,9 +38,9 @@
   gap: 4px;
   padding: 4px;
   border-radius: 8px;
-  background: rgba(17, 20, 26, 0.98);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  box-shadow: 0 14px 38px rgba(0, 0, 0, 0.35);
+  background: #11141a;
+  border: 1px solid #252b36;
+  box-shadow: none;
 }
 
 .builder-tool-ribbon__button {
@@ -41,8 +48,8 @@
   min-width: 64px;
   border: 0;
   border-radius: 5px;
-  background: transparent;
-  color: rgba(232, 237, 242, 0.72);
+  background: #11141a;
+  color: #b8c1ca;
   cursor: pointer;
   display: inline-flex;
   align-items: center;
@@ -52,11 +59,6 @@
   font-size: 12px;
   font-weight: 750;
   padding: 0 10px;
-}
-
-.builder-tool-ribbon__button:hover {
-  color: #e8edf2;
-  background: rgba(255, 255, 255, 0.05);
 }
 
 .builder-tool-ribbon__button.is-active {
@@ -72,7 +74,7 @@
   width: 1px;
   height: 20px;
   margin: 0 2px;
-  background: rgba(255, 255, 255, 0.1);
+  background: #2a3039;
 }
 
 .builder-tool-ribbon__icon {
@@ -102,8 +104,9 @@
   overflow: clip;
   z-index: 15;
   background: #11141a;
+  border: 1px solid #252b36;
   border-radius: 8px;
-  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.45);
+  box-shadow: none;
   transform: translateZ(0);
   backface-visibility: hidden;
   -webkit-backface-visibility: hidden;
@@ -157,7 +160,7 @@
   justify-items: center;
   gap: 6px;
   padding: 8px 6px;
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  border: 1px solid #202938;
   border-radius: 8px;
   background: #0b0f18;
   color: #e2e8f0;
@@ -165,32 +168,24 @@
   cursor: pointer;
 }
 
-.shape-picker__item:hover:not(:disabled) {
-  background: #131a26;
-  border-color: rgba(125, 211, 252, 0.22);
-}
-
 .shape-picker__item.is-active {
   background: #142033;
-  border-color: rgba(34, 211, 238, 0.62);
+  border-color: #22d3ee;
 }
 
 .shape-picker__item:disabled {
   cursor: wait;
-  opacity: 0.58;
+  color: #7f8b97;
+  background: #0b0f18;
 }
 
 .shape-picker__item.is-active:disabled {
-  opacity: 1;
+  color: #e2e8f0;
 }
 
 .shape-picker__item--import {
   border-style: dashed;
   background: #0d121b;
-}
-
-.shape-picker__item--import:hover {
-  background: #141c29;
 }
 
 .shape-picker__thumb {
@@ -242,11 +237,11 @@
   justify-content: space-between;
   gap: 10px;
   padding: 8px 2px 0;
-  border-top: 1px solid rgba(255, 255, 255, 0.07);
+  border-top: 1px solid #252b36;
 }
 
 .shape-picker__surface-label {
-  color: rgba(226, 232, 240, 0.74);
+  color: #b6c0cb;
   font-size: 12px;
   font-weight: 700;
   line-height: 1;
@@ -259,9 +254,9 @@
   align-items: center;
   justify-content: center;
   gap: 6px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid #28313d;
   border-radius: 5px;
-  background: rgba(255, 255, 255, 0.04);
+  background: #171c24;
   color: #e8edf2;
   cursor: pointer;
   font: inherit;
@@ -270,17 +265,13 @@
   padding: 0 9px;
 }
 
-.shape-picker__surface-button:hover {
-  background: rgba(255, 255, 255, 0.07);
-}
-
 .shape-picker__surface-swatch {
   width: 13px;
   height: 13px;
   box-sizing: border-box;
   border-radius: 3px;
-  border: 1px solid rgba(255, 255, 255, 0.22);
-  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.18);
+  border: 1px solid #475363;
+  box-shadow: none;
 }
 
 .shape-picker__surface-swatch.is-gray {
@@ -301,40 +292,30 @@
   align-items: center;
   gap: 4px;
   padding: 4px;
-  background: rgba(17, 19, 22, 0.85);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: #111316;
+  border: 1px solid #252b36;
   border-radius: 999px;
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
   user-select: none;
   z-index: 5;
 }
 .builder-tool-palette__btn {
   appearance: none;
   border: 0;
-  background: transparent;
-  color: rgba(220, 224, 232, 0.6);
+  background: #111316;
+  color: #8c98a6;
   padding: 4px 12px;
   font: inherit;
   font-size: 12px;
   border-radius: 999px;
   cursor: pointer;
-  transition: background-color 120ms ease-out, color 120ms ease-out;
-}
-.builder-tool-palette__btn:hover {
-  color: rgba(220, 224, 232, 0.9);
-  background: rgba(255, 255, 255, 0.04);
 }
 .builder-tool-palette__btn.is-active {
   color: #0a0b0d;
-  background: rgba(34, 211, 238, 0.9);
-}
-.builder-tool-palette__btn.is-active:hover {
-  background: rgba(34, 211, 238, 1);
+  background: #22d3ee;
 }
 
 /* Target-mode pill — sits below the tool palette so the two pills
-   read as a paired toolbar. Same glass treatment as the rest. */
+   read as a paired toolbar. */
 .builder-target-mode {
   position: absolute;
   left: 50%;
@@ -344,36 +325,26 @@
   align-items: center;
   gap: 4px;
   padding: 4px;
-  background: rgba(17, 19, 22, 0.85);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: #111316;
+  border: 1px solid #252b36;
   border-radius: 999px;
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
   user-select: none;
   z-index: 5;
 }
 .builder-target-mode__btn {
   appearance: none;
   border: 0;
-  background: transparent;
-  color: rgba(220, 224, 232, 0.6);
+  background: #111316;
+  color: #8c98a6;
   padding: 3px 10px;
   font: inherit;
   font-size: 11px;
   border-radius: 999px;
   cursor: pointer;
-  transition: background-color 120ms ease-out, color 120ms ease-out;
-}
-.builder-target-mode__btn:hover {
-  color: rgba(220, 224, 232, 0.9);
-  background: rgba(255, 255, 255, 0.04);
 }
 .builder-target-mode__btn.is-active {
   color: #0a0b0d;
-  background: rgba(34, 211, 238, 0.9);
-}
-.builder-target-mode__btn.is-active:hover {
-  background: rgba(34, 211, 238, 1);
+  background: #22d3ee;
 }
 
 /* Floating camera-mode pill — bottom-centre of the builder viewport.
@@ -387,68 +358,45 @@
   align-items: center;
   gap: 4px;
   padding: 4px;
-  background: rgba(17, 19, 22, 0.85);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: #111316;
+  border: 1px solid #252b36;
   border-radius: 999px;
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
   user-select: none;
   z-index: 5;
 }
 .builder-camera-mode__btn {
   appearance: none;
   border: 0;
-  background: transparent;
-  color: rgba(220, 224, 232, 0.6);
+  background: #111316;
+  color: #8c98a6;
   padding: 4px 12px;
   font: inherit;
   font-size: 12px;
   border-radius: 999px;
   cursor: pointer;
-  transition: background-color 120ms ease-out, color 120ms ease-out;
-}
-.builder-camera-mode__btn:hover {
-  color: rgba(220, 224, 232, 0.9);
-  background: rgba(255, 255, 255, 0.04);
 }
 .builder-camera-mode__btn.is-active {
   color: #0a0b0d;
-  background: rgba(34, 211, 238, 0.9);
-}
-.builder-camera-mode__btn.is-active:hover {
-  background: rgba(34, 211, 238, 1);
+  background: #22d3ee;
 }
 .builder-camera-mode__hint {
-  color: rgba(220, 224, 232, 0.4);
+  color: #707b87;
   font-size: 11px;
   padding: 0 10px 0 6px;
-  border-left: 1px solid rgba(255, 255, 255, 0.08);
+  border-left: 1px solid #2a3039;
   margin-left: 2px;
 }
 
-/* Terrain hover preview — translucent cyan tile over the cell the next
-   click will modify. Same opacity caveat as `.builder-ghost`: alpha
-   lives in the polygon's color (rgba), never on a CSS wrapper. */
-.builder-terrain-hover {
-  pointer-events: none;
-}
 .builder-ground-fill,
-.builder-ground-fill *,
-.builder-add-hover,
-.builder-add-hover * {
+.builder-ground-fill * {
   pointer-events: none;
 }
 .builder-terrain {
   pointer-events: none;
 }
 
-/* Ghost mesh — rendered during placement hover.
-   IMPORTANT: do NOT set `opacity` on this element. CSS opacity creates
-   a flattened stacking context that breaks transform-style: preserve-3d
-   on all descendants — every polygon collapses into the XY plane and
-   you only see the bottom face of the bbox. Bake transparency into the
-   polygon color (rgba in GHOST_COLOR) instead. Same trap that's
-   documented at the top of PolyTransformControls.tsx. */
+/* Ghost mesh — rendered during placement preview. Do not set CSS opacity
+   on this element; it flattens the 3D context. */
 .builder-ghost,
 .builder-selection-wireframe {
   pointer-events: none;
@@ -514,7 +462,7 @@
   padding: 4px 12px 6px;
   font-size: 11px;
   font-style: italic;
-  color: rgba(232, 237, 242, 0.45);
+  color: #7b8794;
 }
 
 .builder-scene-folder__list {
@@ -536,12 +484,8 @@
   position: relative;
 }
 
-.builder-scene-folder__row:hover {
-  background: rgba(255, 255, 255, 0.04);
-}
-
 .builder-scene-folder__row.is-selected {
-  background: rgba(34, 211, 238, 0.12);
+  background: #12343c;
 }
 
 /* lil-gui forces `.lil-gui button { width: 100% }`, which throws off the
@@ -584,18 +528,13 @@
   width: 18px;
   height: 18px;
   border: 0;
-  background: transparent;
-  color: rgba(232, 237, 242, 0.45);
+  background: #11141a;
+  color: #7b8794;
   border-radius: 3px;
   cursor: pointer;
   font-size: 14px;
   line-height: 1;
   padding: 0;
-}
-
-.dn-scene-folder-content .builder-scene-folder__remove:hover {
-  background: rgba(220, 50, 50, 0.6);
-  color: #fff;
 }
 
 .builder-mesh-panel {
@@ -604,9 +543,9 @@
   box-sizing: border-box;
   padding: 10px;
   border-radius: 8px;
-  background: rgba(17, 20, 26, 0.98);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.35);
+  background: #11141a;
+  border: 1px solid #252b36;
+  box-shadow: none;
   color: #e8edf2;
 }
 
@@ -632,7 +571,7 @@
 
 .builder-mesh-panel__name {
   margin: 0;
-  color: rgba(232, 237, 242, 0.58);
+  color: #9aa5b1;
   font-size: 11px;
   line-height: 1.2;
   overflow: hidden;
@@ -648,22 +587,17 @@
   place-items: center;
   border: 0;
   border-radius: 4px;
-  background: rgba(255, 255, 255, 0.04);
-  color: rgba(232, 237, 242, 0.64);
+  background: #171c24;
+  color: #b8c1ca;
   cursor: pointer;
   font-size: 17px;
   line-height: 1;
   padding: 0;
 }
 
-.builder-mesh-panel__delete:hover {
-  background: rgba(220, 50, 50, 0.65);
-  color: #fff;
-}
-
 .builder-mesh-panel__field {
   padding: 9px 0;
-  border-top: 1px solid rgba(255, 255, 255, 0.07);
+  border-top: 1px solid #252b36;
 }
 
 .builder-mesh-panel__field-row {
@@ -675,7 +609,7 @@
 }
 
 .builder-mesh-panel__label {
-  color: rgba(232, 237, 242, 0.72);
+  color: #b8c1ca;
   font-size: 11px;
   font-weight: 650;
   line-height: 1;
@@ -685,7 +619,7 @@
   width: 74px;
   height: 26px;
   box-sizing: border-box;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid #28313d;
   border-radius: 4px;
   background: #090b10;
   color: #e8edf2;
@@ -694,7 +628,7 @@
 }
 
 .builder-mesh-panel__number:focus {
-  outline: 1px solid rgba(34, 211, 238, 0.55);
+  outline: 1px solid #22d3ee;
   outline-offset: 0;
 }
 
@@ -702,7 +636,7 @@
   width: 42px;
   height: 28px;
   box-sizing: border-box;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid #28313d;
   border-radius: 4px;
   background: #090b10;
   cursor: pointer;
@@ -722,7 +656,7 @@
   width: 82px;
   height: 28px;
   box-sizing: border-box;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid #28313d;
   border-radius: 4px;
   background: #090b10;
   color: #e8edf2;
@@ -732,7 +666,7 @@
 }
 
 .builder-mesh-panel__color-text:focus {
-  outline: 1px solid rgba(34, 211, 238, 0.55);
+  outline: 1px solid #22d3ee;
   outline-offset: 0;
 }
 
@@ -754,7 +688,7 @@
   height: 26px;
   border: 0;
   border-radius: 4px;
-  background: rgba(34, 211, 238, 0.14);
+  background: #12343c;
   color: #dffbff;
   cursor: pointer;
   font-size: 15px;
@@ -762,13 +696,10 @@
   padding: 0;
 }
 
-.builder-mesh-panel__stepper button:hover:not(:disabled) {
-  background: rgba(34, 211, 238, 0.24);
-}
-
 .builder-mesh-panel__stepper button:disabled {
   cursor: not-allowed;
-  opacity: 0.38;
+  background: #1a2029;
+  color: #6e7985;
 }
 
 .builder-mesh-panel__stepper output {

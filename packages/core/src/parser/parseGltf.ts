@@ -69,7 +69,7 @@ export interface GltfParseOptions {
    * (`doc.images[i].uri = "Textures/foo.png"`) against the GLB/glTF's
    * location. Without this, relative URIs would resolve against the page,
    * which 404s. Pass the same URL you fetched the file from.
-   */
+  */
   baseUrl?: string;
 }
 
@@ -196,7 +196,7 @@ interface GltfAnimationChannel {
   sampler: number;
   target: {
     node?: number;
-    path?: "translation" | "rotation" | "scale" | "weights" | string;
+    path?: "translation" | "rotation" | "scale" | string;
   };
 }
 interface GltfAnimation {
@@ -947,7 +947,6 @@ function buildAnimationController(
     joints: skin.joints ?? [],
     inverseBindMatrices: readMat4Array(doc, buffers, skin.inverseBindMatrices, skin.joints?.length ?? 0),
   }));
-
   const runtimeClips: RuntimeAnimationClip[] = [];
   for (let i = 0; i < animations.length; i++) {
     const animation = animations[i];
@@ -967,7 +966,8 @@ function buildAnimationController(
       const targetNode = channel.target.node;
       const path = channel.target.path;
       const sampler = runtimeSamplers[channel.sampler];
-      if (targetNode === undefined || !path || !sampler || path === "weights") continue;
+      if (targetNode === undefined || !path || !sampler) continue;
+      if (path !== "translation" && path !== "rotation" && path !== "scale") continue;
       channels.push({ sampler, targetNode, path });
     }
     const duration = channels.reduce((max, channel) => {
@@ -1068,7 +1068,10 @@ function buildAnimationController(
       skin.joints.map(() => new Array(16) as Mat4)
     );
 
-    const sampleWorldMatrices = (clipRef: number | string, timeSecondsIn: number): Mat4[] | null => {
+    const sampleWorldMatrices = (
+      clipRef: number | string,
+      timeSecondsIn: number,
+    ): Mat4[] | null => {
       const clip = typeof clipRef === "number"
         ? runtimeClips[clipRef]
         : runtimeClips.find((candidate) => candidate.info.name === clipRef);
@@ -1238,7 +1241,12 @@ function buildAnimationController(
         const source = sources[sourceIndex]!;
         const sourceMask = sourceMaskOverrides?.[sourceIndex];
         const triangleMask = sourceMask?.triangleMask ?? source.triangleMask;
-        const worldPositions = computeSourceWorldPositions(sourceIndex, source, sourceMask, worldMatrices);
+        const worldPositions = computeSourceWorldPositions(
+          sourceIndex,
+          source,
+          sourceMask,
+          worldMatrices,
+        );
 
         let triangleOrdinal = 0;
         for (let i = 0; i + 2 < source.indices.length; i += 3, triangleOrdinal++) {
@@ -1298,7 +1306,12 @@ function buildAnimationController(
         const source = sources[sourceIndex]!;
         const sourceMask = sourceMaskOverrides?.[sourceIndex];
         const triangleMask = sourceMask?.triangleMask ?? source.triangleMask;
-        const worldPositions = computeSourceWorldPositions(sourceIndex, source, sourceMask, worldMatrices);
+        const worldPositions = computeSourceWorldPositions(
+          sourceIndex,
+          source,
+          sourceMask,
+          worldMatrices,
+        );
 
         let triangleOrdinal = 0;
         for (let i = 0; i + 2 < source.indices.length; i += 3, triangleOrdinal++) {

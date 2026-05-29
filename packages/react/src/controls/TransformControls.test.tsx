@@ -137,25 +137,28 @@ describe("<PolyTransformControls>", () => {
     expect(arrows.map(axisKeyOf)).toEqual(["y", "-y"]);
   });
 
-  it("pointer down on a beam fires onMouseDown + onDraggingChanged(true); up fires onMouseUp + (false)", () => {
+  it("translate drag emits lifecycle events, updates position, and does not rebake", () => {
     withFakeLayout(2, () => {
       const onMouseDown = vi.fn();
       const onMouseUp = vi.fn();
       const onDraggingChanged = vi.fn();
+      const onObjectChange = vi.fn();
       const ref = createRef<PolyMeshHandle>();
       const container = mount(
         <PolyCamera>
           <PolyScene>
-            <PolyMesh ref={ref} polygons={[TRIANGLE]} />
+            <PolyMesh ref={ref} polygons={[TRIANGLE]} position={[100, 200, 0]} />
             <PolyTransformControls
               object={ref}
               onMouseDown={onMouseDown}
               onMouseUp={onMouseUp}
               onDraggingChanged={onDraggingChanged}
+              onObjectChange={onObjectChange}
             />
           </PolyScene>
         </PolyCamera>,
       );
+      const rebakeSpy = vi.spyOn(ref.current!, "rebakeAtlas");
       const xBeam = container.querySelector('.polycss-transform-arrow--x') as HTMLElement;
       act(() => {
         xBeam.dispatchEvent(
@@ -165,41 +168,17 @@ describe("<PolyTransformControls>", () => {
       expect(onMouseDown).toHaveBeenCalledOnce();
       expect(onDraggingChanged).toHaveBeenLastCalledWith(true);
       act(() => {
+        window.dispatchEvent(new PointerEvent("pointermove", { clientX: 10, clientY: 0, pointerId: 1 }));
+      });
+      expect(onObjectChange).toHaveBeenCalledOnce();
+      expect(onObjectChange.mock.calls[0][0].position).toEqual([105, 200, 0]);
+      expect(onObjectChange.mock.calls[0][0].object).toBe(ref.current);
+      act(() => {
         window.dispatchEvent(new PointerEvent("pointerup", { clientX: 10, clientY: 0, pointerId: 1 }));
       });
       expect(onMouseUp).toHaveBeenCalledOnce();
       expect(onDraggingChanged).toHaveBeenLastCalledWith(false);
-    });
-  });
-
-  it("dragging projects pointer screen-delta onto the X axis (newPos = startPos + t * X)", () => {
-    withFakeLayout(2, () => {
-      const onObjectChange = vi.fn();
-      const ref = createRef<PolyMeshHandle>();
-      const container = mount(
-        <PolyCamera>
-          <PolyScene>
-            <PolyMesh ref={ref} polygons={[TRIANGLE]} position={[100, 200, 0]} />
-            <PolyTransformControls object={ref} onObjectChange={onObjectChange} />
-          </PolyScene>
-        </PolyCamera>,
-      );
-      const xBeam = container.querySelector('.polycss-transform-arrow--x') as HTMLElement;
-      act(() => {
-        xBeam.dispatchEvent(
-          new PointerEvent("pointerdown", { bubbles: true, clientX: 0, clientY: 0, pointerId: 1 }),
-        );
-      });
-      // Camera scale 2, axis [1,0,0], so screen-axis = (2, 0), |s|² = 4.
-      // Pointer delta (10, 0) → t = (10*2 + 0*0)/4 = 5.
-      // newPos = [100,200,0] + 5*[1,0,0] = [105,200,0].
-      act(() => {
-        window.dispatchEvent(new PointerEvent("pointermove", { clientX: 10, clientY: 0, pointerId: 1 }));
-      });
-      expect(onObjectChange).toHaveBeenCalledOnce();
-      const event = onObjectChange.mock.calls[0][0];
-      expect(event.position).toEqual([105, 200, 0]);
-      expect(event.object).toBe(ref.current);
+      expect(rebakeSpy).not.toHaveBeenCalled();
     });
   });
 
@@ -413,19 +392,27 @@ describe("<PolyTransformControls>", () => {
     });
   });
 
-  it("rotate Y ring pointerdown fires onMouseDown and drag changes rotation[1]", () => {
+  it("rotate drag emits lifecycle events, updates rotation, and rebakes on release", () => {
     withFakeLayout(2, () => {
       const onObjectChange = vi.fn();
       const onMouseDown = vi.fn();
+      const onDraggingChanged = vi.fn();
       const ref = createRef<PolyMeshHandle>();
       const container = mount(
         <PolyCamera>
           <PolyScene>
             <PolyMesh ref={ref} polygons={[TRIANGLE]} rotation={[0, 0, 0]} />
-            <PolyTransformControls object={ref} mode="rotate" onObjectChange={onObjectChange} onMouseDown={onMouseDown} />
+            <PolyTransformControls
+              object={ref}
+              mode="rotate"
+              onObjectChange={onObjectChange}
+              onMouseDown={onMouseDown}
+              onDraggingChanged={onDraggingChanged}
+            />
           </PolyScene>
         </PolyCamera>,
       );
+      const rebakeSpy = vi.spyOn(ref.current!, "rebakeAtlas");
       const yRing = container.querySelector('.polycss-transform-ring--y') as HTMLElement;
       expect(yRing).not.toBeNull();
       // The ring is a single quad masked to a donut via CSS; the JS hit-test
@@ -447,17 +434,20 @@ describe("<PolyTransformControls>", () => {
       });
       leaf.getBoundingClientRect = origLeafRect;
       expect(onMouseDown).toHaveBeenCalledOnce();
+      expect(onDraggingChanged).toHaveBeenLastCalledWith(true);
       // Move pointer to accumulate angle change
       act(() => {
         window.dispatchEvent(new PointerEvent("pointermove", { clientX: 0, clientY: 100, pointerId: 1 }));
       });
-      if (onObjectChange.mock.calls.length > 0) {
-        expect(onObjectChange.mock.calls[0][0].rotation).toBeDefined();
-        expect(onObjectChange.mock.calls[0][0].rotation[1]).not.toBe(0);
-      }
+      expect(onObjectChange).toHaveBeenCalled();
+      expect(onObjectChange.mock.calls[0][0].rotation).toBeDefined();
+      expect(onObjectChange.mock.calls[0][0].rotation[1]).not.toBe(0);
+      expect(rebakeSpy).not.toHaveBeenCalled();
       act(() => {
         window.dispatchEvent(new PointerEvent("pointerup", { pointerId: 1 }));
       });
+      expect(onDraggingChanged).toHaveBeenLastCalledWith(false);
+      expect(rebakeSpy).toHaveBeenCalledOnce();
     });
   });
 
@@ -629,108 +619,4 @@ describe("<PolyTransformControls>", () => {
     });
   });
 
-  it("RotateRing.onPointerDown fires when enabled and finds the wrapper", () => {
-    withFakeLayout(2, () => {
-      const onMouseDown = vi.fn();
-      const onDraggingChanged = vi.fn();
-      const ref = createRef<PolyMeshHandle>();
-      const container = mount(
-        <PolyCamera>
-          <PolyScene>
-            <PolyMesh ref={ref} polygons={[TRIANGLE]} rotation={[0, 0, 0]} />
-            <PolyTransformControls
-              object={ref}
-              mode="rotate"
-              onMouseDown={onMouseDown}
-              onDraggingChanged={onDraggingChanged}
-            />
-          </PolyScene>
-        </PolyCamera>,
-      );
-      const xRing = container.querySelector('.polycss-transform-ring--x') as HTMLElement;
-      // Patch the leaf bbox so the click at (100, 0) is at the right edge of
-      // the bbox — passes the donut-shaped hit-test (clicks at the bbox
-      // center would land in the inner hole and be rejected).
-      const leaf = xRing.querySelector("i,b,s,u") as HTMLElement;
-      leaf.getBoundingClientRect = () => ({
-        left: 0, top: -50, right: 100, bottom: 50, width: 100, height: 100, x: 0, y: -50,
-        toJSON() { return this; },
-      } as DOMRect);
-      act(() => {
-        xRing.dispatchEvent(
-          new PointerEvent("pointerdown", { bubbles: true, clientX: 100, clientY: 0, pointerId: 1 }),
-        );
-      });
-      expect(onMouseDown).toHaveBeenCalledOnce();
-      expect(onDraggingChanged).toHaveBeenCalledWith(true);
-      act(() => {
-        window.dispatchEvent(new PointerEvent("pointerup", { clientX: 100, clientY: 0, pointerId: 1 }));
-      });
-      expect(onDraggingChanged).toHaveBeenCalledWith(false);
-    });
-  });
-
-  it("rotate-ring pointerdown→up calls rebakeAtlas() exactly once on the target mesh", () => {
-    withFakeLayout(2, () => {
-      const ref = createRef<PolyMeshHandle>();
-      const container = mount(
-        <PolyCamera>
-          <PolyScene>
-            <PolyMesh ref={ref} polygons={[TRIANGLE]} rotation={[0, 0, 0]} />
-            <PolyTransformControls object={ref} mode="rotate" />
-          </PolyScene>
-        </PolyCamera>,
-      );
-      // Spy on the handle's rebakeAtlas after mount.
-      const handle = ref.current!;
-      const rebakeSpy = vi.spyOn(handle, "rebakeAtlas");
-
-      const xRing = container.querySelector('.polycss-transform-ring--x') as HTMLElement;
-      // Patch the leaf bbox so click at (100, 0) hits the donut band.
-      const leaf = xRing.querySelector("i,b,s,u") as HTMLElement;
-      leaf.getBoundingClientRect = () => ({
-        left: 0, top: -50, right: 100, bottom: 50, width: 100, height: 100, x: 0, y: -50,
-        toJSON() { return this; },
-      } as DOMRect);
-      act(() => {
-        xRing.dispatchEvent(
-          new PointerEvent("pointerdown", { bubbles: true, clientX: 100, clientY: 0, pointerId: 1 }),
-        );
-      });
-      // Not called yet — only fires on release.
-      expect(rebakeSpy).not.toHaveBeenCalled();
-      act(() => {
-        window.dispatchEvent(new PointerEvent("pointerup", { clientX: 100, clientY: 0, pointerId: 1 }));
-      });
-      expect(rebakeSpy).toHaveBeenCalledOnce();
-    });
-  });
-
-  it("translate-mode drag (startAxisDrag) does NOT call rebakeAtlas()", () => {
-    withFakeLayout(2, () => {
-      const ref = createRef<PolyMeshHandle>();
-      const container = mount(
-        <PolyCamera>
-          <PolyScene>
-            <PolyMesh ref={ref} polygons={[TRIANGLE]} position={[0, 0, 0]} />
-            <PolyTransformControls object={ref} mode="translate" />
-          </PolyScene>
-        </PolyCamera>,
-      );
-      const handle = ref.current!;
-      const rebakeSpy = vi.spyOn(handle, "rebakeAtlas");
-
-      const xBeam = container.querySelector('.polycss-transform-arrow--x') as HTMLElement;
-      act(() => {
-        xBeam.dispatchEvent(
-          new PointerEvent("pointerdown", { bubbles: true, clientX: 0, clientY: 0, pointerId: 1 }),
-        );
-      });
-      act(() => {
-        window.dispatchEvent(new PointerEvent("pointerup", { clientX: 10, clientY: 0, pointerId: 1 }));
-      });
-      // Translation changes position, not normals — rebakeAtlas must not be called.
-      expect(rebakeSpy).not.toHaveBeenCalled();
-    });
-  });
 });

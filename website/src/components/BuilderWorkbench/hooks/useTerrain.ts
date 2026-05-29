@@ -2,10 +2,8 @@
  * Terrain editor state + viewport pointer capture.
  *
  * When `toolMode` is anything other than "pointer", the user is editing
- * the heightmap rather than placing meshes. We capture pointermove (to
- * update the hover ghost) and click (to apply the active tool) on the
- * viewport in CAPTURE phase so orbit drag / mesh selection don't
- * double-fire.
+ * the heightmap rather than placing meshes. We capture click on the
+ * viewport in CAPTURE phase so orbit drag / mesh selection don't double-fire.
  *
  * Heightmap is VERTEX-based: clicks snap to the nearest grid vertex
  * and raise / lower / smooth that vertex. The 4 cells touching the
@@ -13,17 +11,14 @@
  * surrounding terrain reads as a smooth warp instead of a stamped
  * box. See `geometry/terrain.ts` for the rendering model.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { Polygon } from "@layoutit/polycss-react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { SceneOptionsState } from "../../types";
 import type { TargetMode, ToolMode } from "../types";
 import { projectScreenToWorldGround } from "../geometry/screenToWorld";
 import {
-  buildHoverGhostPolygons,
   vertexKey,
   worldToCell,
   worldToVertex,
-  type HoverTarget,
   type TerrainVertices,
 } from "../geometry/terrain";
 
@@ -44,15 +39,14 @@ export interface UseTerrainResult {
    *  to build the warped grid, and by BuilderWorkbench shape placement
    *  to land meshes on top of the terrain with the local slope tilt. */
   vertices: TerrainVertices;
-  /** Polygons for the hover vertex marker (empty when not editing). */
-  hoverPolygons: Polygon[];
 }
+
+type TerrainEditTarget =
+  | { kind: "vertex"; i: number; j: number }
+  | { kind: "face"; i: number; j: number };
 
 export function useTerrain({ toolMode, targetMode, sceneOptions }: UseTerrainOptions): UseTerrainResult {
   const [vertices, setVertices] = useState<TerrainVertices>(() => new Map());
-  // Single hover target descriptor that captures vertex OR face — the
-  // hover-ghost builder picks the right rendering off this discriminator.
-  const [hoverTarget, setHoverTarget] = useState<HoverTarget | null>(null);
 
   // Pointerdown coords for drag-vs-click discrimination. Kept in a ref
   // so they survive useEffect re-runs (sceneOptions changes between
@@ -66,7 +60,7 @@ export function useTerrain({ toolMode, targetMode, sceneOptions }: UseTerrainOpt
   // mode) or all 4 corners of a face (face mode). Tiny residuals are
   // dropped so vertices returning to flat leave the sparse map.
   const applyTool = useCallback(
-    (target: HoverTarget): void => {
+    (target: TerrainEditTarget): void => {
       setVertices((prev) => {
         const next = new Map(prev);
 
@@ -121,10 +115,7 @@ export function useTerrain({ toolMode, targetMode, sceneOptions }: UseTerrainOpt
   // active. Capture phase + stopPropagation keeps the click out of
   // orbit drag / mesh selection.
   useEffect(() => {
-    if (toolMode === "pointer") {
-      setHoverTarget(null);
-      return;
-    }
+    if (toolMode === "pointer") return;
     const viewport = document.querySelector(".dn-viewport") as HTMLElement | null;
     const cameraEl = document.querySelector(".polycss-camera") as HTMLElement | null;
     if (!viewport || !cameraEl) return;
@@ -162,7 +153,7 @@ export function useTerrain({ toolMode, targetMode, sceneOptions }: UseTerrainOpt
       downRef.current = { x: e.clientX, y: e.clientY };
     };
 
-    const worldToTarget = (world: [number, number]): HoverTarget => {
+    const worldToTarget = (world: [number, number]): TerrainEditTarget => {
       if (targetMode === "face") {
         const [i, j] = worldToCell(world[0], world[1], cellSize);
         return { kind: "face", i, j };
@@ -171,15 +162,6 @@ export function useTerrain({ toolMode, targetMode, sceneOptions }: UseTerrainOpt
       return { kind: "vertex", i, j };
     };
 
-    const onMove = (e: PointerEvent) => {
-      if (isUiOverlay(e.target)) return;
-      const world = projectAt(e.clientX, e.clientY);
-      if (!world) return;
-      const next = worldToTarget(world);
-      setHoverTarget((prev) =>
-        prev && prev.kind === next.kind && prev.i === next.i && prev.j === next.j ? prev : next,
-      );
-    };
     const onClick = (e: MouseEvent) => {
       if (isUiOverlay(e.target)) return;
       const dx = e.clientX - downRef.current.x;
@@ -193,24 +175,14 @@ export function useTerrain({ toolMode, targetMode, sceneOptions }: UseTerrainOpt
       e.stopPropagation();
       applyTool(worldToTarget(world));
     };
-    const onLeave = () => setHoverTarget(null);
 
     viewport.addEventListener("pointerdown", onDown, true);
-    viewport.addEventListener("pointermove", onMove, true);
-    viewport.addEventListener("pointerleave", onLeave, true);
     viewport.addEventListener("click", onClick, true);
     return () => {
       viewport.removeEventListener("pointerdown", onDown, true);
-      viewport.removeEventListener("pointermove", onMove, true);
-      viewport.removeEventListener("pointerleave", onLeave, true);
       viewport.removeEventListener("click", onClick, true);
     };
   }, [toolMode, targetMode, sceneOptions, cellSize, applyTool]);
 
-  const hoverPolygons = useMemo(() => {
-    if (toolMode === "pointer" || !hoverTarget) return [];
-    return buildHoverGhostPolygons({ target: hoverTarget, cellSize, vertices });
-  }, [toolMode, hoverTarget, vertices, cellSize]);
-
-  return { vertices, hoverPolygons };
+  return { vertices };
 }

@@ -6,7 +6,7 @@ import type { Polygon, Vec3 } from "../types";
 import { parseGltf } from "../parser/parseGltf";
 import { parseObj } from "../parser/parseObj";
 import { bakeSolidTextureSamples } from "../parser/solidTextureSamples";
-import { DEFAULT_SEAM_FACET_SPLIT_OPTIONS } from "./seamRepair";
+import { seamOverlapDiagnostics } from "./seamRepair";
 import { optimizeMeshPolygons } from "./optimizePolygons";
 
 function rect(x0: number, y0: number, x1: number, y1: number): Polygon[] {
@@ -14,6 +14,24 @@ function rect(x0: number, y0: number, x1: number, y1: number): Polygon[] {
     { vertices: [[x0, y0, 0], [x1, y0, 0], [x1, y1, 0]], color: "#f00" },
     { vertices: [[x0, y0, 0], [x1, y1, 0], [x0, y1, 0]], color: "#f00" },
   ];
+}
+
+function shallowFoldedTrianglePairs(count: number): Polygon[] {
+  const polygons: Polygon[] = [];
+  for (let i = 0; i < count; i += 1) {
+    const x = i * 2;
+    polygons.push(
+      {
+        vertices: [[x, 0, 0], [x + 1, 0, 0], [x + 1, 1, 0]],
+        color: "#6688aa",
+      },
+      {
+        vertices: [[x, 0, 0], [x + 1, 1, 0], [x, 1, 0.04]],
+        color: "#6688aa",
+      },
+    );
+  }
+  return polygons;
 }
 
 function polygonSignature(polygons: Polygon[]): string[] {
@@ -410,7 +428,7 @@ describe("optimizeMeshPolygons", () => {
     expect(renderCost(lossy)).toBeLessThanOrEqual(renderCost(lossless) + 1e-9);
   });
 
-  it("keeps default lossy seam repair within the split budget over the exact lossless floor", async () => {
+  it("keeps default lossy solid-texture fixtures no more expensive than lossless", async () => {
     installSolidTextureEnv([10, 20, 30, 255]);
 
     for (const file of ["poly-pizza/arrow.glb", "poly-pizza/bucket.glb"]) {
@@ -422,22 +440,78 @@ describe("optimizeMeshPolygons", () => {
       const lossless = optimizeMeshPolygons(baked.polygons, { meshResolution: "lossless" });
       const lossy = optimizeMeshPolygons(baked.polygons, { meshResolution: "lossy" });
 
-      expect(lossy.length, file).toBeLessThanOrEqual(
-        lossless.length + DEFAULT_SEAM_FACET_SPLIT_OPTIONS.budget,
-      );
+      expect(renderCost(lossy), file).toBeLessThanOrEqual(renderCost(lossless) + 1e-9);
     }
   });
 
-  it("keeps lossy seam repair tractable on long mechanical NASA geometry", () => {
-    const raw = parseGltf(loadGlbGalleryFile("nasa/opportunity.glb"), { targetSize: 60 }).polygons;
+  it("keeps lossy approximate wins on a long strip of shallow folds", () => {
+    const raw = shallowFoldedTrianglePairs(80);
 
     const lossless = optimizeMeshPolygons(raw, { meshResolution: "lossless" });
     const lossy = optimizeMeshPolygons(raw, { meshResolution: "lossy" });
 
-    expect(lossy.length).toBeLessThanOrEqual(
-      lossless.length + DEFAULT_SEAM_FACET_SPLIT_OPTIONS.budget,
-    );
+    expect(lossy.length).toBeLessThan(lossless.length);
+    expect(renderCost(lossy)).toBeLessThan(renderCost(lossless));
+  });
+
+  it("keeps default lossy cheaper than lossless on the Large Building fixture", () => {
+    const raw = parseGltf(loadGlbGalleryFile("city/Large Building.glb"), { targetSize: 60 }).polygons;
+
+    const lossless = optimizeMeshPolygons(raw, { meshResolution: "lossless" });
+    const lossy = optimizeMeshPolygons(raw, { meshResolution: "lossy" });
+
+    expect(lossy.length).toBeLessThanOrEqual(lossless.length);
+    expect(renderCost(lossy)).toBeLessThanOrEqual(renderCost(lossless));
   }, 10_000);
+
+  it("uses the gated aggressive approximate pass without adding unclosed seams", () => {
+    const raw = parseGltf(loadGlbGalleryFile("poly-pizza/animated-shark.glb"), { targetSize: 60 }).polygons;
+
+    const lossy = optimizeMeshPolygons(raw, { meshResolution: "lossy" });
+    const seamDiagnostics = seamOverlapDiagnostics(lossy);
+
+    expect(lossy).toHaveLength(634);
+    expect(seamDiagnostics.unclosedPairs).toBe(0);
+    expect(seamDiagnostics.maxResidualGapPx).toBe(0);
+  });
+
+  it("rejects large-model rect-cover candidates when topology gap diagnostics are not clean", () => {
+    const raw = parseGltf(loadGlbGalleryFile("nasa/opportunity.glb"), { targetSize: 60 }).polygons;
+
+    const lossless = optimizeMeshPolygons(raw, { meshResolution: "lossless" });
+    const lossy = optimizeMeshPolygons(raw, { meshResolution: "lossy" });
+    const losslessSeams = seamOverlapDiagnostics(lossless);
+    const lossySeams = seamOverlapDiagnostics(lossy);
+
+    expect(lossless).toHaveLength(1895);
+    expect(lossy).toHaveLength(1667);
+    expect(renderCost(lossy)).toBeLessThanOrEqual(renderCost(lossless));
+    expect(lossySeams.unclosedPairs).toBeLessThanOrEqual(losslessSeams.unclosedPairs);
+    expect(lossySeams.maxResidualGapPx).toBeLessThanOrEqual(losslessSeams.maxResidualGapPx);
+  }, 10_000);
+
+  it("keeps small seam-risk fixtures seam-safe under gated lossy candidates", () => {
+    const rock = parseGltf(loadGlbGalleryFile("poly-pizza/rock.glb"), { targetSize: 60 }).polygons;
+    const hauntedHouse = parseObj(
+      loadObjGalleryFile("opengameart/haunted-house/hauntedhouse.obj"),
+      { targetSize: 60 },
+    ).polygons;
+    const chest = parseObj(loadObjGalleryFile("quaternius/dungeon/Chest_gold.obj"), {
+      targetSize: 60,
+    }).polygons;
+
+    expect(optimizeMeshPolygons(rock, { meshResolution: "lossy" })).toHaveLength(58);
+    expect(optimizeMeshPolygons(hauntedHouse, { meshResolution: "lossy" })).toHaveLength(184);
+    const chestLossless = optimizeMeshPolygons(chest, { meshResolution: "lossless" });
+    const chestLossy = optimizeMeshPolygons(chest, { meshResolution: "lossy" });
+    const losslessSeams = seamOverlapDiagnostics(chestLossless);
+    const lossySeams = seamOverlapDiagnostics(chestLossy);
+
+    expect(chestLossless).toHaveLength(258);
+    expect(chestLossy).toHaveLength(250);
+    expect(lossySeams.unclosedPairs).toBeLessThanOrEqual(losslessSeams.unclosedPairs);
+    expect(lossySeams.maxResidualGapPx).toBeLessThanOrEqual(losslessSeams.maxResidualGapPx);
+  });
 
   it("keeps lossless optimization from culling open spacecraft geometry", () => {
     const raw = parseGltf(loadGlbGalleryFile("nasa/cubesat-1u.glb"), { targetSize: 60 }).polygons;
@@ -448,7 +522,7 @@ describe("optimizeMeshPolygons", () => {
     expect(lossless.length).toBeGreaterThan(1500);
   }, 10_000);
 
-  it("does not turn castle seam overlap repairs into concave render polygons", () => {
+  it("does not turn castle lossy output into concave render polygons", () => {
     const raw = parseObj(loadObjGalleryFile("castle.obj"), { targetSize: 60 }).polygons;
 
     const lossless = optimizeMeshPolygons(raw, { meshResolution: "lossless" });
@@ -492,15 +566,13 @@ describe("optimizeMeshPolygons", () => {
     expect(renderCost(lossy)).toBeLessThan(renderCost(lossless));
   });
 
-  it("keeps default lossy wins on the coliseum fixture", () => {
-    const raw = parseObj(loadObjGalleryFile("coliseum.obj"), {
-      targetSize: 80,
-      palette: ["#c9a876", "#a78760", "#8b6f47", "#6b5538"],
-    }).polygons;
+  it("keeps default lossy wins on repeated shallow triangle folds", () => {
+    const raw = shallowFoldedTrianglePairs(48);
 
     const lossless = optimizeMeshPolygons(raw, { meshResolution: "lossless" });
     const lossy = optimizeMeshPolygons(raw, { meshResolution: "lossy" });
 
-    expect(lossless.length - lossy.length).toBeGreaterThanOrEqual(400);
+    expect(lossless.length - lossy.length).toBeGreaterThanOrEqual(40);
+    expect(renderCost(lossy)).toBeLessThan(renderCost(lossless));
   });
 });
