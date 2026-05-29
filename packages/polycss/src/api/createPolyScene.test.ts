@@ -426,11 +426,11 @@ describe("createPolyScene", () => {
       expect(styleEl?.textContent).toContain("transform-origin: 0 0");
       expect(styleEl?.textContent).toContain("backface-visibility: hidden");
       expect(styleEl?.textContent).toContain("background-repeat: no-repeat");
-      expect(styleEl?.textContent).toContain("width: 256px;");
-      expect(styleEl?.textContent).toContain("height: 256px;");
+      expect(styleEl?.textContent).toContain("width: 64px;");
+      expect(styleEl?.textContent).toContain("height: 64px;");
       expect(styleEl?.textContent).toContain("width: var(--polycss-atlas-size, 64px);");
       expect(styleEl?.textContent).toContain("height: var(--polycss-atlas-size, 64px);");
-      expect(styleEl?.textContent).toContain("border-width: 0 128px 256px 128px;");
+      expect(styleEl?.textContent).toContain("border-width: 0 16px 32px 16px;");
       expect(styleEl?.textContent).toContain("width: 0;");
       expect(styleEl?.textContent).toContain("height: 0;");
     });

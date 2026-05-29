@@ -36,7 +36,7 @@ import { applyPolygonDataAttrs, hasPolygonDataAttrs } from "./emit";
 import { resolveSolidTrianglePrimitive } from "./strategy";
 
 const DEFAULT_SOLID_SEAM_BLEED = 1.5;
-const SOLID_TRIANGLE_BORDER_WIDTH = "0 128px 256px 128px";
+const SOLID_TRIANGLE_BORDER_WIDTH = "0 48px 96px 48px";
 
 type RenderTextureAtlasOptionsWithSeams = RenderTextureAtlasOptions & {
   seamBleed?: number;

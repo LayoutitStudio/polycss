@@ -364,8 +364,8 @@ ${selectorList(features.solidLeafTags)} {
     parts.push(`
 .polycss-scene b {
   background: currentColor;
-  width: 256px;
-  height: 256px;
+  width: 64px;
+  height: 64px;
 }
 `);
   }
@@ -402,8 +402,8 @@ ${selectorList(features.solidLeafTags)} {
   if (features.leafTags.includes("i")) {
     parts.push(`
 .polycss-scene i {
-  width: 256px;
-  height: 256px;
+  width: 16px;
+  height: 16px;
   border-color: currentColor;
 }
 `);
@@ -427,7 +427,7 @@ ${selectorList(features.solidLeafTags)} {
   box-sizing: content-box;
   border: 0 solid transparent;
   border-color: transparent transparent currentColor transparent;
-  border-width: 0 128px 256px 128px;
+  border-width: 0 16px 32px 16px;
 }
 `);
   }
