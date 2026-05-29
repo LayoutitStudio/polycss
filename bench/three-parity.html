@@ -232,34 +232,54 @@
     floorMesh.receiveShadow = true;
     threeScene.add(floorMesh);
 
-    // Three.js convention: DirectionalLight.position is the light's world
-    // position (direction = position - target). The vector encodes direction;
-    // its MAGNITUDE matters because the shadow camera is placed AT this
-    // position. If it sits near the origin, the shadow camera's near plane
-    // cuts through the scene and the projected shadow is clipped. Scale the
-    // user direction out to a far position so the shadow camera sees the
-    // whole scene from "infinity" — what a parallel light should be.
-    const LIGHT_DIST = 100;
+    // PolyCSS projects shadows analytically onto the receiver — light
+    // direction is all that matters and there's no clipping limit. Three.js
+    // builds a shadow map from an orthographic camera placed AT
+    // `light.position`, so two things have to be sized to the scene:
+    //  - light.position must be far enough from the scene that the shadow
+    //    camera's near plane doesn't cut into geometry,
+    //  - shadow.camera.{left,right,top,bottom,far} must contain the
+    //    geometry's projection along the light vector (plus the shadow
+    //    extent across the receiver).
+    // We compute both from the scene bounding sphere after every mesh
+    // build/move, so the bench mirrors PolyCSS's "shadows just work" feel
+    // regardless of scene size.
     const dirLight = new THREE.DirectionalLight(0xffffff, S.dir.intensity);
-    dirLight.position.set(S.dir.x * LIGHT_DIST, S.dir.y * LIGHT_DIST, S.dir.z * LIGHT_DIST);
     dirLight.castShadow = true;
-    // Three.js DirectionalLight shadows are a shadow map sampled inside an
-    // orthographic frustum. Anything outside the frustum doesn't appear in
-    // the shadow texture, so the projected silhouette gets clipped when the
-    // light grazes the floor and the shadow stretches past the frustum
-    // edges. PolyCSS has no such limit (it CPU-projects onto the receiver).
-    // Picking the frustum big enough to cover the worst-case shadow extent
-    // for our scene scale (floor 20, light vector down to ~0.05 vertical):
-    // tallest caster ~3 units → max shadow length ~60 units → use ±100.
-    const SHADOW_R = 100;
-    dirLight.shadow.camera.left = -SHADOW_R;
-    dirLight.shadow.camera.right = SHADOW_R;
-    dirLight.shadow.camera.top = SHADOW_R;
-    dirLight.shadow.camera.bottom = -SHADOW_R;
     dirLight.shadow.camera.near = 0.1;
-    dirLight.shadow.camera.far = SHADOW_R * 4;
     dirLight.shadow.mapSize.set(2048, 2048);
     dirLight.shadow.bias = -0.0005;
+
+    function fitDirLightToScene() {
+      const bbox = new THREE.Box3();
+      threeScene.traverse((obj) => {
+        if (obj.isMesh && obj.geometry) bbox.expandByObject(obj);
+      });
+      if (bbox.isEmpty()) return;
+      const sphere = new THREE.Sphere();
+      bbox.getBoundingSphere(sphere);
+      // Pad for grazing light (shadow length ≈ radius / lightZ). Smallest
+      // safe assumption: shadow extends up to ~10× radius for very low
+      // dir.z. We cover with a 6× safety factor — bigger than typical
+      // grazing extent but stays well under shadow-map precision limits.
+      const r = Math.max(sphere.radius, 1);
+      const frustumR = r * 6;
+      const lightDist = r * 4;
+      const dx = S.dir.x, dy = S.dir.y, dz = S.dir.z;
+      const dlen = Math.hypot(dx, dy, dz) || 1;
+      dirLight.position.set(
+        sphere.center.x + (dx / dlen) * lightDist,
+        sphere.center.y + (dy / dlen) * lightDist,
+        sphere.center.z + (dz / dlen) * lightDist,
+      );
+      dirLight.target.position.copy(sphere.center);
+      dirLight.shadow.camera.left = -frustumR;
+      dirLight.shadow.camera.right = frustumR;
+      dirLight.shadow.camera.top = frustumR;
+      dirLight.shadow.camera.bottom = -frustumR;
+      dirLight.shadow.camera.far = lightDist * 3;
+      dirLight.shadow.camera.updateProjectionMatrix();
+    }
     threeScene.add(dirLight);
     threeScene.add(dirLight.target);
     const ambLight = new THREE.AmbientLight(0xffffff, S.amb.intensity);
@@ -316,7 +336,7 @@
         polyFloor.rebakeAtlas();
       }
       if (cubeMesh) cubeMesh.position.set(S.cube.x, S.cube.y, S.cube.z);
-      dirLight.position.set(S.dir.x * LIGHT_DIST, S.dir.y * LIGHT_DIST, S.dir.z * LIGHT_DIST);
+      fitDirLightToScene();
       dirLight.intensity = S.dir.intensity;
       ambLight.intensity = S.amb.intensity;
       renderer.render(threeScene, camera);
