@@ -305,7 +305,7 @@ interface LoadMeshOptions {
   voxOptions?: VoxParseOptions;
   /** Convert uniform texture-backed faces into solid-color polygons before optimization. */
   solidTextureSamples?: boolean | SolidTextureSampleOptions;
-  /** Shared mesh-resolution optimizer. Defaults to "lossy", including bounded seam repair. */
+  /** Shared mesh-resolution optimizer. Defaults to "lossy". */
   meshResolution?: "lossless" | "lossy";
 }
 ```

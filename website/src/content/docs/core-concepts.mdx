@@ -120,7 +120,7 @@ You normally do not target these tags directly; use `Poly`, `PolyMesh`, classes,
 
 ## Automatic Polygon Merge
 
-Before rendering, PolyCSS automatically optimizes loaded meshes. `meshResolution: "lossless"` keeps exact planar candidates only; the default `"lossy"` mode can merge near-coplanar candidates within a bounded displacement budget and then spend a small repair budget on high-risk seams. This keeps DOM element counts low for flat surfaces without changing the intended rendered shape.
+Before rendering, PolyCSS automatically optimizes loaded meshes. `meshResolution: "lossless"` keeps exact planar candidates only; the default `"lossy"` mode can also merge near-coplanar candidates within a bounded displacement budget, choosing the lowest estimated DOM render cost. Larger lossy candidates are accepted only when the DOM win is meaningful and whole-mesh seam diagnostics do not regress. This keeps DOM element counts low for flat surfaces without changing the intended rendered shape.
 
 Per-polygon DOM identity is preserved for polygons that cannot merge; polygons inside a merged flat region become one rendered element.
 

@@ -311,6 +311,34 @@ function distanceVec(a, b) {
   return Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
 }
 
+function subVec(a, b) {
+  return [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+}
+
+function dotVec(a, b) {
+  return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+}
+
+function makeSegment(key, a, b, index = -1) {
+  const delta = subVec(b, a);
+  const length = Math.hypot(delta[0], delta[1], delta[2]);
+  if (length <= 1e-10) return null;
+  return {
+    index,
+    key,
+    a,
+    b,
+    length,
+    dir: [delta[0] / length, delta[1] / length, delta[2] / length],
+    minX: Math.min(a[0], b[0]),
+    minY: Math.min(a[1], b[1]),
+    minZ: Math.min(a[2], b[2]),
+    maxX: Math.max(a[0], b[0]),
+    maxY: Math.max(a[1], b[1]),
+    maxZ: Math.max(a[2], b[2]),
+  };
+}
+
 function collectEdgeStats(polygons) {
   const edges = new Map();
   for (const polygon of polygons) {
@@ -320,7 +348,10 @@ function collectEdgeStats(polygons) {
       const key = edgeKey(a, b);
       const current = edges.get(key);
       if (current) current.count += 1;
-      else edges.set(key, { count: 1, a, b });
+      else {
+        const segment = makeSegment(key, a, b);
+        if (segment) edges.set(key, { count: 1, segment });
+      }
     }
   }
 
@@ -329,8 +360,10 @@ function collectEdgeStats(polygons) {
   const boundarySegments = [];
   const internalSegments = [];
   let boundaryLength = 0;
+  let index = 0;
   for (const [key, edge] of edges) {
-    const segment = { a: edge.a, b: edge.b };
+    const segment = { ...edge.segment, index };
+    index += 1;
     if (edge.count === 1) {
       boundaryKeys.add(key);
       boundarySegments.push(segment);
@@ -376,41 +409,141 @@ function cellKey(x, y, z) {
 }
 
 function buildSegmentIndex(segments, tolerance) {
-  const cellSize = Math.max(tolerance * 2, 1e-6);
+  const cellSize = Math.max(tolerance * 8, 0.5);
   const cells = new Map();
   for (const segment of segments) {
-    const [cx, cy, cz] = segmentCell(segment, cellSize);
-    const key = cellKey(cx, cy, cz);
-    const bucket = cells.get(key);
-    if (bucket) bucket.push(segment);
-    else cells.set(key, [segment]);
+    addSegmentToCells(cells, segment, cellSize, tolerance);
   }
   return { cellSize, cells };
 }
 
-function segmentEndpointGap(a, b) {
-  return Math.min(
-    Math.max(distanceVec(a.a, b.a), distanceVec(a.b, b.b)),
-    Math.max(distanceVec(a.a, b.b), distanceVec(a.b, b.a)),
+function addSegmentToCells(cells, segment, cellSize, padding) {
+  const [minX, minY, minZ] = cellCoords(
+    [segment.minX - padding, segment.minY - padding, segment.minZ - padding],
+    cellSize,
   );
+  const [maxX, maxY, maxZ] = cellCoords(
+    [segment.maxX + padding, segment.maxY + padding, segment.maxZ + padding],
+    cellSize,
+  );
+  for (let x = minX; x <= maxX; x++) {
+    for (let y = minY; y <= maxY; y++) {
+      for (let z = minZ; z <= maxZ; z++) {
+        const key = cellKey(x, y, z);
+        const bucket = cells.get(key);
+        if (bucket) bucket.push(segment);
+        else cells.set(key, [segment]);
+      }
+    }
+  }
 }
 
-function indexedInternalEdgeGap(segment, index, tolerance) {
-  const [cx, cy, cz] = segmentCell(segment, index.cellSize);
-  let best = null;
-  for (let dx = -1; dx <= 1; dx++) {
-    for (let dy = -1; dy <= 1; dy++) {
-      for (let dz = -1; dz <= 1; dz++) {
-        const bucket = index.cells.get(cellKey(cx + dx, cy + dy, cz + dz));
+function cellCoords(point, cellSize) {
+  return [
+    Math.floor(point[0] / cellSize),
+    Math.floor(point[1] / cellSize),
+    Math.floor(point[2] / cellSize),
+  ];
+}
+
+function indexedSegmentCandidates(segment, index, tolerance) {
+  const out = [];
+  const seen = new Set();
+  const [minX, minY, minZ] = cellCoords(
+    [segment.minX - tolerance, segment.minY - tolerance, segment.minZ - tolerance],
+    index.cellSize,
+  );
+  const [maxX, maxY, maxZ] = cellCoords(
+    [segment.maxX + tolerance, segment.maxY + tolerance, segment.maxZ + tolerance],
+    index.cellSize,
+  );
+  for (let x = minX; x <= maxX; x++) {
+    for (let y = minY; y <= maxY; y++) {
+      for (let z = minZ; z <= maxZ; z++) {
+        const bucket = index.cells.get(cellKey(x, y, z));
         if (!bucket) continue;
         for (const candidate of bucket) {
-          const gap = segmentEndpointGap(segment, candidate);
-          if (gap <= tolerance) best = best === null ? gap : Math.min(best, gap);
+          if (seen.has(candidate)) continue;
+          seen.add(candidate);
+          out.push(candidate);
         }
       }
     }
   }
+  return out;
+}
+
+function segmentBoundsOverlap(a, b, tolerance) {
+  return a.minX <= b.maxX + tolerance &&
+    b.minX <= a.maxX + tolerance &&
+    a.minY <= b.maxY + tolerance &&
+    b.minY <= a.maxY + tolerance &&
+    a.minZ <= b.maxZ + tolerance &&
+    b.minZ <= a.maxZ + tolerance;
+}
+
+function overlappingSegmentInfo(a, b, tolerance) {
+  if (!segmentBoundsOverlap(a, b, tolerance)) return null;
+  if (Math.abs(dotVec(a.dir, b.dir)) < 0.999) return null;
+  const bStart = dotVec(subVec(b.a, a.a), a.dir);
+  const bEnd = dotVec(subVec(b.b, a.a), a.dir);
+  const overlapStart = Math.max(0, Math.min(bStart, bEnd));
+  const overlapEnd = Math.min(a.length, Math.max(bStart, bEnd));
+  const overlapLength = overlapEnd - overlapStart;
+  if (overlapLength <= Math.max(1e-5, Math.min(a.length, b.length) * 1e-4)) return null;
+
+  const midT = (overlapStart + overlapEnd) / 2;
+  const mid = [
+    a.a[0] + a.dir[0] * midT,
+    a.a[1] + a.dir[1] * midT,
+    a.a[2] + a.dir[2] * midT,
+  ];
+  const projected = Math.max(0, Math.min(b.length, dotVec(subVec(mid, b.a), b.dir)));
+  const closest = [
+    b.a[0] + b.dir[0] * projected,
+    b.a[1] + b.dir[1] * projected,
+    b.a[2] + b.dir[2] * projected,
+  ];
+  const gap = distanceVec(mid, closest);
+  return gap <= tolerance ? { gap, overlapLength } : null;
+}
+
+function indexedInternalEdgeGap(segment, index, tolerance) {
+  let best = null;
+  for (const candidate of indexedSegmentCandidates(segment, index, tolerance)) {
+    const overlap = overlappingSegmentInfo(segment, candidate, tolerance);
+    if (!overlap) continue;
+    if (
+      best === null ||
+      overlap.overlapLength > best.overlapLength ||
+      (overlap.overlapLength === best.overlapLength && overlap.gap < best.gap)
+    ) {
+      best = overlap;
+    }
+  }
   return best;
+}
+
+function boundaryTJunctionMetrics(boundarySegments, tolerance) {
+  const index = buildSegmentIndex(boundarySegments, tolerance);
+  const seenPairs = new Set();
+  let pairs = 0;
+  let length = 0;
+  for (const segment of boundarySegments) {
+    for (const candidate of indexedSegmentCandidates(segment, index, tolerance)) {
+      if (candidate === segment || candidate.key === segment.key) continue;
+      const pairKey = segment.index < candidate.index
+        ? `${segment.index}:${candidate.index}`
+        : `${candidate.index}:${segment.index}`;
+      if (seenPairs.has(pairKey)) continue;
+      seenPairs.add(pairKey);
+      const overlap = overlappingSegmentInfo(segment, candidate, tolerance);
+      if (!overlap) continue;
+      pairs += 1;
+      length += overlap.overlapLength;
+    }
+  }
+  return { pairs, length };
 }
 
 function crackTolerances(polygons, maxBoundaryDisplacement = LOSSY_CRACK_DIAGNOSTIC_BOUNDARY) {
@@ -429,6 +562,8 @@ function crackMetrics(sourcePolygons, candidatePolygons, maxBoundaryDisplacement
   const metrics = {
     maxGap: 0,
     internalBoundaryLength: 0,
+    exactInternal: 0,
+    nearInternalLength: 0,
     excessBoundaryLength: Math.max(0, candidateEdges.boundaryLength - sourceEdges.boundaryLength),
     baseTolerance,
     tolerance,
@@ -437,25 +572,33 @@ function crackMetrics(sourcePolygons, candidatePolygons, maxBoundaryDisplacement
     over04: 0,
     over08: 0,
     over12: 0,
+    tJunctionPairs: 0,
+    tJunctionLength: 0,
   };
 
   for (const edge of candidateEdges.boundarySegments) {
     const key = edgeKey(edge.a, edge.b);
     if (sourceEdges.boundaryKeys.has(key)) continue;
     if (sourceEdges.internalKeys.has(key)) {
+      metrics.exactInternal += 1;
       metrics.nearInternal += 1;
-      metrics.internalBoundaryLength += distanceVec(edge.a, edge.b);
+      metrics.internalBoundaryLength += edge.length;
       continue;
     }
-    const gap = indexedInternalEdgeGap(edge, index, searchTolerance);
-    if (gap === null) continue;
+    const overlap = indexedInternalEdgeGap(edge, index, searchTolerance);
+    if (overlap === null) continue;
     metrics.nearInternal += 1;
-    metrics.maxGap = Math.max(metrics.maxGap, gap);
-    metrics.internalBoundaryLength += distanceVec(edge.a, edge.b);
-    if (gap > 0.04) metrics.over04 += 1;
-    if (gap > 0.08) metrics.over08 += 1;
-    if (gap > 0.12) metrics.over12 += 1;
+    metrics.maxGap = Math.max(metrics.maxGap, overlap.gap);
+    metrics.internalBoundaryLength += overlap.overlapLength;
+    metrics.nearInternalLength += overlap.overlapLength;
+    if (overlap.gap > 0.04) metrics.over04 += 1;
+    if (overlap.gap > 0.08) metrics.over08 += 1;
+    if (overlap.gap > 0.12) metrics.over12 += 1;
   }
+
+  const tJunctions = boundaryTJunctionMetrics(candidateEdges.boundarySegments, searchTolerance);
+  metrics.tJunctionPairs = tJunctions.pairs;
+  metrics.tJunctionLength = tJunctions.length;
   return metrics;
 }
 
@@ -463,6 +606,8 @@ function compactCrackMetrics(metrics) {
   return {
     maxGap: Number(metrics.maxGap.toFixed(6)),
     internalBoundaryLength: Number(metrics.internalBoundaryLength.toFixed(2)),
+    exactInternal: metrics.exactInternal,
+    nearInternalLength: Number(metrics.nearInternalLength.toFixed(2)),
     excessBoundaryLength: Number(metrics.excessBoundaryLength.toFixed(2)),
     baseTolerance: Number(metrics.baseTolerance.toFixed(6)),
     tolerance: Number(metrics.tolerance.toFixed(6)),
@@ -471,6 +616,8 @@ function compactCrackMetrics(metrics) {
     over04: metrics.over04,
     over08: metrics.over08,
     over12: metrics.over12,
+    tJunctionPairs: metrics.tJunctionPairs,
+    tJunctionLength: Number(metrics.tJunctionLength.toFixed(2)),
   };
 }
 
@@ -478,17 +625,21 @@ function crackDelta(current, reference) {
   return {
     maxGap: Number((current.maxGap - reference.maxGap).toFixed(6)),
     internalBoundaryLength: Number((current.internalBoundaryLength - reference.internalBoundaryLength).toFixed(2)),
+    exactInternal: current.exactInternal - reference.exactInternal,
+    nearInternalLength: Number((current.nearInternalLength - reference.nearInternalLength).toFixed(2)),
     excessBoundaryLength: Number((current.excessBoundaryLength - reference.excessBoundaryLength).toFixed(2)),
     nearInternal: current.nearInternal - reference.nearInternal,
     over04: current.over04 - reference.over04,
     over08: current.over08 - reference.over08,
     over12: current.over12 - reference.over12,
+    tJunctionPairs: current.tJunctionPairs - reference.tJunctionPairs,
+    tJunctionLength: Number((current.tJunctionLength - reference.tJunctionLength).toFixed(2)),
   };
 }
 
-function crackReport(sourcePolygons, losslessPolygons, currentPolygons) {
-  const lossless = compactCrackMetrics(crackMetrics(sourcePolygons, losslessPolygons));
-  const current = compactCrackMetrics(crackMetrics(sourcePolygons, currentPolygons));
+function crackReport(_sourcePolygons, losslessPolygons, currentPolygons) {
+  const lossless = compactCrackMetrics(crackMetrics(losslessPolygons, losslessPolygons));
+  const current = compactCrackMetrics(crackMetrics(losslessPolygons, currentPolygons));
   return {
     lossless,
     current,
@@ -628,7 +779,7 @@ function summarizeModelInWorker(modelPath) {
 function summarizeRows(rows, errors, elapsedMs) {
   const byClass = {};
   for (const row of rows) byClass[row.classification] = (byClass[row.classification] ?? 0) + 1;
-  const total = (field) => rows.reduce((sum, row) => sum + row[field].count, 0);
+  const total = (field) => rows.reduce((sum, row) => sum + (row[field]?.count ?? 0), 0);
   const crackRows = rows.filter((row) => row.cracks);
   return {
     scanned: rows.length,
@@ -647,8 +798,13 @@ function summarizeRows(rows, errors, elapsedMs) {
           maxCurrentInternalBoundaryLength: Math.max(...crackRows.map((row) => row.cracks.current.internalBoundaryLength)),
           totalCurrentInternalBoundaryLength: Number(crackRows.reduce((sum, row) => sum + row.cracks.current.internalBoundaryLength, 0).toFixed(2)),
           totalInternalBoundaryDelta: Number(crackRows.reduce((sum, row) => sum + row.cracks.delta.internalBoundaryLength, 0).toFixed(2)),
+          totalExactInternalDelta: crackRows.reduce((sum, row) => sum + row.cracks.delta.exactInternal, 0),
           totalOver04Delta: crackRows.reduce((sum, row) => sum + row.cracks.delta.over04, 0),
           totalOver08Delta: crackRows.reduce((sum, row) => sum + row.cracks.delta.over08, 0),
+          totalTJunctionPairs: crackRows.reduce((sum, row) => sum + row.cracks.current.tJunctionPairs, 0),
+          totalTJunctionLength: Number(crackRows.reduce((sum, row) => sum + row.cracks.current.tJunctionLength, 0).toFixed(2)),
+          totalTJunctionPairDelta: crackRows.reduce((sum, row) => sum + row.cracks.delta.tJunctionPairs, 0),
+          totalTJunctionLengthDelta: Number(crackRows.reduce((sum, row) => sum + row.cracks.delta.tJunctionLength, 0).toFixed(2)),
         }
       : null,
   };
@@ -659,7 +815,7 @@ function readCorpusJson(path) {
 }
 
 function totalCost(rows, field) {
-  return Number(rows.reduce((sum, row) => sum + row[field].cost, 0).toFixed(2));
+  return Number(rows.reduce((sum, row) => sum + (row[field]?.cost ?? 0), 0).toFixed(2));
 }
 
 function totalTiming(rows, field) {
@@ -673,7 +829,7 @@ function printCorpusSummary(output) {
   console.log(`classes=${JSON.stringify(summary.byClass)}`);
   console.log(`aggregate raw=${summary.aggregate.raw} lossless=${summary.aggregate.lossless} current=${summary.aggregate.current}`);
   if (summary.cracks) {
-    console.log(`cracks measured=${summary.cracks.measured} maxGap=${summary.cracks.maxCurrentGap} totalInternal=${summary.cracks.totalCurrentInternalBoundaryLength} deltaInternal=${summary.cracks.totalInternalBoundaryDelta} deltaOver04=${summary.cracks.totalOver04Delta} deltaOver08=${summary.cracks.totalOver08Delta}`);
+    console.log(`cracks measured=${summary.cracks.measured} maxGap=${summary.cracks.maxCurrentGap} totalInternal=${summary.cracks.totalCurrentInternalBoundaryLength} deltaInternal=${summary.cracks.totalInternalBoundaryDelta} deltaExactInternal=${summary.cracks.totalExactInternalDelta} deltaOver04=${summary.cracks.totalOver04Delta} deltaOver08=${summary.cracks.totalOver08Delta} tJunctionPairs=${summary.cracks.totalTJunctionPairs} tJunctionDelta=${summary.cracks.totalTJunctionPairDelta} tJunctionLengthDelta=${summary.cracks.totalTJunctionLengthDelta}`);
   }
   if (output.rows?.length) {
     console.log(`costs lossless=${totalCost(output.rows, "lossless")} current=${totalCost(output.rows, "current")}`);
@@ -696,7 +852,7 @@ function printOpportunityReport(output, limit = PRINT_LIMIT) {
     console.log("");
     console.log("largest current crack deltas");
     for (const row of crackRows.slice(0, limit)) {
-      console.log(`${row.model}: maxGap=${row.cracks.current.maxGap} internalDelta=${row.cracks.delta.internalBoundaryLength} over04Delta=${row.cracks.delta.over04} current=${row.current.count} lossless=${row.lossless.count}`);
+      console.log(`${row.model}: maxGap=${row.cracks.current.maxGap} losslessInternalDelta=${row.cracks.delta.internalBoundaryLength} exactInternalDelta=${row.cracks.delta.exactInternal} tJunctionDelta=${row.cracks.delta.tJunctionPairs} over04Delta=${row.cracks.delta.over04} current=${row.current.count} lossless=${row.lossless.count}`);
     }
   }
 
@@ -725,6 +881,18 @@ function printCompareReport(current, baseline, limit = PRINT_LIMIT) {
       currentMsDelta: row.timings?.currentMs !== undefined && before.timings?.currentMs !== undefined
         ? Number((row.timings.currentMs - before.timings.currentMs).toFixed(1))
         : null,
+      internalBoundaryDelta: row.cracks && before.cracks
+        ? Number((row.cracks.current.internalBoundaryLength - before.cracks.current.internalBoundaryLength).toFixed(2))
+        : null,
+      exactInternalDelta: row.cracks && before.cracks
+        ? row.cracks.current.exactInternal - before.cracks.current.exactInternal
+        : null,
+      tJunctionPairDelta: row.cracks && before.cracks
+        ? row.cracks.current.tJunctionPairs - before.cracks.current.tJunctionPairs
+        : null,
+      tJunctionLengthDelta: row.cracks && before.cracks
+        ? Number((row.cracks.current.tJunctionLength - before.cracks.current.tJunctionLength).toFixed(2))
+        : null,
       beforeClass: before.classification,
       afterClass: row.classification,
       beforeCost: before.current.cost,
@@ -735,13 +903,33 @@ function printCompareReport(current, baseline, limit = PRINT_LIMIT) {
   const totalCountDelta = deltas.reduce((sum, row) => sum + row.currentCountDelta, 0);
   const timingDeltas = deltas.filter((row) => row.currentMsDelta !== null);
   const totalMsDelta = Number(timingDeltas.reduce((sum, row) => sum + row.currentMsDelta, 0).toFixed(1));
+  const gapDeltas = deltas.filter((row) => row.internalBoundaryDelta !== null);
+  const totalInternalBoundaryDelta = Number(gapDeltas.reduce((sum, row) => sum + row.internalBoundaryDelta, 0).toFixed(2));
+  const totalExactInternalDelta = gapDeltas.reduce((sum, row) => sum + row.exactInternalDelta, 0);
+  const totalTJunctionPairDelta = gapDeltas.reduce((sum, row) => sum + row.tJunctionPairDelta, 0);
+  const totalTJunctionLengthDelta = Number(gapDeltas.reduce((sum, row) => sum + row.tJunctionLengthDelta, 0).toFixed(2));
   console.log("");
   console.log("compare report");
   console.log(`matched=${deltas.length} currentCostDelta=${totalCostDelta} currentCountDelta=${totalCountDelta} currentMsDelta=${timingDeltas.length > 0 ? totalMsDelta : "n/a"}`);
+  if (gapDeltas.length > 0) {
+    console.log(`gapDeltas internalBoundary=${totalInternalBoundaryDelta} exactInternal=${totalExactInternalDelta} tJunctionPairs=${totalTJunctionPairDelta} tJunctionLength=${totalTJunctionLengthDelta}`);
+  }
 
   const improved = [...deltas].filter((row) => row.currentCostDelta < 0).sort((a, b) => a.currentCostDelta - b.currentCostDelta);
   const regressed = [...deltas].filter((row) => row.currentCostDelta > 0).sort((a, b) => b.currentCostDelta - a.currentCostDelta);
   const slower = [...timingDeltas].filter((row) => row.currentMsDelta > 0).sort((a, b) => b.currentMsDelta - a.currentMsDelta);
+  const gapRegressions = [...gapDeltas]
+    .filter((row) =>
+      row.internalBoundaryDelta > 0 ||
+      row.exactInternalDelta > 0 ||
+      row.tJunctionPairDelta > 0 ||
+      row.tJunctionLengthDelta > 0
+    )
+    .sort((a, b) =>
+      b.internalBoundaryDelta - a.internalBoundaryDelta ||
+      b.tJunctionPairDelta - a.tJunctionPairDelta ||
+      b.exactInternalDelta - a.exactInternalDelta
+    );
   const classChanges = deltas.filter((row) => row.beforeClass !== row.afterClass);
   const printRows = (title, rows, format) => {
     if (rows.length === 0) return;
@@ -757,6 +945,9 @@ function printCompareReport(current, baseline, limit = PRINT_LIMIT) {
   );
   printRows("largest currentMs increases", slower, (row) =>
     `${row.model}: currentMsDelta=+${row.currentMsDelta} costDelta=${row.currentCostDelta}`
+  );
+  printRows("largest gap metric regressions", gapRegressions, (row) =>
+    `${row.model}: internalBoundaryDelta=${row.internalBoundaryDelta} exactInternalDelta=${row.exactInternalDelta} tJunctionPairDelta=${row.tJunctionPairDelta} tJunctionLengthDelta=${row.tJunctionLengthDelta} costDelta=${row.currentCostDelta}`
   );
   printRows("classification changes", classChanges, (row) =>
     `${row.model}: ${row.beforeClass}->${row.afterClass} costDelta=${row.currentCostDelta}`

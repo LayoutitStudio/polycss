@@ -145,7 +145,7 @@ console.log(`${polygons.length} polygons → ${merged.length} after merge`);
 
 ## `optimizeMeshPolygons(polygons, options?)`
 
-Runs the shared mesh-resolution optimizer. It defaults to `meshResolution: "lossy"`. `meshResolution: "lossless"` uses exact candidates; `"lossy"` also tries bounded approximate merge candidates and applies bounded seam repair, so it can add a small number of triangles back to reduce visible crack risk.
+Runs the shared mesh-resolution optimizer. It defaults to `meshResolution: "lossy"`. `meshResolution: "lossless"` uses exact candidates; `"lossy"` also tries bounded approximate merge candidates and chooses the lowest estimated DOM render cost. Wider lossy candidates are accepted only when they clear a minimum render-cost win and do not worsen whole-mesh seam diagnostics.
 
 ```ts
 import { optimizeMeshPolygons } from "@layoutit/polycss-core";
