@@ -58,18 +58,25 @@
     // ════════════════════════════════════════════════════════════════════
 
     import * as THREE from "three";
+    import { OBJLoader } from "three/addons/loaders/OBJLoader.js";
+    import { MTLLoader } from "three/addons/loaders/MTLLoader.js";
     import {
       createPolyCamera, createPolyScene,
-      createPolyBox,
+      createPolyBox, loadMesh,
     } from "./.generated/polycss.js";
 
     const Q = new URLSearchParams(location.search);
     const qn = (k, d) => (Q.has(k) ? +Q.get(k) : d);
+    const qs = (k, d) => (Q.has(k) ? Q.get(k) : d);
 
     const S = {
-      // Cube bottom sits on the ground plane (z=0). Floor is a 20×20 grey
-      // quad at z=0 to receive shadows.
+      mesh:  qs("mesh", "cube"),       // "cube" | "cottage"
       cube:  { x: 0, y: 0, z: 1, size: 2, color: "#dc2626" },
+      // Cottage uses /gallery/obj/cottage.obj + cottage.mtl + cottage-diffuse.png
+      // (served by bench/perf-serve.mjs under /gallery/...). Both engines load
+      // the same file; Three.js applies the same (x,y,z) → (z,x,y) cyclic
+      // permutation parseObj uses to put OBJ's Y-up into our Z-up world.
+      cottage:{ x: 0, y: 0, z: 0, scale: qn("cs", 1) },
       floor: { size: 20, color: "#cbd5e1" },
       dir:   { x: qn("dx", 1), y: qn("dy", 0.5), z: qn("dz", 1), intensity: qn("di", 1) },
       amb:   { intensity: qn("ai", 0.3) },
@@ -93,10 +100,35 @@
       shadow: { color: "#000000", opacity: S.shadow.opacity },
       textureLighting: "static",
     });
-    const polyCube = polyScene.add(
-      createPolyBox({ size: [S.cube.size, S.cube.size, S.cube.size], color: S.cube.color }),
-      { position: [S.cube.x, S.cube.y, S.cube.z], castShadow: true, receiveShadow: false, merge: false },
-    );
+    let polyCube = null;
+    let polyCottage = null;
+    function buildPolyCube() {
+      polyCube = polyScene.add(
+        createPolyBox({ size: [S.cube.size, S.cube.size, S.cube.size], color: S.cube.color }),
+        { position: [S.cube.x, S.cube.y, S.cube.z], castShadow: true, receiveShadow: false, merge: false },
+      );
+    }
+    // Cottage normalization: both engines fit the model into a bounding box
+    // of COTTAGE_TARGET_SIZE world units centered at the origin. PolyCSS uses
+    // parseObj's `targetSize` option; Three.js computes the bbox of the
+    // loaded geometry after the Y→Z permutation and applies the same scale +
+    // center. Without this, the OBJ's native pivot is far from origin and
+    // the model lands off-screen after the camera scale.
+    const COTTAGE_TARGET_SIZE = 5;
+    async function buildPolyCottage() {
+      const parse = await loadMesh("/gallery/obj/cottage.obj", {
+        mtlUrl: "/gallery/obj/cottage.mtl",
+        objOptions: { targetSize: COTTAGE_TARGET_SIZE },
+      });
+      polyCottage = polyScene.add(parse, {
+        position: [S.cottage.x, S.cottage.y, S.cottage.z],
+        scale: S.cottage.scale,
+        castShadow: true,
+        receiveShadow: false,
+        merge: false,
+      });
+    }
+    if (S.mesh === "cube") buildPolyCube();
     // Flat horizontal quad on z=0, sized S.floor.size in world units.
     // PolyCSS doesn't ship a generic "plane" generator (createPolyPlane is
     // for transform-control drag handles), so the polygon is inline.
@@ -135,13 +167,63 @@
     const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 5000);
     camera.up.set(0, 0, 1);
 
-    const cubeMesh = new THREE.Mesh(
-      new THREE.BoxGeometry(S.cube.size, S.cube.size, S.cube.size),
-      new THREE.MeshLambertMaterial({ color: S.cube.color }),
-    );
-    cubeMesh.position.set(S.cube.x, S.cube.y, S.cube.z);
-    cubeMesh.castShadow = true;
-    threeScene.add(cubeMesh);
+    let cubeMesh = null;
+    let cottageGroup = null;
+    function buildThreeCube() {
+      cubeMesh = new THREE.Mesh(
+        new THREE.BoxGeometry(S.cube.size, S.cube.size, S.cube.size),
+        new THREE.MeshLambertMaterial({ color: S.cube.color }),
+      );
+      cubeMesh.position.set(S.cube.x, S.cube.y, S.cube.z);
+      cubeMesh.castShadow = true;
+      threeScene.add(cubeMesh);
+    }
+    function buildThreeCottage() {
+      return new Promise((resolve, reject) => {
+        const mtlLoader = new MTLLoader();
+        mtlLoader.setMaterialOptions({ side: THREE.DoubleSide });
+        mtlLoader.load("/gallery/obj/cottage.mtl", (materials) => {
+          materials.preload();
+          const objLoader = new OBJLoader();
+          objLoader.setMaterials(materials);
+          objLoader.load("/gallery/obj/cottage.obj", (obj) => {
+            // OBJ files are Y-up; PolyCSS's parseObj applies a cyclic
+            // (x,y,z) → (z,x,y) permutation to bring +Y into PolyCSS's +Z.
+            // Match that with a 120° rotation around (1,1,1) so the same
+            // loaded file lands in the same world frame on both engines.
+            const q = new THREE.Quaternion();
+            q.setFromAxisAngle(new THREE.Vector3(1, 1, 1).normalize(), 2 * Math.PI / 3);
+            obj.quaternion.copy(q);
+            // Apply the rotation first so the bbox math runs in the same
+            // frame PolyCSS will end up in.
+            obj.updateMatrixWorld(true);
+            const wrap = new THREE.Group();
+            wrap.add(obj);
+            // Normalize: bbox max-dim → COTTAGE_TARGET_SIZE, then re-center
+            // the geometry at the origin. Matches PolyCSS parseObj
+            // `targetSize` behaviour.
+            const bbox = new THREE.Box3().setFromObject(wrap);
+            const sizeV = new THREE.Vector3();
+            bbox.getSize(sizeV);
+            const maxDim = Math.max(sizeV.x, sizeV.y, sizeV.z) || 1;
+            const norm = COTTAGE_TARGET_SIZE / maxDim;
+            obj.scale.multiplyScalar(norm);
+            obj.updateMatrixWorld(true);
+            const bbox2 = new THREE.Box3().setFromObject(wrap);
+            const centerV = new THREE.Vector3();
+            bbox2.getCenter(centerV);
+            obj.position.sub(centerV);
+            wrap.position.set(S.cottage.x, S.cottage.y, S.cottage.z);
+            wrap.scale.setScalar(S.cottage.scale);
+            obj.traverse((c) => { if (c.isMesh) { c.castShadow = true; c.receiveShadow = true; } });
+            cottageGroup = wrap;
+            threeScene.add(wrap);
+            resolve();
+          }, undefined, reject);
+        }, undefined, reject);
+      });
+    }
+    if (S.mesh === "cube") buildThreeCube();
 
     const floorMesh = new THREE.Mesh(
       new THREE.PlaneGeometry(S.floor.size, S.floor.size),
@@ -202,23 +284,23 @@
     window.addEventListener("resize", () => { applyCamera(); update(); });
 
     function update() {
-      polyCube.setTransform({ position: [S.cube.x, S.cube.y, S.cube.z] });
+      if (polyCube) polyCube.setTransform({ position: [S.cube.x, S.cube.y, S.cube.z] });
       polyScene.setOptions({
         directionalLight: {
           direction: [S.dir.x, S.dir.y, S.dir.z],
           intensity: S.dir.intensity,
           color: "#ffffff",
-          castShadow: false,
+          castShadow: true,
         },
         ambientLight: { color: "#ffffff", intensity: S.amb.intensity },
       });
       // PolyCSS static mode bakes lit colors at scene.add time and does NOT
-      // automatically re-bake on setOptions (the contract is "you call us
-      // when the light moves"). The parity bench mimics Three.js's "every
-      // frame is fresh" model by explicitly re-baking both meshes.
-      polyCube.rebakeAtlas();
+      // automatically re-bake on setOptions. Re-bake every visible mesh on
+      // each slider/light change so the bench tracks the live scene.
+      if (polyCube) polyCube.rebakeAtlas();
+      if (polyCottage) polyCottage.rebakeAtlas();
       polyFloor.rebakeAtlas();
-      cubeMesh.position.set(S.cube.x, S.cube.y, S.cube.z);
+      if (cubeMesh) cubeMesh.position.set(S.cube.x, S.cube.y, S.cube.z);
       dirLight.position.set(S.dir.x, S.dir.y, S.dir.z);
       dirLight.intensity = S.dir.intensity;
       ambLight.intensity = S.amb.intensity;
@@ -226,9 +308,28 @@
     }
     function loop() { renderer.render(threeScene, camera); requestAnimationFrame(loop); }
 
+    async function setMesh(name) {
+      S.mesh = name;
+      if (polyCube) { polyCube.remove(); polyCube = null; }
+      if (polyCottage) { polyCottage.remove(); polyCottage = null; }
+      if (cubeMesh) { threeScene.remove(cubeMesh); cubeMesh = null; }
+      if (cottageGroup) { threeScene.remove(cottageGroup); cottageGroup = null; }
+      if (name === "cube") {
+        buildPolyCube();
+        buildThreeCube();
+      } else {
+        await Promise.all([buildPolyCottage(), buildThreeCottage()]);
+      }
+      update();
+    }
+
     applyCamera();
-    update();
-    loop();
+    (async () => {
+      if (S.mesh === "cottage") await Promise.all([buildPolyCottage(), buildThreeCottage()]);
+      update();
+      loop();
+      window.__ready = true;
+    })();
 
     // ─── Controls ───────────────────────────────────────────────────────
     const camSliders = {};
@@ -273,12 +374,38 @@
         "Crosshair = world origin (0,0,0).";
       p.appendChild(info);
 
+      // Mesh dropdown
+      const meshSec = document.createElement("div");
+      meshSec.className = "sec";
+      meshSec.textContent = "Mesh";
+      p.appendChild(meshSec);
+      const meshRow = document.createElement("div");
+      meshRow.className = "row";
+      const meshLabel = document.createElement("label");
+      meshLabel.textContent = "model";
+      meshRow.appendChild(meshLabel);
+      const meshSel = document.createElement("select");
+      for (const opt of ["cube", "cottage"]) {
+        const o = document.createElement("option");
+        o.value = opt; o.textContent = opt;
+        if (S.mesh === opt) o.selected = true;
+        meshSel.appendChild(o);
+      }
+      meshSel.style.gridColumn = "2 / span 2";
+      meshSel.addEventListener("change", async () => {
+        await setMesh(meshSel.value);
+      });
+      meshRow.appendChild(meshSel);
+      p.appendChild(meshRow);
+
       const rows = [
         { sec: "Cube" },
         { k: ["cube", "x"], min: -10, max: 10, step: 0.1, fmt: (v) => v.toFixed(2) },
         { k: ["cube", "y"], min: -10, max: 10, step: 0.1, fmt: (v) => v.toFixed(2) },
         { k: ["cube", "z"], min: -10, max: 10, step: 0.1, fmt: (v) => v.toFixed(2) },
         { k: ["cube", "size"], min: 0.5, max: 6, step: 0.1, fmt: (v) => v.toFixed(2) },
+        { sec: "Cottage" },
+        { k: ["cottage", "scale"], min: 0.01, max: 1, step: 0.01, fmt: (v) => v.toFixed(2), rebuild: true },
         { sec: "Directional light" },
         { k: ["dir", "x"], min: -2, max: 2, step: 0.05, fmt: (v) => v.toFixed(2) },
         { k: ["dir", "y"], min: -2, max: 2, step: 0.05, fmt: (v) => v.toFixed(2) },
@@ -313,6 +440,10 @@
           S[r.k[0]][r.k[1]] = v;
           val.textContent = r.fmt(v);
           if (r.camera) applyCamera();
+          if (r.k[0] === "cottage" && r.k[1] === "scale") {
+            if (polyCottage) polyCottage.setTransform({ scale: S.cottage.scale });
+            if (cottageGroup) cottageGroup.scale.setScalar(S.cottage.scale);
+          }
           update();
         });
         row.appendChild(inp); row.appendChild(val);
@@ -321,8 +452,6 @@
       }
     }
     buildPanel();
-
-    window.__ready = true;
   </script>
 </body>
 </html>
