@@ -56,6 +56,7 @@ import {
   polygonCssSurfaceNormal,
   projectCssVertexToGround,
   parsePureColor,
+  shadePolygon,
 } from "@layoutit/polycss-core";
 import {
   cssBorderShapeForPlan,
@@ -2002,7 +2003,7 @@ export function createPolyScene(
     dedupByCaster: Map<MeshEntry, Set<number>>,
     receiverEntry: MeshEntry,
     lightDir: Vec3,
-    r: number, g: number, b: number,
+    _r: number, _g: number, _b: number,
     opacity: number,
   ): void {
     const llen = Math.hypot(lightDir[0], lightDir[1], lightDir[2]) || 1;
@@ -2011,6 +2012,17 @@ export function createPolyScene(
     const Lz = lightDir[2] / llen;
     const svgNS = "http://www.w3.org/2000/svg";
     const rpos = receiverEntry.handle.transform.position ?? [0, 0, 0];
+    // Three.js parity: a shadowed pixel is the receiver lit by ambient ONLY
+    // (no direct contribution). Compute that color from the receiver's first
+    // polygon color + current ambient light, then paint the shadow SVG with
+    // it. At opacity=1.0 → exact "no direct" Three.js shadow; at lower
+    // opacity the SVG blends back toward the lit pixel, fading the shadow.
+    // shadow.color (the legacy "shadow tint" option) is now ignored — the
+    // surface-aware ambient color replaces the uniform black overlay.
+    const receiverColor = receiverEntry.polygons[0]?.color ?? "#cccccc";
+    const ambColor = currentOptions.ambientLight?.color ?? "#ffffff";
+    const ambIntensity = currentOptions.ambientLight?.intensity ?? 0.4;
+    const fillColor = shadePolygon(receiverColor, 0, "#000000", ambColor, ambIntensity);
     // Mesh-local vertex (world units) → CSS via the same axis swap
     // (world.x → CSS-Y, world.y → CSS-X) and tile scale that the atlas
     // builder applies. transform.position is in world units (matching
@@ -2255,7 +2267,6 @@ export function createPolyScene(
       }
       group.visible = true;
       path.setAttribute("d", d);
-      const fillColor = `rgb(${r},${g},${b})`;
       if (path.getAttribute("fill") !== fillColor) path.setAttribute("fill", fillColor);
       const opStr = opacity.toFixed(4);
       if (path.getAttribute("opacity") !== opStr) path.setAttribute("opacity", opStr);
