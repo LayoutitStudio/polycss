@@ -2,7 +2,7 @@ import type { SceneOptionsState } from "../types";
 
 export const BUILDER_KIT_CATEGORIES: string[] = ["City Kit", "Urban Pack", "Medieval Village"];
 
-export const PARSER_DEFAULTS = { targetSize: 60, gridShift: 1, defaultColor: "#8b95a1" };
+export const PARSER_DEFAULTS = { targetSize: 60, defaultColor: "#8b95a1" };
 export const NORMALIZED_MAX_DIM = 10;
 export const GRID_STEP = 10;
 export const GRID_COLS = 3;

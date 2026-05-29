@@ -65,47 +65,47 @@ export const PRESETS = {
   },
   "ancient-crash-site": {
     url: "/gallery/vox/AncientCrashSite.vox",
-    options: { targetSize: 70, gridShift: 0 },
+    options: { targetSize: 70 },
     zoom: 0.35, rotX: 65, rotY: 45,
   },
   "desert2": {
     url: "/gallery/vox/desert2.vox",
-    options: { targetSize: 60, gridShift: 0 },
+    options: { targetSize: 60 },
     zoom: 0.4, rotX: 65, rotY: 45,
   },
   "mecha-golem": {
     url: "/gallery/vox/MechaGolem.vox",
-    options: { targetSize: 60, gridShift: 0 },
+    options: { targetSize: 60 },
     zoom: 0.4, rotX: 65, rotY: 45,
   },
   "army": {
     url: "/gallery/vox/army.vox",
-    options: { targetSize: 60, gridShift: 0 },
+    options: { targetSize: 60 },
     zoom: 0.4, rotX: 65, rotY: 45,
   },
   "obj-house3": {
     url: "/gallery/vox/obj_house3.vox",
-    options: { targetSize: 60, gridShift: 0 },
+    options: { targetSize: 60 },
     zoom: 0.4, rotX: 65, rotY: 45,
   },
   "obj-house5": {
     url: "/gallery/vox/obj_house5.vox",
-    options: { targetSize: 60, gridShift: 0 },
+    options: { targetSize: 60 },
     zoom: 0.4, rotX: 65, rotY: 45,
   },
   "scene-mechanic2": {
     url: "/gallery/vox/scene_mechanic2.vox",
-    options: { targetSize: 60, gridShift: 0 },
+    options: { targetSize: 60 },
     zoom: 0.4, rotX: 65, rotY: 45,
   },
   "skyscraper": {
     url: "/gallery/vox/skyscraper.vox",
-    options: { targetSize: 60, gridShift: 0 },
+    options: { targetSize: 60 },
     zoom: 0.4, rotX: 65, rotY: 45,
   },
   "treasure": {
     url: "/gallery/vox/Treasure.vox",
-    options: { targetSize: 60, gridShift: 0 },
+    options: { targetSize: 60 },
     zoom: 0.4, rotX: 65, rotY: 45,
   },
   crate: {
@@ -143,7 +143,7 @@ function genericGalleryPreset(params, meshId) {
       url: `/gallery/vox/${file}`,
       options: {
         targetSize: parseNumberParam(params, "targetSize", 60),
-        gridShift: 0,
+        
       },
       zoom: parseNumberParam(params, "zoom", 0.4),
       rotX: parseNumberParam(params, "rotX", 65),

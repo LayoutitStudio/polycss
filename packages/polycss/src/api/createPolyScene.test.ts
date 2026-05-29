@@ -199,7 +199,6 @@ function makeVoxelParseResult(): ParseResult {
       cols: 1,
       depth: 1,
       scale: 1,
-      gridShift: 0,
       sourceBytes: 64,
     },
   };
@@ -215,7 +214,6 @@ function makeVoxelExactParseResult(): ParseResult {
       cols: 1,
       depth: 1,
       scale: 1,
-      gridShift: 0,
       sourceBytes: 64,
     },
   };
@@ -231,7 +229,6 @@ function makeVoxelExactPolygonsParseResult(polygons: Polygon[]): ParseResult {
       cols: 1,
       depth: 1,
       scale: 1,
-      gridShift: 0,
       sourceBytes: 64,
     },
   };
@@ -247,7 +244,6 @@ function makeTwoSidedVoxelExactParseResult(): ParseResult {
       cols: 1,
       depth: 1,
       scale: 1,
-      gridShift: 0,
       sourceBytes: 64,
     },
   };
@@ -269,7 +265,6 @@ function makeTwoTopVoxelExactParseResult(): ParseResult {
       cols: 1,
       depth: 1,
       scale: 1,
-      gridShift: 0,
       sourceBytes: 64,
     },
   };
@@ -285,7 +280,6 @@ function makeTwoSidedVoxelSideParseResult(): ParseResult {
       cols: 1,
       depth: 1,
       scale: 1,
-      gridShift: 0,
       sourceBytes: 64,
     },
   };

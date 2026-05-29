@@ -150,7 +150,6 @@ const DEFAULT_SCENE: SceneOptionsState = {
 
 const DEFAULT_PARSER: ParserOptionsState = {
   targetSize: 60,
-  gridShift: 1,
   defaultColor: "#8b95a1",
 };
 
@@ -494,7 +493,6 @@ function parserDefaultsFor(model: PresetModel): Partial<ParserOptionsState> {
   const options = model.options as (ObjParseOptions & GltfParseOptions & VoxParseOptions) | undefined;
   return {
     ...(typeof options?.targetSize === "number" ? { targetSize: options.targetSize } : {}),
-    ...(typeof options?.gridShift === "number" ? { gridShift: options.gridShift } : {}),
     ...(typeof options?.defaultColor === "string" ? { defaultColor: options.defaultColor } : {}),
   };
 }

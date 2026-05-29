@@ -64,14 +64,8 @@ describe("parseGltf — real fixture (tree.glb)", () => {
     expect(Math.max(span(0), span(1), span(2))).toBeCloseTo(60, 1);
   });
 
-  it("default gridShift=1 keeps all coords ≥ 1 (no zero edges)", () => {
-    const result = parseGltf(loadGlbFile("tree.glb"));
-    const allCoords = result.polygons.flatMap((p) => p.vertices).flat();
-    expect(Math.min(...allCoords)).toBeGreaterThanOrEqual(1);
-  });
-
   it("custom targetSize=200 scales the mesh proportionally", () => {
-    const result = parseGltf(loadGlbFile("tree.glb"), { targetSize: 200, gridShift: 0 });
+    const result = parseGltf(loadGlbFile("tree.glb"), { targetSize: 200 });
     const all = result.polygons.flatMap((p) => p.vertices);
     const span = (axis: number) =>
       Math.max(...all.map((v) => v[axis])) - Math.min(...all.map((v) => v[axis]));
@@ -105,7 +99,7 @@ describe("parseGltf — animated fixture (FishAnimated.glb)", () => {
   it.each(animatedGalleryFixtures)(
     "exposes usable animation clips for %s",
     (file, clipCount) => {
-      const result = parseGltf(loadGlbFile(file), { gridShift: 0 });
+      const result = parseGltf(loadGlbFile(file));
       expect(result.animation?.clips).toHaveLength(clipCount);
       const frame = result.animation!.sample(0, 0.25);
       expect(frame).toHaveLength(result.polygons.length);
@@ -171,7 +165,6 @@ describe("parseGltf — animated fixture (FishAnimated.glb)", () => {
 
   it("keeps robot running samples aligned with rest-pose triangle filtering", () => {
     const result = parseGltf(loadGlbFile("poly-pizza", "animated-robot.glb"), {
-      gridShift: 0,
       targetSize: 72,
     });
     const running = result.animation?.clips.find((clip) => /running/i.test(clip.name));
@@ -185,7 +178,6 @@ describe("parseGltf — animated fixture (FishAnimated.glb)", () => {
 
   it("can sample a glTF animation through a filtered triangle controller", () => {
     const result = parseGltf(loadGlbFile("poly-pizza", "animated-robot.glb"), {
-      gridShift: 0,
       targetSize: 72,
     });
     const kept = cullInteriorPolygons(result.polygons);
@@ -203,7 +195,6 @@ describe("parseGltf — animated fixture (FishAnimated.glb)", () => {
 
   it("can reduce robot animation with a stable animated mesh plan", async () => {
     const parsed = parseGltf(loadGlbFile("poly-pizza", "animated-robot.glb"), {
-      gridShift: 0,
       targetSize: 72,
     });
     const baked = await bakeSolidTextureSamples(parsed);
@@ -667,7 +658,7 @@ describe("parseGltf", () => {
         ],
       };
       const jsonBytes = new TextEncoder().encode(JSON.stringify(doc));
-      const result = parseGltf(jsonBytes.buffer as ArrayBuffer, { upAxis: "z", targetSize: 10, gridShift: 0 });
+      const result = parseGltf(jsonBytes.buffer as ArrayBuffer, { upAxis: "z", targetSize: 10 });
       expect(result.polygons[0].vertices).toEqual([[0, 0, 0], [10, 0, 0], [0, 5, 0]]);
     });
 
@@ -749,7 +740,7 @@ describe("parseGltf", () => {
       };
       const glb = buildGlb({ doc, binData: bin });
 
-      const result = parseGltf(glb, { upAxis: "z", targetSize: 10, gridShift: 0 });
+      const result = parseGltf(glb, { upAxis: "z", targetSize: 10 });
 
       expect(result.polygons).toHaveLength(1);
       expect(result.polygons[0].vertices).toEqual([
@@ -794,7 +785,6 @@ describe("parseGltf", () => {
       const result = parseGltf(buildGlb({ doc, binData: bin }), {
         upAxis: "z",
         targetSize: 10,
-        gridShift: 0,
       });
 
       expect(result.polygons).toHaveLength(1);
@@ -847,7 +837,7 @@ describe("parseGltf", () => {
         buffers: [{ byteLength: bin.length }],
       };
       const glb = buildGlb({ doc, binData: bin });
-      const result = parseGltf(glb, { upAxis: "z", targetSize: 10, gridShift: 0 });
+      const result = parseGltf(glb, { upAxis: "z", targetSize: 10 });
       expect(result.polygons[0].vertices).toEqual([[0, 0, 0], [10, 0, 0], [0, 5, 0]]);
     });
   });
@@ -1075,7 +1065,7 @@ describe("parseGltf", () => {
       const { glb } = buildTriangleGlb({
         doubleSided: true,
       });
-      const result = parseGltf(glb, { upAxis: "z", targetSize: 1, gridShift: 0 });
+      const result = parseGltf(glb, { upAxis: "z", targetSize: 1 });
       expect(result.polygons).toHaveLength(2);
       expect(result.polygons[0].vertices).toEqual([[0, 0, 0], [1, 0, 0], [0, 1, 0]]);
       expect(result.polygons[1].vertices).toEqual([[0, 0, 0], [0, 1, 0], [1, 0, 0]]);
@@ -1087,7 +1077,7 @@ describe("parseGltf", () => {
   describe("targetSize scaling", () => {
     it("output vertices are scaled to fit targetSize", () => {
       const { glb } = buildTriangleGlb();
-      const r = parseGltf(glb, { targetSize: 10, gridShift: 0 });
+      const r = parseGltf(glb, { targetSize: 10 });
       const allCoords = r.polygons.flatMap((p) => p.vertices).flat();
       const span = Math.max(...allCoords) - Math.min(...allCoords);
       expect(span).toBeCloseTo(10, 3);
@@ -1095,8 +1085,8 @@ describe("parseGltf", () => {
 
     it("larger targetSize produces proportionally larger mesh", () => {
       const { glb } = buildTriangleGlb();
-      const r10 = parseGltf(glb, { targetSize: 10, gridShift: 0 });
-      const r50 = parseGltf(glb, { targetSize: 50, gridShift: 0 });
+      const r10 = parseGltf(glb, { targetSize: 10 });
+      const r50 = parseGltf(glb, { targetSize: 50 });
       const span = (r: ReturnType<typeof parseGltf>) =>
         Math.max(...r.polygons.flatMap((p) => p.vertices).flat()) -
         Math.min(...r.polygons.flatMap((p) => p.vertices).flat());
@@ -1107,8 +1097,8 @@ describe("parseGltf", () => {
   describe("axis conversion (upAxis)", () => {
     it("upAxis=y (default) permutes axes (z,x,y) → +Y in glTF ends up on +Z polycss", () => {
       const { glb } = buildTriangleGlb();
-      const rY = parseGltf(glb, { upAxis: "y", gridShift: 0 });
-      const rZ = parseGltf(glb, { upAxis: "z", gridShift: 0 });
+      const rY = parseGltf(glb, { upAxis: "y" });
+      const rZ = parseGltf(glb, { upAxis: "z" });
       // They should produce different vertex layouts
       const serialize = (r: ReturnType<typeof parseGltf>) =>
         JSON.stringify(r.polygons.map((p) => p.vertices).sort());
@@ -1117,17 +1107,8 @@ describe("parseGltf", () => {
 
     it("upAxis=z applies identity (no swap)", () => {
       const { glb } = buildTriangleGlb();
-      const result = parseGltf(glb, { upAxis: "z", targetSize: 10, gridShift: 0 });
+      const result = parseGltf(glb, { upAxis: "z", targetSize: 10 });
       expect(result.polygons).toHaveLength(1);
-    });
-  });
-
-  describe("gridShift", () => {
-    it("default gridShift=1 means minimum vertex coord >= 1", () => {
-      const { glb } = buildTriangleGlb();
-      const result = parseGltf(glb, { gridShift: 1 });
-      const allCoords = result.polygons.flatMap((p) => p.vertices).flat();
-      expect(Math.min(...allCoords)).toBeGreaterThanOrEqual(1);
     });
   });
 
@@ -1155,7 +1136,7 @@ describe("parseGltf", () => {
         buffers: [{ byteLength: bin.length }],
       };
       const glb = buildGlb({ doc, binData: bin });
-      const result = parseGltf(glb, { gridShift: 0 });
+      const result = parseGltf(glb);
       expect(result.polygons).toHaveLength(1);
     });
 
@@ -1184,7 +1165,7 @@ describe("parseGltf", () => {
         buffers: [{ byteLength: bin.length }],
       };
       const glb = buildGlb({ doc, binData: bin });
-      const result = parseGltf(glb, { gridShift: 0 });
+      const result = parseGltf(glb);
       expect(result.polygons).toHaveLength(1);
     });
 

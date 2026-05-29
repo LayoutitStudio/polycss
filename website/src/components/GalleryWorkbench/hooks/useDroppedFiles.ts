@@ -128,7 +128,6 @@ function droppedSourceFromFiles(files: File[], id: string): DroppedModelSource |
     url: "",
     options: {
       targetSize: 60,
-      gridShift: kind === "vox" ? 0 : 1,
       defaultColor: DEFAULT_COLOR,
     },
     zoom: kind === "vox" ? 0.4 : 0.35,

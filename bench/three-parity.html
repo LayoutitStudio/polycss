@@ -118,12 +118,7 @@
     async function buildPolyCottage() {
       const parse = await loadMesh("/gallery/obj/cottage.obj", {
         mtlUrl: "/gallery/obj/cottage.mtl",
-        // parseObj defaults `gridShift` to 1 — every vertex gets +1 added
-        // after the `(v - vMin) * scale` step, so the bbox MIN lands at
-        // (1, 1, 1) instead of the origin and a cottage at world (0,0,0)
-        // floats 1 unit above the floor. Zero it to keep the bbox MIN at
-        // origin, matching the Three.js bench setup.
-        objOptions: { targetSize: COTTAGE_TARGET_SIZE, gridShift: 0 },
+        objOptions: { targetSize: COTTAGE_TARGET_SIZE },
       });
       polyCottage = polyScene.add(parse, {
         position: [S.cottage.x, S.cottage.y, S.cottage.z],
