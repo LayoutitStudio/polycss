@@ -233,10 +233,15 @@
     threeScene.add(floorMesh);
 
     // Three.js convention: DirectionalLight.position is the light's world
-    // position. With target at (0,0,0) the light direction (from surface
-    // toward light) is +position. This matches PolyCSS's `direction` field.
+    // position (direction = position - target). The vector encodes direction;
+    // its MAGNITUDE matters because the shadow camera is placed AT this
+    // position. If it sits near the origin, the shadow camera's near plane
+    // cuts through the scene and the projected shadow is clipped. Scale the
+    // user direction out to a far position so the shadow camera sees the
+    // whole scene from "infinity" — what a parallel light should be.
+    const LIGHT_DIST = 100;
     const dirLight = new THREE.DirectionalLight(0xffffff, S.dir.intensity);
-    dirLight.position.set(S.dir.x, S.dir.y, S.dir.z);
+    dirLight.position.set(S.dir.x * LIGHT_DIST, S.dir.y * LIGHT_DIST, S.dir.z * LIGHT_DIST);
     dirLight.castShadow = true;
     // Three.js DirectionalLight shadows are a shadow map sampled inside an
     // orthographic frustum. Anything outside the frustum doesn't appear in
@@ -311,7 +316,7 @@
         polyFloor.rebakeAtlas();
       }
       if (cubeMesh) cubeMesh.position.set(S.cube.x, S.cube.y, S.cube.z);
-      dirLight.position.set(S.dir.x, S.dir.y, S.dir.z);
+      dirLight.position.set(S.dir.x * LIGHT_DIST, S.dir.y * LIGHT_DIST, S.dir.z * LIGHT_DIST);
       dirLight.intensity = S.dir.intensity;
       ambLight.intensity = S.amb.intensity;
       renderer.render(threeScene, camera);
