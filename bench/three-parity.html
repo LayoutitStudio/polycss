@@ -70,7 +70,8 @@
     const qs = (k, d) => (Q.has(k) ? Q.get(k) : d);
 
     const S = {
-      mesh:  qs("mesh", "cube"),       // "cube" | "cottage"
+      mesh:    qs("mesh", "cube"),     // "cube" | "cottage"
+      lighting:qs("light", "baked"),   // "baked" | "dynamic"
       cube:  { x: 0, y: 0, z: 1, size: 2, color: "#dc2626" },
       // Cottage uses /gallery/obj/cottage.obj + cottage.mtl + cottage-diffuse.png
       // (served by bench/perf-serve.mjs under /gallery/...). Both engines load
@@ -98,7 +99,7 @@
       },
       ambientLight: { color: "#ffffff", intensity: S.amb.intensity },
       shadow: { color: "#000000", opacity: S.shadow.opacity },
-      textureLighting: "baked",
+      textureLighting: S.lighting,
       // Full-quality atlas — no global shrink-to-fit cap. Default "auto"
       // shrinks the whole atlas to ~2048px / 16MB which pixelates large
       // textured polys (cottage walls). The bench prioritizes parity over
@@ -334,8 +335,14 @@
           castShadow: true,
         },
         ambientLight: { color: "#ffffff", intensity: S.amb.intensity },
+        textureLighting: S.lighting,
       });
-      if (lightsChanged) {
+      // Baked mode stores lit colors in atlas pixels → light change requires
+      // re-rasterising every mesh's atlas (visible flicker on textured
+      // meshes). Dynamic mode evaluates Lambert in CSS calc() per-frame
+      // from `--plx/--ply/--plz` vars; setOptions already updated those, so
+      // no re-bake needed.
+      if (lightsChanged && S.lighting === "baked") {
         if (polyCube) polyCube.rebakeAtlas();
         if (polyCottage) polyCottage.rebakeAtlas();
         polyFloor.rebakeAtlas();
@@ -415,7 +422,7 @@
         "Crosshair = world origin (0,0,0).";
       p.appendChild(info);
 
-      // Mesh dropdown
+      // Mesh + lighting dropdowns
       const meshSec = document.createElement("div");
       meshSec.className = "sec";
       meshSec.textContent = "Mesh";
@@ -438,6 +445,28 @@
       });
       meshRow.appendChild(meshSel);
       p.appendChild(meshRow);
+
+      // Lighting mode dropdown — baked = byte-parity but flickers on light
+      // change, dynamic = no flicker but approximate texture brightness.
+      const lightRow = document.createElement("div");
+      lightRow.className = "row";
+      const lightLabel = document.createElement("label");
+      lightLabel.textContent = "lighting";
+      lightRow.appendChild(lightLabel);
+      const lightSel = document.createElement("select");
+      for (const opt of ["baked", "dynamic"]) {
+        const o = document.createElement("option");
+        o.value = opt; o.textContent = opt;
+        if (S.lighting === opt) o.selected = true;
+        lightSel.appendChild(o);
+      }
+      lightSel.style.gridColumn = "2 / span 2";
+      lightSel.addEventListener("change", () => {
+        S.lighting = lightSel.value;
+        update(true);
+      });
+      lightRow.appendChild(lightSel);
+      p.appendChild(lightRow);
 
       const rows = [
         { sec: "Cube" },
