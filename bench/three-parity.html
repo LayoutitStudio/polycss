@@ -99,6 +99,11 @@
       ambientLight: { color: "#ffffff", intensity: S.amb.intensity },
       shadow: { color: "#000000", opacity: S.shadow.opacity },
       textureLighting: "baked",
+      // Full-quality atlas — no global shrink-to-fit cap. Default "auto"
+      // shrinks the whole atlas to ~2048px / 16MB which pixelates large
+      // textured polys (cottage walls). The bench prioritizes parity over
+      // memory budget. Real apps stick with "auto".
+      textureQuality: 1,
     });
     let polyCube = null;
     let polyCottage = null;
