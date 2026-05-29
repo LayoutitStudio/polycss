@@ -1,0 +1,340 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>polycss vs three.js — parity check</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; height: 100%; background: #eef2f6; font-family: ui-sans-serif, system-ui, sans-serif; color: #1e293b; }
+    body { display: grid; grid-template-columns: 1fr 1fr 320px; height: 100vh; overflow: hidden; }
+    .stage { position: relative; overflow: hidden; border-right: 1px solid #cbd5e1; background: #eef2f6; }
+    .stage > h3 { position: absolute; top: 8px; left: 12px; margin: 0; font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: #475569; z-index: 10; pointer-events: none; }
+    .stage > .note { position: absolute; top: 26px; left: 12px; font-size: 10px; color: #94a3b8; pointer-events: none; z-index: 10; }
+    #poly-host { position: absolute; inset: 0; }
+    #three-canvas { display: block; width: 100%; height: 100%; }
+    #panel { padding: 12px; background: #f8fafc; overflow-y: auto; border-left: 1px solid #cbd5e1; font-size: 12px; }
+    #panel .sec { margin: 14px 0 6px; font-weight: 600; color: #0f172a; font-size: 11px; letter-spacing: 0.05em; text-transform: uppercase; }
+    #panel .row { display: grid; grid-template-columns: 70px 1fr 50px; gap: 6px; align-items: center; margin: 3px 0; }
+    #panel .row > label { color: #475569; }
+    #panel .row > .val { text-align: right; font-variant-numeric: tabular-nums; }
+    #panel .row > input[type=range] { width: 100%; }
+    #panel .info { font-size: 11px; color: #64748b; line-height: 1.4; margin: 8px 0 12px; padding: 8px; background: #fff; border: 1px solid #e2e8f0; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <div class="stage"><h3>PolyCSS</h3><div class="note">no bridging — values from S go in raw</div><div id="poly-host"></div></div>
+  <div class="stage"><h3>Three.js</h3><div class="note">no bridging — values from S go in raw</div><canvas id="three-canvas"></canvas></div>
+  <div id="panel"></div>
+
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://esm.sh/three@0.160.0",
+      "three/addons/": "https://esm.sh/three@0.160.0/examples/jsm/"
+    }
+  }
+  </script>
+
+  <script type="module">
+    // ════════════════════════════════════════════════════════════════════
+    //  PARITY TEST
+    //
+    //  This bench renders the SAME scene in PolyCSS and Three.js by feeding
+    //  the exact same numbers into both APIs. There is intentionally NO
+    //  axis swap, sign flip, scale, axis-permute, or any other bridging
+    //  between the shared state object `S` and either engine.
+    //
+    //  When PolyCSS draws something at a different position, size,
+    //  orientation, or light direction than Three.js does for the same
+    //  inputs, that is a parity bug in PolyCSS that we will fix here.
+    //  Three.js is treated as the reference 3D engine.
+    //
+    //  Convention used by both:
+    //    +Z is up. +X is right. +Y is forward (into the scene).
+    //    Distances are world units (no implicit pixel scaling).
+    //    `position` is the world position of the mesh origin.
+    //    `direction` on a directional light is "toward the light"
+    //      (i.e. the vector from a surface pointing back to the sun).
+    //    Camera `rotX` tilts down from straight-up (rotX=0 → top-down);
+    //    `rotY` is azimuth around +Z.
+    // ════════════════════════════════════════════════════════════════════
+
+    import * as THREE from "three";
+    import {
+      createPolyCamera, createPolyScene,
+      createPolyBox, createPolySphere, createPolyPlane,
+    } from "./.generated/polycss.js";
+
+    const Q = new URLSearchParams(location.search);
+    const qn = (k, d) => (Q.has(k) ? +Q.get(k) : d);
+
+    // ── Shared state. One object. Both engines read from here. ──────────
+    const S = {
+      // Two unit-sized markers + a ground plane. Positions are world units.
+      box:    { x: 0, y: 0, z: 1, size: 2, color: "#dc2626" },   // red, on the floor
+      sphere: { x: 4, y: 0, z: 1, size: 1.5, color: "#16a34a" }, // green, to +X
+      floor:  { size: 20, color: "#cbd5e1" },                     // gray, at z=0
+      dir:    { x: 1, y: 0.4, z: 1, intensity: 1, color: "#ffffff" },
+      amb:    { intensity: 0.30, color: "#ffffff" },
+      cam:    { rotX: qn("rx", 55), rotY: qn("ry", 30), zoom: qn("z", 20) },
+    };
+
+    // ════════════════════════════════════════════════════════════════════
+    //  PolyCSS — uses S directly, no transformation.
+    // ════════════════════════════════════════════════════════════════════
+    const polyHost = document.getElementById("poly-host");
+    const polyCamera = createPolyCamera({ rotX: S.cam.rotX, rotY: S.cam.rotY, zoom: S.cam.zoom });
+    const polyScene = createPolyScene(polyHost, {
+      camera: polyCamera,
+      autoCenter: false,
+      directionalLight: {
+        direction: [S.dir.x, S.dir.y, S.dir.z],
+        intensity: S.dir.intensity,
+        color: S.dir.color,
+        castShadow: true,
+      },
+      ambientLight: { color: S.amb.color, intensity: S.amb.intensity },
+      shadow: { color: "#000000", opacity: 0.5 },
+      textureLighting: "static",
+    });
+    const polyBoxHandle = polyScene.add(
+      createPolyBox({ size: [S.box.size, S.box.size, S.box.size], color: S.box.color }),
+      { position: [S.box.x, S.box.y, S.box.z], castShadow: true, receiveShadow: false, merge: false },
+    );
+    const polySphereHandle = polyScene.add(
+      createPolySphere({ radius: S.sphere.size, segments: 24, color: S.sphere.color }),
+      { position: [S.sphere.x, S.sphere.y, S.sphere.z], castShadow: true, receiveShadow: false, merge: false },
+    );
+    polyScene.add(
+      createPolyPlane({ size: [S.floor.size, S.floor.size], color: S.floor.color }),
+      { position: [0, 0, 0], castShadow: false, receiveShadow: true, merge: false },
+    );
+
+    // ════════════════════════════════════════════════════════════════════
+    //  Three.js — same numbers, no transformation.
+    // ════════════════════════════════════════════════════════════════════
+    const threeCanvas = document.getElementById("three-canvas");
+    const renderer = new THREE.WebGLRenderer({ canvas: threeCanvas, antialias: true });
+    renderer.setPixelRatio(window.devicePixelRatio);
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.toneMapping = THREE.NoToneMapping;
+    THREE.Object3D.DEFAULT_UP.set(0, 0, 1);
+
+    const threeScene = new THREE.Scene();
+    threeScene.background = new THREE.Color(0xeef2f6);
+
+    const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 1000);
+    camera.up.set(0, 0, 1);
+
+    function makeMesh(geo, color) {
+      const mat = new THREE.MeshLambertMaterial({ color });
+      const m = new THREE.Mesh(geo, mat);
+      m.castShadow = true;
+      m.receiveShadow = true;
+      return m;
+    }
+
+    const boxMesh = makeMesh(new THREE.BoxGeometry(S.box.size, S.box.size, S.box.size), S.box.color);
+    boxMesh.position.set(S.box.x, S.box.y, S.box.z);
+    threeScene.add(boxMesh);
+
+    const sphereMesh = makeMesh(new THREE.SphereGeometry(S.sphere.size, 24, 16), S.sphere.color);
+    sphereMesh.position.set(S.sphere.x, S.sphere.y, S.sphere.z);
+    threeScene.add(sphereMesh);
+
+    const floorMesh = makeMesh(new THREE.PlaneGeometry(S.floor.size, S.floor.size), S.floor.color);
+    floorMesh.castShadow = false;
+    threeScene.add(floorMesh);
+
+    const dirLight = new THREE.DirectionalLight(S.dir.color, S.dir.intensity);
+    dirLight.position.set(S.dir.x, S.dir.y, S.dir.z);
+    dirLight.target.position.set(0, 0, 0);
+    dirLight.castShadow = true;
+    const R = S.floor.size;
+    dirLight.shadow.camera.left = -R;
+    dirLight.shadow.camera.right = R;
+    dirLight.shadow.camera.top = R;
+    dirLight.shadow.camera.bottom = -R;
+    dirLight.shadow.camera.near = 0.1;
+    dirLight.shadow.camera.far = R * 8;
+    dirLight.shadow.mapSize.set(2048, 2048);
+    dirLight.shadow.bias = -0.0005;
+    threeScene.add(dirLight);
+    threeScene.add(dirLight.target);
+
+    const ambLight = new THREE.AmbientLight(S.amb.color, S.amb.intensity);
+    threeScene.add(ambLight);
+
+    // ════════════════════════════════════════════════════════════════════
+    //  Camera — same rotX/rotY/zoom drive both. Three.js wires it as a
+    //  spherical-coords ortho camera positioned around the origin.
+    //  PolyCSS gets rotX/rotY/zoom verbatim. If the rendered orientation
+    //  doesn't match, that's a parity bug.
+    // ════════════════════════════════════════════════════════════════════
+    function resizeThree() {
+      const w = threeCanvas.clientWidth, h = threeCanvas.clientHeight;
+      renderer.setSize(w, h, false);
+      // Bigger `zoom` = bigger objects, same as PolyCSS's CSS-scale convention.
+      // Frustum extent = canvas pixels / zoom → at zoom=1, 1 world unit = 1 px.
+      const halfW = (w * 0.5) / S.cam.zoom;
+      const halfH = (h * 0.5) / S.cam.zoom;
+      camera.left = -halfW; camera.right = halfW;
+      camera.top = halfH; camera.bottom = -halfH;
+      camera.updateProjectionMatrix();
+    }
+
+    function applyCamera() {
+      const rx = S.cam.rotX * Math.PI / 180;
+      const ry = S.cam.rotY * Math.PI / 180;
+      const dist = 100;
+      camera.position.set(
+        dist * Math.sin(rx) * Math.cos(ry),
+        dist * Math.sin(rx) * Math.sin(ry),
+        dist * Math.cos(rx),
+      );
+      camera.lookAt(0, 0, 0);
+      resizeThree();
+      polyScene.camera.update({ rotX: S.cam.rotX, rotY: S.cam.rotY, zoom: S.cam.zoom });
+      polyScene.applyCamera();
+    }
+    window.addEventListener("resize", () => { resizeThree(); applyCamera(); });
+
+    // ════════════════════════════════════════════════════════════════════
+    //  Update — pushes current S into both engines. No translation step.
+    // ════════════════════════════════════════════════════════════════════
+    function update() {
+      polyScene.setOptions({
+        directionalLight: {
+          direction: [S.dir.x, S.dir.y, S.dir.z],
+          intensity: S.dir.intensity,
+          color: S.dir.color,
+          castShadow: true,
+        },
+        ambientLight: { color: S.amb.color, intensity: S.amb.intensity },
+      });
+      polyBoxHandle.setTransform({ position: [S.box.x, S.box.y, S.box.z] });
+      polySphereHandle.setTransform({ position: [S.sphere.x, S.sphere.y, S.sphere.z] });
+
+      dirLight.position.set(S.dir.x, S.dir.y, S.dir.z);
+      dirLight.intensity = S.dir.intensity;
+      dirLight.color.set(S.dir.color);
+      ambLight.intensity = S.amb.intensity;
+      ambLight.color.set(S.amb.color);
+      boxMesh.position.set(S.box.x, S.box.y, S.box.z);
+      sphereMesh.position.set(S.sphere.x, S.sphere.y, S.sphere.z);
+
+      renderer.render(threeScene, camera);
+    }
+
+    function loop() { renderer.render(threeScene, camera); requestAnimationFrame(loop); }
+
+    applyCamera();
+    update();
+    loop();
+
+    // ════════════════════════════════════════════════════════════════════
+    //  Controls — sliders mutate S, both engines re-read. Drag on either
+    //  viewport rotates the shared camera (same handler for both).
+    // ════════════════════════════════════════════════════════════════════
+    const camSliders = {};
+    function setCamSliders() {
+      for (const k of Object.keys(camSliders)) {
+        const s = camSliders[k];
+        s.input.value = S.cam[k];
+        s.val.textContent = s.fmt(S.cam[k]);
+      }
+    }
+    function bindDrag(el) {
+      let down = false, lx = 0, ly = 0;
+      el.addEventListener("pointerdown", (e) => {
+        down = true; lx = e.clientX; ly = e.clientY; el.setPointerCapture(e.pointerId);
+      });
+      el.addEventListener("pointerup", (e) => {
+        down = false; try { el.releasePointerCapture(e.pointerId); } catch {}
+      });
+      el.addEventListener("pointermove", (e) => {
+        if (!down) return;
+        const dx = e.clientX - lx, dy = e.clientY - ly;
+        lx = e.clientX; ly = e.clientY;
+        S.cam.rotY = (S.cam.rotY + dx * 0.4) % 360;
+        if (S.cam.rotY < 0) S.cam.rotY += 360;
+        S.cam.rotX = Math.max(0, Math.min(90, S.cam.rotX - dy * 0.4));
+        setCamSliders();
+        applyCamera(); update();
+      });
+      el.addEventListener("wheel", (e) => {
+        e.preventDefault();
+        const f = Math.exp(-e.deltaY * 0.001);
+        S.cam.zoom = Math.max(0.005, Math.min(1, S.cam.zoom * f));
+        setCamSliders();
+        applyCamera(); update();
+      }, { passive: false });
+    }
+    bindDrag(polyHost);
+    bindDrag(threeCanvas);
+
+    function buildPanel() {
+      const p = document.getElementById("panel");
+      const info = document.createElement("div");
+      info.className = "info";
+      info.innerHTML = "Same numbers fed to both engines, no bridging. <br/>" +
+        "Convention: +Z up, +X right, +Y forward. <br/>" +
+        "Drag either viewport, or use the sliders.";
+      p.appendChild(info);
+
+      const rows = [
+        { sec: "Directional light" },
+        { k: ["dir", "x"], min: -2, max: 2, step: 0.05, fmt: (v) => v.toFixed(2) },
+        { k: ["dir", "y"], min: -2, max: 2, step: 0.05, fmt: (v) => v.toFixed(2) },
+        { k: ["dir", "z"], min: -2, max: 2, step: 0.05, fmt: (v) => v.toFixed(2) },
+        { k: ["dir", "intensity"], min: 0, max: 3, step: 0.05, fmt: (v) => v.toFixed(2) },
+        { sec: "Ambient light" },
+        { k: ["amb", "intensity"], min: 0, max: 1, step: 0.01, fmt: (v) => v.toFixed(2) },
+        { sec: "Box position" },
+        { k: ["box", "x"], min: -10, max: 10, step: 0.25, fmt: (v) => v.toFixed(2) },
+        { k: ["box", "y"], min: -10, max: 10, step: 0.25, fmt: (v) => v.toFixed(2) },
+        { k: ["box", "z"], min: 0, max: 10, step: 0.25, fmt: (v) => v.toFixed(2) },
+        { sec: "Sphere position" },
+        { k: ["sphere", "x"], min: -10, max: 10, step: 0.25, fmt: (v) => v.toFixed(2) },
+        { k: ["sphere", "y"], min: -10, max: 10, step: 0.25, fmt: (v) => v.toFixed(2) },
+        { k: ["sphere", "z"], min: 0, max: 10, step: 0.25, fmt: (v) => v.toFixed(2) },
+        { sec: "Camera" },
+        { k: ["cam", "rotX"], min: 0, max: 90, step: 1, fmt: (v) => v + "°", camera: true },
+        { k: ["cam", "rotY"], min: 0, max: 359, step: 1, fmt: (v) => v + "°", camera: true },
+        { k: ["cam", "zoom"], min: 1, max: 200, step: 1, fmt: (v) => v.toFixed(0) + " px/u", camera: true },
+      ];
+
+      for (const r of rows) {
+        if (r.sec) {
+          const s = document.createElement("div"); s.className = "sec"; s.textContent = r.sec;
+          p.appendChild(s);
+          continue;
+        }
+        const row = document.createElement("div"); row.className = "row";
+        const lab = document.createElement("label");
+        lab.textContent = r.k.join(".");
+        row.appendChild(lab);
+        const inp = document.createElement("input");
+        inp.type = "range"; inp.min = r.min; inp.max = r.max; inp.step = r.step;
+        inp.value = S[r.k[0]][r.k[1]];
+        const val = document.createElement("span"); val.className = "val"; val.textContent = r.fmt(S[r.k[0]][r.k[1]]);
+        inp.addEventListener("input", () => {
+          const v = +inp.value;
+          S[r.k[0]][r.k[1]] = v;
+          val.textContent = r.fmt(v);
+          if (r.camera) applyCamera();
+          update();
+        });
+        row.appendChild(inp); row.appendChild(val);
+        p.appendChild(row);
+        if (r.camera) camSliders[r.k[1]] = { input: inp, val, fmt: r.fmt };
+      }
+    }
+    buildPanel();
+
+    window.__ready = true;
+  </script>
+</body>
+</html>
