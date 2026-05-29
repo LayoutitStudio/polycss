@@ -4,7 +4,7 @@
  * light's source position inside the nearest <poly-scene>.
  *
  * Attributes (all optional except `direction`):
- *   direction    — "x,y,z" CSS-pixel-space light direction (required)
+ *   direction    — "x,y,z" world-frame light direction vector (required)
  *   target       — "x,y,z" world coords; usually the mesh bbox center (default 0,0,0)
  *   distance     — number, world units from target along the light direction (default 5)
  *   size         — number, marker half-extent in world units (default 0.35)
@@ -28,7 +28,6 @@ const OBSERVED_ATTRS = [
   "color",
 ] as const;
 
-const TILE = 50;
 const DEFAULT_DISTANCE = 5;
 const DEFAULT_SIZE = 0.35;
 const DEFAULT_COLOR = "#ffd54a";
@@ -89,12 +88,15 @@ export class PolyDirectionalLightHelperElement extends ELEMENT_BASE {
     if (!direction) return undefined;
     const target = parseVec3(this.getAttribute("target")) ?? [0, 0, 0];
     const distance = parseNumber(this.getAttribute("distance"), DEFAULT_DISTANCE);
-    const dx = direction[0], dy = direction[1], dz = direction[2];
+    const [dx, dy, dz] = direction;
     const len = Math.hypot(dx, dy, dz) || 1;
-    const worldX = target[0] + (dy / len) * distance;
-    const worldY = target[1] + (dx / len) * distance;
-    const worldZ = target[2] + (dz / len) * distance;
-    return [worldY * TILE, worldX * TILE, worldZ * TILE];
+    // World-frame position. setTransform/worldPositionToCss handles the
+    // axis swap + ×DEFAULT_TILE conversion at the scene boundary.
+    return [
+      target[0] + (dx / len) * distance,
+      target[1] + (dy / len) * distance,
+      target[2] + (dz / len) * distance,
+    ];
   }
 
   private _mount(): void {

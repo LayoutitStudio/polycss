@@ -419,11 +419,27 @@ function shadowOptsEqual(
     && (a?.maxExtend ?? 2000) === (b?.maxExtend ?? 2000);
 }
 
+/**
+ * Convert a world-frame position (`+X right, +Y forward, +Z up`, world units)
+ * into the renderer's internal CSS-pixel frame (`world.y → CSS X`, `world.x →
+ * CSS Y`, `world.z → CSS Z`, ×`DEFAULT_TILE`). This is the SAME swap+scale
+ * that `buildSceneTransformFromCamera` already applies to `camera.target`, so
+ * mesh positions and camera target now share a coordinate system.
+ *
+ * The renderer's internal row/col swap is load-bearing (atlas normals, map
+ * controls, voxel snapping); it stays. We just present a Three.js-shaped API
+ * (standard XYZ in world units) and absorb the conversion at the boundary.
+ */
+function worldPositionToCss(p: Vec3): Vec3 {
+  return [p[1] * DEFAULT_TILE, p[0] * DEFAULT_TILE, p[2] * DEFAULT_TILE];
+}
+
 function buildMeshTransform(t: PolyMeshTransform): string | undefined {
   const parts: string[] = [];
   if (t.position) {
+    const cssPos = worldPositionToCss(t.position);
     parts.push(
-      `translate3d(${t.position[0]}px, ${t.position[1]}px, ${t.position[2]}px)`
+      `translate3d(${cssPos[0]}px, ${cssPos[1]}px, ${cssPos[2]}px)`
     );
   }
   if (t.scale !== undefined) {
@@ -449,7 +465,13 @@ function buildSceneTransformFromCamera(
   const state = camera.state;
   const rotX = state.rotX;
   const rotY = state.rotY;
-  const zoom = (state.zoom ?? DEFAULT_ZOOM) * layoutScale;
+  // User-facing zoom is "px per world unit" (Three.js OrthographicCamera.zoom
+  // shape). Renderer geometry already lives at `× DEFAULT_TILE` CSS px (see
+  // worldPositionToCss / atlas vertex emission), so the scene-root CSS scale
+  // is `zoom / DEFAULT_TILE`. At `zoom=1` → 1 world unit = 1 CSS px on screen,
+  // matching Three.js ortho with frustum [-canvas/2, canvas/2] at zoom=1.
+  const userZoom = state.zoom ?? DEFAULT_ZOOM;
+  const zoom = (userZoom / DEFAULT_TILE) * layoutScale;
   const distance = (state.distance ?? 0) * layoutScale;
   const target = state.target ?? [0, 0, 0];
   // World→CSS axis swap: world[0]→CSS Y, world[1]→CSS X, world[2]→CSS Z.
@@ -1708,17 +1730,17 @@ export function createPolyScene(
         if (!polygon) continue;
 
         const projected: Array<[number, number]> = [];
+        const cssPos = worldPositionToCss(cpos);
         for (const v of polygon.vertices) {
           // World vertex (mesh-local, world units) → CSS via the same
           // axis swap (world.x → CSS-Y, world.y → CSS-X) and tile scale
-          // (× DEFAULT_TILE) that the atlas builder applies per leaf.
-          // Then add transform.position as raw CSS px — that's how the
-          // mesh WRAPPER applies it (translate3d(pos[0]px, pos[1]px,
-          // pos[2]px), no axis swap, no tile multiplier).
+          // that the atlas builder applies per leaf. Then add the mesh
+          // wrapper's translate3d offset, which is also world units →
+          // CSS via worldPositionToCss (same conversion as buildMeshTransform).
           const cssVertex: Vec3 = [
-            v[1] * DEFAULT_TILE + cpos[0],
-            v[0] * DEFAULT_TILE + cpos[1],
-            v[2] * DEFAULT_TILE + cpos[2],
+            v[1] * DEFAULT_TILE + cssPos[0],
+            v[0] * DEFAULT_TILE + cssPos[1],
+            v[2] * DEFAULT_TILE + cssPos[2],
           ];
           if (cssVertex[0] < fpMinX) fpMinX = cssVertex[0];
           if (cssVertex[1] < fpMinY) fpMinY = cssVertex[1];
@@ -1949,15 +1971,18 @@ export function createPolyScene(
     const rpos = receiverEntry.handle.transform.position ?? [0, 0, 0];
     // Mesh-local vertex (world units) → CSS via the same axis swap
     // (world.x → CSS-Y, world.y → CSS-X) and tile scale that the atlas
-    // builder applies. transform.position is then added as raw CSS px
-    // — that's how the mesh wrapper's translate3d treats it. Mixing
-    // tile-scaled position into the same expression would shift the
-    // shadow at a different rate than the visible mesh.
-    const worldCss = (vert: Vec3, pos: Vec3): Vec3 => [
-      vert[1] * DEFAULT_TILE + pos[0],
-      vert[0] * DEFAULT_TILE + pos[1],
-      vert[2] * DEFAULT_TILE + pos[2],
-    ];
+    // builder applies. transform.position is in world units (matching
+    // camera.target), so it goes through the same conversion. Mesh
+    // wrapper translate3d gets the same conversion via worldPositionToCss
+    // in buildMeshTransform — both halves now scale identically.
+    const worldCss = (vert: Vec3, pos: Vec3): Vec3 => {
+      const cssPos = worldPositionToCss(pos);
+      return [
+        vert[1] * DEFAULT_TILE + cssPos[0],
+        vert[0] * DEFAULT_TILE + cssPos[1],
+        vert[2] * DEFAULT_TILE + cssPos[2],
+      ];
+    };
 
     // Group receiver polygons by shared plane (matching normal AND offset
     // within tolerance). Each group becomes ONE shadow surface: instead

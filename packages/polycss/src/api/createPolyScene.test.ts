@@ -383,7 +383,10 @@ describe("createPolyScene", () => {
       const transform = sceneEl.style.transform;
       // Perspective lives on the .polycss-camera wrapper, not on .polycss-scene.
       expect(cameraEl.style.perspective).toBe("1500px");
-      expect(transform).toContain("scale(2)");
+      // User zoom semantic: "px per world unit" (Three.js OrthographicCamera.zoom
+      // shape). Renderer geometry already lives at ×DEFAULT_TILE CSS px, so the
+      // scene CSS scale is `zoom / DEFAULT_TILE`. zoom=2 → scale(0.04).
+      expect(transform).toContain("scale(0.04)");
       expect(transform).toContain("rotateX(30deg)");
       // rotY in our API maps to CSS rotate() (i.e. rotateZ) so the model
       // spins around its vertical world-Z axis, matching React's PolyCamera.
@@ -403,7 +406,8 @@ describe("createPolyScene", () => {
       expect(cameraEl.style.perspective).toBe("1500px");
       expect(sceneEl.style.getPropertyValue("zoom")).toBe("2");
       expect(transform).toContain("translateZ(-50px)");
-      expect(transform).toContain("scale(1)");
+      // zoom=2 / DEFAULT_TILE (50) × layoutScale (0.5) = 0.02.
+      expect(transform).toContain("scale(0.02)");
       expect(transform).toContain("rotateX(30deg)");
       expect(transform).toContain("rotate(60deg)");
       expect(scene.camera.state.zoom).toBe(2);
@@ -656,7 +660,11 @@ describe("createPolyScene", () => {
         scale: 2,
       });
       const wrapper = host.querySelector(".polycss-mesh") as HTMLElement;
-      expect(wrapper.style.transform).toContain("translate3d(10px, 20px, 30px)");
+      // mesh.position is in world units. Boundary conversion applies the same
+      // axis swap + ×DEFAULT_TILE that camera.target uses (world.x → CSS Y,
+      // world.y → CSS X, world.z → CSS Z). Input [10, 20, 30] world →
+      // CSS [20*50, 10*50, 30*50] = [1000, 500, 1500] px.
+      expect(wrapper.style.transform).toContain("translate3d(1000px, 500px, 1500px)");
       expect(wrapper.style.transform).toContain("rotateX(45deg)");
       expect(wrapper.style.transform).toContain("scale3d(2, 2, 2)");
     });
@@ -674,7 +682,8 @@ describe("createPolyScene", () => {
       const handle = scene.add(makeParseResult(), { position: [0, 0, 0] });
       handle.setTransform({ position: [5, 5, 5] });
       const wrapper = host.querySelector(".polycss-mesh") as HTMLElement;
-      expect(wrapper.style.transform).toContain("translate3d(5px, 5px, 5px)");
+      // Symmetric input → axis swap is invisible, ×DEFAULT_TILE (50) applied.
+      expect(wrapper.style.transform).toContain("translate3d(250px, 250px, 250px)");
     });
 
     it("can update stableDom mesh geometry without replacing polygon elements", () => {
