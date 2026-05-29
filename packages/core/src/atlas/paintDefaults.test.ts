@@ -150,9 +150,11 @@ describe("shadePolygon — Lambert shading outputs", () => {
     expect(result).toBe("#000000");
   });
 
-  it("red polygon with white ambient at 1.0 → red output", () => {
-    const result = shadePolygon("#ff0000", 0, "#000000", "#ffffff", 1);
-    // Red channel: 255 * (255/255 * 1) = 255
+  it("red polygon with white ambient at intensity=π → red output (physical Lambert)", () => {
+    // BRDF_Lambert wraps both direct and indirect (ambient): lit = albedo/π ×
+    // (direct + ambient). To get a saturated red back from pure ambient,
+    // ambientIntensity must compensate for /π. At intensity=π → albedo × 1.
+    const result = shadePolygon("#ff0000", 0, "#000000", "#ffffff", Math.PI);
     expect(result).toBe("#ff0000");
   });
 

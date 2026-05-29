@@ -95,12 +95,15 @@ export function shadePolygon(
   const ambLR = srgbChannelToLinear(amb.r / 255);
   const ambLG = srgbChannelToLinear(amb.g / 255);
   const ambLB = srgbChannelToLinear(amb.b / 255);
-  // Physically based diffuse: lit = albedo × (lightColor × lambert × I / π +
-  // ambientColor × I_amb). `directScale` is already `intensity × max(n·L, 0)`
-  // (computed by the caller), so dividing by π here yields Three.js parity.
-  const litLR = baseLR * (lightLR * directScale * INV_PI + ambLR * ambientIntensity);
-  const litLG = baseLG * (lightLG * directScale * INV_PI + ambLG * ambientIntensity);
-  const litLB = baseLB * (lightLB * directScale * INV_PI + ambLB * ambientIntensity);
+  // Physically based diffuse (Three.js MeshLambertMaterial parity):
+  //   lit = (BRDF_Lambert(albedo)) × (directIrradiance + indirectIrradiance)
+  //       = (albedo / π) × (lightColor × lambert × I + ambientColor × I_amb)
+  // The `/π` wraps the whole sum — both the direct and ambient contributions
+  // go through the same diffuse BRDF, so ambient is also normalized by π.
+  // `directScale` is `intensity × max(n·L, 0)` (computed by the caller).
+  const litLR = baseLR * (lightLR * directScale + ambLR * ambientIntensity) * INV_PI;
+  const litLG = baseLG * (lightLG * directScale + ambLG * ambientIntensity) * INV_PI;
+  const litLB = baseLB * (lightLB * directScale + ambLB * ambientIntensity) * INV_PI;
   const enc = (v: number) =>
     Math.max(0, Math.min(255, Math.round(linearChannelToSrgb(Math.max(0, Math.min(1, v))) * 255)));
   const r = enc(litLR);

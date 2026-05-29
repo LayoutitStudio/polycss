@@ -165,16 +165,18 @@ describe("atlas plan computation — plan field determinism", () => {
 
   it("plan shadedColor changes with ambient light color", () => {
     // White base polygon: ambient color directly determines output with no directional.
+    // Lambert is physically based — `BRDF_Lambert(albedo) = albedo / π` wraps
+    // ambient too, so ambientIntensity needs the matching ×π to saturate.
     const whitePoly: Polygon = {
       vertices: [[0, 0, 0], [2, 0, 0], [2, 1, 0], [0, 1, 0]],
       color: "#ffffff",
     };
     const planWhiteAmbient = computeTextureAtlasPlanPublic(whitePoly, 0, {
-      ambientLight: { color: "#ffffff", intensity: 1 },
+      ambientLight: { color: "#ffffff", intensity: Math.PI },
       directionalLight: { direction: [0, 0, 1], color: "#000000", intensity: 0 },
     });
     const planRedAmbient = computeTextureAtlasPlanPublic(whitePoly, 0, {
-      ambientLight: { color: "#ff0000", intensity: 1 },
+      ambientLight: { color: "#ff0000", intensity: Math.PI },
       directionalLight: { direction: [0, 0, 1], color: "#000000", intensity: 0 },
     });
     // White ambient → white output; red ambient → red-tinted output.
