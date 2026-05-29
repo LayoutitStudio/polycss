@@ -209,10 +209,10 @@
             const norm = COTTAGE_TARGET_SIZE / maxDim;
             obj.scale.multiplyScalar(norm);
             obj.updateMatrixWorld(true);
+            // PolyCSS parseObj places the bbox MIN at origin (cottage sits in
+            // the +X+Y+Z quadrant), not the bbox CENTER. Match that here.
             const bbox2 = new THREE.Box3().setFromObject(wrap);
-            const centerV = new THREE.Vector3();
-            bbox2.getCenter(centerV);
-            obj.position.sub(centerV);
+            obj.position.sub(bbox2.min);
             wrap.position.set(S.cottage.x, S.cottage.y, S.cottage.z);
             wrap.scale.setScalar(S.cottage.scale);
             obj.traverse((c) => { if (c.isMesh) { c.castShadow = true; c.receiveShadow = true; } });
