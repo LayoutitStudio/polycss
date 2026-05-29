@@ -1718,9 +1718,20 @@ export function createPolyScene(
       }));
     }
 
-    if (currentGroundCssZ !== null) {
+    // Three.js parity: shadows render only on receiving surfaces. The
+    // virtual ground is a convenience for scenes with no `receiveShadow`
+    // mesh (so a caster still drops some shadow); when at least one
+    // receiver mesh exists, painting on both produces visible double
+    // darkening on the floor.
+    let hasReceiver = false;
+    for (const m of meshes) {
+      if (!m.disposed && m.receiveShadow) { hasReceiver = true; break; }
+    }
+    if (currentGroundCssZ !== null && !hasReceiver) {
       const emittedGround = emitSceneGroundShadow(casters, dedupByCaster, lightDir, currentGroundCssZ, r, g, b, shadowOpacity);
       if (!emittedGround) hideGroundShadow();
+    } else if (hasReceiver) {
+      hideGroundShadow();
     }
     for (const receiver of meshes) {
       if (receiver.disposed || !receiver.receiveShadow) continue;

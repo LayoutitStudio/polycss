@@ -67,10 +67,14 @@
     const qn = (k, d) => (Q.has(k) ? +Q.get(k) : d);
 
     const S = {
-      cube: { x: 0, y: 0, z: 0, size: 2, color: "#dc2626" },
-      dir:  { x: qn("dx", 1), y: qn("dy", 0.5), z: qn("dz", 1), intensity: qn("di", 1) },
-      amb:  { intensity: qn("ai", 0.3) },
-      cam:  { rotX: qn("rx", 30), rotY: qn("ry", 0), zoom: qn("z", 60) },
+      // Cube bottom sits on the ground plane (z=0). Floor is a 20×20 grey
+      // quad at z=0 to receive shadows.
+      cube:  { x: 0, y: 0, z: 1, size: 2, color: "#dc2626" },
+      floor: { size: 20, color: "#cbd5e1" },
+      dir:   { x: qn("dx", 1), y: qn("dy", 0.5), z: qn("dz", 1), intensity: qn("di", 1) },
+      amb:   { intensity: qn("ai", 0.3) },
+      shadow:{ opacity: qn("so", 0.5) },
+      cam:   { rotX: qn("rx", 30), rotY: qn("ry", 0), zoom: qn("z", 60) },
     };
 
     // ─── PolyCSS ────────────────────────────────────────────────────────
@@ -83,14 +87,37 @@
         direction: [S.dir.x, S.dir.y, S.dir.z],
         intensity: S.dir.intensity,
         color: "#ffffff",
-        castShadow: false,
+        castShadow: true,
       },
       ambientLight: { color: "#ffffff", intensity: S.amb.intensity },
+      shadow: { color: "#000000", opacity: S.shadow.opacity },
       textureLighting: "static",
     });
     const polyCube = polyScene.add(
       createPolyBox({ size: [S.cube.size, S.cube.size, S.cube.size], color: S.cube.color }),
-      { position: [S.cube.x, S.cube.y, S.cube.z], castShadow: false, receiveShadow: false, merge: false },
+      { position: [S.cube.x, S.cube.y, S.cube.z], castShadow: true, receiveShadow: false, merge: false },
+    );
+    // Flat horizontal quad on z=0, sized S.floor.size in world units.
+    // PolyCSS doesn't ship a generic "plane" generator (createPolyPlane is
+    // for transform-control drag handles), so the polygon is inline.
+    const floorHalf = S.floor.size / 2;
+    const floorParse = {
+      polygons: [{
+        vertices: [
+          [-floorHalf, -floorHalf, 0],
+          [ floorHalf, -floorHalf, 0],
+          [ floorHalf,  floorHalf, 0],
+          [-floorHalf,  floorHalf, 0],
+        ],
+        color: S.floor.color,
+      }],
+      objectUrls: [],
+      warnings: [],
+      dispose: () => {},
+    };
+    const polyFloor = polyScene.add(
+      floorParse,
+      { position: [0, 0, 0], castShadow: false, receiveShadow: true, merge: false },
     );
 
     // ─── Three.js ───────────────────────────────────────────────────────
@@ -98,6 +125,8 @@
     const renderer = new THREE.WebGLRenderer({ canvas: threeCanvas, antialias: true });
     renderer.setPixelRatio(window.devicePixelRatio);
     renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     THREE.Object3D.DEFAULT_UP.set(0, 0, 1);
 
     const threeScene = new THREE.Scene();
@@ -111,13 +140,33 @@
       new THREE.MeshLambertMaterial({ color: S.cube.color }),
     );
     cubeMesh.position.set(S.cube.x, S.cube.y, S.cube.z);
+    cubeMesh.castShadow = true;
     threeScene.add(cubeMesh);
+
+    const floorMesh = new THREE.Mesh(
+      new THREE.PlaneGeometry(S.floor.size, S.floor.size),
+      new THREE.MeshLambertMaterial({ color: S.floor.color }),
+    );
+    floorMesh.receiveShadow = true;
+    threeScene.add(floorMesh);
 
     // Three.js convention: DirectionalLight.position is the light's world
     // position. With target at (0,0,0) the light direction (from surface
     // toward light) is +position. This matches PolyCSS's `direction` field.
     const dirLight = new THREE.DirectionalLight(0xffffff, S.dir.intensity);
     dirLight.position.set(S.dir.x, S.dir.y, S.dir.z);
+    dirLight.castShadow = true;
+    // Shadow camera frustum — must cover the floor + cube. Big enough to not
+    // clip the projected silhouette as the light moves around.
+    const SHADOW_R = S.floor.size;
+    dirLight.shadow.camera.left = -SHADOW_R;
+    dirLight.shadow.camera.right = SHADOW_R;
+    dirLight.shadow.camera.top = SHADOW_R;
+    dirLight.shadow.camera.bottom = -SHADOW_R;
+    dirLight.shadow.camera.near = 0.1;
+    dirLight.shadow.camera.far = SHADOW_R * 8;
+    dirLight.shadow.mapSize.set(2048, 2048);
+    dirLight.shadow.bias = -0.0005;
     threeScene.add(dirLight);
     threeScene.add(dirLight.target);
     const ambLight = new THREE.AmbientLight(0xffffff, S.amb.intensity);
@@ -236,6 +285,8 @@
         { k: ["dir", "intensity"], min: 0, max: 3, step: 0.05, fmt: (v) => v.toFixed(2) },
         { sec: "Ambient" },
         { k: ["amb", "intensity"], min: 0, max: 1, step: 0.01, fmt: (v) => v.toFixed(2) },
+        { sec: "Shadow" },
+        { k: ["shadow", "opacity"], min: 0, max: 1, step: 0.01, fmt: (v) => v.toFixed(2) },
         { sec: "Camera" },
         { k: ["cam", "rotX"], min: 0, max: 90, step: 1, fmt: (v) => v + "°", camera: true },
         { k: ["cam", "rotY"], min: 0, max: 359, step: 1, fmt: (v) => v + "°", camera: true },
