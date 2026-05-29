@@ -41,6 +41,20 @@ export function rgbToHex({ r, g, b }: RGB): string {
   return `#${f(r)}${f(g)}${f(b)}`;
 }
 
+/**
+ * Tint factors for a textured polygon, in LINEAR light space.
+ *
+ * Returns the per-channel multiplier that the rasterizer should apply to the
+ * texture pixels' LINEAR values — matching Three.js MeshLambertMaterial:
+ *   lit_linear = albedo_linear × tint
+ *   tint = (lightColor × lambert × I + ambientColor × I_amb) / π
+ *
+ * Light + ambient colors are interpreted as sRGB and converted to linear.
+ * The rasterizer is responsible for decoding the texture sample from sRGB
+ * to linear before multiplying by these factors, then re-encoding for paint
+ * (see applyTextureTint in the renderer). `directScale` is already
+ * `intensity × max(n·L, 0)` (computed by the caller).
+ */
 export function textureTintFactors(
   directScale: number,
   lightColor: string,
@@ -49,10 +63,16 @@ export function textureTintFactors(
 ): RGBFactors {
   const light = parseHex(lightColor);
   const amb = parseHex(ambientColor);
+  const lightLR = srgbChannelToLinear(light.r / 255);
+  const lightLG = srgbChannelToLinear(light.g / 255);
+  const lightLB = srgbChannelToLinear(light.b / 255);
+  const ambLR = srgbChannelToLinear(amb.r / 255);
+  const ambLG = srgbChannelToLinear(amb.g / 255);
+  const ambLB = srgbChannelToLinear(amb.b / 255);
   return {
-    r: (amb.r / 255) * ambientIntensity + (light.r / 255) * directScale,
-    g: (amb.g / 255) * ambientIntensity + (light.g / 255) * directScale,
-    b: (amb.b / 255) * ambientIntensity + (light.b / 255) * directScale,
+    r: (lightLR * directScale + ambLR * ambientIntensity) * INV_PI,
+    g: (lightLG * directScale + ambLG * ambientIntensity) * INV_PI,
+    b: (lightLB * directScale + ambLB * ambientIntensity) * INV_PI,
   };
 }
 

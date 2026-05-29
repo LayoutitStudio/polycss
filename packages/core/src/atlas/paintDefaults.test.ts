@@ -180,16 +180,20 @@ describe("shadePolygon — Lambert shading outputs", () => {
 // textureTintFactors — tint factor computation
 // ---------------------------------------------------------------------------
 
-describe("textureTintFactors — tint factor output", () => {
-  it("full white light + zero ambient at direct scale 1 → factors of 1", () => {
+describe("textureTintFactors — tint factor output (linear / π — Three.js parity)", () => {
+  it("full white light + zero ambient at direct scale 1 → factors of 1/π", () => {
+    // Physical BRDF: tint = (lightLinear × directScale) / π. White light is
+    // linear (1,1,1); at directScale=1 the factor is 1/π for each channel.
     const tint = textureTintFactors(1, "#ffffff", "#000000", 0);
-    expect(tint.r).toBeCloseTo(1);
-    expect(tint.g).toBeCloseTo(1);
-    expect(tint.b).toBeCloseTo(1);
+    expect(tint.r).toBeCloseTo(1 / Math.PI);
+    expect(tint.g).toBeCloseTo(1 / Math.PI);
+    expect(tint.b).toBeCloseTo(1 / Math.PI);
   });
 
-  it("zero directScale + white ambient at 1 → factors of 1", () => {
-    const tint = textureTintFactors(0, "#000000", "#ffffff", 1);
+  it("zero directScale + white ambient at intensity=π → factors of 1", () => {
+    // Same physical Lambert: the BRDF /π wraps ambient too. Restore the
+    // legacy "saturated tint" behaviour by passing intensity=π.
+    const tint = textureTintFactors(0, "#000000", "#ffffff", Math.PI);
     expect(tint.r).toBeCloseTo(1);
     expect(tint.g).toBeCloseTo(1);
     expect(tint.b).toBeCloseTo(1);

@@ -12,7 +12,6 @@ import type {
   UvSampleRect,
   RGBFactors,
 } from "@layoutit/polycss-core";
-import { tintToCss } from "@layoutit/polycss-core";
 import { expandClipPoints } from "@layoutit/polycss-core";
 import { BASIS_EPS } from "@layoutit/polycss-core";
 
@@ -67,6 +66,18 @@ export function setCssTransform(
   );
 }
 
+// sRGB ↔ linear helpers — duplicated here to keep applyTextureTint
+// self-contained (it runs per-pixel in a hot loop). Matches the conversion
+// used by shadePolygon / textureTintFactors in @layoutit/polycss-core.
+function srgbByteToLinear(c: number): number {
+  const u = c / 255;
+  return u <= 0.04045 ? u / 12.92 : Math.pow((u + 0.055) / 1.055, 2.4);
+}
+function linearToSrgbByte(c: number): number {
+  const s = c <= 0.0031308 ? c * 12.92 : 1.055 * Math.pow(c, 1 / 2.4) - 0.055;
+  return Math.max(0, Math.min(255, Math.round(s * 255)));
+}
+
 export function applyTextureTint(
   ctx: CanvasRenderingContext2D,
   x: number,
@@ -76,19 +87,26 @@ export function applyTextureTint(
   tint: RGBFactors,
   atlasScale: number,
 ): void {
-  if (
-    Math.abs(tint.r - 1) < 0.001 &&
-    Math.abs(tint.g - 1) < 0.001 &&
-    Math.abs(tint.b - 1) < 0.001
-  ) {
-    return;
+  // `tint` is in LINEAR light space (Three.js BRDF parity):
+  //   tint = (lightColor × directScale + ambientColor × ambIntensity) / π
+  // To avoid distorting the texture's color values we MUST multiply in
+  // linear-light, not in sRGB (canvas's `multiply` composite is sRGB×sRGB
+  // and produces noticeably brighter results for textured surfaces).
+  // Decode each pixel, multiply per-channel, re-encode.
+  const px = Math.round(x * atlasScale);
+  const py = Math.round(y * atlasScale);
+  const pw = Math.max(1, Math.round(width * atlasScale));
+  const ph = Math.max(1, Math.round(height * atlasScale));
+  const img = ctx.getImageData(px, py, pw, ph);
+  const data = img.data;
+  const tr = tint.r, tg = tint.g, tb = tint.b;
+  for (let i = 0; i < data.length; i += 4) {
+    if (data[i + 3] === 0) continue;
+    data[i]     = linearToSrgbByte(srgbByteToLinear(data[i])     * tr);
+    data[i + 1] = linearToSrgbByte(srgbByteToLinear(data[i + 1]) * tg);
+    data[i + 2] = linearToSrgbByte(srgbByteToLinear(data[i + 2]) * tb);
   }
-  ctx.save();
-  setCssTransform(ctx, atlasScale);
-  ctx.globalCompositeOperation = "multiply";
-  ctx.fillStyle = tintToCss(tint);
-  ctx.fillRect(x, y, width, height);
-  ctx.restore();
+  ctx.putImageData(img, px, py);
 }
 
 export function drawImageCover(
