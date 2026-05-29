@@ -215,8 +215,9 @@
       // PolyCSS static mode bakes lit colors at scene.add time and does NOT
       // automatically re-bake on setOptions (the contract is "you call us
       // when the light moves"). The parity bench mimics Three.js's "every
-      // frame is fresh" model by explicitly re-baking.
+      // frame is fresh" model by explicitly re-baking both meshes.
       polyCube.rebakeAtlas();
+      polyFloor.rebakeAtlas();
       cubeMesh.position.set(S.cube.x, S.cube.y, S.cube.z);
       dirLight.position.set(S.dir.x, S.dir.y, S.dir.z);
       dirLight.intensity = S.dir.intensity;
