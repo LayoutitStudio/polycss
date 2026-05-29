@@ -1331,6 +1331,17 @@ describe("createPolyScene", () => {
       expect(sceneEl.dataset.polycssLighting).toBe("baked");
     });
 
+    it("does not install baked preview paint vars during normal baked render", () => {
+      scene = makeScene(host, { textureLighting: "baked" });
+      scene.add(makeParseResult([triangle("#336699")]), { merge: false });
+      const leaf = host.querySelector("b, i, u") as HTMLElement;
+
+      expect(leaf.style.color).not.toBe("");
+      expect(leaf.style.getPropertyValue("--polycss-paint")).toBe("");
+      expect(leaf.style.getPropertyValue("--plam")).toBe("");
+      expect(leaf.style.getPropertyValue("--pnz")).toBe("");
+    });
+
     it("can preview baked solid lighting through CSS vars without switching scene mode", () => {
       scene = makeScene(host, { textureLighting: "baked" });
       scene.add(makeParseResult([triangle("#336699")]), { merge: false });
@@ -1338,7 +1349,6 @@ describe("createPolyScene", () => {
       const leaf = host.querySelector("b, i, u") as HTMLElement;
       const triangleLeaf = host.querySelector("u") as HTMLElement;
       const initialColor = leaf.style.color;
-      const initialLeafStyle = leaf.getAttribute("style");
       const initialTriangleBackgroundColor = triangleLeaf.style.backgroundColor;
       const previewScene = scene as PolySceneHandle & {
         previewBakedSolidLighting(next: Pick<PolySceneOptions, "directionalLight" | "ambientLight">): boolean;
@@ -1357,8 +1367,7 @@ describe("createPolyScene", () => {
       expect(leaf.style.getPropertyValue("--plam")).toContain("var(--plz, 1)");
       expect(leaf.style.getPropertyValue("--polycss-preview-r")).toContain("var(--plam, 0)");
       expect(leaf.style.getPropertyValue("--polycss-paint")).toContain("var(--polycss-light-preview-active");
-      expect(leaf.style.color).toBe(initialColor);
-      expect(leaf.getAttribute("style")).toBe(initialLeafStyle);
+      expect(leaf.style.color).toBe("");
       expect(triangleLeaf.style.backgroundColor).toBe(initialTriangleBackgroundColor);
 
       previewScene.clearBakedSolidLightingPreview();
@@ -1366,8 +1375,9 @@ describe("createPolyScene", () => {
       expect(sceneEl.style.getPropertyValue("--plz")).toBe("");
       expect(sceneEl.style.getPropertyValue("--polycss-light-preview-active")).toBe("");
       expect(leaf.style.color).toBe(initialColor);
-      expect(leaf.style.getPropertyValue("--plam")).toContain("var(--plz, 1)");
-      expect(leaf.style.getPropertyValue("--polycss-preview-r")).toContain("var(--plam, 0)");
+      expect(leaf.style.getPropertyValue("--plam")).toBe("");
+      expect(leaf.style.getPropertyValue("--polycss-preview-r")).toBe("");
+      expect(leaf.style.getPropertyValue("--polycss-paint")).toBe("");
       expect(triangleLeaf.style.backgroundColor).toBe(initialTriangleBackgroundColor);
     });
 
@@ -1377,6 +1387,7 @@ describe("createPolyScene", () => {
       const leaf = host.querySelector("b, i, u") as HTMLElement;
       const triangleLeaf = host.querySelector("u") as HTMLElement;
       const initialLeaf = leaf;
+      const initialColor = leaf.style.color;
       const initialTriangleBackgroundColor = triangleLeaf.style.backgroundColor;
       const previewScene = scene as PolySceneHandle & {
         previewBakedSolidLighting(next: Pick<PolySceneOptions, "directionalLight" | "ambientLight">): boolean;
@@ -1394,10 +1405,11 @@ describe("createPolyScene", () => {
       expect(previewScene.commitBakedSolidLighting()).toBe(true);
 
       expect(host.querySelector("b, i, u")).toBe(initialLeaf);
-      expect(leaf.style.color).toBe("");
-      expect(leaf.style.getPropertyValue("--polycss-paint")).toContain("var(--polycss-light-preview-active");
-      expect(leaf.style.getPropertyValue("--polycss-preview-r")).toContain("var(--plam, 0)");
-      expect(leaf.style.getPropertyValue("--plam")).toContain("var(--plz, 1)");
+      expect(leaf.style.color).not.toBe("");
+      expect(leaf.style.color).not.toBe(initialColor);
+      expect(leaf.style.getPropertyValue("--polycss-paint")).toBe("");
+      expect(leaf.style.getPropertyValue("--polycss-preview-r")).toBe("");
+      expect(leaf.style.getPropertyValue("--plam")).toBe("");
       expect(triangleLeaf.style.backgroundColor).toBe(initialTriangleBackgroundColor);
     });
 
@@ -1899,8 +1911,10 @@ describe("createPolyScene", () => {
       const after = host.querySelector("u, b, i, s") as HTMLElement;
       expect(after).toBe(before);
       expect(handle.polygons[0].color).toBe("#0000ff");
-      expect(after.style.getPropertyValue("--polycss-paint")).not.toBe("");
-      expect(after.style.getPropertyValue("--psb")).toBe("1.0000");
+      expect(after.style.color).not.toBe("");
+      expect(after.style.getPropertyValue("--polycss-paint")).toBe("");
+      expect(after.style.getPropertyValue("--psb")).toBe("");
+      expect(after.style.getPropertyValue("--plam")).toBe("");
     });
 
     it("updates data-only changes without replacing the leaf", () => {
