@@ -238,15 +238,21 @@
     const dirLight = new THREE.DirectionalLight(0xffffff, S.dir.intensity);
     dirLight.position.set(S.dir.x, S.dir.y, S.dir.z);
     dirLight.castShadow = true;
-    // Shadow camera frustum — must cover the floor + cube. Big enough to not
-    // clip the projected silhouette as the light moves around.
-    const SHADOW_R = S.floor.size;
+    // Three.js DirectionalLight shadows are a shadow map sampled inside an
+    // orthographic frustum. Anything outside the frustum doesn't appear in
+    // the shadow texture, so the projected silhouette gets clipped when the
+    // light grazes the floor and the shadow stretches past the frustum
+    // edges. PolyCSS has no such limit (it CPU-projects onto the receiver).
+    // Picking the frustum big enough to cover the worst-case shadow extent
+    // for our scene scale (floor 20, light vector down to ~0.05 vertical):
+    // tallest caster ~3 units → max shadow length ~60 units → use ±100.
+    const SHADOW_R = 100;
     dirLight.shadow.camera.left = -SHADOW_R;
     dirLight.shadow.camera.right = SHADOW_R;
     dirLight.shadow.camera.top = SHADOW_R;
     dirLight.shadow.camera.bottom = -SHADOW_R;
     dirLight.shadow.camera.near = 0.1;
-    dirLight.shadow.camera.far = SHADOW_R * 8;
+    dirLight.shadow.camera.far = SHADOW_R * 4;
     dirLight.shadow.mapSize.set(2048, 2048);
     dirLight.shadow.bias = -0.0005;
     threeScene.add(dirLight);
