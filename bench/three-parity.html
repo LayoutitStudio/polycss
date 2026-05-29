@@ -68,6 +68,8 @@
 
     const S = {
       cube: { x: 0, y: 0, z: 0, size: 2, color: "#dc2626" },
+      dir:  { x: qn("dx", 1), y: qn("dy", 0.5), z: qn("dz", 1), intensity: qn("di", 1) },
+      amb:  { intensity: qn("ai", 0.3) },
       cam:  { rotX: qn("rx", 30), rotY: qn("ry", 0), zoom: qn("z", 60) },
     };
 
@@ -77,8 +79,13 @@
     const polyScene = createPolyScene(polyHost, {
       camera: polyCamera,
       autoCenter: false,
-      directionalLight: { direction: [1, 0.5, 1], intensity: 1, color: "#ffffff", castShadow: false },
-      ambientLight: { color: "#ffffff", intensity: 0.5 },
+      directionalLight: {
+        direction: [S.dir.x, S.dir.y, S.dir.z],
+        intensity: S.dir.intensity,
+        color: "#ffffff",
+        castShadow: false,
+      },
+      ambientLight: { color: "#ffffff", intensity: S.amb.intensity },
       textureLighting: "static",
     });
     const polyCube = polyScene.add(
@@ -106,10 +113,15 @@
     cubeMesh.position.set(S.cube.x, S.cube.y, S.cube.z);
     threeScene.add(cubeMesh);
 
-    const dirLight = new THREE.DirectionalLight(0xffffff, 1);
-    dirLight.position.set(1, 0.5, 1);
+    // Three.js convention: DirectionalLight.position is the light's world
+    // position. With target at (0,0,0) the light direction (from surface
+    // toward light) is +position. This matches PolyCSS's `direction` field.
+    const dirLight = new THREE.DirectionalLight(0xffffff, S.dir.intensity);
+    dirLight.position.set(S.dir.x, S.dir.y, S.dir.z);
     threeScene.add(dirLight);
-    threeScene.add(new THREE.AmbientLight(0xffffff, 0.5));
+    threeScene.add(dirLight.target);
+    const ambLight = new THREE.AmbientLight(0xffffff, S.amb.intensity);
+    threeScene.add(ambLight);
 
     // ─── Camera — same rotX/rotY/zoom drive both ───────────────────────
     function resizeThree() {
@@ -142,7 +154,24 @@
 
     function update() {
       polyCube.setTransform({ position: [S.cube.x, S.cube.y, S.cube.z] });
+      polyScene.setOptions({
+        directionalLight: {
+          direction: [S.dir.x, S.dir.y, S.dir.z],
+          intensity: S.dir.intensity,
+          color: "#ffffff",
+          castShadow: false,
+        },
+        ambientLight: { color: "#ffffff", intensity: S.amb.intensity },
+      });
+      // PolyCSS static mode bakes lit colors at scene.add time and does NOT
+      // automatically re-bake on setOptions (the contract is "you call us
+      // when the light moves"). The parity bench mimics Three.js's "every
+      // frame is fresh" model by explicitly re-baking.
+      polyCube.rebakeAtlas();
       cubeMesh.position.set(S.cube.x, S.cube.y, S.cube.z);
+      dirLight.position.set(S.dir.x, S.dir.y, S.dir.z);
+      dirLight.intensity = S.dir.intensity;
+      ambLight.intensity = S.amb.intensity;
       renderer.render(threeScene, camera);
     }
     function loop() { renderer.render(threeScene, camera); requestAnimationFrame(loop); }
@@ -200,6 +229,13 @@
         { k: ["cube", "y"], min: -10, max: 10, step: 0.1, fmt: (v) => v.toFixed(2) },
         { k: ["cube", "z"], min: -10, max: 10, step: 0.1, fmt: (v) => v.toFixed(2) },
         { k: ["cube", "size"], min: 0.5, max: 6, step: 0.1, fmt: (v) => v.toFixed(2) },
+        { sec: "Directional light" },
+        { k: ["dir", "x"], min: -2, max: 2, step: 0.05, fmt: (v) => v.toFixed(2) },
+        { k: ["dir", "y"], min: -2, max: 2, step: 0.05, fmt: (v) => v.toFixed(2) },
+        { k: ["dir", "z"], min: -2, max: 2, step: 0.05, fmt: (v) => v.toFixed(2) },
+        { k: ["dir", "intensity"], min: 0, max: 3, step: 0.05, fmt: (v) => v.toFixed(2) },
+        { sec: "Ambient" },
+        { k: ["amb", "intensity"], min: 0, max: 1, step: 0.01, fmt: (v) => v.toFixed(2) },
         { sec: "Camera" },
         { k: ["cam", "rotX"], min: 0, max: 90, step: 1, fmt: (v) => v + "°", camera: true },
         { k: ["cam", "rotY"], min: 0, max: 359, step: 1, fmt: (v) => v + "°", camera: true },
