@@ -1781,8 +1781,10 @@ describe("createPolyScene", () => {
       scene.add(makeParseResult([triangle()]), { rotation: [0, 90, 0] });
       const wrapper = host.querySelector(".polycss-mesh") as HTMLElement;
       // inverseRotateVec3([0,0,1], [0,90,0]) = rotateY(-90) on [0,0,1] = [-1,0,0]
-      expect(wrapper.style.getPropertyValue("--plx")).toBe("-1.0000");
-      expect(wrapper.style.getPropertyValue("--ply")).toBe("0.0000");
+      // (user-frame), then worldDirectionToCss swaps X↔Y → [0,-1,0] for the
+      // CSS-frame --plx/--ply/--plz consumed by the Lambert CSS calc().
+      expect(wrapper.style.getPropertyValue("--plx")).toBe("0.0000");
+      expect(wrapper.style.getPropertyValue("--ply")).toBe("-1.0000");
       expect(wrapper.style.getPropertyValue("--plz")).toBe("0.0000");
     });
 

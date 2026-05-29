@@ -434,6 +434,24 @@ function worldPositionToCss(p: Vec3): Vec3 {
   return [p[1] * DEFAULT_TILE, p[0] * DEFAULT_TILE, p[2] * DEFAULT_TILE];
 }
 
+/**
+ * Convert a world-frame direction (dimensionless XYZ in `+X right, +Y forward,
+ * +Z up`) into the renderer's CSS-frame for the lambert dot product. The
+ * polygon basis stores normals in the same swapped frame (see atlas/plan.ts
+ * makeLocalBasis), so directions must match before dotting. No scale — these
+ * are unit vectors.
+ */
+function worldDirectionToCss(d: Vec3): Vec3 {
+  return [d[1], d[0], d[2]];
+}
+
+function worldDirectionalLightToCss<
+  T extends { direction?: Vec3 } | undefined,
+>(light: T): T {
+  if (!light?.direction) return light;
+  return { ...light, direction: worldDirectionToCss(light.direction) } as T;
+}
+
 function buildMeshTransform(t: PolyMeshTransform): string | undefined {
   const parts: string[] = [];
   if (t.position) {
@@ -896,7 +914,13 @@ export function createPolyScene(
   }
 
   function applyLightingVars(el: HTMLElement, opts: Omit<PolySceneOptions, "camera">): void {
-    const dir = opts.directionalLight?.direction ?? [0.4, -0.7, 0.59];
+    // opts.directionalLight.direction is user-frame; --plx/--ply/--plz drive
+    // the same CSS-frame Lambert dot product the static path uses, so convert
+    // at this boundary. --clx/--cly/--clz fall out of the same components
+    // (the CSS shadow-projection matrix in styles.ts is written against this
+    // CSS-frame convention).
+    const userDir = opts.directionalLight?.direction ?? [0.4, -0.7, 0.59];
+    const dir = worldDirectionToCss(userDir as Vec3);
     const len = Math.hypot(dir[0], dir[1], dir[2]) || 1;
     const lx = dir[0] / len, ly = dir[1] / len, lz = dir[2] / len;
     const lightRgb = parseHexColor(opts.directionalLight?.color ?? "#ffffff")?.rgb ?? [255, 255, 255];
@@ -1363,7 +1387,11 @@ export function createPolyScene(
       return;
     }
 
-    const localDir = inverseRotateVec3(dir as Vec3, rotation as Vec3);
+    // dir is user-frame; rotation is also user-frame (Euler). Apply the
+    // inverse rotation first, then swap to CSS frame so the result dots
+    // correctly with the leaf's --pnx/--pny/--pnz (also CSS-frame).
+    const localDirUser = inverseRotateVec3(dir as Vec3, rotation as Vec3);
+    const localDir = worldDirectionToCss(localDirUser);
     const len = Math.hypot(localDir[0], localDir[1], localDir[2]) || 1;
     const plx = (localDir[0] / len).toFixed(4);
     const ply = (localDir[1] / len).toFixed(4);
@@ -1409,7 +1437,7 @@ export function createPolyScene(
     if (!item.plan || item.kind === "atlas" || item.plan.texture) return false;
     const textureLighting: PolyTextureLightingMode = currentOptions.textureLighting ?? "baked";
     const renderOptions = {
-      directionalLight: currentOptions.directionalLight,
+      directionalLight: worldDirectionalLightToCss(currentOptions.directionalLight),
       ambientLight: currentOptions.ambientLight,
       textureLighting,
       textureQuality: currentOptions.textureQuality,
@@ -1665,9 +1693,12 @@ export function createPolyScene(
     const shadowOpacity = currentOptions.shadow?.opacity ?? 0.25;
     const parsed = parseHexColor(shadowColor)?.rgb ?? [0, 0, 0];
     const r = parsed[0], g = parsed[1], b = parsed[2];
-    const lightDir = lightDirectionOverride
+    // Vertices flow into shadow projection in CSS frame (worldPositionToCss);
+    // the light direction must be in the same frame for the projection math.
+    const userLightDir = lightDirectionOverride
       ?? currentOptions.directionalLight?.direction
       ?? ([0.4, -0.7, 0.59] as Vec3);
+    const lightDir = worldDirectionToCss(userLightDir);
 
     // Per-caster shadow dedup (independent meshes can't dedup against
     // each other). Computed once per caster, reused across surfaces.
@@ -2241,9 +2272,12 @@ export function createPolyScene(
   function renderEntry(entry: MeshEntry, lightDirectionOverride?: Vec3): void {
     clearRendered(entry);
     const baseDirLight = currentOptions.directionalLight;
-    const directionalLight: typeof baseDirLight = lightDirectionOverride
+    // lightDirectionOverride and baseDirLight.direction are both in user
+    // world frame; convert to renderer CSS frame for the lambert dot product.
+    const userDirLight: typeof baseDirLight = lightDirectionOverride
       ? { ...baseDirLight, direction: lightDirectionOverride }
       : baseDirLight;
+    const directionalLight = worldDirectionalLightToCss(userDirLight);
     if (canRenderVoxelDirect(entry)) {
       const renderer = createPolyVoxelRenderer({
         doc,
@@ -2355,7 +2389,7 @@ export function createPolyScene(
     clearRendered(entry);
     const renderOptions = {
       doc,
-      directionalLight: currentOptions.directionalLight,
+      directionalLight: worldDirectionalLightToCss(currentOptions.directionalLight),
       ambientLight: currentOptions.ambientLight,
       textureLighting: currentOptions.textureLighting,
       textureQuality: currentOptions.textureQuality,
@@ -2563,7 +2597,7 @@ export function createPolyScene(
       if (entry.stableDom && !entry.hasBuckets) {
         const renderOptions = {
           doc,
-          directionalLight: currentOptions.directionalLight,
+          directionalLight: worldDirectionalLightToCss(currentOptions.directionalLight),
           ambientLight: currentOptions.ambientLight,
           textureLighting: currentOptions.textureLighting,
           textureQuality: currentOptions.textureQuality,
@@ -2698,7 +2732,7 @@ export function createPolyScene(
           const colorFrame = entry.stableTriangleColorFrame + 1;
           const stableTopologyOptions = {
             doc,
-            directionalLight: currentOptions.directionalLight,
+            directionalLight: worldDirectionalLightToCss(currentOptions.directionalLight),
             ambientLight: currentOptions.ambientLight,
             textureLighting: currentOptions.textureLighting,
             textureQuality: currentOptions.textureQuality,
