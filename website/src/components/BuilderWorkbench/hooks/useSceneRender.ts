@@ -1,4 +1,4 @@
-import { useMemo, type RefObject } from "react";
+import { useMemo, useRef, type RefObject } from "react";
 import { optimizeMeshPolygons } from "@layoutit/polycss-react";
 import type { PolyFirstPersonControlsHandle, Polygon } from "@layoutit/polycss-react";
 import { interiorShellPolygons } from "../../helpers/interiorShell";
@@ -16,6 +16,62 @@ const GRID_LINE_COLORS = {
 
 function applySolidColor(polygons: Polygon[], color: string): Polygon[] {
   return polygons.map((polygon) => ({ ...polygon, color }));
+}
+
+function hasRawPolygons(item: PlacedItem): item is PlacedItem & { rawPolygons: Polygon[] } {
+  return item.rawPolygons !== null;
+}
+
+type ActiveMeshResolution = ReturnType<typeof activeMeshResolution>;
+
+interface CachedRenderGeometry {
+  rawPolygons: Polygon[];
+  meshResolution: ActiveMeshResolution;
+  optimized: Polygon[];
+  rendered: Polygon[];
+  renderedMode: "source" | "solid";
+  renderedColor: string | null;
+  interiorShell: Polygon[] | null;
+}
+
+function cachedGeometryFor(
+  cache: Map<string, CachedRenderGeometry>,
+  item: PlacedItem & { rawPolygons: Polygon[] },
+  meshResolution: ActiveMeshResolution,
+): CachedRenderGeometry {
+  const cached = cache.get(item.id);
+  if (
+    cached?.rawPolygons === item.rawPolygons &&
+    cached.meshResolution === meshResolution
+  ) {
+    return cached;
+  }
+
+  const optimized = optimizeMeshPolygons(item.rawPolygons, { meshResolution });
+  const entry: CachedRenderGeometry = {
+    rawPolygons: item.rawPolygons,
+    meshResolution,
+    optimized,
+    rendered: optimized,
+    renderedMode: "source",
+    renderedColor: null,
+    interiorShell: null,
+  };
+  cache.set(item.id, entry);
+  return entry;
+}
+
+function renderedPolygonsFor(entry: CachedRenderGeometry, item: PlacedItem): Polygon[] {
+  const renderedMode = item.colorOverride === false ? "source" : "solid";
+  const renderedColor = renderedMode === "solid" ? item.color : null;
+  if (entry.renderedMode !== renderedMode || entry.renderedColor !== renderedColor) {
+    entry.rendered = renderedMode === "source"
+      ? entry.optimized
+      : applySolidColor(entry.optimized, item.color);
+    entry.renderedMode = renderedMode;
+    entry.renderedColor = renderedColor;
+  }
+  return entry.rendered;
 }
 
 export interface UseSceneRenderOptions {
@@ -46,37 +102,39 @@ export function useSceneRender({
   terrainVertices,
 }: UseSceneRenderOptions): UseSceneRenderResult {
   const effectiveMeshResolution = activeMeshResolution(sceneOptions.meshResolution);
-  const renderedPolygonsById = useMemo(() => {
-    const out = new Map<string, Polygon[]>();
-    for (const it of placedItems) {
-      if (it.rawPolygons === null) continue;
-      const optimized = optimizeMeshPolygons(it.rawPolygons, {
-        meshResolution: effectiveMeshResolution,
-      });
-      out.set(it.id, it.colorOverride === false ? optimized : applySolidColor(optimized, it.color));
-    }
-    return out;
-  }, [
-    placedItems,
-    effectiveMeshResolution,
-  ]);
+  const geometryCacheRef = useRef(new Map<string, CachedRenderGeometry>());
+  const { renderedPolygonsById, interiorShellPolygonsById } = useMemo(() => {
+    const cache = geometryCacheRef.current;
+    const liveIds = new Set<string>();
+    const rendered = new Map<string, Polygon[]>();
+    const interior = new Map<string, Polygon[]>();
 
-  const interiorShellPolygonsById = useMemo(() => {
-    const out = new Map<string, Polygon[]>();
-    if (!sceneOptions.interiorFill) return out;
     for (const it of placedItems) {
-      if (it.rawPolygons === null || it.preset.kind === "vox") continue;
-      const optimized = optimizeMeshPolygons(it.rawPolygons, {
-        meshResolution: effectiveMeshResolution,
-      });
-      const shell = interiorShellPolygons(optimized);
-      if (shell.length > 0) out.set(it.id, shell);
+      if (!hasRawPolygons(it)) continue;
+      liveIds.add(it.id);
+      const entry = cachedGeometryFor(cache, it, effectiveMeshResolution);
+      rendered.set(it.id, renderedPolygonsFor(entry, it));
+
+      if (sceneOptions.interiorFill && it.preset.kind !== "vox") {
+        if (entry.interiorShell === null) {
+          entry.interiorShell = interiorShellPolygons(entry.optimized);
+        }
+        if (entry.interiorShell.length > 0) interior.set(it.id, entry.interiorShell);
+      }
     }
-    return out;
+
+    for (const id of cache.keys()) {
+      if (!liveIds.has(id)) cache.delete(id);
+    }
+
+    return {
+      renderedPolygonsById: rendered,
+      interiorShellPolygonsById: interior,
+    };
   }, [
     placedItems,
-    sceneOptions.interiorFill,
     effectiveMeshResolution,
+    sceneOptions.interiorFill,
   ]);
 
   // World-space polygons for FPV bbox sampling. `useFpvHost` only reads
@@ -116,9 +174,7 @@ export function useSceneRender({
   });
 
   const renderItems = useMemo(() => {
-    const loaded = placedItems.filter(
-      (it): it is PlacedItem & { rawPolygons: Polygon[] } => it.rawPolygons !== null,
-    );
+    const loaded = placedItems.filter(hasRawPolygons);
     return visibleIds === null ? loaded : loaded.filter((it) => visibleIds.has(it.id));
   }, [placedItems, visibleIds]);
 
