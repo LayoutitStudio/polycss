@@ -29,12 +29,12 @@ export const BASIS_EPS = 1e-9;
 const RECT_EPS = 1e-3;
 // Matches the canonical SOLID_TRIANGLE_BLEED constant.
 export const SOLID_TRIANGLE_BLEED = 0.75;
-const SOLID_TRIANGLE_CANONICAL_SIZE = 256;
-const SOLID_TRIANGLE_LARGE_BORDER_CANONICAL_SIZE = 256;
-const SOLID_TRIANGLE_LARGE_BORDER_WIDTH = "0 128px 256px 128px";
+const SOLID_TRIANGLE_CANONICAL_SIZE = 32;
+const SOLID_TRIANGLE_LARGE_BORDER_CANONICAL_SIZE = 96;
+const SOLID_TRIANGLE_LARGE_BORDER_WIDTH = "0 48px 96px 48px";
 const CORNER_TRIANGLE_STYLE = {
-  width: "256px",
-  height: "256px",
+  width: "32px",
+  height: "32px",
   backgroundColor: "currentColor",
   borderWidth: "0",
   borderTopLeftRadius: "50% 100%",
@@ -84,8 +84,8 @@ export function solidTrianglePaintStyle(): CSSProperties | undefined {
 export function applySolidTrianglePaintStyle(el: HTMLElement): void {
   const primitive = solidTrianglePrimitive();
   if (primitive === "corner-bevel") {
-    el.style.width = "256px";
-    el.style.height = "256px";
+    el.style.width = "32px";
+    el.style.height = "32px";
     el.style.backgroundColor = "currentColor";
     el.style.borderWidth = "0";
     el.style.borderTopLeftRadius = "50% 100%";

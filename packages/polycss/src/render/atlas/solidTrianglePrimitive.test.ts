@@ -98,7 +98,7 @@ describe("solid triangle primitive — corner-bevel vs border", () => {
     expect(result).not.toBeNull();
     const element = result!.rendered[0].element;
     expect(element.className).toBe("");
-    expect(element.style.borderWidth).toBe("0px 128px 256px");
+    expect(element.style.borderWidth).toBe("0px 48px 96px");
     result!.dispose();
   });
 
