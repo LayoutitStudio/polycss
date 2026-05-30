@@ -1759,15 +1759,24 @@ export function createPolyScene(
     const height = by1 - by0;
     if (!(width > 0) || !(height > 0)) return false;
 
+    const clipBounds: Array<[number, number]> = [
+      [bx0, by0],
+      [bx1, by0],
+      [bx1, by1],
+      [bx0, by1],
+    ];
     let d = "";
     for (const verts of polyProjections) {
-      const ccw = ensureCcw2D(verts);
+      const clipped = clipPolygonToConvex2D(ensureCcw2D(verts), clipBounds);
+      if (clipped.length < 3) continue;
+      const ccw = ensureCcw2D(clipped);
       d += `M${(ccw[0]![0] - bx0).toFixed(3)},${(ccw[0]![1] - by0).toFixed(3)}`;
       for (let i = 1; i < ccw.length; i++) {
         d += `L${(ccw[i]![0] - bx0).toFixed(3)},${(ccw[i]![1] - by0).toFixed(3)}`;
       }
       d += "Z";
     }
+    if (!d) return false;
     // (No receiver-footprint subtraction.) The earlier "cut every
     // receiver's hull as a CW hole" approach broke fill-rule=nonzero
     // wherever a receiver overlapped the caster's silhouette: a CCW
