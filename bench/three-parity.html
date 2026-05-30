@@ -495,6 +495,34 @@
         "Crosshair = world origin (0,0,0).";
       p.appendChild(info);
 
+      // Copy-state button: dump every slider/dropdown value as a sharable
+      // URL query string so divergences are easy to reproduce.
+      const copyBtn = document.createElement("button");
+      copyBtn.type = "button";
+      copyBtn.textContent = "Copy state URL";
+      copyBtn.style.cssText = "margin: 4px 0 8px; padding: 6px 10px; font: inherit; " +
+        "background:#0f172a; color:#f8fafc; border:1px solid #1e293b; border-radius:4px; cursor:pointer;";
+      copyBtn.addEventListener("click", async () => {
+        const q = new URLSearchParams();
+        q.set("mesh", S.mesh);
+        q.set("light", S.lighting);
+        q.set("dx", String(S.dir.x));
+        q.set("dy", String(S.dir.y));
+        q.set("dz", String(S.dir.z));
+        q.set("di", String(S.dir.intensity));
+        q.set("ai", String(S.amb.intensity));
+        q.set("so", String(S.shadow.opacity));
+        q.set("rx", String(S.cam.rotX));
+        q.set("ry", String(S.cam.rotY));
+        q.set("z",  String(S.cam.zoom));
+        if (S.mesh === "cottage") q.set("cs", String(S.cottage.scale));
+        const url = location.origin + location.pathname + "?" + q.toString();
+        try { await navigator.clipboard.writeText(url); copyBtn.textContent = "Copied ✓"; }
+        catch { copyBtn.textContent = url; }
+        setTimeout(() => { copyBtn.textContent = "Copy state URL"; }, 2000);
+      });
+      p.appendChild(copyBtn);
+
       // Mesh + lighting dropdowns
       const meshSec = document.createElement("div");
       meshSec.className = "sec";
