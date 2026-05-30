@@ -32,6 +32,10 @@ export default defineConfig({
           replacement: repoPath('../packages/polycss/src/elements/index.ts'),
         },
         {
+          find: /^@layoutit\/polycss-fonts$/,
+          replacement: repoPath('../packages/fonts/src/index.ts'),
+        },
+        {
           find: /^@layoutit\/polycss$/,
           replacement: repoPath('../packages/polycss/src/index.ts'),
         },
