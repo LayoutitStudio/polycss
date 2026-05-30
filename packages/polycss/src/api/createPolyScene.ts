@@ -2206,10 +2206,15 @@ export function createPolyScene(
       // shared-edge vertices land at planeDist == 0 on a neighbour's plane.
       // With `>= 0` they collapse the caster tri into a degenerate sliver
       // (3 verts at the shared edge) which projects onto the receiver as
-      // a visible artifact band. Strict `> SELF_SHADOW_EPS` skips that case
-      // while still keeping legitimate above-plane casters (which have a
-      // real positive distance).
-      const SELF_SHADOW_EPS = 1e-3;
+      // a visible artifact band.
+      //
+      // Epsilon must be just above float precision (~1e-15) so the cube's
+      // shared-edge case is caught, but small enough that legitimate
+      // above-plane casters with tiny offsets (cottage roof barely above
+      // wall, etc.) still contribute — otherwise the shadow looks detached
+      // from the casting geometry. 1e-6 in world units (≈ a millionth of
+      // a typical mesh size) hits both targets.
+      const SELF_SHADOW_EPS = 1e-6;
       for (const item of casterItems) {
         // Project 3D bbox corners onto the face plane; if the bbox of
         // those projections is disjoint from the face outline bbox in

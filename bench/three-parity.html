@@ -98,7 +98,12 @@
         castShadow: true,
       },
       ambientLight: { color: "#ffffff", intensity: S.amb.intensity },
-      shadow: { color: "#000000", opacity: S.shadow.opacity },
+      // lift=0 so the shadow projects exactly onto the floor plane (z=0)
+      // instead of a slightly raised plane — default 0.05 produces a small
+      // visible gap between the caster's base and where the shadow starts
+      // on the floor. The bench's floor + cube are separate meshes, no
+      // z-fight risk that the default lift was protecting against.
+      shadow: { color: "#000000", opacity: S.shadow.opacity, lift: 0 },
       textureLighting: S.lighting,
       // Full-quality atlas — no global shrink-to-fit cap. Default "auto"
       // shrinks the whole atlas to ~2048px / 16MB which pixelates large
@@ -164,10 +169,13 @@
     renderer.setPixelRatio(window.devicePixelRatio);
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.shadowMap.enabled = true;
-    // Hard-edged shadow map to match PolyCSS's analytical projection (which
-    // produces sharp silhouette edges). PCFSoftShadowMap would otherwise
-    // blur shadow edges and mask the underlying silhouette shape.
-    renderer.shadowMap.type = THREE.BasicShadowMap;
+    // PCFShadowMap is a 1-tap sampled shadow map (no blur kernel), which
+    // gives crisp shadow edges close to PolyCSS's analytical projection
+    // without the heavy PCF soft blur. Pair with a high mapSize so the
+    // silhouette stays resolution-defined instead of stairstepped. The
+    // bench prioritises detail over memory — real apps stick with smaller
+    // sizes and Soft variants.
+    renderer.shadowMap.type = THREE.PCFShadowMap;
     THREE.Object3D.DEFAULT_UP.set(0, 0, 1);
 
     const threeScene = new THREE.Scene();
@@ -256,7 +264,7 @@
     const dirLight = new THREE.DirectionalLight(0xffffff, S.dir.intensity);
     dirLight.castShadow = true;
     dirLight.shadow.camera.near = 0.1;
-    dirLight.shadow.mapSize.set(2048, 2048);
+    dirLight.shadow.mapSize.set(8192, 8192);  // bench: trade memory for crisp edges
     dirLight.shadow.bias = -0.0005;
 
     function fitDirLightToScene() {
