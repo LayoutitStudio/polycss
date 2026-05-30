@@ -705,6 +705,14 @@ export function createPolyScene(
      *  explicit `transform.id`. Lets DevTools queries pinpoint a mesh
      *  and its cast shadows even when no id was set up front. */
     autoMeshId: string;
+    /** rebakeAtlas serialization. Each tick of a fast slider drag
+     *  triggers a rebake; without serialization multiple in-flight
+     *  atlases finish out-of-order and the visible bitmap rapidly
+     *  swaps between intermediate light directions — perceived as
+     *  flicker. With serialization, only one rebake runs at a time;
+     *  intermediate ticks just update the queued target. */
+    rebakeInFlight: boolean;
+    rebakeQueuedLightDir: Vec3 | null;
     /** Cached light-visibility raytrace result. Keyed by the polygon
      *  array reference (changes on `setPolygons`) plus the quantized
      *  mesh-local light direction. Recomputed on cache miss only —
@@ -3028,9 +3036,18 @@ export function createPolyScene(
       renderOptions as Parameters<typeof renderPolygonsWithTextureAtlas>[1],
     );
 
+    const finish = (): void => {
+      entry.rebakeInFlight = false;
+      const queued = entry.rebakeQueuedLightDir;
+      if (queued !== null) {
+        entry.rebakeQueuedLightDir = null;
+        rebakeRenderEntryInPlace(entry, queued);
+      }
+    };
     const apply = (): void => {
       if (entry.disposed) {
         newAtlas.dispose();
+        finish();
         return;
       }
       // Topology mismatch (shouldn't happen for a pure light rebake but
@@ -3039,6 +3056,7 @@ export function createPolyScene(
       if (newAtlas.rendered.length !== entry.rendered.length) {
         newAtlas.dispose();
         renderEntry(entry, lightDirectionOverride);
+        finish();
         return;
       }
       for (const item of newAtlas.rendered) {
@@ -3065,6 +3083,7 @@ export function createPolyScene(
       }
       // <q> shadow leaves still need to follow the new light direction.
       emitShadowLeaves(entry);
+      finish();
     };
 
     const ready = (newAtlas as { pagesReady?: Promise<void> }).pagesReady;
@@ -3082,10 +3101,27 @@ export function createPolyScene(
         .then(apply, () => {
           newAtlas.dispose();
           if (!entry.disposed) renderEntry(entry, lightDirectionOverride);
+          finish();
         });
     } else {
       apply();
     }
+  }
+
+  // Serialised entry point for rebakeRenderEntryInPlace. Coalesces
+  // rapid back-to-back calls: while a rebake is in flight, the latest
+  // requested light direction is queued (overwriting any prior queued
+  // value) and applied as soon as the in-flight rebake's apply()
+  // resolves. The visible bitmap therefore only ever advances to the
+  // LATEST-requested direction in order — no out-of-order swaps that
+  // would visually flicker between intermediate light directions.
+  function requestRebakeAtlas(entry: MeshEntry, lightDir: Vec3): void {
+    if (entry.rebakeInFlight) {
+      entry.rebakeQueuedLightDir = lightDir;
+      return;
+    }
+    entry.rebakeInFlight = true;
+    rebakeRenderEntryInPlace(entry, lightDir);
   }
 
   function collectAtlasUrlsFromRendered(
@@ -3353,6 +3389,8 @@ export function createPolyScene(
       solidLightingPreviewActive: false,
       bakedRotation: (transformIn.rotation ? [...transformIn.rotation] : [0, 0, 0]) as Vec3,
       autoMeshId,
+      rebakeInFlight: false,
+      rebakeQueuedLightDir: null,
     };
 
     let currentTriangleFrame: PolyAnimationTriangleFrame | null = null;
@@ -3720,10 +3758,12 @@ export function createPolyScene(
         // so the rasterized atlas produces correct shading after rotation.
         const worldDir = currentOptions.directionalLight?.direction ?? [0.4, -0.7, 0.59] as Vec3;
         const localLightDir = inverseRotateVec3(worldDir as Vec3, entry.bakedRotation);
-        // Use the in-place swap so the textures don't flash blank on every
-        // tick of a slider drag. Falls back to plain renderEntry when the
-        // mesh isn't a candidate (no existing leaves, voxel mode, etc.).
-        rebakeRenderEntryInPlace(entry, localLightDir);
+        // Serialised in-place swap: only one rebake runs at a time and
+        // intermediate slider ticks just update the queued target. Avoids
+        // both blank-flash AND the out-of-order bitmap swaps that look
+        // like flicker when many rebakes finish at slightly different
+        // moments.
+        requestRebakeAtlas(entry, localLightDir);
       },
       getPosition() { return transform.position; },
       getRotation() { return transform.rotation; },
