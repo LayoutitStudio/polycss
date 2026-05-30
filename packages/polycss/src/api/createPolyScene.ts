@@ -2077,7 +2077,15 @@ export function createPolyScene(
         }
         const width = maxU - minU;
         const height = maxV - minV;
-        const lift = 5;
+        // Push the receiver-shadow SVG plane slightly OFF the receiver
+        // surface along the face normal so it composites above without
+        // z-fighting the underlying mesh polygons. The lift was 5 CSS
+        // pixels, which at DEFAULT_TILE=50 is 0.1 world units — visible
+        // as a "gap" between the casting feature and the shadow it
+        // produces, because the shadow content gets projected onto a
+        // plane offset from the actual receiver surface. 0.5 CSS px is
+        // sub-pixel at typical zoom and still wins the depth test.
+        const lift = 0.5;
         const Ox = O[0] + minU * u[0] + minV * v[0] + lift * n[0];
         const Oy = O[1] + minU * u[1] + minV * v[1] + lift * n[1];
         const Oz = O[2] + minU * u[2] + minV * v[2] + lift * n[2];
