@@ -2012,17 +2012,31 @@ export function createPolyScene(
     const Lz = lightDir[2] / llen;
     const svgNS = "http://www.w3.org/2000/svg";
     const rpos = receiverEntry.handle.transform.position ?? [0, 0, 0];
-    // Three.js parity: a shadowed pixel is the receiver lit by ambient ONLY
-    // (no direct contribution). Compute that color from the receiver's first
-    // polygon color + current ambient light, then paint the shadow SVG with
-    // it. At opacity=1.0 → exact "no direct" Three.js shadow; at lower
-    // opacity the SVG blends back toward the lit pixel, fading the shadow.
-    // shadow.color (the legacy "shadow tint" option) is now ignored — the
-    // surface-aware ambient color replaces the uniform black overlay.
-    const receiverColor = receiverEntry.polygons[0]?.color ?? "#cccccc";
+    // Solid vs textured receivers need different shadow treatments:
+    //  - Solid (floor, cube): paint the receiver's "ambient only" lit color
+    //    at full opacity → byte-exact "no direct light" Three.js parity.
+    //  - Textured (cottage wall): can't repaint with a flat color without
+    //    replacing the texture; instead paint a semi-transparent BLACK so
+    //    the texture stays visible underneath, just darkened.
+    //
+    // For the textured opacity we approximate Three.js's per-pixel darkening
+    // factor: a shadowed pixel = lit × ambient/(direct+ambient). Painting a
+    // black overlay at opacity = direct/(direct+ambient) ≈ I/(I + I_amb)
+    // gives the same multiplicative darkening. Multiplied by shadow.opacity
+    // so the user keeps a "shadow strength" knob (0 = no shadow, 1 = full).
+    const hasTexture = receiverEntry.polygons.some((p) => p.texture !== undefined);
     const ambColor = currentOptions.ambientLight?.color ?? "#ffffff";
     const ambIntensity = currentOptions.ambientLight?.intensity ?? 0.4;
-    const fillColor = shadePolygon(receiverColor, 0, "#000000", ambColor, ambIntensity);
+    const dirIntensity = currentOptions.directionalLight?.intensity ?? 1;
+    const receiverColor = receiverEntry.polygons[0]?.color ?? "#cccccc";
+    const userShadowColor = currentOptions.shadow?.color ?? "#000000";
+    const fillColor = hasTexture
+      ? userShadowColor
+      : shadePolygon(receiverColor, 0, "#000000", ambColor, ambIntensity);
+    const directOverTotal = dirIntensity > 0
+      ? dirIntensity / (dirIntensity + Math.max(0, ambIntensity))
+      : 0;
+    const effectiveOpacity = hasTexture ? opacity * directOverTotal : opacity;
     // Mesh-local vertex (world units) → CSS via the same axis swap
     // (world.x → CSS-Y, world.y → CSS-X) and tile scale that the atlas
     // builder applies. transform.position is in world units (matching
@@ -2287,7 +2301,7 @@ export function createPolyScene(
       group.visible = true;
       path.setAttribute("d", d);
       if (path.getAttribute("fill") !== fillColor) path.setAttribute("fill", fillColor);
-      const opStr = opacity.toFixed(4);
+      const opStr = effectiveOpacity.toFixed(4);
       if (path.getAttribute("opacity") !== opStr) path.setAttribute("opacity", opStr);
     }
   }
