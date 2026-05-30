@@ -802,6 +802,7 @@ export const PolyMesh = defineComponent({
               : renderTextureBorderShapePoly({
                   entry: plan,
                   solidPaintDefaults: solidPaintDefaults.value,
+                  forceBorderShape: !textureAtlas.useFullRectSolid.value,
                 });
           });
 
