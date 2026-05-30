@@ -7,6 +7,7 @@ import type {
 } from "@layoutit/polycss-core";
 import type { PolyTextureLightingMode } from "@layoutit/polycss-core";
 import { isBorderShapeSupported, isSolidTriangleSupported } from "./detection";
+import { projectiveQuadSupported } from "./detection";
 
 /**
  * Filter a plan array to the subset that needs atlas packing, given the active
@@ -21,6 +22,7 @@ export function filterAtlasPlans(
 ): Array<TextureAtlasPlan | null> {
   return filterAtlasPlansCore(plans, textureLighting, disabled, {
     solidTriangleSupported: isSolidTriangleSupported(doc),
+    projectiveQuadSupported: doc ? projectiveQuadSupported(doc) : true,
     borderShapeSupported: isBorderShapeSupported(doc),
   });
 }

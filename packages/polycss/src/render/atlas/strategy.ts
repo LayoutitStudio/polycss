@@ -194,8 +194,10 @@ export function filterAtlasPlans(
   disabled: ReadonlySet<PolyRenderStrategy>,
   doc?: Document | null,
 ): Array<TextureAtlasPlan | null> {
+  const resolvedDoc = doc ?? (typeof document !== "undefined" ? document : null);
   return filterAtlasPlansCore(plans, textureLighting, disabled, {
     solidTriangleSupported: isSolidTriangleSupported(doc),
+    projectiveQuadSupported: resolvedDoc ? projectiveQuadSupported(resolvedDoc) : true,
     borderShapeSupported: isBorderShapeSupported(doc),
   });
 }

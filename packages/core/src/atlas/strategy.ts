@@ -87,6 +87,7 @@ export function dominantCountKey(map: Map<string, number>): string | undefined {
 
 export interface FilterAtlasPlansEnv {
   solidTriangleSupported: boolean;
+  projectiveQuadSupported: boolean;
   borderShapeSupported: boolean;
 }
 
@@ -102,7 +103,7 @@ export function filterAtlasPlans(
   env: FilterAtlasPlansEnv,
 ): Array<TextureAtlasPlan | null> {
   const useFullRectSolid = !disabled.has("b");
-  const useProjectiveQuad = useFullRectSolid;
+  const useProjectiveQuad = useFullRectSolid && env.projectiveQuadSupported;
   const useStableTriangle = !disabled.has("u") && env.solidTriangleSupported;
   const useBorderShape = !disabled.has("i") && textureLighting !== "dynamic" && env.borderShapeSupported;
   const disableB = disabled.has("b");

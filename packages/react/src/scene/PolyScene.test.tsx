@@ -163,6 +163,25 @@ describe("PolyScene — polygon rendering", () => {
     expect(style).not.toContain("border-shape");
   });
 
+  it("falls back to atlas for projective solid quads on Safari", () => {
+    const nav = document.defaultView?.navigator ?? window.navigator;
+    const userAgent = vi.spyOn(nav, "userAgent", "get").mockReturnValue(
+      "Mozilla/5.0 AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15",
+    );
+    vi.stubGlobal("CSS", { supports: () => false });
+
+    try {
+      const container = renderScene({
+        polygons: [NON_RECT_QUAD],
+      });
+      expect(container.querySelector("b")).toBeNull();
+      expect(container.querySelector("s")).toBeTruthy();
+    } finally {
+      userAgent.mockRestore();
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("renders multiple polygons", () => {
     const container = renderScene({ polygons: [TRIANGLE, QUAD] });
     const polys = container.querySelectorAll("i,b,s,u");

@@ -153,8 +153,9 @@ describe("Poly — non-horizontal geometry", () => {
     expect(poly.style.height).toBe("");
   });
 
-  it("renders solid non-rect quads as projective b on Safari", () => {
-    const userAgent = vi.spyOn(window.navigator, "userAgent", "get").mockReturnValue(
+  it("falls back to atlas for projective solid quads on Safari", () => {
+    const nav = document.defaultView?.navigator ?? window.navigator;
+    const userAgent = vi.spyOn(nav, "userAgent", "get").mockReturnValue(
       "Mozilla/5.0 AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15",
     );
     vi.stubGlobal("CSS", { supports: () => false });
@@ -162,9 +163,7 @@ describe("Poly — non-horizontal geometry", () => {
     try {
       const container = renderPoly({ vertices: NON_RECT_QUAD_VERTS });
       const poly = getPoly(container);
-      // Non-rect untextured quads are rendered as projective <b> regardless of
-      // browser — the projective matrix path doesn't depend on CSS.supports.
-      expect(poly.tagName.toLowerCase()).toBe("b");
+      expect(poly.tagName.toLowerCase()).toBe("s");
       expect(poly.style.getPropertyValue("border-shape")).toBe("");
     } finally {
       userAgent.mockRestore();
