@@ -2299,17 +2299,26 @@ export function createPolyScene(
       group.visible = true;
       path.setAttribute("d", d);
       if (path.getAttribute("fill") !== fillColor) path.setAttribute("fill", fillColor);
-      // Per-group opacity for textured receivers — Ldotn (group's own normal
-      // dotted with the light) drives the direct contribution, so the
-      // semi-transparent overlay darkens this face exactly as Three.js
-      // would compute `lit × ambient/(direct + ambient)` per pixel. Solid
-      // receivers use the user's `shadow.opacity` directly (the fillColor
-      // is already the physically correct ambient-only color).
+      // Per-group opacity for textured receivers. Three.js darkens a
+      // shadowed pixel in LINEAR space: shadow_linear = lit_linear ×
+      // ambient/(direct + ambient). CSS opacity blending happens in sRGB
+      // (post-encoding), so a naive `opacity = direct/(direct+ambient)`
+      // over-darkens — we need the sRGB-equivalent factor of the linear
+      // ratio. For a perfect parity we'd need per-pixel linear processing
+      // (texture is sampled in sRGB and the shadow path can't see those
+      // pixels), but a gamma-2.4 approximation matches very well for
+      // typical mid-tone textures: ratio_sRGB ≈ ratio_linear^(1/2.4).
       let effOp = opacity;
       if (hasTexture) {
         const direct = dirIntensity * Math.max(0, Ldotn);
         const total = direct + Math.max(0, ambIntensity);
-        effOp = total > 0 ? opacity * (direct / total) : 0;
+        if (total > 0) {
+          const ratioLinear = Math.max(0, ambIntensity) / total;
+          const ratioSrgb = Math.pow(ratioLinear, 1 / 2.4);
+          effOp = opacity * (1 - ratioSrgb);
+        } else {
+          effOp = 0;
+        }
       }
       const opStr = effOp.toFixed(4);
       if (path.getAttribute("opacity") !== opStr) path.setAttribute("opacity", opStr);
