@@ -2368,6 +2368,30 @@ describe("createPolyScene", () => {
       expect(initialSvg.querySelector("path")?.getAttribute("d")).toBe(initialPathD);
     });
 
+    it("baked preview can skip shadow rewrites", () => {
+      scene = makeScene(host, {
+        textureLighting: "baked",
+        directionalLight: { direction: [0, 0, 1] },
+      });
+      scene.add(makeParseResult([triangle()]), { castShadow: true });
+      const initialSvg = host.querySelector(".polycss-shadow") as SVGSVGElement;
+      const initialTransform = initialSvg.style.transform;
+      const initialPathD = initialSvg.querySelector("path")?.getAttribute("d");
+      const previewScene = scene as PolySceneHandle & {
+        previewBakedSolidLighting(next: Pick<PolySceneOptions, "directionalLight" | "ambientLight"> & {
+          skipShadows?: boolean;
+        }): boolean;
+      };
+
+      expect(previewScene.previewBakedSolidLighting({
+        directionalLight: { direction: [1, 0, 1] },
+        skipShadows: true,
+      })).toBe(true);
+
+      expect(initialSvg.style.transform).toBe(initialTransform);
+      expect(initialSvg.querySelector("path")?.getAttribute("d")).toBe(initialPathD);
+    });
+
     it("non-shadow helper movement does not overwrite baked preview shadows", () => {
       scene = makeScene(host, {
         textureLighting: "baked",

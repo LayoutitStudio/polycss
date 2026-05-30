@@ -1548,11 +1548,15 @@ export function createPolyScene(
   }
 
   function previewBakedSolidLighting(
-    next: Pick<Omit<PolySceneOptions, "camera">, "directionalLight" | "ambientLight">,
+    next: Pick<Omit<PolySceneOptions, "camera">, "directionalLight" | "ambientLight"> & {
+      skipShadows?: boolean;
+    },
   ): boolean {
     if ((currentOptions.textureLighting ?? "baked") !== "baked") return false;
     applyLightingVars(sceneEl, { ...currentOptions, ...next });
-    if (next.directionalLight?.direction) emitSceneShadows(next.directionalLight.direction as Vec3);
+    if (!next.skipShadows && next.directionalLight?.direction) {
+      emitSceneShadows(next.directionalLight.direction as Vec3);
+    }
     let installed = false;
     for (const entry of meshes) {
       applyPreviewMeshLightVars(entry, next);

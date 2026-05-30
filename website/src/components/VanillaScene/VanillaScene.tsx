@@ -283,13 +283,14 @@ function bakedLightingSignature(
 
 export interface VanillaSceneTransientHandle {
   applySceneOptions(options: SceneOptionsState): void;
-  applyLightOptions(options: SceneOptionsState): void;
+  applyLightOptions(options: SceneOptionsState, preview?: { shadow?: boolean }): void;
 }
 
 type BakedSolidLightingPreviewSceneHandle = PolySceneHandle & {
   previewBakedSolidLighting?: (next: {
     directionalLight?: PolyDirectionalLight;
     ambientLight?: PolyAmbientLight;
+    skipShadows?: boolean;
   }) => boolean;
   commitBakedSolidLighting?: () => boolean;
 };
@@ -411,16 +412,23 @@ export function VanillaScene({
     }
   }, []);
 
-  const applyTransientLightOptions = useCallback((nextOptions: SceneOptionsState): void => {
+  const applyTransientLightOptions = useCallback((nextOptions: SceneOptionsState, preview?: { shadow?: boolean }): void => {
     const scene = sceneRef.current;
     if (!scene) return;
     const nextDirectionalLight = directionalFromOptions(nextOptions);
+    const nextShadow = { maxExtend: nextOptions.shadowMaxExtend, lift: GALLERY_SHADOW_LIFT };
+    const previewShadow = preview?.shadow !== false;
     if (nextOptions.textureLighting === "dynamic") {
-      scene.setOptions({ directionalLight: nextDirectionalLight });
+      scene.setOptions({
+        directionalLight: nextDirectionalLight,
+        ...(previewShadow ? { shadow: nextShadow } : {}),
+      });
     } else {
+      if (previewShadow) scene.setOptions({ shadow: nextShadow });
       (scene as BakedSolidLightingPreviewSceneHandle).previewBakedSolidLighting?.({
         directionalLight: nextDirectionalLight,
         ambientLight: ambientFromOptions(nextOptions),
+        skipShadows: !previewShadow,
       });
     }
     lightHandleRef.current?.setTransform({
