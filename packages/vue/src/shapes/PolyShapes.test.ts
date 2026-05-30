@@ -49,12 +49,34 @@ describe("PolyBox (Vue)", () => {
     const container = renderShape(h(PolyBox, { size: 100, color: "#ff6644" }));
     expect(hasLeaves(container)).toBe(true);
   });
+
+  it("threads face overrides into boxPolygons", () => {
+    const container = renderShape(h(PolyBox, {
+      size: 100,
+      color: "#ff6644",
+      faces: { top: false },
+    }));
+    expect(container.querySelectorAll("i,b,s,u")).toHaveLength(5);
+  });
 });
 
 describe("PolyPlane (Vue)", () => {
   it("renders leaf DOM inside PolyCamera > PolyScene", () => {
     const container = renderShape(h(PolyPlane, { axis: 2, size: 50, color: "#cccccc" }));
     expect(hasLeaves(container)).toBe(true);
+  });
+
+  it("threads offset into planePolygons", () => {
+    const base = renderShape(h(PolyPlane, { axis: 2, size: 1, color: "#cccccc" }));
+    const shifted = renderShape(h(PolyPlane, {
+      axis: 2,
+      size: 1,
+      offset: [5, 5],
+      color: "#cccccc",
+    }));
+    const baseTransform = (base.querySelector("i,b,s,u") as HTMLElement).style.transform;
+    const shiftedTransform = (shifted.querySelector("i,b,s,u") as HTMLElement).style.transform;
+    expect(shiftedTransform).not.toBe(baseTransform);
   });
 });
 

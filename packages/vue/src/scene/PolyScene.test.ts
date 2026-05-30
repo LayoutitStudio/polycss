@@ -243,6 +243,17 @@ describe("PolyScene (Vue) — autoCenter", () => {
     expect(t1).not.toBe(t2);
   });
 
+  it("uses centerPolygons as the autoCenter bbox source without rendering them", () => {
+    const { container } = renderScene({
+      polygons: [],
+      centerPolygons: [QUAD],
+      autoCenter: true,
+    });
+    const scene = container.querySelector(".polycss-scene") as HTMLElement;
+    expect(container.querySelectorAll("i,b,s,u")).toHaveLength(0);
+    expect(scene.style.transform).toContain("translate3d(-50px, -50px, -50px)");
+  });
+
   it("pan (target) and autoCenterOffset are independent — autoCenter does not zero out target", async () => {
     // Even with autoCenter the user's camera target should be preserved.
     // We can't drive orbit controls in a unit test, so we verify the

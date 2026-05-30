@@ -254,6 +254,18 @@ describe("PolyScene — autoCenter", () => {
     expect(transformOn).toContain("translate3d(-50px, -50px, -50px)");
   });
 
+  it("uses centerPolygons as the autoCenter bbox source without rendering them", async () => {
+    const container = renderScene({
+      polygons: [],
+      centerPolygons: [QUAD],
+      autoCenter: true,
+    });
+    await flushReactWork();
+    const scene = container.querySelector(".polycss-scene") as HTMLElement;
+    expect(container.querySelectorAll("i,b,s,u")).toHaveLength(0);
+    expect(scene.style.transform).toContain("translate3d(-50px, -50px, -50px)");
+  });
+
   it("target and autoCenterOffset are independent: pan survives mesh bbox change", async () => {
     // Render with TRIANGLE (centroid ~[0.33, 0.33, 0]) centered.
     // Then switch to QUAD (centroid [1, 1, 1]) — the centering offset updates
