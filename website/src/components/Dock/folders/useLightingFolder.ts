@@ -7,6 +7,7 @@
  * `onUpdateScene` callback so the parent owns the scene-options state.
  */
 import type { GUI } from "lil-gui";
+import { useEffect } from "react";
 
 import { useColor, useFolder, useSlider, useToggle } from "../primitives";
 
@@ -14,6 +15,7 @@ export interface LightingFolderInputs {
   castShadow: boolean;
   shadowMaxExtend: number;
   showGround: boolean;
+  groundColor: string;
   showLight: boolean;
   lightAzimuth: number;
   lightElevation: number;
@@ -25,6 +27,7 @@ export interface LightingFolderInputs {
     castShadow?: boolean;
     shadowMaxExtend?: number;
     showGround?: boolean;
+    groundColor?: string;
     showLight?: boolean;
     lightAzimuth?: number;
     lightElevation?: number;
@@ -40,6 +43,7 @@ export function useLightingFolder(parent: GUI | null, inputs: LightingFolderInpu
     castShadow,
     shadowMaxExtend,
     showGround,
+    groundColor,
     showLight,
     lightAzimuth,
     lightElevation,
@@ -66,6 +70,12 @@ export function useLightingFolder(parent: GUI | null, inputs: LightingFolderInpu
     (value) => onUpdateScene({ shadowMaxExtend: value }),
   );
   useToggle(folder, "Show ground", showGround, (value) => onUpdateScene({ showGround: value }));
+  const groundColorControl = useColor(folder, "Ground color", groundColor, (value) =>
+    onUpdateScene({ groundColor: value }),
+  );
+  useEffect(() => {
+    groundColorControl?.setVisible(showGround);
+  }, [groundColorControl, showGround]);
   useToggle(folder, "Light helper", showLight, (value) => onUpdateScene({ showLight: value }));
 
   useSlider(folder, "Azimuth", { min: 0, max: 360, step: 1 }, lightAzimuth, (value) =>

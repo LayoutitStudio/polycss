@@ -37,6 +37,12 @@ const LIGHT_HELPER_TILE = 50;
 // Keep the visible ground just below the model floor; coplanar ground/car
 // faces z-fight during repaint-heavy light drags.
 const GROUND_Z_OFFSET = -0.04;
+const GALLERY_GROUND_COLOR = "#7d848e";
+const GALLERY_GROUND_RGB = { r: 0x7d, g: 0x84, b: 0x8e };
+const GALLERY_GROUND_LIGHT_RESPONSE = 0.28;
+const GALLERY_GROUND_RADIUS_MULTIPLIER = 2.5;
+const GALLERY_GROUND_MODEL_RADIUS_MULTIPLIER = 1.75;
+const GALLERY_GROUND_MIN_RADIUS = 40;
 // The shadow plane should sit above the visible ground, not above the model
 // floor, otherwise large live-updated SVG shadows can intersect low geometry.
 const SHADOW_GROUND_LIFT = 0.01;
@@ -208,6 +214,60 @@ function ambientFromOptions(options: SceneOptionsState): PolyAmbientLight {
   };
 }
 
+function parseGalleryHexColor(value: string | undefined, fallback: typeof GALLERY_GROUND_RGB): typeof GALLERY_GROUND_RGB {
+  if (!value || !/^#[0-9a-f]{6}$/i.test(value)) return fallback;
+  return {
+    r: Number.parseInt(value.slice(1, 3), 16),
+    g: Number.parseInt(value.slice(3, 5), 16),
+    b: Number.parseInt(value.slice(5, 7), 16),
+  };
+}
+
+function clampColorChannel(value: number): number {
+  return Math.max(0, Math.min(255, Math.round(value)));
+}
+
+function mutedGalleryGroundColor(
+  directionalLight: PolyDirectionalLight,
+  ambientLight: PolyAmbientLight,
+  baseColor: string,
+): string {
+  const base = parseGalleryHexColor(baseColor, GALLERY_GROUND_RGB);
+  const [dx, dy, dz] = directionalLight.direction;
+  const len = Math.hypot(dx, dy, dz) || 1;
+  const lambert = Math.max(0, dz / len);
+  const key = parseGalleryHexColor(directionalLight.color, { r: 255, g: 255, b: 255 });
+  const ambient = parseGalleryHexColor(ambientLight.color, { r: 255, g: 255, b: 255 });
+  const keyIntensity = directionalLight.intensity ?? 1;
+  const ambientIntensity = ambientLight.intensity ?? 0.4;
+  const mix = (base: number, ambientChannel: number, keyChannel: number) => {
+    const lit = base * (
+      (ambientChannel / 255) * ambientIntensity +
+      (keyChannel / 255) * keyIntensity * lambert
+    );
+    return clampColorChannel(base * (1 - GALLERY_GROUND_LIGHT_RESPONSE) + lit * GALLERY_GROUND_LIGHT_RESPONSE);
+  };
+  return `rgb(${mix(base.r, ambient.r, key.r)} ${mix(base.g, ambient.g, key.g)} ${mix(base.b, ambient.b, key.b)})`;
+}
+
+function applyGalleryGroundPaint(
+  handle: VanillaPolyMeshHandle | null,
+  directionalLight: PolyDirectionalLight,
+  ambientLight: PolyAmbientLight,
+  baseColor: string,
+): void {
+  if (!handle) return;
+  const color = mutedGalleryGroundColor(directionalLight, ambientLight, baseColor);
+  const leaves = handle.element.querySelectorAll<HTMLElement>("b,i,s,u");
+  for (const leaf of leaves) {
+    leaf.style.setProperty("color", color, "important");
+    if (leaf.tagName.toLowerCase() === "s") {
+      leaf.style.setProperty("background", color, "important");
+      leaf.style.setProperty("background-blend-mode", "normal", "important");
+    }
+  }
+}
+
 function bakedLightingSignature(
   directionalLight: PolyDirectionalLight,
   ambientLight: PolyAmbientLight,
@@ -319,6 +379,12 @@ export function VanillaScene({
   onTransientHandleChangeRef.current = onTransientHandleChange;
   const onSceneDomChangeRef = useRef(onSceneDomChange);
   onSceneDomChangeRef.current = onSceneDomChange;
+  const directionalLightRef = useRef(directionalLight);
+  directionalLightRef.current = directionalLight;
+  const ambientLightRef = useRef(ambientLight);
+  ambientLightRef.current = ambientLight;
+  const groundColorRef = useRef(options.groundColor);
+  groundColorRef.current = options.groundColor;
   const helperScaleRef = useRef(helperScale);
   helperScaleRef.current = helperScale;
   const helperTargetRef = useRef(helperTarget);
@@ -364,6 +430,7 @@ export function VanillaScene({
         helperScaleRef.current * 0.7,
       ),
     });
+    applyGalleryGroundPaint(groundHandleRef.current, nextDirectionalLight, ambientFromOptions(nextOptions), nextOptions.groundColor);
   }, []);
 
   const applyTransientSceneOptions = useCallback((nextOptions: SceneOptionsState): void => {
@@ -391,6 +458,7 @@ export function VanillaScene({
         helperScaleRef.current * 0.7,
       ),
     });
+    applyGalleryGroundPaint(groundHandleRef.current, nextDirectionalLight, ambientFromOptions(nextOptions), nextOptions.groundColor);
   }, []);
 
   useEffect(() => {
@@ -840,12 +908,14 @@ export function VanillaScene({
     } else if (options.textureLighting !== "baked") {
       committedBakedLightingRef.current = nextLightingSignature;
     }
+    applyGalleryGroundPaint(groundHandleRef.current, directionalLight, ambientLight, options.groundColor);
   }, [
     options.rotX,
     options.rotY,
     options.zoom,
     options.target,
     options.textureLighting,
+    options.groundColor,
     options.shadowMaxExtend,
     directionalLight,
     ambientLight,
@@ -861,6 +931,7 @@ export function VanillaScene({
     scene.setOptions({
       strategies: { disable: options.disableStrategies },
     });
+    applyGalleryGroundPaint(groundHandleRef.current, directionalLightRef.current, ambientLightRef.current, groundColorRef.current);
     notifySceneDomChange();
   }, [options.disableStrategies, notifySceneDomChange]);
 
@@ -1016,10 +1087,10 @@ export function VanillaScene({
 
   // Effect 3.5 — ground receiver. A flat quad in the XY plane (Z is "up"
   // in PolyCSS's world convention — the red-green plane in the axes helper
-  // is the floor) at the model's min-Z, sized to ~3× the model's horizontal
-  // span. Gives shadows something to land on. excludeFromAutoCenter so
-  // toggling it doesn't shift the camera pivot; castShadow:false because
-  // the floor doesn't shadow itself.
+  // is the floor) at the model's min-Z. Size from both footprint and full
+  // model scale so tall/narrow assets still get a usable floor. Gives shadows
+  // something to land on. excludeFromAutoCenter so toggling it doesn't shift
+  // the camera pivot; castShadow:false because the floor doesn't shadow itself.
   useEffect(() => {
     const scene = sceneRef.current;
     if (!scene) return;
@@ -1048,8 +1119,13 @@ export function VanillaScene({
       }
       return;
     }
-    const span = Math.max(maxX - minX, maxY - minY, 1);
-    const pad = span * 1.5;
+    const footprintSpan = Math.max(maxX - minX, maxY - minY, 1);
+    const modelSpan = Math.max(footprintSpan, maxZ - minZ, 1);
+    const pad = Math.max(
+      footprintSpan * GALLERY_GROUND_RADIUS_MULTIPLIER,
+      modelSpan * GALLERY_GROUND_MODEL_RADIUS_MULTIPLIER,
+      GALLERY_GROUND_MIN_RADIUS,
+    );
     const cx = (minX + maxX) / 2;
     const cy = (minY + maxY) / 2;
     const z = minZ + GROUND_Z_OFFSET;
@@ -1062,7 +1138,7 @@ export function VanillaScene({
       ],
       // Medium gray — needs to be light enough that the 25% black shadow
       // on top has visible contrast (the page background is near-black).
-      color: "#7d848e",
+      color: options.groundColor || GALLERY_GROUND_COLOR,
     };
     groundHandleRef.current = scene.add(
       {
@@ -1073,6 +1149,8 @@ export function VanillaScene({
       },
       { excludeFromAutoCenter: true, castShadow: false },
     );
+    groundHandleRef.current.element.classList.add("dn-gallery-ground");
+    applyGalleryGroundPaint(groundHandleRef.current, directionalLightRef.current, ambientLightRef.current, groundColorRef.current);
     notifySceneDomChange();
     return () => {
       groundHandleRef.current?.dispose();
@@ -1085,6 +1163,7 @@ export function VanillaScene({
     options.autoCenter,
     options.textureQuality,
     options.textureLighting,
+    options.groundColor,
     options.perspective,
     stableDirectionalForRebuild,
     stableAmbientForRebuild,

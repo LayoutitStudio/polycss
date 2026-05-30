@@ -131,6 +131,7 @@ const DEFAULT_SCENE: SceneOptionsState = {
   castShadow: false,
   shadowMaxExtend: 2000,
   showGround: false,
+  groundColor: "#7d848e",
   fpvLook: true,
   fpvMove: true,
   fpvJump: true,
@@ -1419,6 +1420,7 @@ export default function GalleryWorkbench() {
           castShadow={sceneOptions.castShadow}
           shadowMaxExtend={sceneOptions.shadowMaxExtend}
           showGround={sceneOptions.showGround}
+          groundColor={sceneOptions.groundColor}
           showLight={sceneOptions.showLight}
           lightAzimuth={sceneOptions.lightAzimuth}
           lightElevation={sceneOptions.lightElevation}
