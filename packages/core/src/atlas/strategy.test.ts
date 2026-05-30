@@ -163,8 +163,8 @@ describe("isProjectiveQuadPlan — projective quad detection", () => {
 // ---------------------------------------------------------------------------
 
 const noDisable = new Set<"b" | "i" | "u">();
-const desktopEnv = { solidTriangleSupported: true, borderShapeSupported: false };
-const borderShapeEnv = { solidTriangleSupported: true, borderShapeSupported: true };
+const desktopEnv = { solidTriangleSupported: true, projectiveQuadSupported: true, borderShapeSupported: false };
+const borderShapeEnv = { solidTriangleSupported: true, projectiveQuadSupported: true, borderShapeSupported: true };
 
 describe("filterAtlasPlans — full-rect solid exclusion", () => {
   it("full-rect plan is excluded from atlas when b is enabled", () => {
@@ -177,7 +177,11 @@ describe("filterAtlasPlans — full-rect solid exclusion", () => {
     const plan = computeTextureAtlasPlanPublic(FLAT_RECT, 0)!;
     const disabled = new Set<"b" | "i" | "u">(["b"]);
     // When b disabled and no border-shape, rect falls through to atlas
-    const result = filterAtlasPlans([plan], "baked", disabled, { solidTriangleSupported: true, borderShapeSupported: false });
+    const result = filterAtlasPlans([plan], "baked", disabled, {
+      solidTriangleSupported: true,
+      projectiveQuadSupported: true,
+      borderShapeSupported: false,
+    });
     expect(result[0]).not.toBeNull();
   });
 });
@@ -193,13 +197,21 @@ describe("filterAtlasPlans — triangle exclusion", () => {
     const plan = computeTextureAtlasPlanPublic(FLAT_TRIANGLE, 0)!;
     const disabled = new Set<"b" | "i" | "u">(["u"]);
     // u disabled and no border-shape → triangle goes to atlas
-    const result = filterAtlasPlans([plan], "baked", disabled, { solidTriangleSupported: false, borderShapeSupported: false });
+    const result = filterAtlasPlans([plan], "baked", disabled, {
+      solidTriangleSupported: false,
+      projectiveQuadSupported: true,
+      borderShapeSupported: false,
+    });
     expect(result[0]).not.toBeNull();
   });
 
   it("triangle plan stays in atlas when solidTriangleSupported is false", () => {
     const plan = computeTextureAtlasPlanPublic(FLAT_TRIANGLE, 0)!;
-    const result = filterAtlasPlans([plan], "baked", noDisable, { solidTriangleSupported: false, borderShapeSupported: false });
+    const result = filterAtlasPlans([plan], "baked", noDisable, {
+      solidTriangleSupported: false,
+      projectiveQuadSupported: true,
+      borderShapeSupported: false,
+    });
     expect(result[0]).not.toBeNull();
   });
 });
@@ -247,6 +259,30 @@ describe("filterAtlasPlans — border-shape exclusion", () => {
     const disabled = new Set<"b" | "i" | "u">(["i"]);
     const result = filterAtlasPlans([plan], "baked", disabled, borderShapeEnv);
     expect(result[0]).not.toBeNull();
+  });
+});
+
+describe("filterAtlasPlans — projective quad exclusion", () => {
+  it("non-rect projective quads are excluded when projective b is supported", () => {
+    const plan = computeTextureAtlasPlanPublic(NON_RECT_QUAD, 0)!;
+    expect(isProjectiveQuadPlan(plan)).toBe(true);
+    const result = filterAtlasPlans([plan], "baked", noDisable, {
+      solidTriangleSupported: true,
+      projectiveQuadSupported: true,
+      borderShapeSupported: false,
+    });
+    expect(result[0]).toBeNull();
+  });
+
+  it("non-rect projective quads stay in atlas when projective b is unsupported", () => {
+    const plan = computeTextureAtlasPlanPublic(NON_RECT_QUAD, 0)!;
+    expect(isProjectiveQuadPlan(plan)).toBe(true);
+    const result = filterAtlasPlans([plan], "baked", noDisable, {
+      solidTriangleSupported: true,
+      projectiveQuadSupported: false,
+      borderShapeSupported: false,
+    });
+    expect(result[0]).toBe(plan);
   });
 });
 

@@ -52,6 +52,7 @@ export const DEFAULT_SCENE: SceneOptionsState = {
   castShadow: true,
   shadowMaxExtend: 600,
   showGround: true,
+  groundColor: "#7d848e",
   fpvLook: true,
   fpvMove: true,
   fpvJump: true,

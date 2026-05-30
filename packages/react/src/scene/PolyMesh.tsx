@@ -520,6 +520,10 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
   const sceneCtx = usePolySceneContext();
   const effectiveTextureLighting = textureLighting ?? sceneCtx?.textureLighting ?? "baked";
   const effectiveStrategies = sceneCtx?.strategies;
+  const disabledStrategies = useMemo(
+    () => effectiveStrategies?.disable?.length ? new Set(effectiveStrategies.disable) : undefined,
+    [effectiveStrategies],
+  );
   const effectiveSeamBleed = seamBleed ?? sceneCtx?.seamBleed ?? DEFAULT_SEAM_BLEED;
   const effectiveDirectional =
     effectiveTextureLighting === "dynamic" ? undefined : sceneCtx?.directionalLight;
@@ -884,6 +888,7 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
                 key={plan.index}
                 entry={plan}
                 solidPaintDefaults={solidPaintDefaults}
+                disabledStrategies={disabledStrategies}
               />
             );
       });

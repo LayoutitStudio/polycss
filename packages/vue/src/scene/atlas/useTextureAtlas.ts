@@ -15,7 +15,7 @@ import type {
   PolyRenderStrategy,
   PolyRenderStrategiesOption,
 } from "@layoutit/polycss-core";
-import { isBorderShapeSupported, isSolidTriangleSupported } from "./detection";
+import { isBorderShapeSupported, isSolidTriangleSupported, projectiveQuadSupported } from "./detection";
 import { filterAtlasPlans } from "./filterPlans";
 import { packTextureAtlasPlansWithScale } from "./packing";
 import { buildAtlasPages } from "./buildAtlasPages";
@@ -49,7 +49,10 @@ export function useTextureAtlas(
 ): TextureAtlasResult {
   const disabled = computed(() => new Set((strategies.value?.disable ?? []) as PolyRenderStrategy[]));
   const useFullRectSolid = computed(() => !disabled.value.has("b"));
-  const useProjectiveQuad = computed(() => useFullRectSolid.value);
+  const useProjectiveQuad = computed(() => {
+    const doc = typeof document !== "undefined" ? document : null;
+    return useFullRectSolid.value && (!doc || projectiveQuadSupported(doc));
+  });
   const useStableTriangle = computed(() => !disabled.value.has("u") && isSolidTriangleSupported());
   const useBorderShape = computed(
     () => !disabled.value.has("i") && textureLighting.value !== "dynamic" && isBorderShapeSupported(),

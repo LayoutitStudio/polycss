@@ -23,6 +23,7 @@ import {
   quantizeCssColor,
   stepRgbToward,
   offsetConvexPolygonPoints,
+  formatStableTriangleTransformScalars,
   applySolidTrianglePaintStyle,
   solidTriangleBorderWidth,
   solidTriangleCanonicalSize,
@@ -142,27 +143,6 @@ function offsetStableTrianglePoints(
   }
 
   return [apexPtX, apexPtY, baseLeftX, baseLeftY, baseRightX, baseRightY];
-}
-
-function formatStableTriangleTransformScalars(
-  x0: number, x1: number, x2: number,
-  y0: number, y1: number, y2: number,
-  z0: number, z1: number, z2: number,
-  tx0: number, tx1: number, tx2: number,
-): string {
-  const rx0 = Math.round(x0 * 1000) / 1000 || 0;
-  const rx1 = Math.round(x1 * 1000) / 1000 || 0;
-  const rx2 = Math.round(x2 * 1000) / 1000 || 0;
-  const ry0 = Math.round(y0 * 1000) / 1000 || 0;
-  const ry1 = Math.round(y1 * 1000) / 1000 || 0;
-  const ry2 = Math.round(y2 * 1000) / 1000 || 0;
-  const rz0 = Math.round(z0 * 1000) / 1000 || 0;
-  const rz1 = Math.round(z1 * 1000) / 1000 || 0;
-  const rz2 = Math.round(z2 * 1000) / 1000 || 0;
-  const rtx0 = Math.round(tx0 * 1000) / 1000 || 0;
-  const rtx1 = Math.round(tx1 * 1000) / 1000 || 0;
-  const rtx2 = Math.round(tx2 * 1000) / 1000 || 0;
-  return `matrix3d(${rx0},${rx1},${rx2},0,${ry0},${ry1},${ry2},0,${rz0},${rz1},${rz2},0,${rtx0},${rtx1},${rtx2},1)`;
 }
 
 function computeStableTriangleDomStyle(

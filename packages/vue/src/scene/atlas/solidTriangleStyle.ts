@@ -26,7 +26,6 @@ export const DEFAULT_LIGHT_INTENSITY = 1;
 export const DEFAULT_AMBIENT_COLOR = "#ffffff";
 export const DEFAULT_AMBIENT_INTENSITY = 0.4;
 export const BASIS_EPS = 1e-9;
-const RECT_EPS = 1e-3;
 // Matches the canonical SOLID_TRIANGLE_BLEED constant.
 export const SOLID_TRIANGLE_BLEED = 0.75;
 const SOLID_TRIANGLE_CANONICAL_SIZE = 32;
@@ -419,6 +418,27 @@ function stableTriangleEdgeAmounts(
       : 0;
     return safePlanSeamBleedAmount(screenPts, localEdgeIndex, requested);
   });
+}
+
+export function formatStableTriangleTransformScalars(
+  x0: number, x1: number, x2: number,
+  y0: number, y1: number, y2: number,
+  z0: number, z1: number, z2: number,
+  tx0: number, tx1: number, tx2: number,
+): string {
+  const rx0 = Math.round(x0 * 1000) / 1000 || 0;
+  const rx1 = Math.round(x1 * 1000) / 1000 || 0;
+  const rx2 = Math.round(x2 * 1000) / 1000 || 0;
+  const ry0 = Math.round(y0 * 1000) / 1000 || 0;
+  const ry1 = Math.round(y1 * 1000) / 1000 || 0;
+  const ry2 = Math.round(y2 * 1000) / 1000 || 0;
+  const rz0 = Math.round(z0 * 1000) / 1000 || 0;
+  const rz1 = Math.round(z1 * 1000) / 1000 || 0;
+  const rz2 = Math.round(z2 * 1000) / 1000 || 0;
+  const rtx0 = Math.round(tx0 * 1000) / 1000 || 0;
+  const rtx1 = Math.round(tx1 * 1000) / 1000 || 0;
+  const rtx2 = Math.round(tx2 * 1000) / 1000 || 0;
+  return `matrix3d(${rx0},${rx1},${rx2},0,${ry0},${ry1},${ry2},0,${rz0},${rz1},${rz2},0,${rtx0},${rtx1},${rtx2},1)`;
 }
 
 function cssPoints(vertices: Vec3[], tile: number, elev: number): Vec3[] {

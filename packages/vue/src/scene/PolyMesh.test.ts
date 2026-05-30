@@ -113,7 +113,8 @@ function mockFetchVox(): void {
 
 function renderMesh(
   meshProps: Record<string, unknown> = {},
-  slots: Record<string, () => VNode | VNode[]> = {}
+  slots: Record<string, () => VNode | VNode[]> = {},
+  sceneProps: Record<string, unknown> = {},
 ): { container: HTMLElement; app: ReturnType<typeof createApp> } {
   const container = document.createElement("div");
   document.body.appendChild(container);
@@ -122,7 +123,7 @@ function renderMesh(
       return () =>
         h(PolyCamera, {}, {
           default: () =>
-            h(PolyScene, {}, {
+            h(PolyScene, sceneProps, {
               default: () => h(PolyMesh, meshProps, slots),
             }),
         });
@@ -149,6 +150,21 @@ describe("PolyMesh (Vue) — with polygons prop", () => {
     const { container } = renderMesh({ polygons: [TRIANGLE, QUAD] });
     const polys = container.querySelectorAll("i,b,s,u");
     expect(polys.length).toBe(2);
+  });
+
+  it("inherits scene strategies.disable b for auto-rendered rects", () => {
+    vi.stubGlobal("CSS", {
+      supports: vi.fn((property: string) => property === "border-shape"),
+    });
+    const { container } = renderMesh(
+      { polygons: [QUAD] },
+      {},
+      { strategies: { disable: ["b"] } },
+    );
+    const poly = container.querySelector("i") as HTMLElement | null;
+    expect(container.querySelector("b")).toBeNull();
+    expect(poly).toBeTruthy();
+    expect(poly!.style.getPropertyValue("border-shape")).toContain("polygon(");
   });
 
   it("hoists repeated baked solid paint to the mesh wrapper", () => {

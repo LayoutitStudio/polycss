@@ -6,7 +6,7 @@
  */
 import { describe, it, expect } from "vitest";
 import type { Polygon } from "@layoutit/polycss-core";
-import { computeTextureAtlasPlanPublic } from "@layoutit/polycss-core";
+import { computeTextureAtlasPlanPublic, isProjectiveQuadPlan } from "@layoutit/polycss-core";
 import { filterAtlasPlans } from "./filterPlans";
 
 // ---------------------------------------------------------------------------
@@ -53,6 +53,11 @@ const FLAT_RECT: Polygon = {
 const FLAT_TRIANGLE: Polygon = {
   vertices: [[0, 0, 0], [1, 0, 0], [0, 1, 0]],
   color: "#ff0000",
+};
+
+const NON_RECT_QUAD: Polygon = {
+  vertices: [[0, 0, 0], [2, 0, 0], [2, 1, 0], [0, 2, 0]],
+  color: "#00ffff",
 };
 
 const TEXTURED_QUAD: Polygon = {
@@ -137,6 +142,14 @@ describe("filterAtlasPlans — strategy filter contracts", () => {
     const filtered = filterAtlasPlans([plan], "dynamic", noDisable, doc);
     // dynamic mode suppresses border-shape; 5-vertex polygon → stays in atlas
     expect(filtered[0]).not.toBeNull();
+  });
+
+  it("projective solid quads stay in atlas on Safari", () => {
+    const plan = computeTextureAtlasPlanPublic(NON_RECT_QUAD, 0);
+    expect(plan && isProjectiveQuadPlan(plan)).toBe(true);
+    const doc = makeDoc({ userAgent: SAFARI_UA, borderShape: false });
+    const filtered = filterAtlasPlans([plan], "baked", noDisable, doc);
+    expect(filtered[0]).toBe(plan);
   });
 
   it("output length matches input length", () => {

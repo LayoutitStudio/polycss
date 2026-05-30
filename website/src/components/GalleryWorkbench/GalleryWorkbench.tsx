@@ -66,7 +66,11 @@ import {
   useRouteSync,
   useGuiCameraSync,
   setRoutePresetId,
+  setRouteSceneOptions,
+  clearRouteSceneOptions,
   routeInitialPresetId,
+  routeInitialSceneOptions,
+  routeHasSceneOptions,
 } from "./hooks";
 import { useFpvHost } from "../fpv";
 import type { ObjParseOptions, GltfParseOptions, VoxParseOptions } from "@layoutit/polycss";
@@ -131,6 +135,7 @@ const DEFAULT_SCENE: SceneOptionsState = {
   castShadow: false,
   shadowMaxExtend: 2000,
   showGround: false,
+  groundColor: "#7d848e",
   fpvLook: true,
   fpvMove: true,
   fpvJump: true,
@@ -512,6 +517,10 @@ function sceneDefaultsFor(model: PresetModel): SceneOptionsState {
   };
 }
 
+function sceneDefaultsForPresetId(id: string): SceneOptionsState {
+  return sceneDefaultsFor(PRESETS.find((preset) => preset.id === id) ?? PRESETS[0]);
+}
+
 function parserStateFor(model: PresetModel): ParserOptionsState {
   return {
     ...DEFAULT_PARSER,
@@ -699,7 +708,12 @@ function openCodePen(html: string, title: string, target: string): void {
 
 export default function GalleryWorkbench() {
   const [initialPreset] = useState<PresetModel>(resolveInitialPreset);
-  const [sceneOptions, setSceneOptions] = useState<SceneOptionsState>(() => sceneDefaultsFor(initialPreset));
+  const [initialRouteSceneOptions] = useState(routeInitialSceneOptions);
+  const [initialRouteHasSceneOptions] = useState(routeHasSceneOptions);
+  const [sceneOptions, setSceneOptions] = useState<SceneOptionsState>(() => ({
+    ...sceneDefaultsFor(initialPreset),
+    ...initialRouteSceneOptions,
+  }));
   const [parserOptions, setParserOptions] = useState<ParserOptionsState>(() => parserStateFor(initialPreset));
   const [presetId, setPresetId] = useState(initialPreset.id);
   const [loaded, setLoaded] = useState<LoadedModel | null>(null);
@@ -713,9 +727,9 @@ export default function GalleryWorkbench() {
   const [codePenState, setCodePenState] = useState<"idle" | "exporting">("idle");
   const [codePenError, setCodePenError] = useState<string | null>(null);
   const viewportRef = useRef<HTMLDivElement | null>(null);
-  const autoZoomPresetRef = useRef<string | null>(null);
-  const autoAmbientPresetRef = useRef<string | null>(null);
-  const autoKeyPresetRef = useRef<string | null>(null);
+  const autoZoomPresetRef = useRef<string | null>(initialRouteHasSceneOptions ? initialPreset.id : null);
+  const autoAmbientPresetRef = useRef<string | null>(initialRouteHasSceneOptions ? initialPreset.id : null);
+  const autoKeyPresetRef = useRef<string | null>(initialRouteHasSceneOptions ? initialPreset.id : null);
   const loadedModelKeyRef = useRef<string | null>(null);
 
   // Selection + drag state for the React renderer's <PolyMesh> wrapper.
@@ -751,6 +765,8 @@ export default function GalleryWorkbench() {
   const sceneOptionsRef = useRef(sceneOptions);
   sceneOptionsRef.current = sceneOptions;
   const domRefreshRafRef = useRef<number>(0);
+  const sceneRouteTouchedRef = useRef(false);
+  const [sceneRouteRevision, setSceneRouteRevision] = useState(0);
 
   const requestGalleryDomRefresh = useCallback(() => {
     if (domRefreshRafRef.current) return;
@@ -769,9 +785,15 @@ export default function GalleryWorkbench() {
     };
   }, []);
 
-  const updateScene = useCallback((partial: Partial<SceneOptionsState>) => {
-    setSceneOptions((current) => ({ ...current, ...partial }));
+  const markSceneRouteDirty = useCallback(() => {
+    sceneRouteTouchedRef.current = true;
+    setSceneRouteRevision((revision) => revision + 1);
   }, []);
+
+  const updateScene = useCallback((partial: Partial<SceneOptionsState>) => {
+    markSceneRouteDirty();
+    setSceneOptions((current) => ({ ...current, ...partial }));
+  }, [markSceneRouteDirty]);
   const canPreviewSceneOptions = useCallback(
     (options: SceneOptionsState) =>
       options.renderer === "vanilla" && transientSceneHandleRef.current !== null,
@@ -792,12 +814,13 @@ export default function GalleryWorkbench() {
   }, [sceneOptions, responsiveZoomScale]);
   const handleRenderCameraChange = useCallback(
     (camera: { rotX: number; rotY: number; zoom: number; target?: ReactVec3 }) => {
+      markSceneRouteDirty();
       handleCameraChange({
         ...camera,
         zoom: camera.zoom / Math.max(responsiveZoomScale, 0.001),
       });
     },
-    [handleCameraChange, responsiveZoomScale],
+    [handleCameraChange, markSceneRouteDirty, responsiveZoomScale],
   );
 
   const dropped = useDroppedFiles({
@@ -806,6 +829,7 @@ export default function GalleryWorkbench() {
       autoAmbientPresetRef.current = null;
       autoKeyPresetRef.current = null;
       setRoutePresetId(null);
+      clearRouteSceneOptions();
       setPresetId(source.id);
       if (loadedModelKeyRef.current !== source.id) loadedModelKeyRef.current = null;
       setSelectedAnimation("");
@@ -832,6 +856,7 @@ export default function GalleryWorkbench() {
   );
   const selectedPreset = availablePresets.find((preset) => preset.id === presetId) ?? PRESETS[0];
   const selectedDroppedSource = dropped.droppedSource?.id === selectedPreset.id ? dropped.droppedSource : null;
+  const selectedSceneDefaults = useMemo(() => sceneDefaultsFor(selectedPreset), [selectedPreset]);
   const loadMeshResolution = activeMeshResolution(sceneOptions.meshResolution);
   const handleLoaded = useCallback((model: LoadedModel) => {
     const modelKey = selectedPreset.id;
@@ -1045,6 +1070,7 @@ export default function GalleryWorkbench() {
 
   const resetToPreset = useCallback((id: string, options: { updateRoute?: boolean } = {}) => {
     const next = availablePresets.find((preset) => preset.id === id);
+    if (sceneRouteTouchedRef.current || routeHasSceneOptions()) markSceneRouteDirty();
     autoZoomPresetRef.current = null;
     autoAmbientPresetRef.current = null;
     autoKeyPresetRef.current = null;
@@ -1066,7 +1092,7 @@ export default function GalleryWorkbench() {
       rotX: next.rotX ?? current.rotX,
       rotY: next.rotY ?? current.rotY,
     }));
-  }, [availablePresets, dropped.droppedSource, animation.setReactAnimatedPolygons]);
+  }, [availablePresets, dropped.droppedSource, animation.setReactAnimatedPolygons, markSceneRouteDirty]);
 
   const handleRandomPreset = useCallback(() => {
     const next = randomPreset();
@@ -1114,7 +1140,28 @@ export default function GalleryWorkbench() {
     presetId,
     presetIds: ALL_PRESET_IDS,
     resetToPreset,
+    sceneDefaultsForPreset: sceneDefaultsForPresetId,
+    setSceneOptions,
   });
+
+  useEffect(() => {
+    if (!sceneRouteTouchedRef.current) return;
+    if (selectedDroppedSource) {
+      clearRouteSceneOptions();
+      return;
+    }
+    setRouteSceneOptions({
+      sceneOptions,
+      sceneDefaults: selectedSceneDefaults,
+      presetId: selectedPreset.id,
+    });
+  }, [
+    sceneOptions,
+    sceneRouteRevision,
+    selectedDroppedSource,
+    selectedPreset.id,
+    selectedSceneDefaults,
+  ]);
 
   useEffect(() => {
     requestGalleryDomRefresh();
@@ -1419,6 +1466,7 @@ export default function GalleryWorkbench() {
           castShadow={sceneOptions.castShadow}
           shadowMaxExtend={sceneOptions.shadowMaxExtend}
           showGround={sceneOptions.showGround}
+          groundColor={sceneOptions.groundColor}
           showLight={sceneOptions.showLight}
           lightAzimuth={sceneOptions.lightAzimuth}
           lightElevation={sceneOptions.lightElevation}

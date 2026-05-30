@@ -152,6 +152,24 @@ describe("PolyScene (Vue) — polygon rendering", () => {
     expect(style).not.toContain("border-shape");
   });
 
+  it("falls back to atlas for projective solid quads on Safari", () => {
+    const userAgent = vi.spyOn(window.navigator, "userAgent", "get").mockReturnValue(
+      "Mozilla/5.0 AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15",
+    );
+    vi.stubGlobal("CSS", { supports: () => false });
+
+    try {
+      const { container } = renderScene({
+        polygons: [NON_RECT_QUAD],
+      });
+      expect(container.querySelector("b")).toBeNull();
+      expect(container.querySelector("s")).toBeTruthy();
+    } finally {
+      userAgent.mockRestore();
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("renders multiple polygons", () => {
     const { container } = renderScene({ polygons: [TRIANGLE, QUAD] });
     const polys = container.querySelectorAll("i,b,s,u");
@@ -223,6 +241,17 @@ describe("PolyScene (Vue) — autoCenter", () => {
     const t1 = (c1.querySelector(".polycss-scene") as HTMLElement).style.transform;
     const t2 = (c2.querySelector(".polycss-scene") as HTMLElement).style.transform;
     expect(t1).not.toBe(t2);
+  });
+
+  it("uses centerPolygons as the autoCenter bbox source without rendering them", () => {
+    const { container } = renderScene({
+      polygons: [],
+      centerPolygons: [QUAD],
+      autoCenter: true,
+    });
+    const scene = container.querySelector(".polycss-scene") as HTMLElement;
+    expect(container.querySelectorAll("i,b,s,u")).toHaveLength(0);
+    expect(scene.style.transform).toContain("translate3d(-50px, -50px, -50px)");
   });
 
   it("pan (target) and autoCenterOffset are independent — autoCenter does not zero out target", async () => {

@@ -39,6 +39,19 @@ export {
   PolyCone,
   PolyTorus,
 } from "./shapes";
+export type {
+  PolyBoxProps,
+  PolyPlaneProps,
+  PolyRingProps,
+  PolyOctahedronProps,
+  PolySphereProps,
+  PolyTetrahedronProps,
+  PolyIcosahedronProps,
+  PolyDodecahedronProps,
+  PolyCylinderProps,
+  PolyConeProps,
+  PolyTorusProps,
+} from "./shapes";
 
 export { PolyOrbitControls, PolyMapControls, PolyTransformControls, PolyFirstPersonControls } from "./controls";
 export type {

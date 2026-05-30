@@ -47,7 +47,12 @@ export function useTextureAtlas(
   );
 
   const atlasPlans = useMemo(
-    () => filterAtlasPlans(plans, textureLighting, disabled),
+    () => filterAtlasPlans(
+      plans,
+      textureLighting,
+      disabled,
+      typeof document !== "undefined" ? document : null,
+    ),
     [plans, textureLighting, disabled],
   );
 
