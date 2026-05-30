@@ -164,6 +164,8 @@ const LIGHT_HELPER_SELECTOR = ".dn-light-helper";
 const RESPONSIVE_ZOOM_BREAKPOINT = 900;
 const RESPONSIVE_ZOOM_BOTTOM_RESERVE = 72;
 const RESPONSIVE_ZOOM_MIN_SCALE = 0.42;
+const RESPONSIVE_SHADOW_EXTEND_BASE = 1600;
+const RESPONSIVE_SHADOW_EXTEND_MIN = 600;
 
 function clamp(value: number, min: number, max: number): number {
   if (!Number.isFinite(value)) return min;
@@ -182,6 +184,15 @@ function responsiveZoomScaleForViewport(width: number, height: number): number {
     ? effectiveHeight / RESPONSIVE_ZOOM_BREAKPOINT
     : 1;
   return clamp(Math.min(widthScale, heightScale), RESPONSIVE_ZOOM_MIN_SCALE, 1);
+}
+
+function responsiveShadowMaxExtend(value: number, viewportScale: number): number {
+  if (viewportScale >= 0.995) return value;
+  const cap = Math.max(
+    RESPONSIVE_SHADOW_EXTEND_MIN,
+    Math.round(RESPONSIVE_SHADOW_EXTEND_BASE * viewportScale),
+  );
+  return Math.min(value, cap);
 }
 
 function initialResponsiveZoomScale(): number {
@@ -806,10 +817,12 @@ export default function GalleryWorkbench() {
   const { handleCameraChange } = useGuiCameraSync({ setSceneOptions });
   const responsiveZoomScale = useResponsiveViewportZoomScale(viewportRef);
   const renderSceneOptions = useMemo<SceneOptionsState>(() => {
-    if (responsiveZoomScale === 1) return sceneOptions;
+    const shadowMaxExtend = responsiveShadowMaxExtend(sceneOptions.shadowMaxExtend, responsiveZoomScale);
+    if (responsiveZoomScale === 1 && shadowMaxExtend === sceneOptions.shadowMaxExtend) return sceneOptions;
     return {
       ...sceneOptions,
       zoom: sceneOptions.zoom * responsiveZoomScale,
+      shadowMaxExtend,
     };
   }, [sceneOptions, responsiveZoomScale]);
   const handleRenderCameraChange = useCallback(
