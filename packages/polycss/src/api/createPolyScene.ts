@@ -2019,11 +2019,13 @@ export function createPolyScene(
     //    replacing the texture; instead paint a semi-transparent BLACK so
     //    the texture stays visible underneath, just darkened.
     //
-    // For the textured opacity we approximate Three.js's per-pixel darkening
-    // factor: a shadowed pixel = lit × ambient/(direct+ambient). Painting a
-    // black overlay at opacity = direct/(direct+ambient) ≈ I/(I + I_amb)
-    // gives the same multiplicative darkening. Multiplied by shadow.opacity
-    // so the user keeps a "shadow strength" knob (0 = no shadow, 1 = full).
+    // For textured receivers we want the multiplicative darkening to match
+    // Three.js's per-pixel formula: shadow_pixel = lit_pixel × ambient /
+    // (direct + ambient), where direct = intensity × max(n·L, 0). That
+    // ratio varies per RECEIVER FACE because n changes; we compute
+    // `effectiveOpacity` per group inside the loop using the group's own
+    // `Ldotn`. Here we just resolve constants that don't depend on the
+    // group.
     const hasTexture = receiverEntry.polygons.some((p) => p.texture !== undefined);
     const ambColor = currentOptions.ambientLight?.color ?? "#ffffff";
     const ambIntensity = currentOptions.ambientLight?.intensity ?? 0.4;
@@ -2033,10 +2035,6 @@ export function createPolyScene(
     const fillColor = hasTexture
       ? userShadowColor
       : shadePolygon(receiverColor, 0, "#000000", ambColor, ambIntensity);
-    const directOverTotal = dirIntensity > 0
-      ? dirIntensity / (dirIntensity + Math.max(0, ambIntensity))
-      : 0;
-    const effectiveOpacity = hasTexture ? opacity * directOverTotal : opacity;
     // Mesh-local vertex (world units) → CSS via the same axis swap
     // (world.x → CSS-Y, world.y → CSS-X) and tile scale that the atlas
     // builder applies. transform.position is in world units (matching
@@ -2301,7 +2299,19 @@ export function createPolyScene(
       group.visible = true;
       path.setAttribute("d", d);
       if (path.getAttribute("fill") !== fillColor) path.setAttribute("fill", fillColor);
-      const opStr = effectiveOpacity.toFixed(4);
+      // Per-group opacity for textured receivers — Ldotn (group's own normal
+      // dotted with the light) drives the direct contribution, so the
+      // semi-transparent overlay darkens this face exactly as Three.js
+      // would compute `lit × ambient/(direct + ambient)` per pixel. Solid
+      // receivers use the user's `shadow.opacity` directly (the fillColor
+      // is already the physically correct ambient-only color).
+      let effOp = opacity;
+      if (hasTexture) {
+        const direct = dirIntensity * Math.max(0, Ldotn);
+        const total = direct + Math.max(0, ambIntensity);
+        effOp = total > 0 ? opacity * (direct / total) : 0;
+      }
+      const opStr = effOp.toFixed(4);
       if (path.getAttribute("opacity") !== opStr) path.setAttribute("opacity", opStr);
     }
   }
