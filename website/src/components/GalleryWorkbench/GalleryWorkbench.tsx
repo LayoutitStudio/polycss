@@ -164,8 +164,8 @@ const LIGHT_HELPER_SELECTOR = ".dn-light-helper";
 const RESPONSIVE_ZOOM_BREAKPOINT = 900;
 const RESPONSIVE_ZOOM_BOTTOM_RESERVE = 72;
 const RESPONSIVE_ZOOM_MIN_SCALE = 0.42;
-const RESPONSIVE_SHADOW_EXTEND_BASE = 1600;
-const RESPONSIVE_SHADOW_EXTEND_MIN = 600;
+const RESPONSIVE_SHADOW_EXTEND_BASE = 3200;
+const RESPONSIVE_SHADOW_EXTEND_MIN = 2000;
 
 function clamp(value: number, min: number, max: number): number {
   if (!Number.isFinite(value)) return min;
