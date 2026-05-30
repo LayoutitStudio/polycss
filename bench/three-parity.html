@@ -111,7 +111,7 @@
     function buildPolyCube() {
       polyCube = polyScene.add(
         createPolyBox({ size: [S.cube.size, S.cube.size, S.cube.size], color: S.cube.color }),
-        { position: [S.cube.x, S.cube.y, S.cube.z], castShadow: true, receiveShadow: false, merge: false },
+        { position: [S.cube.x, S.cube.y, S.cube.z], castShadow: true, receiveShadow: true, merge: false },
       );
     }
     // Cottage normalization: both engines fit the model into a bounding box
@@ -130,7 +130,7 @@
         position: [S.cottage.x, S.cottage.y, S.cottage.z],
         scale: S.cottage.scale,
         castShadow: true,
-        receiveShadow: false,
+        receiveShadow: true,   // self-shadow (Three.js parity)
         merge: false,
       });
     }

@@ -2092,7 +2092,13 @@ export function createPolyScene(
     // position (clearCasterItemsCache from mesh setters).
     const casterItems: CasterPolyItem[] = [];
     for (const caster of casters) {
-      if (caster === receiverEntry) continue;
+      // Self-shadowing: a mesh that's both castShadow + receiveShadow
+      // projects its own geometry onto itself (Three.js parity — the
+      // standard "the cottage's roof shadows its own wall" case). The
+      // per-triangle 3D-clip below drops caster tris that lie in or
+      // behind the receiver-face plane, so a face never shadows itself,
+      // only OTHER parts of the same mesh that are above the receiver
+      // plane along the light direction.
       const cpos = caster.handle.transform.position ?? [0, 0, 0];
       const ckey = `${caster.polygons.length}|${cpos.join(",")}`;
       let cached = casterItemsCache.get(caster);
