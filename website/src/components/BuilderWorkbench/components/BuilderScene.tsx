@@ -22,15 +22,15 @@ import type {
   Polygon,
   Vec3,
 } from "@layoutit/polycss-react";
-import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { useEffect, useMemo, useRef, type RefObject } from "react";
 import { meshResolutionShowsMesh, type SceneOptionsState } from "../../types";
 import { FPV_PERSPECTIVE } from "../../fpv";
 import { BUILDER_GROUND_SPAN, BUILDER_MAX_CAMERA_ROT_X } from "../defaults";
 import { buildSolidWireframePolygons } from "../geometry/ghost";
 import { meshBbox } from "../geometry/meshBbox";
 import { projectScreenToWorldGround } from "../geometry/screenToWorld";
-import { snapWorldToCellCenter, worldToGridCell } from "../geometry/snap";
-import type { BuilderToolMode, PlacedItem } from "../types";
+import { snapWorldToCellCenter } from "../geometry/snap";
+import type { BuilderPlacementTarget, BuilderToolMode, PlacedItem } from "../types";
 import { BuilderCameraDragControls } from "./BuilderCameraDragControls";
 
 const GROUND_FILL_COLORS = {
@@ -46,9 +46,6 @@ export interface BuilderSceneProps {
   /** One polygon per visible grid line, terrain-aware when raised. */
   gridPolygons: Polygon[];
   ghostPolygons: Polygon[];
-  /** Single-quad outline showing the vertex the terrain-tool cursor is
-   *  currently over. Empty when no terrain tool is active. */
-  terrainHoverPolygons: Polygon[];
   placementDraft: boolean;
   renderItems: Array<PlacedItem & { rawPolygons: Polygon[] }>;
   renderedPolygonsById: Map<string, Polygon[]>;
@@ -64,7 +61,7 @@ export interface BuilderSceneProps {
   onSelectedMeshDrag: (id: string, worldX: number, worldY: number) => void;
   onStepSelectedElevation: (direction: 1 | -1) => void;
   builderTool: BuilderToolMode;
-  onAddShapeAt: (worldX: number, worldY: number) => void;
+  onAddShapeAt: (target: BuilderPlacementTarget) => void;
   onRemoveItem: (id: string) => void;
   selected: PlacedItem | null;
 }
@@ -74,6 +71,92 @@ function selectedSurfaceWorldZ(item: PlacedItem): number {
   const bbox = meshBbox(item.rawPolygons);
   const scale = Math.max(item.fitScale * item.scale, 0.0001);
   return item.position[2] / BASE_TILE + bbox.midZ * (1 - scale) + scale * bbox.minZ;
+}
+
+function itemTopSurfaceWorldZ(item: PlacedItem & { rawPolygons: Polygon[] }, polygons: Polygon[]): number {
+  const bbox = meshBbox(polygons);
+  const scale = Math.max(item.fitScale * item.scale, 0.0001);
+  return item.position[2] / BASE_TILE + bbox.midZ * (1 - scale) + scale * bbox.maxZ;
+}
+
+function itemBaseSurfaceWorldZ(item: PlacedItem & { rawPolygons: Polygon[] }, polygons: Polygon[]): number {
+  const bbox = meshBbox(polygons);
+  const scale = Math.max(item.fitScale * item.scale, 0.0001);
+  return item.position[2] / BASE_TILE + bbox.midZ * (1 - scale) + scale * bbox.minZ;
+}
+
+interface PlacementSurface {
+  baseWorldZ: number;
+  surfaceWorldZ: number;
+  minWorldX: number;
+  maxWorldX: number;
+  minWorldY: number;
+  maxWorldY: number;
+}
+
+type PaintLeafFace = "top" | "side" | "other";
+
+function transformNormalZ(transform: string): number | null {
+  const matrix3d = transform.match(/^matrix3d\((.+)\)$/);
+  if (matrix3d) {
+    const values = matrix3d[1].split(",").map((value) => Number(value.trim()));
+    if (values.length !== 16 || values.some((value) => !Number.isFinite(value))) return null;
+    const nx = values[8];
+    const ny = values[9];
+    const nz = values[10];
+    const len = Math.hypot(nx, ny, nz);
+    return len > 0 ? nz / len : null;
+  }
+
+  const matrix = transform.match(/^matrix\((.+)\)$/);
+  if (matrix) return 1;
+  return null;
+}
+
+function paintLeafFace(target: EventTarget | null): PaintLeafFace {
+  const el = target as Element | null;
+  const leaf = el?.closest("b,i,s,u") as HTMLElement | null;
+  if (!leaf || !leaf.closest(".builder-placed")) return "other";
+  const normalZ = transformNormalZ(getComputedStyle(leaf).transform);
+  if (normalZ === null) return "other";
+  if (normalZ > 0.5) return "top";
+  if (Math.abs(normalZ) < 0.25) return "side";
+  return "other";
+}
+
+function placementSurfaceForItem(item: PlacedItem & { rawPolygons: Polygon[] }, polygons: Polygon[]): PlacementSurface {
+  const bbox = meshBbox(polygons);
+  const scale = Math.max(item.fitScale * item.scale, 0.0001);
+  const rz = ((item.rotation[2] ?? 0) * Math.PI) / 180;
+  const cos = Math.cos(rz);
+  const sin = Math.sin(rz);
+  let minWorldX = Infinity;
+  let maxWorldX = -Infinity;
+  let minWorldY = Infinity;
+  let maxWorldY = -Infinity;
+  for (const [x, y] of [
+    [bbox.minX, bbox.minY],
+    [bbox.maxX, bbox.minY],
+    [bbox.maxX, bbox.maxY],
+    [bbox.minX, bbox.maxY],
+  ] as const) {
+    const dx = (x - bbox.midX) * scale;
+    const dy = (y - bbox.midY) * scale;
+    const worldX = item.worldX + dx * cos - dy * sin;
+    const worldY = item.worldY + dx * sin + dy * cos;
+    minWorldX = Math.min(minWorldX, worldX);
+    maxWorldX = Math.max(maxWorldX, worldX);
+    minWorldY = Math.min(minWorldY, worldY);
+    maxWorldY = Math.max(maxWorldY, worldY);
+  }
+  return {
+    baseWorldZ: itemBaseSurfaceWorldZ(item, polygons),
+    surfaceWorldZ: itemTopSurfaceWorldZ(item, polygons),
+    minWorldX,
+    maxWorldX,
+    minWorldY,
+    maxWorldY,
+  };
 }
 
 function zArrowDirectionFromTarget(target: Element | null): 1 | -1 | null {
@@ -271,25 +354,38 @@ function BuilderSelectedMeshInteractionControls({
 interface BuilderViewportToolControlsProps {
   tool: BuilderToolMode;
   sceneOptions: SceneOptionsState;
-  onAddShapeAt: (worldX: number, worldY: number) => void;
+  placementSurfaceById: Map<string, PlacementSurface>;
+  onAddShapeAt: (target: BuilderPlacementTarget) => void;
   onRemoveItem: (id: string) => void;
   onDraggingChanged: (dragging: boolean) => void;
-  onHoverCellChange: (cell: [number, number] | null) => void;
 }
 
 function BuilderViewportToolControls({
   tool,
   sceneOptions,
+  placementSurfaceById,
   onAddShapeAt,
   onRemoveItem,
   onDraggingChanged,
-  onHoverCellChange,
 }: BuilderViewportToolControlsProps): null {
   const { store, cameraElRef } = useCameraContext();
-  const stateRef = useRef({ tool, sceneOptions, onAddShapeAt, onRemoveItem, onDraggingChanged, onHoverCellChange });
-  stateRef.current = { tool, sceneOptions, onAddShapeAt, onRemoveItem, onDraggingChanged, onHoverCellChange };
+  const stateRef = useRef({
+    tool,
+    sceneOptions,
+    placementSurfaceById,
+    onAddShapeAt,
+    onRemoveItem,
+    onDraggingChanged,
+  });
+  stateRef.current = {
+    tool,
+    sceneOptions,
+    placementSurfaceById,
+    onAddShapeAt,
+    onRemoveItem,
+    onDraggingChanged,
+  };
   const downRef = useRef<{ x: number; y: number; target: EventTarget | null } | null>(null);
-  const hoverCellRef = useRef<[number, number] | null>(null);
 
   useEffect(() => {
     const cameraEl = cameraElRef.current;
@@ -301,7 +397,13 @@ function BuilderViewportToolControls({
       return Boolean(el.closest(".builder-tool-ribbon, .shape-picker, .builder-camera-mode, .dn-floating-controls"));
     };
 
-    const projectAt = (clientX: number, clientY: number): [number, number] | null => {
+    const snapHit = (hit: [number, number]): [number, number] => {
+      const { sceneOptions: options } = stateRef.current;
+      if (!options.snapToGrid || options.gridResolution <= 0) return hit;
+      return snapWorldToCellCenter(hit[0], hit[1], options.gridResolution);
+    };
+
+    const projectAt = (clientX: number, clientY: number, planeWorldZ = 0): [number, number] | null => {
       const state = stateRef.current;
       const hit = projectScreenToWorldGround({
         clientX,
@@ -309,31 +411,100 @@ function BuilderViewportToolControls({
         cameraEl,
         sceneOptions: state.sceneOptions,
         autoCenterOffset: store.getState().autoCenterOffset,
+        planeWorldZ,
       });
-      if (!hit) return null;
-      if (!state.sceneOptions.snapToGrid || state.sceneOptions.gridResolution <= 0) return hit;
-      return snapWorldToCellCenter(hit[0], hit[1], state.sceneOptions.gridResolution);
+      return hit;
     };
 
-    const setHoverCell = (cell: [number, number] | null): void => {
-      const prev = hoverCellRef.current;
-      if (prev?.[0] === cell?.[0] && prev?.[1] === cell?.[1]) return;
-      hoverCellRef.current = cell;
-      stateRef.current.onHoverCellChange(cell);
+    const surfaceForTarget = (target: EventTarget | null): PlacementSurface | null => {
+      const el = target as Element | null;
+      const meshEl = el?.closest(".builder-placed") as HTMLElement | null;
+      const id = meshEl?.dataset.polyMeshId;
+      if (!id) return null;
+      return stateRef.current.placementSurfaceById.get(id) ?? null;
     };
 
-    const onPointerMove = (event: PointerEvent): void => {
-      const state = stateRef.current;
-      if (state.tool !== "add" || isUiOverlay(event.target)) {
-        setHoverCell(null);
-        return;
+    const clampToSurface = (hit: [number, number], surface: PlacementSurface): [number, number] => {
+      const { sceneOptions: options } = stateRef.current;
+      if (!options.snapToGrid || options.gridResolution <= 0) {
+        return [
+          Math.min(surface.maxWorldX, Math.max(surface.minWorldX, hit[0])),
+          Math.min(surface.maxWorldY, Math.max(surface.minWorldY, hit[1])),
+        ];
       }
-      const hit = projectAt(event.clientX, event.clientY);
-      if (!hit) {
-        setHoverCell(null);
-        return;
+
+      const step = options.gridResolution;
+      const minCenterX = surface.minWorldX + step / 2;
+      const maxCenterX = surface.maxWorldX - step / 2;
+      const minCenterY = surface.minWorldY + step / 2;
+      const maxCenterY = surface.maxWorldY - step / 2;
+      const centerX = (surface.minWorldX + surface.maxWorldX) / 2;
+      const centerY = (surface.minWorldY + surface.maxWorldY) / 2;
+      return [
+        minCenterX <= maxCenterX
+          ? Math.min(maxCenterX, Math.max(minCenterX, hit[0]))
+          : centerX,
+        minCenterY <= maxCenterY
+          ? Math.min(maxCenterY, Math.max(minCenterY, hit[1]))
+          : centerY,
+      ];
+    };
+
+    const highestSurfaceAt = (worldX: number, worldY: number, fallback: PlacementSurface): number => {
+      const epsilon = Math.max(0.001, stateRef.current.sceneOptions.gridResolution * 0.01);
+      let top = fallback.surfaceWorldZ;
+      for (const surface of stateRef.current.placementSurfaceById.values()) {
+        if (
+          worldX >= surface.minWorldX - epsilon &&
+          worldX <= surface.maxWorldX + epsilon &&
+          worldY >= surface.minWorldY - epsilon &&
+          worldY <= surface.maxWorldY + epsilon
+        ) {
+          top = Math.max(top, surface.surfaceWorldZ);
+        }
       }
-      setHoverCell(worldToGridCell(hit[0], hit[1], state.sceneOptions.gridResolution));
+      return top;
+    };
+
+    const sidePlacementTarget = (hit: [number, number], surface: PlacementSurface): [number, number] => {
+      const { sceneOptions: options } = stateRef.current;
+      const step = options.gridResolution > 0
+        ? options.gridResolution
+        : Math.max(surface.maxWorldX - surface.minWorldX, surface.maxWorldY - surface.minWorldY, 1);
+      const centerX = (surface.minWorldX + surface.maxWorldX) / 2;
+      const centerY = (surface.minWorldY + surface.maxWorldY) / 2;
+      const snapped = options.snapToGrid && options.gridResolution > 0
+        ? snapWorldToCellCenter(hit[0], hit[1], step)
+        : hit;
+      const minCenterX = surface.minWorldX + step / 2;
+      const maxCenterX = surface.maxWorldX - step / 2;
+      const minCenterY = surface.minWorldY + step / 2;
+      const maxCenterY = surface.maxWorldY - step / 2;
+      const clampX = (value: number): number =>
+        minCenterX <= maxCenterX
+          ? Math.min(maxCenterX, Math.max(minCenterX, value))
+          : centerX;
+      const clampY = (value: number): number =>
+        minCenterY <= maxCenterY
+          ? Math.min(maxCenterY, Math.max(minCenterY, value))
+          : centerY;
+      const sides = [
+        { axis: "x" as const, sign: -1 as const, distance: Math.abs(hit[0] - surface.minWorldX) },
+        { axis: "x" as const, sign: 1 as const, distance: Math.abs(hit[0] - surface.maxWorldX) },
+        { axis: "y" as const, sign: -1 as const, distance: Math.abs(hit[1] - surface.minWorldY) },
+        { axis: "y" as const, sign: 1 as const, distance: Math.abs(hit[1] - surface.maxWorldY) },
+      ].sort((a, b) => a.distance - b.distance);
+      const side = sides[0];
+      if (side.axis === "x") {
+        return [
+          side.sign < 0 ? surface.minWorldX - step / 2 : surface.maxWorldX + step / 2,
+          clampY(snapped[1]),
+        ];
+      }
+      return [
+        clampX(snapped[0]),
+        side.sign < 0 ? surface.minWorldY - step / 2 : surface.maxWorldY + step / 2,
+      ];
     };
 
     const onPointerDown = (event: PointerEvent): void => {
@@ -363,26 +534,41 @@ function BuilderViewportToolControls({
         return;
       }
 
-      const hit = projectAt(event.clientX, event.clientY);
-      if (!hit) return;
+      const face = paintLeafFace(event.target);
+      const surface = face !== "other" ? surfaceForTarget(event.target) : null;
+      let hit: [number, number] | null = null;
+      let surfaceWorldZ: number | null = null;
+      if (surface && face === "top") {
+        const projected = projectAt(event.clientX, event.clientY, surface.surfaceWorldZ);
+        if (!projected) return;
+        hit = clampToSurface(snapHit(projected), surface);
+        surfaceWorldZ = highestSurfaceAt(hit[0], hit[1], surface);
+      } else if (surface && face === "side") {
+        const projected = projectAt(event.clientX, event.clientY, surface.baseWorldZ);
+        if (!projected) return;
+        hit = sidePlacementTarget(projected, surface);
+        surfaceWorldZ = surface.baseWorldZ;
+      } else {
+        const projected = projectAt(event.clientX, event.clientY);
+        if (!projected) return;
+        hit = snapHit(projected);
+      }
       event.preventDefault();
       event.stopPropagation();
       event.stopImmediatePropagation();
-      state.onAddShapeAt(hit[0], hit[1]);
+      state.onAddShapeAt({
+        worldX: hit[0],
+        worldY: hit[1],
+        ...(surfaceWorldZ !== null ? { surfaceWorldZ } : null),
+      });
     };
-    const onPointerLeave = (): void => setHoverCell(null);
 
     cameraEl.addEventListener("pointerdown", onPointerDown, true);
-    cameraEl.addEventListener("pointermove", onPointerMove, true);
-    cameraEl.addEventListener("pointerleave", onPointerLeave, true);
     cameraEl.addEventListener("click", onClick, true);
     return () => {
       cameraEl.removeEventListener("pointerdown", onPointerDown, true);
-      cameraEl.removeEventListener("pointermove", onPointerMove, true);
-      cameraEl.removeEventListener("pointerleave", onPointerLeave, true);
       cameraEl.removeEventListener("click", onClick, true);
       downRef.current = null;
-      setHoverCell(null);
       stateRef.current.onDraggingChanged(false);
     };
   }, [cameraElRef, store]);
@@ -397,7 +583,6 @@ export function BuilderScene({
   ambientLight,
   gridPolygons,
   ghostPolygons,
-  terrainHoverPolygons,
   placementDraft,
   renderItems,
   renderedPolygonsById,
@@ -420,7 +605,6 @@ export function BuilderScene({
   const perspective = sceneOptions.dragMode === "fpv" ? FPV_PERSPECTIVE : sceneOptions.perspective;
   const Cam = perspective === false ? PolyOrthographicCamera : PolyPerspectiveCamera;
   const sceneKey = sceneOptions.meshResolution;
-  const [addHoverCell, setAddHoverCell] = useState<[number, number] | null>(null);
   const camProps = perspective === false
     ? { zoom: sceneOptions.zoom, rotX: sceneOptions.rotX, rotY: sceneOptions.rotY, target: sceneOptions.target }
     : {
@@ -453,26 +637,16 @@ export function BuilderScene({
       baseZ: bbox.minZ,
     }, "#00d9ff", edgeHalf);
   }, [renderedPolygonsById, sceneOptions.gridResolution, selected]);
-  const addHoverPolygons = useMemo<Polygon[]>(() => {
-    if (!addHoverCell || builderTool !== "add" || !sceneOptions.showGround) return [];
-    const [cellX, cellY] = addHoverCell;
-    const cellSize = sceneOptions.gridResolution > 0 ? sceneOptions.gridResolution : 10;
-    const x0 = cellX * cellSize;
-    const x1 = (cellX + 1) * cellSize;
-    const y0 = cellY * cellSize;
-    const y1 = (cellY + 1) * cellSize;
-    const z = 0.04;
-    const color = "rgba(34, 211, 238, 0.22)";
-    return [{
-      vertices: [
-        [x0, y0, z],
-        [x1, y0, z],
-        [x1, y1, z],
-        [x0, y1, z],
-      ],
-      color,
-    }];
-  }, [addHoverCell, builderTool, sceneOptions.gridResolution, sceneOptions.showGround]);
+  const placementSurfaceById = useMemo(() => {
+    const surfaces = new Map<string, PlacementSurface>();
+    for (const item of renderItems) {
+      surfaces.set(
+        item.id,
+        placementSurfaceForItem(item, renderedPolygonsById.get(item.id) ?? item.rawPolygons),
+      );
+    }
+    return surfaces;
+  }, [renderItems, renderedPolygonsById]);
   const groundFillPolygons = useMemo<Polygon[]>(() => {
     const half = BUILDER_GROUND_SPAN / 2;
     const [cx, cy] = sceneOptions.target;
@@ -487,10 +661,6 @@ export function BuilderScene({
     }];
   }, [sceneOptions.gridTone, sceneOptions.target]);
 
-  useEffect(() => {
-    if (builderTool !== "add") setAddHoverCell(null);
-  }, [builderTool]);
-
   return (
     <Cam key={sceneKey} {...camProps}>
       <BuilderSelectedMeshInteractionControls
@@ -504,10 +674,10 @@ export function BuilderScene({
       <BuilderViewportToolControls
         tool={builderTool}
         sceneOptions={sceneOptions}
+        placementSurfaceById={placementSurfaceById}
         onAddShapeAt={onAddShapeAt}
         onRemoveItem={onRemoveItem}
         onDraggingChanged={onGizmoDraggingChanged}
-        onHoverCellChange={setAddHoverCell}
       />
       {sceneOptions.dragMode === "pan" ? (
         <>
@@ -563,20 +733,13 @@ export function BuilderScene({
         textureLighting={sceneOptions.textureLighting}
         textureQuality={sceneOptions.textureQuality}
         strategies={{ disable: sceneOptions.disableStrategies }}
+        shadow={{ maxExtend: sceneOptions.shadowMaxExtend }}
       >
         {sceneOptions.showGround && (
           <>
             <PolyMesh polygons={groundFillPolygons} className="builder-ground-fill" />
             <PolyMesh polygons={gridPolygons} />
           </>
-        )}
-        {addHoverPolygons.length > 0 && (
-          <PolyMesh polygons={addHoverPolygons} className="builder-add-hover" />
-        )}
-        {/* Terrain hover ghost — small cyan marker over the vertex the
-            next click will modify. */}
-        {terrainHoverPolygons.length > 0 && (
-          <PolyMesh polygons={terrainHoverPolygons} className="builder-terrain-hover" />
         )}
         {sceneOptions.showAxes && <PolyAxesHelper size={3} />}
         {sceneOptions.showLight && (

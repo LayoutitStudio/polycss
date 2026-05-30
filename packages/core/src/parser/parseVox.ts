@@ -38,6 +38,12 @@ export interface VoxParseOptions {
    */
   targetSize?: number;
   /**
+   * Per-coordinate offset added after scaling. Keeps coordinates away from
+   * zero (matching OBJ/glTF parsers). Default: 0 — vox already starts at
+   * non-negative integers so zero makes sensible default.
+   */
+  gridShift?: number;
+  /**
    * Optional lossy palette simplification. When > 0, opaque, hue-compatible
    * palette colors within this RGB distance are folded into the most-used
    * nearby color before greedy voxel meshing. Default: disabled.
@@ -389,6 +395,7 @@ function faceQuads(x: number, y: number, z: number): {
 
 export function parseVox(buffer: ArrayBuffer, options?: VoxParseOptions): ParseResult {
   const targetSize = options?.targetSize ?? 60;
+  const gridShift = options?.gridShift ?? 0;
   const sourceBytes = buffer.byteLength;
 
   // Handle zero-length / obviously truncated input.
@@ -695,14 +702,15 @@ export function parseVox(buffer: ArrayBuffer, options?: VoxParseOptions): ParseR
     cols: Math.max(0, maxY - minY),
     depth: Math.max(0, maxZ - minZ),
     scale,
+    gridShift,
     sourceBytes,
   };
 
   const round = (n: number): number => Math.round(n * 1000) / 1000;
   const project = (v: Vec3): Vec3 => [
-    round((v[0] - minX) * scale),
-    round((v[1] - minY) * scale),
-    round((v[2] - minZ) * scale),
+    round((v[0] - minX) * scale + gridShift),
+    round((v[1] - minY) * scale + gridShift),
+    round((v[2] - minZ) * scale + gridShift),
   ];
 
   const polygons: Polygon[] = rawPolygons.map(({ vertices, color }) => ({

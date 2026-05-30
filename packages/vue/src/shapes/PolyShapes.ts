@@ -21,15 +21,34 @@ import {
   conePolygons,
   torusPolygons,
 } from "@layoutit/polycss-core";
-import type { Vec3 } from "@layoutit/polycss-core";
+import type {
+  BoxPolygonsOptions,
+  PlanePolygonsOptions,
+  RingPolygonsOptions,
+  OctahedronPolygonsOptions,
+  SpherePolygonsOptions,
+  TetrahedronPolygonsOptions,
+  IcosahedronPolygonsOptions,
+  DodecahedronPolygonsOptions,
+  CylinderPolygonsOptions,
+  ConePolygonsOptions,
+  TorusPolygonsOptions,
+  PolyMaterial,
+  Vec2,
+  Vec3,
+} from "@layoutit/polycss-core";
 import { PolyMesh } from "../scene/PolyMesh";
+import type { PolyMeshProps } from "../scene/PolyMesh";
 
 // ── Shared mesh prop pass-through helpers ────────────────────────────────────
 // We spread the mesh-compatible props without src/mtl/polygons (those are
 // controlled by the shape component). Vue doesn't allow direct key exclusion
 // from interfaces, so we pick explicit passes through `attrs` where needed.
+type ShapeMeshProps = Omit<PolyMeshProps, "polygons" | "src" | "mtl">;
 
 // ── Fixed-geometry primitives ─────────────────────────────────────────────────
+
+export interface PolyBoxProps extends ShapeMeshProps, BoxPolygonsOptions {}
 
 export const PolyBox = defineComponent({
   name: "PolyBox",
@@ -41,6 +60,10 @@ export const PolyBox = defineComponent({
     max: { type: Array as unknown as PropType<Vec3>, default: undefined },
     color: { type: String, default: undefined },
     texture: { type: String, default: undefined },
+    material: { type: Object as PropType<PolyMaterial>, default: undefined },
+    uvs: { type: Array as PropType<Vec2[]>, default: undefined },
+    data: { type: Object as PropType<BoxPolygonsOptions["data"]>, default: undefined },
+    faces: { type: Object as PropType<BoxPolygonsOptions["faces"]>, default: undefined },
     // Common mesh props
     position: { type: Array as unknown as PropType<Vec3>, default: undefined },
     scale: { type: [Number, Array] as unknown as PropType<number | Vec3>, default: undefined },
@@ -57,6 +80,10 @@ export const PolyBox = defineComponent({
         max: props.max,
         color: props.color,
         texture: props.texture,
+        material: props.material,
+        uvs: props.uvs,
+        data: props.data,
+        faces: props.faces,
       }),
     );
     return () =>
@@ -71,11 +98,14 @@ export const PolyBox = defineComponent({
   },
 });
 
+export interface PolyPlaneProps extends ShapeMeshProps, PlanePolygonsOptions {}
+
 export const PolyPlane = defineComponent({
   name: "PolyPlane",
   props: {
     axis: { type: Number as PropType<0 | 1 | 2>, required: true },
     size: { type: Number, default: undefined },
+    offset: { type: [Number, Array] as unknown as PropType<number | [number, number]>, default: undefined },
     along: { type: Number, default: undefined },
     color: { type: String, default: undefined },
     // Common mesh props
@@ -90,6 +120,7 @@ export const PolyPlane = defineComponent({
       planePolygons({
         axis: props.axis,
         size: props.size,
+        offset: props.offset,
         along: props.along,
         color: props.color,
       }),
@@ -105,6 +136,8 @@ export const PolyPlane = defineComponent({
       });
   },
 });
+
+export interface PolyRingProps extends ShapeMeshProps, RingPolygonsOptions {}
 
 export const PolyRing = defineComponent({
   name: "PolyRing",
@@ -143,6 +176,8 @@ export const PolyRing = defineComponent({
   },
 });
 
+export interface PolyOctahedronProps extends ShapeMeshProps, OctahedronPolygonsOptions {}
+
 export const PolyOctahedron = defineComponent({
   name: "PolyOctahedron",
   props: {
@@ -176,6 +211,8 @@ export const PolyOctahedron = defineComponent({
   },
 });
 
+export interface PolyTetrahedronProps extends ShapeMeshProps, TetrahedronPolygonsOptions {}
+
 export const PolyTetrahedron = defineComponent({
   name: "PolyTetrahedron",
   props: {
@@ -203,6 +240,8 @@ export const PolyTetrahedron = defineComponent({
       });
   },
 });
+
+export interface PolyIcosahedronProps extends ShapeMeshProps, IcosahedronPolygonsOptions {}
 
 export const PolyIcosahedron = defineComponent({
   name: "PolyIcosahedron",
@@ -232,6 +271,8 @@ export const PolyIcosahedron = defineComponent({
   },
 });
 
+export interface PolyDodecahedronProps extends ShapeMeshProps, DodecahedronPolygonsOptions {}
+
 export const PolyDodecahedron = defineComponent({
   name: "PolyDodecahedron",
   props: {
@@ -259,6 +300,8 @@ export const PolyDodecahedron = defineComponent({
       });
   },
 });
+
+export interface PolySphereProps extends ShapeMeshProps, SpherePolygonsOptions {}
 
 export const PolySphere = defineComponent({
   name: "PolySphere",
@@ -290,6 +333,8 @@ export const PolySphere = defineComponent({
 });
 
 // ── Parametric primitives ─────────────────────────────────────────────────────
+
+export interface PolyCylinderProps extends ShapeMeshProps, CylinderPolygonsOptions {}
 
 export const PolyCylinder = defineComponent({
   name: "PolyCylinder",
@@ -328,6 +373,8 @@ export const PolyCylinder = defineComponent({
   },
 });
 
+export interface PolyConeProps extends ShapeMeshProps, ConePolygonsOptions {}
+
 export const PolyCone = defineComponent({
   name: "PolyCone",
   props: {
@@ -362,6 +409,8 @@ export const PolyCone = defineComponent({
       });
   },
 });
+
+export interface PolyTorusProps extends ShapeMeshProps, TorusPolygonsOptions {}
 
 export const PolyTorus = defineComponent({
   name: "PolyTorus",

@@ -75,6 +75,7 @@ export interface SceneOptionsState {
    *  Caps the SVG backing store at low light elevations. */
   shadowMaxExtend: number;
   showGround: boolean;
+  groundColor: string;
   fpvLook: boolean;
   fpvMove: boolean;
   fpvJump: boolean;

@@ -180,45 +180,24 @@ describe("PolyTransformControls (Vue)", () => {
     expect(arrows.map(axisKeyOf)).toEqual(["y", "-y"]);
   });
 
-  it("pointerdown on X arrow emits mouseDown + draggingChanged(true); pointerup emits mouseUp + draggingChanged(false)", async () => {
+  it("translate drag emits lifecycle events, updates position, and does not rebake", async () => {
     const onMouseDown = vi.fn();
     const onMouseUp = vi.fn();
     const onDraggingChanged = vi.fn();
-
-    let container!: HTMLElement;
-    await withFakeLayoutAsync(2, async () => {
-      const result = await mount(
-        { polygons: [TRIANGLE] },
-        (meshRef) => ({ object: meshRef, onMouseDown, onMouseUp, onDraggingChanged }),
-      );
-      container = result.container;
-    });
-
-    const xBeam = container.querySelector(".polycss-transform-arrow--x") as HTMLElement;
-    expect(xBeam).not.toBeNull();
-
-    withFakeLayout(2, () => {
-      xBeam.dispatchEvent(
-        new PointerEvent("pointerdown", { bubbles: true, clientX: 0, clientY: 0, pointerId: 1 }),
-      );
-    });
-
-    expect(onMouseDown).toHaveBeenCalledOnce();
-    expect(onDraggingChanged).toHaveBeenLastCalledWith(true);
-
-    window.dispatchEvent(new PointerEvent("pointerup", { clientX: 10, clientY: 0, pointerId: 1 }));
-
-    expect(onMouseUp).toHaveBeenCalledOnce();
-    expect(onDraggingChanged).toHaveBeenLastCalledWith(false);
-  });
-
-  it("dragging X axis: pointer (10,0) with cameraScale=2 → position shifts +5 on X", async () => {
     const onObjectChange = vi.fn();
 
-    const { container } = await mount(
-      { polygons: [TRIANGLE], position: [100, 200, 0] },
-      (meshRef) => ({ object: meshRef, onObjectChange }),
-    );
+    let container!: HTMLElement;
+    let handle!: PolyMeshHandle | null;
+    await withFakeLayoutAsync(2, async () => {
+      const result = await mount(
+        { polygons: [TRIANGLE], position: [100, 200, 0] },
+        (meshRef) => ({ object: meshRef, onMouseDown, onMouseUp, onDraggingChanged, onObjectChange }),
+      );
+      container = result.container;
+      handle = result.getMeshHandle();
+    });
+    expect(handle).not.toBeNull();
+    const rebakeSpy = vi.spyOn(handle!, "rebakeAtlas");
 
     const xBeam = container.querySelector(".polycss-transform-arrow--x") as HTMLElement;
     expect(xBeam).not.toBeNull();
@@ -230,8 +209,16 @@ describe("PolyTransformControls (Vue)", () => {
       window.dispatchEvent(new PointerEvent("pointermove", { clientX: 10, clientY: 0, pointerId: 1 }));
     });
 
+    expect(onMouseDown).toHaveBeenCalledOnce();
+    expect(onDraggingChanged).toHaveBeenLastCalledWith(true);
     expect(onObjectChange).toHaveBeenCalledOnce();
     expect(onObjectChange.mock.calls[0][0].position).toEqual([105, 200, 0]);
+
+    window.dispatchEvent(new PointerEvent("pointerup", { clientX: 10, clientY: 0, pointerId: 1 }));
+
+    expect(onMouseUp).toHaveBeenCalledOnce();
+    expect(onDraggingChanged).toHaveBeenLastCalledWith(false);
+    expect(rebakeSpy).not.toHaveBeenCalled();
   });
 
   it("dragging Y axis only changes y; perpendicular pointer motion has no effect", async () => {
@@ -344,13 +331,26 @@ describe("PolyTransformControls (Vue)", () => {
     expect(onObjectChange).not.toHaveBeenCalled();
   });
 
-  it("dragging Y ring: rotation[1] changes after pointer move", async () => {
+  it("rotate drag emits lifecycle events, updates rotation, and rebakes on release", async () => {
     const onObjectChange = vi.fn();
+    const onMouseDown = vi.fn();
+    const onMouseUp = vi.fn();
+    const onDraggingChanged = vi.fn();
 
-    const { container } = await mount(
+    const { container, getMeshHandle } = await mount(
       { polygons: [TRIANGLE], rotation: [0, 0, 0] },
-      (meshRef) => ({ object: meshRef, mode: "rotate", onObjectChange }),
+      (meshRef) => ({
+        object: meshRef,
+        mode: "rotate",
+        onObjectChange,
+        onMouseDown,
+        onMouseUp,
+        onDraggingChanged,
+      }),
     );
+    const handle = getMeshHandle();
+    expect(handle).not.toBeNull();
+    const rebakeSpy = vi.spyOn(handle!, "rebakeAtlas");
 
     const yRing = container.querySelector(".polycss-transform-ring--y") as HTMLElement;
     expect(yRing).not.toBeNull();
@@ -366,12 +366,21 @@ describe("PolyTransformControls (Vue)", () => {
       window.dispatchEvent(new PointerEvent("pointermove", { clientX: 100, clientY: 10, pointerId: 1 }));
     });
 
+    expect(onMouseDown).toHaveBeenCalledOnce();
+    expect(onDraggingChanged).toHaveBeenLastCalledWith(true);
     expect(onObjectChange).toHaveBeenCalled();
     const event = onObjectChange.mock.calls[0][0];
     expect(typeof event.rotation[1]).toBe("number");
     expect(event.rotation[1]).not.toBe(0);
     expect(Math.abs(event.rotation[0])).toBeLessThan(1e-6);
     expect(Math.abs(event.rotation[2])).toBeLessThan(1e-6);
+    expect(rebakeSpy).not.toHaveBeenCalled();
+
+    window.dispatchEvent(new PointerEvent("pointerup", { clientX: 100, clientY: 10, pointerId: 1 }));
+
+    expect(onMouseUp).toHaveBeenCalledOnce();
+    expect(onDraggingChanged).toHaveBeenLastCalledWith(false);
+    expect(rebakeSpy).toHaveBeenCalledOnce();
   });
 
   it("dragging Z ring: rotation[2] changes after pointer move", async () => {
@@ -423,35 +432,6 @@ describe("PolyTransformControls (Vue)", () => {
     expect(onObjectChange).toHaveBeenCalled();
     const degrees = onObjectChange.mock.calls[0][0].rotation[0];
     expect(degrees % 15).toBeCloseTo(0, 5);
-  });
-
-  it("rotate Y ring: pointerdown emits mouseDown + draggingChanged(true); pointerup emits mouseUp + draggingChanged(false)", async () => {
-    const onMouseDown = vi.fn();
-    const onMouseUp = vi.fn();
-    const onDraggingChanged = vi.fn();
-
-    const { container } = await mount(
-      { polygons: [TRIANGLE] },
-      (meshRef) => ({ object: meshRef, mode: "rotate", onMouseDown, onMouseUp, onDraggingChanged }),
-    );
-
-    const yRing = container.querySelector(".polycss-transform-ring--y") as HTMLElement;
-    expect(yRing).not.toBeNull();
-    patchRingLeafBboxForDonut(yRing, 100, 0);
-
-    withFakeLayout(2, () => {
-      yRing.dispatchEvent(
-        new PointerEvent("pointerdown", { bubbles: true, clientX: 100, clientY: 0, pointerId: 1 }),
-      );
-    });
-
-    expect(onMouseDown).toHaveBeenCalledOnce();
-    expect(onDraggingChanged).toHaveBeenLastCalledWith(true);
-
-    window.dispatchEvent(new PointerEvent("pointerup", { clientX: 0, clientY: 100, pointerId: 1 }));
-
-    expect(onMouseUp).toHaveBeenCalledOnce();
-    expect(onDraggingChanged).toHaveBeenLastCalledWith(false);
   });
 
   it("enabled=false: pointerdown on Y ring ignored", async () => {
@@ -538,57 +518,6 @@ describe("PolyTransformControls (Vue)", () => {
     expect(onDraggingChanged).toHaveBeenLastCalledWith(true);
     window.dispatchEvent(new PointerEvent("pointercancel", { pointerId: 1 }));
     expect(onDraggingChanged).toHaveBeenLastCalledWith(false);
-  });
-
-  it("rebakeAtlas is called exactly once on rotate-ring pointerdown→up", async () => {
-    const { container, getMeshHandle } = await mount(
-      { polygons: [TRIANGLE], rotation: [0, 0, 0] },
-      (meshRef) => ({ object: meshRef, mode: "rotate" }),
-    );
-
-    const handle = getMeshHandle();
-    expect(handle).not.toBeNull();
-    const rebakeSpy = vi.spyOn(handle!, "rebakeAtlas");
-
-    const yRing = container.querySelector(".polycss-transform-ring--y") as HTMLElement;
-    expect(yRing).not.toBeNull();
-    patchRingLeafBboxForDonut(yRing, 100, 0);
-
-    withFakeLayout(2, () => {
-      yRing.dispatchEvent(
-        new PointerEvent("pointerdown", { bubbles: true, clientX: 100, clientY: 0, pointerId: 1 }),
-      );
-    });
-
-    expect(rebakeSpy).not.toHaveBeenCalled();
-
-    window.dispatchEvent(new PointerEvent("pointerup", { clientX: 0, clientY: 100, pointerId: 1 }));
-
-    expect(rebakeSpy).toHaveBeenCalledOnce();
-  });
-
-  it("rebakeAtlas is NOT called after an axis (translate) drag ends", async () => {
-    const { container, getMeshHandle } = await mount(
-      { polygons: [TRIANGLE], position: [0, 0, 0] },
-      (meshRef) => ({ object: meshRef, mode: "translate" }),
-    );
-
-    const handle = getMeshHandle();
-    expect(handle).not.toBeNull();
-    const rebakeSpy = vi.spyOn(handle!, "rebakeAtlas");
-
-    const xBeam = container.querySelector(".polycss-transform-arrow--x") as HTMLElement;
-    expect(xBeam).not.toBeNull();
-
-    withFakeLayout(2, () => {
-      xBeam.dispatchEvent(
-        new PointerEvent("pointerdown", { bubbles: true, clientX: 0, clientY: 0, pointerId: 1 }),
-      );
-    });
-
-    window.dispatchEvent(new PointerEvent("pointerup", { clientX: 10, clientY: 0, pointerId: 1 }));
-
-    expect(rebakeSpy).not.toHaveBeenCalled();
   });
 
   it("switching mode from translate to rotate replaces 6 arrows with 3 rings", async () => {

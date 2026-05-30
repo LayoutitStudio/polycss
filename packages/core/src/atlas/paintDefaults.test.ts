@@ -129,20 +129,12 @@ describe("parseAlpha — alpha extraction from CSS color strings", () => {
 // ---------------------------------------------------------------------------
 
 describe("shadePolygon — Lambert shading outputs", () => {
-  it("white polygon with white light at intensity=1, zero ambient → ~mid grey (physical Lambert / π)", () => {
-    // Lambert is now physically based: `lit_linear = albedo_linear × intensity ×
-    // max(n·L, 0) / π`. At intensity=1, lambert=1, a perfectly white surface
-    // reaches `1 / π ≈ 0.318` in linear-light space, which sRGB-encodes to
-    // ~#999999 (mid-grey). Matches Three.js MeshLambertMaterial.
+  it("white polygon with white light at full intensity and zero ambient → 1/π linear, sRGB-encoded mid-grey", () => {
+    // shadePolygon does physical Lambert: factor = (light·directScale + amb·ambI) / π,
+    // outLinear = albedoLinear × factor, output = sRGB(outLinear). With direct=1 and
+    // n·L absorbed into directScale by the caller, the output is sRGB(1/π) ≈ #999999.
     const result = shadePolygon("#ffffff", 1, "#ffffff", "#000000", 0);
     expect(result).toBe("#999999");
-  });
-
-  it("white polygon with white light at intensity=π, zero ambient → full white", () => {
-    // Multiplying intensity by π cancels the BRDF normalization for callers
-    // that still want the pre-physical "intensity=1 = saturated" behavior.
-    const result = shadePolygon("#ffffff", Math.PI, "#ffffff", "#000000", 0);
-    expect(result).toBe("#ffffff");
   });
 
   it("white polygon with no light and no ambient → black output", () => {
@@ -150,12 +142,11 @@ describe("shadePolygon — Lambert shading outputs", () => {
     expect(result).toBe("#000000");
   });
 
-  it("red polygon with white ambient at intensity=π → red output (physical Lambert)", () => {
-    // BRDF_Lambert wraps both direct and indirect (ambient): lit = albedo/π ×
-    // (direct + ambient). To get a saturated red back from pure ambient,
-    // ambientIntensity must compensate for /π. At intensity=π → albedo × 1.
-    const result = shadePolygon("#ff0000", 0, "#000000", "#ffffff", Math.PI);
-    expect(result).toBe("#ff0000");
+  it("red polygon with white ambient at 1.0 → red, dimmed by 1/π factor", () => {
+    // Same /π factor as the directional case: ambient intensity 1 with white
+    // ambient yields factor = 1/π, so output is sRGB(1/π * (1,0,0)) ≈ #990000.
+    const result = shadePolygon("#ff0000", 0, "#000000", "#ffffff", 1);
+    expect(result).toBe("#990000");
   });
 
   it("returns a hex CSS color string in the format #rrggbb for opaque input", () => {
@@ -180,23 +171,21 @@ describe("shadePolygon — Lambert shading outputs", () => {
 // textureTintFactors — tint factor computation
 // ---------------------------------------------------------------------------
 
-describe("textureTintFactors — tint factor output (linear / π — Three.js parity)", () => {
-  it("full white light + zero ambient at direct scale 1 → factors of 1/π", () => {
-    // Physical BRDF: tint = (lightLinear × directScale) / π. White light is
-    // linear (1,1,1); at directScale=1 the factor is 1/π for each channel.
+describe("textureTintFactors — tint factor output", () => {
+  it("full white light + zero ambient at direct scale 1 → factors of 1/π (linear-space Lambert)", () => {
     const tint = textureTintFactors(1, "#ffffff", "#000000", 0);
-    expect(tint.r).toBeCloseTo(1 / Math.PI);
-    expect(tint.g).toBeCloseTo(1 / Math.PI);
-    expect(tint.b).toBeCloseTo(1 / Math.PI);
+    const expected = 1 / Math.PI;
+    expect(tint.r).toBeCloseTo(expected);
+    expect(tint.g).toBeCloseTo(expected);
+    expect(tint.b).toBeCloseTo(expected);
   });
 
-  it("zero directScale + white ambient at intensity=π → factors of 1", () => {
-    // Same physical Lambert: the BRDF /π wraps ambient too. Restore the
-    // legacy "saturated tint" behaviour by passing intensity=π.
-    const tint = textureTintFactors(0, "#000000", "#ffffff", Math.PI);
-    expect(tint.r).toBeCloseTo(1);
-    expect(tint.g).toBeCloseTo(1);
-    expect(tint.b).toBeCloseTo(1);
+  it("zero directScale + white ambient at 1 → factors of 1/π", () => {
+    const tint = textureTintFactors(0, "#000000", "#ffffff", 1);
+    const expected = 1 / Math.PI;
+    expect(tint.r).toBeCloseTo(expected);
+    expect(tint.g).toBeCloseTo(expected);
+    expect(tint.b).toBeCloseTo(expected);
   });
 
   it("red light only → only r factor is positive", () => {

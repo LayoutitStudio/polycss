@@ -33,7 +33,7 @@ import {
   serializeBuilderSceneToParam,
   updateBuilderSceneUrl,
 } from "./sceneUrl";
-import type { BuilderToolMode, PlacedItem, TargetMode, ToolMode } from "./types";
+import type { BuilderPlacementTarget, BuilderToolMode, PlacedItem, TargetMode, ToolMode } from "./types";
 
 const TILE = 50;
 const BUILDER_IMPORT_EXTENSIONS = new Set(["obj", "glb", "vox"]);
@@ -169,7 +169,7 @@ export default function BuilderWorkbench() {
   // tilt. The grid polygons in useSceneRender also consume this so the
   // floor grid bends with the terrain — there's no separate solid-fill
   // mesh anymore, the grid IS the terrain.
-  const { hoverPolygons, vertices: terrainVertices } = useTerrain({ toolMode, targetMode, sceneOptions });
+  const { vertices: terrainVertices } = useTerrain({ toolMode, targetMode, sceneOptions });
 
   useCameraShortcuts({ dragMode: sceneOptions.dragMode, updateScene });
 
@@ -219,8 +219,9 @@ export default function BuilderWorkbench() {
 
   useEffect(() => {
     if (!urlSyncReady) return;
+    if (gizmoDragging) return;
     updateBuilderSceneUrl(serializeBuilderSceneToParam(placedItems, sceneOptions));
-  }, [placedItems, sceneOptions, urlSyncReady]);
+  }, [gizmoDragging, placedItems, sceneOptions, urlSyncReady]);
 
   // Terrain-follow: when the heightmap changes, re-snap every placed
   // item to the current surface at its (worldX, worldY). Note: this
@@ -320,13 +321,17 @@ export default function BuilderWorkbench() {
     setSceneOptions({ ...DEFAULT_SCENE });
   }, [replaceItems, setSelectedId]);
 
-  const handleAddShapeAt = useCallback(async (worldX: number, worldY: number) => {
+  const handleAddShapeAt = useCallback(async ({ worldX, worldY, surfaceWorldZ }: BuilderPlacementTarget) => {
     if (placingShapeId) return;
     const preset = BUILDER_SHAPE_PRESETS.find((shape) => shape.id === selectedShapeId);
     if (!preset) return;
     setPlacingShapeId(preset.id);
     try {
-      const placement = await buildPlacement(preset, worldX, worldY);
+      const terrainSample = sampleTerrain(terrainVertices, sceneOptions.gridResolution, worldX, worldY);
+      const elevation = typeof surfaceWorldZ === "number" && Number.isFinite(surfaceWorldZ)
+        ? Math.max(0, surfaceWorldZ - terrainSample.z)
+        : 0;
+      const placement = await buildPlacement(preset, worldX, worldY, { elevation });
       if (!placement) return;
       const snapped = snapPlacement(placement, terrainVertices, sceneOptions.gridResolution, sceneOptions.snapToGrid);
       appendItems([snapped]);
@@ -492,7 +497,6 @@ export default function BuilderWorkbench() {
             ambientLight={ambientLight}
             gridPolygons={gridPolygons}
             ghostPolygons={[]}
-            terrainHoverPolygons={hoverPolygons}
             placementDraft={false}
             renderItems={renderItems}
             renderedPolygonsById={renderedPolygonsById}

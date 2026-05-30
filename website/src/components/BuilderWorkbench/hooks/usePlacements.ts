@@ -45,7 +45,11 @@ export interface UsePlacementsResult {
   meshHandlesTick: number;
 }
 
-export function usePlacements({ meshResolution, gridResolution, onImportError }: UsePlacementsOptions): UsePlacementsResult {
+export function usePlacements({
+  meshResolution,
+  gridResolution,
+  onImportError,
+}: UsePlacementsOptions): UsePlacementsResult {
   const effectiveMeshResolution = activeMeshResolution(meshResolution);
   const [placedItems, setPlacedItems] = useState<PlacedItem[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -109,7 +113,9 @@ export function usePlacements({ meshResolution, gridResolution, onImportError }:
     ): Promise<PlacedItem | null> => {
       try {
         const loaded = await loadPresetModel(preset, PARSER_DEFAULTS, effectiveMeshResolution);
-        const optimized = optimizeMeshPolygons(loaded.rawPolygons, { meshResolution: effectiveMeshResolution });
+        const optimized = optimizeMeshPolygons(loaded.rawPolygons, {
+          meshResolution: effectiveMeshResolution,
+        });
         const bbox = meshBbox(optimized);
         const targetSize = gridResolution > 0 ? gridResolution : NORMALIZED_MAX_DIM;
         const fitScale = bbox.span > 0 ? targetSize / bbox.span : 1;
@@ -148,7 +154,9 @@ export function usePlacements({ meshResolution, gridResolution, onImportError }:
       let loaded: Awaited<ReturnType<typeof loadDroppedModel>> | null = null;
       try {
         loaded = await loadDroppedModel(source, PARSER_DEFAULTS, effectiveMeshResolution);
-        const optimized = optimizeMeshPolygons(loaded.rawPolygons, { meshResolution: effectiveMeshResolution });
+        const optimized = optimizeMeshPolygons(loaded.rawPolygons, {
+          meshResolution: effectiveMeshResolution,
+        });
         const bbox = meshBbox(optimized);
         const targetSize = gridResolution > 0 ? gridResolution : NORMALIZED_MAX_DIM;
         const fitScale = bbox.span > 0 ? targetSize / bbox.span : 1;

@@ -79,16 +79,16 @@ describe("parseObj — real fixture (chicken.obj)", () => {
     expect(span).toBeCloseTo(60, 1);
   });
 
-  it("bbox MIN lands at world origin (Three.js convention)", () => {
+  it("default gridShift=1 keeps all vertex coords ≥ 1 (no zero edges)", () => {
     const text = loadObjFile("chicken.obj");
     const result = parseObj(text);
     const allCoords = result.polygons.flatMap((p) => p.vertices).flat();
-    expect(Math.min(...allCoords)).toBeCloseTo(0, 5);
+    expect(Math.min(...allCoords)).toBeGreaterThanOrEqual(1);
   });
 
   it("custom targetSize is honored (target 100 → ~100-unit bbox)", () => {
     const text = loadObjFile("chicken.obj");
-    const result = parseObj(text, { targetSize: 100 });
+    const result = parseObj(text, { targetSize: 100, gridShift: 0 });
     const all = result.polygons.flatMap((p) => p.vertices);
     const span = Math.max(
       Math.max(...all.map((v) => v[0])) - Math.min(...all.map((v) => v[0])),
@@ -339,14 +339,16 @@ v 1000 -1000 0
 v 1000 1000 0
 v -1000 1000 0
 f 4 5 6 7`;
-    const withGround = parseObj(obj, { targetSize: 60 });
+    const withGround = parseObj(obj, { targetSize: 60, gridShift: 0 });
     const withoutGround = parseObj(obj, {
       targetSize: 60,
+      gridShift: 0,
       excludeObjects: ["Ground"],
     });
     // First polygon in both is the Model triangle. Measure its intrinsic
     // size — max edge length between its vertices (NOT distance from origin,
-    // which would inflate when the triangle is offset by a large bbox).
+    // which would inflate when the triangle is offset by gridShift / large
+    // bbox scaling).
     const triEdgeMax = (poly: { vertices: number[][] }) => {
       const v = poly.vertices;
       const dist = (a: number[], b: number[]) =>

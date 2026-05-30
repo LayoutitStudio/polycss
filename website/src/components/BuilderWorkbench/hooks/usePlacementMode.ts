@@ -94,7 +94,12 @@ export function usePlacementMode({
     } finally {
       setLoadingPresetId(null);
     }
-  }, [loadingPresetId, sceneOptions.meshResolution, sceneOptions.autoCenter, updateScene]);
+  }, [
+    loadingPresetId,
+    sceneOptions.meshResolution,
+    sceneOptions.autoCenter,
+    updateScene,
+  ]);
 
   // Commit the current placementDraft at ghostWorld, add to placedItems, exit.
   // Reads the heightmap at the placement XY so the mesh lands on top of

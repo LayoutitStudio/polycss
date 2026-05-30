@@ -3,7 +3,7 @@ import { findOverlappingPolygonDuplicates } from "./dedupeOverlappingPolygons";
 import type { MeshResolution, Polygon, TextureTriangle, Vec2, Vec3 } from "../types";
 import { coverPlanarPolygons, type CoverPlanarPolygonsOptions } from "./coverPlanarPolygons";
 import { mergePolygons } from "./mergePolygons";
-import { repairMeshSeams } from "./seamRepair";
+import { seamOverlapDiagnostics, type SeamOverlapDiagnostics } from "./seamRepair";
 
 const NORMALIZE_MAX_ANGLE_DEG = 3;
 const NORMALIZE_MAX_PLANE_DISPLACEMENT = 0.03;
@@ -78,6 +78,66 @@ interface PlaneGroupReplacements {
   vertexMoves: VertexPositionMove[];
 }
 
+interface TrianglePairSourceCache {
+  polygons: Polygon[];
+  metas: Array<PlaneNormalizeMeta | null>;
+  edgeOwnerPairs: Array<[number, number]>;
+  preparedCandidates?: PreparedPairCandidate[];
+}
+
+interface PreparedPairCandidate {
+  candidate: PairCandidate;
+  normalDot: number;
+  maxDistance: number;
+}
+
+interface TopologySegment {
+  index: number;
+  key: string;
+  polygon: number;
+  edge: number;
+  a: Vec3;
+  b: Vec3;
+  dir: Vec3;
+  length: number;
+  minX: number;
+  minY: number;
+  minZ: number;
+  maxX: number;
+  maxY: number;
+  maxZ: number;
+}
+
+interface TopologyEdgeStats {
+  boundaryKeys: Set<string>;
+  internalKeys: Set<string>;
+  boundarySegments: TopologySegment[];
+  internalSegments: TopologySegment[];
+  boundaryLength: number;
+}
+
+interface TopologyGapDiagnostics {
+  exactInternalEdges: number;
+  nearInternalEdges: number;
+  exposedInternalLength: number;
+  maxInternalOffset: number;
+  tJunctionPairs: number;
+  tJunctionLength: number;
+  excessBoundaryLength: number;
+}
+
+interface SegmentOverlapInfo {
+  overlapLength: number;
+  offset: number;
+}
+
+interface BestSafetyDiagnostics {
+  polygons: Polygon[];
+  seam?: SeamOverlapDiagnostics;
+  topologyEdges?: TopologyEdgeStats;
+  topologySelf?: TopologyGapDiagnostics;
+}
+
 interface PreprocessCache {
   baseline?: Polygon[];
   deduped?: Polygon[];
@@ -87,6 +147,7 @@ interface PreprocessCache {
   snapped?: Polygon[];
   snappedInterior?: Polygon[];
   snappedInteriorIndices?: IndexFilter;
+  trianglePairSource?: TrianglePairSourceCache;
 }
 
 type IndexFilter = number[] | null;
@@ -105,8 +166,37 @@ const DEFAULT_LOSSY_APPROXIMATE_OPTIONS: Required<LossyApproximateOptions> = {
   isolatedPairs: true,
 };
 
+const AGGRESSIVE_LOSSY_APPROXIMATE_VARIANTS: ReadonlyArray<Required<LossyApproximateOptions>> = [
+  {
+    ...DEFAULT_LOSSY_APPROXIMATE_OPTIONS,
+    maxAngleDeg: 30,
+  },
+  {
+    ...DEFAULT_LOSSY_APPROXIMATE_OPTIONS,
+    maxAngleDeg: 45,
+  },
+  {
+    ...DEFAULT_LOSSY_APPROXIMATE_OPTIONS,
+    maxAngleDeg: 60,
+    maxBoundaryDisplacement: 0.06,
+  },
+];
+
 const AUTOMATIC_RECT_COVER_MAX_POLYGONS = 1800;
 const AUTOMATIC_RECT_COVER_MIN_TRIANGLE_RATIO = 0.65;
+const AUTOMATIC_APPROXIMATE_RECT_COVER_MIN_SOURCE_POLYGONS = 500;
+const AUTOMATIC_APPROXIMATE_RECT_COVER_MAX_SOURCE_POLYGONS = 2200;
+const LARGE_LOSSY_RECT_COVER_MIN_POLYGONS = 1000;
+const LARGE_LOSSY_RECT_COVER_MAX_POLYGONS = 2200;
+const LARGE_LOSSY_RECT_COVER_MAX_BOUNDARY_EDGES = 350;
+const WIDE_LOSSY_VARIANT_MAX_SOURCE_POLYGONS = 700;
+const PREPARED_PAIR_MAX_ANGLE_DEG = 60;
+const PREPARED_PAIR_MAX_BOUNDARY_DISPLACEMENT = 0.06;
+const AGGRESSIVE_LOSSY_MIN_RENDER_COST_GAIN = 4;
+const AGGRESSIVE_LOSSY_MIN_SOURCE_GAIN_RATIO = 0.003;
+const TOPOLOGY_GAP_TOLERANCE = 0.045;
+const TOPOLOGY_MIN_PARALLEL_DOT = 0.999;
+const TOPOLOGY_MIN_OVERLAP = 1e-5;
 const DEFAULT_RECT_COVER_SMALL_AUTOMATIC_SKIP_MIN_POLYGONS = 24;
 const DEFAULT_RECT_COVER_SMALL_AUTOMATIC_SKIP_MAX_POLYGONS = 50;
 const DEFAULT_RECT_COVER_MAX_AUTOMATIC_POLYGONS = 1000;
@@ -122,21 +212,71 @@ const AUTOMATIC_LOSSY_RECT_COVER_OPTIONS: CoverPlanarPolygonsOptions = {
   maxCandidateAxes: 1,
 };
 
+const AUTOMATIC_APPROXIMATE_RECT_COVER_OPTIONS: CoverPlanarPolygonsOptions = {
+  ...DEFAULT_RECT_COVER_OPTIONS,
+  maxCandidateAxes: 2,
+};
+
+const LARGE_LOSSY_RECT_COVER_OPTIONS: CoverPlanarPolygonsOptions = {
+  ...DEFAULT_RECT_COVER_OPTIONS,
+  maxCandidateAxes: 2,
+};
+
 export function optimizeMeshPolygons(
   polygons: Polygon[],
   options: OptimizeMeshPolygonsOptions = {},
 ): Polygon[] {
   const meshResolution = options.meshResolution ?? "lossy";
-  const finish = (candidate: Polygon[]): Polygon[] =>
-    meshResolution === "lossy" ? repairMeshSeams(candidate) : candidate;
   const preprocessCache: PreprocessCache = {};
   const baseline = preprocessModelPolygons(polygons, false, preprocessCache);
   let best = baseline;
-  let bestCost = polygonRenderCost(baseline);
+  let bestCost = polygonRenderCost(best);
+  let bestDiagnostics: BestSafetyDiagnostics = { polygons: best };
+  const resetBestDiagnostics = (seam?: SeamOverlapDiagnostics): void => {
+    bestDiagnostics = { polygons: best, seam };
+  };
+  const bestSeamDiagnostics = (): SeamOverlapDiagnostics => {
+    if (bestDiagnostics.polygons !== best) resetBestDiagnostics();
+    if (!bestDiagnostics.seam) bestDiagnostics.seam = seamOverlapDiagnostics(best);
+    return bestDiagnostics.seam;
+  };
+  const bestTopologyEdges = (): TopologyEdgeStats => {
+    if (bestDiagnostics.polygons !== best) resetBestDiagnostics();
+    if (!bestDiagnostics.topologyEdges) bestDiagnostics.topologyEdges = collectTopologyEdgeStats(best);
+    return bestDiagnostics.topologyEdges;
+  };
+  const bestTopologySelfDiagnostics = (): TopologyGapDiagnostics => {
+    if (bestDiagnostics.polygons !== best) resetBestDiagnostics();
+    if (!bestDiagnostics.topologySelf) {
+      bestDiagnostics.topologySelf = topologySelfDiagnostics(bestTopologyEdges(), TOPOLOGY_GAP_TOLERANCE);
+    }
+    return bestDiagnostics.topologySelf;
+  };
   const acceptCandidate = (candidate: Polygon[], cost = polygonRenderCost(candidate)): boolean => {
     if (cost >= bestCost) return false;
     best = candidate;
     bestCost = cost;
+    resetBestDiagnostics();
+    return true;
+  };
+  const acceptSeamSafeCandidate = (
+    candidate: Polygon[],
+    sourcePolygonCount: number,
+    cost = polygonRenderCost(candidate),
+  ): boolean => {
+    const gain = bestCost - cost;
+    if (gain <= 0) return false;
+    if (gain < aggressiveLossyMinRenderCostGain(sourcePolygonCount)) return false;
+    const candidateSeam = seamOverlapDiagnostics(candidate);
+    if (seamDiagnosticsWorse(candidateSeam, bestSeamDiagnostics())) return false;
+    if (topologyGapDiagnosticsWorse(
+      bestTopologyEdges(),
+      bestTopologySelfDiagnostics(),
+      candidate,
+    )) return false;
+    best = candidate;
+    bestCost = cost;
+    resetBestDiagnostics(candidateSeam);
     return true;
   };
 
@@ -152,16 +292,53 @@ export function optimizeMeshPolygons(
     const losslessRectCovered = applyRectCoverCandidate(baseline, undefined);
     if (losslessRectCovered !== baseline) acceptCandidate(losslessRectCovered);
   }
-  if (meshResolution === "lossy" && (best.length <= 1 || bestCost <= 1 + 1e-9)) return finish(best);
+  if (meshResolution === "lossy" && (best.length <= 1 || bestCost <= 1 + 1e-9)) return best;
   if (meshResolution === "lossy") {
     const approximate = preprocessModelPolygons(polygons, DEFAULT_LOSSY_APPROXIMATE_OPTIONS, preprocessCache);
     acceptCandidate(approximate);
+    if (
+      options.rectCover === undefined &&
+      polygons.length >= AUTOMATIC_APPROXIMATE_RECT_COVER_MIN_SOURCE_POLYGONS &&
+      polygons.length <= AUTOMATIC_APPROXIMATE_RECT_COVER_MAX_SOURCE_POLYGONS
+    ) {
+      acceptCandidate(applyRectCoverCandidate(approximate, AUTOMATIC_APPROXIMATE_RECT_COVER_OPTIONS));
+    }
     if (options.rectCover !== undefined && options.rectCover !== false) {
       acceptCandidate(applyRectCoverCandidate(approximate, options.rectCover));
     }
+    let acceptedBaseAggressive = false;
+    for (let variantIndex = 0; variantIndex < AGGRESSIVE_LOSSY_APPROXIMATE_VARIANTS.length; variantIndex += 1) {
+      if (
+        variantIndex === 1 &&
+        !acceptedBaseAggressive
+      ) continue;
+      if (
+        variantIndex === 2 &&
+        !automaticWideLossyVariantCandidate(polygons)
+      ) continue;
+      const aggressiveOptions = AGGRESSIVE_LOSSY_APPROXIMATE_VARIANTS[variantIndex];
+      const aggressive = preprocessModelPolygons(polygons, aggressiveOptions, preprocessCache);
+      let aggressiveCandidate = aggressive;
+      if (
+        options.rectCover === undefined &&
+        polygons.length >= AUTOMATIC_APPROXIMATE_RECT_COVER_MIN_SOURCE_POLYGONS &&
+        polygons.length <= AUTOMATIC_APPROXIMATE_RECT_COVER_MAX_SOURCE_POLYGONS
+      ) {
+        aggressiveCandidate = applyRectCoverCandidate(aggressive, AUTOMATIC_APPROXIMATE_RECT_COVER_OPTIONS);
+      }
+      if (options.rectCover !== undefined && options.rectCover !== false) {
+        aggressiveCandidate = applyRectCoverCandidate(aggressive, options.rectCover);
+      }
+      const accepted = acceptSeamSafeCandidate(aggressiveCandidate, polygons.length);
+      if (variantIndex === 0 && accepted) acceptedBaseAggressive = true;
+    }
+    if (options.rectCover === undefined) {
+      const largeRectCovered = applyRectCoverCandidate(best, automaticLargeLossyRectCoverCandidate(best));
+      if (largeRectCovered !== best) acceptSeamSafeCandidate(largeRectCovered, best.length);
+    }
   }
 
-  return finish(best);
+  return best;
 }
 
 function polygonRenderCost(polygons: Polygon[]): number {
@@ -173,6 +350,312 @@ function polygonRenderCost(polygons: Polygon[]): number {
     cost += 1 + irregularPenalty + texturePenalty;
   }
   return cost;
+}
+
+function seamDiagnosticsWorse(
+  candidate: SeamOverlapDiagnostics,
+  baseline: SeamOverlapDiagnostics,
+): boolean {
+  return candidate.nearPairs > baseline.nearPairs ||
+    candidate.unclosedPairs > baseline.unclosedPairs ||
+    candidate.maxMeasuredGapPx > baseline.maxMeasuredGapPx + 1e-9 ||
+    candidate.maxResidualGapPx > baseline.maxResidualGapPx + 1e-9;
+}
+
+function topologyGapDiagnosticsWorse(
+  referenceEdges: TopologyEdgeStats,
+  referenceDiagnostics: TopologyGapDiagnostics,
+  candidate: Polygon[],
+): boolean {
+  const candidateDiagnostics = topologyGapDiagnostics(
+    referenceEdges,
+    collectTopologyEdgeStats(candidate),
+    TOPOLOGY_GAP_TOLERANCE,
+  );
+  if (candidateDiagnostics.exactInternalEdges > 0 || candidateDiagnostics.nearInternalEdges > 0) {
+    return true;
+  }
+  return candidateDiagnostics.tJunctionPairs > referenceDiagnostics.tJunctionPairs ||
+    candidateDiagnostics.tJunctionLength > referenceDiagnostics.tJunctionLength + 1e-9;
+}
+
+function topologyGapDiagnostics(
+  referenceEdges: TopologyEdgeStats,
+  candidateEdges: TopologyEdgeStats,
+  tolerance: number,
+): TopologyGapDiagnostics {
+  const internalIndex = buildTopologySegmentIndex(referenceEdges.internalSegments, tolerance);
+  const diagnostics: TopologyGapDiagnostics = {
+    exactInternalEdges: 0,
+    nearInternalEdges: 0,
+    exposedInternalLength: 0,
+    maxInternalOffset: 0,
+    tJunctionPairs: 0,
+    tJunctionLength: 0,
+    excessBoundaryLength: Math.max(0, candidateEdges.boundaryLength - referenceEdges.boundaryLength),
+  };
+
+  for (const segment of candidateEdges.boundarySegments) {
+    if (referenceEdges.boundaryKeys.has(segment.key)) continue;
+    if (referenceEdges.internalKeys.has(segment.key)) {
+      diagnostics.exactInternalEdges += 1;
+      diagnostics.exposedInternalLength += segment.length;
+      continue;
+    }
+    const overlap = findOverlappingSegment(segment, internalIndex, tolerance);
+    if (!overlap) continue;
+    diagnostics.nearInternalEdges += 1;
+    diagnostics.exposedInternalLength += overlap.overlapLength;
+    diagnostics.maxInternalOffset = Math.max(diagnostics.maxInternalOffset, overlap.offset);
+  }
+
+  addBoundaryTJunctionDiagnostics(diagnostics, candidateEdges.boundarySegments, tolerance);
+  return diagnostics;
+}
+
+function topologySelfDiagnostics(edges: TopologyEdgeStats, tolerance: number): TopologyGapDiagnostics {
+  const diagnostics: TopologyGapDiagnostics = {
+    exactInternalEdges: 0,
+    nearInternalEdges: 0,
+    exposedInternalLength: 0,
+    maxInternalOffset: 0,
+    tJunctionPairs: 0,
+    tJunctionLength: 0,
+    excessBoundaryLength: 0,
+  };
+  addBoundaryTJunctionDiagnostics(diagnostics, edges.boundarySegments, tolerance);
+  return diagnostics;
+}
+
+function addBoundaryTJunctionDiagnostics(
+  diagnostics: TopologyGapDiagnostics,
+  boundarySegments: TopologySegment[],
+  tolerance: number,
+): void {
+  const boundaryIndex = buildTopologySegmentIndex(boundarySegments, tolerance);
+  const seenPairs = new Set<number>();
+  let pairStride = 0;
+  for (const segment of boundarySegments) pairStride = Math.max(pairStride, segment.index + 1);
+  for (const segment of boundarySegments) {
+    for (const other of overlappingSegmentCandidates(segment, boundaryIndex, tolerance)) {
+      if (other === segment || other.polygon === segment.polygon || other.key === segment.key) continue;
+      const pairKey = segment.index < other.index
+        ? segment.index * pairStride + other.index
+        : other.index * pairStride + segment.index;
+      if (seenPairs.has(pairKey)) continue;
+      seenPairs.add(pairKey);
+      const overlap = segmentOverlap(segment, other, tolerance);
+      if (!overlap) continue;
+      diagnostics.tJunctionPairs += 1;
+      diagnostics.tJunctionLength += overlap.overlapLength;
+    }
+  }
+}
+
+function collectTopologyEdgeStats(polygons: Polygon[]): TopologyEdgeStats {
+  const edges = new Map<string, { count: number; segment: TopologySegment }>();
+  for (let polygonIndex = 0; polygonIndex < polygons.length; polygonIndex += 1) {
+    const vertices = polygons[polygonIndex].vertices;
+    for (let edgeIndex = 0; edgeIndex < vertices.length; edgeIndex += 1) {
+      const a = vertices[edgeIndex];
+      const b = vertices[(edgeIndex + 1) % vertices.length];
+      const segment = topologySegment(edgeKey(a, b), polygonIndex, edgeIndex, a, b);
+      if (!segment) continue;
+      const current = edges.get(segment.key);
+      if (current) current.count += 1;
+      else edges.set(segment.key, { count: 1, segment });
+    }
+  }
+
+  const boundaryKeys = new Set<string>();
+  const internalKeys = new Set<string>();
+  const boundarySegments: TopologySegment[] = [];
+  const internalSegments: TopologySegment[] = [];
+  let boundaryLength = 0;
+  let index = 0;
+  for (const edge of edges.values()) {
+    const segment = { ...edge.segment, index };
+    index += 1;
+    if (edge.count === 1) {
+      boundaryKeys.add(segment.key);
+      boundarySegments.push(segment);
+      boundaryLength += segment.length;
+    } else {
+      internalKeys.add(segment.key);
+      internalSegments.push(segment);
+    }
+  }
+  return { boundaryKeys, internalKeys, boundarySegments, internalSegments, boundaryLength };
+}
+
+function topologySegment(
+  key: string,
+  polygon: number,
+  edge: number,
+  a: Vec3,
+  b: Vec3,
+): TopologySegment | null {
+  const delta = subVec(b, a);
+  const length = Math.hypot(delta[0], delta[1], delta[2]);
+  if (length <= 1e-10) return null;
+  const dir: Vec3 = [delta[0] / length, delta[1] / length, delta[2] / length];
+  return {
+    index: -1,
+    key,
+    polygon,
+    edge,
+    a,
+    b,
+    dir,
+    length,
+    minX: Math.min(a[0], b[0]),
+    minY: Math.min(a[1], b[1]),
+    minZ: Math.min(a[2], b[2]),
+    maxX: Math.max(a[0], b[0]),
+    maxY: Math.max(a[1], b[1]),
+    maxZ: Math.max(a[2], b[2]),
+  };
+}
+
+function buildTopologySegmentIndex(segments: TopologySegment[], tolerance: number) {
+  const cellSize = Math.max(tolerance * 8, 0.5);
+  const cells = new Map<string, TopologySegment[]>();
+  for (const segment of segments) {
+    addTopologySegmentToCells(cells, segment, cellSize, tolerance);
+  }
+  return { cellSize, cells };
+}
+
+function addTopologySegmentToCells(
+  cells: Map<string, TopologySegment[]>,
+  segment: TopologySegment,
+  cellSize: number,
+  padding: number,
+) {
+  const [minX, minY, minZ] = topologyCellCoords(
+    [segment.minX - padding, segment.minY - padding, segment.minZ - padding],
+    cellSize,
+  );
+  const [maxX, maxY, maxZ] = topologyCellCoords(
+    [segment.maxX + padding, segment.maxY + padding, segment.maxZ + padding],
+    cellSize,
+  );
+  for (let x = minX; x <= maxX; x += 1) {
+    for (let y = minY; y <= maxY; y += 1) {
+      for (let z = minZ; z <= maxZ; z += 1) {
+        const key = `${x},${y},${z}`;
+        const bucket = cells.get(key);
+        if (bucket) bucket.push(segment);
+        else cells.set(key, [segment]);
+      }
+    }
+  }
+}
+
+function topologyCellCoords(point: Vec3, cellSize: number): [number, number, number] {
+  return [
+    Math.floor(point[0] / cellSize),
+    Math.floor(point[1] / cellSize),
+    Math.floor(point[2] / cellSize),
+  ];
+}
+
+function overlappingSegmentCandidates(
+  segment: TopologySegment,
+  index: ReturnType<typeof buildTopologySegmentIndex>,
+  tolerance: number,
+): TopologySegment[] {
+  const out: TopologySegment[] = [];
+  const seen = new Set<TopologySegment>();
+  const [minX, minY, minZ] = topologyCellCoords(
+    [segment.minX - tolerance, segment.minY - tolerance, segment.minZ - tolerance],
+    index.cellSize,
+  );
+  const [maxX, maxY, maxZ] = topologyCellCoords(
+    [segment.maxX + tolerance, segment.maxY + tolerance, segment.maxZ + tolerance],
+    index.cellSize,
+  );
+  for (let x = minX; x <= maxX; x += 1) {
+    for (let y = minY; y <= maxY; y += 1) {
+      for (let z = minZ; z <= maxZ; z += 1) {
+        const bucket = index.cells.get(`${x},${y},${z}`);
+        if (!bucket) continue;
+        for (const candidate of bucket) {
+          if (seen.has(candidate)) continue;
+          seen.add(candidate);
+          out.push(candidate);
+        }
+      }
+    }
+  }
+  return out;
+}
+
+function findOverlappingSegment(
+  segment: TopologySegment,
+  index: ReturnType<typeof buildTopologySegmentIndex>,
+  tolerance: number,
+): SegmentOverlapInfo | null {
+  let best: SegmentOverlapInfo | null = null;
+  for (const candidate of overlappingSegmentCandidates(segment, index, tolerance)) {
+    const overlap = segmentOverlap(segment, candidate, tolerance);
+    if (!overlap) continue;
+    if (!best ||
+      overlap.overlapLength > best.overlapLength ||
+      (overlap.overlapLength === best.overlapLength && overlap.offset < best.offset)
+    ) {
+      best = overlap;
+    }
+  }
+  return best;
+}
+
+function segmentOverlap(
+  a: TopologySegment,
+  b: TopologySegment,
+  tolerance: number,
+): SegmentOverlapInfo | null {
+  if (!topologySegmentBoundsOverlap(a, b, tolerance)) return null;
+  if (Math.abs(dotVec(a.dir, b.dir)) < TOPOLOGY_MIN_PARALLEL_DOT) return null;
+
+  const bStart = dotVec(subVec(b.a, a.a), a.dir);
+  const bEnd = dotVec(subVec(b.b, a.a), a.dir);
+  const overlapStart = Math.max(0, Math.min(bStart, bEnd));
+  const overlapEnd = Math.min(a.length, Math.max(bStart, bEnd));
+  const overlapLength = overlapEnd - overlapStart;
+  if (overlapLength <= Math.max(TOPOLOGY_MIN_OVERLAP, Math.min(a.length, b.length) * 1e-4)) {
+    return null;
+  }
+
+  const mid = [
+    a.a[0] + a.dir[0] * ((overlapStart + overlapEnd) / 2),
+    a.a[1] + a.dir[1] * ((overlapStart + overlapEnd) / 2),
+    a.a[2] + a.dir[2] * ((overlapStart + overlapEnd) / 2),
+  ] as Vec3;
+  const projected = Math.max(0, Math.min(b.length, dotVec(subVec(mid, b.a), b.dir)));
+  const closest: Vec3 = [
+    b.a[0] + b.dir[0] * projected,
+    b.a[1] + b.dir[1] * projected,
+    b.a[2] + b.dir[2] * projected,
+  ];
+  const offset = distanceVec(mid, closest);
+  return offset <= tolerance ? { overlapLength, offset } : null;
+}
+
+function topologySegmentBoundsOverlap(a: TopologySegment, b: TopologySegment, tolerance: number): boolean {
+  return a.minX <= b.maxX + tolerance &&
+    b.minX <= a.maxX + tolerance &&
+    a.minY <= b.maxY + tolerance &&
+    b.minY <= a.maxY + tolerance &&
+    a.minZ <= b.maxZ + tolerance &&
+    b.minZ <= a.maxZ + tolerance;
+}
+
+function aggressiveLossyMinRenderCostGain(sourcePolygonCount: number): number {
+  return Math.max(
+    AGGRESSIVE_LOSSY_MIN_RENDER_COST_GAIN,
+    sourcePolygonCount * AGGRESSIVE_LOSSY_MIN_SOURCE_GAIN_RATIO,
+  );
 }
 
 function applyRectCoverCandidate(
@@ -227,6 +710,17 @@ function automaticLossyRectCoverOptions(polygons: Polygon[]): CoverPlanarPolygon
     return false;
   }
   return AUTOMATIC_LOSSY_RECT_COVER_OPTIONS;
+}
+
+function automaticLargeLossyRectCoverCandidate(polygons: Polygon[]): CoverPlanarPolygonsOptions | false {
+  if (polygons.length < LARGE_LOSSY_RECT_COVER_MIN_POLYGONS) return false;
+  if (polygons.length > LARGE_LOSSY_RECT_COVER_MAX_POLYGONS) return false;
+  if (polygonBoundaryEdgeCount(polygons) > LARGE_LOSSY_RECT_COVER_MAX_BOUNDARY_EDGES) return false;
+  return LARGE_LOSSY_RECT_COVER_OPTIONS;
+}
+
+function automaticWideLossyVariantCandidate(polygons: Polygon[]): boolean {
+  return polygons.length <= WIDE_LOSSY_VARIANT_MAX_SOURCE_POLYGONS;
 }
 
 function polygonTriangleCount(polygons: Polygon[]): number {
@@ -332,7 +826,7 @@ function preprocessModelPolygons(
     ? DEFAULT_NORMALIZE_OPTIONS
     : resolveNormalizeOptions(normalizeGeometry);
   if (options.isolatedPairs) {
-    const paired = mergeIsolatedTrianglePairs(snappedInteriorPolygonsForMerge(deduped, cache), options);
+    const paired = mergeIsolatedTrianglePairs(snappedInteriorPolygonsForMerge(deduped, cache), options, cache);
     const mergedPaired = mergePolygons(paired);
     return mergedPaired.length < baseline.length ? mergedPaired : baseline;
   }
@@ -373,7 +867,28 @@ function resolveNormalizeOptions(options: LossyApproximateOptions): ResolvedGeom
 function mergeIsolatedTrianglePairs(
   polygons: Polygon[],
   options: ResolvedGeometryNormalizeOptions,
+  cache?: PreprocessCache,
 ): Polygon[] {
+  const source = trianglePairSourceFor(polygons, cache);
+
+  const candidates: PairCandidate[] = [];
+  for (const prepared of preparedPairCandidatesFor(polygons, source)) {
+    if (preparedPairCandidateMatchesOptions(prepared, options)) {
+      candidates.push(prepared.candidate);
+    }
+  }
+  const selected = choosePairCandidates(candidates);
+  if (selected.length === 0) return polygons;
+
+  return buildIsolatedTrianglePairOutput(polygons, selected);
+}
+
+function trianglePairSourceFor(
+  polygons: Polygon[],
+  cache?: PreprocessCache,
+): TrianglePairSourceCache {
+  if (cache?.trianglePairSource?.polygons === polygons) return cache.trianglePairSource;
+
   const metas = polygons.map((polygon): PlaneNormalizeMeta | null => {
     const plane = planeOfPolygon(polygon);
     if (!plane) return null;
@@ -396,17 +911,37 @@ function mergeIsolatedTrianglePairs(
     }
   }
 
-  const candidates: PairCandidate[] = [];
+  const edgeOwnerPairs: Array<[number, number]> = [];
   for (const owners of edgeOwners.values()) {
-    if (owners.length !== 2) continue;
-    const [a, b] = owners;
-    const candidate = approximateTrianglePairCandidate(a, b, polygons, metas, options);
-    if (candidate) candidates.push(candidate);
+    if (owners.length === 2) edgeOwnerPairs.push([owners[0], owners[1]]);
   }
-  const selected = choosePairCandidates(candidates);
-  if (selected.length === 0) return polygons;
 
-  return buildIsolatedTrianglePairOutput(polygons, selected);
+  const source = { polygons, metas, edgeOwnerPairs };
+  if (cache) cache.trianglePairSource = source;
+  return source;
+}
+
+function preparedPairCandidatesFor(
+  polygons: Polygon[],
+  source: TrianglePairSourceCache,
+): PreparedPairCandidate[] {
+  if (source.preparedCandidates) return source.preparedCandidates;
+  const prepared: PreparedPairCandidate[] = [];
+  for (const [a, b] of source.edgeOwnerPairs) {
+    const candidate = prepareTrianglePairCandidate(a, b, polygons, source.metas);
+    if (candidate) prepared.push(candidate);
+  }
+  source.preparedCandidates = prepared;
+  return prepared;
+}
+
+function preparedPairCandidateMatchesOptions(
+  prepared: PreparedPairCandidate,
+  options: ResolvedGeometryNormalizeOptions,
+): boolean {
+  const minNormalDot = Math.cos((options.maxAngleDeg * Math.PI) / 180);
+  return prepared.normalDot >= minNormalDot &&
+    prepared.maxDistance <= Math.min(options.maxPlaneDisplacement, options.maxBoundaryDisplacement);
 }
 
 function buildIsolatedTrianglePairOutput(
@@ -669,13 +1204,12 @@ function applyVertexPositionMoves(polygons: Polygon[], moves: Map<string, Vec3>)
   });
 }
 
-function approximateTrianglePairCandidate(
+function prepareTrianglePairCandidate(
   aIndex: number,
   bIndex: number,
   polygons: Polygon[],
   metas: Array<PlaneNormalizeMeta | null>,
-  options: ResolvedGeometryNormalizeOptions,
-): PairCandidate | null {
+): PreparedPairCandidate | null {
   const a = polygons[aIndex];
   const b = polygons[bIndex];
   const aMeta = metas[aIndex];
@@ -691,7 +1225,7 @@ function approximateTrianglePairCandidate(
   if (bGoesSameDirection) return null;
 
   const normalDot = Math.abs(dotVec(aMeta.normal, bMeta.normal));
-  const minNormalDot = Math.cos((options.maxAngleDeg * Math.PI) / 180);
+  const minNormalDot = Math.cos((PREPARED_PAIR_MAX_ANGLE_DEG * Math.PI) / 180);
   if (normalDot < minNormalDot) return null;
 
   const aThird = (ai1 + 1) % a.vertices.length;
@@ -712,7 +1246,7 @@ function approximateTrianglePairCandidate(
     maxDistance = Math.max(maxDistance, distance);
     squaredDistance += distance * distance;
   }
-  if (maxDistance > Math.min(options.maxPlaneDisplacement, options.maxBoundaryDisplacement)) return null;
+  if (maxDistance > PREPARED_PAIR_MAX_BOUNDARY_DISPLACEMENT) return null;
 
   const projected = ring.map((vertex) => projectVecToPlane(vertex, fit));
   if (!isConvexPolygon(projected, fit.normal)) return null;
@@ -745,17 +1279,21 @@ function approximateTrianglePairCandidate(
   }
 
   return {
-    a: aIndex,
-    b: bIndex,
-    polygon,
-    vertexMoves: [
-      ...ring.map((vertex, index) => ({
-        key: vertexKey(vertex),
-        target: projected[index],
-      })),
-      ...textureTriangleVertexProjectionMoves([a, b], fit),
-    ],
-    score: squaredDistance / ring.length + maxDistance * 0.25 + (1 - normalDot) * 0.1,
+    normalDot,
+    maxDistance,
+    candidate: {
+      a: aIndex,
+      b: bIndex,
+      polygon,
+      vertexMoves: [
+        ...ring.map((vertex, index) => ({
+          key: vertexKey(vertex),
+          target: projected[index],
+        })),
+        ...textureTriangleVertexProjectionMoves([a, b], fit),
+      ],
+      score: squaredDistance / ring.length + maxDistance * 0.25 + (1 - normalDot) * 0.1,
+    },
   };
 }
 

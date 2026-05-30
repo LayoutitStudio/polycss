@@ -156,6 +156,27 @@ const CORE_BASE_STYLES = `
   border-width: 0 16px 32px 16px;
 }
 
+/* ── Gizmo override ─────────────────────────────────────────────────────── */
+
+/*
+ * PolyTransformControls renders 3D arrows using the same polygon pipeline
+ * as user content, but the gizmo is a UI affordance — both faces of
+ * every polygon should remain visible regardless of which way the
+ * camera is looking. Otherwise the cuboid shafts and pyramid heads end
+ * up half-culled.
+ *
+ * Transitions on color, border-color, and background-color smooth the
+ * idle → hover → drag alpha changes across rect, border-shape, triangle,
+ * and atlas paths.
+ */
+.polycss-transform-controls i,
+.polycss-transform-controls b,
+.polycss-transform-controls s,
+.polycss-transform-controls u {
+  backface-visibility: visible;
+  transition: color 150ms ease-out, border-color 150ms ease-out, background-color 150ms ease-out;
+}
+
 /* ── Dynamic lighting cascade vars (scene root → polygons) ─────────────── */
 
 /*
@@ -306,6 +327,7 @@ const CORE_BASE_STYLES = `
   backface-visibility: visible;
   border-color: currentColor;
   pointer-events: none;
+  will-change: transform;
 }
 .polycss-scene q::before,
 .polycss-scene q::after {

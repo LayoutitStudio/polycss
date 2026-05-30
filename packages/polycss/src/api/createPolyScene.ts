@@ -1679,11 +1679,15 @@ export function createPolyScene(
   }
 
   function previewBakedSolidLighting(
-    next: Pick<Omit<PolySceneOptions, "camera">, "directionalLight" | "ambientLight">,
+    next: Pick<Omit<PolySceneOptions, "camera">, "directionalLight" | "ambientLight"> & {
+      skipShadows?: boolean;
+    },
   ): boolean {
     if ((currentOptions.textureLighting ?? "baked") !== "baked") return false;
     applyLightingVars(sceneEl, { ...currentOptions, ...next });
-    if (next.directionalLight?.direction) emitSceneShadows(next.directionalLight.direction as Vec3);
+    if (!next.skipShadows && next.directionalLight?.direction) {
+      emitSceneShadows(next.directionalLight.direction as Vec3);
+    }
     let installed = false;
     for (const entry of meshes) {
       applyPreviewMeshLightVars(entry, next);
@@ -1989,11 +1993,24 @@ export function createPolyScene(
     const contributingCasters = [...projectionsByCaster.values()];
     const paths = syncShadowPaths(svg, contributingCasters.length, /*withStroke*/ true);
     const casterIds = contributingCasters.map((c) => meshShadowId(c.caster));
+    // Clip every projected polygon to the SVG box ([bx0..bx1] × [by0..by1])
+    // so low-angle lights with a finite shadow.maxExtend don't emit path
+    // coordinates outside the SVG viewport. The clip is per-polygon
+    // (Sutherland-Hodgman against the rectangular bounds) so per-caster
+    // attribution + subpath order are preserved.
+    const clipBounds: Array<[number, number]> = [
+      [bx0, by0],
+      [bx1, by0],
+      [bx1, by1],
+      [bx0, by1],
+    ];
     for (let i = 0; i < contributingCasters.length; i++) {
       const entry = contributingCasters[i]!;
       let d = "";
       for (const v of entry.verts) {
-        const ccw = ensureCcw2D(v);
+        const clipped = clipPolygonToConvex2D(ensureCcw2D(v), clipBounds);
+        if (clipped.length < 3) continue;
+        const ccw = ensureCcw2D(clipped);
         d += `M${(ccw[0]![0] - bx0).toFixed(3)},${(ccw[0]![1] - by0).toFixed(3)}`;
         for (let j = 1; j < ccw.length; j++) {
           d += `L${(ccw[j]![0] - bx0).toFixed(3)},${(ccw[j]![1] - by0).toFixed(3)}`;

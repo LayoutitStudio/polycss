@@ -13,3 +13,16 @@ export {
   PolyCone,
   PolyTorus,
 } from "./PolyShapes";
+export type {
+  PolyBoxProps,
+  PolyPlaneProps,
+  PolyRingProps,
+  PolyOctahedronProps,
+  PolySphereProps,
+  PolyTetrahedronProps,
+  PolyIcosahedronProps,
+  PolyDodecahedronProps,
+  PolyCylinderProps,
+  PolyConeProps,
+  PolyTorusProps,
+} from "./PolyShapes";

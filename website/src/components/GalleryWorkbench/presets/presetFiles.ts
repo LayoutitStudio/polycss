@@ -18,6 +18,7 @@ import {
   QUATERNIUS_ULTIMATE_SPACESHIPS_ATTRIBUTION,
   nasa3dAttribution,
   openGameArtAttribution,
+  polyPizzaAttribution,
   quaterniusAttribution,
   smithsonianOpenAccessAttribution,
 } from "./attributions";
@@ -377,6 +378,18 @@ export const POLY_PIZZA_PRESET_FILES: GalleryPresetFile[] = [
     },
   },
   {
+    file: "poly-pizza/broccoli.glb",
+    label: "Broccoli",
+    category: "Food & Drink",
+    attribution: polyPizzaAttribution("jeremy", "e2Z3XDxtT41", "CC-BY 3.0", 900),
+  },
+  {
+    file: "poly-pizza/peanut.glb",
+    label: "Peanut",
+    category: "Food & Drink",
+    attribution: polyPizzaAttribution("jeremy", "f57FFcX01Tr", "CC-BY 3.0", 1820),
+  },
+  {
     file: "poly-pizza/sheep.glb",
     label: "Sheep",
     category: "Animals",
@@ -451,6 +464,36 @@ export const POLY_PIZZA_PRESET_FILES: GalleryPresetFile[] = [
       sourceUrl: "https://poly.pizza/m/5XSc2Fka3F",
       tris: 796,
     },
+  },
+  {
+    file: "poly-pizza/triceratops.glb",
+    label: "Triceratops",
+    category: "Animals",
+    attribution: polyPizzaAttribution("jeremy", "7GKj5zdc1RZ", "CC-BY 3.0", 892),
+  },
+  {
+    file: "poly-pizza/tiger.glb",
+    label: "Tiger",
+    category: "Animals",
+    attribution: polyPizzaAttribution("jeremy", "54KLm0HdFWy", "CC-BY 3.0", 892),
+  },
+  {
+    file: "poly-pizza/monkey.glb",
+    label: "Monkey",
+    category: "Animals",
+    attribution: polyPizzaAttribution("jeremy", "2mYaCEbogPq", "CC-BY 3.0", 680),
+  },
+  {
+    file: "poly-pizza/crab.glb",
+    label: "Crab",
+    category: "Animals",
+    attribution: polyPizzaAttribution("jeremy", "bmZ6-LnPmp0", "CC-BY 3.0", 768),
+  },
+  {
+    file: "poly-pizza/turkey.glb",
+    label: "Turkey",
+    category: "Animals",
+    attribution: polyPizzaAttribution("jeremy", "b3E2cqagRPn", "CC-BY 3.0", 336),
   },
   {
     file: "poly-pizza/ducky.glb",
@@ -552,6 +595,24 @@ export const POLY_PIZZA_PRESET_FILES: GalleryPresetFile[] = [
     },
   },
   {
+    file: "poly-pizza/tomato.glb",
+    label: "Tomato",
+    category: "Food & Drink",
+    attribution: polyPizzaAttribution("jeremy", "dcvfRb1X5JE", "CC-BY 3.0", 144),
+  },
+  {
+    file: "poly-pizza/pear.glb",
+    label: "Pear",
+    category: "Food & Drink",
+    attribution: polyPizzaAttribution("jeremy", "3Mp-3PRh7Tb", "CC-BY 3.0", 152),
+  },
+  {
+    file: "poly-pizza/ice-cream.glb",
+    label: "Ice Cream",
+    category: "Food & Drink",
+    attribution: polyPizzaAttribution("jeremy", "27NZ4ejbkZl", "CC-BY 3.0", 408),
+  },
+  {
     file: "poly-pizza/rock.glb",
     label: "Low Poly Rock",
     category: "Environment",
@@ -573,6 +634,12 @@ export const POLY_PIZZA_PRESET_FILES: GalleryPresetFile[] = [
       sourceUrl: "https://poly.pizza/m/s1OJ3bBzqc",
       tris: 342,
     },
+  },
+  {
+    file: "poly-pizza/apple-tree.glb",
+    label: "Apple Tree",
+    category: "Environment",
+    attribution: polyPizzaAttribution("jeremy", "2BUc5iO4nUo", "CC-BY 3.0", 644),
   },
   {
     file: "poly-pizza/box.glb",
@@ -628,6 +695,12 @@ export const POLY_PIZZA_PRESET_FILES: GalleryPresetFile[] = [
       sourceUrl: "https://poly.pizza/m/HMnuH5geEG",
       tris: 1216,
     },
+  },
+  {
+    file: "poly-pizza/mr-brush.glb",
+    label: "Mr. Brush",
+    category: "Objects",
+    attribution: polyPizzaAttribution("jeremy", "0jKuzkEIurU", "CC-BY 3.0", 4644),
   },
   {
     file: "poly-pizza/arrow.glb",

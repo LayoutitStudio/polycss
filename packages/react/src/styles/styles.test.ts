@@ -65,6 +65,15 @@ describe("injectPolyBaseStyles", () => {
     expect(el.textContent).not.toContain("polycss-solid-triangle");
   });
 
+  it("includes transform-controls and shadow performance rules", () => {
+    injectPolyBaseStyles(document);
+    const el = document.getElementById("polycss-styles")!;
+    expect(el.textContent).toContain(".polycss-transform-controls i");
+    expect(el.textContent).toContain("transition: color 150ms ease-out");
+    expect(el.textContent).toContain(".polycss-scene q");
+    expect(el.textContent).toContain("will-change: transform");
+  });
+
   it("does nothing when doc is null-ish", () => {
     // Should not throw
     expect(() =>

@@ -29,7 +29,7 @@ import {
   parseHexColor,
   projectCssVertexToGround,
 } from "@layoutit/polycss-core";
-import { usePolyMesh } from "./useMesh";
+import { usePolyMesh, type UseMeshOptions } from "./useMesh";
 import {
   buildSeamBleedPolygonEdges,
   buildTextureEdgeRepairSets,
@@ -104,6 +104,8 @@ export interface PolyMeshProps extends InteractionProps {
    *  authored surface fidelity. Top-level prop wins over any meshResolution
    *  that might be set inside parseOptions. */
   meshResolution?: MeshResolution;
+  /** Parser options forwarded to parseObj/parseGltf/parseVox. */
+  parseOptions?: UseMeshOptions;
   class?: string;
   position?: Vec3;
   scale?: number | Vec3;
@@ -170,6 +172,7 @@ export const PolyMesh = defineComponent({
     seamBleed: { type: [Number, String] as PropType<PolySeamBleed>, default: undefined },
     castShadow: { type: Boolean as PropType<boolean>, default: false },
     meshResolution: { type: String as PropType<MeshResolution>, default: undefined },
+    parseOptions: { type: Object as PropType<UseMeshOptions>, default: undefined },
     class: { type: String },
     position: { type: Array as unknown as PropType<Vec3>, default: undefined },
     scale: { type: [Number, Array] as unknown as PropType<number | Vec3>, default: undefined },
@@ -190,16 +193,15 @@ export const PolyMesh = defineComponent({
   setup(props, { slots, attrs, expose }) {
     // useMesh requires a Ref<string>. Computed ref wraps the src prop.
     const srcRef = computed(() => props.src ?? "");
-    // Merge mtl + meshResolution into the options passed to usePolyMesh.
-    // Top-level meshResolution wins over any meshResolution that could come
-    // from a future parseOptions prop (matches React behavior).
+    // Merge parseOptions + mtl + meshResolution into the options passed to
+    // usePolyMesh. Top-level meshResolution wins over parseOptions.meshResolution.
     const meshOptions = computed(() => {
-      const opts: Record<string, unknown> = {};
+      const opts: UseMeshOptions = { ...(props.parseOptions ?? {}) };
       if (props.mtl) opts.mtlUrl = props.mtl;
       if (props.meshResolution !== undefined) opts.meshResolution = props.meshResolution;
       return Object.keys(opts).length > 0 ? opts : undefined;
     });
-    const fetched = usePolyMesh(srcRef, meshOptions.value as import("./useMesh").UseMeshOptions | undefined);
+    const fetched = usePolyMesh(srcRef, meshOptions.value);
 
     const propPolygons = computed<Polygon[]>(() =>
       props.src ? fetched.polygons.value : (props.polygons ?? [])
@@ -802,6 +804,7 @@ export const PolyMesh = defineComponent({
               : renderTextureBorderShapePoly({
                   entry: plan,
                   solidPaintDefaults: solidPaintDefaults.value,
+                  forceBorderShape: !textureAtlas.useFullRectSolid.value,
                 });
           });
 

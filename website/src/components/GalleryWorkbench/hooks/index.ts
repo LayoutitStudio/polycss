@@ -10,7 +10,15 @@ export type { UseScenePolygonsOptions, UseScenePolygonsResult } from "./useScene
 export { useAnimationFrames } from "./useAnimationFrames";
 export type { UseAnimationFramesOptions, UseAnimationFramesResult } from "./useAnimationFrames";
 
-export { useRouteSync, setRoutePresetId, routeInitialPresetId } from "./useRouteSync";
+export {
+  useRouteSync,
+  setRoutePresetId,
+  setRouteSceneOptions,
+  clearRouteSceneOptions,
+  routeInitialPresetId,
+  routeInitialSceneOptions,
+  routeHasSceneOptions,
+} from "./useRouteSync";
 export type { UseRouteSyncOptions } from "./useRouteSync";
 
 export { useGuiCameraSync } from "./useGuiCameraSync";

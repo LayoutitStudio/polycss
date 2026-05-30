@@ -48,7 +48,8 @@ export function StatsOverlay(): null {
       statsContainer.style.display = "flex";
       statsContainer.style.alignItems = "flex-end";
       statsContainer.style.gap = "2px";
-      statsContainer.style.opacity = "0.9";
+      statsContainer.style.background = "#000";
+      statsContainer.style.opacity = "1";
       statsContainer.style.pointerEvents = "none";
 
       fpsPanel = new Stats.Panel("FPS", "#0ff", "#002");

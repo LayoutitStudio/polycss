@@ -1,5 +1,3 @@
-import { readFileSync } from "fs";
-import { resolve } from "path";
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { renderPoly } from "./polyDOM";
 import {
@@ -7,23 +5,12 @@ import {
   renderPolygonsWithTextureAtlasAsync,
   updatePolygonsWithStableTopology,
 } from "./textureAtlas";
-import {
-  optimizeMeshPolygons,
-  parseGltf,
-  type Polygon,
-} from "@layoutit/polycss-core";
+import type { Polygon } from "@layoutit/polycss-core";
 
 const ATLAS_CANONICAL_SIZE_EXPLICIT = 64;
 const ATLAS_CANONICAL_SIZE_AUTO_DESKTOP = 128;
 const SOLID_QUAD_CANONICAL_SIZE = 64;
 const BORDER_SHAPE_CANONICAL_SIZE = 16;
-
-const CORNER_SHAPE_CORPUS = [
-  ["Bear.glb"],
-  ["urban", "Car.glb"],
-  ["urban", "Fire hydrant.glb"],
-  ["city", "Large Building.glb"],
-] as const;
 
 const FLAT_TRIANGLE: Polygon = {
   vertices: [
@@ -122,6 +109,17 @@ const CHAMFERED_SOLID: Polygon = {
   color: "#0f766e",
 };
 
+const IRREGULAR_SOLID: Polygon = {
+  vertices: [
+    [0, 0, 0],
+    [0, 2, 0],
+    [1, 1.4, 0],
+    [2, 2, 0],
+    [2, 0, 0],
+  ],
+  color: "#f59e0b",
+};
+
 const OFFAXIS_TRIANGLE: Polygon = {
   vertices: [
     [0, 0, 0],
@@ -154,12 +152,6 @@ function expectPointClose(actual: [number, number, number], expected: [number, n
 
 function roundedMatrix(values: number[], decimals = 3): number[] {
   return values.map((value) => Number(value.toFixed(decimals)));
-}
-
-function loadGalleryGlb(...parts: string[]): ArrayBuffer {
-  const filePath = resolve(__dirname, "../../../../website/public/gallery/glb", ...parts);
-  const buffer = readFileSync(filePath);
-  return buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength);
 }
 
 function supportDoc(options: { borderShape?: boolean; cornerShape?: boolean }): Document {
@@ -818,17 +810,7 @@ describe("renderPolygonsWithTextureAtlas", () => {
   });
 
   it("keeps non-chamfered n-gons on border-shape when corner-shape is supported", () => {
-    const irregularSolid: Polygon = {
-      vertices: [
-        [0, 0, 0],
-        [0, 2, 0],
-        [1, 1.4, 0],
-        [2, 2, 0],
-        [2, 0, 0],
-      ],
-      color: "#f59e0b",
-    };
-    const result = renderPolygonsWithTextureAtlas([irregularSolid], {
+    const result = renderPolygonsWithTextureAtlas([IRREGULAR_SOLID], {
       doc: supportDoc({ borderShape: true, cornerShape: true }),
     });
     const element = result.rendered[0].element;
@@ -837,41 +819,28 @@ describe("renderPolygonsWithTextureAtlas", () => {
     result.dispose();
   });
 
-  it("replaces a subset of border-shape leaves with u leaves across a gallery corpus", () => {
+  it("replaces only exact corner-shape solids with u leaves", () => {
     const beforeDoc = supportDoc({ borderShape: true, cornerShape: false });
     const afterDoc = supportDoc({ borderShape: true, cornerShape: true });
-    let beforeI = 0;
-    let beforeU = 0;
-    let afterI = 0;
-    let afterU = 0;
 
-    expect(CORNER_SHAPE_CORPUS).toHaveLength(4);
+    const before = renderPolygonsWithTextureAtlas([CHAMFERED_SOLID, IRREGULAR_SOLID], {
+      doc: beforeDoc,
+    });
+    const after = renderPolygonsWithTextureAtlas([CHAMFERED_SOLID, IRREGULAR_SOLID], {
+      doc: afterDoc,
+    });
+    const beforeCounts = leafTagCounts(before);
+    const afterCounts = leafTagCounts(after);
 
-    for (const fixture of CORNER_SHAPE_CORPUS) {
-      const parsed = parseGltf(loadGalleryGlb(...fixture));
-      const polygons = optimizeMeshPolygons(parsed.polygons, { meshResolution: "lossless" });
-      parsed.dispose();
+    expect(beforeCounts.i).toBe(2);
+    expect(beforeCounts.u).toBe(0);
+    expect(afterCounts.i).toBe(1);
+    expect(afterCounts.u).toBe(1);
+    expect(afterCounts.i + afterCounts.u).toBe(beforeCounts.i + beforeCounts.u);
 
-      const before = renderPolygonsWithTextureAtlas(polygons, { doc: beforeDoc });
-      const after = renderPolygonsWithTextureAtlas(polygons, { doc: afterDoc });
-      const beforeCounts = leafTagCounts(before);
-      const afterCounts = leafTagCounts(after);
-
-      beforeI += beforeCounts.i;
-      beforeU += beforeCounts.u;
-      afterI += afterCounts.i;
-      afterU += afterCounts.u;
-      expect(afterCounts.i + afterCounts.u).toBe(beforeCounts.i + beforeCounts.u);
-
-      before.dispose();
-      after.dispose();
-    }
-
-    const replaced = beforeI - afterI;
-    expect(beforeI).toBeGreaterThan(0);
-    expect(replaced).toBeGreaterThan(0);
-    expect(afterU - beforeU).toBe(replaced);
-  }, 15000);
+    before.dispose();
+    after.dispose();
+  });
 
   it("uses the atlas fallback for solid non-rect polygons on non-desktop pointers when projective quads are disabled", () => {
     const canvases: Array<{ width: number; height: number; getContext: () => null }> = [];

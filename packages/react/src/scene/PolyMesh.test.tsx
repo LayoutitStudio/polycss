@@ -106,7 +106,10 @@ const OFFSET_TEXTURED_TRIANGLE: Polygon = {
   ],
 };
 
-function renderMesh(props: React.ComponentProps<typeof PolyMesh>): HTMLElement {
+function renderMesh(
+  props: React.ComponentProps<typeof PolyMesh>,
+  sceneProps: React.ComponentProps<typeof PolyScene> = {},
+): HTMLElement {
   const container = document.createElement("div");
   document.body.appendChild(container);
   const root = createRoot(container);
@@ -117,7 +120,7 @@ function renderMesh(props: React.ComponentProps<typeof PolyMesh>): HTMLElement {
         {},
         React.createElement(
           PolyScene,
-          {},
+          sceneProps,
           React.createElement(PolyMesh, props)
         )
       )
@@ -166,6 +169,20 @@ describe("PolyMesh — with polygons prop", () => {
     const container = renderMesh({ polygons: [TRIANGLE, QUAD] });
     const polys = container.querySelectorAll("i,b,s,u");
     expect(polys.length).toBe(2);
+  });
+
+  it("inherits scene strategies.disable b for auto-rendered rects", () => {
+    vi.stubGlobal("CSS", {
+      supports: vi.fn((property: string) => property === "border-shape"),
+    });
+    const container = renderMesh(
+      { polygons: [QUAD] },
+      { strategies: { disable: ["b"] } },
+    );
+    const poly = container.querySelector("i") as HTMLElement | null;
+    expect(container.querySelector("b")).toBeNull();
+    expect(poly).toBeTruthy();
+    expect(poly!.style.getPropertyValue("border-shape")).toContain("polygon(");
   });
 
   it("hoists repeated baked solid paint to the mesh wrapper", () => {

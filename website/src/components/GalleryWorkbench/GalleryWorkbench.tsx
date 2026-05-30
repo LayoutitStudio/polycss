@@ -66,7 +66,11 @@ import {
   useRouteSync,
   useGuiCameraSync,
   setRoutePresetId,
+  setRouteSceneOptions,
+  clearRouteSceneOptions,
   routeInitialPresetId,
+  routeInitialSceneOptions,
+  routeHasSceneOptions,
 } from "./hooks";
 import { useFpvHost } from "../fpv";
 import type { ObjParseOptions, GltfParseOptions, VoxParseOptions } from "@layoutit/polycss";
@@ -131,6 +135,7 @@ const DEFAULT_SCENE: SceneOptionsState = {
   castShadow: false,
   shadowMaxExtend: 2000,
   showGround: false,
+  groundColor: "#7d848e",
   fpvLook: true,
   fpvMove: true,
   fpvJump: true,
@@ -158,6 +163,10 @@ const LIGHT_HELPER_SELECTOR = ".dn-light-helper";
 const RESPONSIVE_ZOOM_BREAKPOINT = 900;
 const RESPONSIVE_ZOOM_BOTTOM_RESERVE = 72;
 const RESPONSIVE_ZOOM_MIN_SCALE = 0.42;
+const RESPONSIVE_SHADOW_EXTEND_BASE = 3200;
+const RESPONSIVE_SHADOW_EXTEND_MIN = 2000;
+const RESPONSIVE_SHADOW_PREVIEW_EXTEND_BASE = 1800;
+const RESPONSIVE_SHADOW_PREVIEW_EXTEND_MIN = 800;
 
 function clamp(value: number, min: number, max: number): number {
   if (!Number.isFinite(value)) return min;
@@ -176,6 +185,38 @@ function responsiveZoomScaleForViewport(width: number, height: number): number {
     ? effectiveHeight / RESPONSIVE_ZOOM_BREAKPOINT
     : 1;
   return clamp(Math.min(widthScale, heightScale), RESPONSIVE_ZOOM_MIN_SCALE, 1);
+}
+
+function responsiveCappedShadowMaxExtend(
+  value: number,
+  viewportScale: number,
+  base: number,
+  min: number,
+): number {
+  if (viewportScale >= 0.995) return value;
+  const cap = Math.max(
+    min,
+    Math.round(base * viewportScale),
+  );
+  return Math.min(value, cap);
+}
+
+function responsiveShadowMaxExtend(value: number, viewportScale: number): number {
+  return responsiveCappedShadowMaxExtend(
+    value,
+    viewportScale,
+    RESPONSIVE_SHADOW_EXTEND_BASE,
+    RESPONSIVE_SHADOW_EXTEND_MIN,
+  );
+}
+
+function responsiveShadowPreviewMaxExtend(value: number, viewportScale: number): number {
+  return responsiveCappedShadowMaxExtend(
+    value,
+    viewportScale,
+    RESPONSIVE_SHADOW_PREVIEW_EXTEND_BASE,
+    RESPONSIVE_SHADOW_PREVIEW_EXTEND_MIN,
+  );
 }
 
 function initialResponsiveZoomScale(): number {
@@ -233,7 +274,7 @@ function wrapDegrees(value: number): number {
 }
 
 function clampLightElevation(value: number): number {
-  return Math.max(-90, Math.min(90, value));
+  return Math.max(0, Math.min(90, value));
 }
 
 function lightDirectionFromAngles(azimuth: number, elevation: number): ReactVec3 {
@@ -510,6 +551,10 @@ function sceneDefaultsFor(model: PresetModel): SceneOptionsState {
   };
 }
 
+function sceneDefaultsForPresetId(id: string): SceneOptionsState {
+  return sceneDefaultsFor(PRESETS.find((preset) => preset.id === id) ?? PRESETS[0]);
+}
+
 function parserStateFor(model: PresetModel): ParserOptionsState {
   return {
     ...DEFAULT_PARSER,
@@ -697,7 +742,12 @@ function openCodePen(html: string, title: string, target: string): void {
 
 export default function GalleryWorkbench() {
   const [initialPreset] = useState<PresetModel>(resolveInitialPreset);
-  const [sceneOptions, setSceneOptions] = useState<SceneOptionsState>(() => sceneDefaultsFor(initialPreset));
+  const [initialRouteSceneOptions] = useState(routeInitialSceneOptions);
+  const [initialRouteHasSceneOptions] = useState(routeHasSceneOptions);
+  const [sceneOptions, setSceneOptions] = useState<SceneOptionsState>(() => ({
+    ...sceneDefaultsFor(initialPreset),
+    ...initialRouteSceneOptions,
+  }));
   const [parserOptions, setParserOptions] = useState<ParserOptionsState>(() => parserStateFor(initialPreset));
   const [presetId, setPresetId] = useState(initialPreset.id);
   const [loaded, setLoaded] = useState<LoadedModel | null>(null);
@@ -711,9 +761,9 @@ export default function GalleryWorkbench() {
   const [codePenState, setCodePenState] = useState<"idle" | "exporting">("idle");
   const [codePenError, setCodePenError] = useState<string | null>(null);
   const viewportRef = useRef<HTMLDivElement | null>(null);
-  const autoZoomPresetRef = useRef<string | null>(null);
-  const autoAmbientPresetRef = useRef<string | null>(null);
-  const autoKeyPresetRef = useRef<string | null>(null);
+  const autoZoomPresetRef = useRef<string | null>(initialRouteHasSceneOptions ? initialPreset.id : null);
+  const autoAmbientPresetRef = useRef<string | null>(initialRouteHasSceneOptions ? initialPreset.id : null);
+  const autoKeyPresetRef = useRef<string | null>(initialRouteHasSceneOptions ? initialPreset.id : null);
   const loadedModelKeyRef = useRef<string | null>(null);
 
   // Selection + drag state for the React renderer's <PolyMesh> wrapper.
@@ -749,6 +799,8 @@ export default function GalleryWorkbench() {
   const sceneOptionsRef = useRef(sceneOptions);
   sceneOptionsRef.current = sceneOptions;
   const domRefreshRafRef = useRef<number>(0);
+  const sceneRouteTouchedRef = useRef(false);
+  const [sceneRouteRevision, setSceneRouteRevision] = useState(0);
 
   const requestGalleryDomRefresh = useCallback(() => {
     if (domRefreshRafRef.current) return;
@@ -767,35 +819,48 @@ export default function GalleryWorkbench() {
     };
   }, []);
 
-  const updateScene = useCallback((partial: Partial<SceneOptionsState>) => {
-    setSceneOptions((current) => ({ ...current, ...partial }));
+  const markSceneRouteDirty = useCallback(() => {
+    sceneRouteTouchedRef.current = true;
+    setSceneRouteRevision((revision) => revision + 1);
   }, []);
+
+  const updateScene = useCallback((partial: Partial<SceneOptionsState>) => {
+    markSceneRouteDirty();
+    setSceneOptions((current) => ({ ...current, ...partial }));
+  }, [markSceneRouteDirty]);
+  const responsiveZoomScale = useResponsiveViewportZoomScale(viewportRef);
   const canPreviewSceneOptions = useCallback(
     (options: SceneOptionsState) =>
       options.renderer === "vanilla" && transientSceneHandleRef.current !== null,
     [],
   );
   const previewSceneOptions = useCallback((options: SceneOptionsState) => {
-    transientSceneHandleRef.current?.applyLightOptions(options);
-  }, []);
+    const previewShadow = responsiveZoomScale >= 0.995 || options.textureLighting === "dynamic";
+    transientSceneHandleRef.current?.applyLightOptions({
+      ...options,
+      shadowMaxExtend: responsiveShadowPreviewMaxExtend(options.shadowMaxExtend, responsiveZoomScale),
+    }, { shadow: previewShadow });
+  }, [responsiveZoomScale]);
 
   const { handleCameraChange } = useGuiCameraSync({ setSceneOptions });
-  const responsiveZoomScale = useResponsiveViewportZoomScale(viewportRef);
   const renderSceneOptions = useMemo<SceneOptionsState>(() => {
-    if (responsiveZoomScale === 1) return sceneOptions;
+    const shadowMaxExtend = responsiveShadowMaxExtend(sceneOptions.shadowMaxExtend, responsiveZoomScale);
+    if (responsiveZoomScale === 1 && shadowMaxExtend === sceneOptions.shadowMaxExtend) return sceneOptions;
     return {
       ...sceneOptions,
       zoom: sceneOptions.zoom * responsiveZoomScale,
+      shadowMaxExtend,
     };
   }, [sceneOptions, responsiveZoomScale]);
   const handleRenderCameraChange = useCallback(
     (camera: { rotX: number; rotY: number; zoom: number; target?: ReactVec3 }) => {
+      markSceneRouteDirty();
       handleCameraChange({
         ...camera,
         zoom: camera.zoom / Math.max(responsiveZoomScale, 0.001),
       });
     },
-    [handleCameraChange, responsiveZoomScale],
+    [handleCameraChange, markSceneRouteDirty, responsiveZoomScale],
   );
 
   const dropped = useDroppedFiles({
@@ -804,6 +869,7 @@ export default function GalleryWorkbench() {
       autoAmbientPresetRef.current = null;
       autoKeyPresetRef.current = null;
       setRoutePresetId(null);
+      clearRouteSceneOptions();
       setPresetId(source.id);
       if (loadedModelKeyRef.current !== source.id) loadedModelKeyRef.current = null;
       setSelectedAnimation("");
@@ -830,6 +896,7 @@ export default function GalleryWorkbench() {
   );
   const selectedPreset = availablePresets.find((preset) => preset.id === presetId) ?? PRESETS[0];
   const selectedDroppedSource = dropped.droppedSource?.id === selectedPreset.id ? dropped.droppedSource : null;
+  const selectedSceneDefaults = useMemo(() => sceneDefaultsFor(selectedPreset), [selectedPreset]);
   const loadMeshResolution = activeMeshResolution(sceneOptions.meshResolution);
   const handleLoaded = useCallback((model: LoadedModel) => {
     const modelKey = selectedPreset.id;
@@ -1043,6 +1110,7 @@ export default function GalleryWorkbench() {
 
   const resetToPreset = useCallback((id: string, options: { updateRoute?: boolean } = {}) => {
     const next = availablePresets.find((preset) => preset.id === id);
+    if (sceneRouteTouchedRef.current || routeHasSceneOptions()) markSceneRouteDirty();
     autoZoomPresetRef.current = null;
     autoAmbientPresetRef.current = null;
     autoKeyPresetRef.current = null;
@@ -1064,7 +1132,7 @@ export default function GalleryWorkbench() {
       rotX: next.rotX ?? current.rotX,
       rotY: next.rotY ?? current.rotY,
     }));
-  }, [availablePresets, dropped.droppedSource, animation.setReactAnimatedPolygons]);
+  }, [availablePresets, dropped.droppedSource, animation.setReactAnimatedPolygons, markSceneRouteDirty]);
 
   const handleRandomPreset = useCallback(() => {
     const next = randomPreset();
@@ -1112,7 +1180,28 @@ export default function GalleryWorkbench() {
     presetId,
     presetIds: ALL_PRESET_IDS,
     resetToPreset,
+    sceneDefaultsForPreset: sceneDefaultsForPresetId,
+    setSceneOptions,
   });
+
+  useEffect(() => {
+    if (!sceneRouteTouchedRef.current) return;
+    if (selectedDroppedSource) {
+      clearRouteSceneOptions();
+      return;
+    }
+    setRouteSceneOptions({
+      sceneOptions,
+      sceneDefaults: selectedSceneDefaults,
+      presetId: selectedPreset.id,
+    });
+  }, [
+    sceneOptions,
+    sceneRouteRevision,
+    selectedDroppedSource,
+    selectedPreset.id,
+    selectedSceneDefaults,
+  ]);
 
   useEffect(() => {
     requestGalleryDomRefresh();
@@ -1130,6 +1219,7 @@ export default function GalleryWorkbench() {
       sceneOptions.textureLighting,
       sceneOptions.textureQuality,
       sceneOptions.solidMaterials ? "solid-materials" : "authored-materials",
+      sceneOptions.meshResolution,
       sceneOptions.interiorFill ? "interior-fill" : "no-interior-fill",
       sceneOptions.autoCenter,
       sceneOptions.perspective === false ? "none" : sceneOptions.perspective,
@@ -1142,6 +1232,7 @@ export default function GalleryWorkbench() {
       sceneOptions.textureLighting,
       sceneOptions.textureQuality,
       sceneOptions.solidMaterials,
+      sceneOptions.meshResolution,
       sceneOptions.interiorFill,
       sceneOptions.autoCenter,
       sceneOptions.perspective,
@@ -1415,6 +1506,7 @@ export default function GalleryWorkbench() {
           castShadow={sceneOptions.castShadow}
           shadowMaxExtend={sceneOptions.shadowMaxExtend}
           showGround={sceneOptions.showGround}
+          groundColor={sceneOptions.groundColor}
           showLight={sceneOptions.showLight}
           lightAzimuth={sceneOptions.lightAzimuth}
           lightElevation={sceneOptions.lightElevation}

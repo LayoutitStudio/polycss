@@ -50,6 +50,7 @@ import {
 
 export interface PolySceneProps {
   polygons?: Polygon[];
+  centerPolygons?: Polygon[];
   perspective?: number;
   rotX?: number;
   rotY?: number;
@@ -96,6 +97,7 @@ export const PolyScene = defineComponent({
   inheritAttrs: false,
   props: {
     polygons: { type: Array as PropType<Polygon[]>, default: undefined },
+    centerPolygons: { type: Array as PropType<Polygon[]>, default: undefined },
     perspective: { type: Number },
     rotX: { type: Number },
     rotY: { type: Number },
@@ -208,12 +210,15 @@ export const PolyScene = defineComponent({
     );
 
     const inputPolygons = computed(() => props.polygons ?? []);
+    const centerInputPolygons = computed(() => props.centerPolygons ?? null);
 
     const sceneContextOptions = computed(() => ({
       directionalLight: props.directionalLight,
     }));
 
     const sceneResult = usePolySceneContext(inputPolygons, sceneContextOptions);
+    const centerPolygons = computed(() => centerInputPolygons.value ?? inputPolygons.value);
+    const centerSceneResult = usePolySceneContext(centerPolygons, sceneContextOptions);
 
     // Scene transform is applied imperatively via applyTransformDirect, not via
     // Vue's reactive style binding. The sceneStyle computed previously read
@@ -375,7 +380,7 @@ export const PolyScene = defineComponent({
     // by orbit/map controls) picks it up on every pointer-driven camera move.
     const autoCenterOffset = computed<Vec3>(() => {
       if (!props.autoCenter) return [0, 0, 0];
-      const bbox = sceneResult.value.sceneBbox;
+      const bbox = centerSceneResult.value.sceneBbox;
       return [
         (bbox.min[0] + bbox.max[0]) / 2,
         (bbox.min[1] + bbox.max[1]) / 2,

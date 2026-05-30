@@ -34,6 +34,8 @@ import type { ParseAnimationController, ParseAnimationClip, ParseResult } from "
 export interface GltfParseOptions {
   /** Largest mesh extent (units). Mesh is uniformly scaled to fit. Default 60. */
   targetSize?: number;
+  /** Padding offset (avoids coordinate "0"). Default 1. */
+  gridShift?: number;
   /** Color used when a primitive has no material or no baseColorFactor. */
   defaultColor?: string;
   /**
@@ -67,7 +69,7 @@ export interface GltfParseOptions {
    * (`doc.images[i].uri = "Textures/foo.png"`) against the GLB/glTF's
    * location. Without this, relative URIs would resolve against the page,
    * which 404s. Pass the same URL you fetched the file from.
-   */
+  */
   baseUrl?: string;
 }
 
@@ -194,7 +196,7 @@ interface GltfAnimationChannel {
   sampler: number;
   target: {
     node?: number;
-    path?: "translation" | "rotation" | "scale" | "weights" | string;
+    path?: "translation" | "rotation" | "scale" | string;
   };
 }
 interface GltfAnimation {
@@ -945,7 +947,6 @@ function buildAnimationController(
     joints: skin.joints ?? [],
     inverseBindMatrices: readMat4Array(doc, buffers, skin.inverseBindMatrices, skin.joints?.length ?? 0),
   }));
-
   const runtimeClips: RuntimeAnimationClip[] = [];
   for (let i = 0; i < animations.length; i++) {
     const animation = animations[i];
@@ -965,7 +966,8 @@ function buildAnimationController(
       const targetNode = channel.target.node;
       const path = channel.target.path;
       const sampler = runtimeSamplers[channel.sampler];
-      if (targetNode === undefined || !path || !sampler || path === "weights") continue;
+      if (targetNode === undefined || !path || !sampler) continue;
+      if (path !== "translation" && path !== "rotation" && path !== "scale") continue;
       channels.push({ sampler, targetNode, path });
     }
     const duration = channels.reduce((max, channel) => {
@@ -1066,7 +1068,10 @@ function buildAnimationController(
       skin.joints.map(() => new Array(16) as Mat4)
     );
 
-    const sampleWorldMatrices = (clipRef: number | string, timeSecondsIn: number): Mat4[] | null => {
+    const sampleWorldMatrices = (
+      clipRef: number | string,
+      timeSecondsIn: number,
+    ): Mat4[] | null => {
       const clip = typeof clipRef === "number"
         ? runtimeClips[clipRef]
         : runtimeClips.find((candidate) => candidate.info.name === clipRef);
@@ -1236,7 +1241,12 @@ function buildAnimationController(
         const source = sources[sourceIndex]!;
         const sourceMask = sourceMaskOverrides?.[sourceIndex];
         const triangleMask = sourceMask?.triangleMask ?? source.triangleMask;
-        const worldPositions = computeSourceWorldPositions(sourceIndex, source, sourceMask, worldMatrices);
+        const worldPositions = computeSourceWorldPositions(
+          sourceIndex,
+          source,
+          sourceMask,
+          worldMatrices,
+        );
 
         let triangleOrdinal = 0;
         for (let i = 0; i + 2 < source.indices.length; i += 3, triangleOrdinal++) {
@@ -1296,7 +1306,12 @@ function buildAnimationController(
         const source = sources[sourceIndex]!;
         const sourceMask = sourceMaskOverrides?.[sourceIndex];
         const triangleMask = sourceMask?.triangleMask ?? source.triangleMask;
-        const worldPositions = computeSourceWorldPositions(sourceIndex, source, sourceMask, worldMatrices);
+        const worldPositions = computeSourceWorldPositions(
+          sourceIndex,
+          source,
+          sourceMask,
+          worldMatrices,
+        );
 
         let triangleOrdinal = 0;
         for (let i = 0; i + 2 < source.indices.length; i += 3, triangleOrdinal++) {
@@ -1341,6 +1356,7 @@ function buildAnimationController(
 
 export function parseGltf(input: ArrayBuffer | Uint8Array, options?: GltfParseOptions): ParseResult {
   const targetSize = options?.targetSize ?? 60;
+  const gridShift = options?.gridShift ?? 1;
   const defaultColor = options?.defaultColor ?? "#888888";
   const materialOverrides = options?.materialColors ?? {};
   const materialTextureOverrides = options?.materialTextures ?? {};
@@ -1641,25 +1657,25 @@ export function parseGltf(input: ArrayBuffer | Uint8Array, options?: GltfParseOp
   const upAxis = options?.upAxis ?? "y";
   const project: (v: Vec3) => Vec3 = upAxis === "z"
     ? ([x, y, z]) => [
-        round((x - minX) * scale),
-        round((y - minY) * scale),
-        round((z - minZ) * scale),
+        round((x - minX) * scale + gridShift),
+        round((y - minY) * scale + gridShift),
+        round((z - minZ) * scale + gridShift),
       ]
     : ([x, y, z]) => [
-        round((z - minZ) * scale),
-        round((x - minX) * scale),
-        round((y - minY) * scale),
+        round((z - minZ) * scale + gridShift),
+        round((x - minX) * scale + gridShift),
+        round((y - minY) * scale + gridShift),
       ];
   const projectFrameVertex = upAxis === "z"
     ? (v: Vec3, out: Float64Array, offset: number): void => {
-        out[offset] = round((v[0] - minX) * scale);
-        out[offset + 1] = round((v[1] - minY) * scale);
-        out[offset + 2] = round((v[2] - minZ) * scale);
+        out[offset] = round((v[0] - minX) * scale + gridShift);
+        out[offset + 1] = round((v[1] - minY) * scale + gridShift);
+        out[offset + 2] = round((v[2] - minZ) * scale + gridShift);
       }
     : (v: Vec3, out: Float64Array, offset: number): void => {
-        out[offset] = round((v[2] - minZ) * scale);
-        out[offset + 1] = round((v[0] - minX) * scale);
-        out[offset + 2] = round((v[1] - minY) * scale);
+        out[offset] = round((v[2] - minZ) * scale + gridShift);
+        out[offset + 1] = round((v[0] - minX) * scale + gridShift);
+        out[offset + 2] = round((v[1] - minY) * scale + gridShift);
       };
   const polygons: Polygon[] = [];
   for (const t of rawTris) {

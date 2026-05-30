@@ -568,26 +568,46 @@ export function cullInteriorPolygons(
       origBuf[oCnt++] = mz + (cz0 - mz) * ORIGIN_INSET + offZ;
     }
 
-    // Count how many SAMPLE DIRECTIONS find at least one escaping origin.
-    // (Original behaviour was `escaped = true` on first hit and break.)
-    // We always check every sample direction now so the
-    // minEscapingSamples threshold can require N-of-K rather than 1-of-K.
-    let escapingSamples = 0;
-    for (let si = 0; si < samplesFlat.length; si += 3) {
-      const lx = samplesFlat[si], ly = samplesFlat[si + 1], lz = samplesFlat[si + 2];
-      const rdx = lx * ux + ly * vx + lz * nx;
-      const rdy = lx * uy + ly * vy + lz * ny;
-      const rdz = lx * uz + ly * vz + lz * nz;
-      for (let oi = 0; oi < oCnt; oi += 3) {
-        const rox = origBuf[oi], roy = origBuf[oi + 1], roz = origBuf[oi + 2];
-        if (!rayHitsAnyInBVH(rox, roy, roz, rdx, rdy, rdz, i, bvh, stack)) {
-          escapingSamples++;
-          break;  // this sample escaped; move on to the next sample
+    // Default path (minEscapingSamples=1) keeps the original any-escape
+    // fast path bit-identical: first escaping (sample, origin) pair
+    // breaks both loops and the polygon is kept. Required for stability
+    // of downstream tests that pin polygon counts on specific fixtures.
+    // The threshold branch (minEscapingSamples > 1) is only used by the
+    // light-visibility / interior building helpers that opted into
+    // {force, minEscapeRatio}.
+    if (minEscapingSamples <= 1) {
+      let escaped = false;
+      outer: for (let si = 0; si < samplesFlat.length; si += 3) {
+        const lx = samplesFlat[si], ly = samplesFlat[si + 1], lz = samplesFlat[si + 2];
+        const rdx = lx * ux + ly * vx + lz * nx;
+        const rdy = lx * uy + ly * vy + lz * ny;
+        const rdz = lx * uz + ly * vz + lz * nz;
+        for (let oi = 0; oi < oCnt; oi += 3) {
+          const rox = origBuf[oi], roy = origBuf[oi + 1], roz = origBuf[oi + 2];
+          if (!rayHitsAnyInBVH(rox, roy, roz, rdx, rdy, rdz, i, bvh, stack)) {
+            escaped = true;
+            break outer;
+          }
         }
       }
+      if (escaped) kept.push(polygons[i]);
+    } else {
+      let escapingSamples = 0;
+      for (let si = 0; si < samplesFlat.length; si += 3) {
+        const lx = samplesFlat[si], ly = samplesFlat[si + 1], lz = samplesFlat[si + 2];
+        const rdx = lx * ux + ly * vx + lz * nx;
+        const rdy = lx * uy + ly * vy + lz * ny;
+        const rdz = lx * uz + ly * vz + lz * nz;
+        for (let oi = 0; oi < oCnt; oi += 3) {
+          const rox = origBuf[oi], roy = origBuf[oi + 1], roz = origBuf[oi + 2];
+          if (!rayHitsAnyInBVH(rox, roy, roz, rdx, rdy, rdz, i, bvh, stack)) {
+            escapingSamples++;
+            break;
+          }
+        }
+      }
+      if (escapingSamples >= minEscapingSamples) kept.push(polygons[i]);
     }
-
-    if (escapingSamples >= minEscapingSamples) kept.push(polygons[i]);
   }
 
   return kept;
