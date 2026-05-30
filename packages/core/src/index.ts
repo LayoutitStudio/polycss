@@ -119,6 +119,7 @@ export type {
 } from "./merge/seamRepair";
 export { cullInteriorPolygons } from "./cull/cullInteriorPolygons";
 export type { CullInteriorOptions } from "./cull/cullInteriorPolygons";
+export { computeLightVisibility } from "./cull/lightVisibility";
 export {
   CAMERA_BACKFACE_CULL_EPS,
   VOXEL_CAMERA_CULL_AXIS_EPS,

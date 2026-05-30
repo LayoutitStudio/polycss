@@ -160,7 +160,10 @@ export function shadedSolidPlanForNormal(
   const ambientIntensity = Math.max(0, ambientCfg?.intensity ?? DEFAULT_AMBIENT_INTENSITY);
   const lLen = Math.hypot(lightDir[0], lightDir[1], lightDir[2]) || 1;
   const lx = lightDir[0] / lLen, ly = lightDir[1] / lLen, lz = lightDir[2] / lLen;
-  const directScale = lightIntensity * Math.max(0, normal[0] * lx + normal[1] * ly + normal[2] * lz);
+  const occluded = options.lightOccludedPolyIndices?.has(source.index) ?? false;
+  const directScale = occluded
+    ? 0
+    : lightIntensity * Math.max(0, normal[0] * lx + normal[1] * ly + normal[2] * lz);
   return {
     ...source,
     polygon,

@@ -822,7 +822,10 @@ export function computeTextureAtlasPlan(
   const lx = lightDir[0] / lLen, ly = lightDir[1] / lLen, lz = lightDir[2] / lLen;
   // Decoupled: directional and ambient sum independently. No (1 - ambient)
   // budget — matches three.js's lighting model.
-  const directScale = lightIntensity * Math.max(0, normal[0] * lx + normal[1] * ly + normal[2] * lz);
+  const occluded = options.lightOccludedPolyIndices?.has(index) ?? false;
+  const directScale = occluded
+    ? 0
+    : lightIntensity * Math.max(0, normal[0] * lx + normal[1] * ly + normal[2] * lz);
   const textureTint = textureTintFactors(directScale, lightColor, ambientColor, ambientIntensity);
   const shadedColor = shadePolygon(polygon.color ?? "#cccccc", directScale, lightColor, ambientColor, ambientIntensity);
 

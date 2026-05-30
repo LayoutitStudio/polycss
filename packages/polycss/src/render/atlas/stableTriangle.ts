@@ -58,7 +58,7 @@ function buildStableTriangleSeamEdges(
 function stableTriangleSeamOptions(
   index: number,
   seamBleedEdges: Map<number, Set<number>> | null,
-  options: RenderTextureAtlasOptions,
+  options: RenderTextureAtlasOptionsWithSeams,
 ): RenderTextureAtlasOptionsWithSeams {
   // Same wiring fix as in renderPolygons.ts: honor the caller-supplied
   // seamBleed (incl. 0) instead of always using DEFAULT_SOLID_SEAM_BLEED.

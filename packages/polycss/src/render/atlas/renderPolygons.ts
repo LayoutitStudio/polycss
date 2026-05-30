@@ -93,7 +93,7 @@ async function yieldIfOverBudget(started: number): Promise<number> {
 
 function seamTriangleOptions(
   plan: TextureAtlasPlan,
-  options: RenderTextureAtlasOptions,
+  options: RenderTextureAtlasOptionsWithSeams,
 ): RenderTextureAtlasOptionsWithSeams {
   // Honor the caller-supplied seamBleed (incl. explicit 0) instead of
   // always falling back to DEFAULT_SOLID_SEAM_BLEED. seamBleed === 0
@@ -120,7 +120,7 @@ function buildRenderSeamBleedEdges(
 function seamAtlasOptions(
   index: number,
   seamBleedEdges: Map<number, Set<number>> | null,
-  options: RenderTextureAtlasOptions,
+  options: RenderTextureAtlasOptionsWithSeams,
 ): RenderTextureAtlasOptionsWithSeams {
   const bleed = options.seamBleed ?? DEFAULT_SOLID_SEAM_BLEED;
   return seamBleedEdges && bleed > 0

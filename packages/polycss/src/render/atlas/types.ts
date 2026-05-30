@@ -22,6 +22,13 @@ export interface RenderTextureAtlasOptions {
   textureQuality?: import("@layoutit/polycss-core").TextureQuality;
   solidPaintDefaults?: import("@layoutit/polycss-core").SolidPaintDefaults;
   strategies?: import("@layoutit/polycss-core").PolyRenderStrategiesOption;
+  /**
+   * Indices of polygons that the directional light cannot reach (precomputed
+   * by createPolyScene via {@link computeLightVisibility}). Atlas + solid
+   * planning forces directScale to 0 for these polys so they render with
+   * ambient-only color, matching what a shadow-map pass would output.
+   */
+  lightOccludedPolyIndices?: ReadonlySet<number>;
 }
 
 export interface InternalRenderTextureAtlasOptions extends RenderTextureAtlasOptions {

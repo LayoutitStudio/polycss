@@ -277,6 +277,15 @@ export interface SolidTrianglePlanOptions {
   strategies?: PolyRenderStrategiesOption;
   seamBleed?: PolySeamBleed;
   seamEdges?: Set<number>;
+  /**
+   * Indices (into the polygon array being planned) of polygons that the
+   * directional light cannot physically reach because another polygon of
+   * the same mesh is between them and the light source. Per-polygon
+   * directScale is forced to 0 for indices in this set, so they receive
+   * ambient lighting only — matching what a shadow-map-equivalent pass
+   * would produce.
+   */
+  lightOccludedPolyIndices?: ReadonlySet<number>;
 }
 
 /** Internal solid-triangle plan options (extends SolidTrianglePlanOptions). */

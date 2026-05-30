@@ -346,13 +346,24 @@ const CORE_BASE_STYLES = `
      leaves, so there's nothing inside a leaf that needs to participate
      in 3D compositing across the contain boundary. */
   contain: strict;
+  /* Three.js parity. background-blend-mode: multiply applies tint *
+     texture in sRGB. The textured baked-mode path computes tint as
+     pow(factor/π, 1/2.4) where factor = ambient + intensity·lambert —
+     this is sRGB(linear_tint), i.e. it folds the BRDF normalisation
+     (/π) into the Lambert factor THEN gamma-corrects so the sRGB-space
+     multiply against the texture matches a linear-space multiply.
+     Without /π+pow the raw factor exceeds 1 at any non-trivial
+     intensity (di=3 + lambert=0.6 → factor=1.8 → tint clamps to 255 →
+     texture passes through at 100% — looks "fully lit"). The
+     min(1, …) inside guards against pow's domain (factor>1 would
+     yield tint>1, browser clamps and we lose the gamma curve). */
   background-color: rgb(
-    calc(255 * (var(--par) * var(--pai)
-         + var(--plr) * var(--pli) * var(--plam)))
-    calc(255 * (var(--pag) * var(--pai)
-         + var(--plg) * var(--pli) * var(--plam)))
-    calc(255 * (var(--pab) * var(--pai)
-         + var(--plb) * var(--pli) * var(--plam)))
+    calc(255 * pow(min(1, (var(--par) * var(--pai)
+         + var(--plr) * var(--pli) * var(--plam)) / 3.14159265), 0.4167))
+    calc(255 * pow(min(1, (var(--pag) * var(--pai)
+         + var(--plg) * var(--pli) * var(--plam)) / 3.14159265), 0.4167))
+    calc(255 * pow(min(1, (var(--pab) * var(--pai)
+         + var(--plb) * var(--pli) * var(--plam)) / 3.14159265), 0.4167))
   );
   background-blend-mode: multiply;
   background-image: var(--polycss-atlas-url);
@@ -373,12 +384,20 @@ const CORE_BASE_STYLES = `
 .polycss-scene[data-polycss-lighting="dynamic"] b,
 .polycss-scene[data-polycss-lighting="dynamic"] i,
 .polycss-scene[data-polycss-lighting="dynamic"] u {
+  /* Per-channel min(1, factor) clamp prevents the lit-face tint
+     shift toward white/cyan. Without it, ambient 0.3 + lambert 1 +
+     intensity 1 = 1.3, and a blue surface like #3b82f6 (B=246)
+     saturates B alone at factor>1.04 — R/G keep growing and the
+     channel ratio shifts. Clamping the FACTOR (rather than letting
+     the browser clamp 255*N) keeps every channel scaled by the same
+     value, so the surface's relative tint is preserved on the
+     brightest faces. */
   color: rgb(
-    calc(255 * var(--psr) * (var(--par) * var(--pai)
+    calc(255 * var(--psr) * min(1, var(--par) * var(--pai)
          + var(--plr) * var(--pli) * var(--plam)))
-    calc(255 * var(--psg) * (var(--pag) * var(--pai)
+    calc(255 * var(--psg) * min(1, var(--pag) * var(--pai)
          + var(--plg) * var(--pli) * var(--plam)))
-    calc(255 * var(--psb) * (var(--pab) * var(--pai)
+    calc(255 * var(--psb) * min(1, var(--pab) * var(--pai)
          + var(--plb) * var(--pli) * var(--plam)))
   );
 }
