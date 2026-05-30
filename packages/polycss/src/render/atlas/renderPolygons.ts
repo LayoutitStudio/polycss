@@ -247,7 +247,7 @@ export function renderPolygonsWithTextureAtlas(
 
   rendered.sort((a, b) => a.polygonIndex - b.polygonIndex);
 
-  buildAtlasPages(packed.pages, textureLighting, doc, atlasScale, () => cancelled)
+  const pagesReady = buildAtlasPages(packed.pages, textureLighting, doc, atlasScale, () => cancelled)
     .then((pages) => {
       if (cancelled) {
         for (const page of pages) {
@@ -278,6 +278,7 @@ export function renderPolygonsWithTextureAtlas(
   const result = {
     rendered,
     solidPaintDefaults: solidPaintDefaults ?? {},
+    pagesReady,
     dispose() {
       cancelled = true;
       for (const url of urls) URL.revokeObjectURL(url);
@@ -399,7 +400,7 @@ export async function renderPolygonsWithTextureAtlasAsync(
 
   rendered.sort((a, b) => a.polygonIndex - b.polygonIndex);
 
-  buildAtlasPages(packed.pages, textureLighting, doc, atlasScale, () => cancelled || shouldCancel())
+  const pagesReady = buildAtlasPages(packed.pages, textureLighting, doc, atlasScale, () => cancelled || shouldCancel())
     .then((pages) => {
       if (cancelled || shouldCancel()) {
         for (const page of pages) {
@@ -430,6 +431,7 @@ export async function renderPolygonsWithTextureAtlasAsync(
   return {
     rendered,
     solidPaintDefaults,
+    pagesReady,
     dispose() {
       cancelled = true;
       for (const url of urls) URL.revokeObjectURL(url);

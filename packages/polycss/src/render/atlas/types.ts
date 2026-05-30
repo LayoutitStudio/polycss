@@ -71,6 +71,16 @@ export interface RenderedPoly {
 export interface RenderTextureAtlasResult {
   rendered: RenderedPoly[];
   dispose(): void;
+  /**
+   * Resolves once every textured `<s>` leaf has its `background-image`
+   * applied (i.e. the atlas canvas → Blob → URL chain has completed and
+   * the apply-bg pass has run). For meshes with no textured leaves this
+   * resolves immediately. Callers doing stale-while-revalidate swaps
+   * await this before disposing the previous render — without it, the
+   * fresh leaves mount with empty backgrounds and the prior frame's
+   * bitmaps would be needed underneath to avoid a transparent flash.
+   */
+  pagesReady?: Promise<void>;
 }
 
 export interface RenderTextureAtlasAsyncResult extends RenderTextureAtlasResult {

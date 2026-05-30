@@ -34,8 +34,6 @@ import type { ParseAnimationController, ParseAnimationClip, ParseResult } from "
 export interface GltfParseOptions {
   /** Largest mesh extent (units). Mesh is uniformly scaled to fit. Default 60. */
   targetSize?: number;
-  /** Padding offset (avoids coordinate "0"). Default 1. */
-  gridShift?: number;
   /** Color used when a primitive has no material or no baseColorFactor. */
   defaultColor?: string;
   /**
@@ -1356,7 +1354,6 @@ function buildAnimationController(
 
 export function parseGltf(input: ArrayBuffer | Uint8Array, options?: GltfParseOptions): ParseResult {
   const targetSize = options?.targetSize ?? 60;
-  const gridShift = options?.gridShift ?? 1;
   const defaultColor = options?.defaultColor ?? "#888888";
   const materialOverrides = options?.materialColors ?? {};
   const materialTextureOverrides = options?.materialTextures ?? {};
@@ -1657,25 +1654,25 @@ export function parseGltf(input: ArrayBuffer | Uint8Array, options?: GltfParseOp
   const upAxis = options?.upAxis ?? "y";
   const project: (v: Vec3) => Vec3 = upAxis === "z"
     ? ([x, y, z]) => [
-        round((x - minX) * scale + gridShift),
-        round((y - minY) * scale + gridShift),
-        round((z - minZ) * scale + gridShift),
+        round((x - minX) * scale),
+        round((y - minY) * scale),
+        round((z - minZ) * scale),
       ]
     : ([x, y, z]) => [
-        round((z - minZ) * scale + gridShift),
-        round((x - minX) * scale + gridShift),
-        round((y - minY) * scale + gridShift),
+        round((z - minZ) * scale),
+        round((x - minX) * scale),
+        round((y - minY) * scale),
       ];
   const projectFrameVertex = upAxis === "z"
     ? (v: Vec3, out: Float64Array, offset: number): void => {
-        out[offset] = round((v[0] - minX) * scale + gridShift);
-        out[offset + 1] = round((v[1] - minY) * scale + gridShift);
-        out[offset + 2] = round((v[2] - minZ) * scale + gridShift);
+        out[offset] = round((v[0] - minX) * scale);
+        out[offset + 1] = round((v[1] - minY) * scale);
+        out[offset + 2] = round((v[2] - minZ) * scale);
       }
     : (v: Vec3, out: Float64Array, offset: number): void => {
-        out[offset] = round((v[2] - minZ) * scale + gridShift);
-        out[offset + 1] = round((v[0] - minX) * scale + gridShift);
-        out[offset + 2] = round((v[1] - minY) * scale + gridShift);
+        out[offset] = round((v[2] - minZ) * scale);
+        out[offset + 1] = round((v[0] - minX) * scale);
+        out[offset + 2] = round((v[1] - minY) * scale);
       };
   const polygons: Polygon[] = [];
   for (const t of rawTris) {

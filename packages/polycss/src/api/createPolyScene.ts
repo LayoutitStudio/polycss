@@ -2520,16 +2520,11 @@ export function createPolyScene(
     // `n` is in the same axis convention as polygonCssSurfaceNormal, so
     // normalFacesCamera works directly with the receiver's mesh rotation.
     const receiverCameraRot = cameraCullRotation(receiverEntry);
-    // Per-light occlusion set for the receiver. If every constituent
-    // polygon of a face plane is in this set, the baked atlas already
-    // painted that face at ambient-only (directScale=0), so layering
-    // additional caster-shadow paths on top would only introduce visible
-    // seams between path segments without darkening anything further.
-    // Skip the whole face — matches Three.js, where a face fully in
-    // shadow per the depth pass is just black.
-    const receiverOccluded = currentOptions.textureLighting !== "dynamic"
-      ? occludedPolyIndicesForEntry(receiverEntry, lightDir)
-      : undefined;
+    // Per-light raytrace receiver-skip (paired with task #121) is
+    // disabled — same wall-thickness false-positive on the cottage
+    // would also skip shadow projection on faces that actually receive
+    // light. See renderEntry for the full rationale.
+    const receiverOccluded = undefined as unknown as ReadonlySet<number>;
 
     for (const group of cachedPlanes) {
       const { O, n, u, v, outlineUv, minU, minV, width, height, matrixCss } = group;
@@ -2907,9 +2902,16 @@ export function createPolyScene(
       ? { ...baseDirLight, direction: lightDirectionOverride }
       : baseDirLight;
     const directionalLight = worldDirectionalLightToCss(userDirLight);
-    const lightOccludedPolyIndices = currentOptions.textureLighting !== "dynamic"
-      ? occludedPolyIndicesForEntry(entry, directionalLight?.direction)
-      : undefined;
+    // Per-light raytrace occlusion (task #121) is disabled: on real OBJ
+    // meshes with back-to-back inner/outer wall pairs (~0.05-0.1 mesh
+    // units apart, e.g. the bench cottage) it false-positives. A ray
+    // from the outer wall toward the light hits the inner wall layer
+    // within MIN_HIT_T (1e-3), the outer wall is flagged occluded, and
+    // its baked color drops to ambient-only — visible as a near-black
+    // cottage when ambient intensity is 0. Re-enabling needs either
+    // dedup-before-raytrace (drop the inner wall pair first) or a
+    // material-thickness-aware MIN_HIT_T (and probably both).
+    const lightOccludedPolyIndices: ReadonlySet<number> | undefined = undefined;
     if (canRenderVoxelDirect(entry)) {
       const renderer = createPolyVoxelRenderer({
         doc,
@@ -3029,9 +3031,8 @@ export function createPolyScene(
       textureQuality: currentOptions.textureQuality,
       seamBleed: currentOptions.seamBleed,
       strategies: currentOptions.strategies,
-      lightOccludedPolyIndices: currentOptions.textureLighting !== "dynamic"
-        ? occludedPolyIndicesForEntry(entry, directionalLight?.direction)
-        : undefined,
+      // Per-light raytrace occlusion (task #121) disabled — see renderEntry.
+      lightOccludedPolyIndices: undefined as ReadonlySet<number> | undefined,
     };
     const atlas = entry.stableDom
       ? renderPolygonsWithStableTriangles(entry.polygons, renderOptions)

@@ -33,11 +33,6 @@ export interface ObjParseOptions {
    */
   targetSize?: number;
   /**
-   * Padding added to the bbox of every emitted polygon so they don't land
-   * at coordinate "0". Default: 1.
-   */
-  gridShift?: number;
-  /**
    * Color used for faces that have no `usemtl` in scope, or whose material
    * name doesn't resolve via `materialColors`. Default: "#888888".
    */
@@ -81,7 +76,6 @@ const DEFAULT_PALETTE = [
 
 export function parseObj(text: string, options?: ObjParseOptions): ParseResult {
   const targetSize = options?.targetSize ?? 60;
-  const gridShift = options?.gridShift ?? 1;
   const defaultColor = options?.defaultColor ?? "#888888";
   const palette = options?.palette ?? DEFAULT_PALETTE;
   const materialOverrides = options?.materialColors ?? {};
@@ -183,9 +177,9 @@ export function parseObj(text: string, options?: ObjParseOptions): ParseResult {
   // shift doesn't, so triangle CCW-from-outside winding survives.
   const round = (n: number) => Math.round(n * 1000) / 1000;
   const grid: Vec3[] = verts.map(([x, y, z]) => [
-    round((z - minZ) * scale + gridShift),
-    round((x - minX) * scale + gridShift),
-    round((y - minY) * scale + gridShift),
+    round((z - minZ) * scale),
+    round((x - minX) * scale),
+    round((y - minY) * scale),
   ]);
 
   const polygons: Polygon[] = [];

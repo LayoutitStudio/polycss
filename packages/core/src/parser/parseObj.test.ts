@@ -79,16 +79,21 @@ describe("parseObj — real fixture (chicken.obj)", () => {
     expect(span).toBeCloseTo(60, 1);
   });
 
-  it("default gridShift=1 keeps all vertex coords ≥ 1 (no zero edges)", () => {
+  it("places bbox MIN at origin (no implicit grid offset, matches Three.js)", () => {
     const text = loadObjFile("chicken.obj");
     const result = parseObj(text);
-    const allCoords = result.polygons.flatMap((p) => p.vertices).flat();
-    expect(Math.min(...allCoords)).toBeGreaterThanOrEqual(1);
+    const allVerts = result.polygons.flatMap((p) => p.vertices);
+    const minX = Math.min(...allVerts.map((v) => v[0]));
+    const minY = Math.min(...allVerts.map((v) => v[1]));
+    const minZ = Math.min(...allVerts.map((v) => v[2]));
+    expect(minX).toBeCloseTo(0, 3);
+    expect(minY).toBeCloseTo(0, 3);
+    expect(minZ).toBeCloseTo(0, 3);
   });
 
   it("custom targetSize is honored (target 100 → ~100-unit bbox)", () => {
     const text = loadObjFile("chicken.obj");
-    const result = parseObj(text, { targetSize: 100, gridShift: 0 });
+    const result = parseObj(text, { targetSize: 100 });
     const all = result.polygons.flatMap((p) => p.vertices);
     const span = Math.max(
       Math.max(...all.map((v) => v[0])) - Math.min(...all.map((v) => v[0])),
@@ -339,16 +344,14 @@ v 1000 -1000 0
 v 1000 1000 0
 v -1000 1000 0
 f 4 5 6 7`;
-    const withGround = parseObj(obj, { targetSize: 60, gridShift: 0 });
+    const withGround = parseObj(obj, { targetSize: 60 });
     const withoutGround = parseObj(obj, {
       targetSize: 60,
-      gridShift: 0,
       excludeObjects: ["Ground"],
     });
     // First polygon in both is the Model triangle. Measure its intrinsic
     // size — max edge length between its vertices (NOT distance from origin,
-    // which would inflate when the triangle is offset by gridShift / large
-    // bbox scaling).
+    // which would inflate when the triangle is offset by large bbox scaling).
     const triEdgeMax = (poly: { vertices: number[][] }) => {
       const v = poly.vertices;
       const dist = (a: number[], b: number[]) =>
