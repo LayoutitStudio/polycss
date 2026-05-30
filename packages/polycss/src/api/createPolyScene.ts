@@ -2187,6 +2187,17 @@ export function createPolyScene(
       const fMinU = minU, fMinV = minV;
       const fMaxU = group.minU + width;
       const fMaxV = group.minV + height;
+      // Half-space test epsilon. A caster vertex with `planeDist > 0` (a
+      // hair above the receiver plane) is treated as "above"; vertices on
+      // the plane itself or below are ignored. For convex meshes like a
+      // cube, adjacent faces share edges with their neighbours — those
+      // shared-edge vertices land at planeDist == 0 on a neighbour's plane.
+      // With `>= 0` they collapse the caster tri into a degenerate sliver
+      // (3 verts at the shared edge) which projects onto the receiver as
+      // a visible artifact band. Strict `> SELF_SHADOW_EPS` skips that case
+      // while still keeping legitimate above-plane casters (which have a
+      // real positive distance).
+      const SELF_SHADOW_EPS = 1e-3;
       for (const item of casterItems) {
         // Project 3D bbox corners onto the face plane; if the bbox of
         // those projections is disjoint from the face outline bbox in
@@ -2199,7 +2210,7 @@ export function createPolyScene(
         let pMinU = Infinity, pMinV = Infinity, pMaxU = -Infinity, pMaxV = -Infinity;
         for (let ci = 0; ci < 8; ci++) {
           const c = corners[ci]!;
-          if (planeDist(c) >= 0) anyAbove = true;
+          if (planeDist(c) > SELF_SHADOW_EPS) anyAbove = true;
           const pr = projectOntoPlane(c);
           if (pr[0] < pMinU) pMinU = pr[0];
           if (pr[0] > pMaxU) pMaxU = pr[0];
@@ -2218,8 +2229,10 @@ export function createPolyScene(
           for (let k = 0; k < 3; k++) {
             const [p, dp] = cycle[k]!;
             const [q, dq] = cycle[(k + 1) % 3]!;
-            if (dp >= 0) above.push(p);
-            if ((dp >= 0) !== (dq >= 0)) above.push(planeCross(p, q, dp, dq));
+            const pAbove = dp > SELF_SHADOW_EPS;
+            const qAbove = dq > SELF_SHADOW_EPS;
+            if (pAbove) above.push(p);
+            if (pAbove !== qAbove) above.push(planeCross(p, q, dp, dq));
           }
           if (above.length < 3) continue;
           const projected = above.map(projectOntoPlane);
