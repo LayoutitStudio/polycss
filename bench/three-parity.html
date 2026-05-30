@@ -70,7 +70,7 @@
     const qs = (k, d) => (Q.has(k) ? Q.get(k) : d);
 
     const S = {
-      mesh:    qs("mesh", "cube"),     // "cube" | "cottage"
+      mesh:    qs("mesh", "cube"),     // "cube" | "e" | "cottage"
       lighting:qs("light", "baked"),   // "baked" | "dynamic"
       cube:  { x: 0, y: 0, z: 1, size: 2, color: "#dc2626" },
       // Cottage uses /gallery/obj/cottage.obj + cottage.mtl + cottage-diffuse.png
@@ -113,11 +113,47 @@
     });
     let polyCube = null;
     let polyCottage = null;
+    let polyE = null;
     function buildPolyCube() {
       polyCube = polyScene.add(
         createPolyBox({ size: [S.cube.size, S.cube.size, S.cube.size], color: S.cube.color }),
         { position: [S.cube.x, S.cube.y, S.cube.z], castShadow: true, receiveShadow: true, merge: false },
       );
+    }
+    // 3D capital "E" — strongly concave: a vertical spine plus three
+    // horizontal arms. Lets us check self-shadow on a single mesh where
+    // arms shadow the spine and each other, much more obvious than the
+    // cube (convex, no self-shadow) or the cottage (textured, hard to
+    // see brightness diffs through the brick pattern).
+    //
+    // Box layout (PolyCSS world units, +X right, +Y forward, +Z up):
+    //   spine:    x[0..1]  z[0..5]    (full height left column)
+    //   top arm:  x[0..4]  z[4..5]
+    //   mid arm:  x[0..3]  z[2..3]
+    //   bot arm:  x[0..4]  z[0..1]
+    // All boxes are 1 unit deep on Y. The whole E is offset so it sits
+    // on z=0 and is roughly centred on the crosshair.
+    const E_COLOR = "#3b82f6";
+    const E_BOXES = [
+      { center: [-1.5,  0,  2.5], size: [1, 1, 5] },  // spine
+      { center: [ 0.5,  0,  4.5], size: [4, 1, 1] },  // top arm
+      { center: [ 0.0,  0,  2.5], size: [3, 1, 1] },  // mid arm
+      { center: [ 0.5,  0,  0.5], size: [4, 1, 1] },  // bot arm
+    ];
+    function buildPolyE() {
+      // Combine all box polygons into a single mesh so PolyCSS treats
+      // it as one piece for self-shadowing purposes.
+      const polys = [];
+      for (const { center, size } of E_BOXES) {
+        polys.push(...createPolyBox({ center, size, color: E_COLOR }).polygons);
+      }
+      const parse = { polygons: polys, objectUrls: [], warnings: [], dispose: () => {} };
+      polyE = polyScene.add(parse, {
+        position: [0, 0, 0],
+        castShadow: true,
+        receiveShadow: true,
+        merge: false,
+      });
     }
     // Cottage normalization: both engines fit the model into a bounding box
     // of COTTAGE_TARGET_SIZE world units centered at the origin. PolyCSS uses
@@ -186,6 +222,7 @@
 
     let cubeMesh = null;
     let cottageGroup = null;
+    let eGroup = null;
     function buildThreeCube() {
       cubeMesh = new THREE.Mesh(
         new THREE.BoxGeometry(S.cube.size, S.cube.size, S.cube.size),
@@ -193,7 +230,20 @@
       );
       cubeMesh.position.set(S.cube.x, S.cube.y, S.cube.z);
       cubeMesh.castShadow = true;
+      cubeMesh.receiveShadow = true;
       threeScene.add(cubeMesh);
+    }
+    function buildThreeE() {
+      eGroup = new THREE.Group();
+      const mat = new THREE.MeshLambertMaterial({ color: E_COLOR });
+      for (const { center, size } of E_BOXES) {
+        const m = new THREE.Mesh(new THREE.BoxGeometry(size[0], size[1], size[2]), mat);
+        m.position.set(center[0], center[1], center[2]);
+        m.castShadow = true;
+        m.receiveShadow = true;
+        eGroup.add(m);
+      }
+      threeScene.add(eGroup);
     }
     function buildThreeCottage() {
       return new Promise((resolve, reject) => {
@@ -370,11 +420,16 @@
       S.mesh = name;
       if (polyCube) { polyCube.remove(); polyCube = null; }
       if (polyCottage) { polyCottage.remove(); polyCottage = null; }
+      if (polyE) { polyE.remove(); polyE = null; }
       if (cubeMesh) { threeScene.remove(cubeMesh); cubeMesh = null; }
       if (cottageGroup) { threeScene.remove(cottageGroup); cottageGroup = null; }
+      if (eGroup) { threeScene.remove(eGroup); eGroup = null; }
       if (name === "cube") {
         buildPolyCube();
         buildThreeCube();
+      } else if (name === "e") {
+        buildPolyE();
+        buildThreeE();
       } else {
         await Promise.all([buildPolyCottage(), buildThreeCottage()]);
       }
@@ -385,6 +440,7 @@
     applyCamera();
     (async () => {
       if (S.mesh === "cottage") await Promise.all([buildPolyCottage(), buildThreeCottage()]);
+      else if (S.mesh === "e") { buildPolyE(); buildThreeE(); }
       update(true);
       loop();
       window.__ready = true;
@@ -444,7 +500,7 @@
       meshLabel.textContent = "model";
       meshRow.appendChild(meshLabel);
       const meshSel = document.createElement("select");
-      for (const opt of ["cube", "cottage"]) {
+      for (const opt of ["cube", "e", "cottage"]) {
         const o = document.createElement("option");
         o.value = opt; o.textContent = opt;
         if (S.mesh === opt) o.selected = true;
