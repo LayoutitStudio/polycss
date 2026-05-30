@@ -2165,6 +2165,32 @@ describe("createPolyScene", () => {
       expect((d.match(/Z/g) || []).length).toBe(1);
     });
 
+    it("clips low-angle ground shadow path coordinates to the capped SVG box", () => {
+      scene = makeScene(host, {
+        textureLighting: "baked",
+        directionalLight: { direction: [1, 0, 0.01] },
+        shadow: { maxExtend: 20 },
+      });
+      scene.add(makeParseResult([sideTriangle()]), { castShadow: true, merge: false });
+
+      const shadow = host.querySelector(".polycss-shadow") as SVGSVGElement;
+      const width = Number(shadow.getAttribute("width"));
+      const height = Number(shadow.getAttribute("height"));
+      const d = shadow.querySelector("path")?.getAttribute("d") ?? "";
+      const values = (d.match(/-?\d+(?:\.\d+)?/g) ?? []).map(Number);
+
+      expect(width).toBeGreaterThan(0);
+      expect(width).toBeLessThanOrEqual(40);
+      expect(height).toBeGreaterThan(0);
+      expect(values.length).toBeGreaterThan(0);
+      for (let i = 0; i < values.length; i += 2) {
+        expect(values[i]).toBeGreaterThanOrEqual(-0.001);
+        expect(values[i]).toBeLessThanOrEqual(width + 0.001);
+        expect(values[i + 1]).toBeGreaterThanOrEqual(-0.001);
+        expect(values[i + 1]).toBeLessThanOrEqual(height + 0.001);
+      }
+    });
+
     it("baked mode projects every polygon (no Lambert cull) so thin/open meshes don't get silhouette holes", () => {
       // backTriangle has its surface normal pointing AWAY from the
       // default light. We deliberately do NOT cull these by Lambert
