@@ -164,7 +164,10 @@
     renderer.setPixelRatio(window.devicePixelRatio);
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.shadowMap.enabled = true;
-    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    // Hard-edged shadow map to match PolyCSS's analytical projection (which
+    // produces sharp silhouette edges). PCFSoftShadowMap would otherwise
+    // blur shadow edges and mask the underlying silhouette shape.
+    renderer.shadowMap.type = THREE.BasicShadowMap;
     THREE.Object3D.DEFAULT_UP.set(0, 0, 1);
 
     const threeScene = new THREE.Scene();
