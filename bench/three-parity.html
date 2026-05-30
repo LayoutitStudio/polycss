@@ -110,6 +110,12 @@
       // textured polys (cottage walls). The bench prioritizes parity over
       // memory budget. Real apps stick with "auto".
       textureQuality: 1,
+      // No seam-bleed overscan. Default 1.5 px per shared edge makes
+      // adjacent polygons overlap by up to 3 px to hide rasterisation
+      // cracks. Three.js doesn't have that, so for visual parity we
+      // disable it here. Real apps keep the default so faces stay
+      // crack-free.
+      seamBleed: 0,
     });
     let polyCube = null;
     let polyCottage = null;

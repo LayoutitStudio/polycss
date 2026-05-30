@@ -95,8 +95,13 @@ function seamTriangleOptions(
   plan: TextureAtlasPlan,
   options: RenderTextureAtlasOptions,
 ): RenderTextureAtlasOptionsWithSeams {
-  return plan.seamBleedEdges?.size
-    ? { ...options, seamBleed: DEFAULT_SOLID_SEAM_BLEED, seamEdges: plan.seamBleedEdges }
+  // Honor the caller-supplied seamBleed (incl. explicit 0) instead of
+  // always falling back to DEFAULT_SOLID_SEAM_BLEED. seamBleed === 0
+  // means "no overscan" — the user wants the leaf to paint at its true
+  // geometric size for crack-vs-overlap comparisons (Three.js parity).
+  const bleed = options.seamBleed ?? DEFAULT_SOLID_SEAM_BLEED;
+  return plan.seamBleedEdges?.size && bleed > 0
+    ? { ...options, seamBleed: bleed, seamEdges: plan.seamBleedEdges }
     : { ...options, seamBleed: undefined, seamEdges: undefined };
 }
 
@@ -117,10 +122,11 @@ function seamAtlasOptions(
   seamBleedEdges: Map<number, Set<number>> | null,
   options: RenderTextureAtlasOptions,
 ): RenderTextureAtlasOptionsWithSeams {
-  return seamBleedEdges
+  const bleed = options.seamBleed ?? DEFAULT_SOLID_SEAM_BLEED;
+  return seamBleedEdges && bleed > 0
     ? {
         ...options,
-        seamBleed: seamBleedEdges.has(index) ? DEFAULT_SOLID_SEAM_BLEED : undefined,
+        seamBleed: seamBleedEdges.has(index) ? bleed : undefined,
         seamEdges: seamBleedEdges.get(index),
       }
     : options;
