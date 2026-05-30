@@ -275,7 +275,7 @@ function wrapDegrees(value: number): number {
 }
 
 function clampLightElevation(value: number): number {
-  return Math.max(-90, Math.min(90, value));
+  return Math.max(0, Math.min(90, value));
 }
 
 function lightDirectionFromAngles(azimuth: number, elevation: number): ReactVec3 {
