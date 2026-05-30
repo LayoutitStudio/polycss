@@ -33,7 +33,7 @@ import {
   serializeBuilderSceneToParam,
   updateBuilderSceneUrl,
 } from "./sceneUrl";
-import type { BuilderToolMode, PlacedItem, TargetMode, ToolMode } from "./types";
+import type { BuilderPlacementTarget, BuilderToolMode, PlacedItem, TargetMode, ToolMode } from "./types";
 
 const TILE = 50;
 const BUILDER_IMPORT_EXTENSIONS = new Set(["obj", "glb", "vox"]);
@@ -322,13 +322,17 @@ export default function BuilderWorkbench() {
     setSceneOptions({ ...DEFAULT_SCENE });
   }, [replaceItems, setSelectedId]);
 
-  const handleAddShapeAt = useCallback(async (worldX: number, worldY: number) => {
+  const handleAddShapeAt = useCallback(async ({ worldX, worldY, surfaceWorldZ }: BuilderPlacementTarget) => {
     if (placingShapeId) return;
     const preset = BUILDER_SHAPE_PRESETS.find((shape) => shape.id === selectedShapeId);
     if (!preset) return;
     setPlacingShapeId(preset.id);
     try {
-      const placement = await buildPlacement(preset, worldX, worldY);
+      const terrainSample = sampleTerrain(terrainVertices, sceneOptions.gridResolution, worldX, worldY);
+      const elevation = typeof surfaceWorldZ === "number" && Number.isFinite(surfaceWorldZ)
+        ? Math.max(0, surfaceWorldZ - terrainSample.z)
+        : 0;
+      const placement = await buildPlacement(preset, worldX, worldY, { elevation });
       if (!placement) return;
       const snapped = snapPlacement(placement, terrainVertices, sceneOptions.gridResolution, sceneOptions.snapToGrid);
       appendItems([snapped]);

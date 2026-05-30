@@ -45,6 +45,13 @@ export interface PlacementDraft {
   fitScale: number;
 }
 
+export interface BuilderPlacementTarget {
+  worldX: number;
+  worldY: number;
+  /** Absolute world-Z surface where the new mesh's bottom should land. */
+  surfaceWorldZ?: number;
+}
+
 export type ToolMode = "pointer" | "raise" | "lower" | "smooth";
 
 export type BuilderToolMode = "move" | "add" | "remove";
