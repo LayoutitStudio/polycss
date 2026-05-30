@@ -166,6 +166,8 @@ const RESPONSIVE_ZOOM_BOTTOM_RESERVE = 72;
 const RESPONSIVE_ZOOM_MIN_SCALE = 0.42;
 const RESPONSIVE_SHADOW_EXTEND_BASE = 3200;
 const RESPONSIVE_SHADOW_EXTEND_MIN = 2000;
+const RESPONSIVE_SHADOW_PREVIEW_EXTEND_BASE = 1800;
+const RESPONSIVE_SHADOW_PREVIEW_EXTEND_MIN = 800;
 
 function clamp(value: number, min: number, max: number): number {
   if (!Number.isFinite(value)) return min;
@@ -186,13 +188,36 @@ function responsiveZoomScaleForViewport(width: number, height: number): number {
   return clamp(Math.min(widthScale, heightScale), RESPONSIVE_ZOOM_MIN_SCALE, 1);
 }
 
-function responsiveShadowMaxExtend(value: number, viewportScale: number): number {
+function responsiveCappedShadowMaxExtend(
+  value: number,
+  viewportScale: number,
+  base: number,
+  min: number,
+): number {
   if (viewportScale >= 0.995) return value;
   const cap = Math.max(
-    RESPONSIVE_SHADOW_EXTEND_MIN,
-    Math.round(RESPONSIVE_SHADOW_EXTEND_BASE * viewportScale),
+    min,
+    Math.round(base * viewportScale),
   );
   return Math.min(value, cap);
+}
+
+function responsiveShadowMaxExtend(value: number, viewportScale: number): number {
+  return responsiveCappedShadowMaxExtend(
+    value,
+    viewportScale,
+    RESPONSIVE_SHADOW_EXTEND_BASE,
+    RESPONSIVE_SHADOW_EXTEND_MIN,
+  );
+}
+
+function responsiveShadowPreviewMaxExtend(value: number, viewportScale: number): number {
+  return responsiveCappedShadowMaxExtend(
+    value,
+    viewportScale,
+    RESPONSIVE_SHADOW_PREVIEW_EXTEND_BASE,
+    RESPONSIVE_SHADOW_PREVIEW_EXTEND_MIN,
+  );
 }
 
 function initialResponsiveZoomScale(): number {
@@ -805,17 +830,21 @@ export default function GalleryWorkbench() {
     markSceneRouteDirty();
     setSceneOptions((current) => ({ ...current, ...partial }));
   }, [markSceneRouteDirty]);
+  const responsiveZoomScale = useResponsiveViewportZoomScale(viewportRef);
   const canPreviewSceneOptions = useCallback(
     (options: SceneOptionsState) =>
       options.renderer === "vanilla" && transientSceneHandleRef.current !== null,
     [],
   );
   const previewSceneOptions = useCallback((options: SceneOptionsState) => {
-    transientSceneHandleRef.current?.applyLightOptions(options);
-  }, []);
+    const previewShadow = responsiveZoomScale >= 0.995 || options.textureLighting === "dynamic";
+    transientSceneHandleRef.current?.applyLightOptions({
+      ...options,
+      shadowMaxExtend: responsiveShadowPreviewMaxExtend(options.shadowMaxExtend, responsiveZoomScale),
+    }, { shadow: previewShadow });
+  }, [responsiveZoomScale]);
 
   const { handleCameraChange } = useGuiCameraSync({ setSceneOptions });
-  const responsiveZoomScale = useResponsiveViewportZoomScale(viewportRef);
   const renderSceneOptions = useMemo<SceneOptionsState>(() => {
     const shadowMaxExtend = responsiveShadowMaxExtend(sceneOptions.shadowMaxExtend, responsiveZoomScale);
     if (responsiveZoomScale === 1 && shadowMaxExtend === sceneOptions.shadowMaxExtend) return sceneOptions;
