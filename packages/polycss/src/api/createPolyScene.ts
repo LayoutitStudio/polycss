@@ -2969,6 +2969,149 @@ export function createPolyScene(
     emitShadowLeaves(entry);
   }
 
+  // Light-only rebake that mutates the existing leaves in place instead
+  // of tearing them down. Used by `rebakeAtlas` so dragging the directional
+  // light slider doesn't flash a frame of unstyled mesh on every tick.
+  //
+  // Polygon vertices are unchanged → `matrix3d` is unchanged → element
+  // positions are unchanged. Only the baked Lambert color (inline `color`
+  // / `background-color` for solid leaves, atlas bitmap URL for textured
+  // <s> leaves) differs. We build a throw-away atlas off-DOM, wait for
+  // its bitmap URLs to be applied to its (never-mounted) elements, then
+  // copy each new element's `style` attribute onto the existing leaf with
+  // the matching polygon index. The new elements are never inserted; the
+  // old leaves keep painting with their previous bitmap until the swap.
+  //
+  // Falls back to plain `renderEntry` for cases where the in-place swap
+  // can't safely match (initial render, voxel-direct path, stable-DOM
+  // skeletal animation, topology mismatch).
+  function rebakeRenderEntryInPlace(
+    entry: MeshEntry,
+    lightDirectionOverride?: Vec3,
+  ): void {
+    if (
+      entry.rendered.length === 0 ||
+      entry.voxelRenderer ||
+      entry.stableDom ||
+      canRenderVoxelDirect(entry)
+    ) {
+      renderEntry(entry, lightDirectionOverride);
+      return;
+    }
+    // If the wrapper was emptied externally (e.g. by a test, or a
+    // consumer reaching into the DOM), entry.rendered still references
+    // the detached leaves. Mutating their styles wouldn't put them back
+    // in the DOM — fall back to the destructive rebuild instead.
+    if (entry.rendered[0]?.element.parentNode === null) {
+      renderEntry(entry, lightDirectionOverride);
+      return;
+    }
+
+    const baseDirLight = currentOptions.directionalLight;
+    const userDirLight: typeof baseDirLight = lightDirectionOverride
+      ? { ...baseDirLight, direction: lightDirectionOverride }
+      : baseDirLight;
+    const directionalLight = worldDirectionalLightToCss(userDirLight);
+    const renderOptions = {
+      doc,
+      directionalLight,
+      ambientLight: currentOptions.ambientLight,
+      textureLighting: currentOptions.textureLighting,
+      textureQuality: currentOptions.textureQuality,
+      seamBleed: currentOptions.seamBleed,
+      strategies: currentOptions.strategies,
+      computeSolidPaintDefaults: true,
+      skipDynamicNormalVars: currentOptions.textureLighting === "dynamic",
+    };
+    const newAtlas = renderPolygonsWithTextureAtlas(
+      entry.polygons,
+      renderOptions as Parameters<typeof renderPolygonsWithTextureAtlas>[1],
+    );
+
+    const apply = (): void => {
+      if (entry.disposed) {
+        newAtlas.dispose();
+        return;
+      }
+      // Topology mismatch (shouldn't happen for a pure light rebake but
+      // guards against pathological cases) → drop the new atlas and let
+      // the full destructive renderEntry path rebuild from scratch.
+      if (newAtlas.rendered.length !== entry.rendered.length) {
+        newAtlas.dispose();
+        renderEntry(entry, lightDirectionOverride);
+        return;
+      }
+      for (const item of newAtlas.rendered) {
+        const existing = entry.renderedByPolygonIndex[item.polygonIndex];
+        if (!existing) continue;
+        const nextStyle = item.element.getAttribute("style");
+        if (nextStyle !== null) existing.element.setAttribute("style", nextStyle);
+      }
+      const spd = (newAtlas as { solidPaintDefaults?: SolidPaintDefaults })
+        .solidPaintDefaults;
+      if (spd) applySolidPaintVars(entry.wrapper, spd);
+      // Hand off the Blob URL: revoke the previous atlas's URLs only
+      // AFTER the existing leaves have been re-styled to point at the
+      // new ones. Defer one animation frame so the browser has a chance
+      // to commit a paint with the new URL before the old one is freed.
+      const previousDisposeAtlas = entry.disposeAtlas;
+      entry.disposeAtlas = newAtlas.dispose;
+      if (previousDisposeAtlas) {
+        const schedule: (cb: () => void) => void =
+          typeof requestAnimationFrame === "function"
+            ? (cb) => { requestAnimationFrame(cb); }
+            : (cb) => { setTimeout(cb, 0); };
+        schedule(previousDisposeAtlas);
+      }
+      // <q> shadow leaves still need to follow the new light direction.
+      emitShadowLeaves(entry);
+    };
+
+    const ready = (newAtlas as { pagesReady?: Promise<void> }).pagesReady;
+    if (ready && typeof ready.then === "function") {
+      // Pre-decode the new atlas bitmaps BEFORE swapping styles. Until
+      // a Blob URL is paint-committed at least once the browser hasn't
+      // decoded it; copying that URL into a mounted element triggers
+      // decode lazily on the next paint, which is exactly the visible
+      // blank frame. `Image.decode()` forces decode upfront so the
+      // first paint after the style swap composites the bitmap
+      // immediately.
+      ready
+        .then(() => collectAtlasUrlsFromRendered(newAtlas.rendered))
+        .then(decodeAtlasUrls)
+        .then(apply, () => {
+          newAtlas.dispose();
+          if (!entry.disposed) renderEntry(entry, lightDirectionOverride);
+        });
+    } else {
+      apply();
+    }
+  }
+
+  function collectAtlasUrlsFromRendered(
+    rendered: ReturnType<typeof renderPolygonsWithTextureAtlas>["rendered"],
+  ): string[] {
+    const urls = new Set<string>();
+    for (const item of rendered) {
+      const style = item.element.getAttribute("style") ?? "";
+      // Match `background:url(blob:...)` or `--polycss-atlas-url:url(blob:...)`.
+      const re = /url\((blob:[^)]+)\)/g;
+      let m: RegExpExecArray | null;
+      while ((m = re.exec(style)) !== null) urls.add(m[1]);
+    }
+    return Array.from(urls);
+  }
+
+  function decodeAtlasUrls(urls: string[]): Promise<void> {
+    if (urls.length === 0 || typeof Image === "undefined") return Promise.resolve();
+    return Promise.all(urls.map((url) => {
+      const img = new Image();
+      img.src = url;
+      const decoded = img.decode?.();
+      return decoded ? decoded.catch(() => {}) : Promise.resolve();
+    })).then(() => undefined);
+  }
+
   // Recomputes the shadow ground plane from the minimum world-Z across all
   // casting meshes. World Z stays as CSS Z under the world→CSS axis swap.
   // In PolyCSS's world convention Z is up — the red-green plane in the axes
@@ -3577,7 +3720,10 @@ export function createPolyScene(
         // so the rasterized atlas produces correct shading after rotation.
         const worldDir = currentOptions.directionalLight?.direction ?? [0.4, -0.7, 0.59] as Vec3;
         const localLightDir = inverseRotateVec3(worldDir as Vec3, entry.bakedRotation);
-        renderEntry(entry, localLightDir);
+        // Use the in-place swap so the textures don't flash blank on every
+        // tick of a slider drag. Falls back to plain renderEntry when the
+        // mesh isn't a candidate (no existing leaves, voxel mode, etc.).
+        rebakeRenderEntryInPlace(entry, localLightDir);
       },
       getPosition() { return transform.position; },
       getRotation() { return transform.rotation; },
