@@ -86,7 +86,7 @@ export function collectPolyRenderStats(
     surfaceLeafCounts.clippedSolid += queryCount(scope, "i");
     surfaceLeafCounts.atlas += queryCount(scope, "s");
     surfaceLeafCounts.stableTriangle += queryCount(scope, "u");
-    shadowLeafCount += queryCount(scope, "q");
+    shadowLeafCount += queryCount(scope, "q, .polycss-shadow-svg");
     bucketCount += queryCount(scope, ".polycss-bucket");
   }
 

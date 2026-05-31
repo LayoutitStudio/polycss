@@ -2,15 +2,15 @@
  * createPolyScene — imperative scene API. The vanilla counterpart to
  * `<PolyScene>` in React / Vue.
  *
- * Per §API freeze: takes a host element + scene options, returns a
- * `PolySceneHandle` whose `add(parseResult, transform?)` mounts a mesh under
- * the scene root and returns a removable `PolyMeshHandle`.
+ * Takes a host element + scene options and returns a `PolySceneHandle` whose
+ * `add(parseResult, transform?)` mounts a mesh under the scene root and returns
+ * a removable `PolyMeshHandle`.
  *
  * Implementation:
  *   - Inserts a `<div class="polycss-scene">` into the host.
- *   - Each `add(...)` creates a `<div class="polycss-mesh">` with the
- *     mesh transform; mounts every valid polygon as an atlas-backed
- *     background sprite.
+ *   - Each `add(...)` creates a `<div class="polycss-mesh">` with the mesh
+ *     transform; mounts every valid polygon using the cheapest supported
+ *     render-strategy leaf.
  *   - `destroy()` removes the scene element and disposes every mesh
  *     (which in turn disposes generated atlas blob URLs).
  *
@@ -136,18 +136,16 @@ export interface PolySceneOptions {
    */
   strategies?: PolyRenderStrategiesOption;
   /**
-   * When `true`, rotation pivots around the union bbox of all added meshes
-   * instead of world (0,0,0). The scene wraps polygons in an inner div
-   * translated by `-bboxCenter`. Updates whenever a mesh is added/removed
-   * or `setOptions` is called. Mirrors React's `<PolyScene autoCenter>`.
+   * When `true`, the camera target is offset by the union bbox center of all
+   * added meshes, so rotation pivots around that visible center instead of
+   * world (0,0,0). Updates whenever a mesh is added/removed or `setOptions`
+   * is called. Mirrors React's `<PolyScene autoCenter>`.
    */
   autoCenter?: boolean;
   /**
-   * Shadow appearance for meshes with `castShadow: true`. Works in both
-   * lighting modes — dynamic mode projects via CSS vars so shadows
-   * follow a moving light, baked mode CPU-bakes the projection into
-   * each leaf's inline `matrix3d` and drops back-facing polys from the
-   * DOM entirely. Defaults: `{ color: "#000000", opacity: 0.25, lift: 0.05, maxExtend: 2000 }`.
+   * Shadow appearance for meshes with `castShadow: true`. Shadows are emitted
+   * as scene-level SVG paths in both lighting modes; moving a light reprojects
+   * the shadow geometry. Defaults: `{ color: "#000000", opacity: 0.25, lift: 0.05, maxExtend: 2000 }`.
    */
   shadow?: {
     /** Shadow color as a CSS hex string. Default: `"#000000"`. */
@@ -633,8 +631,8 @@ export function createPolyScene(
     parseResult: ParseResult;
     rendered: RenderedPoly[];
     renderedByPolygonIndex: Array<RenderedPoly | undefined>;
-    /** Dynamic-mode shadow `<q>` leaves, one per non-deduped casting
-     *  polygon. Empty in baked mode (which uses `shadowSvg` instead). */
+    /** Internal compatibility storage for retained per-polygon shadow leaves.
+     *  Current shadow emission is scene-level SVG based. */
     shadowRendered: HTMLElement[];
     voxelRenderer?: PolyVoxelRenderer;
     disposeAtlas?: () => void;
@@ -659,11 +657,10 @@ export function createPolyScene(
   }
   const meshes = new Set<MeshEntry>();
 
-  // Cached CSS-Z of the shadow ground plane. Set by `recomputeShadowGround`.
-  // In dynamic mode this also flows into the `--shadow-ground-cssz` CSS var
-  // that drives `--shadow-proj`. In baked mode it's read by `emitShadowLeaves`
-  // to bake the per-leaf inline projection matrix on the CPU. `null` means
-  // no casting mesh exists yet, so no shadow leaves should be emitted.
+  // Cached CSS-Z of the shadow ground plane. Set by `recomputeShadowGround`
+  // and used by SVG shadow projection for the ground surface. In dynamic mode
+  // this is also mirrored into `--shadow-ground-cssz` for the retained internal
+  // `<q>` shadow CSS path. `null` means no casting mesh exists yet.
   let currentGroundCssZ: number | null = null;
 
   // Scene-level shadow SVGs. One per surface (ground + each receiver
@@ -959,8 +956,8 @@ export function createPolyScene(
   }
 
   function clearShadowLeaves(entry: MeshEntry): void {
-    // Per-entry `<q>` leaves (dynamic-mode chain + legacy callers) still
-    // hang off the mesh and must be cleared individually.
+    // Current shadows are scene-level SVGs, but retained internal `<q>` leaves
+    // can still be present during cleanup of already-mounted entries.
     for (const el of entry.shadowRendered) {
       if (el.parentNode) el.parentNode.removeChild(el);
     }
@@ -1608,23 +1605,9 @@ export function createPolyScene(
     return true;
   }
 
-  // Emits the per-mesh shadow `<svg>`. Same path for both lighting modes:
-  // every casting polygon is projected to the ground on the CPU and
-  // concatenated into a single compound `<path>` (M…L…Z subpaths) under
-  // fill-rule=nonzero. Overlapping outlines composite as one filled
-  // silhouette without alpha stacking; gaps between subpaths remain as
-  // gaps (silhouette holes are preserved); back-facing polys are dropped
-  // up front. One SVG element per mesh regardless of polygon count.
-  //
-  // Trade-off vs. the old dynamic-mode per-`<q>` CSS path: live light
-  // updates now require a JS re-projection pass (`setOptions` triggers
-  // re-emit when directionalLight.direction changes) instead of being
-  // free CSS variable updates. The visual upside (no alpha stacking,
-  // preserved holes, fewer DOM nodes) is worth the JS cost for typical
-  // scenes — huge meshes during light-slider drag can profile if needed.
-  // Per-entry trigger: callers pass the entry that changed, but emission
-  // is scene-wide. Drop the arg here so any change rebuilds the whole
-  // shadow set in one shot — every surface aggregates every caster.
+  // Refreshes scene-level shadow SVGs for both lighting modes. Callers pass the
+  // entry that changed, but emission is scene-wide because every receiving
+  // surface aggregates every caster into one compound path.
   function emitShadowLeaves(_entry: MeshEntry): void {
     emitSceneShadows();
   }
@@ -2301,8 +2284,7 @@ export function createPolyScene(
     let minWorldZ = Infinity;
     // If any receivers exist, anchor the ground plane to the lowest
     // receiver bottom — that's the actual scene floor. Otherwise fall
-    // back to the lowest caster bottom (legacy behavior, used when no
-    // receiver mesh is registered).
+    // back to the lowest caster bottom when no receiver mesh is registered.
     let hasReceiver = false;
     for (const m of meshes) if (!m.disposed && m.receiveShadow) { hasReceiver = true; break; }
     for (const m of meshes) {

@@ -1,8 +1,8 @@
 /**
- * `<PolyGround>` — a flat ground-plane quad that shadow-casting meshes can
- * render their `<q>` shadows onto. Pure convenience over `<PolyMesh>`:
- * generates a 4-vertex polygon in the world XY plane at `z` and renders it
- * with `castShadow: false` (the floor doesn't cast onto itself).
+ * `<PolyGround>` — a flat ground-plane quad for receiving SVG shadows from
+ * shadow-casting meshes. Pure convenience over `<PolyMesh>`: generates a
+ * 4-vertex polygon in the world XY plane at `z` and renders it with
+ * `castShadow: false` (the floor doesn't cast onto itself).
  *
  *   <PolyScene>
  *     <PolyMesh polygons={chickenPolys} castShadow />
@@ -24,8 +24,8 @@ export interface PolyGroundProps {
   z?: number;
   /** World-space XY center. Default `[0, 0]`. */
   center?: [number, number];
-  /** Fill color. Default `#7d848e` — medium gray, chosen so the 25% black
-   *  `<q>` shadow leaves on top have visible contrast against it. */
+  /** Fill color. Default `#7d848e` — medium gray, chosen so the default
+   *  25% black SVG shadow has visible contrast against it. */
   color?: string;
   className?: string;
 }

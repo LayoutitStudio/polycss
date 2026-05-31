@@ -1,13 +1,8 @@
-// Pure-math helpers for baked-mode shadow projection.
+// Pure-math helpers for CPU shadow projection.
 //
-// Dynamic mode keeps the shadow projection in CSS (--shadow-proj on the
-// scene root, driven by --clx/--cly/--clz + --shadow-ground-cssz) so the
-// browser recomputes it whenever the light moves. Baked mode skips that
-// machinery entirely: the light is fixed, so the projection matrix can
-// be CPU-computed once at scene build time and reused inline on every
-// shadow leaf. No CSS vars, no @property dependency, no per-paint calc
-// chain — and back-facing polygons are dropped from the DOM instead of
-// being emitted with opacity 0.
+// Current renderers use these helpers to project caster outlines into SVG
+// shadow paths. The same matrix shape is still exposed for callers that need
+// a CSS `matrix3d(...)` projection rather than projected 2D vertices.
 import type { Vec3 } from "../types";
 
 /** Tiny non-zero scale collapsed into the projection's Z column to keep
@@ -26,10 +21,9 @@ export const BAKED_SHADOW_MIN_UP = 0.01;
 
 /**
  * Build the CSS-space shadow projection matrix for a fixed light + ground
- * plane. The 16-element output mirrors the matrix3d expression in the
- * dynamic-mode `--shadow-proj` CSS custom property, but with literal
- * numbers — ready to be formatted into a single `matrix3d(...)` per
- * shadow leaf.
+ * plane. The 16-element output mirrors the retained `--shadow-proj` CSS
+ * custom property, but with literal numbers — ready to be formatted into a
+ * single `matrix3d(...)`.
  *
  * `lightDir` is the direction the light TRAVELS (e.g. `[0, 0, -1]` is
  * straight down). PolyCSS world Z is up, and the world→CSS axis swap
@@ -151,11 +145,9 @@ export function ensureCcw2D(
 
 /**
  * Projects a single CSS-3D vertex onto the shadow ground plane, returning
- * the resulting 2D point in CSS coordinates. Mirrors the per-element
- * matrix3d that the dynamic-mode `--shadow-proj` builds, but evaluated on
- * the CPU for a fixed light + ground — handy when many projected vertices
- * are needed at once (e.g. rendering shadow outlines into a single SVG
- * per mesh instead of one DOM leaf per casting polygon).
+ * the resulting 2D point in CSS coordinates. Mirrors the retained
+ * `--shadow-proj` matrix, but evaluated on the CPU for a fixed light + ground
+ * so many projected vertices can be merged into one SVG shadow path.
  *
  * `cssVertex` is a 3D point that has already been through the world→CSS
  * axis swap and unit scale (so its components are dimensionless CSS-space

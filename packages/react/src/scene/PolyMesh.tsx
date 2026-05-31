@@ -1,12 +1,12 @@
 /**
  * PolyMesh — load a mesh URL (or accept a polygons array) and render its
  * polygons inside a `.polycss-mesh` wrapper that carries the mesh-wide
- * position/scale/rotation transform. Per §API freeze and §Design.4c.
+ * position/scale/rotation transform.
  *
  * Uses nested DOM (preserve-3d) so the wrapper transform composes with each
  * atlas polygon's vertex matrix3d via CSS without JS doing the matrix math.
  *
- * Render-prop semantics (per §2a "Render-prop semantics"):
+ * Render-prop semantics:
  *   - `children(polygon, index)` is called once per parsed polygon.
  *   - Returned elements render INSIDE the .polycss-mesh wrapper, so they
  *     inherit the mesh transform automatically. Don't re-apply position
@@ -134,11 +134,10 @@ export interface PolyMeshProps extends TransformProps, InteractionProps {
    *  when both are present. */
   meshResolution?: MeshResolution;
   /**
-   * When `true` and the scene is in dynamic lighting mode, emits a flat
-   * shadow leaf (`<q class="polycss-shadow">`) sibling for each polygon.
-   * The shadow is projected onto the ground plane along the CSS-space light
-   * direction via `--shadow-proj` (a CSS var on the scene root). Zero JS in
-   * the render loop — projection is pure `calc()`. Defaults to `false`.
+   * When `true`, emits a per-mesh SVG shadow path in both lighting modes.
+   * Each casting polygon projects onto the scene ground plane along the
+   * directional light; overlapping outlines are merged into one silhouette.
+   * Defaults to `false`.
    */
   castShadow?: boolean;
   className?: string;

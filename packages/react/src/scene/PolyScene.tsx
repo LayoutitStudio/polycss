@@ -80,17 +80,16 @@ export interface PolySceneProps extends TransformProps {
   autoCenter?: boolean;
   /**
    * Shadow appearance for meshes with `castShadow={true}`. Works in both
-   * lighting modes — dynamic mode projects via CSS vars so shadows
-   * follow a moving light, baked mode CPU-bakes the projection into
-   * each leaf's inline `matrix3d` and drops back-facing polys from the
-   * DOM entirely. Defaults: `{ color: "#000000", opacity: 0.25, lift: 0.05, maxExtend: 2000 }`.
+   * lighting modes. Shadows emit as SVG paths and reproject when light,
+   * ground, or mesh geometry changes. Defaults:
+   * `{ color: "#000000", opacity: 0.25, lift: 0.05, maxExtend: 2000 }`.
    */
   shadow?: ShadowOptions;
   className?: string;
   style?: CSSProperties;
   children?: ReactNode;
 
-  // Debug toggles. Cube-only `debugShowOccluded` was removed in Phase 4.
+  // Debug toggles retained for external tooling.
   debugShowLabels?: boolean;
   debugShowBackfaces?: boolean;
 }
@@ -263,9 +262,9 @@ function PolySceneInner({
   //
   // Also emits --clx/--cly/--clz: the light direction in CSS coordinate space
   // (matches the convention in vanilla's applyDynamicLightVars — NO axis swap
-  // relative to --plx/--ply/--plz). Used by the --shadow-proj matrix in
-  // styles.ts. --clz is clamped away from zero to avoid divide-by-zero in
-  // the projection when the light is near-horizontal.
+  // relative to --plx/--ply/--plz). Retained internal <q> projection CSS uses
+  // these vars. --clz is clamped away from zero to avoid divide-by-zero when
+  // the light is near-horizontal.
   const dynamicLightVars = useMemo<CSSProperties | null>(() => {
     if (textureLighting !== "dynamic") return null;
     const dir = directionalLight?.direction ?? [0.4, -0.7, 0.59];
@@ -337,9 +336,9 @@ function PolySceneInner({
     }
   }, [sceneElRef, textureLighting, recomputeGroundCssZ]);
 
-  // Re-sync the CSS var on lighting-mode swaps. Dynamic mode needs the var
-  // (the --shadow-proj calc reads it); baked mode strips it so a stale
-  // value can't accidentally drive --shadow-proj for legacy leaves.
+  // Re-sync the retained CSS shadow projection var on lighting-mode swaps.
+  // Current React shadows are SVG-based, but retained internal <q> leaves still
+  // use --shadow-proj when present.
   useEffect(() => {
     const el = sceneElRef.current;
     if (!el) return;
