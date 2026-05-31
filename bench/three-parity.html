@@ -581,10 +581,11 @@
         new THREE.Vector3(helperPos[0], helperPos[1], helperPos[2]),
         new THREE.Vector3(dirLight.target.position.x, dirLight.target.position.y, dirLight.target.position.z),
       ]);
-      // Only push setTransform when the user ISN'T mid-drag — during a
-      // drag, polyLightHelper's transform is already being mutated by
-      // the gizmo and re-setting it here would cause it to lag/snap.
-      if (polyLightHelper && !lightDragging) {
+      // Always push the helper to the freshly-computed direction-derived
+      // position. The drag handler updates S.dir.{x,y,z} → update() →
+      // computeLightHelperPos() → here. The rhombus visibly follows
+      // the mouse this way.
+      if (polyLightHelper) {
         polyLightHelper.setTransform({ position: helperPos });
       }
       applyShadowsOnly();
