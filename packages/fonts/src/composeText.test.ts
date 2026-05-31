@@ -248,11 +248,24 @@ describe("composeText", () => {
   });
 
   it("custom cubic-bezier profile differs from a round edge", () => {
-    const round = composeText(roboto, "o", { depth: 24, profile: { edge: "round" } });
-    const custom = composeText(roboto, "o", { depth: 24, profile: { curve: [0.1, 0.9, 0.2, 1] } });
+    // Pin equal segment counts so the comparison is apples-to-apples (the round
+    // default is otherwise adaptive, while custom keeps a fixed default).
+    const round = composeText(roboto, "o", { depth: 24, profile: { edge: "round", segments: 6 } });
+    const custom = composeText(roboto, "o", { depth: 24, profile: { curve: [0.1, 0.9, 0.2, 1], segments: 6 } });
     const hash = (ps: ReturnType<typeof composeText>) => ps.map((p) => p.vertices.flat().join()).join("|");
     expect(round.length).toBe(custom.length);
     expect(hash(round)).not.toBe(hash(custom));
+  });
+
+  it("round edges pick fewer segments by default than a forced high count", () => {
+    // The default round segment count is adaptive (small bevel → fewer rings),
+    // so it never exceeds — and here undercuts — an explicit high count.
+    const auto = composeText(roboto, "WordArt", { depth: 20, profile: { edge: "round" } });
+    const dense = composeText(roboto, "WordArt", { depth: 20, profile: { edge: "round", segments: 6 } });
+    expect(auto.length).toBeLessThan(dense.length);
+    // An explicit count is always honored verbatim.
+    const exact = composeText(roboto, "WordArt", { depth: 20, profile: { edge: "round", segments: 6 } });
+    expect(dense.length).toBe(exact.length);
   });
 
   it("flat (depth 0) drops the side walls vs an extruded depth", () => {

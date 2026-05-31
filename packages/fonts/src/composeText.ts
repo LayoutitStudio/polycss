@@ -128,6 +128,17 @@ function resolveProfile(p: Profile | undefined): {
 }
 
 /**
+ * Fewest quarter-arc segments whose worst chord error (sagitta) stays under
+ * `tol` world units, clamped to [2, 6]. For a radius-`r` quarter circle split
+ * into N segments the sagitta is `r·(1 − cos(π/2N))`; solve that ≤ tol for N.
+ */
+function adaptiveRoundSegments(r: number, tol: number): number {
+  if (r <= tol || r <= 1e-6) return 2;
+  const n = Math.ceil(Math.PI / (2 * Math.acos(1 - tol / r)));
+  return Math.min(6, Math.max(2, n));
+}
+
+/**
  * Normalize the `faces` option into sorted material stops. A face set to `false`
  * (or `sides` omitted) contributes no stop — the geometry is still rendered, but
  * the nearest remaining face covers it (no hole, just fewer colour bands). The
@@ -171,7 +182,16 @@ export function composeText(font: ParsedFont, text: string, options: ComposeText
   const { stops, backOffset } = resolveStops(options.faces, "#d4a82a");
 
   const prof = resolveProfile(options.profile);
-  const profileSegments = Math.max(1, Math.round(prof.segments ?? 6));
+  // Ring count for the round edge. An explicit `segments` is honored; otherwise
+  // pick the fewest segments whose chord (sagitta) error stays under ~0.4% of
+  // the cap height — the round-over radius is capped at size*0.045, so a small
+  // bevel never needs the full default. A custom curve keeps a fixed default
+  // since its detail isn't a function of edge size.
+  const roundEdge = Math.min(size * 0.045, depth / 2);
+  const adaptive = prof.profile === "round"
+    ? adaptiveRoundSegments(roundEdge, size * 0.004)
+    : 6;
+  const profileSegments = Math.max(1, Math.round(prof.segments ?? adaptive));
   // depth 0 → a flat slab with no side walls (and a place for the offset shadow).
   const flat = depth <= 0;
 
