@@ -77,7 +77,7 @@
       // (served by bench/perf-serve.mjs under /gallery/...). Both engines load
       // the same file; Three.js applies the same (x,y,z) → (z,x,y) cyclic
       // permutation parseObj uses to put OBJ's Y-up into our Z-up world.
-      cottage:{ x: 0, y: 0, z: 0, scale: qn("cs", 1) },
+      cottage:{ x: qn("cx", 0), y: qn("cy", 0), z: qn("cz", 0), scale: qn("cs", 1) },
       floor: { size: 20, color: "#cbd5e1" },
       dir:   { x: qn("dx", 1), y: qn("dy", 0.5), z: qn("dz", 1), intensity: qn("di", 1) },
       amb:   { intensity: qn("ai", 0.3) },
@@ -400,6 +400,7 @@
     // re-bake on camera moves; viewing angle doesn't affect Lambert.
     function update(lightsChanged) {
       if (polyCube) polyCube.setTransform({ position: [S.cube.x, S.cube.y, S.cube.z] });
+      if (polyCottage) polyCottage.setTransform({ position: [S.cottage.x, S.cottage.y, S.cottage.z] });
       polyScene.setOptions({
         directionalLight: {
           direction: [S.dir.x, S.dir.y, S.dir.z],
@@ -422,6 +423,7 @@
         polyFloor.rebakeAtlas();
       }
       if (cubeMesh) cubeMesh.position.set(S.cube.x, S.cube.y, S.cube.z);
+      if (cottageGroup) cottageGroup.position.set(S.cottage.x, S.cottage.y, S.cottage.z);
       fitDirLightToScene();
       dirLight.intensity = S.dir.intensity;
       ambLight.intensity = S.amb.intensity;
@@ -654,7 +656,12 @@
         q.set("rx", String(S.cam.rotX));
         q.set("ry", String(S.cam.rotY));
         q.set("z",  String(S.cam.zoom));
-        if (S.mesh === "cottage") q.set("cs", String(S.cottage.scale));
+        if (S.mesh === "cottage") {
+          q.set("cs", String(S.cottage.scale));
+          if (S.cottage.x !== 0) q.set("cx", String(S.cottage.x));
+          if (S.cottage.y !== 0) q.set("cy", String(S.cottage.y));
+          if (S.cottage.z !== 0) q.set("cz", String(S.cottage.z));
+        }
         if (S.shadowsOnly) q.set("sx", "1");
         const url = location.origin + location.pathname + "?" + q.toString();
         try { await navigator.clipboard.writeText(url); copyBtn.textContent = "Copied ✓"; }
@@ -733,7 +740,10 @@
         { k: ["cube", "z"], min: -10, max: 10, step: 0.1, fmt: (v) => v.toFixed(2) },
         { k: ["cube", "size"], min: 0.5, max: 6, step: 0.1, fmt: (v) => v.toFixed(2) },
         { sec: "Cottage" },
-        { k: ["cottage", "scale"], min: 0.01, max: 1, step: 0.01, fmt: (v) => v.toFixed(2), rebuild: true },
+        { k: ["cottage", "x"], min: -10, max: 10, step: 0.1, fmt: (v) => v.toFixed(2) },
+        { k: ["cottage", "y"], min: -10, max: 10, step: 0.1, fmt: (v) => v.toFixed(2) },
+        { k: ["cottage", "z"], min: -10, max: 10, step: 0.1, fmt: (v) => v.toFixed(2) },
+        { k: ["cottage", "scale"], min: 0.01, max: 6, step: 0.01, fmt: (v) => v.toFixed(2) },
         { sec: "Directional light" },
         { k: ["dir", "x"], min: -2, max: 2, step: 0.05, fmt: (v) => v.toFixed(2) },
         { k: ["dir", "y"], min: -2, max: 2, step: 0.05, fmt: (v) => v.toFixed(2) },
@@ -795,6 +805,9 @@
           val.textContent = r.fmt(v);
           if (r.camera) applyCamera();
           if (r.k[0] === "cottage" && r.k[1] === "scale") {
+            // Scale needs both PolyCSS setTransform + Three.js scale.setScalar
+            // here because the central update() doesn't carry scale (only
+            // position). Position is handled by update().
             if (polyCottage) polyCottage.setTransform({ scale: S.cottage.scale });
             if (cottageGroup) cottageGroup.scale.setScalar(S.cottage.scale);
           }
