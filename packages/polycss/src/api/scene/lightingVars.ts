@@ -44,12 +44,24 @@ export const BAKED_SOLID_PREVIEW_ACTIVE_VAR = "--polycss-light-preview-active";
 export const BAKED_SOLID_PREVIEW_ACTIVE = `var(${BAKED_SOLID_PREVIEW_ACTIVE_VAR}, 0)`;
 export const BAKED_SOLID_PREVIEW_LAMBERT =
   "max(0, calc(var(--pnx, 0) * var(--plx, 0) + var(--pny, 0) * var(--ply, 0) + var(--pnz, 1) * var(--plz, 1)))";
-export const BAKED_SOLID_PREVIEW_R =
-  "calc(255 * var(--psr, 1) * (var(--par, 1) * var(--pai, 0.4) + var(--plr, 1) * var(--pli, 1) * var(--plam, 0)))";
-export const BAKED_SOLID_PREVIEW_G =
-  "calc(255 * var(--psg, 1) * (var(--pag, 1) * var(--pai, 0.4) + var(--plg, 1) * var(--pli, 1) * var(--plam, 0)))";
-export const BAKED_SOLID_PREVIEW_B =
-  "calc(255 * var(--psb, 1) * (var(--pab, 1) * var(--pai, 0.4) + var(--plb, 1) * var(--pli, 1) * var(--plam, 0)))";
+// Three.js MeshLambertMaterial parity. Matches the dynamic-mode textured
+// cascade in styles.ts: linearize sRGB inputs via pow((c+0.055)/1.055, 2.4),
+// multiply the linear source albedo by (ambient + light × intensity × λ),
+// divide by π for energy conservation, then sRGB-encode via
+// 1.055 × pow(c, 1/2.4) − 0.055 (0.4167 ≈ 1/2.4). Pre-task-#120, this
+// preview omitted /π and the gamma round-trip; releasing the slider then
+// committed the proper baked color, which read as "the mesh suddenly
+// darkens" because the preview was overestimating brightness.
+const _PV_CH = (s: string, a: string, l: string) =>
+  `calc(255 * max(0, 1.055 * pow(min(1, ` +
+  `pow((var(${s}, 1) + 0.055) / 1.055, 2.4) * (` +
+  `pow((var(${a}, 1) + 0.055) / 1.055, 2.4) * var(--pai, 0.4) + ` +
+  `pow((var(${l}, 1) + 0.055) / 1.055, 2.4) * var(--pli, 1) * var(--plam, 0)` +
+  `) / 3.14159265` +
+  `), 0.4167) - 0.055))`;
+export const BAKED_SOLID_PREVIEW_R = _PV_CH("--psr", "--par", "--plr");
+export const BAKED_SOLID_PREVIEW_G = _PV_CH("--psg", "--pag", "--plg");
+export const BAKED_SOLID_PREVIEW_B = _PV_CH("--psb", "--pab", "--plb");
 
 /** Set a CSS custom property only if the new value differs from the current
  *  one. Returns true when a write actually happened. Used so the cascade
