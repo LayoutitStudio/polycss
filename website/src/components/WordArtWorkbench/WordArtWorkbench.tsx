@@ -135,7 +135,7 @@ function readable(hex: string): string {
   return lum > 150 ? "#0b0f18" : "#ffffff";
 }
 
-function fitZoom(polygons: Polygon[], stageW: number, stageH: number): number {
+function fitZoom(polygons: Polygon[], stageW: number, stageH: number, scaleX = 1, scaleY = 1): number {
   if (!polygons.length) return 0.06;
   let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity, minZ = Infinity, maxZ = -Infinity;
   for (const p of polygons) {
@@ -146,9 +146,13 @@ function fitZoom(polygons: Polygon[], stageW: number, stageH: number): number {
     }
   }
   // Flat text: Y = width (screen-right), X = height (screen-down), Z = depth.
-  // As the mesh turntables, width swings into depth, so fit the larger of the two.
-  const horizontal = Math.max(maxY - minY, maxZ - minZ);
-  const vertical = maxX - minX;
+  // As the mesh turntables, width swings into depth, so fit the larger of the
+  // two. Scale X/Y are applied as a CSS transform on the mesh (not baked), so
+  // multiply the base bounds by them here to frame the *scaled* word — the
+  // camera then compensates the wrapper scale, keeping the word framed and the
+  // texture ~base resolution.
+  const horizontal = Math.max((maxY - minY) * scaleX, maxZ - minZ);
+  const vertical = (maxX - minX) * scaleY;
   const fitW = (stageW * 0.7) / (Math.max(horizontal, 1) * BASE_TILE);
   const fitH = (stageH * 0.68) / (Math.max(vertical, 1) * BASE_TILE);
   return Math.max(0.01, Math.min(0.2, Math.min(fitW, fitH)));
@@ -396,7 +400,8 @@ export function WordArtWorkbench() {
       size: 100,
       depth: layered ? 0 : depth,        // "Flat layers" = no edges (depth 0)
       profile: profileObj,
-      scale: [scaleX / 100, scaleY / 100],
+      // Scale X/Y are NOT baked here — they're a live CSS transform on the mesh
+      // wrapper (so they stretch the whole block uniformly and need no recompute).
       letterSpacing,
       lineHeight,
       align,
@@ -408,7 +413,7 @@ export function WordArtWorkbench() {
       faces: { front, sides, back },
       outline: outlineOn ? { color: outlineColor, width: outlineWidth } : undefined,
     });
-  }, [font, text, textCase, scaleX, scaleY, depth, profile, roundConvex, bezier, letterSpacing, lineHeight, align, underline, strike, sideColor, backColor, offset, curveSegments, simplify, profileSegments, warpShape, warpAmount, front, fillType, backFill, backTex, sideFill, sideTex, outlineOn, outlineColor, outlineWidth, layered]);
+  }, [font, text, textCase, depth, profile, roundConvex, bezier, letterSpacing, lineHeight, align, underline, strike, sideColor, backColor, offset, curveSegments, simplify, profileSegments, warpShape, warpAmount, front, fillType, backFill, backTex, sideFill, sideTex, outlineOn, outlineColor, outlineWidth, layered]);
 
   // Live "dynamic-mode" preview for the affine sliders (scale X/Y, depth): while
   // dragging, we don't recompute geometry — we set a CSS scale3d on the mesh
@@ -542,6 +547,8 @@ export function WordArtWorkbench() {
         polygons={polygons}
         preview={preview}
         onFrameReady={() => setPreview((p) => (p.sx === 1 && p.sy === 1 && p.sz === 1) ? p : { sx: 1, sy: 1, sz: 1 })}
+        scaleXFrac={scaleX / 100}
+        scaleYFrac={scaleY / 100}
         zoomScale={zoomScale}
         setZoomScale={setZoomScale}
         perspective={perspective}
@@ -631,6 +638,8 @@ interface StageProps {
   polygons: Polygon[];
   preview: { sx: number; sy: number; sz: number };
   onFrameReady: () => void;
+  scaleXFrac: number;
+  scaleYFrac: number;
   zoomScale: number;
   setZoomScale: (updater: (prev: number) => number) => void;
   perspective: boolean;
@@ -647,7 +656,7 @@ interface StageProps {
  * in this small component means only the camera/scene/mesh re-render per frame,
  * not the parent's controls + 2000-option font datalist (which tanked FPS).
  */
-function Stage({ polygons, preview, onFrameReady, zoomScale, setZoomScale, perspective, lightDir, lightIntensity, lightColor, ambient, spin, status }: StageProps) {
+function Stage({ polygons, preview, onFrameReady, scaleXFrac, scaleYFrac, zoomScale, setZoomScale, perspective, lightDir, lightIntensity, lightColor, ambient, spin, status }: StageProps) {
   const stageRef = useRef<HTMLDivElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const [stage, setStage] = useState({ w: 900, h: 600 });
@@ -664,10 +673,16 @@ function Stage({ polygons, preview, onFrameReady, zoomScale, setZoomScale, persp
   // innermost (applied to the geometry) then rotate/tilt.
   const previewRef = useRef(preview);
   previewRef.current = preview;
+  // Live scale read from a ref so the spin raf's captured applyRotation still
+  // sees the latest value (otherwise scaling while spinning would be clobbered).
+  const scaleRef = useRef({ x: scaleXFrac, y: scaleYFrac });
+  scaleRef.current = { x: scaleXFrac, y: scaleYFrac };
   const applyRotation = () => {
     const el = wrapRef.current;
     const p = previewRef.current;
-    if (el) el.style.transform = `rotateX(${tiltRef.current}deg) rotateY(${spinRef.current}deg) scale3d(${p.sx}, ${p.sy}, ${p.sz})`;
+    const s = scaleRef.current;
+    // Scale X/Y are live CSS; depth uses the preview sz.
+    if (el) el.style.transform = `rotateX(${tiltRef.current}deg) rotateY(${spinRef.current}deg) scale3d(${s.x}, ${s.y}, ${p.sz})`;
   };
   useLayoutEffect(applyRotation); // re-assert after any re-render (preview / new geometry)
 
@@ -723,7 +738,7 @@ function Stage({ polygons, preview, onFrameReady, zoomScale, setZoomScale, persp
     setZoomScale((z) => Math.max(0.1, Math.min(6, z * factor)));
   };
 
-  const zoom = fitZoom(polygons, stage.w, stage.h) * zoomScale;
+  const zoom = fitZoom(polygons, stage.w, stage.h, scaleXFrac, scaleYFrac) * zoomScale;
   const Cam = perspective ? PolyPerspectiveCamera : PolyOrthographicCamera;
 
   return (
@@ -935,8 +950,9 @@ function GuiPanel({ id, className = "", values, set, onPreviewAxis, bezier, onBe
     c.depth = layout.add(cfg, "depth", 2, 80, 1).name("Depth").onChange(previewAxis("depth", "sz")).onFinishChange(bake("depth"));
     c.letterSpacing = layout.add(cfg, "letterSpacing", -20, 60, 1).name("Letter spacing").onFinishChange(on("letterSpacing"));
     c.lineHeight = layout.add(cfg, "lineHeight", 0.8, 2.5, 0.05).name("Line height").onFinishChange(on("lineHeight"));
-    c.scaleX = layout.add(cfg, "scaleX", 40, 200, 1).name("Scale X").onChange(previewAxis("scaleX", "sx")).onFinishChange(bake("scaleX"));
-    c.scaleY = layout.add(cfg, "scaleY", 40, 200, 1).name("Scale Y").onChange(previewAxis("scaleY", "sy")).onFinishChange(bake("scaleY"));
+    // Scale X/Y just update state → a live CSS wrapper transform (no recompute).
+    c.scaleX = layout.add(cfg, "scaleX", 40, 200, 1).name("Scale X").onChange(on("scaleX"));
+    c.scaleY = layout.add(cfg, "scaleY", 40, 200, 1).name("Scale Y").onChange(on("scaleY"));
     c.curveSegments = layout.add(cfg, "curveSegments", 1, 12, 1).name("Curve segments").onFinishChange(on("curveSegments"));
     c.simplify = layout.add(cfg, "simplify", 0, 8, 0.5).name("Simplify").onFinishChange(on("simplify"));
     c.profileSegments = layout.add(cfg, "profileSegments", 2, 10, 1).name("Edge segments").onFinishChange(on("profileSegments"));
