@@ -109,7 +109,9 @@ describe("syncShadowPaths", () => {
   it("withStroke adds stroke-width/linejoin", () => {
     const svg = document.createElementNS(SVG_NS, "svg");
     const [p] = syncShadowPaths(svg, document, 1, true);
-    expect(p!.getAttribute("stroke-width")).toBe("2");
+    // 1 px is enough to close sub-pixel clip-precision gaps between
+    // adjacent receiver-face shadow paths when stroke matches fill.
+    expect(p!.getAttribute("stroke-width")).toBe("1");
     expect(p!.getAttribute("stroke-linejoin")).toBe("round");
   });
   it("shrinks the path list by removing trailing children", () => {

@@ -116,7 +116,11 @@ export function syncShadowPaths(
       path = doc.createElementNS(SVG_NS, "path");
       path.setAttribute("fill-rule", "nonzero");
       if (withStroke) {
-        path.setAttribute("stroke-width", "2");
+        // 1 px stroke is enough to close sub-pixel gaps from float
+        // precision at clip boundaries without overshooting visibly.
+        // Callers must set `stroke` to the same value as `fill` for the
+        // bleed to composite seamlessly — see receiverShadow.ts.
+        path.setAttribute("stroke-width", "1");
         path.setAttribute("stroke-linejoin", "round");
       }
       svg.insertBefore(path, existing);

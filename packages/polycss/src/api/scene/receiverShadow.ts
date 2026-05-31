@@ -488,8 +488,16 @@ export function emitReceiverShadows(
     // intra-mesh overlap. `data-poly-shadow-caster-polys` is a JSON array
     // of source polygon indices so DevTools can map subpath N back to
     // polygon `subPolygonIndices[N]`.
+    // withStroke:true + same-color stroke composites seamlessly with the
+    // fill (no visible boundary, just a 1-px outward bleed). Closes the
+    // hairline gaps between adjacent receiver-face shadow paths that the
+    // Sutherland-Hodgman clip leaves due to float-precision at shared
+    // edges. The "visible outlines on degenerate slivers" the original
+    // syncShadowPaths comment warned about only happened with a
+    // contrasting stroke color — when stroke matches fill, slivers
+    // become invisible 1-px-wider versions of themselves.
     const contributingCasters = [...clippedByCaster.values()];
-    const paths = syncShadowPaths(svg, ctx.doc, contributingCasters.length, /*withStroke*/ false);
+    const paths = syncShadowPaths(svg, ctx.doc, contributingCasters.length, /*withStroke*/ true);
     const casterIds = contributingCasters.map((c) => meshShadowId(c.caster));
     for (let i = 0; i < contributingCasters.length; i++) {
       const entry = contributingCasters[i]!;
@@ -504,6 +512,8 @@ export function emitReceiverShadows(
       const path = paths[i]!;
       path.setAttribute("d", d);
       if (path.getAttribute("fill") !== fillColor) path.setAttribute("fill", fillColor);
+      // Match stroke to fill so the seam-closing bleed is invisible.
+      if (path.getAttribute("stroke") !== fillColor) path.setAttribute("stroke", fillColor);
       if (path.getAttribute("opacity") !== opStr) path.setAttribute("opacity", opStr);
       const casterId = casterIds[i]!;
       if (path.getAttribute("data-poly-shadow-caster") !== casterId) {
