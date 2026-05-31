@@ -22,7 +22,6 @@
 import type {
   ParseResult,
   Polygon,
-  PolyTextureLightingMode,
   Vec3,
   CameraCullNormalGroup,
   CameraCullRotation,
@@ -49,11 +48,9 @@ import {
   isVoxelCameraCullableNormalGroups,
   normalFacesCamera,
   optimizeMeshPolygons,
-  parseHex,
   parseHexColor,
   polygonCssSurfaceNormal,
   projectCssVertexToGround,
-  parsePureColor,
   shadePolygon,
 } from "@layoutit/polycss-core";
 import {
@@ -67,10 +64,8 @@ import {
   type RenderedPoly,
   type SolidPaintDefaults,
 } from "../render/textureAtlas";
-import { applySolidPaint } from "../render/atlas/paintDefaults";
 import {
   applyPolygonDataAttrs,
-  shadedSolidPlanForNormal,
 } from "../render/atlas/emit";
 import {
   createPolyVoxelRenderer,
@@ -98,6 +93,17 @@ import {
   meshScaleVec3,
   worldCssForMesh,
 } from "./scene/shadowGeometry";
+import {
+  BAKED_SOLID_PREVIEW_ACTIVE_VAR,
+  applyBakedSolidColor,
+  applyBakedSolidPreviewPaint,
+  applyDynamicColorVars,
+  applyDynamicLightVars,
+  applyLightingVars,
+  applySolidPaintVars,
+  clearLightingVars,
+  setStylePropertyIfChanged,
+} from "./scene/lightingVars";
 import type {
   InternalPolyMeshHandle,
   InternalSetPolygonsOptions,
@@ -121,23 +127,6 @@ export type {
 // without changing the synchronous public setPolygons() contract.
 const ASYNC_MOUNT_BATCH_SIZE = 750;
 const DEFAULT_SCENE_PERSPECTIVE = 32000;
-const BAKED_SOLID_PREVIEW_ACTIVE_VAR = "--polycss-light-preview-active";
-const BAKED_SOLID_PREVIEW_ACTIVE = `var(${BAKED_SOLID_PREVIEW_ACTIVE_VAR}, 0)`;
-const BAKED_SOLID_PREVIEW_LAMBERT =
-  "max(0, calc(var(--pnx, 0) * var(--plx, 0) + var(--pny, 0) * var(--ply, 0) + var(--pnz, 1) * var(--plz, 1)))";
-const BAKED_SOLID_PREVIEW_R =
-  "calc(255 * var(--psr, 1) * (var(--par, 1) * var(--pai, 0.4) + var(--plr, 1) * var(--pli, 1) * var(--plam, 0)))";
-const BAKED_SOLID_PREVIEW_G =
-  "calc(255 * var(--psg, 1) * (var(--pag, 1) * var(--pai, 0.4) + var(--plg, 1) * var(--pli, 1) * var(--plam, 0)))";
-const BAKED_SOLID_PREVIEW_B =
-  "calc(255 * var(--psb, 1) * (var(--pab, 1) * var(--pai, 0.4) + var(--plb, 1) * var(--pli, 1) * var(--plam, 0)))";
-const LIGHTING_VAR_NAMES = [
-  "--plx", "--ply", "--plz",
-  "--plr", "--plg", "--plb", "--pli",
-  "--par", "--pag", "--pab", "--pai",
-  "--clx", "--cly", "--clz",
-] as const;
-
 function normalizeSceneOptions<T extends Partial<Omit<PolySceneOptions, "camera">>>(options: T): T {
   if (!Object.prototype.hasOwnProperty.call(options, "seamBleed") || options.seamBleed !== undefined) {
     return options;
@@ -544,69 +533,6 @@ export function createPolyScene(
   // in the same frame there; the shadow projection works against 3D positions
   // that have already been through the axis swap, so it needs the light in
   // that same swapped frame.
-  function clearLightingVars(el: HTMLElement): void {
-    for (const v of LIGHTING_VAR_NAMES) {
-      if (el.style.getPropertyValue(v)) el.style.removeProperty(v);
-    }
-  }
-
-  function setStylePropertyIfChanged(el: HTMLElement, name: string, value: string): boolean {
-    if (el.style.getPropertyValue(name) === value) return false;
-    el.style.setProperty(name, value);
-    return true;
-  }
-
-  function applyLightingVars(el: HTMLElement, opts: Omit<PolySceneOptions, "camera">): void {
-    // opts.directionalLight.direction is user-frame; --plx/--ply/--plz drive
-    // the same CSS-frame Lambert dot product the static path uses, so convert
-    // at this boundary. --clx/--cly/--clz fall out of the same components
-    // (the CSS shadow-projection matrix in styles.ts is written against this
-    // CSS-frame convention).
-    const userDir = opts.directionalLight?.direction ?? [0.4, -0.7, 0.59];
-    const dir = worldDirectionToCss(userDir as Vec3);
-    const len = Math.hypot(dir[0], dir[1], dir[2]) || 1;
-    const lx = dir[0] / len, ly = dir[1] / len, lz = dir[2] / len;
-    const lightRgb = parseHexColor(opts.directionalLight?.color ?? "#ffffff")?.rgb ?? [255, 255, 255];
-    const ambRgb = parseHexColor(opts.ambientLight?.color ?? "#ffffff")?.rgb ?? [255, 255, 255];
-    const lightIntensity = opts.directionalLight?.intensity ?? 1;
-    const ambientIntensity = opts.ambientLight?.intensity ?? 0.4;
-    const ch = (n: number) => (n / 255).toFixed(4);
-    setStylePropertyIfChanged(el, "--plx", lx.toFixed(4));
-    setStylePropertyIfChanged(el, "--ply", ly.toFixed(4));
-    setStylePropertyIfChanged(el, "--plz", lz.toFixed(4));
-    setStylePropertyIfChanged(el, "--plr", ch(lightRgb[0]));
-    setStylePropertyIfChanged(el, "--plg", ch(lightRgb[1]));
-    setStylePropertyIfChanged(el, "--plb", ch(lightRgb[2]));
-    setStylePropertyIfChanged(el, "--pli", lightIntensity.toFixed(4));
-    setStylePropertyIfChanged(el, "--par", ch(ambRgb[0]));
-    setStylePropertyIfChanged(el, "--pag", ch(ambRgb[1]));
-    setStylePropertyIfChanged(el, "--pab", ch(ambRgb[2]));
-    setStylePropertyIfChanged(el, "--pai", ambientIntensity.toFixed(4));
-    // Light direction vars for the shadow projection. These match the
-    // axis convention used by Lambert (`--plx/--ply/--plz`) where the
-    // X and Y component naming follows the user-facing light direction
-    // vector directly (NO world→CSS axis swap). The shadow projection
-    // matrix in styles.ts is written against this same convention.
-    // Clamp clz away from zero — shadow projection divides by clz (the
-    // up-axis component), so a near-horizontal light would project
-    // shadows to infinity.
-    const rawClz = lz;
-    const clz = Math.sign(rawClz || 1) * Math.max(Math.abs(rawClz), 0.01);
-    setStylePropertyIfChanged(el, "--clx", lx.toFixed(4));
-    setStylePropertyIfChanged(el, "--cly", ly.toFixed(4));
-    setStylePropertyIfChanged(el, "--clz", clz.toFixed(4));
-  }
-
-  function applyDynamicLightVars(el: HTMLElement, opts: Omit<PolySceneOptions, "camera">): void {
-    const dynamic = opts.textureLighting === "dynamic";
-    el.dataset.polycssLighting = opts.textureLighting ?? "baked";
-    if (!dynamic) {
-      clearLightingVars(el);
-      return;
-    }
-    applyLightingVars(el, opts);
-  }
-
   function clearRendered(entry: MeshEntry): void {
     entry.voxelRenderer?.dispose();
     entry.voxelRenderer = undefined;
@@ -1047,112 +973,13 @@ export function createPolyScene(
     entry.lightOverrideSignature = signature;
   }
 
-  function applySolidPaintVars(wrapper: HTMLDivElement, defaults: SolidPaintDefaults): void {
-    if (defaults.paintColor) {
-      wrapper.style.setProperty("--polycss-paint", defaults.paintColor);
-    } else if (wrapper.style.getPropertyValue("--polycss-paint")) {
-      wrapper.style.removeProperty("--polycss-paint");
-    }
-
-    if (defaults.dynamicColor) {
-      wrapper.style.setProperty("--psr", (defaults.dynamicColor.r / 255).toFixed(4));
-      wrapper.style.setProperty("--psg", (defaults.dynamicColor.g / 255).toFixed(4));
-      wrapper.style.setProperty("--psb", (defaults.dynamicColor.b / 255).toFixed(4));
-    } else if (
-      wrapper.style.getPropertyValue("--psr") ||
-      wrapper.style.getPropertyValue("--psg") ||
-      wrapper.style.getPropertyValue("--psb")
-    ) {
-      wrapper.style.removeProperty("--psr");
-      wrapper.style.removeProperty("--psg");
-      wrapper.style.removeProperty("--psb");
-    }
-  }
-
-  function applyDynamicColorVars(el: HTMLElement, color: string | undefined): void {
-    const rgb = parseHex(color ?? "#cccccc");
-    el.style.setProperty("--psr", (rgb.r / 255).toFixed(4));
-    el.style.setProperty("--psg", (rgb.g / 255).toFixed(4));
-    el.style.setProperty("--psb", (rgb.b / 255).toFixed(4));
-  }
-
-  function applyBakedSolidColor(item: RenderedPoly, polygon: Polygon): boolean {
-    if (!item.plan || item.kind === "atlas" || item.plan.texture) return false;
-    const textureLighting: PolyTextureLightingMode = currentOptions.textureLighting ?? "baked";
-    const renderOptions = {
-      directionalLight: worldDirectionalLightToCss(currentOptions.directionalLight),
-      ambientLight: currentOptions.ambientLight,
-      textureLighting,
-      textureQuality: currentOptions.textureQuality,
-      seamBleed: currentOptions.seamBleed,
-      strategies: currentOptions.strategies,
-    };
-    const shaded = shadedSolidPlanForNormal(
-      item.plan,
-      polygon,
-      item.plan.normal,
-      textureLighting,
-      renderOptions,
-    );
-    applySolidPaint(item.element, shaded, textureLighting);
-    if (textureLighting === "baked") clearBakedSolidPreviewPaintVars(item.element);
-    return true;
-  }
-
-  function bakedSolidPreviewPaintColor(bakedColor: string): string {
-    const parsed = parsePureColor(bakedColor) ?? { rgb: [255, 255, 255] as [number, number, number], alpha: 1 };
-    const [r, g, b] = parsed.rgb;
-    const mix = (baked: number, previewVar: string) =>
-      `calc(${baked} * (1 - ${BAKED_SOLID_PREVIEW_ACTIVE}) + var(${previewVar}, ${baked}) * ${BAKED_SOLID_PREVIEW_ACTIVE})`;
-    const alpha = parsed.alpha < 1 ? ` / ${parsed.alpha}` : "";
-    return `rgb(${mix(r, "--polycss-preview-r")} ${mix(g, "--polycss-preview-g")} ${mix(b, "--polycss-preview-b")}${alpha})`;
-  }
-
-  function applyBakedSolidPreviewPaint(item: RenderedPoly, polygon: Polygon, bakedColor: string): boolean {
-    if (!item.plan || item.kind === "atlas" || item.plan.texture) return false;
-    const el = item.element;
-    const normal = item.plan.normal;
-    const rgb = parseHex(polygon.color ?? "#cccccc");
-    let changed = false;
-    changed = setStylePropertyIfChanged(el, "--pnx", normal[0].toFixed(4)) || changed;
-    changed = setStylePropertyIfChanged(el, "--pny", normal[1].toFixed(4)) || changed;
-    changed = setStylePropertyIfChanged(el, "--pnz", normal[2].toFixed(4)) || changed;
-    changed = setStylePropertyIfChanged(el, "--psr", (rgb.r / 255).toFixed(4)) || changed;
-    changed = setStylePropertyIfChanged(el, "--psg", (rgb.g / 255).toFixed(4)) || changed;
-    changed = setStylePropertyIfChanged(el, "--psb", (rgb.b / 255).toFixed(4)) || changed;
-    changed = setStylePropertyIfChanged(el, "--plam", BAKED_SOLID_PREVIEW_LAMBERT) || changed;
-    changed = setStylePropertyIfChanged(el, "--polycss-preview-r", BAKED_SOLID_PREVIEW_R) || changed;
-    changed = setStylePropertyIfChanged(el, "--polycss-preview-g", BAKED_SOLID_PREVIEW_G) || changed;
-    changed = setStylePropertyIfChanged(el, "--polycss-preview-b", BAKED_SOLID_PREVIEW_B) || changed;
-    changed = setStylePropertyIfChanged(el, "--polycss-paint", bakedSolidPreviewPaintColor(bakedColor)) || changed;
-    if (el.style.getPropertyValue("color")) {
-      el.style.removeProperty("color");
-      changed = true;
-    }
-    return changed;
-  }
-
-  function clearBakedSolidPreviewPaintVars(el: HTMLElement): void {
-    el.style.removeProperty("--pnx");
-    el.style.removeProperty("--pny");
-    el.style.removeProperty("--pnz");
-    el.style.removeProperty("--psr");
-    el.style.removeProperty("--psg");
-    el.style.removeProperty("--psb");
-    el.style.removeProperty("--plam");
-    el.style.removeProperty("--polycss-preview-r");
-    el.style.removeProperty("--polycss-preview-g");
-    el.style.removeProperty("--polycss-preview-b");
-    el.style.removeProperty("--polycss-paint");
-  }
-
   function restoreBakedSolidPaint(entry: MeshEntry): boolean {
     let changed = false;
     for (const item of entry.rendered) {
       if (!item.plan || item.kind === "atlas" || item.plan.texture) continue;
       const polygon = entry.polygons[item.polygonIndex];
       if (!polygon) continue;
-      changed = applyBakedSolidColor(item, polygon) || changed;
+      changed = applyBakedSolidColor(item, polygon, currentOptions) || changed;
     }
     entry.solidLightingPreviewPrepared = false;
     entry.solidLightingPreviewActive = false;
@@ -1271,7 +1098,7 @@ export function createPolyScene(
       return true;
     }
     if (textureLighting === "baked") {
-      return applyBakedSolidColor(item, polygon);
+      return applyBakedSolidColor(item, polygon, currentOptions);
     }
     return false;
   }
