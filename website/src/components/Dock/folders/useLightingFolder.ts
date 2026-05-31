@@ -65,8 +65,15 @@ export function useLightingFolder(parent: GUI | null, inputs: LightingFolderInpu
       ...(value ? { showGround: true } : null),
     }),
   );
+  // Self-shadow without Cast shadow is a no-op (you need a caster to
+  // throw shadows on the mesh's own faces). Auto-enable Cast shadow +
+  // Show ground when the user flips Self-shadow on, mirroring the
+  // Cast shadow toggle's "also enable ground" affordance above.
   useToggle(folder, "Self-shadow", selfShadow, (value) =>
-    onUpdateScene({ selfShadow: value }),
+    onUpdateScene({
+      selfShadow: value,
+      ...(value ? { castShadow: true, showGround: true } : null),
+    }),
   );
   useSlider(
     folder,
