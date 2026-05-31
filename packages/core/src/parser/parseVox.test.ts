@@ -32,15 +32,20 @@ function buildVoxBuffer(
   size: [number, number, number],
   voxels: VoxelInput[],
   palette?: [number, number, number, number][], // 256 RGBA entries
+  extraChunks: Array<{ id: string; content?: number[] }> = [],
 ): ArrayBuffer {
   // SIZE chunk: 12 header + 12 content
   const sizeChunkBytes = 12 + 12;
   // XYZI chunk: 12 header + 4 (count) + voxels.length * 4
   const xyziChunkBytes = 12 + 4 + voxels.length * 4;
+  const extraChunkBytes = extraChunks.reduce(
+    (sum, chunk) => sum + 12 + (chunk.content?.length ?? 0),
+    0,
+  );
   // RGBA chunk: 12 header + 256 * 4 = 12 + 1024
   const rgbaChunkBytes = palette ? 12 + 1024 : 0;
 
-  const childrenSize = sizeChunkBytes + xyziChunkBytes + rgbaChunkBytes;
+  const childrenSize = sizeChunkBytes + xyziChunkBytes + extraChunkBytes + rgbaChunkBytes;
   // total = 8 (header) + 12 (MAIN) + childrenSize
   const totalBytes = 8 + 12 + childrenSize;
 
@@ -83,6 +88,14 @@ function buildVoxBuffer(
     writeU8(v.y);
     writeU8(v.z);
     writeU8(v.colorIndex);
+  }
+
+  for (const chunk of extraChunks) {
+    const content = chunk.content ?? [];
+    writeId(chunk.id);
+    writeU32(content.length);
+    writeU32(0);
+    for (const byte of content) writeU8(byte);
   }
 
   // RGBA chunk (optional)
@@ -335,8 +348,25 @@ describe("parseVox — minimal synthetic buffer", () => {
     );
     const result = parseVox(buf, { targetSize: 70, gridShift: 0 });
     expect(result.voxelSource?.scale).toBe(0.88);
-    const xs = result.polygons.flatMap((p) => p.vertices.map((v) => v[0]));
-    expect(Math.max(...xs) - Math.min(...xs)).toBeCloseTo(70.4, 3);
+    const ys = result.polygons.flatMap((p) => p.vertices.map((v) => v[1]));
+    expect(Math.max(...ys) - Math.min(...ys)).toBeCloseTo(70.4, 3);
+  });
+
+  it("maps MagicaVoxel front (-Y) to PolyCSS +X", () => {
+    const buf = buildVoxBuffer(
+      [1, 2, 1],
+      [
+        { x: 0, y: 0, z: 0, colorIndex: 1 },
+        { x: 0, y: 1, z: 0, colorIndex: 37 },
+      ],
+    );
+    const result = parseVox(buf, { targetSize: 2, gridShift: 0 });
+    expect(result.voxelSource?.cells).toEqual([
+      { x: 1, y: 0, z: 0, color: "#ffffff" },
+      { x: 0, y: 0, z: 0, color: "#ccffff" },
+    ]);
+    expect(result.voxelSource?.rows).toBe(2);
+    expect(result.voxelSource?.cols).toBe(1);
   });
 
   it("two adjacent voxels share one face — greedy-meshed to 6 polys", () => {
@@ -658,6 +688,25 @@ describe("parseVox — empty and malformed input", () => {
     const result = parseVox(buf);
     expect(result.polygons).toEqual([]);
     expect(result.warnings).toEqual([]);
+  });
+
+  it("warns when MagicaVoxel scene-graph chunks are flattened", () => {
+    const buf = buildVoxBuffer(
+      [1, 1, 1],
+      [{ x: 0, y: 0, z: 0, colorIndex: 1 }],
+      undefined,
+      [
+        { id: "nTRN" },
+        { id: "nSHP" },
+      ],
+    );
+
+    const result = parseVox(buf);
+
+    expect(result.polygons.length).toBe(6);
+    expect(result.warnings).toEqual([
+      "Skipped MagicaVoxel scene graph transforms; models were flattened into one grid",
+    ]);
   });
 
   it("dispose() is idempotent on empty result", () => {

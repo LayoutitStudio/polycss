@@ -1,6 +1,6 @@
 /**
  * useMesh — fetch + parse a mesh URL into a polygon list, with race-safe
- * blob-URL lifecycle. Per §API freeze and §Phase 4.3g.
+ * blob-URL lifecycle.
  *
  * Each `src` change:
  *   1. Aborts any in-flight fetch (no race — late responses are dropped).

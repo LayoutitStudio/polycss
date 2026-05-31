@@ -47,7 +47,7 @@ Simple polygons are cheaper than textured or irregular polygons. The renderer us
 - Solid triangles and exact corner-shape solids use `<u>` leaves when supported.
 - Other supported solid clipped polygons use `<i>` leaves.
 - Textured polygons and fallbacks use atlas `<s>` leaves.
-- Dynamic shadows use `<q>` leaves only for meshes with `castShadow`.
+- Cast shadows use SVG shadow surfaces for meshes with `castShadow`; light changes reproject the path without atlas redraw.
 
 Use `collectPolyRenderStats(root)` to inspect the mounted leaf mix. For diagnostics, `strategies={{ disable: ["b", "i", "u"] }}` forces fallback atlas rendering so you can compare output or isolate browser compositor bugs.
 

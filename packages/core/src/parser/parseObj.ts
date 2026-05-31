@@ -79,6 +79,22 @@ const DEFAULT_PALETTE = [
   "#a855f7", "#06b6d4", "#f97316", "#ec4899",
 ];
 
+function logicalObjLines(text: string): string[] {
+  const out: string[] = [];
+  let pending = "";
+  for (const raw of text.split("\n")) {
+    const line = raw.endsWith("\r") ? raw.slice(0, -1) : raw;
+    if (line.endsWith("\\")) {
+      pending += `${line.slice(0, -1).trimEnd()} `;
+      continue;
+    }
+    out.push(pending + line);
+    pending = "";
+  }
+  if (pending) out.push(pending.trimEnd());
+  return out;
+}
+
 export function parseObj(text: string, options?: ObjParseOptions): ParseResult {
   const targetSize = options?.targetSize ?? 60;
   const gridShift = options?.gridShift ?? 1;
@@ -92,6 +108,8 @@ export function parseObj(text: string, options?: ObjParseOptions): ParseResult {
   const rawFaces: { idx: number[]; uvIdx: (number | null)[]; color: string; texture: string | undefined }[] = [];
   const materialOrder: string[] = [];
   const materialColor = new Map<string, string>();
+  const warnings: string[] = [];
+  const warningKeys = new Set<string>();
   let currentColor = defaultColor;
   let currentTexture: string | undefined = undefined;
 
@@ -115,13 +133,19 @@ export function parseObj(text: string, options?: ObjParseOptions): ParseResult {
     return materialColor.get(name)!;
   };
 
+  const pushWarningOnce = (key: string, warning: string): void => {
+    if (warningKeys.has(key)) return;
+    warningKeys.add(key);
+    warnings.push(warning);
+  };
+
   const resolveIndex = (rawIndex: string, length: number): number => {
     const index = parseInt(rawIndex, 10);
     if (!Number.isFinite(index)) return NaN;
     return index < 0 ? length + index : index - 1;
   };
 
-  const lines = text.split("\n");
+  const lines = logicalObjLines(text);
   for (const raw of lines) {
     if (raw.length === 0 || raw.charCodeAt(0) === 35) continue; // skip "" and "#"
     if (raw.startsWith("v ")) {
@@ -136,6 +160,20 @@ export function parseObj(text: string, options?: ObjParseOptions): ParseResult {
       const matName = raw.trim().split(/\s+/)[1];
       currentColor = colorFor(matName);
       currentTexture = materialTextures[matName];
+    } else if (raw.startsWith("p ")) {
+      if (objectAllowed()) {
+        pushWarningOnce(
+          "unsupported-point-elements",
+          "Skipped OBJ point elements; PolyCSS only renders face polygons",
+        );
+      }
+    } else if (raw.startsWith("l ")) {
+      if (objectAllowed()) {
+        pushWarningOnce(
+          "unsupported-line-elements",
+          "Skipped OBJ line elements; PolyCSS only renders face polygons",
+        );
+      }
     } else if (raw.startsWith("f ")) {
       if (!objectAllowed()) continue;
       const parts = raw.trim().split(/\s+/).slice(1);
@@ -157,7 +195,7 @@ export function parseObj(text: string, options?: ObjParseOptions): ParseResult {
   }
 
   if (verts.length === 0 || rawFaces.length === 0) {
-    return makeEmptyResult(materialOrder, text.length);
+    return makeEmptyResult(materialOrder, text.length, warnings);
   }
 
   // Bounding box — only count vertices actually referenced by surviving
@@ -225,7 +263,7 @@ export function parseObj(text: string, options?: ObjParseOptions): ParseResult {
     polygons,
     objectUrls: [],
     dispose: () => { /* no-op: parseObj has no minted blob URLs */ },
-    warnings: [],
+    warnings,
     metadata: {
       triangleCount: polygons.length,
       materials: materialOrder,
@@ -234,12 +272,12 @@ export function parseObj(text: string, options?: ObjParseOptions): ParseResult {
   };
 }
 
-function makeEmptyResult(materials: string[], sourceBytes: number): ParseResult {
+function makeEmptyResult(materials: string[], sourceBytes: number, warnings: string[] = []): ParseResult {
   return {
     polygons: [],
     objectUrls: [],
     dispose: () => { /* no-op */ },
-    warnings: [],
+    warnings,
     metadata: {
       triangleCount: 0,
       materials,

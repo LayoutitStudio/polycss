@@ -103,6 +103,7 @@ export default defineConfig({
           items: [
             { label: 'Headless API', slug: 'api/headless' },
             { label: 'Core Types', slug: 'api/types' },
+            { label: 'Fonts API', slug: 'api/fonts' },
           ],
         },
       ],

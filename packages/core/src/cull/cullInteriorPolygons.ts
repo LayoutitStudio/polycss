@@ -504,7 +504,7 @@ export function cullInteriorPolygons(
     const offY = RAY_ORIGIN_OFFSET * ny;
     const offZ = RAY_ORIGIN_OFFSET * nz;
 
-    // Phase 1 — cheap pre-test: cast a single ray along +normal.
+    // Step 1 — cheap pre-test: cast a single ray along +normal.
     {
       const ox1 = p.centroid[0] + offX;
       const oy1 = p.centroid[1] + offY;
@@ -514,7 +514,7 @@ export function cullInteriorPolygons(
       }
     }
 
-    // Phase 2 — multi-origin K-sample hemisphere test.
+    // Step 2 — multi-origin K-sample hemisphere test.
     const { ux, uy, uz, vx, vy, vz } = basis(p.normal);
     const cx0 = p.centroid[0], cy0 = p.centroid[1], cz0 = p.centroid[2];
     const verts = p.vertices;

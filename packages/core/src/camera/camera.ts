@@ -29,7 +29,7 @@ export type AutoRotateOption = boolean | number | AutoRotateConfig;
  * `distance` is the camera's pull-back from the target in CSS pixels.
  * Increasing distance moves the camera farther from the target along the
  * view axis (dolly out) — analogous to three.js's spherical radius.
- * Default 0 keeps the legacy behaviour unchanged.
+ * Default 0 keeps orthographic/isometric scenes flat.
  */
 export interface CameraState {
   target: Vec3;

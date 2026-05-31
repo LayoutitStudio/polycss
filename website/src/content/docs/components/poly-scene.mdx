@@ -13,6 +13,8 @@ It's available as a custom element (`<poly-scene>`), via the imperative `createP
 
 (React / Vue prop names use camelCase; the `<poly-scene>` custom element accepts the kebab-case form, e.g. `textureQuality` → `texture-quality`.)
 
+The React/Vue components and `createPolyScene()` support the full table. The `<poly-scene>` custom element supports `directional-*`, `ambient-*`, `texture-lighting`, `texture-quality`, `auto-center`, and implicit camera attributes; use the imperative API for options such as `shadow`, `seamBleed`, and `strategies` in vanilla.
+
 | Prop | Type | Default | Description |
 |------|------|---------|-------------|
 | `directionalLight` | `PolyDirectionalLight` | None | Directional light source. |
@@ -23,7 +25,7 @@ It's available as a custom element (`<poly-scene>`), via the imperative `createP
 | `strategies` | `{ disable?: ("b" \| "i" \| "u")[] }` | None | Diagnostic override for render strategy selection. Disabled solid strategies fall through to `<s>` atlas slices; `<s>` cannot be disabled. |
 | `autoCenter` | `boolean` | `false` | Rotate around the content bbox center instead of world origin. Polygon data is not mutated. |
 | `centerPolygons` | `Polygon[]` | None | (Framework only.) Bbox source for `autoCenter` when renderable polygons live inside child meshes. |
-| `shadow` | `{ color?, opacity?, lift? }` | `{ color:"#000000", opacity:0.25, lift:0.05 }` | Appearance for dynamic-lighting cast shadows emitted by meshes with `castShadow`. |
+| `shadow` | `{ color?, opacity?, lift?, maxExtend? }` | `{ color:"#000000", opacity:0.25, lift:0.05, maxExtend:2000 }` | Appearance and SVG extent cap for cast shadows emitted by meshes with `castShadow`. |
 | `polygons` | `Polygon[]` | None | (Framework only.) Flat array of polygon objects rendered as direct children. Composes with JSX/slot children. |
 | `children` | None | None | Meshes, polygons, controls, helpers, selection wrappers, and transform controls. |
 
@@ -31,7 +33,7 @@ It's available as a custom element (`<poly-scene>`), via the imperative `createP
 
 ## Mesh props / attributes
 
-(`<poly-mesh>` accepts the same fields as `<PolyMesh>`; kebab-case attributes map to camelCase props.)
+React/Vue `<PolyMesh>` supports the full table. The `<poly-mesh>` custom element currently supports `src`, `mtl`, `mesh-resolution`, `position`, `scale`, `rotation`, and `auto-center`; use `scene.add(result, opts)` for advanced vanilla mesh options such as `castShadow`.
 
 | Prop | Type | Description |
 |------|------|-------------|
@@ -43,14 +45,29 @@ It's available as a custom element (`<poly-scene>`), via the imperative `createP
 | `rotation` | `Vec3` | Euler rotation in degrees `[x, y, z]`. |
 | `textureLighting` | `"baked" \| "dynamic"` | Per-mesh lighting mode override. Defaults to the scene value. |
 | `textureQuality` | `number \| "auto"` | Atlas bitmap budget and compositor sprite size. React / Vue only; vanilla meshes inherit the scene's `texture-quality`. |
+| `seamBleed` | `number \| "auto"` | Per-mesh solid seam overscan. React / Vue only; vanilla meshes inherit the scene setting. |
+| `atomicAtlas` | `boolean` | Hold the previous atlas frame until the next frame is decoded, then swap atomically. React / Vue only. |
+| `onFrameReady` | `() => void` | Fires when an atomic atlas frame swaps to a ready one. React / Vue only. |
 | `autoCenter` | `boolean` | Shift the loaded mesh so its bounding-box center sits at the local origin before applying `position`. Useful when assets aren't centered in their file coordinates. |
 | `mtl` | `string` | Companion `.mtl` URL for OBJ models. |
 | `parseOptions` | `UseMeshOptions` | Parser options forwarded to `loadMesh`; `meshResolution` defaults to `"lossy"`. |
 | `meshResolution` | `"lossless" \| "lossy"` | Top-level optimizer intent. Wins over `parseOptions.meshResolution`; defaults to `"lossy"`. |
-| `castShadow` | `boolean` | Emit one `<q>` shadow leaf per non-duplicate polygon when the scene uses `textureLighting="dynamic"`. |
+| `castShadow` | `boolean` | Emit SVG cast shadows in both lighting modes; projections update when light, ground, or mesh geometry changes. |
 | `fallback` | `ReactNode` | Rendered while `src` is loading. (React / Vue only.) |
 | `errorFallback` | `(error: Error) => ReactNode` | Rendered if parse fails. (React / Vue only.) |
 | `children` | `(polygon, index) => ReactNode` | Per-polygon render prop / scoped slot. (React / Vue only.) |
+
+## Ground Props
+
+`PolyGround` is a React/Vue convenience component for a flat shadow-receiving plane.
+
+| Prop | Type | Default | Description |
+|------|------|---------|-------------|
+| `size` | `number` | `6` | Side length in world units. |
+| `z` | `number` | `0` | World-space floor height. |
+| `center` | `[number, number]` | `[0,0]` | Ground center in world X/Y. |
+| `color` | `string` | `"#7d848e"` | Ground fill color. |
+| `className` / `class` | `string` | None | Additional CSS class. |
 
 ## PolyDirectionalLight
 
@@ -66,6 +83,15 @@ interface PolyAmbientLight {
   intensity?: number;                   // Ambient intensity (default: 0.4)
 }
 ```
+
+## Scene Helpers
+
+Helpers render as ordinary scene children and are available in vanilla custom elements plus React/Vue components.
+
+| Helper | Props | Description |
+|--------|-------|-------------|
+| `<poly-axes-helper>` / `PolyAxesHelper` | `size`, `thickness`, `negative`, `xColor`, `yColor`, `zColor` | Draws red/green/blue world axes from the origin. |
+| `<poly-directional-light-helper>` / `PolyDirectionalLightHelper` | React/Vue: `light`, `target`, `distance`, `size`, `color`. Vanilla: `direction`, `target`, `distance`, `size`, `color`. | Draws a small marker along a directional light vector. |
 
 ## Usage
 
@@ -133,9 +159,9 @@ import { PolyPerspectiveCamera, PolyScene, PolyTorus, PolyBox } from "@layoutit/
 </PolyPerspectiveCamera>
 ```
 
-### Dynamic Shadows
+### Cast Shadows
 
-Shadows are CSS-projected leaves. They are emitted only in dynamic lighting mode.
+Shadows are SVG-projected surfaces. They work in both lighting modes; `textureLighting` controls surface shading, while shadow geometry reprojects when the light or scene geometry changes.
 
 ```tsx
 import { PolyCamera, PolyScene, PolyGround, PolyMesh } from "@layoutit/polycss-react";

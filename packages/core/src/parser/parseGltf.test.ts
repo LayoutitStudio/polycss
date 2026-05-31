@@ -900,71 +900,74 @@ describe("parseGltf", () => {
       expect(result.warnings.some((warning) => warning.includes("KHR_draco_mesh_compression"))).toBe(true);
     });
 
-    it("skips required meshopt-compressed bufferView primitives before reading extension fallback buffers", () => {
-      const doc = {
-        asset: { version: "2.0" },
-        extensionsRequired: ["EXT_meshopt_compression"],
-        scene: 0,
-        scenes: [{ nodes: [0] }],
-        nodes: [{ mesh: 0 }],
-        meshes: [{
-          name: "MeshoptCompressed",
-          primitives: [{
-            attributes: { POSITION: 0 },
-            indices: 1,
-            mode: 4,
+    it.each(["EXT_meshopt_compression", "KHR_meshopt_compression"])(
+      "skips required %s bufferView primitives before reading extension fallback buffers",
+      (extensionName) => {
+        const doc = {
+          asset: { version: "2.0" },
+          extensionsRequired: [extensionName],
+          scene: 0,
+          scenes: [{ nodes: [0] }],
+          nodes: [{ mesh: 0 }],
+          meshes: [{
+            name: "MeshoptCompressed",
+            primitives: [{
+              attributes: { POSITION: 0 },
+              indices: 1,
+              mode: 4,
+            }],
           }],
-        }],
-        accessors: [
-          { bufferView: 0, componentType: 5126, count: 3, type: "VEC3" },
-          { bufferView: 1, componentType: 5123, count: 3, type: "SCALAR" },
-        ],
-        bufferViews: [
-          {
-            buffer: 1,
-            byteOffset: 0,
-            byteLength: 36,
-            byteStride: 12,
-            extensions: {
-              EXT_meshopt_compression: {
-                buffer: 0,
-                byteOffset: 0,
-                byteLength: 4,
-                byteStride: 12,
-                mode: "ATTRIBUTES",
-                count: 3,
+          accessors: [
+            { bufferView: 0, componentType: 5126, count: 3, type: "VEC3" },
+            { bufferView: 1, componentType: 5123, count: 3, type: "SCALAR" },
+          ],
+          bufferViews: [
+            {
+              buffer: 1,
+              byteOffset: 0,
+              byteLength: 36,
+              byteStride: 12,
+              extensions: {
+                [extensionName]: {
+                  buffer: 0,
+                  byteOffset: 0,
+                  byteLength: 4,
+                  byteStride: 12,
+                  mode: "ATTRIBUTES",
+                  count: 3,
+                },
               },
             },
-          },
-          {
-            buffer: 1,
-            byteOffset: 36,
-            byteLength: 6,
-            extensions: {
-              EXT_meshopt_compression: {
-                buffer: 0,
-                byteOffset: 0,
-                byteLength: 4,
-                byteStride: 2,
-                mode: "TRIANGLES",
-                count: 3,
+            {
+              buffer: 1,
+              byteOffset: 36,
+              byteLength: 6,
+              extensions: {
+                [extensionName]: {
+                  buffer: 0,
+                  byteOffset: 0,
+                  byteLength: 4,
+                  byteStride: 2,
+                  mode: "TRIANGLES",
+                  count: 3,
+                },
               },
             },
-          },
-        ],
-        buffers: [
-          { byteLength: 4 },
-          {
-            byteLength: 42,
-            extensions: { EXT_meshopt_compression: { fallback: true } },
-          },
-        ],
-      };
-      const result = parseGltf(buildGlb({ doc, binData: new Uint8Array(4) }));
+          ],
+          buffers: [
+            { byteLength: 4 },
+            {
+              byteLength: 42,
+              extensions: { [extensionName]: { fallback: true } },
+            },
+          ],
+        };
+        const result = parseGltf(buildGlb({ doc, binData: new Uint8Array(4) }));
 
-      expect(result.polygons).toEqual([]);
-      expect(result.warnings.some((warning) => warning.includes("EXT_meshopt_compression"))).toBe(true);
-    });
+        expect(result.polygons).toEqual([]);
+        expect(result.warnings.some((warning) => warning.includes(extensionName))).toBe(true);
+      },
+    );
   });
 
   describe("material color", () => {
@@ -1214,6 +1217,164 @@ describe("parseGltf", () => {
       const glb = buildGlb({ doc, binData: bin });
       const result = parseGltf(glb);
       expect(result.polygons).toHaveLength(1);
+    });
+
+    it("skips recursive scene graph references without overflowing the stack", () => {
+      const doc = {
+        asset: { version: "2.0" },
+        scene: 0,
+        scenes: [{ nodes: [0] }],
+        nodes: [
+          { children: [1] },
+          { children: [0] },
+        ],
+      };
+      const result = parseGltf(buildGlb({ doc }));
+
+      expect(result.polygons).toEqual([]);
+      expect(result.warnings).toEqual([
+        "Skipped recursive node reference 0 in glTF scene graph",
+      ]);
+    });
+
+    it("warns when a glTF has no meshes to emit", () => {
+      const result = parseGltf(buildGlb({ doc: { asset: { version: "2.0" }, scene: 0 } }));
+
+      expect(result.polygons).toEqual([]);
+      expect(result.warnings).toEqual(["No glTF meshes found"]);
+    });
+
+    it("warns and skips a mesh whose primitives field is not an array", () => {
+      const doc = {
+        asset: { version: "2.0" },
+        scene: 0,
+        scenes: [{ nodes: [0] }],
+        nodes: [{ mesh: 0 }],
+        meshes: [{ name: "Mesh", primitives: { mode: 4, attributes: { POSITION: 0 } } }],
+      };
+      const result = parseGltf(buildGlb({ doc }));
+
+      expect(result.polygons).toEqual([]);
+      expect(result.warnings).toEqual([
+        "Mesh Mesh: skipped mesh with non-array primitives",
+      ]);
+    });
+
+    it("warns when normalization collapses every raw triangle", () => {
+      const positions = [0, 0, 0, 1, 0, 0, 0, 1, 0];
+      const bin = new Uint8Array(positions.length * 4);
+      const view = new DataView(bin.buffer);
+      for (let i = 0; i < positions.length; i++) view.setFloat32(i * 4, positions[i], true);
+
+      const doc = {
+        asset: { version: "2.0" },
+        scene: 0,
+        scenes: [{ nodes: [0, 1] }],
+        nodes: [
+          { mesh: 0 },
+          { mesh: 0, translation: [0, -1_000_000_000, 0] },
+        ],
+        meshes: [{ primitives: [{ attributes: { POSITION: 0 }, mode: 4 }] }],
+        accessors: [{ bufferView: 0, byteOffset: 0, componentType: 5126, count: 3, type: "VEC3" }],
+        bufferViews: [{ buffer: 0, byteOffset: 0, byteLength: bin.length }],
+        buffers: [{ byteLength: bin.length }],
+      };
+      const result = parseGltf(buildGlb({ doc, binData: bin }));
+
+      expect(result.polygons).toEqual([]);
+      expect(result.warnings).toEqual([
+        "No non-degenerate glTF triangles remained after normalization",
+      ]);
+    });
+
+    it("applies default POSITION morph target weights before node transforms", () => {
+      const positions = [0, 0, 0, 1, 0, 0, 0, 1, 0];
+      const deltas = [0, 0, 0, 0, 1, 0, 0, 0, 0];
+      const posBytes = positions.length * 4;
+      const deltaBytes = deltas.length * 4;
+      const bin = new Uint8Array(posBytes + deltaBytes);
+      const view = new DataView(bin.buffer);
+      for (let i = 0; i < positions.length; i++) view.setFloat32(i * 4, positions[i], true);
+      for (let i = 0; i < deltas.length; i++) view.setFloat32(posBytes + i * 4, deltas[i], true);
+
+      const doc = {
+        asset: { version: "2.0" },
+        scene: 0,
+        scenes: [{ nodes: [0] }],
+        nodes: [{ mesh: 0, weights: [1] }],
+        meshes: [{
+          weights: [0],
+          primitives: [{
+            attributes: { POSITION: 0 },
+            targets: [{ POSITION: 1 }],
+            mode: 4,
+          }],
+        }],
+        accessors: [
+          { bufferView: 0, byteOffset: 0, componentType: 5126, count: 3, type: "VEC3" },
+          { bufferView: 1, byteOffset: 0, componentType: 5126, count: 3, type: "VEC3" },
+        ],
+        bufferViews: [
+          { buffer: 0, byteOffset: 0, byteLength: posBytes },
+          { buffer: 0, byteOffset: posBytes, byteLength: deltaBytes },
+        ],
+        buffers: [{ byteLength: bin.length }],
+      };
+      const result = parseGltf(buildGlb({ doc, binData: bin }), {
+        upAxis: "z",
+        targetSize: 10,
+        gridShift: 0,
+      });
+
+      expect(result.polygons).toHaveLength(1);
+      expect(result.polygons[0].vertices).toEqual([[0, 0, 0], [10, 10, 0], [0, 10, 0]]);
+    });
+
+    it("seeds polygons from animation when the bind pose is fully collapsed", () => {
+      const positions = [0, 0, 0, 1, 0, 0, 0, 1, 0];
+      const times = [0, 1];
+      const scales = [0, 0, 0, 1, 1, 1];
+      const posBytes = positions.length * 4;
+      const timeBytes = times.length * 4;
+      const scaleBytes = scales.length * 4;
+      const scaleOffset = posBytes + timeBytes;
+      const bin = new Uint8Array(posBytes + timeBytes + scaleBytes);
+      const view = new DataView(bin.buffer);
+      for (let i = 0; i < positions.length; i++) view.setFloat32(i * 4, positions[i], true);
+      for (let i = 0; i < times.length; i++) view.setFloat32(posBytes + i * 4, times[i], true);
+      for (let i = 0; i < scales.length; i++) view.setFloat32(scaleOffset + i * 4, scales[i], true);
+
+      const doc = {
+        asset: { version: "2.0" },
+        scene: 0,
+        scenes: [{ nodes: [0] }],
+        nodes: [{ mesh: 0, scale: [0, 0, 0] }],
+        meshes: [{ primitives: [{ attributes: { POSITION: 0 }, mode: 4 }] }],
+        accessors: [
+          { bufferView: 0, byteOffset: 0, componentType: 5126, count: 3, type: "VEC3" },
+          { bufferView: 1, byteOffset: 0, componentType: 5126, count: 2, type: "SCALAR" },
+          { bufferView: 2, byteOffset: 0, componentType: 5126, count: 2, type: "VEC3" },
+        ],
+        bufferViews: [
+          { buffer: 0, byteOffset: 0, byteLength: posBytes },
+          { buffer: 0, byteOffset: posBytes, byteLength: timeBytes },
+          { buffer: 0, byteOffset: scaleOffset, byteLength: scaleBytes },
+        ],
+        buffers: [{ byteLength: bin.length }],
+        animations: [{
+          samplers: [{ input: 1, output: 2 }],
+          channels: [{ sampler: 0, target: { node: 0, path: "scale" } }],
+        }],
+      };
+      const result = parseGltf(buildGlb({ doc, binData: bin }), {
+        upAxis: "z",
+        targetSize: 10,
+        gridShift: 0,
+      });
+
+      expect(result.polygons).toHaveLength(1);
+      expect(result.polygons[0].vertices).toEqual([[0, 0, 0], [10, 0, 0], [0, 10, 0]]);
+      expect(result.animation?.sample(0, 1)).toHaveLength(1);
     });
   });
 
@@ -1686,7 +1847,6 @@ describe("parseGltf", () => {
   describe("POSITION non-float fallback", () => {
     it("POSITION accessor with non-Float32Array is skipped", () => {
       // Use UNSIGNED_SHORT (5123) for POSITION — readAccessor returns Uint16Array
-      // emitMesh: if (!(posArr instanceof Float32Array)) continue;
       const positions = [0, 0, 0, 1, 0, 0, 0, 1, 0];
       const bin = new Uint8Array(positions.length * 2); // uint16 each
       const bv = new DataView(bin.buffer);
@@ -1708,8 +1868,41 @@ describe("parseGltf", () => {
       };
       const glb = buildGlb({ doc, binData: bin });
       const result = parseGltf(glb);
-      // The primitive is skipped because posArr is not Float32Array
       expect(result.polygons).toHaveLength(0);
+    });
+
+    it("accepts KHR_mesh_quantization POSITION accessors with integer component types", () => {
+      const positions = [0, 0, 0, 100, 0, 0, 0, 50, 0];
+      const bin = new Uint8Array(positions.length * 2);
+      const bv = new DataView(bin.buffer);
+      for (let i = 0; i < positions.length; i++) bv.setUint16(i * 2, positions[i], true);
+
+      const doc = {
+        asset: { version: "2.0" },
+        extensionsUsed: ["KHR_mesh_quantization"],
+        extensionsRequired: ["KHR_mesh_quantization"],
+        scene: 0,
+        scenes: [{ nodes: [0] }],
+        nodes: [{ mesh: 0, scale: [0.01, 0.01, 0.01] }],
+        meshes: [{ primitives: [{ attributes: { POSITION: 0 }, mode: 4 }] }],
+        accessors: [{
+          bufferView: 0,
+          byteOffset: 0,
+          componentType: 5123,
+          count: 3,
+          type: "VEC3",
+          min: [0, 0, 0],
+          max: [100, 50, 0],
+        }],
+        bufferViews: [{ buffer: 0, byteOffset: 0, byteLength: bin.length }],
+        buffers: [{ byteLength: bin.length }],
+      };
+      const glb = buildGlb({ doc, binData: bin });
+      const result = parseGltf(glb, { upAxis: "z", targetSize: 10, gridShift: 0 });
+
+      expect(result.polygons).toHaveLength(1);
+      expect(result.polygons[0].vertices).toEqual([[0, 0, 0], [10, 0, 0], [0, 5, 0]]);
+      expect(result.warnings).toEqual([]);
     });
   });
 

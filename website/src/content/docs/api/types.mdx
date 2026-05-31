@@ -18,11 +18,19 @@ interface Polygon {
   /** Image URL for UV-mapped rendering. When set with `uvs`, the renderer
    *  applies an affine UV transform. Without `uvs`, single-tile fill. */
   texture?: string;
+  /** Imported texture wrap mode for UVs outside [0, 1]. */
+  textureWrap?: PolyTextureWrap;
+  /** Imported glTF texture alpha interpretation. */
+  textureAlphaMode?: PolyTextureAlphaMode;
   /** Shared material. `material.texture` takes precedence over `texture`. */
   material?: PolyMaterial;
   /** UV coordinates: one per vertex. Must match vertices.length.
    *  Mismatched arrays are stripped during normalizePolygons(). */
   uvs?: [number, number][];
+  /** Source UV triangles preserved by import/merge passes for atlas rasterization. */
+  textureTriangles?: TextureTriangle[];
+  /** Source material requested two-sided rendering. */
+  doubleSided?: boolean;
   /** User-controlled metadata. Reflected to the DOM as data-* attributes
    *  when rendering via <Poly>. Keys must have string, number, or boolean values. */
   data?: Record<string, string | number | boolean>;
@@ -42,6 +50,28 @@ interface PolyMaterial {
   /** Optional stable identity for renderer-side dedupe/cache paths. */
   key?: string;
 }
+```
+
+---
+
+## Texture Metadata
+
+Importer-preserved texture fields used by atlas planning and rendering.
+
+```ts
+interface TextureTriangle {
+  vertices: [Vec3, Vec3, Vec3];
+  uvs: [Vec2, Vec2, Vec2];
+}
+
+type PolyTextureWrapMode = "repeat" | "clamp-to-edge" | "mirrored-repeat";
+
+interface PolyTextureWrap {
+  s: PolyTextureWrapMode;
+  t: PolyTextureWrapMode;
+}
+
+type PolyTextureAlphaMode = "opaque" | "mask" | "blend";
 ```
 
 ---
@@ -88,6 +118,37 @@ type PolyTextureLightingMode = "baked" | "dynamic";
 
 ---
 
+## `MeshResolution`
+
+Controls mesh post-processing intent.
+
+```ts
+type MeshResolution = "lossless" | "lossy";
+```
+
+`"lossless"` preserves the authored surface while applying exact reductions. `"lossy"` allows bounded geometric approximation when it reduces rendered polygon/DOM count.
+
+---
+
+## `TextureQuality` and `PolySeamBleed`
+
+Renderer quality controls accepted by scene, mesh, and atlas APIs.
+
+```ts
+type TextureQuality = number | "auto";
+type PolySeamBleed = number | "auto";
+
+type PolySeamBleedEdgeValue = ReadonlySet<number> | ReadonlyMap<number, number>;
+
+type PolySeamBleedEdges =
+  | ReadonlyMap<number, PolySeamBleedEdgeValue>
+  | readonly (PolySeamBleedEdgeValue | undefined)[];
+```
+
+`TextureQuality` controls atlas bitmap budget and CSS sprite size. `PolySeamBleed` controls solid-primitive overscan for detected shared seam edges.
+
+---
+
 ## `PolyRenderStrategiesOption`
 
 Diagnostic render-strategy override accepted by scenes and atlas renderers. Disabled strategies fall through to the atlas path; `<s>` is the universal fallback and cannot be disabled.
@@ -119,7 +180,7 @@ interface PolyRenderStats {
   polygonCount: number;
   /** Mounted surface leaves, equal to the sum of surfaceLeafCounts. */
   mountedPolygonLeafCount: number;
-  /** Mounted cast-shadow leaves. */
+  /** Mounted shadow nodes: SVG shadow surfaces plus retained compatibility shadow nodes. */
   shadowLeafCount: number;
   /** Surface leaf categories used by the renderer. */
   surfaceLeafCounts: PolyRenderSurfaceLeafCounts;
@@ -142,6 +203,96 @@ interface PolyRenderStatsOptions {
   scopeSelector?: string;
 }
 ```
+
+---
+
+## Vanilla Scene Handle Types
+
+Core imperative handles returned by `createPolyScene()` and `scene.add()`.
+
+```ts
+interface PolySceneOptions {
+  camera: PolyPerspectiveCameraHandle | PolyOrthographicCameraHandle;
+  directionalLight?: PolyDirectionalLight;
+  ambientLight?: PolyAmbientLight;
+  textureLighting?: PolyTextureLightingMode;
+  textureQuality?: TextureQuality;
+  seamBleed?: PolySeamBleed;
+  strategies?: PolyRenderStrategiesOption;
+  autoCenter?: boolean;
+  shadow?: {
+    color?: string;
+    opacity?: number;
+    lift?: number;
+    maxExtend?: number;
+  };
+}
+
+interface PolyMeshTransform {
+  id?: string;
+  position?: Vec3;
+  scale?: number | Vec3;
+  rotation?: Vec3;
+  merge?: boolean;
+  meshResolution?: MeshResolution;
+  stableDom?: boolean;
+  excludeFromAutoCenter?: boolean;
+  castShadow?: boolean;
+  receiveShadow?: boolean;
+}
+
+interface PolySceneHandle {
+  add(mesh: ParseResult, opts?: PolyMeshTransform): PolyMeshHandle;
+  setOptions(partial: Partial<Omit<PolySceneOptions, "camera">>): void;
+  getOptions(): Readonly<Omit<PolySceneOptions, "camera">>;
+  applyCamera(): void;
+  meshes(): readonly PolyMeshHandle[];
+  findMeshByElement(element: Element | null): PolyMeshHandle | null;
+  destroy(): void;
+  readonly host: HTMLElement;
+  readonly cameraEl: HTMLElement;
+  readonly camera: PolyPerspectiveCameraHandle | PolyOrthographicCameraHandle;
+}
+
+interface PolyMeshHandle {
+  readonly element: HTMLElement;
+  readonly id?: string;
+  readonly transform: PolyMeshTransform;
+  polygons: Polygon[];
+  setTransform(transform: Partial<PolyMeshTransform>): void;
+  setPolygons(polygons: Polygon[], options?: {
+    merge?: boolean;
+    stableDom?: boolean;
+    recomputeAutoCenter?: boolean;
+  }): void;
+  updatePolygon(target: Polygon | number, partial: Partial<Polygon>): void;
+  rebakeAtlas(): void;
+  getPosition(): Vec3 | undefined;
+  getRotation(): Vec3 | undefined;
+  getScale(): number | Vec3 | undefined;
+  getPolygons(): Polygon[];
+  remove(): void;
+  dispose(): void;
+}
+```
+
+---
+
+## Framework Type Exports
+
+React and Vue export their public prop, event, context, and handle types next to the runtime components/composables. Vue mirrors the React names where applicable, with Vue-specific context/composable names such as `PolyCameraContextKey`, `PolySelectionContextKey`, `PolyContext`, and `UsePolyAnimationResultVue`.
+
+Runtime selection helpers are exported from the framework packages: `findPolyMeshHandle`, `pointInMeshElement`, and `findMeshUnderPoint`.
+
+<details>
+<summary>Framework type inventory</summary>
+
+- Component props: `PolyCameraProps`, `PolyOrthographicCameraProps`, `PolyPerspectiveCameraProps`, `PolySceneProps`, `PolyMeshProps`, `PolyGroundProps`, `PolyProps`, `PolyBoxProps`, `PolyPlaneProps`, `PolyRingProps`, `PolyOctahedronProps`, `PolySphereProps`, `PolyTetrahedronProps`, `PolyIcosahedronProps`, `PolyDodecahedronProps`, `PolyCylinderProps`, `PolyConeProps`, `PolyTorusProps`, `PolyAxesHelperProps`, `PolyDirectionalLightHelperProps`.
+- Control and selection props/handles: `PolyOrbitControlsProps`, `PolyMapControlsProps`, `PolyFirstPersonControlsProps`, `PolyTransformControlsProps`, `PolySelectProps`, `PolyControlsAnimateOptions`, `PolyControlsBaseOptions`, `PolyControlsCamera`, `PolyControlsHandle`, `PolyControlsChangeEvent`, `PolyControlsInteractionEvent`, `PolyControlsEvent`, `PolyControlsListener`, `PolyOrbitControlsCamera`, `PolyMapControlsCamera`, `PolyFirstPersonControlsOptions`, `PolyFirstPersonControlsHandle`, `PolyOrbitControlsOptions`, `PolyOrbitControlsHandle`, `PolyMapControlsOptions`, `PolyMapControlsHandle`, `PolyTransformControlsOptions`, `PolyTransformControlsHandle`, `PolySelectOptions`, `PolySelectionHandle`.
+- Hooks, events, and contexts: `UseCameraOptions`, `UseCameraResult`, `UseSceneContextOptions`, `UseSceneContextResult`, `UseMeshOptions`, `UseMeshResult`, `UsePolyAnimationResult`, `PolyPointerEvent`, `PolyMouseEvent`, `PolyWheelEvent`, `PolyEventHandler`, `InteractionProps`, `PolySelectionApi`, `PolyCameraContext`, `PolyCameraContextValue`.
+- Utility types: `PolyTransformControlsObject`, `PolyTransformControlsObjectChangeEvent`, `PolySceneSnapshotErrorCode`, `PolyShapeResult`, `TransformProps`, `DOMPassthroughProps`.
+
+</details>
 
 ---
 
@@ -252,6 +403,8 @@ Core animation API used by `usePolyAnimation` and vanilla animation loops.
 interface PolyAnimationTarget {
   setPolygons(polygons: Polygon[]): void;
 }
+
+type PolyAnimationClip = ParseAnimationClip;
 
 interface PolyAnimationAction {
   play(): PolyAnimationAction;
@@ -456,5 +609,50 @@ interface CameraState {
   rotY: number;
   zoom: number;
   distance: number;           // dolly pull-back in pixels (default 0); adds translateZ(-distance)px
+}
+```
+
+## Camera Handles
+
+Vanilla camera handles returned by `createPolyCamera`, `createPolyOrthographicCamera`, and `createPolyPerspectiveCamera`.
+
+```ts
+interface PolyCameraOptions {
+  zoom?: number;
+  target?: Vec3;
+  rotX?: number;
+  rotY?: number;
+  distance?: number;
+}
+
+interface PolyPerspectiveCameraOptions extends PolyCameraOptions {
+  perspective?: number;
+}
+
+interface PolyOrthographicCameraOptions extends PolyCameraOptions {}
+
+interface CameraStyleInput {
+  rows?: number;
+  cols?: number;
+}
+
+interface CameraHandle {
+  readonly state: CameraState;
+  update(next: Partial<CameraState>): void;
+  getStyle(input?: CameraStyleInput): {
+    transform: string;
+    width: string;
+    height: string;
+  };
+}
+
+interface PolyPerspectiveCameraHandle extends CameraHandle {
+  readonly type: "perspective";
+  readonly perspectiveStyle: string;
+}
+
+interface PolyOrthographicCameraHandle extends CameraHandle {
+  readonly type: "orthographic";
+  readonly perspectiveStyle: "none";
 }
 ```

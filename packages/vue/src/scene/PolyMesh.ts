@@ -1,7 +1,7 @@
 /**
  * PolyMesh — load a mesh URL (or accept a polygons array) and render its
  * polygons inside a `.polycss-mesh` wrapper that carries the mesh-wide
- * position/scale/rotation transform. Per §API freeze and §Design.4c.
+ * position/scale/rotation transform.
  *
  * Uses nested DOM (preserve-3d) so the wrapper transform composes with each
  * atlas polygon's vertex matrix3d via CSS without JS doing the matrix math.
@@ -13,8 +13,8 @@
  *   - Named slot `fallback`: rendered while loading.
  *   - Named slot `error({ error })`: rendered on parse failure.
  *
- * When no `polygon` slot is provided, atlas-backed polygon i elements are rendered
- * automatically for each polygon.
+ * When no `polygon` slot is provided, each polygon is rendered automatically
+ * using the cheapest supported render-strategy leaf.
  */
 import { defineComponent, h, computed, inject, onMounted, onBeforeUnmount, ref, watch, watchEffect } from "vue";
 import type { PropType, VNode, CSSProperties } from "vue";
@@ -94,9 +94,17 @@ export interface PolyMeshProps extends InteractionProps {
   /** Solid seam overscan. `"auto"` computes a fitted per-edge amount from the polygon plan. */
   seamBleed?: PolySeamBleed;
   /**
-   * When `true` and the scene is in dynamic lighting mode, the renderer emits
-   * a flat shadow leaf sibling for each non-duplicate polygon. The shadow is
-   * projected onto the ground plane along the CSS-space light direction.
+   * Hold the previous frame until the next atlas is decoded, then swap
+   * atomically. Best for discrete geometry edits where a partial texture
+   * frame would be visible.
+   */
+  atomicAtlas?: boolean;
+  /** Fires when the displayed atlas frame swaps to a ready one in atomic mode. */
+  onFrameReady?: () => void;
+  /**
+   * When `true`, emits a per-mesh SVG shadow path in both lighting modes.
+   * Each casting polygon projects onto the scene ground plane along the
+   * directional light; overlapping outlines are merged into one silhouette.
    * Defaults to `false`.
    */
   castShadow?: boolean;

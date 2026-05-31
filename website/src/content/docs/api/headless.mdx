@@ -49,7 +49,7 @@ dispose(); // always call on cleanup
 
 ## `parseVox(buffer, options?)`
 
-Parses a MagicaVoxel `.vox` file into greedy colored polygon quads. The result also carries `voxelSource` metadata used by the baked-mode voxel fast path across vanilla, React, and Vue when the mesh remains eligible.
+Parses a MagicaVoxel `.vox` file into greedy colored polygon quads. The result also carries `voxelSource` metadata used by the baked-mode voxel fast path across vanilla, React, and Vue when the mesh remains eligible. VOX imports stay Z-up and rotate MagicaVoxel front (`-Y`) to PolyCSS forward (`+X`).
 
 ```ts
 import { parseVox } from "@layoutit/polycss-core";
@@ -143,6 +143,20 @@ console.log(`${polygons.length} polygons → ${merged.length} after merge`);
 
 ---
 
+## Polygon, Color, and Geometry Helpers
+
+For custom tooling, core also exports helpers for polygon faces, texture paint bounds, CSS color parsing/formatting, and mesh-transform Euler rotation.
+
+```ts
+import { polygonFaces, parseHexColor, rotateVec3 } from "@layoutit/polycss-core";
+
+const faces = polygonFaces(polygons);
+const color = parseHexColor("#ffcc00");
+const rotated = rotateVec3([1, 0, 0], [0, 45, 0]);
+```
+
+---
+
 ## `optimizeMeshPolygons(polygons, options?)`
 
 Runs the shared mesh-resolution optimizer. It defaults to `meshResolution: "lossy"`. `meshResolution: "lossless"` uses exact candidates; `"lossy"` also tries bounded approximate merge candidates and chooses the lowest estimated DOM render cost. Wider lossy candidates are accepted only when they clear a minimum render-cost win and do not worsen whole-mesh seam diagnostics.
@@ -172,6 +186,59 @@ const cam = createIsometricCamera({
 // cam.update(partial): merge partial state
 // cam.getStyle(...): returns CSS property map
 ```
+
+---
+
+## `createPolyCamera(options?)`
+
+Creates the vanilla camera handle used by `createPolyScene`. `createPolyCamera()` is the ergonomic orthographic default and is equivalent to `createPolyOrthographicCamera()`. Use `createPolyPerspectiveCamera()` when the scene needs CSS perspective, first-person controls, or stronger depth foreshortening.
+
+```ts
+import {
+  createPolyCamera,
+  createPolyOrthographicCamera,
+  createPolyPerspectiveCamera,
+} from "@layoutit/polycss";
+
+const camera = createPolyCamera({ rotX: 65, rotY: 45, zoom: 0.8 });
+const ortho = createPolyOrthographicCamera({ target: [0, 0, 0] });
+const perspective = createPolyPerspectiveCamera({ perspective: 1200, distance: 300 });
+```
+
+All camera handles expose `state`, `update(partial)`, and `getStyle()`. The React/Vue equivalents are `<PolyCamera>` / `<PolyOrthographicCamera>` and `<PolyPerspectiveCamera>`.
+
+---
+
+## `createPolyScene(host, options)`
+
+Creates a vanilla imperative scene inside `host`. It injects the PolyCSS base styles, creates a `.polycss-camera` wrapper and `.polycss-scene` root, and returns a `PolySceneHandle` for adding meshes, updating scene-level options, and tearing down the scene.
+
+```ts
+import { createPolyCamera, createPolyScene, loadMesh } from "@layoutit/polycss";
+
+const camera = createPolyCamera({ rotX: 65, rotY: 45 });
+const scene = createPolyScene(host, {
+  camera,
+  textureLighting: "dynamic",
+  directionalLight: { direction: [0.4, -0.6, 1], intensity: 1 },
+  shadow: { opacity: 0.28, maxExtend: 2000 },
+});
+
+const result = await loadMesh("/model.glb");
+const mesh = scene.add(result, {
+  id: "asset",
+  position: [0, 0, 0],
+  castShadow: true,
+  meshResolution: "lossy",
+});
+
+mesh.setTransform({ rotation: [0, 30, 0] });
+mesh.rebakeAtlas();
+scene.setOptions({ textureLighting: "baked" });
+scene.destroy();
+```
+
+`scene.add(mesh, opts?)` accepts a `ParseResult` from the parsers, `loadMesh`, or a primitive shape factory. See [`PolySceneOptions`, `PolyMeshTransform`, `PolySceneHandle`, and `PolyMeshHandle`](/api/types/#vanilla-scene-handle-types) for the exact handle and option shapes.
 
 ---
 
@@ -318,7 +385,7 @@ transform.detach();
 
 ## `collectPolyRenderStats(root, options?)`
 
-Reads an already-rendered PolyCSS DOM subtree and returns a one-shot diagnostic snapshot. It counts mounted polygon leaves, shadow leaves, surface leaf categories, and bucket wrappers; it does not observe changes or mutate the scene.
+Reads an already-rendered PolyCSS DOM subtree and returns a one-shot diagnostic snapshot. It counts mounted polygon leaves, shadow nodes, surface leaf categories, and bucket wrappers; it does not observe changes or mutate the scene.
 
 ```ts
 import { collectPolyRenderStats } from "@layoutit/polycss";
@@ -333,6 +400,56 @@ console.log(stats.mountedPolygonLeafCount, stats.surfaceLeafCounts);
 `scopeSelector` narrows the count to matching subtrees, which is useful when helpers, floors, or gizmos share the same scene root. The same utility is exported from `@layoutit/polycss-react` and `@layoutit/polycss-vue`.
 
 **Options:** See [`PolyRenderStatsOptions`](/api/types/#polyrenderstatsoptions).
+
+---
+
+## `injectPolyBaseStyles(doc?)`
+
+Injects the shared PolyCSS base stylesheet into a `Document` once. Scenes and framework components call this automatically; use it directly when rendering PolyCSS DOM yourself or when preparing a custom document before mounting.
+
+```ts
+import { injectPolyBaseStyles } from "@layoutit/polycss";
+
+injectPolyBaseStyles(document);
+```
+
+The same helper is exported from `@layoutit/polycss-react` and `@layoutit/polycss-vue`.
+
+---
+
+## Low-level renderer utilities
+
+The vanilla package also exposes renderer and atlas building blocks for diagnostics, custom renderers, and tests. Most applications should use `createPolyScene`, framework components, or custom elements.
+
+<details>
+<summary>Advanced renderer exports</summary>
+
+- Atlas planning/rendering: `computeTextureAtlasPlanPublic`, `buildAtlasPages`, `renderPolygonsWithTextureAtlas`, `renderPolygonsWithTextureAtlasAsync`, `filterAtlasPlans`, `packTextureAtlasPlansWithScale`, `buildTextureEdgeRepairSets`.
+- Stable DOM animation: `renderPolygonsWithStableTriangles`, `updatePolygonsWithStableTopology`, `updateStableTriangleFrame`.
+- Strategy and CSS helpers: `getSolidPaintDefaults`, `getSolidPaintDefaultsFromPlans`, `isBorderShapeSupported`, `isSolidTriangleSupported`, `isFullRectSolid`, `isSolidTrianglePlan`, `isProjectiveQuadPlan`, `cssBorderShapeForPlan`, `formatMatrix3d`, `formatCssLengthPx`, `formatSolidQuadEntryMatrix`, `formatBorderShapeEntryMatrix`.
+- Related types: `TextureAtlasPlan`, `PackedTextureAtlasEntry`, `PackedAtlas`, `PackedPage`, `TextureAtlasPage`, `SolidPaintDefaults`, `SolidTriangleFrame`, `PolygonBasisInfo`.
+
+</details>
+
+---
+
+## Primitive shape factories
+
+The vanilla package exports ParseResult-compatible factories for built-in shapes. Each one wraps the matching core polygon generator and can be passed directly to `scene.add(...)`.
+
+```ts
+import { createPolyCamera, createPolyScene, createPolyBox, createPolyTorus } from "@layoutit/polycss";
+
+const camera = createPolyCamera();
+const scene = createPolyScene(host, { camera });
+
+scene.add(createPolyBox({ size: 80, color: "#ffd166" }));
+scene.add(createPolyTorus({ radius: 1.2, tube: 0.35, color: "#4ecdc4" }), {
+  position: [100, 0, 0],
+});
+```
+
+Available factories: `createPolyBox`, `createPolyPlane`, `createPolyRing`, `createPolyOctahedron`, `createPolySphere`, `createPolyTetrahedron`, `createPolyIcosahedron`, `createPolyDodecahedron`, `createPolyCylinder`, `createPolyCone`, and `createPolyTorus`.
 
 ---
 
@@ -361,6 +478,15 @@ Registered element families include:
 - Helpers: `<poly-axes-helper>`, `<poly-directional-light-helper>`.
 - Shapes: `<poly-box>`, `<poly-plane>`, `<poly-ring>`, `<poly-sphere>`, `<poly-tetrahedron>`, `<poly-octahedron>`, `<poly-icosahedron>`, `<poly-dodecahedron>`, `<poly-cylinder>`, `<poly-cone>`, `<poly-torus>`.
 
+The root package exports the matching element classes for manual registration or subclassing.
+
+<details>
+<summary>Custom element class exports</summary>
+
+`PolySceneElement`, `PolyMeshElement`, `PolyPolygonElement`, `PolyCameraElement`, `PolyOrthographicCameraElement`, `PolyPerspectiveCameraElement`, `PolyOrbitControlsElement`, `PolyMapControlsElement`, `PolyFirstPersonControlsElement`, `PolyTransformControlsElement`, `PolySelectElement`, `PolyAxesHelperElement`, `PolyDirectionalLightHelperElement`, `PolyBoxElement`, `PolyPlaneElement`, `PolyRingElement`, `PolyOctahedronElement`, `PolySphereElement`, `PolyTetrahedronElement`, `PolyIcosahedronElement`, `PolyDodecahedronElement`, `PolyCylinderElement`, `PolyConeElement`, and `PolyTorusElement`.
+
+</details>
+
 ---
 
 ## Package Exports
@@ -372,3 +498,4 @@ Registered element families include:
 | `@layoutit/polycss` | Vanilla imperative API + custom element classes + controls + selection + render diagnostics |
 | `@layoutit/polycss/elements` | Side-effect: registers the PolyCSS custom elements |
 | `@layoutit/polycss-core` | Pure parsers / math, zero DOM: `parseObj`, `parseGltf`, `parseVox`, `loadMesh`, types |
+| `@layoutit/polycss-fonts` | Font parsing, Google font loading, and text-to-polygon mesh generation |

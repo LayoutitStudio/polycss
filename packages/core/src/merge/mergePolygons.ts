@@ -1,9 +1,8 @@
 /**
  * Merge coplanar same-color adjacent triangles into N-vertex polygons.
  *
- * Each polygon is rendered as one atlas-backed DOM element — so a mesh whose
- * triangles came from quads or pentagons collapses back into its original
- * face count.
+ * Each visible polygon renders as one DOM leaf — so a mesh whose triangles
+ * came from quads or pentagons collapses back into its original face count.
  *
  *   - Geodesic spheres: ~half the triangles came from quad subdivisions
  *   - OBJ imports: many were quads/n-gons fan-triangulated by the importer

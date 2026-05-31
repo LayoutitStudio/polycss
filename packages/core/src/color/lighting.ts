@@ -1,15 +1,10 @@
-/* Shared lighting helpers for polycss polygons.
+/* Shared lighting helpers for PolyCSS polygons.
  * Pure module — zero DOM dependencies.
  *
- * Voxcss carried per-cube-face shading helpers (`shadeCubeFace`,
- * `shadeWallFace`, `getCubeFaceLightDelta`) and a shape-rotation-based
- * `computeShapeLighting(shape, rotation, baseColor)`. All of that's gone
- * with cube removal in Phase 2.
- *
- * The new `computeShapeLighting(normal, baseColor, light?)` is a per-polygon
- * Lambert shader. The renderer (`Poly.tsx`) may keep its Lambert math inline
- * for performance, but the helper exists for users who want to shade
- * polygons outside the renderer (e.g. SSR, validators, alternate backends).
+ * `computeShapeLighting(normal, baseColor, light?)` is a per-polygon Lambert
+ * shader. Renderers may keep Lambert math inline for performance, but this
+ * helper supports users who shade polygons outside the renderer, such as SSR,
+ * validators, or alternate backends.
  */
 import type { PolyAmbientLight, PolyDirectionalLight, Vec3 } from "../types";
 import {
