@@ -430,7 +430,11 @@
       const target = e.target instanceof Element ? e.target : null;
       const helperEl = target?.closest('[data-light-helper="1"]');
       if (!helperEl) return;
-      e.preventDefault(); e.stopPropagation();
+      // stopImmediatePropagation: the bench attaches bindDrag(polyHost)
+      // below for camera orbit. Both handlers live on the SAME element,
+      // so stopPropagation alone wouldn't block the orbit listener —
+      // only stopImmediatePropagation prevents that sibling from firing.
+      e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation();
       lightDragging = true;
       polyHost.setPointerCapture?.(e.pointerId);
       // Snapshot the current direction in spherical form: azimuth around
