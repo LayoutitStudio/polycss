@@ -112,6 +112,13 @@ import {
   syncShadowPaths as syncShadowPathsImpl,
 } from "./scene/shadowSvg";
 import type {
+  CasterPolyItem,
+  MeshEntry,
+  ReceiverFacePlane,
+} from "./scene/internalTypes";
+import { createSceneContext } from "./scene/sceneContext";
+import type { SceneContext } from "./scene/sceneContext";
+import type {
   InternalPolyMeshHandle,
   InternalSetPolygonsOptions,
   PolyAnimationTriangleFrame,
@@ -215,68 +222,21 @@ export function createPolyScene(
 
   cameraEl.appendChild(sceneEl);
 
-  interface MeshEntry {
-    handle: PolyMeshHandle;
-    wrapper: HTMLDivElement;
-    parseResult: ParseResult;
-    rendered: RenderedPoly[];
-    renderedByPolygonIndex: Array<RenderedPoly | undefined>;
-    /** Dynamic-mode shadow `<q>` leaves, one per non-deduped casting
-     *  polygon. Empty in baked mode (which uses `shadowSvg` instead). */
-    shadowRendered: HTMLElement[];
-    voxelRenderer?: PolyVoxelRenderer;
-    disposeAtlas?: () => void;
-    polygons: Polygon[];
-    voxelSource: ParseResult["voxelSource"];
-    disposed: boolean;
-    stableDom: boolean;
-    hasBuckets: boolean;
-    skipBucketNormalCleanupOnce: boolean;
-    excludeFromAutoCenter: boolean;
-    castShadow: boolean;
-    receiveShadow: boolean;
-    /** Polygon bbox CENTER in CSS world coords. Same value the wrapper's
-     *  `--origin` CSS variable carries — i.e. the pivot point that the
-     *  wrapper's scale3d and rotation use. Cached so shadow geometry
-     *  can apply scale around the same pivot. */
-    bboxCenterCss: Vec3 | null;
-    cameraCullGroups: CameraCullNormalGroup[];
-    cameraCullSignature: string;
-    lightOverrideSignature: string;
-    stableTriangleColorFrame: number;
-    solidLightingPreviewPrepared: boolean;
-    solidLightingPreviewActive: boolean;
-    /** Rotation snapshot used by the baked atlas baker. Advances only when
-     *  `rebakeAtlas()` is called — not on every `setTransform`. */
-    bakedRotation: Vec3;
-    /** Auto-assigned, scene-unique identifier (`polycss-mesh-<N>`).
-     *  Reflected on the wrapper as `data-poly-mesh-index` and used as
-     *  the fallback shadow-debug id when the caller didn't pass an
-     *  explicit `transform.id`. Lets DevTools queries pinpoint a mesh
-     *  and its cast shadows even when no id was set up front. */
-    autoMeshId: string;
-    /** rebakeAtlas serialization. Each tick of a fast slider drag
-     *  triggers a rebake; without serialization multiple in-flight
-     *  atlases finish out-of-order and the visible bitmap rapidly
-     *  swaps between intermediate light directions — perceived as
-     *  flicker. With serialization, only one rebake runs at a time;
-     *  intermediate ticks just update the queued target. */
-    rebakeInFlight: boolean;
-    rebakeQueuedLightDir: Vec3 | null;
-    /** Cached light-visibility raytrace result. Keyed by the polygon
-     *  array reference (changes on `setPolygons`) plus the quantized
-     *  mesh-local light direction. Recomputed on cache miss only —
-     *  not per frame. Forces directScale=0 for occluded polygons via
-     *  `lightOccludedPolyIndices` on atlas options, so baked shading
-     *  drops to ambient-only on faces a shadow-map would cull. */
-    lightOcclusionCache?: {
-      polygons: Polygon[];
-      lightDirKey: string;
-      occluded: ReadonlySet<number>;
-    };
-  }
-  const meshes = new Set<MeshEntry>();
-  let meshAutoCounter = 0;
+  // Bundle every mutable scene-state field into a SceneContext. Extracted
+  // scene/* helpers take this object as their first arg instead of capturing
+  // a 30-symbol closure. `meshes`, `shadowSvgState`, the cache maps, etc.
+  // are aliased below so the rest of the closure body uses the same names
+  // it always did; the alias and the ctx field reference the same object.
+  const ctx: SceneContext = createSceneContext({
+    host,
+    doc,
+    cameraEl,
+    sceneEl,
+    camera,
+    layoutScale,
+    options: currentOptions,
+  });
+  const meshes = ctx.meshes;
 
   // Stable id used to label a mesh in shadow `data-poly-shadow-casters` /
   // `data-poly-shadow-receiver` attributes. Prefers the caller-supplied
@@ -287,8 +247,9 @@ export function createPolyScene(
   }
 
   // Shadow SVG state (ground SVG element + visibility + cached ground CSS-Z).
-  // See ./scene/shadowSvg for the helpers that read/write this bag.
-  const shadowSvgState = new ShadowSvgState();
+  // Sourced from the SceneContext so extracted helpers can read+write the
+  // same bag. See ./scene/shadowSvg for the helpers that operate on it.
+  const shadowSvgState = ctx.shadowSvgState;
   const disposeGroundShadow = () => disposeGroundShadowImpl(shadowSvgState);
   const hideGroundShadow = () => hideGroundShadowImpl(shadowSvgState);
   const ensureGroundShadow = () => ensureGroundShadowImpl(shadowSvgState, doc, sceneEl);
@@ -304,49 +265,12 @@ export function createPolyScene(
     hideAllReceiverFaceSvgs();
   }
 
-  // Per-receiver cached face geometry. Each entry holds one record
-  // per coplanar face group on the receiver: plane (O, n, u, v),
-  // outline polygon (used as Sutherland-Hodgman clip), bbox in (u, v)
-  // for SVG sizing, and the pre-stringified matrix3d transform that
-  // places an SVG on that face plane.
-  //
-  // All of this is invariant under light/caster changes. Per light
-  // tick we just re-run the per-tri SH and build the path `d` —
-  // never recompute groups or basis. Cache invalidated when the
-  // receiver's polygon count or position changes.
-  interface ReceiverFacePlane {
-    O: Vec3;
-    n: Vec3;
-    u: Vec3;
-    v: Vec3;
-    outlineUv: Array<[number, number]>;
-    /** Per-constituent-polygon (u,v) outlines used to post-filter
-     *  Sutherland-Hodgman-clipped sub-shadows that fall inside the
-     *  convex hull but outside the actual polygon union (concave
-     *  bridging regions). */
-    memberPolysUv: Array<Array<[number, number]>>;
-    /** Receiver-mesh polygon indices for the polygons in memberPolysUv,
-     *  in matching order. */
-    memberPolyIndices: number[];
-    minU: number;
-    minV: number;
-    width: number;
-    height: number;
-    matrixCss: string;
-    /** Index of this face group within the receiver's plane list, set
-     *  on the SVG as `data-poly-shadow-receiver-face` so a specific
-     *  receiving surface can be addressed directly in DevTools. */
-    faceIndex: number;
-    // Mount-once SVG: created on first non-empty frame for this face,
-    // then kept in the DOM. Per-frame we sync its <path> children
-    // (one per contributing caster) and toggle `display`. Avoids
-    // per-frame ~248 createElementNS + insertBefore + 248 layer churn
-    // that dominated gpuViz (~40 ms/frame).
-    svg: SVGSVGElement | null;
-    visible: boolean;
-  }
-  const receiverShadowCache = new Map<MeshEntry, ReceiverFacePlane[]>();
-  const receiverShadowCacheKey = new Map<MeshEntry, string>();
+  // Receiver shadow caches: per-receiver coplanar face groups + a key for
+  // cache invalidation. Sourced from SceneContext so extracted helpers
+  // share the same maps. Cache record shape is `ReceiverFacePlane` —
+  // defined in ./scene/internalTypes; see there for field docs.
+  const receiverShadowCache = ctx.receiverShadowCache;
+  const receiverShadowCacheKey = ctx.receiverShadowCacheKey;
   function disposeReceiverPlanes(planes: ReceiverFacePlane[]): void {
     for (const p of planes) {
       if (p.svg && p.svg.parentNode) p.svg.parentNode.removeChild(p.svg);
@@ -376,27 +300,11 @@ export function createPolyScene(
     }
   }
 
-  // Per-caster cached per-polygon data: world-space vertices + 3D
-  // AABB corners. Invariant under light direction; depends only on
-  // the caster mesh's geometry and position. Reused across every
-  // receiver-face SH-clip in a frame and across frames within a
-  // drag, so the caching pays for itself many times over.
-  interface CasterPolyItem {
-    wv: Vec3[];
-    bboxCorners: Vec3[];
-    /** Outward CSS-space normal (unit) and plane offset (n·O) of the
-     *  caster polygon. Used by the receiver-shadow path to skip
-     *  casters that are coplanar with a receiver face. */
-    planeN: Vec3 | null;
-    planeOffset: number;
-    /** Source polygon index in caster.polygons. Reflected on the
-     *  corresponding shadow `<path>` as `data-poly-shadow-caster-poly`
-     *  so DevTools can pinpoint which caster polygon produced any
-     *  given sub-shadow. */
-    polygonIndex: number;
-  }
-  const casterItemsCache = new Map<MeshEntry, CasterPolyItem[]>();
-  const casterItemsCacheKey = new Map<MeshEntry, string>();
+  // Caster shadow caches: per-caster precomputed world-space vertices +
+  // AABB corners + plane data. Sourced from SceneContext. Cache record
+  // shape is `CasterPolyItem` — defined in ./scene/internalTypes.
+  const casterItemsCache = ctx.casterItemsCache;
+  const casterItemsCacheKey = ctx.casterItemsCacheKey;
   function clearCasterItemsCache(entry?: MeshEntry): void {
     if (entry) {
       casterItemsCache.delete(entry);
@@ -2416,6 +2324,7 @@ export function createPolyScene(
     }
     if (prev[0] === next[0] && prev[1] === next[1] && prev[2] === next[2]) return;
     autoCenterOffset = next;
+    ctx.autoCenter.offset = next;
     applySceneStyle(sceneEl, currentOptions);
   }
 
@@ -2424,7 +2333,7 @@ export function createPolyScene(
     const wrapper = mountDoc.createElement("div");
     wrapper.className = "polycss-mesh";
     if (transformIn.id) wrapper.setAttribute("data-poly-mesh-id", transformIn.id);
-    const autoMeshId = `polycss-mesh-${meshAutoCounter++}`;
+    const autoMeshId = `polycss-mesh-${ctx.meshAutoCounter.next++}`;
     wrapper.setAttribute("data-poly-mesh-index", autoMeshId);
 
     let transform: PolyMeshTransform = { ...transformIn };
@@ -2963,6 +2872,9 @@ export function createPolyScene(
     const prevShadow = currentOptions.shadow;
     const normalizedPartial = normalizeSceneOptions(partial);
     currentOptions = { ...currentOptions, ...normalizedPartial };
+    // Keep the SceneContext's options ref pointing to the latest snapshot so
+    // extracted scene/* helpers see the new value on their next read.
+    ctx.options.current = currentOptions;
     applySceneStyle(sceneEl, currentOptions);
     const nextAutoCenter = !!currentOptions.autoCenter;
     // Re-evaluate per-mesh light overrides when lighting settings change —
