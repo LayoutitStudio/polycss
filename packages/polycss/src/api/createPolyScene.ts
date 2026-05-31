@@ -983,12 +983,17 @@ export function createPolyScene(
     const dedupByReceiver = new Map<MeshEntry, Set<number>>();
     for (const m of meshes) {
       if (m.disposed || !m.receiveShadow) continue;
-      dedupByReceiver.set(m, findOverlappingPolygonDuplicates(m.polygons, {
-        normalTolerance: 0.1,
-        distanceTolerance: 0.5,
-        overlapFraction: 0.95,
-        preserveDoubleSidedBackfaces: false,
-      }));
+      // Receiver-side dedup disabled. The `facesInward` heuristic that
+      // picks the "winner" of a duplicate pair was selecting the INNER
+      // hidden polygon as the receiver for castle outer walls (109, 111
+      // etc.), so the shadow got projected onto a polygon the user
+      // couldn't see and the visible outer face was left un-shadowed.
+      // preserveDoubleSidedBackfaces:true only helps opposite-normal
+      // pairs; same-normal duplicates (the more common OBJ export
+      // pattern) still mis-keep the inner side. The downside of leaving
+      // all polys in is mild double-shadowing on shared pixels — much
+      // smaller visual regression than missing shadows entirely.
+      dedupByReceiver.set(m, new Set());
     }
 
 
@@ -1061,11 +1066,30 @@ export function createPolyScene(
     if (cached && cached.polygons === entry.polygons && cached.lightDirKey === lightDirKey) {
       return cached.occluded;
     }
-    const occluded = computeLightVisibility(entry.polygons, [lx, ly, lz]);
+    // Reuse the dedup drop-set across light-direction changes — it's a
+    // pure geometric property of the polygon set, not of the light. This
+    // matters because dedup is O(n²) and the raytrace itself is BVH-fast.
+    // Tight thresholds vs the shadow-rendering dedup (distanceTolerance:
+    // 0.5, overlapFraction: 0.95): only drop near-coincident back-to-back
+    // wall pairs (~0.05-0.1 mesh units apart — the OBJ double-face quirk
+    // that caused the cottage false-positive). With distanceTolerance: 0.5
+    // the bench castle drops 104/681 polys including legitimate occluded
+    // walls (polygon 111). Tightening to 0.12 + overlapFraction 0.98
+    // captures the cottage case and leaves merlon/tower geometry intact.
+    const dedupDropped = cached && cached.polygons === entry.polygons
+      ? cached.dedupDropped
+      : findOverlappingPolygonDuplicates(entry.polygons, {
+          normalTolerance: 0.1,
+          distanceTolerance: 0.12,
+          overlapFraction: 0.98,
+          preserveDoubleSidedBackfaces: false,
+        });
+    const occluded = computeLightVisibility(entry.polygons, [lx, ly, lz], dedupDropped);
     entry.lightOcclusionCache = {
       polygons: entry.polygons,
       lightDirKey,
       occluded,
+      dedupDropped,
     };
     return occluded;
   }
@@ -1086,16 +1110,22 @@ export function createPolyScene(
       ? { ...baseDirLight, direction: lightDirectionOverride }
       : baseDirLight;
     const directionalLight = worldDirectionalLightToCss(userDirLight);
-    // Per-light raytrace occlusion (task #121) is disabled: on real OBJ
-    // meshes with back-to-back inner/outer wall pairs (~0.05-0.1 mesh
-    // units apart, e.g. the bench cottage) it false-positives. A ray
-    // from the outer wall toward the light hits the inner wall layer
-    // within MIN_HIT_T (1e-3), the outer wall is flagged occluded, and
-    // its baked color drops to ambient-only — visible as a near-black
-    // cottage when ambient intensity is 0. Re-enabling needs either
-    // dedup-before-raytrace (drop the inner wall pair first) or a
-    // material-thickness-aware MIN_HIT_T (and probably both).
-    const lightOccludedPolyIndices: ReadonlySet<number> | undefined = undefined;
+    // Per-light raytrace occlusion (task #121). Re-enabled — the cottage
+    // false-positive (back-to-back inner/outer wall pairs ~0.05-0.1 mesh
+    // units apart self-occluding the outer face) is dropped via the
+    // dedup-before-raytrace path inside occludedPolyIndicesForEntry. We
+    // pass `findOverlappingPolygonDuplicates`'s drop-set as `skipIndices`
+    // to `computeLightVisibility`, which removes those polys from both
+    // the source loop AND the BVH candidate set.
+    //
+    // Frame: pass the USER-WORLD light direction, not the CSS-frame one.
+    // `computeLightVisibility` raytraces against polygon vertices in
+    // their original frame (vertex arrays as the parser produced them),
+    // so the light direction must match that frame. Passing the CSS-
+    // converted direction here mismatches axes (X↔Y swap) and silently
+    // gives wrong occlusion results — matches the regression from
+    // task #126.
+    const lightOccludedPolyIndices = occludedPolyIndicesForEntry(entry, userDirLight?.direction);
     if (canRenderVoxelDirect(entry)) {
       const renderer = createPolyVoxelRenderer({
         doc,

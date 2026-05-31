@@ -80,6 +80,10 @@ export interface MeshEntry {
     polygons: Polygon[];
     lightDirKey: string;
     occluded: ReadonlySet<number>;
+    /** Cached `findOverlappingPolygonDuplicates` drop-set for this mesh.
+     *  Invariant under light direction, so it's computed once per polygons
+     *  identity and reused on every cache-miss recompute. */
+    dedupDropped: ReadonlySet<number>;
   };
 }
 

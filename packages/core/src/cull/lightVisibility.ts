@@ -342,6 +342,7 @@ function rayHitsAnyInBVH(
 export function computeLightVisibility(
   polygons: readonly Polygon[],
   lightDir: Vec3,
+  skipIndices?: ReadonlySet<number>,
 ): Set<number> {
   const occluded = new Set<number>();
   if (polygons.length < 2) return occluded;
@@ -349,6 +350,14 @@ export function computeLightVisibility(
   if (lLen < PARALLEL_EPS) return occluded;
   const lx = lightDir[0] / lLen, ly = lightDir[1] / lLen, lz = lightDir[2] / lLen;
   const meta: Array<PolyMeta | null> = polygons.map(precompute);
+  // skipIndices: caller-supplied set of polygon indices to exclude from BOTH
+  // being raytraced AND from being raytrace candidates. Used to drop
+  // overlapping/duplicate polygons (e.g. back-to-back inner/outer wall
+  // pairs on imported OBJ meshes) that would otherwise self-occlude and
+  // false-positive a fully-lit outer face as shadowed.
+  if (skipIndices && skipIndices.size > 0) {
+    for (const i of skipIndices) meta[i] = null;
+  }
   const bvh = buildBVH(meta);
   const stack = new Int32Array(Math.max(64, bvh.nodeCount));
   for (let i = 0; i < polygons.length; i++) {

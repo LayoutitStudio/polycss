@@ -80,11 +80,7 @@ export function emitReceiverShadows(
   const ambColor = options.ambientLight?.color ?? "#ffffff";
   const ambIntensity = options.ambientLight?.intensity ?? 0.4;
   const dirIntensity = options.directionalLight?.intensity ?? 1;
-  const receiverColor = receiverEntry.polygons[0]?.color ?? "#cccccc";
   const userShadowColor = options.shadow?.color ?? "#000000";
-  const fillColor = hasTexture
-    ? userShadowColor
-    : shadePolygon(receiverColor, 0, "#000000", ambColor, ambIntensity);
   // worldCssForMesh pivots scale from mesh origin (matches buildMeshTransform);
   // rotation is intentionally not applied here because shadow geometry is
   // computed once per mesh-transform change and already lives in world coords
@@ -260,9 +256,14 @@ export function emitReceiverShadows(
     rotY: ctx.camera.state.rotY,
     meshRotation: receiverEntry.handle.transform.rotation,
   };
-  // Per-light raytrace receiver-skip is disabled — wall-thickness false-
-  // positives would also skip shadow projection on faces that actually
-  // receive light. See renderEntry for the full rationale.
+  // Per-light raytrace receiver-skip stays disabled. Using lightOcclusion-
+  // Cache to skip whole polys here loses the cast-shadow SHAPES that other
+  // casters project onto them — the centroid-only raytrace is a coarse
+  // binary (fully occluded vs not), but pixels across the polygon's face
+  // may legitimately receive direct light AND a separate cast-shadow
+  // silhouette from a neighbouring tower. Skipping the SVG for those
+  // polys produces "missing shadow" regressions. The slight double-
+  // darkening from baked-ambient + receiver-shadow is the lesser evil.
   const receiverOccluded = undefined as unknown as ReadonlySet<number> | undefined;
 
   for (const group of cachedPlanes) {
@@ -430,6 +431,13 @@ export function emitReceiverShadows(
       svg.setAttribute("data-poly-shadow-type", "receiver");
       svg.setAttribute("data-poly-shadow-receiver", meshShadowId(receiverEntry));
       svg.setAttribute("data-poly-shadow-receiver-face", String(group.faceIndex));
+      // Member polygon indices for this receiver face group. Exposed for
+      // the shadow-oracle bench to answer "is polygon N actually being
+      // considered as a shadow receiver, or did the engine drop it?" —
+      // critical to distinguish missing-shadow bugs (no SVG attempted)
+      // from path-doesn't-cover-pixel bugs (SVG attempted but projection
+      // misses the area).
+      svg.setAttribute("data-poly-shadow-receiver-polys", JSON.stringify(group.memberPolyIndices));
       svg.setAttribute("width", String(width));
       svg.setAttribute("height", String(height));
       svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
@@ -462,6 +470,19 @@ export function emitReceiverShadows(
       }
     }
     const opStr = effOp.toFixed(4);
+
+    // Per-face shadow tint: each receiver face uses ITS OWN polygon color
+    // for the ambient-only fill. Previously the whole mesh fell back to
+    // polygons[0].color, which painted brown shadows on the castle's grey
+    // walls because polygon 0 was the wooden door material. `group.memberPolyIndices`
+    // groups coplanar polygons that share the same surface; in practice
+    // they also share a material, so picking the first one is correct
+    // (and degrades to a single-material lookup for the common case).
+    const groupPolyIdx = group.memberPolyIndices[0] ?? 0;
+    const groupColor = receiverEntry.polygons[groupPolyIdx]?.color ?? "#cccccc";
+    const fillColor = hasTexture
+      ? userShadowColor
+      : shadePolygon(groupColor, 0, "#000000", ambColor, ambIntensity);
 
     // One <path> per contributing caster mesh, fill-rule=nonzero handles
     // intra-mesh overlap. `data-poly-shadow-caster-polys` is a JSON array
