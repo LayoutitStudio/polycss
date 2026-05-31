@@ -67,6 +67,8 @@ export type {
   AutoRotateConfig,
   CameraStyleInput,
 } from "./camera/camera";
+export { screenToWorldRay, screenToWorldOnSphere } from "./camera/unproject";
+export type { ScreenToWorldOptions } from "./camera/unproject";
 
 // ── Color & lighting ─────────────────────────────────────────────
 export {

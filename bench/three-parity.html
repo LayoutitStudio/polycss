@@ -63,7 +63,12 @@
     import {
       createPolyCamera, createPolyScene,
       createPolyBox, createPolyOctahedron, loadMesh,
+      screenToWorldOnSphere,
     } from "./.generated/polycss.js";
+
+    // World ↔ CSS px factor that the renderer applies to every vertex.
+    // The unprojection utility takes this as `tileSize`.
+    const POLY_TILE = 50;
 
     const Q = new URLSearchParams(location.search);
     const qn = (k, d) => (Q.has(k) ? +Q.get(k) : d);
@@ -421,43 +426,50 @@
     const lightSliderRefreshers = [];
     function refreshLightSliders() { for (const fn of lightSliderRefreshers) fn(); }
     let lightDragging = false;
-    // Direct pointer-drag on the helper marker (gallery-style — no
-    // axis-arrow gizmo, just grab the rhombus and drag). Horizontal
-    // pixel motion → azimuth rotation around world Z; vertical pixel
-    // motion → elevation tilt. Both at ~1° per pixel for snappy feel.
-    const DEG_PER_PX = 1.0;
+    // Direct pointer-drag on the helper marker — inverse-projects the mouse
+    // to a 3D point on the helper's sphere (radius = LIGHT_HELPER_DISTANCE
+    // around origin), so the rhombus tracks the cursor exactly instead of
+    // approximating with screen-delta rotations. screenToWorldOnSphere is
+    // a core utility that handles the camera's rotZ/rotX/scale chain.
+    // Slider limits (dir.x/y/z ∈ [-2, 2]) are enforced by clamping per
+    // axis after the unprojection.
+    const LIGHT_AXIS_LIMIT = 2;
     polyHost.addEventListener("pointerdown", (e) => {
       const target = e.target instanceof Element ? e.target : null;
       const helperEl = target?.closest('[data-light-helper="1"]');
       if (!helperEl) return;
       // stopImmediatePropagation: the bench attaches bindDrag(polyHost)
-      // below for camera orbit. Both handlers live on the SAME element,
-      // so stopPropagation alone wouldn't block the orbit listener —
-      // only stopImmediatePropagation prevents that sibling from firing.
+      // for camera orbit on the SAME element; only stopImmediate blocks
+      // the orbit listener that comes after this one in registration order.
       e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation();
       lightDragging = true;
       polyHost.setPointerCapture?.(e.pointerId);
-      // Snapshot the current direction in spherical form: azimuth around
-      // +Z (world) measured from +X CCW; elevation from horizon up.
-      const dx = S.dir.x, dy = S.dir.y, dz = S.dir.z;
-      const len = Math.hypot(dx, dy, dz) || 1;
-      const startMag = len;
-      const startAz = Math.atan2(dy, dx) * 180 / Math.PI;
-      const startEl = Math.asin(dz / len) * 180 / Math.PI;
-      const startX = e.clientX, startY = e.clientY;
       const onMove = (ev) => {
         if (!lightDragging) return;
         ev.preventDefault();
-        const dxPx = ev.clientX - startX;
-        const dyPx = ev.clientY - startY;
-        const az = startAz + dxPx * DEG_PER_PX;
-        const el = Math.max(-89, Math.min(89, startEl - dyPx * DEG_PER_PX));
-        const azR = az * Math.PI / 180;
-        const elR = el * Math.PI / 180;
-        const cosEl = Math.cos(elR);
-        S.dir.x = startMag * cosEl * Math.cos(azR);
-        S.dir.y = startMag * cosEl * Math.sin(azR);
-        S.dir.z = startMag * Math.sin(elR);
+        const hostRect = polyHost.getBoundingClientRect();
+        const hit = screenToWorldOnSphere({
+          camera: polyScene.camera.state,
+          tileSize: POLY_TILE,
+          viewportCenterX: hostRect.left + hostRect.width / 2,
+          viewportCenterY: hostRect.top + hostRect.height / 2,
+          mouseX: ev.clientX,
+          mouseY: ev.clientY,
+          sphereCenter: [0, 0, 0],
+          sphereRadius: LIGHT_HELPER_DISTANCE,
+        });
+        if (!hit) return;
+        // Direction vector is the unit-sphere position scaled to keep
+        // the user's CURRENT magnitude (slider UX preserves intensity
+        // feel across drags). Then clamp each axis to the slider range.
+        const oldLen = Math.hypot(S.dir.x, S.dir.y, S.dir.z) || 1;
+        const hitLen = Math.hypot(hit[0], hit[1], hit[2]) || 1;
+        const sx = (hit[0] / hitLen) * oldLen;
+        const sy = (hit[1] / hitLen) * oldLen;
+        const sz = (hit[2] / hitLen) * oldLen;
+        S.dir.x = Math.max(-LIGHT_AXIS_LIMIT, Math.min(LIGHT_AXIS_LIMIT, sx));
+        S.dir.y = Math.max(-LIGHT_AXIS_LIMIT, Math.min(LIGHT_AXIS_LIMIT, sy));
+        S.dir.z = Math.max(-LIGHT_AXIS_LIMIT, Math.min(LIGHT_AXIS_LIMIT, sz));
         refreshLightSliders();
         update(false);
       };
