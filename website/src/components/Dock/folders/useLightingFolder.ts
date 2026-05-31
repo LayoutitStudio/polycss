@@ -65,7 +65,7 @@ export function useLightingFolder(parent: GUI | null, inputs: LightingFolderInpu
   useSlider(
     folder,
     "Shadow reach",
-    { min: 200, max: 4000, step: 100 },
+    { min: 200, max: 10000, step: 100 },
     shadowMaxExtend,
     (value) => onUpdateScene({ shadowMaxExtend: value }),
   );
@@ -84,12 +84,12 @@ export function useLightingFolder(parent: GUI | null, inputs: LightingFolderInpu
   useSlider(folder, "Elev.", { min: 0, max: 90, step: 1 }, lightElevation, (value) =>
     onUpdateScene({ lightElevation: value }),
   );
-  useSlider(folder, "Key", { min: 0, max: 2, step: 0.05 }, lightIntensity, (value) =>
+  useSlider(folder, "Light intensity", { min: 0, max: 8, step: 0.05 }, lightIntensity, (value) =>
     onUpdateScene({ lightIntensity: value }),
   );
-  useColor(folder, "Key color", lightColor, (value) => onUpdateScene({ lightColor: value }));
+  useColor(folder, "Light color", lightColor, (value) => onUpdateScene({ lightColor: value }));
 
-  useSlider(folder, "Ambient", { min: 0, max: 2, step: 0.05 }, ambientIntensity, (value) =>
+  useSlider(folder, "Ambient", { min: 0, max: 4, step: 0.05 }, ambientIntensity, (value) =>
     onUpdateScene({ ambientIntensity: value }),
   );
   useColor(folder, "Amb. color", ambientColor, (value) => onUpdateScene({ ambientColor: value }));
