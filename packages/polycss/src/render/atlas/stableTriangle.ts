@@ -313,16 +313,22 @@ export function createSolidTriangleElement(
 ): HTMLElement {
   const el = doc.createElement("u");
   applySolidTriangleElement(el, entry);
+  // Always emit data-poly-index for devtools pinpointing. The update
+  // paths below skip data-attr work via outer guards (they hot-loop
+  // through transforms), so this mount-time call is what makes the
+  // index stick on every triangle leaf.
+  applyPolygonDataAttrs(el, entry.polygon, entry.index);
   return el;
 }
 
 export function createHiddenSolidTriangleElement(
   polygon: Polygon,
+  polygonIndex: number,
   doc: Document,
 ): HTMLElement {
   const el = doc.createElement("u");
   hideSolidTriangleElement(el);
-  if (polygon.data) applyPolygonDataAttrs(el, polygon);
+  applyPolygonDataAttrs(el, polygon, polygonIndex);
   return el;
 }
 
@@ -540,7 +546,7 @@ export function renderPolygonsWithStableTriangles(
     });
     const element = plan
       ? createSolidTriangleElement(plan, doc)
-      : createHiddenSolidTriangleElement(polygon, doc);
+      : createHiddenSolidTriangleElement(polygon, i, doc);
     rendered.push({ polygonIndex: i, element, kind: "triangle", dispose: () => {} });
   }
 

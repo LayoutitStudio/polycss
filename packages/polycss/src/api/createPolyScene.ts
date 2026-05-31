@@ -1727,7 +1727,7 @@ export function createPolyScene(
     if (!polygon) return false;
     const item = renderedItemForPolygon(entry, polygonIndex);
     if (!item) return false;
-    applyPolygonDataAttrs(item.element, polygon);
+    applyPolygonDataAttrs(item.element, polygon, polygonIndex);
     return true;
   }
 

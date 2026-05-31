@@ -36,10 +36,11 @@ import {
 export const ELEMENT_DATA_KEYS = new WeakMap<HTMLElement, string[]>();
 const ELEMENT_DATA_VALUES = new WeakMap<HTMLElement, Map<string, string>>();
 
-export function applyPolygonDataAttrs(el: HTMLElement, polygon: Polygon): void {
+export function applyPolygonDataAttrs(el: HTMLElement, polygon: Polygon, polygonIndex?: number): void {
   const previousDataKeys = ELEMENT_DATA_KEYS.get(el);
   const previousDataValues = ELEMENT_DATA_VALUES.get(el);
-  if (!polygon.data && (!previousDataKeys || previousDataKeys.length === 0)) {
+  const hasIndex = typeof polygonIndex === "number";
+  if (!polygon.data && !hasIndex && (!previousDataKeys || previousDataKeys.length === 0)) {
     (el as SolidTriangleElement).__polycssHasDataAttrs = false;
     return;
   }
@@ -49,6 +50,11 @@ export function applyPolygonDataAttrs(el: HTMLElement, polygon: Polygon): void {
       nextDataValues.set(k, String(v));
     }
   }
+  // Debug pinpointing: emit the polygon's index in the source mesh so
+  // devtools inspection can ref back to mesh.polygons[N]. Always-on
+  // because the cost is minimal (one short attribute per leaf, set once)
+  // and the convenience during shadow/lighting debugging is significant.
+  if (hasIndex) nextDataValues.set("poly-index", String(polygonIndex));
   if (previousDataKeys) {
     for (const key of previousDataKeys) {
       if (!nextDataValues.has(key)) el.removeAttribute(`data-${key}`);
@@ -149,7 +155,7 @@ export function updateAtlasElementWithStablePlan(
   const next = stableMatrixFromPlan(source, polygon);
   if (!next) {
     el.style.visibility = "hidden";
-    applyPolygonDataAttrs(el, polygon);
+    applyPolygonDataAttrs(el, polygon, source.index);
     return true;
   }
   el.style.visibility = "";
@@ -159,7 +165,7 @@ export function updateAtlasElementWithStablePlan(
     setInlineStyleProperty(el, "--pny", next.normal[1].toFixed(4));
     setInlineStyleProperty(el, "--pnz", next.normal[2].toFixed(4));
   }
-  applyPolygonDataAttrs(el, polygon);
+  applyPolygonDataAttrs(el, polygon, source.index);
   return true;
 }
 
@@ -257,7 +263,7 @@ export function createSolidElement(
     `transform:matrix3d(${formatSolidQuadMatrix(entry)})` +
       formatInitialSolidPaintStyle(entry, textureLighting, solidPaintDefaults, skipDynamicNormalVars),
   );
-  applyPolygonDataAttrs(el, entry.polygon);
+  applyPolygonDataAttrs(el, entry.polygon, entry.index);
 
   return el;
 }
@@ -275,7 +281,7 @@ export function createBorderShapeSolidElement(
     formatBorderShapeElementStyle(entry) +
       formatInitialSolidPaintStyle(entry, textureLighting, solidPaintDefaults, skipDynamicNormalVars),
   );
-  applyPolygonDataAttrs(el, entry.polygon);
+  applyPolygonDataAttrs(el, entry.polygon, entry.index);
 
   return el;
 }
@@ -294,7 +300,7 @@ export function createCornerShapeSolidElement(
     formatCornerShapeElementStyle(entry, geometry) +
       formatInitialSolidPaintStyle(entry, textureLighting, solidPaintDefaults, skipDynamicNormalVars),
   );
-  applyPolygonDataAttrs(el, entry.polygon);
+  applyPolygonDataAttrs(el, entry.polygon, entry.index);
 
   return el;
 }
@@ -312,7 +318,7 @@ export function createProjectiveSolidElement(
     `transform:matrix3d(${entry.projectiveMatrix})` +
       formatInitialSolidPaintStyle(entry, textureLighting, solidPaintDefaults, skipDynamicNormalVars),
   );
-  applyPolygonDataAttrs(el, entry.polygon);
+  applyPolygonDataAttrs(el, entry.polygon, entry.index);
 
   return el;
 }
@@ -334,7 +340,7 @@ export function updateSolidElementWithStablePlan(
   el.style.visibility = "";
   el.style.transform = `matrix3d(${next.matrix})`;
   applySolidPaint(el, entry, textureLighting, solidPaintDefaults);
-  applyPolygonDataAttrs(el, entry.polygon);
+  applyPolygonDataAttrs(el, entry.polygon, entry.index);
   return true;
 }
 
@@ -347,7 +353,7 @@ export function updateBorderShapeElementWithStablePlan(
   el.style.visibility = "";
   el.setAttribute("style", formatBorderShapeElementStyle(entry));
   applySolidPaint(el, entry, textureLighting, solidPaintDefaults);
-  applyPolygonDataAttrs(el, entry.polygon);
+  applyPolygonDataAttrs(el, entry.polygon, entry.index);
 }
 
 export function updateCornerShapeElementWithStablePlan(
@@ -361,7 +367,7 @@ export function updateCornerShapeElementWithStablePlan(
   el.setAttribute("style", formatCornerShapeElementStyle(entry, geometry));
   applySolidPaint(el, entry, textureLighting, solidPaintDefaults);
   setInlineStyleProperty(el, "background", "currentColor");
-  applyPolygonDataAttrs(el, entry.polygon);
+  applyPolygonDataAttrs(el, entry.polygon, entry.index);
 }
 
 export function createAtlasElement(
@@ -389,6 +395,6 @@ export function createAtlasElement(
       `;opacity:0` +
       dynamicNormalStyle,
   );
-  applyPolygonDataAttrs(el, entry.polygon);
+  applyPolygonDataAttrs(el, entry.polygon, entry.index);
   return el;
 }
