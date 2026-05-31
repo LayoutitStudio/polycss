@@ -93,6 +93,11 @@ import {
   strategiesEqual,
   vec3Equal,
 } from "./scene/equality";
+import {
+  groupReceiverFaceGroups,
+  meshScaleVec3,
+  worldCssForMesh,
+} from "./scene/shadowGeometry";
 import type {
   InternalPolyMeshHandle,
   InternalSetPolygonsOptions,
@@ -1595,254 +1600,6 @@ export function createPolyScene(
     return true;
   }
 
-  type ReceiverPlaneGroup = {
-    O: Vec3;       // CSS-3D origin (representative face vertex 0)
-    n: Vec3;       // unit normal
-    u: Vec3;       // in-plane u basis
-    v: Vec3;       // in-plane v basis (= n × u)
-    outlineUv: Array<[number, number]>;  // CCW convex hull of group's (u,v) coords
-    /** Per-constituent-polygon (u,v) outlines that make up this face
-     *  group. Used to post-filter sub-shadows that land inside the
-     *  convex hull but OUTSIDE the actual polygon union (concave
-     *  regions like an L-shape's inside corner — the hull bridges the
-     *  air gap, so shadows clipped to the hull paint in regions with
-     *  no physical surface). Each member is a CCW (u,v) polygon. */
-    memberPolysUv: Array<Array<[number, number]>>;
-    /** Receiver-mesh polygon indices for the members in memberPolysUv,
-     *  in matching order. Used to look up per-polygon facts about the
-     *  receiver surface (e.g. whether every member is occluded from
-     *  the light, in which case the entire face is already painted at
-     *  ambient-only by the baked atlas and no shadow projection should
-     *  be layered on top). */
-    memberPolyIndices: number[];
-  };
-
-  // Groups a receiver's polygons into shadow-receiving surfaces. Two
-  // passes:
-  //   (1) plane bucket — group by matching normal + plane offset within
-  //       tolerance. Catches tessellated flat regions (many triangles on
-  //       one plane).
-  //   (2) connected component — within each plane bucket, run union-find
-  //       on shared-edge adjacency (faces sharing >= 2 vertices). Catches
-  //       the case where a mesh has disjoint coplanar walls (e.g. cottage
-  //       front body + forward entry section both at same Y plane): the
-  //       hull-of-everything would bridge the air gap and paint shadow
-  //       on the empty space between them. Connected components keep
-  //       each real wall as its own group.
-  //
-  // Per group, output a convex hull in the group's (u, v) coords. Hull
-  // is the right shape for connected coplanar regions (cubes, planes,
-  // simple platforms). It still over-extends in true L-shaped regions
-  // where neighbouring edges connect AROUND a concave corner — rare for
-  // an L of just two edges, harder to avoid without a polygon-union
-  // implementation downstream (Sutherland-Hodgman needs convex clips).
-  //
-  // Tolerance choices: dot-product > 0.999 (~2.5° angular) catches
-  // tessellation artifacts on flat surfaces without merging adjacent
-  // faces of a low-poly curved mesh. Plane-offset tolerance is 0.5
-  // CSS px — sub-pixel coplanarity drift in glTF imports doesn't
-  // separate what should be a single surface.
-  // Minkowski expansion of a convex CCW polygon outward by `expand` units.
-  // Each vertex moves along the bisector of its two adjacent edge outward-
-  // perpendiculars, scaled so the edge offset distance equals `expand`
-  // (true Minkowski sum with a disk of radius `expand`, evaluated at the
-  // vertex). For convex inputs the result is a larger convex polygon with
-  // every edge offset outward by exactly `expand`.
-  function expandConvexHullOutward(hullCcw: Array<[number, number]>, expand: number): Array<[number, number]> {
-    if (hullCcw.length < 3 || expand === 0) return hullCcw;
-    const out: Array<[number, number]> = [];
-    const n = hullCcw.length;
-    for (let i = 0; i < n; i++) {
-      const u = hullCcw[(i - 1 + n) % n]!;
-      const v = hullCcw[i]!;
-      const w = hullCcw[(i + 1) % n]!;
-      // Outward perpendiculars for CCW: right side of each edge.
-      const e1x = v[0] - u[0], e1y = v[1] - u[1];
-      const e2x = w[0] - v[0], e2y = w[1] - v[1];
-      const l1 = Math.hypot(e1x, e1y), l2 = Math.hypot(e2x, e2y);
-      if (l1 < 1e-9 || l2 < 1e-9) { out.push(v); continue; }
-      const n1x = e1y / l1, n1y = -e1x / l1;
-      const n2x = e2y / l2, n2y = -e2x / l2;
-      const bx = n1x + n2x, by = n1y + n2y;
-      const bl = Math.hypot(bx, by);
-      if (bl < 1e-9) { out.push(v); continue; }
-      const bxn = bx / bl, byn = by / bl;
-      // Scale bisector so the perpendicular offset to each edge equals `expand`.
-      const dot = bxn * n1x + byn * n1y;
-      if (Math.abs(dot) < 1e-9) { out.push(v); continue; }
-      const scale = expand / dot;
-      out.push([v[0] + bxn * scale, v[1] + byn * scale]);
-    }
-    return out;
-  }
-
-  function groupReceiverFaceGroups(
-    receiver: MeshEntry,
-    rpos: Vec3,
-    worldCss: (vert: Vec3, pos: Vec3) => Vec3,
-    dedupDrop: Set<number>,
-  ): ReceiverPlaneGroup[] {
-    type FacePlane = {
-      face: Polygon;
-      O: Vec3; n: Vec3; u: Vec3; v: Vec3;
-      offset: number;  // plane offset = n · O, used as the hashing dim
-    };
-    type FacePlaneWithIndex = FacePlane & { polyIndex: number };
-    const facePlanes: FacePlaneWithIndex[] = [];
-    for (let i = 0; i < receiver.polygons.length; i++) {
-      if (dedupDrop.has(i)) continue;
-      const face = receiver.polygons[i]!;
-      if (face.vertices.length < 3) continue;
-      const O = worldCss(face.vertices[0]!, rpos);
-      const w1 = worldCss(face.vertices[1]!, rpos);
-      const w2 = worldCss(face.vertices[2]!, rpos);
-      const e1: Vec3 = [w1[0] - O[0], w1[1] - O[1], w1[2] - O[2]];
-      const e2: Vec3 = [w2[0] - O[0], w2[1] - O[1], w2[2] - O[2]];
-      // Normal = e2 × e1 (NOT e1 × e2). PolyCSS uses an axis swap
-      // (world Y → CSS X) when emitting leaves, which flips
-      // handedness. The atlas builder's outward face normal in CSS
-      // coords is the LEFT-hand cross product (= -right-hand). For
-      // shadow projection we need the same outward direction so the
-      // back-face cull aligns with what the renderer treats as the
-      // lit side. e1 × e2 would point inward → shadow would land on
-      // the side of the apple facing AWAY from the light (visible as
-      // "shadow on back/bottom of apple" instead of the lit side).
-      const nx = e2[1] * e1[2] - e2[2] * e1[1];
-      const ny = e2[2] * e1[0] - e2[0] * e1[2];
-      const nz = e2[0] * e1[1] - e2[1] * e1[0];
-      const nLen = Math.hypot(nx, ny, nz);
-      if (nLen < 1e-9) continue;
-      const n: Vec3 = [nx / nLen, ny / nLen, nz / nLen];
-      const e1Len = Math.hypot(e1[0], e1[1], e1[2]);
-      if (e1Len < 1e-9) continue;
-      const u: Vec3 = [e1[0] / e1Len, e1[1] / e1Len, e1[2] / e1Len];
-      const v: Vec3 = [
-        n[1] * u[2] - n[2] * u[1],
-        n[2] * u[0] - n[0] * u[2],
-        n[0] * u[1] - n[1] * u[0],
-      ];
-      const offset = n[0] * O[0] + n[1] * O[1] + n[2] * O[2];
-      facePlanes.push({ face, O, n, u, v, offset, polyIndex: i });
-    }
-
-    const NORMAL_TOL = 0.001;  // 1 - dot < 0.001  → ~2.5°
-    const OFFSET_TOL = 0.5;    // CSS px
-    type PlaneBucket = { rep: FacePlaneWithIndex; faces: FacePlaneWithIndex[] };
-    const planeBuckets: PlaneBucket[] = [];
-    // Step 1 — group faces by SHARED PLANE (matching normal + offset).
-    // This is the cheap pre-filter; the expensive connected-component
-    // step below only runs within each plane bucket.
-    for (const fp of facePlanes) {
-      let merged = false;
-      for (const g of planeBuckets) {
-        const r = g.rep;
-        const dot = fp.n[0] * r.n[0] + fp.n[1] * r.n[1] + fp.n[2] * r.n[2];
-        if (1 - dot > NORMAL_TOL) continue;
-        if (Math.abs(fp.offset - r.offset) > OFFSET_TOL) continue;
-        g.faces.push(fp);
-        merged = true;
-        break;
-      }
-      if (!merged) planeBuckets.push({ rep: fp, faces: [fp] });
-    }
-
-    // Step 2 — within each plane bucket, run a connected-component pass
-    // based on SHARED EDGES (two faces are in the same component iff they
-    // share at least 2 vertices within tolerance). This keeps tessellated
-    // surfaces grouped (their triangles share edges) while preventing the
-    // hull from spanning disjoint coplanar regions — e.g. on the bench
-    // cottage the front wall of the main body and the front wall of a
-    // forward-extending entry are both at the same Y-plane but separated
-    // by the air gap between them. With the old single-hull-per-bucket
-    // approach the hull bridged them, producing a giant "phantom wall"
-    // that received shadow in the empty space between the two real
-    // walls. Connected components give each real wall its own group.
-    const out: ReceiverPlaneGroup[] = [];
-    const VERTEX_KEY_PRECISION = 3;  // ~0.001 CSS px
-    const vertexKey = (w: Vec3): string =>
-      `${w[0].toFixed(VERTEX_KEY_PRECISION)},${w[1].toFixed(VERTEX_KEY_PRECISION)},${w[2].toFixed(VERTEX_KEY_PRECISION)}`;
-    for (const bucket of planeBuckets) {
-      if (bucket.faces.length === 1) {
-        emitGroup(bucket.faces);
-        continue;
-      }
-      // For each face in this bucket, collect its (quantized) world-space
-      // vertex keys. Two faces are adjacent if they share >= 2 keys.
-      const faceVertexSets: Set<string>[] = bucket.faces.map((fp) => {
-        const set = new Set<string>();
-        for (const vert of fp.face.vertices) set.add(vertexKey(worldCss(vert, rpos)));
-        return set;
-      });
-      const parent: number[] = bucket.faces.map((_, i) => i);
-      const find = (x: number): number => {
-        while (parent[x]! !== x) { parent[x] = parent[parent[x]!]!; x = parent[x]!; }
-        return x;
-      };
-      const union = (a: number, b: number) => {
-        const ra = find(a), rb = find(b);
-        if (ra !== rb) parent[ra] = rb;
-      };
-      for (let i = 0; i < bucket.faces.length; i++) {
-        for (let j = i + 1; j < bucket.faces.length; j++) {
-          const a = faceVertexSets[i]!, b = faceVertexSets[j]!;
-          let shared = 0;
-          for (const k of a) if (b.has(k)) { shared++; if (shared >= 2) break; }
-          if (shared >= 2) union(i, j);
-        }
-      }
-      const componentFaces = new Map<number, FacePlaneWithIndex[]>();
-      for (let i = 0; i < bucket.faces.length; i++) {
-        const root = find(i);
-        let arr = componentFaces.get(root);
-        if (!arr) { arr = []; componentFaces.set(root, arr); }
-        arr.push(bucket.faces[i]!);
-      }
-      for (const componentFacesArr of componentFaces.values()) emitGroup(componentFacesArr);
-    }
-
-    function emitGroup(faces: FacePlaneWithIndex[]): void {
-      const rep = faces[0]!;
-      const { O, n, u, v } = rep;
-      const uvs: Array<[number, number]> = [];
-      const memberPolysUv: Array<Array<[number, number]>> = [];
-      const memberPolyIndices: number[] = [];
-      for (const fp of faces) {
-        const polyUv: Array<[number, number]> = [];
-        for (const vert of fp.face.vertices) {
-          const w = worldCss(vert, rpos);
-          const dx = w[0] - O[0];
-          const dy = w[1] - O[1];
-          const dz = w[2] - O[2];
-          const pt: [number, number] = [
-            dx * u[0] + dy * u[1] + dz * u[2],
-            dx * v[0] + dy * v[1] + dz * v[2],
-          ];
-          uvs.push(pt);
-          polyUv.push(pt);
-        }
-        if (polyUv.length >= 3) {
-          memberPolysUv.push(ensureCcw2D(polyUv));
-          memberPolyIndices.push(fp.polyIndex);
-        }
-      }
-      if (uvs.length < 3) return;
-      const hull = convexHull2D(uvs);
-      if (hull.length < 3) return;
-      // Minkowski-expand the outline outward by RECEIVER_OUTLINE_EXPAND CSS
-      // px so shadow projections clipped to this outline extend slightly
-      // past the actual polygon edge. The adjacent receiver face that shares
-      // the edge expands by the same amount in its own UV basis, so the two
-      // shadows overlap by ~2×EXPAND at the corner — eliminating the
-      // sub-pixel light strip that used to appear where two wall faces meet
-      // (the residual gap left after SELF_SHADOW_EPS / lift reductions).
-      // 0.5 CSS px is small enough that shadows extending past edges into
-      // empty 3D space stay sub-pixel at typical zoom.
-      const RECEIVER_OUTLINE_EXPAND = 0.5;
-      const outlineUv = expandConvexHullOutward(ensureCcw2D(hull), RECEIVER_OUTLINE_EXPAND);
-      out.push({ O, n, u, v, outlineUv, memberPolysUv, memberPolyIndices });
-    }
-    return out;
-  }
 
   // Scene-level per-receiver-surface shadow. For each coplanar face
   // group on the receiver, project EVERY caster's polygons onto that
@@ -1908,31 +1665,13 @@ export function createPolyScene(
     // the wrapper, but rotation does NOT need handling here because
     // shadow geometry is computed once per mesh-transform change and
     // already lives in world coords after the per-vertex transform.
-    const meshScaleVec3 = (m: MeshEntry | undefined): Vec3 => {
-      const s = m?.handle?.transform?.scale;
-      if (s === undefined || s === null) return [1, 1, 1];
-      if (typeof s === "number") return [s, s, s];
-      return [s[0] ?? 1, s[1] ?? 1, s[2] ?? 1];
-    };
-    const worldCssForMesh = (mesh: MeshEntry | undefined) => {
-      const scale = meshScaleVec3(mesh);
-      const unit = scale[0] === 1 && scale[1] === 1 && scale[2] === 1;
-      return (vert: Vec3, pos: Vec3): Vec3 => {
-        const cssPos = worldPositionToCss(pos);
-        const x0 = vert[1] * DEFAULT_TILE;
-        const y0 = vert[0] * DEFAULT_TILE;
-        const z0 = vert[2] * DEFAULT_TILE;
-        // Scale pivots from origin (= multiply each component by scale).
-        const sx = unit ? x0 : x0 * scale[0];
-        const sy = unit ? y0 : y0 * scale[1];
-        const sz = unit ? z0 : z0 * scale[2];
-        return [sx + cssPos[0], sy + cssPos[1], sz + cssPos[2]];
-      };
-    };
-    // The receiver-side worldCss handles the RECEIVER mesh's scale +
-    // bbox; the per-caster loop below builds its own worldCss for each
-    // caster mesh.
-    const worldCss = worldCssForMesh(receiverEntry);
+    // The receiver-side worldCss handles the RECEIVER mesh's scale; the
+    // per-caster loop below builds its own worldCss for each caster mesh.
+    // `worldCssForMesh` is pure and pivots scale from mesh origin (matches
+    // buildMeshTransform); rotation is intentionally not applied here
+    // because shadow geometry is computed once per mesh-transform change
+    // and already lives in world coords after the per-vertex transform.
+    const worldCss = worldCssForMesh(receiverEntry.handle.transform.scale);
 
     // Group receiver polygons by shared plane (matching normal AND offset
     // within tolerance). Each group becomes ONE shadow surface: instead
@@ -1948,7 +1687,7 @@ export function createPolyScene(
     // later light positions do not project onto that face.
     // Cache key includes the dedup-drop set size so changing receiver
     // geometry / dedup tolerances invalidates the cached face planes.
-    const receiverScale = meshScaleVec3(receiverEntry);
+    const receiverScale = meshScaleVec3(receiverEntry.handle.transform.scale);
     const rbboxCss = receiverEntry.bboxCenterCss;
     // Include shadow.lift in the cache key because the lift gets baked
     // into each cached plane's origin (Ox/Oy/Oz). A caller that scales
@@ -1960,7 +1699,7 @@ export function createPolyScene(
     const cacheKey = `${receiverEntry.polygons.length}|${receiverDedupDrop.size}|${rpos.join(",")}|${receiverScale.join(",")}|${rbboxCss ? rbboxCss.join(",") : "n"}|${cacheShadowLift}`;
     let cachedPlanes = receiverShadowCache.get(receiverEntry);
     if (cachedPlanes === undefined || receiverShadowCacheKey.get(receiverEntry) !== cacheKey) {
-      const surfaces = groupReceiverFaceGroups(receiverEntry, rpos, worldCss, receiverDedupDrop);
+      const surfaces = groupReceiverFaceGroups(receiverEntry.polygons, rpos, worldCss, receiverDedupDrop);
       cachedPlanes = surfaces.map((group, faceIndex): ReceiverFacePlane => {
         const { O, n, u, v, outlineUv, memberPolysUv, memberPolyIndices } = group;
         let minU = Infinity, minV = Infinity, maxU = -Infinity, maxV = -Infinity;
@@ -2111,7 +1850,7 @@ export function createPolyScene(
       // only OTHER parts of the same mesh that are above the receiver
       // plane along the light direction.
       const cpos = caster.handle.transform.position ?? [0, 0, 0];
-      const casterScale = meshScaleVec3(caster);
+      const casterScale = meshScaleVec3(caster.handle.transform.scale);
       // Cache key includes the caster's scale + bbox so a scale change
       // (or any geometry update that moves the bbox center) busts the
       // cached world-vertex list. Without this the cottage scale slider
@@ -2122,7 +1861,7 @@ export function createPolyScene(
       if (cached === undefined || casterItemsCacheKey.get(caster) !== ckey) {
         const dedupDrop = dedupByCaster.get(caster)!;
         cached = [];
-        const casterWorldCss = worldCssForMesh(caster);
+        const casterWorldCss = worldCssForMesh(caster.handle.transform.scale);
         for (const item of caster.rendered) {
           if (dedupDrop.has(item.polygonIndex)) continue;
           const plan = item.plan;
