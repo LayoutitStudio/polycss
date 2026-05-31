@@ -105,8 +105,11 @@ export function screenToWorldRay(opts: ScreenToWorldOptions): { origin: Vec3; di
 
 /**
  * Unproject the cursor and intersect with a sphere in world coords.
- * Returns the FRONT intersection (the one closer to the camera) or
- * null if the ray misses.
+ * Returns the FRONT intersection (the one closer to the camera) when
+ * the ray hits the sphere. When the ray misses (cursor outside the
+ * projected silhouette), returns the point on the sphere's silhouette
+ * closest to the cursor — that way callers like draggable helpers keep
+ * tracking the cursor along the rim instead of freezing in place.
  */
 export function screenToWorldOnSphere(
   opts: ScreenToWorldOptions & { sphereCenter: Vec3; sphereRadius: number },
@@ -123,21 +126,40 @@ export function screenToWorldOnSphere(
   const Dz = direction[2];
 
   const a = Dx * Dx + Dy * Dy + Dz * Dz;
+  if (a === 0) return null;
   const b = 2 * (Ox * Dx + Oy * Dy + Oz * Dz);
   const c = Ox * Ox + Oy * Oy + Oz * Oz - sphereRadius * sphereRadius;
   const disc = b * b - 4 * a * c;
-  if (disc < 0 || a === 0) return null;
-  const sqrtD = Math.sqrt(disc);
-  const t1 = (-b - sqrtD) / (2 * a);
-  const t2 = (-b + sqrtD) / (2 * a);
-  // Pick the FRONT intersection — the one with the greater "camera-Z"
-  // component (in CSS frame, +Z is toward the viewer). After axis swap
-  // world-Z aligns with CSS-Z, so we pick whichever t yields a higher
-  // world Z value along the ray.
-  const tFront = direction[2] >= 0 ? Math.max(t1, t2) : Math.min(t1, t2);
+
+  if (disc >= 0) {
+    const sqrtD = Math.sqrt(disc);
+    const t1 = (-b - sqrtD) / (2 * a);
+    const t2 = (-b + sqrtD) / (2 * a);
+    // Pick the FRONT intersection — after axis swap world-Z aligns with
+    // CSS-Z and +Z is toward the viewer; greater t·dirZ wins.
+    const tFront = direction[2] >= 0 ? Math.max(t1, t2) : Math.min(t1, t2);
+    return [
+      origin[0] + tFront * direction[0],
+      origin[1] + tFront * direction[1],
+      origin[2] + tFront * direction[2],
+    ];
+  }
+
+  // Ray missed the sphere — find the point on the sphere closest to the
+  // ray (foot of perpendicular from center → ray, then snap to surface).
+  // t* = (C - O) · D / |D|² minimises distance along the ray.
+  const tStar = -(Ox * Dx + Oy * Dy + Oz * Dz) / a;
+  const footX = origin[0] + tStar * Dx;
+  const footY = origin[1] + tStar * Dy;
+  const footZ = origin[2] + tStar * Dz;
+  const fx = footX - sphereCenter[0];
+  const fy = footY - sphereCenter[1];
+  const fz = footZ - sphereCenter[2];
+  const flen = Math.hypot(fx, fy, fz);
+  if (flen === 0) return null;
   return [
-    origin[0] + tFront * direction[0],
-    origin[1] + tFront * direction[1],
-    origin[2] + tFront * direction[2],
+    sphereCenter[0] + (fx / flen) * sphereRadius,
+    sphereCenter[1] + (fy / flen) * sphereRadius,
+    sphereCenter[2] + (fz / flen) * sphereRadius,
   ];
 }
