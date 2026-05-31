@@ -136,26 +136,58 @@ export interface PolyMeshProps extends TransformProps, InteractionProps {
   style?: CSSProperties;
 }
 
+/**
+ * Build the mesh wrapper's CSS transform from a Three.js-style transform
+ * (post-parity convention):
+ *   - `position` is in WORLD UNITS (`+X right, +Y forward, +Z up`); the
+ *     renderer applies the world→CSS axis swap (`world.x → CSS.y`,
+ *     `world.y → CSS.x`) and ×`BASE_TILE` scale here.
+ *   - `scale` pivots from the mesh ORIGIN (Three.js `mesh.scale` semantics —
+ *     a vertex at z=0 stays at z=0 so a scaled mesh "lands" on the floor
+ *     instead of floating). The browser's `transform-origin` is the polygon
+ *     bbox center, so we compose `M_string = T(pos - bbox) · S · T(bbox)` to
+ *     end up with `M_eff = T(pos) · S(around origin) · R(around bbox)`.
+ *   - `rotation` pivots from the bbox center (PolyCSS UX — rotating around
+ *     the visible center feels right).
+ *
+ * Mirror of the vanilla `buildMeshTransform` in
+ * `packages/polycss/src/api/scene/transforms.ts`.
+ */
 function buildTransform(
   position: Vec3 | undefined,
   scale: number | Vec3 | undefined,
-  rotation: Vec3 | undefined
+  rotation: Vec3 | undefined,
+  bboxCenterCss: Vec3 | undefined,
 ): string | undefined {
+  const sx = typeof scale === "number" ? scale : (scale?.[0] ?? 1);
+  const sy = typeof scale === "number" ? scale : (scale?.[1] ?? 1);
+  const sz = typeof scale === "number" ? scale : (scale?.[2] ?? 1);
+  const hasScale = sx !== 1 || sy !== 1 || sz !== 1;
+  const hasRotation = !!rotation && (!!rotation[0] || !!rotation[1] || !!rotation[2]);
+  // World→CSS axis swap + ×BASE_TILE on `position`.
+  const cssPos: Vec3 = position
+    ? [position[1] * BASE_TILE, position[0] * BASE_TILE, position[2] * BASE_TILE]
+    : [0, 0, 0];
+  const bx = bboxCenterCss?.[0] ?? 0;
+  const by = bboxCenterCss?.[1] ?? 0;
+  const bz = bboxCenterCss?.[2] ?? 0;
+  const hasBbox = bx !== 0 || by !== 0 || bz !== 0;
+
   const parts: string[] = [];
-  if (position) {
-    parts.push(`translate3d(${position[0]}px, ${position[1]}px, ${position[2]}px)`);
+  const tx = cssPos[0] - (hasScale && hasBbox ? bx : 0);
+  const ty = cssPos[1] - (hasScale && hasBbox ? by : 0);
+  const tz = cssPos[2] - (hasScale && hasBbox ? bz : 0);
+  if (tx !== 0 || ty !== 0 || tz !== 0) {
+    parts.push(`translate3d(${tx}px, ${ty}px, ${tz}px)`);
   }
-  if (scale !== undefined) {
-    if (typeof scale === "number") {
-      if (scale !== 1) parts.push(`scale3d(${scale}, ${scale}, ${scale})`);
-    } else {
-      parts.push(`scale3d(${scale[0]}, ${scale[1]}, ${scale[2]})`);
-    }
+  if (hasScale) {
+    parts.push(`scale3d(${sx}, ${sy}, ${sz})`);
+    if (hasBbox) parts.push(`translate3d(${bx}px, ${by}px, ${bz}px)`);
   }
-  if (rotation) {
-    if (rotation[0]) parts.push(`rotateX(${rotation[0]}deg)`);
-    if (rotation[1]) parts.push(`rotateY(${rotation[1]}deg)`);
-    if (rotation[2]) parts.push(`rotateZ(${rotation[2]}deg)`);
+  if (hasRotation) {
+    if (rotation![0]) parts.push(`rotateX(${rotation![0]}deg)`);
+    if (rotation![1]) parts.push(`rotateY(${rotation![1]}deg)`);
+    if (rotation![2]) parts.push(`rotateZ(${rotation![2]}deg)`);
   }
   return parts.length > 0 ? parts.join(" ") : undefined;
 }
@@ -268,15 +300,12 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
     [sourcePolygons, autoCenter]
   );
 
-  const transform = buildTransform(position, scale, rotation);
-
-  // Pivot rotation + scale around the polygon bbox center, matching vanilla's
-  // `.polycss-mesh { transform-origin: var(--origin) }`. Without this the
-  // wrapper would pivot at its own (0,0,0) — which usually doesn't coincide
-  // with the visible mesh center, so rotateX/Y/Z would orbit the mesh around
-  // the asset's authoring origin and scale would push it sideways. World→CSS
-  // axis swap: world[1]→CSS x, world[0]→CSS y, world[2]→CSS z.
-  const transformOrigin = useMemo(() => {
+  // Polygon bbox CENTER in CSS world coords. Shared by `transformOrigin`
+  // (the `.polycss-mesh` CSS pivot, matching vanilla's
+  // `transform-origin: var(--origin)`) AND by `buildTransform` (the
+  // scale-from-mesh-origin math needs the bbox to compute its T(pos - bbox)
+  // pre-translation). Computed once per polygon-list identity.
+  const bboxCenterCss = useMemo<Vec3 | undefined>(() => {
     if (polygons.length === 0) return undefined;
     let minX = Infinity, minY = Infinity, minZ = Infinity;
     let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
@@ -288,12 +317,22 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
       }
     }
     if (!Number.isFinite(minX)) return undefined;
-    const tile = 50;
-    const x = ((minY + maxY) / 2) * tile;
-    const y = ((minX + maxX) / 2) * tile;
-    const z = ((minZ + maxZ) / 2) * tile;
-    return `${x}px ${y}px ${z}px`;
+    // World→CSS axis swap: world[1]→CSS x, world[0]→CSS y, world[2]→CSS z.
+    return [
+      ((minY + maxY) / 2) * BASE_TILE,
+      ((minX + maxX) / 2) * BASE_TILE,
+      ((minZ + maxZ) / 2) * BASE_TILE,
+    ];
   }, [polygons]);
+
+  const transform = buildTransform(position, scale, rotation, bboxCenterCss);
+
+  const transformOrigin = useMemo(
+    () => bboxCenterCss
+      ? `${bboxCenterCss[0]}px ${bboxCenterCss[1]}px ${bboxCenterCss[2]}px`
+      : undefined,
+    [bboxCenterCss],
+  );
 
   // ── Imperative ref handle + DOM registry ──────────────────────────────
   // The handle is a stable object whose getters always read the latest

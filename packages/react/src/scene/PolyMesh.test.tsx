@@ -238,13 +238,14 @@ describe("PolyMesh — transform props", () => {
     document.body.innerHTML = "";
   });
 
-  it("applies translate3d from position prop", () => {
+  it("applies translate3d from position prop (post-parity: world units × BASE_TILE with axis swap)", () => {
     const container = renderMesh({
       polygons: [TRIANGLE],
       position: [10, 20, 30],
     });
     const mesh = container.querySelector(".polycss-mesh") as HTMLElement;
-    expect(mesh.style.transform).toContain("translate3d(10px, 20px, 30px)");
+    // world (10, 20, 30) → CSS (worldY*50, worldX*50, worldZ*50) = (1000, 500, 1500)
+    expect(mesh.style.transform).toContain("translate3d(1000px, 500px, 1500px)");
   });
 
   it("applies scale3d from scalar scale prop", () => {

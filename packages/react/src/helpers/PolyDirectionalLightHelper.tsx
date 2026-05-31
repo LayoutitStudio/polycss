@@ -20,19 +20,15 @@ export interface PolyDirectionalLightHelperProps {
   color?: string;
 }
 
-// World units → CSS pixels conversion used by PolyMesh's `position` prop.
-// Matches the default tileSize / layerElevation in PolyScene; if the scene
-// ever exposes custom values we'd thread them through here.
-const TILE = 50;
-
 /**
  * PolyDirectionalLightHelper — small octahedron placed along the light's
  * direction vector. Mirrors three.js's `DirectionalLightHelper`.
  *
- * `light.direction` is in CSS-pixel space (axis convention used by the
- * shader). Polygon vertices are in world space, which the renderer remaps
- * via `[v[1], v[0], v[2]]`. The helper reverses that swap so the marker
- * lands where the light visibly comes from on screen.
+ * Post-parity: both `light.direction` and `target` are in WORLD coords
+ * (`+X right, +Y forward, +Z up`), and `<PolyMesh>`'s `position` prop is
+ * also world units (the renderer applies the world→CSS axis swap +
+ * ×BASE_TILE internally). The helper just adds `dir × distance` to
+ * `target` and passes the result through.
  *
  * The octahedron is built at LOCAL origin once; the world position is
  * applied via PolyMesh's `position` prop (a CSS transform on the wrapper).
@@ -59,10 +55,11 @@ export function PolyDirectionalLightHelper({
     const tx = target?.[0] ?? 0;
     const ty = target?.[1] ?? 0;
     const tz = target?.[2] ?? 0;
-    const worldX = tx + (dy / len) * distance;
-    const worldY = ty + (dx / len) * distance;
-    const worldZ = tz + (dz / len) * distance;
-    return [worldY * TILE, worldX * TILE, worldZ * TILE];
+    return [
+      tx + (dx / len) * distance,
+      ty + (dy / len) * distance,
+      tz + (dz / len) * distance,
+    ];
   }, [light.direction, target, distance]);
 
   return <PolyMesh polygons={polygons} position={meshPosition} />;
