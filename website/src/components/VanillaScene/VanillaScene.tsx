@@ -439,7 +439,16 @@ export function VanillaScene({
         ...(previewShadow ? { shadow: nextShadow } : {}),
       });
     } else {
-      if (previewShadow) scene.setOptions({ shadow: nextShadow });
+      // Pass `directionalLight` even in baked mode so the scene re-emits
+      // shadow SVGs against the live light direction during drag. Matches
+      // the bench's behavior — shadows follow the helper without waiting
+      // for commit. The baked atlas pixels themselves are NOT re-rasterised
+      // mid-drag; that happens on commit via commitBakedSolidLighting.
+      if (previewShadow) {
+        scene.setOptions({ directionalLight: nextDirectionalLight, shadow: nextShadow });
+      } else {
+        scene.setOptions({ directionalLight: nextDirectionalLight });
+      }
       (scene as BakedSolidLightingPreviewSceneHandle).previewBakedSolidLighting?.({
         directionalLight: nextDirectionalLight,
         ambientLight: ambientFromOptions(nextOptions),
