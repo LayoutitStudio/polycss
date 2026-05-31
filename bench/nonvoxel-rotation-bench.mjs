@@ -168,6 +168,9 @@ function selectedModels() {
   const selected = requested.map((id) => {
     const known = byId.get(id);
     if (known) return known;
+    if (id.startsWith("synth-")) {
+      return { id, label: id, mesh: id };
+    }
     if (id.startsWith("glb:") || id.startsWith("obj:")) {
       return { id: id.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, ""), label: id, mesh: id };
     }
@@ -344,6 +347,7 @@ function aggregateRuns(runs) {
     sample_count_filtered: median(runs.map((run) => run.sample_count_filtered)),
     polyCount: runs[0]?.polyCount ?? 0,
     renderStats: runs[0]?.renderStats ?? null,
+    borderShapeStats: runs[0]?.borderShapeStats ?? null,
     runs,
   };
 }
@@ -375,6 +379,7 @@ async function runOnce(port, model, variant, mode) {
       samples: window.__perf__.samples.slice(from),
       polyCount: window.__perf__.polyCount,
       renderStats: window.__perf__.renderStats ?? null,
+      borderShapeStats: window.__nonvoxelBench?.borderShapeStats?.() ?? null,
     }), startIdx);
     await ctx.close();
 
@@ -384,6 +389,7 @@ async function runOnce(port, model, variant, mode) {
       ...summarizeFrameTimes(dts, rawDts.length),
       polyCount: pageResult.polyCount,
       renderStats: pageResult.renderStats,
+      borderShapeStats: pageResult.borderShapeStats,
     };
   } finally {
     await browser.close();
@@ -477,6 +483,7 @@ try {
           sample_count_filtered: result.sample_count_filtered,
           polyCount: result.polyCount,
           renderStats: result.renderStats,
+          borderShapeStats: result.borderShapeStats,
           runs: result.runs,
         };
         rows.push(row);

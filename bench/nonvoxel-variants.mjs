@@ -42,6 +42,48 @@ export const NONVOXEL_VARIANTS = [
     hypothesis: "Force irregular solids to atlas slices instead of border-shape leaves.",
   },
   {
+    id: "border-shape-classes",
+    label: "Border Shape Classes",
+    params: { borderShapeMode: "class" },
+    hypothesis: "Keep <i> leaves but move repeated border-shape declarations from inline style into generated CSS classes.",
+  },
+  {
+    id: "border-shape-vars",
+    label: "Border Shape Vars",
+    params: { borderShapeMode: "var" },
+    hypothesis: "Keep <i> leaves but route border-shape through a per-leaf CSS variable.",
+  },
+  {
+    id: "no-stable-tri-border-shape-classes",
+    label: "No Stable Triangles + Border Shape Classes",
+    params: { disableStrategies: "u", borderShapeMode: "class" },
+    hypothesis: "Force triangles through <i> while moving repeated border-shape declarations into generated CSS classes.",
+  },
+  {
+    id: "no-stable-tri-border-shape-vars",
+    label: "No Stable Triangles + Border Shape Vars",
+    params: { disableStrategies: "u", borderShapeMode: "var" },
+    hypothesis: "Force triangles through <i> while routing border-shape through a per-leaf CSS variable.",
+  },
+  {
+    id: "all-border-shape",
+    label: "All Solids Via Border Shape",
+    params: { disableStrategies: "b,u" },
+    hypothesis: "Force solid quads and triangles through the same <i> border-shape renderer path.",
+  },
+  {
+    id: "all-border-shape-classes",
+    label: "All Solids Via Border Shape Classes",
+    params: { disableStrategies: "b,u", borderShapeMode: "class" },
+    hypothesis: "Force solid quads and triangles through <i>, with repeated border-shape declarations hoisted into generated CSS classes.",
+  },
+  {
+    id: "all-border-shape-vars",
+    label: "All Solids Via Border Shape Vars",
+    params: { disableStrategies: "b,u", borderShapeMode: "var" },
+    hypothesis: "Force solid quads and triangles through <i>, with the border-shape payload routed through per-leaf CSS variables.",
+  },
+  {
     id: "no-stable-tri",
     label: "No Stable Triangles",
     params: { disableStrategies: "u" },
