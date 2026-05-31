@@ -263,7 +263,18 @@ export function renderPolygonsWithTextureAtlas(
         for (const entry of page.entries) {
           const el = atlasElements.get(entry.index);
           if (!el || !built.url) continue;
-          applyAtlasBackground(el, built, textureLighting, entry, !skipDynamicNormalVars);
+          // preserveDynamicNormalVars is always true here — this callback fires
+// AFTER syncMountedRendered has already grouped polys into buckets and
+// restored inline normals on solo polys. Passing false would re-write
+// the leaf's style attribute without normals and wipe out the work
+// restoreInlineDynamicNormalVars just did, leaving solo polys
+// (those with a unique normal+color among siblings) reading Lambert
+// against the @property defaults (0,0,1). The atlas-plan normal here
+// matches what restoreInlineDynamicNormalVars sets, so re-applying it
+// is a no-op for solo polys; for bucketed polys the inline value is
+// unused (the bucket parent drives --plam) but doesn't change the
+// inherited result.
+applyAtlasBackground(el, built, textureLighting, entry, true);
         }
       }
     })
@@ -416,7 +427,18 @@ export async function renderPolygonsWithTextureAtlasAsync(
         for (const entry of page.entries) {
           const el = atlasElements.get(entry.index);
           if (!el || !built.url) continue;
-          applyAtlasBackground(el, built, textureLighting, entry, !skipDynamicNormalVars);
+          // preserveDynamicNormalVars is always true here — this callback fires
+// AFTER syncMountedRendered has already grouped polys into buckets and
+// restored inline normals on solo polys. Passing false would re-write
+// the leaf's style attribute without normals and wipe out the work
+// restoreInlineDynamicNormalVars just did, leaving solo polys
+// (those with a unique normal+color among siblings) reading Lambert
+// against the @property defaults (0,0,1). The atlas-plan normal here
+// matches what restoreInlineDynamicNormalVars sets, so re-applying it
+// is a no-op for solo polys; for bucketed polys the inline value is
+// unused (the bucket parent drives --plam) but doesn't change the
+// inherited result.
+applyAtlasBackground(el, built, textureLighting, entry, true);
         }
       }
     })
