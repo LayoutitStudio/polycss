@@ -763,6 +763,32 @@
         inp.type = "range"; inp.min = r.min; inp.max = r.max; inp.step = r.step;
         inp.value = S[r.k[0]][r.k[1]];
         const val = document.createElement("span"); val.className = "val"; val.textContent = r.fmt(S[r.k[0]][r.k[1]]);
+        const isLightSlider = (r.k[0] === "dir" || r.k[0] === "amb");
+        // Baked mode is treated as truly static: while a light slider is
+        // being dragged, the meshes don't repaint. A single rebake fires
+        // 150ms after the last input event so the final state lands on
+        // the precise baked Lambert. Dynamic mode (CSS calc per pixel)
+        // updates per-frame as setOptions writes the light-direction
+        // vars to the scene root — no rebake needed there.
+        let dragging = false;
+        let endTimer = null;
+        const onDragStart = () => {
+          if (!isLightSlider || S.lighting !== "baked") return;
+          dragging = true;
+          if (endTimer) { clearTimeout(endTimer); endTimer = null; }
+        };
+        const onDragEnd = () => {
+          if (!isLightSlider || S.lighting !== "baked" || !dragging) return;
+          if (endTimer) clearTimeout(endTimer);
+          endTimer = setTimeout(() => {
+            endTimer = null;
+            dragging = false;
+            update(true);
+          }, 150);
+        };
+        inp.addEventListener("pointerdown", onDragStart);
+        inp.addEventListener("pointerup", onDragEnd);
+        inp.addEventListener("change", onDragEnd);
         inp.addEventListener("input", () => {
           const v = +inp.value;
           S[r.k[0]][r.k[1]] = v;
@@ -772,10 +798,9 @@
             if (polyCottage) polyCottage.setTransform({ scale: S.cottage.scale });
             if (cottageGroup) cottageGroup.scale.setScalar(S.cottage.scale);
           }
-          // Only light/ambient slider moves invalidate baked atlas colors;
-          // camera and position sliders don't. Skipping the rebake keeps
-          // cottage textures from flickering on camera drag/zoom.
-          const lightsChanged = (r.k[0] === "dir" || r.k[0] === "amb");
+          // Suppress per-tick rebake during baked-mode drag — debounced
+          // finalize handles it. Dynamic mode never rebakes here either.
+          const lightsChanged = isLightSlider && !dragging && S.lighting === "baked";
           update(lightsChanged);
         });
         row.appendChild(inp); row.appendChild(val);

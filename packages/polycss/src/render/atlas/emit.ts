@@ -107,10 +107,30 @@ export function applyAtlasBackground(
         normalStyle,
     );
   } else {
+    // Use individual `background-image / -position / -size / -repeat`
+    // properties rather than the `background:` shorthand. The shorthand
+    // resets `background-color` to its initial value (transparent), which
+    // prevents an outer "dynamic" CSS tint from layering on top of the
+    // baked bitmap — useful for callers that swap the scene to dynamic
+    // mode for live-preview during a slider drag without rebaking the
+    // atlas. Behaviour in pure baked mode is unchanged.
+    //
+    // Also emit the polygon's surface-normal vars (--pnx/--pny/--pnz)
+    // even in baked mode so the dynamic CSS Lambert formula has real
+    // values to dot against `--plx/--ply/--plz` when a caller toggles
+    // the scene's lighting mode without rebaking. Without these the
+    // Lambert dot product collapses to 0 and the tint goes to
+    // ambient-only (black with ambient=0).
     el.setAttribute(
       "style",
       atlasBaseStyle +
-        `;background:${url} ${pos} / ${size} no-repeat`,
+        `;background-image:${url}` +
+        `;background-position:${pos}` +
+        `;background-size:${size}` +
+        `;background-repeat:no-repeat` +
+        `;--pnx:${entry.normal[0].toFixed(4)}` +
+        `;--pny:${entry.normal[1].toFixed(4)}` +
+        `;--pnz:${entry.normal[2].toFixed(4)}`,
     );
   }
 }
@@ -352,11 +372,16 @@ export function createAtlasElement(
 ): HTMLElement {
   const el = doc.createElement("s");
   const atlasCanonicalSize = atlasCanonicalSizeForEntry(entry);
-  const dynamicNormalStyle = textureLighting === "dynamic" && !skipDynamicNormalVars
-    ? `;--pnx:${entry.normal[0].toFixed(4)}` +
+  // Emit surface normal vars regardless of mode — see applyAtlasBackground
+  // for why baked-mode leaves benefit when callers toggle the scene's
+  // lighting mode without rebaking. `skipDynamicNormalVars` still wins
+  // (used by Lambert-bucketed dynamic leaves where the wrapper provides
+  // the normal once for every poly in the bucket).
+  const dynamicNormalStyle = skipDynamicNormalVars
+    ? ""
+    : `;--pnx:${entry.normal[0].toFixed(4)}` +
       `;--pny:${entry.normal[1].toFixed(4)}` +
-      `;--pnz:${entry.normal[2].toFixed(4)}`
-    : "";
+      `;--pnz:${entry.normal[2].toFixed(4)}`;
   el.setAttribute(
     "style",
     `transform:matrix3d(${entry.atlasMatrix})` +
