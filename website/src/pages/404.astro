@@ -1,5 +1,6 @@
 ---
 import DocsHeader from "../components/DocsHeader.astro";
+import Analytics from "../components/Analytics.astro";
 import "../styles/custom.css";
 
 const title = "Page not found | PolyCSS";
@@ -11,6 +12,7 @@ const description = "The requested page could not be found.";
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <Analytics />
     <title>{title}</title>
     <meta name="description" content={description} />
   </head>

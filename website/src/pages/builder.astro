@@ -1,6 +1,7 @@
 ---
 import { BuilderWorkbench } from '../components/BuilderWorkbench';
 import DocsHeader from '../components/DocsHeader.astro';
+import Analytics from '../components/Analytics.astro';
 import '../styles/custom.css';
 
 const title = 'Builder | PolyCSS';
@@ -13,6 +14,7 @@ const socialImageAlt = 'PolyCSS logo, a rendered polygon duck, and DOM markup.';
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <Analytics />
     <title>{title}</title>
     <meta name="description" content={description} />
     <meta property="og:title" content={title} />
