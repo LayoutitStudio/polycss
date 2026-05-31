@@ -548,6 +548,7 @@ export function VanillaScene({
       stableDom: stableDomForMesh,
       id: meshId,
       castShadow: options.castShadow,
+      receiveShadow: options.selfShadow,
     } as PolyMeshTransform;
     const modelParseResult: ParseResult = parseResult
       ? {
@@ -677,12 +678,18 @@ export function VanillaScene({
     notifySceneDomChange,
   ]);
 
-  // Effect 1.6 — live-toggle castShadow without rebuilding the scene.
+  // Effect 1.6 — live-toggle castShadow / selfShadow (receiveShadow on the
+  // mesh) without rebuilding the scene.
   useEffect(() => {
     const handle = meshHandleRef.current;
     if (!handle) return;
     handle.setTransform({ castShadow: options.castShadow });
   }, [options.castShadow]);
+  useEffect(() => {
+    const handle = meshHandleRef.current;
+    if (!handle) return;
+    handle.setTransform({ receiveShadow: options.selfShadow });
+  }, [options.selfShadow]);
 
   // Selection + transform-controls layer. Selection toggle controls
   // both — when on, clicking the mesh selects it (and attaches the

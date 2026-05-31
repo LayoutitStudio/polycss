@@ -134,6 +134,7 @@ const DEFAULT_SCENE: SceneOptionsState = {
   target: [0, 0, 0],
   disableStrategies: [],
   castShadow: false,
+  selfShadow: false,
   shadowMaxExtend: 2000,
   showGround: false,
   groundColor: "#7d848e",
@@ -1544,6 +1545,7 @@ export default function GalleryWorkbench() {
         />
         <DockLighting
           castShadow={sceneOptions.castShadow}
+          selfShadow={sceneOptions.selfShadow}
           shadowMaxExtend={sceneOptions.shadowMaxExtend}
           showGround={sceneOptions.showGround}
           groundColor={sceneOptions.groundColor}

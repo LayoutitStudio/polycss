@@ -13,6 +13,7 @@ import { useColor, useFolder, useSlider, useToggle } from "../primitives";
 
 export interface LightingFolderInputs {
   castShadow: boolean;
+  selfShadow: boolean;
   shadowMaxExtend: number;
   showGround: boolean;
   groundColor: string;
@@ -25,6 +26,7 @@ export interface LightingFolderInputs {
   ambientColor: string;
   onUpdateScene: (partial: {
     castShadow?: boolean;
+    selfShadow?: boolean;
     shadowMaxExtend?: number;
     showGround?: boolean;
     groundColor?: string;
@@ -41,6 +43,7 @@ export interface LightingFolderInputs {
 export function useLightingFolder(parent: GUI | null, inputs: LightingFolderInputs): void {
   const {
     castShadow,
+    selfShadow,
     shadowMaxExtend,
     showGround,
     groundColor,
@@ -61,6 +64,9 @@ export function useLightingFolder(parent: GUI | null, inputs: LightingFolderInpu
       castShadow: value,
       ...(value ? { showGround: true } : null),
     }),
+  );
+  useToggle(folder, "Self-shadow", selfShadow, (value) =>
+    onUpdateScene({ selfShadow: value }),
   );
   useSlider(
     folder,

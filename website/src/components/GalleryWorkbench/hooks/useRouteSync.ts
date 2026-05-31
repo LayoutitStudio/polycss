@@ -40,6 +40,7 @@ interface SerializedGallerySceneOptions {
   t?: SceneTarget;
   ds?: string;
   shadow?: boolean;
+  self?: boolean;
   reach?: number;
   ground?: boolean;
   gc?: string;
@@ -98,6 +99,7 @@ const COMPACT_KEY_BY_OPTION: Record<SerializedGallerySceneOptionKey, string> = {
   t: "t",
   ds: "b",
   shadow: "S",
+  self: "Z",
   reach: "E",
   ground: "g",
   gc: "G",
@@ -270,6 +272,7 @@ function sceneOptionsPayload(
   const currentStrategies = strategiesPayload(options.disableStrategies);
   if (currentStrategies !== strategiesPayload(defaults.disableStrategies)) out.ds = currentStrategies;
   addBoolean(out, "shadow", options.castShadow, defaults.castShadow);
+  addBoolean(out, "self", options.selfShadow, defaults.selfShadow);
   addNumber(out, "reach", options.shadowMaxExtend, defaults.shadowMaxExtend);
   addBoolean(out, "ground", options.showGround, defaults.showGround);
   addString(out, "gc", options.groundColor, defaults.groundColor);
@@ -488,6 +491,7 @@ function sceneOptionsFromPayload(o: SerializedGallerySceneOptions): Partial<Scen
     ...(isVec3(o.t) ? { target: roundVec3(o.t) } : null),
     ...(disableStrategies ? { disableStrategies } : null),
     ...(isBoolean(o.shadow) ? { castShadow: o.shadow } : null),
+    ...(isBoolean(o.self) ? { selfShadow: o.self } : null),
     ...(isFiniteNumber(o.reach) ? { shadowMaxExtend: o.reach } : null),
     ...(isBoolean(o.ground) ? { showGround: o.ground } : null),
     ...(isHexColor(o.gc) ? { groundColor: o.gc.toLowerCase() } : null),

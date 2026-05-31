@@ -109,6 +109,11 @@
       // shadow elements remain visible. Lets you compare shadow geometry
       // between engines without the mesh getting in the way.
       shadowsOnly: qs("sx", "0") === "1",
+      // "Self-shadow" toggle: when true, the active mesh receives shadows
+      // onto its own faces (matches Three.js mesh.receiveShadow on the
+      // mesh itself). When false, the mesh only casts onto the floor.
+      // Defaults to true to preserve the historical bench behavior.
+      selfShadow: qs("ss", "1") !== "0",
     };
 
     // ─── PolyCSS ────────────────────────────────────────────────────────
@@ -150,7 +155,7 @@
     function buildPolyCube() {
       polyCube = polyScene.add(
         createPolyBox({ size: [S.cube.size, S.cube.size, S.cube.size], color: S.cube.color }),
-        { id: "cube", position: [S.obj.cube.x, S.obj.cube.y, S.obj.cube.z], castShadow: true, receiveShadow: true, merge: false },
+        { id: "cube", position: [S.obj.cube.x, S.obj.cube.y, S.obj.cube.z], castShadow: true, receiveShadow: S.selfShadow, merge: false },
       );
     }
     // 3D capital "E" — strongly concave: a vertical spine plus three
@@ -185,7 +190,7 @@
         id: "e",
         position: [0, 0, 0],
         castShadow: true,
-        receiveShadow: true,
+        receiveShadow: S.selfShadow,
         merge: false,
       });
     }
@@ -206,7 +211,7 @@
         position: [S.obj.cottage.x, S.obj.cottage.y, S.obj.cottage.z],
         scale: S.obj.cottage.scale,
         castShadow: true,
-        receiveShadow: true,   // self-shadow (Three.js parity)
+        receiveShadow: S.selfShadow,
         merge: false,
       });
     }
@@ -225,7 +230,7 @@
         position: [S.obj.castle.x, S.obj.castle.y, S.obj.castle.z],
         scale: S.obj.castle.scale,
         castShadow: true,
-        receiveShadow: true,
+        receiveShadow: S.selfShadow,
         merge: false,
       });
     }
@@ -590,10 +595,10 @@
       // in sync without per-mesh slider plumbing.
       // PolyCSS rotation = degrees (matches PolyMeshTransform.rotation);
       // Three.js mesh.rotation = radians.
-      if (polyCube)    polyCube.setTransform({    position: [S.obj.cube.x,    S.obj.cube.y,    S.obj.cube.z],    scale: S.obj.cube.scale,    rotation: [S.obj.cube.rx, S.obj.cube.ry, S.obj.cube.rz] });
-      if (polyE)       polyE.setTransform({       position: [S.obj.e.x,       S.obj.e.y,       S.obj.e.z],       scale: S.obj.e.scale,       rotation: [S.obj.e.rx, S.obj.e.ry, S.obj.e.rz] });
-      if (polyCottage) polyCottage.setTransform({ position: [S.obj.cottage.x, S.obj.cottage.y, S.obj.cottage.z], scale: S.obj.cottage.scale, rotation: [S.obj.cottage.rx, S.obj.cottage.ry, S.obj.cottage.rz] });
-      if (polyCastle)  polyCastle.setTransform({  position: [S.obj.castle.x,  S.obj.castle.y,  S.obj.castle.z],  scale: S.obj.castle.scale,  rotation: [S.obj.castle.rx, S.obj.castle.ry, S.obj.castle.rz] });
+      if (polyCube)    polyCube.setTransform({    position: [S.obj.cube.x,    S.obj.cube.y,    S.obj.cube.z],    scale: S.obj.cube.scale,    rotation: [S.obj.cube.rx, S.obj.cube.ry, S.obj.cube.rz], receiveShadow: S.selfShadow });
+      if (polyE)       polyE.setTransform({       position: [S.obj.e.x,       S.obj.e.y,       S.obj.e.z],       scale: S.obj.e.scale,       rotation: [S.obj.e.rx, S.obj.e.ry, S.obj.e.rz], receiveShadow: S.selfShadow });
+      if (polyCottage) polyCottage.setTransform({ position: [S.obj.cottage.x, S.obj.cottage.y, S.obj.cottage.z], scale: S.obj.cottage.scale, rotation: [S.obj.cottage.rx, S.obj.cottage.ry, S.obj.cottage.rz], receiveShadow: S.selfShadow });
+      if (polyCastle)  polyCastle.setTransform({  position: [S.obj.castle.x,  S.obj.castle.y,  S.obj.castle.z],  scale: S.obj.castle.scale,  rotation: [S.obj.castle.rx, S.obj.castle.ry, S.obj.castle.rz], receiveShadow: S.selfShadow });
       // Scale the shadow's ground-plane lift inversely with camera zoom so
       // it stays at ~1 SCREEN PIXEL regardless of how far the camera is.
       // With a fixed lift in world units, low-zoom views (small px/u)
@@ -631,21 +636,25 @@
         cubeMesh.position.set(S.obj.cube.x, S.obj.cube.y, S.obj.cube.z);
         cubeMesh.scale.setScalar(S.obj.cube.scale);
         cubeMesh.rotation.set(S.obj.cube.rx * D2R, S.obj.cube.ry * D2R, S.obj.cube.rz * D2R);
+        cubeMesh.receiveShadow = S.selfShadow;
       }
       if (eGroup) {
         eGroup.position.set(S.obj.e.x, S.obj.e.y, S.obj.e.z);
         eGroup.scale.setScalar(S.obj.e.scale);
         eGroup.rotation.set(S.obj.e.rx * D2R, S.obj.e.ry * D2R, S.obj.e.rz * D2R);
+        eGroup.traverse(c => { if (c.isMesh) c.receiveShadow = S.selfShadow; });
       }
       if (cottageGroup) {
         cottageGroup.position.set(S.obj.cottage.x, S.obj.cottage.y, S.obj.cottage.z);
         cottageGroup.scale.setScalar(S.obj.cottage.scale);
         cottageGroup.rotation.set(S.obj.cottage.rx * D2R, S.obj.cottage.ry * D2R, S.obj.cottage.rz * D2R);
+        cottageGroup.traverse(c => { if (c.isMesh) c.receiveShadow = S.selfShadow; });
       }
       if (castleGroup) {
         castleGroup.position.set(S.obj.castle.x, S.obj.castle.y, S.obj.castle.z);
         castleGroup.scale.setScalar(S.obj.castle.scale);
         castleGroup.rotation.set(S.obj.castle.rx * D2R, S.obj.castle.ry * D2R, S.obj.castle.rz * D2R);
+        castleGroup.traverse(c => { if (c.isMesh) c.receiveShadow = S.selfShadow; });
       }
       fitDirLightToScene();
       dirLight.intensity = S.dir.intensity;
@@ -927,6 +936,7 @@
           if (o.rz !== 0)       q.set(`orz_${S.mesh}`, String(o.rz));
         }
         if (S.shadowsOnly) q.set("sx", "1");
+        if (!S.selfShadow) q.set("ss", "0");
         const url = location.origin + location.pathname + "?" + q.toString();
         try { await navigator.clipboard.writeText(url); copyBtn.textContent = "Copied ✓"; }
         catch { copyBtn.textContent = url; }
@@ -950,6 +960,23 @@
       shadowsOnlyLabel.appendChild(shadowsOnlyCheck);
       shadowsOnlyLabel.appendChild(document.createTextNode("Shadows only"));
       p.appendChild(shadowsOnlyLabel);
+
+      // Self-shadow toggle — flips `receiveShadow` on the active mesh in
+      // both engines. Off = mesh only casts onto the floor; on = caster
+      // polys project shadows onto the mesh's own faces (Three.js parity
+      // matches when receiveShadow=true on the mesh's THREE.Mesh).
+      const selfShadowLabel = document.createElement("label");
+      selfShadowLabel.style.cssText = "display:flex; gap:6px; align-items:center; margin: 0 0 8px;";
+      const selfShadowCheck = document.createElement("input");
+      selfShadowCheck.type = "checkbox";
+      selfShadowCheck.checked = !!S.selfShadow;
+      selfShadowCheck.addEventListener("change", () => {
+        S.selfShadow = selfShadowCheck.checked;
+        update(true);
+      });
+      selfShadowLabel.appendChild(selfShadowCheck);
+      selfShadowLabel.appendChild(document.createTextNode("Self-shadow"));
+      p.appendChild(selfShadowLabel);
 
       // Mesh + lighting dropdowns
       const meshSec = document.createElement("div");
