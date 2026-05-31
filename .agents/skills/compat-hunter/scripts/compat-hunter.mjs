@@ -209,7 +209,14 @@ function summarizeReport(file) {
 function isKnownWarning(warning) {
   return /^Skipped primitives with unsupported mode \d+ \((POINTS|LINES|LINE_LOOP|LINE_STRIP)\)$/.test(warning)
     || warning === "Skipped primitives with unsupported required extension KHR_draco_mesh_compression"
-    || warning === "Skipped primitives with unsupported required extension EXT_meshopt_compression";
+    || /^Skipped primitives with unsupported required extension (EXT|KHR)_meshopt_compression$/.test(warning)
+    || /^Skipped recursive node reference \d+ in glTF scene graph$/.test(warning)
+    || warning === "No glTF meshes found"
+    || warning === "No non-degenerate glTF triangles remained after normalization"
+    || /^Mesh .+: skipped mesh with non-array primitives$/.test(warning)
+    || warning === "Skipped OBJ point elements; PolyCSS only renders face polygons"
+    || warning === "Skipped OBJ line elements; PolyCSS only renders face polygons"
+    || warning === "Skipped MagicaVoxel scene graph transforms; models were flattened into one grid";
 }
 
 function isKnownError(message) {

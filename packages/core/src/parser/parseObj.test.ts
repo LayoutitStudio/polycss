@@ -146,6 +146,23 @@ describe("parseObj — empty input", () => {
   it("vertices without faces → empty result (faces are what produces polygons)", () => {
     const r = parseObj("v 0 0 0\nv 1 0 0\nv 0 1 0\n");
     expect(r.polygons).toHaveLength(0);
+    expect(r.warnings).toEqual([]);
+  });
+
+  it("point elements are skipped with a warning", () => {
+    const r = parseObj("v 0 0 0\nv 1 0 0\np 1 2\n");
+    expect(r.polygons).toHaveLength(0);
+    expect(r.warnings).toEqual([
+      "Skipped OBJ point elements; PolyCSS only renders face polygons",
+    ]);
+  });
+
+  it("line elements are skipped with a warning", () => {
+    const r = parseObj("v 0 0 0\nv 1 0 0\nl 1 2\n");
+    expect(r.polygons).toHaveLength(0);
+    expect(r.warnings).toEqual([
+      "Skipped OBJ line elements; PolyCSS only renders face polygons",
+    ]);
   });
 
   it("objectUrls is always empty (parseObj never mints blob URLs)", () => {
@@ -166,6 +183,12 @@ describe("parseObj — fan triangulation", () => {
     const obj = `v 0 1 0\nv 1 0 0\nv 0.5 -1 0\nv -0.5 -1 0\nv -1 0 0\nf 1 2 3 4 5`;
     const r = parseObj(obj);
     expect(r.polygons).toHaveLength(3);
+  });
+
+  it("backslash-continued face lines parse as one logical line", () => {
+    const obj = `v 0 0 0\nv 1 0 0\nv 1 1 0\nv 0 1 0\nf 1 2 \\\n  3 4`;
+    const r = parseObj(obj);
+    expect(r.polygons).toHaveLength(2);
   });
 
   it("fan vertex (index 0) is shared across all emitted triangles", () => {
