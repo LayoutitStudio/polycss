@@ -1,18 +1,20 @@
 ---
 import { WordArtWorkbench } from '../components/WordArtWorkbench';
 import DocsHeader from '../components/DocsHeader.astro';
+import Analytics from '../components/Analytics.astro';
 import '../styles/custom.css';
 
-const title = 'WordArt | PolyCSS';
-const description = 'Compose 3D text from any Google font and render it with pure CSS — multiline, styled, extruded, WordArt-style.';
+const title = 'WordArt — 3D text in pure CSS, no canvas | PolyCSS';
+const description = 'Make retro WordArt-style 3D text from any Google font — gradients, block textures, bevels, custom edge curves and warps — rendered with pure CSS and DOM. No canvas, no WebGL. Powered by PolyCSS, the CSS polygon-mesh engine.';
 const canonical = 'https://polycss.com/wordart/';
 const socialImage = 'https://polycss.com/polycss-github.png';
-const socialImageAlt = 'PolyCSS logo, a rendered polygon duck, and DOM markup.';
+const socialImageAlt = 'WordArt-style extruded 3D text rendered in pure CSS with PolyCSS.';
 ---
 <html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <Analytics />
     <title>{title}</title>
     <meta name="description" content={description} />
     <meta property="og:title" content={title} />
