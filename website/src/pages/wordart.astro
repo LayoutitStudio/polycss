@@ -1,14 +1,14 @@
 ---
-import { BuilderWorkbench } from '../components/BuilderWorkbench';
+import { WordArtWorkbench } from '../components/WordArtWorkbench';
 import DocsHeader from '../components/DocsHeader.astro';
 import Analytics from '../components/Analytics.astro';
 import '../styles/custom.css';
 
-const title = 'Builder | PolyCSS';
-const description = 'Compose PolyCSS scenes in the browser with primitive shapes, imported meshes, terrain, lighting, and DOM-rendered 3D controls.';
-const canonical = 'https://polycss.com/builder/';
+const title = 'WordArt — 3D text in pure CSS, no canvas | PolyCSS';
+const description = 'Make retro WordArt-style 3D text from any Google font — gradients, block textures, bevels, custom edge curves and warps — rendered with pure CSS and DOM. No canvas, no WebGL. Powered by PolyCSS, the CSS polygon-mesh engine.';
+const canonical = 'https://polycss.com/wordart/';
 const socialImage = 'https://polycss.com/polycss-github.png';
-const socialImageAlt = 'PolyCSS logo, a rendered polygon duck, and DOM markup.';
+const socialImageAlt = 'WordArt-style extruded 3D text rendered in pure CSS with PolyCSS.';
 ---
 <html lang="en">
   <head>
@@ -21,8 +21,6 @@ const socialImageAlt = 'PolyCSS logo, a rendered polygon duck, and DOM markup.';
     <meta property="og:description" content={description} />
     <meta property="og:url" content={canonical} />
     <meta property="og:image" content={socialImage} />
-    <meta property="og:image:width" content="1280" />
-    <meta property="og:image:height" content="640" />
     <meta property="og:image:alt" content={socialImageAlt} />
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="PolyCSS" />
@@ -30,7 +28,6 @@ const socialImageAlt = 'PolyCSS logo, a rendered polygon duck, and DOM markup.';
     <meta name="twitter:title" content={title} />
     <meta name="twitter:description" content={description} />
     <meta name="twitter:image" content={socialImage} />
-    <meta name="twitter:image:alt" content={socialImageAlt} />
     <link rel="canonical" href={canonical} />
     <link rel="icon" type="image/x-icon" href="/favicon.ico" />
   </head>
@@ -38,46 +35,23 @@ const socialImageAlt = 'PolyCSS logo, a rendered polygon duck, and DOM markup.';
     <div class="page">
       <DocsHeader />
       <div class="debug-page-shell">
-        <BuilderWorkbench client:only="react" />
+        <WordArtWorkbench client:only="react" />
       </div>
     </div>
   </body>
   <style>
-    :global(:root) {
-      --sl-nav-height: 72px;
-    }
+    :global(:root) { --sl-nav-height: 72px; }
+    @media (max-width: 38rem) { :global(:root) { --sl-nav-height: 90px; } }
+    :global(html, body) { margin: 0; background: #0a0b0d; color: #e8edf2; }
+    :global(body) { font-family: system-ui, sans-serif; min-height: 100vh; overflow: hidden; }
 
-    @media (max-width: 38rem) {
-      :global(:root) {
-        --sl-nav-height: 90px;
-      }
-    }
-
-    :global(html, body) {
-      margin: 0;
-      background: #0a0b0d;
-      color: #e8edf2;
-    }
-
-    :global(body) {
-      min-height: 100vh;
-      overflow: hidden;
-    }
-
-    .page {
-      min-height: 100vh;
-      background: #0a0b0d;
-    }
+    .page { min-height: 100vh; background: #0a0b0d; }
 
     .debug-page-shell {
       position: fixed;
       inset: var(--sl-nav-height) 0 0;
       min-width: 0;
       min-height: 0;
-    }
-    :global(.dn-root) {
-      width: 100%;
-      height: 100%;
     }
   </style>
 </html>

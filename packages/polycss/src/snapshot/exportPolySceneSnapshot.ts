@@ -655,6 +655,52 @@ function arrayBufferToBase64(buffer: ArrayBuffer): string {
   return btoa(binary);
 }
 
+function isObjectUrl(url: string): boolean {
+  return /^(blob|filesystem):/i.test(url.trim());
+}
+
+function loadBlobViaXhr(url: string): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("GET", url, true);
+    xhr.responseType = "blob";
+    xhr.onload = () => {
+      // Object URLs report status 0 on success; treat that as OK.
+      if (xhr.status === 0 || (xhr.status >= 200 && xhr.status < 300)) {
+        resolve(xhr.response as Blob);
+      } else {
+        reject(new Error(`XHR ${xhr.status}`));
+      }
+    };
+    xhr.onerror = () => reject(new Error("XHR request failed"));
+    xhr.send();
+  });
+}
+
+async function loadAssetBlob(url: string): Promise<Blob> {
+  // Object URLs (blob:/filesystem:) are same-document; a credentials mode is
+  // meaningless for them and trips some WebKit builds, so omit it there.
+  const objectUrl = isObjectUrl(url);
+  try {
+    if (typeof fetch !== "function") {
+      throw new Error("fetch is not available");
+    }
+    const response = await fetch(url, objectUrl ? undefined : { credentials: "same-origin" });
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    return await response.blob();
+  } catch (error) {
+    // WebKit/Safari intermittently fails to fetch() object URLs ("Load
+    // failed"); XMLHttpRequest is the reliable fallback for same-document
+    // object URLs and is why a textured/atlas export breaks only on Safari.
+    if (objectUrl && typeof XMLHttpRequest === "function") {
+      return loadBlobViaXhr(url);
+    }
+    throw error;
+  }
+}
+
 async function inlineAssetUrl(rawUrl: string, ctx: InlineContext): Promise<string> {
   if (isInlineOrLocalReference(rawUrl)) return rawUrl;
 
@@ -664,16 +710,7 @@ async function inlineAssetUrl(rawUrl: string, ctx: InlineContext): Promise<strin
 
   const next = (async () => {
     try {
-      if (typeof fetch !== "function") {
-        throw new Error("fetch is not available");
-      }
-
-      const response = await fetch(resolvedUrl, { credentials: "same-origin" });
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
-      }
-
-      const blob = await response.blob();
+      const blob = await loadAssetBlob(resolvedUrl);
       const mime = blob.type || inferMimeType(resolvedUrl);
       const base64 = arrayBufferToBase64(await blob.arrayBuffer());
       return `data:${mime};base64,${base64}`;

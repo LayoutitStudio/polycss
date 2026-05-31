@@ -142,6 +142,36 @@ describe("exportPolySceneSnapshot", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it("falls back to XHR when fetch() fails for a blob URL (WebKit)", async () => {
+    const fetchMock = vi.fn(async () => {
+      throw new TypeError("Load failed");
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    class FakeXHR {
+      status = 200;
+      response: Blob | null = null;
+      responseType = "";
+      onload: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      open(): void {}
+      send(): void {
+        this.response = new Blob(["atlas"], { type: "image/png" });
+        this.onload?.();
+      }
+    }
+    vi.stubGlobal("XMLHttpRequest", FakeXHR);
+
+    const { leaf } = makeRenderedScene(
+      'background: url("blob:atlas") 0 0 / 64px 64px no-repeat; --polycss-atlas-size: 64px;',
+    );
+
+    const html = await exportPolySceneSnapshot(leaf);
+
+    expect(html).toContain("data:image/png;base64,YXRsYXM=");
+    expect(html).not.toContain("blob:atlas");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("does not fetch already-inline data URLs", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);

@@ -50,10 +50,18 @@ export const TextureAtlasPoly = memo(function TextureAtlasPoly({
   const style: CSSProperties = {
     transform: formatMatrix3d(entry.atlasMatrix),
     ["--polycss-atlas-size" as string]: `${atlasCanonicalSize}px`,
-    background,
-    backgroundImage: dynamic && page?.url ? `url(${page.url})` : undefined,
-    backgroundPosition: dynamic ? atlasPosition : undefined,
-    backgroundSize: dynamic ? atlasSize : undefined,
+    // Listing the `background` shorthand alongside the `background-*` longhands
+    // in one inline style object makes React warn on every update (mixing
+    // shorthand and non-shorthand for the same property). Branch so only the
+    // current mode's keys are assigned — baked gets `background`, dynamic gets
+    // the longhands.
+    ...(dynamic
+      ? {
+          backgroundImage: page?.url ? `url(${page.url})` : undefined,
+          backgroundPosition: atlasPosition,
+          backgroundSize: atlasSize,
+        }
+      : { background }),
     ...(dynamic
       ? {
           ["--pnx" as string]: entry.normal[0].toFixed(4),

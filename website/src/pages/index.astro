@@ -11,6 +11,7 @@ hljs.registerLanguage("tsx", typescript);
 hljs.registerLanguage("vue", xml);
 
 import DocsHeader from "../components/DocsHeader.astro";
+import Analytics from "../components/Analytics.astro";
 
 function highlight(code: string, lang: string): string {
   return hljs.highlight(code, { language: lang }).value;
@@ -103,6 +104,7 @@ const ldJson = {
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <Analytics />
   <title>{title}</title>
   <meta name="description" content={description} />
   <meta property="og:title" content={title} />

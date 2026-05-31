@@ -32,6 +32,10 @@ export default defineConfig({
           replacement: repoPath('../packages/polycss/src/elements/index.ts'),
         },
         {
+          find: /^@layoutit\/polycss-fonts$/,
+          replacement: repoPath('../packages/fonts/src/index.ts'),
+        },
+        {
           find: /^@layoutit\/polycss$/,
           replacement: repoPath('../packages/polycss/src/index.ts'),
         },
@@ -46,6 +50,10 @@ export default defineConfig({
       description: 'A CSS polygon mesh engine. DOM-native 3D rendering.',
       favicon: '/favicon.ico',
       head: [
+        // Google Analytics (gtag.js) — covers all Starlight docs pages; custom
+        // pages render the same tag via src/components/Analytics.astro.
+        { tag: 'script', attrs: { async: true, src: 'https://www.googletagmanager.com/gtag/js?id=G-XV72TXWTM5' } },
+        { tag: 'script', content: "window.dataLayer = window.dataLayer || [];\nfunction gtag(){dataLayer.push(arguments);}\ngtag('js', new Date());\ngtag('config', 'G-XV72TXWTM5');" },
         { tag: 'meta', attrs: { property: 'og:image', content: 'https://polycss.com/polycss-github.png' } },
         { tag: 'meta', attrs: { property: 'og:image:width', content: '1280' } },
         { tag: 'meta', attrs: { property: 'og:image:height', content: '640' } },
