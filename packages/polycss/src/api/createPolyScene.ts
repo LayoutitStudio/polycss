@@ -2436,7 +2436,14 @@ export function createPolyScene(
     // geometry / dedup tolerances invalidates the cached face planes.
     const receiverScale = meshScaleVec3(receiverEntry);
     const rbboxCss = receiverEntry.bboxCenterCss;
-    const cacheKey = `${receiverEntry.polygons.length}|${receiverDedupDrop.size}|${rpos.join(",")}|${receiverScale.join(",")}|${rbboxCss ? rbboxCss.join(",") : "n"}`;
+    // Include shadow.lift in the cache key because the lift gets baked
+    // into each cached plane's origin (Ox/Oy/Oz). A caller that scales
+    // lift dynamically (e.g. with camera zoom, to defeat sub-pixel
+    // z-fighting on the floor) needs cache invalidation when lift
+    // changes; otherwise the cached planes keep the old lift and the
+    // visual update is lost.
+    const cacheShadowLift = currentOptions.shadow?.lift ?? 0.001;
+    const cacheKey = `${receiverEntry.polygons.length}|${receiverDedupDrop.size}|${rpos.join(",")}|${receiverScale.join(",")}|${rbboxCss ? rbboxCss.join(",") : "n"}|${cacheShadowLift}`;
     let cachedPlanes = receiverShadowCache.get(receiverEntry);
     if (cachedPlanes === undefined || receiverShadowCacheKey.get(receiverEntry) !== cacheKey) {
       const surfaces = groupReceiverFaceGroups(receiverEntry, rpos, worldCss, receiverDedupDrop);
@@ -2459,12 +2466,14 @@ export function createPolyScene(
         // produces, because the shadow content gets projected onto a
         // plane offset from the actual receiver surface.
         //
-        // 0.05 CSS px is right at the float-noise floor — still wins
-        // the depth test against the underlying paint, and keeps the
-        // parallax mismatch between adjacent receiver faces (which
-        // lift in slightly different normal directions) well below the
-        // eye's threshold.
-        const lift = 0.05;
+        // Respect the same `shadow.lift` (world units) the ground-shadow
+        // path uses, converted to CSS px. Keeps the receiver-face lift
+        // in lockstep with the ground lift so a caller that scales the
+        // shadow lift with camera zoom (to defeat sub-pixel z-fighting
+        // at far zooms) sees consistent behavior across both paths.
+        // Default 0.001 world units (= 0.05 CSS px at DEFAULT_TILE = 50)
+        // matches the original float-noise-floor lift.
+        const lift = (currentOptions.shadow?.lift ?? 0.001) * DEFAULT_TILE;
         const Ox = O[0] + minU * u[0] + minV * v[0] + lift * n[0];
         const Oy = O[1] + minU * u[1] + minV * v[1] + lift * n[1];
         const Oz = O[2] + minU * u[2] + minV * v[2] + lift * n[2];

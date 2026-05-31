@@ -435,6 +435,15 @@
       if (polyCube)    polyCube.setTransform({    position: [S.obj.cube.x,    S.obj.cube.y,    S.obj.cube.z],    scale: S.obj.cube.scale,    rotation: [S.obj.cube.rx, S.obj.cube.ry, S.obj.cube.rz] });
       if (polyE)       polyE.setTransform({       position: [S.obj.e.x,       S.obj.e.y,       S.obj.e.z],       scale: S.obj.e.scale,       rotation: [S.obj.e.rx, S.obj.e.ry, S.obj.e.rz] });
       if (polyCottage) polyCottage.setTransform({ position: [S.obj.cottage.x, S.obj.cottage.y, S.obj.cottage.z], scale: S.obj.cottage.scale, rotation: [S.obj.cottage.rx, S.obj.cottage.ry, S.obj.cottage.rz] });
+      // Scale the shadow's ground-plane lift inversely with camera zoom so
+      // it stays at ~1 SCREEN PIXEL regardless of how far the camera is.
+      // With a fixed lift in world units, low-zoom views (small px/u)
+      // sink the lift below the 3D depth-sort threshold and the floor
+      // mesh wins the z-fight, hiding the cast shadow — the user
+      // reported this on the E mesh at zoom 30 where its ground shadow
+      // vanished. The library's `shadow.lift` is in WORLD UNITS, so a
+      // 1-screen-pixel target lift = 1 / zoom world units.
+      const shadowLift = 1 / Math.max(1, S.cam.zoom);
       polyScene.setOptions({
         directionalLight: {
           direction: [S.dir.x, S.dir.y, S.dir.z],
@@ -444,6 +453,7 @@
         },
         ambientLight: { color: "#ffffff", intensity: S.amb.intensity },
         textureLighting: S.lighting,
+        shadow: { color: "#000000", opacity: S.shadow.opacity, lift: shadowLift },
       });
       // Baked mode stores lit colors in atlas pixels → light change requires
       // re-rasterising every mesh's atlas (visible flicker on textured
