@@ -111,6 +111,110 @@ interface Ring {
   inset: number;
 }
 
+const turn = (o: Pt, a: Pt, b: Pt): number =>
+  (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+
+/** A simple polygon (no repeated vertices) whose turns never change sign. */
+function isConvexLoop(loop: number[], vert: (i: number) => Pt): boolean {
+  const n = loop.length;
+  if (n < 3) return false;
+  if (new Set(loop).size !== n) return false; // self-touching → not simple
+  let sign = 0;
+  for (let i = 0; i < n; i++) {
+    const c = turn(vert(loop[i]), vert(loop[(i + 1) % n]), vert(loop[(i + 2) % n]));
+    if (Math.abs(c) < 1e-9) continue; // collinear vertex — ignore
+    const s = c > 0 ? 1 : -1;
+    if (sign === 0) sign = s;
+    else if (s !== sign) return false;
+  }
+  return true;
+}
+
+/**
+ * Glue two index loops (same orientation) along their shared edge `a–b`,
+ * returning the combined boundary in that same orientation, or null if the
+ * edge isn't a clean P→Q / Q→P pair.
+ */
+function gluedLoop(P: number[], Q: number[], a: number, b: number): number[] | null {
+  const dirIn = (loop: number[]): [number, number] | null => {
+    const ia = loop.indexOf(a);
+    if (ia < 0) return null;
+    if (loop[(ia + 1) % loop.length] === b) return [a, b];
+    const ib = loop.indexOf(b);
+    if (ib >= 0 && loop[(ib + 1) % loop.length] === a) return [b, a];
+    return null;
+  };
+  const dp = dirIn(P);
+  const dq = dirIn(Q);
+  if (!dp || !dq || dp[0] === dq[0]) return null; // must be opposite directions
+  const [x, y] = dp; // P goes x→y along the shared edge
+  const walk = (loop: number[], from: number, to: number): number[] => {
+    const r: number[] = [];
+    let i = loop.indexOf(from);
+    for (let c = 0; c < loop.length; c++) {
+      r.push(loop[i]);
+      if (loop[i] === to) break;
+      i = (i + 1) % loop.length;
+    }
+    return r;
+  };
+  const loop = walk(P, y, x).concat(walk(Q, x, y).slice(1, -1));
+  return loop.length >= 3 ? loop : null;
+}
+
+/**
+ * Greedily merge an earcut triangle list into maximal convex polygons (a
+ * Hertel–Mehlmann-style partition). Each emitted loop keeps earcut's traversal
+ * order, so the cap can wind front/back exactly as it did per-triangle. The
+ * silhouette and holes are unchanged — this only erases interior diagonals,
+ * cutting DOM-leaf count and the coplanar same-color seams between them.
+ */
+function convexPartition(flat: number[], tris: number[]): number[][] {
+  const vert = (i: number): Pt => [flat[i * 2], flat[i * 2 + 1]];
+  const polys: (number[] | null)[] = [];
+  for (let t = 0; t < tris.length; t += 3) polys.push([tris[t], tris[t + 1], tris[t + 2]]);
+
+  // Grow convex regions by absorbing neighbors a triangle at a time (a region
+  // that swallows a triangle is likelier to stay convex than two quads glued
+  // together). Each pass lets a region keep eating along its boundary; passes
+  // repeat until one settles. Edge keys are numeric (a*stride+b) to keep the
+  // per-pass rebuild cheap.
+  const stride = flat.length / 2 + 1;
+  let changed = true;
+  while (changed) {
+    changed = false;
+    const edge = new Map<number, number[]>();
+    for (let pi = 0; pi < polys.length; pi++) {
+      const p = polys[pi];
+      if (!p) continue;
+      for (let i = 0; i < p.length; i++) {
+        const a = p[i], b = p[(i + 1) % p.length];
+        const k = a < b ? a * stride + b : b * stride + a;
+        let l = edge.get(k);
+        if (!l) edge.set(k, (l = []));
+        l.push(pi);
+      }
+    }
+    for (const [k, list] of edge) {
+      if (list.length !== 2) continue;
+      const [pi, pj] = list;
+      // polys[pi] may have grown earlier in this pass; re-read both and re-check
+      // that the recorded edge is still on each boundary (gluedLoop returns null
+      // if the region already absorbed past it).
+      const P = polys[pi], Q = polys[pj];
+      if (!P || !Q) continue;
+      const a = Math.floor(k / stride), b = k % stride;
+      const merged = gluedLoop(P, Q, a, b);
+      if (merged && isConvexLoop(merged, vert)) {
+        polys[pi] = merged;
+        polys[pj] = null;
+        changed = true;
+      }
+    }
+  }
+  return polys.filter((p): p is number[] => p !== null);
+}
+
 const toWorld = (p: Pt, z: number): Vec3 => [-p[1], p[0], z];
 
 /** Extrude pre-grouped 2D shapes (type-plane, world units) into polygons. */
@@ -184,14 +288,13 @@ export function extrudeContours(shapes: Shape[], opts: ExtrudeOptions): Polygon[
       const tris = earcut(flat, holeIndices, 2);
       const vert = (i: number): Pt => [flat[i * 2], flat[i * 2 + 1]];
       const tile = mat.tile ?? 0;
-      for (let t = 0; t < tris.length; t += 3) {
-        const a = vert(tris[t]);
-        const b = vert(tris[t + 1]);
-        const c = vert(tris[t + 2]);
-        const tri = flip ? [a, b, c] : [a, c, b];
-        const ordered: [Pt, Pt, Pt] = [tri[2], tri[1], tri[0]];
+      // earcut order winds the front cap; the back cap is its reverse. A merged
+      // convex loop keeps that order, so the same flip rule winds N-gons.
+      for (const loop of convexPartition(flat, tris)) {
+        const order = flip ? loop.slice().reverse() : loop;
+        const pts = order.map(vert);
         const poly: Polygon = {
-          vertices: [place(ordered[0], z, o), place(ordered[1], z, o), place(ordered[2], z, o)],
+          vertices: pts.map((p) => place(p, z, o)),
           color: mat.color ?? "#cccccc",
         };
         if (mat.texture && fb) {
@@ -199,7 +302,7 @@ export function extrudeContours(shapes: Shape[], opts: ExtrudeOptions): Polygon[
           // which reads polygon.texture — UV-maps the shared fill across the word.
           poly.texture = mat.texture;
           poly.material = { texture: mat.texture };
-          poly.uvs = [uvAt(ordered[0], tile), uvAt(ordered[1], tile), uvAt(ordered[2], tile)];
+          poly.uvs = pts.map((p) => uvAt(p, tile));
           if (tile > 0) poly.textureWrap = REPEAT;
         }
         polygons.push(poly);

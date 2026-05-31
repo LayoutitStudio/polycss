@@ -108,10 +108,29 @@ describe("composeText", () => {
     expect(b.maxX - b.minX).toBeGreaterThan((a.maxX - a.minX) * 1.6);
   });
 
-  it("merge reduces the polygon count", () => {
-    const base = composeText(roboto, "Poly", { merge: false });
-    const merged = composeText(roboto, "Poly", { merge: true });
-    expect(merged.length).toBeLessThan(base.length);
+  it("cap triangles merge into convex polygons (fewer nodes, no concavity)", () => {
+    const polys = composeText(roboto, "Poly", { depth: 20 });
+    // Merge happened: some caps are now N-gons, not bare triangles.
+    expect(polys.some((p) => p.vertices.length > 3)).toBe(true);
+    // Every emitted polygon must stay convex — a concave merge would render as
+    // a self-overlapping leaf. Check each polygon in its own plane.
+    const isConvex3d = (vs: readonly [number, number, number][]): boolean => {
+      const n = vs.length;
+      if (n < 3) return false;
+      const sub = (a: number[], b: number[]) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+      const cross = (a: number[], b: number[]) => [
+        a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0],
+      ];
+      let ref: number[] | null = null;
+      for (let i = 0; i < n; i++) {
+        const c = cross(sub(vs[(i + 1) % n], vs[i]), sub(vs[(i + 2) % n], vs[(i + 1) % n]));
+        if (Math.hypot(...c) < 1e-6) continue; // collinear corner
+        if (!ref) ref = c;
+        else if (ref[0] * c[0] + ref[1] * c[1] + ref[2] * c[2] < 0) return false; // sign flip
+      }
+      return true;
+    };
+    expect(polys.every((p) => isConvex3d(p.vertices))).toBe(true);
   });
 
   it("flat shadow (depth 0) offsets a recolored back layer", () => {

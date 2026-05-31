@@ -53,7 +53,7 @@ const polygons = composeText(font, "Poly\nCSS", {
   // 1 · type & layout
   size: 100, depth: 24, align: "center", scale: [1, 1],
   letterSpacing: 0, lineHeight: 1.25, underline: false, strike: false,
-  warp: { shape: "arch", amount: 0.6 }, simplify: 0, merge: false,
+  warp: { shape: "arch", amount: 0.6 }, simplify: 0,
 
   // 2 · cross-section / edge profile (one union)
   profile: { edge: "bevel", coverage: "front" },
@@ -72,7 +72,7 @@ const polygons = composeText(font, "Poly\nCSS", {
 
 | Group | Options |
 |---|---|
-| **Layout** | `size` · `depth` (0 = flat slab, no edges) · `curveSteps` · `letterSpacing` · `lineHeight` · `align` · `scale: [x,y]` · `underline` · `strike` · `warp` · `simplify` · `merge` |
+| **Layout** | `size` · `depth` (0 = flat slab, no edges) · `curveSteps` · `letterSpacing` · `lineHeight` · `align` · `scale: [x,y]` · `underline` · `strike` · `warp` · `simplify` |
 | **`profile`** | `"flat"` · `{ edge: "bevel"\|"round", raised?, segments? }` · `{ curve: CubicBezier, segments? }` |
 | **`faces`** | `{ front?, sides?, back? }` · a single `Face` · `FaceStop[]` |
 | **`outline`** | `{ color, width }` — a colored halo around the front face |

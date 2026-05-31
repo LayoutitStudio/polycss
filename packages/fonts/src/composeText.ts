@@ -8,7 +8,7 @@
  * extrusion, so the 3D walls follow the curve too. Bold/italic are chosen by
  * the caller by passing the appropriate weight/style `ParsedFont`.
  */
-import { mergePolygons, type Polygon } from "@layoutit/polycss-core";
+import type { Polygon } from "@layoutit/polycss-core";
 import type { ParsedFont } from "./parseFont";
 import {
   dedupeContour,
@@ -101,8 +101,6 @@ export interface ComposeTextOptions {
   warp?: WarpOptions;
   /** Outline simplification tolerance (world units, 0 = exact; hole-less glyphs only). */
   simplify?: number;
-  /** Merge coplanar same-color cap triangles into larger polygons (fewer DOM nodes). */
-  merge?: boolean;
   /** Extrusion cross-section / edge profile. Defaults to "flat". */
   profile?: Profile;
   /**
@@ -260,7 +258,7 @@ export function composeText(font: ParsedFont, text: string, options: ComposeText
     outlineColor: options.outline?.color,
     outlineWidth: options.outline?.width,
   });
-  return options.merge ? mergePolygons(polygons) : polygons;
+  return polygons;
 }
 
 function warpShape(shape: Shape, warp: WarpFn | null): Shape {
