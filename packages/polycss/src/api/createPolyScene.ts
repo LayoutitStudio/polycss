@@ -2093,6 +2093,40 @@ export function createPolyScene(
   // faces of a low-poly curved mesh. Plane-offset tolerance is 0.5
   // CSS px — sub-pixel coplanarity drift in glTF imports doesn't
   // separate what should be a single surface.
+  // Minkowski expansion of a convex CCW polygon outward by `expand` units.
+  // Each vertex moves along the bisector of its two adjacent edge outward-
+  // perpendiculars, scaled so the edge offset distance equals `expand`
+  // (true Minkowski sum with a disk of radius `expand`, evaluated at the
+  // vertex). For convex inputs the result is a larger convex polygon with
+  // every edge offset outward by exactly `expand`.
+  function expandConvexHullOutward(hullCcw: Array<[number, number]>, expand: number): Array<[number, number]> {
+    if (hullCcw.length < 3 || expand === 0) return hullCcw;
+    const out: Array<[number, number]> = [];
+    const n = hullCcw.length;
+    for (let i = 0; i < n; i++) {
+      const u = hullCcw[(i - 1 + n) % n]!;
+      const v = hullCcw[i]!;
+      const w = hullCcw[(i + 1) % n]!;
+      // Outward perpendiculars for CCW: right side of each edge.
+      const e1x = v[0] - u[0], e1y = v[1] - u[1];
+      const e2x = w[0] - v[0], e2y = w[1] - v[1];
+      const l1 = Math.hypot(e1x, e1y), l2 = Math.hypot(e2x, e2y);
+      if (l1 < 1e-9 || l2 < 1e-9) { out.push(v); continue; }
+      const n1x = e1y / l1, n1y = -e1x / l1;
+      const n2x = e2y / l2, n2y = -e2x / l2;
+      const bx = n1x + n2x, by = n1y + n2y;
+      const bl = Math.hypot(bx, by);
+      if (bl < 1e-9) { out.push(v); continue; }
+      const bxn = bx / bl, byn = by / bl;
+      // Scale bisector so the perpendicular offset to each edge equals `expand`.
+      const dot = bxn * n1x + byn * n1y;
+      if (Math.abs(dot) < 1e-9) { out.push(v); continue; }
+      const scale = expand / dot;
+      out.push([v[0] + bxn * scale, v[1] + byn * scale]);
+    }
+    return out;
+  }
+
   function groupReceiverFaceGroups(
     receiver: MeshEntry,
     rpos: Vec3,
@@ -2245,7 +2279,18 @@ export function createPolyScene(
       if (uvs.length < 3) return;
       const hull = convexHull2D(uvs);
       if (hull.length < 3) return;
-      out.push({ O, n, u, v, outlineUv: ensureCcw2D(hull), memberPolysUv, memberPolyIndices });
+      // Minkowski-expand the outline outward by RECEIVER_OUTLINE_EXPAND CSS
+      // px so shadow projections clipped to this outline extend slightly
+      // past the actual polygon edge. The adjacent receiver face that shares
+      // the edge expands by the same amount in its own UV basis, so the two
+      // shadows overlap by ~2×EXPAND at the corner — eliminating the
+      // sub-pixel light strip that used to appear where two wall faces meet
+      // (the residual gap left after SELF_SHADOW_EPS / lift reductions).
+      // 0.5 CSS px is small enough that shadows extending past edges into
+      // empty 3D space stay sub-pixel at typical zoom.
+      const RECEIVER_OUTLINE_EXPAND = 0.5;
+      const outlineUv = expandConvexHullOutward(ensureCcw2D(hull), RECEIVER_OUTLINE_EXPAND);
+      out.push({ O, n, u, v, outlineUv, memberPolysUv, memberPolyIndices });
     }
     return out;
   }
@@ -2662,7 +2707,11 @@ export function createPolyScene(
       // 0.05 CSS px sits right at the float-noise floor. Casters whose
       // vertices touch the receiver-plane edge (e.g. roof eave meeting
       // wall top) get included instead of clipped short, closing the
-      // light strip at junction corners.
+      // light strip at junction corners. Going NEGATIVE here makes
+      // coplanar tris project chaotic spiky shadows — the half-space
+      // clip plane is at dp=0 but the inclusion test counts vertices at
+      // dp<0 as "above", producing inverted polygon orientations after
+      // projection. Keep this positive.
       const SELF_SHADOW_EPS = 0.05;
       // Skip casters that are essentially on the SAME SURFACE as the
       // receiver — including parallel walls behind/in-front-of the
