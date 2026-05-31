@@ -63,6 +63,7 @@
     import {
       createPolyCamera, createPolyScene,
       createPolyBox, loadMesh,
+      createTransformControls,
     } from "./.generated/polycss.js";
 
     const Q = new URLSearchParams(location.search);
@@ -376,21 +377,80 @@
     }
     threeScene.add(dirLight);
     threeScene.add(dirLight.target);
-    // Three.js directional-light helper: yellow line widget at the light's
-    // position, refreshed whenever the light moves.
-    const dirLightHelper = new THREE.DirectionalLightHelper(dirLight, 1, 0xffaa00);
-    threeScene.add(dirLightHelper);
     const ambLight = new THREE.AmbientLight(0xffffff, S.amb.intensity);
     threeScene.add(ambLight);
 
-    // PolyCSS light helper — small box at the same world position the Three.js
-    // helper sits at. Both engines share the same fitDirLightToScene math, so
-    // wiring the position from there keeps the markers aligned.
+    // Light helper marker — both engines render a small box at a NEAR
+    // position derived from the light direction so the user can see + drag
+    // it. The actual light's WORLD position lives much farther out for
+    // shadow-camera precision (see fitDirLightToScene), so the helper
+    // position is computed separately here.
+    const LIGHT_HELPER_DISTANCE = 4; // world units from target
+    function computeLightHelperPos() {
+      const dx = S.dir.x, dy = S.dir.y, dz = S.dir.z;
+      const len = Math.hypot(dx, dy, dz) || 1;
+      return [
+        (dx / len) * LIGHT_HELPER_DISTANCE,
+        (dy / len) * LIGHT_HELPER_DISTANCE,
+        (dz / len) * LIGHT_HELPER_DISTANCE,
+      ];
+    }
+    // Three.js helper: simple mesh + a line from the helper to the origin.
+    const lightHelperGeom = new THREE.SphereGeometry(0.2, 16, 16);
+    const lightHelperMat = new THREE.MeshBasicMaterial({ color: 0xffaa00 });
+    const threeLightHelper = new THREE.Mesh(lightHelperGeom, lightHelperMat);
+    threeScene.add(threeLightHelper);
+    const lightLineMat = new THREE.LineBasicMaterial({ color: 0xffaa00 });
+    const lightLineGeom = new THREE.BufferGeometry();
+    lightLineGeom.setFromPoints([new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, 0)]);
+    const threeLightLine = new THREE.Line(lightLineGeom, lightLineMat);
+    threeScene.add(threeLightLine);
+
+    // PolyCSS helper — small box at the same NEAR world position. The
+    // gizmo attaches to this mesh so drag = move light helper = update
+    // S.dir.{x,y,z}.
     const lightHelperSize = 0.4;
     const polyLightHelper = polyScene.add(
       createPolyBox({ size: [lightHelperSize, lightHelperSize, lightHelperSize], color: "#ffaa00" }),
       { id: "light-helper", position: [0, 0, 0], castShadow: false, receiveShadow: false, excludeFromAutoCenter: true, merge: false },
     );
+    // Wire a translate gizmo onto the light marker. Drag it to move the
+    // directional light in 3D. The drag reports a new WORLD position; we
+    // back-compute the light DIRECTION by subtracting the light target
+    // (always the scene center, kept at world origin in the bench) and
+    // normalizing relative to fitDirLightToScene's lightDist. Result is
+    // assigned to S.dir.{x,y,z} so the sliders + URL stay in sync.
+    let lightDragging = false;
+    const lightGizmo = createTransformControls(polyScene, {
+      mode: "translate",
+      size: 1.2,
+      onDraggingChanged: (dragging) => { lightDragging = dragging; if (!dragging && S.lighting === "baked") update(true); },
+      onObjectChange: (e) => {
+        // e.position is the NEW helper world position. Light direction is
+        // the helper-vs-origin offset, normalized, then scaled to keep
+        // the user's existing direction-vector magnitude (slider UX
+        // treats |dir| as a meaningful number for intensity feel).
+        const nx = e.position[0];
+        const ny = e.position[1];
+        const nz = e.position[2];
+        const newLen = Math.hypot(nx, ny, nz) || 1;
+        const oldLen = Math.hypot(S.dir.x, S.dir.y, S.dir.z) || 1;
+        S.dir.x = (nx / newLen) * oldLen;
+        S.dir.y = (ny / newLen) * oldLen;
+        S.dir.z = (nz / newLen) * oldLen;
+        refreshLightSliders();
+        // Dynamic mode: per-frame CSS calc picks up new --plx/y/z; baked
+        // mode would flicker on every drag tick, so debounce-bake on
+        // drag end (onDraggingChanged above).
+        update(false);
+      },
+    });
+    lightGizmo.attach(polyLightHelper);
+    // Slider value-refreshers for the directional-light dir.x/y/z rows
+    // — populated by buildPanel() so the light-drag handler above can
+    // sync the slider UI when the user moves the helper.
+    const lightSliderRefreshers = [];
+    function refreshLightSliders() { for (const fn of lightSliderRefreshers) fn(); }
 
     // ─── Camera — same rotX/rotY/zoom drive both ───────────────────────
     function resizeThree() {
@@ -485,13 +545,22 @@
       fitDirLightToScene();
       dirLight.intensity = S.dir.intensity;
       ambLight.intensity = S.amb.intensity;
-      // Sync both light-helper markers to the freshly-fit light position.
-      // Three.js DirectionalLightHelper has a built-in update() that re-aligns
-      // its line geometry to the light's new position/direction; the PolyCSS
-      // marker just translates to match.
-      dirLightHelper.update();
-      if (polyLightHelper) {
-        polyLightHelper.setTransform({ position: [dirLight.position.x, dirLight.position.y, dirLight.position.z] });
+      // Sync both light-helper markers to a NEAR world position derived
+      // from the light direction (separate from dirLight.position, which
+      // sits far away for shadow-camera precision). Drag-induced changes
+      // to S.dir.x/y/z are propagated here automatically.
+      const helperPos = computeLightHelperPos();
+      threeLightHelper.position.set(helperPos[0], helperPos[1], helperPos[2]);
+      lightLineGeom.setFromPoints([
+        new THREE.Vector3(helperPos[0], helperPos[1], helperPos[2]),
+        new THREE.Vector3(dirLight.target.position.x, dirLight.target.position.y, dirLight.target.position.z),
+      ]);
+      // Only push setTransform when the user ISN'T mid-drag — during a
+      // drag, polyLightHelper's transform is already being mutated by
+      // the gizmo and re-setting it here would cause it to lag/snap.
+      if (polyLightHelper && !lightDragging) {
+        polyLightHelper.setTransform({ position: helperPos });
+        lightGizmo.update();
       }
       applyShadowsOnly();
       renderer.render(threeScene, camera);
@@ -865,6 +934,12 @@
         inp.value = getVal();
         const val = document.createElement("span"); val.className = "val"; val.textContent = r.fmt(getVal());
         if (r.obj) objectRowRefreshers.push(() => { const v = getVal(); inp.value = v; val.textContent = r.fmt(v); });
+        // Light-direction sliders (dir.x/y/z) also need a refresher hook
+        // so the gizmo drag can sync the slider UI as the user drags the
+        // light marker around in 3D.
+        if (r.k[0] === "dir" && (r.k[1] === "x" || r.k[1] === "y" || r.k[1] === "z")) {
+          lightSliderRefreshers.push(() => { const v = getVal(); inp.value = v; val.textContent = r.fmt(v); });
+        }
         const isLightSlider = (r.k[0] === "dir" || r.k[0] === "amb");
         // Baked mode is treated as truly static: while a light slider is
         // being dragged, the meshes don't repaint. A single rebake fires
