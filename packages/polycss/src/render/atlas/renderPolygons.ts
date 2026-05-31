@@ -17,6 +17,7 @@ import type {
 } from "./types";
 import {
   ASYNC_RENDER_BUDGET_MS,
+  DEFAULT_SEAM_BLEED,
   DEFAULT_TILE,
   PROJECTIVE_QUAD_DENOM_EPS,
   PROJECTIVE_QUAD_MAX_WEIGHT_RATIO,
@@ -74,7 +75,11 @@ import {
 } from "./stableTriangle";
 import { stableTriangleMatrixDecimals } from "@layoutit/polycss-core";
 
-const DEFAULT_SOLID_SEAM_BLEED = 1.5;
+// Single source of truth for the solid seam-bleed default is
+// `DEFAULT_SEAM_BLEED` in `@layoutit/polycss-core/atlas/constants`.
+// Local alias kept for readability at the call sites; do NOT change
+// the value here — change the core constant.
+const DEFAULT_SOLID_SEAM_BLEED = DEFAULT_SEAM_BLEED;
 
 type RenderTextureAtlasOptionsWithSeams = RenderTextureAtlasOptions & {
   seamBleed?: number;

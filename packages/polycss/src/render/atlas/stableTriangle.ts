@@ -1,6 +1,7 @@
 import type { Polygon } from "@layoutit/polycss-core";
 import {
   buildSeamBleedPolygonEdges,
+  DEFAULT_SEAM_BLEED,
   DEFAULT_TILE,
   SOLID_TRIANGLE_CANONICAL_SIZE,
   DEFAULT_MATRIX_DECIMALS,
@@ -35,7 +36,8 @@ import { stableTriangleMatrixDecimals } from "@layoutit/polycss-core";
 import { applyPolygonDataAttrs, hasPolygonDataAttrs } from "./emit";
 import { resolveSolidTrianglePrimitive } from "./strategy";
 
-const DEFAULT_SOLID_SEAM_BLEED = 1.5;
+// Mirrors `DEFAULT_SEAM_BLEED` from core — see renderPolygons.ts.
+const DEFAULT_SOLID_SEAM_BLEED = DEFAULT_SEAM_BLEED;
 const SOLID_TRIANGLE_BORDER_WIDTH = "0 48px 96px 48px";
 
 type RenderTextureAtlasOptionsWithSeams = RenderTextureAtlasOptions & {
