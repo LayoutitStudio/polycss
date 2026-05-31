@@ -122,12 +122,6 @@
 }
 textarea.wa-input { resize: vertical; line-height: 1.35; height: auto; padding: 0.4rem 0.5rem; }
 
-@media (max-width: 60rem) {
-  .wa-card { position: static; width: auto; max-height: none; margin: 12px; }
-  .wa-root { height: auto; overflow: visible; }
-  .wa-stage { position: relative; height: 56vh; inset: auto; }
-}
-
 /* Right panel = real lil-gui, themed with the /gallery's exact variables. */
 .wa-gui {
   position: absolute;
@@ -235,3 +229,69 @@ textarea.wa-input { resize: vertical; line-height: 1.35; height: auto; padding: 
 }
 .wa-codepen:hover { border-color: #3a86ff; }
 .wa-codepen:disabled { opacity: 0.6; cursor: progress; }
+
+/* Bottom tab bar — desktop keeps both panels floating, so it's hidden there. */
+.wa-mobile-tabs { display: none; }
+
+/* Mobile: like /gallery — the floating panels collapse into bottom sheets that
+   the tab bar toggles one at a time, over a full-bleed stage. */
+@media (max-width: 760px) {
+  .wa-root { --wa-tabs-h: 52px; }
+
+  .dn-stats-overlay { display: none !important; }
+
+  /* Only the two top-level floating panels collapse — not the left card's own
+     inline lil-gui (.wa-gui--inline), which stays inside the scrolling card. */
+  .wa-left,
+  .wa-gui:not(.wa-gui--inline) {
+    top: 8px;
+    right: 8px;
+    bottom: calc(8px + var(--wa-tabs-h) + 8px);
+    left: 8px;
+    width: auto;
+    max-width: none;
+    max-height: none;
+    z-index: 25;
+    display: none;
+  }
+  .wa-left.is-mobile-open { display: flex; }
+  .wa-gui:not(.wa-gui--inline).is-mobile-open { display: flex; flex-direction: column; }
+  .wa-left .wa-card__body { flex: 1; max-height: none; }
+
+  /* The right panel's lil-gui fills the sheet and scrolls inside it. */
+  .wa-gui:not(.wa-gui--inline) .lil-gui.root {
+    width: 100% !important;
+    height: 100% !important;
+    max-height: 100% !important;
+  }
+
+  .wa-codepen,
+  .wa-stage-foot { bottom: calc(8px + var(--wa-tabs-h) + 8px); }
+
+  .wa-mobile-tabs {
+    position: absolute;
+    right: 8px;
+    bottom: 8px;
+    left: 8px;
+    z-index: 30;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+  .wa-mobile-tabs__button {
+    min-height: 44px;
+    border: 1px solid #2a3340;
+    border-radius: 8px;
+    background: rgba(17, 20, 26, 0.92);
+    color: #d8e2ec;
+    font: 700 13px/1 system-ui, sans-serif;
+    cursor: pointer;
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+  }
+  .wa-mobile-tabs__button.is-active {
+    border-color: #22d3ee;
+    background: #12313a;
+    color: #ecfeff;
+  }
+}
