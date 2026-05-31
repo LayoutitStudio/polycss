@@ -2441,6 +2441,18 @@ export function createPolyScene(
           // occluding (a partial overlap would still leave parts of i
           // visible, so we shouldn't drop i entirely).
           if (jMinU <= iMinU && jMaxU >= iMaxU && jMinV <= iMinV && jMaxV >= iMaxV) {
+            // Don't cull when j is much LARGER than i — that pattern is a
+            // small surface feature (door frame, window sill, decorative
+            // recess) sitting inside a broader wall, not a duplicate
+            // interior wall layer. Real wall-pair duplicates have
+            // approximately equal bboxes; a small i inside a much bigger
+            // j is a sub-feature that the user CAN see (it's the visible
+            // surface for that local region) and should keep its
+            // receiver SVG so casters can shadow it.
+            const iArea = Math.max(0, iMaxU - iMinU) * Math.max(0, iMaxV - iMinV);
+            const jArea = Math.max(0, jMaxU - jMinU) * Math.max(0, jMaxV - jMinV);
+            const OCCL_AREA_RATIO = 2.0; // j must be ≤ 2× i's area to count as duplicate
+            if (jArea > iArea * OCCL_AREA_RATIO) continue;
             occluded.add(i);
             break;
           }
