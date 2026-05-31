@@ -89,22 +89,22 @@ describe("composeText", () => {
   });
 
   it("round/bevel hold their counters too (inset never overruns the hole)", () => {
-    for (const profile of ["round", "bevel"] as const) {
-      expect(composeText(roboto, "o", { profile }).length).toBeGreaterThan(0);
-      expect(composeText(roboto, "B", { profile, depth: 30 }).length).toBeGreaterThan(0);
+    for (const edge of ["round", "bevel"] as const) {
+      expect(composeText(roboto, "o", { profile: { edge } }).length).toBeGreaterThan(0);
+      expect(composeText(roboto, "B", { profile: { edge }, depth: 30 }).length).toBeGreaterThan(0);
     }
   });
 
   // ── regression: scale / merge / layered ─────────────────────────────────
   it("horizontal scale widens the run", () => {
     const a = bounds(composeText(roboto, "AV"));
-    const b = bounds(composeText(roboto, "AV", { scaleX: 2 }));
+    const b = bounds(composeText(roboto, "AV", { scale: [2, 1] }));
     expect(b.maxY - b.minY).toBeGreaterThan((a.maxY - a.minY) * 1.6);
   });
 
   it("vertical scale heightens the glyphs", () => {
     const a = bounds(composeText(roboto, "A"));
-    const b = bounds(composeText(roboto, "A", { scaleY: 2 }));
+    const b = bounds(composeText(roboto, "A", { scale: [1, 2] }));
     expect(b.maxX - b.minX).toBeGreaterThan((a.maxX - a.minX) * 1.6);
   });
 
@@ -114,10 +114,132 @@ describe("composeText", () => {
     expect(merged.length).toBeLessThan(base.length);
   });
 
-  it("layered back color + oblique recolors and offsets the back", () => {
-    const polys = composeText(roboto, "o", { depth: 10, color: "#ff0000", backColor: "#00ff00", oblique: [12, -12] });
+  it("flat shadow (depth 0) offsets a recolored back layer", () => {
+    const polys = composeText(roboto, "o", { depth: 0, faces: { front: { color: "#ff0000" }, back: { color: "#00ff00", offset: [12, -12] } } });
     const colors = new Set(polys.map((p) => p.color));
-    expect(colors.has("#ff0000")).toBe(true); // front cap
-    expect(colors.has("#00ff00")).toBe(true); // back cap
+    expect(colors.has("#ff0000")).toBe(true); // front
+    expect(colors.has("#00ff00")).toBe(true); // offset back
+  });
+
+  // ── regression: WordArt fills / outline / flat-layer shadow ──────────────
+  it("a face texture UV-maps the front cap across the whole word", () => {
+    const tex = "data:image/png;base64,AAAA";
+    const polys = composeText(roboto, "Hi", { faces: { front: { texture: tex } } });
+    const faces = polys.filter((p) => p.texture === tex);
+    expect(faces.length).toBeGreaterThan(0);
+    // Every textured face carries one UV per vertex…
+    expect(faces.every((p) => p.uvs?.length === p.vertices.length)).toBe(true);
+    // …and the UVs span the whole word (reach both extremes of 0..1).
+    const us = faces.flatMap((p) => p.uvs!.map((uv) => uv[0]));
+    expect(Math.min(...us)).toBeLessThan(0.05);
+    expect(Math.max(...us)).toBeGreaterThan(0.95);
+    // Walls stay untextured.
+    expect(polys.some((p) => !p.texture)).toBe(true);
+  });
+
+  it("solid (no faceTexture) leaves the face untextured", () => {
+    const polys = composeText(roboto, "Hi");
+    expect(polys.every((p) => !p.texture && !p.uvs)).toBe(true);
+  });
+
+  it("outline adds a halo silhouette in the outline color", () => {
+    const plain = composeText(roboto, "o").length;
+    const polys = composeText(roboto, "o", { outline: { color: "#123456", width: 3 } });
+    expect(polys.length).toBeGreaterThan(plain);
+    expect(polys.some((p) => p.color === "#123456")).toBe(true);
+  });
+
+  it("textures each face independently (front / sides / back)", () => {
+    const polys = composeText(roboto, "Hi", {
+      depth: 20,
+      faces: {
+        front: { texture: "/t/dirt.svg" },
+        sides: { texture: "/t/wood.svg" },
+        back: { texture: "/t/brick.svg" },
+      },
+    });
+    const urls = new Set(polys.map((p) => p.texture).filter(Boolean));
+    expect(urls.has("/t/dirt.svg")).toBe(true);  // front cap
+    expect(urls.has("/t/brick.svg")).toBe(true); // back cap
+    expect(urls.has("/t/wood.svg")).toBe(true);  // side walls
+  });
+
+  it("tiling repeats the texture (UV > 1 + repeat wrap) vs stretch", () => {
+    const stretched = composeText(roboto, "WWWW", { faces: { front: { texture: "/t/dirt.svg" } } });
+    const tiled = composeText(roboto, "WWWW", { faces: { front: { texture: "/t/dirt.svg", tile: 20 } } });
+    const maxU = (ps: ReturnType<typeof composeText>) =>
+      Math.max(...ps.filter((p) => p.texture).flatMap((p) => p.uvs!.map((uv) => uv[0])));
+    expect(maxU(stretched)).toBeLessThanOrEqual(1.0001); // normalized to word
+    expect(maxU(tiled)).toBeGreaterThan(1.5);            // repeats across the word
+    expect(tiled.find((p) => p.texture)?.textureWrap?.s).toBe("repeat");
+  });
+
+  it("axial faces band the solid by depth (front cap / body / back cap)", () => {
+    const polys = composeText(roboto, "o", {
+      depth: 30,
+      faces: { front: { color: "#ff0000" }, sides: { color: "#00ff00" }, back: { color: "#0000ff" } },
+    });
+    const front = polys.filter((p) => p.color === "#ff0000");
+    const side = polys.filter((p) => p.color === "#00ff00");
+    const back = polys.filter((p) => p.color === "#0000ff");
+    expect(front.length).toBeGreaterThan(0); // front cap (t≈0)
+    expect(side.length).toBeGreaterThan(0);  // body walls (t≈0.5)
+    expect(back.length).toBeGreaterThan(0);  // back cap (t≈1)
+    // The front cap sits at the most-forward z; the back cap at the most-back.
+    const frontZ = Math.max(...front.flatMap((p) => p.vertices.map((v) => v[2])));
+    const backZ = Math.min(...back.flatMap((p) => p.vertices.map((v) => v[2])));
+    expect(frontZ).toBeGreaterThan(backZ);
+  });
+
+  it("omitting `sides` makes the front meet the back (no side band)", () => {
+    const withSide = composeText(roboto, "o", { depth: 30, faces: { front: { color: "#ff0000" }, sides: { color: "#00ff00" }, back: { color: "#0000ff" } } });
+    const noSide = composeText(roboto, "o", { depth: 30, faces: { front: { color: "#ff0000" }, back: { color: "#0000ff" } } });
+    expect(withSide.some((p) => p.color === "#00ff00")).toBe(true);   // has a side band
+    expect(noSide.some((p) => p.color === "#00ff00")).toBe(false);    // none
+    // Same geometry, but the side band's polys are now front/back instead.
+    expect(noSide.length).toBe(withSide.length);
+    expect(noSide.filter((p) => p.color !== "#00ff00").length).toBeGreaterThan(withSide.filter((p) => p.color !== "#00ff00").length);
+  });
+
+  it("a face set to `false` is covered by its neighbour (no hole, no own color)", () => {
+    const faces = { front: { color: "#ff0000" }, sides: { color: "#00ff00" }, back: { color: "#0000ff" } };
+    const full = composeText(roboto, "o", { depth: 20, faces });
+    const noBack = composeText(roboto, "o", { depth: 20, faces: { ...faces, back: false } });
+    // Geometry is intact (same polygon count → no hole at the back)…
+    expect(noBack.length).toBe(full.length);
+    // …the back has no color of its own…
+    expect(noBack.some((p) => p.color === "#0000ff")).toBe(false);
+    // …and the back cap is covered by the nearest active face (the side).
+    expect(noBack.filter((p) => p.color === "#00ff00").length).toBeGreaterThan(full.filter((p) => p.color === "#00ff00").length);
+  });
+
+  it("an N-stop array distributes materials down the axis", () => {
+    const polys = composeText(roboto, "I", {
+      depth: 40,
+      faces: [
+        { at: 0, color: "#111111" },
+        { at: 0.5, color: "#777777" },
+        { at: 1, color: "#eeeeee" },
+      ],
+    });
+    const colors = new Set(polys.map((p) => p.color));
+    expect(colors.has("#111111")).toBe(true);
+    expect(colors.has("#777777")).toBe(true);
+    expect(colors.has("#eeeeee")).toBe(true);
+  });
+
+  it("custom cubic-bezier profile differs from a round edge", () => {
+    const round = composeText(roboto, "o", { depth: 24, profile: { edge: "round" } });
+    const custom = composeText(roboto, "o", { depth: 24, profile: { curve: [0.1, 0.9, 0.2, 1] } });
+    const hash = (ps: ReturnType<typeof composeText>) => ps.map((p) => p.vertices.flat().join()).join("|");
+    expect(round.length).toBe(custom.length);
+    expect(hash(round)).not.toBe(hash(custom));
+  });
+
+  it("flat (depth 0) drops the side walls vs an extruded depth", () => {
+    const walled = composeText(roboto, "o", { depth: 12, faces: { back: { color: "#00ff00" } } });
+    const flat = composeText(roboto, "o", { depth: 0, faces: { back: { color: "#00ff00", offset: [10, -10] } } });
+    expect(flat.length).toBeLessThan(walled.length);
+    expect(flat.some((p) => p.color === "#00ff00")).toBe(true); // shadow layer kept
   });
 });

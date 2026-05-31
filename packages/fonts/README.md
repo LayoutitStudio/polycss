@@ -44,32 +44,57 @@ scene.add({ polygons, objectUrls: [], warnings: [], dispose() {} });
 
 ## `composeText` — WordArt composer
 
-`composeText` accepts every `textPolygons` option plus the layout, decoration, and warp controls below. `\n` in `text` starts a new line.
+`composeText(font, text, options)` is the full composer (`\n` starts a new line). The options group into five concerns instead of one flat bag:
 
 ```ts
-import { composeText } from "@layoutit/polycss-fonts";
+import { composeText, resolveFace } from "@layoutit/polycss-fonts";
 
 const polygons = composeText(font, "Poly\nCSS", {
-  size: 100,
-  depth: 24,
-  align: "center",
-  warp: { shape: "arch", amount: 0.6 },
-  backColor: "#3a86ff",          // layered: distinct back-cap color…
-  oblique: [14, -14],            // …shifted for the retro front-A / back-B leaning block
+  // 1 · type & layout
+  size: 100, depth: 24, align: "center", scale: [1, 1],
+  letterSpacing: 0, lineHeight: 1.25, underline: false, strike: false,
+  warp: { shape: "arch", amount: 0.6 }, simplify: 0, merge: false,
+
+  // 2 · cross-section / edge profile (one union)
+  profile: { edge: "bevel", coverage: "front" },
+
+  // 3 · per-face material — one `Face` shape for all three
+  faces: {
+    front: resolveFace({ kind: "gradient", from: "#ffe14d", to: "#ff7a1a" }),
+    sides: { color: "#7c4a12" },
+    back:  { color: "#3a86ff" },
+  },
+
+  // 4 · outline
+  outline: { color: "#1a1a2e", width: 3 },
 });
 ```
 
-| Option | Default | Notes |
-|---|---|---|
-| `lineHeight` | `1.25` | Line advance as a multiple of `size`. |
-| `align` | `"center"` | `"left"` · `"center"` · `"right"`. |
-| `scaleX` / `scaleY` | `1` | Horizontal / vertical glyph scale (Photoshop ↔ / ↕). |
-| `underline` / `strike` | `false` | Decoration bars; they follow the active warp. |
-| `warp` | — | `{ shape, amount }`. `shape`: `none`, `arch`, `archDown`, `arc`, `wave`, `bulge`, `cone`, `slantUp`, `slantDown`. `amount` is `0..1`. |
-| `simplify` | `0` | Outline simplification tolerance (world units). Hole-less glyphs only — holed glyphs (`O`, `P`, `a`…) stay full-detail so counters never collapse. |
-| `merge` | `false` | Merge coplanar same-color cap triangles into larger polygons (~⅓ fewer DOM nodes). Has a CPU cost, so off by default. |
-| `backColor` | `color` | Back-cap color — set it apart from `color` for a layered two-tone look. |
-| `oblique` | `[0, 0]` | `[rightward, upward]` shift of the back cap relative to the front (world units). |
+| Group | Options |
+|---|---|
+| **Layout** | `size` · `depth` (0 = flat slab, no edges) · `curveSteps` · `letterSpacing` · `lineHeight` · `align` · `scale: [x,y]` · `underline` · `strike` · `warp` · `simplify` · `merge` |
+| **`profile`** | `"flat"` · `{ edge: "bevel"\|"round", raised?, segments? }` · `{ curve: CubicBezier, segments? }` |
+| **`faces`** | `{ front?, sides?, back? }` · a single `Face` · `FaceStop[]` |
+| **`outline`** | `{ color, width }` — a colored halo around the front face |
+
+- **`profile` (shape)** and **`faces` (color)** are independent functions of the same depth axis `t ∈ [0,1]` (0 = front, 1 = back). `edge` bevels/rounds the edges (`raised` flips a round to a convex dome); `curve` is a custom edge from a CSS `cubic-bezier` easing.
+- **`Face`** = `{ color?, texture?, tile? }`. `texture` is an already-rendered URL/data-URL UV-mapped across the whole word; `tile` repeats it every N units (blocks) vs stretching (gradients/photos).
+- **`faces` resolves to material stops down the axis** — each polygon takes the nearest stop to its depth:
+  - `{ front, sides, back }` → 3 stops at `{0, .5, 1}` (omit `sides` → the front rounds straight into the back, **no side band**).
+  - a single `Face` → one material for the whole solid.
+  - `FaceStop[]` (`Face & { at }`) → **N** materials distributed down the axis.
+- **Flat drop shadow** — `depth: 0` + `faces.back.offset: [x, y]` with a distinct `back.color`.
+
+### Fills — `resolveFace` & `makeFillTexture` (browser)
+
+`composeText` is pure and takes already-rendered textures. The browser helpers turn a high-level fill into a `Face`:
+
+```ts
+resolveFace({ kind: "gradient", from: "#ffe14d", to: "#ff7a1a", angle: 270 })
+// → { color?, texture: "data:image/png;…" }
+```
+
+`FaceFillSpec` (the `kind`): `"solid"` · `"gradient"` (`from`, `to`, `angle?`) · `"rainbow"` (`angle?`) · `"texture"` (`url`, `tile?`) · `"image"` (`src`). `makeFillTexture(FillSpec)` is the lower-level canvas painter if you want the data URL directly.
 
 ## Scope / limitations
 
