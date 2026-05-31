@@ -157,6 +157,8 @@ export function WordArtWorkbench() {
   const [lightEl, setLightEl] = useState(() => qn("lel", 45));
   const [activePreset, setActivePreset] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
+  // Mobile: only one floating panel is open at a time, toggled by the bottom tabs.
+  const [mobilePanel, setMobilePanel] = useState<"style" | "controls" | null>(null);
 
   const handleCodePen = async () => {
     const el = document.querySelector<HTMLElement>(".wa-stage .polycss-camera")
@@ -172,6 +174,13 @@ export function WordArtWorkbench() {
       setExporting(false);
     }
   };
+
+  useEffect(() => {
+    if (!mobilePanel) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setMobilePanel(null); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [mobilePanel]);
 
   // Default bundled font + Google catalog. If the URL named a font, select it
   // once the catalog is in.
@@ -366,7 +375,11 @@ export function WordArtWorkbench() {
         status={status}
       />
 
-      <aside className="wa-card wa-left" aria-label="Text and presets">
+      <aside
+        id="wa-style-panel"
+        className={`wa-card wa-left ${mobilePanel === "style" ? "is-mobile-open" : ""}`}
+        aria-label="Text and presets"
+      >
         <div className="wa-card__body">
           <label className="wa-field">
             <span>Text</span>
@@ -398,11 +411,37 @@ export function WordArtWorkbench() {
         </div>
       </aside>
 
-      <GuiPanel values={guiValues} set={guiSet} />
+      <GuiPanel
+        id="wa-controls-panel"
+        className={mobilePanel === "controls" ? "is-mobile-open" : ""}
+        values={guiValues}
+        set={guiSet}
+      />
 
       <button type="button" className="wa-codepen" onClick={handleCodePen} disabled={exporting}>
         {exporting ? "Exporting…" : "Open in CodePen"}
       </button>
+
+      <nav className="wa-mobile-tabs" aria-label="WordArt panels">
+        <button
+          type="button"
+          className={`wa-mobile-tabs__button ${mobilePanel === "style" ? "is-active" : ""}`}
+          aria-controls="wa-style-panel"
+          aria-expanded={mobilePanel === "style"}
+          onClick={() => setMobilePanel((cur) => (cur === "style" ? null : "style"))}
+        >
+          Style
+        </button>
+        <button
+          type="button"
+          className={`wa-mobile-tabs__button ${mobilePanel === "controls" ? "is-active" : ""}`}
+          aria-controls="wa-controls-panel"
+          aria-expanded={mobilePanel === "controls"}
+          onClick={() => setMobilePanel((cur) => (cur === "controls" ? null : "controls"))}
+        >
+          Controls
+        </button>
+      </nav>
     </div>
   );
 }
@@ -540,7 +579,7 @@ interface GuiValues {
  * are identical, not a CSS approximation. lil-gui is imperative, so we mount it
  * once and bridge its onChange → React, and React state → updateDisplay().
  */
-function GuiPanel({ values, set }: { values: GuiValues; set: (k: keyof GuiValues, v: number | string | boolean) => void }) {
+function GuiPanel({ id, className = "", values, set }: { id?: string; className?: string; values: GuiValues; set: (k: keyof GuiValues, v: number | string | boolean) => void }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const cfgRef = useRef<GuiValues>({ ...values });
   const ctrlRef = useRef<Record<string, ReturnType<GUI["add"]>>>({});
@@ -592,7 +631,7 @@ function GuiPanel({ values, set }: { values: GuiValues; set: (k: keyof GuiValues
     ctrlRef.current.profileSegments?.[values.profile === "round" ? "show" : "hide"]();
   });
 
-  return <div className="wa-gui" ref={hostRef} />;
+  return <div id={id} className={`wa-gui ${className}`} ref={hostRef} />;
 }
 
 interface LeftValues {
