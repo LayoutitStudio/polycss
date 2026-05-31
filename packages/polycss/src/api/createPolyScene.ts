@@ -772,6 +772,15 @@ export function createPolyScene(
     if ((currentOptions.textureLighting ?? "baked") !== "baked") return false;
     let updated = false;
     for (const entry of meshes) {
+      // Solid leaves (the bulk of the castle / cottage / etc.) always need
+      // their inline `color` re-baked at the new light direction — the
+      // preview-cascade was making them brighter than the pre-commit
+      // baseline, so without this they snap back to the OLD baked color on
+      // release and read as "the face just darkened/disappeared." This is
+      // CHEAP — `restoreBakedSolidPaint` walks the entry's solid leaves and
+      // updates inline color/--polycss-paint in place.
+      const solidChanged = restoreBakedSolidPaint(entry);
+      updated = solidChanged || updated;
       if (entry.rendered.some(needsBakedAtlasCommit)) {
         // In-place atlas swap (same path `mesh.rebakeAtlas()` uses) instead
         // of the destructive `renderEntry()`. The destructive path calls
@@ -779,13 +788,10 @@ export function createPolyScene(
         // then asynchronously rebuilds the atlas — during that window the
         // mesh's faces disappear visually. `rebakeRenderEntryInPlace` keeps
         // the existing leaves mounted and only swaps the atlas bitmap URL
-        // on textured leaves, so light commits feel like a clean slide
-        // instead of a flash-then-rebuild.
+        // on textured leaves.
         rebakeRenderEntryInPlace(entry);
         updated = true;
-        continue;
       }
-      updated = restoreBakedSolidPaint(entry) || updated;
     }
     sceneEl.style.removeProperty(BAKED_SOLID_PREVIEW_ACTIVE_VAR);
     for (const entry of meshes) {
