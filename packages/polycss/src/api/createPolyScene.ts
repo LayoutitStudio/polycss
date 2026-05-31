@@ -104,6 +104,13 @@ import {
   clearLightingVars,
   setStylePropertyIfChanged,
 } from "./scene/lightingVars";
+import {
+  ShadowSvgState,
+  disposeGroundShadow as disposeGroundShadowImpl,
+  ensureGroundShadow as ensureGroundShadowImpl,
+  hideGroundShadow as hideGroundShadowImpl,
+  syncShadowPaths as syncShadowPathsImpl,
+} from "./scene/shadowSvg";
 import type {
   InternalPolyMeshHandle,
   InternalSetPolygonsOptions,
@@ -279,102 +286,14 @@ export function createPolyScene(
     return entry.handle.id ?? entry.autoMeshId;
   }
 
-  // Cached CSS-Z of the shadow ground plane. Set by `recomputeShadowGround`.
-  // In dynamic mode this also flows into the `--shadow-ground-cssz` CSS var
-  // that drives `--shadow-proj`. In baked mode it's read by `emitShadowLeaves`
-  // to bake the per-leaf inline projection matrix on the CPU. `null` means
-  // no casting mesh exists yet, so no shadow leaves should be emitted.
-  let currentGroundCssZ: number | null = null;
-
-  // Scene-level shadow SVGs. One per surface (ground + each receiver
-  // face). Every caster's projection onto a given surface ends up in
-  // that surface's single SVG path, so overlapping shadows from
-  // different casters composite via SVG fill-rule=nonzero (one solid
-  // silhouette per surface) rather than stacking opacity at the DOM
-  // level. Surface elements are reused across light changes; only the
-  // SVG attributes/path data change.
-  let groundShadowSvg: SVGSVGElement | null = null;
-  let groundShadowVisible = false;
-  function disposeGroundShadow(): void {
-    if (groundShadowSvg?.parentNode) groundShadowSvg.parentNode.removeChild(groundShadowSvg);
-    groundShadowSvg = null;
-    groundShadowVisible = false;
-  }
-  function hideGroundShadow(): void {
-    if (groundShadowSvg && groundShadowVisible) {
-      groundShadowSvg.style.display = "none";
-      groundShadowVisible = false;
-    }
-  }
-  function ensureGroundShadow(): { svg: SVGSVGElement } {
-    const svgNS = "http://www.w3.org/2000/svg";
-    let svg = groundShadowSvg;
-    if (!svg) {
-      svg = doc.createElementNS(svgNS, "svg");
-      svg.setAttribute("class", "polycss-shadow polycss-shadow-svg");
-      svg.setAttribute("data-poly-shadow-type", "ground");
-      svg.setAttribute("data-poly-shadow-receiver", "ground");
-      svg.style.position = "absolute";
-      svg.style.top = "0";
-      svg.style.left = "0";
-      svg.style.display = "block";
-      svg.style.overflow = "hidden";
-      svg.style.transformOrigin = "0 0";
-      svg.style.pointerEvents = "none";
-      svg.style.willChange = "transform";
-      groundShadowSvg = svg;
-      const sceneFirst = sceneEl.firstChild;
-      if (sceneFirst) sceneEl.insertBefore(svg, sceneFirst);
-      else sceneEl.appendChild(svg);
-    } else if (!svg.parentNode) {
-      const sceneFirst = sceneEl.firstChild;
-      if (sceneFirst) sceneEl.insertBefore(svg, sceneFirst);
-      else sceneEl.appendChild(svg);
-    }
-    if (!groundShadowVisible) {
-      svg.style.display = "block";
-      groundShadowVisible = true;
-    }
-    return { svg };
-  }
-
-  // Ensure an SVG has exactly `count` child `<path>` elements (creates or
-  // removes as needed). Returns the current ordered list. Used by both
-  // ground and receiver-face shadow emitters to keep one path per
-  // contributing caster — letting each path carry a
-  // `data-poly-shadow-caster` attribute that mirrors the caster mesh's
-  // `data-poly-mesh-id`/`data-poly-mesh-index` for DevTools cross-ref.
-  // `withStroke` enables the same-color stroke the ground emitter uses
-  // to anti-alias the silhouette edge — receiver-face emitters MUST
-  // omit it, otherwise per-polygon clip remnants (degenerate slivers,
-  // hairline triangles) render as visible outlines.
-  function syncShadowPaths(svg: SVGSVGElement, count: number, withStroke: boolean): SVGPathElement[] {
-    const svgNS = "http://www.w3.org/2000/svg";
-    const out: SVGPathElement[] = [];
-    let existing = svg.firstChild as SVGPathElement | null;
-    for (let i = 0; i < count; i++) {
-      let path = existing as SVGPathElement | null;
-      if (path && path.tagName === "path") {
-        existing = path.nextSibling as SVGPathElement | null;
-      } else {
-        path = doc.createElementNS(svgNS, "path");
-        path.setAttribute("fill-rule", "nonzero");
-        if (withStroke) {
-          path.setAttribute("stroke-width", "2");
-          path.setAttribute("stroke-linejoin", "round");
-        }
-        svg.insertBefore(path, existing);
-      }
-      out.push(path);
-    }
-    // Remove leftover children that weren't reused.
-    while (existing) {
-      const next = existing.nextSibling as SVGPathElement | null;
-      svg.removeChild(existing);
-      existing = next;
-    }
-    return out;
-  }
+  // Shadow SVG state (ground SVG element + visibility + cached ground CSS-Z).
+  // See ./scene/shadowSvg for the helpers that read/write this bag.
+  const shadowSvgState = new ShadowSvgState();
+  const disposeGroundShadow = () => disposeGroundShadowImpl(shadowSvgState);
+  const hideGroundShadow = () => hideGroundShadowImpl(shadowSvgState);
+  const ensureGroundShadow = () => ensureGroundShadowImpl(shadowSvgState, doc, sceneEl);
+  const syncShadowPaths = (svg: SVGSVGElement, count: number, withStroke: boolean) =>
+    syncShadowPathsImpl(svg, doc, count, withStroke);
 
   function clearAllSceneShadows(): void {
     disposeGroundShadow();
@@ -1230,8 +1149,8 @@ export function createPolyScene(
     for (const m of meshes) {
       if (!m.disposed && m.receiveShadow) { hasReceiver = true; break; }
     }
-    if (currentGroundCssZ !== null && !hasReceiver) {
-      const emittedGround = emitSceneGroundShadow(casters, dedupByCaster, lightDir, currentGroundCssZ, r, g, b, shadowOpacity);
+    if (shadowSvgState.currentGroundCssZ !== null && !hasReceiver) {
+      const emittedGround = emitSceneGroundShadow(casters, dedupByCaster, lightDir, shadowSvgState.currentGroundCssZ, r, g, b, shadowOpacity);
       if (!emittedGround) hideGroundShadow();
     } else if (hasReceiver) {
       hideGroundShadow();
@@ -2403,8 +2322,8 @@ export function createPolyScene(
       }
     }
     if (!Number.isFinite(minWorldZ)) {
-      const hadGround = currentGroundCssZ !== null;
-      currentGroundCssZ = null;
+      const hadGround = shadowSvgState.currentGroundCssZ !== null;
+      shadowSvgState.currentGroundCssZ = null;
       // No casters left: drop any shadow elements still mounted.
       if (hadGround) clearAllSceneShadows();
       return;
@@ -2415,8 +2334,8 @@ export function createPolyScene(
     // bbox floor — putting it on top of a receiver mesh placed at minZ
     // rather than below it, where the receiver would occlude the shadow.
     const groundCssZ = (minWorldZ + lift) * DEFAULT_TILE;
-    const prevGround = currentGroundCssZ;
-    currentGroundCssZ = groundCssZ;
+    const prevGround = shadowSvgState.currentGroundCssZ;
+    shadowSvgState.currentGroundCssZ = groundCssZ;
     // Ground changed: rebuild the scene-level shadow set once.
     if (prevGround !== groundCssZ) emitSceneShadows();
   }
