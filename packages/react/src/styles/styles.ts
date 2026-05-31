@@ -258,29 +258,33 @@ const CORE_BASE_STYLES = `
    here (not inline per polygon) so each leaf only carries its tiny normal
    declarations — ~12× smaller per-polygon style payload on big meshes. */
 .polycss-scene[data-polycss-lighting="dynamic"] s {
-  /* Three.js parity: tint = pow(min(1, factor/π), 1/2.4). Folds the
-     BRDF /π normalisation into the Lambert factor and gamma-corrects
-     so the sRGB multiply against the texture matches a linear-space
-     multiply (which is what the baked CPU path produces). Without
-     /π+pow the raw factor saturates at di>=2 or lambert near 1, the
-     browser clamps tint to 255, and the texture passes through at
-     100% — looks "fully lit" where Three.js correctly dims it. */
+  /*
+   * Three.js MeshLambertMaterial parity for textured surfaces. See
+   * packages/polycss/src/styles/styles.ts for derivation and probe data.
+   * Kept in lockstep across renderer copies per cross-package discipline.
+   */
   background-color: rgb(
-    calc(255 * pow(min(1, (var(--par) * var(--pai)
-         + var(--plr) * var(--pli) * max(0,
-           var(--pnx) * var(--plx) +
-           var(--pny) * var(--ply) +
-           var(--pnz) * var(--plz))) / 3.14159265), 0.4167))
-    calc(255 * pow(min(1, (var(--pag) * var(--pai)
-         + var(--plg) * var(--pli) * max(0,
-           var(--pnx) * var(--plx) +
-           var(--pny) * var(--ply) +
-           var(--pnz) * var(--plz))) / 3.14159265), 0.4167))
-    calc(255 * pow(min(1, (var(--pab) * var(--pai)
-         + var(--plb) * var(--pli) * max(0,
-           var(--pnx) * var(--plx) +
-           var(--pny) * var(--ply) +
-           var(--pnz) * var(--plz))) / 3.14159265), 0.4167))
+    calc(255 * max(0, 1.055 * pow(min(1, (
+      pow((var(--par) + 0.055) / 1.055, 2.4) * var(--pai) +
+      pow((var(--plr) + 0.055) / 1.055, 2.4) * var(--pli) * max(0,
+        var(--pnx) * var(--plx) +
+        var(--pny) * var(--ply) +
+        var(--pnz) * var(--plz))
+    ) / 3.14159265), 0.4167) - 0.055))
+    calc(255 * max(0, 1.055 * pow(min(1, (
+      pow((var(--pag) + 0.055) / 1.055, 2.4) * var(--pai) +
+      pow((var(--plg) + 0.055) / 1.055, 2.4) * var(--pli) * max(0,
+        var(--pnx) * var(--plx) +
+        var(--pny) * var(--ply) +
+        var(--pnz) * var(--plz))
+    ) / 3.14159265), 0.4167) - 0.055))
+    calc(255 * max(0, 1.055 * pow(min(1, (
+      pow((var(--pab) + 0.055) / 1.055, 2.4) * var(--pai) +
+      pow((var(--plb) + 0.055) / 1.055, 2.4) * var(--pli) * max(0,
+        var(--pnx) * var(--plx) +
+        var(--pny) * var(--ply) +
+        var(--pnz) * var(--plz))
+    ) / 3.14159265), 0.4167) - 0.055))
   );
   background-blend-mode: multiply;
   background-image: var(--polycss-atlas-url);
@@ -300,30 +304,40 @@ const CORE_BASE_STYLES = `
 
 .polycss-scene[data-polycss-lighting="dynamic"] b,
 .polycss-scene[data-polycss-lighting="dynamic"] u {
-  /* Per-channel min(1, factor) clamp prevents the lit-face tint
-     shift toward white/cyan. Without it, ambient 0.3 + lambert 1 +
-     intensity 1 = 1.3, and a blue surface like #3b82f6 (B=246)
-     saturates B alone at factor>1.04 — R/G keep growing and the
-     channel ratio shifts. Clamping the FACTOR (rather than letting
-     the browser clamp 255*N) keeps every channel scaled by the same
-     value, so the surface's relative tint is preserved on the
-     brightest faces. */
+  /*
+   * Three.js MeshLambertMaterial parity (default useLegacyLights=false,
+   * physically-correct pipeline). See packages/polycss/src/styles/styles.ts
+   * for the derivation and probe data — kept in lockstep across the three
+   * renderer copies per cross-package discipline.
+   */
   color: rgb(
-    calc(255 * var(--psr) * min(1, var(--par) * var(--pai)
-         + var(--plr) * var(--pli) * max(0,
-           var(--pnx) * var(--plx) +
-           var(--pny) * var(--ply) +
-           var(--pnz) * var(--plz))))
-    calc(255 * var(--psg) * min(1, var(--pag) * var(--pai)
-         + var(--plg) * var(--pli) * max(0,
-           var(--pnx) * var(--plx) +
-           var(--pny) * var(--ply) +
-           var(--pnz) * var(--plz))))
-    calc(255 * var(--psb) * min(1, var(--pab) * var(--pai)
-         + var(--plb) * var(--pli) * max(0,
-           var(--pnx) * var(--plx) +
-           var(--pny) * var(--ply) +
-           var(--pnz) * var(--plz))))
+    calc(255 * max(0, 1.055 * pow(min(1,
+      pow((var(--psr) + 0.055) / 1.055, 2.4) * (
+        pow((var(--par) + 0.055) / 1.055, 2.4) * var(--pai) +
+        pow((var(--plr) + 0.055) / 1.055, 2.4) * var(--pli) * max(0,
+          var(--pnx) * var(--plx) +
+          var(--pny) * var(--ply) +
+          var(--pnz) * var(--plz))
+      ) / 3.14159265
+    ), 0.4167) - 0.055))
+    calc(255 * max(0, 1.055 * pow(min(1,
+      pow((var(--psg) + 0.055) / 1.055, 2.4) * (
+        pow((var(--pag) + 0.055) / 1.055, 2.4) * var(--pai) +
+        pow((var(--plg) + 0.055) / 1.055, 2.4) * var(--pli) * max(0,
+          var(--pnx) * var(--plx) +
+          var(--pny) * var(--ply) +
+          var(--pnz) * var(--plz))
+      ) / 3.14159265
+    ), 0.4167) - 0.055))
+    calc(255 * max(0, 1.055 * pow(min(1,
+      pow((var(--psb) + 0.055) / 1.055, 2.4) * (
+        pow((var(--pab) + 0.055) / 1.055, 2.4) * var(--pai) +
+        pow((var(--plb) + 0.055) / 1.055, 2.4) * var(--pli) * max(0,
+          var(--pnx) * var(--plx) +
+          var(--pny) * var(--ply) +
+          var(--pnz) * var(--plz))
+      ) / 3.14159265
+    ), 0.4167) - 0.055))
   );
 }
 

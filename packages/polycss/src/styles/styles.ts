@@ -346,24 +346,34 @@ const CORE_BASE_STYLES = `
      leaves, so there's nothing inside a leaf that needs to participate
      in 3D compositing across the contain boundary. */
   contain: strict;
-  /* Three.js parity. background-blend-mode: multiply applies tint *
-     texture in sRGB. The textured baked-mode path computes tint as
-     pow(factor/π, 1/2.4) where factor = ambient + intensity·lambert —
-     this is sRGB(linear_tint), i.e. it folds the BRDF normalisation
-     (/π) into the Lambert factor THEN gamma-corrects so the sRGB-space
-     multiply against the texture matches a linear-space multiply.
-     Without /π+pow the raw factor exceeds 1 at any non-trivial
-     intensity (di=3 + lambert=0.6 → factor=1.8 → tint clamps to 255 →
-     texture passes through at 100% — looks "fully lit"). The
-     min(1, …) inside guards against pow's domain (factor>1 would
-     yield tint>1, browser clamps and we lose the gamma curve). */
+  /*
+   * Three.js MeshLambertMaterial parity for textured surfaces:
+   *
+   *   target = sRGB_encode(albedo_linear × irradiance_linear / π)
+   *
+   * background-blend-mode: multiply produces (bitmap × tint) in sRGB
+   * — approximately sRGB(albedo_linear × tint_linear) when bitmap ≈
+   * sRGB(albedo_linear). So we want tint = sRGB_encode(irradiance /π).
+   *
+   * Each light/ambient colour channel is sRGB-to-linearised
+   * via pow((c + 0.055) / 1.055, 2.4) before the dot product so the
+   * irradiance accumulates in linear space; final encode is
+   * 1.055 × pow(c, 1/2.4) - 0.055. min(1, …) clamps inside the encode
+   * domain. Matches the solid <b>/<i>/<u> pipeline below.
+   */
   background-color: rgb(
-    calc(255 * pow(min(1, (var(--par) * var(--pai)
-         + var(--plr) * var(--pli) * var(--plam)) / 3.14159265), 0.4167))
-    calc(255 * pow(min(1, (var(--pag) * var(--pai)
-         + var(--plg) * var(--pli) * var(--plam)) / 3.14159265), 0.4167))
-    calc(255 * pow(min(1, (var(--pab) * var(--pai)
-         + var(--plb) * var(--pli) * var(--plam)) / 3.14159265), 0.4167))
+    calc(255 * max(0, 1.055 * pow(min(1, (
+      pow((var(--par) + 0.055) / 1.055, 2.4) * var(--pai) +
+      pow((var(--plr) + 0.055) / 1.055, 2.4) * var(--pli) * var(--plam)
+    ) / 3.14159265), 0.4167) - 0.055))
+    calc(255 * max(0, 1.055 * pow(min(1, (
+      pow((var(--pag) + 0.055) / 1.055, 2.4) * var(--pai) +
+      pow((var(--plg) + 0.055) / 1.055, 2.4) * var(--pli) * var(--plam)
+    ) / 3.14159265), 0.4167) - 0.055))
+    calc(255 * max(0, 1.055 * pow(min(1, (
+      pow((var(--pab) + 0.055) / 1.055, 2.4) * var(--pai) +
+      pow((var(--plb) + 0.055) / 1.055, 2.4) * var(--pli) * var(--plam)
+    ) / 3.14159265), 0.4167) - 0.055))
   );
   background-blend-mode: multiply;
   background-image: var(--polycss-atlas-url);
@@ -384,21 +394,46 @@ const CORE_BASE_STYLES = `
 .polycss-scene[data-polycss-lighting="dynamic"] b,
 .polycss-scene[data-polycss-lighting="dynamic"] i,
 .polycss-scene[data-polycss-lighting="dynamic"] u {
-  /* Per-channel min(1, factor) clamp prevents the lit-face tint
-     shift toward white/cyan. Without it, ambient 0.3 + lambert 1 +
-     intensity 1 = 1.3, and a blue surface like #3b82f6 (B=246)
-     saturates B alone at factor>1.04 — R/G keep growing and the
-     channel ratio shifts. Clamping the FACTOR (rather than letting
-     the browser clamp 255*N) keeps every channel scaled by the same
-     value, so the surface's relative tint is preserved on the
-     brightest faces. */
+  /*
+   * Three.js MeshLambertMaterial parity (default useLegacyLights=false,
+   * physically-correct pipeline):
+   *
+   *   lit_linear = albedo_linear × (lightColor_linear × intensity × lambert
+   *                                  + ambient_linear × ambientIntensity) / π
+   *   output     = 255 × sRGB_encode(min(1, lit_linear))
+   *
+   * sRGB→linear:   pow((c + 0.055) / 1.055, 2.4)   for c > 0.04045
+   *                12.92 × c                       otherwise (skipped — tiny)
+   * linear→sRGB:   1.055 × pow(c, 1/2.4) - 0.055   for c > 0.0031308
+   *                12.92 × c                       otherwise (skipped — tiny)
+   *
+   * The naive pow(c, 2.4) shortcut undershoots by ~2x for small c
+   * (dark channels of a saturated colour) — the +0.055/1.055 offset
+   * is load-bearing for the G/B drift on saturated fixtures.
+   *
+   * Verified against per-pixel screenshots in bench/three-parity.html
+   * (cube #dc2626 top face): drift <3 per channel across i=0.5..3,
+   * ambient=0..0.3, lambert=0..1.
+   */
   color: rgb(
-    calc(255 * var(--psr) * min(1, var(--par) * var(--pai)
-         + var(--plr) * var(--pli) * var(--plam)))
-    calc(255 * var(--psg) * min(1, var(--pag) * var(--pai)
-         + var(--plg) * var(--pli) * var(--plam)))
-    calc(255 * var(--psb) * min(1, var(--pab) * var(--pai)
-         + var(--plb) * var(--pli) * var(--plam)))
+    calc(255 * max(0, 1.055 * pow(min(1,
+      pow((var(--psr) + 0.055) / 1.055, 2.4) * (
+        pow((var(--par) + 0.055) / 1.055, 2.4) * var(--pai) +
+        pow((var(--plr) + 0.055) / 1.055, 2.4) * var(--pli) * var(--plam)
+      ) / 3.14159265
+    ), 0.4167) - 0.055))
+    calc(255 * max(0, 1.055 * pow(min(1,
+      pow((var(--psg) + 0.055) / 1.055, 2.4) * (
+        pow((var(--pag) + 0.055) / 1.055, 2.4) * var(--pai) +
+        pow((var(--plg) + 0.055) / 1.055, 2.4) * var(--pli) * var(--plam)
+      ) / 3.14159265
+    ), 0.4167) - 0.055))
+    calc(255 * max(0, 1.055 * pow(min(1,
+      pow((var(--psb) + 0.055) / 1.055, 2.4) * (
+        pow((var(--pab) + 0.055) / 1.055, 2.4) * var(--pai) +
+        pow((var(--plb) + 0.055) / 1.055, 2.4) * var(--pli) * var(--plam)
+      ) / 3.14159265
+    ), 0.4167) - 0.055))
   );
 }
 
