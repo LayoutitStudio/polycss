@@ -21,6 +21,7 @@ import {
   PROJECTIVE_QUAD_MAX_WEIGHT_RATIO,
   PROJECTIVE_QUAD_BLEED,
   SOLID_QUAD_CANONICAL_SIZE,
+  resolveBleedRatio,
 } from "./constants";
 import type {
   TextureAtlasPlan,
@@ -868,6 +869,12 @@ export function computeTextureAtlasPlan(
     seamBleedEdges,
     seamBleedEdgeAmounts,
     seamBleedInsets,
+    // Stamp the resolved per-strategy bleed ratio onto the plan so
+    // downstream emitters (borderShape, projective-quad, atlas-edge
+    // expand, etc.) all read the same value from the plan instead of
+    // each having to thread `options.seamBleed` through their own
+    // function-parameter chains.
+    bleedRatio: resolveBleedRatio(internalOptions.seamBleed),
     normal,
     textureTint,
     shadedColor,

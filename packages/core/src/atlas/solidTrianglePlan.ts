@@ -343,10 +343,14 @@ export function computeSolidTrianglePlanFromCssPoints(
   const left = Math.max(0, Math.min(baseLength, apexX));
   const right = Math.max(0, baseLength - left);
   const screenPts = [left, 0, 0, height, left + right, height];
+  // Scale the SOLID_TRIANGLE_BLEED fallback by the bleed ratio (default
+  // 1) so options.seamBleed=0 disables this overscan as well, not just
+  // the shared-edge one.
+  const triangleBleedFallback = SOLID_TRIANGLE_BLEED * (internalOptions.bleedRatio ?? 1);
   const edgeAmounts = stableTriangleEdgeAmounts(
     internalOptions.seamEdges,
     internalOptions.seamBleed,
-    SOLID_TRIANGLE_BLEED,
+    triangleBleedFallback,
     a,
     b,
     c,
@@ -358,7 +362,7 @@ export function computeSolidTrianglePlanFromCssPoints(
         left,
         right,
         height,
-        resolveSeamBleed(internalOptions.seamBleed, SOLID_TRIANGLE_BLEED),
+        resolveSeamBleed(internalOptions.seamBleed, triangleBleedFallback),
       );
   const apex2x = expanded[0];
   const apex2y = expanded[1];

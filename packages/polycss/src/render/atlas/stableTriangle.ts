@@ -62,15 +62,19 @@ function stableTriangleSeamOptions(
   seamBleedEdges: Map<number, Set<number>> | null,
   options: RenderTextureAtlasOptionsWithSeams,
 ): RenderTextureAtlasOptionsWithSeams {
-  // `options.seamBleed` is the ratio (0..1). Resolve to absolute px.
-  const bleed = DEFAULT_SEAM_BLEED * resolveBleedRatio(options.seamBleed);
+  // `options.seamBleed` is the ratio (0..1). Resolve to absolute px for
+  // the shared-edge bleed AND stash the ratio in `bleedRatio` so the
+  // SOLID_TRIANGLE_BLEED fallback inside solidTrianglePlan is scaled too.
+  const ratio = resolveBleedRatio(options.seamBleed);
+  const bleed = DEFAULT_SEAM_BLEED * ratio;
+  const baseOut = { ...options, bleedRatio: ratio };
   return seamBleedEdges && bleed > 0
     ? {
-        ...options,
+        ...baseOut,
         seamBleed: seamBleedEdges.has(index) ? bleed : undefined,
         seamEdges: seamBleedEdges.get(index),
       }
-    : options;
+    : baseOut;
 }
 
 export function stableTriangleColorState(options: InternalRenderTextureAtlasOptions): StableTriangleColorState {

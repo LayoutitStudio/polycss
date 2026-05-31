@@ -110,10 +110,14 @@ function seamTriangleOptions(
   // `options.seamBleed` is the public ratio (0..1, default 1). Resolve
   // to an absolute CSS px value by multiplying the default constant.
   // ratio === 0 → no shared-edge overscan (Three.js-parity testing).
-  const bleed = DEFAULT_SEAM_BLEED * resolveBleedRatio(options.seamBleed);
+  // Also stash the ratio in `bleedRatio` so downstream plan construction
+  // can scale its per-strategy fallbacks (SOLID_TRIANGLE_BLEED, etc).
+  const ratio = resolveBleedRatio(options.seamBleed);
+  const bleed = DEFAULT_SEAM_BLEED * ratio;
+  const baseOut = { ...options, bleedRatio: ratio };
   return plan.seamBleedEdges?.size && bleed > 0
-    ? { ...options, seamBleed: bleed, seamEdges: plan.seamBleedEdges }
-    : { ...options, seamBleed: undefined, seamEdges: undefined };
+    ? { ...baseOut, seamBleed: bleed, seamEdges: plan.seamBleedEdges }
+    : { ...baseOut, seamBleed: undefined, seamEdges: undefined };
 }
 
 function buildRenderSeamBleedEdges(
@@ -133,14 +137,16 @@ function seamAtlasOptions(
   seamBleedEdges: Map<number, Set<number>> | null,
   options: RenderTextureAtlasOptionsWithSeams,
 ): RenderTextureAtlasOptionsWithSeams {
-  const bleed = DEFAULT_SEAM_BLEED * resolveBleedRatio(options.seamBleed);
+  const ratio = resolveBleedRatio(options.seamBleed);
+  const bleed = DEFAULT_SEAM_BLEED * ratio;
+  const baseOut = { ...options, bleedRatio: ratio };
   return seamBleedEdges && bleed > 0
     ? {
-        ...options,
+        ...baseOut,
         seamBleed: seamBleedEdges.has(index) ? bleed : undefined,
         seamEdges: seamBleedEdges.get(index),
       }
-    : options;
+    : baseOut;
 }
 
 export function getSolidPaintDefaults(
@@ -593,12 +599,17 @@ export function updatePolygonsWithStableTopology(
   const useProjectiveQuad = !!doc && useFullRectSolid && projectiveQuadSupported(doc);
   const useCornerShapeSolid = !!doc && !disabled.has("i") && cornerShapeSupported(doc);
   const useBorderShape = !!doc && !disabled.has("i") && borderShapeSupported(doc);
+  // Resolve the per-strategy ratio once so projective-quad / corner-shape
+  // checks below all read from the same value as the plan stamping.
+  const bleedRatio = resolveBleedRatio(options.seamBleed);
+  // Pass the resolved bleed as an explicit override so resolveProjectiveQuadGuards
+  // (which has its own fallback path) returns the scaled value too.
   const projectiveQuadGuards = doc
-    ? resolveProjectiveQuadGuards(doc)
+    ? resolveProjectiveQuadGuards(doc, { bleed: PROJECTIVE_QUAD_BLEED * bleedRatio })
     : {
         denomEps: PROJECTIVE_QUAD_DENOM_EPS,
         maxWeightRatio: PROJECTIVE_QUAD_MAX_WEIGHT_RATIO,
-        bleed: PROJECTIVE_QUAD_BLEED,
+        bleed: PROJECTIVE_QUAD_BLEED * bleedRatio,
         disableGuards: false,
       };
   const optimizeTriangleStyle =

@@ -84,13 +84,18 @@ export function borderShapeBoundsFromPoints(
   return { minX, minY, width, height };
 }
 
+/** Reads `entry.bleedRatio` (defaulted to 1) and scales BORDER_SHAPE_BLEED
+ *  accordingly. Plans are tagged with the ratio at construction time
+ *  (see computeTextureAtlasPlan) so every consumer gets the same value. */
 export function borderShapeGeometryForPlan(entry: TextureAtlasPlan): BorderShapeGeometry {
+  const ratio = entry.bleedRatio ?? 1;
+  const bleed = BORDER_SHAPE_BLEED * ratio;
   const fallbackWidth = entry.canvasW || 1;
   const fallbackHeight = entry.canvasH || 1;
-  const sourcePts = BORDER_SHAPE_BLEED > 0
-    ? offsetConvexPolygonPoints(entry.screenPts, BORDER_SHAPE_BLEED)
+  const sourcePts = bleed > 0
+    ? offsetConvexPolygonPoints(entry.screenPts, bleed)
     : entry.screenPts;
-  const bounds = BORDER_SHAPE_BLEED > 0
+  const bounds = bleed > 0
     ? borderShapeBoundsFromPoints(sourcePts, fallbackWidth, fallbackHeight)
     : { minX: 0, minY: 0, width: fallbackWidth, height: fallbackHeight };
   const points: Array<[number, number]> = [];
