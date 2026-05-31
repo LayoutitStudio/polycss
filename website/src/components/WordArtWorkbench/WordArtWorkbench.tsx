@@ -215,7 +215,6 @@ export function WordArtWorkbench() {
   const [offset, setOffset] = useState(() => qn("offset", 0));
   const [curveSegments, setCurveSegments] = useState(() => qn("curve", 4));
   const [simplify, setSimplify] = useState(() => qn("simplify", 2));
-  const [merge, setMerge] = useState(() => qb("merge", false));
   const [profileSegments, setProfileSegments] = useState(() => qn("edge", 3));
   const [warpShape, setWarpShape] = useState<WarpShape>(() => qs("warp", "none") as WarpShape);
   const [warpAmount, setWarpAmount] = useState(() => qn("bend", 0.5));
@@ -313,7 +312,6 @@ export function WordArtWorkbench() {
     sn("offset", offset, 0);
     sn("curve", curveSegments, 1);
     sn("simplify", simplify, 2);
-    if (merge) p.set("merge", "1");
     sn("edge", profileSegments, 3);
     ss("warp", warpShape, "none");
     sn("bend", warpAmount, 0.5);
@@ -340,7 +338,7 @@ export function WordArtWorkbench() {
     if (layered) p.set("layer", "1");
     const search = p.toString();
     window.history.replaceState(null, "", `${window.location.pathname}${search ? `?${search}` : ""}${window.location.hash}`);
-  }, [text, entry, weight, italic, textCase, scaleX, scaleY, profile, depth, letterSpacing, lineHeight, align, underline, strike, color, sideColor, backColor, offset, curveSegments, simplify, merge, profileSegments, warpShape, warpAmount, spin, perspective, zoomScale, lightIntensity, ambient, lightColor, lightAz, lightEl, roundConvex, bezier, fillType, gradA, gradB, gradAngle, faceTex, sideFill, sideTex, backFill, backTex, outlineOn, outlineColor, outlineWidth, layered]);
+  }, [text, entry, weight, italic, textCase, scaleX, scaleY, profile, depth, letterSpacing, lineHeight, align, underline, strike, color, sideColor, backColor, offset, curveSegments, simplify, profileSegments, warpShape, warpAmount, spin, perspective, zoomScale, lightIntensity, ambient, lightColor, lightAz, lightEl, roundConvex, bezier, fillType, gradA, gradB, gradAngle, faceTex, sideFill, sideTex, backFill, backTex, outlineOn, outlineColor, outlineWidth, layered]);
 
   // Load the picked Google font whenever family / weight / style changes.
   useEffect(() => {
@@ -406,12 +404,11 @@ export function WordArtWorkbench() {
       strike,
       curveSteps: curveSegments,
       simplify,
-      merge,
       warp: { shape: warpShape, amount: warpAmount },
       faces: { front, sides, back },
       outline: outlineOn ? { color: outlineColor, width: outlineWidth } : undefined,
     });
-  }, [font, text, textCase, scaleX, scaleY, depth, profile, roundConvex, bezier, letterSpacing, lineHeight, align, underline, strike, sideColor, backColor, offset, curveSegments, simplify, merge, profileSegments, warpShape, warpAmount, front, fillType, backFill, backTex, sideFill, sideTex, outlineOn, outlineColor, outlineWidth, layered]);
+  }, [font, text, textCase, scaleX, scaleY, depth, profile, roundConvex, bezier, letterSpacing, lineHeight, align, underline, strike, sideColor, backColor, offset, curveSegments, simplify, profileSegments, warpShape, warpAmount, front, fillType, backFill, backTex, sideFill, sideTex, outlineOn, outlineColor, outlineWidth, layered]);
 
   // Directional light direction from azimuth (left/right) + elevation (height),
   // always biased toward the front so the face stays lit.
@@ -497,7 +494,7 @@ export function WordArtWorkbench() {
     layered,
     profileMode, warp: warpShape, bend: warpAmount,
     depth, letterSpacing, lineHeight, scaleX, scaleY,
-    curveSegments, simplify, merge, profileSegments, offset,
+    curveSegments, simplify, profileSegments, offset,
     perspective, zoom: zoomScale, spin,
     light: lightIntensity, ambient, az: lightAz, el: lightEl, lightColor,
   };
@@ -511,7 +508,6 @@ export function WordArtWorkbench() {
         break;
       }
       case "warp": setWarpShape(v as WarpShape); break;
-      case "warp": setWarpShape(v as WarpShape); break;
       case "bend": setWarpAmount(v as number); break;
       case "depth": setDepth(v as number); break;
       case "letterSpacing": setLetterSpacing(v as number); break;
@@ -520,7 +516,6 @@ export function WordArtWorkbench() {
       case "scaleY": setScaleY(v as number); break;
       case "curveSegments": setCurveSegments(v as number); break;
       case "simplify": setSimplify(v as number); break;
-      case "merge": setMerge(v as boolean); break;
       case "profileSegments": setProfileSegments(v as number); break;
       case "offset": setOffset(v as number); break;
       case "perspective": setPerspective(v as boolean); break;
@@ -746,7 +741,7 @@ interface GuiValues {
   layered: boolean;
   profileMode: string; warp: string; bend: number;
   depth: number; letterSpacing: number; lineHeight: number; scaleX: number; scaleY: number;
-  curveSegments: number; simplify: number; merge: boolean; profileSegments: number; offset: number;
+  curveSegments: number; simplify: number; profileSegments: number; offset: number;
   perspective: boolean; zoom: number; spin: boolean;
   light: number; ambient: number; az: number; el: number; lightColor: string;
 }
@@ -899,7 +894,6 @@ function GuiPanel({ id, className = "", values, set, bezier, onBezier }: { id?: 
     c.scaleY = layout.add(cfg, "scaleY", 40, 200, 1).name("Scale Y").onChange(on("scaleY"));
     c.curveSegments = layout.add(cfg, "curveSegments", 1, 12, 1).name("Curve segments").onChange(on("curveSegments"));
     c.simplify = layout.add(cfg, "simplify", 0, 8, 0.5).name("Simplify").onChange(on("simplify"));
-    c.merge = layout.add(cfg, "merge").name("Merge polygons").onChange(on("merge"));
     c.profileSegments = layout.add(cfg, "profileSegments", 2, 10, 1).name("Edge segments").onChange(on("profileSegments"));
     c.offset = layout.add(cfg, "offset", 0, 32, 1).name("Layer offset").onChange(on("offset"));
     c.layered = layout.add(cfg, "layered").name("Flat layers").onChange(on("layered"));
