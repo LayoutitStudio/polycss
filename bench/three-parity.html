@@ -72,12 +72,24 @@
     const S = {
       mesh:    qs("mesh", "cube"),     // "cube" | "e" | "cottage"
       lighting:qs("light", "baked"),   // "baked" | "dynamic"
-      cube:  { x: 0, y: 0, z: 1, size: 2, color: "#dc2626" },
-      // Cottage uses /gallery/obj/cottage.obj + cottage.mtl + cottage-diffuse.png
-      // (served by bench/perf-serve.mjs under /gallery/...). Both engines load
-      // the same file; Three.js applies the same (x,y,z) → (z,x,y) cyclic
-      // permutation parseObj uses to put OBJ's Y-up into our Z-up world.
-      cottage:{ x: qn("cx", 0), y: qn("cy", 0), z: qn("cz", 0), scale: qn("cs", 1) },
+      // Unified per-mesh transform state. Same shape (x, y, z, scale) for
+      // every mesh — one set of object-transform sliders binds to the
+      // currently selected mesh's entry. URL keys are mesh-prefixed so
+      // multiple mesh states survive a reload.
+      obj: {
+        cube:    { x: qn("ox_cube",    0),   y: qn("oy_cube",    0), z: qn("oz_cube",    1), scale: qn("os_cube",    1) },
+        e:       { x: qn("ox_e",       0),   y: qn("oy_e",       0), z: qn("oz_e",       0), scale: qn("os_e",       1) },
+        cottage: { x: qn("ox_cottage", qn("cx", 0)),
+                   y: qn("oy_cottage", qn("cy", 0)),
+                   z: qn("oz_cottage", qn("cz", 0)),
+                   scale: qn("os_cottage", qn("cs", 1)) },
+      },
+      // Cube/E hold the geometry's base parameters (set at build time;
+      // run-time scale applies on top via setTransform). Cottage geometry
+      // comes from /gallery/obj/cottage.obj + cottage.mtl + cottage-diffuse.png.
+      // Three.js applies the same (x,y,z) → (z,x,y) cyclic permutation
+      // parseObj uses to put OBJ's Y-up into our Z-up world.
+      cube:  { size: 2, color: "#dc2626" },
       floor: { size: 20, color: "#cbd5e1" },
       dir:   { x: qn("dx", 1), y: qn("dy", 0.5), z: qn("dz", 1), intensity: qn("di", 1) },
       amb:   { intensity: qn("ai", 0.3) },
@@ -127,7 +139,7 @@
     function buildPolyCube() {
       polyCube = polyScene.add(
         createPolyBox({ size: [S.cube.size, S.cube.size, S.cube.size], color: S.cube.color }),
-        { id: "cube", position: [S.cube.x, S.cube.y, S.cube.z], castShadow: true, receiveShadow: true, merge: false },
+        { id: "cube", position: [S.obj.cube.x, S.obj.cube.y, S.obj.cube.z], castShadow: true, receiveShadow: true, merge: false },
       );
     }
     // 3D capital "E" — strongly concave: a vertical spine plus three
@@ -180,8 +192,8 @@
       });
       polyCottage = polyScene.add(parse, {
         id: "cottage",
-        position: [S.cottage.x, S.cottage.y, S.cottage.z],
-        scale: S.cottage.scale,
+        position: [S.obj.cottage.x, S.obj.cottage.y, S.obj.cottage.z],
+        scale: S.obj.cottage.scale,
         castShadow: true,
         receiveShadow: true,   // self-shadow (Three.js parity)
         merge: false,
@@ -240,7 +252,7 @@
         new THREE.BoxGeometry(S.cube.size, S.cube.size, S.cube.size),
         new THREE.MeshLambertMaterial({ color: S.cube.color }),
       );
-      cubeMesh.position.set(S.cube.x, S.cube.y, S.cube.z);
+      cubeMesh.position.set(S.obj.cube.x, S.obj.cube.y, S.obj.cube.z);
       cubeMesh.castShadow = true;
       cubeMesh.receiveShadow = true;
       threeScene.add(cubeMesh);
@@ -292,8 +304,8 @@
             // the +X+Y+Z quadrant), not the bbox CENTER. Match that here.
             const bbox2 = new THREE.Box3().setFromObject(wrap);
             obj.position.sub(bbox2.min);
-            wrap.position.set(S.cottage.x, S.cottage.y, S.cottage.z);
-            wrap.scale.setScalar(S.cottage.scale);
+            wrap.position.set(S.obj.cottage.x, S.obj.cottage.y, S.obj.cottage.z);
+            wrap.scale.setScalar(S.obj.cottage.scale);
             obj.traverse((c) => { if (c.isMesh) { c.castShadow = true; c.receiveShadow = true; } });
             cottageGroup = wrap;
             threeScene.add(wrap);
@@ -399,8 +411,12 @@
     // texture-flicker on cottage drags. Cube + floor solid colors don't need
     // re-bake on camera moves; viewing angle doesn't affect Lambert.
     function update(lightsChanged) {
-      if (polyCube) polyCube.setTransform({ position: [S.cube.x, S.cube.y, S.cube.z] });
-      if (polyCottage) polyCottage.setTransform({ position: [S.cottage.x, S.cottage.y, S.cottage.z] });
+      // Push every mesh's transform every tick. setTransform is cheap when
+      // values haven't changed; this keeps the bench panel + both engines
+      // in sync without per-mesh slider plumbing.
+      if (polyCube)    polyCube.setTransform({    position: [S.obj.cube.x,    S.obj.cube.y,    S.obj.cube.z],    scale: S.obj.cube.scale });
+      if (polyE)       polyE.setTransform({       position: [S.obj.e.x,       S.obj.e.y,       S.obj.e.z],       scale: S.obj.e.scale });
+      if (polyCottage) polyCottage.setTransform({ position: [S.obj.cottage.x, S.obj.cottage.y, S.obj.cottage.z], scale: S.obj.cottage.scale });
       polyScene.setOptions({
         directionalLight: {
           direction: [S.dir.x, S.dir.y, S.dir.z],
@@ -422,8 +438,18 @@
         if (polyE) polyE.rebakeAtlas();
         polyFloor.rebakeAtlas();
       }
-      if (cubeMesh) cubeMesh.position.set(S.cube.x, S.cube.y, S.cube.z);
-      if (cottageGroup) cottageGroup.position.set(S.cottage.x, S.cottage.y, S.cottage.z);
+      if (cubeMesh) {
+        cubeMesh.position.set(S.obj.cube.x, S.obj.cube.y, S.obj.cube.z);
+        cubeMesh.scale.setScalar(S.obj.cube.scale);
+      }
+      if (eGroup) {
+        eGroup.position.set(S.obj.e.x, S.obj.e.y, S.obj.e.z);
+        eGroup.scale.setScalar(S.obj.e.scale);
+      }
+      if (cottageGroup) {
+        cottageGroup.position.set(S.obj.cottage.x, S.obj.cottage.y, S.obj.cottage.z);
+        cottageGroup.scale.setScalar(S.obj.cottage.scale);
+      }
       fitDirLightToScene();
       dirLight.intensity = S.dir.intensity;
       ambLight.intensity = S.amb.intensity;
@@ -559,6 +585,15 @@
     }
     function loop() { renderer.render(threeScene, camera); requestAnimationFrame(loop); }
 
+    // Slider value refreshers for the Object section — invoked when the
+    // active mesh switches so the sliders display the new mesh's state
+    // instead of the previous mesh's. Populated by buildPanel() as each
+    // Object row is built.
+    const objectRowRefreshers = [];
+    function refreshObjectRows() {
+      for (const fn of objectRowRefreshers) fn();
+    }
+
     async function setMesh(name) {
       S.mesh = name;
       if (polyCube) { polyCube.remove(); polyCube = null; }
@@ -576,6 +611,8 @@
       } else {
         await Promise.all([buildPolyCottage(), buildThreeCottage()]);
       }
+      // Refresh object-row sliders to reflect the new active mesh's state.
+      refreshObjectRows();
       // Newly built mesh has not seen the current light values yet — bake.
       update(true);
     }
@@ -656,11 +693,15 @@
         q.set("rx", String(S.cam.rotX));
         q.set("ry", String(S.cam.rotY));
         q.set("z",  String(S.cam.zoom));
-        if (S.mesh === "cottage") {
-          q.set("cs", String(S.cottage.scale));
-          if (S.cottage.x !== 0) q.set("cx", String(S.cottage.x));
-          if (S.cottage.y !== 0) q.set("cy", String(S.cottage.y));
-          if (S.cottage.z !== 0) q.set("cz", String(S.cottage.z));
+        // Per-mesh transform — only emit keys for the active mesh and
+        // only for non-default values (keeps URLs short).
+        const o = S.obj[S.mesh];
+        const defaultZ = S.mesh === "cube" ? 1 : 0;
+        if (o) {
+          if (o.x !== 0)        q.set(`ox_${S.mesh}`, String(o.x));
+          if (o.y !== 0)        q.set(`oy_${S.mesh}`, String(o.y));
+          if (o.z !== defaultZ) q.set(`oz_${S.mesh}`, String(o.z));
+          if (o.scale !== 1)    q.set(`os_${S.mesh}`, String(o.scale));
         }
         if (S.shadowsOnly) q.set("sx", "1");
         const url = location.origin + location.pathname + "?" + q.toString();
@@ -734,16 +775,15 @@
       p.appendChild(lightRow);
 
       const rows = [
-        { sec: "Cube" },
-        { k: ["cube", "x"], min: -10, max: 10, step: 0.1, fmt: (v) => v.toFixed(2) },
-        { k: ["cube", "y"], min: -10, max: 10, step: 0.1, fmt: (v) => v.toFixed(2) },
-        { k: ["cube", "z"], min: -10, max: 10, step: 0.1, fmt: (v) => v.toFixed(2) },
-        { k: ["cube", "size"], min: 0.5, max: 6, step: 0.1, fmt: (v) => v.toFixed(2) },
-        { sec: "Cottage" },
-        { k: ["cottage", "x"], min: -10, max: 10, step: 0.1, fmt: (v) => v.toFixed(2) },
-        { k: ["cottage", "y"], min: -10, max: 10, step: 0.1, fmt: (v) => v.toFixed(2) },
-        { k: ["cottage", "z"], min: -10, max: 10, step: 0.1, fmt: (v) => v.toFixed(2) },
-        { k: ["cottage", "scale"], min: 0.01, max: 6, step: 0.01, fmt: (v) => v.toFixed(2) },
+        // Object transform — one section. Sliders bind to the currently
+        // selected mesh's entry under S.obj (cube / e / cottage). When the
+        // mesh dropdown switches, refreshObjectRows() rebinds the sliders'
+        // values to the new mesh's state.
+        { sec: "Object" },
+        { k: ["obj", "x"],     min: -10,  max: 10, step: 0.1,  fmt: (v) => v.toFixed(2), obj: true },
+        { k: ["obj", "y"],     min: -10,  max: 10, step: 0.1,  fmt: (v) => v.toFixed(2), obj: true },
+        { k: ["obj", "z"],     min: -10,  max: 10, step: 0.1,  fmt: (v) => v.toFixed(2), obj: true },
+        { k: ["obj", "scale"], min: 0.01, max: 6,  step: 0.01, fmt: (v) => v.toFixed(2), obj: true },
         { sec: "Directional light" },
         { k: ["dir", "x"], min: -2, max: 2, step: 0.05, fmt: (v) => v.toFixed(2) },
         { k: ["dir", "y"], min: -2, max: 2, step: 0.05, fmt: (v) => v.toFixed(2) },
@@ -767,12 +807,18 @@
         }
         const row = document.createElement("div"); row.className = "row";
         const lab = document.createElement("label");
-        lab.textContent = r.k.join(".");
+        lab.textContent = r.obj ? r.k[1] : r.k.join(".");
         row.appendChild(lab);
         const inp = document.createElement("input");
         inp.type = "range"; inp.min = r.min; inp.max = r.max; inp.step = r.step;
-        inp.value = S[r.k[0]][r.k[1]];
-        const val = document.createElement("span"); val.className = "val"; val.textContent = r.fmt(S[r.k[0]][r.k[1]]);
+        // Object-transform rows read S.obj[S.mesh][field] so the slider
+        // value follows the active mesh; everything else reads its own
+        // [section][field] directly.
+        const getVal = r.obj ? () => S.obj[S.mesh][r.k[1]] : () => S[r.k[0]][r.k[1]];
+        const setVal = r.obj ? (v) => { S.obj[S.mesh][r.k[1]] = v; } : (v) => { S[r.k[0]][r.k[1]] = v; };
+        inp.value = getVal();
+        const val = document.createElement("span"); val.className = "val"; val.textContent = r.fmt(getVal());
+        if (r.obj) objectRowRefreshers.push(() => { const v = getVal(); inp.value = v; val.textContent = r.fmt(v); });
         const isLightSlider = (r.k[0] === "dir" || r.k[0] === "amb");
         // Baked mode is treated as truly static: while a light slider is
         // being dragged, the meshes don't repaint. A single rebake fires
@@ -801,18 +847,13 @@
         inp.addEventListener("change", onDragEnd);
         inp.addEventListener("input", () => {
           const v = +inp.value;
-          S[r.k[0]][r.k[1]] = v;
+          setVal(v);
           val.textContent = r.fmt(v);
           if (r.camera) applyCamera();
-          if (r.k[0] === "cottage" && r.k[1] === "scale") {
-            // Scale needs both PolyCSS setTransform + Three.js scale.setScalar
-            // here because the central update() doesn't carry scale (only
-            // position). Position is handled by update().
-            if (polyCottage) polyCottage.setTransform({ scale: S.cottage.scale });
-            if (cottageGroup) cottageGroup.scale.setScalar(S.cottage.scale);
-          }
           // Suppress per-tick rebake during baked-mode drag — debounced
           // finalize handles it. Dynamic mode never rebakes here either.
+          // update() pushes every mesh's full transform (pos + scale), so
+          // object-transform changes don't need any special handling.
           const lightsChanged = isLightSlider && !dragging && S.lighting === "baked";
           update(lightsChanged);
         });
