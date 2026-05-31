@@ -74,7 +74,14 @@ import {
 } from "./stableTriangle";
 import { stableTriangleMatrixDecimals } from "@layoutit/polycss-core";
 
-const DEFAULT_SOLID_SEAM_BLEED = 1.5;
+// Halved from 1.5 → 0.75 CSS px. The old value bled lit-color from
+// neighbour leaves over receiver-face shadow edges, leaving visible
+// un-shadowed strips along polygon boundaries when shadow projection
+// crossed multiple receivers. 0.75 still covers the float-precision
+// gap between adjacent matrix3d-transformed solid quads (sub-pixel)
+// without overshooting onto a neighbour's shadow zone. Pair with the
+// 2 px receiver-shadow stroke for full coverage at boundaries.
+const DEFAULT_SOLID_SEAM_BLEED = 0.75;
 
 type RenderTextureAtlasOptionsWithSeams = RenderTextureAtlasOptions & {
   seamBleed?: number;
