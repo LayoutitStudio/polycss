@@ -114,9 +114,8 @@ The internal leaf tag is a strategy, not public API:
 | `<u>` | Stable triangle / corner-shape solid | Solid triangles and exact beveled-corner solids. |
 | `<i>` | Border-shape clipped solid | Solid non-rect polygons on browsers with `border-shape`. |
 | `<s>` | Atlas slice | Textured polygons and fallback solids. |
-| `<q>` | Cast shadow | Dynamic-lighting shadow leaves for meshes with `castShadow`. |
 
-You normally do not target these tags directly; use `Poly`, `PolyMesh`, classes, data attributes, or render stats.
+You normally do not target these tags directly; use `Poly`, `PolyMesh`, classes, data attributes, or render stats. Cast shadows are separate SVG shadow surfaces, not render-strategy leaves; meshes with `castShadow` project onto the scene ground or receiver surfaces in both lighting modes.
 
 ## Automatic Polygon Merge
 
