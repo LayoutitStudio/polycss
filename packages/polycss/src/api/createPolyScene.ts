@@ -2354,9 +2354,14 @@ export function createPolyScene(
         // pixels, which at DEFAULT_TILE=50 is 0.1 world units — visible
         // as a "gap" between the casting feature and the shadow it
         // produces, because the shadow content gets projected onto a
-        // plane offset from the actual receiver surface. 0.5 CSS px is
-        // sub-pixel at typical zoom and still wins the depth test.
-        const lift = 0.5;
+        // plane offset from the actual receiver surface.
+        //
+        // 0.05 CSS px is right at the float-noise floor — still wins
+        // the depth test against the underlying paint, and keeps the
+        // parallax mismatch between adjacent receiver faces (which
+        // lift in slightly different normal directions) well below the
+        // eye's threshold.
+        const lift = 0.05;
         const Ox = O[0] + minU * u[0] + minV * v[0] + lift * n[0];
         const Oy = O[1] + minU * u[1] + minV * v[1] + lift * n[1];
         const Oz = O[2] + minU * u[2] + minV * v[2] + lift * n[2];
@@ -2652,8 +2657,13 @@ export function createPolyScene(
       // 1e-3 to 1e-5, which at DEFAULT_TILE=50 becomes 0.05 to 0.0005
       // CSS px. With a too-small eps (1e-6 or below) coplanar walls of
       // an imported mesh pass the "above" check and project shadow onto
-      // each other. 0.05 CSS px is well above float noise.
-      const SELF_SHADOW_EPS = 0.5;
+      // each other.
+      //
+      // 0.05 CSS px sits right at the float-noise floor. Casters whose
+      // vertices touch the receiver-plane edge (e.g. roof eave meeting
+      // wall top) get included instead of clipped short, closing the
+      // light strip at junction corners.
+      const SELF_SHADOW_EPS = 0.05;
       // Skip casters that are essentially on the SAME SURFACE as the
       // receiver — including parallel walls behind/in-front-of the
       // receiver within a typical wall thickness. Imported building
