@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   BASE_TILE,
   PolyMesh,
@@ -410,6 +410,12 @@ export function WordArtWorkbench() {
     });
   }, [font, text, textCase, scaleX, scaleY, depth, profile, roundConvex, bezier, letterSpacing, lineHeight, align, underline, strike, sideColor, backColor, offset, curveSegments, simplify, profileSegments, warpShape, warpAmount, front, fillType, backFill, backTex, sideFill, sideTex, outlineOn, outlineColor, outlineWidth, layered]);
 
+  // The leaf-heavy mesh render is the per-tick cost while dragging a slider.
+  // Defer it: React keeps the sliders responsive and re-renders the mesh from
+  // the latest geometry once it has a free frame, so fast drags don't queue up
+  // hundreds of full reconciliations. composeText itself stays live (cheap).
+  const renderPolygons = useDeferredValue(polygons);
+
   // Directional light direction from azimuth (left/right) + elevation (height),
   // always biased toward the front so the face stays lit.
   const lightDir = useMemo<Vec3>(() => {
@@ -533,7 +539,7 @@ export function WordArtWorkbench() {
     <div className="wa-root">
       <StatsOverlay />
       <Stage
-        polygons={polygons}
+        polygons={renderPolygons}
         zoomScale={zoomScale}
         setZoomScale={setZoomScale}
         perspective={perspective}
