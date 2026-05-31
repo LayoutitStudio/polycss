@@ -1,9 +1,7 @@
 /**
  * Polygon geometry helpers — pure math operating on Polygon vertices.
- *
- * After cube removal in Phase 2, this module carries small polygon-level
- * helpers for downstream consumers (lighting, debug metrics, etc.). The
- * cube / ramp / wedge / spike face emitters lived here in voxcss; they're gone.
+ * These helpers feed lighting, diagnostics, and renderer metrics without
+ * depending on browser APIs.
  */
 import type { Polygon, Vec2, Vec3 } from "../types";
 
@@ -48,8 +46,7 @@ const METRIC_EPS = 1e-9;
 
 /**
  * Surface a polygon as a single face. The returned array always has length 1;
- * the indirection exists so callers that historically iterated faces (e.g.
- * the manifold check, the canvas validator) can keep their loop shape.
+ * the indirection lets face-oriented consumers keep a common loop shape.
  *
  * Returns an empty array for degenerate polygons (< 3 vertices).
  */

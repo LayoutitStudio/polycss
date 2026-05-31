@@ -1,8 +1,9 @@
 /**
  * Poly — Vue 3 equivalent of React's Poly component.
  *
- * Renders one polygon as an atlas-backed DOM sprite. The atlas handles both
- * textured and solid-color faces, so normal rendering never emits SVG.
+ * Renders one polygon as a render-strategy DOM leaf. Solid faces use the
+ * cheapest supported solid strategy; textured faces use the atlas path.
+ * Normal polygon rendering never emits SVG.
  */
 import {
   computed,
