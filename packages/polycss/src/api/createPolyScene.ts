@@ -2386,11 +2386,14 @@ export function createPolyScene(
       : shadePolygon(receiverColor, 0, "#000000", ambColor, ambIntensity);
     // Mesh-local vertex (world units) → CSS via the same axis swap
     // (world.x → CSS-Y, world.y → CSS-X), tile scale, and mesh-wrapper
-    // transforms that the atlas + wrapper apply. The wrapper carries
-    // scale3d(mesh.scale) pivoted on the polygon-bbox CSS center (the
-    // wrapper's transform-origin); we apply the same scale around the
-    // same pivot here so shadow-projection geometry stays aligned with
-    // the rendered mesh under non-1 scale.
+    // transforms the atlas + wrapper apply. The wrapper's `scale3d`
+    // pivots from the MESH ORIGIN (Three.js mesh.scale semantics — see
+    // buildMeshTransform); we apply the same origin-pivoted scale here
+    // so shadow-projection geometry stays aligned with the rendered
+    // mesh under non-1 scale. Note: rotation pivots from bbox center on
+    // the wrapper, but rotation does NOT need handling here because
+    // shadow geometry is computed once per mesh-transform change and
+    // already lives in world coords after the per-vertex transform.
     const meshScaleVec3 = (m: MeshEntry | undefined): Vec3 => {
       const s = m?.handle?.transform?.scale;
       if (s === undefined || s === null) return [1, 1, 1];
@@ -2399,16 +2402,16 @@ export function createPolyScene(
     };
     const worldCssForMesh = (mesh: MeshEntry | undefined) => {
       const scale = meshScaleVec3(mesh);
-      const bbox = mesh?.bboxCenterCss;
       const unit = scale[0] === 1 && scale[1] === 1 && scale[2] === 1;
       return (vert: Vec3, pos: Vec3): Vec3 => {
         const cssPos = worldPositionToCss(pos);
         const x0 = vert[1] * DEFAULT_TILE;
         const y0 = vert[0] * DEFAULT_TILE;
         const z0 = vert[2] * DEFAULT_TILE;
-        const sx = unit || !bbox ? x0 : bbox[0] + (x0 - bbox[0]) * scale[0];
-        const sy = unit || !bbox ? y0 : bbox[1] + (y0 - bbox[1]) * scale[1];
-        const sz = unit || !bbox ? z0 : bbox[2] + (z0 - bbox[2]) * scale[2];
+        // Scale pivots from origin (= multiply each component by scale).
+        const sx = unit ? x0 : x0 * scale[0];
+        const sy = unit ? y0 : y0 * scale[1];
+        const sz = unit ? z0 : z0 * scale[2];
         return [sx + cssPos[0], sy + cssPos[1], sz + cssPos[2]];
       };
     };
