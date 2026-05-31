@@ -455,25 +455,55 @@ function worldDirectionalLightToCss<
   return { ...light, direction: worldDirectionToCss(light.direction) } as T;
 }
 
-function buildMeshTransform(t: PolyMeshTransform): string | undefined {
+function buildMeshTransform(t: PolyMeshTransform, bboxCenterCss?: Vec3 | null): string | undefined {
+  // Target effective transform on mesh-local vertex p:
+  //   p_world = T(meshPos) · S(scale, around origin) · R_around_bbox(rotation) · p
+  //
+  // Scale pivots from mesh ORIGIN (Three.js mesh.scale semantics — vertex
+  // at z=0 stays at z=0, so a scaled mesh "lands" on the floor instead of
+  // floating). Rotation pivots from the polygon BBOX CENTER (PolyCSS UX
+  // — rotating around the visible center feels right).
+  //
+  // The wrapper has `transform-origin: var(--origin)` = bbox-center, so
+  // the browser computes M_eff = T(bbox) · M_string · T(-bbox). Solving
+  // for M_string and simplifying:
+  //   scale only / scale + position:  M_string = T(pos - bbox) · S · T(bbox)
+  //   rotation only:                  M_string = R
+  //   rotation + position:            M_string = T(pos) · R
+  //   scale + rotation (± pos):       M_string = T(pos - bbox) · S · T(bbox) · R
+  //   no transforms / position only:  M_string = T(pos)
+  //
+  // CSS string reads matrices left-to-right in the order they're applied
+  // to the point, so the parts below match the M_string above exactly.
+  const sx = typeof t.scale === "number" ? t.scale : (t.scale?.[0] ?? 1);
+  const sy = typeof t.scale === "number" ? t.scale : (t.scale?.[1] ?? 1);
+  const sz = typeof t.scale === "number" ? t.scale : (t.scale?.[2] ?? 1);
+  const hasScale = sx !== 1 || sy !== 1 || sz !== 1;
+  const hasRotation = !!t.rotation && (!!t.rotation[0] || !!t.rotation[1] || !!t.rotation[2]);
+  const cssPos = t.position ? worldPositionToCss(t.position) : [0, 0, 0] as Vec3;
+  const bx = bboxCenterCss?.[0] ?? 0;
+  const by = bboxCenterCss?.[1] ?? 0;
+  const bz = bboxCenterCss?.[2] ?? 0;
+  const hasBbox = bx !== 0 || by !== 0 || bz !== 0;
+
   const parts: string[] = [];
-  if (t.position) {
-    const cssPos = worldPositionToCss(t.position);
-    parts.push(
-      `translate3d(${cssPos[0]}px, ${cssPos[1]}px, ${cssPos[2]}px)`
-    );
+  // Leading translate: pos-bbox if scale needs an origin-pivot offset,
+  // plain pos otherwise. (When scale is identity, no bbox compensation
+  // needed — the bbox cancels out in the transform-origin math.)
+  const tx = cssPos[0] - (hasScale && hasBbox ? bx : 0);
+  const ty = cssPos[1] - (hasScale && hasBbox ? by : 0);
+  const tz = cssPos[2] - (hasScale && hasBbox ? bz : 0);
+  if (tx !== 0 || ty !== 0 || tz !== 0) {
+    parts.push(`translate3d(${tx}px, ${ty}px, ${tz}px)`);
   }
-  if (t.scale !== undefined) {
-    if (typeof t.scale === "number") {
-      if (t.scale !== 1) parts.push(`scale3d(${t.scale}, ${t.scale}, ${t.scale})`);
-    } else {
-      parts.push(`scale3d(${t.scale[0]}, ${t.scale[1]}, ${t.scale[2]})`);
-    }
+  if (hasScale) {
+    parts.push(`scale3d(${sx}, ${sy}, ${sz})`);
+    if (hasBbox) parts.push(`translate3d(${bx}px, ${by}px, ${bz}px)`);
   }
-  if (t.rotation) {
-    if (t.rotation[0]) parts.push(`rotateX(${t.rotation[0]}deg)`);
-    if (t.rotation[1]) parts.push(`rotateY(${t.rotation[1]}deg)`);
-    if (t.rotation[2]) parts.push(`rotateZ(${t.rotation[2]}deg)`);
+  if (hasRotation) {
+    if (t.rotation![0]) parts.push(`rotateX(${t.rotation![0]}deg)`);
+    if (t.rotation![1]) parts.push(`rotateY(${t.rotation![1]}deg)`);
+    if (t.rotation![2]) parts.push(`rotateZ(${t.rotation![2]}deg)`);
   }
   return parts.length > 0 ? parts.join(" ") : undefined;
 }
@@ -3390,7 +3420,10 @@ export function createPolyScene(
     let mergeOnUpdate = transformIn.merge !== false;
     let stableDomOnUpdate = !!transformIn.stableDom;
     let polygonUpdateVersion = 0;
-    const css = buildMeshTransform(transform);
+    // (bboxCenterCssCache is seeded by applyTransformOrigin below; the
+    // wrapper transform also gets a fresh apply there once the bbox is
+    // known, so we don't need to apply it here too.)
+    const css = buildMeshTransform(transform, null);
     if (css) wrapper.style.transform = css;
 
     // Static meshes use the full optimizer by default; meshResolution selects
@@ -3438,11 +3471,16 @@ export function createPolyScene(
     // place. Setting transform-origin to the polygon bbox center makes
     // setTransform({rotation}) behave intuitively.
     let bboxCenterCssCache: Vec3 | null = null;
+    function reapplyWrapperTransform(): void {
+      const css = buildMeshTransform(transform, bboxCenterCssCache);
+      wrapper.style.transform = css ?? "";
+    }
     function applyTransformOrigin(polygons: Polygon[]): void {
       if (polygons.length === 0) {
         wrapper.style.removeProperty("--origin");
         bboxCenterCssCache = null;
         if (entryRef) entryRef.bboxCenterCss = null;
+        reapplyWrapperTransform();
         return;
       }
       let minX = Infinity, minY = Infinity, minZ = Infinity;
@@ -3461,6 +3499,7 @@ export function createPolyScene(
         wrapper.style.removeProperty("--origin");
         bboxCenterCssCache = null;
         if (entryRef) entryRef.bboxCenterCss = null;
+        reapplyWrapperTransform();
         return;
       }
       // World→CSS axis remap (matches polygonGeometry / autoCenter).
@@ -3470,6 +3509,10 @@ export function createPolyScene(
       wrapper.style.setProperty("--origin", `${cssX}px ${cssY}px ${cssZ}px`);
       bboxCenterCssCache = [cssX, cssY, cssZ];
       if (entryRef) entryRef.bboxCenterCss = bboxCenterCssCache;
+      // Re-apply the wrapper transform with the fresh bbox so scale-pivot
+      // math (in buildMeshTransform) lines up with the new
+      // transform-origin.
+      reapplyWrapperTransform();
     }
     let entryRef: MeshEntry | null = null;
     applyTransformOrigin(sourcePolygons);
@@ -3829,7 +3872,7 @@ export function createPolyScene(
         if (t.castShadow !== undefined) entry.castShadow = !!t.castShadow;
         if (t.receiveShadow !== undefined) entry.receiveShadow = !!t.receiveShadow;
         transform = { ...transform, ...t };
-        const css2 = buildMeshTransform(transform);
+        const css2 = buildMeshTransform(transform, entry.bboxCenterCss);
         wrapper.style.transform = css2 ?? "";
         applyMeshLightVarOverride(entry, transform.rotation);
         if (t.rotation !== undefined) syncMountedRenderedForCameraChange(entry, true);

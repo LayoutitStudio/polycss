@@ -654,13 +654,20 @@ describe("createPolyScene", () => {
         scale: 2,
       });
       const wrapper = host.querySelector(".polycss-mesh") as HTMLElement;
-      // mesh.position is in world units. Boundary conversion applies the same
-      // axis swap + ×DEFAULT_TILE that camera.target uses (world.x → CSS Y,
-      // world.y → CSS X, world.z → CSS Z). Input [10, 20, 30] world →
-      // CSS [20*50, 10*50, 30*50] = [1000, 500, 1500] px.
-      expect(wrapper.style.transform).toContain("translate3d(1000px, 500px, 1500px)");
-      expect(wrapper.style.transform).toContain("rotateX(45deg)");
+      // Scale + rotation now compose explicitly under the wrapper's
+      // transform-origin = bbox-center: scale pivots from MESH ORIGIN
+      // (Three.js mesh.scale parity) while rotation pivots from the
+      // polygon BBOX CENTER. With the test fixture's polygons whose
+      // bbox center maps to CSS (25, 25, 0), the wrapper transform
+      // takes the form:
+      //   translate3d(pos - bbox) scale3d(2) translate3d(bbox) rotateX(45deg)
+      // = translate3d(975, 475, 1500) scale3d(2) translate3d(25, 25, 0) rotateX(45deg)
+      // (mesh.position [10, 20, 30] world → CSS [1000, 500, 1500] via
+      // the world.y → CSS.x axis swap and ×DEFAULT_TILE.)
       expect(wrapper.style.transform).toContain("scale3d(2, 2, 2)");
+      expect(wrapper.style.transform).toContain("rotateX(45deg)");
+      // Bbox-compensated leading translate: pos_css - bbox_css
+      expect(wrapper.style.transform).toMatch(/translate3d\(975(\.0+)?px,\s*475(\.0+)?px,\s*1500(\.0+)?px\)/);
     });
 
     it("handle.remove() detaches the wrapper from the DOM", () => {
