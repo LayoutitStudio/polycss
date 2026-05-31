@@ -116,11 +116,16 @@ export function syncShadowPaths(
       path = doc.createElementNS(SVG_NS, "path");
       path.setAttribute("fill-rule", "nonzero");
       if (withStroke) {
-        // 1 px stroke is enough to close sub-pixel gaps from float
-        // precision at clip boundaries without overshooting visibly.
-        // Callers must set `stroke` to the same value as `fill` for the
-        // bleed to composite seamlessly — see receiverShadow.ts.
-        path.setAttribute("stroke-width", "1");
+        // 2 px stroke (= 1 px outside the path) to cover BOTH the float-
+        // precision sub-pixel clip gap AND the ~1.5 px solid seam bleed
+        // that adjacent leaves overscan onto neighbour polygons. The
+        // engine's internal solid seam bleed is up to 1.5 CSS px per
+        // shared edge (not configurable, see AGENTS.md), so a 1 px
+        // shadow stroke wasn't enough to overcome neighbour leaves
+        // painting lit-color INTO this receiver's edge zone. The extra
+        // shadow extension reads as soft penumbra at boundaries, which
+        // is closer to Three.js's PCF shadow look anyway.
+        path.setAttribute("stroke-width", "2");
         path.setAttribute("stroke-linejoin", "round");
       }
       svg.insertBefore(path, existing);
