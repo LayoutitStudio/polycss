@@ -439,21 +439,24 @@ export function VanillaScene({
         ...(previewShadow ? { shadow: nextShadow } : {}),
       });
     } else {
-      // Pass `directionalLight` even in baked mode so the scene re-emits
-      // shadow SVGs against the live light direction during drag. Matches
-      // the bench's behavior — shadows follow the helper without waiting
-      // for commit. The baked atlas pixels themselves are NOT re-rasterised
-      // mid-drag; that happens on commit via commitBakedSolidLighting.
+      // Baked mode: match the bench three-parity flow — push the new light
+      // direction to the scene so shadow SVGs re-emit live during drag,
+      // but DON'T install the CSS-cascade preview on solid leaves. The
+      // preview makes leaves brighter than the eventual bake (different
+      // gamma/dot-product paths) which reads as "the face just darkened
+      // and disappeared" the instant the user releases the helper. The
+      // bench's solid leaves stay at the LAST baked color through the
+      // drag, then commit on release — no perceived flicker.
+      //
+      // Trade-off: textured atlas leaves likewise stay frozen during
+      // drag; only shadows follow live. The atlas re-bakes on commit
+      // via commitBakedSolidLighting → rebakeRenderEntryInPlace (in-place
+      // bitmap swap, no DOM teardown).
       if (previewShadow) {
         scene.setOptions({ directionalLight: nextDirectionalLight, shadow: nextShadow });
       } else {
         scene.setOptions({ directionalLight: nextDirectionalLight });
       }
-      (scene as BakedSolidLightingPreviewSceneHandle).previewBakedSolidLighting?.({
-        directionalLight: nextDirectionalLight,
-        ambientLight: ambientFromOptions(nextOptions),
-        skipShadows: !previewShadow,
-      });
     }
     lightHandleRef.current?.setTransform({
       position: lightHelperPosition(
