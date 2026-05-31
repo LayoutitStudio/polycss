@@ -690,6 +690,11 @@ export function createPolyScene(
     excludeFromAutoCenter: boolean;
     castShadow: boolean;
     receiveShadow: boolean;
+    /** Polygon bbox CENTER in CSS world coords. Same value the wrapper's
+     *  `--origin` CSS variable carries — i.e. the pivot point that the
+     *  wrapper's scale3d and rotation use. Cached so shadow geometry
+     *  can apply scale around the same pivot. */
+    bboxCenterCss: Vec3 | null;
     cameraCullGroups: CameraCullNormalGroup[];
     cameraCullSignature: string;
     lightOverrideSignature: string;
@@ -2350,19 +2355,37 @@ export function createPolyScene(
       ? userShadowColor
       : shadePolygon(receiverColor, 0, "#000000", ambColor, ambIntensity);
     // Mesh-local vertex (world units) → CSS via the same axis swap
-    // (world.x → CSS-Y, world.y → CSS-X) and tile scale that the atlas
-    // builder applies. transform.position is in world units (matching
-    // camera.target), so it goes through the same conversion. Mesh
-    // wrapper translate3d gets the same conversion via worldPositionToCss
-    // in buildMeshTransform — both halves now scale identically.
-    const worldCss = (vert: Vec3, pos: Vec3): Vec3 => {
-      const cssPos = worldPositionToCss(pos);
-      return [
-        vert[1] * DEFAULT_TILE + cssPos[0],
-        vert[0] * DEFAULT_TILE + cssPos[1],
-        vert[2] * DEFAULT_TILE + cssPos[2],
-      ];
+    // (world.x → CSS-Y, world.y → CSS-X), tile scale, and mesh-wrapper
+    // transforms that the atlas + wrapper apply. The wrapper carries
+    // scale3d(mesh.scale) pivoted on the polygon-bbox CSS center (the
+    // wrapper's transform-origin); we apply the same scale around the
+    // same pivot here so shadow-projection geometry stays aligned with
+    // the rendered mesh under non-1 scale.
+    const meshScaleVec3 = (m: MeshEntry | undefined): Vec3 => {
+      const s = m?.handle?.transform?.scale;
+      if (s === undefined || s === null) return [1, 1, 1];
+      if (typeof s === "number") return [s, s, s];
+      return [s[0] ?? 1, s[1] ?? 1, s[2] ?? 1];
     };
+    const worldCssForMesh = (mesh: MeshEntry | undefined) => {
+      const scale = meshScaleVec3(mesh);
+      const bbox = mesh?.bboxCenterCss;
+      const unit = scale[0] === 1 && scale[1] === 1 && scale[2] === 1;
+      return (vert: Vec3, pos: Vec3): Vec3 => {
+        const cssPos = worldPositionToCss(pos);
+        const x0 = vert[1] * DEFAULT_TILE;
+        const y0 = vert[0] * DEFAULT_TILE;
+        const z0 = vert[2] * DEFAULT_TILE;
+        const sx = unit || !bbox ? x0 : bbox[0] + (x0 - bbox[0]) * scale[0];
+        const sy = unit || !bbox ? y0 : bbox[1] + (y0 - bbox[1]) * scale[1];
+        const sz = unit || !bbox ? z0 : bbox[2] + (z0 - bbox[2]) * scale[2];
+        return [sx + cssPos[0], sy + cssPos[1], sz + cssPos[2]];
+      };
+    };
+    // The receiver-side worldCss handles the RECEIVER mesh's scale +
+    // bbox; the per-caster loop below builds its own worldCss for each
+    // caster mesh.
+    const worldCss = worldCssForMesh(receiverEntry);
 
     // Group receiver polygons by shared plane (matching normal AND offset
     // within tolerance). Each group becomes ONE shadow surface: instead
@@ -2378,7 +2401,9 @@ export function createPolyScene(
     // later light positions do not project onto that face.
     // Cache key includes the dedup-drop set size so changing receiver
     // geometry / dedup tolerances invalidates the cached face planes.
-    const cacheKey = `${receiverEntry.polygons.length}|${receiverDedupDrop.size}|${rpos.join(",")}`;
+    const receiverScale = meshScaleVec3(receiverEntry);
+    const rbboxCss = receiverEntry.bboxCenterCss;
+    const cacheKey = `${receiverEntry.polygons.length}|${receiverDedupDrop.size}|${rpos.join(",")}|${receiverScale.join(",")}|${rbboxCss ? rbboxCss.join(",") : "n"}`;
     let cachedPlanes = receiverShadowCache.get(receiverEntry);
     if (cachedPlanes === undefined || receiverShadowCacheKey.get(receiverEntry) !== cacheKey) {
       const surfaces = groupReceiverFaceGroups(receiverEntry, rpos, worldCss, receiverDedupDrop);
@@ -2530,18 +2555,25 @@ export function createPolyScene(
       // only OTHER parts of the same mesh that are above the receiver
       // plane along the light direction.
       const cpos = caster.handle.transform.position ?? [0, 0, 0];
-      const ckey = `${caster.polygons.length}|${cpos.join(",")}`;
+      const casterScale = meshScaleVec3(caster);
+      // Cache key includes the caster's scale + bbox so a scale change
+      // (or any geometry update that moves the bbox center) busts the
+      // cached world-vertex list. Without this the cottage scale slider
+      // would keep using pre-scaled cached shadow geometry.
+      const cbboxCss = caster.bboxCenterCss;
+      const ckey = `${caster.polygons.length}|${cpos.join(",")}|${casterScale.join(",")}|${cbboxCss ? cbboxCss.join(",") : "n"}`;
       let cached = casterItemsCache.get(caster);
       if (cached === undefined || casterItemsCacheKey.get(caster) !== ckey) {
         const dedupDrop = dedupByCaster.get(caster)!;
         cached = [];
+        const casterWorldCss = worldCssForMesh(caster);
         for (const item of caster.rendered) {
           if (dedupDrop.has(item.polygonIndex)) continue;
           const plan = item.plan;
           if (!plan) continue;
           const polygon = caster.polygons[item.polygonIndex];
           if (!polygon) continue;
-          const wv = polygon.vertices.map((vert) => worldCss(vert, cpos));
+          const wv = polygon.vertices.map((vert) => casterWorldCss(vert, cpos));
           let minX = Infinity, minY = Infinity, minZ = Infinity;
           let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
           for (const w of wv) {
@@ -3405,9 +3437,12 @@ export function createPolyScene(
     // mesh would orbit around world (0,0,0) rather than rotating in
     // place. Setting transform-origin to the polygon bbox center makes
     // setTransform({rotation}) behave intuitively.
+    let bboxCenterCssCache: Vec3 | null = null;
     function applyTransformOrigin(polygons: Polygon[]): void {
       if (polygons.length === 0) {
         wrapper.style.removeProperty("--origin");
+        bboxCenterCssCache = null;
+        if (entryRef) entryRef.bboxCenterCss = null;
         return;
       }
       let minX = Infinity, minY = Infinity, minZ = Infinity;
@@ -3424,6 +3459,8 @@ export function createPolyScene(
       }
       if (!Number.isFinite(minX)) {
         wrapper.style.removeProperty("--origin");
+        bboxCenterCssCache = null;
+        if (entryRef) entryRef.bboxCenterCss = null;
         return;
       }
       // World→CSS axis remap (matches polygonGeometry / autoCenter).
@@ -3431,7 +3468,10 @@ export function createPolyScene(
       const cssY = ((minX + maxX) / 2) * DEFAULT_TILE;
       const cssZ = ((minZ + maxZ) / 2) * DEFAULT_TILE;
       wrapper.style.setProperty("--origin", `${cssX}px ${cssY}px ${cssZ}px`);
+      bboxCenterCssCache = [cssX, cssY, cssZ];
+      if (entryRef) entryRef.bboxCenterCss = bboxCenterCssCache;
     }
+    let entryRef: MeshEntry | null = null;
     applyTransformOrigin(sourcePolygons);
 
     sceneEl.appendChild(wrapper);
@@ -3451,6 +3491,7 @@ export function createPolyScene(
       skipBucketNormalCleanupOnce: false,
       excludeFromAutoCenter: !!transformIn.excludeFromAutoCenter,
       castShadow: !!transformIn.castShadow,
+      bboxCenterCss: bboxCenterCssCache,
       receiveShadow: !!transformIn.receiveShadow,
       cameraCullGroups: [],
       cameraCullSignature: "",
@@ -3799,10 +3840,12 @@ export function createPolyScene(
         // Receiver toggled: rebuild the scene-level shadow set so this
         // mesh's faces are added (or removed) as receivers.
         if (entry.receiveShadow !== prevReceiveShadow) emitSceneShadows();
-        // Position change: shadow geometry depends on world-space coords,
-        // but non-shadow helpers (e.g. the light helper) must not overwrite
-        // transient preview shadows with the committed light.
-        if (t.position !== undefined && (entry.castShadow || entry.receiveShadow)) {
+        // Position / scale change: shadow geometry depends on world-space
+        // coords AND the mesh's wrapper scale (which pivots from the
+        // bbox center). Non-shadow helpers (e.g. the light helper) must
+        // not overwrite transient preview shadows with the committed
+        // light, so the gate is on castShadow || receiveShadow.
+        if ((t.position !== undefined || t.scale !== undefined) && (entry.castShadow || entry.receiveShadow)) {
           recomputeShadowGround();
           emitSceneShadows();
         }
@@ -3843,6 +3886,7 @@ export function createPolyScene(
     };
 
     entry.handle = handle;
+    entryRef = entry;
     meshes.add(entry);
     renderEntry(entry);
     applyMeshLightVarOverride(entry, transform.rotation);
