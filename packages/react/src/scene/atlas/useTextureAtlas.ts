@@ -23,22 +23,6 @@ function pageShells(pages: readonly { width: number; height: number }[]): Textur
   return pages.map((page) => ({ width: page.width, height: page.height, url: null }));
 }
 
-function textureAtlasPagesEqual(a: readonly TextureAtlasPage[], b: readonly TextureAtlasPage[]): boolean {
-  return a.length === b.length && a.every((page, index) => {
-    const other = b[index];
-    return page.width === other.width && page.height === other.height && page.url === other.url;
-  });
-}
-
-// Same page count + dimensions → the old bitmap can keep painting under the new
-// slices while the next atlas rasterises (the slice geometry is normalised
-// against page width/height, so identical dimensions map correctly). Only when
-// the layout changes do we have to blank to shells.
-function pagesDimensionsCompatible(a: readonly TextureAtlasPage[], b: readonly TextureAtlasPage[]): boolean {
-  return a.length === b.length && a.every((page, index) =>
-    page.width === b[index].width && page.height === b[index].height);
-}
-
 function blobUrlsOf(pages: readonly TextureAtlasPage[]): string[] {
   return pages.flatMap((page) => page.url?.startsWith("blob:") ? [page.url] : []);
 }
@@ -110,22 +94,21 @@ export function useTextureAtlas(
 
   useEffect(() => {
     let cancelled = false;
-    const nextPageShells = pageShells(packed.pages);
-    // Double-buffer: keep the previous bitmap painting while the new atlas
-    // rasterises, so an edit never flashes a blank textured face. Blank to
-    // shells only when the page layout changed (the old bitmap can't map).
-    setPages((prev) =>
-      textureAtlasPagesEqual(prev, nextPageShells) ? prev
-        : pagesDimensionsCompatible(prev, nextPageShells) ? prev
-          : nextPageShells);
 
-    if (packed.pages.length === 0 || typeof document === "undefined") {
-      if (packed.pages.length === 0) {
-        deferRevoke(shownUrls.current);
-        shownUrls.current = [];
-      }
+    if (packed.pages.length === 0) {
+      // No textured leaves anymore → drop the bitmaps.
+      deferRevoke(shownUrls.current);
+      shownUrls.current = [];
+      setPages((prev) => prev.length === 0 ? prev : []);
       return () => {};
     }
+    if (typeof document === "undefined") return () => {};
+
+    // Double-buffer: keep the previous bitmap painting (geometry leaves still
+    // reposition live from `entries`) until the new atlas is rasterised AND
+    // decoded, then swap. Never blank — on a layout change a brief stale sample
+    // under the new slices beats a blank flash.
+    setPages((prev) => prev.some((page) => page.url) ? prev : pageShells(packed.pages));
 
     let built: string[] = [];
     buildAtlasPages(packed.pages, textureLighting, document, atlasScale, () => cancelled)
@@ -140,13 +123,9 @@ export function useTextureAtlas(
         shownUrls.current = built;
         built = [];
         deferRevoke(stale);
-        setPages((prev) => textureAtlasPagesEqual(prev, nextPages) ? prev : nextPages);
+        setPages(nextPages);
       })
-      .catch(() => {
-        if (!cancelled) {
-          setPages((prev) => textureAtlasPagesEqual(prev, nextPageShells) ? prev : nextPageShells);
-        }
-      });
+      .catch(() => {});
 
     return () => {
       cancelled = true;
