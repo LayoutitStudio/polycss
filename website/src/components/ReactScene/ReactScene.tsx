@@ -44,6 +44,11 @@ function LightHelperMesh({
     () => octahedronPolygons({ center: [0, 0, 0], size, color: swatch }),
     [size, swatch],
   );
+  // React's <PolyMesh> still treats `position` as CSS pixels (pre-parity
+  // convention) — the vanilla createPolyScene parity refactor wasn't
+  // mirrored into the React package. We pre-apply the world→CSS axis swap
+  // + ×BASE_TILE here to compensate. Once tasks #81/#84/#97 land and
+  // React mirrors the parity change, this can drop the swap + multiplier.
   const position = useMemo<Vec3>(() => {
     const [dx, dy, dz] = light.direction;
     const len = Math.hypot(dx, dy, dz) || 1;

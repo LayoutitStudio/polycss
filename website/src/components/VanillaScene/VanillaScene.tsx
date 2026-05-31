@@ -193,12 +193,17 @@ function lightHelperPosition(
   target: Vec3,
   distance: number,
 ): Vec3 {
+  // Post-parity: createPolyScene treats `position` as WORLD UNITS and
+  // applies the world→CSS axis swap + ×BASE_TILE conversion internally.
+  // Pre-parity, this helper used to ×LIGHT_HELPER_TILE + swap manually,
+  // which after the parity refactor pushed the helper thousands of CSS
+  // pixels off-screen because the renderer multiplied a second time.
   const [dx, dy, dz] = light.direction;
   const len = Math.hypot(dx, dy, dz) || 1;
   return [
-    (target[1] + (dx / len) * distance) * LIGHT_HELPER_TILE,
-    (target[0] + (dy / len) * distance) * LIGHT_HELPER_TILE,
-    (target[2] + (dz / len) * distance) * LIGHT_HELPER_TILE,
+    target[0] + (dx / len) * distance,
+    target[1] + (dy / len) * distance,
+    target[2] + (dz / len) * distance,
   ];
 }
 
