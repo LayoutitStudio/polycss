@@ -75,7 +75,7 @@
     const qs = (k, d) => (Q.has(k) ? Q.get(k) : d);
 
     const S = {
-      mesh:    qs("mesh", "cube"),     // "cube" | "e" | "cottage"
+      mesh:    qs("mesh", "cube"),     // "cube" | "e" | "cottage" | "castle"
       lighting:qs("light", "baked"),   // "baked" | "dynamic"
       // Unified per-mesh transform state. Same shape (x, y, z, scale) for
       // every mesh — one set of object-transform sliders binds to the
@@ -91,6 +91,8 @@
                    z: qn("oz_cottage", qn("cz", 0)),
                    scale: qn("os_cottage", qn("cs", 1)),
                    rx: qn("orx_cottage", 0), ry: qn("ory_cottage", 0), rz: qn("orz_cottage", 0) },
+        castle:  { x: qn("ox_castle",  0), y: qn("oy_castle",  0), z: qn("oz_castle", 0), scale: qn("os_castle", 1),
+                   rx: qn("orx_castle", 0), ry: qn("ory_castle", 0), rz: qn("orz_castle", 0) },
       },
       // Cube/E hold the geometry's base parameters (set at build time;
       // run-time scale applies on top via setTransform). Cottage geometry
@@ -143,6 +145,7 @@
     });
     let polyCube = null;
     let polyCottage = null;
+    let polyCastle = null;
     let polyE = null;
     function buildPolyCube() {
       polyCube = polyScene.add(
@@ -207,6 +210,25 @@
         merge: false,
       });
     }
+    // Castle uses a hand-written .mtl whose material names mirror the OBJ's
+    // hex-named `usemtl` slots (455A64 / 78909C / 795548). Without it both
+    // engines would fall back to default white and the castle would look
+    // flat.
+    const CASTLE_TARGET_SIZE = 6;
+    async function buildPolyCastle() {
+      const parse = await loadMesh("/gallery/obj/castle.obj", {
+        mtlUrl: "/gallery/obj/castle.mtl",
+        objOptions: { targetSize: CASTLE_TARGET_SIZE },
+      });
+      polyCastle = polyScene.add(parse, {
+        id: "castle",
+        position: [S.obj.castle.x, S.obj.castle.y, S.obj.castle.z],
+        scale: S.obj.castle.scale,
+        castShadow: true,
+        receiveShadow: true,
+        merge: false,
+      });
+    }
     if (S.mesh === "cube") buildPolyCube();
     // Flat horizontal quad on z=0, sized S.floor.size in world units.
     // PolyCSS doesn't ship a generic "plane" generator (createPolyPlane is
@@ -254,6 +276,7 @@
 
     let cubeMesh = null;
     let cottageGroup = null;
+    let castleGroup = null;
     let eGroup = null;
     function buildThreeCube() {
       cubeMesh = new THREE.Mesh(
@@ -316,6 +339,43 @@
             wrap.scale.setScalar(S.obj.cottage.scale);
             obj.traverse((c) => { if (c.isMesh) { c.castShadow = true; c.receiveShadow = true; } });
             cottageGroup = wrap;
+            threeScene.add(wrap);
+            resolve();
+          }, undefined, reject);
+        }, undefined, reject);
+      });
+    }
+    // Three.js castle. Mirrors buildThreeCottage exactly, just swapping the
+    // OBJ/MTL paths and the target-size constant so the bench's slider
+    // values move both engines identically.
+    function buildThreeCastle() {
+      return new Promise((resolve, reject) => {
+        const mtlLoader = new MTLLoader();
+        mtlLoader.setMaterialOptions({ side: THREE.DoubleSide });
+        mtlLoader.load("/gallery/obj/castle.mtl", (materials) => {
+          materials.preload();
+          const objLoader = new OBJLoader();
+          objLoader.setMaterials(materials);
+          objLoader.load("/gallery/obj/castle.obj", (obj) => {
+            const q = new THREE.Quaternion();
+            q.setFromAxisAngle(new THREE.Vector3(1, 1, 1).normalize(), 2 * Math.PI / 3);
+            obj.quaternion.copy(q);
+            obj.updateMatrixWorld(true);
+            const wrap = new THREE.Group();
+            wrap.add(obj);
+            const bbox = new THREE.Box3().setFromObject(wrap);
+            const sizeV = new THREE.Vector3();
+            bbox.getSize(sizeV);
+            const maxDim = Math.max(sizeV.x, sizeV.y, sizeV.z) || 1;
+            const norm = CASTLE_TARGET_SIZE / maxDim;
+            obj.scale.multiplyScalar(norm);
+            obj.updateMatrixWorld(true);
+            const bbox2 = new THREE.Box3().setFromObject(wrap);
+            obj.position.sub(bbox2.min);
+            wrap.position.set(S.obj.castle.x, S.obj.castle.y, S.obj.castle.z);
+            wrap.scale.setScalar(S.obj.castle.scale);
+            obj.traverse((c) => { if (c.isMesh) { c.castShadow = true; c.receiveShadow = true; } });
+            castleGroup = wrap;
             threeScene.add(wrap);
             resolve();
           }, undefined, reject);
@@ -533,6 +593,7 @@
       if (polyCube)    polyCube.setTransform({    position: [S.obj.cube.x,    S.obj.cube.y,    S.obj.cube.z],    scale: S.obj.cube.scale,    rotation: [S.obj.cube.rx, S.obj.cube.ry, S.obj.cube.rz] });
       if (polyE)       polyE.setTransform({       position: [S.obj.e.x,       S.obj.e.y,       S.obj.e.z],       scale: S.obj.e.scale,       rotation: [S.obj.e.rx, S.obj.e.ry, S.obj.e.rz] });
       if (polyCottage) polyCottage.setTransform({ position: [S.obj.cottage.x, S.obj.cottage.y, S.obj.cottage.z], scale: S.obj.cottage.scale, rotation: [S.obj.cottage.rx, S.obj.cottage.ry, S.obj.cottage.rz] });
+      if (polyCastle)  polyCastle.setTransform({  position: [S.obj.castle.x,  S.obj.castle.y,  S.obj.castle.z],  scale: S.obj.castle.scale,  rotation: [S.obj.castle.rx, S.obj.castle.ry, S.obj.castle.rz] });
       // Scale the shadow's ground-plane lift inversely with camera zoom so
       // it stays at ~1 SCREEN PIXEL regardless of how far the camera is.
       // With a fixed lift in world units, low-zoom views (small px/u)
@@ -561,6 +622,7 @@
       if (lightsChanged && S.lighting === "baked") {
         if (polyCube) polyCube.rebakeAtlas();
         if (polyCottage) polyCottage.rebakeAtlas();
+        if (polyCastle) polyCastle.rebakeAtlas();
         if (polyE) polyE.rebakeAtlas();
         polyFloor.rebakeAtlas();
       }
@@ -579,6 +641,11 @@
         cottageGroup.position.set(S.obj.cottage.x, S.obj.cottage.y, S.obj.cottage.z);
         cottageGroup.scale.setScalar(S.obj.cottage.scale);
         cottageGroup.rotation.set(S.obj.cottage.rx * D2R, S.obj.cottage.ry * D2R, S.obj.cottage.rz * D2R);
+      }
+      if (castleGroup) {
+        castleGroup.position.set(S.obj.castle.x, S.obj.castle.y, S.obj.castle.z);
+        castleGroup.scale.setScalar(S.obj.castle.scale);
+        castleGroup.rotation.set(S.obj.castle.rx * D2R, S.obj.castle.ry * D2R, S.obj.castle.rz * D2R);
       }
       fitDirLightToScene();
       dirLight.intensity = S.dir.intensity;
@@ -715,7 +782,7 @@
           path.after(wrap);
         }
       }
-      const threeObjs = [cubeMesh, eGroup, cottageGroup, floorMesh].filter(Boolean);
+      const threeObjs = [cubeMesh, eGroup, cottageGroup, castleGroup, floorMesh].filter(Boolean);
       for (const obj of threeObjs) {
         obj.traverse(o => {
           if (!o.material) return;
@@ -745,9 +812,11 @@
       S.mesh = name;
       if (polyCube) { polyCube.remove(); polyCube = null; }
       if (polyCottage) { polyCottage.remove(); polyCottage = null; }
+      if (polyCastle) { polyCastle.remove(); polyCastle = null; }
       if (polyE) { polyE.remove(); polyE = null; }
       if (cubeMesh) { threeScene.remove(cubeMesh); cubeMesh = null; }
       if (cottageGroup) { threeScene.remove(cottageGroup); cottageGroup = null; }
+      if (castleGroup) { threeScene.remove(castleGroup); castleGroup = null; }
       if (eGroup) { threeScene.remove(eGroup); eGroup = null; }
       if (name === "cube") {
         buildPolyCube();
@@ -755,6 +824,8 @@
       } else if (name === "e") {
         buildPolyE();
         buildThreeE();
+      } else if (name === "castle") {
+        await Promise.all([buildPolyCastle(), buildThreeCastle()]);
       } else {
         await Promise.all([buildPolyCottage(), buildThreeCottage()]);
       }
@@ -767,12 +838,14 @@
     applyCamera();
     (async () => {
       if (S.mesh === "cottage") await Promise.all([buildPolyCottage(), buildThreeCottage()]);
+      else if (S.mesh === "castle") await Promise.all([buildPolyCastle(), buildThreeCastle()]);
       else if (S.mesh === "e") { buildPolyE(); buildThreeE(); }
       update(true);
       loop();
       window.__polyCube = polyCube;
       window.__polyE = polyE;
       window.__polyCottage = polyCottage;
+      window.__polyCastle = polyCastle;
       window.__polyScene = polyScene;
       window.__ready = true;
     })();
@@ -889,7 +962,7 @@
       meshLabel.textContent = "model";
       meshRow.appendChild(meshLabel);
       const meshSel = document.createElement("select");
-      for (const opt of ["cube", "e", "cottage"]) {
+      for (const opt of ["cube", "e", "cottage", "castle"]) {
         const o = document.createElement("option");
         o.value = opt; o.textContent = opt;
         if (S.mesh === opt) o.selected = true;
