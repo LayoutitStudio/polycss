@@ -41,6 +41,40 @@ function revokeUrls(urls: string[]): void {
   }
 }
 
+// Same page count + dimensions → the old bitmap can keep painting under the new
+// slices while the next atlas rasterises (slice geometry is normalised against
+// page width/height). Only a layout change forces a blank to shells.
+function pagesDimensionsCompatible(a: readonly TextureAtlasPage[], b: readonly TextureAtlasPage[]): boolean {
+  return a.length === b.length && a.every((page, index) =>
+    page.width === b[index].width && page.height === b[index].height);
+}
+
+function blobUrlsOf(pages: readonly TextureAtlasPage[]): string[] {
+  return pages.flatMap((page) => page.url?.startsWith("blob:") ? [page.url] : []);
+}
+
+// Force the browser to decode the new atlas bitmaps before they're swapped onto
+// mounted leaves. A freshly created Blob URL isn't decoded until its first
+// paint; copying it onto a live element decodes lazily on the next frame —
+// exactly the visible blank. `Image.decode()` does that work upfront.
+function decodeBlobUrls(urls: string[]): Promise<void> {
+  if (urls.length === 0 || typeof Image === "undefined") return Promise.resolve();
+  return Promise.all(urls.map((url) => {
+    const img = new Image();
+    img.src = url;
+    const decoded = img.decode?.();
+    return decoded ? decoded.catch(() => {}) : Promise.resolve();
+  })).then(() => undefined);
+}
+
+// Revoke after the browser has had a frame to paint with the replacement URL,
+// so the old bitmap is never freed while it's still on screen.
+function deferRevoke(urls: string[]): void {
+  if (urls.length === 0) return;
+  if (typeof requestAnimationFrame === "function") requestAnimationFrame(() => revokeUrls(urls));
+  else setTimeout(() => revokeUrls(urls), 0);
+}
+
 export function useTextureAtlas(
   plans: ComputedRef<Array<TextureAtlasPlan | null>>,
   textureLighting: ComputedRef<PolyTextureLightingMode>,
@@ -75,6 +109,8 @@ export function useTextureAtlas(
   const pages = ref<TextureAtlasPage[]>(
     atlasState.value.packed.pages.map((page) => ({ width: page.width, height: page.height, url: null })),
   );
+  // Blob URLs currently shown on screen — revoked one frame after they're
+  // replaced (or on scope dispose), never while still painting.
   let activeUrls: string[] = [];
 
   watch(
@@ -82,38 +118,47 @@ export function useTextureAtlas(
     ([nextAtlasState, nextTextureLighting], _prev, onCleanup) => {
       const { packed: nextPacked, atlasScale: nextAtlasScale } = nextAtlasState;
       let cancelled = false;
-      revokeUrls(activeUrls);
-      activeUrls = [];
-      pages.value = nextPacked.pages.map((page) => ({
+      let built: string[] = [];
+      const nextShells = nextPacked.pages.map((page) => ({
         width: page.width,
         height: page.height,
-        url: null,
+        url: null as string | null,
       }));
+      // Double-buffer: keep the previous bitmap painting while the new atlas
+      // rasterises, so an edit never flashes a blank textured face. Blank to
+      // shells only when the page layout changed (the old bitmap can't map).
+      if (!pagesDimensionsCompatible(pages.value, nextShells)) pages.value = nextShells;
 
       onCleanup(() => {
         cancelled = true;
-        revokeUrls(activeUrls);
-        activeUrls = [];
+        deferRevoke(built);
       });
 
-      if (nextPacked.pages.length === 0 || typeof document === "undefined") return;
+      if (nextPacked.pages.length === 0 || typeof document === "undefined") {
+        if (nextPacked.pages.length === 0) {
+          deferRevoke(activeUrls);
+          activeUrls = [];
+        }
+        return;
+      }
 
       buildAtlasPages(nextPacked.pages, nextTextureLighting, document, nextAtlasScale, () => cancelled)
-        .then((nextPages) => {
+        .then(async (nextPages) => {
+          built = blobUrlsOf(nextPages);
+          await decodeBlobUrls(built);
           if (cancelled) {
-            revokeUrls(nextPages.flatMap((page) => page.url?.startsWith("blob:") ? [page.url] : []));
+            deferRevoke(built);
             return;
           }
-          activeUrls = nextPages.flatMap((page) => page.url?.startsWith("blob:") ? [page.url] : []);
+          const stale = activeUrls;
+          activeUrls = built;
+          built = [];
+          deferRevoke(stale);
           pages.value = nextPages;
         })
         .catch(() => {
-          if (!cancelled) {
-            pages.value = nextPacked.pages.map((page) => ({
-              width: page.width,
-              height: page.height,
-              url: null,
-            }));
+          if (!cancelled && !pagesDimensionsCompatible(pages.value, nextShells)) {
+            pages.value = nextShells;
           }
         });
     },
