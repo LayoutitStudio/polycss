@@ -62,8 +62,7 @@
     import { MTLLoader } from "three/addons/loaders/MTLLoader.js";
     import {
       createPolyCamera, createPolyScene,
-      createPolyBox, loadMesh,
-      createTransformControls,
+      createPolyBox, createPolyOctahedron, loadMesh,
     } from "./.generated/polycss.js";
 
     const Q = new URLSearchParams(location.search);
@@ -406,51 +405,74 @@
     const threeLightLine = new THREE.Line(lightLineGeom, lightLineMat);
     threeScene.add(threeLightLine);
 
-    // PolyCSS helper — small box at the same NEAR world position. The
-    // gizmo attaches to this mesh so drag = move light helper = update
-    // S.dir.{x,y,z}.
+    // PolyCSS helper — small OCTAHEDRON (matches the rhombus look from
+    // the gallery's draggable light) at the same NEAR world position.
     const lightHelperSize = 0.4;
     const polyLightHelper = polyScene.add(
-      createPolyBox({ size: [lightHelperSize, lightHelperSize, lightHelperSize], color: "#ffaa00" }),
+      createPolyOctahedron({ center: [0, 0, 0], size: lightHelperSize, color: "#ffaa00" }),
       { id: "light-helper", position: [0, 0, 0], castShadow: false, receiveShadow: false, excludeFromAutoCenter: true, merge: false },
     );
-    // Wire a translate gizmo onto the light marker. Drag it to move the
-    // directional light in 3D. The drag reports a new WORLD position; we
-    // back-compute the light DIRECTION by subtracting the light target
-    // (always the scene center, kept at world origin in the bench) and
-    // normalizing relative to fitDirLightToScene's lightDist. Result is
-    // assigned to S.dir.{x,y,z} so the sliders + URL stay in sync.
-    let lightDragging = false;
-    const lightGizmo = createTransformControls(polyScene, {
-      mode: "translate",
-      size: 1.2,
-      onDraggingChanged: (dragging) => { lightDragging = dragging; if (!dragging && S.lighting === "baked") update(true); },
-      onObjectChange: (e) => {
-        // e.position is the NEW helper world position. Light direction is
-        // the helper-vs-origin offset, normalized, then scaled to keep
-        // the user's existing direction-vector magnitude (slider UX
-        // treats |dir| as a meaningful number for intensity feel).
-        const nx = e.position[0];
-        const ny = e.position[1];
-        const nz = e.position[2];
-        const newLen = Math.hypot(nx, ny, nz) || 1;
-        const oldLen = Math.hypot(S.dir.x, S.dir.y, S.dir.z) || 1;
-        S.dir.x = (nx / newLen) * oldLen;
-        S.dir.y = (ny / newLen) * oldLen;
-        S.dir.z = (nz / newLen) * oldLen;
-        refreshLightSliders();
-        // Dynamic mode: per-frame CSS calc picks up new --plx/y/z; baked
-        // mode would flicker on every drag tick, so debounce-bake on
-        // drag end (onDraggingChanged above).
-        update(false);
-      },
-    });
-    lightGizmo.attach(polyLightHelper);
+    // Mark the helper's wrapper so the pointer handler below can find it
+    // by selector (same trick the gallery's draggable light uses).
+    polyHost.querySelector('[data-poly-mesh-id="light-helper"]')?.setAttribute("data-light-helper", "1");
     // Slider value-refreshers for the directional-light dir.x/y/z rows
-    // — populated by buildPanel() so the light-drag handler above can
-    // sync the slider UI when the user moves the helper.
+    // — populated by buildPanel() so the drag handler can sync the
+    // slider UI as the user moves the helper.
     const lightSliderRefreshers = [];
     function refreshLightSliders() { for (const fn of lightSliderRefreshers) fn(); }
+    let lightDragging = false;
+    // Direct pointer-drag on the helper marker (gallery-style — no
+    // axis-arrow gizmo, just grab the rhombus and drag). Horizontal
+    // pixel motion → azimuth rotation around world Z; vertical pixel
+    // motion → elevation tilt. Both at ~1° per pixel for snappy feel.
+    const DEG_PER_PX = 1.0;
+    polyHost.addEventListener("pointerdown", (e) => {
+      const target = e.target instanceof Element ? e.target : null;
+      const helperEl = target?.closest('[data-light-helper="1"]');
+      if (!helperEl) return;
+      e.preventDefault(); e.stopPropagation();
+      lightDragging = true;
+      polyHost.setPointerCapture?.(e.pointerId);
+      // Snapshot the current direction in spherical form: azimuth around
+      // +Z (world) measured from +X CCW; elevation from horizon up.
+      const dx = S.dir.x, dy = S.dir.y, dz = S.dir.z;
+      const len = Math.hypot(dx, dy, dz) || 1;
+      const startMag = len;
+      const startAz = Math.atan2(dy, dx) * 180 / Math.PI;
+      const startEl = Math.asin(dz / len) * 180 / Math.PI;
+      const startX = e.clientX, startY = e.clientY;
+      const onMove = (ev) => {
+        if (!lightDragging) return;
+        ev.preventDefault();
+        const dxPx = ev.clientX - startX;
+        const dyPx = ev.clientY - startY;
+        const az = startAz + dxPx * DEG_PER_PX;
+        const el = Math.max(-89, Math.min(89, startEl - dyPx * DEG_PER_PX));
+        const azR = az * Math.PI / 180;
+        const elR = el * Math.PI / 180;
+        const cosEl = Math.cos(elR);
+        S.dir.x = startMag * cosEl * Math.cos(azR);
+        S.dir.y = startMag * cosEl * Math.sin(azR);
+        S.dir.z = startMag * Math.sin(elR);
+        refreshLightSliders();
+        update(false);
+      };
+      const onUp = (ev) => {
+        if (ev.pointerId !== e.pointerId) return;
+        lightDragging = false;
+        polyHost.releasePointerCapture?.(e.pointerId);
+        window.removeEventListener("pointermove", onMove);
+        window.removeEventListener("pointerup", onUp);
+        window.removeEventListener("pointercancel", onUp);
+        if (S.lighting === "baked") update(true);
+      };
+      window.addEventListener("pointermove", onMove);
+      window.addEventListener("pointerup", onUp);
+      window.addEventListener("pointercancel", onUp);
+    });
+    // Hint the user the helper is grabbable.
+    const helperStyle = polyHost.querySelector('[data-light-helper="1"]');
+    if (helperStyle instanceof HTMLElement) helperStyle.style.cursor = "grab";
 
     // ─── Camera — same rotX/rotY/zoom drive both ───────────────────────
     function resizeThree() {
@@ -560,7 +582,6 @@
       // the gizmo and re-setting it here would cause it to lag/snap.
       if (polyLightHelper && !lightDragging) {
         polyLightHelper.setTransform({ position: helperPos });
-        lightGizmo.update();
       }
       applyShadowsOnly();
       renderer.render(threeScene, camera);
