@@ -773,7 +773,15 @@ export function createPolyScene(
     let updated = false;
     for (const entry of meshes) {
       if (entry.rendered.some(needsBakedAtlasCommit)) {
-        renderEntry(entry);
+        // In-place atlas swap (same path `mesh.rebakeAtlas()` uses) instead
+        // of the destructive `renderEntry()`. The destructive path calls
+        // `clearRendered(entry)` which removes EVERY leaf from the DOM and
+        // then asynchronously rebuilds the atlas — during that window the
+        // mesh's faces disappear visually. `rebakeRenderEntryInPlace` keeps
+        // the existing leaves mounted and only swaps the atlas bitmap URL
+        // on textured leaves, so light commits feel like a clean slide
+        // instead of a flash-then-rebuild.
+        rebakeRenderEntryInPlace(entry);
         updated = true;
         continue;
       }

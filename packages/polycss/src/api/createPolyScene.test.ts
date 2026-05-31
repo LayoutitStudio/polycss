@@ -1423,7 +1423,7 @@ describe("createPolyScene", () => {
       expect(triangleLeaf.style.backgroundColor).toBe(initialTriangleBackgroundColor);
     });
 
-    it("rebakes atlas leaves when committing baked lighting", () => {
+    it("rebakes atlas leaves in place when committing baked lighting (no flash)", () => {
       scene = makeScene(host, { textureLighting: "baked" });
       scene.add(makeParseResult([texturedTriangle()]), { merge: false });
       const initialLeaf = host.querySelector("s") as HTMLElement;
@@ -1436,7 +1436,12 @@ describe("createPolyScene", () => {
       });
 
       expect(previewScene.commitBakedSolidLighting()).toBe(true);
-      expect(host.querySelector("s")).not.toBe(initialLeaf);
+      // Post-fix: commit uses `rebakeRenderEntryInPlace` rather than the
+      // destructive `renderEntry`, so the same `<s>` DOM node stays
+      // mounted and only its atlas bitmap URL gets swapped. That removes
+      // the visible "leaves disappear then reappear" flash on drag-end.
+      const leafAfter = host.querySelector("s") as HTMLElement;
+      expect(leafAfter).toBe(initialLeaf);
     });
 
     it("honors strategies.disable at creation time", () => {
