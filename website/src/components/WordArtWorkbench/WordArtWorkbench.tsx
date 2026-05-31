@@ -16,8 +16,10 @@ import {
   listGoogleFonts,
   loadFont,
   loadGoogleFont,
+  makeFillTexture,
   pickWeight,
   type ExtrudeProfile,
+  type FillSpec,
   type FontEntry,
   type ParsedFont,
   type WarpShape,
@@ -25,6 +27,7 @@ import {
 import "./wordart.css";
 
 type Align = "left" | "center" | "right";
+type FillType = "solid" | "gradient" | "rainbow" | "image";
 
 interface Preset {
   label: string;
@@ -37,19 +40,36 @@ interface Preset {
   /** Diagonal back offset for the layered block (down-right). */
   offset?: number;
   warp?: { shape: WarpShape; amount: number };
+  /** Face fill (defaults to solid `color`). */
+  fill?: FillType;
+  gradA?: string;
+  gradB?: string;
+  gradAngle?: number;
+  outline?: { color: string; width: number };
+  /** Flat two-layer drop shadow (no extrusion walls). */
+  layered?: boolean;
+  /** CSS background for the preset tile thumbnail (defaults to `color`). */
+  thumb?: string;
 }
 
 // Left-rail style presets — each is a full "look": extrusion, layered front/back,
 // and/or a baked-in WordArt warp (like the builder's shape tiles).
 const PRESETS: Preset[] = [
+  { label: "Gold Gradient", profile: "bevel", depth: 26, color: "#ffd23f", sideColor: "#7c4a12",
+    fill: "gradient", gradA: "#ffe14d", gradB: "#ff7a1a", gradAngle: 270, thumb: "linear-gradient(#ffe14d,#ff7a1a)" },
+  { label: "Grape Pop", profile: "flat", depth: 5, color: "#b14be0", sideColor: "#7a8cff", backColor: "#8aa0ff", offset: 14, layered: true,
+    fill: "gradient", gradA: "#c45cf0", gradB: "#7a1fb8", gradAngle: 270, thumb: "linear-gradient(#c45cf0,#7a1fb8)" },
+  { label: "Chrome", profile: "bevel", depth: 22, color: "#d7dde4", sideColor: "#3a2222",
+    fill: "gradient", gradA: "#f4f8ff", gradB: "#9a4b4b", gradAngle: 270, thumb: "linear-gradient(#f4f8ff 45%,#9a4b4b)" },
+  { label: "Rainbow", profile: "flat", depth: 10, color: "#ff5e3a", sideColor: "#7a2a55",
+    fill: "rainbow", gradAngle: 0, thumb: "linear-gradient(90deg,#ff3b30,#ffcc00,#34c759,#007aff,#af52de)" },
+  { label: "Sky Outline", profile: "flat", depth: 8, color: "#7ec8ff", sideColor: "#2b50b0",
+    outline: { color: "#1838b8", width: 3 }, thumb: "#7ec8ff" },
   { label: "Gold Bevel", profile: "bevel", depth: 26, color: "#d4a82a", sideColor: "#7c5e16" },
-  { label: "Chrome Round", profile: "round", depth: 32, color: "#cdd3da", sideColor: "#5f6772" },
-  { label: "Retro Block", profile: "flat", depth: 6, color: "#ff4d6d", sideColor: "#3a0ca3", backColor: "#3a0ca3", offset: 16 },
-  { label: "Comic Pop", profile: "flat", depth: 6, color: "#ffd166", sideColor: "#1d3557", backColor: "#1d3557", offset: 13 },
+  { label: "Retro Block", profile: "flat", depth: 6, color: "#ff4d6d", sideColor: "#3a0ca3", backColor: "#3a0ca3", offset: 16, layered: true, thumb: "#ff4d6d" },
   { label: "Arch Gold", profile: "bevel", depth: 22, color: "#e9b949", sideColor: "#8a5a12", warp: { shape: "arch", amount: 0.6 } },
   { label: "Wave Mint", profile: "round", depth: 24, color: "#7cffb2", sideColor: "#2f8f5e", warp: { shape: "wave", amount: 0.55 } },
-  { label: "Arc Crimson", profile: "flat", depth: 16, color: "#ff5470", sideColor: "#9c2740", warp: { shape: "arc", amount: 0.7 } },
-  { label: "Ink Shadow", profile: "flat", depth: 4, color: "#e8edf2", sideColor: "#2b313b", backColor: "#2b313b", offset: 12 },
+  { label: "Ink Shadow", profile: "flat", depth: 4, color: "#e8edf2", sideColor: "#2b313b", backColor: "#2b313b", offset: 12, layered: true, thumb: "#e8edf2" },
 ];
 
 function applyCase(text: string, mode: "as-typed" | "upper" | "lower" | "title"): string {
@@ -147,6 +167,16 @@ export function WordArtWorkbench() {
   const [warpShape, setWarpShape] = useState<WarpShape>(() => qs("warp", "none") as WarpShape);
   const [warpAmount, setWarpAmount] = useState(() => qn("bend", 0.5));
   const [spin, setSpin] = useState(() => qb("spin", true));
+  // Face fill (solid / gradient / rainbow / image), outline, flat-layer shadow.
+  const [fillType, setFillType] = useState<FillType>(() => qs("fill", "solid") as FillType);
+  const [gradA, setGradA] = useState(() => qs("ga", "#ffd23f"));
+  const [gradB, setGradB] = useState(() => qs("gb", "#ff5e3a"));
+  const [gradAngle, setGradAngle] = useState(() => qn("gang", 270));
+  const [fillImage, setFillImage] = useState("");
+  const [outlineOn, setOutlineOn] = useState(() => qb("ol", false));
+  const [outlineColor, setOutlineColor] = useState(() => qs("olc", "#1a1a2e"));
+  const [outlineWidth, setOutlineWidth] = useState(() => qn("olw", 3));
+  const [layered, setLayered] = useState(() => qb("layer", false));
   // Camera + lighting (gallery-style)
   const [perspective, setPerspective] = useState(() => qb("persp", true));
   const [zoomScale, setZoomScale] = useState(() => qn("zoom", 1));
@@ -235,9 +265,17 @@ export function WordArtWorkbench() {
     ss("lc", lightColor, "#ffffff");
     sn("laz", lightAz, -25);
     sn("lel", lightEl, 45);
+    ss("fill", fillType, "solid");
+    ss("ga", gradA, "#ffd23f");
+    ss("gb", gradB, "#ff5e3a");
+    sn("gang", gradAngle, 270);
+    if (outlineOn) p.set("ol", "1");
+    ss("olc", outlineColor, "#1a1a2e");
+    sn("olw", outlineWidth, 3);
+    if (layered) p.set("layer", "1");
     const search = p.toString();
     window.history.replaceState(null, "", `${window.location.pathname}${search ? `?${search}` : ""}${window.location.hash}`);
-  }, [text, entry, weight, italic, textCase, scaleX, scaleY, profile, depth, letterSpacing, lineHeight, align, underline, strike, color, sideColor, backColor, offset, curveSegments, simplify, merge, profileSegments, warpShape, warpAmount, spin, perspective, zoomScale, lightIntensity, ambient, lightColor, lightAz, lightEl]);
+  }, [text, entry, weight, italic, textCase, scaleX, scaleY, profile, depth, letterSpacing, lineHeight, align, underline, strike, color, sideColor, backColor, offset, curveSegments, simplify, merge, profileSegments, warpShape, warpAmount, spin, perspective, zoomScale, lightIntensity, ambient, lightColor, lightAz, lightEl, fillType, gradA, gradB, gradAngle, outlineOn, outlineColor, outlineWidth, layered]);
 
   // Load the picked Google font whenever family / weight / style changes.
   useEffect(() => {
@@ -257,6 +295,19 @@ export function WordArtWorkbench() {
     };
   }, [entry, weight, italic]);
 
+  // One master fill texture (gradient / rainbow / image) painted across the
+  // whole word; `solid` produces no texture (the face stays the flat color).
+  const fillKey = `${fillType}:${gradA}:${gradB}:${gradAngle}:${fillImage.slice(0, 40)}`;
+  const faceTexture = useMemo(() => {
+    const spec: FillSpec =
+      fillType === "gradient" ? { type: "gradient", from: gradA, to: gradB, angle: gradAngle }
+      : fillType === "rainbow" ? { type: "rainbow", angle: gradAngle }
+      : fillType === "image" ? { type: "image", src: fillImage }
+      : { type: "solid" };
+    return makeFillTexture(spec);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fillKey]);
+
   const polygons = useMemo<Polygon[]>(() => {
     if (!font) return [];
     return composeText(font, applyCase(text, textCase), {
@@ -273,14 +324,18 @@ export function WordArtWorkbench() {
       color,
       sideColor,
       backColor,
-      oblique: offset ? [offset, -offset] : undefined,
+      oblique: (offset || layered) ? [offset || 12, -(offset || 12)] : undefined,
       curveSteps: curveSegments,
       simplify,
       merge,
       profileSegments,
       warp: { shape: warpShape, amount: warpAmount },
+      faceTexture,
+      faceTextureKey: fillKey,
+      outline: outlineOn ? { color: outlineColor, width: outlineWidth } : undefined,
+      layered,
     });
-  }, [font, text, textCase, scaleX, scaleY, depth, profile, letterSpacing, lineHeight, align, underline, strike, color, sideColor, backColor, offset, curveSegments, simplify, merge, profileSegments, warpShape, warpAmount]);
+  }, [font, text, textCase, scaleX, scaleY, depth, profile, letterSpacing, lineHeight, align, underline, strike, color, sideColor, backColor, offset, curveSegments, simplify, merge, profileSegments, warpShape, warpAmount, faceTexture, fillKey, outlineOn, outlineColor, outlineWidth, layered]);
 
   // Directional light direction from azimuth (left/right) + elevation (height),
   // always biased toward the front so the face stays lit.
@@ -308,6 +363,13 @@ export function WordArtWorkbench() {
     setOffset(p.offset ?? 0);
     setWarpShape(p.warp?.shape ?? "none");
     setWarpAmount(p.warp?.amount ?? 0.5);
+    setFillType(p.fill ?? "solid");
+    if (p.gradA) setGradA(p.gradA);
+    if (p.gradB) setGradB(p.gradB);
+    setGradAngle(p.gradAngle ?? 270);
+    setOutlineOn(!!p.outline);
+    if (p.outline) { setOutlineColor(p.outline.color); setOutlineWidth(p.outline.width); }
+    setLayered(!!p.layered);
     setActivePreset(p.label);
   }
 
@@ -327,6 +389,8 @@ export function WordArtWorkbench() {
   };
 
   const guiValues: GuiValues = {
+    fillType, gradA, gradB, gradAngle, image: fillImage,
+    outlineOn, outlineColor, outlineWidth, layered,
     profile, warp: warpShape, bend: warpAmount,
     depth, letterSpacing, lineHeight, scaleX, scaleY,
     curveSegments, simplify, merge, profileSegments, offset,
@@ -335,6 +399,15 @@ export function WordArtWorkbench() {
   };
   const guiSet = (k: keyof GuiValues, v: number | string | boolean) => {
     switch (k) {
+      case "fillType": setFillType(v as FillType); break;
+      case "gradA": setGradA(v as string); break;
+      case "gradB": setGradB(v as string); break;
+      case "gradAngle": setGradAngle(v as number); break;
+      case "image": setFillImage(v as string); break;
+      case "outlineOn": setOutlineOn(v as boolean); break;
+      case "outlineColor": setOutlineColor(v as string); break;
+      case "outlineWidth": setOutlineWidth(v as number); break;
+      case "layered": setLayered(v as boolean); break;
       case "profile": setProfile(v as ExtrudeProfile); break;
       case "warp": setWarpShape(v as WarpShape); break;
       case "bend": setWarpAmount(v as number); break;
@@ -403,7 +476,7 @@ export function WordArtWorkbench() {
           <div className="wa-grid">
             {PRESETS.map((p) => (
               <button key={p.label} type="button" className={`wa-tile ${activePreset === p.label ? "is-active" : ""}`} onClick={() => applyPreset(p)}>
-                <span className="wa-tile__thumb" style={{ background: p.color, color: readable(p.color) }}>Aa</span>
+                <span className="wa-tile__thumb" style={{ background: p.thumb ?? p.color, color: readable(p.color) }}>Aa</span>
                 <span className="wa-tile__label">{p.label}</span>
               </button>
             ))}
@@ -566,6 +639,8 @@ function Stage({ polygons, zoomScale, setZoomScale, perspective, lightDir, light
 }
 
 interface GuiValues {
+  fillType: string; gradA: string; gradB: string; gradAngle: number; image: string;
+  outlineOn: boolean; outlineColor: string; outlineWidth: number; layered: boolean;
   profile: string; warp: string; bend: number;
   depth: number; letterSpacing: number; lineHeight: number; scaleX: number; scaleY: number;
   curveSegments: number; simplify: number; merge: boolean; profileSegments: number; offset: number;
@@ -589,6 +664,42 @@ function GuiPanel({ id, className = "", values, set }: { id?: string; className?
     const c = ctrlRef.current;
     const gui = new GUI({ container: hostRef.current!, title: "Settings", width: 300 });
     const on = (k: keyof GuiValues) => (v: number | string | boolean) => set(k, v);
+
+    const fill = gui.addFolder("Fill");
+    c.fillType = fill.add(cfg, "fillType", { Solid: "solid", Gradient: "gradient", Rainbow: "rainbow", Image: "image" }).name("Fill").onChange(on("fillType"));
+    c.gradA = fill.addColor(cfg, "gradA").name("Color A").onChange(on("gradA"));
+    c.gradB = fill.addColor(cfg, "gradB").name("Color B").onChange(on("gradB"));
+    c.gradAngle = fill.add(cfg, "gradAngle", 0, 360, 5).name("Angle").onChange(on("gradAngle"));
+    // lil-gui has no file input — inject a "Choose image" button that reads the
+    // picked file as a data URL (the renderer uses it as a background-image).
+    c.image = fill.add({ _: "" }, "_").name("Image");
+    {
+      const widget = c.image.domElement.querySelector<HTMLElement>(".widget");
+      if (widget) {
+        widget.replaceChildren();
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "wa-imgbtn";
+        btn.textContent = "Choose image…";
+        const input = document.createElement("input");
+        input.type = "file";
+        input.accept = "image/*";
+        input.style.display = "none";
+        btn.addEventListener("click", () => input.click());
+        input.addEventListener("change", () => {
+          const file = input.files?.[0];
+          if (!file) return;
+          const reader = new FileReader();
+          reader.onload = () => set("image", String(reader.result));
+          reader.readAsDataURL(file);
+        });
+        widget.append(btn, input);
+      }
+    }
+    c.outlineOn = fill.add(cfg, "outlineOn").name("Outline").onChange(on("outlineOn"));
+    c.outlineColor = fill.addColor(cfg, "outlineColor").name("Outline color").onChange(on("outlineColor"));
+    c.outlineWidth = fill.add(cfg, "outlineWidth", 0.5, 12, 0.5).name("Outline width").onChange(on("outlineWidth"));
+    c.layered = fill.add(cfg, "layered").name("Flat layers").onChange(on("layered"));
 
     const shape = gui.addFolder("Shape");
     c.profile = shape.add(cfg, "profile", { "Flat (slab)": "flat", "Round (bullnose)": "round", "Bevel (rounded edge)": "bevel" }).name("Profile").onChange(on("profile"));
@@ -629,6 +740,13 @@ function GuiPanel({ id, className = "", values, set }: { id?: string; className?
     for (const ctrl of Object.values(ctrlRef.current)) ctrl?.updateDisplay();
     ctrlRef.current.bend?.[values.warp !== "none" ? "show" : "hide"]();
     ctrlRef.current.profileSegments?.[values.profile === "round" ? "show" : "hide"]();
+    const grad = values.fillType === "gradient";
+    ctrlRef.current.gradA?.[grad ? "show" : "hide"]();
+    ctrlRef.current.gradB?.[grad ? "show" : "hide"]();
+    ctrlRef.current.gradAngle?.[grad || values.fillType === "rainbow" ? "show" : "hide"]();
+    ctrlRef.current.image?.[values.fillType === "image" ? "show" : "hide"]();
+    ctrlRef.current.outlineColor?.[values.outlineOn ? "show" : "hide"]();
+    ctrlRef.current.outlineWidth?.[values.outlineOn ? "show" : "hide"]();
   });
 
   return <div id={id} className={`wa-gui ${className}`} ref={hostRef} />;

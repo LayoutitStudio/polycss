@@ -70,6 +70,27 @@ const polygons = composeText(font, "Poly\nCSS", {
 | `merge` | `false` | Merge coplanar same-color cap triangles into larger polygons (~⅓ fewer DOM nodes). Has a CPU cost, so off by default. |
 | `backColor` | `color` | Back-cap color — set it apart from `color` for a layered two-tone look. |
 | `oblique` | `[0, 0]` | `[rightward, upward]` shift of the back cap relative to the front (world units). |
+| `faceTexture` | — | Master fill (data URL / URL) UV-mapped across the whole word's front face — one shared, browser-cached texture flows over every glyph. Build it with `makeFillTexture`. |
+| `outline` | — | `{ color, width }` — a colored stroke halo around the front face. |
+| `layered` | `false` | Flat two-layer shadow: front face + `oblique`-offset back copy, no connecting side walls (classic WordArt drop shadow). |
+
+## Fills — gradients, rainbow, image (`makeFillTexture`)
+
+`makeFillTexture` (browser-only — uses `<canvas>`) paints a **`FillSpec`** to a data URL you pass as `faceTexture`. Because the face UV-maps to the whole word, the fill flows continuously across every letter, not per-glyph.
+
+```ts
+import { composeText, makeFillTexture } from "@layoutit/polycss-fonts";
+
+const faceTexture = makeFillTexture({ type: "gradient", from: "#ffe14d", to: "#ff7a1a", angle: 270 });
+const polygons = composeText(font, "WordArt", { faceTexture, profile: "bevel", depth: 22 });
+```
+
+`FillSpec` is one of:
+
+- `{ type: "solid" }` — no texture (the face stays the flat `color`); returns `undefined`.
+- `{ type: "gradient", from, to, angle? }` — two-stop linear gradient. `angle` in degrees, CCW from +x (default `270` = top→bottom).
+- `{ type: "rainbow", angle? }` — full-spectrum sweep (default `0` = left→right).
+- `{ type: "image", src }` — any image URL / data URL, stretched across the word.
 
 ## Scope / limitations
 

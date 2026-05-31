@@ -120,4 +120,39 @@ describe("composeText", () => {
     expect(colors.has("#ff0000")).toBe(true); // front cap
     expect(colors.has("#00ff00")).toBe(true); // back cap
   });
+
+  // ── regression: WordArt fills / outline / flat-layer shadow ──────────────
+  it("a face texture UV-maps the front cap across the whole word", () => {
+    const tex = "data:image/png;base64,AAAA";
+    const polys = composeText(roboto, "Hi", { faceTexture: tex, faceTextureKey: "k" });
+    const faces = polys.filter((p) => p.texture === tex);
+    expect(faces.length).toBeGreaterThan(0);
+    // Every textured face carries one UV per vertex…
+    expect(faces.every((p) => p.uvs?.length === p.vertices.length)).toBe(true);
+    // …and the UVs span the whole word (reach both extremes of 0..1).
+    const us = faces.flatMap((p) => p.uvs!.map((uv) => uv[0]));
+    expect(Math.min(...us)).toBeLessThan(0.05);
+    expect(Math.max(...us)).toBeGreaterThan(0.95);
+    // Walls stay untextured.
+    expect(polys.some((p) => !p.texture)).toBe(true);
+  });
+
+  it("solid (no faceTexture) leaves the face untextured", () => {
+    const polys = composeText(roboto, "Hi");
+    expect(polys.every((p) => !p.texture && !p.uvs)).toBe(true);
+  });
+
+  it("outline adds a halo silhouette in the outline color", () => {
+    const plain = composeText(roboto, "o").length;
+    const polys = composeText(roboto, "o", { outline: { color: "#123456", width: 3 } });
+    expect(polys.length).toBeGreaterThan(plain);
+    expect(polys.some((p) => p.color === "#123456")).toBe(true);
+  });
+
+  it("layered mode drops the side walls (front + offset back only)", () => {
+    const walled = composeText(roboto, "o", { depth: 12, backColor: "#00ff00", oblique: [10, -10] });
+    const flat = composeText(roboto, "o", { depth: 12, backColor: "#00ff00", oblique: [10, -10], layered: true });
+    expect(flat.length).toBeLessThan(walled.length);
+    expect(flat.some((p) => p.color === "#00ff00")).toBe(true); // shadow layer kept
+  });
 });

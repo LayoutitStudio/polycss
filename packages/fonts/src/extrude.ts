@@ -12,7 +12,7 @@
  * wound in reverse to stay outward-facing (PolyCSS hides back-faces).
  */
 import earcut from "earcut";
-import type { Polygon, Vec3 } from "@layoutit/polycss-core";
+import type { Polygon, Vec2, Vec3 } from "@layoutit/polycss-core";
 
 export type Pt = [number, number];
 export type Contour = Pt[];
@@ -50,6 +50,27 @@ export interface ExtrudeOptions {
   oblique?: [number, number];
   /** Depth offset applied to the whole shape (for layered/offset effects). */
   zOffset?: number;
+  /**
+   * Master fill texture (data URL / URL) painted continuously across the whole
+   * word's front face. The face caps are UV-mapped to `faceUvBounds`, so one
+   * shared, browser-cached texture flows across every glyph (gradient / rainbow
+   * / image). Without it the face stays the solid `color`.
+   */
+  faceTexture?: string;
+  /** Stable material key so every face polygon shares one cached texture. */
+  faceTextureKey?: string;
+  /** Type-plane bounds the face UVs normalize against (the whole word). */
+  faceUvBounds?: { minX: number; minY: number; maxX: number; maxY: number };
+  /** Outline stroke color, drawn as a halo just behind the front face. */
+  outlineColor?: string;
+  /** Outline stroke width in world units (only used with `outlineColor`). */
+  outlineWidth?: number;
+  /**
+   * Flat two-layer mode: emit only the front cap + an offset back cap (shifted
+   * by the full `oblique`), with no connecting side walls — the classic WordArt
+   * "two flat meshes" drop shadow.
+   */
+  layered?: boolean;
 }
 
 interface Ring {
@@ -61,10 +82,14 @@ const toWorld = (p: Pt, z: number): Vec3 => [-p[1], p[0], z];
 
 /** Extrude pre-grouped 2D shapes (type-plane, world units) into polygons. */
 export function extrudeContours(shapes: Shape[], opts: ExtrudeOptions): Polygon[] {
-  const { depth, profile, profileSegments, maxInset, color, sideColor } = opts;
+  const { profile, profileSegments, maxInset, color, sideColor } = opts;
+  const layered = opts.layered ?? false;
   const backColor = opts.backColor ?? color;
   const [obx, oby] = opts.oblique ?? [0, 0];
   const zCenter = opts.zOffset ?? 0;
+  // Layered mode forces a minimum front/back separation so the offset shadow
+  // sits behind the face even when depth is ~0.
+  const depth = layered ? Math.max(opts.depth, 1) : opts.depth;
   const frontZ = zCenter + depth / 2;
   const backZ = zCenter - depth / 2;
   const rings = buildRings(profile, frontZ, backZ, depth, profileSegments, maxInset);
@@ -77,6 +102,18 @@ export function extrudeContours(shapes: Shape[], opts: ExtrudeOptions): Polygon[
     return [obx * t, oby * t];
   };
   const place = (p: Pt, z: number, o: Pt): Vec3 => toWorld([p[0] + o[0], p[1] + o[1]], z);
+
+  // Face UV: normalize a type-plane point to the whole-word bounds (v=0 bottom,
+  // OBJ convention — matches PolyCSS UV expectations).
+  const fb = opts.faceUvBounds;
+  const faceW = fb ? Math.max(fb.maxX - fb.minX, 1e-6) : 1;
+  const faceH = fb ? Math.max(fb.maxY - fb.minY, 1e-6) : 1;
+  const uvOf = (p: Pt): Vec2 => [
+    Math.min(1, Math.max(0, (p[0] - fb!.minX) / faceW)),
+    Math.min(1, Math.max(0, (p[1] - fb!.minY) / faceH)),
+  ];
+  const hasFaceFill = !!(opts.faceTexture && fb);
+  const outlineWidth = opts.outlineColor ? Math.max(0, opts.outlineWidth ?? 0) : 0;
 
   const maxRingInset = rings.reduce((m, r) => Math.max(m, r.inset), 0);
 
@@ -91,13 +128,15 @@ export function extrudeContours(shapes: Shape[], opts: ExtrudeOptions): Polygon[
       : 1;
     const si = (inset: number) => inset * insetScale;
 
-    const cap = (inset: number, z: number, flip: boolean, capColor: string) => {
-      const o = obliqueAt(z);
+    // Emit a flat cap of `contours` offset by `offset`, at depth `z`, shifted
+    // in-plane by `o`. When `fill` is set and a master texture exists, the cap
+    // is UV-mapped across the whole word.
+    const cap = (offset: number, z: number, o: Pt, flip: boolean, capColor: string, fill = false) => {
       const flat: number[] = [];
       const holeIndices: number[] = [];
       for (let r = 0; r < contours.length; r++) {
         if (r > 0) holeIndices.push(flat.length / 2);
-        for (const [x, y] of offsetContour(contours[r], si(inset))) flat.push(x, y);
+        for (const [x, y] of offsetContour(contours[r], offset)) flat.push(x, y);
       }
       const tris = earcut(flat, holeIndices, 2);
       const vert = (i: number): Pt => [flat[i * 2], flat[i * 2 + 1]];
@@ -106,15 +145,46 @@ export function extrudeContours(shapes: Shape[], opts: ExtrudeOptions): Polygon[
         const b = vert(tris[t + 1]);
         const c = vert(tris[t + 2]);
         const tri = flip ? [a, b, c] : [a, c, b];
-        polygons.push({
-          vertices: [place(tri[2], z, o), place(tri[1], z, o), place(tri[0], z, o)],
+        const ordered: [Pt, Pt, Pt] = [tri[2], tri[1], tri[0]];
+        const poly: Polygon = {
+          vertices: [place(ordered[0], z, o), place(ordered[1], z, o), place(ordered[2], z, o)],
           color: capColor,
-        });
+        };
+        if (fill && hasFaceFill) {
+          // Inline `texture` (not just `material`) so the mesh atlas planner —
+          // which reads polygon.texture — UV-maps the shared fill; material is
+          // also set for the direct single-polygon render path.
+          poly.texture = opts.faceTexture!;
+          poly.material = { texture: opts.faceTexture!, key: opts.faceTextureKey };
+          poly.uvs = [uvOf(ordered[0]), uvOf(ordered[1]), uvOf(ordered[2])];
+        }
+        polygons.push(poly);
       }
     };
 
-    cap(rings[0].inset, rings[0].z, false, color);
-    cap(rings[rings.length - 1].inset, rings[rings.length - 1].z, true, backColor);
+    // Outline halo: a larger silhouette in the outline color sitting just behind
+    // the front face, so it peeks out around every outer and counter edge.
+    if (outlineWidth > 0) {
+      cap(-outlineWidth, frontZ - 1e-3, obliqueAt(frontZ), false, opts.outlineColor!);
+    }
+
+    // Front face — UV-filled when a master texture is present.
+    cap(si(rings[0].inset), rings[0].z, obliqueAt(rings[0].z), false, color, true);
+
+    if (layered) {
+      // Flat two-layer shadow: offset back cap, no connecting walls.
+      cap(si(rings[rings.length - 1].inset), backZ, [obx, oby], true, backColor);
+      continue;
+    }
+
+    // Back cap.
+    cap(
+      si(rings[rings.length - 1].inset),
+      rings[rings.length - 1].z,
+      obliqueAt(rings[rings.length - 1].z),
+      true,
+      backColor,
+    );
 
     for (const contour of contours) {
       let prevOffset = offsetContour(contour, si(rings[0].inset));

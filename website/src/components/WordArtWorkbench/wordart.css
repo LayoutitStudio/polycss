@@ -202,6 +202,14 @@ textarea.wa-input { resize: vertical; line-height: 1.35; height: auto; padding: 
 .wa-seg button:hover { border-color: #3a4757; }
 .wa-seg button.is-on { background: #142033; border-color: #22d3ee; color: #e8f9ff; }
 
+/* Image-upload button injected into a lil-gui Fill row. */
+.wa-imgbtn {
+  width: 100%; height: 22px; padding: 0 8px;
+  background: #0b0d10; border: 1px solid #2a3340; color: #c2cad4;
+  border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: 600;
+}
+.wa-imgbtn:hover { border-color: #22d3ee; color: #e8f9ff; }
+
 /* Searchable font dropdown. */
 .wa-fontpick { position: relative; }
 .wa-fontpick__list {

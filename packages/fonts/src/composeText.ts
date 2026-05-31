@@ -74,6 +74,22 @@ export interface ComposeTextOptions extends TextPolygonsOptions {
    * leaning block.
    */
   oblique?: [number, number];
+  /**
+   * Master fill texture (data URL / URL) painted continuously across the whole
+   * word's front face — UV-mapped so a gradient / rainbow / image flows across
+   * every glyph. Generate it in the browser with `makeFillTexture`.
+   */
+  faceTexture?: string;
+  /** Stable material key so every face polygon shares one cached texture. */
+  faceTextureKey?: string;
+  /** Outline stroke drawn as a halo around the front face. */
+  outline?: { color: string; width: number };
+  /**
+   * Flat two-layer mode: front face + offset back copy, no connecting side
+   * walls (the classic WordArt drop-shadow look). Pair with `backColor` +
+   * `oblique`.
+   */
+  layered?: boolean;
 }
 
 type WarpFn = (p: Pt) => Pt;
@@ -150,6 +166,18 @@ export function composeText(font: ParsedFont, text: string, options: ComposeText
     }
   });
 
+  // Whole-word front-plane bounds, so the face fill UV-maps across every glyph.
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const s of shapes) {
+    for (const [x, y] of s.outer) {
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+      if (y < minY) minY = y;
+      if (y > maxY) maxY = y;
+    }
+  }
+  const faceUvBounds = shapes.length ? { minX, minY, maxX, maxY } : undefined;
+
   const polygons = extrudeContours(shapes, {
     depth,
     profile,
@@ -159,6 +187,12 @@ export function composeText(font: ParsedFont, text: string, options: ComposeText
     sideColor,
     backColor: options.backColor,
     oblique: options.oblique,
+    faceTexture: options.faceTexture,
+    faceTextureKey: options.faceTextureKey,
+    faceUvBounds,
+    outlineColor: options.outline?.color,
+    outlineWidth: options.outline?.width,
+    layered: options.layered,
   });
   return options.merge ? mergePolygons(polygons) : polygons;
 }
