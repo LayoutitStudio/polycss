@@ -77,12 +77,15 @@
       // currently selected mesh's entry. URL keys are mesh-prefixed so
       // multiple mesh states survive a reload.
       obj: {
-        cube:    { x: qn("ox_cube",    0),   y: qn("oy_cube",    0), z: qn("oz_cube",    1), scale: qn("os_cube",    1) },
-        e:       { x: qn("ox_e",       0),   y: qn("oy_e",       0), z: qn("oz_e",       0), scale: qn("os_e",       1) },
+        cube:    { x: qn("ox_cube",    0),   y: qn("oy_cube",    0), z: qn("oz_cube",    1), scale: qn("os_cube",    1),
+                   rx: qn("orx_cube", 0), ry: qn("ory_cube", 0), rz: qn("orz_cube", 0) },
+        e:       { x: qn("ox_e",       0),   y: qn("oy_e",       0), z: qn("oz_e",       0), scale: qn("os_e",       1),
+                   rx: qn("orx_e",    0), ry: qn("ory_e",    0), rz: qn("orz_e",    0) },
         cottage: { x: qn("ox_cottage", qn("cx", 0)),
                    y: qn("oy_cottage", qn("cy", 0)),
                    z: qn("oz_cottage", qn("cz", 0)),
-                   scale: qn("os_cottage", qn("cs", 1)) },
+                   scale: qn("os_cottage", qn("cs", 1)),
+                   rx: qn("orx_cottage", 0), ry: qn("ory_cottage", 0), rz: qn("orz_cottage", 0) },
       },
       // Cube/E hold the geometry's base parameters (set at build time;
       // run-time scale applies on top via setTransform). Cottage geometry
@@ -373,8 +376,21 @@
     }
     threeScene.add(dirLight);
     threeScene.add(dirLight.target);
+    // Three.js directional-light helper: yellow line widget at the light's
+    // position, refreshed whenever the light moves.
+    const dirLightHelper = new THREE.DirectionalLightHelper(dirLight, 1, 0xffaa00);
+    threeScene.add(dirLightHelper);
     const ambLight = new THREE.AmbientLight(0xffffff, S.amb.intensity);
     threeScene.add(ambLight);
+
+    // PolyCSS light helper — small box at the same world position the Three.js
+    // helper sits at. Both engines share the same fitDirLightToScene math, so
+    // wiring the position from there keeps the markers aligned.
+    const lightHelperSize = 0.4;
+    const polyLightHelper = polyScene.add(
+      createPolyBox({ size: [lightHelperSize, lightHelperSize, lightHelperSize], color: "#ffaa00" }),
+      { id: "light-helper", position: [0, 0, 0], castShadow: false, receiveShadow: false, excludeFromAutoCenter: true, merge: false },
+    );
 
     // ─── Camera — same rotX/rotY/zoom drive both ───────────────────────
     function resizeThree() {
@@ -414,9 +430,11 @@
       // Push every mesh's transform every tick. setTransform is cheap when
       // values haven't changed; this keeps the bench panel + both engines
       // in sync without per-mesh slider plumbing.
-      if (polyCube)    polyCube.setTransform({    position: [S.obj.cube.x,    S.obj.cube.y,    S.obj.cube.z],    scale: S.obj.cube.scale });
-      if (polyE)       polyE.setTransform({       position: [S.obj.e.x,       S.obj.e.y,       S.obj.e.z],       scale: S.obj.e.scale });
-      if (polyCottage) polyCottage.setTransform({ position: [S.obj.cottage.x, S.obj.cottage.y, S.obj.cottage.z], scale: S.obj.cottage.scale });
+      // PolyCSS rotation = degrees (matches PolyMeshTransform.rotation);
+      // Three.js mesh.rotation = radians.
+      if (polyCube)    polyCube.setTransform({    position: [S.obj.cube.x,    S.obj.cube.y,    S.obj.cube.z],    scale: S.obj.cube.scale,    rotation: [S.obj.cube.rx, S.obj.cube.ry, S.obj.cube.rz] });
+      if (polyE)       polyE.setTransform({       position: [S.obj.e.x,       S.obj.e.y,       S.obj.e.z],       scale: S.obj.e.scale,       rotation: [S.obj.e.rx, S.obj.e.ry, S.obj.e.rz] });
+      if (polyCottage) polyCottage.setTransform({ position: [S.obj.cottage.x, S.obj.cottage.y, S.obj.cottage.z], scale: S.obj.cottage.scale, rotation: [S.obj.cottage.rx, S.obj.cottage.ry, S.obj.cottage.rz] });
       polyScene.setOptions({
         directionalLight: {
           direction: [S.dir.x, S.dir.y, S.dir.z],
@@ -438,21 +456,33 @@
         if (polyE) polyE.rebakeAtlas();
         polyFloor.rebakeAtlas();
       }
+      const D2R = Math.PI / 180;
       if (cubeMesh) {
         cubeMesh.position.set(S.obj.cube.x, S.obj.cube.y, S.obj.cube.z);
         cubeMesh.scale.setScalar(S.obj.cube.scale);
+        cubeMesh.rotation.set(S.obj.cube.rx * D2R, S.obj.cube.ry * D2R, S.obj.cube.rz * D2R);
       }
       if (eGroup) {
         eGroup.position.set(S.obj.e.x, S.obj.e.y, S.obj.e.z);
         eGroup.scale.setScalar(S.obj.e.scale);
+        eGroup.rotation.set(S.obj.e.rx * D2R, S.obj.e.ry * D2R, S.obj.e.rz * D2R);
       }
       if (cottageGroup) {
         cottageGroup.position.set(S.obj.cottage.x, S.obj.cottage.y, S.obj.cottage.z);
         cottageGroup.scale.setScalar(S.obj.cottage.scale);
+        cottageGroup.rotation.set(S.obj.cottage.rx * D2R, S.obj.cottage.ry * D2R, S.obj.cottage.rz * D2R);
       }
       fitDirLightToScene();
       dirLight.intensity = S.dir.intensity;
       ambLight.intensity = S.amb.intensity;
+      // Sync both light-helper markers to the freshly-fit light position.
+      // Three.js DirectionalLightHelper has a built-in update() that re-aligns
+      // its line geometry to the light's new position/direction; the PolyCSS
+      // marker just translates to match.
+      dirLightHelper.update();
+      if (polyLightHelper) {
+        polyLightHelper.setTransform({ position: [dirLight.position.x, dirLight.position.y, dirLight.position.z] });
+      }
       applyShadowsOnly();
       renderer.render(threeScene, camera);
     }
@@ -698,10 +728,13 @@
         const o = S.obj[S.mesh];
         const defaultZ = S.mesh === "cube" ? 1 : 0;
         if (o) {
-          if (o.x !== 0)        q.set(`ox_${S.mesh}`, String(o.x));
-          if (o.y !== 0)        q.set(`oy_${S.mesh}`, String(o.y));
-          if (o.z !== defaultZ) q.set(`oz_${S.mesh}`, String(o.z));
-          if (o.scale !== 1)    q.set(`os_${S.mesh}`, String(o.scale));
+          if (o.x !== 0)        q.set(`ox_${S.mesh}`,  String(o.x));
+          if (o.y !== 0)        q.set(`oy_${S.mesh}`,  String(o.y));
+          if (o.z !== defaultZ) q.set(`oz_${S.mesh}`,  String(o.z));
+          if (o.scale !== 1)    q.set(`os_${S.mesh}`,  String(o.scale));
+          if (o.rx !== 0)       q.set(`orx_${S.mesh}`, String(o.rx));
+          if (o.ry !== 0)       q.set(`ory_${S.mesh}`, String(o.ry));
+          if (o.rz !== 0)       q.set(`orz_${S.mesh}`, String(o.rz));
         }
         if (S.shadowsOnly) q.set("sx", "1");
         const url = location.origin + location.pathname + "?" + q.toString();
@@ -780,10 +813,13 @@
         // mesh dropdown switches, refreshObjectRows() rebinds the sliders'
         // values to the new mesh's state.
         { sec: "Object" },
-        { k: ["obj", "x"],     min: -10,  max: 10, step: 0.1,  fmt: (v) => v.toFixed(2), obj: true },
-        { k: ["obj", "y"],     min: -10,  max: 10, step: 0.1,  fmt: (v) => v.toFixed(2), obj: true },
-        { k: ["obj", "z"],     min: -10,  max: 10, step: 0.1,  fmt: (v) => v.toFixed(2), obj: true },
-        { k: ["obj", "scale"], min: 0.01, max: 6,  step: 0.01, fmt: (v) => v.toFixed(2), obj: true },
+        { k: ["obj", "x"],     min: -10,  max: 10,  step: 0.1,  fmt: (v) => v.toFixed(2),       obj: true },
+        { k: ["obj", "y"],     min: -10,  max: 10,  step: 0.1,  fmt: (v) => v.toFixed(2),       obj: true },
+        { k: ["obj", "z"],     min: -10,  max: 10,  step: 0.1,  fmt: (v) => v.toFixed(2),       obj: true },
+        { k: ["obj", "scale"], min: 0.01, max: 6,   step: 0.01, fmt: (v) => v.toFixed(2),       obj: true },
+        { k: ["obj", "rx"],    min: -180, max: 180, step: 1,    fmt: (v) => v.toFixed(0) + "°", obj: true },
+        { k: ["obj", "ry"],    min: -180, max: 180, step: 1,    fmt: (v) => v.toFixed(0) + "°", obj: true },
+        { k: ["obj", "rz"],    min: -180, max: 180, step: 1,    fmt: (v) => v.toFixed(0) + "°", obj: true },
         { sec: "Directional light" },
         { k: ["dir", "x"], min: -2, max: 2, step: 0.05, fmt: (v) => v.toFixed(2) },
         { k: ["dir", "y"], min: -2, max: 2, step: 0.05, fmt: (v) => v.toFixed(2) },
