@@ -22,6 +22,7 @@ import {
   PROJECTIVE_QUAD_DENOM_EPS,
   PROJECTIVE_QUAD_MAX_WEIGHT_RATIO,
   PROJECTIVE_QUAD_BLEED,
+  resolveBleedRatio,
 } from "@layoutit/polycss-core";
 import {
   buildBasisHints,
@@ -75,11 +76,17 @@ import {
 } from "./stableTriangle";
 import { stableTriangleMatrixDecimals } from "@layoutit/polycss-core";
 
-// Single source of truth for the solid seam-bleed default is
-// `DEFAULT_SEAM_BLEED` in `@layoutit/polycss-core/atlas/constants`.
-// Local alias kept for readability at the call sites; do NOT change
-// the value here — change the core constant.
-const DEFAULT_SOLID_SEAM_BLEED = DEFAULT_SEAM_BLEED;
+// `options.seamBleed` is interpreted as a RATIO 0..1 that scales the
+// per-strategy bleed defaults. The shared-edge seam-bleed below uses
+// `DEFAULT_SEAM_BLEED * ratio` as its absolute value in CSS px.
+//
+// LIMITATION (v1): the other per-strategy bleeds (BORDER_SHAPE_BLEED,
+// SOLID_TRIANGLE_BLEED, TEXTURE_TRIANGLE_BLEED, PROJECTIVE_QUAD_BLEED)
+// don't yet receive the ratio. They live in core functions without
+// options access; threading the ratio through them is a bigger refactor.
+// Until then, `seamBleed: 0` disables ONLY the shared-edge overscan —
+// per-strategy bleeds still apply per their constants in
+// core/atlas/constants.ts.
 
 type RenderTextureAtlasOptionsWithSeams = RenderTextureAtlasOptions & {
   seamBleed?: number;
@@ -100,11 +107,10 @@ function seamTriangleOptions(
   plan: TextureAtlasPlan,
   options: RenderTextureAtlasOptionsWithSeams,
 ): RenderTextureAtlasOptionsWithSeams {
-  // Honor the caller-supplied seamBleed (incl. explicit 0) instead of
-  // always falling back to DEFAULT_SOLID_SEAM_BLEED. seamBleed === 0
-  // means "no overscan" — the user wants the leaf to paint at its true
-  // geometric size for crack-vs-overlap comparisons (Three.js parity).
-  const bleed = options.seamBleed ?? DEFAULT_SOLID_SEAM_BLEED;
+  // `options.seamBleed` is the public ratio (0..1, default 1). Resolve
+  // to an absolute CSS px value by multiplying the default constant.
+  // ratio === 0 → no shared-edge overscan (Three.js-parity testing).
+  const bleed = DEFAULT_SEAM_BLEED * resolveBleedRatio(options.seamBleed);
   return plan.seamBleedEdges?.size && bleed > 0
     ? { ...options, seamBleed: bleed, seamEdges: plan.seamBleedEdges }
     : { ...options, seamBleed: undefined, seamEdges: undefined };
@@ -127,7 +133,7 @@ function seamAtlasOptions(
   seamBleedEdges: Map<number, Set<number>> | null,
   options: RenderTextureAtlasOptionsWithSeams,
 ): RenderTextureAtlasOptionsWithSeams {
-  const bleed = options.seamBleed ?? DEFAULT_SOLID_SEAM_BLEED;
+  const bleed = DEFAULT_SEAM_BLEED * resolveBleedRatio(options.seamBleed);
   return seamBleedEdges && bleed > 0
     ? {
         ...options,

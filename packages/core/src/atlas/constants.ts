@@ -69,7 +69,16 @@ export const CORNER_SHAPE_DUPLICATE_EPS = 0.2;
 export const PROJECTIVE_QUAD_DENOM_EPS = 0.05;
 export const PROJECTIVE_QUAD_MAX_WEIGHT_RATIO = 256;
 export const PROJECTIVE_QUAD_BLEED = 0.6;
-// Configurable default for `RenderTextureAtlasOptions.seamBleed`. Used
-// only when the option is not explicitly set; bench/test code sets it
-// to 0 to disable the shared-edge overscan entirely.
+// Configurable default. Currently treated as RATIO in [0..1] applied to
+// every bleed in this file: `options.seamBleed ?? 1` × per-strategy
+// constant. 0 = no bleed anywhere; 1 = full default bleed.
 export const DEFAULT_SEAM_BLEED = 1.5;
+
+/** Clamp the `seamBleed` ratio. `undefined` → 1 (full default), 0 → no
+ *  bleed, values outside [0,1] are clamped. Single source of truth for
+ *  how the public ratio maps to per-strategy bleed multipliers. */
+export function resolveBleedRatio(seamBleed: number | "auto" | undefined): number {
+  if (seamBleed === undefined || seamBleed === "auto") return 1;
+  if (!Number.isFinite(seamBleed)) return 1;
+  return Math.max(0, Math.min(1, seamBleed));
+}

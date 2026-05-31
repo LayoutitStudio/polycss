@@ -6,6 +6,7 @@ import {
   SOLID_TRIANGLE_CANONICAL_SIZE,
   DEFAULT_MATRIX_DECIMALS,
   BASIS_EPS,
+  resolveBleedRatio,
 } from "@layoutit/polycss-core";
 import type {
   SolidTrianglePlan,
@@ -36,8 +37,7 @@ import { stableTriangleMatrixDecimals } from "@layoutit/polycss-core";
 import { applyPolygonDataAttrs, hasPolygonDataAttrs } from "./emit";
 import { resolveSolidTrianglePrimitive } from "./strategy";
 
-// Mirrors `DEFAULT_SEAM_BLEED` from core — see renderPolygons.ts.
-const DEFAULT_SOLID_SEAM_BLEED = DEFAULT_SEAM_BLEED;
+// See renderPolygons.ts. `options.seamBleed` is interpreted as a ratio.
 const SOLID_TRIANGLE_BORDER_WIDTH = "0 48px 96px 48px";
 
 type RenderTextureAtlasOptionsWithSeams = RenderTextureAtlasOptions & {
@@ -62,9 +62,8 @@ function stableTriangleSeamOptions(
   seamBleedEdges: Map<number, Set<number>> | null,
   options: RenderTextureAtlasOptionsWithSeams,
 ): RenderTextureAtlasOptionsWithSeams {
-  // Same wiring fix as in renderPolygons.ts: honor the caller-supplied
-  // seamBleed (incl. 0) instead of always using DEFAULT_SOLID_SEAM_BLEED.
-  const bleed = options.seamBleed ?? DEFAULT_SOLID_SEAM_BLEED;
+  // `options.seamBleed` is the ratio (0..1). Resolve to absolute px.
+  const bleed = DEFAULT_SEAM_BLEED * resolveBleedRatio(options.seamBleed);
   return seamBleedEdges && bleed > 0
     ? {
         ...options,

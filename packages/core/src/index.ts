@@ -249,6 +249,7 @@ export {
   PROJECTIVE_QUAD_MAX_WEIGHT_RATIO,
   PROJECTIVE_QUAD_BLEED,
   DEFAULT_SEAM_BLEED,
+  resolveBleedRatio,
 } from "./atlas/constants";
 export type {
   RGB,
