@@ -12,11 +12,20 @@ import { filterAtlasPlans } from "./filterPlans";
 import { packTextureAtlasPlansWithScale } from "./packing";
 import { buildAtlasPages } from "./buildAtlasPages";
 
-// TextureAtlasResult exposed by useTextureAtlas.
+// TextureAtlasResult exposed by useTextureAtlas. `plans` is the plan list whose
+// atlas is currently displayed — in `atomic` mode it lags `entries`/`pages` as
+// one frame so solid + textured leaves always swap together.
 export interface TextureAtlasResult {
+  plans: Array<TextureAtlasPlan | null>;
   entries: Array<PackedTextureAtlasEntry | null>;
   pages: TextureAtlasPage[];
   ready: boolean;
+}
+
+interface AtlasFrame {
+  plans: Array<TextureAtlasPlan | null>;
+  entries: Array<PackedTextureAtlasEntry | null>;
+  pages: TextureAtlasPage[];
 }
 
 function pageShells(pages: readonly { width: number; height: number }[]): TextureAtlasPage[] {
@@ -59,6 +68,12 @@ export function useTextureAtlas(
   textureLighting: PolyTextureLightingMode,
   textureQualityInput?: TextureQuality,
   strategies?: PolyRenderStrategiesOption,
+  // Atomic mode: hold the entire previous frame (geometry + bitmap) until the
+  // next atlas is rasterised AND decoded, then swap all at once. Use it when
+  // geometry changes arrive as discrete commits (no continuous drag), so an
+  // edit never shows geometry before its texture. Default (false) streams the
+  // bitmap in while geometry updates live — better for continuous drags.
+  atomic = false,
 ): TextureAtlasResult {
   const disabled = useMemo(
     () => new Set((strategies?.disable ?? []) as PolyRenderStrategy[]),
@@ -85,18 +100,65 @@ export function useTextureAtlas(
     [atlasPlans, textureQualityInput],
   );
 
-  const [pages, setPages] = useState<TextureAtlasPage[]>(
-    () => pageShells(packed.pages),
-  );
-  // Blob URLs currently shown on screen — revoked one frame after they're
-  // replaced (or on unmount), never while still painting.
+  // Streaming-mode page state (default).
+  const [pages, setPages] = useState<TextureAtlasPage[]>(() => pageShells(packed.pages));
+  // Atomic-mode whole-frame state.
+  const [frame, setFrame] = useState<AtlasFrame>(() => ({
+    plans,
+    entries: packed.entries,
+    pages: pageShells(packed.pages),
+  }));
+  // Blob URLs currently on screen — revoked a frame after they're replaced.
   const shownUrls = useRef<string[]>([]);
+  const seqRef = useRef(0);
+  const mountedRef = useRef(true);
 
   useEffect(() => {
-    let cancelled = false;
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      for (const url of shownUrls.current) URL.revokeObjectURL(url);
+      shownUrls.current = [];
+    };
+  }, []);
 
+  useEffect(() => {
+    if (atomic) {
+      const seq = ++seqRef.current;
+      const snapPlans = plans;
+      const snapEntries = packed.entries;
+      if (packed.pages.length === 0 || typeof document === "undefined") {
+        deferRevoke(shownUrls.current);
+        shownUrls.current = [];
+        setFrame({ plans: snapPlans, entries: snapEntries, pages: pageShells(packed.pages) });
+        return;
+      }
+      // Cancel as soon as a newer edit arrives (seqRef advances): the stale
+      // build aborts and is dropped, so an intermediate baked texture never
+      // swaps in. Only the latest build reaches the swap.
+      const stale = (): boolean => seq !== seqRef.current;
+      let built: string[] = [];
+      buildAtlasPages(packed.pages, textureLighting, document, atlasScale, stale)
+        .then(async (nextPages) => {
+          built = blobUrlsOf(nextPages);
+          await decodeBlobUrls(built);
+          if (!mountedRef.current || stale()) {
+            deferRevoke(built);
+            return;
+          }
+          const prev = shownUrls.current;
+          shownUrls.current = built;
+          built = [];
+          deferRevoke(prev);
+          setFrame({ plans: snapPlans, entries: snapEntries, pages: nextPages });
+        })
+        .catch(() => {});
+      return;
+    }
+
+    // --- streaming mode (default): geometry live, bitmap double-buffered ---
+    let cancelled = false;
     if (packed.pages.length === 0) {
-      // No textured leaves anymore → drop the bitmaps.
       deferRevoke(shownUrls.current);
       shownUrls.current = [];
       setPages((prev) => prev.length === 0 ? prev : []);
@@ -104,10 +166,6 @@ export function useTextureAtlas(
     }
     if (typeof document === "undefined") return () => {};
 
-    // Double-buffer: keep the previous bitmap painting (geometry leaves still
-    // reposition live from `entries`) until the new atlas is rasterised AND
-    // decoded, then swap. Never blank — on a layout change a brief stale sample
-    // under the new slices beats a blank flash.
     setPages((prev) => prev.some((page) => page.url) ? prev : pageShells(packed.pages));
 
     let built: string[] = [];
@@ -129,17 +187,21 @@ export function useTextureAtlas(
 
     return () => {
       cancelled = true;
-      // If this build resolved but was superseded before swapping, free it.
       deferRevoke(built);
     };
-  }, [packed, textureLighting, atlasScale]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [packed, textureLighting, atlasScale, atomic]);
 
-  useEffect(() => () => {
-    for (const url of shownUrls.current) URL.revokeObjectURL(url);
-    shownUrls.current = [];
-  }, []);
-
+  if (atomic) {
+    return {
+      plans: frame.plans,
+      entries: frame.entries,
+      pages: frame.pages,
+      ready: frame.pages.length === 0 || frame.pages.every((page) => !!page.url),
+    };
+  }
   return {
+    plans,
     entries: packed.entries,
     pages,
     ready: pages.length === 0 || pages.every((page) => !!page.url),

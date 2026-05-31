@@ -112,6 +112,15 @@ export interface PolyMeshProps extends TransformProps, InteractionProps {
   textureQuality?: TextureQuality;
   /** Solid seam overscan. `"auto"` computes a fitted per-edge amount from the polygon plan. */
   seamBleed?: PolySeamBleed;
+  /**
+   * Hold the whole previous frame (geometry + texture) until the next atlas is
+   * decoded, then swap atomically — so a geometry edit never shows geometry
+   * before its texture. Best when edits arrive as discrete commits (no
+   * continuous drag). Defaults to false (bitmap streams in over live geometry).
+   */
+  atomicAtlas?: boolean;
+  /** Fires when the displayed atlas frame swaps to a ready one (atomic mode). */
+  onFrameReady?: () => void;
   /** Per-polygon override render, or static children mounted inside the mesh wrapper. */
   children?: ((polygon: Polygon, index: number) => ReactNode) | ReactNode;
   /** Loading slot — rendered while `src` is being fetched/parsed. */
@@ -192,6 +201,8 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
     textureLighting,
     textureQuality,
     seamBleed,
+    atomicAtlas,
+    onFrameReady,
     castShadow,
     children,
     fallback,
@@ -604,11 +615,25 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
     effectiveTextureLighting,
     textureQuality,
     effectiveStrategies,
+    atomicAtlas,
   );
+  // Use the displayed plans (which lag in atomic mode) so solid leaves swap in
+  // lockstep with the textured ones.
   const solidPaintDefaults = useMemo(
-    () => !renderPolygon ? getSolidPaintDefaults(atlasPlans, effectiveTextureLighting, effectiveStrategies) : {},
-    [renderPolygon, atlasPlans, effectiveTextureLighting, effectiveStrategies],
+    () => !renderPolygon ? getSolidPaintDefaults(textureAtlas.plans, effectiveTextureLighting, effectiveStrategies) : {},
+    [renderPolygon, textureAtlas.plans, effectiveTextureLighting, effectiveStrategies],
   );
+  // In atomic mode the returned entries reference only changes when the frame
+  // actually swaps (decoded), so fire onFrameReady there for preview handoff.
+  // useLayoutEffect (not useEffect) so a consumer that resets a preview
+  // transform does it BEFORE the swapped frame paints — otherwise the new
+  // geometry paints one frame with the stale preview scale still applied.
+  const onFrameReadyRef = useRef(onFrameReady);
+  onFrameReadyRef.current = onFrameReady;
+  useLayoutEffect(() => {
+    if (atomicAtlas && textureAtlas.ready) onFrameReadyRef.current?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [textureAtlas.entries]);
   const defaultPaintVars = useMemo(
     () => solidPaintVars(solidPaintDefaults),
     [solidPaintDefaults],
@@ -862,7 +887,7 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
           );
         }
 
-        const plan = atlasPlans[index];
+        const plan = textureAtlas.plans[index];
         if (!plan || plan.texture) return null;
         if (isProjectiveQuadPlan(plan)) {
           return (

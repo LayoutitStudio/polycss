@@ -170,6 +170,8 @@ export const PolyMesh = defineComponent({
     textureLighting: { type: String as PropType<PolyTextureLightingMode>, default: undefined },
     textureQuality: { type: [Number, String] as PropType<TextureQuality>, default: undefined },
     seamBleed: { type: [Number, String] as PropType<PolySeamBleed>, default: undefined },
+    atomicAtlas: { type: Boolean as PropType<boolean>, default: false },
+    onFrameReady: { type: Function as PropType<() => void>, default: undefined },
     castShadow: { type: Boolean as PropType<boolean>, default: false },
     meshResolution: { type: String as PropType<MeshResolution>, default: undefined },
     parseOptions: { type: Object as PropType<UseMeshOptions>, default: undefined },
@@ -312,9 +314,19 @@ export const PolyMesh = defineComponent({
       );
     });
     const atlasTextureQuality = computed(() => props.textureQuality);
-    const textureAtlas = useTextureAtlas(textureAtlasPlans, atlasTextureLighting, atlasTextureQuality, atlasStrategies);
+    const atomicAtlas = computed(() => props.atomicAtlas);
+    const textureAtlas = useTextureAtlas(textureAtlasPlans, atlasTextureLighting, atlasTextureQuality, atlasStrategies, atomicAtlas);
+    // Use the displayed plans (which lag in atomic mode) so solid leaves swap in
+    // lockstep with the textured ones.
     const solidPaintDefaults = computed<SolidPaintDefaults>(() =>
-      atlasAutoRender ? getSolidPaintDefaults(textureAtlasPlans.value, atlasTextureLighting.value, atlasStrategies.value) : {},
+      atlasAutoRender ? getSolidPaintDefaults(textureAtlas.plans.value, atlasTextureLighting.value, atlasStrategies.value) : {},
+    );
+    // Fire onFrameReady when the displayed atlas frame swaps (atomic mode) — used
+    // by consumers to hand off a preview transform without a one-frame overshoot.
+    watch(
+      () => textureAtlas.entries.value,
+      () => { if (props.atomicAtlas && textureAtlas.ready.value) props.onFrameReady?.(); },
+      { flush: "sync" },
     );
     const defaultPaintVars = computed(() => solidPaintVars(solidPaintDefaults.value));
 
@@ -786,7 +798,7 @@ export const PolyMesh = defineComponent({
                 solidPaintDefaults: solidPaintDefaults.value,
               });
             }
-            const plan = textureAtlasPlans.value[index];
+            const plan = textureAtlas.plans.value[index];
             if (!plan || plan.texture) return null;
             if (isProjectiveQuadPlan(plan)) {
               return renderTextureProjectiveSolidPoly({
