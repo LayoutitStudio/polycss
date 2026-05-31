@@ -1,13 +1,16 @@
 /**
  * Browser-only helpers that paint a WordArt "master fill" onto a `<canvas>` and
- * return it as a data URL. `composeText` then UV-maps the whole word's front
- * face to this single texture, so a gradient / rainbow / image flows
+ * return it as a data URL, plus `resolveFace` which turns a high-level fill
+ * spec into the pure-layer `Face` (`{ color?, texture?, tile? }`) that
+ * `composeText` consumes. `composeText` then UV-maps the whole word's face to
+ * that single texture, so a gradient / rainbow / image / block flows
  * continuously across every glyph (not per-letter).
  *
  * Pure-layer code (`composeText`, `extrudeContours`) never imports this — it
- * only receives the resulting string — so the Node-testable path stays free of
+ * only receives the resulting strings — so the Node-testable path stays free of
  * browser globals.
  */
+import type { Face } from "./composeText";
 
 /** A WordArt face fill. `solid` means "no texture, use the flat color". */
 export type FillSpec =
@@ -15,6 +18,34 @@ export type FillSpec =
   | { type: "gradient"; from: string; to: string; angle?: number }
   | { type: "rainbow"; angle?: number }
   | { type: "image"; src: string };
+
+/** High-level per-face fill the UI works with; `resolveFace` renders it to a `Face`. */
+export type FaceFillSpec =
+  | { kind: "solid"; color: string }
+  | { kind: "gradient"; color?: string; from: string; to: string; angle?: number }
+  | { kind: "rainbow"; color?: string; angle?: number }
+  | { kind: "texture"; color?: string; url: string; tile?: number }
+  | { kind: "image"; color?: string; src: string };
+
+/**
+ * Resolve a high-level face fill into the pure `Face` `composeText` takes —
+ * rendering gradients / rainbows to a data URL via `makeFillTexture`, and
+ * passing block / image URLs straight through. Keeps `composeText` browser-free.
+ */
+export function resolveFace(spec: FaceFillSpec): Face {
+  switch (spec.kind) {
+    case "solid":
+      return { color: spec.color };
+    case "gradient":
+      return { color: spec.color, texture: makeFillTexture({ type: "gradient", from: spec.from, to: spec.to, angle: spec.angle }) };
+    case "rainbow":
+      return { color: spec.color, texture: makeFillTexture({ type: "rainbow", angle: spec.angle }) };
+    case "texture":
+      return { color: spec.color, texture: spec.url || undefined, tile: spec.tile };
+    case "image":
+      return { color: spec.color, texture: spec.src || undefined };
+  }
+}
 
 const RAINBOW = [
   "#ff3b30", "#ff9500", "#ffcc00", "#34c759",

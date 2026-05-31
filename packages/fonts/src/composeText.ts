@@ -16,11 +16,13 @@ import {
   groupShapes,
   shade,
   simplifyContour,
+  type CubicBezier,
   type Contour,
+  type ExtrudeProfile,
+  type MaterialStop,
   type Pt,
   type Shape,
 } from "./extrude";
-import type { TextPolygonsOptions } from "./textPolygons";
 
 /** Classic WordArt envelope shapes. */
 export type WarpShape =
@@ -40,56 +42,120 @@ export interface WarpOptions {
   amount?: number;
 }
 
-export interface ComposeTextOptions extends TextPolygonsOptions {
+/** A paintable face: a solid color and/or an already-rendered texture. */
+export interface Face {
+  /** Solid color; also the fallback if the texture fails to load. */
+  color?: string;
+  /**
+   * Texture URL / data URL — a gradient, rainbow, image, or block texture
+   * already rendered (see `resolveFace` / `makeFillTexture`). UV-mapped across
+   * the whole word so the fill flows over every glyph.
+   */
+  texture?: string;
+  /** Tile the texture every N world units (block look); omit to stretch one copy. */
+  tile?: number;
+}
+
+/** The back face, which can be offset for the flat WordArt drop shadow (depth 0). */
+export interface BackFace extends Face {
+  /** [rightward, upward] shift of the back relative to the front (world units). */
+  offset?: [number, number];
+}
+
+/** A `Face` pinned at a position on the depth axis (`at`: 0 = front, 1 = back). */
+export interface FaceStop extends Face {
+  at: number;
+}
+
+/**
+ * Extrusion cross-section / edge profile:
+ * - `"flat"` — straight slab (no edge shaping).
+ * - `{ edge }` — a bevel chamfer or round bullnose on the edge (mirrored
+ *   front/back). `raised` flips a round to a convex dome.
+ * - `{ curve }` — a custom edge whose cross-section is a CSS cubic-bezier easing.
+ */
+export type Profile =
+  | "flat"
+  | { edge: "bevel" | "round"; raised?: boolean; segments?: number }
+  | { curve: CubicBezier; segments?: number };
+
+export interface ComposeTextOptions {
+  /** Cap-em size in world units. Defaults to 100. */
+  size?: number;
+  /** Extrusion depth (world units). 0 = a flat slab with no edges. Defaults to size*0.2. */
+  depth?: number;
+  /** Bézier flattening: segments per glyph curve. Higher = smoother. Defaults to 6. */
+  curveSteps?: number;
+  /** Extra space between glyphs (world units). */
+  letterSpacing?: number;
   /** Line advance as a multiple of `size`. Defaults to 1.25. */
   lineHeight?: number;
   /** Horizontal alignment of each line within the block. Defaults to "center". */
   align?: "left" | "center" | "right";
-  /** Horizontal glyph scale (Photoshop ↔). Defaults to 1. */
-  scaleX?: number;
-  /** Vertical glyph scale (Photoshop ↕). Defaults to 1. */
-  scaleY?: number;
-  /** Draw an underline bar under each line. */
+  /** Non-uniform glyph stretch [x, y] (WordArt-style). Defaults to [1, 1]. */
+  scale?: [number, number];
+  /** Draw an underline / strikethrough bar under each line. */
   underline?: boolean;
-  /** Draw a strikethrough bar across each line. */
   strike?: boolean;
   /** WordArt envelope warp applied to the whole block. */
   warp?: WarpOptions;
-  /**
-   * Outline simplification tolerance in world units (0 = exact). Drops points
-   * within this distance of their neighbours — fewer polygons, blockier glyphs.
-   */
+  /** Outline simplification tolerance (world units, 0 = exact; hole-less glyphs only). */
   simplify?: number;
-  /**
-   * Merge coplanar same-color adjacent triangles into larger convex polygons
-   * (fewer DOM elements). Collapses the triangulated caps; ~⅓ fewer polygons
-   * on flat text. Has a CPU cost, so it's off by default.
-   */
+  /** Merge coplanar same-color cap triangles into larger polygons (fewer DOM nodes). */
   merge?: boolean;
-  /** Back cap color. Set differently from `color` for a layered look. */
-  backColor?: string;
+  /** Extrusion cross-section / edge profile. Defaults to "flat". */
+  profile?: Profile;
   /**
-   * Oblique shift of the back relative to the front ([rightward, upward], world
-   * units). Non-zero + a distinct `backColor` gives the retro front-A / back-B
-   * leaning block.
+   * Material along the depth axis. Three shapes, simplest → most general:
+   * - `{ front?, sides?, back? }` — the classic faces (sugar for 3 stops). Omit
+   *   `sides` for no side band (front rounds into back), or set `sides` / `back`
+   *   to `false` to skip that geometry entirely.
+   * - a single `Face` — one material for the whole solid.
+   * - `FaceStop[]` — N materials distributed down the axis (`at` 0→1).
    */
-  oblique?: [number, number];
-  /**
-   * Master fill texture (data URL / URL) painted continuously across the whole
-   * word's front face — UV-mapped so a gradient / rainbow / image flows across
-   * every glyph. Generate it in the browser with `makeFillTexture`.
-   */
-  faceTexture?: string;
-  /** Stable material key so every face polygon shares one cached texture. */
-  faceTextureKey?: string;
+  faces?: Face | FaceStop[] | { front?: Face; sides?: Face | false; back?: BackFace | false };
   /** Outline stroke drawn as a halo around the front face. */
   outline?: { color: string; width: number };
-  /**
-   * Flat two-layer mode: front face + offset back copy, no connecting side
-   * walls (the classic WordArt drop-shadow look). Pair with `backColor` +
-   * `oblique`.
-   */
-  layered?: boolean;
+}
+
+function resolveProfile(p: Profile | undefined): {
+  profile: ExtrudeProfile;
+  roundConvex?: boolean;
+  profileBezier?: CubicBezier;
+  segments?: number;
+} {
+  if (!p || p === "flat") return { profile: "flat" };
+  if ("edge" in p) return { profile: p.edge, roundConvex: p.raised, segments: p.segments };
+  return { profile: "custom", profileBezier: p.curve, segments: p.segments };
+}
+
+/**
+ * Normalize the `faces` option into sorted material stops. A face set to `false`
+ * (or `sides` omitted) contributes no stop — the geometry is still rendered, but
+ * the nearest remaining face covers it (no hole, just fewer colour bands). The
+ * active faces split the depth axis evenly (stop i centered at `(i+½)/k`).
+ */
+function resolveStops(
+  faces: ComposeTextOptions["faces"],
+  defaultFront: string,
+): { stops: MaterialStop[]; backOffset?: [number, number] } {
+  const stop = (f: Face, at: number, color: string): MaterialStop => ({ at, color: f.color ?? color, texture: f.texture, tile: f.tile });
+  if (Array.isArray(faces)) {
+    return { stops: faces.length ? faces.map((f) => stop(f, f.at, defaultFront)) : [{ at: 0.5, color: defaultFront }] };
+  }
+  if (faces && ("front" in faces || "sides" in faces || "back" in faces)) {
+    const front = faces.front ?? {};
+    const fc = front.color ?? defaultFront;
+    const items: { f: Face; color: string }[] = [{ f: front, color: fc }];
+    if (faces.sides) items.push({ f: faces.sides, color: shade(fc, 0.72) });
+    if (faces.back !== false) items.push({ f: faces.back ?? {}, color: fc });
+    const k = items.length;
+    const stops = items.map((it, i) => stop(it.f, (i + 0.5) / k, it.color));
+    return { stops, backOffset: faces.back ? faces.back.offset : undefined };
+  }
+  if (faces) return { stops: [stop(faces as Face, 0.5, defaultFront)] }; // single Face → uniform
+  // Default: the classic gold front / darker sides / matching back, even thirds.
+  return { stops: [{ at: 1 / 6, color: defaultFront }, { at: 0.5, color: shade(defaultFront, 0.72) }, { at: 5 / 6, color: defaultFront }] };
 }
 
 type WarpFn = (p: Pt) => Pt;
@@ -99,15 +165,17 @@ export function composeText(font: ParsedFont, text: string, options: ComposeText
   const depth = options.depth ?? size * 0.2;
   const curveSteps = Math.max(1, Math.round(options.curveSteps ?? 6));
   const letterSpacing = options.letterSpacing ?? 0;
-  const color = options.color ?? "#d4a82a";
-  const sideColor = options.sideColor ?? shade(color, 0.72);
-  const profile = options.profile ?? "flat";
-  const profileSegments = Math.max(1, Math.round(options.profileSegments ?? 6));
   const lineHeight = (options.lineHeight ?? 1.25) * size;
   const align = options.align ?? "center";
   const simplify = Math.max(0, options.simplify ?? 0);
-  const scaleX = options.scaleX ?? 1;
-  const scaleY = options.scaleY ?? 1;
+  const [scaleX, scaleY] = options.scale ?? [1, 1];
+
+  const { stops, backOffset } = resolveStops(options.faces, "#d4a82a");
+
+  const prof = resolveProfile(options.profile);
+  const profileSegments = Math.max(1, Math.round(prof.segments ?? 6));
+  // depth 0 → a flat slab with no side walls (and a place for the offset shadow).
+  const flat = depth <= 0;
 
   const scale = size / font.unitsPerEm;
   const barThickness = size * 0.06;
@@ -180,19 +248,17 @@ export function composeText(font: ParsedFont, text: string, options: ComposeText
 
   const polygons = extrudeContours(shapes, {
     depth,
-    profile,
+    profile: prof.profile,
+    roundConvex: prof.roundConvex,
+    profileBezier: prof.profileBezier,
     profileSegments,
     maxInset: size * 0.045,
-    color,
-    sideColor,
-    backColor: options.backColor,
-    oblique: options.oblique,
-    faceTexture: options.faceTexture,
-    faceTextureKey: options.faceTextureKey,
+    stops,
     faceUvBounds,
+    backOffset,
+    layered: flat,
     outlineColor: options.outline?.color,
     outlineWidth: options.outline?.width,
-    layered: options.layered,
   });
   return options.merge ? mergePolygons(polygons) : polygons;
 }

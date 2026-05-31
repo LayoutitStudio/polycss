@@ -19,56 +19,89 @@ export type Contour = Pt[];
 
 /**
  * Cross-section of the extrusion along its depth:
- * - "flat"  — straight slab with vertical walls (a depth-only extrude).
- * - "round" — a quarter-circle round-over on the front/back edges (bullnose).
- * - "bevel" — a straight 45° chamfer on the front/back edges.
+ * - "flat"   — straight slab with vertical walls (a depth-only extrude).
+ * - "round"  — a quarter-circle round-over on the front/back edges (bullnose).
+ * - "bevel"  — a straight 45° chamfer on the front/back edges.
+ * - "custom" — the edge profile is the CSS easing curve `profileBezier`
+ *   (`cubic-bezier(x1,y1,x2,y2)` semantics), sampled along the depth.
  */
-export type ExtrudeProfile = "flat" | "round" | "bevel";
+export type ExtrudeProfile = "flat" | "round" | "bevel" | "custom";
+
+/** CSS cubic-bezier control points [x1, y1, x2, y2] (P0=(0,0), P3=(1,1)). */
+export type CubicBezier = [number, number, number, number];
+
+/**
+ * CSS `cubic-bezier(x1,y1,x2,y2)` easing → a function mapping x∈[0,1] to y.
+ * Solves x(t)=x by Newton's method (same approach browsers use), then reads y.
+ */
+export function cssCubicBezier([x1, y1, x2, y2]: CubicBezier): (x: number) => number {
+  const cx = 3 * x1, bx = 3 * (x2 - x1) - cx, ax = 1 - cx - bx;
+  const cy = 3 * y1, by = 3 * (y2 - y1) - cy, ay = 1 - cy - by;
+  const sampleX = (t: number) => ((ax * t + bx) * t + cx) * t;
+  const sampleY = (t: number) => ((ay * t + by) * t + cy) * t;
+  const slopeX = (t: number) => (3 * ax * t + 2 * bx) * t + cx;
+  return (x: number) => {
+    const xc = Math.min(1, Math.max(0, x));
+    let t = xc;
+    for (let i = 0; i < 8; i++) {
+      const err = sampleX(t) - xc;
+      if (Math.abs(err) < 1e-6) break;
+      const d = slopeX(t);
+      if (Math.abs(d) < 1e-6) break;
+      t -= err / d;
+    }
+    return sampleY(Math.min(1, Math.max(0, t)));
+  };
+}
 
 export interface Shape {
   outer: Contour;
   holes: Contour[];
 }
 
+/**
+ * A material stop on the axial (depth) axis: `at` runs 0 (front face) → 1 (back
+ * face). Each emitted polygon is colored/textured by the nearest stop to its
+ * own depth, so any number of stops can band the solid down its length.
+ */
+export interface MaterialStop {
+  at: number;
+  /** Solid color (and fallback if a texture fails to load). */
+  color?: string;
+  /** Texture URL / data URL — UV-mapped across the word (caps & stretch walls). */
+  texture?: string;
+  /** Tile the texture every N world units (block look) instead of stretching. */
+  tile?: number;
+}
+
 export interface ExtrudeOptions {
   depth: number;
   profile: ExtrudeProfile;
   profileSegments: number;
+  /** Round only: flip the arc to a raised/convex bullnose (default concave). */
+  roundConvex?: boolean;
+  /**
+   * Custom edge profile (profile === "custom"): a CSS cubic-bezier easing whose
+   * curve is the edge cross-section, sampled over `profileSegments`.
+   */
+  profileBezier?: CubicBezier;
   /** Cap on inward edge inset (keeps round/bevel from pinching thin stems). */
   maxInset: number;
-  /** Front cap color. */
-  color: string;
-  /** Side-wall color. */
-  sideColor: string;
-  /** Back cap color. Defaults to `color`. Set differently for a layered look. */
-  backColor?: string;
-  /**
-   * Oblique in-plane shift of the back relative to the front, in world units
-   * ([rightward, upward]). Non-zero turns the extrude into a leaning block so
-   * the differently-colored back peeks out (classic retro 3D / drop shadow).
-   */
-  oblique?: [number, number];
-  /** Depth offset applied to the whole shape (for layered/offset effects). */
-  zOffset?: number;
-  /**
-   * Master fill texture (data URL / URL) painted continuously across the whole
-   * word's front face. The face caps are UV-mapped to `faceUvBounds`, so one
-   * shared, browser-cached texture flows across every glyph (gradient / rainbow
-   * / image). Without it the face stays the solid `color`.
-   */
-  faceTexture?: string;
-  /** Stable material key so every face polygon shares one cached texture. */
-  faceTextureKey?: string;
+  /** Material stops down the depth axis (≥1). Each polygon takes the nearest. */
+  stops: MaterialStop[];
   /** Type-plane bounds the face UVs normalize against (the whole word). */
   faceUvBounds?: { minX: number; minY: number; maxX: number; maxY: number };
   /** Outline stroke color, drawn as a halo just behind the front face. */
   outlineColor?: string;
   /** Outline stroke width in world units (only used with `outlineColor`). */
   outlineWidth?: number;
+  /** [rightward, upward] in-plane shift of the back cap — the flat drop shadow. */
+  backOffset?: [number, number];
+  /** Depth offset applied to the whole shape (for layered/offset effects). */
+  zOffset?: number;
   /**
-   * Flat two-layer mode: emit only the front cap + an offset back cap (shifted
-   * by the full `oblique`), with no connecting side walls — the classic WordArt
-   * "two flat meshes" drop shadow.
+   * Flat two-layer mode: emit only the front cap + an offset back cap, with no
+   * connecting side walls — the classic WordArt "two flat meshes" drop shadow.
    */
   layered?: boolean;
 }
@@ -82,25 +115,19 @@ const toWorld = (p: Pt, z: number): Vec3 => [-p[1], p[0], z];
 
 /** Extrude pre-grouped 2D shapes (type-plane, world units) into polygons. */
 export function extrudeContours(shapes: Shape[], opts: ExtrudeOptions): Polygon[] {
-  const { profile, profileSegments, maxInset, color, sideColor } = opts;
+  const { profile, profileSegments, maxInset } = opts;
   const layered = opts.layered ?? false;
-  const backColor = opts.backColor ?? color;
-  const [obx, oby] = opts.oblique ?? [0, 0];
   const zCenter = opts.zOffset ?? 0;
   // Layered mode forces a minimum front/back separation so the offset shadow
   // sits behind the face even when depth is ~0.
   const depth = layered ? Math.max(opts.depth, 1) : opts.depth;
   const frontZ = zCenter + depth / 2;
   const backZ = zCenter - depth / 2;
-  const rings = buildRings(profile, frontZ, backZ, depth, profileSegments, maxInset);
+  const rings = buildRings(profile, frontZ, backZ, depth, profileSegments, maxInset, opts.roundConvex ?? false, opts.profileBezier);
   const polygons: Polygon[] = [];
 
-  // Each ring is shifted in-plane proportional to how far back it sits, so the
-  // back leans away from the front by the full oblique offset.
-  const obliqueAt = (z: number): Pt => {
-    const t = depth > 0 ? (frontZ - z) / depth : 0;
-    return [obx * t, oby * t];
-  };
+  const ZERO: Pt = [0, 0];
+  const backOffset = opts.backOffset ?? ZERO;
   const place = (p: Pt, z: number, o: Pt): Vec3 => toWorld([p[0] + o[0], p[1] + o[1]], z);
 
   // Face UV: normalize a type-plane point to the whole-word bounds (v=0 bottom,
@@ -108,12 +135,29 @@ export function extrudeContours(shapes: Shape[], opts: ExtrudeOptions): Polygon[
   const fb = opts.faceUvBounds;
   const faceW = fb ? Math.max(fb.maxX - fb.minX, 1e-6) : 1;
   const faceH = fb ? Math.max(fb.maxY - fb.minY, 1e-6) : 1;
-  const uvOf = (p: Pt): Vec2 => [
-    Math.min(1, Math.max(0, (p[0] - fb!.minX) / faceW)),
-    Math.min(1, Math.max(0, (p[1] - fb!.minY) / faceH)),
-  ];
-  const hasFaceFill = !!(opts.faceTexture && fb);
+  // tile > 0 → repeat the texture every `tile` world units (crisp block look);
+  // tile === 0 → stretch one copy across the whole word (gradient / photo).
+  const uvAt = (p: Pt, tile: number): Vec2 => tile > 0
+    ? [(p[0] - fb!.minX) / tile, (p[1] - fb!.minY) / tile]
+    : [Math.min(1, Math.max(0, (p[0] - fb!.minX) / faceW)), Math.min(1, Math.max(0, (p[1] - fb!.minY) / faceH))];
+  const REPEAT = { s: "repeat", t: "repeat" } as const;
   const outlineWidth = opts.outlineColor ? Math.max(0, opts.outlineWidth ?? 0) : 0;
+
+  // Material by axial position t (0 = front face, 1 = back face): nearest stop.
+  const stops = opts.stops.length ? [...opts.stops].sort((a, b) => a.at - b.at) : [{ at: 0.5 }];
+  const materialAt = (t: number): MaterialStop => {
+    let best = stops[0];
+    let bestD = Infinity;
+    // `<=` so a tie (a band exactly on a boundary, e.g. the single flat wall at
+    // t=0.5 between two even stops) resolves toward the deeper stop — the wall
+    // takes the side/back rather than the front.
+    for (const s of stops) {
+      const d = Math.abs(s.at - t);
+      if (d <= bestD) { bestD = d; best = s; }
+    }
+    return best;
+  };
+  const tOf = (z: number) => (depth > 0 ? Math.min(1, Math.max(0, (frontZ - z) / depth)) : 0);
 
   const maxRingInset = rings.reduce((m, r) => Math.max(m, r.inset), 0);
 
@@ -128,10 +172,9 @@ export function extrudeContours(shapes: Shape[], opts: ExtrudeOptions): Polygon[
       : 1;
     const si = (inset: number) => inset * insetScale;
 
-    // Emit a flat cap of `contours` offset by `offset`, at depth `z`, shifted
-    // in-plane by `o`. When `fill` is set and a master texture exists, the cap
-    // is UV-mapped across the whole word.
-    const cap = (offset: number, z: number, o: Pt, flip: boolean, capColor: string, fill = false) => {
+    // Emit a flat cap of `contours` at depth `z`, shifted in-plane by `o`,
+    // painted with `mat` (UV-mapped to the word when it carries a texture).
+    const cap = (offset: number, z: number, o: Pt, flip: boolean, mat: MaterialStop) => {
       const flat: number[] = [];
       const holeIndices: number[] = [];
       for (let r = 0; r < contours.length; r++) {
@@ -140,6 +183,7 @@ export function extrudeContours(shapes: Shape[], opts: ExtrudeOptions): Polygon[
       }
       const tris = earcut(flat, holeIndices, 2);
       const vert = (i: number): Pt => [flat[i * 2], flat[i * 2 + 1]];
+      const tile = mat.tile ?? 0;
       for (let t = 0; t < tris.length; t += 3) {
         const a = vert(tris[t]);
         const b = vert(tris[t + 1]);
@@ -148,15 +192,15 @@ export function extrudeContours(shapes: Shape[], opts: ExtrudeOptions): Polygon[
         const ordered: [Pt, Pt, Pt] = [tri[2], tri[1], tri[0]];
         const poly: Polygon = {
           vertices: [place(ordered[0], z, o), place(ordered[1], z, o), place(ordered[2], z, o)],
-          color: capColor,
+          color: mat.color ?? "#cccccc",
         };
-        if (fill && hasFaceFill) {
+        if (mat.texture && fb) {
           // Inline `texture` (not just `material`) so the mesh atlas planner —
-          // which reads polygon.texture — UV-maps the shared fill; material is
-          // also set for the direct single-polygon render path.
-          poly.texture = opts.faceTexture!;
-          poly.material = { texture: opts.faceTexture!, key: opts.faceTextureKey };
-          poly.uvs = [uvOf(ordered[0]), uvOf(ordered[1]), uvOf(ordered[2])];
+          // which reads polygon.texture — UV-maps the shared fill across the word.
+          poly.texture = mat.texture;
+          poly.material = { texture: mat.texture };
+          poly.uvs = [uvAt(ordered[0], tile), uvAt(ordered[1], tile), uvAt(ordered[2], tile)];
+          if (tile > 0) poly.textureWrap = REPEAT;
         }
         polygons.push(poly);
       }
@@ -165,49 +209,56 @@ export function extrudeContours(shapes: Shape[], opts: ExtrudeOptions): Polygon[
     // Outline halo: a larger silhouette in the outline color sitting just behind
     // the front face, so it peeks out around every outer and counter edge.
     if (outlineWidth > 0) {
-      cap(-outlineWidth, frontZ - 1e-3, obliqueAt(frontZ), false, opts.outlineColor!);
+      cap(-outlineWidth, frontZ - 1e-3, ZERO, false, { at: 0, color: opts.outlineColor });
     }
 
-    // Front face — UV-filled when a master texture is present.
-    cap(si(rings[0].inset), rings[0].z, obliqueAt(rings[0].z), false, color, true);
-
+    // Front + back caps (material at the two ends of the axis).
+    cap(si(rings[0].inset), rings[0].z, ZERO, false, materialAt(0));
     if (layered) {
       // Flat two-layer shadow: offset back cap, no connecting walls.
-      cap(si(rings[rings.length - 1].inset), backZ, [obx, oby], true, backColor);
+      cap(si(rings[rings.length - 1].inset), backZ, backOffset, true, materialAt(1));
       continue;
     }
-
-    // Back cap.
-    cap(
-      si(rings[rings.length - 1].inset),
-      rings[rings.length - 1].z,
-      obliqueAt(rings[rings.length - 1].z),
-      true,
-      backColor,
-    );
+    cap(si(rings[rings.length - 1].inset), rings[rings.length - 1].z, ZERO, true, materialAt(1));
 
     for (const contour of contours) {
       let prevOffset = offsetContour(contour, si(rings[0].inset));
-      let prevO = obliqueAt(rings[0].z);
       for (let r = 1; r < rings.length; r++) {
         const curOffset = offsetContour(contour, si(rings[r].inset));
-        const curO = obliqueAt(rings[r].z);
         const z0 = rings[r - 1].z;
         const z1 = rings[r].z;
+        const mat = materialAt(tOf((z0 + z1) / 2));
+        const tile = mat.tile ?? 0;
         for (let i = 0, len = contour.length; i < len; i++) {
           const j = (i + 1) % len;
-          polygons.push({
+          const wall: Polygon = {
             vertices: [
-              place(curOffset[i], z1, curO),
-              place(curOffset[j], z1, curO),
-              place(prevOffset[j], z0, prevO),
-              place(prevOffset[i], z0, prevO),
+              place(curOffset[i], z1, ZERO),
+              place(curOffset[j], z1, ZERO),
+              place(prevOffset[j], z0, ZERO),
+              place(prevOffset[i], z0, ZERO),
             ],
-            color: sideColor,
-          });
+            color: mat.color ?? "#cccccc",
+          };
+          if (mat.texture) {
+            wall.texture = mat.texture;
+            wall.material = { texture: mat.texture };
+            if (tile > 0 || !fb) {
+              // Block texture: one full tile per wall quad (voxel edge).
+              wall.uvs = [[0, 1], [1, 1], [1, 0], [0, 0]];
+            } else {
+              // Stretch texture: UV-map the band to the word so it wraps the edge.
+              wall.uvs = [
+                uvAt(curOffset[i], 0),
+                uvAt(curOffset[j], 0),
+                uvAt(prevOffset[j], 0),
+                uvAt(prevOffset[i], 0),
+              ];
+            }
+          }
+          polygons.push(wall);
         }
         prevOffset = curOffset;
-        prevO = curO;
       }
     }
   }
@@ -222,27 +273,37 @@ function buildRings(
   depth: number,
   seg: number,
   maxInset: number,
+  roundConvex: boolean,
+  profileBezier?: CubicBezier,
 ): Ring[] {
   if (profile === "flat" || depth <= 0) {
     return [{ z: frontZ, inset: 0 }, { z: backZ, inset: 0 }];
   }
   const edge = Math.min(maxInset, depth / 2);
-  const s = profile === "round" ? Math.max(2, seg) : 1;
-  const ease = profile === "round"
-    ? (u: number) => Math.cos((u * Math.PI) / 2)
-    : (u: number) => 1 - u;
+  const s = profile === "bevel" ? 1 : Math.max(2, seg);
+  // `insetFrac(u)` is the inset (0..1 of `edge`) at depth fraction u into the
+  // edge (u=0 at the face → 1 at the full-size shoulder). bevel = straight
+  // ramp; round = quarter arc (concave, or convex when raised); custom = the
+  // CSS cubic-bezier easing curve as the cross-section.
+  const insetFrac = profile === "bevel"
+    ? (u: number) => 1 - u
+    : profile === "custom" && profileBezier
+      ? ((b) => (u: number) => 1 - b(u))(cssCubicBezier(profileBezier))
+      : roundConvex
+        ? (u: number) => 1 - Math.sin((u * Math.PI) / 2)
+        : (u: number) => Math.cos((u * Math.PI) / 2);
 
   const rings: Ring[] = [];
   for (let k = 0; k <= s; k++) {
     const u = k / s;
-    rings.push({ z: frontZ - u * edge, inset: edge * ease(u) });
+    rings.push({ z: frontZ - u * edge, inset: edge * insetFrac(u) });
   }
   if (backZ + edge < frontZ - edge - 1e-6) {
     rings.push({ z: backZ + edge, inset: 0 });
   }
   for (let k = 1; k <= s; k++) {
     const u = 1 - k / s;
-    rings.push({ z: backZ + edge * u, inset: edge * ease(u) });
+    rings.push({ z: backZ + edge * u, inset: edge * insetFrac(u) });
   }
   return rings;
 }

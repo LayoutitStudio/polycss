@@ -73,7 +73,10 @@ export function textPolygons(font: ParsedFont, text: string, options: TextPolygo
     profile,
     profileSegments,
     maxInset: size * 0.045,
-    color,
-    sideColor,
+    stops: [
+      { at: 0, color },
+      { at: 0.5, color: sideColor },
+      { at: 1, color },
+    ],
   });
 }

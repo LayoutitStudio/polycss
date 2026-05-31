@@ -12,13 +12,14 @@ export type { ParsedFont, FontGlyph } from "./parseFont";
 
 export { textPolygons } from "./textPolygons";
 export type { TextPolygonsOptions } from "./textPolygons";
-export type { ExtrudeProfile } from "./extrude";
+export { cssCubicBezier } from "./extrude";
+export type { ExtrudeProfile, CubicBezier, MaterialStop } from "./extrude";
 
 export { composeText } from "./composeText";
-export type { ComposeTextOptions, WarpShape, WarpOptions } from "./composeText";
+export type { ComposeTextOptions, Profile, Face, BackFace, FaceStop, WarpShape, WarpOptions } from "./composeText";
 
-export { makeFillTexture } from "./fill";
-export type { FillSpec } from "./fill";
+export { makeFillTexture, resolveFace } from "./fill";
+export type { FillSpec, FaceFillSpec } from "./fill";
 
 export {
   listGoogleFonts,
