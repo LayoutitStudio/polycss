@@ -16,18 +16,54 @@ import {
   listGoogleFonts,
   loadFont,
   loadGoogleFont,
-  makeFillTexture,
+  resolveFace,
   pickWeight,
+  type BackFace,
   type ExtrudeProfile,
-  type FillSpec,
+  type Face,
+  type FaceFillSpec,
   type FontEntry,
   type ParsedFont,
+  type Profile,
   type WarpShape,
 } from "@layoutit/polycss-fonts";
 import "./wordart.css";
 
 type Align = "left" | "center" | "right";
-type FillType = "solid" | "gradient" | "rainbow" | "image";
+type FillType = "solid" | "gradient" | "rainbow" | "texture" | "image";
+type FaceFill = "solid" | "texture" | "none";
+type Bezier4 = [number, number, number, number];
+
+// Named CSS easings → cubic-bezier control points, for the custom edge profile.
+const CSS_EASINGS: Record<string, Bezier4> = {
+  linear: [0, 0, 1, 1],
+  ease: [0.25, 0.1, 0.25, 1],
+  "ease-in": [0.42, 0, 1, 1],
+  "ease-out": [0, 0, 0.58, 1],
+  "ease-in-out": [0.42, 0, 0.58, 1],
+};
+
+/** Parse a CSS easing string (`cubic-bezier(...)` or a keyword) to 4 controls. */
+function parseBezier(input: string): Bezier4 | null {
+  const s = input.trim().toLowerCase();
+  if (CSS_EASINGS[s]) return CSS_EASINGS[s];
+  const m = /cubic-bezier\(\s*([\d.+-]+)[ ,]+([\d.+-]+)[ ,]+([\d.+-]+)[ ,]+([\d.+-]+)\s*\)/.exec(s);
+  if (!m) return null;
+  const p = [m[1], m[2], m[3], m[4]].map(Number) as Bezier4;
+  return p.every((n) => !Number.isNaN(n)) ? p : null;
+}
+const bezierToCss = (b: Bezier4) => `cubic-bezier(${b.map((n) => +n.toFixed(2)).join(", ")})`;
+
+// Bundled voxel-style block textures (Layoutit voxels set), served locally from
+// public/textures/wordart so the atlas canvas stays same-origin (no CORS taint).
+const TEXTURES: { id: string; label: string }[] = [
+  { id: "dirt", label: "Dirt" }, { id: "dirt2", label: "Dirt 2" }, { id: "grass3", label: "Grass" },
+  { id: "brick", label: "Brick" }, { id: "brick2", label: "Brick 2" }, { id: "wood", label: "Wood" },
+  { id: "wood3", label: "Plank" }, { id: "rock", label: "Rock" }, { id: "rock3", label: "Rock 2" },
+  { id: "ice", label: "Ice" }, { id: "ice3", label: "Ice 2" }, { id: "glass", label: "Glass" },
+  { id: "sand", label: "Sand" }, { id: "cacti", label: "Cactus" }, { id: "mine", label: "Ore" }, { id: "mine4", label: "Ore 2" },
+];
+const texUrl = (id: string) => (id ? `/textures/wordart/${id}.svg` : "");
 
 interface Preset {
   label: string;
@@ -45,6 +81,10 @@ interface Preset {
   gradA?: string;
   gradB?: string;
   gradAngle?: number;
+  /** Block-texture ids for the front / sides / back faces. */
+  faceTex?: string;
+  sideTex?: string;
+  backTex?: string;
   outline?: { color: string; width: number };
   /** Flat two-layer drop shadow (no extrusion walls). */
   layered?: boolean;
@@ -65,6 +105,14 @@ const PRESETS: Preset[] = [
     fill: "rainbow", gradAngle: 0, thumb: "linear-gradient(90deg,#ff3b30,#ffcc00,#34c759,#007aff,#af52de)" },
   { label: "Sky Outline", profile: "flat", depth: 8, color: "#7ec8ff", sideColor: "#2b50b0",
     outline: { color: "#1838b8", width: 3 }, thumb: "#7ec8ff" },
+  { label: "Grass Block", profile: "flat", depth: 18, color: "#6ab04c", sideColor: "#6b4a2b",
+    fill: "texture", faceTex: "grass3", sideTex: "dirt", thumb: "url(/textures/wordart/grass3.svg) center/cover" },
+  { label: "Brick Wall", profile: "bevel", depth: 22, color: "#a8432a", sideColor: "#7a2f1d",
+    fill: "texture", faceTex: "brick", sideTex: "brick2", thumb: "url(/textures/wordart/brick.svg) center/cover" },
+  { label: "Stone", profile: "flat", depth: 20, color: "#8d8d8d", sideColor: "#5a5a5a",
+    fill: "texture", faceTex: "rock", sideTex: "rock3", thumb: "url(/textures/wordart/rock.svg) center/cover" },
+  { label: "Ice", profile: "bevel", depth: 18, color: "#b9e6ff", sideColor: "#6aa9cc",
+    fill: "texture", faceTex: "ice", sideTex: "ice3", thumb: "url(/textures/wordart/ice.svg) center/cover" },
   { label: "Gold Bevel", profile: "bevel", depth: 26, color: "#d4a82a", sideColor: "#7c5e16" },
   { label: "Retro Block", profile: "flat", depth: 6, color: "#ff4d6d", sideColor: "#3a0ca3", backColor: "#3a0ca3", offset: 16, layered: true, thumb: "#ff4d6d" },
   { label: "Arch Gold", profile: "bevel", depth: 22, color: "#e9b949", sideColor: "#8a5a12", warp: { shape: "arch", amount: 0.6 } },
@@ -150,6 +198,11 @@ export function WordArtWorkbench() {
   const [scaleX, setScaleX] = useState(() => qn("sx", 100));
   const [scaleY, setScaleY] = useState(() => qn("sy", 100));
   const [profile, setProfile] = useState<ExtrudeProfile>(() => qs("profile", "bevel") as ExtrudeProfile);
+  const [roundConvex, setRoundConvex] = useState(() => qb("rconv", false));
+  const [bezier, setBezier] = useState<Bezier4>(() => {
+    const p = qs("bez", "").split(",").map(Number);
+    return p.length === 4 && p.every((n) => !Number.isNaN(n)) ? (p as Bezier4) : [0.3, 0.9, 0.7, 0.1];
+  });
   const [depth, setDepth] = useState(() => qn("depth", 26));
   const [letterSpacing, setLetterSpacing] = useState(() => qn("ls", 0));
   const [lineHeight, setLineHeight] = useState(() => qn("lh", 1.15));
@@ -173,6 +226,11 @@ export function WordArtWorkbench() {
   const [gradB, setGradB] = useState(() => qs("gb", "#ff5e3a"));
   const [gradAngle, setGradAngle] = useState(() => qn("gang", 270));
   const [fillImage, setFillImage] = useState("");
+  const [faceTex, setFaceTex] = useState(() => qs("ftex", "dirt"));
+  const [sideFill, setSideFill] = useState<FaceFill>(() => qs("sfill", "solid") as FaceFill);
+  const [sideTex, setSideTex] = useState(() => qs("stex", "dirt"));
+  const [backFill, setBackFill] = useState<FaceFill>(() => qs("bfill", "solid") as FaceFill);
+  const [backTex, setBackTex] = useState(() => qs("btex", "dirt"));
   const [outlineOn, setOutlineOn] = useState(() => qb("ol", false));
   const [outlineColor, setOutlineColor] = useState(() => qs("olc", "#1a1a2e"));
   const [outlineWidth, setOutlineWidth] = useState(() => qn("olw", 3));
@@ -241,6 +299,8 @@ export function WordArtWorkbench() {
     sn("sx", scaleX, 100);
     sn("sy", scaleY, 100);
     ss("profile", profile, "bevel");
+    if (roundConvex) p.set("rconv", "1");
+    if (profile === "custom") p.set("bez", bezier.map((n) => +n.toFixed(3)).join(","));
     sn("depth", depth, 26);
     sn("ls", letterSpacing, 0);
     sn("lh", lineHeight, 1.15);
@@ -269,13 +329,18 @@ export function WordArtWorkbench() {
     ss("ga", gradA, "#ffd23f");
     ss("gb", gradB, "#ff5e3a");
     sn("gang", gradAngle, 270);
+    ss("ftex", faceTex, "dirt");
+    ss("sfill", sideFill, "solid");
+    ss("stex", sideTex, "dirt");
+    ss("bfill", backFill, "solid");
+    ss("btex", backTex, "dirt");
     if (outlineOn) p.set("ol", "1");
     ss("olc", outlineColor, "#1a1a2e");
     sn("olw", outlineWidth, 3);
     if (layered) p.set("layer", "1");
     const search = p.toString();
     window.history.replaceState(null, "", `${window.location.pathname}${search ? `?${search}` : ""}${window.location.hash}`);
-  }, [text, entry, weight, italic, textCase, scaleX, scaleY, profile, depth, letterSpacing, lineHeight, align, underline, strike, color, sideColor, backColor, offset, curveSegments, simplify, merge, profileSegments, warpShape, warpAmount, spin, perspective, zoomScale, lightIntensity, ambient, lightColor, lightAz, lightEl, fillType, gradA, gradB, gradAngle, outlineOn, outlineColor, outlineWidth, layered]);
+  }, [text, entry, weight, italic, textCase, scaleX, scaleY, profile, depth, letterSpacing, lineHeight, align, underline, strike, color, sideColor, backColor, offset, curveSegments, simplify, merge, profileSegments, warpShape, warpAmount, spin, perspective, zoomScale, lightIntensity, ambient, lightColor, lightAz, lightEl, roundConvex, bezier, fillType, gradA, gradB, gradAngle, faceTex, sideFill, sideTex, backFill, backTex, outlineOn, outlineColor, outlineWidth, layered]);
 
   // Load the picked Google font whenever family / weight / style changes.
   useEffect(() => {
@@ -295,47 +360,58 @@ export function WordArtWorkbench() {
     };
   }, [entry, weight, italic]);
 
-  // One master fill texture (gradient / rainbow / image) painted across the
-  // whole word; `solid` produces no texture (the face stays the flat color).
-  const fillKey = `${fillType}:${gradA}:${gradB}:${gradAngle}:${fillImage.slice(0, 40)}`;
-  const faceTexture = useMemo(() => {
-    const spec: FillSpec =
-      fillType === "gradient" ? { type: "gradient", from: gradA, to: gradB, angle: gradAngle }
-      : fillType === "rainbow" ? { type: "rainbow", angle: gradAngle }
-      : fillType === "image" ? { type: "image", src: fillImage }
-      : { type: "solid" };
-    return makeFillTexture(spec);
+  // Resolve each face's UI fill into a pure `Face` (gradients/rainbow → data URL
+  // via resolveFace; solid/texture pass through). One key so the memo is stable.
+  const TILE = 52;
+  const frontKey = `${fillType}:${gradA}:${gradB}:${gradAngle}:${faceTex}:${color}:${fillImage.slice(0, 40)}`;
+  const front = useMemo<Face>(() => {
+    const spec: FaceFillSpec =
+      fillType === "gradient" ? { kind: "gradient", color, from: gradA, to: gradB, angle: gradAngle }
+      : fillType === "rainbow" ? { kind: "rainbow", color, angle: gradAngle }
+      : fillType === "texture" ? { kind: "texture", color, url: texUrl(faceTex), tile: TILE }
+      : fillType === "image" ? { kind: "image", color, src: fillImage }
+      : { kind: "solid", color };
+    return resolveFace(spec);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fillKey]);
+  }, [frontKey]);
 
   const polygons = useMemo<Polygon[]>(() => {
     if (!font) return [];
+    // "None" → no separate material for that face (it's covered by the nearest
+    // active face), but the geometry still renders — no hole.
+    const sides: Face | false =
+      sideFill === "texture" ? resolveFace({ kind: "texture", color: sideColor, url: texUrl(sideTex), tile: TILE })
+      : sideFill === "solid" ? { color: sideColor }
+      : false;
+    let back: BackFace | false =
+      backFill === "texture" ? resolveFace({ kind: "texture", color: backColor, url: texUrl(backTex), tile: TILE })
+      : backFill === "solid" ? { color: backColor }
+      : false;
+    if (back !== false && layered) back.offset = [offset || 12, -(offset || 12)];
+
+    const profileObj: Profile =
+      profile === "flat" ? "flat"
+      : profile === "custom" ? { curve: bezier, segments: profileSegments }
+      : { edge: profile, raised: roundConvex, segments: profileSegments };
+
     return composeText(font, applyCase(text, textCase), {
       size: 100,
-      depth,
-      profile,
+      depth: layered ? 0 : depth,        // "Flat layers" = no edges (depth 0)
+      profile: profileObj,
+      scale: [scaleX / 100, scaleY / 100],
       letterSpacing,
       lineHeight,
       align,
-      scaleX: scaleX / 100,
-      scaleY: scaleY / 100,
       underline,
       strike,
-      color,
-      sideColor,
-      backColor,
-      oblique: (offset || layered) ? [offset || 12, -(offset || 12)] : undefined,
       curveSteps: curveSegments,
       simplify,
       merge,
-      profileSegments,
       warp: { shape: warpShape, amount: warpAmount },
-      faceTexture,
-      faceTextureKey: fillKey,
+      faces: { front, sides, back },
       outline: outlineOn ? { color: outlineColor, width: outlineWidth } : undefined,
-      layered,
     });
-  }, [font, text, textCase, scaleX, scaleY, depth, profile, letterSpacing, lineHeight, align, underline, strike, color, sideColor, backColor, offset, curveSegments, simplify, merge, profileSegments, warpShape, warpAmount, faceTexture, fillKey, outlineOn, outlineColor, outlineWidth, layered]);
+  }, [font, text, textCase, scaleX, scaleY, depth, profile, roundConvex, bezier, letterSpacing, lineHeight, align, underline, strike, sideColor, backColor, offset, curveSegments, simplify, merge, profileSegments, warpShape, warpAmount, front, fillType, backFill, backTex, sideFill, sideTex, outlineOn, outlineColor, outlineWidth, layered]);
 
   // Directional light direction from azimuth (left/right) + elevation (height),
   // always biased toward the front so the face stays lit.
@@ -367,13 +443,23 @@ export function WordArtWorkbench() {
     if (p.gradA) setGradA(p.gradA);
     if (p.gradB) setGradB(p.gradB);
     setGradAngle(p.gradAngle ?? 270);
+    if (p.faceTex) setFaceTex(p.faceTex);
+    setSideFill(p.sideTex ? "texture" : "solid");
+    if (p.sideTex) setSideTex(p.sideTex);
+    setBackFill(p.backTex ? "texture" : "solid");
+    if (p.backTex) setBackTex(p.backTex);
     setOutlineOn(!!p.outline);
     if (p.outline) { setOutlineColor(p.outline.color); setOutlineWidth(p.outline.width); }
     setLayered(!!p.layered);
     setActivePreset(p.label);
   }
 
-  const leftValues: LeftValues = { weight, italic, underline, strike, textCase, align, color, sideColor, backColor };
+  const leftValues: LeftValues = {
+    weight, italic, underline, strike, textCase, align, color, sideColor, backColor,
+    fillType, gradA, gradB, gradAngle, image: fillImage, faceTex,
+    sideFill, sideTex, backFill, backTex,
+    outlineOn, outlineColor, outlineWidth,
+  };
   const leftSet = (k: keyof LeftValues, v: number | string | boolean) => {
     switch (k) {
       case "weight": setWeight(v as number); break;
@@ -385,13 +471,31 @@ export function WordArtWorkbench() {
       case "color": setColor(v as string); break;
       case "sideColor": setSideColor(v as string); break;
       case "backColor": setBackColor(v as string); break;
+      case "fillType": setFillType(v as FillType); break;
+      case "gradA": setGradA(v as string); break;
+      case "gradB": setGradB(v as string); break;
+      case "gradAngle": setGradAngle(v as number); break;
+      case "image": setFillImage(v as string); break;
+      case "faceTex": setFaceTex(v as string); break;
+      case "sideFill": setSideFill(v as FaceFill); break;
+      case "sideTex": setSideTex(v as string); break;
+      case "backFill": setBackFill(v as FaceFill); break;
+      case "backTex": setBackTex(v as string); break;
+      case "outlineOn": setOutlineOn(v as boolean); break;
+      case "outlineColor": setOutlineColor(v as string); break;
+      case "outlineWidth": setOutlineWidth(v as number); break;
     }
   };
 
+  // The Profile dropdown encodes edge shape only — colors now come from the
+  // axial face stops, so there's no coverage to bundle in.
+  const profileMode = profile === "flat" ? "flat"
+    : profile === "custom" ? "custom"
+    : profile === "round" ? (roundConvex ? "roundup" : "round")
+    : "bevel";
   const guiValues: GuiValues = {
-    fillType, gradA, gradB, gradAngle, image: fillImage,
-    outlineOn, outlineColor, outlineWidth, layered,
-    profile, warp: warpShape, bend: warpAmount,
+    layered,
+    profileMode, warp: warpShape, bend: warpAmount,
     depth, letterSpacing, lineHeight, scaleX, scaleY,
     curveSegments, simplify, merge, profileSegments, offset,
     perspective, zoom: zoomScale, spin,
@@ -399,16 +503,14 @@ export function WordArtWorkbench() {
   };
   const guiSet = (k: keyof GuiValues, v: number | string | boolean) => {
     switch (k) {
-      case "fillType": setFillType(v as FillType); break;
-      case "gradA": setGradA(v as string); break;
-      case "gradB": setGradB(v as string); break;
-      case "gradAngle": setGradAngle(v as number); break;
-      case "image": setFillImage(v as string); break;
-      case "outlineOn": setOutlineOn(v as boolean); break;
-      case "outlineColor": setOutlineColor(v as string); break;
-      case "outlineWidth": setOutlineWidth(v as number); break;
       case "layered": setLayered(v as boolean); break;
-      case "profile": setProfile(v as ExtrudeProfile); break;
+      case "profileMode": {
+        const base = v as string;
+        setProfile(base === "flat" ? "flat" : base === "custom" ? "custom" : base.startsWith("round") ? "round" : "bevel");
+        setRoundConvex(base === "roundup");
+        break;
+      }
+      case "warp": setWarpShape(v as WarpShape); break;
       case "warp": setWarpShape(v as WarpShape); break;
       case "bend": setWarpAmount(v as number); break;
       case "depth": setDepth(v as number); break;
@@ -489,6 +591,8 @@ export function WordArtWorkbench() {
         className={mobilePanel === "controls" ? "is-mobile-open" : ""}
         values={guiValues}
         set={guiSet}
+        bezier={bezier}
+        onBezier={setBezier}
       />
 
       <button type="button" className="wa-codepen" onClick={handleCodePen} disabled={exporting}>
@@ -639,13 +743,96 @@ function Stage({ polygons, zoomScale, setZoomScale, perspective, lightDir, light
 }
 
 interface GuiValues {
-  fillType: string; gradA: string; gradB: string; gradAngle: number; image: string;
-  outlineOn: boolean; outlineColor: string; outlineWidth: number; layered: boolean;
-  profile: string; warp: string; bend: number;
+  layered: boolean;
+  profileMode: string; warp: string; bend: number;
   depth: number; letterSpacing: number; lineHeight: number; scaleX: number; scaleY: number;
   curveSegments: number; simplify: number; merge: boolean; profileSegments: number; offset: number;
   perspective: boolean; zoom: number; spin: boolean;
   light: number; ambient: number; az: number; el: number; lightColor: string;
+}
+
+/** One coordinate of a cubic Bézier P0..P3 at parameter t. */
+function cubicAt(p0: number, p1: number, p2: number, p3: number, t: number): number {
+  const m = 1 - t;
+  return m * m * m * p0 + 3 * m * m * t * p1 + 3 * m * t * t * p2 + t * t * t * p3;
+}
+
+/**
+ * Mount a draggable cubic-bezier editor (the CSS easing curve) into `parent`.
+ * P0=(0,0) and P3=(1,1) are fixed; the two control handles drive `setB`.
+ * Returns a `redraw()` to resync the SVG when the value changes elsewhere.
+ */
+function mountBezierEditor(parent: HTMLElement, getB: () => Bezier4, setB: (b: Bezier4) => void): () => void {
+  const NS = "http://www.w3.org/2000/svg";
+  const W = 220, H = 150, pad = 16;
+  const X = (x: number) => pad + x * (W - 2 * pad);
+  const Y = (y: number) => (H - pad) - y * (H - 2 * pad);
+  const el = (n: string, a: Record<string, string>) => {
+    const e = document.createElementNS(NS, n);
+    for (const k in a) e.setAttribute(k, a[k]);
+    return e;
+  };
+  const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, class: "wa-bez" });
+  const frame = el("rect", { x: `${X(0)}`, y: `${Y(1)}`, width: `${W - 2 * pad}`, height: `${H - 2 * pad}`, class: "wa-bez__frame" });
+  const diag = el("line", { x1: `${X(0)}`, y1: `${Y(0)}`, x2: `${X(1)}`, y2: `${Y(1)}`, class: "wa-bez__diag" });
+  const l1 = el("line", { class: "wa-bez__leg" });
+  const l2 = el("line", { class: "wa-bez__leg" });
+  const curve = el("path", { class: "wa-bez__curve" });
+  const h1 = el("circle", { r: "5", class: "wa-bez__h" });
+  const h2 = el("circle", { r: "5", class: "wa-bez__h" });
+  svg.append(frame, diag, l1, l2, curve, h1, h2);
+  parent.appendChild(svg);
+
+  // `drawB` is the editor's live value; the SVG follows it every move (cheap),
+  // but the mesh re-extrude (`setB`) is debounced so dragging stays smooth.
+  let drawB: Bezier4 = getB();
+  let active = 0;
+  let timer = 0;
+  const commit = (now: boolean) => {
+    clearTimeout(timer);
+    if (now) setB(drawB);
+    else timer = window.setTimeout(() => setB(drawB), 130);
+  };
+  const render = () => {
+    const [x1, y1, x2, y2] = drawB;
+    let d = `M ${X(0)} ${Y(0)}`;
+    for (let i = 1; i <= 24; i++) {
+      const t = i / 24;
+      d += ` L ${X(cubicAt(0, x1, x2, 1, t))} ${Y(cubicAt(0, y1, y2, 1, t))}`;
+    }
+    curve.setAttribute("d", d);
+    l1.setAttribute("x1", `${X(0)}`); l1.setAttribute("y1", `${Y(0)}`); l1.setAttribute("x2", `${X(x1)}`); l1.setAttribute("y2", `${Y(y1)}`);
+    l2.setAttribute("x1", `${X(1)}`); l2.setAttribute("y1", `${Y(1)}`); l2.setAttribute("x2", `${X(x2)}`); l2.setAttribute("y2", `${Y(y2)}`);
+    h1.setAttribute("cx", `${X(x1)}`); h1.setAttribute("cy", `${Y(y1)}`);
+    h2.setAttribute("cx", `${X(x2)}`); h2.setAttribute("cy", `${Y(y2)}`);
+  };
+
+  const toData = (ev: PointerEvent): [number, number] => {
+    const r = svg.getBoundingClientRect();
+    const x = (((ev.clientX - r.left) / r.width) * W - pad) / (W - 2 * pad);
+    const y = ((H - pad) - ((ev.clientY - r.top) / r.height) * H) / (H - 2 * pad);
+    return [Math.min(1, Math.max(0, x)), Math.min(1, Math.max(0, y))];
+  };
+  const move = (ev: PointerEvent) => {
+    if (!active) return;
+    const [x, y] = toData(ev);
+    drawB = [...drawB] as Bezier4;
+    if (active === 1) { drawB[0] = x; drawB[1] = y; } else { drawB[2] = x; drawB[3] = y; }
+    render();
+    commit(false);
+  };
+  const start = (handle: number, e: PointerEvent, target: SVGElement) => {
+    active = handle;
+    drawB = [...getB()] as Bezier4;
+    target.setPointerCapture(e.pointerId);
+  };
+  h1.addEventListener("pointerdown", (e) => start(1, e as PointerEvent, h1 as SVGElement));
+  h2.addEventListener("pointerdown", (e) => start(2, e as PointerEvent, h2 as SVGElement));
+  svg.addEventListener("pointermove", move as EventListener);
+  svg.addEventListener("pointerup", () => { if (active) { active = 0; commit(true); } });
+  render();
+  // External redraw (state changed elsewhere) — adopt it only when not dragging.
+  return () => { if (!active) drawB = getB(); render(); };
 }
 
 /**
@@ -654,10 +841,13 @@ interface GuiValues {
  * are identical, not a CSS approximation. lil-gui is imperative, so we mount it
  * once and bridge its onChange → React, and React state → updateDisplay().
  */
-function GuiPanel({ id, className = "", values, set }: { id?: string; className?: string; values: GuiValues; set: (k: keyof GuiValues, v: number | string | boolean) => void }) {
+function GuiPanel({ id, className = "", values, set, bezier, onBezier }: { id?: string; className?: string; values: GuiValues; set: (k: keyof GuiValues, v: number | string | boolean) => void; bezier: Bezier4; onBezier: (b: Bezier4) => void }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const cfgRef = useRef<GuiValues>({ ...values });
   const ctrlRef = useRef<Record<string, ReturnType<GUI["add"]>>>({});
+  const bezierRef = useRef(bezier);
+  const onBezierRef = useRef(onBezier);
+  const bezUiRef = useRef<{ wrap: HTMLElement; input: HTMLInputElement; redraw: () => void } | null>(null);
 
   useEffect(() => {
     const cfg = cfgRef.current;
@@ -665,44 +855,39 @@ function GuiPanel({ id, className = "", values, set }: { id?: string; className?
     const gui = new GUI({ container: hostRef.current!, title: "Settings", width: 300 });
     const on = (k: keyof GuiValues) => (v: number | string | boolean) => set(k, v);
 
-    const fill = gui.addFolder("Fill");
-    c.fillType = fill.add(cfg, "fillType", { Solid: "solid", Gradient: "gradient", Rainbow: "rainbow", Image: "image" }).name("Fill").onChange(on("fillType"));
-    c.gradA = fill.addColor(cfg, "gradA").name("Color A").onChange(on("gradA"));
-    c.gradB = fill.addColor(cfg, "gradB").name("Color B").onChange(on("gradB"));
-    c.gradAngle = fill.add(cfg, "gradAngle", 0, 360, 5).name("Angle").onChange(on("gradAngle"));
-    // lil-gui has no file input — inject a "Choose image" button that reads the
-    // picked file as a data URL (the renderer uses it as a background-image).
-    c.image = fill.add({ _: "" }, "_").name("Image");
+    const shape = gui.addFolder("Shape");
+    c.profileMode = shape.add(cfg, "profileMode", {
+      "Flat (slab)": "flat",
+      "Bevel": "bevel",
+      "Round in": "round",
+      "Round out": "roundup",
+      "Custom curve": "custom",
+    }).name("Profile").onChange(on("profileMode"));
+
+    // Custom-profile curve: a CSS cubic-bezier() text field + a draggable editor
+    // (shown only for the Custom profile). Both drive the `bezier` prop.
+    c.bezierText = shape.add({ _: "" }, "_").name("Curve");
     {
-      const widget = c.image.domElement.querySelector<HTMLElement>(".widget");
+      const widget = c.bezierText.domElement.querySelector<HTMLElement>(".widget");
+      const wrap = document.createElement("div");
+      wrap.className = "wa-bezwrap";
+      let input = document.createElement("input");
       if (widget) {
         widget.replaceChildren();
-        const btn = document.createElement("button");
-        btn.type = "button";
-        btn.className = "wa-imgbtn";
-        btn.textContent = "Choose image…";
-        const input = document.createElement("input");
-        input.type = "file";
-        input.accept = "image/*";
-        input.style.display = "none";
-        btn.addEventListener("click", () => input.click());
+        input.type = "text";
+        input.className = "wa-input wa-bezinput";
+        input.spellcheck = false;
         input.addEventListener("change", () => {
-          const file = input.files?.[0];
-          if (!file) return;
-          const reader = new FileReader();
-          reader.onload = () => set("image", String(reader.result));
-          reader.readAsDataURL(file);
+          const parsed = parseBezier(input.value);
+          if (parsed) onBezierRef.current(parsed);
         });
-        widget.append(btn, input);
+        widget.appendChild(input);
       }
+      shape.domElement.querySelector(".children")?.appendChild(wrap);
+      const redraw = mountBezierEditor(wrap, () => bezierRef.current, (b) => onBezierRef.current(b));
+      bezUiRef.current = { wrap, input, redraw };
     }
-    c.outlineOn = fill.add(cfg, "outlineOn").name("Outline").onChange(on("outlineOn"));
-    c.outlineColor = fill.addColor(cfg, "outlineColor").name("Outline color").onChange(on("outlineColor"));
-    c.outlineWidth = fill.add(cfg, "outlineWidth", 0.5, 12, 0.5).name("Outline width").onChange(on("outlineWidth"));
-    c.layered = fill.add(cfg, "layered").name("Flat layers").onChange(on("layered"));
 
-    const shape = gui.addFolder("Shape");
-    c.profile = shape.add(cfg, "profile", { "Flat (slab)": "flat", "Round (bullnose)": "round", "Bevel (rounded edge)": "bevel" }).name("Profile").onChange(on("profile"));
     c.warp = shape.add(cfg, "warp", { None: "none", "Arch up": "arch", "Arch down": "archDown", "Arc (circle)": "arc", Wave: "wave", Bulge: "bulge", "Cone (taper)": "cone", "Slant up": "slantUp", "Slant down": "slantDown" }).name("Warp").onChange(on("warp"));
     c.bend = shape.add(cfg, "bend", 0, 1, 0.02).name("Bend").onChange(on("bend"));
 
@@ -710,13 +895,14 @@ function GuiPanel({ id, className = "", values, set }: { id?: string; className?
     c.depth = layout.add(cfg, "depth", 2, 80, 1).name("Depth").onChange(on("depth"));
     c.letterSpacing = layout.add(cfg, "letterSpacing", -20, 60, 1).name("Letter spacing").onChange(on("letterSpacing"));
     c.lineHeight = layout.add(cfg, "lineHeight", 0.8, 2.5, 0.05).name("Line height").onChange(on("lineHeight"));
-    c.scaleX = layout.add(cfg, "scaleX", 40, 200, 1).name("Width %").onChange(on("scaleX"));
-    c.scaleY = layout.add(cfg, "scaleY", 40, 200, 1).name("Height %").onChange(on("scaleY"));
+    c.scaleX = layout.add(cfg, "scaleX", 40, 200, 1).name("Scale X").onChange(on("scaleX"));
+    c.scaleY = layout.add(cfg, "scaleY", 40, 200, 1).name("Scale Y").onChange(on("scaleY"));
     c.curveSegments = layout.add(cfg, "curveSegments", 1, 12, 1).name("Curve segments").onChange(on("curveSegments"));
     c.simplify = layout.add(cfg, "simplify", 0, 8, 0.5).name("Simplify").onChange(on("simplify"));
     c.merge = layout.add(cfg, "merge").name("Merge polygons").onChange(on("merge"));
     c.profileSegments = layout.add(cfg, "profileSegments", 2, 10, 1).name("Edge segments").onChange(on("profileSegments"));
     c.offset = layout.add(cfg, "offset", 0, 32, 1).name("Layer offset").onChange(on("offset"));
+    c.layered = layout.add(cfg, "layered").name("Flat layers").onChange(on("layered"));
 
     const cam = gui.addFolder("Camera");
     c.perspective = cam.add(cfg, "perspective").name("Perspective").onChange(on("perspective"));
@@ -738,15 +924,17 @@ function GuiPanel({ id, className = "", values, set }: { id?: string; className?
   useEffect(() => {
     Object.assign(cfgRef.current, values);
     for (const ctrl of Object.values(ctrlRef.current)) ctrl?.updateDisplay();
+    bezierRef.current = bezier;
+    onBezierRef.current = onBezier;
+    const isCustom = values.profileMode.startsWith("custom");
     ctrlRef.current.bend?.[values.warp !== "none" ? "show" : "hide"]();
-    ctrlRef.current.profileSegments?.[values.profile === "round" ? "show" : "hide"]();
-    const grad = values.fillType === "gradient";
-    ctrlRef.current.gradA?.[grad ? "show" : "hide"]();
-    ctrlRef.current.gradB?.[grad ? "show" : "hide"]();
-    ctrlRef.current.gradAngle?.[grad || values.fillType === "rainbow" ? "show" : "hide"]();
-    ctrlRef.current.image?.[values.fillType === "image" ? "show" : "hide"]();
-    ctrlRef.current.outlineColor?.[values.outlineOn ? "show" : "hide"]();
-    ctrlRef.current.outlineWidth?.[values.outlineOn ? "show" : "hide"]();
+    ctrlRef.current.profileSegments?.[(values.profileMode.startsWith("round") || isCustom) ? "show" : "hide"]();
+    ctrlRef.current.bezierText?.[isCustom ? "show" : "hide"]();
+    if (bezUiRef.current) {
+      bezUiRef.current.wrap.style.display = isCustom ? "" : "none";
+      bezUiRef.current.redraw();
+      if (document.activeElement !== bezUiRef.current.input) bezUiRef.current.input.value = bezierToCss(bezier);
+    }
   });
 
   return <div id={id} className={`wa-gui ${className}`} ref={hostRef} />;
@@ -755,6 +943,9 @@ function GuiPanel({ id, className = "", values, set }: { id?: string; className?
 interface LeftValues {
   weight: number; italic: boolean; underline: boolean; strike: boolean;
   textCase: string; align: string; color: string; sideColor: string; backColor: string;
+  fillType: string; gradA: string; gradB: string; gradAngle: number; image: string;
+  faceTex: string; sideFill: string; sideTex: string; backFill: string; backTex: string;
+  outlineOn: boolean; outlineColor: string; outlineWidth: number;
 }
 
 /** lil-gui typography + color panel for the left card (blends in, borderless). */
@@ -763,6 +954,8 @@ function LeftGuiPanel({ values, set }: { values: LeftValues; set: (k: keyof Left
   const cfgRef = useRef<LeftValues>({ ...values });
   const ctrlRef = useRef<Record<string, ReturnType<GUI["add"]>>>({});
   const segRef = useRef<Record<string, (v: string) => void>>({});
+  const texRef = useRef<Record<string, (v: string) => void>>({});
+  const texWrapRef = useRef<Record<string, HTMLElement>>({});
 
   useEffect(() => {
     const cfg = cfgRef.current;
@@ -801,10 +994,84 @@ function LeftGuiPanel({ values, set }: { values: LeftValues; set: (k: keyof Left
     segmented(type, "Case", "textCase", [["as-typed", "Aa", "As typed"], ["upper", "AB", "UPPERCASE"], ["lower", "ab", "lowercase"], ["title", "Ab", "Title Case"]]);
     segmented(type, "Align", "align", [["left", "L", "Left"], ["center", "C", "Center"], ["right", "R", "Right"]]);
 
+    // Each face (front / sides / back) has its own fill-type selector that
+    // generates the matching input below it.
     const col = gui.addFolder("Color");
-    c.color = col.addColor(cfg, "color").name("Face").onChange(on("color"));
-    c.sideColor = col.addColor(cfg, "sideColor").name("Sides").onChange(on("sideColor"));
-    c.backColor = col.addColor(cfg, "backColor").name("Back").onChange(on("backColor"));
+    const colChildren = col.domElement.querySelector(".children");
+
+    // A grid of bundled block-texture swatches injected into the folder
+    // (lil-gui has no image picker). Shown only when that face is in Texture mode.
+    const texGrid = (key: keyof LeftValues) => {
+      const wrap = document.createElement("div");
+      wrap.className = "wa-texrow";
+      const grid = document.createElement("div");
+      grid.className = "wa-texgrid";
+      wrap.append(grid);
+      const swatches: Record<string, HTMLButtonElement> = {};
+      for (const t of TEXTURES) {
+        const sw = document.createElement("button");
+        sw.type = "button";
+        sw.className = "wa-texgrid__sw";
+        sw.title = t.label;
+        sw.style.backgroundImage = `url(${texUrl(t.id)})`;
+        sw.addEventListener("click", () => set(key, t.id));
+        grid.appendChild(sw);
+        swatches[t.id] = sw;
+      }
+      colChildren?.appendChild(wrap);
+      texRef.current[key] = (v: string) => {
+        for (const id in swatches) swatches[id].classList.toggle("is-on", id === v);
+      };
+      texWrapRef.current[key] = wrap;
+    };
+
+    // Front — the full fill set.
+    c.fillType = col.add(cfg, "fillType", { Solid: "solid", Gradient: "gradient", Rainbow: "rainbow", Texture: "texture", Image: "image" }).name("Front").onChange(on("fillType"));
+    c.color = col.addColor(cfg, "color").name("Color").onChange(on("color"));
+    c.gradA = col.addColor(cfg, "gradA").name("Color A").onChange(on("gradA"));
+    c.gradB = col.addColor(cfg, "gradB").name("Color B").onChange(on("gradB"));
+    c.gradAngle = col.add(cfg, "gradAngle", 0, 360, 5).name("Angle").onChange(on("gradAngle"));
+    // lil-gui has no file input — inject a "Choose image" button that reads the
+    // picked file as a data URL (the renderer uses it as a background-image).
+    c.image = col.add({ _: "" }, "_").name("Image");
+    {
+      const widget = c.image.domElement.querySelector<HTMLElement>(".widget");
+      if (widget) {
+        widget.replaceChildren();
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "wa-imgbtn";
+        btn.textContent = "Choose image…";
+        const input = document.createElement("input");
+        input.type = "file";
+        input.accept = "image/*";
+        input.style.display = "none";
+        btn.addEventListener("click", () => input.click());
+        input.addEventListener("change", () => {
+          const file = input.files?.[0];
+          if (!file) return;
+          const reader = new FileReader();
+          reader.onload = () => set("image", String(reader.result));
+          reader.readAsDataURL(file);
+        });
+        widget.append(btn, input);
+      }
+    }
+    texGrid("faceTex");
+
+    // Sides — solid color or block texture.
+    c.sideFill = col.add(cfg, "sideFill", { Solid: "solid", Texture: "texture", None: "none" }).name("Sides").onChange(on("sideFill"));
+    c.sideColor = col.addColor(cfg, "sideColor").name("Color").onChange(on("sideColor"));
+    texGrid("sideTex");
+
+    // Back — solid color or block texture.
+    c.backFill = col.add(cfg, "backFill", { Solid: "solid", Texture: "texture", None: "none" }).name("Back").onChange(on("backFill"));
+    c.backColor = col.addColor(cfg, "backColor").name("Color").onChange(on("backColor"));
+    texGrid("backTex");
+
+    c.outlineOn = col.add(cfg, "outlineOn").name("Outline").onChange(on("outlineOn"));
+    c.outlineColor = col.addColor(cfg, "outlineColor").name("Outline color").onChange(on("outlineColor"));
+    c.outlineWidth = col.add(cfg, "outlineWidth", 0.5, 12, 0.5).name("Outline width").onChange(on("outlineWidth"));
 
     return () => gui.destroy();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -815,6 +1082,23 @@ function LeftGuiPanel({ values, set }: { values: LeftValues; set: (k: keyof Left
     for (const ctrl of Object.values(ctrlRef.current)) ctrl?.updateDisplay();
     segRef.current.textCase?.(values.textCase);
     segRef.current.align?.(values.align);
+    // Show only the input that matches each face's selected fill mode.
+    const grad = values.fillType === "gradient";
+    ctrlRef.current.color?.[values.fillType === "solid" ? "show" : "hide"]();
+    ctrlRef.current.gradA?.[grad ? "show" : "hide"]();
+    ctrlRef.current.gradB?.[grad ? "show" : "hide"]();
+    ctrlRef.current.gradAngle?.[grad || values.fillType === "rainbow" ? "show" : "hide"]();
+    ctrlRef.current.image?.[values.fillType === "image" ? "show" : "hide"]();
+    texWrapRef.current.faceTex?.style.setProperty("display", values.fillType === "texture" ? "" : "none");
+    ctrlRef.current.sideColor?.[values.sideFill === "solid" ? "show" : "hide"]();
+    texWrapRef.current.sideTex?.style.setProperty("display", values.sideFill === "texture" ? "" : "none");
+    ctrlRef.current.backColor?.[values.backFill === "solid" ? "show" : "hide"]();
+    texWrapRef.current.backTex?.style.setProperty("display", values.backFill === "texture" ? "" : "none");
+    ctrlRef.current.outlineColor?.[values.outlineOn ? "show" : "hide"]();
+    ctrlRef.current.outlineWidth?.[values.outlineOn ? "show" : "hide"]();
+    texRef.current.faceTex?.(values.faceTex);
+    texRef.current.sideTex?.(values.sideTex);
+    texRef.current.backTex?.(values.backTex);
   });
 
   return <div className="wa-gui wa-gui--inline" ref={hostRef} />;

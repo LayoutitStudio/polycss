@@ -210,6 +210,34 @@ textarea.wa-input { resize: vertical; line-height: 1.35; height: auto; padding: 
 }
 .wa-imgbtn:hover { border-color: #22d3ee; color: #e8f9ff; }
 
+/* Custom-profile cubic-bezier editor. */
+.wa-bezinput { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; }
+.wa-bezwrap { padding: 6px 0 2px; }
+.wa-bez { width: 100%; height: auto; touch-action: none; display: block; }
+.wa-bez__frame { fill: #0b0d10; stroke: #2a3340; stroke-width: 1; }
+.wa-bez__diag { stroke: #2a3340; stroke-width: 1; stroke-dasharray: 3 3; }
+.wa-bez__leg { stroke: #3a4757; stroke-width: 1.5; }
+.wa-bez__curve { fill: none; stroke: #22d3ee; stroke-width: 2.5; }
+.wa-bez__h { fill: #142033; stroke: #22d3ee; stroke-width: 2; cursor: grab; }
+.wa-bez__h:active { cursor: grabbing; fill: #22d3ee; }
+
+/* Bundled-texture swatch grid (front / sides / back face pickers). */
+.wa-texrow { padding: 4px 0 2px; }
+.wa-texrow__label { font-size: 12px; color: #9aa4b1; margin: 0 0 4px; }
+.wa-texgrid { display: grid; grid-template-columns: repeat(8, 1fr); gap: 3px; }
+.wa-texgrid__sw {
+  aspect-ratio: 1; min-width: 0; padding: 0; border-radius: 4px;
+  border: 1px solid #2a3340; background: #0b0d10 center/cover no-repeat;
+  cursor: pointer; image-rendering: pixelated;
+}
+.wa-texgrid__sw:hover { border-color: #3a4757; }
+.wa-texgrid__sw.is-on { border-color: #22d3ee; box-shadow: 0 0 0 1px #22d3ee; }
+.wa-texgrid__sw--none { position: relative; background: #0b0d10; }
+.wa-texgrid__sw--none::after {
+  content: "∅"; position: absolute; inset: 0; display: grid; place-items: center;
+  color: #5b6675; font-size: 12px;
+}
+
 /* Searchable font dropdown. */
 .wa-fontpick { position: relative; }
 .wa-fontpick__list {
