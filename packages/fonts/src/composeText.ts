@@ -8,7 +8,7 @@
  * extrusion, so the 3D walls follow the curve too. Bold/italic are chosen by
  * the caller by passing the appropriate weight/style `ParsedFont`.
  */
-import { mergePolygons, type Polygon } from "@layoutit/polycss-core";
+import type { Polygon } from "@layoutit/polycss-core";
 import type { ParsedFont } from "./parseFont";
 import {
   dedupeContour,
@@ -101,8 +101,6 @@ export interface ComposeTextOptions {
   warp?: WarpOptions;
   /** Outline simplification tolerance (world units, 0 = exact; hole-less glyphs only). */
   simplify?: number;
-  /** Merge coplanar same-color cap triangles into larger polygons (fewer DOM nodes). */
-  merge?: boolean;
   /** Extrusion cross-section / edge profile. Defaults to "flat". */
   profile?: Profile;
   /**
@@ -127,6 +125,17 @@ function resolveProfile(p: Profile | undefined): {
   if (!p || p === "flat") return { profile: "flat" };
   if ("edge" in p) return { profile: p.edge, roundConvex: p.raised, segments: p.segments };
   return { profile: "custom", profileBezier: p.curve, segments: p.segments };
+}
+
+/**
+ * Fewest quarter-arc segments whose worst chord error (sagitta) stays under
+ * `tol` world units, clamped to [2, 6]. For a radius-`r` quarter circle split
+ * into N segments the sagitta is `r·(1 − cos(π/2N))`; solve that ≤ tol for N.
+ */
+function adaptiveRoundSegments(r: number, tol: number): number {
+  if (r <= tol || r <= 1e-6) return 2;
+  const n = Math.ceil(Math.PI / (2 * Math.acos(1 - tol / r)));
+  return Math.min(6, Math.max(2, n));
 }
 
 /**
@@ -173,7 +182,16 @@ export function composeText(font: ParsedFont, text: string, options: ComposeText
   const { stops, backOffset } = resolveStops(options.faces, "#d4a82a");
 
   const prof = resolveProfile(options.profile);
-  const profileSegments = Math.max(1, Math.round(prof.segments ?? 6));
+  // Ring count for the round edge. An explicit `segments` is honored; otherwise
+  // pick the fewest segments whose chord (sagitta) error stays under ~0.4% of
+  // the cap height — the round-over radius is capped at size*0.045, so a small
+  // bevel never needs the full default. A custom curve keeps a fixed default
+  // since its detail isn't a function of edge size.
+  const roundEdge = Math.min(size * 0.045, depth / 2);
+  const adaptive = prof.profile === "round"
+    ? adaptiveRoundSegments(roundEdge, size * 0.004)
+    : 6;
+  const profileSegments = Math.max(1, Math.round(prof.segments ?? adaptive));
   // depth 0 → a flat slab with no side walls (and a place for the offset shadow).
   const flat = depth <= 0;
 
@@ -260,7 +278,7 @@ export function composeText(font: ParsedFont, text: string, options: ComposeText
     outlineColor: options.outline?.color,
     outlineWidth: options.outline?.width,
   });
-  return options.merge ? mergePolygons(polygons) : polygons;
+  return polygons;
 }
 
 function warpShape(shape: Shape, warp: WarpFn | null): Shape {
