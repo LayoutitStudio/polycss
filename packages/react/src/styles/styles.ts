@@ -306,6 +306,7 @@ const CORE_BASE_STYLES = `
 }
 
 .polycss-scene[data-polycss-lighting="dynamic"] b,
+.polycss-scene[data-polycss-lighting="dynamic"] i,
 .polycss-scene[data-polycss-lighting="dynamic"] u {
   /*
    * Three.js MeshLambertMaterial parity (default useLegacyLights=false,
