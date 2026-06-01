@@ -45,6 +45,7 @@ import {
   prepareCasterPolyItems,
   prepareReceiverFacePlanes,
   projectCssVertexToGround,
+  worldDirectionToCss,
   type CameraCullRotation,
   type ReceiverCasterInput,
 } from "@layoutit/polycss-core";
@@ -740,8 +741,11 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
     if (sceneHasReceiver) return null;
     if (bakedShadowGroundCssZ === null) return null;
 
-    const lightDir = sceneDirectionalLight?.direction
+    // World→CSS axis swap so the light direction matches the CSS-frame
+    // vertex projection below (vertices are × BASE_TILE with v[1]→x, v[0]→y).
+    const userGroundLightDir = sceneDirectionalLight?.direction
       ?? ([0.4, -0.7, 0.59] as Vec3);
+    const lightDir = worldDirectionToCss(userGroundLightDir);
     const shadowDedupDrop = findOverlappingPolygonDuplicates(polygons, {
       normalTolerance: 0.1,
       distanceTolerance: 0.5,
@@ -871,7 +875,12 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
   const receiverShadowSvgs = useMemo<ReactNode>(() => {
     if (!receiveShadow) return null;
     if (!shadowCasters || shadowCasters.size === 0) return null;
-    const lightDir = sceneDirectionalLight?.direction ?? ([0.4, -0.7, 0.59] as Vec3);
+    // Caster vertices and receiver plane both live in the CSS axis-swap
+    // frame after worldCssForMesh; the light direction must be in the
+    // same frame for the shadow projection math to land correctly. (Matches
+    // vanilla emitGround/emitReceiverShadows pipelines.)
+    const userLightDir = sceneDirectionalLight?.direction ?? ([0.4, -0.7, 0.59] as Vec3);
+    const lightDir = worldDirectionToCss(userLightDir);
     const shadowLift = sceneShadow?.lift ?? 0.001;
     const planes = prepareReceiverFacePlanes(
       polygons,

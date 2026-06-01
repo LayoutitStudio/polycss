@@ -83,6 +83,13 @@ const PerfApp = defineComponent({
       if (raf !== null) cancelAnimationFrame(raf);
     });
 
+    // Include the floor polygons in centerPolygons when the floor is on, so
+    // Vue autoCenter mirrors vanilla's joint-bbox-of-all-meshes calc.
+    const centerPolys = computed(() => {
+      if (!props.parseResult) return undefined;
+      if (!props.floor) return props.parseResult.polygons;
+      return [...props.parseResult.polygons, ...buildFloorPolygons()];
+    });
     return () => h(
       PolyCamera,
       { rotX: props.preset.rotX, rotY: rotY.value, zoom: props.preset.zoom },
@@ -95,7 +102,7 @@ const PerfApp = defineComponent({
             textureLighting: props.mode,
             strategies: props.strategies,
             autoCenter: true,
-            centerPolygons: props.parseResult?.polygons,
+            centerPolygons: centerPolys.value,
           },
           {
             default: () => [

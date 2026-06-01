@@ -77,6 +77,13 @@ function PerfApp({
     [],
   );
 
+  // Include the floor polygons in centerPolygons when the floor is on, so
+  // React/Vue autoCenter mirrors vanilla's joint-bbox-of-all-meshes calc.
+  const centerPolys = useMemo(() => {
+    if (!parseResult) return undefined;
+    if (!floor) return parseResult.polygons;
+    return [...parseResult.polygons, ...buildFloorPolygons()];
+  }, [parseResult, floor]);
   return (
     <PolyCamera rotX={preset.rotX} rotY={rotY} zoom={preset.zoom}>
       <PolyScene
@@ -85,7 +92,7 @@ function PerfApp({
         textureLighting={mode}
         strategies={strategies}
         autoCenter
-        centerPolygons={parseResult?.polygons}
+        centerPolygons={centerPolys}
       >
         <PolyOrbitControls drag wheel animate={false} />
         {parseResult

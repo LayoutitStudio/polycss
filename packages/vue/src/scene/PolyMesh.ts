@@ -32,6 +32,7 @@ import {
   prepareCasterPolyItems,
   prepareReceiverFacePlanes,
   projectCssVertexToGround,
+  worldDirectionToCss,
   type CameraCullRotation,
   type ReceiverCasterInput,
 } from "@layoutit/polycss-core";
@@ -408,8 +409,11 @@ export const PolyMesh = defineComponent({
       if (groundCssZ === null) return null;
       const shadowOpts = ctx?.shadow;
 
-      const lightDir = ctx?.directionalLight?.direction
+      // World→CSS axis swap so the light direction matches the CSS-frame
+      // vertex projection below (vertices are × BASE_TILE with v[1]→x, v[0]→y).
+      const userGroundLightDir = ctx?.directionalLight?.direction
         ?? ([0.4, -0.7, 0.59] as Vec3);
+      const lightDir = worldDirectionToCss(userGroundLightDir);
       const dedupDrop = findOverlappingPolygonDuplicates(polygons.value, {
         normalTolerance: 0.1,
         distanceTolerance: 0.5,
@@ -535,7 +539,11 @@ export const PolyMesh = defineComponent({
       void cameraTick.value;
       const entries = registry.getEntries();
       if (entries.length === 0) return [];
-      const lightDir = ctx?.directionalLight?.direction ?? ([0.4, -0.7, 0.59] as Vec3);
+      // Caster vertices and receiver plane both live in the CSS axis-swap
+      // frame after worldCssForMesh; the light direction must be in the
+      // same frame for the shadow projection math to land correctly.
+      const userLightDir = ctx?.directionalLight?.direction ?? ([0.4, -0.7, 0.59] as Vec3);
+      const lightDir = worldDirectionToCss(userLightDir);
       const shadowLift = ctx?.shadow?.lift ?? 0.001;
       const planes = prepareReceiverFacePlanes(
         polygons.value,

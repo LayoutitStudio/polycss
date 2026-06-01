@@ -166,6 +166,7 @@ export {
   RECEIVER_OFFSET_TOL,
   RECEIVER_OUTLINE_EXPAND,
   worldCssForMesh,
+  worldDirectionToCss,
   worldPositionToCss,
 } from "./shadow/receiverFaceGroups";
 export type { ReceiverPlaneGroup } from "./shadow/receiverFaceGroups";

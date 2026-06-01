@@ -37,6 +37,13 @@ export function worldPositionToCss(p: Vec3): Vec3 {
   return [p[1] * BASE_TILE, p[0] * BASE_TILE, p[2] * BASE_TILE];
 }
 
+/** World→CSS axis swap for directions (no scale; directions stay unit). The
+ *  polygon basis stores normals in the swapped CSS frame, so light vectors
+ *  must match before any dot product. */
+export function worldDirectionToCss(d: Vec3): Vec3 {
+  return [d[1], d[0], d[2]];
+}
+
 /** Normalize a mesh `scale` value into a Vec3 (undefined → [1,1,1], number →
  *  uniform, Vec3 → as-is with `?? 1` per axis). */
 export function meshScaleVec3(
