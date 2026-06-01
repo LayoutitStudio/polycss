@@ -43,10 +43,16 @@ const GALLERY_GROUND_LIGHT_RESPONSE = 0.28;
 const GALLERY_GROUND_RADIUS_MULTIPLIER = 2.5;
 const GALLERY_GROUND_MODEL_RADIUS_MULTIPLIER = 1.75;
 const GALLERY_GROUND_MIN_RADIUS = 40;
-// The shadow plane should sit above the visible ground, not above the model
-// floor, otherwise large live-updated SVG shadows can intersect low geometry.
-const SHADOW_GROUND_LIFT = 0.01;
-const GALLERY_SHADOW_LIFT = GROUND_Z_OFFSET + SHADOW_GROUND_LIFT;
+// Lift the shadow above the ground plane (which sits at GROUND_Z_OFFSET
+// below the model floor). The library's `shadow.lift` is now interpreted
+// as "world-unit displacement ALONG the receiver face's normal" — for
+// the floor that's +Z, so a positive value puts the shadow visibly above
+// the ground. (Earlier this constant ALSO added GROUND_Z_OFFSET because
+// the old non-receiver cast-shadow path treated `lift` as an absolute
+// z relative to caster.minZ, where negative was correct. Once the floor
+// became a receiver, that negative result placed the shadow BELOW the
+// ground and got occluded by it.)
+const GALLERY_SHADOW_LIFT = 0.01;
 const ANIMATION_STABLE_TRIANGLE_COLOR_POLICY = "cadence";
 // Deforming low-poly triangles can swing face normals sharply; keep the
 // mounted baked color pinned and animate transforms only.
