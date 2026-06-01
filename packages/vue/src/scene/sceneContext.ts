@@ -75,6 +75,14 @@ export interface PolySceneContextValue {
    * casting meshes are registered.
    */
   groundCssZ?: number | null;
+  /**
+   * The `.polycss-scene` DOM element, available once mounted. Receivers
+   * teleport their per-face shadow SVGs into this element so the mesh
+   * wrapper's `translate3d(position)` does NOT double-count the position
+   * already baked into the SVG's `matrix3d(...)` (vanilla mounts shadows
+   * at scene-root for the same reason). `null` before mount.
+   */
+  sceneEl?: HTMLElement | null;
 }
 
 /**

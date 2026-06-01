@@ -16,7 +16,7 @@
  * When no `polygon` slot is provided, atlas-backed polygon i elements are rendered
  * automatically for each polygon.
  */
-import { defineComponent, h, computed, inject, onMounted, onBeforeUnmount, ref, watch, watchEffect } from "vue";
+import { defineComponent, h, Teleport, computed, inject, onMounted, onBeforeUnmount, ref, watch, watchEffect } from "vue";
 import type { PropType, VNode, CSSProperties } from "vue";
 import type { MeshResolution, Polygon, PolyTextureLightingMode, Vec3 } from "@layoutit/polycss-core";
 import { buildBasisHints, cornerShapeGeometryForPlan, worldDirectionalLightToCss } from "@layoutit/polycss-core";
@@ -1107,6 +1107,15 @@ export const PolyMesh = defineComponent({
       const svgNode = shadowSvg.value;
       const shadowChildren: VNode[] = svgNode ? [svgNode] : [];
       const receiverChildren = receiverShadowSvgs.value;
+      // Teleport receiver shadow SVGs OUT of `.polycss-mesh` into
+      // `.polycss-scene`. The SVG `matrix3d(...)` already bakes this mesh's
+      // `position` (via `prepareReceiverFacePlanes`), so leaving them inside
+      // the mesh wrapper would double-count `translate3d(position)`. Vanilla
+      // mounts these at scene-root for the same reason.
+      const portalTarget = sceneCtx?.value?.sceneEl ?? null;
+      const portaledReceiverChildren = portalTarget && receiverChildren.length > 0
+        ? [h(Teleport, { to: portalTarget }, receiverChildren)]
+        : [];
 
       return h(
         "div",
@@ -1118,7 +1127,7 @@ export const PolyMesh = defineComponent({
           ...handlers,
           ...extraAttrs,
         },
-        [...shadowChildren, ...receiverChildren, ...polyNodes, ...defaultChildren]
+        [...shadowChildren, ...portaledReceiverChildren, ...polyNodes, ...defaultChildren]
       );
     };
   },

@@ -73,6 +73,7 @@ import {
   updateStableTriangleDom,
   useTextureAtlas,
 } from "./atlas";
+import { createPortal } from "react-dom";
 import { usePolySceneContext } from "./sceneContext";
 import { PolyCameraContext } from "../camera/context";
 import { createPolyVoxelRenderer, type PolyVoxelRenderer } from "./voxelRenderer";
@@ -1001,43 +1002,57 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
       directionalLight: sceneDirectionalLight,
       shadow: { color: sceneShadow?.color, opacity: sceneShadow?.opacity ?? 0.25 },
     });
-    return specs.map((spec) => (
-      <svg
-        key={`receiver-${spec.faceIndex}`}
-        className="polycss-shadow polycss-shadow-svg polycss-shadow-receiver"
-        data-poly-shadow-type="receiver"
-        data-poly-shadow-receiver-face={spec.faceIndex}
-        data-poly-shadow-receiver-polys={JSON.stringify(spec.memberPolyIndices)}
-        width={spec.width}
-        height={spec.height}
-        viewBox={`0 0 ${spec.width} ${spec.height}`}
-        style={{
-          position: "absolute",
-          top: 0,
-          left: 0,
-          display: "block",
-          overflow: "hidden",
-          transformOrigin: "0 0",
-          pointerEvents: "none",
-          willChange: "transform",
-          transform: spec.matrixCss,
-        }}
-      >
-        {spec.paths.map((p, i) => (
-          <path
-            key={i}
-            d={p.d}
-            fill={spec.fill}
-            stroke={spec.fill}
-            strokeWidth="3"
-            strokeLinejoin="round"
-            opacity={spec.opacity.toFixed(4)}
-            data-poly-shadow-caster-polys={JSON.stringify(p.casterPolygonIndices)}
-          />
+    return (
+      <>
+        {specs.map((spec) => (
+          <svg
+            key={`receiver-${spec.faceIndex}`}
+            className="polycss-shadow polycss-shadow-svg polycss-shadow-receiver"
+            data-poly-shadow-type="receiver"
+            data-poly-shadow-receiver-face={spec.faceIndex}
+            data-poly-shadow-receiver-polys={JSON.stringify(spec.memberPolyIndices)}
+            width={spec.width}
+            height={spec.height}
+            viewBox={`0 0 ${spec.width} ${spec.height}`}
+            style={{
+              position: "absolute",
+              top: 0,
+              left: 0,
+              display: "block",
+              overflow: "hidden",
+              transformOrigin: "0 0",
+              pointerEvents: "none",
+              willChange: "transform",
+              transform: spec.matrixCss,
+            }}
+          >
+            {spec.paths.map((p, i) => (
+              <path
+                key={i}
+                d={p.d}
+                fill={spec.fill}
+                stroke={spec.fill}
+                strokeWidth="3"
+                strokeLinejoin="round"
+                opacity={spec.opacity.toFixed(4)}
+                data-poly-shadow-caster-polys={JSON.stringify(p.casterPolygonIndices)}
+              />
+            ))}
+          </svg>
         ))}
-      </svg>
-    ));
+      </>
+    );
   }, [receiveShadow, shadowCasters, shadowCastersVersion, polygons, position, scale, rotation, sceneDirectionalLight, sceneShadow, sceneCtx?.ambientLight, cameraCtx?.store, cameraTick]);
+
+  // Portal receiver shadow SVGs OUT of `.polycss-mesh` into `.polycss-scene`.
+  // The SVG `matrix3d(...)` already includes this mesh's `position` (baked
+  // into world space by `prepareReceiverFacePlanes`), so leaving them inside
+  // the mesh wrapper would double-count `translate3d(position)`. Vanilla
+  // mounts these at scene-root for the same reason.
+  const portalSceneEl = sceneCtx?.sceneEl ?? null;
+  const portaledReceiverShadowSvgs = portalSceneEl && receiverShadowSvgs
+    ? createPortal(receiverShadowSvgs, portalSceneEl)
+    : null;
 
   setPolygonsImplRef.current = (nextPolygons: Polygon[]) => {
     const nextRenderedPolygons = autoCenter ? recenterPolygons(nextPolygons) : nextPolygons;
@@ -1226,7 +1241,7 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
       {...wrapperHandlers}
     >
       {shadowSvgNode}
-      {receiverShadowSvgs}
+      {portaledReceiverShadowSvgs}
       {renderedPolygons}
       {staticChildren}
     </div>

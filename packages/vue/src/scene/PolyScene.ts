@@ -186,6 +186,8 @@ export const PolyScene = defineComponent({
     // mode reads it via context to bake each leaf's inline matrix3d.
     const groundCssZ = ref<number | null>(null);
 
+    const sceneElLocalRef = ref<HTMLElement | null>(null);
+
     // Propagate scene-level rendering options to descendants (PolyMesh /
     // helpers) so they pick up the same dynamic mode + lights as the
     // scene. Without this, a helper PolyMesh would default to baked
@@ -201,10 +203,9 @@ export const PolyScene = defineComponent({
       shadowRegistry,
       receiverRegistry,
       groundCssZ: groundCssZ.value,
+      sceneEl: sceneElLocalRef.value,
     }));
     provide(PolySceneContextKey, sceneCtxValue);
-
-    const sceneElLocalRef = ref<HTMLElement | null>(null);
 
     // Sync local ref to camera context's sceneElRef so controls that call
     // applyTransformDirect can reach the element.

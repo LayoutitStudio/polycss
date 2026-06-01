@@ -79,6 +79,14 @@ export interface PolySceneContextValue {
    * each shadow leaf. `null` means there are no caster meshes yet.
    */
   groundCssZ?: number | null;
+  /**
+   * The `.polycss-scene` DOM element, available once mounted. Receivers
+   * portal their per-face shadow SVGs into this element so the mesh
+   * wrapper's `translate3d(position)` does NOT double-count the position
+   * already baked into the SVG's `matrix3d(...)` (vanilla mounts shadows
+   * at scene-root for the same reason). `null` before mount.
+   */
+  sceneEl?: HTMLDivElement | null;
 }
 
 export const PolySceneContext = createContext<PolySceneContextValue | null>(null);

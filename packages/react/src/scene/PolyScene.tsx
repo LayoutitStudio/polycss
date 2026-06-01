@@ -120,10 +120,12 @@ function PolySceneInner({
   debugShowBackfaces,
 }: PolySceneProps) {
   const { store, sceneElRef, applyTransformDirect } = useCameraContext();
+  const [sceneEl, setSceneEl] = useState<HTMLDivElement | null>(null);
 
   const localSceneRef = useCallback(
     (el: HTMLDivElement | null) => {
       sceneElRef.current = el;
+      setSceneEl(el);
     },
     [sceneElRef]
   );
@@ -439,8 +441,9 @@ function PolySceneInner({
       shadowCastersVersion,
       hasShadowReceiver,
       groundCssZ,
+      sceneEl,
     }),
-    [textureLighting, directionalLight, ambientLight, strategies, seamBleed, shadow, registerShadowCaster, registerShadowReceiver, shadowCastersVersion, hasShadowReceiver, groundCssZ],
+    [textureLighting, directionalLight, ambientLight, strategies, seamBleed, shadow, registerShadowCaster, registerShadowReceiver, shadowCastersVersion, hasShadowReceiver, groundCssZ, sceneEl],
   );
 
   return (
