@@ -172,6 +172,7 @@ export {
 } from "./shadow/receiverFaceGroups";
 export type { ReceiverPlaneGroup } from "./shadow/receiverFaceGroups";
 export {
+  buildSharedEdgeMap,
   computeReceiverShadowFaces,
   prepareCasterPolyItems,
   prepareReceiverFacePlanes,

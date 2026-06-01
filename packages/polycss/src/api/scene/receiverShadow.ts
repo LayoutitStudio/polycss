@@ -9,6 +9,7 @@
  * React and Vue can share it without duplicating ~500 LOC of geometry.
  */
 import {
+  buildSharedEdgeMap,
   computeReceiverShadowFaces,
   meshScaleVec3,
   prepareCasterPolyItems,
@@ -33,6 +34,11 @@ interface MountedFace {
   visible: boolean;
 }
 const mountedFacesByMesh = new WeakMap<MeshEntry, Map<number, MountedFace>>();
+
+/** Cached shared-edge adjacency per mesh. Invalidated when the polygon
+ *  array reference changes (cheap identity check, no deep diff). */
+const sharedEdgeMapCache = new WeakMap<MeshEntry, ReadonlyMap<number, ReadonlySet<number>>>();
+const sharedEdgeMapCacheKey = new WeakMap<MeshEntry, readonly unknown[]>();
 
 function mountedFacesFor(entry: MeshEntry): Map<number, MountedFace> {
   let m = mountedFacesByMesh.get(entry);
@@ -104,7 +110,21 @@ export function emitReceiverShadows(
       casterItemsCache.set(caster, cached);
       casterItemsCacheKey.set(caster, ckey);
     }
-    casterInputs.push({ id: caster, items: cached });
+    // Self-shadow seam cull: when the caster IS the receiver mesh, pass
+    // a cached shared-edge adjacency map so the algorithm skips projecting
+    // any polygon onto a face that contains one of its edge-sharing
+    // neighbours (kills the spiderweb seam shadows on smooth GLBs).
+    let selfShadowEdgeMap: ReadonlyMap<number, ReadonlySet<number>> | undefined;
+    if (caster === receiverEntry) {
+      let cachedMap = sharedEdgeMapCache.get(caster);
+      if (cachedMap === undefined || sharedEdgeMapCacheKey.get(caster) !== caster.polygons) {
+        cachedMap = buildSharedEdgeMap(caster.polygons);
+        sharedEdgeMapCache.set(caster, cachedMap);
+        sharedEdgeMapCacheKey.set(caster, caster.polygons);
+      }
+      selfShadowEdgeMap = cachedMap;
+    }
+    casterInputs.push({ id: caster, items: cached, selfShadowEdgeMap });
   }
 
   const cameraRot: CameraCullRotation = {

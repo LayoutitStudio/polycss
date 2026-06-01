@@ -77,6 +77,71 @@ export interface ReceiverCasterInput<T = unknown> {
    *  caster mesh. */
   id: T;
   items: CasterPolyItem[];
+  /** Self-shadow edge adjacency. When this caster is the same mesh as the
+   *  receiver, the renderer pre-computes a map polygonIndex →
+   *  set-of-other-polygonIndex that share at least one edge (within
+   *  EDGE_MATCH_EPS). The shadow algorithm skips projecting `polygonIndex`
+   *  onto any receiver face whose member set intersects the shared-edge
+   *  set — those projections are sliver shadows along seams (smooth-shaded
+   *  GLB meshes, subdivided spheres) that the user never wants to see. */
+  selfShadowEdgeMap?: ReadonlyMap<number, ReadonlySet<number>>;
+}
+
+/**
+ * Build a polygon-adjacency map: polygonIndex → set of polygonIndex that
+ * share at least one edge (vertex pair, orientation-independent). Used by
+ * the receiver-shadow algorithm to cull sliver shadows along mesh seams.
+ *
+ * Edge match tolerance is small enough to dedupe vertex coordinates that
+ * went through `optimizeMeshPolygons` snap-to-plane but not so loose it
+ * connects geometrically distinct polygons.
+ */
+export function buildSharedEdgeMap(
+  polygons: readonly Polygon[],
+): Map<number, Set<number>> {
+  const EDGE_MATCH_PRECISION = 1e-4;
+  const quant = (n: number): string => Math.round(n / EDGE_MATCH_PRECISION).toString(36);
+  const vertKey = (v: Vec3): string => `${quant(v[0])},${quant(v[1])},${quant(v[2])}`;
+  // Edge key: sorted vertex-pair string so orientation doesn't matter.
+  const edgeKey = (a: Vec3, b: Vec3): string => {
+    const ka = vertKey(a);
+    const kb = vertKey(b);
+    return ka < kb ? `${ka}|${kb}` : `${kb}|${ka}`;
+  };
+  // edgeKey → polygon indices touching that edge
+  const edgeOwners = new Map<string, number[]>();
+  for (let i = 0; i < polygons.length; i++) {
+    const poly = polygons[i];
+    if (!poly || poly.vertices.length < 2) continue;
+    const verts = poly.vertices;
+    for (let j = 0; j < verts.length; j++) {
+      const a = verts[j]!;
+      const b = verts[(j + 1) % verts.length]!;
+      const k = edgeKey(a, b);
+      let owners = edgeOwners.get(k);
+      if (!owners) {
+        owners = [];
+        edgeOwners.set(k, owners);
+      }
+      owners.push(i);
+    }
+  }
+  const out = new Map<number, Set<number>>();
+  for (const owners of edgeOwners.values()) {
+    if (owners.length < 2) continue;
+    for (const a of owners) {
+      for (const b of owners) {
+        if (a === b) continue;
+        let set = out.get(a);
+        if (!set) {
+          set = new Set();
+          out.set(a, set);
+        }
+        set.add(b);
+      }
+    }
+  }
+  return out;
 }
 
 /** One contributing caster's shadow subpath on a single receiver face. */
@@ -357,7 +422,24 @@ export function computeReceiverShadowFaces<T = unknown>(
     const COPLANAR_NORMAL_TOL = 0.0025;
     const COPLANAR_OFFSET_TOL = 5.0;
     for (const casterEntry of casters) {
+      const sharedEdgeMap = casterEntry.selfShadowEdgeMap;
       for (const item of casterEntry.items) {
+        // Seam-shadow cull: if this caster polygon shares an edge with ANY
+        // of the receiver face's member polygons, skip — projecting a
+        // shared-edge poly always produces a thin sliver along the seam,
+        // independent of plane angle. Without this cull, smooth-shaded
+        // GLB meshes (apple, sphere, teapot) get a dark spiderweb of
+        // shadow streaks at every vertex.
+        if (sharedEdgeMap) {
+          const adj = sharedEdgeMap.get(item.polygonIndex);
+          if (adj) {
+            let sharesEdge = false;
+            for (const memberIdx of group.memberPolyIndices) {
+              if (adj.has(memberIdx)) { sharesEdge = true; break; }
+            }
+            if (sharesEdge) continue;
+          }
+        }
         // Coplanar caster skip.
         if (item.planeN) {
           const cn = item.planeN;
@@ -404,6 +486,39 @@ export function computeReceiverShadowFaces<T = unknown>(
           const subjectCcw = ensureCcw2D(projected);
           const clip = clipPolygonToConvex2D(subjectCcw, outlineUv);
           if (clip.length < 3) continue;
+          // Self-shadow sliver cull: drop sub-shadows that are either
+          // (a) very small in area, OR (b) very thin (high aspect ratio).
+          // Smooth-shaded GLBs produce hundreds of near-coplanar
+          // adjacent polys whose shadow projections come out as long
+          // thin streaks the user reads as visual glitches. Real
+          // architectural cast shadows are always either large in area
+          // OR have a reasonable aspect ratio; sliver self-shadows fail
+          // both checks.
+          // Only applied to self-shadow casters (sharedEdgeMap present)
+          // so cross-mesh cast shadows are never affected.
+          if (sharedEdgeMap) {
+            let twiceArea = 0;
+            let minClipX = Infinity, maxClipX = -Infinity;
+            let minClipY = Infinity, maxClipY = -Infinity;
+            for (let pi = 0; pi < clip.length; pi++) {
+              const p1 = clip[pi]!;
+              const p2 = clip[(pi + 1) % clip.length]!;
+              twiceArea += p1[0] * p2[1] - p2[0] * p1[1];
+              if (p1[0] < minClipX) minClipX = p1[0];
+              if (p1[0] > maxClipX) maxClipX = p1[0];
+              if (p1[1] < minClipY) minClipY = p1[1];
+              if (p1[1] > maxClipY) maxClipY = p1[1];
+            }
+            const clipArea = Math.abs(twiceArea) * 0.5;
+            const clipW = maxClipX - minClipX;
+            const clipH = maxClipY - minClipY;
+            const longSide = Math.max(clipW, clipH);
+            const shortSide = Math.max(0.01, Math.min(clipW, clipH));
+            const aspect = longSide / shortSide;
+            // Drop tiny shadows OR thin-and-modest-area streaks.
+            if (clipArea < 25) continue;
+            if (aspect > 4 && clipArea < 800) continue;
+          }
           // Drop sub-shadows whose centroid lands inside the convex hull
           // but OUTSIDE the actual polygon union (concave bridging regions
           // of L-shaped face groups). PIP test against member polys.

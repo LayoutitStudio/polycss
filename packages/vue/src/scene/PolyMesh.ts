@@ -19,7 +19,7 @@
 import { defineComponent, h, Teleport, computed, inject, onMounted, onBeforeUnmount, ref, watch, watchEffect } from "vue";
 import type { PropType, VNode, CSSProperties } from "vue";
 import type { MeshResolution, Polygon, PolyTextureLightingMode, Vec3 } from "@layoutit/polycss-core";
-import { buildBasisHints, cornerShapeGeometryForPlan, worldDirectionalLightToCss } from "@layoutit/polycss-core";
+import { buildBasisHints, buildSharedEdgeMap, cornerShapeGeometryForPlan, worldDirectionalLightToCss } from "@layoutit/polycss-core";
 import {
   BASE_TILE,
   computeLightVisibility,
@@ -610,6 +610,11 @@ export const PolyMesh = defineComponent({
       if (planes.length === 0) return [];
       const casterInputs: ReceiverCasterInput<symbol>[] = [];
       let i = 0;
+      // Self-shadow seam cull: when the caster IS this mesh, pass the
+      // shared-edge adjacency map so the algorithm skips projecting
+      // edge-sharing neighbour polygons (kills the spiderweb seam
+      // shadows on smooth GLB meshes — apple, sphere, teapot).
+      const selfEdgeMap = buildSharedEdgeMap(polygons.value);
       for (const getData of entries) {
         const data = getData();
         const rendered = data.renderedPolygonIndices;
@@ -619,7 +624,8 @@ export const PolyMesh = defineComponent({
           data.scale,
           rendered ? (idx) => rendered.has(idx) : () => true,
         );
-        casterInputs.push({ id: Symbol(`caster-${i++}`), items });
+        const isSelf = data.polygons === polygons.value;
+        casterInputs.push({ id: Symbol(`caster-${i++}`), items, selfShadowEdgeMap: isSelf ? selfEdgeMap : undefined });
       }
       const cameraState = cameraCtx?.store.getState().cameraState;
       const cameraRot: CameraCullRotation = {

@@ -34,6 +34,7 @@ import type {
 } from "@layoutit/polycss-core";
 import {
   BASE_TILE,
+  buildSharedEdgeMap,
   computeLightVisibility,
   computeReceiverShadowFaces,
   computeSceneBbox,
@@ -954,6 +955,12 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
     return cameraCtx?.store.subscribe(() => setCameraTick((n) => n + 1));
   }, [receiveShadow, cameraCtx?.store]);
   void cameraTick;
+  // Cached shared-edge adjacency for the self-shadow seam cull. Polygon
+  // identity is the bust key (re-built when geometry changes).
+  const selfShadowEdgeMap = useMemo(
+    () => receiveShadow ? buildSharedEdgeMap(polygons) : undefined,
+    [polygons, receiveShadow],
+  );
   const receiverShadowSvgs = useMemo<ReactNode>(() => {
     if (!receiveShadow) return null;
     if (!shadowCasters || shadowCasters.size === 0) return null;
@@ -983,7 +990,12 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
         data.scale,
         rendered ? (idx) => rendered.has(idx) : () => true,
       );
-      casterInputs.push({ id: casterId, items });
+      // Self-shadow seam cull: when the caster IS this mesh, pass the
+      // shared-edge adjacency map so the algorithm skips projecting
+      // edge-sharing neighbour polygons (kills the spiderweb seam
+      // shadows on smooth GLB meshes — apple, sphere, teapot).
+      const selfMap = data.polygons === polygons ? selfShadowEdgeMap : undefined;
+      casterInputs.push({ id: casterId, items, selfShadowEdgeMap: selfMap });
     }
     const cameraState = cameraCtx?.store.getState().cameraState;
     const cameraRot: CameraCullRotation = {
@@ -1042,7 +1054,7 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
         ))}
       </>
     );
-  }, [receiveShadow, shadowCasters, shadowCastersVersion, polygons, position, scale, rotation, sceneDirectionalLight, sceneShadow, sceneCtx?.ambientLight, cameraCtx?.store, cameraTick]);
+  }, [receiveShadow, shadowCasters, shadowCastersVersion, polygons, position, scale, rotation, sceneDirectionalLight, sceneShadow, sceneCtx?.ambientLight, cameraCtx?.store, cameraTick, selfShadowEdgeMap]);
 
   // Portal receiver shadow SVGs OUT of `.polycss-mesh` into `.polycss-scene`.
   // The SVG `matrix3d(...)` already includes this mesh's `position` (baked
