@@ -19,7 +19,7 @@
 import { defineComponent, h, computed, inject, onMounted, onBeforeUnmount, ref, watch, watchEffect } from "vue";
 import type { PropType, VNode, CSSProperties } from "vue";
 import type { MeshResolution, Polygon, PolyTextureLightingMode, Vec3 } from "@layoutit/polycss-core";
-import { buildBasisHints } from "@layoutit/polycss-core";
+import { buildBasisHints, cornerShapeGeometryForPlan } from "@layoutit/polycss-core";
 import {
   BASE_TILE,
   computeReceiverShadowFaces,
@@ -51,6 +51,7 @@ import {
   type SolidPaintDefaults,
   renderTextureBorderShapePoly,
   renderTextureAtlasPoly,
+  renderTextureCornerShapeSolidPoly,
   renderTextureProjectiveSolidPoly,
   renderTextureTrianglePoly,
   updateStableTriangleDom,
@@ -1009,17 +1010,34 @@ export const PolyMesh = defineComponent({
                 solidPaintDefaults: solidPaintDefaults.value,
               });
             }
-            return isSolidTrianglePlan(plan)
-              ? renderTextureTrianglePoly({
-                  entry: plan,
-                  textureLighting: atlasTextureLighting.value,
-                  solidPaintDefaults: solidPaintDefaults.value,
-                })
-              : renderTextureBorderShapePoly({
-                  entry: plan,
-                  solidPaintDefaults: solidPaintDefaults.value,
-                  forceBorderShape: !textureAtlas.useFullRectSolid.value,
-                });
+            if (isSolidTrianglePlan(plan)) {
+              return renderTextureTrianglePoly({
+                entry: plan,
+                textureLighting: atlasTextureLighting.value,
+                solidPaintDefaults: solidPaintDefaults.value,
+              });
+            }
+            // CornerShape solid (corner-*-shape: bevel <u>) — mirrors vanilla
+            // createCornerShapeSolidElement. Catches multi-vertex non-rect
+            // non-triangle polys with a valid cornerShape geometry. Without
+            // this, those polys fall through to atlas bitmap and drift from
+            // vanilla in dynamic mode.
+            const cornerGeo = !atlasStrategies.value?.disable?.includes("i")
+              ? cornerShapeGeometryForPlan(plan)
+              : null;
+            if (cornerGeo) {
+              return renderTextureCornerShapeSolidPoly({
+                entry: plan,
+                geometry: cornerGeo,
+                textureLighting: atlasTextureLighting.value,
+                solidPaintDefaults: solidPaintDefaults.value,
+              });
+            }
+            return renderTextureBorderShapePoly({
+              entry: plan,
+              solidPaintDefaults: solidPaintDefaults.value,
+              forceBorderShape: !textureAtlas.useFullRectSolid.value,
+            });
           });
 
       // Static default slot children (e.g. additional <PolyMesh> children)

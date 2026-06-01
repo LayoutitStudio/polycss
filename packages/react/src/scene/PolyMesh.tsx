@@ -51,7 +51,7 @@ import {
 } from "@layoutit/polycss-core";
 import type { TransformProps } from "../shapes/types";
 import { usePolyMesh, type UseMeshOptions } from "./useMesh";
-import { buildBasisHints } from "@layoutit/polycss-core";
+import { buildBasisHints, cornerShapeGeometryForPlan } from "@layoutit/polycss-core";
 import {
   buildSeamBleedPolygonEdges,
   buildTextureEdgeRepairSets,
@@ -66,6 +66,7 @@ import {
   type SolidPaintDefaults,
   TextureBorderShapePoly,
   TextureAtlasPoly,
+  TextureCornerShapeSolidPoly,
   TextureProjectiveSolidPoly,
   TextureTrianglePoly,
   updateStableTriangleDom,
@@ -1081,23 +1082,41 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
             />
           );
         }
-        return isSolidTrianglePlan(plan)
-          ? (
-              <TextureTrianglePoly
-                key={plan.index}
-                entry={plan}
-                textureLighting={effectiveTextureLighting}
-                solidPaintDefaults={solidPaintDefaults}
-              />
-            )
-          : (
-              <TextureBorderShapePoly
-                key={plan.index}
-                entry={plan}
-                solidPaintDefaults={solidPaintDefaults}
-                disabledStrategies={disabledStrategies}
-              />
-            );
+        if (isSolidTrianglePlan(plan)) {
+          return (
+            <TextureTrianglePoly
+              key={plan.index}
+              entry={plan}
+              textureLighting={effectiveTextureLighting}
+              solidPaintDefaults={solidPaintDefaults}
+            />
+          );
+        }
+        // CornerShape solid (corner-*-shape: bevel <u>) — mirrors vanilla
+        // createCornerShapeSolidElement. Catches multi-vertex non-rect non-
+        // triangle polys whose plan has a valid cornerShape geometry.
+        // Without this branch, those polys fall through to atlas bitmap and
+        // drift from vanilla in dynamic mode.
+        const cornerGeo = !disabledStrategies?.has("i") ? cornerShapeGeometryForPlan(plan) : null;
+        if (cornerGeo) {
+          return (
+            <TextureCornerShapeSolidPoly
+              key={plan.index}
+              entry={plan}
+              geometry={cornerGeo}
+              textureLighting={effectiveTextureLighting}
+              solidPaintDefaults={solidPaintDefaults}
+            />
+          );
+        }
+        return (
+          <TextureBorderShapePoly
+            key={plan.index}
+            entry={plan}
+            solidPaintDefaults={solidPaintDefaults}
+            disabledStrategies={disabledStrategies}
+          />
+        );
       });
 
   // Loading + error slots only apply when we're fetching from `src`.

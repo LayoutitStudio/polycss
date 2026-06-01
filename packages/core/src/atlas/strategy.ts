@@ -4,6 +4,7 @@ import type {
   PolyRenderStrategy,
   RGB,
 } from "./types";
+import { cornerShapeGeometryForPlan } from "./borderShape";
 
 export function fullRectBounds(entry: TextureAtlasPlan): { left: number; top: number; width: number; height: number } | null {
   if (entry.screenPts.length !== 8) return null;
@@ -89,6 +90,12 @@ export interface FilterAtlasPlansEnv {
   solidTriangleSupported: boolean;
   projectiveQuadSupported: boolean;
   borderShapeSupported: boolean;
+  /** When true, non-triangle non-rect non-projective polys whose plan has
+   *  cornerShapeGeometryForPlan != null are excluded from the atlas (they
+   *  render as <u> via corner-*-shape: bevel CSS — matches vanilla's
+   *  createCornerShapeSolidElement path). Falsy / undefined preserves the
+   *  earlier core behaviour (those polys stay in atlas as <s> fallback). */
+  cornerShapeSupported?: boolean;
 }
 
 /**
@@ -105,6 +112,7 @@ export function filterAtlasPlans(
   const useFullRectSolid = !disabled.has("b");
   const useProjectiveQuad = useFullRectSolid && env.projectiveQuadSupported;
   const useStableTriangle = !disabled.has("u") && env.solidTriangleSupported;
+  const useCornerShapeSolid = !disabled.has("i") && !!env.cornerShapeSupported;
   // borderShape applies in both lighting modes (vanilla never gates this on
   // textureLighting). Earlier core implementation disabled it in dynamic
   // mode, which forced solid non-rect non-triangle polys through the atlas
@@ -117,6 +125,19 @@ export function filterAtlasPlans(
     if (!plan || plan.texture) return plan;
     if (useStableTriangle && isSolidTrianglePlan(plan)) return null;
     const fullRect = isFullRectSolid(plan);
+    // CornerShape solid catches non-rect non-triangle non-projective polys
+    // with a valid corner-shape geometry — vanilla renders these as <u>
+    // with corner-*-shape: bevel CSS. Without this branch, multi-vertex
+    // polygons (e.g. 12-vertex tower caps in the castle mesh) fell through
+    // to the atlas bitmap path, producing visible parity drift in dynamic
+    // mode (the atlas pixel was light-baked at compile time, not by the
+    // runtime CSS lambert calc).
+    if (
+      useCornerShapeSolid &&
+      !fullRect &&
+      !(useProjectiveQuad && isProjectiveQuadPlan(plan)) &&
+      cornerShapeGeometryForPlan(plan) !== null
+    ) return null;
     if (
       (useFullRectSolid && fullRect) ||
       (useProjectiveQuad && isProjectiveQuadPlan(plan)) ||
