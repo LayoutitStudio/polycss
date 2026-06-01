@@ -15,12 +15,13 @@
     import { getSynthMesh } from "./synth-mesh.mjs";
     import {
       parseUrlParams, dirFromAzEl, createPerfRecorder, buildFloorPolygons,
+      installParitySync,
       PERF_OVERLAY_HTML, PERF_OVERLAY_CSS,
     } from "./perf-shared.mjs";
 
     document.getElementById("overlay-css").textContent = PERF_OVERLAY_CSS;
 
-    const { meshId, mode, motion, az, el, isSynth, preset, strategies, castShadow, floor, hideOverlay } = parseUrlParams();
+    const { meshId, mode, motion, az, el, isSynth, preset, strategies, castShadow, floor, hideOverlay, sync } = parseUrlParams();
     if (!hideOverlay) document.body.insertAdjacentHTML("beforeend", PERF_OVERLAY_HTML);
     let azimuth = az;
 
@@ -36,7 +37,35 @@
     });
     // Drag + wheel for human inspection via perf-serve. Headless bench
     // doesn't dispatch input events, so listeners stay idle.
-    createPolyOrbitControls(scene, { drag: true, wheel: true });
+    const orbit = createPolyOrbitControls(scene, { drag: true, wheel: true });
+
+    // Parity-quad sync: rebroadcast user drag and accept parent updates.
+    let azimuthState = az, elState = el;
+    if (sync) {
+      installParitySync({
+        applyCamera: ({ rotX, rotY, zoom }) => {
+          const patch = {};
+          if (rotX != null) patch.rotX = rotX;
+          if (rotY != null) patch.rotY = rotY;
+          if (zoom != null) patch.zoom = zoom;
+          if (Object.keys(patch).length > 0) {
+            camera.update(patch);
+            // camera.update mutates state but doesn't re-render — trigger it.
+            scene.applyCamera();
+          }
+        },
+        applyLight: ({ az: newAz, el: newEl }) => {
+          if (newAz != null) azimuthState = newAz;
+          if (newEl != null) elState = newEl;
+          scene.setOptions({
+            directionalLight: { direction: dirFromAzEl(azimuthState, elState), color: "#ffffff", intensity: 1 },
+          });
+        },
+        reportCamera: (cb) => {
+          orbit.addEventListener("change", (e) => cb({ rotX: e.snapshot.rotX, rotY: e.snapshot.rotY, zoom: e.snapshot.zoom }));
+        },
+      });
+    }
 
     const meshPromise = isSynth
       ? Promise.resolve(getSynthMesh(meshId))

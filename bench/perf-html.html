@@ -22,13 +22,13 @@
     import "./.generated/polycss-elements.js";
     import { getSynthMesh } from "./synth-mesh.mjs";
     import {
-      parseUrlParams, dirFromAzEl, createPerfRecorder, buildFloorPolygons,
+      parseUrlParams, dirFromAzEl, createPerfRecorder, buildFloorPolygons, installParitySync,
       PERF_OVERLAY_HTML, PERF_OVERLAY_CSS,
     } from "./perf-shared.mjs";
 
     document.getElementById("overlay-css").textContent = PERF_OVERLAY_CSS;
 
-    const { meshId, mode, motion, az, el, isSynth, preset, castShadow, floor, hideOverlay } = parseUrlParams();
+    const { meshId, mode, motion, az, el, isSynth, preset, castShadow, floor, hideOverlay, sync } = parseUrlParams();
     if (!hideOverlay) document.body.insertAdjacentHTML("beforeend", PERF_OVERLAY_HTML);
     let azimuth = az;
 
@@ -47,9 +47,9 @@
     sceneEl.style.cssText = "width:100%;height:100%;position:absolute;inset:0;";
     host.appendChild(sceneEl);
 
-    // Add <poly-controls> for drag+wheel (human inspection only — bench
-    // doesn't fire pointer/wheel events).
-    const controlsEl = document.createElement("poly-controls");
+    // Add <poly-orbit-controls> for drag+wheel (human inspection only —
+    // bench doesn't fire pointer/wheel events).
+    const controlsEl = document.createElement("poly-orbit-controls");
     controlsEl.setAttribute("drag", "");
     controlsEl.setAttribute("wheel", "");
     sceneEl.appendChild(controlsEl);
@@ -108,6 +108,29 @@
         meshId, mode, motion, polyCount,
         polygons: mesh?.polygons ?? [],
       });
+
+      // Parity-quad sync: receive camera/light updates from parent and apply
+      // via attribute updates. Reporting drag from the HTML pane back to the
+      // parent requires exposing PolyOrbitControlsElement's internal handle,
+      // which isn't currently part of the public API — so this pane is
+      // receive-only. Dragging any of the other three panes drives this one;
+      // dragging here doesn't propagate.
+      let azState = azimuth, elState = el;
+      if (sync) {
+        installParitySync({
+          applyCamera: ({ rotX, rotY, zoom: z }) => {
+            if (rotX != null) sceneEl.setAttribute("rot-x", String(rotX));
+            if (rotY != null) sceneEl.setAttribute("rot-y", String(rotY));
+            if (z != null) sceneEl.setAttribute("zoom", String(z));
+          },
+          applyLight: ({ az: newAz, el: newEl }) => {
+            if (newAz != null) azState = newAz;
+            if (newEl != null) elState = newEl;
+            sceneEl.setAttribute("directional-direction", dirFromAzEl(azState, elState).join(","));
+          },
+          reportCamera: () => {}, // see comment above
+        });
+      }
 
       let frameCount = 0;
       function tick(now) {

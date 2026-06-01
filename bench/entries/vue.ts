@@ -21,7 +21,7 @@ import {
 import type { Polygon } from "@layoutit/polycss-core";
 import { loadMesh } from "@layoutit/polycss-core";
 // @ts-expect-error — sibling .mjs without types
-import { parseUrlParams, dirFromAzEl, createPerfRecorder, buildFloorPolygons, PERF_OVERLAY_HTML, PERF_OVERLAY_CSS } from "../perf-shared.mjs";
+import { parseUrlParams, dirFromAzEl, createPerfRecorder, buildFloorPolygons, installParitySync, PERF_OVERLAY_HTML, PERF_OVERLAY_CSS } from "../perf-shared.mjs";
 // @ts-expect-error — sibling .mjs without types
 import { getSynthMesh } from "../synth-mesh.mjs";
 
@@ -40,9 +40,14 @@ const PerfApp = defineComponent({
     strategies: { type: Object as () => { disable: Array<"b" | "i" | "u"> } | undefined, default: undefined },
     castShadow: { type: Boolean, default: false },
     floor: { type: Boolean, default: false },
+    sync: { type: Boolean, default: false },
   },
   setup(props) {
+    const rotX = ref(props.preset.rotX);
     const rotY = ref(props.preset.rotY);
+    const zoom = ref(props.preset.zoom);
+    const azState = ref(props.az);
+    const elState = ref(props.el);
     const lightDir = ref<[number, number, number]>(dirFromAzEl(props.az, props.el));
 
     const directionalLight = computed(() => ({
@@ -83,6 +88,32 @@ const PerfApp = defineComponent({
       if (raf !== null) cancelAnimationFrame(raf);
     });
 
+    // Parity-quad sync: bridge parent postMessage to camera/light state.
+    onMounted(() => {
+      if (!props.sync) return;
+      installParitySync({
+        applyCamera: ({ rotX: rx, rotY: ry, zoom: z }: { rotX: number | null; rotY: number | null; zoom: number | null }) => {
+          if (rx != null) rotX.value = rx;
+          if (ry != null) rotY.value = ry;
+          if (z != null) zoom.value = z;
+        },
+        applyLight: ({ az, el }: { az: number | null; el: number | null }) => {
+          if (az != null) azState.value = az;
+          if (el != null) elState.value = el;
+          lightDir.value = dirFromAzEl(azState.value, elState.value);
+        },
+        reportCamera: () => {}, // handled inline via onChange below
+      });
+    });
+
+    function onOrbitChange(snap: { rotX?: number; rotY?: number; zoom?: number }): void {
+      if (!props.sync) return;
+      if (typeof snap.rotX === "number") rotX.value = snap.rotX;
+      if (typeof snap.rotY === "number") rotY.value = snap.rotY;
+      if (typeof snap.zoom === "number") zoom.value = snap.zoom;
+      window.parent.postMessage({ kind: "camera-changed", rotX: snap.rotX, rotY: snap.rotY, zoom: snap.zoom }, "*");
+    }
+
     // Include the floor polygons in centerPolygons when the floor is on, so
     // Vue autoCenter mirrors vanilla's joint-bbox-of-all-meshes calc.
     const centerPolys = computed(() => {
@@ -92,7 +123,7 @@ const PerfApp = defineComponent({
     });
     return () => h(
       PolyCamera,
-      { rotX: props.preset.rotX, rotY: rotY.value, zoom: props.preset.zoom },
+      { rotX: rotX.value, rotY: rotY.value, zoom: zoom.value },
       {
         default: () => h(
           PolyScene,
@@ -106,7 +137,7 @@ const PerfApp = defineComponent({
           },
           {
             default: () => [
-              h(PolyOrbitControls, { drag: true, wheel: true, animate: false }),
+              h(PolyOrbitControls, { drag: true, wheel: true, animate: false, onChange: props.sync ? onOrbitChange : undefined }),
               props.parseResult
                 ? h(PolyMesh, { polygons: props.parseResult.polygons, voxelSource: props.parseResult.voxelSource, castShadow: props.castShadow })
                 : props.preset.url
@@ -135,6 +166,7 @@ async function main(): Promise<void> {
     castShadow: boolean;
     floor: boolean;
     hideOverlay: boolean;
+    sync: boolean;
     preset: any;
   };
 
@@ -165,6 +197,7 @@ async function main(): Promise<void> {
     strategies: params.strategies,
     castShadow: params.castShadow,
     floor: params.floor,
+    sync: params.sync,
   }).mount(host);
 }
 
