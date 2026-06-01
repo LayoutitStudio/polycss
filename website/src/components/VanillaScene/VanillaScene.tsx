@@ -1190,7 +1190,13 @@ export function VanillaScene({
         warnings: [],
         dispose: () => {},
       },
-      { excludeFromAutoCenter: true, castShadow: false },
+      // receiveShadow:true is load-bearing — the gallery floor is the
+      // canonical shadow receiver. Without it, enabling Self-shadow on
+      // the model would flip the "only-receiver-paints-shadows" semantic
+      // ON and the floor (not marked as receiver) would lose its cast
+      // shadow entirely. With it, the floor always paints the cast
+      // shadow regardless of the model's self-shadow state.
+      { excludeFromAutoCenter: true, castShadow: false, receiveShadow: true },
     );
     groundHandleRef.current.element.classList.add("dn-gallery-ground");
     applyGalleryGroundPaint(groundHandleRef.current, directionalLightRef.current, ambientLightRef.current, groundColorRef.current);
