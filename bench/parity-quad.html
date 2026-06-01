@@ -118,7 +118,10 @@
         obj: { position: [S.obj.x, S.obj.y, S.obj.z], scale: S.obj.scale, rotation: [S.obj.rx, S.obj.ry, S.obj.rz] },
         dir: { direction: [S.dir.x, S.dir.y, S.dir.z], intensity: S.dir.intensity, color: S.dir.color },
         amb: { intensity: S.amb.intensity, color: S.amb.color },
-        shadow: { opacity: S.shadow.opacity },
+        // Lift in world units, scaled to ~1 screen-pixel at the current zoom
+        // so the shadow plane sits one pixel above the flat floor quad and
+        // wins the z-fight against it. Three-parity uses the same trick.
+        shadow: { opacity: S.shadow.opacity, lift: 1 / Math.max(1, S.cam.zoom) },
         cam: { rotX: S.cam.rotX, rotY: S.cam.rotY, zoom: S.cam.zoom },
       };
     }
@@ -139,7 +142,11 @@
       camera: vanillaCamera,
       directionalLight: { direction: [S.dir.x, S.dir.y, S.dir.z], color: S.dir.color, intensity: S.dir.intensity },
       ambientLight: { color: S.amb.color, intensity: S.amb.intensity },
-      shadow: { opacity: S.shadow.opacity },
+      // lift in world units. Three-parity uses `1 / cam.zoom` so the shadow
+      // sits one screen pixel above the floor at any zoom level. Default 0.05
+      // is fine for textured surfaces but can z-fight with the flat floor
+      // quad in this 4-up bench.
+      shadow: { opacity: S.shadow.opacity, lift: 1 / Math.max(1, S.cam.zoom) },
       textureLighting: S.textureLighting,
       autoCenter: S.autoCenter,
     });
@@ -256,7 +263,7 @@
       vanillaScene.setOptions({
         directionalLight: { direction: [S.dir.x, S.dir.y, S.dir.z], color: S.dir.color, intensity: S.dir.intensity },
         ambientLight: { color: S.amb.color, intensity: S.amb.intensity },
-        shadow: { opacity: S.shadow.opacity },
+        shadow: { opacity: S.shadow.opacity, lift: 1 / Math.max(1, S.cam.zoom) },
         textureLighting: S.textureLighting,
         autoCenter: S.autoCenter,
       });
@@ -288,7 +295,7 @@
       if (S.selfShadow) htmlMesh.setAttribute("receive-shadow", "");
       else htmlMesh.removeAttribute("receive-shadow");
       const htmlSceneHandle = htmlScene.getScene();
-      if (htmlSceneHandle) htmlSceneHandle.setOptions({ shadow: { opacity: S.shadow.opacity } });
+      if (htmlSceneHandle) htmlSceneHandle.setOptions({ shadow: { opacity: S.shadow.opacity, lift: 1 / Math.max(1, S.cam.zoom) } });
       ensureHtmlFloor();
 
       // React + Vue: rebuild the renderer state and let each framework's

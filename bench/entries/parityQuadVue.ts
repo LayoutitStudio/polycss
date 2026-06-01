@@ -29,7 +29,7 @@ export interface ParityQuadState {
   obj: { position: [number, number, number]; scale: number; rotation: [number, number, number] };
   dir: { direction: [number, number, number]; intensity: number; color: string };
   amb: { intensity: number; color: string };
-  shadow: { opacity: number };
+  shadow: { opacity: number; lift?: number };
   cam: { rotX: number; rotY: number; zoom: number };
 }
 
