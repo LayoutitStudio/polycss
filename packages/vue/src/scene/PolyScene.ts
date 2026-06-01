@@ -31,7 +31,13 @@ import { DEFAULT_SEAM_BLEED, parseHexColor } from "@layoutit/polycss-core";
 import { PolyCameraContextKey } from "../camera";
 import { usePolySceneContext } from "./useSceneContext";
 import { injectPolyBaseStyles } from "../styles";
-import { PolySceneContextKey, type PolyShadowOptions, type PolyShadowRegistry } from "./sceneContext";
+import {
+  PolySceneContextKey,
+  type PolyReceiverRegistry,
+  type PolyShadowOptions,
+  type PolyShadowRegistry,
+  type ShadowCasterRegistration,
+} from "./sceneContext";
 import {
   buildSeamBleedPolygonEdges,
   buildTextureEdgeRepairSets,
@@ -137,15 +143,15 @@ export const PolyScene = defineComponent({
 
     const { sceneElRef, applyTransformDirect } = cameraCtx;
 
-    // Shadow registry: child PolyMesh components register their polygon
-    // getters here when castShadow=true. The scene reads registered polygons
-    // to compute --shadow-ground-cssz reactively without needing to enumerate
-    // DOM children in JS.
+    // Shadow registry: child PolyMesh components register their full caster
+    // data (polygons + position + scale + rotation) when castShadow=true. The
+    // scene reads registered casters to compute --shadow-ground-cssz, and
+    // receiver meshes iterate the same registry to project per-face shadows.
     const shadowRegistryVersion = ref(0);
-    const shadowRegistryMap = new Map<symbol, () => import("@layoutit/polycss-core").Polygon[]>();
+    const shadowRegistryMap = new Map<symbol, () => ShadowCasterRegistration>();
     const shadowRegistry: PolyShadowRegistry = {
-      register(id, getPolygons) {
-        shadowRegistryMap.set(id, getPolygons);
+      register(id, getData) {
+        shadowRegistryMap.set(id, getData);
         shadowRegistryVersion.value++;
       },
       unregister(id) {
@@ -156,6 +162,23 @@ export const PolyScene = defineComponent({
       getEntries() {
         return Array.from(shadowRegistryMap.values());
       },
+    };
+
+    // Receiver registry. Tracks whether any mesh has receiveShadow=true so
+    // casters can drop their ground-shadow fallback (Three.js parity: only
+    // receivers paint shadows when at least one receiver exists).
+    const receiverIds = new Set<symbol>();
+    const hasAnyReceiver = ref(false);
+    const receiverRegistry: PolyReceiverRegistry = {
+      register(id) {
+        receiverIds.add(id);
+        hasAnyReceiver.value = receiverIds.size > 0;
+      },
+      unregister(id) {
+        receiverIds.delete(id);
+        hasAnyReceiver.value = receiverIds.size > 0;
+      },
+      hasAny: hasAnyReceiver,
     };
 
     // Reactive ground-plane CSS-Z. Dynamic mode also mirrors this into
@@ -176,6 +199,7 @@ export const PolyScene = defineComponent({
       seamBleed: props.seamBleed ?? DEFAULT_SEAM_BLEED,
       shadow: props.shadow,
       shadowRegistry,
+      receiverRegistry,
       groundCssZ: groundCssZ.value,
     }));
     provide(PolySceneContextKey, sceneCtxValue);
@@ -349,10 +373,12 @@ export const PolyScene = defineComponent({
         return;
       }
       let minWorldZ = Infinity;
-      for (const getPolygons of entries) {
-        for (const poly of getPolygons()) {
+      for (const getData of entries) {
+        const data = getData();
+        for (const poly of data.polygons) {
           for (const v of poly.vertices) {
-            if (v[2] < minWorldZ) minWorldZ = v[2];
+            const z = v[2] + (data.position[2] ?? 0);
+            if (z < minWorldZ) minWorldZ = z;
           }
         }
       }

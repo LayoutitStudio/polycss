@@ -21,13 +21,18 @@ import type { PropType, VNode, CSSProperties } from "vue";
 import type { MeshResolution, Polygon, PolyTextureLightingMode, Vec3 } from "@layoutit/polycss-core";
 import {
   BASE_TILE,
+  computeReceiverShadowFaces,
   computeSceneBbox,
   DEFAULT_SEAM_BLEED,
   ensureCcw2D,
   inverseRotateVec3,
   findOverlappingPolygonDuplicates,
   parseHexColor,
+  prepareCasterPolyItems,
+  prepareReceiverFacePlanes,
   projectCssVertexToGround,
+  type CameraCullRotation,
+  type ReceiverCasterInput,
 } from "@layoutit/polycss-core";
 import { usePolyMesh, type UseMeshOptions } from "./useMesh";
 import {
@@ -100,6 +105,14 @@ export interface PolyMeshProps extends InteractionProps {
    * Defaults to `false`.
    */
   castShadow?: boolean;
+  /**
+   * When `true`, this mesh acts as a shadow receiver. The scene's caster
+   * meshes (those with `castShadow=true`) project per-coplanar-face SVG
+   * shadows onto each visible surface, matching Three.js's `mesh.receiveShadow`
+   * semantics. Disables the ground-shadow fallback when at least one
+   * receiver exists. Defaults to `false`.
+   */
+  receiveShadow?: boolean;
   /** Mesh optimization intent. Defaults to "lossy"; set "lossless" to keep
    *  authored surface fidelity. Top-level prop wins over any meshResolution
    *  that might be set inside parseOptions. */
@@ -200,6 +213,7 @@ export const PolyMesh = defineComponent({
     textureQuality: { type: [Number, String] as PropType<TextureQuality>, default: undefined },
     seamBleed: { type: [Number, String] as PropType<PolySeamBleed>, default: undefined },
     castShadow: { type: Boolean as PropType<boolean>, default: false },
+    receiveShadow: { type: Boolean as PropType<boolean>, default: false },
     meshResolution: { type: String as PropType<MeshResolution>, default: undefined },
     parseOptions: { type: Object as PropType<UseMeshOptions>, default: undefined },
     class: { type: String },
@@ -260,6 +274,19 @@ export const PolyMesh = defineComponent({
     // scene's dynamic mode instead of getting overpainted by the scene's
     // global CSS rule with default normals.
     const sceneCtx = usePolySceneContext();
+    // Camera ctx — referenced by both event synthesis and the receiver-
+    // shadow back-face cull. Declared early so the shadow computed can
+    // close over it.
+    const cameraCtx = inject(PolyCameraContextKey, null);
+    // Bumped on every camera tick so the receiver-shadow computed re-runs
+    // with up-to-date camera rotation for back-face culling.
+    const cameraTick = ref(0);
+    let cameraTickUnsub: (() => void) | undefined;
+    watchEffect((onCleanup) => {
+      cameraTickUnsub?.();
+      cameraTickUnsub = cameraCtx?.store.subscribe(() => { cameraTick.value++; });
+      onCleanup(() => { cameraTickUnsub?.(); cameraTickUnsub = undefined; });
+    });
     const atlasTextureLighting = computed<PolyTextureLightingMode>(
       () => props.textureLighting ?? sceneCtx?.value.textureLighting ?? "baked",
     );
@@ -354,6 +381,9 @@ export const PolyMesh = defineComponent({
     // filled silhouette without alpha stacking; gaps remain as gaps.
     const shadowSvg = computed<VNode | null>(() => {
       if (!props.castShadow) return null;
+      // Three.js parity: when at least one receiver exists, casters drop
+      // the ground-shadow fallback so the receiver paints the only pass.
+      if (sceneCtx?.value.receiverRegistry?.hasAny.value) return null;
       const ctx = sceneCtx?.value;
       const groundCssZ = ctx?.groundCssZ ?? null;
       if (groundCssZ === null) return null;
@@ -473,9 +503,102 @@ export const PolyMesh = defineComponent({
       );
     });
 
+    // Receiver-face shadows. Mirror of vanilla emitReceiverShadows: for
+    // each coplanar surface group on this mesh, project every registered
+    // caster polygon along the directional light, Sutherland-Hodgman-clip
+    // to the face outline, emit one <svg> per visible face.
+    const receiverShadowSvgs = computed<VNode[]>(() => {
+      if (!props.receiveShadow) return [];
+      const ctx = sceneCtx?.value;
+      const registry = ctx?.shadowRegistry;
+      if (!registry) return [];
+      void registry.version.value;
+      void cameraTick.value;
+      const entries = registry.getEntries();
+      if (entries.length === 0) return [];
+      const lightDir = ctx?.directionalLight?.direction ?? ([0.4, -0.7, 0.59] as Vec3);
+      const shadowLift = ctx?.shadow?.lift ?? 0.001;
+      const planes = prepareReceiverFacePlanes(
+        polygons.value,
+        props.position ?? [0, 0, 0],
+        props.scale,
+        new Set(),
+        shadowLift,
+      );
+      if (planes.length === 0) return [];
+      const casterInputs: ReceiverCasterInput<symbol>[] = [];
+      let i = 0;
+      for (const getData of entries) {
+        const data = getData();
+        const items = prepareCasterPolyItems(
+          data.polygons,
+          data.position,
+          data.scale,
+          () => true,
+        );
+        casterInputs.push({ id: Symbol(`caster-${i++}`), items });
+      }
+      const cameraState = cameraCtx?.store.getState().cameraState;
+      const cameraRot: CameraCullRotation = {
+        rotX: cameraState?.rotX ?? 65,
+        rotY: cameraState?.rotY ?? 45,
+        meshRotation: props.rotation,
+      };
+      const specs = computeReceiverShadowFaces<symbol>({
+        receiverPlanes: planes,
+        receiverPolygons: polygons.value,
+        receiverHasTexture: polygons.value.some((p) => p.texture !== undefined),
+        casters: casterInputs,
+        lightDir,
+        cameraRot,
+        ambientLight: ctx?.ambientLight,
+        directionalLight: ctx?.directionalLight,
+        shadow: { color: ctx?.shadow?.color, opacity: ctx?.shadow?.opacity ?? 0.25 },
+      });
+      return specs.map((spec) =>
+        h(
+          "svg",
+          {
+            key: `receiver-${spec.faceIndex}`,
+            class: "polycss-shadow polycss-shadow-svg polycss-shadow-receiver",
+            "data-poly-shadow-type": "receiver",
+            "data-poly-shadow-receiver-face": String(spec.faceIndex),
+            "data-poly-shadow-receiver-polys": JSON.stringify(spec.memberPolyIndices),
+            width: String(spec.width),
+            height: String(spec.height),
+            viewBox: `0 0 ${spec.width} ${spec.height}`,
+            style: {
+              position: "absolute",
+              top: "0",
+              left: "0",
+              display: "block",
+              overflow: "hidden",
+              transformOrigin: "0 0",
+              pointerEvents: "none",
+              willChange: "transform",
+              transform: spec.matrixCss,
+            } as CSSProperties,
+          },
+          spec.paths.map((p, idx) =>
+            h("path", {
+              key: idx,
+              d: p.d,
+              fill: spec.fill,
+              stroke: spec.fill,
+              "stroke-width": "3",
+              "stroke-linejoin": "round",
+              opacity: spec.opacity.toFixed(4),
+              "data-poly-shadow-caster-polys": JSON.stringify(p.casterPolygonIndices),
+            }),
+          ),
+        ),
+      );
+    });
+
     // Register this mesh with the shadow registry when castShadow=true in
-    // either lighting mode — the scene needs caster polygons to derive
-    // the ground plane regardless of how shadows are projected.
+    // either lighting mode — the scene needs caster polygons (with their
+    // full transforms) to derive the ground plane and to feed receiver
+    // meshes' per-face shadow projection.
     const shadowRegistryId = Symbol();
     watch(
       () => props.castShadow,
@@ -483,7 +606,12 @@ export const PolyMesh = defineComponent({
         const registry = sceneCtx?.value.shadowRegistry;
         if (!registry) return;
         if (castShadow) {
-          registry.register(shadowRegistryId, () => polygons.value);
+          registry.register(shadowRegistryId, () => ({
+            polygons: polygons.value,
+            position: props.position ?? [0, 0, 0],
+            scale: props.scale,
+            rotation: props.rotation,
+          }));
         } else {
           registry.unregister(shadowRegistryId);
         }
@@ -492,8 +620,24 @@ export const PolyMesh = defineComponent({
       { immediate: true },
     );
 
+    // Receiver registration: mirror toggle on props.receiveShadow so the
+    // scene knows whether to disable the caster ground-shadow fallback.
+    const receiverRegistryId = Symbol();
+    watch(
+      () => props.receiveShadow,
+      (receive, _, onCleanup) => {
+        const registry = sceneCtx?.value.receiverRegistry;
+        if (!registry) return;
+        if (receive) registry.register(receiverRegistryId);
+        else registry.unregister(receiverRegistryId);
+        onCleanup(() => registry.unregister(receiverRegistryId));
+      },
+      { immediate: true },
+    );
+
     onBeforeUnmount(() => {
       sceneCtx?.value.shadowRegistry?.unregister(shadowRegistryId);
+      sceneCtx?.value.receiverRegistry?.unregister(receiverRegistryId);
     });
 
     // Imperative handle exposed via defineExpose. Read-only view of
@@ -558,11 +702,6 @@ export const PolyMesh = defineComponent({
       if (wrapperRef.value) unregisterMeshElement(wrapperRef.value);
     });
 
-    // Event synthesis. Build the polycss-shaped payload from a native
-    // DOM event. `intersections` walks elementsFromPoint to find every
-    // mesh stacked under the pointer; `pointer` is NDC against the
-    // camera viewport (falls back to (0,0) outside a <PolyCamera>).
-    const cameraCtx = inject(PolyCameraContextKey, null);
     const voxelRenderer = ref<PolyVoxelRenderer | null>(null);
     watchEffect((onCleanup) => {
       const root = wrapperRef.value;
@@ -850,6 +989,7 @@ export const PolyMesh = defineComponent({
       // are coplanar in 3D. Single <svg> per mesh (see shadowSvg above).
       const svgNode = shadowSvg.value;
       const shadowChildren: VNode[] = svgNode ? [svgNode] : [];
+      const receiverChildren = receiverShadowSvgs.value;
 
       return h(
         "div",
@@ -861,7 +1001,7 @@ export const PolyMesh = defineComponent({
           ...handlers,
           ...extraAttrs,
         },
-        [...shadowChildren, ...polyNodes, ...defaultChildren]
+        [...shadowChildren, ...receiverChildren, ...polyNodes, ...defaultChildren]
       );
     };
   },

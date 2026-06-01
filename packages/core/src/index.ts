@@ -169,6 +169,19 @@ export {
   worldPositionToCss,
 } from "./shadow/receiverFaceGroups";
 export type { ReceiverPlaneGroup } from "./shadow/receiverFaceGroups";
+export {
+  computeReceiverShadowFaces,
+  prepareCasterPolyItems,
+  prepareReceiverFacePlanes,
+} from "./shadow/computeReceiverShadows";
+export type {
+  CasterPolyItem,
+  ComputeReceiverShadowFacesInput,
+  ReceiverCasterInput,
+  ReceiverFacePlane,
+  ReceiverShadowFaceSpec,
+  ReceiverShadowPath,
+} from "./shadow/computeReceiverShadows";
 
 // ── Animation ─────────────────────────────────────────────────────
 export {

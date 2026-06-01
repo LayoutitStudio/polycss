@@ -87,64 +87,6 @@ export interface MeshEntry {
   };
 }
 
-/**
- * Per-receiver cached face geometry. Each entry holds one record per
- * coplanar face group on the receiver: plane (O, n, u, v), outline polygon
- * (Sutherland-Hodgman clip), bbox in (u, v) for SVG sizing, and the
- * pre-stringified matrix3d transform that places an SVG on that face plane.
- *
- * All of this is invariant under light/caster changes. Per light tick we
- * just re-run the per-tri SH and build the path `d` — never recompute
- * groups or basis. Cache invalidated when the receiver's polygon count or
- * position changes.
- */
-export interface ReceiverFacePlane {
-  O: Vec3;
-  n: Vec3;
-  u: Vec3;
-  v: Vec3;
-  outlineUv: Array<[number, number]>;
-  /** Per-constituent-polygon (u,v) outlines used to post-filter
-   *  Sutherland-Hodgman-clipped sub-shadows that fall inside the convex hull
-   *  but outside the actual polygon union (concave bridging regions). */
-  memberPolysUv: Array<Array<[number, number]>>;
-  /** Receiver-mesh polygon indices for the polygons in memberPolysUv, in
-   *  matching order. */
-  memberPolyIndices: number[];
-  minU: number;
-  minV: number;
-  width: number;
-  height: number;
-  matrixCss: string;
-  /** Index of this face group within the receiver's plane list, set on the
-   *  SVG as `data-poly-shadow-receiver-face` so a specific receiving surface
-   *  can be addressed directly in DevTools. */
-  faceIndex: number;
-  /** Mount-once SVG: created on first non-empty frame for this face, then
-   *  kept in the DOM. Per-frame we sync its <path> children (one per
-   *  contributing caster) and toggle `display`. Avoids per-frame
-   *  createElementNS + insertBefore + layer churn. */
-  svg: SVGSVGElement | null;
-  visible: boolean;
-}
-
-/**
- * Per-caster cached per-polygon data: world-space vertices + 3D AABB
- * corners. Invariant under light direction; depends only on the caster
- * mesh's geometry and position. Reused across every receiver-face SH-clip
- * in a frame and across frames within a drag, so the caching pays for
- * itself many times over.
- */
-export interface CasterPolyItem {
-  wv: Vec3[];
-  bboxCorners: Vec3[];
-  /** Outward CSS-space normal (unit) and plane offset (n·O) of the caster
-   *  polygon. Used by the receiver-shadow path to skip casters that are
-   *  coplanar with a receiver face. */
-  planeN: Vec3 | null;
-  planeOffset: number;
-  /** Source polygon index in caster.polygons. Reflected on the corresponding
-   *  shadow `<path>` as `data-poly-shadow-caster-poly` so DevTools can
-   *  pinpoint which caster polygon produced any given sub-shadow. */
-  polygonIndex: number;
-}
+// ReceiverFacePlane + CasterPolyItem now live in @layoutit/polycss-core.
+// The vanilla scene caches store them as-is and import the types directly
+// from core where needed.

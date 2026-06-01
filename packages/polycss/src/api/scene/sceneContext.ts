@@ -21,9 +21,9 @@ import type {
 import { ShadowSvgState } from "./shadowSvg";
 import type {
   CasterPolyItem,
-  MeshEntry,
   ReceiverFacePlane,
-} from "./internalTypes";
+} from "@layoutit/polycss-core";
+import type { MeshEntry } from "./internalTypes";
 import type { PolySceneOptions } from "./types";
 
 /** Lazily-initialised counter wrapper for monotonic IDs (`polycss-mesh-N`). */

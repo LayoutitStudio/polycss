@@ -1,0 +1,1473 @@
+{
+  "configsRun": 24,
+  "elapsedMs": 424633,
+  "tol": 40,
+  "zoom": 80,
+  "worstConfigs": [
+    {
+      "cfg": {
+        "camPitch": 70,
+        "camAz": 30,
+        "light": {
+          "az": 60,
+          "el": 30
+        }
+      },
+      "totalFlaggedPx": 1716,
+      "polyCount": 9,
+      "polys": [
+        {
+          "idx": 156,
+          "pixels": 329,
+          "median": 43.94099999999999
+        },
+        {
+          "idx": 321,
+          "pixels": 282,
+          "median": 43.94099999999999
+        },
+        {
+          "idx": 306,
+          "pixels": 256,
+          "median": 43.94099999999999
+        },
+        {
+          "idx": 171,
+          "pixels": 236,
+          "median": 43.94099999999999
+        },
+        {
+          "idx": 185,
+          "pixels": 189,
+          "median": 43.94099999999999
+        },
+        {
+          "idx": 158,
+          "pixels": 129,
+          "median": 43.94099999999999
+        },
+        {
+          "idx": 308,
+          "pixels": 110,
+          "median": 43.94099999999999
+        },
+        {
+          "idx": 313,
+          "pixels": 100,
+          "median": 42.72839999999999
+        },
+        {
+          "idx": 163,
+          "pixels": 85,
+          "median": 42.72839999999999
+        }
+      ],
+      "status": "9 polys · 1869/19779 px (9.4%) · min Δ 40 · base Δ0 · med Δ22 · max Δ64"
+    },
+    {
+      "cfg": {
+        "camPitch": 45,
+        "camAz": 270,
+        "light": {
+          "az": 200,
+          "el": 30
+        }
+      },
+      "totalFlaggedPx": 1682,
+      "polyCount": 6,
+      "polys": [
+        {
+          "idx": 6,
+          "pixels": 868,
+          "median": 42.6562
+        },
+        {
+          "idx": 76,
+          "pixels": 358,
+          "median": 44.6562
+        },
+        {
+          "idx": 98,
+          "pixels": 219,
+          "median": 44.6562
+        },
+        {
+          "idx": 91,
+          "pixels": 108,
+          "median": 42.72839999999999
+        },
+        {
+          "idx": 119,
+          "pixels": 81,
+          "median": 44.6562
+        },
+        {
+          "idx": 17,
+          "pixels": 48,
+          "median": 42.6562
+        }
+      ],
+      "status": "6 polys · 1695/7258 px (23.4%) · min Δ 40 · base Δ0 · med Δ36 · max Δ70"
+    },
+    {
+      "cfg": {
+        "camPitch": 70,
+        "camAz": 270,
+        "light": {
+          "az": 200,
+          "el": 30
+        }
+      },
+      "totalFlaggedPx": 1070,
+      "polyCount": 6,
+      "polys": [
+        {
+          "idx": 6,
+          "pixels": 391,
+          "median": 42.6562
+        },
+        {
+          "idx": 98,
+          "pixels": 285,
+          "median": 44.72840000000001
+        },
+        {
+          "idx": 76,
+          "pixels": 148,
+          "median": 44.72840000000001
+        },
+        {
+          "idx": 91,
+          "pixels": 95,
+          "median": 42.72839999999999
+        },
+        {
+          "idx": 535,
+          "pixels": 77,
+          "median": 42.6562
+        },
+        {
+          "idx": 537,
+          "pixels": 74,
+          "median": 42.6562
+        }
+      ],
+      "status": "6 polys · 1075/8077 px (13.3%) · min Δ 40 · base Δ0 · med Δ36 · max Δ65"
+    },
+    {
+      "cfg": {
+        "camPitch": 70,
+        "camAz": 30,
+        "light": {
+          "az": 200,
+          "el": 30
+        }
+      },
+      "totalFlaggedPx": 1032,
+      "polyCount": 10,
+      "polys": [
+        {
+          "idx": 164,
+          "pixels": 260,
+          "median": 42.6562
+        },
+        {
+          "idx": 306,
+          "pixels": 244,
+          "median": 42.6562
+        },
+        {
+          "idx": 156,
+          "pixels": 154,
+          "median": 44.6562
+        },
+        {
+          "idx": 322,
+          "pixels": 75,
+          "median": 43.72839999999999
+        },
+        {
+          "idx": 313,
+          "pixels": 68,
+          "median": 42.6562
+        },
+        {
+          "idx": 68,
+          "pixels": 53,
+          "median": 42.6562
+        },
+        {
+          "idx": 193,
+          "pixels": 51,
+          "median": 42.6562
+        },
+        {
+          "idx": 451,
+          "pixels": 48,
+          "median": 42.6562
+        },
+        {
+          "idx": 330,
+          "pixels": 40,
+          "median": 43.72839999999999
+        },
+        {
+          "idx": 314,
+          "pixels": 39,
+          "median": 43.72839999999999
+        }
+      ],
+      "status": "10 polys · 1224/19779 px (6.2%) · min Δ 40 · base Δ0 · med Δ5 · max Δ70"
+    },
+    {
+      "cfg": {
+        "camPitch": 70,
+        "camAz": 30,
+        "light": {
+          "az": 60,
+          "el": 60
+        }
+      },
+      "totalFlaggedPx": 711,
+      "polyCount": 13,
+      "polys": [
+        {
+          "idx": 313,
+          "pixels": 100,
+          "median": 48.80059999999999
+        },
+        {
+          "idx": 163,
+          "pixels": 87,
+          "median": 48.80059999999999
+        },
+        {
+          "idx": 172,
+          "pixels": 79,
+          "median": 45.72840000000001
+        },
+        {
+          "idx": 322,
+          "pixels": 74,
+          "median": 45.72840000000001
+        },
+        {
+          "idx": 326,
+          "pixels": 60,
+          "median": 47.5158
+        },
+        {
+          "idx": 546,
+          "pixels": 60,
+          "median": 42.6562
+        },
+        {
+          "idx": 363,
+          "pixels": 47,
+          "median": 44.72840000000001
+        },
+        {
+          "idx": 212,
+          "pixels": 41,
+          "median": 44.72840000000001
+        },
+        {
+          "idx": 128,
+          "pixels": 34,
+          "median": 44.72840000000001
+        },
+        {
+          "idx": 307,
+          "pixels": 34,
+          "median": 44.72840000000001
+        },
+        {
+          "idx": 157,
+          "pixels": 33,
+          "median": 44.72840000000001
+        },
+        {
+          "idx": 472,
+          "pixels": 31,
+          "median": 47.5158
+        },
+        {
+          "idx": 153,
+          "pixels": 31,
+          "median": 44.72840000000001
+        }
+      ],
+      "status": "13 polys · 878/19779 px (4.4%) · min Δ 40 · base Δ0 · med Δ18 · max Δ92"
+    }
+  ],
+  "persistent": [
+    {
+      "idx": 6,
+      "count": 4,
+      "totalPx": 1367,
+      "totalDelta": 169.6248,
+      "configs": [
+        {
+          "camPitch": 45,
+          "camAz": 270,
+          "lightAz": 60,
+          "lightEl": 30,
+          "px": 63,
+          "med": 41.6562
+        },
+        {
+          "camPitch": 45,
+          "camAz": 270,
+          "lightAz": 200,
+          "lightEl": 30,
+          "px": 868,
+          "med": 42.6562
+        },
+        {
+          "camPitch": 70,
+          "camAz": 270,
+          "lightAz": 60,
+          "lightEl": 30,
+          "px": 45,
+          "med": 42.6562
+        },
+        {
+          "camPitch": 70,
+          "camAz": 270,
+          "lightAz": 200,
+          "lightEl": 30,
+          "px": 391,
+          "med": 42.6562
+        }
+      ]
+    },
+    {
+      "idx": 156,
+      "count": 4,
+      "totalPx": 680,
+      "totalDelta": 176.98179999999996,
+      "configs": [
+        {
+          "camPitch": 45,
+          "camAz": 30,
+          "lightAz": 60,
+          "lightEl": 30,
+          "px": 165,
+          "med": 43.72839999999999
+        },
+        {
+          "camPitch": 45,
+          "camAz": 30,
+          "lightAz": 200,
+          "lightEl": 30,
+          "px": 32,
+          "med": 44.6562
+        },
+        {
+          "camPitch": 70,
+          "camAz": 30,
+          "lightAz": 60,
+          "lightEl": 30,
+          "px": 329,
+          "med": 43.94099999999999
+        },
+        {
+          "camPitch": 70,
+          "camAz": 30,
+          "lightAz": 200,
+          "lightEl": 30,
+          "px": 154,
+          "med": 44.6562
+        }
+      ]
+    },
+    {
+      "idx": 91,
+      "count": 4,
+      "totalPx": 403,
+      "totalDelta": 184.77319999999997,
+      "configs": [
+        {
+          "camPitch": 45,
+          "camAz": 270,
+          "lightAz": 200,
+          "lightEl": 30,
+          "px": 108,
+          "med": 42.72839999999999
+        },
+        {
+          "camPitch": 45,
+          "camAz": 270,
+          "lightAz": 200,
+          "lightEl": 60,
+          "px": 108,
+          "med": 50.5158
+        },
+        {
+          "camPitch": 70,
+          "camAz": 270,
+          "lightAz": 200,
+          "lightEl": 30,
+          "px": 95,
+          "med": 42.72839999999999
+        },
+        {
+          "camPitch": 70,
+          "camAz": 270,
+          "lightAz": 200,
+          "lightEl": 60,
+          "px": 92,
+          "med": 48.80059999999999
+        }
+      ]
+    },
+    {
+      "idx": 172,
+      "count": 3,
+      "totalPx": 317,
+      "totalDelta": 135.3256,
+      "configs": [
+        {
+          "camPitch": 45,
+          "camAz": 30,
+          "lightAz": 60,
+          "lightEl": 60,
+          "px": 122,
+          "med": 45.72840000000001
+        },
+        {
+          "camPitch": 45,
+          "camAz": 30,
+          "lightAz": 200,
+          "lightEl": 60,
+          "px": 116,
+          "med": 43.86879999999999
+        },
+        {
+          "camPitch": 70,
+          "camAz": 30,
+          "lightAz": 60,
+          "lightEl": 60,
+          "px": 79,
+          "med": 45.72840000000001
+        }
+      ]
+    },
+    {
+      "idx": 313,
+      "count": 3,
+      "totalPx": 268,
+      "totalDelta": 134.18519999999998,
+      "configs": [
+        {
+          "camPitch": 70,
+          "camAz": 30,
+          "lightAz": 60,
+          "lightEl": 30,
+          "px": 100,
+          "med": 42.72839999999999
+        },
+        {
+          "camPitch": 70,
+          "camAz": 30,
+          "lightAz": 200,
+          "lightEl": 30,
+          "px": 68,
+          "med": 42.6562
+        },
+        {
+          "camPitch": 70,
+          "camAz": 30,
+          "lightAz": 60,
+          "lightEl": 60,
+          "px": 100,
+          "med": 48.80059999999999
+        }
+      ]
+    },
+    {
+      "idx": 88,
+      "count": 3,
+      "totalPx": 200,
+      "totalDelta": 124.75079999999998,
+      "configs": [
+        {
+          "camPitch": 45,
+          "camAz": 150,
+          "lightAz": 200,
+          "lightEl": 60,
+          "px": 105,
+          "med": 41.941
+        },
+        {
+          "camPitch": 45,
+          "camAz": 270,
+          "lightAz": 200,
+          "lightEl": 60,
+          "px": 65,
+          "med": 40.94099999999999
+        },
+        {
+          "camPitch": 70,
+          "camAz": 150,
+          "lightAz": 200,
+          "lightEl": 60,
+          "px": 30,
+          "med": 41.86879999999999
+        }
+      ]
+    },
+    {
+      "idx": 128,
+      "count": 3,
+      "totalPx": 135,
+      "totalDelta": 134.1852,
+      "configs": [
+        {
+          "camPitch": 45,
+          "camAz": 30,
+          "lightAz": 60,
+          "lightEl": 60,
+          "px": 55,
+          "med": 44.72840000000001
+        },
+        {
+          "camPitch": 45,
+          "camAz": 150,
+          "lightAz": 200,
+          "lightEl": 60,
+          "px": 46,
+          "med": 44.72840000000001
+        },
+        {
+          "camPitch": 70,
+          "camAz": 30,
+          "lightAz": 60,
+          "lightEl": 60,
+          "px": 34,
+          "med": 44.72840000000001
+        }
+      ]
+    },
+    {
+      "idx": 76,
+      "count": 2,
+      "totalPx": 506,
+      "totalDelta": 89.3846,
+      "configs": [
+        {
+          "camPitch": 45,
+          "camAz": 270,
+          "lightAz": 200,
+          "lightEl": 30,
+          "px": 358,
+          "med": 44.6562
+        },
+        {
+          "camPitch": 70,
+          "camAz": 270,
+          "lightAz": 200,
+          "lightEl": 30,
+          "px": 148,
+          "med": 44.72840000000001
+        }
+      ]
+    },
+    {
+      "idx": 98,
+      "count": 2,
+      "totalPx": 504,
+      "totalDelta": 89.3846,
+      "configs": [
+        {
+          "camPitch": 45,
+          "camAz": 270,
+          "lightAz": 200,
+          "lightEl": 30,
+          "px": 219,
+          "med": 44.6562
+        },
+        {
+          "camPitch": 70,
+          "camAz": 270,
+          "lightAz": 200,
+          "lightEl": 30,
+          "px": 285,
+          "med": 44.72840000000001
+        }
+      ]
+    },
+    {
+      "idx": 306,
+      "count": 2,
+      "totalPx": 500,
+      "totalDelta": 86.59719999999999,
+      "configs": [
+        {
+          "camPitch": 70,
+          "camAz": 30,
+          "lightAz": 60,
+          "lightEl": 30,
+          "px": 256,
+          "med": 43.94099999999999
+        },
+        {
+          "camPitch": 70,
+          "camAz": 30,
+          "lightAz": 200,
+          "lightEl": 30,
+          "px": 244,
+          "med": 42.6562
+        }
+      ]
+    },
+    {
+      "idx": 164,
+      "count": 2,
+      "totalPx": 353,
+      "totalDelta": 85.3124,
+      "configs": [
+        {
+          "camPitch": 45,
+          "camAz": 30,
+          "lightAz": 200,
+          "lightEl": 30,
+          "px": 93,
+          "med": 42.6562
+        },
+        {
+          "camPitch": 70,
+          "camAz": 30,
+          "lightAz": 200,
+          "lightEl": 30,
+          "px": 260,
+          "med": 42.6562
+        }
+      ]
+    },
+    {
+      "idx": 158,
+      "count": 2,
+      "totalPx": 247,
+      "totalDelta": 87.66939999999998,
+      "configs": [
+        {
+          "camPitch": 45,
+          "camAz": 30,
+          "lightAz": 60,
+          "lightEl": 30,
+          "px": 118,
+          "med": 43.72839999999999
+        },
+        {
+          "camPitch": 70,
+          "camAz": 30,
+          "lightAz": 60,
+          "lightEl": 30,
+          "px": 129,
+          "med": 43.94099999999999
+        }
+      ]
+    },
+    {
+      "idx": 86,
+      "count": 2,
+      "totalPx": 205,
+      "totalDelta": 94.4568,
+      "configs": [
+        {
+          "camPitch": 45,
+          "camAz": 270,
+          "lightAz": 200,
+          "lightEl": 60,
+          "px": 111,
+          "med": 47.72840000000001
+        },
+        {
+          "camPitch": 70,
+          "camAz": 270,
+          "lightAz": 200,
+          "lightEl": 60,
+          "px": 94,
+          "med": 46.72839999999999
+        }
+      ]
+    },
+    {
+      "idx": 335,
+      "count": 2,
+      "totalPx": 202,
+      "totalDelta": 86.38459999999999,
+      "configs": [
+        {
+          "camPitch": 45,
+          "camAz": 30,
+          "lightAz": 60,
+          "lightEl": 30,
+          "px": 104,
+          "med": 43.72839999999999
+        },
+        {
+          "camPitch": 45,
+          "camAz": 30,
+          "lightAz": 200,
+          "lightEl": 30,
+          "px": 98,
+          "med": 42.6562
+        }
+      ]
+    },
+    {
+      "idx": 163,
+      "count": 2,
+      "totalPx": 172,
+      "totalDelta": 91.52899999999998,
+      "configs": [
+        {
+          "camPitch": 70,
+          "camAz": 30,
+          "lightAz": 60,
+          "lightEl": 30,
+          "px": 85,
+          "med": 42.72839999999999
+        },
+        {
+          "camPitch": 70,
+          "camAz": 30,
+          "lightAz": 60,
+          "lightEl": 60,
+          "px": 87,
+          "med": 48.80059999999999
+        }
+      ]
+    },
+    {
+      "idx": 322,
+      "count": 2,
+      "totalPx": 149,
+      "totalDelta": 89.4568,
+      "configs": [
+        {
+          "camPitch": 70,
+          "camAz": 30,
+          "lightAz": 200,
+          "lightEl": 30,
+          "px": 75,
+          "med": 43.72839999999999
+        },
+        {
+          "camPitch": 70,
+          "camAz": 30,
+          "lightAz": 60,
+          "lightEl": 60,
+          "px": 74,
+          "med": 45.72840000000001
+        }
+      ]
+    },
+    {
+      "idx": 157,
+      "count": 2,
+      "totalPx": 142,
+      "totalDelta": 89.45680000000002,
+      "configs": [
+        {
+          "camPitch": 45,
+          "camAz": 30,
+          "lightAz": 60,
+          "lightEl": 60,
+          "px": 109,
+          "med": 44.72840000000001
+        },
+        {
+          "camPitch": 70,
+          "camAz": 30,
+          "lightAz": 60,
+          "lightEl": 60,
+          "px": 33,
+          "med": 44.72840000000001
+        }
+      ]
+    },
+    {
+      "idx": 79,
+      "count": 2,
+      "totalPx": 130,
+      "totalDelta": 95.6694,
+      "configs": [
+        {
+          "camPitch": 45,
+          "camAz": 150,
+          "lightAz": 200,
+          "lightEl": 60,
+          "px": 56,
+          "med": 48.941
+        },
+        {
+          "camPitch": 45,
+          "camAz": 270,
+          "lightAz": 200,
+          "lightEl": 60,
+          "px": 74,
+          "med": 46.72839999999999
+        }
+      ]
+    },
+    {
+      "idx": 114,
+      "count": 2,
+      "totalPx": 126,
+      "totalDelta": 89.3846,
+      "configs": [
+        {
+          "camPitch": 45,
+          "camAz": 30,
+          "lightAz": 60,
+          "lightEl": 60,
+          "px": 41,
+          "med": 44.72840000000001
+        },
+        {
+          "camPitch": 45,
+          "camAz": 30,
+          "lightAz": 200,
+          "lightEl": 60,
+          "px": 85,
+          "med": 44.6562
+        }
+      ]
+    },
+    {
+      "idx": 496,
+      "count": 2,
+      "totalPx": 123,
+      "totalDelta": 89.3846,
+      "configs": [
+        {
+          "camPitch": 45,
+          "camAz": 30,
+          "lightAz": 60,
+          "lightEl": 60,
+          "px": 41,
+          "med": 44.72840000000001
+        },
+        {
+          "camPitch": 45,
+          "camAz": 30,
+          "lightAz": 200,
+          "lightEl": 60,
+          "px": 82,
+          "med": 44.6562
+        }
+      ]
+    },
+    {
+      "idx": 206,
+      "count": 2,
+      "totalPx": 110,
+      "totalDelta": 90.38460000000002,
+      "configs": [
+        {
+          "camPitch": 45,
+          "camAz": 30,
+          "lightAz": 60,
+          "lightEl": 60,
+          "px": 71,
+          "med": 44.72840000000001
+        },
+        {
+          "camPitch": 45,
+          "camAz": 30,
+          "lightAz": 200,
+          "lightEl": 60,
+          "px": 39,
+          "med": 45.65620000000001
+        }
+      ]
+    },
+    {
+      "idx": 17,
+      "count": 2,
+      "totalPx": 110,
+      "totalDelta": 87.3124,
+      "configs": [
+        {
+          "camPitch": 45,
+          "camAz": 270,
+          "lightAz": 200,
+          "lightEl": 30,
+          "px": 48,
+          "med": 42.6562
+        },
+        {
+          "camPitch": 45,
+          "camAz": 270,
+          "lightAz": 60,
+          "lightEl": 60,
+          "px": 62,
+          "med": 44.6562
+        }
+      ]
+    },
+    {
+      "idx": 472,
+      "count": 2,
+      "totalPx": 108,
+      "totalDelta": 95.2442,
+      "configs": [
+        {
+          "camPitch": 45,
+          "camAz": 30,
+          "lightAz": 60,
+          "lightEl": 60,
+          "px": 77,
+          "med": 47.72840000000001
+        },
+        {
+          "camPitch": 70,
+          "camAz": 30,
+          "lightAz": 60,
+          "lightEl": 60,
+          "px": 31,
+          "med": 47.5158
+        }
+      ]
+    },
+    {
+      "idx": 462,
+      "count": 2,
+      "totalPx": 105,
+      "totalDelta": 95.6694,
+      "configs": [
+        {
+          "camPitch": 45,
+          "camAz": 150,
+          "lightAz": 200,
+          "lightEl": 60,
+          "px": 75,
+          "med": 48.941
+        },
+        {
+          "camPitch": 70,
+          "camAz": 270,
+          "lightAz": 200,
+          "lightEl": 60,
+          "px": 30,
+          "med": 46.72839999999999
+        }
+      ]
+    },
+    {
+      "idx": 212,
+      "count": 2,
+      "totalPx": 104,
+      "totalDelta": 89.45680000000002,
+      "configs": [
+        {
+          "camPitch": 45,
+          "camAz": 30,
+          "lightAz": 60,
+          "lightEl": 60,
+          "px": 63,
+          "med": 44.72840000000001
+        },
+        {
+          "camPitch": 70,
+          "camAz": 30,
+          "lightAz": 60,
+          "lightEl": 60,
+          "px": 41,
+          "med": 44.72840000000001
+        }
+      ]
+    },
+    {
+      "idx": 430,
+      "count": 2,
+      "totalPx": 65,
+      "totalDelta": 89.3124,
+      "configs": [
+        {
+          "camPitch": 45,
+          "camAz": 30,
+          "lightAz": 200,
+          "lightEl": 60,
+          "px": 34,
+          "med": 44.6562
+        },
+        {
+          "camPitch": 45,
+          "camAz": 150,
+          "lightAz": 200,
+          "lightEl": 60,
+          "px": 31,
+          "med": 44.6562
+        }
+      ]
+    },
+    {
+      "idx": 321,
+      "count": 1,
+      "totalPx": 282,
+      "totalDelta": 43.94099999999999,
+      "configs": [
+        {
+          "camPitch": 70,
+          "camAz": 30,
+          "lightAz": 60,
+          "lightEl": 30,
+          "px": 282,
+          "med": 43.94099999999999
+        }
+      ]
+    },
+    {
+      "idx": 171,
+      "count": 1,
+      "totalPx": 236,
+      "totalDelta": 43.94099999999999,
+      "configs": [
+        {
+          "camPitch": 70,
+          "camAz": 30,
+          "lightAz": 60,
+          "lightEl": 30,
+          "px": 236,
+          "med": 43.94099999999999
+        }
+      ]
+    },
+    {
+      "idx": 185,
+      "count": 1,
+      "totalPx": 189,
+      "totalDelta": 43.94099999999999,
+      "configs": [
+        {
+          "camPitch": 70,
+          "camAz": 30,
+          "lightAz": 60,
+          "lightEl": 30,
+          "px": 189,
+          "med": 43.94099999999999
+        }
+      ]
+    },
+    {
+      "idx": 308,
+      "count": 1,
+      "totalPx": 110,
+      "totalDelta": 43.94099999999999,
+      "configs": [
+        {
+          "camPitch": 70,
+          "camAz": 30,
+          "lightAz": 60,
+          "lightEl": 30,
+          "px": 110,
+          "med": 43.94099999999999
+        }
+      ]
+    },
+    {
+      "idx": 119,
+      "count": 1,
+      "totalPx": 81,
+      "totalDelta": 44.6562,
+      "configs": [
+        {
+          "camPitch": 45,
+          "camAz": 270,
+          "lightAz": 200,
+          "lightEl": 30,
+          "px": 81,
+          "med": 44.6562
+        }
+      ]
+    },
+    {
+      "idx": 535,
+      "count": 1,
+      "totalPx": 77,
+      "totalDelta": 42.6562,
+      "configs": [
+        {
+          "camPitch": 70,
+          "camAz": 270,
+          "lightAz": 200,
+          "lightEl": 30,
+          "px": 77,
+          "med": 42.6562
+        }
+      ]
+    },
+    {
+      "idx": 537,
+      "count": 1,
+      "totalPx": 74,
+      "totalDelta": 42.6562,
+      "configs": [
+        {
+          "camPitch": 70,
+          "camAz": 270,
+          "lightAz": 200,
+          "lightEl": 30,
+          "px": 74,
+          "med": 42.6562
+        }
+      ]
+    },
+    {
+      "idx": 115,
+      "count": 1,
+      "totalPx": 62,
+      "totalDelta": 44.6562,
+      "configs": [
+        {
+          "camPitch": 45,
+          "camAz": 150,
+          "lightAz": 60,
+          "lightEl": 60,
+          "px": 62,
+          "med": 44.6562
+        }
+      ]
+    },
+    {
+      "idx": 326,
+      "count": 1,
+      "totalPx": 60,
+      "totalDelta": 47.5158,
+      "configs": [
+        {
+          "camPitch": 70,
+          "camAz": 30,
+          "lightAz": 60,
+          "lightEl": 60,
+          "px": 60,
+          "med": 47.5158
+        }
+      ]
+    },
+    {
+      "idx": 546,
+      "count": 1,
+      "totalPx": 60,
+      "totalDelta": 42.6562,
+      "configs": [
+        {
+          "camPitch": 70,
+          "camAz": 30,
+          "lightAz": 60,
+          "lightEl": 60,
+          "px": 60,
+          "med": 42.6562
+        }
+      ]
+    },
+    {
+      "idx": 68,
+      "count": 1,
+      "totalPx": 53,
+      "totalDelta": 42.6562,
+      "configs": [
+        {
+          "camPitch": 70,
+          "camAz": 30,
+          "lightAz": 200,
+          "lightEl": 30,
+          "px": 53,
+          "med": 42.6562
+        }
+      ]
+    },
+    {
+      "idx": 193,
+      "count": 1,
+      "totalPx": 51,
+      "totalDelta": 42.6562,
+      "configs": [
+        {
+          "camPitch": 70,
+          "camAz": 30,
+          "lightAz": 200,
+          "lightEl": 30,
+          "px": 51,
+          "med": 42.6562
+        }
+      ]
+    },
+    {
+      "idx": 451,
+      "count": 1,
+      "totalPx": 48,
+      "totalDelta": 42.6562,
+      "configs": [
+        {
+          "camPitch": 70,
+          "camAz": 30,
+          "lightAz": 200,
+          "lightEl": 30,
+          "px": 48,
+          "med": 42.6562
+        }
+      ]
+    },
+    {
+      "idx": 363,
+      "count": 1,
+      "totalPx": 47,
+      "totalDelta": 44.72840000000001,
+      "configs": [
+        {
+          "camPitch": 70,
+          "camAz": 30,
+          "lightAz": 60,
+          "lightEl": 60,
+          "px": 47,
+          "med": 44.72840000000001
+        }
+      ]
+    },
+    {
+      "idx": 330,
+      "count": 1,
+      "totalPx": 40,
+      "totalDelta": 43.72839999999999,
+      "configs": [
+        {
+          "camPitch": 70,
+          "camAz": 30,
+          "lightAz": 200,
+          "lightEl": 30,
+          "px": 40,
+          "med": 43.72839999999999
+        }
+      ]
+    },
+    {
+      "idx": 314,
+      "count": 1,
+      "totalPx": 39,
+      "totalDelta": 43.72839999999999,
+      "configs": [
+        {
+          "camPitch": 70,
+          "camAz": 30,
+          "lightAz": 200,
+          "lightEl": 30,
+          "px": 39,
+          "med": 43.72839999999999
+        }
+      ]
+    },
+    {
+      "idx": 590,
+      "count": 1,
+      "totalPx": 37,
+      "totalDelta": 44.6562,
+      "configs": [
+        {
+          "camPitch": 45,
+          "camAz": 30,
+          "lightAz": 200,
+          "lightEl": 60,
+          "px": 37,
+          "med": 44.6562
+        }
+      ]
+    },
+    {
+      "idx": 495,
+      "count": 1,
+      "totalPx": 36,
+      "totalDelta": 44.6562,
+      "configs": [
+        {
+          "camPitch": 45,
+          "camAz": 30,
+          "lightAz": 200,
+          "lightEl": 60,
+          "px": 36,
+          "med": 44.6562
+        }
+      ]
+    },
+    {
+      "idx": 429,
+      "count": 1,
+      "totalPx": 36,
+      "totalDelta": 44.6562,
+      "configs": [
+        {
+          "camPitch": 45,
+          "camAz": 30,
+          "lightAz": 200,
+          "lightEl": 60,
+          "px": 36,
+          "med": 44.6562
+        }
+      ]
+    },
+    {
+      "idx": 307,
+      "count": 1,
+      "totalPx": 34,
+      "totalDelta": 44.72840000000001,
+      "configs": [
+        {
+          "camPitch": 70,
+          "camAz": 30,
+          "lightAz": 60,
+          "lightEl": 60,
+          "px": 34,
+          "med": 44.72840000000001
+        }
+      ]
+    },
+    {
+      "idx": 113,
+      "count": 1,
+      "totalPx": 33,
+      "totalDelta": 44.6562,
+      "configs": [
+        {
+          "camPitch": 45,
+          "camAz": 30,
+          "lightAz": 200,
+          "lightEl": 60,
+          "px": 33,
+          "med": 44.6562
+        }
+      ]
+    },
+    {
+      "idx": 280,
+      "count": 1,
+      "totalPx": 33,
+      "totalDelta": 44.6562,
+      "configs": [
+        {
+          "camPitch": 45,
+          "camAz": 30,
+          "lightAz": 200,
+          "lightEl": 60,
+          "px": 33,
+          "med": 44.6562
+        }
+      ]
+    },
+    {
+      "idx": 124,
+      "count": 1,
+      "totalPx": 31,
+      "totalDelta": 44.6562,
+      "configs": [
+        {
+          "camPitch": 45,
+          "camAz": 30,
+          "lightAz": 200,
+          "lightEl": 60,
+          "px": 31,
+          "med": 44.6562
+        }
+      ]
+    },
+    {
+      "idx": 205,
+      "count": 1,
+      "totalPx": 31,
+      "totalDelta": 44.6562,
+      "configs": [
+        {
+          "camPitch": 45,
+          "camAz": 30,
+          "lightAz": 200,
+          "lightEl": 60,
+          "px": 31,
+          "med": 44.6562
+        }
+      ]
+    },
+    {
+      "idx": 275,
+      "count": 1,
+      "totalPx": 31,
+      "totalDelta": 44.6562,
+      "configs": [
+        {
+          "camPitch": 45,
+          "camAz": 30,
+          "lightAz": 200,
+          "lightEl": 60,
+          "px": 31,
+          "med": 44.6562
+        }
+      ]
+    },
+    {
+      "idx": 153,
+      "count": 1,
+      "totalPx": 31,
+      "totalDelta": 44.72840000000001,
+      "configs": [
+        {
+          "camPitch": 70,
+          "camAz": 30,
+          "lightAz": 60,
+          "lightEl": 60,
+          "px": 31,
+          "med": 44.72840000000001
+        }
+      ]
+    },
+    {
+      "idx": 499,
+      "count": 1,
+      "totalPx": 31,
+      "totalDelta": 44.72840000000001,
+      "configs": [
+        {
+          "camPitch": 70,
+          "camAz": 30,
+          "lightAz": 200,
+          "lightEl": 60,
+          "px": 31,
+          "med": 44.72840000000001
+        }
+      ]
+    },
+    {
+      "idx": 121,
+      "count": 1,
+      "totalPx": 30,
+      "totalDelta": 44.6562,
+      "configs": [
+        {
+          "camPitch": 45,
+          "camAz": 30,
+          "lightAz": 200,
+          "lightEl": 60,
+          "px": 30,
+          "med": 44.6562
+        }
+      ]
+    },
+    {
+      "idx": 117,
+      "count": 1,
+      "totalPx": 30,
+      "totalDelta": 44.72840000000001,
+      "configs": [
+        {
+          "camPitch": 70,
+          "camAz": 30,
+          "lightAz": 200,
+          "lightEl": 60,
+          "px": 30,
+          "med": 44.72840000000001
+        }
+      ]
+    }
+  ]
+}

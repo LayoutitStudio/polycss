@@ -11,8 +11,18 @@ import type {
   PolyDirectionalLight,
   PolyTextureLightingMode,
   Polygon,
+  Vec3,
 } from "@layoutit/polycss-core";
 import type { PolyRenderStrategiesOption, PolySeamBleed } from "./atlas";
+
+/** Caster mesh data registered with the scene so receiver meshes can run
+ *  the receiver-shadow algorithm without traversing the Vue component tree. */
+export interface ShadowCasterRegistration {
+  polygons: Polygon[];
+  position: Vec3;
+  scale: number | Vec3 | undefined;
+  rotation: Vec3 | undefined;
+}
 
 export interface PolyShadowOptions {
   color?: string;
@@ -28,14 +38,20 @@ export interface PolyShadowOptions {
 }
 
 export interface PolyShadowRegistry {
-  /** Register a casting mesh's polygon getter (called when castShadow=true). */
-  register(id: symbol, getPolygons: () => Polygon[]): void;
+  /** Register a casting mesh's full data getter. Pass `null` to unregister. */
+  register(id: symbol, getData: () => ShadowCasterRegistration): void;
   /** Unregister a casting mesh on unmount or castShadow toggle. */
   unregister(id: symbol): void;
   /** Reactive signal that increments whenever the registry changes. */
   version: Ref<number>;
-  /** Snapshot of all registered polygon getters. */
-  getEntries(): Array<() => Polygon[]>;
+  /** Snapshot of all registered caster data getters. */
+  getEntries(): Array<() => ShadowCasterRegistration>;
+}
+
+export interface PolyReceiverRegistry {
+  register(id: symbol): void;
+  unregister(id: symbol): void;
+  hasAny: Ref<boolean>;
 }
 
 export interface PolySceneContextValue {
@@ -46,6 +62,7 @@ export interface PolySceneContextValue {
   seamBleed?: PolySeamBleed;
   shadow?: PolyShadowOptions;
   shadowRegistry?: PolyShadowRegistry;
+  receiverRegistry?: PolyReceiverRegistry;
   /**
    * Computed CSS-Z of the shadow ground plane (= min world Z across all
    * casting meshes + scene.shadow.lift, in CSS pixels). Dynamic mode also

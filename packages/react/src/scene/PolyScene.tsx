@@ -7,7 +7,7 @@ import type {
   PolyTextureLightingMode,
 } from "@layoutit/polycss-core";
 import { BASE_TILE, DEFAULT_SEAM_BLEED, parseHexColor } from "@layoutit/polycss-core";
-import type { ShadowOptions } from "./sceneContext";
+import type { ShadowCasterRegistration, ShadowOptions } from "./sceneContext";
 import { useCameraContext } from "../camera/context";
 import { usePolySceneContext } from "./useSceneContext";
 import { injectPolyBaseStyles } from "../styles/styles";
@@ -298,18 +298,26 @@ function PolySceneInner({
 
   // Shadow caster registry. PolyMesh children call registerShadowCaster when
   // their castShadow prop or polygon list changes. The scene accumulates the
-  // polygon lists, derives the ground-plane CSS-Z, and mirrors it into either
-  // the `--shadow-ground-cssz` CSS var (dynamic mode) or the scene context
-  // (baked mode, where each mesh embeds the value in its inline matrix3d).
-  const shadowCastersRef = useRef<Map<symbol, Polygon[]>>(new Map());
+  // full caster transforms, derives the ground-plane CSS-Z, and mirrors it
+  // into either the `--shadow-ground-cssz` CSS var (dynamic mode) or the
+  // scene context (baked mode, where each mesh embeds the value in its
+  // inline matrix3d). Receiver meshes read the same registry to project
+  // per-receiver-face shadows.
+  const shadowCastersRef = useRef<Map<symbol, ShadowCasterRegistration>>(new Map());
+  const shadowReceiversRef = useRef<Set<symbol>>(new Set());
   const [groundCssZ, setGroundCssZ] = useState<number | null>(null);
+  // Bumped on every caster mutation so receiver useMemo deps re-fire.
+  const [shadowCastersVersion, setShadowCastersVersion] = useState(0);
+  const [hasShadowReceiver, setHasShadowReceiver] = useState(false);
 
   const recomputeGroundCssZ = useCallback(() => {
     let minWorldZ = Infinity;
-    for (const polys of shadowCastersRef.current.values()) {
-      for (const poly of polys) {
+    for (const data of shadowCastersRef.current.values()) {
+      for (const poly of data.polygons) {
         for (const v of poly.vertices) {
-          if (v[2] < minWorldZ) minWorldZ = v[2];
+          // Apply caster z-position so receiver and ground stay coherent.
+          const z = v[2] + (data.position[2] ?? 0);
+          if (z < minWorldZ) minWorldZ = z;
         }
       }
     }
@@ -318,12 +326,13 @@ function PolySceneInner({
     return (minWorldZ + lift) * BASE_TILE;
   }, [shadow]);
 
-  const registerShadowCaster = useCallback((meshId: symbol, meshPolygons: Polygon[] | null) => {
-    if (meshPolygons === null) {
+  const registerShadowCaster = useCallback((meshId: symbol, data: ShadowCasterRegistration | null) => {
+    if (data === null) {
       shadowCastersRef.current.delete(meshId);
     } else {
-      shadowCastersRef.current.set(meshId, meshPolygons);
+      shadowCastersRef.current.set(meshId, data);
     }
+    setShadowCastersVersion((v) => v + 1);
     const next = recomputeGroundCssZ();
     setGroundCssZ((prev) => (prev === next ? prev : next));
     const el = sceneElRef.current;
@@ -331,11 +340,15 @@ function PolySceneInner({
     if (textureLighting === "dynamic" && next !== null) {
       el.style.setProperty("--shadow-ground-cssz", next.toFixed(3));
     } else {
-      // Baked mode (no CSS var needed — the value flows through context)
-      // or no casters left.
       el.style.removeProperty("--shadow-ground-cssz");
     }
   }, [sceneElRef, textureLighting, recomputeGroundCssZ]);
+
+  const registerShadowReceiver = useCallback((meshId: symbol, registered: boolean) => {
+    if (registered) shadowReceiversRef.current.add(meshId);
+    else shadowReceiversRef.current.delete(meshId);
+    setHasShadowReceiver(shadowReceiversRef.current.size > 0);
+  }, []);
 
   // Re-sync the CSS var on lighting-mode swaps. Dynamic mode needs the var
   // (the --shadow-proj calc reads it); baked mode strips it so a stale
@@ -414,9 +427,13 @@ function PolySceneInner({
       seamBleed,
       shadow,
       registerShadowCaster,
+      registerShadowReceiver,
+      shadowCasters: shadowCastersRef.current,
+      shadowCastersVersion,
+      hasShadowReceiver,
       groundCssZ,
     }),
-    [textureLighting, directionalLight, ambientLight, strategies, seamBleed, shadow, registerShadowCaster, groundCssZ],
+    [textureLighting, directionalLight, ambientLight, strategies, seamBleed, shadow, registerShadowCaster, registerShadowReceiver, shadowCastersVersion, hasShadowReceiver, groundCssZ],
   );
 
   return (
