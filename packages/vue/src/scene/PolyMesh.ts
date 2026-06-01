@@ -578,11 +578,12 @@ export const PolyMesh = defineComponent({
       let i = 0;
       for (const getData of entries) {
         const data = getData();
+        const rendered = data.renderedPolygonIndices;
         const items = prepareCasterPolyItems(
           data.polygons,
           data.position,
           data.scale,
-          () => true,
+          rendered ? (idx) => rendered.has(idx) : () => true,
         );
         casterInputs.push({ id: Symbol(`caster-${i++}`), items });
       }
@@ -654,12 +655,28 @@ export const PolyMesh = defineComponent({
         const registry = sceneCtx?.value.shadowRegistry;
         if (!registry) return;
         if (castShadow) {
-          registry.register(shadowRegistryId, () => ({
-            polygons: polygons.value,
-            position: props.position ?? [0, 0, 0],
-            scale: props.scale,
-            rotation: props.rotation,
-          }));
+          registry.register(shadowRegistryId, () => {
+            // Mirror vanilla: skip no-plan polys AND overlapping duplicates
+            // (vanilla's dedupByCaster filter, same 0.5/0.95 thresholds).
+            const dedupDrop = findOverlappingPolygonDuplicates(polygons.value, {
+              normalTolerance: 0.1,
+              distanceTolerance: 0.5,
+              overlapFraction: 0.95,
+              preserveDoubleSidedBackfaces: false,
+            });
+            const s = new Set<number>();
+            const plans = textureAtlasPlans.value;
+            for (let i = 0; i < plans.length; i++) {
+              if (plans[i] && !dedupDrop.has(i)) s.add(i);
+            }
+            return {
+              polygons: polygons.value,
+              position: props.position ?? [0, 0, 0],
+              scale: props.scale,
+              rotation: props.rotation,
+              renderedPolygonIndices: s,
+            };
+          });
         } else {
           registry.unregister(shadowRegistryId);
         }

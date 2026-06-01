@@ -24,6 +24,12 @@ export interface ShadowCasterRegistration {
   position: Vec3;
   scale: number | Vec3 | undefined;
   rotation: Vec3 | undefined;
+  /** Polygon indices that have a valid atlas plan (= are actually rendered).
+   *  Receiver-shadow algorithm skips polygons NOT in this set, mirroring
+   *  vanilla which iterates `caster.rendered` (only rendered polys cast
+   *  shadow). Undefined means "include all polygons" (used when the caller
+   *  doesn't have plan information). */
+  renderedPolygonIndices?: ReadonlySet<number>;
 }
 
 export interface ShadowOptions {

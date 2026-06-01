@@ -724,7 +724,27 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
 
   // Register/unregister as a shadow caster whenever castShadow or polygons /
   // transform change. The full transform is registered so receiver meshes
-  // can project the shadow into world space directly.
+  // can project the shadow into world space directly. renderedPolygonIndices
+  // tells the receiver to skip polygons that have no atlas plan (e.g.
+  // degenerate or filtered-out) — vanilla iterates `caster.rendered` for
+  // the same effect.
+  const renderedPolygonIndices = useMemo(() => {
+    // Mirror vanilla: skip polygons that have no atlas plan AND skip
+    // overlapping duplicates (vanilla's `dedupByCaster` filter — the same
+    // findOverlappingPolygonDuplicates pass that the ground-shadow path
+    // uses, with the same 0.5/0.95 thresholds).
+    const dedupDrop = findOverlappingPolygonDuplicates(polygons, {
+      normalTolerance: 0.1,
+      distanceTolerance: 0.5,
+      overlapFraction: 0.95,
+      preserveDoubleSidedBackfaces: false,
+    });
+    const s = new Set<number>();
+    for (let i = 0; i < atlasPlans.length; i++) {
+      if (atlasPlans[i] && !dedupDrop.has(i)) s.add(i);
+    }
+    return s;
+  }, [atlasPlans, polygons]);
   useEffect(() => {
     if (!sceneRegisterShadowCaster) return;
     if (castShadow) {
@@ -733,6 +753,7 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
         position: position ?? [0, 0, 0],
         scale,
         rotation,
+        renderedPolygonIndices,
       });
     } else {
       sceneRegisterShadowCaster(meshIdRef.current, null);
@@ -740,7 +761,7 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
     return () => {
       sceneRegisterShadowCaster(meshIdRef.current, null);
     };
-  }, [sceneRegisterShadowCaster, castShadow, polygons, position, scale, rotation]);
+  }, [sceneRegisterShadowCaster, castShadow, polygons, position, scale, rotation, renderedPolygonIndices]);
 
   // Mirror receiveShadow registration so the scene knows whether at least
   // one receiver exists (drives the ground-shadow-disable rule on casters).
@@ -921,11 +942,14 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
     if (planes.length === 0) return null;
     const casterInputs: ReceiverCasterInput<symbol>[] = [];
     for (const [casterId, data] of shadowCasters) {
+      // Mirror vanilla: only iterate caster.rendered (= polygons with a
+      // valid atlas plan). renderedPolygonIndices is the React/Vue analog.
+      const rendered = data.renderedPolygonIndices;
       const items = prepareCasterPolyItems(
         data.polygons,
         data.position,
         data.scale,
-        () => true,
+        rendered ? (idx) => rendered.has(idx) : () => true,
       );
       casterInputs.push({ id: casterId, items });
     }
