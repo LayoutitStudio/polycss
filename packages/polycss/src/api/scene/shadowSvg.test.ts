@@ -109,10 +109,11 @@ describe("syncShadowPaths", () => {
   it("withStroke adds stroke-width/linejoin", () => {
     const svg = document.createElementNS(SVG_NS, "svg");
     const [p] = syncShadowPaths(svg, document, 1, true);
-    // 2 px stroke (= 1 px outside the path) covers float-precision
-    // sub-pixel clip gaps AND the ~1.5 px solid seam bleed that
-    // adjacent leaves overscan onto neighbour polygons.
-    expect(p!.getAttribute("stroke-width")).toBe("2");
+    // 3 px stroke (= 1.5 px outside the path) covers sub-pixel SH-clip
+    // gaps + seam bleed + residual CSS-compositor 1-px overlap that
+    // survives even seamBleed:0 (each leaf is a separate matrix3d layer
+    // and browsers rasterise each on its own pixel grid).
+    expect(p!.getAttribute("stroke-width")).toBe("3");
     expect(p!.getAttribute("stroke-linejoin")).toBe("round");
   });
   it("shrinks the path list by removing trailing children", () => {

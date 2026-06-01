@@ -116,16 +116,18 @@ export function syncShadowPaths(
       path = doc.createElementNS(SVG_NS, "path");
       path.setAttribute("fill-rule", "nonzero");
       if (withStroke) {
-        // 2 px stroke (= 1 px outside the path) to cover BOTH the float-
-        // precision sub-pixel clip gap AND the ~1.5 px solid seam bleed
-        // that adjacent leaves overscan onto neighbour polygons. The
-        // engine's internal solid seam bleed is up to 1.5 CSS px per
-        // shared edge (not configurable, see AGENTS.md), so a 1 px
-        // shadow stroke wasn't enough to overcome neighbour leaves
-        // painting lit-color INTO this receiver's edge zone. The extra
-        // shadow extension reads as soft penumbra at boundaries, which
-        // is closer to Three.js's PCF shadow look anyway.
-        path.setAttribute("stroke-width", "2");
+        // 3 px stroke (= 1.5 px outside the path) to cover:
+        //  - float-precision sub-pixel gaps from SH-clipping
+        //  - configurable seam-bleed leaves overscanning into shadow zone
+        //  - residual CSS-compositor sub-pixel overlap that survives even
+        //    seamBleed:0 (each leaf is a separate matrix3d layer, browser
+        //    rasterises each independently with its own rounding direction
+        //    → adjacent edges can round different ways producing 1 px of
+        //    lit-color leak into a neighbour's shadow surface; no per-
+        //    polygon seamBleed setting can fully prevent this)
+        // Reads as soft penumbra at shadow boundaries, similar to
+        // Three.js's PCF shadow falloff.
+        path.setAttribute("stroke-width", "3");
         path.setAttribute("stroke-linejoin", "round");
       }
       svg.insertBefore(path, existing);
