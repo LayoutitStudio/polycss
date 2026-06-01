@@ -74,8 +74,12 @@
     } else {
       const meshEl = document.createElement("poly-mesh");
       meshEl.setAttribute("src", preset.url);
-      if (preset.mtlUrl) meshEl.setAttribute("mtl-url", preset.mtlUrl);
+      if (preset.mtlUrl) meshEl.setAttribute("mtl", preset.mtlUrl);
       if (preset.options?.targetSize) meshEl.setAttribute("target-size", String(preset.options.targetSize));
+      if (preset.options?.defaultColor) meshEl.setAttribute("default-color", preset.options.defaultColor);
+      if (preset.options?.palette) meshEl.setAttribute("palette", preset.options.palette.join(","));
+      if (preset.options?.includeObjects) meshEl.setAttribute("include-objects", preset.options.includeObjects.join(","));
+      if (preset.options?.excludeObjects) meshEl.setAttribute("exclude-objects", preset.options.excludeObjects.join(","));
       if (castShadow) meshEl.setAttribute("cast-shadow", "");
       sceneEl.appendChild(meshEl);
       mountedPromise = new Promise((resolve, reject) => {
