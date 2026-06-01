@@ -38,6 +38,6 @@ export const PolyAxesHelper = defineComponent({
         zColor: props.zColor,
       }),
     );
-    return () => h(PolyMesh, { polygons: polygons.value });
+    return () => h(PolyMesh, { polygons: polygons.value, merge: false });
   },
 });

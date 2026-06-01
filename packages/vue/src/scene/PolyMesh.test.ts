@@ -168,7 +168,8 @@ describe("PolyMesh (Vue) — with polygons prop", () => {
   });
 
   it("hoists repeated baked solid paint to the mesh wrapper", () => {
-    const { container } = renderMesh({ polygons: [TRIANGLE, TRIANGLE] });
+    // merge={false} so duplicate triangles aren't optimized away.
+    const { container } = renderMesh({ polygons: [TRIANGLE, TRIANGLE], merge: false });
     const mesh = container.querySelector(".polycss-mesh") as HTMLElement;
     const polys = Array.from(container.querySelectorAll("u")) as HTMLElement[];
     expect(mesh.style.getPropertyValue("--polycss-paint")).not.toBe("");
@@ -179,7 +180,7 @@ describe("PolyMesh (Vue) — with polygons prop", () => {
   });
 
   it("hoists repeated dynamic solid base RGB channels to the mesh wrapper", () => {
-    const { container } = renderMesh({ polygons: [TRIANGLE, TRIANGLE], textureLighting: "dynamic" });
+    const { container } = renderMesh({ polygons: [TRIANGLE, TRIANGLE], merge: false, textureLighting: "dynamic" });
     const mesh = container.querySelector(".polycss-mesh") as HTMLElement;
     const polys = Array.from(container.querySelectorAll("u")) as HTMLElement[];
     expect(mesh.style.getPropertyValue("--psr")).toBe("1.0000");

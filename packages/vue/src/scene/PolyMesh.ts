@@ -27,6 +27,7 @@ import {
   ensureCcw2D,
   inverseRotateVec3,
   findOverlappingPolygonDuplicates,
+  optimizeMeshPolygons,
   parseHexColor,
   prepareCasterPolyItems,
   prepareReceiverFacePlanes,
@@ -113,6 +114,10 @@ export interface PolyMeshProps extends InteractionProps {
    * receiver exists. Defaults to `false`.
    */
   receiveShadow?: boolean;
+  /** Apply mesh optimization (coplanar merge + interior cull) before
+   *  rendering. Defaults to `true` — matches vanilla `scene.add`. Set
+   *  `false` for helper meshes whose geometry shouldn't be merged. */
+  merge?: boolean;
   /** Mesh optimization intent. Defaults to "lossy"; set "lossless" to keep
    *  authored surface fidelity. Top-level prop wins over any meshResolution
    *  that might be set inside parseOptions. */
@@ -214,6 +219,7 @@ export const PolyMesh = defineComponent({
     seamBleed: { type: [Number, String] as PropType<PolySeamBleed>, default: undefined },
     castShadow: { type: Boolean as PropType<boolean>, default: false },
     receiveShadow: { type: Boolean as PropType<boolean>, default: false },
+    merge: { type: Boolean as PropType<boolean>, default: true },
     meshResolution: { type: String as PropType<MeshResolution>, default: undefined },
     parseOptions: { type: Object as PropType<UseMeshOptions>, default: undefined },
     class: { type: String },
@@ -260,8 +266,21 @@ export const PolyMesh = defineComponent({
       imperativePolygons = null;
     });
 
-    const sourcePolygons = computed<Polygon[]>(() =>
+    const rawSourcePolygons = computed<Polygon[]>(() =>
       polygonOverride.value ?? propPolygons.value
+    );
+
+    // Apply mesh optimization (coplanar merge + interior cull) — mirrors
+    // vanilla's scene.add path which always runs optimizeMeshPolygons. Skip
+    // when `merge={false}` (helpers, imperative-edit callers that need
+    // stable polygon refs).
+    const sourcePolygons = computed<Polygon[]>(() =>
+      props.merge
+        ? optimizeMeshPolygons(
+            rawSourcePolygons.value,
+            props.meshResolution !== undefined ? { meshResolution: props.meshResolution } : undefined,
+          )
+        : rawSourcePolygons.value,
     );
 
     const polygons = computed<Polygon[]>(() =>

@@ -61,6 +61,7 @@ export const PolyDirectionalLightHelper = defineComponent({
       h(PolyMesh, {
         polygons: polygons.value,
         position: meshPosition.value,
+        merge: false,
       });
   },
 });

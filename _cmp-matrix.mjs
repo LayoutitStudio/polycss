@@ -24,10 +24,10 @@ page.on("pageerror", (err) => console.log("[pageerror]", err.message));
 for (const cfg of CONFIGS) {
   const qs = `mesh=${cfg.mesh}&mode=${cfg.mode}&motion=none&az=60&el=45&cast=${cfg.cast}&floor=${cfg.floor}&zoom=${cfg.zoom}`;
   const url = `http://localhost:4400/parity-trio.html?${qs}`;
-  await page.goto(url, { waitUntil: "domcontentloaded" });
+  await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60000 });
   await page.waitForTimeout(11000);
   const file = `${OUT}/${cfg.name}.png`;
-  await page.screenshot({ path: file, fullPage: false });
+  await page.screenshot({ path: file, fullPage: false, timeout: 60000 });
   console.log(`saved ${file}`);
 }
 await browser.close();

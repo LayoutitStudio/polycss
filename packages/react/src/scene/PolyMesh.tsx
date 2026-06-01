@@ -40,6 +40,7 @@ import {
   ensureCcw2D,
   findOverlappingPolygonDuplicates,
   inverseRotateVec3,
+  optimizeMeshPolygons,
   parseHexColor,
   prepareCasterPolyItems,
   prepareReceiverFacePlanes,
@@ -145,6 +146,14 @@ export interface PolyMeshProps extends TransformProps, InteractionProps {
    * for caster meshes — receivers handle shadow display. Defaults to `false`.
    */
   receiveShadow?: boolean;
+  /**
+   * Apply mesh optimization (coplanar merge + interior cull) before
+   * rendering. Defaults to `true` — matches vanilla `scene.add`'s default.
+   * Set `false` for helper meshes (axes, light markers) whose geometry
+   * shouldn't be merged, or when the imperative `updatePolygon` API needs
+   * polygon refs to survive across updates.
+   */
+  merge?: boolean;
   className?: string;
   style?: CSSProperties;
 }
@@ -239,6 +248,7 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
     seamBleed,
     castShadow,
     receiveShadow,
+    merge = true,
     children,
     fallback,
     errorFallback,
@@ -299,7 +309,17 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
     if (localPolygons !== null) setLocalPolygons(null);
   }
 
-  const sourcePolygons = localPolygons ?? externalPolygons;
+  const rawSourcePolygons = localPolygons ?? externalPolygons;
+  // Apply mesh optimization (coplanar merge + interior cull) — mirrors
+  // vanilla's scene.add path which always runs optimizeMeshPolygons. Skip
+  // when `merge={false}` (helpers, imperative-edit callers that need
+  // stable polygon refs).
+  const sourcePolygons = useMemo(
+    () => merge
+      ? optimizeMeshPolygons(rawSourcePolygons, meshResolution !== undefined ? { meshResolution } : undefined)
+      : rawSourcePolygons,
+    [rawSourcePolygons, merge, meshResolution],
+  );
   const hasRenderProp = typeof children === "function";
   const renderPolygon = hasRenderProp
     ? children as (polygon: Polygon, index: number) => ReactNode

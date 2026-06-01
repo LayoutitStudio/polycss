@@ -62,5 +62,5 @@ export function PolyDirectionalLightHelper({
     ];
   }, [light.direction, target, distance]);
 
-  return <PolyMesh polygons={polygons} position={meshPosition} />;
+  return <PolyMesh polygons={polygons} position={meshPosition} merge={false} />;
 }
