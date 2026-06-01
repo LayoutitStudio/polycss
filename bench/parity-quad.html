@@ -21,7 +21,10 @@
     .stage.react   { grid-area: react; }
     .stage.vue     { grid-area: vue; }
     .stage.html-ce { grid-area: html-ce; }
-    .stage > h3 { position: absolute; top: 8px; left: 12px; margin: 0; font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: #f87171; z-index: 10; pointer-events: none; }
+    .stage > h3 { position: absolute; top: 10px; left: 14px; margin: 0; font-size: 16px; letter-spacing: 0.06em; text-transform: uppercase; color: #ef4444; z-index: 10; }
+    .stage > h3 a { color: inherit; text-decoration: none; pointer-events: auto; padding: 2px 6px; border-radius: 3px; }
+    .stage > h3 a:hover { background: rgba(239, 68, 68, 0.18); text-decoration: underline; }
+    .stage > h3 a::after { content: " ↗"; font-size: 0.75em; opacity: 0.7; }
     .stage > iframe { width: 100%; height: 100%; border: 0; background: #0a0c10; display: block; }
     #panel { grid-area: panel; padding: 12px; background: #f8fafc; overflow-y: auto; border-left: 1px solid #cbd5e1; font-size: 12px; }
     #panel .sec { margin: 14px 0 6px; font-weight: 600; color: #0f172a; font-size: 11px; letter-spacing: 0.05em; text-transform: uppercase; }
@@ -38,10 +41,10 @@
   </style>
 </head>
 <body>
-  <div class="stage vanilla"><h3>vanilla</h3><iframe id="vanilla-iframe"></iframe></div>
-  <div class="stage react"><h3>react</h3><iframe id="react-iframe"></iframe></div>
-  <div class="stage vue"><h3>vue</h3><iframe id="vue-iframe"></iframe></div>
-  <div class="stage html-ce"><h3>html (custom elements)</h3><iframe id="html-iframe"></iframe></div>
+  <div class="stage vanilla"><h3><a id="vanilla-link" target="_blank" rel="noopener">vanilla</a></h3><iframe id="vanilla-iframe"></iframe></div>
+  <div class="stage react"><h3><a id="react-link" target="_blank" rel="noopener">react</a></h3><iframe id="react-iframe"></iframe></div>
+  <div class="stage vue"><h3><a id="vue-link" target="_blank" rel="noopener">vue</a></h3><iframe id="vue-iframe"></iframe></div>
+  <div class="stage html-ce"><h3><a id="html-link" target="_blank" rel="noopener">html (custom elements)</a></h3><iframe id="html-iframe"></iframe></div>
   <div id="panel"></div>
 
   <script>
@@ -104,11 +107,25 @@
       return `perf-${renderer}.html?${qs.toString()}`;
     }
 
+    // "Open in window" links — same query string but without `sync` / `nohud`
+    // so the standalone page shows the perf HUD and doesn't try to message a
+    // missing parent. Mesh load + every other config flag are preserved.
+    function buildStandaloneUrl(renderer) {
+      const u = new URL(buildIframeUrl(renderer), window.location.href);
+      u.searchParams.delete("sync");
+      u.searchParams.delete("nohud");
+      return u.pathname.split("/").pop() + (u.search || "");
+    }
+
     function reloadAll() {
       document.getElementById("vanilla-iframe").src = buildIframeUrl("vanilla");
       document.getElementById("react-iframe").src   = buildIframeUrl("react");
       document.getElementById("vue-iframe").src     = buildIframeUrl("vue");
       document.getElementById("html-iframe").src    = buildIframeUrl("html");
+      document.getElementById("vanilla-link").href  = buildStandaloneUrl("vanilla");
+      document.getElementById("react-link").href    = buildStandaloneUrl("react");
+      document.getElementById("vue-link").href      = buildStandaloneUrl("vue");
+      document.getElementById("html-link").href     = buildStandaloneUrl("html");
       writeUrl();
     }
 
