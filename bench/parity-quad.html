@@ -96,7 +96,9 @@
       shadowsOnly:     qs("sx", "0") === "1",
       autoCenter:      qs("ax", "1") !== "0",
       obj: { x: qn("ox", 0), y: qn("oy", 0), z: qn("oz", 0), scale: qn("os", 1), rx: qn("orx", 0), ry: qn("ory", 0), rz: qn("orz", 0) },
-      dir: { x: qn("dx", 1), y: qn("dy", 0.5), z: qn("dz", 1), intensity: qn("di", 1), color: qs("dc", "#ffffff") },
+      // Clamp dz to the same min=0.05 the slider enforces — keeps the light
+      // above the floor when an older URL persisted a negative value.
+      dir: { x: qn("dx", 1), y: qn("dy", 0.5), z: Math.max(0.05, qn("dz", 1)), intensity: qn("di", 1), color: qs("dc", "#ffffff") },
       amb: { intensity: qn("ai", 0.3), color: qs("ac", "#ffffff") },
       shadow: { opacity: qn("so", 1.0) },
       cam: { rotX: qn("rotX", preset.rotX), rotY: qn("rotY", preset.rotY), zoom: qn("zoom", preset.zoom) },
@@ -436,7 +438,12 @@
     const dirField = (f, opts) => addRangeRow(f, { ...opts, value: S.dir[f] }, (n) => { S.dir[f] = n; updateAll(); });
     dirField("x", { min: -2, max: 2, step: 0.05, fmt: (v) => v.toFixed(2) });
     dirField("y", { min: -2, max: 2, step: 0.05, fmt: (v) => v.toFixed(2) });
-    dirField("z", { min: -2, max: 2, step: 0.05, fmt: (v) => v.toFixed(2) });
+    // z is clamped to a small positive minimum so the light can't drop to or
+    // below the floor — at z ≤ 0 the light vector is at/under the floor and
+    // shadows physically can't fall on the +Z face, which silently looks
+    // like a bug. shadow-oracle allows -2..+2 here, but for this 4-up
+    // comparison the footgun isn't worth the extra range.
+    dirField("z", { min: 0.05, max: 2, step: 0.05, fmt: (v) => v.toFixed(2) });
     dirField("intensity", { min: 0, max: 3, step: 0.05, fmt: (v) => v.toFixed(2) });
     addColorRow("color", S.dir.color, (c) => { S.dir.color = c; updateAll(); });
 
