@@ -1,5 +1,6 @@
 import {
   bakeSolidTextureSamples,
+  optimizeMeshParseResult,
   parseGltf,
   parseMtl,
   parseObj,
@@ -14,7 +15,6 @@ import type {
 } from "../types";
 import { activeMeshResolution, type WorkbenchMeshResolution } from "../../types";
 import { assertImportedRenderedPolygonLimit } from "./importLimits";
-import { cleanupLossyBakedTextureColors } from "./lossyColorCleanup";
 import { mergeParserOptions } from "./parserOptions";
 
 const VOX_LOSSY_PALETTE_MERGE_DISTANCE = 28;
@@ -138,14 +138,21 @@ export async function loadPresetModel(
       },
     });
     const baked = await bakeSolidTextureSamples(parsedObj);
-    const parsed = cleanupLossyBakedTextureColors(parsedObj, baked, { meshResolution });
+    const sourcePolygonCount = baked.polygons.length;
+    const effectiveMeshResolution = activeMeshResolution(meshResolution);
+    const parsed = optimizeMeshParseResult(baked, {
+      meshResolution: effectiveMeshResolution,
+      source: parsedObj,
+    });
     return {
       label: model.label,
       kind: "obj",
       parseResult: parsed,
       rawPolygons: parsed.polygons,
       polygons: parsed.polygons,
-      sourcePolygons: parsed.polygons.length,
+      optimizedPolygons: parsed.polygons,
+      optimizedMeshResolution: effectiveMeshResolution,
+      sourcePolygons: sourcePolygonCount,
       sourceBytes: objText.length + (mtlText?.length ?? 0),
       warnings: parsed.warnings ?? [],
       parseMs: performance.now() - started,
@@ -174,19 +181,28 @@ export async function loadPresetModel(
     };
   }
 
+  const gltfUrl = new URL(url, window.location.href).href;
   const parsedGltf = parseGltf(buf, {
     ...mergeParserOptions(model.options, parser),
-    baseUrl: new URL(url, window.location.href).href,
+    baseUrl: gltfUrl,
   });
   const baked = await bakeSolidTextureSamples(parsedGltf);
-  const parsed = cleanupLossyBakedTextureColors(parsedGltf, baked, { meshResolution });
+  const sourcePolygonCount = baked.polygons.length;
+  const effectiveMeshResolution = activeMeshResolution(meshResolution);
+  const parsed = optimizeMeshParseResult(baked, {
+    meshResolution: effectiveMeshResolution,
+    source: parsedGltf,
+  });
+  const optimizedStatic = !parsed.animation && !parsed.voxelSource;
   return {
     label: model.label,
     kind: model.kind,
     parseResult: parsed,
     rawPolygons: parsed.polygons,
     polygons: parsed.polygons,
-    sourcePolygons: parsed.polygons.length,
+    optimizedPolygons: optimizedStatic ? parsed.polygons : undefined,
+    optimizedMeshResolution: optimizedStatic ? effectiveMeshResolution : undefined,
+    sourcePolygons: sourcePolygonCount,
     sourceBytes: buf.byteLength,
     warnings: parsed.warnings ?? [],
     parseMs: performance.now() - started,
@@ -250,7 +266,12 @@ export async function loadDroppedModel(
       },
     });
     const baked = await bakeSolidTextureSamples(parsedObj);
-    const parsed = cleanupLossyBakedTextureColors(parsedObj, baked, { meshResolution });
+    const sourcePolygonCount = baked.polygons.length;
+    const effectiveMeshResolution = activeMeshResolution(meshResolution);
+    const parsed = optimizeMeshParseResult(baked, {
+      meshResolution: effectiveMeshResolution,
+      source: parsedObj,
+    });
     let disposed = false;
     const parseResult = {
       ...parsed,
@@ -274,7 +295,9 @@ export async function loadDroppedModel(
       parseResult,
       rawPolygons: parsed.polygons,
       polygons: parsed.polygons,
-      sourcePolygons: parsed.polygons.length,
+      optimizedPolygons: parsed.polygons,
+      optimizedMeshResolution: effectiveMeshResolution,
+      sourcePolygons: sourcePolygonCount,
       sourceBytes,
       warnings: parseResult.warnings,
       parseMs: performance.now() - started,
@@ -308,7 +331,13 @@ export async function loadDroppedModel(
 
   const parsedGltf = parseGltf(buf, options);
   const baked = await bakeSolidTextureSamples(parsedGltf);
-  const parsed = cleanupLossyBakedTextureColors(parsedGltf, baked, { meshResolution });
+  const sourcePolygonCount = baked.polygons.length;
+  const effectiveMeshResolution = activeMeshResolution(meshResolution);
+  const parsed = optimizeMeshParseResult(baked, {
+    meshResolution: effectiveMeshResolution,
+    source: parsedGltf,
+  });
+  const optimizedStatic = !parsed.animation && !parsed.voxelSource;
   try {
     assertImportedRenderedPolygonLimit(parsed, meshResolution, source.label);
   } catch (error) {
@@ -321,7 +350,9 @@ export async function loadDroppedModel(
     parseResult: parsed,
     rawPolygons: parsed.polygons,
     polygons: parsed.polygons,
-    sourcePolygons: parsed.polygons.length,
+    optimizedPolygons: optimizedStatic ? parsed.polygons : undefined,
+    optimizedMeshResolution: optimizedStatic ? effectiveMeshResolution : undefined,
+    sourcePolygons: sourcePolygonCount,
     sourceBytes,
     warnings: parsed.warnings ?? [],
     parseMs: performance.now() - started,

@@ -49,6 +49,8 @@ export interface LoadedModel {
   parseResult: ParseResult;
   rawPolygons: Polygon[];
   polygons: Polygon[];
+  optimizedPolygons?: Polygon[];
+  optimizedMeshResolution?: "lossless" | "lossy";
   sourcePolygons: number;
   sourceBytes: number;
   warnings: string[];

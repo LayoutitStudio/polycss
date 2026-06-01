@@ -30,7 +30,7 @@ Confirmed during benchmarking on a 10k-triangle mesh with auto-rotate:
 
 ## Automatic mesh optimization
 
-PolyCSS automatically optimizes loaded meshes before rendering. The default `meshResolution: "lossy"` path merges compatible polygons and can use bounded geometric approximation when that lowers estimated DOM render cost. Wider lossy candidates are gated by whole-mesh seam diagnostics and a minimum render-cost win. `meshResolution: "lossless"` keeps exact planar candidates only.
+PolyCSS automatically optimizes loaded meshes before rendering. The default `meshResolution: "lossy"` path bakes solid texture swatches, merges visually redundant baked swatch colors, tries static triangle simplification for eligible non-animated imports, merges compatible polygons, and can use bounded geometric approximation when that lowers estimated DOM render cost. Wider lossy candidates are gated by whole-mesh seam diagnostics and a minimum render-cost win. `meshResolution: "lossless"` keeps exact planar candidates only.
 
 This is most useful for architectural meshes with large flat surfaces: walls, floors, ceilings, voxel faces, and other areas where many same-material triangles can collapse without visual change.
 
