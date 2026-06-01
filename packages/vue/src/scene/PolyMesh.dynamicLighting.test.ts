@@ -186,9 +186,10 @@ describe("PolyMesh (Vue) — dynamic lighting override", () => {
     );
 
     const sceneEl = container.querySelector(".polycss-scene") as HTMLElement;
-    // Scene emits world-space lx for direction [1,0,0], normalized → 1.0000
-    expect(sceneEl.style.getPropertyValue("--plx")).toBe("1.0000");
-    expect(sceneEl.style.getPropertyValue("--ply")).toBe("0.0000");
+    // Scene applies worldDirectionToCss before emitting --plx/y/z:
+    // world [1,0,0] → CSS [0,1,0] (world Y→CSS X, world X→CSS Y)
+    expect(sceneEl.style.getPropertyValue("--plx")).toBe("0.0000");
+    expect(sceneEl.style.getPropertyValue("--ply")).toBe("1.0000");
     expect(sceneEl.style.getPropertyValue("--plz")).toBe("0.0000");
   });
 });
