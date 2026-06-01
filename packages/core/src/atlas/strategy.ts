@@ -105,7 +105,13 @@ export function filterAtlasPlans(
   const useFullRectSolid = !disabled.has("b");
   const useProjectiveQuad = useFullRectSolid && env.projectiveQuadSupported;
   const useStableTriangle = !disabled.has("u") && env.solidTriangleSupported;
-  const useBorderShape = !disabled.has("i") && textureLighting !== "dynamic" && env.borderShapeSupported;
+  // borderShape applies in both lighting modes (vanilla never gates this on
+  // textureLighting). Earlier core implementation disabled it in dynamic
+  // mode, which forced solid non-rect non-triangle polys through the atlas
+  // bitmap path — in dynamic mode that produced light-baked atlas pixels
+  // that didn't pick up the CSS-driven lambert calc, drifting the visual
+  // output away from vanilla.
+  const useBorderShape = !disabled.has("i") && env.borderShapeSupported;
   const disableB = disabled.has("b");
   return plans.map((plan) => {
     if (!plan || plan.texture) return plan;
@@ -114,7 +120,7 @@ export function filterAtlasPlans(
     if (
       (useFullRectSolid && fullRect) ||
       (useProjectiveQuad && isProjectiveQuadPlan(plan)) ||
-      (textureLighting !== "dynamic" && useBorderShape && (!fullRect || disableB))
+      (useBorderShape && (!fullRect || disableB))
     ) return null;
     return plan;
   });
