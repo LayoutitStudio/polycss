@@ -193,6 +193,7 @@
     htmlMesh.setAttribute("scale", String(S.obj.scale));
     htmlMesh.setAttribute("rotation", `${S.obj.rx},${S.obj.ry},${S.obj.rz}`);
     if (S.castShadow) htmlMesh.setAttribute("cast-shadow", "");
+    if (S.selfShadow) htmlMesh.setAttribute("receive-shadow", "");
     htmlScene.appendChild(htmlMesh);
     htmlHost.appendChild(htmlScene);
     let htmlFloorMesh = null;
@@ -284,6 +285,8 @@
       htmlMesh.setAttribute("rotation", `${S.obj.rx},${S.obj.ry},${S.obj.rz}`);
       if (S.castShadow) htmlMesh.setAttribute("cast-shadow", "");
       else htmlMesh.removeAttribute("cast-shadow");
+      if (S.selfShadow) htmlMesh.setAttribute("receive-shadow", "");
+      else htmlMesh.removeAttribute("receive-shadow");
       const htmlSceneHandle = htmlScene.getScene();
       if (htmlSceneHandle) htmlSceneHandle.setOptions({ shadow: { opacity: S.shadow.opacity } });
       ensureHtmlFloor();
