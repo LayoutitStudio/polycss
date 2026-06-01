@@ -24,7 +24,10 @@ export interface ParityQuadState {
   polygons: Polygon[];
   voxelSource?: unknown;
   castShadow: boolean;
-  floor: boolean;
+  selfShadow: boolean;
+  floorVisible: boolean;
+  floorReceives: boolean;
+  autoCenter: boolean;
   floorPolygons: Polygon[];
   obj: { position: [number, number, number]; scale: number; rotation: [number, number, number] };
   dir: { direction: [number, number, number]; intensity: number; color: string };
@@ -43,20 +46,21 @@ function App({ state, onCameraChange }: { state: ParityQuadState; onCameraChange
         ambientLight={state.amb}
         shadow={state.shadow}
         textureLighting={state.textureLighting}
-        autoCenter
-        centerPolygons={state.floor ? [...state.polygons, ...state.floorPolygons] : state.polygons}
+        autoCenter={state.autoCenter}
+        centerPolygons={state.floorVisible ? [...state.polygons, ...state.floorPolygons] : state.polygons}
       >
         <PolyOrbitControls drag wheel animate={false} onChange={onCameraChange} />
         <PolyMesh
           polygons={state.polygons}
           voxelSource={state.voxelSource}
           castShadow={state.castShadow}
+          receiveShadow={state.selfShadow}
           position={state.obj.position}
           scale={state.obj.scale}
           rotation={state.obj.rotation}
         />
-        {state.floor && (
-          <PolyMesh polygons={state.floorPolygons} receiveShadow />
+        {state.floorVisible && (
+          <PolyMesh polygons={state.floorPolygons} receiveShadow={state.floorReceives} />
         )}
       </PolyScene>
     </PolyCamera>

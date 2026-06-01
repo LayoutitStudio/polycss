@@ -23,6 +23,8 @@
     .stage.html-ce { grid-area: html-ce; }
     .stage > h3 { position: absolute; top: 8px; left: 12px; margin: 0; font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: #f87171; z-index: 10; pointer-events: none; }
     .stage > .host { position: absolute; inset: 0; }
+    /* Shadows-only mode — hide mesh leaves so only the shadow SVGs render. */
+    .stage > .host.shadows-only .polycss-mesh { visibility: hidden; }
     #panel { grid-area: panel; padding: 12px; background: #f8fafc; overflow-y: auto; border-left: 1px solid #cbd5e1; font-size: 12px; }
     #panel .sec { margin: 14px 0 6px; font-weight: 600; color: #0f172a; font-size: 11px; letter-spacing: 0.05em; text-transform: uppercase; }
     #panel .row { display: grid; grid-template-columns: 70px 1fr 60px; gap: 6px; align-items: center; margin: 3px 0; }
@@ -82,15 +84,21 @@
     const qs = (k, d) => Q.get(k) ?? d;
     const meshId = qs("mesh", "castle");
     const preset = PRESETS[meshId] ?? PRESETS.castle;
+    // Defaults mirror shadow-oracle so shadows are immediately visible:
+    // angled light (dx=1, dy=0.5, dz=1), full-opacity shadow, ambient 0.3.
     const S = {
       mesh: meshId,
       textureLighting: qs("mode", "baked"),
-      castShadow: qs("cast", "1") !== "0",
-      floor: qs("floor", "1") !== "0",
+      castShadow:      qs("cs", "1") !== "0",
+      floorVisible:    qs("fv", "1") !== "0",
+      floorReceives:   qs("fr", "1") !== "0",
+      selfShadow:      qs("ss", "1") !== "0",
+      shadowsOnly:     qs("sx", "0") === "1",
+      autoCenter:      qs("ax", "1") !== "0",
       obj: { x: qn("ox", 0), y: qn("oy", 0), z: qn("oz", 0), scale: qn("os", 1), rx: qn("orx", 0), ry: qn("ory", 0), rz: qn("orz", 0) },
-      dir: { x: qn("dx", 0.5), y: qn("dy", 0.5), z: qn("dz", 1), intensity: qn("di", 1), color: qs("dc", "#ffffff") },
-      amb: { intensity: qn("ai", 0.4), color: qs("ac", "#ffffff") },
-      shadow: { opacity: qn("so", 0.25) },
+      dir: { x: qn("dx", 1), y: qn("dy", 0.5), z: qn("dz", 1), intensity: qn("di", 1), color: qs("dc", "#ffffff") },
+      amb: { intensity: qn("ai", 0.3), color: qs("ac", "#ffffff") },
+      shadow: { opacity: qn("so", 1.0) },
       cam: { rotX: qn("rotX", preset.rotX), rotY: qn("rotY", preset.rotY), zoom: qn("zoom", preset.zoom) },
     };
     const floorPolygons = buildFloorPolygons();
@@ -102,7 +110,10 @@
         polygons: parseResult.polygons,
         voxelSource: parseResult.voxelSource,
         castShadow: S.castShadow,
-        floor: S.floor,
+        selfShadow: S.selfShadow,
+        floorVisible: S.floorVisible,
+        floorReceives: S.floorReceives,
+        autoCenter: S.autoCenter,
         floorPolygons,
         obj: { position: [S.obj.x, S.obj.y, S.obj.z], scale: S.obj.scale, rotation: [S.obj.rx, S.obj.ry, S.obj.rz] },
         dir: { direction: [S.dir.x, S.dir.y, S.dir.z], intensity: S.dir.intensity, color: S.dir.color },
@@ -130,17 +141,18 @@
       ambientLight: { color: S.amb.color, intensity: S.amb.intensity },
       shadow: { opacity: S.shadow.opacity },
       textureLighting: S.textureLighting,
-      autoCenter: true,
+      autoCenter: S.autoCenter,
     });
     const vanillaOrbit = createPolyOrbitControls(vanillaScene, { drag: true, wheel: true });
     const vanillaMesh = vanillaScene.add(parseResult, {
       castShadow: S.castShadow,
+      receiveShadow: S.selfShadow,
       position: [S.obj.x, S.obj.y, S.obj.z],
       scale: S.obj.scale,
       rotation: [S.obj.rx, S.obj.ry, S.obj.rz],
     });
-    const vanillaFloor = S.floor
-      ? vanillaScene.add({ polygons: floorPolygons }, { receiveShadow: true })
+    const vanillaFloor = S.floorVisible
+      ? vanillaScene.add({ polygons: floorPolygons }, { receiveShadow: S.floorReceives })
       : null;
     vanillaOrbit.addEventListener("change", (e) => {
       // User dragged the vanilla pane — push to S + propagate to the others.
@@ -186,11 +198,13 @@
     function ensureHtmlFloor() {
       const handle = htmlScene.getScene();
       if (!handle) return;
-      if (S.floor && !htmlFloorMesh) {
-        htmlFloorMesh = handle.add({ polygons: floorPolygons }, { receiveShadow: true });
-      } else if (!S.floor && htmlFloorMesh) {
+      if (S.floorVisible && !htmlFloorMesh) {
+        htmlFloorMesh = handle.add({ polygons: floorPolygons }, { receiveShadow: S.floorReceives });
+      } else if (!S.floorVisible && htmlFloorMesh) {
         htmlFloorMesh.remove();
         htmlFloorMesh = null;
+      } else if (htmlFloorMesh) {
+        htmlFloorMesh.setTransform({ receiveShadow: S.floorReceives });
       }
     }
     htmlMesh.addEventListener("polycss:loaded", () => { ensureHtmlFloor(); });
@@ -227,12 +241,14 @@
         ambientLight: { color: S.amb.color, intensity: S.amb.intensity },
         shadow: { opacity: S.shadow.opacity },
         textureLighting: S.textureLighting,
+        autoCenter: S.autoCenter,
       });
       vanillaMesh.setTransform({
         position: [S.obj.x, S.obj.y, S.obj.z],
         scale: S.obj.scale,
         rotation: [S.obj.rx, S.obj.ry, S.obj.rz],
         castShadow: S.castShadow,
+        receiveShadow: S.selfShadow,
       });
 
       // HTML elements: declarative attribute writes for everything <poly-
@@ -262,12 +278,21 @@
       reactMount.update(rs);
       vueMount.update(rs);
 
-      // Vanilla floor: add / remove based on toggle.
-      if (S.floor && !vanillaFloorRef.current) {
-        vanillaFloorRef.current = vanillaScene.add({ polygons: floorPolygons }, { receiveShadow: true });
-      } else if (!S.floor && vanillaFloorRef.current) {
+      // Vanilla floor: add / remove based on toggle. Floor visible can be on
+      // while floor receives shadow can be off — those are independent knobs.
+      if (S.floorVisible && !vanillaFloorRef.current) {
+        vanillaFloorRef.current = vanillaScene.add({ polygons: floorPolygons }, { receiveShadow: S.floorReceives });
+      } else if (!S.floorVisible && vanillaFloorRef.current) {
         vanillaFloorRef.current.remove();
         vanillaFloorRef.current = null;
+      } else if (vanillaFloorRef.current) {
+        vanillaFloorRef.current.setTransform({ receiveShadow: S.floorReceives });
+      }
+
+      // Shadows-only: hide .polycss-mesh wrappers via a CSS class so only
+      // the shadow SVGs (which live as .polycss-shadow siblings) remain.
+      for (const host of [vanillaHost, document.getElementById("react-host"), document.getElementById("vue-host"), htmlHost]) {
+        host?.classList.toggle("shadows-only", S.shadowsOnly);
       }
 
       writeUrl();
@@ -278,8 +303,12 @@
       const qs = new URLSearchParams();
       qs.set("mesh", S.mesh);
       qs.set("mode", S.textureLighting);
-      qs.set("cast", S.castShadow ? "1" : "0");
-      qs.set("floor", S.floor ? "1" : "0");
+      qs.set("cs", S.castShadow ? "1" : "0");
+      qs.set("ss", S.selfShadow ? "1" : "0");
+      qs.set("fv", S.floorVisible ? "1" : "0");
+      qs.set("fr", S.floorReceives ? "1" : "0");
+      qs.set("ax", S.autoCenter ? "1" : "0");
+      if (S.shadowsOnly) qs.set("sx", "1");
       qs.set("rotX", String(S.cam.rotX));
       qs.set("rotY", String(S.cam.rotY));
       qs.set("zoom", String(S.cam.zoom));
@@ -352,14 +381,20 @@
       row.appendChild(inp); panel.appendChild(row);
     }
 
-    addSection("Scene config (reload)");
+    addSection("Scene");
     addSelectRow("mesh", Object.keys(PRESETS), S.mesh, (v) => {
       Q.set("mesh", v);
       location.search = Q.toString();
     });
     addSelectRow("lighting", ["baked", "dynamic"], S.textureLighting, (v) => { S.textureLighting = v; updateAll(); });
+    addCheckboxRow("autoCenter", S.autoCenter, (v) => { S.autoCenter = v; updateAll(); });
+
+    addSection("Shadow flags");
     addCheckboxRow("castShadow", S.castShadow, (v) => { S.castShadow = v; updateAll(); });
-    addCheckboxRow("floor", S.floor, (v) => { S.floor = v; updateAll(); });
+    addCheckboxRow("selfShadow", S.selfShadow, (v) => { S.selfShadow = v; updateAll(); });
+    addCheckboxRow("floor visible", S.floorVisible, (v) => { S.floorVisible = v; updateAll(); });
+    addCheckboxRow("floor receives", S.floorReceives, (v) => { S.floorReceives = v; updateAll(); });
+    addCheckboxRow("shadows only", S.shadowsOnly, (v) => { S.shadowsOnly = v; updateAll(); });
 
     addSection("Object");
     const objField = (f, opts) => addRangeRow(f, { ...opts, value: S.obj[f] }, (n) => { S.obj[f] = n; updateAll(); });

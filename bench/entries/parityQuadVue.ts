@@ -21,7 +21,10 @@ export interface ParityQuadState {
   polygons: Polygon[];
   voxelSource?: unknown;
   castShadow: boolean;
-  floor: boolean;
+  selfShadow: boolean;
+  floorVisible: boolean;
+  floorReceives: boolean;
+  autoCenter: boolean;
   floorPolygons: Polygon[];
   obj: { position: [number, number, number]; scale: number; rotation: [number, number, number] };
   dir: { direction: [number, number, number]; intensity: number; color: string };
@@ -58,8 +61,8 @@ export function mount(host: HTMLElement, initial: ParityQuadState, onCameraChang
                 ambientLight: s.amb,
                 shadow: s.shadow,
                 textureLighting: s.textureLighting,
-                autoCenter: true,
-                centerPolygons: s.floor ? [...s.polygons, ...s.floorPolygons] : s.polygons,
+                autoCenter: s.autoCenter,
+                centerPolygons: s.floorVisible ? [...s.polygons, ...s.floorPolygons] : s.polygons,
               },
               {
                 default: () => [
@@ -68,11 +71,12 @@ export function mount(host: HTMLElement, initial: ParityQuadState, onCameraChang
                     polygons: s.polygons,
                     voxelSource: s.voxelSource,
                     castShadow: s.castShadow,
+                    receiveShadow: s.selfShadow,
                     position: s.obj.position,
                     scale: s.obj.scale,
                     rotation: s.obj.rotation,
                   }),
-                  s.floor ? h(PolyMesh, { polygons: s.floorPolygons, receiveShadow: true }) : null,
+                  s.floorVisible ? h(PolyMesh, { polygons: s.floorPolygons, receiveShadow: s.floorReceives }) : null,
                 ],
               },
             ),
