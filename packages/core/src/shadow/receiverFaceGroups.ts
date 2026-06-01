@@ -44,6 +44,18 @@ export function worldDirectionToCss(d: Vec3): Vec3 {
   return [d[1], d[0], d[2]];
 }
 
+/** Apply {@link worldDirectionToCss} to a directional-light object,
+ *  preserving the other fields. Used by atlas plan + buildBasisHints +
+ *  receiver-shadow callers so the light vector is in the same CSS-axis
+ *  frame as the polygon normals. Mirror of vanilla's
+ *  `worldDirectionalLightToCss` in `packages/polycss/src/api/scene/transforms.ts`. */
+export function worldDirectionalLightToCss<
+  T extends { direction?: Vec3 } | undefined,
+>(light: T): T {
+  if (!light?.direction) return light;
+  return { ...light, direction: worldDirectionToCss(light.direction) } as T;
+}
+
 /** Normalize a mesh `scale` value into a Vec3 (undefined → [1,1,1], number →
  *  uniform, Vec3 → as-is with `?? 1` per axis). */
 export function meshScaleVec3(

@@ -51,7 +51,7 @@ import {
 } from "@layoutit/polycss-core";
 import type { TransformProps } from "../shapes/types";
 import { usePolyMesh, type UseMeshOptions } from "./useMesh";
-import { buildBasisHints, cornerShapeGeometryForPlan } from "@layoutit/polycss-core";
+import { buildBasisHints, cornerShapeGeometryForPlan, worldDirectionalLightToCss } from "@layoutit/polycss-core";
 import {
   buildSeamBleedPolygonEdges,
   buildTextureEdgeRepairSets,
@@ -644,10 +644,16 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
   const bakedDirectional = useMemo(() => {
     if (!effectiveDirectional) return effectiveDirectional;
     const rot = bakedRotation ?? [0, 0, 0] as Vec3;
-    if (rot[0] === 0 && rot[1] === 0 && rot[2] === 0) return effectiveDirectional;
+    // Vanilla applies a world→CSS axis swap (x↔y) on the directional light
+    // before passing it to renderPolygonsWithTextureAtlas — the polygon
+    // basis stores normals in the CSS frame, so light vectors must match
+    // before any dot product. React/Vue mirror that here so buildBasisHints
+    // and computeTextureAtlasPlan see the same light vector vanilla sees.
+    const cssLight = worldDirectionalLightToCss(effectiveDirectional);
+    if (rot[0] === 0 && rot[1] === 0 && rot[2] === 0) return cssLight;
     return {
-      ...effectiveDirectional,
-      direction: inverseRotateVec3(effectiveDirectional.direction, rot),
+      ...cssLight,
+      direction: inverseRotateVec3(cssLight.direction, rot),
     };
   }, [effectiveDirectional, bakedRotation]);
 

@@ -19,7 +19,7 @@
 import { defineComponent, h, computed, inject, onMounted, onBeforeUnmount, ref, watch, watchEffect } from "vue";
 import type { PropType, VNode, CSSProperties } from "vue";
 import type { MeshResolution, Polygon, PolyTextureLightingMode, Vec3 } from "@layoutit/polycss-core";
-import { buildBasisHints, cornerShapeGeometryForPlan } from "@layoutit/polycss-core";
+import { buildBasisHints, cornerShapeGeometryForPlan, worldDirectionalLightToCss } from "@layoutit/polycss-core";
 import {
   BASE_TILE,
   computeReceiverShadowFaces,
@@ -362,8 +362,16 @@ export const PolyMesh = defineComponent({
 
     const bakedDirectional = computed(() => {
       const baseLight = atlasDirectional.value;
-      if (!baseLight || !bakedRotation.value) return baseLight;
-      return { ...baseLight, direction: inverseRotateVec3(baseLight.direction, bakedRotation.value) };
+      if (!baseLight) return baseLight;
+      // Vanilla applies a world→CSS axis swap (x↔y) on the directional
+      // light before passing it to renderPolygonsWithTextureAtlas — the
+      // polygon basis stores normals in the CSS frame, so light vectors
+      // must match before any dot product. Vue mirrors that here so
+      // buildBasisHints and computeTextureAtlasPlan see the same light
+      // vector vanilla sees.
+      const cssLight = worldDirectionalLightToCss(baseLight);
+      if (!bakedRotation.value) return cssLight;
+      return { ...cssLight, direction: inverseRotateVec3(cssLight.direction, bakedRotation.value) };
     });
 
     const textureAtlasPlans = computed(() => {
