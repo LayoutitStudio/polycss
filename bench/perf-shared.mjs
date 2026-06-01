@@ -195,12 +195,32 @@ export function parseUrlParams() {
   const basePreset = genericPreset ?? (meshId.startsWith("synth-")
     ? { url: null, options: {}, zoom: 0.2, rotX: 65, rotY: 45 }
     : (PRESETS[meshId] ?? PRESETS.saucer));
-  // `?zoom=N` overrides the per-mesh preset zoom (handy for the parity-trio
+  // `?zoom=N` overrides the per-mesh preset zoom (handy for the parity-quad
   // bench when each iframe is narrower than the original 800px viewport).
   const zoomOverride = parseFloat(params.get("zoom"));
-  const preset = Number.isFinite(zoomOverride) && zoomOverride > 0
-    ? { ...basePreset, zoom: zoomOverride }
-    : basePreset;
+  const rotXOverride = parseFloat(params.get("rotX"));
+  const rotYOverride = parseFloat(params.get("rotY"));
+  const preset = {
+    ...basePreset,
+    ...(Number.isFinite(zoomOverride) && zoomOverride > 0 ? { zoom: zoomOverride } : null),
+    ...(Number.isFinite(rotXOverride) ? { rotX: rotXOverride } : null),
+    ...(Number.isFinite(rotYOverride) ? { rotY: rotYOverride } : null),
+  };
+  // Helpers — coerce to finite number or fall back.
+  const num = (key, dflt) => {
+    const n = parseFloat(params.get(key));
+    return Number.isFinite(n) ? n : dflt;
+  };
+  const bool = (key, dflt) => {
+    const v = params.get(key);
+    if (v === null) return dflt;
+    return v === "1" || v === "true";
+  };
+  const str = (key, dflt) => params.get(key) ?? dflt;
+  // Backwards compat: keep the old `cast=`/`floor=` keys, but accept the
+  // shorter `cs=`/`fv=` aliases shadow-oracle uses.
+  const castShadow = bool("cs", null) ?? params.get("cast") === "1";
+  const floorVisible = bool("fv", null) ?? params.get("floor") === "1";
   return {
     meshId,
     mode: params.get("mode") === "baked" ? "baked" : "dynamic",
@@ -209,13 +229,46 @@ export function parseUrlParams() {
     el: parseFloat(params.get("el")) || 45,
     isSynth: meshId.startsWith("synth-"),
     strategies: disabledStrategies.length > 0 ? { disable: disabledStrategies } : undefined,
-    /** `?cast=1` → mesh casts shadow. */
-    castShadow: params.get("cast") === "1",
-    /** `?floor=1` → add a flat box mesh under the main mesh with
-     *  receiveShadow=true so cross-renderer shadow parity can be inspected. */
-    floor: params.get("floor") === "1",
+    castShadow,
+    floor: floorVisible, // legacy alias
+    floorVisible,
+    /** receive-shadow flag on the main mesh (self-shadow); defaults off so
+     *  the legacy perf-bench sweeps stay backward-compatible. */
+    selfShadow: bool("ss", false),
+    /** receive-shadow flag on the floor mesh; defaults true when floor is on
+     *  (most callers want the floor to receive). */
+    floorReceives: bool("fr", true),
+    /** Scene autoCenter flag. */
+    autoCenter: bool("ax", true),
+    /** Object transform overlay (parity-quad sliders). All optional. */
+    obj: {
+      x: num("ox", 0), y: num("oy", 0), z: num("oz", 0),
+      scale: num("os", 1),
+      rx: num("orx", 0), ry: num("ory", 0), rz: num("orz", 0),
+    },
+    /** Directional light vector + intensity + color (overrides az/el if
+     *  any of dx/dy/dz are present). */
+    dir: {
+      x: num("dx", null), y: num("dy", null), z: num("dz", null),
+      intensity: num("di", 1),
+      color: str("dc", "#ffffff"),
+    },
+    /** Ambient intensity + color. */
+    amb: {
+      intensity: num("ai", 0.4),
+      color: str("ac", "#ffffff"),
+    },
+    /** Shadow opacity + lift. Lift defaults to `1 / zoom` (one screen pixel
+     *  above the floor, which wins the z-fight against the floor quad). */
+    shadow: {
+      opacity: num("so", 0.25),
+      lift: num("sl", null), // null = compute from zoom in the perf page
+    },
     /** Hide the perf overlay (for clean screenshot capture). */
-    hideOverlay: params.get("nohud") === "1",
+    hideOverlay: bool("nohud", false),
+    /** `?sync=1` enables the parity-quad postMessage protocol (see
+     *  {@link installParitySync}). */
+    sync: bool("sync", false),
     preset,
   };
 }
@@ -244,6 +297,72 @@ export function dirFromAzEl(azDeg, elDeg) {
   const el = (elDeg * Math.PI) / 180;
   const cosEl = Math.cos(el);
   return [cosEl * Math.sin(az), cosEl * Math.cos(az), Math.sin(el)];
+}
+
+/**
+ * Parity-quad postMessage protocol — used when `?sync=1` is set on a perf
+ * page. Each perf-*.html implements the per-renderer `apply*` callbacks via
+ * its own renderer's public API; this helper just routes messages.
+ *
+ * Message kinds the parent (parity-quad) broadcasts:
+ *   {kind: "set-camera",  rotX, rotY, zoom}
+ *   {kind: "set-light",   dir: [x,y,z], intensity, color}
+ *   {kind: "set-ambient", intensity, color}
+ *   {kind: "set-object",  position: [x,y,z], scale, rotation: [x,y,z]}
+ *   {kind: "set-shadow",  opacity, lift?}
+ *
+ * Messages the child posts back:
+ *   {kind: "ready"} — on mount, so the parent pushes the initial state
+ *   {kind: "camera-changed", rotX, rotY, zoom} — on orbit drag
+ */
+export function installParitySync(handlers) {
+  if (typeof window === "undefined" || window.parent === window) return null;
+  const { applyCamera, applyLight, applyAmbient, applyObject, applyShadow, reportCamera } = handlers ?? {};
+  window.addEventListener("message", (e) => {
+    if (!e.data || typeof e.data !== "object") return;
+    switch (e.data.kind) {
+      case "set-camera":
+        applyCamera?.({
+          rotX: typeof e.data.rotX === "number" ? e.data.rotX : null,
+          rotY: typeof e.data.rotY === "number" ? e.data.rotY : null,
+          zoom: typeof e.data.zoom === "number" ? e.data.zoom : null,
+        });
+        break;
+      case "set-light":
+        applyLight?.({
+          dir: Array.isArray(e.data.dir) ? e.data.dir : null,
+          intensity: typeof e.data.intensity === "number" ? e.data.intensity : null,
+          color: typeof e.data.color === "string" ? e.data.color : null,
+        });
+        break;
+      case "set-ambient":
+        applyAmbient?.({
+          intensity: typeof e.data.intensity === "number" ? e.data.intensity : null,
+          color: typeof e.data.color === "string" ? e.data.color : null,
+        });
+        break;
+      case "set-object":
+        applyObject?.({
+          position: Array.isArray(e.data.position) ? e.data.position : null,
+          scale: typeof e.data.scale === "number" ? e.data.scale : null,
+          rotation: Array.isArray(e.data.rotation) ? e.data.rotation : null,
+        });
+        break;
+      case "set-shadow":
+        applyShadow?.({
+          opacity: typeof e.data.opacity === "number" ? e.data.opacity : null,
+          lift: typeof e.data.lift === "number" ? e.data.lift : null,
+        });
+        break;
+    }
+  });
+  if (reportCamera) {
+    reportCamera((state) => {
+      window.parent.postMessage({ kind: "camera-changed", ...state }, "*");
+    });
+  }
+  window.parent.postMessage({ kind: "ready" }, "*");
+  return null;
 }
 
 const BORDER_SHAPE_TEST_VALUE = "polygon(0 0, 100% 0, 0 100%) circle(0)";

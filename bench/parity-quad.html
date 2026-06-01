@@ -22,9 +22,7 @@
     .stage.vue     { grid-area: vue; }
     .stage.html-ce { grid-area: html-ce; }
     .stage > h3 { position: absolute; top: 8px; left: 12px; margin: 0; font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: #f87171; z-index: 10; pointer-events: none; }
-    .stage > .host { position: absolute; inset: 0; }
-    /* Shadows-only mode — hide mesh leaves so only the shadow SVGs render. */
-    .stage > .host.shadows-only .polycss-mesh { visibility: hidden; }
+    .stage > iframe { width: 100%; height: 100%; border: 0; background: #0a0c10; display: block; }
     #panel { grid-area: panel; padding: 12px; background: #f8fafc; overflow-y: auto; border-left: 1px solid #cbd5e1; font-size: 12px; }
     #panel .sec { margin: 14px 0 6px; font-weight: 600; color: #0f172a; font-size: 11px; letter-spacing: 0.05em; text-transform: uppercase; }
     #panel .row { display: grid; grid-template-columns: 70px 1fr 60px; gap: 6px; align-items: center; margin: 3px 0; }
@@ -40,303 +38,89 @@
   </style>
 </head>
 <body>
-  <div class="stage vanilla"><h3>vanilla</h3><div class="host" id="vanilla-host"></div></div>
-  <div class="stage react"><h3>react</h3><div class="host" id="react-host"></div></div>
-  <div class="stage vue"><h3>vue</h3><div class="host" id="vue-host"></div></div>
-  <div class="stage html-ce"><h3>html (custom elements)</h3><div class="host" id="html-host"></div></div>
+  <div class="stage vanilla"><h3>vanilla</h3><iframe id="vanilla-iframe"></iframe></div>
+  <div class="stage react"><h3>react</h3><iframe id="react-iframe"></iframe></div>
+  <div class="stage vue"><h3>vue</h3><iframe id="vue-iframe"></iframe></div>
+  <div class="stage html-ce"><h3>html (custom elements)</h3><iframe id="html-iframe"></iframe></div>
   <div id="panel"></div>
 
-  <script type="module">
-    // ══════════════════════════════════════════════════════════════════════
-    //  Mounts the same PolyCSS scene four ways (vanilla / React / Vue / HTML
-    //  custom elements) into four host divs in this page, all driven by ONE
-    //  state object via direct API calls. Same pattern shadow-oracle and
-    //  three-parity use. No iframes, no postMessage. Slider drag mutates S
-    //  then calls update(), which fans out: vanilla via setOptions /
-    //  setTransform / applyCamera, React + Vue via re-render, HTML via
-    //  attribute writes (with imperative fallbacks for surfaces the element
-    //  layer doesn't expose).
-    // ══════════════════════════════════════════════════════════════════════
+  <script>
+    // 4-up parity inspector. Each pane is an iframe loading perf-<r>.html
+    // with the full config encoded as URL params plus ?sync=1 so the page
+    // listens for parent postMessage updates. Reload-only params (mesh,
+    // lighting mode, shadow flags, autoCenter) rebuild the iframe.src.
+    // Live params (camera, light, ambient, object transform, shadow opacity
+    // / lift) broadcast via postMessage so all four panes track in real time.
+    const IFRAME_IDS = ["vanilla-iframe", "react-iframe", "vue-iframe", "html-iframe"];
 
-    import {
-      createPolyCamera, createPolyScene, createPolyOrbitControls, loadMesh,
-    } from "./.generated/polycss.js";
-    import { buildFloorPolygons } from "./perf-shared.mjs";
-    import "./.generated/polycss-elements.js";
-    import { mount as mountReact } from "./.generated/polycss-parity-quad-react.js";
-    import { mount as mountVue } from "./.generated/polycss-parity-quad-vue.js";
+    const params = new URLSearchParams(window.location.search);
+    const get = (k, d) => params.get(k) ?? d;
+    const gn = (k, d) => { const n = parseFloat(get(k, "")); return Number.isFinite(n) ? n : d; };
 
-    // ── Mesh presets (URL → loadMesh args) ─────────────────────────────────
-    const PRESETS = {
-      castle:   { url: "/gallery/obj/castle.obj",   objOptions: { targetSize: 60 },                                      rotX: 65, rotY: 45, zoom: 4 },
-      teapot:   { url: "/gallery/obj/teapot.obj",   objOptions: { targetSize: 60, defaultColor: "#a3a3a3" },              rotX: 65, rotY: 45, zoom: 4 },
-      cottage:  { url: "/gallery/obj/cottage.obj",  objOptions: { targetSize: 60 }, mtlUrl: "/gallery/obj/cottage.mtl",   rotX: 65, rotY: 45, zoom: 4 },
-      coliseum: { url: "/gallery/obj/coliseum.obj", objOptions: { targetSize: 80, palette: ["#c9a876", "#a78760", "#8b6f47", "#6b5538"] }, rotX: 65, rotY: 45, zoom: 4 },
-      apple:    { url: "/gallery/glb/apple.glb",    objOptions: { targetSize: 60 },                                       rotX: 74.4, rotY: 301.6, zoom: 4 },
-      ducky:    { url: "/gallery/glb/poly-pizza/ducky.glb", objOptions: { targetSize: 60 },                               rotX: 65, rotY: 45, zoom: 4 },
-      rock1:    { url: "/gallery/obj/rock1.obj",    objOptions: { targetSize: 40, defaultColor: "#8b6f47", excludeObjects: ["Plane"] }, mtlUrl: "/gallery/obj/rock1.mtl", rotX: 65, rotY: 45, zoom: 4 },
-      "mecha-golem": { url: "/gallery/vox/mecha-golem.vox", objOptions: {}, rotX: 65, rotY: 45, zoom: 4 },
-    };
-
-    // ── Single source of truth for everything the four scenes render ──────
-    const Q = new URLSearchParams(location.search);
-    const qn = (k, d) => { const n = parseFloat(Q.get(k)); return Number.isFinite(n) ? n : d; };
-    const qs = (k, d) => Q.get(k) ?? d;
-    const meshId = qs("mesh", "castle");
-    const preset = PRESETS[meshId] ?? PRESETS.castle;
     // Defaults mirror shadow-oracle so shadows are immediately visible:
     // angled light (dx=1, dy=0.5, dz=1), full-opacity shadow, ambient 0.3.
     const S = {
-      mesh: meshId,
-      textureLighting: qs("mode", "baked"),
-      castShadow:      qs("cs", "1") !== "0",
-      floorVisible:    qs("fv", "1") !== "0",
-      floorReceives:   qs("fr", "1") !== "0",
-      selfShadow:      qs("ss", "1") !== "0",
-      shadowsOnly:     qs("sx", "0") === "1",
-      autoCenter:      qs("ax", "1") !== "0",
-      obj: { x: qn("ox", 0), y: qn("oy", 0), z: qn("oz", 0), scale: qn("os", 1), rx: qn("orx", 0), ry: qn("ory", 0), rz: qn("orz", 0) },
-      // Clamp dz to the same min=0.05 the slider enforces — keeps the light
-      // above the floor when an older URL persisted a negative value.
-      dir: { x: qn("dx", 1), y: qn("dy", 0.5), z: Math.max(0.05, qn("dz", 1)), intensity: qn("di", 1), color: qs("dc", "#ffffff") },
-      amb: { intensity: qn("ai", 0.3), color: qs("ac", "#ffffff") },
-      shadow: { opacity: qn("so", 1.0) },
-      cam: { rotX: qn("rotX", preset.rotX), rotY: qn("rotY", preset.rotY), zoom: qn("zoom", preset.zoom) },
+      mesh:          get("mesh", "castle"),
+      mode:          get("mode", "baked"),
+      castShadow:    get("cs", "1") !== "0",
+      selfShadow:    get("ss", "1") !== "0",
+      floorVisible:  get("fv", "1") !== "0",
+      floorReceives: get("fr", "1") !== "0",
+      autoCenter:    get("ax", "1") !== "0",
+      obj: { x: gn("ox", 0), y: gn("oy", 0), z: gn("oz", 0), scale: gn("os", 1), rx: gn("orx", 0), ry: gn("ory", 0), rz: gn("orz", 0) },
+      // Clamp dir.z to ≥0.05 so an older link with a negative value (light
+      // below the floor → no floor shadow) self-heals on load.
+      dir: { x: gn("dx", 1), y: gn("dy", 0.5), z: Math.max(0.05, gn("dz", 1)), intensity: gn("di", 1), color: get("dc", "#ffffff") },
+      amb: { intensity: gn("ai", 0.3), color: get("ac", "#ffffff") },
+      shadow: { opacity: gn("so", 1.0) },
+      cam: { rotX: gn("rotX", 65), rotY: gn("rotY", 45), zoom: gn("zoom", 4) },
     };
-    const floorPolygons = buildFloorPolygons();
 
-    // ── Build the state object the renderers' update() helpers take ───────
-    function buildRendererState(parseResult) {
-      return {
-        textureLighting: S.textureLighting,
-        polygons: parseResult.polygons,
-        voxelSource: parseResult.voxelSource,
-        castShadow: S.castShadow,
-        selfShadow: S.selfShadow,
-        floorVisible: S.floorVisible,
-        floorReceives: S.floorReceives,
-        autoCenter: S.autoCenter,
-        floorPolygons,
-        obj: { position: [S.obj.x, S.obj.y, S.obj.z], scale: S.obj.scale, rotation: [S.obj.rx, S.obj.ry, S.obj.rz] },
-        dir: { direction: [S.dir.x, S.dir.y, S.dir.z], intensity: S.dir.intensity, color: S.dir.color },
-        amb: { intensity: S.amb.intensity, color: S.amb.color },
-        // Lift in world units, scaled to ~1 screen-pixel at the current zoom
-        // so the shadow plane sits one pixel above the flat floor quad and
-        // wins the z-fight against it. Three-parity uses the same trick.
-        shadow: { opacity: S.shadow.opacity, lift: 1 / Math.max(1, S.cam.zoom) },
-        cam: { rotX: S.cam.rotX, rotY: S.cam.rotY, zoom: S.cam.zoom },
-      };
-    }
-
-    // ══════════════════════════════════════════════════════════════════════
-    //  Mounting — load the mesh once, then stand up all four renderers
-    //  against the same parseResult.
-    // ══════════════════════════════════════════════════════════════════════
-    const parseResult = await loadMesh(preset.url, {
-      ...(preset.mtlUrl ? { mtlUrl: preset.mtlUrl } : {}),
-      objOptions: preset.options ?? preset.objOptions ?? {},
-    });
-
-    // ── Vanilla (createPolyScene + scene.add) ──────────────────────────────
-    const vanillaHost = document.getElementById("vanilla-host");
-    const vanillaCamera = createPolyCamera({ rotX: S.cam.rotX, rotY: S.cam.rotY, zoom: S.cam.zoom });
-    const vanillaScene = createPolyScene(vanillaHost, {
-      camera: vanillaCamera,
-      directionalLight: { direction: [S.dir.x, S.dir.y, S.dir.z], color: S.dir.color, intensity: S.dir.intensity },
-      ambientLight: { color: S.amb.color, intensity: S.amb.intensity },
-      // lift in world units. Three-parity uses `1 / cam.zoom` so the shadow
-      // sits one screen pixel above the floor at any zoom level. Default 0.05
-      // is fine for textured surfaces but can z-fight with the flat floor
-      // quad in this 4-up bench.
-      shadow: { opacity: S.shadow.opacity, lift: 1 / Math.max(1, S.cam.zoom) },
-      textureLighting: S.textureLighting,
-      autoCenter: S.autoCenter,
-    });
-    const vanillaOrbit = createPolyOrbitControls(vanillaScene, { drag: true, wheel: true });
-    const vanillaMesh = vanillaScene.add(parseResult, {
-      castShadow: S.castShadow,
-      receiveShadow: S.selfShadow,
-      position: [S.obj.x, S.obj.y, S.obj.z],
-      scale: S.obj.scale,
-      rotation: [S.obj.rx, S.obj.ry, S.obj.rz],
-    });
-    const vanillaFloor = S.floorVisible
-      ? vanillaScene.add({ polygons: floorPolygons }, { receiveShadow: S.floorReceives })
-      : null;
-    vanillaOrbit.addEventListener("change", (e) => {
-      // User dragged the vanilla pane — push to S + propagate to the others.
-      // PolyControlsChangeEvent shape: { type, camera: PolyControlsCamera }.
-      S.cam.rotX = e.camera.rotX;
-      S.cam.rotY = e.camera.rotY;
-      S.cam.zoom = e.camera.zoom;
-      camSlidersRefresh();
-      updateAll();
-    });
-
-    // ── HTML custom elements (<poly-scene> + <poly-mesh>) ──────────────────
-    const htmlHost = document.getElementById("html-host");
-    const htmlScene = document.createElement("poly-scene");
-    htmlScene.style.cssText = "position:absolute;inset:0;";
-    htmlScene.setAttribute("rot-x", String(S.cam.rotX));
-    htmlScene.setAttribute("rot-y", String(S.cam.rotY));
-    htmlScene.setAttribute("zoom", String(S.cam.zoom));
-    htmlScene.setAttribute("texture-lighting", S.textureLighting);
-    htmlScene.setAttribute("auto-center", "");
-    htmlScene.setAttribute("directional-direction", `${S.dir.x},${S.dir.y},${S.dir.z}`);
-    htmlScene.setAttribute("directional-color", S.dir.color);
-    htmlScene.setAttribute("directional-intensity", String(S.dir.intensity));
-    htmlScene.setAttribute("ambient-color", S.amb.color);
-    htmlScene.setAttribute("ambient-intensity", String(S.amb.intensity));
-    const htmlOrbit = document.createElement("poly-orbit-controls");
-    htmlOrbit.setAttribute("drag", "");
-    htmlOrbit.setAttribute("wheel", "");
-    htmlScene.appendChild(htmlOrbit);
-    const htmlMesh = document.createElement("poly-mesh");
-    htmlMesh.setAttribute("src", preset.url);
-    if (preset.mtlUrl) htmlMesh.setAttribute("mtl", preset.mtlUrl);
-    if ((preset.options ?? preset.objOptions)?.targetSize) htmlMesh.setAttribute("target-size", String((preset.options ?? preset.objOptions).targetSize));
-    if ((preset.options ?? preset.objOptions)?.defaultColor) htmlMesh.setAttribute("default-color", (preset.options ?? preset.objOptions).defaultColor);
-    if ((preset.options ?? preset.objOptions)?.palette) htmlMesh.setAttribute("palette", (preset.options ?? preset.objOptions).palette.join(","));
-    if ((preset.options ?? preset.objOptions)?.excludeObjects) htmlMesh.setAttribute("exclude-objects", (preset.options ?? preset.objOptions).excludeObjects.join(","));
-    htmlMesh.setAttribute("position", `${S.obj.x},${S.obj.y},${S.obj.z}`);
-    htmlMesh.setAttribute("scale", String(S.obj.scale));
-    htmlMesh.setAttribute("rotation", `${S.obj.rx},${S.obj.ry},${S.obj.rz}`);
-    if (S.castShadow) htmlMesh.setAttribute("cast-shadow", "");
-    if (S.selfShadow) htmlMesh.setAttribute("receive-shadow", "");
-    htmlScene.appendChild(htmlMesh);
-    htmlHost.appendChild(htmlScene);
-    let htmlFloorMesh = null;
-    function ensureHtmlFloor() {
-      const handle = htmlScene.getScene();
-      if (!handle) return;
-      if (S.floorVisible && !htmlFloorMesh) {
-        htmlFloorMesh = handle.add({ polygons: floorPolygons }, { receiveShadow: S.floorReceives });
-      } else if (!S.floorVisible && htmlFloorMesh) {
-        htmlFloorMesh.remove();
-        htmlFloorMesh = null;
-      } else if (htmlFloorMesh) {
-        htmlFloorMesh.setTransform({ receiveShadow: S.floorReceives });
-      }
-    }
-    htmlMesh.addEventListener("polycss:loaded", () => {
-      ensureHtmlFloor();
-      // Attach the same change listener the vanilla pane uses, via the new
-      // public `getControls()` getter on PolyOrbitControlsElement. Without
-      // it, dragging the HTML pane wouldn't propagate to the others.
-      const controls = htmlOrbit.getControls?.();
-      if (controls?.addEventListener) {
-        controls.addEventListener("change", (e) => {
-          S.cam.rotX = e.camera.rotX;
-          S.cam.rotY = e.camera.rotY;
-          S.cam.zoom = e.camera.zoom;
-          camSlidersRefresh();
-          updateAll();
-        });
-      }
-    });
-
-    // ── React (createRoot + small App component, see parityQuadReact.tsx) ──
-    const reactHost = document.getElementById("react-host");
-    const reactMount = mountReact(reactHost, buildRendererState(parseResult), (snap) => {
-      S.cam.rotX = snap.rotX;
-      S.cam.rotY = snap.rotY;
-      S.cam.zoom = snap.zoom;
-      camSlidersRefresh();
-      updateAll();
-    });
-
-    // ── Vue (createApp + small render function, see parityQuadVue.ts) ──────
-    const vueHost = document.getElementById("vue-host");
-    const vueMount = mountVue(vueHost, buildRendererState(parseResult), (snap) => {
-      S.cam.rotX = snap.rotX;
-      S.cam.rotY = snap.rotY;
-      S.cam.zoom = snap.zoom;
-      camSlidersRefresh();
-      updateAll();
-    });
-
-    // ══════════════════════════════════════════════════════════════════════
-    //  Updater — single function fans S into all four renderers.
-    // ══════════════════════════════════════════════════════════════════════
-    function updateAll() {
-      // Vanilla: imperative setOptions / setTransform / applyCamera.
-      vanillaCamera.update({ rotX: S.cam.rotX, rotY: S.cam.rotY, zoom: S.cam.zoom });
-      vanillaScene.applyCamera();
-      vanillaScene.setOptions({
-        directionalLight: { direction: [S.dir.x, S.dir.y, S.dir.z], color: S.dir.color, intensity: S.dir.intensity },
-        ambientLight: { color: S.amb.color, intensity: S.amb.intensity },
-        shadow: { opacity: S.shadow.opacity, lift: 1 / Math.max(1, S.cam.zoom) },
-        textureLighting: S.textureLighting,
-        autoCenter: S.autoCenter,
-      });
-      vanillaMesh.setTransform({
-        position: [S.obj.x, S.obj.y, S.obj.z],
-        scale: S.obj.scale,
-        rotation: [S.obj.rx, S.obj.ry, S.obj.rz],
-        castShadow: S.castShadow,
-        receiveShadow: S.selfShadow,
-      });
-
-      // HTML elements: declarative attribute writes for everything <poly-
-      // scene> / <poly-mesh> observes. Shadow opacity has no attribute today,
-      // so it goes through the imperative scene handle.
-      htmlScene.setAttribute("rot-x", String(S.cam.rotX));
-      htmlScene.setAttribute("rot-y", String(S.cam.rotY));
-      htmlScene.setAttribute("zoom", String(S.cam.zoom));
-      htmlScene.setAttribute("texture-lighting", S.textureLighting);
-      htmlScene.setAttribute("directional-direction", `${S.dir.x},${S.dir.y},${S.dir.z}`);
-      htmlScene.setAttribute("directional-color", S.dir.color);
-      htmlScene.setAttribute("directional-intensity", String(S.dir.intensity));
-      htmlScene.setAttribute("ambient-color", S.amb.color);
-      htmlScene.setAttribute("ambient-intensity", String(S.amb.intensity));
-      htmlMesh.setAttribute("position", `${S.obj.x},${S.obj.y},${S.obj.z}`);
-      htmlMesh.setAttribute("scale", String(S.obj.scale));
-      htmlMesh.setAttribute("rotation", `${S.obj.rx},${S.obj.ry},${S.obj.rz}`);
-      if (S.castShadow) htmlMesh.setAttribute("cast-shadow", "");
-      else htmlMesh.removeAttribute("cast-shadow");
-      if (S.selfShadow) htmlMesh.setAttribute("receive-shadow", "");
-      else htmlMesh.removeAttribute("receive-shadow");
-      const htmlSceneHandle = htmlScene.getScene();
-      if (htmlSceneHandle) htmlSceneHandle.setOptions({ shadow: { opacity: S.shadow.opacity, lift: 1 / Math.max(1, S.cam.zoom) } });
-      ensureHtmlFloor();
-
-      // React + Vue: rebuild the renderer state and let each framework's
-      // re-render propagate the values into PolyScene / PolyMesh props.
-      const rs = buildRendererState(parseResult);
-      reactMount.update(rs);
-      vueMount.update(rs);
-
-      // Vanilla floor: add / remove based on toggle. Floor visible can be on
-      // while floor receives shadow can be off — those are independent knobs.
-      if (S.floorVisible && !vanillaFloorRef.current) {
-        vanillaFloorRef.current = vanillaScene.add({ polygons: floorPolygons }, { receiveShadow: S.floorReceives });
-      } else if (!S.floorVisible && vanillaFloorRef.current) {
-        vanillaFloorRef.current.remove();
-        vanillaFloorRef.current = null;
-      } else if (vanillaFloorRef.current) {
-        vanillaFloorRef.current.setTransform({ receiveShadow: S.floorReceives });
-      }
-
-      // Shadows-only: hide .polycss-mesh wrappers via a CSS class so only
-      // the shadow SVGs (which live as .polycss-shadow siblings) remain.
-      for (const host of [vanillaHost, document.getElementById("react-host"), document.getElementById("vue-host"), htmlHost]) {
-        host?.classList.toggle("shadows-only", S.shadowsOnly);
-      }
-
-      writeUrl();
-    }
-    const vanillaFloorRef = { current: vanillaFloor };
-
-    function writeUrl() {
+    // ── Build the perf-*.html?... URL with all live state baked in. The
+    //   iframe consumes these on initial mount, then listens for postMessage
+    //   updates for subsequent live sliders.
+    function buildIframeUrl(renderer) {
       const qs = new URLSearchParams();
       qs.set("mesh", S.mesh);
-      qs.set("mode", S.textureLighting);
+      qs.set("mode", S.mode);
+      qs.set("motion", "none");
       qs.set("cs", S.castShadow ? "1" : "0");
       qs.set("ss", S.selfShadow ? "1" : "0");
       qs.set("fv", S.floorVisible ? "1" : "0");
       qs.set("fr", S.floorReceives ? "1" : "0");
       qs.set("ax", S.autoCenter ? "1" : "0");
-      if (S.shadowsOnly) qs.set("sx", "1");
+      qs.set("ox", String(S.obj.x)); qs.set("oy", String(S.obj.y)); qs.set("oz", String(S.obj.z));
+      qs.set("os", String(S.obj.scale));
+      qs.set("orx", String(S.obj.rx)); qs.set("ory", String(S.obj.ry)); qs.set("orz", String(S.obj.rz));
+      qs.set("dx", String(S.dir.x)); qs.set("dy", String(S.dir.y)); qs.set("dz", String(S.dir.z));
+      qs.set("di", String(S.dir.intensity)); qs.set("dc", S.dir.color);
+      qs.set("ai", String(S.amb.intensity)); qs.set("ac", S.amb.color);
+      qs.set("so", String(S.shadow.opacity));
+      qs.set("rotX", String(S.cam.rotX));
+      qs.set("rotY", String(S.cam.rotY));
+      qs.set("zoom", String(S.cam.zoom));
+      qs.set("nohud", "1");
+      qs.set("sync", "1");
+      return `perf-${renderer}.html?${qs.toString()}`;
+    }
+
+    function reloadAll() {
+      document.getElementById("vanilla-iframe").src = buildIframeUrl("vanilla");
+      document.getElementById("react-iframe").src   = buildIframeUrl("react");
+      document.getElementById("vue-iframe").src     = buildIframeUrl("vue");
+      document.getElementById("html-iframe").src    = buildIframeUrl("html");
+      writeUrl();
+    }
+
+    function writeUrl() {
+      const qs = new URLSearchParams();
+      qs.set("mesh", S.mesh);
+      qs.set("mode", S.mode);
+      qs.set("cs", S.castShadow ? "1" : "0");
+      qs.set("ss", S.selfShadow ? "1" : "0");
+      qs.set("fv", S.floorVisible ? "1" : "0");
+      qs.set("fr", S.floorReceives ? "1" : "0");
+      qs.set("ax", S.autoCenter ? "1" : "0");
       qs.set("rotX", String(S.cam.rotX));
       qs.set("rotY", String(S.cam.rotY));
       qs.set("zoom", String(S.cam.zoom));
@@ -350,19 +134,43 @@
       history.replaceState({}, "", `parity-quad.html?${qs}`);
     }
 
-    // ══════════════════════════════════════════════════════════════════════
-    //  Sidebar — sliders + dropdowns + color pickers.
-    // ══════════════════════════════════════════════════════════════════════
-    const panel = document.getElementById("panel");
-    const camSliders = {};
-    function camSlidersRefresh() {
-      ["rotX", "rotY", "zoom"].forEach((k) => {
-        const r = camSliders[k];
-        if (!r) return;
-        r.input.value = String(S.cam[k]);
-        r.val.textContent = r.fmt(S.cam[k]);
-      });
+    function broadcast(message, except) {
+      for (const id of IFRAME_IDS) {
+        const f = document.getElementById(id);
+        if (!f || !f.contentWindow) continue;
+        if (except && f.contentWindow === except) continue;
+        f.contentWindow.postMessage(message, "*");
+      }
     }
+
+    function pushAll(except) {
+      broadcast({ kind: "set-camera",  rotX: S.cam.rotX, rotY: S.cam.rotY, zoom: S.cam.zoom }, except);
+      broadcast({ kind: "set-light",   dir: [S.dir.x, S.dir.y, S.dir.z], intensity: S.dir.intensity, color: S.dir.color }, except);
+      broadcast({ kind: "set-ambient", intensity: S.amb.intensity, color: S.amb.color }, except);
+      broadcast({ kind: "set-object",  position: [S.obj.x, S.obj.y, S.obj.z], scale: S.obj.scale, rotation: [S.obj.rx, S.obj.ry, S.obj.rz] }, except);
+      broadcast({ kind: "set-shadow",  opacity: S.shadow.opacity, lift: 1 / Math.max(1, S.cam.zoom) }, except);
+    }
+
+    window.addEventListener("message", (e) => {
+      if (!e.data || typeof e.data !== "object") return;
+      if (e.data.kind === "camera-changed") {
+        if (typeof e.data.rotX === "number") S.cam.rotX = e.data.rotX;
+        if (typeof e.data.rotY === "number") S.cam.rotY = e.data.rotY;
+        if (typeof e.data.zoom === "number") S.cam.zoom = e.data.zoom;
+        broadcast({ kind: "set-camera", rotX: S.cam.rotX, rotY: S.cam.rotY, zoom: S.cam.zoom }, e.source);
+        syncCamFromState();
+        writeUrl();
+      } else if (e.data.kind === "ready") {
+        // Newly-mounted iframe — re-push the full current state so it joins
+        // in sync with the others (covers the gap between iframe.src=... and
+        // the page being ready to receive messages).
+        pushAll(null);
+      }
+    });
+
+    // ── Sidebar UI builders ────────────────────────────────────────────────
+    const panel = document.getElementById("panel");
+    const sliderRefreshers = { cam: {}, obj: {}, dir: {}, amb: {}, shadow: {} };
 
     function addSection(title) {
       const d = document.createElement("div"); d.className = "sec"; d.textContent = title; panel.appendChild(d);
@@ -386,7 +194,7 @@
       inp.addEventListener("change", () => onChange(inp.checked));
       row.appendChild(inp); panel.appendChild(row);
     }
-    function addRangeRow(labelText, { min, max, step, value, fmt }, onChange, camKey) {
+    function addRangeRow(labelText, { min, max, step, value, fmt }, onChange, refKey) {
       const row = document.createElement("div"); row.className = "row";
       const lab = document.createElement("label"); lab.textContent = labelText; row.appendChild(lab);
       const inp = document.createElement("input"); inp.type = "range";
@@ -398,7 +206,11 @@
         onChange(n);
       });
       row.appendChild(inp); row.appendChild(val); panel.appendChild(row);
-      if (camKey) camSliders[camKey] = { input: inp, val, fmt };
+      if (refKey) {
+        const [section, field] = refKey;
+        sliderRefreshers[section] = sliderRefreshers[section] ?? {};
+        sliderRefreshers[section][field] = (v) => { inp.value = String(v); val.textContent = fmt(v); };
+      }
     }
     function addColorRow(labelText, value, onChange) {
       const row = document.createElement("div"); row.className = "row";
@@ -409,23 +221,30 @@
       row.appendChild(inp); panel.appendChild(row);
     }
 
-    addSection("Scene");
-    addSelectRow("mesh", Object.keys(PRESETS), S.mesh, (v) => {
-      Q.set("mesh", v);
-      location.search = Q.toString();
-    });
-    addSelectRow("lighting", ["baked", "dynamic"], S.textureLighting, (v) => { S.textureLighting = v; updateAll(); });
-    addCheckboxRow("autoCenter", S.autoCenter, (v) => { S.autoCenter = v; updateAll(); });
+    function syncCamFromState() {
+      sliderRefreshers.cam.rotX?.(S.cam.rotX);
+      sliderRefreshers.cam.rotY?.(S.cam.rotY);
+      sliderRefreshers.cam.zoom?.(S.cam.zoom);
+    }
 
-    addSection("Shadow flags");
-    addCheckboxRow("castShadow", S.castShadow, (v) => { S.castShadow = v; updateAll(); });
-    addCheckboxRow("selfShadow", S.selfShadow, (v) => { S.selfShadow = v; updateAll(); });
-    addCheckboxRow("floor visible", S.floorVisible, (v) => { S.floorVisible = v; updateAll(); });
-    addCheckboxRow("floor receives", S.floorReceives, (v) => { S.floorReceives = v; updateAll(); });
-    addCheckboxRow("shadows only", S.shadowsOnly, (v) => { S.shadowsOnly = v; updateAll(); });
+    // ── Build the panel ────────────────────────────────────────────────────
+    addSection("Scene (reload)");
+    addSelectRow("mesh", ["castle", "teapot", "cottage", "coliseum", "apple", "ducky", "rock1", "mecha-golem"], S.mesh,
+      (v) => { S.mesh = v; reloadAll(); });
+    addSelectRow("lighting", ["baked", "dynamic"], S.mode,
+      (v) => { S.mode = v; reloadAll(); });
+    addCheckboxRow("autoCenter", S.autoCenter, (v) => { S.autoCenter = v; reloadAll(); });
 
-    addSection("Object");
-    const objField = (f, opts) => addRangeRow(f, { ...opts, value: S.obj[f] }, (n) => { S.obj[f] = n; updateAll(); });
+    addSection("Shadow flags (reload)");
+    addCheckboxRow("castShadow", S.castShadow, (v) => { S.castShadow = v; reloadAll(); });
+    addCheckboxRow("selfShadow", S.selfShadow, (v) => { S.selfShadow = v; reloadAll(); });
+    addCheckboxRow("floor visible", S.floorVisible, (v) => { S.floorVisible = v; reloadAll(); });
+    addCheckboxRow("floor receives", S.floorReceives, (v) => { S.floorReceives = v; reloadAll(); });
+
+    addSection("Object (live)");
+    const objField = (f, opts) => addRangeRow(f, { ...opts, value: S.obj[f] },
+      (n) => { S.obj[f] = n; broadcast({ kind: "set-object", position: [S.obj.x, S.obj.y, S.obj.z], scale: S.obj.scale, rotation: [S.obj.rx, S.obj.ry, S.obj.rz] }); writeUrl(); },
+      ["obj", f]);
     objField("x", { min: -10, max: 10, step: 0.1, fmt: (v) => v.toFixed(2) });
     objField("y", { min: -10, max: 10, step: 0.1, fmt: (v) => v.toFixed(2) });
     objField("z", { min: -10, max: 10, step: 0.1, fmt: (v) => v.toFixed(2) });
@@ -434,43 +253,61 @@
     objField("ry", { min: -180, max: 180, step: 1, fmt: (v) => v.toFixed(0) + "°" });
     objField("rz", { min: -180, max: 180, step: 1, fmt: (v) => v.toFixed(0) + "°" });
 
-    addSection("Directional light");
-    const dirField = (f, opts) => addRangeRow(f, { ...opts, value: S.dir[f] }, (n) => { S.dir[f] = n; updateAll(); });
+    addSection("Directional light (live)");
+    const dirField = (f, opts) => addRangeRow(f, { ...opts, value: S.dir[f] },
+      (n) => { S.dir[f] = n; broadcast({ kind: "set-light", dir: [S.dir.x, S.dir.y, S.dir.z], intensity: S.dir.intensity, color: S.dir.color }); writeUrl(); },
+      ["dir", f]);
     dirField("x", { min: -2, max: 2, step: 0.05, fmt: (v) => v.toFixed(2) });
     dirField("y", { min: -2, max: 2, step: 0.05, fmt: (v) => v.toFixed(2) });
-    // z is clamped to a small positive minimum so the light can't drop to or
-    // below the floor — at z ≤ 0 the light vector is at/under the floor and
-    // shadows physically can't fall on the +Z face, which silently looks
-    // like a bug. shadow-oracle allows -2..+2 here, but for this 4-up
-    // comparison the footgun isn't worth the extra range.
+    // z is clamped ≥0.05 so the light can't drop to/under the floor (no
+    // shadow physically possible). shadow-oracle goes negative; here we
+    // avoid the footgun for the 4-up comparison.
     dirField("z", { min: 0.05, max: 2, step: 0.05, fmt: (v) => v.toFixed(2) });
     dirField("intensity", { min: 0, max: 3, step: 0.05, fmt: (v) => v.toFixed(2) });
-    addColorRow("color", S.dir.color, (c) => { S.dir.color = c; updateAll(); });
+    addColorRow("color", S.dir.color, (c) => {
+      S.dir.color = c;
+      broadcast({ kind: "set-light", dir: [S.dir.x, S.dir.y, S.dir.z], intensity: S.dir.intensity, color: S.dir.color });
+      writeUrl();
+    });
 
-    addSection("Ambient");
+    addSection("Ambient (live)");
     addRangeRow("intensity", { min: 0, max: 1, step: 0.01, value: S.amb.intensity, fmt: (v) => v.toFixed(2) },
-      (n) => { S.amb.intensity = n; updateAll(); });
-    addColorRow("color", S.amb.color, (c) => { S.amb.color = c; updateAll(); });
+      (n) => { S.amb.intensity = n; broadcast({ kind: "set-ambient", intensity: S.amb.intensity, color: S.amb.color }); writeUrl(); },
+      ["amb", "intensity"]);
+    addColorRow("color", S.amb.color, (c) => {
+      S.amb.color = c;
+      broadcast({ kind: "set-ambient", intensity: S.amb.intensity, color: S.amb.color });
+      writeUrl();
+    });
 
-    addSection("Shadow");
+    addSection("Shadow (live)");
     addRangeRow("opacity", { min: 0, max: 1, step: 0.01, value: S.shadow.opacity, fmt: (v) => v.toFixed(2) },
-      (n) => { S.shadow.opacity = n; updateAll(); });
+      (n) => { S.shadow.opacity = n; broadcast({ kind: "set-shadow", opacity: S.shadow.opacity, lift: 1 / Math.max(1, S.cam.zoom) }); writeUrl(); },
+      ["shadow", "opacity"]);
 
-    addSection("Camera");
-    addRangeRow("rotX", { min: 0,   max: 90,  step: 1,   value: S.cam.rotX, fmt: (v) => v.toFixed(0) + "°" },
-      (n) => { S.cam.rotX = n; updateAll(); }, "rotX");
-    addRangeRow("rotY", { min: 0,   max: 360, step: 1,   value: S.cam.rotY, fmt: (v) => v.toFixed(0) + "°" },
-      (n) => { S.cam.rotY = n; updateAll(); }, "rotY");
-    addRangeRow("zoom", { min: 0.5, max: 12,  step: 0.1, value: S.cam.zoom, fmt: (v) => v.toFixed(1) },
-      (n) => { S.cam.zoom = n; updateAll(); }, "zoom");
+    addSection("Camera (live)");
+    addRangeRow("rotX", { min: 0, max: 90, step: 1, value: S.cam.rotX, fmt: (v) => v.toFixed(0) + "°" },
+      (n) => { S.cam.rotX = n; broadcast({ kind: "set-camera", rotX: S.cam.rotX, rotY: S.cam.rotY, zoom: S.cam.zoom }); writeUrl(); },
+      ["cam", "rotX"]);
+    addRangeRow("rotY", { min: 0, max: 360, step: 1, value: S.cam.rotY, fmt: (v) => v.toFixed(0) + "°" },
+      (n) => { S.cam.rotY = n; broadcast({ kind: "set-camera", rotX: S.cam.rotX, rotY: S.cam.rotY, zoom: S.cam.zoom }); writeUrl(); },
+      ["cam", "rotY"]);
+    addRangeRow("zoom", { min: 0.5, max: 12, step: 0.1, value: S.cam.zoom, fmt: (v) => v.toFixed(1) },
+      (n) => { S.cam.zoom = n; broadcast({ kind: "set-camera", rotX: S.cam.rotX, rotY: S.cam.rotY, zoom: S.cam.zoom }); writeUrl(); },
+      ["cam", "zoom"]);
+
+    addSection("Actions");
+    const reloadBtn = document.createElement("button");
+    reloadBtn.textContent = "Reload all iframes";
+    reloadBtn.addEventListener("click", reloadAll);
+    panel.appendChild(reloadBtn);
 
     const info = document.createElement("div");
     info.className = "info";
-    info.textContent = "All four panes are driven by one state via the public PolyCSS APIs (vanilla setOptions/setTransform/applyCamera, React/Vue props, <poly-scene>/<poly-mesh> attributes). Drag any pane to orbit — the others follow.";
+    info.textContent = "Each pane is an iframe loading perf-*.html?sync=1. Sliders broadcast via postMessage; mesh/lighting/shadow flags reload all four iframes. Drag any pane to orbit — the others follow.";
     panel.appendChild(info);
 
-    // First sync push so the initial S lands in every renderer.
-    updateAll();
+    reloadAll();
   </script>
 </body>
 </html>

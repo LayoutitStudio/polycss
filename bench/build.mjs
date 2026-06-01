@@ -120,16 +120,6 @@ const targets = [
     entry: resolve(__dirname, "entries/atlasBackground.ts"),
     out: resolve(bundleDir, "polycss-atlas-background.js"),
   },
-  {
-    label: "parity-quad React mount",
-    entry: resolve(__dirname, "entries/parityQuadReact.tsx"),
-    out: resolve(bundleDir, "polycss-parity-quad-react.js"),
-  },
-  {
-    label: "parity-quad Vue mount",
-    entry: resolve(__dirname, "entries/parityQuadVue.ts"),
-    out: resolve(bundleDir, "polycss-parity-quad-vue.js"),
-  },
 ];
 
 const t0 = performance.now();

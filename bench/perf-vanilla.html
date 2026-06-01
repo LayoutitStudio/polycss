@@ -10,51 +10,77 @@
 
   <script type="module">
     // Vanilla path: createPolyScene(host, opts) + createPolyOrbitControls + loadMesh.
-    // Per-frame state changes go through the imperative scene/camera handles.
+    // Full URL config + parity-quad postMessage protocol (when ?sync=1).
     import { createPolyCamera, createPolyScene, createPolyOrbitControls, loadMesh } from "./.generated/polycss.js";
     import { getSynthMesh } from "./synth-mesh.mjs";
     import {
       parseUrlParams, dirFromAzEl, createPerfRecorder, buildFloorPolygons,
+      installParitySync,
       PERF_OVERLAY_HTML, PERF_OVERLAY_CSS,
     } from "./perf-shared.mjs";
 
     document.getElementById("overlay-css").textContent = PERF_OVERLAY_CSS;
 
-    const { meshId, mode, motion, az, el, isSynth, preset, strategies, castShadow, floor, hideOverlay } = parseUrlParams();
-    if (!hideOverlay) document.body.insertAdjacentHTML("beforeend", PERF_OVERLAY_HTML);
-    let azimuth = az;
+    const cfg = parseUrlParams();
+    if (!cfg.hideOverlay) document.body.insertAdjacentHTML("beforeend", PERF_OVERLAY_HTML);
+    let azimuth = cfg.az;
+
+    // Initial directional-light direction: prefer explicit dx/dy/dz (parity-
+    // quad sliders); fall back to legacy az/el.
+    const haveDirVec =
+      Number.isFinite(cfg.dir.x) && Number.isFinite(cfg.dir.y) && Number.isFinite(cfg.dir.z);
+    const initialDir = haveDirVec
+      ? [cfg.dir.x, cfg.dir.y, cfg.dir.z]
+      : dirFromAzEl(azimuth, cfg.el);
+    const initialLift = Number.isFinite(cfg.shadow.lift)
+      ? cfg.shadow.lift
+      : 1 / Math.max(1, cfg.preset.zoom);
 
     const host = document.getElementById("host");
-    const camera = createPolyCamera({ rotX: preset.rotX, rotY: preset.rotY, zoom: preset.zoom });
+    const camera = createPolyCamera({ rotX: cfg.preset.rotX, rotY: cfg.preset.rotY, zoom: cfg.preset.zoom });
     const scene = createPolyScene(host, {
       camera,
-      directionalLight: { direction: dirFromAzEl(azimuth, el), color: "#ffffff", intensity: 1 },
-      ambientLight: { color: "#ffffff", intensity: 0.4 },
-      textureLighting: mode,
-      strategies,
-      autoCenter: true,
+      directionalLight: { direction: initialDir, color: cfg.dir.color, intensity: cfg.dir.intensity },
+      ambientLight: { color: cfg.amb.color, intensity: cfg.amb.intensity },
+      shadow: { opacity: cfg.shadow.opacity, lift: initialLift },
+      textureLighting: cfg.mode,
+      strategies: cfg.strategies,
+      autoCenter: cfg.autoCenter,
     });
     // Drag + wheel for human inspection via perf-serve. Headless bench
     // doesn't dispatch input events, so listeners stay idle.
-    createPolyOrbitControls(scene, { drag: true, wheel: true });
+    const orbit = createPolyOrbitControls(scene, { drag: true, wheel: true });
 
-    const meshPromise = isSynth
-      ? Promise.resolve(getSynthMesh(meshId))
-      : loadMesh(preset.url, {
-          ...(preset.mtlUrl ? { mtlUrl: preset.mtlUrl } : {}),
-          objOptions: preset.options,  // targetSize, excludeObjects, defaultColor, ...
+    const meshPromise = cfg.isSynth
+      ? Promise.resolve(getSynthMesh(cfg.meshId))
+      : loadMesh(cfg.preset.url, {
+          ...(cfg.preset.mtlUrl ? { mtlUrl: cfg.preset.mtlUrl } : {}),
+          objOptions: cfg.preset.options,  // targetSize, excludeObjects, defaultColor, ...
         });
 
+    let meshHandle = null;
+    // Track the current light state separately from cfg.dir so the rAF
+    // motion=light loop can keep updating it without clobbering parity-quad
+    // postMessage state.
+    let curDir = { direction: initialDir, color: cfg.dir.color, intensity: cfg.dir.intensity };
+    let curAmb = { color: cfg.amb.color, intensity: cfg.amb.intensity };
+
     meshPromise.then((parseResult) => {
-      if (!parseResult) throw new Error(`Unknown synth mesh: ${meshId}`);
-      scene.add(parseResult, { castShadow });
-      if (floor) {
-        scene.add({ polygons: buildFloorPolygons() }, { receiveShadow: true });
+      if (!parseResult) throw new Error(`Unknown synth mesh: ${cfg.meshId}`);
+      meshHandle = scene.add(parseResult, {
+        castShadow: cfg.castShadow,
+        receiveShadow: cfg.selfShadow,
+        position: [cfg.obj.x, cfg.obj.y, cfg.obj.z],
+        scale: cfg.obj.scale,
+        rotation: [cfg.obj.rx, cfg.obj.ry, cfg.obj.rz],
+      });
+      if (cfg.floorVisible) {
+        scene.add({ polygons: buildFloorPolygons() }, { receiveShadow: cfg.floorReceives });
       }
 
       const recorder = createPerfRecorder({
         rendererLabel: "vanilla",
-        meshId, mode, motion,
+        meshId: cfg.meshId, mode: cfg.mode, motion: cfg.motion,
         polyCount: parseResult.polygons.length,
         polygons: parseResult.polygons,
       });
@@ -63,18 +89,63 @@
       function tick(now) {
         recorder.onFrame(now);
         frameCount += 1;
-        if (motion === "light") {
+        if (cfg.motion === "light") {
           azimuth = (azimuth + 0.5) % 360;
-          scene.setOptions({
-            directionalLight: { direction: dirFromAzEl(azimuth, el), color: "#ffffff", intensity: 1 },
-          });
-        } else if (motion === "rot") {
-          const newRotY = ((preset.rotY + frameCount * 0.5) + 360) % 360;
+          curDir = { ...curDir, direction: dirFromAzEl(azimuth, cfg.el) };
+          scene.setOptions({ directionalLight: curDir });
+        } else if (cfg.motion === "rot") {
+          const newRotY = ((cfg.preset.rotY + frameCount * 0.5) + 360) % 360;
           camera.update({ rotY: newRotY });
         }
         requestAnimationFrame(tick);
       }
       requestAnimationFrame(tick);
+
+      // Parity-quad sync — installed after the mesh handle exists so apply-
+      // Object can mutate the transform. reportCamera fires when the user
+      // drags this pane so the parent broadcasts to the other three.
+      if (cfg.sync) {
+        installParitySync({
+          applyCamera: ({ rotX, rotY, zoom }) => {
+            const patch = {};
+            if (rotX != null) patch.rotX = rotX;
+            if (rotY != null) patch.rotY = rotY;
+            if (zoom != null) patch.zoom = zoom;
+            if (Object.keys(patch).length) {
+              camera.update(patch);
+              scene.applyCamera();
+            }
+          },
+          applyLight: ({ dir, intensity, color }) => {
+            if (dir) curDir = { ...curDir, direction: dir };
+            if (intensity != null) curDir = { ...curDir, intensity };
+            if (color != null) curDir = { ...curDir, color };
+            scene.setOptions({ directionalLight: curDir });
+          },
+          applyAmbient: ({ intensity, color }) => {
+            if (intensity != null) curAmb = { ...curAmb, intensity };
+            if (color != null) curAmb = { ...curAmb, color };
+            scene.setOptions({ ambientLight: curAmb });
+          },
+          applyObject: ({ position, scale, rotation }) => {
+            if (!meshHandle) return;
+            const patch = {};
+            if (position) patch.position = position;
+            if (scale != null) patch.scale = scale;
+            if (rotation) patch.rotation = rotation;
+            if (Object.keys(patch).length) meshHandle.setTransform(patch);
+          },
+          applyShadow: ({ opacity, lift }) => {
+            const next = {};
+            if (opacity != null) next.opacity = opacity;
+            if (lift != null) next.lift = lift;
+            if (Object.keys(next).length) scene.setOptions({ shadow: next });
+          },
+          reportCamera: (cb) => {
+            orbit.addEventListener("change", (e) => cb({ rotX: e.camera.rotX, rotY: e.camera.rotY, zoom: e.camera.zoom }));
+          },
+        });
+      }
     }).catch((err) => {
       console.error("perf-vanilla mesh load failed", err);
       document.getElementById("fps-now").textContent = "ERR";
