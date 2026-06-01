@@ -40,6 +40,7 @@ export function renderTextureTrianglePoly({
       ...triangleStyle,
       ...styleProp,
     },
+    "data-poly-index": String(entry.index),
     ...dataAttrs,
     ...domAttrs,
   });

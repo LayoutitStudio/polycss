@@ -900,15 +900,22 @@ export function computeTextureAtlasPlanPublic(
   index: number,
   options: ComputeTextureAtlasPlanOptions = {},
   projectiveQuadOverrides?: ProjectiveQuadGuardOverrides,
+  /** Cross-polygon basis hint pre-computed via {@link buildBasisHints} on
+   *  the full polygon array. When supplied, it overrides the per-polygon
+   *  seamEdges/textureEdgeRepairEdges fallback below — this is what the
+   *  vanilla renderer's `renderPolygonsWithTextureAtlas` pipeline does, and
+   *  React/Vue mirror it for byte-identical plan output. */
+  basisHintOverride?: BasisHint,
 ): TextureAtlasPlan | null {
   const projectiveQuadGuards = resolveProjectiveQuadGuards(projectiveQuadOverrides);
   const internalOptions = options as ComputeTextureAtlasPlanOptions & InternalSolidTrianglePlanOptions;
-  const basisHint: BasisHint | undefined = options.textureEdgeRepairEdges?.size || internalOptions.seamEdges?.size
-    ? {
-        seamEdges: internalOptions.seamEdges ?? new Set<number>(),
-        textureEdgeRepairEdges: options.textureEdgeRepairEdges,
-      }
-    : undefined;
+  const basisHint: BasisHint | undefined = basisHintOverride
+    ?? (options.textureEdgeRepairEdges?.size || internalOptions.seamEdges?.size
+      ? {
+          seamEdges: internalOptions.seamEdges ?? new Set<number>(),
+          textureEdgeRepairEdges: options.textureEdgeRepairEdges,
+        }
+      : undefined);
   return computeTextureAtlasPlan(polygon, index, internalOptions, projectiveQuadGuards, basisHint);
 }
 

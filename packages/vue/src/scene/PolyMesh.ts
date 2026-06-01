@@ -19,6 +19,7 @@
 import { defineComponent, h, computed, inject, onMounted, onBeforeUnmount, ref, watch, watchEffect } from "vue";
 import type { PropType, VNode, CSSProperties } from "vue";
 import type { MeshResolution, Polygon, PolyTextureLightingMode, Vec3 } from "@layoutit/polycss-core";
+import { buildBasisHints } from "@layoutit/polycss-core";
 import {
   BASE_TILE,
   computeReceiverShadowFaces,
@@ -377,14 +378,27 @@ export const PolyMesh = defineComponent({
             ambientLight: atlasAmbient.value,
           })
         : null;
+      // Cross-polygon basis hints — vanilla's renderer always passes these,
+      // and the stable-solid-triangle classification depends on them.
+      // Without, ~8 polygons in a castle-class mesh fall through to atlas
+      // bitmap instead of <u>, diverging from vanilla.
+      const basisHints = buildBasisHints(polygons.value, {
+        directionalLight: bakedDirectional.value,
+        ambientLight: atlasAmbient.value,
+      });
       return polygons.value.map((p, i) =>
-        computeTextureAtlasPlan(p, i, {
-          directionalLight: bakedDirectional.value,
-          ambientLight: atlasAmbient.value,
-          seamBleed: seamBleedEdges?.has(i) ? atlasSeamBleed.value : undefined,
-          seamEdges: seamBleedEdges?.get(i),
-          textureEdgeRepairEdges: repairEdges[i],
-        }),
+        computeTextureAtlasPlan(
+          p,
+          i,
+          {
+            directionalLight: bakedDirectional.value,
+            ambientLight: atlasAmbient.value,
+            seamBleed: seamBleedEdges?.has(i) ? atlasSeamBleed.value : undefined,
+            seamEdges: seamBleedEdges?.get(i),
+            textureEdgeRepairEdges: repairEdges[i],
+          },
+          basisHints[i],
+        ),
       );
     });
     const atlasTextureQuality = computed(() => props.textureQuality);

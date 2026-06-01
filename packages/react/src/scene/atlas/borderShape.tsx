@@ -96,6 +96,7 @@ export const TextureBorderShapePoly = memo(function TextureBorderShapePoly({
       <b
         className={elementClassName}
         style={style}
+        data-poly-index={entry.index}
         {...domEventHandlers}
         {...dataAttrs}
         {...domAttrs}
@@ -108,6 +109,7 @@ export const TextureBorderShapePoly = memo(function TextureBorderShapePoly({
       ref={setElementRef}
       className={elementClassName}
       style={style}
+      data-poly-index={entry.index}
       {...domEventHandlers}
       {...dataAttrs}
       {...domAttrs}

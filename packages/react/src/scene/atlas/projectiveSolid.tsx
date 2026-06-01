@@ -70,6 +70,7 @@ export const TextureProjectiveSolidPoly = memo(function TextureProjectiveSolidPo
     <b
       className={elementClassName}
       style={style}
+      data-poly-index={entry.index}
       {...domEventHandlers}
       {...dataAttrs}
       {...domAttrs}

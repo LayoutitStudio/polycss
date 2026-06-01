@@ -98,6 +98,7 @@ export const TextureAtlasPoly = memo(function TextureAtlasPoly({
     <s
       className={elementClassName}
       style={style}
+      data-poly-index={entry.index}
       {...domEventHandlers}
       {...dataAttrs}
       {...domAttrs}

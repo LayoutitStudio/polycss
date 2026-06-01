@@ -91,6 +91,7 @@ export function renderTextureBorderShapePoly({
   return h(fullRect && !useIForFullRect ? "b" : "i", {
     class: elementClassName,
     style,
+    "data-poly-index": String(entry.index),
     ...dataAttrs,
     ...domAttrs,
     onVnodeMounted: applyBorderShape,

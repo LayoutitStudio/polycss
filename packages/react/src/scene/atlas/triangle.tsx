@@ -41,6 +41,7 @@ export const TextureTrianglePoly = memo(function TextureTrianglePoly({
     <u
       className={elementClassName}
       style={{ ...triangleStyle, ...styleProp }}
+      data-poly-index={entry.index}
       {...domEventHandlers}
       {...dataAttrs}
       {...domAttrs}

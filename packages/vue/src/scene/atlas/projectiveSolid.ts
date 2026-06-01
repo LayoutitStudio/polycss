@@ -65,6 +65,7 @@ export function renderTextureProjectiveSolidPoly({
   return h("b", {
     class: elementClassName,
     style,
+    "data-poly-index": String(entry.index),
     ...dataAttrs,
     ...domAttrs,
   });

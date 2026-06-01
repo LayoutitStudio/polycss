@@ -51,6 +51,7 @@ import {
 } from "@layoutit/polycss-core";
 import type { TransformProps } from "../shapes/types";
 import { usePolyMesh, type UseMeshOptions } from "./useMesh";
+import { buildBasisHints } from "@layoutit/polycss-core";
 import {
   buildSeamBleedPolygonEdges,
   buildTextureEdgeRepairSets,
@@ -663,13 +664,28 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
             ambientLight: effectiveAmbient,
           })
         : null;
-      return polygons.map((p, i) => computeTextureAtlasPlan(p, i, {
+      // Cross-polygon basis hints (shared-edge adjacency, connected
+      // components) — vanilla's renderer always computes these because they
+      // affect which polygons qualify for the stable-solid-triangle path.
+      // Without them, ~8 polygons in a typical castle mesh fall through to
+      // the atlas bitmap path instead of <u>, producing visible parity
+      // drift vs vanilla in dynamic mode.
+      const basisHints = buildBasisHints(polygons, {
         directionalLight: bakedDirectional,
         ambientLight: effectiveAmbient,
-        seamBleed: seamBleedEdges?.has(i) ? effectiveSeamBleed : undefined,
-        seamEdges: seamBleedEdges?.get(i),
-        textureEdgeRepairEdges: repairEdges[i],
-      }));
+      });
+      return polygons.map((p, i) => computeTextureAtlasPlan(
+        p,
+        i,
+        {
+          directionalLight: bakedDirectional,
+          ambientLight: effectiveAmbient,
+          seamBleed: seamBleedEdges?.has(i) ? effectiveSeamBleed : undefined,
+          seamEdges: seamBleedEdges?.get(i),
+          textureEdgeRepairEdges: repairEdges[i],
+        },
+        basisHints[i],
+      ));
     },
     [renderPolygon, directVoxelEnabled, polygons, bakedDirectional, effectiveAmbient, effectiveSeamBleed],
   );

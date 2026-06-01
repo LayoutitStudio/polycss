@@ -102,6 +102,7 @@ export function renderTextureAtlasPoly({
   return h("s", {
     class: elementClassName,
     style,
+    "data-poly-index": String(entry.index),
     ...dataAttrs,
     ...domAttrs,
   });
