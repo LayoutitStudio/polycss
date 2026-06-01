@@ -37,19 +37,16 @@ const CORE_BASE_STYLES = `
 
 /* ── Camera wrapper (perspective + interactive drag) ────────────────────── */
 
+/* Matches vanilla .polycss-camera: a simple positioned block that fills the
+   host. PolyPerspectiveCamera / PolyOrthographicCamera apply perspective
+   inline so the CSS file does not bake a default. */
 .polycss-camera {
-  display: flex;
-  width: 100%;
-  justify-content: center;
-  align-items: center;
-  perspective: 32000px;
-  min-height: inherit;
-  height: 100%;
   position: relative;
-  overflow: hidden;
-  contain: paint;
-  isolation: isolate;
+  display: block;
+  width: 100%;
+  height: 100%;
 }
+/* Vue descendant default — keeps preserve-3d on controls + helpers. */
 .polycss-camera * {
   transform-style: preserve-3d;
   position: absolute;

@@ -44,7 +44,7 @@ describe("PolyCamera (alias for PolyOrthographicCamera)", () => {
     );
 
     const camera = container.querySelector(".polycss-camera") as HTMLElement;
-    expect(camera.style.perspective).toBe("none");
+    expect(camera.style.perspective).toBe("1000000px");
   });
 
   it("applies custom className", () => {

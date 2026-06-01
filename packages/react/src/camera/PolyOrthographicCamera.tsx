@@ -41,7 +41,12 @@ function PolyOrthographicCameraInner({
 
   const cameraStyle: React.CSSProperties = {
     ...style,
-    perspective: "none",
+    // Vanilla emits 1000000px instead of "none" because true `perspective: none`
+    // sends Chrome down a compositor fast path that mis-rasterizes <u>
+    // border-triangle leaves. A very large finite value is visually orthographic
+    // but routes through the normal compositor path. Mirror that here so React
+    // produces byte-identical output to vanilla.
+    perspective: "1000000px",
   };
 
   return (

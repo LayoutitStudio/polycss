@@ -35,21 +35,24 @@ const CORE_BASE_STYLES = `
   will-change: transform;
 }
 
-/* ── Camera wrapper (perspective + interactive drag) ────────────────────── */
+/* ── Camera wrapper ──────────────────────────────────────────────────────── */
 
+/* Matches vanilla .polycss-camera: a simple positioned block that fills the
+   host. PolyPerspectiveCamera / PolyOrthographicCamera apply perspective
+   inline (driven by their perspective prop), so the CSS file does not bake a
+   default. Earlier React/Vue copies added flex centering, overflow:hidden,
+   contain:paint, isolation:isolate which shifted layout vs vanilla; removed
+   so cross-renderer iframes lay out identically. */
 .polycss-camera {
-  display: flex;
-  width: 100%;
-  justify-content: center;
-  align-items: center;
-  perspective: 32000px;
-  min-height: inherit;
-  height: 100%;
   position: relative;
-  overflow: hidden;
-  contain: paint;
-  isolation: isolate;
+  display: block;
+  width: 100%;
+  height: 100%;
 }
+/* React-only descendant default: applies preserve-3d to controls + helpers
+   that ride on the camera; vanilla does not need this because every internal
+   element sets the property directly. Kept here so user-supplied wrapper
+   divs inside PolyCamera still participate in 3D layout. */
 .polycss-camera * {
   transform-style: preserve-3d;
   position: absolute;

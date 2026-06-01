@@ -29,7 +29,7 @@ describe("PolyOrthographicCamera (Vue)", () => {
   it("sets perspective to none", () => {
     const container = renderCamera();
     const camera = container.querySelector(".polycss-camera") as HTMLElement;
-    expect(camera.style.perspective).toBe("none");
+    expect(camera.style.perspective).toBe("1000000px");
   });
 
   it("renders children", () => {
