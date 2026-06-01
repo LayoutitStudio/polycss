@@ -20,6 +20,12 @@ export interface OptimizeMeshPolygonsOptions {
   /** Public quality/resolution intent. Defaults to "lossy". */
   meshResolution?: MeshResolution;
   /**
+   * Return as soon as the optimizer finds a result with at most this many
+   * polygons. Useful for candidate comparisons where the caller already knows
+   * the maximum DOM leaf count it can accept.
+   */
+  stopAtPolygonCount?: number;
+  /**
    * Run the planar cover pass as an exact candidate for untextured coplanar
    * regions. Defaults to true.
    */
@@ -227,10 +233,17 @@ export function optimizeMeshPolygons(
   options: OptimizeMeshPolygonsOptions = {},
 ): Polygon[] {
   const meshResolution = options.meshResolution ?? "lossy";
+  const stopAtPolygonCount = Number.isFinite(options.stopAtPolygonCount)
+    ? Math.max(0, Math.floor(options.stopAtPolygonCount!))
+    : undefined;
   const preprocessCache: PreprocessCache = {};
   const baseline = preprocessModelPolygons(polygons, false, preprocessCache);
   let best = baseline;
   let bestCost = polygonRenderCost(best);
+  const shouldStop = (): boolean => (
+    stopAtPolygonCount !== undefined &&
+    best.length <= stopAtPolygonCount
+  );
   let bestDiagnostics: BestSafetyDiagnostics = { polygons: best };
   const resetBestDiagnostics = (seam?: SeamOverlapDiagnostics): void => {
     bestDiagnostics = { polygons: best, seam };
@@ -283,28 +296,34 @@ export function optimizeMeshPolygons(
   const initialRectCover = meshResolution === "lossy" && options.rectCover === undefined
     ? automaticLossyRectCoverOptions(baseline)
     : options.rectCover;
+  if (shouldStop()) return best;
   const rectCovered = applyRectCoverCandidate(baseline, initialRectCover);
   if (rectCovered !== baseline) acceptCandidate(rectCovered);
+  if (shouldStop()) return best;
   if (
     meshResolution === "lossy" &&
     options.rectCover === undefined
   ) {
     const losslessRectCovered = applyRectCoverCandidate(baseline, undefined);
     if (losslessRectCovered !== baseline) acceptCandidate(losslessRectCovered);
+    if (shouldStop()) return best;
   }
   if (meshResolution === "lossy" && (best.length <= 1 || bestCost <= 1 + 1e-9)) return best;
   if (meshResolution === "lossy") {
     const approximate = preprocessModelPolygons(polygons, DEFAULT_LOSSY_APPROXIMATE_OPTIONS, preprocessCache);
     acceptCandidate(approximate);
+    if (shouldStop()) return best;
     if (
       options.rectCover === undefined &&
       polygons.length >= AUTOMATIC_APPROXIMATE_RECT_COVER_MIN_SOURCE_POLYGONS &&
       polygons.length <= AUTOMATIC_APPROXIMATE_RECT_COVER_MAX_SOURCE_POLYGONS
     ) {
       acceptCandidate(applyRectCoverCandidate(approximate, AUTOMATIC_APPROXIMATE_RECT_COVER_OPTIONS));
+      if (shouldStop()) return best;
     }
     if (options.rectCover !== undefined && options.rectCover !== false) {
       acceptCandidate(applyRectCoverCandidate(approximate, options.rectCover));
+      if (shouldStop()) return best;
     }
     let acceptedBaseAggressive = false;
     for (let variantIndex = 0; variantIndex < AGGRESSIVE_LOSSY_APPROXIMATE_VARIANTS.length; variantIndex += 1) {
@@ -331,10 +350,12 @@ export function optimizeMeshPolygons(
       }
       const accepted = acceptSeamSafeCandidate(aggressiveCandidate, polygons.length);
       if (variantIndex === 0 && accepted) acceptedBaseAggressive = true;
+      if (shouldStop()) return best;
     }
     if (options.rectCover === undefined) {
       const largeRectCovered = applyRectCoverCandidate(best, automaticLargeLossyRectCoverCandidate(best));
       if (largeRectCovered !== best) acceptSeamSafeCandidate(largeRectCovered, best.length);
+      if (shouldStop()) return best;
     }
   }
 
@@ -715,6 +736,7 @@ function automaticLossyRectCoverOptions(polygons: Polygon[]): CoverPlanarPolygon
 function automaticLargeLossyRectCoverCandidate(polygons: Polygon[]): CoverPlanarPolygonsOptions | false {
   if (polygons.length < LARGE_LOSSY_RECT_COVER_MIN_POLYGONS) return false;
   if (polygons.length > LARGE_LOSSY_RECT_COVER_MAX_POLYGONS) return false;
+  if (maxPolygonVertexCount(polygons) <= 12) return false;
   if (polygonBoundaryEdgeCount(polygons) > LARGE_LOSSY_RECT_COVER_MAX_BOUNDARY_EDGES) return false;
   return LARGE_LOSSY_RECT_COVER_OPTIONS;
 }

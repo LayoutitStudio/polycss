@@ -1532,6 +1532,7 @@ export function parseGltf(input: ArrayBuffer | Uint8Array, options?: GltfParseOp
     textureAlphaMode?: PolyTextureAlphaMode;
     doubleSided?: boolean;
     uvs?: Vec2[];
+    simplifySourceVertexKeys?: string[];
     source?: AnimatedPrimitiveSource;
     sourceIndex?: number;
     sourceTriangleIndex?: number;
@@ -1578,7 +1579,9 @@ export function parseGltf(input: ArrayBuffer | Uint8Array, options?: GltfParseOp
       );
       return;
     }
-    for (const prim of mesh.primitives) {
+    for (let primitiveIndex = 0; primitiveIndex < mesh.primitives.length; primitiveIndex += 1) {
+      const prim = mesh.primitives[primitiveIndex];
+      if (!prim) continue;
       const mode = prim.mode ?? 4;
       if (mode !== 4 && mode !== 5 && mode !== 6) {
         const modeName = PRIMITIVE_MODE_NAMES[mode] ?? `mode ${mode}`;
@@ -1708,17 +1711,21 @@ export function parseGltf(input: ArrayBuffer | Uint8Array, options?: GltfParseOp
       }
 
       for (let i = 0; i + 2 < indices.length; i += 3) {
+        const i0 = indices[i]!;
+        const i1 = indices[i + 1]!;
+        const i2 = indices[i + 2]!;
         const sourceTriangleIndex = animatedSource ? animatedSource.triangleMask.length : undefined;
         if (animatedSource) animatedSource.triangleMask.push(false);
-        const v0 = positions[indices[i]];
-        const v1 = positions[indices[i + 1]];
-        const v2 = positions[indices[i + 2]];
+        const v0 = positions[i0];
+        const v1 = positions[i1];
+        const v2 = positions[i2];
         if (!v0 || !v1 || !v2) continue;
         let triUvs: Vec2[] | undefined;
         if (uvs && texture) {
-          const u0 = uvs[indices[i]], u1 = uvs[indices[i + 1]], u2 = uvs[indices[i + 2]];
+          const u0 = uvs[i0], u1 = uvs[i1], u2 = uvs[i2];
           if (u0 && u1 && u2) triUvs = [u0, u1, u2];
         }
+        const keyPrefix = `${meshIdx}:${primitiveIndex}:${meshNode ?? "root"}`;
         rawTris.push({
           v0,
           v1,
@@ -1729,6 +1736,11 @@ export function parseGltf(input: ArrayBuffer | Uint8Array, options?: GltfParseOp
           textureAlphaMode,
           doubleSided,
           uvs: triUvs,
+          simplifySourceVertexKeys: [
+            `${keyPrefix}:${i0}`,
+            `${keyPrefix}:${i1}`,
+            `${keyPrefix}:${i2}`,
+          ],
           source: animatedSource,
           sourceIndex: animatedSource?.sourceIndex,
           sourceTriangleIndex,
@@ -1929,6 +1941,7 @@ export function parseGltf(input: ArrayBuffer | Uint8Array, options?: GltfParseOp
     if (t.texture && t.textureAlphaMode) p.textureAlphaMode = t.textureAlphaMode;
     if (t.doubleSided) p.doubleSided = true;
     if (t.uvs) p.uvs = t.uvs;
+    if (t.simplifySourceVertexKeys) p.simplifySourceVertexKeys = t.simplifySourceVertexKeys;
     polygons.push(p);
     animatedPolygonRefs.push(
       t.sourceIndex !== undefined && t.sourceTriangleIndex !== undefined

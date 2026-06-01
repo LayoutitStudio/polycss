@@ -24,7 +24,7 @@ import { parseGltf } from "./parseGltf";
 import { parseMtl } from "./parseMtl";
 import { parseVox } from "./parseVox";
 import { bakeSolidTextureSamples, type SolidTextureSampleOptions } from "./solidTextureSamples";
-import { optimizeMeshPolygons } from "../merge/optimizePolygons";
+import { optimizeMeshParseResult } from "./optimizeMeshParseResult";
 
 export interface LoadMeshOptions {
   /**
@@ -61,18 +61,6 @@ export interface LoadMeshOptions {
 }
 
 const FETCH_NAME = "loadMesh";
-
-function withMeshResolution(result: ParseResult, options?: LoadMeshOptions): ParseResult {
-  // parseVox already emits greedy axis-aligned quads, and voxel fast paths
-  // need load-time latency dominated by the raw voxel source rather than a
-  // second generic polygon optimizer pass with marginal fallback savings.
-  if (result.voxelSource) return result;
-  const optimized = optimizeMeshPolygons(result.polygons, {
-    meshResolution: options?.meshResolution,
-  });
-  if (optimized === result.polygons) return result;
-  return { ...result, polygons: optimized };
-}
 
 async function withSolidTextureSamples(result: ParseResult, options?: LoadMeshOptions): Promise<ParseResult> {
   const setting = options?.solidTextureSamples;
@@ -155,7 +143,11 @@ export async function loadMesh(url: string, options?: LoadMeshOptions): Promise<
     }
 
     const parsed = parseObj(text, objOptions);
-    return withMeshResolution(await withSolidTextureSamples(parsed, options), options);
+    const baked = await withSolidTextureSamples(parsed, options);
+    return optimizeMeshParseResult(baked, {
+      meshResolution: options?.meshResolution,
+      source: parsed,
+    });
   }
 
   if (ext === "glb" || ext === "gltf") {
@@ -163,14 +155,20 @@ export async function loadMesh(url: string, options?: LoadMeshOptions): Promise<
     if (!res.ok) throw new Error(`${FETCH_NAME}: ${url} → ${res.status}`);
     const buf = await res.arrayBuffer();
     const parsed = parseGltf(buf, { baseUrl, ...(options?.gltfOptions ?? {}) });
-    return withMeshResolution(await withSolidTextureSamples(parsed, options), options);
+    const baked = await withSolidTextureSamples(parsed, options);
+    return optimizeMeshParseResult(baked, {
+      meshResolution: options?.meshResolution,
+      source: parsed,
+    });
   }
 
   if (ext === "vox") {
     const res = await fetchFn(url);
     if (!res.ok) throw new Error(`${FETCH_NAME}: ${url} → ${res.status}`);
     const buf = await res.arrayBuffer();
-    return withMeshResolution(parseVox(buf, options?.voxOptions), options);
+    return optimizeMeshParseResult(parseVox(buf, options?.voxOptions), {
+      meshResolution: options?.meshResolution,
+    });
   }
 
   throw new Error(`${FETCH_NAME}: unsupported extension ".${ext}" (supported: obj, glb, gltf, vox)`);

@@ -164,7 +164,9 @@ export type {
   CameraCullNormalGroup,
   CameraCullRotation,
   OptimizeMeshPolygonsOptions,
+  OptimizeMeshParseResultOptions,
   OptimizeAnimatedMeshPolygonsOptions,
+  SimplifyTriangleMeshPolygonsOptions,
 } from "@layoutit/polycss-core";
 export {
   CAMERA_BACKFACE_CULL_EPS,
@@ -174,6 +176,8 @@ export {
   mergePolygons,
   coverPlanarPolygons,
   optimizeMeshPolygons,
+  optimizeMeshParseResult,
+  simplifyTriangleMeshPolygons,
   repairMeshSeams,
   seamFacetSplitPolygons,
   seamFacetSplitReport,
