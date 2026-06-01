@@ -22,14 +22,14 @@
     import "./.generated/polycss-elements.js";
     import { getSynthMesh } from "./synth-mesh.mjs";
     import {
-      parseUrlParams, dirFromAzEl, createPerfRecorder,
+      parseUrlParams, dirFromAzEl, createPerfRecorder, buildFloorPolygons,
       PERF_OVERLAY_HTML, PERF_OVERLAY_CSS,
     } from "./perf-shared.mjs";
 
     document.getElementById("overlay-css").textContent = PERF_OVERLAY_CSS;
-    document.body.insertAdjacentHTML("beforeend", PERF_OVERLAY_HTML);
 
-    const { meshId, mode, motion, az, el, isSynth, preset } = parseUrlParams();
+    const { meshId, mode, motion, az, el, isSynth, preset, castShadow, floor, hideOverlay } = parseUrlParams();
+    if (!hideOverlay) document.body.insertAdjacentHTML("beforeend", PERF_OVERLAY_HTML);
     let azimuth = az;
 
     const host = document.getElementById("host");
@@ -76,10 +76,24 @@
       meshEl.setAttribute("src", preset.url);
       if (preset.mtlUrl) meshEl.setAttribute("mtl-url", preset.mtlUrl);
       if (preset.options?.targetSize) meshEl.setAttribute("target-size", String(preset.options.targetSize));
+      if (castShadow) meshEl.setAttribute("cast-shadow", "");
       sceneEl.appendChild(meshEl);
       mountedPromise = new Promise((resolve, reject) => {
         meshEl.addEventListener("polycss:loaded", (e) => resolve(e.detail), { once: true });
         meshEl.addEventListener("polycss:error", (e) => reject(e.detail), { once: true });
+      });
+    }
+
+    // Optional floor receiver: there is no <poly-mesh> attribute for
+    // inline polygons (only `src=`), so the floor still has to go via the
+    // imperative scene handle. The exercise of receive-shadow on a real
+    // <poly-mesh> element is covered by other tests.
+    if (floor) {
+      const floorPolygons = buildFloorPolygons();
+      mountedPromise = mountedPromise.then(async (parseResult) => {
+        const handle = sceneEl.getScene();
+        handle.add({ polygons: floorPolygons }, { receiveShadow: true });
+        return parseResult;
       });
     }
 

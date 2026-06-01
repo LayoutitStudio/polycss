@@ -28,6 +28,8 @@ const OBSERVED_ATTRS = [
   "scale",
   "rotation",
   "auto-center",
+  "cast-shadow",
+  "receive-shadow",
 ] as const;
 
 function parseVec3(value: string | null): Vec3 | undefined {
@@ -117,6 +119,8 @@ export class PolyMeshElement extends ELEMENT_BASE {
       position: parseVec3(this.getAttribute("position")),
       scale: parseScale(this.getAttribute("scale")),
       rotation: parseVec3(this.getAttribute("rotation")),
+      castShadow: this.hasAttribute("cast-shadow"),
+      receiveShadow: this.hasAttribute("receive-shadow"),
     });
   }
 
@@ -176,6 +180,8 @@ export class PolyMeshElement extends ELEMENT_BASE {
       position: parseVec3(this.getAttribute("position")),
       scale: parseScale(this.getAttribute("scale")),
       rotation: parseVec3(this.getAttribute("rotation")),
+      castShadow: this.hasAttribute("cast-shadow"),
+      receiveShadow: this.hasAttribute("receive-shadow"),
     });
 
     this.dispatchEvent(
