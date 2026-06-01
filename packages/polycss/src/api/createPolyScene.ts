@@ -2065,13 +2065,19 @@ export function createPolyScene(
       && !shadowOptsEqual(prevShadow, nextShadow);
     const shadowReemitNeeded = lightDirChanged || shadowAppearanceChanged;
     if (textureLightingChanged) {
-      // Voxel meshes need a full re-render to swap baked/dynamic leaf
-      // emission; everything else just needs the shadow set rebuilt
-      // (one scene-level pass at the end covers all casters).
-      for (const entry of meshes) {
-        if (!strategiesChanged && !seamBleedChanged && (entry.voxelSource || entry.voxelRenderer)) {
-          renderEntry(entry);
-        }
+      // Every mesh needs a full re-render to swap baked/dynamic leaf
+      // emission. Baked leaves carry inline `color: rgb(...)`; dynamic
+      // leaves carry inline `--pnx/y/z` and rely on a wrapper-level
+      // `--psr/g/b` (set via applySolidPaintVars) for the CSS calc().
+      // Without re-rendering, switching baked→dynamic leaves stale inline
+      // `color` on most leaves (looks fine) but any leaf that gets even
+      // a partial restyle (e.g. plan recomputation downstream) loses its
+      // inline color and falls through to the CSS calc reading the
+      // @property defaults — rendering WHITE polygons on the model.
+      // Skip when strategiesChanged/seamBleedChanged already triggered a
+      // re-render at line 2049.
+      if (!strategiesChanged && !seamBleedChanged) {
+        for (const entry of meshes) renderEntry(entry);
       }
       recomputeShadowGround();
       emitSceneShadows();
