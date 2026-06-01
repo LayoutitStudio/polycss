@@ -158,6 +158,17 @@ export {
   projectCssVertexToGround,
 } from "./shadow/projection";
 export { clipPolygonToConvex2D } from "./shadow/clipping";
+export {
+  expandConvexHullOutward,
+  groupReceiverFaceGroups,
+  meshScaleVec3,
+  RECEIVER_NORMAL_TOL,
+  RECEIVER_OFFSET_TOL,
+  RECEIVER_OUTLINE_EXPAND,
+  worldCssForMesh,
+  worldPositionToCss,
+} from "./shadow/receiverFaceGroups";
+export type { ReceiverPlaneGroup } from "./shadow/receiverFaceGroups";
 
 // ── Animation ─────────────────────────────────────────────────────
 export {

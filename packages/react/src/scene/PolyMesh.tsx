@@ -692,7 +692,7 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
     const shadowDedupDrop = findOverlappingPolygonDuplicates(polygons, {
       normalTolerance: 0.1,
       distanceTolerance: 0.5,
-      overlapFraction: 0.4,
+      overlapFraction: 0.95,
       preserveDoubleSidedBackfaces: false,
     });
 
@@ -795,7 +795,7 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
           fill={`rgb(${parsed[0]},${parsed[1]},${parsed[2]})`}
           fillRule="nonzero"
           stroke={`rgb(${parsed[0]},${parsed[1]},${parsed[2]})`}
-          strokeWidth="2"
+          strokeWidth="3"
           strokeLinejoin="round"
           opacity={shadowOpacity.toFixed(4)}
         />

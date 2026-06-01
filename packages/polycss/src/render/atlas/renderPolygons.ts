@@ -592,6 +592,7 @@ export function updatePolygonsWithStableTopology(
   options: RenderTextureAtlasOptions = {},
 ): boolean {
   if (rendered.length !== polygons.length) return false;
+  const internalOptions = options as InternalRenderTextureAtlasOptions;
   const doc = options.doc ?? (typeof document !== "undefined" ? document : null);
   const textureLighting = options.textureLighting ?? "baked";
   const disabled = new Set(options.strategies?.disable ?? []);
@@ -601,7 +602,7 @@ export function updatePolygonsWithStableTopology(
   const useBorderShape = !!doc && !disabled.has("i") && borderShapeSupported(doc);
   // Resolve the per-strategy ratio once so projective-quad / corner-shape
   // checks below all read from the same value as the plan stamping.
-  const bleedRatio = resolveBleedRatio(options.seamBleed);
+  const bleedRatio = resolveBleedRatio(internalOptions.seamBleed);
   // Pass the resolved bleed as an explicit override so resolveProjectiveQuadGuards
   // (which has its own fallback path) returns the scaled value too.
   const projectiveQuadGuards = doc
@@ -613,9 +614,8 @@ export function updatePolygonsWithStableTopology(
         disableGuards: false,
       };
   const optimizeTriangleStyle =
-    (options as InternalRenderTextureAtlasOptions).optimizeStableTriangleStyle === true &&
+    internalOptions.optimizeStableTriangleStyle === true &&
     textureLighting === "baked";
-  const internalOptions = options as InternalRenderTextureAtlasOptions;
   const stableTriangleDebug = internalOptions.stableTriangleDebug;
   const stableTriangleUpdateMode = internalOptions.stableTriangleUpdateMode ??
     (stableTriangleDebug === "plan-only" || stableTriangleDebug === "transform-only"

@@ -364,7 +364,7 @@ export const PolyMesh = defineComponent({
       const dedupDrop = findOverlappingPolygonDuplicates(polygons.value, {
         normalTolerance: 0.1,
         distanceTolerance: 0.5,
-        overlapFraction: 0.4,
+        overlapFraction: 0.95,
         preserveDoubleSidedBackfaces: false,
       });
 
@@ -465,7 +465,7 @@ export const PolyMesh = defineComponent({
             fill: `rgb(${parsed[0]},${parsed[1]},${parsed[2]})`,
             "fill-rule": "nonzero",
             stroke: `rgb(${parsed[0]},${parsed[1]},${parsed[2]})`,
-            "stroke-width": "2",
+            "stroke-width": "3",
             "stroke-linejoin": "round",
             opacity: shadowOpacity.toFixed(4),
           }),
