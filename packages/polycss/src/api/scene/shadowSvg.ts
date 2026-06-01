@@ -56,13 +56,16 @@ export function ensureGroundShadow(
   state: ShadowSvgState,
   doc: Document,
   sceneEl: HTMLElement,
+  debugAttrs = false,
 ): { svg: SVGSVGElement } {
   let svg = state.groundSvg;
   if (!svg) {
     svg = doc.createElementNS(SVG_NS, "svg");
     svg.setAttribute("class", "polycss-shadow polycss-shadow-svg");
-    svg.setAttribute("data-poly-shadow-type", "ground");
-    svg.setAttribute("data-poly-shadow-receiver", "ground");
+    if (debugAttrs) {
+      svg.setAttribute("data-poly-shadow-type", "ground");
+      svg.setAttribute("data-poly-shadow-receiver", "ground");
+    }
     svg.style.position = "absolute";
     svg.style.top = "0";
     svg.style.left = "0";

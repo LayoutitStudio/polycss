@@ -86,6 +86,15 @@ export interface PolySceneOptions {
      */
     maxExtend?: number;
   };
+  /**
+   * When `true`, emit `data-poly-shadow-*` attribution attributes on every
+   * shadow SVG and path (type, receiver mesh id, receiver face index,
+   * member poly indices, caster ids, caster poly indices). Useful for
+   * DevTools inspection and per-poly attribution in debug benches. When
+   * `false` (default), these attributes are suppressed entirely — production
+   * scenes ship a cleaner DOM and avoid serializing per-frame JSON.
+   */
+  debugShadowAttrs?: boolean;
 }
 
 export interface PolyMeshTransform {

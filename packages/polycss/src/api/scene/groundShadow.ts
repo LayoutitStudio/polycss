@@ -116,7 +116,8 @@ export function emitGroundShadow(
   // history (commit history note in original location). Tracked as a
   // volumetric-occlusion follow-up rather than a 2D cut.
 
-  const { svg } = ensureGroundShadow(ctx.shadowSvgState, ctx.doc, ctx.sceneEl);
+  const debugAttrs = !!ctx.options.current.debugShadowAttrs;
+  const { svg } = ensureGroundShadow(ctx.shadowSvgState, ctx.doc, ctx.sceneEl, debugAttrs);
   const widthStr = String(width);
   const heightStr = String(height);
   const viewBox = `0 0 ${width} ${height}`;
@@ -130,7 +131,7 @@ export function emitGroundShadow(
   const opStr = opacity.toFixed(4);
   const contributingCasters = [...projectionsByCaster.values()];
   const paths = syncShadowPaths(svg, ctx.doc, contributingCasters.length, /*withStroke*/ true);
-  const casterIds = contributingCasters.map((c) => meshShadowId(c.caster));
+  const casterIds = debugAttrs ? contributingCasters.map((c) => meshShadowId(c.caster)) : [];
   // Clip every projected polygon to the SVG box so low-angle lights with
   // a finite shadow.maxExtend don't emit path coordinates outside the
   // viewport. Per-polygon SH against the rectangular bounds preserves

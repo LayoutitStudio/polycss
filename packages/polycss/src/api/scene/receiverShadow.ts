@@ -157,10 +157,12 @@ export function emitReceiverShadows(
     if (!svg) {
       svg = ctx.doc.createElementNS(SVG_NS, "svg");
       svg.setAttribute("class", "polycss-shadow polycss-shadow-svg polycss-shadow-receiver");
-      svg.setAttribute("data-poly-shadow-type", "receiver");
-      svg.setAttribute("data-poly-shadow-receiver", meshShadowId(receiverEntry));
-      svg.setAttribute("data-poly-shadow-receiver-face", String(spec.faceIndex));
-      svg.setAttribute("data-poly-shadow-receiver-polys", JSON.stringify(spec.memberPolyIndices));
+      if (options.debugShadowAttrs) {
+        svg.setAttribute("data-poly-shadow-type", "receiver");
+        svg.setAttribute("data-poly-shadow-receiver", meshShadowId(receiverEntry));
+        svg.setAttribute("data-poly-shadow-receiver-face", String(spec.faceIndex));
+        svg.setAttribute("data-poly-shadow-receiver-polys", JSON.stringify(spec.memberPolyIndices));
+      }
       svg.setAttribute("width", String(spec.width));
       svg.setAttribute("height", String(spec.height));
       svg.setAttribute("viewBox", `0 0 ${spec.width} ${spec.height}`);
@@ -180,26 +182,31 @@ export function emitReceiverShadows(
     const paths = syncShadowPaths(svg, ctx.doc, spec.paths.length, /*withStroke*/ true);
     const opStr = spec.opacity.toFixed(4);
     const casterIds: string[] = [];
+    const wantDebug = !!options.debugShadowAttrs;
     for (let i = 0; i < spec.paths.length; i++) {
       const p = spec.paths[i]!;
-      const casterId = meshShadowId(p.casterId);
-      casterIds.push(casterId);
+      const casterId = wantDebug ? meshShadowId(p.casterId) : "";
+      if (wantDebug) casterIds.push(casterId);
       const path = paths[i]!;
       path.setAttribute("d", p.d);
       if (path.getAttribute("fill") !== spec.fill) path.setAttribute("fill", spec.fill);
       if (path.getAttribute("stroke") !== spec.fill) path.setAttribute("stroke", spec.fill);
       if (path.getAttribute("opacity") !== opStr) path.setAttribute("opacity", opStr);
-      if (path.getAttribute("data-poly-shadow-caster") !== casterId) {
-        path.setAttribute("data-poly-shadow-caster", casterId);
-      }
-      const polysAttr = JSON.stringify(p.casterPolygonIndices);
-      if (path.getAttribute("data-poly-shadow-caster-polys") !== polysAttr) {
-        path.setAttribute("data-poly-shadow-caster-polys", polysAttr);
+      if (wantDebug) {
+        if (path.getAttribute("data-poly-shadow-caster") !== casterId) {
+          path.setAttribute("data-poly-shadow-caster", casterId);
+        }
+        const polysAttr = JSON.stringify(p.casterPolygonIndices);
+        if (path.getAttribute("data-poly-shadow-caster-polys") !== polysAttr) {
+          path.setAttribute("data-poly-shadow-caster-polys", polysAttr);
+        }
       }
     }
-    const castersAttr = casterIds.join(" ");
-    if (svg.getAttribute("data-poly-shadow-casters") !== castersAttr) {
-      svg.setAttribute("data-poly-shadow-casters", castersAttr);
+    if (wantDebug) {
+      const castersAttr = casterIds.join(" ");
+      if (svg.getAttribute("data-poly-shadow-casters") !== castersAttr) {
+        svg.setAttribute("data-poly-shadow-casters", castersAttr);
+      }
     }
   }
   // Hide faces with no current spec.

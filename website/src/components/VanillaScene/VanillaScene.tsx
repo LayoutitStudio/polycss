@@ -1179,10 +1179,18 @@ export function VanillaScene({
     }
     const footprintSpan = Math.max(maxX - minX, maxY - minY, 1);
     const modelSpan = Math.max(footprintSpan, maxZ - minZ, 1);
+    // Floor half-extent in world units. The receiver-shadow path clips
+    // cast shadows against THIS polygon's outline (not against the
+    // scene's shadow.maxExtend slider, which only the legacy ground-
+    // shadow path read). Translate the user's "Shadow reach" slider
+    // (px) into world units via the active zoom so a higher value
+    // actually grows the floor footprint and the shadow keeps going.
+    const reachWorld = options.shadowMaxExtend / Math.max(options.zoom, 0.001);
     const pad = Math.max(
       footprintSpan * GALLERY_GROUND_RADIUS_MULTIPLIER,
       modelSpan * GALLERY_GROUND_MODEL_RADIUS_MULTIPLIER,
       GALLERY_GROUND_MIN_RADIUS,
+      reachWorld,
     );
     const cx = (minX + maxX) / 2;
     const cy = (minY + maxY) / 2;
@@ -1229,6 +1237,8 @@ export function VanillaScene({
     options.textureLighting,
     options.groundColor,
     options.perspective,
+    options.shadowMaxExtend,
+    options.zoom,
     stableDirectionalForRebuild,
     stableAmbientForRebuild,
     parseResult,
