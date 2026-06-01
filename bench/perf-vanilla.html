@@ -14,14 +14,14 @@
     import { createPolyCamera, createPolyScene, createPolyOrbitControls, loadMesh } from "./.generated/polycss.js";
     import { getSynthMesh } from "./synth-mesh.mjs";
     import {
-      parseUrlParams, dirFromAzEl, createPerfRecorder,
+      parseUrlParams, dirFromAzEl, createPerfRecorder, buildFloorPolygons,
       PERF_OVERLAY_HTML, PERF_OVERLAY_CSS,
     } from "./perf-shared.mjs";
 
     document.getElementById("overlay-css").textContent = PERF_OVERLAY_CSS;
-    document.body.insertAdjacentHTML("beforeend", PERF_OVERLAY_HTML);
 
-    const { meshId, mode, motion, az, el, isSynth, preset, strategies } = parseUrlParams();
+    const { meshId, mode, motion, az, el, isSynth, preset, strategies, castShadow, floor, hideOverlay } = parseUrlParams();
+    if (!hideOverlay) document.body.insertAdjacentHTML("beforeend", PERF_OVERLAY_HTML);
     let azimuth = az;
 
     const host = document.getElementById("host");
@@ -47,7 +47,10 @@
 
     meshPromise.then((parseResult) => {
       if (!parseResult) throw new Error(`Unknown synth mesh: ${meshId}`);
-      scene.add(parseResult);
+      scene.add(parseResult, { castShadow });
+      if (floor) {
+        scene.add({ polygons: buildFloorPolygons() }, { receiveShadow: true });
+      }
 
       const recorder = createPerfRecorder({
         rendererLabel: "vanilla",

@@ -21,7 +21,7 @@ import {
 import type { Polygon } from "@layoutit/polycss-core";
 import { loadMesh } from "@layoutit/polycss-core";
 // @ts-expect-error — sibling .mjs without types
-import { parseUrlParams, dirFromAzEl, createPerfRecorder, PERF_OVERLAY_HTML, PERF_OVERLAY_CSS } from "../perf-shared.mjs";
+import { parseUrlParams, dirFromAzEl, createPerfRecorder, buildFloorPolygons, PERF_OVERLAY_HTML, PERF_OVERLAY_CSS } from "../perf-shared.mjs";
 // @ts-expect-error — sibling .mjs without types
 import { getSynthMesh } from "../synth-mesh.mjs";
 
@@ -38,6 +38,8 @@ const PerfApp = defineComponent({
     preset: { type: Object as () => any, required: true },
     parseResult: { type: Object as () => ParseResult | null, default: null },
     strategies: { type: Object as () => { disable: Array<"b" | "i" | "u"> } | undefined, default: undefined },
+    castShadow: { type: Boolean, default: false },
+    floor: { type: Boolean, default: false },
   },
   setup(props) {
     const rotY = ref(props.preset.rotY);
@@ -93,15 +95,19 @@ const PerfApp = defineComponent({
             textureLighting: props.mode,
             strategies: props.strategies,
             autoCenter: true,
+            centerPolygons: props.parseResult?.polygons,
           },
           {
             default: () => [
               h(PolyOrbitControls, { drag: true, wheel: true, animate: false }),
               props.parseResult
-                ? props.parseResult.polygons.map((p, i) => h(Poly, { key: i, ...p }))
+                ? h(PolyMesh, { polygons: props.parseResult.polygons, castShadow: props.castShadow })
                 : props.preset.url
-                  ? h(PolyMesh, { src: props.preset.url, mtlUrl: props.preset.mtlUrl })
+                  ? h(PolyMesh, { src: props.preset.url, mtlUrl: props.preset.mtlUrl, castShadow: props.castShadow })
                   : null,
+              props.floor
+                ? h(PolyMesh, { polygons: buildFloorPolygons(), receiveShadow: true })
+                : null,
             ],
           },
         ),
@@ -111,11 +117,6 @@ const PerfApp = defineComponent({
 });
 
 async function main(): Promise<void> {
-  const css = document.createElement("style");
-  css.textContent = PERF_OVERLAY_CSS;
-  document.head.appendChild(css);
-  document.body.insertAdjacentHTML("beforeend", PERF_OVERLAY_HTML);
-
   const params = parseUrlParams() as {
     meshId: string;
     mode: "dynamic" | "baked";
@@ -124,8 +125,16 @@ async function main(): Promise<void> {
     el: number;
     isSynth: boolean;
     strategies?: { disable: Array<"b" | "i" | "u"> };
+    castShadow: boolean;
+    floor: boolean;
+    hideOverlay: boolean;
     preset: any;
   };
+
+  const css = document.createElement("style");
+  css.textContent = PERF_OVERLAY_CSS;
+  document.head.appendChild(css);
+  if (!params.hideOverlay) document.body.insertAdjacentHTML("beforeend", PERF_OVERLAY_HTML);
 
   let parseResult: ParseResult | null = null;
   if (params.isSynth) {
@@ -147,6 +156,8 @@ async function main(): Promise<void> {
     preset: params.preset,
     parseResult,
     strategies: params.strategies,
+    castShadow: params.castShadow,
+    floor: params.floor,
   }).mount(host);
 }
 

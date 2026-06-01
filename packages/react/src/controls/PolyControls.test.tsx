@@ -149,13 +149,17 @@ describe("PolyOrbitControls", () => {
   });
 
   // ── Wheel zoom ──────────────────────────────────────────────────────────
+  // CSS scale on the scene root is `zoom / BASE_TILE` (Three.js parity:
+  // zoom=1 → 1 CSS px per world unit, and renderer geometry already lives at
+  // ×BASE_TILE so the scene scales down by 1/BASE_TILE). zoom=1 → scale(0.02).
   it("wheel zoom updates scene transform scale", () => {
     root = createRoot(container);
     act(() => root.render(orbitTree({}, { zoom: 1 })));
     const cameraEl = findCameraEl(container);
     dispatchWheel(cameraEl, -100);
     const sceneEl = findSceneEl(container);
-    expect(sceneEl.style.transform).toMatch(/scale\(1\.\d+\)/);
+    // Wheel up zooms in → scale > 0.02 (the zoom=1 baseline).
+    expect(sceneEl.style.transform).toMatch(/scale\(0\.02\d+\)/);
   });
 
   it("does not handle wheel when wheel={false}", () => {
@@ -164,7 +168,7 @@ describe("PolyOrbitControls", () => {
     const cameraEl = findCameraEl(container);
     dispatchWheel(cameraEl, -100);
     const sceneEl = findSceneEl(container);
-    expect(sceneEl.style.transform).toContain("scale(1)");
+    expect(sceneEl.style.transform).toContain("scale(0.02)");
   });
 
   // ── Dolly ────────────────────────────────────────────────────────────────
@@ -174,8 +178,8 @@ describe("PolyOrbitControls", () => {
     const cameraEl = findCameraEl(container);
     dispatchWheel(cameraEl, 100); // scroll down = dolly out = increase distance
     const sceneEl = findSceneEl(container);
-    // Zoom should remain 1 (unchanged), distance should appear as translateZ
-    expect(sceneEl.style.transform).toContain("scale(1)");
+    // Zoom should remain 1 (→ scale(0.02) post-divide); distance shows as translateZ.
+    expect(sceneEl.style.transform).toContain("scale(0.02)");
     expect(sceneEl.style.transform).toContain("translateZ(");
   });
 

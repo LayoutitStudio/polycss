@@ -94,8 +94,12 @@ export function usePolyCamera(options: Ref<UseCameraOptions>): UseCameraResult {
     const cssX = wy * tileSize;
     const cssY = wx * tileSize;
     const cssZ = wz * tileSize;
+    // zoom = px-per-world-unit (Three.js parity). Renderer geometry already
+    // lives at ×BASE_TILE CSS px, so the scene-root CSS scale is
+    // zoom / BASE_TILE. Mirrors vanilla's buildSceneTransform.
+    const cssZoom = s.zoom / tileSize;
     const distancePart = s.distance !== 0 ? `translateZ(${-s.distance}px) ` : "";
-    el.style.transform = `${distancePart}scale(${s.zoom}) rotateX(${s.rotX}deg) rotate(${s.rotY}deg) translate3d(${-cssX}px, ${-cssY}px, ${-cssZ}px)`;
+    el.style.transform = `${distancePart}scale(${cssZoom}) rotateX(${s.rotX}deg) rotate(${s.rotY}deg) translate3d(${-cssX}px, ${-cssY}px, ${-cssZ}px)`;
   }
 
   return {

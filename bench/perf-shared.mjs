@@ -192,6 +192,15 @@ export function parseUrlParams() {
     .split(",")
     .map((value) => value.trim())
     .filter((value) => value === "b" || value === "i" || value === "u");
+  const basePreset = genericPreset ?? (meshId.startsWith("synth-")
+    ? { url: null, options: {}, zoom: 0.2, rotX: 65, rotY: 45 }
+    : (PRESETS[meshId] ?? PRESETS.saucer));
+  // `?zoom=N` overrides the per-mesh preset zoom (handy for the parity-trio
+  // bench when each iframe is narrower than the original 800px viewport).
+  const zoomOverride = parseFloat(params.get("zoom"));
+  const preset = Number.isFinite(zoomOverride) && zoomOverride > 0
+    ? { ...basePreset, zoom: zoomOverride }
+    : basePreset;
   return {
     meshId,
     mode: params.get("mode") === "baked" ? "baked" : "dynamic",
@@ -200,10 +209,34 @@ export function parseUrlParams() {
     el: parseFloat(params.get("el")) || 45,
     isSynth: meshId.startsWith("synth-"),
     strategies: disabledStrategies.length > 0 ? { disable: disabledStrategies } : undefined,
-    preset: genericPreset ?? (meshId.startsWith("synth-")
-      ? { url: null, options: {}, zoom: 0.2, rotX: 65, rotY: 45 }
-      : (PRESETS[meshId] ?? PRESETS.saucer)),
+    /** `?cast=1` → mesh casts shadow. */
+    castShadow: params.get("cast") === "1",
+    /** `?floor=1` → add a flat box mesh under the main mesh with
+     *  receiveShadow=true so cross-renderer shadow parity can be inspected. */
+    floor: params.get("floor") === "1",
+    /** Hide the perf overlay (for clean screenshot capture). */
+    hideOverlay: params.get("nohud") === "1",
+    preset,
   };
+}
+
+/** Build a flat box-cap floor mesh for the perf-bench shadow-receiver path.
+ *  Floor sits at z=0 (the same plane the ground-shadow projection uses) and
+ *  spans ±halfSize on x and y. 80 world units is wide enough to catch a
+ *  castle-class mesh's shadow at typical light angles. Returns a polygons
+ *  array shaped like every other parseResult.polygons. */
+export function buildFloorPolygons(halfSize = 80) {
+  const h = halfSize;
+  // World axes: +X right, +Y forward, +Z up. One CCW quad facing +Z.
+  return [{
+    color: "#d6d6d6",
+    vertices: [
+      [-h, -h, 0],
+      [ h, -h, 0],
+      [ h,  h, 0],
+      [-h,  h, 0],
+    ],
+  }];
 }
 
 export function dirFromAzEl(azDeg, elDeg) {
@@ -299,13 +332,14 @@ function formatTagStats(tags) {
 export function createPerfRecorder({ rendererLabel, meshId, mode, motion, polyCount, polygons, renderStats }) {
   const resolvedRenderStats = renderStats ?? collectRenderStats({ polygons });
 
-  document.getElementById("meta-renderer").textContent = rendererLabel;
-  document.getElementById("meta-polys").textContent = String(polyCount ?? "?");
-  document.getElementById("meta-mode").textContent = mode;
-  document.getElementById("meta-motion").textContent = motion;
-  document.getElementById("meta-tags").textContent = formatTagStats(resolvedRenderStats.dom.tags);
-  document.getElementById("meta-support").textContent =
-    resolvedRenderStats.support.borderShape ? "border-shape" : "no border-shape";
+  // Overlay may be absent (`?nohud=1`). Treat every DOM lookup as optional.
+  const setText = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+  setText("meta-renderer", rendererLabel);
+  setText("meta-polys", String(polyCount ?? "?"));
+  setText("meta-mode", mode);
+  setText("meta-motion", motion);
+  setText("meta-tags", formatTagStats(resolvedRenderStats.dom.tags));
+  setText("meta-support", resolvedRenderStats.support.borderShape ? "border-shape" : "no border-shape");
 
   const fpsNow = document.getElementById("fps-now");
   const metaFrames = document.getElementById("meta-frames");
@@ -339,8 +373,8 @@ export function createPerfRecorder({ rendererLabel, meshId, mode, motion, polyCo
       }
       if (frameCount % 10 === 0) {
         const avg = frameTimes.reduce((a, b) => a + b, 0) / frameTimes.length;
-        fpsNow.textContent = (1000 / avg).toFixed(1);
-        metaFrames.textContent = String(frameCount);
+        if (fpsNow) fpsNow.textContent = (1000 / avg).toFixed(1);
+        if (metaFrames) metaFrames.textContent = String(frameCount);
       }
     },
   };

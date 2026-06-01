@@ -18,14 +18,14 @@ import {
 import type { Polygon } from "@layoutit/polycss-core";
 import { loadMesh } from "@layoutit/polycss-core";
 // @ts-expect-error — sibling .mjs without types
-import { parseUrlParams, dirFromAzEl, createPerfRecorder, PERF_OVERLAY_HTML, PERF_OVERLAY_CSS } from "../perf-shared.mjs";
+import { parseUrlParams, dirFromAzEl, createPerfRecorder, buildFloorPolygons, PERF_OVERLAY_HTML, PERF_OVERLAY_CSS } from "../perf-shared.mjs";
 // @ts-expect-error — sibling .mjs without types
 import { getSynthMesh } from "../synth-mesh.mjs";
 
 interface ParseResult { polygons: Polygon[]; dispose?: () => void }
 
 function PerfApp({
-  meshId, mode, motion, az, el, preset, parseResult, strategies,
+  meshId, mode, motion, az, el, preset, parseResult, strategies, castShadow, floor,
 }: {
   meshId: string;
   mode: "dynamic" | "baked";
@@ -35,6 +35,8 @@ function PerfApp({
   preset: { rotX: number; rotY: number; zoom: number; url: string | null; mtlUrl?: string };
   parseResult: ParseResult | null;
   strategies?: { disable: Array<"b" | "i" | "u"> };
+  castShadow: boolean;
+  floor: boolean;
 }) {
   // Per-frame reactive state — React's render pipeline runs each tick.
   const [rotY, setRotY] = useState(preset.rotY);
@@ -83,26 +85,23 @@ function PerfApp({
         textureLighting={mode}
         strategies={strategies}
         autoCenter
+        centerPolygons={parseResult?.polygons}
       >
         <PolyOrbitControls drag wheel animate={false} />
         {parseResult
-          ? parseResult.polygons.map((p, i) => <Poly key={i} {...p} />)
+          ? <PolyMesh polygons={parseResult.polygons} castShadow={castShadow} />
           : preset.url
-            ? <PolyMesh src={preset.url} mtlUrl={preset.mtlUrl} />
+            ? <PolyMesh src={preset.url} mtlUrl={preset.mtlUrl} castShadow={castShadow} />
             : null}
+        {floor && (
+          <PolyMesh polygons={buildFloorPolygons()} receiveShadow />
+        )}
       </PolyScene>
     </PolyCamera>
   );
 }
 
 async function main(): Promise<void> {
-  // Inject the shared overlay first so meta-renderer, etc. exist when
-  // createPerfRecorder fires inside PerfApp's effect.
-  const css = document.createElement("style");
-  css.textContent = PERF_OVERLAY_CSS;
-  document.head.appendChild(css);
-  document.body.insertAdjacentHTML("beforeend", PERF_OVERLAY_HTML);
-
   const params = parseUrlParams() as {
     meshId: string;
     mode: "dynamic" | "baked";
@@ -111,8 +110,19 @@ async function main(): Promise<void> {
     el: number;
     isSynth: boolean;
     strategies?: { disable: Array<"b" | "i" | "u"> };
+    castShadow: boolean;
+    floor: boolean;
+    hideOverlay: boolean;
     preset: any;
   };
+
+  // Inject the shared overlay first so meta-renderer, etc. exist when
+  // createPerfRecorder fires inside PerfApp's effect. Skipped when
+  // `?nohud=1` (clean screenshot capture).
+  const css = document.createElement("style");
+  css.textContent = PERF_OVERLAY_CSS;
+  document.head.appendChild(css);
+  if (!params.hideOverlay) document.body.insertAdjacentHTML("beforeend", PERF_OVERLAY_HTML);
 
   // For React the component renders with `polygons` directly when a
   // parseResult is available (synth + OBJ both go through the same path
@@ -139,6 +149,8 @@ async function main(): Promise<void> {
       preset={params.preset}
       parseResult={parseResult}
       strategies={params.strategies}
+      castShadow={params.castShadow}
+      floor={params.floor}
     />,
   );
 }
