@@ -156,9 +156,10 @@
       : null;
     vanillaOrbit.addEventListener("change", (e) => {
       // User dragged the vanilla pane — push to S + propagate to the others.
-      S.cam.rotX = e.snapshot.rotX;
-      S.cam.rotY = e.snapshot.rotY;
-      S.cam.zoom = e.snapshot.zoom;
+      // PolyControlsChangeEvent shape: { type, camera: PolyControlsCamera }.
+      S.cam.rotX = e.camera.rotX;
+      S.cam.rotY = e.camera.rotY;
+      S.cam.zoom = e.camera.zoom;
       camSlidersRefresh();
       updateAll();
     });
@@ -207,7 +208,22 @@
         htmlFloorMesh.setTransform({ receiveShadow: S.floorReceives });
       }
     }
-    htmlMesh.addEventListener("polycss:loaded", () => { ensureHtmlFloor(); });
+    htmlMesh.addEventListener("polycss:loaded", () => {
+      ensureHtmlFloor();
+      // Attach the same change listener the vanilla pane uses, via the new
+      // public `getControls()` getter on PolyOrbitControlsElement. Without
+      // it, dragging the HTML pane wouldn't propagate to the others.
+      const controls = htmlOrbit.getControls?.();
+      if (controls?.addEventListener) {
+        controls.addEventListener("change", (e) => {
+          S.cam.rotX = e.camera.rotX;
+          S.cam.rotY = e.camera.rotY;
+          S.cam.zoom = e.camera.zoom;
+          camSlidersRefresh();
+          updateAll();
+        });
+      }
+    });
 
     // ── React (createRoot + small App component, see parityQuadReact.tsx) ──
     const reactHost = document.getElementById("react-host");
