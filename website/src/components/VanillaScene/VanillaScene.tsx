@@ -558,16 +558,16 @@ export function VanillaScene({
     } as PolyMeshTransform;
     const modelParseResult: ParseResult = parseResult
       ? {
-          ...parseResult,
-          polygons,
-          dispose: () => {},
-        }
+        ...parseResult,
+        polygons,
+        dispose: () => { },
+      }
       : {
-          polygons,
-          objectUrls: [],
-          warnings: [],
-          dispose: () => {},
-        };
+        polygons,
+        objectUrls: [],
+        warnings: [],
+        dispose: () => { },
+      };
     meshHandleRef.current = scene.add(modelParseResult, meshTransform);
     mountedModelRef.current = {
       handle: meshHandleRef.current,
@@ -657,7 +657,7 @@ export function VanillaScene({
           polygons: interiorShellPolygons,
           objectUrls: [],
           warnings: [],
-          dispose: () => {},
+          dispose: () => { },
         },
         {
           merge: false,
@@ -807,9 +807,9 @@ export function VanillaScene({
     let lastAnimatedPolygonCount = 0;
     const transformCache =
       stableDomForMesh &&
-      options.textureLighting === "baked" &&
-      typeof animationDurationSeconds === "number" &&
-      animationDurationSeconds > 0
+        options.textureLighting === "baked" &&
+        typeof animationDurationSeconds === "number" &&
+        animationDurationSeconds > 0
         ? createStableTriangleTransformCache()
         : null;
 
@@ -927,8 +927,12 @@ export function VanillaScene({
     stableDomForMesh,
   ]);
 
-  // Effect 2 — cheap: live transform + lighting updates via setOptions.
-  // Sliding sliders only flows through this path.
+  // Effect 2a — camera-only updates. Runs every drag tick. Pushes the new
+  // camera state and re-applies the scene transform. Does NOT call
+  // scene.setOptions — camera changes don't change lighting/shadow, and
+  // calling setOptions({shadow:...}) here would trigger a full receiver-
+  // shadow rebuild every drag tick, causing visible mid-frame flicker
+  // ("shadows disappear when rotating") in real Chrome.
   useEffect(() => {
     const scene = sceneRef.current;
     const camera = cameraRef.current;
@@ -940,6 +944,15 @@ export function VanillaScene({
       target: options.target as Vec3,
     });
     scene.applyCamera();
+  }, [options.rotX, options.rotY, options.zoom, options.target]);
+
+  // Effect 2b — lighting + shadow updates. Runs only when the light, shadow,
+  // textureLighting, or ground color actually change (sliders, not camera).
+  // setOptions triggers the receiver-shadow rebuild via emitSceneShadows();
+  // keep it off the camera-tick path.
+  useEffect(() => {
+    const scene = sceneRef.current;
+    if (!scene) return;
     scene.setOptions({
       directionalLight,
       ambientLight,
@@ -958,10 +971,6 @@ export function VanillaScene({
     }
     applyGalleryGroundPaint(groundHandleRef.current, directionalLight, ambientLight, options.groundColor);
   }, [
-    options.rotX,
-    options.rotY,
-    options.zoom,
-    options.target,
     options.textureLighting,
     options.groundColor,
     options.shadowMaxExtend,
@@ -1110,7 +1119,7 @@ export function VanillaScene({
         polygons: axesHelperPolygons({ size: helperScale * 0.6 }),
         objectUrls: [],
         warnings: [],
-        dispose: () => {},
+        dispose: () => { },
       },
       { excludeFromAutoCenter: true },
     );
@@ -1194,7 +1203,7 @@ export function VanillaScene({
         polygons: [groundPoly],
         objectUrls: [],
         warnings: [],
-        dispose: () => {},
+        dispose: () => { },
       },
       // receiveShadow:true is load-bearing — the gallery floor is the
       // canonical shadow receiver. Without it, enabling Self-shadow on
@@ -1246,7 +1255,7 @@ export function VanillaScene({
         polygons: octahedronPolygons({ center: [0, 0, 0], size: helperScale * 0.05, color: swatch }),
         objectUrls: [],
         warnings: [],
-        dispose: () => {},
+        dispose: () => { },
       },
       {
         position: lightHelperPosition(
