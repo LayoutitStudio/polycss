@@ -585,6 +585,13 @@ export const PolyMesh = defineComponent({
     // each coplanar surface group on this mesh, project every registered
     // caster polygon along the directional light, Sutherland-Hodgman-clip
     // to the face outline, emit one <svg> per visible face.
+    // Cached shared-edge adjacency for the self-shadow seam cull.
+    // Polygon identity is the bust key — re-built only when geometry
+    // changes, mirroring React's useMemo([polygons, receiveShadow]).
+    const selfShadowEdgeMap = computed(() =>
+      props.receiveShadow ? buildSharedEdgeMap(polygons.value) : undefined,
+    );
+
     const receiverShadowSvgs = computed<VNode[]>(() => {
       if (!props.receiveShadow) return [];
       const ctx = sceneCtx?.value;
@@ -610,11 +617,7 @@ export const PolyMesh = defineComponent({
       if (planes.length === 0) return [];
       const casterInputs: ReceiverCasterInput<symbol>[] = [];
       let i = 0;
-      // Self-shadow seam cull: when the caster IS this mesh, pass the
-      // shared-edge adjacency map so the algorithm skips projecting
-      // edge-sharing neighbour polygons (kills the spiderweb seam
-      // shadows on smooth GLB meshes — apple, sphere, teapot).
-      const selfEdgeMap = buildSharedEdgeMap(polygons.value);
+      const cachedSelfMap = selfShadowEdgeMap.value;
       for (const getData of entries) {
         const data = getData();
         const rendered = data.renderedPolygonIndices;
@@ -625,7 +628,11 @@ export const PolyMesh = defineComponent({
           rendered ? (idx) => rendered.has(idx) : () => true,
         );
         const isSelf = data.polygons === polygons.value;
-        casterInputs.push({ id: Symbol(`caster-${i++}`), items, selfShadowEdgeMap: isSelf ? selfEdgeMap : undefined });
+        // Self-shadow seam cull: when caster IS this mesh, pass the
+        // cached shared-edge map so the algorithm skips projecting
+        // edge-sharing neighbour polygons (kills spiderweb seam
+        // shadows on smooth GLB meshes — apple, sphere, teapot).
+        casterInputs.push({ id: Symbol(`caster-${i++}`), items, selfShadowEdgeMap: isSelf ? cachedSelfMap : undefined });
       }
       const cameraState = cameraCtx?.store.getState().cameraState;
       const cameraRot: CameraCullRotation = {
