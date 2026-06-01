@@ -110,6 +110,14 @@ export interface PolyMeshProps extends TransformProps, InteractionProps {
   mtl?: string;
   /** Pre-parsed polygons. Mutually exclusive with `src`. */
   polygons?: Polygon[];
+  /** Optional `parseResult.voxelSource` companion for `.vox` meshes. When
+   *  set alongside `polygons`, the direct voxel renderer fast path activates
+   *  — emitting one `<b>` per visible voxel quad inside `.polycss-voxel-face`
+   *  wrappers (matches vanilla's `scene.add(parseResult)` behaviour).
+   *  Callers fetching via core's `loadMesh()` pass `parseResult.voxelSource`
+   *  here so the fast path engages; callers fetching via PolyMesh's `src`
+   *  prop get the same data wired through `useMesh` automatically. */
+  voxelSource?: import("@layoutit/polycss-core").ParseResult["voxelSource"];
   /** Translate so mesh's bbox center is at local origin before applying `position`. */
   autoCenter?: boolean;
   /** Textured polygon lighting mode. Defaults to "baked". */
@@ -245,6 +253,7 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
     src,
     mtl,
     polygons: polygonsProp,
+    voxelSource: voxelSourceProp,
     autoCenter,
     textureLighting,
     textureQuality,
@@ -296,7 +305,7 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
   const fetched = usePolyMesh(src ?? "", mergedOptions);
 
   const externalPolygons = src ? fetched.polygons : (polygonsProp ?? []);
-  const externalVoxelSource = src ? fetched.voxelSource : undefined;
+  const externalVoxelSource = src ? fetched.voxelSource : voxelSourceProp;
 
   // Local override array written by updatePolygon(). Null means no
   // imperative edits have been applied — the external source is used as-is.

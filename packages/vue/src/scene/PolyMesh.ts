@@ -216,6 +216,10 @@ export const PolyMesh = defineComponent({
     src: { type: String, default: undefined },
     mtl: { type: String, default: undefined },
     polygons: { type: Array as PropType<Polygon[]>, default: undefined },
+    /** Optional `parseResult.voxelSource` companion for `.vox` meshes. When
+     *  set alongside `polygons`, the direct voxel renderer fast path
+     *  activates — mirrors vanilla's `scene.add(parseResult)` behaviour. */
+    voxelSource: { type: Object as PropType<import("@layoutit/polycss-core").ParseResult["voxelSource"]>, default: undefined },
     autoCenter: { type: Boolean, default: false },
     textureLighting: { type: String as PropType<PolyTextureLightingMode>, default: undefined },
     textureQuality: { type: [Number, String] as PropType<TextureQuality>, default: undefined },
@@ -318,9 +322,15 @@ export const PolyMesh = defineComponent({
     // mode (vanilla parity — see React PolyMesh comment).
     const atlasDirectional = computed(() => sceneCtx?.value.directionalLight);
     const atlasAmbient = computed(() => sceneCtx?.value.ambientLight);
+    // voxelSource comes from useMesh (when src is set) OR from the prop
+    // (when polygons array is provided directly). Vanilla scene.add receives
+    // the full parseResult so it always knows voxelSource; React/Vue allow
+    // the polygons-only call shape, so expose voxelSource as a prop.
+    const externalVoxelSource = computed(() =>
+      props.src ? fetched.voxelSource.value : props.voxelSource ?? undefined,
+    );
     const directVoxelEnabled = computed(() => Boolean(
-      props.src &&
-      fetched.voxelSource.value &&
+      externalVoxelSource.value &&
       polygonOverride.value === null &&
       !slots.polygon &&
       !slots.default &&

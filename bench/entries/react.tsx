@@ -22,7 +22,7 @@ import { parseUrlParams, dirFromAzEl, createPerfRecorder, buildFloorPolygons, PE
 // @ts-expect-error — sibling .mjs without types
 import { getSynthMesh } from "../synth-mesh.mjs";
 
-interface ParseResult { polygons: Polygon[]; dispose?: () => void }
+interface ParseResult { polygons: Polygon[]; voxelSource?: unknown; dispose?: () => void }
 
 function PerfApp({
   meshId, mode, motion, az, el, preset, parseResult, strategies, castShadow, floor,
@@ -96,7 +96,7 @@ function PerfApp({
       >
         <PolyOrbitControls drag wheel animate={false} />
         {parseResult
-          ? <PolyMesh polygons={parseResult.polygons} castShadow={castShadow} />
+          ? <PolyMesh polygons={parseResult.polygons} voxelSource={parseResult.voxelSource} castShadow={castShadow} />
           : preset.url
             ? <PolyMesh src={preset.url} mtlUrl={preset.mtlUrl} castShadow={castShadow} />
             : null}
