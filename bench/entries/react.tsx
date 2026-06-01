@@ -18,14 +18,14 @@ import {
 import type { Polygon } from "@layoutit/polycss-core";
 import { loadMesh } from "@layoutit/polycss-core";
 // @ts-expect-error — sibling .mjs without types
-import { parseUrlParams, dirFromAzEl, createPerfRecorder, buildFloorPolygons, installParitySync, PERF_OVERLAY_HTML, PERF_OVERLAY_CSS } from "../perf-shared.mjs";
+import { parseUrlParams, dirFromAzEl, createPerfRecorder, buildFloorPolygons, PERF_OVERLAY_HTML, PERF_OVERLAY_CSS } from "../perf-shared.mjs";
 // @ts-expect-error — sibling .mjs without types
 import { getSynthMesh } from "../synth-mesh.mjs";
 
 interface ParseResult { polygons: Polygon[]; voxelSource?: unknown; dispose?: () => void }
 
 function PerfApp({
-  meshId, mode, motion, az, el, preset, parseResult, strategies, castShadow, floor, sync,
+  meshId, mode, motion, az, el, preset, parseResult, strategies, castShadow, floor,
 }: {
   meshId: string;
   mode: "dynamic" | "baked";
@@ -37,14 +37,9 @@ function PerfApp({
   strategies?: { disable: Array<"b" | "i" | "u"> };
   castShadow: boolean;
   floor: boolean;
-  sync: boolean;
 }) {
   // Per-frame reactive state — React's render pipeline runs each tick.
-  const [rotX, setRotX] = useState(preset.rotX);
   const [rotY, setRotY] = useState(preset.rotY);
-  const [zoom, setZoom] = useState(preset.zoom);
-  const [azState, setAz] = useState(az);
-  const [elState, setEl] = useState(el);
   const [lightDir, setLightDir] = useState<[number, number, number]>(() => dirFromAzEl(az, el));
 
   useEffect(() => {
@@ -73,28 +68,6 @@ function PerfApp({
     return () => { if (raf !== null) cancelAnimationFrame(raf); };
   }, [meshId, mode, motion, az, el, preset.rotX, preset.rotY, parseResult]);
 
-  // Parity-quad sync: bridge parent postMessage to camera/light state.
-  // Reports drag-driven camera changes via PolyOrbitControls.onChange.
-  useEffect(() => {
-    if (!sync) return;
-    installParitySync({
-      applyCamera: ({ rotX: rx, rotY: ry, zoom: z }: { rotX: number | null; rotY: number | null; zoom: number | null }) => {
-        if (rx != null) setRotX(rx);
-        if (ry != null) setRotY(ry);
-        if (z != null) setZoom(z);
-      },
-      applyLight: ({ az: newAz, el: newEl }: { az: number | null; el: number | null }) => {
-        if (newAz != null) setAz(newAz);
-        if (newEl != null) setEl(newEl);
-        const nextAz = newAz ?? azState, nextEl = newEl ?? elState;
-        setLightDir(dirFromAzEl(nextAz, nextEl));
-      },
-      reportCamera: () => {
-        // Drag report is handled inline via <PolyOrbitControls onChange={...}> below.
-      },
-    });
-  }, [sync]);
-
   const directionalLight = useMemo(
     () => ({ direction: lightDir, color: "#ffffff", intensity: 1 }),
     [lightDir],
@@ -112,7 +85,7 @@ function PerfApp({
     return [...parseResult.polygons, ...buildFloorPolygons()];
   }, [parseResult, floor]);
   return (
-    <PolyCamera rotX={rotX} rotY={rotY} zoom={zoom}>
+    <PolyCamera rotX={preset.rotX} rotY={rotY} zoom={preset.zoom}>
       <PolyScene
         directionalLight={directionalLight}
         ambientLight={ambientLight}
@@ -121,14 +94,7 @@ function PerfApp({
         autoCenter
         centerPolygons={centerPolys}
       >
-        <PolyOrbitControls drag wheel animate={false}
-          onChange={sync ? (snap: { rotX?: number; rotY?: number; zoom?: number }) => {
-            if (typeof snap.rotX === "number") setRotX(snap.rotX);
-            if (typeof snap.rotY === "number") setRotY(snap.rotY);
-            if (typeof snap.zoom === "number") setZoom(snap.zoom);
-            window.parent.postMessage({ kind: "camera-changed", rotX: snap.rotX, rotY: snap.rotY, zoom: snap.zoom }, "*");
-          } : undefined}
-        />
+        <PolyOrbitControls drag wheel animate={false} />
         {parseResult
           ? <PolyMesh polygons={parseResult.polygons} voxelSource={parseResult.voxelSource} castShadow={castShadow} />
           : preset.url
@@ -154,7 +120,6 @@ async function main(): Promise<void> {
     castShadow: boolean;
     floor: boolean;
     hideOverlay: boolean;
-    sync: boolean;
     preset: any;
   };
 
@@ -193,7 +158,6 @@ async function main(): Promise<void> {
       strategies={params.strategies}
       castShadow={params.castShadow}
       floor={params.floor}
-      sync={params.sync}
     />,
   );
 }

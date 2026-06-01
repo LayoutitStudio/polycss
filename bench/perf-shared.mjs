@@ -195,17 +195,12 @@ export function parseUrlParams() {
   const basePreset = genericPreset ?? (meshId.startsWith("synth-")
     ? { url: null, options: {}, zoom: 0.2, rotX: 65, rotY: 45 }
     : (PRESETS[meshId] ?? PRESETS.saucer));
-  // `?zoom=N` overrides the per-mesh preset zoom (handy for the parity-quad
+  // `?zoom=N` overrides the per-mesh preset zoom (handy for the parity-trio
   // bench when each iframe is narrower than the original 800px viewport).
   const zoomOverride = parseFloat(params.get("zoom"));
-  const rotXOverride = parseFloat(params.get("rotX"));
-  const rotYOverride = parseFloat(params.get("rotY"));
-  const preset = {
-    ...basePreset,
-    ...(Number.isFinite(zoomOverride) && zoomOverride > 0 ? { zoom: zoomOverride } : null),
-    ...(Number.isFinite(rotXOverride) ? { rotX: rotXOverride } : null),
-    ...(Number.isFinite(rotYOverride) ? { rotY: rotYOverride } : null),
-  };
+  const preset = Number.isFinite(zoomOverride) && zoomOverride > 0
+    ? { ...basePreset, zoom: zoomOverride }
+    : basePreset;
   return {
     meshId,
     mode: params.get("mode") === "baked" ? "baked" : "dynamic",
@@ -221,10 +216,6 @@ export function parseUrlParams() {
     floor: params.get("floor") === "1",
     /** Hide the perf overlay (for clean screenshot capture). */
     hideOverlay: params.get("nohud") === "1",
-    /** `?sync=1` → listen for parent postMessage and broadcast our own
-     *  camera changes back. Used by parity-quad.html to keep all four
-     *  renderer iframes in lockstep when one is dragged. */
-    sync: params.get("sync") === "1",
     preset,
   };
 }
@@ -253,51 +244,6 @@ export function dirFromAzEl(azDeg, elDeg) {
   const el = (elDeg * Math.PI) / 180;
   const cosEl = Math.cos(el);
   return [cosEl * Math.sin(az), cosEl * Math.cos(az), Math.sin(el)];
-}
-
-/**
- * Wire the perf page's camera + light to the parent parity-quad iframe so
- * dragging in one pane mirrors to the other three. Pass per-renderer
- * callbacks that apply the incoming state to whatever scene/camera handle
- * that renderer uses (vanilla = imperative, react/vue = reactive setters,
- * html = element attributes).
- *
- *   installParitySync({
- *     applyCamera: ({rotX, rotY, zoom}) => camera.update({rotX, rotY, zoom}),
- *     applyLight:  ({az, el})           => scene.setOptions({ directionalLight: { direction: dirFromAzEl(az, el), ... } }),
- *     reportCamera: (cb) => orbitControls.on("change", () => cb(camera.state)),
- *   })
- *
- * The page posts {kind:"ready"} once mounted so the parent can push the
- * authoritative initial state. Subsequent local drag broadcasts
- * {kind:"camera-changed", rotX, rotY, zoom}.
- */
-export function installParitySync({ applyCamera, applyLight, reportCamera }) {
-  if (typeof window === "undefined" || window.parent === window) return null;
-  let dispose = null;
-  window.addEventListener("message", (e) => {
-    if (!e.data || typeof e.data !== "object") return;
-    if (e.data.kind === "set-camera" && applyCamera) {
-      applyCamera({
-        rotX: typeof e.data.rotX === "number" ? e.data.rotX : null,
-        rotY: typeof e.data.rotY === "number" ? e.data.rotY : null,
-        zoom: typeof e.data.zoom === "number" ? e.data.zoom : null,
-      });
-    } else if (e.data.kind === "set-light" && applyLight) {
-      applyLight({
-        az: typeof e.data.az === "number" ? e.data.az : null,
-        el: typeof e.data.el === "number" ? e.data.el : null,
-      });
-    }
-  });
-  if (reportCamera) {
-    dispose = reportCamera((state) => {
-      window.parent.postMessage({ kind: "camera-changed", ...state }, "*");
-    });
-  }
-  // Tell the parent we're ready to receive initial state.
-  window.parent.postMessage({ kind: "ready" }, "*");
-  return { dispose };
 }
 
 const BORDER_SHAPE_TEST_VALUE = "polygon(0 0, 100% 0, 0 100%) circle(0)";
