@@ -314,12 +314,10 @@ export const PolyMesh = defineComponent({
     );
     const atlasStrategies = computed(() => sceneCtx?.value.strategies);
     const atlasSeamBleed = computed(() => props.seamBleed ?? sceneCtx?.value.seamBleed ?? DEFAULT_SEAM_BLEED);
-    const atlasDirectional = computed(() =>
-      atlasTextureLighting.value === "dynamic" ? undefined : sceneCtx?.value.directionalLight,
-    );
-    const atlasAmbient = computed(() =>
-      atlasTextureLighting.value === "dynamic" ? undefined : sceneCtx?.value.ambientLight,
-    );
+    // Always forward the scene's lights to atlas plan, including in dynamic
+    // mode (vanilla parity — see React PolyMesh comment).
+    const atlasDirectional = computed(() => sceneCtx?.value.directionalLight);
+    const atlasAmbient = computed(() => sceneCtx?.value.ambientLight);
     const directVoxelEnabled = computed(() => Boolean(
       props.src &&
       fetched.voxelSource.value &&

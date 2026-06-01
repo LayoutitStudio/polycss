@@ -7,8 +7,41 @@ import type {
   PolyTextureLightingMode,
   SolidPaintDefaults,
 } from "@layoutit/polycss-core";
-import { formatCornerShapeElementStyle } from "@layoutit/polycss-core";
-import { solidTriangleStyle } from "./solidTriangleStyle";
+import {
+  formatCornerShapeElementStyle,
+  parseHex,
+  rgbKey,
+} from "@layoutit/polycss-core";
+
+// Vanilla emit.ts uses formatInitialSolidPaintStyle to append paint-only CSS
+// (color in baked, --pn*/--ps* vars in dynamic) AFTER the cornerShape
+// geometry string. solidTriangleStyle would inject its own `transform: matrix3d`
+// which clobbers the cornerShape geometry transform, so cornerShape can't
+// reuse it. This is a transcription of formatInitialSolidPaintStyle for the
+// renderer-owned glue boundary.
+function formatPaintCss(
+  entry: TextureAtlasPlan,
+  textureLighting: PolyTextureLightingMode,
+  solidPaintDefaults: SolidPaintDefaults | undefined,
+): string {
+  if (textureLighting === "dynamic") {
+    const base = parseHex(entry.polygon.color ?? "#cccccc");
+    let style =
+      `;--pnx:${entry.normal[0].toFixed(4)}` +
+      `;--pny:${entry.normal[1].toFixed(4)}` +
+      `;--pnz:${entry.normal[2].toFixed(4)}`;
+    if (rgbKey(base) !== solidPaintDefaults?.dynamicColorKey) {
+      style +=
+        `;--psr:${(base.r / 255).toFixed(4)}` +
+        `;--psg:${(base.g / 255).toFixed(4)}` +
+        `;--psb:${(base.b / 255).toFixed(4)}`;
+    }
+    return style;
+  }
+  return entry.shadedColor && entry.shadedColor !== solidPaintDefaults?.paintColor
+    ? `;color:${entry.shadedColor}`
+    : "";
+}
 
 /**
  * Renders a non-rect non-triangle solid polygon as a `<u>` leaf with
@@ -39,25 +72,20 @@ export const TextureCornerShapeSolidPoly = memo(function TextureCornerShapeSolid
   domEventHandlers?: React.DOMAttributes<Element>;
   pointerEvents?: "auto" | "none";
 }) {
-  // Vanilla applies the cornerShape style string via setAttribute("style",...).
-  // React can't pass a raw style string through the JSX `style` prop, so we
-  // use a ref callback to setAttribute on mount/update. The paint side
-  // (color, lambert vars) is computed via solidTriangleStyle and merged on
-  // top of the cornerShape geometry CSS — same property ordering as vanilla.
-  const paintStyle = solidTriangleStyle(entry, textureLighting, pointerEvents, solidPaintDefaults);
+  // Mirror vanilla createCornerShapeSolidElement: concatenate the cornerShape
+  // geometry CSS (transform + width/height + corner-shape props) with the
+  // paint CSS (color in baked, --pn*/--ps* vars in dynamic) and apply as a
+  // single setAttribute("style", ...). Earlier React used solidTriangleStyle
+  // which injected `transform: matrix3d(...)` for a TRIANGLE primitive,
+  // clobbering the cornerShape geometry transform with a triangle one and
+  // visually mirroring/transposing the leaf.
   const cornerShapeCss = formatCornerShapeElementStyle(entry, geometry);
+  const paintCss = formatPaintCss(entry, textureLighting, solidPaintDefaults);
+  const pointerCss = pointerEvents === "none" ? ";pointer-events:none" : "";
+  const fullCss = cornerShapeCss + paintCss + pointerCss;
   const setRef = useCallback((el: HTMLElement | null) => {
     if (!el) return;
-    // Stamp the cornerShape geometry CSS as a single setAttribute call,
-    // then layer the paint properties on top via individual style sets.
-    el.setAttribute("style", cornerShapeCss);
-    if (paintStyle) {
-      for (const [k, v] of Object.entries(paintStyle)) {
-        if (v === undefined || v === null) continue;
-        if (k.startsWith("--")) el.style.setProperty(k, String(v));
-        else (el.style as unknown as Record<string, string>)[k] = String(v);
-      }
-    }
+    el.setAttribute("style", fullCss);
     if (styleProp) {
       for (const [k, v] of Object.entries(styleProp)) {
         if (v === undefined || v === null) continue;
@@ -65,7 +93,7 @@ export const TextureCornerShapeSolidPoly = memo(function TextureCornerShapeSolid
         else (el.style as unknown as Record<string, string>)[k] = String(v);
       }
     }
-  }, [cornerShapeCss, paintStyle, styleProp]);
+  }, [fullCss, styleProp]);
 
   const dataAttrs = entry.polygon.data
     ? Object.fromEntries(

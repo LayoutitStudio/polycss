@@ -198,6 +198,16 @@ export function renderPolygonsWithTextureAtlas(
       basisHints[index],
     )
   );
+  if (typeof window !== "undefined") {
+    const w = window as unknown as { __vanillaPlan1?: unknown };
+    const plan = plans[1];
+    w.__vanillaPlan1 = {
+      matrix: plan?.matrix,
+      canvasW: plan?.canvasW,
+      canvasH: plan?.canvasH,
+      vertexCount: polygons[1]?.vertices.length,
+    };
+  }
   const solidPaintDefaults = options.solidPaintDefaults ??
     (internalOptions.computeSolidPaintDefaults
       ? getSolidPaintDefaultsForPlans(plans, textureLighting, doc, options.strategies)

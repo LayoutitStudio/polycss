@@ -601,10 +601,16 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
     [effectiveStrategies],
   );
   const effectiveSeamBleed = seamBleed ?? sceneCtx?.seamBleed ?? DEFAULT_SEAM_BLEED;
-  const effectiveDirectional =
-    effectiveTextureLighting === "dynamic" ? undefined : sceneCtx?.directionalLight;
-  const effectiveAmbient =
-    effectiveTextureLighting === "dynamic" ? undefined : sceneCtx?.ambientLight;
+  // Always forward the scene's lights to atlas plan, including in dynamic
+  // mode. Vanilla passes the (CSS-frame) directional light to its render
+  // pipeline in every mode — the dynamic-mode atlas doesn't bake Lambert
+  // into pixels, but buildBasisHints' seamLightBrightness still needs the
+  // light vector, and computeTextureAtlasPlan computes shadedColor for the
+  // fallback paint. Earlier React gated this on textureLighting === "dynamic"
+  // which stripped the light, broke buildBasisHints' seam classification,
+  // and visually transposed the cornerShape <u> matrix3d output vs vanilla.
+  const effectiveDirectional = sceneCtx?.directionalLight;
+  const effectiveAmbient = sceneCtx?.ambientLight;
 
   const directVoxelEnabled = Boolean(
     externalVoxelSource &&

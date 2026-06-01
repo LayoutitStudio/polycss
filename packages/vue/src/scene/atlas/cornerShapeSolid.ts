@@ -5,8 +5,36 @@ import type {
   PolyTextureLightingMode,
   SolidPaintDefaults,
 } from "@layoutit/polycss-core";
-import { formatCornerShapeElementStyle } from "@layoutit/polycss-core";
-import { solidTriangleStyle } from "./solidTriangleStyle";
+import {
+  formatCornerShapeElementStyle,
+  parseHex,
+  rgbKey,
+} from "@layoutit/polycss-core";
+
+// Same as React's CornerShapeSolidPoly paint-only transcription.
+function formatPaintCss(
+  entry: TextureAtlasPlan,
+  textureLighting: PolyTextureLightingMode,
+  solidPaintDefaults: SolidPaintDefaults | undefined,
+): string {
+  if (textureLighting === "dynamic") {
+    const base = parseHex(entry.polygon.color ?? "#cccccc");
+    let style =
+      `;--pnx:${entry.normal[0].toFixed(4)}` +
+      `;--pny:${entry.normal[1].toFixed(4)}` +
+      `;--pnz:${entry.normal[2].toFixed(4)}`;
+    if (rgbKey(base) !== solidPaintDefaults?.dynamicColorKey) {
+      style +=
+        `;--psr:${(base.r / 255).toFixed(4)}` +
+        `;--psg:${(base.g / 255).toFixed(4)}` +
+        `;--psb:${(base.b / 255).toFixed(4)}`;
+    }
+    return style;
+  }
+  return entry.shadedColor && entry.shadedColor !== solidPaintDefaults?.paintColor
+    ? `;color:${entry.shadedColor}`
+    : "";
+}
 
 /**
  * Renders a non-rect non-triangle solid polygon as a `<u>` leaf with CSS
@@ -31,20 +59,15 @@ export function renderTextureCornerShapeSolidPoly({
   pointerEvents?: "auto" | "none";
 }): VNode {
   const cornerShapeCss = formatCornerShapeElementStyle(entry, geometry);
-  const paintStyle = solidTriangleStyle(entry, textureLighting, pointerEvents, solidPaintDefaults);
+  const paintCss = formatPaintCss(entry, textureLighting, solidPaintDefaults);
+  const pointerCss = pointerEvents === "none" ? ";pointer-events:none" : "";
+  const fullCss = cornerShapeCss + paintCss + pointerCss;
 
   const apply = (el: unknown): void => {
     if (!el || !(el instanceof HTMLElement)) return;
-    // Vanilla stamps the cornerShape geometry CSS via setAttribute('style', ...)
-    // — preserve exact ordering so output is byte-identical.
-    el.setAttribute("style", cornerShapeCss);
-    if (paintStyle) {
-      for (const [k, v] of Object.entries(paintStyle)) {
-        if (v === undefined || v === null) continue;
-        if (k.startsWith("--")) el.style.setProperty(k, String(v));
-        else (el.style as unknown as Record<string, string>)[k] = String(v);
-      }
-    }
+    // Mirror vanilla createCornerShapeSolidElement: concatenate cornerShape
+    // geometry CSS with paint CSS and apply as a single setAttribute.
+    el.setAttribute("style", fullCss);
   };
 
   const dataAttrs = entry.polygon.data
