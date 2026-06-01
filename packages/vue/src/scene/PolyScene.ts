@@ -27,7 +27,7 @@ import type {
   PolyTextureLightingMode,
   Vec3,
 } from "@layoutit/polycss-core";
-import { DEFAULT_SEAM_BLEED, parseHexColor } from "@layoutit/polycss-core";
+import { DEFAULT_SEAM_BLEED, parseHexColor, worldDirectionToCss } from "@layoutit/polycss-core";
 import { PolyCameraContextKey } from "../camera";
 import { usePolySceneContext } from "./useSceneContext";
 import { injectPolyBaseStyles } from "../styles";
@@ -323,7 +323,11 @@ export const PolyScene = defineComponent({
     // product and tints via background-blend-mode.
     const dynamicLightVars = computed<Record<string, string> | null>(() => {
       if (props.textureLighting !== "dynamic") return null;
-      const dir = props.directionalLight?.direction ?? [0.4, -0.7, 0.59];
+      // World→CSS axis swap (X↔Y). Polygon normals (--pnx/--pny/--pnz) are
+      // in CSS frame, so the Lambert dot product needs --plx/--ply/--plz in
+      // the same frame. Vanilla applies this swap inside applyLightingVars.
+      const userDir = props.directionalLight?.direction ?? [0.4, -0.7, 0.59];
+      const dir = worldDirectionToCss(userDir as [number, number, number]);
       const len = Math.hypot(dir[0], dir[1], dir[2]) || 1;
       const lx = dir[0] / len, ly = dir[1] / len, lz = dir[2] / len;
       const lightRgb = parseHexColor(props.directionalLight?.color ?? "#ffffff")?.rgb ?? [255, 255, 255];
@@ -455,6 +459,7 @@ export const PolyScene = defineComponent({
         if (textureAtlas.useBorderShape.value || textureAtlas.useFullRectSolid.value) {
           return renderTextureBorderShapePoly({
             entry: plan,
+            textureLighting: ctx.textureLighting ?? "baked",
             forceBorderShape: !textureAtlas.useFullRectSolid.value,
           });
         }

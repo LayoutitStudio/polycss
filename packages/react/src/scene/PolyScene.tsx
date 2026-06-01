@@ -6,7 +6,7 @@ import type {
   PolyAmbientLight,
   PolyTextureLightingMode,
 } from "@layoutit/polycss-core";
-import { BASE_TILE, DEFAULT_SEAM_BLEED, parseHexColor } from "@layoutit/polycss-core";
+import { BASE_TILE, DEFAULT_SEAM_BLEED, parseHexColor, worldDirectionToCss } from "@layoutit/polycss-core";
 import type { ShadowCasterRegistration, ShadowOptions } from "./sceneContext";
 import { useCameraContext } from "../camera/context";
 import { usePolySceneContext } from "./useSceneContext";
@@ -268,7 +268,14 @@ function PolySceneInner({
   // the projection when the light is near-horizontal.
   const dynamicLightVars = useMemo<CSSProperties | null>(() => {
     if (textureLighting !== "dynamic") return null;
-    const dir = directionalLight?.direction ?? [0.4, -0.7, 0.59];
+    // The user-supplied light direction is in world frame (+X right, +Y
+    // forward, +Z up). Polygon normals (--pnx/--pny/--pnz) are in CSS frame
+    // (CSS-X = world-Y, CSS-Y = world-X), so the Lambert dot product
+    // requires the light vector in the same CSS frame. Vanilla applies
+    // worldDirectionToCss inside applyLightingVars; React+Vue must do the
+    // same or the lighting cancels out wrongly at off-axis light angles.
+    const userDir = directionalLight?.direction ?? [0.4, -0.7, 0.59];
+    const dir = worldDirectionToCss(userDir as [number, number, number]);
     const len = Math.hypot(dir[0], dir[1], dir[2]) || 1;
     const lx = dir[0] / len, ly = dir[1] / len, lz = dir[2] / len;
     const lightRgb = parseHexColor(directionalLight?.color ?? "#ffffff")?.rgb ?? [255, 255, 255];
@@ -410,7 +417,7 @@ function PolySceneInner({
     if (useProjectiveSolid && isProjectiveQuadPlan(plan)) {
       return <TextureProjectiveSolidPoly key={plan.index} entry={plan} textureLighting={textureLighting} />;
     }
-    return <TextureBorderShapePoly key={plan.index} entry={plan} disabledStrategies={disabledStrategies} />;
+    return <TextureBorderShapePoly key={plan.index} entry={plan} textureLighting={textureLighting} disabledStrategies={disabledStrategies} />;
   });
 
   // Propagate scene-level rendering options to descendants (PolyMesh /

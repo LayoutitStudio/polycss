@@ -1180,6 +1180,7 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
           <TextureBorderShapePoly
             key={plan.index}
             entry={plan}
+            textureLighting={effectiveTextureLighting}
             solidPaintDefaults={solidPaintDefaults}
             disabledStrategies={disabledStrategies}
           />

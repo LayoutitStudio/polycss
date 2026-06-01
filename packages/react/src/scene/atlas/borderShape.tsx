@@ -4,6 +4,7 @@ import type { CSSProperties } from "react";
 import type {
   TextureAtlasPlan,
   SolidPaintDefaults,
+  PolyTextureLightingMode,
 } from "@layoutit/polycss-core";
 import {
   isFullRectSolid,
@@ -12,6 +13,7 @@ import {
   formatBorderShapeEntryMatrix,
 } from "@layoutit/polycss-core";
 import { isBorderShapeSupported } from "./detection";
+import { parseHex, rgbKey } from "./solidTriangleStyle";
 
 // ---------------------------------------------------------------------------
 // Brush-inline-style ordering helper (needed by TextureBorderShapePoly)
@@ -43,6 +45,7 @@ function orderBrushInlineStyle(el: HTMLElement): void {
 
 export const TextureBorderShapePoly = memo(function TextureBorderShapePoly({
   entry,
+  textureLighting,
   solidPaintDefaults,
   className,
   style: styleProp,
@@ -52,6 +55,7 @@ export const TextureBorderShapePoly = memo(function TextureBorderShapePoly({
   disabledStrategies,
 }: {
   entry: TextureAtlasPlan;
+  textureLighting: PolyTextureLightingMode;
   solidPaintDefaults?: SolidPaintDefaults;
   className?: string;
   style?: CSSProperties;
@@ -65,6 +69,9 @@ export const TextureBorderShapePoly = memo(function TextureBorderShapePoly({
   const bDisabled = disabledStrategies?.has("b") ?? false;
   const useIForFullRect = bDisabled && isBorderShapeSupported();
   const borderShape = (!fullRect || useIForFullRect) ? cssBorderShapeForPlan(entry) : null;
+  const dynamic = textureLighting === "dynamic";
+  const base = parseHex(entry.polygon.color ?? "#cccccc");
+  const useDefaultDynamicColor = dynamic && rgbKey(base) === solidPaintDefaults?.dynamicColorKey;
   const useDefaultPaint = entry.shadedColor === solidPaintDefaults?.paintColor;
   const setElementRef = useCallback((el: HTMLElement | null) => {
     if (!el) return;
@@ -79,8 +86,27 @@ export const TextureBorderShapePoly = memo(function TextureBorderShapePoly({
   const transform = borderShape ? formatBorderShapeEntryMatrix(entry) : formatSolidQuadEntryMatrix(entry);
   const style: CSSProperties = {
     transform,
-    color: useDefaultPaint ? undefined : entry.shadedColor,
+    // Dynamic mode: emit the per-polygon normal so the CSS Lambert calc
+    // reads var(--pnx/y/z) instead of falling back to (0,0,1). Vanilla's
+    // formatInitialSolidPaintStyle does the same. Without this every
+    // <b>/<i> face is treated as facing +Z and the off-axis lighting
+    // produces a uniform color across walls. Color comes from --psr/g/b
+    // when it differs from the scene-wide default; otherwise the cascade
+    // takes care of it.
+    color: dynamic || useDefaultPaint ? undefined : entry.shadedColor,
     pointerEvents: pointerEvents === "none" ? "none" : undefined,
+    ...(dynamic
+      ? {
+          ["--pnx" as string]: entry.normal[0].toFixed(4),
+          ["--pny" as string]: entry.normal[1].toFixed(4),
+          ["--pnz" as string]: entry.normal[2].toFixed(4),
+          ...(useDefaultDynamicColor ? null : {
+            ["--psr" as string]: (base.r / 255).toFixed(4),
+            ["--psg" as string]: (base.g / 255).toFixed(4),
+            ["--psb" as string]: (base.b / 255).toFixed(4),
+          }),
+        }
+      : null),
     ...styleProp,
   };
 
