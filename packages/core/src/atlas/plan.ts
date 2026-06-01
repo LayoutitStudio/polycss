@@ -902,17 +902,24 @@ export function computeTextureAtlasPlanPublic(
   projectiveQuadOverrides?: ProjectiveQuadGuardOverrides,
   /** Cross-polygon basis hint pre-computed via {@link buildBasisHints} on
    *  the full polygon array. When supplied, it overrides the per-polygon
-   *  seamEdges/textureEdgeRepairEdges fallback below — this is what the
-   *  vanilla renderer's `renderPolygonsWithTextureAtlas` pipeline does, and
-   *  React/Vue mirror it for byte-identical plan output. */
+   *  textureEdgeRepairEdges fallback below. Vanilla's renderer always passes
+   *  this from {@link buildBasisHints}; React/Vue mirror that path. */
   basisHintOverride?: BasisHint,
 ): TextureAtlasPlan | null {
   const projectiveQuadGuards = resolveProjectiveQuadGuards(projectiveQuadOverrides);
   const internalOptions = options as ComputeTextureAtlasPlanOptions & InternalSolidTrianglePlanOptions;
+  // Only auto-construct a basisHint when textureEdgeRepairEdges is provided
+  // — that field is read ONLY off the basisHint inside computeTextureAtlasPlan,
+  // so single-polygon callers passing it via options need this bridge.
+  // DO NOT also auto-forward options.seamEdges to basisHint.seamEdges — those
+  // two fields are read by different code paths (bleed amount vs basis edge-
+  // candidate restriction), and forwarding them here makes React/Vue pick a
+  // different basis for any polygon with a seam-bleed edge, breaking parity
+  // with vanilla's renderer which never reconstructs such a hint.
   const basisHint: BasisHint | undefined = basisHintOverride
-    ?? (options.textureEdgeRepairEdges?.size || internalOptions.seamEdges?.size
+    ?? (options.textureEdgeRepairEdges?.size
       ? {
-          seamEdges: internalOptions.seamEdges ?? new Set<number>(),
+          seamEdges: new Set<number>(),
           textureEdgeRepairEdges: options.textureEdgeRepairEdges,
         }
       : undefined);
