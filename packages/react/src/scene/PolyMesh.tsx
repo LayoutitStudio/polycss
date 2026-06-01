@@ -34,6 +34,7 @@ import type {
 } from "@layoutit/polycss-core";
 import {
   BASE_TILE,
+  computeLightVisibility,
   computeReceiverShadowFaces,
   computeSceneBbox,
   DEFAULT_SEAM_BLEED,
@@ -672,6 +673,26 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
     };
   }, [effectiveDirectional, bakedRotation]);
 
+  // Per-light raytrace occlusion (vanilla parity, task #146). Pass the USER-
+  // WORLD light direction (not the CSS-frame one) — computeLightVisibility
+  // raytraces against polygon vertices in their parser frame. Apply the same
+  // dedup-before-raytrace as vanilla so back-to-back wall pairs don't self-
+  // occlude (tighter thresholds than the shadow-caster dedup: 0.12/0.98).
+  const lightOccludedPolyIndices = useMemo(() => {
+    if (effectiveTextureLighting === "dynamic") return undefined;
+    const lightDir = effectiveDirectional?.direction;
+    if (!lightDir || polygons.length < 2) return undefined;
+    const lLen = Math.hypot(lightDir[0], lightDir[1], lightDir[2]);
+    if (!Number.isFinite(lLen) || lLen <= 0) return undefined;
+    const dedupDropped = findOverlappingPolygonDuplicates(polygons, {
+      normalTolerance: 0.1,
+      distanceTolerance: 0.12,
+      overlapFraction: 0.98,
+      preserveDoubleSidedBackfaces: false,
+    });
+    return computeLightVisibility(polygons, lightDir, dedupDropped);
+  }, [polygons, effectiveDirectional, effectiveTextureLighting]);
+
   const atlasPlans = useMemo(
     () => {
       if (renderPolygon || directVoxelEnabled) return [];
@@ -705,11 +726,12 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
           seamBleed: seamBleedEdges?.has(i) ? effectiveSeamBleed : undefined,
           seamEdges: seamBleedEdges?.get(i),
           textureEdgeRepairEdges: repairEdges[i],
+          lightOccludedPolyIndices,
         },
         basisHints[i],
       ));
     },
-    [renderPolygon, directVoxelEnabled, polygons, bakedDirectional, effectiveAmbient, effectiveSeamBleed],
+    [renderPolygon, directVoxelEnabled, polygons, bakedDirectional, effectiveAmbient, effectiveSeamBleed, lightOccludedPolyIndices],
   );
   const textureAtlas = useTextureAtlas(
     atlasPlans,

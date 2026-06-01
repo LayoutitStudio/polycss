@@ -316,4 +316,11 @@ export interface ComputeTextureAtlasPlanOptions {
   textureEdgeRepairEdges?: Set<number>;
   seamBleed?: PolySeamBleed;
   seamEdges?: Set<number>;
+  /** Indices of polygons that the directional light cannot reach because
+   *  another polygon of the same mesh occludes them (precomputed via
+   *  {@link import("../cull/lightVisibility").computeLightVisibility}). When
+   *  `index ∈ lightOccludedPolyIndices`, the polygon's direct lighting term
+   *  is forced to zero and only ambient remains. Matches the vanilla
+   *  renderer's self-shadow path. */
+  lightOccludedPolyIndices?: ReadonlySet<number>;
 }

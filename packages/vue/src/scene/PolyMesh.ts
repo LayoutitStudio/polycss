@@ -22,6 +22,7 @@ import type { MeshResolution, Polygon, PolyTextureLightingMode, Vec3 } from "@la
 import { buildBasisHints, cornerShapeGeometryForPlan, worldDirectionalLightToCss } from "@layoutit/polycss-core";
 import {
   BASE_TILE,
+  computeLightVisibility,
   computeReceiverShadowFaces,
   computeSceneBbox,
   DEFAULT_SEAM_BLEED,
@@ -382,6 +383,27 @@ export const PolyMesh = defineComponent({
       return { ...cssLight, direction: inverseRotateVec3(cssLight.direction, bakedRotation.value) };
     });
 
+    // Per-light raytrace occlusion (vanilla parity, task #146). Pass the
+    // USER-WORLD light direction (not the CSS-frame one) — computeLight-
+    // Visibility raytraces against polygon vertices in their parser frame.
+    // Apply tighter dedup thresholds than shadow-caster dedup so back-to-
+    // back wall pairs don't self-occlude.
+    const lightOccludedPolyIndices = computed(() => {
+      if (atlasTextureLighting.value === "dynamic") return undefined;
+      const baseLight = sceneCtx?.value.directionalLight;
+      const lightDir = baseLight?.direction;
+      if (!lightDir || polygons.value.length < 2) return undefined;
+      const lLen = Math.hypot(lightDir[0], lightDir[1], lightDir[2]);
+      if (!Number.isFinite(lLen) || lLen <= 0) return undefined;
+      const dedupDropped = findOverlappingPolygonDuplicates(polygons.value, {
+        normalTolerance: 0.1,
+        distanceTolerance: 0.12,
+        overlapFraction: 0.98,
+        preserveDoubleSidedBackfaces: false,
+      });
+      return computeLightVisibility(polygons.value, lightDir, dedupDropped);
+    });
+
     const textureAtlasPlans = computed(() => {
       if (!atlasAutoRender || directVoxelEnabled.value) return [];
       const repairEdges = buildTextureEdgeRepairSets(polygons.value);
@@ -403,6 +425,7 @@ export const PolyMesh = defineComponent({
         directionalLight: bakedDirectional.value,
         ambientLight: atlasAmbient.value,
       });
+      const occludedSet = lightOccludedPolyIndices.value;
       return polygons.value.map((p, i) =>
         computeTextureAtlasPlan(
           p,
@@ -413,6 +436,7 @@ export const PolyMesh = defineComponent({
             seamBleed: seamBleedEdges?.has(i) ? atlasSeamBleed.value : undefined,
             seamEdges: seamBleedEdges?.get(i),
             textureEdgeRepairEdges: repairEdges[i],
+            lightOccludedPolyIndices: occludedSet,
           },
           basisHints[i],
         ),
