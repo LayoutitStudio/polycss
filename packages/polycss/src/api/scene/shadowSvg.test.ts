@@ -113,7 +113,7 @@ describe("syncShadowPaths", () => {
     // gaps + seam bleed + residual CSS-compositor 1-px overlap that
     // survives even seamBleed:0 (each leaf is a separate matrix3d layer
     // and browsers rasterise each on its own pixel grid).
-    expect(p!.getAttribute("stroke-width")).toBe("3");
+    expect(p!.getAttribute("stroke-width")).toBe("0.5");
     expect(p!.getAttribute("stroke-linejoin")).toBe("round");
   });
   it("shrinks the path list by removing trailing children", () => {

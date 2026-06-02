@@ -183,6 +183,9 @@
     const polyScene = createPolyScene(polyHost, {
       camera: polyCamera,
       autoCenter: S.autoCenter,
+      // Bench-only: always emit data-poly-shadow-* attribution attrs so the
+      // oracle diff can map mis-rendered pixels back to source polys.
+      debugShadowAttrs: true,
       directionalLight: {
         direction: [S.dir.x, S.dir.y, S.dir.z],
         intensity: S.dir.intensity,
@@ -369,7 +372,7 @@
     };
     const polyFloor = polyScene.add(
       floorParse,
-      { id: "floor", position: [0, 0, 0], castShadow: false, receiveShadow: S.floorReceives, merge: false },
+      { id: "floor", position: [0, 0, 0], castShadow: true, receiveShadow: S.floorReceives, merge: false },
     );
     // Initial visibility — floor toggle defaults to visible; hide the
     // wrapper inline so it round-trips with the URL state.
@@ -613,6 +616,7 @@
       new THREE.MeshLambertMaterial({ color: S.floor.color }),
     );
     floorMesh.receiveShadow = true;
+    floorMesh.castShadow = true;
     threeScene.add(floorMesh);
 
     // PolyCSS projects shadows analytically onto the receiver — light
@@ -2119,16 +2123,16 @@
     liveLabel.appendChild(document.createTextNode("Live (auto-compare on slider change)"));
     panelEl.insertBefore(liveLabel, oracleResults);
 
-    // First run after the initial mesh build settles. Castle/cottage are
-    // async-loaded; retry every 500ms (up to 20s) until the active-mesh
-    // wrapper exists, then fire compareFrame once. After that, the user
-    // drives via "Compare now" or the Live toggle.
+    // Size the oracle canvases as soon as the active mesh is mounted, but
+    // DON'T auto-compare — the per-pixel diff costs ~500-1500ms on
+    // castle-sized meshes and blocks the page for a beat on first paint.
+    // User drives the first comparison via "Compare now" or the Live toggle.
     {
       let attempts = 0;
       const tryInitial = () => {
         attempts += 1;
         const ready = polyHost.querySelector(`[data-poly-mesh-id="${S.mesh}"]`);
-        if (ready) { resizeOracleCanvases(); compareFrame(); return; }
+        if (ready) { resizeOracleCanvases(); return; }
         if (attempts < 40) setTimeout(tryInitial, 500);
       };
       setTimeout(tryInitial, 1500);

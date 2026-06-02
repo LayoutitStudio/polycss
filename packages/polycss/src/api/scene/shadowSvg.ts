@@ -165,7 +165,7 @@ export function syncShadowPaths(
         //    polygon seamBleed setting can fully prevent this)
         // Reads as soft penumbra at shadow boundaries, similar to
         // Three.js's PCF shadow falloff.
-        path.setAttribute("stroke-width", "3");
+        path.setAttribute("stroke-width", "0.5");
         path.setAttribute("stroke-linejoin", "round");
       }
       svg.insertBefore(path, existing);
