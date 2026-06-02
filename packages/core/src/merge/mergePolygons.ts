@@ -52,7 +52,7 @@ interface PolyState {
   normal: Vec3;
   /** Plane offset: distance from origin along the normal. */
   d: number;
-  directedEdges: Set<string>;
+  edgeDirections: Map<string, 1 | -1>;
   alive: boolean;
   doubleSided?: boolean;
   /** Original Polygon's `data` field, preserved through the merge. */
@@ -86,18 +86,6 @@ function edgeKey(a: Vec3, b: Vec3): string {
   const ka = vertexKey(a);
   const kb = vertexKey(b);
   return ka < kb ? `${ka}|${kb}` : `${kb}|${ka}`;
-}
-
-function directedEdgeKey(a: Vec3, b: Vec3): string {
-  return `${vertexKey(a)}>${vertexKey(b)}`;
-}
-
-function directedEdgeSet(vertices: Vec3[]): Set<string> {
-  const edges = new Set<string>();
-  for (let k = 0; k < vertices.length; k++) {
-    edges.add(directedEdgeKey(vertices[k], vertices[(k + 1) % vertices.length]));
-  }
-  return edges;
 }
 
 function planeOf(vertices: Vec3[]): { normal: Vec3; d: number } | null {
@@ -330,12 +318,14 @@ export function mergePolygons(input: Polygon[]): Polygon[] {
     const kb = cachedVertexKey(b);
     return ka < kb ? `${ka}|${kb}` : `${kb}|${ka}`;
   };
-  const cachedDirectedEdgeKey = (a: Vec3, b: Vec3): string =>
-    `${cachedVertexKey(a)}>${cachedVertexKey(b)}`;
-  const cachedDirectedEdgeSet = (vertices: Vec3[]): Set<string> => {
-    const edges = new Set<string>();
+  const canonicalEdgeDirection = (a: Vec3, b: Vec3): 1 | -1 =>
+    cachedVertexKey(a) < cachedVertexKey(b) ? 1 : -1;
+  const cachedEdgeDirectionMap = (vertices: Vec3[]): Map<string, 1 | -1> => {
+    const edges = new Map<string, 1 | -1>();
     for (let k = 0; k < vertices.length; k++) {
-      edges.add(cachedDirectedEdgeKey(vertices[k], vertices[(k + 1) % vertices.length]));
+      const a = vertices[k];
+      const b = vertices[(k + 1) % vertices.length];
+      edges.set(cachedEdgeKey(a, b), canonicalEdgeDirection(a, b));
     }
     return edges;
   };
@@ -383,7 +373,7 @@ export function mergePolygons(input: Polygon[]): Polygon[] {
       textureTriangles,
       normal: plane.normal,
       d: plane.d,
-      directedEdges: cachedDirectedEdgeSet(verts),
+      edgeDirections: cachedEdgeDirectionMap(verts),
       alive: true,
       doubleSided: polygon.doubleSided === true,
       data: polygon.data,
@@ -426,9 +416,9 @@ export function mergePolygons(input: Polygon[]): Polygon[] {
     let mergedThisPass = false;
 
     const edgeDirection = (poly: PolyState, e0: Vec3, e1: Vec3): 1 | -1 | 0 => {
-      if (poly.directedEdges.has(cachedDirectedEdgeKey(e0, e1))) return 1;
-      if (poly.directedEdges.has(cachedDirectedEdgeKey(e1, e0))) return -1;
-      return 0;
+      const direction = poly.edgeDirections.get(cachedEdgeKey(e0, e1));
+      if (!direction) return 0;
+      return direction === canonicalEdgeDirection(e0, e1) ? 1 : -1;
     };
 
     for (const edge of edgeIndex.values()) {
@@ -474,7 +464,7 @@ export function mergePolygons(input: Polygon[]): Polygon[] {
 
       a.vertices = merged.vertices;
       a.uvs = merged.uvs;
-      a.directedEdges = cachedDirectedEdgeSet(merged.vertices);
+      a.edgeDirections = cachedEdgeDirectionMap(merged.vertices);
       a.textureTriangles = hasTexture
         ? [...(a.textureTriangles ?? []), ...(b.textureTriangles ?? [])]
         : undefined;

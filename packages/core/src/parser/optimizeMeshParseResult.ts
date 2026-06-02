@@ -1,9 +1,6 @@
 import { parsePureColor } from "../color/color";
-import { optimizeMeshPolygons } from "../merge/optimizePolygons";
-import {
-  simplifyTriangleMeshPolygons,
-  type SimplifyTriangleMeshPolygonsOptions,
-} from "../merge/simplifyTriangleMesh";
+import { optimizeParseMeshPolygons } from "../merge/optimizePolygons";
+import type { SimplifyTriangleMeshPolygonsOptions } from "../merge/simplifyTriangleMesh";
 import type { MeshResolution, Polygon } from "../types";
 import type { ParseResult } from "./types";
 
@@ -35,10 +32,10 @@ export interface OptimizeMeshParseResultOptions {
 
 const DEFAULT_BAKED_TEXTURE_COLOR_MERGE_DISTANCE = 36;
 const DEFAULT_SIMPLIFY_EARLY_STOP_DROP_RATIO = 0.15;
+const CANDIDATE_FIRST_EARLY_STOP_DROP_RATIO = 0.2;
+const CANDIDATE_FIRST_MIN_SOURCE_POLYGONS = 650;
+const CANDIDATE_FIRST_MAX_SOURCE_POLYGONS = 15000;
 const MAX_STATIC_SIMPLIFY_TEXTURED_RATIO = 0.25;
-const MIN_STATIC_SIMPLIFY_BASELINE_SOURCE_RATIO = 0.23;
-const SOURCE_FIRST_MIN_BASELINE_POLYGONS = 2000;
-const SOURCE_FIRST_MAX_RELAXED_RAW_DROP = 16;
 
 function hasTexturePaint(polygon: Polygon): boolean {
   return Boolean(
@@ -193,96 +190,66 @@ function cleanupLossyBakedTextureColors(
   return changed ? { ...result, polygons } : result;
 }
 
-function earlyStopTarget(count: number, options: OptimizeMeshParseResultOptions): number {
-  const ratio = Number.isFinite(options.simplifyEarlyStopDropRatio)
-    ? Math.max(0, options.simplifyEarlyStopDropRatio!)
-    : DEFAULT_SIMPLIFY_EARLY_STOP_DROP_RATIO;
-  return Math.max(0, count - Math.max(1, Math.ceil(count * ratio)));
-}
-
-function hasSourceVertexKeys(polygons: Polygon[]): boolean {
-  return polygons.some((polygon) => polygon.simplifySourceVertexKeys?.length === polygon.vertices.length);
-}
-
-function shouldTryStaticSimplification(polygons: Polygon[], baselineOptimized: Polygon[]): boolean {
+function staticSimplificationTextureEligible(polygons: Polygon[]): boolean {
   let textured = 0;
   for (const polygon of polygons) {
     if (hasTexturePaint(polygon)) textured += 1;
   }
-  return polygons.length === 0 || (
-    textured / polygons.length <= MAX_STATIC_SIMPLIFY_TEXTURED_RATIO &&
-    baselineOptimized.length / polygons.length > MIN_STATIC_SIMPLIFY_BASELINE_SOURCE_RATIO
-  );
+  return polygons.length === 0 || textured / polygons.length <= MAX_STATIC_SIMPLIFY_TEXTURED_RATIO;
 }
 
-function simplifiedOptimizedPolygons(
-  polygons: Polygon[],
-  baselineOptimized: Polygon[],
+function staticSimplificationEarlyStopDropRatio(
   options: OptimizeMeshParseResultOptions,
-): Polygon[] | null {
-  const simplify = (vertexKeyMode?: "relaxed" | "source"): Polygon[] | null => {
-    const candidate = simplifyTriangleMeshPolygons(polygons, {
-      ...options.simplifyTriangleMeshOptions,
-      ...(vertexKeyMode ? { vertexKeyMode } : {}),
-    });
-    if (candidate === polygons || candidate.length >= polygons.length) return null;
-    return candidate;
-  };
-
-  const optimize = (candidate: Polygon[]): Polygon[] => (
-    optimizeMeshPolygons(candidate, {
-      meshResolution: "lossy",
-      stopAtPolygonCount: earlyStopTarget(baselineOptimized.length, options),
-    })
+  useCandidateFirst: boolean,
+): number | undefined {
+  if (!useCandidateFirst) return options.simplifyEarlyStopDropRatio;
+  return Math.max(
+    options.simplifyEarlyStopDropRatio ?? DEFAULT_SIMPLIFY_EARLY_STOP_DROP_RATIO,
+    CANDIDATE_FIRST_EARLY_STOP_DROP_RATIO,
   );
-
-  const relaxed = simplify();
-  if (!relaxed) return null;
-
-  let sourceKeyed: Polygon[] | null | undefined;
-  let sourceOptimized: Polygon[] | null | undefined;
-  const hasSourceKeys = hasSourceVertexKeys(polygons);
-  const relaxedRawDrop = polygons.length - relaxed.length;
-  const shouldTrySourceKeys = (
-    hasSourceKeys &&
-    baselineOptimized.length >= SOURCE_FIRST_MIN_BASELINE_POLYGONS &&
-    relaxedRawDrop <= SOURCE_FIRST_MAX_RELAXED_RAW_DROP
-  );
-  if (shouldTrySourceKeys) {
-    sourceKeyed = simplify("source");
-    if (sourceKeyed) {
-      sourceOptimized = optimize(sourceKeyed);
-      if (sourceOptimized.length < baselineOptimized.length) return sourceOptimized;
-    }
-  }
-
-  const relaxedOptimized = optimize(relaxed);
-  if (relaxedOptimized.length < baselineOptimized.length) return relaxedOptimized;
-
-  sourceKeyed ??= shouldTrySourceKeys ? simplify("source") : null;
-  if (sourceKeyed) {
-    sourceOptimized ??= optimize(sourceKeyed);
-    if (sourceOptimized.length < baselineOptimized.length) return sourceOptimized;
-  }
-  return null;
 }
 
 export function optimizeMeshParseResult(
   result: ParseResult,
   options: OptimizeMeshParseResultOptions = {},
 ): ParseResult {
-  if (result.voxelSource || result.animation) return result;
-  const meshResolution = options.meshResolution ?? "lossy";
-  const cleaned = cleanupLossyBakedTextureColors(result, options, meshResolution);
-  const baselineOptimized = optimizeMeshPolygons(cleaned.polygons, { meshResolution });
-  const shouldSimplify = (
-    meshResolution === "lossy" &&
-    options.simplifyTriangleMeshes !== false &&
-    !cleaned.animation &&
-    shouldTryStaticSimplification(cleaned.polygons, baselineOptimized)
-  );
-  const polygons = shouldSimplify
-    ? simplifiedOptimizedPolygons(cleaned.polygons, baselineOptimized, options) ?? baselineOptimized
-    : baselineOptimized;
-  return polygons === cleaned.polygons ? cleaned : { ...cleaned, polygons };
+  return new ParseOptimizationContext(result, options).optimize();
+}
+
+class ParseOptimizationContext {
+  private readonly result: ParseResult;
+  private readonly options: OptimizeMeshParseResultOptions;
+  private readonly meshResolution: MeshResolution;
+
+  constructor(result: ParseResult, options: OptimizeMeshParseResultOptions) {
+    this.result = result;
+    this.options = options;
+    this.meshResolution = options.meshResolution ?? "lossy";
+  }
+
+  optimize(): ParseResult {
+    if (this.result.voxelSource || this.result.animation) return this.result;
+    const cleaned = cleanupLossyBakedTextureColors(this.result, this.options, this.meshResolution);
+    const canSimplify = this.canSimplify(cleaned.polygons);
+    const useCandidateFirst = canSimplify &&
+      cleaned.polygons.length >= CANDIDATE_FIRST_MIN_SOURCE_POLYGONS &&
+      cleaned.polygons.length <= CANDIDATE_FIRST_MAX_SOURCE_POLYGONS;
+    const polygons = optimizeParseMeshPolygons(cleaned.polygons, {
+      meshResolution: this.meshResolution,
+      useCandidateFirst,
+      staticSimplification: canSimplify
+        ? {
+          simplifyTriangleMeshOptions: this.options.simplifyTriangleMeshOptions,
+          earlyStopDropRatio: staticSimplificationEarlyStopDropRatio(this.options, useCandidateFirst),
+        }
+        : false,
+    });
+    return polygons === cleaned.polygons ? cleaned : { ...cleaned, polygons };
+  }
+
+  private canSimplify(polygons: Polygon[]): boolean {
+    return this.meshResolution === "lossy" &&
+      this.options.simplifyTriangleMeshes !== false &&
+      staticSimplificationTextureEligible(polygons);
+  }
 }
