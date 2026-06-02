@@ -4,8 +4,15 @@ import type { PresetModel } from "../types";
 
 // Mirrors the lighting/zoom defaults from DEFAULT_SCENE so this module has no
 // dependency on GalleryWorkbench's runtime state object.
-const DEFAULT_AMBIENT_INTENSITY = 0.4;
-const DEFAULT_LIGHT_INTENSITY = 1;
+// Post-parity Lambert math (#100, #120) divides direct light by π and
+// applies sRGB gamma — physically correct vs three.js but visibly dimmer
+// at the old defaults of (1.0, 0.4). The live polycss.com gallery still
+// renders the older approximate-Lambert curves so the same numeric
+// intensities look brighter there. To preserve the gallery's perceived
+// brightness post-parity we lift these defaults; smartAmbientForModel /
+// smartKeyIntensityForModel then derive per-mesh values relative to them.
+const DEFAULT_AMBIENT_INTENSITY = 0.55;
+const DEFAULT_LIGHT_INTENSITY = 4.5;
 const DEFAULT_ZOOM = 0.35;
 
 function clamp(value: number, min: number, max: number): number {
@@ -97,8 +104,8 @@ export function smartAmbientForModel(model: PresetModel, polygons: Polygon[]): n
   return roundToStep(
     clamp(
       DEFAULT_AMBIENT_INTENSITY + luminanceAdjustment + densityLift + textureLift + voxelLift,
-      0.28,
-      0.65,
+      0.4,
+      0.85,
     ),
     0.05,
   );
@@ -118,8 +125,8 @@ export function smartKeyIntensityForModel(polygons: Polygon[]): number {
   return roundToStep(
     clamp(
       DEFAULT_LIGHT_INTENSITY + keyAdjustment,
-      0.85,
-      1.05,
+      4.2,
+      4.8,
     ),
     0.05,
   );

@@ -37,7 +37,7 @@ const LIGHT_HELPER_TILE = 50;
 // Keep the visible ground just below the model floor; coplanar ground/car
 // faces z-fight during repaint-heavy light drags.
 const GROUND_Z_OFFSET = -0.04;
-const GALLERY_GROUND_COLOR = "#7d848e";
+const GALLERY_GROUND_COLOR = "#4a505a";
 const GALLERY_GROUND_RGB = { r: 0x7d, g: 0x84, b: 0x8e };
 const GALLERY_GROUND_LIGHT_RESPONSE = 0.28;
 const GALLERY_GROUND_RADIUS_MULTIPLIER = 2.5;
