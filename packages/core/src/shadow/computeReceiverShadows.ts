@@ -416,6 +416,14 @@ export function computeReceiverShadowFaces<T = unknown>(
 
   const out: ReceiverShadowFaceSpec<T>[] = [];
 
+  // The face-plane normals `group.n` are already in world frame (the
+  // worldCss wrap in prepareReceiverFacePlanes applies the mesh rotation
+  // before the plane is built). Pass a camera-only rotation to
+  // normalFacesCamera so it doesn't re-apply mesh rotation a second time
+  // — otherwise certain mesh orientations spuriously back-face-cull
+  // visible receiver faces (the abrupt cliff at e.g. orz=-61 on the
+  // flight model where ~10 face planes vanished together).
+  const cameraOnlyRot: CameraCullRotation = { rotX: cameraRot.rotX, rotY: cameraRot.rotY };
   for (const group of receiverPlanes) {
     const { O, n, u, v, outlineUv, minU, minV, width, height } = group;
     // Back-facing receiver face → can't receive light → skip.
@@ -423,7 +431,7 @@ export function computeReceiverShadowFaces<T = unknown>(
     if (Ldotn <= 1e-6) continue;
     // Camera back-face cull. SVGs don't honor CSS backface-visibility
     // reliably, so a back-of-camera receiver-face SVG would still paint.
-    if (!normalFacesCamera(n, cameraRot)) continue;
+    if (!normalFacesCamera(n, cameraOnlyRot)) continue;
 
     const planeDist = (w: Vec3): number =>
       (w[0] - O[0]) * n[0] + (w[1] - O[1]) * n[1] + (w[2] - O[2]) * n[2];

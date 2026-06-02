@@ -175,22 +175,50 @@ export function groupReceiverFaceGroups(
     if (dedupDrop.has(i)) continue;
     const face = polygons[i]!;
     if (face.vertices.length < 3) continue;
-    const O = worldCss(face.vertices[0]!, rpos);
-    const w1 = worldCss(face.vertices[1]!, rpos);
-    const w2 = worldCss(face.vertices[2]!, rpos);
-    const e1: Vec3 = [w1[0] - O[0], w1[1] - O[1], w1[2] - O[2]];
-    const e2: Vec3 = [w2[0] - O[0], w2[1] - O[1], w2[2] - O[2]];
-    // Normal = e2 × e1 (LEFT-hand cross), matching the atlas builder's
-    // outward CSS-frame normal under PolyCSS's axis swap.
-    const nx = e2[1] * e1[2] - e2[2] * e1[1];
-    const ny = e2[2] * e1[0] - e2[0] * e1[2];
-    const nz = e2[0] * e1[1] - e2[1] * e1[0];
+    // World vertices for this face.
+    const ws: Vec3[] = face.vertices.map((vert) => worldCss(vert, rpos));
+    const O = ws[0]!;
+    // Compute face normal via fan-triangulated cross-product sum (Newell-
+    // style). Using only the first 3 vertices is fragile: any polygon
+    // whose v0/v1/v2 happen to be near-collinear (long thin slabs with
+    // a short leading edge, or merged polys with clustered first
+    // vertices) yields a tiny cross product that gets culled by the
+    // `nLen < 1e-9` threshold even though the face is geometrically
+    // well-defined. Summing across all fan triangles gives the true
+    // face normal (= 2× signed area along normal) regardless of which
+    // corner happens to be first. Sign matches `e2 × e1` for the
+    // original (v0,v1,v2) triangle so the LEFT-hand outward convention
+    // is preserved.
+    let nx = 0, ny = 0, nz = 0;
+    for (let k = 1; k + 1 < ws.length; k++) {
+      const a = ws[k]!, b = ws[k + 1]!;
+      const e1x = a[0] - O[0], e1y = a[1] - O[1], e1z = a[2] - O[2];
+      const e2x = b[0] - O[0], e2y = b[1] - O[1], e2z = b[2] - O[2];
+      nx += e2y * e1z - e2z * e1y;
+      ny += e2z * e1x - e2x * e1z;
+      nz += e2x * e1y - e2y * e1x;
+    }
     const nLen = Math.hypot(nx, ny, nz);
     if (nLen < 1e-9) continue;
     const n: Vec3 = [nx / nLen, ny / nLen, nz / nLen];
-    const e1Len = Math.hypot(e1[0], e1[1], e1[2]);
-    if (e1Len < 1e-9) continue;
-    const u: Vec3 = [e1[0] / e1Len, e1[1] / e1Len, e1[2] / e1Len];
+    // Pick `u` as the FIRST edge that's long enough — same fan loop so
+    // the basis is robust to a degenerate leading edge too.
+    let u: Vec3 | null = null;
+    for (let k = 1; k < ws.length; k++) {
+      const w = ws[k]!;
+      const ex = w[0] - O[0], ey = w[1] - O[1], ez = w[2] - O[2];
+      const eLen = Math.hypot(ex, ey, ez);
+      if (eLen > 1e-9) { u = [ex / eLen, ey / eLen, ez / eLen]; break; }
+    }
+    if (!u) continue;
+    // Re-orthogonalize u against n so the basis is exactly planar even
+    // when the picked edge has tiny out-of-plane component from float
+    // noise after rotation accumulates.
+    const uDotN = u[0] * n[0] + u[1] * n[1] + u[2] * n[2];
+    u = [u[0] - uDotN * n[0], u[1] - uDotN * n[1], u[2] - uDotN * n[2]];
+    const uLen2 = Math.hypot(u[0], u[1], u[2]);
+    if (uLen2 < 1e-9) continue;
+    u = [u[0] / uLen2, u[1] / uLen2, u[2] / uLen2];
     const v: Vec3 = [
       n[1] * u[2] - n[2] * u[1],
       n[2] * u[0] - n[0] * u[2],
