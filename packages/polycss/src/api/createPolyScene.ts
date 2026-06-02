@@ -102,7 +102,10 @@ import type {
 import { createSceneContext } from "./scene/sceneContext";
 import type { SceneContext } from "./scene/sceneContext";
 import { emitGroundShadow as emitGroundShadowImpl } from "./scene/groundShadow";
-import { emitReceiverShadows as emitReceiverShadowsImpl } from "./scene/receiverShadow";
+import {
+  disposeReceiverShadowMounts,
+  emitReceiverShadows as emitReceiverShadowsImpl,
+} from "./scene/receiverShadow";
 import {
   clearAllSceneShadows as clearAllSceneShadowsImpl,
   clearCasterItemsCache as clearCasterItemsCacheImpl,
@@ -1929,8 +1932,15 @@ export function createPolyScene(
           recomputeShadowGround();
         }
         // Receiver toggled: rebuild the scene-level shadow set so this
-        // mesh's faces are added (or removed) as receivers.
-        if (entry.receiveShadow !== prevReceiveShadow) emitSceneShadows();
+        // mesh's faces are added (or removed) as receivers. When flipping
+        // OFF, the per-frame emitter for THIS mesh would never run again
+        // (emitSceneShadows skips meshes with !receiveShadow), so its
+        // previously-mounted receiver SVGs would linger in the DOM. Tear
+        // them down explicitly before the rebuild.
+        if (entry.receiveShadow !== prevReceiveShadow) {
+          if (!entry.receiveShadow) disposeReceiverShadowMounts(entry);
+          emitSceneShadows();
+        }
         // Position / scale change: shadow geometry depends on world-space
         // coords AND the mesh's wrapper scale (which pivots from the
         // bbox center). Non-shadow helpers (e.g. the light helper) must

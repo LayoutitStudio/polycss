@@ -52,6 +52,23 @@ function mountedFacesFor(entry: MeshEntry): Map<number, MountedFace> {
   return m;
 }
 
+/**
+ * Detach every receiver-shadow SVG previously mounted for this mesh and
+ * clear the local mount bookkeeping. Call when a mesh stops being a
+ * receiver (`receiveShadow` flips false) — the per-frame emitter would
+ * otherwise never run for that mesh and the stale SVGs from when it WAS
+ * a receiver would linger in the DOM.
+ */
+export function disposeReceiverShadowMounts(entry: MeshEntry): void {
+  const mounted = mountedFacesByMesh.get(entry);
+  if (!mounted) return;
+  for (const face of mounted.values()) {
+    if (face.svg && face.svg.parentNode) face.svg.parentNode.removeChild(face.svg);
+  }
+  mounted.clear();
+  mountedFacesByMesh.delete(entry);
+}
+
 export function emitReceiverShadows(
   ctx: SceneContext,
   casters: MeshEntry[],
