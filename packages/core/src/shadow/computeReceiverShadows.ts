@@ -15,12 +15,14 @@
 import { BASE_TILE } from "../camera/camera";
 import { normalFacesCamera, type CameraCullRotation } from "../cull/cameraBackfaceCulling";
 import { shadePolygon } from "../atlas/paintDefaults";
+import { rotateVec3InWrapperCssFrame } from "../math/rotation";
 import { clipPolygonToConvex2D } from "./clipping";
 import { ensureCcw2D } from "./projection";
 import {
   groupReceiverFaceGroups,
   meshScaleVec3,
   worldCssForMesh,
+  worldPositionToCss,
 } from "./receiverFaceGroups";
 import type {
   PolyAmbientLight,
@@ -192,14 +194,30 @@ export function prepareCasterPolyItems(
   position: Vec3,
   scale: number | Vec3 | undefined | null,
   includePolygonIndex: (polygonIndex: number) => boolean,
+  rotation?: Vec3 | null,
 ): CasterPolyItem[] {
   const out: CasterPolyItem[] = [];
   const worldCss = worldCssForMesh(scale);
+  // Mesh rotation lives on the wrapper as a CSS rotate around the wrapper
+  // local origin. To put caster vertices into the SAME world-space the
+  // wrapper composites into, we apply the wrapper's CSS rotation matrix
+  // around the wrapper's CSS-space origin (which is `cssPos`). Without
+  // this, shadows stay attached to the un-rotated mesh while the visible
+  // mesh tips/swings.
+  const hasRotation = !!rotation && (rotation[0] !== 0 || rotation[1] !== 0 || rotation[2] !== 0);
+  const cssPivot = hasRotation ? worldPositionToCss(position) : null;
   for (let i = 0; i < polygons.length; i++) {
     if (!includePolygonIndex(i)) continue;
     const polygon = polygons[i];
     if (!polygon) continue;
-    const wv = polygon.vertices.map((vert) => worldCss(vert, position));
+    let wv = polygon.vertices.map((vert) => worldCss(vert, position));
+    if (hasRotation && cssPivot && rotation) {
+      wv = wv.map((w) => {
+        const local: Vec3 = [w[0] - cssPivot[0], w[1] - cssPivot[1], w[2] - cssPivot[2]];
+        const r = rotateVec3InWrapperCssFrame(local, rotation);
+        return [r[0] + cssPivot[0], r[1] + cssPivot[1], r[2] + cssPivot[2]];
+      });
+    }
     let minX = Infinity, minY = Infinity, minZ = Infinity;
     let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
     for (const w of wv) {
@@ -249,8 +267,24 @@ export function prepareReceiverFacePlanes(
   scale: number | Vec3 | undefined | null,
   dedupDrop: ReadonlySet<number>,
   shadowLift: number,
+  rotation?: Vec3 | null,
 ): ReceiverFacePlane[] {
-  const worldCss = worldCssForMesh(scale);
+  const baseWorldCss = worldCssForMesh(scale);
+  // Same as the caster path: rotation lives on the wrapper as a CSS
+  // rotate around its local origin (CSS-pivot = `worldPositionToCss(pos)`).
+  // Wrap the per-vertex worldCss so the receiver face planes match where
+  // the rotated mesh actually composites — otherwise the shadow projects
+  // onto the un-rotated face plane and detaches from the visible surface.
+  const hasRotation = !!rotation && (rotation[0] !== 0 || rotation[1] !== 0 || rotation[2] !== 0);
+  const cssPivot = hasRotation ? worldPositionToCss(position) : null;
+  const worldCss: (vert: Vec3, pos: Vec3) => Vec3 = (hasRotation && cssPivot && rotation)
+    ? (vert, pos) => {
+        const w = baseWorldCss(vert, pos);
+        const local: Vec3 = [w[0] - cssPivot[0], w[1] - cssPivot[1], w[2] - cssPivot[2]];
+        const r = rotateVec3InWrapperCssFrame(local, rotation);
+        return [r[0] + cssPivot[0], r[1] + cssPivot[1], r[2] + cssPivot[2]];
+      }
+    : baseWorldCss;
   const surfaces = groupReceiverFaceGroups(polygons, position, worldCss, dedupDrop);
   let planes: ReceiverFacePlane[] = surfaces.map((group, faceIndex): ReceiverFacePlane => {
     const { O, n, u, v, outlineUv, memberPolysUv, memberPolyIndices } = group;

@@ -66,11 +66,12 @@ export function emitReceiverShadows(
   const { receiverShadowCache, receiverShadowCacheKey, casterItemsCache, casterItemsCacheKey } = ctx;
 
   const rpos = receiverEntry.handle.transform.position ?? [0, 0, 0];
+  const rrot = receiverEntry.handle.transform.rotation ?? [0, 0, 0];
   const hasTexture = receiverEntry.polygons.some((p) => p.texture !== undefined);
   const receiverScale = meshScaleVec3(receiverEntry.handle.transform.scale);
   const rbboxCss = receiverEntry.bboxCenterCss;
   const cacheShadowLift = options.shadow?.lift ?? 0.001;
-  const cacheKey = `${receiverEntry.polygons.length}|${receiverDedupDrop.size}|${rpos.join(",")}|${receiverScale.join(",")}|${rbboxCss ? rbboxCss.join(",") : "n"}|${cacheShadowLift}`;
+  const cacheKey = `${receiverEntry.polygons.length}|${receiverDedupDrop.size}|${rpos.join(",")}|${rrot.join(",")}|${receiverScale.join(",")}|${rbboxCss ? rbboxCss.join(",") : "n"}|${cacheShadowLift}`;
   let cachedPlanes = receiverShadowCache.get(receiverEntry) as ReceiverFacePlane[] | undefined;
   if (cachedPlanes === undefined || receiverShadowCacheKey.get(receiverEntry) !== cacheKey) {
     cachedPlanes = prepareReceiverFacePlanes(
@@ -79,6 +80,7 @@ export function emitReceiverShadows(
       receiverEntry.handle.transform.scale,
       receiverDedupDrop,
       cacheShadowLift,
+      rrot,
     );
     receiverShadowCache.set(receiverEntry, cachedPlanes);
     receiverShadowCacheKey.set(receiverEntry, cacheKey);
@@ -95,9 +97,10 @@ export function emitReceiverShadows(
   const casterInputs: ReceiverCasterInput<MeshEntry>[] = [];
   for (const caster of casters) {
     const cpos = caster.handle.transform.position ?? [0, 0, 0];
+    const crot = caster.handle.transform.rotation ?? [0, 0, 0];
     const casterScale = meshScaleVec3(caster.handle.transform.scale);
     const cbboxCss = caster.bboxCenterCss;
-    const ckey = `${caster.polygons.length}|${cpos.join(",")}|${casterScale.join(",")}|${cbboxCss ? cbboxCss.join(",") : "n"}`;
+    const ckey = `${caster.polygons.length}|${cpos.join(",")}|${crot.join(",")}|${casterScale.join(",")}|${cbboxCss ? cbboxCss.join(",") : "n"}`;
     let cached = casterItemsCache.get(caster) as CasterPolyItem[] | undefined;
     if (cached === undefined || casterItemsCacheKey.get(caster) !== ckey) {
       const dedupDrop = dedupByCaster.get(caster)!;
@@ -112,6 +115,7 @@ export function emitReceiverShadows(
         cpos,
         caster.handle.transform.scale,
         (idx) => renderedIdx.has(idx),
+        crot,
       );
       casterItemsCache.set(caster, cached);
       casterItemsCacheKey.set(caster, ckey);
