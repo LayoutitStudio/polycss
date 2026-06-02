@@ -64,3 +64,36 @@ export function inverseRotateVec3(v: Vec3, rot: Vec3): Vec3 {
   }
   return [x, y, z];
 }
+
+/**
+ * Apply the wrapper's actual CSS rotation matrix to a CSS-frame vector,
+ * given the user-supplied world rotation tuple `[rx_w, ry_w, rz_w]`.
+ *
+ * The wrapper emits `rotateY(-rx_w) rotateX(-ry_w) rotateZ(-rz_w)` (the
+ * world↔CSS reflection conjugation of three.js XYZ Euler). That matrix
+ * is `Ry(-rx_w) · Rx(-ry_w) · Rz(-rz_w) · v` applied to a vector. Use
+ * this anywhere downstream code needs to transform a CSS-frame normal or
+ * point through the same rotation the wrapper applies — e.g. back-face
+ * culling, voxel item ordering. NOT for inverse-rotating a world light
+ * direction into mesh-local frame — that still uses `inverseRotateVec3`
+ * with the user's world rotation, since it operates in world frame.
+ */
+export function rotateVec3InWrapperCssFrame(v: Vec3, worldRot: Vec3): Vec3 {
+  let [x, y, z] = v;
+  const rz = (-(worldRot[2] ?? 0) * Math.PI) / 180;
+  if (rz !== 0) {
+    const c = Math.cos(rz), s = Math.sin(rz);
+    [x, y] = [x * c - y * s, x * s + y * c];
+  }
+  const rx = (-(worldRot[1] ?? 0) * Math.PI) / 180; // CSS rotateX = -ry_w
+  if (rx !== 0) {
+    const c = Math.cos(rx), s = Math.sin(rx);
+    [y, z] = [y * c - z * s, y * s + z * c];
+  }
+  const ry = (-(worldRot[0] ?? 0) * Math.PI) / 180; // CSS rotateY = -rx_w
+  if (ry !== 0) {
+    const c = Math.cos(ry), s = Math.sin(ry);
+    [x, z] = [x * c + z * s, -x * s + z * c];
+  }
+  return [x, y, z];
+}

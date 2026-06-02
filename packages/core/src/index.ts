@@ -43,7 +43,7 @@ export type {
 } from "./scene/polygonGeometry";
 
 // ── Rotation math ────────────────────────────────────────────────
-export { rotateVec3, inverseRotateVec3 } from "./math/rotation";
+export { rotateVec3, inverseRotateVec3, rotateVec3InWrapperCssFrame } from "./math/rotation";
 export {
   quatFromAxisAngle,
   quatFromEulerXYZ,
