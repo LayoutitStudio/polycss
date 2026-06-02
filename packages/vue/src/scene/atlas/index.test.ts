@@ -147,7 +147,7 @@ describe("isSolidTrianglePlan", () => {
 });
 
 describe("updateStableTriangleDom", () => {
-  it("applies corner triangle paint inline when corner-shape is supported", () => {
+  it("leaves corner triangle paint to base CSS when corner-shape is supported", () => {
     stubCornerTriangleSupported();
     const tri: Polygon = {
       vertices: [[0, 0, 0], [1, 0, 0], [0, 1, 0]],
@@ -157,9 +157,9 @@ describe("updateStableTriangleDom", () => {
 
     const style = solidTriangleStyle(plan, "baked", "auto")!;
 
-    expect(style.borderWidth).toBe("0");
-    expect(style.backgroundColor).toBe("currentColor");
-    expect((style as Record<string, unknown>)["corner-top-left-shape"]).toBe("bevel");
+    expect(style.borderWidth).toBeUndefined();
+    expect(style.backgroundColor).toBeUndefined();
+    expect((style as Record<string, unknown>)["corner-top-left-shape"]).toBeUndefined();
   });
 
   it("applies the large border triangle primitive on Firefox", () => {

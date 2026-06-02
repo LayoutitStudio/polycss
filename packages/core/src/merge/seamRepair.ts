@@ -460,10 +460,11 @@ function buildSeamEdgeAmounts(
   polygons: Polygon[],
   options: Overlap,
   collectCandidates = false,
+  diagnosticsOnly = false,
 ) {
   const metas = buildPolygonMetas(polygons);
   const records = buildEdgeRecords(polygons, metas, options.capacityScale);
-  const repairs = polygons.map(() => new Map<number, Repair[]>());
+  const repairs = diagnosticsOnly ? [] : polygons.map(() => new Map<number, Repair[]>());
   const diagnostics = emptyDiagnostics();
   const candidates = collectCandidates ? [] as OverlapCandidate[] : undefined;
   if (records.length === 0) {
@@ -485,7 +486,7 @@ function buildSeamEdgeAmounts(
   buildNearSeamEdgeAmounts(records, edgeOwners, repairs, diagnostics, options, candidates);
   return {
     edgeRepairs: repairs,
-    diagnostics: finishDiagnostics(repairs, diagnostics),
+    diagnostics: diagnosticsOnly ? diagnostics : finishDiagnostics(repairs, diagnostics),
     candidates,
   };
 }
@@ -545,8 +546,12 @@ function buildNearSeamEdgeAmounts(
     }
 
     candidates?.push(seamOverlapCandidate(kind, record, candidate, info, targetClosure, closureA + closureB));
-    if (closureA > EPS) addEdgeRepair(repairs, record, info.aStart, info.aEnd, closureA / info.facingA);
-    if (closureB > EPS) addEdgeRepair(repairs, candidate, info.bStart, info.bEnd, closureB / info.facingB);
+    if (repairs.length > 0 && closureA > EPS) {
+      addEdgeRepair(repairs, record, info.aStart, info.aEnd, closureA / info.facingA);
+    }
+    if (repairs.length > 0 && closureB > EPS) {
+      addEdgeRepair(repairs, candidate, info.bStart, info.bEnd, closureB / info.facingB);
+    }
     diagnostics.nearPairs += 1;
     diagnostics.maxMeasuredGapPx = Math.max(diagnostics.maxMeasuredGapPx, info.gap);
     if (remainingClosure > MIN_RESIDUAL_PATCH_GAP_PX) {
@@ -1560,6 +1565,15 @@ export function seamOverlapDiagnostics(
   const resolved = resolveSeamOverlapOptions(options);
   if (!seamOverlapEnabled(resolved, options) || polygons.length === 0) return emptyDiagnostics();
   return buildSeamEdgeAmounts(polygons, resolved).diagnostics;
+}
+
+export function seamOverlapSafetyDiagnostics(
+  polygons: Polygon[],
+  options?: number | OverlapOptions,
+): OverlapDiagnostics {
+  const resolved = resolveSeamOverlapOptions(options);
+  if (!seamOverlapEnabled(resolved, options) || polygons.length === 0) return emptyDiagnostics();
+  return buildSeamEdgeAmounts(polygons, resolved, false, true).diagnostics;
 }
 
 export function seamOverlapReport(

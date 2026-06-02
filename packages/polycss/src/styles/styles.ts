@@ -155,6 +155,36 @@ const CORE_BASE_STYLES = `
   border-width: 0 16px 32px 16px;
 }
 
+@supports (corner-top-left-shape: bevel) and (corner-top-right-shape: bevel) {
+  .polycss-scene > u,
+  .polycss-mesh > u,
+  .polycss-bucket > u {
+    border-width: 0;
+    width: 32px;
+    height: 32px;
+    background-color: currentColor;
+    border-top-left-radius: 50% 100%;
+    border-top-right-radius: 50% 100%;
+    corner-top-left-shape: bevel;
+    corner-top-right-shape: bevel;
+  }
+
+  .polycss-scene > u.polycss-corner-shape-solid,
+  .polycss-mesh > u.polycss-corner-shape-solid,
+  .polycss-bucket > u.polycss-corner-shape-solid {
+    width: 16px;
+    height: 16px;
+    box-sizing: border-box;
+    border: 0;
+    background: currentColor;
+    border-radius: 0;
+    corner-top-left-shape: initial;
+    corner-top-right-shape: initial;
+    corner-bottom-right-shape: initial;
+    corner-bottom-left-shape: initial;
+  }
+}
+
 /* Reserved internal <q> shadow element rules. Current shadow emission uses SVG
    surfaces; these rules keep any retained <q> markup styled as a plain
    border-shape leaf instead of inheriting UA quote styling. */

@@ -463,6 +463,25 @@ interface LoadMeshOptions {
 }
 ```
 
+`loadMesh()` applies `optimizeMeshParseResult()` internally. In default lossy mode this includes baked swatch color cleanup, static triangle simplification for eligible non-animated meshes, and final DOM-cost mesh optimization.
+
+---
+
+## `OptimizeMeshParseResultOptions`
+
+Options for `optimizeMeshParseResult()`, the core post-parse optimization path used by `loadMesh()`.
+
+```ts
+interface OptimizeMeshParseResultOptions {
+  meshResolution?: "lossless" | "lossy";
+  source?: ParseResult;
+  bakedTextureColorMergeDistance?: number;
+  simplifyTriangleMeshes?: boolean;
+  simplifyTriangleMeshOptions?: SimplifyTriangleMeshPolygonsOptions;
+  simplifyEarlyStopDropRatio?: number;
+}
+```
+
 ---
 
 ## `SolidTextureSampleOptions`

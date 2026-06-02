@@ -15,6 +15,7 @@
  *   select.destroy();                // remove listeners
  */
 import type { PolyMeshHandle, PolySceneHandle } from "./createPolyScene";
+import { findMeshUnderPoint as findMeshUnderPointInMeshes } from "./meshHitTest";
 
 export interface PolySelectOptions {
   /** Allow multiple meshes selected at once. Default false. */
@@ -49,29 +50,6 @@ export interface PolySelectionHandle {
   has(mesh: PolyMeshHandle): boolean;
   /** Remove the host listener. Idempotent. */
   destroy(): void;
-}
-
-/** Test whether `(clientX, clientY)` falls inside any polygon leaf
- *  child of `meshEl`'s post-3D bounding rect. */
-function pointInMeshElement(
-  meshEl: HTMLElement,
-  clientX: number,
-  clientY: number,
-): boolean {
-  const polys = Array.from(meshEl.querySelectorAll("i,b,s,u")) as HTMLElement[];
-  for (const p of polys) {
-    const r = p.getBoundingClientRect();
-    if (r.width <= 0 || r.height <= 0) continue;
-    if (
-      clientX >= r.left &&
-      clientX <= r.right &&
-      clientY >= r.top &&
-      clientY <= r.bottom
-    ) {
-      return true;
-    }
-  }
-  return false;
 }
 
 export function createSelect(
@@ -135,15 +113,16 @@ export function createSelect(
   }
 
   function findMeshUnderPoint(clientX: number, clientY: number): PolyMeshHandle | null {
-    for (const mesh of scene.meshes()) {
+    return findMeshUnderPointInMeshes(
+      scene.meshes(),
+      clientX,
+      clientY,
       // Skip gizmo meshes — they're managed by transform-controls and
       // shouldn't resolve as user-selectable content. The shared
       // `polycss-transform-gizmo` class is set on every gizmo mesh
       // (translate arrows + rotate rings).
-      if (mesh.element.classList.contains("polycss-transform-gizmo")) continue;
-      if (pointInMeshElement(mesh.element, clientX, clientY)) return mesh;
-    }
-    return null;
+      (mesh) => !mesh.element.classList.contains("polycss-transform-gizmo"),
+    );
   }
 
   // Click delegation on the scene host. Matches the React equivalent

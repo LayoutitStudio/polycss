@@ -137,6 +137,50 @@ describe("bakeSolidTextureSamples", () => {
     expect(baked.polygons.slice(0, 3).every((polygon) => polygon.texture === undefined)).toBe(true);
   });
 
+  it("preserves UV-derived simplifier seam keys when baking solid textures", async () => {
+    installSolidTextureEnv([10, 20, 30, 255]);
+    const polygon = texturedTriangle([[0, 0, 0], [1, 0, 0], [0, 1, 0]]);
+    const result: ParseResult = {
+      polygons: [polygon],
+      objectUrls: [],
+      dispose() {},
+      warnings: [],
+    };
+
+    const baked = await bakeSolidTextureSamples(result);
+
+    expect(baked.polygons[0].texture).toBeUndefined();
+    expect(baked.polygons[0].uvs).toBeUndefined();
+    expect(baked.polygons[0].textureTriangles).toBeUndefined();
+    expect(baked.polygons[0].simplifyVertexKeys).toEqual([
+      "uv:0,0",
+      "uv:100000,0",
+      "uv:0,100000",
+    ]);
+  });
+
+  it("preserves source simplifier keys when appending baked UV seam identity", async () => {
+    installSolidTextureEnv([10, 20, 30, 255]);
+    const polygon: Polygon = {
+      ...texturedTriangle([[0, 0, 0], [1, 0, 0], [0, 1, 0]]),
+      simplifySourceVertexKeys: ["source:0", "source:1", "source:2"],
+    };
+    const result: ParseResult = {
+      polygons: [polygon],
+      objectUrls: [],
+      dispose() {},
+      warnings: [],
+    };
+
+    const baked = await bakeSolidTextureSamples(result);
+
+    expect(baked.polygons[0].simplifySourceVertexKeys).toEqual([
+      "source:0|uv:0,0",
+      "source:1|uv:100000,0",
+      "source:2|uv:0,100000",
+    ]);
+  });
+
   it("uses texture wrap when baking repeated UVs into solid colors", async () => {
     installSolidTextureDataEnv(2, 1, [
       10, 20, 30, 255,

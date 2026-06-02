@@ -475,9 +475,18 @@ function bakePolygon(polygon: Polygon, color: string): Polygon {
     textureTriangles: _textureTriangles,
     ...rest
   } = polygon;
+  const uvKeys = polygon.uvs?.length === polygon.vertices.length
+    ? polygon.uvs.map((uv) => `uv:${Math.round(uv[0] * 100000)},${Math.round(uv[1] * 100000)}`)
+    : undefined;
+  const simplifyVertexKeys = uvKeys ?? polygon.simplifyVertexKeys;
+  const simplifySourceVertexKeys = polygon.simplifySourceVertexKeys?.length === polygon.vertices.length
+    ? polygon.simplifySourceVertexKeys.map((key, index) => uvKeys ? `${key}|${uvKeys[index]}` : key)
+    : polygon.simplifySourceVertexKeys;
   return {
     ...rest,
     color,
+    ...(simplifyVertexKeys ? { simplifyVertexKeys } : {}),
+    ...(simplifySourceVertexKeys ? { simplifySourceVertexKeys } : {}),
   };
 }
 

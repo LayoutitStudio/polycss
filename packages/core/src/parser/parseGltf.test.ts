@@ -1479,6 +1479,20 @@ describe("parseGltf", () => {
       expect(poly.uvs).toHaveLength(3);
     });
 
+    it("preserves source vertex identity for simplifier fallback", () => {
+      const { glb } = buildTriangleGlb({
+        includeTexcoord: true,
+        textureUrl: "texture.png",
+      });
+      const result = parseGltf(glb, { baseUrl: "https://example.com/" });
+
+      expect(result.polygons[0].simplifySourceVertexKeys).toEqual([
+        "0:0:0:0",
+        "0:0:0:1",
+        "0:0:0:2",
+      ]);
+    });
+
     it("preserves glTF default repeat wrapping and opaque alpha mode", () => {
       const { glb } = buildTriangleGlb({
         includeTexcoord: true,

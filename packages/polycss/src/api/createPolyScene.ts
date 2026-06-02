@@ -656,6 +656,7 @@ export function createPolyScene(
     bakedRotation: Vec3;
   }
   const meshes = new Set<MeshEntry>();
+  const meshByElement = new WeakMap<HTMLElement, MeshEntry>();
 
   // Cached CSS-Z of the shadow ground plane. Set by `recomputeShadowGround`
   // and used by SVG shadow projection for the ground surface. In dynamic mode
@@ -2609,6 +2610,7 @@ export function createPolyScene(
         // Removing from DOM doesn't auto-dispose generated atlas/blob URLs.
         clearRendered(entry);
         meshes.delete(entry);
+        meshByElement.delete(wrapper);
         clearReceiverShadowCache(entry);
         clearCasterItemsCache(entry);
         recomputeAutoCenter();
@@ -2831,6 +2833,7 @@ export function createPolyScene(
         clearRendered(entry);
         try { parseResult.dispose(); } catch { /* ignore */ }
         meshes.delete(entry);
+        meshByElement.delete(wrapper);
         recomputeAutoCenter();
         recomputeShadowGround();
       },
@@ -2854,6 +2857,7 @@ export function createPolyScene(
     };
 
     entry.handle = handle;
+    meshByElement.set(wrapper, entry);
     meshes.add(entry);
     renderEntry(entry);
     applyMeshLightVarOverride(entry, transform.rotation);
@@ -2948,11 +2952,12 @@ export function createPolyScene(
   function findMeshByElement(el: Element | null): PolyMeshHandle | null {
     let cur: Element | null = el;
     while (cur) {
-      if (cur instanceof HTMLElement && cur.classList.contains("polycss-mesh")) {
-        for (const entry of meshes) {
-          if (entry.wrapper === cur) return entry.handle;
+      if (cur instanceof HTMLElement) {
+        const entry = meshByElement.get(cur);
+        if (entry && !entry.disposed) return entry.handle;
+        if (cur.classList.contains("polycss-mesh")) {
+          return null;
         }
-        return null;
       }
       cur = cur.parentElement;
     }

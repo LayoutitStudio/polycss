@@ -139,14 +139,15 @@ describe("renderPolygonsWithStableTriangles — initial render", () => {
     bleed.dispose();
   });
 
-  it("applies corner-shape triangle paint inline when supported", () => {
+  it("leaves corner-shape triangle paint to base CSS when supported", () => {
     const doc = makeDoc({ cornerShape: true });
     const result = renderPolygonsWithStableTriangles([TRIANGLE_A], { doc });
     expect(result).not.toBeNull();
     const el = result!.rendered[0].element;
     expect(el.className).toBe("");
-    expect(el.style.getPropertyValue("corner-top-left-shape")).toBe("bevel");
-    expect(el.style.backgroundColor).toBe("currentcolor");
+    expect(el.style.getPropertyValue("corner-top-left-shape")).toBe("");
+    expect(el.style.backgroundColor).toBe("");
+    expect(el.style.borderWidth).toBe("");
     result!.dispose();
   });
 
