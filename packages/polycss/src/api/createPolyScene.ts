@@ -987,21 +987,15 @@ export function createPolyScene(
     }
 
 
-    // Three.js parity: shadows render only on receiving surfaces. The
-    // virtual ground is a convenience for scenes with no `receiveShadow`
-    // mesh (so a caster still drops some shadow); when at least one
-    // receiver mesh exists, painting on both produces visible double
-    // darkening on the floor.
-    let hasReceiver = false;
-    for (const m of meshes) {
-      if (!m.disposed && m.receiveShadow) { hasReceiver = true; break; }
-    }
-    if (shadowSvgState.currentGroundCssZ !== null && !hasReceiver) {
-      const emittedGround = emitGroundShadowImpl(ctx, casters, dedupByCaster, lightDir, shadowSvgState.currentGroundCssZ, r, g, b, shadowOpacity);
-      if (!emittedGround) hideGroundShadow();
-    } else if (hasReceiver) {
-      hideGroundShadow();
-    }
+    // Three.js parity: shadows render only on explicit `receiveShadow:true`
+    // meshes. A caster with no receiver in the scene draws no shadow —
+    // matching Three.js's `mesh.castShadow` contract. The legacy virtual
+    // ground-shadow path (camera-agnostic projection onto an implicit
+    // plane at scene.minZ) used to provide a convenience fallback for
+    // scenes that forgot to add a floor receiver; we dropped it for
+    // Three.js parity. Any per-mesh ground shadow SVG that the legacy
+    // path may have mounted is hidden every tick.
+    hideGroundShadow();
     for (const receiver of meshes) {
       if (receiver.disposed || !receiver.receiveShadow) continue;
       emitReceiverShadowsImpl(ctx, casters, dedupByCaster, receiver, dedupByReceiver.get(receiver) ?? new Set(), lightDir, r, g, b, shadowOpacity);

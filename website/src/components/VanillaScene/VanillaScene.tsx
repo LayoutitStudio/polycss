@@ -1205,12 +1205,14 @@ export function VanillaScene({
         warnings: [],
         dispose: () => { },
       },
-      // receiveShadow:true is load-bearing — the gallery floor is the
-      // canonical shadow receiver. Without it, enabling Self-shadow on
-      // the model would flip the "only-receiver-paints-shadows" semantic
-      // ON and the floor (not marked as receiver) would lose its cast
-      // shadow entirely. With it, the floor always paints the cast
-      // shadow regardless of the model's self-shadow state.
+      // Floor MUST be a receiver — Three.js parity: no receiver, no
+      // shadow. PolyCSS dropped the legacy virtual-ground fallback so
+      // a `castShadow:true` mesh casts no shadow unless an explicit
+      // receiver mesh exists to catch it. The gallery floor is that
+      // receiver. Until the receiver-shadow path is hardened for
+      // perspective cameras, large tilts may visually under-render the
+      // shadow; that's a known follow-up (huge intrinsic receiver SVG
+      // vs ancestor `overflow:hidden`).
       { excludeFromAutoCenter: true, castShadow: false, receiveShadow: true },
     );
     groundHandleRef.current.element.classList.add("dn-gallery-ground");
