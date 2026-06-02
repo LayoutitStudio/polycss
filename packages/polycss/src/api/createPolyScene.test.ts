@@ -451,6 +451,20 @@ describe("createPolyScene", () => {
       expect(handle.polygons.length).toBe(2);
     });
 
+    it("resolves polygon leaves back to their owning mesh", () => {
+      scene = makeScene(host);
+      const first = scene.add(makeParseResult([triangle()]), { id: "first", merge: false });
+      const second = scene.add(makeParseResult([triangle("#00ff00")]), { id: "second", merge: false });
+      const leaf = second.element.querySelector("i,b,s,u") as HTMLElement | null;
+      expect(leaf).not.toBeNull();
+      expect(scene.findMeshByElement(leaf)).toBe(second);
+      expect(scene.findMeshByElement(first.element)).toBe(first);
+
+      second.remove();
+      expect(scene.findMeshByElement(leaf)).toBeNull();
+      expect(scene.findMeshByElement(second.element)).toBeNull();
+    });
+
     it("routes exact raw vox sources through the direct voxel renderer", () => {
       scene = makeScene(host);
       scene.add(makeVoxelExactParseResult(), { merge: false });

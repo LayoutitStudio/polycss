@@ -28,6 +28,7 @@ import {
 } from "@layoutit/polycss-core";
 import type { Polygon, Vec3 } from "@layoutit/polycss-core";
 import type { PolyMeshHandle, PolySceneHandle } from "./createPolyScene";
+import { pointInMeshElement } from "./meshHitTest";
 
 type Mode = "translate" | "rotate";
 
@@ -190,23 +191,6 @@ function gizmoLengthForMesh(polygons: Polygon[]): number {
   if (!Number.isFinite(minX)) return FALLBACK_SHAFT_LENGTH;
   const extent = Math.max(maxX - minX, maxY - minY, maxZ - minZ);
   return extent * SCENE_TILE_SIZE * SHAFT_LENGTH_RATIO;
-}
-
-function pointInMeshElement(meshEl: HTMLElement, clientX: number, clientY: number): boolean {
-  const polys = Array.from(meshEl.querySelectorAll("i,b,s,u")) as HTMLElement[];
-  for (const p of polys) {
-    const r = p.getBoundingClientRect();
-    if (r.width <= 0 || r.height <= 0) continue;
-    if (
-      clientX >= r.left &&
-      clientX <= r.right &&
-      clientY >= r.top &&
-      clientY <= r.bottom
-    ) {
-      return true;
-    }
-  }
-  return false;
 }
 
 export interface PolyTransformControlsObjectChangeEvent {
