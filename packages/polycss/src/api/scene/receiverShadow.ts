@@ -181,12 +181,15 @@ export function emitReceiverShadows(
         `transform-origin:0 0;pointer-events:none;will-change:transform;` +
         `transform:${spec.matrixCss}`,
       );
-      // Mount inside the receiver mesh wrapper so the shadow is owned by
-      // the receiver — removing the mesh takes its shadows with it, and
-      // the wrapper's overflow:hidden clips any shadow content that would
-      // hang off the receiver's footprint (a feature: floor shadows never
-      // bleed past the floor outline).
-      receiverEntry.wrapper.insertBefore(svg, receiverEntry.wrapper.firstChild);
+      // Mount on the scene root, not inside the receiver mesh wrapper.
+      // The SVG's matrix3d encodes the face plane in world frame; mounting
+      // inside the receiver wrapper would double-apply the receiver's own
+      // position/rotation/scale and detach self-shadows from the mesh as
+      // soon as it moves. Shadow-outline clipping to the receiver footprint
+      // is now enforced geometrically by the per-member-polygon
+      // Sutherland-Hodgman clip in `computeReceiverShadowFaces`, so we no
+      // longer need the wrapper's `overflow:hidden` for that.
+      ctx.sceneEl.insertBefore(svg, ctx.sceneEl.firstChild);
       face.svg = svg;
       face.width = spec.width;
       face.height = spec.height;
