@@ -107,7 +107,7 @@
     const qs = (k, d) => (Q.has(k) ? Q.get(k) : d);
 
     const S = {
-      mesh:    qs("mesh", "cube"),     // "cube" | "e" | "cottage" | "castle" | "coliseum" | "apple"
+      mesh:    qs("mesh", "cube"),     // "cube" | "e" | "cottage" | "castle" | "coliseum" | "apple" | "flight"
       lighting:qs("light", "baked"),   // "baked" | "dynamic"
       // Unified per-mesh transform state. Same shape (x, y, z, scale) for
       // every mesh — one set of object-transform sliders binds to the
@@ -133,6 +133,8 @@
                     rx: qn("orx_coliseum", 0), ry: qn("ory_coliseum", 0), rz: qn("orz_coliseum", 0) },
         apple:   { x: qn("ox_apple",   0), y: qn("oy_apple",   0), z: qn("oz_apple",   0), scale: qn("os_apple",   1),
                    rx: qn("orx_apple", 0), ry: qn("ory_apple", 0), rz: qn("orz_apple", 0) },
+        flight:  { x: qn("ox_flight",  0), y: qn("oy_flight",  0), z: qn("oz_flight",  0), scale: qn("os_flight",  1),
+                   rx: qn("orx_flight", 0), ry: qn("ory_flight", 0), rz: qn("orz_flight", 0) },
       },
       // Cube/E hold the geometry's base parameters (set at build time;
       // run-time scale applies on top via setTransform). Cottage geometry
@@ -212,6 +214,7 @@
     let polyCastle = null;
     let polyColiseum = null;
     let polyApple = null;
+    let polyFlight = null;
     let polyE = null;
     function buildPolyCube() {
       polyCube = polyScene.add(
@@ -328,6 +331,23 @@
         merge: false,
       });
     }
+    // NASA Flight System Support — GLB pulled from the gallery's preset
+    // catalogue (preset hash 3730353141). Same GLB path the gallery serves
+    // through Astro's public/, exposed to the bench by perf-serve.mjs.
+    const FLIGHT_TARGET_SIZE = 6;
+    async function buildPolyFlight() {
+      const parse = await loadMesh("/gallery/glb/nasa/flight-system-support.glb", {
+        gltfOptions: { targetSize: FLIGHT_TARGET_SIZE },
+      });
+      polyFlight = polyScene.add(parse, {
+        id: "flight",
+        position: [S.obj.flight.x, S.obj.flight.y, S.obj.flight.z],
+        scale: S.obj.flight.scale,
+        castShadow: true,
+        receiveShadow: S.selfShadow,
+        merge: false,
+      });
+    }
     if (S.mesh === "cube") buildPolyCube();
     // Flat horizontal quad on z=0, sized S.floor.size in world units.
     // PolyCSS doesn't ship a generic "plane" generator (createPolyPlane is
@@ -384,6 +404,7 @@
     let castleGroup = null;
     let coliseumGroup = null;
     let appleGroup = null;
+    let flightGroup = null;
     let eGroup = null;
     function buildThreeCube() {
       cubeMesh = new THREE.Mesh(
@@ -556,6 +577,35 @@
         }, undefined, reject);
       });
     }
+    function buildThreeFlight() {
+      return new Promise((resolve, reject) => {
+        const loader = new GLTFLoader();
+        loader.load("/gallery/glb/nasa/flight-system-support.glb", (gltf) => {
+          const obj = gltf.scene;
+          const q = new THREE.Quaternion();
+          q.setFromAxisAngle(new THREE.Vector3(1, 1, 1).normalize(), 2 * Math.PI / 3);
+          obj.quaternion.copy(q);
+          obj.updateMatrixWorld(true);
+          const wrap = new THREE.Group();
+          wrap.add(obj);
+          const bbox = new THREE.Box3().setFromObject(wrap);
+          const sizeV = new THREE.Vector3();
+          bbox.getSize(sizeV);
+          const maxDim = Math.max(sizeV.x, sizeV.y, sizeV.z) || 1;
+          const norm = FLIGHT_TARGET_SIZE / maxDim;
+          obj.scale.multiplyScalar(norm);
+          obj.updateMatrixWorld(true);
+          const bbox2 = new THREE.Box3().setFromObject(wrap);
+          obj.position.sub(bbox2.min);
+          wrap.position.set(S.obj.flight.x, S.obj.flight.y, S.obj.flight.z);
+          wrap.scale.setScalar(S.obj.flight.scale);
+          obj.traverse((c) => { if (c.isMesh) { c.castShadow = true; c.receiveShadow = true; } });
+          flightGroup = wrap;
+          threeScene.add(wrap);
+          resolve();
+        }, undefined, reject);
+      });
+    }
     if (S.mesh === "cube") buildThreeCube();
 
     const floorMesh = new THREE.Mesh(
@@ -635,6 +685,7 @@
       if (S.mesh === "castle"   && polyCastle)   return polyCastle;
       if (S.mesh === "coliseum" && polyColiseum) return polyColiseum;
       if (S.mesh === "apple"    && polyApple)    return polyApple;
+      if (S.mesh === "flight"   && polyFlight)   return polyFlight;
       return null;
     }
     function activeMeshCenter() {
@@ -810,6 +861,7 @@
       if (polyCastle)   polyCastle.setTransform({   position: [S.obj.castle.x,   S.obj.castle.y,   S.obj.castle.z],   scale: S.obj.castle.scale,   rotation: [S.obj.castle.rx,   S.obj.castle.ry,   S.obj.castle.rz],   castShadow: S.castShadow, receiveShadow: S.selfShadow });
       if (polyColiseum) polyColiseum.setTransform({ position: [S.obj.coliseum.x, S.obj.coliseum.y, S.obj.coliseum.z], scale: S.obj.coliseum.scale, rotation: [S.obj.coliseum.rx, S.obj.coliseum.ry, S.obj.coliseum.rz], castShadow: S.castShadow, receiveShadow: S.selfShadow });
       if (polyApple)    polyApple.setTransform({    position: [S.obj.apple.x,    S.obj.apple.y,    S.obj.apple.z],    scale: S.obj.apple.scale,    rotation: [S.obj.apple.rx,    S.obj.apple.ry,    S.obj.apple.rz],    castShadow: S.castShadow, receiveShadow: S.selfShadow });
+      if (polyFlight)   polyFlight.setTransform({   position: [S.obj.flight.x,   S.obj.flight.y,   S.obj.flight.z],   scale: S.obj.flight.scale,   rotation: [S.obj.flight.rx,   S.obj.flight.ry,   S.obj.flight.rz],   castShadow: S.castShadow, receiveShadow: S.selfShadow });
       // Floor visibility + receiveShadow live-update. visibility:hidden
       // keeps the mesh in the scene graph (so its position still anchors
       // shadow ground recomputation); receiveShadow drives the same
@@ -848,6 +900,7 @@
         if (polyCastle) polyCastle.rebakeAtlas();
         if (polyColiseum) polyColiseum.rebakeAtlas();
         if (polyApple) polyApple.rebakeAtlas();
+        if (polyFlight) polyFlight.rebakeAtlas();
         if (polyE) polyE.rebakeAtlas();
         polyFloor.rebakeAtlas();
       }
@@ -888,6 +941,12 @@
         appleGroup.scale.setScalar(S.obj.apple.scale);
         appleGroup.rotation.set(S.obj.apple.rx * D2R, S.obj.apple.ry * D2R, S.obj.apple.rz * D2R);
         appleGroup.traverse(c => { if (c.isMesh) { c.castShadow = S.castShadow; c.receiveShadow = S.selfShadow; } });
+      }
+      if (flightGroup) {
+        flightGroup.position.set(S.obj.flight.x, S.obj.flight.y, S.obj.flight.z);
+        flightGroup.scale.setScalar(S.obj.flight.scale);
+        flightGroup.rotation.set(S.obj.flight.rx * D2R, S.obj.flight.ry * D2R, S.obj.flight.rz * D2R);
+        flightGroup.traverse(c => { if (c.isMesh) { c.castShadow = S.castShadow; c.receiveShadow = S.selfShadow; } });
       }
       floorMesh.visible = S.floorVisible;
       floorMesh.receiveShadow = S.floorReceives;
@@ -1028,7 +1087,7 @@
           path.after(wrap);
         }
       }
-      const threeObjs = [cubeMesh, eGroup, cottageGroup, castleGroup, coliseumGroup, appleGroup, floorMesh].filter(Boolean);
+      const threeObjs = [cubeMesh, eGroup, cottageGroup, castleGroup, coliseumGroup, appleGroup, flightGroup, floorMesh].filter(Boolean);
       for (const obj of threeObjs) {
         obj.traverse(o => {
           if (!o.material) return;
@@ -1061,12 +1120,14 @@
       if (polyCastle) { polyCastle.remove(); polyCastle = null; }
       if (polyColiseum) { polyColiseum.remove(); polyColiseum = null; }
       if (polyApple) { polyApple.remove(); polyApple = null; }
+      if (polyFlight) { polyFlight.remove(); polyFlight = null; }
       if (polyE) { polyE.remove(); polyE = null; }
       if (cubeMesh) { threeScene.remove(cubeMesh); cubeMesh = null; }
       if (cottageGroup) { threeScene.remove(cottageGroup); cottageGroup = null; }
       if (castleGroup) { threeScene.remove(castleGroup); castleGroup = null; }
       if (coliseumGroup) { threeScene.remove(coliseumGroup); coliseumGroup = null; }
       if (appleGroup) { threeScene.remove(appleGroup); appleGroup = null; }
+      if (flightGroup) { threeScene.remove(flightGroup); flightGroup = null; }
       if (eGroup) { threeScene.remove(eGroup); eGroup = null; }
       if (name === "cube") {
         buildPolyCube();
@@ -1080,6 +1141,8 @@
         await Promise.all([buildPolyColiseum(), buildThreeColiseum()]);
       } else if (name === "apple") {
         await Promise.all([buildPolyApple(), buildThreeApple()]);
+      } else if (name === "flight") {
+        await Promise.all([buildPolyFlight(), buildThreeFlight()]);
       } else {
         await Promise.all([buildPolyCottage(), buildThreeCottage()]);
       }
@@ -1095,6 +1158,7 @@
       else if (S.mesh === "castle") await Promise.all([buildPolyCastle(), buildThreeCastle()]);
       else if (S.mesh === "coliseum") await Promise.all([buildPolyColiseum(), buildThreeColiseum()]);
       else if (S.mesh === "apple") await Promise.all([buildPolyApple(), buildThreeApple()]);
+      else if (S.mesh === "flight") await Promise.all([buildPolyFlight(), buildThreeFlight()]);
       else if (S.mesh === "e") { buildPolyE(); buildThreeE(); }
       update(true);
       loop();
@@ -1104,6 +1168,7 @@
       window.__polyCastle = polyCastle;
       window.__polyColiseum = polyColiseum;
       window.__polyApple = polyApple;
+      window.__polyFlight = polyFlight;
       window.__polyScene = polyScene;
       window.__ready = true;
     })();
@@ -1312,7 +1377,7 @@
       meshLabel.textContent = "model";
       meshRow.appendChild(meshLabel);
       const meshSel = document.createElement("select");
-      for (const opt of ["cube", "e", "cottage", "castle", "coliseum", "apple"]) {
+      for (const opt of ["cube", "e", "cottage", "castle", "coliseum", "apple", "flight"]) {
         const o = document.createElement("option");
         o.value = opt; o.textContent = opt;
         if (S.mesh === opt) o.selected = true;
