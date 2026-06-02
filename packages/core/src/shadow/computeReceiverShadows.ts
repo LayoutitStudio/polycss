@@ -54,6 +54,9 @@ export interface ReceiverFacePlane {
   height: number;
   matrixCss: string;
   faceIndex: number;
+  /** World-frame lift (already × BASE_TILE) along +n. Re-applied per-frame
+   *  when building a tight shadow SVG matrix so the SVG hovers over the face. */
+  lift: number;
 }
 
 /**
@@ -272,7 +275,7 @@ export function prepareReceiverFacePlanes(
     const matrixCss = `matrix3d(${m.map((x) => x.toFixed(4)).join(",")})`;
     return {
       O, n, u, v, outlineUv, memberPolysUv, memberPolyIndices,
-      minU, minV, width, height, matrixCss, faceIndex,
+      minU, minV, width, height, matrixCss, faceIndex, lift,
     };
   });
 
@@ -379,7 +382,7 @@ export function computeReceiverShadowFaces<T = unknown>(
   const out: ReceiverShadowFaceSpec<T>[] = [];
 
   for (const group of receiverPlanes) {
-    const { O, n, u, v, outlineUv, minU, minV, width, height, matrixCss } = group;
+    const { O, n, u, v, outlineUv, minU, minV, width, height } = group;
     // Back-facing receiver face → can't receive light → skip.
     const Ldotn = Lx * n[0] + Ly * n[1] + Lz * n[2];
     if (Ldotn <= 1e-6) continue;
@@ -576,13 +579,63 @@ export function computeReceiverShadowFaces<T = unknown>(
       ? userShadowColor
       : shadePolygon(groupColor, 0, "#000000", ambColor, ambIntensity);
 
+    // Tight shadow-content bbox in (u, v). The receiver face outline can be
+    // huge (e.g. a 17500×17500 CSS-px floor at world units × BASE_TILE), but
+    // the actual shadow content typically covers a fraction of that area.
+    // Sizing the SVG to the receiver outline made Chrome's compositor drop
+    // the entire layer past certain perspective angles (the projected
+    // trapezoid grew unboundedly when one corner approached the horizon).
+    // Clipping the SVG to the shadow's tight bbox keeps the layer small
+    // enough that compositor heuristics keep painting it at every camera
+    // orientation. The on-screen geometry is unchanged: matrix3d is rebased
+    // to the tight bbox and path coordinates are emitted relative to it.
+    let shMinU = Infinity, shMinV = Infinity, shMaxU = -Infinity, shMaxV = -Infinity;
+    for (const entry of clippedByCaster.values()) {
+      for (const verts of entry.verts) {
+        for (const pt of verts) {
+          if (pt[0] < shMinU) shMinU = pt[0];
+          if (pt[0] > shMaxU) shMaxU = pt[0];
+          if (pt[1] < shMinV) shMinV = pt[1];
+          if (pt[1] > shMaxV) shMaxV = pt[1];
+        }
+      }
+    }
+    // Round outward to whole pixels so the SVG covers the path with one px
+    // of slack on each side (matches the path's `.toFixed(1)` precision).
+    shMinU = Math.floor(shMinU - 1);
+    shMinV = Math.floor(shMinV - 1);
+    shMaxU = Math.ceil(shMaxU + 1);
+    shMaxV = Math.ceil(shMaxV + 1);
+    // Clamp the tight bbox to the face outline so we never extend the SVG
+    // past the receiver surface (would let a stray pixel render off-face).
+    if (shMinU < minU) shMinU = minU;
+    if (shMinV < minV) shMinV = minV;
+    if (shMaxU > minU + width) shMaxU = minU + width;
+    if (shMaxV > minV + height) shMaxV = minV + height;
+    const tightW = shMaxU - shMinU;
+    const tightH = shMaxV - shMinV;
+    if (!(tightW > 0) || !(tightH > 0)) continue;
+
+    // matrix3d for the tight SVG: O + shMinU*u + shMinV*v + lift*n
+    const liftN = group.lift;
+    const tx = O[0] + shMinU * u[0] + shMinV * v[0] + liftN * n[0];
+    const ty = O[1] + shMinU * u[1] + shMinV * v[1] + liftN * n[1];
+    const tz = O[2] + shMinU * u[2] + shMinV * v[2] + liftN * n[2];
+    const tm = [
+      u[0], u[1], u[2], 0,
+      v[0], v[1], v[2], 0,
+      n[0], n[1], n[2], 0,
+      tx,   ty,   tz,   1,
+    ];
+    const tightMatrixCss = `matrix3d(${tm.map((x) => x.toFixed(4)).join(",")})`;
+
     const paths: Array<ReceiverShadowPath<T>> = [];
     for (const entry of clippedByCaster.values()) {
       let d = "";
       for (const verts of entry.verts) {
-        d += `M${(verts[0]![0] - minU).toFixed(1)},${(verts[0]![1] - minV).toFixed(1)}`;
+        d += `M${(verts[0]![0] - shMinU).toFixed(1)},${(verts[0]![1] - shMinV).toFixed(1)}`;
         for (let j = 1; j < verts.length; j++) {
-          d += `L${(verts[j]![0] - minU).toFixed(1)},${(verts[j]![1] - minV).toFixed(1)}`;
+          d += `L${(verts[j]![0] - shMinU).toFixed(1)},${(verts[j]![1] - shMinV).toFixed(1)}`;
         }
         d += "Z";
       }
@@ -592,7 +645,9 @@ export function computeReceiverShadowFaces<T = unknown>(
     out.push({
       faceIndex: group.faceIndex,
       memberPolyIndices: group.memberPolyIndices,
-      matrixCss, width, height,
+      matrixCss: tightMatrixCss,
+      width: tightW,
+      height: tightH,
       fill: fillColor,
       opacity: effOp,
       paths,

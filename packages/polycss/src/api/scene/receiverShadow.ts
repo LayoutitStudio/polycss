@@ -32,6 +32,12 @@ const SVG_NS = "http://www.w3.org/2000/svg";
 interface MountedFace {
   svg: SVGSVGElement | null;
   visible: boolean;
+  /** Last applied SVG width — only re-set on change to avoid re-layout. */
+  width: number;
+  /** Last applied SVG height. */
+  height: number;
+  /** Last applied matrix3d string — only re-set on change to dodge style work. */
+  matrixCss: string;
 }
 const mountedFacesByMesh = new WeakMap<MeshEntry, Map<number, MountedFace>>();
 
@@ -152,7 +158,10 @@ export function emitReceiverShadows(
   for (const spec of specs) {
     seen.add(spec.faceIndex);
     let face = mounted.get(spec.faceIndex);
-    if (!face) { face = { svg: null, visible: false }; mounted.set(spec.faceIndex, face); }
+    if (!face) {
+      face = { svg: null, visible: false, width: -1, height: -1, matrixCss: "" };
+      mounted.set(spec.faceIndex, face);
+    }
     let svg = face.svg;
     if (!svg) {
       svg = ctx.doc.createElementNS(SVG_NS, "svg");
@@ -172,10 +181,32 @@ export function emitReceiverShadows(
         `transform-origin:0 0;pointer-events:none;will-change:transform;` +
         `transform:${spec.matrixCss}`,
       );
-      ctx.sceneEl.insertBefore(svg, ctx.sceneEl.firstChild);
+      // Mount inside the receiver mesh wrapper so the shadow is owned by
+      // the receiver — removing the mesh takes its shadows with it, and
+      // the wrapper's overflow:hidden clips any shadow content that would
+      // hang off the receiver's footprint (a feature: floor shadows never
+      // bleed past the floor outline).
+      receiverEntry.wrapper.insertBefore(svg, receiverEntry.wrapper.firstChild);
       face.svg = svg;
-    } else if (!face.visible) {
-      svg.style.display = "block";
+      face.width = spec.width;
+      face.height = spec.height;
+      face.matrixCss = spec.matrixCss;
+    } else {
+      if (!face.visible) svg.style.display = "block";
+      // Tight shadow-bbox SVGs resize/translate every frame as the shadow
+      // sweeps across the receiver — re-apply width/height/viewBox/transform
+      // only when they actually change.
+      if (face.width !== spec.width || face.height !== spec.height) {
+        svg.setAttribute("width", String(spec.width));
+        svg.setAttribute("height", String(spec.height));
+        svg.setAttribute("viewBox", `0 0 ${spec.width} ${spec.height}`);
+        face.width = spec.width;
+        face.height = spec.height;
+      }
+      if (face.matrixCss !== spec.matrixCss) {
+        svg.style.transform = spec.matrixCss;
+        face.matrixCss = spec.matrixCss;
+      }
     }
     face.visible = true;
 
