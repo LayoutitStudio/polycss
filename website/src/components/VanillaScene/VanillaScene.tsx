@@ -445,24 +445,27 @@ export function VanillaScene({
         ...(previewShadow ? { shadow: nextShadow } : {}),
       });
     } else {
-      // Baked mode: match the bench three-parity flow — push the new light
-      // direction to the scene so shadow SVGs re-emit live during drag,
-      // but DON'T install the CSS-cascade preview on solid leaves. The
-      // preview makes leaves brighter than the eventual bake (different
-      // gamma/dot-product paths) which reads as "the face just darkened
-      // and disappeared" the instant the user releases the helper. The
-      // bench's solid leaves stay at the LAST baked color through the
-      // drag, then commit on release — no perceived flicker.
-      //
-      // Trade-off: textured atlas leaves likewise stay frozen during
-      // drag; only shadows follow live. The atlas re-bakes on commit
-      // via commitBakedSolidLighting → rebakeRenderEntryInPlace (in-place
-      // bitmap swap, no DOM teardown).
+      // Baked mode: push the new light direction to the scene so shadow
+      // SVGs re-emit live during drag, AND install the CSS-cascade light
+      // preview on solid leaves so they tint live too — matches the
+      // pre-#9e4763f gallery feel where lights update interactively
+      // while the user drags the gizmo. The atlas pixels themselves stay
+      // at the last baked color; the CSS-cascade preview multiplies them
+      // by the live light vars. On commit the atlas re-bakes via
+      // commitBakedSolidLighting → rebakeRenderEntryInPlace and the
+      // preview vars are dropped — there may be a tiny snap if the
+      // approximate CSS calc Lambert disagrees with the CPU bake, but
+      // the live-feedback during drag is what the user expects.
       if (previewShadow) {
         scene.setOptions({ directionalLight: nextDirectionalLight, shadow: nextShadow });
       } else {
         scene.setOptions({ directionalLight: nextDirectionalLight });
       }
+      (scene as BakedSolidLightingPreviewSceneHandle).previewBakedSolidLighting?.({
+        directionalLight: nextDirectionalLight,
+        ambientLight: ambientFromOptions(nextOptions),
+        skipShadows: !previewShadow,
+      });
     }
     lightHandleRef.current?.setTransform({
       position: lightHelperPosition(
