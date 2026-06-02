@@ -12,6 +12,36 @@ export const NONVOXEL_VARIANTS = [
     hypothesis: "Use true orthographic perspective on the camera wrapper instead of the large finite stand-in.",
   },
   {
+    id: "opt-rectcover1",
+    label: "Optimizer Rect Cover 1",
+    params: { optimizer: "rectcover1" },
+    hypothesis: "Pre-optimize with explicit one-axis planar rect cover; accept only if DOM drops and rotation FPS does not regress.",
+  },
+  {
+    id: "opt-rectcover2",
+    label: "Optimizer Rect Cover 2",
+    params: { optimizer: "rectcover2" },
+    hypothesis: "Pre-optimize with explicit two-axis planar rect cover; accept only if DOM drops and rotation FPS does not regress.",
+  },
+  {
+    id: "opt-rectcover4",
+    label: "Optimizer Rect Cover 4",
+    params: { optimizer: "rectcover4" },
+    hypothesis: "Pre-optimize with explicit four-axis planar rect cover; accept only if DOM drops and rotation FPS does not regress.",
+  },
+  {
+    id: "opt-rectcover8",
+    label: "Optimizer Rect Cover 8",
+    params: { optimizer: "rectcover8" },
+    hypothesis: "Pre-optimize with explicit eight-axis planar rect cover; accept only if DOM drops and rotation FPS does not regress.",
+  },
+  {
+    id: "opt-rectcover24",
+    label: "Optimizer Rect Cover 24",
+    params: { optimizer: "rectcover24" },
+    hypothesis: "Pre-optimize with explicit twenty-four-axis planar rect cover; accept only if DOM drops and rotation FPS does not regress.",
+  },
+  {
     id: "css-keyframes",
     label: "CSS Keyframes",
     params: { rotationDriver: "css-keyframes" },

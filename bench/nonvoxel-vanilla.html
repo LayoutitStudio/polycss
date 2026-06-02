@@ -9,7 +9,7 @@
   <div id="host"></div>
 
   <script type="module">
-    import { createPolyCamera, createPolyScene, createPolyOrbitControls, loadMesh } from "./.generated/polycss.js";
+    import { createPolyCamera, createPolyScene, createPolyOrbitControls, loadMesh, optimizeMeshPolygons } from "./.generated/polycss.js";
     import { getSynthMesh } from "./synth-mesh.mjs";
     import {
       parseUrlParams, dirFromAzEl, createPerfRecorder,
@@ -26,6 +26,7 @@
     const rotationDriver = benchParams.get("rotationDriver") || "js";
     const polygonOrder = benchParams.get("polygonOrder") || "source";
     const domOrder = benchParams.get("domOrder") || "source";
+    const optimizerVariant = benchParams.get("optimizer") || "baseline";
     const leafBucketSize = Number(benchParams.get("leafBucketSize") || 0);
     const islandBucketMode = benchParams.get("islandBucket") || "none";
     const islandBucketSize = Number(benchParams.get("islandBucketSize") || 128);
@@ -419,6 +420,29 @@
       return {
         ...parseResult,
         polygons: orderedPolygons(parseResult.polygons),
+      };
+    }
+
+    function optimizerOptionsForBenchVariant(variant) {
+      if (variant === "baseline") return null;
+      if (variant === "rectcover1") return { meshResolution: "lossy", rectCover: { minGroupPolygons: 2, maxCandidateAxes: 1 } };
+      if (variant === "rectcover2") return { meshResolution: "lossy", rectCover: { minGroupPolygons: 2, maxCandidateAxes: 2 } };
+      if (variant === "rectcover4") return { meshResolution: "lossy", rectCover: { minGroupPolygons: 2, maxCandidateAxes: 4 } };
+      if (variant === "rectcover8") return { meshResolution: "lossy", rectCover: { minGroupPolygons: 2, maxCandidateAxes: 8 } };
+      if (variant === "rectcover24") return { meshResolution: "lossy", rectCover: { minGroupPolygons: 2, maxCandidateAxes: 24 } };
+      throw new Error(`Unknown bench optimizer variant: ${variant}`);
+    }
+
+    function applyBenchOptimizer(parseResult) {
+      const options = optimizerOptionsForBenchVariant(optimizerVariant);
+      if (!options || parseResult.voxelSource) return { parseResult, preoptimized: false };
+      const polygons = optimizeMeshPolygons(parseResult.polygons, options);
+      return {
+        parseResult: {
+          ...parseResult,
+          polygons,
+        },
+        preoptimized: true,
       };
     }
 
@@ -872,11 +896,12 @@
 
     meshPromise.then((rawParseResult) => {
       if (!rawParseResult) throw new Error(`Unknown synth mesh: ${meshId}`);
-      const indexedParseResult = applyPolygonBenchIndexes(rawParseResult);
+      const optimizedResult = applyBenchOptimizer(rawParseResult);
+      const indexedParseResult = applyPolygonBenchIndexes(optimizedResult.parseResult);
       const parseResult = applyPolygonOrder(indexedParseResult);
       const meshTransform = motion === "mesh-set-polygons-same"
         ? { merge: false, stableDom: true }
-        : undefined;
+        : optimizedResult.preoptimized ? { merge: false } : undefined;
       const meshHandle = scene.add(parseResult, meshTransform);
       window.__nonvoxelBench.setMeshPosition = (position) => {
         meshHandle.setTransform({ position });
