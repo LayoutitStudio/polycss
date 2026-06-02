@@ -31,16 +31,6 @@ export const SOLID_TRIANGLE_BLEED = 0.75;
 const SOLID_TRIANGLE_CANONICAL_SIZE = 32;
 const SOLID_TRIANGLE_LARGE_BORDER_CANONICAL_SIZE = 96;
 const SOLID_TRIANGLE_LARGE_BORDER_WIDTH = "0 48px 96px 48px";
-const CORNER_TRIANGLE_STYLE = {
-  width: "32px",
-  height: "32px",
-  backgroundColor: "currentColor",
-  borderWidth: "0",
-  borderTopLeftRadius: "50% 100%",
-  borderTopRightRadius: "50% 100%",
-  "corner-top-left-shape": "bevel",
-  "corner-top-right-shape": "bevel",
-} as CSSProperties;
 let cachedSolidTriangleUserAgent: string | undefined;
 let cachedSolidTriangleCanonicalSize = SOLID_TRIANGLE_CANONICAL_SIZE;
 
@@ -75,7 +65,7 @@ export function solidTriangleBorderWidth(): string | undefined {
 
 export function solidTrianglePaintStyle(): CSSProperties | undefined {
   const primitive = solidTrianglePrimitive();
-  if (primitive === "corner-bevel") return CORNER_TRIANGLE_STYLE;
+  if (primitive === "corner-bevel") return undefined;
   const borderWidth = primitive === "border-large" ? SOLID_TRIANGLE_LARGE_BORDER_WIDTH : undefined;
   return borderWidth ? { borderWidth } : undefined;
 }
@@ -83,14 +73,14 @@ export function solidTrianglePaintStyle(): CSSProperties | undefined {
 export function applySolidTrianglePaintStyle(el: HTMLElement): void {
   const primitive = solidTrianglePrimitive();
   if (primitive === "corner-bevel") {
-    el.style.width = "32px";
-    el.style.height = "32px";
-    el.style.backgroundColor = "currentColor";
-    el.style.borderWidth = "0";
-    el.style.borderTopLeftRadius = "50% 100%";
-    el.style.borderTopRightRadius = "50% 100%";
-    el.style.setProperty("corner-top-left-shape", "bevel");
-    el.style.setProperty("corner-top-right-shape", "bevel");
+    el.style.width = "";
+    el.style.height = "";
+    el.style.backgroundColor = "";
+    el.style.borderWidth = "";
+    el.style.borderTopLeftRadius = "";
+    el.style.borderTopRightRadius = "";
+    el.style.removeProperty("corner-top-left-shape");
+    el.style.removeProperty("corner-top-right-shape");
   } else {
     el.style.width = "";
     el.style.height = "";
