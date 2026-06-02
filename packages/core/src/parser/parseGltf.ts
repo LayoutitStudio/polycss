@@ -58,6 +58,17 @@ export interface GltfParseOptions {
    */
   upAxis?: "y" | "z";
   /**
+   * Where to place the mesh-local origin relative to the parsed geometry.
+   *
+   * - `"min"` (default): bbox-min sits at local (0,0,0); geometry lives in
+   *   the +X+Y+Z quadrant. This is PolyCSS's historical behavior.
+   * - `true` (or `"center"`): bbox-center sits at local (0,0,0); geometry
+   *   is centered around the origin. Pair with `scene.add(parse, {position,
+   *   rotation:[...]})` to get three.js-style rotate-in-place around the
+   *   centroid.
+   */
+  center?: boolean | "min" | "center";
+  /**
    * For .gltf (non-binary) — resolve a glTF buffer URI to its bytes. The
    * built-in parser handles GLB binary chunks natively; .gltf files with
    * external .bin files need this.
@@ -1891,29 +1902,39 @@ export function parseGltf(input: ArrayBuffer | Uint8Array, options?: GltfParseOp
   const maxDim = Math.max(maxX - minX, maxY - minY, maxZ - minZ);
   const scale = maxDim > 0 ? targetSize / maxDim : 1;
 
+  // Offset to subtract from each source vertex. `center: "min"` (default)
+  // → bbox-min sits at local (0,0,0); geometry in +X+Y+Z. `center: true`
+  // → bbox-center at origin so wrapper rotation pivots at the centroid
+  // (three.js-style rotate-in-place).
+  const centerMode = options?.center;
+  const useCenter = centerMode === true || centerMode === "center";
+  const ox = useCenter ? (minX + maxX) * 0.5 : minX;
+  const oy = useCenter ? (minY + maxY) * 0.5 : minY;
+  const oz = useCenter ? (minZ + maxZ) * 0.5 : minZ;
+
   const round = (n: number) => Math.round(n * 1000) / 1000;
   const upAxis = options?.upAxis ?? "y";
   const project: (v: Vec3) => Vec3 = upAxis === "z"
     ? ([x, y, z]) => [
-        round((x - minX) * scale),
-        round((y - minY) * scale),
-        round((z - minZ) * scale),
+        round((x - ox) * scale),
+        round((y - oy) * scale),
+        round((z - oz) * scale),
       ]
     : ([x, y, z]) => [
-        round((z - minZ) * scale),
-        round((x - minX) * scale),
-        round((y - minY) * scale),
+        round((z - oz) * scale),
+        round((x - ox) * scale),
+        round((y - oy) * scale),
       ];
   const projectFrameVertex = upAxis === "z"
     ? (v: Vec3, out: Float64Array, offset: number): void => {
-        out[offset] = round((v[0] - minX) * scale);
-        out[offset + 1] = round((v[1] - minY) * scale);
-        out[offset + 2] = round((v[2] - minZ) * scale);
+        out[offset] = round((v[0] - ox) * scale);
+        out[offset + 1] = round((v[1] - oy) * scale);
+        out[offset + 2] = round((v[2] - oz) * scale);
       }
     : (v: Vec3, out: Float64Array, offset: number): void => {
-        out[offset] = round((v[2] - minZ) * scale);
-        out[offset + 1] = round((v[0] - minX) * scale);
-        out[offset + 2] = round((v[1] - minY) * scale);
+        out[offset] = round((v[2] - oz) * scale);
+        out[offset + 1] = round((v[0] - ox) * scale);
+        out[offset + 2] = round((v[1] - oy) * scale);
       };
   const polygons: Polygon[] = [];
   let projectedDegenerateCount = 0;

@@ -33,6 +33,21 @@ export interface ObjParseOptions {
    */
   targetSize?: number;
   /**
+   * Where to place the mesh-local origin relative to the parsed geometry.
+   *
+   * - `"min"` (default): bbox-min sits at local (0,0,0); geometry lives in
+   *   the +X+Y+Z quadrant. This is PolyCSS's historical behavior.
+   * - `true` (or `"center"`): bbox-center sits at local (0,0,0); geometry
+   *   is centered around the origin. Pair with `scene.add(parse, {position,
+   *   rotation:[...]})` to get three.js-style rotate-in-place around the
+   *   centroid.
+   *
+   * Three.js's `GLTFLoader`/`OBJLoader` don't reposition vertices at all;
+   * for byte-parity loading set this to a separate explicit `false` once
+   * the no-offset option lands.
+   */
+  center?: boolean | "min" | "center";
+  /**
    * Color used for faces that have no `usemtl` in scope, or whose material
    * name doesn't resolve via `materialColors`. Default: "#888888".
    */
@@ -210,14 +225,25 @@ export function parseObj(text: string, options?: ObjParseOptions): ParseResult {
   const maxDim = Math.max(maxX - minX, maxY - minY, maxZ - minZ);
   const scale = maxDim > 0 ? targetSize / maxDim : 1;
 
+  // Offset to subtract from each vertex before scaling. `center: "min"`
+  // (default) puts bbox-min at origin → geometry sits in +X+Y+Z.
+  // `center: true` puts bbox-center at origin → geometry centered around
+  // origin so wrapper rotation pivots at the centroid (three.js-style
+  // rotate-in-place when the GLB/OBJ was authored asymmetrically).
+  const centerMode = options?.center;
+  const useCenter = centerMode === true || centerMode === "center";
+  const ox = useCenter ? (minX + maxX) * 0.5 : minX;
+  const oy = useCenter ? (minY + maxY) * 0.5 : minY;
+  const oz = useCenter ? (minZ + maxZ) * 0.5 : minZ;
+
   // Cyclic axis permutation (x,y,z) → (z,x,y) puts OBJ's +Y up axis into
   // PolyCSS's +Z (elevation). Single axis swaps invert handedness; a cyclic
   // shift doesn't, so triangle CCW-from-outside winding survives.
   const round = (n: number) => Math.round(n * 1000) / 1000;
   const grid: Vec3[] = verts.map(([x, y, z]) => [
-    round((z - minZ) * scale),
-    round((x - minX) * scale),
-    round((y - minY) * scale),
+    round((z - oz) * scale),
+    round((x - ox) * scale),
+    round((y - oy) * scale),
   ]);
 
   const polygons: Polygon[] = [];
