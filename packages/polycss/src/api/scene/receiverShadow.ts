@@ -20,7 +20,7 @@ import {
   type ReceiverFacePlane,
   type Vec3,
 } from "@layoutit/polycss-core";
-import { syncShadowPaths } from "./shadowSvg";
+import { ensureShadowRoot, syncShadowPaths } from "./shadowSvg";
 import { meshShadowId } from "./shadowCache";
 import type { SceneContext } from "./sceneContext";
 import type { MeshEntry } from "./internalTypes";
@@ -185,15 +185,16 @@ export function emitReceiverShadows(
         `transform-origin:0 0;pointer-events:none;will-change:transform;` +
         `transform:${spec.matrixCss}`,
       );
-      // Mount on the scene root, not inside the receiver mesh wrapper.
-      // The SVG's matrix3d encodes the face plane in world frame; mounting
-      // inside the receiver wrapper would double-apply the receiver's own
-      // position/rotation/scale and detach self-shadows from the mesh as
-      // soon as it moves. Shadow-outline clipping to the receiver footprint
-      // is now enforced geometrically by the per-member-polygon
-      // Sutherland-Hodgman clip in `computeReceiverShadowFaces`, so we no
-      // longer need the wrapper's `overflow:hidden` for that.
-      ctx.sceneEl.insertBefore(svg, ctx.sceneEl.firstChild);
+      // Mount inside the shared `.polycss-shadows` wrapper at scene root.
+      // The SVG's matrix3d still encodes the face plane in world frame —
+      // the wrapper is a 0×0 preserve-3d container that takes no layout
+      // space, so children composite at their absolute matrix3d positions
+      // just like they did when mounted directly on sceneEl. Grouping
+      // exists for DOM organization (clean DevTools tree) and to make
+      // future "clip all shadows to a region" / "hide all shadows" toggles
+      // trivial (one ancestor to flip).
+      const shadowRoot = ensureShadowRoot(ctx.shadowSvgState, ctx.doc, ctx.sceneEl);
+      shadowRoot.appendChild(svg);
       face.svg = svg;
       face.width = spec.width;
       face.height = spec.height;

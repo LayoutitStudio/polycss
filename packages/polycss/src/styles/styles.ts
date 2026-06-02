@@ -68,6 +68,23 @@ const CORE_BASE_STYLES = `
   transform-style: preserve-3d !important;
 }
 
+/* ── Shadow root wrapper ────────────────────────────────────────────────── */
+
+/* Single 0×0 preserve-3d container that owns every shadow SVG (ground +
+   per-face receiver). Children composite via their own absolute matrix3d
+   transforms exactly as if mounted on .polycss-scene directly. The wrapper
+   exists so the DOM has one obvious "shadows live here" node and so
+   future toggles (clip-region, hide-all-shadows) flip a single ancestor. */
+.polycss-shadows {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 0;
+  height: 0;
+  transform-style: preserve-3d;
+  pointer-events: none;
+}
+
 /* ── Mesh wrapper ───────────────────────────────────────────────────────── */
 
 .polycss-mesh {

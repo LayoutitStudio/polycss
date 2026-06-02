@@ -28,6 +28,44 @@ export class ShadowSvgState {
    *  in baked mode is read by `emitShadowLeaves` for the per-leaf inline
    *  projection matrix. `null` = no casting mesh yet, suppress emission. */
   currentGroundCssZ: number | null = null;
+  /** Single wrapper div that owns all shadow SVGs (ground + receiver-face).
+   *  Lazily created on first emit. Mounted as the scene's first child so it
+   *  composites under meshes; itself 0×0 so it takes no layout but its
+   *  transform-style:preserve-3d lets the child SVGs still participate in
+   *  the scene's 3D context via their own matrix3d. The point is purely DOM
+   *  organization: groups every shadow SVG into one subtree (cleaner
+   *  DevTools, single attach/detach for "hide all shadows", no scattered
+   *  SVGs at scene root). */
+  shadowRoot: HTMLDivElement | null = null;
+}
+
+/** Lazily create + return the shared shadow-root wrapper inside `sceneEl`.
+ *  Idempotent: same element returned across emits; reattaches if removed
+ *  externally. */
+export function ensureShadowRoot(
+  state: ShadowSvgState,
+  doc: Document,
+  sceneEl: HTMLElement,
+): HTMLDivElement {
+  let root = state.shadowRoot;
+  if (!root) {
+    root = doc.createElement("div");
+    root.setAttribute("class", "polycss-shadows");
+    root.style.position = "absolute";
+    root.style.top = "0";
+    root.style.left = "0";
+    root.style.width = "0";
+    root.style.height = "0";
+    root.style.transformStyle = "preserve-3d";
+    root.style.pointerEvents = "none";
+    state.shadowRoot = root;
+  }
+  if (root.parentNode !== sceneEl) {
+    const first = sceneEl.firstChild;
+    if (first) sceneEl.insertBefore(root, first);
+    else sceneEl.appendChild(root);
+  }
+  return root;
 }
 
 /** Remove the ground-shadow SVG from the DOM and reset the state bag.
@@ -58,6 +96,7 @@ export function ensureGroundShadow(
   sceneEl: HTMLElement,
   debugAttrs = false,
 ): { svg: SVGSVGElement } {
+  const root = ensureShadowRoot(state, doc, sceneEl);
   let svg = state.groundSvg;
   if (!svg) {
     svg = doc.createElementNS(SVG_NS, "svg");
@@ -75,13 +114,9 @@ export function ensureGroundShadow(
     svg.style.pointerEvents = "none";
     svg.style.willChange = "transform";
     state.groundSvg = svg;
-    const sceneFirst = sceneEl.firstChild;
-    if (sceneFirst) sceneEl.insertBefore(svg, sceneFirst);
-    else sceneEl.appendChild(svg);
-  } else if (!svg.parentNode) {
-    const sceneFirst = sceneEl.firstChild;
-    if (sceneFirst) sceneEl.insertBefore(svg, sceneFirst);
-    else sceneEl.appendChild(svg);
+    root.appendChild(svg);
+  } else if (svg.parentNode !== root) {
+    root.appendChild(svg);
   }
   if (!state.groundVisible) {
     svg.style.display = "block";
