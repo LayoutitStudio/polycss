@@ -791,13 +791,13 @@ describe("renderPolygonsWithTextureAtlas", () => {
     result.dispose();
   });
 
-  it("uses bare u corner-shape boxes for exact chamfered solids", () => {
+  it("uses u corner-shape boxes for exact chamfered solids", () => {
     const doc = supportDoc({ borderShape: true, cornerShape: true });
 
     const chamfered = renderPolygonsWithTextureAtlas([CHAMFERED_SOLID], { doc });
     const chamferedElement = chamfered.rendered[0].element;
     expect(chamferedElement.tagName.toLowerCase()).toBe("u");
-    expect(chamferedElement.className).toBe("");
+    expect(chamferedElement.className).toBe("polycss-corner-shape-solid");
     expect(chamferedElement.getAttribute("style") ?? "").toMatch(/corner-[a-z-]+-shape:bevel/);
     expect(chamferedElement.style.getPropertyValue("border-shape")).toBe("");
     chamfered.dispose();
@@ -1606,7 +1606,7 @@ describe("renderPolygonsWithTextureAtlas — strategies.disable", () => {
     result.dispose();
   });
 
-  it("paints solid triangles with inline corner-shape when supported", () => {
+  it("leaves solid triangle corner-shape paint to base CSS when supported", () => {
     const doc = {
       defaultView: {
         CSS: {
@@ -1625,7 +1625,9 @@ describe("renderPolygonsWithTextureAtlas — strategies.disable", () => {
     const element = result.rendered[0].element;
     expect(element.tagName.toLowerCase()).toBe("u");
     expect(element.className).toBe("");
-    expect(element.style.getPropertyValue("corner-top-left-shape")).toBe("bevel");
+    expect(element.style.getPropertyValue("corner-top-left-shape")).toBe("");
+    expect(element.style.backgroundColor).toBe("");
+    expect(element.style.borderWidth).toBe("");
     result.dispose();
   });
 

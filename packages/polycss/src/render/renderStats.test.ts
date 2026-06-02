@@ -22,6 +22,7 @@ describe("collectPolyRenderStats", () => {
         <u></u>
         <u style="width:16px;height:16px;corner-bottom-left-shape:bevel"></u>
         <q></q>
+        <svg class="polycss-shadow polycss-shadow-svg"></svg>
         <div class="polycss-bucket"><b></b><s></s></div>
       </div>
     `;
@@ -29,7 +30,7 @@ describe("collectPolyRenderStats", () => {
     expect(collectPolyRenderStats(root, { polygonCount: 12 })).toEqual({
       polygonCount: 12,
       mountedPolygonLeafCount: 7,
-      shadowLeafCount: 1,
+      shadowLeafCount: 2,
       surfaceLeafCounts: { quad: 2, clippedSolid: 1, atlas: 2, stableTriangle: 2 },
       bucketCount: 1,
     });
@@ -38,14 +39,14 @@ describe("collectPolyRenderStats", () => {
   it("can scope counts to model subtrees", () => {
     const root = document.createElement("div");
     root.innerHTML = `
-      <div class="dn-model-mesh"><b></b><s></s><q></q></div>
+      <div class="dn-model-mesh"><b></b><s></s><q></q><svg class="polycss-shadow polycss-shadow-svg"></svg></div>
       <div class="polycss-helper"><b></b><u></u></div>
     `;
 
     expect(collectPolyRenderStats(root, { scopeSelector: ".dn-model-mesh" })).toEqual({
       polygonCount: 2,
       mountedPolygonLeafCount: 2,
-      shadowLeafCount: 1,
+      shadowLeafCount: 2,
       surfaceLeafCounts: { quad: 1, clippedSolid: 0, atlas: 1, stableTriangle: 0 },
       bucketCount: 0,
     });

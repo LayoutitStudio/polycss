@@ -3,8 +3,8 @@
  * (already normalized) and returns the data the framework wrappers need
  * to render.
  *
- * No cube grid, no per-Z layer bucketing, no wall mask, no neighbor-based
- * occlusion. Just a polygon list and a scene bbox.
+ * The renderer consumes a flat polygon list plus a scene bbox; higher-level
+ * culling or mesh optimization happens before this context is built.
  */
 import type { Polygon, Vec3 } from "../types";
 import { normalizePolygons, type NormalizeResult } from "./normalize";

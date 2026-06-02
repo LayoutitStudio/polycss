@@ -2,8 +2,9 @@
  * Minimal glTF 2.0 / GLB loader — extracts triangle meshes (positions +
  * indices + per-material color) into polycss polygons. Also exposes a
  * lightweight animation sampler for node TRS animation and simple skinned
- * meshes. Skips PBR extras and morph targets: the goal is still to render
- * polycss polygons, not be a complete glTF runtime.
+ * meshes. Applies static POSITION morph target weights, but skips PBR extras
+ * and morph animation: the goal is still to render polycss polygons, not be a
+ * complete glTF runtime.
  *
  * Supports both .glb (binary container with magic "glTF") and .gltf (JSON
  * with separate .bin) — for .gltf the caller must supply the buffers via
@@ -98,6 +99,20 @@ const PRIMITIVE_MODE_NAMES: Record<number, string> = {
   6: "TRIANGLE_FAN",
 };
 
+const MESHOPT_COMPRESSION_EXTENSIONS = [
+  "EXT_meshopt_compression",
+  "KHR_meshopt_compression",
+] as const;
+
+function isQuantizedPositionComponentType(componentType: number): boolean {
+  return (
+    componentType === 5120 ||
+    componentType === 5121 ||
+    componentType === 5122 ||
+    componentType === 5123
+  );
+}
+
 interface GltfAccessor {
   bufferView?: number;
   byteOffset?: number;
@@ -161,18 +176,21 @@ interface GltfPrimitive {
   indices?: number;
   material?: number;
   extensions?: Record<string, unknown>;
+  targets?: Array<{ POSITION?: number;[k: string]: number | undefined }>;
   /** glTF mode: 4 = TRIANGLES, 5 = TRIANGLE_STRIP, 6 = TRIANGLE_FAN. */
   mode?: number;
 }
 interface GltfMesh {
   name?: string;
   primitives: GltfPrimitive[];
+  weights?: number[];
 }
 interface GltfNode {
   name?: string;
   mesh?: number;
   skin?: number;
   children?: number[];
+  weights?: number[];
   /** TRS — PolyCSS reads either matrix or these three components. */
   matrix?: number[];
   translation?: number[];
@@ -302,7 +320,10 @@ function resolveBuffers(
   resolveBuffer?: (uri: string) => Uint8Array | Promise<Uint8Array>,
 ): Uint8Array[] {
   const specs = doc.buffers ?? [];
-  const canSkipMeshoptFallbackBuffers = (doc.extensionsRequired ?? []).includes("EXT_meshopt_compression");
+  const requiredExtensions = new Set(doc.extensionsRequired ?? []);
+  const canSkipMeshoptFallbackBuffers = MESHOPT_COMPRESSION_EXTENSIONS.some((extensionName) =>
+    requiredExtensions.has(extensionName)
+  );
   return specs.map((buffer, index) => {
     const uri = buffer.uri;
     if (uri) {
@@ -315,7 +336,10 @@ function resolveBuffers(
       throw new Error(`parseGltf: external buffer URI "${uri}" — provide options.resolveBuffer`);
     }
     if (index === 0 && glbBin) return glbBin;
-    if (canSkipMeshoptFallbackBuffers && buffer.extensions?.EXT_meshopt_compression) {
+    if (
+      canSkipMeshoptFallbackBuffers &&
+      MESHOPT_COMPRESSION_EXTENSIONS.some((extensionName) => buffer.extensions?.[extensionName])
+    ) {
       return new Uint8Array(0);
     }
     throw new Error(`parseGltf: buffer[${index}] has no uri and no GLB BIN chunk`);
@@ -752,13 +776,17 @@ function computeWorldMatrices(doc: GltfDoc, localMatrices: Mat4[]): Mat4[] {
   const nodes = doc.nodes ?? [];
   const worlds: Mat4[] = new Array(nodes.length);
   const visited = new Set<number>();
+  const visiting = new Set<number>();
 
   const walk = (nodeIdx: number, parentWorld: Mat4): void => {
     if (nodeIdx < 0 || nodeIdx >= nodes.length) return;
+    if (visiting.has(nodeIdx)) return;
     const world = mulMat4(parentWorld, localMatrices[nodeIdx] ?? IDENTITY4);
     worlds[nodeIdx] = world;
     visited.add(nodeIdx);
+    visiting.add(nodeIdx);
     for (const child of nodes[nodeIdx].children ?? []) walk(child, world);
+    visiting.delete(nodeIdx);
   };
 
   const roots = collectSceneRoots(doc);
@@ -927,27 +955,10 @@ function sampleAnimationChannel(sampler: RuntimeAnimationSampler, timeSeconds: n
   return lerpArray(a, b, amount);
 }
 
-function buildAnimationController(
-  doc: GltfDoc,
-  buffers: Uint8Array[],
-  sources: AnimatedPrimitiveSource[],
-  polygonRefs: Array<AnimatedPolygonSourceRef | undefined>,
-  project: (v: Vec3) => Vec3,
-  projectFrameVertex: (v: Vec3, out: Float64Array, offset: number) => void,
-): ParseAnimationController | undefined {
-  const animations = doc.animations ?? [];
-  if (animations.length === 0 || sources.length === 0) return undefined;
-
-  const basePoses = (doc.nodes ?? []).map((node) => poseFromNode(node));
-  const baseLocalMatrices = basePoses.map(poseLocalMatrix);
-  const bindWorldMatrices = computeWorldMatrices(doc, baseLocalMatrices);
-  const skins = (doc.skins ?? []).map((skin) => ({
-    joints: skin.joints ?? [],
-    inverseBindMatrices: readMat4Array(doc, buffers, skin.inverseBindMatrices, skin.joints?.length ?? 0),
-  }));
+function buildRuntimeAnimationClips(doc: GltfDoc, buffers: Uint8Array[]): RuntimeAnimationClip[] {
   const runtimeClips: RuntimeAnimationClip[] = [];
-  for (let i = 0; i < animations.length; i++) {
-    const animation = animations[i];
+  for (let i = 0; i < (doc.animations?.length ?? 0); i++) {
+    const animation = doc.animations![i]!;
     const runtimeSamplers = (animation.samplers ?? []).map((sampler): RuntimeAnimationSampler => {
       const input = readAccessorComponents(doc, buffers, sampler.input);
       const output = readAccessorComponents(doc, buffers, sampler.output);
@@ -982,6 +993,59 @@ function buildAnimationController(
       channels,
     });
   }
+  return runtimeClips;
+}
+
+function sampleRuntimeClipWorldMatrices(
+  doc: GltfDoc,
+  basePoses: NodePose[],
+  clip: RuntimeAnimationClip,
+  timeSecondsIn: number,
+): Mat4[] {
+  const duration = clip.info.duration;
+  const timeSeconds = duration > 0
+    ? ((timeSecondsIn % duration) + duration) % duration
+    : Math.max(0, timeSecondsIn);
+
+  const poses = basePoses.map((pose): NodePose => ({
+    translation: pose.translation.slice(),
+    rotation: pose.rotation.slice(),
+    scale: pose.scale.slice(),
+    matrix: pose.matrix ? pose.matrix.slice() as Mat4 : undefined,
+  }));
+
+  for (const channel of clip.channels) {
+    const pose = poses[channel.targetNode];
+    if (!pose) continue;
+    const value = sampleAnimationChannel(channel.sampler, timeSeconds, channel.path);
+    pose.matrix = undefined;
+    if (channel.path === "translation") pose.translation = value.slice(0, 3);
+    else if (channel.path === "rotation") pose.rotation = normalizeQuat(value.slice(0, 4));
+    else if (channel.path === "scale") pose.scale = value.slice(0, 3);
+  }
+
+  return computeWorldMatrices(doc, poses.map(poseLocalMatrix));
+}
+
+function buildAnimationController(
+  doc: GltfDoc,
+  buffers: Uint8Array[],
+  sources: AnimatedPrimitiveSource[],
+  polygonRefs: Array<AnimatedPolygonSourceRef | undefined>,
+  project: (v: Vec3) => Vec3,
+  projectFrameVertex: (v: Vec3, out: Float64Array, offset: number) => void,
+): ParseAnimationController | undefined {
+  const animations = doc.animations ?? [];
+  if (animations.length === 0 || sources.length === 0) return undefined;
+
+  const basePoses = (doc.nodes ?? []).map((node) => poseFromNode(node));
+  const baseLocalMatrices = basePoses.map(poseLocalMatrix);
+  const bindWorldMatrices = computeWorldMatrices(doc, baseLocalMatrices);
+  const skins = (doc.skins ?? []).map((skin) => ({
+    joints: skin.joints ?? [],
+    inverseBindMatrices: readMat4Array(doc, buffers, skin.inverseBindMatrices, skin.joints?.length ?? 0),
+  }));
+  const runtimeClips = buildRuntimeAnimationClips(doc, buffers);
 
   const clips = runtimeClips.map((clip) => clip.info);
   if (clips.length === 0) return undefined;
@@ -1074,32 +1138,7 @@ function buildAnimationController(
         ? runtimeClips[clipRef]
         : runtimeClips.find((candidate) => candidate.info.name === clipRef);
       if (!clip) return null;
-      const duration = clip.info.duration;
-      const timeSeconds = duration > 0
-        ? ((timeSecondsIn % duration) + duration) % duration
-        : Math.max(0, timeSecondsIn);
-
-      const poses = basePoses.map((pose): NodePose => ({
-        translation: pose.translation.slice(),
-        rotation: pose.rotation.slice(),
-        scale: pose.scale.slice(),
-        matrix: pose.matrix ? pose.matrix.slice() as Mat4 : undefined,
-      }));
-
-      for (const channel of clip.channels) {
-        const pose = poses[channel.targetNode];
-        if (!pose) continue;
-        const value = sampleAnimationChannel(channel.sampler, timeSeconds, channel.path);
-        // Animated TRS channels override matrix-based locals per glTF's node
-        // animation model; converting arbitrary matrices to TRS is intentionally
-        // out of scope for this minimal runtime.
-        pose.matrix = undefined;
-        if (channel.path === "translation") pose.translation = value.slice(0, 3);
-        else if (channel.path === "rotation") pose.rotation = normalizeQuat(value.slice(0, 4));
-        else if (channel.path === "scale") pose.scale = value.slice(0, 3);
-      }
-
-      return computeWorldMatrices(doc, poses.map(poseLocalMatrix));
+      return sampleRuntimeClipWorldMatrices(doc, basePoses, clip, timeSecondsIn);
     };
 
     const computeSourceWorldPositions = (
@@ -1380,6 +1419,9 @@ export function parseGltf(input: ArrayBuffer | Uint8Array, options?: GltfParseOp
   const warnings: string[] = [];
   const warningKeys = new Set<string>();
   const requiredExtensions = new Set(doc.extensionsRequired ?? []);
+  const usesMeshQuantization =
+    requiredExtensions.has("KHR_mesh_quantization") ||
+    (doc.extensionsUsed ?? []).includes("KHR_mesh_quantization");
 
   function pushWarningOnce(key: string, warning: string): void {
     if (warningKeys.has(key)) return;
@@ -1401,13 +1443,80 @@ export function parseGltf(input: ArrayBuffer | Uint8Array, options?: GltfParseOp
     return false;
   }
 
-  function primitiveUsesRequiredMeshopt(prim: GltfPrimitive): boolean {
-    if (!requiredExtensions.has("EXT_meshopt_compression")) return false;
-    if (prim.extensions?.EXT_meshopt_compression) return true;
-    if (accessorUsesBufferViewExtension(prim.indices, "EXT_meshopt_compression")) return true;
-    return Object.values(prim.attributes ?? {}).some((accessorIdx) =>
-      accessorUsesBufferViewExtension(accessorIdx, "EXT_meshopt_compression")
+  function primitiveUsesRequiredMeshopt(prim: GltfPrimitive): string | undefined {
+    for (const extensionName of MESHOPT_COMPRESSION_EXTENSIONS) {
+      if (!requiredExtensions.has(extensionName)) continue;
+      if (prim.extensions?.[extensionName]) return extensionName;
+      if (accessorUsesBufferViewExtension(prim.indices, extensionName)) return extensionName;
+      if (Object.values(prim.attributes ?? {}).some((accessorIdx) =>
+        accessorUsesBufferViewExtension(accessorIdx, extensionName)
+      )) {
+        return extensionName;
+      }
+    }
+    return undefined;
+  }
+
+  function canUsePositionAccessor(accessorIdx: number, array: AccessorArray): boolean {
+    if (array instanceof Float32Array) return true;
+    const acc = doc.accessors?.[accessorIdx];
+    return (
+      usesMeshQuantization &&
+      acc?.type === "VEC3" &&
+      isQuantizedPositionComponentType(acc.componentType)
     );
+  }
+
+  function morphWeightsFor(mesh: GltfMesh, meshNode: number | null): number[] {
+    const nodeWeights = meshNode !== null ? doc.nodes?.[meshNode]?.weights : undefined;
+    return nodeWeights ?? mesh.weights ?? [];
+  }
+
+  function buildMorphPositionOffsets(
+    mesh: GltfMesh,
+    meshIdx: number,
+    prim: GltfPrimitive,
+    meshNode: number | null,
+    vertCount: number,
+  ): Vec3[] | undefined {
+    const targets = prim.targets;
+    if (!targets || targets.length === 0) return undefined;
+    const weights = morphWeightsFor(mesh, meshNode);
+    if (!weights.some((weight) => Number.isFinite(weight) && weight !== 0)) return undefined;
+
+    const offsets: Vec3[] = Array.from({ length: vertCount }, () => [0, 0, 0]);
+    let touched = false;
+    for (let targetIndex = 0; targetIndex < targets.length; targetIndex++) {
+      const weight = weights[targetIndex] ?? 0;
+      if (!Number.isFinite(weight) || weight === 0) continue;
+      const positionAccessor = targets[targetIndex]?.POSITION;
+      if (positionAccessor === undefined) continue;
+      const { array, count, componentCount } = readAccessor(doc, buffers, positionAccessor);
+      if (count !== vertCount || componentCount < 3) {
+        pushWarningOnce(
+          `morph-position-count:${meshIdx}:${targetIndex}`,
+          `Mesh ${mesh.name ?? meshIdx}: skipped morph target ${targetIndex} POSITION with mismatched count`,
+        );
+        continue;
+      }
+      if (!canUsePositionAccessor(positionAccessor, array)) {
+        pushWarningOnce(
+          `morph-position-type:${meshIdx}:${targetIndex}`,
+          `Mesh ${mesh.name ?? meshIdx}: skipped morph target ${targetIndex} POSITION with unsupported accessor type`,
+        );
+        continue;
+      }
+      touched = true;
+      for (let i = 0; i < vertCount; i++) {
+        const base = i * componentCount;
+        const offset = offsets[i]!;
+        offset[0] += Number(array[base]) * weight;
+        offset[1] += Number(array[base + 1]) * weight;
+        offset[2] += Number(array[base + 2]) * weight;
+      }
+    }
+
+    return touched ? offsets : undefined;
   }
 
   interface RawTri {
@@ -1420,6 +1529,7 @@ export function parseGltf(input: ArrayBuffer | Uint8Array, options?: GltfParseOp
     textureAlphaMode?: PolyTextureAlphaMode;
     doubleSided?: boolean;
     uvs?: Vec2[];
+    simplifySourceVertexKeys?: string[];
     source?: AnimatedPrimitiveSource;
     sourceIndex?: number;
     sourceTriangleIndex?: number;
@@ -1459,7 +1569,16 @@ export function parseGltf(input: ArrayBuffer | Uint8Array, options?: GltfParseOp
   function emitMesh(meshIdx: number, world: Mat4, meshNode: number | null): void {
     const mesh = doc.meshes?.[meshIdx];
     if (!mesh) return;
-    for (const prim of mesh.primitives) {
+    if (!Array.isArray(mesh.primitives)) {
+      pushWarningOnce(
+        `malformed-primitives:${meshIdx}`,
+        `Mesh ${mesh.name ?? meshIdx}: skipped mesh with non-array primitives`,
+      );
+      return;
+    }
+    for (let primitiveIndex = 0; primitiveIndex < mesh.primitives.length; primitiveIndex += 1) {
+      const prim = mesh.primitives[primitiveIndex];
+      if (!prim) continue;
       const mode = prim.mode ?? 4;
       if (mode !== 4 && mode !== 5 && mode !== 6) {
         const modeName = PRIMITIVE_MODE_NAMES[mode] ?? `mode ${mode}`;
@@ -1476,10 +1595,11 @@ export function parseGltf(input: ArrayBuffer | Uint8Array, options?: GltfParseOp
         );
         continue;
       }
-      if (primitiveUsesRequiredMeshopt(prim)) {
+      const meshoptExtension = primitiveUsesRequiredMeshopt(prim);
+      if (meshoptExtension) {
         pushWarningOnce(
-          "EXT_meshopt_compression",
-          "Skipped primitives with unsupported required extension EXT_meshopt_compression",
+          meshoptExtension,
+          `Skipped primitives with unsupported required extension ${meshoptExtension}`,
         );
         continue;
       }
@@ -1515,12 +1635,24 @@ export function parseGltf(input: ArrayBuffer | Uint8Array, options?: GltfParseOp
         : undefined;
       const textureTexCoord = texture ? materialTextureInfo?.texCoord ?? 0 : 0;
 
-      const { array: posArr, count: vertCount } = readAccessor(doc, buffers, prim.attributes.POSITION);
-      if (!(posArr instanceof Float32Array)) continue;
+      const positionAccessor = prim.attributes.POSITION;
+      const {
+        array: posArr,
+        count: vertCount,
+        componentCount: positionComponentCount,
+      } = readAccessor(doc, buffers, positionAccessor);
+      if (!canUsePositionAccessor(positionAccessor, posArr)) continue;
+      const morphPositionOffsets = buildMorphPositionOffsets(mesh, meshIdx, prim, meshNode, vertCount);
       const localPositions: Vec3[] = [];
       const positions: Vec3[] = [];
       for (let i = 0; i < vertCount; i++) {
-        const local: Vec3 = [posArr[i * 3], posArr[i * 3 + 1], posArr[i * 3 + 2]];
+        const base = i * positionComponentCount;
+        const morphOffset = morphPositionOffsets?.[i];
+        const local: Vec3 = [
+          Number(posArr[base]) + (morphOffset?.[0] ?? 0),
+          Number(posArr[base + 1]) + (morphOffset?.[1] ?? 0),
+          Number(posArr[base + 2]) + (morphOffset?.[2] ?? 0),
+        ];
         localPositions.push(local);
         positions.push(transformPoint(world, local));
       }
@@ -1576,17 +1708,21 @@ export function parseGltf(input: ArrayBuffer | Uint8Array, options?: GltfParseOp
       }
 
       for (let i = 0; i + 2 < indices.length; i += 3) {
+        const i0 = indices[i]!;
+        const i1 = indices[i + 1]!;
+        const i2 = indices[i + 2]!;
         const sourceTriangleIndex = animatedSource ? animatedSource.triangleMask.length : undefined;
         if (animatedSource) animatedSource.triangleMask.push(false);
-        const v0 = positions[indices[i]];
-        const v1 = positions[indices[i + 1]];
-        const v2 = positions[indices[i + 2]];
+        const v0 = positions[i0];
+        const v1 = positions[i1];
+        const v2 = positions[i2];
         if (!v0 || !v1 || !v2) continue;
         let triUvs: Vec2[] | undefined;
         if (uvs && texture) {
-          const u0 = uvs[indices[i]], u1 = uvs[indices[i + 1]], u2 = uvs[indices[i + 2]];
+          const u0 = uvs[i0], u1 = uvs[i1], u2 = uvs[i2];
           if (u0 && u1 && u2) triUvs = [u0, u1, u2];
         }
+        const keyPrefix = `${meshIdx}:${primitiveIndex}:${meshNode ?? "root"}`;
         rawTris.push({
           v0,
           v1,
@@ -1597,6 +1733,11 @@ export function parseGltf(input: ArrayBuffer | Uint8Array, options?: GltfParseOp
           textureAlphaMode,
           doubleSided,
           uvs: triUvs,
+          simplifySourceVertexKeys: [
+            `${keyPrefix}:${i0}`,
+            `${keyPrefix}:${i1}`,
+            `${keyPrefix}:${i2}`,
+          ],
           source: animatedSource,
           sourceIndex: animatedSource?.sourceIndex,
           sourceTriangleIndex,
@@ -1605,21 +1746,121 @@ export function parseGltf(input: ArrayBuffer | Uint8Array, options?: GltfParseOp
     }
   }
 
-  function walkNode(nodeIdx: number, parentWorld: Mat4): void {
+  function walkNode(nodeIdx: number, parentWorld: Mat4, ancestors: Set<number>): void {
+    if (ancestors.has(nodeIdx)) {
+      pushWarningOnce(
+        `recursive-node:${nodeIdx}`,
+        `Skipped recursive node reference ${nodeIdx} in glTF scene graph`,
+      );
+      return;
+    }
     const node = doc.nodes?.[nodeIdx];
     if (!node) return;
     const world = mulMat4(parentWorld, nodeLocalMatrix(node));
     if (typeof node.mesh === "number") emitMesh(node.mesh, world, nodeIdx);
-    for (const child of node.children ?? []) walkNode(child, world);
+    ancestors.add(nodeIdx);
+    for (const child of node.children ?? []) walkNode(child, world, ancestors);
+    ancestors.delete(nodeIdx);
+  }
+
+  function seedTimesForClip(clip: RuntimeAnimationClip): number[] {
+    const times = new Set<number>();
+    const duration = clip.info.duration;
+    for (const channel of clip.channels) {
+      for (const time of channel.sampler.input) {
+        if (!Number.isFinite(time) || time <= 0) continue;
+        if (duration > 0 && time >= duration) continue;
+        times.add(time);
+      }
+    }
+    if (duration > 0) {
+      times.add(duration * 0.25);
+      times.add(duration * 0.5);
+      times.add(duration * 0.75);
+    }
+    return Array.from(times).sort((a, b) => a - b).slice(0, 128);
+  }
+
+  function animatedRawTriFrame(
+    tri: RawTri,
+    worldMatrices: Mat4[],
+  ): { v0: Vec3; v1: Vec3; v2: Vec3 } | undefined {
+    const source = tri.source;
+    if (!source || tri.sourceTriangleIndex === undefined || source.skinIndex !== undefined) return undefined;
+    const offset = tri.sourceTriangleIndex * 3;
+    const i0 = source.indices[offset];
+    const i1 = source.indices[offset + 1];
+    const i2 = source.indices[offset + 2];
+    const p0 = i0 !== undefined ? source.positions[i0] : undefined;
+    const p1 = i1 !== undefined ? source.positions[i1] : undefined;
+    const p2 = i2 !== undefined ? source.positions[i2] : undefined;
+    if (!p0 || !p1 || !p2) return undefined;
+    const meshWorld = source.meshNode !== null
+      ? (worldMatrices[source.meshNode] ?? source.meshBindWorld)
+      : source.meshBindWorld;
+    return {
+      v0: transformPoint(meshWorld, p0),
+      v1: transformPoint(meshWorld, p1),
+      v2: transformPoint(meshWorld, p2),
+    };
+  }
+
+  function sameWorldVertex(a: Vec3, b: Vec3): boolean {
+    return a[0] === b[0] && a[1] === b[1] && a[2] === b[2];
+  }
+
+  function isDegenerateRawTriFrame(frame: { v0: Vec3; v1: Vec3; v2: Vec3 }): boolean {
+    return (
+      sameWorldVertex(frame.v0, frame.v1) ||
+      sameWorldVertex(frame.v0, frame.v2) ||
+      sameWorldVertex(frame.v1, frame.v2)
+    );
+  }
+
+  function hasNonDegenerateRawTri(): boolean {
+    return rawTris.some((tri) => !isDegenerateRawTriFrame(tri));
+  }
+
+  function seedCollapsedRawTrisFromAnimation(): void {
+    if (rawTris.length === 0 || (doc.animations?.length ?? 0) === 0 || hasNonDegenerateRawTri()) return;
+    const runtimeClips = buildRuntimeAnimationClips(doc, buffers);
+    if (runtimeClips.length === 0) return;
+    const basePoses = (doc.nodes ?? []).map((node) => poseFromNode(node));
+    const seededFrames: Array<{ v0: Vec3; v1: Vec3; v2: Vec3 } | undefined> =
+      new Array(rawTris.length);
+
+    for (const clip of runtimeClips) {
+      for (const time of seedTimesForClip(clip)) {
+        const worldMatrices = sampleRuntimeClipWorldMatrices(doc, basePoses, clip, time);
+        for (let i = 0; i < rawTris.length; i++) {
+          if (seededFrames[i]) continue;
+          const frame = animatedRawTriFrame(rawTris[i]!, worldMatrices);
+          if (frame && !isDegenerateRawTriFrame(frame)) seededFrames[i] = frame;
+        }
+      }
+    }
+
+    if (!seededFrames.some(Boolean)) return;
+    for (let i = 0; i < rawTris.length; i++) {
+      const frame = seededFrames[i];
+      if (!frame) continue;
+      rawTris[i]!.v0 = frame.v0;
+      rawTris[i]!.v1 = frame.v1;
+      rawTris[i]!.v2 = frame.v2;
+    }
   }
 
   const sceneIdx = doc.scene ?? 0;
   const sceneRoots = doc.scenes?.[sceneIdx]?.nodes;
   if (sceneRoots && sceneRoots.length > 0) {
-    for (const r of sceneRoots) walkNode(r, IDENTITY4);
+    for (const r of sceneRoots) walkNode(r, IDENTITY4, new Set());
   } else {
+    if ((doc.meshes?.length ?? 0) === 0) {
+      pushWarningOnce("no-gltf-meshes", "No glTF meshes found");
+    }
     for (let i = 0; i < (doc.meshes?.length ?? 0); i++) emitMesh(i, IDENTITY4, null);
   }
+  seedCollapsedRawTrisFromAnimation();
 
   const dispose = makeDispose(objectUrls);
 
@@ -1675,6 +1916,7 @@ export function parseGltf(input: ArrayBuffer | Uint8Array, options?: GltfParseOp
         out[offset + 2] = round((v[1] - minY) * scale);
       };
   const polygons: Polygon[] = [];
+  let projectedDegenerateCount = 0;
   for (const t of rawTris) {
     const v0 = project(t.v0);
     const v1 = project(t.v1);
@@ -1683,7 +1925,10 @@ export function parseGltf(input: ArrayBuffer | Uint8Array, options?: GltfParseOp
     if (t.source && t.sourceTriangleIndex !== undefined) {
       t.source.triangleMask[t.sourceTriangleIndex] = !degenerate;
     }
-    if (degenerate) continue;
+    if (degenerate) {
+      projectedDegenerateCount++;
+      continue;
+    }
     const p: Polygon = {
       vertices: [v0, v1, v2],
       color: t.color,
@@ -1693,11 +1938,18 @@ export function parseGltf(input: ArrayBuffer | Uint8Array, options?: GltfParseOp
     if (t.texture && t.textureAlphaMode) p.textureAlphaMode = t.textureAlphaMode;
     if (t.doubleSided) p.doubleSided = true;
     if (t.uvs) p.uvs = t.uvs;
+    if (t.simplifySourceVertexKeys) p.simplifySourceVertexKeys = t.simplifySourceVertexKeys;
     polygons.push(p);
     animatedPolygonRefs.push(
       t.sourceIndex !== undefined && t.sourceTriangleIndex !== undefined
         ? { sourceIndex: t.sourceIndex, triangleIndex: t.sourceTriangleIndex }
         : undefined,
+    );
+  }
+  if (polygons.length === 0 && projectedDegenerateCount > 0) {
+    pushWarningOnce(
+      "all-projected-triangles-degenerate",
+      "No non-degenerate glTF triangles remained after normalization",
     );
   }
   const animation = buildAnimationController(

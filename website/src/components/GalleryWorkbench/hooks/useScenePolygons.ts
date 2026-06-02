@@ -43,6 +43,12 @@ export function useScenePolygons({
     if (loaded.kind === "primitive") {
       return optimizeMeshPolygons(loaded.rawPolygons, { meshResolution: "lossless" });
     }
+    if (
+      loaded.optimizedPolygons &&
+      loaded.optimizedMeshResolution === effectiveMeshResolution
+    ) {
+      return loaded.optimizedPolygons;
+    }
     return optimizeMeshPolygons(loaded.rawPolygons, {
       meshResolution: effectiveMeshResolution,
     });

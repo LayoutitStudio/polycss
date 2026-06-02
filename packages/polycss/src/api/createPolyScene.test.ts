@@ -449,6 +449,20 @@ describe("createPolyScene", () => {
       expect(handle.polygons.length).toBe(2);
     });
 
+    it("resolves polygon leaves back to their owning mesh", () => {
+      scene = makeScene(host);
+      const first = scene.add(makeParseResult([triangle()]), { id: "first", merge: false });
+      const second = scene.add(makeParseResult([triangle("#00ff00")]), { id: "second", merge: false });
+      const leaf = second.element.querySelector("i,b,s,u") as HTMLElement | null;
+      expect(leaf).not.toBeNull();
+      expect(scene.findMeshByElement(leaf)).toBe(second);
+      expect(scene.findMeshByElement(first.element)).toBe(first);
+
+      second.remove();
+      expect(scene.findMeshByElement(leaf)).toBeNull();
+      expect(scene.findMeshByElement(second.element)).toBeNull();
+    });
+
     it("routes exact raw vox sources through the direct voxel renderer", () => {
       scene = makeScene(host);
       scene.add(makeVoxelExactParseResult(), { merge: false });
@@ -2225,7 +2239,7 @@ describe("createPolyScene", () => {
       expect(host.querySelectorAll(".polycss-shadow").length).toBe(1);
     });
 
-    it("shadow leaves have the polycss-shadow class", () => {
+    it("shadow SVGs have the polycss-shadow class", () => {
       scene = makeScene(host, dynOpts);
       scene.add(makeParseResult([triangle()]), { castShadow: true });
       const shadows = host.querySelectorAll(".polycss-shadow");
@@ -2265,7 +2279,7 @@ describe("createPolyScene", () => {
       expect(host.querySelectorAll(".polycss-shadow").length).toBe(1);
     });
 
-    it("toggling castShadow via setTransform adds/removes shadow leaves", () => {
+    it("toggling castShadow via setTransform adds/removes shadow SVGs", () => {
       scene = makeScene(host, dynOpts);
       const handle = scene.add(makeParseResult([triangle()]), { castShadow: false });
       expect(host.querySelectorAll(".polycss-shadow").length).toBe(0);
@@ -2300,12 +2314,12 @@ describe("createPolyScene", () => {
       expect(dynamicShadow.style.transform).toMatch(/^translate3d\(/);
     });
 
-    it("textured polygons (s) ALSO emit shadow leaves", () => {
+    it("textured polygons (s) ALSO emit shadow SVGs", () => {
       scene = makeScene(host, dynOpts);
       scene.add(makeParseResult([texturedTriangle()]), { castShadow: true });
       // Shadows depend only on the polygon's outline, not its texture
       // content. Atlas (<s>) polygons cast shadows the same way as
-      // <b>/<i>/<u> — a flat <q> projected onto the ground. Otherwise
+      // solid strategy tags: as part of the mesh's SVG silhouette. Otherwise
       // fully textured meshes (e.g. Frog Guy) get no shadow at all.
       expect(host.querySelectorAll(".polycss-shadow").length).toBe(1);
     });

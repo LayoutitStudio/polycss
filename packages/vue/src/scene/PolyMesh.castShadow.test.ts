@@ -3,11 +3,10 @@
  *
  * Required cases:
  *   - default → no .polycss-shadow elements
- *   - castShadow + dynamic → 1 shadow per non-duplicate polygon
- *   - castShadow + baked → 0 shadows
- *   - shadow tag is <q>
- *   - transform contains var(--shadow-proj) then matrix3d
- *   - --shadow-ground-cssz is set on the scene element when a casting mesh is added
+ *   - castShadow + dynamic → per-mesh SVG shadow
+ *   - castShadow + baked → per-mesh SVG shadow
+ *   - shadow tag is <svg>
+ *   - shadow transform is a translated SVG surface
  *   - toggling castShadow reactively adds/removes shadows
  *   - textured polygons ALSO cast shadows
  */
@@ -166,7 +165,7 @@ describe("PolyMesh (Vue) — castShadow", () => {
     expect(sceneEl.style.getPropertyValue("--shadow-ground-cssz")).toBe("");
   });
 
-  it("toggling castShadow reactively adds and removes shadow leaves", async () => {
+  it("toggling castShadow reactively adds and removes shadow SVGs", async () => {
     const container = document.createElement("div");
     document.body.appendChild(container);
 
@@ -196,7 +195,7 @@ describe("PolyMesh (Vue) — castShadow", () => {
     expect(container.querySelectorAll(".polycss-shadow").length).toBe(0);
   });
 
-  it("textured polygons (s) ALSO emit shadow leaves", async () => {
+  it("textured polygons (s) ALSO emit shadow SVGs", async () => {
     const { container } = mount(DYNAMIC_SCENE_PROPS, {
       polygons: [TEXTURED_TRIANGLE],
       castShadow: true,

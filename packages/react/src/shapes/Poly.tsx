@@ -121,11 +121,12 @@ function MaterialDirectPoly({
 }
 
 /**
- * Poly — renders one polygon as an atlas-backed DOM sprite.
+ * Poly — renders one polygon as a render-strategy DOM leaf.
  *
  * Public API: `{ vertices, color?, texture?, uvs?, data? }` plus DOM
- * passthrough props. The atlas renderer handles both textured and solid-color
- * faces, so `<Poly>` never emits SVG in the normal render path.
+ * passthrough props. Solid faces use the cheapest supported solid strategy;
+ * textured faces use the atlas path. `<Poly>` never emits SVG in the normal
+ * render path.
  *
  * Wrapped in React.memo so parent re-renders (e.g. camera rotation updating
  * rotY state) do not re-render stable polygon children. The shallow-equality

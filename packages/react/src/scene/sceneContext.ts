@@ -73,10 +73,10 @@ export interface PolySceneContextValue {
   registerShadowReceiver?: (meshId: symbol, registered: boolean) => void;
   /**
    * Computed CSS-Z of the shadow ground plane (= min world Z across all
-   * casting meshes + scene.shadow.lift, in CSS pixels). Dynamic mode also
-   * mirrors this into the `--shadow-ground-cssz` CSS var. Baked-mode
-   * mesh code reads it directly to bake the inline `matrix3d(...)` on
-   * each shadow leaf. `null` means there are no caster meshes yet.
+   * casting meshes + scene.shadow.lift, in CSS pixels). Mesh shadow SVGs
+   * read it directly when projecting caster geometry. Dynamic mode also
+   * mirrors this into `--shadow-ground-cssz` for the retained internal
+   * `<q>` shadow CSS path. `null` means there are no caster meshes yet.
    */
   groundCssZ?: number | null;
   /**

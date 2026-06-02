@@ -255,6 +255,16 @@ describe("optimizeMeshPolygons", () => {
     expect(optimizeMeshPolygons(input)).toHaveLength(1);
   });
 
+  it("stops once the current best result reaches the requested polygon count", () => {
+    const input: Polygon[] = [
+      { vertices: [[0, 0, 0], [1, 0, 0], [1, 1, 0]], color: "#f00" },
+      { vertices: [[0, 0, 0], [1, 1, 0], [0, 1, 0.08]], color: "#f00" },
+    ];
+
+    expect(optimizeMeshPolygons(input, { stopAtPolygonCount: 2 })).toHaveLength(2);
+    expect(optimizeMeshPolygons(input, { stopAtPolygonCount: 1 })).toHaveLength(1);
+  });
+
   it("allows lossy approximate merge for same-texture UV polygons", () => {
     const input: Polygon[] = [
       {

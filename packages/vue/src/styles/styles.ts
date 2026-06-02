@@ -153,6 +153,36 @@ const CORE_BASE_STYLES = `
   border-width: 0 16px 32px 16px;
 }
 
+@supports (corner-top-left-shape: bevel) and (corner-top-right-shape: bevel) {
+  .polycss-scene > u,
+  .polycss-mesh > u,
+  .polycss-bucket > u {
+    border-width: 0;
+    width: 32px;
+    height: 32px;
+    background-color: currentColor;
+    border-top-left-radius: 50% 100%;
+    border-top-right-radius: 50% 100%;
+    corner-top-left-shape: bevel;
+    corner-top-right-shape: bevel;
+  }
+
+  .polycss-scene > u.polycss-corner-shape-solid,
+  .polycss-mesh > u.polycss-corner-shape-solid,
+  .polycss-bucket > u.polycss-corner-shape-solid {
+    width: 16px;
+    height: 16px;
+    box-sizing: border-box;
+    border: 0;
+    background: currentColor;
+    border-radius: 0;
+    corner-top-left-shape: initial;
+    corner-top-right-shape: initial;
+    corner-bottom-right-shape: initial;
+    corner-bottom-left-shape: initial;
+  }
+}
+
 /* ── Gizmo override ─────────────────────────────────────────────────────── */
 
 /*
@@ -312,17 +342,11 @@ const CORE_BASE_STYLES = `
   );
 }
 
-/* ── Cast shadow projection (dynamic-mode CSS path) ────────────────────── */
+/* ── Retained <q> shadow projection (dynamic-mode CSS path) ─────────────── */
 
-/* <q> — dedicated shadow leaf. Same border-shape rendering trick as <i>
-   (border-color: currentColor fills the polygon outline) but with its
-   own tag so we don't have to thread :not(.polycss-shadow) exclusions
-   through every dynamic-mode color rule. backface-visibility must be
-   visible because the projection matrix is near-rank-deficient and the
-   resulting plane's normal can read as back-facing under some camera
-   angles; the leaf is intentionally always painted. Strip the UA's
-   default ::before/::after open-/close-quote so the element is just a
-   styled box. */
+/* Reserved internal <q> shadow element rules. Current shadow emission uses SVG
+   surfaces; these rules keep any retained <q> markup styled as a plain
+   border-shape leaf instead of inheriting UA quote styling. */
 .polycss-scene q {
   position: absolute;
   display: block;
@@ -371,8 +395,9 @@ const CORE_BASE_STYLES = `
     transparent var(--ring-outer-r));
 }
 
-/* Shadow projection matrix. Projects any 3D point P onto the horizontal
-   ground plane (cssZ ≈ G) along the CSS-space light direction (--clx/y/z).
+/* Projection matrix for retained internal <q> shadow leaves. Projects any
+   3D point P onto the horizontal ground plane (cssZ ≈ G) along the CSS-space
+   light direction (--clx/y/z).
 
    The strict projection would set m22=0 (output.z is a constant G, flat).
    Chromium SKIPS rendering elements whose composed transform is singular.
@@ -394,12 +419,9 @@ const CORE_BASE_STYLES = `
   );
 }
 
-/* <q> shadow leaf — Lambert-gated opacity. Polygons facing the light cast
-   full shadow; polygons facing away cast zero shadow. The * 10 multiplier
-   sharpens the cutoff so small positive Lambert values jump quickly to 1,
-   giving a near-binary visibility decision with a smooth edge transition.
-   Scoped to dynamic mode: baked-mode shadow leaves are dropped up-front
-   by isBakedShadowCaster() and don't carry --pnx/--pny/--pnz. */
+/* Retained <q> opacity gate. Polygons facing the light cast full shadow;
+   polygons facing away cast zero shadow. The * 10 multiplier sharpens the
+   cutoff so small positive Lambert values jump quickly to 1. */
 .polycss-scene[data-polycss-lighting="dynamic"] q {
   opacity: clamp(0, calc((var(--pnx) * var(--clx) + var(--pny) * var(--cly) + var(--pnz) * var(--clz)) * 10), 1);
 }

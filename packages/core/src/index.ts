@@ -99,6 +99,14 @@ export { optimizeMeshPolygons } from "./merge/optimizePolygons";
 export type {
   OptimizeMeshPolygonsOptions,
 } from "./merge/optimizePolygons";
+export { optimizeMeshParseResult } from "./parser/optimizeMeshParseResult";
+export type {
+  OptimizeMeshParseResultOptions,
+} from "./parser/optimizeMeshParseResult";
+export { simplifyTriangleMeshPolygons } from "./merge/simplifyTriangleMesh";
+export type {
+  SimplifyTriangleMeshPolygonsOptions,
+} from "./merge/simplifyTriangleMesh";
 export {
   DEFAULT_SEAM_FACET_SPLIT_OPTIONS,
   DEFAULT_SEAM_OVERLAP_OPTIONS,

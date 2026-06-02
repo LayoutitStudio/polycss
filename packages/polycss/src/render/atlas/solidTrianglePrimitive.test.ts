@@ -70,13 +70,14 @@ const TRIANGLE_2: Polygon = {
 // ---------------------------------------------------------------------------
 
 describe("solid triangle primitive — corner-bevel vs border", () => {
-  it("corner-shape supported → corner paint is inline and classless", () => {
+  it("corner-shape supported → corner paint is classless and CSS-owned", () => {
     const doc = makeDoc({ cornerShape: true });
     const result = renderPolygonsWithStableTriangles([TRIANGLE], { doc });
     expect(result).not.toBeNull();
     const element = result!.rendered[0].element;
     expect(element.className).toBe("");
-    expect(element.style.getPropertyValue("corner-top-left-shape")).toBe("bevel");
+    expect(element.style.getPropertyValue("corner-top-left-shape")).toBe("");
+    expect(element.style.borderWidth).toBe("");
     result!.dispose();
   });
 
@@ -170,13 +171,14 @@ describe("solid triangle primitive — strategy disable interactions", () => {
     expect(result).toBeNull();
   });
 
-  it("multiple triangles: all get the same inline primitive consistently", () => {
+  it("multiple triangles: all use the CSS-owned primitive consistently", () => {
     const doc = makeDoc({ cornerShape: true });
     const result = renderPolygonsWithStableTriangles([TRIANGLE, TRIANGLE_2], { doc });
     expect(result).not.toBeNull();
     for (const { element } of result!.rendered) {
       expect(element.className).toBe("");
-      expect(element.style.getPropertyValue("corner-top-left-shape")).toBe("bevel");
+      expect(element.style.getPropertyValue("corner-top-left-shape")).toBe("");
+      expect(element.style.borderWidth).toBe("");
     }
     result!.dispose();
   });

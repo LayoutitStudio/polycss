@@ -33,6 +33,8 @@ import {
   DEFAULT_AMBIENT_INTENSITY,
 } from "@layoutit/polycss-core";
 
+const CORNER_SHAPE_SOLID_CLASS = "polycss-corner-shape-solid";
+
 export const ELEMENT_DATA_KEYS = new WeakMap<HTMLElement, string[]>();
 const ELEMENT_DATA_VALUES = new WeakMap<HTMLElement, Map<string, string>>();
 
@@ -295,6 +297,7 @@ export function createCornerShapeSolidElement(
   skipDynamicNormalVars = false,
 ): HTMLElement {
   const el = doc.createElement("u");
+  el.className = CORNER_SHAPE_SOLID_CLASS;
   el.setAttribute(
     "style",
     formatCornerShapeElementStyle(entry, geometry) +
@@ -364,6 +367,7 @@ export function updateCornerShapeElementWithStablePlan(
   solidPaintDefaults?: SolidPaintDefaults,
 ): void {
   el.style.visibility = "";
+  el.className = CORNER_SHAPE_SOLID_CLASS;
   el.setAttribute("style", formatCornerShapeElementStyle(entry, geometry));
   applySolidPaint(el, entry, textureLighting, solidPaintDefaults);
   setInlineStyleProperty(el, "background", "currentColor");

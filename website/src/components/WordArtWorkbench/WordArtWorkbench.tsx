@@ -135,7 +135,7 @@ function readable(hex: string): string {
   return lum > 150 ? "#0b0f18" : "#ffffff";
 }
 
-function fitZoom(polygons: Polygon[], stageW: number, stageH: number): number {
+function fitZoom(polygons: Polygon[], stageW: number, stageH: number, scaleX = 1, scaleY = 1): number {
   if (!polygons.length) return 0.06;
   let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity, minZ = Infinity, maxZ = -Infinity;
   for (const p of polygons) {
@@ -146,9 +146,13 @@ function fitZoom(polygons: Polygon[], stageW: number, stageH: number): number {
     }
   }
   // Flat text: Y = width (screen-right), X = height (screen-down), Z = depth.
-  // As the mesh turntables, width swings into depth, so fit the larger of the two.
-  const horizontal = Math.max(maxY - minY, maxZ - minZ);
-  const vertical = maxX - minX;
+  // As the mesh turntables, width swings into depth, so fit the larger of the
+  // two. Scale X/Y are applied as a CSS transform on the mesh (not baked), so
+  // multiply the base bounds by them here to frame the *scaled* word — the
+  // camera then compensates the wrapper scale, keeping the word framed and the
+  // texture ~base resolution.
+  const horizontal = Math.max((maxY - minY) * scaleX, maxZ - minZ);
+  const vertical = (maxX - minX) * scaleY;
   const fitW = (stageW * 0.7) / (Math.max(horizontal, 1) * BASE_TILE);
   const fitH = (stageH * 0.68) / (Math.max(vertical, 1) * BASE_TILE);
   return Math.max(0.01, Math.min(0.2, Math.min(fitW, fitH)));
@@ -215,7 +219,6 @@ export function WordArtWorkbench() {
   const [offset, setOffset] = useState(() => qn("offset", 0));
   const [curveSegments, setCurveSegments] = useState(() => qn("curve", 4));
   const [simplify, setSimplify] = useState(() => qn("simplify", 2));
-  const [merge, setMerge] = useState(() => qb("merge", false));
   const [profileSegments, setProfileSegments] = useState(() => qn("edge", 3));
   const [warpShape, setWarpShape] = useState<WarpShape>(() => qs("warp", "none") as WarpShape);
   const [warpAmount, setWarpAmount] = useState(() => qn("bend", 0.5));
@@ -313,7 +316,6 @@ export function WordArtWorkbench() {
     sn("offset", offset, 0);
     sn("curve", curveSegments, 1);
     sn("simplify", simplify, 2);
-    if (merge) p.set("merge", "1");
     sn("edge", profileSegments, 3);
     ss("warp", warpShape, "none");
     sn("bend", warpAmount, 0.5);
@@ -340,7 +342,7 @@ export function WordArtWorkbench() {
     if (layered) p.set("layer", "1");
     const search = p.toString();
     window.history.replaceState(null, "", `${window.location.pathname}${search ? `?${search}` : ""}${window.location.hash}`);
-  }, [text, entry, weight, italic, textCase, scaleX, scaleY, profile, depth, letterSpacing, lineHeight, align, underline, strike, color, sideColor, backColor, offset, curveSegments, simplify, merge, profileSegments, warpShape, warpAmount, spin, perspective, zoomScale, lightIntensity, ambient, lightColor, lightAz, lightEl, roundConvex, bezier, fillType, gradA, gradB, gradAngle, faceTex, sideFill, sideTex, backFill, backTex, outlineOn, outlineColor, outlineWidth, layered]);
+  }, [text, entry, weight, italic, textCase, scaleX, scaleY, profile, depth, letterSpacing, lineHeight, align, underline, strike, color, sideColor, backColor, offset, curveSegments, simplify, profileSegments, warpShape, warpAmount, spin, perspective, zoomScale, lightIntensity, ambient, lightColor, lightAz, lightEl, roundConvex, bezier, fillType, gradA, gradB, gradAngle, faceTex, sideFill, sideTex, backFill, backTex, outlineOn, outlineColor, outlineWidth, layered]);
 
   // Load the picked Google font whenever family / weight / style changes.
   useEffect(() => {
@@ -398,7 +400,8 @@ export function WordArtWorkbench() {
       size: 100,
       depth: layered ? 0 : depth,        // "Flat layers" = no edges (depth 0)
       profile: profileObj,
-      scale: [scaleX / 100, scaleY / 100],
+      // Scale X/Y are NOT baked here — they're a live CSS transform on the mesh
+      // wrapper (so they stretch the whole block uniformly and need no recompute).
       letterSpacing,
       lineHeight,
       align,
@@ -406,12 +409,17 @@ export function WordArtWorkbench() {
       strike,
       curveSteps: curveSegments,
       simplify,
-      merge,
       warp: { shape: warpShape, amount: warpAmount },
       faces: { front, sides, back },
       outline: outlineOn ? { color: outlineColor, width: outlineWidth } : undefined,
     });
-  }, [font, text, textCase, scaleX, scaleY, depth, profile, roundConvex, bezier, letterSpacing, lineHeight, align, underline, strike, sideColor, backColor, offset, curveSegments, simplify, merge, profileSegments, warpShape, warpAmount, front, fillType, backFill, backTex, sideFill, sideTex, outlineOn, outlineColor, outlineWidth, layered]);
+  }, [font, text, textCase, depth, profile, roundConvex, bezier, letterSpacing, lineHeight, align, underline, strike, sideColor, backColor, offset, curveSegments, simplify, profileSegments, warpShape, warpAmount, front, fillType, backFill, backTex, sideFill, sideTex, outlineOn, outlineColor, outlineWidth, layered]);
+
+  // Live "dynamic-mode" preview for the affine sliders (scale X/Y, depth): while
+  // dragging, we don't recompute geometry — we set a CSS scale3d on the mesh
+  // wrapper (one var per axis, like dynamic lighting) and bake the real geometry
+  // only on release. {1,1,1} = identity (nothing previewing).
+  const [preview, setPreview] = useState<{ sx: number; sy: number; sz: number }>({ sx: 1, sy: 1, sz: 1 });
 
   // Directional light direction from azimuth (left/right) + elevation (height),
   // always biased toward the front so the face stays lit.
@@ -497,7 +505,7 @@ export function WordArtWorkbench() {
     layered,
     profileMode, warp: warpShape, bend: warpAmount,
     depth, letterSpacing, lineHeight, scaleX, scaleY,
-    curveSegments, simplify, merge, profileSegments, offset,
+    curveSegments, simplify, profileSegments, offset,
     perspective, zoom: zoomScale, spin,
     light: lightIntensity, ambient, az: lightAz, el: lightEl, lightColor,
   };
@@ -511,7 +519,6 @@ export function WordArtWorkbench() {
         break;
       }
       case "warp": setWarpShape(v as WarpShape); break;
-      case "warp": setWarpShape(v as WarpShape); break;
       case "bend": setWarpAmount(v as number); break;
       case "depth": setDepth(v as number); break;
       case "letterSpacing": setLetterSpacing(v as number); break;
@@ -520,7 +527,6 @@ export function WordArtWorkbench() {
       case "scaleY": setScaleY(v as number); break;
       case "curveSegments": setCurveSegments(v as number); break;
       case "simplify": setSimplify(v as number); break;
-      case "merge": setMerge(v as boolean); break;
       case "profileSegments": setProfileSegments(v as number); break;
       case "offset": setOffset(v as number); break;
       case "perspective": setPerspective(v as boolean); break;
@@ -539,6 +545,10 @@ export function WordArtWorkbench() {
       <StatsOverlay />
       <Stage
         polygons={polygons}
+        preview={preview}
+        onFrameReady={() => setPreview((p) => (p.sx === 1 && p.sy === 1 && p.sz === 1) ? p : { sx: 1, sy: 1, sz: 1 })}
+        scaleXFrac={scaleX / 100}
+        scaleYFrac={scaleY / 100}
         zoomScale={zoomScale}
         setZoomScale={setZoomScale}
         perspective={perspective}
@@ -591,6 +601,7 @@ export function WordArtWorkbench() {
         className={mobilePanel === "controls" ? "is-mobile-open" : ""}
         values={guiValues}
         set={guiSet}
+        onPreviewAxis={(axis, ratio) => setPreview((p) => ({ ...p, [axis]: ratio }))}
         bezier={bezier}
         onBezier={setBezier}
       />
@@ -625,6 +636,10 @@ export function WordArtWorkbench() {
 
 interface StageProps {
   polygons: Polygon[];
+  preview: { sx: number; sy: number; sz: number };
+  onFrameReady: () => void;
+  scaleXFrac: number;
+  scaleYFrac: number;
   zoomScale: number;
   setZoomScale: (updater: (prev: number) => number) => void;
   perspective: boolean;
@@ -641,7 +656,7 @@ interface StageProps {
  * in this small component means only the camera/scene/mesh re-render per frame,
  * not the parent's controls + 2000-option font datalist (which tanked FPS).
  */
-function Stage({ polygons, zoomScale, setZoomScale, perspective, lightDir, lightIntensity, lightColor, ambient, spin, status }: StageProps) {
+function Stage({ polygons, preview, onFrameReady, scaleXFrac, scaleYFrac, zoomScale, setZoomScale, perspective, lightDir, lightIntensity, lightColor, ambient, spin, status }: StageProps) {
   const stageRef = useRef<HTMLDivElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const [stage, setStage] = useState({ w: 900, h: 600 });
@@ -652,11 +667,24 @@ function Stage({ polygons, zoomScale, setZoomScale, perspective, lightDir, light
   const draggingRef = useRef(false);
   const lastPtr = useRef({ x: 0, y: 0 });
 
+  // The wrapper transform is set imperatively (the spin raf rewrites it every
+  // frame), so the live scale preview has to be folded in here rather than via
+  // React style — otherwise applyRotation would clobber it. scale3d is
+  // innermost (applied to the geometry) then rotate/tilt.
+  const previewRef = useRef(preview);
+  previewRef.current = preview;
+  // Live scale read from a ref so the spin raf's captured applyRotation still
+  // sees the latest value (otherwise scaling while spinning would be clobbered).
+  const scaleRef = useRef({ x: scaleXFrac, y: scaleYFrac });
+  scaleRef.current = { x: scaleXFrac, y: scaleYFrac };
   const applyRotation = () => {
     const el = wrapRef.current;
-    if (el) el.style.transform = `rotateX(${tiltRef.current}deg) rotateY(${spinRef.current}deg)`;
+    const p = previewRef.current;
+    const s = scaleRef.current;
+    // Scale X/Y are live CSS; depth uses the preview sz.
+    if (el) el.style.transform = `rotateX(${tiltRef.current}deg) rotateY(${spinRef.current}deg) scale3d(${s.x}, ${s.y}, ${p.sz})`;
   };
-  useLayoutEffect(applyRotation); // re-assert after any re-render (e.g. new geometry)
+  useLayoutEffect(applyRotation); // re-assert after any re-render (preview / new geometry)
 
   useEffect(() => {
     const el = stageRef.current;
@@ -710,7 +738,7 @@ function Stage({ polygons, zoomScale, setZoomScale, perspective, lightDir, light
     setZoomScale((z) => Math.max(0.1, Math.min(6, z * factor)));
   };
 
-  const zoom = fitZoom(polygons, stage.w, stage.h) * zoomScale;
+  const zoom = fitZoom(polygons, stage.w, stage.h, scaleXFrac, scaleYFrac) * zoomScale;
   const Cam = perspective ? PolyPerspectiveCamera : PolyOrthographicCamera;
 
   return (
@@ -731,7 +759,7 @@ function Stage({ polygons, zoomScale, setZoomScale, perspective, lightDir, light
           ambientLight={{ intensity: ambient }}
         >
           <div ref={wrapRef} style={{ transformStyle: "preserve-3d" }}>
-            <PolyMesh polygons={polygons} seamBleed={0.3} />
+            <PolyMesh polygons={polygons} seamBleed={0.3} atomicAtlas onFrameReady={onFrameReady} />
           </div>
         </PolyScene>
       </Cam>
@@ -746,7 +774,7 @@ interface GuiValues {
   layered: boolean;
   profileMode: string; warp: string; bend: number;
   depth: number; letterSpacing: number; lineHeight: number; scaleX: number; scaleY: number;
-  curveSegments: number; simplify: number; merge: boolean; profileSegments: number; offset: number;
+  curveSegments: number; simplify: number; profileSegments: number; offset: number;
   perspective: boolean; zoom: number; spin: boolean;
   light: number; ambient: number; az: number; el: number; lightColor: string;
 }
@@ -841,8 +869,18 @@ function mountBezierEditor(parent: HTMLElement, getB: () => Bezier4, setB: (b: B
  * are identical, not a CSS approximation. lil-gui is imperative, so we mount it
  * once and bridge its onChange → React, and React state → updateDisplay().
  */
-function GuiPanel({ id, className = "", values, set, bezier, onBezier }: { id?: string; className?: string; values: GuiValues; set: (k: keyof GuiValues, v: number | string | boolean) => void; bezier: Bezier4; onBezier: (b: Bezier4) => void }) {
+function GuiPanel({ id, className = "", values, set, onPreviewAxis, bezier, onBezier }: { id?: string; className?: string; values: GuiValues; set: (k: keyof GuiValues, v: number | string | boolean) => void; onPreviewAxis: (axis: "sx" | "sy" | "sz", ratio: number) => void; bezier: Bezier4; onBezier: (b: Bezier4) => void }) {
   const hostRef = useRef<HTMLDivElement>(null);
+  // Current committed values, read inside the (mount-once) GUI callbacks so the
+  // live-preview ratio is taken against the value at drag start.
+  const valuesRef = useRef(values);
+  valuesRef.current = values;
+  const onPreviewAxisRef = useRef(onPreviewAxis);
+  onPreviewAxisRef.current = onPreviewAxis;
+  // True while an affine slider is mid-drag (preview mode). The values→GUI
+  // write-back below is skipped then, so it can't reset the control the user is
+  // dragging back to the (not-yet-committed) value.
+  const previewDragRef = useRef(false);
   const cfgRef = useRef<GuiValues>({ ...values });
   const ctrlRef = useRef<Record<string, ReturnType<GUI["add"]>>>({});
   const bezierRef = useRef(bezier);
@@ -854,6 +892,21 @@ function GuiPanel({ id, className = "", values, set, bezier, onBezier }: { id?: 
     const c = ctrlRef.current;
     const gui = new GUI({ container: hostRef.current!, title: "Settings", width: 300 });
     const on = (k: keyof GuiValues) => (v: number | string | boolean) => set(k, v);
+
+    // Tier-1 "dynamic mode": while dragging an affine slider, only set a CSS
+    // scale3d ratio on the wrapper (no geometry recompute). On release we commit
+    // the real value but DON'T reset the preview here — the mesh holds the old
+    // frame until the new atlas is decoded (atomicAtlas) and fires onFrameReady,
+    // which resets the preview so the swap is seamless (no backward flash).
+    const previewAxis = (k: keyof GuiValues, axis: "sx" | "sy" | "sz") => (v: number | string | boolean) => {
+      previewDragRef.current = true;
+      const base = (valuesRef.current[k] as number) || 1;
+      onPreviewAxisRef.current(axis, ((v as number) / base) || 1);
+    };
+    const bake = (k: keyof GuiValues) => (v: number | string | boolean) => {
+      previewDragRef.current = false;
+      set(k, v);
+    };
 
     const shape = gui.addFolder("Shape");
     c.profileMode = shape.add(cfg, "profileMode", {
@@ -889,19 +942,21 @@ function GuiPanel({ id, className = "", values, set, bezier, onBezier }: { id?: 
     }
 
     c.warp = shape.add(cfg, "warp", { None: "none", "Arch up": "arch", "Arch down": "archDown", "Arc (circle)": "arc", Wave: "wave", Bulge: "bulge", "Cone (taper)": "cone", "Slant up": "slantUp", "Slant down": "slantDown" }).name("Warp").onChange(on("warp"));
-    c.bend = shape.add(cfg, "bend", 0, 1, 0.02).name("Bend").onChange(on("bend"));
+    // Tier-3 (changes poly count / non-linear): no live recompute — bake on release.
+    c.bend = shape.add(cfg, "bend", 0, 1, 0.02).name("Bend").onFinishChange(on("bend"));
 
     const layout = gui.addFolder("Layout");
-    c.depth = layout.add(cfg, "depth", 2, 80, 1).name("Depth").onChange(on("depth"));
-    c.letterSpacing = layout.add(cfg, "letterSpacing", -20, 60, 1).name("Letter spacing").onChange(on("letterSpacing"));
-    c.lineHeight = layout.add(cfg, "lineHeight", 0.8, 2.5, 0.05).name("Line height").onChange(on("lineHeight"));
+    // Tier-1 (affine): live CSS scale preview while dragging, bake on release.
+    c.depth = layout.add(cfg, "depth", 2, 80, 1).name("Depth").onChange(previewAxis("depth", "sz")).onFinishChange(bake("depth"));
+    c.letterSpacing = layout.add(cfg, "letterSpacing", -20, 60, 1).name("Letter spacing").onFinishChange(on("letterSpacing"));
+    c.lineHeight = layout.add(cfg, "lineHeight", 0.8, 2.5, 0.05).name("Line height").onFinishChange(on("lineHeight"));
+    // Scale X/Y just update state → a live CSS wrapper transform (no recompute).
     c.scaleX = layout.add(cfg, "scaleX", 40, 200, 1).name("Scale X").onChange(on("scaleX"));
     c.scaleY = layout.add(cfg, "scaleY", 40, 200, 1).name("Scale Y").onChange(on("scaleY"));
-    c.curveSegments = layout.add(cfg, "curveSegments", 1, 12, 1).name("Curve segments").onChange(on("curveSegments"));
-    c.simplify = layout.add(cfg, "simplify", 0, 8, 0.5).name("Simplify").onChange(on("simplify"));
-    c.merge = layout.add(cfg, "merge").name("Merge polygons").onChange(on("merge"));
-    c.profileSegments = layout.add(cfg, "profileSegments", 2, 10, 1).name("Edge segments").onChange(on("profileSegments"));
-    c.offset = layout.add(cfg, "offset", 0, 32, 1).name("Layer offset").onChange(on("offset"));
+    c.curveSegments = layout.add(cfg, "curveSegments", 1, 12, 1).name("Curve segments").onFinishChange(on("curveSegments"));
+    c.simplify = layout.add(cfg, "simplify", 0, 8, 0.5).name("Simplify").onFinishChange(on("simplify"));
+    c.profileSegments = layout.add(cfg, "profileSegments", 2, 10, 1).name("Edge segments").onFinishChange(on("profileSegments"));
+    c.offset = layout.add(cfg, "offset", 0, 32, 1).name("Layer offset").onFinishChange(on("offset"));
     c.layered = layout.add(cfg, "layered").name("Flat layers").onChange(on("layered"));
 
     const cam = gui.addFolder("Camera");
@@ -922,8 +977,11 @@ function GuiPanel({ id, className = "", values, set, bezier, onBezier }: { id?: 
 
   // Push React state back into the GUI display + toggle conditional controllers.
   useEffect(() => {
-    Object.assign(cfgRef.current, values);
-    for (const ctrl of Object.values(ctrlRef.current)) ctrl?.updateDisplay();
+    // Skip the write-back mid preview-drag so it can't reset the dragged control.
+    if (!previewDragRef.current) {
+      Object.assign(cfgRef.current, values);
+      for (const ctrl of Object.values(ctrlRef.current)) ctrl?.updateDisplay();
+    }
     bezierRef.current = bezier;
     onBezierRef.current = onBezier;
     const isCustom = values.profileMode.startsWith("custom");

@@ -36,6 +36,9 @@ interface PolyMeta {
   triFlat: Float64Array;
   /** Bounding sphere center + radius² */
   bcx: number; bcy: number; bcz: number; br2: number;
+  /** Tangent basis for hemisphere sample rotation. */
+  ux: number; uy: number; uz: number;
+  vx: number; vy: number; vz: number;
   /** AABB */
   minX: number; minY: number; minZ: number;
   maxX: number; maxY: number; maxZ: number;
@@ -71,6 +74,25 @@ function hasLargeOpenTopology(polygons: Polygon[]): boolean {
   );
 }
 
+function tangentBasis(nx: number, ny: number, nz: number): {
+  ux: number; uy: number; uz: number;
+  vx: number; vy: number; vz: number;
+} {
+  const ax = Math.abs(nx) > 0.9 ? 0 : 1;
+  const ay = Math.abs(nx) > 0.9 ? 1 : 0;
+  let ux = ay * nz;
+  let uy = -ax * nz;
+  let uz = ax * ny - ay * nx;
+  const uLen = Math.hypot(ux, uy, uz);
+  ux /= uLen; uy /= uLen; uz /= uLen;
+  return {
+    ux, uy, uz,
+    vx: ny * uz - nz * uy,
+    vy: nz * ux - nx * uz,
+    vz: nx * uy - ny * ux,
+  };
+}
+
 function precompute(p: Polygon): PolyMeta | null {
   const verts = p.vertices;
   if (!verts || verts.length < 3) return null;
@@ -89,6 +111,7 @@ function precompute(p: Polygon): PolyMeta | null {
   const nLen = Math.hypot(nx, ny, nz);
   if (nLen < PARALLEL_EPS) return null;
   nx /= nLen; ny /= nLen; nz /= nLen;
+  const { ux, uy, uz, vx, vy, vz } = tangentBasis(nx, ny, nz);
 
   const nTri = verts.length - 2;
   const triFlat = new Float64Array(nTri * 9);
@@ -118,6 +141,7 @@ function precompute(p: Polygon): PolyMeta | null {
     vertices: verts,
     triFlat,
     bcx: cx, bcy: cy, bcz: cz, br2,
+    ux, uy, uz, vx, vy, vz,
     minX, minY, minZ, maxX, maxY, maxZ,
   };
 }
@@ -184,7 +208,7 @@ function rayHitsPolygon(
 
 const BVH_STRIDE = 9;
 const BVH_LEAF_SIZE = 6;
-const SAH_BUCKETS = 12;
+const SAH_BUCKETS = 8;
 
 interface BVH {
   data: Float64Array;
@@ -443,6 +467,8 @@ function rayHitsAnyInBVH(
  * Layout: [lx0, ly0, lz0, lx1, ly1, lz1, ...]
  */
 function hemisphereSamplesFlat(k: number): Float64Array {
+  const cached = hemisphereSampleCache.get(k);
+  if (cached) return cached;
   const phi = (1 + Math.sqrt(5)) / 2;
   const out = new Float64Array(k * 3);
   for (let i = 0; i < k; i++) {
@@ -453,22 +479,11 @@ function hemisphereSamplesFlat(k: number): Float64Array {
     out[i * 3 + 1] = r * Math.sin(theta);
     out[i * 3 + 2] = z;
   }
+  hemisphereSampleCache.set(k, out);
   return out;
 }
 
-function basis(n: Vec3): { ux: number; uy: number; uz: number; vx: number; vy: number; vz: number } {
-  const ax = Math.abs(n[0]) > 0.9 ? 0 : 1;
-  const ay = Math.abs(n[0]) > 0.9 ? 1 : 0;
-  let ux = ay * n[2];
-  let uy = -ax * n[2];
-  let uz = ax * n[1] - ay * n[0];
-  const uLen = Math.hypot(ux, uy, uz);
-  ux /= uLen; uy /= uLen; uz /= uLen;
-  const vx = n[1] * uz - n[2] * uy;
-  const vy = n[2] * ux - n[0] * uz;
-  const vz = n[0] * uy - n[1] * ux;
-  return { ux, uy, uz, vx, vy, vz };
-}
+const hemisphereSampleCache = new Map<number, Float64Array>();
 
 export interface CullInteriorOptions {
   /** Hemisphere ray samples per polygon. Higher = fewer false positives, slower. Default 8. */
@@ -527,7 +542,7 @@ export function cullInteriorPolygons(
     const offY = RAY_ORIGIN_OFFSET * ny;
     const offZ = RAY_ORIGIN_OFFSET * nz;
 
-    // Phase 1 — cheap pre-test: cast a single ray along +normal.
+    // Step 1 — cheap pre-test: cast a single ray along +normal.
     {
       const ox1 = p.centroid[0] + offX;
       const oy1 = p.centroid[1] + offY;
@@ -537,8 +552,8 @@ export function cullInteriorPolygons(
       }
     }
 
-    // Phase 2 — multi-origin K-sample hemisphere test.
-    const { ux, uy, uz, vx, vy, vz } = basis(p.normal);
+    // Step 2 — multi-origin K-sample hemisphere test.
+    const { ux, uy, uz, vx, vy, vz } = p;
     const cx0 = p.centroid[0], cy0 = p.centroid[1], cz0 = p.centroid[2];
     const verts = p.vertices;
     const vCount = verts.length;

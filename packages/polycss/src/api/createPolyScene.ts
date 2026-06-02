@@ -2,15 +2,15 @@
  * createPolyScene — imperative scene API. The vanilla counterpart to
  * `<PolyScene>` in React / Vue.
  *
- * Per §API freeze: takes a host element + scene options, returns a
- * `PolySceneHandle` whose `add(parseResult, transform?)` mounts a mesh under
- * the scene root and returns a removable `PolyMeshHandle`.
+ * Takes a host element + scene options and returns a `PolySceneHandle` whose
+ * `add(parseResult, transform?)` mounts a mesh under the scene root and returns
+ * a removable `PolyMeshHandle`.
  *
  * Implementation:
  *   - Inserts a `<div class="polycss-scene">` into the host.
- *   - Each `add(...)` creates a `<div class="polycss-mesh">` with the
- *     mesh transform; mounts every valid polygon as an atlas-backed
- *     background sprite.
+ *   - Each `add(...)` creates a `<div class="polycss-mesh">` with the mesh
+ *     transform; mounts every valid polygon using the cheapest supported
+ *     render-strategy leaf.
  *   - `destroy()` removes the scene element and disposes every mesh
  *     (which in turn disposes generated atlas blob URLs).
  *
@@ -228,6 +228,10 @@ export function createPolyScene(
     options: currentOptions,
   });
   const meshes = ctx.meshes;
+  // Element → MeshEntry index. Outside the SceneContext because it's a
+  // pure-DOM lookup that the extracted shadow helpers never need; only
+  // findMeshByElement and click-target resolution use it.
+  const meshByElement = new WeakMap<HTMLElement, MeshEntry>();
 
   // Shadow SVG state (ground SVG element + visibility + cached ground CSS-Z).
   // Sourced from the SceneContext so extracted helpers can read+write the
@@ -331,8 +335,8 @@ export function createPolyScene(
   }
 
   function clearShadowLeaves(entry: MeshEntry): void {
-    // Per-entry `<q>` leaves (dynamic-mode chain + legacy callers) still
-    // hang off the mesh and must be cleared individually.
+    // Current shadows are scene-level SVGs, but retained internal `<q>` leaves
+    // can still be present during cleanup of already-mounted entries.
     for (const el of entry.shadowRendered) {
       if (el.parentNode) el.parentNode.removeChild(el);
     }
@@ -899,23 +903,9 @@ export function createPolyScene(
     return true;
   }
 
-  // Emits the per-mesh shadow `<svg>`. Same path for both lighting modes:
-  // every casting polygon is projected to the ground on the CPU and
-  // concatenated into a single compound `<path>` (M…L…Z subpaths) under
-  // fill-rule=nonzero. Overlapping outlines composite as one filled
-  // silhouette without alpha stacking; gaps between subpaths remain as
-  // gaps (silhouette holes are preserved); back-facing polys are dropped
-  // up front. One SVG element per mesh regardless of polygon count.
-  //
-  // Trade-off vs. the old dynamic-mode per-`<q>` CSS path: live light
-  // updates now require a JS re-projection pass (`setOptions` triggers
-  // re-emit when directionalLight.direction changes) instead of being
-  // free CSS variable updates. The visual upside (no alpha stacking,
-  // preserved holes, fewer DOM nodes) is worth the JS cost for typical
-  // scenes — huge meshes during light-slider drag can profile if needed.
-  // Per-entry trigger: callers pass the entry that changed, but emission
-  // is scene-wide. Drop the arg here so any change rebuilds the whole
-  // shadow set in one shot — every surface aggregates every caster.
+  // Refreshes scene-level shadow SVGs for both lighting modes. Callers pass the
+  // entry that changed, but emission is scene-wide because every receiving
+  // surface aggregates every caster into one compound path.
   function emitShadowLeaves(_entry: MeshEntry): void {
     emitSceneShadows();
   }
@@ -1367,8 +1357,7 @@ export function createPolyScene(
     let minWorldZ = Infinity;
     // If any receivers exist, anchor the ground plane to the lowest
     // receiver bottom — that's the actual scene floor. Otherwise fall
-    // back to the lowest caster bottom (legacy behavior, used when no
-    // receiver mesh is registered).
+    // back to the lowest caster bottom when no receiver mesh is registered.
     let hasReceiver = false;
     for (const m of meshes) if (!m.disposed && m.receiveShadow) { hasReceiver = true; break; }
     for (const m of meshes) {
@@ -1751,6 +1740,7 @@ export function createPolyScene(
         // Removing from DOM doesn't auto-dispose generated atlas/blob URLs.
         clearRendered(entry);
         meshes.delete(entry);
+        meshByElement.delete(wrapper);
         clearReceiverShadowCache(entry);
         clearCasterItemsCache(entry);
         recomputeAutoCenter();
@@ -1975,6 +1965,7 @@ export function createPolyScene(
         clearRendered(entry);
         try { parseResult.dispose(); } catch { /* ignore */ }
         meshes.delete(entry);
+        meshByElement.delete(wrapper);
         recomputeAutoCenter();
         recomputeShadowGround();
       },
@@ -2004,6 +1995,7 @@ export function createPolyScene(
 
     entry.handle = handle;
     entryRef = entry;
+    meshByElement.set(wrapper, entry);
     meshes.add(entry);
     renderEntry(entry);
     applyMeshLightVarOverride(entry, transform.rotation);
@@ -2107,11 +2099,12 @@ export function createPolyScene(
   function findMeshByElement(el: Element | null): PolyMeshHandle | null {
     let cur: Element | null = el;
     while (cur) {
-      if (cur instanceof HTMLElement && cur.classList.contains("polycss-mesh")) {
-        for (const entry of meshes) {
-          if (entry.wrapper === cur) return entry.handle;
+      if (cur instanceof HTMLElement) {
+        const entry = meshByElement.get(cur);
+        if (entry && !entry.disposed) return entry.handle;
+        if (cur.classList.contains("polycss-mesh")) {
+          return null;
         }
-        return null;
       }
       cur = cur.parentElement;
     }

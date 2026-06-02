@@ -4,11 +4,10 @@
  *
  * Covers:
  *  - default (no castShadow) → no .polycss-shadow elements
- *  - castShadow + dynamic → 1 shadow per non-duplicate polygon
- *  - castShadow + baked → 0 shadows
- *  - shadow tag is <q>
- *  - transform contains `var(--shadow-proj)` then `matrix3d`
- *  - --shadow-ground-cssz is set on the scene element when a casting mesh is added
+ *  - castShadow + dynamic → per-mesh SVG shadow
+ *  - castShadow + baked → per-mesh SVG shadow
+ *  - shadow tag is <svg>
+ *  - shadow transform is a translated SVG surface
  *  - toggling castShadow reactively adds/removes shadows
  *  - textured polygons ALSO cast shadows (Frog Guy regression)
  *  - --clx/--cly/--clz are set on the scene element in dynamic mode
@@ -163,7 +162,7 @@ describe("PolyMesh — castShadow", () => {
     }
   });
 
-  it("toggling castShadow via prop updates adds/removes shadow leaves", () => {
+  it("toggling castShadow via prop updates adds/removes shadow SVGs", () => {
     const { container, root } = renderScene(DYN_SCENE_PROPS, {
       polygons: [TRIANGLE],
       castShadow: false,
@@ -193,7 +192,7 @@ describe("PolyMesh — castShadow", () => {
     expect(after.style.transform).toMatch(/^translate3d\(/);
   });
 
-  it("textured polygons (s) ALSO emit shadow leaves (Frog Guy regression)", async () => {
+  it("textured polygons (s) ALSO emit shadow SVGs (Frog Guy regression)", async () => {
     // Shadows depend only on the polygon outline, not the texture content.
     // Fully textured meshes must cast shadows or the Frog Guy gets no shadow.
     const { container } = renderScene(DYN_SCENE_PROPS, {

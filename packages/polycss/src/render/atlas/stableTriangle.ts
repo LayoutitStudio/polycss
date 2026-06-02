@@ -3,7 +3,6 @@ import {
   buildSeamBleedPolygonEdges,
   DEFAULT_SEAM_BLEED,
   DEFAULT_TILE,
-  SOLID_TRIANGLE_CANONICAL_SIZE,
   DEFAULT_MATRIX_DECIMALS,
   BASIS_EPS,
   resolveBleedRatio,
@@ -114,14 +113,14 @@ export function applySolidTrianglePrimitive(
   const triangleEl = el as SolidTriangleElement;
   if (triangleEl.__polycssSolidTrianglePrimitive === primitive) return;
   if (primitive === "corner-bevel") {
-    el.style.width = `${SOLID_TRIANGLE_CANONICAL_SIZE}px`;
-    el.style.height = `${SOLID_TRIANGLE_CANONICAL_SIZE}px`;
-    el.style.backgroundColor = "currentColor";
-    el.style.borderWidth = "0";
-    el.style.borderTopLeftRadius = "50% 100%";
-    el.style.borderTopRightRadius = "50% 100%";
-    el.style.setProperty("corner-top-left-shape", "bevel");
-    el.style.setProperty("corner-top-right-shape", "bevel");
+    el.style.width = "";
+    el.style.height = "";
+    el.style.backgroundColor = "";
+    el.style.borderWidth = "";
+    el.style.borderTopLeftRadius = "";
+    el.style.borderTopRightRadius = "";
+    el.style.removeProperty("corner-top-left-shape");
+    el.style.removeProperty("corner-top-right-shape");
   } else {
     el.style.width = "";
     el.style.height = "";

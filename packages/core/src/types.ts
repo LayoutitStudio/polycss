@@ -161,6 +161,20 @@ export interface Polygon {
    */
   textureTriangles?: TextureTriangle[];
   /**
+   * Import-time simplifier seam keys retained after solid texture baking.
+   * Renderers ignore this; mesh optimization uses it to avoid welding vertices
+   * that shared a position but came from different texture/attribute seams.
+   * @internal
+   */
+  simplifyVertexKeys?: string[];
+  /**
+   * Stricter import-time simplifier keys that preserve source vertex identity.
+   * Renderers ignore this; candidate simplification uses it only for fallback
+   * passes where relaxed seam welding loses after render-cost optimization.
+   * @internal
+   */
+  simplifySourceVertexKeys?: string[];
+  /**
    * Source material requested two-sided rendering. Importers use this so
    * optimization passes do not collapse intentional reverse-wound faces.
    * @internal

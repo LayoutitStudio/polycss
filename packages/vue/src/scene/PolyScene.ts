@@ -4,7 +4,7 @@
  *
  * Renders a polycss-scene wrapper containing all polygons and children.
  * Transform (position/scale/rotation) compose with PolyCamera's camera
- * transform via CSS preserve-3d nested DOM (§Design.4c).
+ * transform via CSS preserve-3d nested DOM.
  */
 import {
   defineComponent,
@@ -82,10 +82,9 @@ export interface PolySceneProps {
   autoCenter?: boolean;
   /**
    * Shadow appearance for meshes with `castShadow: true`. Works in both
-   * lighting modes — dynamic mode projects via CSS vars so shadows
-   * follow a moving light, baked mode CPU-bakes the projection into
-   * each leaf's inline `matrix3d` and drops back-facing polys from the
-   * DOM entirely. Defaults: `{ color: "#000000", opacity: 0.25, lift: 0.05, maxExtend: 2000 }`.
+   * lighting modes. Shadows emit as SVG paths and reproject when light,
+   * ground, or mesh geometry changes. Defaults:
+   * `{ color: "#000000", opacity: 0.25, lift: 0.05, maxExtend: 2000 }`.
    */
   shadow?: PolyShadowOptions;
   class?: string;

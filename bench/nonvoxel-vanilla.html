@@ -9,7 +9,7 @@
   <div id="host"></div>
 
   <script type="module">
-    import { createPolyCamera, createPolyScene, createPolyOrbitControls, loadMesh } from "./.generated/polycss.js";
+    import { createPolyCamera, createPolyScene, createPolyOrbitControls, loadMesh, optimizeMeshPolygons } from "./.generated/polycss.js";
     import { getSynthMesh } from "./synth-mesh.mjs";
     import {
       parseUrlParams, dirFromAzEl, createPerfRecorder,
@@ -26,6 +26,7 @@
     const rotationDriver = benchParams.get("rotationDriver") || "js";
     const polygonOrder = benchParams.get("polygonOrder") || "source";
     const domOrder = benchParams.get("domOrder") || "source";
+    const optimizerVariant = benchParams.get("optimizer") || "baseline";
     const leafBucketSize = Number(benchParams.get("leafBucketSize") || 0);
     const islandBucketMode = benchParams.get("islandBucket") || "none";
     const islandBucketSize = Number(benchParams.get("islandBucketSize") || 128);
@@ -34,6 +35,7 @@
     const displayCullBias = Number(benchParams.get("displayCullBias") || 0);
     const displayCullDecimals = Number(benchParams.get("displayCullDecimals") || 1);
     const displayCullMinBucketSize = Number(benchParams.get("displayCullMinBucketSize") || 2);
+    const borderShapeMode = benchParams.get("borderShapeMode") || "inline";
     const recordFrameWork = benchParams.get("frameWork") === "1";
     const disabledStrategies = (benchParams.get("disableStrategies") || "")
       .split(",")
@@ -112,6 +114,7 @@
       frameWorkSamples: () => frameWork.samples(),
       resetInteractionStats,
       cullStats: () => displayCullStats,
+      borderShapeStats: () => borderShapeStats,
       cameraPerspective: () => cameraPerspective(),
       setMeshPosition(_position) {},
       setMeshRotation(_rotation) {},
@@ -134,6 +137,7 @@
     let splitShell = null;
     let displayCullController = null;
     let displayCullStats = null;
+    let borderShapeStats = null;
 
     function formatMatrixTransform(transform) {
       const matrix = new DOMMatrix(transform || "none");
@@ -419,6 +423,29 @@
       };
     }
 
+    function optimizerOptionsForBenchVariant(variant) {
+      if (variant === "baseline") return null;
+      if (variant === "rectcover1") return { meshResolution: "lossy", rectCover: { minGroupPolygons: 2, maxCandidateAxes: 1 } };
+      if (variant === "rectcover2") return { meshResolution: "lossy", rectCover: { minGroupPolygons: 2, maxCandidateAxes: 2 } };
+      if (variant === "rectcover4") return { meshResolution: "lossy", rectCover: { minGroupPolygons: 2, maxCandidateAxes: 4 } };
+      if (variant === "rectcover8") return { meshResolution: "lossy", rectCover: { minGroupPolygons: 2, maxCandidateAxes: 8 } };
+      if (variant === "rectcover24") return { meshResolution: "lossy", rectCover: { minGroupPolygons: 2, maxCandidateAxes: 24 } };
+      throw new Error(`Unknown bench optimizer variant: ${variant}`);
+    }
+
+    function applyBenchOptimizer(parseResult) {
+      const options = optimizerOptionsForBenchVariant(optimizerVariant);
+      if (!options || parseResult.voxelSource) return { parseResult, preoptimized: false };
+      const polygons = optimizeMeshPolygons(parseResult.polygons, options);
+      return {
+        parseResult: {
+          ...parseResult,
+          polygons,
+        },
+        preoptimized: true,
+      };
+    }
+
     function elementDomOrderRank(element, ranks) {
       if (element.classList.contains("polycss-bucket")) {
         let best = Infinity;
@@ -477,6 +504,62 @@
           wrapper.insertBefore(bucket, leaves[i]);
           for (const leaf of leaves.slice(i, i + leafBucketSize)) bucket.appendChild(leaf);
         }
+      }
+    }
+
+    function applyBorderShapeMode() {
+      if (borderShapeMode === "inline") return;
+      const leaves = Array.from(host.querySelectorAll(".polycss-mesh i"))
+        .filter((leaf) => leaf instanceof HTMLElement);
+      const withBorderShape = leaves
+        .map((leaf) => [leaf, leaf.style.getPropertyValue("border-shape").trim()])
+        .filter(([, borderShape]) => borderShape);
+      if (withBorderShape.length === 0) {
+        borderShapeStats = { mode: borderShapeMode, leaves: leaves.length, changed: 0, unique: 0, cssBytes: 0 };
+        return;
+      }
+
+      const style = document.createElement("style");
+      style.setAttribute("data-polycss-bench-border-shape-mode", borderShapeMode);
+      let cssText = "";
+      if (borderShapeMode === "class") {
+        const classByShape = new Map();
+        for (const [leaf, borderShape] of withBorderShape) {
+          let className = classByShape.get(borderShape);
+          if (!className) {
+            className = `polycss-bench-bs-${classByShape.size}`;
+            classByShape.set(borderShape, className);
+            cssText += `.${className}{border-shape:${borderShape}}\n`;
+          }
+          leaf.classList.add(className);
+          leaf.style.removeProperty("border-shape");
+        }
+        borderShapeStats = {
+          mode: borderShapeMode,
+          leaves: leaves.length,
+          changed: withBorderShape.length,
+          unique: classByShape.size,
+          cssBytes: cssText.length,
+        };
+      } else if (borderShapeMode === "var") {
+        cssText = `.polycss-bench-bs-var{border-shape:var(--polycss-bench-border-shape)}\n`;
+        for (const [leaf, borderShape] of withBorderShape) {
+          leaf.classList.add("polycss-bench-bs-var");
+          leaf.style.setProperty("--polycss-bench-border-shape", borderShape);
+          leaf.style.removeProperty("border-shape");
+        }
+        borderShapeStats = {
+          mode: borderShapeMode,
+          leaves: leaves.length,
+          changed: withBorderShape.length,
+          unique: new Set(withBorderShape.map(([, borderShape]) => borderShape)).size,
+          cssBytes: cssText.length,
+        };
+      }
+
+      if (cssText) {
+        style.textContent = cssText;
+        document.head.appendChild(style);
       }
     }
 
@@ -813,11 +896,12 @@
 
     meshPromise.then((rawParseResult) => {
       if (!rawParseResult) throw new Error(`Unknown synth mesh: ${meshId}`);
-      const indexedParseResult = applyPolygonBenchIndexes(rawParseResult);
+      const optimizedResult = applyBenchOptimizer(rawParseResult);
+      const indexedParseResult = applyPolygonBenchIndexes(optimizedResult.parseResult);
       const parseResult = applyPolygonOrder(indexedParseResult);
       const meshTransform = motion === "mesh-set-polygons-same"
         ? { merge: false, stableDom: true }
-        : undefined;
+        : optimizedResult.preoptimized ? { merge: false } : undefined;
       const meshHandle = scene.add(parseResult, meshTransform);
       window.__nonvoxelBench.setMeshPosition = (position) => {
         meshHandle.setTransform({ position });
@@ -870,6 +954,7 @@
       applyIslandBuckets(indexedParseResult);
       applyNormalCullBuckets(indexedParseResult);
       applyLeafBuckets();
+      applyBorderShapeMode();
       applySceneTransformMode();
       displayCullController = createDisplayCullController(indexedParseResult.polygons);
       displayCullController?.update(scene.camera.state.rotY ?? preset.rotY, scene.camera.state.rotX ?? preset.rotX);

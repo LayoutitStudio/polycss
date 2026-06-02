@@ -20,7 +20,7 @@ export interface UseSceneContextResult {
  *   normalizePolygons → mergePolygons by default → bbox compute.
  *
  * Returns the processed polygons + the scene-wide axis-aligned bbox. Memoized
- * on input identity + the few options that affect output. Per §Design.6.
+ * on input identity + the few options that affect output.
  */
 export function usePolySceneContext(
   polygons: Polygon[],

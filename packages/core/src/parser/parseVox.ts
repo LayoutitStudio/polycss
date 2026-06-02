@@ -7,7 +7,8 @@
  *  - SIZE: voxel grid dimensions (sx, sy, sz).
  *  - XYZI: per-voxel (x, y, z, colorIndex) — colorIndex is 1-based.
  *    Files may contain multiple SIZE/XYZI model chunks; coordinates are
- *    flattened into one occupancy grid, matching current voxcss behavior.
+ *    flattened into one occupancy grid because scene-graph transforms are
+ *    not represented in `ParseResult`.
  *  - RGBA: 256×4 bytes custom palette (r, g, b, a). Falls back to the
  *    built-in default palette when this chunk is absent.
  *
@@ -17,10 +18,11 @@
  * Winding follows CCW-from-outside convention, consistent with PolyCSS's
  * backface culling.
  *
- * Coordinate system: MagicaVoxel is Z-up — same as PolyCSS — so no axis
- * permutation is needed (unlike OBJ/glTF which are Y-up and need a cyclic
- * swap). Voxel coordinates are always non-negative (origin at 0), so no
- * shift is required by default.
+ * Coordinate system: MagicaVoxel is Z-up like PolyCSS, but authored front
+ * faces point toward source -Y. The parser rotates the horizontal plane so
+ * source -Y becomes PolyCSS +X and source +X becomes PolyCSS +Y. Voxel
+ * coordinates are always non-negative (origin at 0), so no shift is required
+ * by default.
  *
  * Output mesh is uniformly scaled near `targetSize` units along the longest
  * bbox axis, snapped to the nearest integer CSS cell so voxel renderers can
@@ -357,6 +359,8 @@ function cleanupFacePlaneRegions(
 }
 
 const VOX_MAGIC = 0x20584f56; // "VOX " as little-endian uint32
+const VOX_SCENE_GRAPH_CHUNKS = new Set(["nTRN", "nGRP", "nSHP"]);
+const VOX_SCENE_GRAPH_WARNING = "Skipped MagicaVoxel scene graph transforms; models were flattened into one grid";
 
 // ── Face winding quads ───────────────────────────────────────────────────────
 // CCW-from-outside winding for each of the 6 cube faces.
@@ -429,7 +433,12 @@ export function parseVox(buffer: ArrayBuffer, options?: VoxParseOptions): ParseR
 
   const sizeChunks: SizeChunk[] = [];
   const xyziChunks: VoxelEntry[][] = [];
+  const warnings: string[] = [];
   let customPalette: string[] | null = null;
+
+  const warnOnce = (warning: string): void => {
+    if (!warnings.includes(warning)) warnings.push(warning);
+  };
 
   while (offset < mainChildrenEnd && offset + 12 <= buffer.byteLength) {
     const chunkId = readChunkId(dv, offset);
@@ -475,6 +484,9 @@ export function parseVox(buffer: ArrayBuffer, options?: VoxParseOptions): ParseR
         }
       }
     }
+    if (VOX_SCENE_GRAPH_CHUNKS.has(chunkId)) {
+      warnOnce(VOX_SCENE_GRAPH_WARNING);
+    }
     // Skip PACK and any unknown chunks.
 
     offset = chunkEnd;
@@ -482,7 +494,7 @@ export function parseVox(buffer: ArrayBuffer, options?: VoxParseOptions): ParseR
 
   // Flatten all XYZI chunks. Multi-model VOX files can carry several
   // SIZE/XYZI pairs; without scene-graph transform support the least
-  // surprising behavior is the same flattened occupancy grid voxcss uses.
+  // surprising behavior is one flattened occupancy grid.
   // If chunks overlap, keep the first voxel/color at that coordinate.
   const voxels: VoxelEntry[] = [];
   const occupied = new Set<string>();
@@ -497,7 +509,7 @@ export function parseVox(buffer: ArrayBuffer, options?: VoxParseOptions): ParseR
   }
 
   if (voxels.length === 0) {
-    return makeEmptyResult(sourceBytes, []);
+    return makeEmptyResult(sourceBytes, warnings);
   }
 
   // 3. Build color lookup.
@@ -664,7 +676,7 @@ export function parseVox(buffer: ArrayBuffer, options?: VoxParseOptions): ParseR
   }
 
   if (rawPolygons.length === 0) {
-    return makeEmptyResult(sourceBytes, []);
+    return makeEmptyResult(sourceBytes, warnings);
   }
 
   // 6. Compute bbox from raw voxel coords and scale.
@@ -686,13 +698,13 @@ export function parseVox(buffer: ArrayBuffer, options?: VoxParseOptions): ParseR
   const voxelSource: PolyVoxelSource = {
     kind: "magica-vox",
     cells: voxels.map((v) => ({
-      x: v.x - minX,
-      y: v.y - minY,
+      x: maxY - (v.y + 1),
+      y: v.x - minX,
       z: v.z - minZ,
       color: resolveColor(v.colorIndex),
     })),
-    rows: Math.max(0, maxX - minX),
-    cols: Math.max(0, maxY - minY),
+    rows: Math.max(0, maxY - minY),
+    cols: Math.max(0, maxX - minX),
     depth: Math.max(0, maxZ - minZ),
     scale,
     sourceBytes,
@@ -715,7 +727,7 @@ export function parseVox(buffer: ArrayBuffer, options?: VoxParseOptions): ParseR
     voxelSource,
     objectUrls: [],
     dispose: () => { /* no-op: parseVox has no minted blob URLs */ },
-    warnings: [],
+    warnings,
     metadata: {
       triangleCount: polygons.length,
       sourceBytes,

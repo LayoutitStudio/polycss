@@ -155,15 +155,39 @@ const CORE_BASE_STYLES = `
   border-width: 0 16px 32px 16px;
 }
 
-/* <q> — dedicated shadow leaf. Same border-shape rendering trick as <i>
-   (border-color: currentColor fills the polygon outline) but with its
-   own tag so we don't have to thread :not(.polycss-shadow) exclusions
-   through every dynamic-mode color rule. backface-visibility must be
-   visible because the projection matrix is near-rank-deficient and the
-   resulting plane's normal can read as back-facing under some camera
-   angles; the leaf is intentionally always painted. Strip the UA's
-   default ::before/::after open-/close-quote so the element is just a
-   styled box. */
+@supports (corner-top-left-shape: bevel) and (corner-top-right-shape: bevel) {
+  .polycss-scene > u,
+  .polycss-mesh > u,
+  .polycss-bucket > u {
+    border-width: 0;
+    width: 32px;
+    height: 32px;
+    background-color: currentColor;
+    border-top-left-radius: 50% 100%;
+    border-top-right-radius: 50% 100%;
+    corner-top-left-shape: bevel;
+    corner-top-right-shape: bevel;
+  }
+
+  .polycss-scene > u.polycss-corner-shape-solid,
+  .polycss-mesh > u.polycss-corner-shape-solid,
+  .polycss-bucket > u.polycss-corner-shape-solid {
+    width: 16px;
+    height: 16px;
+    box-sizing: border-box;
+    border: 0;
+    background: currentColor;
+    border-radius: 0;
+    corner-top-left-shape: initial;
+    corner-top-right-shape: initial;
+    corner-bottom-right-shape: initial;
+    corner-bottom-left-shape: initial;
+  }
+}
+
+/* Reserved internal <q> shadow element rules. Current shadow emission uses SVG
+   surfaces; these rules keep any retained <q> markup styled as a plain
+   border-shape leaf instead of inheriting UA quote styling. */
 .polycss-scene q {
   position: absolute;
   display: block;
@@ -437,11 +461,12 @@ const CORE_BASE_STYLES = `
   );
 }
 
-/* ── Cast shadow projection (dynamic-mode CSS path) ────────────────────── */
+/* ── Retained <q> shadow projection (dynamic-mode CSS path) ─────────────── */
 
 /*
- * Shadow projection matrix. Projects any 3D point P onto the horizontal
- * ground plane (cssZ ≈ G) along the CSS-space light direction (--clx/y/z).
+ * Projection matrix for retained internal <q> shadow leaves. Projects any
+ * 3D point P onto the horizontal ground plane (cssZ ≈ G) along the CSS-space
+ * light direction (--clx/y/z).
  *
  * In PolyCSS's world convention world Z is up (red-green plane is the
  * floor in the axes helper). After the world→CSS swap (Y↔X), world Z stays
@@ -454,7 +479,7 @@ const CORE_BASE_STYLES = `
  * has a valid layout box. The fix: collapse along z by a near-zero
  * scale (Z_SQUASH = 0.01) instead of exactly zero — output.z is then
  * approximately G with ~1% drift from the input, full-rank and renderable.
- * The shadow still looks flat to the eye (the drift is sub-pixel for
+ * The result still looks flat to the eye (the drift is sub-pixel for
  * any realistic scene size).
  *
  *   out.cssX = P.cssX - (--clx/--clz) * (P.cssZ - G)
@@ -482,18 +507,9 @@ const CORE_BASE_STYLES = `
   );
 }
 
-/* <q> shadow leaf — Lambert-gated opacity. Polygons facing the light cast
-   full shadow; polygons facing away cast zero shadow (their projection
-   would stack inside the silhouette and produce ugly overdraw). The
-   * 10 multiplier sharpens the cutoff so small positive Lambert values
-   jump quickly to 1, giving a near-binary visibility decision with a
-   smooth edge transition. Pure CSS calc — no JS at light-change time.
-
-   Scoped to dynamic mode: baked-mode shadow leaves are dropped from the
-   DOM up-front by isBakedShadowCaster() and don't carry --pnx/--pny/--pnz,
-   so an unscoped gate would silently zero them via the @property
-   initial values. The base layout / positioning / pseudo-element-strip
-   rules for <q> live in the polygon-leaf section above. */
+/* Retained <q> opacity gate. Polygons facing the light cast full shadow;
+   polygons facing away cast zero shadow. The * 10 multiplier sharpens the
+   cutoff so small positive Lambert values jump quickly to 1. */
 .polycss-scene[data-polycss-lighting="dynamic"] q {
   opacity: clamp(0, calc((var(--pnx) * var(--clx) + var(--pny) * var(--cly) + var(--pnz) * var(--clz)) * 10), 1);
 }

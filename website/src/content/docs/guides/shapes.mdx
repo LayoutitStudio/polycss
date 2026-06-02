@@ -36,6 +36,26 @@ const polygons = boxPolygons({
 });
 ```
 
+## Primitive shape exports
+
+PolyCSS ships built-in shape components for common primitives. React and Vue export `PolyBox`, `PolyPlane`, `PolyRing`, `PolyOctahedron`, `PolySphere`, `PolyTetrahedron`, `PolyIcosahedron`, `PolyDodecahedron`, `PolyCylinder`, `PolyCone`, and `PolyTorus`. The vanilla package exports matching ParseResult factories: `createPolyBox`, `createPolyPlane`, `createPolyRing`, `createPolyOctahedron`, `createPolySphere`, `createPolyTetrahedron`, `createPolyIcosahedron`, `createPolyDodecahedron`, `createPolyCylinder`, `createPolyCone`, and `createPolyTorus`.
+
+Shape components accept their geometry options plus the common mesh props (`position`, `scale`, `rotation`, `autoCenter`, `id`, and event props where supported).
+
+When you need raw polygon arrays, use the core generators directly: `boxPolygons`, `planePolygons`, `ringPolygons`, `octahedronPolygons`, `spherePolygons`, `tetrahedronPolygons`, `icosahedronPolygons`, `dodecahedronPolygons`, `cylinderPolygons`, `conePolygons`, `torusPolygons`, `axesHelperPolygons`, and `arrowPolygons`.
+
+```tsx
+import { PolyCamera, PolyScene, PolyBox, PolySphere, PolyTorus } from "@layoutit/polycss-react";
+
+<PolyCamera rotX={65} rotY={45}>
+  <PolyScene>
+    <PolyBox size={80} color="#ffd166" />
+    <PolySphere radius={0.9} color="#7dd3fc" position={[120, 0, 0]} />
+    <PolyTorus radius={1.2} tube={0.35} color="#4ecdc4" position={[-120, 0, 0]} />
+  </PolyScene>
+</PolyCamera>
+```
+
 ## The polygon primitive
 
 `<poly-polygon>` (vanilla) and `<Poly>` (React / Vue) render a single polygon as one internal leaf element. The renderer picks the cheapest strategy for that polygon: solid CSS primitives where possible, atlas slices for textured or irregular faces. They forward standard DOM props (`onclick`, `class`, `style`, `aria-*`, etc.).
@@ -61,6 +81,7 @@ const polygons = boxPolygons({
 <TabItem label="React">
 ```tsx
 import { PolyCamera, PolyScene, Poly } from "@layoutit/polycss-react";
+import type { Vec3 } from "@layoutit/polycss-react";
 
 const triangle: Vec3[] = [[0,0,0], [1,0,0], [0,1,0]];
 
@@ -176,6 +197,26 @@ const onClickPoly = (i: number) => alert(`clicked polygon ${i}`);
 ```
 </TabItem>
 </Tabs>
+
+## Shared materials
+
+Use `material` when multiple polygons share the same texture identity. React and Vue export `usePolyMaterial` to keep that material object stable across rerenders, which is useful with memoized polygon lists or `<Poly>` children.
+
+```tsx
+import { usePolyMaterial, Poly } from "@layoutit/polycss-react";
+
+const material = usePolyMaterial({ texture: "/stone.png", key: "stone" });
+
+<Poly vertices={vertices} material={material} uvs={uvs} />;
+```
+
+```vue
+<script setup lang="ts">
+import { usePolyMaterial } from "@layoutit/polycss-vue";
+
+const material = usePolyMaterial({ texture: "/stone.png", key: "stone" });
+</script>
+```
 
 ## Per-polygon override (mesh + custom render)
 
@@ -297,6 +338,8 @@ export function SelectAndMove() {
 ```
 
 Use `usePolySelect()` to read the current selection inside a React subtree and `usePolySelectionApi()` when a nested toolbar needs to call `set`, `add`, `remove`, `toggle`, or `clear`.
+
+For lower-level DOM tools, React and Vue also export `findPolyMeshHandle(el)`, `pointInMeshElement(meshEl, clientX, clientY)`, and `findMeshUnderPoint(clientX, clientY, filter?)`. They resolve rendered DOM hits back to `PolyMeshHandle`s and use the same bounding-rect fallback that selection and transform controls use for clipped polygon leaves.
 
 ## Imperative loading
 

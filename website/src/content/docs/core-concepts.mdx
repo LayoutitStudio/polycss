@@ -114,13 +114,12 @@ The internal leaf tag is a strategy, not public API:
 | `<u>` | Stable triangle / corner-shape solid | Solid triangles and exact beveled-corner solids. |
 | `<i>` | Border-shape clipped solid | Solid non-rect polygons on browsers with `border-shape`. |
 | `<s>` | Atlas slice | Textured polygons and fallback solids. |
-| `<q>` | Cast shadow | Dynamic-lighting shadow leaves for meshes with `castShadow`. |
 
-You normally do not target these tags directly; use `Poly`, `PolyMesh`, classes, data attributes, or render stats.
+You normally do not target these tags directly; use `Poly`, `PolyMesh`, classes, data attributes, or render stats. Cast shadows are separate SVG shadow surfaces, not render-strategy leaves; meshes with `castShadow` project onto the scene ground or receiver surfaces in both lighting modes.
 
 ## Automatic Polygon Merge
 
-Before rendering, PolyCSS automatically optimizes loaded meshes. `meshResolution: "lossless"` keeps exact planar candidates only; the default `"lossy"` mode can also merge near-coplanar candidates within a bounded displacement budget, choosing the lowest estimated DOM render cost. Larger lossy candidates are accepted only when the DOM win is meaningful and whole-mesh seam diagnostics do not regress. This keeps DOM element counts low for flat surfaces without changing the intended rendered shape.
+Before rendering, PolyCSS automatically optimizes loaded meshes. `meshResolution: "lossless"` keeps exact planar candidates only; the default `"lossy"` mode also bakes solid texture swatches, merges visually redundant baked swatch colors, tries static triangle simplification for eligible non-animated imports, and can merge near-coplanar candidates within a bounded displacement budget. Candidates are accepted only when the final DOM win is meaningful and whole-mesh seam diagnostics do not regress. This keeps DOM element counts low for flat surfaces without changing the intended rendered shape.
 
 Per-polygon DOM identity is preserved for polygons that cannot merge; polygons inside a merged flat region become one rendered element.
 

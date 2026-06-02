@@ -5,10 +5,9 @@
  * Why this exists: modelers (and importers) often emit redundant geometry
  * for the same visible surface — a doubled face on a wall, an inner shell
  * coincident with an outer shell, or two N-gons that fan-triangulate the
- * same region. Each duplicate is a real `<i>` element at render time:
- * it costs DOM, Lambert math, atlas budget, AND it produces stacked
- * shadow leaves that visibly multiply on the receiver (overlapping dark
- * patches on the ground).
+ * same region. Each duplicate is a real render leaf at render time:
+ * it costs DOM, Lambert math, atlas budget, and redundant shadow projection
+ * work.
  *
  * This is a separate concern from `cullInteriorPolygons` (which removes
  * polygons fully *enclosed* by other geometry, conservative against
@@ -314,9 +313,8 @@ function facesInward(meta: PolyMeta, meshCentroid: Vec3): boolean {
  *  larger area as a tiebreaker.
  *
  *  Exposed for callers that want to act on the index set directly —
- *  e.g. shadow casting can use a looser tolerance to skip shadow leaves
- *  for redundant casters without removing them from the renderable
- *  polygon set. */
+ *  e.g. shadow casting can use a looser tolerance to skip redundant caster
+ *  projections without removing them from the renderable polygon set. */
 export function findOverlappingPolygonDuplicates(
   input: Polygon[],
   options?: DedupeOverlappingPolygonsOptions,

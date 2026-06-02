@@ -3,7 +3,11 @@ import { findOverlappingPolygonDuplicates } from "./dedupeOverlappingPolygons";
 import type { MeshResolution, Polygon, TextureTriangle, Vec2, Vec3 } from "../types";
 import { coverPlanarPolygons, type CoverPlanarPolygonsOptions } from "./coverPlanarPolygons";
 import { mergePolygons } from "./mergePolygons";
-import { seamOverlapDiagnostics, type SeamOverlapDiagnostics } from "./seamRepair";
+import { seamOverlapSafetyDiagnostics, type SeamOverlapDiagnostics } from "./seamRepair";
+import {
+  simplifyTriangleMeshPolygons,
+  type SimplifyTriangleMeshPolygonsOptions,
+} from "./simplifyTriangleMesh";
 
 const NORMALIZE_MAX_ANGLE_DEG = 3;
 const NORMALIZE_MAX_PLANE_DISPLACEMENT = 0.03;
@@ -19,6 +23,12 @@ interface LossyApproximateOptions {
 export interface OptimizeMeshPolygonsOptions {
   /** Public quality/resolution intent. Defaults to "lossy". */
   meshResolution?: MeshResolution;
+  /**
+   * Return as soon as the optimizer finds a result with at most this many
+   * polygons. Useful for candidate comparisons where the caller already knows
+   * the maximum DOM leaf count it can accept.
+   */
+  stopAtPolygonCount?: number;
   /**
    * Run the planar cover pass as an exact candidate for untextured coplanar
    * regions. Defaults to true.
@@ -114,16 +124,18 @@ interface TopologyEdgeStats {
   boundarySegments: TopologySegment[];
   internalSegments: TopologySegment[];
   boundaryLength: number;
+  internalIndex?: TopologySegmentIndex;
+  internalIndexTolerance?: number;
+}
+
+interface TopologySegmentIndex {
+  cellSize: number;
+  cells: Map<string, TopologySegment[]>;
 }
 
 interface TopologyGapDiagnostics {
-  exactInternalEdges: number;
-  nearInternalEdges: number;
-  exposedInternalLength: number;
-  maxInternalOffset: number;
   tJunctionPairs: number;
   tJunctionLength: number;
-  excessBoundaryLength: number;
 }
 
 interface SegmentOverlapInfo {
@@ -139,6 +151,8 @@ interface BestSafetyDiagnostics {
 }
 
 interface PreprocessCache {
+  skipInteriorCull?: boolean;
+  reuseSnappedInteriorCull?: boolean;
   baseline?: Polygon[];
   deduped?: Polygon[];
   dedupedIndices?: IndexFilter;
@@ -147,7 +161,71 @@ interface PreprocessCache {
   snapped?: Polygon[];
   snappedInterior?: Polygon[];
   snappedInteriorIndices?: IndexFilter;
+  snappedInteriorUsesBaselineFilter?: boolean;
+  snappedInteriorExact?: Polygon[];
+  snappedInteriorExactIndices?: IndexFilter;
   trianglePairSource?: TrianglePairSourceCache;
+}
+
+interface OptimizeMeshPolygonsRunOptions {
+  requiredMaxPolygonCount?: number;
+  skipInteriorCull?: boolean;
+  skipExactRectCover?: boolean;
+  simplifiedCandidate?: boolean;
+  captureVisiblePolygons?: boolean;
+}
+
+interface OptimizeMeshPolygonsRunResult {
+  polygons: Polygon[];
+  visiblePolygons?: Polygon[];
+}
+
+type MeshOptimizationStep =
+  | { kind: "baselineCandidates" }
+  | { kind: "initialLossyCandidates" }
+  | { kind: "finalLossyCandidates" }
+  | {
+    kind: "staticSimplificationCandidates";
+    options: OptimizeStaticSimplificationOptions;
+    stopOnAccept: boolean;
+  };
+
+interface MeshOptimizationPlan {
+  steps: readonly MeshOptimizationStep[];
+}
+
+type MeshCandidateAcceptanceMode = "cost" | "dom" | "seamSafe";
+
+interface MeshCandidateSubmission {
+  mode: MeshCandidateAcceptanceMode;
+  polygons: Polygon[];
+  cost?: number;
+  sourcePolygonCount?: number;
+  maxPolygonCount?: number;
+}
+
+interface MeshCandidateEngineConfig {
+  acceptor?: MeshCandidateAcceptor;
+  costCandidateMode?: Extract<MeshCandidateAcceptanceMode, "cost" | "dom">;
+  seamCandidateMode?: Extract<MeshCandidateAcceptanceMode, "dom" | "seamSafe">;
+  offerBaseline?: boolean;
+}
+
+export interface OptimizeStaticSimplificationOptions {
+  simplifyTriangleMeshOptions?: SimplifyTriangleMeshPolygonsOptions;
+  earlyStopDropRatio?: number;
+}
+
+export interface OptimizeParseMeshPolygonsOptions extends OptimizeMeshPolygonsOptions {
+  staticSimplification?: OptimizeStaticSimplificationOptions | false;
+  useCandidateFirst?: boolean;
+}
+
+interface StaticSimplificationPlan {
+  source: Polygon[];
+  vertexKeyMode?: "relaxed" | "source";
+  precomputed?: Polygon[] | null;
+  skipInteriorCull?: boolean;
 }
 
 type IndexFilter = number[] | null;
@@ -194,6 +272,22 @@ const PREPARED_PAIR_MAX_ANGLE_DEG = 60;
 const PREPARED_PAIR_MAX_BOUNDARY_DISPLACEMENT = 0.06;
 const AGGRESSIVE_LOSSY_MIN_RENDER_COST_GAIN = 4;
 const AGGRESSIVE_LOSSY_MIN_SOURCE_GAIN_RATIO = 0.003;
+const LARGE_BASELINE_AGGRESSIVE_SKIP_MIN_POLYGONS = 4000;
+const LARGE_BASELINE_AGGRESSIVE_SKIP_MAX_BEST_POLYGONS = 3000;
+const SIMPLIFIED_CANDIDATE_AGGRESSIVE_MAX_POLYGONS = 4500;
+const SIMPLIFIED_CANDIDATE_CHAINED_AGGRESSIVE_MIN_POLYGONS = 2400;
+const SIMPLIFIED_CANDIDATE_REUSE_CULL_MAX_POLYGONS = 4200;
+const REUSED_SNAPPED_CULL_ALWAYS_MAX_BASELINE_POLYGONS = 1800;
+const REUSED_SNAPPED_CULL_EXTENDED_MAX_BASELINE_POLYGONS = 5000;
+const REUSED_SNAPPED_CULL_EXTENDED_MIN_BASELINE_SOURCE_RATIO = 0.28;
+const DEFAULT_STATIC_SIMPLIFY_EARLY_STOP_DROP_RATIO = 0.15;
+const MIN_STATIC_SIMPLIFY_BASELINE_SOURCE_RATIO = 0.23;
+const SOURCE_FIRST_MIN_BASELINE_POLYGONS = 2000;
+const SOURCE_FIRST_MAX_RELAXED_RAW_DROP = 16;
+const VISIBLE_FIRST_MIN_SOURCE_POLYGONS = 4000;
+const VISIBLE_FIRST_MIN_CULLED_POLYGONS = 900;
+const VISIBLE_FIRST_MAX_RELAXED_RAW_DROP = 16;
+const VISIBLE_FIRST_MIN_CULL_TO_RELAXED_DROP_RATIO = 1.5;
 const TOPOLOGY_GAP_TOLERANCE = 0.045;
 const TOPOLOGY_MIN_PARALLEL_DOT = 0.999;
 const TOPOLOGY_MIN_OVERLAP = 1e-5;
@@ -222,123 +316,611 @@ const LARGE_LOSSY_RECT_COVER_OPTIONS: CoverPlanarPolygonsOptions = {
   maxCandidateAxes: 2,
 };
 
+const FULL_OPTIMIZATION_PLAN: MeshOptimizationPlan = {
+  steps: [
+    { kind: "baselineCandidates" },
+    { kind: "initialLossyCandidates" },
+    { kind: "finalLossyCandidates" },
+  ],
+};
+
 export function optimizeMeshPolygons(
   polygons: Polygon[],
   options: OptimizeMeshPolygonsOptions = {},
 ): Polygon[] {
-  const meshResolution = options.meshResolution ?? "lossy";
-  const preprocessCache: PreprocessCache = {};
-  const baseline = preprocessModelPolygons(polygons, false, preprocessCache);
-  let best = baseline;
-  let bestCost = polygonRenderCost(best);
-  let bestDiagnostics: BestSafetyDiagnostics = { polygons: best };
-  const resetBestDiagnostics = (seam?: SeamOverlapDiagnostics): void => {
-    bestDiagnostics = { polygons: best, seam };
-  };
-  const bestSeamDiagnostics = (): SeamOverlapDiagnostics => {
-    if (bestDiagnostics.polygons !== best) resetBestDiagnostics();
-    if (!bestDiagnostics.seam) bestDiagnostics.seam = seamOverlapDiagnostics(best);
-    return bestDiagnostics.seam;
-  };
-  const bestTopologyEdges = (): TopologyEdgeStats => {
-    if (bestDiagnostics.polygons !== best) resetBestDiagnostics();
-    if (!bestDiagnostics.topologyEdges) bestDiagnostics.topologyEdges = collectTopologyEdgeStats(best);
-    return bestDiagnostics.topologyEdges;
-  };
-  const bestTopologySelfDiagnostics = (): TopologyGapDiagnostics => {
-    if (bestDiagnostics.polygons !== best) resetBestDiagnostics();
-    if (!bestDiagnostics.topologySelf) {
-      bestDiagnostics.topologySelf = topologySelfDiagnostics(bestTopologyEdges(), TOPOLOGY_GAP_TOLERANCE);
-    }
-    return bestDiagnostics.topologySelf;
-  };
-  const acceptCandidate = (candidate: Polygon[], cost = polygonRenderCost(candidate)): boolean => {
-    if (cost >= bestCost) return false;
-    best = candidate;
-    bestCost = cost;
-    resetBestDiagnostics();
-    return true;
-  };
-  const acceptSeamSafeCandidate = (
-    candidate: Polygon[],
-    sourcePolygonCount: number,
-    cost = polygonRenderCost(candidate),
-  ): boolean => {
-    const gain = bestCost - cost;
-    if (gain <= 0) return false;
-    if (gain < aggressiveLossyMinRenderCostGain(sourcePolygonCount)) return false;
-    const candidateSeam = seamOverlapDiagnostics(candidate);
-    if (seamDiagnosticsWorse(candidateSeam, bestSeamDiagnostics())) return false;
-    if (topologyGapDiagnosticsWorse(
-      bestTopologyEdges(),
-      bestTopologySelfDiagnostics(),
-      candidate,
-    )) return false;
-    best = candidate;
-    bestCost = cost;
-    resetBestDiagnostics(candidateSeam);
-    return true;
-  };
+  return optimizeMeshPolygonsInternal(polygons, options).polygons;
+}
 
-  const initialRectCover = meshResolution === "lossy" && options.rectCover === undefined
-    ? automaticLossyRectCoverOptions(baseline)
-    : options.rectCover;
-  const rectCovered = applyRectCoverCandidate(baseline, initialRectCover);
-  if (rectCovered !== baseline) acceptCandidate(rectCovered);
-  if (
-    meshResolution === "lossy" &&
-    options.rectCover === undefined
-  ) {
-    const losslessRectCovered = applyRectCoverCandidate(baseline, undefined);
-    if (losslessRectCovered !== baseline) acceptCandidate(losslessRectCovered);
+export function optimizeParseMeshPolygons(
+  polygons: Polygon[],
+  options: OptimizeParseMeshPolygonsOptions = {},
+): Polygon[] {
+  const optimizeOptions: OptimizeMeshPolygonsOptions = {
+    meshResolution: options.meshResolution,
+    stopAtPolygonCount: options.stopAtPolygonCount,
+    rectCover: options.rectCover,
+  };
+  const graph = new MeshOptimizationArtifactGraph();
+  return graph.workspaceFor(polygons, { captureVisiblePolygons: true })
+    .createRun(optimizeOptions, { captureVisiblePolygons: true })
+    .optimizeParse({
+      staticSimplification: options.staticSimplification,
+      useCandidateFirst: options.useCandidateFirst === true,
+    })
+    .polygons;
+}
+
+function optimizeMeshPolygonsInternal(
+  polygons: Polygon[],
+  options: OptimizeMeshPolygonsOptions = {},
+  runOptions: OptimizeMeshPolygonsRunOptions = {},
+): OptimizeMeshPolygonsRunResult {
+  const graph = new MeshOptimizationArtifactGraph();
+  return graph.workspaceFor(polygons, runOptions)
+    .createRun(options, runOptions)
+    .optimize();
+}
+
+class MeshOptimizationArtifactGraph {
+  private readonly workspaces = new Map<string, WeakMap<Polygon[], MeshOptimizationWorkspace>>();
+
+  workspaceFor(source: Polygon[], runOptions: OptimizeMeshPolygonsRunOptions): MeshOptimizationWorkspace {
+    const key = workspaceCacheKey(runOptions);
+    let workspacesBySource = this.workspaces.get(key);
+    if (!workspacesBySource) {
+      workspacesBySource = new WeakMap();
+      this.workspaces.set(key, workspacesBySource);
+    }
+    let workspace = workspacesBySource.get(source);
+    if (!workspace) {
+      workspace = new MeshOptimizationWorkspace(source, runOptions, this);
+      workspacesBySource.set(source, workspace);
+    }
+    return workspace;
   }
-  if (meshResolution === "lossy" && (best.length <= 1 || bestCost <= 1 + 1e-9)) return best;
-  if (meshResolution === "lossy") {
-    const approximate = preprocessModelPolygons(polygons, DEFAULT_LOSSY_APPROXIMATE_OPTIONS, preprocessCache);
-    acceptCandidate(approximate);
+}
+
+function workspaceCacheKey(runOptions: OptimizeMeshPolygonsRunOptions): string {
+  return [
+    runOptions.skipInteriorCull === true ? "skip-cull" : "cull",
+    runOptions.simplifiedCandidate === true ? "simplified" : "source",
+  ].join(":");
+}
+
+class MeshOptimizationWorkspace {
+  private readonly source: Polygon[];
+  private readonly preprocessCache: PreprocessCache;
+  private readonly graph: MeshOptimizationArtifactGraph;
+
+  constructor(
+    source: Polygon[],
+    runOptions: OptimizeMeshPolygonsRunOptions,
+    graph: MeshOptimizationArtifactGraph,
+  ) {
+    this.source = source;
+    this.graph = graph;
+    this.preprocessCache = {
+      skipInteriorCull: runOptions.skipInteriorCull === true,
+    };
+  }
+
+  polygons(): Polygon[] {
+    return this.source;
+  }
+
+  preprocess(normalizeGeometry: boolean | LossyApproximateOptions): Polygon[] {
+    return preprocessModelPolygons(this.source, normalizeGeometry, this.preprocessCache);
+  }
+
+  configureSnappedCullReuse(baseline: Polygon[], runOptions: OptimizeMeshPolygonsRunOptions): void {
+    const baselineSourceRatio = baseline.length / Math.max(1, this.source.length);
+    this.preprocessCache.reuseSnappedInteriorCull = runOptions.simplifiedCandidate === true
+      ? this.source.length <= SIMPLIFIED_CANDIDATE_REUSE_CULL_MAX_POLYGONS
+      : baseline.length <= REUSED_SNAPPED_CULL_ALWAYS_MAX_BASELINE_POLYGONS ||
+        (
+          baseline.length <= REUSED_SNAPPED_CULL_EXTENDED_MAX_BASELINE_POLYGONS &&
+          baselineSourceRatio >= REUSED_SNAPPED_CULL_EXTENDED_MIN_BASELINE_SOURCE_RATIO
+        );
+  }
+
+  visiblePolygons(): Polygon[] {
+    return this.preprocessCache.interior ?? this.preprocessCache.deduped ?? this.source;
+  }
+
+  createRun(
+    options: OptimizeMeshPolygonsOptions,
+    runOptions: OptimizeMeshPolygonsRunOptions,
+  ): MeshCandidateEngine {
+    return new MeshCandidateEngine(this, options, runOptions);
+  }
+
+  workspaceFor(source: Polygon[], runOptions: OptimizeMeshPolygonsRunOptions): MeshOptimizationWorkspace {
+    return this.graph.workspaceFor(source, runOptions);
+  }
+}
+
+class MeshCandidateEngine {
+  private readonly workspace: MeshOptimizationWorkspace;
+  private readonly source: Polygon[];
+  private readonly options: OptimizeMeshPolygonsOptions;
+  private readonly runOptions: OptimizeMeshPolygonsRunOptions;
+  private readonly meshResolution: MeshResolution;
+  private readonly stopAtPolygonCount?: number;
+  private readonly requiredMaxPolygonCount?: number;
+  private readonly baseline: Polygon[];
+  private readonly visiblePolygons?: Polygon[];
+  private readonly acceptor: MeshCandidateAcceptor;
+  private readonly costCandidateMode: Extract<MeshCandidateAcceptanceMode, "cost" | "dom">;
+  private readonly seamCandidateMode: Extract<MeshCandidateAcceptanceMode, "dom" | "seamSafe">;
+  private readonly offerBaseline: boolean;
+  private baselineCandidatesComplete = false;
+  private initialLossyCandidatesComplete = false;
+  private finalLossyCandidatesComplete = false;
+
+  constructor(
+    workspace: MeshOptimizationWorkspace,
+    options: OptimizeMeshPolygonsOptions,
+    runOptions: OptimizeMeshPolygonsRunOptions,
+    config: MeshCandidateEngineConfig = {},
+  ) {
+    this.workspace = workspace;
+    this.source = workspace.polygons();
+    this.options = options;
+    this.runOptions = runOptions;
+    this.costCandidateMode = config.costCandidateMode ?? "cost";
+    this.seamCandidateMode = config.seamCandidateMode ?? "seamSafe";
+    this.offerBaseline = config.offerBaseline === true;
+    this.meshResolution = options.meshResolution ?? "lossy";
+    this.stopAtPolygonCount = Number.isFinite(options.stopAtPolygonCount)
+      ? Math.max(0, Math.floor(options.stopAtPolygonCount!))
+      : undefined;
+    this.requiredMaxPolygonCount = Number.isFinite(runOptions.requiredMaxPolygonCount)
+      ? Math.max(0, Math.floor(runOptions.requiredMaxPolygonCount!))
+      : undefined;
+    this.baseline = this.preprocess(false);
+    this.workspace.configureSnappedCullReuse(this.baseline, runOptions);
+    this.visiblePolygons = runOptions.captureVisiblePolygons
+      ? this.workspace.visiblePolygons()
+      : undefined;
+    this.acceptor = config.acceptor ?? new MeshCandidateAcceptor(this.baseline, this.requiredMaxPolygonCount);
+  }
+
+  optimize(): OptimizeMeshPolygonsRunResult {
+    return this.runPlan(FULL_OPTIMIZATION_PLAN);
+  }
+
+  optimizeParse(options: {
+    staticSimplification?: OptimizeStaticSimplificationOptions | false;
+    useCandidateFirst: boolean;
+  }): OptimizeMeshPolygonsRunResult {
+    const staticSimplification = options.staticSimplification === false
+      ? null
+      : options.staticSimplification ?? {};
+    const steps: MeshOptimizationStep[] = [
+      { kind: "baselineCandidates" },
+      { kind: "initialLossyCandidates" },
+    ];
+    if (!options.useCandidateFirst) steps.push({ kind: "finalLossyCandidates" });
+    if (staticSimplification) {
+      steps.push({
+        kind: "staticSimplificationCandidates",
+        options: staticSimplification,
+        stopOnAccept: options.useCandidateFirst,
+      });
+    }
+    if (options.useCandidateFirst) steps.push({ kind: "finalLossyCandidates" });
+    return this.runPlan({ steps });
+  }
+
+  private get best(): Polygon[] {
+    return this.acceptor.polygons;
+  }
+
+  private get bestCost(): number {
+    return this.acceptor.cost;
+  }
+
+  private runStaticSimplificationCandidates(options: OptimizeStaticSimplificationOptions = {}): boolean {
+    if (this.meshResolution !== "lossy") return false;
+    if (!shouldTryStaticSimplification(this.source, this.best)) return false;
+    const rawRelaxed = simplifyTriangleMeshCandidate(this.source, options);
+    if (!rawRelaxed) return false;
+
+    for (const plan of this.staticSimplificationPlans(rawRelaxed)) {
+      const simplified = resolveStaticSimplificationPlan(plan, options);
+      if (!simplified) continue;
+      if (this.generateStaticSimplificationCandidate(
+        simplified,
+        options,
+        plan.skipInteriorCull,
+      )) return true;
+    }
+    return false;
+  }
+
+  private staticSimplificationPlans(rawRelaxed: Polygon[]): StaticSimplificationPlan[] {
+    const relaxedRawDrop = this.source.length - rawRelaxed.length;
+    const plans: StaticSimplificationPlan[] = [];
+    const visibleCullDrop = this.visiblePolygons && this.visiblePolygons !== this.source
+      ? this.source.length - this.visiblePolygons.length
+      : 0;
+
     if (
-      options.rectCover === undefined &&
-      polygons.length >= AUTOMATIC_APPROXIMATE_RECT_COVER_MIN_SOURCE_POLYGONS &&
-      polygons.length <= AUTOMATIC_APPROXIMATE_RECT_COVER_MAX_SOURCE_POLYGONS
+      this.visiblePolygons &&
+      this.visiblePolygons !== this.source &&
+      this.source.length >= VISIBLE_FIRST_MIN_SOURCE_POLYGONS &&
+      visibleCullDrop >= VISIBLE_FIRST_MIN_CULLED_POLYGONS &&
+      (
+        relaxedRawDrop <= VISIBLE_FIRST_MAX_RELAXED_RAW_DROP ||
+        visibleCullDrop >= relaxedRawDrop * VISIBLE_FIRST_MIN_CULL_TO_RELAXED_DROP_RATIO
+      )
     ) {
-      acceptCandidate(applyRectCoverCandidate(approximate, AUTOMATIC_APPROXIMATE_RECT_COVER_OPTIONS));
+      plans.push({
+        source: this.visiblePolygons,
+        skipInteriorCull: true,
+      });
     }
-    if (options.rectCover !== undefined && options.rectCover !== false) {
-      acceptCandidate(applyRectCoverCandidate(approximate, options.rectCover));
+
+    if (
+      this.best.length >= SOURCE_FIRST_MIN_BASELINE_POLYGONS &&
+      relaxedRawDrop <= SOURCE_FIRST_MAX_RELAXED_RAW_DROP &&
+      hasSourceVertexKeys(this.source)
+    ) {
+      plans.push({
+        source: this.source,
+        vertexKeyMode: "source",
+      });
     }
+
+    plans.push({
+      source: this.source,
+      precomputed: rawRelaxed,
+    });
+    return plans;
+  }
+
+  private generateStaticSimplificationCandidate(
+    candidate: Polygon[],
+    options: OptimizeStaticSimplificationOptions,
+    skipInteriorCull = false,
+  ): boolean {
+    const runOptions: OptimizeMeshPolygonsRunOptions = {
+      requiredMaxPolygonCount: this.best.length - 1,
+      skipExactRectCover: true,
+      skipInteriorCull,
+      simplifiedCandidate: true,
+    };
+    const workspace = this.workspace.workspaceFor(candidate, runOptions);
+    const before = this.best;
+    new MeshCandidateEngine(
+      workspace,
+      {
+        meshResolution: "lossy",
+        stopAtPolygonCount: staticSimplificationEarlyStopTarget(this.best.length, options),
+      },
+      runOptions,
+      {
+        acceptor: this.acceptor,
+        costCandidateMode: "dom",
+        seamCandidateMode: "dom",
+        offerBaseline: true,
+      },
+    ).optimize();
+    return this.best !== before;
+  }
+
+  private runPlan(plan: MeshOptimizationPlan): OptimizeMeshPolygonsRunResult {
+    for (const step of plan.steps) {
+      let stopAfterStep = false;
+      if (step.kind === "baselineCandidates") {
+        this.runBaselineCandidates();
+      } else if (step.kind === "staticSimplificationCandidates") {
+        stopAfterStep = this.runStaticSimplificationCandidates(step.options) && step.stopOnAccept;
+      } else {
+        if (!this.shouldRunLossyPipeline()) break;
+        if (step.kind === "initialLossyCandidates") this.runInitialLossyPipeline();
+        else this.runFinalLossyPipeline();
+      }
+      if (stopAfterStep || this.shouldStop()) break;
+    }
+    return this.result();
+  }
+
+  private runBaselineCandidates(): void {
+    if (this.baselineCandidatesComplete) return;
+    this.baselineCandidatesComplete = true;
+
+    if (this.offerBaseline) {
+      this.acceptCandidate(this.baseline);
+      if (this.shouldStop()) return;
+    }
+
+    const initialRectCover = this.runOptions.skipExactRectCover === true
+      ? false
+      : this.meshResolution === "lossy" && this.options.rectCover === undefined
+      ? automaticLossyRectCoverOptions(this.baseline)
+      : this.options.rectCover;
+    if (this.shouldStop()) return;
+
+    const rectCovered = applyRectCoverCandidate(this.baseline, initialRectCover);
+    if (rectCovered !== this.baseline) this.acceptCandidate(rectCovered);
+    if (this.shouldStop()) return;
+
+    if (
+      this.meshResolution === "lossy" &&
+      this.options.rectCover === undefined &&
+      this.runOptions.skipExactRectCover !== true
+    ) {
+      const losslessRectCovered = applyRectCoverCandidate(this.baseline, undefined);
+      if (losslessRectCovered !== this.baseline) this.acceptCandidate(losslessRectCovered);
+    }
+  }
+
+  private shouldRunLossyPipeline(): boolean {
+    return this.meshResolution === "lossy" &&
+      !this.shouldStop() &&
+      this.best.length > 1 &&
+      this.bestCost > 1 + 1e-9;
+  }
+
+  private runInitialLossyPipeline(): void {
+    if (this.initialLossyCandidatesComplete) return;
+    this.initialLossyCandidatesComplete = true;
+
+    const approximate = this.preprocess(DEFAULT_LOSSY_APPROXIMATE_OPTIONS);
+    this.acceptCandidate(approximate);
+    if (this.shouldStop()) return;
+
+    if (
+      this.options.rectCover === undefined &&
+      this.source.length >= AUTOMATIC_APPROXIMATE_RECT_COVER_MIN_SOURCE_POLYGONS &&
+      this.source.length <= AUTOMATIC_APPROXIMATE_RECT_COVER_MAX_SOURCE_POLYGONS
+    ) {
+      this.acceptCandidate(applyRectCoverCandidate(approximate, AUTOMATIC_APPROXIMATE_RECT_COVER_OPTIONS));
+      if (this.shouldStop()) return;
+    }
+
+    if (this.options.rectCover !== undefined && this.options.rectCover !== false) {
+      this.acceptCandidate(applyRectCoverCandidate(approximate, this.options.rectCover));
+      if (this.shouldStop()) return;
+    }
+  }
+
+  private runFinalLossyPipeline(): void {
+    if (this.finalLossyCandidatesComplete) return;
+    this.finalLossyCandidatesComplete = true;
+
+    if (
+      this.runOptions.simplifiedCandidate === true &&
+      this.source.length > SIMPLIFIED_CANDIDATE_AGGRESSIVE_MAX_POLYGONS
+    ) {
+      return;
+    }
+
+    this.runAggressiveLossyVariants();
+    if (this.shouldStop()) return;
+    this.runLargeRectCoverCandidate();
+  }
+
+  private runAggressiveLossyVariants(): void {
+    const skipLargeBaselineAggressive = (
+      this.stopAtPolygonCount === undefined &&
+      this.source.length >= LARGE_BASELINE_AGGRESSIVE_SKIP_MIN_POLYGONS &&
+      this.best.length <= LARGE_BASELINE_AGGRESSIVE_SKIP_MAX_BEST_POLYGONS
+    );
     let acceptedBaseAggressive = false;
-    for (let variantIndex = 0; variantIndex < AGGRESSIVE_LOSSY_APPROXIMATE_VARIANTS.length; variantIndex += 1) {
+    for (
+      let variantIndex = skipLargeBaselineAggressive ? AGGRESSIVE_LOSSY_APPROXIMATE_VARIANTS.length : 0;
+      variantIndex < AGGRESSIVE_LOSSY_APPROXIMATE_VARIANTS.length;
+      variantIndex += 1
+    ) {
       if (
         variantIndex === 1 &&
         !acceptedBaseAggressive
       ) continue;
       if (
-        variantIndex === 2 &&
-        !automaticWideLossyVariantCandidate(polygons)
+        variantIndex === 1 &&
+        this.runOptions.simplifiedCandidate === true &&
+        this.source.length < SIMPLIFIED_CANDIDATE_CHAINED_AGGRESSIVE_MIN_POLYGONS
       ) continue;
-      const aggressiveOptions = AGGRESSIVE_LOSSY_APPROXIMATE_VARIANTS[variantIndex];
-      const aggressive = preprocessModelPolygons(polygons, aggressiveOptions, preprocessCache);
+      if (
+        variantIndex === 2 &&
+        !automaticWideLossyVariantCandidate(this.source)
+      ) continue;
+      const aggressive = this.preprocess(AGGRESSIVE_LOSSY_APPROXIMATE_VARIANTS[variantIndex]);
       let aggressiveCandidate = aggressive;
       if (
-        options.rectCover === undefined &&
-        polygons.length >= AUTOMATIC_APPROXIMATE_RECT_COVER_MIN_SOURCE_POLYGONS &&
-        polygons.length <= AUTOMATIC_APPROXIMATE_RECT_COVER_MAX_SOURCE_POLYGONS
+        this.options.rectCover === undefined &&
+        this.source.length >= AUTOMATIC_APPROXIMATE_RECT_COVER_MIN_SOURCE_POLYGONS &&
+        this.source.length <= AUTOMATIC_APPROXIMATE_RECT_COVER_MAX_SOURCE_POLYGONS
       ) {
         aggressiveCandidate = applyRectCoverCandidate(aggressive, AUTOMATIC_APPROXIMATE_RECT_COVER_OPTIONS);
       }
-      if (options.rectCover !== undefined && options.rectCover !== false) {
-        aggressiveCandidate = applyRectCoverCandidate(aggressive, options.rectCover);
+      if (this.options.rectCover !== undefined && this.options.rectCover !== false) {
+        aggressiveCandidate = applyRectCoverCandidate(aggressive, this.options.rectCover);
       }
-      const accepted = acceptSeamSafeCandidate(aggressiveCandidate, polygons.length);
+      const accepted = this.acceptSeamSafeCandidate(aggressiveCandidate, this.source.length);
       if (variantIndex === 0 && accepted) acceptedBaseAggressive = true;
-    }
-    if (options.rectCover === undefined) {
-      const largeRectCovered = applyRectCoverCandidate(best, automaticLargeLossyRectCoverCandidate(best));
-      if (largeRectCovered !== best) acceptSeamSafeCandidate(largeRectCovered, best.length);
+      if (this.shouldStop()) return;
     }
   }
 
-  return best;
+  private runLargeRectCoverCandidate(): void {
+    if (this.options.rectCover !== undefined) return;
+    const largeRectCovered = applyRectCoverCandidate(this.best, automaticLargeLossyRectCoverCandidate(this.best));
+    if (largeRectCovered !== this.best) {
+      this.acceptSeamSafeCandidate(largeRectCovered, this.best.length);
+    }
+  }
+
+  private preprocess(normalizeGeometry: boolean | LossyApproximateOptions): Polygon[] {
+    return this.workspace.preprocess(normalizeGeometry);
+  }
+
+  private result(): OptimizeMeshPolygonsRunResult {
+    return { polygons: this.best, visiblePolygons: this.visiblePolygons };
+  }
+
+  private shouldStop(): boolean {
+    return this.stopAtPolygonCount !== undefined &&
+      this.best.length <= this.stopAtPolygonCount;
+  }
+
+  private acceptCandidate(candidate: Polygon[], cost = polygonRenderCost(candidate)): boolean {
+    return this.emitCandidate({
+      mode: this.costCandidateMode,
+      polygons: candidate,
+      cost,
+    });
+  }
+
+  private acceptDomCandidate(candidate: Polygon[]): boolean {
+    return this.emitCandidate({
+      mode: "dom",
+      polygons: candidate,
+    });
+  }
+
+  private acceptSeamSafeCandidate(
+    candidate: Polygon[],
+    sourcePolygonCount: number,
+    cost?: number,
+  ): boolean {
+    return this.emitCandidate({
+      mode: this.seamCandidateMode,
+      polygons: candidate,
+      sourcePolygonCount,
+      cost,
+    });
+  }
+
+  private emitCandidate(candidate: MeshCandidateSubmission): boolean {
+    return this.acceptor.accept({
+      ...candidate,
+      maxPolygonCount: candidate.maxPolygonCount ?? this.requiredMaxPolygonCount,
+    });
+  }
+}
+
+class MeshCandidateAcceptor {
+  private best: Polygon[];
+  private bestCost: number;
+  private bestDiagnostics: BestSafetyDiagnostics;
+  private readonly requiredMaxPolygonCount?: number;
+
+  constructor(baseline: Polygon[], requiredMaxPolygonCount?: number) {
+    this.best = baseline;
+    this.bestCost = polygonRenderCost(baseline);
+    this.bestDiagnostics = { polygons: baseline };
+    this.requiredMaxPolygonCount = requiredMaxPolygonCount;
+  }
+
+  get polygons(): Polygon[] {
+    return this.best;
+  }
+
+  get cost(): number {
+    return this.bestCost;
+  }
+
+  accept(candidate: MeshCandidateSubmission): boolean {
+    if (candidate.mode === "cost") {
+      return this.acceptCostCandidate(candidate.polygons, candidate.cost);
+    }
+    if (candidate.mode === "dom") {
+      return this.acceptDomCandidate(candidate.polygons, candidate.cost, candidate.maxPolygonCount);
+    }
+    return this.acceptSeamSafeCandidate(
+      candidate.polygons,
+      candidate.sourcePolygonCount ?? candidate.polygons.length,
+      candidate.cost,
+      candidate.maxPolygonCount,
+    );
+  }
+
+  private acceptCostCandidate(
+    candidate: Polygon[],
+    cost = polygonRenderCost(candidate),
+  ): boolean {
+    if (cost >= this.bestCost) return false;
+    this.commit(candidate, cost);
+    return true;
+  }
+
+  private acceptDomCandidate(
+    candidate: Polygon[],
+    cost = polygonRenderCost(candidate),
+    maxPolygonCount?: number,
+  ): boolean {
+    if (candidate.length >= this.best.length) return false;
+    if (!this.withinMaxPolygonCount(candidate, maxPolygonCount)) return false;
+    this.commit(candidate, cost);
+    return true;
+  }
+
+  private acceptSeamSafeCandidate(
+    candidate: Polygon[],
+    sourcePolygonCount: number,
+    cost?: number,
+    maxPolygonCount?: number,
+  ): boolean {
+    if (candidate.length >= this.best.length) return false;
+    if (!this.withinMaxPolygonCount(candidate, maxPolygonCount)) return false;
+    const minGain = aggressiveLossyMinRenderCostGain(sourcePolygonCount);
+    if (this.bestCost - candidate.length < minGain) return false;
+    const candidateCost = cost ?? polygonRenderCost(candidate);
+    const gain = this.bestCost - candidateCost;
+    if (gain <= 0) return false;
+    if (gain < minGain) return false;
+    const candidateSeam = seamOverlapSafetyDiagnostics(candidate);
+    if (seamDiagnosticsWorse(candidateSeam, this.bestSeamDiagnostics())) return false;
+    if (topologyGapDiagnosticsWorse(
+      this.bestTopologyEdges(),
+      this.bestTopologySelfDiagnostics(),
+      candidate,
+    )) return false;
+    this.commit(candidate, candidateCost, candidateSeam);
+    return true;
+  }
+
+  private withinMaxPolygonCount(candidate: Polygon[], maxPolygonCount?: number): boolean {
+    const limit = maxPolygonCount ?? this.requiredMaxPolygonCount;
+    return limit === undefined || candidate.length <= limit;
+  }
+
+  private commit(candidate: Polygon[], cost: number, seam?: SeamOverlapDiagnostics): void {
+    this.best = candidate;
+    this.bestCost = cost;
+    this.bestDiagnostics = { polygons: candidate, seam };
+  }
+
+  private resetBestDiagnostics(seam?: SeamOverlapDiagnostics): void {
+    this.bestDiagnostics = { polygons: this.best, seam };
+  }
+
+  private bestSeamDiagnostics(): SeamOverlapDiagnostics {
+    if (this.bestDiagnostics.polygons !== this.best) this.resetBestDiagnostics();
+    if (!this.bestDiagnostics.seam) {
+      this.bestDiagnostics.seam = seamOverlapSafetyDiagnostics(this.best);
+    }
+    return this.bestDiagnostics.seam;
+  }
+
+  private bestTopologyEdges(): TopologyEdgeStats {
+    if (this.bestDiagnostics.polygons !== this.best) this.resetBestDiagnostics();
+    if (!this.bestDiagnostics.topologyEdges) {
+      this.bestDiagnostics.topologyEdges = collectTopologyEdgeStats(this.best);
+    }
+    return this.bestDiagnostics.topologyEdges;
+  }
+
+  private bestTopologySelfDiagnostics(): TopologyGapDiagnostics {
+    if (this.bestDiagnostics.polygons !== this.best) this.resetBestDiagnostics();
+    if (!this.bestDiagnostics.topologySelf) {
+      this.bestDiagnostics.topologySelf = topologySelfDiagnostics(this.bestTopologyEdges(), TOPOLOGY_GAP_TOLERANCE);
+    }
+    return this.bestDiagnostics.topologySelf;
+  }
 }
 
 function polygonRenderCost(polygons: Polygon[]): number {
@@ -367,61 +949,79 @@ function topologyGapDiagnosticsWorse(
   referenceDiagnostics: TopologyGapDiagnostics,
   candidate: Polygon[],
 ): boolean {
-  const candidateDiagnostics = topologyGapDiagnostics(
-    referenceEdges,
-    collectTopologyEdgeStats(candidate),
+  const candidateEdges = collectTopologyEdgeStats(candidate);
+  if (topologyExposesReferenceInternalEdge(referenceEdges, candidateEdges, TOPOLOGY_GAP_TOLERANCE)) return true;
+  return boundaryTJunctionDiagnosticsWorse(
+    candidateEdges.boundarySegments,
     TOPOLOGY_GAP_TOLERANCE,
+    referenceDiagnostics,
   );
-  if (candidateDiagnostics.exactInternalEdges > 0 || candidateDiagnostics.nearInternalEdges > 0) {
-    return true;
-  }
-  return candidateDiagnostics.tJunctionPairs > referenceDiagnostics.tJunctionPairs ||
-    candidateDiagnostics.tJunctionLength > referenceDiagnostics.tJunctionLength + 1e-9;
 }
 
-function topologyGapDiagnostics(
+function topologyExposesReferenceInternalEdge(
   referenceEdges: TopologyEdgeStats,
   candidateEdges: TopologyEdgeStats,
   tolerance: number,
-): TopologyGapDiagnostics {
-  const internalIndex = buildTopologySegmentIndex(referenceEdges.internalSegments, tolerance);
-  const diagnostics: TopologyGapDiagnostics = {
-    exactInternalEdges: 0,
-    nearInternalEdges: 0,
-    exposedInternalLength: 0,
-    maxInternalOffset: 0,
-    tJunctionPairs: 0,
-    tJunctionLength: 0,
-    excessBoundaryLength: Math.max(0, candidateEdges.boundaryLength - referenceEdges.boundaryLength),
-  };
+): boolean {
+  if (referenceEdges.internalSegments.length === 0) return false;
+  const internalIndex = topologyInternalSegmentIndex(referenceEdges, tolerance);
 
   for (const segment of candidateEdges.boundarySegments) {
     if (referenceEdges.boundaryKeys.has(segment.key)) continue;
-    if (referenceEdges.internalKeys.has(segment.key)) {
-      diagnostics.exactInternalEdges += 1;
-      diagnostics.exposedInternalLength += segment.length;
-      continue;
-    }
-    const overlap = findOverlappingSegment(segment, internalIndex, tolerance);
-    if (!overlap) continue;
-    diagnostics.nearInternalEdges += 1;
-    diagnostics.exposedInternalLength += overlap.overlapLength;
-    diagnostics.maxInternalOffset = Math.max(diagnostics.maxInternalOffset, overlap.offset);
+    if (referenceEdges.internalKeys.has(segment.key)) return true;
+    if (hasOverlappingSegment(segment, internalIndex, tolerance)) return true;
   }
 
-  addBoundaryTJunctionDiagnostics(diagnostics, candidateEdges.boundarySegments, tolerance);
-  return diagnostics;
+  return false;
+}
+
+function topologyInternalSegmentIndex(
+  edges: TopologyEdgeStats,
+  tolerance: number,
+): TopologySegmentIndex {
+  if (!edges.internalIndex || edges.internalIndexTolerance !== tolerance) {
+    edges.internalIndex = buildTopologySegmentIndex(edges.internalSegments, tolerance);
+    edges.internalIndexTolerance = tolerance;
+  }
+  return edges.internalIndex;
+}
+
+function boundaryTJunctionDiagnosticsWorse(
+  boundarySegments: TopologySegment[],
+  tolerance: number,
+  referenceDiagnostics: TopologyGapDiagnostics,
+): boolean {
+  const boundaryIndex = buildTopologySegmentIndex(boundarySegments, tolerance);
+  const seenPairs = new Set<number>();
+  let pairStride = 0;
+  let tJunctionPairs = 0;
+  let tJunctionLength = 0;
+  for (const segment of boundarySegments) pairStride = Math.max(pairStride, segment.index + 1);
+  for (const segment of boundarySegments) {
+    for (const other of overlappingSegmentCandidates(segment, boundaryIndex, tolerance)) {
+      if (other === segment || other.polygon === segment.polygon || other.key === segment.key) continue;
+      const pairKey = segment.index < other.index
+        ? segment.index * pairStride + other.index
+        : other.index * pairStride + segment.index;
+      if (seenPairs.has(pairKey)) continue;
+      seenPairs.add(pairKey);
+      const overlap = segmentOverlap(segment, other, tolerance);
+      if (!overlap) continue;
+      tJunctionPairs += 1;
+      tJunctionLength += overlap.overlapLength;
+      if (
+        tJunctionPairs > referenceDiagnostics.tJunctionPairs ||
+        tJunctionLength > referenceDiagnostics.tJunctionLength + 1e-9
+      ) return true;
+    }
+  }
+  return false;
 }
 
 function topologySelfDiagnostics(edges: TopologyEdgeStats, tolerance: number): TopologyGapDiagnostics {
   const diagnostics: TopologyGapDiagnostics = {
-    exactInternalEdges: 0,
-    nearInternalEdges: 0,
-    exposedInternalLength: 0,
-    maxInternalOffset: 0,
     tJunctionPairs: 0,
     tJunctionLength: 0,
-    excessBoundaryLength: 0,
   };
   addBoundaryTJunctionDiagnostics(diagnostics, edges.boundarySegments, tolerance);
   return diagnostics;
@@ -517,7 +1117,7 @@ function topologySegment(
   };
 }
 
-function buildTopologySegmentIndex(segments: TopologySegment[], tolerance: number) {
+function buildTopologySegmentIndex(segments: TopologySegment[], tolerance: number): TopologySegmentIndex {
   const cellSize = Math.max(tolerance * 8, 0.5);
   const cells = new Map<string, TopologySegment[]>();
   for (const segment of segments) {
@@ -591,23 +1191,16 @@ function overlappingSegmentCandidates(
   return out;
 }
 
-function findOverlappingSegment(
+function hasOverlappingSegment(
   segment: TopologySegment,
   index: ReturnType<typeof buildTopologySegmentIndex>,
   tolerance: number,
-): SegmentOverlapInfo | null {
-  let best: SegmentOverlapInfo | null = null;
+): boolean {
   for (const candidate of overlappingSegmentCandidates(segment, index, tolerance)) {
     const overlap = segmentOverlap(segment, candidate, tolerance);
-    if (!overlap) continue;
-    if (!best ||
-      overlap.overlapLength > best.overlapLength ||
-      (overlap.overlapLength === best.overlapLength && overlap.offset < best.offset)
-    ) {
-      best = overlap;
-    }
+    if (overlap) return true;
   }
-  return best;
+  return false;
 }
 
 function segmentOverlap(
@@ -656,6 +1249,46 @@ function aggressiveLossyMinRenderCostGain(sourcePolygonCount: number): number {
     AGGRESSIVE_LOSSY_MIN_RENDER_COST_GAIN,
     sourcePolygonCount * AGGRESSIVE_LOSSY_MIN_SOURCE_GAIN_RATIO,
   );
+}
+
+function staticSimplificationEarlyStopTarget(
+  count: number,
+  options: OptimizeStaticSimplificationOptions,
+): number {
+  const ratio = Number.isFinite(options.earlyStopDropRatio)
+    ? Math.max(0, options.earlyStopDropRatio!)
+    : DEFAULT_STATIC_SIMPLIFY_EARLY_STOP_DROP_RATIO;
+  return Math.max(0, count - Math.max(1, Math.ceil(count * ratio)));
+}
+
+function hasSourceVertexKeys(polygons: Polygon[]): boolean {
+  return polygons.some((polygon) => polygon.simplifySourceVertexKeys?.length === polygon.vertices.length);
+}
+
+function shouldTryStaticSimplification(polygons: Polygon[], baselineOptimized: Polygon[]): boolean {
+  return polygons.length === 0 ||
+    baselineOptimized.length / polygons.length > MIN_STATIC_SIMPLIFY_BASELINE_SOURCE_RATIO;
+}
+
+function simplifyTriangleMeshCandidate(
+  source: Polygon[],
+  options: OptimizeStaticSimplificationOptions,
+  vertexKeyMode?: "relaxed" | "source",
+): Polygon[] | null {
+  const candidate = simplifyTriangleMeshPolygons(source, {
+    ...options.simplifyTriangleMeshOptions,
+    ...(vertexKeyMode ? { vertexKeyMode } : {}),
+  });
+  if (candidate === source || candidate.length >= source.length) return null;
+  return candidate;
+}
+
+function resolveStaticSimplificationPlan(
+  plan: StaticSimplificationPlan,
+  options: OptimizeStaticSimplificationOptions,
+): Polygon[] | null {
+  if (plan.precomputed !== undefined) return plan.precomputed;
+  return simplifyTriangleMeshCandidate(plan.source, options, plan.vertexKeyMode);
 }
 
 function applyRectCoverCandidate(
@@ -715,6 +1348,7 @@ function automaticLossyRectCoverOptions(polygons: Polygon[]): CoverPlanarPolygon
 function automaticLargeLossyRectCoverCandidate(polygons: Polygon[]): CoverPlanarPolygonsOptions | false {
   if (polygons.length < LARGE_LOSSY_RECT_COVER_MIN_POLYGONS) return false;
   if (polygons.length > LARGE_LOSSY_RECT_COVER_MAX_POLYGONS) return false;
+  if (maxPolygonVertexCount(polygons) <= 12) return false;
   if (polygonBoundaryEdgeCount(polygons) > LARGE_LOSSY_RECT_COVER_MAX_BOUNDARY_EDGES) return false;
   return LARGE_LOSSY_RECT_COVER_OPTIONS;
 }
@@ -795,6 +1429,7 @@ function dedupedPolygonsForMerge(polygons: Polygon[], cache?: PreprocessCache): 
 }
 
 function interiorPolygonsForMerge(polygons: Polygon[], cache?: PreprocessCache): Polygon[] {
+  if (cache?.skipInteriorCull) return polygons;
   if (cache?.interior) return cache.interior;
   let filter = cache?.interiorIndices;
   if (filter === undefined) {
@@ -827,10 +1462,24 @@ function preprocessModelPolygons(
     : resolveNormalizeOptions(normalizeGeometry);
   if (options.isolatedPairs) {
     const paired = mergeIsolatedTrianglePairs(snappedInteriorPolygonsForMerge(deduped, cache), options, cache);
-    const mergedPaired = mergePolygons(paired);
+    let mergedPaired = mergePolygons(paired);
+    if (
+      cache?.snappedInteriorUsesBaselineFilter &&
+      shouldRecheckSnappedInteriorCull(baseline, mergedPaired)
+    ) {
+      const exactPaired = mergeIsolatedTrianglePairs(
+        snappedInteriorPolygonsForMerge(deduped, cache, true),
+        options,
+        cache,
+      );
+      const exactMergedPaired = mergePolygons(exactPaired);
+      if (exactMergedPaired.length < mergedPaired.length) mergedPaired = exactMergedPaired;
+    }
     return mergedPaired.length < baseline.length ? mergedPaired : baseline;
   }
-  const normalized = mergePolygons(cullInteriorPolygons(normalizeGeometryForMerge(deduped, options, cache)));
+  const normalizedGeometry = normalizeGeometryForMerge(deduped, options, cache);
+  const normalizedInterior = cullInteriorPolygons(normalizedGeometry);
+  const normalized = mergePolygons(normalizedInterior);
   return normalized.length < baseline.length ? normalized : baseline;
 }
 
@@ -840,19 +1489,57 @@ function snappedPolygonsForMerge(polygons: Polygon[], cache?: PreprocessCache): 
   return cache.snapped;
 }
 
-function snappedInteriorPolygonsForMerge(polygons: Polygon[], cache?: PreprocessCache): Polygon[] {
+function snappedInteriorPolygonsForMerge(
+  polygons: Polygon[],
+  cache?: PreprocessCache,
+  exactCull = false,
+): Polygon[] {
   if (!cache) return cullInteriorPolygons(snapGeometryForMerge(polygons));
+  if (exactCull && cache.snappedInteriorExact) return cache.snappedInteriorExact;
+  if (!exactCull && cache.snappedInterior) return cache.snappedInterior;
+
+  const snapped = snappedPolygonsForMerge(polygons, cache);
+  if (exactCull) {
+    if (snapped === polygons && cache.deduped === polygons && cache.interior) {
+      cache.snappedInteriorExactIndices = cache.interiorIndices;
+      cache.snappedInteriorExact = cache.interior;
+      return cache.snappedInteriorExact;
+    }
+    const kept = cullInteriorPolygons(snapped);
+    cache.snappedInteriorExactIndices = keptIndexFilter(snapped, kept);
+    cache.snappedInteriorExact = kept;
+    return cache.snappedInteriorExact;
+  }
+
   if (!cache.snappedInterior) {
-    const snapped = snappedPolygonsForMerge(polygons, cache);
+    if (snapped === polygons && cache.deduped === polygons && cache.interior) {
+      cache.snappedInteriorIndices = cache.interiorIndices;
+      cache.snappedInterior = cache.interior;
+      cache.snappedInteriorUsesBaselineFilter = false;
+      return cache.snappedInterior;
+    }
+    if (cache.reuseSnappedInteriorCull !== false && cache.interiorIndices !== undefined) {
+      cache.snappedInteriorIndices = cache.interiorIndices;
+      cache.snappedInterior = applyIndexFilter(snapped, cache.snappedInteriorIndices);
+      cache.snappedInteriorUsesBaselineFilter = true;
+      return cache.snappedInterior;
+    }
     if (cache.snappedInteriorIndices === undefined) {
       const kept = cullInteriorPolygons(snapped);
       cache.snappedInteriorIndices = keptIndexFilter(snapped, kept);
       cache.snappedInterior = kept;
+      cache.snappedInteriorExactIndices = cache.snappedInteriorIndices;
+      cache.snappedInteriorExact = kept;
+      cache.snappedInteriorUsesBaselineFilter = false;
     } else {
       cache.snappedInterior = applyIndexFilter(snapped, cache.snappedInteriorIndices);
     }
   }
   return cache.snappedInterior;
+}
+
+function shouldRecheckSnappedInteriorCull(baseline: Polygon[], candidate: Polygon[]): boolean {
+  return candidate.length >= baseline.length;
 }
 
 function resolveNormalizeOptions(options: LossyApproximateOptions): ResolvedGeometryNormalizeOptions {
@@ -1401,20 +2088,32 @@ function snapGeometryForMerge(polygons: Polygon[]): Polygon[] {
 
   const vertices = createVec3Snapper(geometryEpsilon);
   const uvs = createVec2Snapper(uvEpsilon);
+  let anyChanged = false;
 
-  return polygons.map((polygon) => {
-    const snapVertex = (vertex: Vec3): Vec3 => vertices.snap(vertex);
+  const snapped = polygons.map((polygon) => {
+    let changed = false;
+    const snapVertex = (vertex: Vec3): Vec3 => {
+      const next = vertices.snap(vertex);
+      if (!eqVec(next, vertex)) changed = true;
+      return next;
+    };
     const snappedVertices = polygon.vertices.map(snapVertex);
     const snappedUvs = polygon.uvs && polygon.uvs.length === polygon.vertices.length
-      ? polygon.uvs.map((uv) => uvs.snap(uv))
+      ? polygon.uvs.map((uv) => {
+        const next = uvs.snap(uv);
+        if (!eqUv(next, uv)) changed = true;
+        return next;
+      })
       : undefined;
     const snappedTextureTriangles = mapTextureTriangleVertices(polygon.textureTriangles, snapVertex);
+    if (!changed && !polygon.texture) return polygon;
     const snappedPolygon: Polygon = {
       ...polygon,
       vertices: snappedVertices,
       ...(snappedUvs ? { uvs: snappedUvs } : {}),
       ...(snappedTextureTriangles ? { textureTriangles: snappedTextureTriangles } : {}),
     };
+    anyChanged = true;
     return {
       ...snappedPolygon,
       ...(snappedPolygon.texture
@@ -1422,6 +2121,7 @@ function snapGeometryForMerge(polygons: Polygon[]): Polygon[] {
         : {}),
     };
   });
+  return anyChanged ? snapped : polygons;
 }
 
 function textureTrianglesForPolygon(polygon: Polygon): TextureTriangle[] | undefined {

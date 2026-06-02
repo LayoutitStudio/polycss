@@ -16,12 +16,7 @@ import type { TextureQuality } from "../scene/atlas";
 
 // ── TransformProps ──────────────────────────────────────────────────────────
 
-/**
- * Three.js-style transform props accepted by every polycss component.
- * In Phase 3, position/scale/rotation are accepted but not yet applied —
- * the rendered transform comes from vertices in scene-root space.
- * Phase 4 wires these into the matrix3d composition with parent PolyMesh.
- */
+/** Three.js-style transform props accepted by every PolyCSS component. */
 export interface TransformProps {
   position?: Vec3;
   scale?: number | Vec3;
@@ -32,7 +27,7 @@ export interface TransformProps {
 
 /**
  * DOM event handlers, ARIA, and style props forwarded to the rendered
- * element (atlas-backed <div>) by every Poly component.
+ * element by every Poly component.
  *
  * This is the DOM-native pitch: polygons are real DOM nodes you can
  * target with CSS, attach event handlers to, and inspect in DevTools.
@@ -75,7 +70,7 @@ export interface DOMPassthroughProps {
  * Props for the `<Poly>` component — the atomic polygon primitive.
  *
  * Extends TransformProps + DOMPassthroughProps with the polygon's own fields.
- * This is the canonical polycss v0.1.0 Poly component API per §API freeze.
+ * This is the canonical Poly component API.
  */
 export interface PolyProps extends TransformProps, DOMPassthroughProps {
   // Polygon fields (from Polygon type)
