@@ -55,9 +55,17 @@ export function formatInitialSolidPaintStyle(
     }
     return style;
   }
-  return entry.shadedColor && entry.shadedColor !== solidPaintDefaults?.paintColor
-    ? `;color:${entry.shadedColor}`
-    : "";
+  // Baked mode: always emit the per-leaf shaded `color` when known. The
+  // previous `!== solidPaintDefaults.paintColor` optimization inherited
+  // from the wrapper's `--polycss-paint` default for leaves whose shade
+  // matched the default — but a leaf with `entry.shadedColor` undefined
+  // ALSO hit the empty branch and silently inherited the (often-wrong)
+  // default. That produced the "first render is wrong / corrects after
+  // any light nudge" gallery bug, because `commitBakedSolidLighting`
+  // always sets inline color and so post-nudge each leaf carried its
+  // true baked color. Setting inline color unconditionally keeps the
+  // two paths byte-identical at the cost of ~10 chars per leaf.
+  return entry.shadedColor ? `;color:${entry.shadedColor}` : "";
 }
 
 export function applyDynamicNormalVars(el: HTMLElement, entry: TextureAtlasPlan): void {

@@ -1112,7 +1112,18 @@ export function createPolyScene(
     // converted direction here mismatches axes (X↔Y swap) and silently
     // gives wrong occlusion results — matches the regression from
     // task #126.
-    const lightOccludedPolyIndices = occludedPolyIndicesForEntry(entry, userDirLight?.direction);
+    // Per-light occlusion raytrace (task #121) used to mark polygons in
+    // ray-traced shadow with `directScale=0` so they baked at ambient-only.
+    // Three.js doesn't bake shadow into the diffuse atlas — it uses a real
+    // shadow map at render time, so a "in shadow" polygon's diffuse stays
+    // at full Lambert(n·L) and the shadow darkens it later. Matching that
+    // contract avoids the gallery's "first render looks dim, brightens
+    // after I move a light" symptom (the commit-on-light bake never knew
+    // about the occluded set and so always produced the bright look —
+    // which is the correct one). The occluded set is still computed by
+    // the dynamic path for per-leaf SH-1 visibility (task #128).
+    const lightOccludedPolyIndices: ReadonlySet<number> | undefined = undefined;
+    void occludedPolyIndicesForEntry; // keep helper exported for dynamic path
     if (canRenderVoxelDirect(entry)) {
       const renderer = createPolyVoxelRenderer({
         doc,
