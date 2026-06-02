@@ -75,35 +75,34 @@ describe("buildMeshTransform", () => {
   it("scale-only with no bbox emits scale3d alone", () => {
     expect(buildMeshTransform({ scale: 2 })).toBe("scale3d(2, 2, 2)");
   });
-  it("rotation-only emits axis rotates in X→Y→Z order", () => {
+  it("rotation-only swaps X↔Y axes and negates angles (world↔CSS reflection)", () => {
+    // World↔CSS swap is a reflection (det=-1). Conjugation flips axis and sign:
+    // world rotX(θ) → CSS rotateY(-θ); world rotY(θ) → CSS rotateX(-θ);
+    // world rotZ(θ) → CSS rotateZ(-θ).
     expect(buildMeshTransform({ rotation: [10, 20, 30] })).toBe(
-      "rotateX(10deg) rotateY(20deg) rotateZ(30deg)",
+      "rotateY(-10deg) rotateX(-20deg) rotateZ(-30deg)",
     );
   });
-  it("scale with bbox pivots from origin: T(pos-bbox) · S · T(bbox)", () => {
-    const css = buildMeshTransform({ scale: 2 }, [50, 60, 70]);
-    expect(css).toBe(
-      "translate3d(-50px, -60px, -70px) scale3d(2, 2, 2) translate3d(50px, 60px, 70px)",
-    );
+  it("scale pivots at local (0,0,0) — no bbox folding", () => {
+    expect(buildMeshTransform({ scale: 2 })).toBe("scale3d(2, 2, 2)");
   });
-  it("scale + position + bbox folds position into leading translate", () => {
-    const css = buildMeshTransform({ position: [1, 1, 1], scale: 2 }, [50, 60, 70]);
-    // cssPos = [tile, tile, tile] = [50, 50, 50]; lead = [50-50, 50-60, 50-70]
-    expect(css).toBe(
-      `translate3d(0px, -10px, -20px) scale3d(2, 2, 2) translate3d(50px, 60px, 70px)`,
+  it("scale + position: T(pos) · S, no bbox folding", () => {
+    // cssPos = world [1,1,1] × tile, swapped → [tile, tile, tile]
+    expect(buildMeshTransform({ position: [1, 1, 1], scale: 2 })).toBe(
+      `translate3d(${DEFAULT_TILE}px, ${DEFAULT_TILE}px, ${DEFAULT_TILE}px) scale3d(2, 2, 2)`,
     );
   });
   it("vector scale separates per-axis", () => {
     expect(buildMeshTransform({ scale: [2, 3, 4] })).toBe("scale3d(2, 3, 4)");
   });
-  it("scale + rotation combines parts", () => {
+  it("scale + rotation: R · S (translate, then rotate, then scale applied to vertex)", () => {
     expect(buildMeshTransform({ scale: 2, rotation: [0, 0, 45] })).toBe(
-      "scale3d(2, 2, 2) rotateZ(45deg)",
+      "rotateZ(-45deg) scale3d(2, 2, 2)",
     );
   });
-  it("rotation + position emits plain T(pos) · R (no bbox folding)", () => {
+  it("rotation + position emits T(pos) · R (rotate around local origin)", () => {
     expect(buildMeshTransform({ position: [1, 0, 0], rotation: [0, 0, 90] })).toBe(
-      `translate3d(0px, ${DEFAULT_TILE}px, 0px) rotateZ(90deg)`,
+      `translate3d(0px, ${DEFAULT_TILE}px, 0px) rotateZ(-90deg)`,
     );
   });
 });

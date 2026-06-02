@@ -73,7 +73,10 @@ const CORE_BASE_STYLES = `
 .polycss-mesh {
   position: absolute;
   transform-style: preserve-3d;
-  transform-origin: var(--origin);
+  /* Pivot at wrapper local (0,0,0) for three.js mesh.position/rotation/scale
+     parity. Geometry is positioned by the parser (bbox-min-at-origin by
+     default, or pre-centered via parseGltf/parseObj { center: true }). */
+  transform-origin: 0 0 0;
 }
 
 /* ── Polygon leaf element ───────────────────────────────────────────────── */

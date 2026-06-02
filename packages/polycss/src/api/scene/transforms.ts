@@ -61,26 +61,25 @@ export function worldDirectionalLightToCss<
  *
  * Target effective transform on mesh-local vertex p:
  *
- *   `p_world = T(meshPos) · S(scale, around origin) · R_around_bbox(rotation) · p`
+ *   `p_world = T(meshPos) · R(rotation) · S(scale) · p`
  *
- * Scale pivots from mesh ORIGIN (Three.js mesh.scale semantics — vertex
- * at z=0 stays at z=0, so a scaled mesh "lands" on the floor instead of
- * floating). Rotation pivots from the polygon BBOX CENTER (PolyCSS UX —
- * rotating around the visible center feels right).
+ * All transforms pivot at the wrapper's **local origin (0,0,0)** to match
+ * three.js's `mesh.position` / `mesh.rotation` / `mesh.scale` contract.
+ * Callers that want "rotate around centroid" pre-center the geometry at
+ * load time via `parseGltf/parseObj { center: true }` — the parser's
+ * default `{ center: "min" }` places bbox-min at (0,0,0), so without
+ * centering the mesh orbits its bbox-min corner when rotated.
  *
- * The wrapper has `transform-origin: var(--origin)` = bbox-center, so the
- * browser computes `M_eff = T(bbox) · M_string · T(-bbox)`. Solving for
- * `M_string` and simplifying:
+ * The CSS string composes right-to-left when applied to a vertex:
+ * `translate3d rotate scale` ⇒ `p_world = T · R · S · p`.
  *
- *   scale only / scale + position:  `M_string = T(pos - bbox) · S · T(bbox)`
- *   rotation only:                  `M_string = R`
- *   rotation + position:            `M_string = T(pos) · R`
- *   scale + rotation (± pos):       `M_string = T(pos - bbox) · S · T(bbox) · R`
- *   no transforms / position only:  `M_string = T(pos)`
+ * Rotation axis swap: `worldPositionToCss` permutes `[x,y,z]→[y,x,z]`
+ * (reflection, det = -1). A world rotation `R(n, θ)` becomes
+ * `M·R·M⁻¹ = R(M·n, -θ)` in CSS frame — axis swapped AND angle sense
+ * inverted. World X↦CSS Y, world Y↦CSS X, world Z↦CSS Z.
  */
 export function buildMeshTransform(
   t: PolyMeshTransform,
-  bboxCenterCss?: Vec3 | null,
 ): string | undefined {
   const sx = typeof t.scale === "number" ? t.scale : (t.scale?.[0] ?? 1);
   const sy = typeof t.scale === "number" ? t.scale : (t.scale?.[1] ?? 1);
@@ -88,26 +87,18 @@ export function buildMeshTransform(
   const hasScale = sx !== 1 || sy !== 1 || sz !== 1;
   const hasRotation = !!t.rotation && (!!t.rotation[0] || !!t.rotation[1] || !!t.rotation[2]);
   const cssPos = t.position ? worldPositionToCss(t.position) : [0, 0, 0] as Vec3;
-  const bx = bboxCenterCss?.[0] ?? 0;
-  const by = bboxCenterCss?.[1] ?? 0;
-  const bz = bboxCenterCss?.[2] ?? 0;
-  const hasBbox = bx !== 0 || by !== 0 || bz !== 0;
 
   const parts: string[] = [];
-  const tx = cssPos[0] - (hasScale && hasBbox ? bx : 0);
-  const ty = cssPos[1] - (hasScale && hasBbox ? by : 0);
-  const tz = cssPos[2] - (hasScale && hasBbox ? bz : 0);
-  if (tx !== 0 || ty !== 0 || tz !== 0) {
-    parts.push(`translate3d(${tx}px, ${ty}px, ${tz}px)`);
+  if (cssPos[0] !== 0 || cssPos[1] !== 0 || cssPos[2] !== 0) {
+    parts.push(`translate3d(${cssPos[0]}px, ${cssPos[1]}px, ${cssPos[2]}px)`);
+  }
+  if (hasRotation) {
+    if (t.rotation![0]) parts.push(`rotateY(${-t.rotation![0]}deg)`);
+    if (t.rotation![1]) parts.push(`rotateX(${-t.rotation![1]}deg)`);
+    if (t.rotation![2]) parts.push(`rotateZ(${-t.rotation![2]}deg)`);
   }
   if (hasScale) {
     parts.push(`scale3d(${sx}, ${sy}, ${sz})`);
-    if (hasBbox) parts.push(`translate3d(${bx}px, ${by}px, ${bz}px)`);
-  }
-  if (hasRotation) {
-    if (t.rotation![0]) parts.push(`rotateX(${t.rotation![0]}deg)`);
-    if (t.rotation![1]) parts.push(`rotateY(${t.rotation![1]}deg)`);
-    if (t.rotation![2]) parts.push(`rotateZ(${t.rotation![2]}deg)`);
   }
   return parts.length > 0 ? parts.join(" ") : undefined;
 }

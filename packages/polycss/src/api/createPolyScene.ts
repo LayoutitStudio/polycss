@@ -1477,10 +1477,7 @@ export function createPolyScene(
     let mergeOnUpdate = transformIn.merge !== false;
     let stableDomOnUpdate = !!transformIn.stableDom;
     let polygonUpdateVersion = 0;
-    // (bboxCenterCssCache is seeded by applyTransformOrigin below; the
-    // wrapper transform also gets a fresh apply there once the bbox is
-    // known, so we don't need to apply it here too.)
-    const css = buildMeshTransform(transform, null);
+    const css = buildMeshTransform(transform);
     if (css) wrapper.style.transform = css;
 
     // Static meshes use the full optimizer by default; meshResolution selects
@@ -1519,22 +1516,20 @@ export function createPolyScene(
     };
     const sourcePolygons = preparePolygons(parseResult.polygons, mergeOnUpdate);
 
-    // Pivot rotations around the mesh's polygon bbox center, not the
-    // wrapper's local (0,0,0). The wrapper sits at `transform.position`
-    // inside the scene element, but its polygons live at their world coords
-    // — without an explicit transform-origin, rotateX/Y/Z would pivot
-    // at the wrapper's anchor (= world origin in mesh-local), so the
-    // mesh would orbit around world (0,0,0) rather than rotating in
-    // place. Setting transform-origin to the polygon bbox center makes
-    // setTransform({rotation}) behave intuitively.
+    // Three.js parity: wrapper rotation, scale and translate all pivot at
+    // the wrapper's local (0,0,0). Parser places geometry either with
+    // bbox-min at origin (default) or centered (parser `{ center: true }`);
+    // callers wanting "rotate in place around centroid" use the centered
+    // variant. `bboxCenterCssCache` still tracks the geometry bbox center
+    // because the shadow cache keys on it (receiverShadow.ts) — same data,
+    // but it no longer drives transform-origin.
     let bboxCenterCssCache: Vec3 | null = null;
     function reapplyWrapperTransform(): void {
-      const css = buildMeshTransform(transform, bboxCenterCssCache);
+      const css = buildMeshTransform(transform);
       wrapper.style.transform = css ?? "";
     }
     function applyTransformOrigin(polygons: Polygon[]): void {
       if (polygons.length === 0) {
-        wrapper.style.removeProperty("--origin");
         bboxCenterCssCache = null;
         if (entryRef) entryRef.bboxCenterCss = null;
         reapplyWrapperTransform();
@@ -1553,7 +1548,6 @@ export function createPolyScene(
         }
       }
       if (!Number.isFinite(minX)) {
-        wrapper.style.removeProperty("--origin");
         bboxCenterCssCache = null;
         if (entryRef) entryRef.bboxCenterCss = null;
         reapplyWrapperTransform();
@@ -1563,12 +1557,8 @@ export function createPolyScene(
       const cssX = ((minY + maxY) / 2) * DEFAULT_TILE;
       const cssY = ((minX + maxX) / 2) * DEFAULT_TILE;
       const cssZ = ((minZ + maxZ) / 2) * DEFAULT_TILE;
-      wrapper.style.setProperty("--origin", `${cssX}px ${cssY}px ${cssZ}px`);
       bboxCenterCssCache = [cssX, cssY, cssZ];
       if (entryRef) entryRef.bboxCenterCss = bboxCenterCssCache;
-      // Re-apply the wrapper transform with the fresh bbox so scale-pivot
-      // math (in buildMeshTransform) lines up with the new
-      // transform-origin.
       reapplyWrapperTransform();
     }
     let entryRef: MeshEntry | null = null;
@@ -1930,7 +1920,7 @@ export function createPolyScene(
         if (t.castShadow !== undefined) entry.castShadow = !!t.castShadow;
         if (t.receiveShadow !== undefined) entry.receiveShadow = !!t.receiveShadow;
         transform = { ...transform, ...t };
-        const css2 = buildMeshTransform(transform, entry.bboxCenterCss);
+        const css2 = buildMeshTransform(transform);
         wrapper.style.transform = css2 ?? "";
         applyMeshLightVarOverride(entry, transform.rotation);
         if (t.rotation !== undefined) syncMountedRenderedForCameraChange(entry, true);
