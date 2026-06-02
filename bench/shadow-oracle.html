@@ -107,7 +107,7 @@
     const qs = (k, d) => (Q.has(k) ? Q.get(k) : d);
 
     const S = {
-      mesh:    qs("mesh", "cube"),     // "cube" | "e" | "cottage" | "castle" | "coliseum" | "apple" | "flight"
+      mesh:    qs("mesh", "cube"),     // "cube" | "e" | "cottage" | "castle" | "coliseum" | "apple" | "flight" | "extinguisher"
       lighting:qs("light", "baked"),   // "baked" | "dynamic"
       // Unified per-mesh transform state. Same shape (x, y, z, scale) for
       // every mesh — one set of object-transform sliders binds to the
@@ -135,6 +135,8 @@
                    rx: qn("orx_apple", 0), ry: qn("ory_apple", 0), rz: qn("orz_apple", 0) },
         flight:  { x: qn("ox_flight",  0), y: qn("oy_flight",  0), z: qn("oz_flight",  0), scale: qn("os_flight",  1),
                    rx: qn("orx_flight", 0), ry: qn("ory_flight", 0), rz: qn("orz_flight", 0) },
+        extinguisher: { x: qn("ox_extinguisher", 0), y: qn("oy_extinguisher", 0), z: qn("oz_extinguisher", 0), scale: qn("os_extinguisher", 1),
+                        rx: qn("orx_extinguisher", 0), ry: qn("ory_extinguisher", 0), rz: qn("orz_extinguisher", 0) },
       },
       // Cube/E hold the geometry's base parameters (set at build time;
       // run-time scale applies on top via setTransform). Cottage geometry
@@ -218,6 +220,7 @@
     let polyColiseum = null;
     let polyApple = null;
     let polyFlight = null;
+    let polyExtinguisher = null;
     let polyE = null;
     function buildPolyCube() {
       polyCube = polyScene.add(
@@ -334,6 +337,24 @@
         merge: false,
       });
     }
+    // OpenGameArt fire extinguisher OBJ — preset hash 1109157371. Textured
+    // (BaseColor + AO + Roughness PNGs) — exercises the receiver-shadow path
+    // on textured atlases when self-shadow is on.
+    const EXTINGUISHER_TARGET_SIZE = 4;
+    async function buildPolyExtinguisher() {
+      const parse = await loadMesh("/gallery/obj/opengameart/fire-extinguisher/extinguisher.obj", {
+        mtlUrl: "/gallery/obj/opengameart/fire-extinguisher/extinguisher.mtl",
+        objOptions: { targetSize: EXTINGUISHER_TARGET_SIZE },
+      });
+      polyExtinguisher = polyScene.add(parse, {
+        id: "extinguisher",
+        position: [S.obj.extinguisher.x, S.obj.extinguisher.y, S.obj.extinguisher.z],
+        scale: S.obj.extinguisher.scale,
+        castShadow: true,
+        receiveShadow: S.selfShadow,
+        merge: false,
+      });
+    }
     // NASA Flight System Support — GLB pulled from the gallery's preset
     // catalogue (preset hash 3730353141). Same GLB path the gallery serves
     // through Astro's public/, exposed to the bench by perf-serve.mjs.
@@ -408,6 +429,7 @@
     let coliseumGroup = null;
     let appleGroup = null;
     let flightGroup = null;
+    let extinguisherGroup = null;
     let eGroup = null;
     function buildThreeCube() {
       cubeMesh = new THREE.Mesh(
@@ -609,6 +631,40 @@
         }, undefined, reject);
       });
     }
+    function buildThreeExtinguisher() {
+      return new Promise((resolve, reject) => {
+        const mtlLoader = new MTLLoader();
+        mtlLoader.setMaterialOptions({ side: THREE.DoubleSide });
+        mtlLoader.load("/gallery/obj/opengameart/fire-extinguisher/extinguisher.mtl", (materials) => {
+          materials.preload();
+          const objLoader = new OBJLoader();
+          objLoader.setMaterials(materials);
+          objLoader.load("/gallery/obj/opengameart/fire-extinguisher/extinguisher.obj", (obj) => {
+            const q = new THREE.Quaternion();
+            q.setFromAxisAngle(new THREE.Vector3(1, 1, 1).normalize(), 2 * Math.PI / 3);
+            obj.quaternion.copy(q);
+            obj.updateMatrixWorld(true);
+            const wrap = new THREE.Group();
+            wrap.add(obj);
+            const bbox = new THREE.Box3().setFromObject(wrap);
+            const sizeV = new THREE.Vector3();
+            bbox.getSize(sizeV);
+            const maxDim = Math.max(sizeV.x, sizeV.y, sizeV.z) || 1;
+            const norm = EXTINGUISHER_TARGET_SIZE / maxDim;
+            obj.scale.multiplyScalar(norm);
+            obj.updateMatrixWorld(true);
+            const bbox2 = new THREE.Box3().setFromObject(wrap);
+            obj.position.sub(bbox2.min);
+            wrap.position.set(S.obj.extinguisher.x, S.obj.extinguisher.y, S.obj.extinguisher.z);
+            wrap.scale.setScalar(S.obj.extinguisher.scale);
+            obj.traverse((c) => { if (c.isMesh) { c.castShadow = true; c.receiveShadow = true; } });
+            extinguisherGroup = wrap;
+            threeScene.add(wrap);
+            resolve();
+          }, undefined, reject);
+        }, undefined, reject);
+      });
+    }
     if (S.mesh === "cube") buildThreeCube();
 
     const floorMesh = new THREE.Mesh(
@@ -690,6 +746,7 @@
       if (S.mesh === "coliseum" && polyColiseum) return polyColiseum;
       if (S.mesh === "apple"    && polyApple)    return polyApple;
       if (S.mesh === "flight"   && polyFlight)   return polyFlight;
+      if (S.mesh === "extinguisher" && polyExtinguisher) return polyExtinguisher;
       return null;
     }
     function activeMeshCenter() {
@@ -866,6 +923,7 @@
       if (polyColiseum) polyColiseum.setTransform({ position: [S.obj.coliseum.x, S.obj.coliseum.y, S.obj.coliseum.z], scale: S.obj.coliseum.scale, rotation: [S.obj.coliseum.rx, S.obj.coliseum.ry, S.obj.coliseum.rz], castShadow: S.castShadow, receiveShadow: S.selfShadow });
       if (polyApple)    polyApple.setTransform({    position: [S.obj.apple.x,    S.obj.apple.y,    S.obj.apple.z],    scale: S.obj.apple.scale,    rotation: [S.obj.apple.rx,    S.obj.apple.ry,    S.obj.apple.rz],    castShadow: S.castShadow, receiveShadow: S.selfShadow });
       if (polyFlight)   polyFlight.setTransform({   position: [S.obj.flight.x,   S.obj.flight.y,   S.obj.flight.z],   scale: S.obj.flight.scale,   rotation: [S.obj.flight.rx,   S.obj.flight.ry,   S.obj.flight.rz],   castShadow: S.castShadow, receiveShadow: S.selfShadow });
+      if (polyExtinguisher) polyExtinguisher.setTransform({ position: [S.obj.extinguisher.x, S.obj.extinguisher.y, S.obj.extinguisher.z], scale: S.obj.extinguisher.scale, rotation: [S.obj.extinguisher.rx, S.obj.extinguisher.ry, S.obj.extinguisher.rz], castShadow: S.castShadow, receiveShadow: S.selfShadow });
       // Floor visibility + receiveShadow live-update. visibility:hidden
       // keeps the mesh in the scene graph (so its position still anchors
       // shadow ground recomputation); receiveShadow drives the same
@@ -905,6 +963,7 @@
         if (polyColiseum) polyColiseum.rebakeAtlas();
         if (polyApple) polyApple.rebakeAtlas();
         if (polyFlight) polyFlight.rebakeAtlas();
+        if (polyExtinguisher) polyExtinguisher.rebakeAtlas();
         if (polyE) polyE.rebakeAtlas();
         polyFloor.rebakeAtlas();
       }
@@ -951,6 +1010,12 @@
         flightGroup.scale.setScalar(S.obj.flight.scale);
         flightGroup.rotation.set(S.obj.flight.rx * D2R, S.obj.flight.ry * D2R, S.obj.flight.rz * D2R);
         flightGroup.traverse(c => { if (c.isMesh) { c.castShadow = S.castShadow; c.receiveShadow = S.selfShadow; } });
+      }
+      if (extinguisherGroup) {
+        extinguisherGroup.position.set(S.obj.extinguisher.x, S.obj.extinguisher.y, S.obj.extinguisher.z);
+        extinguisherGroup.scale.setScalar(S.obj.extinguisher.scale);
+        extinguisherGroup.rotation.set(S.obj.extinguisher.rx * D2R, S.obj.extinguisher.ry * D2R, S.obj.extinguisher.rz * D2R);
+        extinguisherGroup.traverse(c => { if (c.isMesh) { c.castShadow = S.castShadow; c.receiveShadow = S.selfShadow; } });
       }
       floorMesh.visible = S.floorVisible;
       floorMesh.receiveShadow = S.floorReceives;
@@ -1091,7 +1156,7 @@
           path.after(wrap);
         }
       }
-      const threeObjs = [cubeMesh, eGroup, cottageGroup, castleGroup, coliseumGroup, appleGroup, flightGroup, floorMesh].filter(Boolean);
+      const threeObjs = [cubeMesh, eGroup, cottageGroup, castleGroup, coliseumGroup, appleGroup, flightGroup, extinguisherGroup, floorMesh].filter(Boolean);
       for (const obj of threeObjs) {
         obj.traverse(o => {
           if (!o.material) return;
@@ -1125,6 +1190,7 @@
       if (polyColiseum) { polyColiseum.remove(); polyColiseum = null; }
       if (polyApple) { polyApple.remove(); polyApple = null; }
       if (polyFlight) { polyFlight.remove(); polyFlight = null; }
+      if (polyExtinguisher) { polyExtinguisher.remove(); polyExtinguisher = null; }
       if (polyE) { polyE.remove(); polyE = null; }
       if (cubeMesh) { threeScene.remove(cubeMesh); cubeMesh = null; }
       if (cottageGroup) { threeScene.remove(cottageGroup); cottageGroup = null; }
@@ -1132,6 +1198,7 @@
       if (coliseumGroup) { threeScene.remove(coliseumGroup); coliseumGroup = null; }
       if (appleGroup) { threeScene.remove(appleGroup); appleGroup = null; }
       if (flightGroup) { threeScene.remove(flightGroup); flightGroup = null; }
+      if (extinguisherGroup) { threeScene.remove(extinguisherGroup); extinguisherGroup = null; }
       if (eGroup) { threeScene.remove(eGroup); eGroup = null; }
       if (name === "cube") {
         buildPolyCube();
@@ -1147,6 +1214,8 @@
         await Promise.all([buildPolyApple(), buildThreeApple()]);
       } else if (name === "flight") {
         await Promise.all([buildPolyFlight(), buildThreeFlight()]);
+      } else if (name === "extinguisher") {
+        await Promise.all([buildPolyExtinguisher(), buildThreeExtinguisher()]);
       } else {
         await Promise.all([buildPolyCottage(), buildThreeCottage()]);
       }
@@ -1163,6 +1232,7 @@
       else if (S.mesh === "coliseum") await Promise.all([buildPolyColiseum(), buildThreeColiseum()]);
       else if (S.mesh === "apple") await Promise.all([buildPolyApple(), buildThreeApple()]);
       else if (S.mesh === "flight") await Promise.all([buildPolyFlight(), buildThreeFlight()]);
+      else if (S.mesh === "extinguisher") await Promise.all([buildPolyExtinguisher(), buildThreeExtinguisher()]);
       else if (S.mesh === "e") { buildPolyE(); buildThreeE(); }
       update(true);
       loop();
@@ -1173,6 +1243,7 @@
       window.__polyColiseum = polyColiseum;
       window.__polyApple = polyApple;
       window.__polyFlight = polyFlight;
+      window.__polyExtinguisher = polyExtinguisher;
       window.__polyScene = polyScene;
       window.__ready = true;
     })();
@@ -1381,7 +1452,7 @@
       meshLabel.textContent = "model";
       meshRow.appendChild(meshLabel);
       const meshSel = document.createElement("select");
-      for (const opt of ["cube", "e", "cottage", "castle", "coliseum", "apple", "flight"]) {
+      for (const opt of ["cube", "e", "cottage", "castle", "coliseum", "apple", "flight", "extinguisher"]) {
         const o = document.createElement("option");
         o.value = opt; o.textContent = opt;
         if (S.mesh === opt) o.selected = true;
