@@ -1,0 +1,291 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>perspective receiver-shadow repro</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; height: 100%; background: #eef2f6; font-family: ui-sans-serif, system-ui, sans-serif; color: #1e293b; }
+    body { display: grid; grid-template-columns: 1fr 300px; height: 100vh; overflow: hidden; }
+    .stage { position: relative; overflow: hidden; background: #eef2f6; }
+    .stage > h3 { position: absolute; top: 8px; left: 12px; margin: 0; font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: #475569; z-index: 10; pointer-events: none; }
+    .stage > .note { position: absolute; top: 26px; left: 12px; font-size: 10px; color: #94a3b8; pointer-events: none; z-index: 10; max-width: 60%; }
+    .stage > .crosshair { position: absolute; inset: 0; pointer-events: none; z-index: 5; }
+    .stage > .crosshair::before, .stage > .crosshair::after { content: ""; position: absolute; background: rgba(0,0,0,0.1); }
+    .stage > .crosshair::before { left: 50%; top: 0; bottom: 0; width: 1px; }
+    .stage > .crosshair::after { top: 50%; left: 0; right: 0; height: 1px; }
+    #poly-host { position: absolute; inset: 0; }
+    #panel { padding: 12px; background: #f8fafc; overflow-y: auto; border-left: 1px solid #cbd5e1; font-size: 12px; }
+    #panel .sec { margin: 14px 0 6px; font-weight: 600; color: #0f172a; font-size: 11px; letter-spacing: 0.05em; text-transform: uppercase; }
+    #panel .sec:first-child { margin-top: 0; }
+    #panel .row { display: grid; grid-template-columns: 70px 1fr 60px; gap: 6px; align-items: center; margin: 3px 0; }
+    #panel .row > label { color: #475569; }
+    #panel .row > .val { text-align: right; font-variant-numeric: tabular-nums; }
+    #panel .row > input[type=range] { width: 100%; }
+    #panel .toggle { display: flex; gap: 8px; align-items: center; margin: 4px 0; color: #475569; cursor: pointer; }
+    #panel .toggle input { margin: 0; }
+    #panel .info { font-size: 11px; color: #64748b; line-height: 1.5; margin: 8px 0; padding: 8px; background: #fff; border: 1px solid #e2e8f0; border-radius: 4px; }
+    #panel .hud { font-size: 11px; color: #1e293b; line-height: 1.6; padding: 8px; background: #fff; border: 1px solid #cbd5e1; border-radius: 4px; font-variant-numeric: tabular-nums; }
+    #panel .hud strong { color: #0f172a; }
+    #panel .hud .ok { color: #16a34a; font-weight: 600; }
+    #panel .hud .bad { color: #dc2626; font-weight: 600; }
+  </style>
+</head>
+<body>
+  <div class="stage">
+    <h3>PolyCSS — perspective receiver-shadow repro</h3>
+    <div class="note">Floor mesh w/ <code>receiveShadow:true</code> under a perspective camera. The cast shadow is visible at rotX=0 and gets cut as you tilt up. Toggle off <code>receiveShadow</code> or switch to ortho to compare.</div>
+    <div class="crosshair"></div>
+    <div id="poly-host"></div>
+  </div>
+  <div id="panel">
+    <div class="sec">Configuration</div>
+    <label class="toggle"><input type="checkbox" id="perspectiveToggle" checked /> Perspective camera <span style="color:#94a3b8">(uncheck for ortho)</span></label>
+    <label class="toggle"><input type="checkbox" id="receiveToggle" checked /> Floor <code>receiveShadow:true</code></label>
+
+    <div class="sec">Rotation</div>
+    <div class="row"><label>rotX</label><input type="range" id="rotX" min="0" max="89" step="0.5" value="40"/><span class="val" id="rotXv">40</span></div>
+    <div class="row"><label>rotY</label><input type="range" id="rotY" min="0" max="360" step="1" value="0"/><span class="val" id="rotYv">0</span></div>
+    <div class="row"><label>zoom</label><input type="range" id="zoom" min="1" max="200" step="1" value="50"/><span class="val" id="zoomv">50</span></div>
+
+    <div class="sec">Light</div>
+    <div class="row"><label>dir.x</label><input type="range" id="dx" min="-2" max="2" step="0.05" value="0.4"/><span class="val" id="dxv">0.40</span></div>
+    <div class="row"><label>dir.y</label><input type="range" id="dy" min="-2" max="2" step="0.05" value="0.7"/><span class="val" id="dyv">0.70</span></div>
+    <div class="row"><label>dir.z</label><input type="range" id="dz" min="0.1" max="2" step="0.05" value="0.5"/><span class="val" id="dzv">0.50</span></div>
+
+    <div class="sec">Shadow</div>
+    <div class="row"><label>maxExtend</label><input type="range" id="maxExtend" min="200" max="10000" step="100" value="2000"/><span class="val" id="maxExtendv">2000</span></div>
+    <div class="row"><label>opacity</label><input type="range" id="opacity" min="0" max="1" step="0.05" value="0.4"/><span class="val" id="opacityv">0.40</span></div>
+
+    <div class="sec">Live state</div>
+    <div class="hud" id="hud">…</div>
+
+    <div class="info">
+      Default reproduces the gallery bug: perspective camera + floor as receiver. The SVG intrinsic size matches the floor's polygon bbox (~17500 CSS-px square here); under perspective + steep rotX the layer projects to a huge tilted trapezoid that overruns the viewport's <code>overflow:hidden</code> ancestors.
+      Switch to ortho or to the legacy ground-shadow path and the shadow stays put at every angle.
+    </div>
+  </div>
+
+  <script type="module">
+    import {
+      createPolyOrthographicCamera,
+      createPolyPerspectiveCamera,
+      createPolyScene,
+      createPolyOrbitControls,
+      createPolyBox,
+    } from "./.generated/polycss.js";
+
+    // Floor is intentionally large (~17500 CSS-px square SVG at BASE_TILE=50)
+    // to match the gallery's actual receiver SVG dimensions where the bug
+    // manifests. Smaller floors don't reproduce — Chrome composites the
+    // smaller tilted 3D rectangle without issue.
+    const FLOOR_HALF = 175;
+    const CUBE_SIZE = 4;
+    const host = document.getElementById("poly-host");
+    const hud = document.getElementById("hud");
+
+    let scene = null;
+    let cameraHandle = null;
+
+    // ───── URL-param sync ─────
+    // All slider/toggle ids that participate in the shareable state.
+    const RANGE_IDS = ["rotX","rotY","zoom","dx","dy","dz","opacity","maxExtend"];
+    const TOGGLE_IDS = ["perspectiveToggle","receiveToggle"];
+
+    // Apply ?foo=bar from the URL before the first build so the page
+    // boots into the same state the link was captured at.
+    function applyQueryParamsToControls() {
+      const params = new URLSearchParams(location.search);
+      for (const id of RANGE_IDS) {
+        const v = params.get(id);
+        if (v == null) continue;
+        const el = document.getElementById(id);
+        if (!el) continue;
+        el.value = v;
+        const label = document.getElementById(id+"v");
+        if (label) {
+          const n = +v;
+          label.textContent = (id === "maxExtend" || id === "rotX" || id === "rotY" || id === "zoom")
+            ? n.toFixed(0) : n.toFixed(2);
+        }
+      }
+      for (const id of TOGGLE_IDS) {
+        const v = params.get(id);
+        if (v == null) continue;
+        const el = document.getElementById(id);
+        if (!el) continue;
+        el.checked = v === "1" || v === "true";
+      }
+    }
+
+    // Debounced replaceState so dragging a slider doesn't spam history.
+    let urlSyncTimer = 0;
+    function syncUrl() {
+      clearTimeout(urlSyncTimer);
+      urlSyncTimer = setTimeout(() => {
+        const params = new URLSearchParams();
+        for (const id of RANGE_IDS) {
+          const el = document.getElementById(id);
+          if (el) params.set(id, el.value);
+        }
+        for (const id of TOGGLE_IDS) {
+          const el = document.getElementById(id);
+          if (el) params.set(id, el.checked ? "1" : "0");
+        }
+        const url = location.pathname + "?" + params.toString() + location.hash;
+        history.replaceState(null, "", url);
+      }, 100);
+    }
+
+    applyQueryParamsToControls();
+
+    function buildFloor(receiveShadow) {
+      return scene.add(
+        {
+          polygons: [{
+            vertices: [
+              [-FLOOR_HALF, -FLOOR_HALF, 0],
+              [ FLOOR_HALF, -FLOOR_HALF, 0],
+              [ FLOOR_HALF,  FLOOR_HALF, 0],
+              [-FLOOR_HALF,  FLOOR_HALF, 0],
+            ],
+            color: "#cbd5e1",
+          }],
+          objectUrls: [],
+          warnings: [],
+          dispose: () => {},
+        },
+        { id: "floor", castShadow: false, receiveShadow, merge: false, excludeFromAutoCenter: true },
+      );
+    }
+
+    function buildCube() {
+      return scene.add(
+        createPolyBox({ size: [CUBE_SIZE, CUBE_SIZE, CUBE_SIZE], color: "#dc2626" }),
+        { id: "cube", position: [0, 0, CUBE_SIZE / 2 + 0.1], castShadow: true, merge: false },
+      );
+    }
+
+    function getDir() {
+      return [
+        +document.getElementById("dx").value,
+        +document.getElementById("dy").value,
+        +document.getElementById("dz").value,
+      ];
+    }
+
+    function rebuild() {
+      const perspective = document.getElementById("perspectiveToggle").checked;
+      const receiveShadow = document.getElementById("receiveToggle").checked;
+      const rotX = +document.getElementById("rotX").value;
+      const rotY = +document.getElementById("rotY").value;
+      const zoom = +document.getElementById("zoom").value;
+      host.innerHTML = "";
+
+      cameraHandle = perspective
+        ? createPolyPerspectiveCamera({ rotX, rotY, zoom })
+        : createPolyOrthographicCamera({ rotX, rotY, zoom });
+
+      scene = createPolyScene(host, {
+        camera: cameraHandle,
+        directionalLight: { direction: getDir(), intensity: 1.5, color: "#ffffff" },
+        ambientLight: { color: "#ffffff", intensity: 0.3 },
+        textureLighting: "baked",
+        shadow: {
+          color: "#000000",
+          opacity: +document.getElementById("opacity").value,
+          lift: 0.05,
+          maxExtend: +document.getElementById("maxExtend").value,
+        },
+      });
+
+      buildCube();
+      buildFloor(receiveShadow);
+
+      const orbit = createPolyOrbitControls(scene, { drag: true, wheel: true });
+      orbit.addEventListener("change", (e) => {
+        const c = e.camera;
+        document.getElementById("rotX").value = c.rotX;
+        document.getElementById("rotXv").textContent = c.rotX.toFixed(0);
+        document.getElementById("rotY").value = c.rotY;
+        document.getElementById("rotYv").textContent = c.rotY.toFixed(0);
+        document.getElementById("zoom").value = c.zoom;
+        document.getElementById("zoomv").textContent = c.zoom.toFixed(0);
+        updateHud();
+        syncUrl();
+      });
+
+      updateHud();
+      syncUrl();
+    }
+
+    function updateLight() {
+      if (!scene) return;
+      scene.setOptions({
+        directionalLight: { direction: getDir(), intensity: 1.5, color: "#ffffff" },
+        ambientLight: { color: "#ffffff", intensity: 0.3 },
+        shadow: {
+          color: "#000000",
+          opacity: +document.getElementById("opacity").value,
+          lift: 0.05,
+          maxExtend: +document.getElementById("maxExtend").value,
+        },
+      });
+      updateHud();
+    }
+
+    function updateHud() {
+      const allShadows = document.querySelectorAll(".polycss-shadow, .polycss-shadow-receiver");
+      const receivers = document.querySelectorAll(".polycss-shadow-receiver");
+      const ground = document.querySelectorAll(".polycss-shadow:not(.polycss-shadow-receiver)");
+      const biggestEl = Array.from(allShadows)
+        .map(s => ({ s, r: s.getBoundingClientRect() }))
+        .sort((a,b) => b.r.width * b.r.height - a.r.width * a.r.height)[0];
+      const biggest = biggestEl ? {
+        path: biggestEl.s.classList.contains("polycss-shadow-receiver") ? "receiver" : "ground",
+        bbox: `${Math.round(biggestEl.r.x)},${Math.round(biggestEl.r.y)} ${Math.round(biggestEl.r.width)}×${Math.round(biggestEl.r.height)}`,
+        svgW: biggestEl.s.getAttribute("width"),
+        svgH: biggestEl.s.getAttribute("height"),
+        pathLen: biggestEl.s.querySelector("path")?.getAttribute("d")?.length ?? 0,
+      } : null;
+      hud.innerHTML = `
+        camera: <strong>${cameraHandle?.type ?? "?"}</strong><br>
+        rotX/rotY/zoom: <strong>${cameraHandle?.state.rotX?.toFixed(1) ?? "?"} / ${cameraHandle?.state.rotY?.toFixed(1) ?? "?"} / ${cameraHandle?.state.zoom?.toFixed(1) ?? "?"}</strong><br>
+        ground SVG count: <strong>${ground.length}</strong><br>
+        receiver SVG count: <strong>${receivers.length}</strong><br>
+        biggest path: <strong>${biggest?.path ?? "(none)"}</strong><br>
+        ${biggest ? `bbox on screen: <strong>${biggest.bbox}</strong><br>` : ""}
+        ${biggest ? `SVG intrinsic: <strong>${biggest.svgW} × ${biggest.svgH}</strong><br>` : ""}
+        ${biggest ? `path d: <strong>${biggest.pathLen} chars</strong>` : ""}
+      `;
+    }
+
+    // Wire camera sliders
+    for (const id of ["rotX","rotY","zoom"]) {
+      document.getElementById(id).addEventListener("input", () => {
+        const v = +document.getElementById(id).value;
+        document.getElementById(id+"v").textContent = v.toFixed(0);
+        cameraHandle?.update({ [id]: v });
+        scene?.applyCamera();
+        updateHud();
+        syncUrl();
+      });
+    }
+    // Wire light + shadow sliders
+    for (const id of ["dx","dy","dz","opacity","maxExtend"]) {
+      document.getElementById(id).addEventListener("input", () => {
+        const v = +document.getElementById(id).value;
+        document.getElementById(id+"v").textContent = id === "maxExtend" ? v.toFixed(0) : v.toFixed(2);
+        updateLight();
+        syncUrl();
+      });
+    }
+    // Wire toggles
+    document.getElementById("perspectiveToggle").addEventListener("change", () => { rebuild(); syncUrl(); });
+    document.getElementById("receiveToggle").addEventListener("change", () => { rebuild(); syncUrl(); });
+
+    rebuild();
+    setInterval(updateHud, 500);
+  </script>
+</body>
+</html>
