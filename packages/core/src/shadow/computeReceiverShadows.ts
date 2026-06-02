@@ -524,52 +524,46 @@ export function computeReceiverShadowFaces<T = unknown>(
           const subjectCcw = ensureCcw2D(projected);
           const clip = clipPolygonToConvex2D(subjectCcw, outlineUv);
           if (clip.length < 3) continue;
-          // Self-shadow sliver cull: drop sub-shadows that are either
-          // (a) very small in area, OR (b) very thin (high aspect ratio).
-          // Smooth-shaded GLBs produce hundreds of near-coplanar
-          // adjacent polys whose shadow projections come out as long
-          // thin streaks the user reads as visual glitches. Real
-          // architectural cast shadows are always either large in area
-          // OR have a reasonable aspect ratio; sliver self-shadows fail
-          // both checks.
-          // Only applied to self-shadow casters (sharedEdgeMap present)
-          // so cross-mesh cast shadows are never affected.
-          if (sharedEdgeMap) {
-            let twiceArea = 0;
-            let minClipX = Infinity, maxClipX = -Infinity;
-            let minClipY = Infinity, maxClipY = -Infinity;
-            for (let pi = 0; pi < clip.length; pi++) {
-              const p1 = clip[pi]!;
-              const p2 = clip[(pi + 1) % clip.length]!;
-              twiceArea += p1[0] * p2[1] - p2[0] * p1[1];
-              if (p1[0] < minClipX) minClipX = p1[0];
-              if (p1[0] > maxClipX) maxClipX = p1[0];
-              if (p1[1] < minClipY) minClipY = p1[1];
-              if (p1[1] > maxClipY) maxClipY = p1[1];
-            }
-            const clipArea = Math.abs(twiceArea) * 0.5;
-            const clipW = maxClipX - minClipX;
-            const clipH = maxClipY - minClipY;
-            const longSide = Math.max(clipW, clipH);
-            const shortSide = Math.max(0.01, Math.min(clipW, clipH));
-            const aspect = longSide / shortSide;
-            // Drop tiny shadows OR thin-and-modest-area streaks.
-            if (clipArea < 25) continue;
-            if (aspect > 4 && clipArea < 800) continue;
-          }
           // Clip the projected shadow against each MEMBER polygon of the
           // receiver face group, not just the group's outer outline. The
           // outline can span concave regions / holes / disconnected
           // coplanar islands where the mesh has no actual surface;
           // clipping against the union of members keeps shadow pixels
-          // strictly over real mesh polygons. Each per-member clip becomes
-          // its own sub-shadow path. Replaces the previous centroid-only
-          // PIP test which left whole sub-shadows visible in empty
-          // outline-but-not-member regions.
+          // strictly over real mesh polygons.
+          //
+          // Self-shadow sliver cull is applied PER MEMBER-CLIP (not on the
+          // outline-clip): smooth-shaded GLBs produce many near-coplanar
+          // adjacent polys whose individual member-clips come out as long
+          // thin sub-pixel-adjacent streaks the user reads as visual
+          // noise. Earlier the cull ran on the outline-clip and would
+          // drop legitimate thin shadows landing on a thin-but-real
+          // member polygon (e.g. flight-system poly 38, a long diagonal
+          // slab receiving a thin shadow from the outer ring). Moving the
+          // cull onto each member-clip lets real thin shadows through
+          // while still discarding tiny-area / extreme-aspect noise.
           let bucket: { id: T; verts: Vec2[][]; subPolygonIndices: number[] } | undefined;
           for (const memberPoly of group.memberPolysUv) {
             const memberClip = clipPolygonToConvex2D(clip, ensureCcw2D(memberPoly as Vec2[]));
             if (memberClip.length < 3) continue;
+            if (sharedEdgeMap) {
+              let twiceArea = 0;
+              let minClipX = Infinity, maxClipX = -Infinity;
+              let minClipY = Infinity, maxClipY = -Infinity;
+              for (let pi = 0; pi < memberClip.length; pi++) {
+                const p1 = memberClip[pi]!;
+                const p2 = memberClip[(pi + 1) % memberClip.length]!;
+                twiceArea += p1[0] * p2[1] - p2[0] * p1[1];
+                if (p1[0] < minClipX) minClipX = p1[0];
+                if (p1[0] > maxClipX) maxClipX = p1[0];
+                if (p1[1] < minClipY) minClipY = p1[1];
+                if (p1[1] > maxClipY) maxClipY = p1[1];
+              }
+              const clipArea = Math.abs(twiceArea) * 0.5;
+              // Pure tiny-area noise → drop. Aspect-only filter is gone:
+              // legitimate thin shadows (poly 38) trip it; member-clip is
+              // the geometric guard against bridging-region false positives.
+              if (clipArea < 5) continue;
+            }
             if (!bucket) {
               bucket = clippedByCaster.get(casterEntry.id);
               if (!bucket) {
