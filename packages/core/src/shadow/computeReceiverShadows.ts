@@ -26,6 +26,7 @@ import type {
   PolyAmbientLight,
   PolyDirectionalLight,
   Polygon,
+  Vec2,
   Vec3,
 } from "../types";
 
@@ -522,33 +523,30 @@ export function computeReceiverShadowFaces<T = unknown>(
             if (clipArea < 25) continue;
             if (aspect > 4 && clipArea < 800) continue;
           }
-          // Drop sub-shadows whose centroid lands inside the convex hull
-          // but OUTSIDE the actual polygon union (concave bridging regions
-          // of L-shaped face groups). PIP test against member polys.
-          let ccx = 0, ccy = 0;
-          for (const pt of clip) { ccx += pt[0]; ccy += pt[1]; }
-          ccx /= clip.length; ccy /= clip.length;
-          let insideUnion = false;
+          // Clip the projected shadow against each MEMBER polygon of the
+          // receiver face group, not just the group's outer outline. The
+          // outline can span concave regions / holes / disconnected
+          // coplanar islands where the mesh has no actual surface;
+          // clipping against the union of members keeps shadow pixels
+          // strictly over real mesh polygons. Each per-member clip becomes
+          // its own sub-shadow path. Replaces the previous centroid-only
+          // PIP test which left whole sub-shadows visible in empty
+          // outline-but-not-member regions.
+          let bucket: { id: T; verts: Vec2[][]; subPolygonIndices: number[] } | undefined;
           for (const memberPoly of group.memberPolysUv) {
-            let inside = false;
-            for (let mi = 0, mj = memberPoly.length - 1; mi < memberPoly.length; mj = mi++) {
-              const xi = memberPoly[mi]![0], yi = memberPoly[mi]![1];
-              const xj = memberPoly[mj]![0], yj = memberPoly[mj]![1];
-              const intersects = ((yi > ccy) !== (yj > ccy)) &&
-                (ccx < ((xj - xi) * (ccy - yi)) / (yj - yi || 1e-12) + xi);
-              if (intersects) inside = !inside;
+            const memberClip = clipPolygonToConvex2D(clip, ensureCcw2D(memberPoly as Vec2[]));
+            if (memberClip.length < 3) continue;
+            if (!bucket) {
+              bucket = clippedByCaster.get(casterEntry.id);
+              if (!bucket) {
+                bucket = { id: casterEntry.id, verts: [], subPolygonIndices: [] };
+                clippedByCaster.set(casterEntry.id, bucket);
+              }
             }
-            if (inside) { insideUnion = true; break; }
+            bucket.verts.push(memberClip);
+            bucket.subPolygonIndices.push(item.polygonIndex);
+            totalClipped++;
           }
-          if (!insideUnion) continue;
-          let bucket = clippedByCaster.get(casterEntry.id);
-          if (!bucket) {
-            bucket = { id: casterEntry.id, verts: [], subPolygonIndices: [] };
-            clippedByCaster.set(casterEntry.id, bucket);
-          }
-          bucket.verts.push(clip);
-          bucket.subPolygonIndices.push(item.polygonIndex);
-          totalClipped++;
         }
       }
     }
