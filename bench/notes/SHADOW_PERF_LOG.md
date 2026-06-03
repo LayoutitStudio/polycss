@@ -127,6 +127,49 @@ section below when explored.
 
 (append-only; newest at top)
 
+### Iteration 7 — H10 REVISITED — full-vector CSS-var quantize (LANDED)
+
+**Hypothesis recap.** Earlier H10 attempt (iter 5) quantized only
+`--plx/y/z` and saw flat style cost. The recalc trigger was still
+firing on every frame even with those vars frozen → I concluded the
+trigger was outside lighting writes. WRONG diagnosis.
+
+**Discovery (iter 7 probe).** Quick A/B with bench `motion=none`
+(no setOptions per frame) showed style at 0.004 ms/frame and 120 FPS.
+Adding a `motion=light-noop` knob that calls `scene.setOptions({})`
+every frame (empty object) ALSO showed 0 style cost. So setOptions
+itself isn't the trigger — it's specifically what fires when
+`directionalLight` is in the partial.
+
+Re-tested H10 with --plx/y/z AND --clx/cly/clz frozen → **frame_p50
+8.3 ms, style 0.04 ms, 120 FPS**. The original H10 missed --clx/cly/clz
+(shadow-projection up-axis vars derived from light direction inside
+`applyLightingVars`). Those were the actual recalc trigger.
+
+**Real fix.** Changed `lx.toFixed(4)` → `lx.toFixed(2)` for ALL six
+direction-derived light vars in `packages/polycss/src/api/scene/lightingVars.ts`
+(--plx/y/z + --clx/cly/clz). 0.57° quantization matches the H3 emit-
+level quantize key; values only differ between frames when the rounded
+component flips a 0.01 boundary.
+
+**Metrics (perf-vanilla teapot, dynamic, no-self-shadow, motion=light):**
+
+| variant | x1 frames | x4_plus frames | total frames | mean fps |
+| --- | ---: | ---: | ---: | ---: |
+| H9+H3+H9b (pre-H10) | 0 | 47 (~58ms each) | 82 in 5s | 16.4 |
+| H10 (toFixed 2 on all 6 vars) | 31 | 75 | 113 in 5s | **22.6** |
+
+**+38% mean FPS.** fps_p50 stays at 17 because the slow frames (light
+crosses a quantize boundary) still cost ~52 ms style each — that's the
+unavoidable per-frame recalc when a var actually changes. But 38 out of
+113 frames now skip recalc entirely.
+
+**Visual.** Regression script byte-identical to H9b for all 12 captures.
+At 0.57° quantize, shadow position shifts <1 px even at extreme zoom.
+Three.js parity unchanged.
+
+**Recommendation: LANDED on `feat/three-parity` as 77f3206.**
+
 ### Iteration 5 — H10 CSS-var quantize for style-recalc floor (NEGATIVE)
 
 **Hypothesis.** With H9 + H3 landed, the dominant remaining cost in
