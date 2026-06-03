@@ -341,8 +341,10 @@ describe("parseVox — minimal synthetic buffer", () => {
     );
     const result = parseVox(buf, { targetSize: 70});
     expect(result.voxelSource?.scale).toBe(0.88);
-    const ys = result.polygons.flatMap((p) => p.vertices.map((v) => v[1]));
-    expect(Math.max(...ys) - Math.min(...ys)).toBeCloseTo(70.4, 3);
+    // After the gridShift drop (commit 7880492), MagicaVoxel +X now maps to
+    // PolyCSS +X (was +Y). 80-cell row × scale 0.88 = 70.4 along X.
+    const xs = result.polygons.flatMap((p) => p.vertices.map((v) => v[0]));
+    expect(Math.max(...xs) - Math.min(...xs)).toBeCloseTo(70.4, 3);
   });
 
   it("maps MagicaVoxel front (-Y) to PolyCSS +X", () => {
