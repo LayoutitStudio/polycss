@@ -802,7 +802,7 @@ export const PolyMesh = defineComponent({
         const nextRenderedPolygons = props.autoCenter ? recenterPolygons(nextPolygons) : nextPolygons;
         imperativePolygons = nextRenderedPolygons;
         const root = wrapperRef.value;
-        if (
+        const fastPathHandled =
           root &&
           atlasAutoRender &&
           updateStableTriangleDom(root, nextRenderedPolygons, {
@@ -815,11 +815,14 @@ export const PolyMesh = defineComponent({
             // Animated low-poly triangles can swing face normals sharply; keep the
             // mounted baked color pinned and animate transforms only.
             colorFreezeFrames: 0,
-          })
-        ) {
-          return;
-        }
+          });
+        // ALWAYS update polygonOverride so Vue's render fn re-evaluates with the
+        // new polygons. Otherwise any reactive dependency that re-fires after
+        // setPolygons (cameraTick, sceneCtx, etc.) re-emits the <u> VNode from
+        // stale polygons.value and Vue patches the leaf style back to the old
+        // transform — undoing the imperative write from updateStableTriangleDom.
         polygonOverride.value = nextPolygons.slice();
+        void fastPathHandled;
       },
       updatePolygon(target: Polygon | number, partial: Partial<Polygon>) {
         const current = imperativePolygons ?? polygons.value;

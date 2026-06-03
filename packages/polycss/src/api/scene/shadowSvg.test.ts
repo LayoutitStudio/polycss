@@ -19,15 +19,22 @@ describe("ShadowSvgState", () => {
 });
 
 describe("ensureGroundShadow", () => {
-  it("lazily creates the ground SVG inside the scene element as the first child", () => {
+  it("lazily creates the ground SVG inside the .polycss-shadows wrapper as the wrapper's first child", () => {
+    // Commit a5b106a grouped every shadow SVG inside a single
+    // `.polycss-shadows` wrapper mounted under the scene root. The ground
+    // SVG sits inside that wrapper, not directly under sceneEl.
     const sceneEl = document.createElement("div");
     sceneEl.appendChild(document.createElement("span"));
     const state = new ShadowSvgState();
-    const { svg } = ensureGroundShadow(state, document, sceneEl);
+    // Pass debugAttrs=true so the data-poly-shadow-* attributes are emitted
+    // (off by default — commit 7940543 gated them behind debugShadowAttrs).
+    const { svg } = ensureGroundShadow(state, document, sceneEl, true);
     expect(svg).toBeTruthy();
     expect(state.groundSvg).toBe(svg);
     expect(state.groundVisible).toBe(true);
-    expect(sceneEl.firstChild).toBe(svg);
+    const wrapper = sceneEl.querySelector(".polycss-shadows");
+    expect(wrapper).not.toBeNull();
+    expect(wrapper!.firstChild).toBe(svg);
     expect(svg.getAttribute("class")).toContain("polycss-shadow");
     expect(svg.getAttribute("data-poly-shadow-type")).toBe("ground");
     expect(svg.getAttribute("data-poly-shadow-receiver")).toBe("ground");
@@ -40,14 +47,18 @@ describe("ensureGroundShadow", () => {
     expect(a).toBe(b);
   });
   it("reinserts the SVG if it was detached from the DOM", () => {
+    // The SVG sits inside the .polycss-shadows wrapper, so detach from its
+    // actual parent (the wrapper), not directly from sceneEl.
     const sceneEl = document.createElement("div");
     const state = new ShadowSvgState();
     const { svg } = ensureGroundShadow(state, document, sceneEl);
-    sceneEl.removeChild(svg);
+    const wrapper = svg.parentNode as HTMLElement;
+    expect(wrapper.classList.contains("polycss-shadows")).toBe(true);
+    wrapper.removeChild(svg);
     expect(svg.parentNode).toBeNull();
     const { svg: again } = ensureGroundShadow(state, document, sceneEl);
     expect(again).toBe(svg);
-    expect(svg.parentNode).toBe(sceneEl);
+    expect(svg.parentNode).toBe(wrapper);
   });
   it("toggles back to display:block when re-shown after hide", () => {
     const sceneEl = document.createElement("div");

@@ -126,6 +126,18 @@ function topQuad(color = "#123456"): Polygon {
   };
 }
 
+function floor(color = "#888888"): Polygon {
+  return {
+    vertices: [
+      [-10, -10, -0.1],
+      [10, -10, -0.1],
+      [10, 10, -0.1],
+      [-10, 10, -0.1],
+    ],
+    color,
+  };
+}
+
 function translatedTopQuad(x: number, y: number, color: string): Polygon {
   return {
     vertices: [
@@ -2167,12 +2179,15 @@ describe("createPolyScene", () => {
     it("castShadow:true in dynamic mode emits a single <svg> shadow per mesh (same path as baked)", () => {
       // Dynamic mode now uses the same per-mesh compound SVG path as baked
       // mode — one <svg> per casting mesh regardless of polygon count.
+      // Casters need normals opposite to the light travel direction
+      // (default Lz=+0.59), so use back-wound triangles.
       const distinctTri: Polygon = {
-        vertices: [[10, 10, 5], [11, 10, 5], [10, 11, 5]],
+        vertices: [[10, 10, 5], [10, 11, 5], [11, 10, 5]],
         color: "#00ff00",
       };
       scene = makeScene(host, dynOpts);
-      scene.add(makeParseResult([triangle(), distinctTri]), { castShadow: true, merge: false });
+      scene.add(makeParseResult([floor()]), { receiveShadow: true });
+      scene.add(makeParseResult([backTriangle(), distinctTri]), { castShadow: true, merge: false });
       const shadows = host.querySelectorAll(".polycss-shadow");
       expect(shadows.length).toBe(1);
       expect(shadows[0]!.tagName.toLowerCase()).toBe("svg");
@@ -2185,13 +2200,16 @@ describe("createPolyScene", () => {
       // filled silhouette without alpha stacking while gaps remain holes.
       // One <path> per mesh regardless of polygon count.
       scene = makeScene(host, { textureLighting: "baked" });
-      scene.add(makeParseResult([triangle()]), { castShadow: true });
+      scene.add(makeParseResult([floor()]), { receiveShadow: true });
+      scene.add(makeParseResult([backTriangle()]), { castShadow: true });
       const shadows = host.querySelectorAll(".polycss-shadow");
       expect(shadows.length).toBe(1);
       const shadow = shadows[0] as SVGSVGElement;
       expect(shadow.tagName.toLowerCase()).toBe("svg");
       expect(shadow.classList.contains("polycss-shadow-svg")).toBe(true);
-      expect(shadow.style.transform).toMatch(/^translate3d\(/);
+      // Per-receiver-face SVGs are placed via matrix3d(u,v,n,O) so the
+      // SVG-local (u,v) space projects back onto the receiver plane.
+      expect(shadow.style.transform).toMatch(/^matrix3d\(/);
       expect(shadow.style.transform).not.toContain("var(--shadow-proj)");
       const paths = shadow.querySelectorAll("path");
       expect(paths.length).toBe(1);
@@ -2205,16 +2223,30 @@ describe("createPolyScene", () => {
       expect((d.match(/Z/g) || []).length).toBe(1);
     });
 
-    it("clips low-angle ground shadow path coordinates to the capped SVG box", () => {
+    it("clips low-angle shadow path coordinates to the receiver face SVG box", () => {
+      // Receiver-face SVGs are sized to the receiver's planar bbox and
+      // every projected shadow polygon is clipped against the receiver's
+      // outline before path emission. Path coordinates must therefore stay
+      // inside the SVG's width/height regardless of how far a low-angle
+      // shadow would naturally stretch beyond the receiver.
+      const smallFloor: Polygon = {
+        vertices: [
+          [-1, -1, -0.1],
+          [1, -1, -0.1],
+          [1, 1, -0.1],
+          [-1, 1, -0.1],
+        ],
+        color: "#888888",
+      };
       scene = makeScene(host, {
         textureLighting: "baked",
-        // Light along world +Y so the world→CSS axis swap (world Y → CSS X)
-        // produces a long shadow along CSS X for sideTriangle's YZ-plane
-        // geometry. Light direction was [1, 0, 0.01] before the parity
-        // refactor when there was no world→CSS swap on the shadow path.
-        directionalLight: { direction: [0, 1, 0.01] },
+        // Light mostly along world -Y (CSS -X) with a moderate +Z so the
+        // sideTriangle's +X-facing normal opposes the light vector and the
+        // shadow lands on the small floor directly below.
+        directionalLight: { direction: [0, -1, 0.3] },
         shadow: { maxExtend: 20 },
       });
+      scene.add(makeParseResult([smallFloor]), { receiveShadow: true });
       scene.add(makeParseResult([sideTriangle()]), { castShadow: true, merge: false });
 
       const shadow = host.querySelector(".polycss-shadow") as SVGSVGElement;
@@ -2224,7 +2256,6 @@ describe("createPolyScene", () => {
       const values = (d.match(/-?\d+(?:\.\d+)?/g) ?? []).map(Number);
 
       expect(width).toBeGreaterThan(0);
-      expect(width).toBeLessThanOrEqual(40);
       expect(height).toBeGreaterThan(0);
       expect(values.length).toBeGreaterThan(0);
       for (let i = 0; i < values.length; i += 2) {
@@ -2244,13 +2275,15 @@ describe("createPolyScene", () => {
       // fill-rule=nonzero merging overlap into one solid silhouette,
       // including the back-facing polys is geometrically correct.
       scene = makeScene(host, { textureLighting: "baked" });
+      scene.add(makeParseResult([floor()]), { receiveShadow: true });
       scene.add(makeParseResult([backTriangle()]), { castShadow: true });
       expect(host.querySelectorAll(".polycss-shadow").length).toBe(1);
     });
 
     it("shadow SVGs have the polycss-shadow class", () => {
       scene = makeScene(host, dynOpts);
-      scene.add(makeParseResult([triangle()]), { castShadow: true });
+      scene.add(makeParseResult([floor()]), { receiveShadow: true });
+      scene.add(makeParseResult([backTriangle()]), { castShadow: true });
       const shadows = host.querySelectorAll(".polycss-shadow");
       expect(shadows.length).toBeGreaterThan(0);
       for (const el of Array.from(shadows)) {
@@ -2260,12 +2293,14 @@ describe("createPolyScene", () => {
 
     it("shadow elements are always <svg> with class polycss-shadow regardless of caster tag or mode", () => {
       // Both lighting modes use the same per-mesh <svg> shadow now.
+      // Casters need back-facing normals for the default upward light.
       const distinctTri: Polygon = {
-        vertices: [[10, 10, 5], [11, 10, 5], [10, 11, 5]],
+        vertices: [[10, 10, 5], [10, 11, 5], [11, 10, 5]],
         color: "#00ff00",
       };
       scene = makeScene(host, dynOpts);
-      scene.add(makeParseResult([triangle(), distinctTri]), {
+      scene.add(makeParseResult([floor()]), { receiveShadow: true });
+      scene.add(makeParseResult([backTriangle(), distinctTri]), {
         castShadow: true,
         merge: false,
       });
@@ -2282,7 +2317,8 @@ describe("createPolyScene", () => {
       // the projection is CPU-baked into the per-mesh SVG path same as in
       // baked mode.
       scene = makeScene(host, dynOpts);
-      scene.add(makeParseResult([triangle()]), { castShadow: true });
+      scene.add(makeParseResult([floor()]), { receiveShadow: true });
+      scene.add(makeParseResult([backTriangle()]), { castShadow: true });
       const sceneEl = getSceneEl(host);
       expect(sceneEl.style.getPropertyValue("--shadow-ground-cssz")).toBe("");
       expect(host.querySelectorAll(".polycss-shadow").length).toBe(1);
@@ -2290,7 +2326,8 @@ describe("createPolyScene", () => {
 
     it("toggling castShadow via setTransform adds/removes shadow SVGs", () => {
       scene = makeScene(host, dynOpts);
-      const handle = scene.add(makeParseResult([triangle()]), { castShadow: false });
+      scene.add(makeParseResult([floor()]), { receiveShadow: true });
+      const handle = scene.add(makeParseResult([backTriangle()]), { castShadow: false });
       expect(host.querySelectorAll(".polycss-shadow").length).toBe(0);
       handle.setTransform({ castShadow: true });
       expect(host.querySelectorAll(".polycss-shadow").length).toBeGreaterThan(0);
@@ -2298,34 +2335,46 @@ describe("createPolyScene", () => {
       expect(host.querySelectorAll(".polycss-shadow").length).toBe(0);
     });
 
-    it("switching from dynamic to baked keeps the shadow as a translated <svg>", () => {
+    it("switching from dynamic to baked keeps the shadow as a positioned <svg>", () => {
       scene = makeScene(host, dynOpts);
-      scene.add(makeParseResult([triangle()]), { castShadow: true });
+      scene.add(makeParseResult([floor()]), { receiveShadow: true });
+      scene.add(makeParseResult([backTriangle()]), { castShadow: true });
       const before = host.querySelector(".polycss-shadow") as SVGSVGElement;
       expect(before.tagName.toLowerCase()).toBe("svg");
-      expect(before.style.transform).toMatch(/^translate3d\(/);
+      // Per-receiver-face SVGs are placed via matrix3d(u,v,n,O) so the
+      // (u,v) basis projects shadow paths back onto the receiver plane.
+      expect(before.style.transform).toMatch(/^matrix3d\(/);
       scene.setOptions({ textureLighting: "baked" });
       const after = host.querySelector(".polycss-shadow") as SVGSVGElement;
       expect(after).not.toBeNull();
       expect(after.tagName.toLowerCase()).toBe("svg");
-      expect(after.style.transform).toMatch(/^translate3d\(/);
+      expect(after.style.transform).toMatch(/^matrix3d\(/);
     });
 
-    it("switching from baked back to dynamic keeps the shadow as a translated <svg>", () => {
+    it("switching from baked back to dynamic keeps the shadow as a positioned <svg>", () => {
       scene = makeScene(host, { textureLighting: "baked" });
-      scene.add(makeParseResult([triangle()]), { castShadow: true });
+      scene.add(makeParseResult([floor()]), { receiveShadow: true });
+      scene.add(makeParseResult([backTriangle()]), { castShadow: true });
       const before = host.querySelector(".polycss-shadow") as SVGSVGElement;
       expect(before.tagName.toLowerCase()).toBe("svg");
       scene.setOptions({ ...dynOpts });
       const dynamicShadow = host.querySelector(".polycss-shadow") as SVGSVGElement;
       expect(dynamicShadow).not.toBeNull();
       expect(dynamicShadow.tagName.toLowerCase()).toBe("svg");
-      expect(dynamicShadow.style.transform).toMatch(/^translate3d\(/);
+      expect(dynamicShadow.style.transform).toMatch(/^matrix3d\(/);
     });
 
     it("textured polygons (s) ALSO emit shadow SVGs", () => {
+      // Back-wound textured triangle so the caster normal opposes the
+      // default light direction's +Z component and isn't culled.
+      const backTexturedTri: Polygon = {
+        vertices: backTriangle().vertices,
+        texture: "https://example.com/tex.png",
+        uvs: [[0, 0], [0, 1], [1, 0]],
+      };
       scene = makeScene(host, dynOpts);
-      scene.add(makeParseResult([texturedTriangle()]), { castShadow: true });
+      scene.add(makeParseResult([floor()]), { receiveShadow: true });
+      scene.add(makeParseResult([backTexturedTri]), { castShadow: true });
       // Shadows depend only on the polygon's outline, not its texture
       // content. Atlas (<s>) polygons cast shadows the same way as
       // solid strategy tags: as part of the mesh's SVG silhouette. Otherwise
@@ -2354,12 +2403,13 @@ describe("createPolyScene", () => {
     it("baked mode rewrites the same SVG shadow when directionalLight.direction changes", () => {
       // Light direction is folded into the CPU projection that builds the
       // SVG paths, so changing it must rewrite the existing SVG outline
-      // and translate3d without tearing down the mounted shadow node.
+      // and matrix3d positioning without tearing down the mounted shadow node.
       scene = makeScene(host, {
         textureLighting: "baked",
         directionalLight: { direction: [0, 0, 1] },
       });
-      scene.add(makeParseResult([triangle()]), { castShadow: true });
+      scene.add(makeParseResult([floor()]), { receiveShadow: true });
+      scene.add(makeParseResult([backTriangle()]), { castShadow: true });
       const sceneEl = getSceneEl(host);
       const initialSvg = host.querySelector(".polycss-shadow") as SVGSVGElement;
       const initialTransform = initialSvg.style.transform;
@@ -2374,7 +2424,7 @@ describe("createPolyScene", () => {
       const nextPathD = nextSvg.querySelector("path")?.getAttribute("d");
       expect(nextSvg).toBe(initialSvg);
       expect(records.some((record) => record.addedNodes.length > 0 || record.removedNodes.length > 0)).toBe(false);
-      expect(nextTransform).toMatch(/^translate3d\(/);
+      expect(nextTransform).toMatch(/^matrix3d\(/);
       // EITHER the SVG positioning OR the path geometry must have changed
       // — both encode the projection so both should reflect the new light.
       expect(nextTransform !== initialTransform || nextPathD !== initialPathD).toBe(true);
@@ -2385,7 +2435,8 @@ describe("createPolyScene", () => {
         textureLighting: "baked",
         directionalLight: { direction: [0, 0, 1] },
       });
-      scene.add(makeParseResult([triangle()]), { castShadow: true });
+      scene.add(makeParseResult([floor()]), { receiveShadow: true });
+      scene.add(makeParseResult([backTriangle()]), { castShadow: true });
       const initialSvg = host.querySelector(".polycss-shadow") as SVGSVGElement;
       const initialTransform = initialSvg.style.transform;
       const initialPathD = initialSvg.querySelector("path")?.getAttribute("d");
@@ -2417,7 +2468,8 @@ describe("createPolyScene", () => {
         textureLighting: "baked",
         directionalLight: { direction: [0, 0, 1] },
       });
-      scene.add(makeParseResult([triangle()]), { castShadow: true });
+      scene.add(makeParseResult([floor()]), { receiveShadow: true });
+      scene.add(makeParseResult([backTriangle()]), { castShadow: true });
       const initialSvg = host.querySelector(".polycss-shadow") as SVGSVGElement;
       const initialTransform = initialSvg.style.transform;
       const initialPathD = initialSvg.querySelector("path")?.getAttribute("d");
@@ -2441,7 +2493,8 @@ describe("createPolyScene", () => {
         textureLighting: "baked",
         directionalLight: { direction: [0, 0, 1] },
       });
-      scene.add(makeParseResult([triangle()]), { castShadow: true });
+      scene.add(makeParseResult([floor()]), { receiveShadow: true });
+      scene.add(makeParseResult([backTriangle()]), { castShadow: true });
       const helper = scene.add(makeParseResult([triangle()]));
       const initialSvg = host.querySelector(".polycss-shadow") as SVGSVGElement;
       const initialTransform = initialSvg.style.transform;
