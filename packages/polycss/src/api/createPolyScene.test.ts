@@ -500,8 +500,11 @@ describe("createPolyScene", () => {
 
     it("uses exact parsed voxel polygons for direct matrix placement", () => {
       scene = makeScene(host, {
+        // ambient = π cancels the shadePolygon `/π` Lambert divisor so the
+        // assertion sees the raw base color. The test is about matrix
+        // placement; color is just an identity marker for the brush.
         directionalLight: { direction: [0, 0, 1], color: "#ffffff", intensity: 0 },
-        ambientLight: { color: "#ffffff", intensity: 1 },
+        ambientLight: { color: "#ffffff", intensity: Math.PI },
       }, { rotX: 65, rotY: 45 });
       scene.add(makeVoxelExactParseResult(), { merge: false });
       const brush = host.querySelector(DIRECT_VOXEL_BRUSH_SELECTOR) as HTMLElement | null;
@@ -1522,8 +1525,10 @@ describe("createPolyScene", () => {
 
     it("updates direct voxel brushes when mesh rotation changes the visible face set", () => {
       scene = makeScene(host, {
+        // ambient = π so the shadePolygon `/π` cancels and the brush color
+        // matches the raw base — lets the test assert color identity.
         directionalLight: { direction: [0, 0, 1], intensity: 0 },
-        ambientLight: { color: "#ffffff", intensity: 1 },
+        ambientLight: { color: "#ffffff", intensity: Math.PI },
       }, { rotX: 0, rotY: 0 });
       const handle = scene.add(makeTwoSidedVoxelExactParseResult());
       const firstBrush = host.querySelector(DIRECT_VOXEL_BRUSH_SELECTOR) as HTMLElement | null;
@@ -1541,8 +1546,10 @@ describe("createPolyScene", () => {
 
     it("updates direct voxel side brushes when mesh z-rotation swaps front and back faces", () => {
       scene = makeScene(host, {
+        // ambient = π so the shadePolygon `/π` cancels and the brush color
+        // matches the raw base — lets the test assert color identity.
         directionalLight: { direction: [0, 0, 1], intensity: 0 },
-        ambientLight: { color: "#ffffff", intensity: 1 },
+        ambientLight: { color: "#ffffff", intensity: Math.PI },
       }, { rotX: 65, rotY: 45 });
       const handle = scene.add(makeTwoSidedVoxelSideParseResult());
       const firstBrush = host.querySelector(DIRECT_VOXEL_BRUSH_SELECTOR) as HTMLElement | null;
@@ -1560,8 +1567,10 @@ describe("createPolyScene", () => {
 
     it("redraws direct voxel brushes on mesh rotation even when visible faces stay the same", () => {
       scene = makeScene(host, {
+        // ambient = π so the shadePolygon `/π` cancels and the brush color
+        // matches the raw base — lets the test assert color identity.
         directionalLight: { direction: [0, 0, 1], intensity: 0 },
-        ambientLight: { color: "#ffffff", intensity: 1 },
+        ambientLight: { color: "#ffffff", intensity: Math.PI },
       }, { rotX: 0, rotY: 0 });
       const handle = scene.add(makeTwoTopVoxelExactParseResult());
       const brushes = () => Array.from(host.querySelectorAll(DIRECT_VOXEL_BRUSH_SELECTOR)) as HTMLElement[];
