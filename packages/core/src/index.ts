@@ -200,8 +200,6 @@ export {
   extractSilhouetteLoops,
 } from "./shadow/silhouette";
 export type { EdgeOwners } from "./shadow/silhouette";
-export { PROXY_MIN_POLYS, prepareProxyReceiverPlanes } from "./shadow/proxyReceivers";
-export type { ProxyReceiverPlane } from "./shadow/proxyReceivers";
 
 // ── Animation ─────────────────────────────────────────────────────
 export {

@@ -46,10 +46,8 @@ import {
   parseHexColor,
   prepareCasterEdgeOwners,
   prepareCasterPolyItems,
-  prepareProxyReceiverPlanes,
   prepareReceiverFacePlanes,
   projectCssVertexToGround,
-  PROXY_MIN_POLYS,
   worldDirectionToCss,
   type CameraCullRotation,
   type EdgeOwners,
@@ -1008,31 +1006,13 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
     const userLightDir = sceneDirectionalLight?.direction ?? ([0.4, -0.7, 0.59] as Vec3);
     const lightDir = worldDirectionToCss(userLightDir);
     const shadowLift = sceneShadow?.lift ?? 0.001;
-    // H11b proxy mode: when this receiver also self-shadows and has enough
-    // polygons that per-face decomposition dominates, use ~6 OBB-face
-    // proxy planes instead of the per-coplanar-face decomposition.
-    const hasSelfShadowCaster = (() => {
-      for (const [, data] of shadowCasters) {
-        if (data.polygons === polygons) return true;
-      }
-      return false;
-    })();
-    const useProxyPlanes = hasSelfShadowCaster && polygons.length >= PROXY_MIN_POLYS;
-    const planes = useProxyPlanes
-      ? prepareProxyReceiverPlanes(
-          polygons,
-          position ?? [0, 0, 0],
-          scale,
-          new Set(),
-          shadowLift,
-        )
-      : prepareReceiverFacePlanes(
-          polygons,
-          position ?? [0, 0, 0],
-          scale,
-          new Set(),
-          shadowLift,
-        );
+    const planes = prepareReceiverFacePlanes(
+      polygons,
+      position ?? [0, 0, 0],
+      scale,
+      new Set(),
+      shadowLift,
+    );
     if (planes.length === 0) return null;
     const casterInputs: ReceiverCasterInput<symbol>[] = [];
     for (const [casterId, data] of shadowCasters) {
