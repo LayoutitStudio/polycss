@@ -122,6 +122,17 @@ section below when explored.
   For concave silhouettes there are interior loops; SVG `d=` supports
   multiple subpaths with fill-rule:evenodd to make holes work. **This
   dwarfs H2 in potential impact for the merge-collapse case.**
+- **[H11b] Silhouette onto OBB/averaged-plane proxy for self-shadow.**
+  Follow-up to H11 NEGATIVE result. Per-face receiver decomposition
+  can't be coalesced on a smooth curved mesh without also relaxing
+  OFFSET_TOL (which would merge unrelated planes). Instead: when
+  caster === receiver, replace the per-face receiver hull with a
+  single proxy plane per camera-facing region (oriented-bounding-box
+  face or k-means averaged plane). Project the H9b silhouette onto N
+  proxy planes instead of 242 actual planes → ~10× fewer SVGs without
+  needing OFFSET_TOL changes. Visual risk: shadow lands on an averaged
+  plane that can detach from real geometry; mitigate by clipping each
+  proxy's projection to the per-face member polygons it represents.
 
 ## Iteration journal
 
@@ -169,6 +180,81 @@ At 0.57° quantize, shadow position shifts <1 px even at extreme zoom.
 Three.js parity unchanged.
 
 **Recommendation: LANDED on `feat/three-parity` as 77f3206.**
+
+### Iteration 6 — H11 receiver-face coalesce (NEGATIVE)
+
+**Hypothesis recap.** After H9b, teapot-self is compositor-bound at
+frame_p50 ≈ 342 ms with 138-242 receiver SVGs per azimuth. Compositor
+cost is ~proportional to SVG count. Relax `RECEIVER_NORMAL_TOL` in
+`packages/core/src/shadow/receiverFaceGroups.ts` from 0.001 (~2.5° cone)
+to 0.02 (~11.5° cone) so adjacent smooth-shaded teapot triangles whose
+normals differ by 1-5° collapse into one face plane → one SVG. Keep
+`RECEIVER_OFFSET_TOL = 0.5` because it's a world-unit distance.
+
+**Implementation.** Branch `perf/shadow-face-coalesce`. One-line change:
+`RECEIVER_NORMAL_TOL: 0.001 → 0.02`. Built core + polycss + react + vue
++ bench bundles. Verified bundle contains `RECEIVER_NORMAL_TOL = 0.02`.
+
+**Metrics (shadow-regression fixture, teapot-self vs h9b-merged baseline).**
+
+| az  | recv SVGs Δ | paths Δ | dChars Δ |
+| --- | ---:        | ---:    | ---:     |
+| 50  | 0 (242→242) | 0       | 0        |
+| 130 | 0 (143→143) | 0       | 0        |
+| 220 | 0 (104→104) | 0       | 0        |
+
+teapot-floor / castle-floor / crate-floor: byte-identical, expected
+(those scenes already collapse to 1 SVG per receiver plane).
+
+**Why the win didn't materialize.** Bisection probes confirmed the
+plane-bucket pass has TWO filters AND'd together: `(1 - dot < NORMAL_TOL)
+&& (|Δoffset| < OFFSET_TOL)`. Plane offset is `n · O` where O is a face
+vertex, so when adjacent triangles' normals drift even 1-2° the resulting
+plane-offset values drift by `|O| × |Δn|` — for a teapot at typical
+world scale (vertices ~100s of CSS px from origin), that's tens of px,
+far beyond the 0.5 px OFFSET_TOL. The NORMAL filter therefore never
+actually gates the merge; OFFSET does, and NORMAL is dead code at any
+value > 0.001. Empirical probes (bench/results/shadow-regression/):
+
+| probe                    | teapot-self az50 recv SVGs |
+| ---                      | ---:                       |
+| baseline (0.001 / 0.5)   | 242                        |
+| H11 prescribed (0.02 / 0.5) | 242                     |
+| 0.05 / 0.5               | 242                        |
+| 2.0 / 0.5 (normal off)   | 242                        |
+| 0.05 / 2.0               | 241                        |
+| 0.05 / 20.0              | 213                        |
+| 2.0 / 1e6 (both off)     | 2                          |
+
+To actually coalesce a smooth-mesh receiver you'd need to ALSO raise
+OFFSET_TOL by 1-2 orders of magnitude — which is exactly the
+"parallel-but-far-apart walls merge into one" bug the hypothesis
+explicitly warned against. At OFFSET_TOL=20 you'd merge floor tiles
+with similar-normal ceiling tiles in modest-height rooms; not
+acceptable.
+
+**Trace / parity.** Trace skipped — the SVG-count delta is 0 across all
+scenes, so script/compositorMain ms/frame are determined to be
+unchanged by definition (same DOM mutation work, same path payload).
+Three.js parity captures `bench/results/threejs-parity/h11-coalesce/`
+all 12 PNGs md5-identical to the `h9b-merged` baseline. Visual
+inspection of `teapot-self-az{50,130,220}` PNGs vs h9b shows no
+detached shadows (no merges happened to detach).
+
+**Recommendation: DISCARD.** The hypothesis identified the right SYMPTOM
+(receiver-SVG count limits dt_p50) but the wrong LEVER. The
+plane-grouping pass can't coalesce smooth-curved-mesh receivers without
+also breaking the offset-distance invariant. To attack receiver-SVG
+count on curved self-shadow casters you need a different approach:
+either project the silhouette onto an averaged-plane proxy receiver per
+mesh region (not per face), or skip the per-face receiver decomposition
+entirely on caster == receiver and use a single oriented-bounding-box
+proxy receiver. Park as `[H11b] silhouette-onto-OBB-proxy` in the
+backlog. Branch `perf/shadow-face-coalesce` stays for traceability but
+contains no code change to cherry-pick — just this log entry. Files
+`bench/results/shadow-regression/h11-coalesce/`,
+`bench/results/shadow-regression/h11-probe-*/`,
+`bench/results/threejs-parity/h11-coalesce/` document the probe runs.
 
 ### Iteration 5 — H10 CSS-var quantize for style-recalc floor (NEGATIVE)
 
