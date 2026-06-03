@@ -243,6 +243,27 @@ export function createPolyScene(
 
   const clearAllSceneShadows = () => clearAllSceneShadowsImpl(ctx);
 
+  // H3: quantize the directional light at ~0.57° (rounding each normalized
+  // component to 0.01) and skip emitSceneShadows when the rounded vector
+  // matches the cached frame. Slow-drag jitter at this resolution is below
+  // human perception, and at ~0.5°/frame in the bench most consecutive
+  // ticks collapse into the same bucket. Any caster/receiver geometry or
+  // shadow-appearance change MUST call invalidateShadowLightCache(); the
+  // cache key is light-only.
+  let lastEmittedShadowLightKey: string | null = null;
+  function quantizeLightDirKey(d: Vec3 | undefined): string | null {
+    if (!d) return null;
+    const len = Math.hypot(d[0], d[1], d[2]);
+    if (!Number.isFinite(len) || len <= 0) return null;
+    const nx = Math.round((d[0] / len) * 100) / 100;
+    const ny = Math.round((d[1] / len) * 100) / 100;
+    const nz = Math.round((d[2] / len) * 100) / 100;
+    return `${nx}|${ny}|${nz}`;
+  }
+  function invalidateShadowLightCache(): void {
+    lastEmittedShadowLightKey = null;
+  }
+
   // Cache-management closures over the SceneContext. The actual maps live
   // on `ctx` and are read/written by the extracted shadow emitters.
   const clearReceiverShadowCache = (entry?: MeshEntry) =>
@@ -816,6 +837,10 @@ export function createPolyScene(
     }
     if ((currentOptions.textureLighting ?? "baked") !== "dynamic") {
       clearLightingVars(sceneEl);
+      // Preview shadow may have used a different light direction than the
+      // committed currentOptions; bust the cache so the restored shadow
+      // re-emits even if the quantized key happens to match.
+      invalidateShadowLightCache();
       emitSceneShadows();
     }
   }
@@ -906,8 +931,11 @@ export function createPolyScene(
 
   // Refreshes scene-level shadow SVGs for both lighting modes. Callers pass the
   // entry that changed, but emission is scene-wide because every receiving
-  // surface aggregates every caster into one compound path.
+  // surface aggregates every caster into one compound path. This is the
+  // geometry-change entry point — bust the H3 light-quantize cache so the
+  // next emit isn't short-circuited against a stale frame.
   function emitShadowLeaves(_entry: MeshEntry): void {
+    invalidateShadowLightCache();
     emitSceneShadows();
   }
 
@@ -921,6 +949,7 @@ export function createPolyScene(
     for (const m of meshes) if (!m.disposed && m.castShadow) casters.push(m);
     if (casters.length === 0) {
       clearAllSceneShadows();
+      lastEmittedShadowLightKey = null;
       return;
     }
 
@@ -934,6 +963,13 @@ export function createPolyScene(
       ?? currentOptions.directionalLight?.direction
       ?? ([0.4, -0.7, 0.59] as Vec3);
     const lightDir = worldDirectionToCss(userLightDir);
+
+    // H3: short-circuit when the quantized light direction matches the cached
+    // frame. invalidateShadowLightCache() is called by every code path that
+    // mutates caster/receiver geometry or shadow appearance, so a cache hit
+    // here means "same light, same scene → previous SVG content is still valid".
+    const lightKey = quantizeLightDirKey(lightDir);
+    if (lightKey !== null && lightKey === lastEmittedShadowLightKey) return;
 
     // Per-caster shadow dedup (independent meshes can't dedup against
     // each other). Computed once per caster, reused across surfaces.
@@ -1000,6 +1036,7 @@ export function createPolyScene(
       if (receiver.disposed || !receiver.receiveShadow) continue;
       emitReceiverShadowsImpl(ctx, casters, dedupByCaster, receiver, dedupByReceiver.get(receiver) ?? new Set(), lightDir, r, g, b, shadowOpacity);
     }
+    lastEmittedShadowLightKey = lightKey;
   }
 
   // Builds a single per-mesh <svg> for the mesh's shadow. Projects every
@@ -1381,7 +1418,10 @@ export function createPolyScene(
       const hadGround = shadowSvgState.currentGroundCssZ !== null;
       shadowSvgState.currentGroundCssZ = null;
       // No casters left: drop any shadow elements still mounted.
-      if (hadGround) clearAllSceneShadows();
+      if (hadGround) {
+        clearAllSceneShadows();
+        invalidateShadowLightCache();
+      }
       return;
     }
     const lift = currentOptions.shadow?.lift ?? 0.05;
@@ -1393,7 +1433,10 @@ export function createPolyScene(
     const prevGround = shadowSvgState.currentGroundCssZ;
     shadowSvgState.currentGroundCssZ = groundCssZ;
     // Ground changed: rebuild the scene-level shadow set once.
-    if (prevGround !== groundCssZ) emitSceneShadows();
+    if (prevGround !== groundCssZ) {
+      invalidateShadowLightCache();
+      emitSceneShadows();
+    }
   }
 
   async function renderEntryChunked(
@@ -1955,6 +1998,7 @@ export function createPolyScene(
         // them down explicitly before the rebuild.
         if (entry.receiveShadow !== prevReceiveShadow) {
           if (!entry.receiveShadow) disposeReceiverShadowMounts(entry);
+          invalidateShadowLightCache();
           emitSceneShadows();
         }
         // Position / scale change: shadow geometry depends on world-space
@@ -1964,6 +2008,7 @@ export function createPolyScene(
         // light, so the gate is on castShadow || receiveShadow.
         if ((t.position !== undefined || t.scale !== undefined) && (entry.castShadow || entry.receiveShadow)) {
           recomputeShadowGround();
+          invalidateShadowLightCache();
           emitSceneShadows();
         }
       },
@@ -2015,7 +2060,10 @@ export function createPolyScene(
     // casters get faces to project onto. recomputeShadowGround only
     // does this when the global ground changes; force a rebuild for the
     // receiver-only case.
-    if (entry.receiveShadow) emitSceneShadows();
+    if (entry.receiveShadow) {
+      invalidateShadowLightCache();
+      emitSceneShadows();
+    }
     return handle;
   }
 
@@ -2082,8 +2130,13 @@ export function createPolyScene(
         for (const entry of meshes) renderEntry(entry);
       }
       recomputeShadowGround();
+      invalidateShadowLightCache();
       emitSceneShadows();
     } else if (shadowReemitNeeded) {
+      // Shadow-appearance change (color/opacity/lift) must bust the cache;
+      // a light-direction-only change is safe because the quantization key
+      // already discriminates by direction.
+      if (shadowAppearanceChanged) invalidateShadowLightCache();
       emitSceneShadows();
     }
     if (shadowAppearanceChanged && partial.shadow?.lift !== prevShadow?.lift) {
