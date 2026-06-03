@@ -65,6 +65,24 @@ const { polygons, voxelSource } = parseVox(buf, {
 
 ---
 
+## `parseStl(source, options?)`
+
+Parses ASCII or binary STL triangle meshes into a `ParseResult`. Accepts `ArrayBuffer`, `Uint8Array`, or an ASCII STL string. STL imports are triangle meshes: the format has no standard units, textures, UVs, or hierarchy. The parser supports binary Magics face colors, exposes ASCII `solid` groups as `metadata.stlSolids`, repairs consistent triangle winding, orients closed manifold components outward, and uses strong supplied-normal agreement to orient open components before emitting polygons. Winding/connectivity diagnostics are exposed as `metadata.stlTopology`.
+
+```ts
+import { parseStl } from "@layoutit/polycss-core";
+
+const buf = await fetch("/part.stl").then(r => r.arrayBuffer());
+const { polygons, warnings } = parseStl(buf, {
+  targetSize: 60,
+  defaultColor: "#888888",
+});
+```
+
+**Options:** See [`StlParseOptions`](/api/types/#stlparseoptions).
+
+---
+
 ## `parseMtl(text)`
 
 Parses an MTL file text string into a material map.
@@ -81,7 +99,7 @@ const { colors, textures } = parseMtl(mtlText);
 
 ## `loadMesh(url, options?)`
 
-High-level convenience function: fetches a URL, detects OBJ vs glTF/GLB/VOX by extension (`.obj`, `.gltf`, `.glb`, `.vox`), parses it, and returns a `ParseResult`. Mesh optimization defaults to `meshResolution: "lossy"`; pass `"lossless"` for exact planar candidates only.
+High-level convenience function: fetches a URL, detects OBJ, STL, glTF/GLB, or VOX by extension (`.obj`, `.stl`, `.gltf`, `.glb`, `.vox`), parses it, and returns a `ParseResult`. Mesh optimization defaults to `meshResolution: "lossy"`; pass `"lossless"` for exact planar candidates only.
 
 In lossy mode, `loadMesh()` runs the full core import optimization path after parsing: solid texture swatch baking, near-identical baked swatch color cleanup, static triangle simplification for eligible non-animated meshes, and final DOM-cost mesh optimization. Animated glTF results keep their source polygon topology so animation sampling remains index-stable.
 
@@ -543,5 +561,5 @@ The root package exports the matching element classes for manual registration or
 | `@layoutit/polycss-vue` | Vue components, composables, controls, selection, animation, core re-exports, render diagnostics |
 | `@layoutit/polycss` | Vanilla imperative API + custom element classes + controls + selection + render diagnostics |
 | `@layoutit/polycss/elements` | Side-effect: registers the PolyCSS custom elements |
-| `@layoutit/polycss-core` | Pure parsers / math, zero DOM: `parseObj`, `parseGltf`, `parseVox`, `loadMesh`, types |
+| `@layoutit/polycss-core` | Pure parsers / math, zero DOM: `parseObj`, `parseGltf`, `parseVox`, `parseStl`, `loadMesh`, types |
 | `@layoutit/polycss-fonts` | Font parsing, Google font loading, and text-to-polygon mesh generation |
