@@ -159,6 +159,18 @@ again. The 53 ms is the dynamic-Lambert floor for now.
 **Recommendation: DISCARD this approach.** Filed as H10 follow-up: probe
 which write actually triggers the per-frame recalc.
 
+**Probe follow-up (same iteration).** Also tried gating
+`el.style.transform = ...` in `applySceneStyle` so it only writes when
+the value changes. Same 53.7 ms style recalc — transform isn't the
+trigger either. With BOTH lighting vars + scene transform writes gated
+to no-ops, the recalc still fires every frame. The cost is intrinsic to
+"calc()-driven `background-color` on 2300 leaves under a CSS scene with
+any kind of per-frame activity" — possibly the browser's implicit
+recalc when ANY style-related event fires, regardless of whether the
+event materially changed anything visible. **No clean lever** to drop
+the 53 ms floor without redesigning dynamic mode (e.g. JS-set inline
+colors, or reducing leaf count). Park H10 here; pursue other H if any.
+
 ### Iteration 3 — H3 light quantization (branch `perf/shadow-light-quantize`)
 
 **Hypothesis recap.** At ~0.5°/frame drag speed, consecutive shadow re-emits
