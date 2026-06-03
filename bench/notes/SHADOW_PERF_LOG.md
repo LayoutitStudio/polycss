@@ -51,6 +51,23 @@ From `bench/results/shadow-teapot-dynamic.json` (light rotating
 4. **compositorMain** — Big number (~400ms) but mostly downstream of (1)
    and (2). Investigate after (1) and (2) shrink.
 
+## Shadow vs lighting cost split (iter 2 diagnostic)
+
+Same scene (teapot, dynamic mode, motion=light), one with shadows on
+(cs=1 ss=1 fv=1), one with all shadows off (cs=0 ss=0 fv=0):
+
+| group | no-shadow ms/f | with-shadow ms/f | shadow Δ |
+| --- | ---: | ---: | ---: |
+| style (calc-Lambert recalc) | 53.4 | 56.0 | +3 |
+| script (SH-clip + DOM mut) | 4.6 | 764.3 | +760 |
+| compositorMain (SVG layers) | 120.1 | 527.0 | +407 |
+| frame_p50 | 59.9 | 449.9 | +390 |
+
+**Shadow path = 95% of the with-shadows cost.** Dynamic-Lambert style
+recalc (53 ms/frame for 2300 leaves) is the floor in dynamic mode and
+is independent of shadows — investigate as a separate H once the shadow
+script + compositorMain numbers shrink. **H9 attacks the right cost.**
+
 ## Hypothesis backlog
 
 In rough priority order. Each entry gets its own branch and journal
