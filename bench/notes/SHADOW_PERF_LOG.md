@@ -38,6 +38,7 @@ loop projected once, dChars down 90,000→5,000 (-94%).
 | `e9cf56c` | 4 | H9b silhouette self | -51-60% dChars / -18% script (self) |
 | `77f3206` | 7 | H10 CSS-var quantize | +38% mean FPS (lighting recalc floor) |
 | `2187a1e` | 9 | H11b OBB-proxy receiver | -94% script in self-shadow / 242→1 SVG |
+| `774c45e` | 10 | H10 mirror React + Vue | parity (cross-package discipline) |
 
 ## Discarded for traceability (branches preserved)
 
