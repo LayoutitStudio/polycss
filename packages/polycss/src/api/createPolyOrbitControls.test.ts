@@ -113,14 +113,16 @@ describe("createPolyOrbitControls", () => {
       expect(scene.camera.state.rotY).toBeCloseTo(((before - 25) % 360 + 360) % 360, 1);
     });
 
-    it("left-drag updates rotX without a vertical clamp", () => {
+    it("left-drag updates rotX, clamped to [0, 89]", () => {
       controls = createPolyOrbitControls(scene);
-      const before = scene.camera.state.rotX ?? 65;
       dispatchPointer(host, "pointerdown", { x: 100, y: 100 });
       dispatchPointer(host, "pointermove", { x: 100, y: -500 });
       dispatchPointer(host, "pointerup", { x: 100, y: -500 });
-      // -600 px / 4 = -150 deg of dY -> rotX = before - (-150) = before + 150.
-      expect(scene.camera.state.rotX).toBeCloseTo(before + 150, 1);
+      // -600 px / 4 = -150 deg of dY → rotX would be 65+150=215° unclamped,
+      // but the controls clamp to [0, 89] to keep the floor's +Z normal
+      // facing the camera (past 90° the floor disappears via
+      // backface-visibility:hidden).
+      expect(scene.camera.state.rotX).toBe(89);
     });
 
     it("does NOT change target on plain left-drag", () => {

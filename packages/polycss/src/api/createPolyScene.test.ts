@@ -1333,7 +1333,10 @@ describe("createPolyScene", () => {
       });
       const sceneEl = host.querySelector(".polycss-scene") as HTMLElement;
       expect(sceneEl.dataset.polycssLighting).toBe("dynamic");
-      expect(sceneEl.style.getPropertyValue("--plz")).toBe("1.0000");
+      // H10: --plx/y/z + --clx/cly/clz quantized to 0.01 (toFixed(2))
+      // to avoid per-frame style recalc on dynamic-Lambert leaves.
+      // Light intensity and per-channel color stay at toFixed(4).
+      expect(sceneEl.style.getPropertyValue("--plz")).toBe("1.00");
       expect(sceneEl.style.getPropertyValue("--pli")).toBe("1.5000");
       expect(sceneEl.style.getPropertyValue("--pai")).toBe("0.3000");
       // #ff8800 → r=255 (1), g=136 (0.5333), b=0 (0).
@@ -1382,7 +1385,8 @@ describe("createPolyScene", () => {
       })).toBe(true);
 
       expect(sceneEl.dataset.polycssLighting).toBe("baked");
-      expect(sceneEl.style.getPropertyValue("--plz")).toBe("1.0000");
+      // H10: --plx/y/z quantized to toFixed(2).
+      expect(sceneEl.style.getPropertyValue("--plz")).toBe("1.00");
       expect(sceneEl.style.getPropertyValue("--polycss-light-preview-active")).toBe("1");
       expect(leaf.style.getPropertyValue("--pnz")).not.toBe("");
       expect(leaf.style.getPropertyValue("--plam")).toContain("var(--plz, 1)");
@@ -1806,9 +1810,10 @@ describe("createPolyScene", () => {
       // inverseRotateVec3([0,0,1], [0,90,0]) = rotateY(-90) on [0,0,1] = [-1,0,0]
       // (user-frame), then worldDirectionToCss swaps X↔Y → [0,-1,0] for the
       // CSS-frame --plx/--ply/--plz consumed by the Lambert CSS calc().
-      expect(wrapper.style.getPropertyValue("--plx")).toBe("0.0000");
-      expect(wrapper.style.getPropertyValue("--ply")).toBe("-1.0000");
-      expect(wrapper.style.getPropertyValue("--plz")).toBe("0.0000");
+      // H10: quantized to toFixed(2).
+      expect(wrapper.style.getPropertyValue("--plx")).toBe("0.00");
+      expect(wrapper.style.getPropertyValue("--ply")).toBe("-1.00");
+      expect(wrapper.style.getPropertyValue("--plz")).toBe("0.00");
     });
 
     it("updates the override synchronously when setTransform changes rotation", () => {
@@ -1861,9 +1866,10 @@ describe("createPolyScene", () => {
       scene.setOptions({
         directionalLight: { direction: [1, 0, 0], color: "#ffffff", intensity: 1 },
       });
-      expect(wrapper.style.getPropertyValue("--plx")).toBe("0.0000");
-      expect(wrapper.style.getPropertyValue("--ply")).toBe("0.0000");
-      expect(wrapper.style.getPropertyValue("--plz")).toBe("1.0000");
+      // H10: quantized to toFixed(2).
+      expect(wrapper.style.getPropertyValue("--plx")).toBe("0.00");
+      expect(wrapper.style.getPropertyValue("--ply")).toBe("0.00");
+      expect(wrapper.style.getPropertyValue("--plz")).toBe("1.00");
     });
 
     it("does NOT emit override when scene has no directionalLight", () => {

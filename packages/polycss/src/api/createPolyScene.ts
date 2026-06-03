@@ -745,9 +745,12 @@ export function createPolyScene(
     const localDirUser = inverseRotateVec3(dir as Vec3, rotation as Vec3);
     const localDir = worldDirectionToCss(localDirUser);
     const len = Math.hypot(localDir[0], localDir[1], localDir[2]) || 1;
-    const plx = (localDir[0] / len).toFixed(4);
-    const ply = (localDir[1] / len).toFixed(4);
-    const plz = (localDir[2] / len).toFixed(4);
+    // H10: quantize to 0.01 (~0.57° angular resolution) matching the
+    // scene-root writes in lightingVars.applyLightingVars, so per-mesh
+    // overrides don't trigger style recalc on sub-quantum light changes.
+    const plx = (localDir[0] / len).toFixed(2);
+    const ply = (localDir[1] / len).toFixed(2);
+    const plz = (localDir[2] / len).toFixed(2);
     const signature = `${plx}|${ply}|${plz}`;
     if (entry.lightOverrideSignature === signature) return;
     entry.wrapper.style.setProperty("--plx", plx);
