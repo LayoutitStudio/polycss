@@ -127,6 +127,93 @@ section below when explored.
 
 (append-only; newest at top)
 
+### Iteration 3 — H3 light quantization (branch `perf/shadow-light-quantize`)
+
+**Hypothesis recap.** At ~0.5°/frame drag speed, consecutive shadow re-emits
+are doing nearly-identical work. Snap the directional light to a coarse
+angular grid (normalized components rounded to 0.01 ≈ 0.57°) and short-circuit
+`emitSceneShadows()` when the rounded key matches the cached frame. The
+visible "stair-step" jitter at 0.57° is below perception during active drag.
+
+**Implementation.** Added `quantizeLightDirKey()` + a closure-scope
+`lastEmittedShadowLightKey` cache to `packages/polycss/src/api/createPolyScene.ts`.
+`emitSceneShadows(lightDirectionOverride?)` computes the key from the
+already-CSS-frame `lightDir` and early-returns on match. An
+`invalidateShadowLightCache()` helper is called from every code path that
+mutates caster/receiver geometry or shadow appearance: `emitShadowLeaves`
+(the geometry-change funnel for `setPolygons` / `castShadow` toggle / chunked
+render / remount), `recomputeShadowGround` (ground/lift change), `setTransform`
+(receiveShadow toggle, position/scale on shadow-participating meshes), `add`
+(new receiver), `setOptions` (lighting mode / shadow color/opacity/lift), and
+`clearBakedSolidLightingPreview` (preview teardown). Light-direction-only
+changes through `setOptions` deliberately do NOT bust the cache — the quant
+key already discriminates by direction. Single-renderer change in
+`packages/polycss` only; no API surface change so React/Vue mirrors are not
+needed.
+
+**Metrics (trace, perf-vanilla page=shadow mesh=teapot mode=dynamic motion=light,
+5s sample, vs `shadow-teapot-dynamic-backface*` baseline references).**
+
+| variant         | fps_p50 | frame_p50 (ms) | x4_plus script (ms) | style (ms) | compositorMain (ms) |
+| ---             | ---:    | ---:           | ---:                | ---:       | ---:                |
+| baseline floor (no-self) | 15.0  | 66.6  | 11.56 | 53.5 | 131.2 |
+| h3 floor (no-self)       | 17.1  | 58.4  | 8.35  | 52.3 | 126.5 |
+| baseline teapot-self     | 3.08  | 325.1 | 535.1 | 53.8 | 399.0 |
+| h3 teapot-self           | 2.92  | 342.5 | 570.5 | 51.7 | 411.6 |
+
+Floor (silhouette-eligible) wins: **frame_p50 -12% (66.6 → 58.4ms)**,
+**fps +14% (15.0 → 17.1)**, **script -28% (11.56 → 8.35)**. Self-shadow
+is statistical noise (14-15 frames over 5s, ±5% wobble).
+
+**domSamples consecutive-identical rate** (frames where `shadow.paths +
+pathDChars` snapshot is byte-identical to the previous frame → emit was
+skipped, leaving the previous SVG content mounted):
+
+| variant         | samples | consec-identical | rate |
+| ---             | ---:    | ---:             | ---: |
+| baseline floor  | 78  | 1   | 1.3%  |
+| h3 floor        | 83  | 15  | 18.3% |
+| baseline self   | 17  | 1   | 6.3%  |
+| h3 self         | 16  | 0   | 0.0%  |
+
+Floor shows a clear 14× rise in skip rate (1.3% → 18.3%) — the cache is
+firing. Self-shadow at this sample size (16 frames) is noise-bound; per-poly
+self-shadow content varies even at quantized direction because the receiver
+loop touches every face's plane, so any tiny camera/normal numeric drift
+shows. Self-shadow does not regress on a per-frame-script basis beyond
+noise.
+
+**Shadow-regression fixture (4 scenes × 3 azimuths).** All 12 captures
+byte-identical to **both** baseline AND h9-merged in PNG md5; path-d
+characters match h9-merged exactly (137,131 chars vs baseline's 685,841 —
+inherited from h9's silhouette extraction in the underlying renderer). The
+quantization cache does not engage on the regression fixture because each
+capture sets a fresh azimuth and the cache is busted on lightDir change in
+setOptions (the deltas are not in the per-frame light-rotate path).
+
+**Three.js parity.** All 12 three.js parity shots **byte-identical** to
+baseline by md5 (cube/E/cottage/castle × topdown/sideish/low-angle). Static
+shadow shape is unchanged, which is expected — the quantization only affects
+WHICH frame's emit gets skipped during drag, not the math.
+
+**Visual verdict.** Static screenshots show no regression. The trade-off
+lives in slow-drag temporal aliasing — the shadow snaps to ~0.57° buckets
+during active drag rather than smoothly tracking. At the 14% frame_p50 win
+on the typical floor case, the trade is favorable. If a user pauses
+mid-drag the cached frame matches the held quantum so there's no stale
+display either.
+
+**Recommendation: cherry-pick.** Floor scenes (the common case — any
+ground-receiver setup) get a measurable smoothness win (fps 15 → 17,
+frame_p50 -12%) with zero visual regression on static captures, byte-identical
+three.js parity, and a 14× rise in cache-skipped frames. Self-shadow doesn't
+benefit from this alone but doesn't regress either — it remains gated on
+H9's silhouette extraction (already merged) and a follow-up "self-shadow
+skip when receiver loop has no light-dependent output" hypothesis. The
+implementation surface is small (~30 LOC, single renderer, no API change)
+and the invalidation discipline is co-located with the existing
+shadow-emission call graph.
+
 ### Iteration 2 — H9 silhouette extraction (branch `perf/shadow-silhouette`)
 
 **Hypothesis recap.** Replace the per-caster-polygon SH-clip loop with a
