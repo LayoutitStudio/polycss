@@ -521,21 +521,6 @@ export function computeReceiverShadowFaces<T = unknown>(
             if (sharesEdge) continue;
           }
         }
-        // Light back-face cull: a caster polygon whose normal points AWAY
-        // from the light cannot cast shadow on anything beyond what the
-        // matching front-facing polygons (across the same closed mesh
-        // silhouette) already cover. For convex closed meshes the projected
-        // shadow is unchanged; for concave closed meshes the union under
-        // fill-rule=nonzero collapses to the same silhouette. For open
-        // one-sided meshes lit from behind the shadow disappears — this
-        // is the "single-sided material" semantic that most pipelines
-        // default to. Use a small epsilon so polygons exactly edge-on
-        // (grazing the light) still cast — they're the silhouette edge
-        // of a closed mesh.
-        if (item.planeN) {
-          const cnDotL = item.planeN[0] * Lx + item.planeN[1] * Ly + item.planeN[2] * Lz;
-          if (cnDotL > -1e-6) continue;
-        }
         // Coplanar caster skip.
         if (item.planeN) {
           const cn = item.planeN;
