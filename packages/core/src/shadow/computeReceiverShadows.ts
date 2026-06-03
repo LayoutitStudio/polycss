@@ -486,17 +486,11 @@ export function computeReceiverShadowFaces<T = unknown>(
   const out: ReceiverShadowFaceSpec<T>[] = [];
 
   // Per-caster silhouette precompute. For caster meshes that pass the
-  // gate (have a cached edgeOwners map, have enough polygons, have plane
-  // normals on most items), extract the closed silhouette loops in world
-  // frame ONCE per frame. The per-receiver-face loop below projects these
-  // loops onto each face's (u,v) basis instead of fan-triangulating every
-  // front-facing caster polygon. See H9 in
-  // `bench/notes/SHADOW_PERF_LOG.md`.
-  //
-  // Self-shadow (caster === receiver) uses the silhouette path too —
-  // the silhouette IS the geometric boundary of the lit region, which
-  // naturally excludes interior adjacent-triangle projections that the
-  // per-poly `selfShadowEdgeMap` cull was designed to drop. See H9b in
+  // gate (have a cached edgeOwners map, aren't the receiver, have enough
+  // polygons, have plane normals on most items), extract the closed
+  // silhouette loops in world frame ONCE per frame. The per-receiver-face
+  // loop below projects these loops onto each face's (u,v) basis instead
+  // of fan-triangulating every front-facing caster polygon. See H9 in
   // `bench/notes/SHADOW_PERF_LOG.md`.
   //
   // `silhouetteByCaster[i]` is `null` when the caster doesn't qualify
@@ -506,6 +500,7 @@ export function computeReceiverShadowFaces<T = unknown>(
   const silhouetteByCaster: Array<Vec3[][] | null> = casters.map((casterEntry) => {
     const edgeOwners = casterEntry.edgeOwners;
     if (!edgeOwners) return null;
+    if (casterEntry.selfShadowEdgeMap) return null;
     const N = casterEntry.casterPolygonCount ?? 0;
     if (N < SILHOUETTE_MIN_POLYS) return null;
     if (casterEntry.items.length < SILHOUETTE_MIN_POLYS) return null;

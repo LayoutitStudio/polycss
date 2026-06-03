@@ -658,14 +658,14 @@ export const PolyMesh = defineComponent({
           rendered ? (idx) => rendered.has(idx) : () => true,
         );
         const isSelf = data.polygons === polygons.value;
-        // Self-shadow seam cull map is still threaded through so the
-        // per-poly fallback (small self-shadow meshes < 40 polys) keeps
-        // its seam protection. H9b extends the silhouette path to self-
-        // shadow too — the silhouette IS the geometric boundary of the
-        // lit region, which subsumes the per-poly seam cull above the
-        // gate.
+        // Self-shadow seam cull: when caster IS this mesh, pass the
+        // cached shared-edge map so the algorithm skips projecting
+        // edge-sharing neighbour polygons (kills spiderweb seam
+        // shadows on smooth GLB meshes — apple, sphere, teapot).
+        // H9 silhouette path: build/reuse world-frame edge owners for
+        // non-self casters with enough polygons.
         let edgeOwners: ReadonlyMap<string, EdgeOwners> | undefined;
-        if (data.polygons.length >= 40) {
+        if (!isSelf && data.polygons.length >= 40) {
           const drot = data.rotation ?? null;
           const dposArr = data.position;
           const dsKey = JSON.stringify(data.scale ?? null);

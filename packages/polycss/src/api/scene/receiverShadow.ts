@@ -172,12 +172,11 @@ export function emitReceiverShadows(
       selfShadowEdgeMap = cachedMap;
     }
     // Silhouette edge ownership for the H9 per-caster-mesh silhouette
-    // path (extended to self-shadow in H9b — the silhouette IS the
-    // geometric boundary of the lit region, which subsumes the per-poly
-    // seam cull). Skip only on tiny meshes (silhouette overhead exceeds
-    // the per-poly cost below ~40 polys).
+    // path. Skip on self-shadow (caster IS receiver — the per-poly path
+    // is geometrically required there) and on tiny meshes (silhouette
+    // overhead exceeds the per-poly cost below ~40 polys).
     let edgeOwners: ReadonlyMap<string, EdgeOwners> | undefined;
-    if (caster.polygons.length >= 40) {
+    if (caster !== receiverEntry && caster.polygons.length >= 40) {
       let cachedOwners = edgeOwnersCache.get(caster);
       if (cachedOwners === undefined || edgeOwnersCacheKey.get(caster) !== ckey) {
         cachedOwners = prepareCasterEdgeOwners(
