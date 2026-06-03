@@ -369,12 +369,6 @@ const CURATED_STL_PRESET_FILES: StlGalleryPresetFile[] = [
     attribution: thingiverseAttribution("ramenspork", 14328, 1532, "Creative Commons - Attribution - Share Alike"),
   },
   {
-    file: "eiffel-tower-550964.stl",
-    label: "Eiffel Tower",
-    category: "CAD",
-    attribution: thingiverseAttribution("LeFabShop", 311002, 6156, "Creative Commons - Attribution - Share Alike"),
-  },
-  {
     file: "low-poly-vase-100423.stl",
     label: "Low Poly Vase",
     category: "CAD",
@@ -439,12 +433,6 @@ const CURATED_STL_PRESET_FILES: StlGalleryPresetFile[] = [
     label: "Cube In Sphere",
     category: "CAD",
     attribution: thingiverseAttribution("clintkc", 14878, 2464, "Public Domain"),
-  },
-  {
-    file: "klein-bottle-40296.stl",
-    label: "Klein Bottle",
-    category: "CAD",
-    attribution: thingiverseAttribution("MakeALot", 12432, 8550),
   },
   {
     file: "rocket-nose-cone-51316.stl",
