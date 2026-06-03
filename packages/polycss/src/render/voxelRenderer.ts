@@ -15,6 +15,7 @@ import {
   resolveProjectiveQuadGuards,
   rotateVec3,
   rotateVec3InWrapperCssFrame,
+  shadePolygon,
   SOLID_QUAD_CANONICAL_SIZE,
 } from "@layoutit/polycss-core";
 
@@ -383,9 +384,6 @@ function shadeBrushColor(
   directionalLight: PolyDirectionalLight | undefined,
   ambientLight: PolyAmbientLight | undefined,
 ): string {
-  const base = parseColor(baseColor);
-  const light = parseColor(directionalLight?.color ?? DEFAULT_LIGHT_COLOR);
-  const ambient = parseColor(ambientLight?.color ?? DEFAULT_AMBIENT_COLOR);
   const lightDir = directionalLight?.direction ?? DEFAULT_LIGHT_DIR;
   const lightLen = Math.hypot(lightDir[0], lightDir[1], lightDir[2]) || 1;
   const lx = lightDir[0] / lightLen;
@@ -394,18 +392,24 @@ function shadeBrushColor(
   const directScale = Math.max(0, directionalLight?.intensity ?? DEFAULT_LIGHT_INTENSITY) *
     Math.max(0, normal[0] * lx + normal[1] * ly + normal[2] * lz);
   const ambientIntensity = Math.max(0, ambientLight?.intensity ?? DEFAULT_AMBIENT_INTENSITY);
-  const tintR = (ambient.r / 255) * ambientIntensity + (light.r / 255) * directScale;
-  const tintG = (ambient.g / 255) * ambientIntensity + (light.g / 255) * directScale;
-  const tintB = (ambient.b / 255) * ambientIntensity + (light.b / 255) * directScale;
-  const shaded: RGB = {
-    r: base.r * tintR,
-    g: base.g * tintG,
-    b: base.b * tintB,
-    alpha: base.alpha,
-  };
-  return shaded.alpha < 1
-    ? `rgba(${clampChannel(shaded.r)}, ${clampChannel(shaded.g)}, ${clampChannel(shaded.b)}, ${shaded.alpha})`
-    : rgbToHex(shaded);
+  const lightColor = directionalLight?.color ?? DEFAULT_LIGHT_COLOR;
+  const ambientColor = ambientLight?.color ?? DEFAULT_AMBIENT_COLOR;
+  // Delegate to the same physically-based Lambert (sRGB→linear, /π, sRGB
+  // back) that polygon meshes use, so voxel brushes match Three.js parity.
+  // Without this the voxel path used pre-parity multiply-in-sRGB, which
+  // came out ~π× brighter than the polygon-path shading for the same
+  // light + base color (visible as blown-out voxel scenes vs polygon
+  // scenes side by side).
+  const shaded = shadePolygon(baseColor, directScale, lightColor, ambientColor, ambientIntensity);
+  // Preserve alpha when the source had it (rare but supported for
+  // translucent voxels). shadePolygon returns a hex string; if the input
+  // had non-1 alpha, re-attach it via rgba(...).
+  const base = parseColor(baseColor);
+  if (base.alpha >= 1) return shaded;
+  const r = parseInt(shaded.slice(1, 3), 16);
+  const g = parseInt(shaded.slice(3, 5), 16);
+  const b = parseInt(shaded.slice(5, 7), 16);
+  return `rgba(${r}, ${g}, ${b}, ${base.alpha})`;
 }
 
 function buildDirectMatrixItems(polygons: readonly Polygon[] | undefined): DirectMatrixItem[] {
