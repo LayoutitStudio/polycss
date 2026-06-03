@@ -1031,11 +1031,13 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
       const isSelf = data.polygons === polygons;
       const selfMap = isSelf ? selfShadowEdgeMap : undefined;
       // H9 silhouette path: build/reuse world-frame edge owners for
-      // non-self casters with enough polygons. The cache key matches the
-      // transform fields fed into `prepareCasterPolyItems` so the world-
-      // frame owners stay consistent with the matching items.
+      // any caster with enough polygons (extended to self-shadow in H9b
+      // — the silhouette IS the geometric boundary of the lit region,
+      // which subsumes the per-poly seam cull). The cache key matches
+      // the transform fields fed into `prepareCasterPolyItems` so the
+      // world-frame owners stay consistent with the matching items.
       let edgeOwners: ReadonlyMap<string, EdgeOwners> | undefined;
-      if (!isSelf && data.polygons.length >= 40) {
+      if (data.polygons.length >= 40) {
         const dposArr = data.position;
         const drot = data.rotation ?? null;
         const dsKey = JSON.stringify(data.scale ?? null);
