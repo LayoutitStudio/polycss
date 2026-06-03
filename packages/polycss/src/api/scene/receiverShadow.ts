@@ -14,7 +14,9 @@ import {
   meshScaleVec3,
   prepareCasterEdgeOwners,
   prepareCasterPolyItems,
+  prepareProxyReceiverPlanes,
   prepareReceiverFacePlanes,
+  PROXY_MIN_POLYS,
   type CasterPolyItem,
   type CameraCullRotation,
   type EdgeOwners,
@@ -108,21 +110,40 @@ export function emitReceiverShadows(
   const receiverScale = meshScaleVec3(receiverEntry.handle.transform.scale);
   const rbboxCss = receiverEntry.bboxCenterCss;
   const cacheShadowLift = options.shadow?.lift ?? 0.001;
-  const cacheKey = `${receiverEntry.polygons.length}|${receiverDedupDrop.size}|${rpos.join(",")}|${rrot.join(",")}|${receiverScale.join(",")}|${rbboxCss ? rbboxCss.join(",") : "n"}|${cacheShadowLift}`;
+  // H11b proxy mode: when this receiver also self-shadows and has enough
+  // polygons that per-face decomposition is the dominant cost, swap the
+  // per-coplanar-face planes for ~6 OBB-face proxy planes. The silhouette
+  // path (H9b) then projects ONE outline per proxy with per-member-poly
+  // clipping — drops receiver SVG count from 100-250 to 3-6 on the
+  // teapot self-shadow case.
+  const selfShadowActive = casters.some((c) => c === receiverEntry);
+  const useProxyPlanes = selfShadowActive && receiverEntry.polygons.length >= PROXY_MIN_POLYS;
+  const planeMode = useProxyPlanes ? "p" : "f";
+  const cacheKey = `${planeMode}|${receiverEntry.polygons.length}|${receiverDedupDrop.size}|${rpos.join(",")}|${rrot.join(",")}|${receiverScale.join(",")}|${rbboxCss ? rbboxCss.join(",") : "n"}|${cacheShadowLift}`;
   let cachedPlanes = receiverShadowCache.get(receiverEntry) as ReceiverFacePlane[] | undefined;
   if (cachedPlanes === undefined || receiverShadowCacheKey.get(receiverEntry) !== cacheKey) {
-    cachedPlanes = prepareReceiverFacePlanes(
-      receiverEntry.polygons,
-      rpos,
-      receiverEntry.handle.transform.scale,
-      receiverDedupDrop,
-      cacheShadowLift,
-      rrot,
-    );
+    cachedPlanes = useProxyPlanes
+      ? prepareProxyReceiverPlanes(
+          receiverEntry.polygons,
+          rpos,
+          receiverEntry.handle.transform.scale,
+          receiverDedupDrop,
+          cacheShadowLift,
+          rrot,
+        )
+      : prepareReceiverFacePlanes(
+          receiverEntry.polygons,
+          rpos,
+          receiverEntry.handle.transform.scale,
+          receiverDedupDrop,
+          cacheShadowLift,
+          rrot,
+        );
     receiverShadowCache.set(receiverEntry, cachedPlanes);
     receiverShadowCacheKey.set(receiverEntry, cacheKey);
     // Reset mounted state when the plane list changes (face indices may
-    // have shifted). Detach any orphan SVGs.
+    // have shifted, and the mode swap reuses 0..5 indices). Detach any
+    // orphan SVGs.
     const mounted = mountedFacesFor(receiverEntry);
     for (const face of mounted.values()) {
       if (face.svg && face.svg.parentNode) face.svg.parentNode.removeChild(face.svg);

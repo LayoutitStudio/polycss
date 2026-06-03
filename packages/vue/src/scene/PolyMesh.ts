@@ -33,8 +33,10 @@ import {
   parseHexColor,
   prepareCasterEdgeOwners,
   prepareCasterPolyItems,
+  prepareProxyReceiverPlanes,
   prepareReceiverFacePlanes,
   projectCssVertexToGround,
+  PROXY_MIN_POLYS,
   worldDirectionToCss,
   type CameraCullRotation,
   type EdgeOwners,
@@ -636,13 +638,32 @@ export const PolyMesh = defineComponent({
       const userLightDir = ctx?.directionalLight?.direction ?? ([0.4, -0.7, 0.59] as Vec3);
       const lightDir = worldDirectionToCss(userLightDir);
       const shadowLift = ctx?.shadow?.lift ?? 0.001;
-      const planes = prepareReceiverFacePlanes(
-        polygons.value,
-        props.position ?? [0, 0, 0],
-        props.scale,
-        new Set(),
-        shadowLift,
-      );
+      // H11b proxy mode: when this receiver also self-shadows and has enough
+      // polygons that per-face decomposition dominates, swap the per-
+      // coplanar-face planes for ~6 OBB-face proxy planes. The silhouette
+      // path (H9b) then projects ONE outline per proxy with per-member-poly
+      // clipping — drops receiver SVG count from 100-250 to 3-6 on the
+      // teapot self-shadow case.
+      let hasSelfShadowCaster = false;
+      for (const getData of entries) {
+        if (getData().polygons === polygons.value) { hasSelfShadowCaster = true; break; }
+      }
+      const useProxyPlanes = hasSelfShadowCaster && polygons.value.length >= PROXY_MIN_POLYS;
+      const planes = useProxyPlanes
+        ? prepareProxyReceiverPlanes(
+            polygons.value,
+            props.position ?? [0, 0, 0],
+            props.scale,
+            new Set(),
+            shadowLift,
+          )
+        : prepareReceiverFacePlanes(
+            polygons.value,
+            props.position ?? [0, 0, 0],
+            props.scale,
+            new Set(),
+            shadowLift,
+          );
       if (planes.length === 0) return [];
       const casterInputs: ReceiverCasterInput<symbol>[] = [];
       let i = 0;
