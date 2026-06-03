@@ -68,6 +68,20 @@ recalc (53 ms/frame for 2300 leaves) is the floor in dynamic mode and
 is independent of shadows — investigate as a separate H once the shadow
 script + compositorMain numbers shrink. **H9 attacks the right cost.**
 
+## H8 hit-rate prediction (iter 8 pre-flight)
+
+Direct measurement on a self-shadow drag (teapot az50, motion=light, 4s
+sample): of 6,986 (face_id, frame) tuples observed in the receiver-SVG
+set after H9b landed, **75.2 % (5,033 / 6,695 non-first-sight)
+emitted a `d=` byte-identical to the previous frame**. (291 unique
+receiver faces × ~24 visited frames.)
+
+This is the H8 prediction signal: per-frame SVG `d=` mutation has a
+~75 % byte-equal redundancy that the existing `MountedFace` cache
+doesn't catch (it memoizes width/height/matrix, not `d`). Before H9b
+(per-poly fan shadows) the hit rate was ~0 % — silhouette geometry is
+dramatically more stable frame-to-frame than fan triangulations.
+
 ## Hypothesis backlog
 
 In rough priority order. Each entry gets its own branch and journal
