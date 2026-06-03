@@ -177,12 +177,12 @@ describe("atlas plan computation — plan field determinism", () => {
       ambientLight: { color: "#ff0000", intensity: 1 },
       directionalLight: { direction: [0, 0, 1], color: "#000000", intensity: 0 },
     });
-    // White ambient → white output; red ambient → red-tinted output.
+    // White ambient → grey output; red ambient → red-tinted output.
+    // Physical Lambert: factor = (ambient · ambI) / π, so ambient intensity 1
+    // with white ambient → factor 1/π → sRGB-encoded mid-grey #999999.
     expect(planWhiteAmbient!.shadedColor).not.toBe(planRedAmbient!.shadedColor);
-    // White ambient + white polygon with no directional → #ffffff
-    expect(planWhiteAmbient!.shadedColor).toBe("#ffffff");
-    // Red ambient + white polygon → #ff0000
-    expect(planRedAmbient!.shadedColor).toBe("#ff0000");
+    expect(planWhiteAmbient!.shadedColor).toBe("#999999");
+    expect(planRedAmbient!.shadedColor).toBe("#990000");
   });
 
   it("plan shadedColor is deterministic across repeated calls", () => {

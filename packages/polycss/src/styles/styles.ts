@@ -68,12 +68,32 @@ const CORE_BASE_STYLES = `
   transform-style: preserve-3d !important;
 }
 
+/* ── Shadow root wrapper ────────────────────────────────────────────────── */
+
+/* Single 0×0 preserve-3d container that owns every shadow SVG (ground +
+   per-face receiver). Children composite via their own absolute matrix3d
+   transforms exactly as if mounted on .polycss-scene directly. The wrapper
+   exists so the DOM has one obvious "shadows live here" node and so
+   future toggles (clip-region, hide-all-shadows) flip a single ancestor. */
+.polycss-shadows {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 0;
+  height: 0;
+  transform-style: preserve-3d;
+  pointer-events: none;
+}
+
 /* ── Mesh wrapper ───────────────────────────────────────────────────────── */
 
 .polycss-mesh {
   position: absolute;
   transform-style: preserve-3d;
-  transform-origin: var(--origin);
+  /* Pivot at wrapper local (0,0,0) for three.js mesh.position/rotation/scale
+     parity. Geometry is positioned by the parser (bbox-min-at-origin by
+     default, or pre-centered via parseGltf/parseObj { center: true }). */
+  transform-origin: 0 0 0;
 }
 
 /* ── Polygon leaf element ───────────────────────────────────────────────── */
@@ -370,13 +390,34 @@ const CORE_BASE_STYLES = `
      leaves, so there's nothing inside a leaf that needs to participate
      in 3D compositing across the contain boundary. */
   contain: strict;
+  /*
+   * Three.js MeshLambertMaterial parity for textured surfaces:
+   *
+   *   target = sRGB_encode(albedo_linear × irradiance_linear / π)
+   *
+   * background-blend-mode: multiply produces (bitmap × tint) in sRGB
+   * — approximately sRGB(albedo_linear × tint_linear) when bitmap ≈
+   * sRGB(albedo_linear). So we want tint = sRGB_encode(irradiance /π).
+   *
+   * Each light/ambient colour channel is sRGB-to-linearised
+   * via pow((c + 0.055) / 1.055, 2.4) before the dot product so the
+   * irradiance accumulates in linear space; final encode is
+   * 1.055 × pow(c, 1/2.4) - 0.055. min(1, …) clamps inside the encode
+   * domain. Matches the solid <b>/<i>/<u> pipeline below.
+   */
   background-color: rgb(
-    calc(255 * (var(--par) * var(--pai)
-         + var(--plr) * var(--pli) * var(--plam)))
-    calc(255 * (var(--pag) * var(--pai)
-         + var(--plg) * var(--pli) * var(--plam)))
-    calc(255 * (var(--pab) * var(--pai)
-         + var(--plb) * var(--pli) * var(--plam)))
+    calc(255 * max(0, 1.055 * pow(min(1, (
+      pow((var(--par) + 0.055) / 1.055, 2.4) * var(--pai) +
+      pow((var(--plr) + 0.055) / 1.055, 2.4) * var(--pli) * var(--plam)
+    ) / 3.14159265), 0.4167) - 0.055))
+    calc(255 * max(0, 1.055 * pow(min(1, (
+      pow((var(--pag) + 0.055) / 1.055, 2.4) * var(--pai) +
+      pow((var(--plg) + 0.055) / 1.055, 2.4) * var(--pli) * var(--plam)
+    ) / 3.14159265), 0.4167) - 0.055))
+    calc(255 * max(0, 1.055 * pow(min(1, (
+      pow((var(--pab) + 0.055) / 1.055, 2.4) * var(--pai) +
+      pow((var(--plb) + 0.055) / 1.055, 2.4) * var(--pli) * var(--plam)
+    ) / 3.14159265), 0.4167) - 0.055))
   );
   background-blend-mode: multiply;
   background-image: var(--polycss-atlas-url);
@@ -397,13 +438,46 @@ const CORE_BASE_STYLES = `
 .polycss-scene[data-polycss-lighting="dynamic"] b,
 .polycss-scene[data-polycss-lighting="dynamic"] i,
 .polycss-scene[data-polycss-lighting="dynamic"] u {
+  /*
+   * Three.js MeshLambertMaterial parity (default useLegacyLights=false,
+   * physically-correct pipeline):
+   *
+   *   lit_linear = albedo_linear × (lightColor_linear × intensity × lambert
+   *                                  + ambient_linear × ambientIntensity) / π
+   *   output     = 255 × sRGB_encode(min(1, lit_linear))
+   *
+   * sRGB→linear:   pow((c + 0.055) / 1.055, 2.4)   for c > 0.04045
+   *                12.92 × c                       otherwise (skipped — tiny)
+   * linear→sRGB:   1.055 × pow(c, 1/2.4) - 0.055   for c > 0.0031308
+   *                12.92 × c                       otherwise (skipped — tiny)
+   *
+   * The naive pow(c, 2.4) shortcut undershoots by ~2x for small c
+   * (dark channels of a saturated colour) — the +0.055/1.055 offset
+   * is load-bearing for the G/B drift on saturated fixtures.
+   *
+   * Verified against per-pixel screenshots in bench/three-parity.html
+   * (cube #dc2626 top face): drift <3 per channel across i=0.5..3,
+   * ambient=0..0.3, lambert=0..1.
+   */
   color: rgb(
-    calc(255 * var(--psr) * (var(--par) * var(--pai)
-         + var(--plr) * var(--pli) * var(--plam)))
-    calc(255 * var(--psg) * (var(--pag) * var(--pai)
-         + var(--plg) * var(--pli) * var(--plam)))
-    calc(255 * var(--psb) * (var(--pab) * var(--pai)
-         + var(--plb) * var(--pli) * var(--plam)))
+    calc(255 * max(0, 1.055 * pow(min(1,
+      pow((var(--psr) + 0.055) / 1.055, 2.4) * (
+        pow((var(--par) + 0.055) / 1.055, 2.4) * var(--pai) +
+        pow((var(--plr) + 0.055) / 1.055, 2.4) * var(--pli) * var(--plam)
+      ) / 3.14159265
+    ), 0.4167) - 0.055))
+    calc(255 * max(0, 1.055 * pow(min(1,
+      pow((var(--psg) + 0.055) / 1.055, 2.4) * (
+        pow((var(--pag) + 0.055) / 1.055, 2.4) * var(--pai) +
+        pow((var(--plg) + 0.055) / 1.055, 2.4) * var(--pli) * var(--plam)
+      ) / 3.14159265
+    ), 0.4167) - 0.055))
+    calc(255 * max(0, 1.055 * pow(min(1,
+      pow((var(--psb) + 0.055) / 1.055, 2.4) * (
+        pow((var(--pab) + 0.055) / 1.055, 2.4) * var(--pai) +
+        pow((var(--plb) + 0.055) / 1.055, 2.4) * var(--pli) * var(--plam)
+      ) / 3.14159265
+    ), 0.4167) - 0.055))
   );
 }
 

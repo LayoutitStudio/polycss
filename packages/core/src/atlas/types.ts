@@ -48,6 +48,12 @@ export interface TextureAtlasPlan {
   seamBleedEdges?: Set<number>;
   seamBleedEdgeAmounts?: Map<number, number>;
   seamBleedInsets?: SeamBleedInsets;
+  /** Resolved per-strategy bleed multiplier (0..1, default 1). Populated
+   *  at plan construction from `options.seamBleed` via `resolveBleedRatio`.
+   *  Downstream emitters (borderShapeGeometryForPlan, projective-quad
+   *  rasteriser, etc.) read this and multiply their hardcoded per-strategy
+   *  bleed constants by it. Single knob for "scale down all my bleeds". */
+  bleedRatio?: number;
   /** World-space surface normal — stable across light changes, used by dynamic mode. */
   normal: Vec3;
   textureTint: RGBFactors;
@@ -277,6 +283,20 @@ export interface SolidTrianglePlanOptions {
   strategies?: PolyRenderStrategiesOption;
   seamBleed?: PolySeamBleed;
   seamEdges?: Set<number>;
+  /** Per-strategy bleed multiplier (0..1, default 1). Scales the
+   *  hardcoded SOLID_TRIANGLE_BLEED used as the seamBleed fallback when
+   *  no shared-edge bleed is present. Populated upstream from
+   *  `resolveBleedRatio(publicOptions.seamBleed)`. */
+  bleedRatio?: number;
+  /**
+   * Indices (into the polygon array being planned) of polygons that the
+   * directional light cannot physically reach because another polygon of
+   * the same mesh is between them and the light source. Per-polygon
+   * directScale is forced to 0 for indices in this set, so they receive
+   * ambient lighting only — matching what a shadow-map-equivalent pass
+   * would produce.
+   */
+  lightOccludedPolyIndices?: ReadonlySet<number>;
 }
 
 /** Internal solid-triangle plan options (extends SolidTrianglePlanOptions). */
@@ -296,4 +316,11 @@ export interface ComputeTextureAtlasPlanOptions {
   textureEdgeRepairEdges?: Set<number>;
   seamBleed?: PolySeamBleed;
   seamEdges?: Set<number>;
+  /** Indices of polygons that the directional light cannot reach because
+   *  another polygon of the same mesh occludes them (precomputed via
+   *  {@link import("../cull/lightVisibility").computeLightVisibility}). When
+   *  `index ∈ lightOccludedPolyIndices`, the polygon's direct lighting term
+   *  is forced to zero and only ambient remains. Matches the vanilla
+   *  renderer's self-shadow path. */
+  lightOccludedPolyIndices?: ReadonlySet<number>;
 }

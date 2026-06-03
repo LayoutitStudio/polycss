@@ -34,16 +34,27 @@ import type {
 } from "@layoutit/polycss-core";
 import {
   BASE_TILE,
+  buildSharedEdgeMap,
+  computeReceiverShadowFaces,
   computeSceneBbox,
   DEFAULT_SEAM_BLEED,
   ensureCcw2D,
   findOverlappingPolygonDuplicates,
   inverseRotateVec3,
+  optimizeMeshPolygons,
   parseHexColor,
+  prepareCasterEdgeOwners,
+  prepareCasterPolyItems,
+  prepareReceiverFacePlanes,
   projectCssVertexToGround,
+  worldDirectionToCss,
+  type CameraCullRotation,
+  type EdgeOwners,
+  type ReceiverCasterInput,
 } from "@layoutit/polycss-core";
 import type { TransformProps } from "../shapes/types";
 import { usePolyMesh, type UseMeshOptions } from "./useMesh";
+import { buildBasisHints, cornerShapeGeometryForPlan, worldDirectionalLightToCss } from "@layoutit/polycss-core";
 import {
   buildSeamBleedPolygonEdges,
   buildTextureEdgeRepairSets,
@@ -58,11 +69,13 @@ import {
   type SolidPaintDefaults,
   TextureBorderShapePoly,
   TextureAtlasPoly,
+  TextureCornerShapeSolidPoly,
   TextureProjectiveSolidPoly,
   TextureTrianglePoly,
   updateStableTriangleDom,
   useTextureAtlas,
 } from "./atlas";
+import { createPortal } from "react-dom";
 import { usePolySceneContext } from "./sceneContext";
 import { PolyCameraContext } from "../camera/context";
 import { createPolyVoxelRenderer, type PolyVoxelRenderer } from "./voxelRenderer";
@@ -75,6 +88,14 @@ import {
   type PolyMeshHandle,
   type PolyPointerEvent,
 } from "./events";
+
+/** Per-frame caster-mesh silhouette edge owner cache. Keyed by the
+ *  caster's polygons array identity (snapshot from `shadowCasters`) +
+ *  position/scale/rotation bust key. Used by the H9 silhouette path in
+ *  `computeReceiverShadowFaces`. Lives at module scope so callsites share
+ *  cache across receivers in a single frame. */
+const reactEdgeOwnersCache = new WeakMap<readonly Polygon[], ReadonlyMap<string, EdgeOwners>>();
+const reactEdgeOwnersCacheKey = new WeakMap<readonly Polygon[], string>();
 
 function solidPaintVars(defaults: SolidPaintDefaults): CSSProperties | null {
   const out: Record<string, string> = {};
@@ -101,6 +122,14 @@ export interface PolyMeshProps extends TransformProps, InteractionProps {
   mtl?: string;
   /** Pre-parsed polygons. Mutually exclusive with `src`. */
   polygons?: Polygon[];
+  /** Optional `parseResult.voxelSource` companion for `.vox` meshes. When
+   *  set alongside `polygons`, the direct voxel renderer fast path activates
+   *  — emitting one `<b>` per visible voxel quad inside `.polycss-voxel-face`
+   *  wrappers (matches vanilla's `scene.add(parseResult)` behaviour).
+   *  Callers fetching via core's `loadMesh()` pass `parseResult.voxelSource`
+   *  here so the fast path engages; callers fetching via PolyMesh's `src`
+   *  prop get the same data wired through `useMesh` automatically. */
+  voxelSource?: import("@layoutit/polycss-core").ParseResult["voxelSource"];
   /** Translate so mesh's bbox center is at local origin before applying `position`. */
   autoCenter?: boolean;
   /** Textured polygon lighting mode. Defaults to "baked". */
@@ -140,30 +169,73 @@ export interface PolyMeshProps extends TransformProps, InteractionProps {
    * Defaults to `false`.
    */
   castShadow?: boolean;
+  /**
+   * When `true`, this mesh acts as a shadow receiver. The scene's caster
+   * meshes (those with `castShadow=true`) project per-coplanar-face SVG
+   * shadows onto each visible surface of this mesh, matching Three.js's
+   * `mesh.receiveShadow` semantics. Disables the ground-shadow fallback
+   * for caster meshes — receivers handle shadow display. Defaults to `false`.
+   */
+  receiveShadow?: boolean;
+  /**
+   * Apply mesh optimization (coplanar merge + interior cull) before
+   * rendering. Defaults to `true` — matches vanilla `scene.add`'s default.
+   * Set `false` for helper meshes (axes, light markers) whose geometry
+   * shouldn't be merged, or when the imperative `updatePolygon` API needs
+   * polygon refs to survive across updates.
+   */
+  merge?: boolean;
   className?: string;
   style?: CSSProperties;
 }
 
+/**
+ * Build the mesh wrapper's CSS transform from a Three.js-style transform
+ * (post-parity convention). All transforms pivot at the wrapper's local
+ * origin (0,0,0) to match three.js `mesh.position`/`mesh.rotation`/`mesh.scale`
+ * and vanilla `buildMeshTransform`. Callers that want "rotate around
+ * centroid" pre-center the geometry at load time via
+ * `loadMesh(..., { center: true })`.
+ *   - `position` is in WORLD UNITS (`+X right, +Y forward, +Z up`); the
+ *     renderer applies the world→CSS axis swap (`world.x → CSS.y`,
+ *     `world.y → CSS.x`) and ×`BASE_TILE` scale here.
+ *   - `scale` pivots from the wrapper local origin.
+ *   - `rotation` pivots from the wrapper local origin.
+ *
+ * Mirror of the vanilla `buildMeshTransform` in
+ * `packages/polycss/src/api/scene/transforms.ts`.
+ */
 function buildTransform(
   position: Vec3 | undefined,
   scale: number | Vec3 | undefined,
-  rotation: Vec3 | undefined
+  rotation: Vec3 | undefined,
 ): string | undefined {
+  const sx = typeof scale === "number" ? scale : (scale?.[0] ?? 1);
+  const sy = typeof scale === "number" ? scale : (scale?.[1] ?? 1);
+  const sz = typeof scale === "number" ? scale : (scale?.[2] ?? 1);
+  const hasScale = sx !== 1 || sy !== 1 || sz !== 1;
+  const hasRotation = !!rotation && (!!rotation[0] || !!rotation[1] || !!rotation[2]);
+  // World→CSS axis swap + ×BASE_TILE on `position`.
+  const cssPos: Vec3 = position
+    ? [position[1] * BASE_TILE, position[0] * BASE_TILE, position[2] * BASE_TILE]
+    : [0, 0, 0];
+
   const parts: string[] = [];
-  if (position) {
-    parts.push(`translate3d(${position[0]}px, ${position[1]}px, ${position[2]}px)`);
+  if (cssPos[0] !== 0 || cssPos[1] !== 0 || cssPos[2] !== 0) {
+    parts.push(`translate3d(${cssPos[0]}px, ${cssPos[1]}px, ${cssPos[2]}px)`);
   }
-  if (scale !== undefined) {
-    if (typeof scale === "number") {
-      if (scale !== 1) parts.push(`scale3d(${scale}, ${scale}, ${scale})`);
-    } else {
-      parts.push(`scale3d(${scale[0]}, ${scale[1]}, ${scale[2]})`);
-    }
+  if (hasRotation) {
+    // World↔CSS reflection conjugation: worldPositionToCss permutes
+    // [x,y,z]→[y,x,z] (det=-1), so a world rotation R(n,θ) becomes
+    // R(M·n, -θ) in CSS frame — axis swapped AND angle inverted.
+    // World X↦CSS Y, world Y↦CSS X, world Z↦CSS Z. Mirrors vanilla
+    // `buildMeshTransform` in packages/polycss/src/api/scene/transforms.ts.
+    if (rotation![0]) parts.push(`rotateY(${-rotation![0]}deg)`);
+    if (rotation![1]) parts.push(`rotateX(${-rotation![1]}deg)`);
+    if (rotation![2]) parts.push(`rotateZ(${-rotation![2]}deg)`);
   }
-  if (rotation) {
-    if (rotation[0]) parts.push(`rotateX(${rotation[0]}deg)`);
-    if (rotation[1]) parts.push(`rotateY(${rotation[1]}deg)`);
-    if (rotation[2]) parts.push(`rotateZ(${rotation[2]}deg)`);
+  if (hasScale) {
+    parts.push(`scale3d(${sx}, ${sy}, ${sz})`);
   }
   return parts.length > 0 ? parts.join(" ") : undefined;
 }
@@ -196,6 +268,7 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
     src,
     mtl,
     polygons: polygonsProp,
+    voxelSource: voxelSourceProp,
     autoCenter,
     textureLighting,
     textureQuality,
@@ -203,6 +276,8 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
     atomicAtlas,
     onFrameReady,
     castShadow,
+    receiveShadow,
+    merge = true,
     children,
     fallback,
     errorFallback,
@@ -247,7 +322,7 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
   const fetched = usePolyMesh(src ?? "", mergedOptions);
 
   const externalPolygons = src ? fetched.polygons : (polygonsProp ?? []);
-  const externalVoxelSource = src ? fetched.voxelSource : undefined;
+  const externalVoxelSource = src ? fetched.voxelSource : voxelSourceProp;
 
   // Local override array written by updatePolygon(). Null means no
   // imperative edits have been applied — the external source is used as-is.
@@ -263,7 +338,17 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
     if (localPolygons !== null) setLocalPolygons(null);
   }
 
-  const sourcePolygons = localPolygons ?? externalPolygons;
+  const rawSourcePolygons = localPolygons ?? externalPolygons;
+  // Apply mesh optimization (coplanar merge + interior cull) — mirrors
+  // vanilla's scene.add path which always runs optimizeMeshPolygons. Skip
+  // when `merge={false}` (helpers, imperative-edit callers that need
+  // stable polygon refs).
+  const sourcePolygons = useMemo(
+    () => merge
+      ? optimizeMeshPolygons(rawSourcePolygons, meshResolution !== undefined ? { meshResolution } : undefined)
+      : rawSourcePolygons,
+    [rawSourcePolygons, merge, meshResolution],
+  );
   const hasRenderProp = typeof children === "function";
   const renderPolygon = hasRenderProp
     ? children as (polygon: Polygon, index: number) => ReactNode
@@ -279,31 +364,6 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
   );
 
   const transform = buildTransform(position, scale, rotation);
-
-  // Pivot rotation + scale around the polygon bbox center, matching vanilla's
-  // `.polycss-mesh { transform-origin: var(--origin) }`. Without this the
-  // wrapper would pivot at its own (0,0,0) — which usually doesn't coincide
-  // with the visible mesh center, so rotateX/Y/Z would orbit the mesh around
-  // the asset's authoring origin and scale would push it sideways. World→CSS
-  // axis swap: world[1]→CSS x, world[0]→CSS y, world[2]→CSS z.
-  const transformOrigin = useMemo(() => {
-    if (polygons.length === 0) return undefined;
-    let minX = Infinity, minY = Infinity, minZ = Infinity;
-    let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
-    for (const poly of polygons) {
-      for (const v of poly.vertices) {
-        if (v[0] < minX) minX = v[0]; if (v[0] > maxX) maxX = v[0];
-        if (v[1] < minY) minY = v[1]; if (v[1] > maxY) maxY = v[1];
-        if (v[2] < minZ) minZ = v[2]; if (v[2] > maxZ) maxZ = v[2];
-      }
-    }
-    if (!Number.isFinite(minX)) return undefined;
-    const tile = 50;
-    const x = ((minY + maxY) / 2) * tile;
-    const y = ((minX + maxX) / 2) * tile;
-    const z = ((minZ + maxZ) / 2) * tile;
-    return `${x}px ${y}px ${z}px`;
-  }, [polygons]);
 
   // ── Imperative ref handle + DOM registry ──────────────────────────────
   // The handle is a stable object whose getters always read the latest
@@ -535,10 +595,16 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
     [effectiveStrategies],
   );
   const effectiveSeamBleed = seamBleed ?? sceneCtx?.seamBleed ?? DEFAULT_SEAM_BLEED;
-  const effectiveDirectional =
-    effectiveTextureLighting === "dynamic" ? undefined : sceneCtx?.directionalLight;
-  const effectiveAmbient =
-    effectiveTextureLighting === "dynamic" ? undefined : sceneCtx?.ambientLight;
+  // Always forward the scene's lights to atlas plan, including in dynamic
+  // mode. Vanilla passes the (CSS-frame) directional light to its render
+  // pipeline in every mode — the dynamic-mode atlas doesn't bake Lambert
+  // into pixels, but buildBasisHints' seamLightBrightness still needs the
+  // light vector, and computeTextureAtlasPlan computes shadedColor for the
+  // fallback paint. Earlier React gated this on textureLighting === "dynamic"
+  // which stripped the light, broke buildBasisHints' seam classification,
+  // and visually transposed the cornerShape <u> matrix3d output vs vanilla.
+  const effectiveDirectional = sceneCtx?.directionalLight;
+  const effectiveAmbient = sceneCtx?.ambientLight;
 
   const directVoxelEnabled = Boolean(
     externalVoxelSource &&
@@ -564,10 +630,11 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
     const dir = sceneDirectionalLight.direction;
     const localDir = inverseRotateVec3(dir, rotation);
     const len = Math.hypot(localDir[0], localDir[1], localDir[2]) || 1;
+    // Quantize to 0.01 — matches H10 in PolyScene + vanilla lightingVars.
     return {
-      ["--plx" as string]: (localDir[0] / len).toFixed(4),
-      ["--ply" as string]: (localDir[1] / len).toFixed(4),
-      ["--plz" as string]: (localDir[2] / len).toFixed(4),
+      ["--plx" as string]: (localDir[0] / len).toFixed(2),
+      ["--ply" as string]: (localDir[1] / len).toFixed(2),
+      ["--plz" as string]: (localDir[2] / len).toFixed(2),
     };
   }, [effectiveTextureLighting, rotation, sceneDirectionalLight]);
 
@@ -578,12 +645,26 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
   const bakedDirectional = useMemo(() => {
     if (!effectiveDirectional) return effectiveDirectional;
     const rot = bakedRotation ?? [0, 0, 0] as Vec3;
-    if (rot[0] === 0 && rot[1] === 0 && rot[2] === 0) return effectiveDirectional;
+    // Vanilla applies a world→CSS axis swap (x↔y) on the directional light
+    // before passing it to renderPolygonsWithTextureAtlas — the polygon
+    // basis stores normals in the CSS frame, so light vectors must match
+    // before any dot product. React/Vue mirror that here so buildBasisHints
+    // and computeTextureAtlasPlan see the same light vector vanilla sees.
+    const cssLight = worldDirectionalLightToCss(effectiveDirectional);
+    if (rot[0] === 0 && rot[1] === 0 && rot[2] === 0) return cssLight;
     return {
-      ...effectiveDirectional,
-      direction: inverseRotateVec3(effectiveDirectional.direction, rot),
+      ...cssLight,
+      direction: inverseRotateVec3(cssLight.direction, rot),
     };
   }, [effectiveDirectional, bakedRotation]);
+
+  // Per-light occlusion raytrace (task #121) used to mark polygons in
+  // ray-traced shadow with `directScale=0` so they baked at ambient-only.
+  // Three.js doesn't bake shadow into the diffuse atlas — the real shadow
+  // map darkens occluded geometry at render time, so a "in shadow" polygon's
+  // diffuse stays at full Lambert(n·L). Vanilla disabled this in createPoly-
+  // Scene.ts:1162 for three.js parity (see "rock1 baked-mode" divergence).
+  const lightOccludedPolyIndices: ReadonlySet<number> | undefined = undefined;
 
   const atlasPlans = useMemo(
     () => {
@@ -599,15 +680,31 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
             ambientLight: effectiveAmbient,
           })
         : null;
-      return polygons.map((p, i) => computeTextureAtlasPlan(p, i, {
+      // Cross-polygon basis hints (shared-edge adjacency, connected
+      // components) — vanilla's renderer always computes these because they
+      // affect which polygons qualify for the stable-solid-triangle path.
+      // Without them, ~8 polygons in a typical castle mesh fall through to
+      // the atlas bitmap path instead of <u>, producing visible parity
+      // drift vs vanilla in dynamic mode.
+      const basisHints = buildBasisHints(polygons, {
         directionalLight: bakedDirectional,
         ambientLight: effectiveAmbient,
-        seamBleed: seamBleedEdges?.has(i) ? effectiveSeamBleed : undefined,
-        seamEdges: seamBleedEdges?.get(i),
-        textureEdgeRepairEdges: repairEdges[i],
-      }));
+      });
+      return polygons.map((p, i) => computeTextureAtlasPlan(
+        p,
+        i,
+        {
+          directionalLight: bakedDirectional,
+          ambientLight: effectiveAmbient,
+          seamBleed: seamBleedEdges?.has(i) ? effectiveSeamBleed : undefined,
+          seamEdges: seamBleedEdges?.get(i),
+          textureEdgeRepairEdges: repairEdges[i],
+          lightOccludedPolyIndices,
+        },
+        basisHints[i],
+      ));
     },
-    [renderPolygon, directVoxelEnabled, polygons, bakedDirectional, effectiveAmbient, effectiveSeamBleed],
+    [renderPolygon, directVoxelEnabled, polygons, bakedDirectional, effectiveAmbient, effectiveSeamBleed, lightOccludedPolyIndices],
   );
   const textureAtlas = useTextureAtlas(
     atlasPlans,
@@ -643,21 +740,57 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
   const meshIdRef = useRef<symbol>(Symbol());
   const sceneRegisterShadowCaster = sceneCtx?.registerShadowCaster;
 
-  // Register/unregister as a shadow caster whenever castShadow or polygons change.
-  // Both lighting modes need the registration so the scene can derive the
-  // shadow ground plane from caster bboxes. Cleanup on unmount passes null
-  // to deregister.
+  // Register/unregister as a shadow caster whenever castShadow or polygons /
+  // transform change. The full transform is registered so receiver meshes
+  // can project the shadow into world space directly. renderedPolygonIndices
+  // tells the receiver to skip polygons that have no atlas plan (e.g.
+  // degenerate or filtered-out) — vanilla iterates `caster.rendered` for
+  // the same effect.
+  const renderedPolygonIndices = useMemo(() => {
+    // Mirror vanilla: skip polygons that have no atlas plan AND skip
+    // overlapping duplicates (vanilla's `dedupByCaster` filter — the same
+    // findOverlappingPolygonDuplicates pass that the ground-shadow path
+    // uses, with the same 0.5/0.95 thresholds).
+    const dedupDrop = findOverlappingPolygonDuplicates(polygons, {
+      normalTolerance: 0.1,
+      distanceTolerance: 0.5,
+      overlapFraction: 0.95,
+      preserveDoubleSidedBackfaces: false,
+    });
+    const s = new Set<number>();
+    for (let i = 0; i < atlasPlans.length; i++) {
+      if (atlasPlans[i] && !dedupDrop.has(i)) s.add(i);
+    }
+    return s;
+  }, [atlasPlans, polygons]);
   useEffect(() => {
     if (!sceneRegisterShadowCaster) return;
     if (castShadow) {
-      sceneRegisterShadowCaster(meshIdRef.current, polygons);
+      sceneRegisterShadowCaster(meshIdRef.current, {
+        polygons,
+        position: position ?? [0, 0, 0],
+        scale,
+        rotation,
+        renderedPolygonIndices,
+      });
     } else {
       sceneRegisterShadowCaster(meshIdRef.current, null);
     }
     return () => {
       sceneRegisterShadowCaster(meshIdRef.current, null);
     };
-  }, [sceneRegisterShadowCaster, castShadow, polygons]);
+  }, [sceneRegisterShadowCaster, castShadow, polygons, position, scale, rotation, renderedPolygonIndices]);
+
+  // Mirror receiveShadow registration so the scene knows whether at least
+  // one receiver exists (drives the ground-shadow-disable rule on casters).
+  const sceneRegisterShadowReceiver = sceneCtx?.registerShadowReceiver;
+  useEffect(() => {
+    if (!sceneRegisterShadowReceiver) return;
+    sceneRegisterShadowReceiver(meshIdRef.current, !!receiveShadow);
+    return () => {
+      sceneRegisterShadowReceiver(meshIdRef.current, false);
+    };
+  }, [sceneRegisterShadowReceiver, receiveShadow]);
 
   // Per-mesh shadow `<svg>` — same path for both lighting modes. Every
   // casting polygon is projected to the ground on the CPU and
@@ -668,16 +801,23 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
   // free); back-facing polys are dropped up front.
   const bakedShadowGroundCssZ = sceneCtx?.groundCssZ ?? null;
   const sceneShadow = sceneCtx?.shadow;
+  const sceneHasReceiver = sceneCtx?.hasShadowReceiver ?? false;
   const shadowSvgNode = useMemo<ReactNode>(() => {
     if (!castShadow || renderPolygon) return null;
+    // Three.js parity: when a receiveShadow mesh exists, casters drop their
+    // ground-shadow fallback so the receiver paints the only shadow pass.
+    if (sceneHasReceiver) return null;
     if (bakedShadowGroundCssZ === null) return null;
 
-    const lightDir = sceneDirectionalLight?.direction
+    // World→CSS axis swap so the light direction matches the CSS-frame
+    // vertex projection below (vertices are × BASE_TILE with v[1]→x, v[0]→y).
+    const userGroundLightDir = sceneDirectionalLight?.direction
       ?? ([0.4, -0.7, 0.59] as Vec3);
+    const lightDir = worldDirectionToCss(userGroundLightDir);
     const shadowDedupDrop = findOverlappingPolygonDuplicates(polygons, {
       normalTolerance: 0.1,
       distanceTolerance: 0.5,
-      overlapFraction: 0.4,
+      overlapFraction: 0.95,
       preserveDoubleSidedBackfaces: false,
     });
 
@@ -780,13 +920,163 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
           fill={`rgb(${parsed[0]},${parsed[1]},${parsed[2]})`}
           fillRule="nonzero"
           stroke={`rgb(${parsed[0]},${parsed[1]},${parsed[2]})`}
-          strokeWidth="2"
+          strokeWidth="3"
           strokeLinejoin="round"
           opacity={shadowOpacity.toFixed(4)}
         />
       </svg>
     );
-  }, [castShadow, renderPolygon, polygons, atlasPlans, sceneDirectionalLight, bakedShadowGroundCssZ, sceneShadow]);
+  }, [castShadow, renderPolygon, polygons, atlasPlans, sceneDirectionalLight, bakedShadowGroundCssZ, sceneShadow, sceneHasReceiver]);
+
+  // Receiver-face shadows. For each coplanar surface group on this mesh,
+  // project every registered caster polygon along the directional light,
+  // Sutherland-Hodgman-clip to the face outline, and emit one <svg> per
+  // visible group. Mirrors vanilla's emitReceiverShadows path.
+  const shadowCasters = sceneCtx?.shadowCasters;
+  const shadowCastersVersion = sceneCtx?.shadowCastersVersion ?? 0;
+  const [cameraTick, setCameraTick] = useState(0);
+  useEffect(() => {
+    if (!receiveShadow) return;
+    return cameraCtx?.store.subscribe(() => setCameraTick((n) => n + 1));
+  }, [receiveShadow, cameraCtx?.store]);
+  void cameraTick;
+  // Cached shared-edge adjacency for the self-shadow seam cull. Polygon
+  // identity is the bust key (re-built when geometry changes).
+  const selfShadowEdgeMap = useMemo(
+    () => receiveShadow ? buildSharedEdgeMap(polygons) : undefined,
+    [polygons, receiveShadow],
+  );
+  const receiverShadowSvgs = useMemo<ReactNode>(() => {
+    if (!receiveShadow) return null;
+    if (!shadowCasters || shadowCasters.size === 0) return null;
+    // Caster vertices and receiver plane both live in the CSS axis-swap
+    // frame after worldCssForMesh; the light direction must be in the
+    // same frame for the shadow projection math to land correctly. (Matches
+    // vanilla emitGround/emitReceiverShadows pipelines.)
+    const userLightDir = sceneDirectionalLight?.direction ?? ([0.4, -0.7, 0.59] as Vec3);
+    const lightDir = worldDirectionToCss(userLightDir);
+    const shadowLift = sceneShadow?.lift ?? 0.001;
+    const planes = prepareReceiverFacePlanes(
+      polygons,
+      position ?? [0, 0, 0],
+      scale,
+      new Set(),
+      shadowLift,
+      rotation,
+    );
+    if (planes.length === 0) return null;
+    const casterInputs: ReceiverCasterInput<symbol>[] = [];
+    for (const [casterId, data] of shadowCasters) {
+      // Mirror vanilla: only iterate caster.rendered (= polygons with a
+      // valid atlas plan). renderedPolygonIndices is the React/Vue analog.
+      const rendered = data.renderedPolygonIndices;
+      const items = prepareCasterPolyItems(
+        data.polygons,
+        data.position,
+        data.scale,
+        rendered ? (idx) => rendered.has(idx) : () => true,
+        data.rotation ?? null,
+      );
+      // Self-shadow seam cull: when the caster IS this mesh, pass the
+      // shared-edge adjacency map so the algorithm skips projecting
+      // edge-sharing neighbour polygons (kills the spiderweb seam
+      // shadows on smooth GLB meshes — apple, sphere, teapot).
+      const isSelf = data.polygons === polygons;
+      const selfMap = isSelf ? selfShadowEdgeMap : undefined;
+      // H9 silhouette path: build/reuse world-frame edge owners for
+      // non-self casters with enough polygons. The cache key matches the
+      // transform fields fed into `prepareCasterPolyItems` so the world-
+      // frame owners stay consistent with the matching items.
+      let edgeOwners: ReadonlyMap<string, EdgeOwners> | undefined;
+      if (!isSelf && data.polygons.length >= 40) {
+        const dposArr = data.position;
+        const drot = data.rotation ?? null;
+        const dsKey = JSON.stringify(data.scale ?? null);
+        const eoKey = `${dposArr[0]},${dposArr[1]},${dposArr[2]}|${drot ? drot.join(",") : "n"}|${dsKey}`;
+        let cachedOwners = reactEdgeOwnersCache.get(data.polygons);
+        if (cachedOwners === undefined || reactEdgeOwnersCacheKey.get(data.polygons) !== eoKey) {
+          cachedOwners = prepareCasterEdgeOwners(data.polygons, dposArr, data.scale, drot);
+          reactEdgeOwnersCache.set(data.polygons, cachedOwners);
+          reactEdgeOwnersCacheKey.set(data.polygons, eoKey);
+        }
+        edgeOwners = cachedOwners;
+      }
+      casterInputs.push({
+        id: casterId,
+        items,
+        selfShadowEdgeMap: selfMap,
+        edgeOwners,
+        casterPolygonCount: data.polygons.length,
+      });
+    }
+    const cameraState = cameraCtx?.store.getState().cameraState;
+    const cameraRot: CameraCullRotation = {
+      rotX: cameraState?.rotX ?? 65,
+      rotY: cameraState?.rotY ?? 45,
+      meshRotation: rotation,
+    };
+    const specs = computeReceiverShadowFaces<symbol>({
+      receiverPlanes: planes,
+      receiverPolygons: polygons,
+      receiverHasTexture: polygons.some((p) => p.texture !== undefined),
+      casters: casterInputs,
+      lightDir,
+      cameraRot,
+      ambientLight: sceneCtx?.ambientLight,
+      directionalLight: sceneDirectionalLight,
+      shadow: { color: sceneShadow?.color, opacity: sceneShadow?.opacity ?? 0.25, maxExtend: sceneShadow?.maxExtend },
+    });
+    return (
+      <>
+        {specs.map((spec) => (
+          <svg
+            key={`receiver-${spec.faceIndex}`}
+            className="polycss-shadow polycss-shadow-svg polycss-shadow-receiver"
+            data-poly-shadow-type="receiver"
+            data-poly-shadow-receiver-face={spec.faceIndex}
+            data-poly-shadow-receiver-polys={JSON.stringify(spec.memberPolyIndices)}
+            width={spec.width}
+            height={spec.height}
+            viewBox={`0 0 ${spec.width} ${spec.height}`}
+            style={{
+              position: "absolute",
+              top: 0,
+              left: 0,
+              display: "block",
+              overflow: "hidden",
+              transformOrigin: "0 0",
+              pointerEvents: "none",
+              willChange: "transform",
+              transform: spec.matrixCss,
+            }}
+          >
+            {spec.paths.map((p, i) => (
+              <path
+                key={i}
+                d={p.d}
+                fill={spec.fill}
+                stroke={spec.fill}
+                strokeWidth="3"
+                strokeLinejoin="round"
+                opacity={spec.opacity.toFixed(4)}
+                data-poly-shadow-caster-polys={JSON.stringify(p.casterPolygonIndices)}
+              />
+            ))}
+          </svg>
+        ))}
+      </>
+    );
+  }, [receiveShadow, shadowCasters, shadowCastersVersion, polygons, position, scale, rotation, sceneDirectionalLight, sceneShadow, sceneCtx?.ambientLight, cameraCtx?.store, cameraTick, selfShadowEdgeMap]);
+
+  // Portal receiver shadow SVGs OUT of `.polycss-mesh` into `.polycss-scene`.
+  // The SVG `matrix3d(...)` already includes this mesh's `position` (baked
+  // into world space by `prepareReceiverFacePlanes`), so leaving them inside
+  // the mesh wrapper would double-count `translate3d(position)`. Vanilla
+  // mounts these at scene-root for the same reason.
+  const portalSceneEl = sceneCtx?.sceneEl ?? null;
+  const portaledReceiverShadowSvgs = portalSceneEl && receiverShadowSvgs
+    ? createPortal(receiverShadowSvgs, portalSceneEl)
+    : null;
 
   setPolygonsImplRef.current = (nextPolygons: Polygon[]) => {
     const nextRenderedPolygons = autoCenter ? recenterPolygons(nextPolygons) : nextPolygons;
@@ -859,7 +1149,6 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
 
   const wrapperStyle: CSSProperties = {
     transform,
-    ...(transformOrigin ? { transformOrigin } : null),
     ...dynamicLightOverride,
     ...style,
     ...defaultPaintVars,
@@ -898,23 +1187,42 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
             />
           );
         }
-        return isSolidTrianglePlan(plan)
-          ? (
-              <TextureTrianglePoly
-                key={plan.index}
-                entry={plan}
-                textureLighting={effectiveTextureLighting}
-                solidPaintDefaults={solidPaintDefaults}
-              />
-            )
-          : (
-              <TextureBorderShapePoly
-                key={plan.index}
-                entry={plan}
-                solidPaintDefaults={solidPaintDefaults}
-                disabledStrategies={disabledStrategies}
-              />
-            );
+        if (isSolidTrianglePlan(plan)) {
+          return (
+            <TextureTrianglePoly
+              key={plan.index}
+              entry={plan}
+              textureLighting={effectiveTextureLighting}
+              solidPaintDefaults={solidPaintDefaults}
+            />
+          );
+        }
+        // CornerShape solid (corner-*-shape: bevel <u>) — mirrors vanilla
+        // createCornerShapeSolidElement. Catches multi-vertex non-rect non-
+        // triangle polys whose plan has a valid cornerShape geometry.
+        // Without this branch, those polys fall through to atlas bitmap and
+        // drift from vanilla in dynamic mode.
+        const cornerGeo = !disabledStrategies?.has("i") ? cornerShapeGeometryForPlan(plan) : null;
+        if (cornerGeo) {
+          return (
+            <TextureCornerShapeSolidPoly
+              key={plan.index}
+              entry={plan}
+              geometry={cornerGeo}
+              textureLighting={effectiveTextureLighting}
+              solidPaintDefaults={solidPaintDefaults}
+            />
+          );
+        }
+        return (
+          <TextureBorderShapePoly
+            key={plan.index}
+            entry={plan}
+            textureLighting={effectiveTextureLighting}
+            solidPaintDefaults={solidPaintDefaults}
+            disabledStrategies={disabledStrategies}
+          />
+        );
       });
 
   // Loading + error slots only apply when we're fetching from `src`.
@@ -956,6 +1264,7 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
       {...wrapperHandlers}
     >
       {shadowSvgNode}
+      {portaledReceiverShadowSvgs}
       {renderedPolygons}
       {staticChildren}
     </div>

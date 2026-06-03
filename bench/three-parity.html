@@ -1,0 +1,1393 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>polycss vs three.js — parity check (cube)</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; height: 100%; background: #eef2f6; font-family: ui-sans-serif, system-ui, sans-serif; color: #1e293b; }
+    body { display: grid; grid-template-columns: 1fr 1fr 300px; height: 100vh; overflow: hidden; }
+    .stage { position: relative; overflow: hidden; border-right: 1px solid #cbd5e1; background: #eef2f6; }
+    .stage > h3 { position: absolute; top: 8px; left: 12px; margin: 0; font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: #475569; z-index: 10; pointer-events: none; }
+    .stage > .note { position: absolute; top: 26px; left: 12px; font-size: 10px; color: #94a3b8; pointer-events: none; z-index: 10; }
+    .stage > .crosshair { position: absolute; inset: 0; pointer-events: none; z-index: 5; }
+    .stage > .crosshair::before, .stage > .crosshair::after { content: ""; position: absolute; background: rgba(0,0,0,0.1); }
+    .stage > .crosshair::before { left: 50%; top: 0; bottom: 0; width: 1px; }
+    .stage > .crosshair::after { top: 50%; left: 0; right: 0; height: 1px; }
+    #poly-host { position: absolute; inset: 0; }
+    #three-canvas { display: block; width: 100%; height: 100%; }
+    #panel { padding: 12px; background: #f8fafc; overflow-y: auto; border-left: 1px solid #cbd5e1; font-size: 12px; }
+    #panel .sec { margin: 14px 0 6px; font-weight: 600; color: #0f172a; font-size: 11px; letter-spacing: 0.05em; text-transform: uppercase; }
+    #panel .row { display: grid; grid-template-columns: 70px 1fr 60px; gap: 6px; align-items: center; margin: 3px 0; }
+    #panel .row > label { color: #475569; }
+    #panel .row > .val { text-align: right; font-variant-numeric: tabular-nums; }
+    #panel .row > input[type=range] { width: 100%; }
+    #panel .info { font-size: 11px; color: #64748b; line-height: 1.4; margin: 8px 0 12px; padding: 8px; background: #fff; border: 1px solid #e2e8f0; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <div class="stage"><h3>PolyCSS</h3><div class="note">no bridging — values from S go in raw</div><div class="crosshair"></div><div id="poly-host"></div></div>
+  <div class="stage"><h3>Three.js</h3><div class="note">no bridging — values from S go in raw</div><div class="crosshair"></div><canvas id="three-canvas"></canvas></div>
+  <div id="panel"></div>
+
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://esm.sh/three@0.160.0",
+      "three/addons/": "https://esm.sh/three@0.160.0/examples/jsm/"
+    }
+  }
+  </script>
+
+  <script type="module">
+    // ════════════════════════════════════════════════════════════════════
+    //  PARITY CHECK — ONE CUBE
+    //  Both engines get the same numbers. No swap, no scale, no flip.
+    //  When the rendered cube differs in size, position, orientation, or
+    //  rotation direction, that is a PolyCSS bug.
+    //
+    //  Crosshairs mark each viewport's center (where world (0,0,0) should
+    //  appear when the camera target is the origin).
+    //
+    //  Convention (both engines):
+    //    +Z up, +X right, +Y forward.
+    //    `position` is world units.
+    //    `size` is world units.
+    //    `zoom` is "pixels per world unit at the viewport" — bigger value,
+    //    bigger cube on screen.
+    // ════════════════════════════════════════════════════════════════════
+
+    import * as THREE from "three";
+    import { OBJLoader } from "three/addons/loaders/OBJLoader.js";
+    import { MTLLoader } from "three/addons/loaders/MTLLoader.js";
+    import {
+      createPolyCamera, createPolyScene,
+      createPolyBox, createPolyOctahedron, loadMesh,
+      screenToWorldOnSphere,
+    } from "./.generated/polycss.js";
+
+    // World ↔ CSS px factor that the renderer applies to every vertex.
+    // The unprojection utility takes this as `tileSize`.
+    const POLY_TILE = 50;
+
+    const Q = new URLSearchParams(location.search);
+    const qn = (k, d) => (Q.has(k) ? +Q.get(k) : d);
+    const qs = (k, d) => (Q.has(k) ? Q.get(k) : d);
+
+    const S = {
+      mesh:    qs("mesh", "cube"),     // "cube" | "e" | "cottage" | "castle"
+      lighting:qs("light", "baked"),   // "baked" | "dynamic"
+      // Unified per-mesh transform state. Same shape (x, y, z, scale) for
+      // every mesh — one set of object-transform sliders binds to the
+      // currently selected mesh's entry. URL keys are mesh-prefixed so
+      // multiple mesh states survive a reload.
+      obj: {
+        cube:    { x: qn("ox_cube",    0),   y: qn("oy_cube",    0), z: qn("oz_cube",    1), scale: qn("os_cube",    1),
+                   rx: qn("orx_cube", 0), ry: qn("ory_cube", 0), rz: qn("orz_cube", 0) },
+        e:       { x: qn("ox_e",       0),   y: qn("oy_e",       0), z: qn("oz_e",       0), scale: qn("os_e",       1),
+                   rx: qn("orx_e",    0), ry: qn("ory_e",    0), rz: qn("orz_e",    0) },
+        cottage: { x: qn("ox_cottage", qn("cx", 0)),
+                   y: qn("oy_cottage", qn("cy", 0)),
+                   z: qn("oz_cottage", qn("cz", 0)),
+                   scale: qn("os_cottage", qn("cs", 1)),
+                   rx: qn("orx_cottage", 0), ry: qn("ory_cottage", 0), rz: qn("orz_cottage", 0) },
+        castle:  { x: qn("ox_castle",  0), y: qn("oy_castle",  0), z: qn("oz_castle", 0), scale: qn("os_castle", 1),
+                   rx: qn("orx_castle", 0), ry: qn("ory_castle", 0), rz: qn("orz_castle", 0) },
+        // ──────────────────────────────────────────────────────────────
+        //   TO ADD A NEW LOADABLE MESH (OBJ): grep for "coliseum" in
+        //   this file and copy the same edits for your new name. There
+        //   are ~13 touchpoints — defaults here, target-size constant,
+        //   buildPoly*/buildThree* pair, activePolyMesh + the meshes
+        //   set, polyScene rebake + cleanup, dropdown <option>, mesh-
+        //   change dispatch, panel-update setTransform chain (poly and
+        //   three sides), and the Copy state URL writer.
+        // ──────────────────────────────────────────────────────────────
+        coliseum: { x: qn("ox_coliseum", 0), y: qn("oy_coliseum", 0), z: qn("oz_coliseum", 0), scale: qn("os_coliseum", 1),
+                    rx: qn("orx_coliseum", 0), ry: qn("ory_coliseum", 0), rz: qn("orz_coliseum", 0) },
+      },
+      // Cube/E hold the geometry's base parameters (set at build time;
+      // run-time scale applies on top via setTransform). Cottage geometry
+      // comes from /gallery/obj/cottage.obj + cottage.mtl + cottage-diffuse.png.
+      // Three.js applies the same (x,y,z) → (z,x,y) cyclic permutation
+      // parseObj uses to put OBJ's Y-up into our Z-up world.
+      cube:  { size: 2, color: "#dc2626" },
+      floor: { size: 20, color: "#cbd5e1" },
+      dir:   { x: qn("dx", 1), y: qn("dy", 0.5), z: qn("dz", 1), intensity: qn("di", 1), color: qs("dc", "#ffffff") },
+      amb:   { intensity: qn("ai", 0.3), color: qs("ac", "#ffffff") },
+      shadow:{ opacity: qn("so", 1.0) },
+      cam:   { rotX: qn("rx", 30), rotY: qn("ry", 0), zoom: qn("z", 60) },
+      // "Shadows only" mode: hide all caster + floor base color so only the
+      // shadow elements remain visible. Lets you compare shadow geometry
+      // between engines without the mesh getting in the way.
+      shadowsOnly: qs("sx", "0") === "1",
+      // "Self-shadow" toggle: when true, the active mesh receives shadows
+      // onto its own faces (matches Three.js mesh.receiveShadow on the
+      // mesh itself). When false, the mesh only casts onto the floor.
+      // Defaults to true to preserve the historical bench behavior.
+      selfShadow: qs("ss", "1") !== "0",
+      // Cast-shadow toggle on the active model — flips `castShadow` on
+      // every caster mesh. Gallery exposes this as a separate knob; the
+      // bench historically hardcoded it to true. Defaulted to true so
+      // existing URLs reproduce.
+      castShadow: qs("cs", "1") !== "0",
+      // Floor mesh visibility — gallery's "Show ground" toggle. When
+      // hidden the floor mesh is removed from the DOM/scene-graph so
+      // the engine falls back to its virtual-ground shadow.
+      floorVisible: qs("fv", "1") !== "0",
+      // Floor mesh `receiveShadow` flag — gallery's gallery-ground
+      // mesh DEFAULTS this to false (omits the option), which suppresses
+      // the ground shadow whenever a self-shadowing receiver mesh
+      // exists. Toggle it here to reproduce that bug on the bench.
+      floorReceives: qs("fr", "1") !== "0",
+      // Scene `autoCenter` — when on, PolyCSS pulls the scene-root
+      // translate so the union of all non-helper meshes centers on the
+      // camera target. Three.js has no parallel; the toggle only drives
+      // the PolyCSS side. URL key `ax` (autoCenter eXposed).
+      autoCenter: qs("ax", "0") === "1",
+    };
+
+    // ─── PolyCSS ────────────────────────────────────────────────────────
+    const polyHost = document.getElementById("poly-host");
+    const polyCamera = createPolyCamera({ rotX: S.cam.rotX, rotY: S.cam.rotY, zoom: S.cam.zoom });
+    const polyScene = createPolyScene(polyHost, {
+      camera: polyCamera,
+      autoCenter: S.autoCenter,
+      directionalLight: {
+        direction: [S.dir.x, S.dir.y, S.dir.z],
+        intensity: S.dir.intensity,
+        color: S.dir.color,
+        castShadow: true,
+      },
+      ambientLight: { color: S.amb.color, intensity: S.amb.intensity },
+      // lift=0 so the shadow projects exactly onto the floor plane (z=0)
+      // instead of a slightly raised plane — default 0.05 produces a small
+      // visible gap between the caster's base and where the shadow starts
+      // on the floor. The bench's floor + cube are separate meshes, no
+      // z-fight risk that the default lift was protecting against.
+      shadow: { color: "#000000", opacity: S.shadow.opacity, lift: 0 },
+      textureLighting: S.lighting,
+      // Full-quality atlas — no global shrink-to-fit cap. Default "auto"
+      // shrinks the whole atlas to ~2048px / 16MB which pixelates large
+      // textured polys (cottage walls). The bench prioritizes parity over
+      // memory budget. Real apps stick with "auto".
+      textureQuality: 1,
+      // No seam-bleed overscan. Default 1.5 px per shared edge makes
+      // adjacent polygons overlap by up to 3 px to hide rasterisation
+      // cracks. Three.js doesn't have that, so for visual parity we
+      // disable it here. Real apps keep the default so faces stay
+      // crack-free.
+      seamBleed: 0,
+    });
+    let polyCube = null;
+    let polyCottage = null;
+    let polyCastle = null;
+    let polyColiseum = null;
+    let polyE = null;
+    function buildPolyCube() {
+      polyCube = polyScene.add(
+        createPolyBox({ size: [S.cube.size, S.cube.size, S.cube.size], color: S.cube.color }),
+        { id: "cube", position: [S.obj.cube.x, S.obj.cube.y, S.obj.cube.z], castShadow: true, receiveShadow: S.selfShadow, merge: false },
+      );
+    }
+    // 3D capital "E" — strongly concave: a vertical spine plus three
+    // horizontal arms. Lets us check self-shadow on a single mesh where
+    // arms shadow the spine and each other, much more obvious than the
+    // cube (convex, no self-shadow) or the cottage (textured, hard to
+    // see brightness diffs through the brick pattern).
+    //
+    // Box layout (PolyCSS world units, +X right, +Y forward, +Z up):
+    //   spine:    x[0..1]  z[0..5]    (full height left column)
+    //   top arm:  x[0..4]  z[4..5]
+    //   mid arm:  x[0..3]  z[2..3]
+    //   bot arm:  x[0..4]  z[0..1]
+    // All boxes are 1 unit deep on Y. The whole E is offset so it sits
+    // on z=0 and is roughly centred on the crosshair.
+    const E_COLOR = "#3b82f6";
+    const E_BOXES = [
+      { center: [-1.5,  0,  2.5], size: [1, 1, 5] },  // spine
+      { center: [ 0.5,  0,  4.5], size: [4, 1, 1] },  // top arm
+      { center: [ 0.0,  0,  2.5], size: [3, 1, 1] },  // mid arm
+      { center: [ 0.5,  0,  0.5], size: [4, 1, 1] },  // bot arm
+    ];
+    function buildPolyE() {
+      // Combine all box polygons into a single mesh so PolyCSS treats
+      // it as one piece for self-shadowing purposes.
+      const polys = [];
+      for (const { center, size } of E_BOXES) {
+        polys.push(...createPolyBox({ center, size, color: E_COLOR }).polygons);
+      }
+      const parse = { polygons: polys, objectUrls: [], warnings: [], dispose: () => {} };
+      polyE = polyScene.add(parse, {
+        id: "e",
+        position: [0, 0, 0],
+        castShadow: true,
+        receiveShadow: S.selfShadow,
+        merge: false,
+      });
+    }
+    // Cottage normalization: both engines fit the model into a bounding box
+    // of COTTAGE_TARGET_SIZE world units centered at the origin. PolyCSS uses
+    // parseObj's `targetSize` option; Three.js computes the bbox of the
+    // loaded geometry after the Y→Z permutation and applies the same scale +
+    // center. Without this, the OBJ's native pivot is far from origin and
+    // the model lands off-screen after the camera scale.
+    const COTTAGE_TARGET_SIZE = 5;
+    async function buildPolyCottage() {
+      const parse = await loadMesh("/gallery/obj/cottage.obj", {
+        mtlUrl: "/gallery/obj/cottage.mtl",
+        objOptions: { targetSize: COTTAGE_TARGET_SIZE },
+      });
+      polyCottage = polyScene.add(parse, {
+        id: "cottage",
+        position: [S.obj.cottage.x, S.obj.cottage.y, S.obj.cottage.z],
+        scale: S.obj.cottage.scale,
+        castShadow: true,
+        receiveShadow: S.selfShadow,
+        merge: false,
+      });
+    }
+    // Castle uses a hand-written .mtl whose material names mirror the OBJ's
+    // hex-named `usemtl` slots (455A64 / 78909C / 795548). Without it both
+    // engines would fall back to default white and the castle would look
+    // flat.
+    const CASTLE_TARGET_SIZE = 6;
+    async function buildPolyCastle() {
+      const parse = await loadMesh("/gallery/obj/castle.obj", {
+        mtlUrl: "/gallery/obj/castle.mtl",
+        objOptions: { targetSize: CASTLE_TARGET_SIZE },
+      });
+      polyCastle = polyScene.add(parse, {
+        id: "castle",
+        position: [S.obj.castle.x, S.obj.castle.y, S.obj.castle.z],
+        scale: S.obj.castle.scale,
+        castShadow: true,
+        receiveShadow: S.selfShadow,
+        merge: false,
+      });
+    }
+    // Coliseum: 16k-line OBJ, ~40-unit raw bbox. Synthetic .mtl maps the
+    // four `lambertN_SG` slots to stone-like greys (see coliseum.mtl).
+    const COLISEUM_TARGET_SIZE = 8;
+    async function buildPolyColiseum() {
+      const parse = await loadMesh("/gallery/obj/coliseum.obj", {
+        mtlUrl: "/gallery/obj/coliseum.mtl",
+        objOptions: { targetSize: COLISEUM_TARGET_SIZE },
+      });
+      polyColiseum = polyScene.add(parse, {
+        id: "coliseum",
+        position: [S.obj.coliseum.x, S.obj.coliseum.y, S.obj.coliseum.z],
+        scale: S.obj.coliseum.scale,
+        castShadow: true,
+        receiveShadow: S.selfShadow,
+        merge: false,
+      });
+    }
+    if (S.mesh === "cube") buildPolyCube();
+    // Flat horizontal quad on z=0, sized S.floor.size in world units.
+    // PolyCSS doesn't ship a generic "plane" generator (createPolyPlane is
+    // for transform-control drag handles), so the polygon is inline.
+    const floorHalf = S.floor.size / 2;
+    const floorParse = {
+      polygons: [{
+        vertices: [
+          [-floorHalf, -floorHalf, 0],
+          [ floorHalf, -floorHalf, 0],
+          [ floorHalf,  floorHalf, 0],
+          [-floorHalf,  floorHalf, 0],
+        ],
+        color: S.floor.color,
+      }],
+      objectUrls: [],
+      warnings: [],
+      dispose: () => {},
+    };
+    const polyFloor = polyScene.add(
+      floorParse,
+      { id: "floor", position: [0, 0, 0], castShadow: false, receiveShadow: S.floorReceives, merge: false },
+    );
+    // Initial visibility — floor toggle defaults to visible; hide the
+    // wrapper inline so it round-trips with the URL state.
+    if (!S.floorVisible) polyFloor.element.style.visibility = "hidden";
+
+    // ─── Three.js ───────────────────────────────────────────────────────
+    const threeCanvas = document.getElementById("three-canvas");
+    const renderer = new THREE.WebGLRenderer({ canvas: threeCanvas, antialias: true });
+    renderer.setPixelRatio(window.devicePixelRatio);
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.shadowMap.enabled = true;
+    // PCFShadowMap is a 1-tap sampled shadow map (no blur kernel), which
+    // gives crisp shadow edges close to PolyCSS's analytical projection
+    // without the heavy PCF soft blur. Pair with a high mapSize so the
+    // silhouette stays resolution-defined instead of stairstepped. The
+    // bench prioritises detail over memory — real apps stick with smaller
+    // sizes and Soft variants.
+    renderer.shadowMap.type = THREE.PCFShadowMap;
+    THREE.Object3D.DEFAULT_UP.set(0, 0, 1);
+
+    const threeScene = new THREE.Scene();
+    threeScene.background = new THREE.Color(0xeef2f6);
+
+    const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 5000);
+    camera.up.set(0, 0, 1);
+
+    let cubeMesh = null;
+    let cottageGroup = null;
+    let castleGroup = null;
+    let coliseumGroup = null;
+    let eGroup = null;
+    function buildThreeCube() {
+      cubeMesh = new THREE.Mesh(
+        new THREE.BoxGeometry(S.cube.size, S.cube.size, S.cube.size),
+        new THREE.MeshLambertMaterial({ color: S.cube.color }),
+      );
+      cubeMesh.position.set(S.obj.cube.x, S.obj.cube.y, S.obj.cube.z);
+      cubeMesh.castShadow = true;
+      cubeMesh.receiveShadow = true;
+      threeScene.add(cubeMesh);
+    }
+    function buildThreeE() {
+      eGroup = new THREE.Group();
+      const mat = new THREE.MeshLambertMaterial({ color: E_COLOR });
+      for (const { center, size } of E_BOXES) {
+        const m = new THREE.Mesh(new THREE.BoxGeometry(size[0], size[1], size[2]), mat);
+        m.position.set(center[0], center[1], center[2]);
+        m.castShadow = true;
+        m.receiveShadow = true;
+        eGroup.add(m);
+      }
+      threeScene.add(eGroup);
+    }
+    function buildThreeCottage() {
+      return new Promise((resolve, reject) => {
+        const mtlLoader = new MTLLoader();
+        mtlLoader.setMaterialOptions({ side: THREE.DoubleSide });
+        mtlLoader.load("/gallery/obj/cottage.mtl", (materials) => {
+          materials.preload();
+          const objLoader = new OBJLoader();
+          objLoader.setMaterials(materials);
+          objLoader.load("/gallery/obj/cottage.obj", (obj) => {
+            // OBJ files are Y-up; PolyCSS's parseObj applies a cyclic
+            // (x,y,z) → (z,x,y) permutation to bring +Y into PolyCSS's +Z.
+            // Match that with a 120° rotation around (1,1,1) so the same
+            // loaded file lands in the same world frame on both engines.
+            const q = new THREE.Quaternion();
+            q.setFromAxisAngle(new THREE.Vector3(1, 1, 1).normalize(), 2 * Math.PI / 3);
+            obj.quaternion.copy(q);
+            // Apply the rotation first so the bbox math runs in the same
+            // frame PolyCSS will end up in.
+            obj.updateMatrixWorld(true);
+            const wrap = new THREE.Group();
+            wrap.add(obj);
+            // Normalize: bbox max-dim → COTTAGE_TARGET_SIZE, then re-center
+            // the geometry at the origin. Matches PolyCSS parseObj
+            // `targetSize` behaviour.
+            const bbox = new THREE.Box3().setFromObject(wrap);
+            const sizeV = new THREE.Vector3();
+            bbox.getSize(sizeV);
+            const maxDim = Math.max(sizeV.x, sizeV.y, sizeV.z) || 1;
+            const norm = COTTAGE_TARGET_SIZE / maxDim;
+            obj.scale.multiplyScalar(norm);
+            obj.updateMatrixWorld(true);
+            // PolyCSS parseObj places the bbox MIN at origin (cottage sits in
+            // the +X+Y+Z quadrant), not the bbox CENTER. Match that here.
+            const bbox2 = new THREE.Box3().setFromObject(wrap);
+            obj.position.sub(bbox2.min);
+            wrap.position.set(S.obj.cottage.x, S.obj.cottage.y, S.obj.cottage.z);
+            wrap.scale.setScalar(S.obj.cottage.scale);
+            obj.traverse((c) => { if (c.isMesh) { c.castShadow = true; c.receiveShadow = true; } });
+            cottageGroup = wrap;
+            threeScene.add(wrap);
+            resolve();
+          }, undefined, reject);
+        }, undefined, reject);
+      });
+    }
+    // Three.js castle. Mirrors buildThreeCottage exactly, just swapping the
+    // OBJ/MTL paths and the target-size constant so the bench's slider
+    // values move both engines identically.
+    function buildThreeCastle() {
+      return new Promise((resolve, reject) => {
+        const mtlLoader = new MTLLoader();
+        mtlLoader.setMaterialOptions({ side: THREE.DoubleSide });
+        mtlLoader.load("/gallery/obj/castle.mtl", (materials) => {
+          materials.preload();
+          const objLoader = new OBJLoader();
+          objLoader.setMaterials(materials);
+          objLoader.load("/gallery/obj/castle.obj", (obj) => {
+            const q = new THREE.Quaternion();
+            q.setFromAxisAngle(new THREE.Vector3(1, 1, 1).normalize(), 2 * Math.PI / 3);
+            obj.quaternion.copy(q);
+            obj.updateMatrixWorld(true);
+            const wrap = new THREE.Group();
+            wrap.add(obj);
+            const bbox = new THREE.Box3().setFromObject(wrap);
+            const sizeV = new THREE.Vector3();
+            bbox.getSize(sizeV);
+            const maxDim = Math.max(sizeV.x, sizeV.y, sizeV.z) || 1;
+            const norm = CASTLE_TARGET_SIZE / maxDim;
+            obj.scale.multiplyScalar(norm);
+            obj.updateMatrixWorld(true);
+            const bbox2 = new THREE.Box3().setFromObject(wrap);
+            obj.position.sub(bbox2.min);
+            wrap.position.set(S.obj.castle.x, S.obj.castle.y, S.obj.castle.z);
+            wrap.scale.setScalar(S.obj.castle.scale);
+            obj.traverse((c) => { if (c.isMesh) { c.castShadow = true; c.receiveShadow = true; } });
+            castleGroup = wrap;
+            threeScene.add(wrap);
+            resolve();
+          }, undefined, reject);
+        }, undefined, reject);
+      });
+    }
+    // Three.js coliseum — same pattern as the castle/cottage loaders.
+    function buildThreeColiseum() {
+      return new Promise((resolve, reject) => {
+        const mtlLoader = new MTLLoader();
+        mtlLoader.setMaterialOptions({ side: THREE.DoubleSide });
+        mtlLoader.load("/gallery/obj/coliseum.mtl", (materials) => {
+          materials.preload();
+          const objLoader = new OBJLoader();
+          objLoader.setMaterials(materials);
+          objLoader.load("/gallery/obj/coliseum.obj", (obj) => {
+            const q = new THREE.Quaternion();
+            q.setFromAxisAngle(new THREE.Vector3(1, 1, 1).normalize(), 2 * Math.PI / 3);
+            obj.quaternion.copy(q);
+            obj.updateMatrixWorld(true);
+            const wrap = new THREE.Group();
+            wrap.add(obj);
+            const bbox = new THREE.Box3().setFromObject(wrap);
+            const sizeV = new THREE.Vector3();
+            bbox.getSize(sizeV);
+            const maxDim = Math.max(sizeV.x, sizeV.y, sizeV.z) || 1;
+            const norm = COLISEUM_TARGET_SIZE / maxDim;
+            obj.scale.multiplyScalar(norm);
+            obj.updateMatrixWorld(true);
+            const bbox2 = new THREE.Box3().setFromObject(wrap);
+            obj.position.sub(bbox2.min);
+            wrap.position.set(S.obj.coliseum.x, S.obj.coliseum.y, S.obj.coliseum.z);
+            wrap.scale.setScalar(S.obj.coliseum.scale);
+            obj.traverse((c) => { if (c.isMesh) { c.castShadow = true; c.receiveShadow = true; } });
+            coliseumGroup = wrap;
+            threeScene.add(wrap);
+            resolve();
+          }, undefined, reject);
+        }, undefined, reject);
+      });
+    }
+    if (S.mesh === "cube") buildThreeCube();
+
+    const floorMesh = new THREE.Mesh(
+      new THREE.PlaneGeometry(S.floor.size, S.floor.size),
+      new THREE.MeshLambertMaterial({ color: S.floor.color }),
+    );
+    floorMesh.receiveShadow = true;
+    threeScene.add(floorMesh);
+
+    // PolyCSS projects shadows analytically onto the receiver — light
+    // direction is all that matters and there's no clipping limit. Three.js
+    // builds a shadow map from an orthographic camera placed AT
+    // `light.position`, so two things have to be sized to the scene:
+    //  - light.position must be far enough from the scene that the shadow
+    //    camera's near plane doesn't cut into geometry,
+    //  - shadow.camera.{left,right,top,bottom,far} must contain the
+    //    geometry's projection along the light vector (plus the shadow
+    //    extent across the receiver).
+    // We compute both from the scene bounding sphere after every mesh
+    // build/move, so the bench mirrors PolyCSS's "shadows just work" feel
+    // regardless of scene size.
+    const dirLight = new THREE.DirectionalLight(new THREE.Color(S.dir.color), S.dir.intensity);
+    dirLight.castShadow = true;
+    dirLight.shadow.camera.near = 0.1;
+    dirLight.shadow.mapSize.set(8192, 8192);  // bench: trade memory for crisp edges
+    dirLight.shadow.bias = -0.0005;
+
+    function fitDirLightToScene() {
+      const bbox = new THREE.Box3();
+      threeScene.traverse((obj) => {
+        if (obj.isMesh && obj.geometry) bbox.expandByObject(obj);
+      });
+      if (bbox.isEmpty()) return;
+      const sphere = new THREE.Sphere();
+      bbox.getBoundingSphere(sphere);
+      // Pad for grazing light (shadow length ≈ radius / lightZ). Smallest
+      // safe assumption: shadow extends up to ~10× radius for very low
+      // dir.z. We cover with a 6× safety factor — bigger than typical
+      // grazing extent but stays well under shadow-map precision limits.
+      const r = Math.max(sphere.radius, 1);
+      const frustumR = r * 6;
+      const lightDist = r * 4;
+      const dx = S.dir.x, dy = S.dir.y, dz = S.dir.z;
+      const dlen = Math.hypot(dx, dy, dz) || 1;
+      dirLight.position.set(
+        sphere.center.x + (dx / dlen) * lightDist,
+        sphere.center.y + (dy / dlen) * lightDist,
+        sphere.center.z + (dz / dlen) * lightDist,
+      );
+      dirLight.target.position.copy(sphere.center);
+      dirLight.shadow.camera.left = -frustumR;
+      dirLight.shadow.camera.right = frustumR;
+      dirLight.shadow.camera.top = frustumR;
+      dirLight.shadow.camera.bottom = -frustumR;
+      dirLight.shadow.camera.far = lightDist * 3;
+      dirLight.shadow.camera.updateProjectionMatrix();
+    }
+    threeScene.add(dirLight);
+    threeScene.add(dirLight.target);
+    const ambLight = new THREE.AmbientLight(new THREE.Color(S.amb.color), S.amb.intensity);
+    threeScene.add(ambLight);
+
+    // Light helper marker — both engines render a small box at a NEAR
+    // position derived from the light direction so the user can see + drag
+    // it. The actual light's WORLD position lives much farther out for
+    // shadow-camera precision (see fitDirLightToScene), so the helper
+    // position is computed separately here.
+    const LIGHT_HELPER_DISTANCE = 4; // world units from target
+    // Active-mesh world-space bbox center. The helper orbits this point so
+    // a normalized OBJ that sits in +X+Y+Z (cottage/castle) gets the light
+    // marker near the building rather than way off at world origin.
+    // Returns null when no mesh is mounted yet (initial async load).
+    function activePolyMesh() {
+      if (S.mesh === "cube"     && polyCube)     return polyCube;
+      if (S.mesh === "e"        && polyE)        return polyE;
+      if (S.mesh === "cottage"  && polyCottage)  return polyCottage;
+      if (S.mesh === "castle"   && polyCastle)   return polyCastle;
+      if (S.mesh === "coliseum" && polyColiseum) return polyColiseum;
+      return null;
+    }
+    function activeMeshCenter() {
+      const m = activePolyMesh();
+      if (!m) return [0, 0, 0];
+      const polys = m.polygons;
+      if (!polys || polys.length === 0) return [0, 0, 0];
+      let minX = Infinity, minY = Infinity, minZ = Infinity;
+      let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+      for (const p of polys) {
+        for (const v of p.vertices) {
+          if (v[0] < minX) minX = v[0]; if (v[0] > maxX) maxX = v[0];
+          if (v[1] < minY) minY = v[1]; if (v[1] > maxY) maxY = v[1];
+          if (v[2] < minZ) minZ = v[2]; if (v[2] > maxZ) maxZ = v[2];
+        }
+      }
+      const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2, cz = (minZ + maxZ) / 2;
+      const pos = m.getPosition?.() ?? [0, 0, 0];
+      const scale = m.getScale?.() ?? 1;
+      const sx = typeof scale === "number" ? scale : (scale[0] ?? 1);
+      const sy = typeof scale === "number" ? scale : (scale[1] ?? 1);
+      const sz = typeof scale === "number" ? scale : (scale[2] ?? 1);
+      return [pos[0] + cx * sx, pos[1] + cy * sy, pos[2] + cz * sz];
+    }
+    function computeLightHelperPos() {
+      const dx = S.dir.x, dy = S.dir.y, dz = S.dir.z;
+      const len = Math.hypot(dx, dy, dz) || 1;
+      const c = activeMeshCenter();
+      return [
+        c[0] + (dx / len) * LIGHT_HELPER_DISTANCE,
+        c[1] + (dy / len) * LIGHT_HELPER_DISTANCE,
+        c[2] + (dz / len) * LIGHT_HELPER_DISTANCE,
+      ];
+    }
+    // Three.js helper: simple mesh + a line from the helper to the origin.
+    const lightHelperGeom = new THREE.SphereGeometry(0.2, 16, 16);
+    const lightHelperMat = new THREE.MeshBasicMaterial({ color: 0xffaa00 });
+    const threeLightHelper = new THREE.Mesh(lightHelperGeom, lightHelperMat);
+    threeScene.add(threeLightHelper);
+    const lightLineMat = new THREE.LineBasicMaterial({ color: 0xffaa00 });
+    const lightLineGeom = new THREE.BufferGeometry();
+    lightLineGeom.setFromPoints([new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, 0)]);
+    const threeLightLine = new THREE.Line(lightLineGeom, lightLineMat);
+    threeScene.add(threeLightLine);
+
+    // PolyCSS helper — small OCTAHEDRON (matches the rhombus look from
+    // the gallery's draggable light) at the same NEAR world position.
+    const lightHelperSize = 0.4;
+    const polyLightHelper = polyScene.add(
+      createPolyOctahedron({ center: [0, 0, 0], size: lightHelperSize, color: "#ffaa00" }),
+      { id: "light-helper", position: [0, 0, 0], castShadow: false, receiveShadow: false, excludeFromAutoCenter: true, merge: false },
+    );
+    // Mark the helper's wrapper so the pointer handler below can find it
+    // by selector (same trick the gallery's draggable light uses).
+    polyHost.querySelector('[data-poly-mesh-id="light-helper"]')?.setAttribute("data-light-helper", "1");
+    // Slider value-refreshers for the directional-light dir.x/y/z rows
+    // — populated by buildPanel() so the drag handler can sync the
+    // slider UI as the user moves the helper.
+    const lightSliderRefreshers = [];
+    function refreshLightSliders() { for (const fn of lightSliderRefreshers) fn(); }
+    let lightDragging = false;
+    // Direct pointer-drag on the helper marker — inverse-projects the mouse
+    // to a 3D point on the helper's sphere (radius = LIGHT_HELPER_DISTANCE
+    // around origin), so the rhombus tracks the cursor exactly instead of
+    // approximating with screen-delta rotations. screenToWorldOnSphere is
+    // a core utility that handles the camera's rotZ/rotX/scale chain.
+    // Slider limits (dir.x/y/z ∈ [-2, 2]) are enforced by clamping per
+    // axis after the unprojection.
+    const LIGHT_AXIS_LIMIT = 2;
+    polyHost.addEventListener("pointerdown", (e) => {
+      const target = e.target instanceof Element ? e.target : null;
+      const helperEl = target?.closest('[data-light-helper="1"]');
+      if (!helperEl) return;
+      // stopImmediatePropagation: the bench attaches bindDrag(polyHost)
+      // for camera orbit on the SAME element; only stopImmediate blocks
+      // the orbit listener that comes after this one in registration order.
+      e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation();
+      lightDragging = true;
+      polyHost.setPointerCapture?.(e.pointerId);
+      const onMove = (ev) => {
+        if (!lightDragging) return;
+        ev.preventDefault();
+        const hostRect = polyHost.getBoundingClientRect();
+        const hit = screenToWorldOnSphere({
+          camera: polyScene.camera.state,
+          tileSize: POLY_TILE,
+          viewportCenterX: hostRect.left + hostRect.width / 2,
+          viewportCenterY: hostRect.top + hostRect.height / 2,
+          mouseX: ev.clientX,
+          mouseY: ev.clientY,
+          sphereCenter: activeMeshCenter(),
+          sphereRadius: LIGHT_HELPER_DISTANCE,
+        });
+        if (!hit) return;
+        // `hit` is now in world coords ON the orbit sphere around the
+        // mesh center. The light DIRECTION is the unit vector from
+        // center → hit (not from origin → hit), otherwise dragging a
+        // mesh away from the origin would pre-bake the offset into the
+        // direction vector. Scale to preserve the slider magnitude.
+        const c = activeMeshCenter();
+        const dx = hit[0] - c[0], dy = hit[1] - c[1], dz = hit[2] - c[2];
+        const oldLen = Math.hypot(S.dir.x, S.dir.y, S.dir.z) || 1;
+        const hitLen = Math.hypot(dx, dy, dz) || 1;
+        const sx = (dx / hitLen) * oldLen;
+        const sy = (dy / hitLen) * oldLen;
+        const sz = (dz / hitLen) * oldLen;
+        S.dir.x = Math.max(-LIGHT_AXIS_LIMIT, Math.min(LIGHT_AXIS_LIMIT, sx));
+        S.dir.y = Math.max(-LIGHT_AXIS_LIMIT, Math.min(LIGHT_AXIS_LIMIT, sy));
+        S.dir.z = Math.max(-LIGHT_AXIS_LIMIT, Math.min(LIGHT_AXIS_LIMIT, sz));
+        refreshLightSliders();
+        update(false);
+      };
+      const onUp = (ev) => {
+        if (ev.pointerId !== e.pointerId) return;
+        lightDragging = false;
+        polyHost.releasePointerCapture?.(e.pointerId);
+        window.removeEventListener("pointermove", onMove);
+        window.removeEventListener("pointerup", onUp);
+        window.removeEventListener("pointercancel", onUp);
+        if (S.lighting === "baked") update(true);
+      };
+      window.addEventListener("pointermove", onMove);
+      window.addEventListener("pointerup", onUp);
+      window.addEventListener("pointercancel", onUp);
+    });
+    // Hint the user the helper is grabbable.
+    const helperStyle = polyHost.querySelector('[data-light-helper="1"]');
+    if (helperStyle instanceof HTMLElement) helperStyle.style.cursor = "grab";
+
+    // ─── Camera — same rotX/rotY/zoom drive both ───────────────────────
+    function resizeThree() {
+      const w = threeCanvas.clientWidth, h = threeCanvas.clientHeight;
+      renderer.setSize(w, h, false);
+      // zoom = pixels per world unit. Frustum extent in world units =
+      // canvas pixels / zoom. Bigger zoom = bigger cube. Same direction
+      // as PolyCSS's CSS-scale convention.
+      const halfW = (w * 0.5) / S.cam.zoom;
+      const halfH = (h * 0.5) / S.cam.zoom;
+      camera.left = -halfW; camera.right = halfW;
+      camera.top = halfH; camera.bottom = -halfH;
+      camera.updateProjectionMatrix();
+    }
+    function applyCamera() {
+      const rx = S.cam.rotX * Math.PI / 180;
+      const ry = S.cam.rotY * Math.PI / 180;
+      const dist = 100;
+      camera.position.set(
+        dist * Math.sin(rx) * Math.cos(ry),
+        dist * Math.sin(rx) * Math.sin(ry),
+        dist * Math.cos(rx),
+      );
+      camera.lookAt(0, 0, 0);
+      resizeThree();
+      polyScene.camera.update({ rotX: S.cam.rotX, rotY: S.cam.rotY, zoom: S.cam.zoom });
+      polyScene.applyCamera();
+    }
+    window.addEventListener("resize", () => { applyCamera(); update(); });
+
+    // Renders both scenes. `lightsChanged` triggers PolyCSS atlas re-bake;
+    // omit it for camera-only updates (drag, wheel) to avoid re-rasterising
+    // textured atlases every pointer tick — that's what causes the visible
+    // texture-flicker on cottage drags. Cube + floor solid colors don't need
+    // re-bake on camera moves; viewing angle doesn't affect Lambert.
+    function update(lightsChanged) {
+      // Push every mesh's transform every tick. setTransform is cheap when
+      // values haven't changed; this keeps the bench panel + both engines
+      // in sync without per-mesh slider plumbing.
+      // PolyCSS rotation = degrees (matches PolyMeshTransform.rotation);
+      // Three.js mesh.rotation = radians.
+      if (polyCube)     polyCube.setTransform({     position: [S.obj.cube.x,     S.obj.cube.y,     S.obj.cube.z],     scale: S.obj.cube.scale,     rotation: [S.obj.cube.rx,     S.obj.cube.ry,     S.obj.cube.rz],     castShadow: S.castShadow, receiveShadow: S.selfShadow });
+      if (polyE)        polyE.setTransform({        position: [S.obj.e.x,        S.obj.e.y,        S.obj.e.z],        scale: S.obj.e.scale,        rotation: [S.obj.e.rx,        S.obj.e.ry,        S.obj.e.rz],        castShadow: S.castShadow, receiveShadow: S.selfShadow });
+      if (polyCottage)  polyCottage.setTransform({  position: [S.obj.cottage.x,  S.obj.cottage.y,  S.obj.cottage.z],  scale: S.obj.cottage.scale,  rotation: [S.obj.cottage.rx,  S.obj.cottage.ry,  S.obj.cottage.rz],  castShadow: S.castShadow, receiveShadow: S.selfShadow });
+      if (polyCastle)   polyCastle.setTransform({   position: [S.obj.castle.x,   S.obj.castle.y,   S.obj.castle.z],   scale: S.obj.castle.scale,   rotation: [S.obj.castle.rx,   S.obj.castle.ry,   S.obj.castle.rz],   castShadow: S.castShadow, receiveShadow: S.selfShadow });
+      if (polyColiseum) polyColiseum.setTransform({ position: [S.obj.coliseum.x, S.obj.coliseum.y, S.obj.coliseum.z], scale: S.obj.coliseum.scale, rotation: [S.obj.coliseum.rx, S.obj.coliseum.ry, S.obj.coliseum.rz], castShadow: S.castShadow, receiveShadow: S.selfShadow });
+      // Floor visibility + receiveShadow live-update. visibility:hidden
+      // keeps the mesh in the scene graph (so its position still anchors
+      // shadow ground recomputation); receiveShadow drives the same
+      // hasReceiver branch the gallery's missing flag toggles.
+      polyFloor.element.style.visibility = S.floorVisible ? "" : "hidden";
+      polyFloor.setTransform({ receiveShadow: S.floorReceives });
+      // Scale the shadow's ground-plane lift inversely with camera zoom so
+      // it stays at ~1 SCREEN PIXEL regardless of how far the camera is.
+      // With a fixed lift in world units, low-zoom views (small px/u)
+      // sink the lift below the 3D depth-sort threshold and the floor
+      // mesh wins the z-fight, hiding the cast shadow — the user
+      // reported this on the E mesh at zoom 30 where its ground shadow
+      // vanished. The library's `shadow.lift` is in WORLD UNITS, so a
+      // 1-screen-pixel target lift = 1 / zoom world units.
+      const shadowLift = 1 / Math.max(1, S.cam.zoom);
+      polyScene.setOptions({
+        directionalLight: {
+          direction: [S.dir.x, S.dir.y, S.dir.z],
+          intensity: S.dir.intensity,
+          color: S.dir.color,
+          castShadow: true,
+        },
+        ambientLight: { color: S.amb.color, intensity: S.amb.intensity },
+        textureLighting: S.lighting,
+        shadow: { color: "#000000", opacity: S.shadow.opacity, lift: shadowLift },
+        autoCenter: S.autoCenter,
+      });
+      // Baked mode stores lit colors in atlas pixels → light change requires
+      // re-rasterising every mesh's atlas (visible flicker on textured
+      // meshes). Dynamic mode evaluates Lambert in CSS calc() per-frame
+      // from `--plx/--ply/--plz` vars; setOptions already updated those, so
+      // no re-bake needed.
+      if (lightsChanged && S.lighting === "baked") {
+        if (polyCube) polyCube.rebakeAtlas();
+        if (polyCottage) polyCottage.rebakeAtlas();
+        if (polyCastle) polyCastle.rebakeAtlas();
+        if (polyColiseum) polyColiseum.rebakeAtlas();
+        if (polyE) polyE.rebakeAtlas();
+        polyFloor.rebakeAtlas();
+      }
+      const D2R = Math.PI / 180;
+      if (cubeMesh) {
+        cubeMesh.position.set(S.obj.cube.x, S.obj.cube.y, S.obj.cube.z);
+        cubeMesh.scale.setScalar(S.obj.cube.scale);
+        cubeMesh.rotation.set(S.obj.cube.rx * D2R, S.obj.cube.ry * D2R, S.obj.cube.rz * D2R);
+        cubeMesh.castShadow = S.castShadow;
+        cubeMesh.receiveShadow = S.selfShadow;
+      }
+      if (eGroup) {
+        eGroup.position.set(S.obj.e.x, S.obj.e.y, S.obj.e.z);
+        eGroup.scale.setScalar(S.obj.e.scale);
+        eGroup.rotation.set(S.obj.e.rx * D2R, S.obj.e.ry * D2R, S.obj.e.rz * D2R);
+        eGroup.traverse(c => { if (c.isMesh) { c.castShadow = S.castShadow; c.receiveShadow = S.selfShadow; } });
+      }
+      if (cottageGroup) {
+        cottageGroup.position.set(S.obj.cottage.x, S.obj.cottage.y, S.obj.cottage.z);
+        cottageGroup.scale.setScalar(S.obj.cottage.scale);
+        cottageGroup.rotation.set(S.obj.cottage.rx * D2R, S.obj.cottage.ry * D2R, S.obj.cottage.rz * D2R);
+        cottageGroup.traverse(c => { if (c.isMesh) { c.castShadow = S.castShadow; c.receiveShadow = S.selfShadow; } });
+      }
+      if (castleGroup) {
+        castleGroup.position.set(S.obj.castle.x, S.obj.castle.y, S.obj.castle.z);
+        castleGroup.scale.setScalar(S.obj.castle.scale);
+        castleGroup.rotation.set(S.obj.castle.rx * D2R, S.obj.castle.ry * D2R, S.obj.castle.rz * D2R);
+        castleGroup.traverse(c => { if (c.isMesh) { c.castShadow = S.castShadow; c.receiveShadow = S.selfShadow; } });
+      }
+      if (coliseumGroup) {
+        coliseumGroup.position.set(S.obj.coliseum.x, S.obj.coliseum.y, S.obj.coliseum.z);
+        coliseumGroup.scale.setScalar(S.obj.coliseum.scale);
+        coliseumGroup.rotation.set(S.obj.coliseum.rx * D2R, S.obj.coliseum.ry * D2R, S.obj.coliseum.rz * D2R);
+        coliseumGroup.traverse(c => { if (c.isMesh) { c.castShadow = S.castShadow; c.receiveShadow = S.selfShadow; } });
+      }
+      floorMesh.visible = S.floorVisible;
+      floorMesh.receiveShadow = S.floorReceives;
+      fitDirLightToScene();
+      dirLight.intensity = S.dir.intensity;
+      dirLight.color.set(S.dir.color);
+      ambLight.intensity = S.amb.intensity;
+      ambLight.color.set(S.amb.color);
+      // Sync both light-helper markers to a NEAR world position derived
+      // from the light direction (separate from dirLight.position, which
+      // sits far away for shadow-camera precision). Drag-induced changes
+      // to S.dir.x/y/z are propagated here automatically.
+      const helperPos = computeLightHelperPos();
+      threeLightHelper.position.set(helperPos[0], helperPos[1], helperPos[2]);
+      lightLineGeom.setFromPoints([
+        new THREE.Vector3(helperPos[0], helperPos[1], helperPos[2]),
+        new THREE.Vector3(dirLight.target.position.x, dirLight.target.position.y, dirLight.target.position.z),
+      ]);
+      // Always push the helper to the freshly-computed direction-derived
+      // position. The drag handler updates S.dir.{x,y,z} → update() →
+      // computeLightHelperPos() → here. The rhombus visibly follows
+      // the mouse this way.
+      if (polyLightHelper) {
+        polyLightHelper.setTransform({ position: helperPos });
+      }
+      applyShadowsOnly();
+      renderer.render(threeScene, camera);
+    }
+
+    // "Shadows only" comparison mode. Renders just the shadow data on
+    // each side — no surfaces, no textures, no shading. What you see
+    // IS the shadow contribution and nothing else.
+    //   - PolyCSS: hide every .polycss-mesh wrapper (visibility:hidden).
+    //     Shadow SVGs (ground + per-receiver-face) are .polycss-shadow
+    //     siblings under .polycss-scene, so they keep rendering. The
+    //     ground-shadow SVG shows the cast shadow on the floor; the
+    //     receiver-face SVGs sit in 3D at each receiving face and show
+    //     shadows-on-objects floating in space.
+    //   - Three.js: swap every mesh material (casters AND floor) to
+    //     THREE.ShadowMaterial. It renders ONLY the shadow that falls
+    //     on the surface, leaving the rest fully transparent — so the
+    //     scene shows only the shadow-map contribution. Original
+    //     materials are restored when the toggle is turned off.
+    const _origThreeMats = new WeakMap();
+    function applyShadowsOnly() {
+      for (const m of polyHost.querySelectorAll(".polycss-mesh")) {
+        // display:none beats visibility:hidden here — leaves inside the
+        // mesh use transform-style: preserve-3d which paints them in a
+        // separate compositor layer that ignores parent `visibility`.
+        m.style.display = S.shadowsOnly ? "none" : "";
+      }
+      // Recolor every shadow SVG path to a uniform semi-transparent black.
+      // PolyCSS receiver shadows for SOLID surfaces are painted with the
+      // receiver's ambient-only color (e.g. dark navy for the E) — that
+      // IS the shadow data physically, but visually it reads as "the
+      // mesh is still there" rather than as a shadow. Forcing every
+      // shadow SVG to render as semi-transparent black makes the layer
+      // read as a true shadow overlay so it's directly comparable to
+      // Three.js's ShadowMaterial output. Original attributes are saved
+      // on the element so toggling off restores the production styling.
+      for (const svg of polyHost.querySelectorAll(".polycss-shadow")) {
+        // Only override stroke when the path actually had one — receiver
+        // SVGs don't set a stroke (per-polygon clip slivers would render
+        // as visible outlines), so leave their stroke attribute alone.
+        const hadStroke = (path) => path.getAttribute("stroke-width") != null;
+        for (const path of svg.querySelectorAll("path")) {
+          if (S.shadowsOnly) {
+            if (!path.dataset.origFill) {
+              path.dataset.origFill = path.getAttribute("fill") ?? "";
+              path.dataset.origStroke = path.getAttribute("stroke") ?? "";
+              path.dataset.origOpacity = path.getAttribute("opacity") ?? "";
+            }
+            path.setAttribute("fill", "#000000");
+            if (hadStroke(path)) path.setAttribute("stroke", "#000000");
+            path.setAttribute("opacity", "0.5");
+          } else if (path.dataset.origFill !== undefined) {
+            path.setAttribute("fill", path.dataset.origFill);
+            if (hadStroke(path)) path.setAttribute("stroke", path.dataset.origStroke);
+            path.setAttribute("opacity", path.dataset.origOpacity);
+            delete path.dataset.origFill;
+            delete path.dataset.origStroke;
+            delete path.dataset.origOpacity;
+          }
+        }
+        // Debug split: in shadows-only mode, decompose each library path
+        // into one <path> per subpath inside an <g style="isolation:
+        // isolate"> wrapper so each sub-shadow is independently
+        // clickable in DevTools (carries data-poly-shadow-caster-poly
+        // pointing at the source polygon index). The isolation group
+        // ensures overlapping paths inside don't double-darken — they
+        // paint into the group buffer at full opacity, then the buffer
+        // composites onto the parent SVG at the group's opacity.
+        //
+        // Re-read the original path's `d` every cycle: emitSceneShadows
+        // rewrites it on every light/option change, so we always split
+        // from the CURRENT d, not a stale saved copy. We don't restore
+        // anything to the original; the library keeps writing fresh d
+        // to it. We just hide it (display:none) when split children
+        // are present and unhide it when shadowsOnly is off.
+        for (const g of svg.querySelectorAll("g.poly-debug-split")) g.remove();
+        for (const path of svg.querySelectorAll("path")) {
+          path.style.display = S.shadowsOnly ? "" : "";
+        }
+        if (!S.shadowsOnly) continue;
+        for (const path of svg.querySelectorAll("path")) {
+          if (path.classList.contains("poly-debug-split-child")) continue;
+          const d = path.getAttribute("d") ?? "";
+          if (!d.includes("M")) continue;
+          const polysAttr = path.getAttribute("data-poly-shadow-caster-polys");
+          let polys = null;
+          try { polys = JSON.parse(polysAttr ?? "null"); } catch {}
+          const subs = d.split(/(?=M)/).filter(Boolean);
+          if (subs.length <= 1) continue;
+          // Hide the merged path while showing the split children.
+          path.style.display = "none";
+          const ns = "http://www.w3.org/2000/svg";
+          const opacity = path.getAttribute("opacity") ?? "0.5";
+          const fill = path.getAttribute("fill") ?? "#000000";
+          const stroke = path.getAttribute("stroke");
+          const casterId = path.getAttribute("data-poly-shadow-caster") ?? "";
+          const wrap = document.createElementNS(ns, "g");
+          wrap.setAttribute("class", "poly-debug-split");
+          wrap.setAttribute("style", `isolation:isolate;opacity:${opacity}`);
+          for (let i = 0; i < subs.length; i++) {
+            const child = document.createElementNS(ns, "path");
+            child.setAttribute("d", subs[i]);
+            child.setAttribute("fill", fill);
+            child.setAttribute("fill-rule", "nonzero");
+            if (stroke) child.setAttribute("stroke", stroke);
+            if (casterId) child.setAttribute("data-poly-shadow-caster", casterId);
+            const polyIdx = Array.isArray(polys) ? polys[i] : undefined;
+            if (polyIdx !== undefined) {
+              child.setAttribute("data-poly-shadow-caster-poly", String(polyIdx));
+            }
+            child.setAttribute("data-poly-shadow-subpath-index", String(i));
+            wrap.appendChild(child);
+          }
+          path.after(wrap);
+        }
+      }
+      const threeObjs = [cubeMesh, eGroup, cottageGroup, castleGroup, floorMesh].filter(Boolean);
+      for (const obj of threeObjs) {
+        obj.traverse(o => {
+          if (!o.material) return;
+          if (S.shadowsOnly) {
+            if (!_origThreeMats.has(o)) _origThreeMats.set(o, o.material);
+            o.material = new THREE.ShadowMaterial({ color: 0x000000, opacity: S.shadow.opacity });
+            o.material.transparent = true;
+          } else if (_origThreeMats.has(o)) {
+            o.material = _origThreeMats.get(o);
+            _origThreeMats.delete(o);
+          }
+        });
+      }
+    }
+    function loop() { renderer.render(threeScene, camera); requestAnimationFrame(loop); }
+
+    // Slider value refreshers for the Object section — invoked when the
+    // active mesh switches so the sliders display the new mesh's state
+    // instead of the previous mesh's. Populated by buildPanel() as each
+    // Object row is built.
+    const objectRowRefreshers = [];
+    function refreshObjectRows() {
+      for (const fn of objectRowRefreshers) fn();
+    }
+
+    async function setMesh(name) {
+      S.mesh = name;
+      if (polyCube) { polyCube.remove(); polyCube = null; }
+      if (polyCottage) { polyCottage.remove(); polyCottage = null; }
+      if (polyCastle) { polyCastle.remove(); polyCastle = null; }
+      if (polyColiseum) { polyColiseum.remove(); polyColiseum = null; }
+      if (polyE) { polyE.remove(); polyE = null; }
+      if (cubeMesh) { threeScene.remove(cubeMesh); cubeMesh = null; }
+      if (cottageGroup) { threeScene.remove(cottageGroup); cottageGroup = null; }
+      if (castleGroup) { threeScene.remove(castleGroup); castleGroup = null; }
+      if (coliseumGroup) { threeScene.remove(coliseumGroup); coliseumGroup = null; }
+      if (eGroup) { threeScene.remove(eGroup); eGroup = null; }
+      if (name === "cube") {
+        buildPolyCube();
+        buildThreeCube();
+      } else if (name === "e") {
+        buildPolyE();
+        buildThreeE();
+      } else if (name === "castle") {
+        await Promise.all([buildPolyCastle(), buildThreeCastle()]);
+      } else if (name === "coliseum") {
+        await Promise.all([buildPolyColiseum(), buildThreeColiseum()]);
+      } else {
+        await Promise.all([buildPolyCottage(), buildThreeCottage()]);
+      }
+      // Refresh object-row sliders to reflect the new active mesh's state.
+      refreshObjectRows();
+      // Newly built mesh has not seen the current light values yet — bake.
+      update(true);
+    }
+
+    applyCamera();
+    (async () => {
+      if (S.mesh === "cottage") await Promise.all([buildPolyCottage(), buildThreeCottage()]);
+      else if (S.mesh === "castle") await Promise.all([buildPolyCastle(), buildThreeCastle()]);
+      else if (S.mesh === "coliseum") await Promise.all([buildPolyColiseum(), buildThreeColiseum()]);
+      else if (S.mesh === "e") { buildPolyE(); buildThreeE(); }
+      update(true);
+      loop();
+      window.__polyCube = polyCube;
+      window.__polyE = polyE;
+      window.__polyCottage = polyCottage;
+      window.__polyCastle = polyCastle;
+      window.__polyColiseum = polyColiseum;
+      window.__polyScene = polyScene;
+      window.__ready = true;
+    })();
+
+    // ─── Controls ───────────────────────────────────────────────────────
+    const camSliders = {};
+    function setCamSliders() {
+      for (const k of Object.keys(camSliders)) {
+        const s = camSliders[k];
+        s.input.value = S.cam[k];
+        s.val.textContent = s.fmt(S.cam[k]);
+      }
+    }
+    function bindDrag(el) {
+      let down = false, lx = 0, ly = 0;
+      el.addEventListener("pointerdown", (e) => { down = true; lx = e.clientX; ly = e.clientY; el.setPointerCapture(e.pointerId); });
+      el.addEventListener("pointerup", (e) => { down = false; try { el.releasePointerCapture(e.pointerId); } catch {} });
+      el.addEventListener("pointermove", (e) => {
+        if (!down) return;
+        const dx = e.clientX - lx, dy = e.clientY - ly;
+        lx = e.clientX; ly = e.clientY;
+        S.cam.rotY = (S.cam.rotY + dx * 0.4) % 360;
+        if (S.cam.rotY < 0) S.cam.rotY += 360;
+        S.cam.rotX = Math.max(0, Math.min(90, S.cam.rotX - dy * 0.4));
+        setCamSliders();
+        applyCamera(); update();
+      });
+      el.addEventListener("wheel", (e) => {
+        e.preventDefault();
+        const f = Math.exp(-e.deltaY * 0.001);
+        S.cam.zoom = Math.max(1, Math.min(500, S.cam.zoom * f));
+        setCamSliders();
+        applyCamera(); update();
+      }, { passive: false });
+    }
+    bindDrag(polyHost);
+    bindDrag(threeCanvas);
+
+    function buildPanel() {
+      const p = document.getElementById("panel");
+      const info = document.createElement("div");
+      info.className = "info";
+      info.innerHTML = "Same numbers → both engines. <br/>" +
+        "Convention: +Z up, +X right, +Y forward. <br/>" +
+        "Crosshair = world origin (0,0,0).";
+      p.appendChild(info);
+
+      // Copy-state button: dump every slider/dropdown value as a sharable
+      // URL query string so divergences are easy to reproduce.
+      const copyBtn = document.createElement("button");
+      copyBtn.type = "button";
+      copyBtn.textContent = "Copy state URL";
+      copyBtn.style.cssText = "margin: 4px 0 8px; padding: 6px 10px; font: inherit; " +
+        "background:#0f172a; color:#f8fafc; border:1px solid #1e293b; border-radius:4px; cursor:pointer;";
+      copyBtn.addEventListener("click", async () => {
+        const q = new URLSearchParams();
+        q.set("mesh", S.mesh);
+        q.set("light", S.lighting);
+        q.set("dx", String(S.dir.x));
+        q.set("dy", String(S.dir.y));
+        q.set("dz", String(S.dir.z));
+        q.set("di", String(S.dir.intensity));
+        q.set("ai", String(S.amb.intensity));
+        if (S.dir.color !== "#ffffff") q.set("dc", S.dir.color);
+        if (S.amb.color !== "#ffffff") q.set("ac", S.amb.color);
+        q.set("so", String(S.shadow.opacity));
+        q.set("rx", String(S.cam.rotX));
+        q.set("ry", String(S.cam.rotY));
+        q.set("z",  String(S.cam.zoom));
+        // Per-mesh transform — only emit keys for the active mesh and
+        // only for non-default values (keeps URLs short).
+        const o = S.obj[S.mesh];
+        const defaultZ = S.mesh === "cube" ? 1 : 0;
+        if (o) {
+          if (o.x !== 0)        q.set(`ox_${S.mesh}`,  String(o.x));
+          if (o.y !== 0)        q.set(`oy_${S.mesh}`,  String(o.y));
+          if (o.z !== defaultZ) q.set(`oz_${S.mesh}`,  String(o.z));
+          if (o.scale !== 1)    q.set(`os_${S.mesh}`,  String(o.scale));
+          if (o.rx !== 0)       q.set(`orx_${S.mesh}`, String(o.rx));
+          if (o.ry !== 0)       q.set(`ory_${S.mesh}`, String(o.ry));
+          if (o.rz !== 0)       q.set(`orz_${S.mesh}`, String(o.rz));
+        }
+        if (S.shadowsOnly) q.set("sx", "1");
+        if (!S.selfShadow) q.set("ss", "0");
+        if (!S.castShadow) q.set("cs", "0");
+        if (!S.floorVisible) q.set("fv", "0");
+        if (!S.floorReceives) q.set("fr", "0");
+        if (S.autoCenter) q.set("ax", "1");
+        const url = location.origin + location.pathname + "?" + q.toString();
+        try { await navigator.clipboard.writeText(url); copyBtn.textContent = "Copied ✓"; }
+        catch { copyBtn.textContent = url; }
+        setTimeout(() => { copyBtn.textContent = "Copy state URL"; }, 2000);
+      });
+      p.appendChild(copyBtn);
+
+      // Shadows-only toggle: hides every caster's geometry while leaving
+      // the shadow elements (PolyCSS SVGs, Three.js shadow-map output)
+      // visible. Useful for isolating shadow-shape differences from the
+      // surrounding mesh paint.
+      const shadowsOnlyLabel = document.createElement("label");
+      shadowsOnlyLabel.style.cssText = "display:flex; gap:6px; align-items:center; margin: 0 0 8px;";
+      const shadowsOnlyCheck = document.createElement("input");
+      shadowsOnlyCheck.type = "checkbox";
+      shadowsOnlyCheck.checked = !!S.shadowsOnly;
+      shadowsOnlyCheck.addEventListener("change", () => {
+        S.shadowsOnly = shadowsOnlyCheck.checked;
+        update();
+      });
+      shadowsOnlyLabel.appendChild(shadowsOnlyCheck);
+      shadowsOnlyLabel.appendChild(document.createTextNode("Shadows only"));
+      p.appendChild(shadowsOnlyLabel);
+
+      // Self-shadow toggle — flips `receiveShadow` on the active mesh in
+      // both engines. Off = mesh only casts onto the floor; on = caster
+      // polys project shadows onto the mesh's own faces (Three.js parity
+      // matches when receiveShadow=true on the mesh's THREE.Mesh).
+      const selfShadowLabel = document.createElement("label");
+      selfShadowLabel.style.cssText = "display:flex; gap:6px; align-items:center; margin: 0 0 8px;";
+      const selfShadowCheck = document.createElement("input");
+      selfShadowCheck.type = "checkbox";
+      selfShadowCheck.checked = !!S.selfShadow;
+      selfShadowCheck.addEventListener("change", () => {
+        S.selfShadow = selfShadowCheck.checked;
+        update(true);
+      });
+      selfShadowLabel.appendChild(selfShadowCheck);
+      selfShadowLabel.appendChild(document.createTextNode("Self-shadow"));
+      p.appendChild(selfShadowLabel);
+
+      // Cast-shadow toggle on the active model. Gallery splits this from
+      // Self-shadow; reproducing it here lets us drive the engine into the
+      // same combinations (cast=on/self=on, cast=on/self=off, etc.).
+      const castShadowLabel = document.createElement("label");
+      castShadowLabel.style.cssText = "display:flex; gap:6px; align-items:center; margin: 0 0 8px;";
+      const castShadowCheck = document.createElement("input");
+      castShadowCheck.type = "checkbox";
+      castShadowCheck.checked = !!S.castShadow;
+      castShadowCheck.addEventListener("change", () => {
+        S.castShadow = castShadowCheck.checked;
+        update(true);
+      });
+      castShadowLabel.appendChild(castShadowCheck);
+      castShadowLabel.appendChild(document.createTextNode("Cast shadow"));
+      p.appendChild(castShadowLabel);
+
+      // Floor mesh visibility — gallery's "Show ground". Hiding the floor
+      // mesh removes the only real shadow receiver from the scene; the
+      // engine then falls back to the virtual ground for the cast shadow.
+      const floorVisibleLabel = document.createElement("label");
+      floorVisibleLabel.style.cssText = "display:flex; gap:6px; align-items:center; margin: 0 0 8px;";
+      const floorVisibleCheck = document.createElement("input");
+      floorVisibleCheck.type = "checkbox";
+      floorVisibleCheck.checked = !!S.floorVisible;
+      floorVisibleCheck.addEventListener("change", () => {
+        S.floorVisible = floorVisibleCheck.checked;
+        update(true);
+      });
+      floorVisibleLabel.appendChild(floorVisibleCheck);
+      floorVisibleLabel.appendChild(document.createTextNode("Floor visible"));
+      p.appendChild(floorVisibleLabel);
+
+      // Floor `receiveShadow` toggle. THE knob that reproduces the gallery
+      // bug — gallery's ground mesh is added WITHOUT receiveShadow:true,
+      // so once the model also receives shadows (selfShadow on), the
+      // engine's hasReceiver branch hides the virtual ground SVG and the
+      // floor doesn't paint one either → ground shadow vanishes.
+      const floorReceivesLabel = document.createElement("label");
+      floorReceivesLabel.style.cssText = "display:flex; gap:6px; align-items:center; margin: 0 0 8px;";
+      const floorReceivesCheck = document.createElement("input");
+      floorReceivesCheck.type = "checkbox";
+      floorReceivesCheck.checked = !!S.floorReceives;
+      floorReceivesCheck.addEventListener("change", () => {
+        S.floorReceives = floorReceivesCheck.checked;
+        update(true);
+      });
+      floorReceivesLabel.appendChild(floorReceivesCheck);
+      floorReceivesLabel.appendChild(document.createTextNode("Floor receives shadow"));
+      p.appendChild(floorReceivesLabel);
+
+      // autoCenter — PolyCSS-only toggle. When on the engine recentres
+      // the scene-root translate around the union of non-helper meshes,
+      // which can make the two engines visually diverge (Three has no
+      // parallel). Useful for debugging gallery presets that set it.
+      const autoCenterLabel = document.createElement("label");
+      autoCenterLabel.style.cssText = "display:flex; gap:6px; align-items:center; margin: 0 0 8px;";
+      const autoCenterCheck = document.createElement("input");
+      autoCenterCheck.type = "checkbox";
+      autoCenterCheck.checked = !!S.autoCenter;
+      autoCenterCheck.addEventListener("change", () => {
+        S.autoCenter = autoCenterCheck.checked;
+        update(true);
+      });
+      autoCenterLabel.appendChild(autoCenterCheck);
+      autoCenterLabel.appendChild(document.createTextNode("Auto-center (PolyCSS only)"));
+      p.appendChild(autoCenterLabel);
+
+      // Mesh + lighting dropdowns
+      const meshSec = document.createElement("div");
+      meshSec.className = "sec";
+      meshSec.textContent = "Mesh";
+      p.appendChild(meshSec);
+      const meshRow = document.createElement("div");
+      meshRow.className = "row";
+      const meshLabel = document.createElement("label");
+      meshLabel.textContent = "model";
+      meshRow.appendChild(meshLabel);
+      const meshSel = document.createElement("select");
+      for (const opt of ["cube", "e", "cottage", "castle", "coliseum"]) {
+        const o = document.createElement("option");
+        o.value = opt; o.textContent = opt;
+        if (S.mesh === opt) o.selected = true;
+        meshSel.appendChild(o);
+      }
+      meshSel.style.gridColumn = "2 / span 2";
+      meshSel.addEventListener("change", async () => {
+        await setMesh(meshSel.value);
+      });
+      meshRow.appendChild(meshSel);
+      p.appendChild(meshRow);
+
+      // Lighting mode dropdown — baked = byte-parity but flickers on light
+      // change, dynamic = no flicker but approximate texture brightness.
+      const lightRow = document.createElement("div");
+      lightRow.className = "row";
+      const lightLabel = document.createElement("label");
+      lightLabel.textContent = "lighting";
+      lightRow.appendChild(lightLabel);
+      const lightSel = document.createElement("select");
+      for (const opt of ["baked", "dynamic"]) {
+        const o = document.createElement("option");
+        o.value = opt; o.textContent = opt;
+        if (S.lighting === opt) o.selected = true;
+        lightSel.appendChild(o);
+      }
+      lightSel.style.gridColumn = "2 / span 2";
+      lightSel.addEventListener("change", () => {
+        S.lighting = lightSel.value;
+        update(true);
+      });
+      lightRow.appendChild(lightSel);
+      p.appendChild(lightRow);
+
+      const rows = [
+        // Object transform — one section. Sliders bind to the currently
+        // selected mesh's entry under S.obj (cube / e / cottage). When the
+        // mesh dropdown switches, refreshObjectRows() rebinds the sliders'
+        // values to the new mesh's state.
+        { sec: "Object" },
+        { k: ["obj", "x"],     min: -10,  max: 10,  step: 0.1,  fmt: (v) => v.toFixed(2),       obj: true },
+        { k: ["obj", "y"],     min: -10,  max: 10,  step: 0.1,  fmt: (v) => v.toFixed(2),       obj: true },
+        { k: ["obj", "z"],     min: -10,  max: 10,  step: 0.1,  fmt: (v) => v.toFixed(2),       obj: true },
+        { k: ["obj", "scale"], min: 0.01, max: 6,   step: 0.01, fmt: (v) => v.toFixed(2),       obj: true },
+        { k: ["obj", "rx"],    min: -180, max: 180, step: 1,    fmt: (v) => v.toFixed(0) + "°", obj: true },
+        { k: ["obj", "ry"],    min: -180, max: 180, step: 1,    fmt: (v) => v.toFixed(0) + "°", obj: true },
+        { k: ["obj", "rz"],    min: -180, max: 180, step: 1,    fmt: (v) => v.toFixed(0) + "°", obj: true },
+        { sec: "Directional light" },
+        { k: ["dir", "x"], min: -2, max: 2, step: 0.05, fmt: (v) => v.toFixed(2) },
+        { k: ["dir", "y"], min: -2, max: 2, step: 0.05, fmt: (v) => v.toFixed(2) },
+        { k: ["dir", "z"], min: -2, max: 2, step: 0.05, fmt: (v) => v.toFixed(2) },
+        { k: ["dir", "intensity"], min: 0, max: 3, step: 0.05, fmt: (v) => v.toFixed(2) },
+        { k: ["dir", "color"], color: true, label: "color" },
+        { sec: "Ambient" },
+        { k: ["amb", "intensity"], min: 0, max: 1, step: 0.01, fmt: (v) => v.toFixed(2) },
+        { k: ["amb", "color"], color: true, label: "color" },
+        { sec: "Shadow" },
+        { k: ["shadow", "opacity"], min: 0, max: 1, step: 0.01, fmt: (v) => v.toFixed(2) },
+        { sec: "Camera" },
+        { k: ["cam", "rotX"], min: 0, max: 90, step: 1, fmt: (v) => v + "°", camera: true },
+        { k: ["cam", "rotY"], min: 0, max: 359, step: 1, fmt: (v) => v + "°", camera: true },
+        { k: ["cam", "zoom"], min: 1, max: 200, step: 1, fmt: (v) => v.toFixed(0) + " px/u", camera: true },
+      ];
+
+      for (const r of rows) {
+        if (r.sec) {
+          const s = document.createElement("div"); s.className = "sec"; s.textContent = r.sec;
+          p.appendChild(s);
+          continue;
+        }
+        if (r.color) {
+          // Native <input type=color> with the same row grid as the sliders.
+          // Both engines accept "#rrggbb" strings directly; setOptions /
+          // dirLight.color.set on next update() applies the change. Baked
+          // mode finalises on commit just like the intensity sliders.
+          const row = document.createElement("div"); row.className = "row";
+          const lab = document.createElement("label");
+          lab.textContent = r.label ?? r.k.join(".");
+          row.appendChild(lab);
+          const inp = document.createElement("input");
+          inp.type = "color";
+          inp.style.gridColumn = "2 / span 2";
+          inp.style.height = "20px";
+          inp.style.border = "1px solid #cbd5e1";
+          inp.style.background = "#fff";
+          inp.value = S[r.k[0]][r.k[1]];
+          let dragging = false;
+          let endTimer = null;
+          const finalize = () => {
+            if (S.lighting !== "baked" || !dragging) return;
+            if (endTimer) clearTimeout(endTimer);
+            endTimer = setTimeout(() => { endTimer = null; dragging = false; update(true); }, 150);
+          };
+          inp.addEventListener("pointerdown", () => {
+            if (S.lighting !== "baked") return;
+            dragging = true;
+            if (endTimer) { clearTimeout(endTimer); endTimer = null; }
+          });
+          inp.addEventListener("pointerup", finalize);
+          inp.addEventListener("change", finalize);
+          inp.addEventListener("input", () => {
+            S[r.k[0]][r.k[1]] = inp.value;
+            const lightsChanged = !dragging && S.lighting === "baked";
+            update(lightsChanged);
+          });
+          row.appendChild(inp);
+          p.appendChild(row);
+          continue;
+        }
+        const row = document.createElement("div"); row.className = "row";
+        const lab = document.createElement("label");
+        lab.textContent = r.obj ? r.k[1] : r.k.join(".");
+        row.appendChild(lab);
+        const inp = document.createElement("input");
+        inp.type = "range"; inp.min = r.min; inp.max = r.max; inp.step = r.step;
+        // Object-transform rows read S.obj[S.mesh][field] so the slider
+        // value follows the active mesh; everything else reads its own
+        // [section][field] directly.
+        const getVal = r.obj ? () => S.obj[S.mesh][r.k[1]] : () => S[r.k[0]][r.k[1]];
+        const setVal = r.obj ? (v) => { S.obj[S.mesh][r.k[1]] = v; } : (v) => { S[r.k[0]][r.k[1]] = v; };
+        inp.value = getVal();
+        const val = document.createElement("span"); val.className = "val"; val.textContent = r.fmt(getVal());
+        if (r.obj) objectRowRefreshers.push(() => { const v = getVal(); inp.value = v; val.textContent = r.fmt(v); });
+        // Light-direction sliders (dir.x/y/z) also need a refresher hook
+        // so the gizmo drag can sync the slider UI as the user drags the
+        // light marker around in 3D.
+        if (r.k[0] === "dir" && (r.k[1] === "x" || r.k[1] === "y" || r.k[1] === "z")) {
+          lightSliderRefreshers.push(() => { const v = getVal(); inp.value = v; val.textContent = r.fmt(v); });
+        }
+        const isLightSlider = (r.k[0] === "dir" || r.k[0] === "amb");
+        // Baked mode is treated as truly static: while a light slider is
+        // being dragged, the meshes don't repaint. A single rebake fires
+        // 150ms after the last input event so the final state lands on
+        // the precise baked Lambert. Dynamic mode (CSS calc per pixel)
+        // updates per-frame as setOptions writes the light-direction
+        // vars to the scene root — no rebake needed there.
+        let dragging = false;
+        let endTimer = null;
+        const onDragStart = () => {
+          if (!isLightSlider || S.lighting !== "baked") return;
+          dragging = true;
+          if (endTimer) { clearTimeout(endTimer); endTimer = null; }
+        };
+        const onDragEnd = () => {
+          if (!isLightSlider || S.lighting !== "baked" || !dragging) return;
+          if (endTimer) clearTimeout(endTimer);
+          endTimer = setTimeout(() => {
+            endTimer = null;
+            dragging = false;
+            update(true);
+          }, 150);
+        };
+        inp.addEventListener("pointerdown", onDragStart);
+        inp.addEventListener("pointerup", onDragEnd);
+        inp.addEventListener("change", onDragEnd);
+        inp.addEventListener("input", () => {
+          const v = +inp.value;
+          setVal(v);
+          val.textContent = r.fmt(v);
+          if (r.camera) applyCamera();
+          // Suppress per-tick rebake during baked-mode drag — debounced
+          // finalize handles it. Dynamic mode never rebakes here either.
+          // update() pushes every mesh's full transform (pos + scale), so
+          // object-transform changes don't need any special handling.
+          const lightsChanged = isLightSlider && !dragging && S.lighting === "baked";
+          update(lightsChanged);
+        });
+        row.appendChild(inp); row.appendChild(val);
+        p.appendChild(row);
+        if (r.camera) camSliders[r.k[1]] = { input: inp, val, fmt: r.fmt };
+      }
+    }
+    buildPanel();
+  </script>
+</body>
+</html>

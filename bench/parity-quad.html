@@ -1,0 +1,330 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>polycss parity quad — vanilla / React / Vue / HTML</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; height: 100%; background: #eef2f6; font-family: ui-sans-serif, system-ui, sans-serif; color: #1e293b; }
+    /* 2x2 stage grid + 360px right panel — same layout as shadow-oracle. */
+    body {
+      display: grid;
+      grid-template-columns: 1fr 1fr 360px;
+      grid-template-rows: 1fr 1fr;
+      grid-template-areas:
+        "vanilla react   panel"
+        "vue     html-ce panel";
+      height: 100vh; overflow: hidden;
+    }
+    .stage { position: relative; overflow: hidden; border-right: 1px solid #cbd5e1; border-bottom: 1px solid #cbd5e1; background: #0a0c10; }
+    .stage.vanilla { grid-area: vanilla; }
+    .stage.react   { grid-area: react; }
+    .stage.vue     { grid-area: vue; }
+    .stage.html-ce { grid-area: html-ce; }
+    .stage > h3 { position: absolute; top: 10px; left: 14px; margin: 0; font-size: 16px; letter-spacing: 0.06em; text-transform: uppercase; color: #ef4444; z-index: 10; }
+    .stage > h3 a { color: inherit; text-decoration: none; pointer-events: auto; padding: 2px 6px; border-radius: 3px; }
+    .stage > h3 a:hover { background: rgba(239, 68, 68, 0.18); text-decoration: underline; }
+    .stage > h3 a::after { content: " ↗"; font-size: 0.75em; opacity: 0.7; }
+    .stage > iframe { width: 100%; height: 100%; border: 0; background: #0a0c10; display: block; }
+    #panel { grid-area: panel; padding: 12px; background: #f8fafc; overflow-y: auto; border-left: 1px solid #cbd5e1; font-size: 12px; }
+    #panel .sec { margin: 14px 0 6px; font-weight: 600; color: #0f172a; font-size: 11px; letter-spacing: 0.05em; text-transform: uppercase; }
+    #panel .row { display: grid; grid-template-columns: 70px 1fr 60px; gap: 6px; align-items: center; margin: 3px 0; }
+    #panel .row > label { color: #475569; }
+    #panel .row > .val { text-align: right; font-variant-numeric: tabular-nums; }
+    #panel .row > input[type=range] { width: 100%; }
+    #panel .row > input[type=number], #panel .row > select { background: #fff; color: #1e293b; border: 1px solid #cbd5e1; padding: 3px 6px; border-radius: 3px; font: inherit; }
+    #panel .row > input[type=checkbox] { justify-self: start; }
+    #panel .row > input[type=color] { height: 22px; padding: 0; border: 1px solid #cbd5e1; background: #fff; }
+    #panel button { background: #3b82f6; color: #fff; border: 0; padding: 5px 12px; border-radius: 3px; cursor: pointer; font: inherit; }
+    #panel button:hover { background: #2563eb; }
+    #panel .info { font-size: 11px; color: #64748b; line-height: 1.4; margin: 8px 0 12px; padding: 8px; background: #fff; border: 1px solid #e2e8f0; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <div class="stage vanilla"><h3><a id="vanilla-link" target="_blank" rel="noopener">vanilla</a></h3><iframe id="vanilla-iframe"></iframe></div>
+  <div class="stage react"><h3><a id="react-link" target="_blank" rel="noopener">react</a></h3><iframe id="react-iframe"></iframe></div>
+  <div class="stage vue"><h3><a id="vue-link" target="_blank" rel="noopener">vue</a></h3><iframe id="vue-iframe"></iframe></div>
+  <div class="stage html-ce"><h3><a id="html-link" target="_blank" rel="noopener">html (custom elements)</a></h3><iframe id="html-iframe"></iframe></div>
+  <div id="panel"></div>
+
+  <script>
+    // 4-up parity inspector. Each pane is an iframe loading perf-<r>.html
+    // with the full config encoded as URL params plus ?sync=1 so the page
+    // listens for parent postMessage updates. Reload-only params (mesh,
+    // lighting mode, shadow flags, autoCenter) rebuild the iframe.src.
+    // Live params (camera, light, ambient, object transform, shadow opacity
+    // / lift) broadcast via postMessage so all four panes track in real time.
+    const IFRAME_IDS = ["vanilla-iframe", "react-iframe", "vue-iframe", "html-iframe"];
+
+    const params = new URLSearchParams(window.location.search);
+    const get = (k, d) => params.get(k) ?? d;
+    const gn = (k, d) => { const n = parseFloat(get(k, "")); return Number.isFinite(n) ? n : d; };
+
+    // Defaults mirror shadow-oracle so shadows are immediately visible:
+    // angled light (dx=1, dy=0.5, dz=1), full-opacity shadow, ambient 0.3.
+    const S = {
+      mesh:          get("mesh", "castle"),
+      mode:          get("mode", "baked"),
+      castShadow:    get("cs", "1") !== "0",
+      selfShadow:    get("ss", "1") !== "0",
+      floorVisible:  get("fv", "1") !== "0",
+      floorReceives: get("fr", "1") !== "0",
+      autoCenter:    get("ax", "1") !== "0",
+      obj: { x: gn("ox", 0), y: gn("oy", 0), z: gn("oz", 0), scale: gn("os", 1), rx: gn("orx", 0), ry: gn("ory", 0), rz: gn("orz", 0) },
+      // Clamp dir.z to ≥0.05 so an older link with a negative value (light
+      // below the floor → no floor shadow) self-heals on load.
+      dir: { x: gn("dx", 1), y: gn("dy", 0.5), z: Math.max(0.05, gn("dz", 1)), intensity: gn("di", 1), color: get("dc", "#ffffff") },
+      amb: { intensity: gn("ai", 0.3), color: get("ac", "#ffffff") },
+      shadow: { opacity: gn("so", 1.0) },
+      cam: { rotX: gn("rotX", 65), rotY: gn("rotY", 45), zoom: gn("zoom", 4) },
+    };
+
+    // ── Build the perf-*.html?... URL with all live state baked in. The
+    //   iframe consumes these on initial mount, then listens for postMessage
+    //   updates for subsequent live sliders.
+    function buildIframeUrl(renderer) {
+      const qs = new URLSearchParams();
+      qs.set("mesh", S.mesh);
+      qs.set("mode", S.mode);
+      qs.set("motion", "none");
+      qs.set("cs", S.castShadow ? "1" : "0");
+      qs.set("ss", S.selfShadow ? "1" : "0");
+      qs.set("fv", S.floorVisible ? "1" : "0");
+      qs.set("fr", S.floorReceives ? "1" : "0");
+      qs.set("ax", S.autoCenter ? "1" : "0");
+      qs.set("ox", String(S.obj.x)); qs.set("oy", String(S.obj.y)); qs.set("oz", String(S.obj.z));
+      qs.set("os", String(S.obj.scale));
+      qs.set("orx", String(S.obj.rx)); qs.set("ory", String(S.obj.ry)); qs.set("orz", String(S.obj.rz));
+      qs.set("dx", String(S.dir.x)); qs.set("dy", String(S.dir.y)); qs.set("dz", String(S.dir.z));
+      qs.set("di", String(S.dir.intensity)); qs.set("dc", S.dir.color);
+      qs.set("ai", String(S.amb.intensity)); qs.set("ac", S.amb.color);
+      qs.set("so", String(S.shadow.opacity));
+      qs.set("rotX", String(S.cam.rotX));
+      qs.set("rotY", String(S.cam.rotY));
+      qs.set("zoom", String(S.cam.zoom));
+      qs.set("nohud", "1");
+      qs.set("sync", "1");
+      return `perf-${renderer}.html?${qs.toString()}`;
+    }
+
+    // "Open in window" links — same query string but without `sync` / `nohud`
+    // so the standalone page shows the perf HUD and doesn't try to message a
+    // missing parent. Mesh load + every other config flag are preserved.
+    function buildStandaloneUrl(renderer) {
+      const u = new URL(buildIframeUrl(renderer), window.location.href);
+      u.searchParams.delete("sync");
+      u.searchParams.delete("nohud");
+      return u.pathname.split("/").pop() + (u.search || "");
+    }
+
+    function reloadAll() {
+      document.getElementById("vanilla-iframe").src = buildIframeUrl("vanilla");
+      document.getElementById("react-iframe").src   = buildIframeUrl("react");
+      document.getElementById("vue-iframe").src     = buildIframeUrl("vue");
+      document.getElementById("html-iframe").src    = buildIframeUrl("html");
+      document.getElementById("vanilla-link").href  = buildStandaloneUrl("vanilla");
+      document.getElementById("react-link").href    = buildStandaloneUrl("react");
+      document.getElementById("vue-link").href      = buildStandaloneUrl("vue");
+      document.getElementById("html-link").href     = buildStandaloneUrl("html");
+      writeUrl();
+    }
+
+    function writeUrl() {
+      const qs = new URLSearchParams();
+      qs.set("mesh", S.mesh);
+      qs.set("mode", S.mode);
+      qs.set("cs", S.castShadow ? "1" : "0");
+      qs.set("ss", S.selfShadow ? "1" : "0");
+      qs.set("fv", S.floorVisible ? "1" : "0");
+      qs.set("fr", S.floorReceives ? "1" : "0");
+      qs.set("ax", S.autoCenter ? "1" : "0");
+      qs.set("rotX", String(S.cam.rotX));
+      qs.set("rotY", String(S.cam.rotY));
+      qs.set("zoom", String(S.cam.zoom));
+      qs.set("ox", String(S.obj.x)); qs.set("oy", String(S.obj.y)); qs.set("oz", String(S.obj.z));
+      qs.set("os", String(S.obj.scale));
+      qs.set("orx", String(S.obj.rx)); qs.set("ory", String(S.obj.ry)); qs.set("orz", String(S.obj.rz));
+      qs.set("dx", String(S.dir.x)); qs.set("dy", String(S.dir.y)); qs.set("dz", String(S.dir.z));
+      qs.set("di", String(S.dir.intensity)); qs.set("dc", S.dir.color);
+      qs.set("ai", String(S.amb.intensity)); qs.set("ac", S.amb.color);
+      qs.set("so", String(S.shadow.opacity));
+      history.replaceState({}, "", `parity-quad.html?${qs}`);
+    }
+
+    function broadcast(message, except) {
+      for (const id of IFRAME_IDS) {
+        const f = document.getElementById(id);
+        if (!f || !f.contentWindow) continue;
+        if (except && f.contentWindow === except) continue;
+        f.contentWindow.postMessage(message, "*");
+      }
+    }
+
+    function pushAll(except) {
+      broadcast({ kind: "set-camera",  rotX: S.cam.rotX, rotY: S.cam.rotY, zoom: S.cam.zoom }, except);
+      broadcast({ kind: "set-light",   dir: [S.dir.x, S.dir.y, S.dir.z], intensity: S.dir.intensity, color: S.dir.color }, except);
+      broadcast({ kind: "set-ambient", intensity: S.amb.intensity, color: S.amb.color }, except);
+      broadcast({ kind: "set-object",  position: [S.obj.x, S.obj.y, S.obj.z], scale: S.obj.scale, rotation: [S.obj.rx, S.obj.ry, S.obj.rz] }, except);
+      broadcast({ kind: "set-shadow",  opacity: S.shadow.opacity, lift: 1 / Math.max(1, S.cam.zoom) }, except);
+    }
+
+    window.addEventListener("message", (e) => {
+      if (!e.data || typeof e.data !== "object") return;
+      if (e.data.kind === "camera-changed") {
+        if (typeof e.data.rotX === "number") S.cam.rotX = e.data.rotX;
+        if (typeof e.data.rotY === "number") S.cam.rotY = e.data.rotY;
+        if (typeof e.data.zoom === "number") S.cam.zoom = e.data.zoom;
+        broadcast({ kind: "set-camera", rotX: S.cam.rotX, rotY: S.cam.rotY, zoom: S.cam.zoom }, e.source);
+        syncCamFromState();
+        writeUrl();
+      } else if (e.data.kind === "ready") {
+        // Newly-mounted iframe — re-push the full current state so it joins
+        // in sync with the others (covers the gap between iframe.src=... and
+        // the page being ready to receive messages).
+        pushAll(null);
+      }
+    });
+
+    // ── Sidebar UI builders ────────────────────────────────────────────────
+    const panel = document.getElementById("panel");
+    const sliderRefreshers = { cam: {}, obj: {}, dir: {}, amb: {}, shadow: {} };
+
+    function addSection(title) {
+      const d = document.createElement("div"); d.className = "sec"; d.textContent = title; panel.appendChild(d);
+    }
+    function addSelectRow(labelText, options, value, onChange) {
+      const row = document.createElement("div"); row.className = "row";
+      const lab = document.createElement("label"); lab.textContent = labelText; row.appendChild(lab);
+      const sel = document.createElement("select"); sel.style.gridColumn = "2 / span 2";
+      for (const opt of options) {
+        const o = document.createElement("option"); o.value = String(opt); o.textContent = String(opt);
+        if (String(value) === String(opt)) o.selected = true;
+        sel.appendChild(o);
+      }
+      sel.addEventListener("change", () => onChange(sel.value));
+      row.appendChild(sel); panel.appendChild(row);
+    }
+    function addCheckboxRow(labelText, checked, onChange) {
+      const row = document.createElement("div"); row.className = "row";
+      const lab = document.createElement("label"); lab.textContent = labelText; row.appendChild(lab);
+      const inp = document.createElement("input"); inp.type = "checkbox"; inp.checked = checked;
+      inp.addEventListener("change", () => onChange(inp.checked));
+      row.appendChild(inp); panel.appendChild(row);
+    }
+    function addRangeRow(labelText, { min, max, step, value, fmt }, onChange, refKey) {
+      const row = document.createElement("div"); row.className = "row";
+      const lab = document.createElement("label"); lab.textContent = labelText; row.appendChild(lab);
+      const inp = document.createElement("input"); inp.type = "range";
+      inp.min = String(min); inp.max = String(max); inp.step = String(step); inp.value = String(value);
+      const val = document.createElement("span"); val.className = "val"; val.textContent = fmt(Number(value));
+      inp.addEventListener("input", () => {
+        const n = parseFloat(inp.value);
+        val.textContent = fmt(n);
+        onChange(n);
+      });
+      row.appendChild(inp); row.appendChild(val); panel.appendChild(row);
+      if (refKey) {
+        const [section, field] = refKey;
+        sliderRefreshers[section] = sliderRefreshers[section] ?? {};
+        sliderRefreshers[section][field] = (v) => { inp.value = String(v); val.textContent = fmt(v); };
+      }
+    }
+    function addColorRow(labelText, value, onChange) {
+      const row = document.createElement("div"); row.className = "row";
+      const lab = document.createElement("label"); lab.textContent = labelText; row.appendChild(lab);
+      const inp = document.createElement("input"); inp.type = "color"; inp.value = value;
+      inp.style.gridColumn = "2 / span 2";
+      inp.addEventListener("input", () => onChange(inp.value));
+      row.appendChild(inp); panel.appendChild(row);
+    }
+
+    function syncCamFromState() {
+      sliderRefreshers.cam.rotX?.(S.cam.rotX);
+      sliderRefreshers.cam.rotY?.(S.cam.rotY);
+      sliderRefreshers.cam.zoom?.(S.cam.zoom);
+    }
+
+    // ── Build the panel ────────────────────────────────────────────────────
+    addSection("Scene (reload)");
+    addSelectRow("mesh", ["castle", "teapot", "cottage", "coliseum", "apple", "ducky", "rock1", "mecha-golem"], S.mesh,
+      (v) => { S.mesh = v; reloadAll(); });
+    addSelectRow("lighting", ["baked", "dynamic"], S.mode,
+      (v) => { S.mode = v; reloadAll(); });
+    addCheckboxRow("autoCenter", S.autoCenter, (v) => { S.autoCenter = v; reloadAll(); });
+
+    addSection("Shadow flags (reload)");
+    addCheckboxRow("castShadow", S.castShadow, (v) => { S.castShadow = v; reloadAll(); });
+    addCheckboxRow("selfShadow", S.selfShadow, (v) => { S.selfShadow = v; reloadAll(); });
+    addCheckboxRow("floor visible", S.floorVisible, (v) => { S.floorVisible = v; reloadAll(); });
+    addCheckboxRow("floor receives", S.floorReceives, (v) => { S.floorReceives = v; reloadAll(); });
+
+    addSection("Object (live)");
+    const objField = (f, opts) => addRangeRow(f, { ...opts, value: S.obj[f] },
+      (n) => { S.obj[f] = n; broadcast({ kind: "set-object", position: [S.obj.x, S.obj.y, S.obj.z], scale: S.obj.scale, rotation: [S.obj.rx, S.obj.ry, S.obj.rz] }); writeUrl(); },
+      ["obj", f]);
+    objField("x", { min: -10, max: 10, step: 0.1, fmt: (v) => v.toFixed(2) });
+    objField("y", { min: -10, max: 10, step: 0.1, fmt: (v) => v.toFixed(2) });
+    objField("z", { min: -10, max: 10, step: 0.1, fmt: (v) => v.toFixed(2) });
+    objField("scale", { min: 0.01, max: 6, step: 0.01, fmt: (v) => v.toFixed(2) });
+    objField("rx", { min: -180, max: 180, step: 1, fmt: (v) => v.toFixed(0) + "°" });
+    objField("ry", { min: -180, max: 180, step: 1, fmt: (v) => v.toFixed(0) + "°" });
+    objField("rz", { min: -180, max: 180, step: 1, fmt: (v) => v.toFixed(0) + "°" });
+
+    addSection("Directional light (live)");
+    const dirField = (f, opts) => addRangeRow(f, { ...opts, value: S.dir[f] },
+      (n) => { S.dir[f] = n; broadcast({ kind: "set-light", dir: [S.dir.x, S.dir.y, S.dir.z], intensity: S.dir.intensity, color: S.dir.color }); writeUrl(); },
+      ["dir", f]);
+    dirField("x", { min: -2, max: 2, step: 0.05, fmt: (v) => v.toFixed(2) });
+    dirField("y", { min: -2, max: 2, step: 0.05, fmt: (v) => v.toFixed(2) });
+    // z is clamped ≥0.05 so the light can't drop to/under the floor (no
+    // shadow physically possible). shadow-oracle goes negative; here we
+    // avoid the footgun for the 4-up comparison.
+    dirField("z", { min: 0.05, max: 2, step: 0.05, fmt: (v) => v.toFixed(2) });
+    dirField("intensity", { min: 0, max: 3, step: 0.05, fmt: (v) => v.toFixed(2) });
+    addColorRow("color", S.dir.color, (c) => {
+      S.dir.color = c;
+      broadcast({ kind: "set-light", dir: [S.dir.x, S.dir.y, S.dir.z], intensity: S.dir.intensity, color: S.dir.color });
+      writeUrl();
+    });
+
+    addSection("Ambient (live)");
+    addRangeRow("intensity", { min: 0, max: 1, step: 0.01, value: S.amb.intensity, fmt: (v) => v.toFixed(2) },
+      (n) => { S.amb.intensity = n; broadcast({ kind: "set-ambient", intensity: S.amb.intensity, color: S.amb.color }); writeUrl(); },
+      ["amb", "intensity"]);
+    addColorRow("color", S.amb.color, (c) => {
+      S.amb.color = c;
+      broadcast({ kind: "set-ambient", intensity: S.amb.intensity, color: S.amb.color });
+      writeUrl();
+    });
+
+    addSection("Shadow (live)");
+    addRangeRow("opacity", { min: 0, max: 1, step: 0.01, value: S.shadow.opacity, fmt: (v) => v.toFixed(2) },
+      (n) => { S.shadow.opacity = n; broadcast({ kind: "set-shadow", opacity: S.shadow.opacity, lift: 1 / Math.max(1, S.cam.zoom) }); writeUrl(); },
+      ["shadow", "opacity"]);
+
+    addSection("Camera (live)");
+    addRangeRow("rotX", { min: 0, max: 90, step: 1, value: S.cam.rotX, fmt: (v) => v.toFixed(0) + "°" },
+      (n) => { S.cam.rotX = n; broadcast({ kind: "set-camera", rotX: S.cam.rotX, rotY: S.cam.rotY, zoom: S.cam.zoom }); writeUrl(); },
+      ["cam", "rotX"]);
+    addRangeRow("rotY", { min: 0, max: 360, step: 1, value: S.cam.rotY, fmt: (v) => v.toFixed(0) + "°" },
+      (n) => { S.cam.rotY = n; broadcast({ kind: "set-camera", rotX: S.cam.rotX, rotY: S.cam.rotY, zoom: S.cam.zoom }); writeUrl(); },
+      ["cam", "rotY"]);
+    addRangeRow("zoom", { min: 0.5, max: 12, step: 0.1, value: S.cam.zoom, fmt: (v) => v.toFixed(1) },
+      (n) => { S.cam.zoom = n; broadcast({ kind: "set-camera", rotX: S.cam.rotX, rotY: S.cam.rotY, zoom: S.cam.zoom }); writeUrl(); },
+      ["cam", "zoom"]);
+
+    addSection("Actions");
+    const reloadBtn = document.createElement("button");
+    reloadBtn.textContent = "Reload all iframes";
+    reloadBtn.addEventListener("click", reloadAll);
+    panel.appendChild(reloadBtn);
+
+    const info = document.createElement("div");
+    info.className = "info";
+    info.textContent = "Each pane is an iframe loading perf-*.html?sync=1. Sliders broadcast via postMessage; mesh/lighting/shadow flags reload all four iframes. Drag any pane to orbit — the others follow.";
+    panel.appendChild(info);
+
+    reloadAll();
+  </script>
+</body>
+</html>

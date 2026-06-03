@@ -61,7 +61,6 @@ export interface LoadedModel {
 
 export interface ParserOptionsState {
   targetSize: number;
-  gridShift: number;
   defaultColor: string;
 }
 

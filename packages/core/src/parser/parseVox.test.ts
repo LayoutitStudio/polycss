@@ -236,7 +236,7 @@ describe("parseVox — real fixture (obj_candle.vox)", () => {
     expect(span).toBeCloseTo(60, 1);
   });
 
-  it("default gridShift=0 → min coord is 0", () => {
+  it("places bbox MIN at origin (matches Three.js)", () => {
     const buf = loadVoxFile("obj_candle.vox");
     const result = parseVox(buf);
     const allCoords = result.polygons.flatMap((p) => p.vertices).flat();
@@ -245,7 +245,7 @@ describe("parseVox — real fixture (obj_candle.vox)", () => {
 
   it("custom targetSize is honored", () => {
     const buf = loadVoxFile("obj_candle.vox");
-    const result = parseVox(buf, { targetSize: 30, gridShift: 0 });
+    const result = parseVox(buf, { targetSize: 30});
     const all = result.polygons.flatMap((p) => p.vertices);
     const span = Math.max(
       Math.max(...all.map((v) => v[0])) - Math.min(...all.map((v) => v[0])),
@@ -253,13 +253,6 @@ describe("parseVox — real fixture (obj_candle.vox)", () => {
       Math.max(...all.map((v) => v[2])) - Math.min(...all.map((v) => v[2])),
     );
     expect(span).toBeCloseTo(30, 1);
-  });
-
-  it("gridShift offsets all coordinates", () => {
-    const buf = loadVoxFile("obj_candle.vox");
-    const result = parseVox(buf, { gridShift: 5, targetSize: 60 });
-    const allCoords = result.polygons.flatMap((p) => p.vertices).flat();
-    expect(Math.min(...allCoords)).toBeGreaterThanOrEqual(5);
   });
 
   it("all polygon colors are valid CSS hex strings", () => {
@@ -325,7 +318,7 @@ describe("parseVox — minimal synthetic buffer", () => {
 
   it("preserves normalized raw voxel source for fast-path rendering", () => {
     const buf = buildVoxBuffer([3, 2, 1], [{ x: 2, y: 1, z: 0, colorIndex: 1 }]);
-    const result = parseVox(buf, { targetSize: 30, gridShift: 2 });
+    const result = parseVox(buf, { targetSize: 30});
     expect(result.voxelSource).toEqual({
       kind: "magica-vox",
       cells: [{ x: 0, y: 0, z: 0, color: "#ffffff" }],
@@ -333,7 +326,7 @@ describe("parseVox — minimal synthetic buffer", () => {
       cols: 1,
       depth: 1,
       scale: 30,
-      gridShift: 2,
+
       sourceBytes: buf.byteLength,
     });
   });
@@ -346,10 +339,12 @@ describe("parseVox — minimal synthetic buffer", () => {
         { x: 79, y: 0, z: 0, colorIndex: 1 },
       ],
     );
-    const result = parseVox(buf, { targetSize: 70, gridShift: 0 });
+    const result = parseVox(buf, { targetSize: 70});
     expect(result.voxelSource?.scale).toBe(0.88);
-    const ys = result.polygons.flatMap((p) => p.vertices.map((v) => v[1]));
-    expect(Math.max(...ys) - Math.min(...ys)).toBeCloseTo(70.4, 3);
+    // After the gridShift drop (commit 7880492), MagicaVoxel +X now maps to
+    // PolyCSS +X (was +Y). 80-cell row × scale 0.88 = 70.4 along X.
+    const xs = result.polygons.flatMap((p) => p.vertices.map((v) => v[0]));
+    expect(Math.max(...xs) - Math.min(...xs)).toBeCloseTo(70.4, 3);
   });
 
   it("maps MagicaVoxel front (-Y) to PolyCSS +X", () => {

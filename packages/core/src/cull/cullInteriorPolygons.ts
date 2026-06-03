@@ -488,6 +488,23 @@ const hemisphereSampleCache = new Map<number, Float64Array>();
 export interface CullInteriorOptions {
   /** Hemisphere ray samples per polygon. Higher = fewer false positives, slower. Default 8. */
   samples?: number;
+  /** Bypass the "large open topology" safety bail-out. By default a mesh
+   *  with >20% boundary edges is treated as open (terrain, partial geometry)
+   *  and culling is skipped to avoid false-positive removals on exposed faces.
+   *  Buildings imported from OBJ commonly have windows/doors that push the
+   *  boundary ratio above the threshold while STILL having clearly enclosed
+   *  interior walls that should be culled — set this when the caller has
+   *  another signal (e.g. mesh is known to be a building / room) that
+   *  interior culling is desired. Default false. */
+  force?: boolean;
+  /** Fraction of sample directions that must find at least one escaping
+   *  origin for the polygon to count as visible. Default `1 / samples`
+   *  (the original "any escape keeps" behaviour). Raise to ~0.5 to
+   *  classify polygons as interior when MOST hemisphere directions are
+   *  blocked — catches interior panels of building meshes (the cottage's
+   *  porch trim, back-of-wall door frames) that have a sliver of clear
+   *  sky through windows/openings but are otherwise enclosed. */
+  minEscapeRatio?: number;
 }
 
 export function cullInteriorPolygons(
@@ -496,7 +513,13 @@ export function cullInteriorPolygons(
 ): Polygon[] {
   const k = options?.samples ?? DEFAULT_HEMISPHERE_SAMPLES;
   if (polygons.length < 4 || k < 1) return polygons;
-  if (hasLargeOpenTopology(polygons)) return polygons;
+  if (!options?.force && hasLargeOpenTopology(polygons)) return polygons;
+  // Default keeps original any-escape behaviour. Threshold semantics:
+  // need at least `minEscapingSamples` of `k` sample directions to have
+  // at least one escaping origin. `minEscapeRatio: 0.5` means ≥4 of 8
+  // directions must escape — drops polys that only escape through a
+  // narrow slot.
+  const minEscapingSamples = Math.max(1, Math.ceil(k * (options?.minEscapeRatio ?? (1 / k))));
 
   const meta: Array<PolyMeta | null> = polygons.map(precompute);
   const samplesFlat = hemisphereSamplesFlat(k);
@@ -560,25 +583,46 @@ export function cullInteriorPolygons(
       origBuf[oCnt++] = mz + (cz0 - mz) * ORIGIN_INSET + offZ;
     }
 
-    // Transpose the origin×sample loop: iterate samples in the outer loop,
-    // origins in the inner. For polygons that escape through a specific sample
-    // direction (regardless of origin), this finds the escape in at most
-    // nOrigins steps for that sample, rather than nSamples steps per origin.
-    let escaped = false;
-    outer: for (let si = 0; si < samplesFlat.length; si += 3) {
-      const lx = samplesFlat[si], ly = samplesFlat[si + 1], lz = samplesFlat[si + 2];
-      const rdx = lx * ux + ly * vx + lz * nx;
-      const rdy = lx * uy + ly * vy + lz * ny;
-      const rdz = lx * uz + ly * vz + lz * nz;
-      for (let oi = 0; oi < oCnt; oi += 3) {
-        const rox = origBuf[oi], roy = origBuf[oi + 1], roz = origBuf[oi + 2];
-        if (!rayHitsAnyInBVH(rox, roy, roz, rdx, rdy, rdz, i, bvh, stack)) {
-          escaped = true; break outer;
+    // Default path (minEscapingSamples=1) keeps the original any-escape
+    // fast path bit-identical: first escaping (sample, origin) pair
+    // breaks both loops and the polygon is kept. Required for stability
+    // of downstream tests that pin polygon counts on specific fixtures.
+    // The threshold branch (minEscapingSamples > 1) is only used by the
+    // light-visibility / interior building helpers that opted into
+    // {force, minEscapeRatio}.
+    if (minEscapingSamples <= 1) {
+      let escaped = false;
+      outer: for (let si = 0; si < samplesFlat.length; si += 3) {
+        const lx = samplesFlat[si], ly = samplesFlat[si + 1], lz = samplesFlat[si + 2];
+        const rdx = lx * ux + ly * vx + lz * nx;
+        const rdy = lx * uy + ly * vy + lz * ny;
+        const rdz = lx * uz + ly * vz + lz * nz;
+        for (let oi = 0; oi < oCnt; oi += 3) {
+          const rox = origBuf[oi], roy = origBuf[oi + 1], roz = origBuf[oi + 2];
+          if (!rayHitsAnyInBVH(rox, roy, roz, rdx, rdy, rdz, i, bvh, stack)) {
+            escaped = true;
+            break outer;
+          }
         }
       }
+      if (escaped) kept.push(polygons[i]);
+    } else {
+      let escapingSamples = 0;
+      for (let si = 0; si < samplesFlat.length; si += 3) {
+        const lx = samplesFlat[si], ly = samplesFlat[si + 1], lz = samplesFlat[si + 2];
+        const rdx = lx * ux + ly * vx + lz * nx;
+        const rdy = lx * uy + ly * vy + lz * ny;
+        const rdz = lx * uz + ly * vz + lz * nz;
+        for (let oi = 0; oi < oCnt; oi += 3) {
+          const rox = origBuf[oi], roy = origBuf[oi + 1], roz = origBuf[oi + 2];
+          if (!rayHitsAnyInBVH(rox, roy, roz, rdx, rdy, rdz, i, bvh, stack)) {
+            escapingSamples++;
+            break;
+          }
+        }
+      }
+      if (escapingSamples >= minEscapingSamples) kept.push(polygons[i]);
     }
-
-    if (escaped) kept.push(polygons[i]);
   }
 
   return kept;

@@ -32,9 +32,8 @@ export function renderTextureProjectiveSolidPoly({
     // computeTextureAtlasPlan. Re-rounding would leave visible seams between
     // adjacent projective quads.
     transform: `matrix3d(${entry.projectiveMatrix})`,
-    color: dynamic || entry.shadedColor === solidPaintDefaults?.paintColor
-      ? undefined
-      : entry.shadedColor,
+    // Baked: always emit per-leaf shaded color (vanilla commit 0423777).
+    color: dynamic ? undefined : entry.shadedColor,
     pointerEvents: pointerEvents === "none" ? "none" : undefined,
     ...(dynamic && !useDefaultDynamicColor
       ? {
@@ -65,6 +64,7 @@ export function renderTextureProjectiveSolidPoly({
   return h("b", {
     class: elementClassName,
     style,
+    "data-poly-index": String(entry.index),
     ...dataAttrs,
     ...domAttrs,
   });

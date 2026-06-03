@@ -35,7 +35,11 @@ function mountMesh(
           default: () =>
             h(PolyScene, {}, {
               default: () =>
-                h(PolyMesh, { ...meshProps, ref: handleRef }, slots),
+                // updatePolygon assertions check that polygons flow through
+              // unmodified; merge={false} bypasses optimizeMeshPolygons so
+              // original refs survive. Test callers can still pass merge:true
+              // by overriding it in meshProps.
+              h(PolyMesh, { merge: false, ...meshProps, ref: handleRef }, slots),
             }),
         });
     },

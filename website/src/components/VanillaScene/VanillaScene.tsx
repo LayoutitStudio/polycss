@@ -37,21 +37,37 @@ const LIGHT_HELPER_TILE = 50;
 // Keep the visible ground just below the model floor; coplanar ground/car
 // faces z-fight during repaint-heavy light drags.
 const GROUND_Z_OFFSET = -0.04;
-const GALLERY_GROUND_COLOR = "#7d848e";
+const GALLERY_GROUND_COLOR = "#4a505a";
 const GALLERY_GROUND_RGB = { r: 0x7d, g: 0x84, b: 0x8e };
 const GALLERY_GROUND_LIGHT_RESPONSE = 0.28;
 const GALLERY_GROUND_RADIUS_MULTIPLIER = 2.5;
 const GALLERY_GROUND_MODEL_RADIUS_MULTIPLIER = 1.75;
 const GALLERY_GROUND_MIN_RADIUS = 40;
-// The shadow plane should sit above the visible ground, not above the model
-// floor, otherwise large live-updated SVG shadows can intersect low geometry.
-const SHADOW_GROUND_LIFT = 0.01;
-const GALLERY_SHADOW_LIFT = GROUND_Z_OFFSET + SHADOW_GROUND_LIFT;
+// Lift the shadow above the ground plane (which sits at GROUND_Z_OFFSET
+// below the model floor). The library's `shadow.lift` is now interpreted
+// as "world-unit displacement ALONG the receiver face's normal" — for
+// the floor that's +Z, so a positive value puts the shadow visibly above
+// the ground. (Earlier this constant ALSO added GROUND_Z_OFFSET because
+// the old non-receiver cast-shadow path treated `lift` as an absolute
+// z relative to caster.minZ, where negative was correct. Once the floor
+// became a receiver, that negative result placed the shadow BELOW the
+// ground and got occluded by it.)
+const GALLERY_SHADOW_LIFT = 0.01;
 const ANIMATION_STABLE_TRIANGLE_COLOR_POLICY = "cadence";
 // Deforming low-poly triangles can swing face normals sharply; keep the
 // mounted baked color pinned and animate transforms only.
 const ANIMATION_STABLE_TRIANGLE_COLOR_FREEZE_FRAMES = 0;
 const ANIMATION_TRANSFORM_CACHE_FRAMES = 60;
+
+// Transitional compat: the polycss vanilla camera was updated to interpret
+// `zoom` as "px per world unit" (Three.js convention) rather than a raw CSS
+// scale factor. The shared workbench presets / sceneOptions still carry
+// CSS-scale-tuned values that ALSO drive the React renderer (which keeps the
+// old semantic until the parity refactor is mirrored there). Multiply by 50
+// going into the vanilla camera and divide on the way back out so both
+// renderers can keep reading from the same `sceneOptions.zoom` field.
+// Remove once @layoutit/polycss-react has been mirrored.
+const LEGACY_ZOOM_COMPAT = 50;
 
 interface StableTriangleTransformFrameItem {
   transform: string;
@@ -183,12 +199,17 @@ function lightHelperPosition(
   target: Vec3,
   distance: number,
 ): Vec3 {
+  // Post-parity: createPolyScene treats `position` as WORLD UNITS and
+  // applies the world→CSS axis swap + ×BASE_TILE conversion internally.
+  // Pre-parity, this helper used to ×LIGHT_HELPER_TILE + swap manually,
+  // which after the parity refactor pushed the helper thousands of CSS
+  // pixels off-screen because the renderer multiplied a second time.
   const [dx, dy, dz] = light.direction;
   const len = Math.hypot(dx, dy, dz) || 1;
   return [
-    (target[1] + (dx / len) * distance) * LIGHT_HELPER_TILE,
-    (target[0] + (dy / len) * distance) * LIGHT_HELPER_TILE,
-    (target[2] + (dz / len) * distance) * LIGHT_HELPER_TILE,
+    target[0] + (dx / len) * distance,
+    target[1] + (dy / len) * distance,
+    target[2] + (dz / len) * distance,
   ];
 }
 
@@ -424,7 +445,22 @@ export function VanillaScene({
         ...(previewShadow ? { shadow: nextShadow } : {}),
       });
     } else {
-      if (previewShadow) scene.setOptions({ shadow: nextShadow });
+      // Baked mode: push the new light direction to the scene so shadow
+      // SVGs re-emit live during drag, AND install the CSS-cascade light
+      // preview on solid leaves so they tint live too — matches the
+      // pre-#9e4763f gallery feel where lights update interactively
+      // while the user drags the gizmo. The atlas pixels themselves stay
+      // at the last baked color; the CSS-cascade preview multiplies them
+      // by the live light vars. On commit the atlas re-bakes via
+      // commitBakedSolidLighting → rebakeRenderEntryInPlace and the
+      // preview vars are dropped — there may be a tiny snap if the
+      // approximate CSS calc Lambert disagrees with the CPU bake, but
+      // the live-feedback during drag is what the user expects.
+      if (previewShadow) {
+        scene.setOptions({ directionalLight: nextDirectionalLight, shadow: nextShadow });
+      } else {
+        scene.setOptions({ directionalLight: nextDirectionalLight });
+      }
       (scene as BakedSolidLightingPreviewSceneHandle).previewBakedSolidLighting?.({
         directionalLight: nextDirectionalLight,
         ambientLight: ambientFromOptions(nextOptions),
@@ -449,7 +485,7 @@ export function VanillaScene({
     camera.update({
       rotX: nextOptions.rotX,
       rotY: nextOptions.rotY,
-      zoom: nextOptions.zoom,
+      zoom: nextOptions.zoom * LEGACY_ZOOM_COMPAT,
       target: nextOptions.target as Vec3,
     });
     scene.applyCamera();
@@ -493,7 +529,7 @@ export function VanillaScene({
     const cameraOpts = {
       rotX: options.rotX,
       rotY: options.rotY,
-      zoom: options.zoom,
+      zoom: options.zoom * LEGACY_ZOOM_COMPAT,
       target: options.target as Vec3 | undefined,
     };
     const perspective = options.dragMode === "fpv" ? FPV_PERSPECTIVE : options.perspective;
@@ -521,19 +557,20 @@ export function VanillaScene({
       stableDom: stableDomForMesh,
       id: meshId,
       castShadow: options.castShadow,
+      receiveShadow: options.selfShadow,
     } as PolyMeshTransform;
     const modelParseResult: ParseResult = parseResult
       ? {
-          ...parseResult,
-          polygons,
-          dispose: () => {},
-        }
+        ...parseResult,
+        polygons,
+        dispose: () => { },
+      }
       : {
-          polygons,
-          objectUrls: [],
-          warnings: [],
-          dispose: () => {},
-        };
+        polygons,
+        objectUrls: [],
+        warnings: [],
+        dispose: () => { },
+      };
     meshHandleRef.current = scene.add(modelParseResult, meshTransform);
     mountedModelRef.current = {
       handle: meshHandleRef.current,
@@ -623,7 +660,7 @@ export function VanillaScene({
           polygons: interiorShellPolygons,
           objectUrls: [],
           warnings: [],
-          dispose: () => {},
+          dispose: () => { },
         },
         {
           merge: false,
@@ -650,12 +687,18 @@ export function VanillaScene({
     notifySceneDomChange,
   ]);
 
-  // Effect 1.6 — live-toggle castShadow without rebuilding the scene.
+  // Effect 1.6 — live-toggle castShadow / selfShadow (receiveShadow on the
+  // mesh) without rebuilding the scene.
   useEffect(() => {
     const handle = meshHandleRef.current;
     if (!handle) return;
     handle.setTransform({ castShadow: options.castShadow });
   }, [options.castShadow]);
+  useEffect(() => {
+    const handle = meshHandleRef.current;
+    if (!handle) return;
+    handle.setTransform({ receiveShadow: options.selfShadow });
+  }, [options.selfShadow]);
 
   // Selection + transform-controls layer. Selection toggle controls
   // both — when on, clicking the mesh selects it (and attaches the
@@ -767,9 +810,9 @@ export function VanillaScene({
     let lastAnimatedPolygonCount = 0;
     const transformCache =
       stableDomForMesh &&
-      options.textureLighting === "baked" &&
-      typeof animationDurationSeconds === "number" &&
-      animationDurationSeconds > 0
+        options.textureLighting === "baked" &&
+        typeof animationDurationSeconds === "number" &&
+        animationDurationSeconds > 0
         ? createStableTriangleTransformCache()
         : null;
 
@@ -887,8 +930,12 @@ export function VanillaScene({
     stableDomForMesh,
   ]);
 
-  // Effect 2 — cheap: live transform + lighting updates via setOptions.
-  // Sliding sliders only flows through this path.
+  // Effect 2a — camera-only updates. Runs every drag tick. Pushes the new
+  // camera state and re-applies the scene transform. Does NOT call
+  // scene.setOptions — camera changes don't change lighting/shadow, and
+  // calling setOptions({shadow:...}) here would trigger a full receiver-
+  // shadow rebuild every drag tick, causing visible mid-frame flicker
+  // ("shadows disappear when rotating") in real Chrome.
   useEffect(() => {
     const scene = sceneRef.current;
     const camera = cameraRef.current;
@@ -896,10 +943,19 @@ export function VanillaScene({
     camera.update({
       rotX: options.rotX,
       rotY: options.rotY,
-      zoom: options.zoom,
+      zoom: options.zoom * LEGACY_ZOOM_COMPAT,
       target: options.target as Vec3,
     });
     scene.applyCamera();
+  }, [options.rotX, options.rotY, options.zoom, options.target]);
+
+  // Effect 2b — lighting + shadow updates. Runs only when the light, shadow,
+  // textureLighting, or ground color actually change (sliders, not camera).
+  // setOptions triggers the receiver-shadow rebuild via emitSceneShadows();
+  // keep it off the camera-tick path.
+  useEffect(() => {
+    const scene = sceneRef.current;
+    if (!scene) return;
     scene.setOptions({
       directionalLight,
       ambientLight,
@@ -918,10 +974,6 @@ export function VanillaScene({
     }
     applyGalleryGroundPaint(groundHandleRef.current, directionalLight, ambientLight, options.groundColor);
   }, [
-    options.rotX,
-    options.rotY,
-    options.zoom,
-    options.target,
     options.textureLighting,
     options.groundColor,
     options.shadowMaxExtend,
@@ -987,7 +1039,8 @@ export function VanillaScene({
           : false as const,
       });
       controls.addEventListener("end", ((e: { camera: { rotX: number; rotY: number; zoom: number; target?: ReactVec3 } }) => {
-        onCameraChangeRef.current?.(e.camera);
+        // Convert back to legacy CSS-scale zoom on the way out — see LEGACY_ZOOM_COMPAT.
+        onCameraChangeRef.current?.({ ...e.camera, zoom: e.camera.zoom / LEGACY_ZOOM_COMPAT });
       }) as any);
       return controls;
     };
@@ -1069,7 +1122,7 @@ export function VanillaScene({
         polygons: axesHelperPolygons({ size: helperScale * 0.6 }),
         objectUrls: [],
         warnings: [],
-        dispose: () => {},
+        dispose: () => { },
       },
       { excludeFromAutoCenter: true },
     );
@@ -1153,9 +1206,17 @@ export function VanillaScene({
         polygons: [groundPoly],
         objectUrls: [],
         warnings: [],
-        dispose: () => {},
+        dispose: () => { },
       },
-      { excludeFromAutoCenter: true, castShadow: false },
+      // Floor MUST be a receiver — Three.js parity: no receiver, no
+      // shadow. PolyCSS dropped the legacy virtual-ground fallback so
+      // a `castShadow:true` mesh casts no shadow unless an explicit
+      // receiver mesh exists to catch it. The gallery floor is that
+      // receiver. Until the receiver-shadow path is hardened for
+      // perspective cameras, large tilts may visually under-render the
+      // shadow; that's a known follow-up (huge intrinsic receiver SVG
+      // vs ancestor `overflow:hidden`).
+      { excludeFromAutoCenter: true, castShadow: false, receiveShadow: true },
     );
     groundHandleRef.current.element.classList.add("dn-gallery-ground");
     applyGalleryGroundPaint(groundHandleRef.current, directionalLightRef.current, ambientLightRef.current, groundColorRef.current);
@@ -1199,7 +1260,7 @@ export function VanillaScene({
         polygons: octahedronPolygons({ center: [0, 0, 0], size: helperScale * 0.05, color: swatch }),
         objectUrls: [],
         warnings: [],
-        dispose: () => {},
+        dispose: () => { },
       },
       {
         position: lightHelperPosition(

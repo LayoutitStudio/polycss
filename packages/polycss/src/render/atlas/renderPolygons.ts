@@ -17,10 +17,12 @@ import type {
 } from "./types";
 import {
   ASYNC_RENDER_BUDGET_MS,
+  DEFAULT_SEAM_BLEED,
   DEFAULT_TILE,
   PROJECTIVE_QUAD_DENOM_EPS,
   PROJECTIVE_QUAD_MAX_WEIGHT_RATIO,
   PROJECTIVE_QUAD_BLEED,
+  resolveBleedRatio,
 } from "@layoutit/polycss-core";
 import {
   buildBasisHints,
@@ -74,7 +76,17 @@ import {
 } from "./stableTriangle";
 import { stableTriangleMatrixDecimals } from "@layoutit/polycss-core";
 
-const DEFAULT_SOLID_SEAM_BLEED = 1.5;
+// `options.seamBleed` is interpreted as a RATIO 0..1 that scales the
+// per-strategy bleed defaults. The shared-edge seam-bleed below uses
+// `DEFAULT_SEAM_BLEED * ratio` as its absolute value in CSS px.
+//
+// LIMITATION (v1): the other per-strategy bleeds (BORDER_SHAPE_BLEED,
+// SOLID_TRIANGLE_BLEED, TEXTURE_TRIANGLE_BLEED, PROJECTIVE_QUAD_BLEED)
+// don't yet receive the ratio. They live in core functions without
+// options access; threading the ratio through them is a bigger refactor.
+// Until then, `seamBleed: 0` disables ONLY the shared-edge overscan —
+// per-strategy bleeds still apply per their constants in
+// core/atlas/constants.ts.
 
 type RenderTextureAtlasOptionsWithSeams = RenderTextureAtlasOptions & {
   seamBleed?: number;
@@ -93,11 +105,19 @@ async function yieldIfOverBudget(started: number): Promise<number> {
 
 function seamTriangleOptions(
   plan: TextureAtlasPlan,
-  options: RenderTextureAtlasOptions,
+  options: RenderTextureAtlasOptionsWithSeams,
 ): RenderTextureAtlasOptionsWithSeams {
-  return plan.seamBleedEdges?.size
-    ? { ...options, seamBleed: DEFAULT_SOLID_SEAM_BLEED, seamEdges: plan.seamBleedEdges }
-    : { ...options, seamBleed: undefined, seamEdges: undefined };
+  // `options.seamBleed` is the public ratio (0..1, default 1). Resolve
+  // to an absolute CSS px value by multiplying the default constant.
+  // ratio === 0 → no shared-edge overscan (Three.js-parity testing).
+  // Also stash the ratio in `bleedRatio` so downstream plan construction
+  // can scale its per-strategy fallbacks (SOLID_TRIANGLE_BLEED, etc).
+  const ratio = resolveBleedRatio(options.seamBleed);
+  const bleed = DEFAULT_SEAM_BLEED * ratio;
+  const baseOut = { ...options, bleedRatio: ratio };
+  return plan.seamBleedEdges?.size && bleed > 0
+    ? { ...baseOut, seamBleed: bleed, seamEdges: plan.seamBleedEdges }
+    : { ...baseOut, seamBleed: undefined, seamEdges: undefined };
 }
 
 function buildRenderSeamBleedEdges(
@@ -115,15 +135,18 @@ function buildRenderSeamBleedEdges(
 function seamAtlasOptions(
   index: number,
   seamBleedEdges: Map<number, Set<number>> | null,
-  options: RenderTextureAtlasOptions,
+  options: RenderTextureAtlasOptionsWithSeams,
 ): RenderTextureAtlasOptionsWithSeams {
-  return seamBleedEdges
+  const ratio = resolveBleedRatio(options.seamBleed);
+  const bleed = DEFAULT_SEAM_BLEED * ratio;
+  const baseOut = { ...options, bleedRatio: ratio };
+  return seamBleedEdges && bleed > 0
     ? {
-        ...options,
-        seamBleed: seamBleedEdges.has(index) ? DEFAULT_SOLID_SEAM_BLEED : undefined,
+        ...baseOut,
+        seamBleed: seamBleedEdges.has(index) ? bleed : undefined,
         seamEdges: seamBleedEdges.get(index),
       }
-    : options;
+    : baseOut;
 }
 
 export function getSolidPaintDefaults(
@@ -175,6 +198,16 @@ export function renderPolygonsWithTextureAtlas(
       basisHints[index],
     )
   );
+  if (typeof window !== "undefined") {
+    const w = window as unknown as { __vanillaPlan1?: unknown };
+    const plan = plans[1];
+    w.__vanillaPlan1 = {
+      matrix: plan?.matrix,
+      canvasW: plan?.canvasW,
+      canvasH: plan?.canvasH,
+      vertexCount: polygons[1]?.vertices.length,
+    };
+  }
   const solidPaintDefaults = options.solidPaintDefaults ??
     (internalOptions.computeSolidPaintDefaults
       ? getSolidPaintDefaultsForPlans(plans, textureLighting, doc, options.strategies)
@@ -241,7 +274,7 @@ export function renderPolygonsWithTextureAtlas(
 
   rendered.sort((a, b) => a.polygonIndex - b.polygonIndex);
 
-  buildAtlasPages(packed.pages, textureLighting, doc, atlasScale, () => cancelled)
+  const pagesReady = buildAtlasPages(packed.pages, textureLighting, doc, atlasScale, () => cancelled)
     .then((pages) => {
       if (cancelled) {
         for (const page of pages) {
@@ -257,7 +290,18 @@ export function renderPolygonsWithTextureAtlas(
         for (const entry of page.entries) {
           const el = atlasElements.get(entry.index);
           if (!el || !built.url) continue;
-          applyAtlasBackground(el, built, textureLighting, entry, !skipDynamicNormalVars);
+          // preserveDynamicNormalVars is always true here — this callback fires
+// AFTER syncMountedRendered has already grouped polys into buckets and
+// restored inline normals on solo polys. Passing false would re-write
+// the leaf's style attribute without normals and wipe out the work
+// restoreInlineDynamicNormalVars just did, leaving solo polys
+// (those with a unique normal+color among siblings) reading Lambert
+// against the @property defaults (0,0,1). The atlas-plan normal here
+// matches what restoreInlineDynamicNormalVars sets, so re-applying it
+// is a no-op for solo polys; for bucketed polys the inline value is
+// unused (the bucket parent drives --plam) but doesn't change the
+// inherited result.
+applyAtlasBackground(el, built, textureLighting, entry, true);
         }
       }
     })
@@ -272,6 +316,7 @@ export function renderPolygonsWithTextureAtlas(
   const result = {
     rendered,
     solidPaintDefaults: solidPaintDefaults ?? {},
+    pagesReady,
     dispose() {
       cancelled = true;
       for (const url of urls) URL.revokeObjectURL(url);
@@ -393,7 +438,7 @@ export async function renderPolygonsWithTextureAtlasAsync(
 
   rendered.sort((a, b) => a.polygonIndex - b.polygonIndex);
 
-  buildAtlasPages(packed.pages, textureLighting, doc, atlasScale, () => cancelled || shouldCancel())
+  const pagesReady = buildAtlasPages(packed.pages, textureLighting, doc, atlasScale, () => cancelled || shouldCancel())
     .then((pages) => {
       if (cancelled || shouldCancel()) {
         for (const page of pages) {
@@ -409,7 +454,18 @@ export async function renderPolygonsWithTextureAtlasAsync(
         for (const entry of page.entries) {
           const el = atlasElements.get(entry.index);
           if (!el || !built.url) continue;
-          applyAtlasBackground(el, built, textureLighting, entry, !skipDynamicNormalVars);
+          // preserveDynamicNormalVars is always true here — this callback fires
+// AFTER syncMountedRendered has already grouped polys into buckets and
+// restored inline normals on solo polys. Passing false would re-write
+// the leaf's style attribute without normals and wipe out the work
+// restoreInlineDynamicNormalVars just did, leaving solo polys
+// (those with a unique normal+color among siblings) reading Lambert
+// against the @property defaults (0,0,1). The atlas-plan normal here
+// matches what restoreInlineDynamicNormalVars sets, so re-applying it
+// is a no-op for solo polys; for bucketed polys the inline value is
+// unused (the bucket parent drives --plam) but doesn't change the
+// inherited result.
+applyAtlasBackground(el, built, textureLighting, entry, true);
         }
       }
     })
@@ -424,6 +480,7 @@ export async function renderPolygonsWithTextureAtlasAsync(
   return {
     rendered,
     solidPaintDefaults,
+    pagesReady,
     dispose() {
       cancelled = true;
       for (const url of urls) URL.revokeObjectURL(url);
@@ -545,6 +602,7 @@ export function updatePolygonsWithStableTopology(
   options: RenderTextureAtlasOptions = {},
 ): boolean {
   if (rendered.length !== polygons.length) return false;
+  const internalOptions = options as InternalRenderTextureAtlasOptions;
   const doc = options.doc ?? (typeof document !== "undefined" ? document : null);
   const textureLighting = options.textureLighting ?? "baked";
   const disabled = new Set(options.strategies?.disable ?? []);
@@ -552,18 +610,22 @@ export function updatePolygonsWithStableTopology(
   const useProjectiveQuad = !!doc && useFullRectSolid && projectiveQuadSupported(doc);
   const useCornerShapeSolid = !!doc && !disabled.has("i") && cornerShapeSupported(doc);
   const useBorderShape = !!doc && !disabled.has("i") && borderShapeSupported(doc);
+  // Resolve the per-strategy ratio once so projective-quad / corner-shape
+  // checks below all read from the same value as the plan stamping.
+  const bleedRatio = resolveBleedRatio(internalOptions.seamBleed);
+  // Pass the resolved bleed as an explicit override so resolveProjectiveQuadGuards
+  // (which has its own fallback path) returns the scaled value too.
   const projectiveQuadGuards = doc
-    ? resolveProjectiveQuadGuards(doc)
+    ? resolveProjectiveQuadGuards(doc, { bleed: PROJECTIVE_QUAD_BLEED * bleedRatio })
     : {
         denomEps: PROJECTIVE_QUAD_DENOM_EPS,
         maxWeightRatio: PROJECTIVE_QUAD_MAX_WEIGHT_RATIO,
-        bleed: PROJECTIVE_QUAD_BLEED,
+        bleed: PROJECTIVE_QUAD_BLEED * bleedRatio,
         disableGuards: false,
       };
   const optimizeTriangleStyle =
-    (options as InternalRenderTextureAtlasOptions).optimizeStableTriangleStyle === true &&
+    internalOptions.optimizeStableTriangleStyle === true &&
     textureLighting === "baked";
-  const internalOptions = options as InternalRenderTextureAtlasOptions;
   const stableTriangleDebug = internalOptions.stableTriangleDebug;
   const stableTriangleUpdateMode = internalOptions.stableTriangleUpdateMode ??
     (stableTriangleDebug === "plan-only" || stableTriangleDebug === "transform-only"

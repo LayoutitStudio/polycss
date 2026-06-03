@@ -302,7 +302,10 @@ const ldJson = {
         const camera = createPolyPerspectiveCamera({
           rotX: 74.4,
           rotY: 301.6,
-          zoom: 0.3,
+          // `zoom` is now "px per world unit" (Three.js convention). The
+          // legacy CSS-scale value was 0.3, multiplied by the old implicit
+          // tile factor (50) to get the matching px/unit.
+          zoom: 15,
         });
         const scene = createPolyScene(host, { camera, autoCenter: true });
         scene.add(parseResult);

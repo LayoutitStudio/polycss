@@ -8,6 +8,7 @@ import type {
   PolyMeshHandle as VanillaPolyMeshHandle,
 } from "@layoutit/polycss";
 import { exportPolySceneSnapshot, optimizeAnimatedMeshPolygons, parsePureColor } from "@layoutit/polycss";
+import { screenToWorldOnSphere } from "@layoutit/polycss-core";
 import type { InspectorColorGroup, InspectorMesh } from "../Inspector";
 import { VanillaScene, type VanillaSceneTransientHandle } from "../VanillaScene";
 import { ReactScene } from "../ReactScene";
@@ -115,11 +116,11 @@ const DEFAULT_SCENE: SceneOptionsState = {
   rotX: PRESETS[0].rotX ?? 65,
   rotY: PRESETS[0].rotY ?? 45,
   perspective: undefined,
-  lightAzimuth: 50,
+  lightAzimuth: 40,
   lightElevation: 45,
-  lightIntensity: 1,
+  lightIntensity: 4.5,
   lightColor: "#ffffff",
-  ambientIntensity: 0.4,
+  ambientIntensity: 0.55,
   ambientColor: "#ffffff",
   textureLighting: "baked",
   textureQuality: "auto",
@@ -133,9 +134,10 @@ const DEFAULT_SCENE: SceneOptionsState = {
   target: [0, 0, 0],
   disableStrategies: [],
   castShadow: false,
+  selfShadow: false,
   shadowMaxExtend: 2000,
   showGround: false,
-  groundColor: "#7d848e",
+  groundColor: "#4a505a",
   fpvLook: true,
   fpvMove: true,
   fpvJump: true,
@@ -155,7 +157,6 @@ const DEFAULT_SCENE: SceneOptionsState = {
 
 const DEFAULT_PARSER: ParserOptionsState = {
   targetSize: 60,
-  gridShift: 1,
   defaultColor: "#8b95a1",
 };
 
@@ -381,6 +382,7 @@ function useLightRotationDrag(
   viewportRef: RefObject<HTMLDivElement | null>,
   sceneOptions: SceneOptionsState,
   helperScale: number,
+  helperTarget: [number, number, number],
   gizmoDragging: boolean,
   onCommitScene: (partial: Partial<SceneOptionsState>) => void,
   canPreviewSceneOptions: (options: SceneOptionsState) => boolean,
@@ -388,12 +390,14 @@ function useLightRotationDrag(
 ): void {
   const sceneOptionsRef = useRef(sceneOptions);
   const helperScaleRef = useRef(helperScale);
+  const helperTargetRef = useRef(helperTarget);
   const gizmoDraggingRef = useRef(gizmoDragging);
   const onCommitSceneRef = useRef(onCommitScene);
   const canPreviewSceneOptionsRef = useRef(canPreviewSceneOptions);
   const onPreviewSceneOptionsRef = useRef(onPreviewSceneOptions);
   sceneOptionsRef.current = sceneOptions;
   helperScaleRef.current = helperScale;
+  helperTargetRef.current = helperTarget;
   gizmoDraggingRef.current = gizmoDragging;
   onCommitSceneRef.current = onCommitScene;
   canPreviewSceneOptionsRef.current = canPreviewSceneOptions;
@@ -404,9 +408,7 @@ function useLightRotationDrag(
     if (!viewport) return;
 
     let activePointerId: number | null = null;
-    let helperTargetScreen = { x: 0, y: 0 };
-    let helperGrabOffset = { x: 0, y: 0 };
-    let helperRadiusCss = 1;
+    let sphereRadius = 1;             // world units
     let previewRaf = 0;
     let dragOptions: SceneOptionsState | null = null;
     let pendingPreviewOptions: SceneOptionsState | null = null;
@@ -433,6 +435,65 @@ function useLightRotationDrag(
     const helperDragEnabled = (): boolean => {
       const options = sceneOptionsRef.current;
       return options.interactive && options.showLight && !gizmoDraggingRef.current;
+    };
+
+    /**
+     * Pixel-perfect drag via inverse projection from screen → 3D world point
+     * on the helper sphere (radius = helperScale × 0.7 around helperTarget).
+     * Mirrors the bench's three-parity drag handler exactly. The post-parity
+     * vanilla camera treats `zoom` as px-per-world-unit, so the legacy
+     * unitless `sceneOptions.zoom` is scaled by `LIGHT_HELPER_TILE` here to
+     * match what the renderer is actually using.
+     */
+    const computeAnglesFromCursor = (
+      options: SceneOptionsState,
+      clientX: number,
+      clientY: number,
+    ): { lightAzimuth: number; lightElevation: number } | null => {
+      const rect = viewport.getBoundingClientRect();
+      // Scene autoCenter adds the bbox center (= helperTarget) to the
+      // configured `target` before computing the scene-root translate, so the
+      // effective look-at point seen by the renderer is target + helperTarget.
+      // screenToWorldOnSphere needs that same effective target to inverse-
+      // project the cursor consistently with what's actually on screen.
+      const ht = helperTargetRef.current;
+      const t = options.target as ReactVec3;
+      const camArg = {
+        rotX: options.rotX,
+        rotY: options.rotY,
+        // sceneOptions.zoom is the post-parity px-per-world-unit value the
+        // post-parity camera receives directly (after VanillaScene's
+        // LEGACY_ZOOM_COMPAT multiplier, which translates the workbench
+        // slider's unitless value into px/u). We use the same multiplied
+        // value here so the inverse-projection matches the actual rendered
+        // scale.
+        zoom: options.zoom * LIGHT_HELPER_TILE,
+        target: [t[0] + ht[0], t[1] + ht[1], t[2] + ht[2]] as ReactVec3,
+      };
+      const hit = screenToWorldOnSphere({
+        camera: camArg as unknown as Parameters<typeof screenToWorldOnSphere>[0]["camera"],
+        tileSize: LIGHT_HELPER_TILE,
+        viewportCenterX: rect.left + rect.width / 2,
+        viewportCenterY: rect.top + rect.height / 2,
+        mouseX: clientX,
+        mouseY: clientY,
+        sphereCenter: helperTargetRef.current,
+        sphereRadius,
+      });
+      if (!hit) return null;
+      const target = helperTargetRef.current;
+      const ox = hit[0] - target[0];
+      const oy = hit[1] - target[1];
+      const oz = hit[2] - target[2];
+      const len = Math.hypot(ox, oy, oz) || 1;
+      const nx = ox / len, ny = oy / len, nz = oz / len;
+      // direction-from-angles convention (lightDirectionFromAngles above):
+      //   dir = [cos(el)*sin(az), cos(el)*cos(az), sin(el)]
+      // So azimuth from XY-plane bearing, elevation from Z.
+      return {
+        lightAzimuth: wrapDegrees((Math.atan2(nx, ny) * 180) / Math.PI),
+        lightElevation: clampLightElevation((Math.asin(Math.max(-1, Math.min(1, nz))) * 180) / Math.PI),
+      };
     };
 
     const stopDrag = (event: PointerEvent): void => {
@@ -462,24 +523,12 @@ function useLightRotationDrag(
       event.preventDefault();
       event.stopPropagation();
       activePointerId = event.pointerId;
-      const options = sceneOptionsRef.current;
-      dragOptions = options;
+      dragOptions = sceneOptionsRef.current;
       pendingCommit = null;
-      helperRadiusCss = Math.max(1, helperScaleRef.current * 0.7 * LIGHT_HELPER_TILE);
-      const helperCenter = elementScreenCenter(helper);
-      const currentOffset = projectLightDirectionToScreen(
-        lightDirectionFromAngles(options.lightAzimuth, options.lightElevation),
-        options,
-        helperRadiusCss,
-      );
-      helperTargetScreen = {
-        x: helperCenter.x - currentOffset[0],
-        y: helperCenter.y - currentOffset[1],
-      };
-      helperGrabOffset = {
-        x: event.clientX - helperCenter.x,
-        y: event.clientY - helperCenter.y,
-      };
+      // World-unit sphere radius — matches the helper's
+      // `helperScale × 0.7` distance used by ReactScene/VanillaScene when
+      // they place the helper octahedron.
+      sphereRadius = Math.max(0.001, helperScaleRef.current * 0.7);
       viewport.classList.add("is-light-rotating");
       try { viewport.setPointerCapture(event.pointerId); } catch { /* ignore */ }
     };
@@ -491,19 +540,9 @@ function useLightRotationDrag(
         return;
       }
       event.preventDefault();
-      const helperCenter = {
-        x: event.clientX - helperGrabOffset.x,
-        y: event.clientY - helperGrabOffset.y,
-      };
       const baseOptions = dragOptions ?? sceneOptionsRef.current;
-      const nextAngles = lightAnglesFromScreenOffset(
-        {
-          x: helperCenter.x - helperTargetScreen.x,
-          y: helperCenter.y - helperTargetScreen.y,
-        },
-        baseOptions,
-        helperRadiusCss,
-      );
+      const nextAngles = computeAnglesFromCursor(baseOptions, event.clientX, event.clientY);
+      if (!nextAngles) return;
       if (!canPreviewSceneOptionsRef.current(baseOptions)) {
         onCommitSceneRef.current(nextAngles);
         dragOptions = { ...baseOptions, ...nextAngles };
@@ -535,7 +574,6 @@ function parserDefaultsFor(model: PresetModel): Partial<ParserOptionsState> {
   const options = model.options as (ObjParseOptions & GltfParseOptions & VoxParseOptions & StlParseOptions) | undefined;
   return {
     ...(typeof options?.targetSize === "number" ? { targetSize: options.targetSize } : {}),
-    ...(typeof options?.gridShift === "number" ? { gridShift: options.gridShift } : {}),
     ...(typeof options?.defaultColor === "string" ? { defaultColor: options.defaultColor } : {}),
   };
 }
@@ -1075,6 +1113,7 @@ export default function GalleryWorkbench() {
     viewportRef,
     renderSceneOptions,
     helperScale,
+    helperTarget,
     gizmoDragging,
     updateScene,
     canPreviewSceneOptions,
@@ -1506,6 +1545,7 @@ export default function GalleryWorkbench() {
         />
         <DockLighting
           castShadow={sceneOptions.castShadow}
+          selfShadow={sceneOptions.selfShadow}
           shadowMaxExtend={sceneOptions.shadowMaxExtend}
           showGround={sceneOptions.showGround}
           groundColor={sceneOptions.groundColor}

@@ -6,7 +6,7 @@ import type {
   PolyRenderStrategy,
 } from "@layoutit/polycss-core";
 import type { PolyTextureLightingMode } from "@layoutit/polycss-core";
-import { isBorderShapeSupported, isSolidTriangleSupported } from "./detection";
+import { cornerShapeSupported, isBorderShapeSupported, isSolidTriangleSupported } from "./detection";
 import { projectiveQuadSupported } from "./detection";
 
 /**
@@ -20,9 +20,11 @@ export function filterAtlasPlans(
   disabled: ReadonlySet<PolyRenderStrategy>,
   doc?: Document | null,
 ): Array<TextureAtlasPlan | null> {
+  const d = doc ?? (typeof document !== "undefined" ? document : null);
   return filterAtlasPlansCore(plans, textureLighting, disabled, {
     solidTriangleSupported: isSolidTriangleSupported(doc),
     projectiveQuadSupported: doc ? projectiveQuadSupported(doc) : true,
     borderShapeSupported: isBorderShapeSupported(doc),
+    cornerShapeSupported: d ? cornerShapeSupported(d) : false,
   });
 }

@@ -126,6 +126,18 @@ function topQuad(color = "#123456"): Polygon {
   };
 }
 
+function floor(color = "#888888"): Polygon {
+  return {
+    vertices: [
+      [-10, -10, -0.1],
+      [10, -10, -0.1],
+      [10, 10, -0.1],
+      [-10, 10, -0.1],
+    ],
+    color,
+  };
+}
+
 function translatedTopQuad(x: number, y: number, color: string): Polygon {
   return {
     vertices: [
@@ -199,7 +211,6 @@ function makeVoxelParseResult(): ParseResult {
       cols: 1,
       depth: 1,
       scale: 1,
-      gridShift: 0,
       sourceBytes: 64,
     },
   };
@@ -215,7 +226,6 @@ function makeVoxelExactParseResult(): ParseResult {
       cols: 1,
       depth: 1,
       scale: 1,
-      gridShift: 0,
       sourceBytes: 64,
     },
   };
@@ -231,7 +241,6 @@ function makeVoxelExactPolygonsParseResult(polygons: Polygon[]): ParseResult {
       cols: 1,
       depth: 1,
       scale: 1,
-      gridShift: 0,
       sourceBytes: 64,
     },
   };
@@ -247,7 +256,6 @@ function makeTwoSidedVoxelExactParseResult(): ParseResult {
       cols: 1,
       depth: 1,
       scale: 1,
-      gridShift: 0,
       sourceBytes: 64,
     },
   };
@@ -269,7 +277,6 @@ function makeTwoTopVoxelExactParseResult(): ParseResult {
       cols: 1,
       depth: 1,
       scale: 1,
-      gridShift: 0,
       sourceBytes: 64,
     },
   };
@@ -285,7 +292,6 @@ function makeTwoSidedVoxelSideParseResult(): ParseResult {
       cols: 1,
       depth: 1,
       scale: 1,
-      gridShift: 0,
       sourceBytes: 64,
     },
   };
@@ -383,7 +389,10 @@ describe("createPolyScene", () => {
       const transform = sceneEl.style.transform;
       // Perspective lives on the .polycss-camera wrapper, not on .polycss-scene.
       expect(cameraEl.style.perspective).toBe("1500px");
-      expect(transform).toContain("scale(2)");
+      // User zoom semantic: "px per world unit" (Three.js OrthographicCamera.zoom
+      // shape). Renderer geometry already lives at ×DEFAULT_TILE CSS px, so the
+      // scene CSS scale is `zoom / DEFAULT_TILE`. zoom=2 → scale(0.04).
+      expect(transform).toContain("scale(0.04)");
       expect(transform).toContain("rotateX(30deg)");
       // rotY in our API maps to CSS rotate() (i.e. rotateZ) so the model
       // spins around its vertical world-Z axis, matching React's PolyCamera.
@@ -403,7 +412,8 @@ describe("createPolyScene", () => {
       expect(cameraEl.style.perspective).toBe("1500px");
       expect(sceneEl.style.getPropertyValue("zoom")).toBe("2");
       expect(transform).toContain("translateZ(-50px)");
-      expect(transform).toContain("scale(1)");
+      // zoom=2 / DEFAULT_TILE (50) × layoutScale (0.5) = 0.02.
+      expect(transform).toContain("scale(0.02)");
       expect(transform).toContain("rotateX(30deg)");
       expect(transform).toContain("rotate(60deg)");
       expect(scene.camera.state.zoom).toBe(2);
@@ -502,8 +512,11 @@ describe("createPolyScene", () => {
 
     it("uses exact parsed voxel polygons for direct matrix placement", () => {
       scene = makeScene(host, {
+        // ambient = π cancels the shadePolygon `/π` Lambert divisor so the
+        // assertion sees the raw base color. The test is about matrix
+        // placement; color is just an identity marker for the brush.
         directionalLight: { direction: [0, 0, 1], color: "#ffffff", intensity: 0 },
-        ambientLight: { color: "#ffffff", intensity: 1 },
+        ambientLight: { color: "#ffffff", intensity: Math.PI },
       }, { rotX: 65, rotY: 45 });
       scene.add(makeVoxelExactParseResult(), { merge: false });
       const brush = host.querySelector(DIRECT_VOXEL_BRUSH_SELECTOR) as HTMLElement | null;
@@ -670,9 +683,14 @@ describe("createPolyScene", () => {
         scale: 2,
       });
       const wrapper = host.querySelector(".polycss-mesh") as HTMLElement;
-      expect(wrapper.style.transform).toContain("translate3d(10px, 20px, 30px)");
-      expect(wrapper.style.transform).toContain("rotateX(45deg)");
+      // Three.js parity: wrapper transform pivots at local (0,0,0). With
+      // mesh.position [10, 20, 30] world → CSS [1000, 500, 1500] via the
+      // world.y → CSS.x axis swap and ×DEFAULT_TILE, and rotation [45,0,0]
+      // (world X) → CSS rotateY(-45deg) via the world↔CSS reflection.
+      // Form: translate3d(pos_css) rotateY(-45deg) scale3d(2,2,2).
       expect(wrapper.style.transform).toContain("scale3d(2, 2, 2)");
+      expect(wrapper.style.transform).toContain("rotateY(-45deg)");
+      expect(wrapper.style.transform).toMatch(/translate3d\(1000(\.0+)?px,\s*500(\.0+)?px,\s*1500(\.0+)?px\)/);
     });
 
     it("handle.remove() detaches the wrapper from the DOM", () => {
@@ -688,7 +706,8 @@ describe("createPolyScene", () => {
       const handle = scene.add(makeParseResult(), { position: [0, 0, 0] });
       handle.setTransform({ position: [5, 5, 5] });
       const wrapper = host.querySelector(".polycss-mesh") as HTMLElement;
-      expect(wrapper.style.transform).toContain("translate3d(5px, 5px, 5px)");
+      // Symmetric input → axis swap is invisible, ×DEFAULT_TILE (50) applied.
+      expect(wrapper.style.transform).toContain("translate3d(250px, 250px, 250px)");
     });
 
     it("can update stableDom mesh geometry without replacing polygon elements", () => {
@@ -1326,7 +1345,10 @@ describe("createPolyScene", () => {
       });
       const sceneEl = host.querySelector(".polycss-scene") as HTMLElement;
       expect(sceneEl.dataset.polycssLighting).toBe("dynamic");
-      expect(sceneEl.style.getPropertyValue("--plz")).toBe("1.0000");
+      // H10: --plx/y/z + --clx/cly/clz quantized to 0.01 (toFixed(2))
+      // to avoid per-frame style recalc on dynamic-Lambert leaves.
+      // Light intensity and per-channel color stay at toFixed(4).
+      expect(sceneEl.style.getPropertyValue("--plz")).toBe("1.00");
       expect(sceneEl.style.getPropertyValue("--pli")).toBe("1.5000");
       expect(sceneEl.style.getPropertyValue("--pai")).toBe("0.3000");
       // #ff8800 → r=255 (1), g=136 (0.5333), b=0 (0).
@@ -1375,7 +1397,8 @@ describe("createPolyScene", () => {
       })).toBe(true);
 
       expect(sceneEl.dataset.polycssLighting).toBe("baked");
-      expect(sceneEl.style.getPropertyValue("--plz")).toBe("1.0000");
+      // H10: --plx/y/z quantized to toFixed(2).
+      expect(sceneEl.style.getPropertyValue("--plz")).toBe("1.00");
       expect(sceneEl.style.getPropertyValue("--polycss-light-preview-active")).toBe("1");
       expect(leaf.style.getPropertyValue("--pnz")).not.toBe("");
       expect(leaf.style.getPropertyValue("--plam")).toContain("var(--plz, 1)");
@@ -1427,7 +1450,7 @@ describe("createPolyScene", () => {
       expect(triangleLeaf.style.backgroundColor).toBe(initialTriangleBackgroundColor);
     });
 
-    it("rebakes atlas leaves when committing baked lighting", () => {
+    it("rebakes atlas leaves in place when committing baked lighting (no flash)", () => {
       scene = makeScene(host, { textureLighting: "baked" });
       scene.add(makeParseResult([texturedTriangle()]), { merge: false });
       const initialLeaf = host.querySelector("s") as HTMLElement;
@@ -1440,7 +1463,12 @@ describe("createPolyScene", () => {
       });
 
       expect(previewScene.commitBakedSolidLighting()).toBe(true);
-      expect(host.querySelector("s")).not.toBe(initialLeaf);
+      // Post-fix: commit uses `rebakeRenderEntryInPlace` rather than the
+      // destructive `renderEntry`, so the same `<s>` DOM node stays
+      // mounted and only its atlas bitmap URL gets swapped. That removes
+      // the visible "leaves disappear then reappear" flash on drag-end.
+      const leafAfter = host.querySelector("s") as HTMLElement;
+      expect(leafAfter).toBe(initialLeaf);
     });
 
     it("honors strategies.disable at creation time", () => {
@@ -1513,8 +1541,10 @@ describe("createPolyScene", () => {
 
     it("updates direct voxel brushes when mesh rotation changes the visible face set", () => {
       scene = makeScene(host, {
+        // ambient = π so the shadePolygon `/π` cancels and the brush color
+        // matches the raw base — lets the test assert color identity.
         directionalLight: { direction: [0, 0, 1], intensity: 0 },
-        ambientLight: { color: "#ffffff", intensity: 1 },
+        ambientLight: { color: "#ffffff", intensity: Math.PI },
       }, { rotX: 0, rotY: 0 });
       const handle = scene.add(makeTwoSidedVoxelExactParseResult());
       const firstBrush = host.querySelector(DIRECT_VOXEL_BRUSH_SELECTOR) as HTMLElement | null;
@@ -1532,8 +1562,10 @@ describe("createPolyScene", () => {
 
     it("updates direct voxel side brushes when mesh z-rotation swaps front and back faces", () => {
       scene = makeScene(host, {
+        // ambient = π so the shadePolygon `/π` cancels and the brush color
+        // matches the raw base — lets the test assert color identity.
         directionalLight: { direction: [0, 0, 1], intensity: 0 },
-        ambientLight: { color: "#ffffff", intensity: 1 },
+        ambientLight: { color: "#ffffff", intensity: Math.PI },
       }, { rotX: 65, rotY: 45 });
       const handle = scene.add(makeTwoSidedVoxelSideParseResult());
       const firstBrush = host.querySelector(DIRECT_VOXEL_BRUSH_SELECTOR) as HTMLElement | null;
@@ -1551,8 +1583,10 @@ describe("createPolyScene", () => {
 
     it("redraws direct voxel brushes on mesh rotation even when visible faces stay the same", () => {
       scene = makeScene(host, {
+        // ambient = π so the shadePolygon `/π` cancels and the brush color
+        // matches the raw base — lets the test assert color identity.
         directionalLight: { direction: [0, 0, 1], intensity: 0 },
-        ambientLight: { color: "#ffffff", intensity: 1 },
+        ambientLight: { color: "#ffffff", intensity: Math.PI },
       }, { rotX: 0, rotY: 0 });
       const handle = scene.add(makeTwoTopVoxelExactParseResult());
       const brushes = () => Array.from(host.querySelectorAll(DIRECT_VOXEL_BRUSH_SELECTOR)) as HTMLElement[];
@@ -1786,9 +1820,12 @@ describe("createPolyScene", () => {
       scene.add(makeParseResult([triangle()]), { rotation: [0, 90, 0] });
       const wrapper = host.querySelector(".polycss-mesh") as HTMLElement;
       // inverseRotateVec3([0,0,1], [0,90,0]) = rotateY(-90) on [0,0,1] = [-1,0,0]
-      expect(wrapper.style.getPropertyValue("--plx")).toBe("-1.0000");
-      expect(wrapper.style.getPropertyValue("--ply")).toBe("0.0000");
-      expect(wrapper.style.getPropertyValue("--plz")).toBe("0.0000");
+      // (user-frame), then worldDirectionToCss swaps X↔Y → [0,-1,0] for the
+      // CSS-frame --plx/--ply/--plz consumed by the Lambert CSS calc().
+      // H10: quantized to toFixed(2).
+      expect(wrapper.style.getPropertyValue("--plx")).toBe("0.00");
+      expect(wrapper.style.getPropertyValue("--ply")).toBe("-1.00");
+      expect(wrapper.style.getPropertyValue("--plz")).toBe("0.00");
     });
 
     it("updates the override synchronously when setTransform changes rotation", () => {
@@ -1841,9 +1878,10 @@ describe("createPolyScene", () => {
       scene.setOptions({
         directionalLight: { direction: [1, 0, 0], color: "#ffffff", intensity: 1 },
       });
-      expect(wrapper.style.getPropertyValue("--plx")).toBe("0.0000");
-      expect(wrapper.style.getPropertyValue("--ply")).toBe("0.0000");
-      expect(wrapper.style.getPropertyValue("--plz")).toBe("1.0000");
+      // H10: quantized to toFixed(2).
+      expect(wrapper.style.getPropertyValue("--plx")).toBe("0.00");
+      expect(wrapper.style.getPropertyValue("--ply")).toBe("0.00");
+      expect(wrapper.style.getPropertyValue("--plz")).toBe("1.00");
     });
 
     it("does NOT emit override when scene has no directionalLight", () => {
@@ -2141,12 +2179,15 @@ describe("createPolyScene", () => {
     it("castShadow:true in dynamic mode emits a single <svg> shadow per mesh (same path as baked)", () => {
       // Dynamic mode now uses the same per-mesh compound SVG path as baked
       // mode — one <svg> per casting mesh regardless of polygon count.
+      // Casters need normals opposite to the light travel direction
+      // (default Lz=+0.59), so use back-wound triangles.
       const distinctTri: Polygon = {
-        vertices: [[10, 10, 5], [11, 10, 5], [10, 11, 5]],
+        vertices: [[10, 10, 5], [10, 11, 5], [11, 10, 5]],
         color: "#00ff00",
       };
       scene = makeScene(host, dynOpts);
-      scene.add(makeParseResult([triangle(), distinctTri]), { castShadow: true, merge: false });
+      scene.add(makeParseResult([floor()]), { receiveShadow: true });
+      scene.add(makeParseResult([backTriangle(), distinctTri]), { castShadow: true, merge: false });
       const shadows = host.querySelectorAll(".polycss-shadow");
       expect(shadows.length).toBe(1);
       expect(shadows[0]!.tagName.toLowerCase()).toBe("svg");
@@ -2159,13 +2200,16 @@ describe("createPolyScene", () => {
       // filled silhouette without alpha stacking while gaps remain holes.
       // One <path> per mesh regardless of polygon count.
       scene = makeScene(host, { textureLighting: "baked" });
-      scene.add(makeParseResult([triangle()]), { castShadow: true });
+      scene.add(makeParseResult([floor()]), { receiveShadow: true });
+      scene.add(makeParseResult([backTriangle()]), { castShadow: true });
       const shadows = host.querySelectorAll(".polycss-shadow");
       expect(shadows.length).toBe(1);
       const shadow = shadows[0] as SVGSVGElement;
       expect(shadow.tagName.toLowerCase()).toBe("svg");
       expect(shadow.classList.contains("polycss-shadow-svg")).toBe(true);
-      expect(shadow.style.transform).toMatch(/^translate3d\(/);
+      // Per-receiver-face SVGs are placed via matrix3d(u,v,n,O) so the
+      // SVG-local (u,v) space projects back onto the receiver plane.
+      expect(shadow.style.transform).toMatch(/^matrix3d\(/);
       expect(shadow.style.transform).not.toContain("var(--shadow-proj)");
       const paths = shadow.querySelectorAll("path");
       expect(paths.length).toBe(1);
@@ -2179,12 +2223,30 @@ describe("createPolyScene", () => {
       expect((d.match(/Z/g) || []).length).toBe(1);
     });
 
-    it("clips low-angle ground shadow path coordinates to the capped SVG box", () => {
+    it("clips low-angle shadow path coordinates to the receiver face SVG box", () => {
+      // Receiver-face SVGs are sized to the receiver's planar bbox and
+      // every projected shadow polygon is clipped against the receiver's
+      // outline before path emission. Path coordinates must therefore stay
+      // inside the SVG's width/height regardless of how far a low-angle
+      // shadow would naturally stretch beyond the receiver.
+      const smallFloor: Polygon = {
+        vertices: [
+          [-1, -1, -0.1],
+          [1, -1, -0.1],
+          [1, 1, -0.1],
+          [-1, 1, -0.1],
+        ],
+        color: "#888888",
+      };
       scene = makeScene(host, {
         textureLighting: "baked",
-        directionalLight: { direction: [1, 0, 0.01] },
+        // Light mostly along world -Y (CSS -X) with a moderate +Z so the
+        // sideTriangle's +X-facing normal opposes the light vector and the
+        // shadow lands on the small floor directly below.
+        directionalLight: { direction: [0, -1, 0.3] },
         shadow: { maxExtend: 20 },
       });
+      scene.add(makeParseResult([smallFloor]), { receiveShadow: true });
       scene.add(makeParseResult([sideTriangle()]), { castShadow: true, merge: false });
 
       const shadow = host.querySelector(".polycss-shadow") as SVGSVGElement;
@@ -2194,7 +2256,6 @@ describe("createPolyScene", () => {
       const values = (d.match(/-?\d+(?:\.\d+)?/g) ?? []).map(Number);
 
       expect(width).toBeGreaterThan(0);
-      expect(width).toBeLessThanOrEqual(40);
       expect(height).toBeGreaterThan(0);
       expect(values.length).toBeGreaterThan(0);
       for (let i = 0; i < values.length; i += 2) {
@@ -2214,13 +2275,15 @@ describe("createPolyScene", () => {
       // fill-rule=nonzero merging overlap into one solid silhouette,
       // including the back-facing polys is geometrically correct.
       scene = makeScene(host, { textureLighting: "baked" });
+      scene.add(makeParseResult([floor()]), { receiveShadow: true });
       scene.add(makeParseResult([backTriangle()]), { castShadow: true });
       expect(host.querySelectorAll(".polycss-shadow").length).toBe(1);
     });
 
     it("shadow SVGs have the polycss-shadow class", () => {
       scene = makeScene(host, dynOpts);
-      scene.add(makeParseResult([triangle()]), { castShadow: true });
+      scene.add(makeParseResult([floor()]), { receiveShadow: true });
+      scene.add(makeParseResult([backTriangle()]), { castShadow: true });
       const shadows = host.querySelectorAll(".polycss-shadow");
       expect(shadows.length).toBeGreaterThan(0);
       for (const el of Array.from(shadows)) {
@@ -2230,12 +2293,14 @@ describe("createPolyScene", () => {
 
     it("shadow elements are always <svg> with class polycss-shadow regardless of caster tag or mode", () => {
       // Both lighting modes use the same per-mesh <svg> shadow now.
+      // Casters need back-facing normals for the default upward light.
       const distinctTri: Polygon = {
-        vertices: [[10, 10, 5], [11, 10, 5], [10, 11, 5]],
+        vertices: [[10, 10, 5], [10, 11, 5], [11, 10, 5]],
         color: "#00ff00",
       };
       scene = makeScene(host, dynOpts);
-      scene.add(makeParseResult([triangle(), distinctTri]), {
+      scene.add(makeParseResult([floor()]), { receiveShadow: true });
+      scene.add(makeParseResult([backTriangle(), distinctTri]), {
         castShadow: true,
         merge: false,
       });
@@ -2252,7 +2317,8 @@ describe("createPolyScene", () => {
       // the projection is CPU-baked into the per-mesh SVG path same as in
       // baked mode.
       scene = makeScene(host, dynOpts);
-      scene.add(makeParseResult([triangle()]), { castShadow: true });
+      scene.add(makeParseResult([floor()]), { receiveShadow: true });
+      scene.add(makeParseResult([backTriangle()]), { castShadow: true });
       const sceneEl = getSceneEl(host);
       expect(sceneEl.style.getPropertyValue("--shadow-ground-cssz")).toBe("");
       expect(host.querySelectorAll(".polycss-shadow").length).toBe(1);
@@ -2260,7 +2326,8 @@ describe("createPolyScene", () => {
 
     it("toggling castShadow via setTransform adds/removes shadow SVGs", () => {
       scene = makeScene(host, dynOpts);
-      const handle = scene.add(makeParseResult([triangle()]), { castShadow: false });
+      scene.add(makeParseResult([floor()]), { receiveShadow: true });
+      const handle = scene.add(makeParseResult([backTriangle()]), { castShadow: false });
       expect(host.querySelectorAll(".polycss-shadow").length).toBe(0);
       handle.setTransform({ castShadow: true });
       expect(host.querySelectorAll(".polycss-shadow").length).toBeGreaterThan(0);
@@ -2268,34 +2335,46 @@ describe("createPolyScene", () => {
       expect(host.querySelectorAll(".polycss-shadow").length).toBe(0);
     });
 
-    it("switching from dynamic to baked keeps the shadow as a translated <svg>", () => {
+    it("switching from dynamic to baked keeps the shadow as a positioned <svg>", () => {
       scene = makeScene(host, dynOpts);
-      scene.add(makeParseResult([triangle()]), { castShadow: true });
+      scene.add(makeParseResult([floor()]), { receiveShadow: true });
+      scene.add(makeParseResult([backTriangle()]), { castShadow: true });
       const before = host.querySelector(".polycss-shadow") as SVGSVGElement;
       expect(before.tagName.toLowerCase()).toBe("svg");
-      expect(before.style.transform).toMatch(/^translate3d\(/);
+      // Per-receiver-face SVGs are placed via matrix3d(u,v,n,O) so the
+      // (u,v) basis projects shadow paths back onto the receiver plane.
+      expect(before.style.transform).toMatch(/^matrix3d\(/);
       scene.setOptions({ textureLighting: "baked" });
       const after = host.querySelector(".polycss-shadow") as SVGSVGElement;
       expect(after).not.toBeNull();
       expect(after.tagName.toLowerCase()).toBe("svg");
-      expect(after.style.transform).toMatch(/^translate3d\(/);
+      expect(after.style.transform).toMatch(/^matrix3d\(/);
     });
 
-    it("switching from baked back to dynamic keeps the shadow as a translated <svg>", () => {
+    it("switching from baked back to dynamic keeps the shadow as a positioned <svg>", () => {
       scene = makeScene(host, { textureLighting: "baked" });
-      scene.add(makeParseResult([triangle()]), { castShadow: true });
+      scene.add(makeParseResult([floor()]), { receiveShadow: true });
+      scene.add(makeParseResult([backTriangle()]), { castShadow: true });
       const before = host.querySelector(".polycss-shadow") as SVGSVGElement;
       expect(before.tagName.toLowerCase()).toBe("svg");
       scene.setOptions({ ...dynOpts });
       const dynamicShadow = host.querySelector(".polycss-shadow") as SVGSVGElement;
       expect(dynamicShadow).not.toBeNull();
       expect(dynamicShadow.tagName.toLowerCase()).toBe("svg");
-      expect(dynamicShadow.style.transform).toMatch(/^translate3d\(/);
+      expect(dynamicShadow.style.transform).toMatch(/^matrix3d\(/);
     });
 
     it("textured polygons (s) ALSO emit shadow SVGs", () => {
+      // Back-wound textured triangle so the caster normal opposes the
+      // default light direction's +Z component and isn't culled.
+      const backTexturedTri: Polygon = {
+        vertices: backTriangle().vertices,
+        texture: "https://example.com/tex.png",
+        uvs: [[0, 0], [0, 1], [1, 0]],
+      };
       scene = makeScene(host, dynOpts);
-      scene.add(makeParseResult([texturedTriangle()]), { castShadow: true });
+      scene.add(makeParseResult([floor()]), { receiveShadow: true });
+      scene.add(makeParseResult([backTexturedTri]), { castShadow: true });
       // Shadows depend only on the polygon's outline, not its texture
       // content. Atlas (<s>) polygons cast shadows the same way as
       // solid strategy tags: as part of the mesh's SVG silhouette. Otherwise
@@ -2324,12 +2403,13 @@ describe("createPolyScene", () => {
     it("baked mode rewrites the same SVG shadow when directionalLight.direction changes", () => {
       // Light direction is folded into the CPU projection that builds the
       // SVG paths, so changing it must rewrite the existing SVG outline
-      // and translate3d without tearing down the mounted shadow node.
+      // and matrix3d positioning without tearing down the mounted shadow node.
       scene = makeScene(host, {
         textureLighting: "baked",
         directionalLight: { direction: [0, 0, 1] },
       });
-      scene.add(makeParseResult([triangle()]), { castShadow: true });
+      scene.add(makeParseResult([floor()]), { receiveShadow: true });
+      scene.add(makeParseResult([backTriangle()]), { castShadow: true });
       const sceneEl = getSceneEl(host);
       const initialSvg = host.querySelector(".polycss-shadow") as SVGSVGElement;
       const initialTransform = initialSvg.style.transform;
@@ -2344,7 +2424,7 @@ describe("createPolyScene", () => {
       const nextPathD = nextSvg.querySelector("path")?.getAttribute("d");
       expect(nextSvg).toBe(initialSvg);
       expect(records.some((record) => record.addedNodes.length > 0 || record.removedNodes.length > 0)).toBe(false);
-      expect(nextTransform).toMatch(/^translate3d\(/);
+      expect(nextTransform).toMatch(/^matrix3d\(/);
       // EITHER the SVG positioning OR the path geometry must have changed
       // — both encode the projection so both should reflect the new light.
       expect(nextTransform !== initialTransform || nextPathD !== initialPathD).toBe(true);
@@ -2355,7 +2435,8 @@ describe("createPolyScene", () => {
         textureLighting: "baked",
         directionalLight: { direction: [0, 0, 1] },
       });
-      scene.add(makeParseResult([triangle()]), { castShadow: true });
+      scene.add(makeParseResult([floor()]), { receiveShadow: true });
+      scene.add(makeParseResult([backTriangle()]), { castShadow: true });
       const initialSvg = host.querySelector(".polycss-shadow") as SVGSVGElement;
       const initialTransform = initialSvg.style.transform;
       const initialPathD = initialSvg.querySelector("path")?.getAttribute("d");
@@ -2387,7 +2468,8 @@ describe("createPolyScene", () => {
         textureLighting: "baked",
         directionalLight: { direction: [0, 0, 1] },
       });
-      scene.add(makeParseResult([triangle()]), { castShadow: true });
+      scene.add(makeParseResult([floor()]), { receiveShadow: true });
+      scene.add(makeParseResult([backTriangle()]), { castShadow: true });
       const initialSvg = host.querySelector(".polycss-shadow") as SVGSVGElement;
       const initialTransform = initialSvg.style.transform;
       const initialPathD = initialSvg.querySelector("path")?.getAttribute("d");
@@ -2411,7 +2493,8 @@ describe("createPolyScene", () => {
         textureLighting: "baked",
         directionalLight: { direction: [0, 0, 1] },
       });
-      scene.add(makeParseResult([triangle()]), { castShadow: true });
+      scene.add(makeParseResult([floor()]), { receiveShadow: true });
+      scene.add(makeParseResult([backTriangle()]), { castShadow: true });
       const helper = scene.add(makeParseResult([triangle()]));
       const initialSvg = host.querySelector(".polycss-shadow") as SVGSVGElement;
       const initialTransform = initialSvg.style.transform;

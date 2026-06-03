@@ -36,7 +36,7 @@ describe("PolyCamera (Vue)", () => {
     it("sets perspective to none (orthographic, the default)", () => {
       const container = renderCamera();
       const camera = container.querySelector(".polycss-camera") as HTMLElement;
-      expect(camera.style.perspective).toBe("none");
+      expect(camera.style.perspective).toBe("1000000px");
     });
   });
 

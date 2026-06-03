@@ -1275,7 +1275,11 @@ describe("renderPolygonsWithTextureAtlas", () => {
     expect(getContext).toHaveBeenCalledWith("2d", { willReadFrequently: true });
     expect(getImageData).toHaveBeenCalled();
     expect(putImageData).toHaveBeenCalled();
-    const repaired = putImageData.mock.calls[0][0] as ImageData;
+    // applyTextureTint now does a per-pixel linear-light multiply (also via
+    // getImageData/putImageData), so multiple putImageData calls land per
+    // polygon. The edge-repair pass is the LAST call; pick it up.
+    const lastCall = putImageData.mock.calls[putImageData.mock.calls.length - 1];
+    const repaired = lastCall[0] as ImageData;
     const firstRow = Array.from({ length: repaired.width }, (_, x) =>
       Array.from(repaired.data.slice(x * 4, x * 4 + 4)),
     );

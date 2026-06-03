@@ -27,11 +27,17 @@ import type {
   PolyTextureLightingMode,
   Vec3,
 } from "@layoutit/polycss-core";
-import { DEFAULT_SEAM_BLEED, parseHexColor } from "@layoutit/polycss-core";
+import { DEFAULT_SEAM_BLEED, parseHexColor, worldDirectionToCss } from "@layoutit/polycss-core";
 import { PolyCameraContextKey } from "../camera";
 import { usePolySceneContext } from "./useSceneContext";
 import { injectPolyBaseStyles } from "../styles";
-import { PolySceneContextKey, type PolyShadowOptions, type PolyShadowRegistry } from "./sceneContext";
+import {
+  PolySceneContextKey,
+  type PolyReceiverRegistry,
+  type PolyShadowOptions,
+  type PolyShadowRegistry,
+  type ShadowCasterRegistration,
+} from "./sceneContext";
 import {
   buildSeamBleedPolygonEdges,
   buildTextureEdgeRepairSets,
@@ -136,15 +142,15 @@ export const PolyScene = defineComponent({
 
     const { sceneElRef, applyTransformDirect } = cameraCtx;
 
-    // Shadow registry: child PolyMesh components register their polygon
-    // getters here when castShadow=true. The scene reads registered polygons
-    // to compute --shadow-ground-cssz reactively without needing to enumerate
-    // DOM children in JS.
+    // Shadow registry: child PolyMesh components register their full caster
+    // data (polygons + position + scale + rotation) when castShadow=true. The
+    // scene reads registered casters to compute --shadow-ground-cssz, and
+    // receiver meshes iterate the same registry to project per-face shadows.
     const shadowRegistryVersion = ref(0);
-    const shadowRegistryMap = new Map<symbol, () => import("@layoutit/polycss-core").Polygon[]>();
+    const shadowRegistryMap = new Map<symbol, () => ShadowCasterRegistration>();
     const shadowRegistry: PolyShadowRegistry = {
-      register(id, getPolygons) {
-        shadowRegistryMap.set(id, getPolygons);
+      register(id, getData) {
+        shadowRegistryMap.set(id, getData);
         shadowRegistryVersion.value++;
       },
       unregister(id) {
@@ -157,10 +163,29 @@ export const PolyScene = defineComponent({
       },
     };
 
+    // Receiver registry. Tracks whether any mesh has receiveShadow=true so
+    // casters can drop their ground-shadow fallback (Three.js parity: only
+    // receivers paint shadows when at least one receiver exists).
+    const receiverIds = new Set<symbol>();
+    const hasAnyReceiver = ref(false);
+    const receiverRegistry: PolyReceiverRegistry = {
+      register(id) {
+        receiverIds.add(id);
+        hasAnyReceiver.value = receiverIds.size > 0;
+      },
+      unregister(id) {
+        receiverIds.delete(id);
+        hasAnyReceiver.value = receiverIds.size > 0;
+      },
+      hasAny: hasAnyReceiver,
+    };
+
     // Reactive ground-plane CSS-Z. Dynamic mode also mirrors this into
     // the `--shadow-ground-cssz` CSS var (the watchEffect below); baked
     // mode reads it via context to bake each leaf's inline matrix3d.
     const groundCssZ = ref<number | null>(null);
+
+    const sceneElLocalRef = ref<HTMLElement | null>(null);
 
     // Propagate scene-level rendering options to descendants (PolyMesh /
     // helpers) so they pick up the same dynamic mode + lights as the
@@ -175,11 +200,11 @@ export const PolyScene = defineComponent({
       seamBleed: props.seamBleed ?? DEFAULT_SEAM_BLEED,
       shadow: props.shadow,
       shadowRegistry,
+      receiverRegistry,
       groundCssZ: groundCssZ.value,
+      sceneEl: sceneElLocalRef.value,
     }));
     provide(PolySceneContextKey, sceneCtxValue);
-
-    const sceneElLocalRef = ref<HTMLElement | null>(null);
 
     // Sync local ref to camera context's sceneElRef so controls that call
     // applyTransformDirect can reach the element.
@@ -298,7 +323,11 @@ export const PolyScene = defineComponent({
     // product and tints via background-blend-mode.
     const dynamicLightVars = computed<Record<string, string> | null>(() => {
       if (props.textureLighting !== "dynamic") return null;
-      const dir = props.directionalLight?.direction ?? [0.4, -0.7, 0.59];
+      // World→CSS axis swap (X↔Y). Polygon normals (--pnx/--pny/--pnz) are
+      // in CSS frame, so the Lambert dot product needs --plx/--ply/--plz in
+      // the same frame. Vanilla applies this swap inside applyLightingVars.
+      const userDir = props.directionalLight?.direction ?? [0.4, -0.7, 0.59];
+      const dir = worldDirectionToCss(userDir as [number, number, number]);
       const len = Math.hypot(dir[0], dir[1], dir[2]) || 1;
       const lx = dir[0] / len, ly = dir[1] / len, lz = dir[2] / len;
       const lightRgb = parseHexColor(props.directionalLight?.color ?? "#ffffff")?.rgb ?? [255, 255, 255];
@@ -311,13 +340,19 @@ export const PolyScene = defineComponent({
       // shadows to infinity.
       const rawClz = lz;
       const clz = Math.sign(rawClz || 1) * Math.max(Math.abs(rawClz), 0.01);
+      // Quantize direction-derived vars to 0.01 (~0.57° angular resolution).
+      // Matches the vanilla H10 fix in scene/lightingVars.ts: at toFixed(4)
+      // every 0.5°/frame drag tick wrote new strings, triggering ~53ms style
+      // recalc on dynamic-mode leaves with calc()-driven Lambert. At
+      // toFixed(2) ~half of drag ticks land on the same rounded value →
+      // Vue's reactivity sees no change → no recalc.
       return {
-        "--plx": lx.toFixed(4),
-        "--ply": ly.toFixed(4),
-        "--plz": lz.toFixed(4),
-        "--clx": lx.toFixed(4),
-        "--cly": ly.toFixed(4),
-        "--clz": clz.toFixed(4),
+        "--plx": lx.toFixed(2),
+        "--ply": ly.toFixed(2),
+        "--plz": lz.toFixed(2),
+        "--clx": lx.toFixed(2),
+        "--cly": ly.toFixed(2),
+        "--clz": clz.toFixed(2),
         "--plr": ch(lightRgb[0]),
         "--plg": ch(lightRgb[1]),
         "--plb": ch(lightRgb[2]),
@@ -348,10 +383,12 @@ export const PolyScene = defineComponent({
         return;
       }
       let minWorldZ = Infinity;
-      for (const getPolygons of entries) {
-        for (const poly of getPolygons()) {
+      for (const getData of entries) {
+        const data = getData();
+        for (const poly of data.polygons) {
           for (const v of poly.vertices) {
-            if (v[2] < minWorldZ) minWorldZ = v[2];
+            const z = v[2] + (data.position[2] ?? 0);
+            if (z < minWorldZ) minWorldZ = z;
           }
         }
       }
@@ -428,6 +465,7 @@ export const PolyScene = defineComponent({
         if (textureAtlas.useBorderShape.value || textureAtlas.useFullRectSolid.value) {
           return renderTextureBorderShapePoly({
             entry: plan,
+            textureLighting: ctx.textureLighting ?? "baked",
             forceBorderShape: !textureAtlas.useFullRectSolid.value,
           });
         }

@@ -25,7 +25,6 @@ export interface PolyVoxelSource {
   cols: number;
   depth: number;
   scale: number;
-  gridShift: number;
   sourceBytes: number;
 }
 

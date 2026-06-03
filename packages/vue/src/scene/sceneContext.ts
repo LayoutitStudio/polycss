@@ -11,8 +11,22 @@ import type {
   PolyDirectionalLight,
   PolyTextureLightingMode,
   Polygon,
+  Vec3,
 } from "@layoutit/polycss-core";
 import type { PolyRenderStrategiesOption, PolySeamBleed } from "./atlas";
+
+/** Caster mesh data registered with the scene so receiver meshes can run
+ *  the receiver-shadow algorithm without traversing the Vue component tree. */
+export interface ShadowCasterRegistration {
+  polygons: Polygon[];
+  position: Vec3;
+  scale: number | Vec3 | undefined;
+  rotation: Vec3 | undefined;
+  /** Polygon indices that have a valid atlas plan (= are actually rendered).
+   *  Receiver-shadow algorithm skips polygons NOT in this set — mirrors
+   *  vanilla which iterates `caster.rendered`. Undefined → include all. */
+  renderedPolygonIndices?: ReadonlySet<number>;
+}
 
 export interface PolyShadowOptions {
   color?: string;
@@ -28,14 +42,20 @@ export interface PolyShadowOptions {
 }
 
 export interface PolyShadowRegistry {
-  /** Register a casting mesh's polygon getter (called when castShadow=true). */
-  register(id: symbol, getPolygons: () => Polygon[]): void;
+  /** Register a casting mesh's full data getter. Pass `null` to unregister. */
+  register(id: symbol, getData: () => ShadowCasterRegistration): void;
   /** Unregister a casting mesh on unmount or castShadow toggle. */
   unregister(id: symbol): void;
   /** Reactive signal that increments whenever the registry changes. */
   version: Ref<number>;
-  /** Snapshot of all registered polygon getters. */
-  getEntries(): Array<() => Polygon[]>;
+  /** Snapshot of all registered caster data getters. */
+  getEntries(): Array<() => ShadowCasterRegistration>;
+}
+
+export interface PolyReceiverRegistry {
+  register(id: symbol): void;
+  unregister(id: symbol): void;
+  hasAny: Ref<boolean>;
 }
 
 export interface PolySceneContextValue {
@@ -46,6 +66,7 @@ export interface PolySceneContextValue {
   seamBleed?: PolySeamBleed;
   shadow?: PolyShadowOptions;
   shadowRegistry?: PolyShadowRegistry;
+  receiverRegistry?: PolyReceiverRegistry;
   /**
    * Computed CSS-Z of the shadow ground plane (= min world Z across all
    * casting meshes + scene.shadow.lift, in CSS pixels). Mesh shadow SVGs
@@ -54,6 +75,14 @@ export interface PolySceneContextValue {
    * `<q>` shadow CSS path. `null` when no casting meshes are registered.
    */
   groundCssZ?: number | null;
+  /**
+   * The `.polycss-scene` DOM element, available once mounted. Receivers
+   * teleport their per-face shadow SVGs into this element so the mesh
+   * wrapper's `translate3d(position)` does NOT double-count the position
+   * already baked into the SVG's `matrix3d(...)` (vanilla mounts shadows
+   * at scene-root for the same reason). `null` before mount.
+   */
+  sceneEl?: HTMLElement | null;
 }
 
 /**

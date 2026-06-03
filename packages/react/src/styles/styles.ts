@@ -35,21 +35,24 @@ const CORE_BASE_STYLES = `
   will-change: transform;
 }
 
-/* ── Camera wrapper (perspective + interactive drag) ────────────────────── */
+/* ── Camera wrapper ──────────────────────────────────────────────────────── */
 
+/* Matches vanilla .polycss-camera: a simple positioned block that fills the
+   host. PolyPerspectiveCamera / PolyOrthographicCamera apply perspective
+   inline (driven by their perspective prop), so the CSS file does not bake a
+   default. Earlier React/Vue copies added flex centering, overflow:hidden,
+   contain:paint, isolation:isolate which shifted layout vs vanilla; removed
+   so cross-renderer iframes lay out identically. */
 .polycss-camera {
-  display: flex;
-  width: 100%;
-  justify-content: center;
-  align-items: center;
-  perspective: 32000px;
-  min-height: inherit;
-  height: 100%;
   position: relative;
-  overflow: hidden;
-  contain: paint;
-  isolation: isolate;
+  display: block;
+  width: 100%;
+  height: 100%;
 }
+/* React-only descendant default: applies preserve-3d to controls + helpers
+   that ride on the camera; vanilla does not need this because every internal
+   element sets the property directly. Kept here so user-supplied wrapper
+   divs inside PolyCamera still participate in 3D layout. */
 .polycss-camera * {
   transform-style: preserve-3d;
   position: absolute;
@@ -69,6 +72,17 @@ const CORE_BASE_STYLES = `
 .polycss-fpv-host {
   perspective: var(--polycss-fpv-perspective, 2000px) !important;
   transform-style: preserve-3d !important;
+}
+
+/* ── Mesh wrapper ───────────────────────────────────────────────────────── */
+
+.polycss-mesh {
+  position: absolute;
+  transform-style: preserve-3d;
+  /* Pivot at wrapper local (0,0,0) for three.js mesh.position/rotation/scale
+     parity. Geometry is positioned by the parser (bbox-min-at-origin by
+     default, or pre-centered via loadMesh { center: true }). */
+  transform-origin: 0 0 0;
 }
 
 /* ── Polygon leaf element ───────────────────────────────────────────────── */
@@ -288,22 +302,33 @@ const CORE_BASE_STYLES = `
    here (not inline per polygon) so each leaf only carries its tiny normal
    declarations — ~12× smaller per-polygon style payload on big meshes. */
 .polycss-scene[data-polycss-lighting="dynamic"] s {
+  /*
+   * Three.js MeshLambertMaterial parity for textured surfaces. See
+   * packages/polycss/src/styles/styles.ts for derivation and probe data.
+   * Kept in lockstep across renderer copies per cross-package discipline.
+   */
   background-color: rgb(
-    calc(255 * (var(--par) * var(--pai)
-         + var(--plr) * var(--pli) * max(0,
-           var(--pnx) * var(--plx) +
-           var(--pny) * var(--ply) +
-           var(--pnz) * var(--plz))))
-    calc(255 * (var(--pag) * var(--pai)
-         + var(--plg) * var(--pli) * max(0,
-           var(--pnx) * var(--plx) +
-           var(--pny) * var(--ply) +
-           var(--pnz) * var(--plz))))
-    calc(255 * (var(--pab) * var(--pai)
-         + var(--plb) * var(--pli) * max(0,
-           var(--pnx) * var(--plx) +
-           var(--pny) * var(--ply) +
-           var(--pnz) * var(--plz))))
+    calc(255 * max(0, 1.055 * pow(min(1, (
+      pow((var(--par) + 0.055) / 1.055, 2.4) * var(--pai) +
+      pow((var(--plr) + 0.055) / 1.055, 2.4) * var(--pli) * max(0,
+        var(--pnx) * var(--plx) +
+        var(--pny) * var(--ply) +
+        var(--pnz) * var(--plz))
+    ) / 3.14159265), 0.4167) - 0.055))
+    calc(255 * max(0, 1.055 * pow(min(1, (
+      pow((var(--pag) + 0.055) / 1.055, 2.4) * var(--pai) +
+      pow((var(--plg) + 0.055) / 1.055, 2.4) * var(--pli) * max(0,
+        var(--pnx) * var(--plx) +
+        var(--pny) * var(--ply) +
+        var(--pnz) * var(--plz))
+    ) / 3.14159265), 0.4167) - 0.055))
+    calc(255 * max(0, 1.055 * pow(min(1, (
+      pow((var(--pab) + 0.055) / 1.055, 2.4) * var(--pai) +
+      pow((var(--plb) + 0.055) / 1.055, 2.4) * var(--pli) * max(0,
+        var(--pnx) * var(--plx) +
+        var(--pny) * var(--ply) +
+        var(--pnz) * var(--plz))
+    ) / 3.14159265), 0.4167) - 0.055))
   );
   background-blend-mode: multiply;
   background-image: var(--polycss-atlas-url);
@@ -322,23 +347,42 @@ const CORE_BASE_STYLES = `
 }
 
 .polycss-scene[data-polycss-lighting="dynamic"] b,
+.polycss-scene[data-polycss-lighting="dynamic"] i,
 .polycss-scene[data-polycss-lighting="dynamic"] u {
+  /*
+   * Three.js MeshLambertMaterial parity (default useLegacyLights=false,
+   * physically-correct pipeline). See packages/polycss/src/styles/styles.ts
+   * for the derivation and probe data — kept in lockstep across the three
+   * renderer copies per cross-package discipline.
+   */
   color: rgb(
-    calc(255 * var(--psr) * (var(--par) * var(--pai)
-         + var(--plr) * var(--pli) * max(0,
-           var(--pnx) * var(--plx) +
-           var(--pny) * var(--ply) +
-           var(--pnz) * var(--plz))))
-    calc(255 * var(--psg) * (var(--pag) * var(--pai)
-         + var(--plg) * var(--pli) * max(0,
-           var(--pnx) * var(--plx) +
-           var(--pny) * var(--ply) +
-           var(--pnz) * var(--plz))))
-    calc(255 * var(--psb) * (var(--pab) * var(--pai)
-         + var(--plb) * var(--pli) * max(0,
-           var(--pnx) * var(--plx) +
-           var(--pny) * var(--ply) +
-           var(--pnz) * var(--plz))))
+    calc(255 * max(0, 1.055 * pow(min(1,
+      pow((var(--psr) + 0.055) / 1.055, 2.4) * (
+        pow((var(--par) + 0.055) / 1.055, 2.4) * var(--pai) +
+        pow((var(--plr) + 0.055) / 1.055, 2.4) * var(--pli) * max(0,
+          var(--pnx) * var(--plx) +
+          var(--pny) * var(--ply) +
+          var(--pnz) * var(--plz))
+      ) / 3.14159265
+    ), 0.4167) - 0.055))
+    calc(255 * max(0, 1.055 * pow(min(1,
+      pow((var(--psg) + 0.055) / 1.055, 2.4) * (
+        pow((var(--pag) + 0.055) / 1.055, 2.4) * var(--pai) +
+        pow((var(--plg) + 0.055) / 1.055, 2.4) * var(--pli) * max(0,
+          var(--pnx) * var(--plx) +
+          var(--pny) * var(--ply) +
+          var(--pnz) * var(--plz))
+      ) / 3.14159265
+    ), 0.4167) - 0.055))
+    calc(255 * max(0, 1.055 * pow(min(1,
+      pow((var(--psb) + 0.055) / 1.055, 2.4) * (
+        pow((var(--pab) + 0.055) / 1.055, 2.4) * var(--pai) +
+        pow((var(--plb) + 0.055) / 1.055, 2.4) * var(--pli) * max(0,
+          var(--pnx) * var(--plx) +
+          var(--pny) * var(--ply) +
+          var(--pnz) * var(--plz))
+      ) / 3.14159265
+    ), 0.4167) - 0.055))
   );
 }
 

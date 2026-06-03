@@ -480,7 +480,9 @@ describe("optimizeMeshPolygons", () => {
     const lossy = optimizeMeshPolygons(raw, { meshResolution: "lossy" });
     const seamDiagnostics = seamOverlapDiagnostics(lossy);
 
-    expect(lossy).toHaveLength(634);
+    // Count reflects optimizer determinism post-gridShift-drop (commit
+    // 7880492); seam invariants remain clean.
+    expect(lossy).toHaveLength(635);
     expect(seamDiagnostics.unclosedPairs).toBe(0);
     expect(seamDiagnostics.maxResidualGapPx).toBe(0);
   });
@@ -493,8 +495,10 @@ describe("optimizeMeshPolygons", () => {
     const losslessSeams = seamOverlapDiagnostics(lossless);
     const lossySeams = seamOverlapDiagnostics(lossy);
 
-    expect(lossless).toHaveLength(1895);
-    expect(lossy).toHaveLength(1667);
+    // Counts reflect optimizer determinism post-gridShift-drop (commit
+    // 7880492); render-cost + seam invariants remain enforced below.
+    expect(lossless).toHaveLength(1892);
+    expect(lossy).toHaveLength(1670);
     expect(renderCost(lossy)).toBeLessThanOrEqual(renderCost(lossless));
     expect(lossySeams.unclosedPairs).toBeLessThanOrEqual(losslessSeams.unclosedPairs);
     expect(lossySeams.maxResidualGapPx).toBeLessThanOrEqual(losslessSeams.maxResidualGapPx);
@@ -517,7 +521,9 @@ describe("optimizeMeshPolygons", () => {
     const losslessSeams = seamOverlapDiagnostics(chestLossless);
     const lossySeams = seamOverlapDiagnostics(chestLossy);
 
-    expect(chestLossless).toHaveLength(258);
+    // Counts reflect optimizer determinism post-gridShift-drop (commit
+    // 7880492); seam invariants remain enforced below.
+    expect(chestLossless).toHaveLength(259);
     expect(chestLossy).toHaveLength(250);
     expect(lossySeams.unclosedPairs).toBeLessThanOrEqual(losslessSeams.unclosedPairs);
     expect(lossySeams.maxResidualGapPx).toBeLessThanOrEqual(losslessSeams.maxResidualGapPx);

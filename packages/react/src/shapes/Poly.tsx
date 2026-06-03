@@ -318,6 +318,7 @@ function PolyInner({
       ) : (
         <TextureBorderShapePoly
           entry={atlasPlan}
+          textureLighting={textureLighting}
           className={className}
           style={styleProp}
           domAttrs={domAttrs}

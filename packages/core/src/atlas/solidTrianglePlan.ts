@@ -91,7 +91,10 @@ export function computeSolidTriangleColorPlanFromNormal(
     const ambientIntensity = Math.max(0, ambientCfg?.intensity ?? DEFAULT_AMBIENT_INTENSITY);
     const lLen = Math.hypot(lightDir[0], lightDir[1], lightDir[2]) || 1;
     const lx = lightDir[0] / lLen, ly = lightDir[1] / lLen, lz = lightDir[2] / lLen;
-    const directScale = lightIntensity * Math.max(0, nx * lx + ny * ly + nz * lz);
+    const occluded = options.lightOccludedPolyIndices?.has(index) ?? false;
+    const directScale = occluded
+      ? 0
+      : lightIntensity * Math.max(0, nx * lx + ny * ly + nz * lz);
     const shadedColorRaw = shadePolygon(baseColor, directScale, lightColor, ambientColor, ambientIntensity);
     const textureLighting = options.textureLighting ?? "baked";
     const shadedColor = textureLighting === "baked" && internalOptions.stableTriangleColorSteps
@@ -340,10 +343,14 @@ export function computeSolidTrianglePlanFromCssPoints(
   const left = Math.max(0, Math.min(baseLength, apexX));
   const right = Math.max(0, baseLength - left);
   const screenPts = [left, 0, 0, height, left + right, height];
+  // Scale the SOLID_TRIANGLE_BLEED fallback by the bleed ratio (default
+  // 1) so options.seamBleed=0 disables this overscan as well, not just
+  // the shared-edge one.
+  const triangleBleedFallback = SOLID_TRIANGLE_BLEED * (internalOptions.bleedRatio ?? 1);
   const edgeAmounts = stableTriangleEdgeAmounts(
     internalOptions.seamEdges,
     internalOptions.seamBleed,
-    SOLID_TRIANGLE_BLEED,
+    triangleBleedFallback,
     a,
     b,
     c,
@@ -355,7 +362,7 @@ export function computeSolidTrianglePlanFromCssPoints(
         left,
         right,
         height,
-        resolveSeamBleed(internalOptions.seamBleed, SOLID_TRIANGLE_BLEED),
+        resolveSeamBleed(internalOptions.seamBleed, triangleBleedFallback),
       );
   const apex2x = expanded[0];
   const apex2y = expanded[1];

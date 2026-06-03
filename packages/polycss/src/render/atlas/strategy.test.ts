@@ -176,9 +176,13 @@ describe("filterAtlasPlans — strategy filter contracts", () => {
     expect(filtered[0]).not.toBeNull();
   });
 
-  it("dynamic lighting mode prevents border-shape filter; non-projective non-rect goes to atlas", () => {
-    // A pentagon has no projective matrix and is not a full-rect → in dynamic mode
-    // (border-shape disabled) it must stay in the atlas.
+  it("dynamic lighting mode keeps border-shape filter active (vanilla parity)", () => {
+    // A pentagon has no projective matrix and is not a full-rect. The
+    // borderShape strategy applies in BOTH lighting modes — vanilla never
+    // gates it on textureLighting, and the dynamic CSS calc shades the
+    // <i> border-shape leaf directly. Earlier core filterAtlasPlans
+    // disabled borderShape in dynamic mode, which routed these polys
+    // through the atlas bitmap (visible parity drift on castle dynamic).
     const pentagon: Polygon = {
       vertices: [
         [0, 1, 0],
@@ -191,9 +195,9 @@ describe("filterAtlasPlans — strategy filter contracts", () => {
     };
     const plan = computeTextureAtlasPlanPublic(pentagon, 0);
     const filtered = filterAtlasPlans([plan], "dynamic", noDisable, document);
-    // dynamic mode → useBorderShape=false; 5-vertex polygon has no projective matrix
-    // and is not a full rect → should remain in atlas
-    expect(filtered[0]).not.toBeNull();
+    // dynamic mode → useBorderShape=true; 5-vertex polygon has no projective matrix
+    // and is not a full rect → borderShape catches it → excluded from atlas
+    expect(filtered[0]).toBeNull();
   });
 });
 

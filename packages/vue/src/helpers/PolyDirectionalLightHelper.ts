@@ -22,9 +22,6 @@ export interface PolyDirectionalLightHelperProps {
   color?: string;
 }
 
-// World units → CSS pixels conversion used by PolyMesh's `position` prop.
-const TILE = 50;
-
 export const PolyDirectionalLightHelper = defineComponent({
   name: "PolyDirectionalLightHelper",
   props: {
@@ -43,6 +40,9 @@ export const PolyDirectionalLightHelper = defineComponent({
       octahedronPolygons({ center: [0, 0, 0], size: props.size, color: swatch.value }),
     );
 
+    // Post-parity: both `light.direction` and `target` are in WORLD coords,
+    // and <PolyMesh>'s `position` prop is also world units (the renderer
+    // applies the world→CSS axis swap + ×BASE_TILE internally).
     const meshPosition = computed<Vec3>(() => {
       const dir = props.light.direction;
       const dx = dir[0], dy = dir[1], dz = dir[2];
@@ -50,16 +50,18 @@ export const PolyDirectionalLightHelper = defineComponent({
       const tx = props.target?.[0] ?? 0;
       const ty = props.target?.[1] ?? 0;
       const tz = props.target?.[2] ?? 0;
-      const worldX = tx + (dy / len) * props.distance;
-      const worldY = ty + (dx / len) * props.distance;
-      const worldZ = tz + (dz / len) * props.distance;
-      return [worldY * TILE, worldX * TILE, worldZ * TILE];
+      return [
+        tx + (dx / len) * props.distance,
+        ty + (dy / len) * props.distance,
+        tz + (dz / len) * props.distance,
+      ];
     });
 
     return () =>
       h(PolyMesh, {
         polygons: polygons.value,
         position: meshPosition.value,
+        merge: false,
       });
   },
 });

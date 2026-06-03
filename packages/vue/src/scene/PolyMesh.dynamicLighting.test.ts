@@ -72,9 +72,11 @@ describe("PolyMesh (Vue) — dynamic lighting override", () => {
     // Compute expected values using the same math as the implementation.
     const localDir = inverseRotateVec3(DYNAMIC_LIGHT.direction, rotation);
     const len = Math.hypot(localDir[0], localDir[1], localDir[2]) || 1;
-    const expectedLx = (localDir[0] / len).toFixed(4);
-    const expectedLy = (localDir[1] / len).toFixed(4);
-    const expectedLz = (localDir[2] / len).toFixed(4);
+    // H10: --plx/y/z quantized to 0.01 to match scene-root precision and
+    // avoid per-frame style recalc on dynamic-Lambert leaves.
+    const expectedLx = (localDir[0] / len).toFixed(2);
+    const expectedLy = (localDir[1] / len).toFixed(2);
+    const expectedLz = (localDir[2] / len).toFixed(2);
 
     expect(meshEl.style.getPropertyValue("--plx")).toBe(expectedLx);
     expect(meshEl.style.getPropertyValue("--ply")).toBe(expectedLy);
@@ -89,9 +91,10 @@ describe("PolyMesh (Vue) — dynamic lighting override", () => {
     );
 
     const meshEl = container.querySelector(".polycss-mesh") as HTMLElement;
-    expect(meshEl.style.getPropertyValue("--plx")).toBe("0.0000");
-    expect(meshEl.style.getPropertyValue("--ply")).toBe("0.0000");
-    expect(meshEl.style.getPropertyValue("--plz")).toBe("1.0000");
+    // H10: --plx/y/z quantized to 0.01 (toFixed(2))
+    expect(meshEl.style.getPropertyValue("--plx")).toBe("0.00");
+    expect(meshEl.style.getPropertyValue("--ply")).toBe("0.00");
+    expect(meshEl.style.getPropertyValue("--plz")).toBe("1.00");
   });
 
   // ── 2. No rotation: no override emitted ─────────────────────────────────
@@ -161,7 +164,8 @@ describe("PolyMesh (Vue) — dynamic lighting override", () => {
     const meshEl = container.querySelector(".polycss-mesh") as HTMLElement;
 
     // Initial: [0, 90, 0] → localDir ≈ [0, 0, 1]
-    expect(meshEl.style.getPropertyValue("--plz")).toBe("1.0000");
+    // H10: --plx/y/z quantized to 0.01 (toFixed(2))
+    expect(meshEl.style.getPropertyValue("--plz")).toBe("1.00");
 
     // Change to [0, 0, 0] — rotation becomes zero → no override
     rotation.value = [0, 0, 0];
@@ -174,8 +178,8 @@ describe("PolyMesh (Vue) — dynamic lighting override", () => {
     await nextTick();
     const localDir2 = inverseRotateVec3([1, 0, 0], [0, -90, 0]);
     const len2 = Math.hypot(...localDir2) || 1;
-    expect(meshEl.style.getPropertyValue("--plx")).toBe((localDir2[0] / len2).toFixed(4));
-    expect(meshEl.style.getPropertyValue("--plz")).toBe((localDir2[2] / len2).toFixed(4));
+    expect(meshEl.style.getPropertyValue("--plx")).toBe((localDir2[0] / len2).toFixed(2));
+    expect(meshEl.style.getPropertyValue("--plz")).toBe((localDir2[2] / len2).toFixed(2));
   });
 
   // ── 6. Per-mesh override does not affect scene-level vars ────────────────
@@ -186,9 +190,11 @@ describe("PolyMesh (Vue) — dynamic lighting override", () => {
     );
 
     const sceneEl = container.querySelector(".polycss-scene") as HTMLElement;
-    // Scene emits world-space lx for direction [1,0,0], normalized → 1.0000
-    expect(sceneEl.style.getPropertyValue("--plx")).toBe("1.0000");
-    expect(sceneEl.style.getPropertyValue("--ply")).toBe("0.0000");
-    expect(sceneEl.style.getPropertyValue("--plz")).toBe("0.0000");
+    // Scene applies worldDirectionToCss before emitting --plx/y/z:
+    // world [1,0,0] → CSS [0,1,0] (world Y→CSS X, world X→CSS Y)
+    // H10: --plx/y/z quantized to 0.01 (toFixed(2))
+    expect(sceneEl.style.getPropertyValue("--plx")).toBe("0.00");
+    expect(sceneEl.style.getPropertyValue("--ply")).toBe("1.00");
+    expect(sceneEl.style.getPropertyValue("--plz")).toBe("0.00");
   });
 });

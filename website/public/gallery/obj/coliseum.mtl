@@ -1,0 +1,14 @@
+# Synthetic MTL for SM_Coliseum.obj — the original SM_Coliseum.mtl
+# isn't shipped with the asset. Maps the four authored material slots to
+# stone-like greys so the parity bench has visible per-material colour.
+newmtl lambert2SG
+Kd 0.78 0.74 0.68
+
+newmtl lambert3SG
+Kd 0.62 0.58 0.52
+
+newmtl lambert4SG
+Kd 0.55 0.51 0.46
+
+newmtl lambert5SG
+Kd 0.42 0.38 0.34

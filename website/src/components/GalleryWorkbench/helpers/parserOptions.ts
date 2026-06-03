@@ -8,7 +8,6 @@ export function mergeParserOptions(
   return {
     ...(base ?? {}),
     targetSize: parser.targetSize,
-    gridShift: parser.gridShift,
     defaultColor: parser.defaultColor,
   };
 }

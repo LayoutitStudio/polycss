@@ -21,6 +21,7 @@ import {
   PROJECTIVE_QUAD_MAX_WEIGHT_RATIO,
   PROJECTIVE_QUAD_BLEED,
   SOLID_QUAD_CANONICAL_SIZE,
+  resolveBleedRatio,
 } from "./constants";
 import type {
   TextureAtlasPlan,
@@ -822,7 +823,10 @@ export function computeTextureAtlasPlan(
   const lx = lightDir[0] / lLen, ly = lightDir[1] / lLen, lz = lightDir[2] / lLen;
   // Decoupled: directional and ambient sum independently. No (1 - ambient)
   // budget — matches three.js's lighting model.
-  const directScale = lightIntensity * Math.max(0, normal[0] * lx + normal[1] * ly + normal[2] * lz);
+  const occluded = options.lightOccludedPolyIndices?.has(index) ?? false;
+  const directScale = occluded
+    ? 0
+    : lightIntensity * Math.max(0, normal[0] * lx + normal[1] * ly + normal[2] * lz);
   const textureTint = textureTintFactors(directScale, lightColor, ambientColor, ambientIntensity);
   const shadedColor = shadePolygon(polygon.color ?? "#cccccc", directScale, lightColor, ambientColor, ambientIntensity);
 
@@ -865,6 +869,12 @@ export function computeTextureAtlasPlan(
     seamBleedEdges,
     seamBleedEdgeAmounts,
     seamBleedInsets,
+    // Stamp the resolved per-strategy bleed ratio onto the plan so
+    // downstream emitters (borderShape, projective-quad, atlas-edge
+    // expand, etc.) all read the same value from the plan instead of
+    // each having to thread `options.seamBleed` through their own
+    // function-parameter chains.
+    bleedRatio: resolveBleedRatio(internalOptions.seamBleed),
     normal,
     textureTint,
     shadedColor,
@@ -890,15 +900,29 @@ export function computeTextureAtlasPlanPublic(
   index: number,
   options: ComputeTextureAtlasPlanOptions = {},
   projectiveQuadOverrides?: ProjectiveQuadGuardOverrides,
+  /** Cross-polygon basis hint pre-computed via {@link buildBasisHints} on
+   *  the full polygon array. When supplied, it overrides the per-polygon
+   *  textureEdgeRepairEdges fallback below. Vanilla's renderer always passes
+   *  this from {@link buildBasisHints}; React/Vue mirror that path. */
+  basisHintOverride?: BasisHint,
 ): TextureAtlasPlan | null {
   const projectiveQuadGuards = resolveProjectiveQuadGuards(projectiveQuadOverrides);
   const internalOptions = options as ComputeTextureAtlasPlanOptions & InternalSolidTrianglePlanOptions;
-  const basisHint: BasisHint | undefined = options.textureEdgeRepairEdges?.size || internalOptions.seamEdges?.size
-    ? {
-        seamEdges: internalOptions.seamEdges ?? new Set<number>(),
-        textureEdgeRepairEdges: options.textureEdgeRepairEdges,
-      }
-    : undefined;
+  // Only auto-construct a basisHint when textureEdgeRepairEdges is provided
+  // — that field is read ONLY off the basisHint inside computeTextureAtlasPlan,
+  // so single-polygon callers passing it via options need this bridge.
+  // DO NOT also auto-forward options.seamEdges to basisHint.seamEdges — those
+  // two fields are read by different code paths (bleed amount vs basis edge-
+  // candidate restriction), and forwarding them here makes React/Vue pick a
+  // different basis for any polygon with a seam-bleed edge, breaking parity
+  // with vanilla's renderer which never reconstructs such a hint.
+  const basisHint: BasisHint | undefined = basisHintOverride
+    ?? (options.textureEdgeRepairEdges?.size
+      ? {
+          seamEdges: new Set<number>(),
+          textureEdgeRepairEdges: options.textureEdgeRepairEdges,
+        }
+      : undefined);
   return computeTextureAtlasPlan(polygon, index, internalOptions, projectiveQuadGuards, basisHint);
 }
 

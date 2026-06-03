@@ -1,9 +1,11 @@
 import type { Polygon } from "@layoutit/polycss-core";
 import {
   buildSeamBleedPolygonEdges,
+  DEFAULT_SEAM_BLEED,
   DEFAULT_TILE,
   DEFAULT_MATRIX_DECIMALS,
   BASIS_EPS,
+  resolveBleedRatio,
 } from "@layoutit/polycss-core";
 import type {
   SolidTrianglePlan,
@@ -34,7 +36,7 @@ import { stableTriangleMatrixDecimals } from "@layoutit/polycss-core";
 import { applyPolygonDataAttrs, hasPolygonDataAttrs } from "./emit";
 import { resolveSolidTrianglePrimitive } from "./strategy";
 
-const DEFAULT_SOLID_SEAM_BLEED = 1.5;
+// See renderPolygons.ts. `options.seamBleed` is interpreted as a ratio.
 const SOLID_TRIANGLE_BORDER_WIDTH = "0 48px 96px 48px";
 
 type RenderTextureAtlasOptionsWithSeams = RenderTextureAtlasOptions & {
@@ -57,15 +59,21 @@ function buildStableTriangleSeamEdges(
 function stableTriangleSeamOptions(
   index: number,
   seamBleedEdges: Map<number, Set<number>> | null,
-  options: RenderTextureAtlasOptions,
+  options: RenderTextureAtlasOptionsWithSeams,
 ): RenderTextureAtlasOptionsWithSeams {
-  return seamBleedEdges
+  // `options.seamBleed` is the ratio (0..1). Resolve to absolute px for
+  // the shared-edge bleed AND stash the ratio in `bleedRatio` so the
+  // SOLID_TRIANGLE_BLEED fallback inside solidTrianglePlan is scaled too.
+  const ratio = resolveBleedRatio(options.seamBleed);
+  const bleed = DEFAULT_SEAM_BLEED * ratio;
+  const baseOut = { ...options, bleedRatio: ratio };
+  return seamBleedEdges && bleed > 0
     ? {
-        ...options,
-        seamBleed: seamBleedEdges.has(index) ? DEFAULT_SOLID_SEAM_BLEED : undefined,
+        ...baseOut,
+        seamBleed: seamBleedEdges.has(index) ? bleed : undefined,
         seamEdges: seamBleedEdges.get(index),
       }
-    : options;
+    : baseOut;
 }
 
 export function stableTriangleColorState(options: InternalRenderTextureAtlasOptions): StableTriangleColorState {
@@ -309,16 +317,22 @@ export function createSolidTriangleElement(
 ): HTMLElement {
   const el = doc.createElement("u");
   applySolidTriangleElement(el, entry);
+  // Always emit data-poly-index for devtools pinpointing. The update
+  // paths below skip data-attr work via outer guards (they hot-loop
+  // through transforms), so this mount-time call is what makes the
+  // index stick on every triangle leaf.
+  applyPolygonDataAttrs(el, entry.polygon, entry.index);
   return el;
 }
 
 export function createHiddenSolidTriangleElement(
   polygon: Polygon,
+  polygonIndex: number,
   doc: Document,
 ): HTMLElement {
   const el = doc.createElement("u");
   hideSolidTriangleElement(el);
-  if (polygon.data) applyPolygonDataAttrs(el, polygon);
+  applyPolygonDataAttrs(el, polygon, polygonIndex);
   return el;
 }
 
@@ -536,7 +550,7 @@ export function renderPolygonsWithStableTriangles(
     });
     const element = plan
       ? createSolidTriangleElement(plan, doc)
-      : createHiddenSolidTriangleElement(polygon, doc);
+      : createHiddenSolidTriangleElement(polygon, i, doc);
     rendered.push({ polygonIndex: i, element, kind: "triangle", dispose: () => {} });
   }
 

@@ -411,7 +411,6 @@ interface PolyVoxelSource {
   cols: number;
   depth: number;
   scale: number;
-  gridShift: number;
   sourceBytes: number;
 }
 ```
@@ -567,8 +566,6 @@ Options for `parseObj`.
 interface ObjParseOptions {
   /** Scale the model so its longest axis is this many world units. */
   targetSize?: number;
-  /** Shift all vertices by this amount after scaling. */
-  gridShift?: number;
   /** Fallback color for un-colored faces (default: "#888888"). */
   defaultColor?: string;
   /** Override per-material colors (material name → CSS color). */
@@ -594,8 +591,6 @@ Options for `parseVox`.
 interface VoxParseOptions {
   /** Scale near this longest-axis size; snapped to integer voxel CSS cells. Default: 60. */
   targetSize?: number;
-  /** Shift all vertices by this amount after scaling. Default: 0. */
-  gridShift?: number;
   /** Lossy RGB distance for folding nearby opaque palette colors before greedy meshing. Default: disabled. */
   paletteMergeDistance?: number;
   /** Lossy RGB distance for recoloring small local color islands/streaks before greedy meshing. Default: disabled. */
@@ -632,8 +627,6 @@ Options for `parseGltf`.
 interface GltfParseOptions {
   /** Scale the model so its longest axis is this many world units. */
   targetSize?: number;
-  /** Shift all vertices by this amount after scaling. */
-  gridShift?: number;
   /** Fallback color for un-colored faces (default: "#888888"). */
   defaultColor?: string;
   /** Override per-material colors. */

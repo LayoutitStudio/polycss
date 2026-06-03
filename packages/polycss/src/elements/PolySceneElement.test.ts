@@ -124,7 +124,9 @@ describe("PolySceneElement", () => {
       el.setAttribute("zoom", "1.5");
       host.appendChild(el);
       const sceneEl = el.querySelector(".polycss-scene") as HTMLElement;
-      expect(sceneEl.style.transform).toContain("scale(1.5)");
+      // User zoom (px per world unit) → CSS scale = zoom / DEFAULT_TILE.
+      // 1.5 / 50 = 0.03.
+      expect(sceneEl.style.transform).toContain("scale(0.03)");
     });
 
     it("ignores invalid perspective value and falls back to orthographic stand-in", () => {

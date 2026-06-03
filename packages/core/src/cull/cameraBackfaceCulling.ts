@@ -1,5 +1,5 @@
 import type { Polygon, Vec3 } from "../types";
-import { rotateVec3 } from "../math/rotation";
+import { rotateVec3, rotateVec3InWrapperCssFrame } from "../math/rotation";
 
 export const CAMERA_BACKFACE_CULL_EPS = 1e-5;
 export const VOXEL_CAMERA_CULL_AXIS_EPS = 1e-3;
@@ -39,8 +39,12 @@ export function polygonCssSurfaceNormal(polygon: Polygon): Vec3 | null {
 
 export function cameraFacingDepth(normal: Vec3, rotation: CameraCullRotation): number {
   const meshRotation = rotation.meshRotation;
+  // Apply the wrapper's actual CSS rotation matrix (conjugated world rotation)
+  // so the cull's idea of the post-wrapper normal matches what the browser
+  // composites. Camera rotation stays as direct CSS rotateX/rotateY because
+  // `rotation.rotX`/`rotY` are already scene-root CSS-frame angles.
   const meshNormal = meshRotation
-    ? rotateVec3(normal, meshRotation[0] ?? 0, meshRotation[1] ?? 0, meshRotation[2] ?? 0)
+    ? rotateVec3InWrapperCssFrame(normal, meshRotation)
     : normal;
   return rotateVec3(meshNormal, rotation.rotX, 0, rotation.rotY)[2];
 }

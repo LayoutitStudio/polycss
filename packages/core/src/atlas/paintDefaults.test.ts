@@ -129,10 +129,12 @@ describe("parseAlpha — alpha extraction from CSS color strings", () => {
 // ---------------------------------------------------------------------------
 
 describe("shadePolygon — Lambert shading outputs", () => {
-  it("white polygon with white light at full intensity and zero ambient → shaded to full white from front", () => {
-    // White polygon + white directional light + zero ambient, full exposure
+  it("white polygon with white light at full intensity and zero ambient → 1/π linear, sRGB-encoded mid-grey", () => {
+    // shadePolygon does physical Lambert: factor = (light·directScale + amb·ambI) / π,
+    // outLinear = albedoLinear × factor, output = sRGB(outLinear). With direct=1 and
+    // n·L absorbed into directScale by the caller, the output is sRGB(1/π) ≈ #999999.
     const result = shadePolygon("#ffffff", 1, "#ffffff", "#000000", 0);
-    expect(result).toBe("#ffffff");
+    expect(result).toBe("#999999");
   });
 
   it("white polygon with no light and no ambient → black output", () => {
@@ -140,10 +142,11 @@ describe("shadePolygon — Lambert shading outputs", () => {
     expect(result).toBe("#000000");
   });
 
-  it("red polygon with white ambient at 1.0 → red output", () => {
+  it("red polygon with white ambient at 1.0 → red, dimmed by 1/π factor", () => {
+    // Same /π factor as the directional case: ambient intensity 1 with white
+    // ambient yields factor = 1/π, so output is sRGB(1/π * (1,0,0)) ≈ #990000.
     const result = shadePolygon("#ff0000", 0, "#000000", "#ffffff", 1);
-    // Red channel: 255 * (255/255 * 1) = 255
-    expect(result).toBe("#ff0000");
+    expect(result).toBe("#990000");
   });
 
   it("returns a hex CSS color string in the format #rrggbb for opaque input", () => {
@@ -169,18 +172,20 @@ describe("shadePolygon — Lambert shading outputs", () => {
 // ---------------------------------------------------------------------------
 
 describe("textureTintFactors — tint factor output", () => {
-  it("full white light + zero ambient at direct scale 1 → factors of 1", () => {
+  it("full white light + zero ambient at direct scale 1 → factors of 1/π (linear-space Lambert)", () => {
     const tint = textureTintFactors(1, "#ffffff", "#000000", 0);
-    expect(tint.r).toBeCloseTo(1);
-    expect(tint.g).toBeCloseTo(1);
-    expect(tint.b).toBeCloseTo(1);
+    const expected = 1 / Math.PI;
+    expect(tint.r).toBeCloseTo(expected);
+    expect(tint.g).toBeCloseTo(expected);
+    expect(tint.b).toBeCloseTo(expected);
   });
 
-  it("zero directScale + white ambient at 1 → factors of 1", () => {
+  it("zero directScale + white ambient at 1 → factors of 1/π", () => {
     const tint = textureTintFactors(0, "#000000", "#ffffff", 1);
-    expect(tint.r).toBeCloseTo(1);
-    expect(tint.g).toBeCloseTo(1);
-    expect(tint.b).toBeCloseTo(1);
+    const expected = 1 / Math.PI;
+    expect(tint.r).toBeCloseTo(expected);
+    expect(tint.g).toBeCloseTo(expected);
+    expect(tint.b).toBeCloseTo(expected);
   });
 
   it("red light only → only r factor is positive", () => {

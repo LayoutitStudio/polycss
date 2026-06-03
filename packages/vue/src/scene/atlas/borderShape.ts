@@ -3,6 +3,7 @@ import type { CSSProperties, VNode } from "vue";
 import type {
   TextureAtlasPlan,
   SolidPaintDefaults,
+  PolyTextureLightingMode,
 } from "@layoutit/polycss-core";
 import {
   isFullRectSolid,
@@ -11,6 +12,7 @@ import {
   formatBorderShapeEntryMatrix,
 } from "@layoutit/polycss-core";
 import { isBorderShapeSupported } from "./detection";
+import { parseHex, rgbKey } from "./solidTriangleStyle";
 
 // ---------------------------------------------------------------------------
 // Brush-inline-style ordering helper (needed by renderTextureBorderShapePoly)
@@ -42,6 +44,7 @@ function orderBrushInlineStyle(el: HTMLElement): void {
 
 export function renderTextureBorderShapePoly({
   entry,
+  textureLighting,
   solidPaintDefaults,
   className,
   style: styleProp,
@@ -50,6 +53,7 @@ export function renderTextureBorderShapePoly({
   forceBorderShape = false,
 }: {
   entry: TextureAtlasPlan;
+  textureLighting: PolyTextureLightingMode;
   solidPaintDefaults?: SolidPaintDefaults;
   className?: string;
   style?: CSSProperties;
@@ -60,16 +64,34 @@ export function renderTextureBorderShapePoly({
   const fullRect = !entry.texture && isFullRectSolid(entry);
   const useIForFullRect = fullRect && forceBorderShape && isBorderShapeSupported();
   const borderShape = (!fullRect || useIForFullRect) ? cssBorderShapeForPlan(entry) : null;
-  const useDefaultPaint = entry.shadedColor === solidPaintDefaults?.paintColor;
+  const dynamic = textureLighting === "dynamic";
+  const base = parseHex(entry.polygon.color ?? "#cccccc");
+  const useDefaultDynamicColor = dynamic && rgbKey(base) === solidPaintDefaults?.dynamicColorKey;
   // formatBorderShapeEntryMatrix / formatSolidQuadEntryMatrix already return a
   // wrapped `matrix3d(...)` string. Wrapping again via formatMatrix3d would
   // produce `matrix3d(matrix3d(...))` — invalid CSS, silently dropped by the
   // browser, leaving the leaf with no transform.
   const transform = borderShape ? formatBorderShapeEntryMatrix(entry) : formatSolidQuadEntryMatrix(entry);
+  // Dynamic mode: emit the per-polygon normal so the CSS Lambert calc reads
+  // var(--pnx/y/z) instead of falling back to (0,0,1) (the @property initial
+  // value) and treating every face as +Z up.
   const style: CSSProperties = {
     transform,
-    color: useDefaultPaint ? undefined : entry.shadedColor,
+    // Baked: always emit per-leaf shaded color (vanilla commit 0423777).
+    color: dynamic ? undefined : entry.shadedColor,
     pointerEvents: pointerEvents === "none" ? "none" : undefined,
+    ...(dynamic
+      ? {
+          "--pnx": entry.normal[0].toFixed(4),
+          "--pny": entry.normal[1].toFixed(4),
+          "--pnz": entry.normal[2].toFixed(4),
+          ...(useDefaultDynamicColor ? null : {
+            "--psr": (base.r / 255).toFixed(4),
+            "--psg": (base.g / 255).toFixed(4),
+            "--psb": (base.b / 255).toFixed(4),
+          }),
+        }
+      : null),
     ...styleProp,
   };
 
@@ -91,6 +113,7 @@ export function renderTextureBorderShapePoly({
   return h(fullRect && !useIForFullRect ? "b" : "i", {
     class: elementClassName,
     style,
+    "data-poly-index": String(entry.index),
     ...dataAttrs,
     ...domAttrs,
     onVnodeMounted: applyBorderShape,

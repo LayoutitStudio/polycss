@@ -58,7 +58,13 @@ export const PolyOrthographicCamera = defineComponent({
         {
           ref: cameraElRef,
           class: `polycss-camera${props.class ? ` ${props.class}` : ""}`,
-          style: { perspective: "none" },
+          // Vanilla emits 1000000px instead of "none" because true
+          // `perspective: none` sends Chrome down a compositor fast path that
+          // mis-rasterizes <u> border-triangle leaves. A very large finite
+          // value is visually orthographic but routes through the normal
+          // compositor path. Mirror that here so Vue produces byte-identical
+          // output to vanilla.
+          style: { perspective: "1000000px" },
         },
         slots.default?.()
       );

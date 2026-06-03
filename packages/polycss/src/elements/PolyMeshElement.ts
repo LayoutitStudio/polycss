@@ -10,7 +10,7 @@
  * `auto-center` is currently honored by recentering vertices in-place before
  * registering; this matches `<PolyMesh autoCenter>` semantics.
  */
-import type { MeshResolution, ParseResult, Polygon, Vec3 } from "@layoutit/polycss-core";
+import type { MeshResolution, ObjParseOptions, ParseResult, Polygon, Vec3 } from "@layoutit/polycss-core";
 import { computeSceneBbox, loadMesh } from "@layoutit/polycss-core";
 import type { PolyMeshHandle } from "../api/createPolyScene";
 import type { PolySceneElement } from "./PolySceneElement";
@@ -28,6 +28,13 @@ const OBSERVED_ATTRS = [
   "scale",
   "rotation",
   "auto-center",
+  "cast-shadow",
+  "receive-shadow",
+  "target-size",
+  "default-color",
+  "palette",
+  "include-objects",
+  "exclude-objects",
 ] as const;
 
 function parseVec3(value: string | null): Vec3 | undefined {
@@ -46,6 +53,28 @@ function parseScale(value: string | null): number | Vec3 | undefined {
     return Number.isFinite(n) ? n : undefined;
   }
   return parseVec3(value);
+}
+
+function parseStringList(value: string | null): string[] | undefined {
+  if (!value) return undefined;
+  const parts = value.split(",").map((p) => p.trim()).filter((p) => p.length > 0);
+  return parts.length > 0 ? parts : undefined;
+}
+
+function parseObjOptions(el: HTMLElement): ObjParseOptions | undefined {
+  const ts = el.getAttribute("target-size");
+  const dc = el.getAttribute("default-color");
+  const pal = parseStringList(el.getAttribute("palette"));
+  const inc = parseStringList(el.getAttribute("include-objects"));
+  const exc = parseStringList(el.getAttribute("exclude-objects"));
+  const tsNum = ts !== null ? parseFloat(ts) : NaN;
+  const out: ObjParseOptions = {};
+  if (Number.isFinite(tsNum)) out.targetSize = tsNum;
+  if (dc) out.defaultColor = dc;
+  if (pal) out.palette = pal;
+  if (inc) out.includeObjects = inc;
+  if (exc) out.excludeObjects = exc;
+  return Object.keys(out).length > 0 ? out : undefined;
 }
 
 function findScene(el: HTMLElement): PolySceneElement | null {
@@ -106,7 +135,16 @@ export class PolyMeshElement extends ELEMENT_BASE {
     newValue: string | null,
   ): void {
     if (oldValue === newValue) return;
-    if (name === "src" || name === "mtl" || name === "mesh-resolution") {
+    if (
+      name === "src" ||
+      name === "mtl" ||
+      name === "mesh-resolution" ||
+      name === "target-size" ||
+      name === "default-color" ||
+      name === "palette" ||
+      name === "include-objects" ||
+      name === "exclude-objects"
+    ) {
       this._tearDown();
       this._maybeLoad();
       return;
@@ -117,6 +155,8 @@ export class PolyMeshElement extends ELEMENT_BASE {
       position: parseVec3(this.getAttribute("position")),
       scale: parseScale(this.getAttribute("scale")),
       rotation: parseVec3(this.getAttribute("rotation")),
+      castShadow: this.hasAttribute("cast-shadow"),
+      receiveShadow: this.hasAttribute("receive-shadow"),
     });
   }
 
@@ -141,10 +181,15 @@ export class PolyMeshElement extends ELEMENT_BASE {
     const meshResolutionAttr = this.getAttribute("mesh-resolution");
     const meshResolution: MeshResolution | undefined =
       meshResolutionAttr === "lossless" ? "lossless" : undefined;
+    const objOptions = parseObjOptions(this);
     let parsed: ParseResult;
     try {
-      const loadOpts = (mtl || meshResolution !== undefined)
-        ? { ...(mtl ? { mtlUrl: mtl } : {}), ...(meshResolution !== undefined ? { meshResolution } : {}) }
+      const loadOpts = (mtl || meshResolution !== undefined || objOptions)
+        ? {
+            ...(mtl ? { mtlUrl: mtl } : {}),
+            ...(meshResolution !== undefined ? { meshResolution } : {}),
+            ...(objOptions ? { objOptions } : {}),
+          }
         : undefined;
       parsed = await loadMesh(src, loadOpts);
     } catch (err) {
@@ -176,6 +221,8 @@ export class PolyMeshElement extends ELEMENT_BASE {
       position: parseVec3(this.getAttribute("position")),
       scale: parseScale(this.getAttribute("scale")),
       rotation: parseVec3(this.getAttribute("rotation")),
+      castShadow: this.hasAttribute("cast-shadow"),
+      receiveShadow: this.hasAttribute("receive-shadow"),
     });
 
     this.dispatchEvent(

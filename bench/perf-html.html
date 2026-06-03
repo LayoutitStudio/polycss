@@ -12,7 +12,7 @@
 
   <script type="module">
     // HTML / custom-element path. Uses <poly-scene> + <poly-mesh> +
-    // <poly-controls> declaratively. Per-frame state changes go through
+    // <poly-orbit-controls> declaratively. Per-frame state changes go through
     // setAttribute() — exercises the custom element's attribute observer
     // pipeline plus everything underneath.
     //
@@ -22,37 +22,47 @@
     import "./.generated/polycss-elements.js";
     import { getSynthMesh } from "./synth-mesh.mjs";
     import {
-      parseUrlParams, dirFromAzEl, createPerfRecorder,
+      parseUrlParams, dirFromAzEl, createPerfRecorder, buildFloorPolygons,
+      installParitySync,
       PERF_OVERLAY_HTML, PERF_OVERLAY_CSS,
     } from "./perf-shared.mjs";
 
     document.getElementById("overlay-css").textContent = PERF_OVERLAY_CSS;
-    document.body.insertAdjacentHTML("beforeend", PERF_OVERLAY_HTML);
 
-    const { meshId, mode, motion, az, el, isSynth, preset } = parseUrlParams();
-    let azimuth = az;
+    const cfg = parseUrlParams();
+    if (!cfg.hideOverlay) document.body.insertAdjacentHTML("beforeend", PERF_OVERLAY_HTML);
+    let azimuth = cfg.az;
+
+    const haveDirVec =
+      Number.isFinite(cfg.dir.x) && Number.isFinite(cfg.dir.y) && Number.isFinite(cfg.dir.z);
+    const initialDir = haveDirVec
+      ? [cfg.dir.x, cfg.dir.y, cfg.dir.z]
+      : dirFromAzEl(azimuth, cfg.el);
+    const initialLift = Number.isFinite(cfg.shadow.lift)
+      ? cfg.shadow.lift
+      : 1 / Math.max(1, cfg.preset.zoom);
 
     const host = document.getElementById("host");
     const sceneEl = document.createElement("poly-scene");
-    sceneEl.setAttribute("rot-x", String(preset.rotX));
-    sceneEl.setAttribute("rot-y", String(preset.rotY));
-    sceneEl.setAttribute("zoom", String(preset.zoom));
-    sceneEl.setAttribute("texture-lighting", mode);
-    sceneEl.setAttribute("auto-center", "");
-    sceneEl.setAttribute("directional-direction", dirFromAzEl(azimuth, el).join(","));
-    sceneEl.setAttribute("directional-color", "#ffffff");
-    sceneEl.setAttribute("directional-intensity", "1");
-    sceneEl.setAttribute("ambient-color", "#ffffff");
-    sceneEl.setAttribute("ambient-intensity", "0.4");
+    sceneEl.setAttribute("rot-x", String(cfg.preset.rotX));
+    sceneEl.setAttribute("rot-y", String(cfg.preset.rotY));
+    sceneEl.setAttribute("zoom", String(cfg.preset.zoom));
+    sceneEl.setAttribute("texture-lighting", cfg.mode);
+    if (cfg.autoCenter) sceneEl.setAttribute("auto-center", "");
+    sceneEl.setAttribute("directional-direction", initialDir.join(","));
+    sceneEl.setAttribute("directional-color", cfg.dir.color);
+    sceneEl.setAttribute("directional-intensity", String(cfg.dir.intensity));
+    sceneEl.setAttribute("ambient-color", cfg.amb.color);
+    sceneEl.setAttribute("ambient-intensity", String(cfg.amb.intensity));
     sceneEl.style.cssText = "width:100%;height:100%;position:absolute;inset:0;";
     host.appendChild(sceneEl);
 
-    // Add <poly-controls> for drag+wheel (human inspection only — bench
-    // doesn't fire pointer/wheel events).
-    const controlsEl = document.createElement("poly-controls");
-    controlsEl.setAttribute("drag", "");
-    controlsEl.setAttribute("wheel", "");
-    sceneEl.appendChild(controlsEl);
+    // <poly-orbit-controls> for drag+wheel (human inspection / parity-quad
+    // sync). Headless perf-bench sweeps don't fire pointer events.
+    const orbitEl = document.createElement("poly-orbit-controls");
+    orbitEl.setAttribute("drag", "");
+    orbitEl.setAttribute("wheel", "");
+    sceneEl.appendChild(orbitEl);
 
     // For declarative perf, OBJ mesh loading goes through <poly-mesh src=...>
     // which kicks off its own fetch. Synth meshes don't have a URL — we have
@@ -60,22 +70,33 @@
     // honest we always go through the element pipeline: synth meshes are
     // injected via an empty <poly-mesh> + a setOptions-style add().
     let mountedPromise;
-    if (isSynth) {
-      mountedPromise = Promise.resolve(getSynthMesh(meshId)).then((parseResult) => {
-        // For synth: bypass <poly-mesh> by reaching into the scene's
-        // imperative handle. This is the only escape hatch for client-
-        // generated meshes; real OBJ loading still uses the element.
-        // We still pay the custom-element + setAttribute cost on every
-        // per-frame state change below.
+    let meshEl = null;
+    if (cfg.isSynth) {
+      mountedPromise = Promise.resolve(getSynthMesh(cfg.meshId)).then((parseResult) => {
         const handle = sceneEl.getScene();
-        handle.add(parseResult);
+        handle.add(parseResult, {
+          castShadow: cfg.castShadow,
+          receiveShadow: cfg.selfShadow,
+          position: [cfg.obj.x, cfg.obj.y, cfg.obj.z],
+          scale: cfg.obj.scale,
+          rotation: [cfg.obj.rx, cfg.obj.ry, cfg.obj.rz],
+        });
         return parseResult;
       });
     } else {
-      const meshEl = document.createElement("poly-mesh");
-      meshEl.setAttribute("src", preset.url);
-      if (preset.mtlUrl) meshEl.setAttribute("mtl-url", preset.mtlUrl);
-      if (preset.options?.targetSize) meshEl.setAttribute("target-size", String(preset.options.targetSize));
+      meshEl = document.createElement("poly-mesh");
+      meshEl.setAttribute("src", cfg.preset.url);
+      if (cfg.preset.mtlUrl) meshEl.setAttribute("mtl", cfg.preset.mtlUrl);
+      if (cfg.preset.options?.targetSize) meshEl.setAttribute("target-size", String(cfg.preset.options.targetSize));
+      if (cfg.preset.options?.defaultColor) meshEl.setAttribute("default-color", cfg.preset.options.defaultColor);
+      if (cfg.preset.options?.palette) meshEl.setAttribute("palette", cfg.preset.options.palette.join(","));
+      if (cfg.preset.options?.includeObjects) meshEl.setAttribute("include-objects", cfg.preset.options.includeObjects.join(","));
+      if (cfg.preset.options?.excludeObjects) meshEl.setAttribute("exclude-objects", cfg.preset.options.excludeObjects.join(","));
+      if (cfg.castShadow) meshEl.setAttribute("cast-shadow", "");
+      if (cfg.selfShadow) meshEl.setAttribute("receive-shadow", "");
+      meshEl.setAttribute("position", `${cfg.obj.x},${cfg.obj.y},${cfg.obj.z}`);
+      meshEl.setAttribute("scale", String(cfg.obj.scale));
+      meshEl.setAttribute("rotation", `${cfg.obj.rx},${cfg.obj.ry},${cfg.obj.rz}`);
       sceneEl.appendChild(meshEl);
       mountedPromise = new Promise((resolve, reject) => {
         meshEl.addEventListener("polycss:loaded", (e) => resolve(e.detail), { once: true });
@@ -83,11 +104,32 @@
       });
     }
 
+    // Optional floor receiver: <poly-mesh> has no attribute for inline
+    // polygons (only `src=`), so the floor goes via the imperative scene
+    // handle.
+    let floorHandle = null;
+    if (cfg.floorVisible) {
+      const floorPolygons = buildFloorPolygons();
+      mountedPromise = mountedPromise.then(async (parseResult) => {
+        const handle = sceneEl.getScene();
+        floorHandle = handle.add({ polygons: floorPolygons }, { receiveShadow: cfg.floorReceives });
+        return parseResult;
+      });
+    }
+
+    // Shadow opacity + lift go via the imperative scene handle (no element
+    // attributes for them today). Set after the scene exists.
+    mountedPromise = mountedPromise.then((parseResult) => {
+      const handle = sceneEl.getScene();
+      if (handle) handle.setOptions({ shadow: { opacity: cfg.shadow.opacity, lift: initialLift } });
+      return parseResult;
+    });
+
     mountedPromise.then((mesh) => {
       const polyCount = mesh?.polygons?.length ?? 0;
       const recorder = createPerfRecorder({
         rendererLabel: "html",
-        meshId, mode, motion, polyCount,
+        meshId: cfg.meshId, mode: cfg.mode, motion: cfg.motion, polyCount,
         polygons: mesh?.polygons ?? [],
       });
 
@@ -95,16 +137,68 @@
       function tick(now) {
         recorder.onFrame(now);
         frameCount += 1;
-        if (motion === "light") {
+        if (cfg.motion === "light") {
           azimuth = (azimuth + 0.5) % 360;
-          sceneEl.setAttribute("directional-direction", dirFromAzEl(azimuth, el).join(","));
-        } else if (motion === "rot") {
-          const newRotY = ((preset.rotY + frameCount * 0.5) + 360) % 360;
+          sceneEl.setAttribute("directional-direction", dirFromAzEl(azimuth, cfg.el).join(","));
+        } else if (cfg.motion === "rot") {
+          const newRotY = ((cfg.preset.rotY + frameCount * 0.5) + 360) % 360;
           sceneEl.setAttribute("rot-y", newRotY.toFixed(2));
         }
         requestAnimationFrame(tick);
       }
       requestAnimationFrame(tick);
+
+      // Parity-quad sync. Camera + light + ambient go via attributes;
+      // shadow opacity / lift + object transform go via the imperative
+      // handle (no attribute equivalent yet). Drag reporting attaches to
+      // the <poly-orbit-controls> element via getControls().
+      if (cfg.sync) {
+        const sceneHandle = sceneEl.getScene();
+        installParitySync({
+          applyCamera: ({ rotX, rotY, zoom }) => {
+            if (rotX != null) sceneEl.setAttribute("rot-x", String(rotX));
+            if (rotY != null) sceneEl.setAttribute("rot-y", String(rotY));
+            if (zoom != null) sceneEl.setAttribute("zoom", String(zoom));
+          },
+          applyLight: ({ dir, intensity, color }) => {
+            if (dir) sceneEl.setAttribute("directional-direction", dir.join(","));
+            if (intensity != null) sceneEl.setAttribute("directional-intensity", String(intensity));
+            if (color != null) sceneEl.setAttribute("directional-color", color);
+          },
+          applyAmbient: ({ intensity, color }) => {
+            if (intensity != null) sceneEl.setAttribute("ambient-intensity", String(intensity));
+            if (color != null) sceneEl.setAttribute("ambient-color", color);
+          },
+          applyObject: ({ position, scale, rotation }) => {
+            // Prefer the declarative element attrs when the mesh came from
+            // <poly-mesh src=…>; fall back to the imperative handle for
+            // synth meshes that bypassed the element.
+            if (meshEl) {
+              if (position) meshEl.setAttribute("position", position.join(","));
+              if (scale != null) meshEl.setAttribute("scale", String(scale));
+              if (rotation) meshEl.setAttribute("rotation", rotation.join(","));
+            } else {
+              const main = sceneHandle?.listMeshes().find((m) => !m.transform.receiveShadow);
+              if (!main) return;
+              const patch = {};
+              if (position) patch.position = position;
+              if (scale != null) patch.scale = scale;
+              if (rotation) patch.rotation = rotation;
+              if (Object.keys(patch).length) main.setTransform(patch);
+            }
+          },
+          applyShadow: ({ opacity, lift }) => {
+            const next = {};
+            if (opacity != null) next.opacity = opacity;
+            if (lift != null) next.lift = lift;
+            if (Object.keys(next).length && sceneHandle) sceneHandle.setOptions({ shadow: next });
+          },
+          reportCamera: (cb) => {
+            const controls = orbitEl.getControls?.();
+            controls?.addEventListener?.("change", (e) => cb({ rotX: e.camera.rotX, rotY: e.camera.rotY, zoom: e.camera.zoom }));
+          },
+        });
+      }
     }).catch((err) => {
       console.error("perf-html mesh load failed", err);
       document.getElementById("fps-now").textContent = "ERR";

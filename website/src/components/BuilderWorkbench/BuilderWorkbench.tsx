@@ -89,7 +89,6 @@ function importedSourceFromFiles(files: File[]): DroppedModelSource | null {
     url: "",
     options: {
       targetSize: 60,
-      gridShift: kind === "vox" ? 0 : 1,
       defaultColor: BUILDER_IMPORT_DEFAULT_COLOR,
     },
     galleryBucket: kind === "vox" ? "Voxel" : kind === "stl" ? "CAD" : "Solid",

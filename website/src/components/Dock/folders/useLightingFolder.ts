@@ -13,6 +13,7 @@ import { useColor, useFolder, useSlider, useToggle } from "../primitives";
 
 export interface LightingFolderInputs {
   castShadow: boolean;
+  selfShadow: boolean;
   shadowMaxExtend: number;
   showGround: boolean;
   groundColor: string;
@@ -25,6 +26,7 @@ export interface LightingFolderInputs {
   ambientColor: string;
   onUpdateScene: (partial: {
     castShadow?: boolean;
+    selfShadow?: boolean;
     shadowMaxExtend?: number;
     showGround?: boolean;
     groundColor?: string;
@@ -41,6 +43,7 @@ export interface LightingFolderInputs {
 export function useLightingFolder(parent: GUI | null, inputs: LightingFolderInputs): void {
   const {
     castShadow,
+    selfShadow,
     shadowMaxExtend,
     showGround,
     groundColor,
@@ -62,10 +65,20 @@ export function useLightingFolder(parent: GUI | null, inputs: LightingFolderInpu
       ...(value ? { showGround: true } : null),
     }),
   );
+  // Self-shadow without Cast shadow is a no-op (you need a caster to
+  // throw shadows on the mesh's own faces). Auto-enable Cast shadow +
+  // Show ground when the user flips Self-shadow on, mirroring the
+  // Cast shadow toggle's "also enable ground" affordance above.
+  useToggle(folder, "Self-shadow", selfShadow, (value) =>
+    onUpdateScene({
+      selfShadow: value,
+      ...(value ? { castShadow: true, showGround: true } : null),
+    }),
+  );
   useSlider(
     folder,
     "Shadow reach",
-    { min: 200, max: 4000, step: 100 },
+    { min: 200, max: 10000, step: 100 },
     shadowMaxExtend,
     (value) => onUpdateScene({ shadowMaxExtend: value }),
   );
@@ -84,12 +97,12 @@ export function useLightingFolder(parent: GUI | null, inputs: LightingFolderInpu
   useSlider(folder, "Elev.", { min: 0, max: 90, step: 1 }, lightElevation, (value) =>
     onUpdateScene({ lightElevation: value }),
   );
-  useSlider(folder, "Key", { min: 0, max: 2, step: 0.05 }, lightIntensity, (value) =>
+  useSlider(folder, "Light intensity", { min: 0, max: 8, step: 0.05 }, lightIntensity, (value) =>
     onUpdateScene({ lightIntensity: value }),
   );
-  useColor(folder, "Key color", lightColor, (value) => onUpdateScene({ lightColor: value }));
+  useColor(folder, "Light color", lightColor, (value) => onUpdateScene({ lightColor: value }));
 
-  useSlider(folder, "Ambient", { min: 0, max: 2, step: 0.05 }, ambientIntensity, (value) =>
+  useSlider(folder, "Ambient", { min: 0, max: 4, step: 0.05 }, ambientIntensity, (value) =>
     onUpdateScene({ ambientIntensity: value }),
   );
   useColor(folder, "Amb. color", ambientColor, (value) => onUpdateScene({ ambientColor: value }));

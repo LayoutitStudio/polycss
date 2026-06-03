@@ -98,7 +98,7 @@ export function voxPreset(input: GalleryPresetFile): PresetModel {
     category: input.category,
     kind: "vox",
     url: galleryFileUrl("vox", input.file),
-    options: { targetSize: input.targetSize ?? 60, gridShift: 0 },
+    options: { targetSize: input.targetSize ?? 60 },
     zoom: input.zoom ?? 0.4,
     rotX: input.rotX ?? 65,
     rotY: input.rotY ?? 45,

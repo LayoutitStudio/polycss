@@ -55,6 +55,14 @@ export class PolyOrbitControlsElement extends ELEMENT_BASE {
 
   private _controls: PolyOrbitControlsHandle | null = null;
 
+  /** Returns the wrapped PolyOrbitControlsHandle once the element has
+   *  connected to its `<poly-scene>` ancestor. Lets external callers attach
+   *  `change` listeners (or call `update()` / `pause()`) the same way they
+   *  would on a vanilla `createPolyOrbitControls(scene, ...)` handle. */
+  getControls(): PolyOrbitControlsHandle | null {
+    return this._controls;
+  }
+
   private _readAnimate(): PolyOrbitControlsOptions["animate"] | undefined {
     const speed = parseNumber(this.getAttribute("animate-speed"));
     const axis = parseAxis(this.getAttribute("animate-axis"));

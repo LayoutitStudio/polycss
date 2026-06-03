@@ -34,5 +34,5 @@ export function PolyAxesHelper({
     () => axesHelperPolygons({ size, thickness, negative, xColor, yColor, zColor }),
     [size, thickness, negative, xColor, yColor, zColor],
   );
-  return <PolyMesh polygons={polygons} />;
+  return <PolyMesh polygons={polygons} merge={false} />;
 }

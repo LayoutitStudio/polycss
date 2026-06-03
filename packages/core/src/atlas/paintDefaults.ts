@@ -41,6 +41,20 @@ export function rgbToHex({ r, g, b }: RGB): string {
   return `#${f(r)}${f(g)}${f(b)}`;
 }
 
+/**
+ * Tint factors for a textured polygon, in LINEAR light space.
+ *
+ * Returns the per-channel multiplier that the rasterizer should apply to the
+ * texture pixels' LINEAR values — matching Three.js MeshLambertMaterial:
+ *   lit_linear = albedo_linear × tint
+ *   tint = (lightColor × lambert × I + ambientColor × I_amb) / π
+ *
+ * Light + ambient colors are interpreted as sRGB and converted to linear.
+ * The rasterizer is responsible for decoding the texture sample from sRGB
+ * to linear before multiplying by these factors, then re-encoding for paint
+ * (see applyTextureTint in the renderer). `directScale` is already
+ * `intensity × max(n·L, 0)` (computed by the caller).
+ */
 export function textureTintFactors(
   directScale: number,
   lightColor: string,
@@ -49,10 +63,16 @@ export function textureTintFactors(
 ): RGBFactors {
   const light = parseHex(lightColor);
   const amb = parseHex(ambientColor);
+  const lightLR = srgbChannelToLinear(light.r / 255);
+  const lightLG = srgbChannelToLinear(light.g / 255);
+  const lightLB = srgbChannelToLinear(light.b / 255);
+  const ambLR = srgbChannelToLinear(amb.r / 255);
+  const ambLG = srgbChannelToLinear(amb.g / 255);
+  const ambLB = srgbChannelToLinear(amb.b / 255);
   return {
-    r: (amb.r / 255) * ambientIntensity + (light.r / 255) * directScale,
-    g: (amb.g / 255) * ambientIntensity + (light.g / 255) * directScale,
-    b: (amb.b / 255) * ambientIntensity + (light.b / 255) * directScale,
+    r: (lightLR * directScale + ambLR * ambientIntensity) * INV_PI,
+    g: (lightLG * directScale + ambLG * ambientIntensity) * INV_PI,
+    b: (lightLB * directScale + ambLB * ambientIntensity) * INV_PI,
   };
 }
 
@@ -60,6 +80,19 @@ export function tintToCss({ r, g, b }: RGBFactors): string {
   const f = (n: number) => Math.round(Math.max(0, Math.min(1, n)) * 255);
   return `rgb(${f(r)} ${f(g)} ${f(b)})`;
 }
+
+// sRGB ↔ linear conversion (IEC 61966-2-1). Lambert is physical only when
+// the multiplication happens in linear-light space; mid-grey × half-light
+// in sRGB is much brighter than the physically-correct result. Matching
+// Three.js's MeshLambertMaterial requires the same pipeline.
+function srgbChannelToLinear(c: number): number {
+  // c in [0, 1]
+  return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+}
+function linearChannelToSrgb(c: number): number {
+  return c <= 0.0031308 ? c * 12.92 : 1.055 * Math.pow(c, 1 / 2.4) - 0.055;
+}
+const INV_PI = 1 / Math.PI;
 
 export function shadePolygon(
   baseColor: string,
@@ -71,12 +104,31 @@ export function shadePolygon(
   const base = parseHex(baseColor);
   const light = parseHex(lightColor);
   const amb = parseHex(ambientColor);
-  const tintR = (amb.r / 255) * ambientIntensity + (light.r / 255) * directScale;
-  const tintG = (amb.g / 255) * ambientIntensity + (light.g / 255) * directScale;
-  const tintB = (amb.b / 255) * ambientIntensity + (light.b / 255) * directScale;
-  const r = Math.max(0, Math.min(255, Math.round(base.r * tintR)));
-  const g = Math.max(0, Math.min(255, Math.round(base.g * tintG)));
-  const b = Math.max(0, Math.min(255, Math.round(base.b * tintB)));
+  // Convert albedo + light + ambient channels from sRGB display space to
+  // linear light. Lambert is then a physically-correct multiply.
+  const baseLR = srgbChannelToLinear(base.r / 255);
+  const baseLG = srgbChannelToLinear(base.g / 255);
+  const baseLB = srgbChannelToLinear(base.b / 255);
+  const lightLR = srgbChannelToLinear(light.r / 255);
+  const lightLG = srgbChannelToLinear(light.g / 255);
+  const lightLB = srgbChannelToLinear(light.b / 255);
+  const ambLR = srgbChannelToLinear(amb.r / 255);
+  const ambLG = srgbChannelToLinear(amb.g / 255);
+  const ambLB = srgbChannelToLinear(amb.b / 255);
+  // Physically based diffuse (Three.js MeshLambertMaterial parity):
+  //   lit = (BRDF_Lambert(albedo)) × (directIrradiance + indirectIrradiance)
+  //       = (albedo / π) × (lightColor × lambert × I + ambientColor × I_amb)
+  // The `/π` wraps the whole sum — both the direct and ambient contributions
+  // go through the same diffuse BRDF, so ambient is also normalized by π.
+  // `directScale` is `intensity × max(n·L, 0)` (computed by the caller).
+  const litLR = baseLR * (lightLR * directScale + ambLR * ambientIntensity) * INV_PI;
+  const litLG = baseLG * (lightLG * directScale + ambLG * ambientIntensity) * INV_PI;
+  const litLB = baseLB * (lightLB * directScale + ambLB * ambientIntensity) * INV_PI;
+  const enc = (v: number) =>
+    Math.max(0, Math.min(255, Math.round(linearChannelToSrgb(Math.max(0, Math.min(1, v))) * 255)));
+  const r = enc(litLR);
+  const g = enc(litLG);
+  const b = enc(litLB);
   // Preserve the base polygon's alpha. Lighting only modulates RGB —
   // a translucent input (e.g. createTransformControls arrows at idle)
   // must keep its alpha so the gizmo stays see-through after shading.

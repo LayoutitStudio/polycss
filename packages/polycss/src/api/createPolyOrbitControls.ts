@@ -107,8 +107,16 @@ export function createPolyOrbitControls(
       const t = cameraState.target ?? [0, 0, 0];
       scene.camera.update({ target: [t[0] + targetD0, t[1] + targetD1, t[2]] });
     } else {
-      // Left-drag orbits
-      const rotX = (cameraState.rotX ?? 65) - dY;
+      // Left-drag orbits.
+      // rotX is clamped to [0, 89]: at 0 the camera is looking straight
+      // down at the scene (floor's +Z normal faces the camera); rotating
+      // PAST 90 flips the floor's normal away from camera, so its
+      // `backface-visibility: hidden` leaf vanishes and any cast shadow
+      // ON the floor vanishes with it. The old upper bound of 100 let a
+      // user drag the camera into that back-facing region (visible in the
+      // gallery as "the ground disappears when I rotate up"); stop at 89
+      // so the floor stays visible at the steepest practical tilt.
+      const rotX = Math.max(0, Math.min(89, (cameraState.rotX ?? 65) - dY));
       const rotY = ((((cameraState.rotY ?? 45) - dX) % 360) + 360) % 360;
       scene.camera.update({ rotX, rotY });
     }

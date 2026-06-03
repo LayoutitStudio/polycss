@@ -248,10 +248,14 @@ describe("filterAtlasPlans — border-shape exclusion", () => {
     expect(result[0]).toBeNull();
   });
 
-  it("non-rect polygon stays in atlas when dynamic lighting mode (border-shape disabled)", () => {
+  it("non-rect polygon is also excluded in dynamic lighting when borderShape is supported (matches vanilla)", () => {
+    // Vanilla never gates borderShape on textureLighting; the dynamic CSS
+    // calc shades the <i> border-shape leaf directly. Earlier core builds
+    // forced these into the atlas bitmap path in dynamic mode, producing
+    // light-baked pixels that drifted from the runtime CSS lambert.
     const plan = computeTextureAtlasPlanPublic(PENTAGON, 0)!;
     const result = filterAtlasPlans([plan], "dynamic", noDisable, borderShapeEnv);
-    expect(result[0]).not.toBeNull();
+    expect(result[0]).toBeNull();
   });
 
   it("non-rect polygon stays in atlas when i is disabled", () => {

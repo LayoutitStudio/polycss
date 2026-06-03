@@ -22,6 +22,13 @@ export interface RenderTextureAtlasOptions {
   textureQuality?: import("@layoutit/polycss-core").TextureQuality;
   solidPaintDefaults?: import("@layoutit/polycss-core").SolidPaintDefaults;
   strategies?: import("@layoutit/polycss-core").PolyRenderStrategiesOption;
+  /**
+   * Indices of polygons that the directional light cannot reach (precomputed
+   * by createPolyScene via {@link computeLightVisibility}). Atlas + solid
+   * planning forces directScale to 0 for these polys so they render with
+   * ambient-only color, matching what a shadow-map pass would output.
+   */
+  lightOccludedPolyIndices?: ReadonlySet<number>;
 }
 
 export interface InternalRenderTextureAtlasOptions extends RenderTextureAtlasOptions {
@@ -64,6 +71,16 @@ export interface RenderedPoly {
 export interface RenderTextureAtlasResult {
   rendered: RenderedPoly[];
   dispose(): void;
+  /**
+   * Resolves once every textured `<s>` leaf has its `background-image`
+   * applied (i.e. the atlas canvas → Blob → URL chain has completed and
+   * the apply-bg pass has run). For meshes with no textured leaves this
+   * resolves immediately. Callers doing stale-while-revalidate swaps
+   * await this before disposing the previous render — without it, the
+   * fresh leaves mount with empty backgrounds and the prior frame's
+   * bitmaps would be needed underneath to avoid a transparent flash.
+   */
+  pagesReady?: Promise<void>;
 }
 
 export interface RenderTextureAtlasAsyncResult extends RenderTextureAtlasResult {

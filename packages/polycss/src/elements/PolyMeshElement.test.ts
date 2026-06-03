@@ -70,6 +70,8 @@ describe("PolyMeshElement", () => {
       expect(observed).toContain("rotation");
       expect(observed).toContain("auto-center");
       expect(observed).toContain("mesh-resolution");
+      expect(observed).toContain("cast-shadow");
+      expect(observed).toContain("receive-shadow");
     });
   });
 
@@ -295,6 +297,38 @@ describe("PolyMeshElement", () => {
       expect(() =>
         mesh.attributeChangedCallback("src", "x.obj", "x.obj"),
       ).not.toThrow();
+    });
+  });
+
+  describe("shadow attributes", () => {
+    it("forwards cast-shadow to the mesh handle at register time", async () => {
+      globalThis.fetch = mockFetch(TRIANGLE_OBJ);
+      const scene = document.createElement("poly-scene") as PolySceneElement;
+      const mesh = document.createElement("poly-mesh") as PolyMeshElement;
+      mesh.setAttribute("src", "tri.obj");
+      mesh.setAttribute("cast-shadow", "");
+      scene.appendChild(mesh);
+      host.appendChild(scene);
+      await vi.waitFor(() => {
+        expect(mesh.getMeshHandle()).not.toBeNull();
+      });
+      const handle = mesh.getMeshHandle()!;
+      expect(handle.transform.castShadow).toBe(true);
+    });
+
+    it("forwards receive-shadow to the mesh handle at register time", async () => {
+      globalThis.fetch = mockFetch(TRIANGLE_OBJ);
+      const scene = document.createElement("poly-scene") as PolySceneElement;
+      const mesh = document.createElement("poly-mesh") as PolyMeshElement;
+      mesh.setAttribute("src", "tri.obj");
+      mesh.setAttribute("receive-shadow", "");
+      scene.appendChild(mesh);
+      host.appendChild(scene);
+      await vi.waitFor(() => {
+        expect(mesh.getMeshHandle()).not.toBeNull();
+      });
+      const handle = mesh.getMeshHandle()!;
+      expect(handle.transform.receiveShadow).toBe(true);
     });
   });
 

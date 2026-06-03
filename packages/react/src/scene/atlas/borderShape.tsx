@@ -4,6 +4,7 @@ import type { CSSProperties } from "react";
 import type {
   TextureAtlasPlan,
   SolidPaintDefaults,
+  PolyTextureLightingMode,
 } from "@layoutit/polycss-core";
 import {
   isFullRectSolid,
@@ -12,6 +13,7 @@ import {
   formatBorderShapeEntryMatrix,
 } from "@layoutit/polycss-core";
 import { isBorderShapeSupported } from "./detection";
+import { parseHex, rgbKey } from "./solidTriangleStyle";
 
 // ---------------------------------------------------------------------------
 // Brush-inline-style ordering helper (needed by TextureBorderShapePoly)
@@ -43,6 +45,7 @@ function orderBrushInlineStyle(el: HTMLElement): void {
 
 export const TextureBorderShapePoly = memo(function TextureBorderShapePoly({
   entry,
+  textureLighting,
   solidPaintDefaults,
   className,
   style: styleProp,
@@ -52,6 +55,7 @@ export const TextureBorderShapePoly = memo(function TextureBorderShapePoly({
   disabledStrategies,
 }: {
   entry: TextureAtlasPlan;
+  textureLighting: PolyTextureLightingMode;
   solidPaintDefaults?: SolidPaintDefaults;
   className?: string;
   style?: CSSProperties;
@@ -65,7 +69,9 @@ export const TextureBorderShapePoly = memo(function TextureBorderShapePoly({
   const bDisabled = disabledStrategies?.has("b") ?? false;
   const useIForFullRect = bDisabled && isBorderShapeSupported();
   const borderShape = (!fullRect || useIForFullRect) ? cssBorderShapeForPlan(entry) : null;
-  const useDefaultPaint = entry.shadedColor === solidPaintDefaults?.paintColor;
+  const dynamic = textureLighting === "dynamic";
+  const base = parseHex(entry.polygon.color ?? "#cccccc");
+  const useDefaultDynamicColor = dynamic && rgbKey(base) === solidPaintDefaults?.dynamicColorKey;
   const setElementRef = useCallback((el: HTMLElement | null) => {
     if (!el) return;
     if (borderShape) el.style.setProperty("border-shape", borderShape);
@@ -79,8 +85,27 @@ export const TextureBorderShapePoly = memo(function TextureBorderShapePoly({
   const transform = borderShape ? formatBorderShapeEntryMatrix(entry) : formatSolidQuadEntryMatrix(entry);
   const style: CSSProperties = {
     transform,
-    color: useDefaultPaint ? undefined : entry.shadedColor,
+    // Baked mode: always emit per-leaf shaded color when known so the
+    // first render matches the post-light-nudge commit path. Vanilla
+    // dropped the `=== solidPaintDefaults.paintColor` shortcut in
+    // commit 0423777 — leaves with undefined shadedColor would inherit
+    // the (often-wrong) wrapper --polycss-paint default, producing
+    // facets that look dimmer than they should until a light change
+    // forced an explicit re-bake.
+    color: dynamic ? undefined : entry.shadedColor,
     pointerEvents: pointerEvents === "none" ? "none" : undefined,
+    ...(dynamic
+      ? {
+          ["--pnx" as string]: entry.normal[0].toFixed(4),
+          ["--pny" as string]: entry.normal[1].toFixed(4),
+          ["--pnz" as string]: entry.normal[2].toFixed(4),
+          ...(useDefaultDynamicColor ? null : {
+            ["--psr" as string]: (base.r / 255).toFixed(4),
+            ["--psg" as string]: (base.g / 255).toFixed(4),
+            ["--psb" as string]: (base.b / 255).toFixed(4),
+          }),
+        }
+      : null),
     ...styleProp,
   };
 
@@ -96,6 +121,7 @@ export const TextureBorderShapePoly = memo(function TextureBorderShapePoly({
       <b
         className={elementClassName}
         style={style}
+        data-poly-index={entry.index}
         {...domEventHandlers}
         {...dataAttrs}
         {...domAttrs}
@@ -108,6 +134,7 @@ export const TextureBorderShapePoly = memo(function TextureBorderShapePoly({
       ref={setElementRef}
       className={elementClassName}
       style={style}
+      data-poly-index={entry.index}
       {...domEventHandlers}
       {...dataAttrs}
       {...domAttrs}

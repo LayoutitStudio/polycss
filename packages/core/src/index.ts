@@ -43,7 +43,7 @@ export type {
 } from "./scene/polygonGeometry";
 
 // ── Rotation math ────────────────────────────────────────────────
-export { rotateVec3, inverseRotateVec3 } from "./math/rotation";
+export { rotateVec3, inverseRotateVec3, rotateVec3InWrapperCssFrame } from "./math/rotation";
 export {
   quatFromAxisAngle,
   quatFromEulerXYZ,
@@ -67,6 +67,8 @@ export type {
   AutoRotateConfig,
   CameraStyleInput,
 } from "./camera/camera";
+export { screenToWorldRay, screenToWorldOnSphere } from "./camera/unproject";
+export type { ScreenToWorldOptions } from "./camera/unproject";
 
 // ── Color & lighting ─────────────────────────────────────────────
 export {
@@ -127,6 +129,7 @@ export type {
 } from "./merge/seamRepair";
 export { cullInteriorPolygons } from "./cull/cullInteriorPolygons";
 export type { CullInteriorOptions } from "./cull/cullInteriorPolygons";
+export { computeLightVisibility } from "./cull/lightVisibility";
 export {
   CAMERA_BACKFACE_CULL_EPS,
   VOXEL_CAMERA_CULL_AXIS_EPS,
@@ -163,6 +166,40 @@ export {
   projectCssVertexToGround,
 } from "./shadow/projection";
 export { clipPolygonToConvex2D } from "./shadow/clipping";
+export {
+  expandConvexHullOutward,
+  groupReceiverFaceGroups,
+  meshScaleVec3,
+  RECEIVER_NORMAL_TOL,
+  RECEIVER_OFFSET_TOL,
+  RECEIVER_OUTLINE_EXPAND,
+  worldCssForMesh,
+  worldDirectionToCss,
+  worldDirectionalLightToCss,
+  worldPositionToCss,
+} from "./shadow/receiverFaceGroups";
+export type { ReceiverPlaneGroup } from "./shadow/receiverFaceGroups";
+export {
+  buildSharedEdgeMap,
+  computeReceiverShadowFaces,
+  prepareCasterEdgeOwners,
+  prepareCasterPolyItems,
+  prepareReceiverFacePlanes,
+} from "./shadow/computeReceiverShadows";
+export type {
+  CasterPolyItem,
+  ComputeReceiverShadowFacesInput,
+  ReceiverCasterInput,
+  ReceiverFacePlane,
+  ReceiverShadowFaceSpec,
+  ReceiverShadowPath,
+} from "./shadow/computeReceiverShadows";
+export {
+  buildEdgeOwners,
+  classifyFacing,
+  extractSilhouetteLoops,
+} from "./shadow/silhouette";
+export type { EdgeOwners } from "./shadow/silhouette";
 
 // ── Animation ─────────────────────────────────────────────────────
 export {
@@ -259,6 +296,7 @@ export {
   PROJECTIVE_QUAD_MAX_WEIGHT_RATIO,
   PROJECTIVE_QUAD_BLEED,
   DEFAULT_SEAM_BLEED,
+  resolveBleedRatio,
 } from "./atlas/constants";
 export type {
   RGB,

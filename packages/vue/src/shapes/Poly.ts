@@ -281,6 +281,7 @@ export const Poly = defineComponent({
               })
           : renderTextureBorderShapePoly({
               entry: plan,
+              textureLighting: atlasTextureLighting.value,
               className: (forwardedAttrs.class as string) ?? undefined,
               style: forwardedAttrs.style as CSSProperties | undefined,
               domAttrs: forwardedDomAttrs,

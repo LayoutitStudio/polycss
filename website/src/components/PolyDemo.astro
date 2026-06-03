@@ -392,7 +392,10 @@ const { id, model, mtl, generator, generatorParams, controls, defaults, showStat
         const attrs: Record<string, string> = {
           "rot-x": String(state.rotX),
           "rot-y": String(state.rotY),
-          "zoom": String(state.zoom),
+          // LEGACY_ZOOM_COMPAT — see VanillaScene.tsx. zoom on <poly-scene>
+          // is now "px per world unit"; demo state.zoom is still the legacy
+          // CSS scale, so ×50 at the boundary.
+          "zoom": String(state.zoom * 50),
           "auto-center": "",
         };
         const perspective = perspectiveOverride();
@@ -542,7 +545,11 @@ const { id, model, mtl, generator, generatorParams, controls, defaults, showStat
         sceneEl.style.cssText = "width:100%;height:100%;position:absolute;inset:0;";
         sceneHost.appendChild(sceneEl);
 
-        const cameraOpts = { rotX: state.rotX, rotY: state.rotY, zoom: state.zoom };
+        // LEGACY_ZOOM_COMPAT (50) — see VanillaScene.tsx. The polycss vanilla
+        // camera now expects zoom as "px per world unit"; demo state.zoom is
+        // still in the legacy CSS-scale range. Multiply at the boundary so
+        // existing demo defaults / sliders keep working.
+        const cameraOpts = { rotX: state.rotX, rotY: state.rotY, zoom: state.zoom * 50 };
         const perspective = perspectiveOverride();
         const camera = state.perspective === false
           ? createPolyOrthographicCamera(cameraOpts)
@@ -597,7 +604,7 @@ const { id, model, mtl, generator, generatorParams, controls, defaults, showStat
           sceneHandle.camera?.update({
             rotX: state.rotX,
             rotY: state.rotY,
-            zoom: state.zoom,
+            zoom: state.zoom * 50,   // LEGACY_ZOOM_COMPAT — see VanillaScene.tsx
           });
           sceneHandle.applyCamera();
         } else {
