@@ -669,7 +669,7 @@ export const PolyMesh = defineComponent({
         cameraRot,
         ambientLight: ctx?.ambientLight,
         directionalLight: ctx?.directionalLight,
-        shadow: { color: ctx?.shadow?.color, opacity: ctx?.shadow?.opacity ?? 0.25 },
+        shadow: { color: ctx?.shadow?.color, opacity: ctx?.shadow?.opacity ?? 0.25, maxExtend: ctx?.shadow?.maxExtend },
       });
       return specs.map((spec) =>
         h(

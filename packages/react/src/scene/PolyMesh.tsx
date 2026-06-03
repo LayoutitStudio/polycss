@@ -1036,7 +1036,7 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
       cameraRot,
       ambientLight: sceneCtx?.ambientLight,
       directionalLight: sceneDirectionalLight,
-      shadow: { color: sceneShadow?.color, opacity: sceneShadow?.opacity ?? 0.25 },
+      shadow: { color: sceneShadow?.color, opacity: sceneShadow?.opacity ?? 0.25, maxExtend: sceneShadow?.maxExtend },
     });
     return (
       <>

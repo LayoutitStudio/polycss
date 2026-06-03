@@ -388,7 +388,7 @@ export interface ComputeReceiverShadowFacesInput<T = unknown> {
   /** Directional light (used for textured-darken opacity calc). */
   directionalLight?: PolyDirectionalLight;
   /** Scene shadow options. */
-  shadow?: { color?: string; opacity?: number };
+  shadow?: { color?: string; opacity?: number; maxExtend?: number };
 }
 
 /**
@@ -413,6 +413,12 @@ export function computeReceiverShadowFaces<T = unknown>(
   const dirIntensity = directionalLight?.intensity ?? 1;
   const userShadowColor = shadow?.color ?? "#000000";
   const opacity = shadow?.opacity ?? 0.25;
+  // `maxExtend` ("shadow reach") caps how far a shadow can stretch beyond
+  // the caster's perpendicular footprint on the receiver plane — matches
+  // the semantic already applied in groundShadow.ts to the infinite-ground
+  // path. Without it, low-angle lights on a large receiver mesh project
+  // shadows across the receiver's full outline (apple-on-floor was ~6k px).
+  const maxExtend = shadow?.maxExtend ?? 2000;
 
   const out: ReceiverShadowFaceSpec<T>[] = [];
 
@@ -463,6 +469,35 @@ export function computeReceiverShadowFaces<T = unknown>(
     const fMinU = minU, fMinV = minV;
     const fMaxU = group.minU + width;
     const fMaxV = group.minV + height;
+
+    // Per-plane shadow-reach rect: union of all casters' perpendicular
+    // footprints on this receiver face in (u,v), expanded by maxExtend.
+    // Mirrors groundShadow.ts's `clipBounds = fp ± maxExtend` semantic so
+    // `shadow.maxExtend` caps shadow reach uniformly across the ground
+    // path and the receiver-mesh path.
+    let footMinU = Infinity, footMinV = Infinity;
+    let footMaxU = -Infinity, footMaxV = -Infinity;
+    for (const casterEntry of casters) {
+      for (const item of casterEntry.items) {
+        for (const w of item.wv) {
+          const dx = w[0] - O[0];
+          const dy = w[1] - O[1];
+          const dz = w[2] - O[2];
+          const cu = dx * u[0] + dy * u[1] + dz * u[2];
+          const cv = dx * v[0] + dy * v[1] + dz * v[2];
+          if (cu < footMinU) footMinU = cu;
+          if (cu > footMaxU) footMaxU = cu;
+          if (cv < footMinV) footMinV = cv;
+          if (cv > footMaxV) footMaxV = cv;
+        }
+      }
+    }
+    const reachRect: Array<[number, number]> = Number.isFinite(footMinU) ? [
+      [footMinU - maxExtend, footMinV - maxExtend],
+      [footMaxU + maxExtend, footMinV - maxExtend],
+      [footMaxU + maxExtend, footMaxV + maxExtend],
+      [footMinU - maxExtend, footMaxV + maxExtend],
+    ] : [];
     const SELF_SHADOW_EPS = 0.05;
     const receiverPlaneOffset = n[0] * O[0] + n[1] * O[1] + n[2] * O[2];
     const COPLANAR_NORMAL_TOL = 0.0025;
@@ -530,7 +565,14 @@ export function computeReceiverShadowFaces<T = unknown>(
           if (above.length < 3) continue;
           const projected = above.map(projectOntoPlane);
           const subjectCcw = ensureCcw2D(projected);
-          const clip = clipPolygonToConvex2D(subjectCcw, outlineUv);
+          // Shadow-reach clip: cap how far the projected shadow can stretch
+          // beyond the caster mesh's perpendicular footprint on this face,
+          // before the (potentially expensive) outline + member clips.
+          const reachClipped = reachRect.length === 4
+            ? clipPolygonToConvex2D(subjectCcw, reachRect)
+            : subjectCcw;
+          if (reachClipped.length < 3) continue;
+          const clip = clipPolygonToConvex2D(reachClipped, outlineUv);
           if (clip.length < 3) continue;
           // Clip the projected shadow against each MEMBER polygon of the
           // receiver face group, not just the group's outer outline. The

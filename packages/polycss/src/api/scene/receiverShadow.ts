@@ -180,7 +180,7 @@ export function emitReceiverShadows(
     cameraRot,
     ambientLight: options.ambientLight,
     directionalLight: options.directionalLight,
-    shadow: { color: options.shadow?.color, opacity },
+    shadow: { color: options.shadow?.color, opacity, maxExtend: options.shadow?.maxExtend },
   });
 
   // Mount/update SVGs from specs. Faces NOT in specs (back-facing, no
