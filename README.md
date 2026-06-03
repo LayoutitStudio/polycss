@@ -1,6 +1,6 @@
 # PolyCSS
 
-A CSS polygon mesh library. A 3D engine for the DOM. Renders OBJ/MTL, GLB and VOX as real HTML elements transformed with CSS `matrix3d(...)`. Supports colors, textures, lighting, shadows, shapes and animations. Works with React, Vue or plain JavaScript.
+A CSS polygon mesh library. A 3D engine for the DOM. Renders OBJ/MTL, STL, glTF/GLB, and VOX as real HTML elements transformed with CSS `matrix3d(...)`. Supports colors, textures, lighting, shadows, shapes and animations. Works with React, Vue or plain JavaScript.
 
 Visit [polycss.com](https://polycss.com) for docs and model examples.
 
@@ -82,7 +82,7 @@ export default function App() {
 - `polygons` accepts pre-parsed geometry.
 - `position`, `scale`, and `rotation` transform the mesh wrapper.
 - `autoCenter` shifts the mesh bbox center to local origin.
-- `meshResolution` chooses `"lossy"` (default) or `"lossless"` optimization.
+- `meshResolution` chooses `"lossy"` (default) or `"lossless"` optimization. STL imports use the conservative lossless path in both modes.
 - `castShadow` emits CSS-projected shadows in dynamic lighting mode.
 
 ### Controls
@@ -160,6 +160,7 @@ scene.add(mesh);
 Supported formats:
 
 - OBJ + MTL, including `map_Kd` textures and UV coordinates.
+- STL triangle meshes, including binary Magics face colors. STL has no standard units, textures, UVs, or hierarchy, so imports skip lossy simplification and ray-based interior culling.
 - glTF / GLB, including embedded images and `TEXCOORD_0`.
 - MagicaVoxel `.vox`, with direct voxel fast paths when eligible.
 - Generated primitives: box, plane, ring, sphere, torus, cylinder, cone, and Platonic solids.

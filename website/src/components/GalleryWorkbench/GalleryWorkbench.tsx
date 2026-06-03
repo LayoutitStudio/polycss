@@ -73,7 +73,7 @@ import {
   routeHasSceneOptions,
 } from "./hooks";
 import { useFpvHost } from "../fpv";
-import type { ObjParseOptions, GltfParseOptions, VoxParseOptions } from "@layoutit/polycss";
+import type { ObjParseOptions, GltfParseOptions, VoxParseOptions, StlParseOptions } from "@layoutit/polycss";
 
 type AnimationClip = NonNullable<LoadedModel["animation"]>["clips"][number];
 type MobileGalleryPanel = "models" | "controls" | null;
@@ -532,7 +532,7 @@ function useLightRotationDrag(
 }
 
 function parserDefaultsFor(model: PresetModel): Partial<ParserOptionsState> {
-  const options = model.options as (ObjParseOptions & GltfParseOptions & VoxParseOptions) | undefined;
+  const options = model.options as (ObjParseOptions & GltfParseOptions & VoxParseOptions & StlParseOptions) | undefined;
   return {
     ...(typeof options?.targetSize === "number" ? { targetSize: options.targetSize } : {}),
     ...(typeof options?.gridShift === "number" ? { gridShift: options.gridShift } : {}),

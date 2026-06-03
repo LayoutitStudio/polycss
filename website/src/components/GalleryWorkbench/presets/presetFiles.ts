@@ -1,4 +1,4 @@
-import type { GalleryPresetFile, ObjGalleryPresetFile } from "../types";
+import type { GalleryPresetFile, ObjGalleryPresetFile, StlGalleryPresetFile } from "../types";
 import {
   MONOGON_ANCIENT_ENVIRONMENT_ATTRIBUTION,
   MINI_MIKES_METRO_MINIS_ATTRIBUTION,
@@ -21,6 +21,7 @@ import {
   polyPizzaAttribution,
   quaterniusAttribution,
   smithsonianOpenAccessAttribution,
+  thingiverseAttribution,
 } from "./attributions";
 
 const NASA_GLB_PRESET_FILES: GalleryPresetFile[] = [
@@ -353,6 +354,101 @@ export const GLB_PRESET_FILES: GalleryPresetFile[] = [
   { file: "urban/Man.glb", label: "Urban Man", category: "Urban Pack" },
   { file: "urban/Animated Woman.glb", label: "Woman", category: "Urban Pack" },
 ];
+
+const CURATED_STL_PRESET_FILES: StlGalleryPresetFile[] = [
+  {
+    file: "castle-68679.stl",
+    label: "Castle",
+    category: "CAD",
+    attribution: thingiverseAttribution("mazels", 22323, 2064),
+  },
+  {
+    file: "chichen-itza-47076.stl",
+    label: "Chichen Itza",
+    category: "CAD",
+    attribution: thingiverseAttribution("ramenspork", 14328, 1532, "Creative Commons - Attribution - Share Alike"),
+  },
+  {
+    file: "low-poly-vase-100423.stl",
+    label: "Low Poly Vase",
+    category: "CAD",
+    attribution: thingiverseAttribution("kikko_fr", 34999, 276, "Creative Commons - Attribution - Share Alike"),
+  },
+  {
+    file: "low-poly-bunny-293137.stl",
+    label: "Low Poly Bunny",
+    category: "CAD",
+    attribution: thingiverseAttribution("johnny6", 151081, 292, "Creative Commons - Attribution - Share Alike"),
+  },
+  {
+    file: "heart-gear-39461.stl",
+    label: "Heart Gear",
+    category: "CAD",
+    attribution: thingiverseAttribution("emmett", 12208, 1934, "Creative Commons - Attribution - Share Alike"),
+  },
+  {
+    file: "gyroscopic-snowflake-105230.stl",
+    label: "Gyroscopic Snowflake",
+    category: "CAD",
+    attribution: thingiverseAttribution("roman_hegglin", 36922, 1036),
+  },
+  {
+    file: "skeletal-cubes-73453.stl",
+    label: "Skeletal Cubes",
+    category: "CAD",
+    attribution: thingiverseAttribution("AuntDaisy", 24274, 1550, "Creative Commons - Attribution - Share Alike"),
+  },
+  {
+    file: "hilbert-cube-53749.stl",
+    label: "Hilbert Cube",
+    category: "CAD",
+    attribution: thingiverseAttribution("tbuser", 16343, 492, "Creative Commons - Attribution - Share Alike"),
+  },
+  {
+    file: "cubist-torus-107100.stl",
+    label: "Cubist Torus",
+    category: "CAD",
+    attribution: thingiverseAttribution("hudson", 37634, 4560),
+  },
+  {
+    file: "six-cubes-compound-91658.stl",
+    label: "Six Cubes Compound",
+    category: "CAD",
+    attribution: thingiverseAttribution("pmoews", 31520, 504),
+  },
+  {
+    file: "johnson-ornament-j68-103287.stl",
+    label: "Johnson Ornament J68",
+    category: "CAD",
+    attribution: thingiverseAttribution("pmoews", 36119, 690),
+  },
+  {
+    file: "rhombic-chain-90794.stl",
+    label: "Rhombic Chain",
+    category: "CAD",
+    attribution: thingiverseAttribution("emmett", 31151, 1224, "Creative Commons - Attribution - Share Alike"),
+  },
+  {
+    file: "cube-in-sphere-49333.stl",
+    label: "Cube In Sphere",
+    category: "CAD",
+    attribution: thingiverseAttribution("clintkc", 14878, 2464, "Public Domain"),
+  },
+  {
+    file: "rocket-nose-cone-51316.stl",
+    label: "Rocket Nose Cone",
+    category: "CAD",
+    attribution: thingiverseAttribution("MakerBotWorkshop", 15582, 1860, "Creative Commons - Attribution - Share Alike"),
+  },
+  {
+    file: "venus-bust-73464.stl",
+    label: "Venus Bust",
+    category: "CAD",
+    attribution: thingiverseAttribution("richgain", 24188, 1000),
+  },
+];
+
+export const STL_PRESET_FILES: StlGalleryPresetFile[] = CURATED_STL_PRESET_FILES;
 
 export const POLY_PIZZA_PRESET_FILES: GalleryPresetFile[] = [
   {

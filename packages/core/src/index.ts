@@ -187,6 +187,9 @@ export type {
   ParseAnimationController,
   PolyVoxelCell,
   PolyVoxelSource,
+  ParseStlColor,
+  ParseStlSolid,
+  ParseStlTopology,
   ParseResult,
 } from "./parser/types";
 export { parseObj } from "./parser/parseObj";
@@ -202,6 +205,8 @@ export {
 export type { SolidTextureSampleOptions } from "./parser/solidTextureSamples";
 export { parseVox } from "./parser/parseVox";
 export type { VoxParseOptions } from "./parser/parseVox";
+export { parseStl } from "./parser/parseStl";
+export type { StlParseOptions } from "./parser/parseStl";
 export { loadMesh } from "./parser/loadMesh";
 export type { LoadMeshOptions } from "./parser/loadMesh";
 

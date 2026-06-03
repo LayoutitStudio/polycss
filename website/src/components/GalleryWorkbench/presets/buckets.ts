@@ -1,6 +1,6 @@
 import type { GalleryBucket, PresetModel } from "../types";
 
-export const GALLERY_BUCKET_ORDER: GalleryBucket[] = ["Primitives", "Solid", "Textured", "Animated", "Voxel"];
+export const GALLERY_BUCKET_ORDER: GalleryBucket[] = ["Primitives", "Solid", "CAD", "Textured", "Animated", "Voxel"];
 
 export const ANIMATED_PRESET_IDS = new Set([
   "glb-poly-pizza-cow",
@@ -26,6 +26,7 @@ export function isAnimatedPreset(
 export function galleryBucketForPreset(preset: PresetModel): GalleryBucket {
   if (preset.kind === "primitive") return "Primitives";
   if (preset.kind === "vox") return "Voxel";
+  if (preset.kind === "stl") return "CAD";
   if (preset.galleryBucket) return preset.galleryBucket;
   if (isAnimatedPreset(preset)) return "Animated";
   return "Solid";

@@ -100,7 +100,7 @@ export function createPolyMapControls(
       const f = invertFactor(opts.invert);
       const dX = (dx / 4) * f;
       const dY = (dy / 4) * f;
-      const rotX = Math.max(0, Math.min(100, (cameraState.rotX ?? 65) - dY));
+      const rotX = (cameraState.rotX ?? 65) - dY;
       const rotY = ((((cameraState.rotY ?? 45) - dX) % 360) + 360) % 360;
       scene.camera.update({ rotX, rotY });
     } else {
@@ -155,7 +155,7 @@ export function createPolyMapControls(
     const dX = (dx / 4) * f;
     const dY = (dy / 4) * f;
     const cameraState = scene.camera.state;
-    const rotX = Math.max(0, Math.min(100, (cameraState.rotX ?? 65) - dY));
+    const rotX = (cameraState.rotX ?? 65) - dY;
     const rotY = ((((cameraState.rotY ?? 45) - dX) % 360) + 360) % 360;
     scene.camera.update({ rotX, rotY });
     scene.applyCamera();

@@ -40,7 +40,7 @@ function tickFrame(advanceMs: number, baseTime: { now: number }): void {
 function dispatchPointer(
   el: HTMLElement,
   type: "pointerdown" | "pointermove" | "pointerup",
-  init: { x: number; y: number; pointerId?: number; isPrimary?: boolean },
+  init: { x: number; y: number; pointerId?: number; isPrimary?: boolean; shiftKey?: boolean },
 ): void {
   el.dispatchEvent(
     new PointerEvent(type, {
@@ -50,6 +50,7 @@ function dispatchPointer(
       isPrimary: init.isPrimary ?? true,
       clientX: init.x,
       clientY: init.y,
+      shiftKey: init.shiftKey ?? false,
     }),
   );
 }
@@ -180,14 +181,14 @@ describe("PolyOrbitControls (Vue)", () => {
     expect(mounted.cameraRef.value.state.rotY).toBeCloseTo(20, 1);
   });
 
-  it("pointer drag updates rotX (clamped to [0, 100])", () => {
-    mounted = mount({}, { rotX: 50 });
+  it("pointer drag updates rotX without a vertical clamp", () => {
+    mounted = mount({}, { rotX: 95 });
     const cameraEl = findCameraEl(mounted.container);
     dispatchPointer(cameraEl, "pointerdown", { x: 0, y: 100 });
     dispatchPointer(cameraEl, "pointermove", { x: 0, y: 60 }); // -40 px
     dispatchPointer(cameraEl, "pointerup", { x: 0, y: 60 });
-    // dY = -40 / 4 = -10. rotX = 50 - (-10) = 60.
-    expect(mounted.cameraRef.value.state.rotX).toBeCloseTo(60, 1);
+    // dY = -40 / 4 = -10. rotX = 95 - (-10) = 105.
+    expect(mounted.cameraRef.value.state.rotX).toBeCloseTo(105, 1);
   });
 
   it("invert as a number multiplies sensitivity", () => {
@@ -603,6 +604,15 @@ describe("PolyMapControls (Vue)", () => {
     // target should have changed
     const target = mounted.cameraRef.value.state.target;
     expect(target[0] !== 0 || target[1] !== 0).toBe(true);
+  });
+
+  it("Shift+left-drag orbits rotX without a vertical clamp", () => {
+    mounted = mountMap({ rotX: 95 });
+    const cameraEl = findCameraEl(mounted.container);
+    dispatchPointer(cameraEl, "pointerdown", { x: 100, y: 100 });
+    dispatchPointer(cameraEl, "pointermove", { x: 100, y: 60, shiftKey: true });
+    dispatchPointer(cameraEl, "pointerup", { x: 100, y: 60 });
+    expect(mounted.cameraRef.value.state.rotX).toBeCloseTo(105, 1);
   });
 
   it("wheel with dolly=true changes distance, not zoom (PolyMapControls)", () => {

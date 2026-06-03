@@ -1,12 +1,12 @@
 ---
 title: Loading Meshes
-description: Loading OBJ, glTF, GLB, and VOX meshes into PolyCSS with UV textures and material colors.
+description: Loading OBJ, STL, glTF, GLB, and VOX meshes into PolyCSS with UV textures and material colors.
 ---
 
 import { Tabs, TabItem } from '@astrojs/starlight/components';
 import PolyDemo from '../../../components/PolyDemo.astro';
 
-PolyCSS loads 3D mesh files (OBJ, glTF, GLB, and MagicaVoxel VOX) and renders them as DOM elements. UV textures are extracted from OBJ/glTF/GLB files and packed into generated atlas pages; each atlas-backed polygon is an internal `<s>` leaf that uses CSS background positioning.
+PolyCSS loads 3D mesh files (OBJ, STL, glTF, GLB, and MagicaVoxel VOX) and renders them as DOM elements. UV textures are extracted from OBJ/glTF/GLB files and packed into generated atlas pages; STL imports are triangle meshes with optional binary Magics face colors, but no standard units, textures, UVs, or hierarchy.
 
 ## Live demo: UV-textured OBJ
 
@@ -82,6 +82,7 @@ import { PolyCamera, PolyScene, PolyMesh } from "@layoutit/polycss-vue";
 | Format | Extension | Notes |
 |--------|-----------|-------|
 | OBJ + MTL | `.obj` + `.mtl` | Text format. UV maps via `vt`. Material textures from `map_Kd`. |
+| STL | `.stl` | ASCII or binary triangle mesh. Supports binary Magics face colors; STL has no standard units, textures, UVs, or hierarchy. |
 | glTF | `.gltf` | JSON format. Embedded or external buffers. TEXCOORD_0 UVs. |
 | GLB | `.glb` | Binary glTF. Embedded textures extracted as blob URLs. |
 | MagicaVoxel | `.vox` | Voxel format. Exposed faces become colored polygon quads; eligible vanilla, React, and Vue meshes use a baked direct-voxel fast path. |
@@ -203,4 +204,4 @@ Generated atlas blob URLs are revoked on unmount (call `dispose()` or let `PolyM
 - [PolyScene](/components/poly-scene): Scene props.
 - [Per-polygon Interaction](/guides/shapes): Click handlers and hover states on individual polygons.
 - [Performance](/guides/performance): Merge modes and DOM tuning.
-- [Headless API](/api/headless): `loadMesh`, `parseObj`, `parseGltf`, and `parseVox` signatures.
+- [Headless API](/api/headless): `loadMesh`, `parseObj`, `parseGltf`, `parseVox`, and `parseStl` signatures.

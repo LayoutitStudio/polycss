@@ -122,6 +122,15 @@ describe("createPolyMapControls", () => {
       expect(afterTarget[0]).toBeCloseTo(beforeTarget[0], 4);
       expect(afterTarget[1]).toBeCloseTo(beforeTarget[1], 4);
     });
+
+    it("Shift+left-drag updates rotX without a vertical clamp", () => {
+      scene.camera.update({ rotX: 95 });
+      controls = createPolyMapControls(scene);
+      dispatchPointer(host, "pointerdown", { x: 100, y: 100 });
+      dispatchPointer(host, "pointermove", { x: 100, y: 60, shiftKey: true });
+      dispatchPointer(host, "pointerup", { x: 100, y: 60 });
+      expect(scene.camera.state.rotX).toBeCloseTo(105, 1);
+    });
   });
 
   // ── Wheel zoom ──────────────────────────────────────────────────────────

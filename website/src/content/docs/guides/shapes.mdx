@@ -19,7 +19,7 @@ Every polygon rendered by PolyCSS is a real DOM element. You can attach standard
 
 ## Box helper
 
-Use `boxPolygons()` when your shape is an axis-aligned box or cuboid. It returns ordinary `Polygon[]`, so the result renders through the same `<PolyMesh>` / `createPolyScene()` path as parsed OBJ, GLB, and VOX meshes.
+Use `boxPolygons()` when your shape is an axis-aligned box or cuboid. It returns ordinary `Polygon[]`, so the result renders through the same `<PolyMesh>` / `createPolyScene()` path as parsed OBJ, STL, GLB, and VOX meshes.
 
 ```ts
 import { boxPolygons } from "@layoutit/polycss-react";
@@ -380,5 +380,5 @@ function Viewer() {
 ## Related
 
 - [PolyScene](/components/poly-scene): Scene props and polygon data reference.
-- [Loading Meshes](/guides/textures): OBJ, GLB, MTL loading and UV textures.
+- [Loading Meshes](/guides/textures): OBJ, STL, glTF, GLB, VOX, MTL loading and UV textures.
 - [Performance](/guides/performance): Merge modes and DOM tuning.
