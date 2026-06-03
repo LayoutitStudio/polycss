@@ -9,6 +9,7 @@
  */
 import type { SceneContext } from "./sceneContext";
 import { disposeGroundShadow } from "./shadowSvg";
+import { disposeAllReceiverShadowMounts } from "./receiverShadow";
 import type {
   MeshEntry,
   ReceiverFacePlane,
@@ -43,21 +44,6 @@ export function clearReceiverShadowCache(
   }
 }
 
-/** Mark every cached receiver-face SVG as hidden via `display:none`. The
- *  per-frame receiver-shadow emitter will reveal the ones with content and
- *  leave the rest hidden — keeps the compositor layer count low without
- *  tearing the elements down between frames. */
-export function hideAllReceiverFaceSvgs(ctx: SceneContext): void {
-  for (const planes of ctx.receiverShadowCache.values()) {
-    for (const p of planes) {
-      if (p.svg && p.visible) {
-        p.svg.style.display = "none";
-        p.visible = false;
-      }
-    }
-  }
-}
-
 /** Drop the per-caster precomputed-vertex cache for a single entry, or for
  *  every caster in the scene when `entry` is omitted. */
 export function clearCasterItemsCache(
@@ -74,11 +60,12 @@ export function clearCasterItemsCache(
 }
 
 /** Tear down every scene-level shadow surface: dispose the ground SVG and
- *  hide every cached receiver-face SVG. Called by `clearShadowLeaves` and
- *  any path that wants a clean slate before the next emit. */
+ *  detach every receiver-face SVG mounted across the scene. Called by
+ *  `clearShadowLeaves` and any path that wants a clean slate before the
+ *  next emit (e.g. when the last caster toggles `castShadow` off). */
 export function clearAllSceneShadows(ctx: SceneContext): void {
   disposeGroundShadow(ctx.shadowSvgState);
-  hideAllReceiverFaceSvgs(ctx);
+  disposeAllReceiverShadowMounts(ctx);
 }
 
 /** Stable id used to label a mesh in shadow `data-poly-shadow-casters` /

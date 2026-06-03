@@ -110,7 +110,6 @@ import {
   clearAllSceneShadows as clearAllSceneShadowsImpl,
   clearCasterItemsCache as clearCasterItemsCacheImpl,
   clearReceiverShadowCache as clearReceiverShadowCacheImpl,
-  hideAllReceiverFaceSvgs as hideAllReceiverFaceSvgsImpl,
 } from "./scene/shadowCache";
 import type {
   InternalPolyMeshHandle,
@@ -250,7 +249,6 @@ export function createPolyScene(
     clearReceiverShadowCacheImpl(ctx, entry);
   const clearCasterItemsCache = (entry?: MeshEntry) =>
     clearCasterItemsCacheImpl(ctx, entry);
-  const hideAllReceiverFaceSvgs = () => hideAllReceiverFaceSvgsImpl(ctx);
 
   // Apply CSS perspective on the camera wrapper, not the scene element.
   // CSS `perspective` only foreshortens direct children's 3D transforms, so
@@ -925,7 +923,6 @@ export function createPolyScene(
       clearAllSceneShadows();
       return;
     }
-    hideAllReceiverFaceSvgs();
 
     const shadowColor = currentOptions.shadow?.color ?? "#000000";
     const shadowOpacity = currentOptions.shadow?.opacity ?? 0.25;

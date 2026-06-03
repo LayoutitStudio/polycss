@@ -69,6 +69,17 @@ export function disposeReceiverShadowMounts(entry: MeshEntry): void {
   mountedFacesByMesh.delete(entry);
 }
 
+/**
+ * Detach every receiver-shadow SVG mounted across every mesh in the scene.
+ * Called when the scene has zero casters (e.g. the only caster toggled
+ * `castShadow` off) — the per-frame emitter never runs in that pass so
+ * the previously-mounted SVGs would otherwise linger frozen on whatever
+ * pose the light had at the last emit.
+ */
+export function disposeAllReceiverShadowMounts(ctx: SceneContext): void {
+  for (const entry of ctx.meshes) disposeReceiverShadowMounts(entry);
+}
+
 export function emitReceiverShadows(
   ctx: SceneContext,
   casters: MeshEntry[],
