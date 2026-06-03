@@ -152,6 +152,103 @@ section below when explored.
 
 (append-only; newest at top)
 
+### Iteration 9 — H11b silhouette onto OBB proxy (branch `perf/shadow-obb-proxy`)
+
+**Hypothesis recap.** Post-H9b state on teapot-self emits 138-242 receiver
+SVGs per frame because the per-coplanar-face decomposition produces one
+plane per smooth-shaded GLB facet. The H9b silhouette path collapses
+sub-path count per face but doesn't reduce face count. H11 tried to
+coalesce faces via tolerance relaxation and failed (RECEIVER_OFFSET_TOL
+is the real gate; loosening it breaks unrelated-plane merging).
+
+H11b replaces the per-face decomposition with ~6 axis-aligned OBB
+proxy planes when (a) caster === receiver and (b) receiver polygons
+≥ `PROXY_MIN_POLYS = 60`. The silhouette (already extracted per H9b)
+projects onto each proxy plane and clips to the convex hull of polygons
+assigned to that proxy. Each polygon is assigned to the proxy whose
+outward normal best matches its own — so the projected shadow stays
+clipped to mesh regions that actually face the same direction. Pixel
+drift expected on regions whose real normal differs from the proxy
+(~3-5 px on a teapot at default zoom; bounded by the per-member-poly
+clip).
+
+**Implementation.** New `packages/core/src/shadow/proxyReceivers.ts`
+(~80 LOC + tests) exports `prepareProxyReceiverPlanes` returning
+`ProxyReceiverPlane[]` with the same shape as `ReceiverFacePlane`.
+Each of the three renderers gates the swap at cache-prep time: when
+the current caster set contains this receiver mesh AND
+`polygons.length >= PROXY_MIN_POLYS`, the renderer calls
+`prepareProxyReceiverPlanes` instead of `prepareReceiverFacePlanes`.
+Cache key gains a `p`/`f` mode segment so swapping modes (caster set
+gains/loses self-shadow) re-runs the prepare step. The shadow
+algorithm in `computeReceiverShadowFaces` is unchanged — proxy and
+per-face planes share the same iteration contract.
+
+**Metrics (shadow-regression fixture, teapot-self scene).**
+
+| az  | recvSVGs h10 | recvSVGs h11b | Δ | dChars h10 | dChars h11b | Δ %    |
+| --- | ---:         | ---:          | ---: | ---:    | ---:        | ---:   |
+| 50  | 242          | 1             | -241 | 16,731  | 5,302       | -68.3% |
+| 130 | 143          | 1             | -142 | 11,560  | 5,341       | -53.8% |
+| 220 | 104          | 1             | -103 | 11,134  | 5,546       | -50.2% |
+
+teapot-floor / castle-floor / crate-floor: **byte-identical** to
+h10-merged (non-self path untouched). Three.js parity: all 12 shots
+(4 meshes × 3 light poses) **byte-identical** to baseline (parity
+scenes use `ss=0`, so they never hit the proxy path).
+
+The "1 receiver SVG" result reflects the back-face cull: at any
+given light direction only one OBB proxy face passes both `Ldotn > 0`
+and camera-facing, and the others get back-face-culled or have no
+silhouette content above them.
+
+**Trace deltas** (perf-vanilla.html, page=shadow mesh=teapot
+mode=dynamic motion=light, 5s sample @ 1.5s warmup, label
+`h11b-teapot-self` vs `h10-merged-teapot-self`):
+
+| bucket   | frames | dt_p50 (ms) | script ms/f | style ms/f | compositorMain (approx) |
+| ---      | ---:   | ---:        | ---:        | ---:       | ---:                |
+| x1  h10  | 18     | 8.30        | 1.54        | 0.00       | (light bucket) |
+| x1  h11b | 29     | 8.30        | 1.29        | 0.00       | (light bucket) |
+| x4_plus h10  | 39 | 116.80      | 124.42      | 52.23      | (heavy bucket) |
+| x4_plus h11b | 77 | **58.40**   | **7.40**    | 52.11      | (heavy bucket) |
+
+x4_plus dt_p50 drops **116.8 → 58.4 ms (-50%)**, script ms/frame drops
+**124.4 → 7.4 (-94%)**. fps_p50 in the heavy bucket roughly doubles
+(8.6 → 17.1 fps). The number of frames in the heavy bucket itself
+nearly doubles (39 → 77) — more total frames complete in the same
+5s window. Style recalc floor (52 ms — dynamic-mode Lambert on 2,117
+leaves) is now the dominant cost, exactly where H10 predicted it
+would be once the SVG-count cost was removed.
+
+**Visual verdict** (zoom=3 captures via
+`bench/scripts/h11b-visual-probe.mjs`, `bench/results/h11b-visual/{h10-merged,h11b-proxy}/`):
+
+- `teapot-self-az50-z3`: teapot reads identical, floor cast shadow
+  identical. A faint floating-dot artifact slightly left of the teapot
+  in h10-merged is GONE in h11b (the per-face path's stray sub-pixel
+  sliver shadows go away when 240 SVGs collapse to 1).
+- `teapot-self-az130-z3`: identical. Floor cast shadow stretches
+  the same direction; no detachment, no drift visible at this zoom.
+  Another faint floating-dot artifact upper-right in h10 is GONE in h11b.
+- `teapot-self-az220-z3`: identical. Dark side reads consistently;
+  spout/handle silhouette preserved; floor cast shadow correct.
+
+No shadow detached from the teapot geometry at any of the three
+azimuths. Pixel drift from proxy averaging is well under the visual
+threshold at default zoom because shadow content stays clipped to
+member-polygon hulls per proxy.
+
+**Recommendation: cherry-pick.** This is the largest single-iteration
+win to date — 94% reduction in script ms/frame on the worst-case
+self-shadow scene, fps doubled, no visual regression, three.js parity
+preserved, non-self paths byte-identical. Surface change is small:
+one new pure helper in core, a per-renderer cache-key prefix, no API
+additions. Once cherry-picked, the next bottleneck is the dynamic-mode
+style-recalc floor (~52 ms/frame on 2,117 leaves) — that's where
+hypothesis H7 (spatial caster prefilter) and any future style-recalc
+work should focus.
+
 ### Iteration 8 — H8 (re-test) memoize d= per face (NEGATIVE)
 
 **Hypothesis recap.** H8's first attempt (pre-H9b) cached `d=` on the

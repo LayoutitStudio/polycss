@@ -21,7 +21,7 @@ import { chromium } from 'playwright';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-const PORT = 4400;
+const PORT = Number(process.env.BENCH_PORT ?? 4400);
 const REPO = resolve(import.meta.dirname, '../..');
 
 // Direction vectors that span typical light positions.
