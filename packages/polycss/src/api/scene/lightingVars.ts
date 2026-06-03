@@ -97,9 +97,16 @@ export function applyLightingVars(el: HTMLElement, opts: Omit<PolySceneOptions, 
   const lightIntensity = opts.directionalLight?.intensity ?? 1;
   const ambientIntensity = opts.ambientLight?.intensity ?? 0.4;
   const ch = (n: number) => (n / 255).toFixed(4);
-  setStylePropertyIfChanged(el, "--plx", lx.toFixed(4));
-  setStylePropertyIfChanged(el, "--ply", ly.toFixed(4));
-  setStylePropertyIfChanged(el, "--plz", lz.toFixed(4));
+  // Quantize direction components to 0.01 (~0.57° angular resolution).
+  // Matches the shadow-emit cache key in createPolyScene (H3). At
+  // toFixed(4) precision, every 0.5°/frame drag tick wrote new strings
+  // here AND in --clx/cly/clz below, triggering ~53 ms/frame style
+  // recalc on 2300 calc-driven leaves. At toFixed(2) ~half of drag
+  // ticks land on the same rounded value → setStylePropertyIfChanged
+  // skips → no recalc. (See H10 in SHADOW_PERF_LOG.md.)
+  setStylePropertyIfChanged(el, "--plx", lx.toFixed(2));
+  setStylePropertyIfChanged(el, "--ply", ly.toFixed(2));
+  setStylePropertyIfChanged(el, "--plz", lz.toFixed(2));
   setStylePropertyIfChanged(el, "--plr", ch(lightRgb[0]));
   setStylePropertyIfChanged(el, "--plg", ch(lightRgb[1]));
   setStylePropertyIfChanged(el, "--plb", ch(lightRgb[2]));
@@ -112,9 +119,14 @@ export function applyLightingVars(el: HTMLElement, opts: Omit<PolySceneOptions, 
   // horizontal light would project shadows to infinity.
   const rawClz = lz;
   const clz = Math.sign(rawClz || 1) * Math.max(Math.abs(rawClz), 0.01);
-  setStylePropertyIfChanged(el, "--clx", lx.toFixed(4));
-  setStylePropertyIfChanged(el, "--cly", ly.toFixed(4));
-  setStylePropertyIfChanged(el, "--clz", clz.toFixed(4));
+  // Quantize shadow-projection up-axis vars to 0.01 too — these were
+  // the actual H10 culprit. Even with --plx/y/z quantized, --clx/cly/clz
+  // were still writing toFixed(4) strings every frame and re-triggering
+  // the calc-Lambert recalc on every leaf (the projection cascade reads
+  // them too). Same 0.57° resolution as the JS-level H3 quantize.
+  setStylePropertyIfChanged(el, "--clx", lx.toFixed(2));
+  setStylePropertyIfChanged(el, "--cly", ly.toFixed(2));
+  setStylePropertyIfChanged(el, "--clz", clz.toFixed(2));
 }
 
 /** Apply lighting vars only when in dynamic mode; clear them otherwise. Also

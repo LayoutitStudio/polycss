@@ -97,6 +97,13 @@
           azimuth = (azimuth + 0.5) % 360;
           curDir = { ...curDir, direction: dirFromAzEl(azimuth, cfg.el) };
           scene.setOptions({ directionalLight: curDir });
+        } else if (cfg.motion === "light-noop") {
+          // H10 diagnostic: call setOptions({}) every frame so the
+          // dispatch + per-mesh-override + emitSceneShadows flow runs but
+          // with no value changes. If the style recalc still fires at
+          // ~50ms, the trigger is intrinsic to setOptions invocation,
+          // not the lighting var writes.
+          scene.setOptions({});
         } else if (cfg.motion === "rot") {
           const newRotY = ((cfg.preset.rotY + frameCount * 0.5) + 360) % 360;
           camera.update({ rotY: newRotY });
