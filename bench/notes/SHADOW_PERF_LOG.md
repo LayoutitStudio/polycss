@@ -18,11 +18,21 @@ Worst-case scene = teapot-self self-shadow drag (perf-vanilla, dynamic mode,
 | +H3 light-key quantize | 442 | 2.3 | 533 | 309 |
 | +H9b silhouette self-shadow | 342 | 2.9 | 465 | 138-242 |
 | +H10 CSS-var quantize | 117 | 8.6 | 126 | 138-242 |
-| **+H11b OBB-proxy receiver** | **58 (heavy) / 8 (light)** | **17.1 / 120** | **8** | **1** |
+| ~~H11b OBB-proxy~~ REVERTED (broke gallery self-shadow visual) | – | – | – | – |
+| **current HEAD** | **117** | **8.6** | **126** | **138-242** |
 
-**Cumulative: 449→58ms heavy bucket, ~7-10× FPS improvement on the worst
-case. Visual identical to baseline per byte-compared regression fixture
-and three.js parity shots.**
+**Cumulative: 449→117ms (~4× FPS) on the worst case. Floor case
+(teapot-floor, no self-shadow) still benefits from H9: 90KB→5KB d-chars,
+script 17.8→7.1ms. Visual byte-identical to pre-H11b state per regression
+fixture and three.js parity shots.**
+
+**H11b regression note**: the OBB-proxy approach correctly reduced
+receiver-SVG count from 138-242 → 1 on the bench teapot-self scene, but
+in the gallery (e.g. apple model with Self-shadow toggle on) it emitted
+ONE proxy SVG on the mesh's bounding-box face that didn't intersect the
+actual mesh surface, so all visible self-shadow content disappeared. The
+agent's "visually identical" verdict was on the bench only, didn't catch
+this. Reverted as 307c553 + 3f8ef23.
 
 Floor-case (teapot-floor, just `castShadow:true` on a floor receiver) is
 even cleaner: pre-loop 66 ms / 17 fps → post-H11b ~58 ms with all of the
@@ -37,8 +47,9 @@ loop projected once, dChars down 90,000→5,000 (-94%).
 | `5337ae4` | 3 | H3 light-key quantize | -28% script during drag |
 | `e9cf56c` | 4 | H9b silhouette self | -51-60% dChars / -18% script (self) |
 | `77f3206` | 7 | H10 CSS-var quantize | +38% mean FPS (lighting recalc floor) |
-| `2187a1e` | 9 | H11b OBB-proxy receiver | -94% script in self-shadow / 242→1 SVG |
+| ~~`2187a1e`~~ | ~~9~~ | ~~H11b OBB-proxy receiver~~ | **REVERTED — gallery self-shadow visual regression** |
 | `774c45e` | 10 | H10 mirror React + Vue | parity (cross-package discipline) |
+| `307c553` + `3f8ef23` | 12 | revert H11b | restore gallery self-shadow + object-on-object visibility |
 
 ## Discarded for traceability (branches preserved)
 
