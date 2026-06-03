@@ -19,12 +19,34 @@ Worst-case scene = teapot-self self-shadow drag (perf-vanilla, dynamic mode,
 | +H9b silhouette self-shadow | 342 | 2.9 | 465 | 138-242 |
 | +H10 CSS-var quantize | 117 | 8.6 | 126 | 138-242 |
 | ~~H11b OBB-proxy~~ REVERTED (broke gallery self-shadow visual) | – | – | – | – |
-| **current HEAD** | **117** | **8.6** | **126** | **138-242** |
+| ~~H9b silhouette self-shadow~~ REVERTED (broke coliseum self-shadow contrast) | – | – | – | – |
+| **current HEAD** | similar to pre-loop on self-shadow scenes | – | – | matches pre-loop |
 
-**Cumulative: 449→117ms (~4× FPS) on the worst case. Floor case
-(teapot-floor, no self-shadow) still benefits from H9: 90KB→5KB d-chars,
-script 17.8→7.1ms. Visual byte-identical to pre-H11b state per regression
-fixture and three.js parity shots.**
+**Wins that LANDED safely** (after the H9b + H11b reverts):
+
+- **H9 silhouette extraction for NON-self-shadow (caster ≠ receiver)** —
+  floor case dropped from 90KB d-chars / 17.8ms script → 5KB / 7.1ms
+  (-94% / -60%). Visual byte-identical to pre-loop. Three.js parity
+  preserved.
+- **H3 light-key quantize** — emit skip when light direction key matches
+  the previous frame; halved emitter call count on slow drag, ~28% script
+  reduction during light motion.
+- **H10 CSS-var quantize (--plx/y/z + --clx/cly/clz → toFixed(2))** —
+  stops per-frame style recalc on dynamic-Lambert leaves when light
+  crosses sub-quantum increments. ~38% mean FPS during light drag.
+  Mirrored to React + Vue.
+
+**Wins that REVERTED** (visual correctness regressions):
+
+- **H9b silhouette for self-shadow** — replaced per-poly seam-cull path
+  with mesh-level silhouette extraction. Bench teapot scene looked fine
+  but on real meshes (apple, coliseum) the silhouette emit produced
+  paths with wrong shape/coverage, making self-shadow contrast disappear
+  or appear in wrong places. Reverted `ae523ce`. Per-poly path restored.
+- **H11b OBB-proxy receiver** — replaced per-face receiver decomposition
+  with bounding-box proxy planes. Bench teapot looked fine but on the
+  gallery apple the proxy plane sat outside the actual mesh surface,
+  dropping all visible self-shadow. Reverted `3f8ef23` + `307c553`.
 
 **H11b regression note**: the OBB-proxy approach correctly reduced
 receiver-SVG count from 138-242 → 1 on the bench teapot-self scene, but
