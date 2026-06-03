@@ -127,6 +127,38 @@ section below when explored.
 
 (append-only; newest at top)
 
+### Iteration 4 — H10 CSS-var quantize for style-recalc floor (NEGATIVE)
+
+**Hypothesis.** With H9 + H3 landed, the dominant remaining cost in
+dynamic mode is the 53 ms/frame style recalc on 2,300 leaves whose
+`background-color` uses calc(--plx*--pnx + …). Theory: `setOptions`
+writes new --plx/y/z strings every tick via setStylePropertyIfChanged;
+coarsening precision (toFixed 4 → 2 → 1 → constants) would let many
+frames hit the existing "same-string → skip" path and freeze the recalc.
+
+**Implementation.** Local branch `perf/lighting-vars-quantize` (deleted
+after test). Three variants of `applyLightingVars` in
+`packages/polycss/src/api/scene/lightingVars.ts`: `.toFixed(2)`,
+`.toFixed(1)`, then literal `"0.0"/"0.0"/"1.0"` constants.
+
+**Trace results** (perf-vanilla teapot, dynamic, no-self-shadow, light motion):
+
+| variant | style ms/f x4_plus |
+| --- | ---: |
+| H9+H3 head | 52.7 |
+| `--plx/y/z` → `.toFixed(2)` | 52.6 |
+| `--plx/y/z` → `.toFixed(1)` | 54.4 |
+| `--plx/y/z` literally frozen constants | 52.5 |
+
+**Conclusion: NEGATIVE.** Frozen lighting vars → identical 52 ms recalc.
+The trigger is not the lighting var writes. Top suspect: `el.style.transform =
+buildSceneTransformFromCamera(...)` inside `applySceneStyle`, which
+fires on every setOptions. Need a deeper diagnostic before trying H10
+again. The 53 ms is the dynamic-Lambert floor for now.
+
+**Recommendation: DISCARD this approach.** Filed as H10 follow-up: probe
+which write actually triggers the per-frame recalc.
+
 ### Iteration 3 — H3 light quantization (branch `perf/shadow-light-quantize`)
 
 **Hypothesis recap.** At ~0.5°/frame drag speed, consecutive shadow re-emits
