@@ -375,10 +375,11 @@ export const PolyMesh = defineComponent({
       if (!dir) return null;
       const localDir = inverseRotateVec3(dir, rot);
       const len = Math.hypot(localDir[0], localDir[1], localDir[2]) || 1;
+      // Quantize to 0.01 — matches H10 in PolyScene + vanilla lightingVars.
       return {
-        "--plx": (localDir[0] / len).toFixed(4),
-        "--ply": (localDir[1] / len).toFixed(4),
-        "--plz": (localDir[2] / len).toFixed(4),
+        "--plx": (localDir[0] / len).toFixed(2),
+        "--ply": (localDir[1] / len).toFixed(2),
+        "--plz": (localDir[2] / len).toFixed(2),
       };
     });
 

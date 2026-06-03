@@ -76,9 +76,10 @@ describe("PolyMesh — dynamic lighting override", () => {
     const lz = mesh.style.getPropertyValue("--plz");
 
     // rotateY(-90deg) of [1,0,0] → [0, 0, 1]
-    expect(lx).toBe("0.0000");
-    expect(ly).toBe("0.0000");
-    expect(lz).toBe("1.0000");
+    // H10: --plx/y/z quantized to 0.01 (toFixed(2))
+    expect(lx).toBe("0.00");
+    expect(ly).toBe("0.00");
+    expect(lz).toBe("1.00");
   });
 
   it("no-rotation = no inline --plx override (relies on scene cascade)", () => {
@@ -157,9 +158,10 @@ describe("PolyMesh — dynamic lighting override", () => {
     const ly = mesh.style.getPropertyValue("--ply");
     const lz = mesh.style.getPropertyValue("--plz");
 
-    expect(lx).toBe("1.0000");
-    expect(ly).toBe("0.0000");
-    expect(lz).toBe("0.0000");
+    // H10: --plx/y/z quantized to 0.01 (toFixed(2))
+    expect(lx).toBe("1.00");
+    expect(ly).toBe("0.00");
+    expect(lz).toBe("0.00");
   });
 
   it("does not emit override when scene has no directionalLight", () => {

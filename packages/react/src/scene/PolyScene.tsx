@@ -286,10 +286,16 @@ function PolySceneInner({
     const ch = (n: number) => (n / 255).toFixed(4);
     const rawClz = lz;
     const clz = Math.sign(rawClz || 1) * Math.max(Math.abs(rawClz), 0.01);
+    // Quantize direction-derived vars to 0.01 (~0.57° angular resolution).
+    // Matches the vanilla H10 fix in scene/lightingVars.ts: at toFixed(4)
+    // every 0.5°/frame drag tick wrote new strings, triggering ~53ms style
+    // recalc on dynamic-mode leaves with calc()-driven Lambert. At
+    // toFixed(2) ~half of drag ticks land on the same rounded value →
+    // React's diff sees no prop change → no recalc.
     return {
-      ["--plx" as string]: lx.toFixed(4),
-      ["--ply" as string]: ly.toFixed(4),
-      ["--plz" as string]: lz.toFixed(4),
+      ["--plx" as string]: lx.toFixed(2),
+      ["--ply" as string]: ly.toFixed(2),
+      ["--plz" as string]: lz.toFixed(2),
       ["--plr" as string]: ch(lightRgb[0]),
       ["--plg" as string]: ch(lightRgb[1]),
       ["--plb" as string]: ch(lightRgb[2]),
@@ -298,9 +304,9 @@ function PolySceneInner({
       ["--pag" as string]: ch(ambRgb[1]),
       ["--pab" as string]: ch(ambRgb[2]),
       ["--pai" as string]: ambientIntensity.toFixed(4),
-      ["--clx" as string]: lx.toFixed(4),
-      ["--cly" as string]: ly.toFixed(4),
-      ["--clz" as string]: clz.toFixed(4),
+      ["--clx" as string]: lx.toFixed(2),
+      ["--cly" as string]: ly.toFixed(2),
+      ["--clz" as string]: clz.toFixed(2),
     };
   }, [textureLighting, directionalLight, ambientLight]);
 

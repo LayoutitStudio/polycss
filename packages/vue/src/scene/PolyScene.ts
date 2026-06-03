@@ -340,13 +340,19 @@ export const PolyScene = defineComponent({
       // shadows to infinity.
       const rawClz = lz;
       const clz = Math.sign(rawClz || 1) * Math.max(Math.abs(rawClz), 0.01);
+      // Quantize direction-derived vars to 0.01 (~0.57° angular resolution).
+      // Matches the vanilla H10 fix in scene/lightingVars.ts: at toFixed(4)
+      // every 0.5°/frame drag tick wrote new strings, triggering ~53ms style
+      // recalc on dynamic-mode leaves with calc()-driven Lambert. At
+      // toFixed(2) ~half of drag ticks land on the same rounded value →
+      // Vue's reactivity sees no change → no recalc.
       return {
-        "--plx": lx.toFixed(4),
-        "--ply": ly.toFixed(4),
-        "--plz": lz.toFixed(4),
-        "--clx": lx.toFixed(4),
-        "--cly": ly.toFixed(4),
-        "--clz": clz.toFixed(4),
+        "--plx": lx.toFixed(2),
+        "--ply": ly.toFixed(2),
+        "--plz": lz.toFixed(2),
+        "--clx": lx.toFixed(2),
+        "--cly": ly.toFixed(2),
+        "--clz": clz.toFixed(2),
         "--plr": ch(lightRgb[0]),
         "--plg": ch(lightRgb[1]),
         "--plb": ch(lightRgb[2]),

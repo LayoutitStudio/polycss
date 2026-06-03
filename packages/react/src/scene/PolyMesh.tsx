@@ -670,10 +670,11 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
     const dir = sceneDirectionalLight.direction;
     const localDir = inverseRotateVec3(dir, rotation);
     const len = Math.hypot(localDir[0], localDir[1], localDir[2]) || 1;
+    // Quantize to 0.01 — matches H10 in PolyScene + vanilla lightingVars.
     return {
-      ["--plx" as string]: (localDir[0] / len).toFixed(4),
-      ["--ply" as string]: (localDir[1] / len).toFixed(4),
-      ["--plz" as string]: (localDir[2] / len).toFixed(4),
+      ["--plx" as string]: (localDir[0] / len).toFixed(2),
+      ["--ply" as string]: (localDir[1] / len).toFixed(2),
+      ["--plz" as string]: (localDir[2] / len).toFixed(2),
     };
   }, [effectiveTextureLighting, rotation, sceneDirectionalLight]);
 
