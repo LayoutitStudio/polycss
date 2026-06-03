@@ -72,7 +72,6 @@ export const TextureBorderShapePoly = memo(function TextureBorderShapePoly({
   const dynamic = textureLighting === "dynamic";
   const base = parseHex(entry.polygon.color ?? "#cccccc");
   const useDefaultDynamicColor = dynamic && rgbKey(base) === solidPaintDefaults?.dynamicColorKey;
-  const useDefaultPaint = entry.shadedColor === solidPaintDefaults?.paintColor;
   const setElementRef = useCallback((el: HTMLElement | null) => {
     if (!el) return;
     if (borderShape) el.style.setProperty("border-shape", borderShape);
@@ -86,14 +85,14 @@ export const TextureBorderShapePoly = memo(function TextureBorderShapePoly({
   const transform = borderShape ? formatBorderShapeEntryMatrix(entry) : formatSolidQuadEntryMatrix(entry);
   const style: CSSProperties = {
     transform,
-    // Dynamic mode: emit the per-polygon normal so the CSS Lambert calc
-    // reads var(--pnx/y/z) instead of falling back to (0,0,1). Vanilla's
-    // formatInitialSolidPaintStyle does the same. Without this every
-    // <b>/<i> face is treated as facing +Z and the off-axis lighting
-    // produces a uniform color across walls. Color comes from --psr/g/b
-    // when it differs from the scene-wide default; otherwise the cascade
-    // takes care of it.
-    color: dynamic || useDefaultPaint ? undefined : entry.shadedColor,
+    // Baked mode: always emit per-leaf shaded color when known so the
+    // first render matches the post-light-nudge commit path. Vanilla
+    // dropped the `=== solidPaintDefaults.paintColor` shortcut in
+    // commit 0423777 — leaves with undefined shadedColor would inherit
+    // the (often-wrong) wrapper --polycss-paint default, producing
+    // facets that look dimmer than they should until a light change
+    // forced an explicit re-bake.
+    color: dynamic ? undefined : entry.shadedColor,
     pointerEvents: pointerEvents === "none" ? "none" : undefined,
     ...(dynamic
       ? {

@@ -277,13 +277,15 @@ describe("PolyMesh — transform props", () => {
     expect(mesh.style.transform).toContain("scale3d(1, 2, 3)");
   });
 
-  it("applies rotateX from rotation[0]", () => {
+  // World↔CSS reflection conjugation: rotation[0] (world X) emits as
+  // rotateY(-rotation[0]) in CSS. Matches vanilla `buildMeshTransform`.
+  it("emits rotateY(-rotation[0]) for world-X rotation", () => {
     const container = renderMesh({
       polygons: [TRIANGLE],
       rotation: [45, 0, 0],
     });
     const mesh = container.querySelector(".polycss-mesh") as HTMLElement;
-    expect(mesh.style.transform).toContain("rotateX(45deg)");
+    expect(mesh.style.transform).toContain("rotateY(-45deg)");
   });
 });
 

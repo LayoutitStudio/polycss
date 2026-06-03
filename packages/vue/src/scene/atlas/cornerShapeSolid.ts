@@ -31,9 +31,8 @@ function formatPaintCss(
     }
     return style;
   }
-  return entry.shadedColor && entry.shadedColor !== solidPaintDefaults?.paintColor
-    ? `;color:${entry.shadedColor}`
-    : "";
+  // Baked: always emit per-leaf shaded color (vanilla commit 0423777).
+  return entry.shadedColor ? `;color:${entry.shadedColor}` : "";
 }
 
 /**

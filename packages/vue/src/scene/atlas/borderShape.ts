@@ -67,7 +67,6 @@ export function renderTextureBorderShapePoly({
   const dynamic = textureLighting === "dynamic";
   const base = parseHex(entry.polygon.color ?? "#cccccc");
   const useDefaultDynamicColor = dynamic && rgbKey(base) === solidPaintDefaults?.dynamicColorKey;
-  const useDefaultPaint = entry.shadedColor === solidPaintDefaults?.paintColor;
   // formatBorderShapeEntryMatrix / formatSolidQuadEntryMatrix already return a
   // wrapped `matrix3d(...)` string. Wrapping again via formatMatrix3d would
   // produce `matrix3d(matrix3d(...))` — invalid CSS, silently dropped by the
@@ -78,7 +77,8 @@ export function renderTextureBorderShapePoly({
   // value) and treating every face as +Z up.
   const style: CSSProperties = {
     transform,
-    color: dynamic || useDefaultPaint ? undefined : entry.shadedColor,
+    // Baked: always emit per-leaf shaded color (vanilla commit 0423777).
+    color: dynamic ? undefined : entry.shadedColor,
     pointerEvents: pointerEvents === "none" ? "none" : undefined,
     ...(dynamic
       ? {

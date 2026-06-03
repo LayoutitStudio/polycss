@@ -38,9 +38,10 @@ function formatPaintCss(
     }
     return style;
   }
-  return entry.shadedColor && entry.shadedColor !== solidPaintDefaults?.paintColor
-    ? `;color:${entry.shadedColor}`
-    : "";
+  // Baked mode: always emit per-leaf shaded color when known. Vanilla
+  // dropped the `=== solidPaintDefaults.paintColor` shortcut in commit
+  // 0423777 — see borderShape.tsx for the full reasoning.
+  return entry.shadedColor ? `;color:${entry.shadedColor}` : "";
 }
 
 /**

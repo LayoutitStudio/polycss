@@ -22,7 +22,6 @@ import type { MeshResolution, Polygon, PolyTextureLightingMode, Vec3 } from "@la
 import { buildBasisHints, buildSharedEdgeMap, cornerShapeGeometryForPlan, worldDirectionalLightToCss } from "@layoutit/polycss-core";
 import {
   BASE_TILE,
-  computeLightVisibility,
   computeReceiverShadowFaces,
   computeSceneBbox,
   DEFAULT_SEAM_BLEED,
@@ -153,15 +152,15 @@ export interface PolyMeshProps extends InteractionProps {
 
 /**
  * Build the mesh wrapper's CSS transform from a Three.js-style transform
- * (post-parity convention):
- *   - `position` is in WORLD UNITS (`+X right, +Y forward, +Z up`); the
- *     renderer applies the world→CSS axis swap (`world.x → CSS.y`,
- *     `world.y → CSS.x`) and ×`BASE_TILE` here.
- *   - `scale` pivots from the mesh ORIGIN (Three.js `mesh.scale` semantics).
- *     Composes `M_string = T(pos - bbox) · S · T(bbox)` so that under the
- *     wrapper's `transform-origin: bbox-center` the effective transform is
- *     `T(pos) · S(around origin) · R(around bbox)`.
- *   - `rotation` pivots from the bbox center (PolyCSS UX).
+ * (post-parity convention). All transforms pivot at the wrapper's local
+ * origin (0,0,0) to match three.js `mesh.position`/`mesh.rotation`/`mesh.scale`
+ * and vanilla `buildMeshTransform`. Callers that want "rotate around
+ * centroid" pre-center the geometry at load time via
+ * `loadMesh(..., { center: true })`.
+ *   - `position` is in WORLD UNITS; renderer applies world→CSS axis swap
+ *     and ×`BASE_TILE` scale here.
+ *   - `scale` pivots from the wrapper local origin.
+ *   - `rotation` pivots from the wrapper local origin.
  *
  * Mirror of the vanilla `buildMeshTransform` in
  * `packages/polycss/src/api/scene/transforms.ts`.
@@ -170,7 +169,6 @@ function buildTransform(
   position: Vec3 | undefined,
   scale: number | Vec3 | undefined,
   rotation: Vec3 | undefined,
-  bboxCenterCss: Vec3 | undefined,
 ): string | undefined {
   const sx = typeof scale === "number" ? scale : (scale?.[0] ?? 1);
   const sy = typeof scale === "number" ? scale : (scale?.[1] ?? 1);
@@ -180,26 +178,23 @@ function buildTransform(
   const cssPos: Vec3 = position
     ? [position[1] * BASE_TILE, position[0] * BASE_TILE, position[2] * BASE_TILE]
     : [0, 0, 0];
-  const bx = bboxCenterCss?.[0] ?? 0;
-  const by = bboxCenterCss?.[1] ?? 0;
-  const bz = bboxCenterCss?.[2] ?? 0;
-  const hasBbox = bx !== 0 || by !== 0 || bz !== 0;
 
   const parts: string[] = [];
-  const tx = cssPos[0] - (hasScale && hasBbox ? bx : 0);
-  const ty = cssPos[1] - (hasScale && hasBbox ? by : 0);
-  const tz = cssPos[2] - (hasScale && hasBbox ? bz : 0);
-  if (tx !== 0 || ty !== 0 || tz !== 0) {
-    parts.push(`translate3d(${tx}px, ${ty}px, ${tz}px)`);
+  if (cssPos[0] !== 0 || cssPos[1] !== 0 || cssPos[2] !== 0) {
+    parts.push(`translate3d(${cssPos[0]}px, ${cssPos[1]}px, ${cssPos[2]}px)`);
+  }
+  if (hasRotation) {
+    // World↔CSS reflection conjugation: worldPositionToCss permutes
+    // [x,y,z]→[y,x,z] (det=-1), so a world rotation R(n,θ) becomes
+    // R(M·n, -θ) in CSS frame — axis swapped AND angle inverted.
+    // World X↦CSS Y, world Y↦CSS X, world Z↦CSS Z. Mirrors vanilla
+    // `buildMeshTransform` in packages/polycss/src/api/scene/transforms.ts.
+    if (rotation![0]) parts.push(`rotateY(${-rotation![0]}deg)`);
+    if (rotation![1]) parts.push(`rotateX(${-rotation![1]}deg)`);
+    if (rotation![2]) parts.push(`rotateZ(${-rotation![2]}deg)`);
   }
   if (hasScale) {
     parts.push(`scale3d(${sx}, ${sy}, ${sz})`);
-    if (hasBbox) parts.push(`translate3d(${bx}px, ${by}px, ${bz}px)`);
-  }
-  if (hasRotation) {
-    if (rotation![0]) parts.push(`rotateX(${rotation![0]}deg)`);
-    if (rotation![1]) parts.push(`rotateY(${rotation![1]}deg)`);
-    if (rotation![2]) parts.push(`rotateZ(${rotation![2]}deg)`);
   }
   return parts.length > 0 ? parts.join(" ") : undefined;
 }
@@ -403,26 +398,13 @@ export const PolyMesh = defineComponent({
       return { ...cssLight, direction: inverseRotateVec3(cssLight.direction, bakedRotation.value) };
     });
 
-    // Per-light raytrace occlusion (vanilla parity, task #146). Pass the
-    // USER-WORLD light direction (not the CSS-frame one) — computeLight-
-    // Visibility raytraces against polygon vertices in their parser frame.
-    // Apply tighter dedup thresholds than shadow-caster dedup so back-to-
-    // back wall pairs don't self-occlude.
-    const lightOccludedPolyIndices = computed(() => {
-      if (atlasTextureLighting.value === "dynamic") return undefined;
-      const baseLight = sceneCtx?.value.directionalLight;
-      const lightDir = baseLight?.direction;
-      if (!lightDir || polygons.value.length < 2) return undefined;
-      const lLen = Math.hypot(lightDir[0], lightDir[1], lightDir[2]);
-      if (!Number.isFinite(lLen) || lLen <= 0) return undefined;
-      const dedupDropped = findOverlappingPolygonDuplicates(polygons.value, {
-        normalTolerance: 0.1,
-        distanceTolerance: 0.12,
-        overlapFraction: 0.98,
-        preserveDoubleSidedBackfaces: false,
-      });
-      return computeLightVisibility(polygons.value, lightDir, dedupDropped);
-    });
+    // Per-light occlusion raytrace (task #121) used to mark polygons in
+    // ray-traced shadow with `directScale=0` so they baked at ambient-only.
+    // Three.js doesn't bake shadow into the diffuse atlas — the real shadow
+    // map darkens occluded geometry at render time, so a "in shadow"
+    // polygon's diffuse stays at full Lambert(n·L). Vanilla disabled this
+    // in createPolyScene.ts:1162 for three.js parity.
+    const lightOccludedPolyIndices: ReadonlySet<number> | undefined = undefined;
 
     const textureAtlasPlans = computed(() => {
       if (!atlasAutoRender || directVoxelEnabled.value) return [];
@@ -445,7 +427,6 @@ export const PolyMesh = defineComponent({
         directionalLight: bakedDirectional.value,
         ambientLight: atlasAmbient.value,
       });
-      const occludedSet = lightOccludedPolyIndices.value;
       return polygons.value.map((p, i) =>
         computeTextureAtlasPlan(
           p,
@@ -456,7 +437,7 @@ export const PolyMesh = defineComponent({
             seamBleed: seamBleedEdges?.has(i) ? atlasSeamBleed.value : undefined,
             seamEdges: seamBleedEdges?.get(i),
             textureEdgeRepairEdges: repairEdges[i],
-            lightOccludedPolyIndices: occludedSet,
+            lightOccludedPolyIndices,
           },
           basisHints[i],
         ),
@@ -643,6 +624,7 @@ export const PolyMesh = defineComponent({
         props.scale,
         new Set(),
         shadowLift,
+        props.rotation,
       );
       if (planes.length === 0) return [];
       const casterInputs: ReceiverCasterInput<symbol>[] = [];
@@ -656,6 +638,7 @@ export const PolyMesh = defineComponent({
           data.position,
           data.scale,
           rendered ? (idx) => rendered.has(idx) : () => true,
+          data.rotation ?? null,
         );
         const isSelf = data.polygons === polygons.value;
         // Self-shadow seam cull: when caster IS this mesh, pass the
@@ -959,39 +942,9 @@ export const PolyMesh = defineComponent({
     }
 
     return () => {
-      // Polygon bbox CENTER in CSS world coords. Shared by `transformOrigin`
-      // (the `.polycss-mesh` CSS pivot, matching vanilla's
-      // `transform-origin: var(--origin)`) AND by `buildTransform` (the
-      // scale-from-mesh-origin math needs the bbox to compute its
-      // T(pos - bbox) pre-translation). World→CSS axis swap matches
-      // polygonGeometry: world[1]→CSS x, world[0]→CSS y, world[2]→CSS z.
-      const originPolys = polygons.value;
-      let bboxCenterCss: Vec3 | undefined;
-      if (originPolys.length > 0) {
-        let minX = Infinity, minY = Infinity, minZ = Infinity;
-        let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
-        for (const poly of originPolys) {
-          for (const v of poly.vertices) {
-            if (v[0] < minX) minX = v[0]; if (v[0] > maxX) maxX = v[0];
-            if (v[1] < minY) minY = v[1]; if (v[1] > maxY) maxY = v[1];
-            if (v[2] < minZ) minZ = v[2]; if (v[2] > maxZ) maxZ = v[2];
-          }
-        }
-        if (Number.isFinite(minX)) {
-          bboxCenterCss = [
-            ((minY + maxY) / 2) * BASE_TILE,
-            ((minX + maxX) / 2) * BASE_TILE,
-            ((minZ + maxZ) / 2) * BASE_TILE,
-          ];
-        }
-      }
-      const transform = buildTransform(props.position, props.scale, props.rotation, bboxCenterCss);
-      const transformOrigin = bboxCenterCss
-        ? `${bboxCenterCss[0]}px ${bboxCenterCss[1]}px ${bboxCenterCss[2]}px`
-        : undefined;
+      const transform = buildTransform(props.position, props.scale, props.rotation);
       const wrapperStyle: CSSProperties = {
         transform,
-        ...(transformOrigin ? { transformOrigin } : null),
         ...(dynamicLightOverride.value as CSSProperties | null ?? undefined),
         ...(attrs.style as CSSProperties | undefined),
         ...(defaultPaintVars.value ?? undefined),
