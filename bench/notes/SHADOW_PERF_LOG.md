@@ -152,7 +152,70 @@ section below when explored.
 
 (append-only; newest at top)
 
-### Iteration 7 — H10 REVISITED — full-vector CSS-var quantize (LANDED)
+### Iteration 8 — H8 (re-test) memoize d= per face (NEGATIVE)
+
+**Hypothesis recap.** H8's first attempt (pre-H9b) cached `d=` on the
+single floor SVG and saw ~0% hit rate at 0.5°/frame motion: a single
+constantly-changing silhouette is the worst case for byte-identical
+frames. H9b changed the picture — teapot-self now mounts 138-242
+receiver SVGs, many of them for faces far from the light terminator
+whose shadow content barely (or never) changes between H3-quantized
+emits. The bet was that those faces would hit the cache often enough
+to save real DOM mutation cost.
+
+**Implementation.** Branch `perf/shadow-memoize-d-v2`. Added
+`lastPathDs: string[]` to `MountedFace` in
+`packages/polycss/src/api/scene/receiverShadow.ts`. Before each
+`path.setAttribute("d", p.d)`, compare against the cached string; only
+write on miss. Truncate the cache when the path-array length shrinks
+so a regrown index doesn't see a stale string and false-hit. React/Vue
+render receiver shadows declaratively via JSX/h() — the framework's
+own diff already short-circuits identical props, so no mirror is
+needed.
+
+**Cache-hit probe** (temporary `__polycssShadowDCacheStats`, 5s sample
+after 2s warmup, motion=light):
+
+| scene | skipped | written | hit rate |
+| --- | ---: | ---: | ---: |
+| teapot-self | 4125 | 3535 | **53.85%** |
+| teapot-floor | 0 | 78 | 0.00% |
+
+Hit rate is real on self-shadow (the H9b receiver-mount explosion gives
+the cache something to bite into) and zero on floor (single SVG with
+ever-changing silhouette, exactly as iter-0 H8 found).
+
+**Metrics (motion=light, 5s sample, x4_plus heavy frames):**
+
+| scene | h10 baseline | h8v2 r1 | h8v2 r2 | Δ |
+| --- | ---: | ---: | ---: | ---: |
+| teapot-self dt p50 (ms) | 117.10 | 124.65 | 124.90 | +6-8 (NOISE) |
+| teapot-self script (ms) | 124.86 | 127.20 | 127.77 | +2-3 (NOISE) |
+| teapot-floor dt p50 (ms) | 58.30 | 58.30 | 58.40 | ~0 |
+| teapot-floor script (ms) | 6.77 | 6.86 | 7.14 | +0.1-0.4 (NOISE) |
+
+**Why the hit rate doesn't translate.** ~47 setAttribute("d", …) calls
+skipped per frame on teapot-self vs ~78 still written. Each skipped
+setAttribute saves ~10-100 µs; ~47 of them is ~0.5-5 ms — below the
+±2-3 ms run-to-run noise floor on a 125 ms frame. The script-side
+bottleneck for self-shadow is `computeReceiverShadowFaces` (per-frame
+SH-clip + projection); DOM mutation is single-digit-percent of total
+script time. The cache is correct but addresses a non-bottleneck.
+
+**Visual.** Regression script byte-identical to h10-merged for all 12
+captures. Three.js parity byte-identical for all 12 poses.
+
+**Recommendation: DISCARD.** The cache is harmless and the hit rate is
+genuinely 50%+ on self-shadow, but the absolute time saved sits below
+measurement noise. Cherry-picking would add 17 lines of code + one
+string-array allocation per receiver face for no observable win. Re-
+visit only if a future iteration moves SVG mutation into the critical
+path (e.g. a script-side optimization halves SH-clip cost, making DOM
+mutation a larger share of remaining script time). Better next target:
+move into the compositor — `compositorMain` is the bigger share of
+remaining frame time after H10.
+
+
 
 **Hypothesis recap.** Earlier H10 attempt (iter 5) quantized only
 `--plx/y/z` and saw flat style cost. The recalc trigger was still
