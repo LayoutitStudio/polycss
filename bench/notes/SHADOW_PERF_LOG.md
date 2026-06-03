@@ -89,6 +89,22 @@ section below when explored.
   width/height/matrix; extending to `d=` was tried as "memoize-d=" and
   came out flat (~0% hit rate at 0.5°/frame). Combined with (H3)
   quantization, the hit rate should jump.
+- **[H9] Caster-mesh silhouette extraction.** Dissection of the
+  teapot-floor 90 KB merged path (`_dissect-shadow-path.mjs`) revealed
+  it's **2,182 sub-paths, each a triangle** (median 3 verts). The cost
+  is the number of caster polygons projected, not per-polygon vertex
+  count. The 2000+ triangles get unioned into a single silhouette by
+  fill-rule:nonzero at paint time — meaning the browser is doing the
+  silhouette work AFTER we've already paid the JS+DOM cost of emitting
+  them. Instead: compute the silhouette EDGE on the CPU per caster mesh
+  per frame (edges where one adjacent triangle faces the light and the
+  other doesn't), project only the silhouette polygon. For a teapot,
+  silhouette is ~20-50 edges → 50 vertices vs 6553 today (~130× fewer
+  vertices). Trade-off: complexity. Need edge-adjacency map (already
+  exists for self-shadow seam cull, see `buildSharedEdgeMap` in core).
+  For concave silhouettes there are interior loops; SVG `d=` supports
+  multiple subpaths with fill-rule:evenodd to make holes work. **This
+  dwarfs H2 in potential impact for the merge-collapse case.**
 
 ## Iteration journal
 
@@ -99,6 +115,27 @@ section below when explored.
 Captured `bench/results/shadow-regression/baseline-<scene>.{png,json}`
 for the regression set (see Fixture). Recorded the cost breakdown
 above. No code changes.
+
+Baseline shadow.paths × shadow.pathDChars:
+
+| scene | recvSVGs | sub-paths | path-d chars |
+| --- | ---: | ---: | ---: |
+| teapot-self az50  | 138 | 138  | 125,046 |
+| teapot-self az130 |  70 |  70  | 108,627 |
+| teapot-self az220 |  52 |  52  | 112,050 |
+| teapot-floor az50 |   1 | 2,182 |  87,869 |
+| teapot-floor az130 |  1 | 2,182 |  89,982 |
+| teapot-floor az220 |  1 | 2,182 |  91,596 |
+| castle-floor      |   1 | ~600 |  ~23,000 |
+| crate-floor       |   1 | 12  |    ~210 |
+
+Dissection finding (`_dissect-shadow-path.mjs`): the teapot-floor
+shadow is **1 SVG path containing 2,182 sub-paths, each a
+triangle/quad** (median 3 vertices). The browser unions them via
+fill-rule:nonzero at paint time. That makes H2 (Douglas-Peucker
+per-poly simplification) likely a no-op for this case — triangles can't
+be DP'd — but it makes H9 (caster-mesh silhouette extraction) a
+potential 130× DOM reduction.
 
 ## Fixture
 
