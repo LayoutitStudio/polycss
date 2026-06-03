@@ -127,7 +127,7 @@ section below when explored.
 
 (append-only; newest at top)
 
-### Iteration 4 — H10 CSS-var quantize for style-recalc floor (NEGATIVE)
+### Iteration 5 — H10 CSS-var quantize for style-recalc floor (NEGATIVE)
 
 **Hypothesis.** With H9 + H3 landed, the dominant remaining cost in
 dynamic mode is the 53 ms/frame style recalc on 2,300 leaves whose
@@ -170,6 +170,103 @@ recalc when ANY style-related event fires, regardless of whether the
 event materially changed anything visible. **No clean lever** to drop
 the 53 ms floor without redesigning dynamic mode (e.g. JS-set inline
 colors, or reducing leaf count). Park H10 here; pursue other H if any.
+
+### Iteration 4 — H9b silhouette self-shadow (branch `perf/shadow-silhouette-self`)
+
+**Hypothesis recap.** H9 cherry-pick at HEAD explicitly gates self-shadow
+(caster === receiver) OUT of the silhouette path because the per-poly
+branch uses `selfShadowEdgeMap` to drop adjacent-triangle projections
+(would otherwise show as a spiderweb of seam streaks on smooth GLBs).
+Drop the gate. The silhouette IS the geometric boundary of the lit
+region, which naturally excludes interior adjacent-triangle projections
+without needing per-edge seam culling — same 5× per-receiver-face
+script speedup we got on the floor case, applied across the 138-SVG
+self-shadow set on the teapot.
+
+**Implementation.** Removed the `if (casterEntry.selfShadowEdgeMap)
+return null;` early-out from `computeReceiverShadowFaces`
+(`packages/core/src/shadow/computeReceiverShadows.ts`) and the matching
+`caster !== receiverEntry` / `!isSelf` gate from each of the three
+caller files (`packages/polycss/src/api/scene/receiverShadow.ts`,
+`packages/react/src/scene/PolyMesh.tsx`, `packages/vue/src/scene/PolyMesh.ts`)
+so `edgeOwners` now gets prepared for self-shadow casters too. The
+`selfShadowEdgeMap` is still threaded through — small (<40 polys) self-
+shadow meshes keep falling through to the per-poly path and still get
+seam culling. Comment updates only; no new options.
+
+**Metrics (shadow-regression fixture, teapot-self scene).**
+
+| az  | recv SVGs Δ | paths Δ | dChars baseline (h3) | dChars h9b | Δ % |
+| --- | ---:        | ---:    | ---:                 | ---:       | ---:|
+| 50  | +104        | +104    | 42,479               | 16,731     | -60.6% |
+| 130 | +73         | +73     | 23,986               | 11,560     | -51.8% |
+| 220 | +52         | +52     | 26,000               | 11,134     | -57.2% |
+
+teapot-floor / castle-floor / crate-floor: byte-identical (silhouette
+path on non-self casters unchanged by this iteration).
+
+Note the +recv-SVG count: silhouette path emits shadows on MORE
+receiver faces than the per-poly path. The per-poly path's per-face
+seam cull was so aggressive on smooth-GLB self-shadow that many faces
+ended up with `totalClipped === 0` and got skipped. The silhouette
+loop, being a single closed outline that doesn't get seam-culled,
+populates those faces too. Net path-d chars still drops 51-60% per
+azimuth because each receiver-face now emits one short silhouette
+sub-path instead of 10-13 fan-triangle sub-paths.
+
+**Trace deltas** (perf-vanilla.html, page=shadow mesh=teapot mode=dynamic
+motion=light, 5s sample, file `h9b-teapot-self.json`):
+
+| bucket   | frames | dt_p50 (ms) | script ms/f | compositorMain ms/f |
+| ---      | ---:   | ---:        | ---:        | ---:                |
+| x3 h3 self      | 3  | 58.0        | (n/a, x4-bound)  | 120.0       |
+| x3 h9b self     | 3  | 58.0        | 1.9         | 120.0           |
+| x4_plus h3 self | 14 | 342.5       | 570.5       | 411.6           |
+| x4_plus h9b self| 16 | 341.7       | 465.2       | 358.5           |
+
+`x4_plus` script ms/frame **drops 570.5 → 465.2 (-18%)**. compositorMain
+also drops 411.6 → 358.5 (-13%) because the SVG path payload is much
+smaller per receiver-face. dt_p50 is essentially unchanged (~342ms) —
+the self-shadow case is compositor-bound with ~155 receiver SVGs being
+composited each frame, and the silhouette only changes path CONTENT,
+not the receiver SVG count. To unlock dt_p50 we would need to also
+reduce the number of receiver SVGs (next-hypothesis territory).
+
+**Visual verdict (z=3.0 probe captures vs h3 baseline at same zoom).**
+
+- `teapot-self-az50-z3`: H9b matches H3 closely. A faint floating-dot
+  artifact off the teapot's left side in the H3 capture is GONE in
+  H9b — silhouette path doesn't manufacture stray sub-pixel sub-paths
+  the way the per-poly fan can on adjacent thin triangles.
+- `teapot-self-az130-z3`: Visually identical between H3 and H9b. Cast
+  shadow on floor stretches the same direction, teapot facets shade
+  the same way.
+- `teapot-self-az220-z3`: Visually identical between H3 and H9b. Dark
+  side facing camera reads the same; spout/handle/lid shade
+  consistently; floor cast shadow preserved.
+- **No spiderweb seam streaks** appear in any of the three H9b
+  azimuths. The per-poly path's `selfShadowEdgeMap` was protecting
+  against those, and the silhouette path's geometric-boundary semantic
+  is equivalent protection without needing the explicit cull.
+- The dark-side shadow region on the teapot body (spout, handle area)
+  reads correctly in both H3 and H9b — silhouette projection picks up
+  concave regions as expected for a closed-mesh silhouette.
+
+**Three.js parity.** All 12 parity shots (4 meshes × 3 light poses)
+**byte-identical to baseline** (md5 verified). Parity scenes don't
+toggle Self-shadow so they exercise H9 only, not H9b — but the byte-
+identical result confirms H9b didn't regress the non-self path.
+
+**Recommendation: cherry-pick.** Hypothesis confirmed — 51-60%
+reduction in path-d chars on teapot-self, 18% script ms/frame drop in
+the heavy bucket, 13% compositorMain ms/frame drop, no spiderweb
+artifacts, three.js parity preserved on non-self casters. The frame_p50
+ceiling stays compositor-bound because the per-receiver-face SVG count
+roughly DOUBLED (silhouette is less aggressive than seam-cull, so more
+faces emit shadows) — that's a feature, not a bug, but it limits the
+dt_p50 win until we attack receiver-SVG count separately. Surface
+change is small: one early-out removed in core, three caller gates
+loosened, no API additions. Ready for merge into `feat/three-parity`.
 
 ### Iteration 3 — H3 light quantization (branch `perf/shadow-light-quantize`)
 
