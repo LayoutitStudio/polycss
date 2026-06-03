@@ -6,6 +6,47 @@ didn't, and the metrics. The "best" wins get cherry-picked back to
 `feat/three-parity`; failed experiments stay on their own branches for
 traceability.
 
+## TL;DR — cumulative loop wins on `feat/three-parity`
+
+Worst-case scene = teapot-self self-shadow drag (perf-vanilla, dynamic mode,
+0.5°/frame light azimuth motion).
+
+| state | frame_p50 | fps_p50 | script ms/f | recv SVGs |
+| --- | ---: | ---: | ---: | ---: |
+| pre-loop (commit `5dff12d`) | 449 ms | 2.2 | ~535 | 309 |
+| +H9 silhouette (floor only) | 449 | 2.2 | (gated out) | 309 |
+| +H3 light-key quantize | 442 | 2.3 | 533 | 309 |
+| +H9b silhouette self-shadow | 342 | 2.9 | 465 | 138-242 |
+| +H10 CSS-var quantize | 117 | 8.6 | 126 | 138-242 |
+| **+H11b OBB-proxy receiver** | **58 (heavy) / 8 (light)** | **17.1 / 120** | **8** | **1** |
+
+**Cumulative: 449→58ms heavy bucket, ~7-10× FPS improvement on the worst
+case. Visual identical to baseline per byte-compared regression fixture
+and three.js parity shots.**
+
+Floor-case (teapot-floor, just `castShadow:true` on a floor receiver) is
+even cleaner: pre-loop 66 ms / 17 fps → post-H11b ~58 ms with all of the
+ground-shadow JS work (SH-clip + per-poly fan) replaced by one silhouette
+loop projected once, dChars down 90,000→5,000 (-94%).
+
+## Wins landed (chronological)
+
+| commit | iter | hypothesis | effect |
+| --- | --- | --- | --- |
+| `feb4ea7` | 2 | H9 silhouette floor | -94% dChars / -57% script (floor) |
+| `5337ae4` | 3 | H3 light-key quantize | -28% script during drag |
+| `e9cf56c` | 4 | H9b silhouette self | -51-60% dChars / -18% script (self) |
+| `77f3206` | 7 | H10 CSS-var quantize | +38% mean FPS (lighting recalc floor) |
+| `2187a1e` | 9 | H11b OBB-proxy receiver | -94% script in self-shadow / 242→1 SVG |
+
+## Discarded for traceability (branches preserved)
+
+| branch | iter | hypothesis | why |
+| --- | --- | --- | --- |
+| `perf/shadow-path-simplify` | 1 | H2 DP simplify | triangles can't be simplified |
+| `perf/shadow-face-coalesce` | 6 | H11 NORMAL_TOL relax | OFFSET_TOL was the actual gate |
+| `perf/shadow-memoize-d-v2` | 8 | H8 d= memoize | 54% hit rate but savings below noise |
+
 ## Setup
 
 - **Source of truth**: this file, plus `bench/results/shadow-regression/`
