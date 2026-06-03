@@ -110,6 +110,77 @@ section below when explored.
 
 (append-only; newest at top)
 
+### Iteration 1 — H2 path simplify (branch `perf/shadow-path-simplify`)
+
+**Hypothesis recap.** Douglas-Peucker simplification on each per-frame
+projected polygon clip (ε = 1 CSS px) before stringifying into SVG
+`d=`, expected 5-10× drop in `pathDChars` on the teapot-floor case
+(~90k chars compound path).
+
+**Implementation.** Added `simplifyPolylineDP` + `simplifyPolygonRingDP`
+helpers and a `SHADOW_PATH_SIMPLIFY_EPS` const to
+`packages/core/src/shadow/computeReceiverShadows.ts`; invoked on
+`memberClip` immediately before the existing
+`bucket.verts.push(memberClip)` site, so the simplified ring is what
+gets written into the SVG path. Static `outlineUv` /
+`memberPolysUv` are left untouched (they're per-mesh clip subjects,
+not per-frame outputs).
+
+**Metrics (shadow-regression fixture, 4 scenes × 3 azimuths).**
+
+| scene         | baseline avg dChars | h2 avg dChars | Δ avg dChars | Δ % |
+| ---           | ---:                | ---:          | ---:         | ---:|
+| teapot-self   | 115,241             | 113,937       | -1,303       | -1.1% |
+| teapot-floor  | 89,816              | 89,816        | 0            | 0.0% |
+| castle-floor  | 23,178              | 23,154        | -190         | -0.8% |
+| crate-floor   | 215                 | 188           | -27          | -12.7% |
+
+Receiver SVG count Δ = 0 across all 12 captures (expected — DP changes
+ring vertex counts only, not which faces emit a path).
+
+Trace (`shadow-h2-teapot-self`, page=shadow mesh=teapot mode=dynamic
+motion=light, 5s sample): frame_p50 = 325.00ms, script_ms = 533.81 in
+x4_plus bucket. Baseline reference
+(`bench/results/shadow-teapot-dynamic-backface.json` on parent
+`feat/three-parity`): frame_p50 = 325.10ms, script_ms = 535.08.
+Wall-time delta ≈ 0 (within noise).
+
+Live trace `domSamples` cross-check: avg pathDChars dropped from
+~120,034 (baseline) to ~118,252 (h2) — confirms the 1.5% reduction
+on the live light-rotation path.
+
+**Visual verdict (per scene).** Compared PNG pairs via Read + raw byte
+diff:
+
+- `teapot-self` az50/130: byte-identical. az220: 3-byte PNG-stream
+  diff (compression-level noise, visually unchanged).
+- `teapot-floor` az50/130/220: byte-identical.
+- `castle-floor` az50/130/220: byte-identical.
+- `crate-floor` az50: byte-identical.
+
+Verdict: visually indistinguishable. DP simplification at ε=1 does not
+perturb the rendered shadow at the regression fixture's render scale.
+
+**Why the hypothesis underperformed.** Each per-frame member-clip is
+the SH-clip of a single fan-triangulated caster tri against the
+receiver outline + member polygon — already 3-7 vertices in the
+common case. The teapot-floor "~90k chars" comes from ~6-7k MOVE/LINE
+tokens emitted by hundreds of small clip polygons, not from a few
+high-vertex-count clips. DP can't simplify a clip that's already
+near-minimal. The 1-2% wins on dense scenes come from the small share
+of clips that DID have 6-8 nearly colinear vertices.
+
+**Recommendation: discard for the H2 default, but keep ε as a knob.**
+The simplification is a no-op in the worst case (~0 saving on
+teapot-floor's compound path; flat frame_p50). The real path-length
+bottleneck is *number of subpaths*, not vertices per subpath; the win
+lives upstream (cluster adjacent caster contributions into a single
+union polygon before SH-clip, or move the bottleneck up to H3
+quantize-skip / H1 drag-coarse). Recommend NOT cherry-picking onto
+`feat/three-parity` as-is. Worth revisiting at a coarser ε (3-5 px)
+only if combined with an upstream merge pass that produces fewer,
+larger compound shapes.
+
 ### Iteration 0 — baseline lock-in (commit 5dff12d)
 
 Captured `bench/results/shadow-regression/baseline-<scene>.{png,json}`
