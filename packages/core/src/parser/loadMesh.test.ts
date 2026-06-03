@@ -177,6 +177,28 @@ function buildMinimalGlb(): ArrayBuffer {
   return buf;
 }
 
+function buildMinimalStl(): ArrayBuffer {
+  const buf = new ArrayBuffer(84 + 50);
+  const view = new DataView(buf);
+  const bytes = new Uint8Array(buf);
+  const header = "solid minimal binary stl";
+  for (let i = 0; i < header.length; i += 1) bytes[i] = header.charCodeAt(i);
+  view.setUint32(80, 1, true);
+  let off = 84;
+  for (const value of [0, 0, 1]) {
+    view.setFloat32(off, value, true);
+    off += 4;
+  }
+  for (const vertex of [[0, 0, 0], [1, 0, 0], [0, 1, 0]]) {
+    for (const value of vertex) {
+      view.setFloat32(off, value, true);
+      off += 4;
+    }
+  }
+  view.setUint16(off, 0, true);
+  return buf;
+}
+
 afterEach(() => {
   vi.unstubAllGlobals();
 });
@@ -506,6 +528,42 @@ describe("loadMesh", () => {
     });
   });
 
+  describe(".stl dispatch", () => {
+    it("fetches .stl URL as arrayBuffer and dispatches to parseStl", async () => {
+      const stlBuf = buildMinimalStl();
+      const fetchMock = makeMockFetch({ arrayBuffer: stlBuf });
+      vi.stubGlobal("fetch", fetchMock);
+
+      const result = await loadMesh("model.stl");
+      expect(fetchMock).toHaveBeenCalledWith("model.stl");
+      expect(result).toHaveProperty("polygons");
+      expect(result).toHaveProperty("dispose");
+      expect(result.polygons.length).toBeGreaterThan(0);
+    });
+
+    it("passes stlOptions to parseStl", async () => {
+      vi.stubGlobal("fetch", makeMockFetch({ arrayBuffer: buildMinimalStl() }));
+
+      const result = await loadMesh("model.stl", {
+        stlOptions: { targetSize: 10, gridShift: 2, defaultColor: "#123456" },
+        meshResolution: "lossless",
+      });
+
+      expect(result.polygons).toHaveLength(1);
+      expect(result.polygons[0].vertices).toEqual([
+        [2, 2, 2],
+        [12, 2, 2],
+        [2, 12, 2],
+      ]);
+      expect(result.polygons[0].color).toBe("#123456");
+    });
+
+    it("throws when fetch returns !ok for .stl", async () => {
+      vi.stubGlobal("fetch", makeMockFetch({ ok: false, status: 404 }));
+      await expect(loadMesh("missing.stl")).rejects.toThrow("404");
+    });
+  });
+
   describe(".mtl rejection", () => {
     it("throws for .mtl URLs without fetching", async () => {
       const fetchMock = vi.fn();
@@ -521,7 +579,7 @@ describe("loadMesh", () => {
   describe("unknown extension", () => {
     it("throws for unknown extension", async () => {
       vi.stubGlobal("fetch", makeMockFetch({}));
-      await expect(loadMesh("model.stl")).rejects.toThrow("unsupported extension");
+      await expect(loadMesh("model.ply")).rejects.toThrow("unsupported extension");
     });
 
     it("throws for extension-less URL", async () => {
