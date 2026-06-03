@@ -116,7 +116,7 @@ export function classifyFacing(
  * returned best-effort.
  */
 export function extractSilhouetteLoops(
-  edgeOwners: Map<string, EdgeOwners>,
+  edgeOwners: ReadonlyMap<string, EdgeOwners>,
   facing: boolean[],
 ): Vec3[][] {
   // Collect silhouette edges.

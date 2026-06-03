@@ -24,6 +24,12 @@ import {
   worldCssForMesh,
   worldPositionToCss,
 } from "./receiverFaceGroups";
+import {
+  buildEdgeOwners as buildEdgeOwnersHelper,
+  classifyFacing,
+  extractSilhouetteLoops,
+  type EdgeOwners,
+} from "./silhouette";
 import type {
   PolyAmbientLight,
   PolyDirectionalLight,
@@ -31,6 +37,12 @@ import type {
   Vec2,
   Vec3,
 } from "../types";
+
+/** Minimum item count required to attempt per-caster-mesh silhouette
+ *  extraction. For smaller meshes (crates, simple primitives) the
+ *  per-poly path stays cheaper than building the edge map and walking
+ *  loops. See `bench/notes/SHADOW_PERF_LOG.md` H9. */
+const SILHOUETTE_MIN_POLYS = 40;
 
 /**
  * Per-receiver cached face geometry. One record per coplanar face group:
@@ -91,6 +103,19 @@ export interface ReceiverCasterInput<T = unknown> {
    *  set — those projections are sliver shadows along seams (smooth-shaded
    *  GLB meshes, subdivided spheres) that the user never wants to see. */
   selfShadowEdgeMap?: ReadonlyMap<number, ReadonlySet<number>>;
+  /** Per-mesh edge ownership map for silhouette extraction. Cached by the
+   *  caller (WeakMap<Mesh, …>) and shared across receivers within a frame.
+   *  When present AND the caster is NOT the receiver AND items.length ≥
+   *  SILHOUETTE_MIN_POLYS, the shadow algorithm projects per-mesh
+   *  silhouette loops instead of every front-facing triangle — collapses
+   *  the N-triangle path to 1 outline per caster per receiver. See H9 in
+   *  `bench/notes/SHADOW_PERF_LOG.md`. */
+  edgeOwners?: ReadonlyMap<string, EdgeOwners>;
+  /** Total polygon count on the source caster mesh (NOT the filtered
+   *  `items` count). Needed by silhouette extraction so the `facing`
+   *  array is sized correctly even when atlas-plan / dedup filters drop
+   *  some polygons from `items`. */
+  casterPolygonCount?: number;
 }
 
 /**
@@ -181,6 +206,44 @@ export interface ReceiverShadowFaceSpec<T = unknown> {
    *  if applicable). */
   opacity: number;
   paths: Array<ReceiverShadowPath<T>>;
+}
+
+/**
+ * Build silhouette `edgeOwners` for a caster mesh in world-CSS frame.
+ * Used by the silhouette path inside `computeReceiverShadowFaces` (H9).
+ * Polygons are transformed through the same world-CSS pipeline as
+ * `prepareCasterPolyItems` (worldCssForMesh + optional rotation around
+ * the CSS-pivot) so the silhouette loop vertices land in the same world
+ * frame as the receiver face plane and the light direction.
+ *
+ * Caller caches by (mesh, polygon-list-identity + position + scale +
+ * rotation) — invalidates only when the caster's geometry or transform
+ * actually changes. Light direction is NOT a bust key (silhouette
+ * adjacency is per-mesh, facing is per-frame).
+ */
+export function prepareCasterEdgeOwners(
+  polygons: readonly Polygon[],
+  position: Vec3,
+  scale: number | Vec3 | undefined | null,
+  rotation?: Vec3 | null,
+): ReadonlyMap<string, EdgeOwners> {
+  const worldCss = worldCssForMesh(scale);
+  const hasRotation = !!rotation && (rotation[0] !== 0 || rotation[1] !== 0 || rotation[2] !== 0);
+  const cssPivot = hasRotation ? worldPositionToCss(position) : null;
+  // Lightweight stub list — buildEdgeOwners only reads `.vertices`.
+  const worldPolys: Polygon[] = polygons.map((p) => {
+    if (!p) return { vertices: [], color: "" };
+    let wv = p.vertices.map((vert) => worldCss(vert, position));
+    if (hasRotation && cssPivot && rotation) {
+      wv = wv.map((w) => {
+        const local: Vec3 = [w[0] - cssPivot[0], w[1] - cssPivot[1], w[2] - cssPivot[2]];
+        const r = rotateVec3InWrapperCssFrame(local, rotation);
+        return [r[0] + cssPivot[0], r[1] + cssPivot[1], r[2] + cssPivot[2]];
+      });
+    }
+    return { vertices: wv, color: "" };
+  });
+  return buildEdgeOwnersHelper(worldPolys);
 }
 
 /**
@@ -422,6 +485,83 @@ export function computeReceiverShadowFaces<T = unknown>(
 
   const out: ReceiverShadowFaceSpec<T>[] = [];
 
+  // Per-caster silhouette precompute. For caster meshes that pass the
+  // gate (have a cached edgeOwners map, aren't the receiver, have enough
+  // polygons, have plane normals on most items), extract the closed
+  // silhouette loops in world frame ONCE per frame. The per-receiver-face
+  // loop below projects these loops onto each face's (u,v) basis instead
+  // of fan-triangulating every front-facing caster polygon. See H9 in
+  // `bench/notes/SHADOW_PERF_LOG.md`.
+  //
+  // `silhouetteByCaster[i]` is `null` when the caster doesn't qualify
+  // (fall through to per-poly path) or `Vec3[][]` when it does (use
+  // silhouette path; may be `[]` meaning "light fully behind mesh →
+  // emit no shadow at all").
+  const silhouetteByCaster: Array<Vec3[][] | null> = casters.map((casterEntry) => {
+    const edgeOwners = casterEntry.edgeOwners;
+    if (!edgeOwners) return null;
+    if (casterEntry.selfShadowEdgeMap) return null;
+    const N = casterEntry.casterPolygonCount ?? 0;
+    if (N < SILHOUETTE_MIN_POLYS) return null;
+    if (casterEntry.items.length < SILHOUETTE_MIN_POLYS) return null;
+    // At least 50% of items must have a planeN — otherwise the mesh is
+    // degenerate (scribble / zero-area polys) and the silhouette would be
+    // unreliable. Fall back to per-poly.
+    let withNormals = 0;
+    for (const item of casterEntry.items) if (item.planeN) withNormals++;
+    if (withNormals * 2 < casterEntry.items.length) return null;
+
+    // Build facing[polygonIndex] from items. Polygons NOT in items (atlas-
+    // filtered out) get treated as not-facing — their edges contribute as
+    // boundary against included neighbours, which is the conservative
+    // choice (slightly larger silhouette but never smaller than real).
+    const normals: Array<Vec3 | null> = new Array(N).fill(null);
+    for (const item of casterEntry.items) {
+      if (item.planeN && item.polygonIndex < N) {
+        normals[item.polygonIndex] = item.planeN;
+      }
+    }
+    const facing = classifyFacing(normals, lightDir);
+    return extractSilhouetteLoops(edgeOwners, facing);
+  });
+
+  // 3D half-space clip: keep the portion of `loop` where planeDist > eps.
+  // Sutherland-Hodgman style — used to clip silhouette loops that dip
+  // below the receiver plane before projection. Returns `[]` if the loop
+  // ends up fully below.
+  const clipLoopAbovePlane = (
+    loop: ReadonlyArray<Vec3>,
+    O: Vec3, n: Vec3, eps: number,
+  ): Vec3[] => {
+    if (loop.length < 3) return [];
+    const out: Vec3[] = [];
+    const dist = (p: Vec3) =>
+      (p[0] - O[0]) * n[0] + (p[1] - O[1]) * n[1] + (p[2] - O[2]) * n[2];
+    const cross = (a: Vec3, b: Vec3, da: number, db: number): Vec3 => {
+      const s = (da - eps) / (da - db);
+      return [
+        a[0] + s * (b[0] - a[0]),
+        a[1] + s * (b[1] - a[1]),
+        a[2] + s * (b[2] - a[2]),
+      ];
+    };
+    for (let i = 0; i < loop.length; i++) {
+      const curr = loop[i]!;
+      const prev = loop[(i + loop.length - 1) % loop.length]!;
+      const dCurr = dist(curr);
+      const dPrev = dist(prev);
+      const inCurr = dCurr > eps;
+      const inPrev = dPrev > eps;
+      if (inCurr) {
+        if (!inPrev) out.push(cross(prev, curr, dPrev, dCurr));
+        out.push(curr);
+      } else if (inPrev) {
+        out.push(cross(prev, curr, dPrev, dCurr));
+      }
+    }
+    return out;
+  };
+
   // The face-plane normals `group.n` are already in world frame (the
   // worldCss wrap in prepareReceiverFacePlanes applies the mesh rotation
   // before the plane is built). Pass a camera-only rotation to
@@ -502,8 +642,55 @@ export function computeReceiverShadowFaces<T = unknown>(
     const receiverPlaneOffset = n[0] * O[0] + n[1] * O[1] + n[2] * O[2];
     const COPLANAR_NORMAL_TOL = 0.0025;
     const COPLANAR_OFFSET_TOL = 5.0;
-    for (const casterEntry of casters) {
+    for (let casterIdx = 0; casterIdx < casters.length; casterIdx++) {
+      const casterEntry = casters[casterIdx]!;
       const sharedEdgeMap = casterEntry.selfShadowEdgeMap;
+
+      // Silhouette path: when the caster qualified for silhouette
+      // extraction, project each closed loop onto this receiver face
+      // instead of fan-triangulating every front-facing polygon. One
+      // sub-path per loop replaces O(items) sub-paths.
+      const silhouette = silhouetteByCaster[casterIdx];
+      if (silhouette !== null) {
+        // Empty loop set means "light fully behind mesh" → no shadow on
+        // this receiver from this caster.
+        if (silhouette.length === 0) continue;
+        for (const loop of silhouette) {
+          if (loop.length < 3) continue;
+          // 3D clip against the receiver plane half-space first — silhouette
+          // vertices that sit BELOW the receiver project to the wrong side
+          // of the (u,v) basis and produce inverted shadows.
+          const above3D = clipLoopAbovePlane(loop, O, n, SELF_SHADOW_EPS);
+          if (above3D.length < 3) continue;
+          const projected = above3D.map(projectOntoPlane);
+          const subjectCcw = ensureCcw2D(projected);
+          const reachClipped = reachRect.length === 4
+            ? clipPolygonToConvex2D(subjectCcw, reachRect)
+            : subjectCcw;
+          if (reachClipped.length < 3) continue;
+          const clip = clipPolygonToConvex2D(reachClipped, outlineUv);
+          if (clip.length < 3) continue;
+          let bucket: { id: T; verts: Vec2[][]; subPolygonIndices: number[] } | undefined;
+          for (const memberPoly of group.memberPolysUv) {
+            const memberClip = clipPolygonToConvex2D(clip, ensureCcw2D(memberPoly as Vec2[]));
+            if (memberClip.length < 3) continue;
+            if (!bucket) {
+              bucket = clippedByCaster.get(casterEntry.id);
+              if (!bucket) {
+                bucket = { id: casterEntry.id, verts: [], subPolygonIndices: [] };
+                clippedByCaster.set(casterEntry.id, bucket);
+              }
+            }
+            bucket.verts.push(memberClip);
+            // Silhouette path has no source-polygon attribution; use -1
+            // so DevTools tooling can tell it apart from per-poly indices.
+            bucket.subPolygonIndices.push(-1);
+            totalClipped++;
+          }
+        }
+        continue;
+      }
+
       for (const item of casterEntry.items) {
         // Seam-shadow cull: if this caster polygon shares an edge with ANY
         // of the receiver face's member polygons, skip — projecting a

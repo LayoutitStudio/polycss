@@ -44,11 +44,13 @@ import {
   inverseRotateVec3,
   optimizeMeshPolygons,
   parseHexColor,
+  prepareCasterEdgeOwners,
   prepareCasterPolyItems,
   prepareReceiverFacePlanes,
   projectCssVertexToGround,
   worldDirectionToCss,
   type CameraCullRotation,
+  type EdgeOwners,
   type ReceiverCasterInput,
 } from "@layoutit/polycss-core";
 import type { TransformProps } from "../shapes/types";
@@ -87,6 +89,14 @@ import {
   type PolyMeshHandle,
   type PolyPointerEvent,
 } from "./events";
+
+/** Per-frame caster-mesh silhouette edge owner cache. Keyed by the
+ *  caster's polygons array identity (snapshot from `shadowCasters`) +
+ *  position/scale/rotation bust key. Used by the H9 silhouette path in
+ *  `computeReceiverShadowFaces`. Lives at module scope so callsites share
+ *  cache across receivers in a single frame. */
+const reactEdgeOwnersCache = new WeakMap<readonly Polygon[], ReadonlyMap<string, EdgeOwners>>();
+const reactEdgeOwnersCacheKey = new WeakMap<readonly Polygon[], string>();
 
 function solidPaintVars(defaults: SolidPaintDefaults): CSSProperties | null {
   const out: Record<string, string> = {};
@@ -1018,8 +1028,33 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
       // shared-edge adjacency map so the algorithm skips projecting
       // edge-sharing neighbour polygons (kills the spiderweb seam
       // shadows on smooth GLB meshes — apple, sphere, teapot).
-      const selfMap = data.polygons === polygons ? selfShadowEdgeMap : undefined;
-      casterInputs.push({ id: casterId, items, selfShadowEdgeMap: selfMap });
+      const isSelf = data.polygons === polygons;
+      const selfMap = isSelf ? selfShadowEdgeMap : undefined;
+      // H9 silhouette path: build/reuse world-frame edge owners for
+      // non-self casters with enough polygons. The cache key matches the
+      // transform fields fed into `prepareCasterPolyItems` so the world-
+      // frame owners stay consistent with the matching items.
+      let edgeOwners: ReadonlyMap<string, EdgeOwners> | undefined;
+      if (!isSelf && data.polygons.length >= 40) {
+        const dposArr = data.position;
+        const drot = data.rotation ?? null;
+        const dsKey = JSON.stringify(data.scale ?? null);
+        const eoKey = `${dposArr[0]},${dposArr[1]},${dposArr[2]}|${drot ? drot.join(",") : "n"}|${dsKey}`;
+        let cachedOwners = reactEdgeOwnersCache.get(data.polygons);
+        if (cachedOwners === undefined || reactEdgeOwnersCacheKey.get(data.polygons) !== eoKey) {
+          cachedOwners = prepareCasterEdgeOwners(data.polygons, dposArr, data.scale, drot);
+          reactEdgeOwnersCache.set(data.polygons, cachedOwners);
+          reactEdgeOwnersCacheKey.set(data.polygons, eoKey);
+        }
+        edgeOwners = cachedOwners;
+      }
+      casterInputs.push({
+        id: casterId,
+        items,
+        selfShadowEdgeMap: selfMap,
+        edgeOwners,
+        casterPolygonCount: data.polygons.length,
+      });
     }
     const cameraState = cameraCtx?.store.getState().cameraState;
     const cameraRot: CameraCullRotation = {

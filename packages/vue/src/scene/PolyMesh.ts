@@ -31,11 +31,13 @@ import {
   findOverlappingPolygonDuplicates,
   optimizeMeshPolygons,
   parseHexColor,
+  prepareCasterEdgeOwners,
   prepareCasterPolyItems,
   prepareReceiverFacePlanes,
   projectCssVertexToGround,
   worldDirectionToCss,
   type CameraCullRotation,
+  type EdgeOwners,
   type ReceiverCasterInput,
 } from "@layoutit/polycss-core";
 import { usePolyMesh, type UseMeshOptions } from "./useMesh";
@@ -70,6 +72,13 @@ import {
   type PolyMeshHandle,
   type PolyPointerEvent,
 } from "./events";
+
+/** Per-frame caster-mesh silhouette edge owner cache. Keyed by the
+ *  caster's polygons array identity + position/scale/rotation bust key.
+ *  Used by the H9 silhouette path in `computeReceiverShadowFaces`. Lives
+ *  at module scope so multiple receivers in one frame share the cache. */
+const vueEdgeOwnersCache = new WeakMap<readonly Polygon[], ReadonlyMap<string, EdgeOwners>>();
+const vueEdgeOwnersCacheKey = new WeakMap<readonly Polygon[], string>();
 
 function solidPaintVars(defaults: SolidPaintDefaults): CSSProperties | null {
   const out: CSSProperties = {};
@@ -652,7 +661,29 @@ export const PolyMesh = defineComponent({
         // cached shared-edge map so the algorithm skips projecting
         // edge-sharing neighbour polygons (kills spiderweb seam
         // shadows on smooth GLB meshes — apple, sphere, teapot).
-        casterInputs.push({ id: Symbol(`caster-${i++}`), items, selfShadowEdgeMap: isSelf ? cachedSelfMap : undefined });
+        // H9 silhouette path: build/reuse world-frame edge owners for
+        // non-self casters with enough polygons.
+        let edgeOwners: ReadonlyMap<string, EdgeOwners> | undefined;
+        if (!isSelf && data.polygons.length >= 40) {
+          const drot = data.rotation ?? null;
+          const dposArr = data.position;
+          const dsKey = JSON.stringify(data.scale ?? null);
+          const eoKey = `${dposArr[0]},${dposArr[1]},${dposArr[2]}|${drot ? drot.join(",") : "n"}|${dsKey}`;
+          let cachedOwners = vueEdgeOwnersCache.get(data.polygons);
+          if (cachedOwners === undefined || vueEdgeOwnersCacheKey.get(data.polygons) !== eoKey) {
+            cachedOwners = prepareCasterEdgeOwners(data.polygons, dposArr, data.scale, drot);
+            vueEdgeOwnersCache.set(data.polygons, cachedOwners);
+            vueEdgeOwnersCacheKey.set(data.polygons, eoKey);
+          }
+          edgeOwners = cachedOwners;
+        }
+        casterInputs.push({
+          id: Symbol(`caster-${i++}`),
+          items,
+          selfShadowEdgeMap: isSelf ? cachedSelfMap : undefined,
+          edgeOwners,
+          casterPolygonCount: data.polygons.length,
+        });
       }
       const cameraState = cameraCtx?.store.getState().cameraState;
       const cameraRot: CameraCullRotation = {

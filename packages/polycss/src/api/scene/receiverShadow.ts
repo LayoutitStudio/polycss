@@ -12,10 +12,12 @@ import {
   buildSharedEdgeMap,
   computeReceiverShadowFaces,
   meshScaleVec3,
+  prepareCasterEdgeOwners,
   prepareCasterPolyItems,
   prepareReceiverFacePlanes,
   type CasterPolyItem,
   type CameraCullRotation,
+  type EdgeOwners,
   type ReceiverCasterInput,
   type ReceiverFacePlane,
   type Vec3,
@@ -45,6 +47,13 @@ const mountedFacesByMesh = new WeakMap<MeshEntry, Map<number, MountedFace>>();
  *  array reference changes (cheap identity check, no deep diff). */
 const sharedEdgeMapCache = new WeakMap<MeshEntry, ReadonlyMap<number, ReadonlySet<number>>>();
 const sharedEdgeMapCacheKey = new WeakMap<MeshEntry, readonly unknown[]>();
+
+/** Cached silhouette edge ownership per caster mesh. Same shape as the
+ *  per-frame `casterItemsCache` bust key — polygon list identity + world
+ *  transform fields — so the world-frame edge owners stay coherent with
+ *  the matching CasterPolyItem[] without an extra invalidation pass. */
+const edgeOwnersCache = new WeakMap<MeshEntry, ReadonlyMap<string, EdgeOwners>>();
+const edgeOwnersCacheKey = new WeakMap<MeshEntry, string>();
 
 function mountedFacesFor(entry: MeshEntry): Map<number, MountedFace> {
   let m = mountedFacesByMesh.get(entry);
@@ -162,7 +171,32 @@ export function emitReceiverShadows(
       }
       selfShadowEdgeMap = cachedMap;
     }
-    casterInputs.push({ id: caster, items: cached, selfShadowEdgeMap });
+    // Silhouette edge ownership for the H9 per-caster-mesh silhouette
+    // path. Skip on self-shadow (caster IS receiver — the per-poly path
+    // is geometrically required there) and on tiny meshes (silhouette
+    // overhead exceeds the per-poly cost below ~40 polys).
+    let edgeOwners: ReadonlyMap<string, EdgeOwners> | undefined;
+    if (caster !== receiverEntry && caster.polygons.length >= 40) {
+      let cachedOwners = edgeOwnersCache.get(caster);
+      if (cachedOwners === undefined || edgeOwnersCacheKey.get(caster) !== ckey) {
+        cachedOwners = prepareCasterEdgeOwners(
+          caster.polygons,
+          cpos,
+          caster.handle.transform.scale,
+          crot,
+        );
+        edgeOwnersCache.set(caster, cachedOwners);
+        edgeOwnersCacheKey.set(caster, ckey);
+      }
+      edgeOwners = cachedOwners;
+    }
+    casterInputs.push({
+      id: caster,
+      items: cached,
+      selfShadowEdgeMap,
+      edgeOwners,
+      casterPolygonCount: caster.polygons.length,
+    });
   }
 
   const cameraRot: CameraCullRotation = {

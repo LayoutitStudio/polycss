@@ -182,6 +182,7 @@ export type { ReceiverPlaneGroup } from "./shadow/receiverFaceGroups";
 export {
   buildSharedEdgeMap,
   computeReceiverShadowFaces,
+  prepareCasterEdgeOwners,
   prepareCasterPolyItems,
   prepareReceiverFacePlanes,
 } from "./shadow/computeReceiverShadows";
@@ -193,6 +194,12 @@ export type {
   ReceiverShadowFaceSpec,
   ReceiverShadowPath,
 } from "./shadow/computeReceiverShadows";
+export {
+  buildEdgeOwners,
+  classifyFacing,
+  extractSilhouetteLoops,
+} from "./shadow/silhouette";
+export type { EdgeOwners } from "./shadow/silhouette";
 
 // ── Animation ─────────────────────────────────────────────────────
 export {
