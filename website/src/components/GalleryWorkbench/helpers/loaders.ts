@@ -4,6 +4,7 @@ import {
   parseGltf,
   parseMtl,
   parseObj,
+  parseStl,
   parseVox,
 } from "@layoutit/polycss";
 import type { ObjParseOptions } from "@layoutit/polycss";
@@ -181,6 +182,30 @@ export async function loadPresetModel(
     };
   }
 
+  if (model.kind === "stl") {
+    const parsedStl = parseStl(buf, mergeParserOptions(model.options, parser));
+    const sourcePolygonCount = parsedStl.polygons.length;
+    const effectiveMeshResolution = activeMeshResolution(meshResolution);
+    const parsed = optimizeMeshParseResult(parsedStl, {
+      meshResolution: effectiveMeshResolution,
+      source: parsedStl,
+    });
+    return {
+      label: model.label,
+      kind: "stl",
+      parseResult: parsed,
+      rawPolygons: parsed.polygons,
+      polygons: parsed.polygons,
+      optimizedPolygons: parsed.polygons,
+      optimizedMeshResolution: effectiveMeshResolution,
+      sourcePolygons: sourcePolygonCount,
+      sourceBytes: buf.byteLength,
+      warnings: parsed.warnings ?? [],
+      parseMs: performance.now() - started,
+      dispose: parsed.dispose,
+    };
+  }
+
   const gltfUrl = new URL(url, window.location.href).href;
   const parsedGltf = parseGltf(buf, {
     ...mergeParserOptions(model.options, parser),
@@ -322,6 +347,36 @@ export async function loadDroppedModel(
       rawPolygons: parsed.polygons,
       polygons: parsed.polygons,
       sourcePolygons: parsed.polygons.length,
+      sourceBytes,
+      warnings: parsed.warnings ?? [],
+      parseMs: performance.now() - started,
+      dispose: parsed.dispose,
+    };
+  }
+
+  if (source.kind === "stl") {
+    const parsedStl = parseStl(buf, options);
+    const sourcePolygonCount = parsedStl.polygons.length;
+    const effectiveMeshResolution = activeMeshResolution(meshResolution);
+    const parsed = optimizeMeshParseResult(parsedStl, {
+      meshResolution: effectiveMeshResolution,
+      source: parsedStl,
+    });
+    try {
+      assertImportedRenderedPolygonLimit(parsed, meshResolution, source.label);
+    } catch (error) {
+      parsed.dispose();
+      throw error;
+    }
+    return {
+      label: source.label,
+      kind: "stl",
+      parseResult: parsed,
+      rawPolygons: parsed.polygons,
+      polygons: parsed.polygons,
+      optimizedPolygons: parsed.polygons,
+      optimizedMeshResolution: effectiveMeshResolution,
+      sourcePolygons: sourcePolygonCount,
       sourceBytes,
       warnings: parsed.warnings ?? [],
       parseMs: performance.now() - started,

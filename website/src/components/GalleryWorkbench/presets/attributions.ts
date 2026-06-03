@@ -144,6 +144,20 @@ export function polyPizzaAttribution(
   };
 }
 
+export function thingiverseAttribution(
+  creator: string,
+  thingId: number,
+  tris: number,
+  license = "Creative Commons - Attribution",
+): ModelAttribution {
+  return {
+    creator,
+    license,
+    sourceUrl: `https://www.thingiverse.com/thing:${thingId}`,
+    tris,
+  };
+}
+
 export const PARFAITUWU_TREE_ATTRIBUTION = polyPizzaAttribution("ParfaitUwU", "MSuchZNT2G");
 
 export function polyPizzaJeremyAttribution(publicId: string): ModelAttribution {

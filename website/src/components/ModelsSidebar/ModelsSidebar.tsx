@@ -105,7 +105,7 @@ export function ModelsSidebar({
             className="model-file-input"
             type="file"
             multiple
-            accept=".obj,.glb,.vox,.mtl,.png,.jpg,.jpeg,.webp,.gif,.bmp"
+            accept=".obj,.glb,.stl,.vox,.mtl,.png,.jpg,.jpeg,.webp,.gif,.bmp"
             onChange={onFileInputChange}
           />
         </div>
