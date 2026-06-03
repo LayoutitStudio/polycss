@@ -36,7 +36,7 @@ import {
 import type { BuilderPlacementTarget, BuilderToolMode, PlacedItem, TargetMode, ToolMode } from "./types";
 
 const TILE = 50;
-const BUILDER_IMPORT_EXTENSIONS = new Set(["obj", "glb", "vox"]);
+const BUILDER_IMPORT_EXTENSIONS = new Set(["obj", "glb", "vox", "stl"]);
 const BUILDER_IMPORT_DEFAULT_COLOR = "#8b95a1";
 
 function clampBuilderCameraUpdate(partial: Partial<SceneOptionsState>): Partial<SceneOptionsState> {
@@ -68,7 +68,7 @@ function fileExtension(name: string): string {
 
 function importedKindForFile(file: File): DroppedModelSource["kind"] | null {
   const ext = fileExtension(file.name);
-  if (ext === "obj" || ext === "glb" || ext === "vox") return ext;
+  if (ext === "obj" || ext === "glb" || ext === "vox" || ext === "stl") return ext;
   return null;
 }
 
@@ -91,7 +91,7 @@ function importedSourceFromFiles(files: File[]): DroppedModelSource | null {
       targetSize: 60,
       defaultColor: BUILDER_IMPORT_DEFAULT_COLOR,
     },
-    galleryBucket: kind === "vox" ? "Voxel" : "Solid",
+    galleryBucket: kind === "vox" ? "Voxel" : kind === "stl" ? "CAD" : "Solid",
     attribution: { creator: "Local file" },
   };
 
@@ -285,7 +285,7 @@ export default function BuilderWorkbench() {
 
     const source = importedSourceFromFiles(files);
     if (!source) {
-      const message = "Choose a .vox, .obj, or .glb file.";
+      const message = "Choose a .vox, .obj, .glb, or .stl file.";
       setImportError(message);
       console.warn("[builder] import ignored:", message);
       return;
@@ -484,7 +484,7 @@ export default function BuilderWorkbench() {
         type="file"
         hidden
         multiple
-        accept=".vox,.obj,.glb,.mtl,.png,.jpg,.jpeg,.webp,.gif,.bmp"
+        accept=".vox,.obj,.glb,.stl,.mtl,.png,.jpg,.jpeg,.webp,.gif,.bmp"
         onChange={handleImportInputChange}
       />
 

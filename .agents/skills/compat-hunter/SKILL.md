@@ -27,6 +27,8 @@ Use this skill when the user wants to keep digging for parser compatibility issu
 3. Treat these as known non-actionable unless the user asks to support them:
    - glTF POINTS/LINES/LINE_LOOP/LINE_STRIP primitives.
    - Required Draco or meshopt compressed primitives skipped with a warning.
+   - STL source-quality diagnostics that the parser already handles: degenerate triangles, repaired winding, component orientation, non-manifold/shared-edge topology, supplied-normal mismatches, malformed normals/facets, overdeclared binary triangle counts, trailing binary bytes, and ignored non-Magics binary attribute bytes.
+   - Empty/corrupt STL containers with no complete triangle records or no valid ASCII facets.
 
 4. Stop and inspect anything classified as:
    - `throw`
@@ -78,6 +80,20 @@ Keep known-warning files too:
 
 ```bash
 pnpm compat-hunter -- --keep-known --max-models 500
+```
+
+For STL hunts, `--keep-known` keeps warning-only models under `known/` and the report includes `warningCategoriesByKind` plus `stlDiagnostics` on retained rows. Unknown STL warning text, throws, zero-polygon outputs, and suspicious DOM collapses remain `interesting/`.
+
+Avoid repeating the same shuffled queue:
+
+```bash
+pnpm compat-hunter -- --sources thingi10k --exts stl --max-models 5000 --seed "$(date +%s)" --queue-offset 5000
+```
+
+Skip models already attempted by prior reports:
+
+```bash
+pnpm compat-hunter -- --sources thingi10k --exts stl --max-models 5000 --skip-report bench/results/<previous-run>/report.json
 ```
 
 Continue after interesting cases:

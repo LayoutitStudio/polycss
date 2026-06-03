@@ -38,6 +38,7 @@
     "bench:minecraft-movement": "pnpm --filter @layoutit/polycss-examples-vanilla build && node bench/minecraft-movement-bench.mjs",
     "bench:lossy": "pnpm --filter @layoutit/polycss-core build && node bench/lossy-optimizer-bench.mjs",
     "bench:lossy:corpus": "pnpm --filter @layoutit/polycss-core build && node bench/lossy-corpus-bench.mjs",
+    "bench:stl-samples": "pnpm --filter @layoutit/polycss-core build && node bench/stl-corpus-sanity.mjs",
     "compat-hunter": "pnpm --filter @layoutit/polycss-core build && node .agents/skills/compat-hunter/scripts/compat-hunter.mjs",
     "bench:seams": "pnpm --filter @layoutit/polycss-core build && node bench/seam-gap-bench.mjs",
     "bench:seams:render": "pnpm --filter @layoutit/polycss-core build && node bench/seam-gap-bench.mjs --render",

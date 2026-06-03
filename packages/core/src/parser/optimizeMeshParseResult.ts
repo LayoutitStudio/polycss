@@ -198,6 +198,10 @@ function staticSimplificationTextureEligible(polygons: Polygon[]): boolean {
   return polygons.length === 0 || textured / polygons.length <= MAX_STATIC_SIMPLIFY_TEXTURED_RATIO;
 }
 
+function hasStlTopology(result: ParseResult): boolean {
+  return Boolean(result.metadata?.stlTopology);
+}
+
 function staticSimplificationEarlyStopDropRatio(
   options: OptimizeMeshParseResultOptions,
   useCandidateFirst: boolean,
@@ -230,12 +234,14 @@ class ParseOptimizationContext {
   optimize(): ParseResult {
     if (this.result.voxelSource || this.result.animation) return this.result;
     const cleaned = cleanupLossyBakedTextureColors(this.result, this.options, this.meshResolution);
-    const canSimplify = this.canSimplify(cleaned.polygons);
+    const stlTopology = hasStlTopology(cleaned);
+    const optimizerMeshResolution = stlTopology ? "lossless" : this.meshResolution;
+    const canSimplify = this.canSimplify(cleaned.polygons, optimizerMeshResolution);
     const useCandidateFirst = canSimplify &&
       cleaned.polygons.length >= CANDIDATE_FIRST_MIN_SOURCE_POLYGONS &&
       cleaned.polygons.length <= CANDIDATE_FIRST_MAX_SOURCE_POLYGONS;
     const polygons = optimizeParseMeshPolygons(cleaned.polygons, {
-      meshResolution: this.meshResolution,
+      meshResolution: optimizerMeshResolution,
       useCandidateFirst,
       staticSimplification: canSimplify
         ? {
@@ -243,12 +249,13 @@ class ParseOptimizationContext {
           earlyStopDropRatio: staticSimplificationEarlyStopDropRatio(this.options, useCandidateFirst),
         }
         : false,
+      skipInteriorCull: stlTopology,
     });
     return polygons === cleaned.polygons ? cleaned : { ...cleaned, polygons };
   }
 
-  private canSimplify(polygons: Polygon[]): boolean {
-    return this.meshResolution === "lossy" &&
+  private canSimplify(polygons: Polygon[], meshResolution: MeshResolution): boolean {
+    return meshResolution === "lossy" &&
       this.options.simplifyTriangleMeshes !== false &&
       staticSimplificationTextureEligible(polygons);
   }

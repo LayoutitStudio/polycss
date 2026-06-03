@@ -113,14 +113,14 @@ describe("createPolyOrbitControls", () => {
       expect(scene.camera.state.rotY).toBeCloseTo(((before - 25) % 360 + 360) % 360, 1);
     });
 
-    it("left-drag updates rotX (orbit, clamped to [0, 100])", () => {
+    it("left-drag updates rotX without a vertical clamp", () => {
       controls = createPolyOrbitControls(scene);
       const before = scene.camera.state.rotX ?? 65;
       dispatchPointer(host, "pointerdown", { x: 100, y: 100 });
-      dispatchPointer(host, "pointermove", { x: 100, y: 60 });
-      dispatchPointer(host, "pointerup", { x: 100, y: 60 });
-      // -40 px / 4 = -10 deg of dY → rotX = before - (-10) = before + 10
-      expect(scene.camera.state.rotX).toBeCloseTo(before + 10, 1);
+      dispatchPointer(host, "pointermove", { x: 100, y: -500 });
+      dispatchPointer(host, "pointerup", { x: 100, y: -500 });
+      // -600 px / 4 = -150 deg of dY -> rotX = before - (-150) = before + 150.
+      expect(scene.camera.state.rotX).toBeCloseTo(before + 150, 1);
     });
 
     it("does NOT change target on plain left-drag", () => {

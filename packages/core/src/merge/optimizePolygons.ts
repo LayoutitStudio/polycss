@@ -219,6 +219,7 @@ export interface OptimizeStaticSimplificationOptions {
 export interface OptimizeParseMeshPolygonsOptions extends OptimizeMeshPolygonsOptions {
   staticSimplification?: OptimizeStaticSimplificationOptions | false;
   useCandidateFirst?: boolean;
+  skipInteriorCull?: boolean;
 }
 
 interface StaticSimplificationPlan {
@@ -341,8 +342,12 @@ export function optimizeParseMeshPolygons(
     rectCover: options.rectCover,
   };
   const graph = new MeshOptimizationArtifactGraph();
-  return graph.workspaceFor(polygons, { captureVisiblePolygons: true })
-    .createRun(optimizeOptions, { captureVisiblePolygons: true })
+  const runOptions: OptimizeMeshPolygonsRunOptions = {
+    captureVisiblePolygons: true,
+    skipInteriorCull: options.skipInteriorCull === true,
+  };
+  return graph.workspaceFor(polygons, runOptions)
+    .createRun(optimizeOptions, runOptions)
     .optimizeParse({
       staticSimplification: options.staticSimplification,
       useCandidateFirst: options.useCandidateFirst === true,
@@ -872,8 +877,11 @@ class MeshCandidateAcceptor {
     const gain = this.bestCost - candidateCost;
     if (gain <= 0) return false;
     if (gain < minGain) return false;
-    const candidateSeam = seamOverlapSafetyDiagnostics(candidate);
-    if (seamDiagnosticsWorse(candidateSeam, this.bestSeamDiagnostics())) return false;
+    const candidateSeam = trySeamOverlapSafetyDiagnostics(candidate);
+    if (!candidateSeam) return false;
+    const baselineSeam = this.bestSeamDiagnostics();
+    if (!baselineSeam) return false;
+    if (seamDiagnosticsWorse(candidateSeam, baselineSeam)) return false;
     if (topologyGapDiagnosticsWorse(
       this.bestTopologyEdges(),
       this.bestTopologySelfDiagnostics(),
@@ -898,10 +906,12 @@ class MeshCandidateAcceptor {
     this.bestDiagnostics = { polygons: this.best, seam };
   }
 
-  private bestSeamDiagnostics(): SeamOverlapDiagnostics {
+  private bestSeamDiagnostics(): SeamOverlapDiagnostics | null {
     if (this.bestDiagnostics.polygons !== this.best) this.resetBestDiagnostics();
     if (!this.bestDiagnostics.seam) {
-      this.bestDiagnostics.seam = seamOverlapSafetyDiagnostics(this.best);
+      const seam = trySeamOverlapSafetyDiagnostics(this.best);
+      if (!seam) return null;
+      this.bestDiagnostics.seam = seam;
     }
     return this.bestDiagnostics.seam;
   }
@@ -932,6 +942,15 @@ function polygonRenderCost(polygons: Polygon[]): number {
     cost += 1 + irregularPenalty + texturePenalty;
   }
   return cost;
+}
+
+function trySeamOverlapSafetyDiagnostics(polygons: Polygon[]): SeamOverlapDiagnostics | null {
+  try {
+    return seamOverlapSafetyDiagnostics(polygons);
+  } catch (error) {
+    if (error instanceof RangeError && error.message === "Set maximum size exceeded") return null;
+    throw error;
+  }
 }
 
 function seamDiagnosticsWorse(

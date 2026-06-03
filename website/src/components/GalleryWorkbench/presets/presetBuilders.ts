@@ -1,4 +1,4 @@
-import type { GalleryPresetFile, ObjGalleryPresetFile, PresetModel } from "../types";
+import type { GalleryPresetFile, ObjGalleryPresetFile, PresetModel, StlGalleryPresetFile } from "../types";
 import { GLB_PRESET_ATTRIBUTIONS } from "./attributions";
 
 function encodeGallerySegment(segment: string): string {
@@ -6,7 +6,7 @@ function encodeGallerySegment(segment: string): string {
   return encodeURIComponent(segment).replace(/%26/g, "&");
 }
 
-export function galleryFileUrl(folder: "glb" | "obj" | "vox", file: string): string {
+export function galleryFileUrl(folder: "glb" | "obj" | "vox" | "stl", file: string): string {
   return `/gallery/${folder}/${file.split("/").map(encodeGallerySegment).join("/")}`;
 }
 
@@ -107,6 +107,26 @@ export function voxPreset(input: GalleryPresetFile): PresetModel {
   };
 }
 
+export function stlPreset(input: StlGalleryPresetFile): PresetModel {
+  return {
+    id: presetIdFromFile("stl", input.file),
+    label: input.label ?? labelFromFile(input.file),
+    category: input.category,
+    kind: "stl",
+    url: galleryFileUrl("stl", input.file),
+    options: {
+      targetSize: input.targetSize ?? 60,
+      defaultColor: input.defaultColor ?? "#8b95a1",
+      ...(input.options ?? {}),
+    },
+    zoom: input.zoom ?? 0.35,
+    rotX: input.rotX ?? 65,
+    rotY: input.rotY ?? 45,
+    galleryBucket: input.galleryBucket ?? "CAD",
+    attribution: input.attribution,
+  };
+}
+
 export function stripParenthesizedText(label: string): string {
-  return label.replace(/\s*\((?:GLB|UV-mapped|[^)]*\.(?:glb|gltf|obj|vox)[^)]*)\)/gi, "").trim();
+  return label.replace(/\s*\((?:GLB|UV-mapped|[^)]*\.(?:glb|gltf|obj|vox|stl)[^)]*)\)/gi, "").trim();
 }

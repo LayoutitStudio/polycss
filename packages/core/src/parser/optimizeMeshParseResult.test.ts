@@ -4,13 +4,52 @@ import type { Polygon, Vec3 } from "../types";
 import { optimizeMeshPolygons } from "../merge/optimizePolygons";
 import { optimizeMeshParseResult } from "./optimizeMeshParseResult";
 
-function parseResult(polygons: Polygon[]): ParseResult {
+function parseResult(polygons: Polygon[], warnings: string[] = []): ParseResult {
   return {
     polygons,
     objectUrls: [],
     dispose() {},
-    warnings: [],
+    warnings,
   };
+}
+
+function axisQuad(
+  cx: number,
+  cy: number,
+  cz: number,
+  normalAxis: "x" | "y" | "z",
+  sign: 1 | -1,
+  size = 1,
+): Polygon {
+  const h = size / 2;
+  if (normalAxis === "x") {
+    if (sign > 0) {
+      return { vertices: [[cx, cy - h, cz - h], [cx, cy + h, cz - h], [cx, cy + h, cz + h], [cx, cy - h, cz + h]] };
+    }
+    return { vertices: [[cx, cy - h, cz - h], [cx, cy - h, cz + h], [cx, cy + h, cz + h], [cx, cy + h, cz - h]] };
+  }
+  if (normalAxis === "y") {
+    if (sign > 0) {
+      return { vertices: [[cx - h, cy, cz - h], [cx - h, cy, cz + h], [cx + h, cy, cz + h], [cx + h, cy, cz - h]] };
+    }
+    return { vertices: [[cx - h, cy, cz - h], [cx + h, cy, cz - h], [cx + h, cy, cz + h], [cx - h, cy, cz + h]] };
+  }
+  if (sign > 0) {
+    return { vertices: [[cx - h, cy - h, cz], [cx + h, cy - h, cz], [cx + h, cy + h, cz], [cx - h, cy + h, cz]] };
+  }
+  return { vertices: [[cx - h, cy - h, cz], [cx - h, cy + h, cz], [cx + h, cy + h, cz], [cx + h, cy - h, cz]] };
+}
+
+function cubeOutward(cx: number, cy: number, cz: number, size = 1): Polygon[] {
+  const h = size / 2;
+  return [
+    axisQuad(cx + h, cy, cz, "x", 1, size),
+    axisQuad(cx - h, cy, cz, "x", -1, size),
+    axisQuad(cx, cy + h, cz, "y", 1, size),
+    axisQuad(cx, cy - h, cz, "y", -1, size),
+    axisQuad(cx, cy, cz + h, "z", 1, size),
+    axisQuad(cx, cy, cz - h, "z", -1, size),
+  ];
 }
 
 function grid(size: number): Polygon[] {
@@ -95,6 +134,54 @@ describe("optimizeMeshParseResult", () => {
     const optimized = optimizeMeshParseResult(animated);
 
     expect(optimized).toBe(animated);
+  });
+
+  it("skips interior culling for STL parse results with clean topology metadata", () => {
+    const outer = cubeOutward(0, 0, 0, 10);
+    const interior = axisQuad(0, 0, 0, "z", 1, 0.1);
+    const source = {
+      ...parseResult([...outer, interior]),
+      metadata: {
+        stlTopology: {
+          componentCount: 1,
+          repairedTriangleCount: 0,
+          outwardComponentCount: 0,
+          suppliedNormalComponentCount: 0,
+          inconsistentSharedEdgeCount: 0,
+          nonManifoldSharedEdgeCount: 0,
+        },
+      },
+    };
+
+    const lossless = optimizeMeshParseResult(source, { meshResolution: "lossless" });
+    const lossy = optimizeMeshParseResult(source, { meshResolution: "lossy" });
+
+    expect(lossless.polygons).toHaveLength(outer.length + 1);
+    expect(lossy.polygons).toHaveLength(outer.length + 1);
+  });
+
+  it("skips interior culling for STL parse results with unreliable topology metadata", () => {
+    const outer = cubeOutward(0, 0, 0, 10);
+    const interior = axisQuad(0, 0, 0, "z", 1, 0.1);
+    const source = {
+      ...parseResult([...outer, interior]),
+      metadata: {
+        stlTopology: {
+          componentCount: 1,
+          repairedTriangleCount: 0,
+          outwardComponentCount: 0,
+          suppliedNormalComponentCount: 0,
+          inconsistentSharedEdgeCount: 0,
+          nonManifoldSharedEdgeCount: 1,
+        },
+      },
+    };
+
+    const lossless = optimizeMeshParseResult(source, { meshResolution: "lossless" });
+    const lossy = optimizeMeshParseResult(source, { meshResolution: "lossy" });
+
+    expect(lossless.polygons).toHaveLength(outer.length + 1);
+    expect(lossy.polygons).toHaveLength(outer.length + 1);
   });
 
   it("skips static triangle simplification for texture-dominant parse results", () => {

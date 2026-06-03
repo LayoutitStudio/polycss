@@ -85,7 +85,7 @@ function applyOrbit(
   const dX = (dx / POINTER_DRAG_SPEED) * f;
   const dY = (dy / POINTER_DRAG_SPEED) * f;
   return {
-    rotX: Math.max(0, Math.min(100, rotX - dY)),
+    rotX: rotX - dY,
     rotY: (((rotY - dX) % 360) + 360) % 360,
   };
 }

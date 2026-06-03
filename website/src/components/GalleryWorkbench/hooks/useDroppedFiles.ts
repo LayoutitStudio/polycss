@@ -2,7 +2,7 @@ import { useCallback, useRef, useState, type ChangeEvent, type Dispatch, type Dr
 import type { DroppedModelSource, PresetModel, ParserOptionsState } from "../types";
 import { labelFromFile } from "../presets";
 
-const DROPPED_MESH_EXTENSIONS = new Set(["obj", "glb", "vox"]);
+const DROPPED_MESH_EXTENSIONS = new Set(["obj", "glb", "vox", "stl"]);
 
 const DEFAULT_COLOR = "#8b95a1";
 
@@ -36,7 +36,7 @@ function fileExtension(name: string): string {
 
 function droppedKindForFile(file: File): DroppedModelSource["kind"] | null {
   const ext = fileExtension(file.name);
-  if (ext === "obj" || ext === "glb" || ext === "vox") return ext;
+  if (ext === "obj" || ext === "glb" || ext === "vox" || ext === "stl") return ext;
   return null;
 }
 
@@ -130,6 +130,7 @@ function droppedSourceFromFiles(files: File[], id: string): DroppedModelSource |
       targetSize: 60,
       defaultColor: DEFAULT_COLOR,
     },
+    galleryBucket: kind === "vox" ? "Voxel" : kind === "stl" ? "CAD" : "Solid",
     zoom: kind === "vox" ? 0.4 : 0.35,
     rotX: 65,
     rotY: 45,
@@ -177,7 +178,7 @@ export function useDroppedFiles({ onDroppedSource, onDropError }: UseDroppedFile
       `dropped-${Date.now().toString(36)}-${(droppedIdRef.current += 1).toString(36)}`,
     );
     if (!source) {
-      onDropError("Drop an .obj, .glb, or .vox file.");
+      onDropError("Drop an .obj, .glb, .stl, or .vox file.");
       return;
     }
     setDroppedSource(source);

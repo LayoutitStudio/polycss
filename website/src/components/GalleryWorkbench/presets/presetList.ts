@@ -12,8 +12,8 @@ import {
   POLYCSS_GENERATED_PRIMITIVE_ATTRIBUTION,
   POLYCSS_LOCAL_FIXTURE_ATTRIBUTION,
 } from "./attributions";
-import { GLB_PRESET_FILES, POLY_PIZZA_PRESET_FILES, VOX_PRESET_FILES, OBJ_PRESET_FILES } from "./presetFiles";
-import { glbPreset, objPreset, voxPreset } from "./presetBuilders";
+import { GLB_PRESET_FILES, POLY_PIZZA_PRESET_FILES, VOX_PRESET_FILES, OBJ_PRESET_FILES, STL_PRESET_FILES } from "./presetFiles";
+import { glbPreset, objPreset, stlPreset, voxPreset } from "./presetBuilders";
 import {
   boxPolygons,
   spherePolygons,
@@ -349,6 +349,7 @@ export const PRESETS: PresetModel[] = [
     attribution: POLYCSS_LOCAL_FIXTURE_ATTRIBUTION,
   },
   ...OBJ_PRESET_FILES.map(objPreset),
+  ...STL_PRESET_FILES.map(stlPreset),
   ...GLB_PRESET_FILES.map(glbPreset),
   ...POLY_PIZZA_PRESET_FILES.map(glbPreset),
   ...VOX_PRESET_FILES.map(voxPreset),

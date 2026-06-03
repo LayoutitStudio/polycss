@@ -318,7 +318,7 @@ type Vec3 = [number, number, number];
 
 ## `ParseResult`
 
-Unified return shape from all mesh parsers (`parseObj`, `parseGltf`, `parseVox`, `loadMesh`).
+Unified return shape from all mesh parsers (`parseObj`, `parseGltf`, `parseVox`, `parseStl`, `loadMesh`).
 
 ```ts
 interface ParseResult {
@@ -343,7 +343,50 @@ interface ParseResult {
     animations?: ParseAnimationClip[];
     sourceBytes?: number;
     voxelCount?: number;
+    stlHeader?: string;
+    stlColor?: ParseStlColor;
+    stlSolids?: ParseStlSolid[];
+    stlTopology?: ParseStlTopology;
   };
+}
+```
+
+---
+
+## `ParseStlTopology`
+
+STL winding/connectivity diagnostics exposed on `ParseResult.metadata.stlTopology`. The optimizer uses unreliable topology signals to avoid interior-culling shortcuts that can collapse malformed CAD meshes.
+
+```ts
+interface ParseStlTopology {
+  componentCount: number;
+  repairedTriangleCount: number;
+  outwardComponentCount: number;
+  suppliedNormalComponentCount: number;
+  inconsistentSharedEdgeCount: number;
+  nonManifoldSharedEdgeCount: number;
+}
+```
+
+---
+
+## `ParseStlColor` and `ParseStlSolid`
+
+STL-specific metadata for binary Magics colors and ASCII `solid` groups. `stlSolids` ranges use emitted polygon indices after malformed and degenerate facets have been filtered.
+
+```ts
+interface ParseStlColor {
+  format: "magics";
+  defaultColor: string;
+  alpha: number;
+  coloredTriangleCount: number;
+  defaultColorTriangleCount: number;
+}
+
+interface ParseStlSolid {
+  name: string;
+  start: number;
+  count: number;
 }
 ```
 
@@ -447,7 +490,7 @@ Options for the high-level `loadMesh` dispatcher. Format-specific parser setting
 interface LoadMeshOptions {
   /** Base URL for resolving relative .gltf textures/buffers. */
   baseUrl?: string;
-  /** Companion .mtl URL for OBJ models. Ignored for glTF/GLB/VOX. */
+  /** Companion .mtl URL for OBJ models. Ignored for STL/glTF/GLB/VOX. */
   mtlUrl?: string;
   /** Forwarded to parseObj; merged with materials from mtlUrl when present. */
   objOptions?: ObjParseOptions;
@@ -455,6 +498,8 @@ interface LoadMeshOptions {
   gltfOptions?: GltfParseOptions;
   /** Forwarded to parseVox. */
   voxOptions?: VoxParseOptions;
+  /** Forwarded to parseStl. */
+  stlOptions?: StlParseOptions;
   /** Convert uniform texture-backed faces into solid-color polygons before optimization. */
   solidTextureSamples?: boolean | SolidTextureSampleOptions;
   /** Shared mesh-resolution optimizer. Defaults to "lossy". */
@@ -550,6 +595,25 @@ interface VoxParseOptions {
   paletteMergeDistance?: number;
   /** Lossy RGB distance for recoloring small local color islands/streaks before greedy meshing. Default: disabled. */
   colorRegionMergeDistance?: number;
+}
+```
+
+---
+
+## `StlParseOptions`
+
+Options for `parseStl`. STL is a triangle mesh format; it has no standard units, textures, UVs, or hierarchy. Binary Magics colors are parsed when the STL header declares `COLOR=rgba`.
+
+```ts
+interface StlParseOptions {
+  /** Scale the model so its longest axis is this many world units. */
+  targetSize?: number;
+  /** Shift all vertices by this amount after scaling. */
+  gridShift?: number;
+  /** Solid color assigned to every STL triangle. */
+  defaultColor?: string;
+  /** Source up axis. Default "z"; "y" applies the OBJ/glTF cyclic remap. */
+  upAxis?: "z" | "y";
 }
 ```
 

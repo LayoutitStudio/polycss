@@ -75,7 +75,7 @@ function applyOrbit(
   const f = invertFactor(invert);
   const dX = (dx / POINTER_DRAG_SPEED) * f;
   const dY = (dy / POINTER_DRAG_SPEED) * f;
-  const rotX = Math.max(0, Math.min(100, s.rotX - dY));
+  const rotX = s.rotX - dY;
   const rotY = (((s.rotY - dX) % 360) + 360) % 360;
   handle.update({ rotX, rotY });
 }

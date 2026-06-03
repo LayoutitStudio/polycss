@@ -2,11 +2,11 @@
 // type declarations that flow between subfolders (presets/, helpers/, the
 // component itself) live here. Component-internal types stay local.
 
-import type { ObjParseOptions, GltfParseOptions, VoxParseOptions, ParseResult, Polygon, ParseAnimationController } from "@layoutit/polycss";
+import type { ObjParseOptions, GltfParseOptions, VoxParseOptions, StlParseOptions, ParseResult, Polygon, ParseAnimationController } from "@layoutit/polycss";
 
 export type Renderer = "react" | "vanilla";
-export type ModelKind = "obj" | "glb" | "gltf" | "vox" | "primitive";
-export type GalleryBucket = "Primitives" | "Solid" | "Textured" | "Animated" | "Voxel";
+export type ModelKind = "obj" | "glb" | "gltf" | "vox" | "stl" | "primitive";
+export type GalleryBucket = "Primitives" | "Solid" | "CAD" | "Textured" | "Animated" | "Voxel";
 export type MatrixPrecision = "exact" | "2" | "3" | "4" | "5" | "6";
 export type BorderShapePrecision = "exact" | "2" | "3" | "4" | "5" | "6";
 
@@ -27,7 +27,7 @@ export interface PresetModel {
   zoom?: number;
   rotX?: number;
   rotY?: number;
-  options?: ObjParseOptions | GltfParseOptions | VoxParseOptions;
+  options?: ObjParseOptions | GltfParseOptions | VoxParseOptions | StlParseOptions;
   galleryBucket?: GalleryBucket;
   attribution?: ModelAttribution;
   /** For kind: "primitive". Returns the polygon array for this primitive. */
@@ -80,4 +80,9 @@ export interface ObjGalleryPresetFile extends GalleryPresetFile {
   mtlFile?: string | null;
   defaultColor?: string;
   options?: ObjParseOptions;
+}
+
+export interface StlGalleryPresetFile extends GalleryPresetFile {
+  defaultColor?: string;
+  options?: StlParseOptions;
 }
