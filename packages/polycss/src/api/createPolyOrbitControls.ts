@@ -108,7 +108,7 @@ export function createPolyOrbitControls(
       scene.camera.update({ target: [t[0] + targetD0, t[1] + targetD1, t[2]] });
     } else {
       // Left-drag orbits
-      const rotX = Math.max(0, Math.min(100, (cameraState.rotX ?? 65) - dY));
+      const rotX = (cameraState.rotX ?? 65) - dY;
       const rotY = ((((cameraState.rotY ?? 45) - dX) % 360) + 360) % 360;
       scene.camera.update({ rotX, rotY });
     }

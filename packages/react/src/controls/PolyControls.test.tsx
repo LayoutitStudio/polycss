@@ -41,7 +41,7 @@ function tickFrame(advanceMs: number, baseTime: { now: number }): void {
 function dispatchPointer(
   el: HTMLElement,
   type: "pointerdown" | "pointermove" | "pointerup",
-  init: { x: number; y: number; pointerId?: number; isPrimary?: boolean },
+  init: { x: number; y: number; pointerId?: number; isPrimary?: boolean; shiftKey?: boolean },
 ): void {
   el.dispatchEvent(
     new PointerEvent(type, {
@@ -51,6 +51,7 @@ function dispatchPointer(
       isPrimary: init.isPrimary ?? true,
       clientX: init.x,
       clientY: init.y,
+      shiftKey: init.shiftKey ?? false,
     }),
   );
 }
@@ -146,6 +147,17 @@ describe("PolyOrbitControls", () => {
     // Drag right (+100 px) → rotY decreases by 100/4 = 25 deg → 45 - 25 = 20.
     const sceneEl = findSceneEl(container);
     expect(sceneEl.style.transform).toContain("rotate(20deg)");
+  });
+
+  it("left-drag updates rotX without a vertical clamp", () => {
+    root = createRoot(container);
+    act(() => root.render(orbitTree({}, { rotX: 95 })));
+    const cameraEl = findCameraEl(container);
+    dispatchPointer(cameraEl, "pointerdown", { x: 100, y: 100 });
+    dispatchPointer(cameraEl, "pointermove", { x: 100, y: 60 });
+    dispatchPointer(cameraEl, "pointerup", { x: 100, y: 60 });
+    const sceneEl = findSceneEl(container);
+    expect(sceneEl.style.transform).toContain("rotateX(105deg)");
   });
 
   // ── Wheel zoom ──────────────────────────────────────────────────────────
@@ -428,5 +440,16 @@ describe("PolyMapControls", () => {
     expect(sceneEl.style.transform).toContain("rotate(0deg)");
     // The translate3d should have changed — target moved
     expect(sceneEl.style.transform).toContain("translate3d(");
+  });
+
+  it("Shift+left-drag orbits rotX without a vertical clamp", () => {
+    root = createRoot(container);
+    act(() => root.render(mapTree({ rotX: 95 })));
+    const cameraEl = findCameraEl(container);
+    dispatchPointer(cameraEl, "pointerdown", { x: 100, y: 100 });
+    dispatchPointer(cameraEl, "pointermove", { x: 100, y: 60, shiftKey: true });
+    dispatchPointer(cameraEl, "pointerup", { x: 100, y: 60 });
+    const sceneEl = findSceneEl(container);
+    expect(sceneEl.style.transform).toContain("rotateX(105deg)");
   });
 });
