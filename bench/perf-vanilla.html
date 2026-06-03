@@ -42,7 +42,11 @@
       camera,
       directionalLight: { direction: initialDir, color: cfg.dir.color, intensity: cfg.dir.intensity },
       ambientLight: { color: cfg.amb.color, intensity: cfg.amb.intensity },
-      shadow: { opacity: cfg.shadow.opacity, lift: initialLift },
+      shadow: {
+        opacity: cfg.shadow.opacity,
+        lift: initialLift,
+        ...(Number.isFinite(cfg.shadow.maxExtend) ? { maxExtend: cfg.shadow.maxExtend } : null),
+      },
       textureLighting: cfg.mode,
       strategies: cfg.strategies,
       autoCenter: cfg.autoCenter,

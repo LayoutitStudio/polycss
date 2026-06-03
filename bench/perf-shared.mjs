@@ -263,6 +263,11 @@ export function parseUrlParams() {
     shadow: {
       opacity: num("so", 0.25),
       lift: num("sl", null), // null = compute from zoom in the perf page
+      // `me=` (max-extend): cap on shadow reach in world units, mirrors the
+      // `shadow.maxExtend` scene option. Null means "let the scene default
+      // (2000) apply." Bench traces can vary this to stress the reach-clip
+      // path in computeReceiverShadowFaces / groundShadow.
+      maxExtend: num("me", null),
     },
     /** Hide the perf overlay (for clean screenshot capture). */
     hideOverlay: bool("nohud", false),
