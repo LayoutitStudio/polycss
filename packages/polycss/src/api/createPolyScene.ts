@@ -1936,6 +1936,14 @@ export function createPolyScene(
         applyMeshLightVarOverride(entry, transform.rotation);
         if (t.rotation !== undefined) syncMountedRenderedForCameraChange(entry, true);
         if (entry.castShadow !== prevCastShadow) {
+          // Voxel-eligible meshes use the direct-matrix fast path only when
+          // castShadow is false (canRenderVoxelDirect). Toggling castShadow
+          // flips that eligibility — if it changes, the mesh has to switch
+          // renderer (direct-voxel ↔ polygon), so re-render the whole entry.
+          // Otherwise emitShadowLeaves runs on the wrong leaf set (the
+          // voxel-direct path has no polygon leaves to project from), and
+          // shadows silently fail to emit.
+          if (entry.voxelSource) renderEntry(entry);
           emitShadowLeaves(entry);
           recomputeShadowGround();
         }
