@@ -127,6 +127,101 @@ section below when explored.
 
 (append-only; newest at top)
 
+### Iteration 2 — H9 silhouette extraction (branch `perf/shadow-silhouette`)
+
+**Hypothesis recap.** Replace the per-caster-polygon SH-clip loop with a
+per-caster-MESH silhouette projection. For a closed solid mesh, the
+projected silhouette is the boundary between front- and back-facing
+polygons relative to the light. Drawing ONE closed polygon per caster
+per receiver face instead of N triangles should drop DOM mutation by
+~100× on the teapot-floor case (2,182 sub-paths → ~10 closed loops).
+
+**Implementation.** New `SILHOUETTE_MIN_POLYS = 40` gate inside
+`computeReceiverShadowFaces` (`packages/core/src/shadow/computeReceiverShadows.ts`).
+For each caster, before the per-receiver-face loop, the algorithm
+classifies polygons as facing/not-facing via the pre-cached `edgeOwners`
+map (`buildEdgeOwners` from `silhouette.ts`) and `classifyFacing`
++ `extractSilhouetteLoops` (already shipped in the parent commit, plus a
+new `prepareCasterEdgeOwners` core helper that walks the world-CSS
+transform once per caster and caches it). Per-receiver-face, the
+silhouette branch 3D-clips each loop against the plane half-space (new
+`clipLoopAbovePlane` Sutherland-Hodgman helper), projects to (u,v), then
+runs the same `reachRect → outlineUv → memberPolysUv` clip pipeline as
+the per-poly branch. Result: ONE sub-path per loop per member-poly
+instead of one per fan-triangulated caster triangle. Self-shadow
+(caster === receiver) and meshes with < 40 polygons fall through to the
+per-poly path — silhouette infra overhead exceeds the per-poly cost on
+small meshes, and the per-poly self-shadow path has different per-face
+contribution semantics. WeakMap caches for `edgeOwners` plumbed through
+the vanilla `receiverShadow.ts`, React `PolyMesh.tsx`, and Vue
+`PolyMesh.ts` callers, with the bust key matching the existing
+`casterItemsCache` key (position/scale/rotation) so the world-frame edge
+owners stay coherent with their matching `CasterPolyItem[]`. New
+`ReceiverCasterInput.edgeOwners` + `casterPolygonCount` fields; new
+core exports: `prepareCasterEdgeOwners`, `buildEdgeOwners`,
+`classifyFacing`, `extractSilhouetteLoops`, `EdgeOwners` type.
+
+**Metrics (shadow-regression fixture, 4 scenes × 3 azimuths).**
+
+| scene         | baseline avg dChars | h9 avg dChars | Δ avg dChars | Δ % |
+| ---           | ---:                | ---:          | ---:         | ---:|
+| teapot-self   | 115,241             | 30,822        | -84,419      | -73.3% |
+| teapot-floor  | 89,816              | 5,396         | -84,420      | -94.0% |
+| castle-floor  | 23,344              | 9,280         | -14,064      | -60.2% |
+| crate-floor   | 212                 | 212           | 0            | 0.0% |
+
+Sub-path counts:
+- teapot-floor: 2,182 → ~10 (≈200× drop, matches the H2 prediction).
+- castle-floor: similar order-of-magnitude collapse to one loop per
+  silhouette.
+- teapot-self: floor receiver collapses to silhouette; the teapot
+  receiver still uses per-poly (self-shadow gate) so 138 receiver
+  SVGs are preserved but the floor sub-path collapsed massively.
+- crate-floor: 12 polys < 40 → gate skipped → per-poly path → unchanged
+  (expected; threshold is the whole point).
+
+Receiver SVG count Δ = 0 across all 12 captures (silhouette doesn't
+change WHICH faces emit, only the path content).
+
+**Trace deltas** (perf-vanilla.html, page=perf mesh=teapot mode=dynamic
+motion=light, 5s sample, vs `shadow-teapot-dynamic-backface-noself.json`
+baseline reference):
+
+| bucket  | frames | dt_p50 (ms) | script_ms |
+| ---     | ---:   | ---:        | ---:      |
+| x3 baseline | 12 | 58.3        | 9.80      |
+| x3 h9       | 50 | 58.20       | 1.63      |
+| x4_plus baseline | 64 | 66.70  | 11.56     |
+| x4_plus h9       | 37 | 66.72  | 4.81      |
+
+frame_p50 stays roughly flat (compositor-dominated, ~115ms gpuViz +
+compositorMain across both runs) but **script_ms drops 6× in the heavy
+x3 bucket and 2.4× in the x4_plus bucket**. The per-frame distribution
+shifts toward lighter buckets (x3 frame share grew 12 → 50; x4_plus
+shrank 64 → 37), so the user-perceived smoothness wins more than the
+median frame-time number suggests. The compositor doesn't get any
+faster because the SVG it composites is the same shape, just authored
+from fewer sub-paths.
+
+**Visual verdict.** All 12 PNG pairs (4 scenes × 3 azimuths) are
+**byte-identical to baseline** by MD5. The silhouette extraction is
+mathematically equivalent to fill-rule:nonzero union of all
+front-facing-poly projections, so the rendered pixels don't shift even
+sub-pixel.
+
+**Three.js parity.** All 12 three.js parity shots (4 meshes × 3 light
+poses) byte-identical to baseline. Since baseline already matched
+three.js, h9 inherits the parity.
+
+**Recommendation: cherry-pick.** Hypothesis confirmed — 94% reduction
+in path-d chars on teapot-floor, 60-73% reductions elsewhere, all
+visually identical, three.js parity preserved, ~5× drop in script_ms.
+The architectural surface change is minimal (two extra fields on
+`ReceiverCasterInput`, one new `prepareCasterEdgeOwners` helper, three
+mirrored caller patches) and the silhouette path is gated so smaller
+meshes (< 40 polys) and self-shadow keep the existing per-poly path
+untouched. Ready for review and merge into `feat/three-parity`.
+
 ### Iteration 1 — H2 path simplify (branch `perf/shadow-path-simplify`)
 
 **Hypothesis recap.** Douglas-Peucker simplification on each per-frame
