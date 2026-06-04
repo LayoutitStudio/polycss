@@ -187,7 +187,7 @@ const TVS = [
               directional-intensity="6.5"
               ambient-intensity="0.4"
             >
-              <poly-orbit-controls drag wheel></poly-orbit-controls>
+              <poly-orbit-controls id="tv-orbit-controls" drag wheel zoom-min="1" zoom-max="200"></poly-orbit-controls>
               <poly-mesh id="tv-mesh" src={TVS[0].src} mtl={('mtl' in TVS[0] ? TVS[0].mtl : undefined)} auto-center cast-shadow receive-shadow></poly-mesh>
               {/* Ground plane for shadow reception. Z position is set
                   per-preset by the script (= TV's bbox minZ) so the floor
@@ -208,6 +208,11 @@ const TVS = [
                   Retro Stack can light up every CRT independently. */}
             </poly-scene>
           </poly-perspective-camera>
+          <div class="tv-camera-mode" role="group" aria-label="Camera mode">
+            <button type="button" class="tv-camera-mode__btn is-active" data-mode="orbit">Orbit</button>
+            <button type="button" class="tv-camera-mode__btn" data-mode="fpv">FPV</button>
+            <span class="tv-camera-mode__hint" data-fpv-hint hidden>WASD · mouse · space</span>
+          </div>
         </div>
       </div>
     </div>
@@ -460,6 +465,44 @@ const TVS = [
         // of the floor at any normal viewing angle.
         const sceneHandle = (sceneEl as unknown as { getScene?: () => { setOptions: (o: Record<string, unknown>) => void } | null }).getScene?.();
         sceneHandle?.setOptions({ shadow: { color: "#000000", opacity: 0.95, lift: 0.1 } });
+
+        // ── Camera-mode toggle (Orbit ⇄ FPV) ───────────────────────────────
+        // Bottom-centre pill swaps the orbit controls for first-person
+        // controls. FPV gives WASD movement + mouse look; click anywhere
+        // in the stage to lock the pointer.
+        const orbitControls = document.getElementById("tv-orbit-controls");
+        const fpvHint = document.querySelector<HTMLElement>("[data-fpv-hint]");
+        let fpvControls: HTMLElement | null = null;
+        function setCameraMode(mode: "orbit" | "fpv"): void {
+          if (!sceneEl) return;
+          root!.querySelectorAll<HTMLButtonElement>(".tv-camera-mode__btn").forEach((b) => {
+            b.classList.toggle("is-active", b.dataset.mode === mode);
+          });
+          if (fpvHint) fpvHint.hidden = mode !== "fpv";
+          if (mode === "fpv") {
+            if (orbitControls) orbitControls.remove();
+            if (!fpvControls) {
+              fpvControls = document.createElement("poly-first-person-controls");
+              fpvControls.setAttribute("move-speed", "30");
+              fpvControls.setAttribute("eye-height", "10");
+              fpvControls.setAttribute("look-sensitivity", "0.15");
+              sceneEl.appendChild(fpvControls);
+            } else if (!fpvControls.isConnected) {
+              sceneEl.appendChild(fpvControls);
+            }
+          } else {
+            if (fpvControls) fpvControls.remove();
+            if (orbitControls && !orbitControls.isConnected) {
+              sceneEl.appendChild(orbitControls);
+            }
+          }
+        }
+        root.querySelectorAll<HTMLButtonElement>(".tv-camera-mode__btn").forEach((btn) => {
+          btn.addEventListener("click", () => {
+            const mode = btn.dataset.mode;
+            if (mode === "orbit" || mode === "fpv") setCameraMode(mode);
+          });
+        });
 
         let activePreset: TvPreset = presets[0];
         let activeIframes: HTMLElement[] = [];
@@ -716,6 +759,45 @@ const TVS = [
     .tv-stage {
       position: relative;
       overflow: hidden;
+    }
+    /* Floating Orbit/FPV pill — bottom-centre of the viewport. Same shape
+       as the builder's camera-mode pill. */
+    .tv-camera-mode {
+      position: absolute;
+      left: 50%;
+      bottom: 16px;
+      transform: translateX(-50%);
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 4px;
+      background: #111316;
+      border: 1px solid #252b36;
+      border-radius: 999px;
+      user-select: none;
+      z-index: 5;
+    }
+    .tv-camera-mode__btn {
+      appearance: none;
+      border: 0;
+      background: #111316;
+      color: #8c98a6;
+      padding: 4px 12px;
+      font: inherit;
+      font-size: 12px;
+      border-radius: 999px;
+      cursor: pointer;
+    }
+    .tv-camera-mode__btn.is-active {
+      color: #0a0b0d;
+      background: #22d3ee;
+    }
+    .tv-camera-mode__hint {
+      color: #707b87;
+      font-size: 11px;
+      padding: 0 10px 0 6px;
+      border-left: 1px solid #2a3039;
+      margin-left: 2px;
     }
     @media (max-width: 38rem) {
       .tv-page { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
