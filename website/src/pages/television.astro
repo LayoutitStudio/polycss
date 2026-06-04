@@ -1,0 +1,646 @@
+---
+import DocsHeader from '../components/DocsHeader.astro';
+import Analytics from '../components/Analytics.astro';
+import '../styles/custom.css';
+
+const title = 'Television | PolyCSS';
+const description = 'Live YouTube iframe placed in 3D space on the screen face of CSS-rendered TV meshes, via the <poly-iframe> custom element.';
+const canonical = 'https://polycss.com/television/';
+
+// Per-TV presets. `screenPolyIndex` is the polygon (post-optimization)
+// inside the GLB/OBJ that represents the screen face — we derive the
+// iframe's position, rotation, width, and height from THAT polygon's
+// vertices at load time. No more eyeballing 8 numbers per TV.
+// Each entry binds a mesh source to one or more screen faces. Each
+// `screens[i].polyIndices` lists the polygons (post-optimization) that
+// make up that screen face; placement is derived from those vertices
+// at load time (no manual position/rotation/size calibration). The first
+// screen's surface normal also drives the camera's rotY so the TV is
+// shown front-on. Per-screen `videoSrc` overrides the default video.
+const DEFAULT_VIDEO_SRC = 'https://www.youtube.com/embed/h03QBNVwX8Q?autoplay=1&mute=1&playsinline=1&modestbranding=1&controls=0&start=175';
+const TVS = [
+  {
+    id: 'old-tv',
+    label: 'Cabinet TV',
+    src: '/television/old-tv.glb',
+    // 50 anchors the plane (it's vertical); 48 is tilted and only contributes
+    // its vertices to the bbox so the iframe still spans that strip.
+    screens: [{ polyIndices: [48, 49, 50, 51, 52, 53] }],
+    cam: { rotX: 70, rotY: 215, zoom: 8 },
+  },
+  {
+    id: 'electronic-tv',
+    label: 'Electronic TV',
+    src: '/television/electronic-tv.glb',
+    screens: [{ polyIndices: [35] }],
+    cam: { rotX: 70, rotY: 35, zoom: 8 },
+  },
+  {
+    id: 'monitor',
+    label: 'Monitor',
+    src: '/television/monitor.glb',
+    screens: [{ polyIndices: [32] }],
+    cam: { rotX: 70, rotY: 35, zoom: 8 },
+  },
+  {
+    id: 'retro-tvs',
+    label: 'Retro Stack',
+    src: '/television/retro-tvs.glb',
+    // Each stacked CRT gets its own iframe. Polygon indices supplied by
+    // hand from the inspector — more screens to come.
+    screens: [
+      { polyIndices: [211, 212, 213, 214, 215] },
+      { polyIndices: [65, 66, 67, 68, 69] },
+      { polyIndices: [119, 120, 121, 122, 123] },
+      { polyIndices: [206, 207, 208, 209, 210] },
+      { polyIndices: [265, 266, 267, 268, 269] },
+    ],
+    cam: { rotX: 70, rotY: 215, zoom: 8 },
+  },
+  {
+    id: 'tv-obj',
+    label: 'Pixel TV',
+    src: '/television/tv-obj.obj',
+    mtl: '/television/materials.mtl',
+    screens: [{ polyIndices: [70] }],
+    cam: { rotX: 70, rotY: 215, zoom: 18 },
+  },
+] as const;
+---
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <Analytics />
+    <title>{title}</title>
+    <meta name="description" content={description} />
+    <link rel="canonical" href={canonical} />
+    <link rel="icon" type="image/x-icon" href="/favicon.ico" />
+  </head>
+  <body>
+    <div class="page">
+      <DocsHeader />
+      <div class="tv-page" data-presets={JSON.stringify(TVS)}>
+        <aside class="tv-rail">
+          <div class="tv-rail__list">
+            {TVS.map((tv, i) => (
+              <button
+                type="button"
+                class:list={['tv-tile', { 'is-active': i === 0 }]}
+                data-preset-id={tv.id}
+                aria-label={`Switch to ${tv.label}`}
+              >
+                <span class={`tv-tile__art tv-tile__art--${tv.id}`} aria-hidden="true">
+                  {tv.id === 'old-tv' && (
+                    <svg viewBox="0 0 64 56" xmlns="http://www.w3.org/2000/svg">
+                      <rect x="4" y="6" width="56" height="40" rx="3" fill="#5b2e15" />
+                      <rect x="9" y="11" width="46" height="28" rx="6" fill="#1c2330" />
+                      <rect x="12" y="14" width="40" height="22" rx="4" fill="#414c5a" />
+                      <rect x="16" y="42" width="32" height="3" fill="#2b1610" />
+                      <rect x="9" y="46" width="3" height="6" fill="#3c1e0e" />
+                      <rect x="52" y="46" width="3" height="6" fill="#3c1e0e" />
+                    </svg>
+                  )}
+                  {tv.id === 'electronic-tv' && (
+                    <svg viewBox="0 0 64 56" xmlns="http://www.w3.org/2000/svg">
+                      <rect x="32" y="4" width="2" height="14" fill="#9aa4b1" />
+                      <circle cx="33" cy="3" r="2" fill="#ff6b35" />
+                      <path d="M10 18 L54 18 L58 22 L58 46 L6 46 L6 22 Z" fill="#e9c958" stroke="#9a7e1f" stroke-width="1" />
+                      <rect x="14" y="22" width="36" height="20" rx="2" fill="#1c2330" />
+                      <circle cx="18" cy="48" r="1.5" fill="#222" />
+                      <circle cx="24" cy="48" r="1.5" fill="#222" />
+                      <circle cx="30" cy="48" r="1.5" fill="#222" />
+                    </svg>
+                  )}
+                  {tv.id === 'monitor' && (
+                    <svg viewBox="0 0 64 56" xmlns="http://www.w3.org/2000/svg">
+                      <rect x="6" y="6" width="52" height="36" rx="2" fill="#c2b594" />
+                      <rect x="11" y="11" width="42" height="26" rx="1" fill="#3d3a32" />
+                      <rect x="25" y="44" width="14" height="4" fill="#a89b7a" />
+                      <rect x="18" y="48" width="28" height="4" rx="1" fill="#807461" />
+                    </svg>
+                  )}
+                  {tv.id === 'retro-tvs' && (
+                    <svg viewBox="0 0 64 56" xmlns="http://www.w3.org/2000/svg">
+                      <rect x="24" y="2" width="22" height="14" rx="1" fill="#476285" />
+                      <rect x="27" y="5" width="16" height="8" rx="1" fill="#1c2330" />
+                      <rect x="18" y="16" width="28" height="16" rx="1" fill="#e6e4dd" />
+                      <rect x="21" y="19" width="20" height="10" rx="1" fill="#3a3a3a" />
+                      <rect x="28" y="32" width="34" height="20" rx="1" fill="#3d4759" />
+                      <rect x="31" y="35" width="24" height="14" rx="1" fill="#1c2330" />
+                      <rect x="4" y="50" width="56" height="3" fill="#c46a8e" />
+                    </svg>
+                  )}
+                  {tv.id === 'tv-obj' && (
+                    <svg viewBox="0 0 64 56" xmlns="http://www.w3.org/2000/svg">
+                      <rect x="4" y="10" width="56" height="32" rx="2" fill="#0e1116" stroke="#27313f" stroke-width="1" />
+                      <rect x="7" y="13" width="50" height="26" rx="1" fill="#1c2330" />
+                      <rect x="28" y="42" width="8" height="4" fill="#1a1f27" />
+                      <rect x="20" y="46" width="24" height="3" rx="1" fill="#1a1f27" />
+                    </svg>
+                  )}
+                </span>
+                <span class="tv-tile__body">
+                  <span class="tv-tile__label">{tv.label}</span>
+                  <span class="tv-tile__meta">{tv.screens.length} screen{tv.screens.length === 1 ? '' : 's'}</span>
+                </span>
+              </button>
+            ))}
+          </div>
+        </aside>
+        <div class="tv-stage" id="tv-host">
+          <poly-perspective-camera
+            id="tv-camera"
+            rot-x={String(TVS[0].cam.rotX)}
+            rot-y={String(TVS[0].cam.rotY)}
+            zoom={String(TVS[0].cam.zoom)}
+            perspective="32000"
+          >
+            <poly-scene
+              id="tv-scene"
+              auto-center
+              directional-direction="0.4,-0.7,0.59"
+              directional-intensity="4.5"
+              ambient-intensity="0.55"
+            >
+              <poly-orbit-controls drag wheel></poly-orbit-controls>
+              <poly-mesh id="tv-mesh" src={TVS[0].src} mtl={('mtl' in TVS[0] ? TVS[0].mtl : undefined)}></poly-mesh>
+              {/* <poly-iframe> elements are added dynamically per preset
+                  (one per `screens[]` entry) so a multi-screen TV like the
+                  Retro Stack can light up every CRT independently. */}
+            </poly-scene>
+          </poly-perspective-camera>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      import "@layoutit/polycss/elements";
+
+      interface TvScreen {
+        polyIndices: readonly number[];
+        videoSrc?: string;
+      }
+
+      interface TvPreset {
+        id: string;
+        label: string;
+        src: string;
+        mtl?: string;
+        screens: readonly TvScreen[];
+        cam: { rotX: number; rotY: number; zoom: number };
+      }
+
+      interface PolygonLike { vertices: Array<[number, number, number]>; }
+
+      // Vertex-count outward test. Counts how many mesh vertices sit on
+      // each side of the plane through `(ax,ay,az)` with normal `(nx,ny,nz)`.
+      // The screen's OUTSIDE is the side with FEWER vertices — just air /
+      // the viewer in front of the TV. The cabinet body sits behind the
+      // screen and contributes most of the mesh's vertices.
+      //
+      // Returns +1 if the normal already points outward, -1 if it should
+      // be flipped. More robust than a bbox-center test for L-shaped or
+      // asymmetric meshes where the bbox midpoint sits outside the body.
+      function outwardSignByVertexCount(
+        nx: number, ny: number, nz: number,
+        ax: number, ay: number, az: number,
+        allPolygons: PolygonLike[],
+      ): number {
+        let inFront = 0, behind = 0;
+        for (const p of allPolygons) {
+          for (const v of p.vertices) {
+            const d = (v[0] - ax) * nx + (v[1] - ay) * ny + (v[2] - az) * nz;
+            if (d > 1e-6) inFront++;
+            else if (d < -1e-6) behind++;
+          }
+        }
+        return inFront > behind ? -1 : 1;
+      }
+
+      // Derive iframe placement from one or more polygons. The polygons are
+      // the TV's screen face (a single polygon for simple meshes, a strip
+      // when the modeller subdivided the bezel — common on CRTs).
+      //
+      // - Normal: AREA-WEIGHTED average across all polygons. Summing the
+      //   cross product `e1 × e2` for each triangle in each polygon gives
+      //   `2 · area · unit_normal`, so the sum naturally weights bigger
+      //   polygons more — the "mostly flat" face wins over a few tilted
+      //   stragglers in the same strip (retro-stack: 212/213/214/230 are
+      //   slightly off, 215 is the true flat screen).
+      // - Outward flip: if `allPolygons` is supplied, count vertices on each
+      //   side of the screen plane and flip the normal so it points to the
+      //   sparser side (the front of the cabinet, not the inside).
+      // - Bbox + placement: project all vertices onto the (right, up) frame
+      //   built from the average normal, take their bbox, place the iframe
+      //   at the bbox center along that frame.
+      function placementFromPolygons(
+        polygons: PolygonLike[],
+        allPolygons?: PolygonLike[],
+      ): {
+        position: [number, number, number];
+        rotation: [number, number, number];
+        width: number;
+        height: number;
+        /** World-space surface normal of the screen face. The camera rotY
+         *  that puts this face camera-facing at a given rotX is
+         *  `atan2(normal.y, normal.x) * 180/π` (see deriveCameraRotY). */
+        normal: [number, number, number];
+      } | null {
+        if (polygons.length === 0) return null;
+
+        // Area-weighted average normal: sum (e1 × e2) for each triangle.
+        let nx = 0, ny = 0, nz = 0;
+        for (const poly of polygons) {
+          const verts = poly.vertices;
+          if (verts.length < 3) continue;
+          const v0 = verts[0];
+          // Fan-triangulate from v0 so polygons with >3 vertices contribute
+          // each of their triangles to the area weighting.
+          for (let i = 1; i + 1 < verts.length; i++) {
+            const va = verts[i], vb = verts[i + 1];
+            const e1x = va[0] - v0[0], e1y = va[1] - v0[1], e1z = va[2] - v0[2];
+            const e2x = vb[0] - v0[0], e2y = vb[1] - v0[1], e2z = vb[2] - v0[2];
+            nx += e1y * e2z - e1z * e2y;
+            ny += e1z * e2x - e1x * e2z;
+            nz += e1x * e2y - e1y * e2x;
+          }
+        }
+        const nlen = Math.hypot(nx, ny, nz);
+        if (nlen < 1e-9) return null;
+        nx /= nlen; ny /= nlen; nz /= nlen;
+
+        // Anchor for bbox + outward-test: the average vertex across all
+        // screen polygons (close enough to the centroid for our purposes).
+        let ax = 0, ay = 0, az = 0, count = 0;
+        for (const poly of polygons) {
+          for (const v of poly.vertices) {
+            ax += v[0]; ay += v[1]; az += v[2]; count++;
+          }
+        }
+        if (count === 0) return null;
+        ax /= count; ay /= count; az /= count;
+
+        // No auto outward-flip. GLB/OBJ files reliably wind screen-face
+        // polygons with the normal pointing outward (away from the cabinet
+        // body); the vertex-count heuristic misfires for meshes whose
+        // body geometry extends in front of the screen plane (e.g. CRT
+        // monitors with deep tubes/stands behind the bezel). Trust the
+        // modeller's winding; rely on per-preset rotY tuning if needed.
+        void allPolygons;
+
+        // "Up" reference: world-Z, unless the polygon is nearly horizontal
+        // (a floor/ceiling face, |n.z| ≈ 1), in which case fall back to
+        // world-Y so the basis stays non-degenerate.
+        const upRef = Math.abs(nz) > 0.95
+          ? { x: 0, y: 1, z: 0 }
+          : { x: 0, y: 0, z: 1 };
+        // up = upRef projected onto plane perpendicular to n, normalized.
+        const dot = upRef.x * nx + upRef.y * ny + upRef.z * nz;
+        let upx = upRef.x - dot * nx;
+        let upy = upRef.y - dot * ny;
+        let upz = upRef.z - dot * nz;
+        const upLen = Math.hypot(upx, upy, upz);
+        if (upLen < 1e-9) return null;
+        upx /= upLen; upy /= upLen; upz /= upLen;
+        // right = up × normal (right-handed frame with normal forward).
+        const rx = upy * nz - upz * ny;
+        const ry = upz * nx - upx * nz;
+        const rz = upx * ny - upy * nx;
+
+        // bbox in (right, up) frame, projected onto the average plane.
+        // Anchor at the centroid (`ax, ay, az` above) so all vertices project
+        // symmetrically — when individual polygons aren't perfectly coplanar
+        // (the retro-stack strips), this centers the iframe over the strip
+        // instead of biasing it toward whichever polygon owns vertex 0.
+        let minR = Infinity, maxR = -Infinity, minU = Infinity, maxU = -Infinity;
+        for (const poly of polygons) {
+          for (const v of poly.vertices) {
+            const dx = v[0] - ax, dy = v[1] - ay, dz = v[2] - az;
+            const r = dx * rx + dy * ry + dz * rz;
+            const u = dx * upx + dy * upy + dz * upz;
+            if (r < minR) minR = r;
+            if (r > maxR) maxR = r;
+            if (u < minU) minU = u;
+            if (u > maxU) maxU = u;
+          }
+        }
+        const width = maxR - minR;
+        const height = maxU - minU;
+        if (!(width > 0) || !(height > 0)) return null;
+        const bcR = (minR + maxR) / 2;
+        const bcU = (minU + maxU) / 2;
+        // World position = centroid + bbox center offset in (right, up),
+        // nudged along the normal so the iframe doesn't z-fight with the
+        // screen polygons themselves. Combines a small fixed floor with
+        // a size-proportional term so small meshes (monitor, tv-obj) get
+        // enough absolute lift to clear CSS-3D z-stacking, while bigger
+        // meshes (cabinet) still get a proportionally larger nudge.
+        const lift = 0.2 + 0.01 * Math.max(width, height);
+        const posX = ax + bcR * rx + bcU * upx + lift * nx;
+        const posY = ay + bcR * ry + bcU * upy + lift * ny;
+        const posZ = az + bcR * rz + bcU * upz + lift * nz;
+        const normal: [number, number, number] = [nx, ny, nz];
+
+        // Build world rotation that takes the iframe's default basis to
+        // the polygon's basis. The iframe default in WORLD coords (after
+        // the world↔CSS axis swap): width=world-Y, height-down=world-X,
+        // normal=world-Z. So we want a rotation M such that
+        //   M(world-Y) = right,  M(-world-X) = up,  M(world-Z) = normal.
+        // Columns of M are M(world-X), M(world-Y), M(world-Z) = -up, right, normal.
+        // Extract Euler XYZ where M = Rx(rx_e)·Ry(ry_e)·Rz(rz_e):
+        //   M[0][2] = sin(ry_e) → ry_e = asin(N.x)
+        //   M[1][2] = -sin(rx)cos(ry); M[2][2] = cos(rx)cos(ry)
+        //     → rx_e = atan2(-N.y, N.z) when not gimbal-locked
+        //   M[0][1] = -cos(ry)sin(rz); M[0][0] = cos(ry)cos(rz)
+        //     → rz_e = atan2(-R.x, -U.x)
+        const clamp = (v: number) => Math.max(-1, Math.min(1, v));
+        const ryEuler = Math.asin(clamp(nx));
+        let rxEuler: number;
+        let rzEuler: number;
+        if (Math.abs(nx) < 0.9999) {
+          rxEuler = Math.atan2(-ny, nz);
+          rzEuler = Math.atan2(-rx, -upx);
+        } else {
+          // Gimbal lock: ry = ±90°. Pin rz=0 and put the remaining angle in rx.
+          rxEuler = Math.atan2(-upy, ry);
+          rzEuler = 0;
+        }
+        const toDeg = 180 / Math.PI;
+        return {
+          position: [posX, posY, posZ],
+          rotation: [rxEuler * toDeg, ryEuler * toDeg, rzEuler * toDeg],
+          width,
+          height,
+          normal,
+        };
+      }
+
+      // Derive the camera's rotY so the screen face (with world normal N) sits
+      // camera-facing. The camera's look direction in world frame, given
+      // (rotX, rotY), is `(-sin(rotX)·cos(rotY), -sin(rotX)·sin(rotY), -cos(rotX))`
+      // (see the inverse of the scene-root rotateX·rotateZ composition plus
+      // the world↔CSS axis swap). Matching that to -N component-wise yields
+      // `rotY = atan2(N.y, N.x)`. We keep the user's preferred rotX so the
+      // view-tilt stays as authored.
+      function deriveCameraRotYDeg(normal: [number, number, number]): number {
+        return Math.atan2(normal[1], normal[0]) * 180 / Math.PI;
+      }
+
+      (() => {
+        const DEFAULT_VIDEO = "https://www.youtube.com/embed/h03QBNVwX8Q?autoplay=1&mute=1&playsinline=1&modestbranding=1&controls=0&start=175";
+        const IFRAME_ALLOW = "autoplay; accelerometer; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share";
+
+        const root = document.querySelector<HTMLElement>(".tv-page");
+        const presetsAttr = root?.dataset?.presets;
+        const presets: TvPreset[] = presetsAttr ? JSON.parse(presetsAttr) : [];
+        const camera = document.getElementById("tv-camera");
+        const sceneEl = document.getElementById("tv-scene");
+        const mesh = document.getElementById("tv-mesh") as
+          (HTMLElement & { getMeshHandle?: () => { polygons: PolygonLike[] } | null })
+          | null;
+        if (!root || !camera || !sceneEl || !mesh || presets.length === 0) return;
+
+        let activePreset: TvPreset = presets[0];
+        let activeIframes: HTMLElement[] = [];
+
+        function rebuildIframesFor(preset: TvPreset): void {
+          if (!sceneEl) return;
+          // Tear down whatever was mounted previously.
+          for (const el of activeIframes) el.remove();
+          activeIframes = [];
+          // Create one <poly-iframe> per screen entry. Geometry attrs are
+          // placeholders — they'll be replaced when the mesh finishes
+          // loading and we can derive placement from the polygons.
+          for (let i = 0; i < preset.screens.length; i++) {
+            const screen = preset.screens[i];
+            const ifr = document.createElement("poly-iframe");
+            ifr.setAttribute("src", screen.videoSrc ?? DEFAULT_VIDEO);
+            ifr.setAttribute("width", "1");
+            ifr.setAttribute("height", "1");
+            ifr.setAttribute("allow", IFRAME_ALLOW);
+            ifr.setAttribute("title", `${preset.label} screen ${i + 1}`);
+            ifr.dataset.screenIndex = String(i);
+            sceneEl.appendChild(ifr);
+            activeIframes.push(ifr);
+          }
+        }
+
+        function applyPlacementsFromMesh(): void {
+          if (!mesh || !camera) return;
+          const handle = mesh.getMeshHandle?.();
+          if (!handle) return;
+          // All-mesh polygon array, passed to placementFromPolygons so each
+          // screen's normal can be vertex-count flipped to point outward.
+          const allPolygons = handle.polygons;
+          for (let i = 0; i < activePreset.screens.length; i++) {
+            const screen = activePreset.screens[i];
+            const ifr = activeIframes[i];
+            if (!ifr) continue;
+            const polys = screen.polyIndices
+              .map((idx) => handle.polygons[idx])
+              .filter((p): p is PolygonLike => !!p);
+            if (polys.length === 0) {
+              console.warn("[tv] screen", i, "polys", screen.polyIndices, "out of range for", activePreset.id);
+              continue;
+            }
+            const placement = placementFromPolygons(polys, allPolygons);
+            if (!placement) {
+              console.warn("[tv] couldn't derive placement for", activePreset.id, "screen", i);
+              continue;
+            }
+            ifr.setAttribute("width", String(placement.width));
+            ifr.setAttribute("height", String(placement.height));
+            ifr.setAttribute("position", placement.position.join(", "));
+            ifr.setAttribute("rotation", placement.rotation.join(", "));
+          }
+        }
+
+        // <poly-mesh> fires polycss:loaded once parsing + scene.add() finish.
+        // That's our cue to read polygons and derive every screen's placement.
+        mesh.addEventListener("polycss:loaded", () => {
+          applyPlacementsFromMesh();
+        });
+
+        function applyPreset(p: TvPreset, opts: { pushUrl?: boolean } = {}): void {
+          if (!camera || !mesh) return;
+          activePreset = p;
+          // Camera state is hand-tuned per preset — apply all three so the
+          // TV shows up the right way + at a sensible size on every switch.
+          camera.setAttribute("rot-x", String(p.cam.rotX));
+          camera.setAttribute("rot-y", String(p.cam.rotY));
+          camera.setAttribute("zoom", String(p.cam.zoom));
+          rebuildIframesFor(p);
+          if (p.mtl) mesh.setAttribute("mtl", p.mtl);
+          else mesh.removeAttribute("mtl");
+          mesh.setAttribute("src", p.src);
+          // polycss:loaded fires after the new src loads, and the listener
+          // re-derives every iframe's placement.
+          if (opts.pushUrl !== false) syncUrl(p.id);
+        }
+
+        function syncUrl(id: string): void {
+          const url = new URL(window.location.href);
+          if (url.searchParams.get("tv") === id) return;
+          url.searchParams.set("tv", id);
+          window.history.replaceState({}, "", url.toString());
+        }
+
+        function selectTile(id: string): void {
+          root!.querySelectorAll(".tv-tile.is-active").forEach((el) =>
+            el.classList.remove("is-active"),
+          );
+          const tile = root!.querySelector<HTMLElement>(`.tv-tile[data-preset-id="${id}"]`);
+          if (tile) tile.classList.add("is-active");
+        }
+
+        // Initial preset: ?tv=<id> wins over the markup default. Falls back to
+        // the first preset (which is what's already wired up in the HTML).
+        const urlParam = new URLSearchParams(window.location.search).get("tv");
+        const initial = (urlParam && presets.find((p) => p.id === urlParam)) || presets[0];
+        if (initial.id !== presets[0].id) {
+          selectTile(initial.id);
+          applyPreset(initial, { pushUrl: false });
+        } else {
+          // First-paint: build iframes for the initial preset; placement is
+          // applied when (or if) the mesh handle is already available.
+          rebuildIframesFor(activePreset);
+          if (mesh.getMeshHandle?.()) applyPlacementsFromMesh();
+          // Reflect the markup default in the URL too so links share cleanly.
+          syncUrl(initial.id);
+        }
+
+        root.querySelectorAll<HTMLButtonElement>(".tv-tile").forEach((tile) => {
+          tile.addEventListener("click", () => {
+            const id = tile.dataset.presetId;
+            const preset = presets.find((p) => p.id === id);
+            if (!preset) return;
+            selectTile(preset.id);
+            applyPreset(preset);
+          });
+        });
+
+        // Back / forward navigation: re-select the preset named in the URL.
+        window.addEventListener("popstate", () => {
+          const id = new URLSearchParams(window.location.search).get("tv");
+          const preset = id ? presets.find((p) => p.id === id) : null;
+          if (!preset) return;
+          selectTile(preset.id);
+          applyPreset(preset, { pushUrl: false });
+        });
+      })();
+    </script>
+  </body>
+  <style>
+    :global(:root) { --sl-nav-height: 72px; }
+    @media (max-width: 38rem) {
+      :global(:root) { --sl-nav-height: 90px; }
+    }
+    :global(html, body) {
+      margin: 0;
+      background: #0a0b0d;
+      color: #e8edf2;
+    }
+    :global(body) { min-height: 100vh; overflow: hidden; }
+    .page { min-height: 100vh; background: #0a0b0d; }
+    .tv-page {
+      position: fixed;
+      inset: var(--sl-nav-height) 0 0;
+      display: grid;
+      grid-template-columns: 240px 1fr;
+      overflow: hidden;
+    }
+    .tv-rail {
+      border-right: 1px solid #1c2330;
+      background: linear-gradient(180deg, #0d1119 0%, #0a0b0d 100%);
+      padding: 14px 12px;
+      overflow-y: auto;
+    }
+    .tv-rail__list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .tv-tile {
+      width: 100%;
+      display: grid;
+      grid-template-columns: 60px 1fr;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 12px;
+      border: 1px solid #1a2230;
+      border-radius: 10px;
+      background: #0b0f18;
+      color: #e2e8f0;
+      font: inherit;
+      text-align: left;
+      cursor: pointer;
+      transition: border-color 0.15s ease, background 0.15s ease, transform 0.15s ease;
+    }
+    .tv-tile:hover {
+      border-color: #2f3a4a;
+      background: #0e1421;
+      transform: translateY(-1px);
+    }
+    .tv-tile.is-active {
+      background: linear-gradient(135deg, #142033 0%, #0d1828 100%);
+      border-color: #22d3ee;
+      box-shadow:
+        inset 0 0 0 1px rgba(34, 211, 238, 0.2),
+        0 6px 20px -10px rgba(34, 211, 238, 0.5);
+    }
+    .tv-tile__art {
+      display: grid;
+      place-items: center;
+      width: 60px;
+      height: 48px;
+      border-radius: 6px;
+      background: radial-gradient(circle at 30% 25%, #131a26 0%, #060810 100%);
+      padding: 4px;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
+    }
+    .tv-tile__art svg {
+      width: 100%;
+      height: 100%;
+      filter: drop-shadow(0 1px 1.5px rgba(0, 0, 0, 0.7));
+    }
+    .tv-tile__body {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      min-width: 0;
+    }
+    .tv-tile__label {
+      color: #e6ecf3;
+      font-size: 13.5px;
+      font-weight: 600;
+      line-height: 1.2;
+      letter-spacing: -0.01em;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .tv-tile__meta {
+      color: #6b7585;
+      font-size: 11px;
+      font-weight: 500;
+      letter-spacing: 0.02em;
+    }
+    .tv-tile.is-active .tv-tile__label { color: #f1f7fb; }
+    .tv-tile.is-active .tv-tile__meta { color: #58c4d6; }
+    .tv-stage {
+      position: relative;
+      overflow: hidden;
+    }
+    @media (max-width: 38rem) {
+      .tv-page { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
+      .tv-rail {
+        border-right: 0;
+        border-bottom: 1px solid #1c2330;
+        max-height: 180px;
+      }
+      .tv-rail__list { flex-direction: row; }
+      .tv-tile { min-width: 200px; }
+    }
+  </style>
+</html>

@@ -16,6 +16,8 @@ export type { PolySceneProps } from "./scene";
 export type { PolyRenderStrategy, PolyRenderStrategiesOption } from "@layoutit/polycss-core";
 export { PolyMesh } from "./scene";
 export type { PolyMeshProps } from "./scene";
+export { PolyIframe } from "./scene";
+export type { PolyIframeProps } from "./scene";
 export { PolyGround } from "./scene";
 export type { PolyGroundProps } from "./scene";
 export { usePolySceneContext } from "./scene";

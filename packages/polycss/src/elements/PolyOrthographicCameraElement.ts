@@ -100,5 +100,17 @@ export class PolyOrthographicCameraElement extends ELEMENT_BASE {
     if (opts.rotY !== undefined) this._camera.update({ rotY: opts.rotY });
     if (opts.target !== undefined) this._camera.update({ target: opts.target });
     if (opts.distance !== undefined) this._camera.update({ distance: opts.distance });
+    // Push the updated transform into the scene root. Without this the
+    // handle's state changes but the rendered `.polycss-scene` transform
+    // stays stale until something else triggers `applyCamera()`.
+    let cur: Element | null = this.parentElement;
+    while (cur) {
+      if (cur.tagName === "POLY-SCENE") {
+        const sc = (cur as unknown as { getScene?: () => { applyCamera: () => void } | null }).getScene?.();
+        sc?.applyCamera();
+        return;
+      }
+      cur = cur.parentElement;
+    }
   }
 }

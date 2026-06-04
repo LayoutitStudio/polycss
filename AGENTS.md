@@ -86,11 +86,12 @@ If you find yourself wanting a `requestAnimationFrame` loop to update many DOM n
 - Brand text is **PolyCSS**. Keep lowercase `polycss` only for literal package names, import paths, CSS classes, domains, and other code identifiers.
 - Every public export gets a `Poly` prefix. Exceptions are generic math types: `Vec2`, `Vec3`, `Polygon`, `PolyMaterial` (already prefixed).
 - **Hooks/composables:** `usePolyCamera`, `usePolyMesh`, `usePolySceneContext`, `usePolySelect`, `usePolySelectionApi`, `usePolyAnimation`.
-- **Components:** `PolyPerspectiveCamera`, `PolyOrthographicCamera`, `PolyOrbitControls`, `PolyMapControls`, `PolyTransformControls`, `PolySelect`, `PolyAxesHelper`, `PolyDirectionalLightHelper`.
+- **Components:** `PolyPerspectiveCamera`, `PolyOrthographicCamera`, `PolyOrbitControls`, `PolyMapControls`, `PolyTransformControls`, `PolySelect`, `PolyAxesHelper`, `PolyDirectionalLightHelper`, `PolyIframe`.
 - **Types:** `PolyDirectionalLight`, `PolyAmbientLight`, `PolyTextureLightingMode`, `PolyAnimationMixer`, `PolyRenderStats`.
 - **Functions:** `findPolyMeshHandle`, `injectPolyBaseStyles`, `collectPolyRenderStats`, `exportPolySceneSnapshot`.
 - **Vanilla factories:** `create*` names stay as-is (`createPolyScene`, `createTransformControls`, `createSelect`).
-- **HTML custom elements:** `poly-` prefix + kebab-case. Existing tags: `<poly-scene>`, `<poly-mesh>`, `<poly-polygon>`, `<poly-perspective-camera>`, `<poly-orthographic-camera>`, `<poly-axes-helper>`, `<poly-directional-light-helper>`. Any new element follows the same shape (e.g. `<poly-transform-controls>`, `<poly-select>`).
+- **HTML custom elements:** `poly-` prefix + kebab-case. Existing tags: `<poly-scene>`, `<poly-mesh>`, `<poly-iframe>`, `<poly-polygon>`, `<poly-perspective-camera>`, `<poly-orthographic-camera>`, `<poly-axes-helper>`, `<poly-directional-light-helper>`. Any new element follows the same shape (e.g. `<poly-transform-controls>`, `<poly-select>`).
+- **`<poly-iframe>`:** flat textured "quad" whose "texture" is a live document (an `<iframe>`) instead of an atlas slice. NOT a render-strategy leaf — same transform conventions as `<poly-mesh>` (`position`/`rotation`/`scale` post-parity; iframe content centered at the wrapper's local origin so rotation/scale pivot at the visible center). Mounted as a child of `.polycss-scene` and inherits the camera transform.
 - **Leaf DOM tags (`<b>`, `<i>`, `<s>`, `<u>`):** internal render-strategy tags. Not part of the public API and not user-facing — do not document them as such.
 - `PolyCamera` is a kept alias for `PolyOrthographicCamera` — the ergonomic default, optimised for iso/voxel/diagrammatic scenes which is PolyCSS's structural strength. **Not deprecated.**
 

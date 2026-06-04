@@ -11,6 +11,7 @@
  */
 import { PolySceneElement } from "./PolySceneElement";
 import { PolyMeshElement } from "./PolyMeshElement";
+import { PolyIframeElement } from "./PolyIframeElement";
 import { PolyPolygonElement } from "./PolyPolygonElement";
 import { PolyAxesHelperElement } from "./PolyAxesHelperElement";
 import { PolyDirectionalLightHelperElement } from "./PolyDirectionalLightHelperElement";
@@ -42,6 +43,9 @@ if (typeof customElements !== "undefined") {
   }
   if (!customElements.get("poly-mesh")) {
     customElements.define("poly-mesh", PolyMeshElement);
+  }
+  if (!customElements.get("poly-iframe")) {
+    customElements.define("poly-iframe", PolyIframeElement);
   }
   if (!customElements.get("poly-polygon")) {
     customElements.define("poly-polygon", PolyPolygonElement);
@@ -117,6 +121,7 @@ if (typeof customElements !== "undefined") {
 export {
   PolySceneElement,
   PolyMeshElement,
+  PolyIframeElement,
   PolyPolygonElement,
   PolyAxesHelperElement,
   PolyDirectionalLightHelperElement,

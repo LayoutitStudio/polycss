@@ -74,6 +74,7 @@ export type {
 // ── Custom element classes (without auto-registering — that's @layoutit/polycss/elements) ──
 export { PolySceneElement } from "./elements/PolySceneElement";
 export { PolyMeshElement } from "./elements/PolyMeshElement";
+export { PolyIframeElement } from "./elements/PolyIframeElement";
 export { PolyPolygonElement } from "./elements/PolyPolygonElement";
 export { PolyOrbitControlsElement } from "./elements/PolyOrbitControlsElement";
 export { PolyMapControlsElement } from "./elements/PolyMapControlsElement";
