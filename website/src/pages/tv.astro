@@ -48,12 +48,15 @@ const TVS = [
     src: '/tv/retro-tvs.glb',
     // Each stacked CRT gets its own iframe. Polygon indices supplied by
     // hand from the inspector — more screens to come.
+    // Negative lift recesses the iframe slightly behind the screen
+    // polygon — these CRT meshes already model the glass surface, so
+    // the video reads better sitting inside the bezel.
     screens: [
-      { polyIndices: [212, 213, 214, 215, 216] },
-      { polyIndices: [65, 66, 67, 68, 69] },
-      { polyIndices: [119, 120, 121, 122, 123] },
-      { polyIndices: [206, 207, 208, 209, 210] },
-      { polyIndices: [265, 266, 267, 268, 269] },
+      { polyIndices: [212, 213, 214, 215, 216], lift: -0.6 },
+      { polyIndices: [65, 66, 67, 68, 69], lift: -0.6 },
+      { polyIndices: [119, 120, 121, 122, 123], lift: -0.6 },
+      { polyIndices: [206, 207, 208, 209, 210], lift: -0.6 },
+      { polyIndices: [265, 266, 267, 268, 269], lift: -0.6 },
     ],
     cam: { rotX: 70, rotY: 215, zoom: 8 },
   },
@@ -194,6 +197,10 @@ const TVS = [
       interface TvScreen {
         polyIndices: readonly number[];
         videoSrc?: string;
+        /** World-unit lift along the screen normal. Default `0.2 + 0.01 * max(w,h)`
+         *  (in front of the polygon to avoid z-fighting). Pass a negative
+         *  value to recess the iframe into the bezel. */
+        lift?: number;
       }
 
       interface TvPreset {
@@ -251,6 +258,7 @@ const TVS = [
       function placementFromPolygons(
         polygons: PolygonLike[],
         allPolygons?: PolygonLike[],
+        liftOverride?: number,
       ): {
         position: [number, number, number];
         rotation: [number, number, number];
@@ -350,7 +358,13 @@ const TVS = [
         // a size-proportional term so small meshes (monitor, tv-obj) get
         // enough absolute lift to clear CSS-3D z-stacking, while bigger
         // meshes (cabinet) still get a proportionally larger nudge.
-        const lift = 0.2 + 0.01 * Math.max(width, height);
+        // Default lift puts the iframe slightly IN FRONT of the screen
+        // polygon so it doesn't z-fight. Callers can pass a negative
+        // `liftOverride` to recess the iframe INTO the bezel — useful for
+        // meshes (like the retro stack CRTs) where the screen polygon
+        // already represents the glass surface and the iframe should
+        // appear inset behind it.
+        const lift = liftOverride ?? (0.2 + 0.01 * Math.max(width, height));
         const posX = ax + bcR * rx + bcU * upx + lift * nx;
         const posY = ay + bcR * ry + bcU * upy + lift * ny;
         const posZ = az + bcR * rz + bcU * upz + lift * nz;
@@ -494,7 +508,7 @@ const TVS = [
               console.warn("[tv] screen", i, "polys", screen.polyIndices, "out of range for", activePreset.id);
               continue;
             }
-            const placement = placementFromPolygons(polys, allPolygons);
+            const placement = placementFromPolygons(polys, allPolygons, screen.lift);
             if (!placement) {
               console.warn("[tv] couldn't derive placement for", activePreset.id, "screen", i);
               continue;
