@@ -188,7 +188,7 @@ const TVS = [
               ambient-intensity="0.9"
             >
               <poly-orbit-controls drag wheel></poly-orbit-controls>
-              <poly-mesh id="tv-mesh" src={TVS[0].src} mtl={('mtl' in TVS[0] ? TVS[0].mtl : undefined)} auto-center cast-shadow></poly-mesh>
+              <poly-mesh id="tv-mesh" src={TVS[0].src} mtl={('mtl' in TVS[0] ? TVS[0].mtl : undefined)} auto-center cast-shadow receive-shadow></poly-mesh>
               {/* Ground plane for shadow reception. Z position is set
                   per-preset by the script (= TV's bbox minZ) so the floor
                   always sits flush with the TV's bottom regardless of how
