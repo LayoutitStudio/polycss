@@ -120,16 +120,11 @@ export class PolyPerspectiveCameraElement extends ELEMENT_BASE {
       target: opts.target,
       distance: opts.distance,
     });
-    // Push the updated transform into the scene root. The scene element
-    // mounted as one of our ancestors; walk up to find it.
-    let cur: Element | null = this.parentElement;
-    while (cur) {
-      if (cur.tagName === "POLY-SCENE") {
-        const sc = (cur as unknown as { getScene?: () => { applyCamera: () => void } | null }).getScene?.();
-        sc?.applyCamera();
-        return;
-      }
-      cur = cur.parentElement;
-    }
+    // Push the updated transform into the scene root. <poly-scene> is a
+    // DESCENDANT of <poly-perspective-camera>, not an ancestor — the
+    // scene wraps itself inside the camera's .polycss-camera div on mount.
+    const sceneEl = this.querySelector("poly-scene");
+    const sc = (sceneEl as unknown as { getScene?: () => { applyCamera: () => void } | null } | null)?.getScene?.();
+    sc?.applyCamera();
   }
 }

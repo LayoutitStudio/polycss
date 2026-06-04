@@ -87,6 +87,42 @@ abstract class PolyShapeElement extends ELEMENT_BASE {
     this._tearDown();
   }
 
+  attributeChangedCallback(
+    name: string,
+    oldValue: string | null,
+    newValue: string | null,
+  ): void {
+    if (oldValue === newValue) return;
+    if (!this._handle) return;
+    // Transform attributes update the handle in place. Geometry attributes
+    // (size, color, etc.) require re-emitting polygons — re-mount.
+    if (
+      name === "position" ||
+      name === "scale" ||
+      name === "rotation" ||
+      name === "cast-shadow" ||
+      name === "receive-shadow"
+    ) {
+      this._handle.setTransform({
+        position: parseVec3Attr(this, "position"),
+        scale: (() => {
+          const raw = this.getAttribute("scale");
+          if (!raw) return undefined;
+          if (raw.includes(",")) return parseVec3Attr(this, "scale");
+          const n = parseFloat(raw);
+          return Number.isFinite(n) ? n : undefined;
+        })(),
+        rotation: parseVec3Attr(this, "rotation"),
+        castShadow: this.hasAttribute("cast-shadow"),
+        receiveShadow: this.hasAttribute("receive-shadow"),
+      });
+      return;
+    }
+    // Geometry/material change: tear down and re-mount.
+    this._tearDown();
+    this._mount();
+  }
+
   private _tearDown(): void {
     if (this._handle) {
       try { this._handle.dispose(); } catch { /* ignore */ }
@@ -125,6 +161,14 @@ abstract class PolyShapeElement extends ELEMENT_BASE {
           return Number.isFinite(n) ? n : undefined;
         })(),
         rotation: parseVec3Attr(this, "rotation"),
+        // Shadow flags mirror <poly-mesh> so primitive shapes can act as
+        // ground planes for shadow receivers without needing a GLB.
+        castShadow: this.hasAttribute("cast-shadow"),
+        receiveShadow: this.hasAttribute("receive-shadow"),
+        // Helper shapes (ground planes, axes, light gizmos) shouldn't
+        // skew the scene's auto-center calculation. Opt out via the
+        // `exclude-from-auto-center` attribute.
+        excludeFromAutoCenter: this.hasAttribute("exclude-from-auto-center"),
         merge: false,
       },
     );
@@ -150,15 +194,33 @@ export class PolyBoxElement extends PolyShapeElement {
 
 export class PolyPlaneElement extends PolyShapeElement {
   static get observedAttributes(): string[] {
-    return ["axis", "size", "color", "auto-center", "position", "scale", "rotation"];
+    return [
+      "axis",
+      "size",
+      "offset",
+      "color",
+      "auto-center",
+      "position",
+      "scale",
+      "rotation",
+      "cast-shadow",
+      "receive-shadow",
+    ];
   }
 
   buildPolygons(): Polygon[] {
     const axisRaw = numAttr(this, "axis", 2);
     const axis = (axisRaw === 0 || axisRaw === 1 || axisRaw === 2 ? axisRaw : 2) as 0 | 1 | 2;
+    // Default offset to 0 (plane centered at the element's local origin) —
+    // `planePolygons` itself defaults to `size * 2` because it was authored
+    // for transform-control drag handles, but for ground planes / generic
+    // quads "centered" is the obvious user expectation.
+    const offsetAttr = this.getAttribute("offset");
+    const offset = offsetAttr === null ? 0 : parseFloat(offsetAttr);
     return planePolygons({
       axis,
       size: numAttr(this, "size", 0.4),
+      offset: Number.isFinite(offset) ? offset : 0,
       color: strAttr(this, "color"),
     });
   }

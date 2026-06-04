@@ -3,9 +3,9 @@ import DocsHeader from '../components/DocsHeader.astro';
 import Analytics from '../components/Analytics.astro';
 import '../styles/custom.css';
 
-const title = 'Television | PolyCSS';
+const title = 'TV | PolyCSS';
 const description = 'Live YouTube iframe placed in 3D space on the screen face of CSS-rendered TV meshes, via the <poly-iframe> custom element.';
-const canonical = 'https://polycss.com/television/';
+const canonical = 'https://polycss.com/tv/';
 
 // Per-TV presets. `screenPolyIndex` is the polygon (post-optimization)
 // inside the GLB/OBJ that represents the screen face — we derive the
@@ -22,7 +22,7 @@ const TVS = [
   {
     id: 'old-tv',
     label: 'Cabinet TV',
-    src: '/television/old-tv.glb',
+    src: '/tv/old-tv.glb',
     // 50 anchors the plane (it's vertical); 48 is tilted and only contributes
     // its vertices to the bbox so the iframe still spans that strip.
     screens: [{ polyIndices: [48, 49, 50, 51, 52, 53] }],
@@ -31,21 +31,21 @@ const TVS = [
   {
     id: 'electronic-tv',
     label: 'Electronic TV',
-    src: '/television/electronic-tv.glb',
+    src: '/tv/electronic-tv.glb',
     screens: [{ polyIndices: [35] }],
     cam: { rotX: 70, rotY: 35, zoom: 8 },
   },
   {
     id: 'monitor',
     label: 'Monitor',
-    src: '/television/monitor.glb',
+    src: '/tv/monitor.glb',
     screens: [{ polyIndices: [32] }],
     cam: { rotX: 70, rotY: 35, zoom: 8 },
   },
   {
     id: 'retro-tvs',
     label: 'Retro Stack',
-    src: '/television/retro-tvs.glb',
+    src: '/tv/retro-tvs.glb',
     // Each stacked CRT gets its own iframe. Polygon indices supplied by
     // hand from the inspector — more screens to come.
     screens: [
@@ -60,10 +60,10 @@ const TVS = [
   {
     id: 'tv-obj',
     label: 'Pixel TV',
-    src: '/television/tv-obj.obj',
-    mtl: '/television/materials.mtl',
+    src: '/tv/tv-obj.obj',
+    mtl: '/tv/materials.mtl',
     screens: [{ polyIndices: [70] }],
-    cam: { rotX: 70, rotY: 215, zoom: 18 },
+    cam: { rotX: 70, rotY: 245, zoom: 10 },
   },
 ] as const;
 ---
@@ -160,11 +160,24 @@ const TVS = [
               id="tv-scene"
               auto-center
               directional-direction="0.4,-0.7,0.59"
-              directional-intensity="4.5"
-              ambient-intensity="0.55"
+              directional-intensity="6.5"
+              ambient-intensity="0.9"
             >
               <poly-orbit-controls drag wheel></poly-orbit-controls>
-              <poly-mesh id="tv-mesh" src={TVS[0].src} mtl={('mtl' in TVS[0] ? TVS[0].mtl : undefined)}></poly-mesh>
+              <poly-mesh id="tv-mesh" src={TVS[0].src} mtl={('mtl' in TVS[0] ? TVS[0].mtl : undefined)} auto-center cast-shadow></poly-mesh>
+              {/* Ground plane for shadow reception. Z position is set
+                  per-preset by the script (= TV's bbox minZ) so the floor
+                  always sits flush with the TV's bottom regardless of how
+                  the GLB was authored. Excluded from auto-center so the
+                  big plane doesn't push the camera target around. */}
+              <poly-plane
+                id="tv-floor"
+                axis="2"
+                size="200"
+                color="#1a2030"
+                position="0,0,0"
+                exclude-from-auto-center
+              ></poly-plane>
               {/* <poly-iframe> elements are added dynamically per preset
                   (one per `screens[]` entry) so a multi-screen TV like the
                   Retro Stack can light up every CRT independently. */}
@@ -396,6 +409,7 @@ const TVS = [
         const presets: TvPreset[] = presetsAttr ? JSON.parse(presetsAttr) : [];
         const camera = document.getElementById("tv-camera");
         const sceneEl = document.getElementById("tv-scene");
+        const floor = document.getElementById("tv-floor");
         const mesh = document.getElementById("tv-mesh") as
           (HTMLElement & { getMeshHandle?: () => { polygons: PolygonLike[] } | null })
           | null;
@@ -433,6 +447,31 @@ const TVS = [
           // All-mesh polygon array, passed to placementFromPolygons so each
           // screen's normal can be vertex-count flipped to point outward.
           const allPolygons = handle.polygons;
+          // Move the ground plane to the TV's bbox center (in mesh-local
+          // coords) at the bottom Z so it sits flush under the TV. Floor
+          // is excluded from auto-center so the scene transform shifts
+          // everything by -bboxCenter; the floor needs to be authored at
+          // bboxCenter in mesh-local to land at scene origin after that
+          // shift.
+          if (floor) {
+            let minX = Infinity, maxX = -Infinity;
+            let minY = Infinity, maxY = -Infinity;
+            let minZ = Infinity;
+            for (const p of allPolygons) {
+              for (const v of p.vertices) {
+                if (v[0] < minX) minX = v[0];
+                if (v[0] > maxX) maxX = v[0];
+                if (v[1] < minY) minY = v[1];
+                if (v[1] > maxY) maxY = v[1];
+                if (v[2] < minZ) minZ = v[2];
+              }
+            }
+            if (Number.isFinite(minZ)) {
+              const cx = (minX + maxX) / 2;
+              const cy = (minY + maxY) / 2;
+              floor.setAttribute("position", `${cx},${cy},${minZ}`);
+            }
+          }
           for (let i = 0; i < activePreset.screens.length; i++) {
             const screen = activePreset.screens[i];
             const ifr = activeIframes[i];
@@ -481,8 +520,8 @@ const TVS = [
 
         function syncUrl(id: string): void {
           const url = new URL(window.location.href);
-          if (url.searchParams.get("tv") === id) return;
-          url.searchParams.set("tv", id);
+          if (url.searchParams.get("model") === id) return;
+          url.searchParams.set("model", id);
           window.history.replaceState({}, "", url.toString());
         }
 
@@ -494,9 +533,9 @@ const TVS = [
           if (tile) tile.classList.add("is-active");
         }
 
-        // Initial preset: ?tv=<id> wins over the markup default. Falls back to
-        // the first preset (which is what's already wired up in the HTML).
-        const urlParam = new URLSearchParams(window.location.search).get("tv");
+        // Initial preset: ?model=<id> wins over the markup default. Falls back
+        // to the first preset (which is what's already wired up in the HTML).
+        const urlParam = new URLSearchParams(window.location.search).get("model");
         const initial = (urlParam && presets.find((p) => p.id === urlParam)) || presets[0];
         if (initial.id !== presets[0].id) {
           selectTile(initial.id);
@@ -522,7 +561,7 @@ const TVS = [
 
         // Back / forward navigation: re-select the preset named in the URL.
         window.addEventListener("popstate", () => {
-          const id = new URLSearchParams(window.location.search).get("tv");
+          const id = new URLSearchParams(window.location.search).get("model");
           const preset = id ? presets.find((p) => p.id === id) : null;
           if (!preset) return;
           selectTile(preset.id);
