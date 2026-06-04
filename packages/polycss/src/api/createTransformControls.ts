@@ -25,6 +25,7 @@ import {
   quatFromEulerXYZ,
   quatMultiply,
   ringQuadPolygons,
+  rotateVec3,
 } from "@layoutit/polycss-core";
 import type { Polygon, Vec3 } from "@layoutit/polycss-core";
 import type { PolyMeshHandle, PolySceneHandle } from "./createPolyScene";
@@ -145,14 +146,14 @@ function snap(value: number, step: number | null | undefined): number {
   return Math.round(value / step) * step;
 }
 
-/** Compute the bbox center of a mesh's polygons in scene-CSS pixels.
- *  PolyCSS world→CSS axis remap: world-Y → CSS-x, world-X → CSS-y,
- *  world-Z → CSS-z. The result is the offset we add to the gizmo
- *  position so the gizmo overlays the visible center of the mesh. The
- *  mesh wrapper sets `transform-origin: var(--origin)` to the same bbox
- *  center, so its visible center is `position + bboxCenter` regardless
- *  of scale or rotation — no per-axis scale multiplication needed. */
-function bboxCenterCss(polygons: Polygon[]): Vec3 {
+/** Compute the bbox center of a mesh's polygons in WORLD units, world-axis
+ *  order (`+X right, +Y forward, +Z up`). Added to `target.transform.position`
+ *  (also world units, world-axis) to place the gizmo at the mesh's visible
+ *  centroid. PolyMesh's buildMeshTransform applies the world→CSS axis swap +
+ *  ×BASE_TILE on the resulting position, so consumers stay in world units.
+ *  Collapses to (0,0,0) when the mesh is already centered (e.g. when
+ *  PolyMesh autoCenter or `loadMesh(..., { center: true })` was used). */
+function bboxCenterWorld(polygons: Polygon[]): Vec3 {
   if (polygons.length === 0) return [0, 0, 0];
   let minX = Infinity, minY = Infinity, minZ = Infinity;
   let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
@@ -168,9 +169,9 @@ function bboxCenterCss(polygons: Polygon[]): Vec3 {
   }
   if (!Number.isFinite(minX)) return [0, 0, 0];
   return [
-    ((minY + maxY) / 2) * SCENE_TILE_SIZE,
-    ((minX + maxX) / 2) * SCENE_TILE_SIZE,
-    ((minZ + maxZ) / 2) * SCENE_TILE_SIZE,
+    (minX + maxX) / 2,
+    (minY + maxY) / 2,
+    (minZ + maxZ) / 2,
   ];
 }
 
@@ -527,7 +528,19 @@ export function createTransformControls(
   function gizmoPosition(): Vec3 {
     if (!target) return [0, 0, 0];
     const t = target.transform.position ?? ([0, 0, 0] as Vec3);
-    return [t[0] + centerOffset[0], t[1] + centerOffset[1], t[2] + centerOffset[2]];
+    const r = target.transform.rotation ?? ([0, 0, 0] as Vec3);
+    const s = typeof target.transform.scale === "number"
+      ? target.transform.scale
+      : (target.transform.scale?.[0] ?? 1);
+    // Visible mesh center under the post-parity wrapper transform
+    // `T · R · S · p`: at p = bboxCenter (mesh-local), visible center
+    // = T + scale * R(rotation) * bboxCenter. Apply current rotation so
+    // the gizmo follows the mesh while it spins — without this, the
+    // rotation handler's pivot compensation slides position around to
+    // keep the visible center fixed and the gizmo (placed at
+    // position + centerOffset) drifts off-axis.
+    const rc = rotateVec3(centerOffset, r[0], r[1], r[2]);
+    return [t[0] + s * rc[0], t[1] + s * rc[1], t[2] + s * rc[2]];
   }
 
   function alphaFor(key: string): number {
@@ -729,7 +742,7 @@ export function createTransformControls(
       teardownGizmos();
       return;
     }
-    centerOffset = bboxCenterCss(t.polygons);
+    centerOffset = bboxCenterWorld(t.polygons);
     teardownGizmos();
     buildGizmos();
   }
@@ -756,16 +769,21 @@ export function createTransformControls(
     // The dragStartPosition snapshot is captured in the pointerdown
     // handler below.
     if (!dragStartPosition) return;
-    const next: Vec3 = [
-      dragStartPosition[0] + t * axisVec[0],
-      dragStartPosition[1] + t * axisVec[1],
-      dragStartPosition[2] + t * axisVec[2],
-    ];
+    // Translate the drag from CSS-pixel CSS-axis space (where the screen
+    // probe was measured) to world-unit world-axis space (where
+    // `transform.position` lives post-parity). t is CSS px along the
+    // visible arrow direction; divide by SCENE_TILE_SIZE for world units.
+    // axisVec encodes the ±sign at index cssAxis; the corresponding
+    // world axis is WORLD_AXIS_FOR_CSS[cssAxis].
+    const sign = axisVec[spec.cssAxis];
+    const worldAxis = WORLD_AXIS_FOR_CSS[spec.cssAxis];
+    const worldStep = (t * sign) / SCENE_TILE_SIZE;
+    const next = dragStartPosition.slice() as Vec3;
+    next[worldAxis] = dragStartPosition[worldAxis] + worldStep;
     target.setTransform({ position: next });
     syncGizmoPositions();
     opts.onObjectChange?.({ object: target, position: next });
     opts.onChange?.();
-    void spec;
   }
   let dragStartPosition: Vec3 | null = null;
 
@@ -810,11 +828,16 @@ export function createTransformControls(
           translationSnap: opts.translationSnap ?? null,
           onPlaneDelta: (tA, tB, aVec, bVec) => {
             if (!target || !dragStartPosition) return;
-            const next: Vec3 = [
-              dragStartPosition[0] + tA * aVec[0] + tB * bVec[0],
-              dragStartPosition[1] + tA * aVec[1] + tB * bVec[1],
-              dragStartPosition[2] + tA * aVec[2] + tB * bVec[2],
-            ];
+            // Same CSS→world translation as applyAxisDelta. aVec/bVec
+            // encode the ±sign at index axisA/axisB (CSS-axis order);
+            // the world axes to translate along are WORLD_AXIS_FOR_CSS.
+            const signA = aVec[spec.axisA];
+            const signB = bVec[spec.axisB];
+            const worldAxisA = WORLD_AXIS_FOR_CSS[spec.axisA];
+            const worldAxisB = WORLD_AXIS_FOR_CSS[spec.axisB];
+            const next = dragStartPosition.slice() as Vec3;
+            next[worldAxisA] += (tA * signA) / SCENE_TILE_SIZE;
+            next[worldAxisB] += (tB * signB) / SCENE_TILE_SIZE;
             target.setTransform({ position: next });
             syncGizmoPositions();
             opts.onObjectChange?.({ object: target, position: next });
@@ -888,6 +911,10 @@ export function createTransformControls(
         draggingKey = spec.key;
         rebuildGizmoColors();
         dragStartRotation = (target.transform.rotation ?? [0, 0, 0]).slice() as Vec3;
+        // Snapshot the position too so the per-tick pivot compensation
+        // anchors to the drag-start state (otherwise compounding rounding
+        // drift across moves slowly slides the mesh off-pivot).
+        dragStartPosition = (target.transform.position ?? [0, 0, 0]).slice() as Vec3;
         startRingDrag({
           cssAxis: spec.cssAxis,
           wrapper: gm.handle.element,
@@ -896,22 +923,49 @@ export function createTransformControls(
           startClientY: event.clientY,
           rotationSnap: opts.rotationSnap ?? null,
           onAngleDelta: (degrees) => {
-            if (!target || !dragStartRotation) return;
-            // World-frame quaternion compose. Rings stay at world axes
-            // visually (the gizmo isn't rotated with the mesh), so each
-            // ring drag rotates the mesh around the WORLD axis the ring
-            // points to — pre-multiply Qdelta · Qstart. Cumulative across
-            // repeated drags. X-axis sign stays empirically inverted to
-            // match user expectation for CW drag on the red ring.
-            const sign = spec.cssAxis === 0 ? -1 : 1;
+            if (!target || !dragStartRotation || !dragStartPosition) return;
+            // Each ring rotates the mesh around the WORLD axis the ring
+            // visually wraps. Ring quads are built with axis =
+            // WORLD_AXIS_FOR_CSS[cssAxis] (see `buildPolygonsFor`), so the
+            // rotation axis here must match — otherwise the mesh spins
+            // around a different axis than the ring the user grabbed.
+            const worldAxis = WORLD_AXIS_FOR_CSS[spec.cssAxis];
             const axisVec: Vec3 = [0, 0, 0];
-            axisVec[spec.cssAxis] = 1;
-            const deltaRad = (degrees * sign * Math.PI) / 180;
+            axisVec[worldAxis] = 1;
+            // Negate the screen-derived angle: `startRingDrag` returns a
+            // CCW-in-screen-space delta, but the world↔CSS axis swap is a
+            // reflection (det -1) so the same screen direction maps to a
+            // CW world rotation around the ring's axis. Flip once globally
+            // rather than per-axis empirically.
+            const deltaRad = (-degrees * Math.PI) / 180;
             const qStart = quatFromEulerXYZ(dragStartRotation);
             const qDelta = quatFromAxisAngle(axisVec, deltaRad);
-            const next = eulerXYZFromQuat(quatMultiply(qDelta, qStart));
-            target.setTransform({ rotation: next });
-            opts.onObjectChange?.({ object: target, rotation: next });
+            const nextRot = eulerXYZFromQuat(quatMultiply(qDelta, qStart));
+            // Pivot the mesh around its visible bbox center, not its
+            // local origin. Post-parity `<PolyMesh rotation>` pivots at
+            // (0,0,0) by design — for callers that haven't pre-centered
+            // their geometry (most loaders default to `{ center: "min" }`),
+            // raw rotation would swing the mesh around its bbox-min corner.
+            // We compensate by re-translating so the world-space point
+            // `position + scale * R * bboxCenter` stays put across the drag.
+            const scaleVal = typeof target.transform.scale === "number"
+              ? target.transform.scale
+              : (target.transform.scale?.[0] ?? 1);
+            const startC = rotateVec3(
+              centerOffset,
+              dragStartRotation[0],
+              dragStartRotation[1],
+              dragStartRotation[2],
+            );
+            const nextC = rotateVec3(centerOffset, nextRot[0], nextRot[1], nextRot[2]);
+            const nextPos: Vec3 = [
+              dragStartPosition[0] + scaleVal * (startC[0] - nextC[0]),
+              dragStartPosition[1] + scaleVal * (startC[1] - nextC[1]),
+              dragStartPosition[2] + scaleVal * (startC[2] - nextC[2]),
+            ];
+            target.setTransform({ rotation: nextRot, position: nextPos });
+            syncGizmoPositions();
+            opts.onObjectChange?.({ object: target, rotation: nextRot, position: nextPos });
             opts.onChange?.();
           },
           onMouseDown: opts.onMouseDown,
@@ -920,6 +974,7 @@ export function createTransformControls(
             if (!d) {
               draggingKey = null;
               dragStartRotation = null;
+              dragStartPosition = null;
               rebuildGizmoColors();
               // Rebake the atlas now that the rotation is committed. The
               // mesh wrapper's CSS rotation has already been applied via

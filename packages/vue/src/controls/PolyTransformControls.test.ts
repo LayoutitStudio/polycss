@@ -145,11 +145,12 @@ describe("PolyTransformControls (Vue)", () => {
     const wrapper = container.querySelector("[data-poly-transform-controls]") as HTMLElement;
     expect(wrapper).not.toBeNull();
     expect(wrapper.getAttribute("data-poly-mode")).toBe("translate");
-    // Wrapper plants itself on the mesh's visible center:
-    // position + bboxCenter * scale. TRIANGLE bbox center is (0.5, 0.5, 0)
-    // in world space → (25, 25, 0) CSS px at the standard tile (50). Scale 1
-    // means it adds straight to [50, 60, 70].
-    expect(wrapper.style.transform).toContain("translate3d(75px, 85px, 70px)");
+    // Wrapper plants itself on the mesh's visible center in scene-CSS
+    // pixel space: worldPositionToCss(position) + bboxCenter. With
+    // position=[50,60,70] (world units), the CSS-pixel translation is
+    // [position[1]*50, position[0]*50, position[2]*50] = [3000,2500,3500].
+    // TRIANGLE bbox center adds (25, 25, 0) in CSS px → [3025,2525,3500].
+    expect(wrapper.style.transform).toContain("translate3d(3025px, 2525px, 3500px)");
     const arrows = wrapper.querySelectorAll(".polycss-transform-arrow");
     expect(arrows.length).toBe(6);
     expect(Array.from(arrows).map(axisKeyOf)).toEqual(["x", "-x", "y", "-y", "z", "-z"]);

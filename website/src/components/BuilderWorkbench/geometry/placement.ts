@@ -1,16 +1,18 @@
 import type { Vec3 } from "@layoutit/polycss-react";
 
-const BASE_TILE = 50;
-
 /**
- * Wrapper translate (CSS px) that lands the mesh's visible bbox center at
- * `desiredWorld` (XY) and its lowest visible vertex at Z=0.
+ * Wrapper translate (world units, world-axis order) that lands the mesh's
+ * visible bbox center at `desiredWorld` (XY) and its lowest visible vertex
+ * at world z = surfaceZ.
  *
- * PolyMesh sets transform-origin to the bbox center, so for any vertex `v`:
- *   visible(v) = T + O + S*(v - O) = T + O*(1-S) + S*v
- * At v = bbox center, the (1-S)*O term collapses to leaving the center at
- * `T + O`. So to land the center at `desired*tile`, set `T = desired*tile - O`.
- * For Z we want the BOTTOM (v = minZ) at 0, which gives the closed form below.
+ * Post-parity, `<PolyMesh position>` is `T·R·S` pivoting at the wrapper's
+ * local origin (0,0,0), so for any vertex `v`:
+ *   visible(v) = T + S*v   (rotation skipped here — caller applies it later)
+ * For v = bbox center: visible_center = T + S*(midX, midY, midZ)
+ * For v.z = minZ:      visible_bottom_z = T.z + S*minZ
+ *
+ * Solve for T so the visible center lands at (desiredWorldX, desiredWorldY)
+ * and the visible bottom lands at surfaceZ.
  */
 export function placeMeshOnFloor(
   desiredWorldX: number,
@@ -23,14 +25,8 @@ export function placeMeshOnFloor(
   surfaceZ: number = 0,
 ): Vec3 {
   return [
-    // CSS X = worldY · tile; origin X = midY · tile
-    (desiredWorldY - bbox.midY) * BASE_TILE,
-    // CSS Y = worldX · tile; origin Y = midX · tile
-    (desiredWorldX - bbox.midX) * BASE_TILE,
-    // CSS Z in scene-local coords maps directly to world Z (the cssPoints
-    // axis swap is identity for Z). To lift the mesh so its lowest vertex
-    // sits at world z = surfaceZ, ADD surfaceZ * tile to the CSS Z that
-    // would land the bottom at world z = 0.
-    -BASE_TILE * (bbox.midZ * (1 - scale) + scale * bbox.minZ) + BASE_TILE * surfaceZ,
+    desiredWorldX - scale * bbox.midX,
+    desiredWorldY - scale * bbox.midY,
+    surfaceZ - scale * bbox.minZ,
   ];
 }

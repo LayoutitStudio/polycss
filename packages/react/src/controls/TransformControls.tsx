@@ -871,14 +871,19 @@ export function PolyTransformControls({
   const position = target.getPosition() ?? ([0, 0, 0] as Vec3);
   const polygons = target.getPolygons();
   const bboxCenter = gizmoCenterForMesh(polygons);
-  // Mesh wrapper pivots around `bboxCenter` via `transform-origin`, so the
-  // visible center stays at `position + bboxCenter` regardless of scale or
-  // rotation. The gizmo wrapper sits on the same point. When `autoCenter` is
-  // set on PolyMesh, bboxCenter collapses to (0,0,0) and this is a no-op.
+  // Post-parity: `position` is world units in world-axis order. The gizmo
+  // wrapper lives in scene-CSS pixel space, so apply the world→CSS axis
+  // swap + ×BASE_TILE before adding the (already CSS-pixel) bbox center.
+  // bboxCenter accounts for meshes whose vertices aren't centered at 0;
+  // when PolyMesh autoCenter is set, bboxCenter is (0,0,0) and this is a
+  // pure axis-swap.
+  const cssPosX = position[1] * SCENE_TILE_SIZE;
+  const cssPosY = position[0] * SCENE_TILE_SIZE;
+  const cssPosZ = position[2] * SCENE_TILE_SIZE;
   const wrapperPos: Vec3 = [
-    position[0] + bboxCenter[0],
-    position[1] + bboxCenter[1],
-    position[2] + bboxCenter[2],
+    cssPosX + bboxCenter[0],
+    cssPosY + bboxCenter[1],
+    cssPosZ + bboxCenter[2],
   ];
   const baseLength = gizmoLengthForMesh(polygons);
   const shaftLengthCss = baseLength * size;

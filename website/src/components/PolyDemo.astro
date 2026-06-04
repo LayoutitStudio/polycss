@@ -341,12 +341,23 @@ const { id, model, mtl, generator, generatorParams, controls, defaults, showStat
       } catch {}
 
       // State — defaults merged with user overrides.
-      // `light` is a partial DirectionalLight ({ direction?, color?, ambient?,
-      // ambientColor? }) — `undefined` falls through to the renderer's
-      // default (ambient 0.35, key direction [0.4,-0.7,0.59], white). Demos
-      // bump ambient to brighten dim assets like trees / dark GLBs.
+      // `light` is a partial config ({ direction?, color?, intensity?,
+      // ambient?, ambientColor? }) — `ambient` is shorthand for ambient
+      // intensity, `intensity` is the directional intensity. Post-parity
+      // the renderer uses physical Lambert (/π), which makes intensity:1
+      // look very dim — match the gallery's defaults (4.5 / 0.55) so demos
+      // look bright by default. Per-demo overrides still win.
       const rendererDefaultPerspective = 32000;
       const hasPerspectiveControl = controlList.includes("perspective");
+      const POST_PARITY_LIGHT_DEFAULT = {
+        intensity: 4.5,
+        ambient: 0.55,
+      };
+      const lightDefault = Object.assign(
+        { direction: [0.4, -0.7, 0.59], color: "#ffffff", ambientColor: "#ffffff" },
+        POST_PARITY_LIGHT_DEFAULT,
+        defaults.light ?? {},
+      );
       const state: Record<string, any> = {
         zoom: defaults.zoom ?? 1,
         rotX: defaults.rotX ?? 65,
@@ -354,7 +365,7 @@ const { id, model, mtl, generator, generatorParams, controls, defaults, showStat
         perspective: defaults.perspective ?? (hasPerspectiveControl ? undefined : false),
         interactive: defaults.interactive ?? false,
         animate: defaults.animate ?? false,
-        light: defaults.light,
+        light: lightDefault,
         // Generator-specific state (sphere)
         subdivisions: generatorParams.subdivisions ?? defaults.subdivisions ?? 3,
         radius: generatorParams.radius ?? defaults.radius ?? 10,
@@ -403,10 +414,15 @@ const { id, model, mtl, generator, generatorParams, controls, defaults, showStat
         // merge is automatic-only on main → no attribute to forward.
         // interactive is owned by <poly-orbit-controls> (appended below in init).
         if (state.light) {
-          if (state.light.direction) attrs["light-direction"] = state.light.direction.join(",");
-          if (state.light.color) attrs["light-color"] = state.light.color;
-          if (state.light.ambient !== undefined) attrs["light-ambient"] = String(state.light.ambient);
-          if (state.light.ambientColor) attrs["light-ambient-color"] = state.light.ambientColor;
+          // `<poly-scene>` reads directional-* / ambient-* (see
+          // PolySceneElement._readDirectionalLight) — the old `light-*`
+          // names were silently ignored, which is why every demo rendered
+          // at the renderer default intensity of 1 (very dim post-parity).
+          if (state.light.direction) attrs["directional-direction"] = state.light.direction.join(",");
+          if (state.light.color) attrs["directional-color"] = state.light.color;
+          if (state.light.intensity !== undefined) attrs["directional-intensity"] = String(state.light.intensity);
+          if (state.light.ambient !== undefined) attrs["ambient-intensity"] = String(state.light.ambient);
+          if (state.light.ambientColor) attrs["ambient-color"] = state.light.ambientColor;
         }
         return attrs;
       }
@@ -558,7 +574,20 @@ const { id, model, mtl, generator, generatorParams, controls, defaults, showStat
           );
 
         const sceneOptions: Record<string, any> = { camera, autoCenter: true };
-        if (state.light) sceneOptions.directionalLight = state.light;
+        if (state.light) {
+          // Split the demo's `light` config back into the two scene fields
+          // the imperative API takes. `state.light.ambient` is shorthand
+          // for ambient *intensity*.
+          const dir: Record<string, unknown> = {};
+          if (state.light.direction) dir.direction = state.light.direction;
+          if (state.light.color) dir.color = state.light.color;
+          if (state.light.intensity !== undefined) dir.intensity = state.light.intensity;
+          if (Object.keys(dir).length) sceneOptions.directionalLight = dir;
+          const amb: Record<string, unknown> = {};
+          if (state.light.ambient !== undefined) amb.intensity = state.light.ambient;
+          if (state.light.ambientColor) amb.color = state.light.ambientColor;
+          if (Object.keys(amb).length) sceneOptions.ambientLight = amb;
+        }
 
         sceneHandle = createPolyScene(sceneEl as HTMLElement, sceneOptions);
         // Vanilla controls layer — drag + wheel + animate. Updated by

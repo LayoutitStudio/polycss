@@ -480,6 +480,16 @@ export const PolyMesh = defineComponent({
       const userGroundLightDir = ctx?.directionalLight?.direction
         ?? ([0.4, -0.7, 0.59] as Vec3);
       const lightDir = worldDirectionToCss(userGroundLightDir);
+
+      // Project shadows into the MESH WRAPPER's local frame so that the
+      // SVG, which is rendered as a child of `.polycss-mesh` and inherits
+      // its `translate3d(position * BASE_TILE)`, lands on the absolute
+      // scene ground (cssZ = groundCssZ) — not lifted by the mesh's own
+      // world position. Mirrors the React path; vanilla handles this by
+      // adding `worldPositionToCss(position)` to every vertex and mounting
+      // the SVG on the scene root.
+      const meshPosZ = props.position?.[2] ?? 0;
+      const localGroundCssZ = groundCssZ - meshPosZ * BASE_TILE;
       const dedupDrop = findOverlappingPolygonDuplicates(polygons.value, {
         normalTolerance: 0.1,
         distanceTolerance: 0.5,
@@ -512,7 +522,7 @@ export const PolyMesh = defineComponent({
           if (cssVertex[1] < fpMinY) fpMinY = cssVertex[1];
           if (cssVertex[0] > fpMaxX) fpMaxX = cssVertex[0];
           if (cssVertex[1] > fpMaxY) fpMaxY = cssVertex[1];
-          const p = projectCssVertexToGround(cssVertex, lightDir, groundCssZ);
+          const p = projectCssVertexToGround(cssVertex, lightDir, localGroundCssZ);
           projected.push(p);
           if (p[0] < minX) minX = p[0];
           if (p[1] < minY) minY = p[1];
@@ -575,7 +585,7 @@ export const PolyMesh = defineComponent({
             transformOrigin: "0 0",
             pointerEvents: "none",
             willChange: "transform",
-            transform: `translate3d(${bx0.toFixed(3)}px,${by0.toFixed(3)}px,${groundCssZ.toFixed(3)}px)`,
+            transform: `translate3d(${bx0.toFixed(3)}px,${by0.toFixed(3)}px,${localGroundCssZ.toFixed(3)}px)`,
           } as CSSProperties,
         },
         [

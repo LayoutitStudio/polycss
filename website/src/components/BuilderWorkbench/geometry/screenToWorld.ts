@@ -34,9 +34,8 @@
  *        worldY = cssX / BASE_TILE
  */
 
-import type { SceneOptionsState } from "../types";
-
-const BASE_TILE = 50;
+import { BASE_TILE } from "@layoutit/polycss-react";
+import type { SceneOptionsState } from "../../types";
 
 /** 3D vector [x, y, z]. */
 type V3 = [number, number, number];
@@ -47,10 +46,15 @@ function deg2rad(d: number): number {
 
 /**
  * Apply a single row of the inverse transform:
- *   translate(+cssTarget) ∘ rotateZ(-rotY) ∘ rotateX(-rotX) ∘ scale(1/zoom)
+ *   translate(+cssTarget) ∘ rotateZ(-rotY) ∘ rotateX(-rotX) ∘ scale(BASE_TILE/zoom)
  *
- * We apply the steps in order (innermost first in M^-1 = T * RZ * RX * S):
- *   1. scale(1/zoom)
+ * Post-parity, `zoom` is "px per world unit" (Three.js OrthographicCamera
+ * shape). The scene-root CSS scale is `zoom / BASE_TILE` (renderer geometry
+ * already lives at × BASE_TILE CSS px), so the inverse scale is
+ * `BASE_TILE / zoom`.
+ *
+ * Steps in order (innermost first in M^-1 = T * RZ * RX * S):
+ *   1. scale(BASE_TILE/zoom)
  *   2. rotateX(-rotX)   — tilt back
  *   3. rotateZ(-rotY)   — rotate back  (CSS rotate() is actually rotateZ)
  *   4. translate(+cssX, +cssY, +cssZ)
@@ -66,8 +70,8 @@ function applyInverseTransform(
 ): V3 {
   let [x, y, z] = p;
 
-  // 1. scale(1/zoom)
-  const inv = 1 / zoom;
+  // 1. inverse of scale(zoom / BASE_TILE)
+  const inv = BASE_TILE / zoom;
   x *= inv;
   y *= inv;
   z *= inv;

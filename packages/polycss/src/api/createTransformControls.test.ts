@@ -243,19 +243,18 @@ describe("createTransformControls", () => {
       // then dispatch pointerdown on the host at (0, 0).
       triggerPointerDownOnGizmoEl(host, ".polycss-transform-arrow--x", 0, 0);
 
-      // cameraScale=2, X axis is cssAxis=0 (maps to translate3d[0]=x).
-      // probeEl will get translate3d(shaftLength, 0, 0) → screen offset (shaftLength*2, 0).
-      // screenAxisX = (shaftLength*2) / shaftLength = 2, screenAxisY = 0.
-      // screenAxisLenSq = 4.
-      // Pointer move to (10, 0): t = (10*2 + 0*0) / 4 = 5.
-      // newPos = [100+5*1, 200+5*0, 0+5*0] = [105, 200, 0].
+      // cameraScale=2, X arrow is cssAxis=0 → probe at translate3d(shaft,0,0).
+      // Screen probe ratio 2, dot product with pointer (10,0) gives t=5 CSS px.
+      // Post-parity drag math: t/SCENE_TILE_SIZE = 0.1 world units, applied
+      // to world axis WORLD_AXIS_FOR_CSS[0] = 1 (world Y). So position[1]
+      // moves 0.1 from 200 → 200.1; world X and Z unchanged.
       window.dispatchEvent(
         new PointerEvent("pointermove", { clientX: 10, clientY: 0, pointerId: 1 }),
       );
 
       expect(onObjectChange).toHaveBeenCalled();
       const evt = onObjectChange.mock.calls[0][0];
-      expect(evt.position).toEqual([105, 200, 0]);
+      expect(evt.position).toEqual([100, 200.1, 0]);
       expect(evt.object).toBe(mesh);
 
       window.dispatchEvent(new PointerEvent("pointerup", { clientX: 10, clientY: 0, pointerId: 1 }));
@@ -272,22 +271,22 @@ describe("createTransformControls", () => {
 
       triggerPointerDownOnGizmoEl(host, ".polycss-transform-arrow--y", 0, 0);
 
-      // Y axis is cssAxis=1 → translate3d(0, shaftLength, 0) → screen (0, shaftLength*2).
-      // screenAxisX=0, screenAxisY=2. screenAxisLenSq=4.
-      // Move (0, 6): t = (0*0 + 6*2) / 4 = 3. newPos = [10, 20+3, 30] = [10, 23, 30].
+      // Y arrow is cssAxis=1 → screen probe (0, 2). Pointer (0, 6) → t=3 CSS px.
+      // Post-parity: t/SCENE_TILE_SIZE = 0.06 world units, applied to world
+      // axis WORLD_AXIS_FOR_CSS[1] = 0 (world X). position[0] moves 0.06 from
+      // 10 → 10.06; Y and Z unchanged.
       window.dispatchEvent(
         new PointerEvent("pointermove", { clientX: 0, clientY: 6, pointerId: 1 }),
       );
-      expect(onObjectChange.mock.calls[0][0].position).toEqual([10, 23, 30]);
+      expect(onObjectChange.mock.calls[0][0].position).toEqual([10.06, 20, 30]);
 
-      // Perpendicular (X) pointer motion: dot([100, 0], [0, 2]) = 0 → t = 0.
-      // newPos = [10, 20+0, 30] = [10, 20, 30] — same as start.
+      // Perpendicular X-only pointer motion: dot([100, 0], [0, 2]) = 0 → t=0.
+      // Cumulative pointer (100, 6) re-projects to t=3 (same as before), so
+      // position[0] stays at 10.06 and Y/Z stay unchanged.
       window.dispatchEvent(
         new PointerEvent("pointermove", { clientX: 100, clientY: 6, pointerId: 1 }),
       );
-      // Position should not have changed from the anchored start + t=3 (prev move reused anchor)
-      // Actually cumulative t from (100, 6): dot([100, 6], [0, 2]) / 4 = 12/4 = 3 → same
-      expect(onObjectChange.mock.calls[1][0].position[0]).toBe(10); // x unchanged
+      expect(onObjectChange.mock.calls[1][0].position[1]).toBe(20); // y unchanged
       expect(onObjectChange.mock.calls[1][0].position[2]).toBe(30); // z unchanged
 
       window.dispatchEvent(new PointerEvent("pointerup", { clientX: 100, clientY: 6, pointerId: 1 }));
@@ -304,14 +303,17 @@ describe("createTransformControls", () => {
 
       triggerPointerDownOnGizmoEl(host, ".polycss-transform-arrow--x", 0, 0);
 
-      // Pointer (14, 0): raw t = (14*2)/4 = 7. snap(7, 5) = 5.
-      // newPos = [0+5, 0, 0] = [5, 0, 0].
+      // Pointer (14, 0): raw t = 7 CSS px, snap(7, 5) = 5 CSS px. The snap
+      // value is in CSS pixels (callers like the builder pre-multiply by
+      // BASE_TILE so a "10 world unit" snap reads as 500 CSS px). After
+      // post-parity drag math: 5 CSS px / SCENE_TILE_SIZE = 0.1 world units
+      // along world axis WORLD_AXIS_FOR_CSS[0] = 1 (world Y).
       window.dispatchEvent(
         new PointerEvent("pointermove", { clientX: 14, clientY: 0, pointerId: 1 }),
       );
 
       expect(onObjectChange).toHaveBeenCalled();
-      expect(onObjectChange.mock.calls[0][0].position).toEqual([5, 0, 0]);
+      expect(onObjectChange.mock.calls[0][0].position).toEqual([0, 0.1, 0]);
 
       window.dispatchEvent(new PointerEvent("pointerup", { clientX: 14, clientY: 0, pointerId: 1 }));
     });
@@ -342,7 +344,7 @@ describe("createTransformControls", () => {
   });
 
   // ── Test 11: rotate ring drag → onObjectChange fires with new rotation ───────
-  it("dragging X ring fires onObjectChange with updated rotation (X-axis inverted)", () => {
+  it("dragging X ring fires onObjectChange with updated rotation around world Y", () => {
     withFakeLayout(2, () => {
       const onObjectChange = vi.fn();
       const mesh = scene.add(parseResult(), { id: "target" });
@@ -350,14 +352,16 @@ describe("createTransformControls", () => {
       tc = createTransformControls(scene, { mode: "rotate", onObjectChange });
       tc.attach(mesh);
 
-      // Dispatch pointerdown at (100, 100) so lastAngle = atan2(100-0, 100-0)
-      // The gizmo wrapper has top=0, left=0 (no translate3d in the mesh), so
-      // wRect.left=0, wRect.top=0. centerX=0, centerY=0.
+      // Pointerdown at (100, 100); gizmo wrapper at (0, 0) so the start
+      // angle is atan2(100, 100) = 45° in screen space.
       triggerPointerDownOnGizmoEl(host, ".polycss-transform-ring--x", 100, 100);
 
-      // Move pointer to (200, 100): angle changes from atan2(100,100)=45° to atan2(100,200)=~26.6°
-      // d = new - old = atan2(100,200) - atan2(100,100) ≈ -0.3217 rad ≈ -18.43°
-      // cumulative ≈ -18.43°. X-axis sign = -1 (inverted), so next[0] = 0 + (-18.43 * -1) ≈ 18.43°
+      // Move pointer to (200, 100): atan2(100, 200) ≈ 26.57°. Screen delta is
+      // CCW-negative ≈ -18.43°. Post-parity: the "X" ring is built around
+      // WORLD_AXIS_FOR_CSS[0] = world Y, so the rotation goes into
+      // `rotation[1]`, not `rotation[0]`. A single global sign flip
+      // (-degrees) maps CCW-in-screen to CW-in-world, matching what the
+      // user sees when they drag the visible ring.
       window.dispatchEvent(
         new PointerEvent("pointermove", { clientX: 200, clientY: 100, pointerId: 1 }),
       );
@@ -365,13 +369,11 @@ describe("createTransformControls", () => {
       expect(onObjectChange).toHaveBeenCalled();
       const evt = onObjectChange.mock.calls[0][0];
       expect(evt.rotation).toBeDefined();
-      // X-axis rotation is inverted; moving CW should produce positive rotation
-      expect(evt.rotation![0]).toBeTypeOf("number");
-      // y and z should remain ~0 (X ring drag only affects cssAxis=0). With
-      // quaternion compose the round-trip through Euler can yield -0 for
-      // nominally-zero components, so check the magnitude instead of strict
-      // +0 equality.
-      expect(Math.abs(evt.rotation![1])).toBeLessThan(1e-6);
+      expect(evt.rotation![1]).toBeTypeOf("number");
+      expect(Math.abs(evt.rotation![1])).toBeGreaterThan(0);
+      // X and Z should stay ~0. Quaternion → Euler round-trip can yield -0
+      // for nominally-zero components, so compare magnitudes.
+      expect(Math.abs(evt.rotation![0])).toBeLessThan(1e-6);
       expect(Math.abs(evt.rotation![2])).toBeLessThan(1e-6);
       expect(evt.object).toBe(mesh);
 
