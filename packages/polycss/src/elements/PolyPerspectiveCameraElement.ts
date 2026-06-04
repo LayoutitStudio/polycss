@@ -103,11 +103,11 @@ export class PolyPerspectiveCameraElement extends ELEMENT_BASE {
     if (!this._camera || !this._wrapper) return;
     const opts = this._readOptions();
     if (name === "perspective") {
-      // Re-creating the handle is required for perspective — it's baked
-      // into `perspectiveStyle` on the wrapper. Everything else uses
-      // update() so the SCENE keeps its reference to the same handle.
-      this._camera = createPolyPerspectiveCamera(opts);
-      this._wrapper.style.perspective = this._camera.perspectiveStyle;
+      // Update the wrapper's CSS perspective in place. Recreating the camera
+      // handle here would orphan the scene's captured reference (it would
+      // keep pointing at the old handle and ignore every later update).
+      const px = opts.perspective !== undefined ? `${opts.perspective}px` : "32000px";
+      this._wrapper.style.perspective = px;
       return;
     }
     // Mutate the existing handle in place — the scene captured this object
