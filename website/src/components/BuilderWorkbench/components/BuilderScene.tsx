@@ -38,6 +38,13 @@ const GROUND_FILL_COLORS = {
   dark: "#05070b",
 } as const;
 
+// The Dock's camera slider feeds a unitless 0.05–2.5 zoom value (legacy
+// CSS-scale semantics shared with the gallery). Post-parity the camera
+// expects px-per-world-unit, so we multiply the slider value by BASE_TILE
+// (50) before handing it to the camera, and divide it back before pushing
+// updates into sceneOptions. Same shape as gallery's LEGACY_ZOOM_COMPAT.
+const LEGACY_ZOOM_COMPAT = 50;
+
 export interface BuilderSceneProps {
   sceneOptions: SceneOptionsState;
   updateScene: (partial: Partial<SceneOptionsState>) => void;
@@ -66,23 +73,27 @@ export interface BuilderSceneProps {
   selected: PlacedItem | null;
 }
 
+// Post-parity `<PolyMesh position>` is `T·R·S` pivoting at the local origin,
+// so visible(v) = T + S·v (no rotation here — XY surfaces are axis-aligned).
+// `position[2]` is the world-Z translate, so the visible bottom of a vertex
+// at v.z = minZ sits at `position[2] + scale * minZ`.
 function selectedSurfaceWorldZ(item: PlacedItem): number {
   if (!item.rawPolygons) return item.elevation ?? 0;
   const bbox = meshBbox(item.rawPolygons);
   const scale = Math.max(item.fitScale * item.scale, 0.0001);
-  return item.position[2] / BASE_TILE + bbox.midZ * (1 - scale) + scale * bbox.minZ;
+  return item.position[2] + scale * bbox.minZ;
 }
 
 function itemTopSurfaceWorldZ(item: PlacedItem & { rawPolygons: Polygon[] }, polygons: Polygon[]): number {
   const bbox = meshBbox(polygons);
   const scale = Math.max(item.fitScale * item.scale, 0.0001);
-  return item.position[2] / BASE_TILE + bbox.midZ * (1 - scale) + scale * bbox.maxZ;
+  return item.position[2] + scale * bbox.maxZ;
 }
 
 function itemBaseSurfaceWorldZ(item: PlacedItem & { rawPolygons: Polygon[] }, polygons: Polygon[]): number {
   const bbox = meshBbox(polygons);
   const scale = Math.max(item.fitScale * item.scale, 0.0001);
-  return item.position[2] / BASE_TILE + bbox.midZ * (1 - scale) + scale * bbox.minZ;
+  return item.position[2] + scale * bbox.minZ;
 }
 
 interface PlacementSurface {
@@ -246,15 +257,17 @@ function BuilderSelectedMeshInteractionControls({
       setTimeout(() => window.removeEventListener("click", swallow, true), 0);
     };
 
-    const projectAt = (clientX: number, clientY: number, planeWorldZ: number): [number, number] | null =>
-      projectScreenToWorldGround({
+    const projectAt = (clientX: number, clientY: number, planeWorldZ: number): [number, number] | null => {
+      const opts = stateRef.current.sceneOptions;
+      return projectScreenToWorldGround({
         clientX,
         clientY,
         cameraEl,
-        sceneOptions: stateRef.current.sceneOptions,
+        sceneOptions: { ...opts, zoom: opts.zoom * LEGACY_ZOOM_COMPAT },
         autoCenterOffset: store.getState().autoCenterOffset,
         planeWorldZ,
       });
+    };
 
     const armZClickSwallow = (pointerId: number): void => {
       const onUp = (event: PointerEvent): void => {
@@ -405,11 +418,12 @@ function BuilderViewportToolControls({
 
     const projectAt = (clientX: number, clientY: number, planeWorldZ = 0): [number, number] | null => {
       const state = stateRef.current;
+      const opts = state.sceneOptions;
       const hit = projectScreenToWorldGround({
         clientX,
         clientY,
         cameraEl,
-        sceneOptions: state.sceneOptions,
+        sceneOptions: { ...opts, zoom: opts.zoom * LEGACY_ZOOM_COMPAT },
         autoCenterOffset: store.getState().autoCenterOffset,
         planeWorldZ,
       });
@@ -605,10 +619,11 @@ export function BuilderScene({
   const perspective = sceneOptions.dragMode === "fpv" ? FPV_PERSPECTIVE : sceneOptions.perspective;
   const Cam = perspective === false ? PolyOrthographicCamera : PolyPerspectiveCamera;
   const sceneKey = sceneOptions.meshResolution;
+  const cameraZoom = sceneOptions.zoom * LEGACY_ZOOM_COMPAT;
   const camProps = perspective === false
-    ? { zoom: sceneOptions.zoom, rotX: sceneOptions.rotX, rotY: sceneOptions.rotY, target: sceneOptions.target }
+    ? { zoom: cameraZoom, rotX: sceneOptions.rotX, rotY: sceneOptions.rotY, target: sceneOptions.target }
     : {
-      zoom: sceneOptions.zoom,
+      zoom: cameraZoom,
       rotX: sceneOptions.rotX,
       rotY: sceneOptions.rotY,
       target: sceneOptions.target,
@@ -617,7 +632,7 @@ export function BuilderScene({
   const handleCameraChange = (cam: { rotX: number; rotY: number; zoom: number; target?: Vec3 }) => updateScene({
     rotX: cam.rotX,
     rotY: cam.rotY,
-    zoom: cam.zoom,
+    zoom: cam.zoom / LEGACY_ZOOM_COMPAT,
     ...(cam.target ? { target: cam.target } : {}),
   });
   const selectedWireframePolygons = useMemo<Polygon[]>(() => {
