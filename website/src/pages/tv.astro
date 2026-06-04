@@ -470,22 +470,53 @@ const TVS = [
         // Bottom-centre pill swaps the orbit controls for first-person
         // controls. FPV gives WASD movement + mouse look; click anywhere
         // in the stage to lock the pointer.
+        //
+        // On the way INTO FPV: disable scene auto-center, switch the
+        // camera to a wider FOV (perspective 2000, matching the gallery's
+        // FPV_PERSPECTIVE), and spawn the player a few mesh-spans behind
+        // the TV along the current rotY look direction so W walks toward
+        // it (matches useFpvSpawn from the gallery).
         const orbitControls = document.getElementById("tv-orbit-controls");
         const fpvHint = document.querySelector<HTMLElement>("[data-fpv-hint]");
         let fpvControls: HTMLElement | null = null;
+        let savedAutoCenter = true;
         function setCameraMode(mode: "orbit" | "fpv"): void {
-          if (!sceneEl) return;
+          if (!sceneEl || !camera || !mesh) return;
           root!.querySelectorAll<HTMLButtonElement>(".tv-camera-mode__btn").forEach((b) => {
             b.classList.toggle("is-active", b.dataset.mode === mode);
           });
           if (fpvHint) fpvHint.hidden = mode !== "fpv";
-          // Wider FOV (lower CSS perspective) while in FPV — matches the
-          // gallery/builder's FPV_PERSPECTIVE so the camera doesn't feel
-          // narrow/zoomed-in while walking.
-          if (camera) {
-            camera.setAttribute("perspective", mode === "fpv" ? "2000" : "32000");
-          }
+          camera.setAttribute("perspective", mode === "fpv" ? "2000" : "32000");
           if (mode === "fpv") {
+            savedAutoCenter = sceneEl.hasAttribute("auto-center");
+            sceneEl.removeAttribute("auto-center");
+            // Compute the spawn target from the TV mesh bbox + the current
+            // rotY so the camera ends up BEHIND the TV looking at it.
+            const handle = mesh.getMeshHandle?.();
+            if (handle) {
+              let minX = Infinity, maxX = -Infinity;
+              let minY = Infinity, maxY = -Infinity;
+              let minZ = Infinity, maxZ = -Infinity;
+              for (const p of handle.polygons) {
+                for (const v of p.vertices) {
+                  if (v[0] < minX) minX = v[0]; if (v[0] > maxX) maxX = v[0];
+                  if (v[1] < minY) minY = v[1]; if (v[1] > maxY) maxY = v[1];
+                  if (v[2] < minZ) minZ = v[2]; if (v[2] > maxZ) maxZ = v[2];
+                }
+              }
+              if (Number.isFinite(minZ)) {
+                const cx = (minX + maxX) / 2;
+                const cy = (minY + maxY) / 2;
+                const cz = (minZ + maxZ) / 2;
+                const span = Math.max(maxX - minX, maxY - minY, 1);
+                const rotY = parseFloat(camera.getAttribute("rot-y") ?? "215");
+                const r = (rotY * Math.PI) / 180;
+                const back = span * 2;
+                const ox = cx + Math.cos(r) * back;
+                const oy = cy + Math.sin(r) * back;
+                camera.setAttribute("target", `${ox},${oy},${cz}`);
+              }
+            }
             if (orbitControls) orbitControls.remove();
             if (!fpvControls) {
               fpvControls = document.createElement("poly-first-person-controls");
@@ -501,6 +532,8 @@ const TVS = [
               sceneEl.appendChild(fpvControls);
             }
           } else {
+            if (savedAutoCenter) sceneEl.setAttribute("auto-center", "");
+            camera.removeAttribute("target");
             if (fpvControls) fpvControls.remove();
             if (orbitControls && !orbitControls.isConnected) {
               sceneEl.appendChild(orbitControls);
