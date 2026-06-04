@@ -50,13 +50,34 @@ const TVS = [
     // hand from the inspector — more screens to come.
     // Negative lift recesses the iframe slightly behind the screen
     // polygon — these CRT meshes already model the glass surface, so
-    // the video reads better sitting inside the bezel.
+    // the video reads better sitting inside the bezel. Each screen gets
+    // its own YouTube embed so all five CRTs play different content.
     screens: [
-      { polyIndices: [212, 213, 214, 215, 216], lift: -0.6 },
-      { polyIndices: [65, 66, 67, 68, 69], lift: -0.6 },
-      { polyIndices: [119, 120, 121, 122, 123], lift: -0.6 },
-      { polyIndices: [207, 208, 209, 210, 211], lift: -0.6 },
-      { polyIndices: [265, 266, 267, 268, 269], lift: -0.6 },
+      {
+        polyIndices: [212, 213, 214, 215, 216],
+        lift: -0.6,
+        videoSrc: 'https://www.youtube.com/embed/frdBb9Slu1A?autoplay=1&mute=1&playsinline=1&modestbranding=1&controls=0&start=650',
+      },
+      {
+        polyIndices: [65, 66, 67, 68, 69],
+        lift: -0.6,
+        videoSrc: 'https://www.youtube.com/embed/QK8mJJJvaes?autoplay=1&mute=1&playsinline=1&modestbranding=1&controls=0',
+      },
+      {
+        polyIndices: [119, 120, 121, 122, 123],
+        lift: -0.6,
+        videoSrc: 'https://www.youtube.com/embed/CduA0TULnow?autoplay=1&mute=1&playsinline=1&modestbranding=1&controls=0',
+      },
+      {
+        polyIndices: [207, 208, 209, 210, 211],
+        lift: -0.6,
+        videoSrc: 'https://www.youtube.com/embed/NCtzkaL2t_Y?autoplay=1&mute=1&playsinline=1&modestbranding=1&controls=0&start=90',
+      },
+      {
+        polyIndices: [265, 266, 267, 268, 269],
+        lift: -0.6,
+        videoSrc: 'https://www.youtube.com/embed/SskpYGyEDmU?autoplay=1&mute=1&playsinline=1&modestbranding=1&controls=0&start=50',
+      },
     ],
     cam: { rotX: 70, rotY: 215, zoom: 8 },
   },
