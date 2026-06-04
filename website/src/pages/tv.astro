@@ -49,7 +49,7 @@ const TVS = [
     // Each stacked CRT gets its own iframe. Polygon indices supplied by
     // hand from the inspector — more screens to come.
     screens: [
-      { polyIndices: [211, 212, 213, 214, 215] },
+      { polyIndices: [211, 212, 213, 214, 215, 216] },
       { polyIndices: [65, 66, 67, 68, 69] },
       { polyIndices: [119, 120, 121, 122, 123] },
       { polyIndices: [206, 207, 208, 209, 210] },
@@ -414,6 +414,14 @@ const TVS = [
           (HTMLElement & { getMeshHandle?: () => { polygons: PolygonLike[] } | null })
           | null;
         if (!root || !camera || !sceneEl || !mesh || presets.length === 0) return;
+
+        // TODO: shadows. Adding `receive-shadow` to <poly-plane> triggers
+        // the receiver-shadow path but the projected SVG lands at the
+        // wrong scene coords (interaction with `excludeFromAutoCenter` on
+        // the plane + the `<poly-mesh auto-center>` on the TV). Vanilla
+        // dropped the legacy ground-shadow fallback for three.js parity,
+        // so a caster with no receiver draws nothing. Skipping shadows
+        // here until the receiver-shadow positioning is debugged.
 
         let activePreset: TvPreset = presets[0];
         let activeIframes: HTMLElement[] = [];
