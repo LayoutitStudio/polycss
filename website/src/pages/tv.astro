@@ -177,6 +177,7 @@ const TVS = [
                 color="#1a2030"
                 position="0,0,0"
                 exclude-from-auto-center
+                receive-shadow
               ></poly-plane>
               {/* <poly-iframe> elements are added dynamically per preset
                   (one per `screens[]` entry) so a multi-screen TV like the
@@ -415,13 +416,15 @@ const TVS = [
           | null;
         if (!root || !camera || !sceneEl || !mesh || presets.length === 0) return;
 
-        // TODO: shadows. Adding `receive-shadow` to <poly-plane> triggers
-        // the receiver-shadow path but the projected SVG lands at the
-        // wrong scene coords (interaction with `excludeFromAutoCenter` on
-        // the plane + the `<poly-mesh auto-center>` on the TV). Vanilla
-        // dropped the legacy ground-shadow fallback for three.js parity,
-        // so a caster with no receiver draws nothing. Skipping shadows
-        // here until the receiver-shadow positioning is debugged.
+        // Shadows: the receiver-shadow code sits the shadow SVG at the
+        // floor's plane plus `shadow.lift` (default 0.05 world = 2.5 CSS
+        // px). With big planes like our 400-world-unit floor + low-angle
+        // camera, that razor-thin gap z-fights with the floor itself and
+        // the shadow only shows from straight-overhead views. Bump the
+        // lift to ~1 world unit (50 CSS px) so the shadow stays in front
+        // of the floor at any normal viewing angle.
+        const sceneHandle = (sceneEl as unknown as { getScene?: () => { setOptions: (o: Record<string, unknown>) => void } | null }).getScene?.();
+        sceneHandle?.setOptions({ shadow: { color: "#000000", opacity: 0.55, lift: 1 } });
 
         let activePreset: TvPreset = presets[0];
         let activeIframes: HTMLElement[] = [];
