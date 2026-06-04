@@ -188,7 +188,7 @@ const TVS = [
               ambient-intensity="0.4"
             >
               <poly-orbit-controls id="tv-orbit-controls" drag wheel zoom-min="1" zoom-max="200"></poly-orbit-controls>
-              <poly-mesh id="tv-mesh" src={TVS[0].src} mtl={('mtl' in TVS[0] ? TVS[0].mtl : undefined)} auto-center cast-shadow receive-shadow></poly-mesh>
+              <poly-mesh id="tv-mesh" src={TVS[0].src} mtl={('mtl' in TVS[0] ? TVS[0].mtl : undefined)} auto-center cast-shadow></poly-mesh>
               {/* Ground plane for shadow reception. Z position is set
                   per-preset by the script (= TV's bbox minZ) so the floor
                   always sits flush with the TV's bottom regardless of how
@@ -479,12 +479,22 @@ const TVS = [
             b.classList.toggle("is-active", b.dataset.mode === mode);
           });
           if (fpvHint) fpvHint.hidden = mode !== "fpv";
+          // Wider FOV (lower CSS perspective) while in FPV — matches the
+          // gallery/builder's FPV_PERSPECTIVE so the camera doesn't feel
+          // narrow/zoomed-in while walking.
+          if (camera) {
+            camera.setAttribute("perspective", mode === "fpv" ? "2000" : "32000");
+          }
           if (mode === "fpv") {
             if (orbitControls) orbitControls.remove();
             if (!fpvControls) {
               fpvControls = document.createElement("poly-first-person-controls");
+              // Same defaults as gallery's DEFAULT_SCENE FPV config so the
+              // walk feel matches.
               fpvControls.setAttribute("move-speed", "30");
-              fpvControls.setAttribute("eye-height", "10");
+              fpvControls.setAttribute("jump-velocity", "25");
+              fpvControls.setAttribute("gravity", "60");
+              fpvControls.setAttribute("eye-height", "6");
               fpvControls.setAttribute("look-sensitivity", "0.15");
               sceneEl.appendChild(fpvControls);
             } else if (!fpvControls.isConnected) {
