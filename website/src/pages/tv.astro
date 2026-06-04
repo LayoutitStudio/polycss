@@ -185,7 +185,7 @@ const TVS = [
               auto-center
               directional-direction="0.4,-0.7,0.59"
               directional-intensity="6.5"
-              ambient-intensity="0.9"
+              ambient-intensity="0.4"
             >
               <poly-orbit-controls drag wheel></poly-orbit-controls>
               <poly-mesh id="tv-mesh" src={TVS[0].src} mtl={('mtl' in TVS[0] ? TVS[0].mtl : undefined)} auto-center cast-shadow receive-shadow></poly-mesh>
@@ -459,7 +459,7 @@ const TVS = [
         // lift to ~1 world unit (50 CSS px) so the shadow stays in front
         // of the floor at any normal viewing angle.
         const sceneHandle = (sceneEl as unknown as { getScene?: () => { setOptions: (o: Record<string, unknown>) => void } | null }).getScene?.();
-        sceneHandle?.setOptions({ shadow: { color: "#000000", opacity: 0.95, lift: 1 } });
+        sceneHandle?.setOptions({ shadow: { color: "#000000", opacity: 0.95, lift: 0.1 } });
 
         let activePreset: TvPreset = presets[0];
         let activeIframes: HTMLElement[] = [];
