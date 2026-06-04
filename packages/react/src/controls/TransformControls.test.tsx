@@ -112,9 +112,12 @@ describe("<PolyTransformControls>", () => {
     );
     const wrapper = container.querySelector("[data-poly-transform-controls]") as HTMLElement;
     expect(wrapper).not.toBeNull();
-    // Wrapper sits at position + bboxCenter(polygons) so the gizmo lands on
-    // the mesh's visual center. TRIANGLE's bbox center contributes (25, 25, 0).
-    expect(wrapper.style.transform).toContain("translate3d(75px, 85px, 70px)");
+    // Wrapper sits at the mesh's visible center in scene-CSS pixel space.
+    // Post-parity `position` is world units / world-axis order, so the
+    // gizmo applies `worldPositionToCss(position)` = [pos[1]*50, pos[0]*50,
+    // pos[2]*50] = [3000, 2500, 3500]. TRIANGLE's bbox center adds
+    // (25, 25, 0) in CSS px (already swapped via SCENE_TILE_SIZE).
+    expect(wrapper.style.transform).toContain("translate3d(3025px, 2525px, 3500px)");
     const arrows = wrapper.querySelectorAll(".polycss-transform-arrow");
     expect(arrows.length).toBe(6);
     expect(Array.from(arrows).map(axisKeyOf)).toEqual([
@@ -287,7 +290,8 @@ describe("<PolyTransformControls>", () => {
       ),
     );
     let wrapper = container.querySelector("[data-poly-transform-controls]") as HTMLElement;
-    // Wrapper = position + bboxCenter(TRIANGLE) where bbox center is (25, 25, 0).
+    // Wrapper = worldPositionToCss(position) + bboxCenter(TRIANGLE).
+    // position=[0,0,0] → CSS [0,0,0]; TRIANGLE bbox center = (25, 25, 0).
     expect(wrapper.style.transform).toContain("translate3d(25px, 25px, 0px)");
     act(() =>
       root.render(
@@ -300,8 +304,9 @@ describe("<PolyTransformControls>", () => {
       ),
     );
     wrapper = container.querySelector("[data-poly-transform-controls]") as HTMLElement;
-    // (42, 7, 0) + (25, 25, 0) bboxCenter
-    expect(wrapper.style.transform).toContain("translate3d(67px, 32px, 0px)");
+    // position=[42,7,0] → CSS [pos[1]*50, pos[0]*50, pos[2]*50] = [350, 2100, 0]
+    // + bboxCenter (25, 25, 0) = [375, 2125, 0].
+    expect(wrapper.style.transform).toContain("translate3d(375px, 2125px, 0px)");
   });
 
   it("dragging -X arrow decreases position[0]", () => {
