@@ -100,5 +100,10 @@ export class PolyOrthographicCameraElement extends ELEMENT_BASE {
     if (opts.rotY !== undefined) this._camera.update({ rotY: opts.rotY });
     if (opts.target !== undefined) this._camera.update({ target: opts.target });
     if (opts.distance !== undefined) this._camera.update({ distance: opts.distance });
+    // Push the updated transform into the scene root. <poly-scene> is a
+    // DESCENDANT of <poly-orthographic-camera>, not an ancestor.
+    const sceneEl = this.querySelector("poly-scene");
+    const sc = (sceneEl as unknown as { getScene?: () => { applyCamera: () => void } | null } | null)?.getScene?.();
+    sc?.applyCamera();
   }
 }

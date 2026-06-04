@@ -2,6 +2,8 @@ export { PolyScene } from "./PolyScene";
 export type { PolySceneProps } from "./PolyScene";
 export { PolyMesh } from "./PolyMesh";
 export type { PolyMeshProps } from "./PolyMesh";
+export { PolyIframe } from "./PolyIframe";
+export type { PolyIframeProps } from "./PolyIframe";
 export { PolyGround } from "./PolyGround";
 export type { PolyGroundProps } from "./PolyGround";
 export { usePolySceneContext } from "./useSceneContext";
