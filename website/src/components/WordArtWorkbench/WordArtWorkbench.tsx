@@ -738,7 +738,13 @@ function Stage({ polygons, preview, onFrameReady, scaleXFrac, scaleYFrac, zoomSc
     setZoomScale((z) => Math.max(0.1, Math.min(6, z * factor)));
   };
 
-  const zoom = fitZoom(polygons, stage.w, stage.h, scaleXFrac, scaleYFrac) * zoomScale;
+  // Post-parity camera `zoom` is px-per-world-unit; the renderer divides
+  // by BASE_TILE for the scene-root CSS scale. `fitZoom` + `zoomScale`
+  // both produce the legacy unitless CSS-scale value (range 0.01–0.2 *
+  // 0.1–6 = roughly 0.001–1.2), so multiply by BASE_TILE to land back at
+  // the same on-screen scale. Same shape as gallery's LEGACY_ZOOM_COMPAT
+  // and the builder's recently-fixed zoom path.
+  const zoom = fitZoom(polygons, stage.w, stage.h, scaleXFrac, scaleYFrac) * zoomScale * BASE_TILE;
   const Cam = perspective ? PolyPerspectiveCamera : PolyOrthographicCamera;
 
   return (
