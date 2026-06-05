@@ -633,7 +633,15 @@ const TVS = [
           if (!mesh || !camera) return;
           const handle = mesh.getMeshHandle?.();
           if (!handle) return;
+          // All-mesh polygon array, passed to placementFromPolygons so each
+          // screen's normal can be vertex-count flipped to point outward.
           const allPolygons = handle.polygons;
+          // Move the ground plane to the TV's bbox center (in mesh-local
+          // coords) at the bottom Z so it sits flush under the TV. Floor
+          // is excluded from auto-center so the scene transform shifts
+          // everything by -bboxCenter; the floor needs to be authored at
+          // bboxCenter in mesh-local to land at scene origin after that
+          // shift.
           if (floor) {
             let minX = Infinity, maxX = -Infinity;
             let minY = Infinity, maxY = -Infinity;
