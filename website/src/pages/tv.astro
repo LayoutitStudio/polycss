@@ -80,6 +80,10 @@ const TVS = [
       },
     ],
     cam: { rotX: 70, rotY: 215, zoom: 8 },
+    // FPV player shrinks for the smaller presets so the TVs read as larger
+    // without actually scaling the DOM — large CSS scales cause compositor
+    // flicker on these many-polygon meshes.
+    fpvPlayerScale: 1 / 2,
   },
   {
     id: 'tv-obj',
@@ -88,6 +92,7 @@ const TVS = [
     mtl: '/tv/materials.mtl',
     screens: [{ polyIndices: [70] }],
     cam: { rotX: 70, rotY: 245, zoom: 10 },
+    fpvPlayerScale: 1 / 3,
   },
 ] as const;
 ---
@@ -187,8 +192,8 @@ const TVS = [
               directional-intensity="6.5"
               ambient-intensity="0.4"
             >
-              <poly-orbit-controls drag wheel></poly-orbit-controls>
-              <poly-mesh id="tv-mesh" src={TVS[0].src} mtl={('mtl' in TVS[0] ? TVS[0].mtl : undefined)} auto-center cast-shadow receive-shadow></poly-mesh>
+              <poly-orbit-controls id="tv-orbit-controls" drag wheel zoom-min="1" zoom-max="200"></poly-orbit-controls>
+              <poly-mesh id="tv-mesh" src={TVS[0].src} mtl={('mtl' in TVS[0] ? TVS[0].mtl : undefined)} auto-center cast-shadow></poly-mesh>
               {/* Ground plane for shadow reception. Z position is set
                   per-preset by the script (= TV's bbox minZ) so the floor
                   always sits flush with the TV's bottom regardless of how
@@ -208,6 +213,11 @@ const TVS = [
                   Retro Stack can light up every CRT independently. */}
             </poly-scene>
           </poly-perspective-camera>
+          <div class="tv-camera-mode" role="group" aria-label="Camera mode">
+            <button type="button" class="tv-camera-mode__btn is-active" data-mode="orbit">Orbit</button>
+            <button type="button" class="tv-camera-mode__btn" data-mode="fpv">FPV</button>
+            <span class="tv-camera-mode__hint" data-fpv-hint hidden>WASD · mouse · space</span>
+          </div>
         </div>
       </div>
     </div>
@@ -231,6 +241,7 @@ const TVS = [
         mtl?: string;
         screens: readonly TvScreen[];
         cam: { rotX: number; rotY: number; zoom: number };
+        fpvPlayerScale?: number;
       }
 
       interface PolygonLike { vertices: Array<[number, number, number]>; }
@@ -461,6 +472,138 @@ const TVS = [
         const sceneHandle = (sceneEl as unknown as { getScene?: () => { setOptions: (o: Record<string, unknown>) => void } | null }).getScene?.();
         sceneHandle?.setOptions({ shadow: { color: "#000000", opacity: 0.95, lift: 0.1 } });
 
+        // ── Camera-mode toggle (Orbit ⇄ FPV) ───────────────────────────────
+        // Bottom-centre pill swaps the orbit controls for first-person
+        // controls. FPV gives WASD movement + mouse look; click anywhere
+        // in the stage to lock the pointer.
+        //
+        // On the way INTO FPV: disable scene auto-center, switch the
+        // camera to a wider FOV (perspective 2000, matching the gallery's
+        // FPV_PERSPECTIVE), and spawn the player a few mesh-spans behind
+        // the TV along the current rotY look direction so W walks toward
+        // it (matches useFpvSpawn from the gallery).
+        const orbitControls = document.getElementById("tv-orbit-controls");
+        const fpvHint = document.querySelector<HTMLElement>("[data-fpv-hint]");
+        let fpvControls: HTMLElement | null = null;
+        let savedAutoCenter = true;
+        let savedRotX = "70";
+        let savedZoom = "8";
+        let currentMode: "orbit" | "fpv" = "orbit";
+
+        // Derive FPV camera + controls config from the current mesh's bbox
+        // and apply it. Used both on initial mode switch and on every mesh
+        // swap while FPV is active (so changing TVs in FPV doesn't snap back
+        // to the orbit-tuned zoom/rotation from applyPreset).
+        function applyFpvSpawn(): void {
+          if (!camera || !mesh) return;
+          const handle = mesh.getMeshHandle?.();
+          let eyeHeight = 6;
+          let groundZ = 0;
+          if (handle) {
+            // Per-preset player scale: smaller = TV reads as bigger from the
+            // player's POV, without actually scaling the mesh DOM (which
+            // causes compositor flicker on large CSS transforms).
+            const playerScale = (activePreset as { fpvPlayerScale?: number }).fpvPlayerScale ?? 1;
+            let minX = Infinity, maxX = -Infinity;
+            let minY = Infinity, maxY = -Infinity;
+            let minZ = Infinity, maxZ = -Infinity;
+            for (const p of handle.polygons) {
+              for (const v of p.vertices) {
+                if (v[0] < minX) minX = v[0]; if (v[0] > maxX) maxX = v[0];
+                if (v[1] < minY) minY = v[1]; if (v[1] > maxY) maxY = v[1];
+                if (v[2] < minZ) minZ = v[2]; if (v[2] > maxZ) maxZ = v[2];
+              }
+            }
+            if (Number.isFinite(minZ)) {
+              const cx = (minX + maxX) / 2;
+              const cy = (minY + maxY) / 2;
+              const midZ = (minZ + maxZ) / 2;
+              const meshHeight = Math.max(maxZ - minZ, 1);
+              const horizSpan = Math.max(maxX - minX, maxY - minY, 1);
+              const rotY = parseFloat(camera.getAttribute("rot-y") ?? "215");
+              const r = (rotY * Math.PI) / 180;
+              // Same back-distance regardless of player size. A smaller
+              // player at the same distance sees the TV loom larger in FOV
+              // — that's the whole point of shrinking the player.
+              const back = horizSpan * 3;
+              const ox = cx + Math.cos(r) * back;
+              const oy = cy + Math.sin(r) * back;
+              camera.setAttribute("target", `${ox},${oy},0`);
+              groundZ = minZ;
+              // Cabinet-anchored eye height (96), shrunk by playerScale.
+              eyeHeight = Math.max(meshHeight * 1.6, meshHeight + 6) * playerScale;
+              // Aim the camera at the TV's vertical center. Computing pitch
+              // from look geometry instead of hard-coding 75° means small
+              // players (low camera) look horizontally and tall players
+              // tilt down sharply to see the TV below them.
+              const cameraZ = groundZ + eyeHeight;
+              const dz = midZ - cameraZ;
+              const rotXDeg = 90 + (Math.atan2(dz, back) * 180) / Math.PI;
+              camera.setAttribute("rot-x", String(rotXDeg));
+              // FPV zoom inversely tracks player size.
+              const fpvZoom = Math.max(0.6, 60 / meshHeight) / playerScale;
+              camera.setAttribute("zoom", String(fpvZoom));
+            }
+          }
+          // Detach any prior FPV controls element. The internal handle seeds
+          // `cameraOrigin` from the scene's target once, on attach — so to
+          // teleport between model switches we throw it away and recreate it
+          // *after* the new target attribute is in place.
+          if (fpvControls && fpvControls.isConnected) fpvControls.remove();
+          fpvControls = document.createElement("poly-first-person-controls");
+          fpvControls.setAttribute("jump-velocity", "25");
+          fpvControls.setAttribute("gravity", "60");
+          fpvControls.setAttribute("look-sensitivity", "0.15");
+          // Constant player-scale tuning — move-speed and crouch-height are
+          // anchored to the cabinet-TV-sized eye height (96) so traversal
+          // and ducking feel identical across all presets.
+          fpvControls.setAttribute("move-speed", String(eyeHeight * 2));
+          fpvControls.setAttribute("eye-height", String(eyeHeight));
+          // Crouch at 70% of eye height — duck-walk, not turn-into-mouse.
+          fpvControls.setAttribute("crouch-height", String(eyeHeight * 0.7));
+          fpvControls.setAttribute("ground-z", String(groundZ));
+          sceneEl!.appendChild(fpvControls);
+        }
+
+        function setCameraMode(mode: "orbit" | "fpv"): void {
+          if (!sceneEl || !camera || !mesh) return;
+          currentMode = mode;
+          root!.querySelectorAll<HTMLButtonElement>(".tv-camera-mode__btn").forEach((b) => {
+            b.classList.toggle("is-active", b.dataset.mode === mode);
+          });
+          if (fpvHint) fpvHint.hidden = mode !== "fpv";
+          camera.setAttribute("perspective", mode === "fpv" ? "2000" : "32000");
+          if (mode === "fpv") {
+            savedAutoCenter = sceneEl.hasAttribute("auto-center");
+            savedRotX = camera.getAttribute("rot-x") ?? "70";
+            savedZoom = camera.getAttribute("zoom") ?? "8";
+            sceneEl.removeAttribute("auto-center");
+            if (orbitControls) orbitControls.remove();
+            applyFpvSpawn();
+          } else {
+            if (savedAutoCenter) sceneEl.setAttribute("auto-center", "");
+            camera.setAttribute("rot-x", savedRotX);
+            camera.setAttribute("zoom", savedZoom);
+            // Removing the attribute doesn't clear the camera handle's
+            // internal target — parseVec3(null) returns undefined and the
+            // handle ignores undefined updates. Force the orbit recenter
+            // by writing target back to world origin explicitly. Combined
+            // with the restored auto-center this puts the TV back in the
+            // middle of the view.
+            camera.setAttribute("target", "0,0,0");
+            if (fpvControls) fpvControls.remove();
+            if (orbitControls && !orbitControls.isConnected) {
+              sceneEl.appendChild(orbitControls);
+            }
+          }
+        }
+        root.querySelectorAll<HTMLButtonElement>(".tv-camera-mode__btn").forEach((btn) => {
+          btn.addEventListener("click", () => {
+            const mode = btn.dataset.mode;
+            if (mode === "orbit" || mode === "fpv") setCameraMode(mode);
+          });
+        });
+
         let activePreset: TvPreset = presets[0];
         let activeIframes: HTMLElement[] = [];
 
@@ -545,6 +688,11 @@ const TVS = [
         // That's our cue to read polygons and derive every screen's placement.
         mesh.addEventListener("polycss:loaded", () => {
           applyPlacementsFromMesh();
+          // While in FPV, applyPreset (which fires on every model switch)
+          // writes the orbit-tuned rot-x/rot-y/zoom from TvPreset.cam into
+          // the camera. Re-spawn from the freshly-loaded mesh's bbox so the
+          // FPV view stays player-scale instead of snapping to orbit zoom.
+          if (currentMode === "fpv") applyFpvSpawn();
         });
 
         function applyPreset(p: TvPreset, opts: { pushUrl?: boolean } = {}): void {
@@ -716,6 +864,45 @@ const TVS = [
     .tv-stage {
       position: relative;
       overflow: hidden;
+    }
+    /* Floating Orbit/FPV pill — bottom-centre of the viewport. Same shape
+       as the builder's camera-mode pill. */
+    .tv-camera-mode {
+      position: absolute;
+      left: 50%;
+      bottom: 16px;
+      transform: translateX(-50%);
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 4px;
+      background: #111316;
+      border: 1px solid #252b36;
+      border-radius: 999px;
+      user-select: none;
+      z-index: 5;
+    }
+    .tv-camera-mode__btn {
+      appearance: none;
+      border: 0;
+      background: #111316;
+      color: #8c98a6;
+      padding: 4px 12px;
+      font: inherit;
+      font-size: 12px;
+      border-radius: 999px;
+      cursor: pointer;
+    }
+    .tv-camera-mode__btn.is-active {
+      color: #0a0b0d;
+      background: #22d3ee;
+    }
+    .tv-camera-mode__hint {
+      color: #707b87;
+      font-size: 11px;
+      padding: 0 10px 0 6px;
+      border-left: 1px solid #2a3039;
+      margin-left: 2px;
     }
     @media (max-width: 38rem) {
       .tv-page { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
