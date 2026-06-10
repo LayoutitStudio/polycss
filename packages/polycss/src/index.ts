@@ -18,6 +18,11 @@ export type {
   PolyMeshTransform,
   PolySceneOptions,
 } from "./api/createPolyScene";
+export {
+  buildPolyMeshTransform,
+  worldDirectionToPolyCss,
+  worldPositionToPolyCss,
+} from "@layoutit/polycss-core";
 
 // ── Camera factories ──────────────────────────────────────────────
 export { createPolyPerspectiveCamera, createPolyOrthographicCamera, createPolyCamera } from "./api/createPolyCamera";

@@ -367,6 +367,8 @@ describe("createPolyScene", () => {
       scene = makeScene(host);
       const sceneEl = host.querySelector(".polycss-scene");
       expect(sceneEl).not.toBeNull();
+      expect(scene.sceneElement).toBe(sceneEl);
+      expect(scene.sceneElement.parentElement).toBe(scene.cameraEl);
     });
 
     it("renders the scene element as a 0x0 anchor at center (top:50%/left:50%)", () => {

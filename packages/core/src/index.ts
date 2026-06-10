@@ -175,10 +175,14 @@ export {
   RECEIVER_OUTLINE_EXPAND,
   worldCssForMesh,
   worldDirectionToCss,
+  worldDirectionToCss as worldDirectionToPolyCss,
   worldDirectionalLightToCss,
   worldPositionToCss,
+  worldPositionToCss as worldPositionToPolyCss,
 } from "./shadow/receiverFaceGroups";
 export type { ReceiverPlaneGroup } from "./shadow/receiverFaceGroups";
+export { buildPolyMeshTransform } from "./transform/meshTransform";
+export type { PolyMeshTransformInput } from "./transform/meshTransform";
 export {
   buildSharedEdgeMap,
   computeReceiverShadowFaces,
