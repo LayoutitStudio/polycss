@@ -2196,6 +2196,7 @@ export function createPolyScene(
     host,
     camera,
     cameraEl,
+    sceneElement: sceneEl,
     applyCamera,
     getOptions,
     meshes: listMeshes,

@@ -251,6 +251,7 @@ interface PolySceneHandle {
   destroy(): void;
   readonly host: HTMLElement;
   readonly cameraEl: HTMLElement;
+  readonly sceneElement: HTMLElement;
   readonly camera: PolyPerspectiveCameraHandle | PolyOrthographicCameraHandle;
 }
 

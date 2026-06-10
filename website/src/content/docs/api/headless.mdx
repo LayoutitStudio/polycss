@@ -302,7 +302,7 @@ scene.setOptions({ textureLighting: "baked" });
 scene.destroy();
 ```
 
-`scene.add(mesh, opts?)` accepts a `ParseResult` from the parsers, `loadMesh`, or a primitive shape factory. See [`PolySceneOptions`, `PolyMeshTransform`, `PolySceneHandle`, and `PolyMeshHandle`](/api/types/#vanilla-scene-handle-types) for the exact handle and option shapes.
+`scene.add(mesh, opts?)` accepts a `ParseResult` from the parsers, `loadMesh`, or a primitive shape factory. `scene.cameraEl` exposes the `.polycss-camera` wrapper, and `scene.sceneElement` exposes the `.polycss-scene` root for tooling that needs to inspect or snapshot the renderer-owned DOM. See [`PolySceneOptions`, `PolyMeshTransform`, `PolySceneHandle`, and `PolyMeshHandle`](/api/types/#vanilla-scene-handle-types) for the exact handle and option shapes.
 
 ---
 
@@ -490,10 +490,13 @@ The vanilla package also exposes renderer and atlas building blocks for diagnost
 
 - Atlas planning/rendering: `computeTextureAtlasPlanPublic`, `buildAtlasPages`, `renderPolygonsWithTextureAtlas`, `renderPolygonsWithTextureAtlasAsync`, `filterAtlasPlans`, `packTextureAtlasPlansWithScale`, `buildTextureEdgeRepairSets`.
 - Stable DOM animation: `renderPolygonsWithStableTriangles`, `updatePolygonsWithStableTopology`, `updateStableTriangleFrame`.
+- Scene transform helpers: `worldPositionToPolyCss`, `worldDirectionToPolyCss`, `buildPolyMeshTransform`.
 - Strategy and CSS helpers: `getSolidPaintDefaults`, `getSolidPaintDefaultsFromPlans`, `isBorderShapeSupported`, `isSolidTriangleSupported`, `isFullRectSolid`, `isSolidTrianglePlan`, `isProjectiveQuadPlan`, `cssBorderShapeForPlan`, `formatMatrix3d`, `formatCssLengthPx`, `formatSolidQuadEntryMatrix`, `formatBorderShapeEntryMatrix`.
 - Related types: `TextureAtlasPlan`, `PackedTextureAtlasEntry`, `PackedAtlas`, `PackedPage`, `TextureAtlasPage`, `SolidPaintDefaults`, `SolidTriangleFrame`, `PolygonBasisInfo`.
 
 </details>
+
+The transform helper names are also exported by `@layoutit/polycss-react` and `@layoutit/polycss-vue`.
 
 ---
 

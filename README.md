@@ -84,6 +84,7 @@ export default function App() {
 - `autoCenter` shifts the mesh bbox center to local origin.
 - `meshResolution` chooses `"lossy"` (default) or `"lossless"` optimization. STL imports use the conservative lossless path in both modes.
 - `castShadow` emits CSS-projected shadows in dynamic lighting mode.
+- Tooling can reuse `buildPolyMeshTransform`, `worldPositionToPolyCss`, and `worldDirectionToPolyCss` for renderer-compatible transforms.
 
 ### Controls
 

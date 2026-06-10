@@ -22,6 +22,7 @@ import type { MeshResolution, Polygon, PolyTextureLightingMode, Vec3 } from "@la
 import { buildBasisHints, buildSharedEdgeMap, cornerShapeGeometryForPlan, worldDirectionalLightToCss } from "@layoutit/polycss-core";
 import {
   BASE_TILE,
+  buildPolyMeshTransform,
   computeReceiverShadowFaces,
   computeSceneBbox,
   DEFAULT_SEAM_BLEED,
@@ -148,55 +149,6 @@ export interface PolyMeshProps extends InteractionProps {
   position?: Vec3;
   scale?: number | Vec3;
   rotation?: Vec3;
-}
-
-/**
- * Build the mesh wrapper's CSS transform from a Three.js-style transform
- * (post-parity convention). All transforms pivot at the wrapper's local
- * origin (0,0,0) to match three.js `mesh.position`/`mesh.rotation`/`mesh.scale`
- * and vanilla `buildMeshTransform`. Callers that want "rotate around
- * centroid" pre-center the geometry at load time via
- * `loadMesh(..., { center: true })`.
- *   - `position` is in WORLD UNITS; renderer applies world→CSS axis swap
- *     and ×`BASE_TILE` scale here.
- *   - `scale` pivots from the wrapper local origin.
- *   - `rotation` pivots from the wrapper local origin.
- *
- * Mirror of the vanilla `buildMeshTransform` in
- * `packages/polycss/src/api/scene/transforms.ts`.
- */
-function buildTransform(
-  position: Vec3 | undefined,
-  scale: number | Vec3 | undefined,
-  rotation: Vec3 | undefined,
-): string | undefined {
-  const sx = typeof scale === "number" ? scale : (scale?.[0] ?? 1);
-  const sy = typeof scale === "number" ? scale : (scale?.[1] ?? 1);
-  const sz = typeof scale === "number" ? scale : (scale?.[2] ?? 1);
-  const hasScale = sx !== 1 || sy !== 1 || sz !== 1;
-  const hasRotation = !!rotation && (!!rotation[0] || !!rotation[1] || !!rotation[2]);
-  const cssPos: Vec3 = position
-    ? [position[1] * BASE_TILE, position[0] * BASE_TILE, position[2] * BASE_TILE]
-    : [0, 0, 0];
-
-  const parts: string[] = [];
-  if (cssPos[0] !== 0 || cssPos[1] !== 0 || cssPos[2] !== 0) {
-    parts.push(`translate3d(${cssPos[0]}px, ${cssPos[1]}px, ${cssPos[2]}px)`);
-  }
-  if (hasRotation) {
-    // World↔CSS reflection conjugation: worldPositionToCss permutes
-    // [x,y,z]→[y,x,z] (det=-1), so a world rotation R(n,θ) becomes
-    // R(M·n, -θ) in CSS frame — axis swapped AND angle inverted.
-    // World X↦CSS Y, world Y↦CSS X, world Z↦CSS Z. Mirrors vanilla
-    // `buildMeshTransform` in packages/polycss/src/api/scene/transforms.ts.
-    if (rotation![0]) parts.push(`rotateY(${-rotation![0]}deg)`);
-    if (rotation![1]) parts.push(`rotateX(${-rotation![1]}deg)`);
-    if (rotation![2]) parts.push(`rotateZ(${-rotation![2]}deg)`);
-  }
-  if (hasScale) {
-    parts.push(`scale3d(${sx}, ${sy}, ${sz})`);
-  }
-  return parts.length > 0 ? parts.join(" ") : undefined;
 }
 
 function recenterPolygons(polygons: Polygon[]): Polygon[] {
@@ -955,7 +907,11 @@ export const PolyMesh = defineComponent({
     }
 
     return () => {
-      const transform = buildTransform(props.position, props.scale, props.rotation);
+      const transform = buildPolyMeshTransform({
+        position: props.position,
+        scale: props.scale,
+        rotation: props.rotation,
+      });
       const wrapperStyle: CSSProperties = {
         transform,
         ...(dynamicLightOverride.value as CSSProperties | null ?? undefined),

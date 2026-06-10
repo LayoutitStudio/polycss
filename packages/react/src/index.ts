@@ -182,6 +182,7 @@ export type {
   OptimizeMeshParseResultOptions,
   OptimizeAnimatedMeshPolygonsOptions,
   SimplifyTriangleMeshPolygonsOptions,
+  PolyMeshTransformInput,
 } from "@layoutit/polycss-core";
 export {
   CAMERA_BACKFACE_CULL_EPS,
@@ -244,6 +245,7 @@ export {
   torusPolygons,
   planePolygons,
   buildSceneContext,
+  buildPolyMeshTransform,
   computeSceneBbox,
   BASE_TILE,
   DEFAULT_CAMERA_STATE,
@@ -256,4 +258,6 @@ export {
   LoopOnce,
   LoopRepeat,
   LoopPingPong,
+  worldDirectionToCss as worldDirectionToPolyCss,
+  worldPositionToCss as worldPositionToPolyCss,
 } from "@layoutit/polycss-core";

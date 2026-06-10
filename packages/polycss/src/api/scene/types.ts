@@ -232,6 +232,11 @@ export interface PolySceneHandle {
    */
   readonly cameraEl: HTMLElement;
   /**
+   * The `.polycss-scene` root element inside `cameraEl`. Mesh wrappers, shadow
+   * roots, and helper DOM are mounted under this element.
+   */
+  readonly sceneElement: HTMLElement;
+  /**
    * The camera handle this scene is bound to. Controls update camera state
    * via `scene.camera.update({...})` then call `scene.applyCamera()` to
    * re-apply the transform.
