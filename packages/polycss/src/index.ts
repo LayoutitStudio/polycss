@@ -20,6 +20,12 @@ export type {
 } from "./api/createPolyScene";
 export {
   buildPolyMeshTransform,
+  cssDistanceToWorld,
+  cssDistanceToWorld as polyCssDistanceToWorld,
+  cssPositionToWorld,
+  cssPositionToWorld as polyCssPositionToWorld,
+  worldDistanceToCss,
+  worldDistanceToCss as worldDistanceToPolyCss,
   worldDirectionToPolyCss,
   worldPositionToPolyCss,
 } from "@layoutit/polycss-core";

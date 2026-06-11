@@ -2,6 +2,9 @@ import { describe, expect, it } from "vitest";
 import { BASE_TILE } from "@layoutit/polycss-core";
 import {
   buildPolyMeshTransform,
+  polyCssDistanceToWorld,
+  polyCssPositionToWorld,
+  worldDistanceToPolyCss,
   worldDirectionToPolyCss,
   worldPositionToPolyCss,
 } from "./index";
@@ -17,6 +20,19 @@ describe("public transform helpers", () => {
 
   it("exposes the world-to-CSS direction conversion without scaling", () => {
     expect(worldDirectionToPolyCss([1, 2, 3])).toEqual([2, 1, 3]);
+  });
+
+  it("exposes scalar and inverse position conversions", () => {
+    expect(worldDistanceToPolyCss(3)).toBe(3 * BASE_TILE);
+    expect(polyCssDistanceToWorld(3 * BASE_TILE)).toBe(3);
+    expect(polyCssPositionToWorld([5 * BASE_TILE, 3 * BASE_TILE, 7 * BASE_TILE])).toEqual([3, 5, 7]);
+  });
+
+  it("exposes custom-scale conversions for external adapters", () => {
+    expect(worldPositionToPolyCss([3, 5, 7], 10)).toEqual([50, 30, 70]);
+    expect(worldDistanceToPolyCss(3, 10)).toBe(30);
+    expect(polyCssDistanceToWorld(30, 10)).toBe(3);
+    expect(polyCssPositionToWorld([50, 30, 70], 10)).toEqual([3, 5, 7]);
   });
 
   it("exposes the mesh wrapper transform builder", () => {

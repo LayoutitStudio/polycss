@@ -249,6 +249,9 @@ export {
   LoopOnce,
   LoopRepeat,
   LoopPingPong,
+  cssDistanceToWorld as polyCssDistanceToWorld,
+  cssPositionToWorld as polyCssPositionToWorld,
+  worldDistanceToCss as worldDistanceToPolyCss,
   worldDirectionToCss as worldDirectionToPolyCss,
   worldPositionToCss as worldPositionToPolyCss,
 } from "@layoutit/polycss-core";

@@ -29,12 +29,37 @@ export type ReceiverPlaneGroup = {
   memberPolyIndices: number[];
 };
 
+function normalizeWorldUnitPx(worldUnitPx: number): number {
+  if (!Number.isFinite(worldUnitPx) || worldUnitPx <= 0) {
+    throw new Error("PolyCSS world unit size must be a positive finite number.");
+  }
+  return worldUnitPx;
+}
+
+/** Convert a world-space scalar to CSS pixels. The default matches PolyCSS's
+ *  current renderer scale: one world unit = BASE_TILE CSS px. */
+export function worldDistanceToCss(value: number, worldUnitPx = BASE_TILE): number {
+  return value * normalizeWorldUnitPx(worldUnitPx);
+}
+
+/** Convert a CSS-pixel scalar back to PolyCSS world units. */
+export function cssDistanceToWorld(value: number, worldUnitPx = BASE_TILE): number {
+  return value / normalizeWorldUnitPx(worldUnitPx);
+}
+
 /** World→CSS axis swap. World is `+X right, +Y forward, +Z up`; the renderer's
  *  internal frame swaps X↔Y and scales by BASE_TILE (one world unit =
  *  BASE_TILE CSS px). Same conversion every renderer applies at the boundary
  *  for mesh positions, polygon vertices, and light directions. */
-export function worldPositionToCss(p: Vec3): Vec3 {
-  return [p[1] * BASE_TILE, p[0] * BASE_TILE, p[2] * BASE_TILE];
+export function worldPositionToCss(p: Vec3, worldUnitPx = BASE_TILE): Vec3 {
+  const scale = normalizeWorldUnitPx(worldUnitPx);
+  return [p[1] * scale, p[0] * scale, p[2] * scale];
+}
+
+/** Inverse of {@link worldPositionToCss}: CSS-pixel frame → world XYZ. */
+export function cssPositionToWorld(p: Vec3, worldUnitPx = BASE_TILE): Vec3 {
+  const scale = normalizeWorldUnitPx(worldUnitPx);
+  return [p[1] / scale, p[0] / scale, p[2] / scale];
 }
 
 /** World→CSS axis swap for directions (no scale; directions stay unit). The
