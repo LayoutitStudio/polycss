@@ -20,14 +20,20 @@ export type {
 } from "./api/createPolyScene";
 export {
   buildPolyMeshTransform,
+  buildPolySceneTransform,
   cssDistanceToWorld,
   cssDistanceToWorld as polyCssDistanceToWorld,
   cssPositionToWorld,
   cssPositionToWorld as polyCssPositionToWorld,
   worldDistanceToCss,
   worldDistanceToCss as worldDistanceToPolyCss,
+  worldDirectionalLightToCss as worldDirectionalLightToPolyCss,
   worldDirectionToPolyCss,
   worldPositionToPolyCss,
+} from "@layoutit/polycss-core";
+export type {
+  PolyMeshTransformInput,
+  PolySceneTransformInput,
 } from "@layoutit/polycss-core";
 
 // ── Camera factories ──────────────────────────────────────────────

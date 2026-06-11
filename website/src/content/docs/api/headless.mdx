@@ -490,9 +490,11 @@ The vanilla package also exposes renderer and atlas building blocks for diagnost
 
 - Atlas planning/rendering: `computeTextureAtlasPlanPublic`, `buildAtlasPages`, `renderPolygonsWithTextureAtlas`, `renderPolygonsWithTextureAtlasAsync`, `filterAtlasPlans`, `packTextureAtlasPlansWithScale`, `buildTextureEdgeRepairSets`.
 - Stable DOM animation: `renderPolygonsWithStableTriangles`, `updatePolygonsWithStableTopology`, `updateStableTriangleFrame`.
-- Scene transform helpers: `worldPositionToPolyCss`, `worldDirectionToPolyCss`, `worldDistanceToPolyCss`, `polyCssDistanceToWorld`, `polyCssPositionToWorld`, `buildPolyMeshTransform`.
+- Scene transform helpers: `worldPositionToPolyCss`, `worldDirectionToPolyCss`, `worldDirectionalLightToPolyCss`, `worldDistanceToPolyCss`, `polyCssDistanceToWorld`, `polyCssPositionToWorld`, `buildPolyMeshTransform`, `buildPolySceneTransform`.
 - Strategy and CSS helpers: `getSolidPaintDefaults`, `getSolidPaintDefaultsFromPlans`, `isBorderShapeSupported`, `isSolidTriangleSupported`, `isFullRectSolid`, `isSolidTrianglePlan`, `isProjectiveQuadPlan`, `cssBorderShapeForPlan`, `formatMatrix3d`, `formatCssLengthPx`, `formatSolidQuadEntryMatrix`, `formatBorderShapeEntryMatrix`.
-- Related types: `TextureAtlasPlan`, `PackedTextureAtlasEntry`, `PackedAtlas`, `PackedPage`, `TextureAtlasPage`, `SolidPaintDefaults`, `SolidTriangleFrame`, `PolygonBasisInfo`.
+- Related types: `PolyMeshTransformInput`, `PolySceneTransformInput`, `PolyDirectionalLight`, `TextureAtlasPlan`, `PackedTextureAtlasEntry`, `PackedAtlas`, `PackedPage`, `TextureAtlasPage`, `SolidPaintDefaults`, `SolidTriangleFrame`, `PolygonBasisInfo`.
+
+`buildPolySceneTransform` accepts `PolySceneTransformInput` and returns the same scene-root transform string used by the vanilla, React, and Vue camera paths.
 
 </details>
 

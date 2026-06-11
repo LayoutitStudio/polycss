@@ -72,8 +72,8 @@ export function worldDirectionToCss(d: Vec3): Vec3 {
 /** Apply {@link worldDirectionToCss} to a directional-light object,
  *  preserving the other fields. Used by atlas plan + buildBasisHints +
  *  receiver-shadow callers so the light vector is in the same CSS-axis
- *  frame as the polygon normals. Mirror of vanilla's
- *  `worldDirectionalLightToCss` in `packages/polycss/src/api/scene/transforms.ts`. */
+ *  frame as the polygon normals. Public package wrappers delegate here so
+ *  directional-light conversion stays single-source. */
 export function worldDirectionalLightToCss<
   T extends { direction?: Vec3 } | undefined,
 >(light: T): T {
