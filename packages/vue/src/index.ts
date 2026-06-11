@@ -237,6 +237,7 @@ export {
   planePolygons,
   buildSceneContext,
   buildPolyMeshTransform,
+  buildPolySceneTransform,
   computeSceneBbox,
   BASE_TILE,
   DEFAULT_CAMERA_STATE,

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { BASE_TILE } from "@layoutit/polycss-core";
 import {
   buildPolyMeshTransform,
+  buildPolySceneTransform,
   polyCssDistanceToWorld,
   polyCssPositionToWorld,
   worldDistanceToPolyCss,
@@ -42,6 +43,17 @@ describe("public transform helpers", () => {
       scale: 2,
     })).toBe(
       `translate3d(${2 * BASE_TILE}px, ${1 * BASE_TILE}px, ${3 * BASE_TILE}px) rotateY(-10deg) rotateX(-20deg) rotateZ(-30deg) scale3d(2, 2, 2)`,
+    );
+  });
+
+  it("exposes the scene-root transform builder", () => {
+    expect(buildPolySceneTransform({
+      rotX: 30,
+      rotY: 45,
+      zoom: 1,
+      target: [3, 5, 7],
+    })).toBe(
+      `scale(${1 / BASE_TILE}) rotateX(30deg) rotate(45deg) translate3d(${-5 * BASE_TILE}px, ${-3 * BASE_TILE}px, ${-7 * BASE_TILE}px)`,
     );
   });
 });

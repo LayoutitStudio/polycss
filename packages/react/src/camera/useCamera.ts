@@ -1,5 +1,5 @@
 import { useRef, useCallback, useEffect, useMemo } from "react";
-import { createIsometricCamera, BASE_TILE } from "@layoutit/polycss-core";
+import { buildPolySceneTransform, createIsometricCamera } from "@layoutit/polycss-core";
 import type { CameraState, CameraHandle, Vec3 } from "@layoutit/polycss-core";
 import { createSceneStore, type SceneStore } from "../store/sceneStore";
 
@@ -66,21 +66,10 @@ export function usePolyCamera(options: UseCameraOptions): UseCameraResult {
       // camera continues to orbit the bbox center even during prop-driven moves.
       const el = sceneElRef.current;
       if (el) {
-        const s = handle.state;
-        const [ox, oy, oz] = store.getState().autoCenterOffset;
-        const tileSize = BASE_TILE;
-        const wx = s.target[0] + ox;
-        const wy = s.target[1] + oy;
-        const wz = s.target[2] + oz;
-        const cssX = wy * tileSize;  // world Y → CSS X
-        const cssY = wx * tileSize;  // world X → CSS Y
-        const cssZ = wz * tileSize;  // world Z → CSS Z
-        // zoom = px-per-world-unit (Three.js parity). Renderer geometry
-        // already lives at ×BASE_TILE CSS px, so the scene-root CSS scale
-        // is zoom / BASE_TILE. Mirrors vanilla's buildSceneTransform.
-        const cssZoom = s.zoom / tileSize;
-        const distancePart = s.distance !== 0 ? `translateZ(${-s.distance}px) ` : "";
-        el.style.transform = `${distancePart}scale(${cssZoom}) rotateX(${s.rotX}deg) rotate(${s.rotY}deg) translate3d(${-cssX}px, ${-cssY}px, ${-cssZ}px)`;
+        el.style.transform = buildPolySceneTransform({
+          ...handle.state,
+          autoCenterOffset: store.getState().autoCenterOffset,
+        });
       }
       store.updateCameraFromRef(handle);
       store.notifyAll(); // props changed — always notify
@@ -95,18 +84,10 @@ export function usePolyCamera(options: UseCameraOptions): UseCameraResult {
     const el = sceneElRef.current;
     if (!el) return;
     const handle = handleRef.current!;
-    const s = handle.state;
-    const [ox, oy, oz] = store.getState().autoCenterOffset;
-    const tileSize = BASE_TILE;
-    const wx = s.target[0] + ox;
-    const wy = s.target[1] + oy;
-    const wz = s.target[2] + oz;
-    const cssX = wy * tileSize;  // world Y → CSS X
-    const cssY = wx * tileSize;  // world X → CSS Y
-    const cssZ = wz * tileSize;  // world Z → CSS Z
-    const cssZoom = s.zoom / tileSize;  // see comment in useCamera above
-    const distancePart = s.distance !== 0 ? `translateZ(${-s.distance}px) ` : "";
-    el.style.transform = `${distancePart}scale(${cssZoom}) rotateX(${s.rotX}deg) rotate(${s.rotY}deg) translate3d(${-cssX}px, ${-cssY}px, ${-cssZ}px)`;
+    el.style.transform = buildPolySceneTransform({
+      ...handle.state,
+      autoCenterOffset: store.getState().autoCenterOffset,
+    });
   }, [store]);
 
   return {

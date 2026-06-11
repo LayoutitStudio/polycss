@@ -20,6 +20,7 @@ export type {
 } from "./api/createPolyScene";
 export {
   buildPolyMeshTransform,
+  buildPolySceneTransform,
   cssDistanceToWorld,
   cssDistanceToWorld as polyCssDistanceToWorld,
   cssPositionToWorld,

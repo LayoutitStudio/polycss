@@ -11,7 +11,7 @@
  *
  * Constants are exported so call sites can compare against them.
  */
-import { BASE_TILE, buildPolyMeshTransform } from "@layoutit/polycss-core";
+import { BASE_TILE, buildPolyMeshTransform, buildPolySceneTransform } from "@layoutit/polycss-core";
 import type { Polygon, Vec3 } from "@layoutit/polycss-core";
 import type {
   PolyPerspectiveCameraHandle,
@@ -104,28 +104,19 @@ export function buildSceneTransformFromCamera(
   layoutScale = 1,
 ): string {
   const state = camera.state;
-  const rotX = state.rotX;
-  const rotY = state.rotY;
-  // User-facing zoom is "px per world unit" (Three.js OrthographicCamera.zoom
-  // shape). Renderer geometry already lives at `× DEFAULT_TILE` CSS px, so
-  // the scene-root CSS scale is `zoom / DEFAULT_TILE`. At `zoom=1` → 1 world
-  // unit = 1 CSS px on screen.
-  const userZoom = state.zoom ?? DEFAULT_ZOOM;
-  const zoom = (userZoom / DEFAULT_TILE) * layoutScale;
-  const distance = (state.distance ?? 0) * layoutScale;
-  const target = state.target ?? [0, 0, 0];
-  const wx = target[0] + autoCenterOffset[0];
-  const wy = target[1] + autoCenterOffset[1];
-  const wz = target[2] + autoCenterOffset[2];
-  const cssX = wy * DEFAULT_TILE;
-  const cssY = wx * DEFAULT_TILE;
-  const cssZ = wz * DEFAULT_TILE;
   // rotate() (i.e. rotateZ) — NOT rotateY. After the rotateX tilt, the world's
   // Z axis is what reads as "spin in place"; rotateY rotates around an oblique
   // axis and makes the mesh wobble. translateZ(-distance) is outermost — pulls
   // the camera back from the target along the view axis.
-  const distancePart = distance !== 0 ? `translateZ(${-distance}px) ` : "";
-  return `${distancePart}scale(${zoom}) rotateX(${rotX}deg) rotate(${rotY}deg) translate3d(${-cssX}px, ${-cssY}px, ${-cssZ}px)`;
+  return buildPolySceneTransform({
+    rotX: state.rotX,
+    rotY: state.rotY,
+    zoom: state.zoom ?? DEFAULT_ZOOM,
+    distance: state.distance ?? 0,
+    target: state.target ?? [0, 0, 0],
+    autoCenterOffset,
+    layoutScale,
+  });
 }
 
 export function parseCssZoom(value: string): number {
