@@ -183,12 +183,15 @@ export {
   worldDirectionToCss,
   worldDirectionToCss as worldDirectionToPolyCss,
   worldDirectionalLightToCss,
+  worldDirectionalLightToCss as worldDirectionalLightToPolyCss,
   worldPositionToCss,
   worldPositionToCss as worldPositionToPolyCss,
 } from "./shadow/receiverFaceGroups";
 export type { ReceiverPlaneGroup } from "./shadow/receiverFaceGroups";
 export { buildPolyMeshTransform } from "./transform/meshTransform";
 export type { PolyMeshTransformInput } from "./transform/meshTransform";
+export { buildPolySceneTransform } from "./transform/sceneTransform";
+export type { PolySceneTransformInput } from "./transform/sceneTransform";
 export {
   buildSharedEdgeMap,
   computeReceiverShadowFaces,

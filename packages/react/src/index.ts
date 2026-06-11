@@ -183,6 +183,7 @@ export type {
   OptimizeAnimatedMeshPolygonsOptions,
   SimplifyTriangleMeshPolygonsOptions,
   PolyMeshTransformInput,
+  PolySceneTransformInput,
 } from "@layoutit/polycss-core";
 export {
   CAMERA_BACKFACE_CULL_EPS,
@@ -246,6 +247,7 @@ export {
   planePolygons,
   buildSceneContext,
   buildPolyMeshTransform,
+  buildPolySceneTransform,
   computeSceneBbox,
   BASE_TILE,
   DEFAULT_CAMERA_STATE,
@@ -262,5 +264,6 @@ export {
   cssPositionToWorld as polyCssPositionToWorld,
   worldDistanceToCss as worldDistanceToPolyCss,
   worldDirectionToCss as worldDirectionToPolyCss,
+  worldDirectionalLightToCss as worldDirectionalLightToPolyCss,
   worldPositionToCss as worldPositionToPolyCss,
 } from "@layoutit/polycss-core";

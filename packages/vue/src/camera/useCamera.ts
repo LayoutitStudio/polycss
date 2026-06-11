@@ -1,6 +1,6 @@
 import { ref, shallowRef, watch } from "vue";
 import type { Ref } from "vue";
-import { createIsometricCamera, BASE_TILE } from "@layoutit/polycss-core";
+import { buildPolySceneTransform, createIsometricCamera } from "@layoutit/polycss-core";
 import type { CameraState, CameraHandle, Vec3 } from "@layoutit/polycss-core";
 import { createSceneStore, type SceneStore } from "../store";
 
@@ -84,22 +84,10 @@ export function usePolyCamera(options: Ref<UseCameraOptions>): UseCameraResult {
   function applyTransformDirect(): void {
     const el = sceneElRef.value;
     if (!el) return;
-    const s = handle.state;
-    const tileSize = BASE_TILE;
-    const offset = autoCenterOffset.value;
-    // world→CSS axis swap: world[0]→CSS Y, world[1]→CSS X, world[2]→CSS Z
-    const wx = s.target[0] + offset[0];
-    const wy = s.target[1] + offset[1];
-    const wz = s.target[2] + offset[2];
-    const cssX = wy * tileSize;
-    const cssY = wx * tileSize;
-    const cssZ = wz * tileSize;
-    // zoom = px-per-world-unit (Three.js parity). Renderer geometry already
-    // lives at ×BASE_TILE CSS px, so the scene-root CSS scale is
-    // zoom / BASE_TILE. Mirrors vanilla's buildSceneTransform.
-    const cssZoom = s.zoom / tileSize;
-    const distancePart = s.distance !== 0 ? `translateZ(${-s.distance}px) ` : "";
-    el.style.transform = `${distancePart}scale(${cssZoom}) rotateX(${s.rotX}deg) rotate(${s.rotY}deg) translate3d(${-cssX}px, ${-cssY}px, ${-cssZ}px)`;
+    el.style.transform = buildPolySceneTransform({
+      ...handle.state,
+      autoCenterOffset: autoCenterOffset.value,
+    });
   }
 
   return {
