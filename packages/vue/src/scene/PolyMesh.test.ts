@@ -51,6 +51,17 @@ const QUAD: Polygon = {
   color: "#00ff00",
 };
 
+const DIRECT_IMAGE_QUAD: Polygon = {
+  vertices: QUAD.vertices,
+  textureImageSource: {
+    url: "https://example.com/source.png",
+    width: 320,
+    height: 200,
+    sourceRect: { x: 16, y: 24, width: 80, height: 40 },
+  },
+  texturePresentation: { backend: "image" },
+};
+
 interface VoxelInput {
   x: number;
   y: number;
@@ -150,6 +161,20 @@ describe("PolyMesh (Vue) — with polygons prop", () => {
     const { container } = renderMesh({ polygons: [TRIANGLE, QUAD] });
     const polys = container.querySelectorAll("i,b,s,u");
     expect(polys.length).toBe(2);
+  });
+
+  it("renders direct image polygons with mesh-level texture presentation", () => {
+    const { container } = renderMesh({
+      polygons: [DIRECT_IMAGE_QUAD],
+      textureImageRendering: "pixelated",
+    });
+    const poly = container.querySelector("s") as HTMLElement | null;
+    expect(poly).toBeTruthy();
+    expect(poly?.getAttribute("data-polycss-texture-backend")).toBe("image");
+    expect(poly?.getAttribute("data-polycss-texture-ready")).toBe("true");
+    expect(poly?.getAttribute("data-polycss-texture-image-rendering")).toBe("pixelated");
+    expect(poly?.getAttribute("data-polycss-texture-leaf-width")).toBe("80");
+    expect(poly?.style.backgroundImage).toContain("https://example.com/source.png");
   });
 
   it("inherits scene strategies.disable b for auto-rendered rects", () => {

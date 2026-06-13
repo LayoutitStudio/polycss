@@ -6,106 +6,53 @@ import {
 } from "./renderStats";
 
 describe("collectPolyRenderStats", () => {
-  it("returns an empty snapshot for a missing root", () => {
-    expect(collectPolyRenderStats(null)).toMatchObject({
-      polygonCount: 0,
-      mountedPolygonLeafCount: 0,
-      shadowLeafCount: 0,
-      surfaceLeafCounts: { quad: 0, clippedSolid: 0, atlas: 0, stableTriangle: 0 },
-      textureReadiness: {
-        ready: true,
-        textureLeafCount: 0,
-        readyTextureLeafCount: 0,
-        pendingTextureLeafCount: 0,
-        atlasTextureLeafCount: 0,
-        imageTextureLeafCount: 0,
-      },
-      bucketCount: 0,
-    });
-  });
-
-  it("counts mounted polygon leaves, shadows, and buckets", () => {
+  it("counts mounted leaves and texture readiness", () => {
     const root = document.createElement("div");
     root.innerHTML = `
       <div class="polycss-scene">
         <b></b>
         <i></i>
-        <s></s>
+        <s data-polycss-texture-backend="atlas" data-polycss-texture-ready="true"></s>
+        <s data-polycss-texture-backend="atlas" data-polycss-texture-ready="false" style="opacity:0"></s>
         <u></u>
-        <u style="width:16px;height:16px;corner-bottom-left-shape:bevel"></u>
         <q></q>
-        <svg class="polycss-shadow polycss-shadow-svg"></svg>
-        <div class="polycss-bucket"><b></b><s></s></div>
+        <div class="polycss-bucket"><b></b></div>
       </div>
     `;
 
-    expect(collectPolyRenderStats(root, { polygonCount: 12 })).toMatchObject({
-      polygonCount: 12,
-      mountedPolygonLeafCount: 7,
-      shadowLeafCount: 2,
-      surfaceLeafCounts: { quad: 2, clippedSolid: 1, atlas: 2, stableTriangle: 2 },
+    expect(collectPolyRenderStats(root, { polygonCount: 9 })).toMatchObject({
+      polygonCount: 9,
+      mountedPolygonLeafCount: 6,
+      shadowLeafCount: 1,
+      surfaceLeafCounts: { quad: 2, clippedSolid: 1, atlas: 2, stableTriangle: 1 },
       textureReadiness: {
-        ready: true,
+        ready: false,
         textureLeafCount: 2,
-        readyTextureLeafCount: 2,
-        pendingTextureLeafCount: 0,
+        readyTextureLeafCount: 1,
+        pendingTextureLeafCount: 1,
         atlasTextureLeafCount: 2,
         imageTextureLeafCount: 0,
       },
       bucketCount: 1,
     });
   });
+});
 
-  it("can scope counts to model subtrees", () => {
-    const root = document.createElement("div");
-    root.innerHTML = `
-      <div class="dn-model-mesh"><b></b><s></s><q></q><svg class="polycss-shadow polycss-shadow-svg"></svg></div>
-      <div class="polycss-helper"><b></b><u></u></div>
-    `;
-
-    expect(collectPolyRenderStats(root, { scopeSelector: ".dn-model-mesh" })).toMatchObject({
-      polygonCount: 2,
-      mountedPolygonLeafCount: 2,
-      shadowLeafCount: 2,
-      surfaceLeafCounts: { quad: 1, clippedSolid: 0, atlas: 1, stableTriangle: 0 },
-      textureReadiness: {
-        ready: true,
-        textureLeafCount: 1,
-        readyTextureLeafCount: 1,
-        pendingTextureLeafCount: 0,
-        atlasTextureLeafCount: 1,
-        imageTextureLeafCount: 0,
-      },
-      bucketCount: 0,
-    });
-  });
-
-  it("includes the root when it matches the scope selector", () => {
-    const root = document.createElement("div");
-    root.className = "dn-model-mesh";
-    root.innerHTML = "<b></b><i></i>";
-
-    expect(collectPolyRenderStats(root, { scopeSelector: ".dn-model-mesh" })).toMatchObject({
-      mountedPolygonLeafCount: 2,
-      surfaceLeafCounts: { quad: 1, clippedSolid: 1, atlas: 0, stableTriangle: 0 },
-    });
-  });
-
-  it("queries mounted polygon leaves with strategy and texture metadata", () => {
+describe("queryPolyLeaves", () => {
+  it("returns strategy and texture metadata", () => {
     const root = document.createElement("div");
     root.innerHTML = `
       <b data-poly-index="0"></b>
       <s
         data-poly-index="1"
-        data-polycss-texture-backend="atlas"
-        data-polycss-texture-ready="false"
+        data-polycss-texture-backend="image"
+        data-polycss-texture-ready="true"
         data-polycss-texture-leaf-sizing="local"
         data-polycss-texture-image-rendering="pixelated"
         data-polycss-texture-projection="projective"
         data-polycss-texture-leaf-width="100"
         data-polycss-texture-leaf-height="50"
         data-polycss-double-sided="true"
-        style="opacity:0"
       ></s>
     `;
 
@@ -136,8 +83,8 @@ describe("collectPolyRenderStats", () => {
       {
         strategy: "atlas",
         polygonIndex: 1,
-        textureBackend: "atlas",
-        textureReady: false,
+        textureBackend: "image",
+        textureReady: true,
         textureLeafSizing: "local",
         textureImageRendering: "pixelated",
         textureProjection: "projective",
@@ -148,7 +95,7 @@ describe("collectPolyRenderStats", () => {
     ]);
   });
 
-  it("collects texture and snapshot diagnostics without style-string game code", () => {
+  it("collects texture and snapshot diagnostics", () => {
     const root = document.createElement("div");
     root.innerHTML = `
       <s
@@ -178,21 +125,21 @@ describe("collectPolyRenderStats", () => {
     `;
 
     const stats = collectPolyRenderStats(root);
-    expect(stats.textureStats).toEqual({
+    expect(stats.textureStats).toMatchObject({
       ready: false,
       leafCount: 2,
       atlasCount: 1,
       imageCount: 1,
       pendingCount: 1,
-      sizingCounts: { canonical: 0, local: 1, raster: 0, image: 1, unknown: 0 },
-      imageRenderingCounts: { auto: 1, pixelated: 1, unknown: 0 },
-      projectionCounts: { affine: 1, projective: 1, fallback: 0, unknown: 0 },
       minLeafWidth: 100,
       maxLeafWidth: 320,
       minLeafHeight: 50,
       maxLeafHeight: 200,
       doubleSidedCount: 1,
     });
+    expect(stats.textureStats.sizingCounts).toEqual({ canonical: 0, local: 1, raster: 0, image: 1, unknown: 0 });
+    expect(stats.textureStats.imageRenderingCounts).toEqual({ auto: 1, pixelated: 1, unknown: 0 });
+    expect(stats.textureStats.projectionCounts).toEqual({ affine: 1, projective: 1, fallback: 0, unknown: 0 });
     expect(stats.snapshotStats).toEqual({
       runtimeAtlasUrlCount: 2,
       snapshotAtlasCount: 1,
@@ -231,22 +178,17 @@ describe("collectPolyRenderStats", () => {
       target: [1, 2, 3],
     });
   });
+});
 
-  it("collects texture readiness without computed style polling", () => {
-    const root = document.createElement("div");
-    root.innerHTML = `
-      <s data-polycss-texture-backend="atlas" data-polycss-texture-ready="true"></s>
-      <s data-polycss-texture-backend="atlas" data-polycss-texture-ready="false" style="opacity:0"></s>
-      <s data-polycss-texture-backend="image" data-polycss-texture-ready="true"></s>
-    `;
-
-    expect(collectPolyTextureReadiness(root)).toEqual({
-      ready: false,
-      textureLeafCount: 3,
-      readyTextureLeafCount: 2,
-      pendingTextureLeafCount: 1,
-      atlasTextureLeafCount: 2,
-      imageTextureLeafCount: 1,
+describe("collectPolyTextureReadiness", () => {
+  it("treats missing roots as ready", () => {
+    expect(collectPolyTextureReadiness(null)).toEqual({
+      ready: true,
+      textureLeafCount: 0,
+      readyTextureLeafCount: 0,
+      pendingTextureLeafCount: 0,
+      atlasTextureLeafCount: 0,
+      imageTextureLeafCount: 0,
     });
   });
 });

@@ -18,8 +18,23 @@
  */
 import { defineComponent, h, Teleport, computed, inject, onMounted, onBeforeUnmount, ref, watch, watchEffect } from "vue";
 import type { PropType, VNode, CSSProperties } from "vue";
-import type { MeshResolution, Polygon, PolyTextureLightingMode, Vec3 } from "@layoutit/polycss-core";
-import { buildBasisHints, buildSharedEdgeMap, cornerShapeGeometryForPlan, worldDirectionalLightToCss } from "@layoutit/polycss-core";
+import type {
+  MeshResolution,
+  Polygon,
+  PolyTextureBackend,
+  PolyTextureImageRendering,
+  PolyTextureLeafSizing,
+  PolyTextureLightingMode,
+  PolyTextureProjection,
+  Vec3,
+} from "@layoutit/polycss-core";
+import {
+  buildBasisHints,
+  buildSharedEdgeMap,
+  cornerShapeGeometryForPlan,
+  resolvePolyTextureLeafGeometry,
+  worldDirectionalLightToCss,
+} from "@layoutit/polycss-core";
 import {
   BASE_TILE,
   buildPolyMeshTransform,
@@ -55,6 +70,7 @@ import {
   renderTextureBorderShapePoly,
   renderTextureAtlasPoly,
   renderTextureCornerShapeSolidPoly,
+  renderTextureImagePoly,
   renderTextureProjectiveSolidPoly,
   renderTextureTrianglePoly,
   updateStableTriangleDom,
@@ -110,6 +126,14 @@ export interface PolyMeshProps extends InteractionProps {
    *  desktop/mobile sprite sizing. Numeric values 0.1..1 force an explicit
    *  raster scale and the 64px sprite. */
   textureQuality?: TextureQuality;
+  /** Atlas leaf CSS primitive sizing. Defaults to scene context, then canonical. */
+  textureLeafSizing?: PolyTextureLeafSizing;
+  /** Default image filtering for atlas and direct image texture leaves. */
+  textureImageRendering?: PolyTextureImageRendering;
+  /** Default texture backend request. Defaults to scene context, then "auto". */
+  textureBackend?: PolyTextureBackend;
+  /** Default texture projection request. Defaults to scene context, then "affine". */
+  textureProjection?: PolyTextureProjection;
   /** Solid seam overscan. `"auto"` computes a fitted per-edge amount from the polygon plan. */
   seamBleed?: PolySeamBleed;
   /**
@@ -188,6 +212,10 @@ export const PolyMesh = defineComponent({
     autoCenter: { type: Boolean, default: false },
     textureLighting: { type: String as PropType<PolyTextureLightingMode>, default: undefined },
     textureQuality: { type: [Number, String] as PropType<TextureQuality>, default: undefined },
+    textureLeafSizing: { type: String as PropType<PolyTextureLeafSizing>, default: undefined },
+    textureImageRendering: { type: String as PropType<PolyTextureImageRendering>, default: undefined },
+    textureBackend: { type: String as PropType<PolyTextureBackend>, default: undefined },
+    textureProjection: { type: String as PropType<PolyTextureProjection>, default: undefined },
     seamBleed: { type: [Number, String] as PropType<PolySeamBleed>, default: undefined },
     atomicAtlas: { type: Boolean as PropType<boolean>, default: false },
     onFrameReady: { type: Function as PropType<() => void>, default: undefined },
@@ -285,6 +313,10 @@ export const PolyMesh = defineComponent({
     );
     const atlasStrategies = computed(() => sceneCtx?.value.strategies);
     const atlasSeamBleed = computed(() => props.seamBleed ?? sceneCtx?.value.seamBleed ?? DEFAULT_SEAM_BLEED);
+    const atlasTextureLeafSizing = computed(() => props.textureLeafSizing ?? sceneCtx?.value.textureLeafSizing);
+    const atlasTextureImageRendering = computed(() => props.textureImageRendering ?? sceneCtx?.value.textureImageRendering);
+    const atlasTextureBackend = computed(() => props.textureBackend ?? sceneCtx?.value.textureBackend);
+    const atlasTextureProjection = computed(() => props.textureProjection ?? sceneCtx?.value.textureProjection);
     // Always forward the scene's lights to atlas plan, including in dynamic
     // mode (vanilla parity — see React PolyMesh comment).
     const atlasDirectional = computed(() => sceneCtx?.value.directionalLight);
@@ -397,7 +429,28 @@ export const PolyMesh = defineComponent({
     });
     const atlasTextureQuality = computed(() => props.textureQuality);
     const atomicAtlas = computed(() => props.atomicAtlas);
-    const textureAtlas = useTextureAtlas(textureAtlasPlans, atlasTextureLighting, atlasTextureQuality, atlasStrategies, atomicAtlas);
+    const textureAtlas = useTextureAtlas(
+      textureAtlasPlans,
+      atlasTextureLighting,
+      atlasTextureQuality,
+      atlasTextureLeafSizing,
+      atlasTextureBackend,
+      atlasTextureImageRendering,
+      atlasTextureProjection,
+      atlasStrategies,
+      atomicAtlas,
+    );
+    const textureReadyWaiters: Array<() => void> = [];
+    const resolveTextureReadyWaiters = (): void => {
+      const waiters = textureReadyWaiters.splice(0);
+      for (const resolve of waiters) resolve();
+    };
+    watch(
+      () => textureAtlas.ready.value,
+      (ready) => { if (ready) resolveTextureReadyWaiters(); },
+      { immediate: true },
+    );
+    onBeforeUnmount(resolveTextureReadyWaiters);
     // Use the displayed plans (which lag in atomic mode) so solid leaves swap in
     // lockstep with the textured ones.
     const solidPaintDefaults = computed<SolidPaintDefaults>(() =>
@@ -802,6 +855,12 @@ export const PolyMesh = defineComponent({
       rebakeAtlas: () => {
         bakedRotation.value = props.rotation;
       },
+      whenTexturesReady() {
+        if (textureAtlas.ready.value) return Promise.resolve();
+        return new Promise<void>((resolve) => {
+          textureReadyWaiters.push(resolve);
+        });
+      },
     };
     expose(handle);
 
@@ -1042,10 +1101,24 @@ export const PolyMesh = defineComponent({
                 entry,
                 page: textureAtlas.pages.value[entry.pageIndex],
                 textureLighting: atlasTextureLighting.value,
+                textureImageRendering: atlasTextureImageRendering.value,
                 solidPaintDefaults: solidPaintDefaults.value,
               });
             }
             const plan = textureAtlas.plans.value[index];
+            const imageGeometry = plan
+              ? resolvePolyTextureLeafGeometry(plan, {
+                  imageRendering: atlasTextureImageRendering.value,
+                  backend: atlasTextureBackend.value,
+                  projection: atlasTextureProjection.value,
+                })
+              : null;
+            if (plan && imageGeometry) {
+              return renderTextureImagePoly({
+                plan,
+                geometry: imageGeometry,
+              });
+            }
             if (!plan || plan.texture) return null;
             if (isProjectiveQuadPlan(plan)) {
               return renderTextureProjectiveSolidPoly({

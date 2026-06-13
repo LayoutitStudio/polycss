@@ -1,4 +1,14 @@
-import type { Vec2, Vec3, Polygon } from "../types";
+import type {
+  Vec2,
+  Vec3,
+  Polygon,
+  PolyTextureBackend,
+  PolyTextureImageLighting,
+  PolyTextureImageRendering,
+  PolyTextureImageSource,
+  PolyTextureLeafSizing,
+  PolyTextureProjection,
+} from "../types";
 
 export interface RGB { r: number; g: number; b: number; }
 export interface RGBFactors { r: number; g: number; b: number; }
@@ -35,6 +45,9 @@ export interface TextureAtlasPlan {
   canonicalMatrix: string;
   atlasMatrix: string;
   atlasCanonicalSize?: number;
+  atlasLeafSizing?: PolyTextureLeafSizing;
+  atlasLeafWidth?: number;
+  atlasLeafHeight?: number;
   projectiveMatrix: string | null;
   canvasW: number;
   canvasH: number;
@@ -58,6 +71,36 @@ export interface TextureAtlasPlan {
   normal: Vec3;
   textureTint: RGBFactors;
   shadedColor: string;
+}
+
+export interface PolyTextureLeafSourceRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface PolyTextureLeafGeometry {
+  source: PolyTextureImageSource;
+  url: string;
+  sourceRect: PolyTextureLeafSourceRect;
+  leafWidth: number;
+  leafHeight: number;
+  matrix: string;
+  backgroundPosition: [number, number];
+  backgroundSize: [number, number];
+  imageRendering: PolyTextureImageRendering;
+  lighting: PolyTextureImageLighting;
+  projection: PolyTextureProjection;
+}
+
+export interface PolyTextureLeafResolverOptions {
+  imageRendering?: PolyTextureImageRendering;
+  backend?: PolyTextureBackend;
+  lighting?: PolyTextureImageLighting;
+  projection?: PolyTextureProjection;
+  allowProjective?: boolean;
+  projectiveQuadGuards?: ProjectiveQuadGuardSettings;
 }
 
 export interface BorderShapeBounds {

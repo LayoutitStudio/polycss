@@ -1,7 +1,11 @@
 import { ref, shallowRef, watch } from "vue";
 import type { Ref } from "vue";
-import { buildPolySceneTransform, createIsometricCamera } from "@layoutit/polycss-core";
-import type { CameraState, CameraHandle, Vec3 } from "@layoutit/polycss-core";
+import {
+  buildPolyCameraSceneTransform,
+  capturePolyCameraSnapshot,
+  createIsometricCamera,
+} from "@layoutit/polycss-core";
+import type { CameraState, CameraHandle, PolyCameraProjection, Vec3 } from "@layoutit/polycss-core";
 import { createSceneStore, type SceneStore } from "../store";
 
 export interface UseCameraOptions {
@@ -10,6 +14,8 @@ export interface UseCameraOptions {
   rotX?: number;
   rotY?: number;
   distance?: number;
+  projection?: PolyCameraProjection;
+  perspectiveStyle?: string;
 }
 
 export interface UseCameraResult {
@@ -37,6 +43,24 @@ export interface UseCameraResult {
   applyTransformDirect: () => void;
 }
 
+function writeCameraSnapshotAttrs(
+  el: HTMLElement | null,
+  camera: CameraHandle,
+  projection: PolyCameraProjection | undefined,
+  perspectiveStyle: string | undefined,
+): void {
+  if (!el) return;
+  const snapshot = capturePolyCameraSnapshot(camera, { projection, perspectiveStyle });
+  el.dataset.polycssCameraProjection = snapshot.projection;
+  el.dataset.polycssCameraPerspective = snapshot.perspectiveStyle;
+  el.dataset.polycssCameraAppliedPerspective = snapshot.appliedPerspectiveStyle;
+  el.dataset.polycssCameraZoom = String(snapshot.state.zoom);
+  el.dataset.polycssCameraDistance = String(snapshot.state.distance);
+  el.dataset.polycssCameraRotX = String(snapshot.state.rotX);
+  el.dataset.polycssCameraRotY = String(snapshot.state.rotY);
+  el.dataset.polycssCameraTarget = snapshot.state.target.join(",");
+}
+
 export function usePolyCamera(options: Ref<UseCameraOptions>): UseCameraResult {
   const handle = createIsometricCamera({
     zoom: options.value.zoom,
@@ -60,6 +84,8 @@ export function usePolyCamera(options: Ref<UseCameraOptions>): UseCameraResult {
       rotX: options.value.rotX,
       rotY: options.value.rotY,
       distance: options.value.distance,
+      projection: options.value.projection,
+      perspectiveStyle: options.value.perspectiveStyle,
     }),
     (next, prev) => {
       const partial: Partial<CameraState> = {};
@@ -74,7 +100,24 @@ export function usePolyCamera(options: Ref<UseCameraOptions>): UseCameraResult {
         store.updateCameraFromRef(handle);
         store.notifyAll();
       }
+      writeCameraSnapshotAttrs(
+        cameraElRef.value,
+        handle,
+        options.value.projection,
+        options.value.perspectiveStyle,
+      );
     }
+  );
+
+  watch(
+    cameraElRef,
+    (el) => writeCameraSnapshotAttrs(
+      el,
+      handle,
+      options.value.projection,
+      options.value.perspectiveStyle,
+    ),
+    { flush: "post" },
   );
 
   // Apply camera transform directly to scene element (bypasses Vue reactivity).
@@ -84,10 +127,15 @@ export function usePolyCamera(options: Ref<UseCameraOptions>): UseCameraResult {
   function applyTransformDirect(): void {
     const el = sceneElRef.value;
     if (!el) return;
-    el.style.transform = buildPolySceneTransform({
-      ...handle.state,
+    el.style.transform = buildPolyCameraSceneTransform(handle.state, {
       autoCenterOffset: autoCenterOffset.value,
     });
+    writeCameraSnapshotAttrs(
+      cameraElRef.value,
+      handle,
+      options.value.projection,
+      options.value.perspectiveStyle,
+    );
   }
 
   return {

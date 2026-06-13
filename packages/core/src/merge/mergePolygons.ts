@@ -48,6 +48,9 @@ interface PolyState {
   texture?: string;
   textureWrap?: PolyTextureWrap;
   textureAlphaMode?: PolyTextureAlphaMode;
+  textureImageSource?: Polygon["textureImageSource"];
+  texturePresentation?: Polygon["texturePresentation"];
+  material?: Polygon["material"];
   textureTriangles?: TextureTriangle[];
   normal: Vec3;
   /** Plane offset: distance from origin along the normal. */
@@ -257,6 +260,27 @@ function cloneTextureTriangles(triangles: TextureTriangle[]): TextureTriangle[] 
   }));
 }
 
+function cloneImageSource(source: Polygon["textureImageSource"]): Polygon["textureImageSource"] {
+  if (!source) return undefined;
+  return {
+    ...source,
+    sourceRect: source.sourceRect ? { ...source.sourceRect } : undefined,
+  };
+}
+
+function clonePresentation(presentation: Polygon["texturePresentation"]): Polygon["texturePresentation"] {
+  return presentation ? { ...presentation } : undefined;
+}
+
+function cloneMaterial(material: Polygon["material"]): Polygon["material"] {
+  if (!material) return undefined;
+  return {
+    ...material,
+    imageSource: cloneImageSource(material.imageSource),
+    presentation: clonePresentation(material.presentation),
+  };
+}
+
 function sameTextureWrap(a: PolyTextureWrap | undefined, b: PolyTextureWrap | undefined): boolean {
   return (a?.s ?? "") === (b?.s ?? "") && (a?.t ?? "") === (b?.t ?? "");
 }
@@ -370,6 +394,9 @@ export function mergePolygons(input: Polygon[]): Polygon[] {
       texture: polygon.texture,
       textureWrap: polygon.texture ? polygon.textureWrap : undefined,
       textureAlphaMode: polygon.texture ? polygon.textureAlphaMode : undefined,
+      textureImageSource: cloneImageSource(polygon.textureImageSource),
+      texturePresentation: clonePresentation(polygon.texturePresentation),
+      material: cloneMaterial(polygon.material),
       textureTriangles,
       normal: plane.normal,
       d: plane.d,
@@ -492,6 +519,9 @@ export function mergePolygons(input: Polygon[]): Polygon[] {
     if (p.texture) out_p.texture = p.texture;
     if (p.texture && p.textureWrap) out_p.textureWrap = { ...p.textureWrap };
     if (p.texture && p.textureAlphaMode) out_p.textureAlphaMode = p.textureAlphaMode;
+    if (p.textureImageSource) out_p.textureImageSource = cloneImageSource(p.textureImageSource);
+    if (p.texturePresentation) out_p.texturePresentation = clonePresentation(p.texturePresentation);
+    if (p.material) out_p.material = cloneMaterial(p.material);
     if (p.uvs) out_p.uvs = p.uvs.map((uv) => [uv[0], uv[1]] as Vec2);
     if (p.textureTriangles?.length) out_p.textureTriangles = p.textureTriangles;
     if (p.doubleSided) out_p.doubleSided = true;

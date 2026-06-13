@@ -230,6 +230,31 @@ describe("filterAtlasPlans — textured polygons always pass through", () => {
     const result = filterAtlasPlans([plan], "baked", noDisable, desktopEnv);
     expect(result[0]).not.toBeNull();
   });
+
+  it("direct image leaves are excluded from atlas packing when eligible", () => {
+    const plan = computeTextureAtlasPlanPublic({
+      ...TEXTURED_QUAD,
+      texture: undefined,
+      textureImageSource: { url: "https://example.com/source.png", width: 128, height: 64 },
+      texturePresentation: { backend: "image" },
+    }, 0)!;
+    const result = filterAtlasPlans([plan], "baked", noDisable, desktopEnv);
+    expect(result[0]).toBeNull();
+  });
+
+  it("projective direct image leaves stay in atlas packing when projective quads are unsupported", () => {
+    const plan = computeTextureAtlasPlanPublic({
+      vertices: NON_RECT_QUAD.vertices,
+      textureImageSource: { url: "https://example.com/source.png", width: 128, height: 64 },
+      texturePresentation: { backend: "image", projection: "projective" },
+    }, 0)!;
+    const result = filterAtlasPlans([plan], "baked", noDisable, {
+      solidTriangleSupported: true,
+      projectiveQuadSupported: false,
+      borderShapeSupported: false,
+    });
+    expect(result[0]).toBe(plan);
+  });
 });
 
 describe("filterAtlasPlans — null plan passthrough", () => {

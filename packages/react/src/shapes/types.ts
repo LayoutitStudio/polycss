@@ -2,8 +2,14 @@ import type {
   Vec2,
   Vec3,
   PolyDirectionalLight,
+  PolyTextureBackend,
+  PolyTextureImageRendering,
+  PolyTextureImageSource,
+  PolyTextureLeafSizing,
   PolyTextureLightingMode,
+  PolyTextureProjection,
   PolyMaterial,
+  PolyTexturePresentation,
 } from "@layoutit/polycss-core";
 import type {
   CSSProperties,
@@ -77,8 +83,11 @@ export interface PolyProps extends TransformProps, DOMPassthroughProps {
   vertices: Vec3[];
   color?: string;
   texture?: string;
+  textureImageSource?: PolyTextureImageSource;
+  texturePresentation?: PolyTexturePresentation;
   uvs?: Vec2[];
   data?: Record<string, string | number | boolean>;
+  doubleSided?: boolean;
   /** Shared material. When set AND the polygon's UVs form an axis-aligned
    *  rectangle, renders via `background-image` directly — no per-polygon
    *  canvas rasterization. Falls back to the atlas path otherwise. */
@@ -92,6 +101,10 @@ export interface PolyProps extends TransformProps, DOMPassthroughProps {
     directionalLight?: PolyDirectionalLight;
     textureLighting?: PolyTextureLightingMode;
     textureQuality?: TextureQuality;
+    textureLeafSizing?: PolyTextureLeafSizing;
+    textureImageRendering?: PolyTextureImageRendering;
+    textureBackend?: PolyTextureBackend;
+    textureProjection?: PolyTextureProjection;
     debugShowBackfaces?: boolean;
     [key: string]: unknown;
   };
@@ -100,6 +113,14 @@ export interface PolyProps extends TransformProps, DOMPassthroughProps {
   /** Atlas bitmap budget and CSS sprite size. `"auto"` (default) uses a
    *  device-appropriate memory budget and desktop/mobile sprite sizing. */
   textureQuality?: TextureQuality;
+  /** Atlas leaf CSS primitive sizing. Defaults to scene context, then canonical. */
+  textureLeafSizing?: PolyTextureLeafSizing;
+  /** Default image filtering for atlas and direct image texture leaves. */
+  textureImageRendering?: PolyTextureImageRendering;
+  /** Default texture backend request. Defaults to scene context, then "auto". */
+  textureBackend?: PolyTextureBackend;
+  /** Default texture projection request. Defaults to scene context, then "affine". */
+  textureProjection?: PolyTextureProjection;
   /** Pre-computed shaded base color from the parent (optional override). */
   baseColor?: string;
 }

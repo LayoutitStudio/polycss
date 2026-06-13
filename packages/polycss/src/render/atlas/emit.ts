@@ -1,4 +1,9 @@
-import type { PolyTextureLightingMode, Polygon } from "@layoutit/polycss-core";
+import type {
+  PolyTextureImageRendering,
+  PolyTextureLeafGeometry,
+  PolyTextureLightingMode,
+  Polygon,
+} from "@layoutit/polycss-core";
 import type { Vec3 } from "@layoutit/polycss-core";
 import type {
   TextureAtlasPlan,
@@ -12,7 +17,12 @@ import type {
   SolidTriangleElement,
   RenderTextureAtlasOptions,
 } from "./types";
-import { formatCssLength, formatMatrix3dValues, formatSolidQuadMatrix } from "@layoutit/polycss-core";
+import {
+  formatCssLength,
+  formatMatrix3dValues,
+  formatSolidQuadMatrix,
+  resolvePolyTextureImageRendering,
+} from "@layoutit/polycss-core";
 import { shadePolygon } from "@layoutit/polycss-core";
 import {
   setInlineStyleProperty,
@@ -35,6 +45,52 @@ import {
 
 const CORNER_SHAPE_SOLID_CLASS = "polycss-corner-shape-solid";
 
+function atlasLeafWidthForEntry(entry: TextureAtlasPlan): number {
+  return entry.atlasLeafWidth ?? atlasCanonicalSizeForEntry(entry);
+}
+
+function atlasLeafHeightForEntry(entry: TextureAtlasPlan): number {
+  return entry.atlasLeafHeight ?? atlasCanonicalSizeForEntry(entry);
+}
+
+function textureImageRenderingForEntry(
+  entry: TextureAtlasPlan,
+  defaultImageRendering?: PolyTextureImageRendering,
+): PolyTextureImageRendering {
+  return resolvePolyTextureImageRendering(entry.polygon, defaultImageRendering);
+}
+
+function textureImageRenderingStyle(imageRendering: PolyTextureImageRendering): string {
+  return imageRendering === "pixelated" ? ";image-rendering:pixelated" : "";
+}
+
+function applyTextureDiagnostics(
+  el: HTMLElement,
+  backend: "atlas" | "image",
+  ready: boolean,
+  imageRendering: PolyTextureImageRendering,
+  leafSizing?: string,
+  projection?: string,
+  lighting?: string,
+  leafWidth?: number,
+  leafHeight?: number,
+): void {
+  el.setAttribute("data-polycss-leaf", "polygon");
+  el.setAttribute("data-polycss-texture-backend", backend);
+  el.setAttribute("data-polycss-texture-ready", ready ? "true" : "false");
+  el.setAttribute("data-polycss-texture-image-rendering", imageRendering);
+  if (leafSizing) el.setAttribute("data-polycss-texture-leaf-sizing", leafSizing);
+  else el.removeAttribute("data-polycss-texture-leaf-sizing");
+  if (projection) el.setAttribute("data-polycss-texture-projection", projection);
+  else el.removeAttribute("data-polycss-texture-projection");
+  if (lighting) el.setAttribute("data-polycss-texture-lighting", lighting);
+  else el.removeAttribute("data-polycss-texture-lighting");
+  if (typeof leafWidth === "number") el.setAttribute("data-polycss-texture-leaf-width", String(leafWidth));
+  else el.removeAttribute("data-polycss-texture-leaf-width");
+  if (typeof leafHeight === "number") el.setAttribute("data-polycss-texture-leaf-height", String(leafHeight));
+  else el.removeAttribute("data-polycss-texture-leaf-height");
+}
+
 export const ELEMENT_DATA_KEYS = new WeakMap<HTMLElement, string[]>();
 const ELEMENT_DATA_VALUES = new WeakMap<HTMLElement, Map<string, string>>();
 
@@ -52,6 +108,7 @@ export function applyPolygonDataAttrs(el: HTMLElement, polygon: Polygon, polygon
       nextDataValues.set(k, String(v));
     }
   }
+  if (polygon.doubleSided === true) nextDataValues.set("polycss-double-sided", "true");
   // Debug pinpointing: emit the polygon's index in the source mesh so
   // devtools inspection can ref back to mesh.polygons[N]. Always-on
   // because the cost is minimal (one short attribute per leaf, set once)
@@ -85,17 +142,24 @@ export function applyAtlasBackground(
   textureLighting: PolyTextureLightingMode,
   entry: PackedTextureAtlasEntry,
   preserveDynamicNormalVars = textureLighting === "dynamic",
+  defaultImageRendering?: PolyTextureImageRendering,
 ): void {
   if (!page.url) return;
+  const imageRendering = textureImageRenderingForEntry(entry, defaultImageRendering);
   const url = `url(${page.url})`;
   const width = entry.canvasW || 1;
   const height = entry.canvasH || 1;
   const atlasCanonicalSize = atlasCanonicalSizeForEntry(entry);
-  const pos = `${formatCssLength((-entry.x / width) * atlasCanonicalSize)} ${formatCssLength((-entry.y / height) * atlasCanonicalSize)}`;
-  const size = `${formatCssLength((page.width / width) * atlasCanonicalSize)} ${formatCssLength((page.height / height) * atlasCanonicalSize)}`;
+  const atlasLeafWidth = atlasLeafWidthForEntry(entry);
+  const atlasLeafHeight = atlasLeafHeightForEntry(entry);
+  const pos = `${formatCssLength((-entry.x / width) * atlasLeafWidth)} ${formatCssLength((-entry.y / height) * atlasLeafHeight)}`;
+  const size = `${formatCssLength((page.width / width) * atlasLeafWidth)} ${formatCssLength((page.height / height) * atlasLeafHeight)}`;
   const atlasBaseStyle =
     `transform:matrix3d(${entry.atlasMatrix})` +
-    `;--polycss-atlas-size:${atlasCanonicalSize}px`;
+    `;--polycss-atlas-size:${atlasCanonicalSize}px` +
+    `;--polycss-atlas-width:${formatCssLength(atlasLeafWidth)}` +
+    `;--polycss-atlas-height:${formatCssLength(atlasLeafHeight)}` +
+    `;--polycss-atlas-leaf-sizing:${entry.atlasLeafSizing ?? "canonical"}`;
   const dynamicBaseStyle =
     `${atlasBaseStyle}` +
     `;--polycss-atlas-position:${pos}` +
@@ -112,7 +176,8 @@ export function applyAtlasBackground(
       "style",
       dynamicBaseStyle +
         `;--polycss-atlas-url:${url}` +
-        normalStyle,
+        normalStyle +
+        textureImageRenderingStyle(imageRendering),
     );
   } else {
     // Use individual `background-image / -position / -size / -repeat`
@@ -138,9 +203,21 @@ export function applyAtlasBackground(
         `;background-repeat:no-repeat` +
         `;--pnx:${entry.normal[0].toFixed(4)}` +
         `;--pny:${entry.normal[1].toFixed(4)}` +
-        `;--pnz:${entry.normal[2].toFixed(4)}`,
+        `;--pnz:${entry.normal[2].toFixed(4)}` +
+        textureImageRenderingStyle(imageRendering),
     );
   }
+  applyTextureDiagnostics(
+    el,
+    "atlas",
+    true,
+    imageRendering,
+    entry.atlasLeafSizing ?? "canonical",
+    "affine",
+    textureLighting,
+    atlasLeafWidth,
+    atlasLeafHeight,
+  );
 }
 
 export function updateAtlasElementWithStablePlan(
@@ -211,13 +288,13 @@ export function stableMatrixFromPlan(
   return {
     normal,
     matrix: formatMatrix3dValues([
-      xAxis[0] * source.canvasW / atlasCanonicalSizeForEntry(source),
-      xAxis[1] * source.canvasW / atlasCanonicalSizeForEntry(source),
-      xAxis[2] * source.canvasW / atlasCanonicalSizeForEntry(source),
+      xAxis[0] * source.canvasW / atlasLeafWidthForEntry(source),
+      xAxis[1] * source.canvasW / atlasLeafWidthForEntry(source),
+      xAxis[2] * source.canvasW / atlasLeafWidthForEntry(source),
       0,
-      yAxis[0] * source.canvasH / atlasCanonicalSizeForEntry(source),
-      yAxis[1] * source.canvasH / atlasCanonicalSizeForEntry(source),
-      yAxis[2] * source.canvasH / atlasCanonicalSizeForEntry(source),
+      yAxis[0] * source.canvasH / atlasLeafHeightForEntry(source),
+      yAxis[1] * source.canvasH / atlasLeafHeightForEntry(source),
+      yAxis[2] * source.canvasH / atlasLeafHeightForEntry(source),
       0,
       normal[0], normal[1], normal[2], 0,
       tx, ty, tz, 1,
@@ -379,9 +456,13 @@ export function createAtlasElement(
   textureLighting: PolyTextureLightingMode,
   doc: Document,
   skipDynamicNormalVars = false,
+  defaultImageRendering?: PolyTextureImageRendering,
 ): HTMLElement {
   const el = doc.createElement("s");
+  const imageRendering = textureImageRenderingForEntry(entry, defaultImageRendering);
   const atlasCanonicalSize = atlasCanonicalSizeForEntry(entry);
+  const atlasLeafWidth = atlasLeafWidthForEntry(entry);
+  const atlasLeafHeight = atlasLeafHeightForEntry(entry);
   // Emit surface normal vars regardless of mode — see applyAtlasBackground
   // for why baked-mode leaves benefit when callers toggle the scene's
   // lighting mode without rebaking. `skipDynamicNormalVars` still wins
@@ -396,9 +477,71 @@ export function createAtlasElement(
     "style",
     `transform:matrix3d(${entry.atlasMatrix})` +
       `;--polycss-atlas-size:${atlasCanonicalSize}px` +
+      `;--polycss-atlas-width:${formatCssLength(atlasLeafWidth)}` +
+      `;--polycss-atlas-height:${formatCssLength(atlasLeafHeight)}` +
+      `;--polycss-atlas-leaf-sizing:${entry.atlasLeafSizing ?? "canonical"}` +
       `;opacity:0` +
-      dynamicNormalStyle,
+      dynamicNormalStyle +
+      textureImageRenderingStyle(imageRendering),
+  );
+  applyTextureDiagnostics(
+    el,
+    "atlas",
+    false,
+    imageRendering,
+    entry.atlasLeafSizing ?? "canonical",
+    "affine",
+    textureLighting,
+    atlasLeafWidth,
+    atlasLeafHeight,
   );
   applyPolygonDataAttrs(el, entry.polygon, entry.index);
+  return el;
+}
+
+export function createTextureImageElement(
+  plan: TextureAtlasPlan,
+  geometry: PolyTextureLeafGeometry,
+  doc: Document,
+  skipDynamicNormalVars = false,
+): HTMLElement {
+  const el = doc.createElement("s");
+  const dynamicNormalStyle = skipDynamicNormalVars
+    ? ""
+    : `;--pnx:${plan.normal[0].toFixed(4)}` +
+      `;--pny:${plan.normal[1].toFixed(4)}` +
+      `;--pnz:${plan.normal[2].toFixed(4)}`;
+  el.setAttribute(
+    "style",
+    `transform:matrix3d(${geometry.matrix})` +
+      `;--polycss-atlas-width:${formatCssLength(geometry.leafWidth)}` +
+      `;--polycss-atlas-height:${formatCssLength(geometry.leafHeight)}` +
+      `;--polycss-atlas-leaf-sizing:image` +
+      `;background-image:url(${geometry.url})` +
+      `;background-position:${formatCssLength(geometry.backgroundPosition[0])} ${formatCssLength(geometry.backgroundPosition[1])}` +
+      `;background-size:${formatCssLength(geometry.backgroundSize[0])} ${formatCssLength(geometry.backgroundSize[1])}` +
+      `;background-repeat:no-repeat` +
+      `;background-blend-mode:normal` +
+      `;mask-image:none` +
+      `;-webkit-mask-image:none` +
+      dynamicNormalStyle +
+      textureImageRenderingStyle(geometry.imageRendering),
+  );
+  applyTextureDiagnostics(
+    el,
+    "image",
+    true,
+    geometry.imageRendering,
+    "image",
+    geometry.projection,
+    geometry.lighting,
+    geometry.leafWidth,
+    geometry.leafHeight,
+  );
+  el.setAttribute("data-polycss-texture-source-x", String(geometry.sourceRect.x));
+  el.setAttribute("data-polycss-texture-source-y", String(geometry.sourceRect.y));
+  el.setAttribute("data-polycss-texture-source-width", String(geometry.sourceRect.width));
+  el.setAttribute("data-polycss-texture-source-height", String(geometry.sourceRect.height));
+  applyPolygonDataAttrs(el, plan.polygon, plan.index);
   return el;
 }

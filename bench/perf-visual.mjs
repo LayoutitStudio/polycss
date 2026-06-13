@@ -11,6 +11,7 @@
  * Normal run (after baseline exists):
  *   node scripts/perf-visual.mjs            → exit 0 if pass, 1 if fail
  *   node scripts/perf-visual.mjs --tolerance 0.005  → mean abs RGB delta cutoff
+ *   node scripts/perf-visual.mjs --hud      → include the debug overlay
  *
  * Comparison metric: mean absolute per-channel difference across all
  * pixels, normalized to [0,1]. 0 = identical, ~0.05 = visible drift.
@@ -47,11 +48,13 @@ const RECORD = hasFlag("record");
 const TOLERANCE = optNum("tolerance", 0.01);
 const MODE = optStr("mode", "dynamic");
 const HEADED = hasFlag("headed");
+const SCREENSHOT_DIR = optStr("screenshots");
+const SHOW_HUD = hasFlag("hud");
 // Two meshes that exercise different render paths:
 //   chicken — flat-color MTL materials (no map_Kd) → polygon path with
 //             cascade-driven CSS colors
-//   rock1   — UV-textured MTL (map_Kd rock1-surface.jpg) → atlas path
-//             with bitmap-clipped <i> backgrounds
+//   rock1   — UV-textured MTL (map_Kd rock1-surface.jpg) → <s> atlas
+//             texture leaves
 // Both are small (~hundreds of polys) so the headless run stays fast.
 // Override with `--mesh <id>` to record/check a single mesh.
 const MESHES = optStr("mesh") ? [optStr("mesh")] : ["chicken", "rock1"];
@@ -145,34 +148,33 @@ async function meanAbsDelta(page, baselinePath, candidateBuf) {
     const page = await ctx.newPage();
 
     if (RECORD) mkdirSync(baselinesDir, { recursive: true });
+    if (SCREENSHOT_DIR) mkdirSync(SCREENSHOT_DIR, { recursive: true });
 
     let allPass = true;
     const report = [];
     for (const mesh of MESHES) for (const f of FRAMES) {
-      const url = `http://127.0.0.1:${port}/?mesh=${mesh}&mode=${MODE}&motion=none&az=${f.az}&el=45`;
+      const url = `http://127.0.0.1:${port}/?mesh=${mesh}&mode=${MODE}&motion=none&az=${f.az}&el=45${SHOW_HUD ? "" : "&nohud=1"}`;
       await page.goto(url, { waitUntil: "load" });
       await page.waitForFunction(() => window.__perf__?.ready === true, null, { timeout: 30000 });
-      // Wait until the atlas blob URLs are actually applied — scene.add()
-      // is sync but atlas building is async (canvas → blob URL). Polygons
-      // stay opacity:0 with no background-image until the atlas is ready;
-      // screenshotting before then captures an empty viewport even though
-      // __perf__.ready is true (this is the bug that produced the empty
-      // az120 baseline previously). Some polys may be display:none (cull)
-      // and never get a backgroundImage, so we just check that at least
-      // one is set — atlas pages share the same blob URL across all polys
-      // assigned to the same page, so a single set means the atlas is up.
+      // Wait until texture leaves have revealed. The renderer used to expose
+      // atlas textures through <i> backgrounds; the current strategy emits
+      // PolyCSS-owned readiness metadata on <s> leaves for atlas and direct
+      // image textures, so avoid hard-coding a historical tag here.
       await page.waitForFunction(() => {
-        const polys = document.querySelectorAll(".polycss-scene i");
-        if (polys.length === 0) return false;
-        for (const el of polys) {
-          if (el.style.backgroundImage) return true;
+        const leaves = document.querySelectorAll(".polycss-scene [data-polycss-texture-backend]");
+        if (leaves.length === 0) return true;
+        for (const el of leaves) {
+          if (el.getAttribute("data-polycss-texture-ready") !== "true") return false;
         }
-        return false;
+        return true;
       }, null, { timeout: 5000 });
       // Tiny settle so the first paint after backgroundImage assignment
       // has actually composed.
       await page.waitForTimeout(150);
       const screenshot = await page.screenshot({ fullPage: false });
+      if (SCREENSHOT_DIR) {
+        writeFileSync(resolve(SCREENSHOT_DIR, `${mesh}-${MODE}-${f.name}.png`), screenshot);
+      }
 
       const baselinePath = resolve(baselinesDir, `${mesh}-${MODE}-${f.name}.png`);
       if (RECORD) {

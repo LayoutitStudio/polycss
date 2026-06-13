@@ -1,17 +1,32 @@
 ---
 ---
-<a href="/" class="site-title">
-  <img src="/voxisologo.png" alt="PolyCSS" class="site-title__logo" />
+<a href="/" class="site-title" aria-label="PolyCSS home">
+  <img src="/voxisologo.png" alt="PolyCSS" width="2048" height="682" class="site-title__logo" />
 </a>
 <style>
   .site-title {
+    --site-title-logo-width: 96px;
+    --site-title-logo-shift-y: 1.5px;
+
     display: inline-flex;
     align-items: center;
+    justify-content: center;
+    width: var(--site-title-logo-width);
+    height: 44px;
     text-decoration: none;
   }
+
   .site-title__logo {
-    width: 85px;
-    height: 44px;
-    object-fit: contain;
+    display: block;
+    width: 100%;
+    height: auto;
+    transform: translateY(var(--site-title-logo-shift-y));
+  }
+
+  @media (max-width: 38rem) {
+    .site-title {
+      --site-title-logo-width: 90px;
+      height: 36px;
+    }
   }
 </style>

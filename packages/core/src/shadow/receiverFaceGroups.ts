@@ -81,6 +81,13 @@ export function worldDirectionalLightToCss<
   return { ...light, direction: worldDirectionToCss(light.direction) } as T;
 }
 
+export const worldDistanceToPolyCss = worldDistanceToCss;
+export const polyCssDistanceToWorld = cssDistanceToWorld;
+export const worldPositionToPolyCss = worldPositionToCss;
+export const polyCssPositionToWorld = cssPositionToWorld;
+export const worldDirectionToPolyCss = worldDirectionToCss;
+export const worldDirectionalLightToPolyCss = worldDirectionalLightToCss;
+
 /** Normalize a mesh `scale` value into a Vec3 (undefined → [1,1,1], number →
  *  uniform, Vec3 → as-is with `?? 1` per axis). */
 export function meshScaleVec3(

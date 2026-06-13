@@ -34,6 +34,7 @@ export interface MeshEntry {
   shadowRendered: HTMLElement[];
   voxelRenderer?: PolyVoxelRenderer;
   disposeAtlas?: () => void;
+  textureReadyPromise: Promise<void>;
   polygons: Polygon[];
   voxelSource: ParseResult["voxelSource"];
   disposed: boolean;

@@ -986,6 +986,229 @@ describe("renderPolygonsWithTextureAtlas", () => {
     numeric.dispose();
   });
 
+  it("supports non-square atlas leaf sizing without changing the atlas path", () => {
+    const texturedRect: Polygon = {
+      vertices: [
+        [0, 0, 0],
+        [2, 0, 0],
+        [2, 1, 0],
+        [0, 1, 0],
+      ],
+      texture: "https://example.com/tex.png",
+      uvs: [
+        [0, 0],
+        [1, 0],
+        [1, 1],
+        [0, 1],
+      ],
+    };
+    const local = renderPolygonsWithTextureAtlas([texturedRect], { textureLeafSizing: "local" });
+    const raster = renderPolygonsWithTextureAtlas([texturedRect], {
+      textureQuality: 0.5,
+      textureLeafSizing: "raster",
+    });
+    const localElement = local.rendered[0].element;
+    const rasterElement = raster.rendered[0].element;
+
+    expect(localElement.tagName.toLowerCase()).toBe("s");
+    expect(localElement.style.width).toBe("");
+    expect(localElement.style.height).toBe("");
+    expect(localElement.style.getPropertyValue("--polycss-atlas-width")).toBe("100px");
+    expect(localElement.style.getPropertyValue("--polycss-atlas-height")).toBe("50px");
+    expect(localElement.getAttribute("data-polycss-texture-backend")).toBe("atlas");
+    expect(localElement.getAttribute("data-polycss-texture-leaf-sizing")).toBe("local");
+    expect(rasterElement.style.getPropertyValue("--polycss-atlas-width")).toBe("50px");
+    expect(rasterElement.style.getPropertyValue("--polycss-atlas-height")).toBe("25px");
+    expect(rasterElement.getAttribute("data-polycss-texture-leaf-sizing")).toBe("raster");
+    local.dispose();
+    raster.dispose();
+  });
+
+  it("applies texture image rendering to atlas leaves", () => {
+    const texturedPoly: Polygon = {
+      vertices: FLAT_TRIANGLE.vertices,
+      texture: "https://example.com/tex.png",
+    };
+    const result = renderPolygonsWithTextureAtlas([texturedPoly], {
+      textureImageRendering: "pixelated",
+    });
+    const element = result.rendered[0].element;
+
+    expect(element.tagName.toLowerCase()).toBe("s");
+    expect(element.getAttribute("data-polycss-texture-backend")).toBe("atlas");
+    expect(element.getAttribute("data-polycss-texture-image-rendering")).toBe("pixelated");
+    expect(element.style.imageRendering).toBe("pixelated");
+    result.dispose();
+  });
+
+  it("renders direct image leaves with source-rectangle metadata", () => {
+    const canvases: Array<{ width: number; height: number; getContext: () => null }> = [];
+    const doc = {
+      defaultView: { CSS: { supports: () => false } },
+      createElement(tagName: string) {
+        if (tagName === "canvas") {
+          const canvas = { width: 0, height: 0, getContext: () => null };
+          canvases.push(canvas);
+          return canvas;
+        }
+        return document.createElement(tagName);
+      },
+    } as unknown as Document;
+    const polygon: Polygon = {
+      vertices: [
+        [0, 0, 0],
+        [2, 0, 0],
+        [2, 1, 0],
+        [0, 1, 0],
+      ],
+      textureImageSource: {
+        url: "https://example.com/source.png",
+        width: 320,
+        height: 200,
+        sourceRect: { x: 16, y: 24, width: 80, height: 40 },
+      },
+      texturePresentation: { backend: "image", imageRendering: "pixelated" },
+      data: { source: "wall-7" },
+      doubleSided: true,
+    };
+
+    const result = renderPolygonsWithTextureAtlas([polygon], { doc });
+    const element = result.rendered[0].element;
+
+    expect(result.rendered[0].kind).toBe("image");
+    expect(element.tagName.toLowerCase()).toBe("s");
+    expect(element.getAttribute("data-polycss-texture-backend")).toBe("image");
+    expect(element.getAttribute("data-polycss-texture-ready")).toBe("true");
+    expect(element.getAttribute("data-polycss-texture-leaf-sizing")).toBe("image");
+    expect(element.getAttribute("data-polycss-texture-image-rendering")).toBe("pixelated");
+    expect(element.getAttribute("data-polycss-texture-projection")).toBe("affine");
+    expect(element.getAttribute("data-polycss-texture-source-x")).toBe("16");
+    expect(element.getAttribute("data-polycss-texture-source-y")).toBe("24");
+    expect(element.getAttribute("data-polycss-texture-source-width")).toBe("80");
+    expect(element.getAttribute("data-polycss-texture-source-height")).toBe("40");
+    expect(element.getAttribute("data-polycss-texture-leaf-width")).toBe("80");
+    expect(element.getAttribute("data-polycss-texture-leaf-height")).toBe("40");
+    expect(element.getAttribute("data-source")).toBe("wall-7");
+    expect(element.getAttribute("data-polycss-double-sided")).toBe("true");
+    expect(element.style.backgroundImage).toBe('url("https://example.com/source.png")');
+    expect(element.style.backgroundPosition).toBe("-16px -24px");
+    expect(element.style.backgroundSize).toBe("320px 200px");
+    expect(element.style.imageRendering).toBe("pixelated");
+    expect(canvases).toHaveLength(0);
+    result.dispose();
+  });
+
+  it("uses scene backend defaults for direct image eligibility", () => {
+    const polygon: Polygon = {
+      vertices: [
+        [0, 0, 0],
+        [2, 0, 0],
+        [2, 1, 0],
+        [0, 1, 0],
+      ],
+      textureImageSource: {
+        url: "https://example.com/source.png",
+        width: 320,
+        height: 200,
+        sourceRect: { x: 16, y: 24, width: 80, height: 40 },
+      },
+    };
+
+    const imageResult = renderPolygonsWithTextureAtlas([polygon], {
+      textureBackend: "image",
+      textureImageRendering: "pixelated",
+    });
+    const imageLeaf = imageResult.rendered[0].element;
+    expect(imageResult.rendered[0].kind).toBe("image");
+    expect(imageLeaf.getAttribute("data-polycss-texture-backend")).toBe("image");
+    expect(imageLeaf.getAttribute("data-polycss-texture-image-rendering")).toBe("pixelated");
+    imageResult.dispose();
+
+    const atlasResult = renderPolygonsWithTextureAtlas([polygon], {
+      textureBackend: "atlas",
+    });
+    const atlasLeaf = atlasResult.rendered[0].element;
+    expect(atlasResult.rendered[0].kind).toBe("atlas");
+    expect(atlasLeaf.getAttribute("data-polycss-texture-backend")).toBe("atlas");
+    atlasResult.dispose();
+  });
+
+  it("renders projective direct image leaves when guards pass", () => {
+    const doc = {
+      defaultView: {
+        CSS: { supports: () => false },
+        __polycssProjectiveQuadGuards: { bleed: 0, disableGuards: true },
+      },
+      createElement(tagName: string) {
+        return document.createElement(tagName);
+      },
+    } as unknown as Document;
+    const polygon: Polygon = {
+      vertices: NON_RECT_QUAD.vertices,
+      textureImageSource: {
+        url: "https://example.com/source.png",
+        width: 80,
+        height: 40,
+      },
+      texturePresentation: { backend: "image", projection: "projective" },
+    };
+
+    const result = renderPolygonsWithTextureAtlas([polygon], { doc });
+    const element = result.rendered[0].element;
+    const matrix = extractMatrix(element);
+    const expected = NON_RECT_QUAD.vertices.map((vertex): [number, number, number] => [
+      vertex[1] * 50,
+      vertex[0] * 50,
+      vertex[2] * 50,
+    ]);
+
+    expect(result.rendered[0].kind).toBe("image");
+    expect(element.getAttribute("data-polycss-texture-projection")).toBe("projective");
+    expectPointClose(transformMatrixPoint(matrix, 0, 0), expected[0]);
+    expectPointClose(transformMatrixPoint(matrix, 80, 0), expected[1]);
+    expectPointClose(transformMatrixPoint(matrix, 80, 40), expected[2]);
+    expectPointClose(transformMatrixPoint(matrix, 0, 40), expected[3]);
+    result.dispose();
+  });
+
+  it("falls back to atlas for projective direct image leaves on Safari", () => {
+    const canvases: Array<{ width: number; height: number; getContext: () => null }> = [];
+    const doc = {
+      defaultView: {
+        navigator: {
+          userAgent: "Mozilla/5.0 AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15",
+        },
+        CSS: { supports: () => false },
+      },
+      createElement(tagName: string) {
+        if (tagName === "canvas") {
+          const canvas = { width: 0, height: 0, getContext: () => null };
+          canvases.push(canvas);
+          return canvas;
+        }
+        return document.createElement(tagName);
+      },
+    } as unknown as Document;
+    const polygon: Polygon = {
+      vertices: NON_RECT_QUAD.vertices,
+      textureImageSource: {
+        url: "https://example.com/source.png",
+        width: 80,
+        height: 40,
+      },
+      texturePresentation: { backend: "image", projection: "projective" },
+    };
+
+    const result = renderPolygonsWithTextureAtlas([polygon], { doc });
+    const element = result.rendered[0].element;
+
+    expect(result.rendered[0].kind).toBe("atlas");
+    expect(element.tagName.toLowerCase()).toBe("s");
+    expect(element.getAttribute("data-polycss-texture-backend")).toBe("atlas");
+    expect(canvases).toHaveLength(1);
+    result.dispose();
+  });
+
   it("uses matrix scale for the fixed border-shape paint box", () => {
     const obliqueQuad: Polygon = {
       vertices: [

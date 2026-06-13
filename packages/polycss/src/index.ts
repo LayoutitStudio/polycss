@@ -149,11 +149,21 @@ export type {
 } from "./render/textureAtlas";
 
 // ── Render diagnostics ───────────────────────────────────────────
-export { collectPolyRenderStats } from "./render/renderStats";
+export {
+  collectPolyRenderStats,
+  collectPolyTextureReadiness,
+  queryPolyLeaves,
+} from "./render/renderStats";
 export type {
+  PolyLeafInfo,
+  PolyRenderLeafStrategy,
   PolyRenderStats,
   PolyRenderStatsOptions,
   PolyRenderSurfaceLeafCounts,
+  PolyCameraSnapshotStats,
+  PolySnapshotRenderStats,
+  PolyTextureRenderStats,
+  PolyTextureReadiness,
 } from "./render/renderStats";
 
 // ── Standalone scene snapshots ───────────────────────────────────

@@ -131,6 +131,39 @@ describe("mergePolygons — real fixture (chicken.obj)", () => {
   });
 });
 
+describe("mergePolygons — direct image metadata", () => {
+  it("preserves source and presentation fields on surviving textured polygons", () => {
+    const source = {
+      url: "https://example.com/source.png",
+      width: 320,
+      height: 200,
+      sourceRect: { x: 16, y: 24, width: 80, height: 40 },
+    };
+    const polygons: Polygon[] = [
+      {
+        vertices: [[0, 0, 0], [1, 0, 0], [1, 1, 0]],
+        texture: source.url,
+        textureImageSource: source,
+        texturePresentation: { backend: "image", imageRendering: "pixelated" },
+      },
+      {
+        vertices: [[0, 0, 0], [1, 1, 0], [0, 1, 0]],
+        texture: source.url,
+        textureImageSource: source,
+        texturePresentation: { backend: "image", imageRendering: "pixelated" },
+      },
+    ];
+
+    const merged = mergePolygons(polygons);
+
+    expect(merged).toHaveLength(2);
+    for (const polygon of merged) {
+      expect(polygon.textureImageSource).toEqual(source);
+      expect(polygon.texturePresentation).toEqual({ backend: "image", imageRendering: "pixelated" });
+    }
+  });
+});
+
 // ── Fixtures ──────────────────────────────────────────────────────────────
 
 // Two right triangles that share the hypotenuse — together they form a unit square

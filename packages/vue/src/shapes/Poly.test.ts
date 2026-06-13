@@ -177,6 +177,29 @@ describe("Poly (Vue) — texture without UVs", () => {
     });
     expect(getPoly(container).style.filter).toBe("");
   });
+
+  it("renders direct image leaves from source metadata", () => {
+    const container = renderPoly({
+      vertices: VERTICAL_QUAD,
+      textureImageSource: {
+        url: "https://example.com/source.png",
+        width: 320,
+        height: 200,
+        sourceRect: { x: 16, y: 24, width: 80, height: 40 },
+      },
+      texturePresentation: { backend: "image" },
+      textureImageRendering: "pixelated",
+      doubleSided: true,
+    });
+    const poly = getPoly(container);
+    expect(poly.tagName.toLowerCase()).toBe("s");
+    expect(poly.getAttribute("data-polycss-texture-backend")).toBe("image");
+    expect(poly.getAttribute("data-polycss-texture-ready")).toBe("true");
+    expect(poly.getAttribute("data-polycss-texture-image-rendering")).toBe("pixelated");
+    expect(poly.getAttribute("data-polycss-texture-source-width")).toBe("80");
+    expect(poly.getAttribute("data-polycss-double-sided")).toBe("true");
+    expect(poly.style.backgroundImage).toContain("https://example.com/source.png");
+  });
 });
 
 describe("Poly (Vue) — UV-mapped texture", () => {

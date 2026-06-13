@@ -55,6 +55,31 @@ export interface CameraHandle {
   };
 }
 
+export interface PolyCameraSceneTransformOptions {
+  autoCenterOffset?: Vec3;
+  layoutScale?: number;
+  tileSize?: number;
+}
+
+export type PolyCameraProjection = "orthographic" | "perspective";
+
+export interface PolyCameraSnapshot {
+  projection: PolyCameraProjection;
+  perspectiveStyle: string;
+  appliedPerspectiveStyle: string;
+  state: CameraState;
+}
+
+export interface PolyCameraSnapshotOptions {
+  projection?: PolyCameraProjection;
+  perspectiveStyle?: string;
+}
+
+export type PolyCameraSnapshotSource = CameraHandle & {
+  readonly type?: PolyCameraProjection;
+  readonly perspectiveStyle?: string;
+};
+
 export function normalizeInvertMultiplier(value: number | boolean | undefined): number | undefined {
   if (typeof value === "number") {
     if (value === 0) return undefined;
@@ -73,6 +98,66 @@ export const DEFAULT_CAMERA_STATE: CameraState = {
   zoom: 0.65,
   distance: 0,
 };
+
+export function polyCameraTargetToCss(
+  target: Vec3 = DEFAULT_CAMERA_STATE.target,
+  autoCenterOffset: Vec3 = [0, 0, 0],
+  tileSize = BASE_TILE,
+): Vec3 {
+  const wx = target[0] + autoCenterOffset[0];
+  const wy = target[1] + autoCenterOffset[1];
+  const wz = target[2] + autoCenterOffset[2];
+  return [wy * tileSize, wx * tileSize, wz * tileSize];
+}
+
+export function buildPolyCameraSceneTransform(
+  state: Partial<CameraState> = DEFAULT_CAMERA_STATE,
+  options: PolyCameraSceneTransformOptions = {},
+): string {
+  const tileSize = options.tileSize ?? BASE_TILE;
+  const layoutScale = options.layoutScale ?? 1;
+  const target = state.target ?? DEFAULT_CAMERA_STATE.target;
+  const [cssX, cssY, cssZ] = polyCameraTargetToCss(
+    target,
+    options.autoCenterOffset,
+    tileSize,
+  );
+  const zoom = ((state.zoom ?? DEFAULT_CAMERA_STATE.zoom) / tileSize) * layoutScale;
+  const distance = (state.distance ?? DEFAULT_CAMERA_STATE.distance) * layoutScale;
+  const rotX = state.rotX ?? DEFAULT_CAMERA_STATE.rotX;
+  const rotY = state.rotY ?? DEFAULT_CAMERA_STATE.rotY;
+  const distancePart = distance !== 0 ? `translateZ(${-distance}px) ` : "";
+  return `${distancePart}scale(${zoom}) rotateX(${rotX}deg) rotate(${rotY}deg) translate3d(${-cssX}px, ${-cssY}px, ${-cssZ}px)`;
+}
+
+export function resolvePolyCameraAppliedPerspectiveStyle(perspectiveStyle = "none"): string {
+  if (perspectiveStyle === "none") {
+    return "1000000px";
+  }
+  const px = Number.parseFloat(perspectiveStyle);
+  return Number.isFinite(px) ? `${px}px` : perspectiveStyle;
+}
+
+export function capturePolyCameraSnapshot(
+  camera: PolyCameraSnapshotSource,
+  options: PolyCameraSnapshotOptions = {},
+): PolyCameraSnapshot {
+  const perspectiveStyle = options.perspectiveStyle ?? camera.perspectiveStyle ?? "none";
+  const projection = options.projection ?? camera.type ?? (perspectiveStyle === "none" ? "orthographic" : "perspective");
+  const state = camera.state ?? DEFAULT_CAMERA_STATE;
+  return {
+    projection,
+    perspectiveStyle,
+    appliedPerspectiveStyle: resolvePolyCameraAppliedPerspectiveStyle(perspectiveStyle),
+    state: {
+      target: [...(state.target ?? DEFAULT_CAMERA_STATE.target)] as Vec3,
+      rotX: state.rotX ?? DEFAULT_CAMERA_STATE.rotX,
+      rotY: state.rotY ?? DEFAULT_CAMERA_STATE.rotY,
+      zoom: state.zoom ?? DEFAULT_CAMERA_STATE.zoom,
+      distance: state.distance ?? DEFAULT_CAMERA_STATE.distance,
+    },
+  };
+}
 
 const CAMERA_PRECISION = 100;
 // Zoom needs much finer steps than rotation/target so trackpad two-finger

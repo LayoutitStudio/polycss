@@ -10,7 +10,11 @@ import type {
   PolyAmbientLight,
   PolyDirectionalLight,
   Polygon,
+  PolyTextureBackend,
+  PolyTextureImageRendering,
+  PolyTextureLeafSizing,
   PolyTextureLightingMode,
+  PolyTextureProjection,
   Vec3,
 } from "@layoutit/polycss-core";
 import type {
@@ -39,6 +43,14 @@ export interface PolySceneOptions {
    *  desktop/mobile sprite sizing. Numeric values 0.1..1 force an explicit
    *  raster scale and the 64px sprite. */
   textureQuality?: TextureQuality;
+  /** Texture leaf primitive sizing. Defaults to "canonical". */
+  textureLeafSizing?: PolyTextureLeafSizing;
+  /** Default image filtering for atlas and direct image texture leaves. */
+  textureImageRendering?: PolyTextureImageRendering;
+  /** Default texture backend request. Defaults to "auto". */
+  textureBackend?: PolyTextureBackend;
+  /** Default texture projection request. Defaults to "affine". */
+  textureProjection?: PolyTextureProjection;
   /** Solid seam overscan. `"auto"` computes a fitted per-edge amount from the polygon plan. */
   seamBleed?: PolySeamBleed;
   /**
@@ -201,6 +213,8 @@ export interface PolyMeshHandle {
    * pointer release (or any point where you want to commit the new shading).
    */
   rebakeAtlas(): void;
+  /** Resolves when this mesh's current texture generation has usable backgrounds. */
+  whenTexturesReady(): Promise<void>;
   /** Current `position` from the transform (matches framework API). */
   getPosition(): Vec3 | undefined;
   /** Current `rotation` from the transform (matches framework API). */
@@ -257,6 +271,8 @@ export interface PolySceneHandle {
   /** Snapshot of mesh handles currently in the scene (insertion order).
    *  Used by selection helpers to enumerate hit-test candidates. */
   meshes(): readonly PolyMeshHandle[];
+  /** Resolves when every mesh currently in the scene has usable texture backgrounds. */
+  whenTexturesReady(): Promise<void>;
   /** Resolve a `.polycss-mesh` element back to its handle, or `null` if
    *  the element doesn't belong to this scene. */
   findMeshByElement(element: Element | null): PolyMeshHandle | null;

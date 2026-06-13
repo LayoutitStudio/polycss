@@ -1,7 +1,11 @@
 import { describe, it, expect } from "vitest";
 import {
+  capturePolyCameraSnapshot,
   createIsometricCamera,
   normalizeInvertMultiplier,
+  buildPolyCameraSceneTransform,
+  polyCameraTargetToCss,
+  resolvePolyCameraAppliedPerspectiveStyle,
   DEFAULT_CAMERA_STATE,
 } from "./camera";
 
@@ -225,5 +229,83 @@ describe("createIsometricCamera", () => {
       const scaleIdx = style.transform.indexOf("scale(");
       expect(translateZIdx).toBeLessThan(scaleIdx);
     });
+  });
+});
+
+describe("polyCameraTargetToCss", () => {
+  it("maps world target coordinates into CSS coordinates", () => {
+    expect(polyCameraTargetToCss([2, 3, 1])).toEqual([150, 100, 50]);
+  });
+
+  it("folds auto-center offset into the target conversion", () => {
+    expect(polyCameraTargetToCss([2, 3, 1], [1, -1, 2])).toEqual([100, 150, 150]);
+  });
+});
+
+describe("buildPolyCameraSceneTransform", () => {
+  it("matches the scene-root transform contract", () => {
+    expect(buildPolyCameraSceneTransform({
+      target: [2, 3, 1],
+      rotX: 30,
+      rotY: 90,
+      zoom: 2,
+      distance: 0,
+    })).toBe("scale(0.04) rotateX(30deg) rotate(90deg) translate3d(-150px, -100px, -50px)");
+  });
+
+  it("prepends camera-space distance and folds layout scale into zoom and distance", () => {
+    expect(buildPolyCameraSceneTransform({
+      target: [0, 0, 0],
+      rotX: 0,
+      rotY: 0,
+      zoom: 1,
+      distance: 100,
+    }, { layoutScale: 0.5 })).toBe(
+      "translateZ(-50px) scale(0.01) rotateX(0deg) rotate(0deg) translate3d(0px, 0px, 0px)",
+    );
+  });
+
+  it("uses default camera state for missing fields", () => {
+    expect(buildPolyCameraSceneTransform({})).toBe(
+      "scale(0.013000000000000001) rotateX(65deg) rotate(45deg) translate3d(0px, 0px, 0px)",
+    );
+  });
+});
+
+describe("camera snapshots", () => {
+  it("exposes the compositor-safe applied perspective for orthographic cameras", () => {
+    expect(resolvePolyCameraAppliedPerspectiveStyle("none")).toBe("1000000px");
+  });
+
+  it("normalizes perspective camera CSS values", () => {
+    expect(resolvePolyCameraAppliedPerspectiveStyle("32000.5px")).toBe("32000.5px");
+  });
+
+  it("captures projection, perspective, and a cloned camera state", () => {
+    const camera = createIsometricCamera({
+      target: [1, 2, 3],
+      rotX: 10,
+      rotY: 20,
+      zoom: 2,
+      distance: 300,
+    });
+    const snapshot = capturePolyCameraSnapshot(camera, {
+      projection: "perspective",
+      perspectiveStyle: "3000px",
+    });
+
+    expect(snapshot).toEqual({
+      projection: "perspective",
+      perspectiveStyle: "3000px",
+      appliedPerspectiveStyle: "3000px",
+      state: {
+        target: [1, 2, 3],
+        rotX: 10,
+        rotY: 20,
+        zoom: 2,
+        distance: 300,
+      },
+    });
+    expect(snapshot.state.target).not.toBe(camera.state.target);
   });
 });

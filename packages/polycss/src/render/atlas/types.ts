@@ -2,7 +2,11 @@ import type {
   PolyAmbientLight,
   PolyDirectionalLight,
   Polygon,
+  PolyTextureBackend,
+  PolyTextureImageRendering,
+  PolyTextureLeafSizing,
   PolyTextureLightingMode,
+  PolyTextureProjection,
 } from "@layoutit/polycss-core";
 
 export interface RenderTextureAtlasOptions {
@@ -20,6 +24,10 @@ export interface RenderTextureAtlasOptions {
    * or a 64px sprite on mobile-class documents.
    */
   textureQuality?: import("@layoutit/polycss-core").TextureQuality;
+  textureLeafSizing?: PolyTextureLeafSizing;
+  textureImageRendering?: PolyTextureImageRendering;
+  textureBackend?: PolyTextureBackend;
+  textureProjection?: PolyTextureProjection;
   solidPaintDefaults?: import("@layoutit/polycss-core").SolidPaintDefaults;
   strategies?: import("@layoutit/polycss-core").PolyRenderStrategiesOption;
   /**
@@ -63,7 +71,7 @@ export interface SolidTriangleElement extends HTMLElement {
 export interface RenderedPoly {
   polygonIndex: number;
   element: HTMLElement;
-  kind?: "atlas" | "solid" | "border" | "corner" | "triangle";
+  kind?: "atlas" | "image" | "solid" | "border" | "corner" | "triangle";
   plan?: import("@layoutit/polycss-core").TextureAtlasPlan;
   dispose(): void;
 }

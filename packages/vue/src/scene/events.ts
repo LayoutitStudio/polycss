@@ -58,6 +58,8 @@ export interface PolyMeshHandle {
    * is always correct and never needs rebaking.
    */
   rebakeAtlas(): void;
+  /** Resolves when this mesh's current texture generation has usable backgrounds. */
+  whenTexturesReady(): Promise<void>;
 }
 
 export interface PolyPointerEvent<E extends Event = PointerEvent> {

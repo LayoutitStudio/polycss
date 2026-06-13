@@ -28,6 +28,7 @@ import {
   buildBasisHints,
   buildSeamBleedPolygonEdges,
   computeTextureAtlasPlan,
+  resolvePolyTextureLeafGeometry,
 } from "@layoutit/polycss-core";
 import { resolveProjectiveQuadGuards } from "./plan";
 import {
@@ -45,6 +46,7 @@ import { packTextureAtlasPlansWithScale } from "./packing";
 import { buildAtlasPages } from "./rasterise";
 import {
   createAtlasElement,
+  createTextureImageElement,
   createSolidElement,
   createBorderShapeSolidElement,
   createCornerShapeSolidElement,
@@ -198,16 +200,6 @@ export function renderPolygonsWithTextureAtlas(
       basisHints[index],
     )
   );
-  if (typeof window !== "undefined") {
-    const w = window as unknown as { __vanillaPlan1?: unknown };
-    const plan = plans[1];
-    w.__vanillaPlan1 = {
-      matrix: plan?.matrix,
-      canvasW: plan?.canvasW,
-      canvasH: plan?.canvasH,
-      vertexCount: polygons[1]?.vertices.length,
-    };
-  }
   const solidPaintDefaults = options.solidPaintDefaults ??
     (internalOptions.computeSolidPaintDefaults
       ? getSolidPaintDefaultsForPlans(plans, textureLighting, doc, options.strategies)
@@ -231,13 +223,30 @@ export function renderPolygonsWithTextureAtlas(
       ? cornerShapeGeometryForPlan(plan)
       : null
   );
-  const atlasPlans = plans.map((plan, index) =>
-    plan &&
-    (plan.texture
-      ? plan
-      : (!(useFullRectSolid && isFullRectSolid(plan)) && !trianglePlans[index] && !(useProjectiveQuad && isProjectiveQuadPlan(plan)) && !cornerShapePlans[index] && !useBorderShape) ? plan : null)
+  const imagePlans = plans.map((plan) => plan
+    ? resolvePolyTextureLeafGeometry(plan, {
+        imageRendering: options.textureImageRendering,
+        backend: options.textureBackend,
+        projection: options.textureProjection,
+        allowProjective: useProjectiveQuad,
+        projectiveQuadGuards,
+      })
+    : null
   );
-  const { packed, atlasScale } = packTextureAtlasPlansWithScale(atlasPlans, options.textureQuality, doc);
+  const atlasPlans = plans.map((plan, index) =>
+    imagePlans[index]
+      ? null
+      : plan &&
+        (plan.texture
+          ? plan
+          : (!(useFullRectSolid && isFullRectSolid(plan)) && !trianglePlans[index] && !(useProjectiveQuad && isProjectiveQuadPlan(plan)) && !cornerShapePlans[index] && !useBorderShape) ? plan : null)
+  );
+  const { packed, atlasScale } = packTextureAtlasPlansWithScale(
+    atlasPlans,
+    options.textureQuality,
+    doc,
+    options.textureLeafSizing,
+  );
   const atlasElements = new Map<number, HTMLElement>();
   const rendered: RenderedPoly[] = [];
   let cancelled = false;
@@ -247,13 +256,17 @@ export function renderPolygonsWithTextureAtlas(
     const plan = plans[i];
     const trianglePlan = trianglePlans[i];
     const cornerShapePlan = cornerShapePlans[i];
+    const imagePlan = imagePlans[i];
     if (!plan) continue;
 
     const entry = packed.entries[i];
     if (entry) {
-      const element = createAtlasElement(entry, textureLighting, doc, skipDynamicNormalVars);
+      const element = createAtlasElement(entry, textureLighting, doc, skipDynamicNormalVars, options.textureImageRendering);
       atlasElements.set(i, element);
       rendered.push({ polygonIndex: i, element, kind: "atlas", plan: entry, dispose: () => {} });
+    } else if (imagePlan) {
+      const element = createTextureImageElement(plan, imagePlan, doc, skipDynamicNormalVars);
+      rendered.push({ polygonIndex: i, element, kind: "image", plan, dispose: () => {} });
     } else if (!plan.texture && useFullRectSolid && isFullRectSolid(plan)) {
       const element = createSolidElement(plan, textureLighting, doc, solidPaintDefaults, skipDynamicNormalVars);
       rendered.push({ polygonIndex: i, element, kind: "solid", plan, dispose: () => {} });
@@ -290,18 +303,9 @@ export function renderPolygonsWithTextureAtlas(
         for (const entry of page.entries) {
           const el = atlasElements.get(entry.index);
           if (!el || !built.url) continue;
-          // preserveDynamicNormalVars is always true here — this callback fires
-// AFTER syncMountedRendered has already grouped polys into buckets and
-// restored inline normals on solo polys. Passing false would re-write
-// the leaf's style attribute without normals and wipe out the work
-// restoreInlineDynamicNormalVars just did, leaving solo polys
-// (those with a unique normal+color among siblings) reading Lambert
-// against the @property defaults (0,0,1). The atlas-plan normal here
-// matches what restoreInlineDynamicNormalVars sets, so re-applying it
-// is a no-op for solo polys; for bucketed polys the inline value is
-// unused (the bucket parent drives --plam) but doesn't change the
-// inherited result.
-applyAtlasBackground(el, built, textureLighting, entry, true);
+          // preserveDynamicNormalVars is always true here: this callback fires
+          // after syncMountedRendered has restored inline normals on solo polys.
+          applyAtlasBackground(el, built, textureLighting, entry, true, options.textureImageRendering);
         }
       }
     })
@@ -371,6 +375,7 @@ export async function renderPolygonsWithTextureAtlasAsync(
     getSolidPaintDefaultsForPlans(plans, textureLighting, doc, options.strategies);
   const trianglePlans: Array<SolidTrianglePlan | null> = new Array(plans.length);
   const cornerShapePlans: Array<CornerShapeGeometry | null> = new Array(plans.length);
+  const imagePlans: Array<ReturnType<typeof resolvePolyTextureLeafGeometry>> = new Array(plans.length);
   const atlasPlans: Array<TextureAtlasPlan | null> = new Array(plans.length);
   for (let i = 0; i < plans.length; i++) {
     const plan = plans[i];
@@ -388,15 +393,32 @@ export async function renderPolygonsWithTextureAtlasAsync(
       ? cornerShapeGeometryForPlan(plan)
       : null;
     cornerShapePlans[i] = cornerShapePlan;
-    atlasPlans[i] = plan &&
-      (plan.texture
-        ? plan
-        : (!(useFullRectSolid && isFullRectSolid(plan)) && !trianglePlan && !(useProjectiveQuad && isProjectiveQuadPlan(plan)) && !cornerShapePlan && !useBorderShape) ? plan : null);
+    const imagePlan = plan
+      ? resolvePolyTextureLeafGeometry(plan, {
+          imageRendering: options.textureImageRendering,
+          backend: options.textureBackend,
+          projection: options.textureProjection,
+          allowProjective: useProjectiveQuad,
+          projectiveQuadGuards,
+        })
+      : null;
+    imagePlans[i] = imagePlan;
+    atlasPlans[i] = imagePlan
+      ? null
+      : plan &&
+        (plan.texture
+          ? plan
+          : (!(useFullRectSolid && isFullRectSolid(plan)) && !trianglePlan && !(useProjectiveQuad && isProjectiveQuadPlan(plan)) && !cornerShapePlan && !useBorderShape) ? plan : null);
     batchStarted = await yieldIfOverBudget(batchStarted);
     if (shouldCancel()) return { rendered: [], solidPaintDefaults, dispose: () => {} };
   }
 
-  const { packed, atlasScale } = packTextureAtlasPlansWithScale(atlasPlans, options.textureQuality, doc);
+  const { packed, atlasScale } = packTextureAtlasPlansWithScale(
+    atlasPlans,
+    options.textureQuality,
+    doc,
+    options.textureLeafSizing,
+  );
   const atlasElements = new Map<number, HTMLElement>();
   const rendered: RenderedPoly[] = [];
   let cancelled = false;
@@ -406,13 +428,17 @@ export async function renderPolygonsWithTextureAtlasAsync(
     const plan = plans[i];
     const trianglePlan = trianglePlans[i];
     const cornerShapePlan = cornerShapePlans[i];
+    const imagePlan = imagePlans[i];
     if (!plan) continue;
 
     const entry = packed.entries[i];
     if (entry) {
-      const element = createAtlasElement(entry, textureLighting, doc, skipDynamicNormalVars);
+      const element = createAtlasElement(entry, textureLighting, doc, skipDynamicNormalVars, options.textureImageRendering);
       atlasElements.set(i, element);
       rendered.push({ polygonIndex: i, element, kind: "atlas", plan: entry, dispose: () => {} });
+    } else if (imagePlan) {
+      const element = createTextureImageElement(plan, imagePlan, doc, skipDynamicNormalVars);
+      rendered.push({ polygonIndex: i, element, kind: "image", plan, dispose: () => {} });
     } else if (!plan.texture && useFullRectSolid && isFullRectSolid(plan)) {
       const element = createSolidElement(plan, textureLighting, doc, solidPaintDefaults, skipDynamicNormalVars);
       rendered.push({ polygonIndex: i, element, kind: "solid", plan, dispose: () => {} });
@@ -454,18 +480,9 @@ export async function renderPolygonsWithTextureAtlasAsync(
         for (const entry of page.entries) {
           const el = atlasElements.get(entry.index);
           if (!el || !built.url) continue;
-          // preserveDynamicNormalVars is always true here — this callback fires
-// AFTER syncMountedRendered has already grouped polys into buckets and
-// restored inline normals on solo polys. Passing false would re-write
-// the leaf's style attribute without normals and wipe out the work
-// restoreInlineDynamicNormalVars just did, leaving solo polys
-// (those with a unique normal+color among siblings) reading Lambert
-// against the @property defaults (0,0,1). The atlas-plan normal here
-// matches what restoreInlineDynamicNormalVars sets, so re-applying it
-// is a no-op for solo polys; for bucketed polys the inline value is
-// unused (the bucket parent drives --plam) but doesn't change the
-// inherited result.
-applyAtlasBackground(el, built, textureLighting, entry, true);
+          // preserveDynamicNormalVars is always true here: this callback fires
+          // after syncMountedRendered has restored inline normals on solo polys.
+          applyAtlasBackground(el, built, textureLighting, entry, true, options.textureImageRendering);
         }
       }
     })

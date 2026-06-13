@@ -1,10 +1,17 @@
-import type { PolyTextureLightingMode } from "../types";
+import type {
+  PolyTextureBackend,
+  PolyTextureImageLighting,
+  PolyTextureImageRendering,
+  PolyTextureLightingMode,
+  PolyTextureProjection,
+} from "../types";
 import type {
   TextureAtlasPlan,
   PolyRenderStrategy,
   RGB,
 } from "./types";
 import { cornerShapeGeometryForPlan } from "./borderShape";
+import { resolvePolyTextureLeafGeometry } from "./textureLeaf";
 
 export function fullRectBounds(entry: TextureAtlasPlan): { left: number; top: number; width: number; height: number } | null {
   if (entry.screenPts.length !== 8) return null;
@@ -90,6 +97,10 @@ export interface FilterAtlasPlansEnv {
   solidTriangleSupported: boolean;
   projectiveQuadSupported: boolean;
   borderShapeSupported: boolean;
+  textureBackend?: PolyTextureBackend;
+  textureImageRendering?: PolyTextureImageRendering;
+  textureImageLighting?: PolyTextureImageLighting;
+  textureProjection?: PolyTextureProjection;
   /** When true, non-triangle non-rect non-projective polys whose plan has
    *  cornerShapeGeometryForPlan != null are excluded from the atlas (they
    *  render as <u> via corner-*-shape: bevel CSS — matches vanilla's
@@ -122,6 +133,18 @@ export function filterAtlasPlans(
   const useBorderShape = !disabled.has("i") && env.borderShapeSupported;
   const disableB = disabled.has("b");
   return plans.map((plan) => {
+    if (
+      plan?.texture &&
+      resolvePolyTextureLeafGeometry(plan, {
+        allowProjective: env.projectiveQuadSupported,
+        backend: env.textureBackend,
+        imageRendering: env.textureImageRendering,
+        lighting: env.textureImageLighting,
+        projection: env.textureProjection,
+      })
+    ) {
+      return null;
+    }
     if (!plan || plan.texture) return plan;
     if (useStableTriangle && isSolidTrianglePlan(plan)) return null;
     const fullRect = isFullRectSolid(plan);

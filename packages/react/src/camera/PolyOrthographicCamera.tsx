@@ -32,7 +32,15 @@ function PolyOrthographicCameraInner({
     sceneElRef,
     cameraElRef,
     applyTransformDirect,
-  } = usePolyCamera({ zoom, target, rotX, rotY, distance });
+  } = usePolyCamera({
+    zoom,
+    target,
+    rotX,
+    rotY,
+    distance,
+    projection: "orthographic",
+    perspectiveStyle: "none",
+  });
 
   const contextValue = useMemo(
     () => ({ store, cameraRef, sceneElRef, cameraElRef, applyTransformDirect }),
@@ -55,6 +63,14 @@ function PolyOrthographicCameraInner({
         ref={cameraElRef}
         className={`polycss-camera${className ? ` ${className}` : ""}`}
         style={cameraStyle}
+        data-polycss-camera-projection="orthographic"
+        data-polycss-camera-perspective="none"
+        data-polycss-camera-applied-perspective="1000000px"
+        data-polycss-camera-zoom={cameraRef.current.state.zoom}
+        data-polycss-camera-distance={cameraRef.current.state.distance}
+        data-polycss-camera-rot-x={cameraRef.current.state.rotX}
+        data-polycss-camera-rot-y={cameraRef.current.state.rotY}
+        data-polycss-camera-target={cameraRef.current.state.target.join(",")}
       >
         {children}
       </div>

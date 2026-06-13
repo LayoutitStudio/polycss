@@ -9,7 +9,11 @@ import { inject, type ComputedRef, type InjectionKey, type Ref } from "vue";
 import type {
   PolyAmbientLight,
   PolyDirectionalLight,
+  PolyTextureBackend,
+  PolyTextureImageRendering,
+  PolyTextureLeafSizing,
   PolyTextureLightingMode,
+  PolyTextureProjection,
   Polygon,
   Vec3,
 } from "@layoutit/polycss-core";
@@ -64,6 +68,10 @@ export interface PolySceneContextValue {
   ambientLight?: PolyAmbientLight;
   strategies?: PolyRenderStrategiesOption;
   seamBleed?: PolySeamBleed;
+  textureLeafSizing?: PolyTextureLeafSizing;
+  textureImageRendering?: PolyTextureImageRendering;
+  textureBackend?: PolyTextureBackend;
+  textureProjection?: PolyTextureProjection;
   shadow?: PolyShadowOptions;
   shadowRegistry?: PolyShadowRegistry;
   receiverRegistry?: PolyReceiverRegistry;

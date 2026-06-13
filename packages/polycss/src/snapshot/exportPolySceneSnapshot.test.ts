@@ -142,6 +142,24 @@ describe("exportPolySceneSnapshot", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it("materializes non-square atlas leaf dimensions", async () => {
+    const fetchMock = vi.fn(async () =>
+      new Response(new Blob(["atlas"], { type: "image/png" })),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const { leaf } = makeRenderedScene(
+      'background: url("blob:atlas") 0 0 / 96px 48px no-repeat; --polycss-atlas-size: 128px; --polycss-atlas-width: 96px; --polycss-atlas-height: 48px; --polycss-atlas-leaf-sizing: local;',
+    );
+
+    const html = await exportPolySceneSnapshot(leaf);
+
+    expect(html).toContain("width: 96px");
+    expect(html).toContain("height: 48px");
+    expect(html).not.toContain("--polycss-atlas-width");
+    expect(html).not.toContain("--polycss-atlas-height");
+    expect(html).not.toContain("--polycss-atlas-leaf-sizing");
+  });
+
   it("falls back to XHR when fetch() fails for a blob URL (WebKit)", async () => {
     const fetchMock = vi.fn(async () => {
       throw new TypeError("Load failed");

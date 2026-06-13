@@ -73,4 +73,4 @@ export { renderTextureTrianglePoly } from "./triangle";
 export { renderTextureBorderShapePoly } from "./borderShape";
 export { renderTextureProjectiveSolidPoly } from "./projectiveSolid";
 export { renderTextureCornerShapeSolidPoly } from "./cornerShapeSolid";
-export { renderTextureAtlasPoly } from "./atlasPoly";
+export { renderTextureAtlasPoly, renderTextureImagePoly } from "./atlasPoly";

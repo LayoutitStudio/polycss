@@ -361,6 +361,8 @@ describe("createPolyScene", () => {
       scene.camera.update({ rotY: 90 });
       scene.applyCamera();
       expect(scene.camera.state.rotY).toBe(90);
+      const cameraEl = host.querySelector(".polycss-camera") as HTMLElement;
+      expect(cameraEl.dataset.polycssCameraRotY).toBe("90");
     });
 
     it("creates a .polycss-scene child under the host", () => {
@@ -391,6 +393,10 @@ describe("createPolyScene", () => {
       const transform = sceneEl.style.transform;
       // Perspective lives on the .polycss-camera wrapper, not on .polycss-scene.
       expect(cameraEl.style.perspective).toBe("1500px");
+      expect(cameraEl.dataset.polycssCameraProjection).toBe("perspective");
+      expect(cameraEl.dataset.polycssCameraPerspective).toBe("1500px");
+      expect(cameraEl.dataset.polycssCameraAppliedPerspective).toBe("1500px");
+      expect(cameraEl.dataset.polycssCameraZoom).toBe("2");
       // User zoom semantic: "px per world unit" (Three.js OrthographicCamera.zoom
       // shape). Renderer geometry already lives at ×DEFAULT_TILE CSS px, so the
       // scene CSS scale is `zoom / DEFAULT_TILE`. zoom=2 → scale(0.04).
@@ -429,6 +435,9 @@ describe("createPolyScene", () => {
       // is visually orthographic but avoids the broken fast path.
       // Perspective lives on the .polycss-camera wrapper.
       expect(cameraEl.style.perspective).toBe("1000000px");
+      expect(cameraEl.dataset.polycssCameraProjection).toBe("orthographic");
+      expect(cameraEl.dataset.polycssCameraPerspective).toBe("none");
+      expect(cameraEl.dataset.polycssCameraAppliedPerspective).toBe("1000000px");
     });
 
     it("injects base styles into the document", () => {
@@ -440,8 +449,8 @@ describe("createPolyScene", () => {
       expect(styleEl?.textContent).toContain("background-repeat: no-repeat");
       expect(styleEl?.textContent).toContain("width: 64px;");
       expect(styleEl?.textContent).toContain("height: 64px;");
-      expect(styleEl?.textContent).toContain("width: var(--polycss-atlas-size, 64px);");
-      expect(styleEl?.textContent).toContain("height: var(--polycss-atlas-size, 64px);");
+      expect(styleEl?.textContent).toContain("width: var(--polycss-atlas-width, var(--polycss-atlas-size, 64px));");
+      expect(styleEl?.textContent).toContain("height: var(--polycss-atlas-height, var(--polycss-atlas-size, 64px));");
       expect(styleEl?.textContent).toContain("border-width: 0 16px 32px 16px;");
       expect(styleEl?.textContent).toContain("width: 0;");
       expect(styleEl?.textContent).toContain("height: 0;");
@@ -461,6 +470,21 @@ describe("createPolyScene", () => {
       expect(host.querySelector(".polycss-poly-textured")).toBeNull();
       expect(host.querySelector("svg")).toBeNull();
       expect(handle.polygons.length).toBe(2);
+    });
+
+    it("exposes mesh and scene texture readiness promises", async () => {
+      scene = makeScene(host, { textureBackend: "image" });
+      const handle = scene.add(makeParseResult([{
+        vertices: topQuad().vertices,
+        textureImageSource: {
+          url: "https://example.com/source.png",
+          width: 64,
+          height: 32,
+        },
+      }]), { merge: false });
+
+      await expect(handle.whenTexturesReady()).resolves.toBeUndefined();
+      await expect(scene.whenTexturesReady()).resolves.toBeUndefined();
     });
 
     it("resolves polygon leaves back to their owning mesh", () => {
@@ -1507,6 +1531,20 @@ describe("createPolyScene", () => {
       // `strategies` into every camera-update setOptions call.
       scene.setOptions({ strategies: { disable: ["u"] } });
       expect(host.querySelector("i, s")).toBe(firstLeaf);
+    });
+
+    it("re-renders textured meshes when textureLeafSizing changes via setOptions", () => {
+      scene = makeScene(host);
+      scene.add(makeParseResult([texturedTriangle()]), { merge: false });
+      const firstLeaf = host.querySelector("s") as HTMLElement;
+      expect(firstLeaf.style.getPropertyValue("--polycss-atlas-width")).toBe("128px");
+
+      scene.setOptions({ textureLeafSizing: "local" });
+      const nextLeaf = host.querySelector("s") as HTMLElement;
+      expect(nextLeaf).not.toBe(firstLeaf);
+      expect(nextLeaf.style.getPropertyValue("--polycss-atlas-width")).toBe("50px");
+      expect(nextLeaf.style.getPropertyValue("--polycss-atlas-height")).toBe("50px");
+      expect(nextLeaf.getAttribute("data-polycss-texture-leaf-sizing")).toBe("local");
     });
 
     it("mounts only camera-facing voxel leaves by default", () => {

@@ -38,6 +38,9 @@ describe("PolyPerspectiveCamera", () => {
     );
     const camera = container.querySelector(".polycss-camera") as HTMLElement;
     expect(camera.style.perspective).toBe("3000px");
+    expect(camera.dataset.polycssCameraProjection).toBe("perspective");
+    expect(camera.dataset.polycssCameraPerspective).toBe("3000px");
+    expect(camera.dataset.polycssCameraAppliedPerspective).toBe("3000px");
   });
 
   it("renders children", () => {

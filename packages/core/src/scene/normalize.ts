@@ -53,6 +53,27 @@ function isDevMode(): boolean {
   return false;
 }
 
+function cloneImageSource(source: Polygon["textureImageSource"]): Polygon["textureImageSource"] {
+  if (!source) return undefined;
+  return {
+    ...source,
+    sourceRect: source.sourceRect ? { ...source.sourceRect } : undefined,
+  };
+}
+
+function clonePresentation(presentation: Polygon["texturePresentation"]): Polygon["texturePresentation"] {
+  return presentation ? { ...presentation } : undefined;
+}
+
+function cloneMaterial(material: Polygon["material"]): Polygon["material"] {
+  if (!material) return undefined;
+  return {
+    ...material,
+    imageSource: cloneImageSource(material.imageSource),
+    presentation: clonePresentation(material.presentation),
+  };
+}
+
 export function normalizePolygons(input: Polygon[]): NormalizeResult {
   const out: Polygon[] = [];
   const warnings: string[] = [];
@@ -173,7 +194,10 @@ function sanitizeFields(p: Polygon, originalIndex: number, warnings: string[]): 
   const out: Polygon = { vertices: p.vertices };
 
   // Texture: empty string treated as unset (no warning per spec).
-  let texture = p.texture;
+  const material = cloneMaterial(p.material);
+  const textureImageSource = cloneImageSource(p.textureImageSource);
+  const texturePresentation = clonePresentation(p.texturePresentation);
+  let texture = material?.texture ?? p.texture ?? textureImageSource?.url ?? material?.imageSource?.url;
   if (typeof texture === "string" && texture === "") {
     texture = undefined;
   }
@@ -204,6 +228,15 @@ function sanitizeFields(p: Polygon, originalIndex: number, warnings: string[]): 
     if (p.textureAlphaMode) {
       out.textureAlphaMode = p.textureAlphaMode;
     }
+  }
+  if (material) out.material = material;
+  if (textureImageSource) out.textureImageSource = textureImageSource;
+  if (texturePresentation) out.texturePresentation = texturePresentation;
+  if (Array.isArray(p.textureTriangles) && p.textureTriangles.length > 0) {
+    out.textureTriangles = p.textureTriangles.map((triangle) => ({
+      vertices: triangle.vertices.map((vertex) => vertex.slice() as Vec3) as [Vec3, Vec3, Vec3],
+      uvs: triangle.uvs.map((uv) => uv.slice() as Vec2) as [Vec2, Vec2, Vec2],
+    }));
   }
 
   if (p.doubleSided === true) {

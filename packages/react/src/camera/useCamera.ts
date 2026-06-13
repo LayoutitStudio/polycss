@@ -1,6 +1,10 @@
 import { useRef, useCallback, useEffect, useMemo } from "react";
-import { buildPolySceneTransform, createIsometricCamera } from "@layoutit/polycss-core";
-import type { CameraState, CameraHandle, Vec3 } from "@layoutit/polycss-core";
+import {
+  buildPolyCameraSceneTransform,
+  capturePolyCameraSnapshot,
+  createIsometricCamera,
+} from "@layoutit/polycss-core";
+import type { CameraState, CameraHandle, PolyCameraProjection, Vec3 } from "@layoutit/polycss-core";
 import { createSceneStore, type SceneStore } from "../store/sceneStore";
 
 export interface UseCameraOptions {
@@ -9,6 +13,8 @@ export interface UseCameraOptions {
   rotX?: number;
   rotY?: number;
   distance?: number;
+  projection?: PolyCameraProjection;
+  perspectiveStyle?: string;
 }
 
 export interface UseCameraResult {
@@ -28,6 +34,24 @@ export interface UseCameraResult {
    * components like <PolyOrbitControls> can call it after mutating state.
    */
   applyTransformDirect: () => void;
+}
+
+function writeCameraSnapshotAttrs(
+  el: HTMLElement | null,
+  camera: CameraHandle,
+  projection: PolyCameraProjection | undefined,
+  perspectiveStyle: string | undefined,
+): void {
+  if (!el) return;
+  const snapshot = capturePolyCameraSnapshot(camera, { projection, perspectiveStyle });
+  el.dataset.polycssCameraProjection = snapshot.projection;
+  el.dataset.polycssCameraPerspective = snapshot.perspectiveStyle;
+  el.dataset.polycssCameraAppliedPerspective = snapshot.appliedPerspectiveStyle;
+  el.dataset.polycssCameraZoom = String(snapshot.state.zoom);
+  el.dataset.polycssCameraDistance = String(snapshot.state.distance);
+  el.dataset.polycssCameraRotX = String(snapshot.state.rotX);
+  el.dataset.polycssCameraRotY = String(snapshot.state.rotY);
+  el.dataset.polycssCameraTarget = snapshot.state.target.join(",");
 }
 
 export function usePolyCamera(options: UseCameraOptions): UseCameraResult {
@@ -66,16 +90,25 @@ export function usePolyCamera(options: UseCameraOptions): UseCameraResult {
       // camera continues to orbit the bbox center even during prop-driven moves.
       const el = sceneElRef.current;
       if (el) {
-        el.style.transform = buildPolySceneTransform({
-          ...handle.state,
+        el.style.transform = buildPolyCameraSceneTransform(handle.state, {
           autoCenterOffset: store.getState().autoCenterOffset,
         });
       }
       store.updateCameraFromRef(handle);
       store.notifyAll(); // props changed — always notify
     }
+    writeCameraSnapshotAttrs(cameraElRef.current, handle, options.projection, options.perspectiveStyle);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [options.zoom, options.target, options.rotX, options.rotY, options.distance, store]);
+  }, [
+    options.zoom,
+    options.target,
+    options.rotX,
+    options.rotY,
+    options.distance,
+    options.projection,
+    options.perspectiveStyle,
+    store,
+  ]);
 
   // Apply camera transform directly to scene element (bypasses React).
   // Reads autoCenterOffset from the store so orbit/pan always pivots around
@@ -84,11 +117,11 @@ export function usePolyCamera(options: UseCameraOptions): UseCameraResult {
     const el = sceneElRef.current;
     if (!el) return;
     const handle = handleRef.current!;
-    el.style.transform = buildPolySceneTransform({
-      ...handle.state,
+    el.style.transform = buildPolyCameraSceneTransform(handle.state, {
       autoCenterOffset: store.getState().autoCenterOffset,
     });
-  }, [store]);
+    writeCameraSnapshotAttrs(cameraElRef.current, handle, options.projection, options.perspectiveStyle);
+  }, [store, options.projection, options.perspectiveStyle]);
 
   return {
     store,

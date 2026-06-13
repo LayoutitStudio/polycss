@@ -11,13 +11,27 @@ import {
   h,
 } from "vue";
 import type { CSSProperties, PropType } from "vue";
-import type { PolyDirectionalLight, PolyTextureLightingMode, Vec2, Vec3, PolyMaterial } from "@layoutit/polycss-core";
+import type {
+  PolyDirectionalLight,
+  PolyTextureBackend,
+  PolyTextureImageRendering,
+  PolyTextureImageSource,
+  PolyTextureLeafSizing,
+  PolyTextureLightingMode,
+  PolyTextureProjection,
+  PolyTexturePresentation,
+  Vec2,
+  Vec3,
+  PolyMaterial,
+} from "@layoutit/polycss-core";
+import { resolvePolyTextureLeafGeometry } from "@layoutit/polycss-core";
 import {
   computeTextureAtlasPlan,
   isProjectiveQuadPlan,
   isSolidTrianglePlan,
   renderTextureBorderShapePoly,
   renderTextureAtlasPoly,
+  renderTextureImagePoly,
   renderTextureProjectiveSolidPoly,
   renderTextureTrianglePoly,
   useTextureAtlas,
@@ -63,6 +77,7 @@ function renderMaterialDirectPoly({
   style: styleProp,
   domAttrs,
   pointerEvents = "auto",
+  imageRendering,
 }: {
   plan: TextureAtlasPlan;
   material: PolyMaterial;
@@ -71,6 +86,7 @@ function renderMaterialDirectPoly({
   style?: CSSProperties;
   domAttrs?: Record<string, unknown>;
   pointerEvents?: "auto" | "none";
+  imageRendering?: PolyTextureImageRendering;
 }) {
   const { u0, u1, v0, v1 } = uvRect;
   const du = u1 - u0;
@@ -86,6 +102,8 @@ function renderMaterialDirectPoly({
     backgroundImage: `url(${material.texture})`,
     backgroundSize: `${formatCssLength(sourceW)} ${formatCssLength(sourceH)}`,
     backgroundPosition: `${formatCssLength(-offsetX)} ${formatCssLength(-offsetY)}`,
+    backgroundRepeat: "no-repeat",
+    imageRendering: imageRendering === "pixelated" ? "pixelated" : undefined,
     pointerEvents: pointerEvents === "none" ? "none" : undefined,
     ...styleProp,
   };
@@ -100,6 +118,14 @@ function renderMaterialDirectPoly({
   return h("i", {
     class: elementClassName,
     style,
+    "data-poly-index": String(plan.index),
+    "data-polycss-leaf": "polygon",
+    "data-polycss-texture-backend": "image",
+    "data-polycss-texture-ready": "true",
+    "data-polycss-texture-image-rendering": imageRendering ?? "auto",
+    "data-polycss-texture-projection": "affine",
+    "data-polycss-texture-lighting": "source",
+    "data-polycss-double-sided": plan.polygon.doubleSided ? "true" : undefined,
     ...dataAttrs,
     ...domAttrs,
   });
@@ -111,6 +137,10 @@ export interface PolyContext {
   directionalLight?: PolyDirectionalLight;
   textureLighting?: PolyTextureLightingMode;
   textureQuality?: TextureQuality;
+  textureLeafSizing?: PolyTextureLeafSizing;
+  textureImageRendering?: PolyTextureImageRendering;
+  textureBackend?: PolyTextureBackend;
+  textureProjection?: PolyTextureProjection;
   debugShowBackfaces?: boolean;
   [key: string]: unknown;
 }
@@ -119,8 +149,11 @@ export interface PolyProps {
   vertices: Vec3[];
   color?: string;
   texture?: string;
+  textureImageSource?: PolyTextureImageSource;
+  texturePresentation?: PolyTexturePresentation;
   uvs?: Vec2[];
   data?: Record<string, string | number | boolean>;
+  doubleSided?: boolean;
   /** Shared material. When set AND the polygon's UVs form an axis-aligned
    *  rectangle, renders via `background-image` directly — no per-polygon
    *  canvas rasterization. Falls back to the atlas path otherwise. */
@@ -133,6 +166,14 @@ export interface PolyProps {
   /** Atlas bitmap budget and CSS sprite size. `"auto"` (default) uses a
    *  device-appropriate memory budget and desktop/mobile sprite sizing. */
   textureQuality?: TextureQuality;
+  /** Atlas leaf CSS primitive sizing. Defaults to scene context, then canonical. */
+  textureLeafSizing?: PolyTextureLeafSizing;
+  /** Default image filtering for atlas and direct image texture leaves. */
+  textureImageRendering?: PolyTextureImageRendering;
+  /** Default texture backend request. Defaults to scene context, then "auto". */
+  textureBackend?: PolyTextureBackend;
+  /** Default texture projection request. Defaults to scene context, then "affine". */
+  textureProjection?: PolyTextureProjection;
   baseColor?: string;
   pointerEvents?: "auto" | "none";
 }
@@ -144,8 +185,11 @@ export const Poly = defineComponent({
     vertices: { type: Array as PropType<Vec3[]>, required: true },
     color: { type: String },
     texture: { type: String },
+    textureImageSource: { type: Object as PropType<PolyTextureImageSource>, default: undefined },
+    texturePresentation: { type: Object as PropType<PolyTexturePresentation>, default: undefined },
     uvs: { type: Array as PropType<Vec2[]>, default: undefined },
     data: { type: Object as PropType<Record<string, string | number | boolean>>, default: undefined },
+    doubleSided: { type: Boolean, default: undefined },
     material: { type: Object as PropType<PolyMaterial>, default: undefined },
     position: { type: Array as unknown as PropType<Vec3>, default: undefined },
     scale: { type: [Number, Array] as unknown as PropType<number | Vec3>, default: undefined },
@@ -155,6 +199,10 @@ export const Poly = defineComponent({
       default: undefined,
     },
     textureQuality: { type: [Number, String] as PropType<TextureQuality>, default: undefined },
+    textureLeafSizing: { type: String as PropType<PolyTextureLeafSizing>, default: undefined },
+    textureImageRendering: { type: String as PropType<PolyTextureImageRendering>, default: undefined },
+    textureBackend: { type: String as PropType<PolyTextureBackend>, default: undefined },
+    textureProjection: { type: String as PropType<PolyTextureProjection>, default: undefined },
     context: {
       type: Object as PropType<PolyContext>,
       default: undefined,
@@ -170,6 +218,10 @@ export const Poly = defineComponent({
       () => props.textureLighting ?? props.context?.textureLighting ?? "baked",
     );
     const atlasTextureQuality = computed(() => props.textureQuality ?? props.context?.textureQuality);
+    const atlasTextureLeafSizing = computed(() => props.textureLeafSizing ?? props.context?.textureLeafSizing);
+    const atlasTextureImageRendering = computed(() => props.textureImageRendering ?? props.context?.textureImageRendering);
+    const atlasTextureBackend = computed(() => props.textureBackend ?? props.context?.textureBackend);
+    const atlasTextureProjection = computed(() => props.textureProjection ?? props.context?.textureProjection);
 
     // material.texture takes precedence over inline texture.
     const effectiveTexture = computed(() => props.material?.texture ?? props.texture);
@@ -185,8 +237,12 @@ export const Poly = defineComponent({
           vertices: props.vertices,
           color: props.baseColor ?? props.color,
           texture: effectiveTexture.value,
+          textureImageSource: props.textureImageSource,
+          texturePresentation: props.texturePresentation,
           uvs: props.uvs,
           data: props.data,
+          doubleSided: props.doubleSided,
+          material: props.material,
         },
         0,
         {
@@ -200,7 +256,15 @@ export const Poly = defineComponent({
     const textureAtlasPlans = computed<Array<TextureAtlasPlan | null>>(() =>
       materialUvRect.value ? [] : [atlasPlan.value],
     );
-    const textureAtlas = useTextureAtlas(textureAtlasPlans, atlasTextureLighting, atlasTextureQuality);
+    const textureAtlas = useTextureAtlas(
+      textureAtlasPlans,
+      atlasTextureLighting,
+      atlasTextureQuality,
+      atlasTextureLeafSizing,
+      atlasTextureBackend,
+      atlasTextureImageRendering,
+      atlasTextureProjection,
+    );
 
     return () => {
       const plan = atlasPlan.value;
@@ -249,18 +313,39 @@ export const Poly = defineComponent({
           style: forwardedAttrs.style as CSSProperties | undefined,
           domAttrs: forwardedDomAttrs,
           pointerEvents: props.pointerEvents ?? "auto",
+          imageRendering: atlasTextureImageRendering.value,
         });
       } else if (atlasEntry) {
         front = renderTextureAtlasPoly({
           entry: atlasEntry,
           page: textureAtlas.pages.value[atlasEntry.pageIndex],
           textureLighting: atlasTextureLighting.value,
+          textureImageRendering: atlasTextureImageRendering.value,
           className: (forwardedAttrs.class as string) ?? undefined,
           style: forwardedAttrs.style as CSSProperties | undefined,
           domAttrs: forwardedDomAttrs,
           pointerEvents: props.pointerEvents ?? "auto",
         });
-      } else if (plan && !plan.texture) {
+      } else {
+        const imageGeometry = plan
+          ? resolvePolyTextureLeafGeometry(plan, {
+              imageRendering: atlasTextureImageRendering.value,
+              backend: atlasTextureBackend.value,
+              projection: atlasTextureProjection.value,
+            })
+          : null;
+        if (plan && imageGeometry) {
+          front = renderTextureImagePoly({
+            plan,
+            geometry: imageGeometry,
+            className: (forwardedAttrs.class as string) ?? undefined,
+            style: forwardedAttrs.style as CSSProperties | undefined,
+            domAttrs: forwardedDomAttrs,
+            pointerEvents: props.pointerEvents ?? "auto",
+          });
+        }
+      }
+      if (!front && plan && !plan.texture) {
         front = isSolidTrianglePlan(plan)
           ? renderTextureTrianglePoly({
               entry: plan,

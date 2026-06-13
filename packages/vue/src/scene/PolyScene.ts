@@ -24,10 +24,19 @@ import type {
   Polygon,
   PolyDirectionalLight,
   PolyAmbientLight,
+  PolyTextureBackend,
+  PolyTextureImageRendering,
+  PolyTextureLeafSizing,
   PolyTextureLightingMode,
+  PolyTextureProjection,
   Vec3,
 } from "@layoutit/polycss-core";
-import { DEFAULT_SEAM_BLEED, parseHexColor, worldDirectionToCss } from "@layoutit/polycss-core";
+import {
+  DEFAULT_SEAM_BLEED,
+  parseHexColor,
+  resolvePolyTextureLeafGeometry,
+  worldDirectionToCss,
+} from "@layoutit/polycss-core";
 import { PolyCameraContextKey } from "../camera";
 import { usePolySceneContext } from "./useSceneContext";
 import { injectPolyBaseStyles } from "../styles";
@@ -49,6 +58,7 @@ import {
   type PolyRenderStrategiesOption,
   renderTextureBorderShapePoly,
   renderTextureAtlasPoly,
+  renderTextureImagePoly,
   renderTextureProjectiveSolidPoly,
   renderTextureTrianglePoly,
   useTextureAtlas,
@@ -69,6 +79,14 @@ export interface PolySceneProps {
    *  desktop/mobile sprite sizing. Numeric values 0.1..1 force an explicit
    *  raster scale and the 64px sprite. */
   textureQuality?: TextureQuality;
+  /** Atlas leaf CSS primitive sizing. Defaults to canonical browser-fast sizing. */
+  textureLeafSizing?: PolyTextureLeafSizing;
+  /** Default image filtering for atlas and direct image texture leaves. */
+  textureImageRendering?: PolyTextureImageRendering;
+  /** Default texture backend request. Defaults to "auto". */
+  textureBackend?: PolyTextureBackend;
+  /** Default texture projection request. Defaults to "affine". */
+  textureProjection?: PolyTextureProjection;
   /** Solid seam overscan. `"auto"` computes a fitted per-edge amount from the polygon plan. */
   seamBleed?: PolySeamBleed;
   /** Opt out of specific render strategies. Disabled strategies fall through the chain (b→i→s, u→i→s, i→s). `<s>` cannot be disabled. */
@@ -120,6 +138,10 @@ export const PolyScene = defineComponent({
       default: "baked",
     },
     textureQuality: { type: [Number, String] as PropType<TextureQuality>, default: undefined },
+    textureLeafSizing: { type: String as PropType<PolyTextureLeafSizing>, default: undefined },
+    textureImageRendering: { type: String as PropType<PolyTextureImageRendering>, default: undefined },
+    textureBackend: { type: String as PropType<PolyTextureBackend>, default: undefined },
+    textureProjection: { type: String as PropType<PolyTextureProjection>, default: undefined },
     seamBleed: { type: [Number, String] as PropType<PolySeamBleed>, default: undefined },
     strategies: { type: Object as PropType<PolyRenderStrategiesOption>, default: undefined },
     autoCenter: { type: Boolean, default: false },
@@ -198,6 +220,10 @@ export const PolyScene = defineComponent({
       ambientLight: props.ambientLight,
       strategies: props.strategies,
       seamBleed: props.seamBleed ?? DEFAULT_SEAM_BLEED,
+      textureLeafSizing: props.textureLeafSizing,
+      textureImageRendering: props.textureImageRendering,
+      textureBackend: props.textureBackend,
+      textureProjection: props.textureProjection,
       shadow: props.shadow,
       shadowRegistry,
       receiverRegistry,
@@ -275,6 +301,8 @@ export const PolyScene = defineComponent({
         directionalLight: props.directionalLight,
         textureLighting: props.textureLighting,
         textureQuality: props.textureQuality,
+        textureLeafSizing: props.textureLeafSizing,
+        textureImageRendering: props.textureImageRendering,
       };
     });
 
@@ -314,8 +342,21 @@ export const PolyScene = defineComponent({
     });
     const atlasTextureLighting = computed<PolyTextureLightingMode>(() => props.textureLighting ?? "baked");
     const atlasTextureQuality = computed(() => props.textureQuality);
+    const atlasTextureLeafSizing = computed(() => props.textureLeafSizing);
+    const atlasTextureBackend = computed(() => props.textureBackend);
+    const atlasTextureImageRendering = computed(() => props.textureImageRendering);
+    const atlasTextureProjection = computed(() => props.textureProjection);
     const atlasStrategies = computed(() => props.strategies);
-    const textureAtlas = useTextureAtlas(textureAtlasPlans, atlasTextureLighting, atlasTextureQuality, atlasStrategies);
+    const textureAtlas = useTextureAtlas(
+      textureAtlasPlans,
+      atlasTextureLighting,
+      atlasTextureQuality,
+      atlasTextureLeafSizing,
+      atlasTextureBackend,
+      atlasTextureImageRendering,
+      atlasTextureProjection,
+      atlasStrategies,
+    );
 
     // Dynamic mode plumbing: emit normalized light direction + light/ambient
     // color/intensity as CSS custom properties on the scene root. They cascade
@@ -446,9 +487,23 @@ export const PolyScene = defineComponent({
             entry,
             page: textureAtlas.pages.value[entry.pageIndex],
             textureLighting: ctx.textureLighting ?? "baked",
+            textureImageRendering: props.textureImageRendering,
           });
         }
         const plan = textureAtlasPlans.value[index];
+        const imageGeometry = plan
+          ? resolvePolyTextureLeafGeometry(plan, {
+              imageRendering: props.textureImageRendering,
+              backend: props.textureBackend,
+              projection: props.textureProjection,
+            })
+          : null;
+        if (plan && imageGeometry) {
+          return renderTextureImagePoly({
+            plan,
+            geometry: imageGeometry,
+          });
+        }
         if (!plan || plan.texture) return null;
         if (textureAtlas.useStableTriangle.value && isSolidTrianglePlan(plan)) {
           return renderTextureTrianglePoly({

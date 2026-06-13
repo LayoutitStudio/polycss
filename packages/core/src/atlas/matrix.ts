@@ -185,18 +185,19 @@ export function formatSolidQuadMatrix(entry: TextureAtlasPlan): string {
 
 export function formatAtlasMatrix(
   entry: TextureAtlasPlan,
-  atlasCanonicalSize: number,
+  atlasLeafWidth: number,
+  atlasLeafHeight = atlasLeafWidth,
 ): string {
   const values = entry.matrix.split(",").map((value) => Number(value));
   if (values.length !== 16 || values.some((value) => !Number.isFinite(value))) {
     return entry.canonicalMatrix;
   }
-  values[0] *= entry.canvasW / atlasCanonicalSize;
-  values[1] *= entry.canvasW / atlasCanonicalSize;
-  values[2] *= entry.canvasW / atlasCanonicalSize;
-  values[4] *= entry.canvasH / atlasCanonicalSize;
-  values[5] *= entry.canvasH / atlasCanonicalSize;
-  values[6] *= entry.canvasH / atlasCanonicalSize;
+  values[0] *= entry.canvasW / atlasLeafWidth;
+  values[1] *= entry.canvasW / atlasLeafWidth;
+  values[2] *= entry.canvasW / atlasLeafWidth;
+  values[4] *= entry.canvasH / atlasLeafHeight;
+  values[5] *= entry.canvasH / atlasLeafHeight;
+  values[6] *= entry.canvasH / atlasLeafHeight;
   return formatMatrix3dValues(values);
 }
 
