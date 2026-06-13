@@ -1,6 +1,6 @@
 {
   "name": "@layoutit/polycss",
-  "version": "0.2.5",
+  "version": "0.2.6",
   "description": "PolyCSS vanilla / custom-elements + imperative API. Renders OBJ / STL / glTF / GLB mesh polygons as DOM via CSS matrix3d.",
   "type": "module",
   "main": "dist/index.cjs",
