@@ -4,9 +4,19 @@ import type {
   Polygon,
   PolyDirectionalLight,
   PolyAmbientLight,
+  PolyTextureBackend,
+  PolyTextureImageRendering,
+  PolyTextureLeafSizing,
   PolyTextureLightingMode,
+  PolyTextureProjection,
 } from "@layoutit/polycss-core";
-import { BASE_TILE, DEFAULT_SEAM_BLEED, parseHexColor, worldDirectionToCss } from "@layoutit/polycss-core";
+import {
+  BASE_TILE,
+  DEFAULT_SEAM_BLEED,
+  parseHexColor,
+  resolvePolyTextureLeafGeometry,
+  worldDirectionToCss,
+} from "@layoutit/polycss-core";
 import type { ShadowCasterRegistration, ShadowOptions } from "./sceneContext";
 import { useCameraContext } from "../camera/context";
 import { usePolySceneContext } from "./useSceneContext";
@@ -23,6 +33,7 @@ import {
   type PolyRenderStrategiesOption,
   TextureBorderShapePoly,
   TextureAtlasPoly,
+  TextureImagePoly,
   TextureProjectiveSolidPoly,
   TextureTrianglePoly,
   useTextureAtlas,
@@ -59,6 +70,14 @@ export interface PolySceneProps extends TransformProps {
    *  desktop/mobile sprite sizing. Numeric values 0.1..1 force an explicit
    *  raster scale and the 64px sprite. */
   textureQuality?: TextureQuality;
+  /** Atlas leaf CSS primitive sizing. Defaults to canonical browser-fast sizing. */
+  textureLeafSizing?: PolyTextureLeafSizing;
+  /** Default image filtering for atlas and direct image texture leaves. */
+  textureImageRendering?: PolyTextureImageRendering;
+  /** Default texture backend request. Defaults to "auto". */
+  textureBackend?: PolyTextureBackend;
+  /** Default texture projection request. Defaults to "affine". */
+  textureProjection?: PolyTextureProjection;
   /** Solid seam overscan. `"auto"` computes a fitted per-edge amount from the polygon plan. */
   seamBleed?: PolySeamBleed;
   /**
@@ -105,6 +124,10 @@ function PolySceneInner({
   ambientLight,
   textureLighting = "baked",
   textureQuality,
+  textureLeafSizing,
+  textureImageRendering,
+  textureBackend,
+  textureProjection,
   seamBleed = DEFAULT_SEAM_BLEED,
   strategies,
   autoCenter = false,
@@ -255,7 +278,16 @@ function PolySceneInner({
     },
     [polygons, polyContext, seamBleed, directionalForAtlas, ambientForAtlas],
   );
-  const textureAtlas = useTextureAtlas(textureAtlasPlans, textureLighting, textureQuality, strategies);
+  const textureAtlas = useTextureAtlas(
+    textureAtlasPlans,
+    textureLighting,
+    textureQuality,
+    textureLeafSizing,
+    textureBackend,
+    textureImageRendering,
+    textureProjection,
+    strategies,
+  );
 
   // Dynamic mode plumbing: emit normalized light direction + light/ambient
   // color/intensity as CSS custom properties on the scene root. They
@@ -400,11 +432,28 @@ function PolySceneInner({
           entry={entry}
           page={textureAtlas.pages[entry.pageIndex]}
           textureLighting={textureLighting}
+          textureImageRendering={textureImageRendering}
         />
       );
     }
 
     const plan = textureAtlasPlans[index];
+    const imageGeometry = plan
+      ? resolvePolyTextureLeafGeometry(plan, {
+          imageRendering: textureImageRendering,
+          backend: textureBackend,
+          projection: textureProjection,
+        })
+      : null;
+    if (plan && imageGeometry) {
+      return (
+        <TextureImagePoly
+          key={plan.index}
+          plan={plan}
+          geometry={imageGeometry}
+        />
+      );
+    }
     if (!plan || plan.texture) return null;
     // Solid triangles go through <u> only when that strategy is active.
     // When "u" is disabled they fall to <i> (border-shape, if supported) or
@@ -439,6 +488,10 @@ function PolySceneInner({
       ambientLight,
       strategies,
       seamBleed,
+      textureLeafSizing,
+      textureImageRendering,
+      textureBackend,
+      textureProjection,
       shadow,
       registerShadowCaster,
       registerShadowReceiver,
@@ -448,7 +501,7 @@ function PolySceneInner({
       groundCssZ,
       sceneEl,
     }),
-    [textureLighting, directionalLight, ambientLight, strategies, seamBleed, shadow, registerShadowCaster, registerShadowReceiver, shadowCastersVersion, hasShadowReceiver, groundCssZ, sceneEl],
+    [textureLighting, directionalLight, ambientLight, strategies, seamBleed, textureLeafSizing, textureImageRendering, textureBackend, textureProjection, shadow, registerShadowCaster, registerShadowReceiver, shadowCastersVersion, hasShadowReceiver, groundCssZ, sceneEl],
   );
 
   return (

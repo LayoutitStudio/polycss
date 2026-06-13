@@ -11,6 +11,13 @@ export type {
   PolyTextureAlphaMode,
   PolyTextureWrap,
   PolyTextureWrapMode,
+  PolyTextureLeafSizing,
+  PolyTextureBackend,
+  PolyTextureImageRendering,
+  PolyTextureImageLighting,
+  PolyTextureProjection,
+  PolyTextureImageSource,
+  PolyTexturePresentation,
   Polygon,
   PolyMaterial,
   PolyDirectionalLight,
@@ -57,6 +64,10 @@ export type { Quat } from "./math/quaternion";
 export {
   createIsometricCamera,
   normalizeInvertMultiplier,
+  buildPolyCameraSceneTransform,
+  polyCameraTargetToCss,
+  resolvePolyCameraAppliedPerspectiveStyle,
+  capturePolyCameraSnapshot,
   DEFAULT_CAMERA_STATE,
   BASE_TILE,
 } from "./camera/camera";
@@ -66,6 +77,11 @@ export type {
   AutoRotateOption,
   AutoRotateConfig,
   CameraStyleInput,
+  PolyCameraSceneTransformOptions,
+  PolyCameraProjection,
+  PolyCameraSnapshot,
+  PolyCameraSnapshotOptions,
+  PolyCameraSnapshotSource,
 } from "./camera/camera";
 export { screenToWorldRay, screenToWorldOnSphere } from "./camera/unproject";
 export type { ScreenToWorldOptions } from "./camera/unproject";
@@ -174,18 +190,18 @@ export {
   RECEIVER_OFFSET_TOL,
   RECEIVER_OUTLINE_EXPAND,
   cssDistanceToWorld,
-  cssDistanceToWorld as polyCssDistanceToWorld,
   cssPositionToWorld,
-  cssPositionToWorld as polyCssPositionToWorld,
+  polyCssDistanceToWorld,
+  polyCssPositionToWorld,
   worldDistanceToCss,
-  worldDistanceToCss as worldDistanceToPolyCss,
+  worldDistanceToPolyCss,
   worldCssForMesh,
   worldDirectionToCss,
-  worldDirectionToCss as worldDirectionToPolyCss,
+  worldDirectionToPolyCss,
   worldDirectionalLightToCss,
-  worldDirectionalLightToCss as worldDirectionalLightToPolyCss,
+  worldDirectionalLightToPolyCss,
   worldPositionToCss,
-  worldPositionToCss as worldPositionToPolyCss,
+  worldPositionToPolyCss,
 } from "./shadow/receiverFaceGroups";
 export type { ReceiverPlaneGroup } from "./shadow/receiverFaceGroups";
 export { buildPolyMeshTransform } from "./transform/meshTransform";
@@ -314,6 +330,9 @@ export {
 export type {
   RGB,
   RGBFactors,
+  PolyTextureLeafGeometry,
+  PolyTextureLeafResolverOptions,
+  PolyTextureLeafSourceRect,
   UvAffine,
   UvSampleRect,
   TextureTrianglePlan,
@@ -477,6 +496,15 @@ export {
   computeTextureAtlasPlanPublic,
 } from "./atlas/plan";
 export {
+  resolvePolyTextureLeafGeometry,
+} from "./atlas/textureLeaf";
+export {
+  resolvePolyTextureImageRendering,
+  resolvePolyTextureImageSource,
+  resolvePolyTexturePresentation,
+  resolvePolyTextureUrl,
+} from "./atlas/textureSource";
+export {
   normalizeAtlasScale,
   atlasArea,
   autoAtlasScaleCap,
@@ -487,6 +515,8 @@ export {
   autoAtlasMaxDecodedBytes,
   atlasCanonicalSizeForTextureQuality,
   applyPackedAtlasCanonicalSize,
+  applyPackedAtlasLeafSizing,
+  resolveAtlasLeafBox,
   atlasCanonicalSizeForEntry,
   atlasPadding,
   packTextureAtlasPlans,

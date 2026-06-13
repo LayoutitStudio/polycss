@@ -150,8 +150,8 @@ const CORE_BASE_STYLES = `
 }
 
 .polycss-scene s {
-  width: var(--polycss-atlas-size, 64px);
-  height: var(--polycss-atlas-size, 64px);
+  width: var(--polycss-atlas-width, var(--polycss-atlas-size, 64px));
+  height: var(--polycss-atlas-height, var(--polycss-atlas-size, 64px));
 }
 
 .polycss-scene u {

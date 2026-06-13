@@ -2,6 +2,7 @@ import type {
   TextureAtlasPlan,
   PackedAtlas,
   TextureQuality,
+  PolyTextureLeafSizing,
 } from "@layoutit/polycss-core";
 import {
   packTextureAtlasPlansWithScaleCore,
@@ -22,6 +23,12 @@ export function packTextureAtlasPlansWithScale(
   plans: Array<TextureAtlasPlan | null>,
   textureQualityInput: TextureQuality | undefined,
   doc: Document | null | undefined,
+  textureLeafSizing?: PolyTextureLeafSizing,
 ): { packed: PackedAtlas; atlasScale: number; atlasCanonicalSize: number } {
-  return packTextureAtlasPlansWithScaleCore(plans, textureQualityInput, isMobileDocument(doc));
+  return packTextureAtlasPlansWithScaleCore(
+    plans,
+    textureQualityInput,
+    isMobileDocument(doc),
+    textureLeafSizing,
+  );
 }

@@ -13,6 +13,31 @@ export const DEFAULT_PROJECTION = "cubic" as const;
  *   variables, no JS work, no atlas re-rasterization.
  */
 export type PolyTextureLightingMode = "baked" | "dynamic";
+export type PolyTextureLeafSizing = "canonical" | "local" | "raster";
+export type PolyTextureBackend = "auto" | "atlas" | "image";
+export type PolyTextureImageRendering = "auto" | "pixelated";
+export type PolyTextureImageLighting = "scene" | "source";
+export type PolyTextureProjection = "affine" | "projective";
+
+export interface PolyTextureImageSource {
+  url: string;
+  width: number;
+  height: number;
+  sourceRect?: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  };
+  imageRendering?: PolyTextureImageRendering;
+}
+
+export interface PolyTexturePresentation {
+  imageRendering?: PolyTextureImageRendering;
+  backend?: PolyTextureBackend;
+  lighting?: PolyTextureImageLighting;
+  projection?: PolyTextureProjection;
+}
 
 /**
  * Mesh post-processing intent.
@@ -104,6 +129,8 @@ export interface PolyMaterial {
    *  pass a stable string; if omitted, the material's identity is its object
    *  reference. */
   key?: string;
+  imageSource?: PolyTextureImageSource;
+  presentation?: PolyTexturePresentation;
 }
 
 /**
@@ -147,6 +174,8 @@ export interface Polygon {
    * polygon canvas rasterization). Falls back to the atlas path otherwise.
    */
   material?: PolyMaterial;
+  textureImageSource?: PolyTextureImageSource;
+  texturePresentation?: PolyTexturePresentation;
   /**
    * Per-vertex UV coords (0..1, OBJ convention with v=0 at bottom).
    * Length MUST equal vertices.length when set; mismatched UVs are

@@ -44,6 +44,17 @@ const TEXTURED_TRIANGLE: Polygon = {
   ],
 };
 
+const DIRECT_IMAGE_QUAD: Polygon = {
+  vertices: QUAD.vertices,
+  textureImageSource: {
+    url: "https://example.com/source.png",
+    width: 320,
+    height: 200,
+    sourceRect: { x: 16, y: 24, width: 80, height: 40 },
+  },
+  texturePresentation: { backend: "image" },
+};
+
 function renderScene(
   sceneProps: React.ComponentProps<typeof PolyScene>,
   children?: React.ReactNode
@@ -191,10 +202,54 @@ describe("PolyScene — polygon rendering", () => {
   it("renders textured polygons as polygon s elements", () => {
     const container = renderScene({
       polygons: [TEXTURED_TRIANGLE],
+      textureImageRendering: "pixelated",
     });
     const poly = container.querySelector("s");
     expect(poly).toBeTruthy();
     expect(poly?.tagName.toLowerCase()).toBe("s");
+    expect(poly?.getAttribute("data-polycss-texture-backend")).toBe("atlas");
+    expect(poly?.getAttribute("data-polycss-texture-image-rendering")).toBe("pixelated");
+  });
+
+  it("renders direct image polygons without atlas readiness delay", () => {
+    const container = renderScene({
+      polygons: [DIRECT_IMAGE_QUAD],
+      textureImageRendering: "pixelated",
+    });
+    const poly = container.querySelector("s") as HTMLElement | null;
+    expect(poly).toBeTruthy();
+    expect(poly?.getAttribute("data-polycss-texture-backend")).toBe("image");
+    expect(poly?.getAttribute("data-polycss-texture-ready")).toBe("true");
+    expect(poly?.getAttribute("data-polycss-texture-leaf-sizing")).toBe("image");
+    expect(poly?.getAttribute("data-polycss-texture-image-rendering")).toBe("pixelated");
+    expect(poly?.getAttribute("data-polycss-texture-source-x")).toBe("16");
+    expect(poly?.getAttribute("data-polycss-texture-source-width")).toBe("80");
+    expect(poly?.style.backgroundImage).toContain("https://example.com/source.png");
+    expect(poly?.style.backgroundPosition).toBe("-16px -24px");
+    expect(poly?.style.backgroundSize).toBe("320px 200px");
+  });
+
+  it("uses scene backend defaults for direct image polygons", () => {
+    const polygon = {
+      ...DIRECT_IMAGE_QUAD,
+      texturePresentation: undefined,
+    };
+    const imageContainer = renderScene({
+      polygons: [polygon],
+      textureBackend: "image",
+      textureImageRendering: "pixelated",
+    });
+    const imagePoly = imageContainer.querySelector("s") as HTMLElement | null;
+    expect(imagePoly?.getAttribute("data-polycss-texture-backend")).toBe("image");
+    expect(imagePoly?.getAttribute("data-polycss-texture-image-rendering")).toBe("pixelated");
+
+    document.body.innerHTML = "";
+    const atlasContainer = renderScene({
+      polygons: [polygon],
+      textureBackend: "atlas",
+    });
+    const atlasPoly = atlasContainer.querySelector("s") as HTMLElement | null;
+    expect(atlasPoly?.getAttribute("data-polycss-texture-backend")).toBe("atlas");
   });
 
   it("renders no poly elements when polygons prop is empty", () => {

@@ -43,6 +43,8 @@ export const PolyPerspectiveCamera = defineComponent({
       rotX: props.rotX,
       rotY: props.rotY,
       distance: props.distance,
+      projection: "perspective" as const,
+      perspectiveStyle: `${typeof props.perspective === "number" ? props.perspective : DEFAULT_PERSPECTIVE}px`,
     }));
 
     const {
@@ -65,6 +67,14 @@ export const PolyPerspectiveCamera = defineComponent({
           ref: cameraElRef,
           class: `polycss-camera${props.class ? ` ${props.class}` : ""}`,
           style: { perspective: perspectiveValue },
+          "data-polycss-camera-projection": "perspective",
+          "data-polycss-camera-perspective": perspectiveValue,
+          "data-polycss-camera-applied-perspective": perspectiveValue,
+          "data-polycss-camera-zoom": cameraRef.value.state.zoom,
+          "data-polycss-camera-distance": cameraRef.value.state.distance,
+          "data-polycss-camera-rot-x": cameraRef.value.state.rotX,
+          "data-polycss-camera-rot-y": cameraRef.value.state.rotY,
+          "data-polycss-camera-target": cameraRef.value.state.target.join(","),
         },
         slots.default?.()
       );

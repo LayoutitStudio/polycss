@@ -378,6 +378,7 @@ pnpm bench:visual              # diff against baselines, exit 1 on fail
 pnpm bench:visual --record     # capture new baselines instead
 pnpm bench:visual --tolerance 0.005   # tighter cutoff (default 0.01)
 pnpm bench:visual --mesh chicken      # check just one mesh
+pnpm bench:visual --hud        # include the debug overlay in screenshots
 ```
 
 The two test meshes were chosen because each exercises a different
@@ -385,20 +386,20 @@ render path:
 
 - **chicken** — flat-color materials (`Kd` only, no `map_Kd`) → CSS
   cascade-driven polygon path.
-- **rock1** — UV-mapped texture (`map_Kd rock1-surface.jpg`) → atlas-
-  blob-clipped `<i>` background path.
+- **rock1** — UV-mapped texture (`map_Kd rock1-surface.jpg`) → atlas
+  texture leaves.
 
 A regression in either path shows up here. Add a new mesh to the
 `MESHES` constant (and `--record`) if you need to cover more ground.
 
 ### Atlas-ready wait
 
-The harness polls until at least one `.polycss-scene i` has a
-non-empty `style.backgroundImage` before screenshotting. This catches
-the asynchronous atlas-blob handoff — `scene.add()` returns sync but
-the polygons stay invisible (`opacity:0`) until the atlas canvas
-finishes building and its blob URL gets assigned. A blind 800 ms wait
-used to race this and produce empty baselines.
+The harness polls texture leaves with `data-polycss-texture-backend`
+until each has `data-polycss-texture-ready="true"` before
+screenshotting. This catches the asynchronous atlas/direct-image
+handoff — `scene.add()` returns sync but textured polygons stay hidden
+until their paint source is ready. A blind timeout used to race this
+and produce empty baselines.
 
 ### Visual diff is vanilla-only
 
@@ -476,13 +477,11 @@ the scenario genuinely runs at < 1 fps.
 
 **Browser hangs or screenshots come up empty.**
 The atlas-ready poll has a 5 s timeout. If it expires you'll get a
-`TimeoutError`. That usually means a polygon never got
-`backgroundImage` set — could be a renderer regression. Open the page
-in `--headed` mode and check the console.
+`TimeoutError`. That usually means a texture leaf never reached
+`data-polycss-texture-ready="true"` — could be a renderer regression.
+Open the page in `--headed` mode and check the console.
 
 **Recording a baseline that ends up empty / wrong.**
-The atlas-ready poll requires *at least one* `<i>` with a non-empty
-`backgroundImage`. If that loosened condition isn't enough for a
-specific mesh (e.g. all polys are culled at the chosen camera angle),
-either pick a non-degenerate angle or tighten the wait condition for
-that mesh.
+The atlas-ready poll requires all texture leaves in the scene to report
+ready. If that condition isn't enough for a specific mesh, either pick a
+non-degenerate angle or tighten the wait condition for that mesh.

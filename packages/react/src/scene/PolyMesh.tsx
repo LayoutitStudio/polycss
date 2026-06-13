@@ -29,7 +29,11 @@ import type { CSSProperties, ReactNode, PointerEvent as ReactPointerEvent, Mouse
 import type {
   MeshResolution,
   Polygon,
+  PolyTextureBackend,
+  PolyTextureImageRendering,
+  PolyTextureLeafSizing,
   PolyTextureLightingMode,
+  PolyTextureProjection,
   Vec3,
 } from "@layoutit/polycss-core";
 import {
@@ -48,6 +52,7 @@ import {
   prepareCasterPolyItems,
   prepareReceiverFacePlanes,
   projectCssVertexToGround,
+  resolvePolyTextureLeafGeometry,
   worldDirectionToCss,
   type CameraCullRotation,
   type EdgeOwners,
@@ -71,6 +76,7 @@ import {
   TextureBorderShapePoly,
   TextureAtlasPoly,
   TextureCornerShapeSolidPoly,
+  TextureImagePoly,
   TextureProjectiveSolidPoly,
   TextureTrianglePoly,
   updateStableTriangleDom,
@@ -140,6 +146,14 @@ export interface PolyMeshProps extends TransformProps, InteractionProps {
    *  desktop/mobile sprite sizing. Numeric values 0.1..1 force an explicit
    *  raster scale and the 64px sprite. */
   textureQuality?: TextureQuality;
+  /** Atlas leaf CSS primitive sizing. Defaults to scene context, then canonical. */
+  textureLeafSizing?: PolyTextureLeafSizing;
+  /** Default image filtering for atlas and direct image texture leaves. */
+  textureImageRendering?: PolyTextureImageRendering;
+  /** Default texture backend request. Defaults to scene context, then "auto". */
+  textureBackend?: PolyTextureBackend;
+  /** Default texture projection request. Defaults to scene context, then "affine". */
+  textureProjection?: PolyTextureProjection;
   /** Solid seam overscan. `"auto"` computes a fitted per-edge amount from the polygon plan. */
   seamBleed?: PolySeamBleed;
   /**
@@ -222,6 +236,10 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
     autoCenter,
     textureLighting,
     textureQuality,
+    textureLeafSizing,
+    textureImageRendering,
+    textureBackend,
+    textureProjection,
     seamBleed,
     atomicAtlas,
     onFrameReady,
@@ -335,6 +353,13 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
   const [bakedRotation, setBakedRotation] = useState<Vec3 | undefined>(rotation);
   const stableTriangleColorFrameRef = useRef(0);
   const setPolygonsImplRef = useRef<(next: Polygon[]) => void>(() => {});
+  const textureReadyRef = useRef(true);
+  const textureReadyWaitersRef = useRef<Array<() => void>>([]);
+
+  const resolveTextureReadyWaiters = useCallback(() => {
+    const waiters = textureReadyWaitersRef.current.splice(0);
+    for (const resolve of waiters) resolve();
+  }, []);
 
   const handle = useMemo<PolyMeshHandle>(() => ({
     get element() { return wrapperRef.current; },
@@ -347,6 +372,12 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
       setPolygonsImplRef.current(nextPolygons);
     },
     rebakeAtlas: () => setBakedRotation(propsRef.current.rotation),
+    whenTexturesReady() {
+      if (textureReadyRef.current) return Promise.resolve();
+      return new Promise<void>((resolve) => {
+        textureReadyWaitersRef.current.push(resolve);
+      });
+    },
     updatePolygon(target: Polygon | number, partial: Partial<Polygon>) {
       const current = polygonsRef.current;
       const idx = typeof target === "number"
@@ -545,6 +576,10 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
     [effectiveStrategies],
   );
   const effectiveSeamBleed = seamBleed ?? sceneCtx?.seamBleed ?? DEFAULT_SEAM_BLEED;
+  const effectiveTextureLeafSizing = textureLeafSizing ?? sceneCtx?.textureLeafSizing;
+  const effectiveTextureImageRendering = textureImageRendering ?? sceneCtx?.textureImageRendering;
+  const effectiveTextureBackend = textureBackend ?? sceneCtx?.textureBackend;
+  const effectiveTextureProjection = textureProjection ?? sceneCtx?.textureProjection;
   // Always forward the scene's lights to atlas plan, including in dynamic
   // mode. Vanilla passes the (CSS-frame) directional light to its render
   // pipeline in every mode — the dynamic-mode atlas doesn't bake Lambert
@@ -660,9 +695,18 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
     atlasPlans,
     effectiveTextureLighting,
     textureQuality,
+    effectiveTextureLeafSizing,
+    effectiveTextureBackend,
+    effectiveTextureImageRendering,
+    effectiveTextureProjection,
     effectiveStrategies,
     atomicAtlas,
   );
+  textureReadyRef.current = textureAtlas.ready;
+  useEffect(() => {
+    if (textureAtlas.ready) resolveTextureReadyWaiters();
+  }, [textureAtlas.ready, resolveTextureReadyWaiters]);
+  useEffect(() => resolveTextureReadyWaiters, [resolveTextureReadyWaiters]);
   // Use the displayed plans (which lag in atomic mode) so solid leaves swap in
   // lockstep with the textured ones.
   const solidPaintDefaults = useMemo(
@@ -1132,12 +1176,29 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
               entry={entry}
               page={textureAtlas.pages[entry.pageIndex]}
               textureLighting={effectiveTextureLighting}
+              textureImageRendering={effectiveTextureImageRendering}
               solidPaintDefaults={solidPaintDefaults}
             />
           );
         }
 
         const plan = textureAtlas.plans[index];
+        const imageGeometry = plan
+          ? resolvePolyTextureLeafGeometry(plan, {
+              imageRendering: effectiveTextureImageRendering,
+              backend: effectiveTextureBackend,
+              projection: effectiveTextureProjection,
+            })
+          : null;
+        if (plan && imageGeometry) {
+          return (
+            <TextureImagePoly
+              key={plan.index}
+              plan={plan}
+              geometry={imageGeometry}
+            />
+          );
+        }
         if (!plan || plan.texture) return null;
         if (isProjectiveQuadPlan(plan)) {
           return (

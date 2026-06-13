@@ -56,6 +56,7 @@ import {
   seamBleedAmountArray,
   normalizedSeamBleed,
 } from "./edgeRepair";
+import { resolvePolyTextureUrl } from "./textureSource";
 
 function finiteNumber(value: unknown, fallback: number): number {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
@@ -716,7 +717,8 @@ export function computeTextureAtlasPlan(
   basisHint?: BasisHint,
 ): TextureAtlasPlan | null {
   const internalOptions = options as InternalSolidTrianglePlanOptions;
-  const { vertices, texture, uvs } = polygon;
+  const { vertices, uvs } = polygon;
+  const texture = resolvePolyTextureUrl(polygon);
   if (!vertices || vertices.length < 3) return null;
 
   const tile = options.tileSize ?? DEFAULT_TILE;

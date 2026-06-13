@@ -7,6 +7,10 @@ import type {
   TextureQuality,
   PolyRenderStrategy,
   PolyRenderStrategiesOption,
+  PolyTextureBackend,
+  PolyTextureImageRendering,
+  PolyTextureLeafSizing,
+  PolyTextureProjection,
 } from "@layoutit/polycss-core";
 import { filterAtlasPlans } from "./filterPlans";
 import { packTextureAtlasPlansWithScale } from "./packing";
@@ -67,6 +71,10 @@ export function useTextureAtlas(
   plans: Array<TextureAtlasPlan | null>,
   textureLighting: PolyTextureLightingMode,
   textureQualityInput?: TextureQuality,
+  textureLeafSizing?: PolyTextureLeafSizing,
+  textureBackend?: PolyTextureBackend,
+  textureImageRendering?: PolyTextureImageRendering,
+  textureProjection?: PolyTextureProjection,
   strategies?: PolyRenderStrategiesOption,
   // Atomic mode: hold the entire previous frame (geometry + bitmap) until the
   // next atlas is rasterised AND decoded, then swap all at once. Use it when
@@ -87,8 +95,11 @@ export function useTextureAtlas(
       textureLighting,
       disabled,
       typeof document !== "undefined" ? document : null,
+      textureBackend,
+      textureImageRendering,
+      textureProjection,
     ),
-    [plans, textureLighting, disabled],
+    [plans, textureLighting, disabled, textureBackend, textureImageRendering, textureProjection],
   );
 
   const { packed, atlasScale } = useMemo(
@@ -96,8 +107,9 @@ export function useTextureAtlas(
       atlasPlans,
       textureQualityInput,
       typeof document !== "undefined" ? document : null,
+      textureLeafSizing,
     ),
-    [atlasPlans, textureQualityInput],
+    [atlasPlans, textureQualityInput, textureLeafSizing],
   );
 
   // Streaming-mode page state (default).

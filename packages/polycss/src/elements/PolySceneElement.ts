@@ -16,7 +16,16 @@
  * Attribute parsing — minimal-footprint string → typed conversion. Unknown
  * attributes are ignored (HTML semantics, not validation).
  */
-import type { PolyAmbientLight, PolyDirectionalLight, PolyTextureLightingMode, Vec3 } from "@layoutit/polycss-core";
+import type {
+  PolyAmbientLight,
+  PolyDirectionalLight,
+  PolyTextureBackend,
+  PolyTextureImageRendering,
+  PolyTextureLeafSizing,
+  PolyTextureLightingMode,
+  PolyTextureProjection,
+  Vec3,
+} from "@layoutit/polycss-core";
 import {
   createPolyScene,
   type PolySceneOptions,
@@ -48,6 +57,10 @@ const OBSERVED_ATTRS = [
   "ambient-intensity",
   "texture-lighting",
   "texture-quality",
+  "texture-leaf-sizing",
+  "texture-image-rendering",
+  "texture-backend",
+  "texture-projection",
   "auto-center",
 ] as const;
 
@@ -79,6 +92,26 @@ function parseTextureLighting(value: string | null): PolyTextureLightingMode | u
 function parseTextureQuality(value: string | null): PolySceneOptions["textureQuality"] | undefined {
   if (value === "auto") return "auto";
   return parseNumber(value);
+}
+
+function parseTextureLeafSizing(value: string | null): PolyTextureLeafSizing | undefined {
+  if (value === "canonical" || value === "local" || value === "raster") return value;
+  return undefined;
+}
+
+function parseTextureImageRendering(value: string | null): PolyTextureImageRendering | undefined {
+  if (value === "auto" || value === "pixelated") return value;
+  return undefined;
+}
+
+function parseTextureBackend(value: string | null): PolyTextureBackend | undefined {
+  if (value === "auto" || value === "atlas" || value === "image") return value;
+  return undefined;
+}
+
+function parseTextureProjection(value: string | null): PolyTextureProjection | undefined {
+  if (value === "affine" || value === "projective") return value;
+  return undefined;
 }
 
 type CameraElement = {
@@ -150,6 +183,14 @@ export class PolySceneElement extends ELEMENT_BASE {
     opts.textureLighting = parseTextureLighting(this.getAttribute("texture-lighting")) ?? "baked";
     const textureQuality = parseTextureQuality(this.getAttribute("texture-quality"));
     if (textureQuality !== undefined) opts.textureQuality = textureQuality;
+    opts.textureLeafSizing =
+      parseTextureLeafSizing(this.getAttribute("texture-leaf-sizing")) ?? "canonical";
+    const textureImageRendering = parseTextureImageRendering(this.getAttribute("texture-image-rendering"));
+    if (textureImageRendering !== undefined) opts.textureImageRendering = textureImageRendering;
+    const textureBackend = parseTextureBackend(this.getAttribute("texture-backend"));
+    if (textureBackend !== undefined) opts.textureBackend = textureBackend;
+    const textureProjection = parseTextureProjection(this.getAttribute("texture-projection"));
+    if (textureProjection !== undefined) opts.textureProjection = textureProjection;
     opts.autoCenter = this.hasAttribute("auto-center");
     if (directionalLight) opts.directionalLight = directionalLight;
     if (ambientLight) opts.ambientLight = ambientLight;

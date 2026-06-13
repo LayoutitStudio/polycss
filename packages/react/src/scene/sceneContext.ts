@@ -9,7 +9,11 @@ import { createContext, useContext } from "react";
 import type {
   PolyAmbientLight,
   PolyDirectionalLight,
+  PolyTextureBackend,
+  PolyTextureImageRendering,
+  PolyTextureLeafSizing,
   PolyTextureLightingMode,
+  PolyTextureProjection,
   Polygon,
   Vec3,
 } from "@layoutit/polycss-core";
@@ -51,6 +55,10 @@ export interface PolySceneContextValue {
   ambientLight?: PolyAmbientLight;
   strategies?: PolyRenderStrategiesOption;
   seamBleed?: PolySeamBleed;
+  textureLeafSizing?: PolyTextureLeafSizing;
+  textureImageRendering?: PolyTextureImageRendering;
+  textureBackend?: PolyTextureBackend;
+  textureProjection?: PolyTextureProjection;
   shadow?: ShadowOptions;
   /**
    * Called by PolyMesh to register/unregister itself as a shadow caster.

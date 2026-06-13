@@ -14,6 +14,10 @@ import type {
   TextureQuality,
   PolyRenderStrategy,
   PolyRenderStrategiesOption,
+  PolyTextureBackend,
+  PolyTextureImageRendering,
+  PolyTextureLeafSizing,
+  PolyTextureProjection,
 } from "@layoutit/polycss-core";
 import { isBorderShapeSupported, isSolidTriangleSupported, projectiveQuadSupported } from "./detection";
 import { filterAtlasPlans } from "./filterPlans";
@@ -84,6 +88,10 @@ export function useTextureAtlas(
   plans: ComputedRef<Array<TextureAtlasPlan | null>>,
   textureLighting: ComputedRef<PolyTextureLightingMode>,
   textureQuality: ComputedRef<TextureQuality | undefined> = computed(() => undefined),
+  textureLeafSizing: ComputedRef<PolyTextureLeafSizing | undefined> = computed(() => undefined),
+  textureBackend: ComputedRef<PolyTextureBackend | undefined> = computed(() => undefined),
+  textureImageRendering: ComputedRef<PolyTextureImageRendering | undefined> = computed(() => undefined),
+  textureProjection: ComputedRef<PolyTextureProjection | undefined> = computed(() => undefined),
   strategies: ComputedRef<PolyRenderStrategiesOption | undefined> = computed(() => undefined),
   // Atomic mode: hold the whole previous frame (geometry + bitmap) until the
   // next atlas is rasterised AND decoded, then swap all at once. Default (false)
@@ -107,11 +115,15 @@ export function useTextureAtlas(
       textureLighting.value,
       disabled.value,
       typeof document !== "undefined" ? document : null,
+      textureBackend.value,
+      textureImageRendering.value,
+      textureProjection.value,
     );
     return packTextureAtlasPlansWithScale(
       atlasPlans,
       textureQuality.value,
       typeof document !== "undefined" ? document : null,
+      textureLeafSizing.value,
     );
   });
 

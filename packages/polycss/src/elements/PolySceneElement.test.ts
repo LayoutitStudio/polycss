@@ -35,6 +35,9 @@ describe("PolySceneElement", () => {
       expect(observed).toContain("rot-y");
       expect(observed).toContain("zoom");
       expect(observed).toContain("texture-quality");
+      expect(observed).toContain("texture-leaf-sizing");
+      expect(observed).toContain("texture-backend");
+      expect(observed).toContain("texture-projection");
       expect(observed).toContain("directional-direction");
       expect(observed).toContain("directional-color");
       expect(observed).toContain("directional-intensity");
@@ -163,6 +166,22 @@ describe("PolySceneElement", () => {
       el.setAttribute("auto-center", "");
       host.appendChild(el);
       expect(el.getScene()?.getOptions().autoCenter).toBe(true);
+    });
+
+    it("parses texture-leaf-sizing", () => {
+      const el = document.createElement("poly-scene") as PolySceneElement;
+      el.setAttribute("texture-leaf-sizing", "local");
+      host.appendChild(el);
+      expect(el.getScene()?.getOptions().textureLeafSizing).toBe("local");
+    });
+
+    it("parses texture backend and projection", () => {
+      const el = document.createElement("poly-scene") as PolySceneElement;
+      el.setAttribute("texture-backend", "image");
+      el.setAttribute("texture-projection", "projective");
+      host.appendChild(el);
+      expect(el.getScene()?.getOptions().textureBackend).toBe("image");
+      expect(el.getScene()?.getOptions().textureProjection).toBe("projective");
     });
 
   });

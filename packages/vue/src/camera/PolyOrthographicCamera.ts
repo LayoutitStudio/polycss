@@ -39,6 +39,8 @@ export const PolyOrthographicCamera = defineComponent({
       rotX: props.rotX,
       rotY: props.rotY,
       distance: props.distance,
+      projection: "orthographic" as const,
+      perspectiveStyle: "none",
     }));
 
     const {
@@ -65,6 +67,14 @@ export const PolyOrthographicCamera = defineComponent({
           // compositor path. Mirror that here so Vue produces byte-identical
           // output to vanilla.
           style: { perspective: "1000000px" },
+          "data-polycss-camera-projection": "orthographic",
+          "data-polycss-camera-perspective": "none",
+          "data-polycss-camera-applied-perspective": "1000000px",
+          "data-polycss-camera-zoom": cameraRef.value.state.zoom,
+          "data-polycss-camera-distance": cameraRef.value.state.distance,
+          "data-polycss-camera-rot-x": cameraRef.value.state.rotX,
+          "data-polycss-camera-rot-y": cameraRef.value.state.rotY,
+          "data-polycss-camera-target": cameraRef.value.state.target.join(","),
         },
         slots.default?.()
       );

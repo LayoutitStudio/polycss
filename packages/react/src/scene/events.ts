@@ -65,6 +65,8 @@ export interface PolyMeshHandle {
    * safe to call.
    */
   rebakeAtlas(): void;
+  /** Resolves when this mesh's current texture generation has usable backgrounds. */
+  whenTexturesReady(): Promise<void>;
   /**
    * Mutate a single polygon in place and re-render the mesh. `target` is
    * either a polygon reference (as returned by `getPolygons()`) or its index.

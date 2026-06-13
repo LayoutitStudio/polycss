@@ -50,8 +50,8 @@ describe("injectPolyBaseStyles", () => {
     expect(el.textContent).toContain("background-repeat: no-repeat");
     expect(el.textContent).toContain("width: 64px;");
     expect(el.textContent).toContain("height: 64px;");
-    expect(el.textContent).toContain("width: var(--polycss-atlas-size, 64px);");
-    expect(el.textContent).toContain("height: var(--polycss-atlas-size, 64px);");
+    expect(el.textContent).toContain("width: var(--polycss-atlas-width, var(--polycss-atlas-size, 64px));");
+    expect(el.textContent).toContain("height: var(--polycss-atlas-height, var(--polycss-atlas-size, 64px));");
     expect(el.textContent).toContain("border-width: 0 16px 32px 16px;");
     expect(el.textContent).toContain("width: 0;");
     expect(el.textContent).toContain("height: 0;");

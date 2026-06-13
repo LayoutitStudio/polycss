@@ -20,6 +20,7 @@ import type {
   PackingPage,
   TextureQuality,
 } from "./types";
+import type { PolyTextureLeafSizing } from "../types";
 import { formatAtlasMatrix } from "./matrix";
 
 export function normalizeAtlasScale(scale: number | string | undefined): number {
@@ -110,10 +111,52 @@ export function applyPackedAtlasCanonicalSize(
   packed: PackedAtlas,
   atlasCanonicalSize: number,
 ): PackedAtlas {
+  return applyPackedAtlasLeafSizing(packed, atlasCanonicalSize, 1, "canonical");
+}
+
+export function resolveAtlasLeafBox(
+  entry: TextureAtlasPlan,
+  atlasScale: number,
+  textureLeafSizing: PolyTextureLeafSizing | undefined,
+  atlasCanonicalSize = atlasCanonicalSizeForEntry(entry),
+): { width: number; height: number; sizing: PolyTextureLeafSizing } {
+  const sizing = textureLeafSizing ?? "canonical";
+  if (sizing === "local") {
+    return {
+      width: Math.max(1, entry.canvasW || 1),
+      height: Math.max(1, entry.canvasH || 1),
+      sizing,
+    };
+  }
+  if (sizing === "raster") {
+    const scale = normalizeAtlasScale(atlasScale);
+    return {
+      width: Math.max(1, (entry.canvasW || 1) * scale),
+      height: Math.max(1, (entry.canvasH || 1) * scale),
+      sizing,
+    };
+  }
+  return {
+    width: atlasCanonicalSize,
+    height: atlasCanonicalSize,
+    sizing: "canonical",
+  };
+}
+
+export function applyPackedAtlasLeafSizing(
+  packed: PackedAtlas,
+  atlasCanonicalSize: number,
+  atlasScale: number,
+  textureLeafSizing: PolyTextureLeafSizing | undefined = "canonical",
+): PackedAtlas {
   for (const entry of packed.entries) {
     if (!entry) continue;
+    const leafBox = resolveAtlasLeafBox(entry, atlasScale, textureLeafSizing, atlasCanonicalSize);
     entry.atlasCanonicalSize = atlasCanonicalSize;
-    entry.atlasMatrix = formatAtlasMatrix(entry, atlasCanonicalSize);
+    entry.atlasLeafSizing = leafBox.sizing;
+    entry.atlasLeafWidth = leafBox.width;
+    entry.atlasLeafHeight = leafBox.height;
+    entry.atlasMatrix = formatAtlasMatrix(entry, leafBox.width, leafBox.height);
   }
   return packed;
 }
@@ -253,12 +296,18 @@ export function packTextureAtlasPlansWithScaleCore(
   plans: Array<TextureAtlasPlan | null>,
   textureQualityInput: TextureQuality | undefined,
   isMobile: boolean,
+  textureLeafSizing: PolyTextureLeafSizing | undefined = "canonical",
 ): { packed: PackedAtlas; atlasScale: number; atlasCanonicalSize: number } {
   const atlasCanonicalSize = atlasCanonicalSizeForTextureQuality(textureQualityInput, isMobile);
   if (textureQualityInput !== undefined && textureQualityInput !== "auto") {
     const atlasScale = normalizeAtlasScale(textureQualityInput);
     return {
-      packed: applyPackedAtlasCanonicalSize(packTextureAtlasPlans(plans, atlasScale), atlasCanonicalSize),
+      packed: applyPackedAtlasLeafSizing(
+        packTextureAtlasPlans(plans, atlasScale),
+        atlasCanonicalSize,
+        atlasScale,
+        textureLeafSizing,
+      ),
       atlasScale,
       atlasCanonicalSize,
     };
@@ -267,7 +316,12 @@ export function packTextureAtlasPlansWithScaleCore(
   const fullScalePacked = packTextureAtlasPlans(plans, 1);
   const autoPacked = packTextureAtlasPlansAuto(plans, fullScalePacked, autoAtlasMaxDecodedBytes(isMobile));
   return {
-    packed: applyPackedAtlasCanonicalSize(autoPacked.packed, atlasCanonicalSize),
+    packed: applyPackedAtlasLeafSizing(
+      autoPacked.packed,
+      atlasCanonicalSize,
+      autoPacked.atlasScale,
+      textureLeafSizing,
+    ),
     atlasScale: autoPacked.atlasScale,
     atlasCanonicalSize,
   };

@@ -90,11 +90,21 @@ export type {
 
 export { injectPolyBaseStyles } from "./styles";
 
-export { collectPolyRenderStats } from "./renderStats";
+export {
+  collectPolyRenderStats,
+  collectPolyTextureReadiness,
+  queryPolyLeaves,
+} from "./renderStats";
 export type {
+  PolyLeafInfo,
+  PolyRenderLeafStrategy,
   PolyRenderStats,
   PolyRenderStatsOptions,
   PolyRenderSurfaceLeafCounts,
+  PolyCameraSnapshotStats,
+  PolySnapshotRenderStats,
+  PolyTextureRenderStats,
+  PolyTextureReadiness,
 } from "./renderStats";
 
 export { usePolyAnimation } from "./animation/usePolyAnimation";
@@ -109,6 +119,13 @@ export type {
   PolyDirectionalLight,
   PolyAmbientLight,
   PolyTextureLightingMode,
+  PolyTextureLeafSizing,
+  PolyTextureBackend,
+  PolyTextureImageRendering,
+  PolyTextureImageLighting,
+  PolyTextureProjection,
+  PolyTextureImageSource,
+  PolyTexturePresentation,
   MeshResolution,
   ParseResult,
   ParseAnimationClip,
@@ -132,6 +149,12 @@ export type {
   CameraState,
   CameraHandle,
   CameraStyleInput,
+  PolyCameraProjection,
+  PolyCameraSnapshot,
+  PolyCameraSnapshotOptions,
+  PolyCameraSnapshotSource,
+  PolyMeshTransformInput,
+  PolySceneTransformInput,
   AutoRotateOption,
   AutoRotateConfig,
   AxesHelperOptions,
@@ -173,8 +196,6 @@ export type {
   OptimizeMeshParseResultOptions,
   OptimizeAnimatedMeshPolygonsOptions,
   SimplifyTriangleMeshPolygonsOptions,
-  PolyMeshTransformInput,
-  PolySceneTransformInput,
 } from "@layoutit/polycss-core";
 export {
   CAMERA_BACKFACE_CULL_EPS,
@@ -240,10 +261,26 @@ export {
   buildPolyMeshTransform,
   buildPolySceneTransform,
   computeSceneBbox,
+  cssDistanceToWorld,
+  cssPositionToWorld,
+  polyCssDistanceToWorld,
+  polyCssPositionToWorld,
+  worldDirectionToCss,
+  worldDirectionToPolyCss,
+  worldDirectionalLightToCss,
+  worldDirectionalLightToPolyCss,
+  worldDistanceToCss,
+  worldDistanceToPolyCss,
+  worldPositionToCss,
+  worldPositionToPolyCss,
   BASE_TILE,
   DEFAULT_CAMERA_STATE,
   DEFAULT_PROJECTION,
   normalizeInvertMultiplier,
+  buildPolyCameraSceneTransform,
+  capturePolyCameraSnapshot,
+  polyCameraTargetToCss,
+  resolvePolyCameraAppliedPerspectiveStyle,
   createPolyAnimationMixer,
   optimizeAnimatedMeshPolygons,
   DEFAULT_SEAM_FACET_SPLIT_OPTIONS,
@@ -251,10 +288,4 @@ export {
   LoopOnce,
   LoopRepeat,
   LoopPingPong,
-  cssDistanceToWorld as polyCssDistanceToWorld,
-  cssPositionToWorld as polyCssPositionToWorld,
-  worldDistanceToCss as worldDistanceToPolyCss,
-  worldDirectionToCss as worldDirectionToPolyCss,
-  worldDirectionalLightToCss as worldDirectionalLightToPolyCss,
-  worldPositionToCss as worldPositionToPolyCss,
 } from "@layoutit/polycss-core";

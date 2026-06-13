@@ -1,7 +1,8 @@
 import { memo, useMemo } from "react";
 import type React from "react";
 import type { CSSProperties } from "react";
-import type { Vec2, PolyMaterial } from "@layoutit/polycss-core";
+import type { PolyTextureBackend, PolyTextureImageRendering, PolyTextureProjection, Vec2, PolyMaterial } from "@layoutit/polycss-core";
+import { resolvePolyTextureLeafGeometry } from "@layoutit/polycss-core";
 import type { PolyProps } from "./types";
 import {
   computeTextureAtlasPlan,
@@ -9,6 +10,7 @@ import {
   isSolidTrianglePlan,
   TextureBorderShapePoly,
   TextureAtlasPoly,
+  TextureImagePoly,
   TextureProjectiveSolidPoly,
   TextureTrianglePoly,
   useTextureAtlas,
@@ -74,6 +76,7 @@ function MaterialDirectPoly({
   domAttrs,
   domEventHandlers,
   pointerEvents = "auto",
+  imageRendering,
 }: {
   plan: TextureAtlasPlan;
   material: PolyMaterial;
@@ -83,6 +86,7 @@ function MaterialDirectPoly({
   domAttrs?: Record<string, unknown>;
   domEventHandlers?: React.DOMAttributes<Element>;
   pointerEvents?: "auto" | "none";
+  imageRendering?: PolyTextureImageRendering;
 }) {
   const { u0, u1, v0, v1 } = uvRect;
   const du = u1 - u0;
@@ -98,6 +102,8 @@ function MaterialDirectPoly({
     backgroundImage: `url(${material.texture})`,
     backgroundSize: `${formatCssLength(sourceW)} ${formatCssLength(sourceH)}`,
     backgroundPosition: `${formatCssLength(-offsetX)} ${formatCssLength(-offsetY)}`,
+    backgroundRepeat: "no-repeat",
+    imageRendering: imageRendering === "pixelated" ? "pixelated" : undefined,
     pointerEvents: pointerEvents === "none" ? "none" : undefined,
     ...styleProp,
   };
@@ -113,6 +119,14 @@ function MaterialDirectPoly({
     <i
       className={elementClassName}
       style={style}
+      data-poly-index={plan.index}
+      data-polycss-leaf="polygon"
+      data-polycss-texture-backend="image"
+      data-polycss-texture-ready="true"
+      data-polycss-texture-image-rendering={imageRendering ?? "auto"}
+      data-polycss-texture-projection="affine"
+      data-polycss-texture-lighting="source"
+      data-polycss-double-sided={plan.polygon.doubleSided ? "true" : undefined}
       {...domEventHandlers}
       {...dataAttrs}
       {...domAttrs}
@@ -137,8 +151,11 @@ function PolyInner({
   vertices,
   color,
   texture,
+  textureImageSource,
+  texturePresentation,
   uvs,
   data,
+  doubleSided,
   material,
   position,
   scale,
@@ -166,6 +183,10 @@ function PolyInner({
   context,
   textureLighting: textureLightingProp,
   textureQuality: textureQualityProp,
+  textureLeafSizing: textureLeafSizingProp,
+  textureImageRendering: textureImageRenderingProp,
+  textureBackend: textureBackendProp,
+  textureProjection: textureProjectionProp,
   baseColor: baseColorProp,
   ...dataAttrs
 }: PolyProps) {
@@ -173,6 +194,10 @@ function PolyInner({
   const layerElevation = context?.layerElevation ?? tileSize;
   const textureLighting = textureLightingProp ?? context?.textureLighting ?? "baked";
   const textureQuality = textureQualityProp ?? context?.textureQuality;
+  const textureLeafSizing = textureLeafSizingProp ?? context?.textureLeafSizing;
+  const textureImageRendering = textureImageRenderingProp ?? context?.textureImageRendering;
+  const textureBackend = textureBackendProp ?? context?.textureBackend;
+  const textureProjection = textureProjectionProp ?? context?.textureProjection;
   const polygonColor = baseColorProp ?? color;
 
   // material.texture takes precedence over inline texture.
@@ -180,7 +205,17 @@ function PolyInner({
 
   const atlasPlan = useMemo(
     () => computeTextureAtlasPlan(
-      { vertices, color: polygonColor, texture: effectiveTexture, uvs, data },
+      {
+        vertices,
+        color: polygonColor,
+        texture: effectiveTexture,
+        textureImageSource,
+        texturePresentation,
+        uvs,
+        data,
+        doubleSided,
+        material,
+      },
       0,
       {
         tileSize,
@@ -192,8 +227,12 @@ function PolyInner({
       vertices,
       polygonColor,
       effectiveTexture,
+      textureImageSource,
+      texturePresentation,
       uvs,
       data,
+      doubleSided,
+      material,
       tileSize,
       layerElevation,
       context?.directionalLight,
@@ -210,7 +249,15 @@ function PolyInner({
     () => (materialUvRect ? [] : [atlasPlan]),
     [materialUvRect, atlasPlan],
   );
-  const textureAtlas = useTextureAtlas(atlasPlans, textureLighting, textureQuality);
+  const textureAtlas = useTextureAtlas(
+    atlasPlans,
+    textureLighting,
+    textureQuality,
+    textureLeafSizing,
+    textureBackend,
+    textureImageRendering,
+    textureProjection,
+  );
 
   const domEventHandlers: React.DOMAttributes<Element> = {
     onClick: onClick as React.MouseEventHandler<Element> | undefined,
@@ -277,6 +324,7 @@ function PolyInner({
         domAttrs={domAttrs}
         domEventHandlers={domEventHandlers}
         pointerEvents={pointerEventsProp ?? "auto"}
+        imageRendering={textureImageRendering}
       />
     );
   } else {
@@ -287,6 +335,7 @@ function PolyInner({
           entry={atlasEntry}
           page={textureAtlas.pages[atlasEntry.pageIndex]}
           textureLighting={textureLighting}
+          textureImageRendering={textureImageRendering}
           className={className}
           style={styleProp}
           domAttrs={domAttrs}
@@ -294,7 +343,29 @@ function PolyInner({
           pointerEvents={pointerEventsProp ?? "auto"}
         />
       );
-    } else if (atlasPlan && !atlasPlan.texture) {
+    } else {
+      const imageGeometry = atlasPlan
+        ? resolvePolyTextureLeafGeometry(atlasPlan, {
+            imageRendering: textureImageRendering,
+            backend: textureBackend,
+            projection: textureProjection,
+          })
+        : null;
+      if (atlasPlan && imageGeometry) {
+        front = (
+          <TextureImagePoly
+            plan={atlasPlan}
+            geometry={imageGeometry}
+            className={className}
+            style={styleProp}
+            domAttrs={domAttrs}
+            domEventHandlers={domEventHandlers}
+            pointerEvents={pointerEventsProp ?? "auto"}
+          />
+        );
+      }
+    }
+    if (!front && atlasPlan && !atlasPlan.texture) {
       front = isSolidTrianglePlan(atlasPlan) ? (
         <TextureTrianglePoly
           entry={atlasPlan}

@@ -25,6 +25,7 @@ import {
   formatCssLength,
   formatBorderShapeMatrix,
   formatScaledMatrixFromPlan,
+  formatAtlasMatrix,
 } from "./matrix";
 import { formatBorderShapeEntryMatrix, borderShapeGeometryForPlan } from "./borderShape";
 import { computeTextureAtlasPlanPublic } from "./plan";
@@ -380,6 +381,37 @@ describe("formatScaledMatrixFromPlan — plan matrix with applied scale", () => 
     expect(scaled[0]).toBeCloseTo(original[0], 3);
     expect(scaled[1]).toBeCloseTo(original[1], 3);
     expect(scaled[2]).toBeCloseTo(original[2], 3);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// formatAtlasMatrix — atlas leaf box scaling
+// ---------------------------------------------------------------------------
+
+describe("formatAtlasMatrix — atlas leaf box scaling", () => {
+  const textured: Polygon = {
+    vertices: [[0, 0, 0], [2, 0, 0], [2, 1, 0], [0, 1, 0]],
+    texture: "https://example.com/tex.png",
+    color: "#ffffff",
+  };
+
+  function columnMagnitude(matrix: string, offset: number): number {
+    const values = matrix.split(",").map(Number);
+    return Math.hypot(values[offset], values[offset + 1], values[offset + 2]);
+  }
+
+  it("keeps old square canonical behavior when one size is provided", () => {
+    const plan = computeTextureAtlasPlanPublic(textured, 0)!;
+    expect(formatAtlasMatrix(plan, 64)).toBe(formatAtlasMatrix(plan, 64, 64));
+  });
+
+  it("uses independent width and height denominators", () => {
+    const plan = computeTextureAtlasPlanPublic(textured, 0)!;
+    const square = formatAtlasMatrix(plan, 64, 64);
+    const wide = formatAtlasMatrix(plan, 128, 64);
+    const tall = formatAtlasMatrix(plan, 64, 128);
+    expect(columnMagnitude(wide, 0)).toBeLessThan(columnMagnitude(square, 0));
+    expect(columnMagnitude(tall, 4)).toBeLessThan(columnMagnitude(square, 4));
   });
 });
 

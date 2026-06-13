@@ -14,6 +14,8 @@ import {
   atlasCanonicalSizeForTextureQuality,
   atlasCanonicalSizeForEntry,
   applyPackedAtlasCanonicalSize,
+  applyPackedAtlasLeafSizing,
+  resolveAtlasLeafBox,
   normalizeAtlasScale,
   atlasArea,
   autoAtlasMaxDecodedBytes,
@@ -242,6 +244,71 @@ describe("applyPackedAtlasCanonicalSize — mutates entries in place", () => {
     const returned = applyPackedAtlasCanonicalSize(packed, 64);
     expect(returned).toBe(packed);
   });
+
+  it("sets canonical atlas leaf box metadata for compatibility", () => {
+    const packed = packTextureAtlasPlans([PLAN_A]);
+    applyPackedAtlasCanonicalSize(packed, 64);
+    const entry = packed.entries[0]!;
+    expect(entry.atlasLeafSizing).toBe("canonical");
+    expect(entry.atlasLeafWidth).toBe(64);
+    expect(entry.atlasLeafHeight).toBe(64);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// resolveAtlasLeafBox / applyPackedAtlasLeafSizing
+// ---------------------------------------------------------------------------
+
+describe("resolveAtlasLeafBox — sizing modes", () => {
+  const nonSquarePlan: TextureAtlasPlan = { ...PLAN_A, canvasW: 120, canvasH: 80 };
+
+  it("canonical uses the atlas canonical square", () => {
+    expect(resolveAtlasLeafBox(nonSquarePlan, 0.5, "canonical", 64)).toEqual({
+      width: 64,
+      height: 64,
+      sizing: "canonical",
+    });
+  });
+
+  it("local uses the plan canvas dimensions", () => {
+    expect(resolveAtlasLeafBox(nonSquarePlan, 0.5, "local", 64)).toEqual({
+      width: 120,
+      height: 80,
+      sizing: "local",
+    });
+  });
+
+  it("raster uses canvas dimensions multiplied by atlas scale", () => {
+    expect(resolveAtlasLeafBox(nonSquarePlan, 0.5, "raster", 64)).toEqual({
+      width: 60,
+      height: 40,
+      sizing: "raster",
+    });
+  });
+});
+
+describe("applyPackedAtlasLeafSizing — mutates entries in place", () => {
+  it("stores local leaf dimensions and recomputes atlasMatrix", () => {
+    const plan: TextureAtlasPlan = { ...PLAN_A, canvasW: 120, canvasH: 80 };
+    const packed = packTextureAtlasPlans([plan]);
+    applyPackedAtlasLeafSizing(packed, 64, 0.5, "local");
+    const entry = packed.entries[0]!;
+    expect(entry.atlasCanonicalSize).toBe(64);
+    expect(entry.atlasLeafSizing).toBe("local");
+    expect(entry.atlasLeafWidth).toBe(120);
+    expect(entry.atlasLeafHeight).toBe(80);
+    expect(entry.atlasMatrix).toBeDefined();
+  });
+
+  it("stores raster leaf dimensions using the resolved atlas scale", () => {
+    const plan: TextureAtlasPlan = { ...PLAN_A, canvasW: 120, canvasH: 80 };
+    const packed = packTextureAtlasPlans([plan], 0.5);
+    applyPackedAtlasLeafSizing(packed, 64, 0.5, "raster");
+    const entry = packed.entries[0]!;
+    expect(entry.atlasLeafSizing).toBe("raster");
+    expect(entry.atlasLeafWidth).toBe(60);
+    expect(entry.atlasLeafHeight).toBe(40);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -282,6 +349,32 @@ describe("packTextureAtlasPlansWithScaleCore — quality and scale resolution", 
   it("packed output has atlasCanonicalSize set on entries", () => {
     const { packed } = packTextureAtlasPlansWithScaleCore([PLAN_A], 1, false);
     expect(packed.entries[0]!.atlasCanonicalSize).toBeDefined();
+  });
+
+  it("packed output has canonical atlas leaf metadata by default", () => {
+    const { packed, atlasCanonicalSize } = packTextureAtlasPlansWithScaleCore([PLAN_A], 1, false);
+    const entry = packed.entries[0]!;
+    expect(entry.atlasLeafSizing).toBe("canonical");
+    expect(entry.atlasLeafWidth).toBe(atlasCanonicalSize);
+    expect(entry.atlasLeafHeight).toBe(atlasCanonicalSize);
+  });
+
+  it("accepts local texture leaf sizing", () => {
+    const plan: TextureAtlasPlan = { ...PLAN_A, canvasW: 120, canvasH: 80 };
+    const { packed } = packTextureAtlasPlansWithScaleCore([plan], 1, false, "local");
+    const entry = packed.entries[0]!;
+    expect(entry.atlasLeafSizing).toBe("local");
+    expect(entry.atlasLeafWidth).toBe(120);
+    expect(entry.atlasLeafHeight).toBe(80);
+  });
+
+  it("accepts raster texture leaf sizing", () => {
+    const plan: TextureAtlasPlan = { ...PLAN_A, canvasW: 120, canvasH: 80 };
+    const { packed } = packTextureAtlasPlansWithScaleCore([plan], 0.5, false, "raster");
+    const entry = packed.entries[0]!;
+    expect(entry.atlasLeafSizing).toBe("raster");
+    expect(entry.atlasLeafWidth).toBe(60);
+    expect(entry.atlasLeafHeight).toBe(40);
   });
 
   it("atlasMatrix string is set on entries after auto packing", () => {

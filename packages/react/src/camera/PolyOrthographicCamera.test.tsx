@@ -28,6 +28,9 @@ describe("PolyOrthographicCamera", () => {
     );
     const camera = container.querySelector(".polycss-camera") as HTMLElement;
     expect(camera.style.perspective).toBe("1000000px");
+    expect(camera.dataset.polycssCameraProjection).toBe("orthographic");
+    expect(camera.dataset.polycssCameraPerspective).toBe("none");
+    expect(camera.dataset.polycssCameraAppliedPerspective).toBe("1000000px");
   });
 
   it("renders children", () => {

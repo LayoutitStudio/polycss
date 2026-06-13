@@ -39,6 +39,7 @@ import {
   computeSceneBbox,
   computeLightVisibility,
   cullInteriorPolygons,
+  capturePolyCameraSnapshot,
   findOverlappingPolygonDuplicates,
   inverseRotateVec3,
   isAxisAlignedSurfaceNormal,
@@ -134,6 +135,7 @@ export type {
 // without changing the synchronous public setPolygons() contract.
 const ASYNC_MOUNT_BATCH_SIZE = 750;
 const DEFAULT_SCENE_PERSPECTIVE = 32000;
+const TEXTURES_READY = Promise.resolve();
 function normalizeSceneOptions<T extends Partial<Omit<PolySceneOptions, "camera">>>(options: T): T {
   if (!Object.prototype.hasOwnProperty.call(options, "seamBleed") || options.seamBleed !== undefined) {
     return options;
@@ -276,20 +278,16 @@ export function createPolyScene(
   // the wrapper must be the perspective context for .polycss-scene to work
   // correctly — matching React/Vue's PolyPerspectiveCamera wrapper shape.
   function applyCameraStyle(el: HTMLElement, _opts: Omit<PolySceneOptions, "camera">): void {
-    // The orthographic camera returns "none" — but true `perspective: none`
-    // triggers a Chrome compositor fast path that mis-rasterizes <u>
-    // border-triangle leaves. A very large finite value is visually
-    // orthographic but routes Chrome through the normal compositor path.
-    const perspStyle = camera.perspectiveStyle;
-    if (perspStyle === "none") {
-      el.style.perspective = "1000000px";
-    } else {
-      // perspStyle is e.g. "32000px" — strip "px", normalize, re-apply.
-      const px = parseFloat(perspStyle);
-      if (Number.isFinite(px)) {
-        el.style.perspective = `${px}px`;
-      }
-    }
+    const snapshot = capturePolyCameraSnapshot(camera);
+    el.style.perspective = snapshot.appliedPerspectiveStyle;
+    el.dataset.polycssCameraProjection = snapshot.projection;
+    el.dataset.polycssCameraPerspective = snapshot.perspectiveStyle;
+    el.dataset.polycssCameraAppliedPerspective = snapshot.appliedPerspectiveStyle;
+    el.dataset.polycssCameraZoom = String(snapshot.state.zoom);
+    el.dataset.polycssCameraDistance = String(snapshot.state.distance);
+    el.dataset.polycssCameraRotX = String(snapshot.state.rotX);
+    el.dataset.polycssCameraRotY = String(snapshot.state.rotY);
+    el.dataset.polycssCameraTarget = snapshot.state.target.join(",");
   }
 
   function applySceneStyle(el: HTMLElement, opts: Omit<PolySceneOptions, "camera">): void {
@@ -317,6 +315,7 @@ export function createPolyScene(
   // that have already been through the axis swap, so it needs the light in
   // that same swapped frame.
   function clearRendered(entry: MeshEntry): void {
+    entry.textureReadyPromise = TEXTURES_READY;
     entry.voxelRenderer?.dispose();
     entry.voxelRenderer = undefined;
     disposeRendered(entry.rendered, entry.disposeAtlas);
@@ -378,13 +377,21 @@ export function createPolyScene(
     }
   }
 
-  function setRendered(entry: MeshEntry, rendered: RenderedPoly[], disposeAtlas?: () => void): void {
+  function setRendered(
+    entry: MeshEntry,
+    rendered: RenderedPoly[],
+    disposeAtlas?: () => void,
+    textureReadyPromise?: Promise<void>,
+  ): void {
     entry.rendered = rendered;
     entry.renderedByPolygonIndex = [];
     for (const item of rendered) {
       entry.renderedByPolygonIndex[item.polygonIndex] = item;
     }
     entry.disposeAtlas = disposeAtlas;
+    entry.textureReadyPromise = textureReadyPromise
+      ? textureReadyPromise.catch(() => undefined)
+      : TEXTURES_READY;
     entry.solidLightingPreviewPrepared = false;
   }
 
@@ -1173,6 +1180,7 @@ export function createPolyScene(
         entry.voxelRenderer = renderer;
         renderer.render(cameraCullRotation(entry));
         entry.cameraCullSignature = "voxel-direct";
+        entry.textureReadyPromise = TEXTURES_READY;
         return;
       }
     }
@@ -1183,6 +1191,10 @@ export function createPolyScene(
       ambientLight: currentOptions.ambientLight,
       textureLighting: currentOptions.textureLighting,
       textureQuality: currentOptions.textureQuality,
+      textureLeafSizing: currentOptions.textureLeafSizing,
+      textureImageRendering: currentOptions.textureImageRendering,
+      textureBackend: currentOptions.textureBackend,
+      textureProjection: currentOptions.textureProjection,
       seamBleed: currentOptions.seamBleed,
       strategies: currentOptions.strategies,
       lightOccludedPolyIndices,
@@ -1210,7 +1222,7 @@ export function createPolyScene(
         (atlas as { solidPaintDefaults?: SolidPaintDefaults }).solidPaintDefaults ?? {},
       );
     }
-    setRendered(entry, atlas.rendered, atlas.dispose);
+    setRendered(entry, atlas.rendered, atlas.dispose, atlas.pagesReady);
     entry.skipBucketNormalCleanupOnce =
       currentOptions.textureLighting === "dynamic" && !entry.stableDom;
     recomputeCameraCullGroups(entry);
@@ -1267,6 +1279,10 @@ export function createPolyScene(
       ambientLight: currentOptions.ambientLight,
       textureLighting: currentOptions.textureLighting,
       textureQuality: currentOptions.textureQuality,
+      textureLeafSizing: currentOptions.textureLeafSizing,
+      textureImageRendering: currentOptions.textureImageRendering,
+      textureBackend: currentOptions.textureBackend,
+      textureProjection: currentOptions.textureProjection,
       seamBleed: currentOptions.seamBleed,
       strategies: currentOptions.strategies,
       computeSolidPaintDefaults: true,
@@ -1329,6 +1345,7 @@ export function createPolyScene(
 
     const ready = (newAtlas as { pagesReady?: Promise<void> }).pagesReady;
     if (ready && typeof ready.then === "function") {
+      entry.textureReadyPromise = ready.catch(() => undefined);
       // Pre-decode the new atlas bitmaps BEFORE swapping styles. Until
       // a Blob URL is paint-committed at least once the browser hasn't
       // decoded it; copying that URL into a mounted element triggers
@@ -1454,6 +1471,10 @@ export function createPolyScene(
       ambientLight: currentOptions.ambientLight,
       textureLighting: currentOptions.textureLighting,
       textureQuality: currentOptions.textureQuality,
+      textureLeafSizing: currentOptions.textureLeafSizing,
+      textureImageRendering: currentOptions.textureImageRendering,
+      textureBackend: currentOptions.textureBackend,
+      textureProjection: currentOptions.textureProjection,
       seamBleed: currentOptions.seamBleed,
       strategies: currentOptions.strategies,
       // Per-light raytrace occlusion (task #121) disabled — see renderEntry.
@@ -1465,7 +1486,7 @@ export function createPolyScene(
     if (atlas) {
       const solidPaintDefaults = getSolidPaintDefaults(entry.polygons, renderOptions);
       applySolidPaintVars(entry.wrapper, solidPaintDefaults);
-      setRendered(entry, atlas.rendered, atlas.dispose);
+      setRendered(entry, atlas.rendered, atlas.dispose, atlas.pagesReady);
       recomputeCameraCullGroups(entry);
       syncMountedRendered(entry);
       emitShadowLeaves(entry);
@@ -1485,7 +1506,7 @@ export function createPolyScene(
       return false;
     }
     applySolidPaintVars(entry.wrapper, asyncAtlas.solidPaintDefaults);
-    setRendered(entry, asyncAtlas.rendered, asyncAtlas.dispose);
+    setRendered(entry, asyncAtlas.rendered, asyncAtlas.dispose, asyncAtlas.pagesReady);
     entry.skipBucketNormalCleanupOnce =
       currentOptions.textureLighting === "dynamic" && !entry.stableDom;
     recomputeCameraCullGroups(entry);
@@ -1650,6 +1671,7 @@ export function createPolyScene(
       autoMeshId,
       rebakeInFlight: false,
       rebakeQueuedLightDir: null,
+      textureReadyPromise: TEXTURES_READY,
     };
 
     let currentTriangleFrame: PolyAnimationTriangleFrame | null = null;
@@ -1709,6 +1731,10 @@ export function createPolyScene(
           ambientLight: currentOptions.ambientLight,
           textureLighting: currentOptions.textureLighting,
           textureQuality: currentOptions.textureQuality,
+          textureLeafSizing: currentOptions.textureLeafSizing,
+          textureImageRendering: currentOptions.textureImageRendering,
+          textureBackend: currentOptions.textureBackend,
+          textureProjection: currentOptions.textureProjection,
           seamBleed: currentOptions.seamBleed,
         };
         const allStableTriangles =
@@ -1845,6 +1871,10 @@ export function createPolyScene(
             ambientLight: currentOptions.ambientLight,
             textureLighting: currentOptions.textureLighting,
             textureQuality: currentOptions.textureQuality,
+            textureLeafSizing: currentOptions.textureLeafSizing,
+            textureImageRendering: currentOptions.textureImageRendering,
+            textureBackend: currentOptions.textureBackend,
+            textureProjection: currentOptions.textureProjection,
             seamBleed: currentOptions.seamBleed,
             solidPaintDefaults: {},
             optimizeStableTriangleStyle: true,
@@ -2045,6 +2075,7 @@ export function createPolyScene(
         // moments.
         requestRebakeAtlas(entry, localLightDir);
       },
+      whenTexturesReady() { return entry.textureReadyPromise; },
       getPosition() { return transform.position; },
       getRotation() { return transform.rotation; },
       getScale() { return transform.scale; },
@@ -2074,6 +2105,10 @@ export function createPolyScene(
     const prevAutoCenter = !!currentOptions.autoCenter;
     const prevStrategies = currentOptions.strategies;
     const prevSeamBleed = currentOptions.seamBleed;
+    const prevTextureLeafSizing = currentOptions.textureLeafSizing;
+    const prevTextureImageRendering = currentOptions.textureImageRendering;
+    const prevTextureBackend = currentOptions.textureBackend;
+    const prevTextureProjection = currentOptions.textureProjection;
     const prevTextureLighting = currentOptions.textureLighting;
     const prevLightDir = currentOptions.directionalLight?.direction;
     const prevShadow = currentOptions.shadow;
@@ -2098,7 +2133,26 @@ export function createPolyScene(
       !strategiesEqual(partial.strategies, prevStrategies);
     const seamBleedChanged = Object.prototype.hasOwnProperty.call(partial, "seamBleed") &&
       normalizedPartial.seamBleed !== prevSeamBleed;
-    if (strategiesChanged || seamBleedChanged) {
+    const textureLeafSizingChanged =
+      Object.prototype.hasOwnProperty.call(partial, "textureLeafSizing") &&
+      normalizedPartial.textureLeafSizing !== prevTextureLeafSizing;
+    const textureImageRenderingChanged =
+      Object.prototype.hasOwnProperty.call(partial, "textureImageRendering") &&
+      normalizedPartial.textureImageRendering !== prevTextureImageRendering;
+    const textureBackendChanged =
+      Object.prototype.hasOwnProperty.call(partial, "textureBackend") &&
+      normalizedPartial.textureBackend !== prevTextureBackend;
+    const textureProjectionChanged =
+      Object.prototype.hasOwnProperty.call(partial, "textureProjection") &&
+      normalizedPartial.textureProjection !== prevTextureProjection;
+    if (
+      strategiesChanged ||
+      seamBleedChanged ||
+      textureLeafSizingChanged ||
+      textureImageRenderingChanged ||
+      textureBackendChanged ||
+      textureProjectionChanged
+    ) {
       for (const entry of meshes) renderEntry(entry);
     }
     if (prevAutoCenter !== nextAutoCenter) recomputeAutoCenter();
@@ -2127,9 +2181,16 @@ export function createPolyScene(
       // a partial restyle (e.g. plan recomputation downstream) loses its
       // inline color and falls through to the CSS calc reading the
       // @property defaults — rendering WHITE polygons on the model.
-      // Skip when strategiesChanged/seamBleedChanged already triggered a
-      // re-render at line 2049.
-      if (!strategiesChanged && !seamBleedChanged) {
+      // Skip when texture-affecting option changes already triggered a
+      // re-render above.
+      if (
+        !strategiesChanged &&
+        !seamBleedChanged &&
+        !textureLeafSizingChanged &&
+        !textureImageRenderingChanged &&
+        !textureBackendChanged &&
+        !textureProjectionChanged
+      ) {
         for (const entry of meshes) renderEntry(entry);
       }
       recomputeShadowGround();
@@ -2152,6 +2213,7 @@ export function createPolyScene(
   }
 
   function applyCamera(): void {
+    applyCameraStyle(cameraEl, currentOptions);
     applySceneCameraTransform(sceneEl);
     for (const entry of meshes) syncMountedRenderedForCameraChange(entry);
   }
@@ -2160,6 +2222,10 @@ export function createPolyScene(
     const out: PolyMeshHandle[] = [];
     for (const entry of meshes) out.push(entry.handle);
     return out;
+  }
+
+  function whenTexturesReady(): Promise<void> {
+    return Promise.all(Array.from(meshes, (entry) => entry.handle.whenTexturesReady())).then(() => undefined);
   }
 
   function findMeshByElement(el: Element | null): PolyMeshHandle | null {
@@ -2200,6 +2266,7 @@ export function createPolyScene(
     applyCamera,
     getOptions,
     meshes: listMeshes,
+    whenTexturesReady,
     findMeshByElement,
     previewBakedSolidLighting,
     commitBakedSolidLighting,

@@ -31,20 +31,27 @@ function PolyPerspectiveCameraInner({
   className,
   style,
 }: PolyPerspectiveCameraProps) {
+  const perspectiveValue = `${typeof perspective === "number" ? perspective : DEFAULT_PERSPECTIVE}px`;
   const {
     store,
     cameraRef,
     sceneElRef,
     cameraElRef,
     applyTransformDirect,
-  } = usePolyCamera({ zoom, target, rotX, rotY, distance });
+  } = usePolyCamera({
+    zoom,
+    target,
+    rotX,
+    rotY,
+    distance,
+    projection: "perspective",
+    perspectiveStyle: perspectiveValue,
+  });
 
   const contextValue = useMemo(
     () => ({ store, cameraRef, sceneElRef, cameraElRef, applyTransformDirect }),
     [store, cameraRef, sceneElRef, cameraElRef, applyTransformDirect]
   );
-
-  const perspectiveValue = `${typeof perspective === "number" ? perspective : DEFAULT_PERSPECTIVE}px`;
 
   const cameraStyle: React.CSSProperties = {
     ...style,
@@ -57,6 +64,14 @@ function PolyPerspectiveCameraInner({
         ref={cameraElRef}
         className={`polycss-camera${className ? ` ${className}` : ""}`}
         style={cameraStyle}
+        data-polycss-camera-projection="perspective"
+        data-polycss-camera-perspective={perspectiveValue}
+        data-polycss-camera-applied-perspective={perspectiveValue}
+        data-polycss-camera-zoom={cameraRef.current.state.zoom}
+        data-polycss-camera-distance={cameraRef.current.state.distance}
+        data-polycss-camera-rot-x={cameraRef.current.state.rotX}
+        data-polycss-camera-rot-y={cameraRef.current.state.rotY}
+        data-polycss-camera-target={cameraRef.current.state.target.join(",")}
       >
         {children}
       </div>

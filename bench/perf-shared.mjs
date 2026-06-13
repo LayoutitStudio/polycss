@@ -13,106 +13,111 @@
  * specific. Each page handles its own mount and its own per-frame state
  * update; this module just provides the measurement surface.
  */
-import { collectPolyRenderStats } from "./.generated/polycss-render-stats.js";
+import { BASE_TILE, collectPolyRenderStats } from "./.generated/polycss-render-stats.js";
+
+// These presets were authored against the old bench scene-scale control.
+// Runtime camera zoom is now px per world unit, so convert at the fixture
+// boundary to preserve the intended visual coverage and perf workload.
+const presetZoom = (sceneScale) => sceneScale * BASE_TILE;
 
 export const PRESETS = {
   saucer: {
     url: "/gallery/obj/saucer.obj",
     options: { targetSize: 60, defaultColor: "#94a3b8" },
-    zoom: 0.2, rotX: 67, rotY: 42.3,
+    zoom: presetZoom(0.2), rotX: 67, rotY: 42.3,
   },
   chicken: {
     url: "/gallery/obj/chicken.obj",
     mtlUrl: "/gallery/obj/chicken.mtl",
     options: { targetSize: 60, defaultColor: "#cccccc" },
-    zoom: 0.15, rotX: 74.4, rotY: 301.6,
+    zoom: presetZoom(0.15), rotX: 74.4, rotY: 301.6,
   },
   coliseum: {
     url: "/gallery/obj/coliseum.obj",
     options: { targetSize: 80, palette: ["#c9a876", "#a78760", "#8b6f47", "#6b5538"] },
-    zoom: 0.15, rotX: 65, rotY: 45,
+    zoom: presetZoom(0.15), rotX: 65, rotY: 45,
   },
   castle: {
     url: "/gallery/obj/castle.obj",
     options: { targetSize: 60 },
-    zoom: 0.15, rotX: 66.9, rotY: 68.5,
+    zoom: presetZoom(0.15), rotX: 66.9, rotY: 68.5,
   },
   teapot: {
     url: "/gallery/obj/teapot.obj",
     options: { targetSize: 60, defaultColor: "#a3a3a3" },
-    zoom: 0.2, rotX: 65, rotY: 45,
+    zoom: presetZoom(0.2), rotX: 65, rotY: 45,
   },
   rock1: {
     url: "/gallery/obj/rock1.obj",
     mtlUrl: "/gallery/obj/rock1.mtl",
     options: { targetSize: 40, defaultColor: "#8b6f47", excludeObjects: ["Plane"] },
-    zoom: 0.6, rotX: 65, rotY: 45,
+    zoom: presetZoom(0.6), rotX: 65, rotY: 45,
   },
   apple: {
     url: "/gallery/glb/apple.glb",
     options: { targetSize: 60 },
-    zoom: 0.25, rotX: 74.4, rotY: 301.6,
+    zoom: presetZoom(0.25), rotX: 74.4, rotY: 301.6,
   },
   ducky: {
     url: "/gallery/glb/poly-pizza/ducky.glb",
     options: { targetSize: 60 },
-    zoom: 0.4, rotX: 65, rotY: 45,
+    zoom: presetZoom(0.4), rotX: 65, rotY: 45,
   },
   "apoc-car": {
     url: "/gallery/glb/apocalypse/car.glb",
     options: { targetSize: 60 },
-    zoom: 0.4, rotX: 65, rotY: 45,
+    zoom: presetZoom(0.4), rotX: 65, rotY: 45,
   },
   "ancient-crash-site": {
     url: "/gallery/vox/AncientCrashSite.vox",
     options: { targetSize: 70 },
-    zoom: 0.35, rotX: 65, rotY: 45,
+    zoom: presetZoom(0.35), rotX: 65, rotY: 45,
   },
   "desert2": {
     url: "/gallery/vox/desert2.vox",
     options: { targetSize: 60 },
-    zoom: 0.4, rotX: 65, rotY: 45,
+    zoom: presetZoom(0.4), rotX: 65, rotY: 45,
   },
   "mecha-golem": {
     url: "/gallery/vox/MechaGolem.vox",
     options: { targetSize: 60 },
-    zoom: 0.4, rotX: 65, rotY: 45,
+    zoom: presetZoom(0.4), rotX: 65, rotY: 45,
   },
   "army": {
     url: "/gallery/vox/army.vox",
     options: { targetSize: 60 },
-    zoom: 0.4, rotX: 65, rotY: 45,
+    zoom: presetZoom(0.4), rotX: 65, rotY: 45,
   },
   "obj-house3": {
     url: "/gallery/vox/obj_house3.vox",
     options: { targetSize: 60 },
-    zoom: 0.4, rotX: 65, rotY: 45,
+    zoom: presetZoom(0.4), rotX: 65, rotY: 45,
   },
   "obj-house5": {
     url: "/gallery/vox/obj_house5.vox",
     options: { targetSize: 60 },
-    zoom: 0.4, rotX: 65, rotY: 45,
+    zoom: presetZoom(0.4), rotX: 65, rotY: 45,
   },
   "scene-mechanic2": {
     url: "/gallery/vox/scene_mechanic2.vox",
     options: { targetSize: 60 },
-    zoom: 0.4, rotX: 65, rotY: 45,
+    zoom: presetZoom(0.4), rotX: 65, rotY: 45,
   },
   "skyscraper": {
     url: "/gallery/vox/skyscraper.vox",
     options: { targetSize: 60 },
-    zoom: 0.4, rotX: 65, rotY: 45,
+    zoom: presetZoom(0.4), rotX: 65, rotY: 45,
   },
   "treasure": {
     url: "/gallery/vox/Treasure.vox",
     options: { targetSize: 60 },
-    zoom: 0.4, rotX: 65, rotY: 45,
+    zoom: presetZoom(0.4), rotX: 65, rotY: 45,
   },
   crate: {
     url: "/gallery/obj/opengameart/crate/Box.obj",
     mtlUrl: "/gallery/obj/opengameart/crate/Box.mtl",
     options: { targetSize: 60 },
-    zoom: 0.25, rotX: 65, rotY: 45,
+    zoom: presetZoom(0.25), rotX: 65, rotY: 45,
   },
 };
 
@@ -145,7 +150,7 @@ function genericGalleryPreset(params, meshId) {
         targetSize: parseNumberParam(params, "targetSize", 60),
         
       },
-      zoom: parseNumberParam(params, "zoom", 0.4),
+      zoom: parseNumberParam(params, "zoom", presetZoom(0.4)),
       rotX: parseNumberParam(params, "rotX", 65),
       rotY: parseNumberParam(params, "rotY", 45),
     };
@@ -157,7 +162,7 @@ function genericGalleryPreset(params, meshId) {
     return {
       url: `/gallery/glb/${file}`,
       options: { targetSize: parseNumberParam(params, "targetSize", 60) },
-      zoom: parseNumberParam(params, "zoom", 0.35),
+      zoom: parseNumberParam(params, "zoom", presetZoom(0.35)),
       rotX: parseNumberParam(params, "rotX", 65),
       rotY: parseNumberParam(params, "rotY", 45),
     };
@@ -175,7 +180,7 @@ function genericGalleryPreset(params, meshId) {
         targetSize: parseNumberParam(params, "targetSize", 60),
         defaultColor: params.get("defaultColor") || "#cccccc",
       },
-      zoom: parseNumberParam(params, "zoom", 0.25),
+      zoom: parseNumberParam(params, "zoom", presetZoom(0.25)),
       rotX: parseNumberParam(params, "rotX", 65),
       rotY: parseNumberParam(params, "rotY", 45),
     };
@@ -193,7 +198,7 @@ export function parseUrlParams() {
     .map((value) => value.trim())
     .filter((value) => value === "b" || value === "i" || value === "u");
   const basePreset = genericPreset ?? (meshId.startsWith("synth-")
-    ? { url: null, options: {}, zoom: 0.2, rotX: 65, rotY: 45 }
+    ? { url: null, options: {}, zoom: presetZoom(0.2), rotX: 65, rotY: 45 }
     : (PRESETS[meshId] ?? PRESETS.saucer));
   // `?zoom=N` overrides the per-mesh preset zoom (handy for the parity-quad
   // bench when each iframe is narrower than the original 800px viewport).

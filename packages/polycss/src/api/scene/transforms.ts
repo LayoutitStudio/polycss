@@ -13,8 +13,8 @@
  */
 import {
   BASE_TILE,
+  buildPolyCameraSceneTransform,
   buildPolyMeshTransform,
-  buildPolySceneTransform,
   worldDirectionToCss as coreWorldDirectionToCss,
   worldDirectionalLightToCss as coreWorldDirectionalLightToCss,
   worldPositionToCss as coreWorldPositionToCss,
@@ -109,20 +109,7 @@ export function buildSceneTransformFromCamera(
   autoCenterOffset: Vec3 = [0, 0, 0],
   layoutScale = 1,
 ): string {
-  const state = camera.state;
-  // rotate() (i.e. rotateZ) — NOT rotateY. After the rotateX tilt, the world's
-  // Z axis is what reads as "spin in place"; rotateY rotates around an oblique
-  // axis and makes the mesh wobble. translateZ(-distance) is outermost — pulls
-  // the camera back from the target along the view axis.
-  return buildPolySceneTransform({
-    rotX: state.rotX,
-    rotY: state.rotY,
-    zoom: state.zoom ?? DEFAULT_ZOOM,
-    distance: state.distance ?? 0,
-    target: state.target ?? [0, 0, 0],
-    autoCenterOffset,
-    layoutScale,
-  });
+  return buildPolyCameraSceneTransform(camera.state, { autoCenterOffset, layoutScale });
 }
 
 export function parseCssZoom(value: string): number {

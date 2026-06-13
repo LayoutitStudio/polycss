@@ -44,6 +44,12 @@ const TEXTURED_QUAD_B: Polygon = {
   color: "#cccccc",
 };
 
+const TEXTURED_RECT: Polygon = {
+  vertices: [[0, 0, 0], [2, 0, 0], [2, 1, 0], [0, 1, 0]],
+  texture: "https://example.com/rect.png",
+  color: "#ffffff",
+};
+
 // ---------------------------------------------------------------------------
 // isMobileDocument
 // ---------------------------------------------------------------------------
@@ -181,5 +187,23 @@ describe("packTextureAtlasPlansWithScale — scale and canonical size", () => {
     const entry = packed.entries[0]!;
     expect(typeof entry.atlasMatrix).toBe("string");
     expect(entry.atlasMatrix.length).toBeGreaterThan(0);
+  });
+
+  it("can keep atlas leaves at local polygon bounds", () => {
+    const plan = computeTextureAtlasPlanPublic(TEXTURED_RECT, 0);
+    const { packed } = packTextureAtlasPlansWithScale([plan], 1, makeDoc(), "local");
+    const entry = packed.entries[0]!;
+    expect(entry.atlasLeafSizing).toBe("local");
+    expect(entry.atlasLeafWidth).toBe(100);
+    expect(entry.atlasLeafHeight).toBe(50);
+  });
+
+  it("can keep atlas leaves at rasterized polygon bounds", () => {
+    const plan = computeTextureAtlasPlanPublic(TEXTURED_RECT, 0);
+    const { packed } = packTextureAtlasPlansWithScale([plan], 0.5, makeDoc(), "raster");
+    const entry = packed.entries[0]!;
+    expect(entry.atlasLeafSizing).toBe("raster");
+    expect(entry.atlasLeafWidth).toBe(50);
+    expect(entry.atlasLeafHeight).toBe(25);
   });
 });

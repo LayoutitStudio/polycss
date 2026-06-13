@@ -78,9 +78,18 @@ const SHADOW_CUSTOM_PROPS = [
 ] as const;
 const ATLAS_CUSTOM_PROPS = [
   "--polycss-atlas-size",
+  "--polycss-atlas-width",
+  "--polycss-atlas-height",
+  "--polycss-atlas-leaf-sizing",
   "--polycss-atlas-url",
   "--polycss-atlas-position",
   "--polycss-atlas-image-size",
+] as const;
+const ATLAS_DIMENSION_CUSTOM_PROPS = [
+  "--polycss-atlas-size",
+  "--polycss-atlas-width",
+  "--polycss-atlas-height",
+  "--polycss-atlas-leaf-sizing",
 ] as const;
 
 function isElement(value: unknown): value is Element {
@@ -572,16 +581,22 @@ function inlineSnapshotStaticStyleHints(
     const tag = cloneEl.tagName.toLowerCase();
     if (tag === "s") {
       const atlasSize = cloneStyle.getPropertyValue("--polycss-atlas-size").trim();
-      if (atlasSize) {
-        cloneStyle.setProperty("width", atlasSize);
-        cloneStyle.setProperty("height", atlasSize);
+      const atlasWidth = cloneStyle.getPropertyValue("--polycss-atlas-width").trim() || atlasSize;
+      const atlasHeight = cloneStyle.getPropertyValue("--polycss-atlas-height").trim() || atlasSize;
+      if (atlasWidth) {
+        cloneStyle.setProperty("width", atlasWidth);
+      }
+      if (atlasHeight) {
+        cloneStyle.setProperty("height", atlasHeight);
       }
       if (!features.hasDynamicLighting) {
         for (const property of ATLAS_CUSTOM_PROPS) {
           cloneStyle.removeProperty(property);
         }
       } else {
-        cloneStyle.removeProperty("--polycss-atlas-size");
+        for (const property of ATLAS_DIMENSION_CUSTOM_PROPS) {
+          cloneStyle.removeProperty(property);
+        }
       }
     } else if (tag === "b" || tag === "i" || tag === "u") {
       const paint = inheritedInlineCustomProperty(sourceEl, "--polycss-paint");
