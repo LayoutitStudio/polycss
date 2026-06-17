@@ -24,9 +24,14 @@
     .stage.misses  { grid-area: misses; }
     #panel         { grid-area: panel; }
     .stage { border-bottom: 1px solid #cbd5e1; }
-    /* Oracle outline on flagged PolyCSS leaves. Bright red so it pops against grey castle. */
-    [data-oracle-mismatch="1"] { outline: 2px solid #ef4444 !important; outline-offset: 1px; }
-    [data-oracle-focus="1"]    { outline: 3px solid #f97316 !important; outline-offset: 2px; z-index: 50; }
+    /* Oracle highlight on flagged PolyCSS leaves: a red outline plus a
+       brightness filter so the poly pops without hiding what it actually
+       renders (the shading/texture stays readable, just brighter). */
+    [data-oracle-mismatch="1"] { outline: 2px solid #ef4444 !important; outline-offset: 1px; filter: brightness(1.5) !important; }
+    [data-oracle-focus="1"]    { outline: 3px solid #f97316 !important; outline-offset: 2px; z-index: 50; filter: brightness(2) !important; }
+    /* Emitter (caster) polygons that SHOULD be casting a missing shadow,
+       found by raytracing each floor hole back to its occluder. Green. */
+    [data-oracle-caster="1"]   { outline: 3px solid #22c55e !important; outline-offset: 1px; backface-visibility: visible !important; }
     .oracle-row { display: grid; grid-template-columns: 46px 1fr 50px; gap: 6px; padding: 4px 6px; border-bottom: 1px solid #f1f5f9; cursor: pointer; font-size: 11px; align-items: center; }
     .oracle-row:hover { background: #f1f5f9; }
     .oracle-row code { font-family: ui-monospace, monospace; color: #0f172a; }
@@ -95,7 +100,7 @@
     import {
       createPolyCamera, createPolyScene,
       createPolyBox, createPolyOctahedron, loadMesh,
-      screenToWorldOnSphere,
+      screenToWorldOnSphere, screenToWorldRay,
     } from "./.generated/polycss.js";
 
     // World ↔ CSS px factor that the renderer applies to every vertex.
@@ -1760,126 +1765,269 @@
     window.addEventListener("resize", () => { resizeOracleCanvases(); });
 
     // Build an offscreen polygon-index canvas by walking every leaf under
-    // `scopeEl`, computing its screen-space AABB via getBoundingClientRect
-    // (which already respects matrix3d), and painting that rect with the
-    // leaf's `data-poly-index` encoded as RGB (idx+1 so 0 == "no polygon").
-    // Iteration is in DOM order, so later leaves overpaint earlier ones —
-    // a passable approximation of compositor depth-order for the typical
-    // case where front-facing leaves render after back-facing ones.
+    // EVERY mesh in the scene (the active caster mesh AND the floor receiver
+    // — the floor's cast shadow is just disagreement on the floor mesh's
+    // polygon, so the oracle has to span all meshes, not only the active
+    // one). Each leaf's screen-space AABB (getBoundingClientRect respects
+    // matrix3d) is painted with a GLOBAL leaf id encoded as RGB (id+1 so
+    // 0 == "no polygon"); the id maps back to {meshId, poly, el} via the
+    // returned `registry`, so polygon indices that repeat across meshes
+    // (floor #0 vs castle #0) stay distinct.
     //
-    // Why this replaces elementsFromPoint: with shadow SVGs and interior
-    // shells stacked above the visible leaves, elementsFromPoint silently
-    // returned null for thousands of legitimate polygon pixels, hiding
-    // real disagreements (e.g. the central castle tower's shadowed face).
-    // Walking the DOM ourselves guarantees coverage. Also ~10× faster.
+    // Paint order: receivers (floor) FIRST with no visibility test (the
+    // floor's center is occluded by the castle, so a single center-hit test
+    // would drop the whole floor), then casters with the per-leaf
+    // visibility test so a closer leaf overpaints the floor where the mesh
+    // is actually in front. The per-flagged-pixel elementsFromPoint VERIFY
+    // in compareFrame is the real attribution guard; this buffer is the
+    // coarse "which poly is a candidate here" mask + sampling gate.
     //
-    // Returns: { idxBuf, colors, W, H } where
-    //   idxBuf[(y*W+x)*4 .. +3] = R,G,B,A of encoded (idx+1)
-    //   colors[polyIdx]         = [r,g,b] of that leaf's computed color
-    // EDGE_INSET pixels shaved off each side of every painted AABB before
-    // it goes into the index buffer. We're comparing the INTERIOR of each
-    // polygon's face, not its edges:
-    //  - the rasterised edge between two adjacent polygons is antialiased
-    //    against both, so per-pixel deltas there reflect blending, not
-    //    real shadow disagreement;
-    //  - AABBs always over-cover the actual polygon shape (only axis-aligned
-    //    rects are tight); the extra border bleeds into neighbours and
-    //    cross-attributes their pixels to the wrong polygon.
-    // 4 px on each side gives a wider antialias-band cushion (helps with
-    // the AABB-leak false positives like #158/#81 the user reported) and
-    // kills any polygon whose AABB is < 8×8 (those are too small to be
-    // visually significant anyway).
+    // EDGE_INSET pixels shaved off each side of every painted AABB: we
+    // compare polygon INTERIORS, not antialiased shared edges, and AABBs
+    // over-cover non-axis-aligned shapes and bleed into neighbours.
     const EDGE_INSET = 4;
-    function buildPolyIndexAndColors(scopeEl, hostRect, W, H) {
+    function buildPolyIndex(meshEls, hostRect, W, H) {
       const canvas = document.createElement("canvas");
       canvas.width = W; canvas.height = H;
       const ctx = canvas.getContext("2d");
-      // Parallel canvas painted with each leaf's COLOR (not its encoded
-      // index). This IS the "PolyCSS reference" we compare against
-      // three.js per pixel — surfacing it in the sidebar lets the user
-      // SEE what we're using, e.g. catch the case where receiver-shadow
-      // SVGs darken the live PolyCSS but the reference (leaf solid colors
-      // only) does not.
-      const refCanvas = document.createElement("canvas");
-      refCanvas.width = W; refCanvas.height = H;
-      const refCtx = refCanvas.getContext("2d");
-      const colors = new Map();
-      const leaves = scopeEl.querySelectorAll("[data-poly-index]");
-      for (const leaf of leaves) {
-        const idxStr = leaf.getAttribute("data-poly-index");
-        if (idxStr === null) continue;
-        const idx = +idxStr;
-        const enc = idx + 1;
-        const r = (enc >> 16) & 0xff;
-        const g = (enc >> 8) & 0xff;
-        const b = enc & 0xff;
-        const rect = leaf.getBoundingClientRect();
-        const x = Math.max(0, Math.floor(rect.left - hostRect.left + EDGE_INSET));
-        const y = Math.max(0, Math.floor(rect.top  - hostRect.top  + EDGE_INSET));
-        const w = Math.min(W - x, Math.ceil(rect.width  - EDGE_INSET * 2));
-        const h = Math.min(H - y, Math.ceil(rect.height - EDGE_INSET * 2));
-        if (w <= 0 || h <= 0) continue;
-        // Visibility test — elementFromPoint at the leaf's center returns
-        // the compositor's TOPMOST element at that screen position,
-        // respecting matrix3d 3D depth + backface-visibility. If the top
-        // hit isn't this leaf, the leaf is either back-facing or behind
-        // a closer one; either way the user can't see it, and painting
-        // its AABB into the index buffer would over-paint a visible
-        // sibling's index → false-positive misclassifications (the
-        // #532/#165-not-visible problem). Cost: ~700 hit tests for the
-        // castle, ~10-20 ms total — well worth the cleanup.
-        const cx = rect.left + rect.width / 2;
-        const cy = rect.top  + rect.height / 2;
-        const topHit = document.elementFromPoint(cx, cy);
-        if (!topHit) continue;
-        if (topHit !== leaf && !leaf.contains(topHit) && !topHit.contains(leaf)) continue;
-        ctx.fillStyle = `rgb(${r},${g},${b})`;
-        ctx.fillRect(x, y, w, h);
-        // Cache the leaf's computed color so the diff loop doesn't need a
-        // rasterised PolyCSS snapshot — for shadow debugging we only care
-        // about the per-polygon baked colour, not per-pixel antialiasing.
-        let rgb = colors.get(idx);
-        if (!rgb) {
-          const cs = getComputedStyle(leaf);
-          const m = cs.color.match(/(\d+)/g);
-          if (m && m.length >= 3) {
-            rgb = [+m[0], +m[1], +m[2]];
-            colors.set(idx, rgb);
+      const registry = []; // global id -> { meshId, poly, el }
+      // Receivers (floor) painted before casters so casters overpaint.
+      const ordered = [...meshEls].sort((a, b) => {
+        const af = a.getAttribute("data-poly-mesh-id") === "floor" ? 0 : 1;
+        const bf = b.getAttribute("data-poly-mesh-id") === "floor" ? 0 : 1;
+        return af - bf;
+      });
+      for (const meshEl of ordered) {
+        const meshId = meshEl.getAttribute("data-poly-mesh-id");
+        // The floor is one huge leaf whose center sits under the castle —
+        // skip the center-hit visibility test for it (it would drop the
+        // entire floor), and let casters painted afterwards overpaint it.
+        const skipVis = meshId === "floor";
+        for (const leaf of meshEl.querySelectorAll("[data-poly-index]")) {
+          const idxStr = leaf.getAttribute("data-poly-index");
+          if (idxStr === null) continue;
+          const poly = +idxStr;
+          const rect = leaf.getBoundingClientRect();
+          const x = Math.max(0, Math.floor(rect.left - hostRect.left + EDGE_INSET));
+          const y = Math.max(0, Math.floor(rect.top  - hostRect.top  + EDGE_INSET));
+          const w = Math.min(W - x, Math.ceil(rect.width  - EDGE_INSET * 2));
+          const h = Math.min(H - y, Math.ceil(rect.height - EDGE_INSET * 2));
+          if (w <= 0 || h <= 0) continue;
+          if (!skipVis) {
+            const cx = rect.left + rect.width / 2;
+            const cy = rect.top  + rect.height / 2;
+            const topHit = document.elementFromPoint(cx, cy);
+            if (!topHit) continue;
+            if (topHit !== leaf && !leaf.contains(topHit) && !topHit.contains(leaf)) continue;
           }
-        }
-        if (rgb) {
-          refCtx.fillStyle = `rgb(${rgb[0]},${rgb[1]},${rgb[2]})`;
-          refCtx.fillRect(x, y, w, h);
+          const id = registry.length;
+          registry.push({ meshId, poly, el: leaf });
+          const enc = id + 1;
+          ctx.fillStyle = `rgb(${(enc >> 16) & 0xff},${(enc >> 8) & 0xff},${enc & 0xff})`;
+          ctx.fillRect(x, y, w, h);
         }
       }
       const idxBuf = ctx.getImageData(0, 0, W, H).data;
-      return { idxBuf, colors, W, H, refCanvas };
+      return { idxBuf, registry, W, H };
     }
-    function polyAtBuf(buf, x, y) {
+    // Returns the registry entry { meshId, poly, el } at a pixel, or null.
+    function ownerAtBuf(buf, x, y) {
       const i = (y * buf.W + x) * 4;
       const enc = (buf.idxBuf[i] << 16) | (buf.idxBuf[i + 1] << 8) | buf.idxBuf[i + 2];
-      return enc === 0 ? null : enc - 1;
+      return enc === 0 ? null : (buf.registry[enc - 1] ?? null);
+    }
+    // Topmost real polygon owner at a screen point, across all meshes.
+    // Skips shadow SVGs (no data-poly-index) and the light helper. Used to
+    // verify AABB attribution before a pixel is counted as a mismatch.
+    function trueOwnerAt(clientX, clientY) {
+      const stack = document.elementsFromPoint(clientX, clientY);
+      for (const el of stack) {
+        if (!el.getAttribute) continue;
+        const idxAttr = el.getAttribute("data-poly-index");
+        if (idxAttr === null) continue;
+        const meshAncestor = el.closest("[data-poly-mesh-id]");
+        if (!meshAncestor) continue;
+        const meshId = meshAncestor.getAttribute("data-poly-mesh-id");
+        if (meshId === "light-helper") continue;
+        return { meshId, poly: +idxAttr, el };
+      }
+      return null;
     }
 
-    // Set / clear the red outline class on PolyCSS leaves.
-    function setMismatchOutlines(polyIndices, scopeEl) {
+    // Set / clear the red outline class on a given list of PolyCSS leaves
+    // (already resolved across whichever mesh owns them).
+    function setMismatchOutlines(els) {
       const live = polyHost.querySelectorAll("[data-oracle-mismatch]");
       for (const el of live) el.removeAttribute("data-oracle-mismatch");
-      if (!polyIndices.size || !scopeEl) return;
-      for (const idx of polyIndices) {
-        const el = scopeEl.querySelector(`[data-poly-index="${idx}"]`);
+      for (const el of els) {
         if (el) el.setAttribute("data-oracle-mismatch", "1");
       }
+    }
+
+    // ── Real PolyCSS pixel capture ──────────────────────────────────────
+    // html-to-image rasterises the DOM via an SVG <foreignObject>, which
+    // DROPS the 3D-`matrix3d`-transformed receiver-shadow SVGs (~99.5% of
+    // the floor cast shadow vanished in measurements). The oracle therefore
+    // captures the REAL composited frame instead:
+    //   • interactive button → Screen Capture API (getDisplayMedia of the
+    //     current tab) + Region Capture (cropTo the poly-host element);
+    //   • headless driver → Playwright screenshots #poly-host and injects it
+    //     via window.oracleCompareWithImage(dataUrl).
+    // Both feed identical real pixels into the shared compare core. The
+    // legacy html-to-image path stays only as a last-resort fallback (with a
+    // visible warning) when tab capture is denied/unavailable.
+    let _capStream = null, _capTrack = null, _capImageCapture = null, _capCropped = false;
+    async function ensureTabCapture() {
+      if (_capTrack && _capTrack.readyState === "live") return true;
+      if (!navigator.mediaDevices?.getDisplayMedia) return false;
+      try {
+        _capStream = await navigator.mediaDevices.getDisplayMedia({
+          video: { frameRate: 12 }, audio: false, preferCurrentTab: true,
+        });
+        _capTrack = _capStream.getVideoTracks()[0];
+        _capCropped = false;
+        // Region Capture: crop the tab frame down to the poly-host element so
+        // grabFrame returns just the PolyCSS render (no sidebar / other stage).
+        if (window.CropTarget?.fromElement && _capTrack.cropTo) {
+          try {
+            const ct = await window.CropTarget.fromElement(polyHost);
+            await _capTrack.cropTo(ct);
+            _capCropped = true;
+          } catch (e) { console.warn("[oracle] cropTo failed, will crop manually", e); }
+        }
+        _capImageCapture = window.ImageCapture ? new ImageCapture(_capTrack) : null;
+        _capTrack.addEventListener("ended", () => { _capTrack = null; _capImageCapture = null; });
+        return true;
+      } catch (e) {
+        console.warn("[oracle] tab capture denied/unavailable", e);
+        return false;
+      }
+    }
+    // Grab one real frame and return W×H ImageData of #poly-host, or null.
+    async function grabRealPolyPx(W, H) {
+      if (!_capTrack || _capTrack.readyState !== "live") return null;
+      let bitmap;
+      try {
+        if (_capImageCapture) bitmap = await _capImageCapture.grabFrame();
+        else return null;
+      } catch (e) { console.warn("[oracle] grabFrame failed", e); return null; }
+      const c = document.createElement("canvas");
+      c.width = W; c.height = H;
+      const cx = c.getContext("2d");
+      if (_capCropped) {
+        // Region-captured frame is already just the poly-host area.
+        cx.drawImage(bitmap, 0, 0, bitmap.width, bitmap.height, 0, 0, W, H);
+      } else {
+        // Whole-tab frame: crop the host rect (scaled by frame/viewport).
+        const rect = polyHost.getBoundingClientRect();
+        const sx = bitmap.width / window.innerWidth;
+        const sy = bitmap.height / window.innerHeight;
+        cx.drawImage(bitmap, rect.left * sx, rect.top * sy, rect.width * sx, rect.height * sy, 0, 0, W, H);
+      }
+      bitmap.close?.();
+      return cx.getImageData(0, 0, W, H).data;
+    }
+    // Decode a data-URL screenshot (Playwright headless) into W×H ImageData.
+    async function dataUrlToPolyPx(dataUrl, W, H) {
+      const img = new Image();
+      await new Promise((r, rej) => { img.onload = r; img.onerror = rej; img.src = dataUrl; });
+      const c = document.createElement("canvas");
+      c.width = W; c.height = H;
+      const cx = c.getContext("2d");
+      cx.drawImage(img, 0, 0, img.width, img.height, 0, 0, W, H);
+      return cx.getImageData(0, 0, W, H).data;
+    }
+
+    // ── Emitter (caster) attribution via raytracing ─────────────────────
+    // A "hole" is a receiver pixel three.js shadows but PolyCSS leaves lit —
+    // a shadow PolyCSS failed to cast. To name the EMITTER responsible,
+    // unproject the pixel to its 3D floor point P, then cast a ray P→light:
+    // the first caster polygon it hits is the occluder that SHOULD be
+    // shadowing P. Those polys get a green border.
+    function setCasterOutlines(polyIndices) {
+      for (const el of polyHost.querySelectorAll('[data-oracle-caster="1"]')) {
+        el.removeAttribute("data-oracle-caster");
+      }
+      const meshEl = polyHost.querySelector(`[data-poly-mesh-id="${S.mesh}"]`);
+      if (!meshEl) return;
+      for (const idx of polyIndices) {
+        const el = meshEl.querySelector(`[data-poly-index="${idx}"]`);
+        if (el) el.setAttribute("data-oracle-caster", "1");
+      }
+    }
+    // World-space caster triangles of the active mesh: { poly, a, b, c }.
+    function activeCasterWorldTris() {
+      const m = activePolyMesh();
+      if (!m || !m.polygons) return [];
+      const pos = m.getPosition?.() ?? [0, 0, 0];
+      const sc = m.getScale?.() ?? 1;
+      const s = typeof sc === "number" ? [sc, sc, sc] : sc;
+      const tris = [];
+      for (let pi = 0; pi < m.polygons.length; pi++) {
+        const v = m.polygons[pi]?.vertices;
+        if (!v || v.length < 3) continue;
+        const w = v.map((p) => [p[0]*s[0]+pos[0], p[1]*s[1]+pos[1], p[2]*s[2]+pos[2]]);
+        for (let t = 1; t < w.length - 1; t++) tris.push({ poly: pi, a: w[0], b: w[t], c: w[t+1] });
+      }
+      return tris;
+    }
+    // Möller–Trumbore ray/triangle. Returns hit distance t (> minT) or null.
+    // minT defaults to a small positive eps (forward hits only); pass
+    // -Infinity to also accept hits behind the origin (used to land the
+    // view ray on a receiver face that may sit at negative t for ortho).
+    function rayTri(o, d, a, b, c, minT = 1e-3) {
+      const e1x=b[0]-a[0], e1y=b[1]-a[1], e1z=b[2]-a[2];
+      const e2x=c[0]-a[0], e2y=c[1]-a[1], e2z=c[2]-a[2];
+      const px=d[1]*e2z-d[2]*e2y, py=d[2]*e2x-d[0]*e2z, pz=d[0]*e2y-d[1]*e2x;
+      const det=e1x*px+e1y*py+e1z*pz;
+      if (det>-1e-9 && det<1e-9) return null;
+      const inv=1/det;
+      const tx=o[0]-a[0], ty=o[1]-a[1], tz=o[2]-a[2];
+      const u=(tx*px+ty*py+tz*pz)*inv;
+      if (u<-1e-6||u>1+1e-6) return null;
+      const qx=ty*e1z-tz*e1y, qy=tz*e1x-tx*e1z, qz=tx*e1y-ty*e1x;
+      const vv=(d[0]*qx+d[1]*qy+d[2]*qz)*inv;
+      if (vv<-1e-6||u+vv>1+1e-6) return null;
+      const t=(e2x*qx+e2y*qy+e2z*qz)*inv;
+      return t>minT ? t : null;
+    }
+    // First caster polygon hit by ray o+t·d (t>eps), skipping `excludePoly`.
+    function firstCasterHit(tris, o, d, excludePoly = -1) {
+      let best=Infinity, bestPoly=-1;
+      for (const tri of tris) {
+        if (tri.poly === excludePoly) continue;
+        const t = rayTri(o, d, tri.a, tri.b, tri.c);
+        if (t!==null && t<best) { best=t; bestPoly=tri.poly; }
+      }
+      return bestPoly;
+    }
+    // The 3D point where the view ray lands on a specific receiver polygon
+    // (any t — the face may be at negative t under orthographic). Returns
+    // null if the ray misses that poly's triangles.
+    function rayHitOnPoly(tris, o, d, poly) {
+      let bestT = null, bestAbs = Infinity;
+      for (const tri of tris) {
+        if (tri.poly !== poly) continue;
+        const t = rayTri(o, d, tri.a, tri.b, tri.c, -Infinity);
+        if (t !== null && Math.abs(t) < bestAbs) { bestAbs = Math.abs(t); bestT = t; }
+      }
+      if (bestT === null) return null;
+      return [o[0]+bestT*d[0], o[1]+bestT*d[1], o[2]+bestT*d[2]];
     }
 
     let oracleRunToken = 0;
     let oracleBusy = false;
     let oracleQueued = false;
 
-    async function compareFrame() {
+    async function compareFrame(opts) {
       if (oracleBusy) { oracleQueued = true; return; }
       oracleBusy = true;
       const myToken = ++oracleRunToken;
+      // Clear last run's polygon outlines up front so a run that bails early
+      // (no active mesh, tiny viewport, token superseded) never leaves stale
+      // outlines on the render.
+      setMismatchOutlines([]);
+      setCasterOutlines([]);
       try {
         oracleStatus.textContent = "Snapshotting…";
         const hostRect = polyHost.getBoundingClientRect();
@@ -1910,18 +2058,38 @@
         const threePx = threeBufCtx.getImageData(0, 0, W, H).data;
         if (myToken !== oracleRunToken) return;
 
-        // Capture the LIVE PolyCSS DOM via html-to-image. This is the
-        // expensive step (~200-400 ms) but gives us byte-accurate pixels
-        // INCLUDING receiver-shadow SVGs, atlas-textured polys, and any
-        // CSS effects that the leaf-color approximation misses.
-        await Promise.all([...polyHost.querySelectorAll("img")].map((img) =>
-          img.complete ? null : new Promise((r) => { img.onload = img.onerror = r; })));
-        const polyCanvas = await htmlToImage.toCanvas(polyHost, {
-          width: W, height: H, pixelRatio: 1, cacheBust: false,
-        });
+        // Acquire REAL composited PolyCSS pixels. Priority:
+        //   1. opts.polyPx — pre-decoded pixels (headless driver path).
+        //   2. live tab-capture stream (interactive "Compare now").
+        //   3. html-to-image fallback (drops 3D shadow SVGs — warns).
+        // A fresh frame is grabbed AFTER the helpers were hidden above, so
+        // give the compositor one rAF to present the hidden state first.
+        await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+        let polyPx = opts?.polyPx ?? null;
+        let captureMode = polyPx ? "injected" : null;
+        if (!polyPx) {
+          polyPx = await grabRealPolyPx(W, H);
+          if (polyPx) captureMode = "tab-capture";
+        }
+        if (!polyPx) {
+          // Fallback: html-to-image (unreliable for 3D shadow SVGs).
+          await Promise.all([...polyHost.querySelectorAll("img")].map((img) =>
+            img.complete ? null : new Promise((r) => { img.onload = img.onerror = r; })));
+          const polyCanvas = await htmlToImage.toCanvas(polyHost, {
+            width: W, height: H, pixelRatio: 1, cacheBust: false,
+          });
+          polyPx = polyCanvas.getContext("2d").getImageData(0, 0, W, H).data;
+          captureMode = "html-to-image(⚠ shadows dropped)";
+        }
         if (myToken !== oracleRunToken) return;
-        const polyBufCtx = polyCanvas.getContext("2d");
-        const polyPx = polyBufCtx.getImageData(0, 0, W, H).data;
+        // Re-expose a polyCanvas-shaped surface for the thumbnail below.
+        const polyThumbSrc = (() => {
+          const c = document.createElement("canvas");
+          c.width = W; c.height = H;
+          const id = new ImageData(new Uint8ClampedArray(polyPx), W, H);
+          c.getContext("2d").putImageData(id, 0, 0);
+          return c;
+        })();
         oracleStatus.textContent = "Comparing…";
 
         // Resize oracle output canvases to match the source's CSS bbox.
@@ -1935,34 +2103,36 @@
         const perPoly = new Map();
         const tol = oracleLumaTolerance;
 
-        // The active-model wrapper. The bench has multiple meshes inside
-        // #poly-host (castle/cube/E/cottage + floor + light helper); the
-        // oracle only inspects the user-selected model.
+        // All meshes the oracle inspects: the user-selected caster model
+        // AND the floor receiver (the cast shadow on the floor is just a
+        // disagreement on the floor mesh's polygon). The light helper is
+        // excluded. Earlier the oracle scoped everything to the active mesh
+        // alone, so floor cast-shadow errors (missing/holed shadows) were
+        // never sampled — they fell outside the active mesh's AABBs.
         const activeMeshEl = polyHost.querySelector(`[data-poly-mesh-id="${S.mesh}"]`);
         if (!activeMeshEl) {
           oracleStatus.textContent = "Waiting for active mesh…";
           return;
         }
+        const meshEls = [...polyHost.querySelectorAll("[data-poly-mesh-id]")]
+          .filter((el) => el.getAttribute("data-poly-mesh-id") !== "light-helper");
 
-        // Build the polygon-index canvas + leaf-color cache once for this
-        // compare. ~5-20 ms total (one DOM walk + N fillRects), replaces
-        // ~600 ms of per-pixel elementsFromPoint calls AND fills coverage
-        // gaps (shadow SVGs and interior shells were silently blocking
-        // elementsFromPoint at the castle's central tower, hiding the
-        // disagreement).
-        const indexBuf = buildPolyIndexAndColors(activeMeshEl, hostRect, W, H);
+        // Build the global polygon-index canvas across all meshes once. The
+        // buffer is the coarse "which poly is a candidate here" mask +
+        // sampling gate; per-flagged-pixel elementsFromPoint verifies the
+        // true owner before a pixel counts.
+        const indexBuf = buildPolyIndex(meshEls, hostRect, W, H);
 
         // First pass — sample every stride'd mesh pixel. PolyCSS colour
         // comes from the html-to-image snapshot (REAL rendered pixels
         // including receiver-shadow SVGs and atlas textures); three.js
         // colour comes from the WebGL canvas snapshot. The indexBuf only
-        // tells us WHICH polygon a pixel belongs to — its color contents
-        // are unused now.
+        // tells us WHICH polygon (and mesh) a pixel belongs to.
         const samples = [];
         for (let y = 0; y < H; y += ORACLE_STRIDE) {
           for (let x = 0; x < W; x += ORACLE_STRIDE) {
-            const polyIdx = polyAtBuf(indexBuf, x, y);
-            if (polyIdx === null) continue;
+            const owner = ownerAtBuf(indexBuf, x, y);
+            if (owner === null) continue;
             const i = (y * W + x) * 4;
             // Both engines paint the bg color where there's no visible
             // mesh. If either snapshot is bg at this pixel, the polygon
@@ -1974,7 +2144,7 @@
             if (isBgPixel(threePx[i], threePx[i + 1], threePx[i + 2])) continue;
             const lumaPoly  = 0.2126 * polyPx[i]    + 0.7152 * polyPx[i + 1]   + 0.0722 * polyPx[i + 2];
             const lumaThree = 0.2126 * threePx[i]   + 0.7152 * threePx[i + 1]  + 0.0722 * threePx[i + 2];
-            samples.push({ x, y, polyIdx, d: Math.abs(lumaPoly - lumaThree) });
+            samples.push({ x, y, owner, d: Math.abs(lumaPoly - lumaThree) });
           }
         }
         const totalMesh = samples.length;
@@ -2004,28 +2174,44 @@
         // one elementsFromPoint hit-test and confirm A IS the topmost
         // data-poly-index element there. If not, drop the sample —
         // it's a false attribution.
+        // Bucket key is `${meshId}#${poly}` so polygon indices that repeat
+        // across meshes (floor #0 vs castle #0) never collide.
+        const keyOf = (o) => `${o.meshId}#${o.poly}`;
         let totalMismatch = 0;
         let maxCal = 0;
         const perPolyDeltas = new Map();
+        // Floor pixels three.js shadows but PolyCSS leaves lit (missing
+        // cast shadow). Fed to the raytracer below to name the emitter.
+        const holePixels = [];
         for (const s of samples) {
           const dCal = Math.abs(s.d - baseline);
           if (dCal > maxCal) maxCal = dCal;
           if (dCal < tol) continue;
-          // Verify attribution.
-          const cx = hostRect.left + s.x;
-          const cy = hostRect.top + s.y;
-          const stack = document.elementsFromPoint(cx, cy);
-          let trueOwner = null;
-          for (const el of stack) {
-            if (!el.getAttribute) continue;
-            const idxAttr = el.getAttribute("data-poly-index");
-            if (idxAttr === null) continue;
-            if (!activeMeshEl.contains(el)) continue;
-            trueOwner = +idxAttr;
-            break;
-          }
-          if (trueOwner !== s.polyIdx) continue;
+          // Resolve the TRUE owner from the live compositor (topmost real
+          // polygon across all meshes), not the coarse AABB index buffer.
+          // The index buffer only gates sampling — its AABBs over-cover and
+          // overpaint neighbours, so attributing by it both invents false
+          // positives AND silently drops real disagreements where the guess
+          // landed on the wrong poly (the missed tower faces). Re-attributing
+          // to elementsFromPoint fixes both: a pixel is counted against the
+          // polygon actually painted there. `null` = only a shadow SVG / bg
+          // sits here (no real poly) → genuinely nothing to attribute.
+          const owner = trueOwnerAt(hostRect.left + s.x, hostRect.top + s.y);
+          if (!owner) continue;
           totalMismatch += 1;
+          // Missing-shadow detection: three.js notably darker than PolyCSS
+          // here → a shadow PolyCSS failed to cast. Record the receiver so
+          // the raytracer can find P (on the floor plane, or on the castle
+          // face for self-shadow holes) and name the occluder.
+          {
+            const ii = (s.y * W + s.x) * 4;
+            const lp = 0.2126*polyPx[ii]   + 0.7152*polyPx[ii+1]   + 0.0722*polyPx[ii+2];
+            const lt = 0.2126*threePx[ii]  + 0.7152*threePx[ii+1]  + 0.0722*threePx[ii+2];
+            if (lt + 6 < lp) {
+              if (owner.meshId === "floor") holePixels.push({ x: s.x, y: s.y, receiver: "floor" });
+              else if (owner.meshId === S.mesh) holePixels.push({ x: s.x, y: s.y, receiver: owner.poly });
+            }
+          }
           const intensity = Math.min(1, dCal / 120);
           const r = 255;
           const g = Math.round(255 * intensity);
@@ -2041,18 +2227,22 @@
               diffImg.data[di + 3] = a;
             }
           }
-          let bucket = perPoly.get(s.polyIdx);
-          if (!bucket) { bucket = { idx: s.polyIdx, sum: 0, pixels: 0 }; perPoly.set(s.polyIdx, bucket); }
+          const key = keyOf(owner);
+          let bucket = perPoly.get(key);
+          if (!bucket) {
+            bucket = { key, meshId: owner.meshId, idx: owner.poly, el: owner.el, sum: 0, pixels: 0 };
+            perPoly.set(key, bucket);
+          }
           bucket.sum += dCal;
           bucket.pixels += 1;
-          let arr = perPolyDeltas.get(s.polyIdx);
-          if (!arr) { arr = []; perPolyDeltas.set(s.polyIdx, arr); }
+          let arr = perPolyDeltas.get(key);
+          if (!arr) { arr = []; perPolyDeltas.set(key, arr); }
           arr.push(dCal);
         }
         // Promote median into each bucket so the ranking below uses it.
-        for (const [idx, arr] of perPolyDeltas) {
+        for (const [key, arr] of perPolyDeltas) {
           arr.sort((a, b) => a - b);
-          const bucket = perPoly.get(idx);
+          const bucket = perPoly.get(key);
           if (bucket) bucket.median = arr[arr.length >> 1];
         }
         // Paint the diff ImageData at DPR for crisp output.
@@ -2063,19 +2253,25 @@
 
         // Rank polys by per-poly MEDIAN delta (not mean) × pixel count.
         // Median is more robust to half-shadowed polys where mean dilutes
-        // the wrong-side signal with the right-side pixels.
+        // the wrong-side signal with the right-side pixels. Each entry
+        // carries its meshId so floor and caster polys stay distinct.
         const ranked = [...perPoly.values()]
           .filter((b) => b.pixels >= ORACLE_MIN_PIXELS)
           .map((b) => ({
+            meshId: b.meshId,
             idx: b.idx,
+            el: b.el,
             pixels: b.pixels,
             avg: b.sum / b.pixels,
             median: b.median ?? (b.sum / b.pixels),
           }))
           .sort((a, b) => (b.median * b.pixels) - (a.median * a.pixels));
+        // Short per-row label: bare `#idx` for the active mesh, `mesh#idx`
+        // for everything else (so floor rows read `floor#0`).
+        const labelOf = (r) => (r.meshId === S.mesh ? `#${r.idx}` : `${r.meshId}#${r.idx}`);
 
         // Misclassified canvas: draw the same diff heatmap LIGHTER, then
-        // outline each ranked polygon's screen bbox + label its index.
+        // outline each ranked polygon's screen bbox + label it.
         missesCtx.setTransform(1, 0, 0, 1, 0, 0);
         missesCtx.clearRect(0, 0, missesCanvas.width, missesCanvas.height);
         missesCtx.fillStyle = "#0f172a";
@@ -2085,26 +2281,74 @@
         missesCtx.drawImage(tmp, 0, 0, missesCanvas.width, missesCanvas.height);
         missesCtx.restore();
         const scale = missesCanvas.width / W;
-        const mesh = activeMeshEl;
-        if (mesh) {
-          missesCtx.font = `${Math.round(11 * scale)}px ui-monospace, monospace`;
-          missesCtx.lineWidth = Math.max(1, 2 * scale);
-          missesCtx.strokeStyle = "#ef4444";
-          missesCtx.fillStyle = "#fef2f2";
-          for (let i = 0; i < Math.min(40, ranked.length); i++) {
-            const el = mesh.querySelector(`[data-poly-index="${ranked[i].idx}"]`);
-            if (!el) continue;
-            const r = el.getBoundingClientRect();
-            const x = (r.left - hostRect.left) * scale;
-            const y = (r.top  - hostRect.top)  * scale;
-            const w = r.width  * scale;
-            const h = r.height * scale;
-            missesCtx.strokeRect(x, y, w, h);
-            missesCtx.fillText(`#${ranked[i].idx}`, x + 2, y + 12 * scale);
+        missesCtx.font = `${Math.round(11 * scale)}px ui-monospace, monospace`;
+        missesCtx.lineWidth = Math.max(1, 2 * scale);
+        missesCtx.strokeStyle = "#ef4444";
+        missesCtx.fillStyle = "#fef2f2";
+        for (let i = 0; i < Math.min(40, ranked.length); i++) {
+          const el = ranked[i].el;
+          if (!el) continue;
+          const r = el.getBoundingClientRect();
+          const x = (r.left - hostRect.left) * scale;
+          const y = (r.top  - hostRect.top)  * scale;
+          const w = r.width  * scale;
+          const h = r.height * scale;
+          missesCtx.strokeRect(x, y, w, h);
+          missesCtx.fillText(labelOf(ranked[i]), x + 2, y + 12 * scale);
+        }
+        // Highlight on the live PolyCSS render = CSS outline on the actual
+        // polygon DOM leaves (the outline follows each leaf's transformed
+        // quad). setMismatchOutlines clears the previous run's outlines
+        // first, so they never accumulate between compares.
+        setMismatchOutlines(ranked.map((r) => r.el));
+
+        // Emitter attribution: raytrace each floor hole back to the caster
+        // polygon that SHOULD be occluding the light there, and border those
+        // green. The occluder is the first caster triangle a ray from the
+        // floor point toward the light (+dir, where the light source sits)
+        // intersects.
+        const casterCulprits = new Set();
+        if (holePixels.length) {
+          const tris = activeCasterWorldTris();
+          if (tris.length) {
+            // Light-source direction (the helper sits at +dir): from a
+            // shadowed point the occluder lies toward +dir.
+            const Llen = Math.hypot(S.dir.x, S.dir.y, S.dir.z) || 1;
+            const L = [S.dir.x / Llen, S.dir.y / Llen, S.dir.z / Llen];
+            const vcx = hostRect.left + hostRect.width / 2;
+            const vcy = hostRect.top + hostRect.height / 2;
+            // Cap the ray count — we only need the SET of occluders, not a
+            // per-pixel map, so a strided subsample of holes suffices.
+            const MAX_RAYS = 1500;
+            const stepH = Math.max(1, Math.floor(holePixels.length / MAX_RAYS));
+            for (let k = 0; k < holePixels.length; k += stepH) {
+              const hp = holePixels[k];
+              const { origin, direction } = screenToWorldRay({
+                camera: polyScene.camera.state, tileSize: POLY_TILE,
+                viewportCenterX: vcx, viewportCenterY: vcy,
+                mouseX: hostRect.left + hp.x, mouseY: hostRect.top + hp.y,
+              });
+              // Receiver point P: floor plane z=0, or the castle face itself
+              // for a self-shadow hole.
+              let P = null, excludePoly = -1;
+              if (hp.receiver === "floor") {
+                if (Math.abs(direction[2]) < 1e-9) continue;
+                const tf = -origin[2] / direction[2];
+                P = [origin[0] + tf * direction[0], origin[1] + tf * direction[1], 0];
+              } else {
+                P = rayHitOnPoly(tris, origin, direction, hp.receiver);
+                excludePoly = hp.receiver;
+              }
+              if (!P) continue;
+              // Nudge off the receiver surface toward the light before casting
+              // so a coplanar/adjacent face doesn't self-hit at grazing angle.
+              const O = [P[0] + L[0] * 0.01, P[1] + L[1] * 0.01, P[2] + L[2] * 0.01];
+              const poly = firstCasterHit(tris, O, L, excludePoly);
+              if (poly >= 0) casterCulprits.add(poly);
+            }
           }
         }
-        // Live red outline on the actual PolyCSS DOM for the top offenders.
-        setMismatchOutlines(new Set(ranked.slice(0, 40).map((r) => r.idx)), activeMeshEl);
+        setCasterOutlines(casterCulprits);
 
         // Paint the two source thumbnails. polyThumbCanvas shows the
         // EXACT bitmap we used as PolyCSS reference (leaf colors stamped
@@ -2117,7 +2361,7 @@
         const ttx = threeThumbCanvas.getContext("2d");
         ptx.fillStyle = "#0f172a"; ptx.fillRect(0, 0, tw, th);
         ttx.fillStyle = "#0f172a"; ttx.fillRect(0, 0, tw, th);
-        ptx.drawImage(polyCanvas, 0, 0, tw, th);
+        ptx.drawImage(polyThumbSrc, 0, 0, tw, th);
         ttx.drawImage(threeBuf, 0, 0, tw, th);
 
         // Sidebar list.
@@ -2126,7 +2370,7 @@
           const row = document.createElement("div");
           row.className = "oracle-row";
           row.innerHTML =
-            `<code>#${r.idx}</code>` +
+            `<code>${labelOf(r)}</code>` +
             `<span>${r.pixels}px · med Δ${r.median.toFixed(0)} · avg Δ${r.avg.toFixed(0)}</span>` +
             `<span class="delta">${Math.round(r.median * r.pixels / 100)}</span>`;
           row.addEventListener("click", () => {
@@ -2134,8 +2378,7 @@
             row.classList.add("is-selected");
             const live = polyHost.querySelectorAll('[data-oracle-focus="1"]');
             for (const el of live) el.removeAttribute("data-oracle-focus");
-            const el = mesh && mesh.querySelector(`[data-poly-index="${r.idx}"]`);
-            if (el) el.setAttribute("data-oracle-focus", "1");
+            if (r.el) r.el.setAttribute("data-oracle-focus", "1");
           });
           oracleResults.appendChild(row);
         }
@@ -2146,8 +2389,43 @@
         // baseline (p20) is what we subtract; median (p50) is shown so
         // the user can read the bimodal gap. max Δ tells you the ceiling.
         oracleStatus.textContent =
-          `${ranked.length} polys · ${totalMismatch}/${totalMesh} px (${pct}%) · min Δ ${tol} · base Δ${baseline.toFixed(0)} · med Δ${median.toFixed(0)} · max Δ${maxCal.toFixed(0)}${hint}`;
-        window.__oracle = { ranked, perPoly, W, H };
+          `[${captureMode}] ${ranked.length} polys · ${totalMismatch}/${totalMesh} px (${pct}%) · min Δ ${tol} · base Δ${baseline.toFixed(0)} · med Δ${median.toFixed(0)} · max Δ${maxCal.toFixed(0)}${hint}`;
+
+        // Per-mesh rollup for the JSON verdict.
+        const byMesh = {};
+        for (const r of ranked) {
+          const m = (byMesh[r.meshId] ??= { mismatchPixels: 0, polys: [] });
+          m.mismatchPixels += r.pixels;
+          m.polys.push({ poly: r.idx, pixels: r.pixels, medianDelta: +r.median.toFixed(1), avgDelta: +r.avg.toFixed(1) });
+        }
+        // Machine-readable verdict — the headless contract. `polys` is the
+        // flat ranked list of every polygon (across all meshes) whose
+        // rendered shading/shadow disagrees with three.js beyond `tol`.
+        window.__oracle = {
+          mesh: S.mesh,
+          captureMode,
+          tol,
+          camera: { rotX: S.cam.rotX, rotY: S.cam.rotY, zoom: S.cam.zoom },
+          light: { dx: S.dir.x, dy: S.dir.y, dz: S.dir.z, intensity: S.dir.intensity, ambient: S.amb.intensity },
+          missingShadowCasters: [...casterCulprits].sort((a, b) => a - b),
+          missingShadowPixels: holePixels.length,
+          totalSampled: totalMesh,
+          totalMismatch,
+          mismatchPct: +pct,
+          baseline: +baseline.toFixed(1),
+          median: +median.toFixed(1),
+          maxDelta: +maxCal.toFixed(1),
+          byMesh,
+          polys: ranked.map((r) => ({
+            meshId: r.meshId,
+            poly: r.idx,
+            label: labelOf(r),
+            pixels: r.pixels,
+            medianDelta: +r.median.toFixed(1),
+            avgDelta: +r.avg.toFixed(1),
+            score: +(r.median * r.pixels / 100).toFixed(1),
+          })),
+        };
       } catch (err) {
         oracleStatus.textContent = "Error: " + (err && err.message || String(err));
         console.error("[oracle]", err);
@@ -2163,7 +2441,48 @@
       }
     }
 
-    oracleCompareBtn.addEventListener("click", compareFrame);
+    // "Compare now" — acquire (or reuse) a real tab-capture stream first so
+    // the diff uses true composited pixels, then compare. The click is the
+    // user gesture getDisplayMedia requires; the "share this tab" prompt
+    // appears once per session and the stream is reused after.
+    oracleCompareBtn.addEventListener("click", async () => {
+      const ok = await ensureTabCapture();
+      if (!ok) oracleStatus.textContent = "⚠ tab capture denied — falling back to html-to-image (shadows unreliable)";
+      await compareFrame();
+    });
+
+    // Headless contract. The Playwright driver screenshots #poly-host (the
+    // REAL compositor output, including 3D-transformed shadow SVGs) and
+    // passes it as a data URL; we decode it, diff against three.js, and
+    // resolve to the JSON verdict (window.__oracle). Usage:
+    //   const shot = await (await page.$('#poly-host')).screenshot();
+    //   const json = await page.evaluate(d => window.oracleCompareWithImage(d),
+    //                                    'data:image/png;base64,' + shot.toString('base64'));
+    window.oracleCompareWithImage = async (dataUrl) => {
+      const hostRect = polyHost.getBoundingClientRect();
+      const W = Math.round(hostRect.width), H = Math.round(hostRect.height);
+      const polyPx = await dataUrlToPolyPx(dataUrl, W, H);
+      await compareFrame({ polyPx });
+      return window.__oracle ?? null;
+    };
+    // Let the headless driver hide the light-helper octahedron before it
+    // screenshots #poly-host (the injected image is captured BEFORE
+    // compareFrame runs, so the helper would otherwise bleed into the diff).
+    window.oracleSetHelpersHidden = (hidden) => {
+      const el = polyHost.querySelector('[data-poly-mesh-id="light-helper"]');
+      if (el) el.style.visibility = hidden ? "hidden" : "";
+      threeLightHelper.visible = !hidden;
+      threeLightLine.visible = !hidden;
+      renderer.render(threeScene, camera);
+    };
+    // Fallback headless entry that uses whatever in-page capture is available
+    // (tab-capture if a stream exists, else html-to-image). Prefer
+    // oracleCompareWithImage with a Playwright screenshot for trustworthy
+    // shadow pixels.
+    window.runShadowOracle = async () => {
+      await compareFrame();
+      return window.__oracle ?? null;
+    };
 
     // Live mode — opt-in. Re-runs compareFrame after every update() call
     // (debounced 350 ms to let the async atlas rebake settle). Off by
