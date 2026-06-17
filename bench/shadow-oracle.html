@@ -1971,6 +1971,41 @@
       }
       return tris;
     }
+    // World-space XYZ-Euler rotation (matches three.js group.rotation and the
+    // mesh wrapper): M = Rx·Ry·Rz applied to the point, i.e. Rz first.
+    function rotateWorldXYZ(p, rxDeg, ryDeg, rzDeg) {
+      let [x, y, z] = p;
+      if (rzDeg) { const a = rzDeg*Math.PI/180, c = Math.cos(a), s = Math.sin(a); [x, y] = [x*c - y*s, x*s + y*c]; }
+      if (ryDeg) { const a = ryDeg*Math.PI/180, c = Math.cos(a), s = Math.sin(a); [x, z] = [x*c + z*s, -x*s + z*c]; }
+      if (rxDeg) { const a = rxDeg*Math.PI/180, c = Math.cos(a), s = Math.sin(a); [y, z] = [y*c - z*s, y*s + z*c]; }
+      return [x, y, z];
+    }
+    // Rotation-correct caster tris: scale → rotate (about the mesh origin)
+    // → translate, the same TRS order three.js and the wrapper apply. The
+    // plain activeCasterWorldTris() above omits rotation, which mis-attributes
+    // occluders on rotated meshes — use THIS for the mask oracle's raytrace.
+    function activeCasterWorldTrisRot() {
+      const m = activePolyMesh();
+      if (!m || !m.polygons) return [];
+      const pos = m.getPosition?.() ?? [0, 0, 0];
+      const sc = m.getScale?.() ?? 1;
+      const s = typeof sc === "number" ? [sc, sc, sc] : sc;
+      const o = S.obj[S.mesh] ?? { rx: 0, ry: 0, rz: 0 };
+      const rx = o.rx || 0, ry = o.ry || 0, rz = o.rz || 0;
+      const hasRot = rx || ry || rz;
+      const tris = [];
+      for (let pi = 0; pi < m.polygons.length; pi++) {
+        const v = m.polygons[pi]?.vertices;
+        if (!v || v.length < 3) continue;
+        const w = v.map((p) => {
+          let q = [p[0]*s[0], p[1]*s[1], p[2]*s[2]];
+          if (hasRot) q = rotateWorldXYZ(q, rx, ry, rz);
+          return [q[0]+pos[0], q[1]+pos[1], q[2]+pos[2]];
+        });
+        for (let t = 1; t < w.length - 1; t++) tris.push({ poly: pi, a: w[0], b: w[t], c: w[t+1] });
+      }
+      return tris;
+    }
     // Möller–Trumbore ray/triangle. Returns hit distance t (> minT) or null.
     // minT defaults to a small positive eps (forward hits only); pass
     // -Infinity to also accept hits behind the origin (used to land the
@@ -2482,6 +2517,162 @@
     window.runShadowOracle = async () => {
       await compareFrame();
       return window.__oracle ?? null;
+    };
+
+    // ── Shadow-mask parity (the better oracle) ──────────────────────────
+    // Drives the existing "shadows only" mode so BOTH engines render just
+    // their shadow contribution (PolyCSS hides meshes → shadow SVGs only;
+    // three.js swaps to ShadowMaterial). Each render is reduced to a binary
+    // "in shadow?" mask, so the comparison is pure SHAPE — no luma tolerance,
+    // no darkness/tint offset, no antialias-edge noise. three.js stays the
+    // reference (its shadows are correct); we just compare shadow shape.
+    window.oracleSetShadowsOnly = (on) => {
+      S.shadowsOnly = !!on;
+      update();
+    };
+    // A pixel is "in shadow" in shadow-only mode when it's clearly darker
+    // than the light page background (#eef2f6 ≈ luma 240). Both engines
+    // darken shadowed pixels well below this; everything else stays bg.
+    const SHADOW_MASK_THRESH = 200;
+    function isShadowPx(d, i) {
+      const luma = 0.2126 * d[i] + 0.7152 * d[i+1] + 0.0722 * d[i+2];
+      return luma < SHADOW_MASK_THRESH;
+    }
+    // Compare shadow masks. `polyShadowUrl` is a Playwright screenshot of
+    // #poly-host taken in shadows-only mode (real compositor). three.js's
+    // shadow render is read straight from its WebGL canvas. Classifies every
+    // pixel and paints the illustration into the diff/misses panes.
+    window.oracleMaskCompare = async (polyShadowUrl) => {
+      const hostRect = polyHost.getBoundingClientRect();
+      const W = Math.round(hostRect.width), H = Math.round(hostRect.height);
+      if (W < 2 || H < 2) return null;
+      renderer.render(threeScene, camera);
+      const polyPx = await dataUrlToPolyPx(polyShadowUrl, W, H);
+      const tb = document.createElement("canvas"); tb.width = W; tb.height = H;
+      const tctx = tb.getContext("2d");
+      tctx.drawImage(threeCanvas, 0, 0, threeCanvas.width, threeCanvas.height, 0, 0, W, H);
+      const threePx = tctx.getImageData(0, 0, W, H).data;
+
+      resizeOracleCanvases();
+
+      // Raw binary masks.
+      const polyMask = new Uint8Array(W * H);
+      const threeMask = new Uint8Array(W * H);
+      for (let p = 0; p < W * H; p++) {
+        polyMask[p] = isShadowPx(polyPx, p * 4) ? 1 : 0;
+        threeMask[p] = isShadowPx(threePx, p * 4) ? 1 : 0;
+      }
+      // Tolerance dilation: the two engines rasterise the SAME shadow edge a
+      // fraction of a pixel apart, so a thin border band would falsely read as
+      // missing/extra. Count a three-shadow pixel as "missing" only when NO
+      // poly shadow sits within MASK_TOL px of it (and symmetrically for
+      // extra). This absorbs the boundary offset while keeping real INTERIOR
+      // holes / over-shadows.
+      const MASK_TOL = 2;
+      const dilate = (m) => {
+        let cur = m;
+        for (let pass = 0; pass < MASK_TOL; pass++) {
+          const next = new Uint8Array(cur);
+          for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+            const p = y * W + x;
+            if (cur[p]) continue;
+            if ((x > 0 && cur[p-1]) || (x < W-1 && cur[p+1]) ||
+                (y > 0 && cur[p-W]) || (y < H-1 && cur[p+W])) next[p] = 1;
+          }
+          cur = next;
+        }
+        return cur;
+      };
+      const polyD = dilate(polyMask), threeD = dilate(threeMask);
+
+      const diffImg = diffCtx.createImageData(W, H);
+      let missing = 0, extra = 0, agreeShadow = 0, agreeLit = 0;
+      const holePixels = [];
+      for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+          const p = y * W + x, i = p * 4;
+          const ps = polyMask[p], ts = threeMask[p];
+          let r = 0, g = 0, b = 0, a = 0;
+          if (ts && !polyD[p]) { missing++; r = 255; a = 235; if (((x|y) & 1) === 0) holePixels.push({ x, y }); }
+          else if (ps && !threeD[p]) { extra++; b = 255; r = 60; a = 200; }
+          else if (ps || ts) { agreeShadow++; r = g = b = 70; a = 160; }
+          else { agreeLit++; }
+          diffImg.data[i] = r; diffImg.data[i+1] = g; diffImg.data[i+2] = b; diffImg.data[i+3] = a;
+        }
+      }
+      const tmp = document.createElement("canvas"); tmp.width = W; tmp.height = H;
+      tmp.getContext("2d").putImageData(diffImg, 0, 0);
+      diffCtx.setTransform(1,0,0,1,0,0);
+      diffCtx.fillStyle = "#0f172a"; diffCtx.fillRect(0, 0, diffCanvas.width, diffCanvas.height);
+      diffCtx.drawImage(tmp, 0, 0, diffCanvas.width, diffCanvas.height);
+
+      // Mask thumbnails (what was thresholded), into the existing thumbs.
+      const drawMask = (canvas, px) => {
+        const tw = canvas.clientWidth || 160, th = canvas.clientHeight || 80;
+        canvas.width = tw; canvas.height = th;
+        const c = document.createElement("canvas"); c.width = W; c.height = H;
+        const id = c.getContext("2d").createImageData(W, H);
+        for (let i = 0; i < W*H; i++) {
+          const on = isShadowPx(px, i*4) ? 20 : 235;
+          id.data[i*4] = id.data[i*4+1] = id.data[i*4+2] = on; id.data[i*4+3] = 255;
+        }
+        c.getContext("2d").putImageData(id, 0, 0);
+        const ctx2 = canvas.getContext("2d");
+        ctx2.fillStyle = "#0f172a"; ctx2.fillRect(0,0,tw,th);
+        ctx2.drawImage(c, 0, 0, tw, th);
+      };
+      drawMask(polyThumbCanvas, polyPx);
+      drawMask(threeThumbCanvas, threePx);
+      polyCap.textContent = "PolyCSS shadow mask";
+      threeCap.textContent = "Three.js shadow mask";
+
+      // Attribute each missing region to the occluder caster poly via the
+      // (rotation-correct) raytrace, and green-border those on the render.
+      const casterCulprits = new Set();
+      if (holePixels.length) {
+        const tris = activeCasterWorldTrisRot();
+        if (tris.length) {
+          const Llen = Math.hypot(S.dir.x, S.dir.y, S.dir.z) || 1;
+          const L = [S.dir.x/Llen, S.dir.y/Llen, S.dir.z/Llen];
+          const vcx = hostRect.left + hostRect.width/2, vcy = hostRect.top + hostRect.height/2;
+          const MAX_RAYS = 1500;
+          const stepH = Math.max(1, Math.floor(holePixels.length / MAX_RAYS));
+          for (let k = 0; k < holePixels.length; k += stepH) {
+            const hp = holePixels[k];
+            const { origin, direction } = screenToWorldRay({
+              camera: polyScene.camera.state, tileSize: POLY_TILE,
+              viewportCenterX: vcx, viewportCenterY: vcy,
+              mouseX: hostRect.left + hp.x, mouseY: hostRect.top + hp.y,
+            });
+            if (Math.abs(direction[2]) < 1e-9) continue;
+            const tf = -origin[2] / direction[2];
+            const P = [origin[0]+tf*direction[0], origin[1]+tf*direction[1], 0];
+            const O = [P[0]+L[0]*0.01, P[1]+L[1]*0.01, P[2]+L[2]*0.01];
+            const poly = firstCasterHit(tris, O, L);
+            if (poly >= 0) casterCulprits.add(poly);
+          }
+        }
+      }
+      setCasterOutlines(casterCulprits);
+
+      const total = W * H;
+      const shadowUnion = missing + extra + agreeShadow;
+      const json = {
+        mesh: S.mesh,
+        camera: { rotX: S.cam.rotX, rotY: S.cam.rotY, zoom: S.cam.zoom },
+        light: { dx: S.dir.x, dy: S.dir.y, dz: S.dir.z },
+        objectRotation: [S.obj[S.mesh]?.rx ?? 0, S.obj[S.mesh]?.ry ?? 0, S.obj[S.mesh]?.rz ?? 0],
+        missingPx: missing,
+        extraPx: extra,
+        agreeShadowPx: agreeShadow,
+        // IoU of the two shadow masks: 1.0 = perfect shape parity.
+        shadowIoU: shadowUnion > 0 ? +(agreeShadow / shadowUnion).toFixed(4) : 1,
+        missingShadowCasters: [...casterCulprits].sort((a,b)=>a-b),
+      };
+      oracleStatus.textContent =
+        `[mask] missing ${missing}px · extra ${extra}px · shadow IoU ${json.shadowIoU} · casters ${json.missingShadowCasters.length}`;
+      window.__oracleMask = json;
+      return json;
     };
 
     // Live mode — opt-in. Re-runs compareFrame after every update() call
