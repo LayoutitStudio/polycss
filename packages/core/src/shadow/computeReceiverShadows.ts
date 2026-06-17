@@ -28,6 +28,7 @@ import {
   buildEdgeOwners as buildEdgeOwnersHelper,
   classifyFacing,
   extractSilhouetteLoops,
+  silhouetteReliable,
   type EdgeOwners,
 } from "./silhouette";
 import type {
@@ -497,7 +498,15 @@ export function computeReceiverShadowFaces<T = unknown>(
   // (fall through to per-poly path) or `Vec3[][]` when it does (use
   // silhouette path; may be `[]` meaning "light fully behind mesh →
   // emit no shadow at all").
-  const silhouetteByCaster: Array<Vec3[][] | null> = casters.map((casterEntry) => {
+  // Per-caster flag: cast DOUBLE-SIDED (skip the light-back-face cull in the
+  // per-poly path). Set only for cross-mesh casters that QUALIFIED for the
+  // silhouette fast path but were rejected as unreliable — i.e. messy /
+  // imported geometry (inconsistent winding, single-sided interior walls).
+  // There, single-sided casting drops light-back-facing occluder faces and
+  // leaves holes in the receiver's shadow (matches three.js DoubleSide).
+  // Clean closed meshes keep single-sided casting (correct + cheaper).
+  const doubleSidedByCaster: boolean[] = new Array(casters.length).fill(false);
+  const silhouetteByCaster: Array<Vec3[][] | null> = casters.map((casterEntry, casterIdx) => {
     const edgeOwners = casterEntry.edgeOwners;
     if (!edgeOwners) return null;
     if (casterEntry.selfShadowEdgeMap) return null;
@@ -522,6 +531,18 @@ export function computeReceiverShadowFaces<T = unknown>(
       }
     }
     const facing = classifyFacing(normals, lightDir);
+    // Only take the silhouette fast path when the silhouette is a clean
+    // union of simple closed loops. For meshes whose silhouette has
+    // non-manifold / T-junction / open-boundary vertices (imported
+    // architecture like the castle), the loop walk mis-chains and the
+    // projection leaves visible gaps in the cast shadow — fall back to the
+    // per-poly union (returned null), which is gap-free for any topology.
+    // Such meshes also cast double-sided (see doubleSidedByCaster) so the
+    // per-poly fallback doesn't drop light-back-facing occluder faces.
+    if (!silhouetteReliable(edgeOwners, facing)) {
+      doubleSidedByCaster[casterIdx] = true;
+      return null;
+    }
     return extractSilhouetteLoops(edgeOwners, facing);
   });
 
@@ -719,7 +740,7 @@ export function computeReceiverShadowFaces<T = unknown>(
         // default to. Use a small epsilon so polygons exactly edge-on
         // (grazing the light) still cast — they're the silhouette edge
         // of a closed mesh.
-        if (item.planeN) {
+        if (item.planeN && !doubleSidedByCaster[casterIdx]) {
           const cnDotL = item.planeN[0] * Lx + item.planeN[1] * Ly + item.planeN[2] * Lz;
           if (cnDotL > -1e-6) continue;
         }

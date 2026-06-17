@@ -115,6 +115,40 @@ export function classifyFacing(
  * a clean cycle; those edges are dropped and the remaining cycles are
  * returned best-effort.
  */
+/**
+ * Whether the silhouette under this light is a clean union of simple
+ * closed loops — i.e. every silhouette vertex is shared by exactly two
+ * silhouette edges. When that holds, `extractSilhouetteLoops` walks each
+ * cycle unambiguously and the projected loops reproduce the true shadow.
+ *
+ * When it DOESN'T hold (non-manifold edges, T-junctions left by mesh
+ * import/optimization, open boundaries that don't chain into clean
+ * cycles — common in imported architecture like the castle), the walk
+ * has to pick an arbitrary next edge at the degenerate vertices, so the
+ * loops mis-chain and project to visible GAPS in the cast shadow. The
+ * caller should fall back to the per-polygon union there, which unions
+ * every front-facing face and is gap-free regardless of topology.
+ */
+export function silhouetteReliable(
+  edgeOwners: ReadonlyMap<string, EdgeOwners>,
+  facing: boolean[],
+): boolean {
+  const EDGE_MATCH_PRECISION = 1e-4;
+  const quant = (n: number): string => Math.round(n / EDGE_MATCH_PRECISION).toString(36);
+  const vKey = (v: Vec3): string => `${quant(v[0])},${quant(v[1])},${quant(v[2])}`;
+  const degree = new Map<string, number>();
+  const bump = (v: Vec3): void => { const k = vKey(v); degree.set(k, (degree.get(k) ?? 0) + 1); };
+  for (const e of edgeOwners.values()) {
+    const fA = facing[e.polyA] ?? false;
+    let isSil: boolean;
+    if (e.polyB === null) isSil = fA;
+    else isSil = fA !== (facing[e.polyB] ?? false);
+    if (isSil) { bump(e.vertA); bump(e.vertB); }
+  }
+  for (const d of degree.values()) if (d !== 2) return false;
+  return true;
+}
+
 export function extractSilhouetteLoops(
   edgeOwners: ReadonlyMap<string, EdgeOwners>,
   facing: boolean[],
