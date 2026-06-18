@@ -663,6 +663,11 @@ export function computeReceiverShadowFaces<T = unknown>(
     const receiverPlaneOffset = n[0] * O[0] + n[1] * O[1] + n[2] * O[2];
     const COPLANAR_NORMAL_TOL = 0.0025;
     const COPLANAR_OFFSET_TOL = 5.0;
+    // Seam cull fires only when the caster face is within ~20° of coplanar
+    // with the receiver face (|n·n| > cos 20°). Edge-neighbours on a smooth
+    // mesh sit a few degrees apart (culled as sub-pixel slivers); a faceted
+    // occluder across a hard edge is far more angled (kept as a real shadow).
+    const SEAM_COPLANAR_TOL = 0.94;
     for (let casterIdx = 0; casterIdx < casters.length; casterIdx++) {
       const casterEntry = casters[casterIdx]!;
       const sharedEdgeMap = casterEntry.selfShadowEdgeMap;
@@ -726,7 +731,19 @@ export function computeReceiverShadowFaces<T = unknown>(
             for (const memberIdx of group.memberPolyIndices) {
               if (adj.has(memberIdx)) { sharesEdge = true; break; }
             }
-            if (sharesEdge) continue;
+            // Seam-shadow cull, but ONLY when the caster is near-COPLANAR with
+            // the receiver face. That's the smooth-shaded-mesh case the cull is
+            // for: edge-neighbour faces a few degrees apart project sub-pixel
+            // slivers (the apple/sphere/teapot "spiderweb"). A caster at a real
+            // angle to the receiver across a shared edge — a wing over a
+            // fuselage, a wall meeting a floor — casts a genuine self-shadow and
+            // must be kept (culling it left big holes on faceted meshes).
+            if (sharesEdge) {
+              const cn = item.planeN;
+              const coplanar = !cn ||
+                Math.abs(cn[0] * n[0] + cn[1] * n[1] + cn[2] * n[2]) > SEAM_COPLANAR_TOL;
+              if (coplanar) continue;
+            }
           }
         }
         // Light back-face cull: a caster polygon whose normal points AWAY
