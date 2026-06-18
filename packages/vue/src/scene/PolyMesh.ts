@@ -647,12 +647,17 @@ export const PolyMesh = defineComponent({
       const cachedSelfMap = selfShadowEdgeMap.value;
       for (const getData of entries) {
         const data = getData();
-        const rendered = data.renderedPolygonIndices;
+        // Cast from EVERY polygon — geometry casts a shadow regardless of
+        // whether it's painted for the camera (atlas plan / renderedPolygon-
+        // Indices). Filtering to rendered polys left camera-dependent holes
+        // in the floor shadow of imported meshes. Coincident projections
+        // merge under the per-mesh `fill-rule: nonzero`, so no dedup is
+        // needed. Mirrors packages/polycss/src/api/scene/receiverShadow.ts.
         const items = prepareCasterPolyItems(
           data.polygons,
           data.position,
           data.scale,
-          rendered ? (idx) => rendered.has(idx) : () => true,
+          () => true,
           data.rotation ?? null,
         );
         const isSelf = data.polygons === polygons.value;

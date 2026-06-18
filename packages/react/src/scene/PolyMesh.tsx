@@ -973,14 +973,18 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
     if (planes.length === 0) return null;
     const casterInputs: ReceiverCasterInput<symbol>[] = [];
     for (const [casterId, data] of shadowCasters) {
-      // Mirror vanilla: only iterate caster.rendered (= polygons with a
-      // valid atlas plan). renderedPolygonIndices is the React/Vue analog.
-      const rendered = data.renderedPolygonIndices;
+      // Cast from EVERY polygon — geometry casts a shadow regardless of
+      // whether it's painted for the camera (atlas plan / renderedPolygon-
+      // Indices). Filtering to rendered polys left camera-dependent holes in
+      // the floor shadow of imported meshes (a poly facing the light but not
+      // the camera vanished). Coincident projections merge under the
+      // per-mesh `fill-rule: nonzero`, so no dedup is needed here. Mirrors
+      // the vanilla fix in packages/polycss/src/api/scene/receiverShadow.ts.
       const items = prepareCasterPolyItems(
         data.polygons,
         data.position,
         data.scale,
-        rendered ? (idx) => rendered.has(idx) : () => true,
+        () => true,
         data.rotation ?? null,
       );
       // Self-shadow seam cull: when the caster IS this mesh, pass the

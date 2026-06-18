@@ -51,12 +51,12 @@ export function emitGroundShadow(
   let totalCount = 0;
   for (const caster of casters) {
     const cpos = caster.handle.transform.position ?? [0, 0, 0];
-    const dedupDrop = dedupByCaster.get(caster)!;
-    for (const item of caster.rendered) {
-      if (dedupDrop.has(item.polygonIndex)) continue;
-      const plan = item.plan;
-      if (!plan) continue;
-      const polygon = caster.polygons[item.polygonIndex];
+    // Cast from EVERY polygon, not just camera-rendered (atlas-planned) /
+    // non-deduped ones: geometry casts a shadow regardless of whether it's
+    // painted for the camera, and filtering left camera-dependent holes.
+    // The per-mesh `fill-rule: nonzero` path merges coincident projections.
+    for (let polygonIndex = 0; polygonIndex < caster.polygons.length; polygonIndex++) {
+      const polygon = caster.polygons[polygonIndex];
       if (!polygon) continue;
 
       const projected: Array<[number, number]> = [];
@@ -96,7 +96,7 @@ export function emitGroundShadow(
           projectionsByCaster.set(caster, bucket);
         }
         bucket.verts.push(simplified);
-        bucket.subPolygonIndices.push(item.polygonIndex);
+        bucket.subPolygonIndices.push(polygonIndex);
         totalCount++;
       }
     }
