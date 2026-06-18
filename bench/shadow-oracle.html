@@ -1633,6 +1633,152 @@
     buildPanel();
 
     // ════════════════════════════════════════════════════════════════════
+    //  Light animation (math) — drive the directional light direction with
+    //  expressions of a looping phase `t` ∈ [0, 2π). Play/pause + speed, plus
+    //  a scrub slider. Each axis (dx, dy, dz) is its own expression using `t`
+    //  and the usual Math functions (sin, cos, abs, PI, …). Animating moves
+    //  shadows every frame WITHOUT re-baking atlases (like dragging the light
+    //  helper); pausing settles a baked re-bake so lit surfaces catch up.
+    // ════════════════════════════════════════════════════════════════════
+    {
+      const TAU = Math.PI * 2;
+      const MATH_FNS = ["sin","cos","tan","asin","acos","atan","atan2","abs",
+        "sqrt","pow","exp","log","min","max","sign","floor","ceil","round","hypot"];
+      const MATH_CONSTS = ["PI","E"];
+      const MATH_VALS = [...MATH_FNS.map((k) => Math[k]), ...MATH_CONSTS.map((k) => Math[k])];
+      // Compile "expr in t" → (t)=>number. Strict-mode module, so no `with`;
+      // Math names are injected as function parameters instead.
+      function compileExpr(src) {
+        const fn = new Function("t", ...MATH_FNS, ...MATH_CONSTS, `"use strict"; return (${src});`);
+        return (t) => fn(t, ...MATH_VALS);
+      }
+
+      const panel = document.getElementById("panel");
+      const sec = document.createElement("div");
+      sec.className = "sec"; sec.textContent = "Light animation (math)";
+      panel.appendChild(sec);
+
+      const note = document.createElement("div");
+      note.style.cssText = "font-size:10px; color:#94a3b8; margin:0 0 6px;";
+      note.textContent = "dx,dy,dz as functions of t∈[0,2π). e.g. 1.2*cos(t), sin(t), 0.8";
+      panel.appendChild(note);
+
+      const exprs = {
+        x: { src: "1.2*cos(t)", fn: null },
+        y: { src: "1.2*sin(t)", fn: null },
+        z: { src: "0.8",        fn: null },
+      };
+      const errEl = document.createElement("div");
+      errEl.style.cssText = "font-size:10px; color:#dc2626; min-height:12px; margin:0 0 4px;";
+
+      const makeExprRow = (axis) => {
+        const row = document.createElement("div");
+        row.style.cssText = "display:grid; grid-template-columns:26px 1fr; gap:6px; align-items:center; margin:3px 0;";
+        const lab = document.createElement("label");
+        lab.textContent = "d" + axis; lab.style.color = "#475569";
+        const inp = document.createElement("input");
+        inp.type = "text"; inp.value = exprs[axis].src;
+        inp.style.cssText = "width:100%; font:11px ui-monospace,monospace; padding:2px 4px; border:1px solid #cbd5e1; border-radius:3px;";
+        const recompile = () => {
+          try {
+            exprs[axis].fn = compileExpr(inp.value);
+            exprs[axis].fn(animT); // probe for runtime errors
+            exprs[axis].src = inp.value;
+            inp.style.borderColor = "#cbd5e1";
+            errEl.textContent = "";
+            applyAnimT();
+          } catch (e) {
+            inp.style.borderColor = "#dc2626";
+            errEl.textContent = `d${axis}: ${e.message}`;
+          }
+        };
+        inp.addEventListener("input", recompile);
+        row.append(lab, inp);
+        panel.appendChild(row);
+      };
+      makeExprRow("x"); makeExprRow("y"); makeExprRow("z");
+      panel.appendChild(errEl);
+
+      let animT = 0;
+      let playing = false;
+      let periodSec = 6;       // seconds for one 0→2π loop
+      let lastTs = null;
+
+      // Transport row: play/pause + t readout.
+      const transport = document.createElement("div");
+      transport.style.cssText = "display:flex; gap:6px; align-items:center; margin:4px 0;";
+      const playBtn = document.createElement("button");
+      playBtn.type = "button"; playBtn.textContent = "▶ Play";
+      playBtn.style.cssText = "padding:5px 10px; font:inherit; background:#0f172a; color:#f8fafc; border:1px solid #1e293b; border-radius:4px; cursor:pointer;";
+      const tReadout = document.createElement("span");
+      tReadout.style.cssText = "font:11px ui-monospace,monospace; color:#475569;";
+      transport.append(playBtn, tReadout);
+      panel.appendChild(transport);
+
+      // t scrub slider (manual control when paused).
+      const tRow = document.createElement("div");
+      tRow.className = "row"; tRow.style.margin = "3px 0";
+      const tLab = document.createElement("label"); tLab.textContent = "t";
+      const tInput = document.createElement("input");
+      tInput.type = "range"; tInput.min = "0"; tInput.max = String(TAU); tInput.step = "0.01"; tInput.value = "0";
+      const tVal = document.createElement("span"); tVal.className = "val";
+      tRow.append(tLab, tInput, tVal);
+      panel.appendChild(tRow);
+
+      // Speed (loop period) slider.
+      const spRow = document.createElement("div");
+      spRow.className = "row"; spRow.style.margin = "3px 0";
+      const spLab = document.createElement("label"); spLab.textContent = "period";
+      const spInput = document.createElement("input");
+      spInput.type = "range"; spInput.min = "0.5"; spInput.max = "20"; spInput.step = "0.1"; spInput.value = String(periodSec);
+      const spVal = document.createElement("span"); spVal.className = "val"; spVal.textContent = periodSec.toFixed(1) + "s";
+      spRow.append(spLab, spInput, spVal);
+      panel.appendChild(spRow);
+      spInput.addEventListener("input", () => { periodSec = +spInput.value; spVal.textContent = periodSec.toFixed(1) + "s"; });
+
+      function applyAnimT() {
+        let x = S.dir.x, y = S.dir.y, z = S.dir.z;
+        try { if (exprs.x.fn) x = exprs.x.fn(animT); } catch {}
+        try { if (exprs.y.fn) y = exprs.y.fn(animT); } catch {}
+        try { if (exprs.z.fn) z = exprs.z.fn(animT); } catch {}
+        if (Number.isFinite(x)) S.dir.x = x;
+        if (Number.isFinite(y)) S.dir.y = y;
+        if (Number.isFinite(z)) S.dir.z = z;
+        refreshLightSliders();
+        tInput.value = String(animT);
+        tVal.textContent = animT.toFixed(2);
+        tReadout.textContent = "t=" + animT.toFixed(2);
+        // false = move shadows + light without re-baking lit atlases per frame.
+        update(false);
+      }
+
+      // Compile initial expressions.
+      for (const axis of ["x", "y", "z"]) { try { exprs[axis].fn = compileExpr(exprs[axis].src); } catch {} }
+
+      function frame(ts) {
+        if (!playing) return;
+        if (lastTs == null) lastTs = ts;
+        const dt = (ts - lastTs) / 1000; lastTs = ts;
+        animT = (animT + (TAU / Math.max(0.1, periodSec)) * dt) % TAU;
+        applyAnimT();
+        requestAnimationFrame(frame);
+      }
+      playBtn.addEventListener("click", () => {
+        playing = !playing;
+        playBtn.textContent = playing ? "⏸ Pause" : "▶ Play";
+        if (playing) { lastTs = null; requestAnimationFrame(frame); }
+        else if (S.lighting === "baked") update(true); // settle a re-bake on pause
+      });
+      tInput.addEventListener("input", () => {
+        if (playing) { playing = false; playBtn.textContent = "▶ Play"; }
+        animT = +tInput.value;
+        applyAnimT();
+      });
+
+      tReadout.textContent = "t=0.00";
+    }
+
+    // ════════════════════════════════════════════════════════════════════
     //  Shadow oracle — per-pixel diff + per-polygon attribution.
     //
     //  • Snapshot PolyCSS DOM via html-to-image into a 2D canvas.
