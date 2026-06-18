@@ -508,8 +508,15 @@ export function computeReceiverShadowFaces<T = unknown>(
   const doubleSidedByCaster: boolean[] = new Array(casters.length).fill(false);
   const silhouetteByCaster: Array<Vec3[][] | null> = casters.map((casterEntry, casterIdx) => {
     const edgeOwners = casterEntry.edgeOwners;
+    // Self-shadow (caster IS the receiver mesh): use the per-poly path AND
+    // cast double-sided. Imported meshes have occluder faces that point away
+    // from the light yet sit between the light and a LIT receiver face;
+    // single-sided casting drops them and leaves holes (e.g. flight poly 46
+    // lost 353 occluders). Closed meshes are unaffected — their far back-faces
+    // sit below each lit receiver's plane and get above-plane-culled, so this
+    // adds no spurious self-shadow (verified: apple unchanged).
+    if (casterEntry.selfShadowEdgeMap) { doubleSidedByCaster[casterIdx] = true; return null; }
     if (!edgeOwners) return null;
-    if (casterEntry.selfShadowEdgeMap) return null;
     const N = casterEntry.casterPolygonCount ?? 0;
     if (N < SILHOUETTE_MIN_POLYS) return null;
     if (casterEntry.items.length < SILHOUETTE_MIN_POLYS) return null;
