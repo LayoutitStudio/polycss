@@ -1,0 +1,2908 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>point-light oracle — polycss vs three.js (point + directional lights)</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; height: 100%; background: #eef2f6; font-family: ui-sans-serif, system-ui, sans-serif; color: #1e293b; }
+    /* 2×2 stage grid + 360 px sidebar. The four stages share camera/light
+       state with the existing bench; the bottom row holds derived diagnostic
+       views (per-polygon delta heatmap + outlined mismatch list). */
+    body {
+      display: grid;
+      grid-template-columns: 1fr 1fr 360px;
+      grid-template-rows: 1fr 1fr;
+      grid-template-areas:
+        "polycss three  panel"
+        "diff    misses panel";
+      height: 100vh; overflow: hidden;
+    }
+    .stage.polycss { grid-area: polycss; }
+    .stage.three   { grid-area: three; }
+    .stage.diff    { grid-area: diff; }
+    .stage.misses  { grid-area: misses; }
+    #panel         { grid-area: panel; }
+    .stage { border-bottom: 1px solid #cbd5e1; }
+    /* Oracle highlight on flagged PolyCSS leaves: a red outline plus a
+       brightness filter so the poly pops without hiding what it actually
+       renders (the shading/texture stays readable, just brighter). */
+    [data-oracle-mismatch="1"] { outline: 2px solid #ef4444 !important; outline-offset: 1px; filter: brightness(1.5) !important; }
+    [data-oracle-focus="1"]    { outline: 3px solid #f97316 !important; outline-offset: 2px; z-index: 50; filter: brightness(2) !important; }
+    /* Emitter (caster) polygons that SHOULD be casting a missing shadow,
+       found by raytracing each floor hole back to its occluder. Green. */
+    [data-oracle-caster="1"]   { outline: 3px solid #22c55e !important; outline-offset: 1px; backface-visibility: visible !important; }
+    .oracle-row { display: grid; grid-template-columns: 46px 1fr 50px; gap: 6px; padding: 4px 6px; border-bottom: 1px solid #f1f5f9; cursor: pointer; font-size: 11px; align-items: center; }
+    .oracle-row:hover { background: #f1f5f9; }
+    .oracle-row code { font-family: ui-monospace, monospace; color: #0f172a; }
+    .oracle-row .delta { text-align: right; color: #b91c1c; font-variant-numeric: tabular-nums; font-weight: 600; }
+    .oracle-row.is-selected { background: #fef2f2; }
+    /* Diagnostic canvases sit absolute-positioned over their stage. */
+    .oracle-canvas { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+    .stage { position: relative; overflow: hidden; border-right: 1px solid #cbd5e1; background: #eef2f6; }
+    .stage > h3 { position: absolute; top: 8px; left: 12px; margin: 0; font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: red; z-index: 10; pointer-events: none; }
+    .stage > .note { position: absolute; top: 26px; left: 12px; font-size: 10px; color: #94a3b8; pointer-events: none; z-index: 10; }
+    .stage > .crosshair { position: absolute; inset: 0; pointer-events: none; z-index: 5; }
+    .stage > .crosshair::before, .stage > .crosshair::after { content: ""; position: absolute; background: rgba(0,0,0,0.1); }
+    .stage > .crosshair::before { left: 50%; top: 0; bottom: 0; width: 1px; }
+    .stage > .crosshair::after { top: 50%; left: 0; right: 0; height: 1px; }
+    #poly-host { position: absolute; inset: 0; }
+    #three-canvas { display: block; width: 100%; height: 100%; }
+    #panel { padding: 12px; background: #f8fafc; overflow-y: auto; border-left: 1px solid #cbd5e1; font-size: 12px; }
+    #panel .sec { margin: 14px 0 6px; font-weight: 600; color: #0f172a; font-size: 11px; letter-spacing: 0.05em; text-transform: uppercase; }
+    #panel .row { display: grid; grid-template-columns: 70px 1fr 60px; gap: 6px; align-items: center; margin: 3px 0; }
+    #panel .row > label { color: #475569; }
+    #panel .row > .val { text-align: right; font-variant-numeric: tabular-nums; }
+    #panel .row > input[type=range] { width: 100%; }
+    #panel .info { font-size: 11px; color: #64748b; line-height: 1.4; margin: 8px 0 12px; padding: 8px; background: #fff; border: 1px solid #e2e8f0; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <div class="stage polycss"><h3>PolyCSS</h3><div class="crosshair"></div><div id="poly-host"></div></div>
+  <div class="stage three"><h3>Three.js</h3><div class="crosshair"></div><canvas id="three-canvas"></canvas></div>
+  <div class="stage diff"><h3>Diff (PolyCSS − Three.js)</h3><canvas id="diff-canvas" class="oracle-canvas"></canvas></div>
+  <div class="stage misses"><h3>Misclassified polys</h3><canvas id="misses-canvas" class="oracle-canvas"></canvas></div>
+  <div id="panel"></div>
+
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://esm.sh/three@0.160.0",
+      "three/addons/": "https://esm.sh/three@0.160.0/examples/jsm/",
+      "html-to-image": "https://esm.sh/html-to-image@1.11.13"
+    }
+  }
+  </script>
+
+  <script type="module">
+    // ════════════════════════════════════════════════════════════════════
+    //  PARITY CHECK — ONE CUBE
+    //  Both engines get the same numbers. No swap, no scale, no flip.
+    //  When the rendered cube differs in size, position, orientation, or
+    //  rotation direction, that is a PolyCSS bug.
+    //
+    //  Crosshairs mark each viewport's center (where world (0,0,0) should
+    //  appear when the camera target is the origin).
+    //
+    //  Convention (both engines):
+    //    +Z up, +X right, +Y forward.
+    //    `position` is world units.
+    //    `size` is world units.
+    //    `zoom` is "pixels per world unit at the viewport" — bigger value,
+    //    bigger cube on screen.
+    // ════════════════════════════════════════════════════════════════════
+
+    import * as THREE from "three";
+    import * as htmlToImage from "html-to-image";
+    import { OBJLoader } from "three/addons/loaders/OBJLoader.js";
+    import { MTLLoader } from "three/addons/loaders/MTLLoader.js";
+    import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+    import {
+      createPolyCamera, createPolyScene,
+      createPolyBox, createPolyOctahedron, loadMesh,
+      screenToWorldOnSphere, screenToWorldRay,
+    } from "./.generated/polycss.js";
+
+    // World ↔ CSS px factor that the renderer applies to every vertex.
+    // The unprojection utility takes this as `tileSize`.
+    const POLY_TILE = 50;
+
+    const Q = new URLSearchParams(location.search);
+    const qn = (k, d) => (Q.has(k) ? +Q.get(k) : d);
+    const qs = (k, d) => (Q.has(k) ? Q.get(k) : d);
+
+    const S = {
+      mesh:    qs("mesh", "cube"),     // "cube" | "e" | "cottage" | "castle" | "coliseum" | "apple" | "flight" | "extinguisher"
+      lighting:qs("light", "baked"),   // "baked" | "dynamic"
+      // Unified per-mesh transform state. Same shape (x, y, z, scale) for
+      // every mesh — one set of object-transform sliders binds to the
+      // currently selected mesh's entry. URL keys are mesh-prefixed so
+      // multiple mesh states survive a reload.
+      obj: {
+        cube:    { x: qn("ox_cube",    0),   y: qn("oy_cube",    0), z: qn("oz_cube",    1), scale: qn("os_cube",    1),
+                   rx: qn("orx_cube", 0), ry: qn("ory_cube", 0), rz: qn("orz_cube", 0) },
+        e:       { x: qn("ox_e",       0),   y: qn("oy_e",       0), z: qn("oz_e",       0), scale: qn("os_e",       1),
+                   rx: qn("orx_e",    0), ry: qn("ory_e",    0), rz: qn("orz_e",    0) },
+        cottage: { x: qn("ox_cottage", qn("cx", 0)),
+                   y: qn("oy_cottage", qn("cy", 0)),
+                   z: qn("oz_cottage", qn("cz", 0)),
+                   scale: qn("os_cottage", qn("cs", 1)),
+                   rx: qn("orx_cottage", 0), ry: qn("ory_cottage", 0), rz: qn("orz_cottage", 0) },
+        castle:  { x: qn("ox_castle",  0), y: qn("oy_castle",  0), z: qn("oz_castle", 0), scale: qn("os_castle", 1),
+                   rx: qn("orx_castle", 0), ry: qn("ory_castle", 0), rz: qn("orz_castle", 0) },
+        // To add a new OBJ mesh: grep "coliseum" in this file — same
+        // ~13 touchpoints as three-parity.html (state defaults here,
+        // target-size constant, buildPoly/buildThree pair, active-mesh
+        // lookup, rebake, cleanup, dropdown, dispatch, setTransform).
+        coliseum: { x: qn("ox_coliseum", 0), y: qn("oy_coliseum", 0), z: qn("oz_coliseum", 0), scale: qn("os_coliseum", 1),
+                    rx: qn("orx_coliseum", 0), ry: qn("ory_coliseum", 0), rz: qn("orz_coliseum", 0) },
+        apple:   { x: qn("ox_apple",   0), y: qn("oy_apple",   0), z: qn("oz_apple",   0), scale: qn("os_apple",   1),
+                   rx: qn("orx_apple", 0), ry: qn("ory_apple", 0), rz: qn("orz_apple", 0) },
+        flight:  { x: qn("ox_flight",  0), y: qn("oy_flight",  0), z: qn("oz_flight",  0), scale: qn("os_flight",  1),
+                   rx: qn("orx_flight", 0), ry: qn("ory_flight", 0), rz: qn("orz_flight", 0) },
+        extinguisher: { x: qn("ox_extinguisher", 0), y: qn("oy_extinguisher", 0), z: qn("oz_extinguisher", 0), scale: qn("os_extinguisher", 1),
+                        rx: qn("orx_extinguisher", 0), ry: qn("ory_extinguisher", 0), rz: qn("orz_extinguisher", 0) },
+      },
+      // Cube/E hold the geometry's base parameters (set at build time;
+      // run-time scale applies on top via setTransform). Cottage geometry
+      // comes from /gallery/obj/cottage.obj + cottage.mtl + cottage-diffuse.png.
+      // Three.js applies the same (x,y,z) → (z,x,y) cyclic permutation
+      // parseObj uses to put OBJ's Y-up into our Z-up world.
+      cube:  { size: 2, color: "#dc2626" },
+      floor: { size: 20, color: "#cbd5e1" },
+      dir:   { x: qn("dx", 1), y: qn("dy", 0.5), z: qn("dz", 1), intensity: qn("di", 1), color: qs("dc", "#ffffff") },
+      // Two point lights (world-space positions). Direction-only per-face
+      // Lambert (no falloff) — emulated in three.js by PointLight(...,0,0).
+      points: [
+        { x: qn("p0x", -4), y: qn("p0y", 4), z: qn("p0z", 5), intensity: qn("p0i", 1), color: qs("p0c", "#ff7755"), on: qs("p0", "1") !== "0" },
+        { x: qn("p1x", 5), y: qn("p1y", -3), z: qn("p1z", 4), intensity: qn("p1i", 1), color: qs("p1c", "#5599ff"), on: qs("p1", "1") !== "0" },
+      ],
+      amb:   { intensity: qn("ai", 0.3), color: qs("ac", "#ffffff") },
+      shadow:{ opacity: qn("so", 1.0) },
+      cam:   { rotX: qn("rx", 30), rotY: qn("ry", 0), zoom: qn("z", 60) },
+      // "Shadows only" mode: hide all caster + floor base color so only the
+      // shadow elements remain visible. Lets you compare shadow geometry
+      // between engines without the mesh getting in the way.
+      shadowsOnly: qs("sx", "0") === "1",
+      // "Self-shadow" toggle: when true, the active mesh receives shadows
+      // onto its own faces (matches Three.js mesh.receiveShadow on the
+      // mesh itself). When false, the mesh only casts onto the floor.
+      // Defaults to true to preserve the historical bench behavior.
+      selfShadow: qs("ss", "1") !== "0",
+      // Cast-shadow toggle on the active model — flips `castShadow` on
+      // every caster mesh. Gallery exposes this as a separate knob; the
+      // bench historically hardcoded it to true. Defaulted to true so
+      // existing URLs reproduce.
+      castShadow: qs("cs", "1") !== "0",
+      // Floor mesh visibility — gallery's "Show ground" toggle. When
+      // hidden the floor mesh is removed from the DOM/scene-graph so
+      // the engine falls back to its virtual-ground shadow.
+      floorVisible: qs("fv", "1") !== "0",
+      // Floor mesh `receiveShadow` flag — gallery's gallery-ground
+      // mesh DEFAULTS this to false (omits the option), which suppresses
+      // the ground shadow whenever a self-shadowing receiver mesh
+      // exists. Toggle it here to reproduce that bug on the bench.
+      floorReceives: qs("fr", "1") !== "0",
+      // Scene `autoCenter` — when on, PolyCSS pulls the scene-root
+      // translate so the union of all non-helper meshes centers on the
+      // camera target. Three.js has no parallel; the toggle only drives
+      // the PolyCSS side. URL key `ax` (autoCenter eXposed).
+      autoCenter: qs("ax", "0") === "1",
+    };
+
+    // PolyCSS point lights (world positions) from enabled S.points.
+    function polyPointLights() {
+      return S.points.filter((p) => p.on).map((p) => ({
+        position: [p.x, p.y, p.z],
+        color: p.color,
+        intensity: p.intensity,
+      }));
+    }
+
+    // ─── PolyCSS ────────────────────────────────────────────────────────
+    const polyHost = document.getElementById("poly-host");
+    const polyCamera = createPolyCamera({ rotX: S.cam.rotX, rotY: S.cam.rotY, zoom: S.cam.zoom });
+    const polyScene = createPolyScene(polyHost, {
+      camera: polyCamera,
+      autoCenter: S.autoCenter,
+      // Bench-only: always emit data-poly-shadow-* attribution attrs so the
+      // oracle diff can map mis-rendered pixels back to source polys.
+      debugShadowAttrs: true,
+      directionalLight: {
+        direction: [S.dir.x, S.dir.y, S.dir.z],
+        intensity: S.dir.intensity,
+        color: S.dir.color,
+        castShadow: true,
+      },
+      pointLights: polyPointLights(),
+      ambientLight: { color: S.amb.color, intensity: S.amb.intensity },
+      // lift=0 so the shadow projects exactly onto the floor plane (z=0)
+      // instead of a slightly raised plane — default 0.05 produces a small
+      // visible gap between the caster's base and where the shadow starts
+      // on the floor. The bench's floor + cube are separate meshes, no
+      // z-fight risk that the default lift was protecting against.
+      shadow: { color: "#000000", opacity: S.shadow.opacity, lift: 0 },
+      textureLighting: S.lighting,
+      // Full-quality atlas — no global shrink-to-fit cap. Default "auto"
+      // shrinks the whole atlas to ~2048px / 16MB which pixelates large
+      // textured polys (cottage walls). The bench prioritizes parity over
+      // memory budget. Real apps stick with "auto".
+      textureQuality: 1,
+      // No seam-bleed overscan. Default 1.5 px per shared edge makes
+      // adjacent polygons overlap by up to 3 px to hide rasterisation
+      // cracks. Three.js doesn't have that, so for visual parity we
+      // disable it here. Real apps keep the default so faces stay
+      // crack-free.
+      seamBleed: 0,
+    });
+    let polyCube = null;
+    let polyCottage = null;
+    let polyCastle = null;
+    let polyColiseum = null;
+    let polyApple = null;
+    let polyFlight = null;
+    let polyExtinguisher = null;
+    let polyE = null;
+    function buildPolyCube() {
+      polyCube = polyScene.add(
+        createPolyBox({ size: [S.cube.size, S.cube.size, S.cube.size], color: S.cube.color }),
+        { id: "cube", position: [S.obj.cube.x, S.obj.cube.y, S.obj.cube.z], castShadow: true, receiveShadow: S.selfShadow, merge: false },
+      );
+    }
+    // 3D capital "E" — strongly concave: a vertical spine plus three
+    // horizontal arms. Lets us check self-shadow on a single mesh where
+    // arms shadow the spine and each other, much more obvious than the
+    // cube (convex, no self-shadow) or the cottage (textured, hard to
+    // see brightness diffs through the brick pattern).
+    //
+    // Box layout (PolyCSS world units, +X right, +Y forward, +Z up):
+    //   spine:    x[0..1]  z[0..5]    (full height left column)
+    //   top arm:  x[0..4]  z[4..5]
+    //   mid arm:  x[0..3]  z[2..3]
+    //   bot arm:  x[0..4]  z[0..1]
+    // All boxes are 1 unit deep on Y. The whole E is offset so it sits
+    // on z=0 and is roughly centred on the crosshair.
+    const E_COLOR = "#3b82f6";
+    const E_BOXES = [
+      { center: [-1.5,  0,  2.5], size: [1, 1, 5] },  // spine
+      { center: [ 0.5,  0,  4.5], size: [4, 1, 1] },  // top arm
+      { center: [ 0.0,  0,  2.5], size: [3, 1, 1] },  // mid arm
+      { center: [ 0.5,  0,  0.5], size: [4, 1, 1] },  // bot arm
+    ];
+    function buildPolyE() {
+      // Combine all box polygons into a single mesh so PolyCSS treats
+      // it as one piece for self-shadowing purposes.
+      const polys = [];
+      for (const { center, size } of E_BOXES) {
+        polys.push(...createPolyBox({ center, size, color: E_COLOR }).polygons);
+      }
+      const parse = { polygons: polys, objectUrls: [], warnings: [], dispose: () => {} };
+      polyE = polyScene.add(parse, {
+        id: "e",
+        position: [0, 0, 0],
+        castShadow: true,
+        receiveShadow: S.selfShadow,
+        merge: false,
+      });
+    }
+    // Cottage normalization: both engines fit the model into a bounding box
+    // of COTTAGE_TARGET_SIZE world units centered at the origin. PolyCSS uses
+    // parseObj's `targetSize` option; Three.js computes the bbox of the
+    // loaded geometry after the Y→Z permutation and applies the same scale +
+    // center. Without this, the OBJ's native pivot is far from origin and
+    // the model lands off-screen after the camera scale.
+    const COTTAGE_TARGET_SIZE = 5;
+    async function buildPolyCottage() {
+      const parse = await loadMesh("/gallery/obj/cottage.obj", {
+        mtlUrl: "/gallery/obj/cottage.mtl",
+        objOptions: { targetSize: COTTAGE_TARGET_SIZE },
+      });
+      polyCottage = polyScene.add(parse, {
+        id: "cottage",
+        position: [S.obj.cottage.x, S.obj.cottage.y, S.obj.cottage.z],
+        scale: S.obj.cottage.scale,
+        castShadow: true,
+        receiveShadow: S.selfShadow,
+        merge: false,
+      });
+    }
+    // Castle uses a hand-written .mtl whose material names mirror the OBJ's
+    // hex-named `usemtl` slots (455A64 / 78909C / 795548). Without it both
+    // engines would fall back to default white and the castle would look
+    // flat.
+    const CASTLE_TARGET_SIZE = 6;
+    async function buildPolyCastle() {
+      const parse = await loadMesh("/gallery/obj/castle.obj", {
+        mtlUrl: "/gallery/obj/castle.mtl",
+        objOptions: { targetSize: CASTLE_TARGET_SIZE },
+      });
+      polyCastle = polyScene.add(parse, {
+        id: "castle",
+        position: [S.obj.castle.x, S.obj.castle.y, S.obj.castle.z],
+        scale: S.obj.castle.scale,
+        castShadow: true,
+        receiveShadow: S.selfShadow,
+        merge: false,
+      });
+    }
+    const COLISEUM_TARGET_SIZE = 8;
+    async function buildPolyColiseum() {
+      const parse = await loadMesh("/gallery/obj/coliseum.obj", {
+        mtlUrl: "/gallery/obj/coliseum.mtl",
+        objOptions: { targetSize: COLISEUM_TARGET_SIZE },
+      });
+      polyColiseum = polyScene.add(parse, {
+        id: "coliseum",
+        position: [S.obj.coliseum.x, S.obj.coliseum.y, S.obj.coliseum.z],
+        scale: S.obj.coliseum.scale,
+        castShadow: true,
+        receiveShadow: S.selfShadow,
+        merge: false,
+      });
+    }
+    // Apple is shipped as GLB (smooth-shaded). loadMesh switches on extension
+    // (.glb → parseGltf). targetSize is applied via gltfOptions, mirroring
+    // the OBJ path's objOptions.targetSize so both engines see the same
+    // world-space size before per-mesh scale.
+    const APPLE_TARGET_SIZE = 4;
+    async function buildPolyApple() {
+      const parse = await loadMesh("/gallery/glb/apple.glb", {
+        gltfOptions: { targetSize: APPLE_TARGET_SIZE },
+      });
+      polyApple = polyScene.add(parse, {
+        id: "apple",
+        position: [S.obj.apple.x, S.obj.apple.y, S.obj.apple.z],
+        scale: S.obj.apple.scale,
+        castShadow: true,
+        receiveShadow: S.selfShadow,
+        merge: false,
+      });
+    }
+    // OpenGameArt fire extinguisher OBJ — preset hash 1109157371. Textured
+    // (BaseColor + AO + Roughness PNGs) — exercises the receiver-shadow path
+    // on textured atlases when self-shadow is on.
+    const EXTINGUISHER_TARGET_SIZE = 4;
+    async function buildPolyExtinguisher() {
+      const parse = await loadMesh("/gallery/obj/opengameart/fire-extinguisher/extinguisher.obj", {
+        mtlUrl: "/gallery/obj/opengameart/fire-extinguisher/extinguisher.mtl",
+        objOptions: { targetSize: EXTINGUISHER_TARGET_SIZE },
+      });
+      polyExtinguisher = polyScene.add(parse, {
+        id: "extinguisher",
+        position: [S.obj.extinguisher.x, S.obj.extinguisher.y, S.obj.extinguisher.z],
+        scale: S.obj.extinguisher.scale,
+        castShadow: true,
+        receiveShadow: S.selfShadow,
+        merge: false,
+      });
+    }
+    // NASA Flight System Support — GLB pulled from the gallery's preset
+    // catalogue (preset hash 3730353141). Same GLB path the gallery serves
+    // through Astro's public/, exposed to the bench by perf-serve.mjs.
+    const FLIGHT_TARGET_SIZE = 6;
+    async function buildPolyFlight() {
+      const parse = await loadMesh("/gallery/glb/nasa/flight-system-support.glb", {
+        gltfOptions: { targetSize: FLIGHT_TARGET_SIZE },
+      });
+      polyFlight = polyScene.add(parse, {
+        id: "flight",
+        position: [S.obj.flight.x, S.obj.flight.y, S.obj.flight.z],
+        scale: S.obj.flight.scale,
+        castShadow: true,
+        receiveShadow: S.selfShadow,
+        merge: false,
+      });
+    }
+    if (S.mesh === "cube") buildPolyCube();
+    // Flat horizontal quad on z=0, sized S.floor.size in world units.
+    // PolyCSS doesn't ship a generic "plane" generator (createPolyPlane is
+    // for transform-control drag handles), so the polygon is inline.
+    const floorHalf = S.floor.size / 2;
+    const floorParse = {
+      polygons: [{
+        vertices: [
+          [-floorHalf, -floorHalf, 0],
+          [ floorHalf, -floorHalf, 0],
+          [ floorHalf,  floorHalf, 0],
+          [-floorHalf,  floorHalf, 0],
+        ],
+        color: S.floor.color,
+      }],
+      objectUrls: [],
+      warnings: [],
+      dispose: () => {},
+    };
+    const polyFloor = polyScene.add(
+      floorParse,
+      { id: "floor", position: [0, 0, 0], castShadow: true, receiveShadow: S.floorReceives, merge: false },
+    );
+    // Initial visibility — floor toggle defaults to visible; hide the
+    // wrapper inline so it round-trips with the URL state.
+    if (!S.floorVisible) polyFloor.element.style.visibility = "hidden";
+
+    // ─── Three.js ───────────────────────────────────────────────────────
+    const threeCanvas = document.getElementById("three-canvas");
+    // preserveDrawingBuffer: true so the oracle can `drawImage(threeCanvas, …)`
+    // into a 2D context AFTER the compositor would normally swap+clear the
+    // back buffer. Performance cost is irrelevant for an interactive bench.
+    const renderer = new THREE.WebGLRenderer({ canvas: threeCanvas, antialias: true, preserveDrawingBuffer: true });
+    renderer.setPixelRatio(window.devicePixelRatio);
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.shadowMap.enabled = true;
+    // PCFShadowMap is a 1-tap sampled shadow map (no blur kernel), which
+    // gives crisp shadow edges close to PolyCSS's analytical projection
+    // without the heavy PCF soft blur. Pair with a high mapSize so the
+    // silhouette stays resolution-defined instead of stairstepped. The
+    // bench prioritises detail over memory — real apps stick with smaller
+    // sizes and Soft variants.
+    renderer.shadowMap.type = THREE.PCFShadowMap;
+    THREE.Object3D.DEFAULT_UP.set(0, 0, 1);
+
+    const threeScene = new THREE.Scene();
+    threeScene.background = new THREE.Color(0xeef2f6);
+
+    const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 5000);
+    camera.up.set(0, 0, 1);
+
+    let cubeMesh = null;
+    let cottageGroup = null;
+    let castleGroup = null;
+    let coliseumGroup = null;
+    let appleGroup = null;
+    let flightGroup = null;
+    let extinguisherGroup = null;
+    let eGroup = null;
+    function buildThreeCube() {
+      cubeMesh = new THREE.Mesh(
+        new THREE.BoxGeometry(S.cube.size, S.cube.size, S.cube.size),
+        new THREE.MeshLambertMaterial({ color: S.cube.color }),
+      );
+      cubeMesh.position.set(S.obj.cube.x, S.obj.cube.y, S.obj.cube.z);
+      cubeMesh.castShadow = true;
+      cubeMesh.receiveShadow = true;
+      threeScene.add(cubeMesh);
+    }
+    function buildThreeE() {
+      eGroup = new THREE.Group();
+      const mat = new THREE.MeshLambertMaterial({ color: E_COLOR });
+      for (const { center, size } of E_BOXES) {
+        const m = new THREE.Mesh(new THREE.BoxGeometry(size[0], size[1], size[2]), mat);
+        m.position.set(center[0], center[1], center[2]);
+        m.castShadow = true;
+        m.receiveShadow = true;
+        eGroup.add(m);
+      }
+      threeScene.add(eGroup);
+    }
+    function buildThreeCottage() {
+      return new Promise((resolve, reject) => {
+        const mtlLoader = new MTLLoader();
+        mtlLoader.setMaterialOptions({ side: THREE.DoubleSide });
+        mtlLoader.load("/gallery/obj/cottage.mtl", (materials) => {
+          materials.preload();
+          const objLoader = new OBJLoader();
+          objLoader.setMaterials(materials);
+          objLoader.load("/gallery/obj/cottage.obj", (obj) => {
+            // OBJ files are Y-up; PolyCSS's parseObj applies a cyclic
+            // (x,y,z) → (z,x,y) permutation to bring +Y into PolyCSS's +Z.
+            // Match that with a 120° rotation around (1,1,1) so the same
+            // loaded file lands in the same world frame on both engines.
+            const q = new THREE.Quaternion();
+            q.setFromAxisAngle(new THREE.Vector3(1, 1, 1).normalize(), 2 * Math.PI / 3);
+            obj.quaternion.copy(q);
+            // Apply the rotation first so the bbox math runs in the same
+            // frame PolyCSS will end up in.
+            obj.updateMatrixWorld(true);
+            const wrap = new THREE.Group();
+            wrap.add(obj);
+            // Normalize: bbox max-dim → COTTAGE_TARGET_SIZE, then re-center
+            // the geometry at the origin. Matches PolyCSS parseObj
+            // `targetSize` behaviour.
+            const bbox = new THREE.Box3().setFromObject(wrap);
+            const sizeV = new THREE.Vector3();
+            bbox.getSize(sizeV);
+            const maxDim = Math.max(sizeV.x, sizeV.y, sizeV.z) || 1;
+            const norm = COTTAGE_TARGET_SIZE / maxDim;
+            obj.scale.multiplyScalar(norm);
+            obj.updateMatrixWorld(true);
+            // PolyCSS parseObj places the bbox MIN at origin (cottage sits in
+            // the +X+Y+Z quadrant), not the bbox CENTER. Match that here.
+            const bbox2 = new THREE.Box3().setFromObject(wrap);
+            obj.position.sub(bbox2.min);
+            wrap.position.set(S.obj.cottage.x, S.obj.cottage.y, S.obj.cottage.z);
+            wrap.scale.setScalar(S.obj.cottage.scale);
+            obj.traverse((c) => { if (c.isMesh) { c.castShadow = true; c.receiveShadow = true; } });
+            cottageGroup = wrap;
+            threeScene.add(wrap);
+            resolve();
+          }, undefined, reject);
+        }, undefined, reject);
+      });
+    }
+    // Three.js castle. Mirrors buildThreeCottage exactly, just swapping the
+    // OBJ/MTL paths and the target-size constant so the bench's slider
+    // values move both engines identically.
+    function buildThreeCastle() {
+      return new Promise((resolve, reject) => {
+        const mtlLoader = new MTLLoader();
+        mtlLoader.setMaterialOptions({ side: THREE.DoubleSide });
+        mtlLoader.load("/gallery/obj/castle.mtl", (materials) => {
+          materials.preload();
+          const objLoader = new OBJLoader();
+          objLoader.setMaterials(materials);
+          objLoader.load("/gallery/obj/castle.obj", (obj) => {
+            const q = new THREE.Quaternion();
+            q.setFromAxisAngle(new THREE.Vector3(1, 1, 1).normalize(), 2 * Math.PI / 3);
+            obj.quaternion.copy(q);
+            obj.updateMatrixWorld(true);
+            const wrap = new THREE.Group();
+            wrap.add(obj);
+            const bbox = new THREE.Box3().setFromObject(wrap);
+            const sizeV = new THREE.Vector3();
+            bbox.getSize(sizeV);
+            const maxDim = Math.max(sizeV.x, sizeV.y, sizeV.z) || 1;
+            const norm = CASTLE_TARGET_SIZE / maxDim;
+            obj.scale.multiplyScalar(norm);
+            obj.updateMatrixWorld(true);
+            const bbox2 = new THREE.Box3().setFromObject(wrap);
+            obj.position.sub(bbox2.min);
+            wrap.position.set(S.obj.castle.x, S.obj.castle.y, S.obj.castle.z);
+            wrap.scale.setScalar(S.obj.castle.scale);
+            obj.traverse((c) => { if (c.isMesh) { c.castShadow = true; c.receiveShadow = true; } });
+            castleGroup = wrap;
+            threeScene.add(wrap);
+            resolve();
+          }, undefined, reject);
+        }, undefined, reject);
+      });
+    }
+    function buildThreeColiseum() {
+      return new Promise((resolve, reject) => {
+        const mtlLoader = new MTLLoader();
+        mtlLoader.setMaterialOptions({ side: THREE.DoubleSide });
+        mtlLoader.load("/gallery/obj/coliseum.mtl", (materials) => {
+          materials.preload();
+          const objLoader = new OBJLoader();
+          objLoader.setMaterials(materials);
+          objLoader.load("/gallery/obj/coliseum.obj", (obj) => {
+            const q = new THREE.Quaternion();
+            q.setFromAxisAngle(new THREE.Vector3(1, 1, 1).normalize(), 2 * Math.PI / 3);
+            obj.quaternion.copy(q);
+            obj.updateMatrixWorld(true);
+            const wrap = new THREE.Group();
+            wrap.add(obj);
+            const bbox = new THREE.Box3().setFromObject(wrap);
+            const sizeV = new THREE.Vector3();
+            bbox.getSize(sizeV);
+            const maxDim = Math.max(sizeV.x, sizeV.y, sizeV.z) || 1;
+            const norm = COLISEUM_TARGET_SIZE / maxDim;
+            obj.scale.multiplyScalar(norm);
+            obj.updateMatrixWorld(true);
+            const bbox2 = new THREE.Box3().setFromObject(wrap);
+            obj.position.sub(bbox2.min);
+            wrap.position.set(S.obj.coliseum.x, S.obj.coliseum.y, S.obj.coliseum.z);
+            wrap.scale.setScalar(S.obj.coliseum.scale);
+            obj.traverse((c) => { if (c.isMesh) { c.castShadow = true; c.receiveShadow = true; } });
+            coliseumGroup = wrap;
+            threeScene.add(wrap);
+            resolve();
+          }, undefined, reject);
+        }, undefined, reject);
+      });
+    }
+    // GLB equivalent of buildThreeColiseum. parseGltf applies the same
+    // axis-swap + targetSize normalization on the PolyCSS side, so the
+    // wrap layout here mirrors what PolyCSS produces (same rotation +
+    // recenter + uniform scale to APPLE_TARGET_SIZE).
+    function buildThreeApple() {
+      return new Promise((resolve, reject) => {
+        const loader = new GLTFLoader();
+        loader.load("/gallery/glb/apple.glb", (gltf) => {
+          const obj = gltf.scene;
+          const q = new THREE.Quaternion();
+          q.setFromAxisAngle(new THREE.Vector3(1, 1, 1).normalize(), 2 * Math.PI / 3);
+          obj.quaternion.copy(q);
+          obj.updateMatrixWorld(true);
+          const wrap = new THREE.Group();
+          wrap.add(obj);
+          const bbox = new THREE.Box3().setFromObject(wrap);
+          const sizeV = new THREE.Vector3();
+          bbox.getSize(sizeV);
+          const maxDim = Math.max(sizeV.x, sizeV.y, sizeV.z) || 1;
+          const norm = APPLE_TARGET_SIZE / maxDim;
+          obj.scale.multiplyScalar(norm);
+          obj.updateMatrixWorld(true);
+          const bbox2 = new THREE.Box3().setFromObject(wrap);
+          obj.position.sub(bbox2.min);
+          wrap.position.set(S.obj.apple.x, S.obj.apple.y, S.obj.apple.z);
+          wrap.scale.setScalar(S.obj.apple.scale);
+          obj.traverse((c) => { if (c.isMesh) { c.castShadow = true; c.receiveShadow = true; } });
+          appleGroup = wrap;
+          threeScene.add(wrap);
+          resolve();
+        }, undefined, reject);
+      });
+    }
+    function buildThreeFlight() {
+      return new Promise((resolve, reject) => {
+        const loader = new GLTFLoader();
+        loader.load("/gallery/glb/nasa/flight-system-support.glb", (gltf) => {
+          const obj = gltf.scene;
+          const q = new THREE.Quaternion();
+          q.setFromAxisAngle(new THREE.Vector3(1, 1, 1).normalize(), 2 * Math.PI / 3);
+          obj.quaternion.copy(q);
+          obj.updateMatrixWorld(true);
+          const wrap = new THREE.Group();
+          wrap.add(obj);
+          const bbox = new THREE.Box3().setFromObject(wrap);
+          const sizeV = new THREE.Vector3();
+          bbox.getSize(sizeV);
+          const maxDim = Math.max(sizeV.x, sizeV.y, sizeV.z) || 1;
+          const norm = FLIGHT_TARGET_SIZE / maxDim;
+          obj.scale.multiplyScalar(norm);
+          obj.updateMatrixWorld(true);
+          const bbox2 = new THREE.Box3().setFromObject(wrap);
+          obj.position.sub(bbox2.min);
+          wrap.position.set(S.obj.flight.x, S.obj.flight.y, S.obj.flight.z);
+          wrap.scale.setScalar(S.obj.flight.scale);
+          obj.traverse((c) => { if (c.isMesh) { c.castShadow = true; c.receiveShadow = true; } });
+          flightGroup = wrap;
+          threeScene.add(wrap);
+          resolve();
+        }, undefined, reject);
+      });
+    }
+    function buildThreeExtinguisher() {
+      return new Promise((resolve, reject) => {
+        const mtlLoader = new MTLLoader();
+        mtlLoader.setMaterialOptions({ side: THREE.DoubleSide });
+        mtlLoader.load("/gallery/obj/opengameart/fire-extinguisher/extinguisher.mtl", (materials) => {
+          materials.preload();
+          const objLoader = new OBJLoader();
+          objLoader.setMaterials(materials);
+          objLoader.load("/gallery/obj/opengameart/fire-extinguisher/extinguisher.obj", (obj) => {
+            const q = new THREE.Quaternion();
+            q.setFromAxisAngle(new THREE.Vector3(1, 1, 1).normalize(), 2 * Math.PI / 3);
+            obj.quaternion.copy(q);
+            obj.updateMatrixWorld(true);
+            const wrap = new THREE.Group();
+            wrap.add(obj);
+            const bbox = new THREE.Box3().setFromObject(wrap);
+            const sizeV = new THREE.Vector3();
+            bbox.getSize(sizeV);
+            const maxDim = Math.max(sizeV.x, sizeV.y, sizeV.z) || 1;
+            const norm = EXTINGUISHER_TARGET_SIZE / maxDim;
+            obj.scale.multiplyScalar(norm);
+            obj.updateMatrixWorld(true);
+            const bbox2 = new THREE.Box3().setFromObject(wrap);
+            obj.position.sub(bbox2.min);
+            wrap.position.set(S.obj.extinguisher.x, S.obj.extinguisher.y, S.obj.extinguisher.z);
+            wrap.scale.setScalar(S.obj.extinguisher.scale);
+            obj.traverse((c) => { if (c.isMesh) { c.castShadow = true; c.receiveShadow = true; } });
+            extinguisherGroup = wrap;
+            threeScene.add(wrap);
+            resolve();
+          }, undefined, reject);
+        }, undefined, reject);
+      });
+    }
+    if (S.mesh === "cube") buildThreeCube();
+
+    const floorMesh = new THREE.Mesh(
+      new THREE.PlaneGeometry(S.floor.size, S.floor.size),
+      new THREE.MeshLambertMaterial({ color: S.floor.color }),
+    );
+    floorMesh.receiveShadow = true;
+    floorMesh.castShadow = true;
+    threeScene.add(floorMesh);
+
+    // PolyCSS projects shadows analytically onto the receiver — light
+    // direction is all that matters and there's no clipping limit. Three.js
+    // builds a shadow map from an orthographic camera placed AT
+    // `light.position`, so two things have to be sized to the scene:
+    //  - light.position must be far enough from the scene that the shadow
+    //    camera's near plane doesn't cut into geometry,
+    //  - shadow.camera.{left,right,top,bottom,far} must contain the
+    //    geometry's projection along the light vector (plus the shadow
+    //    extent across the receiver).
+    // We compute both from the scene bounding sphere after every mesh
+    // build/move, so the bench mirrors PolyCSS's "shadows just work" feel
+    // regardless of scene size.
+    const dirLight = new THREE.DirectionalLight(new THREE.Color(S.dir.color), S.dir.intensity);
+    dirLight.castShadow = true;
+    dirLight.shadow.camera.near = 0.1;
+    dirLight.shadow.mapSize.set(8192, 8192);  // bench: trade memory for crisp edges
+    dirLight.shadow.bias = -0.0005;
+
+    // three.js point lights — DIRECTION-ONLY emulation of PolyCSS point lights:
+    // PointLight(color, intensity, distance=0, decay=0) disables distance
+    // falloff, so contribution is color·intensity·max(0,n·L̂), matching our
+    // per-face shading (three is per-fragment → smooth gradient; ours flat per
+    // face, an accepted approximation). One per S.points entry.
+    const threePointLights = S.points.map(() => {
+      const pl = new THREE.PointLight(0xffffff, 1, 0, 0);
+      threeScene.add(pl);
+      return pl;
+    });
+    function syncThreePointLights() {
+      S.points.forEach((p, i) => {
+        const pl = threePointLights[i];
+        pl.visible = !!p.on;
+        pl.position.set(p.x, p.y, p.z);
+        pl.color.set(p.color);
+        pl.intensity = p.intensity;
+      });
+    }
+    syncThreePointLights();
+
+    function fitDirLightToScene() {
+      const bbox = new THREE.Box3();
+      threeScene.traverse((obj) => {
+        if (obj.isMesh && obj.geometry) bbox.expandByObject(obj);
+      });
+      if (bbox.isEmpty()) return;
+      const sphere = new THREE.Sphere();
+      bbox.getBoundingSphere(sphere);
+      // Pad for grazing light (shadow length ≈ radius / lightZ). Smallest
+      // safe assumption: shadow extends up to ~10× radius for very low
+      // dir.z. We cover with a 6× safety factor — bigger than typical
+      // grazing extent but stays well under shadow-map precision limits.
+      const r = Math.max(sphere.radius, 1);
+      const frustumR = r * 6;
+      const lightDist = r * 4;
+      const dx = S.dir.x, dy = S.dir.y, dz = S.dir.z;
+      const dlen = Math.hypot(dx, dy, dz) || 1;
+      dirLight.position.set(
+        sphere.center.x + (dx / dlen) * lightDist,
+        sphere.center.y + (dy / dlen) * lightDist,
+        sphere.center.z + (dz / dlen) * lightDist,
+      );
+      dirLight.target.position.copy(sphere.center);
+      dirLight.shadow.camera.left = -frustumR;
+      dirLight.shadow.camera.right = frustumR;
+      dirLight.shadow.camera.top = frustumR;
+      dirLight.shadow.camera.bottom = -frustumR;
+      dirLight.shadow.camera.far = lightDist * 3;
+      dirLight.shadow.camera.updateProjectionMatrix();
+    }
+    threeScene.add(dirLight);
+    threeScene.add(dirLight.target);
+    const ambLight = new THREE.AmbientLight(new THREE.Color(S.amb.color), S.amb.intensity);
+    threeScene.add(ambLight);
+
+    // Light helper marker — both engines render a small box at a NEAR
+    // position derived from the light direction so the user can see + drag
+    // it. The actual light's WORLD position lives much farther out for
+    // shadow-camera precision (see fitDirLightToScene), so the helper
+    // position is computed separately here.
+    const LIGHT_HELPER_DISTANCE = 4; // world units from target
+    // Active-mesh world-space bbox center. The helper orbits this point so
+    // a normalized OBJ that sits in +X+Y+Z (cottage/castle) gets the light
+    // marker near the building rather than way off at world origin.
+    // Returns null when no mesh is mounted yet (initial async load).
+    function activePolyMesh() {
+      if (S.mesh === "cube"     && polyCube)     return polyCube;
+      if (S.mesh === "e"        && polyE)        return polyE;
+      if (S.mesh === "cottage"  && polyCottage)  return polyCottage;
+      if (S.mesh === "castle"   && polyCastle)   return polyCastle;
+      if (S.mesh === "coliseum" && polyColiseum) return polyColiseum;
+      if (S.mesh === "apple"    && polyApple)    return polyApple;
+      if (S.mesh === "flight"   && polyFlight)   return polyFlight;
+      if (S.mesh === "extinguisher" && polyExtinguisher) return polyExtinguisher;
+      return null;
+    }
+    function activeMeshCenter() {
+      const m = activePolyMesh();
+      if (!m) return [0, 0, 0];
+      const polys = m.polygons;
+      if (!polys || polys.length === 0) return [0, 0, 0];
+      let minX = Infinity, minY = Infinity, minZ = Infinity;
+      let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+      for (const p of polys) {
+        for (const v of p.vertices) {
+          if (v[0] < minX) minX = v[0]; if (v[0] > maxX) maxX = v[0];
+          if (v[1] < minY) minY = v[1]; if (v[1] > maxY) maxY = v[1];
+          if (v[2] < minZ) minZ = v[2]; if (v[2] > maxZ) maxZ = v[2];
+        }
+      }
+      const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2, cz = (minZ + maxZ) / 2;
+      const pos = m.getPosition?.() ?? [0, 0, 0];
+      const scale = m.getScale?.() ?? 1;
+      const sx = typeof scale === "number" ? scale : (scale[0] ?? 1);
+      const sy = typeof scale === "number" ? scale : (scale[1] ?? 1);
+      const sz = typeof scale === "number" ? scale : (scale[2] ?? 1);
+      return [pos[0] + cx * sx, pos[1] + cy * sy, pos[2] + cz * sz];
+    }
+    function computeLightHelperPos() {
+      const dx = S.dir.x, dy = S.dir.y, dz = S.dir.z;
+      const len = Math.hypot(dx, dy, dz) || 1;
+      const c = activeMeshCenter();
+      return [
+        c[0] + (dx / len) * LIGHT_HELPER_DISTANCE,
+        c[1] + (dy / len) * LIGHT_HELPER_DISTANCE,
+        c[2] + (dz / len) * LIGHT_HELPER_DISTANCE,
+      ];
+    }
+    // Three.js helper: simple mesh + a line from the helper to the origin.
+    const lightHelperGeom = new THREE.SphereGeometry(0.2, 16, 16);
+    const lightHelperMat = new THREE.MeshBasicMaterial({ color: 0xffaa00 });
+    const threeLightHelper = new THREE.Mesh(lightHelperGeom, lightHelperMat);
+    threeScene.add(threeLightHelper);
+    const lightLineMat = new THREE.LineBasicMaterial({ color: 0xffaa00 });
+    const lightLineGeom = new THREE.BufferGeometry();
+    lightLineGeom.setFromPoints([new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, 0)]);
+    const threeLightLine = new THREE.Line(lightLineGeom, lightLineMat);
+    threeScene.add(threeLightLine);
+
+    // PolyCSS helper — small OCTAHEDRON (matches the rhombus look from
+    // the gallery's draggable light) at the same NEAR world position.
+    const lightHelperSize = 0.4;
+    const polyLightHelper = polyScene.add(
+      createPolyOctahedron({ center: [0, 0, 0], size: lightHelperSize, color: "#ffaa00" }),
+      { id: "light-helper", position: [0, 0, 0], castShadow: false, receiveShadow: false, excludeFromAutoCenter: true, merge: false },
+    );
+    // Mark the helper's wrapper so the pointer handler below can find it
+    // by selector (same trick the gallery's draggable light uses).
+    polyHost.querySelector('[data-poly-mesh-id="light-helper"]')?.setAttribute("data-light-helper", "1");
+    // Slider value-refreshers for the directional-light dir.x/y/z rows
+    // — populated by buildPanel() so the drag handler can sync the
+    // slider UI as the user moves the helper.
+    const lightSliderRefreshers = [];
+    function refreshLightSliders() { for (const fn of lightSliderRefreshers) fn(); }
+    let lightDragging = false;
+    // Direct pointer-drag on the helper marker — inverse-projects the mouse
+    // to a 3D point on the helper's sphere (radius = LIGHT_HELPER_DISTANCE
+    // around origin), so the rhombus tracks the cursor exactly instead of
+    // approximating with screen-delta rotations. screenToWorldOnSphere is
+    // a core utility that handles the camera's rotZ/rotX/scale chain.
+    // Slider limits (dir.x/y/z ∈ [-2, 2]) are enforced by clamping per
+    // axis after the unprojection.
+    const LIGHT_AXIS_LIMIT = 2;
+    polyHost.addEventListener("pointerdown", (e) => {
+      const target = e.target instanceof Element ? e.target : null;
+      const helperEl = target?.closest('[data-light-helper="1"]');
+      if (!helperEl) return;
+      // stopImmediatePropagation: the bench attaches bindDrag(polyHost)
+      // for camera orbit on the SAME element; only stopImmediate blocks
+      // the orbit listener that comes after this one in registration order.
+      e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation();
+      lightDragging = true;
+      polyHost.setPointerCapture?.(e.pointerId);
+      const onMove = (ev) => {
+        if (!lightDragging) return;
+        ev.preventDefault();
+        const hostRect = polyHost.getBoundingClientRect();
+        const hit = screenToWorldOnSphere({
+          camera: polyScene.camera.state,
+          tileSize: POLY_TILE,
+          viewportCenterX: hostRect.left + hostRect.width / 2,
+          viewportCenterY: hostRect.top + hostRect.height / 2,
+          mouseX: ev.clientX,
+          mouseY: ev.clientY,
+          sphereCenter: activeMeshCenter(),
+          sphereRadius: LIGHT_HELPER_DISTANCE,
+        });
+        if (!hit) return;
+        // `hit` is now in world coords ON the orbit sphere around the
+        // mesh center. The light DIRECTION is the unit vector from
+        // center → hit (not from origin → hit), otherwise dragging a
+        // mesh away from the origin would pre-bake the offset into the
+        // direction vector. Scale to preserve the slider magnitude.
+        const c = activeMeshCenter();
+        const dx = hit[0] - c[0], dy = hit[1] - c[1], dz = hit[2] - c[2];
+        const oldLen = Math.hypot(S.dir.x, S.dir.y, S.dir.z) || 1;
+        const hitLen = Math.hypot(dx, dy, dz) || 1;
+        const sx = (dx / hitLen) * oldLen;
+        const sy = (dy / hitLen) * oldLen;
+        const sz = (dz / hitLen) * oldLen;
+        S.dir.x = Math.max(-LIGHT_AXIS_LIMIT, Math.min(LIGHT_AXIS_LIMIT, sx));
+        S.dir.y = Math.max(-LIGHT_AXIS_LIMIT, Math.min(LIGHT_AXIS_LIMIT, sy));
+        S.dir.z = Math.max(-LIGHT_AXIS_LIMIT, Math.min(LIGHT_AXIS_LIMIT, sz));
+        refreshLightSliders();
+        update(false);
+      };
+      const onUp = (ev) => {
+        if (ev.pointerId !== e.pointerId) return;
+        lightDragging = false;
+        polyHost.releasePointerCapture?.(e.pointerId);
+        window.removeEventListener("pointermove", onMove);
+        window.removeEventListener("pointerup", onUp);
+        window.removeEventListener("pointercancel", onUp);
+        if (S.lighting === "baked") update(true);
+      };
+      window.addEventListener("pointermove", onMove);
+      window.addEventListener("pointerup", onUp);
+      window.addEventListener("pointercancel", onUp);
+    });
+    // Hint the user the helper is grabbable.
+    const helperStyle = polyHost.querySelector('[data-light-helper="1"]');
+    if (helperStyle instanceof HTMLElement) helperStyle.style.cursor = "grab";
+
+    // ─── Camera — same rotX/rotY/zoom drive both ───────────────────────
+    function resizeThree() {
+      const w = threeCanvas.clientWidth, h = threeCanvas.clientHeight;
+      renderer.setSize(w, h, false);
+      // zoom = pixels per world unit. Frustum extent in world units =
+      // canvas pixels / zoom. Bigger zoom = bigger cube. Same direction
+      // as PolyCSS's CSS-scale convention.
+      const halfW = (w * 0.5) / S.cam.zoom;
+      const halfH = (h * 0.5) / S.cam.zoom;
+      camera.left = -halfW; camera.right = halfW;
+      camera.top = halfH; camera.bottom = -halfH;
+      camera.updateProjectionMatrix();
+    }
+    function applyCamera() {
+      const rx = S.cam.rotX * Math.PI / 180;
+      const ry = S.cam.rotY * Math.PI / 180;
+      const dist = 100;
+      camera.position.set(
+        dist * Math.sin(rx) * Math.cos(ry),
+        dist * Math.sin(rx) * Math.sin(ry),
+        dist * Math.cos(rx),
+      );
+      camera.lookAt(0, 0, 0);
+      resizeThree();
+      polyScene.camera.update({ rotX: S.cam.rotX, rotY: S.cam.rotY, zoom: S.cam.zoom });
+      polyScene.applyCamera();
+    }
+    window.addEventListener("resize", () => { applyCamera(); update(); });
+
+    // Renders both scenes. `lightsChanged` triggers PolyCSS atlas re-bake;
+    // omit it for camera-only updates (drag, wheel) to avoid re-rasterising
+    // textured atlases every pointer tick — that's what causes the visible
+    // texture-flicker on cottage drags. Cube + floor solid colors don't need
+    // re-bake on camera moves; viewing angle doesn't affect Lambert.
+    function update(lightsChanged) {
+      // Push every mesh's transform every tick. setTransform is cheap when
+      // values haven't changed; this keeps the bench panel + both engines
+      // in sync without per-mesh slider plumbing.
+      // PolyCSS rotation = degrees (matches PolyMeshTransform.rotation);
+      // Three.js mesh.rotation = radians.
+      if (polyCube)     polyCube.setTransform({     position: [S.obj.cube.x,     S.obj.cube.y,     S.obj.cube.z],     scale: S.obj.cube.scale,     rotation: [S.obj.cube.rx,     S.obj.cube.ry,     S.obj.cube.rz],     castShadow: S.castShadow, receiveShadow: S.selfShadow });
+      if (polyE)        polyE.setTransform({        position: [S.obj.e.x,        S.obj.e.y,        S.obj.e.z],        scale: S.obj.e.scale,        rotation: [S.obj.e.rx,        S.obj.e.ry,        S.obj.e.rz],        castShadow: S.castShadow, receiveShadow: S.selfShadow });
+      if (polyCottage)  polyCottage.setTransform({  position: [S.obj.cottage.x,  S.obj.cottage.y,  S.obj.cottage.z],  scale: S.obj.cottage.scale,  rotation: [S.obj.cottage.rx,  S.obj.cottage.ry,  S.obj.cottage.rz],  castShadow: S.castShadow, receiveShadow: S.selfShadow });
+      if (polyCastle)   polyCastle.setTransform({   position: [S.obj.castle.x,   S.obj.castle.y,   S.obj.castle.z],   scale: S.obj.castle.scale,   rotation: [S.obj.castle.rx,   S.obj.castle.ry,   S.obj.castle.rz],   castShadow: S.castShadow, receiveShadow: S.selfShadow });
+      if (polyColiseum) polyColiseum.setTransform({ position: [S.obj.coliseum.x, S.obj.coliseum.y, S.obj.coliseum.z], scale: S.obj.coliseum.scale, rotation: [S.obj.coliseum.rx, S.obj.coliseum.ry, S.obj.coliseum.rz], castShadow: S.castShadow, receiveShadow: S.selfShadow });
+      if (polyApple)    polyApple.setTransform({    position: [S.obj.apple.x,    S.obj.apple.y,    S.obj.apple.z],    scale: S.obj.apple.scale,    rotation: [S.obj.apple.rx,    S.obj.apple.ry,    S.obj.apple.rz],    castShadow: S.castShadow, receiveShadow: S.selfShadow });
+      if (polyFlight)   polyFlight.setTransform({   position: [S.obj.flight.x,   S.obj.flight.y,   S.obj.flight.z],   scale: S.obj.flight.scale,   rotation: [S.obj.flight.rx,   S.obj.flight.ry,   S.obj.flight.rz],   castShadow: S.castShadow, receiveShadow: S.selfShadow });
+      if (polyExtinguisher) polyExtinguisher.setTransform({ position: [S.obj.extinguisher.x, S.obj.extinguisher.y, S.obj.extinguisher.z], scale: S.obj.extinguisher.scale, rotation: [S.obj.extinguisher.rx, S.obj.extinguisher.ry, S.obj.extinguisher.rz], castShadow: S.castShadow, receiveShadow: S.selfShadow });
+      // Floor visibility + receiveShadow live-update. visibility:hidden
+      // keeps the mesh in the scene graph (so its position still anchors
+      // shadow ground recomputation); receiveShadow drives the same
+      // hasReceiver branch the gallery's missing flag toggles.
+      polyFloor.element.style.visibility = S.floorVisible ? "" : "hidden";
+      polyFloor.setTransform({ receiveShadow: S.floorReceives });
+      // Scale the shadow's ground-plane lift inversely with camera zoom so
+      // it stays at ~1 SCREEN PIXEL regardless of how far the camera is.
+      // With a fixed lift in world units, low-zoom views (small px/u)
+      // sink the lift below the 3D depth-sort threshold and the floor
+      // mesh wins the z-fight, hiding the cast shadow — the user
+      // reported this on the E mesh at zoom 30 where its ground shadow
+      // vanished. The library's `shadow.lift` is in WORLD UNITS, so a
+      // 1-screen-pixel target lift = 1 / zoom world units.
+      const shadowLift = 1 / Math.max(1, S.cam.zoom);
+      polyScene.setOptions({
+        directionalLight: {
+          direction: [S.dir.x, S.dir.y, S.dir.z],
+          intensity: S.dir.intensity,
+          color: S.dir.color,
+          castShadow: true,
+        },
+        pointLights: polyPointLights(),
+        ambientLight: { color: S.amb.color, intensity: S.amb.intensity },
+        textureLighting: S.lighting,
+        shadow: { color: "#000000", opacity: S.shadow.opacity, lift: shadowLift },
+        autoCenter: S.autoCenter,
+      });
+      syncThreePointLights();
+      // Baked mode stores lit colors in atlas pixels → light change requires
+      // re-rasterising every mesh's atlas (visible flicker on textured
+      // meshes). Dynamic mode evaluates Lambert in CSS calc() per-frame
+      // from `--plx/--ply/--plz` vars; setOptions already updated those, so
+      // no re-bake needed.
+      if (lightsChanged && S.lighting === "baked") {
+        if (polyCube) polyCube.rebakeAtlas();
+        if (polyCottage) polyCottage.rebakeAtlas();
+        if (polyCastle) polyCastle.rebakeAtlas();
+        if (polyColiseum) polyColiseum.rebakeAtlas();
+        if (polyApple) polyApple.rebakeAtlas();
+        if (polyFlight) polyFlight.rebakeAtlas();
+        if (polyExtinguisher) polyExtinguisher.rebakeAtlas();
+        if (polyE) polyE.rebakeAtlas();
+        polyFloor.rebakeAtlas();
+      }
+      const D2R = Math.PI / 180;
+      if (cubeMesh) {
+        cubeMesh.position.set(S.obj.cube.x, S.obj.cube.y, S.obj.cube.z);
+        cubeMesh.scale.setScalar(S.obj.cube.scale);
+        cubeMesh.rotation.set(S.obj.cube.rx * D2R, S.obj.cube.ry * D2R, S.obj.cube.rz * D2R);
+        cubeMesh.castShadow = S.castShadow;
+        cubeMesh.receiveShadow = S.selfShadow;
+      }
+      if (eGroup) {
+        eGroup.position.set(S.obj.e.x, S.obj.e.y, S.obj.e.z);
+        eGroup.scale.setScalar(S.obj.e.scale);
+        eGroup.rotation.set(S.obj.e.rx * D2R, S.obj.e.ry * D2R, S.obj.e.rz * D2R);
+        eGroup.traverse(c => { if (c.isMesh) { c.castShadow = S.castShadow; c.receiveShadow = S.selfShadow; } });
+      }
+      if (cottageGroup) {
+        cottageGroup.position.set(S.obj.cottage.x, S.obj.cottage.y, S.obj.cottage.z);
+        cottageGroup.scale.setScalar(S.obj.cottage.scale);
+        cottageGroup.rotation.set(S.obj.cottage.rx * D2R, S.obj.cottage.ry * D2R, S.obj.cottage.rz * D2R);
+        cottageGroup.traverse(c => { if (c.isMesh) { c.castShadow = S.castShadow; c.receiveShadow = S.selfShadow; } });
+      }
+      if (castleGroup) {
+        castleGroup.position.set(S.obj.castle.x, S.obj.castle.y, S.obj.castle.z);
+        castleGroup.scale.setScalar(S.obj.castle.scale);
+        castleGroup.rotation.set(S.obj.castle.rx * D2R, S.obj.castle.ry * D2R, S.obj.castle.rz * D2R);
+        castleGroup.traverse(c => { if (c.isMesh) { c.castShadow = S.castShadow; c.receiveShadow = S.selfShadow; } });
+      }
+      if (coliseumGroup) {
+        coliseumGroup.position.set(S.obj.coliseum.x, S.obj.coliseum.y, S.obj.coliseum.z);
+        coliseumGroup.scale.setScalar(S.obj.coliseum.scale);
+        coliseumGroup.rotation.set(S.obj.coliseum.rx * D2R, S.obj.coliseum.ry * D2R, S.obj.coliseum.rz * D2R);
+        coliseumGroup.traverse(c => { if (c.isMesh) { c.castShadow = S.castShadow; c.receiveShadow = S.selfShadow; } });
+      }
+      if (appleGroup) {
+        appleGroup.position.set(S.obj.apple.x, S.obj.apple.y, S.obj.apple.z);
+        appleGroup.scale.setScalar(S.obj.apple.scale);
+        appleGroup.rotation.set(S.obj.apple.rx * D2R, S.obj.apple.ry * D2R, S.obj.apple.rz * D2R);
+        appleGroup.traverse(c => { if (c.isMesh) { c.castShadow = S.castShadow; c.receiveShadow = S.selfShadow; } });
+      }
+      if (flightGroup) {
+        flightGroup.position.set(S.obj.flight.x, S.obj.flight.y, S.obj.flight.z);
+        flightGroup.scale.setScalar(S.obj.flight.scale);
+        flightGroup.rotation.set(S.obj.flight.rx * D2R, S.obj.flight.ry * D2R, S.obj.flight.rz * D2R);
+        flightGroup.traverse(c => { if (c.isMesh) { c.castShadow = S.castShadow; c.receiveShadow = S.selfShadow; } });
+      }
+      if (extinguisherGroup) {
+        extinguisherGroup.position.set(S.obj.extinguisher.x, S.obj.extinguisher.y, S.obj.extinguisher.z);
+        extinguisherGroup.scale.setScalar(S.obj.extinguisher.scale);
+        extinguisherGroup.rotation.set(S.obj.extinguisher.rx * D2R, S.obj.extinguisher.ry * D2R, S.obj.extinguisher.rz * D2R);
+        extinguisherGroup.traverse(c => { if (c.isMesh) { c.castShadow = S.castShadow; c.receiveShadow = S.selfShadow; } });
+      }
+      floorMesh.visible = S.floorVisible;
+      floorMesh.receiveShadow = S.floorReceives;
+      fitDirLightToScene();
+      dirLight.intensity = S.dir.intensity;
+      dirLight.color.set(S.dir.color);
+      ambLight.intensity = S.amb.intensity;
+      ambLight.color.set(S.amb.color);
+      // Sync both light-helper markers to a NEAR world position derived
+      // from the light direction (separate from dirLight.position, which
+      // sits far away for shadow-camera precision). Drag-induced changes
+      // to S.dir.x/y/z are propagated here automatically.
+      const helperPos = computeLightHelperPos();
+      threeLightHelper.position.set(helperPos[0], helperPos[1], helperPos[2]);
+      lightLineGeom.setFromPoints([
+        new THREE.Vector3(helperPos[0], helperPos[1], helperPos[2]),
+        new THREE.Vector3(dirLight.target.position.x, dirLight.target.position.y, dirLight.target.position.z),
+      ]);
+      // Always push the helper to the freshly-computed direction-derived
+      // position. The drag handler updates S.dir.{x,y,z} → update() →
+      // computeLightHelperPos() → here. The rhombus visibly follows
+      // the mouse this way.
+      if (polyLightHelper) {
+        polyLightHelper.setTransform({ position: helperPos });
+      }
+      applyShadowsOnly();
+      renderer.render(threeScene, camera);
+    }
+
+    // "Shadows only" comparison mode. Renders just the shadow data on
+    // each side — no surfaces, no textures, no shading. What you see
+    // IS the shadow contribution and nothing else.
+    //   - PolyCSS: hide every .polycss-mesh wrapper (visibility:hidden).
+    //     Shadow SVGs (ground + per-receiver-face) are .polycss-shadow
+    //     siblings under .polycss-scene, so they keep rendering. The
+    //     ground-shadow SVG shows the cast shadow on the floor; the
+    //     receiver-face SVGs sit in 3D at each receiving face and show
+    //     shadows-on-objects floating in space.
+    //   - Three.js: swap every mesh material (casters AND floor) to
+    //     THREE.ShadowMaterial. It renders ONLY the shadow that falls
+    //     on the surface, leaving the rest fully transparent — so the
+    //     scene shows only the shadow-map contribution. Original
+    //     materials are restored when the toggle is turned off.
+    const _origThreeMats = new WeakMap();
+    function applyShadowsOnly() {
+      for (const m of polyHost.querySelectorAll(".polycss-mesh")) {
+        // display:none beats visibility:hidden here — leaves inside the
+        // mesh use transform-style: preserve-3d which paints them in a
+        // separate compositor layer that ignores parent `visibility`.
+        m.style.display = S.shadowsOnly ? "none" : "";
+      }
+      // Recolor every shadow SVG path to a uniform semi-transparent black.
+      // PolyCSS receiver shadows for SOLID surfaces are painted with the
+      // receiver's ambient-only color (e.g. dark navy for the E) — that
+      // IS the shadow data physically, but visually it reads as "the
+      // mesh is still there" rather than as a shadow. Forcing every
+      // shadow SVG to render as semi-transparent black makes the layer
+      // read as a true shadow overlay so it's directly comparable to
+      // Three.js's ShadowMaterial output. Original attributes are saved
+      // on the element so toggling off restores the production styling.
+      for (const svg of polyHost.querySelectorAll(".polycss-shadow")) {
+        // Only override stroke when the path actually had one — receiver
+        // SVGs don't set a stroke (per-polygon clip slivers would render
+        // as visible outlines), so leave their stroke attribute alone.
+        const hadStroke = (path) => path.getAttribute("stroke-width") != null;
+        for (const path of svg.querySelectorAll("path")) {
+          if (S.shadowsOnly) {
+            if (!path.dataset.origFill) {
+              path.dataset.origFill = path.getAttribute("fill") ?? "";
+              path.dataset.origStroke = path.getAttribute("stroke") ?? "";
+              path.dataset.origOpacity = path.getAttribute("opacity") ?? "";
+            }
+            path.setAttribute("fill", "#000000");
+            if (hadStroke(path)) path.setAttribute("stroke", "#000000");
+            path.setAttribute("opacity", "0.5");
+          } else if (path.dataset.origFill !== undefined) {
+            path.setAttribute("fill", path.dataset.origFill);
+            if (hadStroke(path)) path.setAttribute("stroke", path.dataset.origStroke);
+            path.setAttribute("opacity", path.dataset.origOpacity);
+            delete path.dataset.origFill;
+            delete path.dataset.origStroke;
+            delete path.dataset.origOpacity;
+          }
+        }
+        // Debug split: in shadows-only mode, decompose each library path
+        // into one <path> per subpath inside an <g style="isolation:
+        // isolate"> wrapper so each sub-shadow is independently
+        // clickable in DevTools (carries data-poly-shadow-caster-poly
+        // pointing at the source polygon index). The isolation group
+        // ensures overlapping paths inside don't double-darken — they
+        // paint into the group buffer at full opacity, then the buffer
+        // composites onto the parent SVG at the group's opacity.
+        //
+        // Re-read the original path's `d` every cycle: emitSceneShadows
+        // rewrites it on every light/option change, so we always split
+        // from the CURRENT d, not a stale saved copy. We don't restore
+        // anything to the original; the library keeps writing fresh d
+        // to it. We just hide it (display:none) when split children
+        // are present and unhide it when shadowsOnly is off.
+        for (const g of svg.querySelectorAll("g.poly-debug-split")) g.remove();
+        for (const path of svg.querySelectorAll("path")) {
+          path.style.display = S.shadowsOnly ? "" : "";
+        }
+        if (!S.shadowsOnly) continue;
+        for (const path of svg.querySelectorAll("path")) {
+          if (path.classList.contains("poly-debug-split-child")) continue;
+          const d = path.getAttribute("d") ?? "";
+          if (!d.includes("M")) continue;
+          const polysAttr = path.getAttribute("data-poly-shadow-caster-polys");
+          let polys = null;
+          try { polys = JSON.parse(polysAttr ?? "null"); } catch {}
+          const subs = d.split(/(?=M)/).filter(Boolean);
+          if (subs.length <= 1) continue;
+          // Hide the merged path while showing the split children.
+          path.style.display = "none";
+          const ns = "http://www.w3.org/2000/svg";
+          const opacity = path.getAttribute("opacity") ?? "0.5";
+          const fill = path.getAttribute("fill") ?? "#000000";
+          const stroke = path.getAttribute("stroke");
+          const casterId = path.getAttribute("data-poly-shadow-caster") ?? "";
+          const wrap = document.createElementNS(ns, "g");
+          wrap.setAttribute("class", "poly-debug-split");
+          wrap.setAttribute("style", `isolation:isolate;opacity:${opacity}`);
+          for (let i = 0; i < subs.length; i++) {
+            const child = document.createElementNS(ns, "path");
+            child.setAttribute("d", subs[i]);
+            child.setAttribute("fill", fill);
+            child.setAttribute("fill-rule", "nonzero");
+            if (stroke) child.setAttribute("stroke", stroke);
+            if (casterId) child.setAttribute("data-poly-shadow-caster", casterId);
+            const polyIdx = Array.isArray(polys) ? polys[i] : undefined;
+            if (polyIdx !== undefined) {
+              child.setAttribute("data-poly-shadow-caster-poly", String(polyIdx));
+            }
+            child.setAttribute("data-poly-shadow-subpath-index", String(i));
+            wrap.appendChild(child);
+          }
+          path.after(wrap);
+        }
+      }
+      const threeObjs = [cubeMesh, eGroup, cottageGroup, castleGroup, coliseumGroup, appleGroup, flightGroup, extinguisherGroup, floorMesh].filter(Boolean);
+      for (const obj of threeObjs) {
+        obj.traverse(o => {
+          if (!o.material) return;
+          if (S.shadowsOnly) {
+            if (!_origThreeMats.has(o)) _origThreeMats.set(o, o.material);
+            o.material = new THREE.ShadowMaterial({ color: 0x000000, opacity: S.shadow.opacity });
+            o.material.transparent = true;
+          } else if (_origThreeMats.has(o)) {
+            o.material = _origThreeMats.get(o);
+            _origThreeMats.delete(o);
+          }
+        });
+      }
+    }
+    function loop() { renderer.render(threeScene, camera); requestAnimationFrame(loop); }
+
+    // Slider value refreshers for the Object section — invoked when the
+    // active mesh switches so the sliders display the new mesh's state
+    // instead of the previous mesh's. Populated by buildPanel() as each
+    // Object row is built.
+    const objectRowRefreshers = [];
+    function refreshObjectRows() {
+      for (const fn of objectRowRefreshers) fn();
+    }
+
+    async function setMesh(name) {
+      S.mesh = name;
+      if (polyCube) { polyCube.remove(); polyCube = null; }
+      if (polyCottage) { polyCottage.remove(); polyCottage = null; }
+      if (polyCastle) { polyCastle.remove(); polyCastle = null; }
+      if (polyColiseum) { polyColiseum.remove(); polyColiseum = null; }
+      if (polyApple) { polyApple.remove(); polyApple = null; }
+      if (polyFlight) { polyFlight.remove(); polyFlight = null; }
+      if (polyExtinguisher) { polyExtinguisher.remove(); polyExtinguisher = null; }
+      if (polyE) { polyE.remove(); polyE = null; }
+      if (cubeMesh) { threeScene.remove(cubeMesh); cubeMesh = null; }
+      if (cottageGroup) { threeScene.remove(cottageGroup); cottageGroup = null; }
+      if (castleGroup) { threeScene.remove(castleGroup); castleGroup = null; }
+      if (coliseumGroup) { threeScene.remove(coliseumGroup); coliseumGroup = null; }
+      if (appleGroup) { threeScene.remove(appleGroup); appleGroup = null; }
+      if (flightGroup) { threeScene.remove(flightGroup); flightGroup = null; }
+      if (extinguisherGroup) { threeScene.remove(extinguisherGroup); extinguisherGroup = null; }
+      if (eGroup) { threeScene.remove(eGroup); eGroup = null; }
+      if (name === "cube") {
+        buildPolyCube();
+        buildThreeCube();
+      } else if (name === "e") {
+        buildPolyE();
+        buildThreeE();
+      } else if (name === "castle") {
+        await Promise.all([buildPolyCastle(), buildThreeCastle()]);
+      } else if (name === "coliseum") {
+        await Promise.all([buildPolyColiseum(), buildThreeColiseum()]);
+      } else if (name === "apple") {
+        await Promise.all([buildPolyApple(), buildThreeApple()]);
+      } else if (name === "flight") {
+        await Promise.all([buildPolyFlight(), buildThreeFlight()]);
+      } else if (name === "extinguisher") {
+        await Promise.all([buildPolyExtinguisher(), buildThreeExtinguisher()]);
+      } else {
+        await Promise.all([buildPolyCottage(), buildThreeCottage()]);
+      }
+      // Refresh object-row sliders to reflect the new active mesh's state.
+      refreshObjectRows();
+      // Newly built mesh has not seen the current light values yet — bake.
+      update(true);
+    }
+
+    applyCamera();
+    (async () => {
+      if (S.mesh === "cottage") await Promise.all([buildPolyCottage(), buildThreeCottage()]);
+      else if (S.mesh === "castle") await Promise.all([buildPolyCastle(), buildThreeCastle()]);
+      else if (S.mesh === "coliseum") await Promise.all([buildPolyColiseum(), buildThreeColiseum()]);
+      else if (S.mesh === "apple") await Promise.all([buildPolyApple(), buildThreeApple()]);
+      else if (S.mesh === "flight") await Promise.all([buildPolyFlight(), buildThreeFlight()]);
+      else if (S.mesh === "extinguisher") await Promise.all([buildPolyExtinguisher(), buildThreeExtinguisher()]);
+      else if (S.mesh === "e") { buildPolyE(); buildThreeE(); }
+      update(true);
+      loop();
+      window.__polyCube = polyCube;
+      window.__polyE = polyE;
+      window.__polyCottage = polyCottage;
+      window.__polyCastle = polyCastle;
+      window.__polyColiseum = polyColiseum;
+      window.__polyApple = polyApple;
+      window.__polyFlight = polyFlight;
+      window.__polyExtinguisher = polyExtinguisher;
+      window.__polyScene = polyScene;
+      window.__ready = true;
+    })();
+
+    // ─── Controls ───────────────────────────────────────────────────────
+    const camSliders = {};
+    function setCamSliders() {
+      for (const k of Object.keys(camSliders)) {
+        const s = camSliders[k];
+        s.input.value = S.cam[k];
+        s.val.textContent = s.fmt(S.cam[k]);
+      }
+    }
+    function bindDrag(el) {
+      let down = false, lx = 0, ly = 0;
+      el.addEventListener("pointerdown", (e) => { down = true; lx = e.clientX; ly = e.clientY; el.setPointerCapture(e.pointerId); });
+      el.addEventListener("pointerup", (e) => { down = false; try { el.releasePointerCapture(e.pointerId); } catch {} });
+      el.addEventListener("pointermove", (e) => {
+        if (!down) return;
+        const dx = e.clientX - lx, dy = e.clientY - ly;
+        lx = e.clientX; ly = e.clientY;
+        S.cam.rotY = (S.cam.rotY + dx * 0.4) % 360;
+        if (S.cam.rotY < 0) S.cam.rotY += 360;
+        S.cam.rotX = Math.max(0, Math.min(90, S.cam.rotX - dy * 0.4));
+        setCamSliders();
+        applyCamera(); update();
+      });
+      el.addEventListener("wheel", (e) => {
+        e.preventDefault();
+        const f = Math.exp(-e.deltaY * 0.001);
+        S.cam.zoom = Math.max(1, Math.min(500, S.cam.zoom * f));
+        setCamSliders();
+        applyCamera(); update();
+      }, { passive: false });
+    }
+    bindDrag(polyHost);
+    bindDrag(threeCanvas);
+
+    function buildPanel() {
+      const p = document.getElementById("panel");
+      const info = document.createElement("div");
+      info.className = "info";
+      info.innerHTML = "Same numbers → both engines. <br/>" +
+        "Convention: +Z up, +X right, +Y forward. <br/>" +
+        "Crosshair = world origin (0,0,0).";
+      p.appendChild(info);
+
+      // Copy-state button: dump every slider/dropdown value as a sharable
+      // URL query string so divergences are easy to reproduce.
+      const copyBtn = document.createElement("button");
+      copyBtn.type = "button";
+      copyBtn.textContent = "Copy state URL";
+      copyBtn.style.cssText = "margin: 4px 0 8px; padding: 6px 10px; font: inherit; " +
+        "background:#0f172a; color:#f8fafc; border:1px solid #1e293b; border-radius:4px; cursor:pointer;";
+      copyBtn.addEventListener("click", async () => {
+        const q = new URLSearchParams();
+        q.set("mesh", S.mesh);
+        q.set("light", S.lighting);
+        q.set("dx", String(S.dir.x));
+        q.set("dy", String(S.dir.y));
+        q.set("dz", String(S.dir.z));
+        q.set("di", String(S.dir.intensity));
+        q.set("ai", String(S.amb.intensity));
+        if (S.dir.color !== "#ffffff") q.set("dc", S.dir.color);
+        if (S.amb.color !== "#ffffff") q.set("ac", S.amb.color);
+        q.set("so", String(S.shadow.opacity));
+        q.set("rx", String(S.cam.rotX));
+        q.set("ry", String(S.cam.rotY));
+        q.set("z",  String(S.cam.zoom));
+        // Per-mesh transform — only emit keys for the active mesh and
+        // only for non-default values (keeps URLs short).
+        const o = S.obj[S.mesh];
+        const defaultZ = S.mesh === "cube" ? 1 : 0;
+        if (o) {
+          if (o.x !== 0)        q.set(`ox_${S.mesh}`,  String(o.x));
+          if (o.y !== 0)        q.set(`oy_${S.mesh}`,  String(o.y));
+          if (o.z !== defaultZ) q.set(`oz_${S.mesh}`,  String(o.z));
+          if (o.scale !== 1)    q.set(`os_${S.mesh}`,  String(o.scale));
+          if (o.rx !== 0)       q.set(`orx_${S.mesh}`, String(o.rx));
+          if (o.ry !== 0)       q.set(`ory_${S.mesh}`, String(o.ry));
+          if (o.rz !== 0)       q.set(`orz_${S.mesh}`, String(o.rz));
+        }
+        if (S.shadowsOnly) q.set("sx", "1");
+        if (!S.selfShadow) q.set("ss", "0");
+        if (!S.castShadow) q.set("cs", "0");
+        if (!S.floorVisible) q.set("fv", "0");
+        if (!S.floorReceives) q.set("fr", "0");
+        if (S.autoCenter) q.set("ax", "1");
+        if (oracleLumaTolerance !== 18) q.set("tol", String(oracleLumaTolerance));
+        const url = location.origin + location.pathname + "?" + q.toString();
+        try { await navigator.clipboard.writeText(url); copyBtn.textContent = "Copied ✓"; }
+        catch { copyBtn.textContent = url; }
+        setTimeout(() => { copyBtn.textContent = "Copy state URL"; }, 2000);
+      });
+      p.appendChild(copyBtn);
+
+      // Shadows-only toggle: hides every caster's geometry while leaving
+      // the shadow elements (PolyCSS SVGs, Three.js shadow-map output)
+      // visible. Useful for isolating shadow-shape differences from the
+      // surrounding mesh paint.
+      const shadowsOnlyLabel = document.createElement("label");
+      shadowsOnlyLabel.style.cssText = "display:flex; gap:6px; align-items:center; margin: 0 0 8px;";
+      const shadowsOnlyCheck = document.createElement("input");
+      shadowsOnlyCheck.type = "checkbox";
+      shadowsOnlyCheck.checked = !!S.shadowsOnly;
+      shadowsOnlyCheck.addEventListener("change", () => {
+        S.shadowsOnly = shadowsOnlyCheck.checked;
+        update();
+      });
+      shadowsOnlyLabel.appendChild(shadowsOnlyCheck);
+      shadowsOnlyLabel.appendChild(document.createTextNode("Shadows only"));
+      p.appendChild(shadowsOnlyLabel);
+
+      // Self-shadow toggle — flips `receiveShadow` on the active mesh in
+      // both engines. Off = mesh only casts onto the floor; on = caster
+      // polys project shadows onto the mesh's own faces (Three.js parity
+      // matches when receiveShadow=true on the mesh's THREE.Mesh).
+      const selfShadowLabel = document.createElement("label");
+      selfShadowLabel.style.cssText = "display:flex; gap:6px; align-items:center; margin: 0 0 8px;";
+      const selfShadowCheck = document.createElement("input");
+      selfShadowCheck.type = "checkbox";
+      selfShadowCheck.checked = !!S.selfShadow;
+      selfShadowCheck.addEventListener("change", () => {
+        S.selfShadow = selfShadowCheck.checked;
+        update(true);
+      });
+      selfShadowLabel.appendChild(selfShadowCheck);
+      selfShadowLabel.appendChild(document.createTextNode("Self-shadow"));
+      p.appendChild(selfShadowLabel);
+
+      // Cast-shadow toggle on the active model. Gallery splits this from
+      // Self-shadow; reproducing it here lets us drive the engine into the
+      // same combinations (cast=on/self=on, cast=on/self=off, etc.).
+      const castShadowLabel = document.createElement("label");
+      castShadowLabel.style.cssText = "display:flex; gap:6px; align-items:center; margin: 0 0 8px;";
+      const castShadowCheck = document.createElement("input");
+      castShadowCheck.type = "checkbox";
+      castShadowCheck.checked = !!S.castShadow;
+      castShadowCheck.addEventListener("change", () => {
+        S.castShadow = castShadowCheck.checked;
+        update(true);
+      });
+      castShadowLabel.appendChild(castShadowCheck);
+      castShadowLabel.appendChild(document.createTextNode("Cast shadow"));
+      p.appendChild(castShadowLabel);
+
+      // Floor mesh visibility — gallery's "Show ground". Hiding the floor
+      // mesh removes the only real shadow receiver from the scene; the
+      // engine then falls back to the virtual ground for the cast shadow.
+      const floorVisibleLabel = document.createElement("label");
+      floorVisibleLabel.style.cssText = "display:flex; gap:6px; align-items:center; margin: 0 0 8px;";
+      const floorVisibleCheck = document.createElement("input");
+      floorVisibleCheck.type = "checkbox";
+      floorVisibleCheck.checked = !!S.floorVisible;
+      floorVisibleCheck.addEventListener("change", () => {
+        S.floorVisible = floorVisibleCheck.checked;
+        update(true);
+      });
+      floorVisibleLabel.appendChild(floorVisibleCheck);
+      floorVisibleLabel.appendChild(document.createTextNode("Floor visible"));
+      p.appendChild(floorVisibleLabel);
+
+      // Floor `receiveShadow` toggle. THE knob that reproduces the gallery
+      // bug — gallery's ground mesh is added WITHOUT receiveShadow:true,
+      // so once the model also receives shadows (selfShadow on), the
+      // engine's hasReceiver branch hides the virtual ground SVG and the
+      // floor doesn't paint one either → ground shadow vanishes.
+      const floorReceivesLabel = document.createElement("label");
+      floorReceivesLabel.style.cssText = "display:flex; gap:6px; align-items:center; margin: 0 0 8px;";
+      const floorReceivesCheck = document.createElement("input");
+      floorReceivesCheck.type = "checkbox";
+      floorReceivesCheck.checked = !!S.floorReceives;
+      floorReceivesCheck.addEventListener("change", () => {
+        S.floorReceives = floorReceivesCheck.checked;
+        update(true);
+      });
+      floorReceivesLabel.appendChild(floorReceivesCheck);
+      floorReceivesLabel.appendChild(document.createTextNode("Floor receives shadow"));
+      p.appendChild(floorReceivesLabel);
+
+      // autoCenter — PolyCSS-only toggle. When on the engine recentres
+      // the scene-root translate around the union of non-helper meshes,
+      // which can make the two engines visually diverge (Three has no
+      // parallel). Useful for debugging gallery presets that set it.
+      const autoCenterLabel = document.createElement("label");
+      autoCenterLabel.style.cssText = "display:flex; gap:6px; align-items:center; margin: 0 0 8px;";
+      const autoCenterCheck = document.createElement("input");
+      autoCenterCheck.type = "checkbox";
+      autoCenterCheck.checked = !!S.autoCenter;
+      autoCenterCheck.addEventListener("change", () => {
+        S.autoCenter = autoCenterCheck.checked;
+        update(true);
+      });
+      autoCenterLabel.appendChild(autoCenterCheck);
+      autoCenterLabel.appendChild(document.createTextNode("Auto-center (PolyCSS only)"));
+      p.appendChild(autoCenterLabel);
+
+      // Mesh + lighting dropdowns
+      const meshSec = document.createElement("div");
+      meshSec.className = "sec";
+      meshSec.textContent = "Mesh";
+      p.appendChild(meshSec);
+      const meshRow = document.createElement("div");
+      meshRow.className = "row";
+      const meshLabel = document.createElement("label");
+      meshLabel.textContent = "model";
+      meshRow.appendChild(meshLabel);
+      const meshSel = document.createElement("select");
+      for (const opt of ["cube", "e", "cottage", "castle", "coliseum", "apple", "flight", "extinguisher"]) {
+        const o = document.createElement("option");
+        o.value = opt; o.textContent = opt;
+        if (S.mesh === opt) o.selected = true;
+        meshSel.appendChild(o);
+      }
+      meshSel.style.gridColumn = "2 / span 2";
+      meshSel.addEventListener("change", async () => {
+        await setMesh(meshSel.value);
+      });
+      meshRow.appendChild(meshSel);
+      p.appendChild(meshRow);
+
+      // Lighting mode dropdown — baked = byte-parity but flickers on light
+      // change, dynamic = no flicker but approximate texture brightness.
+      const lightRow = document.createElement("div");
+      lightRow.className = "row";
+      const lightLabel = document.createElement("label");
+      lightLabel.textContent = "lighting";
+      lightRow.appendChild(lightLabel);
+      const lightSel = document.createElement("select");
+      for (const opt of ["baked", "dynamic"]) {
+        const o = document.createElement("option");
+        o.value = opt; o.textContent = opt;
+        if (S.lighting === opt) o.selected = true;
+        lightSel.appendChild(o);
+      }
+      lightSel.style.gridColumn = "2 / span 2";
+      lightSel.addEventListener("change", () => {
+        S.lighting = lightSel.value;
+        update(true);
+      });
+      lightRow.appendChild(lightSel);
+      p.appendChild(lightRow);
+
+      const rows = [
+        // Object transform — one section. Sliders bind to the currently
+        // selected mesh's entry under S.obj (cube / e / cottage). When the
+        // mesh dropdown switches, refreshObjectRows() rebinds the sliders'
+        // values to the new mesh's state.
+        { sec: "Object" },
+        { k: ["obj", "x"],     min: -10,  max: 10,  step: 0.1,  fmt: (v) => v.toFixed(2),       obj: true },
+        { k: ["obj", "y"],     min: -10,  max: 10,  step: 0.1,  fmt: (v) => v.toFixed(2),       obj: true },
+        { k: ["obj", "z"],     min: -10,  max: 10,  step: 0.1,  fmt: (v) => v.toFixed(2),       obj: true },
+        { k: ["obj", "scale"], min: 0.01, max: 6,   step: 0.01, fmt: (v) => v.toFixed(2),       obj: true },
+        { k: ["obj", "rx"],    min: -180, max: 180, step: 1,    fmt: (v) => v.toFixed(0) + "°", obj: true },
+        { k: ["obj", "ry"],    min: -180, max: 180, step: 1,    fmt: (v) => v.toFixed(0) + "°", obj: true },
+        { k: ["obj", "rz"],    min: -180, max: 180, step: 1,    fmt: (v) => v.toFixed(0) + "°", obj: true },
+        { sec: "Directional light" },
+        { k: ["dir", "x"], min: -2, max: 2, step: 0.05, fmt: (v) => v.toFixed(2) },
+        { k: ["dir", "y"], min: -2, max: 2, step: 0.05, fmt: (v) => v.toFixed(2) },
+        { k: ["dir", "z"], min: -2, max: 2, step: 0.05, fmt: (v) => v.toFixed(2) },
+        { k: ["dir", "intensity"], min: 0, max: 3, step: 0.05, fmt: (v) => v.toFixed(2) },
+        { k: ["dir", "color"], color: true, label: "color" },
+        { sec: "Ambient" },
+        { k: ["amb", "intensity"], min: 0, max: 1, step: 0.01, fmt: (v) => v.toFixed(2) },
+        { k: ["amb", "color"], color: true, label: "color" },
+        { sec: "Shadow" },
+        { k: ["shadow", "opacity"], min: 0, max: 1, step: 0.01, fmt: (v) => v.toFixed(2) },
+        { sec: "Camera" },
+        { k: ["cam", "rotX"], min: 0, max: 90, step: 1, fmt: (v) => v + "°", camera: true },
+        { k: ["cam", "rotY"], min: 0, max: 359, step: 1, fmt: (v) => v + "°", camera: true },
+        { k: ["cam", "zoom"], min: 1, max: 200, step: 1, fmt: (v) => v.toFixed(0) + " px/u", camera: true },
+      ];
+
+      for (const r of rows) {
+        if (r.sec) {
+          const s = document.createElement("div"); s.className = "sec"; s.textContent = r.sec;
+          p.appendChild(s);
+          continue;
+        }
+        if (r.color) {
+          // Native <input type=color> with the same row grid as the sliders.
+          // Both engines accept "#rrggbb" strings directly; setOptions /
+          // dirLight.color.set on next update() applies the change. Baked
+          // mode finalises on commit just like the intensity sliders.
+          const row = document.createElement("div"); row.className = "row";
+          const lab = document.createElement("label");
+          lab.textContent = r.label ?? r.k.join(".");
+          row.appendChild(lab);
+          const inp = document.createElement("input");
+          inp.type = "color";
+          inp.style.gridColumn = "2 / span 2";
+          inp.style.height = "20px";
+          inp.style.border = "1px solid #cbd5e1";
+          inp.style.background = "#fff";
+          inp.value = S[r.k[0]][r.k[1]];
+          let dragging = false;
+          let endTimer = null;
+          const finalize = () => {
+            if (S.lighting !== "baked" || !dragging) return;
+            if (endTimer) clearTimeout(endTimer);
+            endTimer = setTimeout(() => { endTimer = null; dragging = false; update(true); }, 150);
+          };
+          inp.addEventListener("pointerdown", () => {
+            if (S.lighting !== "baked") return;
+            dragging = true;
+            if (endTimer) { clearTimeout(endTimer); endTimer = null; }
+          });
+          inp.addEventListener("pointerup", finalize);
+          inp.addEventListener("change", finalize);
+          inp.addEventListener("input", () => {
+            S[r.k[0]][r.k[1]] = inp.value;
+            const lightsChanged = !dragging && S.lighting === "baked";
+            update(lightsChanged);
+          });
+          row.appendChild(inp);
+          p.appendChild(row);
+          continue;
+        }
+        const row = document.createElement("div"); row.className = "row";
+        const lab = document.createElement("label");
+        lab.textContent = r.obj ? r.k[1] : r.k.join(".");
+        row.appendChild(lab);
+        const inp = document.createElement("input");
+        inp.type = "range"; inp.min = r.min; inp.max = r.max; inp.step = r.step;
+        // Object-transform rows read S.obj[S.mesh][field] so the slider
+        // value follows the active mesh; everything else reads its own
+        // [section][field] directly.
+        const getVal = r.obj ? () => S.obj[S.mesh][r.k[1]] : () => S[r.k[0]][r.k[1]];
+        const setVal = r.obj ? (v) => { S.obj[S.mesh][r.k[1]] = v; } : (v) => { S[r.k[0]][r.k[1]] = v; };
+        inp.value = getVal();
+        const val = document.createElement("span"); val.className = "val"; val.textContent = r.fmt(getVal());
+        if (r.obj) objectRowRefreshers.push(() => { const v = getVal(); inp.value = v; val.textContent = r.fmt(v); });
+        // Light-direction sliders (dir.x/y/z) also need a refresher hook
+        // so the gizmo drag can sync the slider UI as the user drags the
+        // light marker around in 3D.
+        if (r.k[0] === "dir" && (r.k[1] === "x" || r.k[1] === "y" || r.k[1] === "z")) {
+          lightSliderRefreshers.push(() => { const v = getVal(); inp.value = v; val.textContent = r.fmt(v); });
+        }
+        const isLightSlider = (r.k[0] === "dir" || r.k[0] === "amb");
+        // Baked mode is treated as truly static: while a light slider is
+        // being dragged, the meshes don't repaint. A single rebake fires
+        // 150ms after the last input event so the final state lands on
+        // the precise baked Lambert. Dynamic mode (CSS calc per pixel)
+        // updates per-frame as setOptions writes the light-direction
+        // vars to the scene root — no rebake needed there.
+        let dragging = false;
+        let endTimer = null;
+        const onDragStart = () => {
+          if (!isLightSlider || S.lighting !== "baked") return;
+          dragging = true;
+          if (endTimer) { clearTimeout(endTimer); endTimer = null; }
+        };
+        const onDragEnd = () => {
+          if (!isLightSlider || S.lighting !== "baked" || !dragging) return;
+          if (endTimer) clearTimeout(endTimer);
+          endTimer = setTimeout(() => {
+            endTimer = null;
+            dragging = false;
+            update(true);
+          }, 150);
+        };
+        inp.addEventListener("pointerdown", onDragStart);
+        inp.addEventListener("pointerup", onDragEnd);
+        inp.addEventListener("change", onDragEnd);
+        inp.addEventListener("input", () => {
+          const v = +inp.value;
+          setVal(v);
+          val.textContent = r.fmt(v);
+          if (r.camera) applyCamera();
+          // Suppress per-tick rebake during baked-mode drag — debounced
+          // finalize handles it. Dynamic mode never rebakes here either.
+          // update() pushes every mesh's full transform (pos + scale), so
+          // object-transform changes don't need any special handling.
+          const lightsChanged = isLightSlider && !dragging && S.lighting === "baked";
+          update(lightsChanged);
+        });
+        row.appendChild(inp); row.appendChild(val);
+        p.appendChild(row);
+        if (r.camera) camSliders[r.k[1]] = { input: inp, val, fmt: r.fmt };
+      }
+    }
+    buildPanel();
+
+    // ════════════════════════════════════════════════════════════════════
+    //  Light animation (math) — drive the directional light direction with
+    //  expressions of a looping phase `t` ∈ [0, 2π). Play/pause + speed, plus
+    //  a scrub slider. Each axis (dx, dy, dz) is its own expression using `t`
+    //  and the usual Math functions (sin, cos, abs, PI, …). Animating moves
+    //  shadows every frame WITHOUT re-baking atlases (like dragging the light
+    //  helper); pausing settles a baked re-bake so lit surfaces catch up.
+    // ════════════════════════════════════════════════════════════════════
+    {
+      const TAU = Math.PI * 2;
+      const MATH_FNS = ["sin","cos","tan","asin","acos","atan","atan2","abs",
+        "sqrt","pow","exp","log","min","max","sign","floor","ceil","round","hypot"];
+      const MATH_CONSTS = ["PI","E"];
+      const MATH_VALS = [...MATH_FNS.map((k) => Math[k]), ...MATH_CONSTS.map((k) => Math[k])];
+      // Compile "expr in t" → (t)=>number. Strict-mode module, so no `with`;
+      // Math names are injected as function parameters instead.
+      function compileExpr(src) {
+        const fn = new Function("t", ...MATH_FNS, ...MATH_CONSTS, `"use strict"; return (${src});`);
+        return (t) => fn(t, ...MATH_VALS);
+      }
+
+      const panel = document.getElementById("panel");
+      const sec = document.createElement("div");
+      sec.className = "sec"; sec.textContent = "Light animation (math)";
+      panel.appendChild(sec);
+
+      const note = document.createElement("div");
+      note.style.cssText = "font-size:10px; color:#94a3b8; margin:0 0 6px;";
+      note.textContent = "dx,dy,dz as functions of t∈[0,2π). e.g. 1.2*cos(t), sin(t), 0.8";
+      panel.appendChild(note);
+
+      const exprs = {
+        x: { src: "1.2*cos(t)", fn: null },
+        y: { src: "1.2*sin(t)", fn: null },
+        z: { src: "0.8",        fn: null },
+      };
+      const errEl = document.createElement("div");
+      errEl.style.cssText = "font-size:10px; color:#dc2626; min-height:12px; margin:0 0 4px;";
+
+      const makeExprRow = (axis) => {
+        const row = document.createElement("div");
+        row.style.cssText = "display:grid; grid-template-columns:26px 1fr; gap:6px; align-items:center; margin:3px 0;";
+        const lab = document.createElement("label");
+        lab.textContent = "d" + axis; lab.style.color = "#475569";
+        const inp = document.createElement("input");
+        inp.type = "text"; inp.value = exprs[axis].src;
+        inp.style.cssText = "width:100%; font:11px ui-monospace,monospace; padding:2px 4px; border:1px solid #cbd5e1; border-radius:3px;";
+        const recompile = () => {
+          try {
+            exprs[axis].fn = compileExpr(inp.value);
+            exprs[axis].fn(animT); // probe for runtime errors
+            exprs[axis].src = inp.value;
+            inp.style.borderColor = "#cbd5e1";
+            errEl.textContent = "";
+            applyAnimT();
+          } catch (e) {
+            inp.style.borderColor = "#dc2626";
+            errEl.textContent = `d${axis}: ${e.message}`;
+          }
+        };
+        inp.addEventListener("input", recompile);
+        row.append(lab, inp);
+        panel.appendChild(row);
+      };
+      makeExprRow("x"); makeExprRow("y"); makeExprRow("z");
+      panel.appendChild(errEl);
+
+      let animT = 0;
+      let playing = false;
+      let periodSec = 6;       // seconds for one 0→2π loop
+      let lastTs = null;
+
+      // Transport row: play/pause + t readout.
+      const transport = document.createElement("div");
+      transport.style.cssText = "display:flex; gap:6px; align-items:center; margin:4px 0;";
+      const playBtn = document.createElement("button");
+      playBtn.type = "button"; playBtn.textContent = "▶ Play";
+      playBtn.style.cssText = "padding:5px 10px; font:inherit; background:#0f172a; color:#f8fafc; border:1px solid #1e293b; border-radius:4px; cursor:pointer;";
+      const tReadout = document.createElement("span");
+      tReadout.style.cssText = "font:11px ui-monospace,monospace; color:#475569;";
+      transport.append(playBtn, tReadout);
+      panel.appendChild(transport);
+
+      // t scrub slider (manual control when paused).
+      const tRow = document.createElement("div");
+      tRow.className = "row"; tRow.style.margin = "3px 0";
+      const tLab = document.createElement("label"); tLab.textContent = "t";
+      const tInput = document.createElement("input");
+      tInput.type = "range"; tInput.min = "0"; tInput.max = String(TAU); tInput.step = "0.01"; tInput.value = "0";
+      const tVal = document.createElement("span"); tVal.className = "val";
+      tRow.append(tLab, tInput, tVal);
+      panel.appendChild(tRow);
+
+      // Speed (loop period) slider.
+      const spRow = document.createElement("div");
+      spRow.className = "row"; spRow.style.margin = "3px 0";
+      const spLab = document.createElement("label"); spLab.textContent = "period";
+      const spInput = document.createElement("input");
+      spInput.type = "range"; spInput.min = "0.5"; spInput.max = "20"; spInput.step = "0.1"; spInput.value = String(periodSec);
+      const spVal = document.createElement("span"); spVal.className = "val"; spVal.textContent = periodSec.toFixed(1) + "s";
+      spRow.append(spLab, spInput, spVal);
+      panel.appendChild(spRow);
+      spInput.addEventListener("input", () => { periodSec = +spInput.value; spVal.textContent = periodSec.toFixed(1) + "s"; });
+
+      function applyAnimT() {
+        let x = S.dir.x, y = S.dir.y, z = S.dir.z;
+        try { if (exprs.x.fn) x = exprs.x.fn(animT); } catch {}
+        try { if (exprs.y.fn) y = exprs.y.fn(animT); } catch {}
+        try { if (exprs.z.fn) z = exprs.z.fn(animT); } catch {}
+        if (Number.isFinite(x)) S.dir.x = x;
+        if (Number.isFinite(y)) S.dir.y = y;
+        if (Number.isFinite(z)) S.dir.z = z;
+        refreshLightSliders();
+        tInput.value = String(animT);
+        tVal.textContent = animT.toFixed(2);
+        tReadout.textContent = "t=" + animT.toFixed(2);
+        // false = move shadows + light without re-baking lit atlases per frame.
+        update(false);
+      }
+
+      // Compile initial expressions.
+      for (const axis of ["x", "y", "z"]) { try { exprs[axis].fn = compileExpr(exprs[axis].src); } catch {} }
+
+      function frame(ts) {
+        if (!playing) return;
+        if (lastTs == null) lastTs = ts;
+        const dt = (ts - lastTs) / 1000; lastTs = ts;
+        animT = (animT + (TAU / Math.max(0.1, periodSec)) * dt) % TAU;
+        applyAnimT();
+        requestAnimationFrame(frame);
+      }
+      playBtn.addEventListener("click", () => {
+        playing = !playing;
+        playBtn.textContent = playing ? "⏸ Pause" : "▶ Play";
+        if (playing) { lastTs = null; requestAnimationFrame(frame); }
+        else if (S.lighting === "baked") update(true); // settle a re-bake on pause
+      });
+      tInput.addEventListener("input", () => {
+        if (playing) { playing = false; playBtn.textContent = "▶ Play"; }
+        animT = +tInput.value;
+        applyAnimT();
+      });
+
+      tReadout.textContent = "t=0.00";
+    }
+
+    // ════════════════════════════════════════════════════════════════════
+    //  Shadow oracle — per-pixel diff + per-polygon attribution.
+    //
+    //  • Snapshot PolyCSS DOM via html-to-image into a 2D canvas.
+    //  • Copy WebGL canvas into a 2D canvas (preserveDrawingBuffer:true on
+    //    the THREE.WebGLRenderer makes this safe to do post-paint).
+    //  • Per-pixel |Δrgb|, written to #diff-canvas as a red→yellow heatmap.
+    //  • For each above-threshold pixel, hit-test the live DOM with
+    //    elementsFromPoint to attribute it to a polygon. Aggregate into
+    //    per-poly mismatch scores; outline the top offenders in #misses-canvas
+    //    with their data-poly-index labels.
+    //  • Hooked into update() so any slider drag refreshes the comparison
+    //    after a short debounce (light atlas rebakes are async).
+    // ════════════════════════════════════════════════════════════════════
+    const diffCanvas = document.getElementById("diff-canvas");
+    const missesCanvas = document.getElementById("misses-canvas");
+    const diffCtx = diffCanvas.getContext("2d");
+    const missesCtx = missesCanvas.getContext("2d");
+    // Sample stride in CSS px: lower = denser per-pixel sampling, higher =
+    // faster. 3 picks up castle-scale detail at ~half the cost of stride 2;
+    // bump higher if compareFrame still feels sluggish on bigger meshes.
+    const ORACLE_STRIDE = 3;
+    // Per-polygon: drop polys whose mismatched-pixel COUNT is below this.
+    // Bumped to 30: a polygon that diverges in fewer than 30 sample
+    // pixels (at stride 3 ≈ 270 screen px) is too small to perceive
+    // visually; flagging it dilutes the list with non-actionable noise.
+    const ORACLE_MIN_PIXELS = 30;
+    // Background-pixel test. Both engines paint #eef2f6 (light blue-grey)
+    // wherever no mesh is in the way — three.js via scene.background,
+    // PolyCSS via the page CSS bleeding through transparent areas. Any
+    // pixel that's background in EITHER snapshot can't be a true polygon
+    // disagreement: the AABB index buffer may still attribute it to a
+    // back-facing or occluded polygon, but neither engine is actually
+    // painting that poly there. Skipping these eliminates the "flagged
+    // but invisible" polys (#532, #165 etc. in the user's report).
+    function isBgPixel(r, g, b) {
+      return r > 220 && g > 220 && b > 220
+          && Math.abs(r - g) < 20 && Math.abs(g - b) < 20;
+    }
+    // Tolerance in BT.709 luma units (0..255). Applied to the per-pixel
+    // delta AFTER subtracting the mesh-wide MEDIAN delta — i.e., this is
+    // "how much further than the typical drift" before a pixel counts as
+    // a real local disagreement. Calibrating against the median is what
+    // makes the oracle robust to PolyCSS's /π physical Lambert producing
+    // a uniformly brighter render than three's MeshLambertMaterial: an
+    // uncalibrated 25-luma global tint inflates every pixel's raw delta
+    // and either drowns the real signal (low tol) or has to be sledged
+    // away (high tol, also hides real signal).
+    let oracleLumaTolerance = qn("tol", 18);
+
+    // Thumbnail row — proves what we're comparing. Left = PolyCSS reference
+    // (each leaf's solid color painted into its AABB; this is the literal
+    // input to our diff). Right = three.js sampled buffer (the actual
+    // rendered pixels we read). If shadow contributions are missing from
+    // the PolyCSS reference, the gap is visible here at a glance.
+    const oracleThumbsWrap = document.createElement("div");
+    oracleThumbsWrap.style.cssText = "display:grid; grid-template-columns: 1fr 1fr; gap: 4px; margin: 0 0 6px;";
+    const thumbStyle = "width: 100%; height: 80px; object-fit: contain; background: #0f172a; border: 1px solid #cbd5e1; border-radius:3px;";
+    const thumbCaption = "font-size:9px; color:#94a3b8; text-align:center; margin-top:2px;";
+    const polyThumbCanvas = document.createElement("canvas");
+    polyThumbCanvas.style.cssText = thumbStyle;
+    const threeThumbCanvas = document.createElement("canvas");
+    threeThumbCanvas.style.cssText = thumbStyle;
+    const polyThumbCol = document.createElement("div");
+    const threeThumbCol = document.createElement("div");
+    const polyCap = document.createElement("div");
+    polyCap.style.cssText = thumbCaption; polyCap.textContent = "PolyCSS snapshot";
+    const threeCap = document.createElement("div");
+    threeCap.style.cssText = thumbCaption; threeCap.textContent = "Three.js sampled";
+    polyThumbCol.append(polyThumbCanvas, polyCap);
+    threeThumbCol.append(threeThumbCanvas, threeCap);
+    oracleThumbsWrap.append(polyThumbCol, threeThumbCol);
+
+    const oracleStatus = document.createElement("div");
+    oracleStatus.style.cssText = "font-size:11px; color:#64748b; margin: 0 0 6px;";
+    const oracleResults = document.createElement("div");
+    oracleResults.style.cssText = "max-height: 320px; overflow-y: auto; border:1px solid #e2e8f0; border-radius:4px; background:#fff;";
+    const oracleSec = document.createElement("div");
+    oracleSec.className = "sec";
+    oracleSec.textContent = "Shadow oracle";
+    const oracleCompareBtn = document.createElement("button");
+    oracleCompareBtn.type = "button";
+    oracleCompareBtn.textContent = "Compare now";
+    oracleCompareBtn.style.cssText = "margin: 0 0 4px; padding: 6px 10px; font: inherit; background:#0f172a; color:#f8fafc; border:1px solid #1e293b; border-radius:4px; cursor:pointer; width:100%;";
+    // Tolerance row — luma units 0..120 covers "pixel-perfect" through
+    // "ignore any tint smaller than half the mesh's lit range".
+    const oracleTolRow = document.createElement("div");
+    oracleTolRow.className = "row";
+    oracleTolRow.style.cssText = "margin: 4px 0;";
+    const oracleTolLabel = document.createElement("label");
+    // Labelled "min Δ" because it literally is: pixels with calibrated
+    // |Δluma| BELOW this value are ignored. Higher = stricter = fewer
+    // flags, NOT "more sensitive". Common confusion.
+    oracleTolLabel.textContent = "min Δ";
+    oracleTolLabel.title = "Ignore pixels whose calibrated luma delta is below this value. Higher = fewer flags.";
+    const oracleTolInput = document.createElement("input");
+    oracleTolInput.type = "range";
+    oracleTolInput.min = "0"; oracleTolInput.max = "120"; oracleTolInput.step = "1";
+    oracleTolInput.value = String(oracleLumaTolerance);
+    const oracleTolVal = document.createElement("span");
+    oracleTolVal.className = "val";
+    oracleTolVal.textContent = String(oracleLumaTolerance);
+    oracleTolInput.addEventListener("input", () => {
+      oracleLumaTolerance = +oracleTolInput.value;
+      oracleTolVal.textContent = oracleTolInput.value;
+      // Debounce 400 ms after the LAST drag tick — compareFrame is heavy
+      // (~500-1500 ms) and the user may sweep the slider through many
+      // values to find the right setting. Recomputing per-tick stacks
+      // queued runs (see oracleQueued) and freezes the UI; one compare
+      // after the user lets go matches expectation.
+      if (compareDebounce) clearTimeout(compareDebounce);
+      compareDebounce = setTimeout(compareFrame, 400);
+    });
+    oracleTolRow.append(oracleTolLabel, oracleTolInput, oracleTolVal);
+    const panelEl = document.getElementById("panel");
+    panelEl.insertBefore(oracleSec, panelEl.firstChild?.nextSibling ?? null);
+    panelEl.insertBefore(oracleCompareBtn, oracleSec.nextSibling);
+    panelEl.insertBefore(oracleTolRow, oracleCompareBtn.nextSibling);
+    panelEl.insertBefore(oracleThumbsWrap, oracleTolRow.nextSibling);
+    panelEl.insertBefore(oracleStatus, oracleThumbsWrap.nextSibling);
+    panelEl.insertBefore(oracleResults, oracleStatus.nextSibling);
+
+    function resizeOracleCanvases() {
+      for (const c of [diffCanvas, missesCanvas]) {
+        const r = c.getBoundingClientRect();
+        const dpr = window.devicePixelRatio || 1;
+        c.width = Math.round(r.width * dpr);
+        c.height = Math.round(r.height * dpr);
+      }
+    }
+    window.addEventListener("resize", () => { resizeOracleCanvases(); });
+
+    // Build an offscreen polygon-index canvas by walking every leaf under
+    // EVERY mesh in the scene (the active caster mesh AND the floor receiver
+    // — the floor's cast shadow is just disagreement on the floor mesh's
+    // polygon, so the oracle has to span all meshes, not only the active
+    // one). Each leaf's screen-space AABB (getBoundingClientRect respects
+    // matrix3d) is painted with a GLOBAL leaf id encoded as RGB (id+1 so
+    // 0 == "no polygon"); the id maps back to {meshId, poly, el} via the
+    // returned `registry`, so polygon indices that repeat across meshes
+    // (floor #0 vs castle #0) stay distinct.
+    //
+    // Paint order: receivers (floor) FIRST with no visibility test (the
+    // floor's center is occluded by the castle, so a single center-hit test
+    // would drop the whole floor), then casters with the per-leaf
+    // visibility test so a closer leaf overpaints the floor where the mesh
+    // is actually in front. The per-flagged-pixel elementsFromPoint VERIFY
+    // in compareFrame is the real attribution guard; this buffer is the
+    // coarse "which poly is a candidate here" mask + sampling gate.
+    //
+    // EDGE_INSET pixels shaved off each side of every painted AABB: we
+    // compare polygon INTERIORS, not antialiased shared edges, and AABBs
+    // over-cover non-axis-aligned shapes and bleed into neighbours.
+    const EDGE_INSET = 4;
+    function buildPolyIndex(meshEls, hostRect, W, H) {
+      const canvas = document.createElement("canvas");
+      canvas.width = W; canvas.height = H;
+      const ctx = canvas.getContext("2d");
+      const registry = []; // global id -> { meshId, poly, el }
+      // Receivers (floor) painted before casters so casters overpaint.
+      const ordered = [...meshEls].sort((a, b) => {
+        const af = a.getAttribute("data-poly-mesh-id") === "floor" ? 0 : 1;
+        const bf = b.getAttribute("data-poly-mesh-id") === "floor" ? 0 : 1;
+        return af - bf;
+      });
+      for (const meshEl of ordered) {
+        const meshId = meshEl.getAttribute("data-poly-mesh-id");
+        // The floor is one huge leaf whose center sits under the castle —
+        // skip the center-hit visibility test for it (it would drop the
+        // entire floor), and let casters painted afterwards overpaint it.
+        const skipVis = meshId === "floor";
+        for (const leaf of meshEl.querySelectorAll("[data-poly-index]")) {
+          const idxStr = leaf.getAttribute("data-poly-index");
+          if (idxStr === null) continue;
+          const poly = +idxStr;
+          const rect = leaf.getBoundingClientRect();
+          const x = Math.max(0, Math.floor(rect.left - hostRect.left + EDGE_INSET));
+          const y = Math.max(0, Math.floor(rect.top  - hostRect.top  + EDGE_INSET));
+          const w = Math.min(W - x, Math.ceil(rect.width  - EDGE_INSET * 2));
+          const h = Math.min(H - y, Math.ceil(rect.height - EDGE_INSET * 2));
+          if (w <= 0 || h <= 0) continue;
+          if (!skipVis) {
+            const cx = rect.left + rect.width / 2;
+            const cy = rect.top  + rect.height / 2;
+            const topHit = document.elementFromPoint(cx, cy);
+            if (!topHit) continue;
+            if (topHit !== leaf && !leaf.contains(topHit) && !topHit.contains(leaf)) continue;
+          }
+          const id = registry.length;
+          registry.push({ meshId, poly, el: leaf });
+          const enc = id + 1;
+          ctx.fillStyle = `rgb(${(enc >> 16) & 0xff},${(enc >> 8) & 0xff},${enc & 0xff})`;
+          ctx.fillRect(x, y, w, h);
+        }
+      }
+      const idxBuf = ctx.getImageData(0, 0, W, H).data;
+      return { idxBuf, registry, W, H };
+    }
+    // Returns the registry entry { meshId, poly, el } at a pixel, or null.
+    function ownerAtBuf(buf, x, y) {
+      const i = (y * buf.W + x) * 4;
+      const enc = (buf.idxBuf[i] << 16) | (buf.idxBuf[i + 1] << 8) | buf.idxBuf[i + 2];
+      return enc === 0 ? null : (buf.registry[enc - 1] ?? null);
+    }
+    // Topmost real polygon owner at a screen point, across all meshes.
+    // Skips shadow SVGs (no data-poly-index) and the light helper. Used to
+    // verify AABB attribution before a pixel is counted as a mismatch.
+    function trueOwnerAt(clientX, clientY) {
+      const stack = document.elementsFromPoint(clientX, clientY);
+      for (const el of stack) {
+        if (!el.getAttribute) continue;
+        const idxAttr = el.getAttribute("data-poly-index");
+        if (idxAttr === null) continue;
+        const meshAncestor = el.closest("[data-poly-mesh-id]");
+        if (!meshAncestor) continue;
+        const meshId = meshAncestor.getAttribute("data-poly-mesh-id");
+        if (meshId === "light-helper") continue;
+        return { meshId, poly: +idxAttr, el };
+      }
+      return null;
+    }
+
+    // Set / clear the red outline class on a given list of PolyCSS leaves
+    // (already resolved across whichever mesh owns them).
+    function setMismatchOutlines(els) {
+      const live = polyHost.querySelectorAll("[data-oracle-mismatch]");
+      for (const el of live) el.removeAttribute("data-oracle-mismatch");
+      for (const el of els) {
+        if (el) el.setAttribute("data-oracle-mismatch", "1");
+      }
+    }
+
+    // ── Real PolyCSS pixel capture ──────────────────────────────────────
+    // html-to-image rasterises the DOM via an SVG <foreignObject>, which
+    // DROPS the 3D-`matrix3d`-transformed receiver-shadow SVGs (~99.5% of
+    // the floor cast shadow vanished in measurements). The oracle therefore
+    // captures the REAL composited frame instead:
+    //   • interactive button → Screen Capture API (getDisplayMedia of the
+    //     current tab) + Region Capture (cropTo the poly-host element);
+    //   • headless driver → Playwright screenshots #poly-host and injects it
+    //     via window.oracleCompareWithImage(dataUrl).
+    // Both feed identical real pixels into the shared compare core. The
+    // legacy html-to-image path stays only as a last-resort fallback (with a
+    // visible warning) when tab capture is denied/unavailable.
+    let _capStream = null, _capTrack = null, _capImageCapture = null, _capCropped = false;
+    async function ensureTabCapture() {
+      if (_capTrack && _capTrack.readyState === "live") return true;
+      if (!navigator.mediaDevices?.getDisplayMedia) return false;
+      try {
+        _capStream = await navigator.mediaDevices.getDisplayMedia({
+          video: { frameRate: 12 }, audio: false, preferCurrentTab: true,
+        });
+        _capTrack = _capStream.getVideoTracks()[0];
+        _capCropped = false;
+        // Region Capture: crop the tab frame down to the poly-host element so
+        // grabFrame returns just the PolyCSS render (no sidebar / other stage).
+        if (window.CropTarget?.fromElement && _capTrack.cropTo) {
+          try {
+            const ct = await window.CropTarget.fromElement(polyHost);
+            await _capTrack.cropTo(ct);
+            _capCropped = true;
+          } catch (e) { console.warn("[oracle] cropTo failed, will crop manually", e); }
+        }
+        _capImageCapture = window.ImageCapture ? new ImageCapture(_capTrack) : null;
+        _capTrack.addEventListener("ended", () => { _capTrack = null; _capImageCapture = null; });
+        return true;
+      } catch (e) {
+        console.warn("[oracle] tab capture denied/unavailable", e);
+        return false;
+      }
+    }
+    // Grab one real frame and return W×H ImageData of #poly-host, or null.
+    async function grabRealPolyPx(W, H) {
+      if (!_capTrack || _capTrack.readyState !== "live") return null;
+      let bitmap;
+      try {
+        if (_capImageCapture) bitmap = await _capImageCapture.grabFrame();
+        else return null;
+      } catch (e) { console.warn("[oracle] grabFrame failed", e); return null; }
+      const c = document.createElement("canvas");
+      c.width = W; c.height = H;
+      const cx = c.getContext("2d");
+      if (_capCropped) {
+        // Region-captured frame is already just the poly-host area.
+        cx.drawImage(bitmap, 0, 0, bitmap.width, bitmap.height, 0, 0, W, H);
+      } else {
+        // Whole-tab frame: crop the host rect (scaled by frame/viewport).
+        const rect = polyHost.getBoundingClientRect();
+        const sx = bitmap.width / window.innerWidth;
+        const sy = bitmap.height / window.innerHeight;
+        cx.drawImage(bitmap, rect.left * sx, rect.top * sy, rect.width * sx, rect.height * sy, 0, 0, W, H);
+      }
+      bitmap.close?.();
+      return cx.getImageData(0, 0, W, H).data;
+    }
+    // Decode a data-URL screenshot (Playwright headless) into W×H ImageData.
+    async function dataUrlToPolyPx(dataUrl, W, H) {
+      const img = new Image();
+      await new Promise((r, rej) => { img.onload = r; img.onerror = rej; img.src = dataUrl; });
+      const c = document.createElement("canvas");
+      c.width = W; c.height = H;
+      const cx = c.getContext("2d");
+      cx.drawImage(img, 0, 0, img.width, img.height, 0, 0, W, H);
+      return cx.getImageData(0, 0, W, H).data;
+    }
+
+    // ── Emitter (caster) attribution via raytracing ─────────────────────
+    // A "hole" is a receiver pixel three.js shadows but PolyCSS leaves lit —
+    // a shadow PolyCSS failed to cast. To name the EMITTER responsible,
+    // unproject the pixel to its 3D floor point P, then cast a ray P→light:
+    // the first caster polygon it hits is the occluder that SHOULD be
+    // shadowing P. Those polys get a green border.
+    function setCasterOutlines(polyIndices) {
+      for (const el of polyHost.querySelectorAll('[data-oracle-caster="1"]')) {
+        el.removeAttribute("data-oracle-caster");
+      }
+      const meshEl = polyHost.querySelector(`[data-poly-mesh-id="${S.mesh}"]`);
+      if (!meshEl) return;
+      for (const idx of polyIndices) {
+        const el = meshEl.querySelector(`[data-poly-index="${idx}"]`);
+        if (el) el.setAttribute("data-oracle-caster", "1");
+      }
+    }
+    // World-space caster triangles of the active mesh: { poly, a, b, c }.
+    function activeCasterWorldTris() {
+      const m = activePolyMesh();
+      if (!m || !m.polygons) return [];
+      const pos = m.getPosition?.() ?? [0, 0, 0];
+      const sc = m.getScale?.() ?? 1;
+      const s = typeof sc === "number" ? [sc, sc, sc] : sc;
+      const tris = [];
+      for (let pi = 0; pi < m.polygons.length; pi++) {
+        const v = m.polygons[pi]?.vertices;
+        if (!v || v.length < 3) continue;
+        const w = v.map((p) => [p[0]*s[0]+pos[0], p[1]*s[1]+pos[1], p[2]*s[2]+pos[2]]);
+        for (let t = 1; t < w.length - 1; t++) tris.push({ poly: pi, a: w[0], b: w[t], c: w[t+1] });
+      }
+      return tris;
+    }
+    // World-space XYZ-Euler rotation (matches three.js group.rotation and the
+    // mesh wrapper): M = Rx·Ry·Rz applied to the point, i.e. Rz first.
+    function rotateWorldXYZ(p, rxDeg, ryDeg, rzDeg) {
+      let [x, y, z] = p;
+      if (rzDeg) { const a = rzDeg*Math.PI/180, c = Math.cos(a), s = Math.sin(a); [x, y] = [x*c - y*s, x*s + y*c]; }
+      if (ryDeg) { const a = ryDeg*Math.PI/180, c = Math.cos(a), s = Math.sin(a); [x, z] = [x*c + z*s, -x*s + z*c]; }
+      if (rxDeg) { const a = rxDeg*Math.PI/180, c = Math.cos(a), s = Math.sin(a); [y, z] = [y*c - z*s, y*s + z*c]; }
+      return [x, y, z];
+    }
+    // Rotation-correct caster tris: scale → rotate (about the mesh origin)
+    // → translate, the same TRS order three.js and the wrapper apply. The
+    // plain activeCasterWorldTris() above omits rotation, which mis-attributes
+    // occluders on rotated meshes — use THIS for the mask oracle's raytrace.
+    function activeCasterWorldTrisRot() {
+      const m = activePolyMesh();
+      if (!m || !m.polygons) return [];
+      const pos = m.getPosition?.() ?? [0, 0, 0];
+      const sc = m.getScale?.() ?? 1;
+      const s = typeof sc === "number" ? [sc, sc, sc] : sc;
+      const o = S.obj[S.mesh] ?? { rx: 0, ry: 0, rz: 0 };
+      const rx = o.rx || 0, ry = o.ry || 0, rz = o.rz || 0;
+      const hasRot = rx || ry || rz;
+      const tris = [];
+      for (let pi = 0; pi < m.polygons.length; pi++) {
+        const v = m.polygons[pi]?.vertices;
+        if (!v || v.length < 3) continue;
+        const w = v.map((p) => {
+          let q = [p[0]*s[0], p[1]*s[1], p[2]*s[2]];
+          if (hasRot) q = rotateWorldXYZ(q, rx, ry, rz);
+          return [q[0]+pos[0], q[1]+pos[1], q[2]+pos[2]];
+        });
+        for (let t = 1; t < w.length - 1; t++) tris.push({ poly: pi, a: w[0], b: w[t], c: w[t+1] });
+      }
+      return tris;
+    }
+    // Möller–Trumbore ray/triangle. Returns hit distance t (> minT) or null.
+    // minT defaults to a small positive eps (forward hits only); pass
+    // -Infinity to also accept hits behind the origin (used to land the
+    // view ray on a receiver face that may sit at negative t for ortho).
+    function rayTri(o, d, a, b, c, minT = 1e-3) {
+      const e1x=b[0]-a[0], e1y=b[1]-a[1], e1z=b[2]-a[2];
+      const e2x=c[0]-a[0], e2y=c[1]-a[1], e2z=c[2]-a[2];
+      const px=d[1]*e2z-d[2]*e2y, py=d[2]*e2x-d[0]*e2z, pz=d[0]*e2y-d[1]*e2x;
+      const det=e1x*px+e1y*py+e1z*pz;
+      if (det>-1e-9 && det<1e-9) return null;
+      const inv=1/det;
+      const tx=o[0]-a[0], ty=o[1]-a[1], tz=o[2]-a[2];
+      const u=(tx*px+ty*py+tz*pz)*inv;
+      if (u<-1e-6||u>1+1e-6) return null;
+      const qx=ty*e1z-tz*e1y, qy=tz*e1x-tx*e1z, qz=tx*e1y-ty*e1x;
+      const vv=(d[0]*qx+d[1]*qy+d[2]*qz)*inv;
+      if (vv<-1e-6||u+vv>1+1e-6) return null;
+      const t=(e2x*qx+e2y*qy+e2z*qz)*inv;
+      return t>minT ? t : null;
+    }
+    // First caster polygon hit by ray o+t·d (t>eps), skipping `excludePoly`.
+    function firstCasterHit(tris, o, d, excludePoly = -1) {
+      let best=Infinity, bestPoly=-1;
+      for (const tri of tris) {
+        if (tri.poly === excludePoly) continue;
+        const t = rayTri(o, d, tri.a, tri.b, tri.c);
+        if (t!==null && t<best) { best=t; bestPoly=tri.poly; }
+      }
+      return bestPoly;
+    }
+    // The 3D point where the view ray lands on a specific receiver polygon
+    // (any t — the face may be at negative t under orthographic). Returns
+    // null if the ray misses that poly's triangles.
+    function rayHitOnPoly(tris, o, d, poly) {
+      let bestT = null, bestAbs = Infinity;
+      for (const tri of tris) {
+        if (tri.poly !== poly) continue;
+        const t = rayTri(o, d, tri.a, tri.b, tri.c, -Infinity);
+        if (t !== null && Math.abs(t) < bestAbs) { bestAbs = Math.abs(t); bestT = t; }
+      }
+      if (bestT === null) return null;
+      return [o[0]+bestT*d[0], o[1]+bestT*d[1], o[2]+bestT*d[2]];
+    }
+
+    let oracleRunToken = 0;
+    let oracleBusy = false;
+    let oracleQueued = false;
+
+    async function compareFrame(opts) {
+      if (oracleBusy) { oracleQueued = true; return; }
+      oracleBusy = true;
+      const myToken = ++oracleRunToken;
+      // Clear last run's polygon outlines up front so a run that bails early
+      // (no active mesh, tiny viewport, token superseded) never leaves stale
+      // outlines on the render.
+      setMismatchOutlines([]);
+      setCasterOutlines([]);
+      try {
+        oracleStatus.textContent = "Snapshotting…";
+        const hostRect = polyHost.getBoundingClientRect();
+        const W = Math.round(hostRect.width);
+        const H = Math.round(hostRect.height);
+        if (W < 2 || H < 2) return;
+
+        // Hide BOTH helpers for the snapshot so the orange sphere + line +
+        // PolyCSS octahedron don't bleed into the diff. The polyCSS helper
+        // would be captured by html-to-image even though it's outside the
+        // active mesh scope, so we hide it explicitly.
+        const polyHelperEl = polyHost.querySelector('[data-poly-mesh-id="light-helper"]');
+        if (polyHelperEl) polyHelperEl.style.visibility = "hidden";
+        const threeHelperWasVisible = threeLightHelper.visible;
+        const threeLineWasVisible = threeLightLine.visible;
+        threeLightHelper.visible = false;
+        threeLightLine.visible = false;
+
+        // Force a fresh THREE render so preserveDrawingBuffer has live pixels
+        // before we drawImage from it (compositor may have cleared otherwise).
+        renderer.render(threeScene, camera);
+
+        const threeBuf = document.createElement("canvas");
+        threeBuf.width = W; threeBuf.height = H;
+        const threeBufCtx = threeBuf.getContext("2d");
+        // Three viewport may differ in pixel dims (DPR). drawImage scales to W×H.
+        threeBufCtx.drawImage(threeCanvas, 0, 0, threeCanvas.width, threeCanvas.height, 0, 0, W, H);
+        const threePx = threeBufCtx.getImageData(0, 0, W, H).data;
+        if (myToken !== oracleRunToken) return;
+
+        // Acquire REAL composited PolyCSS pixels. Priority:
+        //   1. opts.polyPx — pre-decoded pixels (headless driver path).
+        //   2. live tab-capture stream (interactive "Compare now").
+        //   3. html-to-image fallback (drops 3D shadow SVGs — warns).
+        // A fresh frame is grabbed AFTER the helpers were hidden above, so
+        // give the compositor one rAF to present the hidden state first.
+        await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+        let polyPx = opts?.polyPx ?? null;
+        let captureMode = polyPx ? "injected" : null;
+        if (!polyPx) {
+          polyPx = await grabRealPolyPx(W, H);
+          if (polyPx) captureMode = "tab-capture";
+        }
+        if (!polyPx) {
+          // Fallback: html-to-image (unreliable for 3D shadow SVGs).
+          await Promise.all([...polyHost.querySelectorAll("img")].map((img) =>
+            img.complete ? null : new Promise((r) => { img.onload = img.onerror = r; })));
+          const polyCanvas = await htmlToImage.toCanvas(polyHost, {
+            width: W, height: H, pixelRatio: 1, cacheBust: false,
+          });
+          polyPx = polyCanvas.getContext("2d").getImageData(0, 0, W, H).data;
+          captureMode = "html-to-image(⚠ shadows dropped)";
+        }
+        if (myToken !== oracleRunToken) return;
+        // Re-expose a polyCanvas-shaped surface for the thumbnail below.
+        const polyThumbSrc = (() => {
+          const c = document.createElement("canvas");
+          c.width = W; c.height = H;
+          const id = new ImageData(new Uint8ClampedArray(polyPx), W, H);
+          c.getContext("2d").putImageData(id, 0, 0);
+          return c;
+        })();
+        oracleStatus.textContent = "Comparing…";
+
+        // Resize oracle output canvases to match the source's CSS bbox.
+        resizeOracleCanvases();
+        const dpr = window.devicePixelRatio || 1;
+        diffCanvas.style.background = "#0f172a";
+        diffCtx.setTransform(1, 0, 0, 1, 0, 0);
+        diffCtx.clearRect(0, 0, diffCanvas.width, diffCanvas.height);
+        // Per-pixel diff into a dedicated ImageData (then drawn at DPR).
+        const diffImg = diffCtx.createImageData(W, H);
+        const perPoly = new Map();
+        const tol = oracleLumaTolerance;
+
+        // All meshes the oracle inspects: the user-selected caster model
+        // AND the floor receiver (the cast shadow on the floor is just a
+        // disagreement on the floor mesh's polygon). The light helper is
+        // excluded. Earlier the oracle scoped everything to the active mesh
+        // alone, so floor cast-shadow errors (missing/holed shadows) were
+        // never sampled — they fell outside the active mesh's AABBs.
+        const activeMeshEl = polyHost.querySelector(`[data-poly-mesh-id="${S.mesh}"]`);
+        if (!activeMeshEl) {
+          oracleStatus.textContent = "Waiting for active mesh…";
+          return;
+        }
+        const meshEls = [...polyHost.querySelectorAll("[data-poly-mesh-id]")]
+          .filter((el) => el.getAttribute("data-poly-mesh-id") !== "light-helper");
+
+        // Build the global polygon-index canvas across all meshes once. The
+        // buffer is the coarse "which poly is a candidate here" mask +
+        // sampling gate; per-flagged-pixel elementsFromPoint verifies the
+        // true owner before a pixel counts.
+        const indexBuf = buildPolyIndex(meshEls, hostRect, W, H);
+
+        // First pass — sample every stride'd mesh pixel. PolyCSS colour
+        // comes from the html-to-image snapshot (REAL rendered pixels
+        // including receiver-shadow SVGs and atlas textures); three.js
+        // colour comes from the WebGL canvas snapshot. The indexBuf only
+        // tells us WHICH polygon (and mesh) a pixel belongs to.
+        const samples = [];
+        for (let y = 0; y < H; y += ORACLE_STRIDE) {
+          for (let x = 0; x < W; x += ORACLE_STRIDE) {
+            const owner = ownerAtBuf(indexBuf, x, y);
+            if (owner === null) continue;
+            const i = (y * W + x) * 4;
+            // Both engines paint the bg color where there's no visible
+            // mesh. If either snapshot is bg at this pixel, the polygon
+            // we'd attribute it to isn't actually rendered there (back-
+            // facing, occluded by a closer leaf, or just outside the
+            // true polygon shape inside the AABB). Skipping these
+            // eliminates the "flagged but invisible" polys.
+            if (isBgPixel(polyPx[i], polyPx[i + 1], polyPx[i + 2])) continue;
+            if (isBgPixel(threePx[i], threePx[i + 1], threePx[i + 2])) continue;
+            const lumaPoly  = 0.2126 * polyPx[i]    + 0.7152 * polyPx[i + 1]   + 0.0722 * polyPx[i + 2];
+            const lumaThree = 0.2126 * threePx[i]   + 0.7152 * threePx[i + 1]  + 0.0722 * threePx[i + 2];
+            samples.push({ x, y, owner, d: Math.abs(lumaPoly - lumaThree) });
+          }
+        }
+        const totalMesh = samples.length;
+        // 20th-percentile baseline = "delta of the BEST-MATCHING 1/5 of
+        // pixels". When the mesh splits bimodally into agreeing-polys
+        // (low delta) and disagreeing-polys (high delta), the median
+        // sits in the no-man's-land between the two clusters and both
+        // groups end up with similar calibrated deltas. p20 anchors the
+        // baseline to the agreeing cluster, so disagreeing polys get
+        // their full delta - baseline of separation.
+        const sortedD = samples.map((s) => s.d).sort((a, b) => a - b);
+        const baseline = sortedD.length ? sortedD[Math.floor(sortedD.length * 0.20)] : 0;
+        // Keep `median` as a status hint so the user can see the bimodal
+        // gap (median - baseline) widen when a scene has lots of disagree.
+        const median = sortedD.length ? sortedD[sortedD.length >> 1] : 0;
+
+        // Second pass — apply tolerance to the calibrated delta.
+        // Aggregation stores PER-PIXEL calibrated deltas per polygon so we
+        // can rank by MEDIAN (not mean) afterwards — partial-shadow polys
+        // with half-lit/half-shadowed pixels don't dilute their score.
+        //
+        // Per-flagged-pixel attribution verify: AABB-based attribution
+        // (paint each leaf's bbox into the index canvas) over-covers
+        // because polygon AABBs include neighbor pixels. A pixel might
+        // sit inside leaf A's AABB but be visually painted by leaf B
+        // (closer / overlapping). For pixels we're about to flag, do
+        // one elementsFromPoint hit-test and confirm A IS the topmost
+        // data-poly-index element there. If not, drop the sample —
+        // it's a false attribution.
+        // Bucket key is `${meshId}#${poly}` so polygon indices that repeat
+        // across meshes (floor #0 vs castle #0) never collide.
+        const keyOf = (o) => `${o.meshId}#${o.poly}`;
+        let totalMismatch = 0;
+        let maxCal = 0;
+        const perPolyDeltas = new Map();
+        // Floor pixels three.js shadows but PolyCSS leaves lit (missing
+        // cast shadow). Fed to the raytracer below to name the emitter.
+        const holePixels = [];
+        for (const s of samples) {
+          const dCal = Math.abs(s.d - baseline);
+          if (dCal > maxCal) maxCal = dCal;
+          if (dCal < tol) continue;
+          // Resolve the TRUE owner from the live compositor (topmost real
+          // polygon across all meshes), not the coarse AABB index buffer.
+          // The index buffer only gates sampling — its AABBs over-cover and
+          // overpaint neighbours, so attributing by it both invents false
+          // positives AND silently drops real disagreements where the guess
+          // landed on the wrong poly (the missed tower faces). Re-attributing
+          // to elementsFromPoint fixes both: a pixel is counted against the
+          // polygon actually painted there. `null` = only a shadow SVG / bg
+          // sits here (no real poly) → genuinely nothing to attribute.
+          const owner = trueOwnerAt(hostRect.left + s.x, hostRect.top + s.y);
+          if (!owner) continue;
+          totalMismatch += 1;
+          // Missing-shadow detection: three.js notably darker than PolyCSS
+          // here → a shadow PolyCSS failed to cast. Record the receiver so
+          // the raytracer can find P (on the floor plane, or on the castle
+          // face for self-shadow holes) and name the occluder.
+          {
+            const ii = (s.y * W + s.x) * 4;
+            const lp = 0.2126*polyPx[ii]   + 0.7152*polyPx[ii+1]   + 0.0722*polyPx[ii+2];
+            const lt = 0.2126*threePx[ii]  + 0.7152*threePx[ii+1]  + 0.0722*threePx[ii+2];
+            if (lt + 6 < lp) {
+              if (owner.meshId === "floor") holePixels.push({ x: s.x, y: s.y, receiver: "floor" });
+              else if (owner.meshId === S.mesh) holePixels.push({ x: s.x, y: s.y, receiver: owner.poly });
+            }
+          }
+          const intensity = Math.min(1, dCal / 120);
+          const r = 255;
+          const g = Math.round(255 * intensity);
+          const a = Math.round(255 * (0.25 + intensity * 0.75));
+          for (let yy = 0; yy < ORACLE_STRIDE; yy++) {
+            for (let xx = 0; xx < ORACLE_STRIDE; xx++) {
+              const dx = s.x + xx, dy = s.y + yy;
+              if (dx >= W || dy >= H) continue;
+              const di = (dy * W + dx) * 4;
+              diffImg.data[di] = r;
+              diffImg.data[di + 1] = g;
+              diffImg.data[di + 2] = 0;
+              diffImg.data[di + 3] = a;
+            }
+          }
+          const key = keyOf(owner);
+          let bucket = perPoly.get(key);
+          if (!bucket) {
+            bucket = { key, meshId: owner.meshId, idx: owner.poly, el: owner.el, sum: 0, pixels: 0 };
+            perPoly.set(key, bucket);
+          }
+          bucket.sum += dCal;
+          bucket.pixels += 1;
+          let arr = perPolyDeltas.get(key);
+          if (!arr) { arr = []; perPolyDeltas.set(key, arr); }
+          arr.push(dCal);
+        }
+        // Promote median into each bucket so the ranking below uses it.
+        for (const [key, arr] of perPolyDeltas) {
+          arr.sort((a, b) => a - b);
+          const bucket = perPoly.get(key);
+          if (bucket) bucket.median = arr[arr.length >> 1];
+        }
+        // Paint the diff ImageData at DPR for crisp output.
+        const tmp = document.createElement("canvas");
+        tmp.width = W; tmp.height = H;
+        tmp.getContext("2d").putImageData(diffImg, 0, 0);
+        diffCtx.drawImage(tmp, 0, 0, diffCanvas.width, diffCanvas.height);
+
+        // Rank polys by per-poly MEDIAN delta (not mean) × pixel count.
+        // Median is more robust to half-shadowed polys where mean dilutes
+        // the wrong-side signal with the right-side pixels. Each entry
+        // carries its meshId so floor and caster polys stay distinct.
+        const ranked = [...perPoly.values()]
+          .filter((b) => b.pixels >= ORACLE_MIN_PIXELS)
+          .map((b) => ({
+            meshId: b.meshId,
+            idx: b.idx,
+            el: b.el,
+            pixels: b.pixels,
+            avg: b.sum / b.pixels,
+            median: b.median ?? (b.sum / b.pixels),
+          }))
+          .sort((a, b) => (b.median * b.pixels) - (a.median * a.pixels));
+        // Short per-row label: bare `#idx` for the active mesh, `mesh#idx`
+        // for everything else (so floor rows read `floor#0`).
+        const labelOf = (r) => (r.meshId === S.mesh ? `#${r.idx}` : `${r.meshId}#${r.idx}`);
+
+        // Misclassified canvas: draw the same diff heatmap LIGHTER, then
+        // outline each ranked polygon's screen bbox + label it.
+        missesCtx.setTransform(1, 0, 0, 1, 0, 0);
+        missesCtx.clearRect(0, 0, missesCanvas.width, missesCanvas.height);
+        missesCtx.fillStyle = "#0f172a";
+        missesCtx.fillRect(0, 0, missesCanvas.width, missesCanvas.height);
+        missesCtx.save();
+        missesCtx.globalAlpha = 0.35;
+        missesCtx.drawImage(tmp, 0, 0, missesCanvas.width, missesCanvas.height);
+        missesCtx.restore();
+        const scale = missesCanvas.width / W;
+        missesCtx.font = `${Math.round(11 * scale)}px ui-monospace, monospace`;
+        missesCtx.lineWidth = Math.max(1, 2 * scale);
+        missesCtx.strokeStyle = "#ef4444";
+        missesCtx.fillStyle = "#fef2f2";
+        for (let i = 0; i < Math.min(40, ranked.length); i++) {
+          const el = ranked[i].el;
+          if (!el) continue;
+          const r = el.getBoundingClientRect();
+          const x = (r.left - hostRect.left) * scale;
+          const y = (r.top  - hostRect.top)  * scale;
+          const w = r.width  * scale;
+          const h = r.height * scale;
+          missesCtx.strokeRect(x, y, w, h);
+          missesCtx.fillText(labelOf(ranked[i]), x + 2, y + 12 * scale);
+        }
+        // Highlight on the live PolyCSS render = CSS outline on the actual
+        // polygon DOM leaves (the outline follows each leaf's transformed
+        // quad). setMismatchOutlines clears the previous run's outlines
+        // first, so they never accumulate between compares.
+        setMismatchOutlines(ranked.map((r) => r.el));
+
+        // Emitter attribution: raytrace each floor hole back to the caster
+        // polygon that SHOULD be occluding the light there, and border those
+        // green. The occluder is the first caster triangle a ray from the
+        // floor point toward the light (+dir, where the light source sits)
+        // intersects.
+        const casterCulprits = new Set();
+        if (holePixels.length) {
+          const tris = activeCasterWorldTris();
+          if (tris.length) {
+            // Light-source direction (the helper sits at +dir): from a
+            // shadowed point the occluder lies toward +dir.
+            const Llen = Math.hypot(S.dir.x, S.dir.y, S.dir.z) || 1;
+            const L = [S.dir.x / Llen, S.dir.y / Llen, S.dir.z / Llen];
+            const vcx = hostRect.left + hostRect.width / 2;
+            const vcy = hostRect.top + hostRect.height / 2;
+            // Cap the ray count — we only need the SET of occluders, not a
+            // per-pixel map, so a strided subsample of holes suffices.
+            const MAX_RAYS = 1500;
+            const stepH = Math.max(1, Math.floor(holePixels.length / MAX_RAYS));
+            for (let k = 0; k < holePixels.length; k += stepH) {
+              const hp = holePixels[k];
+              const { origin, direction } = screenToWorldRay({
+                camera: polyScene.camera.state, tileSize: POLY_TILE,
+                viewportCenterX: vcx, viewportCenterY: vcy,
+                mouseX: hostRect.left + hp.x, mouseY: hostRect.top + hp.y,
+              });
+              // Receiver point P: floor plane z=0, or the castle face itself
+              // for a self-shadow hole.
+              let P = null, excludePoly = -1;
+              if (hp.receiver === "floor") {
+                if (Math.abs(direction[2]) < 1e-9) continue;
+                const tf = -origin[2] / direction[2];
+                P = [origin[0] + tf * direction[0], origin[1] + tf * direction[1], 0];
+              } else {
+                P = rayHitOnPoly(tris, origin, direction, hp.receiver);
+                excludePoly = hp.receiver;
+              }
+              if (!P) continue;
+              // Nudge off the receiver surface toward the light before casting
+              // so a coplanar/adjacent face doesn't self-hit at grazing angle.
+              const O = [P[0] + L[0] * 0.01, P[1] + L[1] * 0.01, P[2] + L[2] * 0.01];
+              const poly = firstCasterHit(tris, O, L, excludePoly);
+              if (poly >= 0) casterCulprits.add(poly);
+            }
+          }
+        }
+        setCasterOutlines(casterCulprits);
+
+        // Paint the two source thumbnails. polyThumbCanvas shows the
+        // EXACT bitmap we used as PolyCSS reference (leaf colors stamped
+        // into AABBs). threeThumbCanvas shows what we sampled from THREE.
+        const tw = polyThumbCanvas.clientWidth || 160;
+        const th = polyThumbCanvas.clientHeight || 80;
+        polyThumbCanvas.width = tw; polyThumbCanvas.height = th;
+        threeThumbCanvas.width = tw; threeThumbCanvas.height = th;
+        const ptx = polyThumbCanvas.getContext("2d");
+        const ttx = threeThumbCanvas.getContext("2d");
+        ptx.fillStyle = "#0f172a"; ptx.fillRect(0, 0, tw, th);
+        ttx.fillStyle = "#0f172a"; ttx.fillRect(0, 0, tw, th);
+        ptx.drawImage(polyThumbSrc, 0, 0, tw, th);
+        ttx.drawImage(threeBuf, 0, 0, tw, th);
+
+        // Sidebar list.
+        oracleResults.innerHTML = "";
+        for (const r of ranked.slice(0, 50)) {
+          const row = document.createElement("div");
+          row.className = "oracle-row";
+          row.innerHTML =
+            `<code>${labelOf(r)}</code>` +
+            `<span>${r.pixels}px · med Δ${r.median.toFixed(0)} · avg Δ${r.avg.toFixed(0)}</span>` +
+            `<span class="delta">${Math.round(r.median * r.pixels / 100)}</span>`;
+          row.addEventListener("click", () => {
+            for (const sib of oracleResults.querySelectorAll(".is-selected")) sib.classList.remove("is-selected");
+            row.classList.add("is-selected");
+            const live = polyHost.querySelectorAll('[data-oracle-focus="1"]');
+            for (const el of live) el.removeAttribute("data-oracle-focus");
+            if (r.el) r.el.setAttribute("data-oracle-focus", "1");
+          });
+          oracleResults.appendChild(row);
+        }
+        const pct = totalMesh > 0 ? (totalMismatch / totalMesh * 100).toFixed(1) : "0";
+        const hint = (totalMismatch === 0 && maxCal > 0 && maxCal < tol)
+          ? ` · ⚠ min Δ ${tol} > max Δ ${maxCal.toFixed(0)} — lower the slider`
+          : "";
+        // baseline (p20) is what we subtract; median (p50) is shown so
+        // the user can read the bimodal gap. max Δ tells you the ceiling.
+        oracleStatus.textContent =
+          `[${captureMode}] ${ranked.length} polys · ${totalMismatch}/${totalMesh} px (${pct}%) · min Δ ${tol} · base Δ${baseline.toFixed(0)} · med Δ${median.toFixed(0)} · max Δ${maxCal.toFixed(0)}${hint}`;
+
+        // Per-mesh rollup for the JSON verdict.
+        const byMesh = {};
+        for (const r of ranked) {
+          const m = (byMesh[r.meshId] ??= { mismatchPixels: 0, polys: [] });
+          m.mismatchPixels += r.pixels;
+          m.polys.push({ poly: r.idx, pixels: r.pixels, medianDelta: +r.median.toFixed(1), avgDelta: +r.avg.toFixed(1) });
+        }
+        // Machine-readable verdict — the headless contract. `polys` is the
+        // flat ranked list of every polygon (across all meshes) whose
+        // rendered shading/shadow disagrees with three.js beyond `tol`.
+        window.__oracle = {
+          mesh: S.mesh,
+          captureMode,
+          tol,
+          camera: { rotX: S.cam.rotX, rotY: S.cam.rotY, zoom: S.cam.zoom },
+          light: { dx: S.dir.x, dy: S.dir.y, dz: S.dir.z, intensity: S.dir.intensity, ambient: S.amb.intensity },
+          missingShadowCasters: [...casterCulprits].sort((a, b) => a - b),
+          missingShadowPixels: holePixels.length,
+          totalSampled: totalMesh,
+          totalMismatch,
+          mismatchPct: +pct,
+          baseline: +baseline.toFixed(1),
+          median: +median.toFixed(1),
+          maxDelta: +maxCal.toFixed(1),
+          byMesh,
+          polys: ranked.map((r) => ({
+            meshId: r.meshId,
+            poly: r.idx,
+            label: labelOf(r),
+            pixels: r.pixels,
+            medianDelta: +r.median.toFixed(1),
+            avgDelta: +r.avg.toFixed(1),
+            score: +(r.median * r.pixels / 100).toFixed(1),
+          })),
+        };
+      } catch (err) {
+        oracleStatus.textContent = "Error: " + (err && err.message || String(err));
+        console.error("[oracle]", err);
+      } finally {
+        // Restore helper visibility on both engines and repaint Three.
+        const polyHelperEl = polyHost.querySelector('[data-poly-mesh-id="light-helper"]');
+        if (polyHelperEl) polyHelperEl.style.visibility = "";
+        threeLightHelper.visible = true;
+        threeLightLine.visible = true;
+        renderer.render(threeScene, camera);
+        oracleBusy = false;
+        if (oracleQueued) { oracleQueued = false; setTimeout(compareFrame, 50); }
+      }
+    }
+
+    // "Compare now" — acquire (or reuse) a real tab-capture stream first so
+    // the diff uses true composited pixels, then compare. The click is the
+    // user gesture getDisplayMedia requires; the "share this tab" prompt
+    // appears once per session and the stream is reused after.
+    oracleCompareBtn.addEventListener("click", async () => {
+      const ok = await ensureTabCapture();
+      if (!ok) oracleStatus.textContent = "⚠ tab capture denied — falling back to html-to-image (shadows unreliable)";
+      await compareFrame();
+    });
+
+    // Headless contract. The Playwright driver screenshots #poly-host (the
+    // REAL compositor output, including 3D-transformed shadow SVGs) and
+    // passes it as a data URL; we decode it, diff against three.js, and
+    // resolve to the JSON verdict (window.__oracle). Usage:
+    //   const shot = await (await page.$('#poly-host')).screenshot();
+    //   const json = await page.evaluate(d => window.oracleCompareWithImage(d),
+    //                                    'data:image/png;base64,' + shot.toString('base64'));
+    window.oracleCompareWithImage = async (dataUrl) => {
+      const hostRect = polyHost.getBoundingClientRect();
+      const W = Math.round(hostRect.width), H = Math.round(hostRect.height);
+      const polyPx = await dataUrlToPolyPx(dataUrl, W, H);
+      await compareFrame({ polyPx });
+      return window.__oracle ?? null;
+    };
+    // Let the headless driver hide the light-helper octahedron before it
+    // screenshots #poly-host (the injected image is captured BEFORE
+    // compareFrame runs, so the helper would otherwise bleed into the diff).
+    window.oracleSetHelpersHidden = (hidden) => {
+      const el = polyHost.querySelector('[data-poly-mesh-id="light-helper"]');
+      if (el) el.style.visibility = hidden ? "hidden" : "";
+      threeLightHelper.visible = !hidden;
+      threeLightLine.visible = !hidden;
+      renderer.render(threeScene, camera);
+    };
+    // Fallback headless entry that uses whatever in-page capture is available
+    // (tab-capture if a stream exists, else html-to-image). Prefer
+    // oracleCompareWithImage with a Playwright screenshot for trustworthy
+    // shadow pixels.
+    window.runShadowOracle = async () => {
+      await compareFrame();
+      return window.__oracle ?? null;
+    };
+
+    // ── Shadow-mask parity (the better oracle) ──────────────────────────
+    // Drives the existing "shadows only" mode so BOTH engines render just
+    // their shadow contribution (PolyCSS hides meshes → shadow SVGs only;
+    // three.js swaps to ShadowMaterial). Each render is reduced to a binary
+    // "in shadow?" mask, so the comparison is pure SHAPE — no luma tolerance,
+    // no darkness/tint offset, no antialias-edge noise. three.js stays the
+    // reference (its shadows are correct); we just compare shadow shape.
+    window.oracleSetShadowsOnly = (on) => {
+      S.shadowsOnly = !!on;
+      update();
+    };
+    // A pixel is "in shadow" in shadow-only mode when it's clearly darker
+    // than the light page background (#eef2f6 ≈ luma 240). Both engines
+    // darken shadowed pixels well below this; everything else stays bg.
+    const SHADOW_MASK_THRESH = 200;
+    function isShadowPx(d, i) {
+      const luma = 0.2126 * d[i] + 0.7152 * d[i+1] + 0.0722 * d[i+2];
+      return luma < SHADOW_MASK_THRESH;
+    }
+    // Compare shadow masks. `polyShadowUrl` is a Playwright screenshot of
+    // #poly-host taken in shadows-only mode (real compositor). three.js's
+    // shadow render is read straight from its WebGL canvas. Classifies every
+    // pixel and paints the illustration into the diff/misses panes.
+    window.oracleMaskCompare = async (polyShadowUrl) => {
+      const hostRect = polyHost.getBoundingClientRect();
+      const W = Math.round(hostRect.width), H = Math.round(hostRect.height);
+      if (W < 2 || H < 2) return null;
+      renderer.render(threeScene, camera);
+      const polyPx = await dataUrlToPolyPx(polyShadowUrl, W, H);
+      const tb = document.createElement("canvas"); tb.width = W; tb.height = H;
+      const tctx = tb.getContext("2d");
+      tctx.drawImage(threeCanvas, 0, 0, threeCanvas.width, threeCanvas.height, 0, 0, W, H);
+      const threePx = tctx.getImageData(0, 0, W, H).data;
+
+      resizeOracleCanvases();
+
+      // Raw binary masks.
+      const polyMask = new Uint8Array(W * H);
+      const threeMask = new Uint8Array(W * H);
+      for (let p = 0; p < W * H; p++) {
+        polyMask[p] = isShadowPx(polyPx, p * 4) ? 1 : 0;
+        threeMask[p] = isShadowPx(threePx, p * 4) ? 1 : 0;
+      }
+      // Tolerance dilation: the two engines rasterise the SAME shadow edge a
+      // fraction of a pixel apart, so a thin border band would falsely read as
+      // missing/extra. Count a three-shadow pixel as "missing" only when NO
+      // poly shadow sits within MASK_TOL px of it (and symmetrically for
+      // extra). This absorbs the boundary offset while keeping real INTERIOR
+      // holes / over-shadows.
+      const MASK_TOL = 2;
+      const dilate = (m) => {
+        let cur = m;
+        for (let pass = 0; pass < MASK_TOL; pass++) {
+          const next = new Uint8Array(cur);
+          for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+            const p = y * W + x;
+            if (cur[p]) continue;
+            if ((x > 0 && cur[p-1]) || (x < W-1 && cur[p+1]) ||
+                (y > 0 && cur[p-W]) || (y < H-1 && cur[p+W])) next[p] = 1;
+          }
+          cur = next;
+        }
+        return cur;
+      };
+      const polyD = dilate(polyMask), threeD = dilate(threeMask);
+
+      const diffImg = diffCtx.createImageData(W, H);
+      let missing = 0, extra = 0, agreeShadow = 0, agreeLit = 0;
+      const holePixels = [];
+      for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+          const p = y * W + x, i = p * 4;
+          const ps = polyMask[p], ts = threeMask[p];
+          let r = 0, g = 0, b = 0, a = 0;
+          if (ts && !polyD[p]) { missing++; r = 255; a = 235; if (((x|y) & 1) === 0) holePixels.push({ x, y }); }
+          else if (ps && !threeD[p]) { extra++; b = 255; r = 60; a = 200; }
+          else if (ps || ts) { agreeShadow++; r = g = b = 70; a = 160; }
+          else { agreeLit++; }
+          diffImg.data[i] = r; diffImg.data[i+1] = g; diffImg.data[i+2] = b; diffImg.data[i+3] = a;
+        }
+      }
+      const tmp = document.createElement("canvas"); tmp.width = W; tmp.height = H;
+      tmp.getContext("2d").putImageData(diffImg, 0, 0);
+      diffCtx.setTransform(1,0,0,1,0,0);
+      diffCtx.fillStyle = "#0f172a"; diffCtx.fillRect(0, 0, diffCanvas.width, diffCanvas.height);
+      diffCtx.drawImage(tmp, 0, 0, diffCanvas.width, diffCanvas.height);
+
+      // Mask thumbnails (what was thresholded), into the existing thumbs.
+      const drawMask = (canvas, px) => {
+        const tw = canvas.clientWidth || 160, th = canvas.clientHeight || 80;
+        canvas.width = tw; canvas.height = th;
+        const c = document.createElement("canvas"); c.width = W; c.height = H;
+        const id = c.getContext("2d").createImageData(W, H);
+        for (let i = 0; i < W*H; i++) {
+          const on = isShadowPx(px, i*4) ? 20 : 235;
+          id.data[i*4] = id.data[i*4+1] = id.data[i*4+2] = on; id.data[i*4+3] = 255;
+        }
+        c.getContext("2d").putImageData(id, 0, 0);
+        const ctx2 = canvas.getContext("2d");
+        ctx2.fillStyle = "#0f172a"; ctx2.fillRect(0,0,tw,th);
+        ctx2.drawImage(c, 0, 0, tw, th);
+      };
+      drawMask(polyThumbCanvas, polyPx);
+      drawMask(threeThumbCanvas, threePx);
+      polyCap.textContent = "PolyCSS shadow mask";
+      threeCap.textContent = "Three.js shadow mask";
+
+      // Attribute each missing region to the occluder caster poly via the
+      // (rotation-correct) raytrace, and green-border those on the render.
+      const casterCulprits = new Set();
+      if (holePixels.length) {
+        const tris = activeCasterWorldTrisRot();
+        if (tris.length) {
+          const Llen = Math.hypot(S.dir.x, S.dir.y, S.dir.z) || 1;
+          const L = [S.dir.x/Llen, S.dir.y/Llen, S.dir.z/Llen];
+          const vcx = hostRect.left + hostRect.width/2, vcy = hostRect.top + hostRect.height/2;
+          const MAX_RAYS = 1500;
+          const stepH = Math.max(1, Math.floor(holePixels.length / MAX_RAYS));
+          for (let k = 0; k < holePixels.length; k += stepH) {
+            const hp = holePixels[k];
+            const { origin, direction } = screenToWorldRay({
+              camera: polyScene.camera.state, tileSize: POLY_TILE,
+              viewportCenterX: vcx, viewportCenterY: vcy,
+              mouseX: hostRect.left + hp.x, mouseY: hostRect.top + hp.y,
+            });
+            if (Math.abs(direction[2]) < 1e-9) continue;
+            const tf = -origin[2] / direction[2];
+            const P = [origin[0]+tf*direction[0], origin[1]+tf*direction[1], 0];
+            const O = [P[0]+L[0]*0.01, P[1]+L[1]*0.01, P[2]+L[2]*0.01];
+            const poly = firstCasterHit(tris, O, L);
+            if (poly >= 0) casterCulprits.add(poly);
+          }
+        }
+      }
+      setCasterOutlines(casterCulprits);
+
+      const total = W * H;
+      const shadowUnion = missing + extra + agreeShadow;
+      const json = {
+        mesh: S.mesh,
+        camera: { rotX: S.cam.rotX, rotY: S.cam.rotY, zoom: S.cam.zoom },
+        light: { dx: S.dir.x, dy: S.dir.y, dz: S.dir.z },
+        objectRotation: [S.obj[S.mesh]?.rx ?? 0, S.obj[S.mesh]?.ry ?? 0, S.obj[S.mesh]?.rz ?? 0],
+        missingPx: missing,
+        extraPx: extra,
+        agreeShadowPx: agreeShadow,
+        // IoU of the two shadow masks: 1.0 = perfect shape parity.
+        shadowIoU: shadowUnion > 0 ? +(agreeShadow / shadowUnion).toFixed(4) : 1,
+        missingShadowCasters: [...casterCulprits].sort((a,b)=>a-b),
+      };
+      oracleStatus.textContent =
+        `[mask] missing ${missing}px · extra ${extra}px · shadow IoU ${json.shadowIoU} · casters ${json.missingShadowCasters.length}`;
+      window.__oracleMask = json;
+      return json;
+    };
+
+    // Live mode — opt-in. Re-runs compareFrame after every update() call
+    // (debounced 350 ms to let the async atlas rebake settle). Off by
+    // default because the snapshot + per-pixel diff costs ~500-1500 ms
+    // on castle-sized meshes and would make slider drags feel sluggish.
+    let compareDebounce = null;
+    let liveMode = false;
+    const _origUpdate = update;
+    update = function (lightsChanged) {
+      _origUpdate(lightsChanged);
+      if (!liveMode) return;
+      if (compareDebounce) clearTimeout(compareDebounce);
+      compareDebounce = setTimeout(compareFrame, 350);
+    };
+
+    const liveLabel = document.createElement("label");
+    liveLabel.style.cssText = "display:flex; gap:6px; align-items:center; margin: 4px 0 6px; font-size:11px; color:#475569;";
+    const liveCheck = document.createElement("input");
+    liveCheck.type = "checkbox";
+    liveCheck.addEventListener("change", () => {
+      liveMode = liveCheck.checked;
+      if (liveMode) {
+        if (compareDebounce) clearTimeout(compareDebounce);
+        compareDebounce = setTimeout(compareFrame, 50);
+      }
+    });
+    liveLabel.appendChild(liveCheck);
+    liveLabel.appendChild(document.createTextNode("Live (auto-compare on slider change)"));
+    panelEl.insertBefore(liveLabel, oracleResults);
+
+    // Size the oracle canvases as soon as the active mesh is mounted, but
+    // DON'T auto-compare — the per-pixel diff costs ~500-1500ms on
+    // castle-sized meshes and blocks the page for a beat on first paint.
+    // User drives the first comparison via "Compare now" or the Live toggle.
+    {
+      let attempts = 0;
+      const tryInitial = () => {
+        attempts += 1;
+        const ready = polyHost.querySelector(`[data-poly-mesh-id="${S.mesh}"]`);
+        if (ready) { resizeOracleCanvases(); return; }
+        if (attempts < 40) setTimeout(tryInitial, 500);
+      };
+      setTimeout(tryInitial, 1500);
+    }
+  </script>
+</body>
+</html>
