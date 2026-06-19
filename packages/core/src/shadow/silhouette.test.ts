@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildEdgeOwners, classifyFacing, extractSilhouetteLoops } from "./silhouette";
+import { buildEdgeOwners, classifyFacing, extractSilhouetteLoops, silhouetteReliable } from "./silhouette";
 import type { Polygon, Vec3 } from "../types";
 
 /** Axis-aligned unit cube centered at origin, +Z-up. 6 quads (12 tris if we
@@ -128,5 +128,28 @@ describe("extractSilhouetteLoops", () => {
     const loops = extractSilhouetteLoops(owners, facing);
     expect(loops.length).toBe(1);
     expect(loops[0]!.length).toBe(4);
+  });
+});
+
+describe("silhouetteReliable", () => {
+  it("is true for a closed cube (clean degree-2 silhouette)", () => {
+    const polys = unitCubeQuads();
+    const owners = buildEdgeOwners(polys);
+    const facing = classifyFacing(planeNormalsFromPolys(polys), [0.1, 0.1, -1]);
+    expect(silhouetteReliable(owners, facing)).toBe(true);
+  });
+
+  it("is false when a silhouette vertex has degree != 2 (bowtie / non-manifold)", () => {
+    // Two triangles in z=0 sharing ONLY the origin vertex (a bowtie). Both
+    // face the light, so all 6 boundary edges are silhouette and FOUR of
+    // them meet at the origin → degree-4 vertex, an ambiguous loop walk.
+    const polys: Polygon[] = [
+      { vertices: [[0,0,0],[1,0,0],[0,1,0]], color: "#fff" },   // normal +Z
+      { vertices: [[0,0,0],[-1,0,0],[0,-1,0]], color: "#fff" }, // normal +Z
+    ];
+    const owners = buildEdgeOwners(polys);
+    const facing = classifyFacing(planeNormalsFromPolys(polys), [0, 0, -1]);
+    expect(facing).toEqual([true, true]);
+    expect(silhouetteReliable(owners, facing)).toBe(false);
   });
 });

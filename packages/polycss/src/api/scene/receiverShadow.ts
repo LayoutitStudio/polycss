@@ -140,18 +140,19 @@ export function emitReceiverShadows(
     const ckey = `${caster.polygons.length}|${cpos.join(",")}|${crot.join(",")}|${casterScale.join(",")}|${cbboxCss ? cbboxCss.join(",") : "n"}`;
     let cached = casterItemsCache.get(caster) as CasterPolyItem[] | undefined;
     if (cached === undefined || casterItemsCacheKey.get(caster) !== ckey) {
-      const dedupDrop = dedupByCaster.get(caster)!;
-      // Vanilla also filters to polygons with an atlas plan — i.e. those
-      // actually rendered. Without a plan there's nothing to cast.
-      const renderedIdx = new Set<number>();
-      for (const item of caster.rendered) {
-        if (item.plan && !dedupDrop.has(item.polygonIndex)) renderedIdx.add(item.polygonIndex);
-      }
+      // Cast from EVERY polygon. Geometry casts a shadow regardless of
+      // whether it's painted for the camera (atlas plan) or whether the
+      // render-dedup dropped it as an overlapping/back face — both filters
+      // left camera-dependent holes in the floor shadow of imported meshes
+      // (a poly facing the light but not the camera, or a back face whose
+      // coincident twin faces away from the light, simply vanished). The
+      // per-mesh `fill-rule: nonzero` path merges coincident projections,
+      // so duplicates don't alpha-stack — no dedup needed here.
       cached = prepareCasterPolyItems(
         caster.polygons,
         cpos,
         caster.handle.transform.scale,
-        (idx) => renderedIdx.has(idx),
+        () => true,
         crot,
       );
       casterItemsCache.set(caster, cached);
