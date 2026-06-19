@@ -69,7 +69,7 @@ export default function App() {
 ### PolyScene
 
 - `polygons` renders a static `Polygon[]` directly.
-- `directionalLight` and `ambientLight` control scene lighting.
+- `directionalLight`, `pointLights` (direction-only, baked mode; optional per-light `castShadow`), and `ambientLight` control scene lighting.
 - `textureLighting` chooses `"baked"` or `"dynamic"`.
 - `textureQuality` controls atlas raster budget.
 - `strategies` can disable selected render strategies for diagnostics.

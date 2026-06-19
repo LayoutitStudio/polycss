@@ -85,7 +85,7 @@ import { PolyCamera, PolyScene, PolyOrbitControls, PolyMesh } from "@layoutit/po
 ### PolyScene
 
 - `polygons` renders a static `Polygon[]` directly.
-- `directionalLight` and `ambientLight` control scene lighting.
+- `directionalLight`, `pointLights` (direction-only, baked mode; optional per-light `castShadow`), and `ambientLight` control scene lighting.
 - `textureLighting` chooses `"baked"` or `"dynamic"`.
 - `textureQuality` controls atlas raster budget.
 - Solid seam bleed is automatic on detected shared solid edges.

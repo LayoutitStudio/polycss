@@ -93,6 +93,29 @@ interface PolyDirectionalLight {
 
 ---
 
+## `PolyPointLight`
+
+A positional light source. **Direction-only** — there is no distance falloff;
+per polygon the contribution is `color · intensity · max(0, n · L̂)` where `L̂`
+is the unit direction from the surface to `position`. Shading is flat per face
+(an approximation of three.js's `PointLight(distance: 0, decay: 0)`), and is
+**baked-mode only** — dynamic lighting ignores `pointLights` for surface shading.
+
+```ts
+interface PolyPointLight {
+  /** World-space position of the light. */
+  position: [number, number, number];
+  /** Point light color hex (default: "#ffffff"). */
+  color?: string;
+  /** Point light intensity (default: 1). */
+  intensity?: number;
+  /** When true, this light casts radial SVG shadows (default: false). */
+  castShadow?: boolean;
+}
+```
+
+---
+
 ## `PolyAmbientLight`
 
 Ambient-only light (no directional component).
@@ -214,6 +237,7 @@ Core imperative handles returned by `createPolyScene()` and `scene.add()`.
 interface PolySceneOptions {
   camera: PolyPerspectiveCameraHandle | PolyOrthographicCameraHandle;
   directionalLight?: PolyDirectionalLight;
+  pointLights?: PolyPointLight[];
   ambientLight?: PolyAmbientLight;
   textureLighting?: PolyTextureLightingMode;
   textureQuality?: TextureQuality;
