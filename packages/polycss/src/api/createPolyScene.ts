@@ -23,6 +23,7 @@ import type {
   ParseResult,
   Polygon,
   Vec3,
+  PolyPointLight,
   CameraCullNormalGroup,
   CameraCullRotation,
 } from "@layoutit/polycss-core";
@@ -1132,6 +1133,24 @@ export function createPolyScene(
       !entry.castShadow;
   }
 
+  // Convert the scene's world-space point lights into a mesh's LOCAL frame
+  // (subtract the mesh position, inverse-rotate by the mesh rotation) so they
+  // match the local vertex frame the atlas plan shades in. The atlas plan
+  // applies the CSS axis-swap × tile itself (computePointContribs). Returns
+  // undefined when there are no point lights so the shading fast path holds.
+  function localPointLightsForEntry(entry: MeshEntry): PolyPointLight[] | undefined {
+    const pls = currentOptions.pointLights;
+    if (!pls || pls.length === 0) return undefined;
+    const pos = entry.handle.transform.position ?? [0, 0, 0];
+    const rot = entry.handle.transform.rotation ?? [0, 0, 0];
+    const hasRot = rot[0] !== 0 || rot[1] !== 0 || rot[2] !== 0;
+    return pls.map((pl) => {
+      const rel: Vec3 = [pl.position[0] - pos[0], pl.position[1] - pos[1], pl.position[2] - pos[2]];
+      const local = hasRot ? inverseRotateVec3(rel, rot as Vec3) : rel;
+      return { ...pl, position: local };
+    });
+  }
+
   function renderEntry(entry: MeshEntry, lightDirectionOverride?: Vec3): void {
     clearRendered(entry);
     const baseDirLight = currentOptions.directionalLight;
@@ -1188,6 +1207,7 @@ export function createPolyScene(
     const renderOptions = {
       doc,
       directionalLight,
+      pointLights: localPointLightsForEntry(entry),
       ambientLight: currentOptions.ambientLight,
       textureLighting: currentOptions.textureLighting,
       textureQuality: currentOptions.textureQuality,
@@ -1276,6 +1296,7 @@ export function createPolyScene(
     const renderOptions = {
       doc,
       directionalLight,
+      pointLights: localPointLightsForEntry(entry),
       ambientLight: currentOptions.ambientLight,
       textureLighting: currentOptions.textureLighting,
       textureQuality: currentOptions.textureQuality,
@@ -1468,6 +1489,7 @@ export function createPolyScene(
     const renderOptions = {
       doc,
       directionalLight,
+      pointLights: localPointLightsForEntry(entry),
       ambientLight: currentOptions.ambientLight,
       textureLighting: currentOptions.textureLighting,
       textureQuality: currentOptions.textureQuality,
@@ -2112,6 +2134,7 @@ export function createPolyScene(
     const prevTextureLighting = currentOptions.textureLighting;
     const prevLightDir = currentOptions.directionalLight?.direction;
     const prevShadow = currentOptions.shadow;
+    const prevPointLights = currentOptions.pointLights;
     const normalizedPartial = normalizeSceneOptions(partial);
     currentOptions = { ...currentOptions, ...normalizedPartial };
     // Keep the SceneContext's options ref pointing to the latest snapshot so
@@ -2145,13 +2168,23 @@ export function createPolyScene(
     const textureProjectionChanged =
       Object.prototype.hasOwnProperty.call(partial, "textureProjection") &&
       normalizedPartial.textureProjection !== prevTextureProjection;
+    // Point lights are baked per-face into the atlas/solid colors, so any
+    // change (added/removed/moved/recolored) requires a re-bake of every
+    // mesh. Compare a compact signature so passing the same array each tick
+    // (e.g. bundled with camera updates) doesn't re-bake needlessly.
+    const pointLightSig = (pls: PolyPointLight[] | undefined): string =>
+      (pls ?? []).map((p) => `${p.position.join(",")}|${p.color ?? ""}|${p.intensity ?? 1}|${p.castShadow ? 1 : 0}`).join(";");
+    const pointLightsChanged =
+      Object.prototype.hasOwnProperty.call(partial, "pointLights") &&
+      pointLightSig(currentOptions.pointLights) !== pointLightSig(prevPointLights);
     if (
       strategiesChanged ||
       seamBleedChanged ||
       textureLeafSizingChanged ||
       textureImageRenderingChanged ||
       textureBackendChanged ||
-      textureProjectionChanged
+      textureProjectionChanged ||
+      pointLightsChanged
     ) {
       for (const entry of meshes) renderEntry(entry);
     }
