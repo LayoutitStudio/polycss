@@ -12,6 +12,7 @@ import {
   buildSharedEdgeMap,
   computeReceiverShadowFaces,
   meshScaleVec3,
+  parseHexColor,
   prepareCasterEdgeOwners,
   prepareCasterPolyItems,
   prepareReceiverFacePlanes,
@@ -22,7 +23,7 @@ import {
   type ReceiverFacePlane,
   type Vec3,
 } from "@layoutit/polycss-core";
-import { ensureShadowRoot, syncShadowPaths } from "./shadowSvg";
+import { ensureShadowRoot } from "./shadowSvg";
 import { meshShadowId } from "./shadowCache";
 import type { SceneContext } from "./sceneContext";
 import type { MeshEntry } from "./internalTypes";
@@ -117,15 +118,18 @@ export function emitReceiverShadows(
   lightDir: Vec3,
   _r: number, _g: number, _b: number,
   opacity: number,
-  /** When set, the light is a point light at this CSS-frame position; the
-   *  projection becomes radial. */
-  lightPos?: Vec3,
-  /** Per-light SVG-mount namespace ("" = directional). */
-  lightKey = "",
-  /** All scene point lights (CSS-frame positions) for the shaded shadow color. */
-  allPointLights?: ReadonlyArray<{ position: Vec3; color?: string; intensity?: number }>,
-  /** Index in `allPointLights` of the light this pass shadows (point pass only). */
-  thisPointIndex?: number,
+  /** Every light's shadow pass for this receiver. All of a face's passes are
+   *  merged into ONE SVG so overlapping shadows composite correctly (the base
+   *  is the full-lit face color, each pass a multiply layer). */
+  passes: {
+    /** Run the directional pass (mount namespace aside, always merged). */
+    runDirectional: boolean;
+    /** One entry per shadow-casting point light: its CSS position + index
+     *  into `allPointLights`. */
+    points: ReadonlyArray<{ lightPos: Vec3; index: number }>;
+    /** All scene point lights (CSS positions) for the shaded shadow color. */
+    allPointLights?: ReadonlyArray<{ position: Vec3; color?: string; intensity?: number }>;
+  },
 ): void {
   const options = ctx.options.current;
   const { receiverShadowCache, receiverShadowCacheKey, casterItemsCache, casterItemsCacheKey } = ctx;
@@ -205,7 +209,7 @@ export function emitReceiverShadows(
     // (a 6-quad cube) require the outline. Directional keeps the ≥40-poly
     // gate where the per-poly path is cheaper.
     let edgeOwners: ReadonlyMap<string, EdgeOwners> | undefined;
-    if (caster !== receiverEntry && (caster.polygons.length >= 40 || lightPos)) {
+    if (caster !== receiverEntry && (caster.polygons.length >= 40 || passes.points.length > 0)) {
       let cachedOwners = edgeOwnersCache.get(caster);
       if (cachedOwners === undefined || edgeOwnersCacheKey.get(caster) !== ckey) {
         cachedOwners = prepareCasterEdgeOwners(
@@ -234,116 +238,147 @@ export function emitReceiverShadows(
     meshRotation: receiverEntry.handle.transform.rotation,
   };
 
-  const specs = computeReceiverShadowFaces<MeshEntry>({
-    receiverPlanes: cachedPlanes,
-    receiverPolygons: receiverEntry.polygons,
-    receiverHasTexture: hasTexture,
-    casters: casterInputs,
-    lightDir,
-    lightPos,
-    allPointLights,
-    thisPointIndex,
-    cameraRot,
-    ambientLight: options.ambientLight,
-    directionalLight: options.directionalLight,
-    shadow: { color: options.shadow?.color, opacity, maxExtend: options.shadow?.maxExtend },
-  });
+  // Plane basis lookup by faceIndex (cachedPlanes is occlusion-filtered).
+  const planeByFace = new Map<number, ReceiverFacePlane>();
+  for (const pl of cachedPlanes) planeByFace.set(pl.faceIndex, pl);
 
-  // Mount/update SVGs from specs. Faces NOT in specs (back-facing, no
-  // shadow content, etc.) get hidden.
-  const mounted = mountedFacesFor(receiverEntry, lightKey);
+  // Aggregate every light pass per receiver FACE, so a face's coplanar shadows
+  // share one SVG and overlaps composite correctly. Solid receivers paint a
+  // base = full-lit color C, then each pass as a `multiply` layer with factor
+  // (remaining/C) — overlaps become C·fA·fB (both lights removed). Textured
+  // receivers (per-pixel base, no uniform multiply) fall back to per-pass dark
+  // alpha layers, which cumulatively darken.
+  // `fill` is the per-pass remaining-light color (receiver lit by all OTHER
+  // lights). Single-layer faces paint it directly (one path, like before);
+  // multi-layer faces multiply it against the base as `fill/base`.
+  type Layer = { polys: Array<Array<[number, number]>>; fill: string; opacity: number };
+  type FaceAgg = { memberPolyIndices: number[]; base: string; solid: boolean; layers: Layer[] };
+  const perFace = new Map<number, FaceAgg>();
+
+  const runPass = (lightPos: Vec3 | undefined, thisPointIndex: number | undefined): void => {
+    const specs = computeReceiverShadowFaces<MeshEntry>({
+      receiverPlanes: cachedPlanes,
+      receiverPolygons: receiverEntry.polygons,
+      receiverHasTexture: hasTexture,
+      casters: casterInputs,
+      lightDir,
+      lightPos,
+      allPointLights: passes.allPointLights,
+      thisPointIndex,
+      cameraRot,
+      ambientLight: options.ambientLight,
+      directionalLight: options.directionalLight,
+      shadow: { color: options.shadow?.color, opacity, maxExtend: options.shadow?.maxExtend },
+    });
+    for (const spec of specs) {
+      if (spec.facePolysUv.length === 0) continue;
+      const solid = spec.fullLitFill !== "";
+      let agg = perFace.get(spec.faceIndex);
+      if (!agg) {
+        agg = { memberPolyIndices: spec.memberPolyIndices, base: spec.fullLitFill, solid, layers: [] };
+        perFace.set(spec.faceIndex, agg);
+      }
+      agg.layers.push({ polys: spec.facePolysUv, fill: spec.fill, opacity: spec.opacity });
+    }
+  };
+  if (passes.runDirectional) runPass(undefined, undefined);
+  for (const p of passes.points) runPass(p.lightPos, p.index);
+
+  const mounted = mountedFacesFor(receiverEntry, "m");
   const seen = new Set<number>();
-  for (const spec of specs) {
-    seen.add(spec.faceIndex);
-    let face = mounted.get(spec.faceIndex);
+  const wantDebug = !!options.debugShadowAttrs;
+  const shadowRoot = ensureShadowRoot(ctx.shadowSvgState, ctx.doc, ctx.sceneEl);
+
+  for (const [faceIndex, agg] of perFace) {
+    const plane = planeByFace.get(faceIndex);
+    if (!plane || agg.layers.length === 0) continue;
+    // Union bbox over every pass's polys (absolute face-(u,v)).
+    let minU = Infinity, minV = Infinity, maxU = -Infinity, maxV = -Infinity;
+    for (const layer of agg.layers) for (const poly of layer.polys) for (const pt of poly) {
+      if (pt[0] < minU) minU = pt[0];
+      if (pt[0] > maxU) maxU = pt[0];
+      if (pt[1] < minV) minV = pt[1];
+      if (pt[1] > maxV) maxV = pt[1];
+    }
+    if (!Number.isFinite(minU)) continue;
+    minU = Math.floor(minU - 1); minV = Math.floor(minV - 1);
+    maxU = Math.ceil(maxU + 1); maxV = Math.ceil(maxV + 1);
+    const w = maxU - minU, h = maxV - minV;
+    if (!(w > 0) || !(h > 0)) continue;
+
+    const { O, u, v, n, lift } = plane;
+    const tx = O[0] + minU * u[0] + minV * v[0] + lift * n[0];
+    const ty = O[1] + minU * u[1] + minV * v[1] + lift * n[1];
+    const tz = O[2] + minU * u[2] + minV * v[2] + lift * n[2];
+    const m = [u[0], u[1], u[2], 0, v[0], v[1], v[2], 0, n[0], n[1], n[2], 0, tx, ty, tz, 1];
+    const matrixCss = `matrix3d(${m.map((x) => x.toFixed(4)).join(",")})`;
+
+    seen.add(faceIndex);
+    let face = mounted.get(faceIndex);
     if (!face) {
       face = { svg: null, visible: false, width: -1, height: -1, matrixCss: "" };
-      mounted.set(spec.faceIndex, face);
+      mounted.set(faceIndex, face);
     }
     let svg = face.svg;
     if (!svg) {
       svg = ctx.doc.createElementNS(SVG_NS, "svg");
       svg.setAttribute("class", "polycss-shadow polycss-shadow-svg polycss-shadow-receiver");
-      if (options.debugShadowAttrs) {
-        svg.setAttribute("data-poly-shadow-type", "receiver");
-        if (lightKey) svg.setAttribute("data-poly-shadow-light", lightKey);
-        svg.setAttribute("data-poly-shadow-receiver", meshShadowId(receiverEntry));
-        svg.setAttribute("data-poly-shadow-receiver-face", String(spec.faceIndex));
-        svg.setAttribute("data-poly-shadow-receiver-polys", JSON.stringify(spec.memberPolyIndices));
-      }
-      svg.setAttribute("width", String(spec.width));
-      svg.setAttribute("height", String(spec.height));
-      svg.setAttribute("viewBox", `0 0 ${spec.width} ${spec.height}`);
-      svg.setAttribute(
-        "style",
-        `position:absolute;top:0;left:0;display:block;overflow:hidden;` +
-        `transform-origin:0 0;pointer-events:none;will-change:transform;` +
-        `transform:${spec.matrixCss}`,
-      );
-      // Mount inside the shared `.polycss-shadows` wrapper at scene root.
-      // The SVG's matrix3d still encodes the face plane in world frame —
-      // the wrapper is a 0×0 preserve-3d container that takes no layout
-      // space, so children composite at their absolute matrix3d positions
-      // just like they did when mounted directly on sceneEl. Grouping
-      // exists for DOM organization (clean DevTools tree) and to make
-      // future "clip all shadows to a region" / "hide all shadows" toggles
-      // trivial (one ancestor to flip).
-      const shadowRoot = ensureShadowRoot(ctx.shadowSvgState, ctx.doc, ctx.sceneEl);
       shadowRoot.appendChild(svg);
       face.svg = svg;
-      face.width = spec.width;
-      face.height = spec.height;
-      face.matrixCss = spec.matrixCss;
-    } else {
-      if (!face.visible) svg.style.display = "block";
-      // Tight shadow-bbox SVGs resize/translate every frame as the shadow
-      // sweeps across the receiver — re-apply width/height/viewBox/transform
-      // only when they actually change.
-      if (face.width !== spec.width || face.height !== spec.height) {
-        svg.setAttribute("width", String(spec.width));
-        svg.setAttribute("height", String(spec.height));
-        svg.setAttribute("viewBox", `0 0 ${spec.width} ${spec.height}`);
-        face.width = spec.width;
-        face.height = spec.height;
-      }
-      if (face.matrixCss !== spec.matrixCss) {
-        svg.style.transform = spec.matrixCss;
-        face.matrixCss = spec.matrixCss;
-      }
     }
+    if (!face.visible) svg.style.display = "block";
     face.visible = true;
-
-    const paths = syncShadowPaths(svg, ctx.doc, spec.paths.length, /*withStroke*/ true);
-    const opStr = spec.opacity.toFixed(4);
-    const casterIds: string[] = [];
-    const wantDebug = !!options.debugShadowAttrs;
-    for (let i = 0; i < spec.paths.length; i++) {
-      const p = spec.paths[i]!;
-      const casterId = wantDebug ? meshShadowId(p.casterId) : "";
-      if (wantDebug) casterIds.push(casterId);
-      const path = paths[i]!;
-      path.setAttribute("d", p.d);
-      if (path.getAttribute("fill") !== spec.fill) path.setAttribute("fill", spec.fill);
-      if (path.getAttribute("stroke") !== spec.fill) path.setAttribute("stroke", spec.fill);
-      if (path.getAttribute("opacity") !== opStr) path.setAttribute("opacity", opStr);
-      if (wantDebug) {
-        if (path.getAttribute("data-poly-shadow-caster") !== casterId) {
-          path.setAttribute("data-poly-shadow-caster", casterId);
-        }
-        const polysAttr = JSON.stringify(p.casterPolygonIndices);
-        if (path.getAttribute("data-poly-shadow-caster-polys") !== polysAttr) {
-          path.setAttribute("data-poly-shadow-caster-polys", polysAttr);
-        }
-      }
+    if (face.width !== w || face.height !== h) {
+      svg.setAttribute("width", String(w));
+      svg.setAttribute("height", String(h));
+      svg.setAttribute("viewBox", `0 0 ${w} ${h}`);
+      face.width = w;
+      face.height = h;
     }
+    // A single-light face paints its remaining color directly (one path); only
+    // multi-light SOLID faces need the base + per-pass `multiply` layers for
+    // correct overlap. Solid multi-light carries shadow strength at the SVG
+    // level (layers stay opaque so multiply is exact); everything else keeps
+    // per-path alpha.
+    const merged = agg.solid && agg.layers.length > 1;
+    const svgOpacity = merged ? opacity : 1;
+    const style =
+      `position:absolute;top:0;left:0;display:block;overflow:hidden;` +
+      `transform-origin:0 0;pointer-events:none;will-change:transform;` +
+      `opacity:${svgOpacity.toFixed(4)};transform:${matrixCss}`;
+    if (face.matrixCss !== style) { svg.setAttribute("style", style); face.matrixCss = style; }
     if (wantDebug) {
-      const castersAttr = casterIds.join(" ");
-      if (svg.getAttribute("data-poly-shadow-casters") !== castersAttr) {
-        svg.setAttribute("data-poly-shadow-casters", castersAttr);
+      svg.setAttribute("data-poly-shadow-type", "receiver");
+      svg.setAttribute("data-poly-shadow-receiver", meshShadowId(receiverEntry));
+      svg.setAttribute("data-poly-shadow-receiver-face", String(faceIndex));
+      svg.setAttribute("data-poly-shadow-receiver-polys", JSON.stringify(agg.memberPolyIndices));
+      svg.setAttribute("data-poly-shadow-layers", String(agg.layers.length));
+    }
+
+    // Rebuild children. Each layer is ONE path (all its polys, nonzero union)
+    // so within-light overlaps don't double-multiply; cross-light overlaps are
+    // separate paths that compose.
+    while (svg.firstChild) svg.removeChild(svg.firstChild);
+    if (merged) {
+      // base = full-lit color over the shadow union; each pass multiplies it.
+      // No stroke: a stroked multiply layer would darken its own outer edge,
+      // drawing a visible outline. Each layer is already a nonzero union so
+      // there are no internal seams to feather.
+      let baseD = "";
+      for (const layer of agg.layers) baseD += polysToD(layer.polys, minU, minV);
+      svg.appendChild(makePath(ctx.doc, baseD, agg.base, false, 1, false));
+      for (const layer of agg.layers) {
+        const factor = multiplyFactor(layer.fill, agg.base);
+        svg.appendChild(makePath(ctx.doc, polysToD(layer.polys, minU, minV), factor, true, 1, false));
+      }
+    } else {
+      // One path per pass at its own alpha (single light, or textured).
+      for (const layer of agg.layers) {
+        svg.appendChild(makePath(ctx.doc, polysToD(layer.polys, minU, minV), layer.fill, false, layer.opacity, false));
       }
     }
   }
-  // Hide faces with no current spec.
+  // Hide faces with no current content.
   for (const [idx, face] of mounted) {
     if (seen.has(idx)) continue;
     if (face.svg && face.visible) {
@@ -351,4 +386,64 @@ export function emitReceiverShadows(
       face.visible = false;
     }
   }
+}
+
+/** Build an `M…L…Z` path string from face-(u,v) polygons, offset to the SVG's
+ *  tight bbox origin. */
+function polysToD(
+  polys: ReadonlyArray<ReadonlyArray<readonly [number, number]>>,
+  minU: number,
+  minV: number,
+): string {
+  let d = "";
+  for (const poly of polys) {
+    if (poly.length < 3) continue;
+    d += `M${(poly[0]![0] - minU).toFixed(1)},${(poly[0]![1] - minV).toFixed(1)}`;
+    for (let j = 1; j < poly.length; j++) {
+      d += `L${(poly[j]![0] - minU).toFixed(1)},${(poly[j]![1] - minV).toFixed(1)}`;
+    }
+    d += "Z";
+  }
+  return d;
+}
+
+function makePath(
+  doc: Document,
+  d: string,
+  fill: string,
+  blendMultiply: boolean,
+  opacity: number,
+  stroke: boolean,
+): SVGPathElement {
+  const path = doc.createElementNS(SVG_NS, "path");
+  path.setAttribute("d", d);
+  path.setAttribute("fill", fill);
+  // Overlapping same-light subpaths union (don't alpha/multiply-stack).
+  path.setAttribute("fill-rule", "nonzero");
+  if (stroke) {
+    // A 1px stroke of the same color closes sub-pixel seams between adjacent
+    // projected polygons (a single path's nonzero fill already merges them,
+    // so this only feathers the outer antialiased edge).
+    path.setAttribute("stroke", fill);
+    path.setAttribute("stroke-width", "1");
+    path.setAttribute("stroke-linejoin", "round");
+  }
+  if (opacity !== 1) path.setAttribute("opacity", opacity.toFixed(4));
+  if (blendMultiply) path.style.mixBlendMode = "multiply";
+  return path;
+}
+
+/** Per-channel multiply factor `remaining / full` (both sRGB hex) as `rgb(...)`.
+ *  Painting the base = `full` and this factor with `mix-blend-mode: multiply`
+ *  reproduces `remaining`; overlapping factors multiply to the both-removed
+ *  color. */
+function multiplyFactor(remaining: string, full: string): string {
+  const a = parseHexColor(remaining)?.rgb ?? [0, 0, 0];
+  const b = parseHexColor(full)?.rgb ?? [255, 255, 255];
+  const f = (i: number): number => {
+    const c = b[i] ?? 0;
+    if (c <= 0) return 255;
+    return Math.max(0, Math.min(255, Math.round((a[i]! / c) * 255)));
+  };
+  return `rgb(${f(0)},${f(1)},${f(2)})`;
 }

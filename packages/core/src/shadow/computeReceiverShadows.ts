@@ -207,6 +207,15 @@ export interface ReceiverShadowFaceSpec<T = unknown> {
    *  if applicable). */
   opacity: number;
   paths: Array<ReceiverShadowPath<T>>;
+  /** Full-lit face color C (all lights), for the multi-light merge: callers
+   *  multiply C by each pass's `fill/C` factor so overlaps composite to the
+   *  both-blocked color. Empty string for textured receivers (per-pixel base,
+   *  multiply can't be uniform — those fall back to cumulative-alpha). */
+  fullLitFill: string;
+  /** Every clipped caster polygon for this pass in absolute face-(u,v) space
+   *  (NOT offset by the tight bbox). The multi-light merge re-bases these to a
+   *  shared per-face bbox so all lights' shadows live in one SVG. */
+  facePolysUv: Array<Array<[number, number]>>;
 }
 
 /**
@@ -681,16 +690,29 @@ export function computeReceiverShadowFaces<T = unknown>(
 
     // Per-face light scalars for the SHADED shadow color. `dirDot` is the
     // directional Lambert term (always vs the directional vector, not the
-    // pass's faceDir). Point dots come from each light's to-source direction.
+    // pass's faceDir). Point dots use the to-source direction from the face
+    // CENTROID — matching the baked surface shading (per-polygon centroid), so
+    // the shadow's full-lit base color equals the painted receiver and the SVG
+    // leaves no visible base-color box. (Projection still uses per-vertex
+    // radial directions; only the flat per-face color uses the centroid.)
     const dirDot = Math.max(0, Lx * n[0] + Ly * n[1] + Lz * n[2]);
+    let cMeanU = 0, cMeanV = 0;
+    for (const pt of outlineUv) { cMeanU += pt[0]; cMeanV += pt[1]; }
+    const cInv = outlineUv.length > 0 ? 1 / outlineUv.length : 0;
+    cMeanU *= cInv; cMeanV *= cInv;
+    const cen: Vec3 = [
+      O[0] + cMeanU * u[0] + cMeanV * v[0],
+      O[1] + cMeanU * u[1] + cMeanV * v[1],
+      O[2] + cMeanU * u[2] + cMeanV * v[2],
+    ];
     const pointDots: number[] = [];
     let pointTotalScale = 0;
     if (allPointLights) {
       for (let k = 0; k < allPointLights.length; k++) {
         const pl = allPointLights[k]!;
-        const dx = pl.position[0] - O[0];
-        const dy = pl.position[1] - O[1];
-        const dz = pl.position[2] - O[2];
+        const dx = pl.position[0] - cen[0];
+        const dy = pl.position[1] - cen[1];
+        const dz = pl.position[2] - cen[2];
         const len = Math.hypot(dx, dy, dz) || 1;
         const dot = Math.max(0, (dx / len) * n[0] + (dy / len) * n[1] + (dz / len) * n[2]);
         pointDots[k] = dot;
@@ -1079,6 +1101,7 @@ export function computeReceiverShadowFaces<T = unknown>(
     const tightMatrixCss = `matrix3d(${tm.map((x) => x.toFixed(4)).join(",")})`;
 
     const paths: Array<ReceiverShadowPath<T>> = [];
+    const facePolysUv: Array<Array<[number, number]>> = [];
     for (const entry of clippedByCaster.values()) {
       let d = "";
       for (const verts of entry.verts) {
@@ -1087,9 +1110,26 @@ export function computeReceiverShadowFaces<T = unknown>(
           d += `L${(verts[j]![0] - shMinU).toFixed(1)},${(verts[j]![1] - shMinV).toFixed(1)}`;
         }
         d += "Z";
+        facePolysUv.push(verts.map((p) => [p[0], p[1]] as [number, number]));
       }
       paths.push({ casterId: entry.id, d, casterPolygonIndices: entry.subPolygonIndices });
     }
+
+    // Full-lit face color C (every light) for the multi-light merge — callers
+    // multiply C by each pass's `fill/C` so overlapping shadows composite to
+    // the both-blocked color. Empty for textured (per-pixel base).
+    const fullPointContribs: { color: string; scale: number }[] = [];
+    if (allPointLights) {
+      for (let k = 0; k < allPointLights.length; k++) {
+        const dot = pointDots[k] ?? 0;
+        if (dot <= 0) continue;
+        const pl = allPointLights[k]!;
+        fullPointContribs.push({ color: pl.color ?? "#ffffff", scale: (pl.intensity ?? 1) * dot });
+      }
+    }
+    const fullLitFill = receiverHasTexture
+      ? ""
+      : shadePolygon(groupColor, dirIntensity * dirDot, dirColor, ambColor, ambIntensity, fullPointContribs);
 
     out.push({
       faceIndex: group.faceIndex,
@@ -1100,6 +1140,8 @@ export function computeReceiverShadowFaces<T = unknown>(
       fill: fillColor,
       opacity: effOp,
       paths,
+      fullLitFill,
+      facePolysUv,
     });
   }
 

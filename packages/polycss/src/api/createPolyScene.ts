@@ -1071,29 +1071,17 @@ export function createPolyScene(
     for (const receiver of meshes) {
       if (receiver.disposed || !receiver.receiveShadow) continue;
       const dedup = dedupByReceiver.get(receiver) ?? new Set();
-      // Directional pass (mount namespace ""). Runs whenever a directional
-      // light is configured, or — to preserve the legacy implicit-sun
-      // shadow — when there are no shadow-casting point lights. A scene with
-      // ONLY point shadow lights skips this so no phantom default-sun shadow
-      // appears.
-      if (runDirectionalShadow) {
-        emitReceiverShadowsImpl(ctx, casters, dedupByCaster, receiver, dedup, lightDir, r, g, b, shadowOpacity, undefined, "", allPointLightsCss, undefined);
-      } else {
-        // Ensure any directional SVGs from a prior tick are cleared.
-        emitReceiverShadowsImpl(ctx, [], dedupByCaster, receiver, dedup, lightDir, r, g, b, shadowOpacity, undefined, "", allPointLightsCss, undefined);
-      }
-      // One radial pass per shadow-casting point light. Each light projects
-      // into its own SVG namespace ("p0".."pN") so overlapping shadows stack
-      // independently. The shaded fill shows the receiver lit by every OTHER
-      // light, so a spot blocked from this light keeps the others' color.
-      for (let li = 0; li < cssPointPositions.length; li++) {
-        emitReceiverShadowsImpl(
-          ctx, casters, dedupByCaster, receiver, dedup,
-          lightDir, r, g, b, shadowOpacity,
-          cssPointPositions[li], `p${li}`,
-          allPointLightsCss, shadowPointIndices[li],
-        );
-      }
+      // All of this receiver's light passes are merged into one SVG per face
+      // (base = full-lit color, each pass a multiply layer) so overlapping
+      // shadows composite to the both-blocked color. The directional pass runs
+      // whenever a directional light is configured, or — to preserve the
+      // implicit-sun shadow — when there are no shadow-casting point lights;
+      // a point-only scene skips it so no phantom default-sun shadow appears.
+      emitReceiverShadowsImpl(ctx, casters, dedupByCaster, receiver, dedup, lightDir, r, g, b, shadowOpacity, {
+        runDirectional: runDirectionalShadow,
+        points: cssPointPositions.map((lightPos, li) => ({ lightPos, index: shadowPointIndices[li]! })),
+        allPointLights: allPointLightsCss,
+      });
     }
     lastEmittedShadowLightKey = lightKey;
   }
