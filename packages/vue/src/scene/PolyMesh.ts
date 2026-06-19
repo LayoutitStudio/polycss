@@ -660,12 +660,22 @@ export const PolyMesh = defineComponent({
       // Shadow-casting point lights → CSS-frame absolute positions (same
       // world-CSS frame as caster/receiver vertices). Only castShadow:true
       // lights project (Three.js parity). Mirrors vanilla emitSceneShadows.
-      const shadowPointLights = (ctx?.pointLights ?? []).filter((pl) => pl.castShadow);
-      const cssPointPositions = shadowPointLights.map((pl) => worldPositionToCss(pl.position));
+      // ALL point lights in CSS frame — the shaded shadow color needs every
+      // light that illuminates the receiver (even non-casters), minus the one
+      // being shadowed. `shadowPointIndices` are the entries that cast.
+      const allPointLightsCss = (ctx?.pointLights ?? []).map((pl) => ({
+        position: worldPositionToCss(pl.position),
+        color: pl.color,
+        intensity: pl.intensity,
+      }));
+      const shadowPointIndices = (ctx?.pointLights ?? [])
+        .map((pl, i) => (pl.castShadow ? i : -1))
+        .filter((i) => i >= 0);
+      const cssPointPositions = shadowPointIndices.map((i) => allPointLightsCss[i]!.position);
       // Directional pass runs when a directional light is configured, or — to
       // preserve the implicit-sun shadow — when there are no point shadow lights.
-      const runDirectionalShadow = !!ctx?.directionalLight?.direction || shadowPointLights.length === 0;
-      const hasShadowPoints = shadowPointLights.length > 0;
+      const runDirectionalShadow = !!ctx?.directionalLight?.direction || shadowPointIndices.length === 0;
+      const hasShadowPoints = shadowPointIndices.length > 0;
       const shadowLift = ctx?.shadow?.lift ?? 0.001;
       const planes = prepareReceiverFacePlanes(
         polygons.value,
@@ -739,6 +749,7 @@ export const PolyMesh = defineComponent({
         lightKey: string,
         passLightDir: Vec3,
         lightPos: Vec3 | undefined,
+        thisPointIndex: number | undefined,
       ): VNode[] => {
         const specs = computeReceiverShadowFaces<symbol>({
           receiverPlanes: planes,
@@ -747,6 +758,8 @@ export const PolyMesh = defineComponent({
           casters: casterInputs,
           lightDir: passLightDir,
           lightPos,
+          allPointLights: allPointLightsCss,
+          thisPointIndex,
           cameraRot,
           ambientLight: ctx?.ambientLight,
           directionalLight: ctx?.directionalLight,
@@ -793,9 +806,9 @@ export const PolyMesh = defineComponent({
         );
       };
       const nodes: VNode[] = [];
-      if (runDirectionalShadow) nodes.push(...runPass("d", lightDir, undefined));
+      if (runDirectionalShadow) nodes.push(...runPass("d", lightDir, undefined, undefined));
       for (let li = 0; li < cssPointPositions.length; li++) {
-        nodes.push(...runPass(`p${li}`, lightDir, cssPointPositions[li]));
+        nodes.push(...runPass(`p${li}`, lightDir, cssPointPositions[li], shadowPointIndices[li]));
       }
       return nodes;
     });

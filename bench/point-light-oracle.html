@@ -1589,6 +1589,19 @@
         { sec: "Ambient" },
         { k: ["amb", "intensity"], min: 0, max: 1, step: 0.01, fmt: (v) => v.toFixed(2) },
         { k: ["amb", "color"], color: true, label: "color" },
+        // Point lights — one section per entry in S.points. Custom get/set bind
+        // to the array entry; `light:true` routes through the baked-mode rebake
+        // debounce (moving a point light re-bakes shading + re-emits shadows).
+        ...S.points.flatMap((_, i) => [
+          { sec: `Point light ${i}` },
+          { light: true, check: true, label: "on", get: () => S.points[i].on, set: (v) => { S.points[i].on = v; } },
+          { light: true, check: true, label: "castShadow", get: () => S.points[i].shadow, set: (v) => { S.points[i].shadow = v; } },
+          { light: true, label: "x", min: -10, max: 10, step: 0.1, fmt: (v) => v.toFixed(2), get: () => S.points[i].x, set: (v) => { S.points[i].x = v; } },
+          { light: true, label: "y", min: -10, max: 10, step: 0.1, fmt: (v) => v.toFixed(2), get: () => S.points[i].y, set: (v) => { S.points[i].y = v; } },
+          { light: true, label: "z", min: -10, max: 10, step: 0.1, fmt: (v) => v.toFixed(2), get: () => S.points[i].z, set: (v) => { S.points[i].z = v; } },
+          { light: true, label: "intensity", min: 0, max: 3, step: 0.05, fmt: (v) => v.toFixed(2), get: () => S.points[i].intensity, set: (v) => { S.points[i].intensity = v; } },
+          { light: true, color: true, label: "color", get: () => S.points[i].color, set: (v) => { S.points[i].color = v; } },
+        ]),
         { sec: "Shadow" },
         { k: ["shadow", "opacity"], min: 0, max: 1, step: 0.01, fmt: (v) => v.toFixed(2) },
         { sec: "Camera" },
@@ -1618,7 +1631,9 @@
           inp.style.height = "20px";
           inp.style.border = "1px solid #cbd5e1";
           inp.style.background = "#fff";
-          inp.value = S[r.k[0]][r.k[1]];
+          const cGet = r.get ?? (() => S[r.k[0]][r.k[1]]);
+          const cSet = r.set ?? ((v) => { S[r.k[0]][r.k[1]] = v; });
+          inp.value = cGet();
           let dragging = false;
           let endTimer = null;
           const finalize = () => {
@@ -1634,7 +1649,7 @@
           inp.addEventListener("pointerup", finalize);
           inp.addEventListener("change", finalize);
           inp.addEventListener("input", () => {
-            S[r.k[0]][r.k[1]] = inp.value;
+            cSet(inp.value);
             const lightsChanged = !dragging && S.lighting === "baked";
             update(lightsChanged);
           });
@@ -1642,27 +1657,47 @@
           p.appendChild(row);
           continue;
         }
+        if (r.check) {
+          // Boolean toggle (point-light on / castShadow). Commits immediately
+          // and re-bakes in baked mode (a light enable/disable changes shading).
+          const row = document.createElement("div"); row.className = "row";
+          const lab = document.createElement("label");
+          lab.textContent = r.label ?? r.k.join(".");
+          row.appendChild(lab);
+          const inp = document.createElement("input");
+          inp.type = "checkbox";
+          inp.style.gridColumn = "2 / span 2";
+          inp.style.justifySelf = "start";
+          inp.checked = !!r.get();
+          inp.addEventListener("change", () => {
+            r.set(inp.checked);
+            update(S.lighting === "baked");
+          });
+          row.appendChild(inp);
+          p.appendChild(row);
+          continue;
+        }
         const row = document.createElement("div"); row.className = "row";
         const lab = document.createElement("label");
-        lab.textContent = r.obj ? r.k[1] : r.k.join(".");
+        lab.textContent = r.label ?? (r.obj ? r.k[1] : r.k.join("."));
         row.appendChild(lab);
         const inp = document.createElement("input");
         inp.type = "range"; inp.min = r.min; inp.max = r.max; inp.step = r.step;
         // Object-transform rows read S.obj[S.mesh][field] so the slider
-        // value follows the active mesh; everything else reads its own
-        // [section][field] directly.
-        const getVal = r.obj ? () => S.obj[S.mesh][r.k[1]] : () => S[r.k[0]][r.k[1]];
-        const setVal = r.obj ? (v) => { S.obj[S.mesh][r.k[1]] = v; } : (v) => { S[r.k[0]][r.k[1]] = v; };
+        // value follows the active mesh; point-light rows pass explicit
+        // get/set; everything else reads its own [section][field] directly.
+        const getVal = r.get ? r.get : (r.obj ? () => S.obj[S.mesh][r.k[1]] : () => S[r.k[0]][r.k[1]]);
+        const setVal = r.set ? r.set : (r.obj ? (v) => { S.obj[S.mesh][r.k[1]] = v; } : (v) => { S[r.k[0]][r.k[1]] = v; });
         inp.value = getVal();
         const val = document.createElement("span"); val.className = "val"; val.textContent = r.fmt(getVal());
         if (r.obj) objectRowRefreshers.push(() => { const v = getVal(); inp.value = v; val.textContent = r.fmt(v); });
         // Light-direction sliders (dir.x/y/z) also need a refresher hook
         // so the gizmo drag can sync the slider UI as the user drags the
         // light marker around in 3D.
-        if (r.k[0] === "dir" && (r.k[1] === "x" || r.k[1] === "y" || r.k[1] === "z")) {
+        if (r.k?.[0] === "dir" && (r.k[1] === "x" || r.k[1] === "y" || r.k[1] === "z")) {
           lightSliderRefreshers.push(() => { const v = getVal(); inp.value = v; val.textContent = r.fmt(v); });
         }
-        const isLightSlider = (r.k[0] === "dir" || r.k[0] === "amb");
+        const isLightSlider = (r.light === true || r.k?.[0] === "dir" || r.k?.[0] === "amb");
         // Baked mode is treated as truly static: while a light slider is
         // being dragged, the meshes don't repaint. A single rebake fires
         // 150ms after the last input event so the final state lands on

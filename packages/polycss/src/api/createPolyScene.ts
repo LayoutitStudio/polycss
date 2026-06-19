@@ -983,10 +983,20 @@ export function createPolyScene(
     // Shadow-casting point lights, converted to CSS-frame positions. Only
     // lights with castShadow:true project (Three.js parity); shading-only
     // point lights never reach the shadow path.
-    const shadowPointLights = (currentOptions.pointLights ?? []).filter((pl) => pl.castShadow);
-    const cssPointPositions = shadowPointLights.map((pl) => worldPositionToCss(pl.position));
+    // ALL point lights in CSS frame — the shaded shadow color needs every
+    // light that illuminates the receiver (even non-casters), minus the one
+    // being shadowed. `shadowPointIndices` are the entries that cast.
+    const allPointLightsCss = (currentOptions.pointLights ?? []).map((pl) => ({
+      position: worldPositionToCss(pl.position),
+      color: pl.color,
+      intensity: pl.intensity,
+    }));
+    const shadowPointIndices = (currentOptions.pointLights ?? [])
+      .map((pl, i) => (pl.castShadow ? i : -1))
+      .filter((i) => i >= 0);
+    const cssPointPositions = shadowPointIndices.map((i) => allPointLightsCss[i]!.position);
     const runDirectionalShadow =
-      !!currentOptions.directionalLight?.direction || shadowPointLights.length === 0;
+      !!currentOptions.directionalLight?.direction || shadowPointIndices.length === 0;
     const dirKey = quantizeLightDirKey(lightDir);
     // Fold point-light positions into the short-circuit key so moving (or
     // toggling) a shadow point light re-emits even when the directional
@@ -1067,22 +1077,21 @@ export function createPolyScene(
       // ONLY point shadow lights skips this so no phantom default-sun shadow
       // appears.
       if (runDirectionalShadow) {
-        emitReceiverShadowsImpl(ctx, casters, dedupByCaster, receiver, dedup, lightDir, r, g, b, shadowOpacity);
+        emitReceiverShadowsImpl(ctx, casters, dedupByCaster, receiver, dedup, lightDir, r, g, b, shadowOpacity, undefined, "", allPointLightsCss, undefined);
       } else {
         // Ensure any directional SVGs from a prior tick are cleared.
-        emitReceiverShadowsImpl(ctx, [], dedupByCaster, receiver, dedup, lightDir, r, g, b, shadowOpacity);
+        emitReceiverShadowsImpl(ctx, [], dedupByCaster, receiver, dedup, lightDir, r, g, b, shadowOpacity, undefined, "", allPointLightsCss, undefined);
       }
       // One radial pass per shadow-casting point light. Each light projects
       // into its own SVG namespace ("p0".."pN") so overlapping shadows stack
-      // independently — a point in shadow from two lights reads as darker,
-      // matching multi-shadow-map occlusion. `lightDir` here is only used for
-      // the textured-receiver opacity ratio; the radial projection uses the
-      // CSS-frame `lightPos`.
+      // independently. The shaded fill shows the receiver lit by every OTHER
+      // light, so a spot blocked from this light keeps the others' color.
       for (let li = 0; li < cssPointPositions.length; li++) {
         emitReceiverShadowsImpl(
           ctx, casters, dedupByCaster, receiver, dedup,
           lightDir, r, g, b, shadowOpacity,
           cssPointPositions[li], `p${li}`,
+          allPointLightsCss, shadowPointIndices[li],
         );
       }
     }

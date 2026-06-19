@@ -122,6 +122,10 @@ export function emitReceiverShadows(
   lightPos?: Vec3,
   /** Per-light SVG-mount namespace ("" = directional). */
   lightKey = "",
+  /** All scene point lights (CSS-frame positions) for the shaded shadow color. */
+  allPointLights?: ReadonlyArray<{ position: Vec3; color?: string; intensity?: number }>,
+  /** Index in `allPointLights` of the light this pass shadows (point pass only). */
+  thisPointIndex?: number,
 ): void {
   const options = ctx.options.current;
   const { receiverShadowCache, receiverShadowCacheKey, casterItemsCache, casterItemsCacheKey } = ctx;
@@ -237,6 +241,8 @@ export function emitReceiverShadows(
     casters: casterInputs,
     lightDir,
     lightPos,
+    allPointLights,
+    thisPointIndex,
     cameraRot,
     ambientLight: options.ambientLight,
     directionalLight: options.directionalLight,

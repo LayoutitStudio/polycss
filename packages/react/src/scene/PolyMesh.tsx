@@ -982,12 +982,22 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
     // Shadow-casting point lights, converted to CSS-frame absolute positions
     // (same world-CSS frame as the caster/receiver vertices). Only lights with
     // castShadow:true project (Three.js parity). Mirrors vanilla emitSceneShadows.
-    const shadowPointLights = (sceneCtx?.pointLights ?? []).filter((pl) => pl.castShadow);
-    const cssPointPositions = shadowPointLights.map((pl) => worldPositionToCss(pl.position));
+    // ALL point lights in CSS frame — the shaded shadow color needs every
+    // light that illuminates the receiver (even non-casters), minus the one
+    // being shadowed. `shadowPointIndices` are the entries that cast.
+    const allPointLightsCss = (sceneCtx?.pointLights ?? []).map((pl) => ({
+      position: worldPositionToCss(pl.position),
+      color: pl.color,
+      intensity: pl.intensity,
+    }));
+    const shadowPointIndices = (sceneCtx?.pointLights ?? [])
+      .map((pl, i) => (pl.castShadow ? i : -1))
+      .filter((i) => i >= 0);
+    const cssPointPositions = shadowPointIndices.map((i) => allPointLightsCss[i]!.position);
     // Directional pass runs when a directional light is configured, or — to
     // preserve the implicit-sun shadow — when there are no point shadow lights.
-    const runDirectionalShadow = !!sceneDirectionalLight?.direction || shadowPointLights.length === 0;
-    const hasShadowPoints = shadowPointLights.length > 0;
+    const runDirectionalShadow = !!sceneDirectionalLight?.direction || shadowPointIndices.length === 0;
+    const hasShadowPoints = shadowPointIndices.length > 0;
     const shadowLift = sceneShadow?.lift ?? 0.001;
     const planes = prepareReceiverFacePlanes(
       polygons,
@@ -1064,6 +1074,7 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
       lightKey: string,
       passLightDir: Vec3,
       lightPos: Vec3 | undefined,
+      thisPointIndex: number | undefined,
     ): ReactNode[] => {
       const specs = computeReceiverShadowFaces<symbol>({
         receiverPlanes: planes,
@@ -1072,6 +1083,8 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
         casters: casterInputs,
         lightDir: passLightDir,
         lightPos,
+        allPointLights: allPointLightsCss,
+        thisPointIndex,
         cameraRot,
         ambientLight: sceneCtx?.ambientLight,
         directionalLight: sceneDirectionalLight,
@@ -1116,9 +1129,9 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
       ));
     };
     const nodes: ReactNode[] = [];
-    if (runDirectionalShadow) nodes.push(...runPass("d", lightDir, undefined));
+    if (runDirectionalShadow) nodes.push(...runPass("d", lightDir, undefined, undefined));
     for (let li = 0; li < cssPointPositions.length; li++) {
-      nodes.push(...runPass(`p${li}`, lightDir, cssPointPositions[li]));
+      nodes.push(...runPass(`p${li}`, lightDir, cssPointPositions[li], shadowPointIndices[li]));
     }
     return <>{nodes}</>;
   }, [receiveShadow, shadowCasters, shadowCastersVersion, polygons, position, scale, rotation, sceneDirectionalLight, sceneCtx?.pointLights, sceneShadow, sceneCtx?.ambientLight, cameraCtx?.store, cameraTick, selfShadowEdgeMap]);

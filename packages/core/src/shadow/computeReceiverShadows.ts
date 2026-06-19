@@ -451,6 +451,16 @@ export interface ComputeReceiverShadowFacesInput<T = unknown> {
    *  shadow projection becomes radial (per-vertex direction from the light)
    *  and the silhouette fast path is disabled (facing is per-polygon). */
   lightPos?: Vec3;
+  /** Every point light in the scene (CSS-frame absolute positions), used to
+   *  compute the SHADED shadow color — a shadow shows the receiver lit by all
+   *  lights EXCEPT the blocked one, so a spot shadowed from one colored light
+   *  still shows the others' color (Three.js parity). Includes non-shadow-
+   *  casting lights, since they still illuminate the shadowed region. */
+  allPointLights?: ReadonlyArray<{ position: Vec3; color?: string; intensity?: number }>;
+  /** For a point-light pass, the index into `allPointLights` of the light
+   *  being shadowed (excluded from the remaining-light fill). Undefined for
+   *  the directional pass (which instead excludes the directional light). */
+  thisPointIndex?: number;
   /** Camera cull rotation (rotX/rotY + receiver mesh rotation) so back-
    *  facing receiver faces can be skipped. */
   cameraRot: CameraCullRotation;
@@ -472,7 +482,8 @@ export function computeReceiverShadowFaces<T = unknown>(
 ): ReceiverShadowFaceSpec<T>[] {
   const {
     receiverPlanes, receiverPolygons, receiverHasTexture, casters,
-    lightDir, lightPos, cameraRot, ambientLight, directionalLight, shadow,
+    lightDir, lightPos, allPointLights, thisPointIndex,
+    cameraRot, ambientLight, directionalLight, shadow,
   } = input;
 
   const llen = Math.hypot(lightDir[0], lightDir[1], lightDir[2]) || 1;
@@ -496,8 +507,16 @@ export function computeReceiverShadowFaces<T = unknown>(
   const ambColor = ambientLight?.color ?? "#ffffff";
   const ambIntensity = ambientLight?.intensity ?? 0.4;
   const dirIntensity = directionalLight?.intensity ?? 1;
+  const dirColor = directionalLight?.color ?? "#ffffff";
   const userShadowColor = shadow?.color ?? "#000000";
   const opacity = shadow?.opacity ?? 0.25;
+  // This pass excludes one light from the receiver's lit color: the directional
+  // light when it's the directional pass (no lightPos), else the point light at
+  // `thisPointIndex`. The shadow then paints the "remaining light" color so a
+  // region blocked from one colored light still shows the others (Three.js
+  // colored shadows). A lone directional light → remaining = ambient only,
+  // identical to the previous flat fill (no regression).
+  const isDirPass = !isPoint;
   // `maxExtend` ("shadow reach") caps how far a shadow can stretch beyond
   // the caster's perpendicular footprint on the receiver plane — matches
   // the semantic already applied in groundShadow.ts to the infinite-ground
@@ -659,6 +678,25 @@ export function computeReceiverShadowFaces<T = unknown>(
     // Camera back-face cull. SVGs don't honor CSS backface-visibility
     // reliably, so a back-of-camera receiver-face SVG would still paint.
     if (!normalFacesCamera(n, cameraOnlyRot)) continue;
+
+    // Per-face light scalars for the SHADED shadow color. `dirDot` is the
+    // directional Lambert term (always vs the directional vector, not the
+    // pass's faceDir). Point dots come from each light's to-source direction.
+    const dirDot = Math.max(0, Lx * n[0] + Ly * n[1] + Lz * n[2]);
+    const pointDots: number[] = [];
+    let pointTotalScale = 0;
+    if (allPointLights) {
+      for (let k = 0; k < allPointLights.length; k++) {
+        const pl = allPointLights[k]!;
+        const dx = pl.position[0] - O[0];
+        const dy = pl.position[1] - O[1];
+        const dz = pl.position[2] - O[2];
+        const len = Math.hypot(dx, dy, dz) || 1;
+        const dot = Math.max(0, (dx / len) * n[0] + (dy / len) * n[1] + (dz / len) * n[2]);
+        pointDots[k] = dot;
+        pointTotalScale += (pl.intensity ?? 1) * dot;
+      }
+    }
 
     const planeDist = (w: Vec3): number =>
       (w[0] - O[0]) * n[0] + (w[1] - O[1]) * n[1] + (w[2] - O[2]) * n[2];
@@ -947,29 +985,48 @@ export function computeReceiverShadowFaces<T = unknown>(
 
     if (totalClipped === 0 || !(width > 0) || !(height > 0)) continue;
 
-    // Per-group opacity for textured receivers. Three.js darkens linearly:
-    // shadow_linear = lit_linear × ambient/(direct + ambient). CSS opacity
-    // blends in sRGB, so apply a gamma-2.4 approximation to match.
+    // Intensity removed by THIS pass (the blocked light) and the scene total.
+    const thisScale = isDirPass
+      ? dirIntensity * dirDot
+      : (allPointLights?.[thisPointIndex ?? -1]?.intensity ?? 1) * (pointDots[thisPointIndex ?? -1] ?? 0);
+    const totalScale = dirIntensity * dirDot + pointTotalScale + Math.max(0, ambIntensity);
+
+    // Per-group opacity for textured receivers. The shadow leaves the receiver
+    // lit by everything EXCEPT this pass's light: shadow_linear =
+    // lit_linear × remaining/total. A black overlay at sRGB opacity o gives
+    // lit_srgb × (1 − o), so o = 1 − (remaining/total)^(1/2.4). For a lone
+    // directional light remaining = ambient, matching the previous formula.
     let effOp = opacity;
     if (receiverHasTexture) {
-      const direct = dirIntensity * Math.max(0, Ldotn);
-      const total = direct + Math.max(0, ambIntensity);
-      if (total > 0) {
-        const ratioLinear = Math.max(0, ambIntensity) / total;
-        const ratioSrgb = Math.pow(ratioLinear, 1 / 2.4);
-        effOp = opacity * (1 - ratioSrgb);
+      if (totalScale > 0) {
+        const remainingRatio = Math.max(0, (totalScale - thisScale) / totalScale);
+        effOp = opacity * (1 - Math.pow(remainingRatio, 1 / 2.4));
       } else {
         effOp = 0;
       }
     }
 
     // Per-face shadow tint. Each receiver face uses ITS OWN polygon color
-    // for the ambient-only fill (one material per coplanar group).
+    // (one material per coplanar group). The fill is the receiver lit by
+    // every light EXCEPT this pass's blocked light — so a region shadowed
+    // from one colored light still shows the others' color. A lone
+    // directional light → remaining = ambient only (unchanged from before).
     const groupPolyIdx = group.memberPolyIndices[0] ?? 0;
     const groupColor = receiverPolygons[groupPolyIdx]?.color ?? "#cccccc";
+    const remDirScale = isDirPass ? 0 : dirIntensity * dirDot;
+    const remPointContribs: { color: string; scale: number }[] = [];
+    if (allPointLights) {
+      for (let k = 0; k < allPointLights.length; k++) {
+        if (isPoint && k === thisPointIndex) continue;
+        const dot = pointDots[k] ?? 0;
+        if (dot <= 0) continue;
+        const pl = allPointLights[k]!;
+        remPointContribs.push({ color: pl.color ?? "#ffffff", scale: (pl.intensity ?? 1) * dot });
+      }
+    }
     const fillColor = receiverHasTexture
       ? userShadowColor
-      : shadePolygon(groupColor, 0, "#000000", ambColor, ambIntensity);
+      : shadePolygon(groupColor, remDirScale, dirColor, ambColor, ambIntensity, remPointContribs);
 
     // Tight shadow-content bbox in (u, v). The receiver face outline can be
     // huge (e.g. a 17500×17500 CSS-px floor at world units × BASE_TILE), but
