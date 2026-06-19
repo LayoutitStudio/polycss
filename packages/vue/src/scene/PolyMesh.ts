@@ -320,6 +320,7 @@ export const PolyMesh = defineComponent({
     // Always forward the scene's lights to atlas plan, including in dynamic
     // mode (vanilla parity — see React PolyMesh comment).
     const atlasDirectional = computed(() => sceneCtx?.value.directionalLight);
+    const atlasPointLights = computed(() => sceneCtx?.value.pointLights);
     const atlasAmbient = computed(() => sceneCtx?.value.ambientLight);
     // voxelSource comes from useMesh (when src is set) OR from the prop
     // (when polygons array is provided directly). Vanilla scene.add receives
@@ -382,6 +383,28 @@ export const PolyMesh = defineComponent({
       return { ...cssLight, direction: inverseRotateVec3(cssLight.direction, bakedRotation.value) };
     });
 
+    // Point lights converted to mesh-local USER coords (plan.ts applies the
+    // CSS x↔y swap). Mirrors bakedDirectional + vanilla's
+    // localPointLightsForEntry: subtract mesh position, then inverse-rotate
+    // into the mesh's local frame so per-face Lambert matches the rendered
+    // orientation.
+    const bakedPointLights = computed(() => {
+      const pls = atlasPointLights.value;
+      if (!pls || pls.length === 0) return undefined;
+      const pos = (props.position ?? [0, 0, 0]) as Vec3;
+      const rot = bakedRotation.value ?? ([0, 0, 0] as Vec3);
+      const hasRot = rot[0] !== 0 || rot[1] !== 0 || rot[2] !== 0;
+      return pls.map((pl) => {
+        const rel: Vec3 = [
+          pl.position[0] - pos[0],
+          pl.position[1] - pos[1],
+          pl.position[2] - pos[2],
+        ];
+        const local = hasRot ? inverseRotateVec3(rel, rot) : rel;
+        return { ...pl, position: local };
+      });
+    });
+
     // Per-light occlusion raytrace (task #121) used to mark polygons in
     // ray-traced shadow with `directScale=0` so they baked at ambient-only.
     // Three.js doesn't bake shadow into the diffuse atlas — the real shadow
@@ -417,6 +440,7 @@ export const PolyMesh = defineComponent({
           i,
           {
             directionalLight: bakedDirectional.value,
+            pointLights: bakedPointLights.value,
             ambientLight: atlasAmbient.value,
             seamBleed: seamBleedEdges?.has(i) ? atlasSeamBleed.value : undefined,
             seamEdges: seamBleedEdges?.get(i),

@@ -23,6 +23,7 @@ import type { PropType } from "vue";
 import type {
   Polygon,
   PolyDirectionalLight,
+  PolyPointLight,
   PolyAmbientLight,
   PolyTextureBackend,
   PolyTextureImageRendering,
@@ -72,6 +73,7 @@ export interface PolySceneProps {
   rotY?: number;
   zoom?: number;
   directionalLight?: PolyDirectionalLight;
+  pointLights?: PolyPointLight[];
   ambientLight?: PolyAmbientLight;
   textureLighting?: PolyTextureLightingMode;
   /** Atlas bitmap budget and CSS sprite size. `"auto"` (default) uses a
@@ -127,6 +129,10 @@ export const PolyScene = defineComponent({
     zoom: { type: Number },
     directionalLight: {
       type: Object as PropType<PolyDirectionalLight>,
+      default: undefined,
+    },
+    pointLights: {
+      type: Array as PropType<PolyPointLight[]>,
       default: undefined,
     },
     ambientLight: {
@@ -217,6 +223,7 @@ export const PolyScene = defineComponent({
     const sceneCtxValue = computed(() => ({
       textureLighting: props.textureLighting ?? "baked",
       directionalLight: props.directionalLight,
+      pointLights: props.pointLights,
       ambientLight: props.ambientLight,
       strategies: props.strategies,
       seamBleed: props.seamBleed ?? DEFAULT_SEAM_BLEED,
@@ -314,6 +321,9 @@ export const PolyScene = defineComponent({
       const dynamic = props.textureLighting === "dynamic";
       const directionalForAtlas = dynamic ? undefined : props.directionalLight;
       const ambientForAtlas = dynamic ? undefined : props.ambientLight;
+      // Scene-level polygons sit at world origin, so point lights pass through
+      // in world coords. Baked-mode only.
+      const pointLightsForAtlas = dynamic ? undefined : props.pointLights;
       const repairEdges = buildTextureEdgeRepairSets(sceneResult.value.polygons);
       const seamBleed = props.seamBleed ?? DEFAULT_SEAM_BLEED;
       const seamBleedEdges = seamBleed === "auto" || (
@@ -333,6 +343,7 @@ export const PolyScene = defineComponent({
           tileSize: polyContext.value.tileSize,
           layerElevation: polyContext.value.layerElevation,
           directionalLight: directionalForAtlas,
+          pointLights: pointLightsForAtlas,
           ambientLight: ambientForAtlas,
           seamBleed: seamBleedEdges?.has(i) ? seamBleed : undefined,
           seamEdges: seamBleedEdges?.get(i),

@@ -9,6 +9,7 @@ import { createContext, useContext } from "react";
 import type {
   PolyAmbientLight,
   PolyDirectionalLight,
+  PolyPointLight,
   PolyTextureBackend,
   PolyTextureImageRendering,
   PolyTextureLeafSizing,
@@ -52,6 +53,7 @@ export interface ShadowOptions {
 export interface PolySceneContextValue {
   textureLighting: PolyTextureLightingMode;
   directionalLight?: PolyDirectionalLight;
+  pointLights?: PolyPointLight[];
   ambientLight?: PolyAmbientLight;
   strategies?: PolyRenderStrategiesOption;
   seamBleed?: PolySeamBleed;

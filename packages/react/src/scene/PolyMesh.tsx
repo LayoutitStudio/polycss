@@ -643,6 +643,22 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
     };
   }, [effectiveDirectional, bakedRotation]);
 
+  // Point lights → mesh-local frame (subtract mesh position, inverse-rotate),
+  // mirroring vanilla's localPointLightsForEntry. The atlas plan applies the
+  // CSS axis-swap itself, so we pass mesh-local USER coords here.
+  const bakedPointLights = useMemo(() => {
+    const pls = sceneCtx?.pointLights;
+    if (!pls || pls.length === 0) return undefined;
+    const pos = (position ?? [0, 0, 0]) as Vec3;
+    const rot = bakedRotation ?? ([0, 0, 0] as Vec3);
+    const hasRot = rot[0] !== 0 || rot[1] !== 0 || rot[2] !== 0;
+    return pls.map((pl) => {
+      const rel: Vec3 = [pl.position[0] - pos[0], pl.position[1] - pos[1], pl.position[2] - pos[2]];
+      const local = hasRot ? inverseRotateVec3(rel, rot) : rel;
+      return { ...pl, position: local };
+    });
+  }, [sceneCtx?.pointLights, position, bakedRotation]);
+
   // Per-light occlusion raytrace (task #121) used to mark polygons in
   // ray-traced shadow with `directScale=0` so they baked at ambient-only.
   // Three.js doesn't bake shadow into the diffuse atlas — the real shadow
@@ -680,6 +696,7 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
         i,
         {
           directionalLight: bakedDirectional,
+          pointLights: bakedPointLights,
           ambientLight: effectiveAmbient,
           seamBleed: seamBleedEdges?.has(i) ? effectiveSeamBleed : undefined,
           seamEdges: seamBleedEdges?.get(i),
@@ -689,7 +706,7 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
         basisHints[i],
       ));
     },
-    [renderPolygon, directVoxelEnabled, polygons, bakedDirectional, effectiveAmbient, effectiveSeamBleed, lightOccludedPolyIndices],
+    [renderPolygon, directVoxelEnabled, polygons, bakedDirectional, bakedPointLights, effectiveAmbient, effectiveSeamBleed, lightOccludedPolyIndices],
   );
   const textureAtlas = useTextureAtlas(
     atlasPlans,
