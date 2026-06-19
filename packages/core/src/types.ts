@@ -96,6 +96,30 @@ export interface PolyDirectionalLight {
 }
 
 /**
+ * Point light — radiates from a world-space position. Contributes per-face
+ * Lambert like a directional light, but the light direction is computed
+ * per polygon (face centroid → light position) rather than being global.
+ *
+ * DIRECTION-ONLY by design: there is no distance falloff (no `decay`/
+ * `distance`). A point light differs from a directional light only in that
+ * its direction varies per face. To emulate in three.js for parity, use
+ * `new THREE.PointLight(color, intensity, 0, 0)` (distance 0, decay 0 →
+ * no attenuation). Shading is flat per face (the centroid direction), so it
+ * approximates three.js's per-fragment gradient — exact for small faces /
+ * distant lights, never a CSS gradient.
+ */
+export interface PolyPointLight {
+  /** World-space position the light radiates from. */
+  position: Vec3;
+  /** Light tint, hex string. White by default. */
+  color?: string;
+  /** Scalar multiplier on the contribution. Default 1. */
+  intensity?: number;
+  /** When true, this light casts shadows (radial projection). Default false. */
+  castShadow?: boolean;
+}
+
+/**
  * Ambient light — uniform fill that adds to every polygon regardless of
  * orientation. Mirrors three.js's `AmbientLight`. Decoupled from the
  * directional contribution: the two add independently rather than

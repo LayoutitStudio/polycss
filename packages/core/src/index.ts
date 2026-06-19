@@ -21,6 +21,7 @@ export type {
   Polygon,
   PolyMaterial,
   PolyDirectionalLight,
+  PolyPointLight,
   PolyAmbientLight,
   PolyTextureLightingMode,
   MeshResolution,

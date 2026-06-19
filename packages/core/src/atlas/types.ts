@@ -320,6 +320,10 @@ export interface SolidTrianglePlanOptions {
   tileSize?: number;
   layerElevation?: number;
   directionalLight?: import("../types").PolyDirectionalLight;
+  /** Point lights in MESH-LOCAL frame (renderer pre-transforms each scene
+   *  point light by inverse-rotate(worldPos - meshPos) so positions match
+   *  the local cssPoints frame). Direction-only, per-face Lambert. */
+  pointLights?: import("../types").PolyPointLight[];
   ambientLight?: import("../types").PolyAmbientLight;
   textureLighting?: import("../types").PolyTextureLightingMode;
   solidPaintDefaults?: SolidPaintDefaults;
@@ -354,6 +358,10 @@ export interface ComputeTextureAtlasPlanOptions {
   tileSize?: number;
   layerElevation?: number;
   directionalLight?: import("../types").PolyDirectionalLight;
+  /** Point lights in MESH-LOCAL frame (renderer pre-transforms each scene
+   *  point light by inverse-rotate(worldPos - meshPos) so positions match
+   *  the local cssPoints frame). Direction-only, per-face Lambert. */
+  pointLights?: import("../types").PolyPointLight[];
   ambientLight?: import("../types").PolyAmbientLight;
   /** Shared-edge set returned by {@link buildTextureEdgeRepairSets}. */
   textureEdgeRepairEdges?: Set<number>;

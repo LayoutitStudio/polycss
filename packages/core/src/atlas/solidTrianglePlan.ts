@@ -34,6 +34,7 @@ import {
   offsetStableTrianglePoints,
   stableTriangleMatrixDecimals,
 } from "./solidTriangle";
+import { computePointContribs } from "./plan";
 import {
   resolveSeamBleed,
   safePlanSeamBleedAmount,
@@ -95,7 +96,16 @@ export function computeSolidTriangleColorPlanFromNormal(
     const directScale = occluded
       ? 0
       : lightIntensity * Math.max(0, nx * lx + ny * ly + nz * lz);
-    const shadedColorRaw = shadePolygon(baseColor, directScale, lightColor, ambientColor, ambientIntensity);
+    const ptTile = options.tileSize ?? DEFAULT_TILE;
+    const ptElev = options.layerElevation ?? ptTile;
+    const pointContribs = computePointContribs(
+      options.pointLights,
+      cssPoints(polygon.vertices, ptTile, ptElev),
+      [nx, ny, nz],
+      ptTile,
+      ptElev,
+    );
+    const shadedColorRaw = shadePolygon(baseColor, directScale, lightColor, ambientColor, ambientIntensity, pointContribs);
     const textureLighting = options.textureLighting ?? "baked";
     const shadedColor = textureLighting === "baked" && internalOptions.stableTriangleColorSteps
       ? quantizeCssColor(shadedColorRaw, internalOptions.stableTriangleColorSteps)
