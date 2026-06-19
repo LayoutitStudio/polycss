@@ -78,6 +78,7 @@ import {
   quantizeNormalKey,
   worldDirectionToCss,
   worldDirectionalLightToCss,
+  worldPositionToCss,
 } from "./scene/transforms";
 import {
   shadowOptsEqual,
@@ -979,7 +980,21 @@ export function createPolyScene(
     // frame. invalidateShadowLightCache() is called by every code path that
     // mutates caster/receiver geometry or shadow appearance, so a cache hit
     // here means "same light, same scene → previous SVG content is still valid".
-    const lightKey = quantizeLightDirKey(lightDir);
+    // Shadow-casting point lights, converted to CSS-frame positions. Only
+    // lights with castShadow:true project (Three.js parity); shading-only
+    // point lights never reach the shadow path.
+    const shadowPointLights = (currentOptions.pointLights ?? []).filter((pl) => pl.castShadow);
+    const cssPointPositions = shadowPointLights.map((pl) => worldPositionToCss(pl.position));
+    const runDirectionalShadow =
+      !!currentOptions.directionalLight?.direction || shadowPointLights.length === 0;
+    const dirKey = quantizeLightDirKey(lightDir);
+    // Fold point-light positions into the short-circuit key so moving (or
+    // toggling) a shadow point light re-emits even when the directional
+    // vector is unchanged.
+    const pointKey = cssPointPositions
+      .map((p) => `${Math.round(p[0])},${Math.round(p[1])},${Math.round(p[2])}`)
+      .join(";");
+    const lightKey = dirKey === null && pointKey === "" ? null : `${dirKey ?? ""}|${pointKey}`;
     if (lightKey !== null && lightKey === lastEmittedShadowLightKey) return;
 
     // Per-caster shadow dedup (independent meshes can't dedup against
@@ -1045,7 +1060,31 @@ export function createPolyScene(
     hideGroundShadow();
     for (const receiver of meshes) {
       if (receiver.disposed || !receiver.receiveShadow) continue;
-      emitReceiverShadowsImpl(ctx, casters, dedupByCaster, receiver, dedupByReceiver.get(receiver) ?? new Set(), lightDir, r, g, b, shadowOpacity);
+      const dedup = dedupByReceiver.get(receiver) ?? new Set();
+      // Directional pass (mount namespace ""). Runs whenever a directional
+      // light is configured, or — to preserve the legacy implicit-sun
+      // shadow — when there are no shadow-casting point lights. A scene with
+      // ONLY point shadow lights skips this so no phantom default-sun shadow
+      // appears.
+      if (runDirectionalShadow) {
+        emitReceiverShadowsImpl(ctx, casters, dedupByCaster, receiver, dedup, lightDir, r, g, b, shadowOpacity);
+      } else {
+        // Ensure any directional SVGs from a prior tick are cleared.
+        emitReceiverShadowsImpl(ctx, [], dedupByCaster, receiver, dedup, lightDir, r, g, b, shadowOpacity);
+      }
+      // One radial pass per shadow-casting point light. Each light projects
+      // into its own SVG namespace ("p0".."pN") so overlapping shadows stack
+      // independently — a point in shadow from two lights reads as darker,
+      // matching multi-shadow-map occlusion. `lightDir` here is only used for
+      // the textured-receiver opacity ratio; the radial projection uses the
+      // CSS-frame `lightPos`.
+      for (let li = 0; li < cssPointPositions.length; li++) {
+        emitReceiverShadowsImpl(
+          ctx, casters, dedupByCaster, receiver, dedup,
+          lightDir, r, g, b, shadowOpacity,
+          cssPointPositions[li], `p${li}`,
+        );
+      }
     }
     lastEmittedShadowLightKey = lightKey;
   }
@@ -2203,7 +2242,10 @@ export function createPolyScene(
     const nextShadow = currentOptions.shadow;
     const shadowAppearanceChanged = partial.shadow !== undefined
       && !shadowOptsEqual(prevShadow, nextShadow);
-    const shadowReemitNeeded = lightDirChanged || shadowAppearanceChanged;
+    // Point-light changes also re-emit: the emit short-circuit key folds in
+    // each shadow point light's CSS position, so a moved/toggled point light
+    // produces a different key and re-projects its radial shadow.
+    const shadowReemitNeeded = lightDirChanged || shadowAppearanceChanged || pointLightsChanged;
     if (textureLightingChanged) {
       // Every mesh needs a full re-render to swap baked/dynamic leaf
       // emission. Baked leaves carry inline `color: rgb(...)`; dynamic

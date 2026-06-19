@@ -442,8 +442,15 @@ export interface ComputeReceiverShadowFacesInput<T = unknown> {
   receiverHasTexture: boolean;
   /** Per-caster items + caller id, in caller-defined order. */
   casters: ReceiverCasterInput<T>[];
-  /** Directional light vector in CSS frame. */
+  /** Light direction in CSS frame, pointing TOWARD the light (to-source).
+   *  For a point light this is a representative direction (used only for the
+   *  textured-receiver opacity ratio); per-vertex directions come from
+   *  `lightPos`. */
   lightDir: Vec3;
+  /** When set, the light is a point light at this CSS-frame position. The
+   *  shadow projection becomes radial (per-vertex direction from the light)
+   *  and the silhouette fast path is disabled (facing is per-polygon). */
+  lightPos?: Vec3;
   /** Camera cull rotation (rotX/rotY + receiver mesh rotation) so back-
    *  facing receiver faces can be skipped. */
   cameraRot: CameraCullRotation;
@@ -465,13 +472,27 @@ export function computeReceiverShadowFaces<T = unknown>(
 ): ReceiverShadowFaceSpec<T>[] {
   const {
     receiverPlanes, receiverPolygons, receiverHasTexture, casters,
-    lightDir, cameraRot, ambientLight, directionalLight, shadow,
+    lightDir, lightPos, cameraRot, ambientLight, directionalLight, shadow,
   } = input;
 
   const llen = Math.hypot(lightDir[0], lightDir[1], lightDir[2]) || 1;
   const Lx = lightDir[0] / llen;
   const Ly = lightDir[1] / llen;
   const Lz = lightDir[2] / llen;
+  // Per-point to-source direction. Directional lights ignore the argument
+  // and return the constant `[Lx, Ly, Lz]` so the directional code path is
+  // byte-identical; point lights return the normalized vector from the
+  // shading point toward the light position.
+  const isPoint = !!lightPos;
+  const dirAt = isPoint
+    ? (p: Vec3): Vec3 => {
+        const dx = lightPos![0] - p[0];
+        const dy = lightPos![1] - p[1];
+        const dz = lightPos![2] - p[2];
+        const len = Math.hypot(dx, dy, dz) || 1;
+        return [dx / len, dy / len, dz / len];
+      }
+    : (_p: Vec3): Vec3 => [Lx, Ly, Lz];
   const ambColor = ambientLight?.color ?? "#ffffff";
   const ambIntensity = ambientLight?.intensity ?? 0.4;
   const dirIntensity = directionalLight?.intensity ?? 1;
@@ -507,6 +528,35 @@ export function computeReceiverShadowFaces<T = unknown>(
   // Clean closed meshes keep single-sided casting (correct + cheaper).
   const doubleSidedByCaster: boolean[] = new Array(casters.length).fill(false);
   const silhouetteByCaster: Array<Vec3[][] | null> = casters.map((casterEntry, casterIdx) => {
+    // Point lights: project the caster SILHOUETTE (its outline as seen from
+    // the light), not individual back-faces. An object resting on the
+    // receiver casts a FILLED contact shadow; the per-poly back-face union
+    // only produces a thin frame (side faces are edge-on to an overhead
+    // light, the contact face is coplanar and culled), leaving the interior
+    // unshadowed. Facing is per-polygon here (each face's normal vs the
+    // direction to the light position), unlike the directional constant.
+    if (isPoint) {
+      if (casterEntry.selfShadowEdgeMap) { doubleSidedByCaster[casterIdx] = true; return null; }
+      const edgeOwners = casterEntry.edgeOwners;
+      if (!edgeOwners) return null;
+      const N = casterEntry.casterPolygonCount ?? 0;
+      if (N === 0) return null;
+      const facing: boolean[] = new Array(N).fill(true);
+      for (const item of casterEntry.items) {
+        if (item.polygonIndex >= N) continue;
+        const nrm = item.planeN;
+        if (!nrm) { facing[item.polygonIndex] = true; continue; }
+        let cx = 0, cy = 0, cz = 0;
+        for (const w of item.wv) { cx += w[0]; cy += w[1]; cz += w[2]; }
+        const inv = item.wv.length > 0 ? 1 / item.wv.length : 0;
+        const d = dirAt([cx * inv, cy * inv, cz * inv]);
+        // Caster (inside silhouette) when the normal points away from the
+        // light, matching classifyFacing's directional convention.
+        facing[item.polygonIndex] = nrm[0] * d[0] + nrm[1] * d[1] + nrm[2] * d[2] < -1e-6;
+      }
+      if (!silhouetteReliable(edgeOwners, facing)) { doubleSidedByCaster[casterIdx] = true; return null; }
+      return extractSilhouetteLoops(edgeOwners, facing);
+    }
     const edgeOwners = casterEntry.edgeOwners;
     // Self-shadow (caster IS the receiver mesh): use the per-poly path AND
     // cast double-sided. Imported meshes have occluder faces that point away
@@ -600,8 +650,11 @@ export function computeReceiverShadowFaces<T = unknown>(
   const cameraOnlyRot: CameraCullRotation = { rotX: cameraRot.rotX, rotY: cameraRot.rotY };
   for (const group of receiverPlanes) {
     const { O, n, u, v, outlineUv, minU, minV, width, height } = group;
-    // Back-facing receiver face → can't receive light → skip.
-    const Ldotn = Lx * n[0] + Ly * n[1] + Lz * n[2];
+    // Back-facing receiver face → can't receive light → skip. For point
+    // lights the representative direction is the to-source vector at the
+    // face origin.
+    const faceDir = dirAt(O);
+    const Ldotn = faceDir[0] * n[0] + faceDir[1] * n[1] + faceDir[2] * n[2];
     if (Ldotn <= 1e-6) continue;
     // Camera back-face cull. SVGs don't honor CSS backface-visibility
     // reliably, so a back-of-camera receiver-face SVG would still paint.
@@ -617,10 +670,17 @@ export function computeReceiverShadowFaces<T = unknown>(
       const VmOx = w[0] - O[0];
       const VmOy = w[1] - O[1];
       const VmOz = w[2] - O[2];
-      const t = (VmOx * n[0] + VmOy * n[1] + VmOz * n[2]) / Ldotn;
-      const Px = w[0] - t * Lx;
-      const Py = w[1] - t * Ly;
-      const Pz = w[2] - t * Lz;
+      // Directional: constant to-source L, denom = Ldotn. Point: per-vertex
+      // to-source direction, denom = d·n. Clamp denom to a small positive so
+      // a grazing point-light vertex projects far (then gets reach/outline
+      // clipped) instead of dividing by ~0.
+      const d = isPoint ? dirAt(w) : ([Lx, Ly, Lz] as Vec3);
+      const denomRaw = isPoint ? d[0] * n[0] + d[1] * n[1] + d[2] * n[2] : Ldotn;
+      const denom = denomRaw > 1e-3 ? denomRaw : 1e-3;
+      const t = (VmOx * n[0] + VmOy * n[1] + VmOz * n[2]) / denom;
+      const Px = w[0] - t * d[0];
+      const Py = w[1] - t * d[1];
+      const Pz = w[2] - t * d[2];
       const dx = Px - O[0];
       const dy = Py - O[1];
       const dz = Pz - O[2];
@@ -765,7 +825,16 @@ export function computeReceiverShadowFaces<T = unknown>(
         // (grazing the light) still cast — they're the silhouette edge
         // of a closed mesh.
         if (item.planeN && !doubleSidedByCaster[casterIdx]) {
-          const cnDotL = item.planeN[0] * Lx + item.planeN[1] * Ly + item.planeN[2] * Lz;
+          let lx = Lx, ly = Ly, lz = Lz;
+          if (isPoint) {
+            // To-source direction from the caster polygon's centroid.
+            let cx = 0, cy = 0, cz = 0;
+            for (const w of item.wv) { cx += w[0]; cy += w[1]; cz += w[2]; }
+            const inv = item.wv.length > 0 ? 1 / item.wv.length : 0;
+            const d = dirAt([cx * inv, cy * inv, cz * inv]);
+            lx = d[0]; ly = d[1]; lz = d[2];
+          }
+          const cnDotL = item.planeN[0] * lx + item.planeN[1] * ly + item.planeN[2] * lz;
           if (cnDotL > -1e-6) continue;
         }
         // Coplanar caster skip.

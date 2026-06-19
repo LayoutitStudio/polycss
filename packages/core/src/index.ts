@@ -179,8 +179,10 @@ export {
   convexHull2D,
   ensureCcw2D,
   isBakedShadowCaster,
+  isPointShadowCaster,
   polygonSignedArea2D,
   projectCssVertexToGround,
+  projectCssVertexToGroundFromPoint,
 } from "./shadow/projection";
 export { clipPolygonToConvex2D } from "./shadow/clipping";
 export {

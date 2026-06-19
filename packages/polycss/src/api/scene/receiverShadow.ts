@@ -41,7 +41,11 @@ interface MountedFace {
   /** Last applied matrix3d string — only re-set on change to dodge style work. */
   matrixCss: string;
 }
-const mountedFacesByMesh = new WeakMap<MeshEntry, Map<number, MountedFace>>();
+// Mounts are namespaced per light so a directional pass and one pass per
+// shadow-casting point light can coexist on the same receiver mesh without
+// colliding on faceIndex. Outer key: a per-light identity ("" = directional,
+// "p0".."pN" = point lights). Inner key: faceIndex.
+const mountedFacesByMesh = new WeakMap<MeshEntry, Map<string, Map<number, MountedFace>>>();
 
 /** Cached shared-edge adjacency per mesh. Invalidated when the polygon
  *  array reference changes (cheap identity check, no deep diff). */
@@ -55,10 +59,30 @@ const sharedEdgeMapCacheKey = new WeakMap<MeshEntry, readonly unknown[]>();
 const edgeOwnersCache = new WeakMap<MeshEntry, ReadonlyMap<string, EdgeOwners>>();
 const edgeOwnersCacheKey = new WeakMap<MeshEntry, string>();
 
-function mountedFacesFor(entry: MeshEntry): Map<number, MountedFace> {
+function lightMapFor(entry: MeshEntry): Map<string, Map<number, MountedFace>> {
   let m = mountedFacesByMesh.get(entry);
   if (!m) { m = new Map(); mountedFacesByMesh.set(entry, m); }
   return m;
+}
+
+function mountedFacesFor(entry: MeshEntry, lightKey: string): Map<number, MountedFace> {
+  const byLight = lightMapFor(entry);
+  let m = byLight.get(lightKey);
+  if (!m) { m = new Map(); byLight.set(lightKey, m); }
+  return m;
+}
+
+/** Detach + clear every mounted face across every light namespace for a mesh. */
+function detachAllFaces(entry: MeshEntry): void {
+  const byLight = mountedFacesByMesh.get(entry);
+  if (!byLight) return;
+  for (const faces of byLight.values()) {
+    for (const face of faces.values()) {
+      if (face.svg && face.svg.parentNode) face.svg.parentNode.removeChild(face.svg);
+    }
+    faces.clear();
+  }
+  byLight.clear();
 }
 
 /**
@@ -69,12 +93,7 @@ function mountedFacesFor(entry: MeshEntry): Map<number, MountedFace> {
  * a receiver would linger in the DOM.
  */
 export function disposeReceiverShadowMounts(entry: MeshEntry): void {
-  const mounted = mountedFacesByMesh.get(entry);
-  if (!mounted) return;
-  for (const face of mounted.values()) {
-    if (face.svg && face.svg.parentNode) face.svg.parentNode.removeChild(face.svg);
-  }
-  mounted.clear();
+  detachAllFaces(entry);
   mountedFacesByMesh.delete(entry);
 }
 
@@ -98,6 +117,11 @@ export function emitReceiverShadows(
   lightDir: Vec3,
   _r: number, _g: number, _b: number,
   opacity: number,
+  /** When set, the light is a point light at this CSS-frame position; the
+   *  projection becomes radial. */
+  lightPos?: Vec3,
+  /** Per-light SVG-mount namespace ("" = directional). */
+  lightKey = "",
 ): void {
   const options = ctx.options.current;
   const { receiverShadowCache, receiverShadowCacheKey, casterItemsCache, casterItemsCacheKey } = ctx;
@@ -122,12 +146,8 @@ export function emitReceiverShadows(
     receiverShadowCache.set(receiverEntry, cachedPlanes);
     receiverShadowCacheKey.set(receiverEntry, cacheKey);
     // Reset mounted state when the plane list changes (face indices may
-    // have shifted). Detach any orphan SVGs.
-    const mounted = mountedFacesFor(receiverEntry);
-    for (const face of mounted.values()) {
-      if (face.svg && face.svg.parentNode) face.svg.parentNode.removeChild(face.svg);
-    }
-    mounted.clear();
+    // have shifted). Detach any orphan SVGs across every light namespace.
+    detachAllFaces(receiverEntry);
   }
 
   // Per-caster items.
@@ -176,8 +196,12 @@ export function emitReceiverShadows(
     // path. Skip on self-shadow (caster IS receiver — the per-poly path
     // is geometrically required there) and on tiny meshes (silhouette
     // overhead exceeds the per-poly cost below ~40 polys).
+    // Point-light passes always need edgeOwners: the radial shadow projects
+    // the caster silhouette (not per-face back-faces), so even small meshes
+    // (a 6-quad cube) require the outline. Directional keeps the ≥40-poly
+    // gate where the per-poly path is cheaper.
     let edgeOwners: ReadonlyMap<string, EdgeOwners> | undefined;
-    if (caster !== receiverEntry && caster.polygons.length >= 40) {
+    if (caster !== receiverEntry && (caster.polygons.length >= 40 || lightPos)) {
       let cachedOwners = edgeOwnersCache.get(caster);
       if (cachedOwners === undefined || edgeOwnersCacheKey.get(caster) !== ckey) {
         cachedOwners = prepareCasterEdgeOwners(
@@ -212,6 +236,7 @@ export function emitReceiverShadows(
     receiverHasTexture: hasTexture,
     casters: casterInputs,
     lightDir,
+    lightPos,
     cameraRot,
     ambientLight: options.ambientLight,
     directionalLight: options.directionalLight,
@@ -220,7 +245,7 @@ export function emitReceiverShadows(
 
   // Mount/update SVGs from specs. Faces NOT in specs (back-facing, no
   // shadow content, etc.) get hidden.
-  const mounted = mountedFacesFor(receiverEntry);
+  const mounted = mountedFacesFor(receiverEntry, lightKey);
   const seen = new Set<number>();
   for (const spec of specs) {
     seen.add(spec.faceIndex);
@@ -235,6 +260,7 @@ export function emitReceiverShadows(
       svg.setAttribute("class", "polycss-shadow polycss-shadow-svg polycss-shadow-receiver");
       if (options.debugShadowAttrs) {
         svg.setAttribute("data-poly-shadow-type", "receiver");
+        if (lightKey) svg.setAttribute("data-poly-shadow-light", lightKey);
         svg.setAttribute("data-poly-shadow-receiver", meshShadowId(receiverEntry));
         svg.setAttribute("data-poly-shadow-receiver-face", String(spec.faceIndex));
         svg.setAttribute("data-poly-shadow-receiver-polys", JSON.stringify(spec.memberPolyIndices));

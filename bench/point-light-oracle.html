@@ -154,8 +154,8 @@
       // Two point lights (world-space positions). Direction-only per-face
       // Lambert (no falloff) — emulated in three.js by PointLight(...,0,0).
       points: [
-        { x: qn("p0x", -4), y: qn("p0y", 4), z: qn("p0z", 5), intensity: qn("p0i", 1), color: qs("p0c", "#ff7755"), on: qs("p0", "1") !== "0" },
-        { x: qn("p1x", 5), y: qn("p1y", -3), z: qn("p1z", 4), intensity: qn("p1i", 1), color: qs("p1c", "#5599ff"), on: qs("p1", "1") !== "0" },
+        { x: qn("p0x", -4), y: qn("p0y", 4), z: qn("p0z", 5), intensity: qn("p0i", 1), color: qs("p0c", "#ff7755"), on: qs("p0", "1") !== "0", shadow: qs("sh0", "1") !== "0" },
+        { x: qn("p1x", 5), y: qn("p1y", -3), z: qn("p1z", 4), intensity: qn("p1i", 1), color: qs("p1c", "#5599ff"), on: qs("p1", "1") !== "0", shadow: qs("sh1", "1") !== "0" },
       ],
       amb:   { intensity: qn("ai", 0.3), color: qs("ac", "#ffffff") },
       shadow:{ opacity: qn("so", 1.0) },
@@ -164,6 +164,11 @@
       // shadow elements remain visible. Lets you compare shadow geometry
       // between engines without the mesh getting in the way.
       shadowsOnly: qs("sx", "0") === "1",
+      // Floor-only shadow comparison (see the shadowsOnly material swap):
+      // hides caster bodies in three so only the received floor shadow is
+      // masked. Use for convex casters where three's shadow-map self-shadows
+      // the body back-faces but PolyCSS (geometric) correctly does not.
+      floorOnly: qs("fo", "0") === "1",
       // "Self-shadow" toggle: when true, the active mesh receives shadows
       // onto its own faces (matches Three.js mesh.receiveShadow on the
       // mesh itself). When false, the mesh only casts onto the floor.
@@ -190,12 +195,26 @@
       autoCenter: qs("ax", "0") === "1",
     };
 
+    // Directional light for PolyCSS — omitted entirely when intensity ≤ 0 so
+    // its (intensity-independent) cast-shadow SVG doesn't appear while three.js
+    // shows nothing. Lets `di=0` isolate the point-light shadows for parity.
+    function polyDirectional() {
+      if (S.dir.intensity <= 0) return undefined;
+      return {
+        direction: [S.dir.x, S.dir.y, S.dir.z],
+        intensity: S.dir.intensity,
+        color: S.dir.color,
+        castShadow: true,
+      };
+    }
+
     // PolyCSS point lights (world positions) from enabled S.points.
     function polyPointLights() {
       return S.points.filter((p) => p.on).map((p) => ({
         position: [p.x, p.y, p.z],
         color: p.color,
         intensity: p.intensity,
+        castShadow: p.shadow,
       }));
     }
 
@@ -208,12 +227,7 @@
       // Bench-only: always emit data-poly-shadow-* attribution attrs so the
       // oracle diff can map mis-rendered pixels back to source polys.
       debugShadowAttrs: true,
-      directionalLight: {
-        direction: [S.dir.x, S.dir.y, S.dir.z],
-        intensity: S.dir.intensity,
-        color: S.dir.color,
-        castShadow: true,
-      },
+      directionalLight: polyDirectional(),
       pointLights: polyPointLights(),
       ambientLight: { color: S.amb.color, intensity: S.amb.intensity },
       // lift=0 so the shadow projects exactly onto the floor plane (z=0)
@@ -721,6 +735,13 @@
     // face, an accepted approximation). One per S.points entry.
     const threePointLights = S.points.map(() => {
       const pl = new THREE.PointLight(0xffffff, 1, 0, 0);
+      // Cube shadow map for the point light. near/far cover the bench scene;
+      // bias trims acne on the floor. PolyCSS projects radial SVG paths, so
+      // this is the parity oracle's reference shadow.
+      pl.shadow.mapSize.set(2048, 2048);
+      pl.shadow.camera.near = 0.1;
+      pl.shadow.camera.far = 200;
+      pl.shadow.bias = -0.0015;
       threeScene.add(pl);
       return pl;
     });
@@ -728,6 +749,7 @@
       S.points.forEach((p, i) => {
         const pl = threePointLights[i];
         pl.visible = !!p.on;
+        pl.castShadow = !!p.shadow;
         pl.position.set(p.x, p.y, p.z);
         pl.color.set(p.color);
         pl.intensity = p.intensity;
@@ -982,12 +1004,7 @@
       // 1-screen-pixel target lift = 1 / zoom world units.
       const shadowLift = 1 / Math.max(1, S.cam.zoom);
       polyScene.setOptions({
-        directionalLight: {
-          direction: [S.dir.x, S.dir.y, S.dir.z],
-          intensity: S.dir.intensity,
-          color: S.dir.color,
-          castShadow: true,
-        },
+        directionalLight: polyDirectional(),
         pointLights: polyPointLights(),
         ambientLight: { color: S.amb.color, intensity: S.amb.intensity },
         textureLighting: S.lighting,
@@ -1104,6 +1121,7 @@
     //     scene shows only the shadow-map contribution. Original
     //     materials are restored when the toggle is turned off.
     const _origThreeMats = new WeakMap();
+    const _origReceive = new WeakMap();
     function applyShadowsOnly() {
       for (const m of polyHost.querySelectorAll(".polycss-mesh")) {
         // display:none beats visibility:hidden here — leaves inside the
@@ -1200,14 +1218,32 @@
           path.after(wrap);
         }
       }
-      const threeObjs = [cubeMesh, eGroup, cottageGroup, castleGroup, coliseumGroup, appleGroup, flightGroup, extinguisherGroup, floorMesh].filter(Boolean);
+      const casterObjs = [cubeMesh, eGroup, cottageGroup, castleGroup, coliseumGroup, appleGroup, flightGroup, extinguisherGroup].filter(Boolean);
+      const threeObjs = [...casterObjs, floorMesh].filter(Boolean);
+      // Floor-only mode: in shadows-only, give caster BODIES an invisible
+      // material (still casts into the shadow map via the depth override) so
+      // only the floor's received shadow is compared. This excludes the
+      // shadow-MAP self-shadowing of convex caster back-faces, which PolyCSS's
+      // geometric projection correctly does not reproduce — otherwise those
+      // back-faces read as a false "missing shadow" hole. Off by default so
+      // self-shadow-on-body validation (concave meshes) still works.
+      const casterSet = new Set();
+      if (S.floorOnly) for (const c of casterObjs) c.traverse(o => casterSet.add(o));
       for (const obj of threeObjs) {
         obj.traverse(o => {
           if (!o.material) return;
           if (S.shadowsOnly) {
             if (!_origThreeMats.has(o)) _origThreeMats.set(o, o.material);
-            o.material = new THREE.ShadowMaterial({ color: 0x000000, opacity: S.shadow.opacity });
-            o.material.transparent = true;
+            if (casterSet.has(o)) {
+              // Floor-only: the caster body writes NO color (and no depth), so
+              // it's invisible and doesn't occlude the floor shadow behind it,
+              // while castShadow (shadow-map depth override) is untouched — it
+              // still casts. Only the floor's received shadow reaches the mask.
+              o.material = new THREE.MeshBasicMaterial({ colorWrite: false, depthWrite: false });
+            } else {
+              o.material = new THREE.ShadowMaterial({ color: 0x000000, opacity: S.shadow.opacity });
+              o.material.transparent = true;
+            }
           } else if (_origThreeMats.has(o)) {
             o.material = _origThreeMats.get(o);
             _origThreeMats.delete(o);
