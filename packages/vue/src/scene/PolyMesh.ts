@@ -51,6 +51,7 @@ import {
   prepareReceiverFacePlanes,
   projectCssVertexToGround,
   worldDirectionToCss,
+  worldPositionToCss,
   type CameraCullRotation,
   type EdgeOwners,
   type ReceiverCasterInput,
@@ -656,6 +657,15 @@ export const PolyMesh = defineComponent({
       // same frame for the shadow projection math to land correctly.
       const userLightDir = ctx?.directionalLight?.direction ?? ([0.4, -0.7, 0.59] as Vec3);
       const lightDir = worldDirectionToCss(userLightDir);
+      // Shadow-casting point lights → CSS-frame absolute positions (same
+      // world-CSS frame as caster/receiver vertices). Only castShadow:true
+      // lights project (Three.js parity). Mirrors vanilla emitSceneShadows.
+      const shadowPointLights = (ctx?.pointLights ?? []).filter((pl) => pl.castShadow);
+      const cssPointPositions = shadowPointLights.map((pl) => worldPositionToCss(pl.position));
+      // Directional pass runs when a directional light is configured, or — to
+      // preserve the implicit-sun shadow — when there are no point shadow lights.
+      const runDirectionalShadow = !!ctx?.directionalLight?.direction || shadowPointLights.length === 0;
+      const hasShadowPoints = shadowPointLights.length > 0;
       const shadowLift = ctx?.shadow?.lift ?? 0.001;
       const planes = prepareReceiverFacePlanes(
         polygons.value,
@@ -691,8 +701,11 @@ export const PolyMesh = defineComponent({
         // shadows on smooth GLB meshes — apple, sphere, teapot).
         // H9 silhouette path: build/reuse world-frame edge owners for
         // non-self casters with enough polygons.
+        // Point-light passes always need edgeOwners (radial shadow projects the
+        // caster silhouette, even for a small cube). Directional keeps the ≥40
+        // gate; core's directional branch ignores edgeOwners below that.
         let edgeOwners: ReadonlyMap<string, EdgeOwners> | undefined;
-        if (!isSelf && data.polygons.length >= 40) {
+        if (!isSelf && (data.polygons.length >= 40 || hasShadowPoints)) {
           const drot = data.rotation ?? null;
           const dposArr = data.position;
           const dsKey = JSON.stringify(data.scale ?? null);
@@ -719,55 +732,72 @@ export const PolyMesh = defineComponent({
         rotY: cameraState?.rotY ?? 45,
         meshRotation: props.rotation,
       };
-      const specs = computeReceiverShadowFaces<symbol>({
-        receiverPlanes: planes,
-        receiverPolygons: polygons.value,
-        receiverHasTexture: polygons.value.some((p) => p.texture !== undefined),
-        casters: casterInputs,
-        lightDir,
-        cameraRot,
-        ambientLight: ctx?.ambientLight,
-        directionalLight: ctx?.directionalLight,
-        shadow: { color: ctx?.shadow?.color, opacity: ctx?.shadow?.opacity ?? 0.25, maxExtend: ctx?.shadow?.maxExtend },
-      });
-      return specs.map((spec) =>
-        h(
-          "svg",
-          {
-            key: `receiver-${spec.faceIndex}`,
-            class: "polycss-shadow polycss-shadow-svg polycss-shadow-receiver",
-            "data-poly-shadow-type": "receiver",
-            "data-poly-shadow-receiver-face": String(spec.faceIndex),
-            "data-poly-shadow-receiver-polys": JSON.stringify(spec.memberPolyIndices),
-            width: String(spec.width),
-            height: String(spec.height),
-            viewBox: `0 0 ${spec.width} ${spec.height}`,
-            style: {
-              position: "absolute",
-              top: "0",
-              left: "0",
-              display: "block",
-              overflow: "hidden",
-              transformOrigin: "0 0",
-              pointerEvents: "none",
-              willChange: "transform",
-              transform: spec.matrixCss,
-            } as CSSProperties,
-          },
-          spec.paths.map((p, idx) =>
-            h("path", {
-              key: idx,
-              d: p.d,
-              fill: spec.fill,
-              stroke: spec.fill,
-              "stroke-width": "3",
-              "stroke-linejoin": "round",
-              opacity: spec.opacity.toFixed(4),
-              "data-poly-shadow-caster-polys": JSON.stringify(p.casterPolygonIndices),
-            }),
+      // One pass per light: directional (namespace "d") + one per shadow point
+      // light ("p0".."pN"), each into its own SVG keys so overlapping shadows
+      // stack independently — matching multi-shadow-map occlusion.
+      const runPass = (
+        lightKey: string,
+        passLightDir: Vec3,
+        lightPos: Vec3 | undefined,
+      ): VNode[] => {
+        const specs = computeReceiverShadowFaces<symbol>({
+          receiverPlanes: planes,
+          receiverPolygons: polygons.value,
+          receiverHasTexture: polygons.value.some((p) => p.texture !== undefined),
+          casters: casterInputs,
+          lightDir: passLightDir,
+          lightPos,
+          cameraRot,
+          ambientLight: ctx?.ambientLight,
+          directionalLight: ctx?.directionalLight,
+          shadow: { color: ctx?.shadow?.color, opacity: ctx?.shadow?.opacity ?? 0.25, maxExtend: ctx?.shadow?.maxExtend },
+        });
+        return specs.map((spec) =>
+          h(
+            "svg",
+            {
+              key: `receiver-${lightKey}-${spec.faceIndex}`,
+              class: "polycss-shadow polycss-shadow-svg polycss-shadow-receiver",
+              "data-poly-shadow-type": "receiver",
+              "data-poly-shadow-light": lightKey,
+              "data-poly-shadow-receiver-face": String(spec.faceIndex),
+              "data-poly-shadow-receiver-polys": JSON.stringify(spec.memberPolyIndices),
+              width: String(spec.width),
+              height: String(spec.height),
+              viewBox: `0 0 ${spec.width} ${spec.height}`,
+              style: {
+                position: "absolute",
+                top: "0",
+                left: "0",
+                display: "block",
+                overflow: "hidden",
+                transformOrigin: "0 0",
+                pointerEvents: "none",
+                willChange: "transform",
+                transform: spec.matrixCss,
+              } as CSSProperties,
+            },
+            spec.paths.map((p, idx) =>
+              h("path", {
+                key: idx,
+                d: p.d,
+                fill: spec.fill,
+                stroke: spec.fill,
+                "stroke-width": "3",
+                "stroke-linejoin": "round",
+                opacity: spec.opacity.toFixed(4),
+                "data-poly-shadow-caster-polys": JSON.stringify(p.casterPolygonIndices),
+              }),
+            ),
           ),
-        ),
-      );
+        );
+      };
+      const nodes: VNode[] = [];
+      if (runDirectionalShadow) nodes.push(...runPass("d", lightDir, undefined));
+      for (let li = 0; li < cssPointPositions.length; li++) {
+        nodes.push(...runPass(`p${li}`, lightDir, cssPointPositions[li]));
+      }
+      return nodes;
     });
 
     // Register this mesh with the shadow registry when castShadow=true in
