@@ -195,11 +195,12 @@
       autoCenter: qs("ax", "0") === "1",
     };
 
-    // Directional light for PolyCSS — omitted entirely when intensity ≤ 0 so
-    // its (intensity-independent) cast-shadow SVG doesn't appear while three.js
-    // shows nothing. Lets `di=0` isolate the point-light shadows for parity.
+    // Directional light for PolyCSS — always passed (even at intensity 0) so
+    // PolyCSS does true ambient-only shading instead of falling back to its
+    // default sun when directionalLight is omitted. The engine already gates
+    // the cast-shadow SVG on intensity > 0, so intensity 0 = no shadow,
+    // matching three.js. Lets `di=0` isolate ambient + point lights.
     function polyDirectional() {
-      if (S.dir.intensity <= 0) return undefined;
       return {
         direction: [S.dir.x, S.dir.y, S.dir.z],
         intensity: S.dir.intensity,
@@ -2928,6 +2929,88 @@
       oracleStatus.textContent =
         `[mask] missing ${missing}px · extra ${extra}px · shadow IoU ${json.shadowIoU} · casters ${json.missingShadowCasters.length}`;
       window.__oracleMask = json;
+      return json;
+    };
+
+    // ── Shadow COLOR calibration ────────────────────────────────────────
+    // NORMAL render (real materials, helpers hidden). Aligns the PolyCSS
+    // screenshot with the three.js canvas at host resolution, excludes the
+    // (reddish) cube, finds a lit-floor reference, and reports the per-channel
+    // delta (PolyCSS − three.js) separately for SHADOW pixels vs LIT floor.
+    // Paints a signed-delta heatmap into the diff pane (gray = match, the
+    // delta's own hue shows where/how PolyCSS diverges).
+    window.oracleColorDelta = async (polyUrl) => {
+      const hostRect = polyHost.getBoundingClientRect();
+      const W = Math.round(hostRect.width), H = Math.round(hostRect.height);
+      if (W < 2 || H < 2) return null;
+      renderer.render(threeScene, camera);
+      const polyPx = await dataUrlToPolyPx(polyUrl, W, H);
+      const tb = document.createElement("canvas"); tb.width = W; tb.height = H;
+      const tctx = tb.getContext("2d");
+      tctx.drawImage(threeCanvas, 0, 0, threeCanvas.width, threeCanvas.height, 0, 0, W, H);
+      const threePx = tctx.getImageData(0, 0, W, H).data;
+
+      const luma = (d, i) => 0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2];
+      // Cube is strongly red-dominant; floor is gray/purple. Skip cube (and a
+      // dilated edge) in EITHER engine to avoid silhouette-AA noise.
+      const isCube = (d, i) => d[i] - Math.max(d[i + 1], d[i + 2]) > 30;
+      const isFloor = (p) => !isCube(polyPx, p * 4) && !isCube(threePx, p * 4);
+
+      // Lit-floor reference = 75th-percentile luma of three's floor pixels.
+      const litSamples = [];
+      for (let p = 0; p < W * H; p++) if (isFloor(p)) litSamples.push(luma(threePx, p * 4));
+      litSamples.sort((a, b) => a - b);
+      const litRef = litSamples.length ? litSamples[Math.floor(litSamples.length * 0.75)] : 255;
+      const shadowCut = litRef * 0.92; // 8% darker than lit floor → shadowed
+
+      const heat = diffCtx.createImageData(W, H);
+      const AMP = 4;
+      let shN = 0, litN = 0;
+      const shSum = [0, 0, 0], litSum = [0, 0, 0];
+      let shAbs = 0, shMax = 0;
+      for (let p = 0; p < W * H; p++) {
+        const i = p * 4;
+        let r = 128, g = 128, b = 128, a = 255;
+        if (isFloor(p)) {
+          const dR = polyPx[i] - threePx[i];
+          const dG = polyPx[i + 1] - threePx[i + 1];
+          const dB = polyPx[i + 2] - threePx[i + 2];
+          r = Math.max(0, Math.min(255, 128 + dR * AMP));
+          g = Math.max(0, Math.min(255, 128 + dG * AMP));
+          b = Math.max(0, Math.min(255, 128 + dB * AMP));
+          const shadowed = luma(threePx, i) < shadowCut || luma(polyPx, i) < shadowCut;
+          if (shadowed) {
+            shN++; shSum[0] += dR; shSum[1] += dG; shSum[2] += dB;
+            const m = (Math.abs(dR) + Math.abs(dG) + Math.abs(dB)) / 3;
+            shAbs += m; if (m > shMax) shMax = m;
+          } else {
+            litN++; litSum[0] += dR; litSum[1] += dG; litSum[2] += dB;
+          }
+        } else {
+          a = 40; // dim the cube region in the heatmap
+        }
+        heat.data[i] = r; heat.data[i + 1] = g; heat.data[i + 2] = b; heat.data[i + 3] = a;
+      }
+      const tmp = document.createElement("canvas"); tmp.width = W; tmp.height = H;
+      tmp.getContext("2d").putImageData(heat, 0, 0);
+      diffCtx.setTransform(1, 0, 0, 1, 0, 0);
+      diffCtx.fillStyle = "#0f172a"; diffCtx.fillRect(0, 0, diffCanvas.width, diffCanvas.height);
+      diffCtx.drawImage(tmp, 0, 0, diffCanvas.width, diffCanvas.height);
+
+      const mean = (s, n) => n ? s.map((v) => +(v / n).toFixed(1)) : [0, 0, 0];
+      const json = {
+        litRef: +litRef.toFixed(1),
+        shadowPx: shN,
+        litPx: litN,
+        // PolyCSS − three.js, per channel (positive = PolyCSS brighter).
+        shadowMeanDelta: mean(shSum, shN),
+        litMeanDelta: mean(litSum, litN),
+        shadowMeanAbs: shN ? +(shAbs / shN).toFixed(1) : 0,
+        shadowMaxAbs: +shMax.toFixed(1),
+      };
+      oracleStatus.textContent =
+        `[color] shadow Δ ${json.shadowMeanDelta.join("/")} (|${json.shadowMeanAbs}|) · lit Δ ${json.litMeanDelta.join("/")}`;
+      window.__oracleColor = json;
       return json;
     };
 
