@@ -2209,6 +2209,13 @@ describe("createPolyScene", () => {
       textureLighting: "dynamic" as const,
       directionalLight: { direction: [0.4, -0.7, 0.59] as [number, number, number], color: "#ffffff", intensity: 1 },
     };
+    // Baked shadow tests need an explicit directional light: a shadow is only
+    // emitted for a light that actually removes irradiance (Three.js parity —
+    // no light, no shadow), so configure one rather than relying on a default.
+    const bakedOpts = {
+      textureLighting: "baked" as const,
+      directionalLight: { direction: [0.4, -0.7, 0.59] as [number, number, number], color: "#ffffff", intensity: 1 },
+    };
 
     it("default (no castShadow) emits no .polycss-shadow elements", () => {
       scene = makeScene(host, dynOpts);
@@ -2239,7 +2246,7 @@ describe("createPolyScene", () => {
       // fill-rule=nonzero, so overlapping CCW outlines composite as one
       // filled silhouette without alpha stacking while gaps remain holes.
       // One <path> per mesh regardless of polygon count.
-      scene = makeScene(host, { textureLighting: "baked" });
+      scene = makeScene(host, bakedOpts);
       scene.add(makeParseResult([floor()]), { receiveShadow: true });
       scene.add(makeParseResult([backTriangle()]), { castShadow: true });
       const shadows = host.querySelectorAll(".polycss-shadow");
@@ -2314,7 +2321,7 @@ describe("createPolyScene", () => {
       // where the back-facing piece would have contributed. With SVG
       // fill-rule=nonzero merging overlap into one solid silhouette,
       // including the back-facing polys is geometrically correct.
-      scene = makeScene(host, { textureLighting: "baked" });
+      scene = makeScene(host, bakedOpts);
       scene.add(makeParseResult([floor()]), { receiveShadow: true });
       scene.add(makeParseResult([backTriangle()]), { castShadow: true });
       expect(host.querySelectorAll(".polycss-shadow").length).toBe(1);
@@ -2392,7 +2399,7 @@ describe("createPolyScene", () => {
     });
 
     it("switching from baked back to dynamic keeps the shadow as a positioned <svg>", () => {
-      scene = makeScene(host, { textureLighting: "baked" });
+      scene = makeScene(host, bakedOpts);
       scene.add(makeParseResult([floor()]), { receiveShadow: true });
       scene.add(makeParseResult([backTriangle()]), { castShadow: true });
       const before = host.querySelector(".polycss-shadow") as SVGSVGElement;

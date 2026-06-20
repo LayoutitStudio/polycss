@@ -995,8 +995,13 @@ export function createPolyScene(
       .map((pl, i) => (pl.castShadow ? i : -1))
       .filter((i) => i >= 0);
     const cssPointPositions = shadowPointIndices.map((i) => allPointLightsCss[i]!.position);
-    const runDirectionalShadow =
-      !!currentOptions.directionalLight?.direction || shadowPointIndices.length === 0;
+    // The directional pass runs only for an actual directional light with
+    // nonzero intensity. Three.js parity: a zero-intensity (or absent)
+    // directional light removes no light, so a blocked region is indistinct
+    // from a lit one — no shadow. (The old implicit-sun fallback that drew a
+    // default-direction shadow when no light was configured is gone.)
+    const dirLight = currentOptions.directionalLight;
+    const runDirectionalShadow = !!dirLight?.direction && (dirLight.intensity ?? 1) > 0;
     const dirKey = quantizeLightDirKey(lightDir);
     // Fold point-light positions into the short-circuit key so moving (or
     // toggling) a shadow point light re-emits even when the directional
