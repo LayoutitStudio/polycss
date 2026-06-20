@@ -980,18 +980,23 @@ export function createPolyScene(
     // frame. invalidateShadowLightCache() is called by every code path that
     // mutates caster/receiver geometry or shadow appearance, so a cache hit
     // here means "same light, same scene → previous SVG content is still valid".
-    // Shadow-casting point lights, converted to CSS-frame positions. Only
-    // lights with castShadow:true project (Three.js parity); shading-only
-    // point lights never reach the shadow path.
+    // Point lights are baked-mode only (they don't drive dynamic-mode surface
+    // shading), so in dynamic mode they must not drive shadows either —
+    // otherwise colored point shadows appear over a floor the same lights
+    // never lit, which reads as broken. Dynamic mode → directional shadows
+    // only (ambient fill). Baked mode → full point participation.
+    const pointLightsForShadow = currentOptions.textureLighting === "dynamic"
+      ? []
+      : (currentOptions.pointLights ?? []);
     // ALL point lights in CSS frame — the shaded shadow color needs every
     // light that illuminates the receiver (even non-casters), minus the one
     // being shadowed. `shadowPointIndices` are the entries that cast.
-    const allPointLightsCss = (currentOptions.pointLights ?? []).map((pl) => ({
+    const allPointLightsCss = pointLightsForShadow.map((pl) => ({
       position: worldPositionToCss(pl.position),
       color: pl.color,
       intensity: pl.intensity,
     }));
-    const shadowPointIndices = (currentOptions.pointLights ?? [])
+    const shadowPointIndices = pointLightsForShadow
       .map((pl, i) => (pl.castShadow ? i : -1))
       .filter((i) => i >= 0);
     const cssPointPositions = shadowPointIndices.map((i) => allPointLightsCss[i]!.position);
