@@ -1,0 +1,178 @@
+---
+title: Lighting & Shadows
+description: Directional, ambient, and point lights; baked vs dynamic shading; and colored cast shadows.
+---
+
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+import PolyDemo from '../../../components/PolyDemo.astro';
+
+PolyCSS shades each polygon with a Lambert model that matches three.js's `MeshLambertMaterial`. A scene takes **one directional light, one ambient light, and any number of point lights**, set on `<poly-scene>` / `PolyScene` / `createPolyScene()`. Shading happens either once on the CPU (**baked**) or live in CSS `calc()` (**dynamic**) — see [Lighting modes](#lighting-modes).
+
+The light types are documented in the [Core Types reference](/api/types/#polydirectionallight); this guide is the conceptual tour.
+
+## The light sources
+
+### Directional light
+
+One infinitely-distant light with a single `direction`, `color`, and `intensity` — like the sun. Every surface gets `color · intensity · max(0, n · L̂)`.
+
+<PolyDemo
+  id="lighting-directional"
+  generator="icosahedron"
+  controls='["rotX","rotY","animate"]'
+  defaults='{"rotX":60,"rotY":30,"animate":true,"light":{"direction":[0.5,-0.6,0.6],"intensity":1,"ambient":0.25}}'
+/>
+
+<Tabs syncKey="fw">
+<TabItem label="Vanilla JS">
+```js
+import { createPolyScene, createPolyCamera } from "@layoutit/polycss";
+
+const scene = createPolyScene(host, {
+  camera: createPolyCamera({ rotX: 60, rotY: 30 }),
+  directionalLight: { direction: [0.5, -0.6, 0.6], color: "#ffffff", intensity: 1 },
+  ambientLight: { intensity: 0.3 },
+});
+```
+</TabItem>
+<TabItem label="React">
+```tsx
+import { PolyCamera, PolyScene } from "@layoutit/polycss-react";
+
+<PolyCamera rotX={60} rotY={30}>
+  <PolyScene
+    directionalLight={{ direction: [0.5, -0.6, 0.6], color: "#ffffff", intensity: 1 }}
+    ambientLight={{ intensity: 0.3 }}
+  >
+    {/* meshes */}
+  </PolyScene>
+</PolyCamera>
+```
+</TabItem>
+<TabItem label="Vue">
+```vue
+<template>
+  <PolyCamera :rot-x="60" :rot-y="30">
+    <PolyScene
+      :directional-light="{ direction: [0.5, -0.6, 0.6], color: '#ffffff', intensity: 1 }"
+      :ambient-light="{ intensity: 0.3 }"
+    >
+      <!-- meshes -->
+    </PolyScene>
+  </PolyCamera>
+</template>
+
+<script setup lang="ts">
+import { PolyCamera, PolyScene } from "@layoutit/polycss-vue";
+</script>
+```
+</TabItem>
+</Tabs>
+
+### Ambient light
+
+A uniform fill with `color` and `intensity` (default `0.4`) added to every surface regardless of orientation. Use it to lift shadowed faces out of pure black — exactly what a shadowed region fades toward.
+
+### Point lights
+
+Positional lights given as an array. Each has a world-space `position`, `color`, `intensity`, and optional `castShadow`. Point lights are **direction-only** — there is **no distance falloff** (they emulate three.js's `PointLight(distance: 0, decay: 0)`); a surface is lit by `color · intensity · max(0, n · L̂)` where `L̂` points from the surface to the light. Shading is flat per face — an accepted approximation of three.js's per-fragment gradient, exact for small faces or distant lights.
+
+> **Point lights are baked-mode only.** Dynamic mode's zero-JS light updates can't express a per-face direction that varies with position, so dynamic scenes ignore `pointLights` entirely (shading *and* shadows). See [Lighting modes](#lighting-modes).
+
+<Tabs syncKey="fw">
+<TabItem label="Vanilla JS">
+```js
+const scene = createPolyScene(host, {
+  camera: createPolyCamera({ rotX: 35, rotY: 20 }),
+  // textureLighting defaults to "baked" — required for point lights.
+  pointLights: [
+    { position: [-4, 4, 5], color: "#ff7755", intensity: 1, castShadow: true },
+    { position: [5, -3, 4], color: "#5599ff", intensity: 1, castShadow: true },
+  ],
+  ambientLight: { intensity: 0.3 },
+});
+```
+</TabItem>
+<TabItem label="React">
+```tsx
+<PolyScene
+  pointLights={[
+    { position: [-4, 4, 5], color: "#ff7755", intensity: 1, castShadow: true },
+    { position: [5, -3, 4], color: "#5599ff", intensity: 1, castShadow: true },
+  ]}
+  ambientLight={{ intensity: 0.3 }}
+>
+  {/* meshes */}
+</PolyScene>
+```
+</TabItem>
+<TabItem label="Vue">
+```vue
+<PolyScene
+  :point-lights="[
+    { position: [-4, 4, 5], color: '#ff7755', intensity: 1, castShadow: true },
+    { position: [5, -3, 4], color: '#5599ff', intensity: 1, castShadow: true },
+  ]"
+  :ambient-light="{ intensity: 0.3 }"
+>
+  <!-- meshes -->
+</PolyScene>
+```
+</TabItem>
+</Tabs>
+
+## Lighting modes
+
+`textureLighting` (scene-level, with a per-mesh override) chooses **how** the Lambert result is applied:
+
+| | **`"baked"`** (default) | **`"dynamic"`** |
+|---|---|---|
+| How | Computed once on the CPU, written into each leaf's color / atlas pixels | Resolved live in CSS `calc()` from scene-root variables + per-leaf normals |
+| Point lights | ✅ Supported | ❌ Ignored (direction-only CSS can't vary per position) |
+| Moving the directional light | Re-bake needed for the lit surface (shadows update for free) | **Zero JS** — just updates a CSS variable |
+| Best for | Static scenes, point lights, exact color | Live / animated directional light, interactive light dragging |
+
+Rule of thumb: **dynamic** when the directional light moves every frame; **baked** when you want point lights or the lights are mostly static.
+
+## Cast shadows
+
+Shadows are CPU-projected SVG surfaces (not a render-strategy leaf). Mark casters with `castShadow` and receivers with `receiveShadow`:
+
+<Tabs syncKey="fw">
+<TabItem label="Vanilla JS">
+```js
+scene.add(parsedFloor, { receiveShadow: true });
+scene.add(parsedModel, { castShadow: true });
+scene.setOptions({ shadow: { color: "#000000", opacity: 0.3, lift: 0.02 } });
+```
+</TabItem>
+<TabItem label="React">
+```tsx
+<PolyScene shadow={{ color: "#000000", opacity: 0.3, lift: 0.02 }}>
+  <PolyGround size={8} color="#d8d2c7" receiveShadow />
+  <PolyMesh src="/model.glb" castShadow />
+</PolyScene>
+```
+</TabItem>
+<TabItem label="Vue">
+```vue
+<PolyScene :shadow="{ color: '#000000', opacity: 0.3, lift: 0.02 }">
+  <PolyGround :size="8" color="#d8d2c7" receive-shadow />
+  <PolyMesh src="/model.glb" cast-shadow />
+</PolyScene>
+```
+</TabItem>
+</Tabs>
+
+What to expect:
+
+- **Directional shadows** work in both lighting modes and only appear for a directional light with `intensity > 0` (intensity `0`, or no directional light, casts nothing — matching three.js).
+- **Point-light shadows** are baked-mode only and **radial** (each vertex projects along its own ray from the light). Set `castShadow: true` on the point light *and* `castShadow`/`receiveShadow` on the meshes.
+- **Colored multi-light shadows.** Each light's shadow is filled with the receiver lit by every *other* light, so a spot blocked from one colored light still shows the others' color. Where two shadows overlap, the region composites to the both-blocked color (ambient only) — not a doubled-up black smear.
+- **`shadow.lift`** floats the shadow a hair above the receiver to avoid z-fighting; the default is fine, just don't set it to exactly `0` on a coplanar floor.
+
+## Live & animated lights
+
+- **Animating the directional light:** use **dynamic** mode — moving the light is a single CSS-variable write per frame, no JS in the paint loop, and shadows re-project automatically.
+- **Baked mode + a light change:** cast shadows re-emit automatically (cheap SVG), but the baked *lit surface* stays frozen until you re-bake — call `mesh.rebakeAtlas()` (debounce it to the end of a drag; the atlas raster is the one costly step). The React/Vue components re-bake automatically on prop change, so this only applies to the imperative `createPolyScene()` API.
+- **Animating point lights:** baked-mode only, so re-bake per change (or per debounced step). For continuously moving lights, prefer a single directional light in dynamic mode.
