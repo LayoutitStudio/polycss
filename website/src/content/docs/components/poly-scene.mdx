@@ -162,7 +162,7 @@ import { PolyPerspectiveCamera, PolyScene, PolyTorus, PolyBox } from "@layoutit/
 
 ### Cast Shadows
 
-Shadows are SVG-projected surfaces. They work in both lighting modes; `textureLighting` controls surface shading, while shadow geometry reprojects when the light or scene geometry changes.
+Shadows are SVG-projected surfaces that reproject when the light or scene geometry changes. Directional-light shadows work in both lighting modes. Point-light shadows are **baked mode only** — like point-light shading, they're omitted in dynamic mode (a colored point shadow over a floor those lights never lit would look broken), so dynamic-mode shadows are directional-only. Where multiple lights overlap on a face, the shadows composite to the correct both-blocked color (each light shows the others' color where it alone is blocked).
 
 ```tsx
 import { PolyCamera, PolyScene, PolyGround, PolyMesh } from "@layoutit/polycss-react";
