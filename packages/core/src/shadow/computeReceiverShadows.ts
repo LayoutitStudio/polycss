@@ -15,6 +15,7 @@
 import { BASE_TILE } from "../camera/camera";
 import { normalFacesCamera, type CameraCullRotation } from "../cull/cameraBackfaceCulling";
 import { shadePolygon } from "../atlas/paintDefaults";
+import { parseHexColor } from "../color/color";
 import { rotateVec3InWrapperCssFrame } from "../math/rotation";
 import { clipPolygonToConvex2D } from "./clipping";
 import { ensureCcw2D } from "./projection";
@@ -1145,6 +1146,209 @@ export function computeReceiverShadowFaces<T = unknown>(
     });
   }
 
+  return out;
+}
+
+// ── Multi-light per-face merge ──────────────────────────────────────────────
+// All renderers share this so a receiver FACE's lights merge into ONE SVG:
+// overlapping shadows then composite correctly (single light → one path with
+// the remaining-light color; multi-light solid → a full-lit base + one
+// `mix-blend-mode: multiply` layer per light, so the both-blocked overlap
+// becomes base·∏factor). Pure data in → DOM-ready descriptors out; each
+// renderer only emits the <svg>/<path> nodes.
+
+/** One path inside a merged face SVG. */
+export interface MergedShadowLayer {
+  /** Path data (`M…L…Z`, already offset to the SVG's tight bbox). */
+  d: string;
+  /** Fill color (remaining-light color for a single layer, multiply factor for
+   *  a merged solid layer, dark shadow color for textured). */
+  fill: string;
+  /** Apply `mix-blend-mode: multiply` (merged solid layers only). */
+  multiply: boolean;
+  /** Per-path opacity (1 for merged solid layers, which carry strength on the
+   *  SVG; the pass's own opacity otherwise). */
+  opacity: number;
+}
+
+/** One receiver FACE's merged shadow, ready to mount as a single SVG. */
+export interface MergedShadowFace {
+  faceIndex: number;
+  memberPolyIndices: number[];
+  matrixCss: string;
+  width: number;
+  height: number;
+  /** SVG-level opacity (shadow strength for merged solid faces, else 1). */
+  svgOpacity: number;
+  /** Full-lit base path (merged solid faces only); null otherwise. */
+  baseFill: string | null;
+  baseD: string | null;
+  layers: MergedShadowLayer[];
+}
+
+/** Inputs for `computeMergedReceiverShadows` — the full light set for one
+ *  receiver, plus its prepared face planes and casters. */
+export interface MergedReceiverShadowInput<T = unknown> {
+  receiverPlanes: ReceiverFacePlane[];
+  receiverPolygons: readonly Polygon[];
+  receiverHasTexture: boolean;
+  casters: ReceiverCasterInput<T>[];
+  /** Directional light vector in CSS frame (to-source). */
+  lightDir: Vec3;
+  /** Run the directional pass (caller gates on a real, nonzero-intensity
+   *  directional light). */
+  runDirectional: boolean;
+  /** One pass per shadow-casting point light: CSS position + index into
+   *  `allPointLights`. Empty in dynamic mode (point lights are baked-only). */
+  pointPasses: ReadonlyArray<{ lightPos: Vec3; index: number }>;
+  /** All point lights (CSS positions) for the shaded shadow color; empty in
+   *  dynamic mode. */
+  allPointLights?: ReadonlyArray<{ position: Vec3; color?: string; intensity?: number }>;
+  cameraRot: CameraCullRotation;
+  ambientLight?: PolyAmbientLight;
+  directionalLight?: PolyDirectionalLight;
+  shadow?: { color?: string; opacity?: number; maxExtend?: number };
+}
+
+/** Per-channel multiply factor `remaining / full` (both sRGB hex) as `rgb(...)`.
+ *  Painting the base = `full` then this with `mix-blend-mode: multiply`
+ *  reproduces `remaining`; overlapping factors multiply to the both-removed
+ *  color. */
+function shadowMultiplyFactor(remaining: string, full: string): string {
+  const a = parseHexColor(remaining)?.rgb ?? [0, 0, 0];
+  const b = parseHexColor(full)?.rgb ?? [255, 255, 255];
+  const f = (i: number): number => {
+    const c = b[i] ?? 0;
+    if (c <= 0) return 255;
+    return Math.max(0, Math.min(255, Math.round((a[i]! / c) * 255)));
+  };
+  return `rgb(${f(0)},${f(1)},${f(2)})`;
+}
+
+/** Build an `M…L…Z` path from face-(u,v) polygons offset to (minU, minV). */
+function polysToPathD(
+  polys: ReadonlyArray<ReadonlyArray<readonly [number, number]>>,
+  minU: number,
+  minV: number,
+): string {
+  let d = "";
+  for (const poly of polys) {
+    if (poly.length < 3) continue;
+    d += `M${(poly[0]![0] - minU).toFixed(1)},${(poly[0]![1] - minV).toFixed(1)}`;
+    for (let j = 1; j < poly.length; j++) {
+      d += `L${(poly[j]![0] - minU).toFixed(1)},${(poly[j]![1] - minV).toFixed(1)}`;
+    }
+    d += "Z";
+  }
+  return d;
+}
+
+/**
+ * Run every light pass for one receiver and merge each face's passes into a
+ * single SVG descriptor. Shared by all three renderers so multi-light shadow
+ * overlap is identical everywhere.
+ */
+export function computeMergedReceiverShadows<T = unknown>(
+  input: MergedReceiverShadowInput<T>,
+): MergedShadowFace[] {
+  const {
+    receiverPlanes, receiverPolygons, receiverHasTexture, casters,
+    lightDir, runDirectional, pointPasses, allPointLights,
+    cameraRot, ambientLight, directionalLight, shadow,
+  } = input;
+  const shadowOpacity = shadow?.opacity ?? 0.25;
+
+  const planeByFace = new Map<number, ReceiverFacePlane>();
+  for (const pl of receiverPlanes) planeByFace.set(pl.faceIndex, pl);
+
+  type Layer = { polys: Array<Array<[number, number]>>; fill: string; opacity: number };
+  type FaceAgg = { memberPolyIndices: number[]; base: string; solid: boolean; layers: Layer[] };
+  const perFace = new Map<number, FaceAgg>();
+
+  const runPass = (lightPos: Vec3 | undefined, thisPointIndex: number | undefined): void => {
+    const specs = computeReceiverShadowFaces<T>({
+      receiverPlanes, receiverPolygons, receiverHasTexture, casters,
+      lightDir, lightPos, allPointLights, thisPointIndex,
+      cameraRot, ambientLight, directionalLight, shadow,
+    });
+    for (const spec of specs) {
+      if (spec.facePolysUv.length === 0) continue;
+      const solid = spec.fullLitFill !== "";
+      let agg = perFace.get(spec.faceIndex);
+      if (!agg) {
+        agg = { memberPolyIndices: spec.memberPolyIndices, base: spec.fullLitFill, solid, layers: [] };
+        perFace.set(spec.faceIndex, agg);
+      }
+      agg.layers.push({ polys: spec.facePolysUv, fill: spec.fill, opacity: spec.opacity });
+    }
+  };
+  if (runDirectional) runPass(undefined, undefined);
+  for (const p of pointPasses) runPass(p.lightPos, p.index);
+
+  const out: MergedShadowFace[] = [];
+  for (const [faceIndex, agg] of perFace) {
+    const plane = planeByFace.get(faceIndex);
+    if (!plane || agg.layers.length === 0) continue;
+    let minU = Infinity, minV = Infinity, maxU = -Infinity, maxV = -Infinity;
+    for (const layer of agg.layers) for (const poly of layer.polys) for (const pt of poly) {
+      if (pt[0] < minU) minU = pt[0];
+      if (pt[0] > maxU) maxU = pt[0];
+      if (pt[1] < minV) minV = pt[1];
+      if (pt[1] > maxV) maxV = pt[1];
+    }
+    if (!Number.isFinite(minU)) continue;
+    minU = Math.floor(minU - 1); minV = Math.floor(minV - 1);
+    maxU = Math.ceil(maxU + 1); maxV = Math.ceil(maxV + 1);
+    const width = maxU - minU, height = maxV - minV;
+    if (!(width > 0) || !(height > 0)) continue;
+
+    const { O, u, v, n, lift } = plane;
+    const tx = O[0] + minU * u[0] + minV * v[0] + lift * n[0];
+    const ty = O[1] + minU * u[1] + minV * v[1] + lift * n[1];
+    const tz = O[2] + minU * u[2] + minV * v[2] + lift * n[2];
+    const m = [u[0], u[1], u[2], 0, v[0], v[1], v[2], 0, n[0], n[1], n[2], 0, tx, ty, tz, 1];
+    const matrixCss = `matrix3d(${m.map((x) => x.toFixed(4)).join(",")})`;
+
+    // Merge (base + multiply) only when a SOLID face has ≥2 lights; otherwise
+    // one path per pass at its own alpha (single light, or textured).
+    const merged = agg.solid && agg.layers.length > 1;
+    let baseFill: string | null = null;
+    let baseD: string | null = null;
+    const layers: MergedShadowLayer[] = [];
+    if (merged) {
+      baseFill = agg.base;
+      baseD = "";
+      for (const layer of agg.layers) baseD += polysToPathD(layer.polys, minU, minV);
+      for (const layer of agg.layers) {
+        layers.push({
+          d: polysToPathD(layer.polys, minU, minV),
+          fill: shadowMultiplyFactor(layer.fill, agg.base),
+          multiply: true,
+          opacity: 1,
+        });
+      }
+    } else {
+      for (const layer of agg.layers) {
+        layers.push({
+          d: polysToPathD(layer.polys, minU, minV),
+          fill: layer.fill,
+          multiply: false,
+          opacity: layer.opacity,
+        });
+      }
+    }
+    out.push({
+      faceIndex,
+      memberPolyIndices: agg.memberPolyIndices,
+      matrixCss,
+      width,
+      height,
+      svgOpacity: merged ? shadowOpacity : 1,
+      baseFill,
+      baseD,
+      layers,
+    });
+  }
   return out;
 }
 

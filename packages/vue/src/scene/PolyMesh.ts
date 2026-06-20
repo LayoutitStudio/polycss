@@ -38,7 +38,7 @@ import {
 import {
   BASE_TILE,
   buildPolyMeshTransform,
-  computeReceiverShadowFaces,
+  computeMergedReceiverShadows,
   computeSceneBbox,
   DEFAULT_SEAM_BLEED,
   ensureCcw2D,
@@ -657,24 +657,26 @@ export const PolyMesh = defineComponent({
       // same frame for the shadow projection math to land correctly.
       const userLightDir = ctx?.directionalLight?.direction ?? ([0.4, -0.7, 0.59] as Vec3);
       const lightDir = worldDirectionToCss(userLightDir);
-      // Shadow-casting point lights → CSS-frame absolute positions (same
-      // world-CSS frame as caster/receiver vertices). Only castShadow:true
-      // lights project (Three.js parity). Mirrors vanilla emitSceneShadows.
+      // Point lights are baked-mode only — in dynamic mode they drive neither
+      // surface shading nor shadows (a colored point shadow on a floor those
+      // lights never lit reads as broken). Mirrors vanilla createPolyScene.
+      const dynamicShading = atlasTextureLighting.value === "dynamic";
+      const scenePoints = dynamicShading ? [] : (ctx?.pointLights ?? []);
       // ALL point lights in CSS frame — the shaded shadow color needs every
       // light that illuminates the receiver (even non-casters), minus the one
       // being shadowed. `shadowPointIndices` are the entries that cast.
-      const allPointLightsCss = (ctx?.pointLights ?? []).map((pl) => ({
+      const allPointLightsCss = scenePoints.map((pl) => ({
         position: worldPositionToCss(pl.position),
         color: pl.color,
         intensity: pl.intensity,
       }));
-      const shadowPointIndices = (ctx?.pointLights ?? [])
+      const shadowPointIndices = scenePoints
         .map((pl, i) => (pl.castShadow ? i : -1))
         .filter((i) => i >= 0);
-      const cssPointPositions = shadowPointIndices.map((i) => allPointLightsCss[i]!.position);
-      // Directional pass runs when a directional light is configured, or — to
-      // preserve the implicit-sun shadow — when there are no point shadow lights.
-      const runDirectionalShadow = !!ctx?.directionalLight?.direction || shadowPointIndices.length === 0;
+      // Directional pass runs only for a real, nonzero-intensity directional
+      // light (Three.js parity; the old implicit-sun fallback is gone).
+      const runDirectionalShadow =
+        !!ctx?.directionalLight?.direction && (ctx.directionalLight.intensity ?? 1) > 0;
       const hasShadowPoints = shadowPointIndices.length > 0;
       const shadowLift = ctx?.shadow?.lift ?? 0.001;
       const planes = prepareReceiverFacePlanes(
@@ -742,75 +744,65 @@ export const PolyMesh = defineComponent({
         rotY: cameraState?.rotY ?? 45,
         meshRotation: props.rotation,
       };
-      // One pass per light: directional (namespace "d") + one per shadow point
-      // light ("p0".."pN"), each into its own SVG keys so overlapping shadows
-      // stack independently — matching multi-shadow-map occlusion.
-      const runPass = (
-        lightKey: string,
-        passLightDir: Vec3,
-        lightPos: Vec3 | undefined,
-        thisPointIndex: number | undefined,
-      ): VNode[] => {
-        const specs = computeReceiverShadowFaces<symbol>({
-          receiverPlanes: planes,
-          receiverPolygons: polygons.value,
-          receiverHasTexture: polygons.value.some((p) => p.texture !== undefined),
-          casters: casterInputs,
-          lightDir: passLightDir,
-          lightPos,
-          allPointLights: allPointLightsCss,
-          thisPointIndex,
-          cameraRot,
-          ambientLight: ctx?.ambientLight,
-          directionalLight: ctx?.directionalLight,
-          shadow: { color: ctx?.shadow?.color, opacity: ctx?.shadow?.opacity ?? 0.25, maxExtend: ctx?.shadow?.maxExtend },
-        });
-        return specs.map((spec) =>
-          h(
-            "svg",
-            {
-              key: `receiver-${lightKey}-${spec.faceIndex}`,
-              class: "polycss-shadow polycss-shadow-svg polycss-shadow-receiver",
-              "data-poly-shadow-type": "receiver",
-              "data-poly-shadow-light": lightKey,
-              "data-poly-shadow-receiver-face": String(spec.faceIndex),
-              "data-poly-shadow-receiver-polys": JSON.stringify(spec.memberPolyIndices),
-              width: String(spec.width),
-              height: String(spec.height),
-              viewBox: `0 0 ${spec.width} ${spec.height}`,
-              style: {
-                position: "absolute",
-                top: "0",
-                left: "0",
-                display: "block",
-                overflow: "hidden",
-                transformOrigin: "0 0",
-                pointerEvents: "none",
-                willChange: "transform",
-                transform: spec.matrixCss,
-              } as CSSProperties,
-            },
-            spec.paths.map((p, idx) =>
+      // Shared core merge: one SVG per receiver face, all its lights merged so
+      // overlaps composite correctly (single light → one path; multi-light
+      // solid → base + per-light multiply layers). Identical to vanilla + React.
+      const faces = computeMergedReceiverShadows<symbol>({
+        receiverPlanes: planes,
+        receiverPolygons: polygons.value,
+        receiverHasTexture: polygons.value.some((p) => p.texture !== undefined),
+        casters: casterInputs,
+        lightDir,
+        runDirectional: runDirectionalShadow,
+        pointPasses: shadowPointIndices.map((i) => ({ lightPos: allPointLightsCss[i]!.position, index: i })),
+        allPointLights: allPointLightsCss,
+        cameraRot,
+        ambientLight: ctx?.ambientLight,
+        directionalLight: ctx?.directionalLight,
+        shadow: { color: ctx?.shadow?.color, opacity: ctx?.shadow?.opacity ?? 0.25, maxExtend: ctx?.shadow?.maxExtend },
+      });
+      return faces.map((fc) =>
+        h(
+          "svg",
+          {
+            key: `receiver-${fc.faceIndex}`,
+            class: "polycss-shadow polycss-shadow-svg polycss-shadow-receiver",
+            "data-poly-shadow-type": "receiver",
+            "data-poly-shadow-receiver-face": String(fc.faceIndex),
+            "data-poly-shadow-receiver-polys": JSON.stringify(fc.memberPolyIndices),
+            width: String(fc.width),
+            height: String(fc.height),
+            viewBox: `0 0 ${fc.width} ${fc.height}`,
+            style: {
+              position: "absolute",
+              top: "0",
+              left: "0",
+              display: "block",
+              overflow: "hidden",
+              transformOrigin: "0 0",
+              pointerEvents: "none",
+              willChange: "transform",
+              opacity: String(fc.svgOpacity),
+              transform: fc.matrixCss,
+            } as CSSProperties,
+          },
+          [
+            ...(fc.baseFill && fc.baseD
+              ? [h("path", { d: fc.baseD, fill: fc.baseFill, "fill-rule": "nonzero" })]
+              : []),
+            ...fc.layers.map((layer, idx) =>
               h("path", {
                 key: idx,
-                d: p.d,
-                fill: spec.fill,
-                stroke: spec.fill,
-                "stroke-width": "3",
-                "stroke-linejoin": "round",
-                opacity: spec.opacity.toFixed(4),
-                "data-poly-shadow-caster-polys": JSON.stringify(p.casterPolygonIndices),
+                d: layer.d,
+                fill: layer.fill,
+                "fill-rule": "nonzero",
+                ...(layer.opacity !== 1 ? { opacity: layer.opacity.toFixed(4) } : {}),
+                ...(layer.multiply ? { style: { mixBlendMode: "multiply" } as CSSProperties } : {}),
               }),
             ),
-          ),
-        );
-      };
-      const nodes: VNode[] = [];
-      if (runDirectionalShadow) nodes.push(...runPass("d", lightDir, undefined, undefined));
-      for (let li = 0; li < cssPointPositions.length; li++) {
-        nodes.push(...runPass(`p${li}`, lightDir, cssPointPositions[li], shadowPointIndices[li]));
-      }
-      return nodes;
+          ],
+        ),
+      );
     });
 
     // Register this mesh with the shadow registry when castShadow=true in

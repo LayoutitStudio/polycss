@@ -213,6 +213,7 @@ export { buildPolySceneTransform } from "./transform/sceneTransform";
 export type { PolySceneTransformInput } from "./transform/sceneTransform";
 export {
   buildSharedEdgeMap,
+  computeMergedReceiverShadows,
   computeReceiverShadowFaces,
   prepareCasterEdgeOwners,
   prepareCasterPolyItems,
@@ -221,6 +222,9 @@ export {
 export type {
   CasterPolyItem,
   ComputeReceiverShadowFacesInput,
+  MergedReceiverShadowInput,
+  MergedShadowFace,
+  MergedShadowLayer,
   ReceiverCasterInput,
   ReceiverFacePlane,
   ReceiverShadowFaceSpec,
