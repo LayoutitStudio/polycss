@@ -18,10 +18,14 @@ One infinitely-distant light with a single `direction`, `color`, and `intensity`
 
 <PolyDemo
   id="lighting-directional"
-  generator="icosahedron"
-  controls='["rotX","rotY","animate"]'
-  defaults='{"rotX":60,"rotY":30,"animate":true,"light":{"direction":[0.5,-0.6,0.6],"intensity":1,"ambient":0.25}}'
+  generator="dodecahedron"
+  generatorParams='{"radius":16}'
+  shadow
+  controls='["lightYaw","lightPitch","lightIntensity","ambient","rotY"]'
+  defaults='{"rotX":58,"rotY":35,"zoom":0.12,"light":{"intensity":4.5,"ambient":0.4}}'
 />
+
+Drag **light °** / **light ↑** to move the sun and watch the lit side — and the cast shadow on the ground — follow; **intensity** and **ambient** control brightness and fill.
 
 <Tabs syncKey="fw">
 <TabItem label="Vanilla JS">
