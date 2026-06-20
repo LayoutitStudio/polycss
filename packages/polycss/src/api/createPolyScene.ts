@@ -2179,6 +2179,8 @@ export function createPolyScene(
     const prevTextureProjection = currentOptions.textureProjection;
     const prevTextureLighting = currentOptions.textureLighting;
     const prevLightDir = currentOptions.directionalLight?.direction;
+    const prevDirIntensity = currentOptions.directionalLight?.intensity;
+    const prevDirColor = currentOptions.directionalLight?.color;
     const prevShadow = currentOptions.shadow;
     const prevPointLights = currentOptions.pointLights;
     const normalizedPartial = normalizeSceneOptions(partial);
@@ -2243,16 +2245,25 @@ export function createPolyScene(
     //    <path>; lift shifts the ground plane and rebuilds geometry)
     const textureLightingChanged = partial.textureLighting !== undefined &&
       prevTextureLighting !== currentOptions.textureLighting;
-    const nextLightDir = currentOptions.directionalLight?.direction;
-    const lightDirChanged = partial.directionalLight !== undefined
-      && !vec3Equal(prevLightDir, nextLightDir);
+    const nextDirLight = currentOptions.directionalLight;
+    // ANY directional change re-emits shadows — not just direction, but also
+    // intensity and color: the shadow only emits for intensity > 0 (and its
+    // shaded fill depends on intensity/color), so toggling a light off or
+    // sliding its intensity must re-project. The emit short-circuit key is
+    // keyed on direction only, so intensity/color changes also bust the cache
+    // below (otherwise emitSceneShadows would no-op).
+    const directionalChanged = partial.directionalLight !== undefined && (
+      !vec3Equal(prevLightDir, nextDirLight?.direction) ||
+      (prevDirIntensity ?? 1) !== (nextDirLight?.intensity ?? 1) ||
+      (prevDirColor ?? "#ffffff") !== (nextDirLight?.color ?? "#ffffff")
+    );
     const nextShadow = currentOptions.shadow;
     const shadowAppearanceChanged = partial.shadow !== undefined
       && !shadowOptsEqual(prevShadow, nextShadow);
     // Point-light changes also re-emit: the emit short-circuit key folds in
     // each shadow point light's CSS position, so a moved/toggled point light
     // produces a different key and re-projects its radial shadow.
-    const shadowReemitNeeded = lightDirChanged || shadowAppearanceChanged || pointLightsChanged;
+    const shadowReemitNeeded = directionalChanged || shadowAppearanceChanged || pointLightsChanged;
     if (textureLightingChanged) {
       // Every mesh needs a full re-render to swap baked/dynamic leaf
       // emission. Baked leaves carry inline `color: rgb(...)`; dynamic
@@ -2279,10 +2290,11 @@ export function createPolyScene(
       invalidateShadowLightCache();
       emitSceneShadows();
     } else if (shadowReemitNeeded) {
-      // Shadow-appearance change (color/opacity/lift) must bust the cache;
-      // a light-direction-only change is safe because the quantization key
-      // already discriminates by direction.
-      if (shadowAppearanceChanged) invalidateShadowLightCache();
+      // The emit short-circuit key only discriminates by light DIRECTION, so a
+      // direction change self-busts, but shadow-appearance and directional
+      // intensity/color changes must bust the cache explicitly or
+      // emitSceneShadows would no-op.
+      if (shadowAppearanceChanged || directionalChanged) invalidateShadowLightCache();
       emitSceneShadows();
     }
     if (shadowAppearanceChanged && partial.shadow?.lift !== prevShadow?.lift) {

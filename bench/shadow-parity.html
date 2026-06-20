@@ -95,8 +95,8 @@
     const vanillaScene = createPolyScene(document.getElementById("host-vanilla"), {
       camera: vanillaCam, ...sceneOpts(params()),
     });
-    vanillaScene.add({ polygons: FLOOR }, { receiveShadow: true });
-    vanillaScene.add({ polygons: CUBE }, { position: CUBE_CENTER, castShadow: true });
+    const vanillaFloor = vanillaScene.add({ polygons: FLOOR }, { receiveShadow: true });
+    const vanillaCube = vanillaScene.add({ polygons: CUBE }, { position: CUBE_CENTER, castShadow: true });
     function sceneOpts(p) {
       return {
         directionalLight: p.directionalLight, pointLights: p.pointLights,
@@ -107,6 +107,15 @@
       vanillaCam.update({ rotX: p.cam.rotX, rotY: p.cam.rotY, zoom: p.cam.zoom });
       vanillaScene.applyCamera();
       vanillaScene.setOptions(sceneOpts(p));
+      // Imperative baked mode freezes the lit surface until an explicit
+      // rebake (perf: no re-bake per drag frame). The declarative React/Vue
+      // renderers re-bake automatically on prop change, so rebake here to keep
+      // all panes in parity when the light changes. Shadows re-emit via
+      // setOptions already; dynamic mode shades in CSS (no rebake needed).
+      if (p.textureLighting === "baked") {
+        vanillaFloor.rebakeAtlas();
+        vanillaCube.rebakeAtlas();
+      }
     }
 
     // ── React + Vue panes ───────────────────────────────────────────────
