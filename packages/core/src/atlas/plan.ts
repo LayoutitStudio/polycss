@@ -1,5 +1,6 @@
 import type {
   Polygon,
+  PolyPointLight,
   TextureTriangle,
   Vec2,
   Vec3,
@@ -49,7 +50,7 @@ import {
   offsetConvexPolygonPointsByEdgeAmounts,
   stableBasisFromPlan,
 } from "./solidTriangle";
-import { textureTintFactors, shadePolygon } from "./paintDefaults";
+import { textureTintFactors, shadePolygon, type PointLightContrib } from "./paintDefaults";
 import {
   computePlanSeamBleedEdgeAmounts,
   computeSeamBleedInsets,
@@ -250,6 +251,39 @@ export function seamLightBrightness(
   const directScale = lightIntensity * Math.max(0, info.normal[0] * lx + info.normal[1] * ly + info.normal[2] * lz);
   const tint = textureTintFactors(directScale, lightColor, ambientColor, ambientIntensity);
   return tint.r * 0.2126 + tint.g * 0.7152 + tint.b * 0.0722;
+}
+
+/**
+ * Per-face point-light contributions for a polygon. Each scene point light
+ * (already in MESH-LOCAL user coords via the renderer) is converted to the
+ * CSS frame the polygon's `cssPts` use, then a direction-only Lambert scale
+ * is computed against the face centroid + normal. Returns `undefined` when
+ * there are no point lights so the shading fast path is unchanged.
+ */
+export function computePointContribs(
+  pointLights: readonly PolyPointLight[] | undefined,
+  cssPts: Vec3[],
+  normal: Vec3,
+  tile: number,
+  elev: number,
+): PointLightContrib[] | undefined {
+  if (!pointLights || pointLights.length === 0) return undefined;
+  let cx = 0, cy = 0, cz = 0;
+  for (const p of cssPts) { cx += p[0]; cy += p[1]; cz += p[2]; }
+  const inv = 1 / cssPts.length;
+  cx *= inv; cy *= inv; cz *= inv;
+  const out: PointLightContrib[] = [];
+  for (const pl of pointLights) {
+    // Mesh-local user position → CSS frame (same axis swap × tile/elev as cssPoints).
+    const px = pl.position[1] * tile, py = pl.position[0] * tile, pz = pl.position[2] * elev;
+    let dx = px - cx, dy = py - cy, dz = pz - cz;
+    const d = Math.hypot(dx, dy, dz) || 1;
+    dx /= d; dy /= d; dz /= d;
+    const lambert = normal[0] * dx + normal[1] * dy + normal[2] * dz;
+    if (lambert <= 0) continue;
+    out.push({ color: pl.color ?? "#ffffff", scale: Math.max(0, pl.intensity ?? 1) * lambert });
+  }
+  return out.length ? out : undefined;
 }
 
 export function basisAxisKey(axis: Vec3): string {
@@ -829,8 +863,11 @@ export function computeTextureAtlasPlan(
   const directScale = occluded
     ? 0
     : lightIntensity * Math.max(0, normal[0] * lx + normal[1] * ly + normal[2] * lz);
-  const textureTint = textureTintFactors(directScale, lightColor, ambientColor, ambientIntensity);
-  const shadedColor = shadePolygon(polygon.color ?? "#cccccc", directScale, lightColor, ambientColor, ambientIntensity);
+  // Point lights are occlusion-shaded the same as directional: a polygon the
+  // directional light can't reach (occluded) still gets point-light + ambient.
+  const pointContribs = computePointContribs(options.pointLights, pts, normal, tile, elev);
+  const textureTint = textureTintFactors(directScale, lightColor, ambientColor, ambientIntensity, pointContribs);
+  const shadedColor = shadePolygon(polygon.color ?? "#cccccc", directScale, lightColor, ambientColor, ambientIntensity, pointContribs);
 
   let uvAffine: UvAffine | null = null;
   let uvSampleRect: UvSampleRect | null = null;

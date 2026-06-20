@@ -55,11 +55,39 @@ export function rgbToHex({ r, g, b }: RGB): string {
  * (see applyTextureTint in the renderer). `directScale` is already
  * `intensity × max(n·L, 0)` (computed by the caller).
  */
+/**
+ * One point light's per-face contribution to a polygon: its color and the
+ * scalar `intensity × max(0, n·L̂)` already computed by the caller against the
+ * face normal + centroid (point lights are direction-only — no distance
+ * falloff). Multiple lights of different colours can't fold into one scalar,
+ * so the shading functions accumulate these per channel in linear space.
+ */
+export interface PointLightContrib {
+  color: string;
+  scale: number;
+}
+
+/** Accumulate Σ pointContrib.color_linear × scale into a running [r,g,b]. */
+function addPointContribs(
+  acc: [number, number, number],
+  pointContribs: readonly PointLightContrib[] | undefined,
+): void {
+  if (!pointContribs) return;
+  for (const pc of pointContribs) {
+    if (pc.scale <= 0) continue;
+    const c = parseHex(pc.color);
+    acc[0] += srgbChannelToLinear(c.r / 255) * pc.scale;
+    acc[1] += srgbChannelToLinear(c.g / 255) * pc.scale;
+    acc[2] += srgbChannelToLinear(c.b / 255) * pc.scale;
+  }
+}
+
 export function textureTintFactors(
   directScale: number,
   lightColor: string,
   ambientColor: string,
   ambientIntensity: number,
+  pointContribs?: readonly PointLightContrib[],
 ): RGBFactors {
   const light = parseHex(lightColor);
   const amb = parseHex(ambientColor);
@@ -69,10 +97,16 @@ export function textureTintFactors(
   const ambLR = srgbChannelToLinear(amb.r / 255);
   const ambLG = srgbChannelToLinear(amb.g / 255);
   const ambLB = srgbChannelToLinear(amb.b / 255);
+  const acc: [number, number, number] = [
+    lightLR * directScale,
+    lightLG * directScale,
+    lightLB * directScale,
+  ];
+  addPointContribs(acc, pointContribs);
   return {
-    r: (lightLR * directScale + ambLR * ambientIntensity) * INV_PI,
-    g: (lightLG * directScale + ambLG * ambientIntensity) * INV_PI,
-    b: (lightLB * directScale + ambLB * ambientIntensity) * INV_PI,
+    r: (acc[0] + ambLR * ambientIntensity) * INV_PI,
+    g: (acc[1] + ambLG * ambientIntensity) * INV_PI,
+    b: (acc[2] + ambLB * ambientIntensity) * INV_PI,
   };
 }
 
@@ -100,6 +134,7 @@ export function shadePolygon(
   lightColor: string,
   ambientColor: string,
   ambientIntensity: number,
+  pointContribs?: readonly PointLightContrib[],
 ): string {
   const base = parseHex(baseColor);
   const light = parseHex(lightColor);
@@ -117,13 +152,19 @@ export function shadePolygon(
   const ambLB = srgbChannelToLinear(amb.b / 255);
   // Physically based diffuse (Three.js MeshLambertMaterial parity):
   //   lit = (BRDF_Lambert(albedo)) × (directIrradiance + indirectIrradiance)
-  //       = (albedo / π) × (lightColor × lambert × I + ambientColor × I_amb)
-  // The `/π` wraps the whole sum — both the direct and ambient contributions
-  // go through the same diffuse BRDF, so ambient is also normalized by π.
-  // `directScale` is `intensity × max(n·L, 0)` (computed by the caller).
-  const litLR = baseLR * (lightLR * directScale + ambLR * ambientIntensity) * INV_PI;
-  const litLG = baseLG * (lightLG * directScale + ambLG * ambientIntensity) * INV_PI;
-  const litLB = baseLB * (lightLB * directScale + ambLB * ambientIntensity) * INV_PI;
+  //       = (albedo / π) × (Σ lightColor × lambert × I + ambientColor × I_amb)
+  // The `/π` wraps the whole sum — direct, point, and ambient contributions
+  // all go through the same diffuse BRDF. `directScale` is the directional
+  // `intensity × max(n·L, 0)`; pointContribs add Σ pointColor × pointScale.
+  const acc: [number, number, number] = [
+    lightLR * directScale,
+    lightLG * directScale,
+    lightLB * directScale,
+  ];
+  addPointContribs(acc, pointContribs);
+  const litLR = baseLR * (acc[0] + ambLR * ambientIntensity) * INV_PI;
+  const litLG = baseLG * (acc[1] + ambLG * ambientIntensity) * INV_PI;
+  const litLB = baseLB * (acc[2] + ambLB * ambientIntensity) * INV_PI;
   const enc = (v: number) =>
     Math.max(0, Math.min(255, Math.round(linearChannelToSrgb(Math.max(0, Math.min(1, v))) * 255)));
   const r = enc(litLR);

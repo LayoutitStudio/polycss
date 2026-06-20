@@ -23,6 +23,7 @@ import type {
   ParseResult,
   Polygon,
   Vec3,
+  PolyPointLight,
   CameraCullNormalGroup,
   CameraCullRotation,
 } from "@layoutit/polycss-core";
@@ -77,6 +78,7 @@ import {
   quantizeNormalKey,
   worldDirectionToCss,
   worldDirectionalLightToCss,
+  worldPositionToCss,
 } from "./scene/transforms";
 import {
   shadowOptsEqual,
@@ -978,7 +980,41 @@ export function createPolyScene(
     // frame. invalidateShadowLightCache() is called by every code path that
     // mutates caster/receiver geometry or shadow appearance, so a cache hit
     // here means "same light, same scene → previous SVG content is still valid".
-    const lightKey = quantizeLightDirKey(lightDir);
+    // Point lights are baked-mode only (they don't drive dynamic-mode surface
+    // shading), so in dynamic mode they must not drive shadows either —
+    // otherwise colored point shadows appear over a floor the same lights
+    // never lit, which reads as broken. Dynamic mode → directional shadows
+    // only (ambient fill). Baked mode → full point participation.
+    const pointLightsForShadow = currentOptions.textureLighting === "dynamic"
+      ? []
+      : (currentOptions.pointLights ?? []);
+    // ALL point lights in CSS frame — the shaded shadow color needs every
+    // light that illuminates the receiver (even non-casters), minus the one
+    // being shadowed. `shadowPointIndices` are the entries that cast.
+    const allPointLightsCss = pointLightsForShadow.map((pl) => ({
+      position: worldPositionToCss(pl.position),
+      color: pl.color,
+      intensity: pl.intensity,
+    }));
+    const shadowPointIndices = pointLightsForShadow
+      .map((pl, i) => (pl.castShadow ? i : -1))
+      .filter((i) => i >= 0);
+    const cssPointPositions = shadowPointIndices.map((i) => allPointLightsCss[i]!.position);
+    // The directional pass runs only for an actual directional light with
+    // nonzero intensity. Three.js parity: a zero-intensity (or absent)
+    // directional light removes no light, so a blocked region is indistinct
+    // from a lit one — no shadow. (The old implicit-sun fallback that drew a
+    // default-direction shadow when no light was configured is gone.)
+    const dirLight = currentOptions.directionalLight;
+    const runDirectionalShadow = !!dirLight?.direction && (dirLight.intensity ?? 1) > 0;
+    const dirKey = quantizeLightDirKey(lightDir);
+    // Fold point-light positions into the short-circuit key so moving (or
+    // toggling) a shadow point light re-emits even when the directional
+    // vector is unchanged.
+    const pointKey = cssPointPositions
+      .map((p) => `${Math.round(p[0])},${Math.round(p[1])},${Math.round(p[2])}`)
+      .join(";");
+    const lightKey = dirKey === null && pointKey === "" ? null : `${dirKey ?? ""}|${pointKey}`;
     if (lightKey !== null && lightKey === lastEmittedShadowLightKey) return;
 
     // Per-caster shadow dedup (independent meshes can't dedup against
@@ -1044,7 +1080,18 @@ export function createPolyScene(
     hideGroundShadow();
     for (const receiver of meshes) {
       if (receiver.disposed || !receiver.receiveShadow) continue;
-      emitReceiverShadowsImpl(ctx, casters, dedupByCaster, receiver, dedupByReceiver.get(receiver) ?? new Set(), lightDir, r, g, b, shadowOpacity);
+      const dedup = dedupByReceiver.get(receiver) ?? new Set();
+      // All of this receiver's light passes are merged into one SVG per face
+      // (base = full-lit color, each pass a multiply layer) so overlapping
+      // shadows composite to the both-blocked color. The directional pass runs
+      // whenever a directional light is configured, or — to preserve the
+      // implicit-sun shadow — when there are no shadow-casting point lights;
+      // a point-only scene skips it so no phantom default-sun shadow appears.
+      emitReceiverShadowsImpl(ctx, casters, dedupByCaster, receiver, dedup, lightDir, r, g, b, shadowOpacity, {
+        runDirectional: runDirectionalShadow,
+        points: cssPointPositions.map((lightPos, li) => ({ lightPos, index: shadowPointIndices[li]! })),
+        allPointLights: allPointLightsCss,
+      });
     }
     lastEmittedShadowLightKey = lightKey;
   }
@@ -1132,6 +1179,24 @@ export function createPolyScene(
       !entry.castShadow;
   }
 
+  // Convert the scene's world-space point lights into a mesh's LOCAL frame
+  // (subtract the mesh position, inverse-rotate by the mesh rotation) so they
+  // match the local vertex frame the atlas plan shades in. The atlas plan
+  // applies the CSS axis-swap × tile itself (computePointContribs). Returns
+  // undefined when there are no point lights so the shading fast path holds.
+  function localPointLightsForEntry(entry: MeshEntry): PolyPointLight[] | undefined {
+    const pls = currentOptions.pointLights;
+    if (!pls || pls.length === 0) return undefined;
+    const pos = entry.handle.transform.position ?? [0, 0, 0];
+    const rot = entry.handle.transform.rotation ?? [0, 0, 0];
+    const hasRot = rot[0] !== 0 || rot[1] !== 0 || rot[2] !== 0;
+    return pls.map((pl) => {
+      const rel: Vec3 = [pl.position[0] - pos[0], pl.position[1] - pos[1], pl.position[2] - pos[2]];
+      const local = hasRot ? inverseRotateVec3(rel, rot as Vec3) : rel;
+      return { ...pl, position: local };
+    });
+  }
+
   function renderEntry(entry: MeshEntry, lightDirectionOverride?: Vec3): void {
     clearRendered(entry);
     const baseDirLight = currentOptions.directionalLight;
@@ -1188,6 +1253,7 @@ export function createPolyScene(
     const renderOptions = {
       doc,
       directionalLight,
+      pointLights: localPointLightsForEntry(entry),
       ambientLight: currentOptions.ambientLight,
       textureLighting: currentOptions.textureLighting,
       textureQuality: currentOptions.textureQuality,
@@ -1276,6 +1342,7 @@ export function createPolyScene(
     const renderOptions = {
       doc,
       directionalLight,
+      pointLights: localPointLightsForEntry(entry),
       ambientLight: currentOptions.ambientLight,
       textureLighting: currentOptions.textureLighting,
       textureQuality: currentOptions.textureQuality,
@@ -1468,6 +1535,7 @@ export function createPolyScene(
     const renderOptions = {
       doc,
       directionalLight,
+      pointLights: localPointLightsForEntry(entry),
       ambientLight: currentOptions.ambientLight,
       textureLighting: currentOptions.textureLighting,
       textureQuality: currentOptions.textureQuality,
@@ -2111,7 +2179,10 @@ export function createPolyScene(
     const prevTextureProjection = currentOptions.textureProjection;
     const prevTextureLighting = currentOptions.textureLighting;
     const prevLightDir = currentOptions.directionalLight?.direction;
+    const prevDirIntensity = currentOptions.directionalLight?.intensity;
+    const prevDirColor = currentOptions.directionalLight?.color;
     const prevShadow = currentOptions.shadow;
+    const prevPointLights = currentOptions.pointLights;
     const normalizedPartial = normalizeSceneOptions(partial);
     currentOptions = { ...currentOptions, ...normalizedPartial };
     // Keep the SceneContext's options ref pointing to the latest snapshot so
@@ -2145,13 +2216,23 @@ export function createPolyScene(
     const textureProjectionChanged =
       Object.prototype.hasOwnProperty.call(partial, "textureProjection") &&
       normalizedPartial.textureProjection !== prevTextureProjection;
+    // Point lights are baked per-face into the atlas/solid colors, so any
+    // change (added/removed/moved/recolored) requires a re-bake of every
+    // mesh. Compare a compact signature so passing the same array each tick
+    // (e.g. bundled with camera updates) doesn't re-bake needlessly.
+    const pointLightSig = (pls: PolyPointLight[] | undefined): string =>
+      (pls ?? []).map((p) => `${p.position.join(",")}|${p.color ?? ""}|${p.intensity ?? 1}|${p.castShadow ? 1 : 0}`).join(";");
+    const pointLightsChanged =
+      Object.prototype.hasOwnProperty.call(partial, "pointLights") &&
+      pointLightSig(currentOptions.pointLights) !== pointLightSig(prevPointLights);
     if (
       strategiesChanged ||
       seamBleedChanged ||
       textureLeafSizingChanged ||
       textureImageRenderingChanged ||
       textureBackendChanged ||
-      textureProjectionChanged
+      textureProjectionChanged ||
+      pointLightsChanged
     ) {
       for (const entry of meshes) renderEntry(entry);
     }
@@ -2164,13 +2245,25 @@ export function createPolyScene(
     //    <path>; lift shifts the ground plane and rebuilds geometry)
     const textureLightingChanged = partial.textureLighting !== undefined &&
       prevTextureLighting !== currentOptions.textureLighting;
-    const nextLightDir = currentOptions.directionalLight?.direction;
-    const lightDirChanged = partial.directionalLight !== undefined
-      && !vec3Equal(prevLightDir, nextLightDir);
+    const nextDirLight = currentOptions.directionalLight;
+    // ANY directional change re-emits shadows — not just direction, but also
+    // intensity and color: the shadow only emits for intensity > 0 (and its
+    // shaded fill depends on intensity/color), so toggling a light off or
+    // sliding its intensity must re-project. The emit short-circuit key is
+    // keyed on direction only, so intensity/color changes also bust the cache
+    // below (otherwise emitSceneShadows would no-op).
+    const directionalChanged = partial.directionalLight !== undefined && (
+      !vec3Equal(prevLightDir, nextDirLight?.direction) ||
+      (prevDirIntensity ?? 1) !== (nextDirLight?.intensity ?? 1) ||
+      (prevDirColor ?? "#ffffff") !== (nextDirLight?.color ?? "#ffffff")
+    );
     const nextShadow = currentOptions.shadow;
     const shadowAppearanceChanged = partial.shadow !== undefined
       && !shadowOptsEqual(prevShadow, nextShadow);
-    const shadowReemitNeeded = lightDirChanged || shadowAppearanceChanged;
+    // Point-light changes also re-emit: the emit short-circuit key folds in
+    // each shadow point light's CSS position, so a moved/toggled point light
+    // produces a different key and re-projects its radial shadow.
+    const shadowReemitNeeded = directionalChanged || shadowAppearanceChanged || pointLightsChanged;
     if (textureLightingChanged) {
       // Every mesh needs a full re-render to swap baked/dynamic leaf
       // emission. Baked leaves carry inline `color: rgb(...)`; dynamic
@@ -2197,10 +2290,11 @@ export function createPolyScene(
       invalidateShadowLightCache();
       emitSceneShadows();
     } else if (shadowReemitNeeded) {
-      // Shadow-appearance change (color/opacity/lift) must bust the cache;
-      // a light-direction-only change is safe because the quantization key
-      // already discriminates by direction.
-      if (shadowAppearanceChanged) invalidateShadowLightCache();
+      // The emit short-circuit key only discriminates by light DIRECTION, so a
+      // direction change self-busts, but shadow-appearance and directional
+      // intensity/color changes must bust the cache explicitly or
+      // emitSceneShadows would no-op.
+      if (shadowAppearanceChanged || directionalChanged) invalidateShadowLightCache();
       emitSceneShadows();
     }
     if (shadowAppearanceChanged && partial.shadow?.lift !== prevShadow?.lift) {

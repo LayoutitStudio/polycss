@@ -18,6 +18,7 @@ The React/Vue components and `createPolyScene()` support the full table. The `<p
 | Prop | Type | Default | Description |
 |------|------|---------|-------------|
 | `directionalLight` | `PolyDirectionalLight` | None | Directional light source. |
+| `pointLights` | `PolyPointLight[]` | None | Positional lights (direction-only, no falloff). Baked mode only; set `castShadow: true` per light for radial shadows. |
 | `ambientLight` | `PolyAmbientLight` | None | Ambient fill light. |
 | `textureLighting` | `"baked" \| "dynamic"` | `"baked"` | Whether texture lighting is rasterized into atlases or computed with CSS variables. |
 | `textureQuality` | `number \| "auto"` | `"auto"` | Atlas bitmap budget and compositor sprite size. Auto caps large runtime bitmaps and uses a larger desktop sprite to avoid Safari/Firefox flattening artifacts; lower numeric values reduce texture memory and detail. |
@@ -161,7 +162,7 @@ import { PolyPerspectiveCamera, PolyScene, PolyTorus, PolyBox } from "@layoutit/
 
 ### Cast Shadows
 
-Shadows are SVG-projected surfaces. They work in both lighting modes; `textureLighting` controls surface shading, while shadow geometry reprojects when the light or scene geometry changes.
+Shadows are SVG-projected surfaces that reproject when the light or scene geometry changes. Directional-light shadows work in both lighting modes. Point-light shadows are **baked mode only** — like point-light shading, they're omitted in dynamic mode (a colored point shadow over a floor those lights never lit would look broken), so dynamic-mode shadows are directional-only. Where multiple lights overlap on a face, the shadows composite to the correct both-blocked color (each light shows the others' color where it alone is blocked).
 
 ```tsx
 import { PolyCamera, PolyScene, PolyGround, PolyMesh } from "@layoutit/polycss-react";

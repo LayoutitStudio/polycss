@@ -3,6 +3,7 @@ import type { CSSProperties, ReactNode } from "react";
 import type {
   Polygon,
   PolyDirectionalLight,
+  PolyPointLight,
   PolyAmbientLight,
   PolyTextureBackend,
   PolyTextureImageRendering,
@@ -62,6 +63,9 @@ export interface PolySceneProps extends TransformProps {
   rotY?: number;
   zoom?: number;
   directionalLight?: PolyDirectionalLight;
+  /** Point lights (world-space positions). Direction-only per-face Lambert,
+   *  baked-mode only. */
+  pointLights?: PolyPointLight[];
   ambientLight?: PolyAmbientLight;
   /** Textured polygon lighting mode. Defaults to "baked". */
   textureLighting?: PolyTextureLightingMode;
@@ -121,6 +125,7 @@ function PolySceneInner({
   rotY: _rotY,
   zoom: _zoom,
   directionalLight,
+  pointLights,
   ambientLight,
   textureLighting = "baked",
   textureQuality,
@@ -205,17 +210,21 @@ function PolySceneInner({
   // a light slider.
   const directionalForAtlas = textureLighting === "dynamic" ? undefined : directionalLight;
   const ambientForAtlas = textureLighting === "dynamic" ? undefined : ambientLight;
+  // Scene-level polygons sit at world origin (no mesh transform), so point
+  // lights pass through in world coords. Baked-mode only.
+  const pointLightsForAtlas = textureLighting === "dynamic" ? undefined : pointLights;
   const polyContext = useMemo(() => {
     const tileSize = 50;
     return {
       tileSize,
       layerElevation: tileSize,
       directionalLight: directionalForAtlas,
+      pointLights: pointLightsForAtlas,
       ambientLight: ambientForAtlas,
       textureLighting,
       seamBleed,
     };
-  }, [directionalForAtlas, ambientForAtlas, textureLighting, seamBleed]);
+  }, [directionalForAtlas, pointLightsForAtlas, ambientForAtlas, textureLighting, seamBleed]);
 
   // Bbox center of all auto-centerable meshes in world coords. Kept as a Vec3
   // so it can be added to `target` inside the scene transform — same
@@ -485,6 +494,7 @@ function PolySceneInner({
     () => ({
       textureLighting,
       directionalLight,
+      pointLights,
       ambientLight,
       strategies,
       seamBleed,
@@ -501,7 +511,7 @@ function PolySceneInner({
       groundCssZ,
       sceneEl,
     }),
-    [textureLighting, directionalLight, ambientLight, strategies, seamBleed, textureLeafSizing, textureImageRendering, textureBackend, textureProjection, shadow, registerShadowCaster, registerShadowReceiver, shadowCastersVersion, hasShadowReceiver, groundCssZ, sceneEl],
+    [textureLighting, directionalLight, pointLights, ambientLight, strategies, seamBleed, textureLeafSizing, textureImageRendering, textureBackend, textureProjection, shadow, registerShadowCaster, registerShadowReceiver, shadowCastersVersion, hasShadowReceiver, groundCssZ, sceneEl],
   );
 
   return (

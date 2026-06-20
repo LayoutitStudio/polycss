@@ -15,6 +15,7 @@
 import { BASE_TILE } from "../camera/camera";
 import { normalFacesCamera, type CameraCullRotation } from "../cull/cameraBackfaceCulling";
 import { shadePolygon } from "../atlas/paintDefaults";
+import { parseHexColor } from "../color/color";
 import { rotateVec3InWrapperCssFrame } from "../math/rotation";
 import { clipPolygonToConvex2D } from "./clipping";
 import { ensureCcw2D } from "./projection";
@@ -207,6 +208,15 @@ export interface ReceiverShadowFaceSpec<T = unknown> {
    *  if applicable). */
   opacity: number;
   paths: Array<ReceiverShadowPath<T>>;
+  /** Full-lit face color C (all lights), for the multi-light merge: callers
+   *  multiply C by each pass's `fill/C` factor so overlaps composite to the
+   *  both-blocked color. Empty string for textured receivers (per-pixel base,
+   *  multiply can't be uniform — those fall back to cumulative-alpha). */
+  fullLitFill: string;
+  /** Every clipped caster polygon for this pass in absolute face-(u,v) space
+   *  (NOT offset by the tight bbox). The multi-light merge re-bases these to a
+   *  shared per-face bbox so all lights' shadows live in one SVG. */
+  facePolysUv: Array<Array<[number, number]>>;
 }
 
 /**
@@ -442,8 +452,25 @@ export interface ComputeReceiverShadowFacesInput<T = unknown> {
   receiverHasTexture: boolean;
   /** Per-caster items + caller id, in caller-defined order. */
   casters: ReceiverCasterInput<T>[];
-  /** Directional light vector in CSS frame. */
+  /** Light direction in CSS frame, pointing TOWARD the light (to-source).
+   *  For a point light this is a representative direction (used only for the
+   *  textured-receiver opacity ratio); per-vertex directions come from
+   *  `lightPos`. */
   lightDir: Vec3;
+  /** When set, the light is a point light at this CSS-frame position. The
+   *  shadow projection becomes radial (per-vertex direction from the light)
+   *  and the silhouette fast path is disabled (facing is per-polygon). */
+  lightPos?: Vec3;
+  /** Every point light in the scene (CSS-frame absolute positions), used to
+   *  compute the SHADED shadow color — a shadow shows the receiver lit by all
+   *  lights EXCEPT the blocked one, so a spot shadowed from one colored light
+   *  still shows the others' color (Three.js parity). Includes non-shadow-
+   *  casting lights, since they still illuminate the shadowed region. */
+  allPointLights?: ReadonlyArray<{ position: Vec3; color?: string; intensity?: number }>;
+  /** For a point-light pass, the index into `allPointLights` of the light
+   *  being shadowed (excluded from the remaining-light fill). Undefined for
+   *  the directional pass (which instead excludes the directional light). */
+  thisPointIndex?: number;
   /** Camera cull rotation (rotX/rotY + receiver mesh rotation) so back-
    *  facing receiver faces can be skipped. */
   cameraRot: CameraCullRotation;
@@ -465,18 +492,41 @@ export function computeReceiverShadowFaces<T = unknown>(
 ): ReceiverShadowFaceSpec<T>[] {
   const {
     receiverPlanes, receiverPolygons, receiverHasTexture, casters,
-    lightDir, cameraRot, ambientLight, directionalLight, shadow,
+    lightDir, lightPos, allPointLights, thisPointIndex,
+    cameraRot, ambientLight, directionalLight, shadow,
   } = input;
 
   const llen = Math.hypot(lightDir[0], lightDir[1], lightDir[2]) || 1;
   const Lx = lightDir[0] / llen;
   const Ly = lightDir[1] / llen;
   const Lz = lightDir[2] / llen;
+  // Per-point to-source direction. Directional lights ignore the argument
+  // and return the constant `[Lx, Ly, Lz]` so the directional code path is
+  // byte-identical; point lights return the normalized vector from the
+  // shading point toward the light position.
+  const isPoint = !!lightPos;
+  const dirAt = isPoint
+    ? (p: Vec3): Vec3 => {
+        const dx = lightPos![0] - p[0];
+        const dy = lightPos![1] - p[1];
+        const dz = lightPos![2] - p[2];
+        const len = Math.hypot(dx, dy, dz) || 1;
+        return [dx / len, dy / len, dz / len];
+      }
+    : (_p: Vec3): Vec3 => [Lx, Ly, Lz];
   const ambColor = ambientLight?.color ?? "#ffffff";
   const ambIntensity = ambientLight?.intensity ?? 0.4;
   const dirIntensity = directionalLight?.intensity ?? 1;
+  const dirColor = directionalLight?.color ?? "#ffffff";
   const userShadowColor = shadow?.color ?? "#000000";
   const opacity = shadow?.opacity ?? 0.25;
+  // This pass excludes one light from the receiver's lit color: the directional
+  // light when it's the directional pass (no lightPos), else the point light at
+  // `thisPointIndex`. The shadow then paints the "remaining light" color so a
+  // region blocked from one colored light still shows the others (Three.js
+  // colored shadows). A lone directional light → remaining = ambient only,
+  // identical to the previous flat fill (no regression).
+  const isDirPass = !isPoint;
   // `maxExtend` ("shadow reach") caps how far a shadow can stretch beyond
   // the caster's perpendicular footprint on the receiver plane — matches
   // the semantic already applied in groundShadow.ts to the infinite-ground
@@ -507,6 +557,35 @@ export function computeReceiverShadowFaces<T = unknown>(
   // Clean closed meshes keep single-sided casting (correct + cheaper).
   const doubleSidedByCaster: boolean[] = new Array(casters.length).fill(false);
   const silhouetteByCaster: Array<Vec3[][] | null> = casters.map((casterEntry, casterIdx) => {
+    // Point lights: project the caster SILHOUETTE (its outline as seen from
+    // the light), not individual back-faces. An object resting on the
+    // receiver casts a FILLED contact shadow; the per-poly back-face union
+    // only produces a thin frame (side faces are edge-on to an overhead
+    // light, the contact face is coplanar and culled), leaving the interior
+    // unshadowed. Facing is per-polygon here (each face's normal vs the
+    // direction to the light position), unlike the directional constant.
+    if (isPoint) {
+      if (casterEntry.selfShadowEdgeMap) { doubleSidedByCaster[casterIdx] = true; return null; }
+      const edgeOwners = casterEntry.edgeOwners;
+      if (!edgeOwners) return null;
+      const N = casterEntry.casterPolygonCount ?? 0;
+      if (N === 0) return null;
+      const facing: boolean[] = new Array(N).fill(true);
+      for (const item of casterEntry.items) {
+        if (item.polygonIndex >= N) continue;
+        const nrm = item.planeN;
+        if (!nrm) { facing[item.polygonIndex] = true; continue; }
+        let cx = 0, cy = 0, cz = 0;
+        for (const w of item.wv) { cx += w[0]; cy += w[1]; cz += w[2]; }
+        const inv = item.wv.length > 0 ? 1 / item.wv.length : 0;
+        const d = dirAt([cx * inv, cy * inv, cz * inv]);
+        // Caster (inside silhouette) when the normal points away from the
+        // light, matching classifyFacing's directional convention.
+        facing[item.polygonIndex] = nrm[0] * d[0] + nrm[1] * d[1] + nrm[2] * d[2] < -1e-6;
+      }
+      if (!silhouetteReliable(edgeOwners, facing)) { doubleSidedByCaster[casterIdx] = true; return null; }
+      return extractSilhouetteLoops(edgeOwners, facing);
+    }
     const edgeOwners = casterEntry.edgeOwners;
     // Self-shadow (caster IS the receiver mesh): use the per-poly path AND
     // cast double-sided. Imported meshes have occluder faces that point away
@@ -600,12 +679,47 @@ export function computeReceiverShadowFaces<T = unknown>(
   const cameraOnlyRot: CameraCullRotation = { rotX: cameraRot.rotX, rotY: cameraRot.rotY };
   for (const group of receiverPlanes) {
     const { O, n, u, v, outlineUv, minU, minV, width, height } = group;
-    // Back-facing receiver face → can't receive light → skip.
-    const Ldotn = Lx * n[0] + Ly * n[1] + Lz * n[2];
+    // Back-facing receiver face → can't receive light → skip. For point
+    // lights the representative direction is the to-source vector at the
+    // face origin.
+    const faceDir = dirAt(O);
+    const Ldotn = faceDir[0] * n[0] + faceDir[1] * n[1] + faceDir[2] * n[2];
     if (Ldotn <= 1e-6) continue;
     // Camera back-face cull. SVGs don't honor CSS backface-visibility
     // reliably, so a back-of-camera receiver-face SVG would still paint.
     if (!normalFacesCamera(n, cameraOnlyRot)) continue;
+
+    // Per-face light scalars for the SHADED shadow color. `dirDot` is the
+    // directional Lambert term (always vs the directional vector, not the
+    // pass's faceDir). Point dots use the to-source direction from the face
+    // CENTROID — matching the baked surface shading (per-polygon centroid), so
+    // the shadow's full-lit base color equals the painted receiver and the SVG
+    // leaves no visible base-color box. (Projection still uses per-vertex
+    // radial directions; only the flat per-face color uses the centroid.)
+    const dirDot = Math.max(0, Lx * n[0] + Ly * n[1] + Lz * n[2]);
+    let cMeanU = 0, cMeanV = 0;
+    for (const pt of outlineUv) { cMeanU += pt[0]; cMeanV += pt[1]; }
+    const cInv = outlineUv.length > 0 ? 1 / outlineUv.length : 0;
+    cMeanU *= cInv; cMeanV *= cInv;
+    const cen: Vec3 = [
+      O[0] + cMeanU * u[0] + cMeanV * v[0],
+      O[1] + cMeanU * u[1] + cMeanV * v[1],
+      O[2] + cMeanU * u[2] + cMeanV * v[2],
+    ];
+    const pointDots: number[] = [];
+    let pointTotalScale = 0;
+    if (allPointLights) {
+      for (let k = 0; k < allPointLights.length; k++) {
+        const pl = allPointLights[k]!;
+        const dx = pl.position[0] - cen[0];
+        const dy = pl.position[1] - cen[1];
+        const dz = pl.position[2] - cen[2];
+        const len = Math.hypot(dx, dy, dz) || 1;
+        const dot = Math.max(0, (dx / len) * n[0] + (dy / len) * n[1] + (dz / len) * n[2]);
+        pointDots[k] = dot;
+        pointTotalScale += (pl.intensity ?? 1) * dot;
+      }
+    }
 
     const planeDist = (w: Vec3): number =>
       (w[0] - O[0]) * n[0] + (w[1] - O[1]) * n[1] + (w[2] - O[2]) * n[2];
@@ -617,10 +731,17 @@ export function computeReceiverShadowFaces<T = unknown>(
       const VmOx = w[0] - O[0];
       const VmOy = w[1] - O[1];
       const VmOz = w[2] - O[2];
-      const t = (VmOx * n[0] + VmOy * n[1] + VmOz * n[2]) / Ldotn;
-      const Px = w[0] - t * Lx;
-      const Py = w[1] - t * Ly;
-      const Pz = w[2] - t * Lz;
+      // Directional: constant to-source L, denom = Ldotn. Point: per-vertex
+      // to-source direction, denom = d·n. Clamp denom to a small positive so
+      // a grazing point-light vertex projects far (then gets reach/outline
+      // clipped) instead of dividing by ~0.
+      const d = isPoint ? dirAt(w) : ([Lx, Ly, Lz] as Vec3);
+      const denomRaw = isPoint ? d[0] * n[0] + d[1] * n[1] + d[2] * n[2] : Ldotn;
+      const denom = denomRaw > 1e-3 ? denomRaw : 1e-3;
+      const t = (VmOx * n[0] + VmOy * n[1] + VmOz * n[2]) / denom;
+      const Px = w[0] - t * d[0];
+      const Py = w[1] - t * d[1];
+      const Pz = w[2] - t * d[2];
       const dx = Px - O[0];
       const dy = Py - O[1];
       const dz = Pz - O[2];
@@ -765,7 +886,16 @@ export function computeReceiverShadowFaces<T = unknown>(
         // (grazing the light) still cast — they're the silhouette edge
         // of a closed mesh.
         if (item.planeN && !doubleSidedByCaster[casterIdx]) {
-          const cnDotL = item.planeN[0] * Lx + item.planeN[1] * Ly + item.planeN[2] * Lz;
+          let lx = Lx, ly = Ly, lz = Lz;
+          if (isPoint) {
+            // To-source direction from the caster polygon's centroid.
+            let cx = 0, cy = 0, cz = 0;
+            for (const w of item.wv) { cx += w[0]; cy += w[1]; cz += w[2]; }
+            const inv = item.wv.length > 0 ? 1 / item.wv.length : 0;
+            const d = dirAt([cx * inv, cy * inv, cz * inv]);
+            lx = d[0]; ly = d[1]; lz = d[2];
+          }
+          const cnDotL = item.planeN[0] * lx + item.planeN[1] * ly + item.planeN[2] * lz;
           if (cnDotL > -1e-6) continue;
         }
         // Coplanar caster skip.
@@ -878,29 +1008,48 @@ export function computeReceiverShadowFaces<T = unknown>(
 
     if (totalClipped === 0 || !(width > 0) || !(height > 0)) continue;
 
-    // Per-group opacity for textured receivers. Three.js darkens linearly:
-    // shadow_linear = lit_linear × ambient/(direct + ambient). CSS opacity
-    // blends in sRGB, so apply a gamma-2.4 approximation to match.
+    // Intensity removed by THIS pass (the blocked light) and the scene total.
+    const thisScale = isDirPass
+      ? dirIntensity * dirDot
+      : (allPointLights?.[thisPointIndex ?? -1]?.intensity ?? 1) * (pointDots[thisPointIndex ?? -1] ?? 0);
+    const totalScale = dirIntensity * dirDot + pointTotalScale + Math.max(0, ambIntensity);
+
+    // Per-group opacity for textured receivers. The shadow leaves the receiver
+    // lit by everything EXCEPT this pass's light: shadow_linear =
+    // lit_linear × remaining/total. A black overlay at sRGB opacity o gives
+    // lit_srgb × (1 − o), so o = 1 − (remaining/total)^(1/2.4). For a lone
+    // directional light remaining = ambient, matching the previous formula.
     let effOp = opacity;
     if (receiverHasTexture) {
-      const direct = dirIntensity * Math.max(0, Ldotn);
-      const total = direct + Math.max(0, ambIntensity);
-      if (total > 0) {
-        const ratioLinear = Math.max(0, ambIntensity) / total;
-        const ratioSrgb = Math.pow(ratioLinear, 1 / 2.4);
-        effOp = opacity * (1 - ratioSrgb);
+      if (totalScale > 0) {
+        const remainingRatio = Math.max(0, (totalScale - thisScale) / totalScale);
+        effOp = opacity * (1 - Math.pow(remainingRatio, 1 / 2.4));
       } else {
         effOp = 0;
       }
     }
 
     // Per-face shadow tint. Each receiver face uses ITS OWN polygon color
-    // for the ambient-only fill (one material per coplanar group).
+    // (one material per coplanar group). The fill is the receiver lit by
+    // every light EXCEPT this pass's blocked light — so a region shadowed
+    // from one colored light still shows the others' color. A lone
+    // directional light → remaining = ambient only (unchanged from before).
     const groupPolyIdx = group.memberPolyIndices[0] ?? 0;
     const groupColor = receiverPolygons[groupPolyIdx]?.color ?? "#cccccc";
+    const remDirScale = isDirPass ? 0 : dirIntensity * dirDot;
+    const remPointContribs: { color: string; scale: number }[] = [];
+    if (allPointLights) {
+      for (let k = 0; k < allPointLights.length; k++) {
+        if (isPoint && k === thisPointIndex) continue;
+        const dot = pointDots[k] ?? 0;
+        if (dot <= 0) continue;
+        const pl = allPointLights[k]!;
+        remPointContribs.push({ color: pl.color ?? "#ffffff", scale: (pl.intensity ?? 1) * dot });
+      }
+    }
     const fillColor = receiverHasTexture
       ? userShadowColor
-      : shadePolygon(groupColor, 0, "#000000", ambColor, ambIntensity);
+      : shadePolygon(groupColor, remDirScale, dirColor, ambColor, ambIntensity, remPointContribs);
 
     // Tight shadow-content bbox in (u, v). The receiver face outline can be
     // huge (e.g. a 17500×17500 CSS-px floor at world units × BASE_TILE), but
@@ -953,6 +1102,7 @@ export function computeReceiverShadowFaces<T = unknown>(
     const tightMatrixCss = `matrix3d(${tm.map((x) => x.toFixed(4)).join(",")})`;
 
     const paths: Array<ReceiverShadowPath<T>> = [];
+    const facePolysUv: Array<Array<[number, number]>> = [];
     for (const entry of clippedByCaster.values()) {
       let d = "";
       for (const verts of entry.verts) {
@@ -961,9 +1111,26 @@ export function computeReceiverShadowFaces<T = unknown>(
           d += `L${(verts[j]![0] - shMinU).toFixed(1)},${(verts[j]![1] - shMinV).toFixed(1)}`;
         }
         d += "Z";
+        facePolysUv.push(verts.map((p) => [p[0], p[1]] as [number, number]));
       }
       paths.push({ casterId: entry.id, d, casterPolygonIndices: entry.subPolygonIndices });
     }
+
+    // Full-lit face color C (every light) for the multi-light merge — callers
+    // multiply C by each pass's `fill/C` so overlapping shadows composite to
+    // the both-blocked color. Empty for textured (per-pixel base).
+    const fullPointContribs: { color: string; scale: number }[] = [];
+    if (allPointLights) {
+      for (let k = 0; k < allPointLights.length; k++) {
+        const dot = pointDots[k] ?? 0;
+        if (dot <= 0) continue;
+        const pl = allPointLights[k]!;
+        fullPointContribs.push({ color: pl.color ?? "#ffffff", scale: (pl.intensity ?? 1) * dot });
+      }
+    }
+    const fullLitFill = receiverHasTexture
+      ? ""
+      : shadePolygon(groupColor, dirIntensity * dirDot, dirColor, ambColor, ambIntensity, fullPointContribs);
 
     out.push({
       faceIndex: group.faceIndex,
@@ -974,9 +1141,214 @@ export function computeReceiverShadowFaces<T = unknown>(
       fill: fillColor,
       opacity: effOp,
       paths,
+      fullLitFill,
+      facePolysUv,
     });
   }
 
+  return out;
+}
+
+// ── Multi-light per-face merge ──────────────────────────────────────────────
+// All renderers share this so a receiver FACE's lights merge into ONE SVG:
+// overlapping shadows then composite correctly (single light → one path with
+// the remaining-light color; multi-light solid → a full-lit base + one
+// `mix-blend-mode: multiply` layer per light, so the both-blocked overlap
+// becomes base·∏factor). Pure data in → DOM-ready descriptors out; each
+// renderer only emits the <svg>/<path> nodes.
+
+/** One path inside a merged face SVG. */
+export interface MergedShadowLayer {
+  /** Path data (`M…L…Z`, already offset to the SVG's tight bbox). */
+  d: string;
+  /** Fill color (remaining-light color for a single layer, multiply factor for
+   *  a merged solid layer, dark shadow color for textured). */
+  fill: string;
+  /** Apply `mix-blend-mode: multiply` (merged solid layers only). */
+  multiply: boolean;
+  /** Per-path opacity (1 for merged solid layers, which carry strength on the
+   *  SVG; the pass's own opacity otherwise). */
+  opacity: number;
+}
+
+/** One receiver FACE's merged shadow, ready to mount as a single SVG. */
+export interface MergedShadowFace {
+  faceIndex: number;
+  memberPolyIndices: number[];
+  matrixCss: string;
+  width: number;
+  height: number;
+  /** SVG-level opacity (shadow strength for merged solid faces, else 1). */
+  svgOpacity: number;
+  /** Full-lit base path (merged solid faces only); null otherwise. */
+  baseFill: string | null;
+  baseD: string | null;
+  layers: MergedShadowLayer[];
+}
+
+/** Inputs for `computeMergedReceiverShadows` — the full light set for one
+ *  receiver, plus its prepared face planes and casters. */
+export interface MergedReceiverShadowInput<T = unknown> {
+  receiverPlanes: ReceiverFacePlane[];
+  receiverPolygons: readonly Polygon[];
+  receiverHasTexture: boolean;
+  casters: ReceiverCasterInput<T>[];
+  /** Directional light vector in CSS frame (to-source). */
+  lightDir: Vec3;
+  /** Run the directional pass (caller gates on a real, nonzero-intensity
+   *  directional light). */
+  runDirectional: boolean;
+  /** One pass per shadow-casting point light: CSS position + index into
+   *  `allPointLights`. Empty in dynamic mode (point lights are baked-only). */
+  pointPasses: ReadonlyArray<{ lightPos: Vec3; index: number }>;
+  /** All point lights (CSS positions) for the shaded shadow color; empty in
+   *  dynamic mode. */
+  allPointLights?: ReadonlyArray<{ position: Vec3; color?: string; intensity?: number }>;
+  cameraRot: CameraCullRotation;
+  ambientLight?: PolyAmbientLight;
+  directionalLight?: PolyDirectionalLight;
+  shadow?: { color?: string; opacity?: number; maxExtend?: number };
+}
+
+/** Per-channel multiply factor `remaining / full` (both sRGB hex) as `rgb(...)`.
+ *  Painting the base = `full` then this with `mix-blend-mode: multiply`
+ *  reproduces `remaining`; overlapping factors multiply to the both-removed
+ *  color. */
+function shadowMultiplyFactor(remaining: string, full: string): string {
+  const a = parseHexColor(remaining)?.rgb ?? [0, 0, 0];
+  const b = parseHexColor(full)?.rgb ?? [255, 255, 255];
+  const f = (i: number): number => {
+    const c = b[i] ?? 0;
+    if (c <= 0) return 255;
+    return Math.max(0, Math.min(255, Math.round((a[i]! / c) * 255)));
+  };
+  return `rgb(${f(0)},${f(1)},${f(2)})`;
+}
+
+/** Build an `M…L…Z` path from face-(u,v) polygons offset to (minU, minV). */
+function polysToPathD(
+  polys: ReadonlyArray<ReadonlyArray<readonly [number, number]>>,
+  minU: number,
+  minV: number,
+): string {
+  let d = "";
+  for (const poly of polys) {
+    if (poly.length < 3) continue;
+    d += `M${(poly[0]![0] - minU).toFixed(1)},${(poly[0]![1] - minV).toFixed(1)}`;
+    for (let j = 1; j < poly.length; j++) {
+      d += `L${(poly[j]![0] - minU).toFixed(1)},${(poly[j]![1] - minV).toFixed(1)}`;
+    }
+    d += "Z";
+  }
+  return d;
+}
+
+/**
+ * Run every light pass for one receiver and merge each face's passes into a
+ * single SVG descriptor. Shared by all three renderers so multi-light shadow
+ * overlap is identical everywhere.
+ */
+export function computeMergedReceiverShadows<T = unknown>(
+  input: MergedReceiverShadowInput<T>,
+): MergedShadowFace[] {
+  const {
+    receiverPlanes, receiverPolygons, receiverHasTexture, casters,
+    lightDir, runDirectional, pointPasses, allPointLights,
+    cameraRot, ambientLight, directionalLight, shadow,
+  } = input;
+  const shadowOpacity = shadow?.opacity ?? 0.25;
+
+  const planeByFace = new Map<number, ReceiverFacePlane>();
+  for (const pl of receiverPlanes) planeByFace.set(pl.faceIndex, pl);
+
+  type Layer = { polys: Array<Array<[number, number]>>; fill: string; opacity: number };
+  type FaceAgg = { memberPolyIndices: number[]; base: string; solid: boolean; layers: Layer[] };
+  const perFace = new Map<number, FaceAgg>();
+
+  const runPass = (lightPos: Vec3 | undefined, thisPointIndex: number | undefined): void => {
+    const specs = computeReceiverShadowFaces<T>({
+      receiverPlanes, receiverPolygons, receiverHasTexture, casters,
+      lightDir, lightPos, allPointLights, thisPointIndex,
+      cameraRot, ambientLight, directionalLight, shadow,
+    });
+    for (const spec of specs) {
+      if (spec.facePolysUv.length === 0) continue;
+      const solid = spec.fullLitFill !== "";
+      let agg = perFace.get(spec.faceIndex);
+      if (!agg) {
+        agg = { memberPolyIndices: spec.memberPolyIndices, base: spec.fullLitFill, solid, layers: [] };
+        perFace.set(spec.faceIndex, agg);
+      }
+      agg.layers.push({ polys: spec.facePolysUv, fill: spec.fill, opacity: spec.opacity });
+    }
+  };
+  if (runDirectional) runPass(undefined, undefined);
+  for (const p of pointPasses) runPass(p.lightPos, p.index);
+
+  const out: MergedShadowFace[] = [];
+  for (const [faceIndex, agg] of perFace) {
+    const plane = planeByFace.get(faceIndex);
+    if (!plane || agg.layers.length === 0) continue;
+    let minU = Infinity, minV = Infinity, maxU = -Infinity, maxV = -Infinity;
+    for (const layer of agg.layers) for (const poly of layer.polys) for (const pt of poly) {
+      if (pt[0] < minU) minU = pt[0];
+      if (pt[0] > maxU) maxU = pt[0];
+      if (pt[1] < minV) minV = pt[1];
+      if (pt[1] > maxV) maxV = pt[1];
+    }
+    if (!Number.isFinite(minU)) continue;
+    minU = Math.floor(minU - 1); minV = Math.floor(minV - 1);
+    maxU = Math.ceil(maxU + 1); maxV = Math.ceil(maxV + 1);
+    const width = maxU - minU, height = maxV - minV;
+    if (!(width > 0) || !(height > 0)) continue;
+
+    const { O, u, v, n, lift } = plane;
+    const tx = O[0] + minU * u[0] + minV * v[0] + lift * n[0];
+    const ty = O[1] + minU * u[1] + minV * v[1] + lift * n[1];
+    const tz = O[2] + minU * u[2] + minV * v[2] + lift * n[2];
+    const m = [u[0], u[1], u[2], 0, v[0], v[1], v[2], 0, n[0], n[1], n[2], 0, tx, ty, tz, 1];
+    const matrixCss = `matrix3d(${m.map((x) => x.toFixed(4)).join(",")})`;
+
+    // Merge (base + multiply) only when a SOLID face has ≥2 lights; otherwise
+    // one path per pass at its own alpha (single light, or textured).
+    const merged = agg.solid && agg.layers.length > 1;
+    let baseFill: string | null = null;
+    let baseD: string | null = null;
+    const layers: MergedShadowLayer[] = [];
+    if (merged) {
+      baseFill = agg.base;
+      baseD = "";
+      for (const layer of agg.layers) baseD += polysToPathD(layer.polys, minU, minV);
+      for (const layer of agg.layers) {
+        layers.push({
+          d: polysToPathD(layer.polys, minU, minV),
+          fill: shadowMultiplyFactor(layer.fill, agg.base),
+          multiply: true,
+          opacity: 1,
+        });
+      }
+    } else {
+      for (const layer of agg.layers) {
+        layers.push({
+          d: polysToPathD(layer.polys, minU, minV),
+          fill: layer.fill,
+          multiply: false,
+          opacity: layer.opacity,
+        });
+      }
+    }
+    out.push({
+      faceIndex,
+      memberPolyIndices: agg.memberPolyIndices,
+      matrixCss,
+      width,
+      height,
+      svgOpacity: merged ? shadowOpacity : 1,
+      baseFill,
+      baseD,
+      layers,
+    });
+  }
   return out;
 }
 

@@ -38,7 +38,7 @@ import {
 import {
   BASE_TILE,
   buildPolyMeshTransform,
-  computeReceiverShadowFaces,
+  computeMergedReceiverShadows,
   computeSceneBbox,
   DEFAULT_SEAM_BLEED,
   ensureCcw2D,
@@ -51,6 +51,7 @@ import {
   prepareReceiverFacePlanes,
   projectCssVertexToGround,
   worldDirectionToCss,
+  worldPositionToCss,
   type CameraCullRotation,
   type EdgeOwners,
   type ReceiverCasterInput,
@@ -320,6 +321,7 @@ export const PolyMesh = defineComponent({
     // Always forward the scene's lights to atlas plan, including in dynamic
     // mode (vanilla parity — see React PolyMesh comment).
     const atlasDirectional = computed(() => sceneCtx?.value.directionalLight);
+    const atlasPointLights = computed(() => sceneCtx?.value.pointLights);
     const atlasAmbient = computed(() => sceneCtx?.value.ambientLight);
     // voxelSource comes from useMesh (when src is set) OR from the prop
     // (when polygons array is provided directly). Vanilla scene.add receives
@@ -382,6 +384,28 @@ export const PolyMesh = defineComponent({
       return { ...cssLight, direction: inverseRotateVec3(cssLight.direction, bakedRotation.value) };
     });
 
+    // Point lights converted to mesh-local USER coords (plan.ts applies the
+    // CSS x↔y swap). Mirrors bakedDirectional + vanilla's
+    // localPointLightsForEntry: subtract mesh position, then inverse-rotate
+    // into the mesh's local frame so per-face Lambert matches the rendered
+    // orientation.
+    const bakedPointLights = computed(() => {
+      const pls = atlasPointLights.value;
+      if (!pls || pls.length === 0) return undefined;
+      const pos = (props.position ?? [0, 0, 0]) as Vec3;
+      const rot = bakedRotation.value ?? ([0, 0, 0] as Vec3);
+      const hasRot = rot[0] !== 0 || rot[1] !== 0 || rot[2] !== 0;
+      return pls.map((pl) => {
+        const rel: Vec3 = [
+          pl.position[0] - pos[0],
+          pl.position[1] - pos[1],
+          pl.position[2] - pos[2],
+        ];
+        const local = hasRot ? inverseRotateVec3(rel, rot) : rel;
+        return { ...pl, position: local };
+      });
+    });
+
     // Per-light occlusion raytrace (task #121) used to mark polygons in
     // ray-traced shadow with `directScale=0` so they baked at ambient-only.
     // Three.js doesn't bake shadow into the diffuse atlas — the real shadow
@@ -417,6 +441,7 @@ export const PolyMesh = defineComponent({
           i,
           {
             directionalLight: bakedDirectional.value,
+            pointLights: bakedPointLights.value,
             ambientLight: atlasAmbient.value,
             seamBleed: seamBleedEdges?.has(i) ? atlasSeamBleed.value : undefined,
             seamEdges: seamBleedEdges?.get(i),
@@ -632,6 +657,27 @@ export const PolyMesh = defineComponent({
       // same frame for the shadow projection math to land correctly.
       const userLightDir = ctx?.directionalLight?.direction ?? ([0.4, -0.7, 0.59] as Vec3);
       const lightDir = worldDirectionToCss(userLightDir);
+      // Point lights are baked-mode only — in dynamic mode they drive neither
+      // surface shading nor shadows (a colored point shadow on a floor those
+      // lights never lit reads as broken). Mirrors vanilla createPolyScene.
+      const dynamicShading = atlasTextureLighting.value === "dynamic";
+      const scenePoints = dynamicShading ? [] : (ctx?.pointLights ?? []);
+      // ALL point lights in CSS frame — the shaded shadow color needs every
+      // light that illuminates the receiver (even non-casters), minus the one
+      // being shadowed. `shadowPointIndices` are the entries that cast.
+      const allPointLightsCss = scenePoints.map((pl) => ({
+        position: worldPositionToCss(pl.position),
+        color: pl.color,
+        intensity: pl.intensity,
+      }));
+      const shadowPointIndices = scenePoints
+        .map((pl, i) => (pl.castShadow ? i : -1))
+        .filter((i) => i >= 0);
+      // Directional pass runs only for a real, nonzero-intensity directional
+      // light (Three.js parity; the old implicit-sun fallback is gone).
+      const runDirectionalShadow =
+        !!ctx?.directionalLight?.direction && (ctx.directionalLight.intensity ?? 1) > 0;
+      const hasShadowPoints = shadowPointIndices.length > 0;
       const shadowLift = ctx?.shadow?.lift ?? 0.001;
       const planes = prepareReceiverFacePlanes(
         polygons.value,
@@ -667,8 +713,11 @@ export const PolyMesh = defineComponent({
         // shadows on smooth GLB meshes — apple, sphere, teapot).
         // H9 silhouette path: build/reuse world-frame edge owners for
         // non-self casters with enough polygons.
+        // Point-light passes always need edgeOwners (radial shadow projects the
+        // caster silhouette, even for a small cube). Directional keeps the ≥40
+        // gate; core's directional branch ignores edgeOwners below that.
         let edgeOwners: ReadonlyMap<string, EdgeOwners> | undefined;
-        if (!isSelf && data.polygons.length >= 40) {
+        if (!isSelf && (data.polygons.length >= 40 || hasShadowPoints)) {
           const drot = data.rotation ?? null;
           const dposArr = data.position;
           const dsKey = JSON.stringify(data.scale ?? null);
@@ -695,29 +744,35 @@ export const PolyMesh = defineComponent({
         rotY: cameraState?.rotY ?? 45,
         meshRotation: props.rotation,
       };
-      const specs = computeReceiverShadowFaces<symbol>({
+      // Shared core merge: one SVG per receiver face, all its lights merged so
+      // overlaps composite correctly (single light → one path; multi-light
+      // solid → base + per-light multiply layers). Identical to vanilla + React.
+      const faces = computeMergedReceiverShadows<symbol>({
         receiverPlanes: planes,
         receiverPolygons: polygons.value,
         receiverHasTexture: polygons.value.some((p) => p.texture !== undefined),
         casters: casterInputs,
         lightDir,
+        runDirectional: runDirectionalShadow,
+        pointPasses: shadowPointIndices.map((i) => ({ lightPos: allPointLightsCss[i]!.position, index: i })),
+        allPointLights: allPointLightsCss,
         cameraRot,
         ambientLight: ctx?.ambientLight,
         directionalLight: ctx?.directionalLight,
         shadow: { color: ctx?.shadow?.color, opacity: ctx?.shadow?.opacity ?? 0.25, maxExtend: ctx?.shadow?.maxExtend },
       });
-      return specs.map((spec) =>
+      return faces.map((fc) =>
         h(
           "svg",
           {
-            key: `receiver-${spec.faceIndex}`,
+            key: `receiver-${fc.faceIndex}`,
             class: "polycss-shadow polycss-shadow-svg polycss-shadow-receiver",
             "data-poly-shadow-type": "receiver",
-            "data-poly-shadow-receiver-face": String(spec.faceIndex),
-            "data-poly-shadow-receiver-polys": JSON.stringify(spec.memberPolyIndices),
-            width: String(spec.width),
-            height: String(spec.height),
-            viewBox: `0 0 ${spec.width} ${spec.height}`,
+            "data-poly-shadow-receiver-face": String(fc.faceIndex),
+            "data-poly-shadow-receiver-polys": JSON.stringify(fc.memberPolyIndices),
+            width: String(fc.width),
+            height: String(fc.height),
+            viewBox: `0 0 ${fc.width} ${fc.height}`,
             style: {
               position: "absolute",
               top: "0",
@@ -727,21 +782,25 @@ export const PolyMesh = defineComponent({
               transformOrigin: "0 0",
               pointerEvents: "none",
               willChange: "transform",
-              transform: spec.matrixCss,
+              opacity: String(fc.svgOpacity),
+              transform: fc.matrixCss,
             } as CSSProperties,
           },
-          spec.paths.map((p, idx) =>
-            h("path", {
-              key: idx,
-              d: p.d,
-              fill: spec.fill,
-              stroke: spec.fill,
-              "stroke-width": "3",
-              "stroke-linejoin": "round",
-              opacity: spec.opacity.toFixed(4),
-              "data-poly-shadow-caster-polys": JSON.stringify(p.casterPolygonIndices),
-            }),
-          ),
+          [
+            ...(fc.baseFill && fc.baseD
+              ? [h("path", { d: fc.baseD, fill: fc.baseFill, "fill-rule": "nonzero" })]
+              : []),
+            ...fc.layers.map((layer, idx) =>
+              h("path", {
+                key: idx,
+                d: layer.d,
+                fill: layer.fill,
+                "fill-rule": "nonzero",
+                ...(layer.opacity !== 1 ? { opacity: layer.opacity.toFixed(4) } : {}),
+                ...(layer.multiply ? { style: { mixBlendMode: "multiply" } as CSSProperties } : {}),
+              }),
+            ),
+          ],
         ),
       );
     });

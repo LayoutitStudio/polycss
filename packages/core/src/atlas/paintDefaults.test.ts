@@ -334,3 +334,36 @@ describe("colorErrorScore — perceptual distance", () => {
     expect(closePair).toBeLessThan(farPair);
   });
 });
+
+describe("point-light contributions (shadePolygon / textureTintFactors)", () => {
+  it("a point contribution brightens a solid color vs ambient-only", () => {
+    const amb = ["#ffffff", 0.3] as const;
+    const dark = shadePolygon("#808080", 0, "#ffffff", amb[0], amb[1]);
+    const lit = shadePolygon("#808080", 0, "#ffffff", amb[0], amb[1], [
+      { color: "#ffffff", scale: 0.8 },
+    ]);
+    const lum = (hex: string) => {
+      const c = parseHex(hex);
+      return 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;
+    };
+    expect(lum(lit)).toBeGreaterThan(lum(dark));
+  });
+
+  it("zero-scale point contribs are a no-op", () => {
+    const a = shadePolygon("#808080", 0.5, "#ffffff", "#ffffff", 0.3);
+    const b = shadePolygon("#808080", 0.5, "#ffffff", "#ffffff", 0.3, [
+      { color: "#ffffff", scale: 0 },
+    ]);
+    expect(b).toBe(a);
+  });
+
+  it("point contribs add to the directional+ambient texture tint per channel", () => {
+    const base = textureTintFactors(0.2, "#ffffff", "#ffffff", 0.3);
+    const withPoint = textureTintFactors(0.2, "#ffffff", "#ffffff", 0.3, [
+      { color: "#ff0000", scale: 0.5 },
+    ]);
+    // Red point light raises r more than g/b.
+    expect(withPoint.r).toBeGreaterThan(base.r);
+    expect(withPoint.r - base.r).toBeGreaterThan(withPoint.g - base.g);
+  });
+});

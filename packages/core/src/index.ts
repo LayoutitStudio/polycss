@@ -21,6 +21,7 @@ export type {
   Polygon,
   PolyMaterial,
   PolyDirectionalLight,
+  PolyPointLight,
   PolyAmbientLight,
   PolyTextureLightingMode,
   MeshResolution,
@@ -178,8 +179,10 @@ export {
   convexHull2D,
   ensureCcw2D,
   isBakedShadowCaster,
+  isPointShadowCaster,
   polygonSignedArea2D,
   projectCssVertexToGround,
+  projectCssVertexToGroundFromPoint,
 } from "./shadow/projection";
 export { clipPolygonToConvex2D } from "./shadow/clipping";
 export {
@@ -210,6 +213,7 @@ export { buildPolySceneTransform } from "./transform/sceneTransform";
 export type { PolySceneTransformInput } from "./transform/sceneTransform";
 export {
   buildSharedEdgeMap,
+  computeMergedReceiverShadows,
   computeReceiverShadowFaces,
   prepareCasterEdgeOwners,
   prepareCasterPolyItems,
@@ -218,6 +222,9 @@ export {
 export type {
   CasterPolyItem,
   ComputeReceiverShadowFacesInput,
+  MergedReceiverShadowInput,
+  MergedShadowFace,
+  MergedShadowLayer,
   ReceiverCasterInput,
   ReceiverFacePlane,
   ReceiverShadowFaceSpec,

@@ -92,6 +92,7 @@ export default defineConfig({
           label: 'Guides',
           items: [
             { label: 'Loading Meshes', slug: 'guides/textures' },
+            { label: 'Lighting & Shadows', slug: 'guides/lighting' },
             { label: 'Per-polygon Interaction', slug: 'guides/shapes' },
             { label: 'Performance', slug: 'guides/performance' },
             { label: 'Projections', slug: 'guides/projections' },

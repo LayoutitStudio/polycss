@@ -10,7 +10,7 @@
  */
 import {
   buildSharedEdgeMap,
-  computeReceiverShadowFaces,
+  computeMergedReceiverShadows,
   meshScaleVec3,
   prepareCasterEdgeOwners,
   prepareCasterPolyItems,
@@ -22,7 +22,7 @@ import {
   type ReceiverFacePlane,
   type Vec3,
 } from "@layoutit/polycss-core";
-import { ensureShadowRoot, syncShadowPaths } from "./shadowSvg";
+import { ensureShadowRoot } from "./shadowSvg";
 import { meshShadowId } from "./shadowCache";
 import type { SceneContext } from "./sceneContext";
 import type { MeshEntry } from "./internalTypes";
@@ -41,7 +41,11 @@ interface MountedFace {
   /** Last applied matrix3d string — only re-set on change to dodge style work. */
   matrixCss: string;
 }
-const mountedFacesByMesh = new WeakMap<MeshEntry, Map<number, MountedFace>>();
+// Mounts are namespaced per light so a directional pass and one pass per
+// shadow-casting point light can coexist on the same receiver mesh without
+// colliding on faceIndex. Outer key: a per-light identity ("" = directional,
+// "p0".."pN" = point lights). Inner key: faceIndex.
+const mountedFacesByMesh = new WeakMap<MeshEntry, Map<string, Map<number, MountedFace>>>();
 
 /** Cached shared-edge adjacency per mesh. Invalidated when the polygon
  *  array reference changes (cheap identity check, no deep diff). */
@@ -55,10 +59,30 @@ const sharedEdgeMapCacheKey = new WeakMap<MeshEntry, readonly unknown[]>();
 const edgeOwnersCache = new WeakMap<MeshEntry, ReadonlyMap<string, EdgeOwners>>();
 const edgeOwnersCacheKey = new WeakMap<MeshEntry, string>();
 
-function mountedFacesFor(entry: MeshEntry): Map<number, MountedFace> {
+function lightMapFor(entry: MeshEntry): Map<string, Map<number, MountedFace>> {
   let m = mountedFacesByMesh.get(entry);
   if (!m) { m = new Map(); mountedFacesByMesh.set(entry, m); }
   return m;
+}
+
+function mountedFacesFor(entry: MeshEntry, lightKey: string): Map<number, MountedFace> {
+  const byLight = lightMapFor(entry);
+  let m = byLight.get(lightKey);
+  if (!m) { m = new Map(); byLight.set(lightKey, m); }
+  return m;
+}
+
+/** Detach + clear every mounted face across every light namespace for a mesh. */
+function detachAllFaces(entry: MeshEntry): void {
+  const byLight = mountedFacesByMesh.get(entry);
+  if (!byLight) return;
+  for (const faces of byLight.values()) {
+    for (const face of faces.values()) {
+      if (face.svg && face.svg.parentNode) face.svg.parentNode.removeChild(face.svg);
+    }
+    faces.clear();
+  }
+  byLight.clear();
 }
 
 /**
@@ -69,12 +93,7 @@ function mountedFacesFor(entry: MeshEntry): Map<number, MountedFace> {
  * a receiver would linger in the DOM.
  */
 export function disposeReceiverShadowMounts(entry: MeshEntry): void {
-  const mounted = mountedFacesByMesh.get(entry);
-  if (!mounted) return;
-  for (const face of mounted.values()) {
-    if (face.svg && face.svg.parentNode) face.svg.parentNode.removeChild(face.svg);
-  }
-  mounted.clear();
+  detachAllFaces(entry);
   mountedFacesByMesh.delete(entry);
 }
 
@@ -98,6 +117,18 @@ export function emitReceiverShadows(
   lightDir: Vec3,
   _r: number, _g: number, _b: number,
   opacity: number,
+  /** Every light's shadow pass for this receiver. All of a face's passes are
+   *  merged into ONE SVG so overlapping shadows composite correctly (the base
+   *  is the full-lit face color, each pass a multiply layer). */
+  passes: {
+    /** Run the directional pass (mount namespace aside, always merged). */
+    runDirectional: boolean;
+    /** One entry per shadow-casting point light: its CSS position + index
+     *  into `allPointLights`. */
+    points: ReadonlyArray<{ lightPos: Vec3; index: number }>;
+    /** All scene point lights (CSS positions) for the shaded shadow color. */
+    allPointLights?: ReadonlyArray<{ position: Vec3; color?: string; intensity?: number }>;
+  },
 ): void {
   const options = ctx.options.current;
   const { receiverShadowCache, receiverShadowCacheKey, casterItemsCache, casterItemsCacheKey } = ctx;
@@ -122,12 +153,8 @@ export function emitReceiverShadows(
     receiverShadowCache.set(receiverEntry, cachedPlanes);
     receiverShadowCacheKey.set(receiverEntry, cacheKey);
     // Reset mounted state when the plane list changes (face indices may
-    // have shifted). Detach any orphan SVGs.
-    const mounted = mountedFacesFor(receiverEntry);
-    for (const face of mounted.values()) {
-      if (face.svg && face.svg.parentNode) face.svg.parentNode.removeChild(face.svg);
-    }
-    mounted.clear();
+    // have shifted). Detach any orphan SVGs across every light namespace.
+    detachAllFaces(receiverEntry);
   }
 
   // Per-caster items.
@@ -176,8 +203,12 @@ export function emitReceiverShadows(
     // path. Skip on self-shadow (caster IS receiver — the per-poly path
     // is geometrically required there) and on tiny meshes (silhouette
     // overhead exceeds the per-poly cost below ~40 polys).
+    // Point-light passes always need edgeOwners: the radial shadow projects
+    // the caster silhouette (not per-face back-faces), so even small meshes
+    // (a 6-quad cube) require the outline. Directional keeps the ≥40-poly
+    // gate where the per-poly path is cheaper.
     let edgeOwners: ReadonlyMap<string, EdgeOwners> | undefined;
-    if (caster !== receiverEntry && caster.polygons.length >= 40) {
+    if (caster !== receiverEntry && (caster.polygons.length >= 40 || passes.points.length > 0)) {
       let cachedOwners = edgeOwnersCache.get(caster);
       if (cachedOwners === undefined || edgeOwnersCacheKey.get(caster) !== ckey) {
         cachedOwners = prepareCasterEdgeOwners(
@@ -206,112 +237,72 @@ export function emitReceiverShadows(
     meshRotation: receiverEntry.handle.transform.rotation,
   };
 
-  const specs = computeReceiverShadowFaces<MeshEntry>({
+  // Shared core merge: run every light pass for this receiver and aggregate
+  // each face's passes into one SVG descriptor (single light → one path;
+  // multi-light solid → base + per-light multiply layers for correct overlap).
+  const faces = computeMergedReceiverShadows<MeshEntry>({
     receiverPlanes: cachedPlanes,
     receiverPolygons: receiverEntry.polygons,
     receiverHasTexture: hasTexture,
     casters: casterInputs,
     lightDir,
+    runDirectional: passes.runDirectional,
+    pointPasses: passes.points,
+    allPointLights: passes.allPointLights,
     cameraRot,
     ambientLight: options.ambientLight,
     directionalLight: options.directionalLight,
     shadow: { color: options.shadow?.color, opacity, maxExtend: options.shadow?.maxExtend },
   });
 
-  // Mount/update SVGs from specs. Faces NOT in specs (back-facing, no
-  // shadow content, etc.) get hidden.
-  const mounted = mountedFacesFor(receiverEntry);
+  const mounted = mountedFacesFor(receiverEntry, "m");
   const seen = new Set<number>();
-  for (const spec of specs) {
-    seen.add(spec.faceIndex);
-    let face = mounted.get(spec.faceIndex);
+  const wantDebug = !!options.debugShadowAttrs;
+  const shadowRoot = ensureShadowRoot(ctx.shadowSvgState, ctx.doc, ctx.sceneEl);
+
+  for (const fc of faces) {
+    seen.add(fc.faceIndex);
+    let face = mounted.get(fc.faceIndex);
     if (!face) {
       face = { svg: null, visible: false, width: -1, height: -1, matrixCss: "" };
-      mounted.set(spec.faceIndex, face);
+      mounted.set(fc.faceIndex, face);
     }
     let svg = face.svg;
     if (!svg) {
       svg = ctx.doc.createElementNS(SVG_NS, "svg");
       svg.setAttribute("class", "polycss-shadow polycss-shadow-svg polycss-shadow-receiver");
-      if (options.debugShadowAttrs) {
-        svg.setAttribute("data-poly-shadow-type", "receiver");
-        svg.setAttribute("data-poly-shadow-receiver", meshShadowId(receiverEntry));
-        svg.setAttribute("data-poly-shadow-receiver-face", String(spec.faceIndex));
-        svg.setAttribute("data-poly-shadow-receiver-polys", JSON.stringify(spec.memberPolyIndices));
-      }
-      svg.setAttribute("width", String(spec.width));
-      svg.setAttribute("height", String(spec.height));
-      svg.setAttribute("viewBox", `0 0 ${spec.width} ${spec.height}`);
-      svg.setAttribute(
-        "style",
-        `position:absolute;top:0;left:0;display:block;overflow:hidden;` +
-        `transform-origin:0 0;pointer-events:none;will-change:transform;` +
-        `transform:${spec.matrixCss}`,
-      );
-      // Mount inside the shared `.polycss-shadows` wrapper at scene root.
-      // The SVG's matrix3d still encodes the face plane in world frame —
-      // the wrapper is a 0×0 preserve-3d container that takes no layout
-      // space, so children composite at their absolute matrix3d positions
-      // just like they did when mounted directly on sceneEl. Grouping
-      // exists for DOM organization (clean DevTools tree) and to make
-      // future "clip all shadows to a region" / "hide all shadows" toggles
-      // trivial (one ancestor to flip).
-      const shadowRoot = ensureShadowRoot(ctx.shadowSvgState, ctx.doc, ctx.sceneEl);
       shadowRoot.appendChild(svg);
       face.svg = svg;
-      face.width = spec.width;
-      face.height = spec.height;
-      face.matrixCss = spec.matrixCss;
-    } else {
-      if (!face.visible) svg.style.display = "block";
-      // Tight shadow-bbox SVGs resize/translate every frame as the shadow
-      // sweeps across the receiver — re-apply width/height/viewBox/transform
-      // only when they actually change.
-      if (face.width !== spec.width || face.height !== spec.height) {
-        svg.setAttribute("width", String(spec.width));
-        svg.setAttribute("height", String(spec.height));
-        svg.setAttribute("viewBox", `0 0 ${spec.width} ${spec.height}`);
-        face.width = spec.width;
-        face.height = spec.height;
-      }
-      if (face.matrixCss !== spec.matrixCss) {
-        svg.style.transform = spec.matrixCss;
-        face.matrixCss = spec.matrixCss;
-      }
     }
+    if (!face.visible) svg.style.display = "block";
     face.visible = true;
-
-    const paths = syncShadowPaths(svg, ctx.doc, spec.paths.length, /*withStroke*/ true);
-    const opStr = spec.opacity.toFixed(4);
-    const casterIds: string[] = [];
-    const wantDebug = !!options.debugShadowAttrs;
-    for (let i = 0; i < spec.paths.length; i++) {
-      const p = spec.paths[i]!;
-      const casterId = wantDebug ? meshShadowId(p.casterId) : "";
-      if (wantDebug) casterIds.push(casterId);
-      const path = paths[i]!;
-      path.setAttribute("d", p.d);
-      if (path.getAttribute("fill") !== spec.fill) path.setAttribute("fill", spec.fill);
-      if (path.getAttribute("stroke") !== spec.fill) path.setAttribute("stroke", spec.fill);
-      if (path.getAttribute("opacity") !== opStr) path.setAttribute("opacity", opStr);
-      if (wantDebug) {
-        if (path.getAttribute("data-poly-shadow-caster") !== casterId) {
-          path.setAttribute("data-poly-shadow-caster", casterId);
-        }
-        const polysAttr = JSON.stringify(p.casterPolygonIndices);
-        if (path.getAttribute("data-poly-shadow-caster-polys") !== polysAttr) {
-          path.setAttribute("data-poly-shadow-caster-polys", polysAttr);
-        }
-      }
+    if (face.width !== fc.width || face.height !== fc.height) {
+      svg.setAttribute("width", String(fc.width));
+      svg.setAttribute("height", String(fc.height));
+      svg.setAttribute("viewBox", `0 0 ${fc.width} ${fc.height}`);
+      face.width = fc.width;
+      face.height = fc.height;
     }
+    const style =
+      `position:absolute;top:0;left:0;display:block;overflow:hidden;` +
+      `transform-origin:0 0;pointer-events:none;will-change:transform;` +
+      `opacity:${fc.svgOpacity.toFixed(4)};transform:${fc.matrixCss}`;
+    if (face.matrixCss !== style) { svg.setAttribute("style", style); face.matrixCss = style; }
     if (wantDebug) {
-      const castersAttr = casterIds.join(" ");
-      if (svg.getAttribute("data-poly-shadow-casters") !== castersAttr) {
-        svg.setAttribute("data-poly-shadow-casters", castersAttr);
-      }
+      svg.setAttribute("data-poly-shadow-type", "receiver");
+      svg.setAttribute("data-poly-shadow-receiver", meshShadowId(receiverEntry));
+      svg.setAttribute("data-poly-shadow-receiver-face", String(fc.faceIndex));
+      svg.setAttribute("data-poly-shadow-receiver-polys", JSON.stringify(fc.memberPolyIndices));
+      svg.setAttribute("data-poly-shadow-layers", String(fc.layers.length));
+    }
+
+    while (svg.firstChild) svg.removeChild(svg.firstChild);
+    if (fc.baseFill && fc.baseD) svg.appendChild(makeShadowPath(ctx.doc, fc.baseD, fc.baseFill, false, 1));
+    for (const layer of fc.layers) {
+      svg.appendChild(makeShadowPath(ctx.doc, layer.d, layer.fill, layer.multiply, layer.opacity));
     }
   }
-  // Hide faces with no current spec.
+  // Hide faces with no current content.
   for (const [idx, face] of mounted) {
     if (seen.has(idx)) continue;
     if (face.svg && face.visible) {
@@ -319,4 +310,21 @@ export function emitReceiverShadows(
       face.visible = false;
     }
   }
+}
+
+function makeShadowPath(
+  doc: Document,
+  d: string,
+  fill: string,
+  blendMultiply: boolean,
+  opacity: number,
+): SVGPathElement {
+  const path = doc.createElementNS(SVG_NS, "path");
+  path.setAttribute("d", d);
+  path.setAttribute("fill", fill);
+  // Overlapping same-light subpaths union (don't alpha/multiply-stack).
+  path.setAttribute("fill-rule", "nonzero");
+  if (opacity !== 1) path.setAttribute("opacity", opacity.toFixed(4));
+  if (blendMultiply) path.style.mixBlendMode = "multiply";
+  return path;
 }

@@ -9,6 +9,7 @@ import type {
   ParseResult,
   PolyAmbientLight,
   PolyDirectionalLight,
+  PolyPointLight,
   Polygon,
   PolyTextureBackend,
   PolyTextureImageRendering,
@@ -35,6 +36,9 @@ export interface PolySceneOptions {
    */
   camera: PolyPerspectiveCameraHandle | PolyOrthographicCameraHandle;
   directionalLight?: PolyDirectionalLight;
+  /** Point lights (world-space positions). Direction-only per-face Lambert
+   *  shading (no distance falloff). Baked-mode only. */
+  pointLights?: PolyPointLight[];
   ambientLight?: PolyAmbientLight;
   /** Textured polygon lighting mode. Defaults to "baked". */
   textureLighting?: PolyTextureLightingMode;

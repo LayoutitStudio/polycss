@@ -5,8 +5,10 @@ import {
   buildBakedShadowProjectionMatrix,
   ensureCcw2D,
   isBakedShadowCaster,
+  isPointShadowCaster,
   polygonSignedArea2D,
   projectCssVertexToGround,
+  projectCssVertexToGroundFromPoint,
 } from "./projection";
 
 describe("buildBakedShadowProjectionMatrix", () => {
@@ -118,6 +120,46 @@ describe("projectCssVertexToGround", () => {
     const [x] = projectCssVertexToGround([100, 0, 25], [1, 0, 0.001], 0);
     expect(Math.abs(x - 100)).toBeLessThanOrEqual(25 / BAKED_SHADOW_MIN_UP + 1);
     expect(Math.abs(x - 100)).toBeGreaterThan(100);
+  });
+});
+
+describe("projectCssVertexToGroundFromPoint", () => {
+  it("projects radially: a point halfway between light and ground doubles its offset", () => {
+    // Light directly above origin at z=100; vertex at (10,0,50) sits halfway
+    // down. The shadow ray from (0,0,100) through (10,0,50) hits z=0 at
+    // x=20 (similar triangles: 10 grows to 20 as height halves to zero).
+    const p = projectCssVertexToGroundFromPoint([10, 0, 50], [0, 0, 100], 0);
+    expect(p).not.toBeNull();
+    expect(p![0]).toBeCloseTo(20, 6);
+    expect(p![1]).toBeCloseTo(0, 6);
+  });
+
+  it("returns the vertex XY when the vertex sits on the ground plane", () => {
+    const p = projectCssVertexToGroundFromPoint([10, 20, 0], [0, 0, 100], 0);
+    expect(p).not.toBeNull();
+    expect(p![0]).toBeCloseTo(10, 6);
+    expect(p![1]).toBeCloseTo(20, 6);
+  });
+
+  it("returns null when the vertex is above the light (no forward intersection)", () => {
+    // Light at z=10, vertex at z=50 → ground (z=0) is on the light's side.
+    expect(projectCssVertexToGroundFromPoint([5, 5, 50], [0, 0, 10], 0)).toBeNull();
+  });
+
+  it("returns null when the shadow ray runs parallel to the ground", () => {
+    expect(projectCssVertexToGroundFromPoint([5, 5, 50], [0, 0, 50], 0)).toBeNull();
+  });
+});
+
+describe("isPointShadowCaster", () => {
+  it("is true when the face normal points away from the light", () => {
+    // Light above at z=100; face centroid below it with normal pointing down
+    // (away from the light) → casts.
+    expect(isPointShadowCaster([0, 0, 0], [0, 0, -1], [0, 0, 100])).toBe(true);
+  });
+
+  it("is false when the face normal points toward the light", () => {
+    expect(isPointShadowCaster([0, 0, 0], [0, 0, 1], [0, 0, 100])).toBe(false);
   });
 });
 

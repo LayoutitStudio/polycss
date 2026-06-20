@@ -9,6 +9,7 @@ import { inject, type ComputedRef, type InjectionKey, type Ref } from "vue";
 import type {
   PolyAmbientLight,
   PolyDirectionalLight,
+  PolyPointLight,
   PolyTextureBackend,
   PolyTextureImageRendering,
   PolyTextureLeafSizing,
@@ -65,6 +66,7 @@ export interface PolyReceiverRegistry {
 export interface PolySceneContextValue {
   textureLighting: PolyTextureLightingMode;
   directionalLight?: PolyDirectionalLight;
+  pointLights?: PolyPointLight[];
   ambientLight?: PolyAmbientLight;
   strategies?: PolyRenderStrategiesOption;
   seamBleed?: PolySeamBleed;

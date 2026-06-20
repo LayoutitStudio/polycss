@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Shadow parity — vanilla / React / Vue / three.js</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; font: 12px system-ui, sans-serif; background: #0f172a; color: #e2e8f0; }
+    #bar { display: flex; gap: 14px; align-items: center; padding: 8px 12px; background: #1e293b; flex-wrap: wrap; }
+    #bar label { display: flex; gap: 5px; align-items: center; }
+    #grid { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 2px; height: calc(100% - 44px); background: #334155; }
+    .pane { position: relative; overflow: hidden; background: #11161f; }
+    .pane > h3 { position: absolute; top: 6px; left: 8px; margin: 0; font-size: 12px; color: #b91c1c; font-weight: 700; z-index: 10; pointer-events: none; }
+    .pane .host { position: absolute; inset: 0; }
+    .pane .anchor { position: absolute; top: 50%; left: 50%; }
+    canvas { width: 100%; height: 100%; display: block; }
+    select, input { background: #0f172a; color: #e2e8f0; border: 1px solid #475569; border-radius: 4px; padding: 2px 4px; }
+  </style>
+</head>
+<body>
+  <div id="bar">
+    <strong>Shadow parity</strong>
+    <label>lighting
+      <select id="lighting"><option value="baked">baked</option><option value="dynamic">dynamic</option></select>
+    </label>
+    <label><input type="checkbox" id="dir" checked /> directional</label>
+    <label><input type="checkbox" id="p0" checked /> point 0 (orange)</label>
+    <label><input type="checkbox" id="p1" checked /> point 1 (blue)</label>
+    <label>di <input type="range" id="di" min="0" max="2" step="0.05" value="1" style="width:80px" /></label>
+    <span style="color:#94a3b8">point lights are baked-mode only — dynamic shows directional shadows only</span>
+  </div>
+  <div id="grid">
+    <div class="pane"><h3>PolyCSS (vanilla)</h3><div class="host" id="host-vanilla"></div></div>
+    <div class="pane"><h3>PolyCSS (React)</h3><div class="host" id="host-react"><div class="anchor" id="anchor-react"></div></div></div>
+    <div class="pane"><h3>PolyCSS (Vue)</h3><div class="host" id="host-vue"><div class="anchor" id="anchor-vue"></div></div></div>
+    <div class="pane"><h3>three.js</h3><canvas id="three-canvas"></canvas></div>
+  </div>
+
+  <script type="importmap">
+    { "imports": {
+      "three": "https://esm.sh/three@0.160.0"
+    } }
+  </script>
+
+  <script type="module">
+    import * as THREE from "three";
+    import { createPolyScene, createPolyCamera } from "./.generated/polycss.js";
+    import { cubePolygons, floorPolygons } from "./.generated/parity-meshes.js";
+    import { mount as mountReact } from "./.generated/shadow-parity-react.js";
+    import { mount as mountVue } from "./.generated/shadow-parity-vue.js";
+
+    const Q = new URLSearchParams(location.search);
+    const qn = (k, d) => (Q.has(k) ? +Q.get(k) : d);
+    const qs = (k, d) => (Q.has(k) ? Q.get(k) : d);
+
+    const S = {
+      lighting: qs("light", "baked"),
+      dir: { x: qn("dx", 1), y: qn("dy", 0.5), z: qn("dz", 1), intensity: qn("di", 1), color: qs("dc", "#ffffff"), on: qs("dir", "1") !== "0" },
+      points: [
+        { x: -4, y: 4, z: 5, intensity: 1, color: "#ff7755", on: qs("p0", "1") !== "0" },
+        { x: 5, y: -3, z: 4, intensity: 1, color: "#5599ff", on: qs("p1", "1") !== "0" },
+      ],
+      amb: { intensity: qn("ai", 0.3), color: "#ffffff" },
+      so: qn("so", 1),
+      cam: { rotX: qn("rx", 35), rotY: qn("ry", 20), zoom: qn("z", 55) },
+    };
+
+    const CUBE = cubePolygons("#dc2626");
+    const FLOOR = floorPolygons(20, "#cbd5e1");
+    const CUBE_CENTER = [0, 0, 1];
+
+    // ── Shared param object for all PolyCSS panes ───────────────────────
+    function params() {
+      const pts = S.points.filter((p) => p.on).map((p) => ({
+        position: [p.x, p.y, p.z], color: p.color, intensity: p.intensity, castShadow: true,
+      }));
+      return {
+        cubePolys: CUBE, floorPolys: FLOOR, cubeCenter: CUBE_CENTER,
+        directionalLight: {
+          direction: [S.dir.x, S.dir.y, S.dir.z],
+          intensity: S.dir.on ? S.dir.intensity : 0,
+          color: S.dir.color, castShadow: true,
+        },
+        pointLights: pts,
+        ambientLight: { color: S.amb.color, intensity: S.amb.intensity },
+        textureLighting: S.lighting,
+        shadow: { color: "#000000", opacity: S.so, lift: 0.02 },
+        cam: { ...S.cam },
+      };
+    }
+
+    // ── Vanilla pane ────────────────────────────────────────────────────
+    const vanillaCam = createPolyCamera({ rotX: S.cam.rotX, rotY: S.cam.rotY, zoom: S.cam.zoom });
+    const vanillaScene = createPolyScene(document.getElementById("host-vanilla"), {
+      camera: vanillaCam, ...sceneOpts(params()),
+    });
+    const vanillaFloor = vanillaScene.add({ polygons: FLOOR }, { receiveShadow: true });
+    const vanillaCube = vanillaScene.add({ polygons: CUBE }, { position: CUBE_CENTER, castShadow: true });
+    function sceneOpts(p) {
+      return {
+        directionalLight: p.directionalLight, pointLights: p.pointLights,
+        ambientLight: p.ambientLight, textureLighting: p.textureLighting, shadow: p.shadow,
+      };
+    }
+    function updateVanilla(p) {
+      vanillaCam.update({ rotX: p.cam.rotX, rotY: p.cam.rotY, zoom: p.cam.zoom });
+      vanillaScene.applyCamera();
+      vanillaScene.setOptions(sceneOpts(p));
+      // Imperative baked mode freezes the lit surface until an explicit
+      // rebake (perf: no re-bake per drag frame). The declarative React/Vue
+      // renderers re-bake automatically on prop change, so rebake here to keep
+      // all panes in parity when the light changes. Shadows re-emit via
+      // setOptions already; dynamic mode shades in CSS (no rebake needed).
+      if (p.textureLighting === "baked") {
+        vanillaFloor.rebakeAtlas();
+        vanillaCube.rebakeAtlas();
+      }
+    }
+
+    // ── React + Vue panes ───────────────────────────────────────────────
+    const react = mountReact(document.getElementById("anchor-react"), params());
+    const vue = mountVue(document.getElementById("anchor-vue"), params());
+
+    // ── three.js pane ───────────────────────────────────────────────────
+    const threeCanvas = document.getElementById("three-canvas");
+    const renderer = new THREE.WebGLRenderer({ canvas: threeCanvas, antialias: true, preserveDrawingBuffer: true });
+    renderer.setPixelRatio(window.devicePixelRatio);
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFShadowMap;
+    const threeScene = new THREE.Scene();
+    threeScene.background = new THREE.Color("#11161f");
+    const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 5000);
+    camera.up.set(0, 0, 1);
+
+    const cubeMesh = new THREE.Mesh(new THREE.BoxGeometry(2, 2, 2), new THREE.MeshLambertMaterial({ color: "#dc2626" }));
+    cubeMesh.position.set(...CUBE_CENTER);
+    cubeMesh.castShadow = true; cubeMesh.receiveShadow = true;
+    threeScene.add(cubeMesh);
+    const floorMesh = new THREE.Mesh(new THREE.PlaneGeometry(20, 20), new THREE.MeshLambertMaterial({ color: "#cbd5e1" }));
+    floorMesh.receiveShadow = true;
+    threeScene.add(floorMesh);
+
+    const dirLight = new THREE.DirectionalLight(0xffffff, 1);
+    dirLight.castShadow = true;
+    dirLight.shadow.mapSize.set(4096, 4096);
+    dirLight.shadow.camera.near = 0.1;
+    dirLight.shadow.bias = -0.0005;
+    threeScene.add(dirLight); threeScene.add(dirLight.target);
+    const ambLight = new THREE.AmbientLight(0xffffff, 0.3);
+    threeScene.add(ambLight);
+    // Direction-only point lights (decay 0, distance 0), cube shadow maps.
+    const threePoints = S.points.map(() => {
+      const pl = new THREE.PointLight(0xffffff, 1, 0, 0);
+      pl.shadow.mapSize.set(2048, 2048);
+      pl.shadow.camera.near = 0.1; pl.shadow.camera.far = 200; pl.shadow.bias = -0.0015;
+      pl.castShadow = true;
+      threeScene.add(pl);
+      return pl;
+    });
+
+    function updateThree(p) {
+      // camera
+      const rx = p.cam.rotX * Math.PI / 180, ry = p.cam.rotY * Math.PI / 180, dist = 100;
+      camera.position.set(dist * Math.sin(rx) * Math.cos(ry), dist * Math.sin(rx) * Math.sin(ry), dist * Math.cos(rx));
+      camera.lookAt(0, 0, 0);
+      const w = threeCanvas.clientWidth, h = threeCanvas.clientHeight;
+      renderer.setSize(w, h, false);
+      const halfW = (w * 0.5) / p.cam.zoom, halfH = (h * 0.5) / p.cam.zoom;
+      camera.left = -halfW; camera.right = halfW; camera.top = halfH; camera.bottom = -halfH;
+      camera.updateProjectionMatrix();
+      // directional
+      const di = p.directionalLight.intensity;
+      dirLight.intensity = di;
+      const d = p.directionalLight.direction, dl = Math.hypot(d[0], d[1], d[2]) || 1;
+      dirLight.position.set((d[0] / dl) * 60, (d[1] / dl) * 60, (d[2] / dl) * 60);
+      dirLight.target.position.set(0, 0, 0);
+      const r = 24;
+      dirLight.shadow.camera.left = -r; dirLight.shadow.camera.right = r;
+      dirLight.shadow.camera.top = r; dirLight.shadow.camera.bottom = -r;
+      dirLight.shadow.camera.far = 200; dirLight.shadow.camera.updateProjectionMatrix();
+      ambLight.intensity = p.ambientLight.intensity;
+      // point lights — match the active list, others off
+      const active = p.pointLights;
+      threePoints.forEach((pl, i) => {
+        const src = S.points[i];
+        const on = src.on && active.length > 0;
+        pl.visible = on; pl.castShadow = on;
+        pl.position.set(src.x, src.y, src.z);
+        pl.color.set(src.color); pl.intensity = src.intensity;
+      });
+      renderer.render(threeScene, camera);
+    }
+
+    // ── Apply / wire controls ───────────────────────────────────────────
+    function applyAll() {
+      const p = params();
+      updateVanilla(p);
+      react.update(p);
+      vue.update(p);
+      updateThree(p);
+    }
+    document.getElementById("lighting").value = S.lighting;
+    document.getElementById("dir").checked = S.dir.on;
+    document.getElementById("p0").checked = S.points[0].on;
+    document.getElementById("p1").checked = S.points[1].on;
+    document.getElementById("di").value = S.dir.intensity;
+    document.getElementById("lighting").addEventListener("change", (e) => { S.lighting = e.target.value; applyAll(); });
+    document.getElementById("dir").addEventListener("change", (e) => { S.dir.on = e.target.checked; applyAll(); });
+    document.getElementById("p0").addEventListener("change", (e) => { S.points[0].on = e.target.checked; applyAll(); });
+    document.getElementById("p1").addEventListener("change", (e) => { S.points[1].on = e.target.checked; applyAll(); });
+    document.getElementById("di").addEventListener("input", (e) => { S.dir.intensity = +e.target.value; applyAll(); });
+    window.addEventListener("resize", applyAll);
+
+    // three needs a couple frames after layout settles.
+    requestAnimationFrame(() => { applyAll(); requestAnimationFrame(applyAll); });
+    // Re-render three after fonts/layout settle.
+    setTimeout(applyAll, 400);
+  </script>
+</body>
+</html>

@@ -22,11 +22,13 @@ interface Props {
   defaults?: string;
   /** Show FPS + polygon count overlay */
   showStats?: boolean;
+  /** Add a ground plane below the shape and cast a shadow onto it (generator demos). */
+  shadow?: boolean;
 }
 
 import '../styles/poly-demo.css';
 
-const { id, model, mtl, generator, generatorParams, controls, defaults, showStats } = Astro.props;
+const { id, model, mtl, generator, generatorParams, controls, defaults, showStats, shadow } = Astro.props;
 ---
 
 <div class="poly-demo" id={id}
@@ -36,7 +38,8 @@ const { id, model, mtl, generator, generatorParams, controls, defaults, showStat
   data-generator-params={generatorParams || undefined}
   data-controls={controls}
   data-defaults={defaults}
-  data-show-stats={showStats ? "1" : undefined}>
+  data-show-stats={showStats ? "1" : undefined}
+  data-shadow={shadow ? "1" : undefined}>
   <div class="poly-demo__viewer not-content">
     <div class="poly-demo__canvas">
       <div class="poly-demo__scene-host"></div>
@@ -286,6 +289,7 @@ const { id, model, mtl, generator, generatorParams, controls, defaults, showStat
       const defaultsData = demoEl.getAttribute("data-defaults");
       const generatorParamsData = demoEl.getAttribute("data-generator-params");
       const wantStats = demoEl.getAttribute("data-show-stats") === "1";
+      const wantShadow = demoEl.getAttribute("data-shadow") === "1";
 
       let controlList: string[] = [];
       try { controlList = JSON.parse(controlsData || "[]"); } catch {}
@@ -366,6 +370,11 @@ const { id, model, mtl, generator, generatorParams, controls, defaults, showStat
         interactive: defaults.interactive ?? false,
         animate: defaults.animate ?? false,
         light: lightDefault,
+        // Light-direction sliders (azimuth/elevation), seeded from the default
+        // direction so the sliders start in sync.
+        lightYaw: Math.round((Math.atan2(lightDefault.direction[1], lightDefault.direction[0]) * 180) / Math.PI),
+        lightPitch: Math.round((Math.asin(Math.max(-1, Math.min(1,
+          lightDefault.direction[2] / (Math.hypot(...lightDefault.direction) || 1)))) * 180) / Math.PI),
         // Generator-specific state (sphere)
         subdivisions: generatorParams.subdivisions ?? defaults.subdivisions ?? 3,
         radius: generatorParams.radius ?? defaults.radius ?? 10,
@@ -573,7 +582,10 @@ const { id, model, mtl, generator, generatorParams, controls, defaults, showStat
             perspective !== undefined ? { ...cameraOpts, perspective } : cameraOpts,
           );
 
-        const sceneOptions: Record<string, any> = { camera, autoCenter: true };
+        const sceneOptions: Record<string, any> = { camera, autoCenter: !wantShadow };
+        if (wantShadow) {
+          sceneOptions.shadow = { color: "#000000", opacity: 0.32, lift: 0.04 };
+        }
         if (state.light) {
           // Split the demo's `light` config back into the two scene fields
           // the imperative API takes. `state.light.ambient` is shorthand
@@ -597,11 +609,22 @@ const { id, model, mtl, generator, generatorParams, controls, defaults, showStat
           wheel: state.interactive,
           animate: state.animate ? { speed: 0.3, axis: "y", pauseOnInteraction: true } : false,
         });
+        // Ground plane below the shape that receives the cast shadow.
+        if (wantShadow) {
+          const g = state.radius * 3;
+          const z = -state.radius * 1.05;
+          const groundPolys = [{
+            vertices: [[-g, -g, z], [g, -g, z], [g, g, z], [-g, g, z]],
+            color: "#c9c4ba",
+          }];
+          groundHandle = sceneHandle.add({ polygons: groundPolys, dispose: () => {} }, { receiveShadow: true });
+        }
         await rebuildGeneratorMesh();
         loadingEl.style.display = "none";
       }
 
       let currentMeshHandle: any = null;
+      let groundHandle: any = null;
 
       async function rebuildGeneratorMesh() {
         if (!sceneHandle) return;
@@ -615,13 +638,13 @@ const { id, model, mtl, generator, generatorParams, controls, defaults, showStat
           state.polyCount = polygons.length;
           updateStats();
           const parseResult = { polygons, dispose: () => {} };
-          currentMeshHandle = sceneHandle.add(parseResult);
+          currentMeshHandle = sceneHandle.add(parseResult, { castShadow: wantShadow });
         } else if (generatorName && PLATONIC_SHAPES.includes(generatorName)) {
           const polygons = buildPlatonic(generatorName, state.radius);
           state.polyCount = polygons.length;
           updateStats();
           const parseResult = { polygons, dispose: () => {} };
-          currentMeshHandle = sceneHandle.add(parseResult);
+          currentMeshHandle = sceneHandle.add(parseResult, { castShadow: wantShadow });
         }
         updateCode();
       }
@@ -650,6 +673,35 @@ const { id, model, mtl, generator, generatorParams, controls, defaults, showStat
       function updateScene() {
         if (sceneHandle) {
           rebuildGeneratorMesh();
+        } else {
+          applySceneAttrs();
+        }
+        updateCode();
+      }
+
+      // Azimuth/elevation (deg) → a directional to-source vector.
+      function dirFromYawPitch(yawDeg: number, pitchDeg: number): number[] {
+        const yaw = (yawDeg * Math.PI) / 180;
+        const pitch = (pitchDeg * Math.PI) / 180;
+        const ch = Math.cos(pitch);
+        return [ch * Math.cos(yaw), ch * Math.sin(yaw), Math.sin(pitch)];
+      }
+
+      // Live light update. Baked mode freezes the lit surface, so after pushing
+      // the new light via setOptions we re-bake the shape + ground (shadows
+      // re-emit automatically). Custom-element demos fall back to scene attrs.
+      function updateLight() {
+        if (sceneHandle) {
+          const dir: Record<string, unknown> = {};
+          if (state.light.direction) dir.direction = state.light.direction;
+          if (state.light.color) dir.color = state.light.color;
+          if (state.light.intensity !== undefined) dir.intensity = state.light.intensity;
+          const amb: Record<string, unknown> = {};
+          if (state.light.ambient !== undefined) amb.intensity = state.light.ambient;
+          if (state.light.ambientColor) amb.color = state.light.ambientColor;
+          sceneHandle.setOptions({ directionalLight: dir, ambientLight: amb });
+          currentMeshHandle?.rebakeAtlas?.();
+          groundHandle?.rebakeAtlas?.();
         } else {
           applySceneAttrs();
         }
@@ -966,6 +1018,12 @@ const { id, model, mtl, generator, generatorParams, controls, defaults, showStat
         perspective: () => makeRange("perspective", 200, 64000, 100, state.perspective === false || state.perspective === undefined ? rendererDefaultPerspective : state.perspective, (v) => { state.perspective = v === rendererDefaultPerspective ? undefined : v; updateCamera(); }, "px"),
         interactive: () => makeSwitch("interactive", state.interactive, (v) => { state.interactive = v; updateCamera(); }),
         animate: () => makeSwitch("animate", state.animate, (v) => { state.animate = v; updateCamera(); }),
+        // Lighting controls (generator demos): intensity, ambient fill, and the
+        // directional light's azimuth/elevation.
+        lightIntensity: () => makeRange("intensity", 0, 8, 0.1, state.light.intensity, (v) => { state.light.intensity = v; updateLight(); }),
+        ambient: () => makeRange("ambient", 0, 1.5, 0.05, state.light.ambient, (v) => { state.light.ambient = v; updateLight(); }),
+        lightYaw: () => makeRange("light °", 0, 360, 1, ((state.lightYaw % 360) + 360) % 360, (v) => { state.lightYaw = v; state.light.direction = dirFromYawPitch(state.lightYaw, state.lightPitch); updateLight(); }, "°"),
+        lightPitch: () => makeRange("light ↑", 5, 89, 1, state.lightPitch, (v) => { state.lightPitch = v; state.light.direction = dirFromYawPitch(state.lightYaw, state.lightPitch); updateLight(); }, "°"),
         // Sphere-specific controls
         subdivisions: () => makeRange("subdivisions", 0, 5, 1, state.subdivisions, (v) => { state.subdivisions = Math.round(v); rebuildGeneratorMesh(); updateCode(); }),
         radius: () => makeRange("radius", 2, 20, 1, state.radius, (v) => { state.radius = Math.round(v); rebuildGeneratorMesh(); updateCode(); }),

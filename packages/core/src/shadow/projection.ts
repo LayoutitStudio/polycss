@@ -54,6 +54,59 @@ export function buildBakedShadowProjectionMatrix(
 }
 
 /**
+ * Radial variant of `projectCssVertexToGround` for a point light at a fixed
+ * CSS-frame position. The shadow ray travels FROM the light THROUGH the
+ * vertex and onto the ground plane `z = groundCssZ`, so each vertex projects
+ * along its own direction (a true perspective projection) rather than the
+ * single parallel direction a directional light uses.
+ *
+ * Returns `null` when no valid forward intersection exists — the vertex sits
+ * on the light's side of the ground plane, or the ray runs parallel to it.
+ * The caller drops that vertex (and any polygon that loses ≥1 vertex falls
+ * back to a degenerate projection it can skip).
+ *
+ * `lightPos` and `cssVertex` are both in the dimensionless CSS frame (after
+ * the world→CSS axis swap + tile scale), matching `projectCssVertexToGround`.
+ */
+export function projectCssVertexToGroundFromPoint(
+  cssVertex: Vec3,
+  lightPos: Vec3,
+  groundCssZ: number,
+): [number, number] | null {
+  const dz = cssVertex[2] - lightPos[2];
+  // Ray parallel to the ground plane → never lands on it.
+  if (Math.abs(dz) < 1e-9) return null;
+  // point = vertex + s · (vertex − light); solve for ground z.
+  const s = (groundCssZ - cssVertex[2]) / dz;
+  // s < 0 means the ground is between the light and the vertex (or behind
+  // the light) — no cast shadow from this vertex. s = 0 is the vertex
+  // already sitting on the ground plane (projects to itself).
+  if (s < 0) return null;
+  return [
+    cssVertex[0] + s * (cssVertex[0] - lightPos[0]),
+    cssVertex[1] + s * (cssVertex[1] - lightPos[1]),
+  ];
+}
+
+/**
+ * Point-light variant of `isBakedShadowCaster`. A polygon casts shadow when
+ * its outward normal points away from the light — i.e. the ray from the
+ * light to the polygon centroid runs into the back of the face. `centroid`
+ * and `lightPos` are CSS-frame; `normal` is the CSS-frame outward normal.
+ */
+export function isPointShadowCaster(
+  centroid: Vec3,
+  normal: Vec3,
+  lightPos: Vec3,
+): boolean {
+  const dx = centroid[0] - lightPos[0];
+  const dy = centroid[1] - lightPos[1];
+  const dz = centroid[2] - lightPos[2];
+  const len = Math.hypot(dx, dy, dz) || 1;
+  return (normal[0] * dx + normal[1] * dy + normal[2] * dz) / len > 0;
+}
+
+/**
  * Decides whether a polygon should cast a shadow given its outward
  * normal and the light's travel direction.
  *

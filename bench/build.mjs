@@ -101,6 +101,21 @@ const targets = [
     out: resolve(bundleDir, "polycss-vue.js"),
   },
   {
+    label: "shadow-parity shared meshes",
+    entry: resolve(__dirname, "entries/parityMeshes.ts"),
+    out: resolve(bundleDir, "parity-meshes.js"),
+  },
+  {
+    label: "shadow-parity react mount",
+    entry: resolve(__dirname, "entries/shadowParityReact.tsx"),
+    out: resolve(bundleDir, "shadow-parity-react.js"),
+  },
+  {
+    label: "shadow-parity vue mount",
+    entry: resolve(__dirname, "entries/shadowParityVue.ts"),
+    out: resolve(bundleDir, "shadow-parity-vue.js"),
+  },
+  {
     label: "HTML chunk mount bench entry",
     entry: resolve(__dirname, "entries/htmlMount.ts"),
     out: resolve(bundleDir, "polycss-html-mount.js"),
