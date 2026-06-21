@@ -22,3 +22,7 @@ packages/vue/tsconfig.tsbuildinfo
 log.md
 log-texture.md
 website/.baseline-shots/
+
+# chrome-trace skill raw output
+chrome-trace.json
+/tmp/*.trace.json

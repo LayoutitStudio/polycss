@@ -215,7 +215,7 @@ export function ReactScene({
         textureLighting={sceneOptions.textureLighting}
         textureQuality={textureQuality}
         strategies={{ disable: sceneOptions.disableStrategies }}
-        shadow={{ maxExtend: sceneOptions.shadowMaxExtend }}
+        shadow={{ maxExtend: sceneOptions.shadowMaxExtend, parametric: sceneOptions.shadowParametric, definition: sceneOptions.shadowDefinition, style: sceneOptions.shadowStyle }}
       >
         {sceneOptions.selection ? (
           <PolySelect onChange={setSelectedMeshes} clearOnMiss={false}>

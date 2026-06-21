@@ -9,6 +9,7 @@
  * React and Vue can share it without duplicating ~500 LOC of geometry.
  */
 import {
+  buildParametricCasterOverride,
   buildSharedEdgeMap,
   computeMergedReceiverShadows,
   meshScaleVec3,
@@ -28,6 +29,7 @@ import type { SceneContext } from "./sceneContext";
 import type { MeshEntry } from "./internalTypes";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
+
 
 /** Mounted SVG state per receiver face. Kept in a separate WeakMap so the
  *  core ReceiverFacePlane stays pure data. */
@@ -222,12 +224,46 @@ export function emitReceiverShadows(
       }
       edgeOwners = cachedOwners;
     }
+    // Parametric shadow: replace the caster's geometry with low-res coverage
+    // contour loops (directional). The cast shadow on a plane is the 2D coverage
+    // of every projected face, so we rasterize that from the light POV and trace
+    // its concave contour (towers, gaps) at a resolution driven by `definition`.
+    // The override loops project onto every receiver face through the normal
+    // pipeline. Cross-mesh casting uses ONE flat layer (cheapest, exact for a
+    // distant receiver). SELF-shadow uses depth-stratified layers: a flat
+    // outline carries no depth and would over-darken a mesh's own interior, so
+    // we slice the caster along the light and let each face's half-space clip
+    // keep only the bands in front of it.
+    let overrideSilhouette: Vec3[][] | undefined;
+    let overridePointSilhouettes: Array<Vec3[][] | undefined> | undefined;
+    if (options.shadow?.parametric) {
+      // Per-mesh override beats the scene default; during a progressive
+      // light-drag emit, cap it at `dragDefinition` for a cheap frame. The
+      // shared core helper owns the rest (flat/convex skip, depth bands, style,
+      // per-point radial) so vanilla/React/Vue stay identical.
+      const baseDef = caster.shadowDefinition ?? options.shadow.definition ?? 16;
+      const def = ctx.shadowDragActive
+        ? Math.min(baseDef, options.shadow.dragDefinition ?? baseDef)
+        : baseDef;
+      const result = buildParametricCasterOverride({
+        polysWorldVerts: cached.map((item) => item.wv),
+        lightDir,
+        definition: def,
+        isSelf: caster === receiverEntry,
+        style: options.shadow.style,
+        pointLights: passes.points.map((pt) => ({ position: pt.lightPos, index: pt.index })),
+      });
+      overrideSilhouette = result.overrideSilhouette;
+      overridePointSilhouettes = result.overridePointSilhouettes;
+    }
     casterInputs.push({
       id: caster,
       items: cached,
       selfShadowEdgeMap,
       edgeOwners,
       casterPolygonCount: caster.polygons.length,
+      overrideSilhouette,
+      overridePointSilhouettes,
     });
   }
 

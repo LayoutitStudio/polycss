@@ -184,6 +184,15 @@ export {
   projectCssVertexToGround,
   projectCssVertexToGroundFromPoint,
 } from "./shadow/projection";
+export { computeParametricShadowSilhouette } from "./shadow/parametricSilhouette";
+export { computeCoverageShadowSilhouette } from "./shadow/coverageSilhouette";
+export {
+  buildParametricCasterOverride,
+  isFlatCaster,
+  isConvexCaster,
+  type ParametricOverrideInput,
+  type ParametricOverrideResult,
+} from "./shadow/parametricOverride";
 export { clipPolygonToConvex2D } from "./shadow/clipping";
 export {
   expandConvexHullOutward,

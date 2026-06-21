@@ -75,6 +75,10 @@ export interface SceneContext {
   receiverShadowCacheKey: Map<MeshEntry, string>;
   casterItemsCache: Map<MeshEntry, CasterPolyItem[]>;
   casterItemsCacheKey: Map<MeshEntry, string>;
+  /** Set during a progressive (light-drag) shadow emit so the receiver
+   *  projector uses `shadow.dragDefinition` instead of full `definition`.
+   *  Cleared for the debounced full-quality refine. */
+  shadowDragActive: boolean;
 }
 
 /** Build a fresh SceneContext for a new scene. The mutable containers
@@ -106,5 +110,6 @@ export function createSceneContext(input: {
     receiverShadowCacheKey: new Map(),
     casterItemsCache: new Map(),
     casterItemsCacheKey: new Map(),
+    shadowDragActive: false,
   };
 }

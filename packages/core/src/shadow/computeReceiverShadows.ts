@@ -118,6 +118,15 @@ export interface ReceiverCasterInput<T = unknown> {
    *  array is sized correctly even when atlas-plan / dedup filters drop
    *  some polygons from `items`. */
   casterPolygonCount?: number;
+  /** Parametric-shadow override: a precomputed world-frame silhouette loop set
+   *  (see `computeParametricShadowSilhouette`). When present it is projected
+   *  directly — skipping per-poly and silhouette extraction — so a cheap,
+   *  low-resolution outline casts onto every receiver via the normal pipeline. */
+  overrideSilhouette?: Vec3[][];
+  /** Per-point-light parametric override (indexed by the point light's index in
+   *  `allPointLights`). A point pass uses this RADIAL silhouette instead of the
+   *  directional `overrideSilhouette`; an undefined entry → exact point path. */
+  overridePointSilhouettes?: Array<Vec3[][] | undefined>;
 }
 
 /**
@@ -557,6 +566,22 @@ export function computeReceiverShadowFaces<T = unknown>(
   // Clean closed meshes keep single-sided casting (correct + cheaper).
   const doubleSidedByCaster: boolean[] = new Array(casters.length).fill(false);
   const silhouetteByCaster: Array<Vec3[][] | null> = casters.map((casterEntry, casterIdx) => {
+    // Parametric-shadow override: low-res silhouette loops the projector casts
+    // onto each receiver face. A point pass uses the per-light RADIAL loops
+    // (`overridePointSilhouettes[thisPointIndex]`) — the directional loops are
+    // the wrong outline for a finite-distance light. An undefined per-point
+    // entry means this caster skipped parametric (flat/convex) → fall through
+    // to the exact point path.
+    if (isPoint) {
+      if (casterEntry.overridePointSilhouettes) {
+        const o = casterEntry.overridePointSilhouettes[thisPointIndex ?? -1];
+        if (o) return o;
+      } else if (casterEntry.overrideSilhouette) {
+        return casterEntry.overrideSilhouette;
+      }
+    } else if (casterEntry.overrideSilhouette) {
+      return casterEntry.overrideSilhouette;
+    }
     // Point lights: project the caster SILHOUETTE (its outline as seen from
     // the light), not individual back-faces. An object resting on the
     // receiver casts a FILLED contact shadow; the per-poly back-face union
@@ -809,6 +834,29 @@ export function computeReceiverShadowFaces<T = unknown>(
         // Empty loop set means "light fully behind mesh" → no shadow on
         // this receiver from this caster.
         if (silhouette.length === 0) continue;
+        // Parametric (override) loops carry coverage holes (courtyards, the
+        // coliseum arena) as opposite-wound loops. Preserving that relative
+        // winding lets them subtract under the path's nonzero fill. The
+        // (u,v) basis may flip handedness, so pick one global orientation from
+        // the largest loop (→ outer CCW) and apply it uniformly. The exact
+        // silhouette path keeps per-loop `ensureCcw2D` (no holes there).
+        const isOverride = !!casterEntry.overrideSilhouette;
+        let overrideFlip = false;
+        if (isOverride) {
+          let bestAbs = 0;
+          for (const loop of silhouette) {
+            if (loop.length < 3) continue;
+            const ab = clipLoopAbovePlane(loop, O, n, SELF_SHADOW_EPS);
+            if (ab.length < 3) continue;
+            const pr = ab.map(projectOntoPlane);
+            let area = 0;
+            for (let i = 0; i < pr.length; i++) {
+              const p = pr[i]!, q = pr[(i + 1) % pr.length]!;
+              area += p[0] * q[1] - q[0] * p[1];
+            }
+            if (Math.abs(area) > bestAbs) { bestAbs = Math.abs(area); overrideFlip = area < 0; }
+          }
+        }
         for (const loop of silhouette) {
           if (loop.length < 3) continue;
           // 3D clip against the receiver plane half-space first — silhouette
@@ -817,7 +865,9 @@ export function computeReceiverShadowFaces<T = unknown>(
           const above3D = clipLoopAbovePlane(loop, O, n, SELF_SHADOW_EPS);
           if (above3D.length < 3) continue;
           const projected = above3D.map(projectOntoPlane);
-          const subjectCcw = ensureCcw2D(projected);
+          const subjectCcw = isOverride
+            ? (overrideFlip ? [...projected].reverse() : projected)
+            : ensureCcw2D(projected);
           const reachClipped = reachRect.length === 4
             ? clipPolygonToConvex2D(subjectCcw, reachRect)
             : subjectCcw;

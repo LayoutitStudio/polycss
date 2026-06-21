@@ -3,8 +3,14 @@
  * (vanilla / React / Vue) renders byte-identical polygons. Bundled into
  * bench/.generated/parity-meshes.js.
  */
-import { boxPolygons } from "@layoutit/polycss-core";
+import { boxPolygons, spherePolygons } from "@layoutit/polycss-core";
 import type { Polygon } from "@layoutit/polycss-core";
+
+/** Round caster — its many-vertex silhouette makes the parametric `definition`
+ *  knob visually obvious. */
+export function spherePolys(radius = 8, subdivisions = 2, color = "#dc2626"): Polygon[] {
+  return spherePolygons({ radius, subdivisions }).map((p) => ({ ...p, color }));
+}
 
 /** Unit-2 cube centered at the origin (sit it on the floor with position z=1). */
 export function cubePolygons(color = "#dc2626"): Polygon[] {

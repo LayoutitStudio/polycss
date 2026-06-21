@@ -85,7 +85,7 @@
         pointLights: pts,
         ambientLight: { color: S.amb.color, intensity: S.amb.intensity },
         textureLighting: S.lighting,
-        shadow: { color: "#000000", opacity: S.so, lift: 0.02 },
+        shadow: { color: "#000000", opacity: S.so, lift: 0.02, parametric: qs("pm","0")==="1", definition: qn("def",24), style: qs("style","vector") },
         cam: { ...S.cam },
       };
     }

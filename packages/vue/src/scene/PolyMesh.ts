@@ -16,7 +16,7 @@
  * When no `polygon` slot is provided, each polygon is rendered automatically
  * using the cheapest supported render-strategy leaf.
  */
-import { defineComponent, h, Teleport, computed, inject, onMounted, onBeforeUnmount, ref, watch, watchEffect } from "vue";
+import { defineComponent, h, Teleport, computed, inject, onMounted, onBeforeUnmount, ref, shallowRef, watch, watchEffect } from "vue";
 import type { PropType, VNode, CSSProperties } from "vue";
 import type {
   MeshResolution,
@@ -37,6 +37,7 @@ import {
 } from "@layoutit/polycss-core";
 import {
   BASE_TILE,
+  buildParametricCasterOverride,
   buildPolyMeshTransform,
   computeMergedReceiverShadows,
   computeSceneBbox,
@@ -222,6 +223,9 @@ export const PolyMesh = defineComponent({
     onFrameReady: { type: Function as PropType<() => void>, default: undefined },
     castShadow: { type: Boolean as PropType<boolean>, default: false },
     receiveShadow: { type: Boolean as PropType<boolean>, default: false },
+    /** Per-mesh parametric-shadow detail override (scene `shadow.definition`
+     *  when undefined). Only used when the scene's `shadow.parametric` is true. */
+    shadowDefinition: { type: Number as PropType<number>, default: undefined },
     merge: { type: Boolean as PropType<boolean>, default: true },
     meshResolution: { type: String as PropType<MeshResolution>, default: undefined },
     parseOptions: { type: Object as PropType<UseMeshOptions>, default: undefined },
@@ -730,12 +734,32 @@ export const PolyMesh = defineComponent({
           }
           edgeOwners = cachedOwners;
         }
+        // Parametric override: low-res silhouette loops via the shared core
+        // helper (identical to vanilla + React). Per-mesh `shadowDefinition`
+        // beats the scene default; directional + per-point-light radial.
+        let overrideSilhouette: Vec3[][] | undefined;
+        let overridePointSilhouettes: Array<Vec3[][] | undefined> | undefined;
+        if (ctx?.shadow?.parametric) {
+          const def = data.shadowDefinition ?? ctx.shadow.definition ?? 16;
+          const result = buildParametricCasterOverride({
+            polysWorldVerts: items.map((it) => it.wv),
+            lightDir,
+            definition: def,
+            isSelf,
+            style: ctx.shadow.style,
+            pointLights: shadowPointIndices.map((idx) => ({ position: allPointLightsCss[idx]!.position, index: idx })),
+          });
+          overrideSilhouette = result.overrideSilhouette;
+          overridePointSilhouettes = result.overridePointSilhouettes;
+        }
         casterInputs.push({
           id: Symbol(`caster-${i++}`),
           items,
           selfShadowEdgeMap: isSelf ? cachedSelfMap : undefined,
           edgeOwners,
           casterPolygonCount: data.polygons.length,
+          overrideSilhouette,
+          overridePointSilhouettes,
         });
       }
       const cameraState = cameraCtx?.store.getState().cameraState;
@@ -805,6 +829,26 @@ export const PolyMesh = defineComponent({
       );
     });
 
+    // Gated shadow-caster geometry: an animated (deforming) mesh FREEZES its
+    // shadow by default — the receiver shadow re-projects whenever this ref
+    // updates, so re-emitting every frame is expensive. Update it on real
+    // topology changes always, but on a same-topology deform only when
+    // `shadow.followAnimation` is set (then the shadow tracks the pose; pair
+    // with a low parametric `definition`). Mirrors vanilla `setPolygons`.
+    const shadowCasterPolygons = shallowRef(polygons.value);
+    let lastShadowPolyCount = -1;
+    watch(
+      polygons,
+      (polys) => {
+        const follow = sceneCtx?.value.shadow?.followAnimation ?? false;
+        const topologyChanged = polys.length !== lastShadowPolyCount;
+        if (lastShadowPolyCount >= 0 && !follow && !topologyChanged) return;
+        lastShadowPolyCount = polys.length;
+        shadowCasterPolygons.value = polys;
+      },
+      { immediate: true },
+    );
+
     // Register this mesh with the shadow registry when castShadow=true in
     // either lighting mode — the scene needs caster polygons (with their
     // full transforms) to derive the ground plane and to feed receiver
@@ -817,9 +861,10 @@ export const PolyMesh = defineComponent({
         if (!registry) return;
         if (castShadow) {
           registry.register(shadowRegistryId, () => {
+            const casterPolygons = shadowCasterPolygons.value;
             // Mirror vanilla: skip no-plan polys AND overlapping duplicates
             // (vanilla's dedupByCaster filter, same 0.5/0.95 thresholds).
-            const dedupDrop = findOverlappingPolygonDuplicates(polygons.value, {
+            const dedupDrop = findOverlappingPolygonDuplicates(casterPolygons, {
               normalTolerance: 0.1,
               distanceTolerance: 0.5,
               overlapFraction: 0.95,
@@ -831,11 +876,12 @@ export const PolyMesh = defineComponent({
               if (plans[i] && !dedupDrop.has(i)) s.add(i);
             }
             return {
-              polygons: polygons.value,
+              polygons: casterPolygons,
               position: props.position ?? [0, 0, 0],
               scale: props.scale,
               rotation: props.rotation,
               renderedPolygonIndices: s,
+              shadowDefinition: props.shadowDefinition,
             };
           });
         } else {

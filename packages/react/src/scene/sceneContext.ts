@@ -35,6 +35,9 @@ export interface ShadowCasterRegistration {
    *  shadow). Undefined means "include all polygons" (used when the caller
    *  doesn't have plan information). */
   renderedPolygonIndices?: ReadonlySet<number>;
+  /** Per-mesh parametric-shadow definition override (scene default when
+   *  undefined). Mirrors `PolyMeshTransform.shadowDefinition` in vanilla. */
+  shadowDefinition?: number;
 }
 
 export interface ShadowOptions {
@@ -48,6 +51,32 @@ export interface ShadowOptions {
    * disable the cap entirely.
    */
   maxExtend?: number;
+  /**
+   * Cast a low-resolution parametric silhouette per caster instead of its full
+   * geometry — lighter DOM + cheaper projection at the cost of an approximate
+   * outline. Casts onto every receiver through the normal pipeline. Default:
+   * `false`. (Directional + point lights; the exact path stays the default.)
+   */
+  parametric?: boolean;
+  /**
+   * Parametric-shadow detail (max silhouette points / pixel-grid resolution).
+   * Only used when `parametric` is true. Default: `16`. Override per mesh via
+   * `<PolyMesh shadowDefinition>`.
+   */
+  definition?: number;
+  /**
+   * Parametric render style: `"vector"` (smooth contour, default) or `"pixel"`
+   * (greedy-meshed voxel blocks; `definition` becomes the grid resolution).
+   */
+  style?: "vector" | "pixel";
+  /**
+   * Re-emit a caster's shadow while it animates (deforms) so the shadow follows
+   * the pose instead of freezing. Default `false`: a same-topology deform keeps
+   * the last shadow pose (re-emitting every frame is expensive). Best with
+   * `parametric` — a low-res silhouette is cheap to reproject. Topology changes
+   * (different polygon count) always re-emit regardless.
+   */
+  followAnimation?: boolean;
 }
 
 export interface PolySceneContextValue {

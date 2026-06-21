@@ -101,6 +101,50 @@ export interface PolySceneOptions {
      * very large number (e.g. `Infinity`) to disable the cap entirely.
      */
     maxExtend?: number;
+    /**
+     * Experimental: cast a single low-resolution parametric **silhouette**
+     * outline per caster instead of projecting its full geometry. Lighter DOM
+     * + cheaper projection, at the cost of an approximate (convex) outline.
+     * Casts onto every receiver through the normal pipeline. Default: `false`.
+     */
+    parametric?: boolean;
+    /**
+     * Parametric-shadow detail: the max number of points in the silhouette
+     * outline. Lower → blobbier + lighter; higher → closer to the exact convex
+     * outline. Only used when `parametric` is true. Default: `16`.
+     *
+     * Can be overridden per mesh via `PolyMeshTransform.shadowDefinition`.
+     */
+    definition?: number;
+    /**
+     * Progressive refinement: the definition used WHILE the directional light
+     * is actively changing (a drag). When set (and `parametric` is true), each
+     * light-direction change emits at `min(definition, dragDefinition)` for a
+     * laggless drag, then a debounced pass re-emits at full `definition` once
+     * the light settles — mirroring the atlas-rebake-at-rest escape hatch.
+     * Self-shadow recompute is O(faces × bands), so dropping detail during
+     * motion is the only way to keep a complex mesh smooth. Unset → no
+     * progressive pass (every change renders at full `definition`).
+     */
+    dragDefinition?: number;
+    /**
+     * Parametric-shadow render style (only used when `parametric` is true):
+     * - `"vector"` (default) — smooth concave contour outline.
+     * - `"pixel"` — the coverage is greedy-meshed into axis-aligned rectangles,
+     *   giving a blocky/voxel shadow. Holes (courtyards, the coliseum arena)
+     *   come free as absent cells. `definition` is the pixel-grid resolution
+     *   (lower → chunkier); the block size is the aesthetic.
+     */
+    style?: "vector" | "pixel";
+    /**
+     * Re-emit shadows while a mesh is animating (skeletal/GLB deformation), so
+     * the shadow follows the pose instead of freezing at the rest pose. Each
+     * `setPolygons` from the animation loop triggers a re-projection, throttled
+     * internally (~12fps) so it stays affordable. Strongly recommended only
+     * with `parametric: true` (a low-res silhouette is cheap to reproject every
+     * few frames; the exact path is not). Default: `false`.
+     */
+    followAnimation?: boolean;
   };
   /**
    * When `true`, emit `data-poly-shadow-*` attribution attributes on every
@@ -161,6 +205,14 @@ export interface PolyMeshTransform {
    * Defaults to `false`.
    */
   receiveShadow?: boolean;
+  /**
+   * Per-mesh parametric-shadow detail (overrides the scene's
+   * `shadow.definition` for THIS mesh's cast/self shadow). Lets a detailed
+   * caster stay high-resolution while a simple prop runs cheap in the same
+   * scene. Only used when `shadow.parametric` is true. Unset → inherit the
+   * scene definition.
+   */
+  shadowDefinition?: number;
 }
 
 export interface PolyMeshHandle {

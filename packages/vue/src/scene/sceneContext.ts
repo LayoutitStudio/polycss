@@ -31,6 +31,9 @@ export interface ShadowCasterRegistration {
    *  Receiver-shadow algorithm skips polygons NOT in this set — mirrors
    *  vanilla which iterates `caster.rendered`. Undefined → include all. */
   renderedPolygonIndices?: ReadonlySet<number>;
+  /** Per-mesh parametric-shadow definition override (scene default when
+   *  undefined). Mirrors `PolyMeshTransform.shadowDefinition` in vanilla. */
+  shadowDefinition?: number;
 }
 
 export interface PolyShadowOptions {
@@ -44,6 +47,30 @@ export interface PolyShadowOptions {
    * disable the cap entirely.
    */
   maxExtend?: number;
+  /**
+   * Cast a low-resolution parametric silhouette per caster instead of full
+   * geometry — lighter DOM + cheaper projection. Directional + point lights.
+   * Default: `false`.
+   */
+  parametric?: boolean;
+  /**
+   * Parametric-shadow detail (max silhouette points / pixel-grid resolution).
+   * Only used when `parametric` is true. Default: `16`. Override per mesh via
+   * `<poly-mesh shadow-definition>`.
+   */
+  definition?: number;
+  /**
+   * Parametric render style: `"vector"` (smooth contour, default) or `"pixel"`
+   * (greedy-meshed voxel blocks; `definition` becomes the grid resolution).
+   */
+  style?: "vector" | "pixel";
+  /**
+   * Re-emit a caster's shadow while it animates (deforms) so the shadow follows
+   * the pose instead of freezing. Default `false`: a same-topology deform keeps
+   * the last shadow pose (re-emitting every frame is expensive). Best with
+   * `parametric`. Topology changes (different polygon count) always re-emit.
+   */
+  followAnimation?: boolean;
 }
 
 export interface PolyShadowRegistry {
