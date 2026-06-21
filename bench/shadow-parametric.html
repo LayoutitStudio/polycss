@@ -156,6 +156,11 @@
       // full caster geometry. `definition` = max outline points.
       shadow:{ opacity: qn("so", 1.0), definition: qn("def", 16) },
       parametric: qs("pm", "1") !== "0",
+      // Progressive refinement: during light/camera motion, cap the shadow
+      // definition for a laggless drag, then refine to full def once motion
+      // stops (debounced). Mirrors the atlas-rebake-at-rest escape hatch.
+      progressive: qs("pg", "1") !== "0",
+      dragDef: qn("dragdef", 16),
       cam:   { rotX: qn("rx", 30), rotY: qn("ry", 0), zoom: qn("z", 60) },
       // "Shadows only" mode: hide all caster + floor base color so only the
       // shadow elements remain visible. Lets you compare shadow geometry
@@ -918,7 +923,23 @@
     // textured atlases every pointer tick — that's what causes the visible
     // texture-flicker on cottage drags. Cube + floor solid colors don't need
     // re-bake on camera moves; viewing angle doesn't affect Lambert.
+    // Progressive refinement controller: any rapid update() (drag) renders at a
+    // capped definition so the frame stays cheap; a debounce schedules a single
+    // full-definition refine once motion stops. This is the laggless lever —
+    // the self-shadow recompute is O(faces × bands × points), so the only way
+    // to stay smooth on complex meshes is to drop quality during motion.
+    let __interacting = false;
+    let __refineTimer = null;
+    function __effectiveDef() {
+      if (!S.progressive) return S.shadow.definition;
+      return __interacting ? Math.min(S.shadow.definition, S.dragDef) : S.shadow.definition;
+    }
     function update(lightsChanged) {
+      if (S.progressive) {
+        __interacting = true;
+        if (__refineTimer) clearTimeout(__refineTimer);
+        __refineTimer = setTimeout(() => { __interacting = false; update(lightsChanged); }, 140);
+      }
       // Push every mesh's transform every tick. setTransform is cheap when
       // values haven't changed; this keeps the bench panel + both engines
       // in sync without per-mesh slider plumbing.
@@ -956,7 +977,7 @@
         },
         ambientLight: { color: S.amb.color, intensity: S.amb.intensity },
         textureLighting: S.lighting,
-        shadow: { color: "#000000", opacity: S.shadow.opacity, lift: shadowLift, parametric: S.parametric, definition: S.shadow.definition },
+        shadow: { color: "#000000", opacity: S.shadow.opacity, lift: shadowLift, parametric: S.parametric, definition: __effectiveDef() },
         autoCenter: S.autoCenter,
       });
       // Baked mode stores lit colors in atlas pixels → light change requires

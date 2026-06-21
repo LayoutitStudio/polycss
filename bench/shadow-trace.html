@@ -83,7 +83,9 @@
         scene.setOptions({ directionalLight: { direction: [qx, qy, qz], intensity: 1, color: "#ffffff", castShadow: true } });
         return;
       }
+      const t0 = performance.now();
       scene.setOptions({ directionalLight: { direction: [x, y, z], intensity: 1, color: "#ffffff", castShadow: true } });
+      globalThis.__soTime = (globalThis.__soTime ?? 0) + (performance.now() - t0);
     }
 
     let sweeping = false;
@@ -104,7 +106,8 @@
 
     globalThis.__shTime = { coverage: 0, merge: 0, dom: 0 };
     window.__shadowTrace = {
-      startSweep: () => { sweeping = true; frames = 0; globalThis.__shTime = { coverage: 0, merge: 0, dom: 0 }; },
+      startSweep: () => { sweeping = true; frames = 0; globalThis.__soTime = 0; globalThis.__shTime = { coverage: 0, merge: 0, dom: 0 }; },
+      soTime: () => ({ soTime: globalThis.__soTime ?? 0, frames }),
       stopSweep: () => { sweeping = false; },
       frames: () => frames,
       memoSize: () => memo.size,
