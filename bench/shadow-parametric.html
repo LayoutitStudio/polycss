@@ -214,7 +214,7 @@
       // visible gap between the caster's base and where the shadow starts
       // on the floor. The bench's floor + cube are separate meshes, no
       // z-fight risk that the default lift was protecting against.
-      shadow: { color: "#000000", opacity: S.shadow.opacity, lift: 0, parametric: S.parametric, definition: S.shadow.definition },
+      shadow: { color: "#000000", opacity: S.shadow.opacity, lift: 0, parametric: S.parametric, definition: S.shadow.definition, dragDefinition: S.progressive ? S.shadow.dragDef : undefined },
       textureLighting: S.lighting,
       // Full-quality atlas — no global shrink-to-fit cap. Default "auto"
       // shrinks the whole atlas to ~2048px / 16MB which pixelates large
@@ -871,7 +871,6 @@
         S.dir.y = Math.max(-LIGHT_AXIS_LIMIT, Math.min(LIGHT_AXIS_LIMIT, sy));
         S.dir.z = Math.max(-LIGHT_AXIS_LIMIT, Math.min(LIGHT_AXIS_LIMIT, sz));
         refreshLightSliders();
-        __markMotion();
         update(false);
       };
       const onUp = (ev) => {
@@ -930,21 +929,6 @@
     // full-definition refine once motion stops. This is the laggless lever —
     // the self-shadow recompute is O(faces × bands × points), so the only way
     // to stay smooth on complex meshes is to drop quality during motion.
-    let __interacting = false;
-    let __refineTimer = null;
-    function __effectiveDef() {
-      if (!S.progressive) return S.shadow.definition;
-      return __interacting ? Math.min(S.shadow.definition, S.shadow.dragDef) : S.shadow.definition;
-    }
-    // Call this from LIGHT/CAMERA motion handlers only — NOT from setting
-    // changes like the definition slider (which must show its exact def
-    // immediately). Caps def during motion and schedules a full-def refine.
-    function __markMotion() {
-      if (!S.progressive) return;
-      __interacting = true;
-      if (__refineTimer) clearTimeout(__refineTimer);
-      __refineTimer = setTimeout(() => { __interacting = false; update(true); }, 140);
-    }
     function update(lightsChanged) {
       // Push every mesh's transform every tick. setTransform is cheap when
       // values haven't changed; this keeps the bench panel + both engines
@@ -983,7 +967,7 @@
         },
         ambientLight: { color: S.amb.color, intensity: S.amb.intensity },
         textureLighting: S.lighting,
-        shadow: { color: "#000000", opacity: S.shadow.opacity, lift: shadowLift, parametric: S.parametric, definition: __effectiveDef() },
+        shadow: { color: "#000000", opacity: S.shadow.opacity, lift: shadowLift, parametric: S.parametric, definition: S.shadow.definition, dragDefinition: S.progressive ? S.shadow.dragDef : undefined },
         autoCenter: S.autoCenter,
       });
       // Baked mode stores lit colors in atlas pixels → light change requires
@@ -1304,7 +1288,6 @@
         if (S.cam.rotY < 0) S.cam.rotY += 360;
         S.cam.rotX = Math.max(0, Math.min(90, S.cam.rotX - dy * 0.4));
         setCamSliders();
-        __markMotion();
         applyCamera(); update();
       });
       el.addEventListener("wheel", (e) => {
@@ -1312,7 +1295,6 @@
         const f = Math.exp(-e.deltaY * 0.001);
         S.cam.zoom = Math.max(1, Math.min(500, S.cam.zoom * f));
         setCamSliders();
-        __markMotion();
         applyCamera(); update();
       }, { passive: false });
     }
@@ -1661,13 +1643,6 @@
         inp.addEventListener("pointerdown", onDragStart);
         inp.addEventListener("pointerup", onDragEnd);
         inp.addEventListener("change", onDragEnd);
-        // Progressive def applies only to MOTION (light direction, camera) —
-        // NOT to the `definition` slider, which must show its exact def. The
-        // `dragDef` slider previews the moving quality, so it marks motion too.
-        const isDragDef = r.k[0] === "shadow" && r.k[1] === "dragDef";
-        const isMotion = isDragDef
-          || (r.k[0] === "dir" && (r.k[1] === "x" || r.k[1] === "y" || r.k[1] === "z"))
-          || !!r.camera;
         inp.addEventListener("input", () => {
           const v = +inp.value;
           setVal(v);
@@ -1677,8 +1652,9 @@
           // finalize handles it. Dynamic mode never rebakes here either.
           // update() pushes every mesh's full transform (pos + scale), so
           // object-transform changes don't need any special handling.
+          // Progressive (drag-definition) is handled by the LIBRARY now: a
+          // light-direction change triggers it; the definition slider doesn't.
           const lightsChanged = isLightSlider && !dragging && S.lighting === "baked";
-          if (isMotion) __markMotion();
           update(lightsChanged);
         });
         row.appendChild(inp); row.appendChild(val);

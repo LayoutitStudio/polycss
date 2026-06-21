@@ -32,7 +32,7 @@
       camera,
       directionalLight: { direction: [1, 0.6, 1], intensity: 1, color: "#ffffff", castShadow: true },
       ambientLight: { color: "#ffffff", intensity: 0.3 },
-      shadow: { color: "#000000", opacity: 1, lift: 0, parametric: true, definition: DEF },
+      shadow: { color: "#000000", opacity: 1, lift: 0, parametric: true, definition: DEF, dragDefinition: parseInt(q.get("dragdef") ?? "0", 10) || undefined },
       textureQuality: 1,
       seamBleed: 0,
     });
@@ -51,7 +51,8 @@
       const m = MESHES[MESH];
       const parse = await loadMesh(m.url, m.mtl ? { mtlUrl: m.mtl, objOptions: { targetSize: m.size } } : { objOptions: { targetSize: m.size } });
       const selfShadow = q.get("self") !== "0";
-      scene.add(parse, { id: "obj", position: [0, 0, 0], castShadow: true, receiveShadow: selfShadow, merge: false });
+      const meshDef = parseInt(q.get("meshdef") ?? "0", 10) || undefined;
+      scene.add(parse, { id: "obj", position: [0, 0, 0], castShadow: true, receiveShadow: selfShadow, merge: false, shadowDefinition: meshDef });
       scene.add(floorParse, { id: "floor", position: [0, 0, 0], castShadow: false, receiveShadow: true, merge: false });
       scene.applyCamera();
     }

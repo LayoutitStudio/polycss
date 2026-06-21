@@ -305,7 +305,12 @@ export function emitReceiverShadows(
     // keep only the bands in front of it.
     let overrideSilhouette: Vec3[][] | undefined;
     if (options.shadow?.parametric) {
-      const def = options.shadow.definition ?? 16;
+      // Per-mesh override beats the scene default; during a progressive
+      // light-drag emit, cap it at `dragDefinition` for a cheap frame.
+      const baseDef = caster.shadowDefinition ?? options.shadow.definition ?? 16;
+      const def = ctx.shadowDragActive
+        ? Math.min(baseDef, options.shadow.dragDefinition ?? baseDef)
+        : baseDef;
       const polysWv = cached.map((item) => item.wv);
       const isSelf = caster === receiverEntry;
       // A FLAT caster (all polygons in one plane, e.g. a ground quad) has no

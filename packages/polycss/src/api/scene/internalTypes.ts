@@ -44,6 +44,9 @@ export interface MeshEntry {
   excludeFromAutoCenter: boolean;
   castShadow: boolean;
   receiveShadow: boolean;
+  /** Per-mesh parametric-shadow definition override (scene default when
+   *  undefined). See `PolyMeshTransform.shadowDefinition`. */
+  shadowDefinition?: number;
   /** Polygon bbox CENTER in CSS world coords. Same value the wrapper's
    *  `--origin` CSS variable carries — i.e. the pivot point that the
    *  wrapper's scale3d and rotation use. Cached so shadow geometry can apply

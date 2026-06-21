@@ -112,8 +112,21 @@ export interface PolySceneOptions {
      * Parametric-shadow detail: the max number of points in the silhouette
      * outline. Lower → blobbier + lighter; higher → closer to the exact convex
      * outline. Only used when `parametric` is true. Default: `16`.
+     *
+     * Can be overridden per mesh via `PolyMeshTransform.shadowDefinition`.
      */
     definition?: number;
+    /**
+     * Progressive refinement: the definition used WHILE the directional light
+     * is actively changing (a drag). When set (and `parametric` is true), each
+     * light-direction change emits at `min(definition, dragDefinition)` for a
+     * laggless drag, then a debounced pass re-emits at full `definition` once
+     * the light settles — mirroring the atlas-rebake-at-rest escape hatch.
+     * Self-shadow recompute is O(faces × bands), so dropping detail during
+     * motion is the only way to keep a complex mesh smooth. Unset → no
+     * progressive pass (every change renders at full `definition`).
+     */
+    dragDefinition?: number;
   };
   /**
    * When `true`, emit `data-poly-shadow-*` attribution attributes on every
@@ -174,6 +187,14 @@ export interface PolyMeshTransform {
    * Defaults to `false`.
    */
   receiveShadow?: boolean;
+  /**
+   * Per-mesh parametric-shadow detail (overrides the scene's
+   * `shadow.definition` for THIS mesh's cast/self shadow). Lets a detailed
+   * caster stay high-resolution while a simple prop runs cheap in the same
+   * scene. Only used when `shadow.parametric` is true. Unset → inherit the
+   * scene definition.
+   */
+  shadowDefinition?: number;
 }
 
 export interface PolyMeshHandle {

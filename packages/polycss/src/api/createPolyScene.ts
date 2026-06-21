@@ -255,6 +255,11 @@ export function createPolyScene(
   // shadow-appearance change MUST call invalidateShadowLightCache(); the
   // cache key is light-only.
   let lastEmittedShadowLightKey: string | null = null;
+  // Progressive refinement: a light-drag emit renders at `shadow.dragDefinition`
+  // (laggless), then this timer re-emits at full `shadow.definition` once the
+  // light settles. Reset on every progressive emit; cleared on dispose.
+  let shadowRefineTimer: ReturnType<typeof setTimeout> | null = null;
+  const SHADOW_REFINE_MS = 140;
   function quantizeLightDirKey(d: Vec3 | undefined): string | null {
     if (!d) return null;
     const len = Math.hypot(d[0], d[1], d[2]);
@@ -888,7 +893,8 @@ export function createPolyScene(
     if ((currentOptions.textureLighting ?? "baked") !== "baked") return false;
     applyLightingVars(sceneEl, { ...currentOptions, ...next });
     if (!next.skipShadows && next.directionalLight?.direction) {
-      emitSceneShadows(next.directionalLight.direction as Vec3);
+      // Interactive light preview = motion → progressive drag definition.
+      emitSceneShadows(next.directionalLight.direction as Vec3, { progressive: true });
     }
     let installed = false;
     for (const entry of meshes) {
@@ -956,7 +962,27 @@ export function createPolyScene(
   // projection onto that surface into the same compound path. Mounted SVG
   // elements are reused across light changes; fill-rule=nonzero collapses
   // overlapping CCW outlines into one filled silhouette per surface.
-  function emitSceneShadows(lightDirectionOverride?: Vec3): void {
+  function emitSceneShadows(lightDirectionOverride?: Vec3, opts?: { progressive?: boolean }): void {
+    // Progressive: a light-drag emit uses `dragDefinition` (set the ctx flag the
+    // receiver projector reads), then schedules ONE debounced full-def refine
+    // after motion stops. Reset the timer each progressive call so a continuous
+    // drag stays low-def until it settles. Geometry/texture-change emits pass
+    // no `progressive` flag and always render at full definition.
+    const sh = currentOptions.shadow;
+    const wantProgressive = !!opts?.progressive
+      && !!sh?.parametric
+      && sh?.dragDefinition != null
+      && sh.dragDefinition < (sh.definition ?? 16);
+    ctx.shadowDragActive = wantProgressive;
+    if (wantProgressive) {
+      if (shadowRefineTimer) clearTimeout(shadowRefineTimer);
+      shadowRefineTimer = setTimeout(() => {
+        shadowRefineTimer = null;
+        ctx.shadowDragActive = false;
+        invalidateShadowLightCache();
+        emitSceneShadows();
+      }, SHADOW_REFINE_MS);
+    }
     const casters: MeshEntry[] = [];
     for (const m of meshes) if (!m.disposed && m.castShadow) casters.push(m);
     if (casters.length === 0) {
@@ -1729,6 +1755,7 @@ export function createPolyScene(
       castShadow: !!transformIn.castShadow,
       bboxCenterCss: bboxCenterCssCache,
       receiveShadow: !!transformIn.receiveShadow,
+      shadowDefinition: transformIn.shadowDefinition,
       cameraCullGroups: [],
       cameraCullSignature: "",
       lightOverrideSignature: "clear",
@@ -2072,8 +2099,10 @@ export function createPolyScene(
       setTransform(t: Partial<PolyMeshTransform>) {
         const prevCastShadow = entry.castShadow;
         const prevReceiveShadow = entry.receiveShadow;
+        const prevShadowDef = entry.shadowDefinition;
         if (t.castShadow !== undefined) entry.castShadow = !!t.castShadow;
         if (t.receiveShadow !== undefined) entry.receiveShadow = !!t.receiveShadow;
+        if (t.shadowDefinition !== undefined) entry.shadowDefinition = t.shadowDefinition;
         transform = { ...transform, ...t };
         const css2 = buildMeshTransform(transform);
         wrapper.style.transform = css2 ?? "";
@@ -2109,6 +2138,11 @@ export function createPolyScene(
         // light, so the gate is on castShadow || receiveShadow.
         if ((t.position !== undefined || t.scale !== undefined) && (entry.castShadow || entry.receiveShadow)) {
           recomputeShadowGround();
+          invalidateShadowLightCache();
+          emitSceneShadows();
+        }
+        // Per-mesh shadow definition changed: re-emit at the new detail.
+        if (entry.shadowDefinition !== prevShadowDef && (entry.castShadow || entry.receiveShadow)) {
           invalidateShadowLightCache();
           emitSceneShadows();
         }
@@ -2295,7 +2329,10 @@ export function createPolyScene(
       // intensity/color changes must bust the cache explicitly or
       // emitSceneShadows would no-op.
       if (shadowAppearanceChanged || directionalChanged) invalidateShadowLightCache();
-      emitSceneShadows();
+      // Only a light-DIRECTION change is "motion" → eligible for the progressive
+      // drag-definition pass. Shadow-appearance edits (opacity, definition,
+      // dragDefinition) render at full definition immediately.
+      emitSceneShadows(undefined, { progressive: directionalChanged && !shadowAppearanceChanged });
     }
     if (shadowAppearanceChanged && partial.shadow?.lift !== prevShadow?.lift) {
       recomputeShadowGround();
@@ -2338,6 +2375,7 @@ export function createPolyScene(
   }
 
   function destroy(): void {
+    if (shadowRefineTimer) { clearTimeout(shadowRefineTimer); shadowRefineTimer = null; }
     // Dispose all meshes (revokes blob URLs) before removing the scene.
     // Snapshot first since dispose() mutates the set.
     const snapshot = Array.from(meshes);

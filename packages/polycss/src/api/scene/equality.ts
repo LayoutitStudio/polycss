@@ -37,5 +37,6 @@ export function shadowOptsEqual(
     && (a?.maxExtend ?? 2000) === (b?.maxExtend ?? 2000)
     && (a?.parametric ?? false) === (b?.parametric ?? false)
     && (a?.definition ?? 16) === (b?.definition ?? 16)
+    && (a?.dragDefinition ?? -1) === (b?.dragDefinition ?? -1)
   );
 }
