@@ -1,0 +1,119 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>shadow trace — parametric cost</title>
+  <style>
+    html, body { margin: 0; height: 100%; background: #eef2f7; overflow: hidden; }
+    #poly-host { position: absolute; inset: 0; }
+    #hud { position: fixed; top: 8px; left: 8px; font: 12px monospace; color: #334; z-index: 10; }
+  </style>
+</head>
+<body>
+  <div id="poly-host"></div>
+  <div id="hud"></div>
+  <script type="importmap">
+    { "imports": { "@layoutit/polycss": "./.generated/polycss.js" } }
+  </script>
+  <script type="module">
+    import { createPolyCamera, createPolyScene, loadMesh } from "@layoutit/polycss";
+
+    const q = new URLSearchParams(location.search);
+    const MESH = q.get("mesh") ?? "castle";
+    const DEF = parseInt(q.get("def") ?? "48", 10);
+    // variant: baseline (recompute each frame) | memo (quantized contour cache)
+    const VARIANT = q.get("v") ?? "baseline";
+    const QUANT = parseFloat(q.get("quant") ?? "0.05"); // light-dir quantization for memo
+
+    const host = document.getElementById("poly-host");
+    const hud = document.getElementById("hud");
+    const camera = createPolyCamera({ rotX: 55, rotY: 18, zoom: 22 });
+    const scene = createPolyScene(host, {
+      camera,
+      directionalLight: { direction: [1, 0.6, 1], intensity: 1, color: "#ffffff", castShadow: true },
+      ambientLight: { color: "#ffffff", intensity: 0.3 },
+      shadow: { color: "#000000", opacity: 1, lift: 0, parametric: true, definition: DEF },
+      textureQuality: 1,
+      seamBleed: 0,
+    });
+
+    const MESHES = {
+      castle:   { url: "/gallery/obj/castle.obj",   mtl: "/gallery/obj/castle.mtl",   size: 6 },
+      coliseum: { url: "/gallery/obj/coliseum.obj", mtl: "/gallery/obj/coliseum.mtl", size: 8 },
+      apple:    { url: "/gallery/glb/apple.glb",    size: 6 },
+    };
+
+    const floorParse = {
+      polygons: [{ vertices: [[-10, -10, 0], [10, -10, 0], [10, 10, 0], [-10, 10, 0]], color: "#cbd5e1" }],
+    };
+
+    async function build() {
+      const m = MESHES[MESH];
+      const parse = await loadMesh(m.url, m.mtl ? { mtlUrl: m.mtl, objOptions: { targetSize: m.size } } : { objOptions: { targetSize: m.size } });
+      const selfShadow = q.get("self") !== "0";
+      scene.add(parse, { id: "obj", position: [0, 0, 0], castShadow: true, receiveShadow: selfShadow, merge: false });
+      scene.add(floorParse, { id: "floor", position: [0, 0, 0], castShadow: false, receiveShadow: true, merge: false });
+      scene.applyCamera();
+    }
+
+    // ── Variant: page-level quantized memo of the directional light. When the
+    // swept direction quantizes to a previously-seen key, we skip the
+    // setOptions entirely (the scene already holds that exact shadow DOM),
+    // which upper-bounds the win of caching the WHOLE shadow re-emit (contour
+    // + projection + DOM) for revisited light directions.
+    const memo = new Set();
+    function quantDir(x, y, z) {
+      const Q = QUANT;
+      return [Math.round(x / Q) * Q, Math.round(y / Q) * Q, Math.round(z / Q) * Q];
+    }
+
+    let lastKey = null;
+    function setLight(x, y, z) {
+      if (VARIANT === "memo") {
+        const [qx, qy, qz] = quantDir(x, y, z);
+        const key = `${qx},${qy},${qz}`;
+        if (key === lastKey) return; // same quantized cell → DOM already correct
+        lastKey = key;
+        if (memo.has(key)) {
+          // Revisited cell: still must re-point the scene to that state. We
+          // re-emit (no contour cache in lib yet) but this measures the
+          // "skip when unchanged" portion; full memo needs lib support.
+        }
+        memo.add(key);
+        scene.setOptions({ directionalLight: { direction: [qx, qy, qz], intensity: 1, color: "#ffffff", castShadow: true } });
+        return;
+      }
+      scene.setOptions({ directionalLight: { direction: [x, y, z], intensity: 1, color: "#ffffff", castShadow: true } });
+    }
+
+    let sweeping = false;
+    let frames = 0;
+    function sweepFrame(t) {
+      if (sweeping) {
+        // rotate the light around a cone so the silhouette genuinely changes
+        const a = (t / 1000) * 1.2;
+        const x = Math.cos(a) * 1.2;
+        const y = 0.5 + 0.3 * Math.sin(a * 0.7);
+        const z = Math.sin(a) * 1.2 + 1.0;
+        setLight(x, y, z);
+        frames++;
+      }
+      requestAnimationFrame(sweepFrame);
+    }
+    requestAnimationFrame(sweepFrame);
+
+    globalThis.__shTime = { coverage: 0, merge: 0, dom: 0 };
+    window.__shadowTrace = {
+      startSweep: () => { sweeping = true; frames = 0; globalThis.__shTime = { coverage: 0, merge: 0, dom: 0 }; },
+      stopSweep: () => { sweeping = false; },
+      frames: () => frames,
+      memoSize: () => memo.size,
+      timing: () => ({ ...globalThis.__shTime, frames }),
+    };
+
+    await build();
+    window.__ready = true;
+    hud.textContent = `mesh=${MESH} def=${DEF} variant=${VARIANT}`;
+  </script>
+</body>
+</html>

@@ -276,17 +276,20 @@ export function computeCoverageShadowSilhouette(
     // Self-shadow: depth-stratified bands. Each band's flat proxy is a tilted
     // quad that pokes slightly above the real face planes even where the actual
     // geometry doesn't, so a band tends to false-shadow the very surface that
-    // generated it (a convex mesh ends up self-shadowed, which is wrong). Place
-    // each band at its FAR-from-light edge (`lo`) rather than its middle: this
-    // biases the proxy one band-thickness deeper, below the planes of faces at
-    // its own depth, so a face is only shadowed by geometry genuinely IN FRONT
-    // of it. Genuine occluders (towers high above a wall) sit many bands ahead
-    // and still project; the convex self-shadow disappears.
-    const band = (tMax - tMin) / nLayers;
+    // generated it (a convex mesh ends up self-shadowed, which is wrong). Push
+    // each band slightly deeper (away from the light) by a small FIXED bias so
+    // its proxy sits below the planes of faces at its own depth — a face is then
+    // only shadowed by geometry genuinely in front of it. The bias is a fraction
+    // of the whole depth span, NOT one band-thickness: tying it to band count
+    // made fewer/thicker bands over-bias and erase real interior self-shadow
+    // (the coliseum's seating). Genuine occluders sit far ahead and still cast.
+    const span = tMax - tMin;
+    const band = span / nLayers;
+    const bias = span * 0.05;
     for (let k = 0; k < nLayers; k++) {
       const lo = tMin + k * band, hi = k === nLayers - 1 ? Infinity : tMin + (k + 1) * band;
       const subset = polys.filter((p) => p.depth >= lo && p.depth < hi);
-      if (subset.length) traceBand(subset, lo - band * 1.0, out);
+      if (subset.length) traceBand(subset, lo - bias, out);
     }
   }
   return out.length ? out : null;

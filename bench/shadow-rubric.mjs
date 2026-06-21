@@ -28,10 +28,12 @@ const SCENES = {
   castleFloor: { mesh: "castle",  sx: 1, ss: 0, def: 48, q: "rx=55&ry=15&z=18&dx=1&dy=0.6&dz=1" },
   castleFloorG:{ mesh: "castle",  sx: 1, ss: 0, def: 48, q: "rx=55&ry=15&z=18&dx=1.4&dy=0.2&dz=0.5" },
   castleSelf:  { mesh: "castle",  sx: 0, ss: 1, def: 48, q: "rx=62&ry=20&z=40&dx=1&dy=0.6&dz=1" },
+  castleSelfG: { mesh: "castle",  sx: 0, ss: 1, def: 48, q: "rx=62&ry=20&z=40&dx=1.5&dy=0.15&dz=0.4" },
   appleFloor:  { mesh: "apple",   sx: 1, ss: 0, def: 48, q: "rx=45&ry=10&z=30&dx=1&dy=0.6&dz=1" },
   appleSelf:   { mesh: "apple",   sx: 0, ss: 1, def: 48, q: "rx=45&ry=10&z=40&dx=1&dy=0.6&dz=1" },
   cottageFloor:{ mesh: "cottage", sx: 1, ss: 0, def: 48, q: "rx=50&ry=12&z=22&dx=1&dy=0.6&dz=1" },
   coliseumFloor:{ mesh: "coliseum",sx: 1, ss: 0, def: 144, q: "rx=50&ry=12&z=22&dx=1&dy=0.6&dz=1" },
+  coliseumSelf: { mesh: "coliseum",sx: 0, ss: 1, def: 96, q: "rx=42.7&ry=338.4&z=16&ax=1&oz_coliseum=0.1&dx=-1&dy=0.33&dz=0.98" },
 };
 
 // Each rubric: a scene, the metric to read, a pass predicate, and a plain
@@ -46,6 +48,10 @@ const RUBRICS = [
   { id: "floor-iou/coliseum",    scene: "coliseumFloor",metric:"iou",min: 0.90, why: "holed floor footprint matches exact" },
   { id: "no-overshadow/castleSelf",scene:"castleSelf", metric:"over",max: 6.00, why: "self-shadow does not over-darken" },
   { id: "no-undershadow/castleSelf",scene:"castleSelf",metric:"under",max:3.00,why:"real self-shadow is not erased by bias" },
+  { id: "no-overshadow/castleSelfG",scene:"castleSelfG",metric:"over",max:6.00,why:"grazing-light self-shadow does not over-darken" },
+  { id: "no-undershadow/castleSelfG",scene:"castleSelfG",metric:"under",max:3.00,why:"grazing-light self-shadow not erased (depth bands suffice)" },
+  { id: "no-undershadow/coliseumSelf",scene:"coliseumSelf",metric:"under",max:1.50,why:"coliseum interior self-shadow not erased by depth bias" },
+  { id: "no-overshadow/coliseumSelf",scene:"coliseumSelf",metric:"over",max:3.00,why:"coliseum self-shadow does not over-darken the arena" },
   { id: "no-undershadow/castleFloor",scene:"castleFloor",metric:"under",max:1.00,why:"floor shadow has no holes vs exact" },
 ];
 
