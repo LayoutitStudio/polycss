@@ -136,6 +136,9 @@ const DEFAULT_SCENE: SceneOptionsState = {
   castShadow: false,
   selfShadow: false,
   shadowMaxExtend: 2000,
+  shadowParametric: false,
+  shadowDefinition: 16,
+  shadowStyle: "vector",
   showGround: false,
   groundColor: "#4a505a",
   fpvLook: true,
@@ -1547,6 +1550,9 @@ export default function GalleryWorkbench() {
           castShadow={sceneOptions.castShadow}
           selfShadow={sceneOptions.selfShadow}
           shadowMaxExtend={sceneOptions.shadowMaxExtend}
+          shadowParametric={sceneOptions.shadowParametric}
+          shadowDefinition={sceneOptions.shadowDefinition}
+          shadowStyle={sceneOptions.shadowStyle}
           showGround={sceneOptions.showGround}
           groundColor={sceneOptions.groundColor}
           showLight={sceneOptions.showLight}

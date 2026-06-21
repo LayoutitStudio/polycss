@@ -78,6 +78,14 @@ export interface SceneOptionsState {
   /** Maximum CSS pixels the shadow may extend beyond the mesh footprint.
    *  Caps the SVG backing store at low light elevations. */
   shadowMaxExtend: number;
+  /** Cast a low-resolution parametric silhouette per caster instead of full
+   *  geometry — lighter DOM + cheaper projection. */
+  shadowParametric: boolean;
+  /** Parametric-shadow detail (silhouette points / pixel-grid resolution).
+   *  Only used when `shadowParametric` is true. */
+  shadowDefinition: number;
+  /** Parametric render style: smooth contour vs blocky voxel. */
+  shadowStyle: "vector" | "pixel";
   showGround: boolean;
   groundColor: string;
   fpvLook: boolean;

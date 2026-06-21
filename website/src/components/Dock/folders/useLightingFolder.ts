@@ -15,6 +15,9 @@ export interface LightingFolderInputs {
   castShadow: boolean;
   selfShadow: boolean;
   shadowMaxExtend: number;
+  shadowParametric: boolean;
+  shadowDefinition: number;
+  shadowStyle: "vector" | "pixel";
   showGround: boolean;
   groundColor: string;
   showLight: boolean;
@@ -28,6 +31,9 @@ export interface LightingFolderInputs {
     castShadow?: boolean;
     selfShadow?: boolean;
     shadowMaxExtend?: number;
+    shadowParametric?: boolean;
+    shadowDefinition?: number;
+    shadowStyle?: "vector" | "pixel";
     showGround?: boolean;
     groundColor?: string;
     showLight?: boolean;
@@ -45,6 +51,9 @@ export function useLightingFolder(parent: GUI | null, inputs: LightingFolderInpu
     castShadow,
     selfShadow,
     shadowMaxExtend,
+    shadowParametric,
+    shadowDefinition,
+    shadowStyle,
     showGround,
     groundColor,
     showLight,
@@ -81,6 +90,22 @@ export function useLightingFolder(parent: GUI | null, inputs: LightingFolderInpu
     { min: 200, max: 10000, step: 100 },
     shadowMaxExtend,
     (value) => onUpdateScene({ shadowMaxExtend: value }),
+  );
+  // Parametric shadows: a low-res silhouette per caster instead of full
+  // geometry. `Shadow def.` sets the detail (silhouette points / pixel grid);
+  // `Pixel shadow` swaps the smooth contour for blocky voxel blocks.
+  useToggle(folder, "Parametric shadow", shadowParametric, (value) =>
+    onUpdateScene({ shadowParametric: value }),
+  );
+  useSlider(
+    folder,
+    "Shadow def.",
+    { min: 3, max: 96, step: 1 },
+    shadowDefinition,
+    (value) => onUpdateScene({ shadowDefinition: value }),
+  );
+  useToggle(folder, "Pixel shadow", shadowStyle === "pixel", (value) =>
+    onUpdateScene({ shadowStyle: value ? "pixel" : "vector" }),
   );
   useToggle(folder, "Show ground", showGround, (value) => onUpdateScene({ showGround: value }));
   const groundColorControl = useColor(folder, "Ground color", groundColor, (value) =>
