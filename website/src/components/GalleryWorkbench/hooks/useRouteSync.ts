@@ -42,6 +42,10 @@ interface SerializedGallerySceneOptions {
   shadow?: boolean;
   self?: boolean;
   reach?: number;
+  sp?: boolean;
+  sd?: number;
+  sst?: SceneOptionsState["shadowStyle"];
+  sfa?: boolean;
   ground?: boolean;
   gc?: string;
   fl?: boolean;
@@ -101,6 +105,10 @@ const COMPACT_KEY_BY_OPTION: Record<SerializedGallerySceneOptionKey, string> = {
   shadow: "S",
   self: "Z",
   reach: "E",
+  sp: "D",
+  sd: "F",
+  sst: "H",
+  sfa: "I",
   ground: "g",
   gc: "G",
   fl: "L",
@@ -134,6 +142,7 @@ const BOOLEAN_OPTIONS = new Set<SerializedGallerySceneOptionKey>([
   "ap", "c", "i", "ar", "axes", "sel", "hov", "helper",
   "solid", "fill", "outline", "shadow", "ground",
   "fl", "fm", "fj", "fc", "fiy",
+  "self", "sp", "sfa",
 ]);
 
 function getRoutePresetValue(): string {
@@ -274,6 +283,10 @@ function sceneOptionsPayload(
   addBoolean(out, "shadow", options.castShadow, defaults.castShadow);
   addBoolean(out, "self", options.selfShadow, defaults.selfShadow);
   addNumber(out, "reach", options.shadowMaxExtend, defaults.shadowMaxExtend);
+  addBoolean(out, "sp", options.shadowParametric, defaults.shadowParametric);
+  addNumber(out, "sd", options.shadowDefinition, defaults.shadowDefinition);
+  addString(out, "sst", options.shadowStyle, defaults.shadowStyle);
+  addBoolean(out, "sfa", options.shadowFollowAnimation, defaults.shadowFollowAnimation);
   addBoolean(out, "ground", options.showGround, defaults.showGround);
   addString(out, "gc", options.groundColor, defaults.groundColor);
   addBoolean(out, "fl", options.fpvLook, defaults.fpvLook);
@@ -377,6 +390,9 @@ function encodeCompactValue(key: SerializedGallerySceneOptionKey, value: Seriali
   if (key === "drag" && (value === "orbit" || value === "pan" || value === "fpv")) {
     return encodeEnum(value, { orbit: "o", pan: "p", fpv: "f" });
   }
+  if (key === "sst" && (value === "vector" || value === "pixel")) {
+    return encodeEnum(value, { vector: "v", pixel: "p" });
+  }
   return typeof value === "string" ? value : undefined;
 }
 
@@ -444,6 +460,10 @@ function isDragMode(value: unknown): value is SceneOptionsState["dragMode"] {
   return value === "orbit" || value === "pan" || value === "fpv";
 }
 
+function isShadowStyle(value: unknown): value is SceneOptionsState["shadowStyle"] {
+  return value === "vector" || value === "pixel";
+}
+
 function isVec3(value: unknown): value is SceneTarget {
   return Array.isArray(value) &&
     value.length === 3 &&
@@ -493,6 +513,10 @@ function sceneOptionsFromPayload(o: SerializedGallerySceneOptions): Partial<Scen
     ...(isBoolean(o.shadow) ? { castShadow: o.shadow } : null),
     ...(isBoolean(o.self) ? { selfShadow: o.self } : null),
     ...(isFiniteNumber(o.reach) ? { shadowMaxExtend: o.reach } : null),
+    ...(isBoolean(o.sp) ? { shadowParametric: o.sp } : null),
+    ...(isFiniteNumber(o.sd) ? { shadowDefinition: o.sd } : null),
+    ...(isShadowStyle(o.sst) ? { shadowStyle: o.sst } : null),
+    ...(isBoolean(o.sfa) ? { shadowFollowAnimation: o.sfa } : null),
     ...(isBoolean(o.ground) ? { showGround: o.ground } : null),
     ...(isHexColor(o.gc) ? { groundColor: o.gc.toLowerCase() } : null),
     ...(isBoolean(o.fl) ? { fpvLook: o.fl } : null),
@@ -527,6 +551,7 @@ function decodeDottedCompactValue(key: SerializedGallerySceneOptionKey, value: s
   if (key === "mp" || key === "bp") return value === "e" ? "exact" : value;
   if (key === "mr") return decodeEnum(value, { lossless: "x", lossy: "y", disabled: "d" });
   if (key === "drag") return decodeEnum(value, { orbit: "o", pan: "p", fpv: "f" });
+  if (key === "sst") return decodeEnum(value, { vector: "v", pixel: "p" });
   return decodeCompactNumber(value) ?? value;
 }
 
@@ -602,6 +627,10 @@ function readPackedValue(
   }
   if (key === "drag") {
     const value = decodeEnum(routeValue[index] ?? "", { orbit: "o", pan: "p", fpv: "f" });
+    return value ? { value, next: index + 1 } : undefined;
+  }
+  if (key === "sst") {
+    const value = decodeEnum(routeValue[index] ?? "", { vector: "v", pixel: "p" });
     return value ? { value, next: index + 1 } : undefined;
   }
   return readPackedNumber(routeValue, index);
