@@ -101,6 +101,19 @@ export interface PolySceneOptions {
      * very large number (e.g. `Infinity`) to disable the cap entirely.
      */
     maxExtend?: number;
+    /**
+     * Experimental: cast a single low-resolution parametric **silhouette**
+     * outline per caster instead of projecting its full geometry. Lighter DOM
+     * + cheaper projection, at the cost of an approximate (convex) outline.
+     * Casts onto every receiver through the normal pipeline. Default: `false`.
+     */
+    parametric?: boolean;
+    /**
+     * Parametric-shadow detail: the max number of points in the silhouette
+     * outline. Lower → blobbier + lighter; higher → closer to the exact convex
+     * outline. Only used when `parametric` is true. Default: `16`.
+     */
+    definition?: number;
   };
   /**
    * When `true`, emit `data-poly-shadow-*` attribution attributes on every

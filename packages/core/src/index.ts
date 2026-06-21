@@ -184,6 +184,8 @@ export {
   projectCssVertexToGround,
   projectCssVertexToGroundFromPoint,
 } from "./shadow/projection";
+export { computeParametricShadowSilhouette } from "./shadow/parametricSilhouette";
+export { computeCoverageShadowSilhouette } from "./shadow/coverageSilhouette";
 export { clipPolygonToConvex2D } from "./shadow/clipping";
 export {
   expandConvexHullOutward,

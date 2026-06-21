@@ -10,7 +10,9 @@
  */
 import {
   buildSharedEdgeMap,
+  computeCoverageShadowSilhouette,
   computeMergedReceiverShadows,
+  computeParametricShadowSilhouette,
   meshScaleVec3,
   prepareCasterEdgeOwners,
   prepareCasterPolyItems,
@@ -28,6 +30,75 @@ import type { SceneContext } from "./sceneContext";
 import type { MeshEntry } from "./internalTypes";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
+
+/** True when every caster vertex lies in a single plane (a ground quad, a
+ *  billboard, etc.). Such casters have no coverage volume for the parametric
+ *  proxy and are routed through the exact path instead. */
+function isFlatCaster(polysWv: ReadonlyArray<ReadonlyArray<Vec3>>): boolean {
+  let ax = 0, ay = 0, az = 0, bx = 0, by = 0, bz = 0, ox = 0, oy = 0, oz = 0;
+  let haveBasis = false;
+  for (const poly of polysWv) {
+    if (poly.length >= 3 && !haveBasis) {
+      const p0 = poly[0]!, p1 = poly[1]!, p2 = poly[2]!;
+      ax = p1[0] - p0[0]; ay = p1[1] - p0[1]; az = p1[2] - p0[2];
+      bx = p2[0] - p0[0]; by = p2[1] - p0[1]; bz = p2[2] - p0[2];
+      ox = p0[0]; oy = p0[1]; oz = p0[2];
+      haveBasis = true;
+    }
+  }
+  if (!haveBasis) return true;
+  // plane normal = a × b
+  let nx = ay * bz - az * by, ny = az * bx - ax * bz, nz = ax * by - ay * bx;
+  const nl = Math.hypot(nx, ny, nz);
+  if (nl < 1e-9) return true;
+  nx /= nl; ny /= nl; nz /= nl;
+  // span sets the coplanarity tolerance so it scales with the caster size.
+  let span = 0;
+  for (const poly of polysWv) for (const p of poly) {
+    span = Math.max(span, Math.abs(p[0] - ox) + Math.abs(p[1] - oy) + Math.abs(p[2] - oz));
+  }
+  const tol = Math.max(1e-3, span * 1e-3);
+  for (const poly of polysWv) for (const p of poly) {
+    const d = (p[0] - ox) * nx + (p[1] - oy) * ny + (p[2] - oz) * nz;
+    if (Math.abs(d) > tol) return false;
+  }
+  return true;
+}
+
+/** Rubric: a CONVEX caster self-shadows nothing (no point on a convex surface
+ *  is occluded from the light by another part of the same surface). The
+ *  depth-band proxy still leaks a little false self-shadow on convex meshes
+ *  (its flat slices poke above the real faces), so detect convexity and skip
+ *  self-shadow entirely for these casters. Capped at `maxPolys` because the
+ *  test is O(faces × verts) and large meshes are essentially never convex —
+ *  they early-exit on the first concave face anyway. */
+function isConvexCaster(polysWv: ReadonlyArray<ReadonlyArray<Vec3>>, maxPolys = 300): boolean {
+  if (polysWv.length === 0 || polysWv.length > maxPolys) return false;
+  let span = 0, ox = 0, oy = 0, oz = 0, seeded = false;
+  for (const poly of polysWv) for (const p of poly) {
+    if (!seeded) { ox = p[0]; oy = p[1]; oz = p[2]; seeded = true; }
+    span = Math.max(span, Math.abs(p[0] - ox) + Math.abs(p[1] - oy) + Math.abs(p[2] - oz));
+  }
+  const tol = Math.max(1e-3, span * 5e-3);
+  for (const face of polysWv) {
+    if (face.length < 3) continue;
+    const a = face[0]!, b = face[1]!, c = face[2]!;
+    let nx = (b[1] - a[1]) * (c[2] - a[2]) - (b[2] - a[2]) * (c[1] - a[1]);
+    let ny = (b[2] - a[2]) * (c[0] - a[0]) - (b[0] - a[0]) * (c[2] - a[2]);
+    let nz = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+    const nl = Math.hypot(nx, ny, nz);
+    if (nl < 1e-9) continue;
+    nx /= nl; ny /= nl; nz /= nl;
+    // All other vertices must lie on one side of this face plane.
+    let pos = false, neg = false;
+    for (const poly of polysWv) for (const p of poly) {
+      const d = (p[0] - a[0]) * nx + (p[1] - a[1]) * ny + (p[2] - a[2]) * nz;
+      if (d > tol) pos = true; else if (d < -tol) neg = true;
+      if (pos && neg) return false;
+    }
+  }
+  return true;
+}
 
 /** Mounted SVG state per receiver face. Kept in a separate WeakMap so the
  *  core ReceiverFacePlane stays pure data. */
@@ -222,12 +293,51 @@ export function emitReceiverShadows(
       }
       edgeOwners = cachedOwners;
     }
+    // Parametric shadow: replace the caster's geometry with low-res coverage
+    // contour loops (directional). The cast shadow on a plane is the 2D coverage
+    // of every projected face, so we rasterize that from the light POV and trace
+    // its concave contour (towers, gaps) at a resolution driven by `definition`.
+    // The override loops project onto every receiver face through the normal
+    // pipeline. Cross-mesh casting uses ONE flat layer (cheapest, exact for a
+    // distant receiver). SELF-shadow uses depth-stratified layers: a flat
+    // outline carries no depth and would over-darken a mesh's own interior, so
+    // we slice the caster along the light and let each face's half-space clip
+    // keep only the bands in front of it.
+    let overrideSilhouette: Vec3[][] | undefined;
+    if (options.shadow?.parametric) {
+      const def = options.shadow.definition ?? 16;
+      const polysWv = cached.map((item) => item.wv);
+      const isSelf = caster === receiverEntry;
+      // A FLAT caster (all polygons in one plane, e.g. a ground quad) has no
+      // meaningful coverage volume: its proxy outline is built in the
+      // light-perpendicular plane, so it becomes a tilted quad that straddles
+      // a coplanar receiver and projects a huge spurious shadow. Exact casting
+      // coplanar-culls such polygons; route flat casters through the exact path
+      // (cheap — they have few polys) so parity is preserved.
+      const flat = isFlatCaster(polysWv);
+      // Convex casters self-shadow nothing — skip the parametric self pass
+      // (the exact path also yields ~0 here, so cross-renderer parity holds).
+      const convexSelfSkip = isSelf && isConvexCaster(polysWv);
+      if (!flat && !convexSelfSkip) {
+        const layers = isSelf ? Math.max(2, Math.min(12, Math.round(def / 4))) : 1;
+        const loops = computeCoverageShadowSilhouette(polysWv, lightDir, def, layers);
+        if (loops && loops.length) {
+          overrideSilhouette = loops;
+        } else if (!isSelf) {
+          const allWv: Vec3[] = [];
+          for (const item of cached) for (const w of item.wv) allWv.push(w);
+          const loop = computeParametricShadowSilhouette(allWv, lightDir, def);
+          if (loop && loop.length >= 3) overrideSilhouette = [loop];
+        }
+      }
+    }
     casterInputs.push({
       id: caster,
       items: cached,
       selfShadowEdgeMap,
       edgeOwners,
       casterPolygonCount: caster.polygons.length,
+      overrideSilhouette,
     });
   }
 
