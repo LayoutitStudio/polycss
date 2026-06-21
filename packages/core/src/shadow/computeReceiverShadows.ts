@@ -123,6 +123,10 @@ export interface ReceiverCasterInput<T = unknown> {
    *  directly — skipping per-poly and silhouette extraction — so a cheap,
    *  low-resolution outline casts onto every receiver via the normal pipeline. */
   overrideSilhouette?: Vec3[][];
+  /** Per-point-light parametric override (indexed by the point light's index in
+   *  `allPointLights`). A point pass uses this RADIAL silhouette instead of the
+   *  directional `overrideSilhouette`; an undefined entry → exact point path. */
+  overridePointSilhouettes?: Array<Vec3[][] | undefined>;
 }
 
 /**
@@ -562,10 +566,22 @@ export function computeReceiverShadowFaces<T = unknown>(
   // Clean closed meshes keep single-sided casting (correct + cheaper).
   const doubleSidedByCaster: boolean[] = new Array(casters.length).fill(false);
   const silhouetteByCaster: Array<Vec3[][] | null> = casters.map((casterEntry, casterIdx) => {
-    // Parametric-shadow override: use the precomputed low-res silhouette loop
-    // directly (works for both directional and point passes — it's just a loop
-    // the projector casts onto each receiver face).
-    if (casterEntry.overrideSilhouette) return casterEntry.overrideSilhouette;
+    // Parametric-shadow override: low-res silhouette loops the projector casts
+    // onto each receiver face. A point pass uses the per-light RADIAL loops
+    // (`overridePointSilhouettes[thisPointIndex]`) — the directional loops are
+    // the wrong outline for a finite-distance light. An undefined per-point
+    // entry means this caster skipped parametric (flat/convex) → fall through
+    // to the exact point path.
+    if (isPoint) {
+      if (casterEntry.overridePointSilhouettes) {
+        const o = casterEntry.overridePointSilhouettes[thisPointIndex ?? -1];
+        if (o) return o;
+      } else if (casterEntry.overrideSilhouette) {
+        return casterEntry.overrideSilhouette;
+      }
+    } else if (casterEntry.overrideSilhouette) {
+      return casterEntry.overrideSilhouette;
+    }
     // Point lights: project the caster SILHOUETTE (its outline as seen from
     // the light), not individual back-faces. An object resting on the
     // receiver casts a FILLED contact shadow; the per-poly back-face union

@@ -304,6 +304,7 @@ export function emitReceiverShadows(
     // we slice the caster along the light and let each face's half-space clip
     // keep only the bands in front of it.
     let overrideSilhouette: Vec3[][] | undefined;
+    let overridePointSilhouettes: Array<Vec3[][] | undefined> | undefined;
     if (options.shadow?.parametric) {
       // Per-mesh override beats the scene default; during a progressive
       // light-drag emit, cap it at `dragDefinition` for a cheap frame.
@@ -323,16 +324,32 @@ export function emitReceiverShadows(
       // Convex casters self-shadow nothing — skip the parametric self pass
       // (the exact path also yields ~0 here, so cross-renderer parity holds).
       const convexSelfSkip = isSelf && isConvexCaster(polysWv);
-      if (!flat && !convexSelfSkip) {
-        const layers = isSelf ? Math.max(2, Math.min(6, Math.round(def / 8))) : 1;
-        const loops = computeCoverageShadowSilhouette(polysWv, lightDir, def, layers);
-        if (loops && loops.length) {
-          overrideSilhouette = loops;
-        } else if (!isSelf) {
+      const layers = isSelf ? Math.max(2, Math.min(6, Math.round(def / 8))) : 1;
+      const buildOverride = (dir: Vec3): Vec3[][] | undefined => {
+        if (flat || convexSelfSkip) return undefined;
+        const loops = computeCoverageShadowSilhouette(polysWv, dir, def, layers);
+        if (loops && loops.length) return loops;
+        if (!isSelf) {
           const allWv: Vec3[] = [];
           for (const item of cached) for (const w of item.wv) allWv.push(w);
-          const loop = computeParametricShadowSilhouette(allWv, lightDir, def);
-          if (loop && loop.length >= 3) overrideSilhouette = [loop];
+          const loop = computeParametricShadowSilhouette(allWv, dir, def);
+          if (loop && loop.length >= 3) return [loop];
+        }
+        return undefined;
+      };
+      overrideSilhouette = buildOverride(lightDir);
+      // Point lights: a finite-distance light sees a RADIAL silhouette, not the
+      // directional one. Build a per-light override from the caster-centroid →
+      // light direction (the small-object approximation point shading already
+      // uses); the projector then diverges it per-vertex from the light.
+      if (passes.points.length > 0) {
+        let cx = 0, cy = 0, cz = 0, n = 0;
+        for (const item of cached) for (const w of item.wv) { cx += w[0]; cy += w[1]; cz += w[2]; n++; }
+        if (n > 0) { cx /= n; cy /= n; cz /= n; }
+        overridePointSilhouettes = [];
+        for (const pt of passes.points) {
+          const dir: Vec3 = [pt.lightPos[0] - cx, pt.lightPos[1] - cy, pt.lightPos[2] - cz];
+          overridePointSilhouettes[pt.index] = buildOverride(dir);
         }
       }
     }
@@ -343,6 +360,7 @@ export function emitReceiverShadows(
       edgeOwners,
       casterPolygonCount: caster.polygons.length,
       overrideSilhouette,
+      overridePointSilhouettes,
     });
   }
 

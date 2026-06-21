@@ -28,11 +28,18 @@
     const host = document.getElementById("poly-host");
     const hud = document.getElementById("hud");
     const camera = createPolyCamera({ rotX: 55, rotY: 18, zoom: 22 });
+    // ?point=x,y,z adds a shadow-casting point light (and zeroes the sun) to
+    // exercise point-light parametric parity.
+    const pointParam = q.get("point");
+    const pointLights = pointParam
+      ? [{ position: pointParam.split(",").map(Number), color: "#ffffff", intensity: 1, castShadow: true }]
+      : undefined;
     const scene = createPolyScene(host, {
       camera,
-      directionalLight: { direction: [1, 0.6, 1], intensity: 1, color: "#ffffff", castShadow: true },
+      directionalLight: { direction: [1, 0.6, 1], intensity: pointParam ? 0 : 1, color: "#ffffff", castShadow: true },
+      pointLights,
       ambientLight: { color: "#ffffff", intensity: 0.3 },
-      shadow: { color: "#000000", opacity: 1, lift: 0, parametric: true, definition: DEF, dragDefinition: parseInt(q.get("dragdef") ?? "0", 10) || undefined },
+      shadow: { color: "#000000", opacity: 1, lift: 0, parametric: q.get("pm") !== "0", definition: DEF, dragDefinition: parseInt(q.get("dragdef") ?? "0", 10) || undefined },
       textureQuality: 1,
       seamBleed: 0,
     });

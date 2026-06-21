@@ -2329,10 +2329,10 @@ export function createPolyScene(
       // intensity/color changes must bust the cache explicitly or
       // emitSceneShadows would no-op.
       if (shadowAppearanceChanged || directionalChanged) invalidateShadowLightCache();
-      // Only a light-DIRECTION change is "motion" → eligible for the progressive
-      // drag-definition pass. Shadow-appearance edits (opacity, definition,
-      // dragDefinition) render at full definition immediately.
-      emitSceneShadows(undefined, { progressive: directionalChanged && !shadowAppearanceChanged });
+      // A light-DIRECTION or point-light move is "motion" → eligible for the
+      // progressive drag-definition pass. Shadow-appearance edits (opacity,
+      // definition, dragDefinition) render at full definition immediately.
+      emitSceneShadows(undefined, { progressive: (directionalChanged || pointLightsChanged) && !shadowAppearanceChanged });
     }
     if (shadowAppearanceChanged && partial.shadow?.lift !== prevShadow?.lift) {
       recomputeShadowGround();
