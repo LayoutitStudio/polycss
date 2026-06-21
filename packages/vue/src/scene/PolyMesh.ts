@@ -37,6 +37,7 @@ import {
 } from "@layoutit/polycss-core";
 import {
   BASE_TILE,
+  buildParametricCasterOverride,
   buildPolyMeshTransform,
   computeMergedReceiverShadows,
   computeSceneBbox,
@@ -222,6 +223,9 @@ export const PolyMesh = defineComponent({
     onFrameReady: { type: Function as PropType<() => void>, default: undefined },
     castShadow: { type: Boolean as PropType<boolean>, default: false },
     receiveShadow: { type: Boolean as PropType<boolean>, default: false },
+    /** Per-mesh parametric-shadow detail override (scene `shadow.definition`
+     *  when undefined). Only used when the scene's `shadow.parametric` is true. */
+    shadowDefinition: { type: Number as PropType<number>, default: undefined },
     merge: { type: Boolean as PropType<boolean>, default: true },
     meshResolution: { type: String as PropType<MeshResolution>, default: undefined },
     parseOptions: { type: Object as PropType<UseMeshOptions>, default: undefined },
@@ -730,12 +734,32 @@ export const PolyMesh = defineComponent({
           }
           edgeOwners = cachedOwners;
         }
+        // Parametric override: low-res silhouette loops via the shared core
+        // helper (identical to vanilla + React). Per-mesh `shadowDefinition`
+        // beats the scene default; directional + per-point-light radial.
+        let overrideSilhouette: Vec3[][] | undefined;
+        let overridePointSilhouettes: Array<Vec3[][] | undefined> | undefined;
+        if (ctx?.shadow?.parametric) {
+          const def = data.shadowDefinition ?? ctx.shadow.definition ?? 16;
+          const result = buildParametricCasterOverride({
+            polysWorldVerts: items.map((it) => it.wv),
+            lightDir,
+            definition: def,
+            isSelf,
+            style: ctx.shadow.style,
+            pointLights: shadowPointIndices.map((idx) => ({ position: allPointLightsCss[idx]!.position, index: idx })),
+          });
+          overrideSilhouette = result.overrideSilhouette;
+          overridePointSilhouettes = result.overridePointSilhouettes;
+        }
         casterInputs.push({
           id: Symbol(`caster-${i++}`),
           items,
           selfShadowEdgeMap: isSelf ? cachedSelfMap : undefined,
           edgeOwners,
           casterPolygonCount: data.polygons.length,
+          overrideSilhouette,
+          overridePointSilhouettes,
         });
       }
       const cameraState = cameraCtx?.store.getState().cameraState;
@@ -836,6 +860,7 @@ export const PolyMesh = defineComponent({
               scale: props.scale,
               rotation: props.rotation,
               renderedPolygonIndices: s,
+              shadowDefinition: props.shadowDefinition,
             };
           });
         } else {

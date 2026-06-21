@@ -38,6 +38,7 @@ import type {
 } from "@layoutit/polycss-core";
 import {
   BASE_TILE,
+  buildParametricCasterOverride,
   buildPolyMeshTransform,
   buildSharedEdgeMap,
   computeMergedReceiverShadows,
@@ -194,6 +195,12 @@ export interface PolyMeshProps extends TransformProps, InteractionProps {
    */
   receiveShadow?: boolean;
   /**
+   * Per-mesh parametric-shadow detail, overriding the scene's
+   * `shadow.definition` for this mesh's cast/self shadow. Only used when the
+   * scene's `shadow.parametric` is true. Unset → inherit the scene definition.
+   */
+  shadowDefinition?: number;
+  /**
    * Apply mesh optimization (coplanar merge + interior cull) before
    * rendering. Defaults to `true` — matches vanilla `scene.add`'s default.
    * Set `false` for helper meshes (axes, light markers) whose geometry
@@ -246,6 +253,7 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
     onFrameReady,
     castShadow,
     receiveShadow,
+    shadowDefinition,
     merge = true,
     children,
     fallback,
@@ -784,6 +792,7 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
         scale,
         rotation,
         renderedPolygonIndices,
+        shadowDefinition,
       });
     } else {
       sceneRegisterShadowCaster(meshIdRef.current, null);
@@ -791,7 +800,7 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
     return () => {
       sceneRegisterShadowCaster(meshIdRef.current, null);
     };
-  }, [sceneRegisterShadowCaster, castShadow, polygons, position, scale, rotation, renderedPolygonIndices]);
+  }, [sceneRegisterShadowCaster, castShadow, polygons, position, scale, rotation, renderedPolygonIndices, shadowDefinition]);
 
   // Mirror receiveShadow registration so the scene knows whether at least
   // one receiver exists (drives the ground-shadow-disable rule on casters).
@@ -1055,12 +1064,32 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
         }
         edgeOwners = cachedOwners;
       }
+      // Parametric override: low-res silhouette loops (shared core helper, so
+      // vanilla/React/Vue are identical). Per-mesh `shadowDefinition` beats the
+      // scene default; directional + per-point-light radial silhouettes.
+      let overrideSilhouette: Vec3[][] | undefined;
+      let overridePointSilhouettes: Array<Vec3[][] | undefined> | undefined;
+      if (sceneShadow?.parametric) {
+        const def = data.shadowDefinition ?? sceneShadow.definition ?? 16;
+        const result = buildParametricCasterOverride({
+          polysWorldVerts: items.map((it) => it.wv),
+          lightDir,
+          definition: def,
+          isSelf,
+          style: sceneShadow.style,
+          pointLights: shadowPointIndices.map((i) => ({ position: allPointLightsCss[i]!.position, index: i })),
+        });
+        overrideSilhouette = result.overrideSilhouette;
+        overridePointSilhouettes = result.overridePointSilhouettes;
+      }
       casterInputs.push({
         id: casterId,
         items,
         selfShadowEdgeMap: selfMap,
         edgeOwners,
         casterPolygonCount: data.polygons.length,
+        overrideSilhouette,
+        overridePointSilhouettes,
       });
     }
     const cameraState = cameraCtx?.store.getState().cameraState;
