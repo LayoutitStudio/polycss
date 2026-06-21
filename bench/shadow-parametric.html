@@ -154,13 +154,14 @@
       amb:   { intensity: qn("ai", 0.3), color: qs("ac", "#ffffff") },
       // Parametric shadows: cast a low-res silhouette outline instead of the
       // full caster geometry. `definition` = max outline points.
-      shadow:{ opacity: qn("so", 1.0), definition: qn("def", 16) },
+      // `dragDef` = the definition used WHILE the light/camera is moving
+      // (progressive refinement); `definition` is the full-quality def at rest.
+      shadow:{ opacity: qn("so", 1.0), definition: qn("def", 16), dragDef: qn("dragdef", 16) },
       parametric: qs("pm", "1") !== "0",
       // Progressive refinement: during light/camera motion, cap the shadow
       // definition for a laggless drag, then refine to full def once motion
       // stops (debounced). Mirrors the atlas-rebake-at-rest escape hatch.
       progressive: qs("pg", "1") !== "0",
-      dragDef: qn("dragdef", 16),
       cam:   { rotX: qn("rx", 30), rotY: qn("ry", 0), zoom: qn("z", 60) },
       // "Shadows only" mode: hide all caster + floor base color so only the
       // shadow elements remain visible. Lets you compare shadow geometry
@@ -933,7 +934,7 @@
     let __refineTimer = null;
     function __effectiveDef() {
       if (!S.progressive) return S.shadow.definition;
-      return __interacting ? Math.min(S.shadow.definition, S.dragDef) : S.shadow.definition;
+      return __interacting ? Math.min(S.shadow.definition, S.shadow.dragDef) : S.shadow.definition;
     }
     // Call this from LIGHT/CAMERA motion handlers only — NOT from setting
     // changes like the definition slider (which must show its exact def
@@ -1562,6 +1563,7 @@
         { sec: "Shadow" },
         { k: ["shadow", "opacity"], min: 0, max: 1, step: 0.01, fmt: (v) => v.toFixed(2) },
         { k: ["shadow", "definition"], min: 3, max: 192, step: 1, fmt: (v) => v.toFixed(0) + " pts" },
+        { k: ["shadow", "dragDef"], min: 3, max: 192, step: 1, fmt: (v) => v.toFixed(0) + " pts (moving)" },
         { sec: "Camera" },
         { k: ["cam", "rotX"], min: 0, max: 90, step: 1, fmt: (v) => v + "°", camera: true },
         { k: ["cam", "rotY"], min: 0, max: 359, step: 1, fmt: (v) => v + "°", camera: true },
@@ -1660,8 +1662,12 @@
         inp.addEventListener("pointerup", onDragEnd);
         inp.addEventListener("change", onDragEnd);
         // Progressive def applies only to MOTION (light direction, camera) —
-        // NOT to the definition slider itself, which must show its exact def.
-        const isMotion = (r.k[0] === "dir" && (r.k[1] === "x" || r.k[1] === "y" || r.k[1] === "z")) || !!r.camera;
+        // NOT to the `definition` slider, which must show its exact def. The
+        // `dragDef` slider previews the moving quality, so it marks motion too.
+        const isDragDef = r.k[0] === "shadow" && r.k[1] === "dragDef";
+        const isMotion = isDragDef
+          || (r.k[0] === "dir" && (r.k[1] === "x" || r.k[1] === "y" || r.k[1] === "z"))
+          || !!r.camera;
         inp.addEventListener("input", () => {
           const v = +inp.value;
           setVal(v);
