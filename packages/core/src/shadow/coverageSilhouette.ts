@@ -100,6 +100,7 @@ export function computeCoverageShadowSilhouette(
   lightDir: Vec3,
   definition: number,
   layers = 1,
+  mode: "contour" | "pixel" = "contour",
 ): Vec3[][] | null {
   const L = unit(lightDir);
   const seed: Vec3 = Math.abs(L[0]) < 0.9 ? [1, 0, 0] : [0, 1, 0];
@@ -138,7 +139,9 @@ export function computeCoverageShadowSilhouette(
 
   // Mask resolution scales with definition; 1-cell empty padding so the
   // contour closes inside the grid. One shared grid sizing for every band.
-  const res = Math.max(8, Math.min(384, Math.round(definition * 2)));
+  // Contour traces at 2× definition for smooth outlines; pixel mode uses
+  // `definition` directly as the cell-grid resolution so it reads as chunky.
+  const res = Math.max(mode === "pixel" ? 3 : 8, Math.min(384, Math.round(definition * (mode === "pixel" ? 1 : 2))));
   const cell = maxSpan / res;
   const pad = 1;
   const oA = minA - pad * cell, oB = minB - pad * cell;
@@ -179,6 +182,40 @@ export function computeCoverageShadowSilhouette(
           }
         }
       }
+    }
+
+    if (mode === "pixel") {
+      // Greedy-mesh the filled cells into axis-aligned rects (voxel-style) and
+      // emit one rect loop each. Holes are simply absent cells — no winding or
+      // fill-rule subtraction needed. Run-length + vertical-extend keeps the
+      // rect count low (the same merge the .vox path uses). The blocky look IS
+      // the effect; `definition` is the grid resolution (lower → chunkier).
+      const used = new Uint8Array(M * K);
+      const lift = (gi: number, gj: number): Vec3 => {
+        const a = oA + gi * cell, b = oB + gj * cell;
+        return [
+          a * e1[0] + b * e2[0] + depth * L[0],
+          a * e1[1] + b * e2[1] + depth * L[1],
+          a * e1[2] + b * e2[2] + depth * L[2],
+        ];
+      };
+      for (let j = 0; j < K; j++) {
+        for (let i = 0; i < M; i++) {
+          if (!mask[j * M + i] || used[j * M + i]) continue;
+          let w = 1;
+          while (i + w < M && mask[j * M + i + w] && !used[j * M + i + w]) w++;
+          let h = 1;
+          outer: while (j + h < K) {
+            for (let k = 0; k < w; k++) {
+              if (!mask[(j + h) * M + i + k] || used[(j + h) * M + i + k]) break outer;
+            }
+            h++;
+          }
+          for (let jj = j; jj < j + h; jj++) for (let ii = i; ii < i + w; ii++) used[jj * M + ii] = 1;
+          out.push([lift(i, j), lift(i + w, j), lift(i + w, j + h), lift(i, j + h)]);
+        }
+      }
+      return;
     }
 
     // Marching squares → undirected segments between edge midpoints.

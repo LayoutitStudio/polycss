@@ -325,9 +325,10 @@ export function emitReceiverShadows(
       // (the exact path also yields ~0 here, so cross-renderer parity holds).
       const convexSelfSkip = isSelf && isConvexCaster(polysWv);
       const layers = isSelf ? Math.max(2, Math.min(6, Math.round(def / 8))) : 1;
+      const style = options.shadow.style ?? "vector";
       const buildOverride = (dir: Vec3): Vec3[][] | undefined => {
         if (flat || convexSelfSkip) return undefined;
-        const loops = computeCoverageShadowSilhouette(polysWv, dir, def, layers);
+        const loops = computeCoverageShadowSilhouette(polysWv, dir, def, layers, style === "pixel" ? "pixel" : "contour");
         if (loops && loops.length) return loops;
         if (!isSelf) {
           const allWv: Vec3[] = [];

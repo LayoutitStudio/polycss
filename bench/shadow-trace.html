@@ -39,7 +39,7 @@
       directionalLight: { direction: [1, 0.6, 1], intensity: pointParam ? 0 : 1, color: "#ffffff", castShadow: true },
       pointLights,
       ambientLight: { color: "#ffffff", intensity: 0.3 },
-      shadow: { color: "#000000", opacity: 1, lift: 0, parametric: q.get("pm") !== "0", definition: DEF, dragDefinition: parseInt(q.get("dragdef") ?? "0", 10) || undefined },
+      shadow: { color: "#000000", opacity: 1, lift: 0.05, parametric: q.get("pm") !== "0", definition: DEF, dragDefinition: parseInt(q.get("dragdef") ?? "0", 10) || undefined, style: q.get("style") === "pixel" ? "pixel" : "vector" },
       textureQuality: 1,
       seamBleed: 0,
     });

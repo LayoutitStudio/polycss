@@ -127,6 +127,15 @@ export interface PolySceneOptions {
      * progressive pass (every change renders at full `definition`).
      */
     dragDefinition?: number;
+    /**
+     * Parametric-shadow render style (only used when `parametric` is true):
+     * - `"vector"` (default) — smooth concave contour outline.
+     * - `"pixel"` — the coverage is greedy-meshed into axis-aligned rectangles,
+     *   giving a blocky/voxel shadow. Holes (courtyards, the coliseum arena)
+     *   come free as absent cells. `definition` is the pixel-grid resolution
+     *   (lower → chunkier); the block size is the aesthetic.
+     */
+    style?: "vector" | "pixel";
   };
   /**
    * When `true`, emit `data-poly-shadow-*` attribution attributes on every
