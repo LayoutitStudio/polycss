@@ -64,6 +64,13 @@ export interface PolyShadowOptions {
    * (greedy-meshed voxel blocks; `definition` becomes the grid resolution).
    */
   style?: "vector" | "pixel";
+  /**
+   * Re-emit a caster's shadow while it animates (deforms) so the shadow follows
+   * the pose instead of freezing. Default `false`: a same-topology deform keeps
+   * the last shadow pose (re-emitting every frame is expensive). Best with
+   * `parametric`. Topology changes (different polygon count) always re-emit.
+   */
+  followAnimation?: boolean;
 }
 
 export interface PolyShadowRegistry {

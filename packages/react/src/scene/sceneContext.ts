@@ -69,6 +69,14 @@ export interface ShadowOptions {
    * (greedy-meshed voxel blocks; `definition` becomes the grid resolution).
    */
   style?: "vector" | "pixel";
+  /**
+   * Re-emit a caster's shadow while it animates (deforms) so the shadow follows
+   * the pose instead of freezing. Default `false`: a same-topology deform keeps
+   * the last shadow pose (re-emitting every frame is expensive). Best with
+   * `parametric` — a low-res silhouette is cheap to reproject. Topology changes
+   * (different polygon count) always re-emit regardless.
+   */
+  followAnimation?: boolean;
 }
 
 export interface PolySceneContextValue {

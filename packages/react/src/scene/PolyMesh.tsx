@@ -783,24 +783,41 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
     }
     return s;
   }, [atlasPlans, polygons]);
+  // Caster registration is split so a deforming (animated) mesh can FREEZE its
+  // shadow by default — re-registering the caster on every animation frame
+  // re-emits the receiver shadow each frame (expensive). Effect A owns
+  // register/unregister lifecycle (castShadow on/off, unmount). Effect B pushes
+  // updated geometry, but skips same-topology deforms unless `shadow.
+  // followAnimation` is set — then the shadow tracks the pose (throttle this
+  // with a low parametric `definition`). Mirrors vanilla `setPolygons`.
+  const shadowCasterRegisteredRef = useRef(false);
+  const lastShadowPolyCountRef = useRef(-1);
   useEffect(() => {
-    if (!sceneRegisterShadowCaster) return;
-    if (castShadow) {
-      sceneRegisterShadowCaster(meshIdRef.current, {
-        polygons,
-        position: position ?? [0, 0, 0],
-        scale,
-        rotation,
-        renderedPolygonIndices,
-        shadowDefinition,
-      });
-    } else {
-      sceneRegisterShadowCaster(meshIdRef.current, null);
-    }
+    if (!sceneRegisterShadowCaster || !castShadow) return;
     return () => {
       sceneRegisterShadowCaster(meshIdRef.current, null);
+      shadowCasterRegisteredRef.current = false;
+      lastShadowPolyCountRef.current = -1;
     };
-  }, [sceneRegisterShadowCaster, castShadow, polygons, position, scale, rotation, renderedPolygonIndices, shadowDefinition]);
+  }, [sceneRegisterShadowCaster, castShadow]);
+  useEffect(() => {
+    if (!sceneRegisterShadowCaster || !castShadow) return;
+    const followAnimation = sceneCtx?.shadow?.followAnimation ?? false;
+    const topologyChanged = polygons.length !== lastShadowPolyCountRef.current;
+    // Freeze: a same-topology deform with followAnimation off keeps the last
+    // registered pose (no re-emit). No cleanup here, so this never unregisters.
+    if (shadowCasterRegisteredRef.current && !followAnimation && !topologyChanged) return;
+    lastShadowPolyCountRef.current = polygons.length;
+    shadowCasterRegisteredRef.current = true;
+    sceneRegisterShadowCaster(meshIdRef.current, {
+      polygons,
+      position: position ?? [0, 0, 0],
+      scale,
+      rotation,
+      renderedPolygonIndices,
+      shadowDefinition,
+    });
+  }, [sceneRegisterShadowCaster, castShadow, polygons, position, scale, rotation, renderedPolygonIndices, shadowDefinition, sceneCtx?.shadow]);
 
   // Mirror receiveShadow registration so the scene knows whether at least
   // one receiver exists (drives the ground-shadow-disable rule on casters).
