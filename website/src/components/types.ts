@@ -86,6 +86,9 @@ export interface SceneOptionsState {
   shadowDefinition: number;
   /** Parametric render style: smooth contour vs blocky voxel. */
   shadowStyle: "vector" | "pixel";
+  /** Re-emit shadows while a mesh animates so the shadow follows the pose
+   *  (throttled; best with parametric). */
+  shadowFollowAnimation: boolean;
   showGround: boolean;
   groundColor: string;
   fpvLook: boolean;

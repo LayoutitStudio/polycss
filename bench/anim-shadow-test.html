@@ -1,0 +1,25 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><style>html,body{margin:0;height:100%;background:#eef}#h{position:absolute;inset:0}</style></head>
+<body><div id="h"></div>
+<script type="importmap">{ "imports": { "@layoutit/polycss": "./.generated/polycss.js" } }</script>
+<script type="module">
+import { createPolyCamera, createPolyScene, boxPolygons } from "@layoutit/polycss";
+const q = new URLSearchParams(location.search);
+const follow = q.get("follow") === "1";
+const camera = createPolyCamera({ rotX: 55, rotY: 18, zoom: 26 });
+const scene = createPolyScene(document.getElementById("h"), {
+  camera,
+  directionalLight: { direction: [1, 0.5, 1], intensity: 1, color: "#fff", castShadow: true },
+  ambientLight: { color: "#fff", intensity: 0.3 },
+  shadow: { color: "#000", opacity: 1, lift: 0.05, parametric: true, definition: 24, followAnimation: follow },
+});
+const floor = { polygons: [{ vertices: [[-12,-12,0],[12,-12,0],[12,12,0],[-12,12,0]], color: "#cbd5e1" }] };
+// caster: a box hovering above the floor; we "animate" it by translating in X.
+function poseBox(dx) { return boxPolygons({ size: 4 }).map((p) => ({ ...p, color: "#d22", vertices: p.vertices.map((v) => [v[0] + dx, v[1], v[2] + 5]) })); }
+const caster = scene.add({ polygons: poseBox(0) }, { id: "box", castShadow: true, receiveShadow: false, merge: false, stableDom: true });
+scene.add(floor, { id: "floor", receiveShadow: true, merge: false });
+scene.applyCamera();
+window.__step = (dx) => caster.setPolygons(poseBox(dx), { stableDom: true, recomputeAutoCenter: false });
+window.__shadowHash = () => { const d=[...document.querySelectorAll("[class*=shadow] path")].map(p=>p.getAttribute("d")||"").join(""); let h=0; for(let i=0;i<d.length;i++) h=(h*31+d.charCodeAt(i))>>>0; return h; };
+window.__ready = true;
+</script></body></html>

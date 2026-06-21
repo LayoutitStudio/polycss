@@ -18,6 +18,7 @@ export interface LightingFolderInputs {
   shadowParametric: boolean;
   shadowDefinition: number;
   shadowStyle: "vector" | "pixel";
+  shadowFollowAnimation: boolean;
   showGround: boolean;
   groundColor: string;
   showLight: boolean;
@@ -34,6 +35,7 @@ export interface LightingFolderInputs {
     shadowParametric?: boolean;
     shadowDefinition?: number;
     shadowStyle?: "vector" | "pixel";
+    shadowFollowAnimation?: boolean;
     showGround?: boolean;
     groundColor?: string;
     showLight?: boolean;
@@ -54,6 +56,7 @@ export function useLightingFolder(parent: GUI | null, inputs: LightingFolderInpu
     shadowParametric,
     shadowDefinition,
     shadowStyle,
+    shadowFollowAnimation,
     showGround,
     groundColor,
     showLight,
@@ -106,6 +109,9 @@ export function useLightingFolder(parent: GUI | null, inputs: LightingFolderInpu
   );
   useToggle(folder, "Pixel shadow", shadowStyle === "pixel", (value) =>
     onUpdateScene({ shadowStyle: value ? "pixel" : "vector" }),
+  );
+  useToggle(folder, "Animate shadow", shadowFollowAnimation, (value) =>
+    onUpdateScene({ shadowFollowAnimation: value }),
   );
   useToggle(folder, "Show ground", showGround, (value) => onUpdateScene({ showGround: value }));
   const groundColorControl = useColor(folder, "Ground color", groundColor, (value) =>

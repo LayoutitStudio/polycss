@@ -136,6 +136,15 @@ export interface PolySceneOptions {
      *   (lower → chunkier); the block size is the aesthetic.
      */
     style?: "vector" | "pixel";
+    /**
+     * Re-emit shadows while a mesh is animating (skeletal/GLB deformation), so
+     * the shadow follows the pose instead of freezing at the rest pose. Each
+     * `setPolygons` from the animation loop triggers a re-projection, throttled
+     * internally (~12fps) so it stays affordable. Strongly recommended only
+     * with `parametric: true` (a low-res silhouette is cheap to reproject every
+     * few frames; the exact path is not). Default: `false`.
+     */
+    followAnimation?: boolean;
   };
   /**
    * When `true`, emit `data-poly-shadow-*` attribution attributes on every

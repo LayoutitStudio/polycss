@@ -139,6 +139,7 @@ const DEFAULT_SCENE: SceneOptionsState = {
   shadowParametric: false,
   shadowDefinition: 16,
   shadowStyle: "vector",
+  shadowFollowAnimation: false,
   showGround: false,
   groundColor: "#4a505a",
   fpvLook: true,
@@ -1553,6 +1554,7 @@ export default function GalleryWorkbench() {
           shadowParametric={sceneOptions.shadowParametric}
           shadowDefinition={sceneOptions.shadowDefinition}
           shadowStyle={sceneOptions.shadowStyle}
+          shadowFollowAnimation={sceneOptions.shadowFollowAnimation}
           showGround={sceneOptions.showGround}
           groundColor={sceneOptions.groundColor}
           showLight={sceneOptions.showLight}

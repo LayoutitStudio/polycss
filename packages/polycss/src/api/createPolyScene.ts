@@ -260,6 +260,19 @@ export function createPolyScene(
   // light settles. Reset on every progressive emit; cleared on dispose.
   let shadowRefineTimer: ReturnType<typeof setTimeout> | null = null;
   const SHADOW_REFINE_MS = 140;
+  // Animated-shadow throttle: re-emit shadows at most this often while a mesh
+  // deforms (shadow.followAnimation). ~12fps keeps a parametric reproject cheap.
+  let lastAnimationShadowEmit = 0;
+  const ANIMATION_SHADOW_MS = 80;
+  function maybeEmitAnimationShadow(entry: MeshEntry): void {
+    if (!currentOptions.shadow?.followAnimation) return;
+    if (!entry.castShadow && !entry.receiveShadow) return;
+    const now = typeof performance !== "undefined" ? performance.now() : Date.now();
+    if (now - lastAnimationShadowEmit < ANIMATION_SHADOW_MS) return;
+    lastAnimationShadowEmit = now;
+    invalidateShadowLightCache();
+    emitSceneShadows();
+  }
   function quantizeLightDirKey(d: Vec3 | undefined): string | null {
     if (!d) return null;
     const len = Math.hypot(d[0], d[1], d[2]);
@@ -1920,6 +1933,10 @@ export function createPolyScene(
         clearCurrentTriangleFrame();
         handle.polygons = entry.polygons;
         const shouldRecomputeAutoCenter = options?.recomputeAutoCenter ?? true;
+        // Animated shadows: re-project (throttled) from the freshly-deformed
+        // polygons so the shadow tracks the pose. entry.polygons is already the
+        // current frame's geometry here; the caster-item cache was just cleared.
+        maybeEmitAnimationShadow(entry);
         if (applyStableTopologyUpdate(options, shouldRecomputeAutoCenter)) return;
         renderEntry(entry);
         if (shouldRecomputeAutoCenter) recomputeAutoCenter();

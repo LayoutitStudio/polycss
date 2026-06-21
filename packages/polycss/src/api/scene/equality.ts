@@ -39,5 +39,6 @@ export function shadowOptsEqual(
     && (a?.definition ?? 16) === (b?.definition ?? 16)
     && (a?.dragDefinition ?? -1) === (b?.dragDefinition ?? -1)
     && (a?.style ?? "vector") === (b?.style ?? "vector")
+    && (a?.followAnimation ?? false) === (b?.followAnimation ?? false)
   );
 }

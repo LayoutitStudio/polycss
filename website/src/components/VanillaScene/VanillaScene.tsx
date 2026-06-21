@@ -443,6 +443,7 @@ export function VanillaScene({
       parametric: nextOptions.shadowParametric,
       definition: nextOptions.shadowDefinition,
       style: nextOptions.shadowStyle,
+      followAnimation: nextOptions.shadowFollowAnimation,
     };
     const previewShadow = preview?.shadow !== false;
     if (nextOptions.textureLighting === "dynamic") {
@@ -499,7 +500,7 @@ export function VanillaScene({
       directionalLight: nextDirectionalLight,
       ambientLight: ambientFromOptions(nextOptions),
       textureLighting: nextOptions.textureLighting,
-      shadow: { maxExtend: nextOptions.shadowMaxExtend, lift: GALLERY_SHADOW_LIFT, parametric: nextOptions.shadowParametric, definition: nextOptions.shadowDefinition, style: nextOptions.shadowStyle },
+      shadow: { maxExtend: nextOptions.shadowMaxExtend, lift: GALLERY_SHADOW_LIFT, parametric: nextOptions.shadowParametric, definition: nextOptions.shadowDefinition, style: nextOptions.shadowStyle, followAnimation: nextOptions.shadowFollowAnimation },
     });
     lightHandleRef.current?.setTransform({
       position: lightHelperPosition(
@@ -553,7 +554,7 @@ export function VanillaScene({
       autoCenter: options.autoCenter,
       textureQuality: options.textureQuality,
       strategies: { disable: options.disableStrategies },
-      shadow: { maxExtend: options.shadowMaxExtend, lift: GALLERY_SHADOW_LIFT, parametric: options.shadowParametric, definition: options.shadowDefinition, style: options.shadowStyle },
+      shadow: { maxExtend: options.shadowMaxExtend, lift: GALLERY_SHADOW_LIFT, parametric: options.shadowParametric, definition: options.shadowDefinition, style: options.shadowStyle, followAnimation: options.shadowFollowAnimation },
     };
     const scene = createPolyScene(host, sceneOptions);
     sceneRef.current = scene;
@@ -817,6 +818,10 @@ export function VanillaScene({
     const transformCache =
       stableDomForMesh &&
         options.textureLighting === "baked" &&
+        // Follow-animation shadows need fresh polygons via setPolygons every
+        // frame; the transform cache skips setPolygons on cache hits (leaving
+        // entry.polygons stale), so disable it while shadows track the pose.
+        !options.shadowFollowAnimation &&
         typeof animationDurationSeconds === "number" &&
         animationDurationSeconds > 0
         ? createStableTriangleTransformCache()
@@ -933,6 +938,7 @@ export function VanillaScene({
     animationFrameFactory,
     animationDurationSeconds,
     options.textureLighting,
+    options.shadowFollowAnimation,
     stableDomForMesh,
   ]);
 
@@ -966,7 +972,7 @@ export function VanillaScene({
       directionalLight,
       ambientLight,
       textureLighting: options.textureLighting,
-      shadow: { maxExtend: options.shadowMaxExtend, lift: GALLERY_SHADOW_LIFT, parametric: options.shadowParametric, definition: options.shadowDefinition, style: options.shadowStyle },
+      shadow: { maxExtend: options.shadowMaxExtend, lift: GALLERY_SHADOW_LIFT, parametric: options.shadowParametric, definition: options.shadowDefinition, style: options.shadowStyle, followAnimation: options.shadowFollowAnimation },
     });
     const nextLightingSignature = bakedLightingSignature(directionalLight, ambientLight);
     if (
@@ -986,6 +992,7 @@ export function VanillaScene({
     options.shadowParametric,
     options.shadowDefinition,
     options.shadowStyle,
+    options.shadowFollowAnimation,
     directionalLight,
     ambientLight,
   ]);
