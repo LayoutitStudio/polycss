@@ -391,6 +391,9 @@ export function VanillaScene({
   onBuildRef.current = onBuild;
   const onCameraChangeRef = useRef(onCameraChange);
   onCameraChangeRef.current = onCameraChange;
+  // Debounce handle for syncing FPV position to options/URL once movement
+  // settles (FPV emits per-frame; we only want the resting spot).
+  const fpvSettleTimerRef = useRef(0);
   const onSelectionChangeRef = useRef(onSelectionChange);
   onSelectionChangeRef.current = onSelectionChange;
   const onHoverChangeRef = useRef(onHoverChange);
@@ -952,6 +955,12 @@ export function VanillaScene({
     const scene = sceneRef.current;
     const camera = cameraRef.current;
     if (!scene || !camera) return;
+    // FPV is authoritative over the live camera. We DO sync FPV's position back
+    // to options (debounced, so the scene URL captures where you walked), but
+    // re-applying that camera here would fight FPV's own per-frame writes — its
+    // target is a derived look-ahead point, not the stored eye. Skip; the
+    // initial pose still restores via scene creation (Effect 1) on load.
+    if (options.dragMode === "fpv") return;
     camera.update({
       rotX: options.rotX,
       rotY: options.rotY,
@@ -959,7 +968,7 @@ export function VanillaScene({
       target: options.target as Vec3,
     });
     scene.applyCamera();
-  }, [options.rotX, options.rotY, options.zoom, options.target]);
+  }, [options.rotX, options.rotY, options.zoom, options.target, options.dragMode]);
 
   // Effect 2b — lighting + shadow updates. Runs only when the light, shadow,
   // textureLighting, or ground color actually change (sliders, not camera).
@@ -1039,11 +1048,27 @@ export function VanillaScene({
           lookSensitivity: options.fpvLookSensitivity,
           invertY: options.fpvInvertY,
         });
-        // FPV is authoritative over the camera while engaged — don't echo
-        // its per-frame writes back into React state; that round-trip fights
-        // the rAF tick and causes visible jitter on mouselook and walk.
-        // The React side picks up the final camera state when the user
-        // exits FPV mode (next controls rebuild reads scene.getOptions()).
+        // FPV is authoritative over the camera while engaged — don't echo its
+        // per-frame writes back into React state; that round-trip fights the
+        // rAF tick and jitters mouselook/walk. But once movement SETTLES
+        // (~900ms idle) we sync the resting pose to options so the scene URL
+        // captures where you walked. We store the EYE position (getOrigin) as
+        // `target`: on reload FPV re-seeds its origin from camera.target, so
+        // the eye lands back at that spot. The camera-apply effect skips fpv
+        // mode, so this write never fights the live controls.
+        fpv.addEventListener("change", () => {
+          if (fpvSettleTimerRef.current) window.clearTimeout(fpvSettleTimerRef.current);
+          fpvSettleTimerRef.current = window.setTimeout(() => {
+            const st = scene.camera.state;
+            const eye = fpv.getOrigin();
+            onCameraChangeRef.current?.({
+              rotX: st.rotX ?? 90,
+              rotY: st.rotY ?? 0,
+              zoom: (st.zoom ?? 1) / LEGACY_ZOOM_COMPAT,
+              target: [eye[0], eye[1], eye[2]],
+            });
+          }, 900);
+        });
         return fpv;
       }
       const factory = options.dragMode === "pan" ? createPolyMapControls : createPolyOrbitControls;
@@ -1061,11 +1086,13 @@ export function VanillaScene({
       return controls;
     };
     if (controlsRef.current) controlsRef.current.destroy();
+    if (fpvSettleTimerRef.current) { window.clearTimeout(fpvSettleTimerRef.current); fpvSettleTimerRef.current = 0; }
     controlsRef.current = buildControls();
     return () => {
       // Effect re-runs when deps change — destroy only on full unmount,
       // which is signaled by the scene Effect 1 cleanup destroying scene.
       // Until then, the next effect run will reuse + update controlsRef.
+      if (fpvSettleTimerRef.current) { window.clearTimeout(fpvSettleTimerRef.current); fpvSettleTimerRef.current = 0; }
     };
   }, [
     options.renderer,
