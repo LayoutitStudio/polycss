@@ -175,6 +175,31 @@ What to expect:
 - **Colored multi-light shadows.** Each light's shadow is filled with the receiver lit by every *other* light, so a spot blocked from one colored light still shows the others' color. Where two shadows overlap, the region composites to the both-blocked color (ambient only) — not a doubled-up black smear.
 - **`shadow.lift`** floats the shadow a hair above the receiver to avoid z-fighting; the default is fine, just don't set it to exactly `0` on a coplanar floor.
 
+## Parametric shadows
+
+By default a shadow projects every casting polygon. Set `shadow: { parametric: true }` and PolyCSS instead casts one low-resolution **coverage silhouette** per caster — far fewer DOM/SVG vertices and a cheaper projection, at the cost of an approximate (but concave- and hole-aware) outline. The exact path stays the default; parametric is purely opt-in and works in all three renderers.
+
+```js
+// vanilla
+scene.setOptions({ shadow: { parametric: true, definition: 32 } });
+```
+
+```jsx
+// React
+<PolyScene shadow={{ parametric: true, definition: 32 }}>
+```
+
+```vue
+<!-- Vue -->
+<PolyScene :shadow="{ parametric: true, definition: 32 }">
+```
+
+- **`definition`** (default `16`) — silhouette detail. Higher → closer to the exact outline and sharper holes, but more vertices. Override it per mesh with **`shadowDefinition`** (`PolyMeshTransform.shadowDefinition` in vanilla, `<PolyMesh shadowDefinition>` in React, `shadow-definition` in Vue) so a detailed hero caster stays crisp while simple props run cheap in the same scene.
+- **`style: "vector" | "pixel"`** — `"vector"` (default) traces a smooth concave contour; `"pixel"` greedy-meshes the coverage into blocky **voxel** rectangles, where `definition` becomes the pixel-grid resolution (lower → chunkier). Holes (courtyards, an arena) come through in both.
+- **Point lights** are supported — each casting point light gets its own radial silhouette.
+- **`dragDefinition`** *(vanilla `createPolyScene` only)* — progressive refinement. While the directional light is being dragged the shadow renders at this lower definition for a smooth drag, then a debounced pass re-emits at full `definition` once the light settles. React/Vue get the same effect by lowering `definition` in component state during a drag.
+- **`followAnimation`** — by default a deforming/animated caster's shadow **freezes** at the last pose (re-projecting it every frame is expensive). Set `followAnimation: true` to make the shadow track the animation; pair it with `parametric` + a modest `definition` so the per-frame reprojection stays cheap.
+
 ## Live & animated lights
 
 - **Animating the directional light:** use **dynamic** mode — moving the light is a single CSS-variable write per frame, no JS in the paint loop, and shadows re-project automatically.

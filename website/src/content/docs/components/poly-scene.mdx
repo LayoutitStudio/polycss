@@ -26,7 +26,7 @@ The React/Vue components and `createPolyScene()` support the full table. The `<p
 | `strategies` | `{ disable?: ("b" \| "i" \| "u")[] }` | None | Diagnostic override for render strategy selection. Disabled solid strategies fall through to `<s>` atlas slices; `<s>` cannot be disabled. |
 | `autoCenter` | `boolean` | `false` | Rotate around the content bbox center instead of world origin. Polygon data is not mutated. |
 | `centerPolygons` | `Polygon[]` | None | (Framework only.) Bbox source for `autoCenter` when renderable polygons live inside child meshes. |
-| `shadow` | `{ color?, opacity?, lift?, maxExtend? }` | `{ color:"#000000", opacity:0.25, lift:0.05, maxExtend:2000 }` | Appearance and SVG extent cap for cast shadows emitted by meshes with `castShadow`. |
+| `shadow` | `{ color?, opacity?, lift?, maxExtend?, parametric?, definition?, style?, dragDefinition?, followAnimation? }` | `{ color:"#000000", opacity:0.25, lift:0.05, maxExtend:2000 }` | Appearance + SVG extent cap for cast shadows. `parametric` swaps to a cheap low-res silhouette (`definition` = detail, `style: "vector" \| "pixel"`); `dragDefinition` (vanilla) and `followAnimation` cover light-drag and animated meshes. See [Parametric shadows](/guides/lighting/#parametric-shadows). |
 | `polygons` | `Polygon[]` | None | (Framework only.) Flat array of polygon objects rendered as direct children. Composes with JSX/slot children. |
 | `children` | None | None | Meshes, polygons, controls, helpers, selection wrappers, and transform controls. |
 
@@ -54,6 +54,7 @@ React/Vue `<PolyMesh>` supports the full table. The `<poly-mesh>` custom element
 | `parseOptions` | `UseMeshOptions` | Parser options forwarded to `loadMesh`; `meshResolution` defaults to `"lossy"`. |
 | `meshResolution` | `"lossless" \| "lossy"` | Top-level optimizer intent. Wins over `parseOptions.meshResolution`; defaults to `"lossy"`. |
 | `castShadow` | `boolean` | Emit SVG cast shadows in both lighting modes; projections update when light, ground, or mesh geometry changes. |
+| `shadowDefinition` | `number` | Per-mesh parametric-shadow detail, overriding the scene's `shadow.definition` (only when `shadow.parametric`). |
 | `fallback` | `ReactNode` | Rendered while `src` is loading. (React / Vue only.) |
 | `errorFallback` | `(error: Error) => ReactNode` | Rendered if parse fails. (React / Vue only.) |
 | `children` | `(polygon, index) => ReactNode` | Per-polygon render prop / scoped slot. (React / Vue only.) |
