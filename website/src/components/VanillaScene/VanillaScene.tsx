@@ -437,7 +437,13 @@ export function VanillaScene({
     const scene = sceneRef.current;
     if (!scene) return;
     const nextDirectionalLight = directionalFromOptions(nextOptions);
-    const nextShadow = { maxExtend: nextOptions.shadowMaxExtend, lift: GALLERY_SHADOW_LIFT };
+    const nextShadow = {
+      maxExtend: nextOptions.shadowMaxExtend,
+      lift: GALLERY_SHADOW_LIFT,
+      parametric: nextOptions.shadowParametric,
+      definition: nextOptions.shadowDefinition,
+      style: nextOptions.shadowStyle,
+    };
     const previewShadow = preview?.shadow !== false;
     if (nextOptions.textureLighting === "dynamic") {
       scene.setOptions({
@@ -977,6 +983,9 @@ export function VanillaScene({
     options.textureLighting,
     options.groundColor,
     options.shadowMaxExtend,
+    options.shadowParametric,
+    options.shadowDefinition,
+    options.shadowStyle,
     directionalLight,
     ambientLight,
   ]);
