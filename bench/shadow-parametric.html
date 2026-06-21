@@ -870,6 +870,7 @@
         S.dir.y = Math.max(-LIGHT_AXIS_LIMIT, Math.min(LIGHT_AXIS_LIMIT, sy));
         S.dir.z = Math.max(-LIGHT_AXIS_LIMIT, Math.min(LIGHT_AXIS_LIMIT, sz));
         refreshLightSliders();
+        __markMotion();
         update(false);
       };
       const onUp = (ev) => {
@@ -934,12 +935,16 @@
       if (!S.progressive) return S.shadow.definition;
       return __interacting ? Math.min(S.shadow.definition, S.dragDef) : S.shadow.definition;
     }
+    // Call this from LIGHT/CAMERA motion handlers only — NOT from setting
+    // changes like the definition slider (which must show its exact def
+    // immediately). Caps def during motion and schedules a full-def refine.
+    function __markMotion() {
+      if (!S.progressive) return;
+      __interacting = true;
+      if (__refineTimer) clearTimeout(__refineTimer);
+      __refineTimer = setTimeout(() => { __interacting = false; update(true); }, 140);
+    }
     function update(lightsChanged) {
-      if (S.progressive) {
-        __interacting = true;
-        if (__refineTimer) clearTimeout(__refineTimer);
-        __refineTimer = setTimeout(() => { __interacting = false; update(lightsChanged); }, 140);
-      }
       // Push every mesh's transform every tick. setTransform is cheap when
       // values haven't changed; this keeps the bench panel + both engines
       // in sync without per-mesh slider plumbing.
@@ -1298,6 +1303,7 @@
         if (S.cam.rotY < 0) S.cam.rotY += 360;
         S.cam.rotX = Math.max(0, Math.min(90, S.cam.rotX - dy * 0.4));
         setCamSliders();
+        __markMotion();
         applyCamera(); update();
       });
       el.addEventListener("wheel", (e) => {
@@ -1305,6 +1311,7 @@
         const f = Math.exp(-e.deltaY * 0.001);
         S.cam.zoom = Math.max(1, Math.min(500, S.cam.zoom * f));
         setCamSliders();
+        __markMotion();
         applyCamera(); update();
       }, { passive: false });
     }
@@ -1652,6 +1659,9 @@
         inp.addEventListener("pointerdown", onDragStart);
         inp.addEventListener("pointerup", onDragEnd);
         inp.addEventListener("change", onDragEnd);
+        // Progressive def applies only to MOTION (light direction, camera) —
+        // NOT to the definition slider itself, which must show its exact def.
+        const isMotion = (r.k[0] === "dir" && (r.k[1] === "x" || r.k[1] === "y" || r.k[1] === "z")) || !!r.camera;
         inp.addEventListener("input", () => {
           const v = +inp.value;
           setVal(v);
@@ -1662,6 +1672,7 @@
           // update() pushes every mesh's full transform (pos + scale), so
           // object-transform changes don't need any special handling.
           const lightsChanged = isLightSlider && !dragging && S.lighting === "baked";
+          if (isMotion) __markMotion();
           update(lightsChanged);
         });
         row.appendChild(inp); row.appendChild(val);
