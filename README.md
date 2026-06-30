@@ -21,7 +21,6 @@ npm install @layoutit/polycss-vue
 
 ```
 
-
 You can also load PolyCSS directly from a CDN. Here is a minimal custom-element scene:
 
 ```html
@@ -39,7 +38,7 @@ You can also load PolyCSS directly from a CDN. Here is a minimal custom-element 
 
 ## Framework Components
 
-React and Vue expose the same component model. `<PolyCamera>` owns the viewpoint, `<PolyScene>` owns lighting and atlas options, and `<PolyMesh>` loads or receives polygon data.
+React and Vue expose the same component model. `<PolyCamera>` owns the viewpoint, `<PolyScene>` owns lighting and options, and `<PolyMesh>` loads or receives polygon data.
 
 ```tsx
 import { PolyCamera, PolyScene, PolyOrbitControls, PolyMesh } from "@layoutit/polycss-react";
