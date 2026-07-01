@@ -187,9 +187,10 @@ Each visible polygon is emitted as one leaf element; the renderer chooses the le
 ## Made with PolyCSS
 
 [cssQuake](https://cssquake.com)
--> A 3D CSS port of Quake (1996)
+-> A 3D port of Quake (1996)
 
 <img width="1280" height="720" alt="quake" src="https://github.com/user-attachments/assets/6d9d809c-857a-4a39-b5cf-733ead2661ec" />
+
 
 [Layoutit Terra](https://terra.layoutit.com)
 -> A CSS Terrain Generator
