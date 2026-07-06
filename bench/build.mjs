@@ -44,10 +44,13 @@ const bundleDir = resolve(__dirname, ".generated");
 
 const ALIASES = {
   "@layoutit/polycss-core":     resolve(repoRoot, "packages/core/src/index.ts"),
+  "@layoutit/polycss-core/three": resolve(repoRoot, "packages/core/src/three/index.ts"),
   "@layoutit/polycss":           resolve(repoRoot, "packages/polycss/src/index.ts"),
   "@layoutit/polycss/elements":  resolve(repoRoot, "packages/polycss/src/elements/index.ts"),
+  "@layoutit/polycss/three":     resolve(repoRoot, "packages/polycss/src/three.ts"),
   "@layoutit/polycss-react":    resolve(repoRoot, "packages/react/src/index.ts"),
   "@layoutit/polycss-vue":      resolve(repoRoot, "packages/vue/src/index.ts"),
+  "three":                      resolve(repoRoot, "node_modules/three/build/three.module.js"),
   // Pin React + ReactDOM to the workspace-root copies so the alias-resolved
   // @layoutit/polycss-react source AND the bench entry import the SAME instance.
   // Without this, esbuild treats two `react` imports starting from different
@@ -134,6 +137,11 @@ const targets = [
     label: "atlas background bench entry",
     entry: resolve(__dirname, "entries/atlasBackground.ts"),
     out: resolve(bundleDir, "polycss-atlas-background.js"),
+  },
+  {
+    label: "three parity dashboard",
+    entry: resolve(__dirname, "entries/threeParityDashboard.ts"),
+    out: resolve(bundleDir, "polycss-three-parity-dashboard.js"),
   },
 ];
 

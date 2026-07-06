@@ -80,6 +80,7 @@ const INDEX_HTML = `<!doctype html>
   <li><a href='/async-scene-mount.html?autorun=1&count=10000&repeats=5'>/async-scene-mount.html</a> &nbsp;<small>internal async scene mount</small></li>
   <li><a href='/sync-scene-add.html?autorun=1&count=10000&repeats=5'>/sync-scene-add.html</a> &nbsp;<small>synchronous scene.add render</small></li>
   <li><a href='/atlas-background.html'>/atlas-background.html</a> &nbsp;<small>atlas background reveal style application</small></li>
+  <li><a href='/three-parity.html'>/three-parity.html</a> &nbsp;<small>three.js vs polycss/three vs native PolyCSS</small></li>
 </ul>
 </body></html>`;
 
