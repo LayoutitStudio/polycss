@@ -250,7 +250,7 @@ export class DirectionalLight extends Object3D {
   }
 
   toPolyDirectionalLight(): PolyDirectionalLight {
-    const direction = this.target.position.clone().sub(this.position).normalize();
+    const direction = this.position.clone().sub(this.target.position).normalize();
     return {
       direction: threeToPolyDirection(direction),
       color: this.color,

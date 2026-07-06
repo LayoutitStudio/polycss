@@ -36,7 +36,7 @@ The `*/three` subpaths intentionally use Three-style conventions:
 | Mesh rotations | Radians, XYZ Euler |
 | Cameras | Three-like `PerspectiveCamera(fov, aspect, near, far)` and `OrthographicCamera(left, right, top, bottom, near, far)` |
 | Camera targeting | `camera.position.set(...)` + `camera.lookAt(...)` |
-| Directional lights | `light.position` toward `light.target.position` |
+| Directional lights | Three.js source vector: `light.target.position` → `light.position` |
 | Point lights | `light.position` in Three/Y-up space |
 
 Internally, geometry is converted into PolyCSS space with

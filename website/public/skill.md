@@ -98,7 +98,7 @@ import {
 - Cameras are `PerspectiveCamera(fov, aspect, near, far)` or
   `OrthographicCamera(left, right, top, bottom, near, far)`.
 - Frame with `camera.position.set(...)` and `camera.lookAt(...)`.
-- Directional lights use `light.position` toward `light.target.position`.
+- Directional lights use the Three.js source vector, `light.target.position` → `light.position`.
 - Geometry converts internally with the right-handed axis map `[x, -z, y]`, so
   winding and Lambert lighting stay correct.
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { computeShapeLighting } from "../color/lighting";
+import { worldDirectionalLightToCss } from "../shadow/receiverFaceGroups";
 import {
   DirectionalLight,
   Object3D,
@@ -53,15 +53,19 @@ describe("@layoutit/polycss-core/three", () => {
     expect(state.rotY).toBeLessThan(0);
   });
 
-  it("converts Three directional lights to PolyCSS toward-direction lights", () => {
+  it("converts Three directional lights to PolyCSS source-direction lights", () => {
     const light = new DirectionalLight("#ffffff", 1);
     light.position.set(0, 5, 0);
     light.target.position.set(0, 0, 0);
 
     const polyLight = light.toPolyDirectionalLight();
-    expect(polyLight.direction).toEqual([0, -0, -1]);
+    expect(polyLight.direction[0]).toBeCloseTo(0);
+    expect(polyLight.direction[1]).toBeCloseTo(0);
+    expect(polyLight.direction[2]).toBeCloseTo(1);
 
-    const shaded = computeShapeLighting([0, 0, 1], "#808080", polyLight, { intensity: 0 });
-    expect(shaded).not.toBe("rgb(0, 0, 0)");
+    const cssLight = worldDirectionalLightToCss(polyLight);
+    expect(cssLight.direction[0]).toBeCloseTo(0);
+    expect(cssLight.direction[1]).toBeCloseTo(0);
+    expect(cssLight.direction[2]).toBeCloseTo(1);
   });
 });

@@ -469,7 +469,7 @@ function renderAdapter(host: HTMLElement, polygons: Polygon[], camera: ReturnTyp
     autoCenter: false,
     directionalLight: directional.toPolyDirectionalLight(),
     ambientLight: ambient.toPolyAmbientLight(),
-    textureLighting: "dynamic",
+    textureLighting: "baked",
     textureQuality: 1,
   });
   polyScenes.push(scene);
@@ -485,7 +485,7 @@ function renderNative(host: HTMLElement, polygons: Polygon[], camera: ReturnType
     autoCenter: false,
     directionalLight: directional.toPolyDirectionalLight(),
     ambientLight: ambient.toPolyAmbientLight(),
-    textureLighting: "dynamic",
+    textureLighting: "baked",
     textureQuality: 1,
   });
   scene.add(parseResult(polygons), { merge: false, meshResolution: "lossless" });
