@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { worldDirectionalLightToCss } from "../shadow/receiverFaceGroups";
 import {
+  AmbientLight,
   DirectionalLight,
   Object3D,
   PerspectiveCamera,
+  PointLight,
   Vector3,
   threeToPolyPoint,
   transformPolygonsToPoly,
@@ -62,10 +64,21 @@ describe("@layoutit/polycss-core/three", () => {
     expect(polyLight.direction[0]).toBeCloseTo(0);
     expect(polyLight.direction[1]).toBeCloseTo(0);
     expect(polyLight.direction[2]).toBeCloseTo(1);
+    expect(polyLight.intensity).toBe(1);
 
     const cssLight = worldDirectionalLightToCss(polyLight);
     expect(cssLight.direction[0]).toBeCloseTo(0);
     expect(cssLight.direction[1]).toBeCloseTo(0);
     expect(cssLight.direction[2]).toBeCloseTo(1);
+  });
+
+  it("preserves Three light intensities because both shaders use Lambert / pi", () => {
+    const directional = new DirectionalLight("#ffffff", 0.82);
+    const point = new PointLight("#ffffff", 0.5);
+    const ambient = new AmbientLight("#ffffff", 0.48);
+
+    expect(directional.toPolyDirectionalLight().intensity).toBe(0.82);
+    expect(point.toPolyPointLight().intensity).toBe(0.5);
+    expect(ambient.toPolyAmbientLight().intensity).toBe(0.48);
   });
 });

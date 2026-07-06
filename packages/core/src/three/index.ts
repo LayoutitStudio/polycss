@@ -254,7 +254,7 @@ export class DirectionalLight extends Object3D {
     return {
       direction: threeToPolyDirection(direction),
       color: this.color,
-      intensity: this.intensity * Math.PI,
+      intensity: this.intensity,
     };
   }
 }
@@ -278,7 +278,7 @@ export class PointLight extends Object3D {
     return {
       position: threeToPolyPoint(this.position),
       color: this.color,
-      intensity: this.intensity * Math.PI,
+      intensity: this.intensity,
       castShadow: this.castShadow,
     };
   }
@@ -296,7 +296,7 @@ export class AmbientLight {
   toPolyAmbientLight(): PolyAmbientLight {
     return {
       color: this.color,
-      intensity: this.intensity * Math.PI,
+      intensity: this.intensity,
     };
   }
 }

@@ -122,7 +122,11 @@ export function mountPolyThreeScene(
     meshes,
     ...sceneOptions
   } = options;
-  const scene = createPolyScene(host, { ...sceneOptions, camera });
+  const scene = createPolyScene(host, {
+    ...sceneOptions,
+    textureLighting: sceneOptions.textureLighting ?? "baked",
+    camera,
+  });
 
   if (meshes) {
     for (const mesh of meshes) {

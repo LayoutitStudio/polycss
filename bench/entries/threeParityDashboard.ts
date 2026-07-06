@@ -30,6 +30,7 @@ type CameraMode = "perspective" | "orthographic" | "fpv";
 type ObjectKey = "cube" | "icosahedron" | "dodecahedron" | "cactus" | "box" | "car";
 type SceneKey = "single" | "lineup" | "occlusion";
 type ViewKey = "iso" | "front" | "side" | "top";
+type LightingMode = "baked" | "dynamic";
 type ThreePolygon = Omit<Polygon, "vertices"> & { vertices: Vec3[] };
 type BBox2 = { x: number; y: number; width: number; height: number; count: number };
 
@@ -41,6 +42,7 @@ const state = {
   fov: 42,
   orthoSize: 7,
   zoom: 1,
+  lighting: "baked" as LightingMode,
   yaw: 35,
   pitch: 24,
 };
@@ -57,6 +59,7 @@ const els = {
   scene: byId<HTMLSelectElement>("scene"),
   camera: byId<HTMLSelectElement>("camera"),
   view: byId<HTMLSelectElement>("view"),
+  lighting: byId<HTMLSelectElement>("lighting"),
   fov: byId<HTMLInputElement>("fov"),
   orthoSize: byId<HTMLInputElement>("ortho-size"),
   zoom: byId<HTMLInputElement>("zoom"),
@@ -437,8 +440,8 @@ function renderThreeCanvasFallback(
 
   for (const item of drawables) {
     const normal = polygonNormal(item.polygon.vertices);
-    const shade = Math.min(1, 0.48 + 0.82 * Math.max(0, normal.dot(light)));
-    const color = new THREE.Color(item.polygon.color ?? "#cbd5e1").multiplyScalar(shade);
+    const direct = 0.82 * Math.max(0, normal.dot(light));
+    const color = lambertSrgbColor(item.polygon.color ?? "#cbd5e1", direct, 0.48);
     ctx.beginPath();
     ctx.moveTo(item.pts[0].x, item.pts[0].y);
     for (let i = 1; i < item.pts.length; i++) ctx.lineTo(item.pts[i].x, item.pts[i].y);
@@ -450,6 +453,16 @@ function renderThreeCanvasFallback(
   ctx.fillStyle = "rgba(82, 96, 114, 0.82)";
   ctx.font = "11px ui-monospace, SFMono-Regular, Menlo, monospace";
   ctx.fillText("2D fallback: WebGL unavailable in this browser", 12, size.height - 14);
+}
+
+function lambertSrgbColor(baseHex: string, direct: number, ambient: number) {
+  const base = new THREE.Color(baseHex);
+  const lit = new THREE.Color(
+    base.r * (direct + ambient) / Math.PI,
+    base.g * (direct + ambient) / Math.PI,
+    base.b * (direct + ambient) / Math.PI,
+  );
+  return lit;
 }
 
 function polygonNormal(vertices: Vec3[]) {
@@ -469,7 +482,7 @@ function renderAdapter(host: HTMLElement, polygons: Polygon[], camera: ReturnTyp
     autoCenter: false,
     directionalLight: directional.toPolyDirectionalLight(),
     ambientLight: ambient.toPolyAmbientLight(),
-    textureLighting: "baked",
+    textureLighting: state.lighting,
     textureQuality: 1,
   });
   polyScenes.push(scene);
@@ -485,7 +498,7 @@ function renderNative(host: HTMLElement, polygons: Polygon[], camera: ReturnType
     autoCenter: false,
     directionalLight: directional.toPolyDirectionalLight(),
     ambientLight: ambient.toPolyAmbientLight(),
-    textureLighting: "baked",
+    textureLighting: state.lighting,
     textureQuality: 1,
   });
   scene.add(parseResult(polygons), { merge: false, meshResolution: "lossless" });
@@ -597,6 +610,7 @@ function updateMetrics(three: BBox2, adapter: BBox2, native: BBox2) {
   els.metricAdapter.textContent = fmtBox(adapter);
   els.metricNative.textContent = fmtBox(native);
   els.metricDelta.textContent = [
+    `PolyCSS lighting: ${state.lighting}`,
     `adapter vs three: ${fmtDelta(three, adapter)}`,
     `native vs three:  ${fmtDelta(three, native)}`,
     `native vs adapter:${fmtDelta(adapter, native)}`,
@@ -642,12 +656,190 @@ function updateLabels() {
   els.zoomValue.textContent = `${state.zoom.toFixed(2)}x`;
 }
 
+function codeNumber(value: number): string {
+  return Number(value.toFixed(4)).toString();
+}
+
+function codeVector(v: THREE.Vector3): string {
+  return `${codeNumber(v.x)}, ${codeNumber(v.y)}, ${codeNumber(v.z)}`;
+}
+
+function codeSize() {
+  const size = panelSize(els.threeSurface);
+  return { ...size, aspect: size.width / size.height };
+}
+
+function threeCameraCode(size = codeSize()): string {
+  const { position, target } = cameraPosition(state.camera);
+  if (state.camera === "orthographic") {
+    return `const camera = new THREE.OrthographicCamera(
+  ${codeNumber(-state.orthoSize * size.aspect / 2)},
+  ${codeNumber(state.orthoSize * size.aspect / 2)},
+  ${codeNumber(state.orthoSize / 2)},
+  ${codeNumber(-state.orthoSize / 2)},
+  0.01,
+  200,
+);
+camera.position.set(${codeVector(position)});
+camera.lookAt(${codeVector(target)});
+camera.updateProjectionMatrix();
+camera.updateMatrixWorld();`;
+  }
+  return `const camera = new THREE.PerspectiveCamera(${state.fov}, ${codeNumber(size.aspect)}, 0.01, 200);
+camera.position.set(${codeVector(position)});
+camera.lookAt(${codeVector(target)});
+camera.updateProjectionMatrix();
+camera.updateMatrixWorld();`;
+}
+
+function compatCameraCode(variableName: string, size = codeSize()): string {
+  const { position, target } = cameraPosition(state.camera);
+  if (state.camera === "orthographic") {
+    return `const ${variableName} = new OrthographicCamera(
+  ${codeNumber(-state.orthoSize * size.aspect / 2)},
+  ${codeNumber(state.orthoSize * size.aspect / 2)},
+  ${codeNumber(state.orthoSize / 2)},
+  ${codeNumber(-state.orthoSize / 2)},
+  0.01,
+  200,
+);
+${variableName}.position.set(${codeVector(position)});
+${variableName}.lookAt(${codeVector(target)});`;
+  }
+  return `const ${variableName} = new PerspectiveCamera(${state.fov}, ${codeNumber(size.aspect)}, 0.01, 200);
+${variableName}.position.set(${codeVector(position)});
+${variableName}.lookAt(${codeVector(target)});`;
+}
+
+function lightsCode(prefix: "THREE" | "poly") {
+  if (prefix === "THREE") {
+    return `scene.add(new THREE.AmbientLight("#ffffff", 0.48));
+const directional = new THREE.DirectionalLight("#ffffff", 0.82);
+directional.position.set(3.4, 5.2, 4.1);
+directional.target.position.set(0, 0.8, 0);
+scene.add(directional);
+scene.add(directional.target);`;
+  }
+  return `const ambient = new AmbientLight("#ffffff", 0.48);
+const directional = new DirectionalLight("#ffffff", 0.82);
+directional.position.set(3.4, 5.2, 4.1);
+directional.target.position.set(0, 0.8, 0);`;
+}
+
+function currentInputComment() {
+  return `// Input geometry: ${objectLabels[state.object]}, ${state.scene} scene, authored in Three/Y-up coordinates.
+// The bench loader produces this from primitives or gallery GLBs, then applies the same floor/lineup/occlusion transforms.
+const threePolygons = await loadSelectedScenePolygons();`;
+}
+
 function updateCode() {
-  const label = objectLabels[state.object];
+  const size = codeSize();
   lastCode = {
-    three: `const camera = new THREE.${state.camera === "orthographic" ? "OrthographicCamera(...)" : "PerspectiveCamera(...)"};\ncamera.position.set(...);\ncamera.lookAt(0, 1.05, 0);\n\nconst scene = new THREE.Scene();\nscene.add(new THREE.AmbientLight("#fff", 0.48));\nscene.add(new THREE.DirectionalLight("#fff", 0.82));\nscene.add(meshFromPolygons(${JSON.stringify(label)}));`,
-    adapter: `import { mountPolyThreeScene, threeToPolyPoint } from "@layoutit/polycss/three";\n\nconst polyPolygons = threePolygons.map((polygon) => ({\n  ...polygon,\n  vertices: polygon.vertices.map(threeToPolyPoint),\n}));\n\nmountPolyThreeScene(host, {\n  camera: threeLikeCamera,\n  cameraOptions: { viewportHeight: ${panelSize(els.threeSurface).height} },\n  polygons: polyPolygons,\n  autoCenter: false,\n  directionalLight: directional.toPolyDirectionalLight(),\n  ambientLight: ambient.toPolyAmbientLight(),\n});`,
-    native: `import { createPolyScene } from "@layoutit/polycss";\nimport { createPolyPerspectiveCameraFromThree } from "@layoutit/polycss/three";\n\nconst camera = createPolyPerspectiveCameraFromThree(threeLikeCamera, {\n  viewportHeight: ${panelSize(els.threeSurface).height},\n});\nconst scene = createPolyScene(host, { camera, autoCenter: false, directionalLight, ambientLight });\nscene.add({ polygons: polyPolygons, objectUrls: [], warnings: [], dispose() {} }, {\n  merge: false,\n  meshResolution: "lossless",\n});`,
+    three: `import * as THREE from "three";
+
+const host = document.querySelector("#three")!;
+const size = { width: ${size.width}, height: ${size.height} };
+${currentInputComment()}
+
+const canvas = document.createElement("canvas");
+host.appendChild(canvas);
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });
+renderer.setSize(size.width, size.height, false);
+renderer.setClearColor(0xf8fafc, 1);
+
+${threeCameraCode(size)}
+
+const scene = new THREE.Scene();
+${lightsCode("THREE")}
+scene.add(meshFromPolygons(threePolygons));
+renderer.render(scene, camera);
+
+function meshFromPolygons(polygons) {
+  const positions = [];
+  const colors = [];
+  for (const polygon of polygons) {
+    const color = new THREE.Color(polygon.color ?? "#cbd5e1");
+    for (let i = 1; i < polygon.vertices.length - 1; i++) {
+      for (const vertex of [polygon.vertices[0], polygon.vertices[i], polygon.vertices[i + 1]]) {
+        positions.push(vertex[0], vertex[1], vertex[2]);
+        colors.push(color.r, color.g, color.b);
+      }
+    }
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
+  geometry.computeVertexNormals();
+  return new THREE.Mesh(
+    geometry,
+    new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.FrontSide }),
+  );
+}`,
+    adapter: `import {
+  AmbientLight,
+  DirectionalLight,
+  ${state.camera === "orthographic" ? "OrthographicCamera" : "PerspectiveCamera"},
+  mountPolyThreeScene,
+  threeToPolyPoint,
+} from "@layoutit/polycss/three";
+
+const host = document.querySelector("#poly-three")!;
+${currentInputComment()}
+
+const polyPolygons = threePolygons.map((polygon) => ({
+  color: polygon.color,
+  vertices: polygon.vertices.map((vertex) => threeToPolyPoint(vertex)),
+}));
+
+${compatCameraCode("camera", size)}
+${lightsCode("poly")}
+
+mountPolyThreeScene(host, {
+  camera,
+  cameraOptions: { viewportHeight: ${size.height} },
+  polygons: polyPolygons,
+  autoCenter: false,
+  directionalLight: directional.toPolyDirectionalLight(),
+  ambientLight: ambient.toPolyAmbientLight(),
+  textureLighting: "${state.lighting}",
+  textureQuality: 1,
+});`,
+    native: `import { createPolyScene } from "@layoutit/polycss";
+import {
+  AmbientLight,
+  DirectionalLight,
+  ${state.camera === "orthographic" ? "OrthographicCamera, createPolyOrthographicCameraFromThree" : "PerspectiveCamera, createPolyPerspectiveCameraFromThree"},
+  threeToPolyPoint,
+} from "@layoutit/polycss/three";
+
+const host = document.querySelector("#poly-native")!;
+${currentInputComment()}
+
+const polyPolygons = threePolygons.map((polygon) => ({
+  color: polygon.color,
+  vertices: polygon.vertices.map((vertex) => threeToPolyPoint(vertex)),
+}));
+
+${compatCameraCode("threeLikeCamera", size)}
+${lightsCode("poly")}
+
+const camera = ${state.camera === "orthographic" ? "createPolyOrthographicCameraFromThree" : "createPolyPerspectiveCameraFromThree"}(threeLikeCamera, {
+  viewportHeight: ${size.height},
+});
+
+const scene = createPolyScene(host, {
+  camera,
+  autoCenter: false,
+  directionalLight: directional.toPolyDirectionalLight(),
+  ambientLight: ambient.toPolyAmbientLight(),
+  textureLighting: "${state.lighting}",
+  textureQuality: 1,
+});
+
+scene.add({ polygons: polyPolygons, objectUrls: [], warnings: [], dispose() {} }, {
+  merge: false,
+  meshResolution: "lossless",
+});`,
   };
   els.code.textContent = lastCode[activeCodeTab];
 }
@@ -657,6 +849,7 @@ function bindControls() {
   els.scene.value = state.scene;
   els.camera.value = state.camera;
   els.view.value = state.view;
+  els.lighting.value = state.lighting;
   els.fov.value = String(state.fov);
   els.orthoSize.value = String(state.orthoSize);
   els.zoom.value = String(state.zoom);
@@ -676,6 +869,10 @@ function bindControls() {
   els.view.addEventListener("change", () => {
     state.view = els.view.value as ViewKey;
     applyPresetView();
+    render();
+  });
+  els.lighting.addEventListener("change", () => {
+    state.lighting = els.lighting.value as LightingMode;
     render();
   });
   els.fov.addEventListener("input", () => {

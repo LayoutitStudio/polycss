@@ -38,6 +38,7 @@ The `*/three` subpaths intentionally use Three-style conventions:
 | Camera targeting | `camera.position.set(...)` + `camera.lookAt(...)` |
 | Directional lights | Three.js source vector: `light.target.position` → `light.position` |
 | Point lights | `light.position` in Three/Y-up space |
+| Vanilla lighting default | `mountPolyThreeScene(...)` defaults to `textureLighting: "baked"` |
 
 Internally, geometry is converted into PolyCSS space with
 `transformPolygonsToPoly`. The axis conversion is right-handed, so polygon
@@ -47,6 +48,12 @@ Polygon arrays passed to `transformPolygonsToPoly` or `<PolyThreeMesh>` are
 interpreted as Three/Y-up coordinates. If you already have native PolyCSS
 polygons with their own native transform, render them with the native API instead
 of converting them again.
+
+For Three parity, use baked lighting as the baseline. It computes the final
+Lambert face color through the same directional/ambient intensity surface used
+by the Three-like light adapters. Dynamic lighting is still available by passing
+`textureLighting: "dynamic"`, but it is a live CSS-lighting path for interactive
+light changes, not the strict conformance mode.
 
 ## Vanilla example
 

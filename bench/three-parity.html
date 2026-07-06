@@ -12,7 +12,7 @@
     header { display: flex; align-items: start; justify-content: space-between; gap: 16px; }
     h1 { margin: 0; font-size: 18px; line-height: 1.2; letter-spacing: 0; }
     .sub { margin: 4px 0 0; color: #5c6678; font-size: 12px; }
-    .controls { display: grid; grid-template-columns: repeat(8, minmax(110px, 1fr)); gap: 8px; align-items: end; padding: 10px; background: #ffffff; border: 1px solid #ccd5e2; border-radius: 8px; }
+    .controls { display: grid; grid-template-columns: repeat(9, minmax(110px, 1fr)); gap: 8px; align-items: end; padding: 10px; background: #ffffff; border: 1px solid #ccd5e2; border-radius: 8px; }
     label { display: grid; gap: 4px; font-size: 11px; color: #536174; }
     select, input, button { height: 32px; border: 1px solid #c3ccda; border-radius: 6px; background: #fff; color: #172033; font: inherit; padding: 0 8px; }
     input[type="range"] { padding: 0; }
@@ -96,6 +96,12 @@
       </label>
       <label>Zoom <span id="zoom-value"></span>
         <input id="zoom" type="range" min="0.6" max="1.8" step="0.05" value="1" />
+      </label>
+      <label>PolyCSS lighting
+        <select id="lighting">
+          <option value="baked">baked</option>
+          <option value="dynamic">dynamic</option>
+        </select>
       </label>
       <button id="reset" type="button">Reset view</button>
     </section>

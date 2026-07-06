@@ -101,6 +101,9 @@ import {
 - Directional lights use the Three.js source vector, `light.target.position` → `light.position`.
 - Geometry converts internally with the right-handed axis map `[x, -z, y]`, so
   winding and Lambert lighting stay correct.
+- `mountPolyThreeScene(...)` defaults to baked lighting for Three parity.
+  Use `textureLighting: "dynamic"` only when live CSS light changes matter more
+  than strict conformance.
 
 ## React Parity Example
 
