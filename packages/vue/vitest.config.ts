@@ -24,7 +24,9 @@ export default defineConfig({
   },
   resolve: {
     alias: {
+      "@layoutit/polycss-core/three": path.resolve(__dirname, "../core/src/three/index.ts"),
       "@layoutit/polycss": path.resolve(__dirname, "../polycss/src/index.ts"),
+      "@layoutit/polycss/three": path.resolve(__dirname, "../polycss/src/three.ts"),
       "@layoutit/polycss-core": path.resolve(__dirname, "../core/src/index.ts"),
     },
   },

@@ -4,6 +4,7 @@ export default defineConfig({
   entry: {
     index: "src/index.ts",
     elements: "src/elements/index.ts",
+    three: "src/three.ts",
   },
   format: ["esm", "cjs"],
   dts: true,
@@ -13,5 +14,5 @@ export default defineConfig({
   minify: true,
   target: "es2020",
   tsconfig: "tsconfig.build.json",
-  external: ["@layoutit/polycss-core"],
+  external: ["@layoutit/polycss-core", "@layoutit/polycss-core/three"],
 });
