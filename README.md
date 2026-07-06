@@ -55,6 +55,54 @@ export default function App() {
 }
 ```
 
+## Three.js Parity API
+
+When porting Three.js scenes or generating code with an agent, use the explicit
+`*/three` subpaths:
+
+- `@layoutit/polycss-core/three`
+- `@layoutit/polycss/three`
+- `@layoutit/polycss-react/three`
+- `@layoutit/polycss-vue/three`
+
+They expose Three-like `PerspectiveCamera`, `OrthographicCamera`, `Object3D`,
+`Vector3`, `DirectionalLight`, `PointLight`, `AmbientLight`, radians for object
+rotations, Y-up authoring coordinates, and `camera.position` + `camera.lookAt(...)`
+framing. The adapters convert into native PolyCSS coordinates with a right-handed
+axis map, so the apparent object size, projection, orientation, depth ordering,
+and light direction line up with Three.js scene math while still rendering
+through the DOM.
+
+```tsx
+import { PolyScene } from "@layoutit/polycss-react";
+import {
+  DirectionalLight,
+  PolyThreeMesh,
+  PolyThreePerspectiveCamera,
+} from "@layoutit/polycss-react/three";
+
+const sun = new DirectionalLight("#ffffff", 1);
+sun.position.set(3, 5, 4);
+sun.target.position.set(0, 0, 0);
+
+export function App() {
+  return (
+    <PolyThreePerspectiveCamera
+      fov={50}
+      aspect={16 / 9}
+      position={[3, 2, 5]}
+      lookAt={[0, 0, 0]}
+    >
+      <PolyScene directionalLight={sun.toPolyDirectionalLight()}>
+        <PolyThreeMesh src="/models/cube.glb" rotation={[0, Math.PI / 4, 0]} />
+      </PolyScene>
+    </PolyThreePerspectiveCamera>
+  );
+}
+```
+
+Full reference: [polycss.com/api/three-parity](https://polycss.com/api/three-parity).
+
 ## API Reference
 
 ### PolyCamera

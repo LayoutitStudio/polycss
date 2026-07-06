@@ -87,7 +87,7 @@ export type PolyTextureAlphaMode = "opaque" | "mask" | "blend";
  * Mirrors three.js's `DirectionalLight`.
  */
 export interface PolyDirectionalLight {
-  /** Direction the light shines TOWARD (typical convention). */
+  /** Unit direction from the surface toward the distant light source. */
   direction: Vec3;
   /** Light tint, hex string. White by default. */
   color?: string;

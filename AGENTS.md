@@ -20,6 +20,16 @@ Monorepo layout (pnpm workspaces):
 
 Public API is **mirrored** across React and Vue. Adding a hook on one side without adding the matching composable on the other is not acceptable (see "Cross-package discipline" below).
 
+### Three-like parity surface
+
+The native PolyCSS API keeps PolyCSS world and camera conventions. For agent-friendly Three.js ports, the monorepo also exposes explicit `*/three` subpaths:
+
+- `@layoutit/polycss-core/three` — pure Three-like math wrappers, camera conversion, lights, and transforms.
+- `@layoutit/polycss/three` — the core Three-like surface plus vanilla scene helpers.
+- `@layoutit/polycss-react/three` and `@layoutit/polycss-vue/three` — mirrored framework components: `PolyThreePerspectiveCamera`, `PolyThreeOrthographicCamera`, and `PolyThreeMesh`.
+
+These subpaths intentionally use Three-compatible public names and units: `Vector3`, `Euler`, `Object3D`, `PerspectiveCamera`, `OrthographicCamera`, `DirectionalLight`, `PointLight`, `AmbientLight`, radians for object rotations, Y-up authoring coordinates, and `camera.position` + `camera.lookAt(...)` framing. They are adapters over PolyCSS, not a Three.js runtime dependency. Geometry authored in that surface is converted to native PolyCSS coordinates with `transformPolygonsToPoly`; the Y-up → Z-up axis map is `[x, -z, y]` so winding and Lambert lighting stay right-handed. The vanilla `mountPolyThreeScene` helper defaults `textureLighting` to `"baked"` because baked Lambert is the Three-parity baseline. Dynamic lighting remains available as an explicit opt-in for live CSS light changes, but it is not the exact conformance mode.
+
 ## Rendering model — the mental model
 
 **One visible `Polygon` → one leaf DOM element.** Leaves use canonical CSS primitives where possible and move scale into `matrix3d`; clipped solids use fixed primitives because their paint geometry becomes unstable when collapsed to 1px. Atlas-backed textured polygons pack their local-2D bounding rect (`canvasW × canvasH`) into atlas pages; source-exact textured polygons may instead carry `textureImageSource` + `texturePresentation.backend="image"` and render as direct image leaves without atlas rasterisation. The HTML tag *is* the render strategy — the renderer picks one tag per polygon based on its shape and material.
@@ -57,7 +67,7 @@ The `.vox` fast path emits plain `<b>` elements inside `.polycss-voxel-face` wra
 
 ### Lights
 
-The scene takes one `directionalLight`, one `ambientLight`, and zero or more `pointLights` (`PolyPointLight[]`). Point lights are **direction-only** — no distance falloff. Per polygon the contribution is `color · intensity · max(0, n · L̂)`, where `L̂` is the unit direction from the surface to the light position; multiple colored lights accumulate per-channel alongside the directional + ambient terms. This deliberately omits CSS gradients: point lights shade flat-per-face (an accepted approximation vs three.js's per-fragment `PointLight(distance:0, decay:0)`; exact for small faces / distant lights). Point lights are **baked-mode only** — the dynamic mode's zero-JS light move can't express a per-face direction that varies with position, so dynamic scenes ignore `pointLights` entirely: not for surface shading, and not for shadows. (A point light casting a shadow onto a floor those same lights never lit would read as broken, so dynamic shadows are directional-only — see the lighting modes below.)
+The scene takes one `directionalLight`, one `ambientLight`, and zero or more `pointLights` (`PolyPointLight[]`). Directional light `direction` is the unit source vector from the surface toward the distant light. Point lights are **direction-only** — no distance falloff. Per polygon the contribution is `color · intensity · max(0, n · L̂)`, where `L̂` is the unit direction from the surface to the light position; multiple colored lights accumulate per-channel alongside the directional + ambient terms. This deliberately omits CSS gradients: point lights shade flat-per-face (an accepted approximation vs three.js's per-fragment `PointLight(distance:0, decay:0)`; exact for small faces / distant lights). Point lights are **baked-mode only** — the dynamic mode's zero-JS light move can't express a per-face direction that varies with position, so dynamic scenes ignore `pointLights` entirely: not for surface shading, and not for shadows. (A point light casting a shadow onto a floor those same lights never lit would read as broken, so dynamic shadows are directional-only — see the lighting modes below.)
 
 ### Lighting modes (`PolyTextureLightingMode = "baked" | "dynamic"`)
 
@@ -98,9 +108,9 @@ If you find yourself wanting a `requestAnimationFrame` loop to update many DOM n
 ## Naming (three.js parity)
 
 - Brand text is **PolyCSS**. Keep lowercase `polycss` only for literal package names, import paths, CSS classes, domains, and other code identifiers.
-- Every public export gets a `Poly` prefix. Exceptions are generic math types: `Vec2`, `Vec3`, `Polygon`, `PolyMaterial` (already prefixed).
+- Every public export gets a `Poly` prefix. Exceptions are generic math types (`Vec2`, `Vec3`, `Polygon`, `PolyMaterial`) and the explicit `*/three` compatibility subpaths, where Three-compatible names are the point of the API. React/Vue components in those subpaths still use the `PolyThree` prefix.
 - **Hooks/composables:** `usePolyCamera`, `usePolyMesh`, `usePolySceneContext`, `usePolySelect`, `usePolySelectionApi`, `usePolyAnimation`.
-- **Components:** `PolyPerspectiveCamera`, `PolyOrthographicCamera`, `PolyOrbitControls`, `PolyMapControls`, `PolyTransformControls`, `PolySelect`, `PolyAxesHelper`, `PolyDirectionalLightHelper`, `PolyIframe`.
+- **Components:** `PolyPerspectiveCamera`, `PolyOrthographicCamera`, `PolyOrbitControls`, `PolyMapControls`, `PolyTransformControls`, `PolySelect`, `PolyAxesHelper`, `PolyDirectionalLightHelper`, `PolyIframe`, `PolyThreePerspectiveCamera`, `PolyThreeOrthographicCamera`, `PolyThreeMesh`.
 - **Types:** `PolyDirectionalLight`, `PolyPointLight`, `PolyAmbientLight`, `PolyTextureLightingMode`, `PolyTextureLeafSizing`, `PolyTextureBackend`, `PolyTextureImageRendering`, `PolyTextureImageLighting`, `PolyTextureProjection`, `PolyTexturePresentation`, `PolyTextureImageSource`, `PolyCameraProjection`, `PolyCameraSnapshot`, `PolyCameraSnapshotStats`, `PolyMeshTransformInput`, `PolySceneTransformInput`, `PolyAnimationMixer`, `PolyRenderStats`.
 - **Functions:** `findPolyMeshHandle`, `injectPolyBaseStyles`, `collectPolyRenderStats`, `collectPolyTextureReadiness`, `queryPolyLeaves`, `resolvePolyTextureLeafGeometry`, `resolvePolyTextureImageSource`, `resolvePolyTexturePresentation`, `resolvePolyTextureImageRendering`, `buildPolyCameraSceneTransform`, `buildPolyMeshTransform`, `buildPolySceneTransform`, `capturePolyCameraSnapshot`, `polyCameraTargetToCss`, `resolvePolyCameraAppliedPerspectiveStyle`, `worldPositionToCss`, `worldPositionToPolyCss`, `cssPositionToWorld`, `polyCssPositionToWorld`, `worldDistanceToCss`, `worldDistanceToPolyCss`, `cssDistanceToWorld`, `polyCssDistanceToWorld`, `worldDirectionToCss`, `worldDirectionToPolyCss`, `worldDirectionalLightToCss`, `worldDirectionalLightToPolyCss`, `exportPolySceneSnapshot`.
 - **Vanilla factories:** `create*` names stay as-is (`createPolyScene`, `createTransformControls`, `createSelect`).

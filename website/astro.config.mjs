@@ -103,6 +103,7 @@ export default defineConfig({
           label: 'API Reference',
           items: [
             { label: 'Headless API', slug: 'api/headless' },
+            { label: 'Three.js Parity API', slug: 'api/three-parity' },
             { label: 'Core Types', slug: 'api/types' },
             { label: 'Fonts API', slug: 'api/fonts' },
           ],

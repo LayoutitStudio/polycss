@@ -82,7 +82,7 @@ Controls the directional light for the scene.
 
 ```ts
 interface PolyDirectionalLight {
-  /** Direction the light shines toward. Normalization is handled internally. */
+  /** Unit direction from the surface toward the distant light source. */
   direction: [number, number, number];
   /** Directional light color hex (default: "#ffffff"). */
   color?: string;

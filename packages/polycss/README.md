@@ -1,26 +1,24 @@
-<p align="center">
-  <img src="https://polycss.com/voxisologo.png" alt="PolyCSS" width="300" />
-</p>
-
 # PolyCSS
 
-A CSS polygon mesh engine. A 3D renderer for the DOM. Renders OBJ, STL, glTF, GLB, MagicaVoxel `.vox`, and generated primitives as real HTML elements transformed with CSS `matrix3d(...)`. Supports colors, textures, lighting, shadows, controls, selection, animation, and per-polygon interaction. Works with React, Vue, custom elements, or plain JavaScript.
+A CSS polygon mesh library. A 3D engine for the DOM. Renders OBJ/MTL, STL, glTF/GLB, and VOX as real HTML elements transformed with CSS `matrix3d(...)`. Supports colors, textures, lighting, shadows, shapes and animations. Works with React, Vue or plain JavaScript.
 
 Visit [polycss.com](https://polycss.com) for docs and model examples.
 
-<img width="1915" height="900" alt="PolyCSS scene" src="https://polycss.com/voxcss-intro.png" />
+<img width="1600" height="300" alt="PolyCSS primitives banner" src="https://github.com/user-attachments/assets/b05e2204-9323-4f83-8d1b-01ea0dd000db" />
 
 ## Installation
 
 ```bash
+
+# Vanilla
+npm install @layoutit/polycss
+
 # React
 npm install @layoutit/polycss-react
 
 # Vue
 npm install @layoutit/polycss-vue
 
-# Vanilla / custom elements
-npm install @layoutit/polycss
 ```
 
 You can also load PolyCSS directly from a CDN. Here is a minimal custom-element scene:
@@ -36,9 +34,11 @@ You can also load PolyCSS directly from a CDN. Here is a minimal custom-element 
 </poly-camera>
 ```
 
+<img width="2500" height="1145" alt="PolyCSS intro" src="https://github.com/user-attachments/assets/0e5df0d8-04a8-4e50-8e3a-1097a96ce42f" />
+
 ## Framework Components
 
-React and Vue expose the same component model. `<PolyCamera>` owns the viewpoint, `<PolyScene>` owns lighting and atlas options, and `<PolyMesh>` loads or receives polygon data.
+React and Vue expose the same component model. `<PolyCamera>` owns the viewpoint, `<PolyScene>` owns lighting and options, and `<PolyMesh>` loads or receives polygon data.
 
 ```tsx
 import { PolyCamera, PolyScene, PolyOrbitControls, PolyMesh } from "@layoutit/polycss-react";
@@ -55,22 +55,53 @@ export default function App() {
 }
 ```
 
-The Vue package mirrors the same names and props with Vue casing:
+## Three.js Parity API
 
-```vue
-<template>
-  <PolyCamera :rot-x="65" :rot-y="45">
-    <PolyScene texture-lighting="dynamic">
-      <PolyOrbitControls drag wheel />
-      <PolyMesh src="/gallery/obj/cottage.obj" mtl="/gallery/obj/cottage.mtl" />
-    </PolyScene>
-  </PolyCamera>
-</template>
+When porting Three.js scenes or generating code with an agent, use the explicit
+`*/three` subpaths:
 
-<script setup lang="ts">
-import { PolyCamera, PolyScene, PolyOrbitControls, PolyMesh } from "@layoutit/polycss-vue";
-</script>
+- `@layoutit/polycss-core/three`
+- `@layoutit/polycss/three`
+- `@layoutit/polycss-react/three`
+- `@layoutit/polycss-vue/three`
+
+They expose Three-like `PerspectiveCamera`, `OrthographicCamera`, `Object3D`,
+`Vector3`, `DirectionalLight`, `PointLight`, `AmbientLight`, radians for object
+rotations, Y-up authoring coordinates, and `camera.position` + `camera.lookAt(...)`
+framing. The adapters convert into native PolyCSS coordinates with a right-handed
+axis map, so the apparent object size, projection, orientation, depth ordering,
+and light direction line up with Three.js scene math while still rendering
+through the DOM.
+
+```tsx
+import { PolyScene } from "@layoutit/polycss-react";
+import {
+  DirectionalLight,
+  PolyThreeMesh,
+  PolyThreePerspectiveCamera,
+} from "@layoutit/polycss-react/three";
+
+const sun = new DirectionalLight("#ffffff", 1);
+sun.position.set(3, 5, 4);
+sun.target.position.set(0, 0, 0);
+
+export function App() {
+  return (
+    <PolyThreePerspectiveCamera
+      fov={50}
+      aspect={16 / 9}
+      position={[3, 2, 5]}
+      lookAt={[0, 0, 0]}
+    >
+      <PolyScene directionalLight={sun.toPolyDirectionalLight()}>
+        <PolyThreeMesh src="/models/cube.glb" rotation={[0, Math.PI / 4, 0]} />
+      </PolyScene>
+    </PolyThreePerspectiveCamera>
+  );
+}
 ```
+
+Full reference: [polycss.com/api/three-parity](https://polycss.com/api/three-parity).
 
 ## API Reference
 
@@ -88,7 +119,6 @@ import { PolyCamera, PolyScene, PolyOrbitControls, PolyMesh } from "@layoutit/po
 - `directionalLight`, `pointLights` (direction-only, baked mode; optional per-light `castShadow`), and `ambientLight` control scene lighting.
 - `textureLighting` chooses `"baked"` or `"dynamic"`.
 - `textureQuality` controls atlas raster budget.
-- Solid seam bleed is automatic on detected shared solid edges.
 - `strategies` can disable selected render strategies for diagnostics.
 - `autoCenter` rotates around the rendered mesh bounds instead of world origin.
 
@@ -99,9 +129,8 @@ import { PolyCamera, PolyScene, PolyOrbitControls, PolyMesh } from "@layoutit/po
 - `polygons` accepts pre-parsed geometry.
 - `position`, `scale`, and `rotation` transform the mesh wrapper.
 - `autoCenter` shifts the mesh bbox center to local origin.
-- `meshResolution` chooses `"lossy"` (default) or `"lossless"` optimization. Lossy also applies bounded seam repair; STL imports use the conservative lossless path in both modes.
+- `meshResolution` chooses `"lossy"` (default) or `"lossless"` optimization. STL imports use the conservative lossless path in both modes.
 - `castShadow` emits CSS-projected shadows in dynamic lighting mode.
-- Tooling can reuse `buildPolyMeshTransform`, `buildPolySceneTransform`, `worldPositionToPolyCss`, `worldDirectionToPolyCss`, `worldDirectionalLightToPolyCss`, `worldDistanceToPolyCss`, `polyCssDistanceToWorld`, and `polyCssPositionToWorld` for renderer-compatible transforms and world/CSS conversions.
 
 ### Controls
 
@@ -159,7 +188,7 @@ Render polygons directly when you need per-face DOM events or custom styling:
 
 ## Loading Mesh Files
 
-Use `loadMesh()` from `@layoutit/polycss`, `@layoutit/polycss-react`, or `@layoutit/polycss-vue` to parse supported model formats:
+Use `loadMesh()` to parse supported model formats:
 
 ```ts
 import { createPolyCamera, createPolyScene, loadMesh } from "@layoutit/polycss";
@@ -185,16 +214,7 @@ Supported formats:
 
 ## Performance
 
-PolyCSS renders in the DOM, so performance is mostly determined by how many polygons are mounted and how much texture atlas area they consume. The renderer uses several CSS strategies so simple surfaces stay cheap and textured or irregular surfaces fall back to atlas slices.
-
-- One visible polygon becomes one leaf DOM element.
-- Flat rectangles and stable quads use solid CSS leaves.
-- Textured polygons are packed into generated texture atlases.
-- Dynamic lighting runs through CSS custom properties instead of per-frame JavaScript.
-- Voxel-shaped meshes mount only camera-facing leaves when the mesh is eligible.
-- `meshResolution: "lossy"` merges compatible polygons, then may spend a small split budget to repair high-risk seams.
-
-Renderer internals:
+PolyCSS renders through the DOM, so performance is mostly shaped by two things: the number of mounted leaves, and the amount of texture atlas area the browser has to paint. The renderer tries to keep the common cases cheap. Simple surfaces stay as solid CSS elements, while textured, irregular, or high-detail geometry falls back to atlas-backed slices only when needed.
 
 Each visible polygon is emitted as one leaf element; the renderer chooses the least expensive CSS primitive that can represent the polygon, then uses `matrix3d(...)` to place that primitive in 3D space.
 
@@ -202,8 +222,6 @@ Each visible polygon is emitted as one leaf element; the renderer chooses the le
 - `<u>` uses `corner-shape` for stable triangles and beveled-corner solids, with a `border-width` triangle fallback when needed.
 - `<i>` clips solid polygons with `border-shape: polygon(...)` when the browser supports it.
 - `<s>` maps a packed texture-atlas slice with `background-image`, and is the fallback for textured or unsupported shapes.
-
-For diagnostics, all renderer packages export `collectPolyRenderStats(root)`, which returns mounted polygon leaf counts, shadow counts, surface categories, and bucket counts for an already-rendered scene.
 
 ## Packages
 
@@ -216,10 +234,11 @@ For diagnostics, all renderer packages export `collectPolyRenderStats(root)`, wh
 
 ## Made with PolyCSS
 
-[Layoutit Voxels](https://voxels.layoutit.com)
--> A CSS Voxel editor
+[cssQuake](https://cssquake.com)
+-> A CSS port of Quake (1996)
 
-<img width="1000" height="600" alt="layoutit-voxels" src="https://polycss.com/layoutit-voxels.png" />
+<img width="1280" height="720" alt="quake" src="https://github.com/user-attachments/assets/6d9d809c-857a-4a39-b5cf-733ead2661ec" />
+
 
 [Layoutit Terra](https://terra.layoutit.com)
 -> A CSS Terrain Generator
