@@ -4,6 +4,8 @@ A CSS polygon mesh library. A 3D engine for the DOM. Renders OBJ/MTL, STL, glTF/
 
 Visit [polycss.com](https://polycss.com) for docs and model examples.
 
+Join [chat.polycss.com](https://chat,polycss.com) for support and community discussions.
+
 <img width="1600" height="300" alt="PolyCSS primitives banner" src="https://github.com/user-attachments/assets/b05e2204-9323-4f83-8d1b-01ea0dd000db" />
 
 ## Installation
