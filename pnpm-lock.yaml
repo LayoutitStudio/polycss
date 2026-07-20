@@ -106,6 +106,22 @@ importers:
         specifier: ^6.0.0
         version: 6.4.1(@types/node@25.5.0)
 
+  examples/world:
+    dependencies:
+      '@layoutit/polycss':
+        specifier: workspace:^
+        version: link:../../packages/polycss
+      '@layoutit/polycss-world':
+        specifier: workspace:^
+        version: link:../../packages/world
+    devDependencies:
+      typescript:
+        specifier: ^5.3.3
+        version: 5.9.3
+      vite:
+        specifier: ^6.0.0
+        version: 6.4.1(@types/node@25.5.0)
+
   packages/core:
     devDependencies:
       '@vitest/coverage-v8':
@@ -229,6 +245,25 @@ importers:
       vue:
         specifier: ^3.5.12
         version: 3.5.30(typescript@5.9.3)
+
+  packages/world:
+    dependencies:
+      '@layoutit/polycss-core':
+        specifier: workspace:^
+        version: link:../core
+    devDependencies:
+      '@vitest/coverage-v8':
+        specifier: ^3.1.1
+        version: 3.2.4(vitest@3.2.4(@types/debug@4.1.13)(@types/node@25.5.0)(happy-dom@20.8.9))
+      tsup:
+        specifier: ^8.0.1
+        version: 8.5.1(postcss@8.5.8)(typescript@5.9.3)
+      typescript:
+        specifier: ^5.3.3
+        version: 5.9.3
+      vitest:
+        specifier: ^3.1.1
+        version: 3.2.4(@types/debug@4.1.13)(@types/node@25.5.0)(happy-dom@20.8.9)
 
   website:
     dependencies:

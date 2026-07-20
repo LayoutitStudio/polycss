@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PolyCSS World examples</title>
+  <script type="module" src="/main.ts"></script>
+</head>
+<body>
+  <main class="app-shell">
+    <header class="app-header">
+      <h1>PolyCSS World</h1>
+      <p>Camera-driven authored worlds using real PolyCSS mesh DOM.</p>
+    </header>
+
+    <section class="demo-grid" aria-label="PolyCSS World examples">
+      <article class="demo-panel" data-demo="portal">
+        <div class="panel-head">
+          <div>
+            <h2>Portal FPV</h2>
+            <p>First-person camera position chooses the active portal region.</p>
+          </div>
+          <div class="controls" data-controls aria-label="Portal room controls"></div>
+        </div>
+        <div class="scene-host" id="portal-scene"></div>
+        <dl class="world-readout">
+          <div>
+            <dt>Visible</dt>
+            <dd data-visible></dd>
+          </div>
+          <div>
+            <dt>Hidden</dt>
+            <dd data-hidden></dd>
+          </div>
+        </dl>
+        <details class="debug-details">
+          <summary>Debug snapshot</summary>
+          <pre class="debug-panel" data-debug></pre>
+        </details>
+      </article>
+
+      <article class="demo-panel" data-demo="chunk">
+        <div class="panel-head">
+          <div>
+            <h2>Chunk Follow</h2>
+            <p>A third-person camera follows the player through streamed chunks.</p>
+          </div>
+          <div class="controls" data-controls aria-label="Chunk controls"></div>
+        </div>
+        <div class="scene-host" id="chunk-scene"></div>
+        <dl class="world-readout">
+          <div>
+            <dt>Visible</dt>
+            <dd data-visible></dd>
+          </div>
+          <div>
+            <dt>Hidden</dt>
+            <dd data-hidden></dd>
+          </div>
+        </dl>
+        <details class="debug-details">
+          <summary>Debug snapshot</summary>
+          <pre class="debug-panel" data-debug></pre>
+        </details>
+      </article>
+    </section>
+  </main>
+</body>
+</html>

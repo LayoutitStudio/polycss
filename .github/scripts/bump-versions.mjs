@@ -11,15 +11,15 @@
  * untouched), and prints the new version to stdout (also exported as
  * NEXT_VERSION when running inside GitHub Actions).
  */
-import { readFileSync, writeFileSync, appendFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, writeFileSync, appendFileSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, "..", "..");
-const packages = ["core", "polycss", "react", "vue"].map((d) =>
-  resolve(root, "packages", d, "package.json"),
-);
+const packagesRoot = resolve(root, "packages");
+const sourcePackage = resolve(packagesRoot, "core", "package.json");
+const packages = discoverPackageJsons(packagesRoot);
 
 const bump = process.argv[2];
 if (!["patch", "minor", "major"].includes(bump)) {
@@ -29,10 +29,15 @@ if (!["patch", "minor", "major"].includes(bump)) {
 
 const versionRe = /^(\s*"version":\s*")(\d+)\.(\d+)\.(\d+)(")/m;
 
-const first = readFileSync(packages[0], "utf8");
+if (!packages.includes(sourcePackage)) {
+  console.error(`could not find ${sourcePackage}`);
+  process.exit(1);
+}
+
+const first = readFileSync(sourcePackage, "utf8");
 const m = first.match(versionRe);
 if (!m) {
-  console.error(`could not find a "version" field in ${packages[0]}`);
+  console.error(`could not find a "version" field in ${sourcePackage}`);
   process.exit(1);
 }
 const [maj, min, pat] = [Number(m[2]), Number(m[3]), Number(m[4])];
@@ -58,4 +63,12 @@ if (process.env.GITHUB_ENV) {
 }
 if (process.env.GITHUB_OUTPUT) {
   appendFileSync(process.env.GITHUB_OUTPUT, `version=${next}\n`);
+}
+
+function discoverPackageJsons(packagesRoot) {
+  return readdirSync(packagesRoot, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => resolve(packagesRoot, entry.name, "package.json"))
+    .filter((file) => existsSync(file))
+    .sort();
 }

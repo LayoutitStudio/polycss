@@ -1,0 +1,49 @@
+{
+  "name": "@layoutit/polycss-world",
+  "version": "0.0.0",
+  "description": "Topology, state, planning, and DOM helpers for authored PolyCSS worlds.",
+  "type": "module",
+  "main": "dist/index.cjs",
+  "module": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "keywords": ["polycss", "world", "topology", "3d", "css", "dom"],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/LayoutitStudio/polycss.git",
+    "directory": "packages/world"
+  },
+  "bugs": {
+    "url": "https://github.com/LayoutitStudio/polycss/issues"
+  },
+  "homepage": "https://github.com/LayoutitStudio/polycss#readme",
+  "files": [
+    "dist"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "scripts": {
+    "build": "tsup",
+    "test": "vitest run --passWithNoTests",
+    "test:coverage": "vitest run --coverage --passWithNoTests",
+    "prepack": "node ../../.github/scripts/sync-package-readmes.mjs",
+    "prepublishOnly": "npm run build"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {
+    "@layoutit/polycss-core": "workspace:^"
+  },
+  "devDependencies": {
+    "@vitest/coverage-v8": "^3.1.1",
+    "tsup": "^8.0.1",
+    "typescript": "^5.3.3",
+    "vitest": "^3.1.1"
+  }
+}

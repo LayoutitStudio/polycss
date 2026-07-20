@@ -233,6 +233,8 @@ Each visible polygon is emitted as one leaf element; the renderer chooses the le
 | `@layoutit/polycss` | Vanilla custom elements and imperative `createPolyScene` API. |
 | `@layoutit/polycss-react` | React components, hooks, controls, and core re-exports. |
 | `@layoutit/polycss-vue` | Vue 3 components, composables, controls, and core re-exports. |
+| `@layoutit/polycss-fonts` | Font parsing, Google font loading, and text-to-polygon mesh generation. |
+| `@layoutit/polycss-world` | Framework-agnostic topology, BSP/PVS compilation, state, planning, and DOM-apply helpers for authored PolyCSS worlds. |
 
 ## Made with PolyCSS
 
