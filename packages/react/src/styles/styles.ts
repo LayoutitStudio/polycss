@@ -109,6 +109,7 @@ const CORE_BASE_STYLES = `
   quotes: none;
   text-decoration: none;
   backface-visibility: hidden;
+  contain: layout style;
   background-repeat: no-repeat;
 }
 

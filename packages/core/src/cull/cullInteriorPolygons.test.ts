@@ -88,6 +88,35 @@ describe("cullInteriorPolygons", () => {
     expect(out).toBe(tiny); // referential equality — short-circuit path
   });
 
+  it("still culls a lone enclosed quad when preserveCoincidentTwins is on", () => {
+    // The opt-in must not weaken culling of genuinely-interior lone faces: a
+    // single quad with no coincident twin is still dropped.
+    const outer = cubeOutward(0, 0, 0, 10);
+    const interior = axisQuad(0, 0, 0, "z", 1, 0.1);
+    const out = cullInteriorPolygons([...outer, interior], { preserveCoincidentTwins: true });
+    expect(out.length).toBe(outer.length);
+  });
+
+  it("keeps an enclosed two-sided twin only when preserveCoincidentTwins is on", () => {
+    // A coincident front/back pair (authored two-sided surface) enclosed by an
+    // outer shell. Both twins face enclosed geometry from their own normal, so
+    // the default any-escape test strips BOTH. The opt-in keeps both because a
+    // two-sided surface is visible from at least one reachable side.
+    const outer = cubeOutward(0, 0, 0, 10);
+    const front = axisQuad(0, 0, 0, "z", 1, 0.4);
+    const back = axisQuad(0, 0, 0, "z", -1, 0.4);
+
+    const culled = cullInteriorPolygons([...outer, front, back]);
+    expect(culled.length).toBe(outer.length); // both twins dropped by default
+
+    const kept = cullInteriorPolygons([...outer, front, back], { preserveCoincidentTwins: true });
+    expect(kept.length).toBe(outer.length + 2); // both twins preserved
+    const frontKey = JSON.stringify(front.vertices);
+    const backKey = JSON.stringify(back.vertices);
+    expect(kept.some((p) => JSON.stringify(p.vertices) === frontKey)).toBe(true);
+    expect(kept.some((p) => JSON.stringify(p.vertices) === backKey)).toBe(true);
+  });
+
   it("does not ray-cull large open topology", () => {
     const openPanels: Polygon[] = [];
     for (let i = 0; i < 130; i += 1) {

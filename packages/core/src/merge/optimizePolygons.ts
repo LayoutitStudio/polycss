@@ -1,4 +1,4 @@
-import { cullInteriorPolygons } from "../cull/cullInteriorPolygons";
+import { cullInteriorPolygons, type CullInteriorOptions } from "../cull/cullInteriorPolygons";
 import { findOverlappingPolygonDuplicates } from "./dedupeOverlappingPolygons";
 import type { MeshResolution, Polygon, TextureTriangle, Vec2, Vec3 } from "../types";
 import { coverPlanarPolygons, type CoverPlanarPolygonsOptions } from "./coverPlanarPolygons";
@@ -34,6 +34,15 @@ export interface OptimizeMeshPolygonsOptions {
    * regions. Defaults to true.
    */
   rectCover?: boolean | CoverPlanarPolygonsOptions;
+  /**
+   * Never interior-cull a polygon that has a coincident opposite-facing twin
+   * (an authored two-sided surface). Off by default (closed-mesh imports keep
+   * their coincident-junk culling). Walkable-interior worlds — where the camera
+   * stands on both sides of a wall — opt in so two-sided walls/floors are not
+   * silently stripped from the side facing enclosed geometry. See
+   * `CullInteriorOptions.preserveCoincidentTwins`.
+   */
+  preserveCoincidentTwins?: boolean;
 }
 
 interface ResolvedGeometryNormalizeOptions {
@@ -152,6 +161,7 @@ interface BestSafetyDiagnostics {
 
 interface PreprocessCache {
   skipInteriorCull?: boolean;
+  preserveCoincidentTwins?: boolean;
   reuseSnappedInteriorCull?: boolean;
   baseline?: Polygon[];
   deduped?: Polygon[];
@@ -170,6 +180,7 @@ interface PreprocessCache {
 interface OptimizeMeshPolygonsRunOptions {
   requiredMaxPolygonCount?: number;
   skipInteriorCull?: boolean;
+  preserveCoincidentTwins?: boolean;
   skipExactRectCover?: boolean;
   simplifiedCandidate?: boolean;
   captureVisiblePolygons?: boolean;
@@ -329,7 +340,9 @@ export function optimizeMeshPolygons(
   polygons: Polygon[],
   options: OptimizeMeshPolygonsOptions = {},
 ): Polygon[] {
-  return optimizeMeshPolygonsInternal(polygons, options).polygons;
+  return optimizeMeshPolygonsInternal(polygons, options, {
+    preserveCoincidentTwins: options.preserveCoincidentTwins === true,
+  }).polygons;
 }
 
 export function optimizeParseMeshPolygons(
@@ -388,6 +401,7 @@ class MeshOptimizationArtifactGraph {
 function workspaceCacheKey(runOptions: OptimizeMeshPolygonsRunOptions): string {
   return [
     runOptions.skipInteriorCull === true ? "skip-cull" : "cull",
+    runOptions.preserveCoincidentTwins === true ? "keep-twins" : "cull-twins",
     runOptions.simplifiedCandidate === true ? "simplified" : "source",
   ].join(":");
 }
@@ -406,6 +420,7 @@ class MeshOptimizationWorkspace {
     this.graph = graph;
     this.preprocessCache = {
       skipInteriorCull: runOptions.skipInteriorCull === true,
+      preserveCoincidentTwins: runOptions.preserveCoincidentTwins === true,
     };
   }
 
@@ -1447,12 +1462,16 @@ function dedupedPolygonsForMerge(polygons: Polygon[], cache?: PreprocessCache): 
   return deduped;
 }
 
+function cullOptionsFor(cache?: PreprocessCache): CullInteriorOptions | undefined {
+  return cache?.preserveCoincidentTwins ? { preserveCoincidentTwins: true } : undefined;
+}
+
 function interiorPolygonsForMerge(polygons: Polygon[], cache?: PreprocessCache): Polygon[] {
   if (cache?.skipInteriorCull) return polygons;
   if (cache?.interior) return cache.interior;
   let filter = cache?.interiorIndices;
   if (filter === undefined) {
-    const kept = cullInteriorPolygons(polygons);
+    const kept = cullInteriorPolygons(polygons, cullOptionsFor(cache));
     filter = keptIndexFilter(polygons, kept);
     if (cache) cache.interiorIndices = filter;
   }
@@ -1497,7 +1516,7 @@ function preprocessModelPolygons(
     return mergedPaired.length < baseline.length ? mergedPaired : baseline;
   }
   const normalizedGeometry = normalizeGeometryForMerge(deduped, options, cache);
-  const normalizedInterior = cullInteriorPolygons(normalizedGeometry);
+  const normalizedInterior = cullInteriorPolygons(normalizedGeometry, cullOptionsFor(cache));
   const normalized = mergePolygons(normalizedInterior);
   return normalized.length < baseline.length ? normalized : baseline;
 }
@@ -1514,6 +1533,7 @@ function snappedInteriorPolygonsForMerge(
   exactCull = false,
 ): Polygon[] {
   if (!cache) return cullInteriorPolygons(snapGeometryForMerge(polygons));
+  const cullOptions = cullOptionsFor(cache);
   if (exactCull && cache.snappedInteriorExact) return cache.snappedInteriorExact;
   if (!exactCull && cache.snappedInterior) return cache.snappedInterior;
 
@@ -1524,7 +1544,7 @@ function snappedInteriorPolygonsForMerge(
       cache.snappedInteriorExact = cache.interior;
       return cache.snappedInteriorExact;
     }
-    const kept = cullInteriorPolygons(snapped);
+    const kept = cullInteriorPolygons(snapped, cullOptions);
     cache.snappedInteriorExactIndices = keptIndexFilter(snapped, kept);
     cache.snappedInteriorExact = kept;
     return cache.snappedInteriorExact;
@@ -1544,7 +1564,7 @@ function snappedInteriorPolygonsForMerge(
       return cache.snappedInterior;
     }
     if (cache.snappedInteriorIndices === undefined) {
-      const kept = cullInteriorPolygons(snapped);
+      const kept = cullInteriorPolygons(snapped, cullOptions);
       cache.snappedInteriorIndices = keptIndexFilter(snapped, kept);
       cache.snappedInterior = kept;
       cache.snappedInteriorExactIndices = cache.snappedInteriorIndices;

@@ -114,6 +114,14 @@ const CORE_BASE_STYLES = `
   line-height: 0;
   text-decoration: none;
   backface-visibility: hidden;
+  /* Isolate each leaf's layout + style scope so a high-leaf-count scene
+     (10k+ mounted polygons) does not fold every leaf into one global
+     layout/style-recalc pass. Softens the periodic multi-hundred-ms
+     compositor/recalc stalls that appear when the DOM is churned (LOD
+     mount/unmount) at high leaf counts. Deliberately excludes paint (a
+     per-leaf paint boundary regressed) and size (leaf primitives are
+     CSS-sized). */
+  contain: layout style;
   background-repeat: no-repeat;
 }
 
@@ -384,11 +392,6 @@ const CORE_BASE_STYLES = `
    own) and the scene-level light vars. Splitting this from the lambert
    calc above lets bucketed polys skip the dot-product entirely. */
 .polycss-scene[data-polycss-lighting="dynamic"] s {
-  /* Isolate each leaf's layout/style/paint walks from siblings. Works
-     because the leaf transform-style:preserve-3d was dropped above —
-     the 3D context lives on .polycss-scene / .polycss-mesh, not the
-     leaves, so there's nothing inside a leaf that needs to participate
-     in 3D compositing across the contain boundary. */
   contain: strict;
   /*
    * Three.js MeshLambertMaterial parity for textured surfaces:

@@ -93,6 +93,58 @@ function tangentBasis(nx: number, ny: number, nz: number): {
   };
 }
 
+const TWIN_QUANTIZE = 1e3;
+
+/** Unordered, quantized vertex signature. Two polygons that occupy the exact
+ *  same footprint — including an authored front/back winding flip that carries
+ *  the identical vertex ring in reverse order — hash to the same key. */
+function footprintKey(p: Polygon): string {
+  const q = (v: number): number => Math.round(v * TWIN_QUANTIZE);
+  return p.vertices
+    .map((v) => `${q(v[0])},${q(v[1])},${q(v[2])}`)
+    .sort()
+    .join("|");
+}
+
+/**
+ * Flag polygons that have a COINCIDENT OPPOSITE-FACING twin in the set — an
+ * authored two-sided surface (front + reverse-wound back on the same
+ * footprint). Such a surface is deliberately visible from at least one side,
+ * so neither twin may be interior-culled: the ray test only samples the
+ * hemisphere above ONE normal and will happily classify the side that faces
+ * enclosed geometry as "interior", silently deleting a panel the camera sees
+ * from the OTHER side (walkable-interior worlds put the camera on both sides of
+ * a wall). Coincident twins are exempted before the ray test runs.
+ */
+function coincidentTwinFlags(
+  polygons: Polygon[],
+  meta: Array<PolyMeta | null>,
+): boolean[] {
+  const flags = new Array<boolean>(polygons.length).fill(false);
+  const buckets = new Map<string, number[]>();
+  for (let i = 0; i < polygons.length; i++) {
+    if (!meta[i]) continue;
+    const key = footprintKey(polygons[i]);
+    let list = buckets.get(key);
+    if (!list) buckets.set(key, (list = []));
+    list.push(i);
+  }
+  for (const list of buckets.values()) {
+    if (list.length < 2) continue;
+    for (let a = 0; a < list.length; a++) {
+      const na = meta[list[a]]!.normal;
+      for (let b = a + 1; b < list.length; b++) {
+        const nb = meta[list[b]]!.normal;
+        if (na[0] * nb[0] + na[1] * nb[1] + na[2] * nb[2] < -0.9) {
+          flags[list[a]] = true;
+          flags[list[b]] = true;
+        }
+      }
+    }
+  }
+  return flags;
+}
+
 function precompute(p: Polygon): PolyMeta | null {
   const verts = p.vertices;
   if (!verts || verts.length < 3) return null;
@@ -505,6 +557,16 @@ export interface CullInteriorOptions {
    *  porch trim, back-of-wall door frames) that have a sliver of clear
    *  sky through windows/openings but are otherwise enclosed. */
   minEscapeRatio?: number;
+  /** Never cull a polygon that has a COINCIDENT OPPOSITE-FACING twin — an
+   *  authored two-sided surface (front + reverse-wound back on the same
+   *  footprint). The ray test only samples the hemisphere above ONE normal, so
+   *  it classifies the side that faces enclosed geometry as "interior" and
+   *  silently deletes a panel the camera sees from the OTHER side. In a
+   *  walkable-interior world the camera stands on both sides of a wall, so both
+   *  twins are visible. Off by default: closed-mesh CAD imports carry coincident
+   *  double-sided junk that SHOULD still be culled. Callers that author
+   *  deliberate two-sided walls (worlds) opt in. Default false. */
+  preserveCoincidentTwins?: boolean;
 }
 
 export function cullInteriorPolygons(
@@ -522,6 +584,9 @@ export function cullInteriorPolygons(
   const minEscapingSamples = Math.max(1, Math.ceil(k * (options?.minEscapeRatio ?? (1 / k))));
 
   const meta: Array<PolyMeta | null> = polygons.map(precompute);
+  const twinFlags = options?.preserveCoincidentTwins
+    ? coincidentTwinFlags(polygons, meta)
+    : null;
   const samplesFlat = hemisphereSamplesFlat(k);
   const kept: Polygon[] = [];
   const bvh = buildBVH(meta);
@@ -536,6 +601,8 @@ export function cullInteriorPolygons(
   for (let i = 0; i < polygons.length; i++) {
     const p = meta[i];
     if (!p) { kept.push(polygons[i]); continue; }
+    // Authored two-sided surface — visible from at least one side. Never cull.
+    if (twinFlags?.[i]) { kept.push(polygons[i]); continue; }
 
     const nx = p.normal[0], ny = p.normal[1], nz = p.normal[2];
     const offX = RAY_ORIGIN_OFFSET * nx;
