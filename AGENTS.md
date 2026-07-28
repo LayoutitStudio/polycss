@@ -15,8 +15,9 @@ Monorepo layout (pnpm workspaces):
 | `packages/react` | `@layoutit/polycss-react` | React components + hooks. Owns its own copy of atlas rasterisation. Depends on `core` only — **NOT on `polycss`.** |
 | `packages/vue` | `@layoutit/polycss-vue` | Vue 3 mirror of the React package. Owns its own copy of atlas rasterisation. Depends on `core` only. |
 | `packages/fonts` | `@layoutit/polycss-fonts` | Fonts + text → extruded 3D `Polygon[]`. Hand-written TrueType (`glyf`) reader + extruder (flat/round/bevel profiles) + Google Fonts loader. Framework-agnostic (returns `Polygon[]`, no React/Vue mirror needed). Depends on `core` + `earcut`. |
+| `packages/morph` | `@layoutit/polycss-morph` | Framework-agnostic prepared-model contracts, deterministic Node preparation, browser loading, retained DOM mounting, sparse deformation, controls, springs, animation, joint skinning, and prepared playback. The browser entry uses public `@layoutit/polycss` APIs; Node-only preparation lives at `@layoutit/polycss-morph/prepare`. No React/Vue mirrors. |
 | `website` | `@layoutit/polycss-website` | Astro + Starlight docs site. Not published. |
-| `examples/{html,vanilla,react,vue,fontcss}` | private | Per-framework Vite apps demonstrating the minimal usage for each renderer (`fontcss` demos `@layoutit/polycss-fonts`). Workspace members so they resolve to local `workspace:^` packages. Not published. |
+| `examples/{html,vanilla,react,vue,fontcss,morph}` | private | Per-framework Vite apps demonstrating the minimal usage for each renderer (`fontcss` demos `@layoutit/polycss-fonts`), plus `morph` for its framework-agnostic package. Workspace members so they resolve to local `workspace:^` packages. Not published. |
 
 Public API is **mirrored** across React and Vue. Adding a hook on one side without adding the matching composable on the other is not acceptable (see "Cross-package discipline" below).
 
@@ -104,6 +105,42 @@ The current exception is imported skeletal animation. glTF/GLB skinning changes 
 | Hover/selection raycasting (only on pointer events, not per frame) | Continuous re-rendering "ticks" |
 
 If you find yourself wanting a `requestAnimationFrame` loop to update many DOM nodes outside skeletal animation, stop. Find the CSS variable that should be carrying the change, and update that single variable on a single ancestor. Cascading + `@property`-registered custom properties do the rest.
+
+### PolyCSS Morph boundary
+
+`@layoutit/polycss-morph` is an imperative, framework-agnostic prepared-model
+layer. It does not replace ordinary `Polygon[]` loading and it does not add
+React or Vue wrappers.
+
+- `@layoutit/polycss-morph/prepare` is the Node-only authoring boundary. It
+  reads strict config plus glTF/GLB input and writes a deterministic,
+  content-addressed package with `manifest.json` last. The generic preparer
+  directly authors `static-prepared` and `morph-regions` with canonical solid
+  CSS triangle leaves for base-color materials plus packed prepared alpha-atlas
+  pages for browsers without the corner-shape triangle primitive. Every
+  polygon owns a slice sized to its local-2D bounding rect and a precomputed
+  transform relation; there is no shared canonical triangle mask. The pages
+  are generated with Node built-ins, add no native image dependency, and are
+  selected once at mount without runtime rasterization. Product adapters or
+  dedicated tooling may author other validated image-backed, `joint-skin`, and
+  `prepared-playback` packages.
+- `@layoutit/polycss-morph` is the browser-safe boundary. It validates and loads
+  prepared packages, mounts one retained PolyCSS graph, and exposes
+  caller-driven runtimes for morphs, controls, springs, animation, skinning,
+  and prepared playback.
+- A mount resolves prepared solid triangles to the CSS primitive when
+  corner-shape is available, otherwise to each leaf's prepared polygon-sized
+  atlas slice. It creates topology and leaves once. Runtime samples may update
+  only declared model, shape, or leaf state. They must preserve leaf identity,
+  must not rebuild topology or redraw atlases, and must not own a scheduler.
+  The caller owns input and timing.
+- The four executable profiles are `static-prepared`, `morph-regions`,
+  `joint-skin`, and `prepared-playback`.
+- CSSFace is currently pinned to an earlier Morph artifact with a
+  prepared-playback DOM target. Adapting CSSFace to the current package is
+  deferred consumer work; its source cadence, source schemas, preparation
+  provenance, Mario mounting path, product behavior, and oracle evidence stay
+  in CSSFace.
 
 ## Naming (three.js parity)
 

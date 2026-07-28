@@ -153,6 +153,61 @@ const html = await exportPolySceneSnapshot(scene.host);
 
 If any referenced asset cannot be inlined, the function throws `PolySceneSnapshotError` with `code: "ASSET_INLINE_FAILED"`.
 
+### Prepared retained models
+
+The source tree includes `@layoutit/polycss-morph`, an imperative,
+framework-agnostic package for models prepared ahead of time and updated through
+one retained PolyCSS DOM graph. Version `0.0.1` is qualified for publication;
+this documentation does not announce npm registry availability.
+
+Preparation is explicitly Node-only:
+
+```ts
+import { preparePolyMorphModel } from "@layoutit/polycss-morph/prepare";
+
+await preparePolyMorphModel({
+  configPath: "./source/prepare.json",
+  outputRoot: "./public/model/package",
+});
+```
+
+The browser entry loads, mounts, samples, and applies updates:
+
+```ts
+import {
+  createPolyMorphDeformationRuntime,
+  loadPolyMorphPackage,
+  mountPolyMorphModel,
+} from "@layoutit/polycss-morph";
+
+const { model } = await loadPolyMorphPackage("/model/");
+const mounted = mountPolyMorphModel(host, model, {
+  resolveResourceUrl: (path) => `/model/package/${path}`,
+});
+const deformation = createPolyMorphDeformationRuntime(model);
+const frame = deformation.sample({
+  tick: 0,
+  morphWeights: { "corner-lift": 0.5 },
+});
+
+mounted.apply({ leaves: frame.leafUpdates });
+```
+
+Morph supports `static-prepared`, `morph-regions`, `joint-skin`, and
+`prepared-playback` profiles. It does not own an animation scheduler: callers
+sample controls, springs, clips, skinning, or playback and pass only changed
+rows to `mounted.apply(...)`. Mounted leaf identity stays stable, and runtime
+updates do not rebuild topology or redraw prepared image resources. The neutral
+2,080-triangle terrain in [`examples/morph`](./examples/morph) exercises
+deterministic preparation, browser loading, 90 local deformation targets,
+sculpting, zoom, orbit, and retained leaf identity.
+
+Prepared solid triangles use the native CSS triangle primitive when supported.
+Preparation also emits packed alpha-atlas pages for Firefox and other browsers
+without the corner-shape primitive. Every polygon receives a slice sized to
+its local-2D bounding rect. The fallback is selected once at mount and is never
+generated or redrawn in the browser.
+
 ### Polygon Data Model
 
 Each polygon describes one renderable face:
@@ -233,6 +288,7 @@ Each visible polygon is emitted as one leaf element; the renderer chooses the le
 | `@layoutit/polycss` | Vanilla custom elements and imperative `createPolyScene` API. |
 | `@layoutit/polycss-react` | React components, hooks, controls, and core re-exports. |
 | `@layoutit/polycss-vue` | Vue 3 components, composables, controls, and core re-exports. |
+| `@layoutit/polycss-morph` | Prepared retained-model contracts, Node preparation, browser loading, sparse deformation, controls, springs, animation, skinning, and playback. |
 
 ## Made with PolyCSS
 

@@ -1,0 +1,226 @@
+:root {
+  color: #f4efe6;
+  background: #000;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+@keyframes morph-sphere-deform {
+  from {
+    transform: var(--morph-sphere-from);
+  }
+
+  to {
+    transform: var(--morph-sphere-to);
+  }
+}
+
+@keyframes morph-sphere-spin {
+  from {
+    transform: rotateY(0deg);
+  }
+
+  to {
+    transform: rotateY(360deg);
+  }
+}
+
+.cube-sphere-workbench {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 520px;
+  overflow: hidden;
+  color: #f4efe6;
+  background:
+    radial-gradient(circle at 52% 48%, rgb(87 8 1 / 25%), transparent 34%),
+    radial-gradient(circle at 63% 58%, rgb(0 54 23 / 13%), transparent 28%),
+    #000;
+}
+
+.cube-sphere-scene {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  touch-action: none;
+  user-select: none;
+  cursor: grab;
+}
+
+.cube-sphere-workbench.is-rotating .cube-sphere-scene {
+  cursor: grabbing;
+}
+
+.cube-sphere-scene .polycss-morph-model,
+.cube-sphere-scene .polycss-morph-shape,
+.morph-sphere-points {
+  transform-style: preserve-3d;
+}
+
+.cube-sphere-scene .polycss-morph-model[data-morph-sphere-spin] {
+  animation: morph-sphere-spin 12.566s linear infinite;
+}
+
+.cube-sphere-scene .polycss-morph-leaf {
+  pointer-events: none;
+}
+
+.cube-sphere-scene .polycss-morph-leaf[data-morph-sphere-leaf] {
+  animation: morph-sphere-deform 2s linear infinite alternate;
+  will-change: transform;
+}
+
+.cube-sphere-workbench.is-paused .polycss-morph-model,
+.cube-sphere-workbench.is-paused .polycss-morph-leaf {
+  animation-play-state: paused;
+}
+
+.morph-sphere-points {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.morph-sphere-point {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 4px;
+  height: 4px;
+  margin: -2px;
+  border-radius: 50%;
+  background: #ff321e;
+  box-shadow:
+    0 0 3px rgb(255 37 18 / 95%),
+    0 0 7px rgb(255 23 8 / 38%);
+  backface-visibility: visible;
+  pointer-events: none;
+}
+
+.cube-sphere-hint {
+  position: absolute;
+  top: 22px;
+  right: 24px;
+  color: #817b73;
+  font: 700 10px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: 0.08em;
+  pointer-events: none;
+}
+
+.cube-sphere-hint strong {
+  color: #ef6d46;
+  font-weight: 850;
+}
+
+.cube-sphere-panel {
+  position: absolute;
+  z-index: 4;
+  top: 12px;
+  left: 12px;
+  display: grid;
+  gap: 12px;
+  width: min(270px, calc(100vw - 24px));
+  padding: 14px;
+  border: 1px solid rgb(255 255 255 / 9%);
+  border-radius: 10px;
+  background: rgb(17 20 26 / 94%);
+  box-shadow: 0 18px 48px rgb(0 0 0 / 48%);
+  backdrop-filter: blur(7px);
+}
+
+.cube-sphere-kicker {
+  color: #a8a29a;
+  font: 800 9px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: 0.16em;
+}
+
+.cube-sphere-state {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.cube-sphere-state span {
+  color: #ff7754;
+  font: 900 19px/1 ui-sans-serif, system-ui, sans-serif;
+  letter-spacing: -0.04em;
+}
+
+.cube-sphere-state output {
+  color: #9c968d;
+  font: 750 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.cube-sphere-panel button {
+  min-height: 36px;
+  border: 1px solid rgb(244 90 48 / 38%);
+  border-radius: 7px;
+  color: #fff0ea;
+  background: #4b2922;
+  font: 800 12px/1 ui-sans-serif, system-ui, sans-serif;
+  cursor: pointer;
+}
+
+.cube-sphere-panel button:hover {
+  border-color: rgb(255 117 76 / 75%);
+  background: #623126;
+}
+
+.cube-sphere-panel dl {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  border-top: 1px solid rgb(255 255 255 / 7%);
+}
+
+.cube-sphere-panel dl div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 7px 0;
+  border-bottom: 1px solid rgb(255 255 255 / 7%);
+}
+
+.cube-sphere-panel dt,
+.cube-sphere-panel dd {
+  margin: 0;
+  color: #8e8982;
+  font: 650 10px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.cube-sphere-panel dd {
+  color: #d9d0c2;
+  font-weight: 800;
+}
+
+.cube-sphere-panel a {
+  color: #d96b4b;
+  font: 750 10px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  text-decoration: none;
+}
+
+.cube-sphere-panel a:hover {
+  color: #ff9272;
+}
+
+.cube-sphere-workbench[data-status="loading"] .cube-sphere-panel button,
+.cube-sphere-workbench[data-status="error"] .cube-sphere-panel button {
+  opacity: 0.45;
+  pointer-events: none;
+}
+
+@media (max-width: 640px) {
+  .cube-sphere-hint {
+    display: none;
+  }
+
+  .cube-sphere-panel {
+    top: 8px;
+    left: 8px;
+    width: min(245px, calc(100vw - 16px));
+    padding: 12px;
+  }
+}

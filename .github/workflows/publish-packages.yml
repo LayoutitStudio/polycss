@@ -1,8 +1,9 @@
 name: Publish packages
 
-# Manual-only. Bumps every package under `packages/*` in lockstep (using
-# .github/scripts/bump-versions.mjs), builds them, publishes to npm, then commits
-# the version change and pushes a `v<X.Y.Z>` tag back to main.
+# Manual-only. Bumps the core, vanilla, React, and Vue packages in lockstep
+# (using .github/scripts/bump-versions.mjs), builds the workspace, publishes
+# those four packages to npm, then commits the version change and pushes a
+# `v<X.Y.Z>` tag back to main.
 #
 # Trigger from the Actions tab ("Run workflow") or:
 #   gh workflow run publish-packages.yml -f bump=patch
@@ -64,7 +65,13 @@ jobs:
         run: pnpm build:packages
 
       - name: Publish to npm
-        run: pnpm --filter "./packages/*" -r publish --access public --no-git-checks
+        run: >-
+          pnpm
+          --filter @layoutit/polycss-core
+          --filter @layoutit/polycss
+          --filter @layoutit/polycss-react
+          --filter @layoutit/polycss-vue
+          -r publish --access public --no-git-checks
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
@@ -75,7 +82,7 @@ jobs:
         run: |
           git config user.name "$ACTOR"
           git config user.email "${ACTOR_ID}+${ACTOR}@users.noreply.github.com"
-          git add packages/*/package.json
+          git add packages/core/package.json packages/polycss/package.json packages/react/package.json packages/vue/package.json
           git commit -m "chore(release): v${NEXT_VERSION}"
           git tag "v${NEXT_VERSION}"
           git push origin HEAD:main "v${NEXT_VERSION}"

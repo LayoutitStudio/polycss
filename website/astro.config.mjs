@@ -36,6 +36,10 @@ export default defineConfig({
           replacement: repoPath('../packages/fonts/src/index.ts'),
         },
         {
+          find: /^@layoutit\/polycss-morph$/,
+          replacement: repoPath('../packages/morph/src/index.ts'),
+        },
+        {
           find: /^@layoutit\/polycss$/,
           replacement: repoPath('../packages/polycss/src/index.ts'),
         },
@@ -97,6 +101,7 @@ export default defineConfig({
             { label: 'Performance', slug: 'guides/performance' },
             { label: 'Projections', slug: 'guides/projections' },
             { label: 'Animation', slug: 'guides/animation' },
+            { label: 'Prepared Morph Models', slug: 'guides/morph' },
           ],
         },
         {

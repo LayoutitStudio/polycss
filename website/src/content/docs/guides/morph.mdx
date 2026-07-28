@@ -1,0 +1,108 @@
+---
+title: Prepared Morph Models
+description: Prepare retained PolyCSS models in Node, then load and update them through a stable browser DOM graph.
+---
+
+`@layoutit/polycss-morph` is an imperative, framework-agnostic layer for models
+whose topology, paint resources, and update plans are prepared ahead of time.
+It is currently a workspace package under standalone qualification; this page
+documents the source-tree API and does not announce npm registry availability.
+
+Use ordinary `Polygon[]` loading for ordinary meshes. Use Morph when a model
+needs a retained leaf graph plus sparse deformation, semantic controls,
+springs, joint skinning, or an externally prepared playback stream.
+
+## Two explicit entries
+
+The Node and browser dependency graphs are separate:
+
+| Entry | Environment | Owns |
+|---|---|---|
+| `@layoutit/polycss-morph/prepare` | Node | Strict config and glTF/GLB intake, normalization, topology, canonical solid-triangle plans, packed fallback pages with one local-size slice per polygon, provenance, content hashes, and atomic package writes. |
+| `@layoutit/polycss-morph` | Browser or shared code | Contracts, validation, bounded loading, retained mounting, deformation, controls, springs, animation sampling, joint skinning, and prepared playback. |
+
+The generic preparer directly authors `static-prepared` and `morph-regions`
+models. Dedicated tooling or a product adapter can author validated
+`joint-skin` and `prepared-playback` models.
+
+## Prepare
+
+```ts
+import { preparePolyMorphModel } from "@layoutit/polycss-morph/prepare";
+
+await preparePolyMorphModel({
+  configPath: "./source/prepare.json",
+  outputRoot: "./public/model/package",
+});
+```
+
+Preparation writes resources before `manifest.json`. Re-running with
+`check: true` verifies the complete existing inventory and bytes without
+rewriting them.
+
+## Load, mount, update
+
+```ts
+import {
+  createPolyMorphDeformationRuntime,
+  loadPolyMorphPackage,
+  mountPolyMorphModel,
+} from "@layoutit/polycss-morph";
+
+const { model } = await loadPolyMorphPackage("/model/");
+const mounted = mountPolyMorphModel(host, model, {
+  resolveResourceUrl: (path) => `/model/package/${path}`,
+});
+const deformation = createPolyMorphDeformationRuntime(model);
+const frame = deformation.sample({
+  tick: 0,
+  morphWeights: { "pin-c06-r04-lift": 0.5 },
+});
+
+mounted.apply({ leaves: frame.leafUpdates });
+```
+
+The same imperative API is used from vanilla, React, or Vue applications.
+Morph does not ship framework wrappers.
+
+## Executable profiles
+
+| Profile | Behavior |
+|---|---|
+| `static-prepared` | Retained rendering with no deformation. |
+| `morph-regions` | Sparse morph targets, semantic controls, springs, and clip channels. |
+| `joint-skin` | Hierarchical joint transforms and normalized weighted skinning. |
+| `prepared-playback` | Source-ordered retained model, shape, transform, visibility, opacity, and image-row changes. |
+
+## Runtime invariant
+
+Mount once, then sample and apply:
+
+- the application owns input and timing;
+- Morph owns no animation scheduler;
+- leaf elements retain identity until teardown;
+- unchanged samples perform no writes;
+- sparse samples visit only affected leaves;
+- runtime updates do not reconstruct topology or redraw prepared image resources.
+
+The [`examples/morph`](https://github.com/LayoutitStudio/polycss/tree/main/examples/morph)
+workspace fixture proves this boundary with a 2,080-triangle terrain and 90
+prepared local deformation targets. It prepares the model through the Node
+entry and mounts the same retained graph in the browser.
+
+The top-level [Morph playground](/morph) uses those prepared model bytes. Drag
+a triangle to sculpt it, drag empty space to orbit, switch between filled and
+outline views, and choose whether a sculpt remains or springs back. Supporting
+browsers use the native CSS triangle primitive. Firefox and other browsers
+without the corner-shape primitive use each leaf's prepared polygon-sized
+alpha-atlas slice instead; the browser never generates or redraws those pages.
+Dedicated tooling may also author
+other image-backed strategies, including prepared-playback consumers.
+
+## Consumer boundary
+
+A consuming product keeps its source-specific schemas, cadence, input ordering,
+presentation, and oracle tooling. CSSFace is currently pinned to an earlier
+Morph artifact with a prepared-playback DOM target. Its adaptation to the
+current package is deferred to CSSFace, alongside its validated Mario package,
+mounting path, presentation, and oracle evidence.

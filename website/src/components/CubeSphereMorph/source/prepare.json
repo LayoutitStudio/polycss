@@ -1,0 +1,38 @@
+{
+  "schema": "polycss-morph.prepare@1",
+  "identity": {
+    "id": "animated-morph-sphere",
+    "name": "Animated Morph Sphere",
+    "revision": "1.0.0"
+  },
+  "profile": "morph-regions",
+  "source": {
+    "path": "AnimatedMorphSphere.gltf",
+    "id": "threejs-animated-morph-sphere",
+    "kind": "open-data",
+    "uri": "https://github.com/mrdoob/three.js/tree/dev/examples/models/gltf/AnimatedMorphSphere",
+    "license": "CC0-1.0"
+  },
+  "transform": {
+    "axes": ["x", "y", "z"],
+    "signs": [1, 1, 1],
+    "scale": 250,
+    "center": true
+  },
+  "morphAliases": {
+    "morph-0": "ship",
+    "morph-1": "blob"
+  },
+  "controls": [],
+  "springs": [],
+  "animations": [],
+  "budgets": {
+    "maxVertices": 2000,
+    "maxPolygons": 1000,
+    "maxLeaves": 1000,
+    "maxFrames": 1,
+    "maxJoints": 1,
+    "maxResources": 4,
+    "maxBytes": 8000000
+  }
+}
