@@ -93,7 +93,5 @@ dependency.
 ## Consumer adapters
 
 Product-specific source cadence, schemas, input ordering, presentation, and
-oracle tooling stay in the consuming product. CSSFace is currently pinned to
-an earlier Morph artifact with a prepared-playback DOM target. Adapting
-CSSFace to this package is deferred consumer work; its validated Mario package,
-mounting path, presentation, and oracle evidence remain in CSSFace.
+oracle tooling stay in the consuming product. Product adapters own their
+prepared packages, mounting paths, presentation, and oracle evidence.

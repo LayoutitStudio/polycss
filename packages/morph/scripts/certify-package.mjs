@@ -23,7 +23,6 @@ import { generateCertificationFixture } from "./generate-certification-fixture.m
 const runFile = promisify(execFile);
 const morphRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const repoRoot = resolve(morphRoot, "..", "..");
-const cssMarioRoot = resolve(repoRoot, "..", "cssmario");
 const registryDependencies = process.argv.includes("--registry-dependencies");
 const reportFlag = process.argv.indexOf("--report");
 const reportPath = reportFlag === -1
@@ -44,28 +43,6 @@ async function run(command, args, cwd, options = {}) {
     stdout: result.stdout.trim(),
     stderr: result.stderr.trim(),
   };
-}
-
-async function gitSnapshot(root) {
-  const [head, status] = await Promise.all([
-    run("git", ["rev-parse", "HEAD"], root),
-    run("git", ["status", "--porcelain=v1", "--untracked-files=all"], root),
-  ]);
-  return {
-    head: head.stdout,
-    status: status.stdout,
-    statusSha256: createHash("sha256").update(status.stdout).digest("hex"),
-  };
-}
-
-async function optionalGitSnapshot(root) {
-  try {
-    await stat(resolve(root, ".git"));
-  } catch (error) {
-    if (error?.code === "ENOENT") return null;
-    throw error;
-  }
-  return gitSnapshot(root);
 }
 
 async function packPackage(packageName, packageRoot, artifactRoot, ignoreScripts) {
@@ -423,7 +400,6 @@ try {
     mkdir(artifactRoot, { recursive: true }),
     mkdir(consumerRoot, { recursive: true }),
   ]);
-  const cssMarioBefore = await optionalGitSnapshot(cssMarioRoot);
   const pnpmVersion = (await run("pnpm", ["--version"], repoRoot)).stdout;
   await run("pnpm", ["--filter", "@layoutit/polycss-core", "build"], repoRoot);
   await run("pnpm", ["--filter", "@layoutit/polycss", "build"], repoRoot);
@@ -516,19 +492,6 @@ try {
     await run("node", ["browser-smoke.mjs"], consumerRoot),
     "browser smoke",
   );
-  const cssMarioAfter = cssMarioBefore
-    ? await gitSnapshot(cssMarioRoot)
-    : null;
-  if (
-    cssMarioBefore
-    && cssMarioAfter
-    && (
-      cssMarioBefore.head !== cssMarioAfter.head
-      || cssMarioBefore.statusSha256 !== cssMarioAfter.statusSha256
-    )
-  ) {
-    throw new Error("CSSMario changed during standalone certification");
-  }
   const morphBytes = await readFile(morphTarball);
   const morphStat = await stat(morphTarball);
   const report = {
@@ -557,17 +520,6 @@ try {
       prepare: prepareResult,
       browser: browserResult,
     },
-    cssMario: cssMarioAfter
-      ? {
-          available: true,
-          unchanged: true,
-          head: cssMarioAfter.head,
-          statusSha256: cssMarioAfter.statusSha256,
-        }
-      : {
-          available: false,
-          unchanged: null,
-        },
   };
   if (reportPath) {
     await mkdir(dirname(reportPath), { recursive: true });

@@ -136,11 +136,8 @@ React or Vue wrappers.
   The caller owns input and timing.
 - The four executable profiles are `static-prepared`, `morph-regions`,
   `joint-skin`, and `prepared-playback`.
-- CSSFace is currently pinned to an earlier Morph artifact with a
-  prepared-playback DOM target. Adapting CSSFace to the current package is
-  deferred consumer work; its source cadence, source schemas, preparation
-  provenance, Mario mounting path, product behavior, and oracle evidence stay
-  in CSSFace.
+- Product-specific source cadence, schemas, preparation provenance, mounting
+  paths, product behavior, and oracle evidence stay in the consuming product.
 
 ## Naming (three.js parity)
 
