@@ -1,6 +1,6 @@
 {
   "name": "@layoutit/polycss-fonts",
-  "version": "0.2.9",
+  "version": "0.2.10",
   "description": "Turn fonts + text into extruded 3D polygon meshes for PolyCSS. Framework-agnostic — returns Polygon[].",
   "type": "module",
   "main": "dist/index.cjs",
