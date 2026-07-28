@@ -1,6 +1,6 @@
 {
   "name": "@layoutit/polycss-core",
-  "version": "0.2.8",
+  "version": "0.2.9",
   "description": "Pure math engine for CSS polygon mesh rendering. Zero browser globals.",
   "type": "module",
   "main": "dist/index.cjs",
