@@ -38,6 +38,7 @@ export type {
   PolyMorphProvenanceSource,
   PolyMorphQuat,
   PolyMorphRegionDeformation,
+  PolyMorphRenderFallback,
   PolyMorphRenderLeaf,
   PolyMorphRenderPlan,
   PolyMorphRenderShape,

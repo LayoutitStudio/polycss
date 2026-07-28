@@ -78,7 +78,8 @@ export async function buildPolyMorphPackage(
       );
     }
   }
-  descriptors.sort((left, right) => left.path.localeCompare(right.path));
+  descriptors.sort((left, right) =>
+    left.path < right.path ? -1 : left.path > right.path ? 1 : 0);
   const manifest: PolyMorphPackageManifest = validatePolyMorphPackageManifest({
     schema: POLY_MORPH_PACKAGE_SCHEMA,
     identity: model.identity,
@@ -126,7 +127,8 @@ export async function buildPolyMorphCatalog(
     manifestPath: entry.manifestPath,
     manifestSha256: entry.manifestSha256,
   }));
-  rows.sort((left, right) => left.id.localeCompare(right.id));
+  rows.sort((left, right) =>
+    left.id < right.id ? -1 : left.id > right.id ? 1 : 0);
   const catalog = validatePolyMorphCatalog({
     schema: POLY_MORPH_CATALOG_SCHEMA,
     defaultId,

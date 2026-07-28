@@ -18,6 +18,7 @@ import { failPolyMorphPrepare } from "./error.js";
 import {
   buildPolyMorphSolidTriangleAtlas,
 } from "./solidTriangleAtlas.js";
+import packageMetadata from "../../package.json";
 import type {
   PolyMorphGltfDocument,
   PolyMorphPrepareConfig,
@@ -31,6 +32,7 @@ const IDENTITY: PolyMorphMat4 = [
   0, 0, 1, 0,
   0, 0, 0, 1,
 ];
+const PREPARER_VERSION = packageMetadata.version;
 
 function rounded(value: number): number {
   const result = Number(value.toFixed(10));
@@ -89,6 +91,37 @@ function authoredVector(
   const source = { x: vector[0], y: vector[1], z: vector[2] };
   return roundedVec3(config.transform.axes.map((axis, index) =>
     source[axis] * config.transform.signs[index]! * config.transform.scale));
+}
+
+function reversesHandedness(
+  matrix: PolyMorphMat4,
+  config: PolyMorphPrepareConfig,
+): boolean {
+  const sourceBasis: readonly PolyMorphVec3[] = [
+    [1, 0, 0],
+    [0, 1, 0],
+    [0, 0, 1],
+  ];
+  const basis = sourceBasis.map((vector) => {
+    const transformed = transformVector(
+      matrix,
+      vector,
+    );
+    const source = {
+      x: transformed[0],
+      y: transformed[1],
+      z: transformed[2],
+    };
+    return config.transform.axes.map((axis, index) =>
+      source[axis] * config.transform.signs[index]! * config.transform.scale,
+    ) as unknown as PolyMorphVec3;
+  });
+  const [x, y, z] = basis;
+  const determinant =
+    x![0] * (y![1] * z![2] - y![2] * z![1])
+    - y![0] * (x![1] * z![2] - x![2] * z![1])
+    + z![0] * (x![1] * y![2] - x![2] * y![1]);
+  return determinant < 0;
 }
 
 function subtract(left: PolyMorphVec3, right: PolyMorphVec3): PolyMorphVec3 {
@@ -201,6 +234,7 @@ export async function compilePolyMorphSource(
   let polygonIndex = 0;
 
   for (const instance of source.instances) {
+    const reverseWinding = reversesHandedness(instance.matrix, config);
     for (const primitive of instance.primitives) {
       const shapeId = `shape-${String(shapeIndex).padStart(4, "0")}-${normalizedName(
         `${instance.meshName}-${primitive.primitiveIndex}`,
@@ -235,14 +269,17 @@ export async function compilePolyMorphSource(
       }
       usedMaterialIndices.add(primitive.materialIndex);
       for (const triangle of primitive.triangles) {
+        const ordered = reverseWinding
+          ? [triangle[0], triangle[2], triangle[1]]
+          : triangle;
         pendingPolygons.push({
           id: `polygon-${String(polygonIndex).padStart(6, "0")}`,
           shapeId,
           materialIndex: primitive.materialIndex,
           vertexIndices: [
-            preparedIndexBySource.get(triangle[0])!,
-            preparedIndexBySource.get(triangle[1])!,
-            preparedIndexBySource.get(triangle[2])!,
+            preparedIndexBySource.get(ordered[0])!,
+            preparedIndexBySource.get(ordered[1])!,
+            preparedIndexBySource.get(ordered[2])!,
           ],
         });
         polygonIndex += 1;
@@ -355,13 +392,6 @@ export async function compilePolyMorphSource(
     ...leaf,
     fallback: fallbackAtlas.fallbacks[index]!,
   }));
-  const cssText = [
-    ".polycss-morph-leaf{",
-    "background-repeat:no-repeat;",
-    "backface-visibility:visible;",
-    "transform-origin:0 0;",
-    "}",
-  ].join("");
   const modelInput: PolyMorphModel = {
     schema: POLY_MORPH_MODEL_SCHEMA,
     identity: config.identity,
@@ -371,7 +401,6 @@ export async function compilePolyMorphSource(
     topology: { vertices, normals, polygons },
     materials: materials.map(({ id, color }) => ({ id, color })),
     render: {
-      cssText,
       modelMatrix: IDENTITY,
       shapes,
       leaves,
@@ -385,7 +414,7 @@ export async function compilePolyMorphSource(
     playback: null,
     provenance: {
       generator: "polycss-morph",
-      generatorVersion: "1.0.0",
+      generatorVersion: PREPARER_VERSION,
       sources: [{
         id: config.source.id,
         kind: config.source.kind,
@@ -398,7 +427,6 @@ export async function compilePolyMorphSource(
   const model = validatePolyMorphModel(modelInput);
   return {
     model,
-    cssBytes: new TextEncoder().encode(cssText),
     fallbackAtlasPages: fallbackAtlas.pages,
   };
 }
@@ -409,12 +437,6 @@ export async function buildPolyMorphPreparedPackage(
 ): Promise<PolyMorphPreparedPackage> {
   const prepared = await compilePolyMorphSource(source, config);
   const built = await buildPolyMorphPackage(prepared.model, [
-    {
-      path: "model.css",
-      role: "stylesheet",
-      mediaType: "text/css",
-      bytes: prepared.cssBytes,
-    },
     ...prepared.fallbackAtlasPages.map((page) => ({
       path: page.path,
       role: "image",

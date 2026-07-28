@@ -45,7 +45,7 @@ async function inventory(root: string, current = ""): Promise<string[]> {
   const entries = await readdir(directory, { withFileTypes: true });
   const files: string[] = [];
   for (const entry of entries.sort((left, right) =>
-    left.name.localeCompare(right.name))) {
+    left.name < right.name ? -1 : left.name > right.name ? 1 : 0)) {
     const path = current === "" ? entry.name : `${current}/${entry.name}`;
     if (entry.isSymbolicLink()) {
       failPolyMorphPrepare("unsafe-output", path, "symbolic links are forbidden");
@@ -61,12 +61,12 @@ async function inventory(root: string, current = ""): Promise<string[]> {
   return files;
 }
 
-async function assertExactPackage(
+async function packageDrift(
   target: string,
   expected: ReadonlyMap<string, Uint8Array>,
-): Promise<void> {
+): Promise<{ readonly path: string; readonly message: string } | null> {
   if (!existsSync(target)) {
-    failPolyMorphPrepare("drift", "$.outputRoot", "prepared package is missing");
+    return { path: "$.outputRoot", message: "prepared package is missing" };
   }
   const actualPaths = await inventory(target);
   const expectedPaths = [...expected.keys()].sort();
@@ -74,11 +74,10 @@ async function assertExactPackage(
     actualPaths.length !== expectedPaths.length
     || actualPaths.some((path, index) => path !== expectedPaths[index])
   ) {
-    failPolyMorphPrepare(
-      "drift",
-      "$.outputRoot",
-      `inventory differs: expected ${expectedPaths.join(", ")}`,
-    );
+    return {
+      path: "$.outputRoot",
+      message: `inventory differs: expected ${expectedPaths.join(", ")}`,
+    };
   }
   for (const path of expectedPaths) {
     const actual = new Uint8Array(await readFile(join(target, path)));
@@ -87,9 +86,18 @@ async function assertExactPackage(
       actual.byteLength !== wanted.byteLength
       || actual.some((value, index) => value !== wanted[index])
     ) {
-      failPolyMorphPrepare("drift", path, "prepared bytes differ");
+      return { path, message: "prepared bytes differ" };
     }
   }
+  return null;
+}
+
+async function assertExactPackage(
+  target: string,
+  expected: ReadonlyMap<string, Uint8Array>,
+): Promise<void> {
+  const drift = await packageDrift(target, expected);
+  if (drift) failPolyMorphPrepare("drift", drift.path, drift.message);
 }
 
 async function writePackage(
@@ -127,7 +135,9 @@ async function writePackage(
       movedPrevious = true;
     }
     await rename(staging, target);
-    if (movedPrevious) await rm(backup, { recursive: true, force: true });
+    if (movedPrevious) {
+      await rm(backup, { recursive: true, force: true }).catch(() => {});
+    }
     return writeOrder;
   } catch (error) {
     if (movedPrevious && !existsSync(target) && existsSync(backup)) {
@@ -174,6 +184,20 @@ export async function preparePolyMorphModel(
       files: expectedPaths,
       writeOrder: [],
       checked: true,
+      changed: false,
+    };
+  }
+  if (await packageDrift(outputRoot, files) === null) {
+    return {
+      config,
+      source,
+      model: built.prepared.model,
+      manifest: built.package.manifest,
+      manifestSha256: built.package.manifestSha256,
+      outputRoot,
+      files: expectedPaths,
+      writeOrder: [],
+      checked: false,
       changed: false,
     };
   }

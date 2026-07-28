@@ -41,12 +41,19 @@
       "require": "./dist/prepare.cjs"
     }
   },
+  "typesVersions": {
+    "*": {
+      "prepare": [
+        "dist/prepare.d.ts"
+      ]
+    }
+  },
   "scripts": {
     "build": "tsup",
-    "test": "vitest run --passWithNoTests",
+    "test": "vitest run",
     "test:package": "node scripts/certify-package.mjs",
     "test:package:registry": "node scripts/certify-package.mjs --registry-dependencies",
-    "test:coverage": "vitest run --coverage --passWithNoTests",
+    "test:coverage": "vitest run --coverage",
     "prepack": "node ../../.github/scripts/sync-package-readmes.mjs",
     "prepublishOnly": "npm run build"
   },

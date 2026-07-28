@@ -35,20 +35,38 @@ function fail(code: string, path: string, message: string): never {
   throw new PolyMorphRuntimeError(code, path, message);
 }
 
+function frozenSample(value: readonly number[]): readonly number[] {
+  return Object.freeze([...value]);
+}
+
 function sampleChannel(channel: PolyMorphAnimationChannel, timeMs: number): readonly number[] {
   const { timesMs, values } = channel;
-  if (timeMs <= timesMs[0]!) return values[0]!;
+  if (timeMs <= timesMs[0]!) return frozenSample(values[0]!);
   for (let index = 1; index < timesMs.length; index += 1) {
     const rightTime = timesMs[index]!;
     if (timeMs > rightTime) continue;
     const leftTime = timesMs[index - 1]!;
     const left = values[index - 1]!;
     const right = values[index]!;
-    if (channel.interpolation === "step") return left;
+    if (timeMs === rightTime) return frozenSample(right);
+    if (channel.interpolation === "step") return frozenSample(left);
     const amount = (timeMs - leftTime) / (rightTime - leftTime);
-    return left.map((value, part) => value + (right[part]! - value) * amount);
+    if (channel.target === "joint-rotation") {
+      const dot = left.reduce(
+        (sum, value, part) => sum + value * right[part]!,
+        0,
+      );
+      const direction = dot < 0 ? -1 : 1;
+      const interpolated = left.map((value, part) =>
+        value + (right[part]! * direction - value) * amount);
+      const length = Math.hypot(...interpolated);
+      return Object.freeze(interpolated.map((value) => value / length));
+    }
+    return Object.freeze(
+      left.map((value, part) => value + (right[part]! - value) * amount),
+    );
   }
-  return values[values.length - 1]!;
+  return frozenSample(values[values.length - 1]!);
 }
 
 function sampleTime(clip: PolyMorphAnimationClip, requested: number): number {

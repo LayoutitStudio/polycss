@@ -57,11 +57,11 @@ import {
   mountPolyMorphModel,
 } from "@layoutit/polycss-morph";
 
-const { model } = await loadPolyMorphPackage("/model/");
-const mounted = mountPolyMorphModel(host, model, {
-  resolveResourceUrl: (path) => `/model/package/${path}`,
+const loaded = await loadPolyMorphPackage("/model/");
+const mounted = mountPolyMorphModel(host, loaded.model, {
+  resources: loaded.resources,
 });
-const deformation = createPolyMorphDeformationRuntime(model);
+const deformation = createPolyMorphDeformationRuntime(loaded.model);
 const frame = deformation.sample({
   tick: 0,
   morphWeights: { "corner-lift": 0.5 },
@@ -77,6 +77,8 @@ The browser API is intentionally imperative:
 - create only the runtimes the model uses;
 - sample them from application input or time;
 - pass changed model, shape, or leaf rows to `mounted.apply(...)`;
+- for prepared playback, call `runtime.commit(sample)` only after
+  `mounted.apply(sample.update)` succeeds;
 - call `mounted.destroy()` at teardown.
 
 Morph owns no `requestAnimationFrame` loop, interval, or other scheduler. A
@@ -84,11 +86,13 @@ mounted model keeps the same leaf elements for its lifetime. Runtime updates do
 not rebuild topology, add or remove leaves, construct image resources, or
 redraw prepared image resources.
 
-The browser resolves the prepared triangles once during mount. Supporting
-browsers use the native CSS primitive; Firefox and other browsers without that
-primitive use each leaf's prepared polygon-sized atlas slice. Atlas pages are
-generated with Node built-ins, so Morph has no Sharp or other native image
-dependency.
+The browser resolves prepared triangles once during mount. Supporting browsers,
+including Firefox, use a native CSS triangle primitive. WebKit/Safari and other
+browsers without a supported primitive use each leaf's prepared polygon-sized
+atlas slice. Mount creates object URLs from the loader's already-verified image
+bytes and revokes them at teardown; it does not refetch package resources.
+Atlas pages are generated with Node built-ins, so Morph has no Sharp or other
+native image dependency.
 
 ## Consumer adapters
 

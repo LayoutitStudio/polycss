@@ -41,7 +41,7 @@ function fail(code: string, path: string, message: string): never {
 }
 
 function cloneMatrix(value: PolyMorphMat4): PolyMorphMat4 {
-  return [...value] as unknown as PolyMorphMat4;
+  return Object.freeze([...value]) as unknown as PolyMorphMat4;
 }
 
 function matrixEqual(left: PolyMorphMat4, right: PolyMorphMat4): boolean {

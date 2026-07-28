@@ -180,11 +180,11 @@ import {
   mountPolyMorphModel,
 } from "@layoutit/polycss-morph";
 
-const { model } = await loadPolyMorphPackage("/model/");
-const mounted = mountPolyMorphModel(host, model, {
-  resolveResourceUrl: (path) => `/model/package/${path}`,
+const loaded = await loadPolyMorphPackage("/model/");
+const mounted = mountPolyMorphModel(host, loaded.model, {
+  resources: loaded.resources,
 });
-const deformation = createPolyMorphDeformationRuntime(model);
+const deformation = createPolyMorphDeformationRuntime(loaded.model);
 const frame = deformation.sample({
   tick: 0,
   morphWeights: { "corner-lift": 0.5 },
@@ -198,12 +198,15 @@ Morph supports `static-prepared`, `morph-regions`, `joint-skin`, and
 sample controls, springs, clips, skinning, or playback and pass only changed
 rows to `mounted.apply(...)`. Mounted leaf identity stays stable, and runtime
 updates do not rebuild topology or redraw prepared image resources.
+Prepared playback uses a two-phase sample: apply `sample.update`, then call
+`runtime.commit(sample)` only after the retained mount accepts the update.
 
 Prepared solid triangles use the native CSS triangle primitive when supported.
-Preparation also emits packed alpha-atlas pages for Firefox and other browsers
-without the corner-shape primitive. Every polygon receives a slice sized to
-its local-2D bounding rect. The fallback is selected once at mount and is never
-generated or redrawn in the browser.
+Preparation also emits packed alpha-atlas pages for WebKit/Safari and other
+browsers without a supported CSS triangle primitive. Every polygon receives a
+slice sized to its local-2D bounding rect. Mount creates object URLs from the
+already-verified package bytes, selects the fallback once, and revokes those
+URLs at teardown; it never refetches, generates, or redraws the atlas.
 
 ### Polygon Data Model
 

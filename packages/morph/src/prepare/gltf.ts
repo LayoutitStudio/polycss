@@ -240,6 +240,7 @@ function createAccessorReader(
       !components
       || !bytesPerComponent
       || !bufferView
+      || !Number.isSafeInteger(accessor.bufferView)
       || !Number.isSafeInteger(bufferView.buffer)
     ) {
       failPolyMorphPrepare("invalid-accessor", path, "unsupported accessor metadata");
@@ -250,14 +251,27 @@ function createAccessorReader(
     }
     const itemBytes = components * bytesPerComponent;
     const stride = bufferView.byteStride ?? itemBytes;
-    const start = (bufferView.byteOffset ?? 0) + (accessor.byteOffset ?? 0);
+    const viewOffset = bufferView.byteOffset ?? 0;
+    const accessorOffset = accessor.byteOffset ?? 0;
+    const viewLength = bufferView.byteLength;
+    const start = viewOffset + accessorOffset;
+    const end = start + Math.max(0, accessor.count - 1) * stride + itemBytes;
     if (
-      !Number.isSafeInteger(stride)
+      !Number.isSafeInteger(viewOffset)
+      || viewOffset < 0
+      || !Number.isSafeInteger(viewLength)
+      || viewLength < 0
+      || viewOffset + viewLength > buffer.byteLength
+      || !Number.isSafeInteger(accessorOffset)
+      || accessorOffset < 0
+      || accessorOffset % bytesPerComponent !== 0
+      || !Number.isSafeInteger(stride)
       || stride < itemBytes
-      || stride % bytesPerComponent !== 0
+      || (bufferView.byteStride !== undefined && (stride > 252 || stride % 4 !== 0))
       || !Number.isSafeInteger(start)
       || start < 0
-      || start + Math.max(0, accessor.count - 1) * stride + itemBytes > buffer.byteLength
+      || start % bytesPerComponent !== 0
+      || end > viewOffset + viewLength
     ) {
       failPolyMorphPrepare("invalid-accessor", path, "invalid accessor byte layout");
     }
@@ -495,7 +509,14 @@ function sceneInstances(json: JsonObject): readonly {
 function parseMaterials(json: JsonObject): readonly PolyMorphGltfMaterial[] {
   const rows = Array.isArray(json.materials) ? json.materials as JsonObject[] : [];
   return rows.map((material, sourceIndex) => {
-    const raw = material?.pbrMetallicRoughness?.baseColorFactor ?? [1, 1, 1, 1];
+    if (!material || typeof material !== "object" || Array.isArray(material)) {
+      failPolyMorphPrepare(
+        "invalid-material",
+        `$.source.materials[${sourceIndex}]`,
+        "expected a material object",
+      );
+    }
+    const raw = material.pbrMetallicRoughness?.baseColorFactor ?? [1, 1, 1, 1];
     if (
       !Array.isArray(raw)
       || raw.length !== 4

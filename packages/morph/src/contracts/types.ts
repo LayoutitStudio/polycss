@@ -66,7 +66,6 @@ export interface PolyMorphMaterial {
 export type PolyMorphRenderStrategy =
   | "atlas-slice"
   | "direct-image"
-  | "solid-clipped"
   | "solid-quad"
   | "solid-triangle";
 
@@ -106,7 +105,6 @@ export interface PolyMorphRenderLeaf {
 }
 
 export interface PolyMorphRenderPlan {
-  readonly cssText: string;
   readonly modelMatrix: PolyMorphMat4;
   readonly shapes: readonly PolyMorphRenderShape[];
   readonly leaves: readonly PolyMorphRenderLeaf[];

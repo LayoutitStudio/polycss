@@ -63,7 +63,6 @@ export function createPolyMorphModelFixture(
       },
     ],
     render: {
-      cssText: "",
       modelMatrix: POLY_MORPH_IDENTITY_MATRIX,
       shapes: [
         {

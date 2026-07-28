@@ -4,6 +4,7 @@ import {
   createPolyCamera,
   formatMatrix3dValues,
   injectPolyBaseStyles,
+  isSolidTriangleSupported,
 } from "@layoutit/polycss";
 import {
   validatePolyMorphModel,
@@ -25,7 +26,6 @@ import type {
 const TAG_BY_STRATEGY = {
   "atlas-slice": "s",
   "direct-image": "s",
-  "solid-clipped": "i",
   "solid-quad": "b",
   "solid-triangle": "u",
 } as const;
@@ -76,13 +76,6 @@ function resolvedLeafMatrix(
 function colorText(color: readonly [number, number, number, number]): string {
   const [red, green, blue, alpha] = color;
   return `rgba(${Math.round(red * 255)}, ${Math.round(green * 255)}, ${Math.round(blue * 255)}, ${alpha})`;
-}
-
-function supportsCornerTriangle(doc: Document): boolean {
-  const css = doc.defaultView?.CSS
-    ?? (typeof CSS === "undefined" ? undefined : CSS);
-  return !!css?.supports?.("corner-top-left-shape", "bevel")
-    && !!css.supports("corner-top-right-shape", "bevel");
 }
 
 function exactKeys(
@@ -226,7 +219,7 @@ function createLeaf(
   doc: Document,
   leaf: PolyMorphRenderLeaf,
   materialColor: readonly [number, number, number, number],
-  resolveResourceUrl: (path: string, errorPath: string) => string,
+  resolveVerifiedImageUrl: (path: string, errorPath: string) => string,
   useSolidTriangleFallback: boolean,
 ): HTMLElement {
   const fallback = useSolidTriangleFallback ? leaf.fallback : null;
@@ -244,7 +237,9 @@ function createLeaf(
   );
   element.style.color = colorText(materialColor);
   element.style.backfaceVisibility = "visible";
+  element.style.backgroundRepeat = "no-repeat";
   element.style.opacity = "1";
+  element.style.transformOrigin = "0 0";
   element.style.visibility = "visible";
   if (leaf.atlas) {
     element.style.width = `${leaf.width}px`;
@@ -253,7 +248,7 @@ function createLeaf(
       element,
       leaf,
       leaf.atlas,
-      resolveResourceUrl(leaf.atlas.resourcePath, leaf.id),
+      resolveVerifiedImageUrl(leaf.atlas.resourcePath, leaf.id),
     );
   } else if (fallback) {
     applySolidTriangleFallbackPaint(
@@ -261,8 +256,11 @@ function createLeaf(
       fallback.atlas,
       fallback.width,
       fallback.height,
-      resolveResourceUrl(fallback.atlas.resourcePath, leaf.id),
+      resolveVerifiedImageUrl(fallback.atlas.resourcePath, leaf.id),
     );
+  } else if (leaf.strategy === "solid-quad") {
+    element.style.width = `${leaf.width}px`;
+    element.style.height = `${leaf.height}px`;
   }
   return element;
 }
@@ -279,46 +277,77 @@ export function mountPolyMorphModel(
   const doc = host.ownerDocument;
   const useSolidTriangleFallback = model.render.leaves.some(
     (leaf) => leaf.strategy === "solid-triangle",
-  ) && !supportsCornerTriangle(doc);
+  ) && !isSolidTriangleSupported(doc);
   const resourceUrls = new Map<string, string>();
-  const resolveResourceUrl = (path: string, errorPath: string): string => {
+  const objectUrlApi = typeof doc.defaultView?.URL?.createObjectURL === "function"
+    ? doc.defaultView.URL
+    : globalThis.URL;
+  const blobConstructor = doc.defaultView?.Blob ?? globalThis.Blob;
+  const releaseResourceUrls = (): void => {
+    for (const url of resourceUrls.values()) objectUrlApi.revokeObjectURL(url);
+    resourceUrls.clear();
+  };
+  const resolveVerifiedImageUrl = (path: string, errorPath: string): string => {
     const cached = resourceUrls.get(path);
     if (cached) return cached;
-    if (!options.resolveResourceUrl) {
+    const resource = options.resources?.get(path);
+    if (
+      !resource
+      || resource.descriptor.path !== path
+      || resource.descriptor.role !== "image"
+    ) {
       fail(
-        "missing-resource-url",
+        "missing-resource",
         errorPath,
-        "image-backed leaves require resolveResourceUrl",
+        "image-backed leaves require their verified package resource",
       );
     }
-    const resolved = options.resolveResourceUrl(path);
-    if (typeof resolved !== "string" || resolved.length === 0) {
+    if (
+      typeof objectUrlApi?.createObjectURL !== "function"
+      || typeof objectUrlApi?.revokeObjectURL !== "function"
+      || typeof blobConstructor !== "function"
+    ) {
       fail(
-        "invalid-resource-url",
+        "missing-object-url",
         errorPath,
-        "resource URL resolver returned no URL",
+        "this browser cannot mount verified image bytes",
       );
     }
+    const bytes = resource.bytes.slice();
+    const resolved = objectUrlApi.createObjectURL(new blobConstructor(
+      [bytes.buffer],
+      { type: resource.descriptor.mediaType },
+    ));
     resourceUrls.set(path, resolved);
     return resolved;
   };
-  if (useSolidTriangleFallback) {
+  try {
     for (const leaf of model.render.leaves) {
-      if (leaf.strategy !== "solid-triangle") continue;
-      if (!leaf.fallback) {
-        fail(
-          "missing-solid-triangle-fallback",
-          `${leaf.id}.fallback`,
-          "this browser requires a prepared per-polygon atlas slice",
-        );
+      if (leaf.atlas) {
+        resolveVerifiedImageUrl(leaf.atlas.resourcePath, leaf.id);
       }
-      resolveResourceUrl(leaf.fallback.atlas.resourcePath, leaf.id);
+      if (useSolidTriangleFallback && leaf.strategy === "solid-triangle") {
+        if (!leaf.fallback) {
+          fail(
+            "missing-solid-triangle-fallback",
+            `${leaf.id}.fallback`,
+            "this browser requires a prepared per-polygon atlas slice",
+          );
+        }
+        resolveVerifiedImageUrl(leaf.fallback.atlas.resourcePath, leaf.id);
+      }
     }
+  } catch (error) {
+    releaseResourceUrls();
+    throw error;
   }
   injectPolyBaseStyles(doc);
   const computed = doc.defaultView?.getComputedStyle(host);
+  const initialHostPosition = host.style.position;
+  let changedHostPosition = false;
   if (!computed || computed.position === "static" || computed.position === "") {
     host.style.position = "relative";
+    changedHostPosition = true;
   }
   const camera = options.camera ?? createPolyCamera({ zoom: 1 });
   const cameraElement = doc.createElement("div");
@@ -328,19 +357,11 @@ export function mountPolyMorphModel(
   cameraElement.dataset.polycssCameraProjection = cameraSnapshot.projection;
   host.appendChild(cameraElement);
 
-  const styleElement = model.render.cssText === ""
-    ? null
-    : doc.createElement("style");
-  if (styleElement) {
-    styleElement.dataset.polyMorphStyles = model.identity.id;
-    styleElement.textContent = model.render.cssText;
-    cameraElement.appendChild(styleElement);
-  }
-
   const sceneElement = doc.createElement("div");
   sceneElement.className = "polycss-scene polycss-morph-scene";
   sceneElement.setAttribute("aria-hidden", "true");
-  sceneElement.style.transform = buildPolyCameraSceneTransform(camera.state);
+  const initialCameraTransform = buildPolyCameraSceneTransform(camera.state);
+  sceneElement.style.transform = initialCameraTransform;
   cameraElement.appendChild(sceneElement);
 
   const modelElement = doc.createElement("div");
@@ -381,7 +402,7 @@ export function mountPolyMorphModel(
       doc,
       leaf,
       material.color,
-      resolveResourceUrl,
+      resolveVerifiedImageUrl,
       useSolidTriangleFallback && leaf.strategy === "solid-triangle",
     );
     shapeElement.appendChild(element);
@@ -401,7 +422,7 @@ export function mountPolyMorphModel(
   const stableShapes = [...shapeElements.entries()];
   const stableLeaves = [...leafHandles.entries()];
   let destroyed = false;
-  let cameraTransform = sceneElement.style.transform;
+  let cameraTransform = initialCameraTransform;
   const counters = {
     applyCount: 0,
     totalTransformWrites: 0,
@@ -435,6 +456,30 @@ export function mountPolyMorphModel(
   const apply = (updateInput: PolyMorphRetainedUpdate): PolyMorphApplyResult => {
     assertActive();
     const update = validateUpdate(updateInput);
+    const resolvedShapes = (update.shapes ?? []).map((shape) => {
+      const element = shapeElements.get(shape.shapeId);
+      if (!element) fail("unknown-shape", shape.shapeId, "no retained shape handle");
+      return { shape, element };
+    });
+    const resolvedLeaves = (update.leaves ?? []).map((leaf) => {
+      const handle = leafHandles.get(leaf.leafId);
+      const state = leafStates.get(leaf.leafId);
+      if (!handle || !state) {
+        fail("unknown-leaf", leaf.leafId, "no retained leaf handle");
+      }
+      let atlasPosition: string | undefined;
+      if (leaf.atlasRow !== undefined) {
+        const atlas = handle.plan.atlas;
+        if (!atlas) fail("invalid-atlas-row", leaf.leafId, "leaf has no image rows");
+        const y = atlas.y + leaf.atlasRow * atlas.height;
+        if (y + atlas.height > atlas.pageHeight) {
+          fail("invalid-atlas-row", leaf.leafId, "row exceeds the image page");
+        }
+        atlasPosition = `${-atlas.x}px ${-y}px`;
+      }
+      return { leaf, handle, state, atlasPosition };
+    });
+    assertStableDomIdentity();
     let modelTransformWrites = 0;
     let shapeTransformWrites = 0;
     let leafTransformWrites = 0;
@@ -443,33 +488,28 @@ export function mountPolyMorphModel(
     let atlasRowWrites = 0;
     if (update.modelMatrix) {
       const next = matrixText(update.modelMatrix);
-      if (modelTransform !== next || modelElement.style.transform !== next) {
+      if (modelTransform !== next) {
         modelTransform = next;
         modelElement.style.transform = next;
         modelTransformWrites += 1;
       }
     }
-    for (const shape of update.shapes ?? []) {
-      const element = shapeElements.get(shape.shapeId);
-      if (!element) fail("unknown-shape", shape.shapeId, "no retained shape handle");
+    for (const { shape, element } of resolvedShapes) {
       const next = matrixText(shape.matrix);
-      if (shapeTransforms.get(shape.shapeId) !== next || element.style.transform !== next) {
+      if (shapeTransforms.get(shape.shapeId) !== next) {
         shapeTransforms.set(shape.shapeId, next);
         element.style.transform = next;
         shapeTransformWrites += 1;
       }
     }
-    for (const leaf of update.leaves ?? []) {
-      const handle = leafHandles.get(leaf.leafId);
-      const state = leafStates.get(leaf.leafId);
-      if (!handle || !state) fail("unknown-leaf", leaf.leafId, "no retained leaf handle");
+    for (const { leaf, handle, state, atlasPosition } of resolvedLeaves) {
       if (leaf.matrix) {
         const next = matrixText(resolvedLeafMatrix(
           handle.plan,
           leaf.matrix,
           useSolidTriangleFallback && handle.plan.strategy === "solid-triangle",
         ));
-        if (state.transform !== next || handle.element.style.transform !== next) {
+        if (state.transform !== next) {
           state.transform = next;
           handle.element.style.transform = next;
           leafTransformWrites += 1;
@@ -477,7 +517,7 @@ export function mountPolyMorphModel(
       }
       if (leaf.visible !== undefined) {
         const next = leaf.visible ? "visible" : "hidden";
-        if (state.visible !== leaf.visible || handle.element.style.visibility !== next) {
+        if (state.visible !== leaf.visible) {
           state.visible = leaf.visible;
           handle.element.style.visibility = next;
           visibilityWrites += 1;
@@ -485,23 +525,16 @@ export function mountPolyMorphModel(
       }
       if (leaf.opacity !== undefined) {
         const next = String(leaf.opacity);
-        if (state.opacity !== leaf.opacity || handle.element.style.opacity !== next) {
+        if (state.opacity !== leaf.opacity) {
           state.opacity = leaf.opacity;
           handle.element.style.opacity = next;
           opacityWrites += 1;
         }
       }
       if (leaf.atlasRow !== undefined) {
-        const atlas = handle.plan.atlas;
-        if (!atlas) fail("invalid-atlas-row", leaf.leafId, "leaf has no image rows");
-        const y = atlas.y + leaf.atlasRow * atlas.height;
-        if (y + atlas.height > atlas.pageHeight) {
-          fail("invalid-atlas-row", leaf.leafId, "row exceeds the image page");
-        }
-        const next = `${-atlas.x}px ${-y}px`;
-        if (state.atlasRow !== leaf.atlasRow || handle.element.style.backgroundPosition !== next) {
+        if (state.atlasRow !== leaf.atlasRow) {
           state.atlasRow = leaf.atlasRow;
-          handle.element.style.backgroundPosition = next;
+          handle.element.style.backgroundPosition = atlasPosition!;
           atlasRowWrites += 1;
         }
       }
@@ -554,7 +587,7 @@ export function mountPolyMorphModel(
     updateCamera(): boolean {
       assertActive();
       const next = buildPolyCameraSceneTransform(camera.state);
-      if (cameraTransform === next && sceneElement.style.transform === next) return false;
+      if (cameraTransform === next) return false;
       cameraTransform = next;
       sceneElement.style.transform = next;
       const snapshot = capturePolyCameraSnapshot(camera);
@@ -571,6 +604,10 @@ export function mountPolyMorphModel(
       leafHandles.clear();
       leafStates.clear();
       shapeTransforms.clear();
+      releaseResourceUrls();
+      if (changedHostPosition && host.style.position === "relative") {
+        host.style.position = initialHostPosition;
+      }
     },
   };
   mounted.assertStableDomIdentity();

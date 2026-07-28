@@ -38,6 +38,22 @@ describe("PolyMorph joint skinning", () => {
     ]);
     expect(frame.dirtyLeafIds).toEqual(["gem-panel-leaf"]);
     expect(frame.leafUpdates[0]?.matrix).toHaveLength(16);
+    expect(Object.isFrozen(frame.positions)).toBe(true);
+    expect(Object.isFrozen(frame.positions[0]!)).toBe(true);
+    expect(Object.isFrozen(frame.normals[0]!)).toBe(true);
+  });
+
+  it("uses inverse-transpose normal transforms for non-uniform scale", () => {
+    const fixture = clonePolyMorphFixture(createPolyMorphSkinningFixture());
+    const unit = Math.SQRT1_2;
+    fixture.topology.normals = fixture.topology.normals.map(() => [unit, unit, 0]);
+    const runtime = createPolyMorphSkinningRuntime(fixture);
+    const frame = runtime.sample({
+      tick: 1,
+      jointTransforms: new Map([["root", { scale: [2, 1, 1] }]]),
+    });
+    expect(frame.normals[0]![0]).toBeCloseTo(1 / Math.sqrt(5));
+    expect(frame.normals[0]![1]).toBeCloseTo(2 / Math.sqrt(5));
   });
 
   it("turns a repeated pose into a no-op", () => {
@@ -102,5 +118,29 @@ describe("PolyMorph joint skinning", () => {
   it("advertises joint-skin only with the executable runtime present", () => {
     expect(POLY_MORPH_EXECUTABLE_PROFILES).toContain("joint-skin");
     expect(createPolyMorphSkinningRuntime).toBeTypeOf("function");
+  });
+
+  it("does not publish failed quad geometry into the next pose", () => {
+    const fixture = clonePolyMorphFixture(createPolyMorphSkinningFixture());
+    fixture.topology.vertices.push([1, 1, 0]);
+    fixture.topology.normals.push([0, 0, 1]);
+    fixture.topology.polygons[0]!.vertexIndices = [0, 1, 3, 2];
+    fixture.topology.polygons[0]!.normalIndices = [0, 1, 3, 2];
+    fixture.render.leaves[0]!.strategy = "solid-quad";
+    fixture.render.leaves[0]!.width = 1;
+    fixture.render.leaves[0]!.height = 1;
+    fixture.deformation.vertices.push({
+      vertexIndex: 3,
+      influences: [{ jointId: "root", weight: 1 }],
+    });
+    const runtime = createPolyMorphSkinningRuntime(fixture);
+
+    expect(() => runtime.sample({
+      tick: 1,
+      jointTransforms: new Map([["tip", { translation: [0, 1, 0] }]]),
+    })).toThrowError(PolyMorphRuntimeError);
+    const recovered = runtime.sample({ tick: 2 });
+    expect(recovered.positions).toEqual(fixture.topology.vertices);
+    expect(recovered.dirtyLeafIds).toEqual([]);
   });
 });

@@ -354,7 +354,6 @@ async function packageBytes(root: string): Promise<ReadonlyMap<string, Uint8Arra
   const paths = [
     "assets/solid-triangles-000.png",
     "manifest.json",
-    "model.css",
     "model.json",
   ];
   return new Map(await Promise.all(paths.map(async (path) => [
@@ -375,14 +374,12 @@ describe("preparePolyMorphModel", () => {
     expect(first.files).toEqual([
       "assets/solid-triangles-000.png",
       "manifest.json",
-      "model.css",
       "model.json",
     ]);
     expect(first.writeOrder.at(-1)).toBe("manifest.json");
     expect((await readdir(firstRoot)).sort()).toEqual([
       "assets",
       "manifest.json",
-      "model.css",
       "model.json",
     ]);
     expect(await readdir(join(firstRoot, "assets"))).toEqual([
@@ -418,7 +415,6 @@ describe("preparePolyMorphModel", () => {
     ) as { resources: readonly { path: string }[] };
     expect(manifest.resources.map(({ path }) => path)).toEqual([
       "assets/solid-triangles-000.png",
-      "model.css",
       "model.json",
     ]);
   });
@@ -439,14 +435,21 @@ describe("preparePolyMorphModel", () => {
       writeOrder: [],
     });
 
-    await writeFile(join(outputRoot, "model.css"), "drift");
+    await writeFile(join(outputRoot, "model.json"), "drift");
     await expect(preparePolyMorphModel({
       configPath,
       outputRoot,
       check: true,
     })).rejects.toMatchObject<Partial<PolyMorphPrepareError>>({ code: "drift" });
 
-    await preparePolyMorphModel({ configPath, outputRoot });
+    const repaired = await preparePolyMorphModel({ configPath, outputRoot });
+    expect(repaired.changed).toBe(true);
+    const unchanged = await preparePolyMorphModel({ configPath, outputRoot });
+    expect(unchanged).toMatchObject({
+      checked: false,
+      changed: false,
+      writeOrder: [],
+    });
     await writeFile(join(outputRoot, "extra.json"), "{}");
     await expect(preparePolyMorphModel({
       configPath,
@@ -530,6 +533,14 @@ describe("compilePolyMorphSource", () => {
       height,
       bytes: [...bytes],
     })));
+  });
+
+  it("preserves front-face winding through reflective authoring transforms", async () => {
+    const config = mixedSizeConfig();
+    config.transform.signs = [-1, 1, 1];
+    const compiled = await compilePolyMorphSource(mixedSizeSource(), config);
+    expect(compiled.model.topology.polygons[0]!.vertexIndices).toEqual([0, 2, 1]);
+    expect(compiled.model.topology.normals[0]).toEqual([0, 0, 1]);
   });
 });
 
@@ -893,6 +904,34 @@ describe("loadPolyMorphGltf", () => {
       },
     },
     {
+      name: "misaligned accessor strides",
+      code: "invalid-accessor",
+      mutate: (document) => {
+        document.bufferViews[0].byteStride = 14;
+      },
+    },
+    {
+      name: "oversized accessor strides",
+      code: "invalid-accessor",
+      mutate: (document) => {
+        document.bufferViews[0].byteStride = 256;
+      },
+    },
+    {
+      name: "accessors outside their buffer views",
+      code: "invalid-accessor",
+      mutate: (document) => {
+        document.accessors[0].byteOffset = 12;
+      },
+    },
+    {
+      name: "buffer views outside their buffers",
+      code: "invalid-accessor",
+      mutate: (document) => {
+        document.bufferViews[0].byteLength = 200;
+      },
+    },
+    {
       name: "scalar positions",
       code: "invalid-accessor",
       mutate: (document) => {
@@ -1003,6 +1042,13 @@ describe("loadPolyMorphGltf", () => {
       code: "invalid-material",
       mutate: (document) => {
         document.meshes[0].primitives[0].material = -2;
+      },
+    },
+    {
+      name: "null materials",
+      code: "invalid-material",
+      mutate: (document) => {
+        document.materials[0] = null;
       },
     },
     {

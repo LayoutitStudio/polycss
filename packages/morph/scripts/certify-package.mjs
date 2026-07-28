@@ -25,13 +25,16 @@ const morphRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const repoRoot = resolve(morphRoot, "..", "..");
 const registryDependencies = process.argv.includes("--registry-dependencies");
 const reportFlag = process.argv.indexOf("--report");
-const reportPath = reportFlag === -1
-  ? null
-  : resolve(process.cwd(), process.argv[reportFlag + 1] ?? "");
-
-if (reportFlag !== -1 && process.argv[reportFlag + 1] === undefined) {
+const reportArgument = reportFlag === -1 ? null : process.argv[reportFlag + 1];
+if (
+  reportFlag !== -1
+  && (reportArgument === undefined || reportArgument.startsWith("--"))
+) {
   throw new Error("--report requires a path");
 }
+const reportPath = reportArgument
+  ? resolve(process.cwd(), reportArgument)
+  : null;
 
 async function run(command, args, cwd, options = {}) {
   const result = await runFile(command, args, {
@@ -264,7 +267,7 @@ const host = document.createElement("main");
 document.body.appendChild(host);
 const mounted = mountPolyMorphModel(host, loaded.model, {
   camera: createPolyOrthographicCamera({ zoom: 1 }),
-  resolveResourceUrl: (path) => \`https://consumer.test/model/package/\${path}\`,
+  resources: loaded.resources,
 });
 const identities = [...mounted.leafHandles.values()].map((entry) => entry.element);
 const deformation = createPolyMorphDeformationRuntime(loaded.model);
@@ -309,15 +312,15 @@ Object.defineProperty(browser, "CSS", {
   configurable: true,
   value: { supports: () => false },
 });
-let fallbackResourceResolutions = 0;
+Object.defineProperty(browser.navigator, "userAgent", {
+  configurable: true,
+  value: "Mozilla/5.0 Version/18.0 Safari/605.1.15",
+});
 const fallbackHost = document.createElement("main");
 document.body.appendChild(fallbackHost);
 const fallbackMounted = mountPolyMorphModel(fallbackHost, loaded.model, {
   camera: createPolyOrthographicCamera({ zoom: 1 }),
-  resolveResourceUrl: (path) => {
-    fallbackResourceResolutions += 1;
-    return \`https://consumer.test/model/package/\${path}\`;
-  },
+  resources: loaded.resources,
 });
 const fallbackIdentities = [...fallbackMounted.leafHandles.values()]
   .map((entry) => entry.element);
@@ -332,8 +335,8 @@ const fallbackDom = [...fallbackMounted.leafHandles.values()]
     && element.dataset.polyMorphResolvedStrategy === "atlas-slice"
     && element.style.width === \`\${fallback.width}px\`
     && element.style.height === \`\${fallback.height}px\`
-    && element.style.getPropertyValue("mask-image").includes(fallback.atlas.resourcePath)
-    && element.style.getPropertyValue("-webkit-mask-image").includes(fallback.atlas.resourcePath);
+    && element.style.getPropertyValue("mask-image").includes("blob:")
+    && element.style.getPropertyValue("-webkit-mask-image").includes("blob:");
   });
 
 if (
@@ -347,7 +350,6 @@ if (
   || applied.topologyConstructions !== 0
   || applied.schedulerCallbacks !== 0
   || !fallbackDom
-  || fallbackResourceResolutions !== fallbackPaths.size
   || fallbackApplied.atlasRedraws !== 0
   || fallbackApplied.topologyConstructions !== 0
   || fallbackApplied.schedulerCallbacks !== 0
@@ -372,7 +374,7 @@ console.log(JSON.stringify({
     identityStable: fallbackDom,
     pages: fallbackPaths.size,
     slices: fallbackSlices.size,
-    resourceResolutions: fallbackResourceResolutions,
+    verifiedImageResources: fallbackPaths.size,
     applied: fallbackApplied,
     stats: fallbackMounted.stats,
   },
@@ -443,10 +445,20 @@ try {
     || packedPackage.dependencies?.["@layoutit/polycss"] !== `^${polycssPackage.version}`
     || Object.hasOwn(packedPackage.dependencies ?? {}, "sharp")
     || JSON.stringify(Object.keys(packedPackage.exports).sort()) !== JSON.stringify([".", "./prepare"])
+    || packedPackage.typesVersions?.["*"]?.prepare?.[0] !== "dist/prepare.d.ts"
     || JSON.stringify(packedPackage.files) !== JSON.stringify(["dist"])
     || JSON.stringify(packedPackage).includes("workspace:")
   ) {
     throw new Error("packed Morph package metadata is not distributable");
+  }
+  const runtimeOutputNames = (await readdir(resolve(extractedRoot, "package/dist")))
+    .filter((entry) => entry.endsWith(".js") || entry.endsWith(".cjs"))
+    .sort();
+  if (
+    JSON.stringify(runtimeOutputNames)
+    !== JSON.stringify(["index.cjs", "index.js", "prepare.cjs", "prepare.js"])
+  ) {
+    throw new Error(`unexpected runtime chunks: ${runtimeOutputNames.join(", ")}`);
   }
   const browserOutputs = await Promise.all([
     readFile(resolve(extractedRoot, "package/dist/index.js"), "utf8"),

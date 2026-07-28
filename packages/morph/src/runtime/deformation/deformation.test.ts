@@ -36,6 +36,9 @@ describe("PolyMorph deformation runtime", () => {
     expect(frame.dirtyLeafIds).toEqual(["gem-panel-leaf"]);
     expect(frame.leafUpdates).toHaveLength(1);
     expect(frame.leafUpdates[0]?.matrix).toHaveLength(16);
+    expect(Object.isFrozen(frame.positions)).toBe(true);
+    expect(Object.isFrozen(frame.positions[2]!)).toBe(true);
+    expect(Object.isFrozen(frame.normals[2]!)).toBe(true);
   });
 
   it("combines bounded semantic control values with explicit morph weights", () => {
@@ -108,5 +111,30 @@ describe("PolyMorph deformation runtime", () => {
       .toMatchObject({ visible: false });
     expect(runtime.sample({ tick: 2, morphWeights: { stretch: 0 } }).leafUpdates[0])
       .toMatchObject({ visible: true });
+  });
+
+  it("does not publish failed quad geometry into the next sample", () => {
+    const fixture = clonePolyMorphFixture(
+      createPolyMorphModelFixture("morph-regions"),
+    );
+    fixture.topology.vertices.push([1, 1, 0]);
+    fixture.topology.normals.push([0, 0, 1]);
+    fixture.topology.polygons[0]!.vertexIndices = [0, 1, 3, 2];
+    fixture.topology.polygons[0]!.normalIndices = [0, 1, 3, 2];
+    fixture.render.leaves[0]!.strategy = "solid-quad";
+    fixture.render.leaves[0]!.width = 1;
+    fixture.render.leaves[0]!.height = 1;
+    const runtime = createPolyMorphDeformationRuntime(fixture);
+
+    expect(() => runtime.sample({
+      tick: 1,
+      morphWeights: { stretch: 1 },
+    })).toThrowError(PolyMorphRuntimeError);
+    const recovered = runtime.sample({
+      tick: 2,
+      morphWeights: { stretch: 0 },
+    });
+    expect(recovered.positions).toEqual(fixture.topology.vertices);
+    expect(recovered.dirtyLeafIds).toEqual([]);
   });
 });

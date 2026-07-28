@@ -57,10 +57,10 @@ describe("canonical package construction", () => {
   it("sorts and content-binds every declared resource", async () => {
     const built = await buildPolyMorphPackage(createPolyMorphModelFixture(), [
       {
-        path: "styles/model.css",
-        role: "stylesheet",
-        mediaType: "text/css",
-        bytes: new TextEncoder().encode(".gem{}"),
+        path: "data/metadata.bin",
+        role: "data",
+        mediaType: "application/octet-stream",
+        bytes: new TextEncoder().encode("gem"),
       },
       {
         path: "assets/gem.webp",
@@ -71,8 +71,8 @@ describe("canonical package construction", () => {
     ]);
     expect(built.manifest.resources.map((resource) => resource.path)).toEqual([
       "assets/gem.webp",
+      "data/metadata.bin",
       "model.json",
-      "styles/model.css",
     ]);
     for (const descriptor of built.manifest.resources) {
       const bytes = built.files.get(descriptor.path);
@@ -122,6 +122,17 @@ describe("canonical package construction", () => {
           }),
         ]),
       },
+    });
+  });
+
+  it("requires image resources to declare an image media type", async () => {
+    await expect(buildPolyMorphPackage(createPolyMorphModelFixture(), [{
+      path: "assets/paint.bin",
+      role: "image",
+      mediaType: "application/octet-stream",
+      bytes: new Uint8Array([1]),
+    }])).rejects.toMatchObject({
+      code: "invalid-media-type",
     });
   });
 

@@ -92,7 +92,6 @@ export interface PolyMorphGltfDocument {
 
 export interface PolyMorphPreparedSource {
   readonly model: PolyMorphModel;
-  readonly cssBytes: Uint8Array;
   readonly fallbackAtlasPages: readonly {
     readonly path: string;
     readonly width: number;

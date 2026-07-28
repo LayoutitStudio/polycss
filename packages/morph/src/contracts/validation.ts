@@ -20,6 +20,7 @@ import {
 } from "./types.js";
 
 const ID = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
+const PATH_SEGMENT = /^[a-z0-9][a-z0-9._-]*$/;
 const REVISION = /^\d+\.\d+\.\d+$/;
 const SHA256 = /^[a-f0-9]{64}$/;
 const PROFILES = new Set<PolyMorphProfile>([
@@ -41,7 +42,6 @@ const CAPABILITIES = new Set<PolyMorphCapability>([
 const STRATEGIES = new Set<PolyMorphRenderStrategy>([
   "atlas-slice",
   "direct-image",
-  "solid-clipped",
   "solid-quad",
   "solid-triangle",
 ]);
@@ -147,13 +147,13 @@ function mat4(value: unknown, path: string): PolyMorphMat4 {
 function normalizedPath(value: unknown, path: string): string {
   const result = string(value, path);
   if (
-    result.startsWith("/")
-    || result.includes("\\")
-    || result.includes("?")
-    || result.includes("#")
-    || result.split("/").some((part) => part === "" || part === "." || part === "..")
+    result.split("/").some((part) => !PATH_SEGMENT.test(part))
   ) {
-    fail("invalid-path", path, "expected a normalized package-relative path");
+    fail(
+      "invalid-path",
+      path,
+      "expected lowercase URL-safe package path segments",
+    );
   }
   return result;
 }
@@ -456,6 +456,13 @@ function validateAnimationChannel(
   if (interpolation !== "linear" && interpolation !== "step") {
     fail("invalid-interpolation", `${path}.interpolation`, interpolation);
   }
+  if (target === "shape-matrix" && interpolation !== "step") {
+    fail(
+      "invalid-interpolation",
+      `${path}.interpolation`,
+      "shape matrices require step interpolation",
+    );
+  }
   const timesMs = array(input.timesMs, `${path}.timesMs`).map((entry, index) =>
     number(entry, `${path}.timesMs[${index}]`));
   const values = array(input.values, `${path}.values`).map((entry, valueIndex) => {
@@ -464,7 +471,16 @@ function validateAnimationChannel(
     if (parts.length !== arity) {
       fail("invalid-animation-value", `${path}.values[${valueIndex}]`, `expected ${arity} components`);
     }
-    return parts.map((part, partIndex) => number(part, `${path}.values[${valueIndex}][${partIndex}]`));
+    const result = parts.map((part, partIndex) =>
+      number(part, `${path}.values[${valueIndex}][${partIndex}]`));
+    if (target === "joint-rotation" && Math.hypot(...result) <= 1e-12) {
+      fail(
+        "invalid-animation-value",
+        `${path}.values[${valueIndex}]`,
+        "quaternion must be non-zero",
+      );
+    }
+    return result;
   });
   if (timesMs.length === 0 || timesMs.length !== values.length) {
     fail("invalid-animation-samples", path, "times and values must have the same non-zero length");
@@ -635,12 +651,10 @@ export function validatePolyMorphModel(value: unknown): PolyMorphModel {
   if (materials.length === 0) fail("missing-materials", "$.materials", "expected at least one material");
   uniqueIds(materials.map((material) => material.id), "$.materials");
   const renderInput = record(input.render, "$.render", [
-    "cssText",
     "leaves",
     "modelMatrix",
     "shapes",
   ]);
-  if (typeof renderInput.cssText !== "string") fail("invalid-string", "$.render.cssText", "expected a string");
   const shapes = array(renderInput.shapes, "$.render.shapes").map((entry, shapeIndex) => {
     const shapePath = `$.render.shapes[${shapeIndex}]`;
     const shape = record(entry, shapePath, ["id", "matrix"]);
@@ -663,7 +677,6 @@ export function validatePolyMorphModel(value: unknown): PolyMorphModel {
     fail("unstable-topology", "$.render.leaves", "every polygon must bind exactly one retained leaf");
   }
   const render = {
-    cssText: renderInput.cssText,
     modelMatrix: mat4(renderInput.modelMatrix, "$.render.modelMatrix"),
     shapes,
     leaves,

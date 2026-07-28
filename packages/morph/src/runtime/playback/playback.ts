@@ -34,6 +34,7 @@ export interface PolyMorphPlaybackRuntime {
   readonly loop: boolean;
   readonly frameCount: number;
   sample(timeMs: number): PolyMorphPlaybackSample;
+  commit(sample: PolyMorphPlaybackSample): void;
   reset(): void;
 }
 
@@ -89,6 +90,7 @@ export function createPolyMorphPlaybackRuntime(
   }
   const times = playback.frames.map((frame) => frame.timeMs);
   let current = initial;
+  let pending: PolyMorphPlaybackSample | null = null;
   const sample = (timeMs: number): PolyMorphPlaybackSample => {
     if (!Number.isFinite(timeMs) || timeMs < 0) {
       fail("invalid-time", "$.timeMs", "expected a finite non-negative time");
@@ -97,8 +99,7 @@ export function createPolyMorphPlaybackRuntime(
     const frameIndex = frameAt(times, resolvedTime);
     const next = states[frameIndex]!;
     const diff = diffPolyMorphPreparedStates(current, next);
-    current = next;
-    return {
+    const result = Object.freeze({
       requestedTimeMs: timeMs,
       sampledTimeMs: resolvedTime,
       frameIndex,
@@ -113,7 +114,9 @@ export function createPolyMorphPlaybackRuntime(
       atlasConstructions: 0,
       atlasRedraws: 0,
       schedulerCallbacks: 0,
-    };
+    });
+    pending = result;
+    return result;
   };
   return Object.freeze({
     model,
@@ -121,8 +124,20 @@ export function createPolyMorphPlaybackRuntime(
     loop: playback.loop,
     frameCount: playback.frames.length,
     sample,
+    commit(sampled: PolyMorphPlaybackSample): void {
+      if (sampled !== pending) {
+        fail(
+          "invalid-sample",
+          "$.sample",
+          "commit requires the latest unapplied playback sample",
+        );
+      }
+      current = sampled.state;
+      pending = null;
+    },
     reset(): void {
       current = initial;
+      pending = null;
     },
   });
 }

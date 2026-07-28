@@ -71,7 +71,7 @@ function multiply(left: PolyMorphMat4, right: PolyMorphMat4): PolyMorphMat4 {
       output[column * 4 + row] = Object.is(sum, -0) ? 0 : sum;
     }
   }
-  return output as unknown as PolyMorphMat4;
+  return Object.freeze(output) as unknown as PolyMorphMat4;
 }
 
 function normalizedQuaternion(value: PolyMorphQuat | undefined, path: string): PolyMorphQuat {
@@ -160,11 +160,40 @@ function transformPoint(matrix: PolyMorphMat4, point: PolyMorphVec3): MutableVec
   ];
 }
 
-function transformDirection(matrix: PolyMorphMat4, normal: PolyMorphVec3): MutableVec3 {
+function transformNormal(
+  matrix: PolyMorphMat4,
+  normal: PolyMorphVec3,
+  path: string,
+): MutableVec3 {
+  const [a, d, g] = matrix;
+  const b = matrix[4];
+  const e = matrix[5];
+  const h = matrix[6];
+  const c = matrix[8];
+  const f = matrix[9];
+  const i = matrix[10];
+  const determinant = a! * (e! * i! - f! * h!)
+    - b! * (d! * i! - f! * g!)
+    + c! * (d! * h! - e! * g!);
+  if (Math.abs(determinant) <= 1e-12) {
+    fail("invalid-normal-transform", path, "joint skin matrix is singular");
+  }
   return [
-    matrix[0] * normal[0] + matrix[4] * normal[1] + matrix[8] * normal[2],
-    matrix[1] * normal[0] + matrix[5] * normal[1] + matrix[9] * normal[2],
-    matrix[2] * normal[0] + matrix[6] * normal[1] + matrix[10] * normal[2],
+    (
+      (e! * i! - f! * h!) * normal[0]
+      + (f! * g! - d! * i!) * normal[1]
+      + (d! * h! - e! * g!) * normal[2]
+    ) / determinant,
+    (
+      (c! * h! - b! * i!) * normal[0]
+      + (a! * i! - c! * g!) * normal[1]
+      + (b! * g! - a! * h!) * normal[2]
+    ) / determinant,
+    (
+      (b! * f! - c! * e!) * normal[0]
+      + (c! * d! - a! * f!) * normal[1]
+      + (a! * e! - b! * d!) * normal[2]
+    ) / determinant,
   ];
 }
 
@@ -172,6 +201,11 @@ function normalize(value: MutableVec3): MutableVec3 {
   const length = Math.hypot(...value);
   if (length <= 1e-12) return [0, 0, 0];
   return [value[0] / length, value[1] / length, value[2] / length];
+}
+
+function freezeVectors(values: MutableVec3[]): readonly PolyMorphVec3[] {
+  for (const value of values) Object.freeze(value);
+  return Object.freeze(values);
 }
 
 function matricesEqual(left: PolyMorphMat4, right: PolyMorphMat4): boolean {
@@ -238,8 +272,12 @@ export function createPolyMorphSkinningRuntime(
   const jointIdSet = new Set(jointIds);
   const restGlobals = globalMatrices(deformation.joints, new Map());
   const restSkin = skinMatrices(deformation.joints, restGlobals);
-  const basePositions = model.topology.vertices.map((value) => [...value] as MutableVec3);
-  const baseNormals = model.topology.normals.map((value) => [...value] as MutableVec3);
+  const basePositions = freezeVectors(
+    model.topology.vertices.map((value) => [...value] as MutableVec3),
+  );
+  const baseNormals = freezeVectors(
+    model.topology.normals.map((value) => [...value] as MutableVec3),
+  );
   const compiledLeaves = new Map(model.render.leaves.map((leaf) => [
     leaf.id,
     compilePolyMorphPreparedLeaf(model, leaf),
@@ -270,7 +308,11 @@ export function createPolyMorphSkinningRuntime(
       for (const influence of skin.influences) {
         const matrix = matrices.get(influence.jointId)!;
         const transformedPosition = transformPoint(matrix, basePositions[vertexIndex]!);
-        const transformedNormal = transformDirection(matrix, baseNormals[vertexIndex]!);
+        const transformedNormal = transformNormal(
+          matrix,
+          baseNormals[vertexIndex]!,
+          `$.skinMatrices.${influence.jointId}`,
+        );
         position[0] += transformedPosition[0] * influence.weight;
         position[1] += transformedPosition[1] * influence.weight;
         position[2] += transformedPosition[2] * influence.weight;
@@ -285,9 +327,11 @@ export function createPolyMorphSkinningRuntime(
   };
 
   const restGeometry = skinGeometry(restSkin);
+  const restPositions = freezeVectors(restGeometry.positions);
+  const restNormals = freezeVectors(restGeometry.normals);
   let priorSkin = new Map(restSkin);
-  let lastPositions = restGeometry.positions;
-  let lastNormals = restGeometry.normals;
+  let lastPositions = restPositions;
+  let lastNormals = restNormals;
   const animation = createPolyMorphAnimationRuntime(model);
 
   const sample = (input: PolyMorphSkinningInput): PolyMorphSkinningFrame => {
@@ -299,14 +343,12 @@ export function createPolyMorphSkinningRuntime(
     const matrices = skinMatrices(deformation.joints, globals);
     const changedJoints = new Set(jointIds.filter((id) =>
       !matricesEqual(matrices.get(id)!, priorSkin.get(id)!)));
-    let positions = lastPositions;
-    let normals = lastNormals;
+    let positions: readonly PolyMorphVec3[] = lastPositions;
+    let normals: readonly PolyMorphVec3[] = lastNormals;
     if (changedJoints.size > 0) {
       const geometry = skinGeometry(matrices);
-      positions = geometry.positions;
-      normals = geometry.normals;
-      lastPositions = positions;
-      lastNormals = normals;
+      positions = freezeVectors(geometry.positions);
+      normals = freezeVectors(geometry.normals);
     }
     const dirtyVertices = new Set<number>();
     if (changedJoints.size > 0) {
@@ -337,6 +379,8 @@ export function createPolyMorphSkinningRuntime(
         ...(prepared.matrix ? { matrix: prepared.matrix } : {}),
       };
     });
+    lastPositions = positions;
+    lastNormals = normals;
     priorSkin = new Map(matrices);
     return {
       tick: input.tick,
@@ -364,8 +408,8 @@ export function createPolyMorphSkinningRuntime(
     },
     reset(): void {
       priorSkin = new Map(restSkin);
-      lastPositions = restGeometry.positions.map((value) => [...value] as MutableVec3);
-      lastNormals = restGeometry.normals.map((value) => [...value] as MutableVec3);
+      lastPositions = restPositions;
+      lastNormals = restNormals;
     },
   });
 }

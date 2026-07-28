@@ -33,6 +33,20 @@ describe("PolyMorph springs", () => {
     expect(left.atRest).toBe(true);
   });
 
+  it("stays stable for large caller steps and clears velocity at a bound", () => {
+    const runtime = createPolyMorphSpringRuntime(createPolyMorphRuntimeFixture());
+    const state = createPolyMorphSpringState(runtime, { "stretch-control": 1 });
+    const largeStep = stepPolyMorphSprings(runtime, state, { deltaMs: 1000 });
+    expect(largeStep.values["stretch-control"]).toBeGreaterThanOrEqual(0);
+    expect(largeStep.values["stretch-control"]).toBeLessThanOrEqual(1);
+    expect(Number.isFinite(largeStep.velocities["stretch-control"]!)).toBe(true);
+
+    const clamped = stepPolyMorphSprings(runtime, state, { deltaMs: 500 });
+    expect(clamped.values["stretch-control"]).toBe(0);
+    expect(clamped.velocities["stretch-control"]).toBe(0);
+    expect(clamped.atRest).toBe(true);
+  });
+
   it("leaves explicitly frozen controls unchanged", () => {
     const runtime = createPolyMorphSpringRuntime(createPolyMorphRuntimeFixture());
     const state = createPolyMorphSpringState(runtime, { "stretch-control": 0.6 });

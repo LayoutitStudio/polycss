@@ -9,8 +9,7 @@ import type {
 export type PolyMorphResourceRole =
   | "data"
   | "image"
-  | "model"
-  | "stylesheet";
+  | "model";
 
 export interface PolyMorphResourceDescriptor {
   readonly path: string;

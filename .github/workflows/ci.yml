@@ -43,5 +43,11 @@ jobs:
       - name: Build packages (DTS + JS)
         run: pnpm build:packages
 
+      - name: Certify Morph package
+        run: pnpm --filter @layoutit/polycss-morph test:package
+
+      - name: Certify Morph with registry dependencies
+        run: pnpm --filter @layoutit/polycss-morph test:package:registry
+
       - name: Build website
         run: pnpm build:website

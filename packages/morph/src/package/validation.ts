@@ -27,7 +27,6 @@ const ROLES = new Set<PolyMorphResourceRole>([
   "data",
   "image",
   "model",
-  "stylesheet",
 ]);
 
 function fail(code: string, path: string, message: string): never {
@@ -104,6 +103,13 @@ function resource(value: unknown, path: string): PolyMorphResourceDescriptor {
   const mediaType = text(input.mediaType, `${path}.mediaType`).toLowerCase();
   if (!MEDIA_TYPE.test(mediaType) || mediaType !== input.mediaType) {
     fail("invalid-media-type", `${path}.mediaType`, "expected a normalized type/subtype");
+  }
+  if (role === "image" && !mediaType.startsWith("image/")) {
+    fail(
+      "invalid-media-type",
+      `${path}.mediaType`,
+      "image resources require an image media type",
+    );
   }
   return {
     path: normalizedPath(input.path, `${path}.path`),

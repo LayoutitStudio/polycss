@@ -128,12 +128,19 @@ React or Vue wrappers.
   prepared packages, mounts one retained PolyCSS graph, and exposes
   caller-driven runtimes for morphs, controls, springs, animation, skinning,
   and prepared playback.
-- A mount resolves prepared solid triangles to the CSS primitive when
-  corner-shape is available, otherwise to each leaf's prepared polygon-sized
-  atlas slice. It creates topology and leaves once. Runtime samples may update
-  only declared model, shape, or leaf state. They must preserve leaf identity,
-  must not rebuild topology or redraw atlases, and must not own a scheduler.
-  The caller owns input and timing.
+- A mount uses PolyCSS's public solid-triangle support check, so Firefox keeps
+  its border-triangle path while WebKit/Safari selects each leaf's prepared
+  polygon-sized atlas slice. Image paint comes only from loader-verified bytes:
+  mount creates object URLs once and revokes them at teardown, with no resource
+  refetch or arbitrary prepared CSS injection. It creates topology and leaves
+  once. Runtime samples may update only declared model, shape, or leaf state.
+  They must preserve leaf identity, must not rebuild topology or redraw atlases,
+  and must not own a scheduler. Prepared playback commits a sample only after
+  the caller's retained apply succeeds. The caller owns input and timing.
+- Morph does not copy renderer feature detection or maintain a fourth visual
+  browser harness. Package certification exercises native and fallback retained
+  DOM resolution; actual engine-specific triangle painting remains covered by
+  the renderer-owned browser paths that define `isSolidTriangleSupported`.
 - The four executable profiles are `static-prepared`, `morph-regions`,
   `joint-skin`, and `prepared-playback`.
 - Product-specific source cadence, schemas, preparation provenance, mounting

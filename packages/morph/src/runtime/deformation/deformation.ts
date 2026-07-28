@@ -50,6 +50,11 @@ function cloneVectors(values: readonly PolyMorphVec3[]): MutableVec3[] {
   return values.map((value) => [value[0], value[1], value[2]]);
 }
 
+function freezeVectors(values: MutableVec3[]): readonly PolyMorphVec3[] {
+  for (const value of values) Object.freeze(value);
+  return Object.freeze(values);
+}
+
 function trianglePlan(
   compiled: PolyMorphCompiledLeaf,
   positions: readonly PolyMorphVec3[],
@@ -255,11 +260,11 @@ export function createPolyMorphDeformationRuntime(
     leaf.id,
     compilePolyMorphPreparedLeaf(model, leaf),
   ]));
-  const basePositions = cloneVectors(model.topology.vertices);
-  const baseNormals = cloneVectors(model.topology.normals);
+  const basePositions = freezeVectors(cloneVectors(model.topology.vertices));
+  const baseNormals = freezeVectors(cloneVectors(model.topology.normals));
   let priorEffective = Object.fromEntries(targetIds.map((id) => [id, 0])) as Record<string, number>;
-  let lastPositions = cloneVectors(basePositions);
-  let lastNormals = cloneVectors(baseNormals);
+  let lastPositions = basePositions;
+  let lastNormals = baseNormals;
 
   const sample = (input: PolyMorphDeformationInput): PolyMorphDeformationFrame => {
     if (!input || !Number.isSafeInteger(input.tick) || input.tick < 0) {
@@ -288,22 +293,22 @@ export function createPolyMorphDeformationRuntime(
       }
     }
     const changedTargets = targetIds.filter((id) => effective[id] !== priorEffective[id]);
-    let positions = lastPositions;
-    let normals = lastNormals;
+    let positions: readonly PolyMorphVec3[] = lastPositions;
+    let normals: readonly PolyMorphVec3[] = lastNormals;
     if (changedTargets.length > 0) {
-      positions = cloneVectors(basePositions);
-      normals = cloneVectors(baseNormals);
+      const nextPositions = cloneVectors(basePositions);
+      let nextNormals = cloneVectors(baseNormals);
       for (const targetId of targetIds) {
         const weight = effective[targetId]!;
         if (weight === 0) continue;
         for (const delta of targets.get(targetId)!.deltas) {
-          const position = positions[delta.vertexIndex]!;
+          const position = nextPositions[delta.vertexIndex]!;
           if (delta.position) {
             position[0] += delta.position[0] * weight;
             position[1] += delta.position[1] * weight;
             position[2] += delta.position[2] * weight;
           }
-          const normal = normals[delta.vertexIndex]!;
+          const normal = nextNormals[delta.vertexIndex]!;
           if (delta.normal) {
             normal[0] += delta.normal[0] * weight;
             normal[1] += delta.normal[1] * weight;
@@ -311,9 +316,9 @@ export function createPolyMorphDeformationRuntime(
           }
         }
       }
-      normals = normals.map(normalize);
-      lastPositions = positions;
-      lastNormals = normals;
+      nextNormals = nextNormals.map(normalize);
+      positions = freezeVectors(nextPositions);
+      normals = freezeVectors(nextNormals);
     }
     const dirtySet = new Set<string>();
     for (const targetId of changedTargets) {
@@ -330,6 +335,8 @@ export function createPolyMorphDeformationRuntime(
         ...(prepared.matrix ? { matrix: prepared.matrix } : {}),
       };
     });
+    lastPositions = positions;
+    lastNormals = normals;
     priorEffective = { ...effective };
     return {
       tick: input.tick,
@@ -354,8 +361,8 @@ export function createPolyMorphDeformationRuntime(
     sample,
     reset(): void {
       priorEffective = Object.fromEntries(targetIds.map((id) => [id, 0]));
-      lastPositions = cloneVectors(basePositions);
-      lastNormals = cloneVectors(baseNormals);
+      lastPositions = basePositions;
+      lastNormals = baseNormals;
     },
   });
 }

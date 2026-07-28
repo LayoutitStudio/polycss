@@ -73,6 +73,53 @@ function fetchFrom(files: ReadonlyMap<string, Uint8Array>): typeof fetch {
   }) as typeof fetch;
 }
 
+async function replaceFixtureModel(
+  fixture: LoadFixture,
+  mutate: (model: {
+    budgets: {
+      maxResources: number;
+      maxBytes: number;
+    };
+  }) => void,
+): Promise<void> {
+  const model = createPolyMorphModelFixture("morph-regions") as unknown as {
+    budgets: {
+      maxResources: number;
+      maxBytes: number;
+    };
+  };
+  mutate(model);
+  const modelBytes = encodePolyMorphCanonicalJson(model);
+  const manifest = {
+    ...fixture.builtPackage.manifest,
+    resources: fixture.builtPackage.manifest.resources.map((descriptor) =>
+      descriptor.path === fixture.builtPackage.manifest.modelPath
+        ? {
+            ...descriptor,
+            bytes: modelBytes.byteLength,
+            sha256: "",
+          }
+        : descriptor),
+  };
+  const modelDescriptor = manifest.resources.find(
+    ({ path }) => path === manifest.modelPath,
+  )!;
+  (modelDescriptor as { sha256: string }).sha256 =
+    await hashPolyMorphBytes(modelBytes);
+  const manifestBytes = encodePolyMorphCanonicalJson(manifest);
+  const manifestSha256 = await hashPolyMorphBytes(manifestBytes);
+  const catalog = {
+    ...fixture.builtCatalog.catalog,
+    packages: fixture.builtCatalog.catalog.packages.map((row) => ({
+      ...row,
+      manifestSha256,
+    })),
+  };
+  fixture.files.set(`${BASE_URL}catalog.json`, encodePolyMorphCanonicalJson(catalog));
+  fixture.files.set(`${BASE_URL}${MANIFEST_PATH}`, manifestBytes);
+  fixture.files.set(`${BASE_URL}models/morph-gem/model.json`, modelBytes);
+}
+
 async function expectLoadCode(
   fixture: LoadFixture,
   code: string,
@@ -171,6 +218,41 @@ describe("browser package loading", () => {
       maxResourceBytes: 1_000_000,
       maxTotalBytes: total.builtPackage.manifest.resources[0]!.bytes,
     });
+
+    const resourceCount = await createLoadFixture();
+    await expectLoadCode(resourceCount, "package-too-large", {
+      maxResources: 1,
+    });
+  });
+
+  it("enforces the verified model's authored package budgets", async () => {
+    const resources = await createLoadFixture();
+    await replaceFixtureModel(resources, (model) => {
+      model.budgets.maxResources = 1;
+    });
+    await expectLoadCode(resources, "budget-exceeded");
+
+    const bytes = await createLoadFixture();
+    await replaceFixtureModel(bytes, (model) => {
+      model.budgets.maxBytes = 1;
+    });
+    await expectLoadCode(bytes, "budget-exceeded");
+  });
+
+  it.each([
+    "http:evil.example/manifest.json",
+    "javascript:alert.js",
+    "%2e%2e/%2e%2e/secret.json",
+    "models/%2e%2e/secret.json",
+  ])("rejects unsafe catalog package paths: %s", async (manifestPath) => {
+    const fixture = await createLoadFixture();
+    const catalog = clonePolyMorphFixture(fixture.builtCatalog.catalog);
+    catalog.packages[0]!.manifestPath = manifestPath;
+    fixture.files.set(
+      `${BASE_URL}catalog.json`,
+      encodePolyMorphCanonicalJson(catalog),
+    );
+    await expectLoadCode(fixture, "invalid-path");
   });
 
   it.each([
@@ -212,16 +294,33 @@ describe("browser package loading", () => {
       }),
       "invalid-limit",
     );
+    await expectPackageCode(
+      loadPolyMorphPackage(BASE_URL, {
+        fetchImpl: fetchFrom(fixture.files),
+        maxResources: 0,
+      }),
+      "invalid-limit",
+    );
+    await expectPackageCode(
+      loadPolyMorphPackage(BASE_URL, {
+        fetchImpl: fetchFrom(fixture.files),
+        requestTimeoutMs: 0,
+      }),
+      "invalid-limit",
+    );
   });
 
   it("normalizes transport failures and rejects dishonest content lengths", async () => {
+    const offline = new Error("offline");
     const throwingFetch = (async () => {
-      throw new Error("offline");
+      throw offline;
     }) as typeof fetch;
-    await expectPackageCode(
+    await expect(
       loadPolyMorphCatalog(BASE_URL, { fetchImpl: throwingFetch }),
-      "request-failed",
-    );
+    ).rejects.toMatchObject({
+      code: "request-failed",
+      cause: offline,
+    });
 
     const statusFetch = (async () => new Response("unavailable", {
       status: 503,
@@ -238,6 +337,17 @@ describe("browser package loading", () => {
       loadPolyMorphCatalog(BASE_URL, { fetchImpl: invalidLengthFetch }),
       "resource-too-large",
     );
+
+    const controller = new AbortController();
+    const abort = new DOMException("cancelled", "AbortError");
+    controller.abort(abort);
+    const abortedFetch = (async (_input, init) => {
+      throw init?.signal?.reason;
+    }) as typeof fetch;
+    await expect(loadPolyMorphCatalog(BASE_URL, {
+      fetchImpl: abortedFetch,
+      signal: controller.signal,
+    })).rejects.toBe(abort);
   });
 
   it("enforces streamed and array-buffer byte limits", async () => {
@@ -251,10 +361,30 @@ describe("browser package loading", () => {
       "resource-too-large",
     );
 
-    const arrayBufferFetch = (async () => ({
+    const arrayBufferWithoutLength = (async () => ({
       ok: true,
       status: 200,
       headers: new Headers(),
+      body: null,
+      arrayBuffer: async () => fixture.builtCatalog.bytes.buffer.slice(
+        fixture.builtCatalog.bytes.byteOffset,
+        fixture.builtCatalog.bytes.byteOffset + fixture.builtCatalog.bytes.byteLength,
+      ),
+    } as Response)) as typeof fetch;
+    await expectPackageCode(
+      loadPolyMorphCatalog(BASE_URL, {
+        fetchImpl: arrayBufferWithoutLength,
+        maxResourceBytes: fixture.builtCatalog.bytes.byteLength,
+      }),
+      "resource-too-large",
+    );
+
+    const arrayBufferFetch = (async () => ({
+      ok: true,
+      status: 200,
+      headers: new Headers({
+        "content-length": String(fixture.builtCatalog.bytes.byteLength),
+      }),
       body: null,
       arrayBuffer: async () => fixture.builtCatalog.bytes.buffer.slice(
         fixture.builtCatalog.bytes.byteOffset,

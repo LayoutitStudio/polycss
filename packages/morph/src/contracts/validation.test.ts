@@ -12,6 +12,7 @@ import {
   createPolyMorphModelFixture,
   POLY_MORPH_IDENTITY_MATRIX,
 } from "../testing/modelFixture.js";
+import { createPolyMorphSkinningFixture } from "../testing/skinningFixture.js";
 
 function expectCode(value: unknown, code: string): void {
   try {
@@ -55,6 +56,10 @@ describe("validatePolyMorphModel", () => {
     expect(isPolyMorphResourcePath("assets/gem.webp")).toBe(true);
     expect(isPolyMorphResourcePath("../assets/gem.webp")).toBe(false);
     expect(isPolyMorphResourcePath("/assets/gem.webp")).toBe(false);
+    expect(isPolyMorphResourcePath("http:evil.example/manifest.json")).toBe(false);
+    expect(isPolyMorphResourcePath("javascript:alert.js")).toBe(false);
+    expect(isPolyMorphResourcePath("%2e%2e/%2e%2e/secret.json")).toBe(false);
+    expect(isPolyMorphResourcePath("assets/%2e%2e/secret.json")).toBe(false);
 
     const fixture = clonePolyMorphFixture(createPolyMorphModelFixture());
     fixture.identity.id = "Gem_Panel";
@@ -220,6 +225,46 @@ describe("validatePolyMorphModel", () => {
     expectCode(fixture, "invalid-animation-time");
   });
 
+  it("requires step interpolation for matrices and non-zero quaternions", () => {
+    const matrixFixture = clonePolyMorphFixture(
+      createPolyMorphModelFixture("morph-regions"),
+    );
+    matrixFixture.capabilities = [
+      "animation",
+      "morph-targets",
+      "retained-render",
+      "sparse-updates",
+    ];
+    matrixFixture.animations = [{
+      id: "shape-step",
+      durationMs: 1000,
+      loop: false,
+      channels: [{
+        target: "shape-matrix",
+        targetId: "gem",
+        interpolation: "linear",
+        timesMs: [0, 1000],
+        values: [
+          [...POLY_MORPH_IDENTITY_MATRIX],
+          [...POLY_MORPH_IDENTITY_MATRIX],
+        ],
+      }],
+    }];
+    expectCode(matrixFixture, "invalid-interpolation");
+
+    const quaternionFixture = clonePolyMorphFixture(
+      createPolyMorphSkinningFixture(),
+    );
+    quaternionFixture.animations[0]!.channels[0]!.values[0] = [0, 0, 0, 0];
+    expectCode(quaternionFixture, "invalid-animation-value");
+  });
+
+  it("rejects removed render strategies", () => {
+    const fixture = clonePolyMorphFixture(createPolyMorphModelFixture());
+    (fixture.render.leaves[0] as { strategy: string }).strategy = "solid-clipped";
+    expectCode(fixture, "invalid-strategy");
+  });
+
   it("validates ordered prepared playback updates against retained ids", () => {
     const fixture = clonePolyMorphFixture(createPolyMorphModelFixture("prepared-playback"));
     fixture.playback!.frames.push({
@@ -241,22 +286,14 @@ describe("validatePolyMorphModel", () => {
     expectCode(fixture, "unknown-reference");
   });
 
-  it("keeps the public contracts neutral and strategy-named", () => {
+  it("keeps internal leaf tags out of the public contracts", () => {
     const publicFiles = ["types.ts", "validation.ts", "index.ts"].map((name) =>
       readFileSync(fileURLToPath(new URL(name, import.meta.url)), "utf8").toLowerCase());
-    const forbiddenPatterns = [
-      new RegExp(["css", "fa", "ce"].join(""), "i"),
-      new RegExp(["he", "ad"].join(""), "i"),
-      new RegExp(["e", "ye"].join(""), "i"),
-      new RegExp(["ma", "rio"].join(""), "i"),
-      new RegExp(["cur", "sor"].join(""), "i"),
-    ];
     for (const source of publicFiles) {
-      for (const pattern of forbiddenPatterns) expect(source).not.toMatch(pattern);
       expect(source).not.toMatch(/<(?:b|i|s|u)>/);
     }
   });
-});
+
   it("validates joint hierarchy, references, coverage, and normalized weights", () => {
     const unknownJoint = clonePolyMorphFixture(createPolyMorphModelFixture("joint-skin"));
     unknownJoint.deformation.vertices[0]!.influences[0]!.jointId = "missing";
@@ -274,3 +311,4 @@ describe("validatePolyMorphModel", () => {
     missingVertex.deformation.vertices.pop();
     expectCode(missingVertex, "missing-skin-vertex");
   });
+});

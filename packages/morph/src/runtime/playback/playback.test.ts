@@ -35,6 +35,7 @@ describe("PolyMorph prepared playback", () => {
       opacity: 0.5,
       atlasRow: 1,
     });
+    runtime.commit(changed);
     expect(runtime.sample(500).update).toEqual({});
   });
 
@@ -42,8 +43,16 @@ describe("PolyMorph prepared playback", () => {
     const left = createPolyMorphPlaybackRuntime(createPolyMorphPlaybackFixture());
     const right = createPolyMorphPlaybackRuntime(createPolyMorphPlaybackFixture());
     const times = [250, 500, 750, 1250, 2000];
-    const leftSamples = times.map((time) => left.sample(time));
-    const rightSamples = times.map((time) => right.sample(time));
+    const leftSamples = times.map((time) => {
+      const sample = left.sample(time);
+      left.commit(sample);
+      return sample;
+    });
+    const rightSamples = times.map((time) => {
+      const sample = right.sample(time);
+      right.commit(sample);
+      return sample;
+    });
     expect(leftSamples).toEqual(rightSamples);
     expect(leftSamples[3]).toMatchObject({
       sampledTimeMs: 250,
@@ -59,12 +68,25 @@ describe("PolyMorph prepared playback", () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
     const mounted = mountPolyMorphModel(host, fixture, {
-      resolveResourceUrl: (path) => `https://assets.example.test/${path}`,
+      resources: new Map([[
+        "assets/gem.webp",
+        {
+          descriptor: {
+            path: "assets/gem.webp",
+            role: "image",
+            mediaType: "image/webp",
+            bytes: 1,
+            sha256: "0".repeat(64),
+          },
+          bytes: new Uint8Array([1]),
+        },
+      ]]),
     });
     const animated = mounted.leafHandles.get("gem-panel-leaf")!.element;
     const stable = mounted.leafHandles.get("static-panel-leaf")!.element;
     const sample = runtime.sample(250);
     const result = mounted.apply(sample.update);
+    runtime.commit(sample);
     expect(result).toMatchObject({
       dirtyLeavesVisited: 1,
       modelTransformWrites: 1,
@@ -81,6 +103,18 @@ describe("PolyMorph prepared playback", () => {
     expect(mounted.leafHandles.get("gem-panel-leaf")!.element).toBe(animated);
     expect(mounted.leafHandles.get("static-panel-leaf")!.element).toBe(stable);
     expect(runtime.sample(500).dirtyLeafIds).toEqual([]);
+  });
+
+  it("commits playback state only after the caller applies a sample", () => {
+    const runtime = createPolyMorphPlaybackRuntime(
+      createPolyMorphPlaybackFixture(),
+    );
+    const first = runtime.sample(250);
+    const retry = runtime.sample(250);
+    expect(retry.update).toEqual(first.update);
+    expect(() => runtime.commit(first)).toThrowError(PolyMorphRuntimeError);
+    runtime.commit(retry);
+    expect(runtime.sample(250).update).toEqual({});
   });
 
   it("rejects malformed packets and invalid image rows", () => {

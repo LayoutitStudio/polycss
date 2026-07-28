@@ -10,6 +10,35 @@ import {
   PolyMorphRenderError,
 } from "./index.js";
 
+function imageResources(paths: readonly string[]) {
+  return new Map(paths.map((path, index) => [
+    path,
+    {
+      descriptor: {
+        path,
+        role: "image" as const,
+        mediaType: "image/png",
+        bytes: 1,
+        sha256: "0".repeat(64),
+      },
+      bytes: new Uint8Array([index]),
+    },
+  ]));
+}
+
+function overrideUserAgent(value: string): () => void {
+  const navigator = document.defaultView!.navigator;
+  const prior = Object.getOwnPropertyDescriptor(navigator, "userAgent");
+  Object.defineProperty(navigator, "userAgent", {
+    configurable: true,
+    value,
+  });
+  return () => {
+    if (prior) Object.defineProperty(navigator, "userAgent", prior);
+    else delete (navigator as Navigator & { userAgent?: string }).userAgent;
+  };
+}
+
 function createTwoLeafFixture() {
   const fixture = clonePolyMorphFixture(createPolyMorphModelFixture());
   fixture.topology.vertices.push([1, 1, 0]);
@@ -23,7 +52,6 @@ function createTwoLeafFixture() {
     id: "cyan",
     color: [0, 0.8, 1, 1],
   });
-  fixture.render.cssText = ".polycss-morph-leaf{pointer-events:none}";
   fixture.render.shapes.push({
     id: "accent",
     matrix: POLY_MORPH_IDENTITY_MATRIX,
@@ -50,6 +78,11 @@ describe("mountPolyMorphModel", () => {
     document.body.replaceChildren();
     host = document.createElement("div");
     document.body.appendChild(host);
+    let objectUrl = 0;
+    vi.spyOn(document.defaultView!.URL, "createObjectURL")
+      .mockImplementation(() => `blob:test-${objectUrl += 1}`);
+    vi.spyOn(document.defaultView!.URL, "revokeObjectURL")
+      .mockImplementation(() => undefined);
   });
 
   afterEach(() => {
@@ -66,9 +99,9 @@ describe("mountPolyMorphModel", () => {
     expect(mounted.leafHandles.get("accent-panel-leaf")?.element.localName).toBe("b");
     expect(mounted.leafHandles.get("gem-panel-leaf")?.element.style.width).toBe("");
     expect(mounted.leafHandles.get("gem-panel-leaf")?.element.style.height).toBe("");
-    expect(mounted.leafHandles.get("accent-panel-leaf")?.element.style.width).toBe("");
-    expect(mounted.leafHandles.get("accent-panel-leaf")?.element.style.height).toBe("");
-    expect(mounted.cameraElement.querySelector("style")?.textContent).toContain("pointer-events");
+    expect(mounted.leafHandles.get("accent-panel-leaf")?.element.style.width).toBe("64px");
+    expect(mounted.leafHandles.get("accent-panel-leaf")?.element.style.height).toBe("64px");
+    expect(mounted.cameraElement.querySelector("style")).toBeNull();
     expect(mounted.stats).toMatchObject({
       mountCount: 1,
       shapeRoots: 2,
@@ -88,6 +121,9 @@ describe("mountPolyMorphModel", () => {
       configurable: true,
       value: { supports: () => false },
     });
+    const restoreUserAgent = overrideUserAgent(
+      "Mozilla/5.0 Version/18.0 Safari/605.1.15",
+    );
     try {
       const fixture = createTwoLeafFixture();
       fixture.render.leaves[1]!.strategy = "solid-triangle";
@@ -126,11 +162,11 @@ describe("mountPolyMorphModel", () => {
           pageHeight: 11,
         },
       };
-      const resolver = vi.fn(
-        (path: string) => `https://assets.example.test/${path}`,
-      );
       const mounted = mountPolyMorphModel(host, fixture, {
-        resolveResourceUrl: resolver,
+        resources: imageResources([
+          "assets/solid-triangles-000.png",
+          "assets/solid-triangles-001.png",
+        ]),
       });
       const leaves = [...mounted.leafHandles.values()].map(({ element }) => element);
       expect(leaves.every((element) => element.localName === "s")).toBe(true);
@@ -139,22 +175,19 @@ describe("mountPolyMorphModel", () => {
         && element.style.backgroundColor === "currentcolor")).toBe(true);
       expect(leaves.map((element) =>
         element.style.getPropertyValue("mask-image"))).toEqual([
-        'url("https://assets.example.test/assets/solid-triangles-000.png")',
-        'url("https://assets.example.test/assets/solid-triangles-001.png")',
+        'url("blob:test-1")',
+        'url("blob:test-2")',
       ]);
       expect(leaves.map((element) =>
         element.style.getPropertyValue("-webkit-mask-image"))).toEqual([
-        'url("https://assets.example.test/assets/solid-triangles-000.png")',
-        'url("https://assets.example.test/assets/solid-triangles-001.png")',
+        'url("blob:test-1")',
+        'url("blob:test-2")',
       ]);
       expect(leaves.map((element) => [
         element.style.width,
         element.style.height,
       ])).toEqual([["7px", "5px"], ["11px", "9px"]]);
-      expect(resolver.mock.calls).toEqual([
-        ["assets/solid-triangles-000.png"],
-        ["assets/solid-triangles-001.png"],
-      ]);
+      expect(document.defaultView!.URL.createObjectURL).toHaveBeenCalledTimes(2);
       const translated = [...POLY_MORPH_IDENTITY_MATRIX] as number[];
       translated[12] = 10;
       expect(mounted.apply({
@@ -169,6 +202,7 @@ describe("mountPolyMorphModel", () => {
       mounted.assertStableDomIdentity();
       expect(mounted.stats.atlasConstructions).toBe(0);
     } finally {
+      restoreUserAgent();
       Object.defineProperty(view, "CSS", {
         configurable: true,
         value: priorCss,
@@ -185,12 +219,41 @@ describe("mountPolyMorphModel", () => {
       configurable: true,
       value: { supports: () => false },
     });
+    const restoreUserAgent = overrideUserAgent(
+      "Mozilla/5.0 Version/18.0 Safari/605.1.15",
+    );
     try {
       expect(() =>
         mountPolyMorphModel(host, createPolyMorphModelFixture())
       ).toThrowError(PolyMorphRenderError);
       expect(host.childElementCount).toBe(0);
     } finally {
+      restoreUserAgent();
+      Object.defineProperty(view, "CSS", {
+        configurable: true,
+        value: priorCss,
+      });
+    }
+  });
+
+  it("keeps Firefox on the native border-triangle path", () => {
+    const view = document.defaultView as Window & {
+      CSS?: { supports(property: string, value: string): boolean };
+    };
+    const priorCss = view.CSS;
+    Object.defineProperty(view, "CSS", {
+      configurable: true,
+      value: { supports: () => false },
+    });
+    const restoreUserAgent = overrideUserAgent(
+      "Mozilla/5.0 Firefox/141.0",
+    );
+    try {
+      const mounted = mountPolyMorphModel(host, createPolyMorphModelFixture());
+      expect(mounted.leafHandles.get("gem-panel-leaf")!.element.localName).toBe("u");
+      expect(document.defaultView!.URL.createObjectURL).not.toHaveBeenCalled();
+    } finally {
+      restoreUserAgent();
       Object.defineProperty(view, "CSS", {
         configurable: true,
         value: priorCss,
@@ -284,15 +347,16 @@ describe("mountPolyMorphModel", () => {
       pageWidth: 4,
       pageHeight: 8,
     };
-    const resolver = vi.fn((path: string) => `https://assets.example.test/${path}`);
-    const mounted = mountPolyMorphModel(host, fixture, { resolveResourceUrl: resolver });
+    const mounted = mountPolyMorphModel(host, fixture, {
+      resources: imageResources(["assets/gem.webp"]),
+    });
     const element = mounted.leafHandles.get("gem-panel-leaf")!.element;
     expect(element.localName).toBe("s");
     expect(element.style.width).toBe("4px");
     expect(element.style.height).toBe("4px");
-    expect(element.style.backgroundImage).toContain("gem.webp");
+    expect(element.style.backgroundImage).toContain("blob:test-1");
     expect(element.style.backfaceVisibility).toBe("visible");
-    expect(resolver).toHaveBeenCalledOnce();
+    expect(document.defaultView!.URL.createObjectURL).toHaveBeenCalledOnce();
 
     expect(mounted.apply({
       leaves: [{ leafId: "gem-panel-leaf", atlasRow: 1 }],
@@ -302,6 +366,9 @@ describe("mountPolyMorphModel", () => {
       leaves: [{ leafId: "gem-panel-leaf", atlasRow: 2 }],
     })).toThrowError(PolyMorphRenderError);
     expect(mounted.stats.atlasConstructions).toBe(0);
+    mounted.destroy();
+    expect(document.defaultView!.URL.revokeObjectURL)
+      .toHaveBeenCalledWith("blob:test-1");
   });
 
   it("rejects incomplete plans and unknown update handles", () => {
@@ -310,13 +377,30 @@ describe("mountPolyMorphModel", () => {
     expect(() => mountPolyMorphModel(host, incomplete)).toThrowError(PolyMorphContractError);
     expect(host.childElementCount).toBe(0);
 
-    const mounted = mountPolyMorphModel(host, createPolyMorphModelFixture());
+    const mounted = mountPolyMorphModel(host, createTwoLeafFixture());
     expect(() => mounted.apply({
       shapes: [{ shapeId: "missing-shape", matrix: POLY_MORPH_IDENTITY_MATRIX }],
     })).toThrowError(PolyMorphRenderError);
     expect(() => mounted.apply({
       leaves: [{ leafId: "missing-leaf", visible: false }],
     })).toThrowError(PolyMorphRenderError);
+
+    const translated = [...POLY_MORPH_IDENTITY_MATRIX] as number[];
+    translated[12] = 9;
+    const accent = mounted.leafHandles.get("accent-panel-leaf")!.element;
+    const before = accent.style.transform;
+    const applyCount = mounted.stats.applyCount;
+    expect(() => mounted.apply({
+      leaves: [
+        {
+          leafId: "accent-panel-leaf",
+          matrix: translated as typeof POLY_MORPH_IDENTITY_MATRIX,
+        },
+        { leafId: "gem-panel-leaf", atlasRow: 1 },
+      ],
+    })).toThrowError(PolyMorphRenderError);
+    expect(accent.style.transform).toBe(before);
+    expect(mounted.stats.applyCount).toBe(applyCount);
   });
 
   it("never schedules animation and destroys idempotently", () => {
@@ -328,12 +412,14 @@ describe("mountPolyMorphModel", () => {
     });
     try {
       const mounted = mountPolyMorphModel(host, createPolyMorphModelFixture());
+      expect(host.style.position).toBe("relative");
       mounted.apply({});
       expect(requestFrame).not.toHaveBeenCalled();
       mounted.destroy();
       mounted.destroy();
       expect(mounted.destroyed).toBe(true);
       expect(host.childElementCount).toBe(0);
+      expect(host.style.position).toBe("");
       expect(() => mounted.assertStableDomIdentity()).toThrowError(PolyMorphRenderError);
     } finally {
       Object.defineProperty(globalThis, "requestAnimationFrame", {

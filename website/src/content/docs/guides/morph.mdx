@@ -49,11 +49,11 @@ import {
   mountPolyMorphModel,
 } from "@layoutit/polycss-morph";
 
-const { model } = await loadPolyMorphPackage("/model/");
-const mounted = mountPolyMorphModel(host, model, {
-  resolveResourceUrl: (path) => `/model/package/${path}`,
+const loaded = await loadPolyMorphPackage("/model/");
+const mounted = mountPolyMorphModel(host, loaded.model, {
+  resources: loaded.resources,
 });
-const deformation = createPolyMorphDeformationRuntime(model);
+const deformation = createPolyMorphDeformationRuntime(loaded.model);
 const frame = deformation.sample({
   tick: 0,
   morphWeights: { "pin-c06-r04-lift": 0.5 },
@@ -64,6 +64,8 @@ mounted.apply({ leaves: frame.leafUpdates });
 
 The same imperative API is used from vanilla, React, or Vue applications.
 Morph does not ship framework wrappers.
+Prepared playback commits explicitly: apply `sample.update`, then call
+`runtime.commit(sample)` only after `mounted.apply(...)` succeeds.
 
 ## Executable profiles
 
@@ -85,9 +87,11 @@ Mount once, then sample and apply:
 - sparse samples visit only affected leaves;
 - runtime updates do not reconstruct topology or redraw prepared image resources.
 
-Supporting browsers use the native CSS triangle primitive. Firefox and other
-browsers without the corner-shape primitive use each leaf's prepared
-polygon-sized alpha-atlas slice instead; the browser never generates or redraws
+Supporting browsers, including Firefox, use a native CSS triangle primitive.
+WebKit/Safari and other browsers without a supported primitive use each leaf's
+prepared polygon-sized alpha-atlas slice instead. Mount uses the loader's
+verified image bytes and revokes their object URLs at teardown; the browser
+never refetches, generates, or redraws
 those pages. Dedicated tooling may also author other image-backed strategies,
 including prepared-playback consumers.
 

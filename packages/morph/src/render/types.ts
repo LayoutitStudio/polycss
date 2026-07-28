@@ -7,6 +7,7 @@ import type {
   PolyOrthographicCameraHandle,
   PolyPerspectiveCameraHandle,
 } from "@layoutit/polycss";
+import type { PolyMorphLoadedResource } from "../package/index.js";
 
 export type PolyMorphCamera =
   | PolyOrthographicCameraHandle
@@ -14,7 +15,7 @@ export type PolyMorphCamera =
 
 export interface PolyMorphMountOptions {
   readonly camera?: PolyMorphCamera;
-  readonly resolveResourceUrl?: (path: string) => string;
+  readonly resources?: ReadonlyMap<string, PolyMorphLoadedResource>;
 }
 
 export interface PolyMorphShapeUpdate {

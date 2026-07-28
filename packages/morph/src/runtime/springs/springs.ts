@@ -30,6 +30,56 @@ function fail(code: string, path: string, message: string): never {
   throw new PolyMorphRuntimeError(code, path, message);
 }
 
+function integrateSpring(
+  displacement: number,
+  velocity: number,
+  stiffness: number,
+  damping: number,
+  deltaSeconds: number,
+): readonly [number, number] {
+  const discriminant = damping * damping - 4 * stiffness;
+  const criticalTolerance = 1e-9 * Math.max(1, damping * damping, stiffness);
+  if (Math.abs(discriminant) <= criticalTolerance) {
+    const decay = damping / 2;
+    const slope = velocity + decay * displacement;
+    const envelope = Math.exp(-decay * deltaSeconds);
+    return [
+      envelope * (displacement + slope * deltaSeconds),
+      envelope * (velocity - decay * slope * deltaSeconds),
+    ];
+  }
+  if (discriminant < 0) {
+    const decay = damping / 2;
+    const frequency = Math.sqrt(stiffness - decay * decay);
+    const angle = frequency * deltaSeconds;
+    const cosine = Math.cos(angle);
+    const sine = Math.sin(angle);
+    const envelope = Math.exp(-decay * deltaSeconds);
+    return [
+      envelope * (
+        displacement * cosine
+        + ((velocity + decay * displacement) / frequency) * sine
+      ),
+      envelope * (
+        velocity * cosine
+        - ((decay * velocity + stiffness * displacement) / frequency) * sine
+      ),
+    ];
+  }
+  const root = Math.sqrt(discriminant);
+  const firstRate = (-damping + root) / 2;
+  const secondRate = (-damping - root) / 2;
+  const firstWeight = (velocity - secondRate * displacement)
+    / (firstRate - secondRate);
+  const secondWeight = displacement - firstWeight;
+  const firstTerm = firstWeight * Math.exp(firstRate * deltaSeconds);
+  const secondTerm = secondWeight * Math.exp(secondRate * deltaSeconds);
+  return [
+    firstTerm + secondTerm,
+    firstRate * firstTerm + secondRate * secondTerm,
+  ];
+}
+
 export function createPolyMorphSpringRuntime(modelInput: unknown): PolyMorphSpringRuntime {
   const model = validatePolyMorphModel(modelInput);
   const springs = new Map<string, PolyMorphSpring>();
@@ -104,10 +154,18 @@ export function stepPolyMorphSprings(
     } else {
       const spring = runtime.springs.get(id)!;
       const displacement = priorValue - control.initial;
-      const acceleration = -spring.stiffness * displacement - spring.damping * priorVelocity;
-      let velocity = priorVelocity + acceleration * dt;
-      let value = priorValue + velocity * dt;
-      value = Math.max(control.minimum, Math.min(control.maximum, value));
+      const [nextDisplacement, nextVelocity] = integrateSpring(
+        displacement,
+        priorVelocity,
+        spring.stiffness,
+        spring.damping,
+        dt,
+      );
+      let velocity = nextVelocity;
+      let value = control.initial + nextDisplacement;
+      const clamped = Math.max(control.minimum, Math.min(control.maximum, value));
+      if (clamped !== value) velocity = 0;
+      value = clamped;
       if (Math.abs(value - control.initial) < 1e-6 && Math.abs(velocity) < 1e-6) {
         value = control.initial;
         velocity = 0;

@@ -210,7 +210,7 @@ export function parsePolyMorphPrepareConfig(value: unknown): PolyMorphPrepareCon
         text(sourceName, "$.morphAliases key"),
         id(targetId, `$.morphAliases.${sourceName}`),
       ])
-      .sort(([left], [right]) => left.localeCompare(right)),
+      .sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0),
   );
   if (new Set(Object.values(morphAliases)).size !== Object.keys(morphAliases).length) {
     failPolyMorphPrepare(

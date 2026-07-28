@@ -8,16 +8,22 @@ import {
   validatePolyMorphPackageManifest,
   type PolyMorphCatalog,
   type PolyMorphLoadedPackage,
+  type PolyMorphLoadedResource,
+  type PolyMorphResourceDescriptor,
 } from "../package/index.js";
 
 const DEFAULT_MAX_RESOURCE_BYTES = 64 * 1024 * 1024;
+const DEFAULT_MAX_RESOURCES = 1024;
 const DEFAULT_MAX_TOTAL_BYTES = 128 * 1024 * 1024;
+const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 
 export interface PolyMorphLoadOptions {
   readonly fetchImpl?: typeof fetch;
   readonly modelId?: string;
   readonly maxResourceBytes?: number;
+  readonly maxResources?: number;
   readonly maxTotalBytes?: number;
+  readonly requestTimeoutMs?: number;
   readonly signal?: AbortSignal;
 }
 
@@ -86,6 +92,13 @@ async function readBounded(
     }
     return bytes;
   }
+  if (header === null) {
+    throw new PolyMorphPackageError(
+      "resource-too-large",
+      path,
+      "content-length is required without a readable body",
+    );
+  }
   const bytes = new Uint8Array(await response.arrayBuffer());
   if (bytes.byteLength > maximum) {
     throw new PolyMorphPackageError("resource-too-large", path, `bytes exceed ${maximum}`);
@@ -98,12 +111,20 @@ async function requestBytes(
   url: URL,
   maximum: number,
   signal: AbortSignal | undefined,
+  timeoutMs: number,
 ): Promise<Uint8Array> {
+  const requestSignal = signal ?? AbortSignal.timeout(timeoutMs);
   let response: Response;
   try {
-    response = await fetchImpl(url, { cache: "no-store", signal });
-  } catch {
-    throw new PolyMorphPackageError("request-failed", url.pathname, "request failed");
+    response = await fetchImpl(url, { cache: "no-store", signal: requestSignal });
+  } catch (cause) {
+    if (requestSignal.aborted) throw cause;
+    throw new PolyMorphPackageError(
+      "request-failed",
+      url.pathname,
+      "request failed",
+      { cause },
+    );
   }
   if (!response.ok) {
     throw new PolyMorphPackageError("request-failed", url.pathname, `HTTP ${response.status}`);
@@ -120,12 +141,30 @@ async function assertHash(bytes: Uint8Array, expected: string, path: string): Pr
 
 function packageRoot(baseUrl: URL, manifestPath: string): URL {
   const slash = manifestPath.lastIndexOf("/");
-  return new URL(manifestPath.slice(0, slash + 1), baseUrl);
+  return resolvePackageUrl(baseUrl, manifestPath.slice(0, slash + 1));
+}
+
+function resolvePackageUrl(baseUrl: URL, path: string): URL {
+  const resolved = new URL(path, baseUrl);
+  if (
+    resolved.origin !== baseUrl.origin
+    || !resolved.href.startsWith(baseUrl.href)
+  ) {
+    throw new PolyMorphPackageError(
+      "invalid-path",
+      path,
+      "package path escapes its base URL",
+    );
+  }
+  return resolved;
 }
 
 export async function loadPolyMorphCatalog(
   baseUrl: string,
-  options: Omit<PolyMorphLoadOptions, "modelId" | "maxTotalBytes"> = {},
+  options: Omit<
+    PolyMorphLoadOptions,
+    "maxResources" | "maxTotalBytes" | "modelId"
+  > = {},
 ): Promise<{ readonly catalog: PolyMorphCatalog; readonly bytes: Uint8Array; readonly sha256: string }> {
   const base = resolveBaseUrl(baseUrl);
   const maximum = boundedInteger(
@@ -137,7 +176,18 @@ export async function loadPolyMorphCatalog(
   if (typeof fetchImpl !== "function") {
     throw new PolyMorphPackageError("missing-fetch", "$.fetchImpl", "a fetch implementation is required");
   }
-  const bytes = await requestBytes(fetchImpl, new URL("catalog.json", base), maximum, options.signal);
+  const timeoutMs = boundedInteger(
+    options.requestTimeoutMs,
+    DEFAULT_REQUEST_TIMEOUT_MS,
+    "$.requestTimeoutMs",
+  );
+  const bytes = await requestBytes(
+    fetchImpl,
+    resolvePackageUrl(base, "catalog.json"),
+    maximum,
+    options.signal,
+    timeoutMs,
+  );
   const catalog = validatePolyMorphCatalog(decodePolyMorphJson(bytes, "$.catalog"));
   return { catalog, bytes, sha256: await hashPolyMorphBytes(bytes) };
 }
@@ -152,10 +202,20 @@ export async function loadPolyMorphPackage(
     DEFAULT_MAX_RESOURCE_BYTES,
     "$.maxResourceBytes",
   );
+  const maxResources = boundedInteger(
+    options.maxResources,
+    DEFAULT_MAX_RESOURCES,
+    "$.maxResources",
+  );
   const maxTotalBytes = boundedInteger(
     options.maxTotalBytes,
     DEFAULT_MAX_TOTAL_BYTES,
     "$.maxTotalBytes",
+  );
+  const requestTimeoutMs = boundedInteger(
+    options.requestTimeoutMs,
+    DEFAULT_REQUEST_TIMEOUT_MS,
+    "$.requestTimeoutMs",
   );
   const fetchImpl = options.fetchImpl ?? globalThis.fetch;
   if (typeof fetchImpl !== "function") {
@@ -164,6 +224,7 @@ export async function loadPolyMorphPackage(
   const loadedCatalog = await loadPolyMorphCatalog(base.href, {
     fetchImpl,
     maxResourceBytes,
+    requestTimeoutMs,
     signal: options.signal,
   });
   const selected = options.modelId ?? loadedCatalog.catalog.defaultId;
@@ -171,9 +232,10 @@ export async function loadPolyMorphPackage(
   if (!row) throw new PolyMorphPackageError("unknown-package", "$.modelId", selected);
   const manifestBytes = await requestBytes(
     fetchImpl,
-    new URL(row.manifestPath, base),
+    resolvePackageUrl(base, row.manifestPath),
     maxResourceBytes,
     options.signal,
+    requestTimeoutMs,
   );
   await assertHash(manifestBytes, row.manifestSha256, row.manifestPath);
   const manifest = validatePolyMorphPackageManifest(
@@ -192,7 +254,13 @@ export async function loadPolyMorphPackage(
     );
   }
   const root = packageRoot(base, row.manifestPath);
-  const resources = new Map();
+  if (manifest.resources.length > maxResources) {
+    throw new PolyMorphPackageError(
+      "package-too-large",
+      "$.manifest.resources",
+      `${manifest.resources.length} resources exceed ${maxResources}`,
+    );
+  }
   let totalBytes = 0;
   for (const descriptor of manifest.resources) {
     if (descriptor.bytes > maxResourceBytes) {
@@ -210,11 +278,17 @@ export async function loadPolyMorphPackage(
         `declared package bytes exceed ${maxTotalBytes}`,
       );
     }
+  }
+  const resources = new Map<string, PolyMorphLoadedResource>();
+  const loadResource = async (
+    descriptor: PolyMorphResourceDescriptor,
+  ): Promise<PolyMorphLoadedResource> => {
     const bytes = await requestBytes(
       fetchImpl,
-      new URL(descriptor.path, root),
+      resolvePackageUrl(root, descriptor.path),
       Math.min(maxResourceBytes, descriptor.bytes),
       options.signal,
+      requestTimeoutMs,
     );
     if (bytes.byteLength !== descriptor.bytes) {
       throw new PolyMorphPackageError(
@@ -224,16 +298,35 @@ export async function loadPolyMorphPackage(
       );
     }
     await assertHash(bytes, descriptor.sha256, descriptor.path);
-    resources.set(descriptor.path, { descriptor, bytes });
-  }
-  const modelResource = resources.get(manifest.modelPath);
-  if (!modelResource) {
-    throw new PolyMorphPackageError("missing-resource", manifest.modelPath, "model is missing");
-  }
+    return { descriptor, bytes };
+  };
+  const modelDescriptor = manifest.resources.find(
+    (descriptor) => descriptor.path === manifest.modelPath,
+  )!;
+  const modelResource = await loadResource(modelDescriptor);
+  resources.set(modelDescriptor.path, modelResource);
   const model = validatePolyMorphModel(
     decodePolyMorphJson(modelResource.bytes, "$.model"),
   );
   assertPolyMorphPackageModelBinding(manifest, model);
+  if (manifest.resources.length > model.budgets.maxResources) {
+    throw new PolyMorphPackageError(
+      "budget-exceeded",
+      "$.budgets.maxResources",
+      `${manifest.resources.length} resources exceed ${model.budgets.maxResources}`,
+    );
+  }
+  if (totalBytes > model.budgets.maxBytes) {
+    throw new PolyMorphPackageError(
+      "budget-exceeded",
+      "$.budgets.maxBytes",
+      `${totalBytes} bytes exceed ${model.budgets.maxBytes}`,
+    );
+  }
+  for (const descriptor of manifest.resources) {
+    if (descriptor === modelDescriptor) continue;
+    resources.set(descriptor.path, await loadResource(descriptor));
+  }
   const imagePaths = new Set(model.render.leaves.flatMap((leaf) => [
     ...(leaf.atlas ? [leaf.atlas.resourcePath] : []),
     ...(leaf.fallback ? [leaf.fallback.atlas.resourcePath] : []),
