@@ -67,6 +67,12 @@ Morph does not ship framework wrappers.
 Prepared playback commits explicitly: apply `sample.update`, then call
 `runtime.commit(sample)` only after `mounted.apply(...)` succeeds.
 
+If an application already owns a retained DOM graph,
+`createPolyMorphPreparedDomTarget` adopts its source-ordered model, shape, and
+leaf elements as indexed write targets. Morph deduplicates requested values and
+invalidates the writers at destroy; the application retains DOM teardown
+ownership.
+
 ## Executable profiles
 
 | Profile | Behavior |

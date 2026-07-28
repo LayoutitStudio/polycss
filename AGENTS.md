@@ -128,6 +128,10 @@ React or Vue wrappers.
   prepared packages, mounts one retained PolyCSS graph, and exposes
   caller-driven runtimes for morphs, controls, springs, animation, skinning,
   and prepared playback.
+- `createPolyMorphPreparedDomTarget` adopts a caller-owned retained graph as
+  source-ordered model, shape, and leaf targets. It tracks requested values for
+  sparse write deduplication, preserves element identity, invalidates writers
+  when destroyed, and leaves DOM teardown to the caller.
 - A mount uses PolyCSS's public solid-triangle support check, so Firefox keeps
   its border-triangle path while WebKit/Safari selects each leaf's prepared
   polygon-sized atlas slice. Image paint comes only from loader-verified bytes:
