@@ -37,6 +37,9 @@ jobs:
       - name: Run tests
         run: pnpm test
 
+      - name: Enforce Morph coverage
+        run: pnpm --filter @layoutit/polycss-morph test:coverage
+
       - name: Build packages (DTS + JS)
         run: pnpm build:packages
 

@@ -91,6 +91,20 @@ async function expectLoadCode(
   throw new Error(`Expected ${code}.`);
 }
 
+async function expectPackageCode(
+  action: Promise<unknown>,
+  code: string,
+): Promise<void> {
+  try {
+    await action;
+  } catch (error) {
+    expect(error).toBeInstanceOf(PolyMorphPackageError);
+    expect((error as PolyMorphPackageError).code).toBe(code);
+    return;
+  }
+  throw new Error(`Expected ${code}.`);
+}
+
 describe("browser package loading", () => {
   it("loads and binds catalog, manifest, model, and resource hashes", async () => {
     const fixture = await createLoadFixture();
@@ -157,6 +171,118 @@ describe("browser package loading", () => {
       maxResourceBytes: 1_000_000,
       maxTotalBytes: total.builtPackage.manifest.resources[0]!.bytes,
     });
+  });
+
+  it.each([
+    null,
+    "",
+    "https://assets.example.test\\morph",
+    "https://assets.example.test/morph#fragment",
+    "https://assets.example.test/morph?query=1",
+    "file:///tmp/morph/",
+    "http://[",
+  ])("rejects unsafe base URLs: %s", async (baseUrl) => {
+    await expectPackageCode(
+      loadPolyMorphCatalog(baseUrl as string, { fetchImpl: fetchFrom(new Map()) }),
+      "invalid-base-url",
+    );
+  });
+
+  it("normalizes a missing trailing slash", async () => {
+    const fixture = await createLoadFixture();
+    const loaded = await loadPolyMorphCatalog(BASE_URL.slice(0, -1), {
+      fetchImpl: fetchFrom(fixture.files),
+    });
+    expect(loaded.sha256).toBe(fixture.builtCatalog.sha256);
+  });
+
+  it("rejects invalid resource and package limits", async () => {
+    const fixture = await createLoadFixture();
+    await expectPackageCode(
+      loadPolyMorphCatalog(BASE_URL, {
+        fetchImpl: fetchFrom(fixture.files),
+        maxResourceBytes: 0,
+      }),
+      "invalid-limit",
+    );
+    await expectPackageCode(
+      loadPolyMorphPackage(BASE_URL, {
+        fetchImpl: fetchFrom(fixture.files),
+        maxTotalBytes: 1.5,
+      }),
+      "invalid-limit",
+    );
+  });
+
+  it("normalizes transport failures and rejects dishonest content lengths", async () => {
+    const throwingFetch = (async () => {
+      throw new Error("offline");
+    }) as typeof fetch;
+    await expectPackageCode(
+      loadPolyMorphCatalog(BASE_URL, { fetchImpl: throwingFetch }),
+      "request-failed",
+    );
+
+    const statusFetch = (async () => new Response("unavailable", {
+      status: 503,
+    })) as typeof fetch;
+    await expectPackageCode(
+      loadPolyMorphCatalog(BASE_URL, { fetchImpl: statusFetch }),
+      "request-failed",
+    );
+
+    const invalidLengthFetch = (async () => new Response("{}", {
+      headers: { "content-length": "not-a-number" },
+    })) as typeof fetch;
+    await expectPackageCode(
+      loadPolyMorphCatalog(BASE_URL, { fetchImpl: invalidLengthFetch }),
+      "resource-too-large",
+    );
+  });
+
+  it("enforces streamed and array-buffer byte limits", async () => {
+    const fixture = await createLoadFixture();
+    const streamedFetch = (async () => new Response(fixture.builtCatalog.bytes)) as typeof fetch;
+    await expectPackageCode(
+      loadPolyMorphCatalog(BASE_URL, {
+        fetchImpl: streamedFetch,
+        maxResourceBytes: fixture.builtCatalog.bytes.byteLength - 1,
+      }),
+      "resource-too-large",
+    );
+
+    const arrayBufferFetch = (async () => ({
+      ok: true,
+      status: 200,
+      headers: new Headers(),
+      body: null,
+      arrayBuffer: async () => fixture.builtCatalog.bytes.buffer.slice(
+        fixture.builtCatalog.bytes.byteOffset,
+        fixture.builtCatalog.bytes.byteOffset + fixture.builtCatalog.bytes.byteLength,
+      ),
+    } as Response)) as typeof fetch;
+    await expectPackageCode(
+      loadPolyMorphCatalog(BASE_URL, {
+        fetchImpl: arrayBufferFetch,
+        maxResourceBytes: fixture.builtCatalog.bytes.byteLength - 1,
+      }),
+      "resource-too-large",
+    );
+    await expect(
+      loadPolyMorphCatalog(BASE_URL, {
+        fetchImpl: arrayBufferFetch,
+        maxResourceBytes: fixture.builtCatalog.bytes.byteLength,
+      }),
+    ).resolves.toMatchObject({ sha256: fixture.builtCatalog.sha256 });
+  });
+
+  it("rejects resources whose delivered size differs from the manifest", async () => {
+    const fixture = await createLoadFixture();
+    fixture.files.set(
+      `${BASE_URL}models/morph-gem/assets/gem.bin`,
+      new Uint8Array([2, 7, 1]),
+    );
+    await expectLoadCode(fixture, "stale-size");
   });
 
   it("keeps the loader free of product paths and Node-only dependencies", () => {

@@ -9,6 +9,11 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
 import { compilePolyMorphSource } from "./compile.js";
+import {
+  parsePolyMorphPrepareConfig,
+  readPolyMorphPrepareConfig,
+  resolvePolyMorphSourcePath,
+} from "./config.js";
 import { PolyMorphPrepareError } from "./error.js";
 import { loadPolyMorphGltf } from "./gltf.js";
 import { preparePolyMorphModel } from "./prepare.js";
@@ -199,6 +204,60 @@ function fixtureConfig(sourcePath = "kite.glb") {
       maxBytes: 1_000_000,
     },
   };
+}
+
+type MutablePrepareConfig = ReturnType<typeof fixtureConfig>;
+type MutableGltfDocument = Record<string, any>;
+
+function expectPrepareFailure(
+  action: () => unknown,
+  code: string,
+  path?: string,
+): void {
+  try {
+    action();
+  } catch (error) {
+    expect(error).toBeInstanceOf(PolyMorphPrepareError);
+    expect(error).toMatchObject({
+      code,
+      ...(path ? { path } : {}),
+    });
+    return;
+  }
+  throw new Error(`Expected ${code}.`);
+}
+
+async function expectPrepareRejection(
+  action: Promise<unknown>,
+  code: string,
+  path?: string,
+): Promise<void> {
+  try {
+    await action;
+  } catch (error) {
+    expect(error).toBeInstanceOf(PolyMorphPrepareError);
+    expect(error).toMatchObject({
+      code,
+      ...(path ? { path } : {}),
+    });
+    return;
+  }
+  throw new Error(`Expected ${code}.`);
+}
+
+async function writeEmbeddedGltf(
+  root: string,
+  name: string,
+  mutate: (document: MutableGltfDocument) => void = () => {},
+): Promise<string> {
+  const binary = fixtureBinary();
+  const document = fixtureDocument(binary.byteLength) as MutableGltfDocument;
+  document.buffers[0].uri =
+    `data:application/octet-stream;base64,${Buffer.from(binary).toString("base64")}`;
+  mutate(document);
+  const sourcePath = join(root, `${name}.gltf`);
+  await writeFile(sourcePath, JSON.stringify(document));
+  return sourcePath;
 }
 
 function mixedSizeConfig(): PolyMorphPrepareConfig {
@@ -474,6 +533,243 @@ describe("compilePolyMorphSource", () => {
   });
 });
 
+describe("prepare config validation", () => {
+  it("accepts both generic authoring profiles and resolves local sources", () => {
+    const morph = fixtureConfig();
+    (morph.morphAliases as Record<string, string>).Bend = "bend";
+    const parsedMorph = parsePolyMorphPrepareConfig(morph);
+    expect(Object.keys(parsedMorph.morphAliases)).toEqual(["Bend", "Lift"]);
+
+    const staticPrepared = fixtureConfig();
+    staticPrepared.profile = "static-prepared";
+    staticPrepared.source.kind = "open-data";
+    staticPrepared.transform.axes = ["z", "x", "y"];
+    staticPrepared.transform.signs = [-1, 1, -1];
+    staticPrepared.transform.center = false;
+    staticPrepared.morphAliases = {} as MutablePrepareConfig["morphAliases"];
+    expect(parsePolyMorphPrepareConfig(staticPrepared)).toMatchObject({
+      profile: "static-prepared",
+      source: { kind: "open-data" },
+      transform: { center: false },
+      morphAliases: {},
+    });
+
+    expect(resolvePolyMorphSourcePath("/tmp/morph/prepare.json", "model/kite.glb"))
+      .toBe("/tmp/morph/model/kite.glb");
+  });
+
+  const invalidCases: readonly {
+    readonly name: string;
+    readonly code: string;
+    readonly path: string;
+    readonly mutate: (config: MutablePrepareConfig) => void;
+  }[] = [
+    {
+      name: "unknown root keys",
+      code: "invalid-config",
+      path: "$",
+      mutate: (config) => {
+        (config as unknown as Record<string, unknown>).atlas = {};
+      },
+    },
+    {
+      name: "schema revisions",
+      code: "invalid-config",
+      path: "$.schema",
+      mutate: (config) => {
+        config.schema = "polycss-morph.prepare@2";
+      },
+    },
+    {
+      name: "unnormalized ids",
+      code: "invalid-config",
+      path: "$.identity.id",
+      mutate: (config) => {
+        config.identity.id = "Morph Kite";
+      },
+    },
+    {
+      name: "blank names",
+      code: "invalid-config",
+      path: "$.identity.name",
+      mutate: (config) => {
+        config.identity.name = " ";
+      },
+    },
+    {
+      name: "non-semver revisions",
+      code: "invalid-config",
+      path: "$.identity.revision",
+      mutate: (config) => {
+        config.identity.revision = "v1";
+      },
+    },
+    {
+      name: "unsupported profiles",
+      code: "invalid-config",
+      path: "$.profile",
+      mutate: (config) => {
+        config.profile = "joint-skin";
+      },
+    },
+    {
+      name: "unknown source kinds",
+      code: "invalid-config",
+      path: "$.source.kind",
+      mutate: (config) => {
+        config.source.kind = "private";
+      },
+    },
+    {
+      name: "absolute source paths",
+      code: "unsafe-path",
+      path: "$.source.path",
+      mutate: (config) => {
+        config.source.path = "/tmp/kite.glb";
+      },
+    },
+    {
+      name: "parent source paths",
+      code: "unsafe-path",
+      path: "$.source.path",
+      mutate: (config) => {
+        config.source.path = "../kite.glb";
+      },
+    },
+    {
+      name: "filesystem source URIs",
+      code: "invalid-config",
+      path: "$.source.uri",
+      mutate: (config) => {
+        config.source.uri = "file:///tmp/kite.glb";
+      },
+    },
+    {
+      name: "duplicate axes",
+      code: "invalid-config",
+      path: "$.transform.axes",
+      mutate: (config) => {
+        config.transform.axes = ["x", "x", "z"];
+      },
+    },
+    {
+      name: "invalid axis signs",
+      code: "invalid-config",
+      path: "$.transform.signs",
+      mutate: (config) => {
+        config.transform.signs = [1, 0, 1];
+      },
+    },
+    {
+      name: "non-positive scales",
+      code: "invalid-config",
+      path: "$.transform.scale",
+      mutate: (config) => {
+        config.transform.scale = 0;
+      },
+    },
+    {
+      name: "non-boolean centering",
+      code: "invalid-config",
+      path: "$.transform.center",
+      mutate: (config) => {
+        config.transform.center = "yes" as unknown as boolean;
+      },
+    },
+    {
+      name: "duplicate target aliases",
+      code: "invalid-config",
+      path: "$.morphAliases",
+      mutate: (config) => {
+        (config.morphAliases as Record<string, string>).Bend = "lift";
+      },
+    },
+    {
+      name: "morph profiles without aliases",
+      code: "invalid-config",
+      path: "$.morphAliases",
+      mutate: (config) => {
+        config.morphAliases = {} as MutablePrepareConfig["morphAliases"];
+      },
+    },
+    {
+      name: "static profiles with aliases",
+      code: "invalid-config",
+      path: "$.morphAliases",
+      mutate: (config) => {
+        config.profile = "static-prepared";
+      },
+    },
+    {
+      name: "non-array controls",
+      code: "invalid-config",
+      path: "$.controls",
+      mutate: (config) => {
+        config.controls = {} as MutablePrepareConfig["controls"];
+      },
+    },
+    {
+      name: "non-array springs",
+      code: "invalid-config",
+      path: "$.springs",
+      mutate: (config) => {
+        config.springs = {} as MutablePrepareConfig["springs"];
+      },
+    },
+    {
+      name: "non-array animations",
+      code: "invalid-config",
+      path: "$.animations",
+      mutate: (config) => {
+        config.animations = {} as MutablePrepareConfig["animations"];
+      },
+    },
+    {
+      name: "zero budgets",
+      code: "invalid-config",
+      path: "$.budgets.maxBytes",
+      mutate: (config) => {
+        config.budgets.maxBytes = 0;
+      },
+    },
+    {
+      name: "fractional budgets",
+      code: "invalid-config",
+      path: "$.budgets.maxVertices",
+      mutate: (config) => {
+        config.budgets.maxVertices = 1.5;
+      },
+    },
+  ];
+
+  it.each(invalidCases)("rejects $name", ({ code, path, mutate }) => {
+    const config = structuredClone(fixtureConfig());
+    mutate(config);
+    expectPrepareFailure(() => parsePolyMorphPrepareConfig(config), code, path);
+  });
+
+  it("rejects non-object configs, unreadable JSON, and escaped resolved paths", async () => {
+    expectPrepareFailure(
+      () => parsePolyMorphPrepareConfig(null),
+      "invalid-config",
+      "$",
+    );
+    const root = await temporaryRoot();
+    const configPath = join(root, "prepare.json");
+    await writeFile(configPath, "{");
+    await expectPrepareRejection(
+      readPolyMorphPrepareConfig(configPath),
+      "invalid-config",
+      "$",
+    );
+    expectPrepareFailure(
+      () => resolvePolyMorphSourcePath(configPath, "../kite.glb"),
+      "unsafe-path",
+      "$.source.path",
+    );
+  });
+});
+
 describe("loadPolyMorphGltf", () => {
   it("loads a JSON glTF with a source-relative external buffer", async () => {
     const root = await temporaryRoot();
@@ -487,5 +783,270 @@ describe("loadPolyMorphGltf", () => {
     expect(loaded.format).toBe("gltf");
     expect(loaded.instances[0]?.primitives[0]?.targets[0]?.name).toBe("Lift");
     expect(loaded.contentSha256).toMatch(/^[a-f0-9]{64}$/u);
+  });
+
+  it("loads embedded triangle strips with implicit scenes and node TRS", async () => {
+    const root = await temporaryRoot();
+    const sourcePath = await writeEmbeddedGltf(root, "strip", (document) => {
+      document.accessors[1].count = 4;
+      document.meshes[0].primitives[0].mode = 5;
+      delete document.meshes[0].primitives[0].material;
+      delete document.meshes[0].extras;
+      delete document.meshes[0].name;
+      document.nodes[0] = {
+        mesh: 0,
+        translation: [1, 2, 3],
+        rotation: [0, 0, Math.SQRT1_2, Math.SQRT1_2],
+        scale: [2, 3, 4],
+      };
+      delete document.scenes;
+      delete document.scene;
+      delete document.materials;
+    });
+
+    const loaded = await loadPolyMorphGltf(sourcePath);
+    expect(loaded.format).toBe("gltf");
+    expect(loaded.instances[0]).toMatchObject({
+      nodeName: "node-0",
+      meshName: "mesh-0",
+      primitives: [{
+        materialIndex: -1,
+        triangles: [[0, 1, 2], [2, 1, 0]],
+        targets: [{ name: "morph-0" }],
+      }],
+    });
+  });
+
+  const invalidGltfCases: readonly {
+    readonly name: string;
+    readonly code: string;
+    readonly mutate: (document: MutableGltfDocument) => void;
+  }[] = [
+    {
+      name: "glTF 1 assets",
+      code: "unsupported-gltf",
+      mutate: (document) => {
+        document.asset.version = "1.0";
+      },
+    },
+    {
+      name: "required extensions",
+      code: "unsupported-gltf",
+      mutate: (document) => {
+        document.extensionsRequired = ["KHR_draco_mesh_compression"];
+      },
+    },
+    {
+      name: "missing buffers",
+      code: "missing-buffer",
+      mutate: (document) => {
+        document.buffers = [];
+      },
+    },
+    {
+      name: "negative buffer lengths",
+      code: "invalid-buffer",
+      mutate: (document) => {
+        document.buffers[0].byteLength = -1;
+      },
+    },
+    {
+      name: "unsupported data URIs",
+      code: "unsupported-uri",
+      mutate: (document) => {
+        document.buffers[0].uri = "data:text/plain;base64,AA==";
+      },
+    },
+    {
+      name: "mismatched buffer lengths",
+      code: "invalid-buffer",
+      mutate: (document) => {
+        document.buffers[0].byteLength -= 4;
+      },
+    },
+    {
+      name: "sparse accessors",
+      code: "invalid-accessor",
+      mutate: (document) => {
+        document.accessors[0].sparse = {};
+      },
+    },
+    {
+      name: "unknown accessor types",
+      code: "invalid-accessor",
+      mutate: (document) => {
+        document.accessors[0].type = "VEC5";
+      },
+    },
+    {
+      name: "absent accessor buffers",
+      code: "invalid-accessor",
+      mutate: (document) => {
+        document.bufferViews[0].buffer = 1;
+      },
+    },
+    {
+      name: "invalid accessor strides",
+      code: "invalid-accessor",
+      mutate: (document) => {
+        document.bufferViews[0].byteStride = 1;
+      },
+    },
+    {
+      name: "scalar positions",
+      code: "invalid-accessor",
+      mutate: (document) => {
+        document.accessors[0].type = "SCALAR";
+      },
+    },
+    {
+      name: "vector indices",
+      code: "invalid-index",
+      mutate: (document) => {
+        document.accessors[1].type = "VEC3";
+        document.accessors[1].count = 2;
+      },
+    },
+    {
+      name: "non-triangle primitive modes",
+      code: "unsupported-primitive",
+      mutate: (document) => {
+        document.meshes[0].primitives[0].mode = 1;
+      },
+    },
+    {
+      name: "incomplete triangle lists",
+      code: "invalid-primitive",
+      mutate: (document) => {
+        document.accessors[1].count = 5;
+      },
+    },
+    {
+      name: "missing scene nodes",
+      code: "invalid-scene",
+      mutate: (document) => {
+        document.scenes[0] = {};
+      },
+    },
+    {
+      name: "unknown scene nodes",
+      code: "invalid-node",
+      mutate: (document) => {
+        document.scenes[0].nodes = [9];
+      },
+    },
+    {
+      name: "node cycles",
+      code: "invalid-node",
+      mutate: (document) => {
+        document.nodes[0].children = [0];
+      },
+    },
+    {
+      name: "negative mesh indices",
+      code: "invalid-node",
+      mutate: (document) => {
+        document.nodes[0].mesh = -1;
+      },
+    },
+    {
+      name: "non-array node children",
+      code: "invalid-node",
+      mutate: (document) => {
+        document.nodes[0].children = {};
+      },
+    },
+    {
+      name: "short node matrices",
+      code: "invalid-node",
+      mutate: (document) => {
+        document.nodes[0].matrix = new Array(15).fill(0);
+      },
+    },
+    {
+      name: "zero node quaternions",
+      code: "invalid-node",
+      mutate: (document) => {
+        document.nodes[0].rotation = [0, 0, 0, 0];
+      },
+    },
+    {
+      name: "empty meshes",
+      code: "invalid-mesh",
+      mutate: (document) => {
+        document.meshes[0].primitives = [];
+      },
+    },
+    {
+      name: "missing positions",
+      code: "invalid-primitive",
+      mutate: (document) => {
+        delete document.meshes[0].primitives[0].attributes.POSITION;
+      },
+    },
+    {
+      name: "morph targets without positions",
+      code: "invalid-morph",
+      mutate: (document) => {
+        document.meshes[0].primitives[0].targets[0] = {};
+      },
+    },
+    {
+      name: "short morph targets",
+      code: "invalid-morph",
+      mutate: (document) => {
+        document.accessors[2].count = 3;
+      },
+    },
+    {
+      name: "negative material indices",
+      code: "invalid-material",
+      mutate: (document) => {
+        document.meshes[0].primitives[0].material = -2;
+      },
+    },
+    {
+      name: "out-of-range material colors",
+      code: "invalid-material",
+      mutate: (document) => {
+        document.materials[0].pbrMetallicRoughness.baseColorFactor = [2, 0, 0, 1];
+      },
+    },
+    {
+      name: "empty default scenes",
+      code: "empty-model",
+      mutate: (document) => {
+        document.scenes[0].nodes = [];
+      },
+    },
+  ];
+
+  it.each(invalidGltfCases)("rejects $name", async ({ name, code, mutate }) => {
+    const root = await temporaryRoot();
+    const sourcePath = await writeEmbeddedGltf(root, name.replaceAll(" ", "-"), mutate);
+    await expectPrepareRejection(loadPolyMorphGltf(sourcePath), code);
+  });
+
+  it("rejects malformed source containers", async () => {
+    const root = await temporaryRoot();
+    const invalidJson = join(root, "invalid.gltf");
+    const nonObjectJson = join(root, "array.gltf");
+    const unsupported = join(root, "model.obj");
+    const truncatedGlb = join(root, "truncated.glb");
+    const invalidHeaderGlb = join(root, "header.glb");
+    await writeFile(invalidJson, "{");
+    await writeFile(nonObjectJson, "[]");
+    await writeFile(unsupported, "");
+    await writeFile(truncatedGlb, new Uint8Array([1, 2, 3]));
+    const binary = fixtureBinary();
+    const invalidHeader = encodeGlb(fixtureDocument(binary.byteLength), binary);
+    invalidHeader[0] = 0;
+    await writeFile(invalidHeaderGlb, invalidHeader);
+
+    await expectPrepareRejection(loadPolyMorphGltf(invalidJson), "invalid-gltf");
+    await expectPrepareRejection(loadPolyMorphGltf(nonObjectJson), "invalid-gltf");
+    await expectPrepareRejection(loadPolyMorphGltf(unsupported), "unsupported-format");
+    await expectPrepareRejection(loadPolyMorphGltf(truncatedGlb), "invalid-glb");
+    await expectPrepareRejection(loadPolyMorphGltf(invalidHeaderGlb), "invalid-glb");
   });
 });
