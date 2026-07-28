@@ -10,7 +10,6 @@ const shouldRenderSearch =
 const pathname = Astro.url.pathname.replace(/\/$/, '') || '/';
 const isLanding = pathname === '/';
 const isGallery = pathname.startsWith('/gallery');
-const isMorph = pathname.startsWith('/morph');
 const isBuilder = pathname.startsWith('/builder');
 const isWordart = pathname.startsWith('/wordart');
 const isTv = pathname.startsWith('/tv');
@@ -33,7 +32,6 @@ const topLinks = [
     active: pathname.startsWith('/api'),
   },
   { href: '/gallery', label: 'Gallery', active: pathname.startsWith('/gallery') },
-  { href: '/morph', label: 'Morph', active: pathname.startsWith('/morph') },
   { href: '/builder', label: 'Builder', active: pathname.startsWith('/builder') },
   { href: '/wordart', label: 'WordArt', active: pathname.startsWith('/wordart') },
   { href: '/tv', label: 'TV', active: pathname.startsWith('/tv') },
@@ -46,7 +44,7 @@ const topLinks = [
       <SiteTitle />
     </div>
   )}
-  {!isLanding && !isGallery && !isMorph && !isBuilder && !isWordart && !isTv && (
+  {!isLanding && !isGallery && !isBuilder && !isWordart && !isTv && (
     <div class="sidebar-search-dock print:hidden">
       {shouldRenderSearch && <Search />}
     </div>

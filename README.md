@@ -197,10 +197,7 @@ Morph supports `static-prepared`, `morph-regions`, `joint-skin`, and
 `prepared-playback` profiles. It does not own an animation scheduler: callers
 sample controls, springs, clips, skinning, or playback and pass only changed
 rows to `mounted.apply(...)`. Mounted leaf identity stays stable, and runtime
-updates do not rebuild topology or redraw prepared image resources. The neutral
-2,080-triangle terrain in [`examples/morph`](./examples/morph) exercises
-deterministic preparation, browser loading, 90 local deformation targets,
-sculpting, zoom, orbit, and retained leaf identity.
+updates do not rebuild topology or redraw prepared image resources.
 
 Prepared solid triangles use the native CSS triangle primitive when supported.
 Preparation also emits packed alpha-atlas pages for Firefox and other browsers

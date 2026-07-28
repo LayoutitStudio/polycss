@@ -85,19 +85,11 @@ Mount once, then sample and apply:
 - sparse samples visit only affected leaves;
 - runtime updates do not reconstruct topology or redraw prepared image resources.
 
-The [`examples/morph`](https://github.com/LayoutitStudio/polycss/tree/main/examples/morph)
-workspace fixture proves this boundary with a 2,080-triangle terrain and 90
-prepared local deformation targets. It prepares the model through the Node
-entry and mounts the same retained graph in the browser.
-
-The top-level [Morph playground](/morph) uses those prepared model bytes. Drag
-a triangle to sculpt it, drag empty space to orbit, switch between filled and
-outline views, and choose whether a sculpt remains or springs back. Supporting
-browsers use the native CSS triangle primitive. Firefox and other browsers
-without the corner-shape primitive use each leaf's prepared polygon-sized
-alpha-atlas slice instead; the browser never generates or redraws those pages.
-Dedicated tooling may also author
-other image-backed strategies, including prepared-playback consumers.
+Supporting browsers use the native CSS triangle primitive. Firefox and other
+browsers without the corner-shape primitive use each leaf's prepared
+polygon-sized alpha-atlas slice instead; the browser never generates or redraws
+those pages. Dedicated tooling may also author other image-backed strategies,
+including prepared-playback consumers.
 
 ## Consumer boundary
 

@@ -6,7 +6,6 @@
   "description": "PolyCSS documentation and landing page.",
   "license": "MIT",
   "scripts": {
-    "prepare:morph-sphere": "pnpm --filter @layoutit/polycss-morph build && node src/components/CubeSphereMorph/prepare.mjs",
     "dev": "astro dev",
     "build": "astro build && node scripts/generate-llms-txt.mjs",
     "preview": "astro preview"
@@ -17,7 +16,6 @@
     "@astrojs/starlight": "^0.38.2",
     "@layoutit/polycss": "workspace:^",
     "@layoutit/polycss-fonts": "workspace:^",
-    "@layoutit/polycss-morph": "workspace:^",
     "@layoutit/polycss-react": "workspace:^",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",

@@ -46,22 +46,6 @@ importers:
         specifier: ^6.0.0
         version: 6.4.1(@types/node@25.5.0)
 
-  examples/morph:
-    dependencies:
-      '@layoutit/polycss':
-        specifier: workspace:^
-        version: link:../../packages/polycss
-      '@layoutit/polycss-morph':
-        specifier: workspace:^
-        version: link:../../packages/morph
-    devDependencies:
-      typescript:
-        specifier: ^5.3.3
-        version: 5.9.3
-      vite:
-        specifier: ^6.0.0
-        version: 6.4.1(@types/node@25.5.0)
-
   examples/react:
     dependencies:
       '@layoutit/polycss-react':
@@ -177,9 +161,6 @@ importers:
       happy-dom:
         specifier: ^20.7.0
         version: 20.8.9
-      playwright:
-        specifier: ^1.58.2
-        version: 1.58.2
       tsup:
         specifier: ^8.0.1
         version: 8.5.1(postcss@8.5.8)(typescript@5.9.3)
@@ -291,9 +272,6 @@ importers:
       '@layoutit/polycss-fonts':
         specifier: workspace:^
         version: link:../packages/fonts
-      '@layoutit/polycss-morph':
-        specifier: workspace:^
-        version: link:../packages/morph
       '@layoutit/polycss-react':
         specifier: workspace:^
         version: link:../packages/react

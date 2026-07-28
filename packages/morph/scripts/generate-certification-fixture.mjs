@@ -1,10 +1,17 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { mkdir, writeFile } from "node:fs/promises";
+import { resolve } from "node:path";
 
-const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const specPath = resolve(root, "source/plane.spec.json");
-const generatedRoot = resolve(root, "source/.generated");
+const spec = {
+  columns: 40,
+  rows: 26,
+  width: 7.2,
+  height: 4.4,
+  controlColumns: [4, 8, 12, 16, 20, 24, 28, 32, 36],
+  controlRows: [4, 9, 13, 17, 22],
+  radius: 5.8,
+  lift: 1.25,
+  press: -1.05,
+};
 
 function targetName(column, row, direction) {
   return `Pin C${String(column).padStart(2, "0")} R${String(row).padStart(2, "0")} ${direction}`;
@@ -136,11 +143,11 @@ function buildPlaneSource(spec) {
   const gltf = {
     asset: {
       version: "2.0",
-      generator: "polycss-morph-plane-fixture",
+      generator: "polycss-morph-certification-fixture",
     },
     scene: 0,
     scenes: [{ nodes: [0] }],
-    nodes: [{ mesh: 0, name: "Morph Plane" }],
+    nodes: [{ mesh: 0, name: "Certification Plane" }],
     buffers: [{
       byteLength: buffer.byteLength,
       uri: `data:application/octet-stream;base64,${buffer.toString("base64")}`,
@@ -148,7 +155,7 @@ function buildPlaneSource(spec) {
     bufferViews,
     accessors,
     materials: [{
-      name: "Morph terrain",
+      name: "Certification surface",
       pbrMetallicRoughness: {
         baseColorFactor: [0.57, 0.56, 0.51, 1],
         metallicFactor: 0,
@@ -156,7 +163,7 @@ function buildPlaneSource(spec) {
       },
     }],
     meshes: [{
-      name: "Tessellated Plane",
+      name: "Certification Plane",
       extras: {
         targetNames: targetRows.map((target) => target.name),
       },
@@ -173,16 +180,16 @@ function buildPlaneSource(spec) {
   const prepare = {
     schema: "polycss-morph.prepare@1",
     identity: {
-      id: "morph-plane",
-      name: "Morph Plane",
+      id: "certification-plane",
+      name: "Certification Plane",
       revision: "1.0.0",
     },
     profile: "morph-regions",
     source: {
-      path: "morph-plane.gltf",
-      id: "generated-morph-plane",
+      path: "model.gltf",
+      id: "generated-certification-plane",
       kind: "generated",
-      uri: "urn:polycss:example:morph-plane",
+      uri: "urn:polycss:test:certification-plane",
       license: "MIT",
     },
     transform: {
@@ -209,14 +216,11 @@ function buildPlaneSource(spec) {
   return { gltf, prepare };
 }
 
-export async function generatePlaneFixture() {
-  const spec = JSON.parse(await readFile(specPath, "utf8"));
-  if (spec.schema !== "polycss-morph.plane-fixture@1") {
-    throw new Error(`Unsupported plane fixture schema: ${String(spec.schema)}`);
-  }
+export async function generateCertificationFixture(outputRoot) {
   const generated = buildPlaneSource(spec);
+  const generatedRoot = resolve(outputRoot);
   await mkdir(generatedRoot, { recursive: true });
-  const gltfPath = resolve(generatedRoot, "morph-plane.gltf");
+  const gltfPath = resolve(generatedRoot, "model.gltf");
   const configPath = resolve(generatedRoot, "prepare.json");
   await Promise.all([
     writeFile(gltfPath, `${JSON.stringify(generated.gltf)}\n`),

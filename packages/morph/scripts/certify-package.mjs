@@ -1,7 +1,6 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
-  copyFile,
   mkdir,
   mkdtemp,
   readFile,
@@ -19,7 +18,7 @@ import {
 } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { generatePlaneFixture } from "../../../examples/morph/scripts/generate-plane.mjs";
+import { generateCertificationFixture } from "./generate-certification-fixture.mjs";
 
 const runFile = promisify(execFile);
 const morphRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -123,7 +122,6 @@ async function writeConsumer(
   polycssDependency,
 ) {
   const sourceRoot = resolve(consumerRoot, "source");
-  const generated = await generatePlaneFixture();
   const morphDependency = fileDependency(tarballs.morph, consumerRoot);
   const dependencies = {
     "@layoutit/polycss": registryDependencies
@@ -150,15 +148,7 @@ async function writeConsumer(
           },
         }),
   };
-  await mkdir(sourceRoot, { recursive: true });
-  await copyFile(
-    generated.gltfPath,
-    resolve(sourceRoot, "morph-plane.gltf"),
-  );
-  await copyFile(
-    generated.configPath,
-    resolve(sourceRoot, "prepare.json"),
-  );
+  await generateCertificationFixture(sourceRoot);
   await writeFile(
     resolve(consumerRoot, "package.json"),
     `${JSON.stringify(consumerPackage, null, 2)}\n`,

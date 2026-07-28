@@ -90,14 +90,6 @@ primitive use each leaf's prepared polygon-sized atlas slice. Atlas pages are
 generated with Node built-ins, so Morph has no Sharp or other native image
 dependency.
 
-## Neutral example
-
-`examples/morph` prepares a 2,080-triangle terrain with 90 local morph regions
-through the Node entry, loads it through the browser entry, and keeps the
-PolyCSS leaf graph retained while sculpting, zooming, and orbiting. Its browser
-proof checks stable identity and forbidden runtime work across two deterministic
-runs.
-
 ## Consumer adapters
 
 Product-specific source cadence, schemas, input ordering, presentation, and

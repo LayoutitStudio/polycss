@@ -36,10 +36,6 @@ export default defineConfig({
           replacement: repoPath('../packages/fonts/src/index.ts'),
         },
         {
-          find: /^@layoutit\/polycss-morph$/,
-          replacement: repoPath('../packages/morph/src/index.ts'),
-        },
-        {
           find: /^@layoutit\/polycss$/,
           replacement: repoPath('../packages/polycss/src/index.ts'),
         },
