@@ -11,15 +11,24 @@
  * untouched), and prints the new version to stdout (also exported as
  * NEXT_VERSION when running inside GitHub Actions).
  */
-import { readFileSync, writeFileSync, appendFileSync } from "node:fs";
+import {
+  appendFileSync,
+  existsSync,
+  readFileSync,
+  readdirSync,
+  writeFileSync,
+} from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, "..", "..");
-const packages = ["core", "polycss", "react", "vue"].map((d) =>
-  resolve(root, "packages", d, "package.json"),
-);
+const packagesRoot = resolve(root, "packages");
+const packages = readdirSync(packagesRoot, { withFileTypes: true })
+  .filter((entry) => entry.isDirectory())
+  .map((entry) => resolve(packagesRoot, entry.name, "package.json"))
+  .filter(existsSync)
+  .sort();
 
 const bump = process.argv[2];
 if (!["patch", "minor", "major"].includes(bump)) {

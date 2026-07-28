@@ -1,5 +1,5 @@
 import { copyFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { dirname, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -10,6 +10,28 @@ const targets = [
   "packages/react/README.md",
   "packages/vue/README.md",
 ];
+const packageSpecificTargets = [
+  "packages/fonts/README.md",
+  "packages/morph/README.md",
+];
+
+const invokedFrom = relative(repoRoot, process.cwd());
+const invokedFromPackageReadme = invokedFrom.startsWith("packages/")
+  ? `${invokedFrom}/README.md`
+  : undefined;
+
+if (
+  invokedFromPackageReadme !== undefined
+  && packageSpecificTargets.includes(invokedFromPackageReadme)
+) {
+  console.log(`[sync-package-readmes] preserved ${invokedFromPackageReadme}`);
+  process.exit(0);
+}
+
+if (invokedFromPackageReadme !== undefined && !targets.includes(invokedFromPackageReadme)) {
+  console.log(`[sync-package-readmes] skipped for ${invokedFromPackageReadme}`);
+  process.exit(0);
+}
 
 for (const target of targets) {
   copyFileSync(source, resolve(repoRoot, target));

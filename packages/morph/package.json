@@ -1,0 +1,74 @@
+{
+  "name": "@layoutit/polycss-morph",
+  "version": "0.0.1",
+  "description": "Prepared retained-model deformation and playback for PolyCSS.",
+  "type": "module",
+  "main": "dist/index.cjs",
+  "module": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "keywords": [
+    "polycss",
+    "morph",
+    "animation",
+    "skinning",
+    "3d",
+    "css",
+    "matrix3d",
+    "dom"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/LayoutitStudio/polycss.git",
+    "directory": "packages/morph"
+  },
+  "bugs": {
+    "url": "https://github.com/LayoutitStudio/polycss/issues"
+  },
+  "homepage": "https://github.com/LayoutitStudio/polycss#readme",
+  "files": [
+    "dist"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    },
+    "./prepare": {
+      "types": "./dist/prepare.d.ts",
+      "import": "./dist/prepare.js",
+      "require": "./dist/prepare.cjs"
+    }
+  },
+  "typesVersions": {
+    "*": {
+      "prepare": [
+        "dist/prepare.d.ts"
+      ]
+    }
+  },
+  "scripts": {
+    "build": "tsup",
+    "test": "vitest run",
+    "test:package": "node scripts/certify-package.mjs",
+    "test:package:registry": "node scripts/certify-package.mjs --registry-dependencies",
+    "test:coverage": "vitest run --coverage",
+    "prepack": "node ../../.github/scripts/sync-package-readmes.mjs",
+    "prepublishOnly": "npm run build"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {
+    "@layoutit/polycss": "workspace:^"
+  },
+  "devDependencies": {
+    "@types/node": "^25.0.0",
+    "@vitest/coverage-v8": "^3.1.1",
+    "happy-dom": "^20.7.0",
+    "tsup": "^8.0.1",
+    "typescript": "^5.3.3",
+    "vitest": "^3.1.1"
+  }
+}
