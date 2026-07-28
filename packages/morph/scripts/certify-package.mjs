@@ -4,6 +4,7 @@ import {
   mkdir,
   mkdtemp,
   readFile,
+  realpath,
   readdir,
   rm,
   stat,
@@ -95,6 +96,10 @@ function fileDependency(tarball, consumerRoot) {
   return `file:${relative(consumerRoot, tarball).replaceAll("\\", "/")}`;
 }
 
+function linkDependency(packageRoot, consumerRoot) {
+  return `link:${relative(consumerRoot, packageRoot).replaceAll("\\", "/")}`;
+}
+
 async function writeConsumer(
   consumerRoot,
   artifactRoot,
@@ -103,13 +108,18 @@ async function writeConsumer(
 ) {
   const sourceRoot = resolve(consumerRoot, "source");
   const morphDependency = fileDependency(tarballs.morph, consumerRoot);
+  const [canonicalConsumerRoot, happyDomRoot, typescriptRoot] = await Promise.all([
+    realpath(consumerRoot),
+    realpath(resolve(morphRoot, "node_modules/happy-dom")),
+    realpath(resolve(morphRoot, "node_modules/typescript")),
+  ]);
   const dependencies = {
     "@layoutit/polycss": registryDependencies
       ? polycssDependency
       : fileDependency(tarballs.polycss, consumerRoot),
     "@layoutit/polycss-morph": morphDependency,
-    "happy-dom": "20.8.9",
-    "typescript": "5.9.3",
+    "happy-dom": linkDependency(happyDomRoot, canonicalConsumerRoot),
+    "typescript": linkDependency(typescriptRoot, canonicalConsumerRoot),
   };
   const consumerPackage = {
     name: "polycss-morph-clean-consumer",
