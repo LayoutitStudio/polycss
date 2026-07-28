@@ -1,4 +1,5 @@
 export { mountPolyMorphModel } from "./mount.js";
+export { createPolyMorphPreparedDomTarget } from "./preparedDomTarget.js";
 export { PolyMorphRenderError } from "./renderError.js";
 export type {
   PolyMorphApplyResult,
@@ -7,6 +8,12 @@ export type {
   PolyMorphLeafUpdate,
   PolyMorphMountedModel,
   PolyMorphMountOptions,
+  PolyMorphPreparedDomTarget,
+  PolyMorphPreparedDomTargetInput,
+  PolyMorphPreparedElementTarget,
+  PolyMorphPreparedElementTargetInput,
+  PolyMorphPreparedModelTarget,
+  PolyMorphPreparedModelTargetInput,
   PolyMorphRenderStats,
   PolyMorphRetainedUpdate,
   PolyMorphShapeUpdate,

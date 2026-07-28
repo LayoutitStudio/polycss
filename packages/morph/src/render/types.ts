@@ -87,3 +87,40 @@ export interface PolyMorphMountedModel {
   assertStableDomIdentity(): void;
   destroy(): void;
 }
+
+export interface PolyMorphPreparedModelTargetInput {
+  readonly element: HTMLElement;
+  writeTransform(transform: string): boolean;
+}
+
+export interface PolyMorphPreparedElementTargetInput {
+  readonly element: HTMLElement;
+}
+
+export interface PolyMorphPreparedDomTargetInput {
+  readonly model: PolyMorphPreparedModelTargetInput;
+  readonly shapes: readonly PolyMorphPreparedElementTargetInput[];
+  readonly leaves: readonly PolyMorphPreparedElementTargetInput[];
+}
+
+export interface PolyMorphPreparedModelTarget {
+  readonly element: HTMLElement;
+  writeTransform(transform: string): boolean;
+}
+
+export interface PolyMorphPreparedElementTarget {
+  readonly element: HTMLElement;
+  writeTransform(transform: string): boolean;
+  writeVisibility(visible: boolean): boolean;
+  writeOpacity(opacity: number): boolean;
+  writeImagePositionY(position: string): boolean;
+}
+
+export interface PolyMorphPreparedDomTarget {
+  readonly model: PolyMorphPreparedModelTarget;
+  readonly shapes: readonly PolyMorphPreparedElementTarget[];
+  readonly leaves: readonly PolyMorphPreparedElementTarget[];
+  readonly destroyed: boolean;
+  assertStableDomIdentity(): void;
+  destroy(): void;
+}

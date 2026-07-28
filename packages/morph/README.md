@@ -81,6 +81,11 @@ The browser API is intentionally imperative:
   `mounted.apply(sample.update)` succeeds;
 - call `mounted.destroy()` at teardown.
 
+Consumers that already own a retained DOM graph can adopt its source-ordered
+model, shape, and leaf elements with `createPolyMorphPreparedDomTarget`.
+The target owns write deduplication and invalidation, while the consumer
+continues to own the elements and their teardown.
+
 Morph owns no `requestAnimationFrame` loop, interval, or other scheduler. A
 mounted model keeps the same leaf elements for its lifetime. Runtime updates do
 not rebuild topology, add or remove leaves, construct image resources, or

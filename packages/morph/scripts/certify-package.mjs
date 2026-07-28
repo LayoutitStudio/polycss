@@ -159,8 +159,11 @@ async function writeConsumer(
 import { createPolyOrthographicCamera } from "@layoutit/polycss";
 import {
   createPolyMorphDeformationRuntime,
+  createPolyMorphPreparedDomTarget,
   mountPolyMorphModel,
   type PolyMorphModel,
+  type PolyMorphPreparedDomTarget,
+  type PolyMorphPreparedElementTarget,
 } from "@layoutit/polycss-morph";
 import {
   preparePolyMorphModel,
@@ -169,10 +172,23 @@ import {
 
 declare const host: HTMLElement;
 declare const model: PolyMorphModel;
+declare const modelElement: HTMLElement;
+declare const shapeElement: HTMLElement;
+declare const leafElement: HTMLElement;
 
 const camera = createPolyOrthographicCamera({ zoom: 1 });
 const mounted = mountPolyMorphModel(host, model, { camera });
 const runtime = createPolyMorphDeformationRuntime(model);
+const preparedTarget: PolyMorphPreparedDomTarget =
+  createPolyMorphPreparedDomTarget({
+    model: {
+      element: modelElement,
+      writeTransform: () => true,
+    },
+    shapes: [{ element: shapeElement }],
+    leaves: [{ element: leafElement }],
+  });
+const preparedLeaf: PolyMorphPreparedElementTarget = preparedTarget.leaves[0]!;
 const options: PolyMorphPrepareOptions = {
   configPath: "./source/prepare.json",
   outputRoot: "./model/package",
@@ -180,6 +196,7 @@ const options: PolyMorphPrepareOptions = {
 
 void runtime.sample({ tick: 0 });
 void mounted;
+void preparedLeaf;
 void preparePolyMorphModel(options);
 `);
   await writeFile(resolve(consumerRoot, "prepare-smoke.mjs"), `
@@ -264,6 +281,7 @@ const fetchImpl = async (input) => {
 
 const {
   createPolyMorphDeformationRuntime,
+  createPolyMorphPreparedDomTarget,
   loadPolyMorphPackage,
   mountPolyMorphModel,
 } = await import("@layoutit/polycss-morph");
@@ -349,6 +367,67 @@ const fallbackDom = [...fallbackMounted.leafHandles.values()]
     && element.style.getPropertyValue("-webkit-mask-image").includes("blob:");
   });
 
+const adoptedHost = document.createElement("main");
+const adoptedModel = document.createElement("div");
+const adoptedShape = document.createElement("div");
+const adoptedLeaf = document.createElement("s");
+document.body.appendChild(adoptedHost);
+adoptedHost.appendChild(adoptedModel);
+adoptedModel.appendChild(adoptedShape);
+adoptedShape.appendChild(adoptedLeaf);
+let adoptedModelTransform;
+let adoptedModelWrites = 0;
+const preparedTarget = createPolyMorphPreparedDomTarget({
+  model: {
+    element: adoptedModel,
+    writeTransform(transform) {
+      if (adoptedModelTransform === transform) return false;
+      adoptedModelTransform = transform;
+      adoptedModel.style.transform = transform;
+      adoptedModelWrites += 1;
+      return true;
+    },
+  },
+  shapes: [{ element: adoptedShape }],
+  leaves: [{ element: adoptedLeaf }],
+});
+const adoptedIdentityWrite = preparedTarget.model.writeTransform("");
+const adoptedIdentityRepeat = preparedTarget.model.writeTransform("");
+const adoptedLeafWrite = preparedTarget.leaves[0].writeTransform("");
+adoptedLeaf.style.transform = "scale(2)";
+const adoptedLeafRepeat = preparedTarget.leaves[0].writeTransform("");
+const adoptedVisibilityWrite = preparedTarget.leaves[0].writeVisibility(false);
+const adoptedVisibilityRepeat = preparedTarget.leaves[0].writeVisibility(false);
+const adoptedOpacityWrite = preparedTarget.leaves[0].writeOpacity(0.5);
+const adoptedOpacityRepeat = preparedTarget.leaves[0].writeOpacity(0.5);
+const adoptedImageWrite = preparedTarget.leaves[0].writeImagePositionY("-4px");
+const adoptedImageRepeat = preparedTarget.leaves[0].writeImagePositionY("-4px");
+preparedTarget.assertStableDomIdentity();
+preparedTarget.destroy();
+let destroyedTargetRejectsWrites = false;
+try {
+  preparedTarget.leaves[0].writeVisibility(true);
+} catch {
+  destroyedTargetRejectsWrites = true;
+}
+const preparedTargetCertified = adoptedIdentityWrite
+  && !adoptedIdentityRepeat
+  && adoptedModelWrites === 1
+  && adoptedLeafWrite
+  && !adoptedLeafRepeat
+  && adoptedLeaf.style.transform === "scale(2)"
+  && adoptedVisibilityWrite
+  && !adoptedVisibilityRepeat
+  && adoptedOpacityWrite
+  && !adoptedOpacityRepeat
+  && adoptedImageWrite
+  && !adoptedImageRepeat
+  && preparedTarget.destroyed
+  && destroyedTargetRejectsWrites
+  && adoptedModel.parentElement === adoptedHost
+  && adoptedShape.parentElement === adoptedModel
+  && adoptedLeaf.parentElement === adoptedShape;
+
 if (
   mounted.leafHandles.size !== loaded.model.render.leaves.length
   || frame.dirtyLeafIds.length === 0
@@ -363,6 +442,7 @@ if (
   || fallbackApplied.atlasRedraws !== 0
   || fallbackApplied.topologyConstructions !== 0
   || fallbackApplied.schedulerCallbacks !== 0
+  || !preparedTargetCertified
 ) {
   throw new Error("packed browser entry violated the retained-model contract");
 }
@@ -378,6 +458,7 @@ console.log(JSON.stringify({
   solidLeaves,
   polygonSizedFallbacks,
   canonicalDom,
+  preparedTargetCertified,
   applied,
   stats: mounted.stats,
   fallback: {
