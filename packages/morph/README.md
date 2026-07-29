@@ -1,12 +1,12 @@
 # @layoutit/polycss-morph
 
-Prepared retained-model deformation and playback for PolyCSS.
+Prepare, load, and animate retained DOM models with PolyCSS.
 
 ```bash
 npm install @layoutit/polycss-morph
 ```
 
-## Boundary
+## Package entries
 
 Morph has two public entries:
 
@@ -19,9 +19,8 @@ Morph has two public entries:
   packages, mounts one retained PolyCSS graph, and exposes imperative,
   caller-driven runtimes.
 
-The generic Node preparer directly creates `static-prepared` and
-`morph-regions` models. The browser runtime executes all four validated
-profiles:
+The Node preparer creates `static-prepared` and `morph-regions` models. The
+browser runtime supports all four profiles:
 
 | Profile | Runtime contract |
 |---|---|
@@ -71,6 +70,9 @@ const frame = deformation.sample({
 mounted.apply({ leaves: frame.leafUpdates });
 ```
 
+See the [cube-to-sphere example](https://polycss.com/guides/morph/#example-cube-to-sphere)
+for a complete rendered deformation example.
+
 The browser API is intentionally imperative:
 
 - load or validate a model;
@@ -92,17 +94,15 @@ mounted model keeps the same leaf elements for its lifetime. Runtime updates do
 not rebuild topology, add or remove leaves, construct image resources, or
 redraw prepared image resources.
 
-The browser resolves prepared triangles once during mount. On browsers that
-pass PolyCSS's solid-triangle support check, Morph uses `corner-shape` when
-available and a CSS border triangle otherwise; Firefox uses the larger
-border-triangle variant. WebKit/Safari instead uses each leaf's prepared
-polygon-sized atlas slice. Mount creates object URLs from the loader's
-already-verified image bytes and revokes them at teardown; it does not refetch
-package resources. Atlas pages are generated with Node built-ins, so Morph has
-no Sharp or other native image dependency.
+Morph chooses the triangle paint path once when it mounts. It uses
+`corner-shape` where available, a larger CSS border triangle in Firefox, and
+each leaf's prepared polygon-sized atlas slice in WebKit/Safari. Mount creates
+object URLs from the loader's already-verified image bytes and revokes them at
+teardown; it does not refetch package resources. Atlas pages are generated with
+Node built-ins, so Morph has no Sharp or other native image dependency.
 
-## Consumer adapters
+## Application ownership
 
-Product-specific source cadence, schemas, input ordering, presentation, and
-oracle tooling stay in the consuming product. Product adapters own their
-prepared packages, mounting paths, presentation, and oracle evidence.
+Morph owns the prepared model format and sparse DOM updates. Your application
+owns input, timing, presentation, model-specific preparation, and product
+behavior.

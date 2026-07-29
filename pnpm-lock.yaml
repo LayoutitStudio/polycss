@@ -272,6 +272,9 @@ importers:
       '@layoutit/polycss-fonts':
         specifier: workspace:^
         version: link:../packages/fonts
+      '@layoutit/polycss-morph':
+        specifier: workspace:^
+        version: link:../packages/morph
       '@layoutit/polycss-react':
         specifier: workspace:^
         version: link:../packages/react
