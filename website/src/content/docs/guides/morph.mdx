@@ -1,31 +1,33 @@
 ---
-title: Prepared Morph Models
-description: Prepare retained PolyCSS models in Node, then load and update them through a stable browser DOM graph.
+title: PolyCSS Morph
+description: Prepare, load, and animate retained DOM models with PolyCSS.
 ---
 
+import MorphTargetsDemo from "../../../components/MorphTargetsDemo.astro";
+
 `@layoutit/polycss-morph` is an imperative, framework-agnostic layer for models
-whose topology, paint resources, and update plans are prepared ahead of time.
+whose geometry and paint resources are built ahead of time, then updated
+through a stable DOM graph.
 
 ```bash
 npm install @layoutit/polycss-morph
 ```
 
-Use ordinary `Polygon[]` loading for ordinary meshes. Use Morph when a model
-needs a retained leaf graph plus sparse deformation, semantic controls,
-springs, joint skinning, or an externally prepared playback stream.
+Use the regular `Polygon[]` path when a mesh does not need prepared updates.
+Use Morph when a model needs stable DOM elements plus morph targets, semantic
+controls, springs, joint skinning, or prepared playback.
 
-## Two explicit entries
+## Package entries
 
 The Node and browser dependency graphs are separate:
 
-| Entry | Environment | Owns |
+| Entry | Environment | Purpose |
 |---|---|---|
-| `@layoutit/polycss-morph/prepare` | Node | Strict config and glTF/GLB intake, normalization, topology, canonical solid-triangle plans, packed fallback pages with one local-size slice per polygon, provenance, content hashes, and atomic package writes. |
-| `@layoutit/polycss-morph` | Browser or shared code | Contracts, validation, bounded loading, retained mounting, deformation, controls, springs, animation sampling, joint skinning, and prepared playback. |
+| `@layoutit/polycss-morph/prepare` | Node | Turn glTF/GLB sources into deterministic model packages with CSS triangle plans and browser fallbacks. |
+| `@layoutit/polycss-morph` | Browser or shared code | Validate, load, mount, and update prepared models. |
 
-The generic preparer directly authors `static-prepared` and `morph-regions`
-models. Dedicated tooling or a product adapter can author validated
-`joint-skin` and `prepared-playback` models.
+The Node preparer creates `static-prepared` and `morph-regions` models. Custom
+tooling can create validated `joint-skin` and `prepared-playback` models.
 
 ## Prepare
 
@@ -75,7 +77,40 @@ leaf elements as indexed write targets. Morph deduplicates requested values and
 invalidates the writers at destroy; the application retains DOM teardown
 ownership.
 
-## Executable profiles
+## Example: Cube to sphere
+
+This 768-polygon model from the
+[three.js morph-target example](https://github.com/mrdoob/three.js/blob/7763535f6f944a32105af7d9d57d83a92f310d51/examples/webgl_morphtargets.html)
+exposes two prepared targets. **Spherify** moves the cube toward a sphere;
+**Swirl** applies the source twist target. Both sliders may be combined while
+the same DOM leaves remain mounted. Drag anywhere on the stage to orbit the
+model.
+
+<MorphTargetsDemo />
+
+The page samples only when a slider changes. Geometry follows the slider
+directly; releasing it commits the nearest prepared lighting state with at
+most two ancestor custom-property writes:
+
+```ts
+const deformation = createPolyMorphDeformationRuntime(model);
+const mounted = mountPolyMorphModel(host, loaded.model, {
+  resources: loaded.resources,
+});
+
+function update(spherify: number, twist: number) {
+  const frame = deformation.sample({
+    tick: tick++,
+    morphWeights: { spherify, twist },
+  });
+  mounted.apply({ leaves: frame.leafUpdates });
+}
+```
+
+Morph owns no scheduler. Applications decide whether weights come from direct
+input, state, an animation sampler, or a spring.
+
+## Profiles
 
 | Profile | Behavior |
 |---|---|
@@ -84,7 +119,7 @@ ownership.
 | `joint-skin` | Hierarchical joint transforms and normalized weighted skinning. |
 | `prepared-playback` | Source-ordered retained model, shape, transform, visibility, opacity, and image-row changes. |
 
-## Runtime invariant
+## Runtime behavior
 
 Mount once, then sample and apply:
 
@@ -95,16 +130,14 @@ Mount once, then sample and apply:
 - sparse samples visit only affected leaves;
 - runtime updates do not reconstruct topology or redraw prepared image resources.
 
-On browsers that pass PolyCSS's solid-triangle support check, Morph uses
-`corner-shape` when available and a CSS border triangle otherwise; Firefox uses
-the larger border-triangle variant. WebKit/Safari instead uses each leaf's
-prepared polygon-sized alpha-atlas slice. Mount uses the loader's verified image
-bytes and revokes their object URLs at teardown; the browser never refetches,
-generates, or redraws those pages. Dedicated tooling may also author other
-image-backed strategies, including prepared-playback consumers.
+Morph chooses the triangle paint path once when it mounts. It uses
+`corner-shape` where available, a larger CSS border triangle in Firefox, and
+each leaf's prepared polygon-sized alpha-atlas slice in WebKit/Safari. Mount
+uses the loader's verified image bytes and revokes their object URLs at
+teardown; the browser never refetches, generates, or redraws those pages.
 
-## Consumer boundary
+## Application ownership
 
-A consuming product keeps its source-specific schemas, cadence, input ordering,
-presentation, and oracle tooling. Product adapters own their prepared packages,
-mounting paths, presentation, and oracle evidence.
+Morph owns the prepared model format and sparse DOM updates. Your application
+owns input, timing, presentation, model-specific preparation, and product
+behavior.

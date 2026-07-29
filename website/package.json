@@ -16,6 +16,7 @@
     "@astrojs/starlight": "^0.38.2",
     "@layoutit/polycss": "workspace:^",
     "@layoutit/polycss-fonts": "workspace:^",
+    "@layoutit/polycss-morph": "workspace:^",
     "@layoutit/polycss-react": "workspace:^",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",

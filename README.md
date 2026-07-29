@@ -21,7 +21,7 @@ npm install @layoutit/polycss-react
 # Vue
 npm install @layoutit/polycss-vue
 
-# Prepared retained models
+# Morph
 npm install @layoutit/polycss-morph
 
 ```
@@ -156,13 +156,12 @@ const html = await exportPolySceneSnapshot(scene.host);
 
 If any referenced asset cannot be inlined, the function throws `PolySceneSnapshotError` with `code: "ASSET_INLINE_FAILED"`.
 
-### Prepared retained models
+### PolyCSS Morph
 
-`@layoutit/polycss-morph` is an imperative, framework-agnostic package for
-models prepared ahead of time and updated through one retained PolyCSS DOM
-graph.
+Use `@layoutit/polycss-morph` for models built ahead of time and updated through
+a stable PolyCSS DOM graph.
 
-Preparation is explicitly Node-only:
+Preparation runs in Node:
 
 ```ts
 import { preparePolyMorphModel } from "@layoutit/polycss-morph/prepare";
@@ -203,13 +202,15 @@ updates do not rebuild topology or redraw prepared image resources.
 Prepared playback uses a two-phase sample: apply `sample.update`, then call
 `runtime.commit(sample)` only after the retained mount accepts the update.
 
-On browsers that pass PolyCSS's solid-triangle support check, Morph uses
-`corner-shape` when available and a CSS border triangle otherwise; Firefox uses
-the larger border-triangle variant. Preparation also emits packed alpha-atlas
-pages for WebKit/Safari. Every polygon receives a slice sized to its local-2D
-bounding rect. Mount creates object URLs from the already-verified package
-bytes, selects the fallback once, and revokes those URLs at teardown; it never
-refetches, generates, or redraws the atlas.
+Morph chooses the triangle paint path once when it mounts. It uses
+`corner-shape` where available, a larger CSS border triangle in Firefox, and
+prepared alpha-atlas pages in WebKit/Safari. Every polygon receives a slice
+sized to its local-2D bounding rect. Mount creates object URLs from the
+already-verified package bytes, selects the fallback once, and revokes those
+URLs at teardown; it never refetches, generates, or redraws the atlas.
+
+See the [PolyCSS Morph guide](https://polycss.com/guides/morph/), including the
+CC0 Animated Morph Sphere example.
 
 ### Polygon Data Model
 
@@ -291,7 +292,7 @@ Each visible polygon is emitted as one leaf element; the renderer chooses the le
 | `@layoutit/polycss` | Vanilla custom elements and imperative `createPolyScene` API. |
 | `@layoutit/polycss-react` | React components, hooks, controls, and core re-exports. |
 | `@layoutit/polycss-vue` | Vue 3 components, composables, controls, and core re-exports. |
-| `@layoutit/polycss-morph` | Prepared retained-model contracts, Node preparation, browser loading, sparse deformation, controls, springs, animation, skinning, and playback. |
+| `@layoutit/polycss-morph` | Prepared-model loading, retained DOM animation, morph targets, skinning, and playback. |
 
 ## Made with PolyCSS
 
