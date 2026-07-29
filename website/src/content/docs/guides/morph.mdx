@@ -80,51 +80,28 @@ ownership.
 ## Example: Animated Morph Sphere
 
 Animated Morph Sphere is a CC0, 960-polygon model that combines a morph clip
-with a shape-transform clip while keeping the same DOM leaves mounted.
+with a shape-transform clip while keeping the same DOM leaves mounted. Its
+fixed, no-input loop is prepared into CSS transform keyframes at authoring
+time, so the browser plays it without a JavaScript render loop.
 
 <MorphSphereDemo />
 
-After loading and mounting the model as above:
+The page validates and mounts the prepared model once. A generated playback
+stylesheet owns the animation, and teardown only destroys the retained mount:
 
 ```ts
-import {
-  createPolyMorphAnimationRuntime,
-  createPolyMorphDeformationRuntime,
-} from "@layoutit/polycss-morph";
-
-const animation = createPolyMorphAnimationRuntime(loaded.model);
-const deformation = createPolyMorphDeformationRuntime(loaded.model);
-let tick = 0;
-let frameRequest = 0;
-
-function draw(timeMs: number) {
-  const morph = animation.sample("example-blob", timeMs);
-  const spin = animation.sample("example-spin", timeMs);
-  const frame = deformation.sample({
-    tick,
-    morphWeights: morph.morphWeights,
-  });
-
-  mounted.apply({
-    shapes: [...spin.shapeMatrices].map(([shapeId, matrix]) => ({
-      shapeId,
-      matrix,
-    })),
-    leaves: frame.leafUpdates,
-  });
-  tick += 1;
-  frameRequest = requestAnimationFrame(draw);
-}
-
-frameRequest = requestAnimationFrame(draw);
+const mounted = mountPolyMorphModel(host, loaded.model, {
+  resources: loaded.resources,
+});
 
 function destroy() {
-  cancelAnimationFrame(frameRequest);
   mounted.destroy();
 }
 ```
 
-Call `destroy()` during application teardown.
+Use the caller-driven animation and deformation runtimes when weights respond
+to input or application state. Fixed presentation loops can be prepared into
+browser-driven CSS as this example is.
 
 ## Profiles
 

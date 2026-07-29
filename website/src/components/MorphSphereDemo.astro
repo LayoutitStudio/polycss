@@ -1,6 +1,6 @@
 <link
   rel="stylesheet"
-  href="/morph/animated-morph-sphere/model.css"
+  href="/morph/animated-morph-sphere/playback.css"
 />
 
 <div class="morph-sphere-demo not-content" data-morph-sphere-demo>
@@ -16,8 +16,6 @@
 <script>
   import { createPolyPerspectiveCamera } from "@layoutit/polycss";
   import {
-    createPolyMorphAnimationRuntime,
-    createPolyMorphDeformationRuntime,
     mountPolyMorphModel,
     validatePolyMorphModel,
     type PolyMorphLoadedResource,
@@ -25,13 +23,6 @@
 
   const MODEL_BASE = "/morph/animated-morph-sphere";
   const IMAGE_RESOURCES = [
-    {
-      bytes: 77_658,
-      mediaType: "image/webp",
-      path: "assets/lighting-state-000.webp",
-      role: "image",
-      sha256: "c734df98d5417a6c4a4c0a60206d9704bfde0e11d2389be6022917abe8e26a72",
-    },
     {
       bytes: 23_530,
       mediaType: "image/webp",
@@ -59,14 +50,12 @@
     const stage = required<HTMLElement>(root, "[data-morph-sphere-stage]");
     const status = required<HTMLElement>(root, "[data-morph-sphere-status]");
     let disposed = false;
-    let frameRequest = 0;
     let mounted: ReturnType<typeof mountPolyMorphModel> | null = null;
     let resizeObserver: ResizeObserver | null = null;
 
     const destroy = (): void => {
       if (disposed) return;
       disposed = true;
-      cancelAnimationFrame(frameRequest);
       resizeObserver?.disconnect();
       mounted?.destroy();
     };
@@ -116,35 +105,10 @@
       });
       resizeObserver.observe(stage);
 
-      const animation = createPolyMorphAnimationRuntime(model);
-      const deformation = createPolyMorphDeformationRuntime(model);
-      const startedAt = performance.now();
-      let tick = 0;
-
-      const draw = (now: number): void => {
-        if (disposed || !mounted) return;
-        const timeMs = Math.max(0, now - startedAt);
-        const morph = animation.sample("example-blob", timeMs);
-        const spin = animation.sample("example-spin", timeMs);
-        const frame = deformation.sample({
-          tick,
-          morphWeights: morph.morphWeights,
-        });
-        mounted.apply({
-          shapes: [...spin.shapeMatrices].map(([shapeId, matrix]) => ({
-            shapeId,
-            matrix,
-          })),
-          leaves: frame.leafUpdates,
-        });
-        tick += 1;
-        frameRequest = requestAnimationFrame(draw);
-      };
-
       mounted.assertStableDomIdentity();
+      root.dataset.morphSpherePlayback = "prepared-css";
       root.dataset.morphSphereMounted = "ready";
       status.hidden = true;
-      frameRequest = requestAnimationFrame(draw);
     } catch (error) {
       destroy();
       root.dataset.morphSphereMounted = "error";
