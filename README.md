@@ -209,8 +209,8 @@ sized to its local-2D bounding rect. Mount creates object URLs from the
 already-verified package bytes, selects the fallback once, and revokes those
 URLs at teardown; it never refetches, generates, or redraws the atlas.
 
-See the [PolyCSS Morph guide](https://polycss.com/guides/morph/) and the CC0
-[Animated Morph Sphere](https://css.graphics/?asset=animated-morph-sphere).
+See the [PolyCSS Morph guide](https://polycss.com/guides/morph/), including the
+CC0 Animated Morph Sphere example.
 
 ### Polygon Data Model
 

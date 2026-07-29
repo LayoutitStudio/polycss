@@ -3,6 +3,8 @@ title: PolyCSS Morph
 description: Prepare, load, and animate retained DOM models with PolyCSS.
 ---
 
+import MorphSphereDemo from "../../../components/MorphSphereDemo.astro";
+
 `@layoutit/polycss-morph` is an imperative, framework-agnostic layer for models
 whose geometry and paint resources are built ahead of time, then updated
 through a stable DOM graph.
@@ -77,16 +79,10 @@ ownership.
 
 ## Example: Animated Morph Sphere
 
-[Animated Morph Sphere on css.graphics](https://css.graphics/?asset=animated-morph-sphere)
-is a CC0, 960-polygon model that combines a morph clip with a shape-transform
-clip while keeping the same DOM leaves mounted.
+Animated Morph Sphere is a CC0, 960-polygon model that combines a morph clip
+with a shape-transform clip while keeping the same DOM leaves mounted.
 
-<iframe
-  src="https://css.graphics/?asset=animated-morph-sphere"
-  title="Animated Morph Sphere rendered with PolyCSS Morph"
-  loading="lazy"
-  style="display:block;width:100%;height:34rem;border:1px solid var(--sl-color-gray-5);border-radius:0.5rem;background:#0d0d0d"
-></iframe>
+<MorphSphereDemo />
 
 After loading and mounting the model as above:
 

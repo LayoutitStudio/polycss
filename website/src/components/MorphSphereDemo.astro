@@ -1,0 +1,207 @@
+<link
+  rel="stylesheet"
+  href="/morph/animated-morph-sphere/model.css"
+/>
+
+<div class="morph-sphere-demo not-content" data-morph-sphere-demo>
+  <div
+    class="morph-sphere-demo__stage"
+    data-morph-sphere-stage
+    aria-label="Animated Morph Sphere rendered with PolyCSS Morph"
+  ></div>
+  <p class="morph-sphere-demo__status" data-morph-sphere-status>Loading model…</p>
+  <p class="morph-sphere-demo__meta">960 DOM polygons · CC0</p>
+</div>
+
+<script>
+  import { createPolyPerspectiveCamera } from "@layoutit/polycss";
+  import {
+    createPolyMorphAnimationRuntime,
+    createPolyMorphDeformationRuntime,
+    mountPolyMorphModel,
+    validatePolyMorphModel,
+    type PolyMorphLoadedResource,
+  } from "@layoutit/polycss-morph";
+
+  const MODEL_BASE = "/morph/animated-morph-sphere";
+  const IMAGE_RESOURCES = [
+    {
+      bytes: 77_658,
+      mediaType: "image/webp",
+      path: "assets/lighting-state-000.webp",
+      role: "image",
+      sha256: "c734df98d5417a6c4a4c0a60206d9704bfde0e11d2389be6022917abe8e26a72",
+    },
+    {
+      bytes: 23_530,
+      mediaType: "image/webp",
+      path: "assets/solid-triangles-000.webp",
+      role: "image",
+      sha256: "d8919eee54bfeba3a518e2c9950505ed91b610ae6057694992ef8ff392320cf1",
+    },
+  ] as const;
+
+  function required<T extends Element>(root: ParentNode, selector: string): T {
+    const element = root.querySelector<T>(selector);
+    if (!element) throw new Error(`Missing ${selector}.`);
+    return element;
+  }
+
+  async function fetchBytes(path: string): Promise<Uint8Array> {
+    const response = await fetch(`${MODEL_BASE}/${path}`);
+    if (!response.ok) throw new Error(`Could not load ${path}.`);
+    return new Uint8Array(await response.arrayBuffer());
+  }
+
+  async function mountMorphSphere(root: HTMLElement): Promise<void> {
+    if (root.dataset.morphSphereMounted) return;
+    root.dataset.morphSphereMounted = "loading";
+    const stage = required<HTMLElement>(root, "[data-morph-sphere-stage]");
+    const status = required<HTMLElement>(root, "[data-morph-sphere-status]");
+    let disposed = false;
+    let frameRequest = 0;
+    let mounted: ReturnType<typeof mountPolyMorphModel> | null = null;
+    let resizeObserver: ResizeObserver | null = null;
+
+    const destroy = (): void => {
+      if (disposed) return;
+      disposed = true;
+      cancelAnimationFrame(frameRequest);
+      resizeObserver?.disconnect();
+      mounted?.destroy();
+    };
+    document.addEventListener("astro:before-swap", destroy, { once: true });
+    window.addEventListener("pagehide", destroy, { once: true });
+
+    try {
+      const [modelInput, ...resourceBytes] = await Promise.all([
+        fetch(`${MODEL_BASE}/runtime.json`).then((response) => {
+          if (!response.ok) throw new Error("Could not load the prepared model.");
+          return response.json() as Promise<unknown>;
+        }),
+        ...IMAGE_RESOURCES.map(({ path }) => fetchBytes(path)),
+      ]);
+      if (disposed) return;
+
+      const resources = new Map<string, PolyMorphLoadedResource>();
+      IMAGE_RESOURCES.forEach((descriptor, index) => {
+        const bytes = resourceBytes[index]!;
+        if (bytes.byteLength !== descriptor.bytes) {
+          throw new Error(`Prepared resource ${descriptor.path} has stale bytes.`);
+        }
+        resources.set(descriptor.path, { descriptor, bytes });
+      });
+
+      const model = validatePolyMorphModel(modelInput);
+      const fovDegrees = 45;
+      const perspectiveForHeight = (height: number): number =>
+        height / (2 * Math.tan((fovDegrees * Math.PI) / 360));
+      const perspective = perspectiveForHeight(stage.clientHeight);
+      const camera = createPolyPerspectiveCamera({
+        distance: 707.1067811865476 - perspective,
+        perspective,
+        rotX: 0,
+        rotY: 0,
+        target: [0, 0, 0],
+        zoom: 50,
+      });
+      mounted = mountPolyMorphModel(stage, model, { camera, resources });
+
+      resizeObserver = new ResizeObserver(() => {
+        if (!mounted) return;
+        const nextPerspective = perspectiveForHeight(stage.clientHeight);
+        camera.update({ distance: 707.1067811865476 - nextPerspective });
+        mounted.cameraElement.style.perspective = `${nextPerspective}px`;
+        mounted.updateCamera();
+      });
+      resizeObserver.observe(stage);
+
+      const animation = createPolyMorphAnimationRuntime(model);
+      const deformation = createPolyMorphDeformationRuntime(model);
+      const startedAt = performance.now();
+      let tick = 0;
+
+      const draw = (now: number): void => {
+        if (disposed || !mounted) return;
+        const timeMs = now - startedAt;
+        const morph = animation.sample("example-blob", timeMs);
+        const spin = animation.sample("example-spin", timeMs);
+        const frame = deformation.sample({
+          tick,
+          morphWeights: morph.morphWeights,
+        });
+        mounted.apply({
+          shapes: [...spin.shapeMatrices].map(([shapeId, matrix]) => ({
+            shapeId,
+            matrix,
+          })),
+          leaves: frame.leafUpdates,
+        });
+        tick += 1;
+        frameRequest = requestAnimationFrame(draw);
+      };
+
+      mounted.assertStableDomIdentity();
+      root.dataset.morphSphereMounted = "ready";
+      status.hidden = true;
+      frameRequest = requestAnimationFrame(draw);
+    } catch (error) {
+      destroy();
+      root.dataset.morphSphereMounted = "error";
+      status.textContent = "Could not load the prepared model.";
+      console.error(error);
+    }
+  }
+
+  document
+    .querySelectorAll<HTMLElement>("[data-morph-sphere-demo]")
+    .forEach((root) => void mountMorphSphere(root));
+</script>
+
+<style>
+  .morph-sphere-demo {
+    position: relative;
+    display: block;
+    width: 100%;
+    height: 34rem;
+    overflow: hidden;
+    background:
+      radial-gradient(circle at 50% 48%, #252525 0, #111 45%, #090909 100%);
+    border: 1px solid var(--sl-color-gray-5);
+    border-radius: 0.5rem;
+    isolation: isolate;
+  }
+
+  .morph-sphere-demo__stage {
+    position: absolute;
+    inset: 0;
+  }
+
+  .morph-sphere-demo__status,
+  .morph-sphere-demo__meta {
+    position: absolute;
+    z-index: 2;
+    margin: 0;
+    color: #aaa;
+    font: 600 0.7rem/1.2 ui-monospace, SFMono-Regular, Menlo, monospace;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    pointer-events: none;
+  }
+
+  .morph-sphere-demo__status {
+    inset: 50% auto auto 50%;
+    transform: translate(-50%, -50%);
+  }
+
+  .morph-sphere-demo__meta {
+    right: 0.75rem;
+    bottom: 0.7rem;
+  }
+
+  @media (max-width: 40rem) {
+    .morph-sphere-demo {
+      height: 26rem;
+    }
+  }
+</style>
