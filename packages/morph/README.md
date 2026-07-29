@@ -70,6 +70,10 @@ const frame = deformation.sample({
 mounted.apply({ leaves: frame.leafUpdates });
 ```
 
+See the CC0
+[Animated Morph Sphere](https://css.graphics/?asset=animated-morph-sphere) for
+a complete animation and deformation example.
+
 The browser API is intentionally imperative:
 
 - load or validate a model;

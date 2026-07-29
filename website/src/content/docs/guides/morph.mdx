@@ -75,6 +75,54 @@ leaf elements as indexed write targets. Morph deduplicates requested values and
 invalidates the writers at destroy; the application retains DOM teardown
 ownership.
 
+## Example: Animated Morph Sphere
+
+[Animated Morph Sphere on css.graphics](https://css.graphics/?asset=animated-morph-sphere)
+is a CC0, 960-polygon model that combines a morph clip with a shape-transform
+clip while keeping the same DOM leaves mounted.
+
+After loading and mounting the model as above:
+
+```ts
+import {
+  createPolyMorphAnimationRuntime,
+  createPolyMorphDeformationRuntime,
+} from "@layoutit/polycss-morph";
+
+const animation = createPolyMorphAnimationRuntime(loaded.model);
+const deformation = createPolyMorphDeformationRuntime(loaded.model);
+let tick = 0;
+let frameRequest = 0;
+
+function draw(timeMs: number) {
+  const morph = animation.sample("example-blob", timeMs);
+  const spin = animation.sample("example-spin", timeMs);
+  const frame = deformation.sample({
+    tick,
+    morphWeights: morph.morphWeights,
+  });
+
+  mounted.apply({
+    shapes: [...spin.shapeMatrices].map(([shapeId, matrix]) => ({
+      shapeId,
+      matrix,
+    })),
+    leaves: frame.leafUpdates,
+  });
+  tick += 1;
+  frameRequest = requestAnimationFrame(draw);
+}
+
+frameRequest = requestAnimationFrame(draw);
+
+function destroy() {
+  cancelAnimationFrame(frameRequest);
+  mounted.destroy();
+}
+```
+
+Call `destroy()` during application teardown.
+
 ## Profiles
 
 | Profile | Behavior |
