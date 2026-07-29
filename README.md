@@ -21,6 +21,9 @@ npm install @layoutit/polycss-react
 # Vue
 npm install @layoutit/polycss-vue
 
+# Prepared retained models
+npm install @layoutit/polycss-morph
+
 ```
 
 You can also load PolyCSS directly from a CDN. Here is a minimal custom-element scene:
@@ -155,10 +158,9 @@ If any referenced asset cannot be inlined, the function throws `PolySceneSnapsho
 
 ### Prepared retained models
 
-The source tree includes `@layoutit/polycss-morph`, an imperative,
-framework-agnostic package for models prepared ahead of time and updated through
-one retained PolyCSS DOM graph. Version `0.0.1` is qualified for publication;
-this documentation does not announce npm registry availability.
+`@layoutit/polycss-morph` is an imperative, framework-agnostic package for
+models prepared ahead of time and updated through one retained PolyCSS DOM
+graph.
 
 Preparation is explicitly Node-only:
 
@@ -201,12 +203,13 @@ updates do not rebuild topology or redraw prepared image resources.
 Prepared playback uses a two-phase sample: apply `sample.update`, then call
 `runtime.commit(sample)` only after the retained mount accepts the update.
 
-Prepared solid triangles use the native CSS triangle primitive when supported.
-Preparation also emits packed alpha-atlas pages for WebKit/Safari and other
-browsers without a supported CSS triangle primitive. Every polygon receives a
-slice sized to its local-2D bounding rect. Mount creates object URLs from the
-already-verified package bytes, selects the fallback once, and revokes those
-URLs at teardown; it never refetches, generates, or redraws the atlas.
+On browsers that pass PolyCSS's solid-triangle support check, Morph uses
+`corner-shape` when available and a CSS border triangle otherwise; Firefox uses
+the larger border-triangle variant. Preparation also emits packed alpha-atlas
+pages for WebKit/Safari. Every polygon receives a slice sized to its local-2D
+bounding rect. Mount creates object URLs from the already-verified package
+bytes, selects the fallback once, and revokes those URLs at teardown; it never
+refetches, generates, or redraws the atlas.
 
 ### Polygon Data Model
 

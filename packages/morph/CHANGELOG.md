@@ -8,5 +8,5 @@
   identity and caller-owned timing.
 - Support static models, sparse morph regions, controls, springs, animation,
   joint skinning, and prepared playback.
-- Use native CSS triangle primitives where available and prepared,
+- Use PolyCSS's solid-triangle CSS path where supported and prepared,
   polygon-sized alpha-atlas slices elsewhere, with no runtime rasterization.

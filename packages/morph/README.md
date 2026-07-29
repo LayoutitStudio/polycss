@@ -2,8 +2,9 @@
 
 Prepared retained-model deformation and playback for PolyCSS.
 
-Version `0.0.1` is the first release candidate. This README documents the
-source-tree API; it does not announce npm registry availability.
+```bash
+npm install @layoutit/polycss-morph
+```
 
 ## Boundary
 
@@ -91,13 +92,14 @@ mounted model keeps the same leaf elements for its lifetime. Runtime updates do
 not rebuild topology, add or remove leaves, construct image resources, or
 redraw prepared image resources.
 
-The browser resolves prepared triangles once during mount. Supporting browsers,
-including Firefox, use a native CSS triangle primitive. WebKit/Safari and other
-browsers without a supported primitive use each leaf's prepared polygon-sized
-atlas slice. Mount creates object URLs from the loader's already-verified image
-bytes and revokes them at teardown; it does not refetch package resources.
-Atlas pages are generated with Node built-ins, so Morph has no Sharp or other
-native image dependency.
+The browser resolves prepared triangles once during mount. On browsers that
+pass PolyCSS's solid-triangle support check, Morph uses `corner-shape` when
+available and a CSS border triangle otherwise; Firefox uses the larger
+border-triangle variant. WebKit/Safari instead uses each leaf's prepared
+polygon-sized atlas slice. Mount creates object URLs from the loader's
+already-verified image bytes and revokes them at teardown; it does not refetch
+package resources. Atlas pages are generated with Node built-ins, so Morph has
+no Sharp or other native image dependency.
 
 ## Consumer adapters
 

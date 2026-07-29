@@ -5,8 +5,10 @@ description: Prepare retained PolyCSS models in Node, then load and update them 
 
 `@layoutit/polycss-morph` is an imperative, framework-agnostic layer for models
 whose topology, paint resources, and update plans are prepared ahead of time.
-It is currently a workspace package under standalone qualification; this page
-documents the source-tree API and does not announce npm registry availability.
+
+```bash
+npm install @layoutit/polycss-morph
+```
 
 Use ordinary `Polygon[]` loading for ordinary meshes. Use Morph when a model
 needs a retained leaf graph plus sparse deformation, semantic controls,
@@ -93,13 +95,13 @@ Mount once, then sample and apply:
 - sparse samples visit only affected leaves;
 - runtime updates do not reconstruct topology or redraw prepared image resources.
 
-Supporting browsers, including Firefox, use a native CSS triangle primitive.
-WebKit/Safari and other browsers without a supported primitive use each leaf's
-prepared polygon-sized alpha-atlas slice instead. Mount uses the loader's
-verified image bytes and revokes their object URLs at teardown; the browser
-never refetches, generates, or redraws
-those pages. Dedicated tooling may also author other image-backed strategies,
-including prepared-playback consumers.
+On browsers that pass PolyCSS's solid-triangle support check, Morph uses
+`corner-shape` when available and a CSS border triangle otherwise; Firefox uses
+the larger border-triangle variant. WebKit/Safari instead uses each leaf's
+prepared polygon-sized alpha-atlas slice. Mount uses the loader's verified image
+bytes and revokes their object URLs at teardown; the browser never refetches,
+generates, or redraws those pages. Dedicated tooling may also author other
+image-backed strategies, including prepared-playback consumers.
 
 ## Consumer boundary
 
