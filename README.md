@@ -210,7 +210,7 @@ already-verified package bytes, selects the fallback once, and revokes those
 URLs at teardown; it never refetches, generates, or redraws the atlas.
 
 See the [PolyCSS Morph guide](https://polycss.com/guides/morph/), including the
-CC0 Animated Morph Sphere example.
+interactive cube-to-sphere example.
 
 ### Polygon Data Model
 
