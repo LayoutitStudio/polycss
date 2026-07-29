@@ -97,7 +97,7 @@ export default defineConfig({
             { label: 'Performance', slug: 'guides/performance' },
             { label: 'Projections', slug: 'guides/projections' },
             { label: 'Animation', slug: 'guides/animation' },
-            { label: 'Prepared Morph Models', slug: 'guides/morph' },
+            { label: 'Morph', slug: 'guides/morph' },
           ],
         },
         {
