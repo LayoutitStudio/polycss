@@ -3,7 +3,7 @@ title: PolyCSS Morph
 description: Prepare, load, and animate retained DOM models with PolyCSS.
 ---
 
-import MorphSphereDemo from "../../../components/MorphSphereDemo.astro";
+import MorphTargetsDemo from "../../../components/MorphTargetsDemo.astro";
 
 `@layoutit/polycss-morph` is an imperative, framework-agnostic layer for models
 whose geometry and paint resources are built ahead of time, then updated
@@ -77,31 +77,38 @@ leaf elements as indexed write targets. Morph deduplicates requested values and
 invalidates the writers at destroy; the application retains DOM teardown
 ownership.
 
-## Example: Animated Morph Sphere
+## Example: Cube to sphere
 
-Animated Morph Sphere is a CC0, 960-polygon model that combines a morph clip
-with a shape-transform clip while keeping the same DOM leaves mounted. Its
-fixed, no-input loop is prepared into CSS transform keyframes at authoring
-time, so the browser plays it without a JavaScript render loop.
+This 768-polygon model from the
+[three.js morph-target example](https://github.com/mrdoob/three.js/blob/7763535f6f944a32105af7d9d57d83a92f310d51/examples/webgl_morphtargets.html)
+exposes two prepared targets. **Spherify** moves the cube toward a sphere;
+**Swirl** applies the source twist target. Both sliders may be combined while
+the same DOM leaves remain mounted. Drag anywhere on the stage to orbit the
+model.
 
-<MorphSphereDemo />
+<MorphTargetsDemo />
 
-The page validates and mounts the prepared model once. A generated playback
-stylesheet owns the animation, and teardown only destroys the retained mount:
+The page samples only when a slider changes. Geometry follows the slider
+directly; releasing it commits the nearest prepared lighting state with at
+most two ancestor custom-property writes:
 
 ```ts
+const deformation = createPolyMorphDeformationRuntime(model);
 const mounted = mountPolyMorphModel(host, loaded.model, {
   resources: loaded.resources,
 });
 
-function destroy() {
-  mounted.destroy();
+function update(spherify: number, twist: number) {
+  const frame = deformation.sample({
+    tick: tick++,
+    morphWeights: { spherify, twist },
+  });
+  mounted.apply({ leaves: frame.leafUpdates });
 }
 ```
 
-Use the caller-driven animation and deformation runtimes when weights respond
-to input or application state. Fixed presentation loops can be prepared into
-browser-driven CSS as this example is.
+Morph owns no scheduler. Applications decide whether weights come from direct
+input, state, an animation sampler, or a spring.
 
 ## Profiles
 

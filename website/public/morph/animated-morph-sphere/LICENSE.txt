@@ -1,3 +1,0 @@
-Animated Morph Sphere prepared model
-SPDX-License-Identifier: CC0-1.0
-Source: cssGraphics Animated Morph Sphere example

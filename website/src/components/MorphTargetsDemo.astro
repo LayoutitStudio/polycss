@@ -1,0 +1,472 @@
+<link rel="stylesheet" href="/morph/morph-targets/model.css" />
+
+<div class="morph-targets-demo not-content" data-morph-targets-demo>
+  <div
+    class="morph-targets-demo__stage"
+    data-morph-targets-stage
+    aria-label="Interactive cube-to-sphere morph rendered with PolyCSS Morph"
+  ></div>
+
+  <div class="morph-targets-demo__controls" aria-label="Morph controls">
+    <label>
+      <span>Spherify</span>
+      <input
+        type="range"
+        min="0"
+        max="1"
+        step="0.01"
+        value="0"
+        data-morph-target="spherify"
+      />
+      <output data-morph-output="spherify">0.00</output>
+    </label>
+    <label>
+      <span>Swirl</span>
+      <input
+        type="range"
+        min="0"
+        max="1"
+        step="0.01"
+        value="0"
+        data-morph-target="twist"
+      />
+      <output data-morph-output="twist">0.00</output>
+    </label>
+  </div>
+
+  <p class="morph-targets-demo__status" data-morph-targets-status>
+    Loading model…
+  </p>
+  <p class="morph-targets-demo__meta">Drag to orbit · 768 DOM polygons · MIT</p>
+</div>
+
+<script>
+  import { createPolyPerspectiveCamera } from "@layoutit/polycss";
+  import {
+    createPolyMorphDeformationRuntime,
+    mountPolyMorphModel,
+    validatePolyMorphModel,
+    type PolyMorphLoadedResource,
+    type PolyMorphMat4,
+  } from "@layoutit/polycss-morph";
+
+  const MODEL_BASE = "/morph/morph-targets";
+  const LIGHTING_X = "--polycss-morph-targets-lighting-x";
+  const LIGHTING_Y = "--polycss-morph-targets-lighting-y";
+  const LIGHTING_STEPS = 9;
+  const LIGHTING_COLUMNS = 2;
+  const LIGHTING_CELL_PX = 32;
+  const LEAF_COUNT = 768;
+  const IMAGE_RESOURCES = [
+    {
+      bytes: 31_080,
+      mediaType: "image/webp",
+      path: "assets/lighting-state-000.webp",
+      role: "image",
+      sha256: "67f72845628ef5dfad51e14a694bd1658c509e6bdc581329b027bbd0fdec596f",
+    },
+    {
+      bytes: 4_190,
+      mediaType: "image/webp",
+      path: "assets/solid-triangles-000.webp",
+      role: "image",
+      sha256: "c8c495e1d7ddc7a73ae06c7310d8e3e515f0b716cbd6499143688e6c1c79c389",
+    },
+  ] as const;
+
+  type MorphTargetId = "spherify" | "twist";
+
+  function multiply(
+    left: PolyMorphMat4,
+    right: PolyMorphMat4,
+  ): PolyMorphMat4 {
+    const output = new Array<number>(16).fill(0);
+    for (let column = 0; column < 4; column += 1) {
+      for (let row = 0; row < 4; row += 1) {
+        for (let axis = 0; axis < 4; axis += 1) {
+          output[(column * 4) + row] +=
+            left[(axis * 4) + row]! * right[(column * 4) + axis]!;
+        }
+      }
+    }
+    return output as unknown as PolyMorphMat4;
+  }
+
+  function threeOrbitMatrix(
+    azimuthRadians: number,
+    polarRadians: number,
+  ): PolyMorphMat4 {
+    const sinTheta = Math.sin(azimuthRadians);
+    const cosTheta = Math.cos(azimuthRadians);
+    const sinPhi = Math.sin(polarRadians);
+    const cosPhi = Math.cos(polarRadians);
+    return [
+      cosTheta, cosPhi * sinTheta, sinPhi * sinTheta, 0,
+      0, -sinPhi, cosPhi, 0,
+      -sinTheta, cosPhi * cosTheta, sinPhi * cosTheta, 0,
+      0, 0, 0, 1,
+    ];
+  }
+
+  function inverseRotation(matrix: PolyMorphMat4): PolyMorphMat4 {
+    return [
+      matrix[0], matrix[4], matrix[8], 0,
+      matrix[1], matrix[5], matrix[9], 0,
+      matrix[2], matrix[6], matrix[10], 0,
+      0, 0, 0, 1,
+    ];
+  }
+
+  function createOrbit(
+    host: HTMLElement,
+    onChange: () => void,
+  ): { compose(matrix: PolyMorphMat4): PolyMorphMat4; destroy(): void } {
+    const initialAzimuth = 0;
+    const initialPolar = Math.PI / 2;
+    const initialInverse = inverseRotation(
+      threeOrbitMatrix(initialAzimuth, initialPolar),
+    );
+    let delta: PolyMorphMat4 | null = null;
+    let azimuth = initialAzimuth;
+    let polar = initialPolar;
+    let pointerId: number | null = null;
+    let lastX = 0;
+    let lastY = 0;
+
+    const release = (event: PointerEvent): void => {
+      if (event.pointerId !== pointerId) return;
+      if (host.hasPointerCapture(pointerId)) {
+        host.releasePointerCapture(pointerId);
+      }
+      pointerId = null;
+      delete host.dataset.polyMorphDragging;
+    };
+    const down = (event: PointerEvent): void => {
+      if (event.button !== 0 || pointerId !== null) return;
+      pointerId = event.pointerId;
+      lastX = event.clientX;
+      lastY = event.clientY;
+      host.dataset.polyMorphDragging = "true";
+      host.setPointerCapture(event.pointerId);
+      event.preventDefault();
+    };
+    const move = (event: PointerEvent): void => {
+      if (event.pointerId !== pointerId) return;
+      const radiansPerPixel = Math.PI * 2 / (host.clientHeight || 1);
+      azimuth -= (event.clientX - lastX) * radiansPerPixel;
+      polar = Math.max(
+        1e-6,
+        Math.min(
+          Math.PI - 1e-6,
+          polar - ((event.clientY - lastY) * radiansPerPixel),
+        ),
+      );
+      lastX = event.clientX;
+      lastY = event.clientY;
+      delta = multiply(
+        threeOrbitMatrix(azimuth, polar),
+        initialInverse,
+      );
+      onChange();
+      event.preventDefault();
+    };
+
+    host.dataset.polyMorphOrbit = "ready";
+    host.addEventListener("pointerdown", down, { passive: false });
+    host.addEventListener("pointermove", move, { passive: false });
+    host.addEventListener("pointerup", release);
+    host.addEventListener("pointercancel", release);
+
+    return {
+      compose(matrix: PolyMorphMat4): PolyMorphMat4 {
+        return delta ? multiply(delta, matrix) : matrix;
+      },
+      destroy(): void {
+        host.removeEventListener("pointerdown", down);
+        host.removeEventListener("pointermove", move);
+        host.removeEventListener("pointerup", release);
+        host.removeEventListener("pointercancel", release);
+        delete host.dataset.polyMorphOrbit;
+        delete host.dataset.polyMorphDragging;
+      },
+    };
+  }
+
+  function required<T extends Element>(root: ParentNode, selector: string): T {
+    const element = root.querySelector<T>(selector);
+    if (!element) throw new Error(`Missing ${selector}.`);
+    return element;
+  }
+
+  async function fetchBytes(path: string): Promise<Uint8Array> {
+    const response = await fetch(`${MODEL_BASE}/${path}`);
+    if (!response.ok) throw new Error(`Could not load ${path}.`);
+    return new Uint8Array(await response.arrayBuffer());
+  }
+
+  async function mountMorphTargets(root: HTMLElement): Promise<void> {
+    if (root.dataset.morphTargetsMounted) return;
+    root.dataset.morphTargetsMounted = "loading";
+
+    const stage = required<HTMLElement>(root, "[data-morph-targets-stage]");
+    const status = required<HTMLElement>(root, "[data-morph-targets-status]");
+    const weights: Record<MorphTargetId, number> = {
+      spherify: 0,
+      twist: 0,
+    };
+    let disposed = false;
+    let tick = 0;
+    let currentLightingX = 0;
+    let currentLightingY = 0;
+    let mounted: ReturnType<typeof mountPolyMorphModel> | null = null;
+    let deformation:
+      | ReturnType<typeof createPolyMorphDeformationRuntime>
+      | null = null;
+    let orbit: ReturnType<typeof createOrbit> | null = null;
+    let resizeObserver: ResizeObserver | null = null;
+
+    const applyLighting = (): void => {
+      if (!mounted) return;
+      const spherifyIndex = Math.round(weights.spherify * (LIGHTING_STEPS - 1));
+      const twistIndex = Math.round(weights.twist * (LIGHTING_STEPS - 1));
+      const stateIndex = (spherifyIndex * LIGHTING_STEPS) + twistIndex;
+      const nextX = -(stateIndex % LIGHTING_COLUMNS)
+        * LEAF_COUNT
+        * LIGHTING_CELL_PX;
+      const nextY = -Math.floor(stateIndex / LIGHTING_COLUMNS)
+        * LIGHTING_CELL_PX;
+      if (nextX !== currentLightingX) {
+        mounted.modelElement.style.setProperty(LIGHTING_X, `${nextX}px`);
+        currentLightingX = nextX;
+      }
+      if (nextY !== currentLightingY) {
+        mounted.modelElement.style.setProperty(LIGHTING_Y, `${nextY}px`);
+        currentLightingY = nextY;
+      }
+    };
+
+    const applyMorph = (): void => {
+      if (!mounted || !deformation) return;
+      const frame = deformation.sample({
+        tick,
+        morphWeights: weights,
+      });
+      mounted.apply({ leaves: frame.leafUpdates });
+      tick += 1;
+    };
+
+    const onInput = (event: Event): void => {
+      const input = event.target;
+      if (!(input instanceof HTMLInputElement)) return;
+      const targetId = input.dataset.morphTarget as MorphTargetId | undefined;
+      if (targetId !== "spherify" && targetId !== "twist") return;
+      const value = Number(input.value);
+      if (!Number.isFinite(value) || value < 0 || value > 1) return;
+      weights[targetId] = value;
+      const output = required<HTMLOutputElement>(
+        root,
+        `[data-morph-output="${targetId}"]`,
+      );
+      output.value = value.toFixed(2);
+      output.textContent = output.value;
+      applyMorph();
+    };
+    const onChange = (event: Event): void => {
+      const input = event.target;
+      if (!(input instanceof HTMLInputElement)) return;
+      const targetId = input.dataset.morphTarget as MorphTargetId | undefined;
+      if (targetId !== "spherify" && targetId !== "twist") return;
+      applyLighting();
+    };
+
+    const destroy = (): void => {
+      if (disposed) return;
+      disposed = true;
+      root.removeEventListener("input", onInput);
+      root.removeEventListener("change", onChange);
+      resizeObserver?.disconnect();
+      orbit?.destroy();
+      mounted?.destroy();
+    };
+    document.addEventListener("astro:before-swap", destroy, { once: true });
+    window.addEventListener("pagehide", destroy, { once: true });
+
+    try {
+      const [modelInput, ...resourceBytes] = await Promise.all([
+        fetch(`${MODEL_BASE}/runtime.json`).then((response) => {
+          if (!response.ok) throw new Error("Could not load the prepared model.");
+          return response.json() as Promise<unknown>;
+        }),
+        ...IMAGE_RESOURCES.map(({ path }) => fetchBytes(path)),
+      ]);
+      if (disposed) return;
+
+      const resources = new Map<string, PolyMorphLoadedResource>();
+      IMAGE_RESOURCES.forEach((descriptor, index) => {
+        const bytes = resourceBytes[index]!;
+        if (bytes.byteLength !== descriptor.bytes) {
+          throw new Error(`Prepared resource ${descriptor.path} has stale bytes.`);
+        }
+        resources.set(descriptor.path, { descriptor, bytes });
+      });
+
+      const model = validatePolyMorphModel(modelInput);
+      if (
+        model.identity.id !== "webgl-morphtargets"
+        || model.render.leaves.length !== LEAF_COUNT
+        || model.deformation.kind !== "morph-regions"
+        || model.deformation.targets.map(({ id }) => id).join(",")
+          !== "spherify,twist"
+      ) {
+        throw new Error("Prepared morph-target model drifted.");
+      }
+
+      const fovDegrees = 45;
+      const perspectiveForHeight = (height: number): number =>
+        height / (2 * Math.tan((fovDegrees * Math.PI) / 360));
+      const perspective = perspectiveForHeight(stage.clientHeight);
+      const camera = createPolyPerspectiveCamera({
+        distance: 1_000 - perspective,
+        perspective,
+        rotX: 70,
+        rotY: -30,
+        target: [0, 0, 0],
+        zoom: 60,
+      });
+      mounted = mountPolyMorphModel(stage, model, { camera, resources });
+      deformation = createPolyMorphDeformationRuntime(model);
+      orbit = createOrbit(stage, () => {
+        const activeOrbit = orbit;
+        if (!mounted || !activeOrbit) return;
+        mounted.apply({
+          shapes: model.render.shapes.map(({ id, matrix }) => ({
+            shapeId: id,
+            matrix: activeOrbit.compose(matrix),
+          })),
+        });
+      });
+
+      resizeObserver = new ResizeObserver(() => {
+        if (!mounted) return;
+        const nextPerspective = perspectiveForHeight(stage.clientHeight);
+        camera.update({ distance: 1_000 - nextPerspective });
+        mounted.cameraElement.style.perspective = `${nextPerspective}px`;
+        mounted.updateCamera();
+      });
+      resizeObserver.observe(stage);
+      root.addEventListener("input", onInput);
+      root.addEventListener("change", onChange);
+
+      applyMorph();
+      applyLighting();
+      root.dataset.morphTargetsMounted = "ready";
+      root.dataset.morphTargetsPlayback = "input-driven";
+      status.hidden = true;
+    } catch (error) {
+      destroy();
+      root.dataset.morphTargetsMounted = "error";
+      status.textContent = "Could not load the prepared model.";
+      console.error(error);
+    }
+  }
+
+  document
+    .querySelectorAll<HTMLElement>("[data-morph-targets-demo]")
+    .forEach((root) => void mountMorphTargets(root));
+</script>
+
+<style>
+  .morph-targets-demo {
+    position: relative;
+    display: block;
+    width: 100%;
+    height: 34rem;
+    overflow: hidden;
+    background:
+      radial-gradient(circle at 50% 48%, #252525 0, #111 45%, #090909 100%);
+    border: 1px solid var(--sl-color-gray-5);
+    border-radius: 0.5rem;
+    isolation: isolate;
+  }
+
+  .morph-targets-demo__stage {
+    position: absolute;
+    inset: 0;
+    touch-action: none;
+    cursor: grab;
+  }
+
+  .morph-targets-demo__stage[data-poly-morph-dragging="true"] {
+    cursor: grabbing;
+  }
+
+  .morph-targets-demo__controls {
+    position: absolute;
+    z-index: 2;
+    top: 0.75rem;
+    right: 0.75rem;
+    width: min(19rem, calc(100% - 1.5rem));
+    overflow: hidden;
+    color: #ddd;
+    background: rgb(12 12 12 / 88%);
+    border: 1px solid rgb(255 255 255 / 12%);
+    border-radius: 0.35rem;
+    box-shadow: 0 0.5rem 1.5rem rgb(0 0 0 / 28%);
+  }
+
+  .morph-targets-demo__controls label {
+    display: grid;
+    grid-template-columns: 4.25rem 1fr 2.6rem;
+    align-items: center;
+    gap: 0.55rem;
+    min-height: 2.15rem;
+    padding: 0.3rem 0.55rem;
+    border-top: 1px solid rgb(255 255 255 / 7%);
+    font: 600 0.72rem/1.2 ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+
+  .morph-targets-demo__controls label:first-child {
+    border-top: 0;
+  }
+
+  .morph-targets-demo__controls input {
+    width: 100%;
+    margin: 0;
+    accent-color: #e2482d;
+    cursor: pointer;
+  }
+
+  .morph-targets-demo__controls output {
+    color: #aaa;
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+  }
+
+  .morph-targets-demo__status,
+  .morph-targets-demo__meta {
+    position: absolute;
+    z-index: 2;
+    margin: 0;
+    color: #aaa;
+    font: 600 0.7rem/1.2 ui-monospace, SFMono-Regular, Menlo, monospace;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    pointer-events: none;
+  }
+
+  .morph-targets-demo__status {
+    inset: 50% auto auto 50%;
+    transform: translate(-50%, -50%);
+  }
+
+  .morph-targets-demo__meta {
+    right: 0.75rem;
+    bottom: 0.7rem;
+  }
+
+  @media (max-width: 40rem) {
+    .morph-targets-demo {
+      height: 26rem;
+    }
+  }
+</style>

@@ -8,7 +8,6 @@
   "scripts": {
     "dev": "astro dev",
     "build": "astro build && node scripts/generate-llms-txt.mjs",
-    "prepare:morph-sphere-playback": "node scripts/generate-morph-sphere-playback.mjs",
     "preview": "astro preview"
   },
   "dependencies": {
