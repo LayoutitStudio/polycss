@@ -123,7 +123,7 @@
 
       const draw = (now: number): void => {
         if (disposed || !mounted) return;
-        const timeMs = now - startedAt;
+        const timeMs = Math.max(0, now - startedAt);
         const morph = animation.sample("example-blob", timeMs);
         const spin = animation.sample("example-spin", timeMs);
         const frame = deformation.sample({
