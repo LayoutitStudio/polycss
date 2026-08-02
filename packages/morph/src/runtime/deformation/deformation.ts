@@ -1,5 +1,7 @@
 import {
+  computeProjectiveQuadCoefficients,
   computeSolidTrianglePlanFromCssPoints,
+  resolveProjectiveQuadGuards,
   SOLID_TRIANGLE_CANONICAL_SIZE,
   type Polygon,
   type SolidTriangleBasis,
@@ -28,6 +30,8 @@ export interface PolyMorphCompiledLeaf {
 }
 
 type MutableVec3 = [number, number, number];
+
+const PROJECTIVE_QUAD_GUARDS = resolveProjectiveQuadGuards(undefined);
 
 function fail(code: string, path: string, message: string): never {
   throw new PolyMorphRuntimeError(code, path, message);
@@ -102,44 +106,132 @@ function quadMatrix(
   const p1 = positions[i1!]!;
   const p2 = positions[i2!]!;
   const p3 = positions[i3!]!;
-  const predicted = [
-    p1[0] + p3[0] - p0[0],
-    p1[1] + p3[1] - p0[1],
-    p1[2] + p3[2] - p0[2],
-  ] as const;
-  if (Math.hypot(
-    predicted[0] - p2[0],
-    predicted[1] - p2[1],
-    predicted[2] - p2[2],
-  ) > 1e-6) {
-    fail("non-affine-polygon", compiled.leaf.id, "deformed quad is not a parallelogram");
-  }
-  const x = [
-    (p1[0] - p0[0]) / compiled.leaf.width,
-    (p1[1] - p0[1]) / compiled.leaf.width,
-    (p1[2] - p0[2]) / compiled.leaf.width,
-  ] as const;
-  const y = [
-    (p3[0] - p0[0]) / compiled.leaf.height,
-    (p3[1] - p0[1]) / compiled.leaf.height,
-    (p3[2] - p0[2]) / compiled.leaf.height,
-  ] as const;
-  const cross = [
-    x[1] * y[2] - x[2] * y[1],
-    x[2] * y[0] - x[0] * y[2],
-    x[0] * y[1] - x[1] * y[0],
+  const edgeX = [
+    p1[0] - p0[0],
+    p1[1] - p0[1],
+    p1[2] - p0[2],
   ] as PolyMorphVec3;
-  const z = normalize(cross);
-  if (Math.hypot(...z) <= 1e-12) {
+  const edgeY = [
+    p3[0] - p0[0],
+    p3[1] - p0[1],
+    p3[2] - p0[2],
+  ] as PolyMorphVec3;
+  const edgeXLength = Math.hypot(...edgeX);
+  const edgeYLength = Math.hypot(...edgeY);
+  if (
+    !Number.isFinite(edgeXLength)
+    || !Number.isFinite(edgeYLength)
+    || edgeXLength === 0
+    || edgeYLength === 0
+  ) {
     fail("degenerate-polygon", compiled.leaf.id, "deformed quad has no area");
   }
+  const unitEdgeX = [
+    edgeX[0] / edgeXLength,
+    edgeX[1] / edgeXLength,
+    edgeX[2] / edgeXLength,
+  ] as PolyMorphVec3;
+  const unitEdgeY = [
+    edgeY[0] / edgeYLength,
+    edgeY[1] / edgeYLength,
+    edgeY[2] / edgeYLength,
+  ] as PolyMorphVec3;
+  const cross = [
+    unitEdgeX[1] * unitEdgeY[2] - unitEdgeX[2] * unitEdgeY[1],
+    unitEdgeX[2] * unitEdgeY[0] - unitEdgeX[0] * unitEdgeY[2],
+    unitEdgeX[0] * unitEdgeY[1] - unitEdgeX[1] * unitEdgeY[0],
+  ] as PolyMorphVec3;
+  const crossLength = Math.hypot(...cross);
+  if (!Number.isFinite(crossLength) || crossLength <= 1e-12) {
+    fail("degenerate-polygon", compiled.leaf.id, "deformed quad has no area");
+  }
+  const z = [
+    cross[0] / crossLength,
+    cross[1] / crossLength,
+    cross[2] / crossLength,
+  ] as PolyMorphVec3;
+  const diagonal = [
+    p2[0] - p0[0],
+    p2[1] - p0[1],
+    p2[2] - p0[2],
+  ] as PolyMorphVec3;
+  const diagonalLength = Math.hypot(...diagonal);
+  const distance = Math.abs(
+    z[0] * diagonal[0]
+    + z[1] * diagonal[1]
+    + z[2] * diagonal[2],
+  );
+  const quadScale = Math.max(edgeXLength, edgeYLength, diagonalLength);
+  if (
+    !Number.isFinite(distance)
+    || !Number.isFinite(quadScale)
+    || distance / quadScale > 1e-6
+  ) {
+    fail("non-planar-polygon", compiled.leaf.id, "deformed quad is not coplanar");
+  }
+  const basis = ([[0, 1], [0, 2], [1, 2]] as const)
+    .map(([first, second]) => ({
+      first,
+      second,
+      determinant: unitEdgeX[first] * unitEdgeY[second]
+        - unitEdgeX[second] * unitEdgeY[first],
+    }))
+    .sort((left, right) =>
+      Math.abs(right.determinant) - Math.abs(left.determinant))[0]!;
+  const projected = [p0, p1, p2, p3].map((point): [number, number] => [
+    point[basis.first],
+    point[basis.second],
+  ]);
+  const [projectedOrigin] = projected;
+  const projectedScaleX = Math.max(...projected.map((point) =>
+    Math.abs(point[0] - projectedOrigin![0])));
+  const projectedScaleY = Math.max(...projected.map((point) =>
+    Math.abs(point[1] - projectedOrigin![1])));
+  if (
+    !Number.isFinite(projectedScaleX)
+    || !Number.isFinite(projectedScaleY)
+    || projectedScaleX === 0
+    || projectedScaleY === 0
+  ) {
+    fail("degenerate-polygon", compiled.leaf.id, "deformed quad has no area");
+  }
+  const normalizedProjected = projected.map((point): [number, number] => [
+    (point[0] - projectedOrigin![0]) / projectedScaleX,
+    (point[1] - projectedOrigin![1]) / projectedScaleY,
+  ]);
+  const coefficients = computeProjectiveQuadCoefficients(
+    normalizedProjected,
+    PROJECTIVE_QUAD_GUARDS,
+  );
+  if (!coefficients) {
+    fail(
+      "degenerate-polygon",
+      compiled.leaf.id,
+      "deformed quad has no stable convex projective transform",
+    );
+  }
+  const { g, h } = coefficients;
+  const x = [
+    ((1 + g) * p1[0] - p0[0]) / compiled.leaf.width,
+    ((1 + g) * p1[1] - p0[1]) / compiled.leaf.width,
+    ((1 + g) * p1[2] - p0[2]) / compiled.leaf.width,
+  ] as const;
+  const y = [
+    ((1 + h) * p3[0] - p0[0]) / compiled.leaf.height,
+    ((1 + h) * p3[1] - p0[1]) / compiled.leaf.height,
+    ((1 + h) * p3[2] - p0[2]) / compiled.leaf.height,
+  ] as const;
+  const matrix = [
+    x[0], x[1], x[2], g / compiled.leaf.width,
+    y[0], y[1], y[2], h / compiled.leaf.height,
+    z[0], z[1], z[2], 0,
+    p0[0], p0[1], p0[2], 1,
+  ] as PolyMorphMat4;
+  if (matrix.some((component) => !Number.isFinite(component))) {
+    fail("invalid-transform", compiled.leaf.id, "deformed quad produced a non-finite matrix");
+  }
   return {
-    matrix: [
-      x[0], x[1], x[2], 0,
-      y[0], y[1], y[2], 0,
-      z[0], z[1], z[2], 0,
-      p0[0], p0[1], p0[2], 1,
-    ],
+    matrix,
     visible: true,
   };
 }
@@ -153,7 +245,7 @@ export function computePolyMorphPreparedLeafMatrix(
   fail(
     "unsupported-deformation",
     compiled.leaf.id,
-    "caller-driven deformation supports prepared triangles and affine quads",
+    "caller-driven deformation supports prepared triangles and planar quads",
   );
 }
 

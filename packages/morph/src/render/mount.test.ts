@@ -71,6 +71,50 @@ function createTwoLeafFixture() {
   return fixture;
 }
 
+function createSolidQuadFixture() {
+  const fixture = clonePolyMorphFixture(createPolyMorphModelFixture());
+  fixture.topology.vertices.push([1, 1, 0]);
+  fixture.topology.normals.push([0, 0, 1]);
+  fixture.topology.polygons[0]!.vertexIndices = [0, 1, 3, 2];
+  fixture.topology.polygons[0]!.normalIndices = [0, 1, 3, 2];
+  fixture.render.leaves[0]!.strategy = "solid-quad";
+  fixture.render.leaves[0]!.width = 64;
+  fixture.render.leaves[0]!.height = 64;
+  return fixture;
+}
+
+function projectiveMatrix() {
+  const value = [...POLY_MORPH_IDENTITY_MATRIX] as number[];
+  value[3] = 0.25 / 64;
+  return value as typeof POLY_MORPH_IDENTITY_MATRIX;
+}
+
+const SAFARI_UA =
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15";
+const IOS_CHROME_UA =
+  "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/128.0.6613.98 Mobile/15E148 Safari/604.1";
+const WKWEBVIEW_UA =
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko)";
+const CHROME_UA =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36";
+
+function parsedMatrix(element: HTMLElement): number[] {
+  const match = /^matrix3d\(([^)]+)\)$/u.exec(element.style.transform);
+  if (!match) throw new TypeError("expected matrix3d transform");
+  return match[1]!.split(",").map(Number);
+}
+
+function applyMatrix(
+  matrix: readonly number[],
+  [x, y]: readonly [number, number],
+): readonly [number, number] {
+  const w = matrix[3]! * x + matrix[7]! * y + matrix[15]!;
+  return [
+    (matrix[0]! * x + matrix[4]! * y + matrix[12]!) / w,
+    (matrix[1]! * x + matrix[5]! * y + matrix[13]!) / w,
+  ];
+}
+
 describe("mountPolyMorphModel", () => {
   let host: HTMLElement;
 
@@ -112,6 +156,154 @@ describe("mountPolyMorphModel", () => {
     });
   });
 
+  it("applies projective solid quad matrices on supported browsers", () => {
+    const restoreUserAgent = overrideUserAgent(CHROME_UA);
+    try {
+      const mounted = mountPolyMorphModel(host, createSolidQuadFixture());
+      const element = mounted.leafHandles.get("gem-panel-leaf")!.element;
+
+      expect(mounted.apply({
+        leaves: [{ leafId: "gem-panel-leaf", matrix: projectiveMatrix() }],
+      }).leafTransformWrites).toBe(1);
+      expect(element.style.transform).toContain("0.00390625");
+    } finally {
+      restoreUserAgent();
+    }
+  });
+
+  it("preserves projective terms smaller than six decimal places", () => {
+    const restoreUserAgent = overrideUserAgent(CHROME_UA);
+    try {
+      const fixture = createSolidQuadFixture();
+      const leaf = fixture.render.leaves[0]!;
+      const size = 10_000;
+      const h = -40 / 10_040;
+      leaf.width = size;
+      leaf.height = size;
+      const value = [...POLY_MORPH_IDENTITY_MATRIX] as number[];
+      value[5] = 1 + h;
+      value[7] = h / size;
+      const mounted = mountPolyMorphModel(host, fixture);
+      const element = mounted.leafHandles.get("gem-panel-leaf")!.element;
+
+      mounted.apply({
+        leaves: [{
+          leafId: "gem-panel-leaf",
+          matrix: value as typeof POLY_MORPH_IDENTITY_MATRIX,
+        }],
+      });
+
+      const emitted = parsedMatrix(element);
+      expect(emitted[7]).toBe(value[7]);
+      const corner = applyMatrix(emitted, [size, size]);
+      expect(corner[0]).toBeCloseTo(10_040, 10);
+      expect(corner[1]).toBeCloseTo(10_000, 10);
+    } finally {
+      restoreUserAgent();
+    }
+  });
+
+  it.each([
+    ["Safari", SAFARI_UA],
+    ["iOS Chrome", IOS_CHROME_UA],
+    ["WKWebView", WKWEBVIEW_UA],
+  ])("fails before mounting projective solid quads on %s", (_name, userAgent) => {
+    const restoreUserAgent = overrideUserAgent(userAgent);
+    try {
+      const fixture = createSolidQuadFixture();
+      fixture.render.leaves[0]!.matrix = projectiveMatrix();
+
+      expect(() => mountPolyMorphModel(host, fixture))
+        .toThrowError(PolyMorphRenderError);
+      expect(host.childElementCount).toBe(0);
+    } finally {
+      restoreUserAgent();
+    }
+  });
+
+  it("rejects projective solid quad updates on Safari before writes", () => {
+    const restoreUserAgent = overrideUserAgent(SAFARI_UA);
+    try {
+      const mounted = mountPolyMorphModel(host, createSolidQuadFixture());
+      const element = mounted.leafHandles.get("gem-panel-leaf")!.element;
+      const transform = element.style.transform;
+      const applyCount = mounted.stats.applyCount;
+
+      expect(() => mounted.apply({
+        leaves: [{ leafId: "gem-panel-leaf", matrix: projectiveMatrix() }],
+      })).toThrowError(PolyMorphRenderError);
+      expect(element.style.transform).toBe(transform);
+      expect(mounted.stats.applyCount).toBe(applyCount);
+    } finally {
+      restoreUserAgent();
+    }
+  });
+
+  it("rejects projective leaves on Safari regardless of topology arity", () => {
+    const restoreUserAgent = overrideUserAgent(SAFARI_UA);
+    try {
+      const initial = createTwoLeafFixture();
+      initial.render.leaves[1]!.matrix = projectiveMatrix();
+      expect(() => mountPolyMorphModel(host, initial))
+        .toThrowError(PolyMorphRenderError);
+      expect(host.childElementCount).toBe(0);
+
+      const mounted = mountPolyMorphModel(host, createTwoLeafFixture());
+      const element = mounted.leafHandles.get("accent-panel-leaf")!.element;
+      const transform = element.style.transform;
+      const applyCount = mounted.stats.applyCount;
+      expect(() => mounted.apply({
+        leaves: [{ leafId: "accent-panel-leaf", matrix: projectiveMatrix() }],
+      })).toThrowError(PolyMorphRenderError);
+      expect(element.style.transform).toBe(transform);
+      expect(mounted.stats.applyCount).toBe(applyCount);
+    } finally {
+      restoreUserAgent();
+    }
+  });
+
+  it("checks the resolved fallback matrix before mounting on Safari", () => {
+    const view = document.defaultView as Window & {
+      CSS?: { supports(property: string, value: string): boolean };
+    };
+    const priorCss = view.CSS;
+    Object.defineProperty(view, "CSS", {
+      configurable: true,
+      value: { supports: () => false },
+    });
+    const restoreUserAgent = overrideUserAgent(SAFARI_UA);
+    try {
+      const fixture = createSolidQuadFixture();
+      const leaf = fixture.render.leaves[0]!;
+      leaf.strategy = "solid-triangle";
+      leaf.fallback = {
+        width: 64,
+        height: 64,
+        matrixFromLeaf: projectiveMatrix(),
+        atlas: {
+          resourcePath: "assets/projective-fallback.png",
+          x: 0,
+          y: 0,
+          width: 64,
+          height: 64,
+          pageWidth: 64,
+          pageHeight: 64,
+        },
+      };
+
+      expect(() => mountPolyMorphModel(host, fixture))
+        .toThrowError(PolyMorphRenderError);
+      expect(host.childElementCount).toBe(0);
+      expect(document.defaultView!.URL.createObjectURL).not.toHaveBeenCalled();
+    } finally {
+      restoreUserAgent();
+      Object.defineProperty(view, "CSS", {
+        configurable: true,
+        value: priorCss,
+      });
+    }
+  });
+
   it("mounts polygon-sized slices across prepared pages when corner triangles are unavailable", () => {
     const view = document.defaultView as Window & {
       CSS?: { supports(property: string, value: string): boolean };
@@ -121,9 +313,7 @@ describe("mountPolyMorphModel", () => {
       configurable: true,
       value: { supports: () => false },
     });
-    const restoreUserAgent = overrideUserAgent(
-      "Mozilla/5.0 Version/18.0 Safari/605.1.15",
-    );
+    const restoreUserAgent = overrideUserAgent(SAFARI_UA);
     try {
       const fixture = createTwoLeafFixture();
       fixture.render.leaves[1]!.strategy = "solid-triangle";
@@ -219,9 +409,7 @@ describe("mountPolyMorphModel", () => {
       configurable: true,
       value: { supports: () => false },
     });
-    const restoreUserAgent = overrideUserAgent(
-      "Mozilla/5.0 Version/18.0 Safari/605.1.15",
-    );
+    const restoreUserAgent = overrideUserAgent(SAFARI_UA);
     try {
       expect(() =>
         mountPolyMorphModel(host, createPolyMorphModelFixture())

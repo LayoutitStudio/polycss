@@ -110,6 +110,12 @@ function update(spherify: number, twist: number) {
 Morph owns no scheduler. Applications decide whether weights come from direct
 input, state, an animation sampler, or a spring.
 
+Sparse deformation supports retained solid triangles and affine solid quads.
+Planar projective solid quads are available where PolyCSS enables projective
+quad compositing. Deformation rejects non-coplanar, non-convex, or
+compositor-unstable geometry, and the retained mount rejects projective quad
+matrices on unsupported Safari-family browsers before DOM writes.
+
 ## Profiles
 
 | Profile | Behavior |

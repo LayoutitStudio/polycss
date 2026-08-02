@@ -5,6 +5,7 @@ import {
   formatMatrix3dValues,
   injectPolyBaseStyles,
   isSolidTriangleSupported,
+  safariCssProjectiveUnsupported,
 } from "@layoutit/polycss";
 import {
   validatePolyMorphModel,
@@ -30,6 +31,8 @@ const TAG_BY_STRATEGY = {
   "solid-triangle": "u",
 } as const;
 
+const PROJECTIVE_MATRIX_EPSILON = 1e-12;
+
 function fail(code: string, path: string, message: string): never {
   throw new PolyMorphRenderError(code, path, message);
 }
@@ -45,8 +48,34 @@ function matrix(value: unknown, path: string): PolyMorphMat4 {
   return value as unknown as PolyMorphMat4;
 }
 
-function matrixText(value: PolyMorphMat4): string {
-  return `matrix3d(${formatMatrix3dValues(value)})`;
+function exactMatrix3dValues(value: PolyMorphMat4): string {
+  return value.map((component) =>
+    String(Object.is(component, -0) ? 0 : component)).join(",");
+}
+
+function matrixText(value: PolyMorphMat4, exact = false): string {
+  return `matrix3d(${exact
+    ? exactMatrix3dValues(value)
+    : formatMatrix3dValues(value)})`;
+}
+
+function resolvedLeafDimensions(
+  leaf: PolyMorphRenderLeaf,
+  useFallback: boolean,
+): readonly [number, number] {
+  return useFallback && leaf.fallback
+    ? [leaf.fallback.width, leaf.fallback.height]
+    : [leaf.width, leaf.height];
+}
+
+function hasProjectiveLeafTerms(
+  value: PolyMorphMat4,
+  leaf: PolyMorphRenderLeaf,
+  useFallback: boolean,
+): boolean {
+  const [width, height] = resolvedLeafDimensions(leaf, useFallback);
+  return Math.abs(value[3] * width) > PROJECTIVE_MATRIX_EPSILON
+    || Math.abs(value[7] * height) > PROJECTIVE_MATRIX_EPSILON;
 }
 
 function multiply(left: PolyMorphMat4, right: PolyMorphMat4): PolyMorphMat4 {
@@ -71,6 +100,30 @@ function resolvedLeafMatrix(
   return useFallback && leaf.fallback
     ? multiply(value, leaf.fallback.matrixFromLeaf)
     : value;
+}
+
+function resolvedLeafTransform(
+  leaf: PolyMorphRenderLeaf,
+  value: PolyMorphMat4,
+  useFallback: boolean,
+): { readonly matrix: PolyMorphMat4; readonly projective: boolean } {
+  const resolved = resolvedLeafMatrix(leaf, value, useFallback);
+  if (resolved.some((component) => !Number.isFinite(component))) {
+    fail("invalid-matrix", `${leaf.id}.matrix`, "resolved leaf matrix must remain finite");
+  }
+  return {
+    matrix: resolved,
+    projective: hasProjectiveLeafTerms(resolved, leaf, useFallback),
+  };
+}
+
+function leafMatrixText(
+  leaf: PolyMorphRenderLeaf,
+  value: PolyMorphMat4,
+  useFallback: boolean,
+): string {
+  const resolved = resolvedLeafTransform(leaf, value, useFallback);
+  return matrixText(resolved.matrix, resolved.projective);
 }
 
 function colorText(color: readonly [number, number, number, number]): string {
@@ -232,9 +285,7 @@ function createLeaf(
   element.dataset.polyMorphResolvedStrategy = fallback
     ? "atlas-slice"
     : leaf.strategy;
-  element.style.transform = matrixText(
-    resolvedLeafMatrix(leaf, leaf.matrix, fallback !== null),
-  );
+  element.style.transform = leafMatrixText(leaf, leaf.matrix, fallback !== null);
   element.style.color = colorText(materialColor);
   element.style.backfaceVisibility = "visible";
   element.style.backgroundRepeat = "no-repeat";
@@ -275,6 +326,8 @@ export function mountPolyMorphModel(
   }
   const model = validatePolyMorphModel(modelInput);
   const doc = host.ownerDocument;
+  const userAgent = doc.defaultView?.navigator?.userAgent ?? "";
+  const supportsProjectiveQuads = !safariCssProjectiveUnsupported(userAgent);
   const useSolidTriangleFallback = model.render.leaves.some(
     (leaf) => leaf.strategy === "solid-triangle",
   ) && !isSolidTriangleSupported(doc);
@@ -323,6 +376,19 @@ export function mountPolyMorphModel(
   };
   try {
     for (const leaf of model.render.leaves) {
+      const useFallback = useSolidTriangleFallback
+        && leaf.strategy === "solid-triangle";
+      const resolved = resolvedLeafTransform(leaf, leaf.matrix, useFallback);
+      if (
+        !supportsProjectiveQuads
+        && resolved.projective
+      ) {
+        fail(
+          "unsupported-projective-quad",
+          `${leaf.id}.matrix`,
+          "this browser does not support projective leaf matrices",
+        );
+      }
       if (leaf.atlas) {
         resolveVerifiedImageUrl(leaf.atlas.resourcePath, leaf.id);
       }
@@ -408,11 +474,11 @@ export function mountPolyMorphModel(
     shapeElement.appendChild(element);
     leafHandles.set(leaf.id, { id: leaf.id, plan: leaf, element });
     leafStates.set(leaf.id, {
-      transform: matrixText(resolvedLeafMatrix(
+      transform: leafMatrixText(
         leaf,
         leaf.matrix,
         useSolidTriangleFallback && leaf.strategy === "solid-triangle",
-      )),
+      ),
       visible: true,
       opacity: 1,
       atlasRow: 0,
@@ -467,6 +533,20 @@ export function mountPolyMorphModel(
       if (!handle || !state) {
         fail("unknown-leaf", leaf.leafId, "no retained leaf handle");
       }
+      const useFallback = useSolidTriangleFallback
+        && handle.plan.strategy === "solid-triangle";
+      let transform: string | undefined;
+      if (leaf.matrix) {
+        const resolved = resolvedLeafTransform(handle.plan, leaf.matrix, useFallback);
+        if (!supportsProjectiveQuads && resolved.projective) {
+          fail(
+            "unsupported-projective-quad",
+            `${leaf.leafId}.matrix`,
+            "this browser does not support projective leaf matrices",
+          );
+        }
+        transform = matrixText(resolved.matrix, resolved.projective);
+      }
       let atlasPosition: string | undefined;
       if (leaf.atlasRow !== undefined) {
         const atlas = handle.plan.atlas;
@@ -477,7 +557,7 @@ export function mountPolyMorphModel(
         }
         atlasPosition = `${-atlas.x}px ${-y}px`;
       }
-      return { leaf, handle, state, atlasPosition };
+      return { leaf, handle, state, atlasPosition, transform };
     });
     assertStableDomIdentity();
     let modelTransformWrites = 0;
@@ -502,13 +582,9 @@ export function mountPolyMorphModel(
         shapeTransformWrites += 1;
       }
     }
-    for (const { leaf, handle, state, atlasPosition } of resolvedLeaves) {
-      if (leaf.matrix) {
-        const next = matrixText(resolvedLeafMatrix(
-          handle.plan,
-          leaf.matrix,
-          useSolidTriangleFallback && handle.plan.strategy === "solid-triangle",
-        ));
+    for (const { leaf, handle, state, atlasPosition, transform } of resolvedLeaves) {
+      if (transform) {
+        const next = transform;
         if (state.transform !== next) {
           state.transform = next;
           handle.element.style.transform = next;

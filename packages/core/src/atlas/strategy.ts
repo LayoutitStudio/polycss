@@ -74,7 +74,10 @@ export function isProjectiveQuadPlan(entry: TextureAtlasPlan): entry is TextureA
 export function safariCssProjectiveUnsupported(userAgent: string): boolean {
   const isChromiumFamily = /\b(?:Chrome|HeadlessChrome|Chromium|Edg|OPR)\//.test(userAgent);
   const isSafariFamily = /\bVersion\/[\d.]+.*\bSafari\//.test(userAgent);
-  return isSafariFamily && !isChromiumFamily;
+  const isApplePlatform = /\b(?:Macintosh|iPad|iPhone|iPod)\b/.test(userAgent);
+  const isAppleWebKitFamily = isApplePlatform
+    && /\bAppleWebKit\/[\d.]+/.test(userAgent);
+  return (isSafariFamily || isAppleWebKitFamily) && !isChromiumFamily;
 }
 
 export function incrementCount(map: Map<string, number>, key: string): void {
