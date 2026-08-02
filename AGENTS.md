@@ -128,10 +128,12 @@ React or Vue wrappers.
   prepared packages, mounts one retained PolyCSS graph, and exposes
   caller-driven runtimes for morphs, controls, springs, animation, skinning,
   and prepared playback.
-- Sparse deformation supports retained solid triangles plus affine and planar
+- Sparse deformation supports retained solid triangles and affine solid quads.
+  Browsers where PolyCSS enables projective quad compositing also accept planar
   projective solid quads. Quad updates recompute one CSS `matrix3d(...)` per
-  dirty leaf and fail closed when a deformed quad becomes non-coplanar or
-  projectively singular.
+  dirty leaf; deformation rejects non-coplanar, non-convex, or
+  compositor-unstable geometry, and the retained mount rejects projective quad
+  matrices on unsupported Safari-family browsers before DOM writes.
 - `createPolyMorphPreparedDomTarget` adopts a caller-owned retained graph as
   source-ordered model, shape, and leaf targets. It tracks requested values for
   sparse write deduplication, preserves element identity, invalidates writers

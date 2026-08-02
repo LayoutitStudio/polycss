@@ -71,6 +71,24 @@ function createTwoLeafFixture() {
   return fixture;
 }
 
+function createSolidQuadFixture() {
+  const fixture = clonePolyMorphFixture(createPolyMorphModelFixture());
+  fixture.topology.vertices.push([1, 1, 0]);
+  fixture.topology.normals.push([0, 0, 1]);
+  fixture.topology.polygons[0]!.vertexIndices = [0, 1, 3, 2];
+  fixture.topology.polygons[0]!.normalIndices = [0, 1, 3, 2];
+  fixture.render.leaves[0]!.strategy = "solid-quad";
+  fixture.render.leaves[0]!.width = 64;
+  fixture.render.leaves[0]!.height = 64;
+  return fixture;
+}
+
+function projectiveMatrix() {
+  const value = [...POLY_MORPH_IDENTITY_MATRIX] as number[];
+  value[3] = 0.25 / 64;
+  return value as typeof POLY_MORPH_IDENTITY_MATRIX;
+}
+
 describe("mountPolyMorphModel", () => {
   let host: HTMLElement;
 
@@ -110,6 +128,52 @@ describe("mountPolyMorphModel", () => {
       atlasConstructions: 0,
       schedulerCount: 0,
     });
+  });
+
+  it("applies projective solid quad matrices on supported browsers", () => {
+    const mounted = mountPolyMorphModel(host, createSolidQuadFixture());
+    const element = mounted.leafHandles.get("gem-panel-leaf")!.element;
+
+    expect(mounted.apply({
+      leaves: [{ leafId: "gem-panel-leaf", matrix: projectiveMatrix() }],
+    }).leafTransformWrites).toBe(1);
+    expect(element.style.transform).toContain("0.003906");
+  });
+
+  it("fails before mounting projective solid quads on Safari", () => {
+    const restoreUserAgent = overrideUserAgent(
+      "Mozilla/5.0 Version/18.0 Safari/605.1.15",
+    );
+    try {
+      const fixture = createSolidQuadFixture();
+      fixture.render.leaves[0]!.matrix = projectiveMatrix();
+
+      expect(() => mountPolyMorphModel(host, fixture))
+        .toThrowError(PolyMorphRenderError);
+      expect(host.childElementCount).toBe(0);
+    } finally {
+      restoreUserAgent();
+    }
+  });
+
+  it("rejects projective solid quad updates on Safari before writes", () => {
+    const restoreUserAgent = overrideUserAgent(
+      "Mozilla/5.0 Version/18.0 Safari/605.1.15",
+    );
+    try {
+      const mounted = mountPolyMorphModel(host, createSolidQuadFixture());
+      const element = mounted.leafHandles.get("gem-panel-leaf")!.element;
+      const transform = element.style.transform;
+      const applyCount = mounted.stats.applyCount;
+
+      expect(() => mounted.apply({
+        leaves: [{ leafId: "gem-panel-leaf", matrix: projectiveMatrix() }],
+      })).toThrowError(PolyMorphRenderError);
+      expect(element.style.transform).toBe(transform);
+      expect(mounted.stats.applyCount).toBe(applyCount);
+    } finally {
+      restoreUserAgent();
+    }
   });
 
   it("mounts polygon-sized slices across prepared pages when corner triangles are unavailable", () => {

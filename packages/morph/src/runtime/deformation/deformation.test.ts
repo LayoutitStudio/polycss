@@ -132,6 +132,43 @@ describe("PolyMorph deformation runtime", () => {
     }
   });
 
+  it("fails closed when a planar quad folds across its projective denominator", () => {
+    const fixture = createProjectiveQuadFixture();
+    if (fixture.deformation.kind !== "morph-regions") {
+      throw new TypeError("expected morph fixture");
+    }
+    fixture.deformation.targets[0]!.deltas = [
+      {
+        vertexIndex: 1,
+        position: [0, 1, 0],
+        normal: null,
+      },
+      {
+        vertexIndex: 3,
+        position: [0, -1, 0],
+        normal: null,
+      },
+    ];
+    const runtime = createPolyMorphDeformationRuntime(fixture);
+
+    expect(() => runtime.sample({ tick: 1, morphWeights: { stretch: 1 } }))
+      .toThrowError(PolyMorphRuntimeError);
+    expect(runtime.sample({ tick: 2, morphWeights: { stretch: 0 } }).dirtyLeafIds)
+      .toEqual([]);
+  });
+
+  it("rejects compositor-unstable projective weight ratios", () => {
+    const fixture = createProjectiveQuadFixture();
+    if (fixture.deformation.kind !== "morph-regions") {
+      throw new TypeError("expected morph fixture");
+    }
+    fixture.deformation.targets[0]!.deltas[0]!.position = [999, 0, 0];
+    const runtime = createPolyMorphDeformationRuntime(fixture);
+
+    expect(() => runtime.sample({ tick: 1, morphWeights: { stretch: 1 } }))
+      .toThrowError(PolyMorphRuntimeError);
+  });
+
   it("fails closed on unknown ids, out-of-range values, and unsupported profiles", () => {
     const runtime = createPolyMorphDeformationRuntime(createPolyMorphRuntimeFixture());
     expect(() => runtime.sample({

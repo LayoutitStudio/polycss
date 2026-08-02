@@ -1,5 +1,7 @@
 import {
+  computeProjectiveQuadCoefficients,
   computeSolidTrianglePlanFromCssPoints,
+  resolveProjectiveQuadGuards,
   SOLID_TRIANGLE_CANONICAL_SIZE,
   type Polygon,
   type SolidTriangleBasis,
@@ -28,6 +30,8 @@ export interface PolyMorphCompiledLeaf {
 }
 
 type MutableVec3 = [number, number, number];
+
+const PROJECTIVE_QUAD_GUARDS = resolveProjectiveQuadGuards(undefined);
 
 function fail(code: string, path: string, message: string): never {
   throw new PolyMorphRuntimeError(code, path, message);
@@ -117,10 +121,15 @@ function quadMatrix(
     edgeX[2] * edgeY[0] - edgeX[0] * edgeY[2],
     edgeX[0] * edgeY[1] - edgeX[1] * edgeY[0],
   ] as PolyMorphVec3;
-  const z = normalize(cross);
-  if (Math.hypot(...z) <= 1e-12) {
+  const crossLength = Math.hypot(...cross);
+  if (!Number.isFinite(crossLength) || crossLength <= 1e-12) {
     fail("degenerate-polygon", compiled.leaf.id, "deformed quad has no area");
   }
+  const z = [
+    cross[0] / crossLength,
+    cross[1] / crossLength,
+    cross[2] / crossLength,
+  ] as PolyMorphVec3;
   const distance = Math.abs(
     z[0] * (p2[0] - p0[0])
     + z[1] * (p2[1] - p0[1])
@@ -129,47 +138,30 @@ function quadMatrix(
   if (distance > 1e-6) {
     fail("non-planar-polygon", compiled.leaf.id, "deformed quad is not coplanar");
   }
-  const a = [
-    p1[0] - p2[0],
-    p1[1] - p2[1],
-    p1[2] - p2[2],
-  ] as const;
-  const b = [
-    p3[0] - p2[0],
-    p3[1] - p2[1],
-    p3[2] - p2[2],
-  ] as const;
-  const residual = [
-    p0[0] + p2[0] - p1[0] - p3[0],
-    p0[1] + p2[1] - p1[1] - p3[1],
-    p0[2] + p2[2] - p1[2] - p3[2],
-  ] as const;
   const basis = ([[0, 1], [0, 2], [1, 2]] as const)
     .map(([first, second]) => ({
       first,
       second,
-      determinant: a[first] * b[second] - a[second] * b[first],
+      determinant: edgeX[first] * edgeY[second] - edgeX[second] * edgeY[first],
     }))
     .sort((left, right) =>
       Math.abs(right.determinant) - Math.abs(left.determinant))[0]!;
-  if (Math.abs(basis.determinant) <= 1e-12) {
-    fail("degenerate-polygon", compiled.leaf.id, "deformed quad has no projective basis");
+  const projected = [p0, p1, p2, p3].map((point): [number, number] => [
+    point[basis.first],
+    point[basis.second],
+  ]);
+  const coefficients = computeProjectiveQuadCoefficients(
+    projected,
+    PROJECTIVE_QUAD_GUARDS,
+  );
+  if (!coefficients) {
+    fail(
+      "degenerate-polygon",
+      compiled.leaf.id,
+      "deformed quad has no stable convex projective transform",
+    );
   }
-  const g = (
-    residual[basis.first] * b[basis.second]
-    - residual[basis.second] * b[basis.first]
-  ) / basis.determinant;
-  const h = (
-    a[basis.first] * residual[basis.second]
-    - a[basis.second] * residual[basis.first]
-  ) / basis.determinant;
-  if (
-    Math.abs(1 + g) <= 1e-10
-    || Math.abs(1 + h) <= 1e-10
-    || Math.abs(1 + g + h) <= 1e-10
-  ) {
-    fail("degenerate-polygon", compiled.leaf.id, "deformed quad has a point at infinity");
-  }
+  const { g, h } = coefficients;
   const x = [
     ((1 + g) * p1[0] - p0[0]) / compiled.leaf.width,
     ((1 + g) * p1[1] - p0[1]) / compiled.leaf.width,
