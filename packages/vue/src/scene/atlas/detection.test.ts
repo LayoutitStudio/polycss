@@ -12,6 +12,7 @@ import {
   borderShapeSupported,
   solidTriangleSupported,
   cornerShapeSupported,
+  projectiveQuadSupported,
 } from "./detection";
 import { isMobileDocument } from "./packing";
 
@@ -48,6 +49,8 @@ function makeDoc(options: {
 
 const SAFARI_UA =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15";
+const IOS_WEBKIT_UA =
+  "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/128.0.6613.98 Mobile/15E148 Safari/604.1";
 const CHROME_UA = "Mozilla/5.0 Chrome/120";
 
 // ---------------------------------------------------------------------------
@@ -86,6 +89,11 @@ describe("solidTriangleSupported — direct doc variant", () => {
     expect(solidTriangleSupported(doc)).toBe(false);
   });
 
+  it("returns false for an iOS AppleWebKit browser shell", () => {
+    const doc = makeDoc({ userAgent: IOS_WEBKIT_UA });
+    expect(solidTriangleSupported(doc)).toBe(false);
+  });
+
   it("returns true for Safari when corner-shape triangles are supported", () => {
     const doc = makeDoc({ userAgent: SAFARI_UA, cornerShape: true });
     expect(solidTriangleSupported(doc)).toBe(true);
@@ -94,6 +102,16 @@ describe("solidTriangleSupported — direct doc variant", () => {
   it("returns true when userAgent string is empty (unknown UA → optimistic)", () => {
     const doc = makeDoc({ userAgent: "" });
     expect(solidTriangleSupported(doc)).toBe(true);
+  });
+});
+
+describe("projectiveQuadSupported", () => {
+  it("returns false for an iOS AppleWebKit browser shell", () => {
+    expect(projectiveQuadSupported(makeDoc({ userAgent: IOS_WEBKIT_UA }))).toBe(false);
+  });
+
+  it("returns true for desktop Chromium", () => {
+    expect(projectiveQuadSupported(makeDoc({ userAgent: CHROME_UA }))).toBe(true);
   });
 });
 

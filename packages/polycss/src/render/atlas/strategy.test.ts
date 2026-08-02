@@ -20,6 +20,7 @@ import {
   isFullRectSolid,
   isProjectiveQuadPlan,
   isSolidTrianglePlan,
+  projectiveQuadSupported,
 } from "./strategy";
 import { computeTextureAtlasPlanPublic } from "@layoutit/polycss-core";
 import { renderPolygonsWithTextureAtlas } from "./renderPolygons";
@@ -32,11 +33,12 @@ function makeDoc(options: {
   borderShape?: boolean;
   cornerShape?: boolean;
   pointer?: "fine" | "coarse";
+  userAgent?: string;
 }): Document {
   const pointer = options.pointer ?? "fine";
   return {
     defaultView: {
-      navigator: { userAgent: "Mozilla/5.0 Chrome/120" },
+      navigator: { userAgent: options.userAgent ?? "Mozilla/5.0 Chrome/120" },
       CSS: {
         supports: (property: string, value?: string) => {
           if (property === "border-shape") return options.borderShape === true;
@@ -131,6 +133,18 @@ describe("plan predicate functions", () => {
   it("isProjectiveQuadPlan is false for a full-rect plan", () => {
     const plan = computeTextureAtlasPlanPublic(FLAT_RECT, 0);
     expect(isProjectiveQuadPlan(plan!)).toBe(false);
+  });
+});
+
+describe("projectiveQuadSupported", () => {
+  it("returns false for an iOS AppleWebKit browser shell", () => {
+    const userAgent = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/128.0.6613.98 Mobile/15E148 Safari/604.1";
+    expect(projectiveQuadSupported(makeDoc({ userAgent }))).toBe(false);
+  });
+
+  it("returns true for desktop Chromium", () => {
+    const userAgent = "Mozilla/5.0 AppleWebKit/537.36 Chrome/128.0.0.0 Safari/537.36";
+    expect(projectiveQuadSupported(makeDoc({ userAgent }))).toBe(true);
   });
 });
 

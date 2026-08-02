@@ -132,6 +132,57 @@ describe("PolyMorph deformation runtime", () => {
     }
   });
 
+  it("keeps projective quad acceptance invariant under uniform model scale", () => {
+    const scale = 1e-5;
+    const fixture = createProjectiveQuadFixture();
+    for (const vertex of fixture.topology.vertices) {
+      vertex[0] *= scale;
+      vertex[1] *= scale;
+      vertex[2] *= scale;
+    }
+    fixture.render.leaves[0]!.width = scale;
+    fixture.render.leaves[0]!.height = scale;
+    fixture.render.modelMatrix[0] = 1e6;
+    fixture.render.modelMatrix[5] = 1e6;
+    fixture.render.modelMatrix[10] = 1e6;
+    if (fixture.deformation.kind !== "morph-regions") {
+      throw new TypeError("expected morph fixture");
+    }
+    fixture.deformation.targets[0]!.deltas[0]!.position = [scale, 0, 0];
+
+    const runtime = createPolyMorphDeformationRuntime(fixture);
+    const frame = runtime.sample({ tick: 1, morphWeights: { stretch: 1 } });
+    const matrix = frame.leafUpdates[0]!.matrix!;
+    const corners = [[0, 0], [scale, 0], [scale, scale], [0, scale]] as const;
+    const vertexIndices = [0, 1, 3, 2] as const;
+    for (const [index, corner] of corners.entries()) {
+      const actual = applyMatrix(matrix, corner);
+      const expected = frame.positions[vertexIndices[index]!]!;
+      for (const [axis, value] of actual.entries()) {
+        expect(value).toBeCloseTo(expected[axis]!, 12);
+      }
+    }
+  });
+
+  it("rejects non-finite projective output without committing runtime state", () => {
+    const fixture = createProjectiveQuadFixture();
+    fixture.topology.vertices[1] = [1e308, 0, 0];
+    fixture.topology.vertices[2] = [0, 1e-308, 0];
+    fixture.topology.vertices[3] = [1e308, 1e-308, 0];
+    if (fixture.deformation.kind !== "morph-regions") {
+      throw new TypeError("expected morph fixture");
+    }
+    fixture.deformation.targets[0]!.deltas[0]!.position = [0, -5e-309, 0];
+    const runtime = createPolyMorphDeformationRuntime(fixture);
+
+    expect(() => runtime.sample({ tick: 1, morphWeights: { stretch: 1 } }))
+      .toThrowError(PolyMorphRuntimeError);
+    expect(() => runtime.sample({ tick: 2, morphWeights: { stretch: 1 } }))
+      .toThrowError(PolyMorphRuntimeError);
+    expect(runtime.sample({ tick: 3, morphWeights: { stretch: 0 } }).dirtyLeafIds)
+      .toEqual([]);
+  });
+
   it("fails closed when a planar quad folds across its projective denominator", () => {
     const fixture = createProjectiveQuadFixture();
     if (fixture.deformation.kind !== "morph-regions") {

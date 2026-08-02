@@ -116,10 +116,30 @@ function quadMatrix(
     p3[1] - p0[1],
     p3[2] - p0[2],
   ] as PolyMorphVec3;
+  const edgeXLength = Math.hypot(...edgeX);
+  const edgeYLength = Math.hypot(...edgeY);
+  if (
+    !Number.isFinite(edgeXLength)
+    || !Number.isFinite(edgeYLength)
+    || edgeXLength === 0
+    || edgeYLength === 0
+  ) {
+    fail("degenerate-polygon", compiled.leaf.id, "deformed quad has no area");
+  }
+  const unitEdgeX = [
+    edgeX[0] / edgeXLength,
+    edgeX[1] / edgeXLength,
+    edgeX[2] / edgeXLength,
+  ] as PolyMorphVec3;
+  const unitEdgeY = [
+    edgeY[0] / edgeYLength,
+    edgeY[1] / edgeYLength,
+    edgeY[2] / edgeYLength,
+  ] as PolyMorphVec3;
   const cross = [
-    edgeX[1] * edgeY[2] - edgeX[2] * edgeY[1],
-    edgeX[2] * edgeY[0] - edgeX[0] * edgeY[2],
-    edgeX[0] * edgeY[1] - edgeX[1] * edgeY[0],
+    unitEdgeX[1] * unitEdgeY[2] - unitEdgeX[2] * unitEdgeY[1],
+    unitEdgeX[2] * unitEdgeY[0] - unitEdgeX[0] * unitEdgeY[2],
+    unitEdgeX[0] * unitEdgeY[1] - unitEdgeX[1] * unitEdgeY[0],
   ] as PolyMorphVec3;
   const crossLength = Math.hypot(...cross);
   if (!Number.isFinite(crossLength) || crossLength <= 1e-12) {
@@ -130,19 +150,31 @@ function quadMatrix(
     cross[1] / crossLength,
     cross[2] / crossLength,
   ] as PolyMorphVec3;
+  const diagonal = [
+    p2[0] - p0[0],
+    p2[1] - p0[1],
+    p2[2] - p0[2],
+  ] as PolyMorphVec3;
+  const diagonalLength = Math.hypot(...diagonal);
   const distance = Math.abs(
-    z[0] * (p2[0] - p0[0])
-    + z[1] * (p2[1] - p0[1])
-    + z[2] * (p2[2] - p0[2]),
+    z[0] * diagonal[0]
+    + z[1] * diagonal[1]
+    + z[2] * diagonal[2],
   );
-  if (distance > 1e-6) {
+  const quadScale = Math.max(edgeXLength, edgeYLength, diagonalLength);
+  if (
+    !Number.isFinite(distance)
+    || !Number.isFinite(quadScale)
+    || distance / quadScale > 1e-6
+  ) {
     fail("non-planar-polygon", compiled.leaf.id, "deformed quad is not coplanar");
   }
   const basis = ([[0, 1], [0, 2], [1, 2]] as const)
     .map(([first, second]) => ({
       first,
       second,
-      determinant: edgeX[first] * edgeY[second] - edgeX[second] * edgeY[first],
+      determinant: unitEdgeX[first] * unitEdgeY[second]
+        - unitEdgeX[second] * unitEdgeY[first],
     }))
     .sort((left, right) =>
       Math.abs(right.determinant) - Math.abs(left.determinant))[0]!;
@@ -150,8 +182,25 @@ function quadMatrix(
     point[basis.first],
     point[basis.second],
   ]);
+  const [projectedOrigin] = projected;
+  const projectedScaleX = Math.max(...projected.map((point) =>
+    Math.abs(point[0] - projectedOrigin![0])));
+  const projectedScaleY = Math.max(...projected.map((point) =>
+    Math.abs(point[1] - projectedOrigin![1])));
+  if (
+    !Number.isFinite(projectedScaleX)
+    || !Number.isFinite(projectedScaleY)
+    || projectedScaleX === 0
+    || projectedScaleY === 0
+  ) {
+    fail("degenerate-polygon", compiled.leaf.id, "deformed quad has no area");
+  }
+  const normalizedProjected = projected.map((point): [number, number] => [
+    (point[0] - projectedOrigin![0]) / projectedScaleX,
+    (point[1] - projectedOrigin![1]) / projectedScaleY,
+  ]);
   const coefficients = computeProjectiveQuadCoefficients(
-    projected,
+    normalizedProjected,
     PROJECTIVE_QUAD_GUARDS,
   );
   if (!coefficients) {
@@ -172,13 +221,17 @@ function quadMatrix(
     ((1 + h) * p3[1] - p0[1]) / compiled.leaf.height,
     ((1 + h) * p3[2] - p0[2]) / compiled.leaf.height,
   ] as const;
+  const matrix = [
+    x[0], x[1], x[2], g / compiled.leaf.width,
+    y[0], y[1], y[2], h / compiled.leaf.height,
+    z[0], z[1], z[2], 0,
+    p0[0], p0[1], p0[2], 1,
+  ] as PolyMorphMat4;
+  if (matrix.some((component) => !Number.isFinite(component))) {
+    fail("invalid-transform", compiled.leaf.id, "deformed quad produced a non-finite matrix");
+  }
   return {
-    matrix: [
-      x[0], x[1], x[2], g / compiled.leaf.width,
-      y[0], y[1], y[2], h / compiled.leaf.height,
-      z[0], z[1], z[2], 0,
-      p0[0], p0[1], p0[2], 1,
-    ],
+    matrix,
     visible: true,
   };
 }
