@@ -94,6 +94,10 @@ mounted model keeps the same leaf elements for its lifetime. Runtime updates do
 not rebuild topology, add or remove leaves, construct image resources, or
 redraw prepared image resources.
 
+Sparse deformation supports retained solid triangles plus affine and planar
+projective solid quads. A quad update emits one CSS `matrix3d(...)` and fails
+closed if the deformed corners become non-coplanar or projectively singular.
+
 Morph chooses the triangle paint path once when it mounts. It uses
 `corner-shape` where available, a larger CSS border triangle in Firefox, and
 each leaf's prepared polygon-sized atlas slice in WebKit/Safari. Mount creates

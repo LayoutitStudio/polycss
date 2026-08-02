@@ -102,41 +102,88 @@ function quadMatrix(
   const p1 = positions[i1!]!;
   const p2 = positions[i2!]!;
   const p3 = positions[i3!]!;
-  const predicted = [
-    p1[0] + p3[0] - p0[0],
-    p1[1] + p3[1] - p0[1],
-    p1[2] + p3[2] - p0[2],
-  ] as const;
-  if (Math.hypot(
-    predicted[0] - p2[0],
-    predicted[1] - p2[1],
-    predicted[2] - p2[2],
-  ) > 1e-6) {
-    fail("non-affine-polygon", compiled.leaf.id, "deformed quad is not a parallelogram");
-  }
-  const x = [
-    (p1[0] - p0[0]) / compiled.leaf.width,
-    (p1[1] - p0[1]) / compiled.leaf.width,
-    (p1[2] - p0[2]) / compiled.leaf.width,
-  ] as const;
-  const y = [
-    (p3[0] - p0[0]) / compiled.leaf.height,
-    (p3[1] - p0[1]) / compiled.leaf.height,
-    (p3[2] - p0[2]) / compiled.leaf.height,
-  ] as const;
+  const edgeX = [
+    p1[0] - p0[0],
+    p1[1] - p0[1],
+    p1[2] - p0[2],
+  ] as PolyMorphVec3;
+  const edgeY = [
+    p3[0] - p0[0],
+    p3[1] - p0[1],
+    p3[2] - p0[2],
+  ] as PolyMorphVec3;
   const cross = [
-    x[1] * y[2] - x[2] * y[1],
-    x[2] * y[0] - x[0] * y[2],
-    x[0] * y[1] - x[1] * y[0],
+    edgeX[1] * edgeY[2] - edgeX[2] * edgeY[1],
+    edgeX[2] * edgeY[0] - edgeX[0] * edgeY[2],
+    edgeX[0] * edgeY[1] - edgeX[1] * edgeY[0],
   ] as PolyMorphVec3;
   const z = normalize(cross);
   if (Math.hypot(...z) <= 1e-12) {
     fail("degenerate-polygon", compiled.leaf.id, "deformed quad has no area");
   }
+  const distance = Math.abs(
+    z[0] * (p2[0] - p0[0])
+    + z[1] * (p2[1] - p0[1])
+    + z[2] * (p2[2] - p0[2]),
+  );
+  if (distance > 1e-6) {
+    fail("non-planar-polygon", compiled.leaf.id, "deformed quad is not coplanar");
+  }
+  const a = [
+    p1[0] - p2[0],
+    p1[1] - p2[1],
+    p1[2] - p2[2],
+  ] as const;
+  const b = [
+    p3[0] - p2[0],
+    p3[1] - p2[1],
+    p3[2] - p2[2],
+  ] as const;
+  const residual = [
+    p0[0] + p2[0] - p1[0] - p3[0],
+    p0[1] + p2[1] - p1[1] - p3[1],
+    p0[2] + p2[2] - p1[2] - p3[2],
+  ] as const;
+  const basis = ([[0, 1], [0, 2], [1, 2]] as const)
+    .map(([first, second]) => ({
+      first,
+      second,
+      determinant: a[first] * b[second] - a[second] * b[first],
+    }))
+    .sort((left, right) =>
+      Math.abs(right.determinant) - Math.abs(left.determinant))[0]!;
+  if (Math.abs(basis.determinant) <= 1e-12) {
+    fail("degenerate-polygon", compiled.leaf.id, "deformed quad has no projective basis");
+  }
+  const g = (
+    residual[basis.first] * b[basis.second]
+    - residual[basis.second] * b[basis.first]
+  ) / basis.determinant;
+  const h = (
+    a[basis.first] * residual[basis.second]
+    - a[basis.second] * residual[basis.first]
+  ) / basis.determinant;
+  if (
+    Math.abs(1 + g) <= 1e-10
+    || Math.abs(1 + h) <= 1e-10
+    || Math.abs(1 + g + h) <= 1e-10
+  ) {
+    fail("degenerate-polygon", compiled.leaf.id, "deformed quad has a point at infinity");
+  }
+  const x = [
+    ((1 + g) * p1[0] - p0[0]) / compiled.leaf.width,
+    ((1 + g) * p1[1] - p0[1]) / compiled.leaf.width,
+    ((1 + g) * p1[2] - p0[2]) / compiled.leaf.width,
+  ] as const;
+  const y = [
+    ((1 + h) * p3[0] - p0[0]) / compiled.leaf.height,
+    ((1 + h) * p3[1] - p0[1]) / compiled.leaf.height,
+    ((1 + h) * p3[2] - p0[2]) / compiled.leaf.height,
+  ] as const;
   return {
     matrix: [
-      x[0], x[1], x[2], 0,
-      y[0], y[1], y[2], 0,
+      x[0], x[1], x[2], g / compiled.leaf.width,
+      y[0], y[1], y[2], h / compiled.leaf.height,
       z[0], z[1], z[2], 0,
       p0[0], p0[1], p0[2], 1,
     ],
@@ -153,7 +200,7 @@ export function computePolyMorphPreparedLeafMatrix(
   fail(
     "unsupported-deformation",
     compiled.leaf.id,
-    "caller-driven deformation supports prepared triangles and affine quads",
+    "caller-driven deformation supports prepared triangles and planar quads",
   );
 }
 

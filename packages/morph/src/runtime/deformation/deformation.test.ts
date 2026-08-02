@@ -8,6 +8,38 @@ import { createPolyMorphRuntimeFixture } from "../../testing/runtimeFixture.js";
 import { PolyMorphRuntimeError } from "../runtimeError.js";
 import { createPolyMorphDeformationRuntime } from "./index.js";
 
+function createProjectiveQuadFixture(zDelta = 0) {
+  const fixture = clonePolyMorphFixture(createPolyMorphModelFixture("morph-regions"));
+  fixture.topology.vertices.push([1, 1, 0]);
+  fixture.topology.normals.push([0, 0, 1]);
+  fixture.topology.polygons[0]!.vertexIndices = [0, 1, 3, 2];
+  fixture.topology.polygons[0]!.normalIndices = [0, 1, 3, 2];
+  fixture.render.leaves[0]!.strategy = "solid-quad";
+  fixture.render.leaves[0]!.width = 1;
+  fixture.render.leaves[0]!.height = 1;
+  if (fixture.deformation.kind !== "morph-regions") {
+    throw new TypeError("expected morph fixture");
+  }
+  fixture.deformation.targets[0]!.deltas = [{
+    vertexIndex: 3,
+    position: [1, 0, zDelta],
+    normal: null,
+  }];
+  return fixture;
+}
+
+function applyMatrix(
+  matrix: readonly number[],
+  [x, y]: readonly [number, number],
+): readonly [number, number, number] {
+  const w = matrix[3]! * x + matrix[7]! * y + matrix[15]!;
+  return [
+    (matrix[0]! * x + matrix[4]! * y + matrix[12]!) / w,
+    (matrix[1]! * x + matrix[5]! * y + matrix[13]!) / w,
+    (matrix[2]! * x + matrix[6]! * y + matrix[14]!) / w,
+  ];
+}
+
 describe("PolyMorph deformation runtime", () => {
   it("emits no writes for static steps", () => {
     const runtime = createPolyMorphDeformationRuntime(createPolyMorphModelFixture());
@@ -84,6 +116,22 @@ describe("PolyMorph deformation runtime", () => {
     }).dirtyLeavesVisited).toBe(0);
   });
 
+  it("maps a deformed planar trapezoid through one projective quad matrix", () => {
+    const runtime = createPolyMorphDeformationRuntime(createProjectiveQuadFixture());
+    const frame = runtime.sample({ tick: 1, morphWeights: { stretch: 0.5 } });
+    const matrix = frame.leafUpdates[0]!.matrix!;
+    const corners = [[0, 0], [1, 0], [1, 1], [0, 1]] as const;
+    const vertexIndices = [0, 1, 3, 2] as const;
+    expect(Math.abs(matrix[3]!) + Math.abs(matrix[7]!)).toBeGreaterThan(0);
+    for (const [index, corner] of corners.entries()) {
+      const actual = applyMatrix(matrix, corner);
+      const expected = frame.positions[vertexIndices[index]!]!;
+      for (const [axis, value] of actual.entries()) {
+        expect(value).toBeCloseTo(expected[axis]!, 10);
+      }
+    }
+  });
+
   it("fails closed on unknown ids, out-of-range values, and unsupported profiles", () => {
     const runtime = createPolyMorphDeformationRuntime(createPolyMorphRuntimeFixture());
     expect(() => runtime.sample({
@@ -114,16 +162,7 @@ describe("PolyMorph deformation runtime", () => {
   });
 
   it("does not publish failed quad geometry into the next sample", () => {
-    const fixture = clonePolyMorphFixture(
-      createPolyMorphModelFixture("morph-regions"),
-    );
-    fixture.topology.vertices.push([1, 1, 0]);
-    fixture.topology.normals.push([0, 0, 1]);
-    fixture.topology.polygons[0]!.vertexIndices = [0, 1, 3, 2];
-    fixture.topology.polygons[0]!.normalIndices = [0, 1, 3, 2];
-    fixture.render.leaves[0]!.strategy = "solid-quad";
-    fixture.render.leaves[0]!.width = 1;
-    fixture.render.leaves[0]!.height = 1;
+    const fixture = createProjectiveQuadFixture(1);
     const runtime = createPolyMorphDeformationRuntime(fixture);
 
     expect(() => runtime.sample({

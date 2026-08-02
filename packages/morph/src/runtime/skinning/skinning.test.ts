@@ -137,7 +137,7 @@ describe("PolyMorph joint skinning", () => {
 
     expect(() => runtime.sample({
       tick: 1,
-      jointTransforms: new Map([["tip", { translation: [0, 1, 0] }]]),
+      jointTransforms: new Map([["tip", { translation: [0, 1, 1] }]]),
     })).toThrowError(PolyMorphRuntimeError);
     const recovered = runtime.sample({ tick: 2 });
     expect(recovered.positions).toEqual(fixture.topology.vertices);

@@ -110,6 +110,10 @@ function update(spherify: number, twist: number) {
 Morph owns no scheduler. Applications decide whether weights come from direct
 input, state, an animation sampler, or a spring.
 
+Sparse deformation supports retained solid triangles plus affine and planar
+projective solid quads. A quad update emits one CSS `matrix3d(...)` and fails
+closed if the deformed corners become non-coplanar or projectively singular.
+
 ## Profiles
 
 | Profile | Behavior |
