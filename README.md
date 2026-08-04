@@ -21,9 +21,6 @@ npm install @layoutit/polycss-react
 # Vue
 npm install @layoutit/polycss-vue
 
-# Morph
-npm install @layoutit/polycss-morph
-
 ```
 
 You can also load PolyCSS directly from a CDN. Here is a minimal custom-element scene:
