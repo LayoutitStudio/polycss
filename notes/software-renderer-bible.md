@@ -109,8 +109,20 @@ browser paint invisibility at antialiased/composited polygon boundaries. The
 current visibility schedule remains unchanged; a stronger prepare-time paint
 oracle is required before cost-aware rescheduling may be reopened.
 
-The sequential experiment register is the execution authority. SR-09 is closed;
-SR-10 is the only ready row, and every later experiment remains locked.
+SR-10 then tested whether one guarded publication record per dirty leaf could
+beat the current individual setters. The full product workload did contain
+113,750 multi-property records, but no record contained a repeated write to the
+same property. Merely collecting records was 8.81% slower. The best grouped
+candidate reduced physical style operations by 15.90% and style mutation
+records by 15.61%, yet was 21.78% slower; even an optimistic CSS-ownership
+variant was 29.66% slower. Repeated Chrome traces held frame pacing flat while
+the candidate increased median script, compositor-main, and commit cost. The
+record layer and grouped CSS publication are therefore rejected for this
+workload.
+
+The sequential experiment register is the execution authority. The current
+chain is complete: SR-10 is falsified, while SR-11 and SR-12 are cancelled
+because their measured unlock premises did not survive.
 
 ## Rules for using this bible
 
@@ -488,7 +500,9 @@ The status column is the current PolyCSS decision, not a judgment on the histori
 
 These conclusions apply to the exact Mario CodePen workload substituted onto PolyCSS `v0.2.11`. They are stronger than analogy because they were measured, but they are not universal claims about every PolyCSS scene.
 
-The SR identifiers below are permanent and match the sequential register. SR-10 appears here only as preflight opportunity counting; it is now ready but has not been executed.
+The SR identifiers below are permanent and match the sequential register. The
+SR-10 preflight count is retained beside the executed result so future work
+does not mistake a theoretical setter ceiling for a browser-performance win.
 
 ### Evidence provenance
 
@@ -643,19 +657,23 @@ Raw visibility saves 2.54% beyond the current schedule but causes severe transit
 
 **Hypothesis:** Combine transform, lighting, and visibility changes for one leaf into one publication.
 
-**Status:** Opportunity counted only. SR-09 closed without changing the current visibility schedule, so SR-10 is ready but has not been executed.
+**Status:** Recounted against the final SR-09 baseline, then tested in the
+isolated SR-10 harness.
 
-Across all 820 frames:
+Across all 820 source rows, before full product-tick effects and non-leaf work:
 
-- property mutations: 718,637;
-- unique dirty leaf/frame records: 599,879;
-- theoretical setter reduction: 16.53%;
-- transform plus lighting overlaps: 108,189;
-- transform plus visibility overlaps: 6,958;
-- visibility plus lighting overlaps: 7,097;
-- all three overlap: 3,486.
+- property mutations: 629,749;
+- unique dirty leaf/frame records: 510,536;
+- multi-property records: 115,304;
+- theoretical setter reduction: 119,213, or 18.93%;
+- transform plus lighting overlaps: 104,703;
+- transform plus visibility overlaps: 3,472;
+- visibility plus lighting overlaps: 3,220;
+- all three overlap: 3,909.
 
-`style.cssText` may be slower because it reparses and replaces a whole declaration. Do not implement from the theoretical count; prototype it against individual setters and inspect style/paint traces.
+The executed browser experiment confirmed why the count was only an upper
+bound: `style.cssText` reparsed and replaced enough declaration state that
+fewer operations cost more than the individual guarded setters.
 
 ## Rejection ledger
 
@@ -665,6 +683,8 @@ This table is the quick stop sign. Do not reopen these directions without satisf
 | --- | --- | --- |
 | Public `scene.batch()` | No measured coalescing in Mario; browser already supplies physical rendering boundary | Real callers show same-target overwrites or repeated scene-wide recomputation in one frame |
 | Generic submission manager | Added allocation/traversal and script cost | It removes upstream work, not merely delays setters |
+| Guarded leaf-record publication | Record collection found zero repeated property writes and was 8.81% slower; grouped CSS publication cut operations 15.90% but was at least 21.78% slower | A browser primitive atomically updates several existing declarations more cheaply, or a new workload has repeated target/property writes to eliminate |
+| Per-leaf custom-property substitution | It retained the same operation count and was 6.58% slower | Values cascade from a shared ancestor or one update replaces many leaf-local writes |
 | Worker DOM mutation | Workers cannot directly own the live DOM; messaging adds another boundary | Browser platform changes or work is pure preparation with transferable results |
 | Canvas/WebGL/WebGPU fallback | Changes the renderer and product identity | Product scope explicitly changes |
 | Scanline/span rasterizer | PolyCSS does not own pixels | Product adopts a framebuffer |
@@ -891,7 +911,8 @@ improvement unless repeated traces demonstrate one.
 
 This is the canonical execution queue. Work proceeds from the first nonterminal row downward. At most one row may be `READY` or `ACTIVE`; every later row remains `LOCKED` because the predecessor changes its baseline or premise.
 
-Current slot: **SR-10 is `READY`; every later experiment remains `LOCKED`.**
+Current slot: **the present chain is complete; no experiment is `READY` or
+`ACTIVE`.**
 
 | ID | Experiment | Depends on | Status | Closure evidence or unlock condition | Unlocks |
 | --- | --- | --- | --- | --- | --- |
@@ -904,9 +925,9 @@ Current slot: **SR-10 is `READY`; every later experiment remains `LOCKED`.**
 | SR-07 | Integrate visibility-coherent publication in DOMFormat | SR-01 through SR-06 terminal | ADOPTED | 16.17% fewer transform writes; exact 820-frame animation and 44-frame interaction pixels; stable identity; canonical seek barrier; release gates green | SR-08 |
 | SR-08 | Coalesce overdue-tick publication | SR-07 terminal and new baseline recorded | ADOPTED | Controlled catch-up style mutations/tick -63.30% and p95 -63.23%; exact 317-commit/820-tick pixels; stable identity | SR-09 |
 | SR-09 | Re-score prepared visibility runs | SR-08 terminal and final publication costs recorded | FALSIFIED | Style writes -1.03% with max burst 32, but exact pixels failed in 797/820 animation and 44/44 interaction frames | SR-10 |
-| SR-10 | Publish one guarded record per dirty leaf | SR-09 terminal and unchanged current schedule retained | READY | Beat individual setters in deterministic work and browser traces without changing visible state or identity | SR-11 |
-| SR-11 | Typed OM publication | SR-10 terminal and trace proves parsing/publication remains material | LOCKED | Beat the surviving publication path after startup, support, and retained-memory costs | SR-12 |
-| SR-12 | WAAPI prepared-playback lab | SR-11 terminal and per-frame JS remains material | LOCKED | Preserve exact seek, visibility, lighting, interaction, identity, startup, memory, and trace behavior | End of current chain |
+| SR-10 | Publish one guarded record per dirty leaf | SR-09 terminal and unchanged current schedule retained | FALSIFIED | `cssText` hybrid operations -15.90% but wall p50 +21.78%; trace script +12.03%, compositor-main +4.72%, frame p95 flat; zero record overwrites | SR-11 condition failed |
+| SR-11 | Typed OM publication | SR-10 terminal and trace proves parsing/publication remains material | CANCELLED | SR-10 attributed 0 ms to the explicit style group and left no surviving grouped path; CSS parsing was not isolated as a material cost | SR-12 condition failed |
+| SR-12 | WAAPI prepared-playback lab | SR-11 terminal and per-frame JS remains material | CANCELLED | Baseline script was only 0.0723 ms/browser frame with flat 8.81 ms p95; there is no material playback-JS bottleneck to transfer | End of current chain |
 
 Status rules:
 
@@ -1207,29 +1228,161 @@ Decision: keep the current retained-safe schedule and make no DOMFormat or
 public API change. Reopen only after the Mario producer gains a stronger
 prepare-time paint-visibility oracle that proves every changed hide/reveal run
 at the required zero pixel tolerance. Do not relax the tolerance or use the raw
-mathematical audit alone. SR-10 becomes ready against the unchanged SR-08 code
+mathematical audit alone. SR-10 therefore ran against the unchanged SR-08 code
 and current Mario schedule.
 
 ### SR-10 — Publish one guarded record per dirty leaf
 
-- Owner: DOMFormat prepared-playback interpreter or an isolated harness until supported.
-- Current evidence: an earlier preflight theoretical ceiling of 16.53% fewer setter calls; recount it against the adopted SR-07/SR-08 behavior before testing.
+- Owner: isolated DOMFormat prepared-playback harness.
+- Status: `FALSIFIED`.
+- Started: 2026-08-04.
+- Closed: 2026-08-04.
+- DOMFormat baseline: `54e9a3c303a1e7866ca0be6f1f7fe5501b55450a`.
+- Main interpreter SHA-256: `df34102e19421735beacfa38a99469d0a159ed7efcce9ac8e9b8ed3e71f5268e`.
+- Independent interpreter SHA-256: `279506b2175abf04ef6e1537ad33437d4213dc0eb761538ba37e2b32f58c0f45`.
+- Mario state SHA-256: `cfabf9928b836c7f1dcd41143f7d6957ef0d4eb016a3c2976862d0b38b01df85`.
+- Mario tree SHA-256: `36122d677499bd895f99f3bcae2cdbd278f10fee77ce4acae3898c963b0737d9`.
+- Mario bindings SHA-256: `f15b930ca44531a85b6f6c6b5d93d7da4e466a050947a0709e7e60ad205cfbaf`.
+- Mario CSS binding SHA-256: `1bebbac5d2f110c4cfcb83864eb8a8f0062b623e75f979204c496f4baed1cc0d`.
+- Mario model CSS SHA-256: `05e01a250febb982ed1e22a4206638478b5db4dbf4d3964a559c020dcd099253`.
+- Mario texel atlas SHA-256: `cb3cbaedb6a0a6680652640210df470f48b4d92f1896a35e816851379b91f5ca`.
+- Mario source-lighting SHA-256: `d12f43789adc2dc22344cf43c6b0e554717f206424441eb4dcab5726fbb1d021`.
+- Browser: Google Chrome `150.0.7871.187`, 320x240 viewport, device scale factor 1.
+- API, schema, package bytes, and product code: unchanged.
+- Ignored evidence bundle: `bench/results/sr-10-mario-2026-08-04/`.
 
-Recount transform, visibility, and lighting overlap against the unchanged current schedule retained after SR-09. Compare current individual guarded setters with one explicit per-leaf publication record. Treat `style.cssText`, CSS custom properties, and direct setters as separate candidates rather than assuming one implementation represents the idea.
+#### Hypothesis and candidates
 
-Use exact setter counts, full visible-state parity, stable identity, startup/memory measurements, and browser trace phases. A lower JavaScript call count alone does not pass.
+The experiment asked whether collecting each product tick's transform,
+lighting, and visibility changes into one record per dirty leaf could publish
+less browser work than individual guarded setters. It tested six explicit
+strategies rather than treating record collection and publication as the same
+idea:
+
+- baseline individual property setters;
+- record collection followed by the same direct setters;
+- direct setters for single-property records plus `style.cssText` for
+  multi-property records;
+- `style.cssText` for every record;
+- direct setters plus `setAttribute("style", ...)` for multi-property records;
+- leaf-local CSS custom properties.
+
+An additional optimistic `css-text-dynamic` variant moved the shared atlas URL
+out of each inline declaration and into one class rule before replacing only
+dynamic declarations. That variant expands CSS ownership beyond the current
+contract, so it was an upper bound rather than a reviewable candidate.
+
+#### Opportunity recount
+
+The final SR-09 schedule contains 629,749 transform, lighting, and visibility
+property changes across 820 source rows. They collapse theoretically to
+510,536 leaf/row records: 119,213 fewer calls, or 18.93%. Of those records,
+115,304 contain more than one property. The maximum row contains 1,652
+property changes, 1,050 records, and 617 multi-property records.
+
+The complete 820-product-tick browser workload differs slightly because it
+includes effects, shape roots, and other non-leaf publication. There it formed
+506,436 leaf records, including 113,750 multi-property records. Crucially,
+record collection found **zero repeated writes to the same target/property**.
+The manager could group declarations, but it could not cancel any upstream
+work or last-write-wins duplication.
+
+#### Deterministic browser result
+
+Six fresh-page repetitions per variant used the complete 820-tick workload.
+All variants performed the same 739,386 logical style assignments. Physical
+operations count a direct property setter, one `cssText` assignment, one style
+attribute assignment, or one custom-property setter as one publication.
+
+| Variant | Physical operations | Change | Wall p50 | Timing change |
+| --- | ---: | ---: | ---: | ---: |
+| Individual setters | 739,386 | baseline | 3,789.55 ms | baseline |
+| Records then direct setters | 739,386 | 0 | 4,123.25 ms | +8.81% |
+| `cssText` only for multi-property records | 621,808 | -117,578 (-15.90%) | 4,614.85 ms | +21.78% |
+| `cssText` for every record | 621,808 | -117,578 (-15.90%) | 6,415.45 ms | +69.29% |
+| Style attribute for multi-property records | 621,808 | -117,578 (-15.90%) | 4,801.15 ms | +26.69% |
+| Leaf-local custom properties | 739,386 | 0 | 4,038.90 ms | +6.58% |
+| Optimistic dynamic-only `cssText` | 621,808 | -117,578 (-15.90%) | 4,900.35 ms | +29.66% |
+
+The optimistic dynamic-only run also increased submitted value bytes from
+62,425,536 to 69,350,731 because a grouped write must reserialize declarations
+whose values did not all change. The normal hybrid reduced observed style
+mutation records from 734,840 to 620,159 (-15.61%), but that lower mutation
+count did not translate into lower elapsed work.
+
+Every run retained all 1,320 node identities, produced zero child-list
+mutations, and ended with the exact baseline logical and computed-style hashes.
+There was no complete rerender or topology change. Those checks establish that
+the harness compared the intended terminal state; they are not a substitute
+for numbered pixel parity.
+
+#### Normal-loop Chrome trace
+
+Three fresh-page, alternating-order pairs compared baseline with the least
+expensive grouped candidate, the multi-property `cssText` hybrid. Each trace
+used a 1,500 ms warmup, 4,000 ms autoplay action, 500 ms settle window, Chrome
+trace marks, and the frozen 320x240 viewport. Medians across the three aligned
+traces were:
+
+| Metric | Individual setters | `cssText` hybrid | Change |
+| --- | ---: | ---: | ---: |
+| Browser frames | 539 | 539 | flat |
+| Frame time p50 | 8.300 ms | 8.300 ms | flat |
+| Frame time p95 | 8.810 ms | 8.800 ms | -0.010 ms; below resolution |
+| Frame time p99 | 9.200 ms | 9.300 ms | +0.100 ms |
+| Script | 0.0723 ms/frame | 0.0810 ms/frame | +12.03% |
+| Pre-paint | 0.0063 ms/frame | 0.0063 ms/frame | flat |
+| Main-thread compositor | 0.4814 ms/frame | 0.5041 ms/frame | +4.72% |
+| GPU/viz | 0.0373 ms/frame | 0.0404 ms/frame | +8.31% |
+| GPU-service events | 0.1200 ms/frame | 0.0919 ms/frame | -23.42%; no frame effect |
+| `Commit` total | 93.018 ms | 95.351 ms | +2.51% |
+| `ProxyMain::BeginMainFrame` total | 148.758 ms | 157.289 ms | +5.73% |
+
+The isolated GPU-service median moved in the opposite direction, but its
+cross-process, inclusive duration did not survive as frame pacing, script,
+commit, or compositor improvement.
+The browser held the same 120 Hz presentation cadence while the candidate made
+the phases closest to the application more expensive. Style, layout, paint,
+and raster groups were zero in both trace summaries, so this trace does not
+identify CSS string parsing as a material standalone phase.
+
+#### Visual gate and decision
+
+No candidate passed the deterministic timing plus normal-loop trace gate.
+Therefore none qualified as a claimed win, and the expensive numbered
+baseline/candidate screenshot gate was deliberately not run. SR-10 makes no
+visual-parity claim. Startup and retained-memory profiling likewise stopped at
+this fail-fast boundary; the candidate already lost before those additional
+costs could rescue or reject it.
+
+Decision: keep the individual guarded setters and make no DOMFormat, schema,
+or public API change. The retained DOM plus browser lifecycle is already the
+adequate physical synchronization boundary for this workload. A per-leaf
+record layer adds collection, mirroring, error, and synchronization semantics
+without cancelling upstream work. Reopen only if a browser exposes a genuinely
+cheaper atomic multi-property primitive, or a different workload demonstrates
+repeated target/property writes that the record layer can eliminate.
 
 ### SR-11 — Typed OM publication
 
 - Owner: isolated harness until support and benefit are proven.
-- Current evidence: no measured benefit on the final publication shape.
+- Status: `CANCELLED` without execution because its unlock condition failed.
+- Current evidence: SR-10's grouped string path was slower, its trace attributed
+  zero time to the explicit style group, and no grouped publication path
+  survived.
 
-Run only if SR-10's trace shows string construction or CSS parsing remains material. Compare the surviving direct/record path with Typed OM values under the same browser, startup, memory, state, pixel, and compatibility gates. Close as `NOT APPLICABLE` if support or retained object cost makes it unsuitable.
+Typed OM was conditional on SR-10 proving that string construction or CSS
+parsing remained material. It did not. Do not build hundreds of thousands of
+retained typed values to optimize a phase the trace could not resolve. Reopen
+only after a new supported browser baseline attributes material time to direct
+CSS parsing or publication.
 
 ### SR-12 — WAAPI prepared-playback lab
 
 - Owner: isolated experimental harness.
-- Current evidence: open, high risk.
+- Status: `CANCELLED` without execution because its unlock condition failed.
+- Current evidence: baseline autoplay scripting was 0.0723 ms per browser
+  frame and did not constrain the measured 120 Hz presentation cadence.
 
 This is last because every earlier experiment can reduce or eliminate the JavaScript work it proposes to transfer to the user agent. Measure:
 
@@ -1243,7 +1396,12 @@ This is last because every earlier experiment can reduce or eliminate the JavaSc
 - package bytes;
 - script, style, paint, raster, and compositor trace groups.
 
-Abort if the roughly 849 tracks / 551,808 transform keyframes merely move cost to startup, memory, or layer management.
+The lab was conditional on per-frame playback JavaScript remaining material
+after the publication experiments. It does not. The roughly 849 tracks and
+551,808 transform keyframes would move an unresolved sub-millisecond cost into
+startup, memory, seeking, and layer management without a measured bottleneck to
+solve. Reopen only for a new workload whose normal-loop trace shows playback
+JavaScript causing missed frames.
 
 ### Separate PolyCSS work
 
@@ -1533,17 +1691,25 @@ Read the item matching the problem. There is no reason to reread the full shelf 
 - SR-09 rejected cost-aware rescheduling from the ideal mathematical visibility
   audit: a measured 1.03% write reduction changed exact browser pixels, so the
   current retained-safe schedule remains authoritative.
+- SR-10 rejected guarded per-leaf records for the current Mario workload. It
+  found zero same-property overwrites; record collection alone was 8.81%
+  slower, and the least expensive grouped publication cut physical operations
+  15.90% while increasing wall time 21.78% and traced script/commit cost.
+- SR-11 Typed OM and SR-12 WAAPI are cancelled in the current chain because
+  SR-10 did not expose material CSS parsing and baseline playback JavaScript is
+  only 0.0723 ms per browser frame.
 - LOD, progressive refinement, and impostor substitution are outside the PolyCSS contract.
 
 ### Next
 
-1. Start only ready row SR-10 when authorized; no later row may begin.
-2. Recompute transform, lighting, and visibility overlap against the unchanged
-   current schedule and adopted SR-07/SR-08 publication behavior.
-3. Compare guarded per-leaf record candidates with the current individual
-   setters; do not assume `style.cssText` is cheaper.
-4. Require deterministic work, browser traces, stable identity, and full
-   numbered Mario visual parity before adopting a win.
+1. Keep the SR-07/SR-08 implementation and the current individual guarded
+   setters. The current sequential chain is complete.
+2. Add another renderer experiment only after a fresh trace identifies a
+   material cost or a new workload changes the measured premise.
+3. If cost-aware visibility is revisited, first build a stronger prepare-time
+   browser-paint oracle; the ideal frontmost-triangle audit is insufficient.
+4. Continue requiring exact numbered visual parity before any future candidate
+   is called a win.
 
 ### Not next
 
@@ -1553,4 +1719,5 @@ Read the item matching the problem. There is no reason to reread the full shelf 
 - workers;
 - runtime scan conversion;
 - a broad `createPolyScene.ts` refactor;
+- Typed OM or WAAPI for this Mario workload without a changed trace premise;
 - LOD, progressive refinement, or impostor substitution.
