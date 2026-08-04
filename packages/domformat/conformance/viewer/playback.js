@@ -412,6 +412,7 @@ export function createPolycssPlayback(materialized, bindings, mounted, options =
   const shapeTransforms = new Uint32Array(packet.shapeCount);
   const shapeVisibility = new Uint8Array(packet.shapeCount);
   const leafTransforms = new Uint32Array(packet.leafCount);
+  const dirtyHiddenTransforms = new Uint8Array(packet.leafCount);
   loadTriples(packet.initial.shapes, shapeTransforms, shapeVisibility);
   loadPairs(packet.initial.leaves, leafTransforms);
   const visibility = visibilityState(materialized.lighting, packet.leafCount, playbackBinding.parameters.frameCount);
@@ -451,10 +452,31 @@ export function createPolycssPlayback(materialized, bindings, mounted, options =
     if (scene.style.transform !== next) scene.style.transform = next;
   };
 
+  const isPaintVisible = (index) => (visible[index] === 1 || forced[index] === 1) && degenerate[index] === 0;
+
+  const writePreparedLeafTransform = (index) => {
+    leaves[index].style.transform = packet.transforms[leafTransforms[index]];
+    dirtyHiddenTransforms[index] = 0;
+  };
+
+  const flushPreparedLeafTransform = (index) => {
+    if (dirtyHiddenTransforms[index] === 0) return;
+    writePreparedLeafTransform(index);
+  };
+
+  const publishOrDeferPreparedLeafTransform = (index) => {
+    if (isPaintVisible(index)) writePreparedLeafTransform(index);
+    else dirtyHiddenTransforms[index] = 1;
+  };
+
+  const synchronizePreparedLeafTransforms = () => {
+    for (let index = 0; index < leaves.length; index += 1) flushPreparedLeafTransform(index);
+  };
+
   const writeVisibility = (index) => {
-    const next = (visible[index] === 1 || forced[index] === 1) && degenerate[index] === 0
-      ? "visible"
-      : "hidden";
+    const paintVisible = isPaintVisible(index);
+    const next = paintVisible ? "visible" : "hidden";
+    if (paintVisible) flushPreparedLeafTransform(index);
     if (leaves[index].style.visibility !== next) leaves[index].style.visibility = next;
   };
 
@@ -560,33 +582,41 @@ export function createPolycssPlayback(materialized, bindings, mounted, options =
       const leaf = packet.leafChanges[base];
       leafTransforms[leaf] = packet.leafChanges[base + 1];
       dirtyLeaves?.add(leaf);
-      if (publish) leaves[leaf].style.transform = packet.transforms[leafTransforms[leaf]];
+      if (publish) publishOrDeferPreparedLeafTransform(leaf);
     }
     if (publish) applySurface(nextFrame);
     sourceFrame = nextFrame;
   };
 
-  const seek = (target) => {
+  const seekTo = (target, synchronize) => {
     invariant(Number.isSafeInteger(target) && target >= 1 && target <= playbackBinding.parameters.frameCount, "FRAME_RANGE", `Prepared playback frame ${target} is out of range.`);
-    if (target === sourceFrame) return target;
-    const dirtyShapes = new Set();
-    const dirtyLeaves = new Set();
-    let next = sourceFrame;
-    while (next !== target) {
-      next = next === playbackBinding.parameters.frameCount ? 1 : next + 1;
-      applyRow(row(next), false, dirtyShapes, dirtyLeaves);
+    if (target !== sourceFrame) {
+      const dirtyShapes = new Set();
+      const dirtyLeaves = new Set();
+      let next = sourceFrame;
+      while (next !== target) {
+        next = next === playbackBinding.parameters.frameCount ? 1 : next + 1;
+        applyRow(row(next), false, dirtyShapes, dirtyLeaves);
+      }
+      writeModel();
+      applyAppearance();
+      for (const index of [...dirtyShapes].sort((left, right) => left - right)) {
+        shapes[index].style.transform = packet.transforms[shapeTransforms[index]];
+        shapes[index].style.visibility = shapeVisibility[index] === 1 ? "visible" : "hidden";
+      }
+      for (const index of [...dirtyLeaves].sort((left, right) => left - right)) {
+        if (synchronize) dirtyHiddenTransforms[index] = 1;
+        else publishOrDeferPreparedLeafTransform(index);
+      }
+      if (synchronize) synchronizePreparedLeafTransforms();
+      applySurface(target);
+      sourceFrame = target;
     }
-    writeModel();
-    applyAppearance();
-    for (const index of [...dirtyShapes].sort((left, right) => left - right)) {
-      shapes[index].style.transform = packet.transforms[shapeTransforms[index]];
-      shapes[index].style.visibility = shapeVisibility[index] === 1 ? "visible" : "hidden";
-    }
-    for (const index of [...dirtyLeaves].sort((left, right) => left - right)) leaves[index].style.transform = packet.transforms[leafTransforms[index]];
-    applySurface(target);
-    sourceFrame = target;
+    if (synchronize) synchronizePreparedLeafTransforms();
     return target;
   };
+
+  const seek = (target) => seekTo(target, true);
 
   return Object.freeze({
     get tick() { return tick; },
@@ -598,7 +628,7 @@ export function createPolycssPlayback(materialized, bindings, mounted, options =
         shapes[index].style.transform = packet.transforms[shapeTransforms[index]];
         shapes[index].style.visibility = shapeVisibility[index] === 1 ? "visible" : "hidden";
       }
-      for (let index = 0; index < leaves.length; index += 1) leaves[index].style.transform = packet.transforms[leafTransforms[index]];
+      for (let index = 0; index < leaves.length; index += 1) writePreparedLeafTransform(index);
       publishSurfaceState(sourceFrame);
       applyAppearance();
       initialPublished = true;
@@ -610,7 +640,7 @@ export function createPolycssPlayback(materialized, bindings, mounted, options =
       if (target === sourceFrame) return target;
       const expected = sourceFrame === playbackBinding.parameters.frameCount ? 1 : sourceFrame + 1;
       if (target === expected) applyRow(row(target), true);
-      else seek(target);
+      else seekTo(target, false);
       return target;
     },
     seek,
@@ -660,7 +690,7 @@ export function createPolycssPlayback(materialized, bindings, mounted, options =
       for (const index of leafIndices) {
         invariant(Number.isSafeInteger(index) && index >= 0 && index < packet.leafCount, "INVALID_INTERACTION_PUBLICATION", `Interaction leaf ${index} is out of range.`);
         degenerate[index] = 0;
-        leaves[index].style.transform = packet.transforms[leafTransforms[index]];
+        writePreparedLeafTransform(index);
         writeVisibility(index);
       }
     },

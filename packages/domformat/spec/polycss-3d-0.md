@@ -329,9 +329,15 @@ no scheduler, and accepts only `seek(1)`.
 
 ## 8. DOM publication and lifecycle
 
-All prepared state updates are synchronous writes to existing targets. Viewer
-input adapters translate trusted host events into standardized `BIND` inputs;
-they do not expose package data to event handler compilation.
+All physical prepared-state publications are synchronous writes to existing
+targets. Automatic playback MAY retain the latest logical transform for a
+paint-hidden leaf without assigning that transform to its DOM target, as
+defined by `polycss-playback@0`. It MUST flush that transform before any reveal.
+Public `seek(frame)` is a synchronization barrier: before it returns, every
+retained leaf's physical transform equals its logical prepared transform,
+including for a same-frame seek. Viewer input adapters translate trusted host
+events into standardized `BIND` inputs; they do not expose package data to
+event handler compilation.
 
 The only conforming lifecycle order is:
 

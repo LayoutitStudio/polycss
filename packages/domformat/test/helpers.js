@@ -396,6 +396,38 @@ export async function syntheticTwoFramePolycssInput() {
   return input;
 }
 
+export async function syntheticHiddenPlaybackInput() {
+  const input = await syntheticExecutableInteractionInput();
+  const playback = input.state.channels.find((channel) => channel.codec === "polycss-playback-packed@0").data.packet;
+  playback.leafChanges = { sources: [0, 0, 0], transforms: [3, 2, 1] };
+  const leafOffsets = [0, 1, 2, 3, 3, 3, 3, 3];
+  for (let frame = 0; frame < playback.frameRows.length; frame += 1) {
+    playback.frameRows[frame][5] = leafOffsets[frame];
+    playback.frameRows[frame][6] = frame <= 2 ? 1 : 0;
+  }
+  playback.transforms.count = 7;
+  const leafGroup = playback.transforms.groups[3];
+  leafGroup.columns = leafGroup.columns.map((column, index) => {
+    if (index === 0 || index === 4 || index === 8) return [column[0], 0, 0];
+    if (index === 9) return [column[0], 1000, 1000];
+    return [column[0], 0, 0];
+  });
+
+  const surface = input.state.channels.find((channel) => channel.codec === "polycss-surface-packed@0").data.packet;
+  surface.visibility.initialVisibleBitsBase64 = Buffer.from([2]).toString("base64");
+  surface.visibility.sequential = {
+    offsetsBase64: base64Integers([0, 1, 1, 1, 2, 2, 2, 2, 2], 4),
+    faceIndicesBase64: base64Integers([0, 0], 2),
+  };
+  surface.transitions.sequential = {
+    offsetsBase64: base64Integers([0, 0, 0, 0, 1, 1, 1, 1, 1], 4),
+    faceIndexDeltas: [0],
+    stateIndexDeltas: [0],
+  };
+  input.tree.nodes.find((node) => node.id === "synthetic/leaf").styles.visibility = "hidden";
+  return input;
+}
+
 export function errorCode(code) {
   return (error) => error?.code === code;
 }

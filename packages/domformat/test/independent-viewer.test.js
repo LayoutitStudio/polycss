@@ -9,6 +9,7 @@ import {
   builtExternalResources,
   projectRoot,
   syntheticExecutableInteractionInput,
+  syntheticHiddenPlaybackInput,
   syntheticPolycssInput,
   syntheticStaticPresentationInput,
   syntheticTwoFramePolycssInput,
@@ -248,6 +249,87 @@ test("independent and public viewers publish identical ordered animation transit
     normalizedWrites(value.result, value.referenceHost, value.reference),
     "frame 2 to 1 write order",
   );
+  value.referenceRuntime.destroy();
+  value.independentRuntime.destroy();
+});
+
+test("independent and public viewers defer hidden transforms until an explicit publication boundary", async () => {
+  const value = await mountedPair(await syntheticHiddenPlaybackInput(), { animate: true, mode: "animation" });
+  const leafIndex = value.result.document.tree.nodes.findIndex((node) => node.id === "synthetic/leaf");
+  const referenceLeaf = value.reference.namespaced[leafIndex];
+  const independentLeaf = value.independentRuntime.node("synthetic/leaf");
+  const referenceIdentity = referenceLeaf;
+  const independentIdentity = independentLeaf;
+  const initialTransform = referenceLeaf.style.transform;
+  const leafWrites = (host, fake) => normalizedWrites(value.result, host, fake)
+    .filter(([id, property]) => id === "synthetic/leaf" && (property === "transform" || property === "visibility"));
+
+  value.reference.frame(0);
+  value.independent.frame(0);
+  clearWrites(value.reference, value.independent);
+
+  value.reference.frame(34);
+  value.independent.frame(34);
+  assert.equal(value.referenceRuntime.sourceFrame, 2);
+  assert.equal(value.independentRuntime.sourceFrame, 2);
+  assert.equal(referenceLeaf.style.transform, initialTransform);
+  assert.equal(independentLeaf.style.transform, initialTransform);
+  assert.deepEqual(leafWrites(value.referenceHost, value.reference), []);
+  assert.deepEqual(leafWrites(value.independentHost, value.independent), []);
+  assertEquivalent(value, "hidden automatic playback");
+
+  clearWrites(value.reference, value.independent);
+  assert.equal(value.referenceRuntime.seek(2), 2);
+  assert.equal(value.independentRuntime.seek(2), 2);
+  const synchronizedReferenceWrites = leafWrites(value.referenceHost, value.reference);
+  const synchronizedIndependentWrites = leafWrites(value.independentHost, value.independent);
+  assert.deepEqual(synchronizedIndependentWrites, synchronizedReferenceWrites);
+  assert.equal(synchronizedReferenceWrites.length, 1);
+  assert.equal(synchronizedReferenceWrites[0][1], "transform");
+  assertEquivalent(value, "same-frame public synchronization");
+
+  clearWrites(value.reference, value.independent);
+  value.referenceRuntime.seek(2);
+  value.independentRuntime.seek(2);
+  assert.deepEqual(leafWrites(value.referenceHost, value.reference), []);
+  assert.deepEqual(leafWrites(value.independentHost, value.independent), []);
+
+  value.reference.frame(68);
+  value.independent.frame(68);
+  clearWrites(value.reference, value.independent);
+  value.reference.frame(102);
+  value.independent.frame(102);
+  assert.deepEqual(leafWrites(value.independentHost, value.independent), leafWrites(value.referenceHost, value.reference));
+  assert.deepEqual(leafWrites(value.referenceHost, value.reference).map(([, property]) => property), ["transform", "visibility"]);
+  assert.equal(referenceLeaf.style.visibility, "visible");
+  assert.equal(independentLeaf.style.visibility, "visible");
+  assert.equal(value.reference.namespaced[leafIndex], referenceIdentity);
+  assert.equal(value.independentRuntime.node("synthetic/leaf"), independentIdentity);
+  assertEquivalent(value, "flush before reveal");
+
+  assert.equal(value.referenceRuntime.destroy(), true);
+  assert.equal(value.independentRuntime.destroy(), true);
+  assert.equal(value.referenceRuntime.destroy(), false);
+  assert.equal(value.independentRuntime.destroy(), false);
+});
+
+test("entering interaction mode synchronizes deferred hidden transforms in both viewers", async () => {
+  const value = await mountedPair(await syntheticHiddenPlaybackInput(), { animate: true, mode: "animation" });
+  value.reference.frame(0);
+  value.independent.frame(0);
+  value.reference.frame(34);
+  value.independent.frame(34);
+  clearWrites(value.reference, value.independent);
+
+  assert.equal(value.referenceRuntime.setMode("interaction"), "interaction");
+  assert.equal(value.independentRuntime.setMode("interaction"), "interaction");
+  const referenceWrites = normalizedWrites(value.result, value.referenceHost, value.reference)
+    .filter(([id, property]) => id === "synthetic/leaf" && property === "transform");
+  const independentWrites = normalizedWrites(value.result, value.independentHost, value.independent)
+    .filter(([id, property]) => id === "synthetic/leaf" && property === "transform");
+  assert.deepEqual(independentWrites, referenceWrites);
+  assert.equal(referenceWrites.length, 1);
+  assertEquivalent(value, "interaction mode synchronization");
   value.referenceRuntime.destroy();
   value.independentRuntime.destroy();
 });

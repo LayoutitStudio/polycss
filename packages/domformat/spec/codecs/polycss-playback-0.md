@@ -141,8 +141,10 @@ animation frame therefore does not permanently slow playback.
 ## Publication
 
 Initial shape/leaf transform tables and shape visibility are expanded into
-fixed arrays. Initial DOM styles come from `TREE`; the controller publishes the
-initial appearance and downstream effects on mount.
+fixed logical arrays. Each logical leaf transform is distinct from the last
+transform physically published to its retained DOM target. Initial DOM styles
+come from `TREE`; mount publication synchronously writes every logical leaf
+transform, the initial appearance, surface state, and downstream effects.
 
 For a sequential frame row, in order:
 
@@ -153,9 +155,20 @@ For a sequential frame row, in order:
    inline transform already equals that exact string, preserve it without a
    redundant assignment.
 3. Apply shape changes in row order, writing transform and visible/hidden.
-4. Apply leaf changes in row order, writing transform only.
+4. Apply leaf changes in row order. If the leaf is currently paint-visible,
+   write its transform. Otherwise update only its logical transform and mark
+   its physical transform dirty.
 5. When `polycss-surface@0` is present, publish the same 1-based source frame
-   to it.
+   to it. Before any surface or interaction transition makes a leaf
+   paint-visible, write that leaf's latest dirty transform and then write
+   `visibility: visible`.
+
+A leaf is paint-visible when surface visibility or forced interaction
+visibility is active and interaction has not marked the leaf degenerate.
+Deferred state is bounded by one dirty bit per leaf; the logical transform
+array always contains the latest prepared state. A reveal publishes only that
+latest transform, never the superseded hidden intermediates. Stable target
+identity and row ordering are unchanged.
 
 Appearance camera fit uses host width/height, falling back to the trusted
 viewport option and then 320x240:
@@ -175,15 +188,26 @@ six-decimal rounding and negative-zero normalization. Clearing the identity
 inline transform preserves renderer base-CSS camera behavior; publishing
 `transform: none` is not equivalent.
 
-Seek advances frame rows forward with `frameCount -> 1` wrapping until the
-target, without intermediate DOM writes; it then publishes the final model,
-appearance, changed shapes/leaves in ascending target order, and surface frame.
-This produces the same state as applying all intervening rows.
+An automatic timeline jump advances frame rows forward with `frameCount -> 1`
+wrapping until the target, without intermediate DOM writes; it then publishes
+the final model, appearance, changed shapes/leaves in ascending target order,
+and surface frame. Hidden leaf transforms remain eligible for deferral.
+
+Public `seek(frame)` is a synchronous publication barrier, including when
+`frame` already equals the current source frame. It performs the same bounded
+forward simulation when needed, publishes changed targets in ascending target
+order, and then writes every dirty leaf transform in ascending leaf order
+before returning. Its postcondition is that every retained leaf's physical
+transform equals its current logical prepared transform. A repeated same-frame
+seek performs no transform write once that postcondition already holds.
 
 Interaction may temporarily replace declared shape/leaf transforms and force
-leaf visibility. Restart seeks to the initial source frame, restores only the
-declared modified target indices from the playback arrays, clears interaction
-visibility state through the surface controller, and resets tick to zero.
+leaf visibility. Entering interaction uses the public seek barrier. Forced
+visibility flushes a dirty prepared transform before revealing its leaf.
+Restart seeks to the initial source frame, restores only the declared modified
+target indices from the playback arrays, clears their dirty transform state,
+clears interaction visibility state through the surface controller, and resets
+tick to zero.
 
 ## Validation boundary
 

@@ -82,6 +82,9 @@ validate → construct → bind → initialize → publish → destroy
 Partial failures roll back DOM, style elements, listeners, observers, object
 URLs, and host mutations. `destroy()` is idempotent. The runtime controller is
 closed to `lifecycle`, `mode`, `sourceFrame`, `seek`, `setMode`, and `destroy`.
+Automatic playback may defer transforms for paint-hidden leaves; `seek(frame)`
+is the synchronous barrier that publishes every current prepared transform
+before returning, including for a same-frame seek.
 
 ## Contract and security
 
