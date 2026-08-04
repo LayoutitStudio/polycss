@@ -98,8 +98,19 @@ ticks remain separately published, and all 317 numbered Mario commits covering
 820 logical ticks matched pixel-for-pixel with stable node identity. This is an
 internal backlog path, not a generic submission manager or public batch API.
 
-The sequential experiment register is the execution authority. SR-08 is closed;
-SR-09 is the only ready row, and every later experiment remains locked.
+SR-09 tested whether the Mario producer could spend the same 32-transition
+burst budget more intelligently. A full-source, cost-aware candidate reduced
+attempted browser style writes by 7,609 over 820 product ticks (1.03%) while
+keeping all 1,320 retained nodes stable. It nevertheless failed the mandatory
+pixel gate: 797 of 820 animation frames and all 44 interaction frames differed
+at a zero threshold, including when the candidate reused the exact baseline
+texel bytes. The ideal frontmost-triangle audit therefore does not prove exact
+browser paint invisibility at antialiased/composited polygon boundaries. The
+current visibility schedule remains unchanged; a stronger prepare-time paint
+oracle is required before cost-aware rescheduling may be reopened.
+
+The sequential experiment register is the execution authority. SR-09 is closed;
+SR-10 is the only ready row, and every later experiment remains locked.
 
 ## Rules for using this bible
 
@@ -477,7 +488,7 @@ The status column is the current PolyCSS decision, not a judgment on the histori
 
 These conclusions apply to the exact Mario CodePen workload substituted onto PolyCSS `v0.2.11`. They are stronger than analogy because they were measured, but they are not universal claims about every PolyCSS scene.
 
-The SR identifiers below are permanent and match the sequential register. SR-10 appears here only as preflight opportunity counting; it has not been unlocked or executed.
+The SR identifiers below are permanent and match the sequential register. SR-10 appears here only as preflight opportunity counting; it is now ready but has not been executed.
 
 ### Evidence provenance
 
@@ -632,7 +643,7 @@ Raw visibility saves 2.54% beyond the current schedule but causes severe transit
 
 **Hypothesis:** Combine transform, lighting, and visibility changes for one leaf into one publication.
 
-**Status:** Opportunity counted only. The actual experiment remains locked behind SR-09 because upstream publication and visibility decisions change its baseline.
+**Status:** Opportunity counted only. SR-09 closed without changing the current visibility schedule, so SR-10 is ready but has not been executed.
 
 Across all 820 frames:
 
@@ -662,6 +673,7 @@ This table is the quick stop sign. Do not reopen these directions without satisf
 | Translation/basis split | Almost all changes touch both | A new animation corpus shows strong component sparsity |
 | Exact Mario merging | Less than 3% upper bound | Different topology or authorized approximation changes the ceiling |
 | Raw maximum culling | Transition bursts dominate marginal savings | Cost-aware bounded schedule beats current total work |
+| Cost-aware raw-visibility rescore | A 1.03% write reduction changed pixels in 797/820 animation and 44/44 interaction frames | A stronger prepare-time paint oracle proves every changed hide/reveal decision is exact at zero pixel tolerance |
 | LOD, progressive meshes, or impostors | Runtime representation switching violates the PolyCSS contract; impostors also lose polygon identity and interaction | Do not reopen as a PolyCSS optimization |
 | Per-frame runtime lighting rasterization | Prepared surface cache already owns it | Live lighting becomes a required exact behavior and cannot use CSS |
 | WAAPI in the main PR | Huge keyframe/layer/memory uncertainty | Separate lab passes startup, memory, parity, interaction, and trace gates |
@@ -879,7 +891,7 @@ improvement unless repeated traces demonstrate one.
 
 This is the canonical execution queue. Work proceeds from the first nonterminal row downward. At most one row may be `READY` or `ACTIVE`; every later row remains `LOCKED` because the predecessor changes its baseline or premise.
 
-Current slot: **SR-09 is `READY`; every later experiment remains `LOCKED`.**
+Current slot: **SR-10 is `READY`; every later experiment remains `LOCKED`.**
 
 | ID | Experiment | Depends on | Status | Closure evidence or unlock condition | Unlocks |
 | --- | --- | --- | --- | --- | --- |
@@ -891,8 +903,8 @@ Current slot: **SR-09 is `READY`; every later experiment remains `LOCKED`.**
 | SR-06 | Maximum raw visibility | SR-05 terminal | FALSIFIED | Only 2.54% marginal work reduction with transition bursts up to 821 writes/frame | SR-07 |
 | SR-07 | Integrate visibility-coherent publication in DOMFormat | SR-01 through SR-06 terminal | ADOPTED | 16.17% fewer transform writes; exact 820-frame animation and 44-frame interaction pixels; stable identity; canonical seek barrier; release gates green | SR-08 |
 | SR-08 | Coalesce overdue-tick publication | SR-07 terminal and new baseline recorded | ADOPTED | Controlled catch-up style mutations/tick -63.30% and p95 -63.23%; exact 317-commit/820-tick pixels; stable identity | SR-09 |
-| SR-09 | Re-score prepared visibility runs | SR-08 terminal and final publication costs recorded | READY | Minimize total work with a hard transition-burst bound; do not maximize hidden percentage | SR-10 |
-| SR-10 | Publish one guarded record per dirty leaf | SR-09 terminal and overlap counts recomputed | LOCKED | Beat individual setters in deterministic work and browser traces without changing visible state or identity | SR-11 |
+| SR-09 | Re-score prepared visibility runs | SR-08 terminal and final publication costs recorded | FALSIFIED | Style writes -1.03% with max burst 32, but exact pixels failed in 797/820 animation and 44/44 interaction frames | SR-10 |
+| SR-10 | Publish one guarded record per dirty leaf | SR-09 terminal and unchanged current schedule retained | READY | Beat individual setters in deterministic work and browser traces without changing visible state or identity | SR-11 |
 | SR-11 | Typed OM publication | SR-10 terminal and trace proves parsing/publication remains material | LOCKED | Beat the surviving publication path after startup, support, and retained-memory costs | SR-12 |
 | SR-12 | WAAPI prepared-playback lab | SR-11 terminal and per-frame JS remains material | LOCKED | Preserve exact seek, visibility, lighting, interaction, identity, startup, memory, and trace behavior | End of current chain |
 
@@ -1116,26 +1128,94 @@ boundary, and a generic frame manager remains falsified for normal playback.
 ### SR-09 — Re-score prepared visibility runs
 
 - Owner: Mario/cssGraphics preparation, not DOMFormat runtime.
-- Current evidence: low-single-digit modeled headroom against the pre-SR-07 baseline.
+- Status: `FALSIFIED`.
+- Started: 2026-08-04.
+- Closed: 2026-08-04.
+- DOMFormat baseline: `7b853099ec089e43aefd547f237385b99fe746aa`.
+- Exact Mario closure: the four SR-07 hashes above, unchanged through SR-08.
+- Mathematical visibility audit SHA-256: `c4ba58ad0c40e11145f37c3bbc96c235ed9b028138e79d98cbd8f9c0e39b6b59`.
+- Retained-safe audit SHA-256: `1f183f7b8219ce7454524e95ab9bfd14cc4ea8188844f5d9d4ee63c9f8a88c56`.
+- Producer checkpoint: cssGraphics `88fd377ea043f9890d6878b59a88fec2f944b3ae`; its dirty working tree remains read-only for this experiment.
+- Candidate visibility report SHA-256: `ffb68524a2d56ca9d559c1a08afa78a2b245294763991e702df97ec2a7569c3b`.
+- Candidate cssGraphics generation: `4f1cb65011d062681017dfc25484fbe3c9bf9b0caf6189977fa8681f2d819099`.
+- Ignored evidence root: `bench/results/sr-09-mario-2026-08-04/`.
+- Deterministic and browser reports: `analysis.json`, `benchmark.json`, and `capture.json` under that root.
+- Exact diff reports: `diff-animation-aa/sr09_animation_aa.json`, `diff-interaction-aa/sr09_interaction_aa.json`, `diff-animation-schedule-only/sr09_animation_schedule_only.json`, and `diff-interaction-schedule-only/sr09_interaction_schedule_only.json` under that root.
 
-Recompute the model after SR-07 and SR-08 close. Score each candidate hidden run with an objective resembling:
+#### Candidate and deterministic work
 
-```text
-saved transform publications
-+ saved lighting publications
-+ estimated saved paint/compositor work
-- hide/reveal publication cost
-- transition burst penalty
-```
+The model used the full 198,033-write source-lighting timeline rather than the
+already visibility-compacted DOMFormat atlas. Replaying the current schedule
+through that source timeline reproduced its exact 153,530 lighting writes,
+which closed the model against producer output before any candidate was scored.
 
-Enforce a strict maximum transition count per frame. Compare total property work, worst-frame transitions, full visual parity, and trace paint/compositor work. Do not optimize hidden percentage in isolation.
+The selected balanced schedule used 6,885 hidden runs plus the one permanently
+hidden face. Against the current 7,129-run schedule it changed the deterministic
+820-frame sequential totals as follows:
+
+| Metric | Current | Candidate | Change |
+| --- | ---: | ---: | ---: |
+| Total modeled leaf-property writes | 629,749 | 621,914 | -7,835 (-1.24%) |
+| Transform writes | 461,961 | 457,586 | -4,375 |
+| Lighting writes | 153,530 | 150,558 | -2,972 |
+| Visibility writes | 14,258 | 13,770 | -488 |
+| Weighted raster-footprint leaf-frames | 400,800,773 | 395,341,988 | -5,458,785 (-1.36%) |
+| Compact lighting states | 150,985 | 148,812 | -2,173 |
+| Maximum transitions in one frame | 32 | 32 | unchanged |
+
+The generated packet materialized through DOMFormat with exactly 820 frames,
+1,213 leaves, 148,812 lighting states, 150,558 lighting writes, 13,770
+visibility writes, and a maximum transition burst of 32. Re-decoding its
+visibility stream reproduced the optimizer's 994,660 face/frame decisions with
+zero mismatches. A baseline check proved the experimental packer could lower
+the current producer contract to the existing DOMFormat surface packet exactly
+before it lowered the candidate.
+
+Over the representative 820 product ticks, six alternating real-browser runs
+reduced attempted style writes from 739,386 to 731,777: 7,609 fewer writes
+(1.03%). This comprised 4,199 fewer transforms, 2,924 fewer
+`backgroundPositionY` writes, and 486 fewer visibility writes. All 1,320 nodes
+retained identity and both paths performed zero child-list mutations. Median
+synchronous run time moved from 2,073.7 ms to 2,054.5 ms, while p95 moved from
+2,085.775 ms to 2,083.0 ms; this is a small harness timing movement, not an FPS
+claim. A Chrome phase trace was not run because the candidate failed the prior
+mandatory pixel gate.
+
+#### Visual rejection
+
+Baseline A/A was exact at zero tolerance for all 820 numbered 320x240 animation
+frames and all 44 interaction frames. The candidate initially used its freshly
+encoded texel WebP, then repeated the complete candidate capture with the exact
+baseline texel bytes to isolate visibility scheduling from atlas encoding. The
+schedule-only comparison still failed:
+
+- 797 of 820 animation frames contained changed pixels;
+- the worst mean-delta frame was 464, with mean absolute delta `0.072214`,
+  changed-pixel ratio `0.013320`, and maximum channel delta `240`;
+- maximum channel delta anywhere in the animation sequence was `252`;
+- all 44 interaction frames changed; their worst mean absolute delta was
+  `0.000564`, changed-pixel ratio `0.000143`, and maximum channel delta `22`;
+- source clocks matched, retained identity held, and no topology mutation
+  occurred.
+
+The raw audit proves ideal positive-area frontmost triangles, but it does not
+prove that changing a retained leaf's browser visibility is pixel-neutral at
+antialiased, textured, and composited boundaries. The experiment therefore
+cannot convert its real 1.03% publication reduction into an accepted win.
+
+Decision: keep the current retained-safe schedule and make no DOMFormat or
+public API change. Reopen only after the Mario producer gains a stronger
+prepare-time paint-visibility oracle that proves every changed hide/reveal run
+at the required zero pixel tolerance. Do not relax the tolerance or use the raw
+mathematical audit alone. SR-10 becomes ready against the unchanged SR-08 code
+and current Mario schedule.
 
 ### SR-10 — Publish one guarded record per dirty leaf
 
 - Owner: DOMFormat prepared-playback interpreter or an isolated harness until supported.
-- Current evidence: a preflight theoretical ceiling of 16.53% fewer setter calls before upstream changes.
+- Current evidence: an earlier preflight theoretical ceiling of 16.53% fewer setter calls; recount it against the adopted SR-07/SR-08 behavior before testing.
 
-Recount transform, visibility, and lighting overlap against SR-09's final schedule. Compare current individual guarded setters with one explicit per-leaf publication record. Treat `style.cssText`, CSS custom properties, and direct setters as separate candidates rather than assuming one implementation represents the idea.
+Recount transform, visibility, and lighting overlap against the unchanged current schedule retained after SR-09. Compare current individual guarded setters with one explicit per-leaf publication record. Treat `style.cssText`, CSS custom properties, and direct setters as separate candidates rather than assuming one implementation represents the idea.
 
 Use exact setter counts, full visible-state parity, stable identity, startup/memory measurements, and browser trace phases. A lower JavaScript call count alone does not pass.
 
@@ -1450,17 +1530,20 @@ Read the item matching the problem. There is no reason to reread the full shelf 
 - SR-08 adopted final-state physical publication for multi-tick animation
   backlogs while preserving every logical tick and separately publishing every
   interaction tick.
+- SR-09 rejected cost-aware rescheduling from the ideal mathematical visibility
+  audit: a measured 1.03% write reduction changed exact browser pixels, so the
+  current retained-safe schedule remains authoritative.
 - LOD, progressive refinement, and impostor substitution are outside the PolyCSS contract.
 
 ### Next
 
-1. Start only ready row SR-09 when authorized; no later row may begin.
-2. Recompute visibility-run savings against the adopted SR-07 and SR-08
-   publication costs.
-3. Score saved transform, lighting, paint, and compositor work against hide /
-   reveal writes and a hard worst-frame transition-burst limit.
-4. Reject any candidate that merely maximizes hidden percentage, and require
-   full numbered Mario visual parity before adopting a win.
+1. Start only ready row SR-10 when authorized; no later row may begin.
+2. Recompute transform, lighting, and visibility overlap against the unchanged
+   current schedule and adopted SR-07/SR-08 publication behavior.
+3. Compare guarded per-leaf record candidates with the current individual
+   setters; do not assume `style.cssText` is cheaper.
+4. Require deterministic work, browser traces, stable identity, and full
+   numbered Mario visual parity before adopting a win.
 
 ### Not next
 
