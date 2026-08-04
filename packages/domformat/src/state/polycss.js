@@ -617,6 +617,45 @@ export function createPolycssPlayback(materialized, bindings, mounted, options =
 
   const seek = (target) => seekTo(target, true);
 
+  const advanceOne = (publish, dirtyShapes, dirtyLeaves) => {
+    tick += 1;
+    const target = timelineFrame(packet, tick);
+    if (target === sourceFrame) return target;
+    const expected = sourceFrame === playbackBinding.parameters.frameCount ? 1 : sourceFrame + 1;
+    if (target === expected) applyRow(row(target), publish, dirtyShapes, dirtyLeaves);
+    else if (publish) seekTo(target, false);
+    else {
+      let next = sourceFrame;
+      while (next !== target) {
+        next = next === playbackBinding.parameters.frameCount ? 1 : next + 1;
+        applyRow(row(next), false, dirtyShapes, dirtyLeaves);
+      }
+    }
+    return target;
+  };
+
+  const advanceMany = (count) => {
+    invariant(Number.isSafeInteger(count) && count >= 1, "INVALID_PLAYBACK_PUBLICATION", "Prepared playback catch-up count must be a positive integer.");
+    if (count === 1) return Object.freeze([advanceOne(true)]);
+    const initialAppearance = appearanceIndex;
+    const initialModelTransform = modelTransform;
+    const dirtyShapes = new Set();
+    const dirtyLeaves = new Set();
+    const frames = [];
+    for (let index = 0; index < count; index += 1) frames.push(advanceOne(false, dirtyShapes, dirtyLeaves));
+    if (modelTransform !== initialModelTransform) writeModel();
+    if (appearanceIndex !== initialAppearance) applyAppearance();
+    for (const index of [...dirtyShapes].sort((left, right) => left - right)) {
+      const transform = packet.transforms[shapeTransforms[index]];
+      const nextVisibility = shapeVisibility[index] === 1 ? "visible" : "hidden";
+      if (shapes[index].style.transform !== transform) shapes[index].style.transform = transform;
+      if (shapes[index].style.visibility !== nextVisibility) shapes[index].style.visibility = nextVisibility;
+    }
+    for (const index of [...dirtyLeaves].sort((left, right) => left - right)) publishOrDeferPreparedLeafTransform(index);
+    applySurface(sourceFrame);
+    return Object.freeze(frames);
+  };
+
   return Object.freeze({
     get tick() { return tick; },
     get sourceFrame() { return sourceFrame; },
@@ -634,14 +673,9 @@ export function createPolycssPlayback(materialized, bindings, mounted, options =
       return sourceFrame;
     },
     advance() {
-      tick += 1;
-      const target = timelineFrame(packet, tick);
-      if (target === sourceFrame) return target;
-      const expected = sourceFrame === playbackBinding.parameters.frameCount ? 1 : sourceFrame + 1;
-      if (target === expected) applyRow(row(target), true);
-      else seekTo(target, false);
-      return target;
+      return advanceOne(true);
     },
+    advanceMany,
     seek,
     restart(shapeIndices = [], leafIndices = []) {
       seek(packet.initial.sourceFrame);

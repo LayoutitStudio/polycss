@@ -56,6 +56,32 @@ export function createPolycssEffects(state, bindings, mounted, options = {}) {
   let sourceFrame = 0;
   let spawnCursor = 0;
   let destroyed = false;
+  let deferred = false;
+  const pendingStyles = new Map();
+
+  const writeStyle = (element, property, value) => {
+    if (!deferred) {
+      if (element.style[property] !== value) element.style[property] = value;
+      return;
+    }
+    let styles = pendingStyles.get(element);
+    const previous = styles?.has(property) ? styles.get(property) : element.style[property];
+    if (previous === value) return;
+    if (!styles) {
+      styles = new Map();
+      pendingStyles.set(element, styles);
+    }
+    styles.set(property, value);
+  };
+
+  const commitStyles = () => {
+    for (const [element, styles] of pendingStyles) {
+      for (const [property, value] of styles) {
+        if (element.style[property] !== value) element.style[property] = value;
+      }
+    }
+    pendingStyles.clear();
+  };
 
   const publishStars = (frameIndex) => {
     for (let index = 0; index < packet.stars.length; index += 1) {
@@ -66,9 +92,9 @@ export function createPolycssEffects(state, bindings, mounted, options = {}) {
       starZ[index] = definition.positions[position + 2];
       const element = starElements[index];
       const transform = definition.transforms[frameIndex];
-      if (element.style.transform !== transform) element.style.transform = transform;
+      writeStyle(element, "transform", transform);
       const backgroundPosition = definition.backgroundPositions[definition.frameIndices[frameIndex]];
-      if (element.style.backgroundPosition !== backgroundPosition) element.style.backgroundPosition = backgroundPosition;
+      writeStyle(element, "backgroundPosition", backgroundPosition);
     }
   };
 
@@ -89,8 +115,8 @@ export function createPolycssEffects(state, bindings, mounted, options = {}) {
   const hideParticle = (emitter, index) => {
     emitter.visibleParticles[index] = 0;
     const element = emitter.elements[index];
-    if (element.style.visibility !== "hidden") element.style.visibility = "hidden";
-    if (emitter.activeParticles[index] === 0 && element.style.opacity !== "0") element.style.opacity = "0";
+    writeStyle(element, "visibility", "hidden");
+    if (emitter.activeParticles[index] === 0) writeStyle(element, "opacity", "0");
   };
 
   const publishParticle = (emitter, index) => {
@@ -105,15 +131,15 @@ export function createPolycssEffects(state, bindings, mounted, options = {}) {
     }
     const element = emitter.elements[index];
     const transform = sparkleTransform(emitter.x[index], emitter.y[index], emitter.z[index]);
-    if (element.style.transform !== transform) element.style.transform = transform;
+    writeStyle(element, "transform", transform);
     const frame = packet.particle.sparkleFrameTable[displayList - 1];
     const backgroundPosition = emitter.definition.backgroundPositions[frame];
-    if (element.style.backgroundPosition !== backgroundPosition) element.style.backgroundPosition = backgroundPosition;
+    writeStyle(element, "backgroundPosition", backgroundPosition);
     const opacity = cssNumber(f32(emitter.timeout[index] / 10));
-    if (element.style.opacity !== opacity) element.style.opacity = opacity;
+    writeStyle(element, "opacity", opacity);
     if (emitter.visibleParticles[index] === 0) {
       emitter.visibleParticles[index] = 1;
-      element.style.visibility = "visible";
+      writeStyle(element, "visibility", "visible");
     }
   };
 
@@ -175,6 +201,25 @@ export function createPolycssEffects(state, bindings, mounted, options = {}) {
     advanceParticles(emitter);
   };
 
+  const applyFrame = (nextFrame, grab, publish) => {
+    invariant(Number.isSafeInteger(nextFrame) && nextFrame >= 1 && nextFrame <= packet.frameCount, "FRAME_RANGE", `Prepared effects frame ${nextFrame} is out of range.`);
+    const grabActive = grab !== null && grab.active === true;
+    if (grab !== null) {
+      invariant(grab && typeof grab === "object" && typeof grab.active === "boolean", "INVALID_EFFECT_INPUT", "Prepared grab input is invalid.");
+      invariant(Number.isFinite(grab.x) && Number.isFinite(grab.y) && Number.isFinite(grab.z), "INVALID_EFFECT_INPUT", "Prepared grab coordinates must be finite.");
+    }
+    const frameIndex = nextFrame - 1;
+    publishStars(frameIndex);
+    for (let index = 0; index < emitters.length; index += 1) {
+      const emitter = emitters[index];
+      if (emitter.definition.mode === "grab") publishGrab(emitter, grabActive, grab?.x ?? 0, grab?.y ?? 0, grab?.z ?? 0);
+      else publishContinuous(emitter);
+    }
+    sourceFrame = nextFrame;
+    if (publish) commitStyles();
+    return nextFrame;
+  };
+
   const inspect = () => Object.freeze({
     sourceFrame,
     spawnCursor,
@@ -192,21 +237,26 @@ export function createPolycssEffects(state, bindings, mounted, options = {}) {
     get spawnCursor() { return spawnCursor; },
     publish(nextFrame, grab = null) {
       invariant(!destroyed, "EFFECTS_DESTROYED", "Prepared effects interpreter is destroyed.");
-      invariant(Number.isSafeInteger(nextFrame) && nextFrame >= 1 && nextFrame <= packet.frameCount, "FRAME_RANGE", `Prepared effects frame ${nextFrame} is out of range.`);
-      const grabActive = grab !== null && grab.active === true;
-      if (grab !== null) {
-        invariant(grab && typeof grab === "object" && typeof grab.active === "boolean", "INVALID_EFFECT_INPUT", "Prepared grab input is invalid.");
-        invariant(Number.isFinite(grab.x) && Number.isFinite(grab.y) && Number.isFinite(grab.z), "INVALID_EFFECT_INPUT", "Prepared grab coordinates must be finite.");
+      return applyFrame(nextFrame, grab, true);
+    },
+    publishMany(nextFrames) {
+      invariant(!destroyed, "EFFECTS_DESTROYED", "Prepared effects interpreter is destroyed.");
+      invariant(Array.isArray(nextFrames) && nextFrames.length > 0, "INVALID_EFFECT_PUBLICATION", "Prepared effects catch-up frames must be a nonempty array.");
+      const frames = [];
+      let previous = sourceFrame;
+      for (const frame of nextFrames) {
+        invariant(Number.isSafeInteger(frame) && frame >= 1 && frame <= packet.frameCount, "FRAME_RANGE", `Prepared effects frame ${frame} is out of range.`);
+        if (frame !== previous) frames.push(frame);
+        previous = frame;
       }
-      const frameIndex = nextFrame - 1;
-      publishStars(frameIndex);
-      for (let index = 0; index < emitters.length; index += 1) {
-        const emitter = emitters[index];
-        if (emitter.definition.mode === "grab") publishGrab(emitter, grabActive, grab?.x ?? 0, grab?.y ?? 0, grab?.z ?? 0);
-        else publishContinuous(emitter);
+      deferred = true;
+      try {
+        for (let index = 0; index < frames.length; index += 1) applyFrame(frames[index], null, index === frames.length - 1);
+        return sourceFrame;
+      } finally {
+        deferred = false;
+        pendingStyles.clear();
       }
-      sourceFrame = nextFrame;
-      return nextFrame;
     },
     inspect,
     destroy() { destroyed = true; },

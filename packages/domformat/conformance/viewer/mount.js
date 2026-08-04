@@ -509,6 +509,10 @@ export async function mountConformanceDom(result, host, options = {}) {
       else if (effects && effects.sourceFrame !== frame) effects.publish(frame);
       return frame;
     };
+    const publishEffectFrames = (frames) => {
+      effects?.publishMany(frames);
+      return frames.at(-1);
+    };
     const stepInteraction = (sample = input?.sample()) => {
       assertPublished();
       invariant(interaction, "INVALID_EXPERIENCE_MODE", "Interaction mode is not active.");
@@ -525,10 +529,16 @@ export async function mountConformanceDom(result, host, options = {}) {
       if (phases.phase === "destroy") return;
       try {
         if (nextTick === null) nextTick = timestamp + tickMs;
-        else while (timestamp >= nextTick - 0.5) {
-          if (mode === "interaction") stepInteraction();
-          else publishEffects(playback.advance());
-          nextTick += tickMs;
+        else {
+          let due = 0;
+          while (timestamp >= nextTick - 0.5) {
+            due += 1;
+            nextTick += tickMs;
+          }
+          if (mode === "interaction") {
+            for (let index = 0; index < due; index += 1) stepInteraction();
+          } else if (due === 1) publishEffects(playback.advance());
+          else if (due > 1) publishEffectFrames(playback.advanceMany(due));
         }
       } catch (error) {
         cleanup();

@@ -133,10 +133,14 @@ sourceFrame = frames[index]
 
 The controller begins at tick 0. `advance()` increments tick, resolves the
 target source frame, and performs a sequential update or seek. The reference
-mount scheduler calls `advance()` once every `1000 / tickRateHz` milliseconds.
-When an animation frame spans multiple due ticks, it advances once per due tick
-and increments the deadline by that fixed interval after each step; a dropped
-animation frame therefore does not permanently slow playback.
+mount scheduler accounts for one logical tick every `1000 / tickRateHz`
+milliseconds and carries its deadline forward by that fixed interval, so a
+dropped browser animation frame does not permanently slow playback. A callback
+with one due tick publishes synchronously. A callback with multiple overdue
+animation ticks evaluates every tick and every distinct prepared-effects source
+frame in order, but MAY defer their physical DOM writes and publish only the
+final retained state for that callback. Interaction catch-up MUST step and
+publish every due tick separately.
 
 ## Publication
 

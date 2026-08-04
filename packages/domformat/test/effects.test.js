@@ -3,8 +3,14 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { buildDom } from "../src/writer.js";
-import { createPolycssEffects } from "../src/state/effects.js";
+import { createPolycssEffects as createReferenceEffects } from "../src/state/effects.js";
+import { createPolycssEffects as createIndependentEffects } from "../conformance/viewer/effects.js";
 import { errorCode, projectRoot, syntheticInput } from "./helpers.js";
+
+const EFFECT_IMPLEMENTATIONS = [
+  ["reference", createReferenceEffects],
+  ["independent", createIndependentEffects],
+];
 
 const fixturePath = resolve(projectRoot, "fixtures/synthetic-effects/packet.json");
 
@@ -128,7 +134,7 @@ function styleSnapshot(mounted) {
 }
 
 function runEvidence(input, mounted) {
-  const effects = createPolycssEffects(input.state, input.bindings, mounted);
+  const effects = createReferenceEffects(input.state, input.bindings, mounted);
   const grab = { active: true, x: 100, y: 200, z: 300 };
   effects.publish(1, grab);
   effects.publish(2, grab);
@@ -142,7 +148,7 @@ test("prepared effects execute in declared order on stable retained targets", as
   buildDom(input);
   const mounted = fakeMounted(input.bindings);
   const identities = [...mounted.byId];
-  const effects = createPolycssEffects(input.state, input.bindings, mounted);
+  const effects = createReferenceEffects(input.state, input.bindings, mounted);
   effects.publish(1, { active: true, x: 100, y: 200, z: 300 });
   assert.equal(effects.sourceFrame, 1);
   assert.equal(effects.spawnCursor, 2);
@@ -184,6 +190,25 @@ test("prepared effects replay deterministically including same-frame and grab up
     ],
   });
 });
+
+for (const [implementation, createEffects] of EFFECT_IMPLEMENTATIONS) {
+  test(`${implementation} effects catch-up simulates every source-frame transition and publishes the final state`, async () => {
+    const input = await effectInput();
+    const sequentialMounted = fakeMounted(input.bindings);
+    const batchedMounted = fakeMounted(input.bindings);
+    const identities = [...batchedMounted.byId];
+    const sequential = createEffects(input.state, input.bindings, sequentialMounted);
+    const batched = createEffects(input.state, input.bindings, batchedMounted);
+
+    sequential.publish(1);
+    batched.publish(1);
+    for (const frame of [2, 3, 1]) sequential.publish(frame);
+    assert.equal(batched.publishMany([2, 3, 1]), 1);
+    assert.deepEqual(batched.inspect(), sequential.inspect());
+    assert.deepEqual(styleSnapshot(batchedMounted), styleSnapshot(sequentialMounted));
+    for (const [id, element] of identities) assert.equal(batchedMounted.byId.get(id), element);
+  });
+}
 
 test("prepared effects schema rejects implicit roles, malformed tables, limits, targets, and defaults", async () => {
   const base = await effectInput();

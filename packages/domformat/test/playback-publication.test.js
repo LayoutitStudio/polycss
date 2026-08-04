@@ -216,4 +216,32 @@ for (const [implementation, createPlayback] of IMPLEMENTATIONS) {
     restored.playback.forceVisible([0]);
     assert.deepEqual(restored.writes, [["leaf:0", "visibility", "visible"]]);
   });
+
+  test(`${implementation} playback catch-up advances every tick and publishes only the final paint state`, () => {
+    const sequential = createFixture(createPlayback);
+    const batched = createFixture(createPlayback);
+    const identities = [...batched.leaves];
+
+    for (let index = 0; index < 4; index += 1) sequential.playback.advance();
+    assert.deepEqual(batched.playback.advanceMany(4), [2, 3, 4, 1]);
+    assert.equal(batched.playback.tick, sequential.playback.tick);
+    assert.equal(batched.playback.sourceFrame, sequential.playback.sourceFrame);
+    assert.ok(batched.writes.length < sequential.writes.length);
+    for (let index = 0; index < batched.leaves.length; index += 1) {
+      assert.equal(batched.leaves[index].style.visibility, sequential.leaves[index].style.visibility);
+      if (batched.leaves[index].style.visibility === "visible") {
+        assert.equal(batched.leaves[index].style.transform, sequential.leaves[index].style.transform);
+      }
+      assert.equal(batched.leaves[index], identities[index]);
+    }
+
+    sequential.writes.splice(0);
+    batched.writes.splice(0);
+    sequential.playback.seek(sequential.playback.sourceFrame);
+    batched.playback.seek(batched.playback.sourceFrame);
+    assert.deepEqual(
+      batched.leaves.map((leaf) => ({ ...leaf.style })),
+      sequential.leaves.map((leaf) => ({ ...leaf.style })),
+    );
+  });
 }

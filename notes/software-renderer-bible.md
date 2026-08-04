@@ -89,8 +89,17 @@ median script/compositor cost, but no resolvable FPS improvement. Therefore the
 technique is adopted as an internal DOMFormat prepared-playback optimization
 with explicit synchronization semantics, not as a public PolyCSS batch API.
 
-The sequential experiment register is the execution authority. SR-07 is closed;
-SR-08 is the only ready row, and every later experiment remains locked.
+SR-08 then found the smaller MAME-like boundary that Mario actually needed:
+when one browser callback owes multiple animation ticks, simulate every logical
+tick and effect transition but commit only the final retained state. Controlled
+120 ms stalls cut catch-up style mutations per due tick by 63.30% and catch-up
+p95 callback time by 63.23%. Normal one-tick work was unchanged, interaction
+ticks remain separately published, and all 317 numbered Mario commits covering
+820 logical ticks matched pixel-for-pixel with stable node identity. This is an
+internal backlog path, not a generic submission manager or public batch API.
+
+The sequential experiment register is the execution authority. SR-08 is closed;
+SR-09 is the only ready row, and every later experiment remains locked.
 
 ## Rules for using this bible
 
@@ -870,7 +879,7 @@ improvement unless repeated traces demonstrate one.
 
 This is the canonical execution queue. Work proceeds from the first nonterminal row downward. At most one row may be `READY` or `ACTIVE`; every later row remains `LOCKED` because the predecessor changes its baseline or premise.
 
-Current slot: **SR-08 is `READY`; every later experiment remains `LOCKED`.**
+Current slot: **SR-09 is `READY`; every later experiment remains `LOCKED`.**
 
 | ID | Experiment | Depends on | Status | Closure evidence or unlock condition | Unlocks |
 | --- | --- | --- | --- | --- | --- |
@@ -881,8 +890,8 @@ Current slot: **SR-08 is `READY`; every later experiment remains `LOCKED`.**
 | SR-05 | Exact polygon merging | SR-04 terminal | FALSIFIED | Exact theoretical leaf reduction remained below 3% before compatibility costs | SR-06 |
 | SR-06 | Maximum raw visibility | SR-05 terminal | FALSIFIED | Only 2.54% marginal work reduction with transition bursts up to 821 writes/frame | SR-07 |
 | SR-07 | Integrate visibility-coherent publication in DOMFormat | SR-01 through SR-06 terminal | ADOPTED | 16.17% fewer transform writes; exact 820-frame animation and 44-frame interaction pixels; stable identity; canonical seek barrier; release gates green | SR-08 |
-| SR-08 | Coalesce overdue-tick publication | SR-07 terminal and new baseline recorded | READY | First prove multiple due ticks occur; then simulate every logical transition but publish only the callback's final state | SR-09 |
-| SR-09 | Re-score prepared visibility runs | SR-08 terminal and final publication costs recorded | LOCKED | Minimize total work with a hard transition-burst bound; do not maximize hidden percentage | SR-10 |
+| SR-08 | Coalesce overdue-tick publication | SR-07 terminal and new baseline recorded | ADOPTED | Controlled catch-up style mutations/tick -63.30% and p95 -63.23%; exact 317-commit/820-tick pixels; stable identity | SR-09 |
+| SR-09 | Re-score prepared visibility runs | SR-08 terminal and final publication costs recorded | READY | Minimize total work with a hard transition-burst bound; do not maximize hidden percentage | SR-10 |
 | SR-10 | Publish one guarded record per dirty leaf | SR-09 terminal and overlap counts recomputed | LOCKED | Beat individual setters in deterministic work and browser traces without changing visible state or identity | SR-11 |
 | SR-11 | Typed OM publication | SR-10 terminal and trace proves parsing/publication remains material | LOCKED | Beat the surviving publication path after startup, support, and retained-memory costs | SR-12 |
 | SR-12 | WAAPI prepared-playback lab | SR-11 terminal and per-frame JS remains material | LOCKED | Preserve exact seek, visibility, lighting, interaction, identity, startup, memory, and trace behavior | End of current chain |
@@ -1010,15 +1019,99 @@ claim narrow: fewer transform assignments, not higher FPS.
 ### SR-08 — Coalesce overdue-tick publication
 
 - Owner: DOMFormat browser scheduler plus state interpreters.
-- Status: `READY`.
-- Current evidence: architectural opportunity, not yet supported by a benchmark.
+- Status: `ADOPTED`.
+- Started: 2026-08-04.
+- Closed: 2026-08-04.
+- Code baseline: DOMFormat PR #81 plus SR-07 commit `debaa5f99eba0dbdbf41c8c0ea44483bfc64098d`.
+- Workload: Mario prepared retained-DOM package, 1,320 package nodes, 1,213
+  leaves, 820 source frames at 30 Hz.
+- API and schema: unchanged.
+- Decision: `ADOPTED` as an internal animation-backlog publication path.
 
-PR #81's scheduler runs a `while` loop and publishes every overdue tick. First capture a normal or induced-lag trace that proves repeated due ticks and measures their intermediate publication cost. Only then compare:
+#### Falsification premise
 
-1. current per-due-tick simulation and publication;
-2. simulation of every required logical transition with publication of only the final dirty state for that animation callback.
+The frozen scheduler published inside its overdue-tick `while` loop. Repeated
+ticks were not hypothetical: three paired normal-browser repetitions observed 6
+multi-tick callbacks over 1,080 baseline callbacks; 6x CPU throttling observed
+624 over 720; and an explicit 120 ms stall every 60 callbacks observed 20 over
+1,082. This supported prototyping the narrow catch-up path. It did not reopen a
+normal-frame submission layer: 99.44% of normal baseline callbacks still had at
+most one due tick.
 
-Effects, interaction, cursor state, timeline semantics, and source-frame events must still advance correctly. Do not build `advanceMany()` merely because the loop exists.
+#### Adopted boundary
+
+- Count due ticks before publication.
+- Keep zero- and one-tick animation callbacks on the existing synchronous path.
+- For multiple overdue animation ticks, evaluate every timeline tick and every
+  distinct prepared-effects source-frame transition in order, accumulate dirty
+  retained targets, and publish only final model, appearance, shape, leaf,
+  surface, star, and particle state.
+- Keep every overdue interaction tick separately stepped and published. Input,
+  cursor, selection, grab, spring, and interaction effects are observable state,
+  not discardable intermediate animation paint.
+- Keep public `seek()` synchronous and retain the existing hidden-transform
+  synchronization barrier. No public `advanceMany()`, `scene.batch()`, nested
+  batch semantics, worker, backend, alternate primitive stream, or renderer
+  abstraction was added.
+
+The retained graph remains immutable after mount, so mesh removal and stale
+asynchronous topology work do not enter this path. Errors still destroy the
+mount transactionally. Dirty targets commit in stable numeric order, and no
+node is replaced.
+
+#### Measured work
+
+Three alternating real-Chromium repetitions per variant used the production
+mount scheduler. Counts are normalized per logical due tick because a faster
+candidate can prevent its own lag feedback and therefore observe fewer total
+overdue ticks.
+
+| Scenario | Frozen baseline | Candidate | Result |
+| --- | ---: | ---: | ---: |
+| Normal style mutations / due tick | 873.237 | 872.154 | -0.12%; intentionally unchanged |
+| Normal callback p95 median | 0.900 ms | 0.900 ms | no regression |
+| 6x CPU style mutations / due tick | 961.815 | 469.143 | -51.22% |
+| 6x CPU callback p95 median | 20.815 ms | 10.405 ms | -50.01% |
+| Controlled-stall catch-up attempted writes / due tick | 998.288 | 365.367 | -63.40% |
+| Controlled-stall catch-up style mutations / due tick | 988.055 | 362.582 | -63.30% |
+| Controlled-stall catch-up p95 | 13.040 ms | 4.795 ms | -63.23% |
+
+The controlled-stall catch-ups attempted 46,540 baseline transform writes and
+15,778 candidate transform writes even though the candidate sample contained
+more catch-up due ticks (79 versus 73). Across the whole controlled-stall run,
+which is mostly zero- and one-tick callbacks, style mutations per tick fell
+8.61%. The normal path is not claimed as a performance win.
+
+Paired controlled-stall Chrome traces found no meaningful aggregate style,
+layout, paint, raster, or scripting regression. The imposed stalls dominate
+frame pacing, and repeated traces do not resolve an FPS gain; none is claimed.
+
+#### Semantic and visual parity
+
+- A deterministic callback pattern of 1-6 due ticks covered all 820 logical
+  Mario ticks in 316 publication groups plus the initial state.
+- All 317 baseline/candidate paint-state hashes matched, retained identity held
+  for all 1,321 mounted nodes, and the numbered 320x240 frame oracle reported
+  zero changed pixels, zero mean/RMS delta, and zero maximum channel delta.
+- After an explicit same-frame seek, the only full-inline-style differences
+  were `backgroundPositionY` on 84 computed-hidden leaves. No visible node
+  differed, and every later reveal in the complete run matched. This is the
+  existing visibility-coherent rule: hidden lighting paint may remain stale
+  until it is visible; the public seek barrier canonically synchronizes hidden
+  transforms.
+- Reference and independent implementations passed focused tests proving
+  batched playback state, final effects state, stable identities, explicit
+  seek synchronization, and separate publication of every overdue interaction
+  tick.
+- `pnpm --filter @layoutit/polycss-domformat test:release` passed 137 tests,
+  Python/JavaScript conformance, real-Chrome zero-delta checks, and deterministic
+  tarball validation. `pnpm test`, `pnpm build`, and `git diff --check` passed
+  across the monorepo.
+
+Decision: adopt the smallest MAME-inspired submission seam that measurement
+supports. Logical simulation and physical publication are separate during an
+animation backlog only. The browser remains the one physical rendering commit
+boundary, and a generic frame manager remains falsified for normal playback.
 
 ### SR-09 — Re-score prepared visibility runs
 
@@ -1354,16 +1447,20 @@ Read the item matching the problem. There is no reason to reread the full shelf 
 - Prepared visibility is valuable, but transition cost must be part of its objective.
 - Hidden logical state can safely outrun hidden physical publication if explicit barriers restore canonical DOM.
 - SR-07 adopted that split inside DOMFormat with exact full-loop visual proof and no public batching API.
+- SR-08 adopted final-state physical publication for multi-tick animation
+  backlogs while preserving every logical tick and separately publishing every
+  interaction tick.
 - LOD, progressive refinement, and impostor substitution are outside the PolyCSS contract.
 
 ### Next
 
-1. Start only SR-08 when authorized; no later row may begin.
-2. First measure whether normal or induced scheduler lag actually creates more
-   than one due tick in a browser callback.
-3. Prototype final-state publication only if that repeated-tick premise is
-   observed; otherwise falsify SR-08 without adding an `advanceMany()` API.
-4. Close SR-08 and record its new baseline before unlocking SR-09.
+1. Start only ready row SR-09 when authorized; no later row may begin.
+2. Recompute visibility-run savings against the adopted SR-07 and SR-08
+   publication costs.
+3. Score saved transform, lighting, paint, and compositor work against hide /
+   reveal writes and a hard worst-frame transition-burst limit.
+4. Reject any candidate that merely maximizes hidden percentage, and require
+   full numbered Mario visual parity before adopting a win.
 
 ### Not next
 

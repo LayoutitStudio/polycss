@@ -498,6 +498,12 @@ export async function mountDom(result, host, options = {}) {
         assertMounted();
         return publishPlaybackFrame(preparedPlayback.advance());
       },
+      advanceMany(count) {
+        assertMounted();
+        const frames = preparedPlayback.advanceMany(count);
+        effects?.publishMany(frames);
+        return frames.at(-1);
+      },
       seek(frame) {
         assertMounted();
         return publishPlaybackFrame(preparedPlayback.seek(frame));
@@ -573,10 +579,16 @@ export async function mountDom(result, host, options = {}) {
       if (lifecycle.phase === "destroy") return;
       try {
         if (nextTick === null) nextTick = timestamp + tickMs;
-        else while (timestamp >= nextTick - 0.5) {
-          if (mode === "interaction") stepInteraction();
-          else playback.advance();
-          nextTick += tickMs;
+        else {
+          let due = 0;
+          while (timestamp >= nextTick - 0.5) {
+            due += 1;
+            nextTick += tickMs;
+          }
+          if (mode === "interaction") {
+            for (let index = 0; index < due; index += 1) stepInteraction();
+          } else if (due === 1) playback.advance();
+          else if (due > 1) playback.advanceMany(due);
         }
       } catch (error) {
         cleanup();

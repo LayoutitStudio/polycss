@@ -388,8 +388,12 @@ profile interpreter instances.
 
 When playback is present, the reference scheduler derives its interval from
 the closed playback binding `tickRateHz`; version 0 fixes that value to 30. It
-advances once per due fixed-rate tick and carries the deadline forward by that
-interval, including when one browser animation frame spans multiple ticks.
+accounts for every due fixed-rate tick and carries the deadline forward by that
+interval. One due animation tick publishes synchronously. When one browser
+animation frame spans multiple due animation ticks, the viewer evaluates each
+tick and distinct prepared-effects source-frame transition in order but MAY
+publish only the final retained state for that callback. Interaction mode MUST
+step and publish every due tick separately.
 
 Keyboard input listeners are attached to the mount, not the global window, and
 therefore act only while events target or bubble through that mount. A viewer

@@ -354,6 +354,38 @@ test("independent and public viewers catch up every due fixed-rate playback tick
   value.independentRuntime.destroy();
 });
 
+test("interaction catch-up keeps every overdue tick separately published", async () => {
+  const catchup = await mountedPair(await syntheticExecutableInteractionInput(), { animate: true, mode: "interaction" });
+  const sequential = await mountedPair(await syntheticExecutableInteractionInput(), { animate: true, mode: "interaction" });
+  for (const value of [catchup, sequential]) {
+    value.reference.frame(0);
+    value.independent.frame(0);
+    clearWrites(value.reference, value.independent);
+  }
+
+  catchup.reference.frame(68);
+  catchup.independent.frame(68);
+  sequential.reference.frame(34);
+  sequential.independent.frame(34);
+  sequential.reference.frame(68);
+  sequential.independent.frame(68);
+
+  assert.deepEqual(
+    normalizedWrites(catchup.result, catchup.referenceHost, catchup.reference),
+    normalizedWrites(sequential.result, sequential.referenceHost, sequential.reference),
+  );
+  assert.deepEqual(
+    normalizedWrites(catchup.result, catchup.independentHost, catchup.independent),
+    normalizedWrites(sequential.result, sequential.independentHost, sequential.independent),
+  );
+  assertEquivalent(catchup, "interaction two-tick catch-up");
+  assertEquivalent(sequential, "interaction sequential ticks");
+  for (const value of [catchup, sequential]) {
+    value.referenceRuntime.destroy();
+    value.independentRuntime.destroy();
+  }
+});
+
 test("independent and public viewers agree through pointer pick, drag, release, effects, and mode reset", async () => {
   const value = await mountedPair(await syntheticExecutableInteractionInput(), { animate: true, mode: "interaction" });
   assertEquivalent(value, "interaction initial");
