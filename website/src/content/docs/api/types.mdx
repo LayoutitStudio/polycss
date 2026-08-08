@@ -11,9 +11,13 @@ The atomic renderable primitive. Each visible polygon becomes one renderer-owned
 
 ```ts
 interface Polygon {
-  /** Three or more [x, y, z] world-space points, CCW winding from the outside. */
+  /** Three or more [x, y, z] world-space points, CCW winding seen from the
+   *  outside. Winding sets the face normal via the right-hand rule, and
+   *  PolyCSS backface-culls — a reversed face is invisible. */
   vertices: [number, number, number][];
-  /** CSS color. Falls back to "#cccccc" when neither color nor texture is set. */
+  /** Hex (`#rgb` / `#rrggbb`) or `rgb()` / `rgba()` only — NOT CSS named
+   *  colors. Unparseable values render white. Falls back to "#cccccc" when
+   *  neither color nor texture is set. */
   color?: string;
   /** Image URL for UV-mapped rendering. When set with `uvs`, the renderer
    *  applies an affine UV transform. Without `uvs`, single-tile fill. */
@@ -24,12 +28,22 @@ interface Polygon {
   textureAlphaMode?: PolyTextureAlphaMode;
   /** Shared material. `material.texture` takes precedence over `texture`. */
   material?: PolyMaterial;
+  /** Source-exact image backing. Renders as a direct image leaf using the
+   *  caller's URL and source rect — no atlas rasterisation, no atlas memory,
+   *  and source lighting is preserved. */
+  textureImageSource?: PolyTextureImageSource;
+  /** Backend, projection, filtering, and lighting request for this polygon's
+   *  texture. See Texture Presentation below. */
+  texturePresentation?: PolyTexturePresentation;
   /** UV coordinates: one per vertex. Must match vertices.length.
    *  Mismatched arrays are stripped during normalizePolygons(). */
   uvs?: [number, number][];
   /** Source UV triangles preserved by import/merge passes for atlas rasterization. */
   textureTriangles?: TextureTriangle[];
-  /** Source material requested two-sided rendering. */
+  /** Importer-internal. Records that a source material requested two-sided
+   *  rendering, so optimization passes don't collapse intentional
+   *  reverse-wound faces. It is NOT a render-time flag — setting it does not
+   *  make a polygon visible from behind. Orient your winding instead. */
   doubleSided?: boolean;
   /** User-controlled metadata. Reflected to the DOM as data-* attributes
    *  when rendering via <Poly>. Keys must have string, number, or boolean values. */
@@ -73,6 +87,59 @@ interface PolyTextureWrap {
 
 type PolyTextureAlphaMode = "opaque" | "mask" | "blend";
 ```
+
+---
+
+## Texture Presentation
+
+How a textured polygon is painted. PolyCSS has two texture backends: the
+**atlas** backend rasterises each polygon's local-2D bounding rect into packed
+atlas pages, and the **image** backend renders a direct image leaf straight from
+a source URL and rect — no rasterisation and no atlas memory, but source pixels
+are preserved as-is.
+
+```ts
+/** Leaf primitive sizing for texture leaves. Default "canonical". */
+type PolyTextureLeafSizing = "canonical" | "local" | "raster";
+
+/** Requested backend. "auto" lets the renderer choose. Default "auto". */
+type PolyTextureBackend = "auto" | "atlas" | "image";
+
+/** CSS `image-rendering` for the leaf. Default "auto". */
+type PolyTextureImageRendering = "auto" | "pixelated";
+
+/** Whether the image is lit by the scene or shown as authored. */
+type PolyTextureImageLighting = "scene" | "source";
+
+/** UV mapping. "projective" enables exact quad mapping where the
+ *  compositor-stability guards allow it. Default "affine". */
+type PolyTextureProjection = "affine" | "projective";
+
+interface PolyTextureImageSource {
+  url: string;
+  width: number;
+  height: number;
+  /** Sub-rect of the source image to draw. Defaults to the whole image. */
+  sourceRect?: { x: number; y: number; width: number; height: number };
+  imageRendering?: PolyTextureImageRendering;
+}
+
+interface PolyTexturePresentation {
+  imageRendering?: PolyTextureImageRendering;
+  backend?: PolyTextureBackend;
+  lighting?: PolyTextureImageLighting;
+  projection?: PolyTextureProjection;
+}
+```
+
+Direct image leaves (`backend: "image"`) are **source-lit only** — they use
+`lighting: "source"` and keep the source pixels untouched. A textured polygon
+that needs scene lighting falls back to the atlas backend.
+
+These are also scene-level defaults: `textureBackend`, `textureProjection`,
+`textureImageRendering`, and `textureLeafSizing` on `PolySceneOptions` (and the
+matching `<PolyMesh>` props) set the default for every polygon, and a polygon's
+own `texturePresentation` overrides it.
 
 ---
 
@@ -240,17 +307,49 @@ interface PolySceneOptions {
   directionalLight?: PolyDirectionalLight;
   pointLights?: PolyPointLight[];
   ambientLight?: PolyAmbientLight;
+  /** Defaults to "baked". */
   textureLighting?: PolyTextureLightingMode;
   textureQuality?: TextureQuality;
+  /** Texture leaf primitive sizing. Defaults to "canonical". */
+  textureLeafSizing?: PolyTextureLeafSizing;
+  /** Default image filtering for atlas and direct image texture leaves. */
+  textureImageRendering?: PolyTextureImageRendering;
+  /** Default texture backend request. Defaults to "auto". */
+  textureBackend?: PolyTextureBackend;
+  /** Default texture projection request. Defaults to "affine". */
+  textureProjection?: PolyTextureProjection;
   seamBleed?: PolySeamBleed;
   strategies?: PolyRenderStrategiesOption;
   autoCenter?: boolean;
   shadow?: {
+    /** Default: "#000000". */
     color?: string;
+    /** 0..1. Default: 0.25. */
     opacity?: number;
+    /** World units above the receiver, avoids z-fighting. Default: 0.05. */
     lift?: number;
+    /** Max CSS px the shadow may extend past the mesh footprint. Default: 2000. */
     maxExtend?: number;
+    /** Cast one low-resolution coverage silhouette per caster instead of
+     *  projecting full geometry. Default: false. */
+    parametric?: boolean;
+    /** Parametric silhouette detail. Default: 16. Overridden per mesh by
+     *  `PolyMeshTransform.shadowDefinition`. */
+    definition?: number;
+    /** Progressive refinement: definition used while the directional light is
+     *  actively being dragged, then a debounced pass re-emits at full
+     *  `definition`. Vanilla `createPolyScene` only. Unset → no progressive pass. */
+    dragDefinition?: number;
+    /** "vector" (default) traces a smooth concave contour; "pixel"
+     *  greedy-meshes the coverage into blocky rectangles. */
+    style?: "vector" | "pixel";
+    /** Re-emit shadows while a mesh animates instead of freezing at the last
+     *  pose. Throttled internally (~12fps). Default: false. */
+    followAnimation?: boolean;
   };
+  /** Emit `data-poly-shadow-*` attribution attributes on every shadow SVG and
+   *  path, for DevTools inspection. Default: false. */
+  debugShadowAttrs?: boolean;
 }
 
 interface PolyMeshTransform {
@@ -258,12 +357,18 @@ interface PolyMeshTransform {
   position?: Vec3;
   scale?: number | Vec3;
   rotation?: Vec3;
+  /** Merge coplanar polygons before rendering. Defaults to true. Set false for
+   *  animated meshes whose triangle topology must stay stable, or to render
+   *  authored geometry exactly as given. */
   merge?: boolean;
   meshResolution?: MeshResolution;
   stableDom?: boolean;
   excludeFromAutoCenter?: boolean;
   castShadow?: boolean;
   receiveShadow?: boolean;
+  /** Per-mesh parametric-shadow detail, overriding the scene's
+   *  `shadow.definition`. Only used when `shadow.parametric` is true. */
+  shadowDefinition?: number;
 }
 
 interface PolySceneHandle {
