@@ -41,7 +41,7 @@ export default function App() {
 ### `<PolyCamera>`
 
 - `rotX`, `rotY` control the orbit angle in degrees.
-- `zoom` is CSS pixels per world unit.
+- `zoom` scales the projected scene (default `0.65`). One world unit is 50 CSS px before zoom.
 - `target` pans the camera target in world coordinates.
 - `distance` adds dolly pull-back.
 - `PolyCamera` is the orthographic default. Use `<PolyPerspectiveCamera>` for

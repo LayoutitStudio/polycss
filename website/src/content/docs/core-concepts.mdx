@@ -68,7 +68,7 @@ Each polygon is a plain object. The only required field is `vertices` (three or 
 ```ts
 interface Polygon {
   vertices: [number, number, number][];  // Required: 3+ [x, y, z] points in world space
-  color?: string;                        // CSS color ("#f97316", "tomato")
+  color?: string;                        // Hex or rgb()/rgba() only — "#f97316"
   texture?: string;                      // Image URL for UV-mapped face
   material?: PolyMaterial;               // Shared texture material
   uvs?: [number, number][];             // UV coordinates (one per vertex)
@@ -95,6 +95,111 @@ Scene content renders relative to the (0,0,0) origin. Most mesh files are author
 // React
 <PolyMesh src="/model.glb" autoCenter position={[0, 0, 0]} />
 ```
+
+## Authoring Polygons
+
+Imported meshes get repaired on the way in — parsers fix winding, normalize
+coordinates, and strip malformed data. **Hand-authored `Polygon[]` does not.**
+If you generate geometry in code (an architectural kit, a procedural terrain, a
+shape library), these constraints are load-bearing, and violating them fails
+silently rather than throwing.
+
+### Winding determines visibility
+
+Vertex order sets the face normal by the right-hand rule, and PolyCSS
+**backface-culls** every leaf. A polygon wound the wrong way is not merely
+shaded oddly — it is invisible, it casts no shadow, and it lights inverted.
+
+Vertices are **counter-clockwise seen from the outside** (the side you want to
+look at):
+
+```ts
+// Faces +Z (up). CCW when viewed from above.
+const floor = {
+  vertices: [[0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0]],
+  color: "#d8d2c7",
+};
+
+// The SAME quad reversed faces -Z (down) and is invisible from above.
+const broken = {
+  vertices: [[0, 0, 0], [0, 1, 0], [1, 1, 0], [1, 0, 0]],
+  color: "#d8d2c7",
+};
+```
+
+The normal is `(v1 - v0) × (v2 - v0)`, normalized. For the first quad that is
+`(1,0,0) × (1,1,0) = (0,0,1)` — pointing up, so the face is visible from above.
+
+Consequences worth internalizing when you build a shape library:
+
+- **Solids face outward; rooms face inward.** A box you look at from outside and
+  a room you stand inside are the same six quads with opposite winding.
+- **Mirroring reverses handedness.** Any negative scale or mirror transform
+  flips the effective winding of every face it touches, so mirrored geometry
+  needs its vertex order reversed to compensate.
+- **Reverse UVs with the vertices.** If a polygon has `uvs`, reversing
+  `vertices` without reversing `uvs` in the same order silently remaps the
+  texture.
+- **`doubleSided` is not the fix.** It exists so importers can stop the
+  optimizer collapsing intentional reverse-wound faces; it is not a render-time
+  flag and will not make a face visible from behind. Orient the winding.
+
+**Diagnostic rule:** if a polygon exists in your generated data but disappears
+when the camera crosses to its other side, inspect its winding and normal
+*before* you touch culling, lighting, or camera code. That symptom is winding
+essentially every time.
+
+### `color` is not a full CSS color
+
+Only hex (`#rgb`, `#rrggbb`) and `rgb()` / `rgba()` parse. CSS named colors
+(`"tomato"`, `"red"`), `hsl()`, and `color()` do **not** — an unparseable value
+renders **white**, with no warning.
+
+```ts
+{ color: "tomato" }   // ✗ renders white
+{ color: "#ff6347" }  // ✓
+```
+
+### Non-triangular polygons must be coplanar
+
+Renderers do not call `normalizePolygons` for you — it is available, but the
+render path does not apply it. A quad or n-gon whose vertices are not on a
+common plane is flattened onto their average plane when its local 2D basis is
+built, which moves vertices out from under their neighbours and opens visible
+cracks.
+
+Triangles are always coplanar, so this only bites n-gons. If you merge faces
+into quads, either merge only where coplanarity genuinely holds, or snap the
+shared vertices onto a common plane and propagate the new position to **every**
+polygon that references them.
+
+### The optimizer rewrites your geometry by default
+
+`merge` defaults to `true` and `meshResolution` defaults to `"lossy"`, so
+authored geometry is merged, deduped, and interior-culled before it renders:
+
+- Coincident faces closer than `0.05` world units are deduped.
+- Fully-interior faces are culled.
+- Lossy merging tolerates up to `0.35` world units of plane displacement and
+  `0.04` of boundary displacement, at up to `15°` of angle change. These are
+  **absolute world units and not configurable**, so small-scale hand-authored
+  meshes can get visibly welded.
+
+If you authored geometry precisely and want it rendered exactly as given, set
+`merge: false`, or `meshResolution: "lossless"` to keep only exact reductions.
+
+### Degenerate polygons vanish silently
+
+Fewer than three vertices, a zero-length edge, or a zero-area face produces no
+leaf and no console output. If a face is missing and the winding is right, check
+for duplicate or collinear vertices.
+
+### Scale
+
+One world unit is **50 CSS pixels** (`BASE_TILE`). Camera `zoom` is a scale
+multiplier applied on top of that conversion — it defaults to `0.65`, so at the
+default camera one world unit covers about 32.5 CSS px, and at `zoom: 1` it
+covers 50.
 
 ## Rendering Pipeline
 
