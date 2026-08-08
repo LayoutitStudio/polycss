@@ -84,8 +84,7 @@ export default function App() {
 - `position`, `scale`, and `rotation` transform the mesh wrapper.
 - `autoCenter` shifts the mesh bbox center to local origin.
 - `meshResolution` chooses `"lossy"` (default) or `"lossless"` optimization. STL imports use the conservative lossless path in both modes.
-- `castShadow` emits CPU-projected SVG shadows. It works in both `"baked"` and `"dynamic"` lighting modes; dynamic-mode shadows are directional-only.
-- `shadowDefinition` overrides the scene's parametric shadow resolution for this mesh.
+- `castShadow` emits CSS-projected shadows in dynamic lighting mode.
 
 ### Controls
 
@@ -180,12 +179,6 @@ const polygons = [
 ];
 ```
 
-Authoring `Polygon[]` by hand has real constraints — vertex winding decides
-whether a face is visible at all, `color` does not accept CSS named colors, and
-non-triangular polygons must be coplanar. Read
-[Authoring Polygons](https://polycss.com/core-concepts#authoring-polygons)
-before generating geometry.
-
 Render polygons directly when you need per-face DOM events or custom styling:
 
 ```tsx
@@ -248,7 +241,6 @@ Each visible polygon is emitted as one leaf element; the renderer chooses the le
 | `@layoutit/polycss` | Vanilla custom elements and imperative `createPolyScene` API. |
 | `@layoutit/polycss-react` | React components, hooks, controls, and core re-exports. |
 | `@layoutit/polycss-vue` | Vue 3 components, composables, controls, and core re-exports. |
-| `@layoutit/polycss-fonts` | Fonts + text → extruded 3D `Polygon[]`. Framework-agnostic. |
 | `@layoutit/polycss-morph` | Prepared-model loading, retained DOM animation, morph targets, skinning, and playback. |
 
 ## Made with PolyCSS
