@@ -36,24 +36,32 @@ You can also load PolyCSS directly from a CDN. Here is a minimal custom-element 
 
 <img width="2500" height="1145" alt="PolyCSS intro" src="https://github.com/user-attachments/assets/0e5df0d8-04a8-4e50-8e3a-1097a96ce42f" />
 
-## Framework Components
+## Imperative API
 
-React and Vue expose the same component model. `<PolyCamera>` owns the viewpoint, `<PolyScene>` owns lighting and options, and `<PolyMesh>` loads or receives polygon data.
+`createPolyCamera` owns the viewpoint, `createPolyScene` owns lighting and
+options, and meshes are added to the scene:
 
-```tsx
-import { PolyCamera, PolyScene, PolyOrbitControls, PolyMesh } from "@layoutit/polycss-react";
+```ts
+import {
+  createPolyBox,
+  createPolyCamera,
+  createPolyOrbitControls,
+  createPolyScene,
+} from "@layoutit/polycss";
 
-export default function App() {
-  return (
-    <PolyCamera rotX={65} rotY={45}>
-      <PolyScene textureLighting="dynamic">
-        <PolyOrbitControls drag wheel />
-        <PolyMesh src="/gallery/obj/cottage.obj" mtl="/gallery/obj/cottage.mtl" />
-      </PolyScene>
-    </PolyCamera>
-  );
-}
+const host = document.getElementById("polycss")!;
+const camera = createPolyCamera({ rotX: 65, rotY: 45 });
+const scene = createPolyScene(host, { camera, textureLighting: "dynamic" });
+
+createPolyOrbitControls(scene, { drag: true, wheel: true });
+
+scene.add(createPolyBox({ size: 100, color: "#ffd166" }));
 ```
+
+Using React or Vue instead? Install
+[`@layoutit/polycss-react`](https://www.npmjs.com/package/@layoutit/polycss-react)
+or [`@layoutit/polycss-vue`](https://www.npmjs.com/package/@layoutit/polycss-vue),
+which expose the same model as components.
 
 ## Three.js Parity API
 
@@ -130,14 +138,29 @@ Full reference: [polycss.com/api/three-parity](https://polycss.com/api/three-par
 - `position`, `scale`, and `rotation` transform the mesh wrapper.
 - `autoCenter` shifts the mesh bbox center to local origin.
 - `meshResolution` chooses `"lossy"` (default) or `"lossless"` optimization. STL imports use the conservative lossless path in both modes.
-- `castShadow` emits CSS-projected shadows in dynamic lighting mode.
+- `castShadow` emits CPU-projected SVG shadows. It works in both `"baked"` and `"dynamic"` lighting modes; dynamic-mode shadows are directional-only.
+- `shadowDefinition` overrides the scene's parametric shadow resolution for this mesh.
 
 ### Controls
 
-- `<PolyOrbitControls>` adds drag orbit, shift-drag pan, wheel zoom, and optional auto-rotate.
-- `<PolyMapControls>` uses pan-first map-style input.
-- `<PolyFirstPersonControls>` provides keyboard and pointer-look navigation.
-- `<PolyTransformControls>` adds translate/rotate gizmos for selected mesh handles.
+- `createPolyOrbitControls(scene, opts)` adds drag orbit, shift-drag pan, wheel zoom, and optional auto-rotate.
+- `createPolyMapControls(scene, opts)` uses pan-first map-style input.
+- `createPolyFirstPersonControls(scene, opts)` provides keyboard and pointer-look navigation.
+- `createTransformControls(scene, opts)` adds translate/rotate gizmos for selected mesh handles.
+- `createSelect(scene, opts)` adds pointer picking over mesh handles.
+
+### PolyIframe
+
+The `<poly-iframe>` custom element renders a live document as a flat quad inside
+the scene, using the same `position` / `rotation` / `scale` conventions as a
+mesh. Its content is centered on the wrapper's local origin, so rotation and
+scale pivot at the visible center. React and Vue expose it as `<PolyIframe>`.
+
+```html
+<poly-scene>
+  <poly-iframe src="https://example.com" width="800" height="600" position="0,0,50"></poly-iframe>
+</poly-scene>
+```
 
 ### Snapshot Export
 
@@ -169,22 +192,17 @@ const polygons = [
 ];
 ```
 
-Render polygons directly when you need per-face DOM events or custom styling:
+Pass them straight to the scene:
 
-```tsx
-<PolyCamera>
-  <PolyScene>
-    {polygons.map((polygon, index) => (
-      <Poly
-        key={index}
-        {...polygon}
-        onClick={() => console.log("clicked polygon", index)}
-        className="my-polygon"
-      />
-    ))}
-  </PolyScene>
-</PolyCamera>
+```ts
+const scene = createPolyScene(host, { camera, polygons });
 ```
+
+Authoring `Polygon[]` by hand has real constraints — winding decides visibility,
+`color` does not accept CSS named colors, and non-triangular polygons must be
+coplanar. Read
+[Authoring Polygons](https://polycss.com/core-concepts#authoring-polygons)
+before you generate geometry.
 
 ## Loading Mesh Files
 
@@ -231,6 +249,8 @@ Each visible polygon is emitted as one leaf element; the renderer chooses the le
 | `@layoutit/polycss` | Vanilla custom elements and imperative `createPolyScene` API. |
 | `@layoutit/polycss-react` | React components, hooks, controls, and core re-exports. |
 | `@layoutit/polycss-vue` | Vue 3 components, composables, controls, and core re-exports. |
+| `@layoutit/polycss-fonts` | Fonts + text → extruded 3D `Polygon[]`. Framework-agnostic. |
+| `@layoutit/polycss-morph` | Prepared-model loading, retained DOM animation, morph targets, skinning, and playback. |
 
 ## Made with PolyCSS
 
