@@ -153,7 +153,7 @@ scene.setOptions({ shadow: { color: "#000000", opacity: 0.3, lift: 0.02 } });
 <TabItem label="React">
 ```tsx
 <PolyScene shadow={{ color: "#000000", opacity: 0.3, lift: 0.02 }}>
-  <PolyGround size={8} color="#d8d2c7" receiveShadow />
+  <PolyMesh polygons={floorPolygons} receiveShadow />
   <PolyMesh src="/model.glb" castShadow />
 </PolyScene>
 ```
@@ -161,12 +161,32 @@ scene.setOptions({ shadow: { color: "#000000", opacity: 0.3, lift: 0.02 } });
 <TabItem label="Vue">
 ```vue
 <PolyScene :shadow="{ color: '#000000', opacity: 0.3, lift: 0.02 }">
-  <PolyGround :size="8" color="#d8d2c7" receive-shadow />
+  <PolyMesh :polygons="floorPolygons" receive-shadow />
   <PolyMesh src="/model.glb" cast-shadow />
 </PolyScene>
 ```
 </TabItem>
 </Tabs>
+
+### Two ways to receive a shadow
+
+There are two distinct receiver mechanisms, and mixing them up is a common
+source of "my shadow disappeared":
+
+- **Ground-shadow fallback.** A `castShadow` mesh projects onto the scene's
+  ground plane automatically, with no receiver mesh required. This is what
+  `<PolyGround>` relies on — it is a convenience quad that renders with
+  `castShadow: false` and has **no `receiveShadow` prop of its own**. Passing
+  `receiveShadow` to `<PolyGround>` does nothing.
+- **`receiveShadow` meshes.** Marking any mesh `receiveShadow` makes casters
+  project per-coplanar-face SVG shadows onto each of its visible surfaces
+  (Three.js `mesh.receiveShadow` semantics). As soon as *any* receiver exists in
+  the scene, casters **drop the ground-shadow fallback** so the receiver paints
+  the only shadow pass.
+
+So `<PolyGround>` alone works, and an explicit `receiveShadow` mesh alone works
+— but adding a receiver elsewhere in the scene will silently turn off the
+ground fallback under `<PolyGround>`.
 
 What to expect:
 

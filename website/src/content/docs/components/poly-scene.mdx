@@ -39,7 +39,7 @@ React/Vue `<PolyMesh>` supports the full table. The `<poly-mesh>` custom element
 | Prop | Type | Description |
 |------|------|-------------|
 | `id` | `string` | Stable mesh identifier. Reflected as `data-poly-mesh-id` and exposed on mesh handles for selection / transform tools. |
-| `src` | `string` | URL to `.obj`, `.glb`, `.gltf`, or `.vox`. |
+| `src` | `string` | URL to `.obj`, `.stl`, `.glb`, `.gltf`, or `.vox`. |
 | `polygons` | `Polygon[]` | Pre-parsed polygons (alternative to `src`). Framework only. |
 | `position` | `Vec3` | `[x, y, z]` offset in scene space. |
 | `scale` | `number \| Vec3` | Uniform or per-axis scale. |
@@ -54,7 +54,9 @@ React/Vue `<PolyMesh>` supports the full table. The `<poly-mesh>` custom element
 | `parseOptions` | `UseMeshOptions` | Parser options forwarded to `loadMesh`; `meshResolution` defaults to `"lossy"`. |
 | `meshResolution` | `"lossless" \| "lossy"` | Top-level optimizer intent. Wins over `parseOptions.meshResolution`; defaults to `"lossy"`. |
 | `castShadow` | `boolean` | Emit SVG cast shadows in both lighting modes; projections update when light, ground, or mesh geometry changes. |
+| `receiveShadow` | `boolean` | Casters project per-coplanar-face SVG shadows onto this mesh's visible surfaces (Three.js `mesh.receiveShadow` semantics). Any receiver in the scene disables the casters' ground-shadow fallback. Defaults to `false`. |
 | `shadowDefinition` | `number` | Per-mesh parametric-shadow detail, overriding the scene's `shadow.definition` (only when `shadow.parametric`). |
+| `merge` | `boolean` | Run the polygon optimizer. Defaults to `true`. Set `false` to render authored geometry exactly as given — no merging, deduping, or interior culling. |
 | `fallback` | `ReactNode` | Rendered while `src` is loading. (React / Vue only.) |
 | `errorFallback` | `(error: Error) => ReactNode` | Rendered if parse fails. (React / Vue only.) |
 | `children` | `(polygon, index) => ReactNode` | Per-polygon render prop / scoped slot. (React / Vue only.) |
