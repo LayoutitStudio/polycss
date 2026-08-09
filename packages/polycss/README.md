@@ -156,9 +156,13 @@ the scene, using the same `position` / `rotation` / `scale` conventions as a
 mesh. Its content is centered on the wrapper's local origin, so rotation and
 scale pivot at the visible center. React and Vue expose it as `<PolyIframe>`.
 
+`width` and `height` are **world units**, not pixels — the mounted document is
+`width × 50` CSS px wide (`BASE_TILE`), so `16 × 9` yields an 800 × 450 px page.
+`position` is world units too.
+
 ```html
 <poly-scene>
-  <poly-iframe src="https://example.com" width="800" height="600" position="0,0,50"></poly-iframe>
+  <poly-iframe src="https://example.com" width="16" height="9" position="0,0,5"></poly-iframe>
 </poly-scene>
 ```
 
@@ -192,11 +196,15 @@ const polygons = [
 ];
 ```
 
-Pass them straight to the scene:
+Geometry enters the scene through `scene.add()`, which takes a `ParseResult`.
+There is no `polygons` scene option — wrap a raw `Polygon[]` yourself:
 
 ```ts
-const scene = createPolyScene(host, { camera, polygons });
+scene.add({ polygons, objectUrls: [], warnings: [], dispose: () => {} });
 ```
+
+`scene.add` runs the mesh optimizer by default. Pass `{ merge: false }` as the
+second argument to render authored polygons exactly as given.
 
 Authoring `Polygon[]` by hand has real constraints — winding decides visibility,
 `color` does not accept CSS named colors, and non-triangular polygons must be

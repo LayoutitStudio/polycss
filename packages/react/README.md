@@ -41,7 +41,7 @@ export default function App() {
 ### `<PolyCamera>`
 
 - `rotX`, `rotY` control the orbit angle in degrees.
-- `zoom` scales the projected scene (default `0.65`). One world unit is 50 CSS px before zoom.
+- `zoom` is on-screen CSS pixels per world unit (Three.js `OrthographicCamera.zoom` style).
 - `target` pans the camera target in world coordinates.
 - `distance` adds dolly pull-back.
 - `PolyCamera` is the orthographic default. Use `<PolyPerspectiveCamera>` for
@@ -85,8 +85,11 @@ Renders a live document as a flat quad in the scene, with the same
 `position` / `rotation` / `scale` conventions as a mesh. Content is centered on
 the wrapper's local origin, so rotation and scale pivot at the visible center.
 
+`width` and `height` are **world units**, not pixels — the mounted document is
+`width × 50` CSS px wide (`BASE_TILE`), so `16 × 9` yields an 800 × 450 px page.
+
 ```tsx
-<PolyIframe src="https://example.com" width={800} height={600} position={[0, 0, 50]} />
+<PolyIframe src="https://example.com" width={16} height={9} position={[0, 0, 5]} />
 ```
 
 ### Controls
@@ -107,8 +110,11 @@ the wrapper's local origin, so rotation and scale pivot at the visible center.
 
 ## Hooks
 
-- `usePolyCamera` — read/drive the camera handle from the context.
-- `usePolySceneContext` — access the underlying scene handle.
+- `usePolyCamera(options)` — create and drive the scene camera store from camera
+  options; returns `{ store, cameraRef, sceneElRef, cameraElRef,
+  applyTransformDirect }`.
+- `usePolySceneContext(polygons, { directionalLight })` — run the scene pipeline
+  (normalize + merge) over a polygon list; returns `{ polygons, sceneBbox }`.
 - `usePolyMesh` — load a mesh imperatively; returns `{ polygons, voxelSource,
   loading, error, warnings, dispose }`, where `error` is an `Error | null`.
 - `usePolyMaterial` — resolve material state for a mesh.

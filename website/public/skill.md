@@ -55,8 +55,10 @@ import {
 - Coordinates are PolyCSS world space: `[x, y, z]`, **+X right, +Y forward,
   +Z up**.
 - Camera rotations are degrees: `rotX`, `rotY`.
-- One world unit is 50 CSS px; `zoom` is a scale multiplier on top of that
-  (default `0.65`).
+- `zoom` is on-screen CSS pixels per world unit (Three.js
+  `OrthographicCamera.zoom` style). `BASE_TILE` (50) is the internal world-unit
+  → CSS px factor, and matters only for APIs that take world units directly,
+  like `<poly-iframe width>`.
 - `PolyCamera` / `createPolyCamera` are orthographic by default.
 - Use `PolyPerspectiveCamera` / `createPolyPerspectiveCamera` for perspective.
 
@@ -74,8 +76,19 @@ interface Polygon {
 }
 ```
 
-Imported meshes get repaired on the way in. **Hand-authored polygons do not.**
-These constraints fail *silently* — no throw, no warning:
+How much cleanup you get for free varies by parser and by entry point:
+
+- **Winding:** STL repairs it from connectivity; `.vox` is correct by
+  construction; **OBJ and glTF preserve source winding as-is**. All parsers
+  normalize coordinates with a handedness-preserving axis map.
+- **Validation:** only React/Vue `<PolyScene polygons>` runs
+  `normalizePolygons` (drops degenerates, strips mismatched `uvs`, replaces bad
+  colors with `#cccccc`, fan-triangulates non-coplanar n-gons) — and its
+  warnings are never surfaced. `scene.add(...)`, `<PolyMesh polygons>`,
+  `<Poly>`, and `<poly-polygon>` do **not** normalize.
+
+So for hand-authored polygons these constraints fail *silently* — no throw, no
+console warning:
 
 **1. Winding decides visibility.** Vertex order sets the face normal by the
 right-hand rule (`(v1-v0) × (v2-v0)`), and PolyCSS backface-culls every leaf. A
@@ -100,18 +113,21 @@ camera crosses to its other side, inspect winding and normal before touching
 culling, lighting, or camera code.
 
 **2. `color` is not a full CSS color.** Only `#rgb`, `#rrggbb`, `rgb()`, and
-`rgba()` parse. Named colors (`"tomato"`), `hsl()`, and `color()` render
-**white**.
+`rgba()` parse. Named colors (`"tomato"`), `hsl()`, and `color()` fail silently
+— rendering **white**, or `#cccccc` on the normalizing `<PolyScene polygons>`
+path.
 
-**3. Non-triangular polygons must be coplanar.** Renderers do not run
-`normalizePolygons` for you. A non-planar n-gon is flattened onto the average
-plane, opening cracks against its neighbours. Triangles are always safe.
+**3. Non-triangular polygons must be coplanar.** On every path except
+`<PolyScene polygons>`, a non-planar n-gon is flattened onto its average plane,
+opening cracks against its neighbours; `<PolyScene polygons>` instead
+fan-triangulates it, silently changing topology. Triangles are always safe.
 
 **4. The optimizer rewrites geometry by default.** `merge` defaults to `true`
 and `meshResolution` to `"lossy"`: coincident faces within `0.05` world units
 are deduped, interior faces culled, and lossy merging tolerates up to `0.35`
-world units of plane displacement (absolute units, not configurable). For
-precise authored geometry pass `merge: false` or `meshResolution: "lossless"`.
+world units of plane displacement (absolute units, not configurable). Dedupe and
+interior culling count as exact reductions and still run under
+`meshResolution: "lossless"` — only `merge: false` renders geometry untouched.
 
 **5. Degenerate polygons vanish silently** — under 3 vertices, zero-length edge,
 or zero area produces no leaf and no console output.
@@ -166,15 +182,17 @@ React/Vue: `<PolyOrbitControls>`, `<PolyMapControls>`,
 `usePolySelect` / `usePolySelectionApi`.
 
 **Animation.** `usePolyAnimation` (React/Vue) drives imported skeletal clips.
-Animated meshes want `merge: false` and `stableDom: true` so triangle topology
-and leaf identity stay stable across frames.
+Animated meshes need stable triangle topology: vanilla passes
+`scene.add(mesh, { merge: false, stableDom: true })`; React/Vue pass
+`merge={false}` — there is no `stableDom` prop, leaf identity across
+same-topology frames is handled internally.
 
 ## Lighting
 
 The scene takes one `directionalLight`, one `ambientLight`, and optional
-`pointLights`. Directional `direction` is the unit vector from the surface
-*toward* the light. Point lights are direction-only (no distance falloff) and
-shade flat per face.
+`pointLights`. Directional `direction` is the vector from the surface *toward*
+the light; it is normalized internally, so it need not be unit length. Point
+lights are direction-only (no distance falloff) and shade flat per face.
 
 Two modes, set via `textureLighting`:
 

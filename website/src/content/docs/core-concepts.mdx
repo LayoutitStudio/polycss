@@ -98,11 +98,39 @@ Scene content renders relative to the (0,0,0) origin. Most mesh files are author
 
 ## Authoring Polygons
 
-Imported meshes get repaired on the way in — parsers fix winding, normalize
-coordinates, and strip malformed data. **Hand-authored `Polygon[]` does not.**
-If you generate geometry in code (an architectural kit, a procedural terrain, a
-shape library), these constraints are load-bearing, and violating them fails
+If you generate geometry in code — an architectural kit, a procedural terrain, a
+shape library — the constraints below are load-bearing, and violating them fails
 silently rather than throwing.
+
+How much cleanup you get for free depends on **which parser** produced the mesh
+and **which entry point** you hand it to. Neither is uniform:
+
+| Source | Winding treatment |
+|---|---|
+| STL | Repaired. Connectivity orients closed components outward; open components follow a consistent supplied-normal signal. |
+| `.vox` | Correct by construction — faces are generated CCW-from-outside. |
+| OBJ | **Preserved as authored.** A file wound inconsistently stays that way. |
+| glTF / GLB | **Preserved as authored.** `doubleSided` materials emit reversed duplicate triangles. |
+
+Every parser normalizes coordinates (fit-to-target scale, Y-up → Z-up), and the
+axis permutation is chosen specifically so it does *not* flip handedness.
+
+`normalizePolygons` — which drops degenerate polygons, strips mismatched `uvs`,
+replaces unparseable colors with `#cccccc`, and **fan-triangulates non-coplanar
+n-gons** — runs on only one path:
+
+- **React/Vue `<PolyScene polygons>` normalizes.** Your non-coplanar quad comes
+  back as triangles. It records warnings, but they are not surfaced to the
+  console, so the repair is silent.
+- **`scene.add(...)`, `<PolyMesh polygons>`, `<Poly>`, and `<poly-polygon>` do
+  not.** They run the mesh optimizer (or nothing, with `merge: false`). Here a
+  non-coplanar n-gon is flattened onto its average plane when its local 2D basis
+  is built — opening cracks against its neighbours — and degenerate polygons
+  vanish without a trace.
+
+If you generate geometry, the portable move is to emit triangles or genuinely
+coplanar n-gons, or to call `normalizePolygons` yourself and inspect the
+warnings it returns.
 
 ### Winding determines visibility
 
@@ -152,21 +180,22 @@ essentially every time.
 ### `color` is not a full CSS color
 
 Only hex (`#rgb`, `#rrggbb`) and `rgb()` / `rgba()` parse. CSS named colors
-(`"tomato"`, `"red"`), `hsl()`, and `color()` do **not** — an unparseable value
-renders **white**, with no warning.
+(`"tomato"`, `"red"`), `hsl()`, and `color()` do **not**, and the failure is
+silent either way: on the normalizing `<PolyScene polygons>` path the value is
+replaced with `#cccccc`, and everywhere else it renders **white**.
 
 ```ts
-{ color: "tomato" }   // ✗ renders white
+{ color: "tomato" }   // ✗ silently wrong (white, or #cccccc)
 { color: "#ff6347" }  // ✓
 ```
 
 ### Non-triangular polygons must be coplanar
 
-Renderers do not call `normalizePolygons` for you — it is available, but the
-render path does not apply it. A quad or n-gon whose vertices are not on a
-common plane is flattened onto their average plane when its local 2D basis is
-built, which moves vertices out from under their neighbours and opens visible
-cracks.
+On every path except `<PolyScene polygons>`, a quad or n-gon whose vertices are
+not on a common plane is flattened onto their average plane when its local 2D
+basis is built, which moves vertices out from under their neighbours and opens
+visible cracks. `<PolyScene polygons>` instead fan-triangulates it, which avoids
+the crack but silently changes your topology.
 
 Triangles are always coplanar, so this only bites n-gons. If you merge faces
 into quads, either merge only where coplanarity genuinely holds, or snap the
@@ -185,8 +214,10 @@ authored geometry is merged, deduped, and interior-culled before it renders:
   **absolute world units and not configurable**, so small-scale hand-authored
   meshes can get visibly welded.
 
-If you authored geometry precisely and want it rendered exactly as given, set
-`merge: false`, or `meshResolution: "lossless"` to keep only exact reductions.
+Note that dedupe and interior culling are treated as *exact* reductions, so they
+still run under `meshResolution: "lossless"` — only the lossy approximation is
+switched off. **`merge: false` is the only setting that renders your geometry
+completely untouched.**
 
 ### Degenerate polygons vanish silently
 
@@ -196,10 +227,15 @@ for duplicate or collinear vertices.
 
 ### Scale
 
-One world unit is **50 CSS pixels** (`BASE_TILE`). Camera `zoom` is a scale
-multiplier applied on top of that conversion — it defaults to `0.65`, so at the
-default camera one world unit covers about 32.5 CSS px, and at `zoom: 1` it
-covers 50.
+Camera `zoom` is **on-screen CSS pixels per world unit**, matching Three.js's
+`OrthographicCamera.zoom` shape — at `zoom: 50`, one world unit renders 50 px
+across.
+
+Internally, renderer geometry already lives at `BASE_TILE` (50) CSS px per world
+unit, and the camera transform divides that back out (`scale(zoom / 50)`), so
+the two cancel. You only need `BASE_TILE` when converting world units to raw CSS
+px yourself — for example `<poly-iframe width>`, which is in world units and
+mounts a document `width × 50` CSS px wide.
 
 ## Rendering Pipeline
 

@@ -54,7 +54,7 @@ Props are listed in their template (kebab-case) form.
 ### `<PolyCamera>`
 
 - `rot-x`, `rot-y` control the orbit angle in degrees.
-- `zoom` scales the projected scene (default `0.65`). One world unit is 50 CSS px before zoom.
+- `zoom` is on-screen CSS pixels per world unit (Three.js `OrthographicCamera.zoom` style).
 - `target` pans the camera target in world coordinates.
 - `distance` adds dolly pull-back.
 - `PolyCamera` is the orthographic default. Use `<PolyPerspectiveCamera>` for
@@ -98,8 +98,11 @@ Renders a live document as a flat quad in the scene, with the same
 `position` / `rotation` / `scale` conventions as a mesh. Content is centered on
 the wrapper's local origin, so rotation and scale pivot at the visible center.
 
+`width` and `height` are **world units**, not pixels — the mounted document is
+`width × 50` CSS px wide (`BASE_TILE`), so `16 × 9` yields an 800 × 450 px page.
+
 ```vue
-<PolyIframe src="https://example.com" :width="800" :height="600" :position="[0, 0, 50]" />
+<PolyIframe src="https://example.com" :width="16" :height="9" :position="[0, 0, 5]" />
 ```
 
 ### Controls
@@ -120,8 +123,11 @@ the wrapper's local origin, so rotation and scale pivot at the visible center.
 
 ## Composables
 
-- `usePolyCamera` — read/drive the camera handle from the provided context.
-- `usePolySceneContext` — access the underlying scene handle.
+- `usePolyCamera(options)` — create and drive the scene camera store from camera
+  options; returns the camera store plus scene/camera element refs.
+- `usePolySceneContext(polygons, options)` — run the scene pipeline (normalize +
+  merge) over a reactive polygon list; returns a ref of
+  `{ polygons, sceneBbox }`.
 - `usePolyMesh` — load a mesh imperatively; exposes polygons, voxel source,
   loading, error, and warnings as reactive state.
 - `usePolyMaterial` — resolve material state for a mesh.

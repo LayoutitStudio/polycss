@@ -29,10 +29,13 @@ npm install @layoutit/polycss-core
 
 ## Parsing a mesh without a browser
 
-`loadMesh` and the individual parsers are pure functions over bytes and strings,
-so they run under Node:
+The parsers (`parseObj`, `parseStl`, `parseGltf`, `parseVox`, `parseMtl`) are
+pure, synchronous functions over already-loaded bytes and strings, so they run
+under Node. `loadMesh` is the convenience wrapper on top: it fetches a URL and
+dispatches by extension, so it needs `fetch` and is not pure.
 
 ```ts
+import { readFile } from "node:fs/promises";
 import { parseObj, optimizeMeshPolygons } from "@layoutit/polycss-core";
 
 const result = parseObj(await readFile("cottage.obj", "utf8"));
