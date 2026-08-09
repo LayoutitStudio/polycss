@@ -8,7 +8,7 @@
  */
 import { strict as assert } from "node:assert";
 import test from "node:test";
-import { assertWellFormed } from "./sync-package-readmes.mjs";
+import { applyBlocks, assertWellFormed } from "./sync-package-readmes.mjs";
 
 const S = (n) => `<!-- polycss:shared:${n}:start -->`;
 const E = (n) => `<!-- polycss:shared:${n}:end -->`;
@@ -66,16 +66,31 @@ test("rejects a block name the root README does not define", () => {
   assert.match(error, /not defined in the root README/);
 });
 
-test("replacement copies content literally, including $ sequences", () => {
-  // Regression: passing the block as a replacement STRING expands `$&`,
-  // "$`" and `$'`, corrupting any README containing them.
-  const blockRe = /<!-- polycss:shared:links:start -->[\s\S]*?<!-- polycss:shared:links:end -->/;
-  const replacement = `${S("links")}\ncost: $5 — see $& and $\` and $'\n${E("links")}`;
+test("applyBlocks copies content literally, including $ sequences", () => {
+  // Regression: a replacement STRING expands `$&`, "$`" and `$'`. This drives
+  // the PRODUCTION path, so reverting it to the string form fails here.
+  const block = `${S("links")}\ncost: $5 — see $& and $\` and $'\n${E("links")}`;
   const target = `head\n${S("links")}\nold\n${E("links")}\ntail`;
 
-  const viaString = target.replace(blockRe, replacement);
-  const viaCallback = target.replace(blockRe, () => replacement);
+  const out = applyBlocks(target, new Map([["links", block]]), "fixture", ALLOWED);
 
-  assert.ok(viaCallback.includes("$& and $` and $'"), "callback must copy verbatim");
-  assert.notEqual(viaString, viaCallback, "string form is the buggy path this guards against");
+  assert.ok(out.includes("$& and $` and $'"), "block must be copied byte-for-byte");
+  assert.equal(out, `head\n${block}\ntail`);
+});
+
+test("applyBlocks leaves a marker-less file untouched", () => {
+  const target = "# Pkg\n\nnothing shared here\n";
+  assert.equal(applyBlocks(target, new Map(), "fixture", ALLOWED), target);
+});
+
+test("rejects marker-like comments that are not canonical", () => {
+  for (const bad of [
+    "<!-- polycss:shared:links2:start -->",
+    "<!-- polycss:shared:Links:start -->",
+    "<!-- polycss:shared:links:begin -->",
+    "<!--  polycss:shared:links:start  -->",
+  ]) {
+    const { error } = check(`head\n${bad}\nx\n${E("links")}\n`);
+    assert.match(error ?? "", /malformed shared marker/, `should reject ${bad}`);
+  }
 });

@@ -136,11 +136,11 @@ export interface PolyAmbientLight {
  * Material — paint configuration shareable across many polygons.
  *
  * In CSS terms, a material bundles the `background-image` source plus paint
- * config. When a polygon references a material AND its UVs form an
- * axis-aligned rectangle, PolyCSS renders the polygon as an <i> with
- * `background-image: url(material.texture)` directly — no per-polygon canvas
- * rasterization, browser-cached texture, mounting / unmounting one polygon
- * does not affect any other.
+ * config. Material-backed polygons render through the texture atlas by
+ * default. A direct image leaf — source URL and rect, no per-polygon canvas
+ * rasterization — requires valid `imageSource` metadata AND a resolved
+ * presentation of `backend: "image"` with source lighting; the default
+ * `"auto"` backend resolves to the atlas.
  *
  * Three.js parallel: combines THREE.Texture + a basic Material in one. CSS
  * has no shader/sampler concerns, so the texture/material split from

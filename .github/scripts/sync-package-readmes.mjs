@@ -59,7 +59,19 @@ const countByName = (text, re) => {
  * stale block reaches npm.
  */
 export function assertWellFormed(text, label, allowed, onError = fail) {
+  // Canonical form, and the loose form used only to catch near-misses. A typo
+  // (`links2`, `Links`, `:begin`, stray whitespace) must NOT read as "this
+  // package opted out" — that would let `--check` pass on stale content.
   const MARKER_RE = /<!-- polycss:shared:([a-z-]+):(start|end) -->/g;
+  const LOOSE_RE = /<!--[^>]*polycss:shared[^>]*-->/g;
+
+  for (const m of text.matchAll(LOOSE_RE)) {
+    if (!new RegExp(`^${MARKER_RE.source}$`).test(m[0]))
+      return onError(
+        `${label}: malformed shared marker ${JSON.stringify(m[0])} — expected exactly "<!-- polycss:shared:<name>:start -->" or ":end", with a lowercase-and-hyphen name`,
+      );
+  }
+
   const names = new Set();
   let open = null;
 
@@ -93,6 +105,22 @@ export function assertWellFormed(text, label, allowed, onError = fail) {
   return names;
 }
 
+/**
+ * Rewrite every shared block present in `text` from `blocks`. This is the
+ * production replacement path — tests must call THIS, not a local copy.
+ */
+export function applyBlocks(text, blocks, label, allowed, onError = fail) {
+  const present = assertWellFormed(text, label, allowed, onError);
+  if (present === null) return null;
+  let next = text;
+  for (const name of present) {
+    // Replacement passed as a CALLBACK: README content is arbitrary text, and
+    // `$&` / `` $` `` / `$'` in a replacement string would be expanded.
+    next = next.replace(blockRe(name), () => blocks.get(name));
+  }
+  return next;
+}
+
 function main() {
 const rootText = readFileSync(source, "utf8");
 const names = [...assertWellFormed(rootText, "root README", null)];
@@ -121,14 +149,7 @@ for (const target of targets) {
     fail(`${target}: cannot be read (${err.code ?? err.message})`);
   }
 
-  const present = assertWellFormed(text, target, new Set(names));
-
-  let next = text;
-  for (const name of present) {
-    // Replacement passed as a callback: README content is arbitrary text and
-    // `$&` / `` $` `` / `$'` in a replacement STRING would be expanded.
-    next = next.replace(blockRe(name), () => blocks.get(name));
-  }
+  const next = applyBlocks(text, blocks, target, new Set(names));
 
   if (next === text) continue;
   if (checkOnly) {

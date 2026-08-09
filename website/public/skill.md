@@ -73,7 +73,7 @@ interface Polygon {
   texture?: string;                      // image URL
   uvs?: [number, number][];              // one per vertex
   material?: PolyMaterial;               // shared material; material.texture wins over `texture`
-  textureImageSource?: PolyTextureImageSource;    // source-exact image leaf (advanced)
+  textureImageSource?: PolyTextureImageSource;    // source image metadata; needs texturePresentation.backend="image" (advanced)
   texturePresentation?: PolyTexturePresentation;  // per-polygon texture overrides (advanced)
   data?: Record<string, string | number | boolean>;  // → data-* attributes
 }
@@ -179,6 +179,8 @@ createPolyOrbitControls(scene, { drag: true, wheel: true });
 
 scene.add(createPolyBox({ size: 100, color: "#ffd166" }), { position: [0, 0, 50] });
 scene.add(await loadMesh("/model.glb"), { castShadow: true });
+// Vanilla has no ground fallback — a caster needs an explicit receiver.
+scene.add(createPolyPlane({ size: 400, color: "#7d848e" }), { receiveShadow: true });
 ```
 
 React (Vue mirrors this with kebab-case props):
