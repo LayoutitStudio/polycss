@@ -25,6 +25,7 @@ import { canonicalJsonBytes } from "./gallery-domformat-canonical.mjs";
 
 const scriptRoot = dirname(fileURLToPath(import.meta.url));
 const websiteRoot = resolve(scriptRoot, "..");
+const coreSourceEntry = join(websiteRoot, "../packages/core/src/index.ts");
 const galleryRoot = join(websiteRoot, "public/gallery");
 const defaultOutputRoot = join(websiteRoot, "gallery-domformat-corpus");
 const browserEntry = join(scriptRoot, "gallery-domformat-browser.ts");
@@ -729,6 +730,7 @@ async function main() {
   try {
     await build({
       entryPoints: [browserEntry],
+      alias: { "@layoutit/polycss-core": coreSourceEntry },
       bundle: true,
       format: "esm",
       platform: "browser",
