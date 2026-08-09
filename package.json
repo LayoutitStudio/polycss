@@ -24,6 +24,7 @@
     "test:coverage": "pnpm --filter './packages/*' -r --if-present test:coverage",
     "sync:readmes": "node .github/scripts/sync-package-readmes.mjs",
     "check:readmes": "node .github/scripts/sync-package-readmes.mjs --check",
+    "test:scripts": "node --test .github/scripts/*.test.mjs",
     "publish:all": "pnpm sync:readmes && pnpm --filter './packages/*' -r publish --access public",
     "dev:website": "pnpm --filter @layoutit/polycss-website dev",
     "build:website": "pnpm --filter @layoutit/polycss-website build",

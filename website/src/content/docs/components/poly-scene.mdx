@@ -38,7 +38,7 @@ The React/Vue components and `createPolyScene()` support the full table except r
 
 ## Mesh props / attributes
 
-React/Vue `<PolyMesh>` supports the full table. The `<poly-mesh>` custom element supports `src`, `mtl`, `mesh-resolution`, `position`, `scale`, `rotation`, `auto-center`, `cast-shadow`, `receive-shadow`, plus the OBJ parse attributes `target-size`, `default-color`, `palette`, `include-objects`, and `exclude-objects` (these five affect `.obj` sources only). `position`, `scale`, `rotation`, `cast-shadow`, and `receive-shadow` update live; the parse attributes trigger a reload; `auto-center` is read at load only, so changing it after mount does nothing. Use `scene.add(result, opts)` for vanilla options the element doesn't expose, such as `merge`, `stableDom`, and `shadowDefinition`.
+React/Vue `<PolyMesh>` supports the full table. The `<poly-mesh>` custom element supports `src`, `mtl`, `mesh-resolution`, `position`, `scale`, `rotation`, `auto-center`, `cast-shadow`, `receive-shadow`, plus the OBJ parse attributes `target-size`, `default-color`, `palette`, `include-objects`, and `exclude-objects` (these five affect `.obj` sources only). `position`, `scale`, `rotation`, `cast-shadow`, and `receive-shadow` update live; changing `src`, `mtl`, `mesh-resolution`, or any of the OBJ parse attributes tears the mesh down and reloads it; `auto-center` is read at load only, so changing it after mount does nothing. Use `scene.add(result, opts)` for vanilla options the element doesn't expose, such as `merge`, `stableDom`, and `shadowDefinition`.
 
 | Prop | Type | Description |
 |------|------|-------------|

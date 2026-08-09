@@ -28,9 +28,11 @@ interface Polygon {
   textureAlphaMode?: PolyTextureAlphaMode;
   /** Shared material. `material.texture` takes precedence over `texture`. */
   material?: PolyMaterial;
-  /** Source-exact image backing. Renders as a direct image leaf using the
-   *  caller's URL and source rect — no atlas rasterisation, no atlas memory,
-   *  and source lighting is preserved. */
+  /** Source-exact image metadata (URL + source rect). It does not by itself
+   *  select a direct image leaf: the resolved presentation must end up with
+   *  `backend: "image"` and source lighting, and the default `"auto"` backend
+   *  resolves to the atlas. When it does apply, there is no atlas
+   *  rasterisation and no atlas memory. */
   textureImageSource?: PolyTextureImageSource;
   /** Backend, projection, filtering, and lighting request for this polygon's
    *  texture. See Texture Presentation below. */

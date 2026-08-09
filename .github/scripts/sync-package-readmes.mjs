@@ -58,28 +58,44 @@ const countByName = (text, re) => {
  * malformed file, not a partially-syncable one: silently skipping it is how a
  * stale block reaches npm.
  */
-function assertWellFormed(text, label, allowed) {
-  const starts = countByName(text, START_RE);
-  const ends = countByName(text, END_RE);
+export function assertWellFormed(text, label, allowed, onError = fail) {
+  const MARKER_RE = /<!-- polycss:shared:([a-z-]+):(start|end) -->/g;
+  const names = new Set();
+  let open = null;
 
-  for (const [name, n] of starts) {
-    if (n > 1) fail(`${label}: block "${name}" has ${n} start markers, expected 1`);
-    if ((ends.get(name) ?? 0) !== 1)
-      fail(`${label}: block "${name}" has a start marker but no matching end marker`);
-    if (allowed && !allowed.has(name))
-      fail(`${label}: block "${name}" is not defined in the root README`);
+  for (const m of text.matchAll(MARKER_RE)) {
+    const [, name, kind] = m;
+    if (kind === "start") {
+      if (open)
+        return onError(
+          `${label}: block "${name}" starts inside block "${open}" — blocks may not nest or cross`,
+        );
+      if (names.has(name))
+        return onError(`${label}: block "${name}" appears more than once`);
+      if (allowed && !allowed.has(name))
+        return onError(`${label}: block "${name}" is not defined in the root README`);
+      open = name;
+    } else {
+      if (open === null)
+        return onError(
+          `${label}: block "${name}" has an end marker before its start marker`,
+        );
+      if (open !== name)
+        return onError(
+          `${label}: block "${open}" is closed by "${name}" — blocks may not nest or cross`,
+        );
+      names.add(name);
+      open = null;
+    }
   }
-  for (const [name, n] of ends) {
-    if (n > 1) fail(`${label}: block "${name}" has ${n} end markers, expected 1`);
-    if (!starts.has(name))
-      fail(`${label}: block "${name}" has an end marker but no matching start marker`);
-  }
-  return starts;
+
+  if (open) return onError(`${label}: block "${open}" is never closed`);
+  return names;
 }
 
+function main() {
 const rootText = readFileSync(source, "utf8");
-const rootStarts = assertWellFormed(rootText, "root README", null);
-const names = [...rootStarts.keys()];
+const names = [...assertWellFormed(rootText, "root README", null)];
 
 if (names.length === 0) {
   fail("no shared blocks found in the root README — refusing to run");
@@ -98,15 +114,20 @@ for (const target of targets) {
   let text;
   try {
     text = readFileSync(path, "utf8");
-  } catch {
-    continue;
+  } catch (err) {
+    // A listed package must have a readable README — packages opt out by
+    // carrying no markers, not by going missing. Skipping here would let a
+    // deleted or unreadable README pass both `--check` and `prepack`.
+    fail(`${target}: cannot be read (${err.code ?? err.message})`);
   }
 
   const present = assertWellFormed(text, target, new Set(names));
 
   let next = text;
-  for (const name of present.keys()) {
-    next = next.replace(blockRe(name), blocks.get(name));
+  for (const name of present) {
+    // Replacement passed as a callback: README content is arbitrary text and
+    // `$&` / `` $` `` / `$'` in a replacement STRING would be expanded.
+    next = next.replace(blockRe(name), () => blocks.get(name));
   }
 
   if (next === text) continue;
@@ -134,3 +155,6 @@ if (checkOnly) {
 console.log(
   `[sync-package-readmes] ${updated} README${updated === 1 ? "" : "s"} updated, ${names.length} shared block${names.length === 1 ? "" : "s"}`,
 );
+}
+
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main();

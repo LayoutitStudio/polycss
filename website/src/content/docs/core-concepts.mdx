@@ -290,7 +290,7 @@ The internal leaf tag is a strategy, not public API:
 | `<i>` | Border-shape clipped solid | Solid non-rect polygons on browsers with `border-shape`. |
 | `<s>` | Atlas slice | Textured polygons and fallback solids. |
 
-You normally do not target these tags directly; use `Poly`, `PolyMesh`, classes, data attributes, or render stats. Cast shadows are separate SVG shadow surfaces, not render-strategy leaves; meshes with `castShadow` project onto the scene ground or receiver surfaces in both lighting modes.
+You normally do not target these tags directly; use `Poly`, `PolyMesh`, classes, data attributes, or render stats. Cast shadows are separate SVG shadow surfaces, not render-strategy leaves; meshes with `castShadow` project onto `receiveShadow` surfaces in both lighting modes (React/Vue additionally fall back to the scene ground plane when no receiver exists — vanilla does not).
 
 ## Automatic Polygon Merge
 

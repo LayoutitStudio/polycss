@@ -189,20 +189,24 @@ export interface PolyMeshTransform {
    */
   excludeFromAutoCenter?: boolean;
   /**
-   * When `true`, this mesh casts a shadow onto the scene's shadow ground
-   * plane (and onto any meshes marked `receiveShadow: true`). The shadow
-   * emits as one per-mesh `<svg>` whose path is the union of every
-   * casting polygon's projection. Works in both lighting modes.
-   * Defaults to `false`.
+   * When `true`, this mesh casts a shadow onto any mesh marked
+   * `receiveShadow: true`. The shadow emits as one `<svg>` per receiver face
+   * whose path is the union of every casting polygon's projection. Works in
+   * both lighting modes. Defaults to `false`.
+   *
+   * Vanilla has NO ground-plane fallback: with no receiver in the scene a
+   * caster draws nothing (Three.js `castShadow` / `receiveShadow` parity).
+   * React/Vue additionally project onto the scene ground plane when no
+   * receiver exists.
    */
   castShadow?: boolean;
   /**
    * **(experimental)** When `true`, this mesh acts as a shadow receiver:
    * each of its polygon faces becomes a target plane that casting meshes'
    * shadows project onto and get clipped to. Useful for "shadow on table"
-   * scenarios. Currently only convex face outlines clip cleanly. When no
-   * receivers are present the global ground plane is used as today.
-   * Defaults to `false`.
+   * scenarios. Currently only convex face outlines clip cleanly. In vanilla a
+   * receiver is REQUIRED for any shadow to appear — there is no ground-plane
+   * fallback. Defaults to `false`.
    */
   receiveShadow?: boolean;
   /**
