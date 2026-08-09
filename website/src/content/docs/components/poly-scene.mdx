@@ -62,7 +62,7 @@ React/Vue `<PolyMesh>` supports the full table. The `<poly-mesh>` custom element
 | `parseOptions` | `UseMeshOptions` | Parser options forwarded to `loadMesh`; `meshResolution` defaults to `"lossy"`. |
 | `meshResolution` | `"lossless" \| "lossy"` | Top-level optimizer intent. Wins over `parseOptions.meshResolution`; defaults to `"lossy"`. |
 | `castShadow` | `boolean` | Emit SVG cast shadows in both lighting modes; projections update when light, ground, or mesh geometry changes. |
-| `receiveShadow` | `boolean` | Casters project per-coplanar-face SVG shadows onto this mesh's visible surfaces (Three.js `mesh.receiveShadow` semantics). Any receiver in the scene disables the casters' ground-shadow fallback. Defaults to `false`. |
+| `receiveShadow` | `boolean` | Casters project per-coplanar-face SVG shadows onto this mesh's visible surfaces (Three.js `mesh.receiveShadow` semantics). Defaults to `false`. In React/Vue, any receiver in the scene disables the casters' ground-shadow fallback; vanilla has no such fallback, so a receiver is required for any shadow to appear. |
 | `shadowDefinition` | `number` | Per-mesh parametric-shadow detail, overriding the scene's `shadow.definition` (only when `shadow.parametric`). |
 | `merge` | `boolean` | Run the polygon optimizer (dedupe, interior cull, coplanar/lossy merge). Defaults to `true`. Set `false` to render **the polygon array entering the renderer** exactly as given. It cannot restore source-file geometry: with `src`, `loadMesh` has already optimized the parse result before `merge` is consulted. |
 | `fallback` | `ReactNode` | Rendered while `src` is loading. (React / Vue only.) |
