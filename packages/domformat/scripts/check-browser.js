@@ -257,8 +257,10 @@ function decodeScreenshot(png, expectedWidth = 320, expectedHeight = 240) {
   return { ...header, bytesPerPixel, pixels };
 }
 
-function sideBySideEvidence(png, label) {
-  const decoded = decodeScreenshot(png, 640, 240);
+function pairedPaintEvidence(referencePng, comparisonPng, label) {
+  const reference = decodeScreenshot(referencePng, 320, 240);
+  const comparison = decodeScreenshot(comparisonPng, 320, 240);
+  invariant(reference.bytesPerPixel === comparison.bytesPerPixel, "BROWSER_RELEASE_PAINT", `${label} screenshots use different raster formats.`);
   let modelPixelDifferences = 0;
   let maximumChannelDelta = 0;
   const colors = new Map();
@@ -271,11 +273,10 @@ function sideBySideEvidence(png, label) {
   let maximumDifferenceY = -1;
   for (let y = 0; y < 240; y += 1) {
     for (let x = 0; x < 320; x += 1) {
-      const referenceOffset = (y * decoded.width + x) * decoded.bytesPerPixel;
-      const comparisonOffset = (y * decoded.width + x + 320) * decoded.bytesPerPixel;
+      const offset = (y * 320 + x) * reference.bytesPerPixel;
       let different = false;
-      for (let channel = 0; channel < decoded.bytesPerPixel; channel += 1) {
-        const delta = Math.abs(decoded.pixels[referenceOffset + channel] - decoded.pixels[comparisonOffset + channel]);
+      for (let channel = 0; channel < reference.bytesPerPixel; channel += 1) {
+        const delta = Math.abs(reference.pixels[offset + channel] - comparison.pixels[offset + channel]);
         maximumChannelDelta = Math.max(maximumChannelDelta, delta);
         if (delta !== 0) different = true;
       }
@@ -286,9 +287,9 @@ function sideBySideEvidence(png, label) {
         maximumDifferenceX = Math.max(maximumDifferenceX, x);
         maximumDifferenceY = Math.max(maximumDifferenceY, y);
       }
-      const red = decoded.pixels[referenceOffset];
-      const green = decoded.pixels[referenceOffset + 1];
-      const blue = decoded.pixels[referenceOffset + 2];
+      const red = reference.pixels[offset];
+      const green = reference.pixels[offset + 1];
+      const blue = reference.pixels[offset + 2];
       const color = `${red},${green},${blue}`;
       colors.set(color, (colors.get(color) ?? 0) + 1);
       const luma = Math.round((red * 54 + green * 183 + blue * 19) / 256);
@@ -321,13 +322,14 @@ async function dumpedMount(browser, url, label, nodes, leaves, requiredLeafTag, 
   invariant(new RegExp(`<${requiredLeafTag}(?:\\s|>)`, "u").test(html), "BROWSER_RELEASE_MOUNT", `${label} did not retain its required <${requiredLeafTag}> strategy leaf.`);
 }
 
-async function paintedComparison(browser, url, label) {
-  const png = await withBrowserPage(browser, { width: 640, height: 240 }, label, async (page, diagnostics) => {
-    await waitForPublication(page, url, label, diagnostics, 2);
+async function paintedPath(browser, url, label) {
+  const png = await withBrowserPage(browser, { width: 320, height: 240 }, label, async (page, diagnostics) => {
+    await waitForPublication(page, url, label, diagnostics, 1);
+    const statusHidden = await page.evaluate(() => document.querySelector("#status")?.hidden === true);
+    invariant(statusHidden, "BROWSER_RELEASE_PAINT", `${label} did not isolate model paint from viewer diagnostics.`);
     return page.screenshot({ type: "png" });
   });
-  invariant(png.length > 1024, "BROWSER_RELEASE_PAINT", `${label} did not produce a substantial painted PNG proof.`);
-  return Object.freeze({ ...sideBySideEvidence(png, label), pngBytes: png.length });
+  return png;
 }
 
 async function browserFixtureProof(browser, origin, modelUrl, slug, nodes, leaves, requiredLeafTag, sourceFrame) {
@@ -338,16 +340,11 @@ async function browserFixtureProof(browser, origin, modelUrl, slug, nodes, leave
   await dumpedMount(browser, alternateUrl, `${slug} alternate mount`, nodes, leaves, requiredLeafTag, sourceFrame);
   await dumpedMount(browser, nVersionUrl, `${slug} N-version reader path`, nodes, leaves, requiredLeafTag, sourceFrame);
 
-  const alternateComparison = await paintedComparison(
-    browser,
-    `${referenceUrl}&compare=conformance`,
-    `${slug} reference/alternate mount paths`,
-  );
-  const nVersionComparison = await paintedComparison(
-    browser,
-    `${nVersionUrl}&compare=reference`,
-    `${slug} reference/N-version reader paths`,
-  );
+  const referencePng = await paintedPath(browser, `${referenceUrl}&proof=1`, `${slug} reference paint path`);
+  const alternatePng = await paintedPath(browser, `${alternateUrl}&proof=1`, `${slug} alternate paint path`);
+  const nVersionPng = await paintedPath(browser, `${nVersionUrl}&proof=1`, `${slug} N-version paint path`);
+  const alternateComparison = pairedPaintEvidence(referencePng, alternatePng, `${slug} reference/alternate mount paths`);
+  const nVersionComparison = pairedPaintEvidence(referencePng, nVersionPng, `${slug} reference/N-version reader paths`);
   return Object.freeze({
     slug,
     sourceFrame,
@@ -356,13 +353,13 @@ async function browserFixtureProof(browser, origin, modelUrl, slug, nodes, leave
     alternateMountPaintedDistinctColors: alternateComparison.distinctColors,
     alternateMountPaintedLumaRange: alternateComparison.lumaRange,
     alternateMountPaintedSecondaryCoverage: alternateComparison.secondaryCoverage,
-    alternateMountPaintedPngBytes: alternateComparison.pngBytes,
+    alternateMountPaintedPngBytes: alternatePng.length,
     alternateMountModelPixelsIdentical: alternateComparison.modelPixelDifferences === 0,
     alternateMountMaximumChannelDelta: alternateComparison.maximumChannelDelta,
     nVersionProbePaintedDistinctColors: nVersionComparison.distinctColors,
     nVersionProbePaintedLumaRange: nVersionComparison.lumaRange,
     nVersionProbePaintedSecondaryCoverage: nVersionComparison.secondaryCoverage,
-    nVersionProbePaintedPngBytes: nVersionComparison.pngBytes,
+    nVersionProbePaintedPngBytes: nVersionPng.length,
     nVersionProbeModelPixelsIdentical: nVersionComparison.modelPixelDifferences === 0,
     nVersionProbeMaximumChannelDelta: nVersionComparison.maximumChannelDelta,
   });

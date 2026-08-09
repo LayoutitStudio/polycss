@@ -4,10 +4,11 @@ const parameters = new URLSearchParams(location.search);
 const modelUrl = parameters.get("model");
 const implementation = parameters.get("implementation") ?? "reference";
 const comparison = parameters.get("compare");
+const paintProof = parameters.get("proof") === "1";
 let runtime = null;
 let comparisonRuntime = null;
 
-if (comparison) status.hidden = true;
+if (comparison || paintProof) status.hidden = true;
 
 try {
   if (!modelUrl) throw new Error("Missing required ?model=/path/to/model.json URL.");

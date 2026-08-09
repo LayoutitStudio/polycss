@@ -5,10 +5,11 @@ const status = document.querySelector("#status");
 const parameters = new URLSearchParams(location.search);
 const modelUrl = parameters.get("model");
 const comparison = parameters.get("compare");
+const paintProof = parameters.get("proof") === "1";
 let referenceRuntime = null;
 let probeRuntime = null;
 
-if (comparison) status.hidden = true;
+if (comparison || paintProof) status.hidden = true;
 
 try {
   if (!modelUrl) throw new Error("Missing required ?model=/path/to/model.json URL.");
