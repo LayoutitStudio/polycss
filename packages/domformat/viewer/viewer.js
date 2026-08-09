@@ -7,6 +7,8 @@ const comparison = parameters.get("compare");
 let runtime = null;
 let comparisonRuntime = null;
 
+if (comparison) status.hidden = true;
+
 try {
   if (!modelUrl) throw new Error("Missing required ?model=/path/to/model.json URL.");
   if (implementation !== "reference" && implementation !== "conformance") throw new Error(`Unsupported viewer implementation ${implementation}.`);

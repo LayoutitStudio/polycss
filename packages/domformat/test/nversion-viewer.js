@@ -8,6 +8,8 @@ const comparison = parameters.get("compare");
 let referenceRuntime = null;
 let probeRuntime = null;
 
+if (comparison) status.hidden = true;
+
 try {
   if (!modelUrl) throw new Error("Missing required ?model=/path/to/model.json URL.");
   if (comparison && comparison !== "reference") throw new Error(`Unsupported comparison ${comparison}.`);

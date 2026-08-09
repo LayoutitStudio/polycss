@@ -6,6 +6,7 @@ import { join, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import { inflateSync } from "node:zlib";
+import { chromium } from "playwright";
 import { buildDom } from "../src/writer.js";
 import { invariant } from "../src/errors.js";
 import { crc32 } from "../src/crc32.js";
@@ -15,6 +16,7 @@ const execFileAsync = promisify(execFile);
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const temporary = await mkdtemp(join(tmpdir(), "domformat-browser-release-"));
 let server;
+let launchedBrowser;
 
 function contentType(path) {
   if (path.endsWith(".html")) return "text/html;charset=utf-8";
@@ -28,6 +30,7 @@ function contentType(path) {
 async function availableBrowser() {
   const candidates = [
     process.env.DOMFORMAT_BROWSER,
+    chromium.executablePath(),
     "/Applications/Chromium.app/Contents/MacOS/Chromium",
     "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
     "/usr/bin/chromium",
@@ -66,28 +69,78 @@ function serve(explicitFiles, runtimeRoot) {
   });
 }
 
-function chromeArguments(profile, dimensions = {}) {
-  const width = dimensions.width ?? 320;
-  const height = dimensions.height ?? 240;
-  return [
-    "--headless=new",
-    "--disable-background-networking",
-    "--disable-component-update",
-    "--disable-default-apps",
-    "--disable-extensions",
-    "--disable-sync",
-    "--hide-scrollbars",
-    "--metrics-recording-only",
-    "--no-default-browser-check",
-    "--no-first-run",
-    `--window-size=${width},${height}`,
-    `--user-data-dir=${profile}`,
-    ...(process.env.DOMFORMAT_BROWSER_NO_SANDBOX === "1"
-      || (typeof process.getuid === "function" && process.getuid() === 0)
-      ? ["--no-sandbox"]
-      : []),
-    "--virtual-time-budget=5000",
-  ];
+function browserArguments() {
+  return process.env.DOMFORMAT_BROWSER_NO_SANDBOX === "1"
+    || (typeof process.getuid === "function" && process.getuid() === 0)
+    ? ["--no-sandbox"]
+    : [];
+}
+
+function diagnosticSuffix(status, diagnostics, error) {
+  const entries = [
+    status?.trim() ? `status: ${status.trim()}` : "",
+    ...diagnostics,
+    error instanceof Error ? error.message : error ? String(error) : "",
+  ].filter(Boolean);
+  return entries.length > 0 ? ` (${entries.join("; ").slice(0, 1000)})` : "";
+}
+
+async function withBrowserPage(browser, dimensions, label, action) {
+  const context = await browser.newContext({
+    viewport: dimensions,
+    deviceScaleFactor: 1,
+    colorScheme: "light",
+  });
+  const page = await context.newPage();
+  const diagnostics = [];
+  page.on("pageerror", (error) => diagnostics.push(`page error: ${error.message}`));
+  page.on("console", (message) => {
+    if (message.type() === "error") diagnostics.push(`console error: ${message.text()}`);
+  });
+  let result;
+  let primaryError;
+  try {
+    result = await action(page, diagnostics);
+  } catch (error) {
+    primaryError = error;
+  }
+  try {
+    await context.close();
+  } catch (error) {
+    primaryError ??= error;
+  }
+  if (primaryError) throw primaryError;
+  invariant(diagnostics.length === 0, "BROWSER_RELEASE_BROWSER", `${label} emitted browser errors${diagnosticSuffix("", diagnostics)}.`);
+  return result;
+}
+
+async function waitForPublication(page, url, label, diagnostics) {
+  let waitError;
+  try {
+    await page.goto(url, { waitUntil: "load", timeout: 20_000 });
+    await page.waitForFunction(() => {
+      const root = document.documentElement;
+      return root.hasAttribute("data-domformat-ready") || root.hasAttribute("data-domformat-error");
+    }, undefined, { polling: 50, timeout: 20_000 });
+  } catch (error) {
+    waitError = error;
+  }
+  const publication = await page.evaluate(() => ({
+    ready: document.documentElement.hasAttribute("data-domformat-ready"),
+    error: document.documentElement.hasAttribute("data-domformat-error"),
+    status: document.querySelector("#status")?.textContent ?? "",
+  })).catch(() => ({ ready: false, error: false, status: "" }));
+  invariant(!waitError, "BROWSER_RELEASE_MOUNT", `${label} did not publish the retained DOM${diagnosticSuffix(publication.status, diagnostics, waitError)}.`);
+  invariant(!publication.error, "BROWSER_RELEASE_MOUNT", `${label} reported a package mount failure${diagnosticSuffix(publication.status, diagnostics)}.`);
+  invariant(publication.ready, "BROWSER_RELEASE_MOUNT", `${label} did not publish the retained DOM${diagnosticSuffix(publication.status, diagnostics)}.`);
+  const paint = await page.evaluate(() => new Promise((resolvePaint) => {
+    const timeout = setTimeout(() => resolvePaint(false), 2_000);
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      clearTimeout(timeout);
+      resolvePaint(true);
+    }));
+  }));
+  invariant(paint, "BROWSER_RELEASE_PAINT", `${label} did not cross its two-frame paint barrier.`);
 }
 
 function uint32Be(bytes, offset) {
@@ -175,8 +228,8 @@ function sideBySideEvidence(png, label) {
   let minimumLuma = 255;
   let maximumLuma = 0;
   let samples = 0;
-  for (let y = 48; y < 192; y += 1) {
-    for (let x = 64; x < 256; x += 1) {
+  for (let y = 0; y < 240; y += 1) {
+    for (let x = 0; x < 320; x += 1) {
       const referenceOffset = (y * decoded.width + x) * decoded.bytesPerPixel;
       const comparisonOffset = (y * decoded.width + x + 320) * decoded.bytesPerPixel;
       let different = false;
@@ -197,7 +250,7 @@ function sideBySideEvidence(png, label) {
       samples += 1;
     }
   }
-  invariant(modelPixelDifferences === 0, "BROWSER_RELEASE_PAINT", `${label} differs in ${modelPixelDifferences} central model pixels.`);
+  invariant(modelPixelDifferences === 0, "BROWSER_RELEASE_PAINT", `${label} differs in ${modelPixelDifferences} retained-DOM proof pixels.`);
   const populations = [...colors.values()].sort((left, right) => right - left);
   const secondaryCoverage = (populations[1] ?? 0) / samples;
   invariant(colors.size >= 2 && maximumLuma - minimumLuma >= 2 && secondaryCoverage >= 0.2, "BROWSER_RELEASE_PAINT", `Side-by-side model paint is uniform (${colors.size} colors; luma range ${maximumLuma - minimumLuma}; secondary coverage ${secondaryCoverage.toFixed(3)}).`);
@@ -210,44 +263,22 @@ function sideBySideEvidence(png, label) {
   });
 }
 
-async function dumpedMount(browser, url, profile, label, nodes, leaves, requiredLeafTag, sourceFrame) {
-  let result = null;
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    try {
-      result = await execFileAsync(browser, [...chromeArguments(`${profile}-attempt-${attempt + 1}`), "--dump-dom", url], {
-        maxBuffer: 16 * 1024 * 1024,
-        timeout: 20_000,
-        killSignal: "SIGKILL",
-      });
-    } catch (error) {
-      const stdout = typeof error?.stdout === "string" ? error.stdout : "";
-      if (error?.killed && error.signal === "SIGKILL" && stdout.includes("data-domformat-ready")) {
-        result = { stdout, stderr: error.stderr ?? "" };
-      } else if (attempt === 2) throw error;
-      else continue;
-    }
-    invariant(!result.stdout.includes("data-domformat-error"), "BROWSER_RELEASE_MOUNT", `${label} reported a package mount failure.`);
-    if (/<html[^>]*data-domformat-ready=""/u.test(result.stdout)) break;
-    result = null;
-  }
-  invariant(result, "BROWSER_RELEASE_MOUNT", `${label} did not publish the retained DOM after three isolated attempts.`);
-  invariant(result.stdout.includes("data-domformat-mount-surface=\"\""), "BROWSER_RELEASE_MOUNT", `${label} lacks the isolated mount surface.`);
-  invariant(result.stdout.includes(`data-domformat-source-frame="${sourceFrame}"`), "BROWSER_RELEASE_MOUNT", `${label} did not publish prepared source frame ${sourceFrame}.`);
-  invariant(result.stdout.includes(`domformat@0 · ${nodes} nodes · ${leaves} leaves`), "BROWSER_RELEASE_MOUNT", `${label} has unexpected retained-DOM counts.`);
-  invariant(new RegExp(`<${requiredLeafTag}(?:\\s|>)`, "u").test(result.stdout), "BROWSER_RELEASE_MOUNT", `${label} did not retain its required <${requiredLeafTag}> strategy leaf.`);
+async function dumpedMount(browser, url, label, nodes, leaves, requiredLeafTag, sourceFrame) {
+  const html = await withBrowserPage(browser, { width: 320, height: 240 }, label, async (page, diagnostics) => {
+    await waitForPublication(page, url, label, diagnostics);
+    return page.content();
+  });
+  invariant(html.includes("data-domformat-mount-surface=\"\""), "BROWSER_RELEASE_MOUNT", `${label} lacks the isolated mount surface.`);
+  invariant(html.includes(`data-domformat-source-frame="${sourceFrame}"`), "BROWSER_RELEASE_MOUNT", `${label} did not publish prepared source frame ${sourceFrame}.`);
+  invariant(html.includes(`domformat@0 · ${nodes} nodes · ${leaves} leaves`), "BROWSER_RELEASE_MOUNT", `${label} has unexpected retained-DOM counts.`);
+  invariant(new RegExp(`<${requiredLeafTag}(?:\\s|>)`, "u").test(html), "BROWSER_RELEASE_MOUNT", `${label} did not retain its required <${requiredLeafTag}> strategy leaf.`);
 }
 
-async function paintedComparison(browser, url, profile, screenshot, label) {
-  try {
-    await execFileAsync(browser, [
-      ...chromeArguments(profile, { width: 640, height: 240 }),
-      `--screenshot=${screenshot}`,
-      url,
-    ], { maxBuffer: 4 * 1024 * 1024, timeout: 20_000, killSignal: "SIGKILL" });
-  } catch (error) {
-    if (!error?.killed || error.signal !== "SIGKILL") throw error;
-  }
-  const png = await readFile(screenshot);
+async function paintedComparison(browser, url, label) {
+  const png = await withBrowserPage(browser, { width: 640, height: 240 }, label, async (page, diagnostics) => {
+    await waitForPublication(page, url, label, diagnostics);
+    return page.screenshot({ type: "png" });
+  });
   invariant(png.length > 1024, "BROWSER_RELEASE_PAINT", `${label} did not produce a substantial painted PNG proof.`);
   return Object.freeze({ ...sideBySideEvidence(png, label), pngBytes: png.length });
 }
@@ -256,22 +287,18 @@ async function browserFixtureProof(browser, origin, modelUrl, slug, nodes, leave
   const referenceUrl = `${origin}/viewer/index.html?model=${encodeURIComponent(modelUrl)}&animate=0&frame=${sourceFrame}`;
   const alternateUrl = `${referenceUrl}&implementation=conformance`;
   const nVersionUrl = `${origin}/test/nversion-viewer.html?model=${encodeURIComponent(modelUrl)}&animate=0&frame=${sourceFrame}`;
-  await dumpedMount(browser, referenceUrl, join(temporary, `${slug}-reference-profile`), `${slug} reference viewer`, nodes, leaves, requiredLeafTag, sourceFrame);
-  await dumpedMount(browser, alternateUrl, join(temporary, `${slug}-alternate-profile`), `${slug} alternate mount`, nodes, leaves, requiredLeafTag, sourceFrame);
-  await dumpedMount(browser, nVersionUrl, join(temporary, `${slug}-nversion-profile`), `${slug} N-version reader path`, nodes, leaves, requiredLeafTag, sourceFrame);
+  await dumpedMount(browser, referenceUrl, `${slug} reference viewer`, nodes, leaves, requiredLeafTag, sourceFrame);
+  await dumpedMount(browser, alternateUrl, `${slug} alternate mount`, nodes, leaves, requiredLeafTag, sourceFrame);
+  await dumpedMount(browser, nVersionUrl, `${slug} N-version reader path`, nodes, leaves, requiredLeafTag, sourceFrame);
 
   const alternateComparison = await paintedComparison(
     browser,
     `${referenceUrl}&compare=conformance`,
-    join(temporary, `${slug}-alternate-comparison-profile`),
-    join(temporary, `${slug}-alternate-comparison-painted.png`),
     `${slug} reference/alternate mount paths`,
   );
   const nVersionComparison = await paintedComparison(
     browser,
     `${nVersionUrl}&compare=reference`,
-    join(temporary, `${slug}-nversion-comparison-profile`),
-    join(temporary, `${slug}-nversion-comparison-painted.png`),
     `${slug} reference/N-version reader paths`,
   );
   return Object.freeze({
@@ -341,12 +368,18 @@ try {
   const address = server.address();
   invariant(address && typeof address === "object", "BROWSER_RELEASE_SERVER", "Browser release server did not bind a local port.");
   const origin = `http://127.0.0.1:${address.port}`;
-  const browser = await availableBrowser();
+  const browserExecutable = await availableBrowser();
+  launchedBrowser = await chromium.launch({
+    executablePath: browserExecutable,
+    headless: true,
+    args: browserArguments(),
+  });
   const proofs = [];
-  proofs.push(await browserFixtureProof(browser, origin, "/model.json", "reference-writer-json", 8, 1, "i", 1));
-  proofs.push(await browserFixtureProof(browser, origin, "/independent/model.json", "independent-producer-json", 11, 2, "u", 2));
+  proofs.push(await browserFixtureProof(launchedBrowser, origin, "/model.json", "reference-writer-json", 8, 1, "i", 1));
+  proofs.push(await browserFixtureProof(launchedBrowser, origin, "/independent/model.json", "independent-producer-json", 11, 2, "u", 2));
   process.stdout.write(`${JSON.stringify({
-    browser,
+    browser: browserExecutable,
+    browserVersion: launchedBrowser.version(),
     fixtures: proofs,
     independentProducer: producerSummary,
     browserRuntime: "clean-installed npm tarball",
@@ -357,6 +390,7 @@ try {
     realBrowser: true,
   }, null, 2)}\n`);
 } finally {
+  try { await launchedBrowser?.close(); } catch {}
   if (server) await new Promise((resolveClose) => server.close(resolveClose));
   await rm(temporary, { recursive: true, force: true });
 }

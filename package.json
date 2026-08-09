@@ -58,7 +58,7 @@
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "esbuild": "^0.28.0",
-    "playwright": "^1.58.2",
+    "playwright": "1.58.2",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
     "three": "^0.185.1",

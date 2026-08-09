@@ -82,12 +82,12 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Install pinned Chromium headless shell
-        run: pnpm exec playwright install --with-deps chromium-headless-shell
+      - name: Install pinned Playwright Chromium
+        run: pnpm exec playwright install --with-deps chromium
 
-      - name: Expose pinned Chromium headless shell executable
+      - name: Expose pinned Playwright Chromium executable
         run: >-
-          node --input-type=module --eval 'import { chromium } from "playwright"; const server = await chromium.launchServer({ headless: true }); process.stdout.write("DOMFORMAT_BROWSER=" + server.process().spawnfile + "\n"); await server.close();' >> "$GITHUB_ENV"
+          node --input-type=module --eval 'import { chromium } from "playwright"; process.stdout.write("DOMFORMAT_BROWSER=" + chromium.executablePath() + "\n");' >> "$GITHUB_ENV"
 
       - name: Certify domformat in real Chromium
         env:

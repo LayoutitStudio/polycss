@@ -18,7 +18,7 @@ importers:
         specifier: ^0.28.0
         version: 0.28.0
       playwright:
-        specifier: ^1.58.2
+        specifier: 1.58.2
         version: 1.58.2
       react:
         specifier: ^19.2.6
@@ -126,6 +126,9 @@ importers:
       '@types/node':
         specifier: ^25.0.0
         version: 25.5.0
+      playwright:
+        specifier: 1.58.2
+        version: 1.58.2
       tsup:
         specifier: ^8.0.1
         version: 8.5.1(postcss@8.5.8)(tsx@4.23.11)(typescript@5.9.3)
