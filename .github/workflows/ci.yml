@@ -61,7 +61,7 @@ jobs:
       - name: Build website
         run: pnpm build:website
 
-  certify-domformat-browser-and-corpus:
+  certify-domformat-browser:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -93,6 +93,33 @@ jobs:
         env:
           DOMFORMAT_BROWSER_NO_SANDBOX: "1"
         run: pnpm --filter @layoutit/polycss-domformat test:browser
+
+  certify-gallery-domformat-corpus:
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - name: Check out
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@a7487c7e89a18df4991f7f222e4898a00d66ddda
+        with:
+          version: 10.32.1
+
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install pinned Playwright Chromium
+        run: pnpm exec playwright install chromium
+
+      - name: Build domformat
+        run: pnpm --filter @layoutit/polycss-domformat build
 
       - name: Regenerate and compare the complete Gallery corpus
         run: pnpm --filter @layoutit/polycss-website verify:domformat:fresh
