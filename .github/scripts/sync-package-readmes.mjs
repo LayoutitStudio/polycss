@@ -37,33 +37,57 @@ const blockRe = (name) =>
     `<!-- polycss:shared:${name}:start -->[\\s\\S]*?<!-- polycss:shared:${name}:end -->`,
   );
 
-/** Every block name the root README publishes, in document order. */
-function sharedBlockNames(text) {
-  return [...text.matchAll(/<!-- polycss:shared:([a-z-]+):start -->/g)].map(
-    (m) => m[1],
-  );
+const START_RE = /<!-- polycss:shared:([a-z-]+):start -->/g;
+const END_RE = /<!-- polycss:shared:([a-z-]+):end -->/g;
+
+const fail = (message) => {
+  console.error(`[sync-package-readmes] ${message}`);
+  process.exit(1);
+};
+
+const countByName = (text, re) => {
+  const counts = new Map();
+  for (const m of text.matchAll(re)) {
+    counts.set(m[1], (counts.get(m[1]) ?? 0) + 1);
+  }
+  return counts;
+};
+
+/**
+ * Every marker must appear exactly once and be balanced. Anything else is a
+ * malformed file, not a partially-syncable one: silently skipping it is how a
+ * stale block reaches npm.
+ */
+function assertWellFormed(text, label, allowed) {
+  const starts = countByName(text, START_RE);
+  const ends = countByName(text, END_RE);
+
+  for (const [name, n] of starts) {
+    if (n > 1) fail(`${label}: block "${name}" has ${n} start markers, expected 1`);
+    if ((ends.get(name) ?? 0) !== 1)
+      fail(`${label}: block "${name}" has a start marker but no matching end marker`);
+    if (allowed && !allowed.has(name))
+      fail(`${label}: block "${name}" is not defined in the root README`);
+  }
+  for (const [name, n] of ends) {
+    if (n > 1) fail(`${label}: block "${name}" has ${n} end markers, expected 1`);
+    if (!starts.has(name))
+      fail(`${label}: block "${name}" has an end marker but no matching start marker`);
+  }
+  return starts;
 }
 
 const rootText = readFileSync(source, "utf8");
-const names = sharedBlockNames(rootText);
+const rootStarts = assertWellFormed(rootText, "root README", null);
+const names = [...rootStarts.keys()];
 
 if (names.length === 0) {
-  console.error(
-    "[sync-package-readmes] no shared blocks found in the root README — refusing to run",
-  );
-  process.exit(1);
+  fail("no shared blocks found in the root README — refusing to run");
 }
 
 const blocks = new Map();
 for (const name of names) {
-  const match = rootText.match(blockRe(name));
-  if (!match) {
-    console.error(
-      `[sync-package-readmes] block "${name}" has a start marker but no end marker`,
-    );
-    process.exit(1);
-  }
-  blocks.set(name, match[0]);
+  blocks.set(name, rootText.match(blockRe(name))[0]);
 }
 
 const drifted = [];
@@ -78,10 +102,11 @@ for (const target of targets) {
     continue;
   }
 
+  const present = assertWellFormed(text, target, new Set(names));
+
   let next = text;
-  for (const [name, block] of blocks) {
-    const re = blockRe(name);
-    if (re.test(next)) next = next.replace(re, block);
+  for (const name of present.keys()) {
+    next = next.replace(blockRe(name), blocks.get(name));
   }
 
   if (next === text) continue;

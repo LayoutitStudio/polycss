@@ -141,10 +141,14 @@ and `meshResolution` to `"lossy"`: coincident faces within `0.05` world units
 are deduped, interior faces culled, and lossy merging starts at `0.35` world
 units of plane displacement / `0.04` boundary / `15°` — but that is not the
 ceiling: the optimizer also tries aggressive `30°`, `45°`, and `60°` variants
-(the widest at `0.06` boundary), accepted on a material render-cost win. All
-absolute world units, not configurable. Dedupe and
-interior culling count as exact reductions and still run under
-`meshResolution: "lossless"`. `merge: false` renders the array you pass
+(the widest at `0.06` boundary), accepted on a material render-cost win. The
+degree values are angular thresholds; the displacement budgets are absolute
+world units. None are configurable. Dedupe and interior culling count as exact
+reductions and still run under `meshResolution: "lossless"` — with one
+parse-time exception: STL parse results force the lossless optimizer *and* pass
+`skipInteriorCull`, but that protection does not survive into the renderer's own
+pass, which culls again unless you set `merge: false`. `merge: false` renders
+the array you pass
 untouched, but only on `scene.add(...)` and `<PolyMesh polygons>` — it does not
 exist on `<PolyScene polygons>` (always normalized + merged) or `<poly-mesh>`,
 and it cannot undo `loadMesh`'s own parse-time optimization. There is no

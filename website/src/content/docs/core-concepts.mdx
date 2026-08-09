@@ -27,7 +27,7 @@ PolyCSS exposes three composable concepts. Each one ships as a custom element (v
 - **Mesh** (`<poly-mesh>` / `PolyMesh`): loads a mesh from a URL (OBJ / STL / glTF / GLB / VOX). Internally expands to one polygon child per face. Convenience wrapper around the parser + renderer.
 - **Polygon** (`<poly-polygon>` / `Poly`): one polygon. The atomic primitive. Renders as one internal DOM leaf with `transform: matrix3d(...)`. Accepts standard DOM event handlers, classes, and styles: this is what makes PolyCSS "DOM-native 3D" rather than "3D inside a black-box canvas".
 
-A mesh element is internally `polygons.map(p => <poly-polygon …>)`, so any rendered mesh can be inspected, styled, or handled per-polygon.
+A loaded mesh does **not** expand into `<poly-polygon>` elements — the renderer mounts one internal leaf per visible polygon inside a `.polycss-mesh` wrapper, and the leaf tag is a private strategy choice (see [Render Strategies](#render-strategies)). `<poly-polygon>` / `<Poly>` exists for polygons you author yourself. To style or handle a loaded mesh per-polygon, use its render prop / scoped slot, or target the mesh wrapper and its leaves by class and `data-*` attributes.
 
 ## Camera
 
@@ -228,8 +228,10 @@ authored geometry is merged, deduped, and interior-culled before it renders:
   tries progressively more aggressive variants at `30°`, `45°`, and `60°` — the
   widest also raising boundary displacement to `0.06`. Those are accepted only
   on a material render-cost win with non-worsening seam diagnostics, but they
-  *can* apply to your geometry. All values are **absolute world units and not
-  configurable**, so small-scale hand-authored meshes can get visibly welded.
+  *can* apply to your geometry. The degree values are angular thresholds; the
+  plane and boundary displacement budgets are **absolute world units**. None of
+  them are configurable, so small-scale hand-authored meshes can get visibly
+  welded.
 
 Note that dedupe and interior culling are treated as *exact* reductions, so they
 still run under `meshResolution: "lossless"` — only the lossy approximation is

@@ -5,7 +5,9 @@ description: "Camera components for controlling the 3D viewport: perspective, or
 
 import { Tabs, TabItem } from '@astrojs/starlight/components';
 
-PolyCSS provides two camera components: `<PolyCamera>` (alias `<PolyOrthographicCamera>`) for parallel projection, and `<PolyPerspectiveCamera>` for scenes with depth foreshortening. The camera element is always the **outer** node — `<poly-scene>` / `PolyScene` is nested inside it. This is required by the CSS rendering model: CSS `perspective` only applies to descendants, so the scene's `transform: matrix3d(...)` must be a child of the camera.
+PolyCSS provides two camera components: `<PolyCamera>` (alias `<PolyOrthographicCamera>`) for parallel projection, and `<PolyPerspectiveCamera>` for scenes with depth foreshortening. The camera element is normally the **outer** node — `<poly-scene>` / `PolyScene` is nested inside it. The CSS rendering model requires this nesting: CSS `perspective` only applies to descendants, so the scene's `transform: matrix3d(...)` must be a child of the element carrying the projection.
+
+React and Vue enforce it — `PolyScene` throws outside a camera component, and `createPolyScene()` takes a required camera handle. The `<poly-scene>` custom element is the one exception: with no ancestor camera element it builds an **implicit** camera wrapper from its own `perspective`, `rot-x`, `rot-y`, `zoom`, `distance`, and `target` attributes, which satisfies the same nesting requirement internally. See [PolyScene](/components/poly-scene).
 
 `<PolyCamera>` is orthographic by default. Use `<PolyPerspectiveCamera>` when depth foreshortening is needed (e.g. first-person or game-like scenes).
 
