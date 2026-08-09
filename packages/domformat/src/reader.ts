@@ -5,7 +5,7 @@ import { decodeJson, deepFreezeJson } from "./canonical-json.js";
 import { errorCode, errorName, fail, invariant } from "./errors.js";
 import { readCappedFile } from "./file-io.js";
 import { sha256Hex } from "./hash.js";
-import { assertSafeRelativePath, validateCssBytes, validateResourceBytes } from "./resources.js";
+import { assertSafeRelativePath, byteView, validateCssBytes, validateResourceBytes } from "./resources.js";
 import { validateDocumentInternal } from "./schema.js";
 import { assertRealDescendantComponents, assertRealDirectory } from "./path-security.js";
 import type { DomLimits } from "./constants.js";
@@ -24,17 +24,15 @@ function plainRecord(value: unknown, code: string, label: string): Record<string
 }
 
 function inputBytes(value: unknown): Uint8Array {
-  if (value instanceof Uint8Array) return value.slice();
-  if (value instanceof ArrayBuffer) return new Uint8Array(value.slice(0));
-  if (ArrayBuffer.isView(value)) return new Uint8Array(value.buffer, value.byteOffset, value.byteLength).slice();
-  invariant(false, "INVALID_BYTES", "Expected an ArrayBuffer or Uint8Array.");
+  const bytes = byteView(value);
+  invariant(bytes, "INVALID_BYTES", "Expected an ArrayBuffer or ArrayBufferView.");
+  return bytes.slice();
 }
 
 function externalResourceBytes(value: unknown, label: string): Uint8Array {
-  if (value instanceof Uint8Array) return value;
-  if (value instanceof ArrayBuffer) return new Uint8Array(value);
-  if (ArrayBuffer.isView(value)) return new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
-  invariant(false, "INVALID_RESOURCE_BYTES", `${label} must be an ArrayBuffer view.`);
+  const bytes = byteView(value);
+  invariant(bytes, "INVALID_RESOURCE_BYTES", `${label} must be an ArrayBuffer or ArrayBufferView.`);
+  return bytes;
 }
 
 function decodeTransport(value: unknown, limits: DomLimits): DomTransport {

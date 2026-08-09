@@ -265,7 +265,7 @@ test("independent Python reader validates canonical and ordinary JSON with sibli
   }
 });
 
-test("independent Python reader enforces interaction arithmetic envelopes", async () => {
+test("independent Python reader enforces prepared runtime arithmetic envelopes", async () => {
   const built = buildDom(await syntheticExecutableInteractionInput());
   const directory = await mkdtemp(join(tmpdir(), "domformat-python-interaction-"));
   try {
@@ -282,18 +282,39 @@ test("independent Python reader enforces interaction arithmetic envelopes", asyn
     });
     assert.equal(valid.status, 0, `${valid.stdout}\n${valid.stderr}`);
 
-    const overflow = encodeUncheckedDocument(built, (document) => {
-      document.state.channels.find((channel) => channel.codec === "polycss-pointer-grab-prepared@0")
-        .data.packet.source.displacementMagnitude = Math.fround(3e38);
-    });
-    const overflowFile = join(directory, "overflow.json");
-    await writeFile(overflowFile, overflow);
-    const invalid = spawnSync("python3", ["-B", "conformance/reader.py", "validate", overflowFile], {
-      cwd: root,
-      encoding: "utf8",
-    });
-    assert.equal(invalid.status, 1, `${invalid.stdout}\n${invalid.stderr}`);
-    assert.match(invalid.stderr, /INVALID_INTERACTION_STATE/u);
+    const cases = [
+      ["interaction-displacement", "INVALID_INTERACTION_STATE", (document) => {
+        document.state.channels.find((channel) => channel.codec === "polycss-pointer-grab-prepared@0")
+          .data.packet.source.displacementMagnitude = Math.fround(3e38);
+      }],
+      ["interaction-reconstruction", "INVALID_INTERACTION_STATE", (document) => {
+        const packet = document.state.channels.find((channel) => channel.codec === "polycss-pointer-grab-prepared@0").data.packet;
+        const closure = packet.controls[0].closure;
+        closure.weightActiveFlags[0] = 0;
+        closure.weightScalars[0] = Math.fround(2e38);
+        closure.weightLinearContributions[0] = 2;
+      }],
+      ["interaction-eye-matrix", "INVALID_INTERACTION_STATE", (document) => {
+        const packet = document.state.channels.find((channel) => channel.codec === "polycss-pointer-grab-prepared@0").data.packet;
+        packet.objects.rotationMatrices[0] = Math.fround(2e38);
+        packet.controls.find((control) => control.mode === "eye-follow").closure.rigidRootInverseMatrix[0] = 2;
+      }],
+      ...[1, 1.5].map((timeout) => [`effects-lifetime-${timeout}`, "INVALID_EFFECTS_STATE", (document) => {
+        const packet = document.state.channels.find((channel) => channel.codec === "polycss-effects-prepared@0").data.packet;
+        packet.biases.continuous = [0, 0, 0];
+        packet.spawnStream.tuples[0] = [timeout, Math.fround(2e38), 0, 0];
+      }]),
+    ];
+    for (const [label, code, mutateDocument] of cases) {
+      const invalidFile = join(directory, `${label}.json`);
+      await writeFile(invalidFile, encodeUncheckedDocument(built, mutateDocument));
+      const invalid = spawnSync("python3", ["-B", "conformance/reader.py", "validate", invalidFile], {
+        cwd: root,
+        encoding: "utf8",
+      });
+      assert.equal(invalid.status, 1, `${label}: ${invalid.stdout}\n${invalid.stderr}`);
+      assert.match(invalid.stderr, new RegExp(code, "u"), label);
+    }
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

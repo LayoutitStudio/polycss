@@ -145,6 +145,7 @@ export interface PolycssInteraction {
     settling: boolean;
     cursor: readonly [number, number];
   }>;
+  invalidatePublication(): void;
   restore(): Readonly<{ shapeIndices: readonly number[]; leafIndices: readonly number[] }>;
   publishInitial(): InteractionPublication;
   step(value?: unknown): InteractionPublication;
@@ -315,7 +316,7 @@ function mirrorControl(value: ControlState, input: InteractionInputContract): Co
 
 function sourceSample(sample: NormalizedSample, input: InteractionInputContract): NormalizedSample {
   return Object.freeze({
-    stickX: Math.max(input.stickRange[0], Math.min(input.stickRange[1], -sample.stickX)),
+    stickX: Math.max(input.stickRange[0], Math.min(input.stickRange[1], mirrorStick(sample.stickX))),
     stickY: sample.stickY,
     buttonMask: sample.buttonMask,
     pointer: sample.pointer
@@ -776,6 +777,10 @@ export function createPolycssInteraction(
         settling: active !== null && !active.selected,
         cursor: Object.freeze([mirrorControl(control, packet.input).csrX, mirrorControl(control, packet.input).csrY] as const),
       });
+    },
+    invalidatePublication() {
+      invariant(!destroyed, "INTERACTION_DESTROYED", "Prepared interaction interpreter is destroyed.");
+      coordinatesReady.fill(0);
     },
     restore() {
       invariant(!destroyed, "INTERACTION_DESTROYED", "Prepared interaction interpreter is destroyed.");

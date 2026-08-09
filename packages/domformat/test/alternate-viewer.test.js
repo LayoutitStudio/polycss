@@ -354,6 +354,24 @@ test("alternate and public viewers catch up every due fixed-rate playback tick",
   value.alternateRuntime.destroy();
 });
 
+test("eight due scheduler ticks catch up while the ninth is a suspension", async () => {
+  for (const [timestamp, expectedFrame, label] of [
+    [267, 1, "eight due ticks"],
+    [300, 2, "nine due ticks"],
+  ]) {
+    const value = await mountedPair(await syntheticTwoFramePolycssInput(), { animate: true });
+    value.reference.frame(0);
+    value.alternate.frame(0);
+    value.reference.frame(timestamp);
+    value.alternate.frame(timestamp);
+    assert.equal(value.referenceRuntime.sourceFrame, expectedFrame, `${label} reference boundary`);
+    assert.equal(value.alternateRuntime.sourceFrame, expectedFrame, `${label} alternate boundary`);
+    assertEquivalent(value, label);
+    value.referenceRuntime.destroy();
+    value.alternateRuntime.destroy();
+  }
+});
+
 test("alternate and public viewers drop a suspended scheduler backlog", async () => {
   const value = await mountedPair(await syntheticTwoFramePolycssInput(), { animate: true });
   value.reference.frame(0);
@@ -380,7 +398,7 @@ test("alternate and public viewers drop a suspended scheduler backlog", async ()
   value.alternateRuntime.destroy();
 });
 
-test("interaction catch-up keeps every overdue tick separately published", async () => {
+test("interaction catch-up keeps every due tick separately published", async () => {
   const catchup = await mountedPair(await syntheticExecutableInteractionInput(), { animate: true, mode: "interaction" });
   const sequential = await mountedPair(await syntheticExecutableInteractionInput(), { animate: true, mode: "interaction" });
   for (const value of [catchup, sequential]) {
@@ -410,6 +428,32 @@ test("interaction catch-up keeps every overdue tick separately published", async
     value.referenceRuntime.destroy();
     value.alternateRuntime.destroy();
   }
+});
+
+test("public seek invalidates sparse interaction publication for the next tick", async () => {
+  const value = await mountedPair(await syntheticExecutableInteractionInput(), { animate: true, mode: "interaction" });
+  const eyeIndex = value.result.document.tree.nodes.findIndex((node) => node.id === "synthetic/eye-leaf");
+  const referenceEye = value.reference.namespaced[eyeIndex];
+  const alternateEye = value.alternateRuntime.node("synthetic/eye-leaf");
+  const interactionTransform = referenceEye.style.transform;
+  assert.equal(alternateEye.style.transform, interactionTransform);
+
+  const frame = value.referenceRuntime.sourceFrame;
+  assert.equal(value.referenceRuntime.seek(frame), frame);
+  assert.equal(value.alternateRuntime.seek(frame), frame);
+  const preparedTransform = referenceEye.style.transform;
+  assert.notEqual(preparedTransform, interactionTransform);
+  assert.equal(alternateEye.style.transform, preparedTransform);
+
+  value.reference.frame(0);
+  value.alternate.frame(0);
+  value.reference.frame(34);
+  value.alternate.frame(34);
+  assert.equal(referenceEye.style.transform, interactionTransform);
+  assert.equal(alternateEye.style.transform, interactionTransform);
+  assertEquivalent(value, "interaction republish after seek");
+  value.referenceRuntime.destroy();
+  value.alternateRuntime.destroy();
 });
 
 test("alternate and public viewers agree through pointer pick, drag, release, effects, and mode reset", async () => {

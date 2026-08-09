@@ -96,7 +96,7 @@ This is the load-bearing constraint behind the whole engine. **JavaScript should
 
 The renderer exception is imported skeletal animation. glTF/GLB skinning changes each polygon independently, so the vanilla stable-DOM animation path samples the active clip in JS, keeps the leaf set mounted, caches baked stable-triangle transform frames, and pins each mounted triangle's baked color while transforms animate. Recomputing Lambert from every deformed low-poly face normal creates visible color pumping, so color refresh is internal opt-in rather than the default animation behavior. On WebKit/Safari, where stable CSS triangles fall through to solid atlas `<s>` leaves, same-topology animation updates keep the existing atlas elements and bitmap URLs mounted, cache transform frames once warmed, and hide briefly degenerate atlas triangles only until the next valid frame. That optimized path is the default; do not add a user-facing "baseline vs optimized" toggle or maintain a legacy slow path in product UI.
 
-The domformat reference mount has one separate, closed exception: it may schedule its validated fixed-rate prepared playback and interaction tables. That scheduler may write only declared sinks on the retained targets, never reconstruct topology or evaluate producer code, expressions, renderer internals, or network resources, and is disabled by `animate: false`. Normal catch-up is bounded to eight overdue ticks: every due logical animation tick and distinct prepared-effect transition in that window is evaluated in order, but one browser callback may publish only their final retained-DOM state; interaction publishes each such tick separately because input, cursor, grab, and spring state are observable. A larger gap is treated as suspension, discards the stale backlog, advances one tick, and resets the deadline. The one-tick path and public operations remain synchronous. This is a reference implementation of an already-lowered wire profile, not a PolyCSS renderer loop.
+The domformat reference mount has one separate, closed exception: it may schedule its validated fixed-rate prepared playback and interaction tables. That scheduler may write only declared sinks on the retained targets, never reconstruct topology or evaluate producer code, expressions, renderer internals, or network resources, and is disabled by `animate: false`. Normal catch-up is bounded to eight due ticks: every due logical animation tick and distinct prepared-effect transition in that window is evaluated in order, but one browser callback may publish only their final retained-DOM state; interaction publishes each such tick separately because input, cursor, grab, and spring state are observable. A larger gap is treated as suspension, discards the stale backlog, advances one tick, and resets the deadline. The one-tick path and public operations remain synchronous. This is a reference implementation of an already-lowered wire profile, not a PolyCSS renderer loop.
 
 | Where JS runs | Where JS does NOT run |
 |---|---|
@@ -181,13 +181,15 @@ alias for Morph packages and does not depend on Morph or renderer internals.
   commands include it; public version-bump and npm-publish automation must not.
   Public Node and browser signatures describe the closed document, resource,
   options, lifecycle, and controller contracts.
-- Domformat's certification suite intentionally remains under `test/` and uses
-  `node:test`: it coordinates raw ESM, CLI subprocesses, Python implementations,
-  and real-browser harnesses rather than renderer-unit tests. Tests execute the
-  authored TypeScript through `tsx`; the release gate separately exercises the
-  clean-installed compiled package. This is the package's explicit exception
-  to sibling Vitest/co-location conventions, not an exception to strict typing,
-  declarations, coverage, or the mandatory build gate.
+- Domformat's repository-side tests intentionally remain one certification
+  suite under `test/` using `node:test`. In-process contract tests share the
+  same corpora and helpers as the raw-ESM, CLI-subprocess, independent Python,
+  and real-browser harnesses, with one package-level coverage gate. Tests
+  execute the authored TypeScript through `tsx`; the release gate separately
+  exercises the clean-installed compiled package. This is the package's
+  explicit exception to sibling Vitest/co-location conventions, not an
+  exception to strict typing, declarations, coverage, or the mandatory build
+  gate.
 - Install tarballs contain only package metadata, README, CLI, compiled runtime,
   and declarations. Specifications, independent readers/producers, fixtures, the
   alternate mount shell, scripts, and tests remain repository-side
@@ -197,7 +199,7 @@ alias for Morph packages and does not depend on Morph or renderer internals.
   `website/scripts/generate-gallery-domformat.mjs` lowers all Gallery presets
   through shared Gallery preset/loader/presentation/animation behavior into
   canonical documents under
-  `website/public/gallery/domformat/`. The generated 304-model corpus and its
+  `website/gallery-domformat-corpus/`. The generated 304-model corpus and its
   digest-bound CSS/image siblings are website assets, never package payload or
   runtime code. Its catalog pins the exact Chromium strategy environment and
   per-model strategy counts; the corpus does not claim browser-neutral leaf

@@ -167,6 +167,40 @@ function finiteMagnitudeF32(value) {
   return Number.isFinite(squared) && squared >= 0 && Number.isFinite(operationF32(Math.sqrt(squared)));
 }
 
+function reconstructionIsFinite(closure, row, component, offsetBound) {
+  const weightOffset = closure.vertexRows[row * 4 + 2];
+  const weightCount = closure.vertexRows[row * 4 + 3];
+  for (const offset of [-offsetBound, 0, offsetBound]) {
+    let value = operationF32(closure.vertexPositions[row * 3 + component]);
+    for (let index = weightOffset; index < weightOffset + weightCount; index += 1) {
+      const translation = addF32(
+        closure.weightBaseTranslations[index * 3 + component],
+        closure.weightActiveFlags[index] === 1 ? offset : 0,
+      );
+      const contribution = addF32(closure.weightLinearContributions[index * 3 + component], translation);
+      value = addF32(value, multiplyF32(contribution, closure.weightScalars[index]));
+      if (!Number.isFinite(value)) return false;
+    }
+  }
+  return true;
+}
+
+function eyeMatrixIsFinite(rotation, inverse, offsetBound) {
+  const offsets = offsetBound === 0 ? [0] : [-offsetBound, offsetBound];
+  for (const x of offsets) {
+    for (const y of offsets) {
+      for (const z of offsets) {
+        const translated = [...rotation];
+        translated[12] = addF32(translated[12], x);
+        translated[13] = addF32(translated[13], y);
+        translated[14] = addF32(translated[14], z);
+        if (!translated.every(Number.isFinite) || !multiplyF32Matrices(translated, inverse).every(Number.isFinite)) return false;
+      }
+    }
+  }
+  return true;
+}
+
 function integerArray(value, maximum, code, label, options = {}) {
   const minimum = options.minimum ?? Number.MIN_SAFE_INTEGER;
   const upper = options.upper ?? Number.MAX_SAFE_INTEGER;
@@ -854,17 +888,17 @@ function validateEffects(state, binding, playback, inputs, limits) {
     star.backgroundPositions.forEach((value) => safeStyle(value, `Effects star ${index} background position`));
     require(Array.isArray(star.frameIndices) && star.frameIndices.length === packet.frameCount && star.frameIndices.every((frame) => Number.isSafeInteger(frame) && frame >= 0 && frame < star.backgroundPositions.length), "FRAME_CARDINALITY_MISMATCH", `Effects star ${index} frame indices are invalid.`);
   }
-  let maximumLifetime = 0;
+  let maximumMovementSteps = 0;
   const maximumVelocity = [0, 0, 0];
   for (const tuple of spawn.tuples) {
-    maximumLifetime = Math.max(maximumLifetime, Math.trunc(tuple[0]));
+    maximumMovementSteps = Math.max(maximumMovementSteps, Math.ceil(tuple[0]) + 1);
     for (let component = 0; component < 3; component += 1) maximumVelocity[component] = Math.max(maximumVelocity[component], Math.abs(Math.fround(tuple[component + 1] + biases.continuous[component])));
   }
   const maximumStart = [0, 0, 0];
   for (const star of packet.stars) for (let index = 0; index < star.positions.length; index += 1) maximumStart[index % 3] = Math.max(maximumStart[index % 3], Math.abs(star.positions[index]));
   for (let component = 0; component < 3; component += 1) {
-    const gravity = component === 1 ? Math.abs(particle.gravityY) * maximumLifetime * (maximumLifetime + 1) / 2 : 0;
-    require(Number.isFinite(Math.fround(maximumStart[component] + maximumVelocity[component] * maximumLifetime + gravity)), "INVALID_EFFECTS_STATE", `Effects component ${component} can overflow.`);
+    const gravity = component === 1 ? Math.abs(particle.gravityY) * maximumMovementSteps * (maximumMovementSteps - 1) / 2 : 0;
+    require(Number.isFinite(Math.fround(maximumStart[component] + maximumVelocity[component] * maximumMovementSteps + gravity)), "INVALID_EFFECTS_STATE", `Effects component ${component} can overflow.`);
   }
   return packet;
 }
@@ -1034,6 +1068,14 @@ function validateInteraction(state, binding, playback, presentation, inputs, lim
       && closure.weightLinearContributions.every(finiteF32)
       && closure.weightBaseTranslations.every(finiteF32)
       && closure.weightActiveFlags.every((flag) => flag === 0 || flag === 1), "INTERACTION_STATE_LIMIT", `Interaction control ${controlIndex} weight tables are invalid or excessive.`);
+    const reconstructionBounds = control.mode === "eye-follow"
+      ? [source.eyeMaximumOffset, source.eyeMaximumOffset, source.eyeMaximumOffset]
+      : selectedOffsetBounds;
+    for (let row = 0; row < vertexCount; row += 1) {
+      for (let component = 0; component < 3; component += 1) {
+        require(reconstructionIsFinite(closure, row, component, reconstructionBounds[component]), "INVALID_INTERACTION_STATE", `Interaction control ${controlIndex} vertex ${row} reconstruction can overflow.`);
+      }
+    }
     integerArray(closure.leafIndices, packet.leaves.length, "INTERACTION_STATE_LIMIT", `Interaction control ${controlIndex} leaf indices`, { minimum: 0, upper: Math.max(0, packet.leaves.length - 1), unique: true });
     require(Array.isArray(closure.leafRows) && closure.leafRows.length === closure.leafIndices.length * 4, "INVALID_INTERACTION_STATE", `Interaction control ${controlIndex} leaf rows are invalid.`);
     totalLeafRows += closure.leafIndices.length;
@@ -1048,6 +1090,9 @@ function validateInteraction(state, binding, playback, presentation, inputs, lim
     if (control.mode === "eye-follow") finiteF32Array(closure.rigidRootInverseMatrix, 16, "INVALID_INTERACTION_STATE", `Interaction control ${controlIndex} rigid inverse matrix`);
     else require(Array.isArray(closure.rigidRootInverseMatrix) && closure.rigidRootInverseMatrix.length === 0, "INVALID_INTERACTION_STATE", `Grab control ${controlIndex} declares a rigid inverse matrix.`);
     if (control.mode === "eye-follow") {
+      const rotationOffset = control.attachmentObjectIndices[0] * 16;
+      const rotation = packet.objects.rotationMatrices.slice(rotationOffset, rotationOffset + 16);
+      require(eyeMatrixIsFinite(rotation, closure.rigidRootInverseMatrix, source.eyeMaximumOffset), "INVALID_INTERACTION_STATE", `Interaction eye control ${controlIndex} matrix envelope can overflow.`);
       const projected = projectedF32(control.sourcePosition, source);
       require(projected, "INVALID_INTERACTION_STATE", `Interaction eye control ${controlIndex} projection overflows.`);
       for (const cursorX of [input.cursorBounds[0], input.cursorBounds[1]]) {

@@ -394,6 +394,26 @@ def interaction_magnitude_f32(value: list[float]) -> bool:
             and math.isfinite(interaction_f32(math.sqrt(squared))))
 
 
+def interaction_reconstruction_is_finite(closure: dict, row: int, component: int,
+                                         offset_bound: float) -> bool:
+    weight_offset = int(closure["vertexRows"][row * 4 + 2])
+    weight_count = int(closure["vertexRows"][row * 4 + 3])
+    for offset in (-offset_bound, 0.0, offset_bound):
+        value = interaction_f32(closure["vertexPositions"][row * 3 + component])
+        for index in range(weight_offset, weight_offset + weight_count):
+            translation = interaction_add_f32(
+                closure["weightBaseTranslations"][index * 3 + component],
+                offset if closure["weightActiveFlags"][index] == 1 else 0.0)
+            contribution = interaction_add_f32(
+                closure["weightLinearContributions"][index * 3 + component],
+                translation)
+            value = interaction_add_f32(
+                value, interaction_mul_f32(contribution, closure["weightScalars"][index]))
+            if not math.isfinite(value):
+                return False
+    return True
+
+
 def finite_f32_array(value: Any, length: int, code: str, label: str) -> list[float]:
     require(isinstance(value, list) and len(value) == length
             and all(finite_f32(entry) for entry in value),
@@ -440,6 +460,26 @@ def multiply_f32_matrices(left: list[float], right: list[float]) -> list[float]:
                                         * f32(right[index * 4 + column])))
             output.append(value)
     return output
+
+
+def interaction_eye_matrix_is_finite(rotation: list[float], inverse: list[float],
+                                     offset_bound: float) -> bool:
+    offsets = (0.0,) if offset_bound == 0 else (-offset_bound, offset_bound)
+    try:
+        for x_value in offsets:
+            for y_value in offsets:
+                for z_value in offsets:
+                    translated = list(rotation)
+                    translated[12] = interaction_add_f32(translated[12], x_value)
+                    translated[13] = interaction_add_f32(translated[13], y_value)
+                    translated[14] = interaction_add_f32(translated[14], z_value)
+                    if (not all(math.isfinite(value) for value in translated)
+                            or not all(math.isfinite(value) for value in
+                                       multiply_f32_matrices(translated, inverse))):
+                        return False
+    except DomError:
+        return False
+    return True
 
 
 def inverse_matrix_pair(left: list[float], right: list[float]) -> bool:
@@ -1760,7 +1800,7 @@ def validate_effects_contract(state_channel: dict, binding: dict,
         require(len(frames) == frame_count, "FRAME_CARDINALITY_MISMATCH",
                 f"Effect star {index} frame indices do not match frameCount")
 
-    maximum_lifetime = max(math.trunc(tuple_value[0]) for tuple_value in tuples)
+    maximum_movement_steps = max(math.ceil(tuple_value[0]) + 1 for tuple_value in tuples)
     continuous_velocity = [max(abs(f32(tuple_value[component + 1]
                                              + continuous_bias[component]))
                                for tuple_value in tuples)
@@ -1771,10 +1811,10 @@ def validate_effects_contract(state_channel: dict, binding: dict,
             component = index % 3
             continuous_start[component] = max(continuous_start[component], abs(value))
     for component in range(3):
-        gravity = (abs(particle["gravityY"]) * maximum_lifetime
-                   * (maximum_lifetime + 1) / 2 if component == 1 else 0)
+        gravity = (abs(particle["gravityY"]) * maximum_movement_steps
+                   * (maximum_movement_steps - 1) / 2 if component == 1 else 0)
         bound = (continuous_start[component]
-                 + continuous_velocity[component] * maximum_lifetime + gravity)
+                 + continuous_velocity[component] * maximum_movement_steps + gravity)
         require(finite_f32(bound), code,
                 f"Prepared continuous effect component {component} can overflow")
     return packet
@@ -2211,6 +2251,14 @@ def validate_interaction_contract(state_channel: dict, binding: dict,
                 and all(value in (0, 1) and not isinstance(value, bool)
                         for value in weight_flags), "INTERACTION_STATE_LIMIT",
                 f"Interaction control {control_index} weight tables are invalid or excessive")
+        reconstruction_bounds = ([source["eyeMaximumOffset"]] * 3
+                                 if mode == "eye-follow" else selected_grab_bounds)
+        for row in range(vertex_count):
+            for component in range(3):
+                require(interaction_reconstruction_is_finite(
+                            closure, row, component, reconstruction_bounds[component]),
+                        state_code,
+                        f"Interaction control {control_index} vertex {row} reconstruction can overflow")
         leaf_indices = integer_array(closure.get("leafIndices"), len(leaf_plans), state_code,
                                      f"interaction control {control_index} leaf indices", 0,
                                      max(0, len(leaf_plans) - 1), True)
@@ -2236,6 +2284,12 @@ def validate_interaction_contract(state_channel: dict, binding: dict,
         if mode == "eye-follow":
             finite_f32_array(rigid_inverse, 16, state_code,
                              f"interaction control {control_index} rigid inverse matrix")
+            rotation_offset = attachments[0] * 16
+            rotation = rotations[rotation_offset:rotation_offset + 16]
+            require(interaction_eye_matrix_is_finite(
+                        rotation, rigid_inverse, source["eyeMaximumOffset"]),
+                    state_code,
+                    f"Interaction eye control {control_index} matrix envelope can overflow")
             projected = interaction_projected_f32(source_position, source)
             require(projected is not None, state_code,
                     f"Interaction eye control {control_index} projection overflows")

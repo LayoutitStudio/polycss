@@ -176,11 +176,11 @@ test("prepared effects replay deterministically including same-frame and grab up
   assert.deepEqual(styleSnapshot(firstMounted), styleSnapshot(secondMounted));
   assert.deepEqual(first.inspect(), {
     sourceFrame: 2,
-    spawnCursor: 0,
+    spawnCursor: 2,
     stars: 1,
     emitters: [
       { mode: "grab", poolSize: 1, active: 1, visible: 0 },
-      { mode: "follow-star", poolSize: 1, active: 1, visible: 1 },
+      { mode: "follow-star", poolSize: 1, active: 0, visible: 0 },
     ],
   });
 });
@@ -200,6 +200,39 @@ test("effects catch-up simulates every source-frame transition and publishes the
     assert.deepEqual(batched.inspect(), sequential.inspect());
     assert.deepEqual(styleSnapshot(batchedMounted), styleSnapshot(sequentialMounted));
     for (const [id, element] of identities) assert.equal(batchedMounted.byId.get(id), element);
+});
+
+test("continuous effects recycle only after a slot becomes inactive", async () => {
+  const input = await effectInput();
+  const mounted = fakeMounted(input.bindings);
+  const effects = createReferenceEffects(input.state, input.bindings, mounted);
+
+  for (let index = 0; index < 4; index += 1) effects.publish(1);
+  assert.equal(effects.spawnCursor, 1);
+  assert.deepEqual(effects.inspect().emitters[1], { mode: "follow-star", poolSize: 1, active: 1, visible: 0 });
+
+  effects.publish(1);
+  assert.equal(effects.spawnCursor, 1);
+  assert.deepEqual(effects.inspect().emitters[1], { mode: "follow-star", poolSize: 1, active: 0, visible: 0 });
+
+  effects.publish(1);
+  assert.equal(effects.spawnCursor, 2);
+  assert.deepEqual(effects.inspect().emitters[1], { mode: "follow-star", poolSize: 1, active: 1, visible: 1 });
+});
+
+test("destroy hides every fixed effect target and rejects later publication", async () => {
+  const input = await effectInput();
+  const mounted = fakeMounted(input.bindings);
+  const effects = createReferenceEffects(input.state, input.bindings, mounted);
+  effects.publish(1, { active: true, x: 100, y: 200, z: 300 });
+
+  effects.destroy();
+  for (const [id, element] of mounted.byId) {
+    assert.equal(element.style.visibility, "hidden", `${id} remains visible after destroy`);
+    if (id.includes("particle")) assert.equal(element.style.opacity, "0");
+  }
+  effects.destroy();
+  assert.throws(() => effects.publish(1), errorCode("EFFECTS_DESTROYED"));
 });
 
 test("prepared effects schema rejects implicit roles, malformed tables, limits, targets, and defaults", async () => {
@@ -223,6 +256,13 @@ test("prepared effects schema rejects implicit roles, malformed tables, limits, 
   overflow.state.channels[0].data.packet.biases.continuous[0] = 3e38;
   overflow.state.channels[0].data.packet.spawnStream.tuples[0][1] = 3e38;
   assert.throws(() => buildDom(overflow), errorCode("INVALID_EFFECTS_STATE"));
+  for (const timeoutValue of [1, 1.5]) {
+    const lifetimeOverflow = structuredClone(base);
+    const packet = lifetimeOverflow.state.channels[0].data.packet;
+    packet.biases.continuous = [0, 0, 0];
+    packet.spawnStream.tuples[0] = [timeoutValue, Math.fround(2e38), 0, 0];
+    assert.throws(() => buildDom(lifetimeOverflow), errorCode("INVALID_EFFECTS_STATE"));
+  }
   const target = structuredClone(base);
   target.bindings.channels[0].targets.emitters[0].pop();
   assert.throws(() => buildDom(target), errorCode("TARGET_CARDINALITY_MISMATCH"));

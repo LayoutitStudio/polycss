@@ -9,6 +9,11 @@ interface InteractionPresentation {
   readonly sourceHeight: number;
 }
 
+interface InteractionViewportOptions {
+  readonly viewportWidth?: number;
+  readonly viewportHeight?: number;
+}
+
 export interface InteractionSample {
   readonly stickX: -128 | 0 | 127;
   readonly stickY: -128 | 0 | 127;
@@ -26,7 +31,12 @@ export interface InteractionInput {
 type ListenerTarget = Pick<EventTarget, "addEventListener" | "removeEventListener">;
 type Registration = readonly [ListenerTarget, string, EventListener];
 
-export function createInteractionInput(host: HTMLElement, presentation: InteractionPresentation): InteractionInput {
+export function createInteractionInput(
+  host: HTMLElement,
+  viewport: HTMLElement,
+  presentation: InteractionPresentation,
+  options: InteractionViewportOptions = {},
+): InteractionInput {
   const win = host.ownerDocument.defaultView;
   invariant(win, "INVALID_DOCUMENT_HOST", "The mount host requires a browser window.");
   const keys = new Set<InteractionKey>();
@@ -47,14 +57,22 @@ export function createInteractionInput(host: HTMLElement, presentation: Interact
     || target instanceof win.HTMLSelectElement
     || (target instanceof win.Element && target.closest("[contenteditable='true']") !== null);
   const mapPointer = (event: PointerEvent): void => {
-    const bounds = host.getBoundingClientRect();
-    if (!(bounds.width > 0) || !(bounds.height > 0)) return;
-    const scale = Math.min(bounds.width / presentation.fitWidth, bounds.height / presentation.fitHeight);
-    const offsetX = (bounds.width - presentation.sourceWidth * scale) / 2;
-    const offsetY = (bounds.height - presentation.sourceHeight * scale) / 2;
+    const bounds = viewport.getBoundingClientRect();
+    const width = viewport.clientWidth || options.viewportWidth || presentation.sourceWidth;
+    const height = viewport.clientHeight || options.viewportHeight || presentation.sourceHeight;
+    if (!(width > 0) || !(height > 0)) return;
+    const localX = bounds.width > 0
+      ? (event.clientX - bounds.left) * width / bounds.width
+      : event.clientX - bounds.left;
+    const localY = bounds.height > 0
+      ? (event.clientY - bounds.top) * height / bounds.height
+      : event.clientY - bounds.top;
+    const scale = Math.min(width / presentation.fitWidth, height / presentation.fitHeight);
+    const offsetX = (width - presentation.sourceWidth * scale) / 2;
+    const offsetY = (height - presentation.sourceHeight * scale) / 2;
     pendingPointer = Object.freeze({
-      x: (event.clientX - bounds.left - offsetX) / scale,
-      y: (event.clientY - bounds.top - offsetY) / scale,
+      x: (localX - offsetX) / scale,
+      y: (localY - offsetY) / scale,
     });
   };
   const keydown: EventListener = (value) => {

@@ -44,14 +44,20 @@ their relative paths. `readDom` validates supplied bytes and a logical-id
 resource map. `readDomFile` loads and verifies paths relative to the JSON
 document directory.
 
+`readDom` may be used for document-only inspection: when sibling bytes are not
+supplied it reports their ids in `externalMissing`. Every supplied resource is
+still digest- and policy-validated. Set `requireResources: true` to require a
+complete package; only complete browser-reader results can be mounted.
+
 Producers must emit the writer manifest natively. Parsing, preparation,
 lowering, source provenance, and product adapters remain in producer packages;
 domformat contains no producer-specific or legacy conversion layer.
 
 PolyCSS's first producer follows that boundary: website-owned tooling lowers
 all 304 Gallery presets through shared preset, loader, camera, animation, and
-renderer paths into canonical JSON plus digest-bound CSS and image siblings
-under the website's public assets. The website catalog binds that corpus to its
+renderer paths into canonical JSON plus digest-bound CSS and image siblings in
+the repository-only `website/gallery-domformat-corpus/` directory. The website
+build does not deploy this certification corpus. Its catalog binds the corpus to its
 exact Playwright Chromium strategy environment; it is not a browser-neutral
 leaf-strategy claim. Neither that producer nor its generated corpus is shipped
 in this package.

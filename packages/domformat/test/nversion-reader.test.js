@@ -15,6 +15,7 @@ import { validateStylesheet } from "../conformance/nversion/resources.js";
 import {
   builtExternalResources,
   syntheticEmptySurfaceInput,
+  syntheticExecutableInteractionInput,
   syntheticPlaybackWithoutSurfaceInput,
   syntheticStaticPresentationInput,
 } from "./helpers.js";
@@ -238,6 +239,37 @@ test("N-version probe matches the shared fail-closed CSS security corpus", async
       actual = error.code;
     }
     assert.equal(actual, entry.expect, entry.id);
+  }
+});
+
+test("production and N-version readers reject prepared runtime arithmetic envelopes", async () => {
+  const built = buildDom(await syntheticExecutableInteractionInput());
+  const externalResources = builtExternalResources(built);
+  const cases = [
+    ["INVALID_INTERACTION_STATE", (document) => {
+      const packet = document.state.channels.find((channel) => channel.codec === "polycss-pointer-grab-prepared@0").data.packet;
+      const closure = packet.controls[0].closure;
+      closure.weightActiveFlags[0] = 0;
+      closure.weightScalars[0] = Math.fround(2e38);
+      closure.weightLinearContributions[0] = 2;
+    }],
+    ["INVALID_INTERACTION_STATE", (document) => {
+      const packet = document.state.channels.find((channel) => channel.codec === "polycss-pointer-grab-prepared@0").data.packet;
+      packet.objects.rotationMatrices[0] = Math.fround(2e38);
+      packet.controls.find((control) => control.mode === "eye-follow").closure.rigidRootInverseMatrix[0] = 2;
+    }],
+    ...[1, 1.5].map((timeout) => ["INVALID_EFFECTS_STATE", (document) => {
+      const packet = document.state.channels.find((channel) => channel.codec === "polycss-effects-prepared@0").data.packet;
+      packet.biases.continuous = [0, 0, 0];
+      packet.spawnStream.tuples[0] = [timeout, Math.fround(2e38), 0, 0];
+    }]),
+  ];
+  for (const [code, mutateDocument] of cases) {
+    const document = decodeJson(built.bytes, "prepared arithmetic fixture");
+    mutateDocument(document);
+    const bytes = encodeCanonicalJson(document);
+    assert.throws(() => readDom(bytes, { externalResources, requireResources: true }), (error) => error?.code === code);
+    await assert.rejects(readDomNVersion(bytes, { externalResources }), (error) => error instanceof NVersionError && error.code === code);
   }
 });
 

@@ -190,11 +190,13 @@ function safeBleed(points: readonly number[], edgeIndex: number, requested: numb
   const afterLength = Math.hypot(afterX, afterY);
   if (previousLength > 1e-3) {
     const sine = Math.abs(dx * previousY - dy * previousX) / (length * previousLength);
-    if (sine > 1e-3) limits.push(previousLength * sine);
+    const height = previousLength * sine;
+    if (height > 1e-3) limits.push(height);
   }
   if (afterLength > 1e-3) {
     const sine = Math.abs(-dx * afterY + dy * afterX) / (length * afterLength);
-    if (sine > 1e-3) limits.push(afterLength * sine);
+    const height = afterLength * sine;
+    if (height > 1e-3) limits.push(height);
   }
   const finite = limits.filter((value) => Number.isFinite(value) && value > 0);
   return finite.length === 0 ? requested : Math.max(0, Math.min(requested, ...finite));

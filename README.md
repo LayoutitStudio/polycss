@@ -296,7 +296,7 @@ Each visible polygon is emitted as one leaf element; the renderer chooses the le
 | `@layoutit/polycss-domformat` | Private MIT-licensed producer-neutral `domformat@0` runtime for canonical JSON plus digest-bound sibling resources; conformance and specifications stay repository-side. Not published. |
 
 The website-owned producer also carries a deterministic canonical JSON snapshot
-of every Gallery model at `website/public/gallery/domformat/`, with digest-bound
+of every Gallery model at `website/gallery-domformat-corpus/`, with digest-bound
 CSS and image siblings. Its catalog pins the 640×640 Playwright Chromium
 strategy environment, including engine version, device scale, media queries,
 CSS feature branches, and per-model leaf-strategy counts; it does not claim

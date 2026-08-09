@@ -1,11 +1,17 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import vm from "node:vm";
 import { buildDom } from "../src/writer.js";
 import { readDom } from "../src/reader.js";
 import { inspection } from "../src/inspect.js";
 import { sha256Hex } from "../src/hash.js";
 import { encodeCanonicalJson } from "../src/canonical-json.js";
 import { builtExternalResources, errorCode, syntheticInput, syntheticPolycssInput } from "./helpers.js";
+
+function foreignArrayBuffer(bytes) {
+  const context = vm.createContext({ values: [...bytes] });
+  return vm.runInContext("Uint8Array.from(values).buffer", context);
+}
 
 test("JSON writer is deterministic and round-trips every semantic section with sibling resources", async () => {
   const input = await syntheticInput();
@@ -108,6 +114,15 @@ test("writer accepts and copies the exact bytes selected by an ArrayBufferView",
   assert.deepEqual(built.externalResources.get(resource.path), expected);
   storage.fill(0);
   assert.deepEqual(built.externalResources.get(resource.path), expected);
+});
+
+test("writer and Node reader accept raw ArrayBuffers from another realm", async () => {
+  const input = await syntheticInput();
+  for (const resource of input.resourceInputs) resource.bytes = foreignArrayBuffer(resource.bytes);
+  const built = buildDom(input);
+  const resources = new Map([...builtExternalResources(built)].map(([id, bytes]) => [id, foreignArrayBuffer(bytes)]));
+  const result = readDom(foreignArrayBuffer(built.bytes), { externalResources: resources, requireResources: true });
+  assert.equal(result.resourceBytes.size, 2);
 });
 
 test("executable PolyCSS fixture is deterministic and remains fully executable", async () => {

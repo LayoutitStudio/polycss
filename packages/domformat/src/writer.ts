@@ -2,15 +2,15 @@ import { FORMAT_ID, PROFILE_ID, jsonStructureLimits, mergeLimits } from "./const
 import { canonicalize, deepFreezeJson, encodeCanonicalJson } from "./canonical-json.js";
 import { invariant } from "./errors.js";
 import { sha256Hex } from "./hash.js";
-import { assertResourceId, assertSafeRelativePath, imageDimensions, validateCssBytes, validateResourceBytes } from "./resources.js";
+import { assertResourceId, assertSafeRelativePath, byteView, imageDimensions, validateCssBytes, validateResourceBytes } from "./resources.js";
 import { validateDocumentInternal } from "./schema.js";
 import type { DomBuildResult, DomLimitOverrides, DomResourceInputBytes, DomResourceRecord, DomWriterInput } from "./public-types.js";
 
 function bytesOf(value: DomResourceInputBytes): Uint8Array {
-  if (ArrayBuffer.isView(value)) return new Uint8Array(value.buffer, value.byteOffset, value.byteLength).slice();
-  if (value instanceof ArrayBuffer) return new Uint8Array(value.slice(0));
   if (typeof value === "string") return new TextEncoder().encode(value);
-  invariant(false, "INVALID_RESOURCE_BYTES", "Resource input bytes must be a string, ArrayBuffer, or ArrayBufferView.");
+  const bytes = byteView(value);
+  invariant(bytes, "INVALID_RESOURCE_BYTES", "Resource input bytes must be a string, ArrayBuffer, or ArrayBufferView.");
+  return bytes.slice();
 }
 
 function plainRecord(value: unknown): boolean {

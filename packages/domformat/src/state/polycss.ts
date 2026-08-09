@@ -613,6 +613,7 @@ export function createPolycssPlayback(
   const shapeVisibility = new Uint8Array(packet.shapeCount);
   const leafTransforms = new Uint32Array(packet.leafCount);
   const dirtyHiddenTransforms = new Uint8Array(packet.leafCount);
+  const interactionTransforms = new Uint8Array(packet.leafCount);
   loadTriples(packet.initial.shapes, shapeTransforms, shapeVisibility);
   loadPairs(packet.initial.leaves, leafTransforms);
   const visibility = visibilityState(materialized.lighting, packet.leafCount, playbackParameters.frameCount);
@@ -642,6 +643,7 @@ export function createPolycssPlayback(
   const writePreparedLeafTransform = (index: number): void => {
     leaves[index].style.transform = packet.transforms[leafTransforms[index]];
     dirtyHiddenTransforms[index] = 0;
+    interactionTransforms[index] = 0;
   };
 
   const flushPreparedLeafTransform = (index: number): void => {
@@ -655,7 +657,9 @@ export function createPolycssPlayback(
   };
 
   const synchronizePreparedLeafTransforms = () => {
-    for (let index = 0; index < leaves.length; index += 1) flushPreparedLeafTransform(index);
+    for (let index = 0; index < leaves.length; index += 1) {
+      if (dirtyHiddenTransforms[index] === 1 || interactionTransforms[index] === 1) writePreparedLeafTransform(index);
+    }
   };
 
   const writeVisibility = (index: number): void => {
@@ -842,6 +846,37 @@ export function createPolycssPlayback(
     return Object.freeze(frames);
   };
 
+  const forceVisible = (indices: Iterable<number>): void => {
+    invariant(indices && typeof indices[Symbol.iterator] === "function", "INVALID_INTERACTION_PUBLICATION", "Forced-visible leaves must be iterable.");
+    const next = new Uint8Array(packet.leafCount);
+    const nextIndices: number[] = [];
+    for (const index of indices) {
+      invariant(Number.isSafeInteger(index) && index >= 0 && index < packet.leafCount, "INVALID_INTERACTION_PUBLICATION", `Forced-visible leaf ${index} is out of range.`);
+      if (next[index] === 0) nextIndices.push(index);
+      next[index] = 1;
+    }
+    const changed = new Set([...currentForced, ...nextIndices]);
+    for (const index of changed) {
+      forced[index] = next[index];
+      writeVisibility(index);
+    }
+    currentForced = Uint16Array.from(nextIndices);
+  };
+
+  const restoreInteraction = (shapeIndices: readonly number[], leafIndices: readonly number[]): void => {
+    for (const index of shapeIndices) {
+      invariant(Number.isSafeInteger(index) && index >= 0 && index < packet.shapeCount, "INVALID_INTERACTION_PUBLICATION", `Interaction shape ${index} is out of range.`);
+      shapes[index].style.transform = packet.transforms[shapeTransforms[index]];
+      shapes[index].style.visibility = shapeVisibility[index] === 1 ? "visible" : "hidden";
+    }
+    for (const index of leafIndices) {
+      invariant(Number.isSafeInteger(index) && index >= 0 && index < packet.leafCount, "INVALID_INTERACTION_PUBLICATION", `Interaction leaf ${index} is out of range.`);
+      degenerate[index] = 0;
+      writePreparedLeafTransform(index);
+      writeVisibility(index);
+    }
+  };
+
   return Object.freeze({
     get tick() { return tick; },
     get sourceFrame() { return sourceFrame; },
@@ -865,7 +900,8 @@ export function createPolycssPlayback(
     seek,
     restart(shapeIndices = [], leafIndices = []) {
       seek(packet.initial.sourceFrame);
-      this.restoreInteraction(shapeIndices, leafIndices);
+      restoreInteraction(shapeIndices, leafIndices);
+      forceVisible(new Uint16Array(0));
       tick = 0;
       return sourceFrame;
     },
@@ -874,41 +910,15 @@ export function createPolycssPlayback(
       applySurface(nextFrame);
       return nextFrame;
     },
-    forceVisible(indices: Iterable<number>) {
-      invariant(indices && typeof indices[Symbol.iterator] === "function", "INVALID_INTERACTION_PUBLICATION", "Forced-visible leaves must be iterable.");
-      const next = new Uint8Array(packet.leafCount);
-      const nextIndices: number[] = [];
-      for (const index of indices) {
-        invariant(Number.isSafeInteger(index) && index >= 0 && index < packet.leafCount, "INVALID_INTERACTION_PUBLICATION", `Forced-visible leaf ${index} is out of range.`);
-        if (next[index] === 0) nextIndices.push(index);
-        next[index] = 1;
-      }
-      const changed = new Set([...currentForced, ...nextIndices]);
-      for (const index of changed) {
-        forced[index] = next[index];
-        writeVisibility(index);
-      }
-      currentForced = Uint16Array.from(nextIndices);
-    },
+    forceVisible,
     applyInteractionLeaf(index: number, transform: string | null) {
       invariant(Number.isSafeInteger(index) && index >= 0 && index < packet.leafCount, "INVALID_INTERACTION_PUBLICATION", `Interaction leaf ${index} is out of range.`);
       invariant(transform === null || typeof transform === "string", "INVALID_INTERACTION_PUBLICATION", `Interaction leaf ${index} transform is invalid.`);
       degenerate[index] = transform === null ? 1 : 0;
       writeVisibility(index);
       if (transform !== null && leaves[index].style.transform !== transform) leaves[index].style.transform = transform;
+      interactionTransforms[index] = leaves[index].style.transform === packet.transforms[leafTransforms[index]] ? 0 : 1;
     },
-    restoreInteraction(shapeIndices: readonly number[], leafIndices: readonly number[]) {
-      for (const index of shapeIndices) {
-        invariant(Number.isSafeInteger(index) && index >= 0 && index < packet.shapeCount, "INVALID_INTERACTION_PUBLICATION", `Interaction shape ${index} is out of range.`);
-        shapes[index].style.transform = packet.transforms[shapeTransforms[index]];
-        shapes[index].style.visibility = shapeVisibility[index] === 1 ? "visible" : "hidden";
-      }
-      for (const index of leafIndices) {
-        invariant(Number.isSafeInteger(index) && index >= 0 && index < packet.leafCount, "INVALID_INTERACTION_PUBLICATION", `Interaction leaf ${index} is out of range.`);
-        degenerate[index] = 0;
-        writePreparedLeafTransform(index);
-        writeVisibility(index);
-      }
-    },
+    restoreInteraction,
   });
 }

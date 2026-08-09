@@ -15,6 +15,21 @@ const SUPPORTED_MEDIA_TYPES = new Set([
   "text/css;charset=utf-8",
 ]);
 
+const arrayBufferByteLength = Object.getOwnPropertyDescriptor(ArrayBuffer.prototype, "byteLength")?.get;
+
+export function byteView(value: unknown): Uint8Array | null {
+  try {
+    if (ArrayBuffer.isView(value)) {
+      return new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+    }
+    if (!arrayBufferByteLength) return null;
+    const byteLength = Reflect.apply(arrayBufferByteLength, value, []) as number;
+    return new Uint8Array(value as ArrayBuffer, 0, byteLength);
+  } catch {
+    return null;
+  }
+}
+
 function plainRecord(value: unknown, code: string, label: string): Record<string, unknown> {
   invariant(value && typeof value === "object" && !Array.isArray(value), code, `${label} must be an object.`);
   const prototype = Object.getPrototypeOf(value);

@@ -65,7 +65,7 @@ interface CssUrlSpan extends SourceRange {
   readonly token: string;
 }
 
-export interface CssAnalysis {
+interface CssAnalysis {
   readonly declarations: number;
   readonly functions: number;
   readonly rules: number;
@@ -335,7 +335,7 @@ export function cssScopeAttribute(scope: unknown): Readonly<{ name: `data-${stri
   return Object.freeze({ name: `data-${match[1]}`, value: match[2] });
 }
 
-export function analyzeCss(css: string, binding: DomStylesheetBinding, limits: DomLimits): CssAnalysis {
+function analyzeCss(css: string, binding: DomStylesheetBinding, limits: DomLimits): CssAnalysis {
   assertAlphaCharacters(css);
   cssScopeAttribute(binding.scope);
   const rules = parseRules(css, limits);

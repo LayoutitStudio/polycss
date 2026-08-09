@@ -136,10 +136,10 @@ target source frame, and performs a sequential update or seek. The reference
 mount scheduler accounts for one logical tick every `1000 / tickRateHz`
 milliseconds and carries its deadline forward by that fixed interval, so a
 dropped browser animation frame does not permanently slow playback. A callback
-with one due tick publishes synchronously. Up to eight overdue ticks are normal
+with one due tick publishes synchronously. Up to eight due ticks are normal
 catch-up: animation evaluates every tick and every distinct prepared-effects
 source frame in order but MAY publish only the final retained state, while
-interaction steps and publishes each tick separately. More than eight overdue
+interaction steps and publishes each tick separately. More than eight due
 ticks is a suspension: the scheduler discards the stale backlog, advances one
 tick, and resets its next deadline from the current callback timestamp.
 

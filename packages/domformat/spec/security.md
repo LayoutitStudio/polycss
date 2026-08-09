@@ -15,6 +15,14 @@ Validation is fail-closed. A reader MUST NOT repair malformed input, apply
 last-key-wins duplicate JSON semantics, skip unknown schema fields, or mount a
 partially validated document.
 
+The Node `readDom` API MAY be used in document-inspection mode by leaving
+`requireResources` false. In that mode it validates the JSON contract and every
+supplied sibling, reports every absent resource id in `externalMissing`, and
+MUST NOT describe the result as a verified package. Missing CSS or image bytes
+leave their byte-level and CSS security boundaries unverified. A mount or a
+complete package read MUST require and verify every declared sibling; browser
+readers and `readDomFile` use that complete-package boundary by default.
+
 ## 2. Mandatory rejection boundary
 
 A reader rejects at least:
@@ -32,7 +40,7 @@ A reader rejects at least:
   state, and inaccurate declared counts;
 - invalid resource counts, lengths, digests, media signatures, dimensions, or
   semantic roles; unused resources; legacy storage or embedded payload fields;
-  missing siblings; unsafe relative paths;
+  missing siblings during complete-package reads; unsafe relative paths;
   origin escape, redirects, credentials, or responses outside exact lengths;
 - CSS escapes/comments/at-rules/nesting, selector scope or sibling escape,
   properties outside the profile vocabulary, unknown/network-capable

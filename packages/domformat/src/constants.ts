@@ -47,7 +47,7 @@ export const DEFAULT_LIMITS = Object.freeze({
   maxInteractionLeafRows: 4_000_000,
 });
 
-export type DomLimitName = keyof typeof DEFAULT_LIMITS;
+type DomLimitName = keyof typeof DEFAULT_LIMITS;
 export type DomLimits = Readonly<Record<DomLimitName, number>>;
 export type DomLimitOverrides = Partial<Record<DomLimitName, number>>;
 

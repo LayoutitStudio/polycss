@@ -12,7 +12,7 @@ interface PresentationParameters {
 
 type BoundPresentationTargets = Readonly<Record<string, HTMLElement>>;
 
-export interface StaticPresentation {
+interface StaticPresentation {
   publishAppearance(appearance: unknown): void;
   resize(): void;
 }

@@ -4,6 +4,7 @@ import { fail, invariant } from "./errors.js";
 import { validateDocumentInternal } from "./schema.js";
 import {
   assertSafeRelativePath,
+  byteView,
   validateCssBytes,
   materializeCss,
   validateResourceBytes,
@@ -97,18 +98,39 @@ type BoundTargetGraph = HTMLElement | readonly BoundTargetGraph[] | BoundTargetG
 
 interface BoundMountedChannel {
   readonly targets: Readonly<Record<string, BoundTargetGraph>>;
-  readonly sinks: readonly string[];
 }
 
-interface RuntimePlayback {
-  readonly tick: number;
-  readonly sourceFrame: number;
-  advance(): number;
-  advanceMany(count: number): number;
-  seek(frame: number): number;
+interface MountedRuntimeState {
+  readonly bindings: DomBindings;
+  readonly mounted: MountedTree;
+  readonly materialized: MaterializedPolycssState;
+  readonly preparedPlayback: PolycssPlayback;
+  readonly boundTargets: ReadonlyMap<string, BoundMountedChannel>;
+}
+
+interface MountRuntimeOwner {
+  readonly lifecycle: ReturnType<typeof createLifecycle>;
+  readonly urls: Map<string, string>;
+  readonly styles: HTMLStyleElement[];
+  win: BrowserWindow | null;
+  urlApi: typeof URL | null;
+  restoreHost: (() => void) | null;
+  hostMutated: boolean;
+  runtimeState: MountedRuntimeState | null;
+  effects: PolycssEffects | null;
+  input: InteractionInput | null;
+  resizeObserver: ResizeObserver | null;
+  request: number | null;
+  mode: DomExperienceMode;
+  destroyedSourceFrame: number;
+  interaction: PolycssInteraction | null;
+  reservedHost: HTMLElement | null;
+  presentation: PresentationParameters | null;
+  interactionViewport: Readonly<{ viewportWidth?: number; viewportHeight?: number }> | null;
 }
 
 const validatedBrowserResults = new WeakMap<DomBrowserReadResult, ValidatedBrowserResult>();
+const activeMountHosts = new WeakSet<HTMLElement>();
 let runtimeScopeSequence = 0;
 const BROWSER_DEFAULT_LIMITS = Object.freeze({
   maxFileBytes: 32 * 1024 * 1024,
@@ -158,8 +180,15 @@ function runtimeScope(document: Document): RuntimeScope {
 }
 
 async function sha256Hex(bytes: Uint8Array): Promise<string> {
-  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", browserBufferView(bytes)));
-  return [...digest].map((value) => value.toString(16).padStart(2, "0")).join("");
+  const subtle = globalThis.crypto?.subtle;
+  const digestFunction = subtle?.digest;
+  invariant(typeof digestFunction === "function", "MISSING_BROWSER_API", "SHA-256 support is required before a package can be verified.");
+  try {
+    const digest = new Uint8Array(await Reflect.apply(digestFunction, subtle, ["SHA-256", browserBufferView(bytes)]));
+    return [...digest].map((value) => value.toString(16).padStart(2, "0")).join("");
+  } catch (error) {
+    fail("RESOURCE_DIGEST_FAILED", "Browser SHA-256 verification failed.", { cause: String(error) });
+  }
 }
 
 function browserBufferView(bytes: Uint8Array) {
@@ -169,10 +198,9 @@ function browserBufferView(bytes: Uint8Array) {
 }
 
 function externalBytes(value: unknown, label: string): Uint8Array {
-  if (value instanceof Uint8Array) return value;
-  if (value instanceof ArrayBuffer) return new Uint8Array(value);
-  if (ArrayBuffer.isView(value)) return new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
-  invariant(false, "INVALID_RESOURCE_BYTES", `${label} did not return bytes.`);
+  const bytes = byteView(value);
+  invariant(bytes, "INVALID_RESOURCE_BYTES", `${label} did not return an ArrayBuffer or ArrayBufferView.`);
+  return bytes;
 }
 
 function requiredResourceBytes(resources: ReadonlyMap<string, Uint8Array>, id: string): Uint8Array {
@@ -420,7 +448,8 @@ async function decodeImageResources(
   BlobClass: typeof Blob,
   signal?: AbortSignal,
 ): Promise<void> {
-  const decode = win.createImageBitmap ?? globalThis.createImageBitmap;
+  const receiver = typeof win.createImageBitmap === "function" ? win : globalThis;
+  const decode = receiver.createImageBitmap;
   invariant(typeof decode === "function", "MISSING_BROWSER_API", "Image decoding support is required before a package can publish.");
   for (const record of document.resources.resources) {
     if (record.kind !== "image") continue;
@@ -429,7 +458,7 @@ async function decodeImageResources(
     invariant(bytes && record.dimensions, "MISSING_EXTERNAL_RESOURCE", `Image resource ${record.id} is incomplete.`);
     let bitmap: ImageBitmap | undefined;
     try {
-      bitmap = await Reflect.apply(decode, win, [new BlobClass([browserBufferView(bytes)], { type: record.mediaType })]) as ImageBitmap;
+      bitmap = await Reflect.apply(decode, receiver, [new BlobClass([browserBufferView(bytes)], { type: record.mediaType })]) as ImageBitmap;
     } catch (error) {
       throwIfAborted(signal);
       fail("IMAGE_DECODE_FAILED", `Browser decoding rejected image resource ${record.id}.`, { cause: String(error) });
@@ -459,13 +488,169 @@ function bindMountedChannels(bindings: DomBindings, mounted: MountedTree): Reado
   const channels = new Map<string, BoundMountedChannel>();
   for (const channel of bindings.channels) {
     const targets = bindTargetGraph(channel.targets, mounted) as BoundTargetGroup;
-    for (const sink of channel.sinks) {
-      const property = sink.slice(sink.lastIndexOf(".") + 1);
-      invariant(typeof property === "string" && property.length > 0, "UNSUPPORTED_SINK", `Binding ${channel.id} contains an invalid sink.`);
-    }
-    channels.set(channel.id, Object.freeze({ targets, sinks: Object.freeze([...channel.sinks]) }));
+    channels.set(channel.id, Object.freeze({ targets }));
   }
   return channels;
+}
+
+function cleanupMount(owner: MountRuntimeOwner): boolean {
+  if (owner.lifecycle.isDestroyed()) return false;
+  const attempt = (operation?: (() => unknown) | null): void => {
+    try { operation?.(); } catch {}
+  };
+  const request = owner.request;
+  if (request !== null) attempt(() => owner.win?.cancelAnimationFrame(request));
+  owner.request = null;
+  attempt(() => owner.resizeObserver?.disconnect());
+  owner.resizeObserver = null;
+  attempt(() => owner.input?.destroy());
+  owner.input = null;
+  attempt(() => owner.interaction?.destroy());
+  owner.interaction = null;
+  attempt(() => owner.effects?.destroy());
+  owner.effects = null;
+  if (owner.runtimeState) owner.destroyedSourceFrame = owner.runtimeState.preparedPlayback.sourceFrame;
+  owner.runtimeState = null;
+  owner.presentation = null;
+  owner.interactionViewport = null;
+  for (const style of owner.styles) attempt(() => style.remove());
+  owner.styles.length = 0;
+  for (const url of owner.urls.values()) attempt(() => owner.urlApi?.revokeObjectURL(url));
+  owner.urls.clear();
+  if (owner.hostMutated) attempt(owner.restoreHost);
+  owner.hostMutated = false;
+  owner.restoreHost = null;
+  if (owner.reservedHost) activeMountHosts.delete(owner.reservedHost);
+  owner.reservedHost = null;
+  owner.urlApi = null;
+  owner.win = null;
+  owner.lifecycle.destroy();
+  return true;
+}
+
+function assertMounted(owner: MountRuntimeOwner): void {
+  invariant(!owner.lifecycle.isDestroyed(), "MOUNT_DESTROYED", "The mounted DOM runtime is destroyed.");
+  owner.lifecycle.assertPublished();
+}
+
+function requireRuntimeState(owner: MountRuntimeOwner): MountedRuntimeState {
+  invariant(owner.runtimeState, "MOUNT_DESTROYED", "The mounted DOM runtime is destroyed.");
+  return owner.runtimeState;
+}
+
+function mountedRuntime(owner: MountRuntimeOwner): MountedRuntimeState {
+  assertMounted(owner);
+  return requireRuntimeState(owner);
+}
+
+function publishPlaybackFrame(owner: MountRuntimeOwner, frame: number): number {
+  if (owner.effects && owner.effects.sourceFrame !== frame) owner.effects.publish(frame);
+  return frame;
+}
+
+function advancePlayback(owner: MountRuntimeOwner): number {
+  return publishPlaybackFrame(owner, mountedRuntime(owner).preparedPlayback.advance());
+}
+
+function advancePlaybackMany(owner: MountRuntimeOwner, count: number): number {
+  const frames = mountedRuntime(owner).preparedPlayback.advanceMany(count);
+  owner.effects?.publishMany(frames);
+  const latest = frames.at(-1);
+  invariant(latest !== undefined, "INVALID_PLAYBACK_PUBLICATION", "Prepared playback produced no catch-up frame.");
+  return latest;
+}
+
+function seekPlayback(owner: MountRuntimeOwner, frame: number): number {
+  return publishPlaybackFrame(owner, mountedRuntime(owner).preparedPlayback.seek(frame));
+}
+
+function makeInteraction(owner: MountRuntimeOwner): Readonly<{ initialFrame: number; interpreter: PolycssInteraction }> {
+  const state = requireRuntimeState(owner);
+  const binding = state.bindings.channels.find((channel) => channel.interpreter === "polycss-pointer-grab@0");
+  const parameters = binding?.parameters as unknown as InteractionParameters | undefined;
+  invariant(binding && parameters && owner.presentation && owner.interactionViewport, "MISSING_POLYCSS_BINDING", "Executable pointer interaction parameters are required.");
+  return Object.freeze({
+    initialFrame: parameters.initialFrame,
+    interpreter: createPolycssInteraction(state.materialized, state.bindings, state.mounted, state.preparedPlayback, {
+      ...owner.interactionViewport,
+      boundTargets: state.boundTargets,
+      presentation: owner.presentation,
+    }),
+  });
+}
+
+function activateInteraction(owner: MountRuntimeOwner): void {
+  assertMounted(owner);
+  const next = makeInteraction(owner);
+  try {
+    const playback = mountedRuntime(owner).preparedPlayback;
+    playback.seek(next.initialFrame);
+    publishPlaybackFrame(owner, playback.sourceFrame);
+    owner.input?.setEnabled(true);
+  } catch (error) {
+    next.interpreter.destroy();
+    throw error;
+  }
+  owner.interaction = next.interpreter;
+}
+
+function stepInteraction(owner: MountRuntimeOwner, sample?: InteractionSample) {
+  assertMounted(owner);
+  invariant(owner.interaction, "INVALID_EXPERIENCE_MODE", "Interaction mode is not active.");
+  invariant(owner.input, "INVALID_EXPERIENCE_MODE", "Interaction input is not mounted.");
+  const frame = owner.interaction.step(sample ?? owner.input.sample());
+  owner.effects?.publish(frame.sourceFrame, frame.selectedId && frame.selectedMatrix
+    ? { active: true, x: frame.selectedMatrix[12], y: frame.selectedMatrix[13], z: frame.selectedMatrix[14] }
+    : { active: false, x: 0, y: 0, z: 0 });
+  return frame;
+}
+
+function setRuntimeMode(owner: MountRuntimeOwner, next: DomExperienceMode): DomExperienceMode {
+  assertMounted(owner);
+  invariant(next === "animation" || next === "interaction", "INVALID_EXPERIENCE_MODE", "Browser mode must be animation or interaction.");
+  if (next === owner.mode) return owner.mode;
+  try {
+    if (next === "interaction") {
+      activateInteraction(owner);
+      invariant(owner.interaction, "MISSING_POLYCSS_BINDING", "Interaction mode did not initialize its interpreter.");
+      owner.interaction.publishInitial();
+    } else {
+      owner.input?.setEnabled(false);
+      const modified = owner.interaction?.restore() ?? { shapeIndices: [], leafIndices: [] };
+      owner.interaction?.destroy();
+      owner.interaction = null;
+      const sourceFrame = mountedRuntime(owner).preparedPlayback.restart(modified.shapeIndices, modified.leafIndices);
+      if (owner.effects && owner.effects.sourceFrame !== sourceFrame) owner.effects.publish(sourceFrame);
+    }
+    owner.mode = next;
+    return owner.mode;
+  } catch (error) {
+    cleanupMount(owner);
+    throw error;
+  }
+}
+
+function createMountedRuntime(owner: MountRuntimeOwner): DomMountRuntime {
+  return Object.freeze({
+    lifecycle: owner.lifecycle.view as DomMountRuntime["lifecycle"],
+    get mode() { return owner.mode; },
+    get sourceFrame() {
+      return owner.lifecycle.isDestroyed()
+        ? owner.destroyedSourceFrame
+        : mountedRuntime(owner).preparedPlayback.sourceFrame;
+    },
+    seek(frame: number) {
+      const nextFrame = seekPlayback(owner, frame);
+      owner.interaction?.invalidatePublication();
+      return nextFrame;
+    },
+    setMode(next: DomExperienceMode) {
+      return setRuntimeMode(owner, next);
+    },
+    destroy() {
+      return cleanupMount(owner);
+    },
+  });
 }
 
 export function mountDom(result: DomBrowserReadResult, host: HTMLElement, options?: DomMountOptions): Promise<DomMountRuntime>;
@@ -475,48 +660,27 @@ export async function mountDom(
   options: DomMountOptions = {},
 ): Promise<DomMountRuntime> {
   const lifecycle = createLifecycle(options.onLifecyclePhase);
+  const owner: MountRuntimeOwner = {
+    lifecycle,
+    urls: new Map(),
+    styles: [],
+    win: null,
+    urlApi: null,
+    restoreHost: null,
+    hostMutated: false,
+    runtimeState: null,
+    effects: null,
+    input: null,
+    resizeObserver: null,
+    request: null,
+    mode: "animation",
+    destroyedSourceFrame: 0,
+    interaction: null,
+    reservedHost: null,
+    presentation: null,
+    interactionViewport: null,
+  };
   let ownerDocument: Document;
-  let win: BrowserWindow | null = null;
-  let urlApi: typeof URL | null = null;
-  let restoreHost: (() => void) | null = null;
-  let hostMutated = false;
-  const urls = new Map<string, string>();
-  const styles: HTMLStyleElement[] = [];
-  let mountSurface: HTMLElement;
-  let mounted: MountedTree;
-  let boundTargets: ReadonlyMap<string, BoundMountedChannel> | null = null;
-  let materialized: MaterializedPolycssState;
-  let preparedPlayback: PolycssPlayback;
-  let effects: PolycssEffects | null = null;
-  let input: InteractionInput | null = null;
-  let resizeObserver: ResizeObserver | null = null;
-  let request: number | null = null;
-  let mode: DomExperienceMode;
-  let interaction: PolycssInteraction | null = null;
-  const cleanup = () => {
-    if (lifecycle.isDestroyed()) return false;
-    const attempt = (operation?: (() => unknown) | null): void => {
-      try { operation?.(); } catch {}
-    };
-    const requestId = request;
-    if (requestId !== null) attempt(() => win?.cancelAnimationFrame(requestId));
-    request = null;
-    attempt(() => resizeObserver?.disconnect());
-    attempt(() => input?.destroy());
-    attempt(() => interaction?.destroy());
-    interaction = null;
-    attempt(() => effects?.destroy());
-    boundTargets = null;
-    for (const style of styles) attempt(() => style.remove());
-    for (const url of urls.values()) attempt(() => urlApi?.revokeObjectURL(url));
-    if (hostMutated) attempt(restoreHost);
-    lifecycle.destroy();
-    return true;
-  };
-  const assertMounted = () => {
-    invariant(!lifecycle.isDestroyed(), "MOUNT_DESTROYED", "The mounted DOM runtime is destroyed.");
-    lifecycle.assertPublished();
-  };
 
   try {
     throwIfAborted(options.signal);
@@ -524,22 +688,25 @@ export async function mountDom(
     invariant(validated, "LIFECYCLE_PRECONDITION", "mountDom requires a result returned by readDomBrowser or readDomBrowserUrl.");
     const packageDocument = validated.document;
     const packageResources = validated.resourceBytes;
-    mode = options.mode ?? packageDocument.meta.initialExperience ?? "animation";
-    invariant(mode === "animation" || mode === "interaction", "INVALID_EXPERIENCE_MODE", "Browser mode must be animation or interaction.");
+    owner.mode = options.mode ?? packageDocument.meta.initialExperience ?? "animation";
+    invariant(owner.mode === "animation" || owner.mode === "interaction", "INVALID_EXPERIENCE_MODE", "Browser mode must be animation or interaction.");
     ownerDocument = host?.ownerDocument;
     const browserWindow = ownerDocument?.defaultView as BrowserWindow | null;
     invariant(ownerDocument && browserWindow, "INVALID_DOCUMENT_HOST", "A connected browser document host is required.");
-    win = browserWindow;
+    invariant(!activeMountHosts.has(host), "HOST_ALREADY_MOUNTED", "The mount host already owns a live domformat runtime.");
+    activeMountHosts.add(host);
+    owner.reservedHost = host;
+    owner.win = browserWindow;
     const RuntimeUrl = browserWindow.URL ?? globalThis.URL;
     const RuntimeBlob = browserWindow.Blob ?? globalThis.Blob;
     invariant(typeof RuntimeUrl?.createObjectURL === "function" && typeof RuntimeUrl?.revokeObjectURL === "function" && typeof RuntimeBlob === "function", "MISSING_BROWSER_API", "Object URL and Blob support are required.");
-    urlApi = RuntimeUrl;
+    owner.urlApi = RuntimeUrl;
 
     const mountValidation = validateDocumentInternal(packageDocument, { limits: validated.limits });
     throwIfAborted(options.signal);
     const interpreters = new Set(packageDocument.bindings.channels.map((channel) => channel.interpreter));
     invariant(interpreters.has("static-presentation@0"), "UNSUPPORTED_MOUNT_CONTRACT", "mountDom requires executable static presentation.");
-    if (mode === "interaction") invariant(interpreters.has("polycss-pointer-grab@0"), "UNSUPPORTED_MOUNT_CONTRACT", "The interaction experience requires an executable pointer interaction channel.");
+    if (owner.mode === "interaction") invariant(interpreters.has("polycss-pointer-grab@0"), "UNSUPPORTED_MOUNT_CONTRACT", "The interaction experience requires an executable pointer interaction channel.");
     invariant(packageResources instanceof Map, "LIFECYCLE_PRECONDITION", "The validated browser result has no private resource snapshot.");
     invariant(packageResources.size === packageDocument.resources.resources.length, "RESOURCE_CARDINALITY_MISMATCH", "Mounted resource count does not match RCRD.");
     for (const record of packageDocument.resources.resources) {
@@ -555,136 +722,87 @@ export async function mountDom(
     lifecycle.advance("validate");
 
     const isolation = runtimeScope(ownerDocument);
-    restoreHost = captureHostState(host);
-    mountSurface = ownerDocument.createElement("div");
+    owner.restoreHost = captureHostState(host);
+    const mountSurface = ownerDocument.createElement("div");
     mountSurface.setAttribute(isolation.name, isolation.value);
-    mounted = instantiateTree(ownerDocument, mountSurface, { tree: packageDocument.tree });
+    const mounted = instantiateTree(ownerDocument, mountSurface, { tree: packageDocument.tree });
     applyMountBoundary(mountSurface);
     lifecycle.advance("construct");
 
     for (const record of packageDocument.resources.resources) {
       if (record.kind === "stylesheet") continue;
-      urls.set(record.id, RuntimeUrl.createObjectURL(new RuntimeBlob([Uint8Array.from(requiredResourceBytes(packageResources, record.id))], { type: record.mediaType })));
+      owner.urls.set(record.id, RuntimeUrl.createObjectURL(new RuntimeBlob([Uint8Array.from(requiredResourceBytes(packageResources, record.id))], { type: record.mediaType })));
     }
     await decodeImageResources(packageDocument, packageResources, browserWindow, RuntimeBlob, options.signal);
     throwIfAborted(options.signal);
-    applyInitialResources(mounted, urls);
+    applyInitialResources(mounted, owner.urls);
     for (const binding of packageDocument.cssBinding.stylesheets) {
       const css = new TextDecoder().decode(requiredResourceBytes(packageResources, binding.resource));
       const element = ownerDocument.createElement("style");
       element.dataset.domformatStylesheet = binding.id;
-      element.textContent = materializeCss(css, binding, urls, { scope: isolation.selector, limits: mountValidation.limits });
+      element.textContent = materializeCss(css, binding, owner.urls, { scope: isolation.selector, limits: mountValidation.limits });
       ownerDocument.head.appendChild(element);
-      styles.push(element);
+      owner.styles.push(element);
     }
     const mountedTargets = bindMountedChannels(packageDocument.bindings, mounted);
-    boundTargets = mountedTargets;
     lifecycle.advance("bind");
 
-    materialized = materializePolycssState(packageDocument.state);
+    const materialized = materializePolycssState(packageDocument.state);
     throwIfAborted(options.signal);
     const presentationController = createStaticPresentation(packageDocument.bindings, mounted, { ...options, boundTargets: mountedTargets });
-    preparedPlayback = createPolycssPlayback(materialized, packageDocument.bindings, mounted, {
+    const preparedPlayback = createPolycssPlayback(materialized, packageDocument.bindings, mounted, {
       ...options,
       boundTargets: mountedTargets,
       publishAppearance: presentationController.publishAppearance,
     });
-    effects = interpreters.has("polycss-effects@0")
+    owner.runtimeState = Object.freeze({
+      bindings: packageDocument.bindings,
+      mounted,
+      materialized,
+      preparedPlayback,
+      boundTargets: mountedTargets,
+    });
+    owner.effects = interpreters.has("polycss-effects@0")
       ? createPolycssEffects(materialized, packageDocument.bindings, mounted, { boundTargets: mountedTargets })
       : null;
-    const publishPlaybackFrame = (frame: number): number => {
-      if (effects && effects.sourceFrame !== frame) effects.publish(frame);
-      return frame;
-    };
-    const playback: RuntimePlayback = Object.freeze({
-      get tick() { return preparedPlayback.tick; },
-      get sourceFrame() { return preparedPlayback.sourceFrame; },
-      advance() {
-        assertMounted();
-        return publishPlaybackFrame(preparedPlayback.advance());
-      },
-      advanceMany(count: number) {
-        assertMounted();
-        const frames = preparedPlayback.advanceMany(count);
-        effects?.publishMany(frames);
-        const latest = frames.at(-1);
-        invariant(latest !== undefined, "INVALID_PLAYBACK_PUBLICATION", "Prepared playback produced no catch-up frame.");
-        return latest;
-      },
-      seek(frame: number) {
-        assertMounted();
-        return publishPlaybackFrame(preparedPlayback.seek(frame));
-      },
-    });
     const presentationBinding = packageDocument.bindings.channels.find((channel) => channel.interpreter === "static-presentation@0");
     invariant(presentationBinding?.parameters, "MISSING_POLYCSS_BINDING", "Executable presentation parameters are required.");
-    const presentation = presentationBinding.parameters as unknown as PresentationParameters;
-    input = interpreters.has("polycss-pointer-grab@0") ? createInteractionInput(host, presentation) : null;
+    owner.presentation = presentationBinding.parameters as unknown as PresentationParameters;
+    owner.input = interpreters.has("polycss-pointer-grab@0") ? createInteractionInput(host, mountSurface, owner.presentation, options) : null;
     const ResizeObserverClass = browserWindow.ResizeObserver;
-    resizeObserver = typeof ResizeObserverClass === "function"
+    owner.resizeObserver = typeof ResizeObserverClass === "function"
       ? new ResizeObserverClass(() => {
           if (lifecycle.history.at(-1) !== "publish") return;
-          try { presentationController.resize(); } catch { cleanup(); }
+          try { presentationController.resize(); } catch { cleanupMount(owner); }
         })
       : null;
     const interactionBinding = packageDocument.bindings.channels.find((channel) => channel.interpreter === "polycss-pointer-grab@0");
     const interactionParameters = interactionBinding?.parameters as unknown as InteractionParameters | undefined;
-    const makeInteraction = () => {
-      invariant(interactionBinding && interactionParameters, "MISSING_POLYCSS_BINDING", "Executable pointer interaction parameters are required.");
-      return Object.freeze({
-        initialFrame: interactionParameters.initialFrame,
-        interpreter: createPolycssInteraction(materialized, packageDocument.bindings, mounted, preparedPlayback, {
-          ...options,
-          boundTargets: mountedTargets,
-          presentation,
-        }),
-      });
-    };
-    const activateInteraction = () => {
-      assertMounted();
-      const next = makeInteraction();
-      try {
-        preparedPlayback.seek(next.initialFrame);
-        publishPlaybackFrame(preparedPlayback.sourceFrame);
-        input?.setEnabled(true);
-      } catch (error) {
-        next.interpreter.destroy();
-        throw error;
-      }
-      interaction = next.interpreter;
-    };
-    if (mode === "interaction") interaction = makeInteraction().interpreter;
+    owner.interactionViewport = Object.freeze({
+      viewportWidth: options.viewportWidth,
+      viewportHeight: options.viewportHeight,
+    });
+    if (owner.mode === "interaction") owner.interaction = makeInteraction(owner).interpreter;
     lifecycle.advance("initialize");
     lifecycle.begin("publish");
 
     preparedPlayback.publishInitial();
-    if (mode === "interaction") {
+    if (owner.mode === "interaction") {
       invariant(interactionParameters, "MISSING_POLYCSS_BINDING", "Executable pointer interaction parameters are required.");
       preparedPlayback.seek(interactionParameters.initialFrame);
-      input?.setEnabled(true);
-    } else input?.setEnabled(false);
-    effects?.publish(preparedPlayback.sourceFrame);
-    if (mode === "interaction") {
-      invariant(interaction, "MISSING_POLYCSS_BINDING", "Interaction mode did not initialize its interpreter.");
-      interaction.publishInitial();
+      owner.input?.setEnabled(true);
+    } else owner.input?.setEnabled(false);
+    owner.effects?.publish(preparedPlayback.sourceFrame);
+    if (owner.mode === "interaction") {
+      invariant(owner.interaction, "MISSING_POLYCSS_BINDING", "Interaction mode did not initialize its interpreter.");
+      owner.interaction.publishInitial();
     }
     throwIfAborted(options.signal);
-    hostMutated = true;
+    owner.hostMutated = true;
     if (interpreters.has("polycss-pointer-grab@0") && !host.hasAttribute("tabindex")) host.setAttribute("tabindex", "0");
     host.replaceChildren(mountSurface);
     presentationController.resize();
-    resizeObserver?.observe(host);
-    const stepInteraction = (sample?: InteractionSample) => {
-      assertMounted();
-      invariant(interaction, "INVALID_EXPERIENCE_MODE", "Interaction mode is not active.");
-      const inputAdapter = input;
-      invariant(inputAdapter, "INVALID_EXPERIENCE_MODE", "Interaction input is not mounted.");
-      const frame = interaction.step(sample ?? inputAdapter.sample());
-      effects?.publish(frame.sourceFrame, frame.selectedId && frame.selectedMatrix
-        ? { active: true, x: frame.selectedMatrix[12], y: frame.selectedMatrix[13], z: frame.selectedMatrix[14] }
-        : { active: false, x: 0, y: 0, z: 0 });
-      return frame;
-    };
+    owner.resizeObserver?.observe(host);
     const playbackBinding = packageDocument.bindings.channels.find((channel) => channel.interpreter === "polycss-playback@0");
     if (options.animate !== false && playbackBinding) {
       const playbackParameters = playbackBinding.parameters as unknown as PlaybackParameters | undefined;
@@ -702,57 +820,23 @@ export async function mountDom(
               due = 1;
               nextTick = timestamp + tickMs;
             } else nextTick += due * tickMs;
-            if (mode === "interaction") {
-              for (let index = 0; index < due; index += 1) stepInteraction();
-            } else if (due === 1) playback.advance();
-            else if (due > 1) playback.advanceMany(due);
+            if (owner.mode === "interaction") {
+              for (let index = 0; index < due; index += 1) stepInteraction(owner);
+            } else if (due === 1) advancePlayback(owner);
+            else if (due > 1) advancePlaybackMany(owner, due);
           }
         } catch (error) {
-          cleanup();
+          cleanupMount(owner);
           throw error;
         }
-        if (!lifecycle.isDestroyed()) request = browserWindow.requestAnimationFrame(loop);
+        if (!lifecycle.isDestroyed()) owner.request = browserWindow.requestAnimationFrame(loop);
       };
-      request = browserWindow.requestAnimationFrame(loop);
+      owner.request = browserWindow.requestAnimationFrame(loop);
     }
     lifecycle.advance("publish");
-    return Object.freeze({
-      lifecycle: lifecycle.view as DomMountRuntime["lifecycle"],
-      get mode() { return mode; },
-      get sourceFrame() { return playback.sourceFrame; },
-      seek(frame: number) {
-        assertMounted();
-        return playback.seek(frame);
-      },
-      setMode(next: DomExperienceMode) {
-        assertMounted();
-        invariant(next === "animation" || next === "interaction", "INVALID_EXPERIENCE_MODE", "Browser mode must be animation or interaction.");
-        if (next === mode) return mode;
-        try {
-          if (next === "interaction") {
-            activateInteraction();
-            const activeInteraction = interaction;
-            invariant(activeInteraction, "MISSING_POLYCSS_BINDING", "Interaction mode did not initialize its interpreter.");
-            activeInteraction.publishInitial();
-          } else {
-            input?.setEnabled(false);
-            const modified = interaction?.restore() ?? { shapeIndices: [], leafIndices: [] };
-            interaction?.destroy();
-            interaction = null;
-            const sourceFrame = preparedPlayback.restart(modified.shapeIndices, modified.leafIndices);
-            if (effects && effects.sourceFrame !== sourceFrame) effects.publish(sourceFrame);
-          }
-          mode = next;
-          return mode;
-        } catch (error) {
-          cleanup();
-          throw error;
-        }
-      },
-      destroy: cleanup,
-    });
+    return createMountedRuntime(owner);
   } catch (error) {
-    cleanup();
+    cleanupMount(owner);
     throw error;
   }
 }

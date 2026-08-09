@@ -135,6 +135,20 @@ test("prepared pointer samples use declared source quantization and bounds", asy
   assert.deepEqual(value.interaction.inspect().cursor, [48, 208]);
 });
 
+test("stick endpoints, axis direction, and the deadzone boundary follow the closed input mirror", async () => {
+  const endpointInput = await interactionInput();
+  endpointInput.state.channels.find((channel) => channel.id === "interaction").data.packet.input.stickScale = Math.fround(0.4);
+  const endpoint = runtime(endpointInput);
+  const endpointFrame = endpoint.interaction.step({ stickX: 127, stickY: 127 });
+  assert.equal(endpointFrame.control.csrX, 212, "display +127 mirrors to source -128");
+  assert.equal(endpointFrame.control.csrY, 69, "positive stick Y moves toward smaller display Y");
+
+  const boundaryInput = await interactionInput();
+  boundaryInput.state.channels.find((channel) => channel.id === "interaction").data.packet.input.stickScale = Math.fround(0.4);
+  const boundary = runtime(boundaryInput);
+  assert.equal(boundary.interaction.step({ stickX: 6 }).control.csrX, 163, "the exact deadzone boundary is active");
+});
+
 test("prepared idle animation advances without being reset every tick", async () => {
   const input = await interactionInput();
   const animator = input.state.channels.find((channel) => channel.id === "interaction").data.packet.animator;
@@ -283,4 +297,18 @@ test("interaction validation rejects runtime arithmetic overflow envelopes", asy
   const unstable = await interactionInput();
   unstable.state.channels.find((channel) => channel.id === "interaction").data.packet.source.spring.pickedResistance = 0;
   assert.throws(() => buildDom(unstable), errorCode("INVALID_INTERACTION_STATE"));
+
+  const reconstruction = await interactionInput();
+  const reconstructionPacket = reconstruction.state.channels.find((channel) => channel.id === "interaction").data.packet;
+  const reconstructionClosure = reconstructionPacket.controls[0].closure;
+  reconstructionClosure.weightActiveFlags[0] = 0;
+  reconstructionClosure.weightScalars[0] = Math.fround(2e38);
+  reconstructionClosure.weightLinearContributions[0] = 2;
+  assert.throws(() => buildDom(reconstruction), errorCode("INVALID_INTERACTION_STATE"));
+
+  const eyeMatrix = await interactionInput();
+  const eyePacket = eyeMatrix.state.channels.find((channel) => channel.id === "interaction").data.packet;
+  eyePacket.objects.rotationMatrices[0] = Math.fround(2e38);
+  eyePacket.controls.find((control) => control.mode === "eye-follow").closure.rigidRootInverseMatrix[0] = 2;
+  assert.throws(() => buildDom(eyeMatrix), errorCode("INVALID_INTERACTION_STATE"));
 });

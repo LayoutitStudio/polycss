@@ -1,11 +1,19 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import vm from "node:vm";
 import { mountDom, readDomBrowser, readDomBrowserUrl } from "../src/browser.js";
 import { createInteractionInput } from "../src/browser-input.js";
 import { decodeJson, encodeCanonicalJson } from "../src/canonical-json.js";
 import { buildDom } from "../src/writer.js";
 import { builtExternalResources, errorCode, syntheticAnimationWithoutEffectsInput, syntheticInput, syntheticStaticPresentationInput, syntheticPolycssInput } from "./helpers.js";
 import { dispatch, FakeElement, fakeBrowserDocument } from "./fake-browser.js";
+
+function foreignArrayBuffer(bytes) {
+  const context = vm.createContext({ values: [...bytes] });
+  return vm.runInContext("Uint8Array.from(values).buffer", context);
+}
 
 function documentRoutes(built, modelUrl) {
   const routes = new Map([[modelUrl, built.bytes]]);
@@ -44,6 +52,25 @@ test("browser reader verifies supplied sibling resources without network loading
     readDomBrowser(built.bytes, { externalResources: new Map() }),
     errorCode("MISSING_EXTERNAL_RESOURCE"),
   );
+});
+
+test("browser reader accepts model and sibling ArrayBuffers from another realm", async () => {
+  const built = buildDom(await syntheticInput());
+  const externalResources = new Map([...builtExternalResources(built)].map(([id, bytes]) => [id, foreignArrayBuffer(bytes)]));
+  const result = await readDomBrowser(foreignArrayBuffer(built.bytes), { externalResources });
+  assert.equal(result.resourceBytes.size, 2);
+});
+
+test("browser reader reports unavailable SHA-256 as a coded format error", async () => {
+  const built = buildDom(await syntheticInput());
+  const descriptor = Object.getOwnPropertyDescriptor(globalThis, "crypto");
+  Object.defineProperty(globalThis, "crypto", { configurable: true, value: undefined });
+  try {
+    await assert.rejects(readBuiltBrowser(built), errorCode("MISSING_BROWSER_API"));
+  } finally {
+    if (descriptor) Object.defineProperty(globalThis, "crypto", descriptor);
+    else delete globalThis.crypto;
+  }
 });
 
 test("browser limit overrides reject non-record values consistently", async () => {
@@ -373,8 +400,34 @@ test("successful mount retains identities and idempotent destroy restores the ho
   assert.equal(document.head.childNodes.length, 0);
   assert.equal(observers[0].disconnected, true);
   assert.deepEqual(urls.revoked, urls.created);
+  assert.equal(runtime.mode, "animation");
+  assert.equal(runtime.sourceFrame, 1);
   assert.throws(() => runtime.seek(1), errorCode("MOUNT_DESTROYED"));
   assert.throws(() => runtime.setMode("animation"), errorCode("MOUNT_DESTROYED"));
+});
+
+test("a retained destroyed controller does not retain its detached mount graph", () => {
+  const probe = spawnSync(process.execPath, [
+    "--expose-gc",
+    "--import",
+    "tsx",
+    fileURLToPath(new URL("./runtime-gc-probe.js", import.meta.url)),
+  ], { encoding: "utf8" });
+  assert.equal(probe.status, 0, `${probe.stdout}\n${probe.stderr}`);
+});
+
+test("one host cannot own overlapping runtimes and can be remounted after destroy", async () => {
+  const built = buildDom(await syntheticPolycssInput());
+  const result = await readBuiltBrowser(built);
+  const { document } = fakeBrowserDocument();
+  const host = new FakeElement(document, "main");
+  const first = await mountDom(result, host, { animate: false });
+
+  await assert.rejects(mountDom(result, host, { animate: false }), errorCode("HOST_ALREADY_MOUNTED"));
+  assert.equal(first.destroy(), true);
+
+  const second = await mountDom(result, host, { animate: false });
+  assert.equal(second.destroy(), true);
 });
 
 test("mount keeps construction detached and publishes packet-owned initial sinks atomically", async () => {
@@ -488,6 +541,7 @@ test("browser image decode and cancellation failures roll back before publicatio
 
   const result = await readBuiltBrowser(built);
   const failed = fakeBrowserDocument();
+  const decodeImage = failed.document.defaultView.createImageBitmap;
   failed.document.defaultView.createImageBitmap = async () => { throw new Error("synthetic decoder rejection"); };
   const host = new FakeElement(failed.document, "main");
   const priorChild = new FakeElement(failed.document, "p");
@@ -501,6 +555,32 @@ test("browser image decode and cancellation failures roll back before publicatio
   assert.deepEqual(host.childNodes, [priorChild]);
   assert.equal(failed.document.head.childNodes.length, 0);
   assert.deepEqual(failed.urls.revoked, failed.urls.created);
+
+  failed.document.defaultView.createImageBitmap = decodeImage;
+  const recovered = await mountDom(result, host, { animate: false });
+  assert.equal(recovered.destroy(), true);
+});
+
+test("global image decoding fallback uses its owning realm", async () => {
+  const built = buildDom(await syntheticPolycssInput());
+  const result = await readBuiltBrowser(built);
+  const fake = fakeBrowserDocument();
+  fake.document.defaultView.createImageBitmap = undefined;
+  const descriptor = Object.getOwnPropertyDescriptor(globalThis, "createImageBitmap");
+  Object.defineProperty(globalThis, "createImageBitmap", {
+    configurable: true,
+    value: async function () {
+      assert.equal(this, globalThis);
+      return { width: 2, height: 2, close() {} };
+    },
+  });
+  try {
+    const runtime = await mountDom(result, new FakeElement(fake.document, "main"), { animate: false });
+    assert.equal(runtime.destroy(), true);
+  } finally {
+    if (descriptor) Object.defineProperty(globalThis, "createImageBitmap", descriptor);
+    else delete globalThis.createImageBitmap;
+  }
 });
 
 test("mount rejects forged values and uses private verified resource bytes", async () => {
@@ -609,7 +689,7 @@ test("pre-publication failure does not detach and reconnect existing host childr
 test("input sampling has fixed typed order and consumes the latest pointer once", async () => {
   const { document } = fakeBrowserDocument();
   const host = new FakeElement(document, "main");
-  const input = createInteractionInput(host, {
+  const input = createInteractionInput(host, host, {
     fitHeight: 240,
     fitWidth: 320,
     sourceHeight: 240,
@@ -651,4 +731,49 @@ test("input sampling has fixed typed order and consumes the latest pointer once"
   assert.equal(host.hasPointerCapture(10), false);
   assert.equal(input.destroy(), false);
   assert.throws(() => input.sample(), errorCode("INPUT_DESTROYED"));
+});
+
+test("pointer mapping measures the isolated mount surface with viewport fallback", () => {
+  const { document } = fakeBrowserDocument();
+  const host = new FakeElement(document, "main");
+  const viewport = new FakeElement(document, "div");
+  host.getBoundingClientRect = () => { throw new Error("caller host must not be measured"); };
+  viewport.getBoundingClientRect = () => ({ left: 100, top: 50, width: 640, height: 480 });
+  const presentation = { fitHeight: 240, fitWidth: 320, sourceHeight: 240, sourceWidth: 320 };
+  const input = createInteractionInput(host, viewport, presentation);
+  input.setEnabled(true);
+  dispatch(host, "pointermove", { clientX: 420, clientY: 290 });
+  assert.deepEqual(input.sample().pointer, { x: 160, y: 120 });
+  input.destroy();
+
+  const zeroViewport = new FakeElement(document, "div");
+  zeroViewport.clientWidth = 0;
+  zeroViewport.clientHeight = 0;
+  zeroViewport.getBoundingClientRect = () => ({ left: 10, top: 20, width: 0, height: 0 });
+  const fallback = createInteractionInput(host, zeroViewport, presentation, { viewportWidth: 640, viewportHeight: 480 });
+  fallback.setEnabled(true);
+  dispatch(host, "pointermove", { clientX: 330, clientY: 260 });
+  assert.deepEqual(fallback.sample().pointer, { x: 160, y: 120 });
+  fallback.destroy();
+});
+
+test("pointer mapping converts a non-uniformly scaled surface back to layout coordinates", () => {
+  const { document } = fakeBrowserDocument();
+  const host = new FakeElement(document, "main");
+  const viewport = new FakeElement(document, "div");
+  viewport.clientWidth = 640;
+  viewport.clientHeight = 480;
+  viewport.getBoundingClientRect = () => ({ left: 100, top: 50, width: 1280, height: 480 });
+  const input = createInteractionInput(host, viewport, {
+    fitHeight: 240,
+    fitWidth: 320,
+    sourceHeight: 240,
+    sourceWidth: 320,
+  });
+  input.setEnabled(true);
+  for (const [clientX, sourceX] of [[420, 80], [740, 160], [1060, 240]]) {
+    dispatch(host, "pointermove", { clientX, clientY: 290 });
+    assert.deepEqual(input.sample().pointer, { x: sourceX, y: 120 });
+  }
+  input.destroy();
 });

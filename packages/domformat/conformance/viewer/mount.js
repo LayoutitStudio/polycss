@@ -434,7 +434,9 @@ export async function mountConformanceDom(result, host, options = {}) {
       : null;
     const presentation = document.bindings.channels.find((channel) => channel.interpreter === "static-presentation@0")?.parameters;
     invariant(presentation, "MISSING_POLYCSS_BINDING", "Presentation parameters are required.");
-    input = interpreters.has("polycss-pointer-grab@0") ? createInteractionInput(host, presentation) : null;
+    input = interpreters.has("polycss-pointer-grab@0")
+      ? createInteractionInput(host, surface, presentation, options)
+      : null;
     const makeInteraction = () => createPolycssInteraction(materialized, document.bindings, mounted, playback, {
       ...options,
       boundTargets,
@@ -521,7 +523,12 @@ export async function mountConformanceDom(result, host, options = {}) {
       get mode() { return mode; },
       get sourceFrame() { assertPublished(); return playback.sourceFrame; },
       advance() { assertPublished(); invariant(mode === "animation", "INVALID_EXPERIENCE_MODE", "Animation mode is not active."); return publishEffects(playback.advance()); },
-      seek(frame) { assertPublished(); return publishEffects(playback.seek(frame)); },
+      seek(frame) {
+        assertPublished();
+        const nextFrame = publishEffects(playback.seek(frame));
+        interaction?.invalidatePublication();
+        return nextFrame;
+      },
       stepInteraction,
       snapshot() { assertPublished(); return snapshotTree(mounted, urls); },
       node(id) { assertPublished(); return mounted.byId.get(id); },

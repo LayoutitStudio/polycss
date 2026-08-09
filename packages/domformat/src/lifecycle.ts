@@ -1,7 +1,7 @@
 import { invariant } from "./errors.js";
 import type { DomLifecyclePhase } from "./public-types.js";
 
-export const LIFECYCLE_PHASES = Object.freeze([
+const LIFECYCLE_PHASES = Object.freeze([
   "validate",
   "construct",
   "bind",

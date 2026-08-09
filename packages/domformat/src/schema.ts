@@ -656,6 +656,52 @@ function interactionMagnitudeF32(value: readonly number[]): boolean {
   return Number.isFinite(squared) && squared >= 0 && Number.isFinite(interactionOperationF32(Math.sqrt(squared)));
 }
 
+function interactionReconstructionIsFinite(
+  closure: InteractionClosure,
+  row: number,
+  component: number,
+  offsetBound: number,
+): boolean {
+  const weightOffset = closure.vertexRows[row * 4 + 2];
+  const weightCount = closure.vertexRows[row * 4 + 3];
+  for (const offset of [-offsetBound, 0, offsetBound]) {
+    let value = interactionOperationF32(closure.vertexPositions[row * 3 + component]);
+    for (let index = weightOffset; index < weightOffset + weightCount; index += 1) {
+      const translation = interactionAddF32(
+        closure.weightBaseTranslations[index * 3 + component],
+        closure.weightActiveFlags[index] === 1 ? offset : 0,
+      );
+      const contribution = interactionAddF32(
+        closure.weightLinearContributions[index * 3 + component],
+        translation,
+      );
+      value = interactionAddF32(value, interactionMulF32(contribution, closure.weightScalars[index]));
+      if (!Number.isFinite(value)) return false;
+    }
+  }
+  return true;
+}
+
+function interactionEyeMatrixIsFinite(
+  rotation: readonly number[],
+  inverse: readonly number[],
+  offsetBound: number,
+): boolean {
+  const offsets = offsetBound === 0 ? [0] : [-offsetBound, offsetBound];
+  for (const x of offsets) {
+    for (const y of offsets) {
+      for (const z of offsets) {
+        const translated = [...rotation];
+        translated[12] = interactionAddF32(translated[12], x);
+        translated[13] = interactionAddF32(translated[13], y);
+        translated[14] = interactionAddF32(translated[14], z);
+        if (!translated.every(Number.isFinite) || !multiplyF32Matrices(translated, inverse).every(Number.isFinite)) return false;
+      }
+    }
+  }
+  return true;
+}
+
 function finiteF32Array(value: unknown, length: number, label: string): number[] {
   invariant(Array.isArray(value) && value.length === length && value.every(finiteF32), "INVALID_EFFECTS_STATE", `${label} must contain ${length} finite f32 values.`);
   return value as number[];
@@ -1418,7 +1464,7 @@ export interface InteractionProjection {
   readonly origin: readonly number[];
 }
 
-export interface InteractionSpring {
+interface InteractionSpring {
   readonly cursorResistance: number;
   readonly grabbedFlag: number;
   readonly pickedResistance: number;
@@ -1428,7 +1474,7 @@ export interface InteractionSpring {
   readonly velocityDecay: number;
 }
 
-export interface InteractionSource {
+interface InteractionSource {
   readonly cameraViewMatrix: readonly number[];
   readonly cameraWorldPosition: readonly number[];
   readonly inverseCameraMatrix: readonly number[];
@@ -1439,14 +1485,14 @@ export interface InteractionSource {
   readonly spring: InteractionSpring;
 }
 
-export interface InteractionTriangle {
+interface InteractionTriangle {
   readonly basisEpsilon: number;
   readonly primitive: string;
   readonly fallbackAmount: number;
   readonly sharedEdgeAmount: number;
 }
 
-export interface InteractionLeafPlan {
+interface InteractionLeafPlan {
   readonly basis: readonly number[];
   readonly canonicalSize: number;
   readonly matrixDecimals: number;
@@ -1469,7 +1515,7 @@ export interface InteractionClosure {
   readonly rigidRootInverseMatrix: readonly number[];
 }
 
-export interface InteractionControl {
+interface InteractionControl {
   readonly id: string;
   readonly role: string;
   readonly mode: "grab" | "eye-follow";
@@ -1645,10 +1691,10 @@ function validatePolycssChannelInvariants(
       const frameIndices: readonly number[] = star.frameIndices;
       invariant(Array.isArray(frameIndices) && frameIndices.length === packet.frameCount && frameIndices.every((frame) => Number.isSafeInteger(frame) && frame >= 0 && frame < star.backgroundPositions.length), "FRAME_CARDINALITY_MISMATCH", `Effect star ${index} frame indices are invalid.`);
     }
-    let maximumLifetime = 0;
+    let maximumMovementSteps = 0;
     const continuousVelocity = [0, 0, 0];
     for (const tuple of spawnStream.tuples) {
-      maximumLifetime = Math.max(maximumLifetime, Math.trunc(tuple[0]));
+      maximumMovementSteps = Math.max(maximumMovementSteps, Math.ceil(tuple[0]) + 1);
       for (const component of [0, 1, 2]) continuousVelocity[component] = Math.max(continuousVelocity[component], Math.abs(Math.fround(tuple[component + 1] + biases.continuous[component])));
     }
     const continuousStart = [0, 0, 0];
@@ -1659,8 +1705,8 @@ function validatePolycssChannelInvariants(
       }
     }
     for (const component of [0, 1, 2]) {
-      const gravity = component === 1 ? Math.abs(particle.gravityY) * maximumLifetime * (maximumLifetime + 1) / 2 : 0;
-      const bound = continuousStart[component] + continuousVelocity[component] * maximumLifetime + gravity;
+      const gravity = component === 1 ? Math.abs(particle.gravityY) * maximumMovementSteps * (maximumMovementSteps - 1) / 2 : 0;
+      const bound = continuousStart[component] + continuousVelocity[component] * maximumMovementSteps + gravity;
       invariant(finiteF32Result(bound), "INVALID_EFFECTS_STATE", `Prepared continuous effect component ${component} can overflow within a particle lifetime.`);
     }
   }
@@ -1864,6 +1910,18 @@ function validatePolycssChannelInvariants(
         && closure.weightLinearContributions.every(finiteF32)
         && closure.weightBaseTranslations.every(finiteF32)
         && closure.weightActiveFlags.every((flag) => flag === 0 || flag === 1), "INTERACTION_STATE_LIMIT", `Interaction control ${controlIndex} weight tables are invalid or excessive.`);
+      const reconstructionBounds = control.mode === "eye-follow"
+        ? [source.eyeMaximumOffset, source.eyeMaximumOffset, source.eyeMaximumOffset]
+        : selectedGrabOffsetBounds;
+      for (let row = 0; row < vertexCount; row += 1) {
+        for (let component = 0; component < 3; component += 1) {
+          invariant(
+            interactionReconstructionIsFinite(closure, row, component, reconstructionBounds[component]),
+            "INVALID_INTERACTION_STATE",
+            `Interaction control ${controlIndex} vertex ${row} reconstruction can overflow binary32 arithmetic.`,
+          );
+        }
+      }
       interactionIntegerArray(closure.leafIndices, packet.leaves.length, `Interaction control ${controlIndex} leaf indices`, { upper: Math.max(0, packet.leaves.length - 1), unique: true });
       invariant(Array.isArray(closure.leafRows) && closure.leafRows.length === closure.leafIndices.length * 4, "INVALID_INTERACTION_STATE", `Interaction control ${controlIndex} leaf rows are truncated or mismatched.`);
       totalLeafRows += closure.leafIndices.length;
@@ -1882,6 +1940,13 @@ function validatePolycssChannelInvariants(
       if (control.mode === "eye-follow") interactionF32Array(closure.rigidRootInverseMatrix, 16, `Interaction control ${controlIndex} rigid inverse matrix`);
       else invariant(Array.isArray(closure.rigidRootInverseMatrix) && closure.rigidRootInverseMatrix.length === 0, "INVALID_INTERACTION_STATE", `Grab control ${controlIndex} must not contain a rigid inverse matrix.`);
       if (control.mode === "eye-follow") {
+        const rotationOffset = control.attachmentObjectIndices[0] * 16;
+        const rotation = objects.rotationMatrices.slice(rotationOffset, rotationOffset + 16);
+        invariant(
+          interactionEyeMatrixIsFinite(rotation, closure.rigidRootInverseMatrix, source.eyeMaximumOffset),
+          "INVALID_INTERACTION_STATE",
+          `Interaction eye control ${controlIndex} matrix envelope can overflow binary32 arithmetic.`,
+        );
         const projected = interactionProjectedF32(control.sourcePosition, source as unknown as JsonRecord);
         invariant(projected, "INVALID_INTERACTION_STATE", `Interaction eye control ${controlIndex} projection overflows binary32 arithmetic.`);
         for (const cursorX of [input.cursorBounds[0], input.cursorBounds[1]]) {
@@ -2056,7 +2121,7 @@ function validateMetadataClosure(meta: DomMeta, bindingChannels: ReadonlyMap<str
   invariant(meta.conformance.declaredOnly.length === 0, "CONFORMANCE_CLOSURE_MISMATCH", "polycss-3d@0 has no declared-only interpreter surface.");
 }
 
-export interface DomDocumentValidation {
+interface DomDocumentValidation {
   readonly limits: DomLimits;
   readonly resourceIds: Set<string>;
   readonly nodeIds: Set<string>;

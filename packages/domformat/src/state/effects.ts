@@ -269,7 +269,7 @@ export function createPolycssEffects(
     const star = emitter.definition.sourceStar;
     positionEmitter(emitter, starX[star], starY[star], starZ[star]);
     for (let index = 0; index < emitter.definition.poolSize; index += 1) {
-      if (emitter.timeout[index] <= 0) spawn(emitter, index, packet.biases.continuous);
+      if (emitter.activeParticles[index] === 0) spawn(emitter, index, packet.biases.continuous);
     }
     advanceParticles(emitter);
   };
@@ -286,7 +286,7 @@ export function createPolycssEffects(
     positionEmitter(emitter, grabActive ? grabX : 0, grabActive ? grabY : 0, grabActive ? grabZ : 0);
     if (emitter.armed && !emitter.emitted) {
       for (let index = 0; index < emitter.definition.poolSize; index += 1) {
-        if (emitter.timeout[index] <= 0) spawn(emitter, index, packet.biases.grab);
+        if (emitter.activeParticles[index] === 0) spawn(emitter, index, packet.biases.grab);
       }
       emitter.emitted = true;
     }
@@ -351,6 +351,24 @@ export function createPolycssEffects(
       }
     },
     inspect,
-    destroy() { destroyed = true; },
+    destroy() {
+      if (destroyed) return;
+      destroyed = true;
+      deferred = false;
+      pendingStyles.clear();
+      for (const element of mountedStars) element.style.visibility = "hidden";
+      for (const emitter of emitters) {
+        emitter.active = 0;
+        emitter.armed = false;
+        emitter.emitted = false;
+        emitter.activeParticles.fill(0);
+        emitter.visibleParticles.fill(0);
+        emitter.timeout.fill(-1);
+        for (const element of emitter.elements) {
+          element.style.visibility = "hidden";
+          element.style.opacity = "0";
+        }
+      }
+    },
   });
 }

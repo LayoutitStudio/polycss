@@ -190,6 +190,32 @@ test("playback defers hidden transforms and flushes the latest value before reve
     ]);
   });
 
+  test("public seek restores interaction-owned physical transforms exactly once", () => {
+    const { leaves, playback, writes } = createFixture();
+    playback.applyInteractionLeaf(1, "interaction-transform");
+    assert.equal(leaves[1].style.transform, "interaction-transform");
+    writes.splice(0);
+
+    assert.equal(playback.seek(1), 1);
+    assert.equal(leaves[1].style.transform, "leaf-1-frame-1");
+    assert.deepEqual(writes, [["leaf:1", "transform", "leaf-1-frame-1"]]);
+
+    writes.splice(0);
+    assert.equal(playback.seek(1), 1);
+    assert.deepEqual(writes, []);
+  });
+
+  test("restart clears forced interaction visibility without method receiver state", () => {
+    const { leaves, playback, writes } = createFixture();
+    playback.forceVisible([0]);
+    assert.equal(leaves[0].style.visibility, "visible");
+    writes.splice(0);
+
+    assert.equal(playback.restart(), 1);
+    assert.equal(leaves[0].style.visibility, "hidden");
+    assert.deepEqual(writes, [["leaf:0", "visibility", "hidden"]]);
+  });
+
   test("forced reveal flushes prepared state and restore clears hidden dirt", () => {
     const forced = createFixture();
     assert.equal(forced.playback.advance(), 2);

@@ -70,9 +70,10 @@ reference interpreter invokes `f32`. Cursor resistance uses ECMAScript
 
 An absolute positioned pointer is finite, truncated toward zero, and clamped
 to the declared X/Y cursor bounds before it replaces retained cursor state.
-Grab defines `dragging`; its rising edge captures the drag origin. Stick axes
-outside the deadzone add `stick * stickScale`, then truncate and clamp. Hold
-publishes the declared hold bit.
+Grab defines `dragging`; its rising edge captures the drag origin. At or beyond
+the deadzone, stick X adds `stickX * stickScale` and stick Y subtracts
+`stickY * stickScale`; each result is then truncated and clamped. Hold publishes
+the declared hold bit.
 
 For a declared horizontal mirror, display stick X and the already quantized and
 clamped absolute pointer X are mirrored before source execution, including
@@ -142,6 +143,21 @@ order on an exact tie; cursor snap uses that selected control's screen position.
 A moved control is projected from its current matrix;
 otherwise use its prepared screen position/distance.
 
+Projection first transforms the world position by the row-major
+`cameraViewMatrix`, including its translation, with `f32` after every multiply
+and add. For camera-space `[x, y, z]`, `abs(z)` MUST exceed `1e-6`, then the
+screen coordinates are evaluated in this exact order:
+
+```text
+xScale  = f32(scale / f32(-z))
+yScale  = f32(scale / z)
+screenX = f32(f32(x * xScale) + originX)
+screenY = f32(f32(y * yScale) + originY)
+```
+
+The asymmetric signs are normative: the source camera looks down negative Z
+while display Y increases downward.
+
 While selected, velocity is `offset * pickedResistance` and the grabbed flag is
 set. After release without hold, each component is:
 
@@ -157,8 +173,9 @@ the inverse camera matrix, the selected-offset envelope, source-position sums,
 and eye projection/magnitude operations using the declared binary32 order.
 
 Snap to source position only when velocity and offset L1 norms are both
-strictly below declared thresholds. Hold freezes velocity. Cursor resistance is
-applied after movement and before the new displacement.
+strictly below declared thresholds. Hold sets velocity to zero and freezes the
+current position; release resumes spring integration from zero velocity. Cursor
+resistance is applied after movement and before the new displacement.
 
 ## Sparse publication and triangle fit
 

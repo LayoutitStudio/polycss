@@ -12,7 +12,7 @@ import { canonicalJsonBytes, serializeCanonicalJson } from "./gallery-domformat-
 const scriptRoot = dirname(fileURLToPath(import.meta.url));
 const websiteRoot = resolve(scriptRoot, "..");
 const galleryRoot = join(websiteRoot, "public/gallery");
-const corpusRoot = join(websiteRoot, "public/gallery/domformat");
+const corpusRoot = join(websiteRoot, "gallery-domformat-corpus");
 const catalogPath = join(corpusRoot, "catalog.json");
 const generatorPath = join(scriptRoot, "generate-gallery-domformat.mjs");
 const execFileAsync = promisify(execFile);

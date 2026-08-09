@@ -26,7 +26,7 @@ import { canonicalJsonBytes } from "./gallery-domformat-canonical.mjs";
 const scriptRoot = dirname(fileURLToPath(import.meta.url));
 const websiteRoot = resolve(scriptRoot, "..");
 const galleryRoot = join(websiteRoot, "public/gallery");
-const defaultOutputRoot = join(galleryRoot, "domformat");
+const defaultOutputRoot = join(websiteRoot, "gallery-domformat-corpus");
 const browserEntry = join(scriptRoot, "gallery-domformat-browser.ts");
 const scope = '[data-domformat-gallery="model"]';
 const XHTML = "http://www.w3.org/1999/xhtml";
