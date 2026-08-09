@@ -244,6 +244,8 @@ type PolySeamBleedEdges =
 
 `TextureQuality` controls atlas bitmap budget and CSS sprite size. `PolySeamBleed` controls solid-primitive overscan for detected shared seam edges.
 
+Renderer semantics for `PolySeamBleed` currently diverge: vanilla `createPolyScene` treats a number as a `0..1` ratio of the built-in `1.5` px default and resolves `"auto"` to the full `1.5` px, while React/Vue treat a number as the requested CSS-pixel amount and treat an explicit `"auto"` as no shared-edge overscan at all (atlas planning accepts numeric amounts only; per-strategy primitive bleeds are unaffected). The numeric default `1.5` behaves identically everywhere.
+
 ---
 
 ## `PolyRenderStrategiesOption`
@@ -324,6 +326,7 @@ interface PolySceneOptions {
   textureBackend?: PolyTextureBackend;
   /** Default texture projection request. Defaults to "affine". */
   textureProjection?: PolyTextureProjection;
+  /** Shared-edge solid overscan. See `PolySeamBleed` above for cross-renderer semantics. */
   seamBleed?: PolySeamBleed;
   strategies?: PolyRenderStrategiesOption;
   autoCenter?: boolean;

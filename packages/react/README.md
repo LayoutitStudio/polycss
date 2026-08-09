@@ -97,7 +97,8 @@ Renders a live document as a flat quad in the scene, with the same
 the wrapper's local origin, so rotation and scale pivot at the visible center.
 
 `width` and `height` are **world units**, not pixels — the mounted document is
-`width × 50` CSS px wide (`BASE_TILE`), so `16 × 9` yields an 800 × 450 px page.
+`width × 50` by `height × 50` CSS px (`BASE_TILE`), so `16 × 9` yields an
+800 × 450 px page.
 
 ```tsx
 <PolyIframe src="https://example.com" width={16} height={9} position={[0, 0, 5]} />
