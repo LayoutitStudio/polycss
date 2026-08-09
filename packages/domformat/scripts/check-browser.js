@@ -114,7 +114,7 @@ async function withBrowserPage(browser, dimensions, label, action) {
   return result;
 }
 
-async function waitForPublication(page, url, label, diagnostics) {
+async function waitForPublication(page, url, label, diagnostics, expectedPaintResources) {
   let waitError;
   try {
     await page.goto(url, { waitUntil: "load", timeout: 20_000 });
@@ -133,6 +133,43 @@ async function waitForPublication(page, url, label, diagnostics) {
   invariant(!waitError, "BROWSER_RELEASE_MOUNT", `${label} did not publish the retained DOM${diagnosticSuffix(publication.status, diagnostics, waitError)}.`);
   invariant(!publication.error, "BROWSER_RELEASE_MOUNT", `${label} reported a package mount failure${diagnosticSuffix(publication.status, diagnostics)}.`);
   invariant(publication.ready, "BROWSER_RELEASE_MOUNT", `${label} did not publish the retained DOM${diagnosticSuffix(publication.status, diagnostics)}.`);
+  const resources = await page.evaluate(async () => {
+    const urls = new Set();
+    const urlPattern = /url\((?:"([^"]*)"|'([^']*)'|([^)]*))\)/gu;
+    for (const element of document.querySelectorAll("*")) {
+      const background = getComputedStyle(element).backgroundImage;
+      for (const match of background.matchAll(urlPattern)) {
+        const value = (match[1] ?? match[2] ?? match[3] ?? "").trim();
+        if (value.startsWith("blob:")) urls.add(value);
+      }
+      for (const attribute of ["src", "href"]) {
+        const value = element.getAttribute(attribute);
+        if (value?.startsWith("blob:")) urls.add(value);
+      }
+    }
+    let timeout;
+    try {
+      const decoded = [...urls].map(async (resource) => {
+        const image = new Image();
+        image.src = resource;
+        await image.decode();
+      });
+      if (document.fonts) decoded.push(document.fonts.ready);
+      await Promise.race([
+        Promise.all(decoded),
+        new Promise((_, reject) => {
+          timeout = setTimeout(() => reject(new Error("paint resources did not decode within 5 seconds")), 5_000);
+        }),
+      ]);
+      return { decoded: true, count: urls.size, error: "" };
+    } catch (error) {
+      return { decoded: false, count: urls.size, error: error instanceof Error ? error.message : String(error) };
+    } finally {
+      clearTimeout(timeout);
+    }
+  });
+  invariant(resources.count === expectedPaintResources, "BROWSER_RELEASE_PAINT", `${label} exposed ${resources.count} blob-backed paint resources instead of ${expectedPaintResources}.`);
+  invariant(resources.decoded, "BROWSER_RELEASE_PAINT", `${label} did not decode ${resources.count} paint resources (${resources.error}).`);
   const paint = await page.evaluate(() => new Promise((resolvePaint) => {
     const timeout = setTimeout(() => resolvePaint(false), 2_000);
     requestAnimationFrame(() => requestAnimationFrame(() => {
@@ -228,6 +265,10 @@ function sideBySideEvidence(png, label) {
   let minimumLuma = 255;
   let maximumLuma = 0;
   let samples = 0;
+  let minimumDifferenceX = 320;
+  let minimumDifferenceY = 240;
+  let maximumDifferenceX = -1;
+  let maximumDifferenceY = -1;
   for (let y = 0; y < 240; y += 1) {
     for (let x = 0; x < 320; x += 1) {
       const referenceOffset = (y * decoded.width + x) * decoded.bytesPerPixel;
@@ -238,7 +279,13 @@ function sideBySideEvidence(png, label) {
         maximumChannelDelta = Math.max(maximumChannelDelta, delta);
         if (delta !== 0) different = true;
       }
-      if (different) modelPixelDifferences += 1;
+      if (different) {
+        modelPixelDifferences += 1;
+        minimumDifferenceX = Math.min(minimumDifferenceX, x);
+        minimumDifferenceY = Math.min(minimumDifferenceY, y);
+        maximumDifferenceX = Math.max(maximumDifferenceX, x);
+        maximumDifferenceY = Math.max(maximumDifferenceY, y);
+      }
       const red = decoded.pixels[referenceOffset];
       const green = decoded.pixels[referenceOffset + 1];
       const blue = decoded.pixels[referenceOffset + 2];
@@ -250,7 +297,7 @@ function sideBySideEvidence(png, label) {
       samples += 1;
     }
   }
-  invariant(modelPixelDifferences === 0, "BROWSER_RELEASE_PAINT", `${label} differs in ${modelPixelDifferences} retained-DOM proof pixels.`);
+  invariant(modelPixelDifferences === 0, "BROWSER_RELEASE_PAINT", `${label} differs in ${modelPixelDifferences} retained-DOM proof pixels (bounds ${minimumDifferenceX},${minimumDifferenceY}-${maximumDifferenceX},${maximumDifferenceY}; maximum channel delta ${maximumChannelDelta}).`);
   const populations = [...colors.values()].sort((left, right) => right - left);
   const secondaryCoverage = (populations[1] ?? 0) / samples;
   invariant(colors.size >= 2 && maximumLuma - minimumLuma >= 2 && secondaryCoverage >= 0.2, "BROWSER_RELEASE_PAINT", `Side-by-side model paint is uniform (${colors.size} colors; luma range ${maximumLuma - minimumLuma}; secondary coverage ${secondaryCoverage.toFixed(3)}).`);
@@ -265,7 +312,7 @@ function sideBySideEvidence(png, label) {
 
 async function dumpedMount(browser, url, label, nodes, leaves, requiredLeafTag, sourceFrame) {
   const html = await withBrowserPage(browser, { width: 320, height: 240 }, label, async (page, diagnostics) => {
-    await waitForPublication(page, url, label, diagnostics);
+    await waitForPublication(page, url, label, diagnostics, 1);
     return page.content();
   });
   invariant(html.includes("data-domformat-mount-surface=\"\""), "BROWSER_RELEASE_MOUNT", `${label} lacks the isolated mount surface.`);
@@ -276,7 +323,7 @@ async function dumpedMount(browser, url, label, nodes, leaves, requiredLeafTag, 
 
 async function paintedComparison(browser, url, label) {
   const png = await withBrowserPage(browser, { width: 640, height: 240 }, label, async (page, diagnostics) => {
-    await waitForPublication(page, url, label, diagnostics);
+    await waitForPublication(page, url, label, diagnostics, 2);
     return page.screenshot({ type: "png" });
   });
   invariant(png.length > 1024, "BROWSER_RELEASE_PAINT", `${label} did not produce a substantial painted PNG proof.`);
