@@ -86,7 +86,10 @@ How much cleanup you get for free varies by parser and by entry point:
 
 - **Winding:** STL repairs it from connectivity; `.vox` is correct by
   construction; **OBJ and glTF preserve source winding as-is**. All parsers
-  normalize coordinates with a handedness-preserving axis map.
+  fit to target size and normalize into PolyCSS Z-up coordinates. The axis
+  transform is per-format: OBJ and glTF apply a cyclic `(x,y,z) → (z,x,y)`
+  permutation (never a y↔z swap, so handedness is preserved); STL defaults to
+  identity axes; `.vox` is already Z-up.
 - **Validation:** only React/Vue `<PolyScene polygons>` runs
   `normalizePolygons` (drops degenerates, strips mismatched `uvs`, replaces bad
   colors with `#cccccc`, fan-triangulates non-coplanar n-gons) — and its
@@ -135,15 +138,18 @@ fan-triangulates it, silently changing topology. Triangles are always safe.
 
 **4. The optimizer rewrites geometry by default.** `merge` defaults to `true`
 and `meshResolution` to `"lossy"`: coincident faces within `0.05` world units
-are deduped, interior faces culled, and lossy merging tolerates up to `0.35`
-world units of plane displacement (absolute units, not configurable). Dedupe and
+are deduped, interior faces culled, and lossy merging starts at `0.35` world
+units of plane displacement / `0.04` boundary / `15°` — but that is not the
+ceiling: the optimizer also tries aggressive `30°`, `45°`, and `60°` variants
+(the widest at `0.06` boundary), accepted on a material render-cost win. All
+absolute world units, not configurable. Dedupe and
 interior culling count as exact reductions and still run under
 `meshResolution: "lossless"`. `merge: false` renders the array you pass
 untouched, but only on `scene.add(...)` and `<PolyMesh polygons>` — it does not
 exist on `<PolyScene polygons>` (always normalized + merged) or `<poly-mesh>`,
 and it cannot undo `loadMesh`'s own parse-time optimization. There is no
 exact-as-authored path for file geometry — the parsers normalize (fit to
-`targetSize` `60`, origin reposition, Z-up axis remap, coordinate rounding,
+`targetSize` `60`, origin reposition, per-format axis normalization, rounding,
 fan-triangulation; STL repairs winding; `.vox` greedy-meshes quads). To preserve
 the *direct parser output* from renderer optimization, call
 `parseObj`/`parseStl`/`parseGltf`/`parseVox` directly and add with

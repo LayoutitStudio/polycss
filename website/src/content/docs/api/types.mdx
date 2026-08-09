@@ -142,10 +142,16 @@ Direct image leaves (`backend: "image"`) are **source-lit only** — they use
 `lighting: "source"` and keep the source pixels untouched. A textured polygon
 that needs scene lighting falls back to the atlas backend.
 
-These are also scene-level defaults: `textureBackend`, `textureProjection`,
-`textureImageRendering`, and `textureLeafSizing` on `PolySceneOptions` (and the
-matching `<PolyMesh>` props) set the default for every polygon, and a polygon's
-own `texturePresentation` overrides it.
+These are also scene-level defaults: `textureBackend`, `textureProjection`, and
+`textureImageRendering` on `PolySceneOptions` (and the matching `<PolyMesh>`
+props) set the default for every polygon. From weakest to strongest, the
+resolved presentation is: scene defaults → `material.presentation` → (for
+`imageRendering` only) the selected image source's own `imageRendering` → the
+polygon's `texturePresentation`. The image source itself resolves as
+`polygon.textureImageSource` over `material.imageSource`.
+
+`textureLeafSizing` is different: it is a scene/atlas-level option with **no**
+per-polygon override — `PolyTexturePresentation` has no leaf-sizing field.
 
 ---
 

@@ -23,7 +23,7 @@ Where voxcss used to render a single voxel cube, PolyCSS renders any regular pol
 
 PolyCSS exposes three composable concepts. Each one ships as a custom element (vanilla) and as a React / Vue component:
 
-- **Scene** (`<poly-scene>` / `PolyScene`): the render tree root. Always nested inside a camera element. Sets up lighting and fills its parent element.
+- **Scene** (`<poly-scene>` / `PolyScene`): the render tree root. Normally nested inside a camera element (the custom element can also stand alone — see [Camera](#camera)). Sets up lighting and fills its parent element.
 - **Mesh** (`<poly-mesh>` / `PolyMesh`): loads a mesh from a URL (OBJ / STL / glTF / GLB / VOX). Internally expands to one polygon child per face. Convenience wrapper around the parser + renderer.
 - **Polygon** (`<poly-polygon>` / `Poly`): one polygon. The atomic primitive. Renders as one internal DOM leaf with `transform: matrix3d(...)`. Accepts standard DOM event handlers, classes, and styles: this is what makes PolyCSS "DOM-native 3D" rather than "3D inside a black-box canvas".
 
@@ -31,7 +31,9 @@ A mesh element is internally `polygons.map(p => <poly-polygon …>)`, so any ren
 
 ## Camera
 
-The camera element (`<poly-camera>` / `PolyCamera`) is always the **outer** node. `<poly-scene>` / `PolyScene` is nested inside it. Camera attributes (`rot-x`, `rot-y`, `zoom`, `distance`) belong on the camera element, never on the scene. `PolyCamera` is orthographic by default; use `PolyPerspectiveCamera` for depth foreshortening.
+The camera element (`<poly-camera>` / `PolyCamera`) is normally the **outer** node, with `<poly-scene>` / `PolyScene` nested inside it, and camera attributes (`rot-x`, `rot-y`, `zoom`, `distance`) belong on the camera element rather than the scene. `PolyCamera` is orthographic by default; use `PolyPerspectiveCamera` for depth foreshortening.
+
+**One exception:** the `<poly-scene>` custom element can stand alone. With no ancestor camera element it builds an implicit camera from its own `perspective`, `rot-x`, `rot-y`, `zoom`, `distance`, and `target` attributes — see [PolyScene](/components/poly-scene). React/Vue have no such fallback: `PolyScene` throws outside a camera component.
 
 ```html
 <!-- Vanilla -->
@@ -112,8 +114,13 @@ and **which entry point** you hand it to. Neither is uniform:
 | OBJ | **Preserved as authored.** A file wound inconsistently stays that way. |
 | glTF / GLB | **Preserved as authored.** `doubleSided` materials emit reversed duplicate triangles. |
 
-Every parser normalizes coordinates (fit-to-target scale, Y-up → Z-up), and the
-axis permutation is chosen specifically so it does *not* flip handedness.
+Every parser fits the mesh to its target size and normalizes into PolyCSS's Z-up
+coordinates, but the axis transform is per-format: OBJ and glTF/GLB apply the
+cyclic permutation `(x,y,z) → (z,x,y)` to bring their +Y-up convention to +Z-up
+(glTF can opt out with `upAxis: "z"`); STL defaults to identity axes, the common
+CAD export convention, with the permutation as opt-in; `.vox` is already Z-up
+and only rotates the horizontal plane. Where a permutation is applied it is
+cyclic rather than a y↔z swap, precisely so it never flips handedness.
 
 `normalizePolygons` — which drops degenerate polygons, strips mismatched `uvs`,
 replaces unparseable colors with `#cccccc`, and **fan-triangulates non-coplanar
@@ -215,10 +222,14 @@ authored geometry is merged, deduped, and interior-culled before it renders:
 
 - Coincident faces closer than `0.05` world units are deduped.
 - Fully-interior faces are culled.
-- Lossy merging tolerates up to `0.35` world units of plane displacement and
-  `0.04` of boundary displacement, at up to `15°` of angle change. These are
-  **absolute world units and not configurable**, so small-scale hand-authored
-  meshes can get visibly welded.
+- Lossy merging starts at up to `0.35` world units of plane displacement and
+  `0.04` of boundary displacement, at up to `15°` of angle change. **These are
+  not the maximum.** When the default pass doesn't pay off, the optimizer also
+  tries progressively more aggressive variants at `30°`, `45°`, and `60°` — the
+  widest also raising boundary displacement to `0.06`. Those are accepted only
+  on a material render-cost win with non-worsening seam diagnostics, but they
+  *can* apply to your geometry. All values are **absolute world units and not
+  configurable**, so small-scale hand-authored meshes can get visibly welded.
 
 Note that dedupe and interior culling are treated as *exact* reductions, so they
 still run under `meshResolution: "lossless"` — only the lossy approximation is

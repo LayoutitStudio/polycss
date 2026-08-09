@@ -30,8 +30,13 @@ npm install @layoutit/polycss-core
 ## Parsing a mesh without a browser
 
 The parsers (`parseObj`, `parseStl`, `parseGltf`, `parseVox`, `parseMtl`) are
-pure, synchronous functions over already-loaded bytes and strings, so they run
-under Node. `loadMesh` is the convenience wrapper on top: it fetches a URL and
+synchronous functions over already-loaded bytes and strings, so they run under
+Node. `parseGltf` has two caveats: `.gltf` files with external `.bin` buffers
+need an `options.resolveBuffer` callback returning the bytes as a `Uint8Array`
+**synchronously** (returning a Promise throws — read the buffers first), and
+embedded images mint blob object URLs, so callers must call `result.dispose()`
+when done with the mesh. `dispose()` is idempotent, and a no-op for the other
+parsers. `loadMesh` is the convenience wrapper on top: it fetches a URL and
 dispatches by extension, so it needs `fetch` and is not pure.
 
 ```ts
@@ -76,8 +81,10 @@ already-loaded input.
 - **Atlas planning** — the pure-math half of the texture atlas pipeline. Canvas
   rasterisation itself lives in each renderer, because it needs the DOM.
 
-Everything exported from `src/index.ts` is the supported surface; anything else
-is implementation detail.
+The package has two public entry points: the root (`@layoutit/polycss-core`,
+exported from `src/index.ts`) and the Three.js parity subpath
+(`@layoutit/polycss-core/three`, described below). Everything they export is the
+supported surface; anything else is implementation detail.
 
 ## Authoring polygons directly
 
