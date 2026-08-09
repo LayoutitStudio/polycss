@@ -146,7 +146,14 @@ async function verifyFreshCorpus() {
       timeout: 30 * 60 * 1000,
     });
     const [committedFiles, freshFiles] = await Promise.all([filesBelow(corpusRoot), filesBelow(freshRoot)]);
-    requireCondition(sameValue(committedFiles, freshFiles), "Fresh Gallery generation changed the corpus file inventory.");
+    const committedSet = new Set(committedFiles);
+    const freshSet = new Set(freshFiles);
+    const committedOnly = committedFiles.filter((path) => !freshSet.has(path));
+    const freshOnly = freshFiles.filter((path) => !committedSet.has(path));
+    requireCondition(
+      committedOnly.length === 0 && freshOnly.length === 0,
+      `Fresh Gallery generation changed the corpus file inventory; committed-only (${committedOnly.length}): ${committedOnly.slice(0, 20).join(", ")}; fresh-only (${freshOnly.length}): ${freshOnly.slice(0, 20).join(", ")}.`,
+    );
     for (const path of committedFiles) {
       const [committed, fresh] = await Promise.all([readFile(join(corpusRoot, path)), readFile(join(freshRoot, path))]);
       requireCondition(committed.equals(fresh), `Committed Gallery corpus is stale at ${path}.`);
