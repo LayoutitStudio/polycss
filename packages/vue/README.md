@@ -4,9 +4,13 @@ Vue 3 bindings for [PolyCSS](https://polycss.com) — a 3D engine for the DOM.
 Renders OBJ/MTL, STL, glTF/GLB, and VOX meshes as real HTML elements
 transformed with CSS `matrix3d(...)`. No WebGL, no canvas-per-frame.
 
+<!-- polycss:shared:links:start -->
 Visit [polycss.com](https://polycss.com) for docs and model examples.
 
+Join [chat.polycss.com](https://chat.polycss.com) for support and community discussions.
+
 <img width="1600" height="300" alt="PolyCSS primitives banner" src="https://github.com/user-attachments/assets/b05e2204-9323-4f83-8d1b-01ea0dd000db" />
+<!-- polycss:shared:links:end -->
 
 ## Installation
 
@@ -240,6 +244,7 @@ to place that primitive in 3D space. Polygon count is the dominant cost.
 - `<s>` maps a packed texture-atlas slice, and is the fallback for textured or
   unsupported shapes.
 
+<!-- polycss:shared:packages:start -->
 ## Packages
 
 | Package | Description |
@@ -248,9 +253,11 @@ to place that primitive in 3D space. Polygon count is the dominant cost.
 | `@layoutit/polycss` | Vanilla custom elements and imperative `createPolyScene` API. |
 | `@layoutit/polycss-react` | React components, hooks, controls, and core re-exports. |
 | `@layoutit/polycss-vue` | Vue 3 components, composables, controls, and core re-exports. |
-| `@layoutit/polycss-fonts` | Fonts + text → extruded 3D `Polygon[]`. Framework-agnostic. |
 | `@layoutit/polycss-morph` | Prepared-model loading, retained DOM animation, morph targets, skinning, and playback. |
+<!-- polycss:shared:packages:end -->
 
+<!-- polycss:shared:license:start -->
 ## License
 
 MIT.
+<!-- polycss:shared:license:end -->

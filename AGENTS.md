@@ -189,6 +189,7 @@ Before opening a PR:
 - [ ] If I touched the canvas atlas pipeline (`rasterise.ts` / `buildAtlasPages.ts`), browser-feature detection, or direct voxel renderer in ONE renderer, the same fix lands in the other two renderers (`polycss` + react + vue) in this PR.
 - [ ] If I touched any of the three `styles.ts` (`packages/polycss/src/styles/styles.ts`, `packages/react/src/styles/styles.ts`, `packages/vue/src/styles/styles.ts`), the other two are consistent — CSS rules cover every emitted tag for both lighting modes, and shared properties like `will-change: transform` on `.polycss-scene` exist in all three.
 - [ ] Website docs (`website/src/content/docs/**`) and READMEs reflect any user-visible change.
+- [ ] If I edited a `<!-- polycss:shared:* -->` block, I edited it in the ROOT `README.md` and ran `pnpm sync:readmes` (see "Package READMEs" below).
 - [ ] If I changed a render strategy, lighting mode, naming convention, or the JS-in-render-loop rules, `AGENTS.md` reflects the new state in this same PR.
 
 ## Iterating on the system
@@ -199,6 +200,29 @@ The rendering model, tag table, lighting modes, and naming conventions described
 - **Architectural changes require user approval.** Dropping a render strategy, adding a lighting mode, renaming a public-facing convention, changing what JS is allowed in the render path — propose, don't decide. The user (human) is the architect.
 - **Same-PR sync.** Any PR that adds, removes, or materially changes a render strategy, lighting mode, naming rule, or cross-package contract must update `AGENTS.md` in the same PR. An API change that lands without an AGENTS.md update is an incomplete change.
 - **Don't append-only.** Prune content that no longer reflects the codebase. If a strategy is dropped, remove its row from the tag table — don't leave a "deprecated" note. If a hook is renamed, update the naming section in place — don't list the old name "for reference".
+
+## Package READMEs
+
+Each `packages/*/README.md` is a real, hand-written, committed file that is
+published to npm **as-is**. What you read in the repo is what ships — there is
+no generated README.
+
+Regions wrapped in `<!-- polycss:shared:<name>:start -->` /
+`<!-- polycss:shared:<name>:end -->` are the exception: they are owned by the
+root `README.md` and mirrored into every package README that contains the
+matching markers. Current blocks are `links`, `packages`, `showcase`, and
+`license`.
+
+- **Edit a shared block in the root `README.md`, never in a package README.**
+  Then run `pnpm sync:readmes`.
+- Everything outside the markers is package-specific. Write it in the root
+  README's voice, but say what that package actually does — `core` documents
+  core, `vue` shows Vue code.
+- `.github/scripts/sync-package-readmes.mjs` runs as `prepack` in every
+  publishable package, so a stale shared block cannot reach npm.
+- CI runs `pnpm check:readmes`, which fails on drift instead of writing.
+- A package opts in per block simply by containing the markers. `fonts` and
+  `morph` carry none today and are left entirely alone.
 
 ## Backward compatibility
 

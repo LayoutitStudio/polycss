@@ -2,9 +2,13 @@
 
 A CSS polygon mesh library. A 3D engine for the DOM. Renders OBJ/MTL, STL, glTF/GLB, and VOX as real HTML elements transformed with CSS `matrix3d(...)`. Supports colors, textures, lighting, shadows, shapes and animations. Works with React, Vue or plain JavaScript.
 
+<!-- polycss:shared:links:start -->
 Visit [polycss.com](https://polycss.com) for docs and model examples.
 
+Join [chat.polycss.com](https://chat.polycss.com) for support and community discussions.
+
 <img width="1600" height="300" alt="PolyCSS primitives banner" src="https://github.com/user-attachments/assets/b05e2204-9323-4f83-8d1b-01ea0dd000db" />
+<!-- polycss:shared:links:end -->
 
 ## Installation
 
@@ -248,6 +252,7 @@ Each visible polygon is emitted as one leaf element; the renderer chooses the le
 - `<i>` clips solid polygons with `border-shape: polygon(...)` when the browser supports it.
 - `<s>` maps a packed texture-atlas slice with `background-image`, and is the fallback for textured or unsupported shapes.
 
+<!-- polycss:shared:packages:start -->
 ## Packages
 
 | Package | Description |
@@ -256,22 +261,11 @@ Each visible polygon is emitted as one leaf element; the renderer chooses the le
 | `@layoutit/polycss` | Vanilla custom elements and imperative `createPolyScene` API. |
 | `@layoutit/polycss-react` | React components, hooks, controls, and core re-exports. |
 | `@layoutit/polycss-vue` | Vue 3 components, composables, controls, and core re-exports. |
-| `@layoutit/polycss-fonts` | Fonts + text → extruded 3D `Polygon[]`. Framework-agnostic. |
 | `@layoutit/polycss-morph` | Prepared-model loading, retained DOM animation, morph targets, skinning, and playback. |
+<!-- polycss:shared:packages:end -->
 
-## Made with PolyCSS
-
-[cssQuake](https://cssquake.com)
--> A CSS port of Quake (1996)
-
-<img width="1280" height="720" alt="quake" src="https://github.com/user-attachments/assets/6d9d809c-857a-4a39-b5cf-733ead2661ec" />
-
-
-[Layoutit Terra](https://terra.layoutit.com)
--> A CSS Terrain Generator
-
-<img width="1000" height="601" alt="layoutit-terra" src="https://polycss.com/layoutit-terra.png" />
-
+<!-- polycss:shared:license:start -->
 ## License
 
 MIT.
+<!-- polycss:shared:license:end -->

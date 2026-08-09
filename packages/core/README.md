@@ -19,7 +19,13 @@ you rarely install it directly. Reach for it when you need PolyCSS geometry work
 **outside a browser** — a Node build step, a worker, a test, a server-side mesh
 pipeline, or your own renderer.
 
+<!-- polycss:shared:links:start -->
 Visit [polycss.com](https://polycss.com) for docs and model examples.
+
+Join [chat.polycss.com](https://chat.polycss.com) for support and community discussions.
+
+<img width="1600" height="300" alt="PolyCSS primitives banner" src="https://github.com/user-attachments/assets/b05e2204-9323-4f83-8d1b-01ea0dd000db" />
+<!-- polycss:shared:links:end -->
 
 ## Installation
 
@@ -110,6 +116,8 @@ first. Three constraints bite immediately:
 PolyCSS coordinates. See
 [polycss.com/api/three-parity](https://polycss.com/api/three-parity).
 
+<!-- polycss:shared:license:start -->
 ## License
 
 MIT.
+<!-- polycss:shared:license:end -->
