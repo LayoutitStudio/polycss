@@ -211,6 +211,22 @@ test("triangle publication treats decimal-quantized zero-area bases as degenerat
   assert.equal(transform, null);
 });
 
+test("triangle fit preserves the leaf plan's declared matrix precision", () => {
+  const transform = preparedTriangleTransform({
+    basis: [0, 1, 2],
+    canonicalSize: 32,
+    matrixDecimals: 2,
+    seamEdgeMask: 0,
+    width: 24,
+    height: 20,
+  }, [
+    [0, 0, 0],
+    [0, 32, 0],
+    [32, 0, 0],
+  ], { fallbackAmount: 0, sharedEdgeAmount: 0 });
+  assert.equal(transform, "matrix3d(0,1.33,-1.33,0,0,0.8,0.8,0,1,0,0,0,0,-16,16,1)");
+});
+
 test("interaction viewport defaults are source-derived and composed targets must match playback", async () => {
   const rescaled = await interactionInput();
   const packet = rescaled.state.channels.find((channel) => channel.id === "interaction").data.packet;
@@ -256,6 +272,12 @@ test("prepared pointer/grab schema rejects implicit semantics, escaped rows, and
   const overlongBasis = structuredClone(base);
   overlongBasis.state.channels.find((channel) => channel.id === "interaction").data.packet.leaves[0].basis.push(0);
   assert.throws(() => buildDom(overlongBasis), errorCode("INVALID_INTERACTION_STATE"));
+  const canonicalSize = structuredClone(base);
+  canonicalSize.state.channels.find((channel) => channel.id === "interaction").data.packet.leaves[0].canonicalSize = 64;
+  assert.throws(() => buildDom(canonicalSize), errorCode("INVALID_INTERACTION_STATE"));
+  const playbackFit = structuredClone(base);
+  playbackFit.state.channels.find((channel) => channel.id === "playback").data.leafFit[0].canonicalSize = 16;
+  assert.throws(() => buildDom(playbackFit), errorCode("INTERACTION_TARGET_MISMATCH"));
   const singularCamera = structuredClone(base);
   singularCamera.state.channels.find((channel) => channel.id === "interaction").data.packet.source.cameraViewMatrix.fill(0);
   assert.throws(() => buildDom(singularCamera), errorCode("INVALID_INTERACTION_STATE"));

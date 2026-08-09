@@ -406,6 +406,28 @@ test("successful mount retains identities and idempotent destroy restores the ho
   assert.throws(() => runtime.setMode("animation"), errorCode("MOUNT_DESTROYED"));
 });
 
+test("resize failures roll back the mount and remain observable", async () => {
+  const built = buildDom(await syntheticPolycssInput());
+  const result = await readBuiltBrowser(built);
+  const { document, urls, observers, namespaced } = fakeBrowserDocument();
+  const host = new FakeElement(document, "main");
+  const priorChild = new FakeElement(document, "p");
+  host.appendChild(priorChild);
+  const runtime = await mountDom(result, host, { animate: false });
+  const cameraIndex = result.document.tree.nodes.findIndex((node) => node.id === "synthetic-polycss/camera");
+  const camera = namespaced[cameraIndex];
+  const failure = new Error("resize publication failed");
+  camera.style = new Proxy(camera.style, { set() { throw failure; } });
+
+  assert.throws(() => observers[0].callback(), (error) => error === failure);
+  assert.deepEqual(host.childNodes, [priorChild]);
+  assert.equal(document.head.childNodes.length, 0);
+  assert.equal(observers[0].disconnected, true);
+  assert.deepEqual(urls.revoked, urls.created);
+  assert.throws(() => runtime.seek(1), errorCode("MOUNT_DESTROYED"));
+  assert.equal(runtime.destroy(), false);
+});
+
 test("a retained destroyed controller does not retain its detached mount graph", () => {
   const probe = spawnSync(process.execPath, [
     "--expose-gc",

@@ -1909,6 +1909,7 @@ def validate_presentation_contract(state_channel: dict, binding: dict,
 
 def validate_interaction_contract(state_channel: dict, binding: dict,
                                   binding_inputs: dict[str, dict],
+                                  playback_state: dict,
                                   playback_binding: dict | None,
                                   presentation_binding: dict | None,
                                   limits: dict[str, int]) -> dict:
@@ -2146,12 +2147,15 @@ def validate_interaction_contract(state_channel: dict, binding: dict,
         require(set(leaf) == {"basis", "canonicalSize", "matrixDecimals", "seamEdgeMask",
                               "width", "height"}
                 and leaf.get("basis") in ([0, 1, 2], [1, 2, 0], [2, 0, 1])
-                and is_safe_int(leaf.get("canonicalSize"), 1)
+                and leaf.get("canonicalSize") == 32
                 and is_safe_int(leaf.get("matrixDecimals"), 0, 6)
                 and is_safe_int(leaf.get("seamEdgeMask"), 0, 7)
                 and is_safe_int(leaf.get("width"), 1)
                 and is_safe_int(leaf.get("height"), 1), state_code,
                 f"Interaction leaf {index} is invalid")
+        require(playback_state["data"]["leafFit"][index]["canonicalSize"] == 32,
+                "INTERACTION_TARGET_MISMATCH",
+                f"Interaction leaf {index} does not match playback's fixed triangle basis")
 
     controls = packet.get("controls")
     require(isinstance(controls, list) and 0 < len(controls) <= limits["interaction_controls"],
@@ -2490,7 +2494,8 @@ def validate_state_bindings(state: Any, bindings: Any, node_ids: set[str], limit
                 and effects_binding is not None, "MISSING_POLYCSS_CHANNEL",
                 "Prepared pointer interaction requires playback, presentation, and effects")
         validate_interaction_contract(interaction_state, interaction_binding, input_map,
-                                      playback_binding, presentation_binding, limits)
+                                      playback_state, playback_binding,
+                                      presentation_binding, limits)
         require(interaction_binding["parameters"]["tickRateHz"]
                 == playback_binding["parameters"]["tickRateHz"],
                 "INVALID_INTERACTION_BINDING",
@@ -3006,8 +3011,10 @@ def image_dimensions(payload: bytes, media: str) -> tuple[int, int]:
             require(offset == 12 and length == 10 and extended is None and primary is None,
                     "IMAGE_MEDIA_MISMATCH", "WebP VP8X is malformed or misplaced")
             flags = payload[start]
-            require(flags & 0xC3 == 0 and payload[start + 1:start + 4] == b"\0\0\0",
-                    "IMAGE_MEDIA_MISMATCH", "WebP VP8X reserved bits or animation unsupported")
+            require(flags & 0x02 == 0, "IMAGE_ANIMATION_UNSUPPORTED",
+                    "Animated WebP resources are outside polycss-3d@0")
+            require(flags & 0xC1 == 0 and payload[start + 1:start + 4] == b"\0\0\0",
+                    "IMAGE_MEDIA_MISMATCH", "WebP VP8X reserved bits are nonzero")
             extended = (int.from_bytes(payload[start + 4:start + 7], "little") + 1,
                         int.from_bytes(payload[start + 7:start + 10], "little") + 1)
         elif kind == b"VP8L":

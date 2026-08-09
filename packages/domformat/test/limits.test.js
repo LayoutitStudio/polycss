@@ -109,3 +109,12 @@ test("every configured limit is wired to a rejecting path", async () => {
   assert.deepEqual([...covered].sort(), Object.keys(DEFAULT_LIMITS).sort());
   assert.equal(Object.isFrozen(jsonStructureLimits(DEFAULT_LIMITS)), true);
 });
+
+test("declared transform counts cannot escape coded validation through array allocation", async () => {
+  const input = await syntheticExecutableInteractionInput();
+  input.state.channels.find((channel) => channel.codec === "polycss-playback-packed@0").data.packet.transforms.count = 2 ** 32;
+  assert.throws(
+    () => buildDom(input, { limits: { maxPreparedTransforms: 2 ** 32 } }),
+    errorCode("TRANSFORM_GROUP_MISMATCH"),
+  );
+});

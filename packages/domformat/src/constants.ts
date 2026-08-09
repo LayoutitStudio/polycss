@@ -2,6 +2,7 @@ import { invariant } from "./errors.js";
 
 export const FORMAT_ID = "domformat@0";
 export const PROFILE_ID = "polycss-3d@0";
+export const TRIANGLE_CANONICAL_SIZE = 32;
 
 export const DEFAULT_LIMITS = Object.freeze({
   maxFileBytes: 128 * 1024 * 1024,

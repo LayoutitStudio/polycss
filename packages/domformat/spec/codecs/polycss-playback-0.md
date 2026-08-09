@@ -33,6 +33,8 @@ Its sinks are exactly `style.transform` and `style.visibility`. Parameters are
 
 The state data has `packet` and `leafFit`. `leafFit` contains exactly one
 `{canonicalSize}` positive-integer record per leaf.
+When a same-index leaf is targeted by `polycss-pointer-grab@0`, its
+`canonicalSize` MUST be `32`.
 
 The packet fields are:
 

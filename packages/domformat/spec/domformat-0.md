@@ -60,6 +60,7 @@ The reference writer emits canonical JSON:
 5. strings use ECMAScript JSON escaping;
 6. there is no insignificant whitespace or byte-order mark.
 
+Normalization occurs before key sorting.
 Two input keys that normalize to the same key are invalid. Canonical JSON
 vectors in `conformance/corpus/canonical-json-cases.json` fix the writer form.
 Canonical writing is required for deterministic reference output, not as a

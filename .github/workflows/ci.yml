@@ -95,6 +95,7 @@ jobs:
         run: pnpm --filter @layoutit/polycss-domformat test:browser
 
   certify-gallery-domformat-corpus:
+    # Gallery assets are byte-bound to this Chromium/sharp runner; changing it requires corpus regeneration.
     runs-on: macos-15
     timeout-minutes: 30
     steps:

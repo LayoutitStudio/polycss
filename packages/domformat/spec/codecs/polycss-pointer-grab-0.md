@@ -49,8 +49,9 @@ admitted.
   shared-edge amounts;
 - `objects.rotationMatrices`: row-major 4x4 matrices;
 - `shapes.baseMatrices`: one row-major 4x4 matrix per shape target;
-- one target-indexed leaf plan containing cyclic basis, canonical size, matrix
-  decimals, seam mask, width, and height;
+- one target-indexed leaf plan containing cyclic basis, fixed canonical size
+  `32`, matrix decimals, seam mask, width, and height; the same-index playback
+  leaf fit MUST also use canonical size `32`;
 - unique ordered controls with explicit role, `grab` or `eye-follow` mode,
   source/screen positions, camera distance, attachments, and sparse closure.
 
@@ -326,12 +327,11 @@ same one-time longest-edge retry; a collapsed retry returns no transform.
 Insert zero fourth components and a final one to form CSS `matrix3d` in the same
 3-by-4 layout used by playback.
 
-Finally, when leaf `width` or `height` differs from `canonicalSize`, parse that
-matrix, multiply components 0..2 by `canonicalSize/width` and components 4..6
-by `canonicalSize/height`, round all 16 components to
-`10^6`, convert with ECMAScript finite-number string
-semantics, and normalize negative zero. This last fit, including the fixed
-raster basis size of 32, is observable profile behavior.
+Finally, when leaf `width` or `height` differs from `32`, parse that matrix,
+multiply components 0..2 by `32/width` and components 4..6 by `32/height`,
+round all 16 components to the leaf's `matrixDecimals`, retain the exact
+`0`, `1`, and `-1` spellings, and normalize negative zero. This last fit,
+including the fixed raster basis size of 32, is observable profile behavior.
 
 ## Lifecycle and output
 

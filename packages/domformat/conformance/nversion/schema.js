@@ -1011,11 +1011,12 @@ function validateInteraction(state, binding, playback, presentation, inputs, lim
   for (const [index, leaf] of packet.leaves.entries()) {
     exactObject(leaf, ["basis", "canonicalSize", "matrixDecimals", "seamEdgeMask", "width", "height"], "INVALID_INTERACTION_STATE", `Interaction leaf ${index}`);
     require(Array.isArray(leaf.basis) && [[0, 1, 2], [1, 2, 0], [2, 0, 1]].some((basis) => exactEqualArray(leaf.basis, basis))
-      && Number.isSafeInteger(leaf.canonicalSize) && leaf.canonicalSize > 0
+      && leaf.canonicalSize === 32
       && Number.isSafeInteger(leaf.matrixDecimals) && leaf.matrixDecimals >= 0 && leaf.matrixDecimals <= 6
       && Number.isSafeInteger(leaf.seamEdgeMask) && leaf.seamEdgeMask >= 0 && leaf.seamEdgeMask <= 7
       && Number.isSafeInteger(leaf.width) && leaf.width > 0
       && Number.isSafeInteger(leaf.height) && leaf.height > 0, "INVALID_INTERACTION_STATE", `Interaction leaf ${index} is invalid.`);
+    if (playback) require(playback.state.data.leafFit[index].canonicalSize === 32, "INTERACTION_TARGET_MISMATCH", `Interaction leaf ${index} does not match playback's fixed triangle basis.`);
   }
 
   require(Array.isArray(packet.controls) && packet.controls.length > 0 && packet.controls.length <= limits.maxInteractionControls, "INTERACTION_STATE_LIMIT", "Interaction controls are missing or excessive.");

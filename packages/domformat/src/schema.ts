@@ -1,4 +1,4 @@
-import { FORMAT_ID, PROFILE_ID, mergeLimits } from "./constants.js";
+import { FORMAT_ID, PROFILE_ID, TRIANGLE_CANONICAL_SIZE, mergeLimits } from "./constants.js";
 import { canonicalBase64DecodedLength } from "./base64.js";
 import { cssScopeAttribute } from "./css.js";
 import { invariant } from "./errors.js";
@@ -938,11 +938,12 @@ function validatePlaybackContract(
   invariant(shapeChanges.sources.length === shapeChanges.transforms.length && shapeChanges.sources.length === shapeChanges.visibility.length && leafChanges.sources.length === leafChanges.transforms.length, "STATE_COLUMN_MISMATCH", "Playback change-table columns have unequal lengths.");
 
   invariant(Array.isArray(packet.frameRows) && packet.frameRows.length === parameters.frameCount, "FRAME_CARDINALITY_MISMATCH", "Playback frame rows do not match frameCount.");
-  const owners = new Array<string | undefined>(transformTable.count);
+  const owners = new Map<number, string>();
   const claim = (index: number, owner: string, label: string): void => {
     invariant(Number.isSafeInteger(index) && index >= 0 && index < transformTable.count, "INVALID_PLAYBACK_STATE", `${label} references missing transform ${index}.`);
-    if (owners[index] === undefined) owners[index] = owner;
-    else invariant(owners[index] === owner || (owners[index].startsWith("shape:") && owner.startsWith("shape:")), "TRANSFORM_GROUP_MISMATCH", `${label} aliases a fitted transform across incompatible owners.`);
+    const current = owners.get(index);
+    if (current === undefined) owners.set(index, owner);
+    else invariant(current === owner || (current.startsWith("shape:") && owner.startsWith("shape:")), "TRANSFORM_GROUP_MISMATCH", `${label} aliases a fitted transform across incompatible owners.`);
   };
   claim(initial.modelTransform, "model", "Playback initial model");
   initialShapeTransforms.forEach((transform, index) => claim(transform, `shape:${index}`, `Playback initial shape ${index}`));
@@ -976,14 +977,12 @@ function validatePlaybackContract(
     leafCursor += row[6];
   }
   invariant(shapeCursor === shapeChanges.sources.length && leafCursor === leafChanges.sources.length, "STATE_COLUMN_MISMATCH", "Playback change tables contain unreferenced rows.");
-  for (let index = 0; index < owners.length; index += 1) {
-    invariant(typeof owners[index] === "string", "TRANSFORM_GROUP_MISMATCH", `Playback transform ${index} is unowned.`);
-  }
+  invariant(owners.size === transformTable.count, "TRANSFORM_GROUP_MISMATCH", "Playback transform table contains unowned transforms.");
 
   const inferredGroups = new Map<string, number[]>();
-  for (let index = 0; index < owners.length; index += 1) {
-    const owner = owners[index];
-    invariant(typeof owner === "string", "TRANSFORM_GROUP_MISMATCH", `Playback transform ${index} is unowned.`);
+  for (let index = 0; index < transformTable.count; index += 1) {
+    const owner = owners.get(index);
+    invariant(owner, "TRANSFORM_GROUP_MISMATCH", `Playback transform ${index} is unowned.`);
     const indices = inferredGroups.get(owner);
     if (indices) indices.push(index);
     else inferredGroups.set(owner, [index]);
@@ -1541,10 +1540,9 @@ export interface InteractionPacket {
 }
 
 function validateInitialSurfaceClosure(packet: SurfacePacket, playbackBinding: DomBindingChannel, tree: ValidatedTree): void {
-  invariant(typeof packet.visibility.initialVisibleBitsBase64 === "string", "INVALID_SURFACE_STATE", "Surface visibility bitset is invalid.");
-  const packed = Uint8Array.from(globalThis.atob(packet.visibility.initialVisibleBitsBase64), (character) => character.charCodeAt(0));
-  const targetFrame = packet.transitions.initialFrame - 1;
   const playbackTargets = plainObject<PlaybackTargets>(playbackBinding.targets, "INVALID_PLAYBACK_BINDING", "Playback targets");
+  const packed = base64Integers(packet.visibility.initialVisibleBitsBase64, 1, Math.ceil(playbackTargets.leaves.length / 8), "INVALID_SURFACE_STATE", "Surface initial visibility bitset");
+  const targetFrame = packet.transitions.initialFrame - 1;
   for (const [index, target] of playbackTargets.leaves.entries()) {
     const node = tree.nodesById.get(target);
     const expectedVisibility = ((packed[index >> 3] >> (index & 7)) & 1) === 1 ? "visible" : "hidden";
@@ -1715,7 +1713,7 @@ function validatePolycssChannelInvariants(
   const interactionBinding = [...bindingChannels.values()].find((channel) => channel.interpreter === "polycss-pointer-grab@0");
   if (interactionState || interactionBinding) {
     invariant(interactionState && interactionBinding, "MISSING_POLYCSS_CHANNEL", "Prepared interaction state and binding must appear together.");
-    invariant(playbackBinding && presentationBinding && effectsBinding, "MISSING_POLYCSS_CHANNEL", "Prepared pointer interaction requires playback, presentation, and effects.");
+    invariant(playbackState && playbackBinding && presentationBinding && effectsBinding, "MISSING_POLYCSS_CHANNEL", "Prepared pointer interaction requires playback, presentation, and effects.");
     invariant(interactionBinding.status === "executable", "INVALID_INTERACTION_BINDING", "polycss-pointer-grab@0 must be executable.");
     const expectedInputs = ["axis.x", "axis.y", "button.hold", "pointer.positioned", "pointer.pressed", "pointer.x", "pointer.y"];
     invariant(JSON.stringify(interactionBinding.inputs) === JSON.stringify(expectedInputs), "INVALID_INTERACTION_BINDING", "polycss-pointer-grab@0 inputs are incomplete or noncanonical.");
@@ -1736,6 +1734,7 @@ function validatePolycssChannelInvariants(
     uniqueTargets(targets.shapes, "Interaction shape");
     uniqueTargets(targets.leaves, "Interaction leaf");
     const playbackTargets = plainObject<PlaybackTargets>(playbackBinding.targets, "INVALID_PLAYBACK_BINDING", "Playback targets");
+    const playbackData = plainObject<PlaybackData>(playbackState.data, "INVALID_PLAYBACK_STATE", "Playback state data");
     invariant(sameArray(targets.shapes, playbackTargets.shapes) && sameArray(targets.leaves, playbackTargets.leaves), "INTERACTION_TARGET_MISMATCH", "Interaction shape and leaf targets must exactly match playback target order.");
     stableId(targets.cursorLayer, "Interaction cursor layer");
     const cursorStates = plainObject<{ readonly open: string; readonly closed: string }>(targets.cursorStates, "INVALID_INTERACTION_BINDING", "Interaction cursor states");
@@ -1840,11 +1839,13 @@ function validatePolycssChannelInvariants(
       plainObject<InteractionLeafPlan>(leaf, "INVALID_INTERACTION_STATE", `Interaction leaf plan ${index}`);
       knownKeys(leaf, new Set(["basis", "canonicalSize", "matrixDecimals", "seamEdgeMask", "width", "height"]), "INVALID_INTERACTION_STATE", `Interaction leaf plan ${index}`);
       invariant(Array.isArray(leaf.basis) && leaf.basis.length === 3 && [[0, 1, 2], [1, 2, 0], [2, 0, 1]].some((basis) => basis.every((entry, basisIndex) => leaf.basis[basisIndex] === entry)), "INVALID_INTERACTION_STATE", `Interaction leaf plan ${index} basis is invalid.`);
-      invariant(Number.isSafeInteger(leaf.canonicalSize) && leaf.canonicalSize > 0
+      invariant(leaf.canonicalSize === TRIANGLE_CANONICAL_SIZE
         && Number.isSafeInteger(leaf.matrixDecimals) && leaf.matrixDecimals >= 0 && leaf.matrixDecimals <= 6
         && Number.isSafeInteger(leaf.seamEdgeMask) && leaf.seamEdgeMask >= 0 && leaf.seamEdgeMask <= 7
         && Number.isSafeInteger(leaf.width) && leaf.width > 0
         && Number.isSafeInteger(leaf.height) && leaf.height > 0, "INVALID_INTERACTION_STATE", `Interaction leaf plan ${index} dimensions or update settings are invalid.`);
+      const playbackFit = plainObject<{ readonly canonicalSize: number }>(playbackData.leafFit[index], "INVALID_PLAYBACK_STATE", `Playback leaf-fit row ${index}`);
+      invariant(playbackFit.canonicalSize === TRIANGLE_CANONICAL_SIZE, "INTERACTION_TARGET_MISMATCH", `Interaction leaf plan ${index} does not match playback's fixed triangle basis.`);
     }
 
     invariant(Array.isArray(packet.controls) && packet.controls.length > 0 && packet.controls.length <= limits.maxInteractionControls, "INTERACTION_STATE_LIMIT", "Prepared interaction controls are missing or excessive.");

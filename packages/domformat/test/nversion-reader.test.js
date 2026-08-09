@@ -357,6 +357,10 @@ test("deep codec mutations are rejected by Node, Python, and the N-version reade
       ["effects emitter mode", (document) => { packet(document, "effects").emitters[0].mode = "network-stream"; }],
       ["interaction pointer quantization", (document) => { packet(document, "interaction").input.pointerQuantization = "round"; }],
       ["interaction overlong basis", (document) => { packet(document, "interaction").leaves[0].basis.push(0); }],
+      ["interaction canonical size", (document) => { packet(document, "interaction").leaves[0].canonicalSize = 64; }],
+      ["interaction playback fit mismatch", (document) => {
+        document.state.channels.find((entry) => entry.id === "playback").data.leafFit[0].canonicalSize = 16;
+      }],
     ];
     for (const [label, mutate] of mutations) {
       const document = structuredClone(original);
@@ -399,6 +403,42 @@ test("illegal PNG media survives digest rebinding but not independent validation
     const python = runPython([pythonReader, "validate", produced.model]);
     assert.notEqual(python.status, 0, python.stdout);
     assert.match(python.stderr, /IMAGE_MEDIA_MISMATCH/u);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("animated WebP has one rejection code across independent readers", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "domformat-nversion-animated-webp-"));
+  try {
+    const produced = await produce(directory, ["--ordinary"]);
+    const document = JSON.parse(await readFile(produced.model, "utf8"));
+    const record = document.resources.resources.find((entry) => entry.kind === "image");
+    assert.ok(record);
+    const image = new Uint8Array(44);
+    image.set(new TextEncoder().encode("RIFF"), 0);
+    new DataView(image.buffer).setUint32(4, 36, true);
+    image.set(new TextEncoder().encode("WEBPVP8X"), 8);
+    new DataView(image.buffer).setUint32(16, 10, true);
+    image[20] = 0x02;
+    image.set(new TextEncoder().encode("VP8L"), 30);
+    new DataView(image.buffer).setUint32(34, 6, true);
+    image[38] = 0x2f;
+    record.mediaType = "image/webp";
+    record.path = record.path.replace(/\.png$/u, ".webp");
+    record.byteLength = image.length;
+    record.dimensions = { width: 1, height: 1 };
+    record.digest.value = createHash("sha256").update(image).digest("hex");
+    await writeFile(join(directory, record.path), image);
+    const modelBytes = new TextEncoder().encode(JSON.stringify(document));
+    await writeFile(produced.model, modelBytes);
+    const resources = new Map(await Promise.all(document.resources.resources.map(async (entry) => [entry.id, new Uint8Array(await readFile(join(directory, entry.path)))])));
+
+    assert.throws(() => readDom(modelBytes, { externalResources: resources, requireResources: true }), (error) => error?.code === "IMAGE_ANIMATION_UNSUPPORTED");
+    await assert.rejects(readDomNVersion(modelBytes, { externalResources: resources }), (error) => error instanceof NVersionError && error.code === "IMAGE_ANIMATION_UNSUPPORTED");
+    const python = runPython([pythonReader, "validate", produced.model]);
+    assert.equal(python.status, 1, `${python.stdout}\n${python.stderr}`);
+    assert.match(python.stderr, /IMAGE_ANIMATION_UNSUPPORTED/u);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

@@ -119,6 +119,7 @@ test("CLI file failures expose a closed diagnostic without paths or stacks", asy
 
 test("CLI rejects unknown, command-inapplicable, and duplicate flags", async () => {
   for (const args of [
+    ["valueOf", syntheticManifestPath, "--json"],
     ["encode", syntheticManifestPath, "--output", "ignored.json", "--json"],
     ["inspect", syntheticManifestPath, "--packed"],
     ["validate", syntheticManifestPath, "--resources", "."],

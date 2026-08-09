@@ -57,8 +57,8 @@ const COMMAND_FLAGS: Readonly<Record<string, ReadonlySet<string>>> = Object.free
 });
 
 function validateFlags(command: string, flags: CliFlags): void {
+  invariant(Object.hasOwn(COMMAND_FLAGS, command), "CLI_ARGUMENT", `Unknown command ${command}.`);
   const allowed = COMMAND_FLAGS[command];
-  invariant(allowed, "CLI_ARGUMENT", `Unknown command ${command}.`);
   for (const name of flags.keys()) invariant(allowed.has(name), "CLI_ARGUMENT", `--${name} is not valid for ${command}.`);
 }
 

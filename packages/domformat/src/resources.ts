@@ -237,7 +237,8 @@ function webpDimensions(bytes: Uint8Array): ImageDimensions {
     if (type === "VP8X") {
       invariant(offset === 12 && length === 10 && !extended && !primary, "IMAGE_MEDIA_MISMATCH", "WebP VP8X chunk is duplicated, misplaced, or malformed.");
       const flags = bytes[payload];
-      invariant((flags & 0xc3) === 0 && bytes[payload + 1] === 0 && bytes[payload + 2] === 0 && bytes[payload + 3] === 0, "IMAGE_MEDIA_MISMATCH", "WebP VP8X reserved bits are nonzero or animation is requested.");
+      invariant((flags & 0x02) === 0, "IMAGE_ANIMATION_UNSUPPORTED", "Animated WebP resources are outside polycss-3d@0.");
+      invariant((flags & 0xc1) === 0 && bytes[payload + 1] === 0 && bytes[payload + 2] === 0 && bytes[payload + 3] === 0, "IMAGE_MEDIA_MISMATCH", "WebP VP8X reserved bits are nonzero.");
       extended = { width: uint24(bytes, payload + 4) + 1, height: uint24(bytes, payload + 7) + 1 };
     } else if (type === "VP8L") {
       invariant(!primary && length >= 6 && bytes[payload] === 0x2f, "IMAGE_MEDIA_MISMATCH", "WebP VP8L image chunk is duplicated or malformed.");

@@ -1,8 +1,8 @@
 import { invariant } from "../errors.js";
+import { TRIANGLE_CANONICAL_SIZE } from "../constants.js";
 
 const BASIS_EPSILON = 1e-9;
 const TRIANGLE_BLEED = 0.75;
-const TRIANGLE_CANONICAL_SIZE = 32;
 
 type Vec3 = readonly [number, number, number];
 type Basis = readonly [number, number, number];
@@ -371,11 +371,7 @@ function fitTransform(transform: string, plan: TrianglePlan): string {
   const values = transform.slice("matrix3d(".length, -1).split(",").map(Number);
   for (const index of [0, 1, 2]) values[index] *= plan.canonicalSize / plan.width;
   for (const index of [4, 5, 6]) values[index] *= plan.canonicalSize / plan.height;
-  const factor = 1e6;
-  return `matrix3d(${values.map((value) => {
-    const rounded = Math.round(value * factor) / factor;
-    return String(Object.is(rounded, -0) ? 0 : rounded);
-  }).join(",")})`;
+  return `matrix3d(${values.map((value) => roundDecimal(value, plan.matrixDecimals)).join(",")})`;
 }
 
 export function preparedTriangleTransform(

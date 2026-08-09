@@ -773,7 +773,10 @@ export async function mountDom(
     owner.resizeObserver = typeof ResizeObserverClass === "function"
       ? new ResizeObserverClass(() => {
           if (lifecycle.history.at(-1) !== "publish") return;
-          try { presentationController.resize(); } catch { cleanupMount(owner); }
+          try { presentationController.resize(); } catch (error) {
+            cleanupMount(owner);
+            throw error;
+          }
         })
       : null;
     const interactionBinding = packageDocument.bindings.channels.find((channel) => channel.interpreter === "polycss-pointer-grab@0");

@@ -18,6 +18,8 @@ implements JSON parsing, deep schema and prepared-codec checks,
 sibling-resource and media verification, and CSS validation. It imports
 neither `src/` nor `conformance/viewer/`. Browser proof passes its validated
 result to the alternate mount shell below; it is not a second runtime.
+N-version evidence is format-level; executable codec output semantics remain
+covered by the reference interpreters and fixed transcript/oracle tests.
 
 `viewer/` is an alternate mount shell. It independently constructs the tree,
 binds resources, materializes CSS, captures snapshots, and owns transactional
