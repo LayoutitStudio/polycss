@@ -229,8 +229,14 @@ only on the paths that accept it**: vanilla `scene.add(...)` and React/Vue
 `<PolyMesh polygons merge={false}>`. It does not exist on `<PolyScene polygons>`
 (always normalized and merged) or on the `<poly-mesh>` custom element. And it
 cannot undo `loadMesh`'s own parse-time optimization — geometry loaded from a
-file is deduped and optimized *before* `merge` is ever consulted. To render file
-geometry exactly as authored, parse it with `parseObj` / `parseStl` /
+file is deduped and optimized *before* `merge` is ever consulted.
+
+There is **no fully identity path for file geometry**: the parsers themselves
+normalize their input (fit to `targetSize`, default `60`; reposition the origin;
+remap axes to Z-up; round coordinates; fan-triangulate n-gons and drop
+degenerate triangles). STL additionally repairs winding, and `.vox` synthesizes
+greedy-meshed quads from the voxel grid. To preserve the *direct parser output*
+from any further renderer optimization, call `parseObj` / `parseStl` /
 `parseGltf` / `parseVox` directly and add the result with `merge: false`.
 
 ### Degenerate polygons vanish silently

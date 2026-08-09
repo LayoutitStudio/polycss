@@ -5,7 +5,7 @@ description: Scene component that sets up the 3D viewport, camera, and lighting 
 
 import { Tabs, TabItem } from '@astrojs/starlight/components';
 
-The scene is the root of every PolyCSS render tree. It applies scene-level lighting and atlas options, then renders its children (typically meshes or individual polygons) in 3D space. `<poly-scene>` / `PolyScene` must always be nested inside a camera element (`<poly-camera>` / `PolyCamera` or the perspective variant): the camera owns the projection and orbital state.
+The scene is the root of every PolyCSS render tree. It applies scene-level lighting and atlas options, then renders its children (typically meshes or individual polygons) in 3D space. `PolyScene` (React/Vue) must be nested inside a camera component (`PolyCamera`, `PolyPerspectiveCamera`, or `PolyOrthographicCamera`) — it throws otherwise — and `createPolyScene()` takes a required camera handle in its options. The `<poly-scene>` custom element prefers an ancestor camera element, but can stand alone: without one it builds an implicit camera from its own `perspective`, `rot-x`, `rot-y`, and `zoom` attributes.
 
 It's available as a custom element (`<poly-scene>`), via the imperative `createPolyScene(host, opts)` API, and as React / Vue components (`<PolyScene>`).
 
@@ -13,7 +13,7 @@ It's available as a custom element (`<poly-scene>`), via the imperative `createP
 
 (React / Vue prop names use camelCase; the `<poly-scene>` custom element accepts the kebab-case form, e.g. `textureQuality` → `texture-quality`.)
 
-The React/Vue components and `createPolyScene()` support the full table. The `<poly-scene>` custom element supports `directional-*`, `ambient-*`, `texture-lighting`, `texture-quality`, `texture-leaf-sizing`, `texture-image-rendering`, `texture-backend`, `texture-projection`, `auto-center`, and implicit camera attributes; use the imperative API for options such as `shadow`, `seamBleed`, and `strategies` in vanilla.
+The React/Vue components and `createPolyScene()` support the full table except rows marked otherwise (`polygons`, `children`, and `centerPolygons` are framework-only; `shadow.dragDefinition` — and the imperative-only `debugShadowAttrs` option, not listed here — are vanilla-only). The `<poly-scene>` custom element supports `directional-*`, `ambient-*`, `texture-lighting`, `texture-quality`, `texture-leaf-sizing`, `texture-image-rendering`, `texture-backend`, `texture-projection`, `auto-center`, and — when no ancestor camera element is present — the implicit camera attributes `perspective`, `rot-x`, `rot-y`, `zoom`; use the imperative API for options such as `shadow`, `seamBleed`, and `strategies` in vanilla.
 
 | Prop | Type | Default | Description |
 |------|------|---------|-------------|
@@ -26,7 +26,7 @@ The React/Vue components and `createPolyScene()` support the full table. The `<p
 | `textureImageRendering` | `"auto" \| "pixelated"` | `"auto"` | Default image filtering for atlas and direct-image texture leaves. |
 | `textureBackend` | `"auto" \| "atlas" \| "image"` | `"auto"` | Default texture backend request per polygon. |
 | `textureProjection` | `"affine" \| "projective"` | `"affine"` | Default texture projection request for textured quads. |
-| `seamBleed` | `number \| "auto"` | `1.5` | Solid-primitive overscan for detected shared seam edges. `"auto"` fits each edge from the polygon plan; numbers clamp the CSS-pixel amount. |
+| `seamBleed` | `number \| "auto"` | `1.5` | Overscan on detected shared solid seam edges. Every request is additionally fitted per edge to what the polygon plan can safely absorb; `0` disables it. **Numeric semantics currently differ by renderer:** React/Vue treat the number as the requested CSS-pixel amount, while vanilla `createPolyScene` clamps it to `0..1` and multiplies the built-in `1.5` px default (so vanilla values above `1` behave like `1`, capping at 1.5 px). Defaults agree; only non-default numbers diverge. |
 | `strategies` | `{ disable?: ("b" \| "i" \| "u")[] }` | None | Diagnostic override for render strategy selection. Disabled solid strategies fall through to `<s>` atlas slices; `<s>` cannot be disabled. |
 | `autoCenter` | `boolean` | `false` | Rotate around the content bbox center instead of world origin. Polygon data is not mutated. |
 | `centerPolygons` | `Polygon[]` | None | (Framework only.) Bbox source for `autoCenter` when renderable polygons live inside child meshes. |
@@ -34,11 +34,11 @@ The React/Vue components and `createPolyScene()` support the full table. The `<p
 | `polygons` | `Polygon[]` | None | (Framework only.) Flat array of polygon objects rendered as direct children. Composes with JSX/slot children. |
 | `children` | None | None | Meshes, polygons, controls, helpers, selection wrappers, and transform controls. |
 
-**Camera state and input** are set on the wrapping camera element (`<poly-camera>` / `PolyCamera`): `rot-x`, `rot-y`, `zoom`, `distance`. `<poly-scene>` carries no camera attributes. Add a child `<poly-orbit-controls>` / `<PolyOrbitControls>` to enable drag, wheel, or autorotate: see [PolyOrbitControls](/components/poly-controls).
+**Camera state and input** are normally set on the wrapping camera element (`<poly-camera>` / `PolyCamera`): `rot-x`, `rot-y`, `zoom`, `distance`. Without an ancestor camera element, `<poly-scene>` falls back to an implicit camera driven by its own `perspective`, `rot-x`, `rot-y`, and `zoom` attributes. Add a child `<poly-orbit-controls>` / `<PolyOrbitControls>` to enable drag, wheel, or autorotate: see [PolyOrbitControls](/components/poly-controls).
 
 ## Mesh props / attributes
 
-React/Vue `<PolyMesh>` supports the full table. The `<poly-mesh>` custom element currently supports `src`, `mtl`, `mesh-resolution`, `position`, `scale`, `rotation`, and `auto-center`; use `scene.add(result, opts)` for advanced vanilla mesh options such as `castShadow`.
+React/Vue `<PolyMesh>` supports the full table. The `<poly-mesh>` custom element supports `src`, `mtl`, `mesh-resolution`, `position`, `scale`, `rotation`, `auto-center`, `cast-shadow`, `receive-shadow`, plus the OBJ parse attributes `target-size`, `default-color`, `palette`, `include-objects`, and `exclude-objects` (these five affect `.obj` sources only). `position`, `scale`, `rotation`, `cast-shadow`, and `receive-shadow` update live; the parse attributes trigger a reload. Use `scene.add(result, opts)` for vanilla options the element doesn't expose, such as `merge`, `stableDom`, and `shadowDefinition`.
 
 | Prop | Type | Description |
 |------|------|-------------|

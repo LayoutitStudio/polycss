@@ -141,9 +141,13 @@ interior culling count as exact reductions and still run under
 `meshResolution: "lossless"`. `merge: false` renders the array you pass
 untouched, but only on `scene.add(...)` and `<PolyMesh polygons>` — it does not
 exist on `<PolyScene polygons>` (always normalized + merged) or `<poly-mesh>`,
-and it cannot undo `loadMesh`'s own parse-time optimization. For file geometry
-exactly as authored, call `parseObj`/`parseStl`/`parseGltf`/`parseVox` directly
-and add with `merge: false`.
+and it cannot undo `loadMesh`'s own parse-time optimization. There is no
+exact-as-authored path for file geometry — the parsers normalize (fit to
+`targetSize` `60`, origin reposition, Z-up axis remap, coordinate rounding,
+fan-triangulation; STL repairs winding; `.vox` greedy-meshes quads). To preserve
+the *direct parser output* from renderer optimization, call
+`parseObj`/`parseStl`/`parseGltf`/`parseVox` directly and add with
+`merge: false`.
 
 **5. Degenerate polygons vanish silently** — under 3 vertices, zero-length edge,
 or zero area produces no leaf and no console output.
