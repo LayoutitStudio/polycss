@@ -82,7 +82,10 @@ function chromeArguments(profile, dimensions = {}) {
     "--no-first-run",
     `--window-size=${width},${height}`,
     `--user-data-dir=${profile}`,
-    ...(typeof process.getuid === "function" && process.getuid() === 0 ? ["--no-sandbox"] : []),
+    ...(process.env.DOMFORMAT_BROWSER_NO_SANDBOX === "1"
+      || (typeof process.getuid === "function" && process.getuid() === 0)
+      ? ["--no-sandbox"]
+      : []),
     "--virtual-time-budget=5000",
   ];
 }

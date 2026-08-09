@@ -90,6 +90,8 @@ jobs:
           node --input-type=module --eval 'import { chromium } from "playwright"; const server = await chromium.launchServer({ headless: true }); process.stdout.write("DOMFORMAT_BROWSER=" + server.process().spawnfile + "\n"); await server.close();' >> "$GITHUB_ENV"
 
       - name: Certify domformat in real Chromium
+        env:
+          DOMFORMAT_BROWSER_NO_SANDBOX: "1"
         run: pnpm --filter @layoutit/polycss-domformat test:browser
 
       - name: Regenerate and compare the complete Gallery corpus
