@@ -24,7 +24,7 @@ Where voxcss used to render a single voxel cube, PolyCSS renders any regular pol
 PolyCSS exposes three composable concepts. Each one ships as a custom element (vanilla) and as a React / Vue component:
 
 - **Scene** (`<poly-scene>` / `PolyScene`): the render tree root. Normally nested inside a camera element (the custom element can also stand alone — see [Camera](#camera)). Sets up lighting and fills its parent element.
-- **Mesh** (`<poly-mesh>` / `PolyMesh`): loads a mesh from a URL (OBJ / STL / glTF / GLB / VOX). Internally expands to one polygon child per face. Convenience wrapper around the parser + renderer.
+- **Mesh** (`<poly-mesh>` / `PolyMesh`): loads a mesh from a URL (OBJ / STL / glTF / GLB / VOX). Emits one internal leaf per visible polygon. Convenience wrapper around the parser + renderer.
 - **Polygon** (`<poly-polygon>` / `Poly`): one polygon. The atomic primitive. Renders as one internal DOM leaf with `transform: matrix3d(...)`. Accepts standard DOM event handlers, classes, and styles: this is what makes PolyCSS "DOM-native 3D" rather than "3D inside a black-box canvas".
 
 A loaded mesh does **not** expand into `<poly-polygon>` elements — the renderer mounts one internal leaf per visible polygon inside a `.polycss-mesh` wrapper, and the leaf tag is a private strategy choice (see [Render Strategies](#render-strategies)). `<poly-polygon>` / `<Poly>` exists for polygons you author yourself. To style or handle a loaded mesh per-polygon, use its render prop / scoped slot, or target the mesh wrapper and its leaves by class and `data-*` attributes.
@@ -129,11 +129,12 @@ n-gons** — runs on only one path:
 - **React/Vue `<PolyScene polygons>` normalizes.** Your non-coplanar quad comes
   back as triangles. It records warnings, but they are not surfaced to the
   console, so the repair is silent.
-- **`scene.add(...)`, `<PolyMesh polygons>`, `<Poly>`, and `<poly-polygon>` do
-  not.** They run the mesh optimizer (or nothing, with `merge: false`). Here a
-  non-coplanar n-gon is flattened onto its average plane when its local 2D basis
-  is built — opening cracks against its neighbours — and degenerate polygons
-  vanish without a trace.
+- **`scene.add(...)`, `<PolyMesh polygons>`, `<poly-polygon>`, and `<Poly>` do
+  not.** The first three run the mesh optimizer instead (or nothing, with
+  `merge: false`); `<Poly>` runs neither — it renders the polygon exactly as
+  passed. On all of them a non-coplanar n-gon is flattened onto its average
+  plane when its local 2D basis is built — opening cracks against its
+  neighbours — and degenerate polygons vanish without a trace.
 
 If you generate geometry, the portable move is to emit triangles or genuinely
 coplanar n-gons, or to call `normalizePolygons` yourself and inspect the
@@ -145,9 +146,9 @@ Vertex order sets the face normal by the right-hand rule, and PolyCSS
 **backface-culls** every leaf. A polygon wound the wrong way is invisible from
 the side you meant to show, and its Lambert shading is computed from the flipped
 normal — typically ambient-only, since the directional term clamps at zero (it
-darkens, it does not invert). Winding does **not** stop shadow casting: ground
-shadows project every polygon regardless of orientation, so a reversed face can
-be invisible and still cast.
+darkens, it does not invert). Winding does **not** stop shadow casting: shadow
+projection ignores orientation, so a reversed face can be invisible and still
+cast onto a `receiveShadow` mesh (or React/Vue's ground fallback).
 
 Vertices are **counter-clockwise seen from the outside** (the side you want to
 look at):
@@ -260,9 +261,9 @@ for duplicate or collinear vertices.
 
 ### Scale
 
-Camera `zoom` is **on-screen CSS pixels per world unit**, matching Three.js's
-`OrthographicCamera.zoom` shape — at `zoom: 50`, one world unit renders 50 px
-across.
+Camera `zoom` is **on-screen CSS pixels per world unit** — at `zoom: 50`, one
+world unit renders 50 px across. The default is `0.65`, and orbit controls clamp
+it to `0.1…10`.
 
 Internally, renderer geometry already lives at `BASE_TILE` (50) CSS px per world
 unit, and the camera transform divides that back out (`scale(zoom / 50)`), so

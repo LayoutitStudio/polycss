@@ -24,7 +24,7 @@ The React/Vue components and `createPolyScene()` support the full table except r
 | `textureQuality` | `number \| "auto"` | `"auto"` | Atlas bitmap budget and compositor sprite size. Auto caps large runtime bitmaps and uses a larger desktop sprite to avoid Safari/Firefox flattening artifacts; lower numeric values reduce texture memory and detail. |
 | `textureLeafSizing` | `"canonical" \| "local" \| "raster"` | `"canonical"` | Texture leaf CSS primitive sizing. |
 | `textureImageRendering` | `"auto" \| "pixelated"` | `"auto"` | Default image filtering for atlas and direct-image texture leaves. |
-| `textureBackend` | `"auto" \| "atlas" \| "image"` | `"auto"` | Default texture backend request per polygon. |
+| `textureBackend` | `"auto" \| "atlas" \| "image"` | `"auto"` | Default texture backend request per polygon. `"auto"` currently always resolves to the atlas — direct image leaves must be requested explicitly with `"image"`. |
 | `textureProjection` | `"affine" \| "projective"` | `"affine"` | Default texture projection request for textured quads. |
 | `seamBleed` | `number \| "auto"` | `1.5` | Overscan on detected shared solid seam edges. Every request is additionally fitted per edge to what the polygon plan can safely absorb; `0` disables it. **Semantics currently differ by renderer.** *Numbers:* React/Vue treat the number as the requested CSS-pixel amount, while vanilla `createPolyScene` clamps it to `0..1` and multiplies the built-in `1.5` px default (so vanilla values above `1` behave like `1`, capping at 1.5 px). *`"auto"`:* vanilla resolves it to the full `1.5` px default, but React/Vue forward it into atlas planning, which accepts numeric amounts only — so an explicit `"auto"` in React/Vue produces **no** shared-edge overscan (per-strategy primitive bleeds are unaffected). Only the numeric default `1.5` behaves identically everywhere. |
 | `strategies` | `{ disable?: ("b" \| "i" \| "u")[] }` | None | Diagnostic override for render strategy selection. Disabled solid strategies fall through to `<s>` atlas slices; `<s>` cannot be disabled. |
@@ -38,7 +38,7 @@ The React/Vue components and `createPolyScene()` support the full table except r
 
 ## Mesh props / attributes
 
-React/Vue `<PolyMesh>` supports the full table. The `<poly-mesh>` custom element supports `src`, `mtl`, `mesh-resolution`, `position`, `scale`, `rotation`, `auto-center`, `cast-shadow`, `receive-shadow`, plus the OBJ parse attributes `target-size`, `default-color`, `palette`, `include-objects`, and `exclude-objects` (these five affect `.obj` sources only). `position`, `scale`, `rotation`, `cast-shadow`, and `receive-shadow` update live; the parse attributes trigger a reload. Use `scene.add(result, opts)` for vanilla options the element doesn't expose, such as `merge`, `stableDom`, and `shadowDefinition`.
+React/Vue `<PolyMesh>` supports the full table. The `<poly-mesh>` custom element supports `src`, `mtl`, `mesh-resolution`, `position`, `scale`, `rotation`, `auto-center`, `cast-shadow`, `receive-shadow`, plus the OBJ parse attributes `target-size`, `default-color`, `palette`, `include-objects`, and `exclude-objects` (these five affect `.obj` sources only). `position`, `scale`, `rotation`, `cast-shadow`, and `receive-shadow` update live; the parse attributes trigger a reload; `auto-center` is read at load only, so changing it after mount does nothing. Use `scene.add(result, opts)` for vanilla options the element doesn't expose, such as `merge`, `stableDom`, and `shadowDefinition`.
 
 | Prop | Type | Description |
 |------|------|-------------|
@@ -48,7 +48,7 @@ React/Vue `<PolyMesh>` supports the full table. The `<poly-mesh>` custom element
 | `position` | `Vec3` | `[x, y, z]` offset in scene space. |
 | `scale` | `number \| Vec3` | Uniform or per-axis scale. |
 | `rotation` | `Vec3` | Euler rotation in degrees `[x, y, z]`. |
-| `textureLighting` | `"baked" \| "dynamic"` | Per-mesh lighting mode override. Defaults to the scene value. |
+| `textureLighting` | `"baked" \| "dynamic"` | Per-mesh lighting mode override. React / Vue only; vanilla meshes inherit the scene value. |
 | `textureQuality` | `number \| "auto"` | Atlas bitmap budget and compositor sprite size. React / Vue only; vanilla meshes inherit the scene's `texture-quality`. |
 | `textureLeafSizing` | `"canonical" \| "local" \| "raster"` | Per-mesh override of the scene default. React / Vue only; vanilla meshes inherit the scene value. |
 | `textureImageRendering` | `"auto" \| "pixelated"` | Per-mesh override of the scene default. React / Vue only; vanilla meshes inherit the scene value. |

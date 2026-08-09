@@ -108,7 +108,8 @@ are preserved as-is.
 /** Leaf primitive sizing for texture leaves. Default "canonical". */
 type PolyTextureLeafSizing = "canonical" | "local" | "raster";
 
-/** Requested backend. "auto" lets the renderer choose. Default "auto". */
+/** Requested backend. Default "auto", which currently always resolves to the
+ *  atlas — direct image leaves must be requested explicitly with "image". */
 type PolyTextureBackend = "auto" | "atlas" | "image";
 
 /** CSS `image-rendering` for the leaf. Default "auto". */
@@ -341,7 +342,9 @@ interface PolySceneOptions {
     color?: string;
     /** 0..1. Default: 0.25. */
     opacity?: number;
-    /** World units above the receiver, avoids z-fighting. Default: 0.05. */
+    /** World units the shadow is lifted off its receiver to avoid z-fighting.
+     *  Default 0.05 for the ground-plane fallback, 0.001 for `receiveShadow`
+     *  meshes. */
     lift?: number;
     /** Max CSS px the shadow may extend past the mesh footprint. Default: 2000. */
     maxExtend?: number;
@@ -359,11 +362,14 @@ interface PolySceneOptions {
      *  greedy-meshes the coverage into blocky rectangles. */
     style?: "vector" | "pixel";
     /** Re-emit shadows while a mesh animates instead of freezing at the last
-     *  pose. Throttled internally (~12fps). Default: false. */
+     *  pose. Default false. Vanilla throttles the re-emit internally (~12fps);
+     *  React/Vue re-emit on every polygon change — pair with a low parametric
+     *  `definition`. */
     followAnimation?: boolean;
   };
   /** Emit `data-poly-shadow-*` attribution attributes on every shadow SVG and
-   *  path, for DevTools inspection. Default: false. */
+   *  path, for DevTools inspection. Vanilla `createPolyScene` only.
+   *  Default: false. */
   debugShadowAttrs?: boolean;
 }
 

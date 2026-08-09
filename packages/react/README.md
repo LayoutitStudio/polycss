@@ -45,7 +45,7 @@ export default function App() {
 ### `<PolyCamera>`
 
 - `rotX`, `rotY` control the orbit angle in degrees.
-- `zoom` is on-screen CSS pixels per world unit (Three.js `OrthographicCamera.zoom` style).
+- `zoom` is on-screen CSS pixels per world unit (default `0.65`; orbit controls clamp to `0.1`–`10`).
 - `target` pans the camera target in world coordinates.
 - `distance` adds dolly pull-back.
 - `PolyCamera` is the orthographic default. Use `<PolyPerspectiveCamera>` for
@@ -67,7 +67,8 @@ export default function App() {
   `<PolyScene autoCenter><PolyMesh src=… /></PolyScene>` the bbox is empty and
   nothing shifts. Pass the mesh's polygons as `centerPolygons`, or use
   `<PolyMesh autoCenter>` to recenter the mesh itself. (Vanilla
-  `createPolyScene` differs — it unions every added mesh.)
+  `createPolyScene` differs — it unions every added mesh, minus any marked
+  `excludeFromAutoCenter`.)
 
 Unlike the vanilla renderer, React re-renders on prop change, so a light change
 **auto-rebakes** the lit surface in baked mode. For live or animated lights,

@@ -58,7 +58,7 @@ Props are listed in their template (kebab-case) form.
 ### `<PolyCamera>`
 
 - `rot-x`, `rot-y` control the orbit angle in degrees.
-- `zoom` is on-screen CSS pixels per world unit (Three.js `OrthographicCamera.zoom` style).
+- `zoom` is on-screen CSS pixels per world unit (default `0.65`; orbit controls clamp to `0.1`–`10`).
 - `target` pans the camera target in world coordinates.
 - `distance` adds dolly pull-back.
 - `PolyCamera` is the orthographic default. Use `<PolyPerspectiveCamera>` for
@@ -80,7 +80,8 @@ Props are listed in their template (kebab-case) form.
   `<PolyScene auto-center><PolyMesh src="…" /></PolyScene>` the bbox is empty
   and nothing shifts. Pass the mesh's polygons as `center-polygons`, or use
   `<PolyMesh auto-center>` to recenter the mesh itself. (Vanilla
-  `createPolyScene` differs — it unions every added mesh.)
+  `createPolyScene` differs — it unions every added mesh, minus any marked
+  `excludeFromAutoCenter`.)
 
 Unlike the vanilla renderer, Vue re-renders on prop change, so a light change
 **auto-rebakes** the lit surface in baked mode. For live or animated lights,

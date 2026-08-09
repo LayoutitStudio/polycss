@@ -55,8 +55,8 @@ import {
 - Coordinates are PolyCSS world space: `[x, y, z]`, **+X right, +Y forward,
   +Z up**.
 - Camera rotations are degrees: `rotX`, `rotY`.
-- `zoom` is on-screen CSS pixels per world unit (Three.js
-  `OrthographicCamera.zoom` style). `BASE_TILE` (50) is the internal world-unit
+- `zoom` is on-screen CSS pixels per world unit (default `0.65`; orbit controls
+  clamp to `0.1`–`10`). `BASE_TILE` (50) is the internal world-unit
   → CSS px factor, and matters only for APIs that take world units directly,
   like `<poly-iframe width>`.
 - `PolyCamera` / `createPolyCamera` are orthographic by default.
@@ -103,9 +103,9 @@ console warning:
 right-hand rule (`(v1-v0) × (v2-v0)`), and PolyCSS backface-culls every leaf. A
 reversed face is invisible from the side you meant to show, and shades from the
 flipped normal — typically ambient-only, since the directional term clamps at
-zero (it darkens, it does not invert). It still casts a ground shadow: shadow
-projection ignores winding. Wind counter-clockwise as seen from the side you
-want to look at.
+zero (it darkens, it does not invert). It still casts — onto `receiveShadow`
+meshes, or React/Vue's ground fallback — because shadow projection ignores
+winding. Wind counter-clockwise as seen from the side you want to look at.
 
 ```ts
 // Faces +Z (up) — visible from above.
@@ -251,10 +251,13 @@ scene.add(floor, { receiveShadow: true });
 scene.setOptions({ shadow: { color: "#000000", opacity: 0.3, parametric: true, definition: 32 } });
 ```
 
-- Two receiver mechanisms: a caster projects onto the scene ground plane
-  automatically (what `<PolyGround>` relies on — it has **no** `receiveShadow`
-  prop), *or* onto explicit `receiveShadow` meshes. As soon as any receiver
-  exists, casters drop the ground fallback.
+- **Receivers differ by renderer.** Vanilla has no ground fallback: a
+  `castShadow` mesh draws nothing until some mesh has `receiveShadow: true`, so
+  `scene.add(floor, { receiveShadow: true })` is required (the snippet above
+  does this). React/Vue additionally project onto the scene ground plane
+  automatically when no receiver exists — that is what `<PolyGround>` relies on
+  (it has **no** `receiveShadow` prop) — and drop that fallback as soon as any
+  receiver exists.
 - `shadow.parametric: true` casts a low-resolution coverage silhouette per
   caster instead of full geometry — far cheaper. `definition` (default `16`)
   is the detail knob; `<PolyMesh shadowDefinition>` overrides it per mesh.
