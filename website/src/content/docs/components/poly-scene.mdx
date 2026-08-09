@@ -13,7 +13,7 @@ It's available as a custom element (`<poly-scene>`), via the imperative `createP
 
 (React / Vue prop names use camelCase; the `<poly-scene>` custom element accepts the kebab-case form, e.g. `textureQuality` → `texture-quality`.)
 
-The React/Vue components and `createPolyScene()` support the full table. The `<poly-scene>` custom element supports `directional-*`, `ambient-*`, `texture-lighting`, `texture-quality`, `auto-center`, and implicit camera attributes; use the imperative API for options such as `shadow`, `seamBleed`, and `strategies` in vanilla.
+The React/Vue components and `createPolyScene()` support the full table. The `<poly-scene>` custom element supports `directional-*`, `ambient-*`, `texture-lighting`, `texture-quality`, `texture-leaf-sizing`, `texture-image-rendering`, `texture-backend`, `texture-projection`, `auto-center`, and implicit camera attributes; use the imperative API for options such as `shadow`, `seamBleed`, and `strategies` in vanilla.
 
 | Prop | Type | Default | Description |
 |------|------|---------|-------------|
@@ -22,6 +22,10 @@ The React/Vue components and `createPolyScene()` support the full table. The `<p
 | `ambientLight` | `PolyAmbientLight` | None | Ambient fill light. |
 | `textureLighting` | `"baked" \| "dynamic"` | `"baked"` | Whether texture lighting is rasterized into atlases or computed with CSS variables. |
 | `textureQuality` | `number \| "auto"` | `"auto"` | Atlas bitmap budget and compositor sprite size. Auto caps large runtime bitmaps and uses a larger desktop sprite to avoid Safari/Firefox flattening artifacts; lower numeric values reduce texture memory and detail. |
+| `textureLeafSizing` | `"canonical" \| "local" \| "raster"` | `"canonical"` | Texture leaf CSS primitive sizing. |
+| `textureImageRendering` | `"auto" \| "pixelated"` | `"auto"` | Default image filtering for atlas and direct-image texture leaves. |
+| `textureBackend` | `"auto" \| "atlas" \| "image"` | `"auto"` | Default texture backend request per polygon. |
+| `textureProjection` | `"affine" \| "projective"` | `"affine"` | Default texture projection request for textured quads. |
 | `seamBleed` | `number \| "auto"` | `1.5` | Solid-primitive overscan for detected shared seam edges. `"auto"` fits each edge from the polygon plan; numbers clamp the CSS-pixel amount. |
 | `strategies` | `{ disable?: ("b" \| "i" \| "u")[] }` | None | Diagnostic override for render strategy selection. Disabled solid strategies fall through to `<s>` atlas slices; `<s>` cannot be disabled. |
 | `autoCenter` | `boolean` | `false` | Rotate around the content bbox center instead of world origin. Polygon data is not mutated. |
@@ -46,6 +50,10 @@ React/Vue `<PolyMesh>` supports the full table. The `<poly-mesh>` custom element
 | `rotation` | `Vec3` | Euler rotation in degrees `[x, y, z]`. |
 | `textureLighting` | `"baked" \| "dynamic"` | Per-mesh lighting mode override. Defaults to the scene value. |
 | `textureQuality` | `number \| "auto"` | Atlas bitmap budget and compositor sprite size. React / Vue only; vanilla meshes inherit the scene's `texture-quality`. |
+| `textureLeafSizing` | `"canonical" \| "local" \| "raster"` | Per-mesh override of the scene default. React / Vue only; vanilla meshes inherit the scene value. |
+| `textureImageRendering` | `"auto" \| "pixelated"` | Per-mesh override of the scene default. React / Vue only; vanilla meshes inherit the scene value. |
+| `textureBackend` | `"auto" \| "atlas" \| "image"` | Per-mesh override of the scene default. React / Vue only; vanilla meshes inherit the scene value. |
+| `textureProjection` | `"affine" \| "projective"` | Per-mesh override of the scene default. React / Vue only; vanilla meshes inherit the scene value. |
 | `seamBleed` | `number \| "auto"` | Per-mesh solid seam overscan. React / Vue only; vanilla meshes inherit the scene setting. |
 | `atomicAtlas` | `boolean` | Hold the previous atlas frame until the next frame is decoded, then swap atomically. React / Vue only. |
 | `onFrameReady` | `() => void` | Fires when an atomic atlas frame swaps to a ready one. React / Vue only. |

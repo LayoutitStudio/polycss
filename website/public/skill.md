@@ -72,9 +72,15 @@ interface Polygon {
   color?: string;                        // hex or rgb()/rgba() ONLY
   texture?: string;                      // image URL
   uvs?: [number, number][];              // one per vertex
+  material?: PolyMaterial;               // shared material; material.texture wins over `texture`
+  textureImageSource?: PolyTextureImageSource;    // source-exact image leaf (advanced)
+  texturePresentation?: PolyTexturePresentation;  // per-polygon texture overrides (advanced)
   data?: Record<string, string | number | boolean>;  // → data-* attributes
 }
 ```
+
+Fields not listed here (`textureWrap`, `textureTriangles`, `doubleSided`, …) are
+parser-internal — do not author them.
 
 How much cleanup you get for free varies by parser and by entry point:
 
@@ -92,8 +98,11 @@ console warning:
 
 **1. Winding decides visibility.** Vertex order sets the face normal by the
 right-hand rule (`(v1-v0) × (v2-v0)`), and PolyCSS backface-culls every leaf. A
-reversed face is invisible, casts no shadow, and lights inverted. Wind
-counter-clockwise as seen from the side you want to look at.
+reversed face is invisible from the side you meant to show, and shades from the
+flipped normal — typically ambient-only, since the directional term clamps at
+zero (it darkens, it does not invert). It still casts a ground shadow: shadow
+projection ignores winding. Wind counter-clockwise as seen from the side you
+want to look at.
 
 ```ts
 // Faces +Z (up) — visible from above.
@@ -108,9 +117,11 @@ vertices requires reversing `uvs` in the same order. `doubleSided` is
 importer-internal and is **not** a render-time flag — it will not make a face
 visible from behind.
 
-*Diagnostic rule:* if a polygon exists in your data but disappears when the
-camera crosses to its other side, inspect winding and normal before touching
-culling, lighting, or camera code.
+*Diagnostic rule:* a single-sided face disappearing when the camera moves behind
+it is correct behavior, not a bug. The winding symptom is a surface missing or
+flickering **from the viewpoint it was built to be seen from** — it exists in
+the data, its neighbours render, but it only shows from the opposite side. Then
+inspect winding and normal before touching culling, lighting, or camera code.
 
 **2. `color` is not a full CSS color.** Only `#rgb`, `#rrggbb`, `rgb()`, and
 `rgba()` parse. Named colors (`"tomato"`), `hsl()`, and `color()` fail silently
@@ -127,7 +138,12 @@ and `meshResolution` to `"lossy"`: coincident faces within `0.05` world units
 are deduped, interior faces culled, and lossy merging tolerates up to `0.35`
 world units of plane displacement (absolute units, not configurable). Dedupe and
 interior culling count as exact reductions and still run under
-`meshResolution: "lossless"` — only `merge: false` renders geometry untouched.
+`meshResolution: "lossless"`. `merge: false` renders the array you pass
+untouched, but only on `scene.add(...)` and `<PolyMesh polygons>` — it does not
+exist on `<PolyScene polygons>` (always normalized + merged) or `<poly-mesh>`,
+and it cannot undo `loadMesh`'s own parse-time optimization. For file geometry
+exactly as authored, call `parseObj`/`parseStl`/`parseGltf`/`parseVox` directly
+and add with `merge: false`.
 
 **5. Degenerate polygons vanish silently** — under 3 vertices, zero-length edge,
 or zero area produces no leaf and no console output.
@@ -148,7 +164,7 @@ const scene = createPolyScene(document.getElementById("host")!, {
 createPolyOrbitControls(scene, { drag: true, wheel: true });
 
 scene.add(createPolyBox({ size: 100, color: "#ffd166" }), { position: [0, 0, 50] });
-scene.add(await loadMesh("/model.glb"), { autoCenter: true, castShadow: true });
+scene.add(await loadMesh("/model.glb"), { castShadow: true });
 ```
 
 React (Vue mirrors this with kebab-case props):

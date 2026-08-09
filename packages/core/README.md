@@ -89,8 +89,10 @@ first. Three constraints bite immediately:
   via the right-hand rule, and PolyCSS backface-culls, so a reversed face is
   invisible.
 - **`color` accepts hex and `rgb()`/`rgba()` only** — not CSS named colors.
-- **Non-triangular polygons must be coplanar.** Renderers do not call
-  `normalizePolygons` for you.
+- **Non-triangular polygons must be coplanar.** Only the React/Vue
+  `<PolyScene polygons>` entry point runs `normalizePolygons` for you
+  (fan-triangulating non-coplanar n-gons); `scene.add(...)`,
+  `<PolyMesh polygons>`, `<Poly>`, and `<poly-polygon>` do not.
 
 ## Three.js parity
 

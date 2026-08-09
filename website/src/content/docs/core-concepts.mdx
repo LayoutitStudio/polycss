@@ -135,8 +135,12 @@ warnings it returns.
 ### Winding determines visibility
 
 Vertex order sets the face normal by the right-hand rule, and PolyCSS
-**backface-culls** every leaf. A polygon wound the wrong way is not merely
-shaded oddly — it is invisible, it casts no shadow, and it lights inverted.
+**backface-culls** every leaf. A polygon wound the wrong way is invisible from
+the side you meant to show, and its Lambert shading is computed from the flipped
+normal — typically ambient-only, since the directional term clamps at zero (it
+darkens, it does not invert). Winding does **not** stop shadow casting: ground
+shadows project every polygon regardless of orientation, so a reversed face can
+be invisible and still cast.
 
 Vertices are **counter-clockwise seen from the outside** (the side you want to
 look at):
@@ -172,10 +176,12 @@ Consequences worth internalizing when you build a shape library:
   optimizer collapsing intentional reverse-wound faces; it is not a render-time
   flag and will not make a face visible from behind. Orient the winding.
 
-**Diagnostic rule:** if a polygon exists in your generated data but disappears
-when the camera crosses to its other side, inspect its winding and normal
-*before* you touch culling, lighting, or camera code. That symptom is winding
-essentially every time.
+**Diagnostic rule:** a single-sided face is *supposed* to disappear when the
+camera moves behind it — that alone is not a bug. The winding symptom is a
+surface missing or flickering **from the viewpoint it was built to be seen
+from**: the polygon exists in your data, its neighbours render, but the face
+only shows from the opposite side. When you see that, inspect the face's winding
+and normal *before* you touch culling, lighting, or camera code.
 
 ### `color` is not a full CSS color
 
@@ -216,8 +222,16 @@ authored geometry is merged, deduped, and interior-culled before it renders:
 
 Note that dedupe and interior culling are treated as *exact* reductions, so they
 still run under `meshResolution: "lossless"` — only the lossy approximation is
-switched off. **`merge: false` is the only setting that renders your geometry
-completely untouched.**
+switched off.
+
+**`merge: false` renders the polygon array you pass completely untouched — but
+only on the paths that accept it**: vanilla `scene.add(...)` and React/Vue
+`<PolyMesh polygons merge={false}>`. It does not exist on `<PolyScene polygons>`
+(always normalized and merged) or on the `<poly-mesh>` custom element. And it
+cannot undo `loadMesh`'s own parse-time optimization — geometry loaded from a
+file is deduped and optimized *before* `merge` is ever consulted. To render file
+geometry exactly as authored, parse it with `parseObj` / `parseStl` /
+`parseGltf` / `parseVox` directly and add the result with `merge: false`.
 
 ### Degenerate polygons vanish silently
 
@@ -260,7 +274,7 @@ You normally do not target these tags directly; use `Poly`, `PolyMesh`, classes,
 
 ## Automatic Polygon Merge
 
-Before rendering, PolyCSS automatically optimizes loaded meshes. `meshResolution: "lossless"` keeps exact planar candidates only; the default `"lossy"` mode also bakes solid texture swatches, merges visually redundant baked swatch colors, tries static triangle simplification for eligible non-animated imports, and can merge near-coplanar candidates within a bounded displacement budget. Candidates are accepted only when the final DOM win is meaningful and whole-mesh seam diagnostics do not regress. STL imports use the conservative lossless path and skip ray-based interior culling in both modes because public CAD/STL files often contain shell, winding, or topology quirks. This keeps DOM element counts low for flat surfaces without changing the intended rendered shape.
+Before rendering, PolyCSS automatically optimizes loaded meshes. `meshResolution: "lossless"` keeps exact planar candidates only; the default `"lossy"` mode also bakes solid texture swatches, merges visually redundant baked swatch colors, tries static triangle simplification for eligible non-animated imports, and can merge near-coplanar candidates within a bounded displacement budget. Candidates are accepted only when the final DOM win is meaningful and whole-mesh seam diagnostics do not regress. STL **parsing** is conservative — the import pass uses the lossless optimizer and skips ray-based interior culling, because public CAD/STL files often contain shell, winding, or topology quirks. That protection is parse-time only: the renderer's own optimization pass does not know the geometry came from STL, so it interior-culls and, by default, lossy-merges. Preserve the parsed STL surface with `merge: false`. This keeps DOM element counts low for flat surfaces without changing the intended rendered shape.
 
 Per-polygon DOM identity is preserved for polygons that cannot merge; polygons inside a merged flat region become one rendered element.
 

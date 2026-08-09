@@ -70,7 +70,13 @@ Props are listed in their template (kebab-case) form.
 - `shadow` configures cast-shadow color, opacity, and the parametric shadow
   knobs (`parametric`, `definition`, `style`, `followAnimation`).
 - `strategies` can disable selected render strategies for diagnostics.
-- `auto-center` rotates around the rendered mesh bounds instead of world origin.
+- `auto-center` rotates around the bbox of the scene's own `polygons` prop (or
+  `center-polygons` when given) instead of world origin. It does **not** see
+  geometry inside child `<PolyMesh>` components — with
+  `<PolyScene auto-center><PolyMesh src="…" /></PolyScene>` the bbox is empty
+  and nothing shifts. Pass the mesh's polygons as `center-polygons`, or use
+  `<PolyMesh auto-center>` to recenter the mesh itself. (Vanilla
+  `createPolyScene` differs — it unions every added mesh.)
 
 Unlike the vanilla renderer, Vue re-renders on prop change, so a light change
 **auto-rebakes** the lit surface in baked mode. For live or animated lights,
@@ -85,9 +91,14 @@ prefer `texture-lighting="dynamic"`.
 - `auto-center` shifts the mesh bbox center to local origin. Note this rewrites
   vertex data, so `getPolygons()` returns the shifted coordinates.
 - `mesh-resolution` chooses `"lossy"` (default) or `"lossless"` optimization.
-  STL imports use the conservative lossless path in both modes.
-- `merge` (default `true`) runs the polygon optimizer. Set `false` to keep
-  authored geometry exactly as given.
+  `.stl` **parsing** is conservative — the loader always uses the lossless
+  optimizer and skips interior culling — but rendering re-optimizes the loaded
+  polygons: the second pass follows `mesh-resolution` and interior-culls even at
+  `"lossless"`.
+- `merge` (default `true`) runs the polygon optimizer. Set `false` to render the
+  polygons you passed exactly as given. It cannot undo `loadMesh`'s own
+  parse-time optimization, so `src`-loaded geometry is already optimized before
+  this switch is consulted.
 - `cast-shadow` / `receive-shadow` opt the mesh into CPU-projected SVG shadows.
 - `shadow-definition` overrides the scene parametric shadow resolution for this
   mesh.

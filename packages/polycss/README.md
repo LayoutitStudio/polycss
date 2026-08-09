@@ -121,25 +121,23 @@ Full reference: [polycss.com/api/three-parity](https://polycss.com/api/three-par
 - `distance` adds dolly pull-back.
 - `PolyCamera` is the orthographic default. Use `PolyPerspectiveCamera` when you want perspective depth.
 
-### PolyScene
+### Scene options (`createPolyScene`)
 
-- `polygons` renders a static `Polygon[]` directly.
+- Geometry enters through `scene.add(parseResult, transform)` — there is **no** `polygons` option. In markup, use `<poly-mesh>` or `<poly-polygon>` children.
 - `directionalLight`, `pointLights` (direction-only, baked mode; optional per-light `castShadow`), and `ambientLight` control scene lighting.
 - `textureLighting` chooses `"baked"` or `"dynamic"`.
-- `textureQuality` controls atlas raster budget.
+- `textureQuality` controls atlas raster budget; `textureLeafSizing`, `textureImageRendering`, `textureBackend`, and `textureProjection` set per-polygon texture defaults.
 - `strategies` can disable selected render strategies for diagnostics.
-- `autoCenter` rotates around the rendered mesh bounds instead of world origin.
+- `autoCenter` rotates around the union bbox of all added meshes instead of world origin, updating as meshes are added or removed. Individual meshes opt out with `excludeFromAutoCenter`.
 
-### PolyMesh
+### Mesh options
 
-- `src` loads `.obj`, `.gltf`, `.glb`, or `.vox` files.
-- `mtl` loads companion OBJ materials.
-- `polygons` accepts pre-parsed geometry.
-- `position`, `scale`, and `rotation` transform the mesh wrapper.
-- `autoCenter` shifts the mesh bbox center to local origin.
-- `meshResolution` chooses `"lossy"` (default) or `"lossless"` optimization. STL imports use the conservative lossless path in both modes.
-- `castShadow` emits CPU-projected SVG shadows. It works in both `"baked"` and `"dynamic"` lighting modes; dynamic-mode shadows are directional-only.
-- `shadowDefinition` overrides the scene's parametric shadow resolution for this mesh.
+`<poly-mesh>` attributes: `src` (loads `.obj`, `.stl`, `.gltf`, `.glb`, or `.vox`), `mtl`, `position`, `scale`, `rotation`, `auto-center`, `mesh-resolution`, `cast-shadow`, `receive-shadow`, `target-size`, `default-color`, `palette`, `include-objects`, `exclude-objects`. There is **no** `polygons` attribute — pass pre-parsed geometry to `scene.add(...)`, or use `<poly-polygon>` for inline one-off polygons.
+
+`scene.add(result, transform)` additionally accepts `merge`, `meshResolution`, `stableDom`, `shadowDefinition`, `excludeFromAutoCenter`, and `id`. These are imperative-only — they are not `<poly-mesh>` attributes.
+
+- `cast-shadow` / `receive-shadow` emit CPU-projected SVG shadows. They work in both `"baked"` and `"dynamic"` lighting modes; dynamic-mode shadows are directional-only.
+- `mesh-resolution` chooses `"lossy"` (default) or `"lossless"`. Note it threads into the **parse** only; the element's own `scene.add` call always renders at the default resolution. Use the imperative API when you need to control both passes.
 
 ### Controls
 
