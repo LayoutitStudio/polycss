@@ -15,14 +15,17 @@ prepared state, bindings, and cross-section invariants.
 
 `nversion/` is a production-free JavaScript browser reader. It independently
 implements JSON parsing, deep schema and prepared-codec checks,
-sibling-resource and media verification, CSS validation, and the executable
-contract required by the N-version viewer. It imports neither `src/` nor
-`conformance/viewer/`.
+sibling-resource and media verification, and CSS validation. It imports
+neither `src/` nor `conformance/viewer/`. Browser proof passes its validated
+result to the alternate mount shell below; it is not a second runtime.
 
-`viewer/` is an independent mount/runtime implementation for the executable
-profile. It is compared with the public browser implementation for lifecycle,
-stable retained DOM, ordered writes, animation, interaction, CSS materialization,
-and transactional teardown.
+`viewer/` is an alternate mount shell. It independently constructs the tree,
+binds resources, materializes CSS, captures snapshots, and owns transactional
+teardown, while importing the compiled reference lifecycle, input adapter, and
+profile interpreters from `dist/`. Comparing it with the public browser mount
+tests shell composition, stable retained DOM, ordered writes, animation,
+interaction, CSS materialization, and rollback without maintaining copied
+state machines.
 
 ## Commands
 
@@ -70,11 +73,14 @@ The release gate verifies:
 - canonical writer-form JSON and ordinary-reader form;
 - identical decoded contracts across Node, browser, Python, and N-version
   implementations;
-- exact stable-tree and DOM-write transcripts across reference and independent
-  viewers;
-- real Chromium mounts for reference- and Python-produced documents;
-- separately captured zero model-pixel deltas for reference versus independent
-  and reference versus N-version viewer paths;
+- exact stable-tree and DOM-write transcripts across public and alternate mount
+  shells that share the reference interpreters;
+- real Chromium mounts the reference fixture at its only prepared frame and
+  the animated Python-produced fixture at noninitial source frame 2;
+- a retained `<i>` strategy leaf in the reference-writer Chromium fixture,
+  complementing Gallery strategy counts from its pinned feature profile;
+- separately captured zero model-pixel deltas for public versus alternate
+  mount-shell paths and production-reader versus N-version-reader paths;
 - exact runtime tarball allowlisting and a clean-installed runtime/CLI smoke.
 
 No package mode, embedded payload path, archive, gzip transport, or `.dom`

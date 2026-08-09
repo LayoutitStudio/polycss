@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, readFile, readdir, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -10,38 +10,43 @@ const npm = process.platform === "win32" ? "npm.cmd" : "npm";
 const python = process.platform === "win32" ? "python" : "python3";
 const MAX_TARBALL_BYTES = 96 * 1024;
 const MAX_UNPACKED_BYTES = 400 * 1024;
+const RUNTIME_MODULES = Object.freeze([
+  "base64",
+  "browser-input",
+  "browser",
+  "canonical-json",
+  "cli",
+  "constants",
+  "crc32",
+  "css",
+  "errors",
+  "file-io",
+  "hash",
+  "index",
+  "inspect",
+  "lifecycle",
+  "manifest",
+  "package-files",
+  "path-security",
+  "public-types",
+  "reader",
+  "resources",
+  "retained-dom",
+  "schema",
+  "state/effects",
+  "state/interaction",
+  "state/numeric",
+  "state/polycss",
+  "state/presentation",
+  "state/triangle",
+  "writer",
+]);
 const ALLOWED_PACKAGE_PATHS = Object.freeze([
   "LICENSE",
   "README.md",
   "bin/domformat.js",
   "package.json",
-  "src/base64.js",
-  "src/browser-input.js",
-  "src/browser.js",
-  "src/canonical-json.js",
-  "src/cli.js",
-  "src/constants.js",
-  "src/crc32.js",
-  "src/css.js",
-  "src/errors.js",
-  "src/file-io.js",
-  "src/hash.js",
-  "src/index.js",
-  "src/inspect.js",
-  "src/lifecycle.js",
-  "src/manifest.js",
-  "src/package-files.js",
-  "src/path-security.js",
-  "src/reader.js",
-  "src/resources.js",
-  "src/retained-dom.js",
-  "src/schema.js",
-  "src/state/effects.js",
-  "src/state/interaction.js",
-  "src/state/numeric.js",
-  "src/state/polycss.js",
-  "src/state/triangle.js",
-  "src/writer.js",
+  ...RUNTIME_MODULES.flatMap((name) => [`dist/${name}.d.ts`, `dist/${name}.js`]),
 ]);
 const FORBIDDEN_PACKAGE_TEXT = Object.freeze([
   "/Users/",
@@ -108,8 +113,10 @@ async function pack(destination) {
     "README.md",
     "bin/domformat.js",
     "package.json",
-    "src/browser.js",
-    "src/index.js",
+    "dist/browser.d.ts",
+    "dist/browser.js",
+    "dist/index.d.ts",
+    "dist/index.js",
   ]) {
     invariant(paths.includes(required), `npm package is missing ${required}.`);
   }
@@ -155,7 +162,7 @@ try {
   const installed = join(installRoot, "node_modules", "@layoutit", "polycss-domformat");
   const installedEntries = (await readdir(installed)).sort();
   invariant(
-    JSON.stringify(installedEntries) === JSON.stringify(["LICENSE", "README.md", "bin", "package.json", "src"]),
+    JSON.stringify(installedEntries) === JSON.stringify(["LICENSE", "README.md", "bin", "dist", "package.json"]),
     `Clean install contains non-runtime top-level entries: ${installedEntries.join(", ")}`,
   );
   const installedManifest = JSON.parse(await readFile(join(installed, "package.json"), "utf8"));
@@ -164,9 +171,13 @@ try {
   invariant(installedManifest.private === true, "Installed package must remain private.");
   invariant(installedManifest.license === "MIT", "Installed package license must match the PolyCSS MIT license.");
   invariant(installedManifest.type === "module", "Installed package must remain ESM.");
-  invariant(JSON.stringify(installedManifest.files) === JSON.stringify(["bin/", "src/", "LICENSE", "README.md"]), "Installed package file allowlist changed.");
+  invariant(JSON.stringify(installedManifest.files) === JSON.stringify(["bin/", "dist/", "LICENSE", "README.md"]), "Installed package file allowlist changed.");
   invariant(JSON.stringify(installedManifest.bin) === JSON.stringify({ domformat: "./bin/domformat.js" }), "Installed CLI surface changed.");
-  invariant(JSON.stringify(installedManifest.exports) === JSON.stringify({ ".": "./src/index.js", "./browser": "./src/browser.js" }), "Installed export map changed.");
+  invariant(installedManifest.main === "./dist/index.js" && installedManifest.types === "./dist/index.d.ts", "Installed Node entry metadata changed.");
+  invariant(JSON.stringify(installedManifest.exports) === JSON.stringify({
+    ".": { types: "./dist/index.d.ts", import: "./dist/index.js" },
+    "./browser": { types: "./dist/browser.d.ts", import: "./dist/browser.js" },
+  }), "Installed export map changed.");
   invariant(installedManifest.dependencies === undefined && installedManifest.optionalDependencies === undefined && installedManifest.peerDependencies === undefined, "Installed package gained a dependency.");
   invariant(installedManifest.scripts?.prepack === undefined, "Installed package contains a source-checkout-only prepack hook.");
   const cli = join(installed, "bin", "domformat.js");
@@ -184,6 +195,46 @@ try {
     "--input-type=module",
     "--eval",
     "import * as core from '@layoutit/polycss-domformat'; import * as browser from '@layoutit/polycss-domformat/browser'; const same=(a,b)=>JSON.stringify(Object.keys(a).sort())===JSON.stringify(b); if (!same(core, ['DomFormatError','buildDom','readDom','readDomFile','validateDocument']) || !same(browser, ['mountDom','readDomBrowser','readDomBrowserUrl'])) process.exit(1);",
+  ], { cwd: installRoot });
+  const typeConsumer = join(installRoot, "consumer.ts");
+  await writeFile(typeConsumer, `
+import { DomFormatError, buildDom, readDom, readDomFile, validateDocument } from "@layoutit/polycss-domformat";
+import { mountDom, readDomBrowser, readDomBrowserUrl } from "@layoutit/polycss-domformat/browser";
+const bytes = new Uint8Array();
+const decoded = readDom(bytes);
+void readDom(bytes, { limits: { maxFileBytes: 12345, maxNodes: 678 } });
+validateDocument(decoded.document);
+const writerInput = {
+  meta: {
+    title: "typed consumer",
+    capabilities: ["css-semantic-closure", "deterministic-json", "explicit-retained-tree", "logical-assets"],
+    conformance: { executable: ["retained-tree", "presentation"], declaredOnly: [] },
+  },
+  tree: { version: 0, mount: { behavior: "replace-children", attributes: [] }, nodes: [] },
+  cssBinding: { version: 0, stylesheets: [] },
+  state: { version: 0, channels: [] },
+  bindings: { version: 0, inputs: [], channels: [] },
+  resourceInputs: [],
+} satisfies Parameters<typeof buildDom>[0];
+void buildDom(writerInput);
+void readDomFile("model.json");
+void readDomBrowser(bytes, { limits: { maxFileBytes: 12345, maxNodes: 678 } });
+void readDomBrowserUrl(new URL("https://example.invalid/model.json"));
+declare const browserResult: Awaited<ReturnType<typeof readDomBrowser>>;
+declare const host: HTMLElement;
+void mountDom(browserResult, host, { animate: false, mode: "animation" });
+void new DomFormatError("EXAMPLE", "example");
+`);
+  run(process.execPath, [
+    join(root, "node_modules", "typescript", "bin", "tsc"),
+    "--noEmit",
+    "--strict",
+    "--skipLibCheck",
+    "--target", "ES2022",
+    "--module", "NodeNext",
+    "--moduleResolution", "NodeNext",
+    "--lib", "ES2022,DOM",
+    typeConsumer,
   ], { cwd: installRoot });
   run(process.execPath, [cli, "encode", manifest, "--output", encodedA]);
   run(process.execPath, [cli, "encode", manifest, "--output", encodedB]);
@@ -221,6 +272,7 @@ try {
     runtimeOnlyTopLevel: true,
     installedJsonAndSiblingSmoke: true,
     installedAllCliCommandsSmoke: true,
+    installedTypeDeclarationsSmoke: true,
     installedRuntimeAcceptsIndependentProducer: true,
   }, null, 2)}\n`);
 } finally {

@@ -7,6 +7,7 @@ import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
 import { readDomFile } from "@layoutit/polycss-domformat";
+import { canonicalJsonBytes, serializeCanonicalJson } from "./gallery-domformat-canonical.mjs";
 
 const scriptRoot = dirname(fileURLToPath(import.meta.url));
 const websiteRoot = resolve(scriptRoot, "..");
@@ -30,22 +31,6 @@ function requireCondition(condition, message) {
 
 function sha256(bytes) {
   return createHash("sha256").update(bytes).digest("hex");
-}
-
-function canonicalize(value) {
-  if (Array.isArray(value)) return value.map(canonicalize);
-  if (!value || typeof value !== "object") return value;
-  return Object.fromEntries(Object.keys(value).sort().map((key) => [key, canonicalize(value[key])]));
-}
-
-function serializeCanonical(value) {
-  if (value === null || typeof value !== "object") return JSON.stringify(value);
-  if (Array.isArray(value)) return `[${value.map(serializeCanonical).join(",")}]`;
-  return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${serializeCanonical(value[key])}`).join(",")}}`;
-}
-
-function canonicalBytes(value, newline = false) {
-  return Buffer.from(`${serializeCanonical(canonicalize(value))}${newline ? "\n" : ""}`);
 }
 
 function exactKeys(value, expected, label) {
@@ -172,7 +157,7 @@ async function verifyFreshCorpus() {
 }
 
 function sameValue(left, right) {
-  return JSON.stringify(canonicalize(left)) === JSON.stringify(canonicalize(right));
+  return serializeCanonicalJson(left) === serializeCanonicalJson(right);
 }
 
 async function verifySourceClosure(entry, preset, document) {
@@ -301,7 +286,7 @@ async function main() {
   const options = parseArguments(process.argv.slice(2));
   const [catalogBytes, presets] = await Promise.all([readFile(catalogPath), galleryInventory()]);
   const catalog = JSON.parse(catalogBytes);
-  requireCondition(catalogBytes.equals(canonicalBytes(catalog, true)), "Gallery domformat catalog is not canonical deterministic JSON.");
+  requireCondition(catalogBytes.equals(canonicalJsonBytes(catalog, true)), "Gallery domformat catalog is not canonical deterministic JSON.");
   exactKeys(catalog, ["capture", "format", "models", "presentation", "profile", "schema"], "Gallery domformat catalog");
   requireCondition(catalog.schema === "polycss-gallery-domformat@0", "Gallery domformat catalog schema is wrong.");
   requireCondition(catalog.format === "domformat@0" && catalog.profile === "polycss-3d@0", "Gallery domformat catalog format/profile is wrong.");
@@ -317,15 +302,19 @@ async function main() {
   requireCondition(Array.isArray(catalog.models) && catalog.models.length === presets.length, `Gallery domformat catalog has ${catalog.models?.length ?? "no"} models; expected ${presets.length}.`);
   requireCondition(new Set(presets.map((preset) => preset.id)).size === presets.length, "Gallery preset inventory contains duplicate ids.");
   requireCondition(new Set(catalog.models.map((model) => model.id)).size === catalog.models.length, "Gallery domformat catalog contains duplicate ids.");
+  const catalogById = new Map(catalog.models.map((model) => [model.id, model]));
+  requireCondition(presets.every((preset) => catalogById.has(preset.id)), "Gallery domformat catalog ids do not match the Gallery preset inventory.");
+  requireCondition(sameValue(catalog.models.map((model) => model.id), presets.map((preset) => preset.id)), "Gallery domformat catalog order is not canonical Gallery preset order.");
 
   const expectedFiles = new Set(["catalog.json"]);
   let documentBytesTotal = 0;
   let externalBytesTotal = 0;
   let visualLeavesTotal = 0;
+  const strategyTotals = { b: 0, i: 0, s: 0, u: 0, voxelFaces: 0 };
   let maxDocumentBytes = 0;
   let maxResourceBytes = 0;
-  for (const [index, preset] of presets.entries()) {
-    const entry = catalog.models[index];
+  for (const preset of presets) {
+    const entry = catalogById.get(preset.id);
     exactKeys(entry, ["attribution", "canonical", "category", "document", ...(preset.galleryBucket ? ["galleryBucket"] : []), "id", "kind", "label", "source"], `Catalog model ${preset.id}`);
     requireCondition(entry.id === preset.id && entry.label === preset.label && entry.kind === preset.kind && entry.category === preset.category, `Catalog model ${preset.id} does not match the Gallery preset.`);
     requireCondition(entry.galleryBucket === preset.galleryBucket, `Catalog model ${preset.id} has the wrong Gallery bucket.`);
@@ -338,9 +327,10 @@ async function main() {
     exactKeys(entry.canonical.strategies, ["b", "i", "s", "u", "voxelFaces"], `Catalog model ${preset.id} strategy summary`);
     requireCondition(Object.values(entry.canonical.strategies).every((value) => Number.isSafeInteger(value) && value >= 0), `Catalog model ${preset.id} has invalid strategy counts.`);
     requireCondition(entry.canonical.strategies.b + entry.canonical.strategies.i + entry.canonical.strategies.s + entry.canonical.strategies.u === entry.canonical.visualLeaves, `Catalog model ${preset.id} strategy counts do not cover every visual leaf.`);
+    for (const strategy of Object.keys(strategyTotals)) strategyTotals[strategy] += entry.canonical.strategies[strategy];
     const documentPath = await safeCorpusPath(entry.document);
     const bytes = await readFile(documentPath);
-    requireCondition(bytes.equals(canonicalBytes(JSON.parse(bytes))), `${preset.id} is not canonical deterministic JSON.`);
+    requireCondition(bytes.equals(canonicalJsonBytes(JSON.parse(bytes))), `${preset.id} is not canonical deterministic JSON.`);
     requireCondition(entry.canonical.byteLength === bytes.length, `${preset.id} document byte length is stale.`);
     requireCondition(entry.canonical.digest?.algorithm === "sha256" && entry.canonical.digest.value === sha256(bytes), `${preset.id} document digest is stale.`);
     requireCondition(bytes.length <= MAX_DOCUMENT_BYTES, `${preset.id} exceeds the ${MAX_DOCUMENT_BYTES}-byte document budget.`);
@@ -388,6 +378,8 @@ async function main() {
   requireCondition(orphaned.length === 0, `Gallery domformat corpus has orphaned files: ${orphaned.join(", ")}.`);
   requireCondition(documentBytesTotal <= MAX_TOTAL_DOCUMENT_BYTES, `Gallery documents exceed the ${MAX_TOTAL_DOCUMENT_BYTES}-byte corpus budget.`);
   requireCondition(externalBytesTotal <= MAX_TOTAL_EXTERNAL_BYTES, `Gallery external resources exceed the ${MAX_TOTAL_EXTERNAL_BYTES}-byte referenced corpus budget.`);
+  requireCondition(strategyTotals.b > 0 && strategyTotals.s > 0 && strategyTotals.u > 0, "Gallery domformat corpus does not exercise its available retained-leaf strategies.");
+  requireCondition(strategyTotals.i > 0 || catalog.capture.css.borderShape === false, "Gallery domformat corpus omitted <i> despite border-shape support in its captured browser profile.");
   if (options.fresh) await verifyFreshCorpus();
   process.stdout.write(`${JSON.stringify({
     models: catalog.models.length,
@@ -395,6 +387,7 @@ async function main() {
     referencedExternalBytes: externalBytesTotal,
     files: files.length,
     visualLeaves: visualLeavesTotal,
+    strategies: strategyTotals,
     maxDocumentBytes,
     maxResourceBytes,
     ...(options.fresh ? { fresh: true } : {}),

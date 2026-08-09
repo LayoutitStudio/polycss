@@ -18,6 +18,7 @@ export class FakeElement {
     this.classes = [];
     this.classList = { add: (...tokens) => { this.classes.push(...tokens); } };
     this.listeners = new Map();
+    this.capturedPointers = new Set();
     this.clientWidth = 320;
     this.clientHeight = 240;
   }
@@ -45,6 +46,9 @@ export class FakeElement {
   getBoundingClientRect() { return { left: 0, top: 0, width: this.clientWidth, height: this.clientHeight }; }
   closest() { return null; }
   focus(options) { this.focusOptions = options; }
+  setPointerCapture(pointerId) { this.capturedPointers.add(pointerId); }
+  hasPointerCapture(pointerId) { return this.capturedPointers.has(pointerId); }
+  releasePointerCapture(pointerId) { this.capturedPointers.delete(pointerId); }
   remove() {
     if (!this.parentNode) return;
     const index = this.parentNode.childNodes.indexOf(this);

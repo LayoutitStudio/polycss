@@ -28,6 +28,9 @@ test("JSON writer is deterministic and round-trips every semantic section with s
   assert.equal(summary.tree.nodes, 3);
   assert.equal(summary.allResourcesVerified, true);
   assert.throws(() => readDom(first.bytes, { externalResources: new Map(), requireResources: true }), errorCode("MISSING_EXTERNAL_RESOURCE"));
+  assert.equal(Object.isFrozen(result.document), true);
+  assert.equal(Object.isFrozen(result.document.tree.nodes[0].styles), true);
+  assert.throws(() => { result.document.tree.nodes[0].styles.position = "fixed"; }, TypeError);
 });
 
 test("writer returns the same canonical Unicode document carried by its bytes", async () => {
@@ -37,6 +40,17 @@ test("writer returns the same canonical Unicode document carried by its bytes", 
   const read = readDom(built.bytes, { externalResources: builtExternalResources(built), requireResources: true });
   assert.equal(built.document.meta.title, "Café retained model");
   assert.deepEqual(built.document, read.document);
+});
+
+test("writer deeply freezes the canonical document carried by its bytes", async () => {
+  const built = buildDom(await syntheticInput());
+  assert.equal(Object.isFrozen(built.document), true);
+  assert.equal(Object.isFrozen(built.document.meta), true);
+  assert.equal(Object.isFrozen(built.document.tree), true);
+  assert.equal(Object.isFrozen(built.document.tree.nodes), true);
+  assert.equal(Object.isFrozen(built.document.tree.nodes[0]), true);
+  assert.throws(() => { built.document.meta.title = "mutated"; }, TypeError);
+  assert.throws(() => { built.document.tree.nodes.push({}); }, TypeError);
 });
 
 test("canonical JSON rejects sparse arrays and non-plain host objects", () => {
@@ -78,6 +92,22 @@ test("writer copies caller-owned resource bytes before validation and publicatio
   source.fill(0);
   assert.deepEqual(builtExternalResources(built).get(input.resourceInputs[0].id), before);
   assert.equal(readDom(built.bytes, { externalResources: builtExternalResources(built), requireResources: true }).resourceBytes.size, 2);
+});
+
+test("writer accepts and copies the exact bytes selected by an ArrayBufferView", async () => {
+  const input = await syntheticInput();
+  const resource = input.resourceInputs[0];
+  const expected = Uint8Array.from(resource.bytes);
+  const padding = 7;
+  const storage = new Uint8Array(expected.length + padding * 2);
+  storage.fill(0xa5);
+  storage.set(expected, padding);
+  resource.bytes = new DataView(storage.buffer, padding, expected.length);
+
+  const built = buildDom(input);
+  assert.deepEqual(built.externalResources.get(resource.path), expected);
+  storage.fill(0);
+  assert.deepEqual(built.externalResources.get(resource.path), expected);
 });
 
 test("executable PolyCSS fixture is deterministic and remains fully executable", async () => {

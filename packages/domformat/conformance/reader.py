@@ -25,7 +25,8 @@ from typing import Any
 
 
 DOCUMENT_FIELDS = ("meta", "tree", "cssBinding", "state", "bindings", "resources")
-BASE64_ALPHABET = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/")
+BASE64_CHARACTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+BASE64_ALPHABET = frozenset(BASE64_CHARACTERS)
 STATE_INTERPRETERS = {
     "polycss-effects-prepared@0": "polycss-effects@0",
     "polycss-playback-packed@0": "polycss-playback@0",
@@ -46,7 +47,7 @@ KNOWN_REQUIRED_CAPABILITIES = {
 ALLOWED_ELEMENTS = {"b", "div", "i", "img", "s", "span", "u"}
 ALLOWED_ATTRIBUTES = {
     "alt", "aria-hidden", "class", "decoding", "draggable", "height",
-    "id", "role", "width",
+    "role", "width",
 }
 ALLOWED_STYLES = {
     "backgroundColor", "backgroundPosition", "backgroundPositionY",
@@ -64,8 +65,6 @@ ALLOWED_MOUNT_STYLES = {
     "backgroundSize", "position",
 }
 ALLOWED_SINKS = {
-    "host.style.backgroundColor", "host.style.backgroundImage", "host.style.backgroundPosition",
-    "host.style.backgroundRepeat", "host.style.backgroundSize",
     "style.backgroundPosition", "style.backgroundPositionY", "style.height",
     "style.left", "style.opacity", "style.top", "style.transform",
     "style.visibility", "style.width",
@@ -117,7 +116,8 @@ DEFAULT_LIMITS = {
     "prepared_transforms": 2_000_000,
     "prepared_states": 2_000_000,
     "prepared_changes": 4_000_000,
-    "visibility_cells": 64 * 1024 * 1024,
+    # Surface validation revisits this matrix, so this bounds CPU as well as allocation.
+    "visibility_cells": 8 * 1024 * 1024,
     "effect_particles": 10_000,
     "effect_spawn_tuples": 1_000_000,
     "interaction_controls": 256,
@@ -486,7 +486,12 @@ def safe_style(value: Any, label: str) -> str:
             cursor = index + 1
             while cursor < len(value) and re.match(r"[A-Za-z0-9_-]", value[cursor]):
                 cursor += 1
-            if cursor < len(value) and value[cursor] == "(":
+            open_paren = cursor
+            while open_paren < len(value) and value[open_paren] in "\t\n\f\r ":
+                open_paren += 1
+            if open_paren < len(value) and value[open_paren] == "(":
+                require(open_paren == cursor, "UNSAFE_STYLE_VALUE",
+                        f"{label} separates a function name from its opening parenthesis")
                 name = value[index:cursor].lower()
                 require(name in INLINE_SAFE_FUNCTIONS, "UNSAFE_STYLE_VALUE",
                         f"{label} uses context-dependent or unsupported function {name}()")
@@ -577,6 +582,8 @@ def parse_canonical_json(payload: bytes, label: str) -> Any:
         text = payload.decode("utf-8", "strict")
     except UnicodeDecodeError as error:
         raise DomError("MALFORMED_UTF8", f"{label} is not UTF-8: {error}") from error
+    require(not text.startswith("\ufeff"), "MALFORMED_UTF8",
+            f"{label} begins with a byte-order mark")
     preflight_json_structure(text, label)
 
     def pairs_hook(pairs: list[tuple[str, Any]]) -> dict:
@@ -614,6 +621,8 @@ def parse_json(payload: bytes, label: str) -> Any:
         text = payload.decode("utf-8", "strict")
     except UnicodeDecodeError as error:
         raise DomError("MALFORMED_UTF8", f"{label} is not UTF-8: {error}") from error
+    require(not text.startswith("\ufeff"), "MALFORMED_UTF8",
+            f"{label} begins with a byte-order mark")
     preflight_json_structure(text, label)
 
     def pairs_hook(pairs: list[tuple[str, Any]]) -> dict:
@@ -695,6 +704,12 @@ def canonical_base64_decoded_length(value: Any, label: str,
             and (padding == 0 or (len(value) >= 4
                  and body_length % 4 == (2 if padding == 2 else 3))),
             code, f"{label} is not canonical base64")
+    if padding == 2:
+        require(BASE64_CHARACTERS.index(value[body_length - 1]) & 15 == 0,
+                code, f"{label} has nonzero padding bits")
+    elif padding == 1:
+        require(BASE64_CHARACTERS.index(value[body_length - 1]) & 3 == 0,
+                code, f"{label} has nonzero padding bits")
     return len(value) // 4 * 3 - padding
 
 
@@ -1843,14 +1858,7 @@ def validate_presentation_contract(state_channel: dict, binding: dict,
                 "INVALID_PRESENTATION_STATE", "Presentation background opacity is invalid")
         for key in ("position", "repeat", "size"):
             safe_style(background.get(key), f"Presentation background {key}")
-    expected_sinks = []
-    if background is not None:
-        expected_sinks.extend([
-            "host.style.backgroundColor", "host.style.backgroundImage",
-            "host.style.backgroundPosition", "host.style.backgroundRepeat",
-            "host.style.backgroundSize",
-        ])
-    expected_sinks.extend(["style.height", "style.left", "style.top", "style.transform"])
+    expected_sinks = ["style.height", "style.left", "style.top", "style.transform"]
     if has_cursor_layer:
         expected_sinks.append("style.visibility")
     expected_sinks.append("style.width")
@@ -1980,8 +1988,7 @@ def validate_interaction_contract(state_channel: dict, binding: dict,
             and finite_f32(input_contract.get("mirrorX")), state_code,
             "Interaction picking or cursor timing is invalid")
 
-    animator_keys = {"initialState", "initialFrame", "introState", "dozeState",
-                     "sleepState", "wakeState", "convergeState", "exitEyeState",
+    animator_keys = {"dozeState", "sleepState", "wakeState", "convergeState", "exitEyeState",
                      "eyeState", "dozeLoopCount", "dozeLoopStartFrame",
                      "dozeLoopEndFrame", "sleepEndFrame", "wakeStartFrame", "eyeFrame",
                      "convergeStillTicks", "eyeStillTicks"}
@@ -1990,25 +1997,23 @@ def validate_interaction_contract(state_channel: dict, binding: dict,
     require(set(animator) == animator_keys
             and all(is_safe_int(animator[key], 0) for key in animator_keys), state_code,
             "Interaction animator contains invalid integers")
-    state_ids = [animator[key] for key in ("introState", "dozeState", "sleepState",
-                                           "wakeState", "convergeState", "exitEyeState",
+    state_ids = [animator[key] for key in ("dozeState", "sleepState", "wakeState",
+                                           "convergeState", "exitEyeState",
                                            "eyeState")]
-    require(len(set(state_ids)) == len(state_ids) and animator["initialState"] in state_ids,
+    require(len(set(state_ids)) == len(state_ids),
             state_code, "Interaction animator states are invalid")
     playback_frame_count = (playback_binding["parameters"]["frameCount"]
                             if playback_binding is not None else limits["frames"])
-    require(animator["initialState"] == animator["eyeState"]
-            and animator["initialFrame"] == animator["eyeFrame"]
-            and 0 < animator["initialFrame"] <= playback_frame_count, state_code,
-            "Interaction initial animator state is inconsistent")
+    require(0 < animator["eyeFrame"] <= playback_frame_count, state_code,
+            "Interaction eye frame is invalid")
     require(animator["dozeLoopCount"] > 0
             and 0 < animator["dozeLoopStartFrame"] < animator["dozeLoopEndFrame"] <= playback_frame_count
             and 0 < animator["sleepEndFrame"] <= playback_frame_count
             and 0 < animator["wakeStartFrame"] <= playback_frame_count
             and animator["convergeStillTicks"] > 0 and animator["eyeStillTicks"] > 0,
             state_code, "Interaction animator timing is invalid")
-    require(parameters.get("initialFrame") == animator["initialFrame"], binding_code,
-            "Interaction binding initialFrame differs from animator")
+    require(parameters.get("initialFrame") == animator["eyeFrame"], binding_code,
+            "Interaction binding initialFrame differs from animator eye frame")
 
     source = strict_keys(packet.get("source"), {"cameraViewMatrix", "cameraWorldPosition",
                          "inverseCameraMatrix", "projection", "displacementMagnitude",
@@ -2575,7 +2580,7 @@ def validate_presentation_closure(document: dict[str, Any], nodes: list[dict],
 CSS_WHITESPACE = "\t\n\f\r "
 SAFE_CSS_FUNCTIONS = frozenset("""
 abs acos asin atan atan2 blur brightness calc circle clamp color color-mix
-conic-gradient contrast cos counter counters cubic-bezier drop-shadow ellipse exp
+conic-gradient contrast cos cubic-bezier drop-shadow ellipse exp
 fit-content grayscale hsl hsla hwb hypot hue-rotate inset invert is lab lch
 light-dark linear-gradient log matrix matrix3d max min minmax mod not nth-child
 nth-last-child nth-last-of-type nth-of-type oklab oklch opacity path perspective
@@ -2590,7 +2595,7 @@ SAFE_CSS_PROPERTIES = frozenset("""
 background-color background-image background-position-x background-position-y
 background-repeat background-size border border-bottom-left-radius
 border-bottom-right-radius border-color border-shape border-top-left-radius
-border-top-right-radius box-sizing color contain content corner-bottom-left-shape
+border-top-right-radius box-sizing color contain corner-bottom-left-shape
 corner-bottom-right-shape corner-top-left-shape corner-top-right-shape cursor display font font-style font-weight height
 image-rendering inset isolation left line-height margin max-width object-fit
 object-position opacity overflow padding pointer-events position text-decoration
@@ -2800,8 +2805,13 @@ def scan_css_functions(css: str, start: int, end: int,
         cursor = index + 1
         while cursor < end and re.match(r"[A-Za-z0-9_-]", css[cursor]):
             cursor += 1
-        if cursor >= end or css[cursor] != "(":
+        open_paren = cursor
+        while open_paren < end and css[open_paren] in CSS_WHITESPACE:
+            open_paren += 1
+        if open_paren >= end or css[open_paren] != "(":
             index = cursor; continue
+        require(open_paren == cursor, "UNSAFE_CSS",
+                "Stylesheet function names must immediately precede '('")
         name = css[index:cursor].lower()
         require(name in SAFE_CSS_FUNCTIONS, "UNSAFE_CSS_FUNCTION",
                 f"Stylesheet function {name}() is forbidden")
@@ -2809,11 +2819,11 @@ def scan_css_functions(css: str, start: int, end: int,
         require(counters["functions"] <= limits["css_functions"], "CSS_FUNCTION_LIMIT",
                 "Stylesheet has too many functions")
         if name == "url":
-            closing = matching_css_paren(css, cursor, end)
-            counters["urls"].append(css_url_token(css, cursor, closing))
+            closing = matching_css_paren(css, open_paren, end)
+            counters["urls"].append(css_url_token(css, open_paren, closing))
             index = closing + 1
         else:
-            index = cursor + 1
+            index = open_paren + 1
 
 
 def validate_css(payload: bytes, binding: dict, resources: dict[str, dict], limits: dict[str, int]) -> None:

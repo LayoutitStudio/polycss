@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { buildDom } from "../src/writer.js";
 import { createPolycssInteraction } from "../src/state/interaction.js";
+import { preparedTriangleTransform } from "../src/state/triangle.js";
 import { errorCode, syntheticExecutableInteractionInput as interactionInput, syntheticPolycssInput } from "./helpers.js";
 
 async function mismatchedComposedInput() {
@@ -135,7 +136,9 @@ test("prepared pointer samples use declared source quantization and bounds", asy
 });
 
 test("prepared idle animation advances without being reset every tick", async () => {
-  const value = runtime(await interactionInput());
+  const input = await interactionInput();
+  const animator = input.state.channels.find((channel) => channel.id === "interaction").data.packet.animator;
+  const value = runtime(input);
   const states = [];
   const frames = [];
   for (let tick = 0; tick < 12; tick += 1) {
@@ -144,9 +147,54 @@ test("prepared idle animation advances without being reset every tick", async ()
     states.push(inspected.animatorState);
     frames.push(inspected.sourceFrame);
   }
-  assert.ok(states.includes(2), "idle animation reaches the fixed doze state");
-  assert.ok(states.includes(3), "idle animation reaches the fixed sleep state");
+  assert.ok(states.includes(animator.dozeState), "idle animation reaches the fixed doze state");
+  assert.ok(states.includes(animator.sleepState), "idle animation reaches the fixed sleep state");
   assert.ok(new Set(frames).size > 1, "idle animation publishes more than its initial source frame");
+});
+
+test("a grab wins over doze-loop expiry on the same logical tick", async () => {
+  const input = await interactionInput();
+  const animator = input.state.channels.find((channel) => channel.id === "interaction").data.packet.animator;
+  animator.eyeStillTicks = 1;
+  animator.dozeLoopCount = 1;
+  animator.dozeLoopStartFrame = animator.eyeFrame;
+  animator.dozeLoopEndFrame = animator.eyeFrame + 1;
+  const value = runtime(input);
+  value.interaction.step();
+  value.interaction.step();
+  const grabbed = value.interaction.step({ pressed: true, pointer: { x: 160, y: 120 } });
+  assert.equal(grabbed.selectedId, "grab-triangle");
+  assert.equal(value.interaction.inspect().animatorState, animator.convergeState);
+});
+
+test("overlapping picks snap to the selected nearest control", async () => {
+  const input = await interactionInput();
+  const packet = input.state.channels.find((channel) => channel.id === "interaction").data.packet;
+  packet.controls[0].screenPosition = [150, 120];
+  packet.controls[0].cameraDistance = 10;
+  packet.controls[1].mode = "grab";
+  packet.controls[1].screenPosition = [170, 120];
+  packet.controls[1].cameraDistance = 100;
+  const value = runtime(input);
+  const frame = value.interaction.step({ pressed: true, pointer: { x: 160, y: 120 } });
+  assert.equal(frame.selectedId, packet.controls[0].id);
+  assert.equal(frame.control.csrX, 170, "source x=150 mirrors back to public x=170");
+});
+
+test("triangle publication treats decimal-quantized zero-area bases as degenerate", () => {
+  const transform = preparedTriangleTransform({
+    basis: [0, 1, 2],
+    canonicalSize: 32,
+    matrixDecimals: 0,
+    seamEdgeMask: 0,
+    width: 32,
+    height: 32,
+  }, [
+    [0, 0, 0],
+    [0.1, 0, 0],
+    [0, 0.1, 0],
+  ], { fallbackAmount: 0, sharedEdgeAmount: 0 });
+  assert.equal(transform, null);
 });
 
 test("interaction viewport defaults are source-derived and composed targets must match playback", async () => {

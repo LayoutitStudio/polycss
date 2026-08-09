@@ -21,6 +21,7 @@ import {
   readDomFile,
   validateDocument,
 } from "@layoutit/polycss-domformat";
+import { canonicalJsonBytes } from "./gallery-domformat-canonical.mjs";
 
 const scriptRoot = dirname(fileURLToPath(import.meta.url));
 const websiteRoot = resolve(scriptRoot, "..");
@@ -77,16 +78,6 @@ function sha256(bytes) {
 
 function utf8(value) {
   return new TextEncoder().encode(value);
-}
-
-function canonicalize(value) {
-  if (Array.isArray(value)) return value.map(canonicalize);
-  if (!value || typeof value !== "object") return value;
-  return Object.fromEntries(Object.keys(value).sort().map((key) => [key, canonicalize(value[key])]));
-}
-
-function canonicalBytes(value) {
-  return utf8(`${JSON.stringify(canonicalize(value))}\n`);
 }
 
 function parseArguments(argv) {
@@ -734,6 +725,7 @@ async function main() {
   let browser;
   let server;
   let stagingRoot;
+  let primaryError;
   try {
     await build({
       entryPoints: [browserEntry],
@@ -787,6 +779,7 @@ async function main() {
       const capture = await page.evaluate((presetId) => window.galleryDomformat.capturePreset(presetId), id);
       const consumedSourcePaths = started.galleryRequests.slice(requestStart);
       requireCondition(browserErrors.length === 0, `${id} raised browser errors: ${browserErrors.join(" | ")}`);
+      requireCondition(capture.attribution && typeof capture.attribution === "object" && !Array.isArray(capture.attribution) && typeof capture.attribution.creator === "string" && capture.attribution.creator.length > 0, `${id} has no explicit Gallery attribution.`);
       captureSummary.push({
         id,
         nodes: capture.nodes.length,
@@ -832,7 +825,7 @@ async function main() {
       presentation: { width: 640, height: 640, renderer: "gallery-vanilla-chromium" },
       models: entries,
     };
-    await writeFile(join(stagingRoot, "catalog.json"), canonicalBytes(catalog));
+    await writeFile(join(stagingRoot, "catalog.json"), canonicalJsonBytes(catalog, true));
     const expectedComplete = options.ids === null;
     if (expectedComplete) requireCondition(entries.length === presets.length, "Generated Gallery catalog is incomplete.");
     await validateOutputRoot(output.outputRoot, output.outputParent);
@@ -840,11 +833,18 @@ async function main() {
     await rename(stagingRoot, output.outputRoot);
     stagingRoot = undefined;
     process.stdout.write(`${JSON.stringify({ outputRoot: output.outputRoot, models: entries.length, ...totals, maxDocumentBytes, maxResourceBytes }, null, 2)}\n`);
+  } catch (error) {
+    primaryError = error;
+    throw error;
   } finally {
-    await browser?.close();
-    if (server) await new Promise((resolvePromise) => server.close(resolvePromise));
-    if (stagingRoot) await rm(stagingRoot, { recursive: true, force: true });
-    await rm(bundleRoot, { recursive: true, force: true });
+    const cleanup = await Promise.allSettled([
+      browser?.close(),
+      server ? new Promise((resolvePromise, reject) => server.close((error) => error ? reject(error) : resolvePromise())) : undefined,
+      stagingRoot ? rm(stagingRoot, { recursive: true, force: true }) : undefined,
+      rm(bundleRoot, { recursive: true, force: true }),
+    ]);
+    const failures = cleanup.filter((result) => result.status === "rejected").map((result) => result.reason);
+    if (failures.length > 0) throw new AggregateError(primaryError ? [primaryError, ...failures] : failures, "Gallery domformat cleanup did not complete.");
   }
 }
 

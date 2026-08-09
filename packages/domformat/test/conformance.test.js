@@ -42,6 +42,23 @@ function canonicalBinary64Sample(count) {
   return values;
 }
 
+function canonicalDecimalBandSample(count) {
+  const values = [];
+  let state = 0xbb67ae8584caa73bn;
+  const fractionMask = (1n << 53n) - 1n;
+  while (values.length < count) {
+    state ^= state << 13n;
+    state ^= state >> 7n;
+    state ^= state << 17n;
+    state = BigInt.asUintN(64, state);
+    const exponent = Number(state % 27n) - 6;
+    const fraction = Number((state >> 11n) & fractionMask) / 2 ** 53;
+    const sign = (state & 1n) === 0n ? 1 : -1;
+    values.push(sign * (1 + fraction * 9) * 10 ** exponent);
+  }
+  return values;
+}
+
 function decodeCanonicalJsonForTest(bytes, label) {
   let value;
   try {
@@ -67,6 +84,7 @@ function mutate(source, operation) {
   if (operation === "none") return source.slice();
   if (operation === "gzip-transport") return Uint8Array.of(0x1f, 0x8b, 0x08, 0x00);
   if (operation === "malformed-utf8") return new Uint8Array([0xff]);
+  if (operation === "byte-order-mark") return Uint8Array.from([0xef, 0xbb, 0xbf, ...source]);
   if (operation === "malformed-json") return new TextEncoder().encode("{\"meta\":");
   const text = new TextDecoder().decode(source);
   if (operation === "duplicate-key") return new TextEncoder().encode("{\"meta\":null," + text.slice(1));
@@ -88,6 +106,11 @@ function mutate(source, operation) {
   else if (operation === "reserved-resource-path") envelope.resources.resources[0].path = "assets/CON.png";
   else if (operation === "trailing-dot-resource-path") envelope.resources.resources[0].path = "assets/checker.";
   else if (operation === "missing-aria-hidden") delete envelope.tree.nodes.find((node) => !envelope.tree.nodes.some((candidate) => candidate.parent === node.index)).attributes["aria-hidden"];
+  else if (operation === "noncanonical-base64") {
+    const surface = envelope.state.channels.find((channel) => channel.codec === "polycss-surface-packed@0");
+    assert.equal(surface.data.packet.visibility.initialVisibleBitsBase64, "Aw==");
+    surface.data.packet.visibility.initialVisibleBitsBase64 = "Ax==";
+  }
   else if (operation === "missing-resource" || operation === "resource-digest") return source.slice();
   else throw new Error("Unknown corpus mutation " + operation);
   return encodeCanonicalJson(envelope);
@@ -200,8 +223,11 @@ test("JavaScript and Python enforce the shared fail-closed CSS security vectors"
   assert.match(python.stdout, /ok indirect-image-set: UNSAFE_CSS_FUNCTION/u);
 });
 
-test("independent Python canonicalizer accepts a deterministic binary64 sample from JavaScript", () => {
-  const sample = encodeCanonicalJson(canonicalBinary64Sample(4096));
+test("independent Python canonicalizer accepts broad and decimal-band binary64 samples from JavaScript", () => {
+  const sample = encodeCanonicalJson([
+    ...canonicalBinary64Sample(4096),
+    ...canonicalDecimalBandSample(4096),
+  ]);
   const python = spawnSync("python3", ["-B", "conformance/check_canonical.py", "--stdin"], {
     cwd: root,
     input: sample,
@@ -210,7 +236,7 @@ test("independent Python canonicalizer accepts a deterministic binary64 sample f
   });
   assert.equal(python.status, 0, `${python.stdout}\n${python.stderr}`);
   const evidence = JSON.parse(python.stdout);
-  assert.equal(evidence.count, 4096);
+  assert.equal(evidence.count, 8192);
   assert.equal(evidence.sha256, sha256Hex(sample));
 });
 

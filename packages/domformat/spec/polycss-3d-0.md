@@ -58,12 +58,14 @@ other package paint remain inside the sized application container while
 preserving the declared stable subtree beneath the surface.
 
 Supported mount attributes are `alt`, `aria-hidden`, `class`, `decoding`,
-`draggable`, `height`, `id`, `role`, `width`, and data attributes. Node-local
+`draggable`, `height`, `role`, `width`, and data attributes. Node-local
 attributes use the same vocabulary except that `class` is forbidden because
 node classes have the single canonical `classes` field. Values are at most
 1024 code units. Event attributes, `srcdoc`, and a literal `style` attribute are
 forbidden. `data-domformat-instance` and `data-domformat-mount-surface` are
 reserved to the viewer and are forbidden on the mount and every package node.
+TREE stable ids are binding keys only and are not copied into the global DOM
+`id` namespace.
 
 Supported mount style properties are `backgroundColor`,
 `backgroundPosition`, `backgroundRepeat`, `backgroundSize`, and optionally
@@ -184,7 +186,7 @@ vocabulary; every other property is invalid:
 background background-clip background-color background-image
 background-position-x background-position-y background-repeat background-size
 border border-bottom-left-radius border-bottom-right-radius border-color border-shape
-border-top-left-radius border-top-right-radius box-sizing color contain content
+border-top-left-radius border-top-right-radius box-sizing color contain
 corner-bottom-left-shape corner-bottom-right-shape corner-top-left-shape
 corner-top-right-shape cursor
 display font font-style font-weight height image-rendering inset isolation left
@@ -199,7 +201,7 @@ unknown functions such as `image-set`, `var`, `env`, `attr`, `paint`, and
 
 ```text
 abs acos asin atan atan2 blur brightness calc circle clamp color color-mix
-conic-gradient contrast cos counter counters cubic-bezier drop-shadow ellipse
+conic-gradient contrast cos cubic-bezier drop-shadow ellipse
 exp fit-content grayscale hsl hsla hwb hypot hue-rotate inset invert is lab lch
 light-dark linear-gradient log matrix matrix3d max min minmax mod not nth-child
 nth-last-child nth-last-of-type nth-of-type oklab oklch opacity path perspective
@@ -213,6 +215,8 @@ translatey translatez url where
 `url()` is special: its complete quoted or unquoted argument MUST be exactly a
 declared logical token, and every declared token MUST appear at least once.
 Strings in any other allowed function do not grant network access.
+Function identifiers MUST immediately precede `(`; whitespace-separated
+function-like sequences are invalid rather than skipped by the scanner.
 
 After validation and resource verification, a viewer allocates a unique safe
 `data-domformat-instance` value on the viewer-owned mount surface. In one span-based pass it replaces
@@ -284,9 +288,6 @@ rules prevent two unrelated interpreters from racing the same sink.
 The complete sink vocabulary is:
 
 ```text
-host.style.backgroundColor host.style.backgroundImage
-host.style.backgroundPosition host.style.backgroundRepeat
-host.style.backgroundSize
 style.backgroundPosition style.backgroundPositionY style.height style.left
 style.opacity style.top style.transform style.visibility style.width
 ```
@@ -380,6 +381,9 @@ precondition and postcondition of each phase are:
 Phase completion is observable only after its postcondition holds. If any
 operation or phase observer fails, the viewer MUST transactionally clean up all
 work completed so far and enter `destroy`; it MUST NOT return a partial runtime.
+In particular, the publish observer runs only after initial sink publication,
+host attachment, input/observer enablement, and optional scheduler installation
+have all succeeded.
 The reference mount runtime exposes a read-only current phase and completed
 phase history for verification. It also exposes the current prepared source
 frame and a bounded `seek(frame)` operation after publication. Its public
@@ -388,18 +392,22 @@ profile interpreter instances.
 
 When playback is present, the reference scheduler derives its interval from
 the closed playback binding `tickRateHz`; version 0 fixes that value to 30. It
-accounts for every due fixed-rate tick and carries the deadline forward by that
-interval. One due animation tick publishes synchronously. When one browser
-animation frame spans multiple due animation ticks, the viewer evaluates each
+normally carries the deadline forward by that interval. One due animation tick
+publishes synchronously. A callback with at most eight due ticks evaluates each
 tick and distinct prepared-effects source-frame transition in order but MAY
-publish only the final retained state for that callback. Interaction mode MUST
-step and publish every due tick separately.
+publish only the final retained state; interaction publishes each such tick
+separately. More than eight due ticks is treated as a suspended clock: stale
+ticks are discarded, one tick is advanced, and the deadline resets from the
+current callback timestamp.
 
 Keyboard input listeners are attached to the mount, not the global window, and
 therefore act only while events target or bubble through that mount. A viewer
 MAY add a temporary focus target such as `tabindex="0"`, but MUST restore its
 prior value. Window-level blur handling MAY clear owned input state; it MUST NOT
 capture keyboard commands outside the mount.
+Pointer cancellation and lost capture clear the held button and pending pointer
+sample without mapping cancellation-event coordinates. Only a matching primary
+`pointerup` contributes its final coordinates.
 
 A mount controller owns every inserted stylesheet, object URL, event listener,
 animation-frame request, and resize observer. Aborted URL loads MUST cancel

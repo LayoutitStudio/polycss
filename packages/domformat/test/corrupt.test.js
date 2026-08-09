@@ -40,6 +40,9 @@ test("reader rejects gzip and enforces JSON byte limits", async () => {
 test("JSON preflight rejects malformed UTF-8, duplicate normalized keys, negative zero, and trailing data", async () => {
   const built = await validBuild();
   assert.throws(() => readDom(new Uint8Array([0xff])), errorCode("MALFORMED_UTF8"));
+  const bom = Uint8Array.from([0xef, 0xbb, 0xbf, ...built.bytes]);
+  assert.throws(() => readDom(bom), errorCode("MALFORMED_UTF8"));
+  await assert.rejects(readDomBrowser(bom), errorCode("MALFORMED_UTF8"));
   const text = new TextDecoder().decode(built.bytes);
   assert.throws(() => readDom(new TextEncoder().encode(`{"meta":null,${text.slice(1)}`)), errorCode("DUPLICATE_NORMALIZED_KEY"));
   assert.throws(() => readDom(new TextEncoder().encode(text.replace('"version":0', '"version":-0'))), errorCode("INVALID_NUMBER"));

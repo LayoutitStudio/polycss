@@ -1,12 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createPolycssPlayback as createReferencePlayback } from "../src/state/polycss.js";
-import { createPolycssPlayback as createIndependentPlayback } from "../conformance/viewer/playback.js";
-
-const IMPLEMENTATIONS = [
-  ["reference", createReferencePlayback],
-  ["independent", createIndependentPlayback],
-];
+import { createPolycssPlayback } from "../src/state/polycss.js";
 
 function base64Integers(values, width) {
   const bytes = new Uint8Array(values.length * width);
@@ -28,7 +22,7 @@ function target(id, writes) {
   return element;
 }
 
-function createFixture(createPlayback, options = {}) {
+function createFixture(options = {}) {
   const writes = [];
   const model = target("model", writes);
   const leaves = [target("leaf:0", writes), target("leaf:1", writes)];
@@ -115,15 +109,14 @@ function createFixture(createPlayback, options = {}) {
     ],
   };
   const mounted = { byId: new Map([[model.id, model], ...leaves.map((leaf) => [leaf.id, leaf])]) };
-  const playback = createPlayback(materialized, bindings, mounted);
+  const playback = createPolycssPlayback(materialized, bindings, mounted, { publishAppearance() {} });
   playback.publishInitial();
   writes.splice(0);
   return { leaves, playback, writes };
 }
 
-for (const [implementation, createPlayback] of IMPLEMENTATIONS) {
-  test(`${implementation} playback defers hidden transforms and flushes the latest value before reveal`, () => {
-    const { leaves, playback, writes } = createFixture(createPlayback);
+test("playback defers hidden transforms and flushes the latest value before reveal", () => {
+    const { leaves, playback, writes } = createFixture();
     const identities = [...leaves];
 
     assert.equal(playback.advance(), 2);
@@ -144,8 +137,8 @@ for (const [implementation, createPlayback] of IMPLEMENTATIONS) {
     assert.deepEqual(leaves, identities);
   });
 
-  test(`${implementation} public same-frame seek synchronizes dirty hidden transforms once in target order`, () => {
-    const { leaves, playback, writes } = createFixture(createPlayback, { initiallyHidden: "both" });
+  test("public same-frame seek synchronizes dirty hidden transforms once in target order", () => {
+    const { leaves, playback, writes } = createFixture({ initiallyHidden: "both" });
 
     assert.equal(playback.advance(), 2);
     assert.equal(leaves[0].style.transform, "leaf-0-frame-1");
@@ -163,8 +156,8 @@ for (const [implementation, createPlayback] of IMPLEMENTATIONS) {
     assert.deepEqual(writes, []);
   });
 
-  test(`${implementation} automatic nonsequential advance keeps hidden transforms deferred`, () => {
-    const { leaves, playback, writes } = createFixture(createPlayback, { timeline: [1, 3, 4, 1] });
+  test("automatic nonsequential advance keeps hidden transforms deferred", () => {
+    const { leaves, playback, writes } = createFixture({ timeline: [1, 3, 4, 1] });
 
     assert.equal(playback.advance(), 3);
     assert.equal(leaves[0].style.transform, "leaf-0-frame-1");
@@ -175,8 +168,8 @@ for (const [implementation, createPlayback] of IMPLEMENTATIONS) {
     assert.deepEqual(writes, [["leaf:0", "transform", "leaf-0-frame-3"]]);
   });
 
-  test(`${implementation} public seek synchronizes old and newly dirty transforms in target order`, () => {
-    const { playback, writes } = createFixture(createPlayback, {
+  test("public seek synchronizes old and newly dirty transforms in target order", () => {
+    const { playback, writes } = createFixture({
       initiallyHidden: "both",
       visibilityOffsets: [0, 0, 0, 0, 0],
       frameRows: [
@@ -197,8 +190,8 @@ for (const [implementation, createPlayback] of IMPLEMENTATIONS) {
     ]);
   });
 
-  test(`${implementation} forced reveal flushes prepared state and restore clears hidden dirt`, () => {
-    const forced = createFixture(createPlayback);
+  test("forced reveal flushes prepared state and restore clears hidden dirt", () => {
+    const forced = createFixture();
     assert.equal(forced.playback.advance(), 2);
     forced.writes.splice(0);
     forced.playback.forceVisible([0]);
@@ -207,7 +200,7 @@ for (const [implementation, createPlayback] of IMPLEMENTATIONS) {
       ["leaf:0", "visibility", "visible"],
     ]);
 
-    const restored = createFixture(createPlayback);
+    const restored = createFixture();
     assert.equal(restored.playback.advance(), 2);
     restored.writes.splice(0);
     restored.playback.restoreInteraction([], [0]);
@@ -217,9 +210,9 @@ for (const [implementation, createPlayback] of IMPLEMENTATIONS) {
     assert.deepEqual(restored.writes, [["leaf:0", "visibility", "visible"]]);
   });
 
-  test(`${implementation} playback catch-up advances every tick and publishes only the final paint state`, () => {
-    const sequential = createFixture(createPlayback);
-    const batched = createFixture(createPlayback);
+  test("playback catch-up advances every tick and publishes only the final paint state", () => {
+    const sequential = createFixture();
+    const batched = createFixture();
     const identities = [...batched.leaves];
 
     for (let index = 0; index < 4; index += 1) sequential.playback.advance();
@@ -244,4 +237,3 @@ for (const [implementation, createPlayback] of IMPLEMENTATIONS) {
       sequential.leaves.map((leaf) => ({ ...leaf.style })),
     );
   });
-}

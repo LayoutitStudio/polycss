@@ -5,10 +5,10 @@
       "assets/independent-checker.png",
       "independent.css"
     ],
-    "byteLength": 14048,
-    "sha256": "46536f4c391bb55d8a54d748bfb121126a283cc9cb4cb5e9599aff2a139f505c",
+    "byteLength": 13851,
+    "sha256": "b55dfcb7e39a3e88b450515f02c890f782013015750fed0679cb6439251b9f90",
     "constructionPlanSha256": "f7097139292db43c0af3342e621ae1b21ae4b40385052248dbfcfbe5f98bd261",
-    "bindingPlanSha256": "f07f8f134918ff6d1d7bceb7c907453990a92dda6ef130a0ee543267c6ae930a"
+    "bindingPlanSha256": "1fe84bc707999db28c7fa59184247ddf3bf84a6604b672ec36d2fa4f337fca7b"
   },
   "cases": [
     {
@@ -27,6 +27,11 @@
       "expect": "MALFORMED_UTF8"
     },
     {
+      "id": "byte-order-mark",
+      "mutation": "byte-order-mark",
+      "expect": "MALFORMED_UTF8"
+    },
+    {
       "id": "malformed-json",
       "mutation": "malformed-json",
       "expect": "MALFORMED_JSON"
@@ -40,6 +45,11 @@
       "id": "negative-zero",
       "mutation": "negative-zero",
       "expect": "INVALID_NUMBER"
+    },
+    {
+      "id": "noncanonical-base64",
+      "mutation": "noncanonical-base64",
+      "expect": "INVALID_SURFACE_STATE"
     },
     {
       "id": "unknown-top-level",

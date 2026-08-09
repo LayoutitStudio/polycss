@@ -55,6 +55,9 @@ test("rejects duplicate ids, invalid parents, forbidden elements, and event attr
   const handler = copy(input);
   handler.tree.nodes[2].attributes.onclick = "alert(1)";
   assert.throws(() => buildDom(handler), errorCode("UNSAFE_ATTRIBUTE"));
+  const globalId = copy(input);
+  globalId.tree.nodes[2].attributes.id = "host-visible-id";
+  assert.throws(() => buildDom(globalId), errorCode("UNSAFE_ATTRIBUTE"));
   const fixedMount = copy(input);
   fixedMount.tree.mount.styles.position = "fixed";
   assert.throws(() => buildDom(fixedMount), errorCode("INVALID_MOUNT"));
@@ -183,6 +186,10 @@ test("CSS closure rejects indirect networking, escapes, sibling scope exits, and
     errorCode("UNSAFE_CSS_ESCAPE"),
   );
   assert.throws(
+    () => buildDom(cssResource('[data-domformat-root="synthetic"]{background-image:url ("https://example.test/a")}')),
+    errorCode("UNSAFE_CSS"),
+  );
+  assert.throws(
     () => buildDom(cssResource('[data-domformat-root="synthetic"] ~ *{color:red}')),
     errorCode("CSS_SCOPE_ESCAPE"),
   );
@@ -198,6 +205,9 @@ test("CSS closure rejects indirect networking, escapes, sibling scope exits, and
   const nodeSurface = copy(input);
   nodeSurface.tree.nodes[0].attributes["data-domformat-mount-surface"] = "package-controlled";
   assert.throws(() => buildDom(nodeSurface), errorCode("UNSAFE_ATTRIBUTE"));
+  const spacedInlineFunction = copy(input);
+  spacedInlineFunction.tree.nodes[0].styles.transform = "matrix3d (1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1)";
+  assert.throws(() => buildDom(spacedInlineFunction), errorCode("UNSAFE_STYLE_VALUE"));
 });
 
 test("CSS materialization rewrites exact token and scope spans in one pass", () => {

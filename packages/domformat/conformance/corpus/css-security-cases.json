@@ -27,6 +27,24 @@
       "expect": "UNSAFE_CSS_ESCAPE"
     },
     {
+      "id": "spaced-function-name",
+      "css": "[data-domformat-root=\"synthetic\"]{background:url (\"https://example.test/a\")}\n",
+      "tokens": [],
+      "expect": "UNSAFE_CSS"
+    },
+    {
+      "id": "generated-content",
+      "css": "[data-domformat-root=\"synthetic\"]::before{content:\"injected\"}\n",
+      "tokens": [],
+      "expect": "UNSAFE_CSS_PROPERTY"
+    },
+    {
+      "id": "generated-counter",
+      "css": "[data-domformat-root=\"synthetic\"]::before{background:counter(item)}\n",
+      "tokens": [],
+      "expect": "UNSAFE_CSS_FUNCTION"
+    },
+    {
       "id": "scope-sibling-exit",
       "css": "[data-domformat-root=\"synthetic\"] ~ *{color:red}\n",
       "tokens": [],

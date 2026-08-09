@@ -57,6 +57,8 @@ def mutate(source: bytes, operation: str) -> bytes:
         return b"\x1f\x8b\x08\x00"
     if operation == "malformed-utf8":
         return b"\xff"
+    if operation == "byte-order-mark":
+        return b"\xef\xbb\xbf" + source
     if operation == "malformed-json":
         return b'{"meta":'
 
@@ -104,6 +106,11 @@ def mutate(source: bytes, operation: str) -> bytes:
         parents = {node["parent"] for node in document["tree"]["nodes"] if node["parent"] >= 0}
         terminal = next(node for node in document["tree"]["nodes"] if node["index"] not in parents)
         del terminal["attributes"]["aria-hidden"]
+    elif operation == "noncanonical-base64":
+        surface = next(channel for channel in document["state"]["channels"]
+                       if channel["codec"] == "polycss-surface-packed@0")
+        assert surface["data"]["packet"]["visibility"]["initialVisibleBitsBase64"] == "Aw=="
+        surface["data"]["packet"]["visibility"]["initialVisibleBitsBase64"] = "Ax=="
     else:
         raise ValueError(f"Unknown mutation {operation}")
     return canonical_encode(document)

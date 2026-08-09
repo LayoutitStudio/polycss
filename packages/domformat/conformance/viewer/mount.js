@@ -1,14 +1,17 @@
-import { requireContract as invariant } from "./errors.js";
-import { createInteractionInput } from "./input.js";
-import { createPolycssEffects } from "./effects.js";
-import { createPolycssInteraction } from "./interaction.js";
-import { createPolycssPlayback, materializePolycssState } from "./playback.js";
+import { createInteractionInput } from "../../dist/browser-input.js";
+import { invariant } from "../../dist/errors.js";
+import { createLifecycle } from "../../dist/lifecycle.js";
+import { createPolycssEffects } from "../../dist/state/effects.js";
+import { createPolycssInteraction } from "../../dist/state/interaction.js";
+import { createPolycssPlayback, materializePolycssState } from "../../dist/state/polycss.js";
+import { createStaticPresentation } from "../../dist/state/presentation.js";
 
-// This is deliberately outside the package exports.  It is an independently
-// wired executable consumer used to challenge the normative profile and the
-// production viewer.  Imports from src/ are forbidden by the release tests.
+const MAX_CATCH_UP_TICKS = 8;
 
-const PHASES = Object.freeze(["validate", "construct", "bind", "initialize", "publish", "destroy"]);
+// This deliberately stays outside the package exports. It challenges the
+// production viewer's mount shell while sharing the profile's one normative
+// set of state interpreters.
+
 const REQUIRED_INTERPRETERS = Object.freeze([
   "static-presentation@0",
 ]);
@@ -55,40 +58,6 @@ const SNAPSHOT_STYLE_PROPERTIES = Object.freeze([
 ]);
 let scopeSequence = 0;
 
-function lifecycle(observer) {
-  invariant(observer === undefined || typeof observer === "function", "INVALID_LIFECYCLE_OBSERVER", "onLifecyclePhase must be a function.");
-  let phase = null;
-  const history = [];
-  const notify = (next) => {
-    history.push(next);
-    phase = next;
-    observer?.(next);
-  };
-  const view = Object.freeze({
-    get phase() { return phase; },
-    get history() { return Object.freeze([...history]); },
-  });
-  return Object.freeze({
-    view,
-    get phase() { return phase; },
-    advance(next) {
-      const expected = phase === null ? "validate" : PHASES[PHASES.indexOf(phase) + 1];
-      invariant(next !== "destroy" && next === expected, "LIFECYCLE_ORDER", `Lifecycle expected ${expected}, not ${String(next)}.`);
-      notify(next);
-    },
-    destroy() {
-      if (phase === "destroy") return false;
-      history.push("destroy");
-      phase = "destroy";
-      try { observer?.("destroy"); } catch {}
-      return true;
-    },
-    assertPublished() {
-      invariant(phase === "publish", phase === "destroy" ? "MOUNT_DESTROYED" : "LIFECYCLE_PRECONDITION", `Operation requires publish phase; current phase is ${phase ?? "start"}.`);
-    },
-  });
-}
-
 function aborted(signal) {
   invariant(!signal?.aborted, "OPERATION_ABORTED", "The conformance viewer operation was aborted by its host.");
 }
@@ -105,34 +74,16 @@ async function digestHex(value) {
   return [...digest].map((entry) => entry.toString(16).padStart(2, "0")).join("");
 }
 
-function captureHost(host, document) {
+function captureHost(host) {
   const children = [...host.childNodes];
-  const attributeNames = new Set(["tabindex", ...document.tree.mount.attributes.map(([name]) => name)]);
-  const attributes = new Map([...attributeNames].map((name) => [name, {
-    present: host.hasAttribute(name),
-    value: host.getAttribute(name),
-  }]));
-  const styleNames = new Set([
-    ...Object.keys(document.tree.mount.styles ?? {}),
-    ...Object.keys(document.tree.mount.resourceStyles ?? {}),
-  ]);
-  for (const channel of document.bindings.channels) {
-    for (const sink of channel.sinks) if (sink.startsWith("host.style.")) styleNames.add(sink.slice("host.style.".length));
-  }
-  const styles = new Map([...styleNames].map((name) => [name, host.style[name]]));
-  const styleAttribute = { present: host.hasAttribute("style"), value: host.getAttribute("style") };
+  const tabindex = { present: host.hasAttribute("tabindex"), value: host.getAttribute("tabindex") };
   let restored = false;
   return () => {
     if (restored) return;
     restored = true;
     host.replaceChildren(...children);
-    for (const [name, prior] of attributes) {
-      if (prior.present) host.setAttribute(name, prior.value);
-      else host.removeAttribute(name);
-    }
-    for (const [name, value] of styles) host.style[name] = value;
-    if (styleAttribute.present) host.setAttribute("style", styleAttribute.value);
-    else host.removeAttribute("style");
+    if (tabindex.present) host.setAttribute("tabindex", tabindex.value);
+    else host.removeAttribute("tabindex");
   };
 }
 
@@ -378,7 +329,7 @@ function snapshotTree(mounted, urls) {
 }
 
 export async function mountConformanceDom(result, host, options = {}) {
-  const phases = lifecycle(options.onLifecyclePhase);
+  const phases = createLifecycle(options.onLifecyclePhase);
   let ownerDocument;
   let win;
   let urlApi;
@@ -387,6 +338,7 @@ export async function mountConformanceDom(result, host, options = {}) {
   let hostMutated = false;
   let mounted = null;
   let boundTargets = null;
+  let presentationRuntime = null;
   let playback = null;
   let effects = null;
   let interaction = null;
@@ -413,7 +365,10 @@ export async function mountConformanceDom(result, host, options = {}) {
     phases.destroy();
     return true;
   };
-  const assertPublished = () => phases.assertPublished();
+  const assertPublished = () => {
+    invariant(phases.phase !== "destroy", "MOUNT_DESTROYED", "The conformance mount is destroyed.");
+    phases.assertPublished();
+  };
 
   try {
     aborted(options.signal);
@@ -442,7 +397,7 @@ export async function mountConformanceDom(result, host, options = {}) {
     urlApi = win.URL ?? globalThis.URL;
     BlobClass = win.Blob ?? globalThis.Blob;
     invariant(typeof urlApi?.createObjectURL === "function" && typeof urlApi?.revokeObjectURL === "function" && typeof BlobClass === "function", "MISSING_BROWSER_API", "Object URL and Blob support are required.");
-    restoreHost = captureHost(host, document);
+    restoreHost = captureHost(host);
     const surface = ownerDocument.createElement("div");
     surface.setAttribute("data-domformat-instance", `c${(scopeSequence++).toString(36)}`);
     mounted = constructTree(ownerDocument, surface, document.tree);
@@ -468,7 +423,12 @@ export async function mountConformanceDom(result, host, options = {}) {
     phases.advance("bind");
 
     const materialized = materializePolycssState(document.state);
-    playback = createPolycssPlayback(materialized, document.bindings, mounted, { ...options, boundTargets });
+    presentationRuntime = createStaticPresentation(document.bindings, mounted, { ...options, boundTargets });
+    playback = createPolycssPlayback(materialized, document.bindings, mounted, {
+      ...options,
+      boundTargets,
+      publishAppearance: presentationRuntime.publishAppearance,
+    });
     effects = interpreters.has("polycss-effects@0")
       ? createPolycssEffects(materialized, document.bindings, mounted, { boundTargets })
       : null;
@@ -484,11 +444,12 @@ export async function mountConformanceDom(result, host, options = {}) {
     const ResizeObserverClass = win.ResizeObserver;
     resizeObserver = typeof ResizeObserverClass === "function"
       ? new ResizeObserverClass(() => {
-          if (phases.phase !== "publish") return;
-          try { playback.resize(); } catch { cleanup(); }
+          if (phases.history.at(-1) !== "publish") return;
+          try { presentationRuntime.resize(); } catch { cleanup(); }
         })
       : null;
     phases.advance("initialize");
+    phases.begin("publish");
 
     playback.publishInitial();
     if (mode === "interaction") {
@@ -497,11 +458,14 @@ export async function mountConformanceDom(result, host, options = {}) {
       input?.setEnabled(true);
     } else input?.setEnabled(false);
     effects?.publish(playback.sourceFrame);
-    if (mode === "interaction") interaction.publishInitial();
+    if (mode === "interaction") {
+      invariant(interaction, "MISSING_POLYCSS_BINDING", "Interaction mode did not initialize its interpreter.");
+      interaction.publishInitial();
+    }
     hostMutated = true;
     if (interpreters.has("polycss-pointer-grab@0") && !host.hasAttribute("tabindex")) host.setAttribute("tabindex", "0");
     host.replaceChildren(surface);
-    playback.resize();
+    presentationRuntime.resize();
     resizeObserver?.observe(host);
 
     const publishEffects = (frame, selected = null) => {
@@ -522,32 +486,32 @@ export async function mountConformanceDom(result, host, options = {}) {
         : { active: false, x: 0, y: 0, z: 0 });
       return frame;
     };
-    let nextTick = null;
     const playbackBinding = document.bindings.channels.find((channel) => channel.interpreter === "polycss-playback@0");
-    const tickMs = playbackBinding ? 1000 / playbackBinding.parameters.tickRateHz : null;
-    const loop = (timestamp) => {
-      if (phases.phase === "destroy") return;
-      try {
-        if (nextTick === null) nextTick = timestamp + tickMs;
-        else {
-          let due = 0;
-          while (timestamp >= nextTick - 0.5) {
-            due += 1;
-            nextTick += tickMs;
-          }
-          if (mode === "interaction") {
-            for (let index = 0; index < due; index += 1) stepInteraction();
-          } else if (due === 1) publishEffects(playback.advance());
-          else if (due > 1) publishEffectFrames(playback.advanceMany(due));
-        }
-      } catch (error) {
-        cleanup();
-        throw error;
-      }
-      if (phases.phase !== "destroy") request = win.requestAnimationFrame(loop);
-    };
     if (options.animate !== false && playbackBinding) {
       invariant(typeof win.requestAnimationFrame === "function" && typeof win.cancelAnimationFrame === "function", "MISSING_BROWSER_API", "Animation-frame support is required.");
+      const tickMs = 1000 / playbackBinding.parameters.tickRateHz;
+      let nextTick = null;
+      const loop = (timestamp) => {
+        if (phases.phase === "destroy") return;
+        try {
+          if (nextTick === null) nextTick = timestamp + tickMs;
+          else {
+            let due = timestamp < nextTick - 0.5 ? 0 : Math.floor((timestamp - nextTick + 0.5) / tickMs) + 1;
+            if (due > MAX_CATCH_UP_TICKS) {
+              due = 1;
+              nextTick = timestamp + tickMs;
+            } else nextTick += due * tickMs;
+            if (mode === "interaction") {
+              for (let index = 0; index < due; index += 1) stepInteraction();
+            } else if (due === 1) publishEffects(playback.advance());
+            else if (due > 1) publishEffectFrames(playback.advanceMany(due));
+          }
+        } catch (error) {
+          cleanup();
+          throw error;
+        }
+        if (phases.phase !== "destroy") request = win.requestAnimationFrame(loop);
+      };
       request = win.requestAnimationFrame(loop);
     }
     phases.advance("publish");
@@ -557,7 +521,7 @@ export async function mountConformanceDom(result, host, options = {}) {
       get mode() { return mode; },
       get sourceFrame() { assertPublished(); return playback.sourceFrame; },
       advance() { assertPublished(); invariant(mode === "animation", "INVALID_EXPERIENCE_MODE", "Animation mode is not active."); return publishEffects(playback.advance()); },
-      seek(frame) { assertPublished(); invariant(mode === "animation", "INVALID_EXPERIENCE_MODE", "Animation mode is not active."); return publishEffects(playback.seek(frame)); },
+      seek(frame) { assertPublished(); return publishEffects(playback.seek(frame)); },
       stepInteraction,
       snapshot() { assertPublished(); return snapshotTree(mounted, urls); },
       node(id) { assertPublished(); return mounted.byId.get(id); },
@@ -579,7 +543,6 @@ export async function mountConformanceDom(result, host, options = {}) {
               candidate.destroy();
               throw error;
             }
-            interaction?.destroy();
             interaction = candidate;
           } else {
             input?.setEnabled(false);

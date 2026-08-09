@@ -14,8 +14,9 @@ The normative documents are:
   limits;
 - [`codecs/`](./codecs/): executable prepared-state codec/interpreter contracts.
 
-The conformance corpus, independent Python producer and reader, and isolated
-executable profile viewer are described in `conformance/README.md`.
+The conformance corpus, independent Python producer and reader,
+production-free N-version JavaScript reader, and alternate executable mount
+shell are described in `conformance/README.md`.
 
 `TREE`, `CSSB`, `STAT`, `BIND`, and logical `RCRD` identities express the
 retained-DOM execution contract. The only physical form is a `.json` document

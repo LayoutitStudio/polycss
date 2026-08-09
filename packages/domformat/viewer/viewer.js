@@ -11,7 +11,7 @@ try {
   if (!modelUrl) throw new Error("Missing required ?model=/path/to/model.json URL.");
   if (implementation !== "reference" && implementation !== "conformance") throw new Error(`Unsupported viewer implementation ${implementation}.`);
   if (comparison && comparison !== "conformance") throw new Error(`Unsupported viewer comparison ${comparison}.`);
-  const production = await import("../src/browser.js");
+  const production = await import("../dist/browser.js");
   const conformanceMount = implementation === "conformance" || comparison
     ? (await import("../conformance/viewer/mount.js")).mountConformanceDom
     : null;
@@ -47,7 +47,14 @@ try {
   }
   const playback = result.document.bindings.channels.find((channel) => channel.interpreter === "polycss-playback@0");
   if (!playback) throw new Error("The package has no executable polycss-playback@0 binding.");
+  if (parameters.has("frame")) {
+    const frame = Number(parameters.get("frame"));
+    if (!Number.isSafeInteger(frame)) throw new Error("The requested proof frame is invalid.");
+    runtime.seek(frame);
+    comparisonRuntime?.seek(frame);
+  }
   const leaves = playback.targets.leaves.length;
+  document.documentElement.dataset.domformatSourceFrame = String(runtime.sourceFrame);
   document.documentElement.dataset.domformatReady = "";
   globalThis.domformatProof = Object.freeze({
     format: result.document.meta.format,
@@ -60,6 +67,13 @@ try {
       : implementation,
     get lifecycle() { return runtime.lifecycle; },
     get mode() { return runtime.mode; },
+    get sourceFrame() { return runtime.sourceFrame; },
+    seek(frame) {
+      const value = runtime.seek(frame);
+      comparisonRuntime?.seek(frame);
+      document.documentElement.dataset.domformatSourceFrame = String(value);
+      return value;
+    },
     setMode(mode) { return runtime.setMode(mode); },
     destroy() {
       runtime.destroy();

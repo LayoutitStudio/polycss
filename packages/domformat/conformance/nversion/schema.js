@@ -10,7 +10,7 @@ const GENERATOR_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u;
 const GENERATOR_VERSION = /^[0-9A-Za-z][0-9A-Za-z.+-]{0,63}$/u;
 const SHA256 = /^[0-9a-f]{64}$/u;
 const ELEMENTS = new Set(["b", "div", "i", "img", "s", "span", "u"]);
-const ATTRIBUTES = new Set(["alt", "aria-hidden", "class", "decoding", "draggable", "height", "id", "role", "width"]);
+const ATTRIBUTES = new Set(["alt", "aria-hidden", "class", "decoding", "draggable", "height", "role", "width"]);
 const NODE_STYLES = new Set(`backgroundColor backgroundPosition backgroundPositionY backgroundRepeat backgroundSize borderBottomLeftRadius borderBottomRightRadius borderShape borderTopLeftRadius borderTopRightRadius color cornerBottomLeftShape cornerBottomRightShape cornerTopLeftShape cornerTopRightShape height left objectFit objectPosition opacity perspective perspectiveOrigin position top transform transformOrigin transformStyle visibility width`.split(" "));
 const MOUNT_STYLES = new Set(["backgroundColor", "backgroundPosition", "backgroundRepeat", "backgroundSize", "position"]);
 const INLINE_FUNCTIONS = new Set(`abs acos asin atan atan2 calc clamp color color-mix cos exp hsl hsla hwb hypot lab lch linear-gradient log matrix matrix3d max min mod oklab oklch polygon pow radial-gradient rem rgb rgba rotate rotate3d rotatex rotatey rotatez round scale scale3d scalex scaley scalez sign sin skew skewx skewy sqrt tan translate translate3d translatex translatey translatez`.split(" "));
@@ -246,7 +246,12 @@ function safeStyle(value, label) {
     if (!/[A-Za-z_-]/u.test(character)) continue;
     let end = index + 1;
     while (/[A-Za-z0-9_-]/u.test(value[end] ?? "")) end += 1;
-    if (value[end] === "(") require(INLINE_FUNCTIONS.has(value.slice(index, end).toLowerCase()), "UNSAFE_STYLE_VALUE", `${label} uses an unsupported function.`);
+    let open = end;
+    while (/[\t\n\f\r ]/u.test(value[open] ?? "")) open += 1;
+    if (value[open] === "(") {
+      require(open === end, "UNSAFE_STYLE_VALUE", `${label} separates a function name from its opening parenthesis.`);
+      require(INLINE_FUNCTIONS.has(value.slice(index, end).toLowerCase()), "UNSAFE_STYLE_VALUE", `${label} uses an unsupported function.`);
+    }
     index = end - 1;
   }
   require(!quote && depth === 0, "UNSAFE_STYLE_VALUE", `${label} has unterminated CSS syntax.`);
@@ -784,7 +789,6 @@ function validatePresentation(state, binding, records, inputs) {
     for (const name of ["position", "repeat", "size"]) safeStyle(packet.background[name], `Presentation background ${name}`);
   }
   exactArray(binding.sinks, [
-    ...(hasBackground ? ["host.style.backgroundColor", "host.style.backgroundImage", "host.style.backgroundPosition", "host.style.backgroundRepeat", "host.style.backgroundSize"] : []),
     "style.height", "style.left", "style.top", "style.transform",
     ...(hasCursorLayer ? ["style.visibility"] : []),
     "style.width",
@@ -920,19 +924,18 @@ function validateInteraction(state, binding, playback, presentation, inputs, lim
     && binding.targets.cursorStates.open === presentation.binding.targets.cursorStates.open
     && binding.targets.cursorStates.closed === presentation.binding.targets.cursorStates.closed, "PRESENTATION_TREE_MISMATCH", "Interaction and presentation closure differs.");
 
-  const animatorKeys = ["initialState", "initialFrame", "introState", "dozeState", "sleepState", "wakeState", "convergeState", "exitEyeState", "eyeState", "dozeLoopCount", "dozeLoopStartFrame", "dozeLoopEndFrame", "sleepEndFrame", "wakeStartFrame", "eyeFrame", "convergeStillTicks", "eyeStillTicks"];
+  const animatorKeys = ["dozeState", "sleepState", "wakeState", "convergeState", "exitEyeState", "eyeState", "dozeLoopCount", "dozeLoopStartFrame", "dozeLoopEndFrame", "sleepEndFrame", "wakeStartFrame", "eyeFrame", "convergeStillTicks", "eyeStillTicks"];
   const animator = exactObject(packet.animator, animatorKeys, "INVALID_INTERACTION_STATE", "Interaction animator");
   require(animatorKeys.every((key) => Number.isSafeInteger(animator[key]) && animator[key] >= 0), "INVALID_INTERACTION_STATE", "Interaction animator contains invalid integers.");
-  const stateIds = [animator.introState, animator.dozeState, animator.sleepState, animator.wakeState, animator.convergeState, animator.exitEyeState, animator.eyeState];
+  const stateIds = [animator.dozeState, animator.sleepState, animator.wakeState, animator.convergeState, animator.exitEyeState, animator.eyeState];
   const frameCount = playback?.binding.parameters.frameCount ?? limits.maxFrames;
-  require(new Set(stateIds).size === stateIds.length && stateIds.includes(animator.initialState)
-    && animator.initialState === animator.eyeState && animator.initialFrame === animator.eyeFrame
-    && animator.initialFrame > 0 && animator.initialFrame <= frameCount
+  require(new Set(stateIds).size === stateIds.length
+    && animator.eyeFrame > 0 && animator.eyeFrame <= frameCount
     && animator.dozeLoopCount > 0 && animator.dozeLoopStartFrame > 0 && animator.dozeLoopStartFrame < animator.dozeLoopEndFrame && animator.dozeLoopEndFrame <= frameCount
     && animator.sleepEndFrame > 0 && animator.sleepEndFrame <= frameCount
     && animator.wakeStartFrame > 0 && animator.wakeStartFrame <= frameCount
     && animator.convergeStillTicks > 0 && animator.eyeStillTicks > 0
-    && binding.parameters.initialFrame === animator.initialFrame, "INVALID_INTERACTION_STATE", "Interaction animator state or timing closure is invalid.");
+    && binding.parameters.initialFrame === animator.eyeFrame, "INVALID_INTERACTION_STATE", "Interaction animator state or timing closure is invalid.");
 
   const source = exactObject(packet.source, ["cameraViewMatrix", "cameraWorldPosition", "inverseCameraMatrix", "projection", "displacementMagnitude", "eyeGain", "eyeMaximumOffset", "spring"], "INVALID_INTERACTION_STATE", "Interaction source contract");
   finiteF32Array(source.cameraViewMatrix, 16, "INVALID_INTERACTION_STATE", "Interaction camera view matrix");

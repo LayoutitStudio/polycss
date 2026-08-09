@@ -9,7 +9,7 @@ const CSS_PROPERTIES = new Set(`
   background-color background-image background-position-x background-position-y
   background-repeat background-size border border-bottom-left-radius
   border-bottom-right-radius border-color border-shape border-top-left-radius
-  border-top-right-radius box-sizing color contain content corner-bottom-left-shape
+  border-top-right-radius box-sizing color contain corner-bottom-left-shape
   corner-bottom-right-shape corner-top-left-shape corner-top-right-shape cursor display font font-style font-weight height
   image-rendering inset isolation left line-height margin max-width object-fit
   object-position opacity overflow padding pointer-events position text-decoration
@@ -18,7 +18,7 @@ const CSS_PROPERTIES = new Set(`
 `.trim().split(/\s+/u));
 const CSS_FUNCTIONS = new Set(`
   abs acos asin atan atan2 blur brightness calc circle clamp color color-mix
-  conic-gradient contrast cos counter counters cubic-bezier drop-shadow ellipse
+  conic-gradient contrast cos cubic-bezier drop-shadow ellipse
   exp fit-content grayscale hsl hsla hwb hypot hue-rotate inset invert is lab
   lch light-dark linear-gradient log matrix matrix3d max min minmax mod not
   nth-child nth-last-child nth-last-of-type nth-of-type oklab oklch opacity path
@@ -308,6 +308,7 @@ export function validateStylesheet(bytes, binding, resources, limits) {
         const match = functionPattern.exec(value);
         if (!match) { index += 1; continue; }
         const name = match[1].toLowerCase();
+        require(match[0].length === match[1].length + 1, "UNSAFE_CSS", "CSS function names must immediately precede '('.");
         require(CSS_FUNCTIONS.has(name), "UNSAFE_CSS_FUNCTION", `CSS function ${name} is unsupported.`);
         if (name === "url") {
           const end = value.indexOf(")", functionPattern.lastIndex);

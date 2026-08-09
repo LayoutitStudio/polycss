@@ -7,11 +7,12 @@
   "license": "MIT",
   "scripts": {
     "dev": "astro dev",
-    "build": "node scripts/verify-gallery-domformat.mjs && astro build && node scripts/generate-llms-txt.mjs",
+    "build": "astro build && node scripts/generate-llms-txt.mjs",
     "generate:domformat": "node scripts/generate-gallery-domformat.mjs",
     "prove:domformat": "node scripts/prove-gallery-domformat.mjs",
     "verify:domformat": "node scripts/verify-gallery-domformat.mjs",
     "verify:domformat:fresh": "node scripts/verify-gallery-domformat.mjs --fresh",
+    "test:domformat-tools": "node --test scripts/gallery-domformat-canonical.test.mjs",
     "preview": "astro preview"
   },
   "dependencies": {

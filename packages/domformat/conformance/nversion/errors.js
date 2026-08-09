@@ -1,5 +1,5 @@
 // Conformance-only error surface. This directory is mechanically forbidden
-// from importing the production implementation under src/.
+// from importing the production implementation.
 
 export class NVersionError extends Error {
   constructor(code, message) {

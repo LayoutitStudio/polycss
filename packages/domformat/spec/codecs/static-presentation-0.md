@@ -51,9 +51,9 @@ cursorStates  optional distinct stable open/closed cursor image nodes
 
 Parameters repeat `fitWidth`, `fitHeight`, `sourceWidth`, and `sourceHeight` and
 MUST equal the packet. Declared sinks always include `height`, `left`, `top`,
-`transform`, and `width`. The five host background sinks appear exactly when
-`background` is present. `visibility` appears exactly when the cursor target
-pair is present. The cursor layer and cursor states MUST be declared together,
+`transform`, and `width`. `visibility` appears exactly when the cursor target
+pair is present. Background is immutable initial `TREE` state, not an
+interpreter sink. The cursor layer and cursor states MUST be declared together,
 and pointer interaction requires them.
 
 ## Initial retained contract
@@ -95,8 +95,10 @@ camera.transform = scale(scale) when scale != 1
 camera inline transform = unset when scale == 1
 ```
 
-The trusted viewer recomputes this on resize and appearance change. It writes
-only the declared camera sinks and does not rebuild any descendant.
+The static-presentation interpreter recomputes this on resize and appearance
+change. It is the sole writer of the declared camera fit sinks and does not
+rebuild any descendant. Playback passes it the selected appearance but never
+writes those sinks itself.
 If layout dimensions are not yet observable while the mount surface is
 detached, the initial publication uses the declared `sourceWidth` and
 `sourceHeight`; it never substitutes a hard-coded producer viewport.

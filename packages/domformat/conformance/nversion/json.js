@@ -153,7 +153,7 @@ function freeze(value) {
 export function parseJsonBytes(bytes, limits, label = "domformat JSON") {
   let text;
   try {
-    text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes);
   } catch {
     throw new NVersionError("MALFORMED_UTF8", `${label} is not strict UTF-8.`);
   }

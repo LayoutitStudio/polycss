@@ -44,13 +44,12 @@ async function availableBrowser() {
   invariant(false, "MISSING_RELEASE_BROWSER", "A Chromium-family browser is required for the real-browser release gate. Set DOMFORMAT_BROWSER to its executable path.");
 }
 
-function serve(explicitFiles, requestPaths, runtimeRoot) {
+function serve(explicitFiles, runtimeRoot) {
   return createServer(async (request, response) => {
     try {
       const pathname = decodeURIComponent(new URL(request.url, "http://127.0.0.1").pathname);
-      requestPaths.push(pathname);
       const explicit = explicitFiles.get(pathname);
-      const sourceRoot = pathname.startsWith("/src/") ? runtimeRoot : root;
+      const sourceRoot = pathname === "/dist/browser.js" ? runtimeRoot : root;
       const target = explicit ?? resolve(sourceRoot, `.${pathname}`);
       invariant(explicit !== undefined || target.startsWith(`${sourceRoot}${sep}`), "UNSAFE_TEST_PATH", "Browser smoke request escaped its fixture root.");
       const bytes = await readFile(target);
@@ -176,10 +175,10 @@ function sideBySideEvidence(png, label) {
   for (let y = 48; y < 192; y += 1) {
     for (let x = 64; x < 256; x += 1) {
       const referenceOffset = (y * decoded.width + x) * decoded.bytesPerPixel;
-      const independentOffset = (y * decoded.width + x + 320) * decoded.bytesPerPixel;
+      const comparisonOffset = (y * decoded.width + x + 320) * decoded.bytesPerPixel;
       let different = false;
       for (let channel = 0; channel < decoded.bytesPerPixel; channel += 1) {
-        const delta = Math.abs(decoded.pixels[referenceOffset + channel] - decoded.pixels[independentOffset + channel]);
+        const delta = Math.abs(decoded.pixels[referenceOffset + channel] - decoded.pixels[comparisonOffset + channel]);
         maximumChannelDelta = Math.max(maximumChannelDelta, delta);
         if (delta !== 0) different = true;
       }
@@ -208,7 +207,7 @@ function sideBySideEvidence(png, label) {
   });
 }
 
-async function dumpedMount(browser, url, profile, label, nodes, leaves) {
+async function dumpedMount(browser, url, profile, label, nodes, leaves, requiredLeafTag, sourceFrame) {
   let result = null;
   for (let attempt = 0; attempt < 3; attempt += 1) {
     try {
@@ -230,7 +229,9 @@ async function dumpedMount(browser, url, profile, label, nodes, leaves) {
   }
   invariant(result, "BROWSER_RELEASE_MOUNT", `${label} did not publish the retained DOM after three isolated attempts.`);
   invariant(result.stdout.includes("data-domformat-mount-surface=\"\""), "BROWSER_RELEASE_MOUNT", `${label} lacks the isolated mount surface.`);
+  invariant(result.stdout.includes(`data-domformat-source-frame="${sourceFrame}"`), "BROWSER_RELEASE_MOUNT", `${label} did not publish prepared source frame ${sourceFrame}.`);
   invariant(result.stdout.includes(`domformat@0 · ${nodes} nodes · ${leaves} leaves`), "BROWSER_RELEASE_MOUNT", `${label} has unexpected retained-DOM counts.`);
+  invariant(new RegExp(`<${requiredLeafTag}(?:\\s|>)`, "u").test(result.stdout), "BROWSER_RELEASE_MOUNT", `${label} did not retain its required <${requiredLeafTag}> strategy leaf.`);
 }
 
 async function paintedComparison(browser, url, profile, screenshot, label) {
@@ -248,41 +249,39 @@ async function paintedComparison(browser, url, profile, screenshot, label) {
   return Object.freeze({ ...sideBySideEvidence(png, label), pngBytes: png.length });
 }
 
-async function browserFixtureProof(browser, origin, modelUrl, slug, nodes, leaves, requestPaths) {
-  const referenceUrl = `${origin}/viewer/index.html?model=${encodeURIComponent(modelUrl)}&animate=0`;
-  const independentUrl = `${referenceUrl}&implementation=conformance`;
-  const nVersionUrl = `${origin}/test/nversion-viewer.html?model=${encodeURIComponent(modelUrl)}&animate=0`;
-  await dumpedMount(browser, referenceUrl, join(temporary, `${slug}-reference-profile`), `${slug} reference viewer`, nodes, leaves);
-  await dumpedMount(browser, independentUrl, join(temporary, `${slug}-independent-profile`), `${slug} independent viewer`, nodes, leaves);
-  const nVersionRequestStart = requestPaths.length;
-  await dumpedMount(browser, nVersionUrl, join(temporary, `${slug}-nversion-profile`), `${slug} N-version probe/viewer`, nodes, leaves);
-  const nVersionRequests = requestPaths.slice(nVersionRequestStart);
-  invariant(!nVersionRequests.some((path) => path.startsWith("/src/")), "BROWSER_RELEASE_IMPORT_BOUNDARY", `${slug} N-version path requested production source: ${nVersionRequests.filter((path) => path.startsWith("/src/")).join(", ")}`);
+async function browserFixtureProof(browser, origin, modelUrl, slug, nodes, leaves, requiredLeafTag, sourceFrame) {
+  const referenceUrl = `${origin}/viewer/index.html?model=${encodeURIComponent(modelUrl)}&animate=0&frame=${sourceFrame}`;
+  const alternateUrl = `${referenceUrl}&implementation=conformance`;
+  const nVersionUrl = `${origin}/test/nversion-viewer.html?model=${encodeURIComponent(modelUrl)}&animate=0&frame=${sourceFrame}`;
+  await dumpedMount(browser, referenceUrl, join(temporary, `${slug}-reference-profile`), `${slug} reference viewer`, nodes, leaves, requiredLeafTag, sourceFrame);
+  await dumpedMount(browser, alternateUrl, join(temporary, `${slug}-alternate-profile`), `${slug} alternate mount`, nodes, leaves, requiredLeafTag, sourceFrame);
+  await dumpedMount(browser, nVersionUrl, join(temporary, `${slug}-nversion-profile`), `${slug} N-version reader path`, nodes, leaves, requiredLeafTag, sourceFrame);
 
-  const independentComparison = await paintedComparison(
+  const alternateComparison = await paintedComparison(
     browser,
     `${referenceUrl}&compare=conformance`,
-    join(temporary, `${slug}-independent-comparison-profile`),
-    join(temporary, `${slug}-independent-comparison-painted.png`),
-    `${slug} reference/independent viewers`,
+    join(temporary, `${slug}-alternate-comparison-profile`),
+    join(temporary, `${slug}-alternate-comparison-painted.png`),
+    `${slug} reference/alternate mount paths`,
   );
   const nVersionComparison = await paintedComparison(
     browser,
     `${nVersionUrl}&compare=reference`,
     join(temporary, `${slug}-nversion-comparison-profile`),
     join(temporary, `${slug}-nversion-comparison-painted.png`),
-    `${slug} reference/N-version viewers`,
+    `${slug} reference/N-version reader paths`,
   );
   return Object.freeze({
     slug,
+    sourceFrame,
     nodes,
     leaves,
-    independentViewerPaintedDistinctColors: independentComparison.distinctColors,
-    independentViewerPaintedLumaRange: independentComparison.lumaRange,
-    independentViewerPaintedSecondaryCoverage: independentComparison.secondaryCoverage,
-    independentViewerPaintedPngBytes: independentComparison.pngBytes,
-    independentViewerModelPixelsIdentical: independentComparison.modelPixelDifferences === 0,
-    independentViewerMaximumChannelDelta: independentComparison.maximumChannelDelta,
+    alternateMountPaintedDistinctColors: alternateComparison.distinctColors,
+    alternateMountPaintedLumaRange: alternateComparison.lumaRange,
+    alternateMountPaintedSecondaryCoverage: alternateComparison.secondaryCoverage,
+    alternateMountPaintedPngBytes: alternateComparison.pngBytes,
+    alternateMountModelPixelsIdentical: alternateComparison.modelPixelDifferences === 0,
+    alternateMountMaximumChannelDelta: alternateComparison.maximumChannelDelta,
     nVersionProbePaintedDistinctColors: nVersionComparison.distinctColors,
     nVersionProbePaintedLumaRange: nVersionComparison.lumaRange,
     nVersionProbePaintedSecondaryCoverage: nVersionComparison.secondaryCoverage,
@@ -324,7 +323,6 @@ try {
   const producerSummary = JSON.parse(producerRun.stdout);
   invariant(producerSummary.codecs === 5 && producerSummary.nodes === 11 && producerSummary.resources === 2, "BROWSER_RELEASE_PRODUCER", "Independent producer emitted an unexpected contract.");
 
-  const requestPaths = [];
   server = serve(new Map([
     ["/model.json", modelPath],
     ["/model.css", join(temporary, "model.css")],
@@ -332,7 +330,7 @@ try {
     ["/independent/model.json", pythonModel],
     ["/independent/independent.css", join(pythonRoot, "independent.css")],
     ["/independent/assets/independent-checker.png", join(pythonRoot, "assets", "independent-checker.png")],
-  ]), requestPaths, installedRuntime);
+  ]), installedRuntime);
   await new Promise((resolveListen, reject) => {
     server.once("error", reject);
     server.listen(0, "127.0.0.1", resolveListen);
@@ -342,15 +340,15 @@ try {
   const origin = `http://127.0.0.1:${address.port}`;
   const browser = await availableBrowser();
   const proofs = [];
-  proofs.push(await browserFixtureProof(browser, origin, "/model.json", "reference-writer-json", 8, 1, requestPaths));
-  proofs.push(await browserFixtureProof(browser, origin, "/independent/model.json", "independent-producer-json", 11, 2, requestPaths));
+  proofs.push(await browserFixtureProof(browser, origin, "/model.json", "reference-writer-json", 8, 1, "i", 1));
+  proofs.push(await browserFixtureProof(browser, origin, "/independent/model.json", "independent-producer-json", 11, 2, "u", 2));
   process.stdout.write(`${JSON.stringify({
     browser,
     fixtures: proofs,
     independentProducer: producerSummary,
     browserRuntime: "clean-installed npm tarball",
-    independentViewerModelPixelsIdentical: proofs.every((proof) => proof.independentViewerModelPixelsIdentical),
-    independentViewerMaximumChannelDelta: Math.max(...proofs.map((proof) => proof.independentViewerMaximumChannelDelta)),
+    alternateMountModelPixelsIdentical: proofs.every((proof) => proof.alternateMountModelPixelsIdentical),
+    alternateMountMaximumChannelDelta: Math.max(...proofs.map((proof) => proof.alternateMountMaximumChannelDelta)),
     nVersionProbeModelPixelsIdentical: proofs.every((proof) => proof.nVersionProbeModelPixelsIdentical),
     nVersionProbeMaximumChannelDelta: Math.max(...proofs.map((proof) => proof.nVersionProbeMaximumChannelDelta)),
     realBrowser: true,

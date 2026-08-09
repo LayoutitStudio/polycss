@@ -11,7 +11,13 @@ test("lifecycle is strictly ordered and exposes read-only idempotent teardown", 
   assert.deepEqual(Object.keys(lifecycle.view), ["phase", "history"]);
   assert.throws(() => lifecycle.advance("construct"), errorCode("LIFECYCLE_ORDER"));
 
-  for (const phase of ["validate", "construct", "bind", "initialize", "publish"]) lifecycle.advance(phase);
+  for (const phase of ["validate", "construct", "bind", "initialize"]) lifecycle.advance(phase);
+  lifecycle.begin("publish");
+  assert.equal(lifecycle.phase, "publish");
+  assert.deepEqual(lifecycle.history, ["validate", "construct", "bind", "initialize"]);
+  assert.deepEqual(observed, lifecycle.history);
+  assert.throws(() => lifecycle.assertPublished(), errorCode("LIFECYCLE_PRECONDITION"));
+  lifecycle.advance("publish");
   lifecycle.assertPublished();
   assert.equal(lifecycle.view.phase, "publish");
   assert.deepEqual(lifecycle.view.history, observed);

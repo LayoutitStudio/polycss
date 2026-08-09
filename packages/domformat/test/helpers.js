@@ -324,7 +324,7 @@ export async function syntheticExecutableInteractionInput() {
         cursorLayer: "synthetic/cursor",
         cursorStates: { open: "synthetic/cursor:open", closed: "synthetic/cursor:closed" },
       },
-      sinks: ["host.style.backgroundColor", "host.style.backgroundImage", "host.style.backgroundPosition", "host.style.backgroundRepeat", "host.style.backgroundSize", "style.height", "style.left", "style.top", "style.transform", "style.visibility", "style.width"],
+      sinks: ["style.height", "style.left", "style.top", "style.transform", "style.visibility", "style.width"],
       parameters: { fitHeight: 240, fitWidth: 320, sourceHeight: 240, sourceWidth: 320 },
     },
     {

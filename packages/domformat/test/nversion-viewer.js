@@ -21,7 +21,7 @@ try {
   };
   let probeHost = host;
   if (comparison) {
-    const production = await import("../src/browser.js");
+    const production = await import("../dist/browser.js");
     const referenceResult = await production.readDomBrowserUrl(modelUrl);
     host.style.width = "50%";
     host.style.right = "50%";
@@ -40,9 +40,16 @@ try {
   }
   probeRuntime = await mountConformanceDom(probeResult, probeHost, mountOptions);
   const playback = probeResult.document.bindings.channels.find((channel) => channel.interpreter === "polycss-playback@0");
+  if (parameters.has("frame")) {
+    const frame = Number(parameters.get("frame"));
+    if (!Number.isSafeInteger(frame)) throw new Error("The requested proof frame is invalid.");
+    referenceRuntime?.seek(frame);
+    probeRuntime.seek(frame);
+  }
   const leaves = playback?.targets.leaves.length
     ?? probeResult.document.meta.counts?.leaves
     ?? probeResult.document.tree.nodes.filter((node) => !probeResult.document.tree.nodes.some((candidate) => candidate.parent === node.index)).length;
+  document.documentElement.dataset.domformatSourceFrame = String(probeRuntime.sourceFrame);
   document.documentElement.dataset.domformatReady = "";
   globalThis.domformatProof = Object.freeze({
     format: probeResult.document.meta.format,
@@ -51,6 +58,13 @@ try {
     nodes: probeResult.document.tree.nodes.length,
     leaves,
     implementation: comparison ? "nversion-comparison" : probeResult.implementation,
+    get sourceFrame() { return probeRuntime.sourceFrame; },
+    seek(frame) {
+      referenceRuntime?.seek(frame);
+      const value = probeRuntime.seek(frame);
+      document.documentElement.dataset.domformatSourceFrame = String(value);
+      return value;
+    },
     destroy() {
       referenceRuntime?.destroy();
       probeRuntime?.destroy();

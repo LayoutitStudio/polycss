@@ -40,6 +40,9 @@ jobs:
       - name: Enforce Morph coverage
         run: pnpm --filter @layoutit/polycss-morph test:coverage
 
+      - name: Enforce domformat coverage
+        run: pnpm --filter @layoutit/polycss-domformat test:coverage
+
       - name: Certify domformat package
         run: pnpm --filter @layoutit/polycss-domformat pack:check
 
@@ -52,5 +55,42 @@ jobs:
       - name: Certify Morph with registry dependencies
         run: pnpm --filter @layoutit/polycss-morph test:package:registry
 
+      - name: Certify Gallery domformat corpus
+        run: pnpm --filter @layoutit/polycss-website test:domformat-tools && pnpm --filter @layoutit/polycss-website verify:domformat
+
       - name: Build website
         run: pnpm build:website
+
+  certify-domformat-browser-and-corpus:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@a7487c7e89a18df4991f222e4898a00d66ddda
+        with:
+          version: 10.32.1
+
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install pinned Chromium headless shell
+        run: pnpm exec playwright install --with-deps chromium-headless-shell
+
+      - name: Expose pinned Chromium headless shell executable
+        run: >-
+          node --input-type=module --eval 'import { chromium } from "playwright"; const server = await chromium.launchServer({ headless: true }); process.stdout.write("DOMFORMAT_BROWSER=" + server.process().spawnfile + "\n"); await server.close();' >> "$GITHUB_ENV"
+
+      - name: Certify domformat in real Chromium
+        run: pnpm --filter @layoutit/polycss-domformat test:browser
+
+      - name: Regenerate and compare the complete Gallery corpus
+        run: pnpm --filter @layoutit/polycss-website verify:domformat:fresh

@@ -62,7 +62,7 @@
       "parent": 1,
       "sibling": 0,
       "namespace": "http://www.w3.org/1999/xhtml",
-      "name": "u",
+      "name": "i",
       "classes": ["leaf"],
       "attributes": {"aria-hidden": "true"},
       "styles": {

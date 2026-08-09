@@ -16,7 +16,7 @@ Monorepo layout (pnpm workspaces):
 | `packages/vue` | `@layoutit/polycss-vue` | Vue 3 mirror of the React package. Owns its own copy of atlas rasterisation. Depends on `core` only. |
 | `packages/fonts` | `@layoutit/polycss-fonts` | Fonts + text → extruded 3D `Polygon[]`. Hand-written TrueType (`glyf`) reader + extruder (flat/round/bevel profiles) + Google Fonts loader. Framework-agnostic (returns `Polygon[]`, no React/Vue mirror needed). Depends on `core` + `earcut`. |
 | `packages/morph` | `@layoutit/polycss-morph` | Framework-agnostic prepared-model contracts, deterministic Node preparation, browser loading, retained DOM mounting, sparse deformation, controls, springs, animation, joint skinning, and prepared playback. The browser entry uses public `@layoutit/polycss` APIs; Node-only preparation lives at `@layoutit/polycss-morph/prepare`. No React/Vue mirrors. |
-| `packages/domformat` | `@layoutit/polycss-domformat` | Private source-only `domformat@0` writer, reader, validator, CLI, and browser mount with repository-side conformance. Owns the producer-neutral wire contract; producer lowering stays in producer packages. Runtime installs exclude certification material. Not published. |
+| `packages/domformat` | `@layoutit/polycss-domformat` | Private strict-TypeScript `domformat@0` writer, reader, validator, CLI, and browser mount with repository-side conformance. Owns the producer-neutral wire contract; producer lowering stays in producer packages. Runtime installs contain unbundled ESM and declarations but exclude certification material. Not published. |
 | `website` | `@layoutit/polycss-website` | Astro + Starlight docs site. Not published. |
 | `examples/{html,vanilla,react,vue,fontcss}` | private | Per-framework Vite apps demonstrating the minimal usage for each renderer (`fontcss` demos `@layoutit/polycss-fonts`). Workspace members so they resolve to local `workspace:^` packages. Not published. |
 
@@ -96,7 +96,7 @@ This is the load-bearing constraint behind the whole engine. **JavaScript should
 
 The renderer exception is imported skeletal animation. glTF/GLB skinning changes each polygon independently, so the vanilla stable-DOM animation path samples the active clip in JS, keeps the leaf set mounted, caches baked stable-triangle transform frames, and pins each mounted triangle's baked color while transforms animate. Recomputing Lambert from every deformed low-poly face normal creates visible color pumping, so color refresh is internal opt-in rather than the default animation behavior. On WebKit/Safari, where stable CSS triangles fall through to solid atlas `<s>` leaves, same-topology animation updates keep the existing atlas elements and bitmap URLs mounted, cache transform frames once warmed, and hide briefly degenerate atlas triangles only until the next valid frame. That optimized path is the default; do not add a user-facing "baseline vs optimized" toggle or maintain a legacy slow path in product UI.
 
-The domformat reference mount has one separate, closed exception: it may schedule its validated fixed-rate prepared playback and interaction tables. That scheduler may write only declared sinks on the retained targets, never reconstruct topology or evaluate producer code, expressions, renderer internals, or network resources, and is disabled by `animate: false`. Every due logical animation tick and distinct prepared-effect transition is still evaluated in order, but one browser callback with multiple overdue animation ticks may publish only their final retained-DOM state. The one-tick path and public operations remain synchronous, and every overdue interaction tick is stepped and published separately because input, cursor, grab, and spring state are observable. This is a reference implementation of an already-lowered wire profile, not a PolyCSS renderer loop.
+The domformat reference mount has one separate, closed exception: it may schedule its validated fixed-rate prepared playback and interaction tables. That scheduler may write only declared sinks on the retained targets, never reconstruct topology or evaluate producer code, expressions, renderer internals, or network resources, and is disabled by `animate: false`. Normal catch-up is bounded to eight overdue ticks: every due logical animation tick and distinct prepared-effect transition in that window is evaluated in order, but one browser callback may publish only their final retained-DOM state; interaction publishes each such tick separately because input, cursor, grab, and spring state are observable. A larger gap is treated as suspension, discards the stale backlog, advances one tick, and resets the deadline. The one-tick path and public operations remain synchronous. This is a reference implementation of an already-lowered wire profile, not a PolyCSS renderer loop.
 
 | Where JS runs | Where JS does NOT run |
 |---|---|
@@ -176,11 +176,23 @@ alias for Morph packages and does not depend on Morph or renderer internals.
   payload, archive, or alternate packaging mode.
 - Mounting follows `validate → construct → bind → initialize → publish →
   destroy`, with rollback on partial failure and idempotent teardown.
-- The package is source-only, `private`, and MIT-licensed. Workspace test/build
+- The package is authored in strict TypeScript, built as unbundled ESM plus
+  declarations with tsup, `private`, and MIT-licensed. Workspace test/build
   commands include it; public version-bump and npm-publish automation must not.
-- Install tarballs contain only package metadata, README, CLI, and runtime
-  source. Specifications, conformance implementations, fixtures, viewers,
-  scripts, and tests remain repository-side certification material.
+  Public Node and browser signatures describe the closed document, resource,
+  options, lifecycle, and controller contracts.
+- Domformat's certification suite intentionally remains under `test/` and uses
+  `node:test`: it coordinates raw ESM, CLI subprocesses, Python implementations,
+  and real-browser harnesses rather than renderer-unit tests. Tests execute the
+  authored TypeScript through `tsx`; the release gate separately exercises the
+  clean-installed compiled package. This is the package's explicit exception
+  to sibling Vitest/co-location conventions, not an exception to strict typing,
+  declarations, coverage, or the mandatory build gate.
+- Install tarballs contain only package metadata, README, CLI, compiled runtime,
+  and declarations. Specifications, independent readers/producers, fixtures, the
+  alternate mount shell, scripts, and tests remain repository-side
+  certification material. The alternate shell shares the single reference
+  lifecycle, input adapter, and profile interpreters rather than copying them.
 - The first concrete producer is website-owned:
   `website/scripts/generate-gallery-domformat.mjs` lowers all Gallery presets
   through shared Gallery preset/loader/presentation/animation behavior into

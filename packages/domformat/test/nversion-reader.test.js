@@ -43,6 +43,7 @@ function mutateCorpus(source, operation) {
   if (operation === "none") return source.slice();
   if (operation === "gzip-transport") return Uint8Array.of(0x1f, 0x8b, 0x08, 0x00);
   if (operation === "malformed-utf8") return Uint8Array.of(0xff);
+  if (operation === "byte-order-mark") return Uint8Array.from([0xef, 0xbb, 0xbf, ...source]);
   if (operation === "malformed-json") return new TextEncoder().encode('{"meta":');
   const text = new TextDecoder().decode(source);
   if (operation === "duplicate-key") return new TextEncoder().encode('{"meta":null,' + text.slice(1));
@@ -64,6 +65,11 @@ function mutateCorpus(source, operation) {
   else if (operation === "reserved-resource-path") document.resources.resources[0].path = "assets/CON.png";
   else if (operation === "trailing-dot-resource-path") document.resources.resources[0].path = "assets/checker.";
   else if (operation === "missing-aria-hidden") delete document.tree.nodes.find((node) => !document.tree.nodes.some((candidate) => candidate.parent === node.index)).attributes["aria-hidden"];
+  else if (operation === "noncanonical-base64") {
+    const surface = document.state.channels.find((channel) => channel.codec === "polycss-surface-packed@0");
+    assert.equal(surface.data.packet.visibility.initialVisibleBitsBase64, "Aw==");
+    surface.data.packet.visibility.initialVisibleBitsBase64 = "Ax==";
+  }
   else if (operation === "missing-resource" || operation === "resource-digest") return source.slice();
   else throw new Error(`Unknown corpus mutation ${operation}.`);
   return encodeCanonicalJson(document);

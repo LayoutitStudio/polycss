@@ -136,11 +136,12 @@ target source frame, and performs a sequential update or seek. The reference
 mount scheduler accounts for one logical tick every `1000 / tickRateHz`
 milliseconds and carries its deadline forward by that fixed interval, so a
 dropped browser animation frame does not permanently slow playback. A callback
-with one due tick publishes synchronously. A callback with multiple overdue
-animation ticks evaluates every tick and every distinct prepared-effects source
-frame in order, but MAY defer their physical DOM writes and publish only the
-final retained state for that callback. Interaction catch-up MUST step and
-publish every due tick separately.
+with one due tick publishes synchronously. Up to eight overdue ticks are normal
+catch-up: animation evaluates every tick and every distinct prepared-effects
+source frame in order but MAY publish only the final retained state, while
+interaction steps and publishes each tick separately. More than eight overdue
+ticks is a suspension: the scheduler discards the stale backlog, advances one
+tick, and resets its next deadline from the current callback timestamp.
 
 ## Publication
 
@@ -152,7 +153,9 @@ transform, the initial appearance, surface state, and downstream effects.
 
 For a sequential frame row, in order:
 
-1. If appearance changed, publish its camera fit.
+1. If appearance changed, publish the selected appearance to
+   `static-presentation@0`. That interpreter alone writes the declared camera
+   fit sinks.
 2. If model transform is not `-1`, write the model transform. The empty
    transform means exactly `baseSceneTransform`; otherwise write
    `baseSceneTransform + " " + preparedTransform`. If the retained model's
@@ -174,23 +177,9 @@ array always contains the latest prepared state. A reveal publishes only that
 latest transform, never the superseded hidden intermediates. Stable target
 identity and row ordering are unchanged.
 
-Appearance camera fit uses host width/height, falling back to the trusted
-viewport option and then 320x240:
-
-```text
-sourceScale = min(width / fitWidth, height / fitHeight)
-scale = sourceScale * appearance.scale
-left = width/2 - sourceWidth*scale/2
-top  = height/2 - sourceHeight*scale/2
-camera width/height = sourceWidth/sourceHeight
-camera transform = scale(scale) when scale != 1
-camera inline transform = unset when scale == 1
-```
-
-`translateY * sourceScale` is added to `top`. CSS numbers use the profile's
-six-decimal rounding and negative-zero normalization. Clearing the identity
-inline transform preserves renderer base-CSS camera behavior; publishing
-`transform: none` is not equivalent.
+Appearance camera fit, viewport fallback, CSS number formatting, and identity
+transform clearing are defined once by `static-presentation@0`. Playback owns
+only the selected appearance index and never writes presentation sinks.
 
 An automatic timeline jump advances frame rows forward with `frameCount -> 1`
 wrapping until the target, without intermediate DOM writes; it then publishes

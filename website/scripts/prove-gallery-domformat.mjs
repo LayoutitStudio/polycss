@@ -1,6 +1,7 @@
 import { createServer } from "node:http";
 import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
-import { dirname, extname, join, resolve, sep } from "node:path";
+import { tmpdir } from "node:os";
+import { dirname, extname, isAbsolute, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
 import { chromium } from "playwright";
@@ -8,6 +9,7 @@ import sharp from "sharp";
 
 const scriptRoot = dirname(fileURLToPath(import.meta.url));
 const websiteRoot = resolve(scriptRoot, "..");
+const repositoryRoot = resolve(websiteRoot, "..");
 const galleryRoot = join(websiteRoot, "public/gallery");
 const defaultCorpusRoot = join(galleryRoot, "domformat");
 const directEntry = join(scriptRoot, "gallery-domformat-browser.ts");
@@ -52,10 +54,18 @@ function parseArguments(argv) {
     if (argument === "--corpus") options.corpus = resolve(argv[++index]);
     else if (argument === "--model") options.model = argv[++index];
     else if (argument === "--frames") options.frames = Number(argv[++index]);
-    else if (argument === "--output") options.output = resolve(argv[++index]);
+    else if (argument === "--output") {
+      const value = argv[++index];
+      requireCondition(value && isAbsolute(value), "--output must be an absolute path.");
+      options.output = resolve(value);
+    }
     else throw new Error(`Unknown argument ${argument}.`);
   }
   requireCondition(options.output, "--output is required so proof artifacts stay outside the repository by default.");
+  requireCondition(
+    options.output !== repositoryRoot && !options.output.startsWith(`${repositoryRoot}${sep}`),
+    "--output must stay outside the repository.",
+  );
   requireCondition(/^[a-z][a-z0-9-]+$/u.test(options.model), "--model is invalid.");
   requireCondition(Number.isSafeInteger(options.frames) && options.frames > 0 && options.frames <= 300, "--frames must be between 1 and 300.");
   return options;
@@ -161,7 +171,7 @@ async function startServer(bundleBytes, corpusRoot) {
 
 async function main() {
   const options = parseArguments(process.argv.slice(2));
-  const bundleRoot = await mkdtemp("/tmp/polycss-domformat-proof-");
+  const bundleRoot = await mkdtemp(join(tmpdir(), "polycss-domformat-proof-"));
   let browser;
   let server;
   try {

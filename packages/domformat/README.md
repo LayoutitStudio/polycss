@@ -6,10 +6,11 @@ stores one canonical UTF-8 JSON document plus integrity-bound sibling resource
 files. There is no `.dom` packet, archive, gzip transport, embedded payload, or
 alternate packaging mode.
 
-The package is source-only ESM, has no runtime dependencies, and does not
-depend on Morph or PolyCSS renderer internals. It is `private: true` and
-MIT-licensed; it is tested and built in the workspace but excluded from public
-versioning and publication.
+The package is authored in strict TypeScript and builds unbundled ESM plus
+declarations with tsup. It has no runtime dependencies and does not depend on
+Morph or PolyCSS renderer internals. It is `private: true` and MIT-licensed; it
+is tested and built in the workspace but excluded from public versioning and
+publication.
 
 ## CLI
 
@@ -100,9 +101,9 @@ compatibility aliases, and browser-generated identity. CSS is parsed against a
 closed semantic subset, scoped to a viewer-owned instance, and rewritten only
 for validated asset tokens.
 
-The normative specifications, independent Python and JavaScript
-implementations, fixtures, viewers, and certification tests remain
-repository-side and are intentionally absent from the install tarball. See the
+The normative specifications, independent Python producer/reader and N-version
+JavaScript reader, fixtures, alternate mount shell, and certification tests
+remain repository-side and are intentionally absent from the install tarball. See the
 [domformat source directory](https://github.com/LayoutitStudio/polycss/tree/main/packages/domformat)
 for that material.
 
@@ -114,6 +115,7 @@ From the PolyCSS workspace:
 pnpm --filter @layoutit/polycss-domformat test:release
 ```
 
-The gate runs Node tests, independent conformance corpora, real-browser mounts
-and visual comparisons, exact tarball allowlisting, byte-identical packing,
-clean-install API/CLI checks, and deterministic independent-producer checks.
+The gate runs strict type checking, Node tests, independent reader/producer
+conformance corpora, real-browser noninitial-frame mount and visual
+comparisons, exact tarball allowlisting, byte-identical packing, clean-install
+API/CLI/declaration checks, and deterministic independent-producer checks.

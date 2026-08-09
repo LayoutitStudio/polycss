@@ -100,7 +100,7 @@ Implementations MAY expose stricter limits. The reference alpha defaults are:
 | prepared transforms | 2,000,000 |
 | prepared surface states | 2,000,000 |
 | prepared changes | 4,000,000 per bounded column |
-| visibility cells (`leaves * frames`) | 64 Mi |
+| visibility cells (`leaves * frames`) | 8 Mi |
 | effect particles | 10,000 |
 | effect spawn tuples | 1,000,000 |
 | interaction controls | 256 |
@@ -115,12 +115,16 @@ MiB means `1024 * 1024` bytes; Mi means `1024 * 1024` entries.
 Lengths and cardinalities are checked before multiplication, allocation,
 slicing, codec-table base64 decoding, or typed-array conversion. Aggregate counters are
 checked after every addition. Codec-table base64 decoded sizes are derived
-with a linear bounded scanner before decoding; validators
+with a linear bounded scanner before decoding. Canonical base64 requires the
+standard padded alphabet and zero unused trailing bits; alternate spellings of
+the same decoded bytes are rejected. Validators
 MUST avoid regex strategies whose stack or runtime grows unsafely on
 multi-megabyte payloads. JSON array/object counts are scanned before the host
 JSON parser materializes them. Binding target graphs are traversed iteratively
 under depth, target, container, and structural-entry limits; empty containers
 cannot evade the target cardinality budget.
+The visibility-cell limit is also a validation CPU budget because semantic
+transition closure revisits the bounded matrix.
 
 Writers enforce the same document/resource/whole-file ceilings. Manifest
 references use portable paths confined to the real manifest directory and the
@@ -142,6 +146,9 @@ URL, retains the same origin, and streams under its exact declared length.
 limit on bytes delivered to the reader. Digest, media structure, dimensions,
 and CSS policy are verified after stream completion. Every image is
 additionally decoded by the browser before publication.
+Responses must expose a readable byte stream so limits are enforced before
+allocation. The reader does not fall back to an unbounded
+`Response.arrayBuffer()`.
 
 The browser reader deeply freezes its validated document and retains a private
 copy of every verified resource for mounting. Public inspection bytes are

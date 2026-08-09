@@ -91,14 +91,16 @@ mount, preventing a stuck key, but is not consumed with `preventDefault`.
 
 ## Animator and tick order
 
-The trusted v0 animator has intro, doze, sleep, wake, converge, eye, and
-exit-eye states. The topology is fixed; packet values supply frame/timer
+The trusted v0 animator has doze, sleep, wake, converge, eye, and exit-eye
+states. The topology is fixed; packet values supply frame/timer
 boundaries. Eye state pins source frame to `eyeFrame`, refreshes its still timer
 while dragging, and exits when the timer reaches zero.
 
-The packet's `introState`, `dozeState`, `sleepState`, `wakeState`,
-`convergeState`, `eyeState`, and `exitEyeState` fields are the seven fixed named
+The packet's `dozeState`, `sleepState`, `wakeState`, `convergeState`,
+`eyeState`, and `exitEyeState` fields are the six fixed named
 state roles. Their integer ids are unique; they do not create arbitrary states.
+Interaction always initializes in `eyeState` at `eyeFrame`; redundant initial
+state/frame fields and an unreachable intro state are not part of the packet.
 The complete guard vocabulary implemented by the trusted graph is:
 
 ```text
@@ -111,8 +113,9 @@ frame-reached(frame == target)
 
 Guard names are specification labels, not packet strings. A package cannot add
 guards, transitions, actions, XPath, JavaScript-like expressions, or random
-branches. Within doze, drag is tested first, frame increment second, loop wrap
-third, and loop exhaustion last; a later transition in that order wins. Other
+branches. Within doze, an active drag transitions directly to converge without
+advancing or expiring the doze loop on that tick. Otherwise the frame advances,
+then loop wrap and exhaustion are evaluated. Other
 state branches follow the source order below, so the same state and sample
 produce the same next state.
 
@@ -134,8 +137,9 @@ downstream grab-particle channel.
 ## Picking and spring
 
 Only grab controls participate. A hit requires strict absolute X and Y distance
-below `hitRadius`. Selection uses nearest camera distance; cursor snap uses the
-last hit in source order. A moved control is projected from its current matrix;
+below `hitRadius`. Selection uses nearest camera distance and preserves source
+order on an exact tie; cursor snap uses that selected control's screen position.
+A moved control is projected from its current matrix;
 otherwise use its prepared screen position/distance.
 
 While selected, velocity is `offset * pickedResistance` and the grabbed flag is
@@ -299,13 +303,16 @@ The twelve affine components are, in order, `x*xScale`,
 `p[c] + x*txX + y*txY`. They map to CSS as
 `[v0,v1,v2,0,v3,v4,v5,0,v6,v7,v8,0,v9,v10,v11,1]`. Each component is decimal-rounded to
 `matrixDecimals`; exact `0`, `1`, and `-1` retain those spellings and negative
-zero becomes `0`. Insert zero fourth components and a final one to form CSS
-`matrix3d` in the same 3-by-4 layout used by playback.
+zero becomes `0`. If decimal quantization collapses the two in-plane basis
+columns to zero area, the declared-basis attempt is degenerate and performs the
+same one-time longest-edge retry; a collapsed retry returns no transform.
+Insert zero fourth components and a final one to form CSS `matrix3d` in the same
+3-by-4 layout used by playback.
 
 Finally, when leaf `width` or `height` differs from `canonicalSize`, parse that
 matrix, multiply components 0..2 by `canonicalSize/width` and components 4..6
 by `canonicalSize/height`, round all 16 components to
-`10^max(6,min(12,matrixDecimals))`, convert with ECMAScript finite-number string
+`10^6`, convert with ECMAScript finite-number string
 semantics, and normalize negative zero. This last fit, including the fixed
 raster basis size of 32, is observable profile behavior.
 
