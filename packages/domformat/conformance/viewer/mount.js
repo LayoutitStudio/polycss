@@ -432,15 +432,13 @@ export async function mountConformanceDom(result, host, options = {}) {
     effects = interpreters.has("polycss-effects@0")
       ? createPolycssEffects(materialized, document.bindings, mounted, { boundTargets })
       : null;
-    const presentation = document.bindings.channels.find((channel) => channel.interpreter === "static-presentation@0")?.parameters;
-    invariant(presentation, "MISSING_POLYCSS_BINDING", "Presentation parameters are required.");
     input = interpreters.has("polycss-pointer-grab@0")
-      ? createInteractionInput(host, surface, presentation, options)
+      ? createInteractionInput(host, surface, presentationRuntime, options)
       : null;
     const makeInteraction = () => createPolycssInteraction(materialized, document.bindings, mounted, playback, {
       ...options,
       boundTargets,
-      presentation,
+      presentation: presentationRuntime,
     });
     if (mode === "interaction") interaction = makeInteraction();
     const ResizeObserverClass = win.ResizeObserver;

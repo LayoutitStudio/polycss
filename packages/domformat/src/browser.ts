@@ -33,10 +33,11 @@ import type { DomLimits } from "./constants.js";
 import type { DomBindingTarget, DomBindings } from "./public-types.js";
 import type { MountedTree } from "./retained-dom.js";
 import type { InteractionInput, InteractionSample } from "./browser-input.js";
-import type { InteractionParameters, PlaybackParameters, PresentationParameters } from "./schema.js";
+import type { InteractionParameters, PlaybackParameters } from "./schema.js";
 import type { PolycssEffects } from "./state/effects.js";
 import type { PolycssInteraction } from "./state/interaction.js";
 import type { MaterializedPolycssState, PolycssPlayback } from "./state/polycss.js";
+import type { StaticPresentation } from "./state/presentation.js";
 
 const RUNTIME_SCOPE_ATTRIBUTE = "data-domformat-instance";
 const MAX_CATCH_UP_TICKS = 8;
@@ -125,7 +126,7 @@ interface MountRuntimeOwner {
   destroyedSourceFrame: number;
   interaction: PolycssInteraction | null;
   reservedHost: HTMLElement | null;
-  presentation: PresentationParameters | null;
+  presentation: StaticPresentation | null;
   interactionViewport: Readonly<{ viewportWidth?: number; viewportHeight?: number }> | null;
 }
 
@@ -765,9 +766,7 @@ export async function mountDom(
     owner.effects = interpreters.has("polycss-effects@0")
       ? createPolycssEffects(materialized, packageDocument.bindings, mounted, { boundTargets: mountedTargets })
       : null;
-    const presentationBinding = packageDocument.bindings.channels.find((channel) => channel.interpreter === "static-presentation@0");
-    invariant(presentationBinding?.parameters, "MISSING_POLYCSS_BINDING", "Executable presentation parameters are required.");
-    owner.presentation = presentationBinding.parameters as unknown as PresentationParameters;
+    owner.presentation = presentationController;
     owner.input = interpreters.has("polycss-pointer-grab@0") ? createInteractionInput(host, mountSurface, owner.presentation, options) : null;
     const ResizeObserverClass = browserWindow.ResizeObserver;
     owner.resizeObserver = typeof ResizeObserverClass === "function"

@@ -94,15 +94,17 @@ chunks. Schema version fields in `tree`, `cssBinding`, `state`, `bindings`, and
 - `format`: exactly `domformat@0`;
 - `profile`: exactly `polycss-3d@0` for this profile;
 - `title`: nonempty display text, at most 256 Unicode scalar values;
-- `generator`: `{ "name": string, "version": string }`;
+- `generator`: `{ "name": string, "version": string }`, where `name` matches
+  `[A-Za-z0-9][A-Za-z0-9._-]{0,63}` and `version` matches
+  `[0-9A-Za-z][0-9A-Za-z.+-]{0,63}`;
 - `capabilities`: a nonempty unique array of required capability identifiers;
 - `conformance`: `{ "executable": string[], "declaredOnly": [] }`, exactly
   describing the fixed profile roles present in the document.
 
 These optional fields are defined:
 
-- `optionalCapabilities`: unique short capability identifiers which do not
-  overlap `capabilities`;
+- `optionalCapabilities`: unique, strictly ascending short capability
+  identifiers which do not overlap `capabilities`;
 - `initialExperience`: `animation` or `interaction`; omission means
   `animation`;
 - `counts`: optional nonnegative integer counts that MUST match the
@@ -116,14 +118,32 @@ version. The known required capability vocabulary is:
 
 ```text
 css-semantic-closure deterministic-json explicit-retained-tree logical-assets
-prepared-particle-effects prepared-playback prepared-pointer-grab-interaction
+prepared-particle-effects prepared-pointer-grab-interaction prepared-playback
 prepared-surface-lighting
 ```
 
 An unknown required capability is fatal. Unknown optional capabilities are
 ignored and MUST NOT change construction, binding, initialization, or
 publication. Required capabilities and executable conformance roles MUST
-exactly match the fixed interpreter closure; `declaredOnly` MUST be empty.
+exactly match the fixed interpreter closure. Required capabilities begin with
+the four base capabilities shown above, in that order, then append the
+capability for each present interpreter in this order:
+
+```text
+polycss-effects@0 polycss-pointer-grab@0 polycss-playback@0 polycss-surface@0
+```
+
+`conformance.executable` begins with `retained-tree`, then appends the role for
+each present interpreter in this order:
+
+```text
+particle-effects playback pointer-grab-interaction presentation surface-lighting
+```
+
+The corresponding interpreter order is `polycss-effects@0`,
+`polycss-playback@0`, `polycss-pointer-grab@0`, `static-presentation@0`, then
+`polycss-surface@0`. Omitted interpreters omit their capability or role without
+reordering the remaining entries. `declaredOnly` MUST be empty.
 `initialExperience: "interaction"` requires the
 `prepared-pointer-grab-interaction` capability and an executable matching
 binding. Codec packets carry their own fixed initial state/frame declarations;

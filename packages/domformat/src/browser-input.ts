@@ -7,6 +7,7 @@ interface InteractionPresentation {
   readonly fitHeight: number;
   readonly sourceWidth: number;
   readonly sourceHeight: number;
+  readonly sourcePoint?: (x: number, y: number, width: number, height: number) => Readonly<{ x: number; y: number }>;
 }
 
 interface InteractionViewportOptions {
@@ -67,13 +68,17 @@ export function createInteractionInput(
     const localY = bounds.height > 0
       ? (event.clientY - bounds.top) * height / bounds.height
       : event.clientY - bounds.top;
-    const scale = Math.min(width / presentation.fitWidth, height / presentation.fitHeight);
-    const offsetX = (width - presentation.sourceWidth * scale) / 2;
-    const offsetY = (height - presentation.sourceHeight * scale) / 2;
-    pendingPointer = Object.freeze({
-      x: (localX - offsetX) / scale,
-      y: (localY - offsetY) / scale,
-    });
+    if (presentation.sourcePoint) {
+      pendingPointer = Object.freeze(presentation.sourcePoint(localX, localY, width, height));
+    } else {
+      const scale = Math.min(width / presentation.fitWidth, height / presentation.fitHeight);
+      const offsetX = (width - presentation.sourceWidth * scale) / 2;
+      const offsetY = (height - presentation.sourceHeight * scale) / 2;
+      pendingPointer = Object.freeze({
+        x: (localX - offsetX) / scale,
+        y: (localY - offsetY) / scale,
+      });
+    }
   };
   const keydown: EventListener = (value) => {
     const event = value as KeyboardEvent;

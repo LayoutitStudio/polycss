@@ -95,6 +95,12 @@ camera.transform = scale(scale) when scale != 1
 camera inline transform = unset when scale == 1
 ```
 
+Source point `(sourceX,sourceY)` maps to mount-surface layout coordinates as
+`(camera.left + sourceX*scale, camera.top + sourceY*scale)`. Positioned pointer
+input applies the exact inverse of this current mapping, including appearance
+scale and vertical translation. The retained cursor layer uses the forward
+mapping and the same scale.
+
 The static-presentation interpreter recomputes this on resize and appearance
 change. It is the sole writer of the declared camera fit sinks and does not
 rebuild any descendant. Playback passes it the selected appearance but never

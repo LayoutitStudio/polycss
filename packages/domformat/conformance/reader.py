@@ -2013,8 +2013,8 @@ def validate_interaction_contract(state_channel: dict, binding: dict,
             state_code, "Interaction pointer quantization is unsupported")
     stick_range = finite_f32_array(input_contract.get("stickRange"), 2, state_code,
                                    "interaction stick range")
-    require(stick_range[0] < 0 < stick_range[1], state_code,
-            "Interaction stick range is invalid")
+    require(stick_range == [-128, 127], state_code,
+            "Interaction stick range must be the fixed -128..127 range")
     require(finite_f32(input_contract.get("stickDeadzone"))
             and input_contract["stickDeadzone"] >= 0
             and finite_f32(input_contract.get("stickScale"))

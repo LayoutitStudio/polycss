@@ -1772,7 +1772,7 @@ function validatePolycssChannelInvariants(
       && input.cursorInitial[1] >= input.cursorBounds[2] && input.cursorInitial[1] <= input.cursorBounds[3], "INVALID_INTERACTION_STATE", "Interaction initial cursor is outside its bounds.");
     invariant(input.pointerQuantization === "trunc-toward-zero-then-clamp", "INVALID_INTERACTION_STATE", "Interaction pointer quantization is unsupported.");
     interactionF32Array(input.stickRange, 2, "Interaction stick range");
-    invariant(input.stickRange[0] < 0 && input.stickRange[1] > 0 && input.stickRange[0] < input.stickRange[1], "INVALID_INTERACTION_STATE", "Interaction stick range is invalid.");
+    invariant(input.stickRange[0] === -128 && input.stickRange[1] === 127, "INVALID_INTERACTION_STATE", "Interaction stick range must be the fixed -128..127 range.");
     invariant(finiteF32(input.stickDeadzone) && input.stickDeadzone >= 0 && finiteF32(input.stickScale) && input.stickScale > 0, "INVALID_INTERACTION_STATE", "Interaction stick scaling is invalid.");
     invariant(Number.isSafeInteger(input.grabButton) && input.grabButton > 0 && input.grabButton <= 0xffff
       && Number.isSafeInteger(input.holdButton) && input.holdButton > 0 && input.holdButton <= 0xffff

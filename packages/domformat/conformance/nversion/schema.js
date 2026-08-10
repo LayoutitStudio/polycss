@@ -927,7 +927,7 @@ function validateInteraction(state, binding, playback, presentation, inputs, lim
     require(input?.type === type && input.default === defaultValue, "INVALID_INTERACTION_BINDING", `Interaction input ${id} is invalid.`);
   }
   require(packet.version === 0 && packet.arithmetic === "ieee754-f32-per-operation", "INVALID_INTERACTION_STATE", "Interaction version or arithmetic is unsupported.");
-  if (playback) require(exactEqualArray(binding.targets.shapes, playback.binding.targets.shapes) && exactEqualArray(binding.targets.leaves, playback.binding.targets.leaves), "TARGET_ORDER_MISMATCH", "Interaction and playback target order differs.");
+  require(exactEqualArray(binding.targets.shapes, playback.binding.targets.shapes) && exactEqualArray(binding.targets.leaves, playback.binding.targets.leaves), "INTERACTION_TARGET_MISMATCH", "Interaction and playback target order differs.");
 
   const input = exactObject(packet.input, ["sourceWidth", "sourceHeight", "cursorBounds", "cursorInitial", "pointerQuantization", "stickRange", "stickDeadzone", "stickScale", "grabButton", "holdButton", "hitRadius", "cursorVisibleTicks", "mirrorX"], "INVALID_INTERACTION_STATE", "Interaction input contract");
   require(Number.isSafeInteger(input.sourceWidth) && input.sourceWidth > 0 && Number.isSafeInteger(input.sourceHeight) && input.sourceHeight > 0, "INVALID_INTERACTION_STATE", "Interaction viewport is invalid.");
@@ -944,7 +944,7 @@ function validateInteraction(state, binding, playback, presentation, inputs, lim
     && input.cursorInitial[1] >= input.cursorBounds[2] && input.cursorInitial[1] <= input.cursorBounds[3], "INVALID_INTERACTION_STATE", "Interaction cursor bounds or initial position are invalid.");
   require(input.pointerQuantization === "trunc-toward-zero-then-clamp", "INVALID_INTERACTION_STATE", "Interaction pointer quantization is unsupported.");
   finiteF32Array(input.stickRange, 2, "INVALID_INTERACTION_STATE", "Interaction stick range");
-  require(input.stickRange[0] < 0 && input.stickRange[1] > 0 && input.stickRange[0] < input.stickRange[1]
+  require(input.stickRange[0] === -128 && input.stickRange[1] === 127
     && finiteF32(input.stickDeadzone) && input.stickDeadzone >= 0
     && finiteF32(input.stickScale) && input.stickScale > 0, "INVALID_INTERACTION_STATE", "Interaction stick contract is invalid.");
   require(Number.isSafeInteger(input.grabButton) && input.grabButton > 0 && input.grabButton <= 0xffff

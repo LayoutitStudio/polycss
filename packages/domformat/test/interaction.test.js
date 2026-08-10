@@ -42,7 +42,7 @@ async function mismatchedComposedInput() {
   return input;
 }
 
-function runtime(input) {
+function runtime(input, presentation = { sourceWidth: 320, sourceHeight: 240, fitWidth: 320, fitHeight: 240 }) {
   const binding = input.bindings.channels.find((channel) => channel.id === "interaction");
   const ids = [
     ...binding.targets.shapes,
@@ -67,7 +67,7 @@ function runtime(input) {
     restoreInteraction(shapes, leaves) { calls.restores.push([[...shapes], [...leaves]]); },
   };
   const interaction = createPolycssInteraction(input.state, input.bindings, mounted, playback, {
-    presentation: { sourceWidth: 320, sourceHeight: 240, fitWidth: 320, fitHeight: 240 },
+    presentation,
     viewportWidth: 320,
     viewportHeight: 240,
   });
@@ -133,6 +133,19 @@ test("prepared pointer samples use declared source quantization and bounds", asy
   assert.deepEqual(value.interaction.inspect().cursor, [170, 125]);
   value.interaction.step({ pointer: { x: -99.5, y: 999.5 } });
   assert.deepEqual(value.interaction.inspect().cursor, [48, 208]);
+});
+
+test("prepared cursor publication follows the current appearance mapping", async () => {
+  const input = await interactionInput();
+  const value = runtime(input, {
+    sourceWidth: 320,
+    sourceHeight: 240,
+    fitWidth: 320,
+    fitHeight: 240,
+    viewportPoint(x, y) { return { x: x * 2 - 160, y: y * 2 - 110, scale: 2 }; },
+  });
+  value.interaction.publishInitial();
+  assert.equal(value.mounted.byId.get("synthetic/cursor").style.transform, "translate3d(160px, 130px, 0) scale(2)");
 });
 
 test("stick endpoints, axis direction, and the deadzone boundary follow the closed input mirror", async () => {
@@ -227,6 +240,22 @@ test("triangle fit preserves the leaf plan's declared matrix precision", () => {
   assert.equal(transform, "matrix3d(0,1.33,-1.33,0,0,0.8,0.8,0,1,0,0,0,0,-16,16,1)");
 });
 
+test("triangle fit rejects a basis collapsed by declared post-fit precision", () => {
+  const transform = preparedTriangleTransform({
+    basis: [0, 1, 2],
+    canonicalSize: 32,
+    matrixDecimals: 1,
+    seamEdgeMask: 0,
+    width: 4096,
+    height: 4096,
+  }, [
+    [0, 0, 0],
+    [0, 32, 0],
+    [32, 0, 0],
+  ], { fallbackAmount: 0, sharedEdgeAmount: 0 });
+  assert.equal(transform, null);
+});
+
 test("interaction viewport defaults are source-derived and composed targets must match playback", async () => {
   const rescaled = await interactionInput();
   const packet = rescaled.state.channels.find((channel) => channel.id === "interaction").data.packet;
@@ -269,6 +298,9 @@ test("prepared pointer/grab schema rejects implicit semantics, escaped rows, and
   const pointerQuantization = structuredClone(base);
   pointerQuantization.state.channels.find((channel) => channel.id === "interaction").data.packet.input.pointerQuantization = "host-number";
   assert.throws(() => buildDom(pointerQuantization), errorCode("INVALID_INTERACTION_STATE"));
+  const stickRange = structuredClone(base);
+  stickRange.state.channels.find((channel) => channel.id === "interaction").data.packet.input.stickRange = [-127, 127];
+  assert.throws(() => buildDom(stickRange), errorCode("INVALID_INTERACTION_STATE"));
   const overlongBasis = structuredClone(base);
   overlongBasis.state.channels.find((channel) => channel.id === "interaction").data.packet.leaves[0].basis.push(0);
   assert.throws(() => buildDom(overlongBasis), errorCode("INVALID_INTERACTION_STATE"));

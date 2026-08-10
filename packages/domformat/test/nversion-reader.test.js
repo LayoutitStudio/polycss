@@ -356,22 +356,35 @@ test("deep codec mutations are rejected by Node, Python, and the N-version reade
       ["surface source-frame delta", (document) => { packet(document, "surface").surface.statePacking.sourceFrameDeltas[1] = packet(document, "surface").frameCount; }],
       ["effects emitter mode", (document) => { packet(document, "effects").emitters[0].mode = "network-stream"; }],
       ["interaction pointer quantization", (document) => { packet(document, "interaction").input.pointerQuantization = "round"; }],
+      ["interaction stick range", (document) => { packet(document, "interaction").input.stickRange = [-127, 127]; }, "INVALID_INTERACTION_STATE"],
+      ["interaction target order", (document) => {
+        document.bindings.channels.find((entry) => entry.interpreter === "polycss-pointer-grab@0").targets.leaves.reverse();
+      }, "INTERACTION_TARGET_MISMATCH"],
       ["interaction overlong basis", (document) => { packet(document, "interaction").leaves[0].basis.push(0); }],
       ["interaction canonical size", (document) => { packet(document, "interaction").leaves[0].canonicalSize = 64; }],
       ["interaction playback fit mismatch", (document) => {
         document.state.channels.find((entry) => entry.id === "playback").data.leafFit[0].canonicalSize = 16;
       }],
     ];
-    for (const [label, mutate] of mutations) {
+    for (const [label, mutate, expectedCode] of mutations) {
       const document = structuredClone(original);
       mutate(document);
       const bytes = new TextEncoder().encode(JSON.stringify(document));
-      assert.throws(() => readDom(bytes, { externalResources: reference.resourceBytes, requireResources: true }), undefined, `${label} Node`);
-      await assert.rejects(readDomNVersion(bytes, { externalResources: reference.resourceBytes }), NVersionError, `${label} N-version`);
+      assert.throws(
+        () => readDom(bytes, { externalResources: reference.resourceBytes, requireResources: true }),
+        expectedCode ? (error) => error?.code === expectedCode : undefined,
+        `${label} Node`,
+      );
+      await assert.rejects(
+        readDomNVersion(bytes, { externalResources: reference.resourceBytes }),
+        expectedCode ? (error) => error instanceof NVersionError && error.code === expectedCode : NVersionError,
+        `${label} N-version`,
+      );
       const path = join(directory, `invalid-${label.replaceAll(" ", "-")}.json`);
       await writeFile(path, bytes);
       const python = runPython([pythonReader, "validate", path]);
       assert.notEqual(python.status, 0, `${label} Python`);
+      if (expectedCode) assert.match(python.stderr, new RegExp(`: ${expectedCode}:`, "u"), `${label} Python code`);
     }
   } finally {
     await rm(directory, { recursive: true, force: true });

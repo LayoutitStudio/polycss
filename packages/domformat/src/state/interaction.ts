@@ -99,6 +99,7 @@ interface InteractionPresentation {
   readonly sourceHeight: number;
   readonly fitWidth: number;
   readonly fitHeight: number;
+  readonly viewportPoint?: (x: number, y: number, width: number, height: number) => Readonly<{ x: number; y: number; scale: number }>;
 }
 
 interface InteractionOptions {
@@ -625,10 +626,11 @@ function publishCursor(
   if (!layer || !open || !closed || !presentation || !mounted.host) return;
   const width = mounted.host.clientWidth || options.viewportWidth || presentation.sourceWidth;
   const height = mounted.host.clientHeight || options.viewportHeight || presentation.sourceHeight;
-  const scale = Math.min(width / presentation.fitWidth, height / presentation.fitHeight);
-  const offsetX = (width - presentation.sourceWidth * scale) / 2;
-  const offsetY = (height - presentation.sourceHeight * scale) / 2;
-  layer.style.transform = `translate3d(${cssNumber(offsetX + control.csrX * scale)}px, ${cssNumber(offsetY + control.csrY * scale)}px, 0) scale(${cssNumber(scale)})`;
+  const point = presentation.viewportPoint?.(control.csrX, control.csrY, width, height);
+  const scale = point?.scale ?? Math.min(width / presentation.fitWidth, height / presentation.fitHeight);
+  const x = point?.x ?? (width - presentation.sourceWidth * scale) / 2 + control.csrX * scale;
+  const y = point?.y ?? (height - presentation.sourceHeight * scale) / 2 + control.csrY * scale;
+  layer.style.transform = `translate3d(${cssNumber(x)}px, ${cssNumber(y)}px, 0) scale(${cssNumber(scale)})`;
   open.style.visibility = control.dragging === 1 ? "hidden" : "visible";
   closed.style.visibility = control.dragging === 1 ? "visible" : "hidden";
 }

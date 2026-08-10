@@ -30,15 +30,19 @@ function roundDecimal(value: number, decimals: number): string {
   return Object.is(next, 0) || Object.is(next, -0) ? "0" : String(next);
 }
 
+function hasBasisArea(values: readonly number[], secondColumn: number): boolean {
+  const cross = [
+    values[1] * values[secondColumn + 2] - values[2] * values[secondColumn + 1],
+    values[2] * values[secondColumn] - values[0] * values[secondColumn + 2],
+    values[0] * values[secondColumn + 1] - values[1] * values[secondColumn],
+  ];
+  return values.every(Number.isFinite) && Math.hypot(...cross) > BASIS_EPSILON;
+}
+
 function affineTransform(values: readonly number[], decimals: number): string | null {
   const rounded = values.map((value) => roundDecimal(value, decimals));
   const numeric = rounded.map(Number);
-  const cross = [
-    numeric[1] * numeric[5] - numeric[2] * numeric[4],
-    numeric[2] * numeric[3] - numeric[0] * numeric[5],
-    numeric[0] * numeric[4] - numeric[1] * numeric[3],
-  ];
-  if (!numeric.every(Number.isFinite) || Math.hypot(...cross) <= BASIS_EPSILON) return null;
+  if (!hasBasisArea(numeric, 3)) return null;
   return `matrix3d(${rounded[0]},${rounded[1]},${rounded[2]},0,`
     + `${rounded[3]},${rounded[4]},${rounded[5]},0,`
     + `${rounded[6]},${rounded[7]},${rounded[8]},0,`
@@ -366,12 +370,14 @@ function computedTransform(
   return transform ?? (basisHint ? computedTransform(points, plan, triangle, null) : null);
 }
 
-function fitTransform(transform: string, plan: TrianglePlan): string {
+function fitTransform(transform: string, plan: TrianglePlan): string | null {
   if (plan.width === plan.canonicalSize && plan.height === plan.canonicalSize) return transform;
   const values = transform.slice("matrix3d(".length, -1).split(",").map(Number);
   for (const index of [0, 1, 2]) values[index] *= plan.canonicalSize / plan.width;
   for (const index of [4, 5, 6]) values[index] *= plan.canonicalSize / plan.height;
-  return `matrix3d(${values.map((value) => roundDecimal(value, plan.matrixDecimals)).join(",")})`;
+  const rounded = values.map((value) => roundDecimal(value, plan.matrixDecimals));
+  if (!hasBasisArea(rounded.map(Number), 4)) return null;
+  return `matrix3d(${rounded.join(",")})`;
 }
 
 export function preparedTriangleTransform(

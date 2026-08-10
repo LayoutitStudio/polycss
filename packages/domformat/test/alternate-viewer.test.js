@@ -506,6 +506,34 @@ test("alternate and public viewers agree through pointer pick, drag, release, ef
   value.alternateRuntime.destroy();
 });
 
+test("alternate and public viewers pick through a nonidentity presentation appearance", async () => {
+  const input = await syntheticExecutableInteractionInput();
+  input.state.channels.find((channel) => channel.id === "playback").data.packet.appearances[0] = ["zoomed", 2, 50];
+  const value = await mountedPair(input, { animate: true, mode: "interaction" });
+  const cursorIndex = value.result.document.tree.nodes.findIndex((node) => node.id === "synthetic/cursor");
+  const leafIndex = value.result.document.tree.nodes.findIndex((node) => node.id === "synthetic/leaf");
+  assert.equal(value.reference.namespaced[cursorIndex].style.transform, "translate3d(160px, 170px, 0) scale(2)");
+  assert.equal(value.alternate.namespaced[cursorIndex].style.transform, "translate3d(160px, 170px, 0) scale(2)");
+
+  value.reference.frame(0);
+  value.alternate.frame(0);
+  dispatch(value.referenceHost, "pointerdown", { button: 0, pointerId: 1, clientX: 160, clientY: 170 });
+  dispatch(value.alternateHost, "pointerdown", { button: 0, pointerId: 1, clientX: 160, clientY: 170 });
+  value.reference.frame(34);
+  value.alternate.frame(34);
+  const selectedTransform = value.reference.namespaced[leafIndex].style.transform;
+  dispatch(value.referenceHost, "pointermove", { pointerId: 1, clientX: 180, clientY: 170 });
+  dispatch(value.alternateHost, "pointermove", { pointerId: 1, clientX: 180, clientY: 170 });
+  for (const timestamp of [68, 102]) {
+    value.reference.frame(timestamp);
+    value.alternate.frame(timestamp);
+  }
+  assert.notEqual(value.reference.namespaced[leafIndex].style.transform, selectedTransform);
+  assertEquivalent(value, "interaction through presentation appearance");
+  value.referenceRuntime.destroy();
+  value.alternateRuntime.destroy();
+});
+
 test("alternate viewer rolls back partial phases and keeps destroy idempotent", async () => {
   const built = buildDom(await syntheticPolycssInput());
   const result = await readDomBrowser(built.bytes, { externalResources: builtExternalResources(built) });

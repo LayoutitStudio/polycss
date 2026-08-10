@@ -6,6 +6,7 @@ import vm from "node:vm";
 import { mountDom, readDomBrowser, readDomBrowserUrl } from "../src/browser.js";
 import { createInteractionInput } from "../src/browser-input.js";
 import { decodeJson, encodeCanonicalJson } from "../src/canonical-json.js";
+import { createStaticPresentation } from "../src/state/presentation.js";
 import { buildDom } from "../src/writer.js";
 import { builtExternalResources, errorCode, syntheticAnimationWithoutEffectsInput, syntheticInput, syntheticStaticPresentationInput, syntheticPolycssInput } from "./helpers.js";
 import { dispatch, FakeElement, fakeBrowserDocument } from "./fake-browser.js";
@@ -797,5 +798,31 @@ test("pointer mapping converts a non-uniformly scaled surface back to layout coo
     dispatch(host, "pointermove", { clientX, clientY: 290 });
     assert.deepEqual(input.sample().pointer, { x: sourceX, y: 120 });
   }
+  input.destroy();
+});
+
+test("pointer mapping inverts the current presentation appearance", () => {
+  const { document } = fakeBrowserDocument();
+  const host = new FakeElement(document, "main");
+  const camera = new FakeElement(document, "div");
+  const parameters = { fitHeight: 240, fitWidth: 320, sourceHeight: 240, sourceWidth: 320 };
+  const presentation = createStaticPresentation({
+    channels: [{
+      id: "presentation",
+      interpreter: "static-presentation@0",
+      parameters,
+      targets: { camera: "camera" },
+    }],
+  }, { host, byId: new Map([["camera", camera]]) });
+  presentation.publishAppearance(["zoomed", 2, 10]);
+  assert.equal(camera.style.left, "-160px");
+  assert.equal(camera.style.top, "-110px");
+  assert.equal(camera.style.transform, "scale(2)");
+  assert.deepEqual(presentation.viewportPoint(160, 120, 320, 240), { x: 160, y: 130, scale: 2 });
+
+  const input = createInteractionInput(host, host, presentation);
+  input.setEnabled(true);
+  dispatch(host, "pointermove", { clientX: 160, clientY: 130 });
+  assert.deepEqual(input.sample().pointer, { x: 160, y: 120 });
   input.destroy();
 });

@@ -123,5 +123,6 @@ pnpm --filter @layoutit/polycss-domformat test:release
 
 The gate runs strict type checking, Node tests, independent reader/producer
 conformance corpora, real-browser noninitial-frame mount and visual
-comparisons, exact tarball allowlisting, byte-identical packing, clean-install
+comparisons, exact tarball allowlisting, two byte-identical packs in one
+toolchain, clean-install
 API/CLI/declaration checks, and deterministic independent-producer checks.

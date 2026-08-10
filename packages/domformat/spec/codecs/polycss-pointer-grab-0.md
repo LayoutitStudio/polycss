@@ -37,8 +37,8 @@ admitted.
 `data.packet` contains only:
 
 - `version: 0` and `arithmetic: "ieee754-f32-per-operation"`;
-- `input`: source viewport, ordered cursor bounds, initial cursor, signed stick
-  range, deadzone/scale, distinct button masks, hit radius, cursor-visible
+- `input`: source viewport, ordered cursor bounds, initial cursor, fixed signed
+  stick range `[-128,127]`, deadzone/scale, distinct button masks, hit radius, cursor-visible
   ticks, horizontal mirror axis, and exact pointer quantization
   `trunc-toward-zero-then-clamp`;
 - `animator`: explicit state ids, initial/eye frame, doze/sleep/wake bounds,
@@ -90,6 +90,11 @@ sample. Sample composition is always `stickX`, `stickY`, `pressed`, `hold`, then
 `pointer`; unrelated or disabled key events and editable-target keydown events
 are ignored. An editable-target keyup may clear a level already owned by the
 mount, preventing a stuck key, but is not consumed with `preventDefault`.
+Host pointer coordinates are converted to mount-surface layout coordinates and
+then through the inverse of the current static-presentation camera mapping.
+Left is `ArrowLeft`/`KeyA`, right is `ArrowRight`/`KeyD`, up is
+`ArrowUp`/`KeyW`, down is `ArrowDown`/`KeyS`, grab is `Space`, and hold is
+`KeyR`. Opposed directions cancel; active axes emit only `-128`, `0`, or `127`.
 
 ## Animator and tick order
 
@@ -329,9 +334,11 @@ Insert zero fourth components and a final one to form CSS `matrix3d` in the same
 
 Finally, when leaf `width` or `height` differs from `32`, parse that matrix,
 multiply components 0..2 by `32/width` and components 4..6 by `32/height`,
-round all 16 components to the leaf's `matrixDecimals`, retain the exact
-`0`, `1`, and `-1` spellings, and normalize negative zero. This last fit,
-including the fixed raster basis size of 32, is observable profile behavior.
+round all 16 components to the leaf's `matrixDecimals`, convert them with
+ECMAScript finite-number string semantics, and normalize negative zero to `0`.
+If this fitted, rounded matrix has zero-area in-plane basis columns, return no
+transform. This last fit, including the fixed raster basis size of 32, is
+observable profile behavior.
 
 ## Lifecycle and output
 

@@ -12,9 +12,11 @@ interface PresentationParameters {
 
 type BoundPresentationTargets = Readonly<Record<string, HTMLElement>>;
 
-interface StaticPresentation {
+export interface StaticPresentation extends PresentationParameters {
   publishAppearance(appearance: unknown): void;
   resize(): void;
+  sourcePoint(x: number, y: number, width: number, height: number): Readonly<{ x: number; y: number }>;
+  viewportPoint(x: number, y: number, width: number, height: number): Readonly<{ x: number; y: number; scale: number }>;
 }
 
 export function createStaticPresentation(
@@ -38,19 +40,29 @@ export function createStaticPresentation(
   let appearanceScale = 1;
   let appearanceTranslateY = 0;
 
+  const layout = (width: number, height: number) => {
+    const sourceScale = Math.min(width / parameters.fitWidth, height / parameters.fitHeight);
+    const scale = sourceScale * appearanceScale;
+    return {
+      left: width / 2 - parameters.sourceWidth * scale / 2,
+      scale,
+      top: height / 2 - parameters.sourceHeight * scale / 2 + appearanceTranslateY * sourceScale,
+    };
+  };
+
   const apply = () => {
     const width = host.clientWidth || options.viewportWidth || parameters.sourceWidth;
     const height = host.clientHeight || options.viewportHeight || parameters.sourceHeight;
-    const sourceScale = Math.min(width / parameters.fitWidth, height / parameters.fitHeight);
-    const scale = sourceScale * appearanceScale;
-    camera.style.left = `${cssNumber(width / 2 - parameters.sourceWidth * scale / 2)}px`;
-    camera.style.top = `${cssNumber(height / 2 - parameters.sourceHeight * scale / 2 + appearanceTranslateY * sourceScale)}px`;
+    const next = layout(width, height);
+    camera.style.left = `${cssNumber(next.left)}px`;
+    camera.style.top = `${cssNumber(next.top)}px`;
     camera.style.width = `${parameters.sourceWidth}px`;
     camera.style.height = `${parameters.sourceHeight}px`;
-    camera.style.transform = scale === 1 ? "" : `scale(${cssNumber(scale)})`;
+    camera.style.transform = next.scale === 1 ? "" : `scale(${cssNumber(next.scale)})`;
   };
 
   return Object.freeze({
+    ...parameters,
     publishAppearance(appearance: unknown) {
       invariant(Array.isArray(appearance), "INVALID_PRESENTATION_PUBLICATION", "Presentation appearance is invalid.");
       const values = appearance as unknown[];
@@ -60,5 +72,13 @@ export function createStaticPresentation(
       apply();
     },
     resize: apply,
+    sourcePoint(x: number, y: number, width: number, height: number) {
+      const next = layout(width, height);
+      return Object.freeze({ x: (x - next.left) / next.scale, y: (y - next.top) / next.scale });
+    },
+    viewportPoint(x: number, y: number, width: number, height: number) {
+      const next = layout(width, height);
+      return Object.freeze({ x: next.left + x * next.scale, y: next.top + y * next.scale, scale: next.scale });
+    },
   });
 }
