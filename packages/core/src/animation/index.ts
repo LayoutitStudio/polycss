@@ -57,7 +57,8 @@ export interface PolyAnimationTarget {
  * All mutating methods return `this` for chaining.
  */
 export interface PolyAnimationAction {
-  /** Start playing (sets weight=1, resets time if not already playing). */
+  /** Start playing from the current time. Does NOT reset time or weight —
+   *  a faded-out action stays invisible until you raise `weight`. */
   play(): PolyAnimationAction;
   /** Stop playing and reset time to 0. */
   stop(): PolyAnimationAction;

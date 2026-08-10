@@ -65,8 +65,8 @@ React/Vue `<PolyMesh>` supports the full table. The `<poly-mesh>` custom element
 | `receiveShadow` | `boolean` | Casters project per-coplanar-face SVG shadows onto this mesh's visible surfaces (Three.js `mesh.receiveShadow` semantics). Defaults to `false`. In React/Vue, any receiver in the scene disables the casters' ground-shadow fallback; vanilla has no such fallback, so a receiver is required for any shadow to appear. |
 | `shadowDefinition` | `number` | Per-mesh parametric-shadow detail, overriding the scene's `shadow.definition` (only when `shadow.parametric`). |
 | `merge` | `boolean` | Run the polygon optimizer (dedupe, interior cull, coplanar/lossy merge). Defaults to `true`. Set `false` to render **the polygon array entering the renderer** exactly as given. It cannot restore source-file geometry: with `src`, `loadMesh` has already optimized the parse result before `merge` is consulted. |
-| `fallback` | `ReactNode` | Rendered while `src` is loading. (React / Vue only.) |
-| `errorFallback` | `(error: Error) => ReactNode` | Rendered if parse fails. (React / Vue only.) |
+| `fallback` | `ReactNode` | Rendered while `src` is loading. React prop / Vue `#fallback` slot. |
+| `errorFallback` | `(error: Error) => ReactNode` | Rendered if parse fails. React prop / Vue `#error` slot. |
 | `children` | `(polygon, index) => ReactNode` | Per-polygon render prop / scoped slot. (React / Vue only.) |
 
 ## Ground Props

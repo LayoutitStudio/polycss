@@ -179,7 +179,7 @@
       castShadow: qs("cs", "1") !== "0",
       // Floor mesh visibility — gallery's "Show ground" toggle. When
       // hidden the floor mesh is removed from the DOM/scene-graph so
-      // the engine falls back to its virtual-ground shadow.
+      // the floor stays a receiver (vanilla has no virtual-ground fallback).
       floorVisible: qs("fv", "1") !== "0",
       // Floor mesh `receiveShadow` flag — gallery's gallery-ground
       // mesh DEFAULTS this to false (omits the option), which suppresses

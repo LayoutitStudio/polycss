@@ -1,5 +1,5 @@
 /**
- * Primitive shape custom elements — <poly-box>, <poly-plane>, <poly-ring>,
+ * Primitive shape custom elements — <poly-box>, <poly-plane>, <poly-sphere>, <poly-ring>,
  * <poly-octahedron>, <poly-tetrahedron>, <poly-icosahedron>, <poly-dodecahedron>,
  * <poly-cylinder>, <poly-cone>, <poly-torus>.
  *

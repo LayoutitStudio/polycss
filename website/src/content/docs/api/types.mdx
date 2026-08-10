@@ -435,6 +435,8 @@ interface PolyMeshHandle {
   getRotation(): Vec3 | undefined;
   getScale(): number | Vec3 | undefined;
   getPolygons(): Polygon[];
+  /** Resolves once every texture leaf on this mesh has loaded/decoded. */
+  whenTexturesReady(): Promise<void>;
   remove(): void;
   dispose(): void;
 }
@@ -444,7 +446,7 @@ interface PolyMeshHandle {
 
 ## Framework Type Exports
 
-React and Vue export their public prop, event, context, and handle types next to the runtime components/composables. Vue mirrors the React names where applicable, with Vue-specific context/composable names such as `PolyCameraContextKey`, `PolySelectionContextKey`, `PolyContext`, and `UsePolyAnimationResultVue`.
+React and Vue export their public prop, event, context, and handle types next to the runtime components/composables. Vue mirrors the React names where applicable, with Vue-specific context/composable names such as `PolyCameraContextKey`, `PolySelectionContextKey`, `PolyContext`, and `UsePolyAnimationResultVue`. Imperative control **options and handle** types belong to the vanilla package and are not re-exported by React or Vue — see the vanilla-only list below.
 
 Runtime selection helpers are exported from the framework packages: `findPolyMeshHandle`, `pointInMeshElement`, and `findMeshUnderPoint`.
 
@@ -452,9 +454,10 @@ Runtime selection helpers are exported from the framework packages: `findPolyMes
 <summary>Framework type inventory</summary>
 
 - Component props: `PolyCameraProps`, `PolyOrthographicCameraProps`, `PolyPerspectiveCameraProps`, `PolySceneProps`, `PolyMeshProps`, `PolyGroundProps`, `PolyProps`, `PolyBoxProps`, `PolyPlaneProps`, `PolyRingProps`, `PolyOctahedronProps`, `PolySphereProps`, `PolyTetrahedronProps`, `PolyIcosahedronProps`, `PolyDodecahedronProps`, `PolyCylinderProps`, `PolyConeProps`, `PolyTorusProps`, `PolyAxesHelperProps`, `PolyDirectionalLightHelperProps`.
-- Control and selection props/handles: `PolyOrbitControlsProps`, `PolyMapControlsProps`, `PolyFirstPersonControlsProps`, `PolyTransformControlsProps`, `PolySelectProps`, `PolyControlsAnimateOptions`, `PolyControlsBaseOptions`, `PolyControlsCamera`, `PolyControlsHandle`, `PolyControlsChangeEvent`, `PolyControlsInteractionEvent`, `PolyControlsEvent`, `PolyControlsListener`, `PolyOrbitControlsCamera`, `PolyMapControlsCamera`, `PolyFirstPersonControlsOptions`, `PolyFirstPersonControlsHandle`, `PolyOrbitControlsOptions`, `PolyOrbitControlsHandle`, `PolyMapControlsOptions`, `PolyMapControlsHandle`, `PolyTransformControlsOptions`, `PolyTransformControlsHandle`, `PolySelectOptions`, `PolySelectionHandle`.
+- Control and selection props: `PolyOrbitControlsProps`, `PolyMapControlsProps`, `PolyTransformControlsProps`, `PolySelectProps`, `PolyControlsAnimateOptions`, `PolyOrbitControlsCamera`, `PolyMapControlsCamera`. **React only:** `PolyFirstPersonControlsProps`, `PolyControlsCamera`.
+- **Vanilla only** — exported from `@layoutit/polycss`, NOT from the framework packages: `PolyControlsBaseOptions`, `PolyControlsHandle`, `PolyControlsChangeEvent`, `PolyControlsInteractionEvent`, `PolyControlsEvent`, `PolyControlsListener`, `PolyOrbitControlsOptions`, `PolyOrbitControlsHandle`, `PolyMapControlsOptions`, `PolyMapControlsHandle`, `PolyFirstPersonControlsOptions`, `PolyFirstPersonControlsHandle`, `PolyTransformControlsOptions`, `PolyTransformControlsHandle`, `PolySelectOptions`, `PolySelectionHandle`, `PolyShapeResult`, `PolySceneSnapshotErrorCode`.
 - Hooks, events, and contexts: `UseCameraOptions`, `UseCameraResult`, `UseSceneContextOptions`, `UseSceneContextResult`, `UseMeshOptions`, `UseMeshResult`, `UsePolyAnimationResult`, `PolyPointerEvent`, `PolyMouseEvent`, `PolyWheelEvent`, `PolyEventHandler`, `InteractionProps`, `PolySelectionApi`, `PolyCameraContext`, `PolyCameraContextValue`.
-- Utility types: `PolyTransformControlsObject`, `PolyTransformControlsObjectChangeEvent`, `PolySceneSnapshotErrorCode`, `PolyShapeResult`, `TransformProps`, `DOMPassthroughProps`.
+- Utility types: `PolyTransformControlsObject`, `PolyTransformControlsObjectChangeEvent`. **React only:** `TransformProps`, `DOMPassthroughProps`.
 
 </details>
 

@@ -4,7 +4,7 @@
  * Mirrors the React PolyTransformControls API and the vanilla
  * createTransformControls behavior.
  *
- * Geometry: arrows use `arrowPolygons`, rings use `ringPolygons`
+ * Geometry: arrows use `arrowPolygons`, rings use `ringQuadPolygons`
  * (both from @layoutit/polycss-core). Each is rendered through a regular
  * `<PolyMesh>` so it composes with the scene's lighting / atlas
  * pipeline. baked mode is forced on the gizmo PolyMeshes so hover/
