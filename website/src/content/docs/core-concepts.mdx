@@ -39,8 +39,9 @@ The camera element (`<poly-camera>` / `PolyCamera`) is normally the **outer** no
 <!-- Vanilla -->
 <poly-camera rot-x="65" rot-y="45">
   <poly-scene
-    directional-light='{"direction":[0.5,-0.7,0.6],"color":"#ffe4a8"}'
-    ambient-light='{"intensity":0.4}'>
+    directional-direction="0.5,-0.7,0.6"
+    directional-color="#ffe4a8"
+    ambient-intensity="0.4">
     <poly-octahedron size="100" color="#7dd3fc"></poly-octahedron>
   </poly-scene>
 </poly-camera>
@@ -90,7 +91,7 @@ Scene content renders relative to the (0,0,0) origin. Most mesh files are author
 
 ```html
 <!-- Vanilla -->
-<poly-mesh src="/model.glb" auto-center position="[0,0,0]"></poly-mesh>
+<poly-mesh src="/model.glb" auto-center position="0,0,0"></poly-mesh>
 ```
 
 ```tsx

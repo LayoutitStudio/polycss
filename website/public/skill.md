@@ -22,6 +22,7 @@ import {
   createPolyScene,
   createPolyOrbitControls,
   createPolyBox,
+  createPolyPlane,
   loadMesh,
 } from "@layoutit/polycss";
 ```
@@ -180,7 +181,7 @@ createPolyOrbitControls(scene, { drag: true, wheel: true });
 scene.add(createPolyBox({ size: 100, color: "#ffd166" }), { position: [0, 0, 50] });
 scene.add(await loadMesh("/model.glb"), { castShadow: true });
 // Vanilla has no ground fallback — a caster needs an explicit receiver.
-scene.add(createPolyPlane({ size: 400, color: "#7d848e" }), { receiveShadow: true });
+scene.add(createPolyPlane({ axis: 2, size: 4, color: "#7d848e" }), { receiveShadow: true });
 ```
 
 React (Vue mirrors this with kebab-case props):

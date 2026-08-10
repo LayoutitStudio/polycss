@@ -292,6 +292,14 @@ interface PolyRenderStats {
   shadowLeafCount: number;
   /** Surface leaf categories used by the renderer. */
   surfaceLeafCounts: PolyRenderSurfaceLeafCounts;
+  /** Per-leaf texture load/decode readiness. */
+  textureReadiness: PolyTextureReadiness;
+  /** Atlas page and bitmap accounting. */
+  textureStats: PolyTextureRenderStats;
+  /** Snapshot-export accounting. */
+  snapshotStats: PolySnapshotRenderStats;
+  /** Camera projection + framing snapshot. */
+  cameraStats: PolyCameraSnapshotStats;
   /** Number of PolyCSS bucket wrapper nodes under the measured scope. */
   bucketCount: number;
 }
