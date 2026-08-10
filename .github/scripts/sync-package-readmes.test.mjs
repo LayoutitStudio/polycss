@@ -122,4 +122,3 @@ test("rejects case-altered markers even when paired (fail-open regression)", () 
   );
   assert.match(error ?? "", /malformed shared marker/);
 });
-
