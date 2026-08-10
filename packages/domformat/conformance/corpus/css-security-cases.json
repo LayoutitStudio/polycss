@@ -9,6 +9,12 @@
       "expect": "valid"
     },
     {
+      "id": "leading-byte-order-mark",
+      "css": "\uFEFF[data-domformat-root=\"synthetic\"]{color:red}\n",
+      "tokens": [],
+      "expect": "MALFORMED_UTF8"
+    },
+    {
       "id": "remote-url",
       "css": "[data-domformat-root=\"synthetic\"]{background:url(\"https://example.test/a\")}\n",
       "tokens": [],

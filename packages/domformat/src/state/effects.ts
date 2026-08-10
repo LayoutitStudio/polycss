@@ -18,7 +18,7 @@ interface EffectStarDefinition {
 }
 
 interface EffectEmitterDefinition {
-  readonly mode: "grab" | "continuous";
+  readonly mode: "grab" | "follow-star";
   readonly poolSize: number;
   readonly sourceStar: number;
   readonly backgroundPositions: readonly string[];

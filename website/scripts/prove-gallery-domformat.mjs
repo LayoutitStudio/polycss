@@ -397,6 +397,7 @@ async function main() {
       }
       process.stdout.write(`[${frame + 1}/${options.frames}] ${name}\n`);
     }
+    requireCondition(errors.length === 0, errors.join(" | "));
     requireCondition(domMismatches.length === 0, `Canonical DOM state diverged from the live Gallery: ${JSON.stringify(domMismatches)}`);
     requireCondition(containerMismatches.length === 0, `Canonical DOM containers diverged from the live Gallery: ${JSON.stringify(containerMismatches)}`);
     requireCondition(pixelFailures.length === 0, `Canonical pixels exceeded the calibrated Chromium compositor bound: ${JSON.stringify(pixelFailures)}`);

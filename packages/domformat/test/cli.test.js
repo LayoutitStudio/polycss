@@ -6,27 +6,52 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { errorCode, projectRoot, syntheticManifestPath } from "./helpers.js";
+import { main } from "../src/cli.js";
 import { loadManifest } from "../src/manifest.js";
 import { writeDomFiles } from "../src/package-files.js";
 
 const execFileAsync = promisify(execFile);
 const cli = join(projectRoot, "bin/domformat.js");
 
+async function invokeCli(argv) {
+  const stdout = [];
+  const stderr = [];
+  const stdoutWrite = process.stdout.write;
+  const stderrWrite = process.stderr.write;
+  process.stdout.write = (chunk) => { stdout.push(String(chunk)); return true; };
+  process.stderr.write = (chunk) => { stderr.push(String(chunk)); return true; };
+  try {
+    const status = await main(argv);
+    return { status, stdout: stdout.join(""), stderr: stderr.join("") };
+  } finally {
+    process.stdout.write = stdoutWrite;
+    process.stderr.write = stderrWrite;
+  }
+}
+
 test("CLI encode, validate, inspect, and decode commands run end to end", async () => {
   const root = await mkdtemp(join(tmpdir(), "domformat-cli-"));
   const file = join(root, "synthetic.json");
-  const encoded = await execFileAsync(process.execPath, [cli, "encode", syntheticManifestPath, "--output", file]);
+  const encoded = await invokeCli(["encode", syntheticManifestPath, "--output", file]);
+  assert.equal(encoded.status, 0);
   assert.match(encoded.stdout, /wrote .*synthetic\.json/u);
-  const validated = await execFileAsync(process.execPath, [cli, "validate", file]);
+  const validated = await invokeCli(["validate", file]);
+  assert.equal(validated.status, 0);
   assert.match(validated.stdout, /valid domformat@0 polycss-3d@0/u);
-  const inspected = await execFileAsync(process.execPath, [cli, "inspect", file, "--json"]);
+  const inspected = await invokeCli(["inspect", file, "--json"]);
+  assert.equal(inspected.status, 0);
   const summary = JSON.parse(inspected.stdout);
   assert.equal(summary.tree.nodes, 3);
   const decodedDirectory = join(root, "decoded");
-  const decoded = await execFileAsync(process.execPath, [cli, "decode", file, "--output", decodedDirectory]);
+  const decoded = await invokeCli(["decode", file, "--output", decodedDirectory]);
+  assert.equal(decoded.status, 0);
   assert.match(decoded.stdout, /decoded domformat@0/u);
   const tree = JSON.parse(await readFile(join(decodedDirectory, "tree.json"), "utf8"));
   assert.equal(tree.nodes.length, 3);
+  assert.match((await invokeCli(["inspect", "--help"])).stdout, /domformat encode/u);
+  const rejected = await invokeCli(["valueOf", syntheticManifestPath]);
+  assert.equal(rejected.status, 1);
+  assert.match(rejected.stderr, /CLI_ARGUMENT/u);
 });
 
 test("encode preflights every sibling target and leaves no partial document", async () => {

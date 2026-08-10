@@ -2891,6 +2891,8 @@ def validate_css(payload: bytes, binding: dict, resources: dict[str, dict], limi
         css = payload.decode("utf-8", "strict")
     except UnicodeDecodeError as error:
         raise DomError("MALFORMED_UTF8", f"Stylesheet is not UTF-8: {error}") from error
+    require(not css.startswith("\ufeff"), "MALFORMED_UTF8",
+            f"Stylesheet {binding['id']} begins with a byte-order mark")
     require("\\" not in css, "UNSAFE_CSS_ESCAPE", "Stylesheet escapes are forbidden")
     require("/*" not in css and "*/" not in css, "UNSAFE_CSS_COMMENT", "Stylesheet comments are forbidden")
     require("@" not in css and "<!--" not in css and "-->" not in css,

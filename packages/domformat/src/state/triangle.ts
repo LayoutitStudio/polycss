@@ -113,8 +113,9 @@ function radialExpansion(points: readonly number[], amount: number): number[] {
 function offsetByEdges(points: readonly number[], amounts: readonly number[]): readonly number[] {
   const count = points.length / 2;
   const maximum = Math.max(0, ...amounts);
+  const equalAmounts = amounts.every((amount) => Math.abs(amount - amounts[0]) <= BASIS_EPSILON);
   if (maximum <= 0) return points;
-  if (amounts.every((amount) => Math.abs(amount - amounts[0]) <= BASIS_EPSILON)) {
+  if (equalAmounts) {
     if (!convex(points) || Math.abs(signedArea(points)) <= BASIS_EPSILON) {
       return radialExpansion(points, amounts[0]);
     }
@@ -129,7 +130,7 @@ function offsetByEdges(points: readonly number[], amounts: readonly number[]): r
     const dx = points[b] - points[a];
     const dy = points[b + 1] - points[a + 1];
     const length = Math.hypot(dx, dy);
-    if (length <= BASIS_EPSILON) return amounts.every((amount) => amount === amounts[0])
+    if (length <= BASIS_EPSILON) return equalAmounts
       ? radialExpansion(points, amounts[0])
       : points;
     const ox = outward * dy / length * amounts[index];
@@ -147,7 +148,7 @@ function offsetByEdges(points: readonly number[], amounts: readonly number[]): r
     const previous = lines[(index + count - 1) % count];
     const next = lines[index];
     const point = intersect(previous[0], previous[1], previous[2], previous[3], next[0], next[1], next[2], next[3]);
-    if (!point) return amounts.every((amount) => amount === amounts[0])
+    if (!point) return equalAmounts
       ? radialExpansion(points, amounts[0])
       : points;
     const source = index * 2;

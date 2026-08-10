@@ -257,8 +257,9 @@ function declarationColon(value) {
 export function validateStylesheet(bytes, binding, resources, limits) {
   require(bytes.length <= limits.maxCssBytes, "CSS_SIZE_LIMIT", "Stylesheet exceeds its byte limit.");
   let css;
-  try { css = new TextDecoder("utf-8", { fatal: true }).decode(bytes); }
+  try { css = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes); }
   catch { throw new NVersionError("MALFORMED_UTF8", `Stylesheet ${binding.id} is not strict UTF-8.`); }
+  require(css.charCodeAt(0) !== 0xfeff, "MALFORMED_UTF8", `Stylesheet ${binding.id} begins with a byte-order mark.`);
   require(!css.includes("\\"), "UNSAFE_CSS_ESCAPE", "Stylesheet contains a CSS escape.");
   require(!css.includes("/*") && !css.includes("*/"), "UNSAFE_CSS_COMMENT", "Stylesheet contains a CSS comment.");
   require(!css.includes("@"), "UNSAFE_CSS_AT_RULE", "Stylesheet contains an at-rule.");

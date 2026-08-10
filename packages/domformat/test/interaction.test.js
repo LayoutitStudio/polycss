@@ -208,6 +208,15 @@ test("overlapping picks snap to the selected nearest control", async () => {
   assert.equal(frame.control.csrX, 170, "source x=150 mirrors back to public x=170");
 });
 
+test("picking has no hidden camera-distance ceiling", async () => {
+  const input = await interactionInput();
+  const packet = input.state.channels.find((channel) => channel.id === "interaction").data.packet;
+  packet.controls[0].cameraDistance = 20_000_000;
+  assert.doesNotThrow(() => buildDom(input));
+  const frame = runtime(input).interaction.step({ pressed: true, pointer: { x: 160, y: 120 } });
+  assert.equal(frame.selectedId, packet.controls[0].id);
+});
+
 test("triangle publication treats decimal-quantized zero-area bases as degenerate", () => {
   const transform = preparedTriangleTransform({
     basis: [0, 1, 2],

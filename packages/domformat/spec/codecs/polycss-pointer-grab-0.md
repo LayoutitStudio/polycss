@@ -78,8 +78,9 @@ the declared hold bit.
 
 For a declared horizontal mirror, display stick X and the already quantized and
 clamped absolute pointer X are mirrored before source execution, including
-asymmetric -128/127 endpoints. Published cursor X mirrors back. Quantization,
-clamping, and mirroring are packet data, not adapter conventions.
+asymmetric -128/127 endpoints. Published cursor X mirrors back and is clamped
+to the declared cursor bounds. Quantization, clamping, and mirroring are packet
+data, not adapter conventions.
 
 The browser adapter consumes host events in dispatch order. Mapped enabled
 keydown/keyup events update idempotent key levels; primary left pointer down/up
@@ -257,7 +258,8 @@ following adjacent edge. Distances/heights at most `1e-3` are omitted. It
 returns the request when no bound remains, otherwise the request clamped to the
 smallest bound.
 
-The general edge-offset operation is exact:
+The general edge-offset operation is exact. Amounts are equal when every amount
+differs from the first by at most `epsilon`:
 
 1. If the greatest amount is nonpositive, return the original points.
 2. A polygon is convex only when every consecutive cross product has absolute

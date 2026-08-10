@@ -7,6 +7,15 @@ export class FakeElement {
     this.parentNode = null;
     this.attributes = new Map();
     const styleTarget = {};
+    this.stylePriorities = new Map();
+    Object.defineProperty(styleTarget, "setProperty", {
+      enumerable: false,
+      value: (name, value, priority = "") => {
+        const property = String(name).replace(/-([a-z])/gu, (_match, letter) => letter.toUpperCase());
+        this.stylePriorities.set(String(name), String(priority));
+        this.style[property] = String(value);
+      },
+    });
     this.style = new Proxy(styleTarget, {
       set: (target, property, value) => {
         target[property] = value;
@@ -18,6 +27,7 @@ export class FakeElement {
     this.classes = [];
     this.classList = { add: (...tokens) => { this.classes.push(...tokens); } };
     this.listeners = new Map();
+    this.listenerSequence = 0;
     this.capturedPointers = new Set();
     this.clientWidth = 320;
     this.clientHeight = 240;
@@ -39,7 +49,7 @@ export class FakeElement {
   getAttribute(name) { return this.attributes.get(name) ?? null; }
   hasAttribute(name) { return this.attributes.has(name); }
   removeAttribute(name) { this.attributes.delete(name); }
-  addEventListener(name, listener) { this.listeners.set(`${name}:${this.listeners.size}`, listener); }
+  addEventListener(name, listener) { this.listeners.set(`${name}:${this.listenerSequence++}`, listener); }
   removeEventListener(name, listener) {
     for (const [key, value] of this.listeners) if (key.startsWith(`${name}:`) && value === listener) this.listeners.delete(key);
   }

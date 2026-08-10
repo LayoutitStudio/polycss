@@ -466,7 +466,7 @@ function pick(
     }
   }
   let selectedHit: { index: number; screen: Vec3; distance: number } | null = null;
-  let nearest = f32(10_000_000);
+  let nearest = Number.POSITIVE_INFINITY;
   for (const hit of hits) {
     if (hit.distance < nearest) {
       nearest = hit.distance;

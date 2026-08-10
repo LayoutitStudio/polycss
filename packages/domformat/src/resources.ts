@@ -298,10 +298,11 @@ export function validateCssBytes(bytes: Uint8Array, binding: DomStylesheetBindin
   invariant(bytes.length <= limits.maxCssBytes, "CSS_SIZE_LIMIT", `Stylesheet exceeds ${limits.maxCssBytes} bytes.`);
   let css: string;
   try {
-    css = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    css = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes);
   } catch {
     invariant(false, "MALFORMED_UTF8", `Stylesheet ${binding.id} is not valid UTF-8.`);
   }
+  invariant(css.charCodeAt(0) !== 0xfeff, "MALFORMED_UTF8", `Stylesheet ${binding.id} begins with a byte-order mark.`);
   validateCssClosure(css, binding, resources, limits);
   return css;
 }

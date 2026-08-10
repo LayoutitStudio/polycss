@@ -89,7 +89,12 @@ test("every configured limit is wired to a rejecting path", async () => {
   await assert.rejects(loadManifest(syntheticManifestPath, { limits: { maxDecodedInputBytes: 0 } }), errorCode("MANIFEST_INPUT_LIMIT"));
   await assert.rejects(loadManifest(syntheticManifestPath, { limits: { maxAggregateDecodedBytes: 128 } }), errorCode("AGGREGATE_DECODED_LIMIT"));
 
+  const excessiveNodeAttributes = structuredClone(basic);
+  excessiveNodeAttributes.tree.nodes[1].attributes["data-extra"] = "present";
+  assert.throws(() => buildDom(excessiveNodeAttributes, { limits: { maxAttributesPerNode: 1 } }), errorCode("ATTRIBUTE_COUNT_LIMIT"));
+
   const built = buildDom(basic);
+  assert.throws(() => readDom(built.bytes, { limits: { maxResources: 1 } }), errorCode("RESOURCE_COUNT_LIMIT"));
   assert.doesNotThrow(() => readDom(built.bytes, {
     limits: {
       maxFileBytes: built.bytes.length,
