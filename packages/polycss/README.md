@@ -120,7 +120,7 @@ Full reference: [polycss.com/api/three-parity](https://polycss.com/api/three-par
 ### PolyCamera
 
 - `rotX`, `rotY` control the orbit angle in degrees.
-- `zoom` scales the projected scene.
+- `zoom` is on-screen CSS pixels per world unit (default `0.65`).
 - `target` pans the camera target in world coordinates.
 - `distance` adds dolly pull-back.
 - `PolyCamera` is the orthographic default. Use `PolyPerspectiveCamera` when you want perspective depth.
@@ -130,7 +130,7 @@ Full reference: [polycss.com/api/three-parity](https://polycss.com/api/three-par
 - Geometry enters through `scene.add(parseResult, transform)` — there is **no** `polygons` option. In markup, use `<poly-mesh>` or `<poly-polygon>` children.
 - `directionalLight`, `pointLights` (direction-only, baked mode; optional per-light `castShadow`), and `ambientLight` control scene lighting.
 - `textureLighting` chooses `"baked"` or `"dynamic"`.
-- `textureQuality` controls atlas raster budget; `textureLeafSizing`, `textureImageRendering`, `textureBackend`, and `textureProjection` set per-polygon texture defaults.
+- `textureQuality` controls atlas raster budget. `textureImageRendering`, `textureBackend`, and `textureProjection` set per-polygon texture defaults; `textureLeafSizing` is scene/atlas-wide with no per-polygon override.
 - `strategies` can disable selected render strategies for diagnostics.
 - `autoCenter` rotates around the union bbox of all added meshes instead of world origin, updating as meshes are added or removed. Individual meshes opt out with `excludeFromAutoCenter`.
 

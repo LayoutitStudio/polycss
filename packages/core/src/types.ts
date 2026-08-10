@@ -4,13 +4,15 @@ export const DEFAULT_PROJECTION = "cubic" as const;
 /**
  * How polygon lighting is applied by DOM renderers.
  * - "baked": multiply the light tint into the off-DOM canvas before the
- *   polygon becomes an atlas sprite. Best fidelity (full RGB tint) but
- *   the atlas re-rasterizes whenever the light changes.
+ *   polygon becomes an atlas sprite. Best fidelity (full RGB tint), but a
+ *   light change needs a rebake. React/Vue re-render and rebake automatically;
+ *   vanilla freezes the lit surface until an explicit `mesh.rebakeAtlas()`.
  * - "dynamic": lighting computed entirely in CSS via per-polygon normals
  *   embedded in calc() and scene-root light vars (background-color +
  *   background-blend-mode multiply, masked by the atlas alpha). Atlas
  *   stays light-independent — sliding the light only writes a few CSS
- *   variables, no JS work, no atlas re-rasterization.
+ *   variables and no JS work in vanilla. (React/Vue still recompute atlas
+ *   plans on a light-prop change even in dynamic mode.)
  */
 export type PolyTextureLightingMode = "baked" | "dynamic";
 export type PolyTextureLeafSizing = "canonical" | "local" | "raster";
@@ -193,9 +195,10 @@ export interface Polygon {
   textureAlphaMode?: PolyTextureAlphaMode;
   /**
    * Shared material. When set, `material.texture` takes precedence over the
-   * inline `texture` field. If the polygon's UVs form an axis-aligned
-   * rectangle, PolyCSS uses the direct CSS background-image path (no per-
-   * polygon canvas rasterization). Falls back to the atlas path otherwise.
+   * inline `texture` field. Material-backed polygons render through the atlas
+   * by default; a direct image leaf requires valid `imageSource` metadata plus
+   * a resolved `backend: "image"` with source lighting. UV shape has no effect
+   * on backend selection.
    */
   material?: PolyMaterial;
   textureImageSource?: PolyTextureImageSource;

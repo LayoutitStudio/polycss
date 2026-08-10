@@ -14,7 +14,7 @@
  * Runs as `prepack` in every publishable package, so a stale block can never
  * reach npm. Run with `--check` in CI to fail on drift instead of writing.
  */
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { dirname, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -37,20 +37,9 @@ const blockRe = (name) =>
     `<!-- polycss:shared:${name}:start -->[\\s\\S]*?<!-- polycss:shared:${name}:end -->`,
   );
 
-const START_RE = /<!-- polycss:shared:([a-z-]+):start -->/g;
-const END_RE = /<!-- polycss:shared:([a-z-]+):end -->/g;
-
 const fail = (message) => {
   console.error(`[sync-package-readmes] ${message}`);
   process.exit(1);
-};
-
-const countByName = (text, re) => {
-  const counts = new Map();
-  for (const m of text.matchAll(re)) {
-    counts.set(m[1], (counts.get(m[1]) ?? 0) + 1);
-  }
-  return counts;
 };
 
 /**
@@ -63,7 +52,9 @@ export function assertWellFormed(text, label, allowed, onError = fail) {
   // (`links2`, `Links`, `:begin`, stray whitespace) must NOT read as "this
   // package opted out" — that would let `--check` pass on stale content.
   const MARKER_RE = /<!-- polycss:shared:([a-z-]+):(start|end) -->/g;
-  const LOOSE_RE = /<!--[^>]*polycss:shared[^>]*-->/g;
+  // `[^>]*` would miss a comment containing `>` — and a near-miss the scanner
+  // cannot see reads as "this package opted out", which is a silent fail-open.
+  const LOOSE_RE = /<!--(?:(?!-->)[\s\S])*?polycss:shared(?:(?!-->)[\s\S])*?-->/g;
 
   for (const m of text.matchAll(LOOSE_RE)) {
     if (!new RegExp(`^${MARKER_RE.source}$`).test(m[0]))
@@ -178,4 +169,16 @@ console.log(
 );
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main();
+// `import.meta.url` is realpathed by Node but `argv[1]` is not, so a symlink
+// anywhere in the invocation path would make this compare unequal — main()
+// would silently never run and `--check` would exit 0 on stale content.
+const invokedDirectly = () => {
+  if (!process.argv[1]) return false;
+  try {
+    return realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url));
+  } catch {
+    return false;
+  }
+};
+
+if (invokedDirectly()) main();

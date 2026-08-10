@@ -94,3 +94,12 @@ test("rejects marker-like comments that are not canonical", () => {
     assert.match(error ?? "", /malformed shared marker/, `should reject ${bad}`);
   }
 });
+
+test("rejects a near-miss marker containing '>' (fail-open regression)", () => {
+  // Both markers of a block corrupted with `>` made the file look marker-less,
+  // so `--check` reported "up to date" while a stale block shipped.
+  const { error } = check(
+    `head\n<!-- polycss:shared:license:start (see > note) -->\nSTALE\n<!-- polycss:shared:license:end (see > note) -->\n`,
+  );
+  assert.match(error ?? "", /malformed shared marker/);
+});
