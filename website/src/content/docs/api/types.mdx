@@ -452,7 +452,7 @@ interface PolyMeshHandle {
 
 ## Framework Type Exports
 
-React and Vue export their public prop, event, context, and handle types next to the runtime components/composables. Vue mirrors the React names where applicable, with Vue-specific context/composable names such as `PolyCameraContextKey`, `PolySelectionContextKey`, `PolyContext`, and `UsePolyAnimationResultVue`. Imperative control **options and handle** types belong to the vanilla package and are not re-exported by React or Vue — see the vanilla-only list below.
+React and Vue export their public prop, event, context, and handle types next to the runtime components/composables. Vue mirrors the React names where applicable, with Vue-specific context/composable names such as `PolyCameraContextKey`, `PolySelectionContextKey`, `PolyContext`, and `UsePolyAnimationResultVue`. Most imperative control **options and handle** types belong to the vanilla package and are not re-exported by React or Vue — see the vanilla-only list below. The first-person pair (`PolyFirstPersonControlsOptions`, `PolyFirstPersonControlsHandle`) is the exception: both framework packages do re-export it.
 
 Runtime selection helpers are exported from the framework packages: `findPolyMeshHandle`, `pointInMeshElement`, and `findMeshUnderPoint`.
 

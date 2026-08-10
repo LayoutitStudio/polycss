@@ -114,3 +114,12 @@ test("rejects a bogus `--!>` terminator", () => {
   assert.match(error ?? "", /malformed shared marker/);
 });
 
+test("rejects case-altered markers even when paired (fail-open regression)", () => {
+  // A matched PAIR of uppercase markers previously read as "no markers", so
+  // `--check` passed while the block between them was stale.
+  const { error } = check(
+    `head\n<!-- POLYCSS:shared:links:start -->\nSTALE\n<!-- POLYCSS:shared:links:end -->\n`,
+  );
+  assert.match(error ?? "", /malformed shared marker/);
+});
+

@@ -62,8 +62,12 @@ export function assertWellFormed(text, label, allowed, onError = fail) {
   const covered = [];
   for (const m of text.matchAll(MARKER_RE)) covered.push([m.index, m.index + m[0].length]);
 
-  const TOKEN = "polycss:shared";
-  for (let i = text.indexOf(TOKEN); i !== -1; i = text.indexOf(TOKEN, i + 1)) {
+  // Case-INSENSITIVE: `<!-- POLYCSS:shared:x:start -->` is not canonical, and
+  // a case-sensitive scan would not see it — the file would read as
+  // marker-less and stale content would pass `--check`.
+  const TOKEN_RE = /polycss:shared/gi;
+  for (const t of text.matchAll(TOKEN_RE)) {
+    const i = t.index;
     if (!covered.some(([s, e]) => i >= s && i < e)) {
       const line = text.slice(0, i).split("\n").length;
       const snippet = text.slice(Math.max(0, i - 24), i + 40).split("\n")[0];
