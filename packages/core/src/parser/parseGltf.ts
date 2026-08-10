@@ -14,7 +14,7 @@
  *   1. Read the POSITION accessor → Vec3[] of vertex positions.
  *   2. Read the indices accessor → triangle index array.
  *   3. Pick the material's pbrMetallicRoughness.baseColorFactor as a
- *      sRGB color, fall back to `materialColors[name]`, then `defaultColor` (#888888).
+ *      sRGB color, `materialColors[name]` overrides it when the material is named, and `defaultColor` (#888888) is the last resort.
  *   4. Emit one triangle Polygon per (i, i+1, i+2).
  *
  * After parsing, the mesh is uniformly scaled to fit `targetSize` units

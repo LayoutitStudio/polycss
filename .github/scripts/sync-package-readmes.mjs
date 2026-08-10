@@ -52,15 +52,25 @@ export function assertWellFormed(text, label, allowed, onError = fail) {
   // (`links2`, `Links`, `:begin`, stray whitespace) must NOT read as "this
   // package opted out" — that would let `--check` pass on stale content.
   const MARKER_RE = /<!-- polycss:shared:([a-z-]+):(start|end) -->/g;
-  // `[^>]*` would miss a comment containing `>` — and a near-miss the scanner
-  // cannot see reads as "this package opted out", which is a silent fail-open.
-  const LOOSE_RE = /<!--(?:(?!-->)[\s\S])*?polycss:shared(?:(?!-->)[\s\S])*?-->/g;
 
-  for (const m of text.matchAll(LOOSE_RE)) {
-    if (!new RegExp(`^${MARKER_RE.source}$`).test(m[0]))
+  // Anything matching a canonical marker is accounted for; every OTHER
+  // occurrence of the reserved token is malformed. Scanning for the token
+  // itself (rather than for well-formed comments) is what catches an
+  // unterminated `<!-- polycss:shared:x:start` or a bogus `--!>` terminator —
+  // forms the comment-shaped scanner cannot see, which previously read as
+  // "this package opted out" and let stale content ship.
+  const covered = [];
+  for (const m of text.matchAll(MARKER_RE)) covered.push([m.index, m.index + m[0].length]);
+
+  const TOKEN = "polycss:shared";
+  for (let i = text.indexOf(TOKEN); i !== -1; i = text.indexOf(TOKEN, i + 1)) {
+    if (!covered.some(([s, e]) => i >= s && i < e)) {
+      const line = text.slice(0, i).split("\n").length;
+      const snippet = text.slice(Math.max(0, i - 24), i + 40).split("\n")[0];
       return onError(
-        `${label}: malformed shared marker ${JSON.stringify(m[0])} — expected exactly "<!-- polycss:shared:<name>:start -->" or ":end", with a lowercase-and-hyphen name`,
+        `${label}:${line}: malformed shared marker near ${JSON.stringify(snippet.trim())} — expected exactly "<!-- polycss:shared:<name>:start -->" or ":end", with a lowercase-and-hyphen name`,
       );
+    }
   }
 
   const names = new Set();

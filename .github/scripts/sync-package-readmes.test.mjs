@@ -103,3 +103,14 @@ test("rejects a near-miss marker containing '>' (fail-open regression)", () => {
   );
   assert.match(error ?? "", /malformed shared marker/);
 });
+
+test("rejects an unterminated marker comment", () => {
+  const { error } = check(`head\n<!-- polycss:shared:links:start\nSTALE\n`);
+  assert.match(error ?? "", /malformed shared marker/);
+});
+
+test("rejects a bogus `--!>` terminator", () => {
+  const { error } = check(`head\n<!-- polycss:shared:links:start --!>\nSTALE\n`);
+  assert.match(error ?? "", /malformed shared marker/);
+});
+

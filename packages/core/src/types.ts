@@ -5,14 +5,17 @@ export const DEFAULT_PROJECTION = "cubic" as const;
  * How polygon lighting is applied by DOM renderers.
  * - "baked": multiply the light tint into the off-DOM canvas before the
  *   polygon becomes an atlas sprite. Best fidelity (full RGB tint), but a
- *   light change needs a rebake. React/Vue re-render and rebake automatically;
- *   vanilla freezes the lit surface until an explicit `mesh.rebakeAtlas()`.
+ *   light change needs a rebake. React/Vue re-render and rebake on any light
+ *   prop change. Vanilla freezes the lit surface on a `directionalLight`
+ *   change until an explicit `mesh.rebakeAtlas()`; a `pointLights` change
+ *   does re-render every mesh.
  * - "dynamic": lighting computed entirely in CSS via per-polygon normals
  *   embedded in calc() and scene-root light vars (background-color +
  *   background-blend-mode multiply, masked by the atlas alpha). Atlas
  *   stays light-independent — sliding the light only writes a few CSS
- *   variables and no JS work in vanilla. (React/Vue still recompute atlas
- *   plans on a light-prop change even in dynamic mode.)
+ *   variables, with no JS work in vanilla. (React/Vue mesh rendering may still
+ *   recompute atlas plans on a light-prop change; the direct
+ *   `<PolyScene polygons>` path keeps its plans stable.)
  */
 export type PolyTextureLightingMode = "baked" | "dynamic";
 export type PolyTextureLeafSizing = "canonical" | "local" | "raster";
