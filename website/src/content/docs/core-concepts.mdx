@@ -147,9 +147,12 @@ Vertex order sets the face normal by the right-hand rule, and PolyCSS
 **backface-culls** every leaf. A polygon wound the wrong way is invisible from
 the side you meant to show, and its Lambert shading is computed from the flipped
 normal — typically ambient-only, since the directional term clamps at zero (it
-darkens, it does not invert). Winding does **not** stop shadow casting: shadow
-projection ignores orientation, so a reversed face can be invisible and still
-cast onto a `receiveShadow` mesh (or React/Vue's ground fallback).
+darkens, it does not invert). Winding affects shadows too, and differently per path: React/Vue's
+ground-shadow fallback projects every polygon with no orientation test, so a
+reversed face still casts there. The `receiveShadow` path — all renderers, and
+vanilla's only mechanism — light-back-face-culls caster polygons (except
+self-shadow and unreliable-silhouette casters), so reversing an open face's
+winding can remove its shadow as well as the face.
 
 Vertices are **counter-clockwise seen from the outside** (the side you want to
 look at):
@@ -256,7 +259,7 @@ from any further renderer optimization, call `parseObj` / `parseStl` /
 
 ### Degenerate polygons vanish silently
 
-Fewer than three vertices, a zero-length edge, or a zero-area face produces no
+Fewer than three vertices, a zero-area face, or a degenerate first edge produces no
 leaf and no console output. If a face is missing and the winding is right, check
 for duplicate or collinear vertices.
 

@@ -138,7 +138,7 @@ Full reference: [polycss.com/api/three-parity](https://polycss.com/api/three-par
 
 `<poly-mesh>` attributes: `src` (loads `.obj`, `.stl`, `.gltf`, `.glb`, or `.vox`), `mtl`, `position`, `scale`, `rotation`, `auto-center`, `mesh-resolution`, `cast-shadow`, `receive-shadow`, `target-size`, `default-color`, `palette`, `include-objects`, `exclude-objects`. There is **no** `polygons` attribute — pass pre-parsed geometry to `scene.add(...)`, or use `<poly-polygon>` for inline one-off polygons.
 
-`scene.add(result, transform)` additionally accepts `merge`, `meshResolution`, `stableDom`, `shadowDefinition`, `excludeFromAutoCenter`, and `id`. These are imperative-only — they are not `<poly-mesh>` attributes.
+`scene.add(result, transform)` additionally accepts `merge`, `meshResolution`, `stableDom`, `shadowDefinition`, `excludeFromAutoCenter`, and `id`. Apart from `meshResolution` — which also exists as the `mesh-resolution` attribute, affecting the parse pass only — these are imperative-only.
 
 - `cast-shadow` / `receive-shadow` emit CPU-projected SVG shadows. They work in both `"baked"` and `"dynamic"` lighting modes; dynamic-mode shadows are directional-only.
 - `mesh-resolution` chooses `"lossy"` (default) or `"lossless"`. Note it threads into the **parse** only; the element's own `scene.add` call always renders at the default resolution. Use the imperative API when you need to control both passes.

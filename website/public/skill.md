@@ -53,13 +53,15 @@ import {
 
 ## Native Conventions
 
-- Coordinates are PolyCSS world space: `[x, y, z]`, **+X right, +Y forward,
-  +Z up**.
+- Coordinates are PolyCSS world space `[x, y, z]` with **+Z up**. World Y maps
+  to CSS X (screen-right at identity rotation) and world X to CSS Y
+  (screen-down); the default camera (`rotX: 65, rotY: 45`) presents that as an
+  isometric view.
 - Camera rotations are degrees: `rotX`, `rotY`.
 - `zoom` is on-screen CSS pixels per world unit (default `0.65`; orbit controls
-  clamp to `0.1`–`10`). `BASE_TILE` (50) is the internal world-unit
-  → CSS px factor, and matters only for APIs that take world units directly,
-  like `<poly-iframe width>`.
+  clamp to `0.1`–`10` by default). `BASE_TILE` (50) is the world-unit → CSS px
+  factor; you need it when converting world units to raw CSS pixels yourself —
+  e.g. `<poly-iframe width>` mounts a document `width × 50` px wide.
 - `PolyCamera` / `createPolyCamera` are orthographic by default.
 - Use `PolyPerspectiveCamera` / `createPolyPerspectiveCamera` for perspective.
 
@@ -104,9 +106,10 @@ console warning:
 right-hand rule (`(v1-v0) × (v2-v0)`), and PolyCSS backface-culls every leaf. A
 reversed face is invisible from the side you meant to show, and shades from the
 flipped normal — typically ambient-only, since the directional term clamps at
-zero (it darkens, it does not invert). It still casts — onto `receiveShadow`
-meshes, or React/Vue's ground fallback — because shadow projection ignores
-winding. Wind counter-clockwise as seen from the side you want to look at.
+zero (it darkens, it does not invert). Shadows differ by path: React/Vue's ground fallback
+projects every polygon regardless of orientation, but the `receiveShadow` path
+(vanilla's only mechanism) light-back-face-culls casters, so a reversed open
+face can lose its shadow too. Wind counter-clockwise as seen from the side you want to look at.
 
 ```ts
 // Faces +Z (up) — visible from above.
@@ -160,8 +163,8 @@ the *direct parser output* from renderer optimization, call
 `parseObj`/`parseStl`/`parseGltf`/`parseVox` directly and add with
 `merge: false`.
 
-**5. Degenerate polygons vanish silently** — under 3 vertices, zero-length edge,
-or zero area produces no leaf and no console output.
+**5. Degenerate polygons vanish silently** — under 3 vertices, zero area, or a
+degenerate first edge produces no leaf and no console output.
 
 ## Building a Scene
 
@@ -181,7 +184,7 @@ createPolyOrbitControls(scene, { drag: true, wheel: true });
 scene.add(createPolyBox({ size: 100, color: "#ffd166" }), { position: [0, 0, 50] });
 scene.add(await loadMesh("/model.glb"), { castShadow: true });
 // Vanilla has no ground fallback — a caster needs an explicit receiver.
-scene.add(createPolyPlane({ axis: 2, size: 4, color: "#7d848e" }), { receiveShadow: true });
+scene.add(createPolyPlane({ axis: 2, size: 60, offset: 0, color: "#7d848e" }), { receiveShadow: true });
 ```
 
 React (Vue mirrors this with kebab-case props):

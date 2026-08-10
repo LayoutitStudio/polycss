@@ -16,8 +16,9 @@ interface Polygon {
    *  PolyCSS backface-culls — a reversed face is invisible. */
   vertices: [number, number, number][];
   /** Hex (`#rgb` / `#rrggbb`) or `rgb()` / `rgba()` only — NOT CSS named
-   *  colors. Unparseable values render white. Falls back to "#cccccc" when
-   *  neither color nor texture is set. */
+   *  colors. Unparseable values render white on solid and baked-atlas paths,
+   *  or are replaced with "#cccccc" on the normalizing `<PolyScene polygons>`
+   *  path. Falls back to "#cccccc" when neither color nor texture is set. */
   color?: string;
   /** Image URL for UV-mapped rendering. When set with `uvs`, the renderer
    *  applies an affine UV transform. Without `uvs`, single-tile fill. */
