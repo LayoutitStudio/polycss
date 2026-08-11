@@ -2,9 +2,13 @@
 
 A CSS polygon mesh library. A 3D engine for the DOM. Renders OBJ/MTL, STL, glTF/GLB, and VOX as real HTML elements transformed with CSS `matrix3d(...)`. Supports colors, textures, lighting, shadows, shapes and animations. Works with React, Vue or plain JavaScript.
 
+<!-- polycss:shared:links:start -->
 Visit [polycss.com](https://polycss.com) for docs and model examples.
 
+Join [chat.polycss.com](https://chat.polycss.com) for support and community discussions.
+
 <img width="1600" height="300" alt="PolyCSS primitives banner" src="https://github.com/user-attachments/assets/b05e2204-9323-4f83-8d1b-01ea0dd000db" />
+<!-- polycss:shared:links:end -->
 
 ## Installation
 
@@ -36,24 +40,32 @@ You can also load PolyCSS directly from a CDN. Here is a minimal custom-element 
 
 <img width="2500" height="1145" alt="PolyCSS intro" src="https://github.com/user-attachments/assets/0e5df0d8-04a8-4e50-8e3a-1097a96ce42f" />
 
-## Framework Components
+## Imperative API
 
-React and Vue expose the same component model. `<PolyCamera>` owns the viewpoint, `<PolyScene>` owns lighting and options, and `<PolyMesh>` loads or receives polygon data.
+`createPolyCamera` owns the viewpoint, `createPolyScene` owns lighting and
+options, and meshes are added to the scene:
 
-```tsx
-import { PolyCamera, PolyScene, PolyOrbitControls, PolyMesh } from "@layoutit/polycss-react";
+```ts
+import {
+  createPolyBox,
+  createPolyCamera,
+  createPolyOrbitControls,
+  createPolyScene,
+} from "@layoutit/polycss";
 
-export default function App() {
-  return (
-    <PolyCamera rotX={65} rotY={45}>
-      <PolyScene textureLighting="dynamic">
-        <PolyOrbitControls drag wheel />
-        <PolyMesh src="/gallery/obj/cottage.obj" mtl="/gallery/obj/cottage.mtl" />
-      </PolyScene>
-    </PolyCamera>
-  );
-}
+const host = document.getElementById("polycss")!;
+const camera = createPolyCamera({ rotX: 65, rotY: 45 });
+const scene = createPolyScene(host, { camera, textureLighting: "dynamic" });
+
+createPolyOrbitControls(scene, { drag: true, wheel: true });
+
+scene.add(createPolyBox({ size: 100, color: "#ffd166" }));
 ```
+
+Using React or Vue instead? Install
+[`@layoutit/polycss-react`](https://www.npmjs.com/package/@layoutit/polycss-react)
+or [`@layoutit/polycss-vue`](https://www.npmjs.com/package/@layoutit/polycss-vue),
+which expose the same model as components.
 
 ## Three.js Parity API
 
@@ -108,36 +120,54 @@ Full reference: [polycss.com/api/three-parity](https://polycss.com/api/three-par
 ### PolyCamera
 
 - `rotX`, `rotY` control the orbit angle in degrees.
-- `zoom` scales the projected scene.
+- `zoom` is on-screen CSS pixels per world unit (default `0.65`).
 - `target` pans the camera target in world coordinates.
 - `distance` adds dolly pull-back.
 - `PolyCamera` is the orthographic default. Use `PolyPerspectiveCamera` when you want perspective depth.
 
-### PolyScene
+### Scene options (`createPolyScene`)
 
-- `polygons` renders a static `Polygon[]` directly.
+- Geometry enters through `scene.add(parseResult, transform)` — there is **no** `polygons` option. In markup, use `<poly-mesh>` or `<poly-polygon>` children.
 - `directionalLight`, `pointLights` (direction-only, baked mode; optional per-light `castShadow`), and `ambientLight` control scene lighting.
 - `textureLighting` chooses `"baked"` or `"dynamic"`.
-- `textureQuality` controls atlas raster budget.
+- `textureQuality` controls atlas raster budget. `textureImageRendering`, `textureBackend`, and `textureProjection` set per-polygon texture defaults; `textureLeafSizing` is scene/atlas-wide with no per-polygon override.
 - `strategies` can disable selected render strategies for diagnostics.
-- `autoCenter` rotates around the rendered mesh bounds instead of world origin.
+- `autoCenter` rotates around the union bbox of all added meshes instead of world origin, updating as meshes are added or removed. Individual meshes opt out with `excludeFromAutoCenter`.
 
-### PolyMesh
+### Mesh options
 
-- `src` loads `.obj`, `.gltf`, `.glb`, or `.vox` files.
-- `mtl` loads companion OBJ materials.
-- `polygons` accepts pre-parsed geometry.
-- `position`, `scale`, and `rotation` transform the mesh wrapper.
-- `autoCenter` shifts the mesh bbox center to local origin.
-- `meshResolution` chooses `"lossy"` (default) or `"lossless"` optimization. STL imports use the conservative lossless path in both modes.
-- `castShadow` emits CSS-projected shadows in dynamic lighting mode.
+`<poly-mesh>` attributes: `src` (loads `.obj`, `.stl`, `.gltf`, `.glb`, or `.vox`), `mtl`, `position`, `scale`, `rotation`, `auto-center`, `mesh-resolution`, `cast-shadow`, `receive-shadow`, `target-size`, `default-color`, `palette`, `include-objects`, `exclude-objects`. There is **no** `polygons` attribute — pass pre-parsed geometry to `scene.add(...)`, or use `<poly-polygon>` for inline one-off polygons.
+
+`scene.add(result, transform)` additionally accepts `merge`, `meshResolution`, `stableDom`, `shadowDefinition`, `excludeFromAutoCenter`, and `id`. Apart from `meshResolution` — which also exists as the `mesh-resolution` attribute, affecting the parse pass only — these are imperative-only.
+
+- `cast-shadow` / `receive-shadow` emit CPU-projected SVG shadows. They work in both `"baked"` and `"dynamic"` lighting modes; dynamic-mode shadows are directional-only.
+- `mesh-resolution` chooses `"lossy"` (default) or `"lossless"`. Note it threads into the **parse** only; the element's own `scene.add` call always renders at the default resolution. Use the imperative API when you need to control both passes.
 
 ### Controls
 
-- `<PolyOrbitControls>` adds drag orbit, shift-drag pan, wheel zoom, and optional auto-rotate.
-- `<PolyMapControls>` uses pan-first map-style input.
-- `<PolyFirstPersonControls>` provides keyboard and pointer-look navigation.
-- `<PolyTransformControls>` adds translate/rotate gizmos for selected mesh handles.
+- `createPolyOrbitControls(scene, opts)` adds drag orbit, shift-drag pan, wheel zoom, and optional auto-rotate.
+- `createPolyMapControls(scene, opts)` uses pan-first map-style input.
+- `createPolyFirstPersonControls(scene, opts)` provides keyboard and pointer-look navigation.
+- `createTransformControls(scene, opts)` adds translate/rotate gizmos for selected mesh handles.
+- `createSelect(scene, opts)` adds pointer picking over mesh handles.
+
+### PolyIframe
+
+The `<poly-iframe>` custom element renders a live document as a flat quad inside
+the scene, using the same `position` / `rotation` / `scale` conventions as a
+mesh. Its content is centered on the wrapper's local origin, so rotation and
+scale pivot at the visible center. React and Vue expose it as `<PolyIframe>`.
+
+`width` and `height` are **world units**, not pixels — the mounted document is
+`width × 50` by `height × 50` CSS px (`BASE_TILE`), so `16 × 9` yields an
+800 × 450 px page.
+`position` is world units too.
+
+```html
+<poly-scene>
+  <poly-iframe src="https://example.com" width="16" height="9" position="0,0,5"></poly-iframe>
+</poly-scene>
+```
 
 ### Snapshot Export
 
@@ -169,22 +199,21 @@ const polygons = [
 ];
 ```
 
-Render polygons directly when you need per-face DOM events or custom styling:
+Geometry enters the scene through `scene.add()`, which takes a `ParseResult`.
+There is no `polygons` scene option — wrap a raw `Polygon[]` yourself:
 
-```tsx
-<PolyCamera>
-  <PolyScene>
-    {polygons.map((polygon, index) => (
-      <Poly
-        key={index}
-        {...polygon}
-        onClick={() => console.log("clicked polygon", index)}
-        className="my-polygon"
-      />
-    ))}
-  </PolyScene>
-</PolyCamera>
+```ts
+scene.add({ polygons, objectUrls: [], warnings: [], dispose: () => {} });
 ```
+
+`scene.add` runs the mesh optimizer by default. Pass `{ merge: false }` as the
+second argument to render authored polygons exactly as given.
+
+Authoring `Polygon[]` by hand has real constraints — winding decides visibility,
+`color` does not accept CSS named colors, and non-triangular polygons must be
+coplanar. Read
+[Authoring Polygons](https://polycss.com/core-concepts#authoring-polygons)
+before you generate geometry.
 
 ## Loading Mesh Files
 
@@ -223,6 +252,7 @@ Each visible polygon is emitted as one leaf element; the renderer chooses the le
 - `<i>` clips solid polygons with `border-shape: polygon(...)` when the browser supports it.
 - `<s>` maps a packed texture-atlas slice with `background-image`, and is the fallback for textured or unsupported shapes.
 
+<!-- polycss:shared:packages:start -->
 ## Packages
 
 | Package | Description |
@@ -231,20 +261,11 @@ Each visible polygon is emitted as one leaf element; the renderer chooses the le
 | `@layoutit/polycss` | Vanilla custom elements and imperative `createPolyScene` API. |
 | `@layoutit/polycss-react` | React components, hooks, controls, and core re-exports. |
 | `@layoutit/polycss-vue` | Vue 3 components, composables, controls, and core re-exports. |
+| `@layoutit/polycss-morph` | Prepared-model loading, retained DOM animation, morph targets, skinning, and playback. |
+<!-- polycss:shared:packages:end -->
 
-## Made with PolyCSS
-
-[cssQuake](https://cssquake.com)
--> A CSS port of Quake (1996)
-
-<img width="1280" height="720" alt="quake" src="https://github.com/user-attachments/assets/6d9d809c-857a-4a39-b5cf-733ead2661ec" />
-
-
-[Layoutit Terra](https://terra.layoutit.com)
--> A CSS Terrain Generator
-
-<img width="1000" height="601" alt="layoutit-terra" src="https://polycss.com/layoutit-terra.png" />
-
+<!-- polycss:shared:license:start -->
 ## License
 
 MIT.
+<!-- polycss:shared:license:end -->

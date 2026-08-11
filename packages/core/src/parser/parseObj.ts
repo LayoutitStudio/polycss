@@ -6,7 +6,7 @@
  *  - `v x y z` vertex lines (ignores `vn`, `vp`).
  *  - `vt u v` texture-coordinate lines (kept for `f` entries that reference them).
  *  - `f a b c [d ...]` face lines with optional `v/vt/vn` indices. n-gons are
- *    fan-triangulated. Per-face vt indices become per-triangle `uvs` on the
+ *    fan-triangulated. Per-face vt indices become per-triangle `uvs` (emitted only on textured polygons) on the
  *    output polygon — needed by the renderer's UV-mapped texture path.
  *  - `usemtl <name>` material switches. Material names that look like 6-char
  *    hex are used as colors directly; otherwise they get assigned a palette

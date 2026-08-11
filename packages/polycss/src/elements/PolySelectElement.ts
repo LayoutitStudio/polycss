@@ -6,8 +6,8 @@
  *
  * Attributes:
  *   multiple     — boolean attr; when present, allows multi-select
- *   clear-on-miss — boolean attr (default true); when present, clicking
- *                   background clears selection
+ *   clear-on-miss — enabled by default; set clear-on-miss="false" to keep
+ *                   the selection when clicking the background
  *
  * Dispatches:
  *   polycss:select — fires on every selection change with

@@ -1,44 +1,27 @@
-# PolyCSS
+# @layoutit/polycss-react
 
-A CSS polygon mesh library. A 3D engine for the DOM. Renders OBJ/MTL, STL, glTF/GLB, and VOX as real HTML elements transformed with CSS `matrix3d(...)`. Supports colors, textures, lighting, shadows, shapes and animations. Works with React, Vue or plain JavaScript.
+React bindings for [PolyCSS](https://polycss.com) — a 3D engine for the DOM.
+Renders OBJ/MTL, STL, glTF/GLB, and VOX meshes as real HTML elements
+transformed with CSS `matrix3d(...)`. No WebGL, no canvas-per-frame.
 
+<!-- polycss:shared:links:start -->
 Visit [polycss.com](https://polycss.com) for docs and model examples.
 
+Join [chat.polycss.com](https://chat.polycss.com) for support and community discussions.
+
 <img width="1600" height="300" alt="PolyCSS primitives banner" src="https://github.com/user-attachments/assets/b05e2204-9323-4f83-8d1b-01ea0dd000db" />
+<!-- polycss:shared:links:end -->
 
 ## Installation
 
 ```bash
-
-# Vanilla
-npm install @layoutit/polycss
-
-# React
 npm install @layoutit/polycss-react
-
-# Vue
-npm install @layoutit/polycss-vue
-
 ```
 
-You can also load PolyCSS directly from a CDN. Here is a minimal custom-element scene:
+## Quick start
 
-```html
-<script type="module" src="https://esm.sh/@layoutit/polycss/elements"></script>
-
-<poly-camera rot-x="65" rot-y="45">
-  <poly-scene>
-    <poly-orbit-controls drag wheel></poly-orbit-controls>
-    <poly-box size="100" color="#ffd166"></poly-box>
-  </poly-scene>
-</poly-camera>
-```
-
-<img width="2500" height="1145" alt="PolyCSS intro" src="https://github.com/user-attachments/assets/0e5df0d8-04a8-4e50-8e3a-1097a96ce42f" />
-
-## Framework Components
-
-React and Vue expose the same component model. `<PolyCamera>` owns the viewpoint, `<PolyScene>` owns lighting and options, and `<PolyMesh>` loads or receives polygon data.
+`<PolyCamera>` owns the viewpoint, `<PolyScene>` owns lighting and options, and
+`<PolyMesh>` loads or receives polygon data.
 
 ```tsx
 import { PolyCamera, PolyScene, PolyOrbitControls, PolyMesh } from "@layoutit/polycss-react";
@@ -55,103 +38,107 @@ export default function App() {
 }
 ```
 
-## Three.js Parity API
+<img width="2500" height="1145" alt="PolyCSS intro" src="https://github.com/user-attachments/assets/0e5df0d8-04a8-4e50-8e3a-1097a96ce42f" />
 
-When porting Three.js scenes or generating code with an agent, use the explicit
-`*/three` subpaths:
+## Components
 
-- `@layoutit/polycss-core/three`
-- `@layoutit/polycss/three`
-- `@layoutit/polycss-react/three`
-- `@layoutit/polycss-vue/three`
-
-They expose Three-like `PerspectiveCamera`, `OrthographicCamera`, `Object3D`,
-`Vector3`, `DirectionalLight`, `PointLight`, `AmbientLight`, radians for object
-rotations, Y-up authoring coordinates, and `camera.position` + `camera.lookAt(...)`
-framing. The adapters convert into native PolyCSS coordinates with a right-handed
-axis map, so the apparent object size, projection, orientation, depth ordering,
-and light direction line up with Three.js scene math while still rendering
-through the DOM.
-
-```tsx
-import { PolyScene } from "@layoutit/polycss-react";
-import {
-  DirectionalLight,
-  PolyThreeMesh,
-  PolyThreePerspectiveCamera,
-} from "@layoutit/polycss-react/three";
-
-const sun = new DirectionalLight("#ffffff", 1);
-sun.position.set(3, 5, 4);
-sun.target.position.set(0, 0, 0);
-
-export function App() {
-  return (
-    <PolyThreePerspectiveCamera
-      fov={50}
-      aspect={16 / 9}
-      position={[3, 2, 5]}
-      lookAt={[0, 0, 0]}
-    >
-      <PolyScene directionalLight={sun.toPolyDirectionalLight()}>
-        <PolyThreeMesh src="/models/cube.glb" rotation={[0, Math.PI / 4, 0]} />
-      </PolyScene>
-    </PolyThreePerspectiveCamera>
-  );
-}
-```
-
-Full reference: [polycss.com/api/three-parity](https://polycss.com/api/three-parity).
-
-## API Reference
-
-### PolyCamera
+### `<PolyCamera>`
 
 - `rotX`, `rotY` control the orbit angle in degrees.
-- `zoom` scales the projected scene.
+- `zoom` is on-screen CSS pixels per world unit (default `0.65`; orbit controls clamp to `0.1`–`10`).
 - `target` pans the camera target in world coordinates.
 - `distance` adds dolly pull-back.
-- `PolyCamera` is the orthographic default. Use `PolyPerspectiveCamera` when you want perspective depth.
+- `PolyCamera` is the orthographic default. Use `<PolyPerspectiveCamera>` for
+  perspective depth, or `<PolyOrthographicCamera>` for the explicit name.
 
-### PolyScene
+### `<PolyScene>`
 
 - `polygons` renders a static `Polygon[]` directly.
-- `directionalLight`, `pointLights` (direction-only, baked mode; optional per-light `castShadow`), and `ambientLight` control scene lighting.
+- `directionalLight`, `pointLights` (direction-only, baked mode; optional
+  per-light `castShadow`), and `ambientLight` control scene lighting.
 - `textureLighting` chooses `"baked"` or `"dynamic"`.
 - `textureQuality` controls atlas raster budget.
+- `shadow` configures cast-shadow color, opacity, and the parametric shadow
+  knobs (`parametric`, `definition`, `style`, `followAnimation`).
 - `strategies` can disable selected render strategies for diagnostics.
-- `autoCenter` rotates around the rendered mesh bounds instead of world origin.
+- `autoCenter` rotates around the bbox of the scene's own `polygons` prop (or
+  `centerPolygons` when given) instead of world origin. It does **not** see
+  geometry inside child `<PolyMesh>` components — with
+  `<PolyScene autoCenter><PolyMesh src=… /></PolyScene>` the bbox is empty and
+  nothing shifts. Pass the mesh's polygons as `centerPolygons`, or use
+  `<PolyMesh autoCenter>` to recenter the mesh itself. (Vanilla
+  `createPolyScene` differs — it unions every added mesh, minus any marked
+  `excludeFromAutoCenter`.)
 
-### PolyMesh
+Unlike the vanilla renderer, React re-renders on prop change, so a light change
+**auto-rebakes** the lit surface in baked mode. For live or animated lights,
+prefer `textureLighting="dynamic"`.
 
-- `src` loads `.obj`, `.gltf`, `.glb`, or `.vox` files.
+### `<PolyMesh>`
+
+- `src` loads `.obj`, `.stl`, `.gltf`, `.glb`, or `.vox` files.
 - `mtl` loads companion OBJ materials.
 - `polygons` accepts pre-parsed geometry.
 - `position`, `scale`, and `rotation` transform the mesh wrapper.
-- `autoCenter` shifts the mesh bbox center to local origin.
-- `meshResolution` chooses `"lossy"` (default) or `"lossless"` optimization. STL imports use the conservative lossless path in both modes.
-- `castShadow` emits CSS-projected shadows in dynamic lighting mode.
+- `autoCenter` shifts the mesh bbox center to local origin. Note this rewrites
+  vertex data, so `getPolygons()` returns the shifted coordinates.
+- `meshResolution` chooses `"lossy"` (default) or `"lossless"` optimization.
+  `.stl` **parsing** is conservative — the loader always uses the lossless
+  optimizer and skips interior culling — but rendering re-optimizes the loaded
+  polygons: the second pass follows `meshResolution` and interior-culls even at
+  `"lossless"`.
+- `merge` (default `true`) runs the polygon optimizer. Set `false` to render the
+  polygons you passed exactly as given. It cannot undo `loadMesh`'s own
+  parse-time optimization, so `src`-loaded geometry is already optimized before
+  this switch is consulted.
+- `castShadow` / `receiveShadow` opt the mesh into CPU-projected SVG shadows.
+- `shadowDefinition` overrides the scene parametric shadow resolution for this
+  mesh.
+
+### `<PolyIframe>`
+
+Renders a live document as a flat quad in the scene, with the same
+`position` / `rotation` / `scale` conventions as a mesh. Content is centered on
+the wrapper's local origin, so rotation and scale pivot at the visible center.
+
+`width` and `height` are **world units**, not pixels — the mounted document is
+`width × 50` by `height × 50` CSS px (`BASE_TILE`), so `16 × 9` yields an
+800 × 450 px page.
+
+```tsx
+<PolyIframe src="https://example.com" width={16} height={9} position={[0, 0, 5]} />
+```
 
 ### Controls
 
-- `<PolyOrbitControls>` adds drag orbit, shift-drag pan, wheel zoom, and optional auto-rotate.
+- `<PolyOrbitControls>` adds drag orbit, shift-drag pan, wheel zoom, and
+  optional auto-rotate.
 - `<PolyMapControls>` uses pan-first map-style input.
 - `<PolyFirstPersonControls>` provides keyboard and pointer-look navigation.
-- `<PolyTransformControls>` adds translate/rotate gizmos for selected mesh handles.
+- `<PolyTransformControls>` adds translate/rotate gizmos for selected mesh
+  handles.
+- `<PolySelect>` adds pointer picking; pair with `usePolySelect` /
+  `usePolySelectionApi`.
 
-### Snapshot Export
+### Helpers
 
-The vanilla package exports `exportPolySceneSnapshot(target)`. It clones the current rendered `.polycss-camera` / `.polycss-scene` DOM, injects only the PolyCSS CSS needed by that snapshot, inlines CSS `url(...)` image assets as `data:image/...;base64,...`, strips scripts and inline event handlers, and returns a standalone HTML document string with no PolyCSS runtime import. It works with rendered React/Vue scenes too; import it from `@layoutit/polycss` and pass the rendered camera or scene element.
+`<PolyGround>`, `<PolyAxesHelper>`, `<PolyDirectionalLightHelper>`, and the
+`<Poly>` shape component for one-off polygons.
 
-```ts
-import { exportPolySceneSnapshot } from "@layoutit/polycss";
+## Hooks
 
-const html = await exportPolySceneSnapshot(scene.host);
-```
+- `usePolyCamera(options)` — create and drive the scene camera store from camera
+  options; returns `{ store, cameraRef, sceneElRef, cameraElRef,
+  applyTransformDirect }`.
+- `usePolySceneContext(polygons, { directionalLight })` — run the scene pipeline
+  (normalize + merge) over a polygon list; returns `{ polygons, sceneBbox }`.
+- `usePolyMesh` — load a mesh imperatively; returns `{ polygons, voxelSource,
+  loading, error, warnings, dispose }`, where `error` is an `Error | null`.
+- `usePolyMaterial` — resolve material state for a mesh.
+- `usePolySelect`, `usePolySelectionApi` — selection state and imperative API.
+- `usePolyAnimation` — drive imported skeletal/morph clips.
 
-If any referenced asset cannot be inlined, the function throws `PolySceneSnapshotError` with `code: "ASSET_INLINE_FAILED"`.
-
-### Polygon Data Model
+## Polygon data model
 
 Each polygon describes one renderable face:
 
@@ -186,43 +173,57 @@ Render polygons directly when you need per-face DOM events or custom styling:
 </PolyCamera>
 ```
 
-## Loading Mesh Files
+Authoring `Polygon[]` by hand has real constraints — vertex winding decides
+whether a face is visible at all, `color` does not accept CSS named colors, and
+non-triangular polygons must be coplanar. Read
+[Authoring Polygons](https://polycss.com/core-concepts#authoring-polygons)
+before generating geometry.
 
-Use `loadMesh()` to parse supported model formats:
+## Three.js parity API
 
-```ts
-import { createPolyCamera, createPolyScene, loadMesh } from "@layoutit/polycss";
+When porting Three.js scenes or generating code with an agent, use the explicit
+`@layoutit/polycss-react/three` subpath. It exposes `PolyThreePerspectiveCamera`,
+`PolyThreeOrthographicCamera`, `PolyThreeMesh`, and the Three-like light classes,
+with radians for object rotations and Y-up authoring coordinates.
 
-const host = document.getElementById("polycss")!;
-const camera = createPolyCamera({ rotX: 65, rotY: 45 });
-const scene = createPolyScene(host, { camera });
+```tsx
+import { PolyScene } from "@layoutit/polycss-react";
+import {
+  DirectionalLight,
+  PolyThreeMesh,
+  PolyThreePerspectiveCamera,
+} from "@layoutit/polycss-react/three";
 
-const mesh = await loadMesh("https://polycss.com/gallery/obj/cottage.obj", {
-  mtlUrl: "https://polycss.com/gallery/obj/cottage.mtl",
-});
+const sun = new DirectionalLight("#ffffff", 1);
+sun.position.set(3, 5, 4);
+sun.target.position.set(0, 0, 0);
 
-scene.add(mesh);
+export function App() {
+  return (
+    <PolyThreePerspectiveCamera fov={50} aspect={16 / 9} position={[3, 2, 5]} lookAt={[0, 0, 0]}>
+      <PolyScene directionalLight={sun.toPolyDirectionalLight()}>
+        <PolyThreeMesh src="/models/cube.glb" rotation={[0, Math.PI / 4, 0]} />
+      </PolyScene>
+    </PolyThreePerspectiveCamera>
+  );
+}
 ```
 
-Supported formats:
-
-- OBJ + MTL, including `map_Kd` textures and UV coordinates.
-- STL triangle meshes, including binary Magics face colors. STL has no standard units, textures, UVs, or hierarchy, so imports skip lossy simplification and ray-based interior culling.
-- glTF / GLB, including embedded images and `TEXCOORD_0`.
-- MagicaVoxel `.vox`, with direct voxel fast paths when eligible.
-- Generated primitives: box, plane, ring, sphere, torus, cylinder, cone, and Platonic solids.
+Full reference: [polycss.com/api/three-parity](https://polycss.com/api/three-parity).
 
 ## Performance
 
-PolyCSS renders through the DOM, so performance is mostly shaped by two things: the number of mounted leaves, and the amount of texture atlas area the browser has to paint. The renderer tries to keep the common cases cheap. Simple surfaces stay as solid CSS elements, while textured, irregular, or high-detail geometry falls back to atlas-backed slices only when needed.
+Each visible polygon is emitted as one leaf element; the renderer chooses the
+least expensive CSS primitive that can represent it, then uses `matrix3d(...)`
+to place that primitive in 3D space. Polygon count is the dominant cost.
 
-Each visible polygon is emitted as one leaf element; the renderer chooses the least expensive CSS primitive that can represent the polygon, then uses `matrix3d(...)` to place that primitive in 3D space.
+- `<b>` uses `background: currentColor` for solid rectangles and stable quads.
+- `<u>` uses `corner-shape` for stable triangles and beveled-corner solids.
+- `<i>` clips solid polygons with `border-shape: polygon(...)` where supported.
+- `<s>` maps a packed texture-atlas slice, and is the fallback for textured or
+  unsupported shapes.
 
-- `<b>` uses `background: currentColor` on a fixed box for solid rectangles and stable quads.
-- `<u>` uses `corner-shape` for stable triangles and beveled-corner solids, with a `border-width` triangle fallback when needed.
-- `<i>` clips solid polygons with `border-shape: polygon(...)` when the browser supports it.
-- `<s>` maps a packed texture-atlas slice with `background-image`, and is the fallback for textured or unsupported shapes.
-
+<!-- polycss:shared:packages:start -->
 ## Packages
 
 | Package | Description |
@@ -231,20 +232,11 @@ Each visible polygon is emitted as one leaf element; the renderer chooses the le
 | `@layoutit/polycss` | Vanilla custom elements and imperative `createPolyScene` API. |
 | `@layoutit/polycss-react` | React components, hooks, controls, and core re-exports. |
 | `@layoutit/polycss-vue` | Vue 3 components, composables, controls, and core re-exports. |
+| `@layoutit/polycss-morph` | Prepared-model loading, retained DOM animation, morph targets, skinning, and playback. |
+<!-- polycss:shared:packages:end -->
 
-## Made with PolyCSS
-
-[cssQuake](https://cssquake.com)
--> A CSS port of Quake (1996)
-
-<img width="1280" height="720" alt="quake" src="https://github.com/user-attachments/assets/6d9d809c-857a-4a39-b5cf-733ead2661ec" />
-
-
-[Layoutit Terra](https://terra.layoutit.com)
--> A CSS Terrain Generator
-
-<img width="1000" height="601" alt="layoutit-terra" src="https://polycss.com/layoutit-terra.png" />
-
+<!-- polycss:shared:license:start -->
 ## License
 
 MIT.
+<!-- polycss:shared:license:end -->

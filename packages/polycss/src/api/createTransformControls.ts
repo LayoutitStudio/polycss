@@ -4,16 +4,19 @@
  * around an attached mesh and emits `objectChange` events as the user
  * drags. Mirrors the React API surface (mode, size, snap, draggingChanged
  * event) and uses the same shared geometry helpers in `@layoutit/polycss-core`
- * (`arrowPolygons`, `ringPolygons`).
+ * (`arrowPolygons`, `ringQuadPolygons`).
  *
  * Usage:
- *   const tc = createTransformControls(scene, { mode: "translate" });
+ *   const tc = createTransformControls(scene, {
+ *     mode: "translate",
+ *     // Events are constructor options — the handle has no `on(...)`.
+ *     onObjectChange: ({ position, rotation }) => {
+ *       // Apply to your own state if you need to keep it in sync; the
+ *       // gizmo already calls target.setTransform internally.
+ *     },
+ *   });
  *   tc.attach(meshHandle);
  *   tc.setMode("rotate");
- *   tc.on("objectChange", ({ position, rotation }) => {
- *     // Apply to your own state if you need to keep it in sync; the
- *     // gizmo already calls target.setTransform internally.
- *   });
  *   tc.detach();
  *   tc.destroy();
  */
