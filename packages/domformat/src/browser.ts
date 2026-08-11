@@ -738,7 +738,7 @@ export async function mountDom(
     throwIfAborted(options.signal);
     applyInitialResources(mounted, owner.urls);
     for (const binding of packageDocument.cssBinding.stylesheets) {
-      const css = new TextDecoder().decode(requiredResourceBytes(packageResources, binding.resource));
+      const css = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(requiredResourceBytes(packageResources, binding.resource));
       const element = ownerDocument.createElement("style");
       element.dataset.domformatStylesheet = binding.id;
       element.textContent = materializeCss(css, binding, owner.urls, { scope: isolation.selector, limits: mountValidation.limits });

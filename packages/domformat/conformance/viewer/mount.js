@@ -414,7 +414,7 @@ export async function mountConformanceDom(result, host, options = {}) {
     for (const binding of document.cssBinding.stylesheets) {
       const element = ownerDocument.createElement("style");
       element.dataset.domformatStylesheet = binding.id;
-      const css = new TextDecoder().decode(resourceBytes.get(binding.resource));
+      const css = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(resourceBytes.get(binding.resource));
       element.textContent = closedCss(css, binding, urls, runtimeSelector);
       ownerDocument.head.appendChild(element);
       styles.push(element);
