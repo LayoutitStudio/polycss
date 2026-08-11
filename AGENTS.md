@@ -16,6 +16,7 @@ Monorepo layout (pnpm workspaces):
 | `packages/vue` | `@layoutit/polycss-vue` | Vue 3 mirror of the React package. Owns its own copy of atlas rasterisation. Depends on `core` only. |
 | `packages/fonts` | `@layoutit/polycss-fonts` | Fonts + text → extruded 3D `Polygon[]`. Hand-written TrueType (`glyf`) reader + extruder (flat/round/bevel profiles) + Google Fonts loader. Framework-agnostic (returns `Polygon[]`, no React/Vue mirror needed). Depends on `core` + `earcut`. |
 | `packages/morph` | `@layoutit/polycss-morph` | Framework-agnostic prepared-model contracts, deterministic Node preparation, browser loading, retained DOM mounting, sparse deformation, controls, springs, animation, joint skinning, and prepared playback. The browser entry uses public `@layoutit/polycss` APIs; Node-only preparation lives at `@layoutit/polycss-morph/prepare`. No React/Vue mirrors. |
+| `packages/domformat` | `@layoutit/polycss-domformat` | Private strict-TypeScript `domformat@0` writer, reader, validator, CLI, and browser mount with repository-side conformance. Owns the producer-neutral wire contract; producer lowering stays in producer packages. Runtime installs contain unbundled ESM and declarations but exclude certification material. Not published. |
 | `website` | `@layoutit/polycss-website` | Astro + Starlight docs site. Not published. |
 | `examples/{html,vanilla,react,vue,fontcss}` | private | Per-framework Vite apps demonstrating the minimal usage for each renderer (`fontcss` demos `@layoutit/polycss-fonts`). Workspace members so they resolve to local `workspace:^` packages. Not published. |
 
@@ -93,7 +94,9 @@ All solid and atlas-backed tags work in both modes. Direct image `<s>` leaves ar
 
 This is the load-bearing constraint behind the whole engine. **JavaScript should not run per-frame to paint polygons when the motion can be expressed as a scene, mesh, camera, or light update.** Once the scene is built and the atlas is rasterised, the browser drives most rendering through CSS — `matrix3d` transforms, `calc()`-driven custom properties, `background-blend-mode`, `border-shape`, etc.
 
-The current exception is imported skeletal animation. glTF/GLB skinning changes each polygon independently, so the vanilla stable-DOM animation path samples the active clip in JS, keeps the leaf set mounted, caches baked stable-triangle transform frames, and pins each mounted triangle's baked color while transforms animate. Recomputing Lambert from every deformed low-poly face normal creates visible color pumping, so color refresh is internal opt-in rather than the default animation behavior. On WebKit/Safari, where stable CSS triangles fall through to solid atlas `<s>` leaves, same-topology animation updates keep the existing atlas elements and bitmap URLs mounted, cache transform frames once warmed, and hide briefly degenerate atlas triangles only until the next valid frame. That optimized path is the default; do not add a user-facing "baseline vs optimized" toggle or maintain a legacy slow path in product UI.
+The renderer exception is imported skeletal animation. glTF/GLB skinning changes each polygon independently, so the vanilla stable-DOM animation path samples the active clip in JS, keeps the leaf set mounted, caches baked stable-triangle transform frames, and pins each mounted triangle's baked color while transforms animate. Recomputing Lambert from every deformed low-poly face normal creates visible color pumping, so color refresh is internal opt-in rather than the default animation behavior. On WebKit/Safari, where stable CSS triangles fall through to solid atlas `<s>` leaves, same-topology animation updates keep the existing atlas elements and bitmap URLs mounted, cache transform frames once warmed, and hide briefly degenerate atlas triangles only until the next valid frame. That optimized path is the default; do not add a user-facing "baseline vs optimized" toggle or maintain a legacy slow path in product UI.
+
+The domformat reference mount has one separate, closed exception: it may schedule its validated fixed-rate prepared playback and interaction tables. That scheduler may write only declared sinks on the retained targets, never reconstruct topology or evaluate producer code, expressions, renderer internals, or network resources, and is disabled by `animate: false`. Normal catch-up is bounded to eight due ticks: every due logical animation tick and distinct prepared-effect transition in that window is evaluated in order, but one browser callback may publish only their final retained-DOM state; interaction publishes each such tick separately because input, cursor, grab, and spring state are observable. A larger gap is treated as suspension, discards the stale backlog, advances one tick, and resets the deadline. The one-tick path and public operations remain synchronous. This is a reference implementation of an already-lowered wire profile, not a PolyCSS renderer loop.
 
 | Where JS runs | Where JS does NOT run |
 |---|---|
@@ -102,9 +105,9 @@ The current exception is imported skeletal animation. glTF/GLB skinning changes 
 | Atlas planning + rasterisation (one-shot to `<canvas>`, then `toBlob`) | Per-frame atlas redraw (only on baked-mode light changes) |
 | Control input handling (`PolyOrbitControls`, `PolyMapControls`, `PolyTransformControls`) | Per-frame transform recomputation of every polygon for camera/mesh motion — only the scene-root or mesh-root transform changes |
 | Camera math (matrix4 product → scene-root `transform` CSS var) | Per-polygon JS in any hot path |
-| Hover/selection raycasting (only on pointer events, not per frame) | Continuous re-rendering "ticks" |
+| Hover/selection raycasting (only on pointer events, not per frame) | Continuous renderer re-rendering "ticks" |
 
-If you find yourself wanting a `requestAnimationFrame` loop to update many DOM nodes outside skeletal animation, stop. Find the CSS variable that should be carrying the change, and update that single variable on a single ancestor. Cascading + `@property`-registered custom properties do the rest.
+If you find yourself wanting a `requestAnimationFrame` loop to update many renderer DOM nodes outside skeletal animation or the closed domformat prepared-runtime exception, stop. Find the CSS variable that should be carrying the change, and update that single variable on a single ancestor. Cascading + `@property`-registered custom properties do the rest.
 
 ### PolyCSS Morph boundary
 
@@ -156,10 +159,58 @@ React or Vue wrappers.
 - Product-specific source cadence, schemas, preparation provenance, mounting
   paths, product behavior, and oracle evidence stay in the consuming product.
 
+### domformat boundary
+
+`@layoutit/polycss-domformat` is the private, producer-neutral reference package
+for the experimental `domformat@0` wire contract. It is not a serialization
+alias for Morph packages and does not depend on Morph or renderer internals.
+
+- Node exposes only `buildDom`, `readDom`, `readDomFile`, `validateDocument`,
+  and `DomFormatError`; the CLI exposes only `encode`, `decode`, `inspect`, and
+  `validate`; the browser subpath exposes only `readDomBrowser`,
+  `readDomBrowserUrl`, and `mountDom`.
+- Producers emit the closed writer manifest natively. Source parsing,
+  preparation, lowering, and product adapters remain in producer packages.
+- The only physical form is canonical `.json` plus digest-bound external
+  sibling resource files. There is no `.dom` packet, gzip transport, embedded
+  payload, archive, or alternate packaging mode.
+- Mounting follows `validate → construct → bind → initialize → publish →
+  destroy`, with rollback on partial failure and idempotent teardown.
+- The package is authored in strict TypeScript, built as unbundled ESM plus
+  declarations with tsup, `private`, and MIT-licensed. Workspace test/build
+  commands include it; public version-bump and npm-publish automation must not.
+  Public Node and browser signatures describe the closed document, resource,
+  options, lifecycle, and controller contracts.
+- Domformat's repository-side tests intentionally remain one certification
+  suite under `test/` using `node:test`. In-process contract tests share the
+  same corpora and helpers as the raw-ESM, CLI-subprocess, independent Python,
+  and real-browser harnesses, with one package-level coverage gate. Tests
+  execute the authored TypeScript through `tsx`; the release gate separately
+  exercises the clean-installed compiled package. This is the package's
+  explicit exception to sibling Vitest/co-location conventions, not an
+  exception to strict typing, declarations, coverage, or the mandatory build
+  gate.
+- Install tarballs contain only package metadata, README, CLI, compiled runtime,
+  and declarations. Specifications, independent readers/producers, fixtures, the
+  alternate mount shell, scripts, and tests remain repository-side
+  certification material. The alternate shell shares the single reference
+  lifecycle, input adapter, and profile interpreters rather than copying them.
+- The first concrete producer is website-owned:
+  `website/scripts/generate-gallery-domformat.mjs` lowers all Gallery presets
+  through shared Gallery preset/loader/presentation/animation behavior into
+  canonical documents under
+  `website/gallery-domformat-corpus/`. The generated 304-model corpus and its
+  digest-bound CSS/image siblings are website assets, never package payload or
+  runtime code. Its catalog pins the exact Chromium strategy environment and
+  per-model strategy counts; the corpus does not claim browser-neutral leaf
+  topology. Static documents are presentation-only; animated documents add
+  one Gallery-selected preferred clip at 30 Hz. Adding this producer does not
+  move source parsing or renderer internals into domformat.
+
 ## Naming (three.js parity)
 
 - Brand text is **PolyCSS**. Keep lowercase `polycss` only for literal package names, import paths, CSS classes, domains, and other code identifiers.
-- Every public export gets a `Poly` prefix. Exceptions are generic math types (`Vec2`, `Vec3`, `Polygon`, `PolyMaterial`) and the explicit `*/three` compatibility subpaths, where Three-compatible names are the point of the API. React/Vue components in those subpaths still use the `PolyThree` prefix.
+- Every public export gets a `Poly` prefix. Exceptions are generic math types (`Vec2`, `Vec3`, `Polygon`, `PolyMaterial`), the closed versioned domformat API listed above, and the explicit `*/three` compatibility subpaths, where Three-compatible names are the point of the API. React/Vue components in those subpaths still use the `PolyThree` prefix.
 - **Hooks/composables:** `usePolyCamera`, `usePolyMesh`, `usePolySceneContext`, `usePolySelect`, `usePolySelectionApi`, `usePolyAnimation`.
 - **Components:** `PolyPerspectiveCamera`, `PolyOrthographicCamera`, `PolyOrbitControls`, `PolyMapControls`, `PolyTransformControls`, `PolySelect`, `PolyAxesHelper`, `PolyDirectionalLightHelper`, `PolyIframe`, `PolyThreePerspectiveCamera`, `PolyThreeOrthographicCamera`, `PolyThreeMesh`.
 - **Types:** `PolyDirectionalLight`, `PolyPointLight`, `PolyAmbientLight`, `PolyTextureLightingMode`, `PolyTextureLeafSizing`, `PolyTextureBackend`, `PolyTextureImageRendering`, `PolyTextureImageLighting`, `PolyTextureProjection`, `PolyTexturePresentation`, `PolyTextureImageSource`, `PolyCameraProjection`, `PolyCameraSnapshot`, `PolyCameraSnapshotStats`, `PolyMeshTransformInput`, `PolySceneTransformInput`, `PolyAnimationMixer`, `PolyRenderStats`.

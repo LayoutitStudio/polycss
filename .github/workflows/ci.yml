@@ -46,6 +46,12 @@ jobs:
       - name: Enforce Morph coverage
         run: pnpm --filter @layoutit/polycss-morph test:coverage
 
+      - name: Enforce domformat coverage
+        run: pnpm --filter @layoutit/polycss-domformat test:coverage
+
+      - name: Certify domformat package
+        run: pnpm --filter @layoutit/polycss-domformat pack:check
+
       - name: Build packages (DTS + JS)
         run: pnpm build:packages
 
@@ -55,5 +61,72 @@ jobs:
       - name: Certify Morph with registry dependencies
         run: pnpm --filter @layoutit/polycss-morph test:package:registry
 
+      - name: Certify Gallery domformat corpus
+        run: pnpm --filter @layoutit/polycss-website test:domformat-tools && pnpm --filter @layoutit/polycss-website verify:domformat
+
       - name: Build website
         run: pnpm build:website
+
+  certify-domformat-browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@a7487c7e89a18df4991f7f222e4898a00d66ddda
+        with:
+          version: 10.32.1
+
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install pinned Playwright Chromium
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Expose pinned Playwright Chromium executable
+        run: >-
+          node --input-type=module --eval 'import { chromium } from "playwright"; process.stdout.write("DOMFORMAT_BROWSER=" + chromium.executablePath() + "\n");' >> "$GITHUB_ENV"
+
+      - name: Certify domformat in real Chromium
+        env:
+          DOMFORMAT_BROWSER_NO_SANDBOX: "1"
+        run: pnpm --filter @layoutit/polycss-domformat test:browser
+
+  certify-gallery-domformat-corpus:
+    # Gallery assets are byte-bound to this Chromium/sharp runner; changing it requires corpus regeneration.
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - name: Check out
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@a7487c7e89a18df4991f7f222e4898a00d66ddda
+        with:
+          version: 10.32.1
+
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install pinned Playwright Chromium
+        run: pnpm exec playwright install chromium
+
+      - name: Build domformat
+        run: pnpm --filter @layoutit/polycss-domformat build
+
+      - name: Regenerate and compare the complete Gallery corpus
+        run: pnpm --filter @layoutit/polycss-website verify:domformat:fresh

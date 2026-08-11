@@ -26,6 +26,7 @@ const targets = [
   "packages/polycss/README.md",
   "packages/react/README.md",
   "packages/vue/README.md",
+  "packages/domformat/README.md",
   "packages/fonts/README.md",
   "packages/morph/README.md",
 ];
