@@ -11,9 +11,14 @@ The atomic renderable primitive. Each visible polygon becomes one renderer-owned
 
 ```ts
 interface Polygon {
-  /** Three or more [x, y, z] world-space points, CCW winding from the outside. */
+  /** Three or more [x, y, z] world-space points, CCW winding seen from the
+   *  outside. Winding sets the face normal via the right-hand rule, and
+   *  PolyCSS backface-culls — a reversed face is invisible. */
   vertices: [number, number, number][];
-  /** CSS color. Falls back to "#cccccc" when neither color nor texture is set. */
+  /** Hex (`#rgb` / `#rrggbb`) or `rgb()` / `rgba()` only — NOT CSS named
+   *  colors. Unparseable values render white on solid and baked-atlas paths,
+   *  or are replaced with "#cccccc" on the normalizing `<PolyScene polygons>`
+   *  path. Falls back to "#cccccc" when neither color nor texture is set. */
   color?: string;
   /** Image URL for UV-mapped rendering. When set with `uvs`, the renderer
    *  applies an affine UV transform. Without `uvs`, single-tile fill. */
@@ -24,12 +29,24 @@ interface Polygon {
   textureAlphaMode?: PolyTextureAlphaMode;
   /** Shared material. `material.texture` takes precedence over `texture`. */
   material?: PolyMaterial;
+  /** Source-exact image metadata (URL + source rect). It does not by itself
+   *  select a direct image leaf: the resolved presentation must end up with
+   *  `backend: "image"` and source lighting, and the default `"auto"` backend
+   *  resolves to the atlas. When it does apply, there is no atlas
+   *  rasterisation and no atlas memory. */
+  textureImageSource?: PolyTextureImageSource;
+  /** Backend, projection, filtering, and lighting request for this polygon's
+   *  texture. See Texture Presentation below. */
+  texturePresentation?: PolyTexturePresentation;
   /** UV coordinates: one per vertex. Must match vertices.length.
    *  Mismatched arrays are stripped during normalizePolygons(). */
   uvs?: [number, number][];
   /** Source UV triangles preserved by import/merge passes for atlas rasterization. */
   textureTriangles?: TextureTriangle[];
-  /** Source material requested two-sided rendering. */
+  /** Importer-internal. Records that a source material requested two-sided
+   *  rendering, so optimization passes don't collapse intentional
+   *  reverse-wound faces. It is NOT a render-time flag — setting it does not
+   *  make a polygon visible from behind. Orient your winding instead. */
   doubleSided?: boolean;
   /** User-controlled metadata. Reflected to the DOM as data-* attributes
    *  when rendering via <Poly>. Keys must have string, number, or boolean values. */
@@ -49,6 +66,12 @@ interface PolyMaterial {
   texture: string;
   /** Optional stable identity for renderer-side dedupe/cache paths. */
   key?: string;
+  /** Source-exact image sampling (URL + source rect) for direct image leaves
+   *  that skip atlas rasterisation. */
+  imageSource?: PolyTextureImageSource;
+  /** Per-material texture presentation (backend, projection, filtering,
+   *  lighting). See Texture Presentation below. */
+  presentation?: PolyTexturePresentation;
 }
 ```
 
@@ -73,6 +96,66 @@ interface PolyTextureWrap {
 
 type PolyTextureAlphaMode = "opaque" | "mask" | "blend";
 ```
+
+---
+
+## Texture Presentation
+
+How a textured polygon is painted. PolyCSS has two texture backends: the
+**atlas** backend rasterises each polygon's local-2D bounding rect into packed
+atlas pages, and the **image** backend renders a direct image leaf straight from
+a source URL and rect — no rasterisation and no atlas memory, but source pixels
+are preserved as-is.
+
+```ts
+/** Leaf primitive sizing for texture leaves. Default "canonical". */
+type PolyTextureLeafSizing = "canonical" | "local" | "raster";
+
+/** Requested backend. Default "auto", which currently always resolves to the
+ *  atlas — direct image leaves must be requested explicitly with "image". */
+type PolyTextureBackend = "auto" | "atlas" | "image";
+
+/** CSS `image-rendering` for the leaf. Default "auto". */
+type PolyTextureImageRendering = "auto" | "pixelated";
+
+/** Whether the image is lit by the scene or shown as authored. */
+type PolyTextureImageLighting = "scene" | "source";
+
+/** UV mapping. "projective" enables exact quad mapping where the
+ *  compositor-stability guards allow it. Default "affine". */
+type PolyTextureProjection = "affine" | "projective";
+
+interface PolyTextureImageSource {
+  url: string;
+  width: number;
+  height: number;
+  /** Sub-rect of the source image to draw. Defaults to the whole image. */
+  sourceRect?: { x: number; y: number; width: number; height: number };
+  imageRendering?: PolyTextureImageRendering;
+}
+
+interface PolyTexturePresentation {
+  imageRendering?: PolyTextureImageRendering;
+  backend?: PolyTextureBackend;
+  lighting?: PolyTextureImageLighting;
+  projection?: PolyTextureProjection;
+}
+```
+
+Direct image leaves (`backend: "image"`) are **source-lit only** — they use
+`lighting: "source"` and keep the source pixels untouched. A textured polygon
+that needs scene lighting falls back to the atlas backend.
+
+These are also scene-level defaults: `textureBackend`, `textureProjection`, and
+`textureImageRendering` on `PolySceneOptions` (and the matching `<PolyMesh>`
+props) set the default for every polygon. From weakest to strongest, the
+resolved presentation is: scene defaults → `material.presentation` → (for
+`imageRendering` only) the selected image source's own `imageRendering` → the
+polygon's `texturePresentation`. The image source itself resolves as
+`polygon.textureImageSource` over `material.imageSource`.
+
+`textureLeafSizing` is different: it is a scene/atlas-level option with **no**
+per-polygon override — `PolyTexturePresentation` has no leaf-sizing field.
 
 ---
 
@@ -171,6 +254,8 @@ type PolySeamBleedEdges =
 
 `TextureQuality` controls atlas bitmap budget and CSS sprite size. `PolySeamBleed` controls solid-primitive overscan for detected shared seam edges.
 
+Renderer semantics for `PolySeamBleed` currently diverge: vanilla `createPolyScene` treats a number as a `0..1` ratio of the built-in `1.5` px default and resolves `"auto"` to the full `1.5` px, while React/Vue treat a number as the requested CSS-pixel amount and treat an explicit `"auto"` as no shared-edge overscan at all (atlas planning accepts numeric amounts only; per-strategy primitive bleeds are unaffected). The numeric default `1.5` behaves identically everywhere.
+
 ---
 
 ## `PolyRenderStrategiesOption`
@@ -208,6 +293,16 @@ interface PolyRenderStats {
   shadowLeafCount: number;
   /** Surface leaf categories used by the renderer. */
   surfaceLeafCounts: PolyRenderSurfaceLeafCounts;
+  /** Per-leaf readiness as flagged by the renderer — NOT proof of load or
+   *  decode. Direct-image leaves are marked ready as soon as their CSS URL is
+   *  assigned, and atlas failures are not surfaced here. */
+  textureReadiness: PolyTextureReadiness;
+  /** Atlas page and bitmap accounting. */
+  textureStats: PolyTextureRenderStats;
+  /** Snapshot-export accounting. */
+  snapshotStats: PolySnapshotRenderStats;
+  /** Camera projection + framing snapshot. */
+  cameraStats: PolyCameraSnapshotStats;
   /** Number of PolyCSS bucket wrapper nodes under the measured scope. */
   bucketCount: number;
 }
@@ -240,17 +335,55 @@ interface PolySceneOptions {
   directionalLight?: PolyDirectionalLight;
   pointLights?: PolyPointLight[];
   ambientLight?: PolyAmbientLight;
+  /** Defaults to "baked". */
   textureLighting?: PolyTextureLightingMode;
   textureQuality?: TextureQuality;
+  /** Texture leaf primitive sizing. Defaults to "canonical". */
+  textureLeafSizing?: PolyTextureLeafSizing;
+  /** Default image filtering for atlas and direct image texture leaves. */
+  textureImageRendering?: PolyTextureImageRendering;
+  /** Default texture backend request. Defaults to "auto". */
+  textureBackend?: PolyTextureBackend;
+  /** Default texture projection request. Defaults to "affine". */
+  textureProjection?: PolyTextureProjection;
+  /** Shared-edge solid overscan. See `PolySeamBleed` above for cross-renderer semantics. */
   seamBleed?: PolySeamBleed;
   strategies?: PolyRenderStrategiesOption;
   autoCenter?: boolean;
   shadow?: {
+    /** Default: "#000000". */
     color?: string;
+    /** 0..1. Default: 0.25. */
     opacity?: number;
+    /** World units the shadow is lifted off its receiver to avoid z-fighting.
+     *  Default 0.05 for the ground-plane fallback, 0.001 for `receiveShadow`
+     *  meshes. */
     lift?: number;
+    /** Max CSS px the shadow may extend past the mesh footprint. Default: 2000. */
     maxExtend?: number;
+    /** Cast one low-resolution coverage silhouette per caster instead of
+     *  projecting full geometry. Default: false. */
+    parametric?: boolean;
+    /** Parametric silhouette detail. Default: 16. Overridden per mesh by
+     *  `PolyMeshTransform.shadowDefinition`. */
+    definition?: number;
+    /** Progressive refinement: definition used while the directional light is
+     *  actively being dragged, then a debounced pass re-emits at full
+     *  `definition`. Vanilla `createPolyScene` only. Unset → no progressive pass. */
+    dragDefinition?: number;
+    /** "vector" (default) traces a smooth concave contour; "pixel"
+     *  greedy-meshes the coverage into blocky rectangles. */
+    style?: "vector" | "pixel";
+    /** Re-emit shadows while a mesh animates instead of freezing at the last
+     *  pose. Default false. Vanilla throttles the re-emit internally (~12fps);
+     *  React/Vue re-emit on every polygon change — pair with a low parametric
+     *  `definition`. */
+    followAnimation?: boolean;
   };
+  /** Emit `data-poly-shadow-*` attribution attributes on every shadow SVG and
+   *  path, for DevTools inspection. Vanilla `createPolyScene` only.
+   *  Default: false. */
+  debugShadowAttrs?: boolean;
 }
 
 interface PolyMeshTransform {
@@ -258,12 +391,20 @@ interface PolyMeshTransform {
   position?: Vec3;
   scale?: number | Vec3;
   rotation?: Vec3;
+  /** Run the mesh optimizer (coincident-face dedupe, interior-face cull, and
+   *  coplanar/lossy merging per `meshResolution`) before rendering. Defaults to
+   *  true. `false` skips all of it — for animated meshes whose triangle
+   *  topology must stay stable, or to render the polygon array exactly as
+   *  given. */
   merge?: boolean;
   meshResolution?: MeshResolution;
   stableDom?: boolean;
   excludeFromAutoCenter?: boolean;
   castShadow?: boolean;
   receiveShadow?: boolean;
+  /** Per-mesh parametric-shadow detail, overriding the scene's
+   *  `shadow.definition`. Only used when `shadow.parametric` is true. */
+  shadowDefinition?: number;
 }
 
 interface PolySceneHandle {
@@ -272,6 +413,8 @@ interface PolySceneHandle {
   getOptions(): Readonly<Omit<PolySceneOptions, "camera">>;
   applyCamera(): void;
   meshes(): readonly PolyMeshHandle[];
+  /** Resolves once the renderer has flagged every mesh's textures ready. */
+  whenTexturesReady(): Promise<void>;
   findMeshByElement(element: Element | null): PolyMeshHandle | null;
   destroy(): void;
   readonly host: HTMLElement;
@@ -297,6 +440,10 @@ interface PolyMeshHandle {
   getRotation(): Vec3 | undefined;
   getScale(): number | Vec3 | undefined;
   getPolygons(): Polygon[];
+  /** Resolves once the renderer has flagged this mesh's texture leaves ready.
+   *  Not a guarantee that every image loaded or decoded — direct-image leaves
+   *  resolve on URL assignment, and atlas failures are not surfaced. */
+  whenTexturesReady(): Promise<void>;
   remove(): void;
   dispose(): void;
 }
@@ -306,7 +453,7 @@ interface PolyMeshHandle {
 
 ## Framework Type Exports
 
-React and Vue export their public prop, event, context, and handle types next to the runtime components/composables. Vue mirrors the React names where applicable, with Vue-specific context/composable names such as `PolyCameraContextKey`, `PolySelectionContextKey`, `PolyContext`, and `UsePolyAnimationResultVue`.
+React and Vue export their public prop, event, context, and handle types next to the runtime components/composables. Vue mirrors the React names where applicable, with Vue-specific context/composable names such as `PolyCameraContextKey`, `PolySelectionContextKey`, `PolyContext`, and `UsePolyAnimationResultVue`. Most imperative control **options and handle** types belong to the vanilla package and are not re-exported by React or Vue — see the vanilla-only list below. The first-person pair (`PolyFirstPersonControlsOptions`, `PolyFirstPersonControlsHandle`) is the exception: both framework packages do re-export it.
 
 Runtime selection helpers are exported from the framework packages: `findPolyMeshHandle`, `pointInMeshElement`, and `findMeshUnderPoint`.
 
@@ -314,9 +461,10 @@ Runtime selection helpers are exported from the framework packages: `findPolyMes
 <summary>Framework type inventory</summary>
 
 - Component props: `PolyCameraProps`, `PolyOrthographicCameraProps`, `PolyPerspectiveCameraProps`, `PolySceneProps`, `PolyMeshProps`, `PolyGroundProps`, `PolyProps`, `PolyBoxProps`, `PolyPlaneProps`, `PolyRingProps`, `PolyOctahedronProps`, `PolySphereProps`, `PolyTetrahedronProps`, `PolyIcosahedronProps`, `PolyDodecahedronProps`, `PolyCylinderProps`, `PolyConeProps`, `PolyTorusProps`, `PolyAxesHelperProps`, `PolyDirectionalLightHelperProps`.
-- Control and selection props/handles: `PolyOrbitControlsProps`, `PolyMapControlsProps`, `PolyFirstPersonControlsProps`, `PolyTransformControlsProps`, `PolySelectProps`, `PolyControlsAnimateOptions`, `PolyControlsBaseOptions`, `PolyControlsCamera`, `PolyControlsHandle`, `PolyControlsChangeEvent`, `PolyControlsInteractionEvent`, `PolyControlsEvent`, `PolyControlsListener`, `PolyOrbitControlsCamera`, `PolyMapControlsCamera`, `PolyFirstPersonControlsOptions`, `PolyFirstPersonControlsHandle`, `PolyOrbitControlsOptions`, `PolyOrbitControlsHandle`, `PolyMapControlsOptions`, `PolyMapControlsHandle`, `PolyTransformControlsOptions`, `PolyTransformControlsHandle`, `PolySelectOptions`, `PolySelectionHandle`.
+- Control and selection props: `PolyOrbitControlsProps`, `PolyMapControlsProps`, `PolyTransformControlsProps`, `PolySelectProps`, `PolyControlsAnimateOptions`, `PolyOrbitControlsCamera`, `PolyMapControlsCamera`. `PolyFirstPersonControlsOptions`, `PolyFirstPersonControlsHandle`. **React only:** `PolyFirstPersonControlsProps`, `PolyControlsCamera`.
+- **Vanilla only** — exported from `@layoutit/polycss`, NOT from the framework packages: `PolyControlsBaseOptions`, `PolyControlsHandle`, `PolyControlsChangeEvent`, `PolyControlsInteractionEvent`, `PolyControlsEvent`, `PolyControlsListener`, `PolyOrbitControlsOptions`, `PolyOrbitControlsHandle`, `PolyMapControlsOptions`, `PolyMapControlsHandle`, `PolyTransformControlsOptions`, `PolyTransformControlsHandle`, `PolySelectOptions`, `PolySelectionHandle`, `PolyShapeResult`, `PolySceneSnapshotErrorCode`.
 - Hooks, events, and contexts: `UseCameraOptions`, `UseCameraResult`, `UseSceneContextOptions`, `UseSceneContextResult`, `UseMeshOptions`, `UseMeshResult`, `UsePolyAnimationResult`, `PolyPointerEvent`, `PolyMouseEvent`, `PolyWheelEvent`, `PolyEventHandler`, `InteractionProps`, `PolySelectionApi`, `PolyCameraContext`, `PolyCameraContextValue`.
-- Utility types: `PolyTransformControlsObject`, `PolyTransformControlsObjectChangeEvent`, `PolySceneSnapshotErrorCode`, `PolyShapeResult`, `TransformProps`, `DOMPassthroughProps`.
+- Utility types: `PolyTransformControlsObject`, `PolyTransformControlsObjectChangeEvent`. **React only:** `TransformProps`, `DOMPassthroughProps`.
 
 </details>
 

@@ -30,7 +30,7 @@ npm install @layoutit/polycss-vue
 
 ## 2. Add a scene and load a mesh
 
-The camera element (`<poly-camera>` / `PolyCamera`) is always the outer node: it owns the projection and orbital state. `<poly-scene>` / `PolyScene` is nested inside it and carries lighting and atlas options. The mesh element (`<poly-mesh>` / `PolyMesh`) loads OBJ, STL, glTF, GLB, or VOX files and renders their polygons. `PolyCamera` uses orthographic projection by default; use `PolyPerspectiveCamera` for depth foreshortening.
+The camera element (`<poly-camera>` / `PolyCamera`) is normally the outer node: it owns the projection and orbital state. (The `<poly-scene>` custom element can also stand alone and drive an implicit camera from its own attributes — see [PolyScene](/components/poly-scene).) `<poly-scene>` / `PolyScene` is nested inside it and carries lighting and atlas options. The mesh element (`<poly-mesh>` / `PolyMesh`) loads OBJ, STL, glTF, GLB, or VOX files and renders their polygons. `PolyCamera` uses orthographic projection by default; use `PolyPerspectiveCamera` for depth foreshortening.
 
 <Tabs syncKey="fw">
 <TabItem label="Vanilla JS">

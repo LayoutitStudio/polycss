@@ -1,24 +1,24 @@
 /**
- * <Select> — selection wrapper that auto-tracks descendant `<PolyMesh>`
- * clicks and exposes the current selection via `useSelect()`.
+ * <PolySelect> — selection wrapper that auto-tracks descendant `<PolyMesh>`
+ * clicks and exposes the current selection via `usePolySelect()`.
  *
  * API mirrors @react-three/drei's `<Select>` so devs migrating from
  * three.js / R3F use the same mental model:
  *
- *   <Select multiple onChange={setSelected}>
+ *   <PolySelect multiple onChange={setSelected}>
  *     <PolyMesh id="a" polygons={...} />
  *     <PolyMesh id="b" polygons={...} />
- *   </Select>
+ *   </PolySelect>
  *
  *   // anywhere inside:
- *   const selected = useSelect();          // PolyMeshHandle[]
- *   const api = useSelectionApi();         // imperative add/remove/toggle
+ *   const selected = usePolySelect();       // PolyMeshHandle[]
+ *   const api = usePolySelectionApi();      // imperative add/remove/toggle
  *
  * Differences from drei:
  *   - No `box` prop (drag-rectangle select) — deferred until requested.
  *     drei's box-select uses three.js `SelectionBox` (frustum cast) which
  *     has no clean DOM analogue; we'd need a different implementation.
- *   - Adds `useSelectionApi()` for imperative mutation. drei keeps state
+ *   - Adds `usePolySelectionApi()` for imperative mutation. drei keeps state
  *     internal and only reports via `onChange`; we expose the API so a
  *     `<TransformControls>` or sidebar can call `api.set([mesh])` directly.
  *   - Adds `clearOnMiss` (default true). When the click resolves to no
@@ -280,7 +280,7 @@ export function PolySelect({
   // with preserve-3d via the `.polycss-camera *` rule, flattens the
   // scene (the chicken renders as a pancake). Event delivery to a
   // display:contents element is unreliable in some browsers, but we
-  // don't depend on it — the native pointerdown listener attaches to
+  // don't depend on it — the native click listener attaches to
   // the parent scene element instead (see useEffect above).
   const wrapperStyle: CSSProperties = { display: "contents", ...style };
 
@@ -300,8 +300,8 @@ export function PolySelect({
 }
 
 /**
- * Read the current selection from the nearest enclosing `<Select>`.
- * Returns an empty array when used outside a `<Select>` (matches drei).
+ * Read the current selection from the nearest enclosing `<PolySelect>`.
+ * Returns an empty array when used outside a `<PolySelect>` (matches drei).
  */
 export function usePolySelect(): PolyMeshHandle[] {
   return useContext(SelectContext)?.selected ?? [];

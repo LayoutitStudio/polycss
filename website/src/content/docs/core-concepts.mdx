@@ -23,22 +23,25 @@ Where voxcss used to render a single voxel cube, PolyCSS renders any regular pol
 
 PolyCSS exposes three composable concepts. Each one ships as a custom element (vanilla) and as a React / Vue component:
 
-- **Scene** (`<poly-scene>` / `PolyScene`): the render tree root. Always nested inside a camera element. Sets up lighting and fills its parent element.
-- **Mesh** (`<poly-mesh>` / `PolyMesh`): loads a mesh from a URL (OBJ / STL / glTF / GLB / VOX). Internally expands to one polygon child per face. Convenience wrapper around the parser + renderer.
+- **Scene** (`<poly-scene>` / `PolyScene`): the render tree root. Normally nested inside a camera element (the custom element can also stand alone — see [Camera](#camera)). Sets up lighting and fills its parent element.
+- **Mesh** (`<poly-mesh>` / `PolyMesh`): loads a mesh from a URL (OBJ / STL / glTF / GLB / VOX). Emits one internal leaf per visible polygon. Convenience wrapper around the parser + renderer.
 - **Polygon** (`<poly-polygon>` / `Poly`): one polygon. The atomic primitive. Renders as one internal DOM leaf with `transform: matrix3d(...)`. Accepts standard DOM event handlers, classes, and styles: this is what makes PolyCSS "DOM-native 3D" rather than "3D inside a black-box canvas".
 
-A mesh element is internally `polygons.map(p => <poly-polygon …>)`, so any rendered mesh can be inspected, styled, or handled per-polygon.
+A loaded mesh does **not** expand into `<poly-polygon>` elements — the renderer mounts one internal leaf per visible polygon inside a `.polycss-mesh` wrapper, and the leaf tag is a private strategy choice (see [Render Strategies](#render-strategies)). `<poly-polygon>` / `<Poly>` exists for polygons you author yourself. To style or handle a loaded mesh per-polygon, use its render prop / scoped slot, or target the mesh wrapper and its leaves by class and `data-*` attributes.
 
 ## Camera
 
-The camera element (`<poly-camera>` / `PolyCamera`) is always the **outer** node. `<poly-scene>` / `PolyScene` is nested inside it. Camera attributes (`rot-x`, `rot-y`, `zoom`, `distance`) belong on the camera element, never on the scene. `PolyCamera` is orthographic by default; use `PolyPerspectiveCamera` for depth foreshortening.
+The camera element (`<poly-camera>` / `PolyCamera`) is normally the **outer** node, with `<poly-scene>` / `PolyScene` nested inside it, and camera attributes (`rot-x`, `rot-y`, `zoom`, `distance`) belong on the camera element rather than the scene. `PolyCamera` is orthographic by default; use `PolyPerspectiveCamera` for depth foreshortening.
+
+**One exception:** the `<poly-scene>` custom element can stand alone. With no ancestor camera element it builds an implicit camera from its own `perspective`, `rot-x`, `rot-y`, `zoom`, `distance`, and `target` attributes — see [PolyScene](/components/poly-scene). React/Vue have no such fallback: `PolyScene` throws outside a camera component.
 
 ```html
 <!-- Vanilla -->
 <poly-camera rot-x="65" rot-y="45">
   <poly-scene
-    directional-light='{"direction":[0.5,-0.7,0.6],"color":"#ffe4a8"}'
-    ambient-light='{"intensity":0.4}'>
+    directional-direction="0.5,-0.7,0.6"
+    directional-color="#ffe4a8"
+    ambient-intensity="0.4">
     <poly-octahedron size="100" color="#7dd3fc"></poly-octahedron>
   </poly-scene>
 </poly-camera>
@@ -68,7 +71,7 @@ Each polygon is a plain object. The only required field is `vertices` (three or 
 ```ts
 interface Polygon {
   vertices: [number, number, number][];  // Required: 3+ [x, y, z] points in world space
-  color?: string;                        // CSS color ("#f97316", "tomato")
+  color?: string;                        // Hex or rgb()/rgba() only — "#f97316"
   texture?: string;                      // Image URL for UV-mapped face
   material?: PolyMaterial;               // Shared texture material
   uvs?: [number, number][];             // UV coordinates (one per vertex)
@@ -88,13 +91,189 @@ Scene content renders relative to the (0,0,0) origin. Most mesh files are author
 
 ```html
 <!-- Vanilla -->
-<poly-mesh src="/model.glb" auto-center position="[0,0,0]"></poly-mesh>
+<poly-mesh src="/model.glb" auto-center position="0,0,0"></poly-mesh>
 ```
 
 ```tsx
 // React
 <PolyMesh src="/model.glb" autoCenter position={[0, 0, 0]} />
 ```
+
+## Authoring Polygons
+
+If you generate geometry in code — an architectural kit, a procedural terrain, a
+shape library — the constraints below are load-bearing, and violating them fails
+silently rather than throwing.
+
+How much cleanup you get for free depends on **which parser** produced the mesh
+and **which entry point** you hand it to. Neither is uniform:
+
+| Source | Winding treatment |
+|---|---|
+| STL | Repaired. Connectivity orients closed components outward; open components follow a consistent supplied-normal signal. |
+| `.vox` | Correct by construction — faces are generated CCW-from-outside. |
+| OBJ | **Preserved as authored.** A file wound inconsistently stays that way. |
+| glTF / GLB | **Preserved as authored.** `doubleSided` materials emit reversed duplicate triangles. |
+
+Every parser fits the mesh to its target size and normalizes into PolyCSS's Z-up
+coordinates, but the axis transform is per-format: OBJ and glTF/GLB apply the
+cyclic permutation `(x,y,z) → (z,x,y)` to bring their +Y-up convention to +Z-up
+(glTF can opt out with `upAxis: "z"`); STL defaults to identity axes, the common
+CAD export convention, with the permutation as opt-in; `.vox` is already Z-up
+and only rotates the horizontal plane. Where a permutation is applied it is
+cyclic rather than a y↔z swap, precisely so it never flips handedness.
+
+`normalizePolygons` — which drops degenerate polygons, strips mismatched `uvs`,
+replaces unparseable colors with `#cccccc`, and **fan-triangulates non-coplanar
+n-gons** — runs on only one path:
+
+- **React/Vue `<PolyScene polygons>` normalizes.** Your non-coplanar quad comes
+  back as triangles. It records warnings, but they are not surfaced to the
+  console, so the repair is silent.
+- **`scene.add(...)`, `<PolyMesh polygons>`, `<poly-polygon>`, and `<Poly>` do
+  not.** The first three run the mesh optimizer instead (or nothing, with
+  `merge: false`); `<Poly>` runs neither — it renders the polygon exactly as
+  passed. On all of them a non-coplanar n-gon is flattened onto its average
+  plane when its local 2D basis is built — opening cracks against its
+  neighbours — and degenerate polygons vanish without a trace.
+
+If you generate geometry, the portable move is to emit triangles or genuinely
+coplanar n-gons, or to call `normalizePolygons` yourself and inspect the
+warnings it returns.
+
+### Winding determines visibility
+
+Vertex order sets the face normal by the right-hand rule, and PolyCSS
+**backface-culls** every leaf. A polygon wound the wrong way is invisible from
+the side you meant to show, and its Lambert shading is computed from the flipped
+normal — typically ambient-only, since the directional term clamps at zero (it
+darkens, it does not invert). Winding affects shadows too, and differently per path: React/Vue's
+ground-shadow fallback projects every polygon with no orientation test, so a
+reversed face still casts there. The `receiveShadow` path — all renderers, and
+vanilla's only mechanism — light-back-face-culls caster polygons (except
+self-shadow and unreliable-silhouette casters), so reversing an open face's
+winding can remove its shadow as well as the face.
+
+Vertices are **counter-clockwise seen from the outside** (the side you want to
+look at):
+
+```ts
+// Faces +Z (up). CCW when viewed from above.
+const floor = {
+  vertices: [[0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0]],
+  color: "#d8d2c7",
+};
+
+// The SAME quad reversed faces -Z (down) and is invisible from above.
+const broken = {
+  vertices: [[0, 0, 0], [0, 1, 0], [1, 1, 0], [1, 0, 0]],
+  color: "#d8d2c7",
+};
+```
+
+The normal is `(v1 - v0) × (v2 - v0)`, normalized. For the first quad that is
+`(1,0,0) × (1,1,0) = (0,0,1)` — pointing up, so the face is visible from above.
+
+Consequences worth internalizing when you build a shape library:
+
+- **Solids face outward; rooms face inward.** A box you look at from outside and
+  a room you stand inside are the same six quads with opposite winding.
+- **Mirroring reverses handedness.** Any negative scale or mirror transform
+  flips the effective winding of every face it touches, so mirrored geometry
+  needs its vertex order reversed to compensate.
+- **Reverse UVs with the vertices.** If a polygon has `uvs`, reversing
+  `vertices` without reversing `uvs` in the same order silently remaps the
+  texture.
+- **`doubleSided` is not the fix.** It exists so importers can stop the
+  optimizer collapsing intentional reverse-wound faces; it is not a render-time
+  flag and will not make a face visible from behind. Orient the winding.
+
+**Diagnostic rule:** a single-sided face is *supposed* to disappear when the
+camera moves behind it — that alone is not a bug. The winding symptom is a
+surface missing or flickering **from the viewpoint it was built to be seen
+from**: the polygon exists in your data, its neighbours render, but the face
+only shows from the opposite side. When you see that, inspect the face's winding
+and normal *before* you touch culling, lighting, or camera code.
+
+### `color` is not a full CSS color
+
+Only hex (`#rgb`, `#rrggbb`) and `rgb()` / `rgba()` parse. CSS named colors
+(`"tomato"`, `"red"`), `hsl()`, and `color()` do **not**, and the failure is
+silent either way: on the normalizing `<PolyScene polygons>` path the value is
+replaced with `#cccccc`, and everywhere else it renders **white**.
+
+```ts
+{ color: "tomato" }   // ✗ silently wrong (white, or #cccccc)
+{ color: "#ff6347" }  // ✓
+```
+
+### Non-triangular polygons must be coplanar
+
+On every path except `<PolyScene polygons>`, a quad or n-gon whose vertices are
+not on a common plane is flattened onto their average plane when its local 2D
+basis is built, which moves vertices out from under their neighbours and opens
+visible cracks. `<PolyScene polygons>` instead fan-triangulates it, which avoids
+the crack but silently changes your topology.
+
+Triangles are always coplanar, so this only bites n-gons. If you merge faces
+into quads, either merge only where coplanarity genuinely holds, or snap the
+shared vertices onto a common plane and propagate the new position to **every**
+polygon that references them.
+
+### The optimizer rewrites your geometry by default
+
+`merge` defaults to `true` and `meshResolution` defaults to `"lossy"`, so
+authored geometry is merged, deduped, and interior-culled before it renders:
+
+- Coincident faces closer than `0.05` world units are deduped.
+- Fully-interior faces are culled.
+- Lossy merging starts at up to `0.35` world units of plane displacement and
+  `0.04` of boundary displacement, at up to `15°` of angle change. **These are
+  not the maximum.** When the default pass doesn't pay off, the optimizer also
+  tries progressively more aggressive variants at `30°`, `45°`, and `60°` — the
+  widest also raising boundary displacement to `0.06`. Those are accepted only
+  on a material render-cost win with non-worsening seam diagnostics, but they
+  *can* apply to your geometry. The degree values are angular thresholds; the
+  plane and boundary displacement budgets are **absolute world units**. None of
+  them are configurable, so small-scale hand-authored meshes can get visibly
+  welded.
+
+Note that dedupe and interior culling are treated as *exact* reductions, so they
+still run under `meshResolution: "lossless"` — only the lossy approximation is
+switched off.
+
+**`merge: false` renders the polygon array you pass completely untouched — but
+only on the paths that accept it**: vanilla `scene.add(...)` and React/Vue
+`<PolyMesh polygons merge={false}>`. It does not exist on `<PolyScene polygons>`
+(always normalized and merged) or on the `<poly-mesh>` custom element. And it
+cannot undo `loadMesh`'s own parse-time optimization — geometry loaded from a
+file is deduped and optimized *before* `merge` is ever consulted.
+
+There is **no fully identity path for file geometry**: the parsers themselves
+normalize their input (fit to `targetSize`, default `60`; reposition the origin;
+remap axes to Z-up; round coordinates; fan-triangulate n-gons and drop
+degenerate triangles). STL additionally repairs winding, and `.vox` synthesizes
+greedy-meshed quads from the voxel grid. To preserve the *direct parser output*
+from any further renderer optimization, call `parseObj` / `parseStl` /
+`parseGltf` / `parseVox` directly and add the result with `merge: false`.
+
+### Degenerate polygons vanish silently
+
+Fewer than three vertices, a zero-area face, or a degenerate first edge produces no
+leaf and no console output. If a face is missing and the winding is right, check
+for duplicate or collinear vertices.
+
+### Scale
+
+Camera `zoom` is **on-screen CSS pixels per world unit** — at `zoom: 50`, one
+world unit renders 50 px across. The default is `0.65`, and orbit controls clamp
+it to `0.1…10`.
+
+Internally, renderer geometry already lives at `BASE_TILE` (50) CSS px per world
+unit, and the camera transform divides that back out (`scale(zoom / 50)`), so
+the two cancel. You only need `BASE_TILE` when converting world units to raw CSS
+px yourself — for example `<poly-iframe width>`, which is in world units and
+mounts a document `width × 50` CSS px wide.
 
 ## Rendering Pipeline
 
@@ -115,11 +294,11 @@ The internal leaf tag is a strategy, not public API:
 | `<i>` | Border-shape clipped solid | Solid non-rect polygons on browsers with `border-shape`. |
 | `<s>` | Atlas slice | Textured polygons and fallback solids. |
 
-You normally do not target these tags directly; use `Poly`, `PolyMesh`, classes, data attributes, or render stats. Cast shadows are separate SVG shadow surfaces, not render-strategy leaves; meshes with `castShadow` project onto the scene ground or receiver surfaces in both lighting modes.
+You normally do not target these tags directly; use `Poly`, `PolyMesh`, classes, data attributes, or render stats. Cast shadows are separate SVG shadow surfaces, not render-strategy leaves; meshes with `castShadow` project onto `receiveShadow` surfaces in both lighting modes (React/Vue additionally fall back to the scene ground plane when no receiver exists — vanilla does not).
 
 ## Automatic Polygon Merge
 
-Before rendering, PolyCSS automatically optimizes loaded meshes. `meshResolution: "lossless"` keeps exact planar candidates only; the default `"lossy"` mode also bakes solid texture swatches, merges visually redundant baked swatch colors, tries static triangle simplification for eligible non-animated imports, and can merge near-coplanar candidates within a bounded displacement budget. Candidates are accepted only when the final DOM win is meaningful and whole-mesh seam diagnostics do not regress. STL imports use the conservative lossless path and skip ray-based interior culling in both modes because public CAD/STL files often contain shell, winding, or topology quirks. This keeps DOM element counts low for flat surfaces without changing the intended rendered shape.
+Before rendering, PolyCSS automatically optimizes loaded meshes. `meshResolution: "lossless"` keeps exact planar candidates only; the default `"lossy"` mode also bakes solid texture swatches, merges visually redundant baked swatch colors, tries static triangle simplification for eligible non-animated imports, and can merge near-coplanar candidates within a bounded displacement budget. Candidates are accepted only when the final DOM win is meaningful and whole-mesh seam diagnostics do not regress. STL **parsing** is conservative — the import pass uses the lossless optimizer and skips ray-based interior culling, because public CAD/STL files often contain shell, winding, or topology quirks. That protection is parse-time only: the renderer's own optimization pass does not know the geometry came from STL, so it interior-culls and, by default, lossy-merges. Preserve the parsed STL surface with `merge: false`. This keeps DOM element counts low for flat surfaces without changing the intended rendered shape.
 
 Per-polygon DOM identity is preserved for polygons that cannot merge; polygons inside a merged flat region become one rendered element.
 

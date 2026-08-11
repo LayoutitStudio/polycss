@@ -2,11 +2,13 @@
 
 A CSS polygon mesh library. A 3D engine for the DOM. Renders OBJ/MTL, STL, glTF/GLB, and VOX as real HTML elements transformed with CSS `matrix3d(...)`. Supports colors, textures, lighting, shadows, shapes and animations. Works with React, Vue or plain JavaScript.
 
+<!-- polycss:shared:links:start -->
 Visit [polycss.com](https://polycss.com) for docs and model examples.
 
-Join [chat.polycss.com](https://chat,polycss.com) for support and community discussions.
+Join [chat.polycss.com](https://chat.polycss.com) for support and community discussions.
 
 <img width="1600" height="300" alt="PolyCSS primitives banner" src="https://github.com/user-attachments/assets/b05e2204-9323-4f83-8d1b-01ea0dd000db" />
+<!-- polycss:shared:links:end -->
 
 ## Installation
 
@@ -20,9 +22,6 @@ npm install @layoutit/polycss-react
 
 # Vue
 npm install @layoutit/polycss-vue
-
-# Morph
-npm install @layoutit/polycss-morph
 
 ```
 
@@ -59,54 +58,6 @@ export default function App() {
   );
 }
 ```
-
-## Three.js Parity API
-
-When porting Three.js scenes or generating code with an agent, use the explicit
-`*/three` subpaths:
-
-- `@layoutit/polycss-core/three`
-- `@layoutit/polycss/three`
-- `@layoutit/polycss-react/three`
-- `@layoutit/polycss-vue/three`
-
-They expose Three-like `PerspectiveCamera`, `OrthographicCamera`, `Object3D`,
-`Vector3`, `DirectionalLight`, `PointLight`, `AmbientLight`, radians for object
-rotations, Y-up authoring coordinates, and `camera.position` + `camera.lookAt(...)`
-framing. The adapters convert into native PolyCSS coordinates with a right-handed
-axis map, so the apparent object size, projection, orientation, depth ordering,
-and light direction line up with Three.js scene math while still rendering
-through the DOM.
-
-```tsx
-import { PolyScene } from "@layoutit/polycss-react";
-import {
-  DirectionalLight,
-  PolyThreeMesh,
-  PolyThreePerspectiveCamera,
-} from "@layoutit/polycss-react/three";
-
-const sun = new DirectionalLight("#ffffff", 1);
-sun.position.set(3, 5, 4);
-sun.target.position.set(0, 0, 0);
-
-export function App() {
-  return (
-    <PolyThreePerspectiveCamera
-      fov={50}
-      aspect={16 / 9}
-      position={[3, 2, 5]}
-      lookAt={[0, 0, 0]}
-    >
-      <PolyScene directionalLight={sun.toPolyDirectionalLight()}>
-        <PolyThreeMesh src="/models/cube.glb" rotation={[0, Math.PI / 4, 0]} />
-      </PolyScene>
-    </PolyThreePerspectiveCamera>
-  );
-}
-```
-
-Full reference: [polycss.com/api/three-parity](https://polycss.com/api/three-parity).
 
 ## API Reference
 
@@ -284,6 +235,7 @@ Each visible polygon is emitted as one leaf element; the renderer chooses the le
 - `<i>` clips solid polygons with `border-shape: polygon(...)` when the browser supports it.
 - `<s>` maps a packed texture-atlas slice with `background-image`, and is the fallback for textured or unsupported shapes.
 
+<!-- polycss:shared:packages:start -->
 ## Packages
 
 | Package | Description |
@@ -294,6 +246,7 @@ Each visible polygon is emitted as one leaf element; the renderer chooses the le
 | `@layoutit/polycss-vue` | Vue 3 components, composables, controls, and core re-exports. |
 | `@layoutit/polycss-morph` | Prepared-model loading, retained DOM animation, morph targets, skinning, and playback. |
 | `@layoutit/polycss-domformat` | Private MIT-licensed producer-neutral `domformat@0` runtime for canonical JSON plus digest-bound sibling resources; conformance and specifications stay repository-side. Not published. |
+<!-- polycss:shared:packages:end -->
 
 The website-owned producer also carries a deterministic canonical JSON snapshot
 of every Gallery model at `website/gallery-domformat-corpus/`, with digest-bound
@@ -312,6 +265,7 @@ external direct-versus-canonical animated proof with
 retained DOM and computed paint semantics and reports bounded subpixel
 Chromium compositor differences.
 
+<!-- polycss:shared:showcase:start -->
 ## Made with PolyCSS
 
 [cssQuake](https://cssquake.com)
@@ -324,7 +278,10 @@ Chromium compositor differences.
 -> A CSS Terrain Generator
 
 <img width="1000" height="601" alt="layoutit-terra" src="https://polycss.com/layoutit-terra.png" />
+<!-- polycss:shared:showcase:end -->
 
+<!-- polycss:shared:license:start -->
 ## License
 
 MIT.
+<!-- polycss:shared:license:end -->

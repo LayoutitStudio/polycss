@@ -22,7 +22,7 @@ The broken stone slab below uses `stone.obj` with a companion `stone.mtl` file t
 
 ## Declarative loading: the mesh element
 
-The simplest way to render a mesh is the mesh element with a `src`. It fetches the file, parses it, and renders one polygon element per polygon automatically.
+The simplest way to render a mesh is the mesh element with a `src`. It fetches the file, parses it, and mounts one internal render leaf per visible polygon inside a `.polycss-mesh` wrapper automatically.
 
 <Tabs syncKey="fw">
 <TabItem label="Vanilla JS">
@@ -164,7 +164,7 @@ function Viewer() {
   });
 
   if (loading) return <div>Loading...</div>;
-  if (error) return <div>Error: {error}</div>;
+  if (error) return <div>Error: {error.message}</div>;
 
   return (
     <PolyCamera>

@@ -65,17 +65,15 @@ export interface PolySceneOptions {
   strategies?: PolyRenderStrategiesOption;
   /**
    * When `true`, rotation pivots around the union bbox of all added meshes
-   * instead of world (0,0,0). The scene wraps polygons in an inner div
-   * translated by `-bboxCenter`. Updates whenever a mesh is added/removed
+   * instead of world (0,0,0). Implemented as a camera-target offset, not a DOM
+   * wrapper — polygon data is not mutated. Updates whenever a mesh is added/removed
    * or `setOptions` is called. Mirrors React's `<PolyScene autoCenter>`.
    */
   autoCenter?: boolean;
   /**
-   * Shadow appearance for meshes with `castShadow: true`. Works in both
-   * lighting modes — dynamic mode projects via CSS vars so shadows
-   * follow a moving light, baked mode CPU-bakes the projection into
-   * each leaf's inline `matrix3d` and drops back-facing polys from the
-   * DOM entirely. Defaults: `{ color: "#000000", opacity: 0.25, lift: 0.05, maxExtend: 2000 }`.
+   * Shadow appearance for meshes with `castShadow: true`. Both lighting
+   * modes use the same CPU-projected SVG path; dynamic-mode shadows are
+   * directional-only. Defaults: `{ color: "#000000", opacity: 0.25, lift: 0.05, maxExtend: 2000 }`.
    */
   shadow?: {
     /** Shadow color as a CSS hex string. Default: `"#000000"`. */
@@ -189,20 +187,24 @@ export interface PolyMeshTransform {
    */
   excludeFromAutoCenter?: boolean;
   /**
-   * When `true`, this mesh casts a shadow onto the scene's shadow ground
-   * plane (and onto any meshes marked `receiveShadow: true`). The shadow
-   * emits as one per-mesh `<svg>` whose path is the union of every
-   * casting polygon's projection. Works in both lighting modes.
-   * Defaults to `false`.
+   * When `true`, this mesh casts a shadow onto any mesh marked
+   * `receiveShadow: true`. The shadow emits as one `<svg>` per receiver face
+   * whose path is the union of every casting polygon's projection. Works in
+   * both lighting modes. Defaults to `false`.
+   *
+   * Vanilla has NO ground-plane fallback: with no receiver in the scene a
+   * caster draws nothing (Three.js `castShadow` / `receiveShadow` parity).
+   * React/Vue additionally project onto the scene ground plane when no
+   * receiver exists.
    */
   castShadow?: boolean;
   /**
    * **(experimental)** When `true`, this mesh acts as a shadow receiver:
    * each of its polygon faces becomes a target plane that casting meshes'
    * shadows project onto and get clipped to. Useful for "shadow on table"
-   * scenarios. Currently only convex face outlines clip cleanly. When no
-   * receivers are present the global ground plane is used as today.
-   * Defaults to `false`.
+   * scenarios. Currently only convex face outlines clip cleanly. In vanilla a
+   * receiver is REQUIRED for any shadow to appear — there is no ground-plane
+   * fallback. Defaults to `false`.
    */
   receiveShadow?: boolean;
   /**
