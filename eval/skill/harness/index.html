@@ -1,0 +1,126 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>PolyCSS skill eval harness</title>
+    <style>
+      html, body { margin: 0; padding: 0; background: #ffffff; }
+      #host { width: 900px; height: 600px; overflow: hidden; }
+    </style>
+  </head>
+  <body>
+    <div id="host"></div>
+    <script type="module">
+      // Anything the candidate scene logs or throws is evidence, so collect it
+      // before the module that produces it is even imported.
+      const errors = [];
+      window.__evalErrors = errors;
+      window.addEventListener("error", (e) => errors.push(String(e.message)));
+      window.addEventListener("unhandledrejection", (e) => errors.push(String(e.reason)));
+      const consoleError = console.error.bind(console);
+      console.error = (...args) => {
+        errors.push(args.map(String).join(" "));
+        consoleError(...args);
+      };
+
+      const bundle = new URLSearchParams(location.search).get("bundle");
+
+      window.__mounted = (async () => {
+        const mod = await import(bundle);
+        if (typeof mod.mount !== "function") {
+          throw new Error("scene.mjs does not export a `mount` function");
+        }
+        await mod.mount(document.getElementById("host"));
+        return true;
+      })().catch((error) => {
+        errors.push(String(error && error.stack ? error.stack.split("\n")[0] : error));
+        return false;
+      });
+
+      const LEAF_TAGS = new Set(["B", "I", "S", "U"]);
+
+      const rgbOf = (value) => {
+        const m = /rgba?\(\s*([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)(?:[,\s/]+([\d.]+))?/.exec(value || "");
+        if (!m) return null;
+        if (m[4] !== undefined && Number(m[4]) === 0) return null;
+        return [Number(m[1]), Number(m[2]), Number(m[3])];
+      };
+
+      /**
+       * Sample what was actually PAINTED, not what merely occupies a box.
+       * Leaf strategies other than `<b>` carry `backface-visibility: hidden`,
+       * so a back-facing leaf still has a bounding rect while painting
+       * nothing — reading rects alone cannot tell correct winding from
+       * reversed. Chromium decodes the screenshot for us, so this needs no
+       * image library.
+       */
+      window.__samplePixels = async (dataUrl, cols = 120, rows = 80) => {
+        const img = new Image();
+        img.src = dataUrl;
+        await img.decode();
+
+        const canvas = document.createElement("canvas");
+        canvas.width = cols;
+        canvas.height = rows;
+        const ctx = canvas.getContext("2d", { willReadFrequently: true });
+        ctx.drawImage(img, 0, 0, cols, rows);
+        const { data } = ctx.getImageData(0, 0, cols, rows);
+
+        const out = new Array(cols * rows);
+        for (let i = 0; i < out.length; i += 1) {
+          out[i] = [data[i * 4], data[i * 4 + 1], data[i * 4 + 2]];
+        }
+        return { cols, rows, rgb: out };
+      };
+
+      window.__probe = () => {
+        const scene = document.querySelector(".polycss-scene");
+        const leaves = [];
+
+        if (scene) {
+          for (const el of scene.querySelectorAll("*")) {
+            if (!LEAF_TAGS.has(el.tagName)) continue;
+            const rect = el.getBoundingClientRect();
+            if (rect.width <= 0 || rect.height <= 0) continue;
+            const style = getComputedStyle(el);
+            // Solid strategies paint with `currentColor`; atlas leaves paint a
+            // background image, so fall back to the box color for those.
+            const rgb = rgbOf(style.backgroundColor) ?? rgbOf(style.color) ?? rgbOf(style.borderTopColor);
+            const mesh = el.closest(".polycss-mesh");
+            leaves.push({
+              tag: el.tagName.toLowerCase(),
+              rgb,
+              mesh: mesh ? (mesh.dataset.polyMeshId || String([...scene.querySelectorAll(".polycss-mesh")].indexOf(mesh))) : "none",
+              rect: { x: rect.x, y: rect.y, w: rect.width, h: rect.height },
+              area: rect.width * rect.height,
+            });
+          }
+        }
+
+        const strategies = { b: 0, i: 0, s: 0, u: 0 };
+        for (const leaf of leaves) strategies[leaf.tag] += 1;
+
+        const paths = scene ? [...scene.querySelectorAll("svg path")] : [];
+        let shadowArea = 0;
+        for (const path of paths) {
+          const box = path.getBoundingClientRect();
+          shadowArea += box.width * box.height;
+        }
+
+        return {
+          sceneCount: document.querySelectorAll(".polycss-scene").length,
+          cameraCount: document.querySelectorAll(".polycss-camera").length,
+          meshCount: scene ? scene.querySelectorAll(".polycss-mesh").length : 0,
+          leaves: leaves.filter((leaf) => leaf.rgb !== null),
+          leafTotal: leaves.length,
+          strategies,
+          shadow: {
+            svgCount: scene ? scene.querySelectorAll("svg").length : 0,
+            pathCount: paths.length,
+            area: Math.round(shadowArea),
+          },
+        };
+      };
+    </script>
+  </body>
+</html>

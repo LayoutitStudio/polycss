@@ -26,6 +26,8 @@
     "sync:skill": "node .github/scripts/sync-skill-docs.mjs",
     "check:readmes": "node .github/scripts/sync-package-readmes.mjs --check",
     "check:skill": "node .github/scripts/sync-skill-docs.mjs --check",
+    "eval:skill": "node eval/skill/run.mjs",
+    "eval:selftest": "node eval/skill/selftest.mjs",
     "test:scripts": "node --test .github/scripts/*.test.mjs",
     "publish:all": "pnpm sync:readmes && pnpm --filter './packages/*' --filter '!@layoutit/polycss-domformat' -r publish --access public",
     "dev:website": "pnpm --filter @layoutit/polycss-website dev",
