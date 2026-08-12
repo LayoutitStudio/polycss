@@ -1,0 +1,41 @@
+{
+  "name": "@layoutit/polycss-skills",
+  "version": "0.2.11",
+  "description": "Installs the PolyCSS agent skill (SKILL.md + reference docs) into .claude/skills or .agents/skills.",
+  "type": "module",
+  "bin": {
+    "polycss-skills": "bin/polycss-skills.mjs"
+  },
+  "exports": {
+    ".": "./src/install.mjs",
+    "./package.json": "./package.json"
+  },
+  "keywords": ["polycss", "skill", "agent", "claude", "codex", "ai", "docs"],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/LayoutitStudio/polycss.git",
+    "directory": "packages/skills"
+  },
+  "bugs": {
+    "url": "https://github.com/LayoutitStudio/polycss/issues"
+  },
+  "homepage": "https://github.com/LayoutitStudio/polycss#readme",
+  "files": [
+    "bin",
+    "src/install.mjs",
+    "skill"
+  ],
+  "scripts": {
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "prepack": "node ../../.github/scripts/sync-package-readmes.mjs"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "devDependencies": {
+    "vitest": "^3.1.1",
+    "@vitest/coverage-v8": "^3.1.1"
+  }
+}

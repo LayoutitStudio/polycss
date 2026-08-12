@@ -17,6 +17,7 @@ Monorepo layout (pnpm workspaces):
 | `packages/fonts` | `@layoutit/polycss-fonts` | Fonts + text → extruded 3D `Polygon[]`. Hand-written TrueType (`glyf`) reader + extruder (flat/round/bevel profiles) + Google Fonts loader. Framework-agnostic (returns `Polygon[]`, no React/Vue mirror needed). Depends on `core` + `earcut`. |
 | `packages/morph` | `@layoutit/polycss-morph` | Framework-agnostic prepared-model contracts, deterministic Node preparation, browser loading, retained DOM mounting, sparse deformation, controls, springs, animation, joint skinning, and prepared playback. The browser entry uses public `@layoutit/polycss` APIs; Node-only preparation lives at `@layoutit/polycss-morph/prepare`. No React/Vue mirrors. |
 | `packages/domformat` | `@layoutit/polycss-domformat` | Private strict-TypeScript `domformat@0` writer, reader, validator, CLI, and browser mount with repository-side conformance. Owns the producer-neutral wire contract; producer lowering stays in producer packages. Runtime installs contain unbundled ESM and declarations but exclude certification material. Not published. |
+| `packages/skills` | `@layoutit/polycss-skills` | Zero-dependency `npx` installer for the PolyCSS agent skill. Owns `skill/SKILL.md` + `skill/docs/*.md` — the source of truth for what agents are told about PolyCSS. No renderer code, no runtime dependency on any other package. |
 | `website` | `@layoutit/polycss-website` | Astro + Starlight docs site. Not published. |
 | `examples/{html,vanilla,react,vue,fontcss}` | private | Per-framework Vite apps demonstrating the minimal usage for each renderer (`fontcss` demos `@layoutit/polycss-fonts`). Workspace members so they resolve to local `workspace:^` packages. Not published. |
 
@@ -240,6 +241,7 @@ Before opening a PR:
 - [ ] If I touched the canvas atlas pipeline (`rasterise.ts` / `buildAtlasPages.ts`), browser-feature detection, or direct voxel renderer in ONE renderer, the same fix lands in the other two renderers (`polycss` + react + vue) in this PR.
 - [ ] If I touched any of the three `styles.ts` (`packages/polycss/src/styles/styles.ts`, `packages/react/src/styles/styles.ts`, `packages/vue/src/styles/styles.ts`), the other two are consistent — CSS rules cover every emitted tag for both lighting modes, and shared properties like `will-change: transform` on `.polycss-scene` exist in all three.
 - [ ] Website docs (`website/src/content/docs/**`) and READMEs reflect any user-visible change.
+- [ ] If a user-visible change contradicts the agent skill, `packages/skills/skill/**` is updated and `pnpm sync:skill` has been run (see "The agent skill" below).
 - [ ] If I edited a `<!-- polycss:shared:* -->` block, I edited it in the ROOT `README.md` and ran `pnpm sync:readmes` (see "Package READMEs" below).
 - [ ] If I changed a render strategy, lighting mode, naming convention, or the JS-in-render-loop rules, `AGENTS.md` reflects the new state in this same PR.
 
@@ -274,6 +276,30 @@ matching markers. Current blocks are `links`, `packages`, `showcase`, and
 - CI runs `pnpm check:readmes`, which fails on drift instead of writing.
 - A package opts in per block simply by containing the markers. `fonts` and
   `morph` carry none today and are left entirely alone.
+
+## The agent skill
+
+`packages/skills/skill/` is the **single source of truth** for what coding
+agents are told about PolyCSS: `SKILL.md` is the entry point (conventions, the
+silent-failure invariants, minimal scenes, and the docs index) and
+`skill/docs/*.md` holds the per-topic reference. `@layoutit/polycss-skills`
+publishes that tree with a zero-dependency `npx` installer.
+
+- **Edit `packages/skills/skill/`, never the website copy.** Then run
+  `pnpm sync:skill`. CI runs `pnpm check:skill`, which fails on drift.
+- `.github/scripts/sync-skill-docs.mjs` mirrors the tree to
+  `website/public/skill/` verbatim and to `website/public/skill.md` with doc
+  links rewritten site-absolute (that file is served one level above the tree).
+  It also deletes website copies of docs the skill has dropped.
+- Adding or removing a doc means updating the index table in `SKILL.md`; the
+  package's tests fail on an unindexed doc, a link to a file that does not
+  ship, and a broken cross-doc relative link.
+- The skill documents the *current* behaviour, including the renderer
+  divergences recorded in this file (vanilla's missing ground-shadow fallback,
+  the baked-light rebake asymmetry, `seamBleed`). When one of those is
+  reconciled, the skill changes in the same PR.
+- The package is plain ESM with no build step. Its `bin` runs under `npx` in
+  someone else's project, so it must stay dependency-free.
 
 ## Backward compatibility
 

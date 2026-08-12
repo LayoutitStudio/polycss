@@ -19,19 +19,19 @@ Read the file that matches the task before writing non-trivial code.
 
 | File | Read it when |
 |---|---|
-| [docs/authoring-polygons.md](/skill/docs/authoring-polygons.md) | **Generating `Polygon[]` by hand.** Winding, color format, coplanarity, the optimizer. Silent-failure rules. |
-| [docs/scenes-and-cameras.md](/skill/docs/scenes-and-cameras.md) | Setting up a scene, camera props, scene options, custom elements, coordinates. |
-| [docs/shapes-and-primitives.md](/skill/docs/shapes-and-primitives.md) | Boxes, spheres, planes, Platonic solids, raw polygon generators. |
-| [docs/loading-models.md](/skill/docs/loading-models.md) | `loadMesh`, `<PolyMesh src>`, OBJ/MTL/STL/glTF/GLB/VOX, parse options. |
-| [docs/lighting.md](/skill/docs/lighting.md) | Directional/ambient/point lights, baked vs dynamic, rebaking. |
-| [docs/shadows.md](/skill/docs/shadows.md) | `castShadow`, `receiveShadow`, parametric shadows, renderer differences. |
-| [docs/textures.md](/skill/docs/textures.md) | UV textures, the atlas pipeline, texture quality, presentation options. |
-| [docs/controls-and-interaction.md](/skill/docs/controls-and-interaction.md) | Orbit/map/first-person controls, selection, transform gizmos, click handlers. |
-| [docs/animation.md](/skill/docs/animation.md) | Skeletal clips from glTF/GLB, `usePolyAnimation`, stable DOM. |
-| [docs/performance.md](/skill/docs/performance.md) | Leaf counts, render strategies, atlas memory, voxel fast paths. |
-| [docs/three-parity.md](/skill/docs/three-parity.md) | Porting Three.js scenes through the `*/three` subpaths. |
-| [docs/troubleshooting.md](/skill/docs/troubleshooting.md) | **Something renders wrong.** Symptom → cause table. |
-| [docs/api-index.md](/skill/docs/api-index.md) | "Does this export exist?" Package-by-package export inventory. |
+| [docs/authoring-polygons.md](docs/authoring-polygons.md) | **Generating `Polygon[]` by hand.** Winding, color format, coplanarity, the optimizer. Silent-failure rules. |
+| [docs/scenes-and-cameras.md](docs/scenes-and-cameras.md) | Setting up a scene, camera props, scene options, custom elements, coordinates. |
+| [docs/shapes-and-primitives.md](docs/shapes-and-primitives.md) | Boxes, spheres, planes, Platonic solids, raw polygon generators. |
+| [docs/loading-models.md](docs/loading-models.md) | `loadMesh`, `<PolyMesh src>`, OBJ/MTL/STL/glTF/GLB/VOX, parse options. |
+| [docs/lighting.md](docs/lighting.md) | Directional/ambient/point lights, baked vs dynamic, rebaking. |
+| [docs/shadows.md](docs/shadows.md) | `castShadow`, `receiveShadow`, parametric shadows, renderer differences. |
+| [docs/textures.md](docs/textures.md) | UV textures, the atlas pipeline, texture quality, presentation options. |
+| [docs/controls-and-interaction.md](docs/controls-and-interaction.md) | Orbit/map/first-person controls, selection, transform gizmos, click handlers. |
+| [docs/animation.md](docs/animation.md) | Skeletal clips from glTF/GLB, `usePolyAnimation`, stable DOM. |
+| [docs/performance.md](docs/performance.md) | Leaf counts, render strategies, atlas memory, voxel fast paths. |
+| [docs/three-parity.md](docs/three-parity.md) | Porting Three.js scenes through the `*/three` subpaths. |
+| [docs/troubleshooting.md](docs/troubleshooting.md) | **Something renders wrong.** Symptom → cause table. |
+| [docs/api-index.md](docs/api-index.md) | "Does this export exist?" Package-by-package export inventory. |
 
 ## Packages
 
@@ -123,7 +123,7 @@ These constraints fail with **no throw and no console warning**:
 5. **Degenerate polygons vanish silently** — under 3 vertices, zero area, or a
    degenerate first edge.
 
-Read [docs/authoring-polygons.md](/skill/docs/authoring-polygons.md) in full before
+Read [docs/authoring-polygons.md](docs/authoring-polygons.md) in full before
 generating geometry — it covers per-parser winding behaviour, which entry points
 normalize, and the exact optimizer thresholds.
 
