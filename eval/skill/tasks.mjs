@@ -82,6 +82,40 @@ const pixelsWithHue = (snapshot, hex, tolerance = 30) => {
 const hasHue = (snapshot, hex, minPixels = 40) =>
   pixelsWithHue(snapshot, hex).length >= minPixels;
 
+/**
+ * Count 4-connected regions in a set of sampled pixels, ignoring specks. Used
+ * to ask "how many separate surfaces are painted" without caring how big they
+ * are on screen.
+ */
+function countRegions(pixels, cols, minSize = 4) {
+  const set = new Set(pixels.map((p) => p.y * cols + p.x));
+  const seen = new Set();
+  let regions = 0;
+  for (const start of set) {
+    if (seen.has(start)) continue;
+    const stack = [start];
+    seen.add(start);
+    let size = 0;
+    while (stack.length > 0) {
+      const index = stack.pop();
+      size += 1;
+      const x = index % cols;
+      const y = Math.floor(index / cols);
+      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const nx = x + dx;
+        const ny = y + dy;
+        if (nx < 0 || nx >= cols) continue;
+        const next = ny * cols + nx;
+        if (!set.has(next) || seen.has(next)) continue;
+        seen.add(next);
+        stack.push(next);
+      }
+    }
+    if (size >= minSize) regions += 1;
+  }
+  return regions;
+}
+
 const boundsOf = (pixels) => ({
   x0: Math.min(...pixels.map((p) => p.x)),
   x1: Math.max(...pixels.map((p) => p.x)),
@@ -389,7 +423,9 @@ export const TASKS = [
 surface, lit by a directional light.
 
 - The cube must be amber: #fbbf24.
-- The cube must cast a visible shadow onto the ground.
+- The cube must cast a shadow onto the ground that is clearly visible from the
+  camera. Place the light so the shadow falls to one side rather than directly
+  behind the cube, where the cube itself would hide it.
 - The camera is fixed.`,
     visual: [
       mountsCleanly,
@@ -475,7 +511,9 @@ tiles lying on the ground, seen from above at an angle.
   use any built-in shape helper or generator, and do not load a model file.
 - Every tile is lime: #84cc16.
 - All four tiles must be visible from the camera looking down at them.
-- Leave a small gap between the tiles so the four squares read separately.`,
+- Leave a small gap between the tiles so the four squares read separately.
+- Frame the grid so it fills a good part of the 900x600 viewport: on-screen size
+  comes from BOTH the tile sizes and the camera zoom.`,
     visual: [
       mountsCleanly,
       colorMatches("#84cc16"),
@@ -483,18 +521,15 @@ tiles lying on the ground, seen from above at an angle.
         id: "faces-visible",
         describe: "all four tiles face the camera (correct winding)",
         run: ({ first }) => {
-          // Four flat tiles share one normal, so they share one Lambert shade
-          // and the only question is how much of that shade is painted. A tile
-          // wound the other way is backface-culled and paints nothing at all,
-          // so lost coverage counts the tiles that got their vertex order
-          // wrong. Four tiles were measured at ~9% of the viewport; require
-          // enough for all four rather than a bare majority.
-          const painted = pixelsWithHue(first, "#84cc16").length;
-          const total = first.pixels.rgb.length;
-          const share = painted / total;
-          return share >= 0.055
+          // Count separate painted regions, not total coverage. A tile wound
+          // away from the camera is backface-culled and paints nothing, so it
+          // costs a whole region — while a small-but-correct grid still shows
+          // four. Coverage alone conflated "wound inward" with "zoomed out",
+          // and blamed winding for what was really framing.
+          const regions = countRegions(pixelsWithHue(first, "#84cc16"), first.pixels.cols);
+          return regions >= 4
             ? true
-            : `only ${(share * 100).toFixed(1)}% of the viewport is lime - tiles wound away from the camera are backface-culled and paint nothing`;
+            : `only ${regions} separate lime region(s) painted, expected 4 - a tile wound away from the camera is backface-culled and paints nothing`;
         },
       },
     ],
