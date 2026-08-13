@@ -54,7 +54,7 @@
        * reversed. Chromium decodes the screenshot for us, so this needs no
        * image library.
        */
-      window.__samplePixels = async (dataUrl, cols = 120, rows = 80) => {
+      window.__samplePixels = async (dataUrl, cols = 240, rows = 160) => {
         const img = new Image();
         img.src = dataUrl;
         await img.decode();

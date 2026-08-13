@@ -401,7 +401,12 @@ async function main(argv) {
     console.log(`[eval] wrote ${options.json}`);
   }
   if (!options.keep) {
-    rmSync(workRoot, { recursive: true, force: true });
+    // Remove only what THIS run created. Wiping the shared root also deleted
+    // workspaces another run had deliberately kept, which lost evidence that
+    // had already cost real agent invocations to produce.
+    for (const candidate of candidates) {
+      rmSync(candidate.dir, { recursive: true, force: true });
+    }
   } else {
     console.log(`[eval] workspaces kept in ${workRoot}`);
   }

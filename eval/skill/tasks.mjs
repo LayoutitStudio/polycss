@@ -88,7 +88,25 @@ const hasHue = (snapshot, hex, minPixels = 40) =>
  * are on screen.
  */
 function countRegions(pixels, cols, minSize = 4) {
-  const set = new Set(pixels.map((p) => p.y * cols + p.x));
+  const raw = new Set(pixels.map((p) => p.y * cols + p.x));
+
+  // Erode by one sample first. Shapes that merely touch — four tiles meeting
+  // at a corner, say — bridge into a single blob at this sampling density,
+  // which read as "three tiles are missing" for a scene that was perfect.
+  // Dropping boundary samples separates a point contact from a real join.
+  const set = new Set();
+  for (const index of raw) {
+    const x = index % cols;
+    const y = Math.floor(index / cols);
+    const neighbours = [
+      raw.has(index - 1) && x > 0,
+      raw.has(index + 1) && x < cols - 1,
+      raw.has(index - cols),
+      raw.has(index + cols),
+    ].filter(Boolean).length;
+    if (neighbours === 4) set.add(index);
+  }
+
   const seen = new Set();
   let regions = 0;
   for (const start of set) {
