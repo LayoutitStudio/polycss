@@ -11,20 +11,6 @@
  * hidden`, so a reversed face keeps its box while painting nothing.
  */
 
-const CONTRACT = `Write your scene in a single file \`scene.mjs\` in this directory.
-
-It must export one function:
-
-    export function mount(host) { ... }
-
-\`host\` is an empty \`<div>\` that is already in the document, sized 900x600.
-Build the scene inside it. Import everything from "@layoutit/polycss" — the
-bundler resolves that specifier, so do not add a package.json, do not install
-anything, and do not use a CDN URL.
-
-Do not write any other file. Do not run a dev server. Do not try to open a
-browser. When \`scene.mjs\` is written, you are done.`;
-
 const hueOf = ([r, g, b]) => {
   const max = Math.max(r, g, b);
   const min = Math.min(r, g, b);
@@ -57,10 +43,43 @@ const hexToRgb = (hex) => {
  * samples are the only evidence that survives that.
  */
 
-/** The harness page paints on white, so anything off-white is scene content. */
-const isBackground = ([r, g, b]) => r > 246 && g > 246 && b > 246;
+/**
+ * The page background, measured rather than assumed. A PolyCSS scene is DOM on
+ * a white page; a WebGL control track paints whatever clear color it chose. The
+ * four corners are background in every framing this suite grades, so their
+ * modal color is the ground truth for "not scene content".
+ */
+function backgroundOf(snapshot) {
+  if (snapshot.__bg) return snapshot.__bg;
+  const { cols, rows, rgb } = snapshot.pixels;
+  const block = 6;
+  const counts = new Map();
+  for (const [ox, oy] of [
+    [0, 0],
+    [cols - block, 0],
+    [0, rows - block],
+    [cols - block, rows - block],
+  ]) {
+    for (let y = 0; y < block; y += 1) {
+      for (let x = 0; x < block; x += 1) {
+        const c = rgb[(oy + y) * cols + (ox + x)];
+        const key = c.map((v) => Math.round(v / 8) * 8).join(",");
+        counts.set(key, (counts.get(key) ?? 0) + 1);
+      }
+    }
+  }
+  const best = [...counts.entries()].sort((a, b) => b[1] - a[1])[0][0].split(",").map(Number);
+  snapshot.__bg = best;
+  return best;
+}
 
-const paintedPixels = (snapshot) => snapshot.pixels.rgb.filter((rgb) => !isBackground(rgb));
+const isBackgroundOf = (rgb, bg) =>
+  Math.abs(rgb[0] - bg[0]) + Math.abs(rgb[1] - bg[1]) + Math.abs(rgb[2] - bg[2]) <= 30;
+
+const paintedPixels = (snapshot) => {
+  const bg = backgroundOf(snapshot);
+  return snapshot.pixels.rgb.filter((rgb) => !isBackgroundOf(rgb, bg));
+};
 
 const paintedFraction = (snapshot) =>
   paintedPixels(snapshot).length / snapshot.pixels.rgb.length;
@@ -74,9 +93,10 @@ const pixelsWithHue = (snapshot, hex, tolerance = 30) => {
   const target = hueOf(hexToRgb(hex));
   if (target === null) return [];
   const { cols } = snapshot.pixels;
+  const bg = backgroundOf(snapshot);
   const out = [];
   snapshot.pixels.rgb.forEach((rgb, index) => {
-    if (isBackground(rgb)) return;
+    if (isBackgroundOf(rgb, bg)) return;
     const hue = hueOf(rgb);
     if (hue === null || hueDistance(hue, target) > tolerance) return;
     out.push({ rgb, x: index % cols, y: Math.floor(index / cols) });
@@ -141,9 +161,10 @@ function surfaceBrightness(snapshot, hex) {
  */
 function receiverContrast(snapshot, excludeHex) {
   const target = excludeHex === null ? null : hueOf(hexToRgb(excludeHex));
+  const bg = backgroundOf(snapshot);
   const lumas = [];
   for (const rgb of snapshot.pixels.rgb) {
-    if (isBackground(rgb)) continue;
+    if (isBackgroundOf(rgb, bg)) continue;
     if (target !== null) {
       const hue = hueOf(rgb);
       if (hue !== null && hueDistance(hue, target) <= 30) continue;
@@ -297,7 +318,6 @@ const shadowDarkensReceiver = (casterHex) => ({
   id: "shadow-contrast",
   describe: "the cast shadow visibly darkens the receiver",
   run: ({ first }) => {
-    if (first.shadow.pathCount === 0) return "no shadow geometry was emitted at all";
     const c = receiverContrast(first, casterHex);
     if (c.count < 200) return `not enough receiver surface to measure (${c.count} samples)`;
     return c.ratio <= 0.95
@@ -320,17 +340,17 @@ export const TASKS = [
   reads clearly as its own color and each face is shaded differently.
 - Frame it so the cube fills roughly a third of the 900x600 viewport: clearly
   more than a speck, and not running off the edges. Remember that on-screen
-  size comes from BOTH the shape's world size and the camera zoom.
-
-${CONTRACT}`,
-    checks: [
+  size comes from BOTH the shape's world size and the camera zoom.`,
+    visual: [
       mountsCleanly,
-      hasScene,
       framedWithin(0.08, 0.6),
       colorMatches("#ff8c1a"),
       litWithin("#ff8c1a", 40, 210),
       isShaded("#ff8c1a", 2),
       isStill,
+    ],
+    native: [
+      hasScene,
       {
         id: "one-mesh",
         describe: "adds exactly one mesh",
@@ -360,16 +380,16 @@ ${CONTRACT}`,
 - Light it with a plain white directional light plus ambient fill.
 - Frame it so the cube fills roughly a third of the 900x600 viewport: clearly
   more than a speck, and not running off the edges. Remember that on-screen
-  size comes from BOTH the shape's world size and the camera zoom.
-
-${CONTRACT}`,
-    checks: [
+  size comes from BOTH the shape's world size and the camera zoom.`,
+    visual: [
       mountsCleanly,
-      hasScene,
       framedWithin(0.08, 0.6),
       colorMatches("#14b8a6"),
       litWithin("#14b8a6", 25, 190),
       isMoving,
+    ],
+    native: [
+      hasScene,
       {
         id: "no-raf-loop",
         describe: "does not hand-roll a per-polygon animation loop",
@@ -389,14 +409,15 @@ surface, lit by a directional light.
 
 - The cube must be amber: #fbbf24.
 - The cube must cast a visible shadow onto the ground.
-- The camera is fixed.
-
-${CONTRACT}`,
-    checks: [
+- The camera is fixed.`,
+    visual: [
       mountsCleanly,
-      hasScene,
       paintsSomething(),
       colorMatches("#fbbf24"),
+      shadowDarkensReceiver("#fbbf24"),
+    ],
+    native: [
+      hasScene,
       {
         id: "shadow-drawn",
         describe: "a cast shadow is actually painted",
@@ -405,7 +426,6 @@ ${CONTRACT}`,
             ? true
             : `no shadow geometry rendered (${first.shadow.svgCount} svg, ${first.shadow.pathCount} paths, area ${first.shadow.area})`,
       },
-      shadowDarkensReceiver("#fbbf24"),
       {
         id: "receiver",
         describe: "a receiver exists — vanilla has no ground-shadow fallback",
@@ -426,21 +446,12 @@ separated so neither hides the other:
 - a cube in indigo #6366f1
 - a sphere in rose #f43f5e
 
-The camera is fixed. Use the default lighting.
-
-${CONTRACT}`,
-    checks: [
+The camera is fixed. Use the default lighting.`,
+    visual: [
       mountsCleanly,
-      hasScene,
       paintsSomething(0.04),
       colorMatches("#6366f1"),
       colorMatches("#f43f5e"),
-      {
-        id: "two-meshes",
-        describe: "adds two separate meshes",
-        run: ({ first }) =>
-          first.meshCount === 2 ? true : `expected 2 meshes, found ${first.meshCount}`,
-      },
       {
         id: "separated",
         describe: "the two shapes do not overlap on screen",
@@ -460,6 +471,15 @@ ${CONTRACT}`,
         },
       },
     ],
+    native: [
+      hasScene,
+      {
+        id: "two-meshes",
+        describe: "adds two separate meshes",
+        run: ({ first }) =>
+          first.meshCount === 2 ? true : `expected 2 meshes, found ${first.meshCount}`,
+      },
+    ],
   },
 
   {
@@ -472,23 +492,10 @@ tiles lying on the ground, seen from above at an angle.
   use any built-in shape helper or generator, and do not load a model file.
 - Every tile is lime: #84cc16.
 - All four tiles must be visible from the camera looking down at them.
-- Leave a small gap between the tiles so the four squares read separately.
-
-${CONTRACT}`,
-    checks: [
+- Leave a small gap between the tiles so the four squares read separately.`,
+    visual: [
       mountsCleanly,
-      hasScene,
       colorMatches("#84cc16"),
-      {
-        id: "authored",
-        describe: "geometry is hand-authored, not generated by a helper",
-        run: ({ source }) =>
-          /(box|sphere|cone|cylinder|plane|torus|tetrahedron|octahedron|icosahedron|dodecahedron)Polygons|createPoly(Box|Sphere|Cone|Cylinder|Plane|Torus|Tetrahedron|Octahedron|Icosahedron|Dodecahedron)/i.test(
-            source,
-          )
-            ? "used a built-in shape helper instead of authoring polygons"
-            : true,
-      },
       {
         id: "faces-visible",
         describe: "all four tiles face the camera (correct winding)",
@@ -506,6 +513,19 @@ ${CONTRACT}`,
             ? true
             : `only ${(share * 100).toFixed(1)}% of the viewport is lime - tiles wound away from the camera are backface-culled and paint nothing`;
         },
+      },
+    ],
+    native: [
+      hasScene,
+      {
+        id: "authored",
+        describe: "geometry is hand-authored, not generated by a helper",
+        run: ({ source }) =>
+          /(box|sphere|cone|cylinder|plane|torus|tetrahedron|octahedron|icosahedron|dodecahedron)Polygons|createPoly(Box|Sphere|Cone|Cylinder|Plane|Torus|Tetrahedron|Octahedron|Icosahedron|Dodecahedron)/i.test(
+            source,
+          )
+            ? "used a built-in shape helper instead of authoring polygons"
+            : true,
       },
       {
         id: "no-named-colors",
@@ -529,16 +549,17 @@ ${CONTRACT}`,
   yellow #eab308.
 - A directional light plus some ambient fill.
 - All three shapes cast shadows onto the ground.
-- The user can drag to orbit and use the wheel to zoom.
-
-${CONTRACT}`,
-    checks: [
+- The user can drag to orbit and use the wheel to zoom.`,
+    visual: [
       mountsCleanly,
-      hasScene,
       paintsSomething(0.15),
       colorMatches("#ef4444"),
       colorMatches("#3b82f6"),
       colorMatches("#eab308"),
+      shadowDarkensReceiver(null),
+    ],
+    native: [
+      hasScene,
       {
         id: "four-meshes",
         describe: "ground plus three shapes are separate meshes",
@@ -553,7 +574,6 @@ ${CONTRACT}`,
             ? true
             : `no shadow geometry rendered (${first.shadow.pathCount} paths, area ${first.shadow.area})`,
       },
-      shadowDarkensReceiver(null),
       {
         id: "controls",
         describe: "uses the built-in controls rather than manual input handling",
@@ -567,6 +587,9 @@ ${CONTRACT}`,
 ];
 
 export const TASK_IDS = TASKS.map((t) => t.id);
+
+/** Every check a task can run, for reporting totals. */
+export const allChecks = (task) => [...task.visual, ...task.native];
 
 export function selectTasks(ids) {
   if (ids.length === 0) return TASKS;

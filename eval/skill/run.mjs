@@ -19,6 +19,7 @@
 import { execFileSync } from "node:child_process";
 import {
   copyFileSync,
+  existsSync,
   mkdirSync,
   readFileSync,
   rmSync,
@@ -28,7 +29,8 @@ import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { AGENTS, AGENT_NAMES, availableAgents, expandAgents, isAvailable } from "./agents.mjs";
-import { TASK_IDS, selectTasks } from "./tasks.mjs";
+import { allChecks, TASK_IDS, selectTasks } from "./tasks.mjs";
+import { selectTracks, TRACK_NAMES, TRACKS } from "./tracks.mjs";
 import { verifyCandidates } from "./verify.mjs";
 
 const here = resolve(fileURLToPath(import.meta.url), "..");
@@ -41,6 +43,8 @@ const USAGE = `Usage: node eval/skill/run.mjs [options]
 Options
   --agent <names>   Comma-separated: ${AGENT_NAMES.join(", ")}, or all.
                     Default: oracle.
+  --track <names>   Comma-separated: ${TRACK_NAMES.join(", ")}, or all.
+                    Default: polycss. "three" is the no-skill control.
   --task <ids>      Comma-separated task ids. Default: all.
   --keep            Keep the agent workspaces for inspection.
   --headed          Run Chromium headed.
@@ -56,6 +60,7 @@ ${TASK_IDS.map((id) => `  ${id}`).join("\n")}
 function parseArgs(argv) {
   const options = {
     agents: [],
+    tracks: [],
     tasks: [],
     keep: false,
     headed: false,
@@ -73,6 +78,7 @@ function parseArgs(argv) {
       return next;
     };
     if (arg === "--agent") options.agents.push(value());
+    else if (arg === "--track") options.tracks.push(...value().split(",").map((t) => t.trim()));
     else if (arg === "--task") options.tasks.push(...value().split(",").map((t) => t.trim()));
     else if (arg === "--keep") options.keep = true;
     else if (arg === "--headed") options.headed = true;
@@ -91,28 +97,40 @@ function parseArgs(argv) {
  * read their skills directory relative to the working directory, so installing
  * both flavours covers every CLI without special-casing.
  */
-function makeWorkspace(agent, task) {
-  const dir = join(workRoot, agent, task.id);
+function makeWorkspace(track, agent, task) {
+  const dir = join(workRoot, track, agent, task.id);
   rmSync(dir, { recursive: true, force: true });
   mkdirSync(dir, { recursive: true });
 
-  execFileSync(process.execPath, [installer, "--cwd", dir, "--agent", "all"], {
-    stdio: "pipe",
-  });
+  // Only the track under test gets the skill. The control measures what the
+  // model already knows, so handing it anything would defeat the comparison.
+  if (TRACKS[track].installSkill) {
+    execFileSync(process.execPath, [installer, "--cwd", dir, "--agent", "all"], { stdio: "pipe" });
+  }
 
-  writeFileSync(join(dir, "TASK.md"), `# Task\n\n${task.prompt}\n`);
+  writeFileSync(join(dir, "TASK.md"), `# Task\n\n${taskPrompt(track, task)}\n`);
   return dir;
 }
 
-function runAgent(name, dir, task, timeoutSeconds) {
+const taskPrompt = (track, task) => `${task.prompt}\n\n${TRACKS[track].contract}`;
+
+function runAgent(name, track, dir, task, timeoutSeconds) {
   const agent = AGENTS[name];
 
   if (name === "oracle") {
-    copyFileSync(join(here, "oracle", `${task.id}.mjs`), join(dir, "scene.mjs"));
+    const from = join(here, "oracle", track, `${task.id}.mjs`);
+    copyFileSync(from, join(dir, "scene.mjs"));
+    // The Three reference scenes share a small setup helper; the bundler
+    // resolves it relative to the copied entry.
+    const shared = join(here, "oracle", track, "_common.mjs");
+    if (existsSync(shared)) copyFileSync(shared, join(dir, "_common.mjs"));
     return { ok: true, ms: 0, output: "reference solution copied" };
   }
 
-  const prompt = `Read TASK.md in this directory and complete it. You have the PolyCSS skill installed in this workspace — use it.\n\n${task.prompt}`;
+  const preamble = TRACKS[track].installSkill
+    ? "Read TASK.md in this directory and complete it. You have the PolyCSS skill installed in this workspace — use it."
+    : "Read TASK.md in this directory and complete it.";
+  const prompt = `${preamble}\n\n${taskPrompt(track, task)}`;
   const started = Date.now();
   try {
     const output = execFileSync(agent.bin, agent.argv(prompt, dir), {
@@ -160,9 +178,11 @@ async function main(argv) {
 
   let agents;
   let tasks;
+  let tracks;
   try {
     agents = expandAgents(options.agents.length > 0 ? options.agents : ["oracle"]);
     tasks = selectTasks(options.tasks);
+    tracks = selectTracks(options.tracks);
   } catch (error) {
     console.error(error.message);
     return 1;
@@ -182,16 +202,17 @@ async function main(argv) {
   }
 
   console.log(
-    `[eval] ${agents.length} agent(s) x ${tasks.length} task(s) = ${agents.length * tasks.length} run(s)\n`,
+    `[eval] ${agents.length} agent(s) x ${tracks.length} track(s) x ${tasks.length} task(s) = ${agents.length * tracks.length * tasks.length} run(s)\n`,
   );
 
   const candidates = [];
 
   for (const name of agents) {
-    for (const task of tasks) {
-      process.stdout.write(`[eval] ${name} / ${task.id} ... `);
-      const dir = makeWorkspace(name, task);
-      const run = runAgent(name, dir, task, options.timeout);
+    for (const track of tracks) {
+      for (const task of tasks) {
+      process.stdout.write(`[eval] ${name} / ${track} / ${task.id} ... `);
+      const dir = makeWorkspace(track, name, task);
+      const run = runAgent(name, track, dir, task, options.timeout);
 
       let source = null;
       try {
@@ -207,14 +228,17 @@ async function main(argv) {
       );
 
       candidates.push({
-        key: `${name}__${task.id}`,
+        key: `${name}__${track}__${task.id}`,
         agent: name,
+        trackName: track,
+        track: TRACKS[track],
         task,
         dir,
         run,
         source,
         entry: source === null ? null : join(dir, "scene.mjs"),
       });
+      }
     }
   }
 
@@ -229,9 +253,12 @@ async function main(argv) {
 
   const rows = candidates.map((candidate) => {
     const result = byKey.get(candidate.key);
+    const applicable = candidate.track.installSkill
+      ? allChecks(candidate.task)
+      : candidate.task.visual;
     const checks =
       result?.checks ??
-      candidate.task.checks.map((check) => ({
+      applicable.map((check) => ({
         id: check.id,
         describe: check.describe,
         pass: false,
@@ -240,6 +267,7 @@ async function main(argv) {
     const passed = checks.filter((c) => c.pass).length;
     return {
       agent: candidate.agent,
+      track: candidate.trackName,
       task: candidate.task.id,
       wroteScene: candidate.source !== null,
       buildOk: result?.build?.ok ?? false,
@@ -247,21 +275,46 @@ async function main(argv) {
       seconds: Math.round(candidate.run.ms / 1000),
       passed,
       total: checks.length,
+      visualPassed: checks.filter((c) => c.pass && candidate.task.visual.some((v) => v.id === c.id)).length,
+      visualTotal: candidate.task.visual.length,
       checks,
     };
   });
 
   for (const agent of agents) {
-    const mine = rows.filter((r) => r.agent === agent);
-    const passed = mine.reduce((n, r) => n + r.passed, 0);
-    const total = mine.reduce((n, r) => n + r.total, 0);
-    console.log(`${AGENTS[agent].label} — ${passed}/${total} checks`);
-    for (const row of mine) {
-      console.log(`  ${bar(row.passed, row.total)} ${row.passed}/${row.total}  ${row.task}  (${row.seconds}s)`);
-      if (row.buildError) console.log(`      build failed: ${row.buildError}`);
-      for (const check of row.checks.filter((c) => !c.pass)) {
-        console.log(`      x ${check.id}: ${check.reason}`);
+    for (const track of tracks) {
+      const mine = rows.filter((r) => r.agent === agent && r.track === track);
+      if (mine.length === 0) continue;
+      const passed = mine.reduce((n, r) => n + r.passed, 0);
+      const total = mine.reduce((n, r) => n + r.total, 0);
+      console.log(`${AGENTS[agent].label} / ${TRACKS[track].label} — ${passed}/${total} checks`);
+      for (const row of mine) {
+        console.log(
+          `  ${bar(row.passed, row.total)} ${row.passed}/${row.total}  ${row.task}  (${row.seconds}s)`,
+        );
+        if (row.buildError) console.log(`      build failed: ${row.buildError}`);
+        for (const check of row.checks.filter((c) => !c.pass)) {
+          console.log(`      x ${check.id}: ${check.reason}`);
+        }
       }
+      console.log();
+    }
+  }
+
+  // The comparison the control exists for: the same visual criteria, scored on
+  // each track independently. Never a pixel diff between the two.
+  if (tracks.length > 1) {
+    console.log("Visual criteria only (comparable across tracks)\n");
+    const width = Math.max(...agents.map((a) => AGENTS[a].label.length));
+    console.log(`${"agent".padEnd(width)}  ${tracks.map((t) => TRACKS[t].label.padEnd(10)).join(" ")}`);
+    for (const agent of agents) {
+      const cells = tracks.map((track) => {
+        const mine = rows.filter((r) => r.agent === agent && r.track === track);
+        const p = mine.reduce((n, r) => n + r.visualPassed, 0);
+        const t = mine.reduce((n, r) => n + r.visualTotal, 0);
+        return `${p}/${t}`.padEnd(10);
+      });
+      console.log(`${AGENTS[agent].label.padEnd(width)}  ${cells.join(" ")}`);
     }
     console.log();
   }

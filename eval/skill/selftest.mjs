@@ -21,7 +21,7 @@ const here = resolve(fileURLToPath(import.meta.url), "..");
 const scratch = join(here, ".work", "__selftest__");
 
 const task = (id) => TASKS.find((t) => t.id === id);
-const oracle = (id) => readFileSync(join(here, "oracle", `${id}.mjs`), "utf8");
+const oracle = (id) => readFileSync(join(here, "oracle", "polycss", `${id}.mjs`), "utf8");
 
 /** Apply a required replacement, failing loudly if the source drifted. */
 function patch(source, from, to) {

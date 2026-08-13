@@ -19,18 +19,9 @@ import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 
 import { chromiumArgsWithGpuDefault } from "../../bench/chromium-defaults.mjs";
+import { TRACKS } from "./tracks.mjs";
 
 const here = resolve(fileURLToPath(import.meta.url), "..");
-const repoRoot = resolve(here, "..", "..");
-
-/** Same aliasing as bench/build.mjs: bundle workspace SOURCE, not dist. */
-const ALIASES = {
-  "@layoutit/polycss-core": resolve(repoRoot, "packages/core/src/index.ts"),
-  "@layoutit/polycss-core/three": resolve(repoRoot, "packages/core/src/three/index.ts"),
-  "@layoutit/polycss": resolve(repoRoot, "packages/polycss/src/index.ts"),
-  "@layoutit/polycss/elements": resolve(repoRoot, "packages/polycss/src/elements/index.ts"),
-  "@layoutit/polycss/three": resolve(repoRoot, "packages/polycss/src/three.ts"),
-};
 
 const MIME = {
   ".html": "text/html; charset=utf-8",
@@ -39,7 +30,9 @@ const MIME = {
   ".css": "text/css; charset=utf-8",
 };
 
-export async function bundleScene(entry, outfile) {
+/** Each track brings its own aliases: workspace SOURCE for PolyCSS, the
+ *  workspace copy of three for the control. */
+export async function bundleScene(entry, outfile, alias = TRACKS.polycss.alias) {
   try {
     await build({
       entryPoints: [entry],
@@ -48,7 +41,7 @@ export async function bundleScene(entry, outfile) {
       format: "esm",
       platform: "browser",
       target: "es2020",
-      alias: ALIASES,
+      alias,
       loader: { ".ts": "ts", ".tsx": "tsx" },
       jsx: "automatic",
       logLevel: "silent",
@@ -139,7 +132,11 @@ export async function verifyCandidates(candidates, { headed = false, settleMs } 
 
   for (const candidate of candidates) {
     const outfile = join(bundleDir, `${candidate.key}.js`);
-    const result = await bundleScene(candidate.entry, outfile);
+    const result = await bundleScene(
+      candidate.entry,
+      outfile,
+      (candidate.track ?? TRACKS.polycss).alias,
+    );
     built.push({ ...candidate, outfile, build: result });
   }
 
@@ -158,10 +155,12 @@ export async function verifyCandidates(candidates, { headed = false, settleMs } 
     const results = [];
 
     for (const candidate of built) {
+      const checksFor = (c) => [...c.task.visual, ...((c.track ?? TRACKS.polycss).installSkill ? c.task.native : [])];
+
       if (!candidate.build.ok) {
         results.push({
           ...candidate,
-          checks: candidate.task.checks.map((check) => ({
+          checks: checksFor(candidate).map((check) => ({
             id: check.id,
             describe: check.describe,
             pass: false,
@@ -177,7 +176,7 @@ export async function verifyCandidates(candidates, { headed = false, settleMs } 
       const probe = await probeScene(page, url, { settleMs });
       const ctx = { ...probe, source: candidate.source };
 
-      const checks = candidate.task.checks.map((check) => {
+      const checks = checksFor(candidate).map((check) => {
         let outcome;
         try {
           outcome = check.run(ctx);
