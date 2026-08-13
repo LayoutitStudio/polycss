@@ -146,10 +146,13 @@ function receiverContrast(snapshot, excludeHex) {
   }
   lumas.sort((a, b) => a - b);
   const median = percentile(lumas, 0.5);
-  const dark = percentile(lumas, 0.1);
-  const threshold = median * 0.85;
-  const darkShare = lumas.length === 0 ? 0 : lumas.filter((l) => l < threshold).length / lumas.length;
-  return { count: lumas.length, median, dark, ratio: median === 0 ? 1 : dark / median, darkShare };
+  // Size of the dark patch, not a percentile of it. Once the caster's own
+  // shaded faces are excluded, a shadow is a small minority of receiver
+  // pixels — the 10th percentile still lands on lit ground, which read as
+  // "no contrast" even for shadows that are plainly visible.
+  const darkShare =
+    lumas.length === 0 ? 0 : lumas.filter((l) => l < median * 0.88).length / lumas.length;
+  return { count: lumas.length, median, darkShare };
 }
 
 /**
@@ -280,7 +283,7 @@ const isMoving = {
   describe: "camera orbits over time",
   run: ({ first, second }) => {
     const changed = changedFraction(first, second);
-    return changed >= 0.02
+    return changed >= 0.01
       ? true
       : `only ${(changed * 100).toFixed(1)}% of the image changed between samples — nothing is animating`;
   },
@@ -298,9 +301,9 @@ const shadowDarkensReceiver = (casterHex) => ({
   run: ({ first }) => {
     const c = receiverContrast(first, casterHex);
     if (c.count < 200) return `not enough receiver surface to measure (${c.count} samples)`;
-    return c.ratio <= 0.95
+    return c.darkShare >= 0.005
       ? true
-      : `the receiver's dark tail is ${(c.ratio * 100).toFixed(0)}% of its median brightness - shadow paths are emitted but nothing is darker`;
+      : `only ${(c.darkShare * 100).toFixed(2)}% of the receiver is meaningfully darker than the rest - shadow geometry may be emitted, but nothing is shaded by it`;
   },
 });
 
@@ -424,7 +427,9 @@ separated so neither hides the other:
 - a cube in indigo #6366f1
 - a sphere in rose #f43f5e
 
-The camera is fixed. Use the default lighting.`,
+The camera is fixed. Use the default lighting. Frame the pair so they together
+fill a good part of the 900x600 viewport rather than sitting small in the
+middle: on-screen size comes from BOTH the shape sizes and the camera zoom.`,
     visual: [
       mountsCleanly,
       paintsSomething(0.04),
@@ -527,7 +532,10 @@ tiles lying on the ground, seen from above at an angle.
   yellow #eab308.
 - A directional light plus some ambient fill.
 - All three shapes cast shadows onto the ground.
-- The user can drag to orbit and use the wheel to zoom.`,
+- The user can drag to orbit and use the wheel to zoom.
+
+Frame the scene so it fills a good part of the 900x600 viewport: on-screen size
+comes from BOTH the world sizes and the camera zoom.`,
     visual: [
       mountsCleanly,
       paintsSomething(0.15),

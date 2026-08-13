@@ -25,7 +25,8 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { basename, join, resolve } from "node:path";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { AGENTS, AGENT_NAMES, availableAgents, expandAgents, isAvailable } from "./agents.mjs";
@@ -35,7 +36,13 @@ import { verifyCandidates } from "./verify.mjs";
 
 const here = resolve(fileURLToPath(import.meta.url), "..");
 const repoRoot = resolve(here, "..", "..");
-const workRoot = join(here, ".work");
+/**
+ * Workspaces live OUTSIDE the repository. Inside it, an agent can walk up out
+ * of its workspace and read the PolyCSS monorepo — measured: a control-track
+ * run with no skill installed found `@layoutit/polycss/three` in the source
+ * tree and imported it, which is not the clean room this is supposed to be.
+ */
+const workRoot = join(tmpdir(), "polycss-skill-eval");
 const installer = join(repoRoot, "packages/skills/bin/polycss-skills.mjs");
 
 const USAGE = `Usage: node eval/skill/run.mjs [options]
@@ -47,8 +54,11 @@ Options
                     Default: polycss. "three" is the no-skill control.
   --task <ids>      Comma-separated task ids. Default: all.
   --keep            Keep the agent workspaces for inspection.
+  --reuse           Reuse a workspace that already has a scene.mjs instead of
+                    re-running the agent. Grades existing work for free.
+  --no-preflight    Skip the per-agent readiness probe.
   --headed          Run Chromium headed.
-  --settle <ms>     Delay between the two DOM samples (default 1200).
+  --settle <ms>     Delay between the two DOM samples (default 2000).
   --timeout <s>     Per-agent-invocation timeout (default 600).
   --json <file>     Also write the full result as JSON.
   --list            List agents and tasks, then exit.
@@ -63,8 +73,10 @@ function parseArgs(argv) {
     tracks: [],
     tasks: [],
     keep: false,
+    reuse: false,
+    preflight: true,
     headed: false,
-    settle: 1200,
+    settle: 2000,
     timeout: 600,
     json: null,
     list: false,
@@ -81,6 +93,8 @@ function parseArgs(argv) {
     else if (arg === "--track") options.tracks.push(...value().split(",").map((t) => t.trim()));
     else if (arg === "--task") options.tasks.push(...value().split(",").map((t) => t.trim()));
     else if (arg === "--keep") options.keep = true;
+    else if (arg === "--reuse") options.reuse = true;
+    else if (arg === "--no-preflight") options.preflight = false;
     else if (arg === "--headed") options.headed = true;
     else if (arg === "--settle") options.settle = Number(value());
     else if (arg === "--timeout") options.timeout = Number(value());
@@ -137,6 +151,10 @@ function runAgent(name, track, dir, task, timeoutSeconds) {
       cwd: dir,
       encoding: "utf8",
       timeout: timeoutSeconds * 1000,
+      // SIGTERM is advisory and some CLIs ignore it while blocked on an
+      // interactive prompt — one unauthenticated agent sat on a task for 48
+      // minutes past its timeout before this was SIGKILL.
+      killSignal: "SIGKILL",
       maxBuffer: 64 * 1024 * 1024,
       stdio: ["ignore", "pipe", "pipe"],
     });
@@ -148,6 +166,42 @@ function runAgent(name, track, dir, task, timeoutSeconds) {
       output: `${error.stdout ?? ""}${error.stderr ?? ""}`.trim() || String(error.message),
     };
   }
+}
+
+/**
+ * One trivial task per agent before the real matrix starts. An agent that is
+ * not logged in blocks on an interactive prompt forever; finding that out now
+ * costs one minute instead of an hour of dead runs.
+ */
+function preflight(name, timeoutSeconds = 90) {
+  if (name === "oracle") return { ok: true };
+  const dir = join(workRoot, "__preflight__", name);
+  rmSync(dir, { recursive: true, force: true });
+  mkdirSync(dir, { recursive: true });
+  const agent = AGENTS[name];
+  try {
+    execFileSync(
+      agent.bin,
+      agent.argv("Write a file named ready.txt containing the word READY. Then stop.", dir),
+      {
+        cwd: dir,
+        encoding: "utf8",
+        timeout: timeoutSeconds * 1000,
+        killSignal: "SIGKILL",
+        maxBuffer: 8 * 1024 * 1024,
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
+  } catch (error) {
+    const out = `${error.stdout ?? ""}${error.stderr ?? ""}`;
+    if (/authenticat|sign in|login|api key/i.test(out)) {
+      return { ok: false, reason: "needs authentication — run the CLI once interactively and log in" };
+    }
+    return { ok: false, reason: `probe failed after ${timeoutSeconds}s (${error.code ?? error.message})` };
+  }
+  return existsSync(join(dir, "ready.txt"))
+    ? { ok: true }
+    : { ok: false, reason: "probe returned but wrote no file" };
 }
 
 const bar = (passed, total) => {
@@ -201,6 +255,21 @@ async function main(argv) {
     return 1;
   }
 
+  if (options.preflight && !options.reuse) {
+    for (const name of [...agents]) {
+      process.stdout.write(`[eval] preflight ${name} ... `);
+      const ready = preflight(name);
+      console.log(ready.ok ? "ready" : `SKIPPED: ${ready.reason}`);
+      if (!ready.ok) agents.splice(agents.indexOf(name), 1);
+    }
+    rmSync(join(workRoot, "__preflight__"), { recursive: true, force: true });
+    if (agents.length === 0) {
+      console.error("[eval] no agent is ready");
+      return 1;
+    }
+    console.log();
+  }
+
   console.log(
     `[eval] ${agents.length} agent(s) x ${tracks.length} track(s) x ${tasks.length} task(s) = ${agents.length * tracks.length * tasks.length} run(s)\n`,
   );
@@ -211,8 +280,14 @@ async function main(argv) {
     for (const track of tracks) {
       for (const task of tasks) {
       process.stdout.write(`[eval] ${name} / ${track} / ${task.id} ... `);
-      const dir = makeWorkspace(track, name, task);
-      const run = runAgent(name, track, dir, task, options.timeout);
+      const existing = join(workRoot, track, name, task.id, "scene.mjs");
+      const reusing = options.reuse && existsSync(existing);
+      const dir = reusing
+        ? join(workRoot, track, name, task.id)
+        : makeWorkspace(track, name, task);
+      const run = reusing
+        ? { ok: true, ms: 0, output: "reused existing workspace" }
+        : runAgent(name, track, dir, task, options.timeout);
 
       let source = null;
       try {
@@ -224,7 +299,9 @@ async function main(argv) {
       console.log(
         source === null
           ? `no scene.mjs (${(run.ms / 1000).toFixed(0)}s)`
-          : `wrote scene.mjs (${(run.ms / 1000).toFixed(0)}s)`,
+          : reusing
+            ? "reused scene.mjs"
+            : `wrote scene.mjs (${(run.ms / 1000).toFixed(0)}s)`,
       );
 
       candidates.push({
@@ -326,7 +403,7 @@ async function main(argv) {
   if (!options.keep) {
     rmSync(workRoot, { recursive: true, force: true });
   } else {
-    console.log(`[eval] workspaces kept in ${workRoot.replace(`${repoRoot}/`, "")}`);
+    console.log(`[eval] workspaces kept in ${workRoot}`);
   }
 
   const allPassed = rows.every((r) => r.passed === r.total);
