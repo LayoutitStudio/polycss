@@ -111,6 +111,53 @@ function changedFraction(a, b) {
   return changed / left.length;
 }
 
+const luma = ([r, g, b]) => 0.2126 * r + 0.7152 * g + 0.0722 * b;
+
+const percentile = (sorted, p) =>
+  sorted.length === 0 ? 0 : sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * p))];
+
+/**
+ * Brightness of the surface painted in `hex`, as the median luma of its
+ * pixels. A scene whose light points away from every visible face still paints
+ * the right hue at near-black, and a blown-out one washes to white — both are
+ * "the right color" to a hue test and wrong to a human.
+ */
+function surfaceBrightness(snapshot, hex) {
+  const lumas = pixelsWithHue(snapshot, hex)
+    .map((p) => luma(p.rgb))
+    .sort((a, b) => a - b);
+  return { count: lumas.length, median: percentile(lumas, 0.5) };
+}
+
+/**
+ * Shadow contrast, measured on the receiver rather than on the shadow markup.
+ * Counting `<path>` nodes proves a shadow was emitted, not that it darkens
+ * anything — `opacity: 0` emits the same paths. Comparing the receiver's dark
+ * tail against its own median is what separates a visible shadow from a
+ * technically-present one.
+ *
+ * `excludeHex` drops the caster's own pixels so the statistics describe the
+ * ground, not the object standing on it.
+ */
+function receiverContrast(snapshot, excludeHex) {
+  const target = excludeHex === null ? null : hueOf(hexToRgb(excludeHex));
+  const lumas = [];
+  for (const rgb of snapshot.pixels.rgb) {
+    if (isBackground(rgb)) continue;
+    if (target !== null) {
+      const hue = hueOf(rgb);
+      if (hue !== null && hueDistance(hue, target) <= 30) continue;
+    }
+    lumas.push(luma(rgb));
+  }
+  lumas.sort((a, b) => a - b);
+  const median = percentile(lumas, 0.5);
+  const dark = percentile(lumas, 0.1);
+  const threshold = median * 0.85;
+  const darkShare = lumas.length === 0 ? 0 : lumas.filter((l) => l < threshold).length / lumas.length;
+  return { count: lumas.length, median, dark, ratio: median === 0 ? 1 : dark / median, darkShare };
+}
+
 /**
  * Distinct Lambert shading levels within one hue. Each differently-oriented
  * face of a solid gets its own brightness, so this counts how many faces of a
@@ -155,6 +202,60 @@ const paintsSomething = (minFraction = 0.03) => ({
   },
 });
 
+/**
+ * Framing, as a band rather than a floor. `zoom` is CSS pixels per world unit,
+ * so the on-screen size of a shape is set by TWO numbers — its world size and
+ * the camera zoom — and getting either wrong is invisible to a floor-only
+ * check: a cube scaled past the viewport edges paints ~100% and "passes".
+ */
+const framedWithin = (minFraction, maxFraction) => ({
+  id: "scale",
+  describe: `fills between ${Math.round(minFraction * 100)}% and ${Math.round(maxFraction * 100)}% of the viewport`,
+  run: ({ first }) => {
+    const covered = paintedFraction(first);
+    if (covered < minFraction) {
+      return `fills only ${(covered * 100).toFixed(1)}% of the viewport - too small; raise the shape size or the camera zoom`;
+    }
+    if (covered > maxFraction) {
+      return `fills ${(covered * 100).toFixed(1)}% of the viewport - overscaled and running past the edges; lower the shape size or the camera zoom`;
+    }
+    return true;
+  },
+});
+
+/**
+ * The surface is actually lit. A hue test alone passes a cube whose every
+ * visible face points away from the light (correct hue, near-black) and one
+ * blown out to white — both read as "the right color" to a hue check.
+ */
+const litWithin = (hex, minLuma, maxLuma) => ({
+  id: "brightness",
+  describe: `paints ${hex} at a usable brightness`,
+  run: ({ first }) => {
+    const { count, median } = surfaceBrightness(first, hex);
+    if (count < 40) return `not enough ${hex} surface to judge brightness (${count} samples)`;
+    if (median < minLuma) {
+      return `${hex} surfaces average luma ${median.toFixed(0)} - too dark; the light points away from every visible face, or ambient is too low`;
+    }
+    if (median > maxLuma) {
+      return `${hex} surfaces average luma ${median.toFixed(0)} - blown out; lower the light or ambient intensity`;
+    }
+    return true;
+  },
+});
+
+/** A lit solid shows a different Lambert shade per face orientation. */
+const isShaded = (hex, minShades = 2) => ({
+  id: "shaded",
+  describe: "faces are individually shaded rather than flat-filled",
+  run: ({ first }) => {
+    const levels = shadeLevels(first, hex);
+    return levels >= minShades
+      ? true
+      : `only ${levels} distinct shade(s) of ${hex} - the faces are not being lit separately`;
+  },
+});
+
 const colorMatches = (hex) => ({
   id: `color${hex}`,
   describe: `paints a visible surface in the requested color (${hex})`,
@@ -196,15 +297,20 @@ export const TASKS = [
 
 - The cube must be orange: #ff8c1a.
 - The camera is fixed — it must not rotate, orbit, or animate.
-- Use the default lighting so the cube keeps its color.
-- The cube should fill a good part of the viewport.
+- Light it with a plain white directional light plus ambient fill, so the cube
+  reads clearly as its own color and each face is shaded differently.
+- Frame it so the cube fills roughly a third of the 900x600 viewport: clearly
+  more than a speck, and not running off the edges. Remember that on-screen
+  size comes from BOTH the shape's world size and the camera zoom.
 
 ${CONTRACT}`,
     checks: [
       mountsCleanly,
       hasScene,
-      paintsSomething(),
+      framedWithin(0.08, 0.6),
       colorMatches("#ff8c1a"),
+      litWithin("#ff8c1a", 40, 210),
+      isShaded("#ff8c1a", 2),
       isStill,
       {
         id: "one-mesh",
@@ -232,14 +338,18 @@ ${CONTRACT}`,
 - The camera must orbit the cube continuously on its own, without any user
   input, at a slow speed.
 - The user should also be able to drag to rotate and use the wheel to zoom.
-- Use the default lighting so the cube keeps its color.
+- Light it with a plain white directional light plus ambient fill.
+- Frame it so the cube fills roughly a third of the 900x600 viewport: clearly
+  more than a speck, and not running off the edges. Remember that on-screen
+  size comes from BOTH the shape's world size and the camera zoom.
 
 ${CONTRACT}`,
     checks: [
       mountsCleanly,
       hasScene,
-      paintsSomething(),
+      framedWithin(0.08, 0.6),
       colorMatches("#14b8a6"),
+      litWithin("#14b8a6", 25, 190),
       isMoving,
       {
         id: "no-raf-loop",
@@ -447,6 +557,9 @@ export function selectTasks(ids) {
 }
 
 export const __testing = {
+  luma,
+  surfaceBrightness,
+  receiverContrast,
   hueOf,
   hueDistance,
   hexToRgb,

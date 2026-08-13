@@ -132,6 +132,31 @@ const MUTATIONS = [
       ),
   },
   {
+    name: "an overscaled cube runs past the viewport edges",
+    taskId: "01-static-cube",
+    expect: "scale",
+    mutate: (source) => patch(source, `zoom: 3`, `zoom: 24`),
+  },
+  {
+    name: "an undersized cube is a speck",
+    taskId: "01-static-cube",
+    expect: "scale",
+    mutate: (source) => patch(source, `zoom: 3`, `zoom: 0.25`),
+  },
+  {
+    name: "a light pointing away leaves the cube near-black",
+    taskId: "01-static-cube",
+    expect: "brightness",
+    mutate: (source) =>
+      patch(
+        source,
+        `directionalLight: { direction: [0.5, -0.6, 0.7], color: "#ffffff", intensity: 1 },
+    ambientLight: { color: "#ffffff", intensity: 0.4 },`,
+        `directionalLight: { direction: [0, 0, -1], color: "#ffffff", intensity: 1 },
+    ambientLight: { color: "#ffffff", intensity: 0.04 },`,
+      ),
+  },
+  {
     name: "an export that does not exist fails the build",
     taskId: "01-static-cube",
     expect: "*",
