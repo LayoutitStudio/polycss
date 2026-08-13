@@ -140,7 +140,7 @@ export function emitReceiverShadows(
   const hasTexture = receiverEntry.polygons.some((p) => p.texture !== undefined);
   const receiverScale = meshScaleVec3(receiverEntry.handle.transform.scale);
   const rbboxCss = receiverEntry.bboxCenterCss;
-  const cacheShadowLift = options.shadow?.lift ?? 0.001;
+  const cacheShadowLift = options.shadow?.lift ?? 0.05;
   const cacheKey = `${receiverEntry.polygons.length}|${receiverDedupDrop.size}|${rpos.join(",")}|${rrot.join(",")}|${receiverScale.join(",")}|${rbboxCss ? rbboxCss.join(",") : "n"}|${cacheShadowLift}`;
   let cachedPlanes = receiverShadowCache.get(receiverEntry) as ReceiverFacePlane[] | undefined;
   if (cachedPlanes === undefined || receiverShadowCacheKey.get(receiverEntry) !== cacheKey) {

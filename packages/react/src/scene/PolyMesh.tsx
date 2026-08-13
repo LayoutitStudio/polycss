@@ -1027,7 +1027,7 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
     const runDirectionalShadow =
       !!sceneDirectionalLight?.direction && (sceneDirectionalLight.intensity ?? 1) > 0;
     const hasShadowPoints = shadowPointIndices.length > 0;
-    const shadowLift = sceneShadow?.lift ?? 0.001;
+    const shadowLift = sceneShadow?.lift ?? 0.05;
     const planes = prepareReceiverFacePlanes(
       polygons,
       position ?? [0, 0, 0],
