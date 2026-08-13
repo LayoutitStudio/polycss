@@ -229,16 +229,19 @@ const paintsSomething = (minFraction = 0.03) => ({
  * the camera zoom — and getting either wrong is invisible to a floor-only
  * check: a cube scaled past the viewport edges paints ~100% and "passes".
  */
-const framedWithin = (minFraction, maxFraction) => ({
+const framedWithin = (hex, minFraction, maxFraction) => ({
   id: "scale",
-  describe: `fills between ${Math.round(minFraction * 100)}% and ${Math.round(maxFraction * 100)}% of the viewport`,
+  describe: `the subject fills between ${Math.round(minFraction * 100)}% and ${Math.round(maxFraction * 100)}% of the viewport`,
   run: ({ first }) => {
-    const covered = paintedFraction(first);
+    // Measured on the SUBJECT's own hue, not on "anything not background".
+    // A shape scaled past every edge becomes the background by definition —
+    // corner sampling would call the cube the page and report ~0% painted.
+    const covered = pixelsWithHue(first, hex).length / first.pixels.rgb.length;
     if (covered < minFraction) {
-      return `fills only ${(covered * 100).toFixed(1)}% of the viewport - too small; raise the shape size or the camera zoom`;
+      return `the ${hex} subject fills only ${(covered * 100).toFixed(1)}% of the viewport - too small, or scaled so far past the edges that it fills the frame; raise or lower both the shape size and the camera zoom`;
     }
     if (covered > maxFraction) {
-      return `fills ${(covered * 100).toFixed(1)}% of the viewport - overscaled and running past the edges; lower the shape size or the camera zoom`;
+      return `the ${hex} subject fills ${(covered * 100).toFixed(1)}% of the viewport - overscaled and running past the edges; lower the shape size or the camera zoom`;
     }
     return true;
   },
@@ -343,7 +346,7 @@ export const TASKS = [
   size comes from BOTH the shape's world size and the camera zoom.`,
     visual: [
       mountsCleanly,
-      framedWithin(0.08, 0.6),
+      framedWithin("#ff8c1a", 0.05, 0.55),
       colorMatches("#ff8c1a"),
       litWithin("#ff8c1a", 40, 210),
       isShaded("#ff8c1a", 2),
@@ -383,7 +386,7 @@ export const TASKS = [
   size comes from BOTH the shape's world size and the camera zoom.`,
     visual: [
       mountsCleanly,
-      framedWithin(0.08, 0.6),
+      framedWithin("#14b8a6", 0.05, 0.55),
       colorMatches("#14b8a6"),
       litWithin("#14b8a6", 25, 190),
       isMoving,
