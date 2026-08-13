@@ -44,42 +44,17 @@ const hexToRgb = (hex) => {
  */
 
 /**
- * The page background, measured rather than assumed. A PolyCSS scene is DOM on
- * a white page; a WebGL control track paints whatever clear color it chose. The
- * four corners are background in every framing this suite grades, so their
- * modal color is the ground truth for "not scene content".
+ * Both tracks render on a white page: PolyCSS paints DOM over it, and the
+ * Three.js contract requires a white renderer clear color. So "not white" is
+ * scene content on either track.
+ *
+ * Sampling the corners instead would be self-defeating for the one case that
+ * most needs catching — a shape scaled past every edge fills the corners, and
+ * would be measured as the background it overran.
  */
-function backgroundOf(snapshot) {
-  if (snapshot.__bg) return snapshot.__bg;
-  const { cols, rows, rgb } = snapshot.pixels;
-  const block = 6;
-  const counts = new Map();
-  for (const [ox, oy] of [
-    [0, 0],
-    [cols - block, 0],
-    [0, rows - block],
-    [cols - block, rows - block],
-  ]) {
-    for (let y = 0; y < block; y += 1) {
-      for (let x = 0; x < block; x += 1) {
-        const c = rgb[(oy + y) * cols + (ox + x)];
-        const key = c.map((v) => Math.round(v / 8) * 8).join(",");
-        counts.set(key, (counts.get(key) ?? 0) + 1);
-      }
-    }
-  }
-  const best = [...counts.entries()].sort((a, b) => b[1] - a[1])[0][0].split(",").map(Number);
-  snapshot.__bg = best;
-  return best;
-}
+const isBackground = ([r, g, b]) => r > 244 && g > 244 && b > 244;
 
-const isBackgroundOf = (rgb, bg) =>
-  Math.abs(rgb[0] - bg[0]) + Math.abs(rgb[1] - bg[1]) + Math.abs(rgb[2] - bg[2]) <= 30;
-
-const paintedPixels = (snapshot) => {
-  const bg = backgroundOf(snapshot);
-  return snapshot.pixels.rgb.filter((rgb) => !isBackgroundOf(rgb, bg));
-};
+const paintedPixels = (snapshot) => snapshot.pixels.rgb.filter((rgb) => !isBackground(rgb));
 
 const paintedFraction = (snapshot) =>
   paintedPixels(snapshot).length / snapshot.pixels.rgb.length;
@@ -93,10 +68,9 @@ const pixelsWithHue = (snapshot, hex, tolerance = 30) => {
   const target = hueOf(hexToRgb(hex));
   if (target === null) return [];
   const { cols } = snapshot.pixels;
-  const bg = backgroundOf(snapshot);
   const out = [];
   snapshot.pixels.rgb.forEach((rgb, index) => {
-    if (isBackgroundOf(rgb, bg)) return;
+    if (isBackground(rgb)) return;
     const hue = hueOf(rgb);
     if (hue === null || hueDistance(hue, target) > tolerance) return;
     out.push({ rgb, x: index % cols, y: Math.floor(index / cols) });
@@ -161,10 +135,9 @@ function surfaceBrightness(snapshot, hex) {
  */
 function receiverContrast(snapshot, excludeHex) {
   const target = excludeHex === null ? null : hueOf(hexToRgb(excludeHex));
-  const bg = backgroundOf(snapshot);
   const lumas = [];
   for (const rgb of snapshot.pixels.rgb) {
-    if (isBackgroundOf(rgb, bg)) continue;
+    if (isBackground(rgb)) continue;
     if (target !== null) {
       const hue = hueOf(rgb);
       if (hue !== null && hueDistance(hue, target) <= 30) continue;
@@ -236,7 +209,9 @@ const framedWithin = (hex, minFraction, maxFraction) => ({
     // Measured on the SUBJECT's own hue, not on "anything not background".
     // A shape scaled past every edge becomes the background by definition —
     // corner sampling would call the cube the page and report ~0% painted.
-    const covered = pixelsWithHue(first, hex).length / first.pixels.rgb.length;
+    const covered = paintedFraction(first);
+    const subject = pixelsWithHue(first, hex).length / first.pixels.rgb.length;
+    if (subject < 0.02) return `almost none of the viewport is ${hex} (${(subject * 100).toFixed(1)}%)`;
     if (covered < minFraction) {
       return `the ${hex} subject fills only ${(covered * 100).toFixed(1)}% of the viewport - too small, or scaled so far past the edges that it fills the frame; raise or lower both the shape size and the camera zoom`;
     }
