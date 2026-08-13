@@ -157,6 +157,21 @@ const MUTATIONS = [
       ),
   },
   {
+    name: "a zero-opacity shadow emits paths but darkens nothing",
+    taskId: "03-cube-with-shadow",
+    expect: "shadow-contrast",
+    mutate: (source) => patch(source, `shadow: { opacity: 0.35 }`, `shadow: { opacity: 0 }`),
+  },
+  {
+    // The regression that motivated the check: a lift too small to clear the
+    // receiver leaves the shadow z-fighting and painted over.
+    name: "a shadow lift too small to clear the receiver is invisible",
+    taskId: "03-cube-with-shadow",
+    expect: "shadow-contrast",
+    mutate: (source) =>
+      patch(source, `shadow: { opacity: 0.35 }`, `shadow: { opacity: 0.35, lift: 0.001 }`),
+  },
+  {
     name: "an export that does not exist fails the build",
     taskId: "01-static-cube",
     expect: "*",

@@ -287,6 +287,25 @@ const isMoving = {
   },
 };
 
+/**
+ * The shadow must DARKEN the receiver, not merely exist in the markup. An
+ * `opacity: 0` shadow, or one z-fighting with the surface it lands on, emits
+ * exactly the same `<path>` nodes as a working one — which is how a
+ * renderer-wide invisible-shadow default survived until this check existed.
+ */
+const shadowDarkensReceiver = (casterHex) => ({
+  id: "shadow-contrast",
+  describe: "the cast shadow visibly darkens the receiver",
+  run: ({ first }) => {
+    if (first.shadow.pathCount === 0) return "no shadow geometry was emitted at all";
+    const c = receiverContrast(first, casterHex);
+    if (c.count < 200) return `not enough receiver surface to measure (${c.count} samples)`;
+    return c.ratio <= 0.95
+      ? true
+      : `the receiver's dark tail is ${(c.ratio * 100).toFixed(0)}% of its median brightness - shadow paths are emitted but nothing is darker`;
+  },
+});
+
 /* ── tasks ────────────────────────────────────────────────────────── */
 
 export const TASKS = [
@@ -386,6 +405,7 @@ ${CONTRACT}`,
             ? true
             : `no shadow geometry rendered (${first.shadow.svgCount} svg, ${first.shadow.pathCount} paths, area ${first.shadow.area})`,
       },
+      shadowDarkensReceiver("#fbbf24"),
       {
         id: "receiver",
         describe: "a receiver exists — vanilla has no ground-shadow fallback",
@@ -533,6 +553,7 @@ ${CONTRACT}`,
             ? true
             : `no shadow geometry rendered (${first.shadow.pathCount} paths, area ${first.shadow.area})`,
       },
+      shadowDarkensReceiver(null),
       {
         id: "controls",
         describe: "uses the built-in controls rather than manual input handling",
