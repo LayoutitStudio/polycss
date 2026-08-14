@@ -3,13 +3,24 @@
  * Runs the PolyCSS skill evaluation.
  *
  * For each (agent, task) pair:
- *   1. build a throwaway workspace containing ONLY the installed skill and a
- *      TASK.md — no repo access, no examples, nothing to copy from;
+ *   1. build a throwaway workspace containing only the installed skill and a
+ *      TASK.md;
  *   2. run the agent's CLI non-interactively in that workspace;
  *   3. bundle whatever `scene.mjs` it produced and grade what renders.
  *
- * The workspace isolation is the whole point. An agent that scores well here
- * did it from the skill, not from the surrounding source tree.
+ * WHAT THE ISOLATION IS, AND IS NOT
+ *
+ * The workspace sits outside the repository, so an agent cannot reach this
+ * monorepo by walking up from its working directory — which one did, on the
+ * no-skill control track, before the move.
+ *
+ * It is NOT a sandbox. The agent still has the host filesystem by absolute
+ * path, the real HOME and any globally installed skills, network access, and
+ * sibling task workspaces under the same root. Several adapters also run with
+ * approvals bypassed. So a score here is evidence that the skill is sufficient,
+ * not proof that it was the only source used. Treat cross-track differences as
+ * the signal and single-track absolutes as approximate; for a stronger claim,
+ * run each case in a container with a temporary HOME and no network.
  *
  * Usage:
  *   node eval/skill/run.mjs --agent oracle

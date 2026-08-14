@@ -8,28 +8,45 @@ agent's real CLI, then grades **what the resulting scene actually paints in
 Chromium** — not what the agent said it did.
 
 ```bash
-pnpm eval:skill --agent oracle              # reference solutions (should be 100%)
-pnpm eval:skill --agent claude              # one agent, all tasks
-pnpm eval:skill --agent all --json out.json # every agent on PATH
+pnpm eval:skill --agent oracle --track all   # reference solutions (must be 100%)
+pnpm eval:skill --agent claude --track all   # one agent, both tracks, all tasks
+pnpm eval:skill --agent all --track all --keep --json out.json
 pnpm eval:skill --task 03-cube-with-shadow --agent claude,codex
-pnpm eval:selftest                          # prove the graders can fail
+pnpm eval:skill --agent claude --reuse       # re-grade existing work, no new calls
+pnpm eval:selftest                           # prove the graders can fail
 ```
 
 ## How a run works
 
 For each (agent, task) pair:
 
-1. **Isolate.** A fresh directory gets `npx polycss-skills --agent all` and a
-   `TASK.md`. Nothing else — no repo, no examples, no existing scenes. A good
-   score can only have come from the skill.
+1. **Isolate.** A fresh directory outside the repository gets
+   `npx polycss-skills --agent all` and a `TASK.md`, and nothing else.
 2. **Run the agent** non-interactively in that directory. The task asks for one
    file, `scene.mjs`, exporting `mount(host)`.
 3. **Build** it with esbuild, aliasing `@layoutit/polycss` to workspace source.
    An import that does not exist is a build error here — invented exports fail
    loudly instead of mysteriously.
-4. **Render** it in Chromium and sample the result twice, ~1.2s apart, so
-   motion is observable.
+4. **Render** it in Chromium and sample the result twice, ~2s apart, so motion
+   is observable.
 5. **Grade** with the task's checks.
+
+## What the isolation is worth
+
+The workspace lives outside the repo, which stops an agent reaching this
+monorepo by walking up from its working directory. One did exactly that on the
+no-skill control track before the move, and wrote PolyCSS in the Three.js
+control.
+
+That is the limit of it. This is **not a sandbox**: the host filesystem is still
+reachable by absolute path, HOME and any global skills are visible, network is
+open, and sibling task workspaces share a root. Several adapters run with
+approvals bypassed.
+
+So read a score as *the skill was sufficient*, not *the skill was the only
+source*. The cross-track comparison is the trustworthy signal, because both
+tracks run under identical conditions. For a stronger claim, run each case in a
+container with a temporary HOME and network denied.
 
 ## Grading on pixels, not DOM boxes
 
@@ -50,7 +67,7 @@ mesh as perfectly visible. Only pixels survive that.
 | `02-orbiting-cube` | Reaching for `createPolyOrbitControls` instead of hand-rolling a `requestAnimationFrame` loop. |
 | `03-cube-with-shadow` | The vanilla no-ground-fallback trap: a caster with no `receiveShadow` mesh draws nothing. |
 | `04-two-shapes` | Two meshes, two colors, positioned in world space so neither hides the other. |
-| `05-hand-authored-polygons` | Winding. Four flat tiles wound CCW from above; any tile wound the other way is backface-culled and paints nothing. |
+| `05-hand-authored-polygons` | Winding. Four flat tiles wound CCW from above; any tile wound the other way is backface-culled and paints nothing, costing a whole painted region. |
 | `06-composed-scene` | Everything at once: ground, three primitives, lights, shadows, controls. |
 
 ### Why tiles and not a pyramid
@@ -93,9 +110,11 @@ nothing else.
 
 ## Adding a task
 
-Add to `tasks.mjs` and drop a reference solution in `oracle/<task-id>.mjs`. The
-oracle must score 100% — if it does not, the grader is wrong, not the agent.
-Add a mutation to `selftest.mjs` for any new check that could silently pass.
+Add to `tasks.mjs`, splitting its checks into `visual` (graded on both tracks)
+and `native` (PolyCSS-only), then drop a reference solution in
+`oracle/polycss/<task-id>.mjs` and `oracle/three/<task-id>.mjs`. Both oracles
+must score 100% — if either does not, the grader is wrong, not the agent. Add a
+mutation to `selftest.mjs` for any new check that could silently pass.
 
 ## Interpreting results
 
@@ -104,5 +123,9 @@ below 100% is a finding: read the failure reason, then decide whether the skill
 failed to say something, said it somewhere the agent did not look, or the agent
 ignored it. The first two are fixable in `packages/skills/skill/`.
 
-Use `--keep` to leave the workspaces in `.work/` and read what the agent
-actually wrote.
+Use `--keep` to leave the workspaces under `$TMPDIR/polycss-skill-eval` and read
+what the agent actually wrote. `--reuse` then re-grades them without spending
+another agent call, which is how to iterate on a grader.
+
+Screenshot a red result before believing it. Three separate findings in this
+suite turned out to be grader bugs, not agent mistakes.
