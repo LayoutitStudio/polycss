@@ -152,6 +152,20 @@ const taskPrompt = (track, task) => `${task.prompt}\n\n${TRACKS[track].contract}
 const workspaceDir = (runId, track, agent, task) =>
   join(workRoot, runId, track, agent, task.id);
 
+/**
+ * Run ids name a directory that gets recursively deleted, so they are
+ * validated rather than trusted: `--run ..` resolved above the workspace root
+ * and would have taken a sibling directory with it.
+ */
+function assertSafeRunId(runId) {
+  if (!/^[A-Za-z0-9._-]+$/.test(runId) || runId === "." || runId === "..") {
+    throw new Error(
+      `invalid --run id ${JSON.stringify(runId)} — use letters, digits, dot, dash or underscore`,
+    );
+  }
+  return runId;
+}
+
 function runAgent(name, track, dir, task, timeoutSeconds) {
   const agent = AGENTS[name];
 
@@ -264,6 +278,7 @@ async function main(argv) {
     agents = expandAgents(options.agents.length > 0 ? options.agents : ["oracle"]);
     tasks = selectTasks(options.tasks);
     tracks = selectTracks(options.tracks);
+    assertSafeRunId(options.run);
   } catch (error) {
     console.error(error.message);
     return 1;
@@ -452,6 +467,13 @@ async function main(argv) {
     }
   } else {
     console.log(`[eval] workspaces kept in ${join(workRoot, options.run)}`);
+  }
+
+  if (rows.length === 0) {
+    // `rows.every` is vacuously true, so a run where every case was skipped
+    // would otherwise exit 0 and read as a green result in CI.
+    console.error("[eval] no scenes were graded");
+    return 1;
   }
 
   const allPassed = rows.every((r) => r.passed === r.total);
