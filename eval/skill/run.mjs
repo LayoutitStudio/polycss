@@ -65,8 +65,10 @@ Options
                     Default: polycss. "three" is the no-skill control.
   --task <ids>      Comma-separated task ids. Default: all.
   --keep            Keep the agent workspaces for inspection.
-  --reuse           Reuse a workspace that already has a scene.mjs instead of
-                    re-running the agent. Grades existing work for free.
+  --reuse           Grade existing workspaces only. Never invokes an agent:
+                    a case with no scene.mjs is SKIPPED, not re-run.
+  --run <id>        Namespace this run's workspaces (default "current"), so a
+                    later run cannot overwrite evidence you kept.
   --no-preflight    Skip the per-agent readiness probe.
   --headed          Run Chromium headed.
   --settle <ms>     Delay between the two DOM samples (default 2000).
@@ -85,6 +87,7 @@ function parseArgs(argv) {
     tasks: [],
     keep: false,
     reuse: false,
+    run: "current",
     preflight: true,
     headed: false,
     settle: 2000,
@@ -105,6 +108,7 @@ function parseArgs(argv) {
     else if (arg === "--task") options.tasks.push(...value().split(",").map((t) => t.trim()));
     else if (arg === "--keep") options.keep = true;
     else if (arg === "--reuse") options.reuse = true;
+    else if (arg === "--run") options.run = value();
     else if (arg === "--no-preflight") options.preflight = false;
     else if (arg === "--headed") options.headed = true;
     else if (arg === "--settle") options.settle = Number(value());
@@ -122,8 +126,8 @@ function parseArgs(argv) {
  * read their skills directory relative to the working directory, so installing
  * both flavours covers every CLI without special-casing.
  */
-function makeWorkspace(track, agent, task) {
-  const dir = join(workRoot, track, agent, task.id);
+function makeWorkspace(runId, track, agent, task) {
+  const dir = workspaceDir(runId, track, agent, task);
   rmSync(dir, { recursive: true, force: true });
   mkdirSync(dir, { recursive: true });
 
@@ -139,15 +143,27 @@ function makeWorkspace(track, agent, task) {
 
 const taskPrompt = (track, task) => `${task.prompt}\n\n${TRACKS[track].contract}`;
 
+/**
+ * Workspaces are namespaced per run. Without that, every run owned the same
+ * `track/agent/task` path and wiped it before starting — a second `--keep` run
+ * silently destroyed the evidence the first one was asked to preserve, and two
+ * concurrent runs would fight over the same directories.
+ */
+const workspaceDir = (runId, track, agent, task) =>
+  join(workRoot, runId, track, agent, task.id);
+
 function runAgent(name, track, dir, task, timeoutSeconds) {
   const agent = AGENTS[name];
 
   if (name === "oracle") {
-    const from = join(here, "oracle", track, `${task.id}.mjs`);
+    // The control shares the intervention's reference solutions — it differs
+    // only in whether the agent was given the skill.
+    const oracleTrack = track === "polycss-noskill" ? "polycss" : track;
+    const from = join(here, "oracle", oracleTrack, `${task.id}.mjs`);
     copyFileSync(from, join(dir, "scene.mjs"));
     // The Three reference scenes share a small setup helper; the bundler
     // resolves it relative to the copied entry.
-    const shared = join(here, "oracle", track, "_common.mjs");
+    const shared = join(here, "oracle", oracleTrack, "_common.mjs");
     if (existsSync(shared)) copyFileSync(shared, join(dir, "_common.mjs"));
     return { ok: true, ms: 0, output: "reference solution copied" };
   }
@@ -286,16 +302,25 @@ async function main(argv) {
   );
 
   const candidates = [];
+  let skipped = 0;
 
   for (const name of agents) {
     for (const track of tracks) {
       for (const task of tasks) {
       process.stdout.write(`[eval] ${name} / ${track} / ${task.id} ... `);
-      const existing = join(workRoot, track, name, task.id, "scene.mjs");
-      const reusing = options.reuse && existsSync(existing);
-      const dir = reusing
-        ? join(workRoot, track, name, task.id)
-        : makeWorkspace(track, name, task);
+      const existingDir = workspaceDir(options.run, track, name, task);
+      const reusing = options.reuse && existsSync(join(existingDir, "scene.mjs"));
+
+      // Reuse means "grade what is already there". Falling through to the
+      // agent here would spend real, paid calls behind a flag documented as
+      // costing none.
+      if (options.reuse && !reusing) {
+        console.log("skipped — no scene.mjs to reuse");
+        skipped += 1;
+        continue;
+      }
+
+      const dir = reusing ? existingDir : makeWorkspace(options.run, track, name, task);
       const run = reusing
         ? { ok: true, ms: 0, output: "reused existing workspace" }
         : runAgent(name, track, dir, task, options.timeout);
@@ -328,6 +353,10 @@ async function main(argv) {
       });
       }
     }
+  }
+
+  if (skipped > 0) {
+    console.log(`\n[eval] skipped ${skipped} case(s) with nothing to reuse`);
   }
 
   const buildable = candidates.filter((c) => c.entry !== null);
@@ -392,7 +421,10 @@ async function main(argv) {
   // The comparison the control exists for: the same visual criteria, scored on
   // each track independently. Never a pixel diff between the two.
   if (tracks.length > 1) {
-    console.log("Visual criteria only (comparable across tracks)\n");
+    console.log(
+      "Visual criteria only. polycss vs polycss-noskill isolates the skill;\n" +
+        "three is an external baseline, not a control.\n",
+    );
     const width = Math.max(...agents.map((a) => AGENTS[a].label.length));
     console.log(`${"agent".padEnd(width)}  ${tracks.map((t) => TRACKS[t].label.padEnd(10)).join(" ")}`);
     for (const agent of agents) {
@@ -419,7 +451,7 @@ async function main(argv) {
       rmSync(candidate.dir, { recursive: true, force: true });
     }
   } else {
-    console.log(`[eval] workspaces kept in ${workRoot}`);
+    console.log(`[eval] workspaces kept in ${join(workRoot, options.run)}`);
   }
 
   const allPassed = rows.every((r) => r.passed === r.total);
