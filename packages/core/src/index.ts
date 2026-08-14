@@ -227,7 +227,7 @@ export {
   prepareCasterEdgeOwners,
   prepareCasterPolyItems,
   prepareReceiverFacePlanes,
-  DEFAULT_SHADOW_LIFT,
+  POLY_DEFAULT_SHADOW_LIFT,
 } from "./shadow/computeReceiverShadows";
 export type {
   CasterPolyItem,

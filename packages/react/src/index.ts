@@ -285,7 +285,7 @@ export {
   BASE_TILE,
   DEFAULT_CAMERA_STATE,
   DEFAULT_PROJECTION,
-  DEFAULT_SHADOW_LIFT,
+  POLY_DEFAULT_SHADOW_LIFT,
   normalizeInvertMultiplier,
   buildPolyCameraSceneTransform,
   capturePolyCameraSnapshot,

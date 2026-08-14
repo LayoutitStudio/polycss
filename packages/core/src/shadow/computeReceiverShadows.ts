@@ -348,7 +348,7 @@ export function prepareCasterPolyItems(
  * limitation is documented for callers; fixing it needs projection-aware
  * clearance.
  */
-export const DEFAULT_SHADOW_LIFT = 0.05;
+export const POLY_DEFAULT_SHADOW_LIFT = 0.05;
 
 /**
  * Build ReceiverFacePlane[] for a receiver mesh. Pure: groups coplanar

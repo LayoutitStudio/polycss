@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   computeMergedReceiverShadows,
   prepareCasterPolyItems,
-  DEFAULT_SHADOW_LIFT,
+  POLY_DEFAULT_SHADOW_LIFT,
   prepareReceiverFacePlanes,
 } from "./computeReceiverShadows";
 import { worldPositionToCss } from "./receiverFaceGroups";
@@ -107,18 +107,18 @@ describe("computeMergedReceiverShadows", () => {
   });
 });
 
-describe("DEFAULT_SHADOW_LIFT", () => {
+describe("POLY_DEFAULT_SHADOW_LIFT", () => {
   it("matches the documented default", () => {
     // Regression guard. This default was written out at seven call sites and
     // two drifted to 0.001, which is too small to clear the receiver — cast
     // shadows emitted paths that darkened nothing in all three renderers.
-    expect(DEFAULT_SHADOW_LIFT).toBe(0.05);
+    expect(POLY_DEFAULT_SHADOW_LIFT).toBe(0.05);
   });
 
   it("offsets the receiver plane away from the surface", () => {
     const [flat] = prepareReceiverFacePlanes([floor], [0, 0, 0], 1, new Set(), 0, null);
     const [lifted] = prepareReceiverFacePlanes(
-      [floor], [0, 0, 0], 1, new Set(), DEFAULT_SHADOW_LIFT, null,
+      [floor], [0, 0, 0], 1, new Set(), POLY_DEFAULT_SHADOW_LIFT, null,
     );
     expect(flat.lift).toBe(0);
     expect(lifted.lift).toBeGreaterThan(0);
