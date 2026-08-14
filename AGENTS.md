@@ -301,6 +301,38 @@ publishes that tree with a zero-dependency `npx` installer.
 - The package is plain ESM with no build step. Its `bin` runs under `npx` in
   someone else's project, so it must stay dependency-free.
 
+### Measuring the skill
+
+`eval/skill/` answers whether an agent holding only the skill actually writes
+correct PolyCSS. It hands a real coding-agent CLI a throwaway workspace
+containing the installed skill and one task, then grades **what the scene
+paints in Chromium** — never the agent's prose.
+
+- `pnpm eval:skill --agent oracle --track all` — reference solutions, must be
+  100%. Anything less is a harness bug, not an agent result.
+- `pnpm eval:selftest` — mutates each reference solution with one mistake the
+  skill warns about and asserts the matching check catches it. A grader that
+  cannot fail measures nothing.
+- `pnpm eval:skill --agent claude,codex,grok --track all` — the real matrix.
+  Costs real agent invocations; `--reuse` re-grades existing workspaces free.
+
+Two design rules that are load-bearing:
+
+- **Workspaces live outside the repository** (`$TMPDIR`). Inside it, an agent
+  walks up out of its workspace and reads this monorepo — measured, on the
+  no-skill control track.
+- **The `three` track is a control, never a reference.** Same model, same task,
+  no skill, separate workspace. The two tracks are graded independently against
+  the same visual criteria; PolyCSS output is never diffed against a Three.js
+  render. It exists to separate "the skill is inadequate" from "this task is
+  hard for this model", and it has repeatedly proved the grader wrong rather
+  than the agent.
+
+Grade on painted pixels, not DOM boxes: every leaf except `<b>` is
+`backface-visibility: hidden`, so a reversed face keeps its bounding rect while
+painting nothing. Prefer tolerance bands over exact values — models frame
+scenes differently and that is not a defect.
+
 ## Backward compatibility
 
 - **No BC shims.** Clean breaks only. No re-export aliases for renamed symbols. No `@deprecated` wrappers. If the API changes, callers update.
