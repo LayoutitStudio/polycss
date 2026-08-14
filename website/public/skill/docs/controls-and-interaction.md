@@ -105,7 +105,9 @@ const [position, setPosition] = useState<Vec3>([0, 0, 0]);
   object={selected}
   mode="translate"
   translationSnap={10}
-  onObjectChange={(e) => setPosition(e.position)}
+  // `position` and `rotation` are both optional — only the one the current
+  // mode changed is present.
+  onObjectChange={(e) => { if (e.position) setPosition(e.position); }}
 />
 ```
 

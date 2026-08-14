@@ -23,7 +23,7 @@ uniform** — pass `color` explicitly rather than relying on any of these:
 |---|---|
 | `boxPolygons`, `planePolygons`, `ringPolygons`, `octahedronPolygons`, `arrowPolygons`, `ringQuadPolygons` | `#ffffff` |
 | `spherePolygons`, `cylinderPolygons`, `conePolygons`, `torusPolygons`, `tetrahedronPolygons`, `icosahedronPolygons`, `dodecahedronPolygons` | `#cccccc` |
-| `axesPolygons` | per axis: `xColor` `#ff3a3a`, `yColor` `#3aff3a`, `zColor` `#3a8aff` |
+| `axesHelperPolygons` | per axis: `xColor` `#ff3a3a`, `yColor` `#3aff3a`, `zColor` `#3a8aff` |
 
 ### `boxPolygons` / `createPolyBox` / `PolyBox`
 
