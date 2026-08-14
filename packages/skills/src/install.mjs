@@ -125,8 +125,21 @@ function realpathThroughAncestors(path) {
  * here, and the caller treats it as a conflict (or, under `--force`, unlinks
  * and replaces the link itself rather than writing through it).
  */
-function containedPath(root, rel) {
+/** True when `root` really lives inside `boundary`, following symlinks on both. */
+function withinBoundary(root, boundary) {
+  const outer = realpathThroughAncestors(boundary);
+  const real = realpathThroughAncestors(root);
+  return real === outer || real.startsWith(outer + sep);
+}
+
+function containedPath(root, rel, boundary = null) {
   if (!isSafeRelativePath(rel)) return null;
+  // For an auto-detected destination the caller passes the project root as a
+  // boundary. A hostile repository can ship `.claude/skills -> /elsewhere`, and
+  // without this the install follows it straight out of the project. Comparing
+  // REAL paths on both sides keeps ordinary system links (`/var` ->
+  // `/private/var`) from reading as an escape.
+  if (boundary !== null && !withinBoundary(root, boundary)) return null;
   // The destination root may legitimately be a symlink — a shared skills
   // directory is a reasonable layout — so containment is measured against its
   // real location rather than refused.
@@ -151,8 +164,8 @@ function containedPath(root, rel) {
   return target.startsWith(base + sep) ? target : null;
 }
 
-function readManifest(destDir) {
-  const path = containedPath(destDir, MANIFEST_FILE);
+function readManifest(destDir, boundary) {
+  const path = containedPath(destDir, MANIFEST_FILE, boundary);
   if (path === null || isSymlink(path)) return null;
   try {
     const parsed = JSON.parse(readFileSync(path, "utf8"));
@@ -164,7 +177,7 @@ function readManifest(destDir) {
     // unsafe key would send a delete outside the skill directory entirely.
     for (const [key, value] of Object.entries(files)) {
       if (typeof value !== "string") return null;
-      if (containedPath(destDir, key) === null) return null;
+      if (containedPath(destDir, key, boundary) === null) return null;
     }
     return { version: typeof parsed.version === "string" ? parsed.version : null, files };
   } catch {
@@ -224,13 +237,23 @@ function writeFileNoFollow(path, bytes) {
  * and are not accounted for by the manifest — i.e. hand-edited. They block the
  * install unless `force` is set.
  */
-export function planInstall({ sourceDir, destDir, force = false }) {
+export function planInstall({ sourceDir, destDir, force = false, boundary = null }) {
   const sourceFiles = listFiles(sourceDir);
   if (sourceFiles.length === 0) {
     throw new Error(`no skill files found in ${sourceDir}`);
   }
 
-  const manifest = readManifest(destDir);
+  // Fail loudly rather than reporting every file as a "local edit": the
+  // destination itself resolves outside the project the caller confined us to.
+  if (boundary !== null && !withinBoundary(destDir, boundary)) {
+    const outer = realpathThroughAncestors(boundary);
+    throw new Error(
+      `${destDir} resolves to ${realpathThroughAncestors(destDir)}, outside ${outer} — ` +
+        "a symlinked parent directory points out of the project. Pass --dir explicitly if that is intended.",
+    );
+  }
+
+  const manifest = readManifest(destDir, boundary);
   const write = [];
   const unchanged = [];
   const conflicts = [];
@@ -238,7 +261,7 @@ export function planInstall({ sourceDir, destDir, force = false }) {
   const kept = [];
 
   for (const rel of sourceFiles) {
-    const target = containedPath(destDir, rel);
+    const target = containedPath(destDir, rel, boundary);
     if (target === null) {
       conflicts.push(rel);
       continue;
@@ -271,7 +294,7 @@ export function planInstall({ sourceDir, destDir, force = false }) {
   const shipped = new Set(sourceFiles);
   for (const rel of Object.keys(manifest?.files ?? {})) {
     if (shipped.has(rel)) continue;
-    const target = containedPath(destDir, rel);
+    const target = containedPath(destDir, rel, boundary);
     if (target === null) continue;
     const current = readIfFile(target);
     if (current === null || current === SYMLINK) continue;
@@ -303,8 +326,9 @@ export function installSkill({
   version = "0.0.0",
   force = false,
   dryRun = false,
+  boundary = null,
 } = {}) {
-  const plan = planInstall({ sourceDir, destDir, force });
+  const plan = planInstall({ sourceDir, destDir, force, boundary });
 
   if (plan.conflicts.length > 0 || dryRun) {
     return { ...plan, destDir, applied: false };
@@ -312,7 +336,7 @@ export function installSkill({
 
   const files = {};
   for (const rel of plan.sourceFiles) {
-    const target = containedPath(destDir, rel);
+    const target = containedPath(destDir, rel, boundary);
     if (target === null) continue;
     const bytes = readFileSync(join(sourceDir, toNative(rel)));
     files[rel] = sha256(bytes);
@@ -321,14 +345,14 @@ export function installSkill({
   }
 
   for (const rel of plan.remove) {
-    const target = containedPath(destDir, rel);
+    const target = containedPath(destDir, rel, boundary);
     if (target === null) continue;
     rmSync(target, { force: true });
   }
 
   mkdirSync(destDir, { recursive: true });
   writeFileNoFollow(
-    containedPath(destDir, MANIFEST_FILE),
+    containedPath(destDir, MANIFEST_FILE, boundary),
     `${JSON.stringify({ skill: SKILL_NAME, version, files }, null, 2)}\n`,
   );
 

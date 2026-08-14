@@ -169,6 +169,9 @@ function main(argv) {
         version,
         force: options.force,
         dryRun: options.dryRun,
+        // Auto-detected targets are confined to the project. A destination the
+        // user named explicitly (--dir/--global) may live anywhere.
+        boundary: options.dir !== null || options.global ? null : resolve(options.cwd),
       });
     } catch (error) {
       console.error(`polycss-skills: ${target.label}: ${error.message}`);
