@@ -130,7 +130,11 @@ Raycasting runs on pointer events only — never per frame.
 ## Transform controls
 
 Translate mode gives axis arrows and plane handles; rotate mode gives axis
-rings. Dragging updates the attached mesh directly.
+rings. **In vanilla** dragging updates the attached mesh directly, because
+`createTransformControls` calls `handle.setTransform(...)` itself. **In React
+and Vue** dragging updates nothing on its own — the gizmo emits
+`onObjectChange` and your state update is what moves the mesh (and the gizmo
+with it).
 
 Key props: `object`, `mode`, `size`, `showX`, `showY`, `showZ`,
 `translationSnap`, `rotationSnap`, `enabled`, `onChange`, `onObjectChange`,

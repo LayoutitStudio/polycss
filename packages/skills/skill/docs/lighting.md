@@ -56,8 +56,12 @@ baseline.
 - **Vanilla `setOptions({ ambientLight })` changes nothing on its own.** There
   is no ambient branch in the change detection at all, so the baked surface
   stays stale *and* the shadow fill — which is derived from ambient — is not
-  re-emitted. Change the directional light in the same call, or call
-  `mesh.rebakeAtlas()`, to make an ambient edit take effect.
+  re-emitted. Two outputs are stale and **neither workaround fixes both**:
+  `mesh.rebakeAtlas()` refreshes that mesh's baked paint but does not re-emit
+  the receiver shadow, while touching the directional light in the same
+  `setOptions` call re-emits the shadow but leaves baked mesh colors frozen. To
+  fully apply an ambient edit, do both — nudge the directional light *and*
+  rebake every affected mesh.
 
 So the vanilla freeze covers the directional **and** ambient lights, not the
 directional light alone.
