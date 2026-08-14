@@ -335,16 +335,6 @@ export function prepareCasterPolyItems(
 }
 
 /**
- * Build ReceiverFacePlane[] for a receiver mesh. Pure: groups coplanar
- * polygons, computes (u,v) basis + outline, applies interior occlusion cull
- * (drops face planes hidden behind a parallel face plane within wall-
- * thickness range).
- *
- * `shadowLift` is the world-unit lift applied along each face normal so the
- * shadow SVG composites above the surface without z-fighting (matches the
- * ground-shadow `shadow.lift` option).
- */
-/**
  * Default clearance between a receiver face and the shadow painted on it, in
  * world units.
  *
@@ -360,6 +350,16 @@ export function prepareCasterPolyItems(
  */
 export const DEFAULT_SHADOW_LIFT = 0.05;
 
+/**
+ * Build ReceiverFacePlane[] for a receiver mesh. Pure: groups coplanar
+ * polygons, computes (u,v) basis + outline, applies interior occlusion cull
+ * (drops face planes hidden behind a parallel face plane within wall-
+ * thickness range).
+ *
+ * `shadowLift` is the world-unit lift applied along each face normal so the
+ * shadow SVG composites above the surface without z-fighting (matches the
+ * ground-shadow `shadow.lift` option).
+ */
 export function prepareReceiverFacePlanes(
   polygons: readonly Polygon[],
   position: Vec3,
