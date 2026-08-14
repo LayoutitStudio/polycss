@@ -7,6 +7,7 @@
 import type { Vec3 } from "@layoutit/polycss-core";
 import type { PolyRenderStrategiesOption } from "../../render/textureAtlas";
 import type { PolySceneOptions } from "./types";
+import { DEFAULT_SHADOW_LIFT } from "@layoutit/polycss-core";
 
 export function strategiesEqual(
   a: PolyRenderStrategiesOption | undefined,
@@ -33,7 +34,7 @@ export function shadowOptsEqual(
   return (
     (a?.color ?? "#000000") === (b?.color ?? "#000000")
     && (a?.opacity ?? 0.25) === (b?.opacity ?? 0.25)
-    && (a?.lift ?? 0.05) === (b?.lift ?? 0.05)
+    && (a?.lift ?? DEFAULT_SHADOW_LIFT) === (b?.lift ?? DEFAULT_SHADOW_LIFT)
     && (a?.maxExtend ?? 2000) === (b?.maxExtend ?? 2000)
     && (a?.parametric ?? false) === (b?.parametric ?? false)
     && (a?.definition ?? 16) === (b?.definition ?? 16)

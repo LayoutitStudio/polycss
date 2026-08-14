@@ -49,6 +49,7 @@ import {
   optimizeMeshPolygons,
   parseHexColor,
   polygonCssSurfaceNormal,
+  DEFAULT_SHADOW_LIFT,
 } from "@layoutit/polycss-core";
 import {
   cssBorderShapeForPlan,
@@ -1550,7 +1551,7 @@ export function createPolyScene(
       }
       return;
     }
-    const lift = currentOptions.shadow?.lift ?? 0.05;
+    const lift = currentOptions.shadow?.lift ?? DEFAULT_SHADOW_LIFT;
     // World Z → CSS Z: the ground plane in CSS-Z coordinates. Lift is added
     // (not subtracted) so the shadow plane sits slightly *above* the model
     // bbox floor — putting it on top of a receiver mesh placed at minZ

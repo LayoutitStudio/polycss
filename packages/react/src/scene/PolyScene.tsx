@@ -17,6 +17,7 @@ import {
   parseHexColor,
   resolvePolyTextureLeafGeometry,
   worldDirectionToCss,
+  DEFAULT_SHADOW_LIFT,
 } from "@layoutit/polycss-core";
 import type { ShadowCasterRegistration, ShadowOptions } from "./sceneContext";
 import { useCameraContext } from "../camera/context";
@@ -377,7 +378,7 @@ function PolySceneInner({
       }
     }
     if (!Number.isFinite(minWorldZ)) return null;
-    const lift = shadow?.lift ?? 0.05;
+    const lift = shadow?.lift ?? DEFAULT_SHADOW_LIFT;
     return (minWorldZ + lift) * BASE_TILE;
   }, [shadow]);
 
