@@ -11,11 +11,14 @@
  */
 import { createHash } from "node:crypto";
 import {
+  lstatSync,
   mkdirSync,
   readFileSync,
   readdirSync,
+  renameSync,
   rmSync,
   statSync,
+  unlinkSync,
   writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
@@ -66,16 +69,50 @@ export function listFiles(dir, prefix = "") {
 
 const toNative = (rel) => rel.split("/").join(sep);
 
+/**
+ * A path we are willing to act on inside the skill directory.
+ *
+ * Manifest keys are read off disk and are therefore untrusted input: a
+ * `../../../package.json` entry whose hash matched would otherwise be joined to
+ * `destDir` and deleted during stale-file cleanup. Everything must be a plain
+ * forward-slash relative path with no traversal, no root, and no drive letter.
+ */
+export function isSafeRelativePath(rel) {
+  if (typeof rel !== "string" || rel.length === 0) return false;
+  if (rel.includes("\\") || rel.includes("\u0000")) return false;
+  if (rel.startsWith("/") || /^[a-zA-Z]:/.test(rel)) return false;
+  const parts = rel.split("/");
+  if (parts.some((part) => part === "" || part === "." || part === "..")) return false;
+  return true;
+}
+
+/**
+ * Resolve `rel` under `root`, returning null unless it stays inside. Belt and
+ * braces over `isSafeRelativePath` — containment is re-checked immediately
+ * before every read, write and delete, not once at parse time.
+ */
+function containedPath(root, rel) {
+  if (!isSafeRelativePath(rel)) return null;
+  const base = resolve(root);
+  const target = resolve(base, toNative(rel));
+  if (target !== base && !target.startsWith(base + sep)) return null;
+  return target;
+}
+
 function readManifest(destDir) {
+  const path = containedPath(destDir, MANIFEST_FILE);
+  if (path === null || isSymlink(path)) return null;
   try {
-    const parsed = JSON.parse(readFileSync(join(destDir, MANIFEST_FILE), "utf8"));
+    const parsed = JSON.parse(readFileSync(path, "utf8"));
     if (!parsed || typeof parsed !== "object") return null;
     const files = parsed.files;
     if (!files || typeof files !== "object" || Array.isArray(files)) return null;
     // A manifest we cannot fully trust is worse than none: a bad entry would
-    // read as "unmodified" and silently overwrite the user's edit.
-    for (const value of Object.values(files)) {
+    // read as "unmodified" and silently overwrite the user's edit, and an
+    // unsafe key would send a delete outside the skill directory entirely.
+    for (const [key, value] of Object.entries(files)) {
       if (typeof value !== "string") return null;
+      if (containedPath(destDir, key) === null) return null;
     }
     return { version: typeof parsed.version === "string" ? parsed.version : null, files };
   } catch {
@@ -83,13 +120,48 @@ function readManifest(destDir) {
   }
 }
 
+const isSymlink = (path) => {
+  try {
+    return lstatSync(path).isSymbolicLink();
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * Read a managed file, refusing to follow symlinks.
+ *
+ * Returns `SYMLINK` for a link so callers treat it as a conflict rather than
+ * silently writing through it: installing over a `SKILL.md` symlink otherwise
+ * overwrites whatever it points at, anywhere on disk.
+ */
+const SYMLINK = Symbol("symlink");
+
 function readIfFile(path) {
   try {
-    if (!statSync(path).isFile()) return null;
+    const stat = lstatSync(path);
+    if (stat.isSymbolicLink()) return SYMLINK;
+    if (!stat.isFile()) return null;
     return readFileSync(path);
   } catch {
     return null;
   }
+}
+
+/** Replace `path` without following a symlink that may sit at it. */
+function writeFileNoFollow(path, bytes) {
+  mkdirSync(dirname(path), { recursive: true });
+  if (isSymlink(path)) unlinkSync(path);
+  // Same-directory temp + rename: rename replaces the entry itself, so a link
+  // created between the check and the write cannot be followed either.
+  const temp = `${path}.polycss-skill-tmp`;
+  try {
+    writeFileSync(temp, bytes, { flag: "wx" });
+  } catch {
+    rmSync(temp, { force: true });
+    writeFileSync(temp, bytes);
+  }
+  renameSync(temp, path);
 }
 
 /**
@@ -113,9 +185,22 @@ export function planInstall({ sourceDir, destDir, force = false }) {
   const kept = [];
 
   for (const rel of sourceFiles) {
+    const target = containedPath(destDir, rel);
+    if (target === null) {
+      conflicts.push(rel);
+      continue;
+    }
     const next = readFileSync(join(sourceDir, toNative(rel)));
-    const current = readIfFile(join(destDir, toNative(rel)));
+    const current = readIfFile(target);
 
+    if (current === SYMLINK) {
+      // A managed path that is a link points somewhere we do not own, so it is
+      // never written *through*. Under an explicit --force the link itself is
+      // replaced by a real file; without one it blocks the install.
+      if (force) write.push(rel);
+      else conflicts.push(rel);
+      continue;
+    }
     if (current === null) {
       write.push(rel);
       continue;
@@ -133,8 +218,10 @@ export function planInstall({ sourceDir, destDir, force = false }) {
   const shipped = new Set(sourceFiles);
   for (const rel of Object.keys(manifest?.files ?? {})) {
     if (shipped.has(rel)) continue;
-    const current = readIfFile(join(destDir, toNative(rel)));
-    if (current === null) continue;
+    const target = containedPath(destDir, rel);
+    if (target === null) continue;
+    const current = readIfFile(target);
+    if (current === null || current === SYMLINK) continue;
     // Dropped from a newer version of the skill. Reclaim it only if it still
     // matches what we installed; an edited leftover is the user's file now.
     if (sha256(current) === manifest.files[rel] || force) remove.push(rel);
@@ -172,21 +259,23 @@ export function installSkill({
 
   const files = {};
   for (const rel of plan.sourceFiles) {
-    const target = join(destDir, toNative(rel));
+    const target = containedPath(destDir, rel);
+    if (target === null) continue;
     const bytes = readFileSync(join(sourceDir, toNative(rel)));
     files[rel] = sha256(bytes);
     if (!plan.write.includes(rel)) continue;
-    mkdirSync(dirname(target), { recursive: true });
-    writeFileSync(target, bytes);
+    writeFileNoFollow(target, bytes);
   }
 
   for (const rel of plan.remove) {
-    rmSync(join(destDir, toNative(rel)), { force: true });
+    const target = containedPath(destDir, rel);
+    if (target === null) continue;
+    rmSync(target, { force: true });
   }
 
   mkdirSync(destDir, { recursive: true });
-  writeFileSync(
-    join(destDir, MANIFEST_FILE),
+  writeFileNoFollow(
+    containedPath(destDir, MANIFEST_FILE),
     `${JSON.stringify({ skill: SKILL_NAME, version, files }, null, 2)}\n`,
   );
 

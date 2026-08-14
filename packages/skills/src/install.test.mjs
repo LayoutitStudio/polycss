@@ -4,12 +4,14 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
+import { symlinkSync } from "node:fs";
 import {
   AGENTS,
   bundledSkillDir,
   DEFAULT_AGENT,
   expandAgents,
   installSkill,
+  isSafeRelativePath,
   listFiles,
   MANIFEST_FILE,
   planInstall,
@@ -252,6 +254,151 @@ describe("installSkill", () => {
     expect(() =>
       installSkill({ sourceDir: fixture({}), destDir: join(tmp(), "polycss") }),
     ).toThrow(/no skill files/);
+  });
+});
+
+describe("hostile manifests and links stay inside the skill directory", () => {
+  it("rejects traversal, absolute, backslash and dot path segments", () => {
+    for (const bad of [
+      "../package.json",
+      "../../../package.json",
+      "docs/../../escape.md",
+      "/etc/passwd",
+      "C:/Windows/system.ini",
+      "docs\\win.md",
+      "./docs/a.md",
+      "docs//a.md",
+      "",
+    ]) {
+      expect(isSafeRelativePath(bad), bad).toBe(false);
+    }
+    for (const good of ["SKILL.md", "docs/a.md", "docs/nested/b.md"]) {
+      expect(isSafeRelativePath(good), good).toBe(true);
+    }
+  });
+
+  it("does not delete a file outside the skill directory named by the manifest", () => {
+    const project = tmp();
+    const destDir = join(project, ".claude", "skills", "polycss");
+    const outsider = join(project, "package.json");
+    writeFileSync(outsider, '{"name":"victim"}');
+
+    installSkill({
+      sourceDir: fixture({ "SKILL.md": "v1" }),
+      destDir,
+      version: "1.0.0",
+    });
+
+    // A manifest entry pointing out of the tree, with the hash the cleanup
+    // path checks before reclaiming a dropped file.
+    writeFileSync(
+      join(destDir, MANIFEST_FILE),
+      JSON.stringify({
+        skill: SKILL_NAME,
+        version: "1.0.0",
+        files: {
+          "SKILL.md": createHash("sha256").update("v1").digest("hex"),
+          "../../../package.json": createHash("sha256")
+            .update('{"name":"victim"}')
+            .digest("hex"),
+        },
+      }),
+    );
+
+    installSkill({ sourceDir: fixture({ "SKILL.md": "v2" }), destDir, version: "2.0.0" });
+
+    expect(readFileSync(outsider, "utf8")).toBe('{"name":"victim"}');
+  });
+
+  it("does not delete outside the skill directory under --force either", () => {
+    const project = tmp();
+    const destDir = join(project, "skills", "polycss");
+    const outsider = join(project, "package.json");
+    writeFileSync(outsider, "keep me");
+
+    installSkill({ sourceDir: fixture({ "SKILL.md": "v1" }), destDir, version: "1.0.0" });
+    writeFileSync(
+      join(destDir, MANIFEST_FILE),
+      JSON.stringify({
+        skill: SKILL_NAME,
+        files: { "../../package.json": "whatever" },
+      }),
+    );
+
+    installSkill({
+      sourceDir: fixture({ "SKILL.md": "v2" }),
+      destDir,
+      version: "2.0.0",
+      force: true,
+    });
+
+    expect(readFileSync(outsider, "utf8")).toBe("keep me");
+  });
+
+  it("refuses to write through a symlinked managed file", () => {
+    const project = tmp();
+    const destDir = join(project, "skills", "polycss");
+    const outsider = join(project, "secret.txt");
+    writeFileSync(outsider, "original");
+
+    installSkill({ sourceDir: fixture({ "SKILL.md": "v1" }), destDir, version: "1.0.0" });
+    rmSync(join(destDir, "SKILL.md"));
+    symlinkSync(outsider, join(destDir, "SKILL.md"));
+
+    const result = installSkill({
+      sourceDir: fixture({ "SKILL.md": "v2" }),
+      destDir,
+      version: "2.0.0",
+    });
+
+    expect(result.applied).toBe(false);
+    expect(result.conflicts).toEqual(["SKILL.md"]);
+    expect(readFileSync(outsider, "utf8")).toBe("original");
+  });
+
+  it("replaces a symlink rather than following it under --force", () => {
+    const project = tmp();
+    const destDir = join(project, "skills", "polycss");
+    const outsider = join(project, "secret.txt");
+    writeFileSync(outsider, "original");
+
+    installSkill({ sourceDir: fixture({ "SKILL.md": "v1" }), destDir, version: "1.0.0" });
+    rmSync(join(destDir, "SKILL.md"));
+    symlinkSync(outsider, join(destDir, "SKILL.md"));
+
+    installSkill({
+      sourceDir: fixture({ "SKILL.md": "v2" }),
+      destDir,
+      version: "2.0.0",
+      force: true,
+    });
+
+    expect(readFileSync(outsider, "utf8")).toBe("original");
+    expect(read(destDir, "SKILL.md")).toBe("v2");
+  });
+
+  it("ignores a manifest that is itself a symlink", () => {
+    const project = tmp();
+    const destDir = join(project, "skills", "polycss");
+    const planted = join(project, "planted.json");
+
+    installSkill({ sourceDir: fixture({ "SKILL.md": "v1" }), destDir, version: "1.0.0" });
+    writeFileSync(
+      planted,
+      JSON.stringify({ skill: SKILL_NAME, files: { "SKILL.md": "not-the-real-hash" } }),
+    );
+    rmSync(join(destDir, MANIFEST_FILE));
+    symlinkSync(planted, join(destDir, MANIFEST_FILE));
+    writeFileSync(join(destDir, "SKILL.md"), "user edit");
+
+    const result = installSkill({
+      sourceDir: fixture({ "SKILL.md": "v2" }),
+      destDir,
+      version: "2.0.0",
+    });
+
+    expect(result.applied).toBe(false);
+    expect(result.conflicts).toEqual(["SKILL.md"]);
   });
 });
 
