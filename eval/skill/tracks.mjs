@@ -1,20 +1,25 @@
 /**
- * The two tracks an agent is asked to build the same scene in.
+ * The tracks a task can be run in.
  *
- * `polycss` is what we are actually evaluating. `three` is the **control**: the
- * same model, the same task, a library it already knows well, and no skill
- * installed. It exists to answer the question a PolyCSS score alone cannot —
- * "did the agent fail because our skill is inadequate, or because the task
- * itself is hard for it?"
+ * `polycss` is the intervention: PolyCSS with the skill installed.
  *
- * The tracks are graded independently and never compared pixel-to-pixel. A
- * PolyCSS scene is never diffed against a Three.js render, and the Three.js
- * output is never a reference image. Both are measured against the SAME
- * task-level visual criteria — is it the right color, the right size, lit,
- * moving, shadowed — so the two scores are comparable as scores while each
- * scene is judged only on its own merits.
+ * `polycss-noskill` is the actual CONTROL. Same library, same task, same
+ * contract, skill withheld — so the only thing that differs is the
+ * intervention, and the delta is attributable to the skill.
  *
- * Workspaces are separate and neither knows the other exists.
+ * `three` is an external BASELINE, not a control. It changes the rendering
+ * library, its API and its whole authoring contract at the same time as it
+ * removes the skill, so a polycss-vs-three delta conflates the skill with how
+ * familiar and how expensive each library is for that model. It answers a
+ * different and still useful question — "is this task hard for this model at
+ * all?" — and it calibrates the graders. It does not measure the skill.
+ *
+ * No track is ever compared to another pixel-for-pixel. A PolyCSS scene is
+ * never diffed against a Three.js render and neither is a reference image for
+ * the other; each is graded on its own against the same task-level visual
+ * criteria, which is what makes the SCORES comparable.
+ *
+ * Workspaces are separate per track and neither knows the other exists.
  */
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -52,12 +57,17 @@ specifier. The scene renders as DOM elements, on the page's white background.`,
     },
   },
 
+  "polycss-noskill": {
+    label: "PolyCSS (no skill)",
+    /** The control: identical to `polycss` except the skill is withheld. */
+    installSkill: false,
+    contract: null, // filled in below — identical to the polycss contract
+    alias: null,
+  },
+
   three: {
     label: "Three.js",
-    /**
-     * No skill, deliberately. The control measures what the model can do from
-     * its own training, which is the whole point of the comparison.
-     */
+    /** External baseline — a different library, not a control. See the header. */
     installSkill: false,
     contract: `${SHARED_CONTRACT}
 
@@ -86,3 +96,9 @@ export function selectTracks(names) {
   }
   return [...new Set(expanded)];
 }
+
+// The control must differ from the intervention in exactly one way, so it
+// inherits the PolyCSS contract and aliases verbatim rather than restating
+// them, where a copy could drift.
+TRACKS["polycss-noskill"].contract = TRACKS.polycss.contract;
+TRACKS["polycss-noskill"].alias = TRACKS.polycss.alias;

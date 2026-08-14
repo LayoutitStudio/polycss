@@ -9,10 +9,11 @@ Chromium** — not what the agent said it did.
 
 ```bash
 pnpm eval:skill --agent oracle --track all   # reference solutions (must be 100%)
+pnpm eval:skill --agent claude --track polycss,polycss-noskill   # the real control
 pnpm eval:skill --agent claude --track all   # one agent, both tracks, all tasks
 pnpm eval:skill --agent all --track all --keep --json out.json
 pnpm eval:skill --task 03-cube-with-shadow --agent claude,codex
-pnpm eval:skill --agent claude --reuse       # re-grade existing work, no new calls
+pnpm eval:skill --agent claude --reuse --run r1   # re-grade only; never calls an agent
 pnpm eval:selftest                           # prove the graders can fail
 ```
 
@@ -30,6 +31,24 @@ For each (agent, task) pair:
 4. **Render** it in Chromium and sample the result twice, ~2s apart, so motion
    is observable.
 5. **Grade** with the task's checks.
+
+## Tracks: what is a control and what is not
+
+| Track | Role |
+|---|---|
+| `polycss` | The intervention — PolyCSS with the skill installed. |
+| `polycss-noskill` | The **control**. Same library, task and contract; skill withheld. `polycss` minus this is the skill's effect. |
+| `three` | An external **baseline**, not a control. |
+
+The Three.js track changes the library, its API and its authoring contract at
+the same time as it removes the skill, so a polycss-vs-three delta conflates the
+skill with how familiar and how costly each library is for that model. It still
+earns its place — it answers "is this task hard for this model at all?" and it
+calibrates the graders, which is how two over-strict checks were caught — but it
+does not measure the skill. Use `polycss-noskill` for that.
+
+No track is diffed against another pixel-for-pixel; each is graded on its own
+against the same task-level criteria, which is what makes the scores comparable.
 
 ## What the isolation is worth
 
@@ -123,9 +142,14 @@ below 100% is a finding: read the failure reason, then decide whether the skill
 failed to say something, said it somewhere the agent did not look, or the agent
 ignored it. The first two are fixable in `packages/skills/skill/`.
 
-Use `--keep` to leave the workspaces under `$TMPDIR/polycss-skill-eval` and read
-what the agent actually wrote. `--reuse` then re-grades them without spending
-another agent call, which is how to iterate on a grader.
+Use `--keep` to leave the workspaces under `$TMPDIR/polycss-skill-eval/<run>`
+and read what the agent actually wrote. Runs are namespaced by `--run <id>`
+(default `current`) so a later run cannot wipe evidence you kept, and
+concurrent runs do not collide.
+
+`--reuse` re-grades a kept run and **never invokes an agent**: a case with no
+`scene.mjs` is skipped and reported, not re-run. That is how to iterate on a
+grader for free.
 
 Screenshot a red result before believing it. Three separate findings in this
 suite turned out to be grader bugs, not agent mistakes.
