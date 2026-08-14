@@ -52,12 +52,20 @@ baseline.
   `mesh.rebakeAtlas()` explicitly, typically debounced to drag-end. This is
   deliberate: it keeps high-frequency light drags fast.
 - **React/Vue re-render and do auto-rebake** on any light prop change.
-- **Exception:** a vanilla `setOptions({ pointLights })` change *does* re-render
-  every mesh. The freeze applies to the directional light only.
+- **Vanilla `setOptions({ pointLights })` *does* re-render** every mesh.
+- **Vanilla `setOptions({ ambientLight })` changes nothing on its own.** There
+  is no ambient branch in the change detection at all, so the baked surface
+  stays stale *and* the shadow fill — which is derived from ambient — is not
+  re-emitted. Change the directional light in the same call, or call
+  `mesh.rebakeAtlas()`, to make an ambient edit take effect.
 
-Cast shadows are cheap (CPU-projected SVG) and re-emit automatically on any
-light change in both renderer families, so a scene can have a live shadow over a
-frozen baked surface until you rebake.
+So the vanilla freeze covers the directional **and** ambient lights, not the
+directional light alone.
+
+Cast shadows are cheap (CPU-projected SVG) and re-emit on a *directional* or
+*point* light change in both renderer families — so a scene can show a live
+shadow over a frozen baked surface until you rebake. An ambient-only change in
+vanilla re-emits nothing.
 
 ### `"dynamic"`
 

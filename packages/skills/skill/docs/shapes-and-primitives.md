@@ -17,9 +17,13 @@ generators when you want raw arrays to post-process.
 ## Options and defaults
 
 Defaults below are the generator defaults. The default `color` is **not
-uniform**: `boxPolygons`, `planePolygons`, `ringPolygons`, and
-`octahedronPolygons` default to `#ffffff`; every other generator defaults to
-`#cccccc`. Pass `color` explicitly rather than relying on either.
+uniform** — pass `color` explicitly rather than relying on any of these:
+
+| Generators | Default |
+|---|---|
+| `boxPolygons`, `planePolygons`, `ringPolygons`, `octahedronPolygons`, `arrowPolygons`, `ringQuadPolygons` | `#ffffff` |
+| `spherePolygons`, `cylinderPolygons`, `conePolygons`, `torusPolygons`, `tetrahedronPolygons`, `icosahedronPolygons`, `dodecahedronPolygons` | `#cccccc` |
+| `axesPolygons` | per axis: `xColor` `#ff3a3a`, `yColor` `#3aff3a`, `zColor` `#3a8aff` |
 
 ### `boxPolygons` / `createPolyBox` / `PolyBox`
 

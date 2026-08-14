@@ -12,8 +12,16 @@ loop, and it updates one ancestor transform, not per-polygon state.
 | `PolyTransformControls` / `createTransformControls` | Translate/rotate gizmo on a selected mesh handle. |
 | `PolySelect` / `createSelect` | Pointer picking over mesh handles. |
 
-Camera controls mutate the wrapping camera state. Transform controls mutate the
-attached mesh handle via `setTransform`.
+Camera controls mutate the wrapping camera state.
+
+Transform controls differ by renderer, and this catches people:
+
+- **Vanilla** mesh handles expose `setTransform`, so the gizmo moves the mesh
+  directly.
+- **React and Vue** handles deliberately have **no** `setTransform`. The gizmo
+  only *reports* — it emits `onObjectChange`, and you must commit the new
+  position/rotation to your own state. A gizmo wired without that callback drags
+  visibly but the mesh never moves.
 
 ## Orbit / Map options
 
@@ -86,11 +94,24 @@ For whole-mesh selection use `PolySelect` / `<poly-select>` rather than wiring
 every polygon. It tracks selected `PolyMeshHandle`s and supports multi-select.
 
 ```tsx
+// React: the mesh is controlled state, and onObjectChange commits the drag.
+const [selected, setSelected] = useState<PolyMeshHandle | null>(null);
+const [position, setPosition] = useState<Vec3>([0, 0, 0]);
+
 <PolySelect multiple={false} onChange={(meshes) => setSelected(meshes[0] ?? null)}>
-  <PolyMesh id="cottage" src="/cottage.glb" />
+  <PolyMesh id="cottage" src="/cottage.glb" position={position} />
 </PolySelect>
-<PolyTransformControls object={selected} mode="translate" translationSnap={10} />
+<PolyTransformControls
+  object={selected}
+  mode="translate"
+  translationSnap={10}
+  onObjectChange={(e) => setPosition(e.position)}
+/>
 ```
+
+Drop `onObjectChange` and nothing moves — the gizmo has no way to write back.
+In vanilla the equivalent needs no callback, because `createTransformControls`
+calls `handle.setTransform(...)` itself.
 
 - `usePolySelect()` reads the current selection inside a subtree.
 - `usePolySelectionApi()` gives a nested toolbar `set`, `add`, `remove`,

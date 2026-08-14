@@ -136,10 +136,12 @@ constants `LoopOnce`, `LoopRepeat`, `LoopPingPong`.
 Geometry: `Vec2`, `Vec3`, `Polygon`, `PolyMaterial`, `ParseResult`,
 `MeshResolution`.
 
-Lights: `PolyDirectionalLight`, `PolyAmbientLight` (all packages);
-`PolyPointLight` (core, `@layoutit/polycss`, and the `*/three` subpaths — React
-and Vue accept the `pointLights` prop but do not re-export the type, so import
-it from `@layoutit/polycss-core`).
+Lights: `PolyDirectionalLight`, `PolyAmbientLight` (all packages).
+`PolyPointLight` is narrower: `@layoutit/polycss-core`, `@layoutit/polycss`, and
+`@layoutit/polycss/three` only. It is **not** re-exported by
+`@layoutit/polycss-core/three`, `@layoutit/polycss-react/three`, or
+`@layoutit/polycss-vue/three`, and React and Vue accept the `pointLights` prop
+without exporting the type — take it from `@layoutit/polycss-core`.
 
 Texture: `PolyTextureLightingMode`, `PolyTextureLeafSizing`,
 `PolyTextureBackend`, `PolyTextureImageRendering`, `PolyTextureImageLighting`,
