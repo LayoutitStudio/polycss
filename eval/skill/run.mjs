@@ -27,6 +27,7 @@
  *   node eval/skill/run.mjs --agent claude,codex --task 01-static-cube
  *   node eval/skill/run.mjs --agent all --json results.json
  */
+import { randomBytes } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import {
   copyFileSync,
@@ -62,13 +63,18 @@ Options
   --agent <names>   Comma-separated: ${AGENT_NAMES.join(", ")}, or all.
                     Default: oracle.
   --track <names>   Comma-separated: ${TRACK_NAMES.join(", ")}, or all.
-                    Default: polycss. "three" is the no-skill control.
+                    Default: polycss. "polycss-noskill" is the control (same
+                    library, skill withheld); "three" is an external baseline,
+                    not a control.
   --task <ids>      Comma-separated task ids. Default: all.
   --keep            Keep the agent workspaces for inspection.
   --reuse           Grade existing workspaces only. Never invokes an agent:
                     a case with no scene.mjs is SKIPPED, not re-run.
-  --run <id>        Namespace this run's workspaces (default "current"), so a
-                    later run cannot overwrite evidence you kept.
+  --run <id>        Namespace this run's workspaces. Defaults to a fresh unique
+                    id, printed on start, so no run can overwrite another's.
+                    Required with --reuse, which needs a specific run to grade.
+  --allow-missing   With --reuse, tolerate requested cases that have no
+                    scene.mjs instead of failing.
   --no-preflight    Skip the per-agent readiness probe.
   --headed          Run Chromium headed.
   --settle <ms>     Delay between the two DOM samples (default 2000).
@@ -87,7 +93,8 @@ function parseArgs(argv) {
     tasks: [],
     keep: false,
     reuse: false,
-    run: "current",
+    allowMissing: false,
+    run: null,
     preflight: true,
     headed: false,
     settle: 2000,
@@ -108,6 +115,7 @@ function parseArgs(argv) {
     else if (arg === "--task") options.tasks.push(...value().split(",").map((t) => t.trim()));
     else if (arg === "--keep") options.keep = true;
     else if (arg === "--reuse") options.reuse = true;
+    else if (arg === "--allow-missing") options.allowMissing = true;
     else if (arg === "--run") options.run = value();
     else if (arg === "--no-preflight") options.preflight = false;
     else if (arg === "--headed") options.headed = true;
@@ -150,7 +158,20 @@ const taskPrompt = (track, task) => `${task.prompt}\n\n${TRACKS[track].contract}
  * concurrent runs would fight over the same directories.
  */
 const workspaceDir = (runId, track, agent, task) =>
-  join(workRoot, runId, track, agent, task.id);
+  join(workRoot, runId, `track-${track}`, agent, task.id);
+
+/**
+ * Control tracks run first, and each track owns a separate root.
+ *
+ * With one shared root the no-skill control could read the intervention's
+ * installed skill through a sibling path — reproduced at
+ * `../../../polycss/<task>/.agents/skills/polycss/SKILL.md`. Ordering the
+ * skill-less tracks first means those workspaces do not exist yet while the
+ * control runs. This narrows the leak; it is not a sandbox, and the README
+ * says so.
+ */
+const orderTracks = (names) =>
+  [...names].sort((a, b) => Number(TRACKS[a].installSkill) - Number(TRACKS[b].installSkill));
 
 /**
  * Run ids name a directory that gets recursively deleted, so they are
@@ -214,9 +235,9 @@ function runAgent(name, track, dir, task, timeoutSeconds) {
  * not logged in blocks on an interactive prompt forever; finding that out now
  * costs one minute instead of an hour of dead runs.
  */
-function preflight(name, timeoutSeconds = 90) {
+function preflight(name, runId, timeoutSeconds = 90) {
   if (name === "oracle") return { ok: true };
-  const dir = join(workRoot, "__preflight__", name);
+  const dir = join(workRoot, runId, "__preflight__", name);
   rmSync(dir, { recursive: true, force: true });
   mkdirSync(dir, { recursive: true });
   const agent = AGENTS[name];
@@ -278,6 +299,10 @@ async function main(argv) {
     agents = expandAgents(options.agents.length > 0 ? options.agents : ["oracle"]);
     tasks = selectTasks(options.tasks);
     tracks = selectTracks(options.tracks);
+    if (options.reuse && options.run === null) {
+      throw new Error("--reuse needs --run <id>: it grades a specific retained run");
+    }
+    if (options.run === null) options.run = `run-${randomBytes(4).toString("hex")}`;
     assertSafeRunId(options.run);
   } catch (error) {
     console.error(error.message);
@@ -300,11 +325,11 @@ async function main(argv) {
   if (options.preflight && !options.reuse) {
     for (const name of [...agents]) {
       process.stdout.write(`[eval] preflight ${name} ... `);
-      const ready = preflight(name);
+      const ready = preflight(name, options.run);
       console.log(ready.ok ? "ready" : `SKIPPED: ${ready.reason}`);
       if (!ready.ok) agents.splice(agents.indexOf(name), 1);
     }
-    rmSync(join(workRoot, "__preflight__"), { recursive: true, force: true });
+    rmSync(join(workRoot, options.run, "__preflight__"), { recursive: true, force: true });
     if (agents.length === 0) {
       console.error("[eval] no agent is ready");
       return 1;
@@ -313,14 +338,15 @@ async function main(argv) {
   }
 
   console.log(
-    `[eval] ${agents.length} agent(s) x ${tracks.length} track(s) x ${tasks.length} task(s) = ${agents.length * tracks.length * tasks.length} run(s)\n`,
+    `[eval] run ${options.run} — ${agents.length} agent(s) x ${tracks.length} track(s) x ${tasks.length} task(s) = ${agents.length * tracks.length * tasks.length} run(s)\n`,
   );
 
   const candidates = [];
+  const created = new Set();
   let skipped = 0;
 
   for (const name of agents) {
-    for (const track of tracks) {
+    for (const track of orderTracks(tracks)) {
       for (const task of tasks) {
       process.stdout.write(`[eval] ${name} / ${track} / ${task.id} ... `);
       const existingDir = workspaceDir(options.run, track, name, task);
@@ -336,6 +362,7 @@ async function main(argv) {
       }
 
       const dir = reusing ? existingDir : makeWorkspace(options.run, track, name, task);
+      if (!reusing) created.add(dir);
       const run = reusing
         ? { ok: true, ms: 0, output: "reused existing workspace" }
         : runAgent(name, track, dir, task, options.timeout);
@@ -462,8 +489,11 @@ async function main(argv) {
     // Remove only what THIS run created. Wiping the shared root also deleted
     // workspaces another run had deliberately kept, which lost evidence that
     // had already cost real agent invocations to produce.
-    for (const candidate of candidates) {
-      rmSync(candidate.dir, { recursive: true, force: true });
+    // Only directories this invocation created. Reused inputs belong to an
+    // earlier run that was explicitly kept; deleting them destroyed the very
+    // evidence the reuse flow exists to re-grade.
+    for (const dir of created) {
+      rmSync(dir, { recursive: true, force: true });
     }
   } else {
     console.log(`[eval] workspaces kept in ${join(workRoot, options.run)}`);
@@ -473,6 +503,13 @@ async function main(argv) {
     // `rows.every` is vacuously true, so a run where every case was skipped
     // would otherwise exit 0 and read as a green result in CI.
     console.error("[eval] no scenes were graded");
+    return 1;
+  }
+
+  if (skipped > 0 && !options.allowMissing) {
+    console.error(
+      `[eval] ${skipped} requested case(s) had nothing to reuse — pass --allow-missing to tolerate that`,
+    );
     return 1;
   }
 
