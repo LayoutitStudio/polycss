@@ -82,13 +82,13 @@ Prefer leaving it alone.
 | `position` | `Vec3` | Offset in scene space. |
 | `scale` | `number \| Vec3` | |
 | `rotation` | `Vec3` | Euler **degrees** `[x, y, z]`. |
-| `autoCenter` | `boolean` | Shifts the mesh so its bbox center sits at the local origin before `position`. |
+| `autoCenter` | `boolean` | **Not a vanilla `scene.add` option** — it is a `<PolyMesh>` prop and a `<poly-mesh auto-center>` attribute only. Shifts the mesh so its bbox center sits at the local origin before `position`. (The scene-level `autoCenter` above is a different, unrelated option.) |
 | `castShadow` / `receiveShadow` | `boolean` | See [shadows.md](shadows.md). |
 | `merge` | `boolean` | Default `true`. `false` renders the array entering the renderer exactly as given. |
 | `meshResolution` | `"lossy" \| "lossless"` | Default `"lossy"`. |
 | `stableDom` | `boolean` | Vanilla only; needed for skeletal animation. |
 | `shadowDefinition` | `number` | Per-mesh parametric shadow detail. |
-| `excludeFromAutoCenter` | `boolean` | |
+| `excludeFromAutoCenter` | `boolean` | **Vanilla only.** Keeps this mesh out of the scene's auto-center bbox — for helpers and debug overlays. |
 
 React/Vue additionally expose per-mesh `textureLighting`, `textureQuality`,
 `textureLeafSizing`, `textureImageRendering`, `textureBackend`,

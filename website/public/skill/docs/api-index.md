@@ -113,9 +113,13 @@ Constant: `BASE_TILE` (50).
 
 ## Diagnostics and DOM helpers
 
-`collectPolyRenderStats`, `collectPolyTextureReadiness`, `queryPolyLeaves`,
-`findPolyMeshHandle`, `pointInMeshElement`, `findMeshUnderPoint`,
-`injectPolyBaseStyles`.
+Renderer packages only — these touch the DOM, so **none of them are in `core`**.
+
+From `@layoutit/polycss`, `-react` and `-vue`: `collectPolyRenderStats`,
+`collectPolyTextureReadiness`, `queryPolyLeaves`, `injectPolyBaseStyles`.
+
+React and Vue only: `findPolyMeshHandle`, `pointInMeshElement`,
+`findMeshUnderPoint`. Vanilla has no exported equivalent.
 
 Texture resolution (from `@layoutit/polycss-core` or `@layoutit/polycss`, **not**
 the React/Vue indexes): `resolvePolyTextureLeafGeometry`,
@@ -143,13 +147,14 @@ Texture: `PolyTextureLightingMode`, `PolyTextureLeafSizing`,
 
 Camera: `PolyCameraProjection`, `PolyCameraSnapshot`, `PolyCameraSnapshotStats`.
 
-Scene/mesh: `PolyMeshHandle`, `PolyMeshTransformInput`,
-`PolySceneTransformInput` (all packages); `PolySceneOptions`,
+Scene/mesh: `PolyMeshTransformInput`, `PolySceneTransformInput` (all packages);
+`PolyMeshHandle` (renderer packages only — not in `core`); `PolySceneOptions`,
 `PolySceneHandle`, `PolyMeshTransform` (vanilla — React/Vue use component prop
 types such as `PolySceneProps` and `PolyMeshProps` instead).
 
-Render: `PolyRenderStrategy`, `PolyRenderStrategiesOption`, `PolyRenderStats`,
-`PolyLeafInfo` (all packages); `TextureQuality` (core and `@layoutit/polycss`).
+Render: `PolyRenderStrategy`, `PolyRenderStrategiesOption` (all packages);
+`PolyRenderStats` and `PolyLeafInfo` (renderer packages only — not in `core`);
+`TextureQuality` (core and `@layoutit/polycss`).
 
 Parse options: `LoadMeshOptions`, `ObjParseOptions`, `StlParseOptions`,
 `GltfParseOptions`, `VoxParseOptions`, `UseMeshOptions`.

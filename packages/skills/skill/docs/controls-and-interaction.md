@@ -24,7 +24,7 @@ attached mesh handle via `setTransform`.
 | `invert` | `boolean \| number` | `false` | `true` reverses; a number scales sensitivity (negative inverts). |
 | `minZoom` / `maxZoom` | `number` | `0.1` / `10` | Zoom clamps. |
 | `dolly` | `boolean` | `false` | Wheel drives `distance` instead of `zoom`. |
-| `minDistance` / `maxDistance` | `number` | `0` / `5000` | Dolly clamps. |
+| `minDistance` / `maxDistance` | `number` | `0` / see note | Dolly clamps. **`maxDistance` defaults differ:** vanilla is `Infinity`, React/Vue is `5000`. Set it explicitly if it matters. |
 | `animate` | `false \| { speed?, axis?, pauseOnInteraction? }` | `false` | Autorotate. |
 
 `animate` fields: `speed` (default `0.3`, degrees per 60 Hz-equivalent frame ≈
@@ -95,7 +95,8 @@ every polygon. It tracks selected `PolyMeshHandle`s and supports multi-select.
 - `usePolySelect()` reads the current selection inside a subtree.
 - `usePolySelectionApi()` gives a nested toolbar `set`, `add`, `remove`,
   `toggle`, `clear`.
-- Lower-level DOM helpers: `findPolyMeshHandle(el)`,
+- Lower-level DOM helpers, **React and Vue only** — vanilla exports no
+  equivalent: `findPolyMeshHandle(el)`,
   `pointInMeshElement(meshEl, clientX, clientY)`,
   `findMeshUnderPoint(clientX, clientY, filter?)`. They use the same
   bounding-rect fallback that selection and transform controls use for clipped
