@@ -48,7 +48,9 @@ production setting.
 ## Diagnostics
 
 - `collectPolyRenderStats(root)` — mounted leaf mix by strategy.
-- `collectPolyTextureReadiness(root)` — whether atlas bitmaps have decoded.
+- `collectPolyTextureReadiness(root)` — renderer-reported texture readiness. A
+  progress signal, not proof of decode: direct-image leaves count as ready when
+  their CSS URL is assigned.
 - `queryPolyLeaves(root)` — the leaf elements themselves.
 
 ## Automatic mesh optimization

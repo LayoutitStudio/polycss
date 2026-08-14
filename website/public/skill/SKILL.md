@@ -44,9 +44,17 @@ Read the file that matches the task before writing non-trivial code.
 | `@layoutit/polycss-fonts` | Text → extruded 3D `Polygon[]`. |
 | `@layoutit/polycss-morph` | Prepared models with retained DOM, morphs, skinning, playback. |
 
-React and Vue depend on `core` only — **never import `@layoutit/polycss` from a
-React or Vue app.** The public API is mirrored between React and Vue: same
-names, same defaults, idiomatic differences only (refs vs reactives).
+React and Vue depend on `core` only, so **do not import renderer or component
+APIs from `@layoutit/polycss` in a React or Vue app** — use the framework
+package, and take anything it does not re-export from `@layoutit/polycss-core`.
+
+The one documented exception is `exportPolySceneSnapshot`, which lives only in
+`@layoutit/polycss` because it is browser DOM serialization rather than
+component API; React and Vue callers import it from there and pass the rendered
+element. See [docs/api-index.md](docs/api-index.md).
+
+The public API is mirrored between React and Vue: same names, same defaults,
+idiomatic differences only (refs vs reactives).
 
 ## Imports
 

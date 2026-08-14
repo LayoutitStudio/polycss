@@ -92,9 +92,15 @@ numeric default `1.5` is the only value that behaves identically everywhere.
 
 ## Readiness
 
-`collectPolyTextureReadiness(root)` reports whether atlas bitmaps have decoded.
-Textured scenes need real settle time before a screenshot — an atlas that has
-not loaded yet looks like a rendering regression but is not one.
+`collectPolyTextureReadiness(root)` reports the renderer's own readiness state
+for texture leaves. Treat it as a progress signal, **not as proof that every
+texture decoded**: a direct-image leaf counts as ready once its CSS URL is
+assigned, which says nothing about whether the browser has fetched or decoded
+the bytes.
+
+Textured scenes still need real settle time before a screenshot — an atlas that
+has not painted yet looks like a rendering regression but is not one. Readiness
+narrows that window; it does not close it.
 
 React/Vue `atomicAtlas` holds the previous atlas frame until the next is
 decoded, then swaps atomically; `onFrameReady` fires on that swap.

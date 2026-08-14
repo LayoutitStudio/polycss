@@ -13,8 +13,10 @@ Core generators are exported from every package (`@layoutit/polycss`,
 
 ## Options and defaults
 
-Defaults below are the generator defaults. Colors default to `#cccccc` unless
-noted.
+Defaults below are the generator defaults. The default `color` is **not
+uniform**: `boxPolygons`, `planePolygons`, `ringPolygons`, and
+`octahedronPolygons` default to `#ffffff`; every other generator defaults to
+`#cccccc`. Pass `color` explicitly rather than relying on either.
 
 ### `boxPolygons` / `createPolyBox` / `PolyBox`
 

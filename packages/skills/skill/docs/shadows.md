@@ -32,6 +32,29 @@ scene.setOptions({
 Reconciling the two is an open decision; write code that works under both by
 adding an explicit receiver.
 
+## Known limitation: shadows vanish at low camera zoom
+
+`shadow.lift` is expressed in **world units**, but the depth conflict it has to
+win against the receiver is resolved in **device pixels**. The scene transform
+scales the lift along with everything else, so below roughly `zoom: 1` the
+shadow plane and the receiver collapse into the same pixel and the receiver
+paints over the shadow. Paths are still emitted — nothing errors, nothing warns,
+and the shadow is simply invisible.
+
+The default camera zoom is `0.65`, which is inside that range. Measured on a
+cube over a plane with the default `lift`:
+
+| `zoom` | shadow |
+|---|---|
+| 0.5 | none |
+| 0.65 (default) | none |
+| 1.0 | visible |
+| 2.0 | visible |
+
+Until this is fixed, a scene that keeps the default zoom needs a larger lift —
+`shadow: { lift: 0.2 }` is enough at `zoom: 0.65` — or a camera at `zoom: 1` or
+above.
+
 ## `shadow` options
 
 | Key | Default | Meaning |

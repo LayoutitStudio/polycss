@@ -16,6 +16,8 @@ is simply wrong or absent. Work the symptom table before adding instrumentation.
 | Geometry looks different from what you passed in | The optimizer ran (`merge` defaults `true`, `meshResolution` `"lossy"`). Pass `{ merge: false }`. |
 | `merge: false` still changes the mesh | `loadMesh` already optimized at parse time. Call `parseObj`/`parseStl`/`parseGltf`/`parseVox` directly, then add with `merge: false`. |
 | **No shadow appears at all** in vanilla | Vanilla has no ground fallback. Add a mesh with `receiveShadow: true`. |
+| Shadow still absent with a caster, a receiver and a light | Camera `zoom` below ~1 (the default is `0.65`). `shadow.lift` is in world units and scales with the camera, so it stops clearing the receiver. Raise `shadow.lift` to `0.2`, or the zoom to `1`. |
+| Shadow is hidden behind the object casting it | The light is nearly parallel to the view direction. Move it to one side so the shadow falls where the camera can see it. |
 | Shadow works in React but not vanilla | Same cause — React/Vue have the ground-plane fallback, vanilla does not. |
 | Shadow vanished when you added a floor in React/Vue | Adding any receiver disables the ground fallback. Set `receiveShadow` on that floor. |
 | Point lights do nothing | `textureLighting: "dynamic"` ignores `pointLights` entirely — shading and shadows. Switch to `"baked"`. |
@@ -23,7 +25,7 @@ is simply wrong or absent. Work the symptom table before adding instrumentation.
 | Shadows move but the surface stays lit the old way | Same as above — expected, and the reason the escape hatch exists. |
 | Shadow doesn't follow an animated mesh | Shadows freeze during a same-topology deform. Set `shadow.followAnimation: true` and lower `definition`. |
 | A texture renders blurry when it should be crisp | Set `textureImageRendering: "pixelated"`. |
-| Textures look missing right after mount | The atlas is still decoding. Check `collectPolyTextureReadiness(root)`; textured scenes need real settle time before a screenshot. |
+| Textures look missing right after mount | The atlas has not painted yet. `collectPolyTextureReadiness(root)` narrows the window but does not prove decode — direct-image leaves report ready once their URL is assigned. Give textured scenes real settle time before a screenshot. |
 | `textureBackend: "auto"` didn't give a direct image leaf | `"auto"` always resolves to the atlas today. Request `"image"` explicitly. |
 | A direct image leaf ignores scene lighting | By design — direct image leaves are source-lit. Use the atlas backend for scene lighting. |
 | `PolyScene` throws | It must be nested inside a camera component. |
