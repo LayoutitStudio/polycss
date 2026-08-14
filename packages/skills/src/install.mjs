@@ -13,6 +13,7 @@ import { createHash } from "node:crypto";
 import {
   lstatSync,
   mkdirSync,
+  realpathSync,
   readFileSync,
   readdirSync,
   renameSync,
@@ -86,17 +87,52 @@ export function isSafeRelativePath(rel) {
   return true;
 }
 
+const realpathOrSelf = (path) => {
+  try {
+    return realpathSync(path);
+  } catch {
+    return path;
+  }
+};
+
 /**
- * Resolve `rel` under `root`, returning null unless it stays inside. Belt and
- * braces over `isSafeRelativePath` — containment is re-checked immediately
- * before every read, write and delete, not once at parse time.
+ * Resolve `rel` under `root`, returning null unless it genuinely stays inside.
+ *
+ * Lexical resolution is not enough. `resolve()` does not follow symlinked path
+ * COMPONENTS, so a planted `docs -> /elsewhere` directory passes a
+ * `startsWith(base)` check while every write under it lands outside the skill
+ * directory — reproduced: an ordinary install wrote all 13 docs into the link
+ * target. So every intermediate component is `lstat`ed and a symlink anywhere
+ * along the path refuses the operation outright.
+ *
+ * The leaf is deliberately exempt: a symlinked managed FILE is still resolved
+ * here, and the caller treats it as a conflict (or, under `--force`, unlinks
+ * and replaces the link itself rather than writing through it).
  */
 function containedPath(root, rel) {
   if (!isSafeRelativePath(rel)) return null;
-  const base = resolve(root);
-  const target = resolve(base, toNative(rel));
-  if (target !== base && !target.startsWith(base + sep)) return null;
-  return target;
+  // The destination root may legitimately be a symlink — a shared skills
+  // directory is a reasonable layout — so containment is measured against its
+  // real location rather than refused.
+  const base = realpathOrSelf(resolve(root));
+  const parts = rel.split("/");
+  let current = base;
+
+  for (let i = 0; i < parts.length; i += 1) {
+    current = join(current, parts[i]);
+    const isLeaf = i === parts.length - 1;
+    let stat = null;
+    try {
+      stat = lstatSync(current);
+    } catch {
+      // Nothing exists from here down; the rest is ours to create inside base.
+      break;
+    }
+    if (!isLeaf && stat.isSymbolicLink()) return null;
+  }
+
+  const target = join(base, ...parts.map((part) => part));
+  return target.startsWith(base + sep) ? target : null;
 }
 
 function readManifest(destDir) {

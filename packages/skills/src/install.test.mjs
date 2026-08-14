@@ -377,6 +377,96 @@ describe("hostile manifests and links stay inside the skill directory", () => {
     expect(read(destDir, "SKILL.md")).toBe("v2");
   });
 
+  it("refuses to write through a symlinked intermediate directory", () => {
+    // Lexical containment passes for `docs/x.md` even when `docs` is a link,
+    // so this escaped an ordinary install with no manifest and no --force.
+    const project = tmp();
+    const destDir = join(project, "skills", "polycss");
+    const outside = join(project, "outside");
+    mkdirSync(outside, { recursive: true });
+    mkdirSync(destDir, { recursive: true });
+    symlinkSync(outside, join(destDir, "docs"));
+
+    const result = installSkill({
+      sourceDir: fixture({ "SKILL.md": "v1", "docs/a.md": "aye", "docs/b.md": "bee" }),
+      destDir,
+      version: "1.0.0",
+    });
+
+    expect(result.applied).toBe(false);
+    expect(result.conflicts).toEqual(["docs/a.md", "docs/b.md"]);
+    expect(listFiles(outside)).toEqual([]);
+  });
+
+  it("refuses a symlinked intermediate directory under --force too", () => {
+    const project = tmp();
+    const destDir = join(project, "skills", "polycss");
+    const outside = join(project, "outside");
+    mkdirSync(outside, { recursive: true });
+    writeFileSync(join(outside, "a.md"), "theirs");
+    mkdirSync(destDir, { recursive: true });
+    symlinkSync(outside, join(destDir, "docs"));
+
+    installSkill({
+      sourceDir: fixture({ "SKILL.md": "v1", "docs/a.md": "ours" }),
+      destDir,
+      version: "1.0.0",
+      force: true,
+    });
+
+    expect(readFileSync(join(outside, "a.md"), "utf8")).toBe("theirs");
+  });
+
+  it("does not delete through a symlinked intermediate directory", () => {
+    const project = tmp();
+    const destDir = join(project, "skills", "polycss");
+    const outside = join(project, "outside");
+    mkdirSync(outside, { recursive: true });
+    writeFileSync(join(outside, "precious.md"), "keep me");
+
+    installSkill({ sourceDir: fixture({ "SKILL.md": "v1" }), destDir, version: "1.0.0" });
+    symlinkSync(outside, join(destDir, "docs"));
+    writeFileSync(
+      join(destDir, MANIFEST_FILE),
+      JSON.stringify({
+        skill: SKILL_NAME,
+        files: {
+          "SKILL.md": createHash("sha256").update("v1").digest("hex"),
+          "docs/precious.md": createHash("sha256").update("keep me").digest("hex"),
+        },
+      }),
+    );
+
+    const result = installSkill({
+      sourceDir: fixture({ "SKILL.md": "v2" }),
+      destDir,
+      version: "2.0.0",
+      force: true,
+    });
+
+    expect(result.remove).toEqual([]);
+    expect(readFileSync(join(outside, "precious.md"), "utf8")).toBe("keep me");
+  });
+
+  it("still installs into a destination root that is itself a symlink", () => {
+    // A shared skills directory is a legitimate layout; only links INSIDE the
+    // destination are refused.
+    const project = tmp();
+    const real = join(project, "real-skills");
+    mkdirSync(real, { recursive: true });
+    const destDir = join(project, "linked-skills");
+    symlinkSync(real, destDir);
+
+    const result = installSkill({
+      sourceDir: fixture({ "SKILL.md": "v1", "docs/a.md": "aye" }),
+      destDir,
+      version: "1.0.0",
+    });
+
+    expect(result.applied).toBe(true);
+    expect(readFileSync(join(real, "docs", "a.md"), "utf8")).toBe("aye");
+  });
+
   it("ignores a manifest that is itself a symlink", () => {
     const project = tmp();
     const destDir = join(project, "skills", "polycss");
