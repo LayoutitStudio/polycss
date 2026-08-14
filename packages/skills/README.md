@@ -75,6 +75,17 @@ If you have edited an installed file, the upgrade stops and names it rather than
 overwriting your work. Re-run with `--force` when you want the shipped version
 back.
 
+## What the installer refuses
+
+It only ever writes inside the skill directory. Manifest entries are validated
+as plain relative paths, and a symlink anywhere *inside* the destination — a
+managed file or one of its parent directories — is refused rather than written
+through, so nothing outside can be created or deleted.
+
+The destination root itself is followed if it is a symlink, because a shared
+skills directory is a reasonable layout. If you do not want that, pass an
+explicit `--dir`.
+
 ## Fetching instead of installing
 
 The same content is served at

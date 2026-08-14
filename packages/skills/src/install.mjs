@@ -9,7 +9,7 @@
  *
  * Zero runtime dependencies: this runs under `npx` in someone else's project.
  */
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import {
   lstatSync,
   mkdirSync,
@@ -87,13 +87,29 @@ export function isSafeRelativePath(rel) {
   return true;
 }
 
-const realpathOrSelf = (path) => {
-  try {
-    return realpathSync(path);
-  } catch {
-    return path;
+/**
+ * Real location of `path`, resolving through the nearest ancestor that exists.
+ *
+ * A plain `realpathSync` throws when the destination has not been created yet
+ * and the lexical fallback then hides a symlinked ANCESTOR — so a planted
+ * `.claude/skills -> /elsewhere` would be silently followed on a first install.
+ */
+function realpathThroughAncestors(path) {
+  const absolute = resolve(path);
+  const trailing = [];
+  let current = absolute;
+
+  for (;;) {
+    try {
+      return join(realpathSync(current), ...trailing);
+    } catch {
+      const parent = dirname(current);
+      if (parent === current) return absolute;
+      trailing.unshift(current.slice(parent.length + 1));
+      current = parent;
+    }
   }
-};
+}
 
 /**
  * Resolve `rel` under `root`, returning null unless it genuinely stays inside.
@@ -114,7 +130,7 @@ function containedPath(root, rel) {
   // The destination root may legitimately be a symlink — a shared skills
   // directory is a reasonable layout — so containment is measured against its
   // real location rather than refused.
-  const base = realpathOrSelf(resolve(root));
+  const base = realpathThroughAncestors(root);
   const parts = rel.split("/");
   let current = base;
 
@@ -190,14 +206,15 @@ function writeFileNoFollow(path, bytes) {
   if (isSymlink(path)) unlinkSync(path);
   // Same-directory temp + rename: rename replaces the entry itself, so a link
   // created between the check and the write cannot be followed either.
-  const temp = `${path}.polycss-skill-tmp`;
+  // Random suffix + exclusive create: a predictable temp name is a file another
+  // local process can plant and win a race against.
+  const temp = `${path}.${randomBytes(6).toString("hex")}.polycss-skill-tmp`;
   try {
     writeFileSync(temp, bytes, { flag: "wx" });
-  } catch {
+    renameSync(temp, path);
+  } finally {
     rmSync(temp, { force: true });
-    writeFileSync(temp, bytes);
   }
-  renameSync(temp, path);
 }
 
 /**
