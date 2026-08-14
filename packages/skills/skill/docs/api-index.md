@@ -11,9 +11,11 @@ here and not in your editor's completions, do not invent it.
 - `@layoutit/polycss-react` and `@layoutit/polycss-vue` re-export a **curated
   list** of core — parsers, generators, math, and the common types — not all of
   it. A core name missing from their index (for example `PolyPointLight`, or the
-  `resolvePolyTexture*` helpers) is imported from `@layoutit/polycss-core`
-  directly, which React and Vue already depend on. Never import
-  `@layoutit/polycss` from a React or Vue app.
+  `resolvePolyTexture*` helpers, `spherePolygons`) is imported from
+  `@layoutit/polycss-core` directly, which React and Vue already depend on.
+  Do not take renderer or component APIs from `@layoutit/polycss` in a React or
+  Vue app — the one exception is `exportPolySceneSnapshot`, which exists only
+  there (see "Names that do NOT exist" below).
 - The React and Vue public surfaces are **mirrored**. The only value exports
   that differ are the idiomatic context handles: React has `PolyCameraContext`
   and `useCameraContext`; Vue has `PolyCameraContextKey` and
@@ -75,12 +77,17 @@ classes. Importing `@layoutit/polycss` does **not** register them — import
 `loadMesh`, `parseObj`, `parseMtl`, `parseStl`, `parseGltf`, `parseVox`,
 `normalizePolygons`.
 
-## Geometry generators (all packages)
+## Geometry generators
 
-`boxPolygons`, `planePolygons`, `ringPolygons`, `spherePolygons`,
+From every package: `boxPolygons`, `planePolygons`, `ringPolygons`,
 `cylinderPolygons`, `conePolygons`, `torusPolygons`, `tetrahedronPolygons`,
 `octahedronPolygons`, `icosahedronPolygons`, `dodecahedronPolygons`,
 `axesHelperPolygons`, `arrowPolygons`.
+
+**`spherePolygons` and `ringQuadPolygons` are the exceptions:** they are
+exported from `@layoutit/polycss-core` and `@layoutit/polycss` but **not** from
+the React or Vue indexes, even though the `<PolySphere>` component exists. In a
+React or Vue app import them from `@layoutit/polycss-core`.
 
 ## Optimizer and mesh ops (all packages)
 

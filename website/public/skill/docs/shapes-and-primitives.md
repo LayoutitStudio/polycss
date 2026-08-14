@@ -8,8 +8,11 @@ Three layers, same geometry:
 | Vanilla factories | `createPolyBox(opts)` | `ParseResult` for `scene.add(...)` |
 | Components | `<PolyBox …>` / `<poly-box …>` | Mounted mesh |
 
-Core generators are exported from every package (`@layoutit/polycss`,
-`-react`, `-vue`, `-core`). Use them when you want raw arrays to post-process.
+Core generators are exported from every package (`@layoutit/polycss`, `-react`,
+`-vue`, `-core`) with two exceptions: **`spherePolygons` and `ringQuadPolygons`
+are not re-exported by React or Vue** — import those from
+`@layoutit/polycss-core`, which both framework packages already depend on. Use
+generators when you want raw arrays to post-process.
 
 ## Options and defaults
 
@@ -132,7 +135,8 @@ The cap at 3 is deliberate — DOM cost.
 
 ### Other generators
 
-`axesHelperPolygons`, `arrowPolygons`, `ringQuadPolygons`.
+`axesHelperPolygons`, `arrowPolygons`, and `ringQuadPolygons` (core and
+`@layoutit/polycss` only — see the note at the top).
 
 ## Usage
 
