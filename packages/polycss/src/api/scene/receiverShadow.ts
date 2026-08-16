@@ -62,6 +62,20 @@ const sharedEdgeMapCacheKey = new WeakMap<MeshEntry, readonly unknown[]>();
 const edgeOwnersCache = new WeakMap<MeshEntry, ReadonlyMap<string, EdgeOwners>>();
 const edgeOwnersCacheKey = new WeakMap<MeshEntry, string>();
 
+/** Per-caster parametric override cache, keyed on the cached CasterPolyItem[]
+ *  identity (which already busts on polygon/transform changes via
+ *  `casterItemsCacheKey`). The override depends only on the caster's world
+ *  vertices + light configuration + definition/style + the self/cross flag,
+ *  NOT on the receiver — so one caster needs at most two variants shared
+ *  across every receiver in an emit. `worldVerts` hoists the previously
+ *  per-call `cached.map((item) => item.wv)` allocation. */
+interface ParametricCasterCacheEntry {
+  worldVerts: Vec3[][];
+  self?: { key: string; result: ReturnType<typeof buildParametricCasterOverride> };
+  cross?: { key: string; result: ReturnType<typeof buildParametricCasterOverride> };
+}
+const parametricCasterCache = new WeakMap<CasterPolyItem[], ParametricCasterCacheEntry>();
+
 function lightMapFor(entry: MeshEntry): Map<string, Map<number, MountedFace>> {
   let m = mountedFacesByMesh.get(entry);
   if (!m) { m = new Map(); mountedFacesByMesh.set(entry, m); }
@@ -114,7 +128,7 @@ export function disposeAllReceiverShadowMounts(ctx: SceneContext): void {
 export function emitReceiverShadows(
   ctx: SceneContext,
   casters: MeshEntry[],
-  dedupByCaster: Map<MeshEntry, Set<number>>,
+  dedupByCaster: ReadonlyMap<MeshEntry, ReadonlySet<number>>,
   receiverEntry: MeshEntry,
   receiverDedupDrop: Set<number>,
   lightDir: Vec3,
@@ -246,16 +260,38 @@ export function emitReceiverShadows(
       const def = ctx.shadowDragActive
         ? Math.min(baseDef, options.shadow.dragDefinition ?? baseDef)
         : baseDef;
-      const result = buildParametricCasterOverride({
-        polysWorldVerts: cached.map((item) => item.wv),
-        lightDir,
-        definition: def,
-        isSelf: caster === receiverEntry,
-        style: options.shadow.style,
-        pointLights: passes.points.map((pt) => ({ position: pt.lightPos, index: pt.index })),
-      });
-      overrideSilhouette = result.overrideSilhouette;
-      overridePointSilhouettes = result.overridePointSilhouettes;
+      const isSelf = caster === receiverEntry;
+      // Cache the built override per caster-items identity + parameter key.
+      // Receivers only differ through `isSelf`, so the same caster reuses one
+      // cross-mesh variant across every receiver and one self variant on
+      // itself instead of re-rasterising per (receiver × caster).
+      const paramKey =
+        `${def}|${options.shadow.style ?? "vector"}|` +
+        `${lightDir[0]},${lightDir[1]},${lightDir[2]}|` +
+        passes.points.map((pt) => `${pt.index}:${pt.lightPos[0]},${pt.lightPos[1]},${pt.lightPos[2]}`).join(";");
+      let paramEntry = parametricCasterCache.get(cached);
+      if (!paramEntry) {
+        paramEntry = { worldVerts: cached.map((item) => item.wv) };
+        parametricCasterCache.set(cached, paramEntry);
+      }
+      const variantKey = isSelf ? "self" : "cross";
+      let variant = paramEntry[variantKey];
+      if (!variant || variant.key !== paramKey) {
+        variant = {
+          key: paramKey,
+          result: buildParametricCasterOverride({
+            polysWorldVerts: paramEntry.worldVerts,
+            lightDir,
+            definition: def,
+            isSelf,
+            style: options.shadow.style,
+            pointLights: passes.points.map((pt) => ({ position: pt.lightPos, index: pt.index })),
+          }),
+        };
+        paramEntry[variantKey] = variant;
+      }
+      overrideSilhouette = variant.result.overrideSilhouette;
+      overridePointSilhouettes = variant.result.overridePointSilhouettes;
     }
     casterInputs.push({
       id: caster,

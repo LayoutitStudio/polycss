@@ -157,6 +157,38 @@ function nonCullableCameraGroups(): CameraCullNormalGroup[] {
   return [NON_CULLABLE_CAMERA_GROUP];
 }
 
+/** Shared overlap-dedup cache. `findOverlappingPolygonDuplicates` is O(n²)
+ *  and a pure geometric property of the polygon array + options, so both
+ *  the shadow-emit path (0.5/0.95 thresholds) and the raytrace path
+ *  (0.12/0.98 thresholds) reuse one cache keyed on polygon-array identity
+ *  with the option set as the inner key. WeakMap → dropped arrays free
+ *  their entries. */
+const overlapDedupCache = new WeakMap<readonly Polygon[], Map<string, ReadonlySet<number>>>();
+function cachedOverlappingPolygonDuplicates(
+  polygons: Polygon[],
+  options: {
+    normalTolerance: number;
+    distanceTolerance: number;
+    overlapFraction: number;
+    preserveDoubleSidedBackfaces: boolean;
+  },
+): ReadonlySet<number> {
+  const optKey =
+    `${options.normalTolerance}|${options.distanceTolerance}|` +
+    `${options.overlapFraction}|${options.preserveDoubleSidedBackfaces ? 1 : 0}`;
+  let byOptions = overlapDedupCache.get(polygons);
+  if (!byOptions) {
+    byOptions = new Map();
+    overlapDedupCache.set(polygons, byOptions);
+  }
+  let dropped = byOptions.get(optKey);
+  if (!dropped) {
+    dropped = findOverlappingPolygonDuplicates(polygons, options);
+    byOptions.set(optKey, dropped);
+  }
+  return dropped;
+}
+
 export function createPolyScene(
   host: HTMLElement,
   options: PolySceneOptions,
@@ -1069,9 +1101,9 @@ export function createPolyScene(
     // is lost and the floor shadow develops visible stripes between
     // arms. True back-to-back or importer-duplicate faces have BOTH
     // fractions ≈ 1.0 so they still dedup at 0.95.
-    const dedupByCaster = new Map<MeshEntry, Set<number>>();
+    const dedupByCaster = new Map<MeshEntry, ReadonlySet<number>>();
     for (const c of casters) {
-      dedupByCaster.set(c, findOverlappingPolygonDuplicates(c.polygons, {
+      dedupByCaster.set(c, cachedOverlappingPolygonDuplicates(c.polygons, {
         normalTolerance: 0.1,
         distanceTolerance: 0.5,
         overlapFraction: 0.95,
@@ -1194,14 +1226,12 @@ export function createPolyScene(
     // the bench castle drops 104/681 polys including legitimate occluded
     // walls (polygon 111). Tightening to 0.12 + overlapFraction 0.98
     // captures the cottage case and leaves merlon/tower geometry intact.
-    const dedupDropped = cached && cached.polygons === entry.polygons
-      ? cached.dedupDropped
-      : findOverlappingPolygonDuplicates(entry.polygons, {
-          normalTolerance: 0.1,
-          distanceTolerance: 0.12,
-          overlapFraction: 0.98,
-          preserveDoubleSidedBackfaces: false,
-        });
+    const dedupDropped = cachedOverlappingPolygonDuplicates(entry.polygons, {
+      normalTolerance: 0.1,
+      distanceTolerance: 0.12,
+      overlapFraction: 0.98,
+      preserveDoubleSidedBackfaces: false,
+    });
     const occluded = computeLightVisibility(entry.polygons, [lx, ly, lz], dedupDropped);
     entry.lightOcclusionCache = {
       polygons: entry.polygons,

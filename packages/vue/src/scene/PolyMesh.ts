@@ -55,6 +55,7 @@ import {
   worldDirectionToCss,
   worldPositionToCss,
   type CameraCullRotation,
+  type CasterPolyItem,
   type EdgeOwners,
   type ReceiverCasterInput,
 } from "@layoutit/polycss-core";
@@ -98,6 +99,59 @@ import {
  *  at module scope so multiple receivers in one frame share the cache. */
 const vueEdgeOwnersCache = new WeakMap<readonly Polygon[], ReadonlyMap<string, EdgeOwners>>();
 const vueEdgeOwnersCacheKey = new WeakMap<readonly Polygon[], string>();
+
+/** Per-caster precomputed world vertices/planes, keyed on the caster's
+ *  polygons array identity + the same position/scale/rotation bust key as
+ *  the edge-owner cache. Mirrors vanilla's `casterItemsCache` on the scene
+ *  context — without it every receiver re-ran `prepareCasterPolyItems` for
+ *  every caster on every emit. */
+const vueCasterItemsCache = new WeakMap<readonly Polygon[], CasterPolyItem[]>();
+const vueCasterItemsCacheKey = new WeakMap<readonly Polygon[], string>();
+
+/** Per-caster parametric override cache, keyed on the cached CasterPolyItem[]
+ *  identity (which busts on polygon/transform changes via the caster-items
+ *  key). The override depends only on caster world verts + light config +
+ *  definition/style + the self/cross flag — NOT on the receiver — so one
+ *  caster needs at most two variants shared across every receiver. Mirrors
+ *  vanilla receiverShadow.ts. `worldVerts` hoists the per-call
+ *  `items.map((it) => it.wv)` allocation. */
+interface ParametricCasterCacheEntry {
+  worldVerts: Vec3[][];
+  self?: { key: string; result: ReturnType<typeof buildParametricCasterOverride> };
+  cross?: { key: string; result: ReturnType<typeof buildParametricCasterOverride> };
+}
+const vueParametricCasterCache = new WeakMap<CasterPolyItem[], ParametricCasterCacheEntry>();
+
+/** Shared overlap-dedup cache. `findOverlappingPolygonDuplicates` is O(n²)
+ *  and a pure geometric property of the polygon array + options, so every
+ *  call site (caster registration + ground-shadow path) reuses one cache
+ *  keyed on polygon-array identity with the option set as the inner key.
+ *  Mirrors vanilla createPolyScene's shared dedup cache. */
+const vueDedupDropCache = new WeakMap<readonly Polygon[], Map<string, ReadonlySet<number>>>();
+function cachedOverlappingPolygonDuplicates(
+  polygons: Polygon[],
+  options: {
+    normalTolerance: number;
+    distanceTolerance: number;
+    overlapFraction: number;
+    preserveDoubleSidedBackfaces: boolean;
+  },
+): ReadonlySet<number> {
+  const optKey =
+    `${options.normalTolerance}|${options.distanceTolerance}|` +
+    `${options.overlapFraction}|${options.preserveDoubleSidedBackfaces ? 1 : 0}`;
+  let byOptions = vueDedupDropCache.get(polygons);
+  if (!byOptions) {
+    byOptions = new Map();
+    vueDedupDropCache.set(polygons, byOptions);
+  }
+  let dropped = byOptions.get(optKey);
+  if (!dropped) {
+    dropped = findOverlappingPolygonDuplicates(polygons, options);
+    byOptions.set(optKey, dropped);
+  }
+  return dropped;
+}
 
 function solidPaintVars(defaults: SolidPaintDefaults): CSSProperties | null {
   const out: CSSProperties = {};
@@ -304,16 +358,12 @@ export const PolyMesh = defineComponent({
     // Camera ctx — referenced by both event synthesis and the receiver-
     // shadow back-face cull. Declared early so the shadow computed can
     // close over it.
+    // NO camera subscription here — receiver shadows do not re-emit on
+    // camera motion (they ride the scene transform). The receiver-face
+    // back-face cull reads the camera state at emit time and may go stale
+    // during an orbit — the same deliberate trade vanilla makes in
+    // emitSceneShadows (shadows are not re-emitted from applyCamera).
     const cameraCtx = inject(PolyCameraContextKey, null);
-    // Bumped on every camera tick so the receiver-shadow computed re-runs
-    // with up-to-date camera rotation for back-face culling.
-    const cameraTick = ref(0);
-    let cameraTickUnsub: (() => void) | undefined;
-    watchEffect((onCleanup) => {
-      cameraTickUnsub?.();
-      cameraTickUnsub = cameraCtx?.store.subscribe(() => { cameraTick.value++; });
-      onCleanup(() => { cameraTickUnsub?.(); cameraTickUnsub = undefined; });
-    });
     const atlasTextureLighting = computed<PolyTextureLightingMode>(
       () => props.textureLighting ?? sceneCtx?.value.textureLighting ?? "baked",
     );
@@ -525,7 +575,7 @@ export const PolyMesh = defineComponent({
       // the SVG on the scene root.
       const meshPosZ = props.position?.[2] ?? 0;
       const localGroundCssZ = groundCssZ - meshPosZ * BASE_TILE;
-      const dedupDrop = findOverlappingPolygonDuplicates(polygons.value, {
+      const dedupDrop = cachedOverlappingPolygonDuplicates(polygons.value, {
         normalTolerance: 0.1,
         distanceTolerance: 0.5,
         overlapFraction: 0.95,
@@ -654,7 +704,6 @@ export const PolyMesh = defineComponent({
       const registry = ctx?.shadowRegistry;
       if (!registry) return [];
       void registry.version.value;
-      void cameraTick.value;
       const entries = registry.getEntries();
       if (entries.length === 0) return [];
       // Caster vertices and receiver plane both live in the CSS axis-swap
@@ -698,19 +747,33 @@ export const PolyMesh = defineComponent({
       const cachedSelfMap = selfShadowEdgeMap.value;
       for (const getData of entries) {
         const data = getData();
+        // Shared bust key for the caster-items + edge-owners caches — the
+        // transform fields fed into `prepareCasterPolyItems`, so cached
+        // world-frame data stays coherent with the registered transform.
+        // Polygon content identity is the WeakMap key itself.
+        const dposArr = data.position;
+        const drot = data.rotation ?? null;
+        const casterKey = `${dposArr[0]},${dposArr[1]},${dposArr[2]}|${drot ? drot.join(",") : "n"}|${JSON.stringify(data.scale ?? null)}`;
         // Cast from EVERY polygon — geometry casts a shadow regardless of
         // whether it's painted for the camera (atlas plan / renderedPolygon-
         // Indices). Filtering to rendered polys left camera-dependent holes
         // in the floor shadow of imported meshes. Coincident projections
         // merge under the per-mesh `fill-rule: nonzero`, so no dedup is
         // needed. Mirrors packages/polycss/src/api/scene/receiverShadow.ts.
-        const items = prepareCasterPolyItems(
-          data.polygons,
-          data.position,
-          data.scale,
-          () => true,
-          data.rotation ?? null,
-        );
+        // Cached per caster (vanilla `casterItemsCache` parity) so a re-emit
+        // with unchanged polygons + transform skips the world-space rebuild.
+        let items = vueCasterItemsCache.get(data.polygons);
+        if (items === undefined || vueCasterItemsCacheKey.get(data.polygons) !== casterKey) {
+          items = prepareCasterPolyItems(
+            data.polygons,
+            data.position,
+            data.scale,
+            () => true,
+            data.rotation ?? null,
+          );
+          vueCasterItemsCache.set(data.polygons, items);
+          vueCasterItemsCacheKey.set(data.polygons, casterKey);
+        }
         const isSelf = data.polygons === polygons.value;
         // Self-shadow seam cull: when caster IS this mesh, pass the
         // cached shared-edge map so the algorithm skips projecting
@@ -723,35 +786,51 @@ export const PolyMesh = defineComponent({
         // gate; core's directional branch ignores edgeOwners below that.
         let edgeOwners: ReadonlyMap<string, EdgeOwners> | undefined;
         if (!isSelf && (data.polygons.length >= 40 || hasShadowPoints)) {
-          const drot = data.rotation ?? null;
-          const dposArr = data.position;
-          const dsKey = JSON.stringify(data.scale ?? null);
-          const eoKey = `${dposArr[0]},${dposArr[1]},${dposArr[2]}|${drot ? drot.join(",") : "n"}|${dsKey}`;
           let cachedOwners = vueEdgeOwnersCache.get(data.polygons);
-          if (cachedOwners === undefined || vueEdgeOwnersCacheKey.get(data.polygons) !== eoKey) {
+          if (cachedOwners === undefined || vueEdgeOwnersCacheKey.get(data.polygons) !== casterKey) {
             cachedOwners = prepareCasterEdgeOwners(data.polygons, dposArr, data.scale, drot);
             vueEdgeOwnersCache.set(data.polygons, cachedOwners);
-            vueEdgeOwnersCacheKey.set(data.polygons, eoKey);
+            vueEdgeOwnersCacheKey.set(data.polygons, casterKey);
           }
           edgeOwners = cachedOwners;
         }
         // Parametric override: low-res silhouette loops via the shared core
         // helper (identical to vanilla + React). Per-mesh `shadowDefinition`
         // beats the scene default; directional + per-point-light radial.
+        // Cached per caster-items identity + parameter key: the override does
+        // not depend on the receiver beyond the self/cross flag, so one caster
+        // reuses one cross variant across every receiver (mirrors vanilla).
         let overrideSilhouette: Vec3[][] | undefined;
         let overridePointSilhouettes: Array<Vec3[][] | undefined> | undefined;
         if (ctx?.shadow?.parametric) {
           const def = data.shadowDefinition ?? ctx.shadow.definition ?? 16;
-          const result = buildParametricCasterOverride({
-            polysWorldVerts: items.map((it) => it.wv),
-            lightDir,
-            definition: def,
-            isSelf,
-            style: ctx.shadow.style,
-            pointLights: shadowPointIndices.map((idx) => ({ position: allPointLightsCss[idx]!.position, index: idx })),
-          });
-          overrideSilhouette = result.overrideSilhouette;
-          overridePointSilhouettes = result.overridePointSilhouettes;
+          const paramKey =
+            `${def}|${ctx.shadow.style ?? "vector"}|` +
+            `${lightDir[0]},${lightDir[1]},${lightDir[2]}|` +
+            shadowPointIndices.map((idx) => `${idx}:${allPointLightsCss[idx]!.position.join(",")}`).join(";");
+          let paramEntry = vueParametricCasterCache.get(items);
+          if (!paramEntry) {
+            paramEntry = { worldVerts: items.map((it) => it.wv) };
+            vueParametricCasterCache.set(items, paramEntry);
+          }
+          const variantKey = isSelf ? "self" : "cross";
+          let variant = paramEntry[variantKey];
+          if (!variant || variant.key !== paramKey) {
+            variant = {
+              key: paramKey,
+              result: buildParametricCasterOverride({
+                polysWorldVerts: paramEntry.worldVerts,
+                lightDir,
+                definition: def,
+                isSelf,
+                style: ctx.shadow.style,
+                pointLights: shadowPointIndices.map((idx) => ({ position: allPointLightsCss[idx]!.position, index: idx })),
+              }),
+            };
+            paramEntry[variantKey] = variant;
+          }
+          overrideSilhouette = variant.result.overrideSilhouette;
+          overridePointSilhouettes = variant.result.overridePointSilhouettes;
         }
         casterInputs.push({
           id: Symbol(`caster-${i++}`),
@@ -763,6 +842,10 @@ export const PolyMesh = defineComponent({
           overridePointSilhouettes,
         });
       }
+      // Camera state captured at EMIT time (light/geometry/registration
+      // change) for the receiver-face back-face cull — never a reactive
+      // dependency. It may go stale during an orbit; vanilla makes the same
+      // trade (shadows ride the scene transform, camera motion is free).
       const cameraState = cameraCtx?.store.getState().cameraState;
       const cameraRot: CameraCullRotation = {
         rotX: cameraState?.rotX ?? 65,
@@ -864,8 +947,10 @@ export const PolyMesh = defineComponent({
           registry.register(shadowRegistryId, () => {
             const casterPolygons = shadowCasterPolygons.value;
             // Mirror vanilla: skip no-plan polys AND overlapping duplicates
-            // (vanilla's dedupByCaster filter, same 0.5/0.95 thresholds).
-            const dedupDrop = findOverlappingPolygonDuplicates(casterPolygons, {
+            // (vanilla's dedupByCaster filter, same 0.5/0.95 thresholds —
+            // shared via the module dedup cache so the O(n²) pass runs once
+            // per polygon-array identity even across receiver re-emits).
+            const dedupDrop = cachedOverlappingPolygonDuplicates(casterPolygons, {
               normalTolerance: 0.1,
               distanceTolerance: 0.5,
               overlapFraction: 0.95,
