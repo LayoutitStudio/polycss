@@ -339,6 +339,123 @@ describe("PolyMesh (Vue) — castShadow", () => {
     }
   });
 
+  it("disabling followAnimation cancels a pending trailing shadow bump", async () => {
+    // Regression: the trailing timer fired even after followAnimation was
+    // turned off — the freeze semantics must win at fire time, and the flip
+    // cancels the pending timer eagerly.
+    vi.useFakeTimers();
+    try {
+      const container = document.createElement("div");
+      document.body.appendChild(container);
+      const polys = shallowRef<Polygon[]>([TRIANGLE]);
+      const follow = ref(true);
+      let ctx: ComputedRef<PolySceneContextValue> | null = null;
+      const Probe = defineComponent({
+        setup() {
+          ctx = inject(PolySceneContextKey, null);
+          return () => null;
+        },
+      });
+      const app = createApp({
+        setup() {
+          return () =>
+            h(PolyCamera, {}, {
+              default: () =>
+                h(
+                  PolyScene,
+                  { ...DYNAMIC_SCENE_PROPS, shadow: { followAnimation: follow.value } },
+                  {
+                    default: () => [
+                      h(PolyMesh, { polygons: polys.value, castShadow: true }),
+                      h(Probe),
+                    ],
+                  },
+                ),
+            });
+        },
+      });
+      app.mount(container);
+      await nextTick();
+      await nextTick();
+      const registry = ctx!.value.shadowRegistry;
+      const registeredPolygons = (): Polygon[] => registry!.getEntries()[0]!().polygons;
+      const initialRegistered = registeredPolygons();
+      const deform = (dz: number): Polygon[] => [
+        {
+          ...TRIANGLE,
+          vertices: TRIANGLE.vertices.map(([x, y, z]) => [x, y, z + dz] as Vec3),
+        },
+      ];
+      // Park a trailing bump inside the 80ms window…
+      polys.value = deform(0.1);
+      await nextTick();
+      await nextTick();
+      expect(registeredPolygons()).toBe(initialRegistered);
+      // …then disable followAnimation before the window elapses.
+      follow.value = false;
+      await nextTick();
+      await nextTick();
+      vi.advanceTimersByTime(200);
+      await nextTick();
+      await nextTick();
+      // No bump: the pending trailing emit was cancelled.
+      expect(registeredPolygons()).toBe(initialRegistered);
+      app.unmount();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("fresh-but-equal inline shadow objects keep the scene context identity stable", async () => {
+    // Regression: an inline `:shadow="{...}"` object is a new identity on
+    // every parent render; it used to invalidate the scene context computed —
+    // and every receiver's shadow-emit computed — per render even when no
+    // shadow field changed. The scene now keys shadow identity field-wise.
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const tick = ref(0);
+    let ctx: ComputedRef<PolySceneContextValue> | null = null;
+    const Probe = defineComponent({
+      setup() {
+        ctx = inject(PolySceneContextKey, null);
+        return () => null;
+      },
+    });
+    const app = createApp({
+      setup() {
+        return () => {
+          void tick.value;
+          return h(PolyCamera, {}, {
+            default: () =>
+              h(
+                PolyScene,
+                // INLINE shadow object — fresh-but-equal identity per render.
+                { ...DYNAMIC_SCENE_PROPS, shadow: { followAnimation: true } },
+                {
+                  default: () => [
+                    h(PolyMesh, { polygons: [TRIANGLE], castShadow: true }),
+                    h(Probe),
+                  ],
+                },
+              ),
+          });
+        };
+      },
+    });
+    app.mount(container);
+    await nextTick();
+    await nextTick();
+    const ctx0 = ctx!.value;
+    const shadow0 = ctx0.shadow;
+    tick.value++;
+    await nextTick();
+    await nextTick();
+    // Equal-field shadow objects must not produce a new context value.
+    expect(ctx!.value).toBe(ctx0);
+    expect(ctx!.value.shadow).toBe(shadow0);
+    app.unmount();
+  });
+
   it("--clx/--cly/--clz are set on the scene element in dynamic mode", () => {
     const { container } = mount(DYNAMIC_SCENE_PROPS, { polygons: [TRIANGLE] });
     const sceneEl = container.querySelector(".polycss-scene") as HTMLElement;

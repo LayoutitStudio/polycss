@@ -9,7 +9,10 @@
  */
 import type { SceneContext } from "./sceneContext";
 import { disposeGroundShadow } from "./shadowSvg";
-import { disposeAllReceiverShadowMounts } from "./receiverShadow";
+import {
+  clearCasterGeometryCaches,
+  disposeAllReceiverShadowMounts,
+} from "./receiverShadow";
 import type { MeshEntry } from "./internalTypes";
 
 /**
@@ -41,9 +44,11 @@ export function clearCasterItemsCache(
   if (entry) {
     ctx.casterItemsCache.delete(entry);
     ctx.casterItemsCacheKey.delete(entry);
+    clearCasterGeometryCaches(entry);
   } else {
     ctx.casterItemsCache.clear();
     ctx.casterItemsCacheKey.clear();
+    for (const m of ctx.meshes) clearCasterGeometryCaches(m);
   }
 }
 

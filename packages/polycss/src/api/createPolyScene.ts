@@ -941,6 +941,18 @@ export function createPolyScene(
         if (idx < 0 || idx >= entry.polygons.length) return;
         clearCurrentTriangleFrame();
         entry.voxelSource = undefined;
+        // Shadow caches derive from polygon geometry, but their bust keys
+        // (polygon count + transform + bbox center, or polygon-array
+        // identity) all survive an in-place vertex edit. Mirror setPolygons:
+        // clear the caster/receiver caches explicitly and give the array a
+        // fresh identity so the identity-keyed caches (overlap dedup,
+        // shared-edge map, light occlusion) bust too. Color/data-only edits
+        // skip this — those caches are pure geometry.
+        if ("vertices" in partial && (entry.castShadow || entry.receiveShadow)) {
+          entry.polygons = entry.polygons.slice();
+          clearCasterItemsCache(entry);
+          clearReceiverShadowCache(entry);
+        }
         Object.assign(entry.polygons[idx], partial);
         const partialKeys = Object.keys(partial);
         if (tryUpdatePolygonLeafOnly(ctx, entry, idx, partialKeys)) {

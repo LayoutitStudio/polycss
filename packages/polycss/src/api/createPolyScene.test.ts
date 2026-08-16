@@ -2325,6 +2325,66 @@ describe("createPolyScene", () => {
       }
     });
 
+    it("updatePolygon vertex edits bust the shadow caches so subsequent emits use the moved geometry", () => {
+      // Regression: updatePolygon mutated entry.polygons in place, so the
+      // caster-items / receiver-plane / overlap-dedup / edge-owner caches
+      // (whose bust keys all survive a same-count, same-transform vertex
+      // edit) kept serving the pre-edit geometry to every later shadow emit.
+      scene = makeScene(host, bakedOpts);
+      scene.add(makeParseResult([floor()]), { receiveShadow: true });
+      const caster = scene.add(makeParseResult([backTriangle()]), {
+        castShadow: true,
+        merge: false,
+      });
+      // The path `d` is normalized to the shadow's own bbox, so capture the
+      // SVG transform alongside it — a moved caster shows up in either.
+      const readShadowD = (root: HTMLElement = host): string => {
+        const svg = root.querySelector(".polycss-shadow") as SVGSVGElement | null;
+        const d = svg?.querySelector("path")?.getAttribute("d") ?? "";
+        return d === "" ? "" : `${svg!.style.transform}|${d}`;
+      };
+      const d0 = readShadowD();
+      expect(d0).not.toBe("");
+      // Move ONE vertex so the caster's shape (not just its position) changes.
+      const movedVertices = backTriangle().vertices.map(
+        ([x, y, z], i) => (i === 2 ? [x + 2, y, z] : [x, y, z]) as [number, number, number],
+      );
+      caster.updatePolygon(0, { vertices: movedVertices });
+      // The re-render emit must reflect the moved vertex, not the cached
+      // pre-edit caster items.
+      const d1 = readShadowD();
+      expect(d1).not.toBe("");
+      expect(d1).not.toBe(d0);
+      // A light change after the edit must also project the moved geometry —
+      // byte-identical to a fresh scene built with the moved polygon.
+      const newLight = {
+        direction: [0.1, -0.8, 0.59] as [number, number, number],
+        color: "#ffffff",
+        intensity: 1,
+      };
+      scene.setOptions({ directionalLight: newLight });
+      const d2 = readShadowD();
+      expect(d2).not.toBe("");
+
+      const refHost = document.createElement("div");
+      document.body.appendChild(refHost);
+      try {
+        const refScene = makeScene(refHost, { ...bakedOpts, directionalLight: newLight });
+        try {
+          refScene.add(makeParseResult([floor()]), { receiveShadow: true });
+          refScene.add(
+            makeParseResult([{ ...backTriangle(), vertices: movedVertices }]),
+            { castShadow: true, merge: false },
+          );
+          expect(d2).toBe(readShadowD(refHost));
+        } finally {
+          refScene.destroy();
+        }
+      } finally {
+        refHost.remove();
+      }
+    });
+
     it("clips low-angle shadow path coordinates to the receiver face SVG box", () => {
       // Receiver-face SVGs are sized to the receiver's planar bbox and
       // every projected shadow polygon is clipped against the receiver's

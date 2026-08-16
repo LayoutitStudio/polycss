@@ -325,6 +325,27 @@ function PolySceneInner({
     };
   }, [textureLighting, directionalLight, ambientLight]);
 
+  // Field-wise stable shadow identity. An inline `shadow={{...}}` object is a
+  // fresh identity on every parent render; keying the registration callback
+  // and scene context on it would recreate registerShadowCaster each render,
+  // forcing every PolyMesh caster through an unregister/re-register cycle
+  // that bypasses the followAnimation throttle. Only a real field change
+  // produces a new identity here.
+  const stableShadow = useMemo<PolyShadowOptions | undefined>(
+    () => shadow,
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- identity keyed on the option fields, not the object
+    [
+      shadow?.color,
+      shadow?.opacity,
+      shadow?.lift,
+      shadow?.maxExtend,
+      shadow?.parametric,
+      shadow?.definition,
+      shadow?.style,
+      shadow?.followAnimation,
+    ],
+  );
+
   // Shadow caster registry. PolyMesh children call registerShadowCaster when
   // their castShadow prop or polygon list changes. The scene accumulates the
   // full caster transforms, derives the ground-plane CSS-Z, and mirrors it
@@ -351,9 +372,9 @@ function PolySceneInner({
       }
     }
     if (!Number.isFinite(minWorldZ)) return null;
-    const lift = shadow?.lift ?? POLY_DEFAULT_SHADOW_LIFT;
+    const lift = stableShadow?.lift ?? POLY_DEFAULT_SHADOW_LIFT;
     return (minWorldZ + lift) * BASE_TILE;
-  }, [shadow]);
+  }, [stableShadow]);
 
   const registerShadowCaster = useCallback((meshId: symbol, data: ShadowCasterRegistration | null) => {
     if (data === null) {
@@ -478,7 +499,7 @@ function PolySceneInner({
       textureImageRendering,
       textureBackend,
       textureProjection,
-      shadow,
+      shadow: stableShadow,
       registerShadowCaster,
       registerShadowReceiver,
       shadowCasters: shadowCastersRef.current,
@@ -487,7 +508,7 @@ function PolySceneInner({
       groundCssZ,
       sceneEl,
     }),
-    [textureLighting, directionalLight, pointLights, ambientLight, strategies, seamBleed, textureLeafSizing, textureImageRendering, textureBackend, textureProjection, shadow, registerShadowCaster, registerShadowReceiver, shadowCastersVersion, hasShadowReceiver, groundCssZ, sceneEl],
+    [textureLighting, directionalLight, pointLights, ambientLight, strategies, seamBleed, textureLeafSizing, textureImageRendering, textureBackend, textureProjection, stableShadow, registerShadowCaster, registerShadowReceiver, shadowCastersVersion, hasShadowReceiver, groundCssZ, sceneEl],
   );
 
   return (

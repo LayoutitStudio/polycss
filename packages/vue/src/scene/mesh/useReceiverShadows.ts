@@ -385,6 +385,9 @@ export function useReceiverShadows({
               shadowTrailingTimer = null;
               const pending = pendingShadowPolygons;
               pendingShadowPolygons = null;
+              // Recheck at fire time: followAnimation may have been disabled
+              // while the trailing bump was pending — freeze semantics win.
+              if (!(sceneCtx?.value.shadow?.followAnimation ?? false)) return;
               if (pending) bumpShadowCasterPolygons(pending);
             }, ANIMATION_SHADOW_MS - elapsed);
           }
@@ -399,6 +402,18 @@ export function useReceiverShadows({
       bumpShadowCasterPolygons(polys);
     },
     { immediate: true },
+  );
+  // followAnimation flipped off with a trailing bump still pending: cancel
+  // it eagerly so the frozen pose can't be replaced after the flip.
+  watch(
+    () => sceneCtx?.value.shadow?.followAnimation ?? false,
+    (follow) => {
+      if (!follow && shadowTrailingTimer !== null) {
+        clearTimeout(shadowTrailingTimer);
+        shadowTrailingTimer = null;
+        pendingShadowPolygons = null;
+      }
+    },
   );
   onBeforeUnmount(() => {
     if (shadowTrailingTimer !== null) {

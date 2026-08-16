@@ -196,6 +196,34 @@ export const PolyScene = defineComponent({
 
     const sceneElLocalRef = ref<HTMLElement | null>(null);
 
+    // Field-wise stable shadow identity. An inline `:shadow="{...}"` binding
+    // is a fresh object identity on every parent render; letting it flow into
+    // the context computed would invalidate `sceneCtxValue` — and every
+    // receiver's shadow-emit computed — per render even when nothing changed.
+    // Only a real field change replaces the provided object.
+    let lastShadow: PolyShadowOptions | undefined;
+    let lastShadowKey: string | undefined;
+    const stableShadow = computed<PolyShadowOptions | undefined>(() => {
+      const next = props.shadow;
+      const key = next
+        ? [
+            next.color,
+            next.opacity,
+            next.lift,
+            next.maxExtend,
+            next.parametric,
+            next.definition,
+            next.style,
+            next.followAnimation,
+          ].map((v) => String(v)).join("|")
+        : undefined;
+      if (key !== lastShadowKey) {
+        lastShadowKey = key;
+        lastShadow = next;
+      }
+      return lastShadow;
+    });
+
     // Propagate scene-level rendering options to descendants (PolyMesh /
     // helpers) so they pick up the same dynamic mode + lights as the
     // scene. Without this, a helper PolyMesh would default to baked
@@ -212,7 +240,7 @@ export const PolyScene = defineComponent({
       textureImageRendering: props.textureImageRendering,
       textureBackend: props.textureBackend,
       textureProjection: props.textureProjection,
-      shadow: props.shadow,
+      shadow: stableShadow.value,
       shadowRegistry,
       receiverRegistry,
       groundCssZ: groundCssZ.value,
@@ -414,7 +442,7 @@ export const PolyScene = defineComponent({
         if (groundCssZ.value !== null) groundCssZ.value = null;
         return;
       }
-      const lift = props.shadow?.lift ?? POLY_DEFAULT_SHADOW_LIFT;
+      const lift = stableShadow.value?.lift ?? POLY_DEFAULT_SHADOW_LIFT;
       const next = (minWorldZ + lift) * DEFAULT_TILE;
       if (groundCssZ.value !== next) groundCssZ.value = next;
       if (!el) return;

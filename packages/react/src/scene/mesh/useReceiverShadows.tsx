@@ -128,6 +128,17 @@ export function useReceiverShadows({
   // re-registering. Defined at component top-level via useRef.
   const meshIdRef = useRef<symbol>(Symbol());
   const sceneRegisterShadowCaster = sceneCtx?.registerShadowCaster;
+  // Live views for the trailing timer + lifecycle effect. The registration
+  // callback ref keeps the register/unregister lifecycle keyed on callback
+  // PRESENCE, not identity — a scene re-render that recreates the callback
+  // must not unregister the caster and reset the followAnimation throttle.
+  // The followAnimation ref lets the trailing callback see the CURRENT value
+  // instead of the one captured when the timer was queued.
+  const registerCasterRef = useRef(sceneRegisterShadowCaster);
+  registerCasterRef.current = sceneRegisterShadowCaster;
+  const hasRegisterCaster = !!sceneRegisterShadowCaster;
+  const followAnimationRef = useRef(false);
+  followAnimationRef.current = sceneCtx?.shadow?.followAnimation ?? false;
 
   // Register/unregister as a shadow caster whenever castShadow or polygons /
   // transform change. The full transform is registered so receiver meshes
@@ -162,29 +173,40 @@ export function useReceiverShadows({
   // with a low parametric `definition`). Mirrors vanilla `setPolygons`.
   const shadowCasterRegisteredRef = useRef(false);
   const lastShadowPolyCountRef = useRef(-1);
+  const lastShadowDefinitionRef = useRef<number | undefined>(undefined);
   const lastShadowRegisterAtRef = useRef(0);
   const shadowTrailingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingShadowRegistrationRef = useRef<ShadowCasterRegistration | null>(null);
   useEffect(() => {
-    if (!sceneRegisterShadowCaster || !castShadow) return;
+    if (!hasRegisterCaster || !castShadow) return;
     return () => {
       if (shadowTrailingTimerRef.current !== null) {
         clearTimeout(shadowTrailingTimerRef.current);
         shadowTrailingTimerRef.current = null;
       }
       pendingShadowRegistrationRef.current = null;
-      sceneRegisterShadowCaster(meshIdRef.current, null);
+      registerCasterRef.current?.(meshIdRef.current, null);
       shadowCasterRegisteredRef.current = false;
       lastShadowPolyCountRef.current = -1;
     };
-  }, [sceneRegisterShadowCaster, castShadow]);
+  }, [hasRegisterCaster, castShadow]);
   useEffect(() => {
     if (!sceneRegisterShadowCaster || !castShadow) return;
     const followAnimation = sceneCtx?.shadow?.followAnimation ?? false;
+    // followAnimation flipped off with a trailing emit still pending: cancel
+    // it — the freeze semantics apply from this render on.
+    if (!followAnimation && shadowTrailingTimerRef.current !== null) {
+      clearTimeout(shadowTrailingTimerRef.current);
+      shadowTrailingTimerRef.current = null;
+      pendingShadowRegistrationRef.current = null;
+    }
     const topologyChanged = polygons.length !== lastShadowPolyCountRef.current;
+    // Per-mesh shadowDefinition is carried on the registration, so a change
+    // must re-register promptly — it bypasses both the freeze and the throttle.
+    const definitionChanged = shadowDefinition !== lastShadowDefinitionRef.current;
     // Freeze: a same-topology deform with followAnimation off keeps the last
     // registered pose (no re-emit). No cleanup here, so this never unregisters.
-    if (shadowCasterRegisteredRef.current && !followAnimation && !topologyChanged) return;
+    if (shadowCasterRegisteredRef.current && !followAnimation && !topologyChanged && !definitionChanged) return;
     const registration: ShadowCasterRegistration = {
       polygons,
       position: position ?? [0, 0, 0],
@@ -198,7 +220,7 @@ export function useReceiverShadows({
     // maybeEmitAnimationShadow): inside a window the latest pose is parked and
     // registered once the window elapses, so a paused animation still lands
     // its final pose. First registration and topology changes are immediate.
-    if (shadowCasterRegisteredRef.current && followAnimation && !topologyChanged) {
+    if (shadowCasterRegisteredRef.current && followAnimation && !topologyChanged && !definitionChanged) {
       const now = typeof performance !== "undefined" ? performance.now() : Date.now();
       const elapsed = now - lastShadowRegisterAtRef.current;
       if (elapsed < ANIMATION_SHADOW_MS) {
@@ -208,10 +230,12 @@ export function useReceiverShadows({
             shadowTrailingTimerRef.current = null;
             const pending = pendingShadowRegistrationRef.current;
             pendingShadowRegistrationRef.current = null;
-            if (!pending) return;
+            // Recheck at fire time: followAnimation may have been disabled
+            // while the trailing emit was pending — the freeze semantics win.
+            if (!pending || !followAnimationRef.current) return;
             lastShadowRegisterAtRef.current =
               typeof performance !== "undefined" ? performance.now() : Date.now();
-            sceneRegisterShadowCaster(meshIdRef.current, pending);
+            registerCasterRef.current?.(meshIdRef.current, pending);
           }, ANIMATION_SHADOW_MS - elapsed);
         }
         return;
@@ -223,6 +247,7 @@ export function useReceiverShadows({
     }
     pendingShadowRegistrationRef.current = null;
     lastShadowPolyCountRef.current = polygons.length;
+    lastShadowDefinitionRef.current = shadowDefinition;
     shadowCasterRegisteredRef.current = true;
     lastShadowRegisterAtRef.current =
       typeof performance !== "undefined" ? performance.now() : Date.now();
