@@ -21,15 +21,20 @@ import {
   ref,
 } from "vue";
 import type { PropType } from "vue";
-import { BASE_TILE } from "@layoutit/polycss-core";
-import type { Vec3 } from "@layoutit/polycss-core";
+import {
+  ANIM_DT_CLAMP_MS,
+  ANIM_FRAME_MS,
+  BASE_TILE,
+  WHEEL_IDLE_END_MS,
+  applyOrbit,
+  applyWheelDolly,
+  applyWheelZoom,
+  normalizeWheelDelta,
+} from "@layoutit/polycss-core";
+import type { PolyControlsAnimateOptions, Vec3 } from "@layoutit/polycss-core";
 import { PolyCameraContextKey } from "../camera/context";
 
-export interface PolyControlsAnimateOptions {
-  speed?: number;
-  axis?: "x" | "y";
-  pauseOnInteraction?: boolean;
-}
+export type { PolyControlsAnimateOptions } from "@layoutit/polycss-core";
 
 export interface PolyOrbitControlsCamera {
   rotX: number;
@@ -56,39 +61,11 @@ export interface PolyOrbitControlsProps {
   animate?: false | PolyControlsAnimateOptions;
 }
 
-const WHEEL_IDLE_END_MS = 150;
-const POINTER_DRAG_SPEED = 4;
-const ZOOM_STEP = 0.000513;
-const PINCH_AMP = 10;
-const SCROLL_AMP = 3;
-const ANIM_FRAME_MS = 16.67;
-const ANIM_DT_CLAMP_MS = 50;
 const DEFAULT_ZOOM_MIN = 0.1;
 const DEFAULT_ZOOM_MAX = 10;
 const DEFAULT_DISTANCE_MIN = 0;
 const DEFAULT_DISTANCE_MAX = 5000;
 const DEFAULT_ANIMATE_SPEED = 0.3;
-const DOLLY_STEP = 0.05;
-
-function invertFactor(invert: boolean | number | undefined): number {
-  if (invert === true) return -1;
-  if (invert === undefined || invert === false) return 1;
-  return invert;
-}
-
-function applyOrbit(
-  dx: number, dy: number,
-  rotX: number, rotY: number,
-  invert: boolean | number | undefined,
-): { rotX: number; rotY: number } {
-  const f = invertFactor(invert);
-  const dX = (dx / POINTER_DRAG_SPEED) * f;
-  const dY = (dy / POINTER_DRAG_SPEED) * f;
-  return {
-    rotX: rotX - dY,
-    rotY: (((rotY - dX) % 360) + 360) % 360,
-  };
-}
 
 function applyPanDelta(
   dx: number, dy: number,
@@ -271,22 +248,18 @@ export const PolyOrbitControls = defineComponent({
       const onWheel = (e: WheelEvent): void => {
         if (!props.wheel) return;
         e.preventDefault();
-        const lineFactor = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 100 : 1;
-        let delta = e.deltaY * lineFactor;
-        if (e.ctrlKey) delta *= PINCH_AMP;
-        else delta *= SCROLL_AMP;
+        const delta = normalizeWheelDelta(e.deltaY, e.deltaMode, e.ctrlKey);
         const handle = cameraRef.value;
         if (props.dolly) {
           // Dolly mode: change distance (camera pull-back) instead of zoom.
           const minDist = props.minDistance ?? DEFAULT_DISTANCE_MIN;
           const maxDist = props.maxDistance ?? DEFAULT_DISTANCE_MAX;
-          const nextDist = Math.max(minDist, Math.min(maxDist, handle.state.distance + delta * DOLLY_STEP));
+          const nextDist = applyWheelDolly(handle.state.distance, delta, minDist, maxDist);
           handle.update({ distance: nextDist });
         } else {
-          const factor = Math.exp(-delta * ZOOM_STEP);
           const minZ = props.minZoom ?? DEFAULT_ZOOM_MIN;
           const maxZ = props.maxZoom ?? DEFAULT_ZOOM_MAX;
-          const next = Math.max(minZ, Math.min(maxZ, handle.state.zoom * factor));
+          const next = applyWheelZoom(handle.state.zoom, delta, minZ, maxZ);
           handle.update({ zoom: next });
         }
         applyTransformDirect();

@@ -28,13 +28,40 @@ import {
   type Ref,
 } from "vue";
 import {
+  ALPHA_DRAGGING,
+  ALPHA_HOVER,
+  ALPHA_IDLE,
+  ARROW_SPECS,
+  HEAD_HALF_THICKNESS_RATIO,
+  HEAD_LENGTH_RATIO,
+  PLANE_HALF_SIZE_RATIO,
+  PLANE_OFFSET_RATIO,
+  PLANE_SPECS,
+  RING_HALF_THICKNESS_RATIO,
+  RING_QUAD_OUTER_RATIO,
+  RING_RADIUS_RATIO,
+  RING_SPECS,
+  SCENE_TILE_SIZE,
+  SCREEN_AXIS_DEAD_ZONE_SQ,
+  SHAFT_HALF_THICKNESS_RATIO,
+  WORLD_AXIS_FOR_CSS,
   arrowPolygons,
   eulerXYZFromQuat,
+  gizmoCenterForMesh,
+  gizmoLengthForMesh,
+  isAxisBackFacing,
   planePolygons,
   quatFromAxisAngle,
   quatFromEulerXYZ,
   quatMultiply,
   ringQuadPolygons,
+  screenPlaneDet,
+  snap,
+  solveAxisDragDelta,
+  solvePlaneDragDeltas,
+  unwrapAngleDelta,
+  userAxisLetterOf,
+  withAlpha,
   type Polygon,
   type Vec3,
 } from "@layoutit/polycss-core";
@@ -45,144 +72,6 @@ import {
   type PolyPointerEvent,
 } from "../scene/events";
 import { PolyCameraContextKey } from "../camera";
-
-const COLOR_X = "#ff3653";
-const COLOR_Y = "#8adb00";
-const COLOR_Z = "#2c8fff";
-
-const ALPHA_IDLE = 0.6;
-const ALPHA_HOVER = 0.8;
-const ALPHA_DRAGGING = 1.0;
-
-const SCENE_TILE_SIZE = 50;
-const FALLBACK_SHAFT_LENGTH = 60;
-const SHAFT_LENGTH_RATIO = 0.6;
-const SHAFT_HALF_THICKNESS_RATIO = 0.0125;
-const HEAD_LENGTH_RATIO = 0.15;
-const HEAD_HALF_THICKNESS_RATIO = 0.04;
-const RING_RADIUS_RATIO = 1.0;
-// Thick enough to be an easy click target — matches arrow head half thickness.
-const RING_HALF_THICKNESS_RATIO = 0.02;
-// Outer radius of the ring's quad polygon as a multiple of mid-radius —
-// independent of the visible band thickness, so the click target stays
-// generous even when the ring looks thin.
-const RING_QUAD_OUTER_RATIO = 1.04;
-const PLANE_HALF_SIZE_RATIO = 0.1;
-const PLANE_OFFSET_RATIO = 0.25;
-const SCREEN_AXIS_DEAD_ZONE_SQ = 0.0001;
-
-const WORLD_AXIS_FOR_CSS: Record<0 | 1 | 2, 0 | 1 | 2> = { 0: 1, 1: 0, 2: 2 };
-
-const ARROW_SPECS: Array<{ cssAxis: 0 | 1 | 2; sign: 1 | -1; key: string; color: string }> = [
-  { cssAxis: 0, sign:  1, key:  "x", color: COLOR_X },
-  { cssAxis: 0, sign: -1, key: "-x", color: COLOR_X },
-  { cssAxis: 1, sign:  1, key:  "y", color: COLOR_Y },
-  { cssAxis: 1, sign: -1, key: "-y", color: COLOR_Y },
-  { cssAxis: 2, sign:  1, key:  "z", color: COLOR_Z },
-  { cssAxis: 2, sign: -1, key: "-z", color: COLOR_Z },
-];
-
-const RING_SPECS: Array<{ cssAxis: 0 | 1 | 2; key: string; color: string }> = [
-  { cssAxis: 0, key: "x", color: COLOR_X },
-  { cssAxis: 1, key: "y", color: COLOR_Y },
-  { cssAxis: 2, key: "z", color: COLOR_Z },
-];
-
-// Plane color = perpendicular axis color: XY plane → blue (Z), XZ → green
-// (Y), YZ → red (X).
-const PLANE_SPECS: Array<{
-  perpAxis: 0 | 1 | 2;
-  axisA: 0 | 1 | 2;
-  axisB: 0 | 1 | 2;
-  key: "xy" | "xz" | "yz";
-  color: string;
-}> = [
-  { perpAxis: 2, axisA: 0, axisB: 1, key: "xy", color: COLOR_Z },
-  { perpAxis: 1, axisA: 0, axisB: 2, key: "xz", color: COLOR_Y },
-  { perpAxis: 0, axisA: 1, axisB: 2, key: "yz", color: COLOR_X },
-];
-
-function withAlpha(hex: string, alpha: number): string {
-  const m = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex);
-  if (!m) return hex;
-  const r = parseInt(m[1], 16);
-  const g = parseInt(m[2], 16);
-  const b = parseInt(m[3], 16);
-  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
-}
-
-function snap(v: number, step: number | null | undefined): number {
-  if (!step || step <= 0) return v;
-  return Math.round(v / step) * step;
-}
-
-function userAxisLetterOf(key: string): "x" | "y" | "z" {
-  return key.replace("-", "")[0] as "x" | "y" | "z";
-}
-
-
-/** True when the signed CSS-space axis points AWAY from the viewer after
- *  the scene's rotateZ(rotY) · rotateX(rotX). Mirrors React's helper. */
-function isAxisBackFacing(
-  cssAxis: 0 | 1 | 2,
-  sign: 1 | -1,
-  rotXDeg: number,
-  rotYDeg: number,
-): boolean {
-  const rx = (rotXDeg * Math.PI) / 180;
-  const ry = (rotYDeg * Math.PI) / 180;
-  const a: [number, number, number] = [0, 0, 0];
-  a[cssAxis] = sign;
-  const by = a[0] * Math.sin(ry) + a[1] * Math.cos(ry);
-  const bz = a[2];
-  const cz = by * Math.sin(rx) + bz * Math.cos(rx);
-  return cz < 0;
-}
-
-function gizmoLengthForMesh(polygons: Polygon[]): number {
-  if (polygons.length === 0) return FALLBACK_SHAFT_LENGTH;
-  let minX = Infinity, minY = Infinity, minZ = Infinity;
-  let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
-  for (const poly of polygons) {
-    for (const v of poly.vertices) {
-      if (v[0] < minX) minX = v[0];
-      if (v[0] > maxX) maxX = v[0];
-      if (v[1] < minY) minY = v[1];
-      if (v[1] > maxY) maxY = v[1];
-      if (v[2] < minZ) minZ = v[2];
-      if (v[2] > maxZ) maxZ = v[2];
-    }
-  }
-  if (!Number.isFinite(minX)) return FALLBACK_SHAFT_LENGTH;
-  return Math.max(maxX - minX, maxY - minY, maxZ - minZ) * SCENE_TILE_SIZE * SHAFT_LENGTH_RATIO;
-}
-
-/** Polygon bbox center in scene-CSS pixels, via the standard polycss
- *  world→CSS axis remap (v[1]→x, v[0]→y, v[2]→z). Used to plant the
- *  gizmo wrapper at the mesh's visible center rather than at its
- *  wrapper origin — necessary whenever the mesh's vertices don't sit
- *  on `(0,0,0)` in mesh-local space (e.g. PolyMesh.autoCenter unset). */
-function gizmoCenterForMesh(polygons: Polygon[]): Vec3 {
-  if (polygons.length === 0) return [0, 0, 0];
-  let minX = Infinity, minY = Infinity, minZ = Infinity;
-  let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
-  for (const poly of polygons) {
-    for (const v of poly.vertices) {
-      if (v[0] < minX) minX = v[0];
-      if (v[0] > maxX) maxX = v[0];
-      if (v[1] < minY) minY = v[1];
-      if (v[1] > maxY) maxY = v[1];
-      if (v[2] < minZ) minZ = v[2];
-      if (v[2] > maxZ) maxZ = v[2];
-    }
-  }
-  if (!Number.isFinite(minX)) return [0, 0, 0];
-  return [
-    ((minY + maxY) / 2) * SCENE_TILE_SIZE,
-    ((minX + maxX) / 2) * SCENE_TILE_SIZE,
-    ((minZ + maxZ) / 2) * SCENE_TILE_SIZE,
-  ];
-}
 
 export interface PolyTransformControlsObjectChangeEvent {
   object: PolyMeshHandle;
@@ -251,7 +140,7 @@ function startAxisDrag(opts: AxisDragOptions): void {
   const handleMove = (ev: PointerEvent): void => {
     const dx = ev.clientX - opts.startClientX;
     const dy = ev.clientY - opts.startClientY;
-    let t = (dx * screenAxisX + dy * screenAxisY) / screenAxisLenSq;
+    let t = solveAxisDragDelta(dx, dy, screenAxisX, screenAxisY);
     t = snap(t, opts.translationSnap);
     const newPos: Vec3 = [
       startPos[0] + t * axisVec[0],
@@ -321,7 +210,7 @@ function startPlaneDrag(opts: PlaneDragOptions): void {
   }
   const pA = probe(axisAVec);
   const pB = probe(axisBVec);
-  const det = pA.x * pB.y - pB.x * pA.y;
+  const det = screenPlaneDet(pA, pB);
   if (Math.abs(det) < SCREEN_AXIS_DEAD_ZONE_SQ) return;
 
   const startPos = (opts.target.getPosition() ?? [0, 0, 0]) as Vec3;
@@ -331,10 +220,9 @@ function startPlaneDrag(opts: PlaneDragOptions): void {
   const handleMove = (ev: PointerEvent): void => {
     const dx = ev.clientX - opts.startClientX;
     const dy = ev.clientY - opts.startClientY;
-    let tA = (pB.y * dx - pB.x * dy) / det;
-    let tB = (-pA.y * dx + pA.x * dy) / det;
-    tA = snap(tA, opts.translationSnap);
-    tB = snap(tB, opts.translationSnap);
+    const solved = solvePlaneDragDeltas(dx, dy, pA, pB, det);
+    const tA = snap(solved.tA, opts.translationSnap);
+    const tB = snap(solved.tB, opts.translationSnap);
     const next: Vec3 = [
       startPos[0] + tA * axisAVec[0] + tB * axisBVec[0],
       startPos[1] + tA * axisAVec[1] + tB * axisBVec[1],
@@ -384,10 +272,7 @@ function startRingDrag(opts: RingDragOptions): void {
   opts.onDraggingChanged?.(true);
   const handleMove = (ev: PointerEvent): void => {
     const a = Math.atan2(ev.clientY - centerY, ev.clientX - centerX);
-    let d = a - lastAngle;
-    if (d > Math.PI) d -= 2 * Math.PI;
-    else if (d < -Math.PI) d += 2 * Math.PI;
-    cumulative += d;
+    cumulative += unwrapAngleDelta(a, lastAngle);
     lastAngle = a;
     let degrees = (cumulative * 180) / Math.PI;
     degrees = snap(degrees, opts.rotationSnap);

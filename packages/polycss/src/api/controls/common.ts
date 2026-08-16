@@ -2,37 +2,24 @@
  * Shared types, constants, and utilities for orbit/map controls factories.
  * Not part of the public API surface — use createPolyOrbitControls or
  * createPolyMapControls.
+ *
+ * The pure orbit/pan/zoom/dolly math and the shared numeric tunables live in
+ * `@layoutit/polycss-core` (`controls/orbit`); this module owns the
+ * scene-handle glue (option resolution, listener registry, wheel handler,
+ * rAF animate loop).
  */
 import type { PolySceneHandle } from "../createPolyScene";
-import type { Vec3 } from "@layoutit/polycss-core";
+import {
+  ANIM_DT_CLAMP_MS,
+  ANIM_FRAME_MS,
+  WHEEL_IDLE_END_MS,
+  applyWheelDolly,
+  applyWheelZoom,
+  normalizeWheelDelta,
+} from "@layoutit/polycss-core";
+import type { PolyControlsAnimateOptions, PolyControlsCamera } from "@layoutit/polycss-core";
 
-// ── Wheel idle threshold ──────────────────────────────────────────────────
-// Fires `end` once no new wheel event has arrived for this many milliseconds.
-// Matches Three.js's internal idle threshold.
-export const WHEEL_IDLE_END_MS = 150;
-
-// ── Tunables ──────────────────────────────────────────────────────────────
-export const POINTER_DRAG_SPEED = 4; // px per degree
-export const ZOOM_STEP = 0.000513; // wheel sensitivity
-export const PINCH_AMP = 10; // macOS trackpad pinch amplification
-export const SCROLL_AMP = 3; // two-finger scroll amplification
-export const ANIM_FRAME_MS = 16.67; // 60 Hz reference for dt normalization
-export const ANIM_DT_CLAMP_MS = 50; // cap dt per tick
-export const DOLLY_STEP = 0.05; // CSS pixels per unit wheel delta
-
-// ── Shared animate options ────────────────────────────────────────────────
-export interface PolyControlsAnimateOptions {
-  /**
-   * Rotation rate in degrees per 60 Hz-equivalent frame. The tick is
-   * dt-clamped so 0.3 deg/frame ≈ 18 deg/sec on every refresh rate.
-   * Default: 0.3.
-   */
-  speed?: number;
-  /** Rotation axis. Default: "y" (yaw, rotates around vertical world Z). */
-  axis?: "x" | "y";
-  /** Halt the loop while a pointer drag is in progress. Default: true. */
-  pauseOnInteraction?: boolean;
-}
+export type { PolyControlsAnimateOptions, PolyControlsCamera } from "@layoutit/polycss-core";
 
 // ── Shared base options ───────────────────────────────────────────────────
 export interface PolyControlsBaseOptions {
@@ -61,15 +48,6 @@ export interface PolyControlsBaseOptions {
   maxDistance?: number;
   /** Auto-rotate. Pass false (or omit) to disable. */
   animate?: false | PolyControlsAnimateOptions;
-}
-
-// ── Camera snapshot ───────────────────────────────────────────────────────
-export interface PolyControlsCamera {
-  rotX: number;
-  rotY: number;
-  zoom: number;
-  target: Vec3;
-  distance: number;
 }
 
 export interface PolyControlsChangeEvent {
@@ -159,12 +137,6 @@ export function resolveOptions(
   };
 }
 
-export function invertFactor(invert: boolean | number): number {
-  if (invert === true) return -1;
-  if (invert === false) return 1;
-  return invert;
-}
-
 // ── Event subscription registry ───────────────────────────────────────────
 export function makeListenerRegistry(): {
   changeListeners: PolyControlsListener<PolyControlsChangeEvent>[];
@@ -239,19 +211,13 @@ export function makeWheelHandler(
     const opts = getOpts();
     if (!opts.wheel || isStopped()) return;
     e.preventDefault();
-    const lineFactor = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 100 : 1;
-    let delta = e.deltaY * lineFactor;
-    if (e.ctrlKey) delta *= PINCH_AMP;
-    else delta *= SCROLL_AMP;
+    const delta = normalizeWheelDelta(e.deltaY, e.deltaMode, e.ctrlKey);
     const cameraState = scene.camera.state;
     if (opts.dolly) {
-      const cur = cameraState.distance ?? 0;
-      const next = Math.max(opts.minDistance, Math.min(opts.maxDistance, cur + delta * DOLLY_STEP));
+      const next = applyWheelDolly(cameraState.distance ?? 0, delta, opts.minDistance, opts.maxDistance);
       scene.camera.update({ distance: next });
     } else {
-      const factor = Math.exp(-delta * ZOOM_STEP);
-      const cur = cameraState.zoom ?? 1;
-      const next = Math.max(opts.minZoom, Math.min(opts.maxZoom, cur * factor));
+      const next = applyWheelZoom(cameraState.zoom ?? 1, delta, opts.minZoom, opts.maxZoom);
       scene.camera.update({ zoom: next });
     }
     scene.applyCamera();

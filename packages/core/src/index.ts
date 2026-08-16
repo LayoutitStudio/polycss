@@ -171,6 +171,82 @@ export type {
 export { axesHelperPolygons, boxPolygons, arrowPolygons, ringPolygons, ringQuadPolygons, planePolygons, octahedronPolygons, spherePolygons, tetrahedronPolygons, icosahedronPolygons, dodecahedronPolygons, cylinderPolygons, conePolygons, torusPolygons } from "./helpers";
 export type { AxesHelperOptions, BoxFace, BoxFaceOptions, BoxPolygonsOptions, ArrowPolygonsOptions, RingPolygonsOptions, RingQuadPolygonsOptions, PlanePolygonsOptions, OctahedronPolygonsOptions, SpherePolygonsOptions, TetrahedronPolygonsOptions, IcosahedronPolygonsOptions, DodecahedronPolygonsOptions, CylinderPolygonsOptions, ConePolygonsOptions, TorusPolygonsOptions } from "./helpers";
 
+// ── Controls math (orbit / map, first-person, transform gizmo) ────
+export {
+  WHEEL_IDLE_END_MS,
+  POINTER_DRAG_SPEED,
+  ZOOM_STEP,
+  PINCH_AMP,
+  SCROLL_AMP,
+  ANIM_FRAME_MS,
+  ANIM_DT_CLAMP_MS,
+  DOLLY_STEP,
+  invertFactor,
+  applyOrbit,
+  applyPan,
+  normalizeWheelDelta,
+  applyWheelZoom,
+  applyWheelDolly,
+} from "./controls/orbit";
+export type {
+  PolyControlsAnimateOptions,
+  PolyControlsCamera,
+} from "./controls/orbit";
+export {
+  FORWARD_KEYS,
+  BACK_KEYS,
+  LEFT_KEYS,
+  RIGHT_KEYS,
+  JUMP_KEYS,
+  CROUCH_KEYS,
+  isFpvKey,
+  FIRST_PERSON_DEFAULTS,
+  resolveFirstPersonOptions,
+  forwardDir,
+  stepFirstPersonPhysics,
+} from "./controls/firstPerson";
+export type {
+  PolyFirstPersonControlsOptions,
+  PolyFirstPersonResolvedOptions,
+  PolyFirstPersonPhysicsState,
+  PolyFirstPersonPhysicsResult,
+} from "./controls/firstPerson";
+export {
+  COLOR_X,
+  COLOR_Y,
+  COLOR_Z,
+  ALPHA_IDLE,
+  ALPHA_HOVER,
+  ALPHA_DRAGGING,
+  SCENE_TILE_SIZE,
+  FALLBACK_SHAFT_LENGTH,
+  SHAFT_LENGTH_RATIO,
+  SHAFT_HALF_THICKNESS_RATIO,
+  HEAD_LENGTH_RATIO,
+  HEAD_HALF_THICKNESS_RATIO,
+  RING_RADIUS_RATIO,
+  RING_HALF_THICKNESS_RATIO,
+  RING_QUAD_OUTER_RATIO,
+  PLANE_HALF_SIZE_RATIO,
+  PLANE_OFFSET_RATIO,
+  SCREEN_AXIS_DEAD_ZONE_SQ,
+  WORLD_AXIS_FOR_CSS,
+  ARROW_SPECS,
+  RING_SPECS,
+  PLANE_SPECS,
+  userAxisLetterOf,
+  withAlpha,
+  snap,
+  isAxisBackFacing,
+  gizmoLengthForMesh,
+  gizmoCenterForMesh,
+  solveAxisDragDelta,
+  screenPlaneDet,
+  solvePlaneDragDeltas,
+  unwrapAngleDelta,
+} from "./controls/gizmo";
+export type { GizmoScreenAxis } from "./controls/gizmo";
+
 // ── Shadow ────────────────────────────────────────────────────────
 export {
   BAKED_SHADOW_MIN_UP,

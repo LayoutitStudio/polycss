@@ -21,133 +21,45 @@
  *   tc.destroy();
  */
 import {
+  ALPHA_DRAGGING,
+  ALPHA_HOVER,
+  ALPHA_IDLE,
+  ARROW_SPECS,
+  HEAD_HALF_THICKNESS_RATIO,
+  HEAD_LENGTH_RATIO,
+  PLANE_HALF_SIZE_RATIO,
+  PLANE_OFFSET_RATIO,
+  PLANE_SPECS,
+  RING_QUAD_OUTER_RATIO,
+  RING_HALF_THICKNESS_RATIO,
+  RING_RADIUS_RATIO,
+  RING_SPECS,
+  SCENE_TILE_SIZE,
+  SCREEN_AXIS_DEAD_ZONE_SQ,
+  SHAFT_HALF_THICKNESS_RATIO,
+  WORLD_AXIS_FOR_CSS,
   arrowPolygons,
   eulerXYZFromQuat,
+  gizmoLengthForMesh,
+  isAxisBackFacing,
   planePolygons,
   quatFromAxisAngle,
   quatFromEulerXYZ,
   quatMultiply,
   ringQuadPolygons,
   rotateVec3,
+  screenPlaneDet,
+  snap,
+  solveAxisDragDelta,
+  solvePlaneDragDeltas,
+  unwrapAngleDelta,
+  withAlpha,
 } from "@layoutit/polycss-core";
 import type { Polygon, Vec3 } from "@layoutit/polycss-core";
 import type { PolyMeshHandle, PolySceneHandle } from "./createPolyScene";
 import { pointInMeshElement } from "./meshHitTest";
 
 type Mode = "translate" | "rotate";
-
-const COLOR_X = "#ff3653";
-const COLOR_Y = "#8adb00";
-const COLOR_Z = "#2c8fff";
-
-const SCENE_TILE_SIZE = 50;
-const FALLBACK_SHAFT_LENGTH = 60;
-const SHAFT_LENGTH_RATIO = 0.6;
-const SHAFT_HALF_THICKNESS_RATIO = 0.0125;
-const HEAD_LENGTH_RATIO = 0.15;
-const HEAD_HALF_THICKNESS_RATIO = 0.04;
-const RING_RADIUS_RATIO = 1.0;
-// Visible band half-width relative to the ring's mid-radius. Drives ONLY
-// the CSS mask; the underlying click target (quad bbox) is sized separately
-// by RING_QUAD_OUTER_RATIO so we can show a thin ring without shrinking
-// the hit area. Keep small for a clean look.
-const RING_HALF_THICKNESS_RATIO = 0.02;
-// Outer radius of the ring's quad polygon as a multiple of mid-radius. The
-// quad's bbox IS the click target — generous quad = generous click margin
-// even when the visible band is very thin. 1.04 leaves a 2% margin past the
-// visible ring's outer edge while keeping the previous hit footprint.
-const RING_QUAD_OUTER_RATIO = 1.04;
-// Plane handle proportions, relative to the arrow's shaft length: the square
-// sits at ~25% of the arrow length and is ~20% of the arrow length wide.
-const PLANE_HALF_SIZE_RATIO = 0.1;
-const PLANE_OFFSET_RATIO = 0.25;
-const SCREEN_AXIS_DEAD_ZONE_SQ = 0.0001;
-
-const ALPHA_IDLE = 0.6;
-const ALPHA_HOVER = 0.8;
-const ALPHA_DRAGGING = 1.0;
-
-/** PolyCSS world→CSS remap. Match TransformControls in @layoutit/polycss-react. */
-const WORLD_AXIS_FOR_CSS: Record<0 | 1 | 2, 0 | 1 | 2> = { 0: 1, 1: 0, 2: 2 };
-
-/** Six arrow specs (translate mode). `cssAxis` is the visible direction
- *  the arrow points and the index in `PolyMeshHandle.transform.position`
- *  the drag updates. */
-const ARROW_SPECS: Array<{ cssAxis: 0 | 1 | 2; sign: 1 | -1; key: string; color: string }> = [
-  { cssAxis: 0, sign:  1, key:  "x", color: COLOR_X },
-  { cssAxis: 0, sign: -1, key: "-x", color: COLOR_X },
-  { cssAxis: 1, sign:  1, key:  "y", color: COLOR_Y },
-  { cssAxis: 1, sign: -1, key: "-y", color: COLOR_Y },
-  { cssAxis: 2, sign:  1, key:  "z", color: COLOR_Z },
-  { cssAxis: 2, sign: -1, key: "-z", color: COLOR_Z },
-];
-
-/** Three ring specs (rotate mode). */
-const RING_SPECS: Array<{ cssAxis: 0 | 1 | 2; key: string; color: string }> = [
-  { cssAxis: 0, key: "x", color: COLOR_X },
-  { cssAxis: 1, key: "y", color: COLOR_Y },
-  { cssAxis: 2, key: "z", color: COLOR_Z },
-];
-
-/** Three plane specs (translate mode — planar drag). `perpAxis` is the
- *  axis perpendicular to the plane (the one the drag does NOT move along);
- *  `axisA` and `axisB` are the two axes the drag DOES update. All three
- *  refer to the CSS axes in `PolyMeshHandle.transform.position`. */
-// Each plane handle is colored with the axis it's PERPENDICULAR to — so the
-// XY plane (containing the red+green arrows) reads as the blue (Z) handle,
-// the XZ plane as the green (Y) handle, and the YZ plane as the red (X)
-// handle. Inversion of three.js's convention but maps cleanly to "the axis
-// you can't drag along is this color".
-const PLANE_SPECS: Array<{
-  perpAxis: 0 | 1 | 2;
-  axisA: 0 | 1 | 2;
-  axisB: 0 | 1 | 2;
-  key: "xy" | "xz" | "yz";
-  color: string;
-}> = [
-  { perpAxis: 2, axisA: 0, axisB: 1, key: "xy", color: COLOR_Z },
-  { perpAxis: 1, axisA: 0, axisB: 2, key: "xz", color: COLOR_Y },
-  { perpAxis: 0, axisA: 1, axisB: 2, key: "yz", color: COLOR_X },
-];
-
-/** Returns true when the given signed CSS-space axis points AWAY from the
- *  viewer under the scene's current rotation (rotateZ(rotY) · rotateX(rotX)).
- *  Computed from screen-Z: a CSS-Z component < 0 after applying the scene
- *  rotation = into the screen = back-facing. Used by `<TransformControls>`
- *  to drop the shaft on the back-facing axis of each pair so the gizmo
- *  doesn't double-paint at the gizmo center. */
-function isAxisBackFacing(
-  cssAxis: 0 | 1 | 2,
-  sign: 1 | -1,
-  rotXDeg: number,
-  rotYDeg: number,
-): boolean {
-  const rx = (rotXDeg * Math.PI) / 180;
-  const ry = (rotYDeg * Math.PI) / 180;
-  const a: [number, number, number] = [0, 0, 0];
-  a[cssAxis] = sign;
-  // rotateZ(rotY)
-  const bx = a[0] * Math.cos(ry) - a[1] * Math.sin(ry);
-  const by = a[0] * Math.sin(ry) + a[1] * Math.cos(ry);
-  const bz = a[2];
-  // rotateX(rotX) — only Y and Z change
-  const cz = by * Math.sin(rx) + bz * Math.cos(rx);
-  return cz < 0;
-}
-
-function withAlpha(hex: string, alpha: number): string {
-  const m = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex);
-  if (!m) return hex;
-  const r = parseInt(m[1], 16);
-  const g = parseInt(m[2], 16);
-  const b = parseInt(m[3], 16);
-  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
-}
-
-function snap(value: number, step: number | null | undefined): number {
-  if (!step || step <= 0) return value;
-  return Math.round(value / step) * step;
-}
 
 /** Compute the bbox center of a mesh's polygons in WORLD units, world-axis
  *  order (`+X right, +Y forward, +Z up`). Added to `target.transform.position`
@@ -176,25 +88,6 @@ function bboxCenterWorld(polygons: Polygon[]): Vec3 {
     (minY + maxY) / 2,
     (minZ + maxZ) / 2,
   ];
-}
-
-function gizmoLengthForMesh(polygons: Polygon[]): number {
-  if (polygons.length === 0) return FALLBACK_SHAFT_LENGTH;
-  let minX = Infinity, minY = Infinity, minZ = Infinity;
-  let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
-  for (const poly of polygons) {
-    for (const v of poly.vertices) {
-      if (v[0] < minX) minX = v[0];
-      if (v[0] > maxX) maxX = v[0];
-      if (v[1] < minY) minY = v[1];
-      if (v[1] > maxY) maxY = v[1];
-      if (v[2] < minZ) minZ = v[2];
-      if (v[2] > maxZ) maxZ = v[2];
-    }
-  }
-  if (!Number.isFinite(minX)) return FALLBACK_SHAFT_LENGTH;
-  const extent = Math.max(maxX - minX, maxY - minY, maxZ - minZ);
-  return extent * SCENE_TILE_SIZE * SHAFT_LENGTH_RATIO;
 }
 
 export interface PolyTransformControlsObjectChangeEvent {
@@ -309,7 +202,7 @@ function startAxisDrag(opts: DragOptions): void {
   const handleMove = (ev: PointerEvent): void => {
     const dx = ev.clientX - startClientX;
     const dy = ev.clientY - startClientY;
-    let t = (dx * screenAxisX + dy * screenAxisY) / screenAxisLenSq;
+    let t = solveAxisDragDelta(dx, dy, screenAxisX, screenAxisY);
     t = snap(t, translationSnap);
     onAxisDelta(t, axisVec);
   };
@@ -391,8 +284,7 @@ function startPlaneDrag(opts: PlaneDragOptions): void {
   }
   const pA = probe(axisAVec);
   const pB = probe(axisBVec);
-  // Cramer's rule on the 2x2: [pA.x pB.x; pA.y pB.y] * [tA tB]' = [dx dy]'
-  const det = pA.x * pB.y - pB.x * pA.y;
+  const det = screenPlaneDet(pA, pB);
   if (Math.abs(det) < SCREEN_AXIS_DEAD_ZONE_SQ) return; // plane edge-on to camera
 
   onMouseDown?.();
@@ -401,10 +293,9 @@ function startPlaneDrag(opts: PlaneDragOptions): void {
   const handleMove = (ev: PointerEvent): void => {
     const dx = ev.clientX - startClientX;
     const dy = ev.clientY - startClientY;
-    let tA = (pB.y * dx - pB.x * dy) / det;
-    let tB = (-pA.y * dx + pA.x * dy) / det;
-    tA = snap(tA, translationSnap);
-    tB = snap(tB, translationSnap);
+    const solved = solvePlaneDragDeltas(dx, dy, pA, pB, det);
+    const tA = snap(solved.tA, translationSnap);
+    const tB = snap(solved.tB, translationSnap);
     onPlaneDelta(tA, tB, axisAVec, axisBVec);
   };
   const handleUp = (): void => {
@@ -467,10 +358,7 @@ function startRingDrag(opts: RingDragOptions): void {
 
   const handleMove = (ev: PointerEvent): void => {
     const a = Math.atan2(ev.clientY - centerY, ev.clientX - centerX);
-    let d = a - lastAngle;
-    if (d > Math.PI) d -= 2 * Math.PI;
-    else if (d < -Math.PI) d += 2 * Math.PI;
-    cumulative += d;
+    cumulative += unwrapAngleDelta(a, lastAngle);
     lastAngle = a;
     let degrees = (cumulative * 180) / Math.PI;
     degrees = snap(degrees, rotationSnap);
