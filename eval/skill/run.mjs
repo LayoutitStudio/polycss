@@ -203,10 +203,11 @@ function runAgent(name, track, dir, task, timeoutSeconds) {
     return { ok: true, ms: 0, output: "reference solution copied" };
   }
 
-  const preamble = TRACKS[track].installSkill
-    ? "Read TASK.md in this directory and complete it. You have the PolyCSS skill installed in this workspace — use it."
-    : "Read TASK.md in this directory and complete it.";
-  const prompt = `${preamble}\n\n${taskPrompt(track, task)}`;
+  // IDENTICAL on every track. The intervention used to carry an extra "you
+  // have the skill installed — use it" cue, which measured the files plus an
+  // activation prompt rather than the skill. Whether the agent discovers the
+  // project-local skill IS the intervention; telling it to is not.
+  const prompt = `Read TASK.md in this directory and complete it.\n\n${taskPrompt(track, task)}`;
   const started = Date.now();
   try {
     const output = execFileSync(agent.bin, agent.argv(prompt, dir), {
@@ -264,6 +265,24 @@ function preflight(name, runId, timeoutSeconds = 90) {
   return existsSync(join(dir, "ready.txt"))
     ? { ok: true }
     : { ok: false, reason: "probe returned but wrote no file" };
+}
+
+/** Best-effort CLI version string, so a result can be tied to what produced it. */
+function agentVersion(name) {
+  const agent = AGENTS[name];
+  if (!agent?.bin) return null;
+  try {
+    return execFileSync(agent.bin, ["--version"], {
+      encoding: "utf8",
+      timeout: 20000,
+      killSignal: "SIGKILL",
+      stdio: ["ignore", "pipe", "ignore"],
+    })
+      .trim()
+      .split("\n")[0];
+  } catch {
+    return null;
+  }
 }
 
 const bar = (passed, total) => {
@@ -341,12 +360,17 @@ async function main(argv) {
     `[eval] run ${options.run} — ${agents.length} agent(s) x ${tracks.length} track(s) x ${tasks.length} task(s) = ${agents.length * tracks.length * tasks.length} run(s)\n`,
   );
 
+  const startedAt = new Date();
   const candidates = [];
   const created = new Set();
   let skipped = 0;
 
-  for (const name of agents) {
-    for (const track of orderTracks(tracks)) {
+  // Track is the OUTER loop. With agents outermost, ordering tracks only
+  // isolated the FIRST agent: once Claude's with-skill workspaces existed,
+  // Codex's control could read them at
+  // ../../../track-polycss/claude/<task>/.agents/skills/polycss/SKILL.md.
+  for (const track of orderTracks(tracks)) {
+    for (const name of agents) {
       for (const task of tasks) {
       process.stdout.write(`[eval] ${name} / ${track} / ${task.id} ... `);
       const existingDir = workspaceDir(options.run, track, name, task);
@@ -383,6 +407,7 @@ async function main(argv) {
       );
 
       candidates.push({
+        order: candidates.length,
         key: `${name}__${track}__${task.id}`,
         agent: name,
         trackName: track,
@@ -425,6 +450,7 @@ async function main(argv) {
       }));
     const passed = checks.filter((c) => c.pass).length;
     return {
+      order: candidate.order,
       agent: candidate.agent,
       track: candidate.trackName,
       task: candidate.task.id,
@@ -482,7 +508,33 @@ async function main(argv) {
   }
 
   if (options.json) {
-    writeFileSync(resolve(options.json), `${JSON.stringify({ rows }, null, 2)}\n`);
+    // Rows alone cannot be audited. Record what produced them.
+    const provenance = {
+      runId: options.run,
+      commit: (() => {
+        try {
+          return execFileSync("git", ["rev-parse", "HEAD"], {
+            cwd: repoRoot,
+            encoding: "utf8",
+          }).trim();
+        } catch {
+          return null;
+        }
+      })(),
+      startedAt: startedAt.toISOString(),
+      finishedAt: new Date().toISOString(),
+      agents,
+      tracks,
+      tasks: tasks.map((t) => t.id),
+      timeoutSeconds: options.timeout,
+      settleMs: options.settle,
+      reuse: options.reuse,
+      trackOrder: orderTracks(tracks),
+      agentVersions: Object.fromEntries(
+        agents.map((name) => [name, agentVersion(name)]),
+      ),
+    };
+    writeFileSync(resolve(options.json), `${JSON.stringify({ provenance, rows }, null, 2)}\n`);
     console.log(`[eval] wrote ${options.json}`);
   }
   if (!options.keep) {
