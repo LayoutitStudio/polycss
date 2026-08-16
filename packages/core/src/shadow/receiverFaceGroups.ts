@@ -9,7 +9,7 @@
  * other. Renderers wrap the pure-data output with their own DOM mounting.
  */
 import { BASE_TILE } from "../camera/camera";
-import { convexHull2D, ensureCcw2D } from "./projection";
+import { convexHull2D, ensureCcw2D, polygonSignedArea2D } from "./projection";
 import type { Polygon, Vec3 } from "../types";
 
 /**
@@ -26,6 +26,16 @@ export type ReceiverPlaneGroup = {
   v: Vec3;       // in-plane v basis (= n × u)
   outlineUv: Array<[number, number]>;  // CCW convex hull of group's (u,v) coords (Minkowski-expanded)
   memberPolysUv: Array<Array<[number, number]>>;
+  /** Parallel to `memberPolysUv` (same members, same rotation/winding, same
+   *  edge indices): each member's TRUE world-space vertices, before the
+   *  projection onto this group's plane. Imported architecture routinely
+   *  carries non-planar quads — the castle has quads whose vertices sit ~0.3
+   *  CSS px off their own group plane — and projecting to (u, v) then lifting
+   *  back snaps those vertices onto the plane. Two groups snap the SAME shared
+   *  vertex to two different points, which pushes an exactly-shared crease edge
+   *  past `RECEIVER_EDGE_PERP_EPS` and makes the crease undetectable. Crease
+   *  matching therefore runs on these unsnapped positions. */
+  memberPolysWorld: Vec3[][];
   memberPolyIndices: number[];
   /** Parallel to `memberPolysUv`: for each member, the CCW edge indices
    *  (edge i = point i → point i+1 of the stored CCW member polygon) that
@@ -171,7 +181,14 @@ export function expandConvexHullOutward(
  *  Adjacent receiver faces sharing an edge each expand by this amount, so the
  *  two shadows overlap by ~2×EXPAND at the corner — eliminating the sub-pixel
  *  light strip that used to appear where two wall faces meet. 0.5 CSS px stays
- *  sub-pixel at typical zoom. */
+ *  sub-pixel at typical zoom.
+ *
+ *  This value also sizes each face plane's `minU/minV/width/height/matrixCss`,
+ *  so it is deliberately NOT raised to `SHADOW_CLIP_SEAM_BLEED` even though the
+ *  shadow pre-clip would otherwise cap the per-edge bleed at it: that would
+ *  shift emitted geometry on multi-light and textured receivers, which get no
+ *  crease bleed at all. `computeReceiverShadowFaces` instead widens its own
+ *  clip copy by the shortfall, and only on the crease-bleed-eligible path. */
 export const RECEIVER_OUTLINE_EXPAND = 0.5;
 
 /** Plane-grouping tolerances. dot-product > 0.999 (~2.5° angular) catches
@@ -641,9 +658,11 @@ export function groupReceiverFaceGroups(
     const { O, n, u, v } = rep;
     const uvs: Array<[number, number]> = [];
     const memberPolysUv: Array<Array<[number, number]>> = [];
+    const memberPolysWorld: Vec3[][] = [];
     const memberPolyIndices: number[] = [];
     for (const fp of faces) {
       const polyUv: Array<[number, number]> = [];
+      const polyWorld: Vec3[] = [];
       for (const vert of fp.face.vertices) {
         const w = worldCss(vert, rpos);
         const dx = w[0] - O[0];
@@ -655,9 +674,15 @@ export function groupReceiverFaceGroups(
         ];
         uvs.push(pt);
         polyUv.push(pt);
+        polyWorld.push(w);
       }
       if (polyUv.length >= 3) {
+        // `ensureCcw2D` may reverse the (u, v) list; the world list has to take
+        // the SAME reversal or edge index i would name different edges in the
+        // two arrays.
+        const flip = polygonSignedArea2D(polyUv) < 0;
         memberPolysUv.push(ensureCcw2D(polyUv));
+        memberPolysWorld.push(flip ? polyWorld.reverse() : polyWorld);
         memberPolyIndices.push(fp.polyIndex);
       }
     }
@@ -666,7 +691,10 @@ export function groupReceiverFaceGroups(
     if (hull.length < 3) return;
     const outlineUv = expandConvexHullOutward(ensureCcw2D(hull), RECEIVER_OUTLINE_EXPAND);
     const memberSharedEdges = detectMemberSharedEdges(memberPolysUv);
-    out.push({ O, n, u, v, outlineUv, memberPolysUv, memberPolyIndices, memberSharedEdges });
+    out.push({
+      O, n, u, v, outlineUv,
+      memberPolysUv, memberPolysWorld, memberPolyIndices, memberSharedEdges,
+    });
   }
   return out;
 }

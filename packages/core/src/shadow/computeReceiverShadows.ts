@@ -22,9 +22,11 @@ import { rotateVec3InWrapperCssFrame } from "../math/rotation";
 import { clipPolygonToConvex2D } from "./clipping";
 import { ensureCcw2D } from "./projection";
 import {
+  expandConvexHullOutward,
   groupReceiverFaceGroups,
   meshScaleVec3,
   RECEIVER_EDGE_PERP_EPS,
+  RECEIVER_OUTLINE_EXPAND,
   spatialEdge,
   spatialEdgeBoundsOverlap,
   spatialEdgesShareLine,
@@ -55,11 +57,11 @@ const SILHOUETTE_MIN_POLYS = 40;
 
 /**
  * Outward overscan (CSS px on the receiver plane — UV units) applied to a
- * member polygon's clip outline along its SHARED edges only, before shadow
- * geometry is clipped against it. Exactly-abutting clipped subpaths inside
- * one compound path don't sum to full coverage under SVG antialiasing, so
- * interior member seams showed a hairline light strip — the same artifact
- * class the atlas seam bleed solves for solid leaves. Non-shared edges get
+ * member polygon's clip outline along its SHARED and CREASE edges only, before
+ * shadow geometry is clipped against it. Exactly-abutting clipped subpaths
+ * don't sum to full coverage under SVG antialiasing, so member seams and
+ * creases showed a hairline light strip — the same artifact class the atlas
+ * seam bleed solves for solid leaves. Edges with no neighbouring surface get
  * zero expansion so the shadow never leaks past the face-group boundary.
  *
  * Fixed constant: the scene `seamBleed` option does not flow into the
@@ -67,6 +69,20 @@ const SILHOUETTE_MIN_POLYS = 40;
  * and threading it through all three renderers is out of scope here.
  */
 export const SHADOW_CLIP_SEAM_BLEED = 0.75;
+
+/**
+ * How much wider than `RECEIVER_OUTLINE_EXPAND` the shadow pre-clip has to be
+ * so it never caps the per-edge member bleed. The pre-clip runs BEFORE the
+ * per-member clips, so at the stored 0.5 px outline a crease sitting on the
+ * group hull (91% of the castle's) kept only 0.5 px of its granted 0.75 px.
+ * Applied ONLY where crease bleed is active, because the stored outline also
+ * sizes the face plane's matrix and box — widening that unconditionally moves
+ * emitted geometry on multi-light and textured receivers, which get no crease
+ * bleed at all. The group hull is not the surface boundary (the member clips
+ * are, and they still bound every edge), so widening the clip copy cannot push
+ * shadow past a member outline.
+ */
+const CLIP_OUTLINE_EXTRA = Math.max(0, SHADOW_CLIP_SEAM_BLEED - RECEIVER_OUTLINE_EXPAND);
 
 /**
  * Per-receiver cached face geometry. One record per coplanar face group:
@@ -86,6 +102,11 @@ export interface ReceiverFacePlane {
   v: Vec3;
   outlineUv: Array<[number, number]>;
   memberPolysUv: Array<Array<[number, number]>>;
+  /** Parallel to `memberPolysUv`: each member's unsnapped world-space vertices
+   *  (see `ReceiverPlaneGroup.memberPolysWorld`). Crease matching reads these
+   *  rather than lifting (u, v) back to 3D, which would snap non-planar
+   *  members onto their group plane and hide real creases. */
+  memberPolysWorld: Vec3[][];
   memberPolyIndices: number[];
   /** Parallel to `memberPolysUv`: CCW edge indices shared with another member
    *  of the same group (see `ReceiverPlaneGroup.memberSharedEdges`). Drives
@@ -428,7 +449,10 @@ export function prepareReceiverFacePlanes(
     : baseWorldCss;
   const surfaces = groupReceiverFaceGroups(polygons, position, worldCss, dedupDrop);
   let planes: ReceiverFacePlane[] = surfaces.map((group, faceIndex): ReceiverFacePlane => {
-    const { O, n, u, v, outlineUv, memberPolysUv, memberPolyIndices, memberSharedEdges } = group;
+    const {
+      O, n, u, v, outlineUv,
+      memberPolysUv, memberPolysWorld, memberPolyIndices, memberSharedEdges,
+    } = group;
     let minU = Infinity, minV = Infinity, maxU = -Infinity, maxV = -Infinity;
     for (const pt of outlineUv) {
       if (pt[0] < minU) minU = pt[0];
@@ -450,7 +474,8 @@ export function prepareReceiverFacePlanes(
     ];
     const matrixCss = `matrix3d(${m.map((x) => x.toFixed(4)).join(",")})`;
     return {
-      O, n, u, v, outlineUv, memberPolysUv, memberPolyIndices, memberSharedEdges,
+      O, n, u, v, outlineUv,
+      memberPolysUv, memberPolysWorld, memberPolyIndices, memberSharedEdges,
       memberCreaseEdges: memberPolysUv.map(() => undefined),
       minU, minV, width, height, matrixCss, faceIndex, lift,
     };
@@ -517,43 +542,45 @@ export function prepareReceiverFacePlanes(
  * vs wall — and each group's shadow SVG stops exactly at the crease with an
  * antialiased edge, so two abutting layers leave a pale hairline.
  *
- * Members are stored in per-plane (u, v); lifting them back to world space
- * (`O + u·uᵤ + v·uᵥ`) is exact, since they were projected from world onto that
- * plane. Two passes mirroring `detectMemberSharedEdges`: an exact quantized
+ * Matching runs on `memberPolysWorld` — the members' TRUE world vertices — not
+ * on the (u, v) outlines lifted back to 3D. That lift is exact only for members
+ * that are perfectly coplanar with their group plane, and imported architecture
+ * is routinely not: the castle has quads with vertices ~0.3 CSS px off their
+ * own plane. Projecting drops that offset, so each of two groups snaps the SAME
+ * shared vertex to a different point, moving an exactly-shared crease edge
+ * further apart than `RECEIVER_EDGE_PERP_EPS` (0.25) allows — and the crease
+ * silently vanished, leaving the pale hairline it exists to close.
+ *
+ * Two passes mirroring `detectMemberSharedEdges`: an exact quantized
  * endpoint-pair hash, then a collinear-overlap pass over a uniform spatial
  * hash for T-junctions where a crease neighbour covers only part of the edge.
- * Edges already in `memberSharedEdges` are excluded up front — they are
- * interior to their group and already bled, so a crease mark could not change
- * their clip expansion. The 2D
- * `planarEdgesShareLine` predicate cannot be reused here because crease
- * neighbours are by definition not coplanar — `spatialEdgesShareLine` is its
- * world-space sibling with the same tolerances.
+ * Edges already in `memberSharedEdges` stay in the candidate pool but are
+ * pre-marked: marking them again could not change their own clip expansion
+ * (both sets union into one), yet they are still the only neighbour some
+ * crease edge on another plane has, so dropping them outright hid those
+ * creases. The 2D `planarEdgesShareLine` predicate cannot be reused here
+ * because crease neighbours are by definition not coplanar —
+ * `spatialEdgesShareLine` is its world-space sibling with the same tolerances.
  *
  * Runs AFTER the occlusion cull so hidden interior planes cannot mark a
  * visible plane's edge as a crease.
  */
 function fillCrossGroupCreaseEdges(planes: ReceiverFacePlane[]): void {
   if (planes.length < 2) return;
-  type Ref = SpatialEdge & { plane: number; member: number; edge: number };
+  type Ref = SpatialEdge & { plane: number; member: number; edge: number; pre: boolean };
   const refs: Ref[] = [];
   for (let pi = 0; pi < planes.length; pi++) {
     const plane = planes[pi]!;
-    const { O, u, v } = plane;
-    for (let mi = 0; mi < plane.memberPolysUv.length; mi++) {
-      const poly = plane.memberPolysUv[mi]!;
-      if (poly.length < 3) continue;
+    for (let mi = 0; mi < plane.memberPolysWorld.length; mi++) {
+      const world = plane.memberPolysWorld[mi]!;
+      if (world.length < 3) continue;
       const shared = plane.memberSharedEdges[mi];
-      const world: Vec3[] = poly.map(([pu, pv]) => [
-        O[0] + pu * u[0] + pv * v[0],
-        O[1] + pu * u[1] + pv * v[1],
-        O[2] + pu * u[2] + pv * v[2],
-      ]);
-      for (let e = 0; e < poly.length; e++) {
-        // Already bled as a within-group seam — adding it to the crease set
-        // could not change the clip expansion, so keep it out of the sweep.
-        if (shared?.has(e)) continue;
-        const built = spatialEdge(world[e]!, world[(e + 1) % poly.length]!);
-        if (built) refs.push({ ...built, plane: pi, member: mi, edge: e });
+      for (let e = 0; e < world.length; e++) {
+        const built = spatialEdge(world[e]!, world[(e + 1) % world.length]!);
+        // `pre` = already bled as a within-group seam. Such an edge needs no
+        // crease mark of its own, but must stay a candidate so it can supply
+        // the neighbour that marks a crease edge on another plane.
+        if (built) refs.push({ ...built, plane: pi, member: mi, edge: e, pre: !!shared?.has(e) });
       }
     }
   }
@@ -563,12 +590,14 @@ function fillCrossGroupCreaseEdges(planes: ReceiverFacePlane[]): void {
     p.memberPolysUv.map(() => undefined),
   );
   const mark = (r: Ref): void => {
+    if (r.pre) return;
     const perPlane = marked[r.plane]!;
     let set = perPlane[r.member];
     if (!set) { set = new Set(); perPlane[r.member] = set; }
     set.add(r.edge);
   };
-  const isMarked = (r: Ref): boolean => !!marked[r.plane]![r.member]?.has(r.edge);
+  const isMarked = (r: Ref): boolean =>
+    r.pre || !!marked[r.plane]![r.member]?.has(r.edge);
 
   const QUANT = 1000;
   const ptKey = (x: number, y: number, z: number): string =>
@@ -1016,9 +1045,6 @@ export function computeReceiverShadowFaces<T = unknown>(
     };
     const clippedByCaster = new Map<T, PerCasterClip>();
     let totalClipped = 0;
-    const fMinU = minU, fMinV = minV;
-    const fMaxU = group.minU + width;
-    const fMaxV = group.minV + height;
 
     // Per-plane shadow-reach rect: union of all casters' perpendicular
     // footprints on this receiver face in (u,v), expanded by maxExtend.
@@ -1090,6 +1116,20 @@ export function computeReceiverShadowFaces<T = unknown>(
     // silhouette edges (no neighbour at all) are never in either set, so the
     // shadow can never be pushed off the model's outline.
     const applyCreaseBleed = creaseBleed === true && preblendEligible;
+    // Widen the PRE-CLIP copy of the group hull so it cannot cap a bled member
+    // edge (see CLIP_OUTLINE_EXTRA). Only on the crease-bleed path: everywhere
+    // else the stored outline must be used verbatim or multi-light and textured
+    // receivers would shift. The stored `outlineUv` — and therefore the face
+    // plane's box and matrix — is never touched either way.
+    const clipOutlineUv = applyCreaseBleed && CLIP_OUTLINE_EXTRA > 0
+      ? expandConvexHullOutward(outlineUv, CLIP_OUTLINE_EXTRA)
+      : outlineUv;
+    const clipPad = clipOutlineUv === outlineUv ? 0 : CLIP_OUTLINE_EXTRA;
+    // Projection prefilter bounds. Padded with the clip widening so a caster
+    // whose footprint only reaches into the bled margin is not rejected here.
+    const fMinU = minU - clipPad, fMinV = minV - clipPad;
+    const fMaxU = group.minU + width + clipPad;
+    const fMaxV = group.minV + height + clipPad;
     const memberClipsUv: Array<Array<[number, number]>> = group.memberPolysUv.map(
       (memberPoly, mi) => {
         const ccw = ensureCcw2D(memberPoly);
@@ -1168,7 +1208,7 @@ export function computeReceiverShadowFaces<T = unknown>(
             ? clipPolygonToConvex2D(subjectCcw, reachRect)
             : subjectCcw;
           if (reachClipped.length < 3) continue;
-          const clip = clipPolygonToConvex2D(reachClipped, outlineUv);
+          const clip = clipPolygonToConvex2D(reachClipped, clipOutlineUv);
           if (clip.length < 3) continue;
           let bucket: { id: T; verts: Vec2[][]; subPolygonIndices: number[] } | undefined;
           for (const memberClipPoly of memberClipsUv) {
@@ -1295,7 +1335,7 @@ export function computeReceiverShadowFaces<T = unknown>(
             ? clipPolygonToConvex2D(subjectCcw, reachRect)
             : subjectCcw;
           if (reachClipped.length < 3) continue;
-          const clip = clipPolygonToConvex2D(reachClipped, outlineUv);
+          const clip = clipPolygonToConvex2D(reachClipped, clipOutlineUv);
           if (clip.length < 3) continue;
           // Clip the projected shadow against each MEMBER polygon of the
           // receiver face group, not just the group's outer outline. The
@@ -1426,10 +1466,10 @@ export function computeReceiverShadowFaces<T = unknown>(
     shMaxV = Math.ceil(shMaxV + 1);
     // Clamp the tight bbox to the face outline so we never extend the SVG
     // past the receiver surface (would let a stray pixel render off-face).
-    if (shMinU < minU) shMinU = minU;
-    if (shMinV < minV) shMinV = minV;
-    if (shMaxU > minU + width) shMaxU = minU + width;
-    if (shMaxV > minV + height) shMaxV = minV + height;
+    if (shMinU < minU - clipPad) shMinU = minU - clipPad;
+    if (shMinV < minV - clipPad) shMinV = minV - clipPad;
+    if (shMaxU > minU + width + clipPad) shMaxU = minU + width + clipPad;
+    if (shMaxV > minV + height + clipPad) shMaxV = minV + height + clipPad;
     const tightW = shMaxU - shMinU;
     const tightH = shMaxV - shMinV;
     if (!(tightW > 0) || !(tightH > 0)) continue;

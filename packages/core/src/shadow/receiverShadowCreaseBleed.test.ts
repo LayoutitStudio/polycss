@@ -307,3 +307,49 @@ describe("opaque pre-blend", () => {
     }
   });
 });
+
+// The crease detector's input is `memberPolysWorld` (true world vertices), not
+// the (u, v) member outline lifted back to 3D. Lifting is exact only when a
+// member is perfectly coplanar with its group plane; imported architecture is
+// routinely not, and the projection then snaps the SAME shared vertex to two
+// different points in the two groups. On the bench castle that displaced
+// exactly-shared crease endpoints by ~0.3 CSS px — past RECEIVER_EDGE_PERP_EPS
+// (0.25) — so 272 real creases went undetected and painted pale hairlines.
+describe("crease detection survives a non-planar member quad", () => {
+  // A wall quad whose two top vertices sit slightly off its own best-fit
+  // plane, sharing its bottom edge exactly with the floor quad below.
+  const OFF = 0.012; // world units ≈ 0.6 CSS px, ≳ the 0.25 px predicate slack
+  const skewWall: Polygon = {
+    vertices: [[-2, 2, 0], [2, 2, 0], [2, 2 + OFF, 3], [-2, 2 - OFF, 3]],
+    color: "#888888",
+  };
+
+  it("marks the shared bottom edge as a crease on both members", () => {
+    const planes = prepareReceiverFacePlanes(
+      [floor, skewWall], [0, 0, 0], 1, new Set(), 0.05, null,
+    );
+    // The quad really is non-planar: its group projection would move vertices.
+    const wallPlane = planes.find((p) => p.memberPolyIndices.includes(1))!;
+    const { O, n } = wallPlane;
+    const offsets = wallPlane.memberPolysWorld[0]!.map(
+      (w) => (w[0] - O[0]) * n[0] + (w[1] - O[1]) * n[1] + (w[2] - O[2]) * n[2],
+    );
+    expect(Math.max(...offsets.map(Math.abs))).toBeGreaterThan(0.25);
+
+    // Every plane must have found the crease it shares with the other plane.
+    for (const plane of planes) {
+      const marked = plane.memberCreaseEdges.some((s) => (s?.size ?? 0) > 0);
+      expect(marked).toBe(true);
+    }
+  });
+
+  it("bleeds that crease, growing the emitted shadow area", () => {
+    const bled = specAreas([floor, skewWall], { creaseBleed: true });
+    const plain = specAreas([floor, skewWall], { creaseBleed: false });
+    let grew = 0;
+    for (const [faceIndex, area] of bled) {
+      if (area > (plain.get(faceIndex) ?? 0) + 1e-6) grew++;
+    }
+    expect(grew).toBeGreaterThan(0);
+  });
+});
