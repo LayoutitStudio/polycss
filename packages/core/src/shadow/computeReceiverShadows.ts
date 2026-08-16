@@ -15,6 +15,8 @@
 import { BASE_TILE } from "../camera/camera";
 import { normalFacesCamera, type CameraCullRotation } from "../cull/cameraBackfaceCulling";
 import { shadePolygon } from "../atlas/paintDefaults";
+import { safePlanSeamBleedAmount } from "../atlas/edgeRepair";
+import { offsetConvexPolygonPointsByEdgeAmounts } from "../atlas/solidTriangle";
 import { parseHexColor } from "../color/color";
 import { rotateVec3InWrapperCssFrame } from "../math/rotation";
 import { clipPolygonToConvex2D } from "./clipping";
@@ -47,6 +49,21 @@ import type {
 const SILHOUETTE_MIN_POLYS = 40;
 
 /**
+ * Outward overscan (CSS px on the receiver plane — UV units) applied to a
+ * member polygon's clip outline along its SHARED edges only, before shadow
+ * geometry is clipped against it. Exactly-abutting clipped subpaths inside
+ * one compound path don't sum to full coverage under SVG antialiasing, so
+ * interior member seams showed a hairline light strip — the same artifact
+ * class the atlas seam bleed solves for solid leaves. Non-shared edges get
+ * zero expansion so the shadow never leaks past the face-group boundary.
+ *
+ * Fixed constant: the scene `seamBleed` option does not flow into the
+ * shadow pipeline (`shadow` options carry only color/opacity/maxExtend),
+ * and threading it through all three renderers is out of scope here.
+ */
+export const SHADOW_CLIP_SEAM_BLEED = 0.75;
+
+/**
  * Per-receiver cached face geometry. One record per coplanar face group:
  * plane (O, n, u, v), outline polygon (Sutherland-Hodgman clip), bbox in
  * (u, v) for SVG sizing, and the pre-stringified matrix3d transform that
@@ -65,6 +82,10 @@ export interface ReceiverFacePlane {
   outlineUv: Array<[number, number]>;
   memberPolysUv: Array<Array<[number, number]>>;
   memberPolyIndices: number[];
+  /** Parallel to `memberPolysUv`: CCW edge indices shared with another member
+   *  of the same group (see `ReceiverPlaneGroup.memberSharedEdges`). Drives
+   *  the member-clip seam bleed. */
+  memberSharedEdges: Array<ReadonlySet<number> | undefined>;
   minU: number;
   minV: number;
   width: number;
@@ -386,7 +407,7 @@ export function prepareReceiverFacePlanes(
     : baseWorldCss;
   const surfaces = groupReceiverFaceGroups(polygons, position, worldCss, dedupDrop);
   let planes: ReceiverFacePlane[] = surfaces.map((group, faceIndex): ReceiverFacePlane => {
-    const { O, n, u, v, outlineUv, memberPolysUv, memberPolyIndices } = group;
+    const { O, n, u, v, outlineUv, memberPolysUv, memberPolyIndices, memberSharedEdges } = group;
     let minU = Infinity, minV = Infinity, maxU = -Infinity, maxV = -Infinity;
     for (const pt of outlineUv) {
       if (pt[0] < minU) minU = pt[0];
@@ -408,7 +429,7 @@ export function prepareReceiverFacePlanes(
     ];
     const matrixCss = `matrix3d(${m.map((x) => x.toFixed(4)).join(",")})`;
     return {
-      O, n, u, v, outlineUv, memberPolysUv, memberPolyIndices,
+      O, n, u, v, outlineUv, memberPolysUv, memberPolyIndices, memberSharedEdges,
       minU, minV, width, height, matrixCss, faceIndex, lift,
     };
   });
@@ -837,6 +858,39 @@ export function computeReceiverShadowFaces<T = unknown>(
     // mesh sit a few degrees apart (culled as sub-pixel slivers); a faceted
     // occluder across a hard edge is far more angled (kept as a real shadow).
     const SEAM_COPLANAR_TOL = 0.94;
+    // Member clip polygons with seam bleed: each member's CCW outline is
+    // expanded outward by SHADOW_CLIP_SEAM_BLEED along the edges it SHARES
+    // with another member of this group (non-shared edges stay put), so the
+    // clipped shadow subpaths of abutting members overlap across the seam
+    // instead of leaving a hairline light strip under SVG antialiasing.
+    // Overlapping pieces land in the same nonzero compound path, so they
+    // cannot double-darken. `safePlanSeamBleedAmount` fits each edge's
+    // amount to the polygon (tiny/degenerate members fall back to 0), and
+    // `offsetConvexPolygonPointsByEdgeAmounts` returns the input unchanged
+    // for non-convex/degenerate outlines — the unexpanded member is the
+    // fallback in every failure mode.
+    const memberClipsUv: Array<Array<[number, number]>> = group.memberPolysUv.map(
+      (memberPoly, mi) => {
+        const ccw = ensureCcw2D(memberPoly);
+        const shared = group.memberSharedEdges[mi];
+        if (!shared || shared.size === 0 || ccw.length < 3) return ccw;
+        const flat: number[] = [];
+        for (const p of ccw) flat.push(p[0], p[1]);
+        const amounts = ccw.map((_, e) =>
+          shared.has(e) ? safePlanSeamBleedAmount(flat, e, SHADOW_CLIP_SEAM_BLEED) : 0,
+        );
+        let any = false;
+        for (const a of amounts) if (a > 0) { any = true; break; }
+        if (!any) return ccw;
+        const expanded = offsetConvexPolygonPointsByEdgeAmounts(flat, amounts);
+        if (expanded === flat || expanded.length !== flat.length) return ccw;
+        const out2: Array<[number, number]> = [];
+        for (let i = 0; i < expanded.length; i += 2) {
+          out2.push([expanded[i]!, expanded[i + 1]!]);
+        }
+        return out2;
+      },
+    );
     for (let casterIdx = 0; casterIdx < casters.length; casterIdx++) {
       const casterEntry = casters[casterIdx]!;
       const sharedEdgeMap = casterEntry.selfShadowEdgeMap;
@@ -891,8 +945,8 @@ export function computeReceiverShadowFaces<T = unknown>(
           const clip = clipPolygonToConvex2D(reachClipped, outlineUv);
           if (clip.length < 3) continue;
           let bucket: { id: T; verts: Vec2[][]; subPolygonIndices: number[] } | undefined;
-          for (const memberPoly of group.memberPolysUv) {
-            const memberClip = clipPolygonToConvex2D(clip, ensureCcw2D(memberPoly as Vec2[]));
+          for (const memberClipPoly of memberClipsUv) {
+            const memberClip = clipPolygonToConvex2D(clip, memberClipPoly);
             if (memberClip.length < 3) continue;
             if (!bucket) {
               bucket = clippedByCaster.get(casterEntry.id);
@@ -1035,8 +1089,8 @@ export function computeReceiverShadowFaces<T = unknown>(
           // cull onto each member-clip lets real thin shadows through
           // while still discarding tiny-area / extreme-aspect noise.
           let bucket: { id: T; verts: Vec2[][]; subPolygonIndices: number[] } | undefined;
-          for (const memberPoly of group.memberPolysUv) {
-            const memberClip = clipPolygonToConvex2D(clip, ensureCcw2D(memberPoly as Vec2[]));
+          for (const memberClipPoly of memberClipsUv) {
+            const memberClip = clipPolygonToConvex2D(clip, memberClipPoly);
             if (memberClip.length < 3) continue;
             if (sharedEdgeMap) {
               let twiceArea = 0;

@@ -27,6 +27,14 @@ export type ReceiverPlaneGroup = {
   outlineUv: Array<[number, number]>;  // CCW convex hull of group's (u,v) coords (Minkowski-expanded)
   memberPolysUv: Array<Array<[number, number]>>;
   memberPolyIndices: number[];
+  /** Parallel to `memberPolysUv`: for each member, the CCW edge indices
+   *  (edge i = point i → point i+1 of the stored CCW member polygon) that
+   *  geometrically coincide with an edge of ANOTHER member of the same
+   *  group. Used by the shadow member-clip seam bleed — clip polygons
+   *  expand outward along these edges only, so abutting members' clipped
+   *  shadow subpaths overlap instead of leaving an antialiasing seam.
+   *  `undefined` for members with no shared edges. */
+  memberSharedEdges: Array<ReadonlySet<number> | undefined>;
 };
 
 function normalizeWorldUnitPx(worldUnitPx: number): number {
@@ -173,6 +181,52 @@ export const RECEIVER_OUTLINE_EXPAND = 0.5;
  *  surface. */
 export const RECEIVER_NORMAL_TOL = 0.001;
 export const RECEIVER_OFFSET_TOL = 0.5;
+
+/**
+ * Detect edges shared between DIFFERENT member polygons of one face group,
+ * in the group's (u, v) space. Members abut along mesh seams (the union-find
+ * grouping requires ≥ 2 shared vertex keys), so shared edges match endpoint
+ * keys exactly at the same 1e-3 quantization the grouping uses — orientation-
+ * independent (sorted endpoint pair). Edge index i is the stored CCW member
+ * polygon's point i → point i+1 edge.
+ */
+export function detectMemberSharedEdges(
+  memberPolysUv: ReadonlyArray<ReadonlyArray<readonly [number, number]>>,
+): Array<ReadonlySet<number> | undefined> {
+  const result: Array<Set<number> | undefined> = memberPolysUv.map(() => undefined);
+  if (memberPolysUv.length < 2) return result;
+  const ptKey = (p: readonly [number, number]): string =>
+    `${Math.round(p[0] * 1000)},${Math.round(p[1] * 1000)}`;
+  const edgeUvKey = (a: readonly [number, number], b: readonly [number, number]): string => {
+    const ka = ptKey(a);
+    const kb = ptKey(b);
+    return ka < kb ? `${ka}|${kb}` : `${kb}|${ka}`;
+  };
+  const owners = new Map<string, Array<{ member: number; edge: number }>>();
+  for (let mi = 0; mi < memberPolysUv.length; mi++) {
+    const poly = memberPolysUv[mi]!;
+    for (let e = 0; e < poly.length; e++) {
+      const key = edgeUvKey(poly[e]!, poly[(e + 1) % poly.length]!);
+      let list = owners.get(key);
+      if (!list) { list = []; owners.set(key, list); }
+      list.push({ member: mi, edge: e });
+    }
+  }
+  for (const list of owners.values()) {
+    if (list.length < 2) continue;
+    let multiMember = false;
+    for (let i = 1; i < list.length; i++) {
+      if (list[i]!.member !== list[0]!.member) { multiMember = true; break; }
+    }
+    if (!multiMember) continue;
+    for (const o of list) {
+      let set = result[o.member];
+      if (!set) { set = new Set(); result[o.member] = set; }
+      set.add(o.edge);
+    }
+  }
+  return result;
+}
 
 /**
  * Groups a receiver's polygons into shadow-receiving surfaces. Two passes:
@@ -346,7 +400,8 @@ export function groupReceiverFaceGroups(
     const hull = convexHull2D(uvs);
     if (hull.length < 3) return;
     const outlineUv = expandConvexHullOutward(ensureCcw2D(hull), RECEIVER_OUTLINE_EXPAND);
-    out.push({ O, n, u, v, outlineUv, memberPolysUv, memberPolyIndices });
+    const memberSharedEdges = detectMemberSharedEdges(memberPolysUv);
+    out.push({ O, n, u, v, outlineUv, memberPolysUv, memberPolyIndices, memberSharedEdges });
   }
   return out;
 }

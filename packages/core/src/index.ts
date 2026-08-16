@@ -271,6 +271,7 @@ export {
 } from "./shadow/parametricOverride";
 export { clipPolygonToConvex2D } from "./shadow/clipping";
 export {
+  detectMemberSharedEdges,
   expandConvexHullOutward,
   groupReceiverFaceGroups,
   meshScaleVec3,
@@ -304,6 +305,7 @@ export {
   prepareCasterPolyItems,
   prepareReceiverFacePlanes,
   POLY_DEFAULT_SHADOW_LIFT,
+  SHADOW_CLIP_SEAM_BLEED,
 } from "./shadow/computeReceiverShadows";
 export type {
   CasterPolyItem,
