@@ -18,6 +18,10 @@ export interface PolyVoxelCell {
   color: string;
 }
 
+/** Signed-face wrapper keys used by the renderers' direct voxel fast path:
+ *  top, bottom, back-left, back-right, front-right, front-left. */
+export type PolyVoxelFace = "t" | "b" | "bl" | "br" | "fr" | "fl";
+
 export interface PolyVoxelSource {
   kind: "magica-vox";
   cells: PolyVoxelCell[];

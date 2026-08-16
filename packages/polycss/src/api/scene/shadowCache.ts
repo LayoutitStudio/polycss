@@ -10,35 +10,23 @@
 import type { SceneContext } from "./sceneContext";
 import { disposeGroundShadow } from "./shadowSvg";
 import { disposeAllReceiverShadowMounts } from "./receiverShadow";
-import type {
-  MeshEntry,
-  ReceiverFacePlane,
-} from "./internalTypes";
-
-/** Detach a list of receiver-face SVGs from the DOM and null the slot.
- *  Used both on per-entry invalidation and on full scene clear. */
-export function disposeReceiverPlanes(planes: ReceiverFacePlane[]): void {
-  for (const p of planes) {
-    if (p.svg && p.svg.parentNode) p.svg.parentNode.removeChild(p.svg);
-    p.svg = null;
-  }
-}
+import type { MeshEntry } from "./internalTypes";
 
 /**
  * Drop the receiver-face cache for a single entry (e.g. when its polygons
  * change). With no `entry`, drops the cache for every receiver in the scene.
+ * Cached planes are pure data (core `ReceiverFacePlane`); the mounted SVGs
+ * live in the per-mesh mount registry and are torn down separately via
+ * `disposeAllReceiverShadowMounts`.
  */
 export function clearReceiverShadowCache(
   ctx: SceneContext,
   entry?: MeshEntry,
 ): void {
   if (entry) {
-    const planes = ctx.receiverShadowCache.get(entry);
-    if (planes) disposeReceiverPlanes(planes);
     ctx.receiverShadowCache.delete(entry);
     ctx.receiverShadowCacheKey.delete(entry);
   } else {
-    for (const planes of ctx.receiverShadowCache.values()) disposeReceiverPlanes(planes);
     ctx.receiverShadowCache.clear();
     ctx.receiverShadowCacheKey.clear();
   }

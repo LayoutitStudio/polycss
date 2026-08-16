@@ -1198,6 +1198,7 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
       updateStableTriangleDom(root, nextRenderedPolygons, {
         directionalLight: bakedDirectional,
         ambientLight: effectiveAmbient,
+        pointLights: bakedPointLights,
         textureLighting: effectiveTextureLighting,
         strategies: effectiveStrategies,
         seamBleed: effectiveSeamBleed,
@@ -1321,6 +1322,8 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
               entry={plan}
               textureLighting={effectiveTextureLighting}
               solidPaintDefaults={solidPaintDefaults}
+              doc={sceneCtx?.sceneEl?.ownerDocument}
+              strategies={effectiveStrategies}
             />
           );
         }

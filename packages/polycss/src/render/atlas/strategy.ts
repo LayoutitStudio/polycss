@@ -14,6 +14,9 @@ import type {
   TextureAtlasPlan,
   PolyRenderStrategy,
   PolyRenderStrategiesOption,
+  PolyTextureBackend,
+  PolyTextureImageRendering,
+  PolyTextureProjection,
   SolidPaintDefaults,
   RGB,
 } from "@layoutit/polycss-core";
@@ -193,12 +196,19 @@ export function filterAtlasPlans(
   textureLighting: PolyTextureLightingMode,
   disabled: ReadonlySet<PolyRenderStrategy>,
   doc?: Document | null,
+  textureBackend?: PolyTextureBackend,
+  textureImageRendering?: PolyTextureImageRendering,
+  textureProjection?: PolyTextureProjection,
 ): Array<TextureAtlasPlan | null> {
   const resolvedDoc = doc ?? (typeof document !== "undefined" ? document : null);
   return filterAtlasPlansCore(plans, textureLighting, disabled, {
     solidTriangleSupported: isSolidTriangleSupported(doc),
     projectiveQuadSupported: resolvedDoc ? projectiveQuadSupported(resolvedDoc) : true,
     borderShapeSupported: isBorderShapeSupported(doc),
+    cornerShapeSupported: resolvedDoc ? cornerShapeSupported(resolvedDoc) : false,
+    textureBackend,
+    textureImageRendering,
+    textureProjection,
   });
 }
 

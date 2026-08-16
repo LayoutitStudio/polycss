@@ -97,6 +97,32 @@ describe("PolyMesh (Vue) — castShadow", () => {
     expect(shadows[0]!.tagName.toLowerCase()).toBe("svg");
   });
 
+  it("castShadow with a polygon slot emits no ground shadow", async () => {
+    // A polygon-slot mesh owns its own leaves; the ground-shadow fallback
+    // projects renderer-owned geometry and would not match the custom
+    // output, so it is suppressed (mirrors React's renderPolygon gate).
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const app = createApp({
+      setup() {
+        return () =>
+          h(PolyCamera, {}, {
+            default: () =>
+              h(PolyScene, { textureLighting: "baked" }, {
+                default: () =>
+                  h(PolyMesh, { polygons: [TRIANGLE], castShadow: true }, {
+                    polygon: () => h("b"),
+                  }),
+              }),
+          });
+      },
+    });
+    app.mount(container);
+    await nextTick();
+    expect(container.querySelectorAll(".polycss-shadow").length).toBe(0);
+    app.unmount();
+  });
+
   it("castShadow:true in baked mode emits a single <svg> shadow per mesh with one compound <path>", async () => {
     // Baked mode concatenates every casting polygon's projected outline
     // into ONE compound `d` (M…L…Z subpaths) rendered under

@@ -17,6 +17,7 @@ import {
   solidTriangleSupported,
   cornerShapeSupported,
   projectiveQuadSupported,
+  resolveSolidTrianglePrimitive,
 } from "./detection";
 import { isMobileDocument } from "./packing";
 
@@ -194,5 +195,42 @@ describe("isMobileDocument", () => {
   it("returns true for a coarse-pointer mobile doc", () => {
     const doc = makeDoc({ pointer: "coarse" });
     expect(isMobileDocument(doc)).toBe(true);
+  });
+});
+
+describe("resolveSolidTrianglePrimitive", () => {
+  it("returns corner-bevel when the passed document supports corner triangles", () => {
+    expect(resolveSolidTrianglePrimitive(makeDoc({ cornerShape: true }))).toBe("corner-bevel");
+  });
+
+  it("returns border-large for a Firefox document without corner-shape", () => {
+    expect(resolveSolidTrianglePrimitive(makeDoc({
+      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:146.0) Gecko/20100101 Firefox/146.0",
+    }))).toBe("border-large");
+  });
+
+  it("returns border for a Chromium document without corner-shape", () => {
+    expect(resolveSolidTrianglePrimitive(makeDoc({}))).toBe("border");
+  });
+
+  it("returns null for a Safari document without corner-shape (u unsupported)", () => {
+    expect(resolveSolidTrianglePrimitive(makeDoc({
+      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15",
+    }))).toBeNull();
+  });
+
+  it("returns null when strategies disable u, even with corner-shape support", () => {
+    expect(resolveSolidTrianglePrimitive(makeDoc({ cornerShape: true }), { disable: ["u"] })).toBeNull();
+  });
+
+  it("reads the PASSED document, not the global one", () => {
+    // Two documents with different capabilities must resolve differently in
+    // the same environment (iframe / second-document correctness — the
+    // drifted copy read the global CSS/navigator, so every document
+    // resolved identically).
+    expect(resolveSolidTrianglePrimitive(makeDoc({ cornerShape: true }))).toBe("corner-bevel");
+    expect(resolveSolidTrianglePrimitive(makeDoc({
+      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15",
+    }))).toBeNull();
   });
 });

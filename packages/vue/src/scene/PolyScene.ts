@@ -521,6 +521,8 @@ export const PolyScene = defineComponent({
           return renderTextureTrianglePoly({
             entry: plan,
             textureLighting: ctx.textureLighting ?? "baked",
+            doc: sceneElLocalRef.value?.ownerDocument,
+            strategies: props.strategies,
           });
         }
         if (textureAtlas.useProjectiveQuad.value && isProjectiveQuadPlan(plan)) {

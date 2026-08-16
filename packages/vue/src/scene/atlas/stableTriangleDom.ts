@@ -2,33 +2,31 @@ import type { Polygon } from "@layoutit/polycss-core";
 import type {
   PolyDirectionalLight,
   PolyAmbientLight,
+  PolyPointLight,
   PolyTextureLightingMode,
   PolyRenderStrategiesOption,
   PolySeamBleed,
+  RGB,
+  SolidTrianglePrimitive,
 } from "@layoutit/polycss-core";
-import { isSolidTriangleSupported } from "./detection";
 import {
   BASIS_EPS,
-  SOLID_TRIANGLE_BLEED,
   DEFAULT_TILE,
-  DEFAULT_LIGHT_DIR,
-  DEFAULT_LIGHT_COLOR,
-  DEFAULT_LIGHT_INTENSITY,
-  DEFAULT_AMBIENT_COLOR,
-  DEFAULT_AMBIENT_INTENSITY,
+  SOLID_TRIANGLE_BLEED,
+  computeSolidTriangleColorPlanFromNormal,
+  offsetStableTrianglePoints,
   parseHex,
-  rgbKey,
-  rgbToHex,
-  shadePolygon,
   quantizeCssColor,
+  rgbToHex,
   stepRgbToward,
-  offsetConvexPolygonPoints,
+} from "@layoutit/polycss-core";
+import { resolveSolidTrianglePrimitive } from "./detection";
+import {
   formatStableTriangleTransformScalars,
   applySolidTrianglePaintStyle,
   solidTriangleBorderWidth,
   solidTriangleCanonicalSize,
 } from "./solidTriangleStyle";
-import type { RGB } from "./solidTriangleStyle";
 
 // ---------------------------------------------------------------------------
 // updateStableTriangleDom — imperative DOM fast-path for triangle meshes
@@ -39,6 +37,7 @@ import type { RGB } from "./solidTriangleStyle";
 export interface StableTriangleDomUpdateOptions {
   directionalLight?: PolyDirectionalLight;
   ambientLight?: PolyAmbientLight;
+  pointLights?: PolyPointLight[];
   textureLighting?: PolyTextureLightingMode;
   strategies?: PolyRenderStrategiesOption;
   seamBleed?: PolySeamBleed;
@@ -77,77 +76,11 @@ interface StableTriangleDomStyle {
   basis: StableTriangleBasis;
 }
 
-function offsetStableTrianglePoints(
-  left: number,
-  right: number,
-  height: number,
-  amount: number,
-): number[] {
-  const baseWidth = left + right;
-  if (
-    amount <= 0 ||
-    height <= BASIS_EPS ||
-    baseWidth <= BASIS_EPS ||
-    !Number.isFinite(left + right + height + amount)
-  ) {
-    return offsetConvexPolygonPoints([left, 0, 0, height, baseWidth, height], amount);
-  }
-
-  const leftLen = Math.sqrt(left * left + height * height);
-  const rightLen = Math.sqrt(right * right + height * height);
-  if (leftLen <= BASIS_EPS || rightLen <= BASIS_EPS) {
-    return offsetConvexPolygonPoints([left, 0, 0, height, baseWidth, height], amount);
-  }
-
-  const leftOffsetX = -amount * height / leftLen;
-  const leftOffsetY = -amount * left / leftLen;
-  const rightOffsetX = amount * height / rightLen;
-  const rightOffsetY = -amount * right / rightLen;
-  const apexLineLeftX = left + leftOffsetX;
-  const apexLineLeftY = leftOffsetY;
-  const apexLineRightX = baseWidth + rightOffsetX;
-  const apexLineRightY = height + rightOffsetY;
-  const det = -height * baseWidth;
-  if (Math.abs(det) <= BASIS_EPS) {
-    return offsetConvexPolygonPoints([left, 0, 0, height, baseWidth, height], amount);
-  }
-
-  const qx = apexLineLeftX - apexLineRightX;
-  const qy = apexLineLeftY - apexLineRightY;
-  const t = (qx * height + qy * left) / det;
-  let apexPtX = apexLineRightX - t * right;
-  let apexPtY = apexLineRightY - t * height;
-  let baseLeftX = -amount * (left + leftLen) / height;
-  let baseLeftY = height + amount;
-  let baseRightX = baseWidth + amount * (right + rightLen) / height;
-  let baseRightY = baseLeftY;
-
-  const maxMiter = Math.max(2, amount * 4);
-  const apexDx = apexPtX - left;
-  const apexDy = apexPtY;
-  const apexMiter = Math.sqrt(apexDx * apexDx + apexDy * apexDy);
-  if (apexMiter > maxMiter) {
-    apexPtX = left + (apexDx / apexMiter) * maxMiter;
-    apexPtY = (apexDy / apexMiter) * maxMiter;
-  }
-  const leftMiter = Math.sqrt(baseLeftX * baseLeftX + amount * amount);
-  if (leftMiter > maxMiter) {
-    baseLeftX = (baseLeftX / leftMiter) * maxMiter;
-    baseLeftY = height + (amount / leftMiter) * maxMiter;
-  }
-  const rightDx = baseRightX - baseWidth;
-  const rightMiter = Math.sqrt(rightDx * rightDx + amount * amount);
-  if (rightMiter > maxMiter) {
-    baseRightX = baseWidth + (rightDx / rightMiter) * maxMiter;
-    baseRightY = height + (amount / rightMiter) * maxMiter;
-  }
-
-  return [apexPtX, apexPtY, baseLeftX, baseLeftY, baseRightX, baseRightY];
-}
-
 function computeStableTriangleDomStyle(
   polygon: Polygon,
+  index: number,
   options: StableTriangleDomUpdateOptions,
+  primitive: SolidTrianglePrimitive,
   basisHint?: StableTriangleBasis,
 ): StableTriangleDomStyle | null {
   if (polygon.texture || polygon.vertices.length !== 3) return null;
@@ -178,7 +111,7 @@ function computeStableTriangleDomStyle(
   let b = isStableTriangleBasis(basisHint) ? basisHint.b : 1;
   let c = isStableTriangleBasis(basisHint) ? basisHint.c : 2;
   const retryWithoutBasis = (): StableTriangleDomStyle | null =>
-    basisHint ? computeStableTriangleDomStyle(polygon, options) : null;
+    basisHint ? computeStableTriangleDomStyle(polygon, index, options, primitive) : null;
   if (!isStableTriangleBasis(basisHint)) {
     let baseLengthSq = len01Sq;
     if (len12Sq > baseLengthSq) { a = 1; b = 2; c = 0; baseLengthSq = len12Sq; }
@@ -227,7 +160,7 @@ function computeStableTriangleDomStyle(
     return retryWithoutBasis();
   }
 
-  const canonicalSize = solidTriangleCanonicalSize();
+  const canonicalSize = solidTriangleCanonicalSize(primitive);
   const invCanonicalSize = 1 / canonicalSize;
   const baseWidthPx = leftPx + rightPx;
   const xScale = baseWidthPx * invCanonicalSize;
@@ -246,30 +179,32 @@ function computeStableTriangleDomStyle(
 
   let color: string | undefined;
   if (Math.floor(options.colorFreezeFrames ?? 1) !== 0) {
-    const directionalCfg = options.directionalLight;
-    const ambientCfg = options.ambientLight;
-    const lightDir = directionalCfg?.direction ?? DEFAULT_LIGHT_DIR;
-    const lightColor = directionalCfg?.color ?? DEFAULT_LIGHT_COLOR;
-    const lightIntensity = Math.max(0, directionalCfg?.intensity ?? DEFAULT_LIGHT_INTENSITY);
-    const ambientColor = ambientCfg?.color ?? DEFAULT_AMBIENT_COLOR;
-    const ambientIntensity = Math.max(0, ambientCfg?.intensity ?? DEFAULT_AMBIENT_INTENSITY);
-    const lLen = Math.sqrt(
-      lightDir[0] * lightDir[0] + lightDir[1] * lightDir[1] + lightDir[2] * lightDir[2],
-    ) || 1;
-    const lx = lightDir[0] / lLen, ly = lightDir[1] / lLen, lz = lightDir[2] / lLen;
-    const directScale = lightIntensity * Math.max(0, nx * lx + ny * ly + nz * lz);
-    const shadedColor = shadePolygon(
-      polygon.color ?? "#cccccc",
-      directScale,
-      lightColor,
-      ambientColor,
-      ambientIntensity,
+    // Vanilla routes imperative solid-triangle updates through core's
+    // computeSolidTrianglePlanFromCssPoints, whose color plan folds the
+    // directional, ambient, AND point-light contributions into one baked
+    // linear-light Lambert color. Reuse that color plan here so imperative
+    // updates match the plan-path colors (including point-light shading).
+    const colorPlan = computeSolidTriangleColorPlanFromNormal(
+      polygon,
+      index,
+      nx,
+      ny,
+      nz,
+      {
+        directionalLight: options.directionalLight,
+        ambientLight: options.ambientLight,
+        pointLights: options.pointLights,
+        tileSize: tile,
+        layerElevation: elev,
+      },
+      true,
     );
-    color = options.colorSteps
+    const shadedColor = colorPlan.bakedColor;
+    color = shadedColor !== undefined && options.colorSteps
       ? quantizeCssColor(shadedColor, options.colorSteps)
       : shadedColor;
   }
-  return { transform, borderWidth: solidTriangleBorderWidth(), color, basis: { a, b, c } };
+  return { transform, borderWidth: solidTriangleBorderWidth(primitive), color, basis: { a, b, c } };
 }
 
 function stableTriangleColorAllowed(index: number, colorFrame: number, freezeFrames: number): boolean {
@@ -311,7 +246,12 @@ export function updateStableTriangleDom(
   options: StableTriangleDomUpdateOptions = {},
 ): boolean {
   if ((options.textureLighting ?? "baked") !== "baked") return false;
-  if (!isSolidTriangleSupported()) return false;
+  // Resolve the primitive against the ROOT's owning document (correct inside
+  // iframes / second documents) and honor strategies.disable — mirrors
+  // vanilla's updatePolygonsWithStableTriangles gate, which rejects this
+  // fast path entirely when "u" is disabled or unsupported.
+  const primitive = resolveSolidTrianglePrimitive(root.ownerDocument, options.strategies);
+  if (!primitive) return false;
   const leaves = Array.from(root.children).filter(
     (child): child is StableTriangleDomElement =>
       child instanceof HTMLElement && child.localName === "u",
@@ -319,7 +259,7 @@ export function updateStableTriangleDom(
   if (leaves.length !== polygons.length) return false;
 
   const styles = polygons.map((polygon, index) =>
-    computeStableTriangleDomStyle(polygon, options, leaves[index].__polycssStableTriangleBasis)
+    computeStableTriangleDomStyle(polygon, index, options, primitive, leaves[index].__polycssStableTriangleBasis)
   );
   if (styles.some((style) => !style)) return false;
 
@@ -328,7 +268,7 @@ export function updateStableTriangleDom(
     const el = leaves[i];
     if (el.style.visibility) el.style.visibility = "";
     el.__polycssStableTriangleBasis = style.basis;
-    applySolidTrianglePaintStyle(el);
+    applySolidTrianglePaintStyle(el, primitive);
     el.style.transform = style.transform;
     if (style.borderWidth !== undefined) el.style.borderWidth = style.borderWidth;
     if (style.color !== undefined) applyStableTriangleColor(el, i, style.color, options);

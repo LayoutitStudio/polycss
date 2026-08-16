@@ -501,7 +501,7 @@ export const PolyMesh = defineComponent({
     // fill-rule=nonzero so overlapping CCW outlines composite as one
     // filled silhouette without alpha stacking; gaps remain as gaps.
     const shadowSvg = computed<VNode | null>(() => {
-      if (!props.castShadow) return null;
+      if (!props.castShadow || slots.polygon) return null;
       // Three.js parity: when at least one receiver exists, casters drop
       // the ground-shadow fallback so the receiver paints the only pass.
       if (sceneCtx?.value.receiverRegistry?.hasAny.value) return null;
@@ -934,6 +934,7 @@ export const PolyMesh = defineComponent({
           updateStableTriangleDom(root, nextRenderedPolygons, {
             directionalLight: bakedDirectional.value,
             ambientLight: atlasAmbient.value,
+            pointLights: bakedPointLights.value,
             textureLighting: atlasTextureLighting.value,
             strategies: atlasStrategies.value,
             seamBleed: atlasSeamBleed.value,
@@ -1243,6 +1244,8 @@ export const PolyMesh = defineComponent({
                 entry: plan,
                 textureLighting: atlasTextureLighting.value,
                 solidPaintDefaults: solidPaintDefaults.value,
+                doc: sceneCtx?.value.sceneEl?.ownerDocument,
+                strategies: atlasStrategies.value,
               });
             }
             // CornerShape solid (corner-*-shape: bevel <u>) — mirrors vanilla

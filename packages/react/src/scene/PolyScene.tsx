@@ -477,6 +477,8 @@ function PolySceneInner({
           key={plan.index}
           entry={plan}
           textureLighting={textureLighting}
+          doc={sceneEl?.ownerDocument}
+          strategies={strategies}
         />
       );
     }

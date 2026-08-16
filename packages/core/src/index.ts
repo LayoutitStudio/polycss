@@ -269,6 +269,7 @@ export type {
   ParseAnimationClip,
   ParseAnimationController,
   PolyVoxelCell,
+  PolyVoxelFace,
   PolyVoxelSource,
   ParseStlColor,
   ParseStlSolid,

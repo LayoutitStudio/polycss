@@ -1,77 +1,57 @@
 import {
+  BASIS_EPS,
+  SOLID_TRIANGLE_BLEED,
+  SOLID_TRIANGLE_CANONICAL_SIZE,
+  SOLID_TRIANGLE_LARGE_BORDER_CANONICAL_SIZE,
+  cssPoints,
+  computeSurfaceNormal,
+  crossVec,
+  dotVec,
   isSolidTrianglePlan,
   offsetConvexPolygonPointsByEdgeAmounts,
-  parsePureColor,
+  offsetStableTrianglePoints,
+  parseHex,
   resolveSeamBleed,
+  rgbKey,
   safePlanSeamBleedAmount,
 } from "@layoutit/polycss-core";
 import type {
   TextureAtlasPlan,
   PolyTextureLightingMode,
+  PolyRenderStrategiesOption,
   SolidPaintDefaults,
   SolidTrianglePrimitive,
   Vec2,
   Vec3,
 } from "@layoutit/polycss-core";
 import type { CSSProperties } from "vue";
+import { resolveSolidTrianglePrimitive } from "./detection";
 
 // ---------------------------------------------------------------------------
 // Internal helpers used by solidTriangleStyle and updateStableTriangleDom
 // ---------------------------------------------------------------------------
 
-export const DEFAULT_TILE = 50;
-export const DEFAULT_LIGHT_DIR: Vec3 = [0.4, -0.7, 0.59];
-export const DEFAULT_LIGHT_COLOR = "#ffffff";
-export const DEFAULT_LIGHT_INTENSITY = 1;
-export const DEFAULT_AMBIENT_COLOR = "#ffffff";
-export const DEFAULT_AMBIENT_INTENSITY = 0.4;
-export const BASIS_EPS = 1e-9;
-// Matches the canonical SOLID_TRIANGLE_BLEED constant.
-export const SOLID_TRIANGLE_BLEED = 0.75;
-const SOLID_TRIANGLE_CANONICAL_SIZE = 32;
-const SOLID_TRIANGLE_LARGE_BORDER_CANONICAL_SIZE = 96;
 const SOLID_TRIANGLE_LARGE_BORDER_WIDTH = "0 48px 96px 48px";
-let cachedSolidTriangleUserAgent: string | undefined;
-let cachedSolidTriangleCanonicalSize = SOLID_TRIANGLE_CANONICAL_SIZE;
 
-function cornerTriangleSupported(): boolean {
-  const css = typeof CSS !== "undefined" ? CSS : undefined;
-  return !!css?.supports?.("corner-top-left-shape", "bevel") &&
-    !!css.supports("corner-top-right-shape", "bevel");
+export function solidTriangleCanonicalSize(primitive: SolidTrianglePrimitive): number {
+  return primitive === "border-large"
+    ? SOLID_TRIANGLE_LARGE_BORDER_CANONICAL_SIZE
+    : SOLID_TRIANGLE_CANONICAL_SIZE;
 }
 
-function solidTrianglePrimitive(): SolidTrianglePrimitive {
-  if (cornerTriangleSupported()) return "corner-bevel";
-  const ua = typeof navigator !== "undefined" ? navigator.userAgent : "";
-  return /\bFirefox\//.test(ua) ? "border-large" : "border";
-}
-
-export function solidTriangleCanonicalSize(): number {
-  const ua = typeof navigator !== "undefined" ? navigator.userAgent : "";
-  if (ua !== cachedSolidTriangleUserAgent) {
-    cachedSolidTriangleUserAgent = ua;
-    cachedSolidTriangleCanonicalSize = /\bFirefox\//.test(ua)
-      ? SOLID_TRIANGLE_LARGE_BORDER_CANONICAL_SIZE
-      : SOLID_TRIANGLE_CANONICAL_SIZE;
-  }
-  return cachedSolidTriangleCanonicalSize;
-}
-
-export function solidTriangleBorderWidth(): string | undefined {
-  return solidTrianglePrimitive() === "border-large"
+export function solidTriangleBorderWidth(primitive: SolidTrianglePrimitive): string | undefined {
+  return primitive === "border-large"
     ? SOLID_TRIANGLE_LARGE_BORDER_WIDTH
     : undefined;
 }
 
-export function solidTrianglePaintStyle(): CSSProperties | undefined {
-  const primitive = solidTrianglePrimitive();
+export function solidTrianglePaintStyle(primitive: SolidTrianglePrimitive): CSSProperties | undefined {
   if (primitive === "corner-bevel") return undefined;
   const borderWidth = primitive === "border-large" ? SOLID_TRIANGLE_LARGE_BORDER_WIDTH : undefined;
   return borderWidth ? { borderWidth } : undefined;
 }
 
-export function applySolidTrianglePaintStyle(el: HTMLElement): void {
-  const primitive = solidTrianglePrimitive();
+export function applySolidTrianglePaintStyle(el: HTMLElement, primitive: SolidTrianglePrimitive): void {
   if (primitive === "corner-bevel") {
     el.style.width = "";
     el.style.height = "";
@@ -91,295 +71,6 @@ export function applySolidTrianglePaintStyle(el: HTMLElement): void {
     el.style.removeProperty("corner-top-right-shape");
     el.style.borderWidth = primitive === "border-large" ? SOLID_TRIANGLE_LARGE_BORDER_WIDTH : "";
   }
-}
-
-export interface RGB { r: number; g: number; b: number; }
-
-export function parseHex(hex: string): RGB {
-  // Tolerate any CSS color string the renderer hands us — hex, rgb(),
-  // or rgba(). Polygon colors arrive from user code and helpers like
-  // <PolyTransformControls> use rgba() to fade arrows on hover/drag.
-  const parsed = parsePureColor(hex);
-  if (!parsed) return { r: 255, g: 255, b: 255 };
-  return { r: parsed.rgb[0], g: parsed.rgb[1], b: parsed.rgb[2] };
-}
-
-export function rgbKey({ r, g, b }: RGB): string {
-  return `${r},${g},${b}`;
-}
-
-function parseAlpha(input: string): number {
-  return parsePureColor(input)?.alpha ?? 1;
-}
-
-export function rgbToHex({ r, g, b }: RGB): string {
-  const f = (n: number) =>
-    Math.round(Math.max(0, Math.min(255, n))).toString(16).padStart(2, "0");
-  return `#${f(r)}${f(g)}${f(b)}`;
-}
-
-export function shadePolygon(
-  baseColor: string,
-  directScale: number,
-  lightColor: string,
-  ambientColor: string,
-  ambientIntensity: number,
-): string {
-  const base = parseHex(baseColor);
-  const light = parseHex(lightColor);
-  const amb = parseHex(ambientColor);
-  const tintR = (amb.r / 255) * ambientIntensity + (light.r / 255) * directScale;
-  const tintG = (amb.g / 255) * ambientIntensity + (light.g / 255) * directScale;
-  const tintB = (amb.b / 255) * ambientIntensity + (light.b / 255) * directScale;
-  const r = Math.max(0, Math.min(255, Math.round(base.r * tintR)));
-  const g = Math.max(0, Math.min(255, Math.round(base.g * tintG)));
-  const b = Math.max(0, Math.min(255, Math.round(base.b * tintB)));
-  // Preserve the base polygon's alpha. Lighting only modulates RGB —
-  // a translucent input (e.g. <PolyTransformControls> arrow at idle)
-  // must keep its alpha so the gizmo stays see-through after shading.
-  const alpha = parseAlpha(baseColor);
-  return alpha < 1
-    ? `rgba(${r}, ${g}, ${b}, ${alpha})`
-    : rgbToHex({ r, g, b });
-}
-
-export function quantizeCssColor(input: string, steps: number): string {
-  if (!Number.isFinite(steps) || steps <= 1) return input;
-  const parsed = parsePureColor(input);
-  if (!parsed) return input;
-  const channelStep = 255 / Math.max(1, Math.round(steps) - 1);
-  const quantize = (value: number) =>
-    Math.max(0, Math.min(255, Math.round(Math.round(value / channelStep) * channelStep)));
-  const rgb = {
-    r: quantize(parsed.rgb[0]),
-    g: quantize(parsed.rgb[1]),
-    b: quantize(parsed.rgb[2]),
-  };
-  return parsed.alpha < 1
-    ? `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${parsed.alpha})`
-    : rgbToHex(rgb);
-}
-
-export function stepRgbToward(current: RGB, target: RGB, maxStep: number): RGB {
-  const step = (from: number, to: number) => {
-    if (from === to) return from;
-    const delta = to - from;
-    return from + Math.sign(delta) * Math.min(Math.abs(delta), maxStep);
-  };
-  return {
-    r: step(current.r, target.r),
-    g: step(current.g, target.g),
-    b: step(current.b, target.b),
-  };
-}
-
-function dotVec(a: Vec3, b: Vec3): number {
-  return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
-}
-
-function crossVec(a: Vec3, b: Vec3): Vec3 {
-  return [
-    a[1] * b[2] - a[2] * b[1],
-    a[2] * b[0] - a[0] * b[2],
-    a[0] * b[1] - a[1] * b[0],
-  ];
-}
-
-function computeSurfaceNormal(pts: Vec3[]): Vec3 | null {
-  if (pts.length < 3) return null;
-  const p0 = pts[0];
-  const normal: Vec3 = [0, 0, 0];
-  for (let i = 1; i + 1 < pts.length; i++) {
-    const p1 = pts[i];
-    const p2 = pts[i + 1];
-    const e1: Vec3 = [p1[0] - p0[0], p1[1] - p0[1], p1[2] - p0[2]];
-    const e2: Vec3 = [p2[0] - p0[0], p2[1] - p0[1], p2[2] - p0[2]];
-    normal[0] -= e1[1] * e2[2] - e1[2] * e2[1];
-    normal[1] -= e1[2] * e2[0] - e1[0] * e2[2];
-    normal[2] -= e1[0] * e2[1] - e1[1] * e2[0];
-  }
-  const len = Math.hypot(normal[0], normal[1], normal[2]);
-  if (len <= BASIS_EPS) return null;
-  return [normal[0] / len, normal[1] / len, normal[2] / len];
-}
-
-function isConvexPolygonPoints(points: Array<[number, number]>): boolean {
-  if (points.length < 3) return false;
-  let sign = 0;
-  for (let i = 0; i < points.length; i++) {
-    const a = points[i];
-    const b = points[(i + 1) % points.length];
-    const c = points[(i + 2) % points.length];
-    const cross = (b[0] - a[0]) * (c[1] - b[1]) - (b[1] - a[1]) * (c[0] - b[0]);
-    if (Math.abs(cross) <= BASIS_EPS) return false;
-    const nextSign = Math.sign(cross);
-    if (sign === 0) sign = nextSign;
-    else if (nextSign !== sign) return false;
-  }
-  return true;
-}
-
-function signedArea2D(points: Array<[number, number]>): number {
-  let area = 0;
-  for (let i = 0; i < points.length; i++) {
-    const a = points[i];
-    const b = points[(i + 1) % points.length];
-    area += a[0] * b[1] - a[1] * b[0];
-  }
-  return area / 2;
-}
-
-function intersect2DLines(
-  a0: [number, number],
-  a1: [number, number],
-  b0: [number, number],
-  b1: [number, number],
-): [number, number] | null {
-  const rx = a1[0] - a0[0];
-  const ry = a1[1] - a0[1];
-  const sx = b1[0] - b0[0];
-  const sy = b1[1] - b0[1];
-  const det = rx * sy - ry * sx;
-  if (Math.abs(det) <= BASIS_EPS) return null;
-  const qpx = b0[0] - a0[0];
-  const qpy = b0[1] - a0[1];
-  const t = (qpx * sy - qpy * sx) / det;
-  return [a0[0] + t * rx, a0[1] + t * ry];
-}
-
-function expandClipPoints(points: number[], amount: number): number[] {
-  if (points.length < 6 || amount <= 0) return points;
-  let cx = 0;
-  let cy = 0;
-  const count = points.length / 2;
-  for (let i = 0; i < points.length; i += 2) {
-    cx += points[i];
-    cy += points[i + 1];
-  }
-  cx /= count;
-  cy /= count;
-  const expanded = points.slice();
-  for (let i = 0; i < expanded.length; i += 2) {
-    const dx = expanded[i] - cx;
-    const dy = expanded[i + 1] - cy;
-    const len = Math.hypot(dx, dy);
-    if (len <= BASIS_EPS) continue;
-    expanded[i] += (dx / len) * amount;
-    expanded[i + 1] += (dy / len) * amount;
-  }
-  return expanded;
-}
-
-export function offsetConvexPolygonPoints(points: number[], amount: number): number[] {
-  if (points.length < 6 || points.length % 2 !== 0 || amount <= 0) return points;
-  const q: Array<[number, number]> = [];
-  for (let i = 0; i < points.length; i += 2) q.push([points[i], points[i + 1]]);
-  if (!isConvexPolygonPoints(q)) return expandClipPoints(points, amount);
-
-  const area = signedArea2D(q);
-  if (Math.abs(area) <= BASIS_EPS) return expandClipPoints(points, amount);
-  const outwardSign = area > 0 ? 1 : -1;
-  const offsetLines: Array<{ a: [number, number]; b: [number, number] }> = [];
-  for (let i = 0; i < q.length; i++) {
-    const a = q[i];
-    const b = q[(i + 1) % q.length];
-    const dx = b[0] - a[0];
-    const dy = b[1] - a[1];
-    const length = Math.hypot(dx, dy);
-    if (length <= BASIS_EPS) return expandClipPoints(points, amount);
-    const ox = outwardSign * (dy / length) * amount;
-    const oy = outwardSign * (-dx / length) * amount;
-    offsetLines.push({
-      a: [a[0] + ox, a[1] + oy],
-      b: [b[0] + ox, b[1] + oy],
-    });
-  }
-
-  const expanded: number[] = [];
-  const maxMiter = Math.max(2, amount * 4);
-  for (let i = 0; i < q.length; i++) {
-    const prev = offsetLines[(i + q.length - 1) % q.length];
-    const next = offsetLines[i];
-    const intersection = intersect2DLines(prev.a, prev.b, next.a, next.b);
-    if (!intersection) return expandClipPoints(points, amount);
-
-    const original = q[i];
-    const dx = intersection[0] - original[0];
-    const dy = intersection[1] - original[1];
-    const miter = Math.hypot(dx, dy);
-    if (miter > maxMiter) {
-      expanded.push(
-        original[0] + (dx / miter) * maxMiter,
-        original[1] + (dy / miter) * maxMiter,
-      );
-    } else {
-      expanded.push(intersection[0], intersection[1]);
-    }
-  }
-  return expanded;
-}
-
-function offsetStableTrianglePoints(
-  left: number,
-  right: number,
-  height: number,
-  amount: number,
-): number[] {
-  const baseWidth = left + right;
-  if (
-    amount <= 0 ||
-    height <= BASIS_EPS ||
-    baseWidth <= BASIS_EPS ||
-    !Number.isFinite(left + right + height + amount)
-  ) {
-    return offsetConvexPolygonPoints([left, 0, 0, height, baseWidth, height], amount);
-  }
-  const leftLen = Math.sqrt(left * left + height * height);
-  const rightLen = Math.sqrt(right * right + height * height);
-  if (leftLen <= BASIS_EPS || rightLen <= BASIS_EPS) {
-    return offsetConvexPolygonPoints([left, 0, 0, height, baseWidth, height], amount);
-  }
-  const leftOffsetX = -amount * height / leftLen;
-  const leftOffsetY = -amount * left / leftLen;
-  const rightOffsetX = amount * height / rightLen;
-  const rightOffsetY = -amount * right / rightLen;
-  const apexLineLeftX = left + leftOffsetX;
-  const apexLineLeftY = leftOffsetY;
-  const apexLineRightX = baseWidth + rightOffsetX;
-  const apexLineRightY = height + rightOffsetY;
-  const det = -height * baseWidth;
-  if (Math.abs(det) <= BASIS_EPS) {
-    return offsetConvexPolygonPoints([left, 0, 0, height, baseWidth, height], amount);
-  }
-  const qx = apexLineLeftX - apexLineRightX;
-  const qy = apexLineLeftY - apexLineRightY;
-  const t = (qx * height + qy * left) / det;
-  let apexX = apexLineRightX - t * right;
-  let apexY = apexLineRightY - t * height;
-  let baseLeftX = -amount * (left + leftLen) / height;
-  let baseLeftY = height + amount;
-  let baseRightX = baseWidth + amount * (right + rightLen) / height;
-  let baseRightY = baseLeftY;
-  const maxMiter = Math.max(2, amount * 4);
-  const apexDx = apexX - left;
-  const apexDy = apexY;
-  const apexMiter = Math.sqrt(apexDx * apexDx + apexDy * apexDy);
-  if (apexMiter > maxMiter) {
-    apexX = left + (apexDx / apexMiter) * maxMiter;
-    apexY = (apexDy / apexMiter) * maxMiter;
-  }
-  const leftMiter = Math.sqrt(baseLeftX * baseLeftX + amount * amount);
-  if (leftMiter > maxMiter) {
-    baseLeftX = (baseLeftX / leftMiter) * maxMiter;
-    baseLeftY = height + (amount / leftMiter) * maxMiter;
-  }
-  const rightDx = baseRightX - baseWidth;
-  const rightMiter = Math.sqrt(rightDx * rightDx + amount * amount);
-  if (rightMiter > maxMiter) {
-    baseRightX = baseWidth + (rightDx / rightMiter) * maxMiter;
-    baseRightY = height + (amount / rightMiter) * maxMiter;
-  }
-  return [apexX, apexY, baseLeftX, baseLeftY, baseRightX, baseRightY];
 }
 
 function triangleEdgeIndexForPair(a: number, b: number): number | undefined {
@@ -431,10 +122,6 @@ export function formatStableTriangleTransformScalars(
   return `matrix3d(${rx0},${rx1},${rx2},0,${ry0},${ry1},${ry2},0,${rz0},${rz1},${rz2},0,${rtx0},${rtx1},${rtx2},1)`;
 }
 
-function cssPoints(vertices: Vec3[], tile: number, elev: number): Vec3[] {
-  return vertices.map((v) => [v[1] * tile, v[0] * tile, v[2] * elev]);
-}
-
 // Generates Vue CSSProperties for a solid-triangle (<u>) leaf.
 // Uses canonical SOLID_TRIANGLE_BLEED = 0.75 to match the polycss renderer.
 export function solidTriangleStyle(
@@ -442,8 +129,19 @@ export function solidTriangleStyle(
   textureLighting: PolyTextureLightingMode,
   pointerEvents: "auto" | "none",
   solidPaintDefaults?: SolidPaintDefaults,
+  doc?: Document | null,
+  strategies?: PolyRenderStrategiesOption,
 ): CSSProperties | null {
   if (!isSolidTrianglePlan(entry)) return null;
+  // Vanilla resolves the primitive from the owning document (correct inside
+  // iframes / second documents) once per render; gating on a disabled or
+  // unsupported "u" strategy already happened in plan filtering, so a leaf
+  // that reaches this builder falls back to the border primitive when no
+  // document is available (mirrors vanilla's `?? "border"` call sites).
+  const resolvedDoc = doc ?? (typeof document !== "undefined" ? document : null);
+  const primitive = resolvedDoc
+    ? resolveSolidTrianglePrimitive(resolvedDoc, strategies) ?? "border"
+    : "border";
 
   const tile = entry.tileSize;
   const elev = entry.layerElevation;
@@ -516,7 +214,7 @@ export function solidTriangleStyle(
     yAxis = [yAxisRaw[0] / nextHeight, yAxisRaw[1] / nextHeight, yAxisRaw[2] / nextHeight];
   }
 
-  const canonicalSize = solidTriangleCanonicalSize();
+  const canonicalSize = solidTriangleCanonicalSize(primitive);
   const left = Math.max(0, Math.min(baseLength, apexX));
   const right = Math.max(0, baseLength - left);
   const screenPts = [left, 0, 0, height, left + right, height];
@@ -601,7 +299,7 @@ export function solidTriangleStyle(
     normal[0], normal[1], normal[2], 0,
     txCol[0], txCol[1], txCol[2], 1,
   ].map((v) => (Math.round(v * 1000) / 1000 || 0).toString()).join(",");
-  const primitiveStyle = solidTrianglePaintStyle();
+  const primitiveStyle = solidTrianglePaintStyle(primitive);
   return {
     transform: `matrix3d(${canonicalMatrix})`,
     ...(primitiveStyle ?? {}),

@@ -288,3 +288,47 @@ describe("renderPolygonsWithTextureAtlas — strategy dispatch", () => {
     result.dispose();
   });
 });
+
+// ---------------------------------------------------------------------------
+// filterAtlasPlans — extended env parity (react/vue mirror)
+// ---------------------------------------------------------------------------
+
+describe("filterAtlasPlans — extended env parity (react/vue mirror)", () => {
+  const noDisable = new Set<"b" | "i" | "u">();
+
+  // Axis-aligned rect with one beveled corner — corner-shape solid eligible.
+  const BEVELED_RECT: Polygon = {
+    vertices: [[0, 0, 0], [2, 0, 0], [2, 2, 0], [0.5, 2, 0], [0, 1.5, 0]],
+    color: "#aaaaaa",
+  };
+
+  // Source-exact direct-image polygon (no texturePresentation — relies on the
+  // scene-level textureBackend/textureProjection defaults reaching the core
+  // filter env).
+  const DIRECT_IMAGE_QUAD: Polygon = {
+    vertices: [[0, 0, 0], [2, 0, 0], [2, 1, 0], [0, 1, 0]],
+    textureImageSource: {
+      url: "https://example.com/source.png",
+      width: 320,
+      height: 200,
+      sourceRect: { x: 16, y: 24, width: 80, height: 40 },
+    },
+  };
+
+  it("passes cornerShapeSupported to the core filter (beveled rect leaves the atlas)", () => {
+    const plan = computeTextureAtlasPlanPublic(BEVELED_RECT, 0);
+    const withCorner = filterAtlasPlans([plan], "baked", noDisable, makeDoc({ cornerShape: true }));
+    const withoutCorner = filterAtlasPlans([plan], "baked", noDisable, makeDoc({ cornerShape: false, borderShape: false, userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15" }));
+    expect(withCorner[0]).toBeNull();
+    expect(withoutCorner[0]).not.toBeNull();
+  });
+
+  it("passes textureBackend/textureProjection so direct-image leaves leave the atlas", () => {
+    const plan = computeTextureAtlasPlanPublic(DIRECT_IMAGE_QUAD, 0);
+    const doc = makeDoc({});
+    const withoutBackend = filterAtlasPlans([plan], "baked", noDisable, doc);
+    const withBackend = filterAtlasPlans([plan], "baked", noDisable, doc, "image", undefined, "affine");
+    expect(withoutBackend[0]).toBe(plan);
+    expect(withBackend[0]).toBeNull();
+  });
+});

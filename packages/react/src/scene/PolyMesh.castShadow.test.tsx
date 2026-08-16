@@ -123,6 +123,21 @@ describe("PolyMesh — castShadow", () => {
     expect(shadows[0]!.tagName.toLowerCase()).toBe("svg");
   });
 
+  it("castShadow with a custom polygon renderer emits no ground shadow", () => {
+    // A render-prop mesh owns its own leaves; the ground-shadow fallback
+    // projects renderer-owned geometry and would not match the custom
+    // output, so it is suppressed (mirrored by Vue's polygon slot gate).
+    const { container } = renderScene(
+      { textureLighting: "baked" },
+      {
+        polygons: [TRIANGLE],
+        castShadow: true,
+        children: (polygon: Polygon, index: number) => <b key={index} data-custom={String(index)} />,
+      },
+    );
+    expect(container.querySelectorAll(".polycss-shadow").length).toBe(0);
+  });
+
   it("castShadow in baked mode emits a single <svg> shadow per mesh with one compound <path>", () => {
     // Baked mode concatenates every casting polygon's projected outline
     // into ONE compound `d` (M…L…Z subpaths) rendered under

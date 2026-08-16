@@ -12,7 +12,7 @@ import {
   formatBorderShapeEntryMatrix,
 } from "@layoutit/polycss-core";
 import { isBorderShapeSupported } from "./detection";
-import { parseHex, rgbKey } from "./solidTriangleStyle";
+import { parseHex, rgbKey } from "@layoutit/polycss-core";
 
 // ---------------------------------------------------------------------------
 // Brush-inline-style ordering helper (needed by renderTextureBorderShapePoly)
