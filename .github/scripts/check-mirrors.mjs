@@ -73,13 +73,6 @@ export const IDENTICAL_GROUPS = [
     ],
   },
   {
-    name: "colorResolver (react↔vue)",
-    files: [
-      "packages/react/src/styles/colorResolver.ts",
-      "packages/vue/src/styles/colorResolver.ts",
-    ],
-  },
-  {
     name: "three subpath index (react↔vue)",
     files: [
       "packages/react/src/three/index.ts",
