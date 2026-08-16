@@ -139,8 +139,8 @@ The cap at 3 is deliberate — DOM cost.
 
 ### Other generators
 
-`axesHelperPolygons`, `arrowPolygons`, and `ringQuadPolygons` (core and
-`@layoutit/polycss` only — see the note at the top).
+`axesHelperPolygons` and `arrowPolygons` (all packages), plus `ringQuadPolygons`
+(core and `@layoutit/polycss` only — see the note at the top).
 
 ## Usage
 
@@ -152,12 +152,15 @@ scene.add(createPolyTorus({ radius: 60, tube: 18, color: "#4ecdc4" }));
 ```
 
 ```tsx
-// React / Vue — geometry options plus the common mesh props
-<PolyScene>
-  <PolyBox size={80} color="#ffd166" />
-  <PolySphere radius={40} subdivisions={2} color="#7dd3fc" position={[120, 0, 0]} />
-  <PolyTorus radius={60} tube={18} color="#4ecdc4" position={[-120, 0, 0]} />
-</PolyScene>
+// React / Vue — geometry options plus the common mesh props.
+// PolyScene throws outside a camera component, so it is always wrapped.
+<PolyCamera rotX={65} rotY={45}>
+  <PolyScene>
+    <PolyBox size={80} color="#ffd166" />
+    <PolySphere radius={40} subdivisions={2} color="#7dd3fc" position={[120, 0, 0]} />
+    <PolyTorus radius={60} tube={18} color="#4ecdc4" position={[-120, 0, 0]} />
+  </PolyScene>
+</PolyCamera>
 ```
 
 ```html

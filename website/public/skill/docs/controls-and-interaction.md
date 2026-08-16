@@ -163,11 +163,13 @@ work — in every entry point.
 ```
 
 ```js
-// Vanilla custom elements
+// Vanilla custom elements. `<poly-polygon>` children go inside the
+// <poly-scene> element itself, not a createPolyScene handle.
+const sceneEl = document.querySelector("poly-scene");
 const el = document.createElement("poly-polygon");
-el.setAttribute("vertices", JSON.stringify(p.vertices));
+el.setAttribute("vertices", JSON.stringify(polygon.vertices));
 el.addEventListener("click", () => el.classList.toggle("selected"));
-scene.appendChild(el);
+sceneEl.appendChild(el);
 ```
 
 Use `polygon.data` to attach `data-*` attributes for CSS selectors and event

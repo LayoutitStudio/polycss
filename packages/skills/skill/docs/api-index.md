@@ -109,7 +109,8 @@ React or Vue app import them from `@layoutit/polycss-core`.
 `worldDirectionToCss` / `worldDirectionToPolyCss`,
 `worldDirectionalLightToCss` / `worldDirectionalLightToPolyCss`.
 
-Constant: `BASE_TILE` (50).
+Constants: `BASE_TILE` (50) and `POLY_DEFAULT_SHADOW_LIFT` (0.05, the default
+clearance between a receiver face and the shadow painted on it).
 
 ## Diagnostics and DOM helpers
 

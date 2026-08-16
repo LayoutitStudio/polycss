@@ -50,6 +50,7 @@ import {
   DirectionalLight,
   PointLight,
   AmbientLight,
+  boxPolygons,
   transformPolygonsToPoly,
   mountPolyThreeScene,
 } from "@layoutit/polycss/three";

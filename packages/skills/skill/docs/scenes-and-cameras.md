@@ -88,7 +88,7 @@ Prefer leaving it alone.
 | `meshResolution` | `"lossy" \| "lossless"` | Default `"lossy"`. |
 | `stableDom` | `boolean` | Vanilla only; needed for skeletal animation. |
 | `shadowDefinition` | `number` | Per-mesh parametric shadow detail. |
-| `excludeFromAutoCenter` | `boolean` | **Vanilla only.** Keeps this mesh out of the scene's auto-center bbox — for helpers and debug overlays. |
+| `excludeFromAutoCenter` | `boolean` | **Vanilla only, and a `scene.add(result, transform)` option** — there is no React/Vue prop. Keeps this mesh out of the scene's auto-center bbox, for helpers and debug overlays. |
 
 React/Vue additionally expose per-mesh `textureLighting`, `textureQuality`,
 `textureLeafSizing`, `textureImageRendering`, `textureBackend`,

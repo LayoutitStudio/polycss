@@ -46,14 +46,29 @@ scene.destroy();   // removes the scene and disposes registered meshes
 ```ts
 interface ParseResult {
   polygons: Polygon[];
-  objectUrls: string[];
-  warnings: string[];
-  dispose: () => void;   // revokes blob URLs
+  objectUrls: string[];          // blob URLs minted during parse — do not mutate
+  warnings: string[];            // non-fatal parse warnings
+  dispose: () => void;           // idempotent; revokes the object URLs
+  voxelSource?: PolyVoxelSource;         // `.vox` fast-path marker
+  animation?: ParseAnimationController;  // glTF/GLB clips, when present
 }
 ```
 
-React/Vue wrap this as `usePolyMesh(url, opts)` → `{ polygons, loading, error }`,
-which disposes on unmount.
+React/Vue wrap this as `usePolyMesh(url, opts)`, which disposes on unmount and
+returns more than the polygons:
+
+```ts
+interface UseMeshResult {
+  polygons: Polygon[];
+  voxelSource: ParseResult["voxelSource"];
+  loading: boolean;
+  error: Error | null;
+  warnings: string[];
+  dispose: () => void;   // also called for you on unmount
+}
+```
+
+Read `warnings` — parse problems surface there rather than throwing.
 
 Format-specific parsers are also exported directly: `parseObj`, `parseStl`,
 `parseGltf`, `parseVox`. Use them when you need the raw parser output without
@@ -124,14 +139,19 @@ thresholds and the STL exception.
 ```
 
 ```ts
-// Vanilla: one mesh handle per polygon
+// Vanilla: one mesh handle per polygon.
 const result = await loadMesh("/character.glb");
 const handles = result.polygons.map((polygon, i) =>
   scene.add(
+    // Each wrapper is a view onto `result`; it owns no URLs of its own.
     { polygons: [polygon], objectUrls: [], warnings: [], dispose: () => {} },
     { id: `polygon-${i}`, merge: false },
   ),
 );
+
+// Keep `result` — the wrappers above have no-op disposers, so its object URLs
+// are only released when you dispose the original.
+// later: handles.forEach((h) => h.remove()); result.dispose();
 ```
 
 Merged polygons lose per-polygon DOM addressing, which is why `merge: false`
