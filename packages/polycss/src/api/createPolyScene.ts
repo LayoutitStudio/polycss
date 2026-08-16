@@ -24,47 +24,29 @@ import type {
   Polygon,
   Vec3,
   PolyPointLight,
-  CameraCullNormalGroup,
-  CameraCullRotation,
 } from "@layoutit/polycss-core";
 import type {
   PolyPerspectiveCameraHandle,
   PolyOrthographicCameraHandle,
 } from "./createPolyCamera";
 import {
-  CAMERA_BACKFACE_CULL_EPS,
   DEFAULT_SEAM_BLEED,
-  VOXEL_CAMERA_CULL_NORMAL_LIMIT,
-  cameraCullNormalKey,
-  cameraCullVisibleSignature,
   computeSceneBbox,
   computeLightVisibility,
-  cullInteriorPolygons,
   capturePolyCameraSnapshot,
-  findOverlappingPolygonDuplicates,
   inverseRotateVec3,
-  isAxisAlignedSurfaceNormal,
-  isVoxelCameraCullableNormalGroups,
-  normalFacesCamera,
   optimizeMeshPolygons,
-  parseHexColor,
-  polygonCssSurfaceNormal,
-  POLY_DEFAULT_SHADOW_LIFT,
+
 } from "@layoutit/polycss-core";
 import {
-  cssBorderShapeForPlan,
   getSolidPaintDefaults,
   renderPolygonsWithTextureAtlas,
   renderPolygonsWithTextureAtlasAsync,
   renderPolygonsWithStableTriangles,
   updateStableTriangleFrame,
   updatePolygonsWithStableTopology,
-  type RenderedPoly,
   type SolidPaintDefaults,
 } from "../render/textureAtlas";
-import {
-  applyPolygonDataAttrs,
-} from "../render/atlas/emit";
 import {
   createPolyVoxelRenderer,
   type PolyVoxelRenderer,
@@ -76,10 +58,7 @@ import {
   buildMeshTransform,
   buildSceneTransformFromCamera,
   effectiveCssZoom,
-  quantizeNormalKey,
-  worldDirectionToCss,
   worldDirectionalLightToCss,
-  worldPositionToCss,
 } from "./scene/transforms";
 import {
   shadowOptsEqual,
@@ -87,34 +66,55 @@ import {
   vec3Equal,
 } from "./scene/equality";
 import {
-  BAKED_SOLID_PREVIEW_ACTIVE_VAR,
-  applyBakedSolidColor,
-  applyBakedSolidPreviewPaint,
-  applyDynamicColorVars,
   applyDynamicLightVars,
-  applyLightingVars,
   applySolidPaintVars,
-  clearLightingVars,
-  setStylePropertyIfChanged,
 } from "./scene/lightingVars";
-import {
-  hideGroundShadow as hideGroundShadowImpl,
-} from "./scene/shadowSvg";
 import type {
   MeshEntry,
 } from "./scene/internalTypes";
 import { createSceneContext } from "./scene/sceneContext";
 import type { SceneContext } from "./scene/sceneContext";
-import { emitGroundShadow as emitGroundShadowImpl } from "./scene/groundShadow";
 import {
-  disposeReceiverShadowMounts,
-  emitReceiverShadows as emitReceiverShadowsImpl,
-} from "./scene/receiverShadow";
+  TEXTURES_READY,
+  clearRendered,
+  setRendered,
+} from "./scene/mountLifecycle";
 import {
-  clearAllSceneShadows as clearAllSceneShadowsImpl,
+  cameraCullRotation,
+  canDomCullCamera,
+  recomputeCameraCullGroups,
+  syncCameraCullSignature,
+} from "./scene/cameraCull";
+import {
+  syncMountedRendered,
+  syncMountedRenderedChunked,
+  syncMountedRenderedForCameraChange,
+} from "./scene/mountSync";
+import {
+  canRenderVoxelDirect,
+  localPointLightsForEntry,
+  requestRebakeAtlas,
+} from "./scene/rebake";
+import {
+  applyMeshLightVarOverride,
+  clearBakedSolidLightingPreview,
+  commitBakedSolidLighting,
+  previewBakedSolidLighting,
+} from "./scene/bakedLighting";
+import { tryUpdatePolygonLeafOnly } from "./scene/polygonPatch";
+import { disposeReceiverShadowMounts } from "./scene/receiverShadow";
+import {
   clearCasterItemsCache as clearCasterItemsCacheImpl,
   clearReceiverShadowCache as clearReceiverShadowCacheImpl,
 } from "./scene/shadowCache";
+import {
+  cachedOverlappingPolygonDuplicates,
+  emitSceneShadows,
+  emitShadowLeaves,
+  invalidateShadowLightCache,
+  maybeEmitAnimationShadow,
+  recomputeShadowGround,
+} from "./scene/shadowOrchestrator";
 import type {
   InternalPolyMeshHandle,
   InternalSetPolygonsOptions,
@@ -133,12 +133,6 @@ export type {
   PolySceneOptions,
 } from "./scene/types";
 
-// Used only by the internal async mesh update path. Batching DOM insertion
-// keeps large gallery meshes below Chrome's long-task warning threshold
-// without changing the synchronous public setPolygons() contract.
-const ASYNC_MOUNT_BATCH_SIZE = 750;
-const DEFAULT_SCENE_PERSPECTIVE = 32000;
-const TEXTURES_READY = Promise.resolve();
 function normalizeSceneOptions<T extends Partial<Omit<PolySceneOptions, "camera">>>(options: T): T {
   if (!Object.prototype.hasOwnProperty.call(options, "seamBleed") || options.seamBleed !== undefined) {
     return options;
@@ -146,48 +140,6 @@ function normalizeSceneOptions<T extends Partial<Omit<PolySceneOptions, "camera"
   return { ...options, seamBleed: DEFAULT_SEAM_BLEED };
 }
 
-// Sentinel that keeps broad camera DOM culling disabled once a mesh proves
-// it has non-voxel normals; callers never inspect group contents directly.
-const NON_CULLABLE_CAMERA_GROUP: CameraCullNormalGroup = {
-  key: "non-cullable",
-  normal: [1, 1, 0],
-};
-
-function nonCullableCameraGroups(): CameraCullNormalGroup[] {
-  return [NON_CULLABLE_CAMERA_GROUP];
-}
-
-/** Shared overlap-dedup cache. `findOverlappingPolygonDuplicates` is O(n²)
- *  and a pure geometric property of the polygon array + options, so both
- *  the shadow-emit path (0.5/0.95 thresholds) and the raytrace path
- *  (0.12/0.98 thresholds) reuse one cache keyed on polygon-array identity
- *  with the option set as the inner key. WeakMap → dropped arrays free
- *  their entries. */
-const overlapDedupCache = new WeakMap<readonly Polygon[], Map<string, ReadonlySet<number>>>();
-function cachedOverlappingPolygonDuplicates(
-  polygons: Polygon[],
-  options: {
-    normalTolerance: number;
-    distanceTolerance: number;
-    overlapFraction: number;
-    preserveDoubleSidedBackfaces: boolean;
-  },
-): ReadonlySet<number> {
-  const optKey =
-    `${options.normalTolerance}|${options.distanceTolerance}|` +
-    `${options.overlapFraction}|${options.preserveDoubleSidedBackfaces ? 1 : 0}`;
-  let byOptions = overlapDedupCache.get(polygons);
-  if (!byOptions) {
-    byOptions = new Map();
-    overlapDedupCache.set(polygons, byOptions);
-  }
-  let dropped = byOptions.get(optKey);
-  if (!dropped) {
-    dropped = findOverlappingPolygonDuplicates(polygons, options);
-    byOptions.set(optKey, dropped);
-  }
-  return dropped;
-}
 
 export function createPolyScene(
   host: HTMLElement,
@@ -272,75 +224,6 @@ export function createPolyScene(
   // findMeshByElement and click-target resolution use it.
   const meshByElement = new WeakMap<HTMLElement, MeshEntry>();
 
-  // Shadow SVG state (ground SVG element + visibility + cached ground CSS-Z).
-  // Sourced from the SceneContext so extracted helpers can read+write the
-  // same bag. See ./scene/shadowSvg for the helpers that operate on it.
-  const shadowSvgState = ctx.shadowSvgState;
-  const hideGroundShadow = () => hideGroundShadowImpl(shadowSvgState);
-
-  const clearAllSceneShadows = () => clearAllSceneShadowsImpl(ctx);
-
-  // H3: quantize the directional light at ~0.57° (rounding each normalized
-  // component to 0.01) and skip emitSceneShadows when the rounded vector
-  // matches the cached frame. Slow-drag jitter at this resolution is below
-  // human perception, and at ~0.5°/frame in the bench most consecutive
-  // ticks collapse into the same bucket. Any caster/receiver geometry or
-  // shadow-appearance change MUST call invalidateShadowLightCache(); the
-  // cache key is light-only.
-  let lastEmittedShadowLightKey: string | null = null;
-  // Progressive refinement: a light-drag emit renders at `shadow.dragDefinition`
-  // (laggless), then this timer re-emits at full `shadow.definition` once the
-  // light settles. Reset on every progressive emit; cleared on dispose.
-  let shadowRefineTimer: ReturnType<typeof setTimeout> | null = null;
-  const SHADOW_REFINE_MS = 140;
-  // Animated-shadow throttle: re-emit shadows at most this often while a mesh
-  // deforms (shadow.followAnimation). ~12fps keeps a parametric reproject cheap.
-  // Trailing-edge: a deform landing inside the window schedules one deferred
-  // emit for when the window elapses, so a paused animation never leaves a
-  // stale shadow (the emit reads entry.polygons at fire time — latest pose).
-  let lastAnimationShadowEmit = 0;
-  let animationShadowTrailingTimer: ReturnType<typeof setTimeout> | null = null;
-  const ANIMATION_SHADOW_MS = 80;
-  function emitAnimationShadowNow(): void {
-    lastAnimationShadowEmit =
-      typeof performance !== "undefined" ? performance.now() : Date.now();
-    invalidateShadowLightCache();
-    emitSceneShadows();
-  }
-  function maybeEmitAnimationShadow(entry: MeshEntry): void {
-    if (!currentOptions.shadow?.followAnimation) return;
-    if (!entry.castShadow && !entry.receiveShadow) return;
-    const now = typeof performance !== "undefined" ? performance.now() : Date.now();
-    const elapsed = now - lastAnimationShadowEmit;
-    if (elapsed < ANIMATION_SHADOW_MS) {
-      if (animationShadowTrailingTimer === null) {
-        animationShadowTrailingTimer = setTimeout(() => {
-          animationShadowTrailingTimer = null;
-          if (!currentOptions.shadow?.followAnimation) return;
-          emitAnimationShadowNow();
-        }, ANIMATION_SHADOW_MS - elapsed);
-      }
-      return;
-    }
-    if (animationShadowTrailingTimer !== null) {
-      clearTimeout(animationShadowTrailingTimer);
-      animationShadowTrailingTimer = null;
-    }
-    emitAnimationShadowNow();
-  }
-  function quantizeLightDirKey(d: Vec3 | undefined): string | null {
-    if (!d) return null;
-    const len = Math.hypot(d[0], d[1], d[2]);
-    if (!Number.isFinite(len) || len <= 0) return null;
-    const nx = Math.round((d[0] / len) * 100) / 100;
-    const ny = Math.round((d[1] / len) * 100) / 100;
-    const nz = Math.round((d[2] / len) * 100) / 100;
-    return `${nx}|${ny}|${nz}`;
-  }
-  function invalidateShadowLightCache(): void {
-    lastEmittedShadowLightKey = null;
-  }
-
   // Cache-management closures over the SceneContext. The actual maps live
   // on `ctx` and are read/written by the extracted shadow emitters.
   const clearReceiverShadowCache = (entry?: MeshEntry) =>
@@ -365,16 +248,6 @@ export function createPolyScene(
     el.dataset.polycssCameraTarget = snapshot.state.target.join(",");
   }
 
-  function applySceneStyle(el: HTMLElement, opts: Omit<PolySceneOptions, "camera">): void {
-    applyCssZoomCompensation(el, layoutScale);
-    el.style.transform = buildSceneTransformFromCamera(camera, autoCenterOffset, layoutScale);
-    applyDynamicLightVars(el, opts);
-  }
-
-  function applySceneCameraTransform(el: HTMLElement): void {
-    el.style.transform = buildSceneTransformFromCamera(camera, autoCenterOffset, layoutScale);
-  }
-
   // Dynamic lighting cascade vars: PolyScene writes the directional + ambient
   // light setup to these custom properties on the scene root. Each polygon's
   // <i> bakes its own normal directly into an inline calc() that reads these
@@ -389,828 +262,14 @@ export function createPolyScene(
   // in the same frame there; the shadow projection works against 3D positions
   // that have already been through the axis swap, so it needs the light in
   // that same swapped frame.
-  function clearRendered(entry: MeshEntry): void {
-    entry.textureReadyPromise = TEXTURES_READY;
-    entry.voxelRenderer?.dispose();
-    entry.voxelRenderer = undefined;
-    disposeRendered(entry.rendered, entry.disposeAtlas);
-    entry.disposeAtlas = undefined;
-    entry.rendered.length = 0;
-    entry.renderedByPolygonIndex = [];
-    entry.cameraCullGroups = [];
-    entry.cameraCullSignature = "";
-    entry.solidLightingPreviewPrepared = false;
-    entry.solidLightingPreviewActive = false;
-    clearShadowLeaves(entry);
-    for (const child of Array.from(entry.wrapper.children)) {
-      if (child instanceof HTMLElement && child.classList.contains("polycss-bucket")) {
-        child.remove();
-      }
-    }
-    entry.hasBuckets = false;
+  function applySceneStyle(el: HTMLElement, opts: Omit<PolySceneOptions, "camera">): void {
+    applyCssZoomCompensation(el, layoutScale);
+    el.style.transform = buildSceneTransformFromCamera(camera, autoCenterOffset, layoutScale);
+    applyDynamicLightVars(el, opts);
   }
 
-  function firstPreservedChild(entry: MeshEntry): ChildNode | null {
-    for (const child of Array.from(entry.wrapper.childNodes)) {
-      if (!(child instanceof HTMLElement)) return child;
-      if (child.classList.contains("polycss-bucket")) continue;
-      if (child.classList.contains("polycss-shadow")) continue;
-      const tag = child.tagName.toLowerCase();
-      if (tag === "b" || tag === "i" || tag === "s" || tag === "u" || tag === "q") continue;
-      return child;
-    }
-    return null;
-  }
-
-  function mountRenderedFragment(entry: MeshEntry, fragment: DocumentFragment, before: ChildNode | null): void {
-    if (before?.parentNode === entry.wrapper) {
-      entry.wrapper.insertBefore(fragment, before);
-    } else {
-      entry.wrapper.appendChild(fragment);
-    }
-  }
-
-  function clearShadowLeaves(entry: MeshEntry): void {
-    // Current shadows are scene-level SVGs, but retained internal `<q>` leaves
-    // can still be present during cleanup of already-mounted entries.
-    for (const el of entry.shadowRendered) {
-      if (el.parentNode) el.parentNode.removeChild(el);
-    }
-    entry.shadowRendered.length = 0;
-    // SVG shadow surfaces are scene-scoped (one per ground / receiver
-    // face, aggregating every caster). Any per-entry trigger that asks
-    // to clear leaves drops the whole scene-level set; emitSceneShadows
-    // will rebuild it next.
-    clearAllSceneShadows();
-  }
-
-  function disposeRendered(rendered: RenderedPoly[], disposeAtlas?: () => void): void {
-    disposeAtlas?.();
-    for (const r of rendered) {
-      try { r.dispose(); } catch { /* ignore */ }
-      if (r.element.parentNode) r.element.parentNode.removeChild(r.element);
-    }
-  }
-
-  function setRendered(
-    entry: MeshEntry,
-    rendered: RenderedPoly[],
-    disposeAtlas?: () => void,
-    textureReadyPromise?: Promise<void>,
-  ): void {
-    entry.rendered = rendered;
-    entry.renderedByPolygonIndex = [];
-    for (const item of rendered) {
-      entry.renderedByPolygonIndex[item.polygonIndex] = item;
-    }
-    entry.disposeAtlas = disposeAtlas;
-    entry.textureReadyPromise = textureReadyPromise
-      ? textureReadyPromise.catch(() => undefined)
-      : TEXTURES_READY;
-    entry.solidLightingPreviewPrepared = false;
-  }
-
-  function renderedItemForPolygon(entry: MeshEntry, polygonIndex: number): RenderedPoly | undefined {
-    const item = entry.renderedByPolygonIndex[polygonIndex];
-    return item?.polygonIndex === polygonIndex ? item : undefined;
-  }
-
-  function clearMountedRendered(entry: MeshEntry): void {
-    for (const child of Array.from(entry.wrapper.children)) {
-      if (child instanceof HTMLElement && child.classList.contains("polycss-bucket")) {
-        child.remove();
-      }
-    }
-    entry.hasBuckets = false;
-    for (const item of entry.rendered) {
-      if (item.element.parentNode) item.element.parentNode.removeChild(item.element);
-    }
-  }
-
-  function normalForRendered(entry: MeshEntry, item: RenderedPoly): Vec3 | null {
-    const poly = entry.polygons[item.polygonIndex];
-    if (entry.stableDom && poly) return polygonCssSurfaceNormal(poly);
-    return item.plan?.normal ?? (poly ? polygonCssSurfaceNormal(poly) : null);
-  }
-
-  function renderedItemsForCamera(entry: MeshEntry): RenderedPoly[] {
-    if (!canDomCullCamera(entry)) return entry.rendered;
-    const rotation = cameraCullRotation(entry);
-    return entry.rendered.filter((item) =>
-      renderedItemFacesCamera(entry, item, CAMERA_BACKFACE_CULL_EPS, rotation)
-    );
-  }
-
-  function cameraCullRotation(entry: MeshEntry): CameraCullRotation {
-    return {
-      rotX: camera.state.rotX,
-      rotY: camera.state.rotY,
-      meshRotation: entry.handle.transform.rotation,
-    };
-  }
-
-  function renderedItemFacesCamera(
-    entry: MeshEntry,
-    item: RenderedPoly,
-    depthThreshold = CAMERA_BACKFACE_CULL_EPS,
-    rotation = cameraCullRotation(entry),
-  ): boolean {
-    const normal = normalForRendered(entry, item);
-    return normal === null || normalFacesCamera(normal, rotation, depthThreshold);
-  }
-
-  function recomputeCameraCullGroups(entry: MeshEntry): void {
-    if (entry.excludeFromAutoCenter) {
-      entry.cameraCullGroups = [];
-      return;
-    }
-    const groups = new Map<string, Vec3>();
-    for (const item of entry.rendered) {
-      const normal = normalForRendered(entry, item);
-      if (!normal) continue;
-      if (!isAxisAlignedSurfaceNormal(normal)) {
-        entry.cameraCullGroups = nonCullableCameraGroups();
-        return;
-      }
-      const key = cameraCullNormalKey(normal);
-      if (!groups.has(key)) {
-        groups.set(key, normal);
-        if (groups.size > VOXEL_CAMERA_CULL_NORMAL_LIMIT) {
-          entry.cameraCullGroups = nonCullableCameraGroups();
-          return;
-        }
-      }
-    }
-    entry.cameraCullGroups = Array.from(groups, ([key, normal]) => ({ key, normal }));
-  }
-
-  function cameraCullSignature(entry: MeshEntry): string {
-    return canDomCullCamera(entry)
-      ? cameraCullVisibleSignature(entry.cameraCullGroups, cameraCullRotation(entry))
-      : "all";
-  }
-
-  function canDomCullCamera(entry: MeshEntry): boolean {
-    return !entry.excludeFromAutoCenter &&
-      isVoxelCameraCullableNormalGroups(entry.cameraCullGroups);
-  }
-
-  function syncCameraCullSignature(entry: MeshEntry): void {
-    entry.cameraCullSignature = canDomCullCamera(entry)
-      ? cameraCullSignature(entry)
-      : "all";
-  }
-
-  function patchMountedRenderedForCamera(entry: MeshEntry, depthThreshold: number): boolean {
-    const visible = new Array<boolean>(entry.rendered.length);
-    let changed = false;
-    const rotation = cameraCullRotation(entry);
-
-    for (let i = 0; i < entry.rendered.length; i += 1) {
-      const item = entry.rendered[i];
-      const shouldMount = renderedItemFacesCamera(entry, item, depthThreshold, rotation);
-      visible[i] = shouldMount;
-    }
-
-    let removeStart: HTMLElement | null = null;
-    let removeEnd: HTMLElement | null = null;
-    const flushRemove = () => {
-      if (!removeStart || !removeEnd) return;
-      if (removeStart === removeEnd) {
-        removeStart.remove();
-      } else {
-        const range = doc.createRange();
-        range.setStartBefore(removeStart);
-        range.setEndAfter(removeEnd);
-        range.deleteContents();
-        range.detach();
-      }
-      removeStart = null;
-      removeEnd = null;
-      changed = true;
-    };
-
-    for (let i = 0; i < entry.rendered.length; i += 1) {
-      const item = entry.rendered[i];
-      if (!visible[i] && item.element.parentNode === entry.wrapper) {
-        if (removeEnd && removeEnd.nextSibling === item.element) {
-          removeEnd = item.element;
-        } else {
-          flushRemove();
-          removeStart = item.element;
-          removeEnd = item.element;
-        }
-      } else {
-        flushRemove();
-      }
-    }
-    flushRemove();
-
-    const insertionPointAfter = (index: number): ChildNode | null => {
-      for (let i = index; i < entry.rendered.length; i += 1) {
-        const next = entry.rendered[i].element;
-        if (next.parentNode === entry.wrapper) return next;
-      }
-      return firstPreservedChild(entry);
-    };
-
-    let addStart = -1;
-    const flushAdd = (endExclusive: number) => {
-      if (addStart < 0) return;
-      const fragment = doc.createDocumentFragment();
-      for (let i = addStart; i < endExclusive; i += 1) {
-        const item = entry.rendered[i];
-        restoreInlineDynamicNormalVars(entry, item);
-        fragment.appendChild(item.element);
-      }
-      mountRenderedFragment(entry, fragment, insertionPointAfter(endExclusive));
-      addStart = -1;
-      changed = true;
-    };
-
-    for (let i = 0; i < entry.rendered.length; i += 1) {
-      const item = entry.rendered[i];
-      if (visible[i] && item.element.parentNode !== entry.wrapper) {
-        if (addStart < 0) addStart = i;
-      } else {
-        flushAdd(i);
-      }
-    }
-    flushAdd(entry.rendered.length);
-
-    return changed;
-  }
-
-  function syncMountedRenderedForCameraChange(entry: MeshEntry, force = false): void {
-    if (entry.voxelRenderer) {
-      if (force) entry.voxelRenderer.render(cameraCullRotation(entry));
-      else entry.voxelRenderer.syncCamera(cameraCullRotation(entry));
-      entry.cameraCullSignature = "voxel-direct";
-      return;
-    }
-
-    if (!canDomCullCamera(entry)) {
-      const wasCulled = entry.cameraCullSignature !== "all";
-      entry.cameraCullSignature = "all";
-      if (wasCulled) remountEntry(entry);
-      return;
-    }
-
-    if (entry.hasBuckets) {
-      remountEntryIfCullSignatureChanged(entry, force);
-      return;
-    }
-
-    const nextSignature = cameraCullSignature(entry);
-    if (!force && nextSignature === entry.cameraCullSignature) return;
-
-    const changed = patchMountedRenderedForCamera(entry, CAMERA_BACKFACE_CULL_EPS);
-    entry.cameraCullSignature = nextSignature;
-    if (changed) emitShadowLeaves(entry);
-  }
-
-  function remountEntryIfCullSignatureChanged(entry: MeshEntry, force = false): void {
-    const next = canDomCullCamera(entry)
-      ? cameraCullSignature(entry)
-      : "all";
-    if (!force && next === entry.cameraCullSignature) return;
-    remountEntry(entry);
-  }
-
-  function dynamicNormalForRendered(entry: MeshEntry, item: RenderedPoly): Vec3 | null {
-    return normalForRendered(entry, item);
-  }
-
-  function restoreInlineDynamicNormalVars(entry: MeshEntry, item: RenderedPoly): void {
-    if (currentOptions.textureLighting !== "dynamic") return;
-    const normal = dynamicNormalForRendered(entry, item);
-    if (!normal) return;
-    item.element.style.setProperty("--pnx", normal[0].toFixed(4));
-    item.element.style.setProperty("--pny", normal[1].toFixed(4));
-    item.element.style.setProperty("--pnz", normal[2].toFixed(4));
-  }
-
-  function syncMountedRendered(entry: MeshEntry): void {
-    clearMountedRendered(entry);
-    entry.hasBuckets = false;
-    const skipBucketNormalCleanup = entry.skipBucketNormalCleanupOnce;
-    entry.skipBucketNormalCleanupOnce = false;
-    const fragment = doc.createDocumentFragment();
-
-    // Lambert-bucketing only pays off in dynamic mode, where the cascade
-    // recomputes lambert per polygon every frame. Baked mode bakes lambert
-    // into atlas pixels at parse time — no per-frame computation to save.
-    const useBuckets =
-      currentOptions.textureLighting === "dynamic" && !entry.stableDom;
-
-    interface BucketGroup {
-      vec: Vec3;
-      items: RenderedPoly[];
-    }
-    const groups = new Map<string, BucketGroup>();
-    const soloItems: RenderedPoly[] = [];
-
-    // Pass 1 — gather per (quantized-normal × color) keys.
-    for (const item of renderedItemsForCamera(entry)) {
-      const poly = entry.polygons[item.polygonIndex];
-      const q = useBuckets && poly ? quantizeNormalKey(poly) : null;
-      if (!q) {
-        soloItems.push(item);
-        continue;
-      }
-      const key = q.key + "|" + (poly.color ?? "");
-      let group = groups.get(key);
-      if (!group) {
-        group = { vec: q.vec, items: [] };
-        groups.set(key, group);
-      }
-      group.items.push(item);
-    }
-
-    // Pass 2 — wrap groups of ≥ 2 (where one bucket-level lambert calc
-    // beats the per-poly calcs it replaces). Singletons fall back to the
-    // per-poly path so we don't add a wrapper that costs more than it saves.
-    for (const item of soloItems) {
-      restoreInlineDynamicNormalVars(entry, item);
-      fragment.appendChild(item.element);
-    }
-    for (const group of groups.values()) {
-      if (group.items.length < 2) {
-        for (const item of group.items) {
-          restoreInlineDynamicNormalVars(entry, item);
-          fragment.appendChild(item.element);
-        }
-        continue;
-      }
-      const bucketEl = doc.createElement("div");
-      bucketEl.className = "polycss-bucket";
-      entry.hasBuckets = true;
-      bucketEl.style.setProperty("--pnx", String(group.vec[0]));
-      bucketEl.style.setProperty("--pny", String(group.vec[1]));
-      bucketEl.style.setProperty("--pnz", String(group.vec[2]));
-      for (const item of group.items) {
-        bucketEl.appendChild(item.element);
-        // Atlas sets per-poly --pnx/y/z inline (for the non-bucketed
-        // dynamic-lighting path used by other consumers). Inside a bucket
-        // those inline values are dead weight — the lambert is computed at
-        // the wrapper and inherited. Strip them.
-        if (!skipBucketNormalCleanup || item.kind === "triangle") {
-          item.element.style.removeProperty("--pnx");
-          item.element.style.removeProperty("--pny");
-          item.element.style.removeProperty("--pnz");
-        }
-      }
-      fragment.appendChild(bucketEl);
-    }
-
-    mountRenderedFragment(entry, fragment, firstPreservedChild(entry));
-    syncCameraCullSignature(entry);
-  }
-
-  function yieldToMainThread(): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, 0));
-  }
-
-  async function syncMountedRenderedChunked(
-    entry: MeshEntry,
-    shouldCancel: () => boolean,
-  ): Promise<boolean> {
-    const useBuckets =
-      currentOptions.textureLighting === "dynamic" && !entry.stableDom;
-    if (useBuckets) {
-      syncMountedRendered(entry);
-      return !shouldCancel();
-    }
-
-    clearMountedRendered(entry);
-    let fragment = doc.createDocumentFragment();
-    const before = firstPreservedChild(entry);
-    let count = 0;
-    for (const item of renderedItemsForCamera(entry)) {
-      if (shouldCancel()) return false;
-      restoreInlineDynamicNormalVars(entry, item);
-      fragment.appendChild(item.element);
-      count++;
-      if (count % ASYNC_MOUNT_BATCH_SIZE === 0) {
-        mountRenderedFragment(entry, fragment, before);
-        fragment = doc.createDocumentFragment();
-        await yieldToMainThread();
-      }
-    }
-    if (fragment.childNodes.length > 0) mountRenderedFragment(entry, fragment, before);
-    syncCameraCullSignature(entry);
-    return !shouldCancel();
-  }
-
-  // Dynamic-mode per-mesh light override: when the mesh has a non-zero rotation
-  // and the scene is in dynamic lighting mode, emit --plx/ly/lz on the
-  // wrapper element, computed by inverse-rotating the world-space light into the
-  // mesh's local frame. The cascade means these override the scene-level vars
-  // only for polygons inside this wrapper. Cleared when conditions are not met.
-  function applyMeshLightVarOverride(entry: MeshEntry, rotation: Vec3 | undefined): void {
-    const isDynamic = currentOptions.textureLighting === "dynamic";
-    const dir = currentOptions.directionalLight?.direction;
-    const hasNonZeroRotation = rotation && (rotation[0] !== 0 || rotation[1] !== 0 || rotation[2] !== 0);
-
-    if (!isDynamic || !hasNonZeroRotation || !dir) {
-      if (entry.lightOverrideSignature === "clear") return;
-      entry.wrapper.style.removeProperty("--plx");
-      entry.wrapper.style.removeProperty("--ply");
-      entry.wrapper.style.removeProperty("--plz");
-      entry.lightOverrideSignature = "clear";
-      return;
-    }
-
-    // dir is user-frame; rotation is also user-frame (Euler). Apply the
-    // inverse rotation first, then swap to CSS frame so the result dots
-    // correctly with the leaf's --pnx/--pny/--pnz (also CSS-frame).
-    const localDirUser = inverseRotateVec3(dir as Vec3, rotation as Vec3);
-    const localDir = worldDirectionToCss(localDirUser);
-    const len = Math.hypot(localDir[0], localDir[1], localDir[2]) || 1;
-    // H10: quantize to 0.01 (~0.57° angular resolution) matching the
-    // scene-root writes in lightingVars.applyLightingVars, so per-mesh
-    // overrides don't trigger style recalc on sub-quantum light changes.
-    const plx = (localDir[0] / len).toFixed(2);
-    const ply = (localDir[1] / len).toFixed(2);
-    const plz = (localDir[2] / len).toFixed(2);
-    const signature = `${plx}|${ply}|${plz}`;
-    if (entry.lightOverrideSignature === signature) return;
-    entry.wrapper.style.setProperty("--plx", plx);
-    entry.wrapper.style.setProperty("--ply", ply);
-    entry.wrapper.style.setProperty("--plz", plz);
-    entry.lightOverrideSignature = signature;
-  }
-
-  function restoreBakedSolidPaint(entry: MeshEntry): boolean {
-    let changed = false;
-    for (const item of entry.rendered) {
-      if (!item.plan || item.kind === "atlas" || item.plan.texture) continue;
-      const polygon = entry.polygons[item.polygonIndex];
-      if (!polygon) continue;
-      changed = applyBakedSolidColor(item, polygon, currentOptions) || changed;
-    }
-    entry.solidLightingPreviewPrepared = false;
-    entry.solidLightingPreviewActive = false;
-    return changed;
-  }
-
-  function prepareBakedSolidLightingPreview(entry: MeshEntry): boolean {
-    if ((currentOptions.textureLighting ?? "baked") !== "baked") return false;
-    let prepared = false;
-    for (const item of entry.rendered) {
-      if (!item.plan || item.kind === "atlas" || item.plan.texture) continue;
-      const polygon = entry.polygons[item.polygonIndex];
-      if (!polygon) continue;
-      applyBakedSolidPreviewPaint(item, polygon, item.plan.shadedColor);
-      prepared = true;
-    }
-    entry.solidLightingPreviewPrepared = prepared;
-    return prepared;
-  }
-
-  function installBakedSolidLightingPreview(entry: MeshEntry): boolean {
-    if ((currentOptions.textureLighting ?? "baked") !== "baked") return false;
-    if (!entry.solidLightingPreviewPrepared && !prepareBakedSolidLightingPreview(entry)) return false;
-    entry.solidLightingPreviewActive = true;
-    return true;
-  }
-
-  function needsBakedAtlasCommit(item: RenderedPoly): boolean {
-    return item.kind === "atlas" || !!item.plan?.texture;
-  }
-
-  function commitBakedSolidLighting(): boolean {
-    if ((currentOptions.textureLighting ?? "baked") !== "baked") return false;
-    let updated = false;
-    for (const entry of meshes) {
-      // Solid leaves (the bulk of the castle / cottage / etc.) always need
-      // their inline `color` re-baked at the new light direction — the
-      // preview-cascade was making them brighter than the pre-commit
-      // baseline, so without this they snap back to the OLD baked color on
-      // release and read as "the face just darkened/disappeared." This is
-      // CHEAP — `restoreBakedSolidPaint` walks the entry's solid leaves and
-      // updates inline color/--polycss-paint in place.
-      const solidChanged = restoreBakedSolidPaint(entry);
-      updated = solidChanged || updated;
-      if (entry.rendered.some(needsBakedAtlasCommit)) {
-        // In-place atlas swap (same path `mesh.rebakeAtlas()` uses) instead
-        // of the destructive `renderEntry()`. The destructive path calls
-        // `clearRendered(entry)` which removes EVERY leaf from the DOM and
-        // then asynchronously rebuilds the atlas — during that window the
-        // mesh's faces disappear visually. `rebakeRenderEntryInPlace` keeps
-        // the existing leaves mounted and only swaps the atlas bitmap URL
-        // on textured leaves.
-        rebakeRenderEntryInPlace(entry);
-        updated = true;
-      }
-    }
-    sceneEl.style.removeProperty(BAKED_SOLID_PREVIEW_ACTIVE_VAR);
-    for (const entry of meshes) {
-      clearLightingVars(entry.wrapper);
-      entry.solidLightingPreviewActive = false;
-    }
-    clearLightingVars(sceneEl);
-    return updated;
-  }
-
-  function clearBakedSolidLightingPreview(): void {
-    sceneEl.style.removeProperty(BAKED_SOLID_PREVIEW_ACTIVE_VAR);
-    for (const entry of meshes) {
-      if (!entry.solidLightingPreviewActive) continue;
-      restoreBakedSolidPaint(entry);
-      clearLightingVars(entry.wrapper);
-    }
-    if ((currentOptions.textureLighting ?? "baked") !== "dynamic") {
-      clearLightingVars(sceneEl);
-      // Preview shadow may have used a different light direction than the
-      // committed currentOptions; bust the cache so the restored shadow
-      // re-emits even if the quantized key happens to match.
-      invalidateShadowLightCache();
-      emitSceneShadows();
-    }
-  }
-
-  function applyPreviewMeshLightVars(
-    entry: MeshEntry,
-    next: Pick<Omit<PolySceneOptions, "camera">, "directionalLight" | "ambientLight">,
-  ): void {
-    const rotation = entry.handle.transform.rotation;
-    const dir = next.directionalLight?.direction ?? currentOptions.directionalLight?.direction;
-    const hasNonZeroRotation = rotation && (rotation[0] !== 0 || rotation[1] !== 0 || rotation[2] !== 0);
-    if (!hasNonZeroRotation || !dir) {
-      clearLightingVars(entry.wrapper);
-      return;
-    }
-    const localDir = inverseRotateVec3(dir as Vec3, rotation as Vec3);
-    applyLightingVars(entry.wrapper, {
-      ...currentOptions,
-      ...next,
-      directionalLight: {
-        ...currentOptions.directionalLight,
-        ...next.directionalLight,
-        direction: localDir,
-      },
-    });
-  }
-
-  function previewBakedSolidLighting(
-    next: Pick<Omit<PolySceneOptions, "camera">, "directionalLight" | "ambientLight"> & {
-      skipShadows?: boolean;
-    },
-  ): boolean {
-    if ((currentOptions.textureLighting ?? "baked") !== "baked") return false;
-    applyLightingVars(sceneEl, { ...currentOptions, ...next });
-    if (!next.skipShadows && next.directionalLight?.direction) {
-      // Interactive light preview = motion → progressive drag definition.
-      emitSceneShadows(next.directionalLight.direction as Vec3, { progressive: true });
-    }
-    let installed = false;
-    for (const entry of meshes) {
-      applyPreviewMeshLightVars(entry, next);
-      installed = installBakedSolidLightingPreview(entry) || installed;
-    }
-    if (installed) setStylePropertyIfChanged(sceneEl, BAKED_SOLID_PREVIEW_ACTIVE_VAR, "1");
-    else sceneEl.style.removeProperty(BAKED_SOLID_PREVIEW_ACTIVE_VAR);
-    return installed;
-  }
-
-  function tryUpdatePolygonColorOnly(entry: MeshEntry, polygonIndex: number, color: string | undefined): boolean {
-    const polygon = entry.polygons[polygonIndex];
-    if (!polygon) return false;
-    const item = renderedItemForPolygon(entry, polygonIndex);
-    if (!item) return false;
-    const textureLighting = currentOptions.textureLighting ?? "baked";
-    if (textureLighting === "dynamic") {
-      applyDynamicColorVars(item.element, color);
-      return true;
-    }
-    if (textureLighting === "baked") {
-      return applyBakedSolidColor(item, polygon, currentOptions);
-    }
-    return false;
-  }
-
-  function tryUpdatePolygonDataOnly(entry: MeshEntry, polygonIndex: number): boolean {
-    const polygon = entry.polygons[polygonIndex];
-    if (!polygon) return false;
-    const item = renderedItemForPolygon(entry, polygonIndex);
-    if (!item) return false;
-    applyPolygonDataAttrs(item.element, polygon, polygonIndex);
-    return true;
-  }
-
-  function tryUpdatePolygonLeafOnly(entry: MeshEntry, polygonIndex: number, partialKeys: string[]): boolean {
-    if (partialKeys.length === 0 || !partialKeys.every((key) => key === "color" || key === "data")) {
-      return false;
-    }
-    if (
-      partialKeys.includes("color") &&
-      !tryUpdatePolygonColorOnly(entry, polygonIndex, entry.polygons[polygonIndex]?.color)
-    ) {
-      return false;
-    }
-    if (partialKeys.includes("data") && !tryUpdatePolygonDataOnly(entry, polygonIndex)) {
-      return false;
-    }
-    return true;
-  }
-
-  // Refreshes scene-level shadow SVGs for both lighting modes. Callers pass the
-  // entry that changed, but emission is scene-wide because every receiving
-  // surface aggregates every caster into one compound path. This is the
-  // geometry-change entry point — bust the H3 light-quantize cache so the
-  // next emit isn't short-circuited against a stale frame.
-  function emitShadowLeaves(_entry: MeshEntry): void {
-    invalidateShadowLightCache();
-    emitSceneShadows();
-  }
-
-  // Refreshes every shadow SVG in the scene. Iterates each SURFACE (the
-  // global ground + every receiver face) once, then sweeps every caster's
-  // projection onto that surface into the same compound path. Mounted SVG
-  // elements are reused across light changes; fill-rule=nonzero collapses
-  // overlapping CCW outlines into one filled silhouette per surface.
-  function emitSceneShadows(lightDirectionOverride?: Vec3, opts?: { progressive?: boolean }): void {
-    // Progressive: a light-drag emit uses `dragDefinition` (set the ctx flag the
-    // receiver projector reads), then schedules ONE debounced full-def refine
-    // after motion stops. Reset the timer each progressive call so a continuous
-    // drag stays low-def until it settles. Geometry/texture-change emits pass
-    // no `progressive` flag and always render at full definition.
-    const sh = currentOptions.shadow;
-    const wantProgressive = !!opts?.progressive
-      && !!sh?.parametric
-      && sh?.dragDefinition != null
-      && sh.dragDefinition < (sh.definition ?? 16);
-    ctx.shadowDragActive = wantProgressive;
-    if (wantProgressive) {
-      if (shadowRefineTimer) clearTimeout(shadowRefineTimer);
-      shadowRefineTimer = setTimeout(() => {
-        shadowRefineTimer = null;
-        ctx.shadowDragActive = false;
-        invalidateShadowLightCache();
-        emitSceneShadows();
-      }, SHADOW_REFINE_MS);
-    }
-    const casters: MeshEntry[] = [];
-    for (const m of meshes) if (!m.disposed && m.castShadow) casters.push(m);
-    if (casters.length === 0) {
-      clearAllSceneShadows();
-      lastEmittedShadowLightKey = null;
-      return;
-    }
-
-    const shadowColor = currentOptions.shadow?.color ?? "#000000";
-    const shadowOpacity = currentOptions.shadow?.opacity ?? 0.25;
-    const parsed = parseHexColor(shadowColor)?.rgb ?? [0, 0, 0];
-    const r = parsed[0], g = parsed[1], b = parsed[2];
-    // Vertices flow into shadow projection in CSS frame (worldPositionToCss);
-    // the light direction must be in the same frame for the projection math.
-    const userLightDir = lightDirectionOverride
-      ?? currentOptions.directionalLight?.direction
-      ?? ([0.4, -0.7, 0.59] as Vec3);
-    const lightDir = worldDirectionToCss(userLightDir);
-
-    // H3: short-circuit when the quantized light direction matches the cached
-    // frame. invalidateShadowLightCache() is called by every code path that
-    // mutates caster/receiver geometry or shadow appearance, so a cache hit
-    // here means "same light, same scene → previous SVG content is still valid".
-    // Point lights are baked-mode only (they don't drive dynamic-mode surface
-    // shading), so in dynamic mode they must not drive shadows either —
-    // otherwise colored point shadows appear over a floor the same lights
-    // never lit, which reads as broken. Dynamic mode → directional shadows
-    // only (ambient fill). Baked mode → full point participation.
-    const pointLightsForShadow = currentOptions.textureLighting === "dynamic"
-      ? []
-      : (currentOptions.pointLights ?? []);
-    // ALL point lights in CSS frame — the shaded shadow color needs every
-    // light that illuminates the receiver (even non-casters), minus the one
-    // being shadowed. `shadowPointIndices` are the entries that cast.
-    const allPointLightsCss = pointLightsForShadow.map((pl) => ({
-      position: worldPositionToCss(pl.position),
-      color: pl.color,
-      intensity: pl.intensity,
-    }));
-    const shadowPointIndices = pointLightsForShadow
-      .map((pl, i) => (pl.castShadow ? i : -1))
-      .filter((i) => i >= 0);
-    const cssPointPositions = shadowPointIndices.map((i) => allPointLightsCss[i]!.position);
-    // The directional pass runs only for an actual directional light with
-    // nonzero intensity. Three.js parity: a zero-intensity (or absent)
-    // directional light removes no light, so a blocked region is indistinct
-    // from a lit one — no shadow. (The old implicit-sun fallback that drew a
-    // default-direction shadow when no light was configured is gone.)
-    const dirLight = currentOptions.directionalLight;
-    const runDirectionalShadow = !!dirLight?.direction && (dirLight.intensity ?? 1) > 0;
-    const dirKey = quantizeLightDirKey(lightDir);
-    // Fold point-light positions into the short-circuit key so moving (or
-    // toggling) a shadow point light re-emits even when the directional
-    // vector is unchanged.
-    const pointKey = cssPointPositions
-      .map((p) => `${Math.round(p[0])},${Math.round(p[1])},${Math.round(p[2])}`)
-      .join(";");
-    const lightKey = dirKey === null && pointKey === "" ? null : `${dirKey ?? ""}|${pointKey}`;
-    if (lightKey !== null && lightKey === lastEmittedShadowLightKey) return;
-
-    // Per-caster shadow dedup (independent meshes can't dedup against
-    // each other). Computed once per caster, reused across surfaces.
-    // The threshold has to be NEAR-IDENTICAL (~0.95) rather than loose
-    // (0.4): `overlapScore2D` returns max(aInB, bInA), so a small
-    // coplanar polygon entirely inside a larger one (e.g. the spine's
-    // 1×1 top face contained in a 4×1 arm's top face on a multi-box
-    // mesh like the parity bench E) scores 1.0 — and the dedup would
-    // drop the smaller-area spine face. The dropped face has unique
-    // x/y extent the survivor doesn't cover, so its shadow projection
-    // is lost and the floor shadow develops visible stripes between
-    // arms. True back-to-back or importer-duplicate faces have BOTH
-    // fractions ≈ 1.0 so they still dedup at 0.95.
-    const dedupByCaster = new Map<MeshEntry, ReadonlySet<number>>();
-    for (const c of casters) {
-      dedupByCaster.set(c, cachedOverlappingPolygonDuplicates(c.polygons, {
-        normalTolerance: 0.1,
-        distanceTolerance: 0.5,
-        overlapFraction: 0.95,
-        // Authored double-sided backfaces would project coincident
-        // shadows that stack their alpha against the front face — drop
-        // them at the dedup step instead of in the SVG fill rule.
-        preserveDoubleSidedBackfaces: false,
-      }));
-    }
-    // Same dedup applied to RECEIVER polygons. Meshes with both inner
-    // and outer wall layers (e.g. the bench cottage's OBJ has back-to-back
-    // wall pairs) would otherwise emit one ReceiverFacePlane per layer,
-    // each picking up casters and painting shadow independently — the
-    // inner-wall shadow shows through PolyCSS's compositor because there's
-    // no z-buffer to occlude it the way Three.js's depth pass would. The
-    // dedup drops the inward-facing duplicate of each pair so only the
-    // visible outer wall ends up as a receiver, matching what the user
-    // can actually see. Same 0.95 overlap threshold as the caster dedup
-    // — only near-identical back-to-back pairs match, adjacent walls of
-    // different sizes don't get falsely merged.
-    const dedupByReceiver = new Map<MeshEntry, Set<number>>();
-    for (const m of meshes) {
-      if (m.disposed || !m.receiveShadow) continue;
-      // Receiver-side dedup disabled. The `facesInward` heuristic that
-      // picks the "winner" of a duplicate pair was selecting the INNER
-      // hidden polygon as the receiver for castle outer walls (109, 111
-      // etc.), so the shadow got projected onto a polygon the user
-      // couldn't see and the visible outer face was left un-shadowed.
-      // preserveDoubleSidedBackfaces:true only helps opposite-normal
-      // pairs; same-normal duplicates (the more common OBJ export
-      // pattern) still mis-keep the inner side. The downside of leaving
-      // all polys in is mild double-shadowing on shared pixels — much
-      // smaller visual regression than missing shadows entirely.
-      dedupByReceiver.set(m, new Set());
-    }
-
-
-    // Three.js parity: shadows render only on explicit `receiveShadow:true`
-    // meshes. A caster with no receiver in the scene draws no shadow —
-    // matching Three.js's `mesh.castShadow` contract. The legacy virtual
-    // ground-shadow path (camera-agnostic projection onto an implicit
-    // plane at scene.minZ) used to provide a convenience fallback for
-    // scenes that forgot to add a floor receiver; we dropped it for
-    // Three.js parity. Any per-mesh ground shadow SVG that the legacy
-    // path may have mounted is hidden every tick.
-    hideGroundShadow();
-    for (const receiver of meshes) {
-      if (receiver.disposed || !receiver.receiveShadow) continue;
-      const dedup = dedupByReceiver.get(receiver) ?? new Set();
-      // All of this receiver's light passes are merged into one SVG per face
-      // (base = full-lit color, each pass a multiply layer) so overlapping
-      // shadows composite to the both-blocked color. The directional pass runs
-      // whenever a directional light is configured, or — to preserve the
-      // implicit-sun shadow — when there are no shadow-casting point lights;
-      // a point-only scene skips it so no phantom default-sun shadow appears.
-      emitReceiverShadowsImpl(ctx, casters, dedupByCaster, receiver, dedup, lightDir, r, g, b, shadowOpacity, {
-        runDirectional: runDirectionalShadow,
-        points: cssPointPositions.map((lightPos, li) => ({ lightPos, index: shadowPointIndices[li]! })),
-        allPointLights: allPointLightsCss,
-      });
-    }
-    lastEmittedShadowLightKey = lightKey;
-  }
-
-  // Builds a single per-mesh <svg> for the mesh's shadow. Projects every
-  // casting polygon to the ground on the CPU, concatenates the outlines
-  // into one compound <path d="M…L…Z M…L…Z …"> under fill-rule=nonzero so
-  // overlapping CCW subpaths composite as one filled silhouette (no alpha
-  // accumulation at intersections). SVG content is internally 2D so this
-  // sidesteps the `opacity + transform-style: preserve-3d` flatten trap
-  // that breaks CSS-only shadow grouping in a 3D scene.
-  // Scene-level ground surface: one SVG containing every caster's
-  // projection onto the global ground plane. Overlapping caster shadows
-  // (e.g. pole shadow + cube shadow) collapse into one filled silhouette
-  // via fill-rule=nonzero instead of stacking opacity.
-
-  function remountEntry(entry: MeshEntry): void {
-    if (entry.voxelRenderer) {
-      entry.voxelRenderer.render(cameraCullRotation(entry));
-      entry.cameraCullSignature = "voxel-direct";
-      return;
-    }
-    clearShadowLeaves(entry);
-    syncMountedRendered(entry);
-    emitShadowLeaves(entry);
+  function applySceneCameraTransform(el: HTMLElement): void {
+    el.style.transform = buildSceneTransformFromCamera(camera, autoCenterOffset, layoutScale);
   }
 
   // Per-light raytrace cache. Returns the set of polygon indices the
@@ -1264,33 +323,8 @@ export function createPolyScene(
     return occluded;
   }
 
-  function canRenderVoxelDirect(entry: MeshEntry): boolean {
-    return !!entry.voxelSource &&
-      currentOptions.textureLighting !== "dynamic" &&
-      !entry.stableDom &&
-      !entry.castShadow;
-  }
-
-  // Convert the scene's world-space point lights into a mesh's LOCAL frame
-  // (subtract the mesh position, inverse-rotate by the mesh rotation) so they
-  // match the local vertex frame the atlas plan shades in. The atlas plan
-  // applies the CSS axis-swap × tile itself (computePointContribs). Returns
-  // undefined when there are no point lights so the shading fast path holds.
-  function localPointLightsForEntry(entry: MeshEntry): PolyPointLight[] | undefined {
-    const pls = currentOptions.pointLights;
-    if (!pls || pls.length === 0) return undefined;
-    const pos = entry.handle.transform.position ?? [0, 0, 0];
-    const rot = entry.handle.transform.rotation ?? [0, 0, 0];
-    const hasRot = rot[0] !== 0 || rot[1] !== 0 || rot[2] !== 0;
-    return pls.map((pl) => {
-      const rel: Vec3 = [pl.position[0] - pos[0], pl.position[1] - pos[1], pl.position[2] - pos[2]];
-      const local = hasRot ? inverseRotateVec3(rel, rot as Vec3) : rel;
-      return { ...pl, position: local };
-    });
-  }
-
   function renderEntry(entry: MeshEntry, lightDirectionOverride?: Vec3): void {
-    clearRendered(entry);
+    clearRendered(ctx, entry);
     const baseDirLight = currentOptions.directionalLight;
     // lightDirectionOverride and baseDirLight.direction are both in user
     // world frame; convert to renderer CSS frame for the lambert dot product.
@@ -1325,7 +359,7 @@ export function createPolyScene(
     // the dynamic path for per-leaf SH-1 visibility (task #128).
     const lightOccludedPolyIndices: ReadonlySet<number> | undefined = undefined;
     void occludedPolyIndicesForEntry; // keep helper exported for dynamic path
-    if (canRenderVoxelDirect(entry)) {
+    if (canRenderVoxelDirect(ctx, entry)) {
       const renderer = createPolyVoxelRenderer({
         doc,
         wrapper: entry.wrapper,
@@ -1335,7 +369,7 @@ export function createPolyScene(
       });
       if (renderer) {
         entry.voxelRenderer = renderer;
-        renderer.render(cameraCullRotation(entry));
+        renderer.render(cameraCullRotation(ctx, entry));
         entry.cameraCullSignature = "voxel-direct";
         entry.textureReadyPromise = TEXTURES_READY;
         return;
@@ -1345,7 +379,7 @@ export function createPolyScene(
     const renderOptions = {
       doc,
       directionalLight,
-      pointLights: localPointLightsForEntry(entry),
+      pointLights: localPointLightsForEntry(ctx, entry),
       ambientLight: currentOptions.ambientLight,
       textureLighting: currentOptions.textureLighting,
       textureQuality: currentOptions.textureQuality,
@@ -1384,250 +418,20 @@ export function createPolyScene(
     entry.skipBucketNormalCleanupOnce =
       currentOptions.textureLighting === "dynamic" && !entry.stableDom;
     recomputeCameraCullGroups(entry);
-    syncMountedRendered(entry);
-    emitShadowLeaves(entry);
-  }
-
-  // Light-only rebake that mutates the existing leaves in place instead
-  // of tearing them down. Used by `rebakeAtlas` so dragging the directional
-  // light slider doesn't flash a frame of unstyled mesh on every tick.
-  //
-  // Polygon vertices are unchanged → `matrix3d` is unchanged → element
-  // positions are unchanged. Only the baked Lambert color (inline `color`
-  // / `background-color` for solid leaves, atlas bitmap URL for textured
-  // <s> leaves) differs. We build a throw-away atlas off-DOM, wait for
-  // its bitmap URLs to be applied to its (never-mounted) elements, then
-  // copy each new element's `style` attribute onto the existing leaf with
-  // the matching polygon index. The new elements are never inserted; the
-  // old leaves keep painting with their previous bitmap until the swap.
-  //
-  // Falls back to plain `renderEntry` for cases where the in-place swap
-  // can't safely match (initial render, voxel-direct path, stable-DOM
-  // skeletal animation, topology mismatch).
-  function rebakeRenderEntryInPlace(
-    entry: MeshEntry,
-    lightDirectionOverride?: Vec3,
-  ): void {
-    if (
-      entry.rendered.length === 0 ||
-      entry.voxelRenderer ||
-      entry.stableDom ||
-      canRenderVoxelDirect(entry)
-    ) {
-      renderEntry(entry, lightDirectionOverride);
-      return;
-    }
-    // If the wrapper was emptied externally (e.g. by a test, or a
-    // consumer reaching into the DOM), entry.rendered still references
-    // the detached leaves. Mutating their styles wouldn't put them back
-    // in the DOM — fall back to the destructive rebuild instead.
-    if (entry.rendered[0]?.element.parentNode === null) {
-      renderEntry(entry, lightDirectionOverride);
-      return;
-    }
-
-    const baseDirLight = currentOptions.directionalLight;
-    const userDirLight: typeof baseDirLight = lightDirectionOverride
-      ? { ...baseDirLight, direction: lightDirectionOverride }
-      : baseDirLight;
-    const directionalLight = worldDirectionalLightToCss(userDirLight);
-    const renderOptions = {
-      doc,
-      directionalLight,
-      pointLights: localPointLightsForEntry(entry),
-      ambientLight: currentOptions.ambientLight,
-      textureLighting: currentOptions.textureLighting,
-      textureQuality: currentOptions.textureQuality,
-      textureLeafSizing: currentOptions.textureLeafSizing,
-      textureImageRendering: currentOptions.textureImageRendering,
-      textureBackend: currentOptions.textureBackend,
-      textureProjection: currentOptions.textureProjection,
-      seamBleed: currentOptions.seamBleed,
-      strategies: currentOptions.strategies,
-      computeSolidPaintDefaults: true,
-      skipDynamicNormalVars: currentOptions.textureLighting === "dynamic",
-    };
-    const newAtlas = renderPolygonsWithTextureAtlas(
-      entry.polygons,
-      renderOptions as Parameters<typeof renderPolygonsWithTextureAtlas>[1],
-    );
-
-    const finish = (): void => {
-      entry.rebakeInFlight = false;
-      const queued = entry.rebakeQueuedLightDir;
-      if (queued !== null) {
-        entry.rebakeQueuedLightDir = null;
-        rebakeRenderEntryInPlace(entry, queued);
-      }
-    };
-    const apply = (): void => {
-      if (entry.disposed) {
-        newAtlas.dispose();
-        finish();
-        return;
-      }
-      // Topology mismatch (shouldn't happen for a pure light rebake but
-      // guards against pathological cases) → drop the new atlas and let
-      // the full destructive renderEntry path rebuild from scratch.
-      if (newAtlas.rendered.length !== entry.rendered.length) {
-        newAtlas.dispose();
-        renderEntry(entry, lightDirectionOverride);
-        finish();
-        return;
-      }
-      for (const item of newAtlas.rendered) {
-        const existing = entry.renderedByPolygonIndex[item.polygonIndex];
-        if (!existing) continue;
-        const nextStyle = item.element.getAttribute("style");
-        if (nextStyle !== null) existing.element.setAttribute("style", nextStyle);
-      }
-      const spd = (newAtlas as { solidPaintDefaults?: SolidPaintDefaults })
-        .solidPaintDefaults;
-      if (spd) applySolidPaintVars(entry.wrapper, spd);
-      // Hand off the Blob URL: revoke the previous atlas's URLs only
-      // AFTER the existing leaves have been re-styled to point at the
-      // new ones. Defer one animation frame so the browser has a chance
-      // to commit a paint with the new URL before the old one is freed.
-      const previousDisposeAtlas = entry.disposeAtlas;
-      entry.disposeAtlas = newAtlas.dispose;
-      if (previousDisposeAtlas) {
-        const schedule: (cb: () => void) => void =
-          typeof requestAnimationFrame === "function"
-            ? (cb) => { requestAnimationFrame(cb); }
-            : (cb) => { setTimeout(cb, 0); };
-        schedule(previousDisposeAtlas);
-      }
-      // <q> shadow leaves still need to follow the new light direction.
-      emitShadowLeaves(entry);
-      finish();
-    };
-
-    const ready = (newAtlas as { pagesReady?: Promise<void> }).pagesReady;
-    if (ready && typeof ready.then === "function") {
-      entry.textureReadyPromise = ready.catch(() => undefined);
-      // Pre-decode the new atlas bitmaps BEFORE swapping styles. Until
-      // a Blob URL is paint-committed at least once the browser hasn't
-      // decoded it; copying that URL into a mounted element triggers
-      // decode lazily on the next paint, which is exactly the visible
-      // blank frame. `Image.decode()` forces decode upfront so the
-      // first paint after the style swap composites the bitmap
-      // immediately.
-      ready
-        .then(() => collectAtlasUrlsFromRendered(newAtlas.rendered))
-        .then(decodeAtlasUrls)
-        .then(apply, () => {
-          newAtlas.dispose();
-          if (!entry.disposed) renderEntry(entry, lightDirectionOverride);
-          finish();
-        });
-    } else {
-      apply();
-    }
-  }
-
-  // Serialised entry point for rebakeRenderEntryInPlace. Coalesces
-  // rapid back-to-back calls: while a rebake is in flight, the latest
-  // requested light direction is queued (overwriting any prior queued
-  // value) and applied as soon as the in-flight rebake's apply()
-  // resolves. The visible bitmap therefore only ever advances to the
-  // LATEST-requested direction in order — no out-of-order swaps that
-  // would visually flicker between intermediate light directions.
-  function requestRebakeAtlas(entry: MeshEntry, lightDir: Vec3): void {
-    if (entry.rebakeInFlight) {
-      entry.rebakeQueuedLightDir = lightDir;
-      return;
-    }
-    entry.rebakeInFlight = true;
-    rebakeRenderEntryInPlace(entry, lightDir);
-  }
-
-  function collectAtlasUrlsFromRendered(
-    rendered: ReturnType<typeof renderPolygonsWithTextureAtlas>["rendered"],
-  ): string[] {
-    const urls = new Set<string>();
-    for (const item of rendered) {
-      const style = item.element.getAttribute("style") ?? "";
-      // Match `background:url(blob:...)` or `--polycss-atlas-url:url(blob:...)`.
-      const re = /url\((blob:[^)]+)\)/g;
-      let m: RegExpExecArray | null;
-      while ((m = re.exec(style)) !== null) urls.add(m[1]);
-    }
-    return Array.from(urls);
-  }
-
-  function decodeAtlasUrls(urls: string[]): Promise<void> {
-    if (urls.length === 0 || typeof Image === "undefined") return Promise.resolve();
-    return Promise.all(urls.map((url) => {
-      const img = new Image();
-      img.src = url;
-      const decoded = img.decode?.();
-      return decoded ? decoded.catch(() => {}) : Promise.resolve();
-    })).then(() => undefined);
-  }
-
-  // Recomputes the shadow ground plane from the minimum world-Z across all
-  // casting meshes. World Z stays as CSS Z under the world→CSS axis swap.
-  // In PolyCSS's world convention Z is up — the red-green plane in the axes
-  // helper is the floor. An optional `lift` (in world units) raises the
-  // plane slightly above the bbox floor to prevent z-fighting with
-  // receiver polygons.
-  //
-  // The ground value is folded into each mesh's SVG shadow path on the
-  // CPU, so a change requires re-emission of every caster's shadow.
-  function recomputeShadowGround(): void {
-    let minWorldZ = Infinity;
-    // If any receivers exist, anchor the ground plane to the lowest
-    // receiver bottom — that's the actual scene floor. Otherwise fall
-    // back to the lowest caster bottom when no receiver mesh is registered.
-    let hasReceiver = false;
-    for (const m of meshes) if (!m.disposed && m.receiveShadow) { hasReceiver = true; break; }
-    for (const m of meshes) {
-      if (m.disposed) continue;
-      const eligible = hasReceiver ? m.receiveShadow : m.castShadow;
-      if (!eligible) continue;
-      const dz = m.handle.transform.position?.[2] ?? 0;
-      for (const poly of m.polygons) {
-        for (const v of poly.vertices) {
-          const wz = v[2] + dz;
-          if (wz < minWorldZ) minWorldZ = wz;
-        }
-      }
-    }
-    if (!Number.isFinite(minWorldZ)) {
-      const hadGround = shadowSvgState.currentGroundCssZ !== null;
-      shadowSvgState.currentGroundCssZ = null;
-      // No casters left: drop any shadow elements still mounted.
-      if (hadGround) {
-        clearAllSceneShadows();
-        invalidateShadowLightCache();
-      }
-      return;
-    }
-    const lift = currentOptions.shadow?.lift ?? POLY_DEFAULT_SHADOW_LIFT;
-    // World Z → CSS Z: the ground plane in CSS-Z coordinates. Lift is added
-    // (not subtracted) so the shadow plane sits slightly *above* the model
-    // bbox floor — putting it on top of a receiver mesh placed at minZ
-    // rather than below it, where the receiver would occlude the shadow.
-    const groundCssZ = (minWorldZ + lift) * DEFAULT_TILE;
-    const prevGround = shadowSvgState.currentGroundCssZ;
-    shadowSvgState.currentGroundCssZ = groundCssZ;
-    // Ground changed: rebuild the scene-level shadow set once.
-    if (prevGround !== groundCssZ) {
-      invalidateShadowLightCache();
-      emitSceneShadows();
-    }
+    syncMountedRendered(ctx, entry);
+    emitShadowLeaves(ctx, entry);
   }
 
   async function renderEntryChunked(
     entry: MeshEntry,
     shouldCancel: () => boolean,
   ): Promise<boolean> {
-    clearRendered(entry);
+    clearRendered(ctx, entry);
     const directionalLight = worldDirectionalLightToCss(currentOptions.directionalLight);
     const renderOptions = {
       doc,
       directionalLight,
-      pointLights: localPointLightsForEntry(entry),
+      pointLights: localPointLightsForEntry(ctx, entry),
       ambientLight: currentOptions.ambientLight,
       textureLighting: currentOptions.textureLighting,
       textureQuality: currentOptions.textureQuality,
@@ -1648,8 +452,8 @@ export function createPolyScene(
       applySolidPaintVars(entry.wrapper, solidPaintDefaults);
       setRendered(entry, atlas.rendered, atlas.dispose, atlas.pagesReady);
       recomputeCameraCullGroups(entry);
-      syncMountedRendered(entry);
-      emitShadowLeaves(entry);
+      syncMountedRendered(ctx, entry);
+      emitShadowLeaves(ctx, entry);
       return !shouldCancel();
     }
 
@@ -1670,8 +474,8 @@ export function createPolyScene(
     entry.skipBucketNormalCleanupOnce =
       currentOptions.textureLighting === "dynamic" && !entry.stableDom;
     recomputeCameraCullGroups(entry);
-    const mounted = await syncMountedRenderedChunked(entry, shouldCancel);
-    if (mounted) emitShadowLeaves(entry);
+    const mounted = await syncMountedRenderedChunked(ctx, entry, shouldCancel);
+    if (mounted) emitShadowLeaves(ctx, entry);
     return mounted;
   }
 
@@ -1943,7 +747,7 @@ export function createPolyScene(
         ) {
           if (!colorOnlyStableTriangleUpdate) {
             recomputeCameraCullGroups(entry);
-            syncMountedRenderedForCameraChange(entry, true);
+            syncMountedRenderedForCameraChange(ctx, entry, true);
             if (shouldRecomputeAutoCenter) recomputeAutoCenter();
           }
           return true;
@@ -1966,13 +770,13 @@ export function createPolyScene(
         polygonUpdateVersion++;
         if (wrapper.parentNode) wrapper.parentNode.removeChild(wrapper);
         // Removing from DOM doesn't auto-dispose generated atlas/blob URLs.
-        clearRendered(entry);
+        clearRendered(ctx, entry);
         meshes.delete(entry);
         meshByElement.delete(wrapper);
         clearReceiverShadowCache(entry);
         clearCasterItemsCache(entry);
         recomputeAutoCenter();
-        recomputeShadowGround();
+        recomputeShadowGround(ctx);
       },
       setPolygons(polygons: Polygon[], options?: InternalSetPolygonsOptions) {
         polygonUpdateVersion++;
@@ -1989,7 +793,7 @@ export function createPolyScene(
         // Animated shadows: re-project (throttled) from the freshly-deformed
         // polygons so the shadow tracks the pose. entry.polygons is already the
         // current frame's geometry here; the caster-item cache was just cleared.
-        maybeEmitAnimationShadow(entry);
+        maybeEmitAnimationShadow(ctx, entry);
         if (applyStableTopologyUpdate(options, shouldRecomputeAutoCenter)) return;
         renderEntry(entry);
         if (shouldRecomputeAutoCenter) recomputeAutoCenter();
@@ -2088,9 +892,9 @@ export function createPolyScene(
             materializedTriangleFrameVersion = -1;
             if (canDomCullCamera(entry)) {
               recomputeCameraCullGroups(entry);
-              syncMountedRenderedForCameraChange(entry, true);
+              syncMountedRenderedForCameraChange(ctx, entry, true);
             } else {
-              syncCameraCullSignature(entry);
+              syncCameraCullSignature(ctx, entry);
             }
             return true;
           }
@@ -2138,7 +942,7 @@ export function createPolyScene(
         entry.voxelSource = undefined;
         Object.assign(entry.polygons[idx], partial);
         const partialKeys = Object.keys(partial);
-        if (tryUpdatePolygonLeafOnly(entry, idx, partialKeys)) {
+        if (tryUpdatePolygonLeafOnly(ctx, entry, idx, partialKeys)) {
           return;
         }
         renderEntry(entry);
@@ -2161,7 +965,7 @@ export function createPolyScene(
         const shouldCancel = () => entry.disposed || version !== polygonUpdateVersion;
         const completed = await renderEntryChunked(entry, shouldCancel);
         if (!completed) {
-          clearRendered(entry);
+          clearRendered(ctx, entry);
           return;
         }
         if (shouldRecomputeAutoCenter) recomputeAutoCenter();
@@ -2176,8 +980,8 @@ export function createPolyScene(
         transform = { ...transform, ...t };
         const css2 = buildMeshTransform(transform);
         wrapper.style.transform = css2 ?? "";
-        applyMeshLightVarOverride(entry, transform.rotation);
-        if (t.rotation !== undefined) syncMountedRenderedForCameraChange(entry, true);
+        applyMeshLightVarOverride(ctx, entry, transform.rotation);
+        if (t.rotation !== undefined) syncMountedRenderedForCameraChange(ctx, entry, true);
         if (entry.castShadow !== prevCastShadow) {
           // Voxel-eligible meshes use the direct-matrix fast path only when
           // castShadow is false (canRenderVoxelDirect). Toggling castShadow
@@ -2187,8 +991,8 @@ export function createPolyScene(
           // voxel-direct path has no polygon leaves to project from), and
           // shadows silently fail to emit.
           if (entry.voxelSource) renderEntry(entry);
-          emitShadowLeaves(entry);
-          recomputeShadowGround();
+          emitShadowLeaves(ctx, entry);
+          recomputeShadowGround(ctx);
         }
         // Receiver toggled: rebuild the scene-level shadow set so this
         // mesh's faces are added (or removed) as receivers. When flipping
@@ -2198,8 +1002,8 @@ export function createPolyScene(
         // them down explicitly before the rebuild.
         if (entry.receiveShadow !== prevReceiveShadow) {
           if (!entry.receiveShadow) disposeReceiverShadowMounts(entry);
-          invalidateShadowLightCache();
-          emitSceneShadows();
+          invalidateShadowLightCache(ctx);
+          emitSceneShadows(ctx);
         }
         // Position / scale change: shadow geometry depends on world-space
         // coords AND the mesh's wrapper scale (which pivots from the
@@ -2207,14 +1011,14 @@ export function createPolyScene(
         // not overwrite transient preview shadows with the committed
         // light, so the gate is on castShadow || receiveShadow.
         if ((t.position !== undefined || t.scale !== undefined) && (entry.castShadow || entry.receiveShadow)) {
-          recomputeShadowGround();
-          invalidateShadowLightCache();
-          emitSceneShadows();
+          recomputeShadowGround(ctx);
+          invalidateShadowLightCache(ctx);
+          emitSceneShadows(ctx);
         }
         // Per-mesh shadow definition changed: re-emit at the new detail.
         if (entry.shadowDefinition !== prevShadowDef && (entry.castShadow || entry.receiveShadow)) {
-          invalidateShadowLightCache();
-          emitSceneShadows();
+          invalidateShadowLightCache(ctx);
+          emitSceneShadows(ctx);
         }
       },
       dispose() {
@@ -2222,12 +1026,12 @@ export function createPolyScene(
         entry.disposed = true;
         polygonUpdateVersion++;
         if (wrapper.parentNode) wrapper.parentNode.removeChild(wrapper);
-        clearRendered(entry);
+        clearRendered(ctx, entry);
         try { parseResult.dispose(); } catch { /* ignore */ }
         meshes.delete(entry);
         meshByElement.delete(wrapper);
         recomputeAutoCenter();
-        recomputeShadowGround();
+        recomputeShadowGround(ctx);
       },
       rebakeAtlas() {
         // Advance the baked rotation to match the current live rotation.
@@ -2245,7 +1049,7 @@ export function createPolyScene(
         // both blank-flash AND the out-of-order bitmap swaps that look
         // like flicker when many rebakes finish at slightly different
         // moments.
-        requestRebakeAtlas(entry, localLightDir);
+        requestRebakeAtlas(ctx, entry, renderEntry, localLightDir);
       },
       whenTexturesReady() { return entry.textureReadyPromise; },
       getPosition() { return transform.position; },
@@ -2259,16 +1063,16 @@ export function createPolyScene(
     meshByElement.set(wrapper, entry);
     meshes.add(entry);
     renderEntry(entry);
-    applyMeshLightVarOverride(entry, transform.rotation);
+    applyMeshLightVarOverride(ctx, entry, transform.rotation);
     recomputeAutoCenter();
-    recomputeShadowGround();
+    recomputeShadowGround(ctx);
     // New receiver: the scene-level shadow set must rebuild so existing
     // casters get faces to project onto. recomputeShadowGround only
     // does this when the global ground changes; force a rebuild for the
     // receiver-only case.
     if (entry.receiveShadow) {
-      invalidateShadowLightCache();
-      emitSceneShadows();
+      invalidateShadowLightCache(ctx);
+      emitSceneShadows(ctx);
     }
     return handle;
   }
@@ -2297,7 +1101,7 @@ export function createPolyScene(
     // Re-evaluate per-mesh light overrides when lighting settings change —
     // textureLighting or directionalLight may have changed.
     for (const entry of meshes) {
-      applyMeshLightVarOverride(entry, entry.handle.transform.rotation);
+      applyMeshLightVarOverride(ctx, entry, entry.handle.transform.rotation);
     }
     // `strategies` controls which leaf tags the renderer emits. A change
     // means we have to re-render every mesh against the new constraint.
@@ -2390,22 +1194,22 @@ export function createPolyScene(
       ) {
         for (const entry of meshes) renderEntry(entry);
       }
-      recomputeShadowGround();
-      invalidateShadowLightCache();
-      emitSceneShadows();
+      recomputeShadowGround(ctx);
+      invalidateShadowLightCache(ctx);
+      emitSceneShadows(ctx);
     } else if (shadowReemitNeeded) {
       // The emit short-circuit key only discriminates by light DIRECTION, so a
       // direction change self-busts, but shadow-appearance and directional
       // intensity/color changes must bust the cache explicitly or
       // emitSceneShadows would no-op.
-      if (shadowAppearanceChanged || directionalChanged) invalidateShadowLightCache();
+      if (shadowAppearanceChanged || directionalChanged) invalidateShadowLightCache(ctx);
       // A light-DIRECTION or point-light move is "motion" → eligible for the
       // progressive drag-definition pass. Shadow-appearance edits (opacity,
       // definition, dragDefinition) render at full definition immediately.
-      emitSceneShadows(undefined, { progressive: (directionalChanged || pointLightsChanged) && !shadowAppearanceChanged });
+      emitSceneShadows(ctx, undefined, { progressive: (directionalChanged || pointLightsChanged) && !shadowAppearanceChanged });
     }
     if (shadowAppearanceChanged && partial.shadow?.lift !== prevShadow?.lift) {
-      recomputeShadowGround();
+      recomputeShadowGround(ctx);
     }
   }
 
@@ -2416,7 +1220,7 @@ export function createPolyScene(
   function applyCamera(): void {
     applyCameraStyle(cameraEl, currentOptions);
     applySceneCameraTransform(sceneEl);
-    for (const entry of meshes) syncMountedRenderedForCameraChange(entry);
+    for (const entry of meshes) syncMountedRenderedForCameraChange(ctx, entry);
   }
 
   function listMeshes(): readonly PolyMeshHandle[] {
@@ -2445,10 +1249,10 @@ export function createPolyScene(
   }
 
   function destroy(): void {
-    if (shadowRefineTimer) { clearTimeout(shadowRefineTimer); shadowRefineTimer = null; }
-    if (animationShadowTrailingTimer) {
-      clearTimeout(animationShadowTrailingTimer);
-      animationShadowTrailingTimer = null;
+    if (ctx.shadowRefineTimer) { clearTimeout(ctx.shadowRefineTimer); ctx.shadowRefineTimer = null; }
+    if (ctx.animationShadowTrailingTimer) {
+      clearTimeout(ctx.animationShadowTrailingTimer);
+      ctx.animationShadowTrailingTimer = null;
     }
     // Dispose all meshes (revokes blob URLs) before removing the scene.
     // Snapshot first since dispose() mutates the set.
@@ -2474,9 +1278,10 @@ export function createPolyScene(
     meshes: listMeshes,
     whenTexturesReady,
     findMeshByElement,
-    previewBakedSolidLighting,
-    commitBakedSolidLighting,
-    clearBakedSolidLightingPreview,
+    previewBakedSolidLighting: (next: Parameters<typeof previewBakedSolidLighting>[1]) =>
+      previewBakedSolidLighting(ctx, next),
+    commitBakedSolidLighting: () => commitBakedSolidLighting(ctx, renderEntry),
+    clearBakedSolidLightingPreview: () => clearBakedSolidLightingPreview(ctx),
   };
   return handle;
 }

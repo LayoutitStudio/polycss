@@ -128,11 +128,9 @@ export function disposeAllReceiverShadowMounts(ctx: SceneContext): void {
 export function emitReceiverShadows(
   ctx: SceneContext,
   casters: MeshEntry[],
-  dedupByCaster: ReadonlyMap<MeshEntry, ReadonlySet<number>>,
   receiverEntry: MeshEntry,
   receiverDedupDrop: Set<number>,
   lightDir: Vec3,
-  _r: number, _g: number, _b: number,
   opacity: number,
   /** Every light's shadow pass for this receiver. All of a face's passes are
    *  merged into ONE SVG so overlapping shadows composite correctly (the base
