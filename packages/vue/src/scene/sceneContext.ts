@@ -41,9 +41,8 @@ export interface PolyShadowOptions {
   opacity?: number;
   /**
    * Raises the shadow plane along +Z (world units) so it clears the surface
-   * beneath it. Two defaults by design: `0.05` on the ground-plane fallback
-   * path, `0.001` on the receiver-face (`receiveShadow`) path, which only
-   * needs to clear z-fighting with the receiver's own surface.
+   * beneath it. Defaults to `POLY_DEFAULT_SHADOW_LIFT` (`0.05`) on both the
+   * ground-plane fallback path and the receiver-face (`receiveShadow`) path.
    */
   lift?: number;
   /**
