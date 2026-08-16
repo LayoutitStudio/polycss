@@ -447,6 +447,8 @@ export function VanillaScene({
       definition: nextOptions.shadowDefinition,
       style: nextOptions.shadowStyle,
       followAnimation: nextOptions.shadowFollowAnimation,
+      color: nextOptions.shadowColor,
+      opacity: nextOptions.shadowOpacity,
     };
     const previewShadow = preview?.shadow !== false;
     if (nextOptions.textureLighting === "dynamic") {
@@ -503,7 +505,7 @@ export function VanillaScene({
       directionalLight: nextDirectionalLight,
       ambientLight: ambientFromOptions(nextOptions),
       textureLighting: nextOptions.textureLighting,
-      shadow: { maxExtend: nextOptions.shadowMaxExtend, lift: GALLERY_SHADOW_LIFT, parametric: nextOptions.shadowParametric, definition: nextOptions.shadowDefinition, style: nextOptions.shadowStyle, followAnimation: nextOptions.shadowFollowAnimation },
+      shadow: { maxExtend: nextOptions.shadowMaxExtend, lift: GALLERY_SHADOW_LIFT, parametric: nextOptions.shadowParametric, definition: nextOptions.shadowDefinition, style: nextOptions.shadowStyle, followAnimation: nextOptions.shadowFollowAnimation, color: nextOptions.shadowColor, opacity: nextOptions.shadowOpacity },
     });
     lightHandleRef.current?.setTransform({
       position: lightHelperPosition(
@@ -557,7 +559,7 @@ export function VanillaScene({
       autoCenter: options.autoCenter,
       textureQuality: options.textureQuality,
       strategies: { disable: options.disableStrategies },
-      shadow: { maxExtend: options.shadowMaxExtend, lift: GALLERY_SHADOW_LIFT, parametric: options.shadowParametric, definition: options.shadowDefinition, style: options.shadowStyle, followAnimation: options.shadowFollowAnimation },
+      shadow: { maxExtend: options.shadowMaxExtend, lift: GALLERY_SHADOW_LIFT, parametric: options.shadowParametric, definition: options.shadowDefinition, style: options.shadowStyle, followAnimation: options.shadowFollowAnimation, color: options.shadowColor, opacity: options.shadowOpacity },
     };
     const scene = createPolyScene(host, sceneOptions);
     sceneRef.current = scene;
@@ -981,7 +983,7 @@ export function VanillaScene({
       directionalLight,
       ambientLight,
       textureLighting: options.textureLighting,
-      shadow: { maxExtend: options.shadowMaxExtend, lift: GALLERY_SHADOW_LIFT, parametric: options.shadowParametric, definition: options.shadowDefinition, style: options.shadowStyle, followAnimation: options.shadowFollowAnimation },
+      shadow: { maxExtend: options.shadowMaxExtend, lift: GALLERY_SHADOW_LIFT, parametric: options.shadowParametric, definition: options.shadowDefinition, style: options.shadowStyle, followAnimation: options.shadowFollowAnimation, color: options.shadowColor, opacity: options.shadowOpacity },
     });
     const nextLightingSignature = bakedLightingSignature(directionalLight, ambientLight);
     if (
@@ -1002,6 +1004,8 @@ export function VanillaScene({
     options.shadowDefinition,
     options.shadowStyle,
     options.shadowFollowAnimation,
+    options.shadowColor,
+    options.shadowOpacity,
     directionalLight,
     ambientLight,
   ]);

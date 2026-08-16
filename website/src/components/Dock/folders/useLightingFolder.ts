@@ -19,6 +19,8 @@ export interface LightingFolderInputs {
   shadowDefinition: number;
   shadowStyle: "vector" | "pixel";
   shadowFollowAnimation: boolean;
+  shadowOpacity: number;
+  shadowColor: string;
   showGround: boolean;
   groundColor: string;
   showLight: boolean;
@@ -36,6 +38,8 @@ export interface LightingFolderInputs {
     shadowDefinition?: number;
     shadowStyle?: "vector" | "pixel";
     shadowFollowAnimation?: boolean;
+    shadowOpacity?: number;
+    shadowColor?: string;
     showGround?: boolean;
     groundColor?: string;
     showLight?: boolean;
@@ -57,6 +61,8 @@ export function useLightingFolder(parent: GUI | null, inputs: LightingFolderInpu
     shadowDefinition,
     shadowStyle,
     shadowFollowAnimation,
+    shadowOpacity,
+    shadowColor,
     showGround,
     groundColor,
     showLight,
@@ -110,6 +116,12 @@ export function useLightingFolder(parent: GUI | null, inputs: LightingFolderInpu
   useToggle(folder, "Pixel shadow", shadowStyle === "pixel", (value) =>
     onUpdateScene({ shadowStyle: value ? "pixel" : "vector" }),
   );
+  // Shading of the shadow itself (engine `shadow.opacity` / `shadow.color`),
+  // separate from the geometry knobs above.
+  useSlider(folder, "Shadow strength", { min: 0, max: 1, step: 0.01 }, shadowOpacity, (value) =>
+    onUpdateScene({ shadowOpacity: value }),
+  );
+  useColor(folder, "Shadow color", shadowColor, (value) => onUpdateScene({ shadowColor: value }));
   useToggle(folder, "Animate shadow", shadowFollowAnimation, (value) =>
     onUpdateScene({ shadowFollowAnimation: value }),
   );

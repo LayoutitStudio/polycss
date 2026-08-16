@@ -748,7 +748,7 @@ export function BuilderScene({
         textureLighting={sceneOptions.textureLighting}
         textureQuality={sceneOptions.textureQuality}
         strategies={{ disable: sceneOptions.disableStrategies }}
-        shadow={{ maxExtend: sceneOptions.shadowMaxExtend, parametric: sceneOptions.shadowParametric, definition: sceneOptions.shadowDefinition, style: sceneOptions.shadowStyle }}
+        shadow={{ maxExtend: sceneOptions.shadowMaxExtend, parametric: sceneOptions.shadowParametric, definition: sceneOptions.shadowDefinition, style: sceneOptions.shadowStyle, color: sceneOptions.shadowColor, opacity: sceneOptions.shadowOpacity }}
       >
         {sceneOptions.showGround && (
           <>
