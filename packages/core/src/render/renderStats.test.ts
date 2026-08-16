@@ -46,7 +46,10 @@ describe("collectPolyRenderStats", () => {
         <u></u>
         <u style="width:16px;height:16px;corner-bottom-left-shape:bevel"></u>
         <q></q>
-        <svg class="polycss-shadow polycss-shadow-svg"></svg>
+        <svg class="polycss-shadow polycss-shadow-svg">
+          <path d="M0 0L10 0L10 10Z"></path>
+          <path d="M2 2L8 2Z"></path>
+        </svg>
         <div class="polycss-bucket"><b></b><s></s></div>
       </div>
     `;
@@ -55,6 +58,8 @@ describe("collectPolyRenderStats", () => {
       polygonCount: 12,
       mountedPolygonLeafCount: 7,
       shadowLeafCount: 2,
+      shadowSubpathCount: 2,
+      shadowPathDChars: "M0 0L10 0L10 10Z".length + "M2 2L8 2Z".length,
       surfaceLeafCounts: { quad: 2, clippedSolid: 1, atlas: 2, stableTriangle: 2 },
       textureReadiness: {
         ready: true,

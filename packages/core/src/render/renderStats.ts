@@ -107,6 +107,15 @@ export interface PolyRenderStats {
   polygonCount: number;
   mountedPolygonLeafCount: number;
   shadowLeafCount: number;
+  /**
+   * Total `<path>` elements across shadow SVGs. Together with
+   * `shadowPathDChars` this is the real shadow DOM cost driver — one shadow
+   * SVG can hold thousands of subpaths, so the SVG element count alone
+   * (`shadowLeafCount`) under-reports emit/repaint weight.
+   */
+  shadowSubpathCount: number;
+  /** Summed `d` attribute character count across shadow SVG paths. */
+  shadowPathDChars: number;
   surfaceLeafCounts: PolyRenderSurfaceLeafCounts;
   textureReadiness: PolyTextureReadiness;
   textureStats: PolyTextureRenderStats;
@@ -180,6 +189,8 @@ const EMPTY_POLY_RENDER_STATS: PolyRenderStats = {
   polygonCount: 0,
   mountedPolygonLeafCount: 0,
   shadowLeafCount: 0,
+  shadowSubpathCount: 0,
+  shadowPathDChars: 0,
   surfaceLeafCounts: ZERO_SURFACE_LEAF_COUNTS,
   textureReadiness: READY_TEXTURE_READINESS,
   textureStats: emptyTextureStats(),
@@ -486,6 +497,8 @@ export function collectPolyRenderStats(
   const scopes = collectScopes(root, options.scopeSelector);
   const surfaceLeafCounts: PolyRenderSurfaceLeafCounts = { ...ZERO_SURFACE_LEAF_COUNTS };
   let shadowLeafCount = 0;
+  let shadowSubpathCount = 0;
+  let shadowPathDChars = 0;
   let bucketCount = 0;
 
   for (const scope of scopes) {
@@ -493,7 +506,20 @@ export function collectPolyRenderStats(
     surfaceLeafCounts.clippedSolid += queryCount(scope, "i");
     surfaceLeafCounts.atlas += queryCount(scope, "s");
     surfaceLeafCounts.stableTriangle += queryCount(scope, "u");
-    shadowLeafCount += queryCount(scope, "q, .polycss-shadow-svg");
+    const shadowSvgs = scope.querySelectorAll("q, .polycss-shadow-svg");
+    shadowLeafCount += shadowSvgs.length;
+    for (let i = 0; i < shadowSvgs.length; i += 1) {
+      const svg = shadowSvgs[i];
+      if (!isStatsElement(svg)) continue;
+      const paths = svg.querySelectorAll("path");
+      shadowSubpathCount += paths.length;
+      for (let j = 0; j < paths.length; j += 1) {
+        const path = paths[j];
+        if (isStatsElement(path)) {
+          shadowPathDChars += path.getAttribute("d")?.length ?? 0;
+        }
+      }
+    }
     bucketCount += queryCount(scope, ".polycss-bucket");
   }
 
@@ -506,6 +532,8 @@ export function collectPolyRenderStats(
     polygonCount: options.polygonCount ?? mountedPolygonLeafCount,
     mountedPolygonLeafCount,
     shadowLeafCount,
+    shadowSubpathCount,
+    shadowPathDChars,
     surfaceLeafCounts,
     textureReadiness: collectPolyTextureReadiness(root, options),
     textureStats: collectPolyTextureStats(root, options),

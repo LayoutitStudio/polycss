@@ -31,6 +31,26 @@ import type { MeshEntry } from "./internalTypes";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 
+/**
+ * Opt-in per-phase shadow timing sink for `bench/shadow-trace.html`. The bench
+ * page sets `globalThis.__shTime = { coverage: 0, merge: 0, dom: 0 }` before a
+ * sweep and reads the accumulated milliseconds back via its `timing()` HUD
+ * hook. Strictly inert in production: when the global is absent every call
+ * site pays one property read and skips the `performance.now()` pair.
+ */
+interface ShadowPhaseTiming {
+  /** buildParametricCasterOverride — coverage mask + contour trace. */
+  coverage: number;
+  /** computeMergedReceiverShadows — projection + per-face pass merge. */
+  merge: number;
+  /** SVG mount/update — path re-emission + style writes. */
+  dom: number;
+}
+
+function shTime(): ShadowPhaseTiming | undefined {
+  return (globalThis as { __shTime?: ShadowPhaseTiming }).__shTime;
+}
+
 
 /** Mounted SVG state per receiver face. Kept in a separate WeakMap so the
  *  core ReceiverFacePlane stays pure data. */
@@ -74,6 +94,20 @@ interface ParametricCasterCacheEntry {
   cross?: { key: string; result: ReturnType<typeof buildParametricCasterOverride> };
 }
 const parametricCasterCache = new WeakMap<CasterPolyItem[], ParametricCasterCacheEntry>();
+
+/**
+ * Drop the module-scope caster geometry caches for one mesh. The edge-owner
+ * cache's bust key (polygon count + transform + bbox center) and the
+ * shared-edge map's array-identity key can both survive an in-place polygon
+ * edit, so any path that invalidates `casterItemsCache` for a geometry change
+ * must drop these too (wired through `clearCasterItemsCache`).
+ */
+export function clearCasterGeometryCaches(entry: MeshEntry): void {
+  edgeOwnersCache.delete(entry);
+  edgeOwnersCacheKey.delete(entry);
+  sharedEdgeMapCache.delete(entry);
+  sharedEdgeMapCacheKey.delete(entry);
+}
 
 function mountedFacesFor(entry: MeshEntry): Map<number, MountedFace> {
   let m = mountedFacesByMesh.get(entry);
@@ -264,17 +298,18 @@ export function emitReceiverShadows(
       const variantKey = isSelf ? "self" : "cross";
       let variant = paramEntry[variantKey];
       if (!variant || variant.key !== paramKey) {
-        variant = {
-          key: paramKey,
-          result: buildParametricCasterOverride({
-            polysWorldVerts: paramEntry.worldVerts,
-            lightDir,
-            definition: def,
-            isSelf,
-            style: options.shadow.style,
-            pointLights: passes.points.map((pt) => ({ position: pt.lightPos, index: pt.index })),
-          }),
-        };
+        const timing = shTime();
+        const t0 = timing ? performance.now() : 0;
+        const result = buildParametricCasterOverride({
+          polysWorldVerts: paramEntry.worldVerts,
+          lightDir,
+          definition: def,
+          isSelf,
+          style: options.shadow.style,
+          pointLights: passes.points.map((pt) => ({ position: pt.lightPos, index: pt.index })),
+        });
+        if (timing) timing.coverage += performance.now() - t0;
+        variant = { key: paramKey, result };
         paramEntry[variantKey] = variant;
       }
       overrideSilhouette = variant.result.overrideSilhouette;
@@ -300,6 +335,8 @@ export function emitReceiverShadows(
   // Shared core merge: run every light pass for this receiver and aggregate
   // each face's passes into one SVG descriptor (single light → one path;
   // multi-light solid → base + per-light multiply layers for correct overlap).
+  const timing = shTime();
+  const tMerge0 = timing ? performance.now() : 0;
   const faces = computeMergedReceiverShadows<MeshEntry>({
     receiverPlanes: cachedPlanes,
     receiverPolygons: receiverEntry.polygons,
@@ -314,7 +351,9 @@ export function emitReceiverShadows(
     directionalLight: options.directionalLight,
     shadow: { color: options.shadow?.color, opacity, maxExtend: options.shadow?.maxExtend },
   });
+  if (timing) timing.merge += performance.now() - tMerge0;
 
+  const tDom0 = timing ? performance.now() : 0;
   const mounted = mountedFacesFor(receiverEntry);
   const seen = new Set<number>();
   const wantDebug = !!options.debugShadowAttrs;
@@ -370,6 +409,7 @@ export function emitReceiverShadows(
       face.visible = false;
     }
   }
+  if (timing) timing.dom += performance.now() - tDom0;
 }
 
 function makeShadowPath(

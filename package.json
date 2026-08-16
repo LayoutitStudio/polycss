@@ -55,7 +55,13 @@
     "compat-hunter": "pnpm --filter @layoutit/polycss-core build && node .agents/skills/compat-hunter/scripts/compat-hunter.mjs",
     "bench:seams": "pnpm --filter @layoutit/polycss-core build && node bench/seam-gap-bench.mjs",
     "bench:seams:render": "pnpm --filter @layoutit/polycss-core build && node bench/seam-gap-bench.mjs --render",
-    "bench:visual": "node bench/build.mjs && node bench/perf-visual.mjs"
+    "bench:visual": "node bench/build.mjs && node bench/perf-visual.mjs",
+    "bench:shadow-timing": "node bench/shadow-timing-bench.mjs",
+    "bench:vox-import": "node bench/vox-import-bench.mjs",
+    "bench:shadow-rubric": "node bench/shadow-rubric.mjs",
+    "bench:shadow-diff": "node bench/shadow-diff.mjs",
+    "bench:gltf-simplifier": "node bench/gltf-simplifier-corpus-bench.mjs",
+    "bench:nonvoxel-rotation": "node bench/nonvoxel-rotation-bench.mjs"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
