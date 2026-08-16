@@ -172,6 +172,29 @@ const MUTATIONS = [
       patch(source, `shadow: { opacity: 0.35 }`, `shadow: { opacity: 0.35, lift: 0.001 }`),
   },
   {
+    // The framing check used to measure ALL painted pixels, so a tiny correct
+    // target passed whenever unrelated content filled the frame.
+    name: "a tiny subject beside a large distractor",
+    taskId: "01-static-cube",
+    expect: "scale",
+    mutate: (source) =>
+      patch(
+        source,
+        `import { createPolyBox, createPolyCamera, createPolyScene } from "@layoutit/polycss";`,
+        `import {
+  createPolyBox,
+  createPolyCamera,
+  createPolyPlane,
+  createPolyScene,
+} from "@layoutit/polycss";`,
+      ).replace(
+        `  scene.add(createPolyBox({ size: 100, color: "#ff8c1a" }));`,
+        `  // A big unrelated surface plus a speck of the requested colour.
+  scene.add(createPolyPlane({ axis: 2, size: 400, offset: 0, color: "#3355aa" }));
+  scene.add(createPolyBox({ size: 8, color: "#ff8c1a" }), { position: [0, 0, 30] });`,
+      ),
+  },
+  {
     name: "an export that does not exist fails the build",
     taskId: "01-static-cube",
     expect: "*",

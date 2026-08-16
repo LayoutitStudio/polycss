@@ -261,17 +261,16 @@ const framedWithin = (hex, minFraction, maxFraction) => ({
   id: "scale",
   describe: `the subject fills between ${Math.round(minFraction * 100)}% and ${Math.round(maxFraction * 100)}% of the viewport`,
   run: ({ first }) => {
-    // Measured on the SUBJECT's own hue, not on "anything not background".
-    // A shape scaled past every edge becomes the background by definition —
-    // corner sampling would call the cube the page and report ~0% painted.
-    const covered = paintedFraction(first);
+    // Measured on the SUBJECT's own hue. Using total painted coverage let a
+    // tiny correctly-coloured target pass whenever unrelated content filled
+    // the viewport — and a shape scaled past every edge becomes the background
+    // by definition, so corner sampling cannot be trusted either.
     const subject = pixelsWithHue(first, hex).length / first.pixels.rgb.length;
-    if (subject < 0.02) return `almost none of the viewport is ${hex} (${(subject * 100).toFixed(1)}%)`;
-    if (covered < minFraction) {
-      return `the ${hex} subject fills only ${(covered * 100).toFixed(1)}% of the viewport - too small, or scaled so far past the edges that it fills the frame; raise or lower both the shape size and the camera zoom`;
+    if (subject < minFraction) {
+      return `the ${hex} subject fills only ${(subject * 100).toFixed(1)}% of the viewport - too small, or scaled so far past the edges that it fills the frame; adjust both the shape size and the camera zoom`;
     }
-    if (covered > maxFraction) {
-      return `the ${hex} subject fills ${(covered * 100).toFixed(1)}% of the viewport - overscaled and running past the edges; lower the shape size or the camera zoom`;
+    if (subject > maxFraction) {
+      return `the ${hex} subject fills ${(subject * 100).toFixed(1)}% of the viewport - overscaled and running past the edges; lower the shape size or the camera zoom`;
     }
     return true;
   },

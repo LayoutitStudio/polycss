@@ -75,6 +75,7 @@ Options
                     Required with --reuse, which needs a specific run to grade.
   --allow-missing   With --reuse, tolerate requested cases that have no
                     scene.mjs instead of failing.
+  --replace         Clear an existing run root before a fresh run.
   --no-preflight    Skip the per-agent readiness probe.
   --headed          Run Chromium headed.
   --settle <ms>     Delay between the two DOM samples (default 2000).
@@ -86,6 +87,15 @@ Tasks
 ${TASK_IDS.map((id) => `  ${id}`).join("\n")}
 `;
 
+/** `--timeout nope` used to become NaN, pass silently, and land as null in the JSON. */
+function positiveNumber(flag, raw) {
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value <= 0) {
+    throw new Error(`${flag} needs a positive number, got ${JSON.stringify(raw)}`);
+  }
+  return value;
+}
+
 function parseArgs(argv) {
   const options = {
     agents: [],
@@ -94,6 +104,7 @@ function parseArgs(argv) {
     keep: false,
     reuse: false,
     allowMissing: false,
+    replace: false,
     run: null,
     preflight: true,
     headed: false,
@@ -116,11 +127,12 @@ function parseArgs(argv) {
     else if (arg === "--keep") options.keep = true;
     else if (arg === "--reuse") options.reuse = true;
     else if (arg === "--allow-missing") options.allowMissing = true;
+    else if (arg === "--replace") options.replace = true;
     else if (arg === "--run") options.run = value();
     else if (arg === "--no-preflight") options.preflight = false;
     else if (arg === "--headed") options.headed = true;
-    else if (arg === "--settle") options.settle = Number(value());
-    else if (arg === "--timeout") options.timeout = Number(value());
+    else if (arg === "--settle") options.settle = positiveNumber(arg, value());
+    else if (arg === "--timeout") options.timeout = positiveNumber(arg, value());
     else if (arg === "--json") options.json = value();
     else if (arg === "--list") options.list = true;
     else if (arg === "--help" || arg === "-h") return null;
@@ -323,6 +335,17 @@ async function main(argv) {
     }
     if (options.run === null) options.run = `run-${randomBytes(4).toString("hex")}`;
     assertSafeRunId(options.run);
+    // Track-first ordering only isolates a CLEAN root. Naming an existing kept
+    // run leaves the previous track's installed skill readable by this run's
+    // control, so a fresh run refuses it unless the caller asks to replace it.
+    if (!options.reuse && existsSync(join(workRoot, options.run))) {
+      if (!options.replace) {
+        throw new Error(
+          `run "${options.run}" already exists — pass --replace to clear it, --reuse to grade it, or omit --run for a fresh id`,
+        );
+      }
+      rmSync(join(workRoot, options.run), { recursive: true, force: true });
+    }
   } catch (error) {
     console.error(error.message);
     return 1;
@@ -565,10 +588,20 @@ async function main(argv) {
     return 1;
   }
 
+  // The oracle is the harness's own correctness gate, so it fails the run even
+  // when other agents are selected — a broken oracle beside a passing agent
+  // used to exit 0.
+  const oracleRows = rows.filter((r) => r.agent === "oracle");
+  if (oracleRows.some((r) => r.passed !== r.total)) {
+    console.error("[eval] reference solutions regressed — the graders or the oracles are wrong");
+    return 1;
+  }
+
   const allPassed = rows.every((r) => r.passed === r.total);
   // Only the reference solution is expected to be perfect; a real agent
   // scoring below 100% is a finding, not a harness failure.
-  return agents.length === 1 && agents[0] === "oracle" && !allPassed ? 1 : 0;
+  // Real agents scoring below 100% is a finding, not a harness failure.
+  return allPassed || agents.some((a) => a !== "oracle") ? 0 : 1;
 }
 
 process.exitCode = await main(process.argv.slice(2));
