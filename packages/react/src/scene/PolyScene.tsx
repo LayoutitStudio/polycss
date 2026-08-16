@@ -94,13 +94,15 @@ export interface PolySceneProps extends TransformProps {
    */
   strategies?: PolyRenderStrategiesOption;
   /**
-   * When `true`, rotation pivots around the mesh's bbox center instead of
-   * world (0,0,0). Polygon data is not mutated — the scene element's
-   * `transform-origin` is moved to the bbox center in CSS. Equivalent to
-   * setting Three.js's `OrbitControls.target` to the mesh centroid. Off
-   * by default to match Three.js: meshes load at their authored origin
-   * unless the user opts in. Use this for loaded OBJ/GLB assets whose
-   * origin is at a corner / feet / arbitrary point.
+   * When `true`, rotation pivots around the bbox center of all centerable
+   * meshes instead of world (0,0,0). Polygon data is not mutated and no DOM
+   * wrapper is added — the bbox-center offset is folded into the scene
+   * camera transform alongside `target` (the camera orbits
+   * `target + offset`). Equivalent to setting Three.js's
+   * `OrbitControls.target` to the mesh centroid. Off by default to match
+   * Three.js: meshes load at their authored origin unless the user opts in.
+   * Use this for loaded OBJ/GLB assets whose origin is at a corner / feet /
+   * arbitrary point. Same mechanism in all three renderers.
    */
   autoCenter?: boolean;
   /**

@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { parseColor, shadeColor, computeShapeLighting } from "./lighting";
+import { DEFAULT_LIGHT_DIR } from "../atlas/constants";
 
 describe("parseColor", () => {
   it("parses 6-digit hex", () => {
@@ -105,12 +106,22 @@ describe("computeShapeLighting", () => {
     expect(result).toBe("rgb(51, 51, 51)");
   });
 
-  it("uses default lights when args are omitted", () => {
-    // Defaults: directional intensity 1 + ambient intensity 0.4. Face up gets
-    // full light from a top-down default direction.
-    // tint = 0.4 + 1*1 = 1.4; channel = 128 * 1.4 = 179.2 → 179.
+  it("uses default lights when args are omitted (atlas DEFAULT_LIGHT_DIR sun)", () => {
+    // Defaults: white directional along the atlas pipeline's
+    // DEFAULT_LIGHT_DIR with intensity 1 + white ambient intensity 0.4 —
+    // core has ONE default sun. Pinned by equality with the explicit args.
     const result = computeShapeLighting([0, 0, 1], "#808080");
-    expect(result).toBe("rgb(179, 179, 179)");
+    const explicit = computeShapeLighting(
+      [0, 0, 1],
+      "#808080",
+      { direction: DEFAULT_LIGHT_DIR, color: "#ffffff", intensity: 1 },
+      { color: "#ffffff", intensity: 0.4 },
+    );
+    expect(result).toBe(explicit);
+    // Not the old [0,0,1] top-down default: a face tilted toward
+    // DEFAULT_LIGHT_DIR shades brighter than the up-facing one.
+    const towardSun = computeShapeLighting(DEFAULT_LIGHT_DIR, "#808080");
+    expect(towardSun).not.toBe(result);
   });
 
   it("directional intensity scales the lit contribution independently of ambient", () => {

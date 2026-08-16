@@ -295,16 +295,38 @@ export function createPolyScene(
   const SHADOW_REFINE_MS = 140;
   // Animated-shadow throttle: re-emit shadows at most this often while a mesh
   // deforms (shadow.followAnimation). ~12fps keeps a parametric reproject cheap.
+  // Trailing-edge: a deform landing inside the window schedules one deferred
+  // emit for when the window elapses, so a paused animation never leaves a
+  // stale shadow (the emit reads entry.polygons at fire time — latest pose).
   let lastAnimationShadowEmit = 0;
+  let animationShadowTrailingTimer: ReturnType<typeof setTimeout> | null = null;
   const ANIMATION_SHADOW_MS = 80;
+  function emitAnimationShadowNow(): void {
+    lastAnimationShadowEmit =
+      typeof performance !== "undefined" ? performance.now() : Date.now();
+    invalidateShadowLightCache();
+    emitSceneShadows();
+  }
   function maybeEmitAnimationShadow(entry: MeshEntry): void {
     if (!currentOptions.shadow?.followAnimation) return;
     if (!entry.castShadow && !entry.receiveShadow) return;
     const now = typeof performance !== "undefined" ? performance.now() : Date.now();
-    if (now - lastAnimationShadowEmit < ANIMATION_SHADOW_MS) return;
-    lastAnimationShadowEmit = now;
-    invalidateShadowLightCache();
-    emitSceneShadows();
+    const elapsed = now - lastAnimationShadowEmit;
+    if (elapsed < ANIMATION_SHADOW_MS) {
+      if (animationShadowTrailingTimer === null) {
+        animationShadowTrailingTimer = setTimeout(() => {
+          animationShadowTrailingTimer = null;
+          if (!currentOptions.shadow?.followAnimation) return;
+          emitAnimationShadowNow();
+        }, ANIMATION_SHADOW_MS - elapsed);
+      }
+      return;
+    }
+    if (animationShadowTrailingTimer !== null) {
+      clearTimeout(animationShadowTrailingTimer);
+      animationShadowTrailingTimer = null;
+    }
+    emitAnimationShadowNow();
   }
   function quantizeLightDirKey(d: Vec3 | undefined): string | null {
     if (!d) return null;
@@ -2424,6 +2446,10 @@ export function createPolyScene(
 
   function destroy(): void {
     if (shadowRefineTimer) { clearTimeout(shadowRefineTimer); shadowRefineTimer = null; }
+    if (animationShadowTrailingTimer) {
+      clearTimeout(animationShadowTrailingTimer);
+      animationShadowTrailingTimer = null;
+    }
     // Dispose all meshes (revokes blob URLs) before removing the scene.
     // Snapshot first since dispose() mutates the set.
     const snapshot = Array.from(meshes);

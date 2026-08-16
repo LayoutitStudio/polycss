@@ -96,10 +96,12 @@ export interface PolySceneProps {
   /** Opt out of specific render strategies. Disabled strategies fall through the chain (b→i→s, u→i→s, i→s). `<s>` cannot be disabled. */
   strategies?: PolyRenderStrategiesOption;
   /**
-   * When `true`, rotation pivots around the mesh's bbox center instead of
-   * world (0,0,0). Polygon data is not mutated — a wrapper div translates
-   * the polygons so the bbox center coincides with the scene anchor (0,0,0).
-   * Mirrors React's PolyScene autoCenter prop.
+   * When `true`, rotation pivots around the bbox center of all centerable
+   * meshes instead of world (0,0,0). Polygon data is not mutated and no DOM
+   * wrapper is added — the bbox-center offset is folded into the scene
+   * camera transform alongside `target` (the camera orbits
+   * `target + offset`). Mirrors React's PolyScene autoCenter prop; same
+   * mechanism in all three renderers.
    */
   autoCenter?: boolean;
   /**

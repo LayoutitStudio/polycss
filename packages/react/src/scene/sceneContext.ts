@@ -43,6 +43,12 @@ export interface ShadowCasterRegistration {
 export interface ShadowOptions {
   color?: string;
   opacity?: number;
+  /**
+   * Raises the shadow plane along +Z (world units) so it clears the surface
+   * beneath it. Two defaults by design: `0.05` on the ground-plane fallback
+   * path, `0.001` on the receiver-face (`receiveShadow`) path, which only
+   * needs to clear z-fighting with the receiver's own surface.
+   */
   lift?: number;
   /**
    * Maximum CSS pixels the shadow may extend beyond the mesh's

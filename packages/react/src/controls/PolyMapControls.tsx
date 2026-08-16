@@ -34,7 +34,7 @@ export function PolyMapControls({
   minZoom = 0.1,
   maxZoom = 10,
   minDistance = 0,
-  maxDistance = 5000,
+  maxDistance = Infinity,
   animate = false,
   onChange,
   onInteractionStart,

@@ -64,16 +64,20 @@ export interface PolySceneOptions {
    */
   strategies?: PolyRenderStrategiesOption;
   /**
-   * When `true`, rotation pivots around the union bbox of all added meshes
-   * instead of world (0,0,0). Implemented as a camera-target offset, not a DOM
-   * wrapper — polygon data is not mutated. Updates whenever a mesh is added/removed
-   * or `setOptions` is called. Mirrors React's `<PolyScene autoCenter>`.
+   * When `true`, rotation pivots around the union bbox center of all added
+   * meshes instead of world (0,0,0). Implemented as an offset folded into the
+   * scene-root transform alongside the camera target — no DOM wrapper, no
+   * `transform-origin` change, and polygon data is not mutated. Recomputed
+   * whenever a mesh is added/removed or `setOptions` is called. Mirrors
+   * React/Vue `<PolyScene autoCenter>` (same mechanism in all three
+   * renderers).
    */
   autoCenter?: boolean;
   /**
    * Shadow appearance for meshes with `castShadow: true`. Both lighting
    * modes use the same CPU-projected SVG path; dynamic-mode shadows are
-   * directional-only. Defaults: `{ color: "#000000", opacity: 0.25, lift: 0.05, maxExtend: 2000 }`.
+   * directional-only. Defaults: `{ color: "#000000", opacity: 0.25,
+   * lift: 0.05 ground / 0.001 receiver-face, maxExtend: 2000 }`.
    */
   shadow?: {
     /** Shadow color as a CSS hex string. Default: `"#000000"`. */
@@ -84,7 +88,10 @@ export interface PolySceneOptions {
      * Raises the shadow plane slightly above the model bbox floor along
      * +Z (Z up) so it sits on top of a receiver mesh placed at the bbox
      * bottom, rather than below it where the receiver would occlude the
-     * shadow. In world units. Default: `0.05`.
+     * shadow. In world units. Two defaults by design: `0.05` on the
+     * ground-plane path, `0.001` on the receiver-face (`receiveShadow`)
+     * path, which only needs to clear z-fighting with the receiver's own
+     * surface.
      */
     lift?: number;
     /**

@@ -25,9 +25,9 @@ import type { PropType } from "vue";
 import {
   ANIM_DT_CLAMP_MS,
   ANIM_FRAME_MS,
-  BASE_TILE,
   WHEEL_IDLE_END_MS,
   applyOrbit,
+  applyPan,
   applyWheelDolly,
   applyWheelZoom,
   normalizeWheelDelta,
@@ -57,7 +57,7 @@ export interface PolyMapControlsProps {
   maxZoom?: number;
   /** Minimum camera pull-back in CSS pixels when dolly=true. Default 0. */
   minDistance?: number;
-  /** Maximum camera pull-back in CSS pixels when dolly=true. Default 5000. */
+  /** Maximum camera pull-back in CSS pixels when dolly=true. Default Infinity (three.js OrbitControls parity). */
   maxDistance?: number;
   animate?: false | PolyControlsAnimateOptions;
 }
@@ -65,25 +65,8 @@ export interface PolyMapControlsProps {
 const DEFAULT_ZOOM_MIN = 0.1;
 const DEFAULT_ZOOM_MAX = 10;
 const DEFAULT_DISTANCE_MIN = 0;
-const DEFAULT_DISTANCE_MAX = 5000;
+const DEFAULT_DISTANCE_MAX = Infinity;
 const DEFAULT_ANIMATE_SPEED = 0.3;
-
-function applyPanDelta(
-  dx: number, dy: number,
-  zoom: number, rotX: number, rotY: number,
-): { dWorldX: number; dWorldY: number } {
-  const z = Math.max(0.01, zoom);
-  const cosRotX = Math.max(0.1, Math.cos((rotX * Math.PI) / 180));
-  const dWorldY = -dx / (z * BASE_TILE);
-  const dWorldX = -dy / (z * BASE_TILE * cosRotX);
-  const a = (-rotY * Math.PI) / 180;
-  const cosA = Math.cos(a);
-  const sinA = Math.sin(a);
-  return {
-    dWorldX: dWorldX * cosA - dWorldY * sinA,
-    dWorldY: dWorldX * sinA + dWorldY * cosA,
-  };
-}
 
 export const PolyMapControls = defineComponent({
   name: "PolyMapControls",
@@ -172,8 +155,8 @@ export const PolyMapControls = defineComponent({
           handle.update({ rotX, rotY });
         } else {
           // Left = pan (map convention)
-          const { dWorldX, dWorldY } = applyPanDelta(dx, dy, s.zoom, s.rotX, s.rotY);
-          handle.update({ target: [s.target[0] + dWorldX, s.target[1] + dWorldY, s.target[2]] });
+          const { targetD0, targetD1 } = applyPan(dx, dy, s.zoom, s.rotX, s.rotY);
+          handle.update({ target: [s.target[0] + targetD0, s.target[1] + targetD1, s.target[2]] });
         }
         applyTransformDirect();
         store.updateCameraFromRef(handle);

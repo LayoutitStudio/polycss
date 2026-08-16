@@ -55,7 +55,7 @@ export interface SharedControlsProps {
   maxZoom?: number;
   /** Minimum camera distance in CSS pixels when dolly is enabled. Default 0. */
   minDistance?: number;
-  /** Maximum camera distance in CSS pixels when dolly is enabled. Default 5000. */
+  /** Maximum camera distance in CSS pixels when dolly is enabled. Default Infinity (three.js OrbitControls parity). */
   maxDistance?: number;
   /** Auto-rotate. Pass false (or omit) to disable. */
   animate?: false | PolyControlsAnimateOptions;

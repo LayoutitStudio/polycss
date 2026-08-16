@@ -352,7 +352,7 @@ controls.addEventListener("end",   () => endInteraction());
 | `maxZoom` | `number` | `10` | Maximum zoom scale clamp. |
 | `dolly` | `boolean` | `false` | When `true`, wheel drives `distance` (dolly pull-back) instead of `zoom` scale. |
 | `minDistance` | `number` | `0` | Minimum distance clamp when `dolly` is enabled. |
-| `maxDistance` | `number` | `5000` | Maximum distance clamp when `dolly` is enabled. |
+| `maxDistance` | `number` | `Infinity` | Maximum distance clamp when `dolly` is enabled. |
 | `animate` | `false \| { speed?, axis?, pauseOnInteraction? }` | `false` | Auto-rotate. `speed` is in degrees per 60 Hz-equivalent frame; the tick is `dt`-clamped at 50 ms. |
 
 ### Returned `PolyOrbitControlsHandle`

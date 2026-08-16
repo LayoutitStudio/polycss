@@ -17,7 +17,7 @@
  * using the cheapest supported render-strategy leaf.
  */
 import { defineComponent, h, Teleport, computed, inject, onMounted, onBeforeUnmount, ref, shallowRef, watch, watchEffect } from "vue";
-import type { PropType, VNode, CSSProperties } from "vue";
+import type { PropType, SlotsType, VNode, CSSProperties } from "vue";
 import type {
   MeshResolution,
   Polygon,
@@ -129,6 +129,14 @@ const vueParametricCasterCache = new WeakMap<CasterPolyItem[], ParametricCasterC
  *  keyed on polygon-array identity with the option set as the inner key.
  *  Mirrors vanilla createPolyScene's shared dedup cache. */
 const vueDedupDropCache = new WeakMap<readonly Polygon[], Map<string, ReadonlySet<number>>>();
+
+// Animated-shadow throttle: with `shadow.followAnimation`, same-topology
+// deforms bump the caster geometry ref (→ receiver re-emit) at most this
+// often (~12fps), leading + trailing edge. Mirrors vanilla createPolyScene's
+// ANIMATION_SHADOW_MS / maybeEmitAnimationShadow semantics: the last deform
+// inside a window is deferred and still lands once the window elapses, so a
+// paused animation never leaves a stale shadow.
+const ANIMATION_SHADOW_MS = 80;
 function cachedOverlappingPolygonDuplicates(
   polygons: Polygon[],
   options: {
@@ -258,6 +266,14 @@ function recenterPolygons(polygons: Polygon[]): Polygon[] {
 export const PolyMesh = defineComponent({
   name: "PolyMesh",
   inheritAttrs: false,
+  // Typed slots so `#polygon` consumers see the scoped { polygon, index }
+  // payload instead of Vue's untyped default slot signature.
+  slots: Object as SlotsType<{
+    default?: Record<string, never>;
+    polygon?: { polygon: Polygon; index: number };
+    fallback?: Record<string, never>;
+    error?: { error: unknown };
+  }>,
   props: {
     id: { type: String, default: undefined },
     src: { type: String, default: undefined },
@@ -559,12 +575,16 @@ export const PolyMesh = defineComponent({
       const groundCssZ = ctx?.groundCssZ ?? null;
       if (groundCssZ === null) return null;
       const shadowOpts = ctx?.shadow;
+      // Three.js parity (same gate as the receiver-face path): only a real,
+      // nonzero-intensity directional light casts a ground shadow. A scene
+      // with no lights must not draw a phantom shadow from an implicit
+      // default sun.
+      const groundDirLight = ctx?.directionalLight;
+      if (!groundDirLight?.direction || (groundDirLight.intensity ?? 1) <= 0) return null;
 
       // World→CSS axis swap so the light direction matches the CSS-frame
       // vertex projection below (vertices are × BASE_TILE with v[1]→x, v[0]→y).
-      const userGroundLightDir = ctx?.directionalLight?.direction
-        ?? ([0.4, -0.7, 0.59] as Vec3);
-      const lightDir = worldDirectionToCss(userGroundLightDir);
+      const lightDir = worldDirectionToCss(groundDirLight.direction);
 
       // Project shadows into the MESH WRAPPER's local frame so that the
       // SVG, which is rendered as a child of `.polycss-mesh` and inherits
@@ -921,17 +941,60 @@ export const PolyMesh = defineComponent({
     // with a low parametric `definition`). Mirrors vanilla `setPolygons`.
     const shadowCasterPolygons = shallowRef(polygons.value);
     let lastShadowPolyCount = -1;
+    let lastShadowBumpAt = 0;
+    let shadowTrailingTimer: ReturnType<typeof setTimeout> | null = null;
+    let pendingShadowPolygons: Polygon[] | null = null;
+    const bumpShadowCasterPolygons = (polys: Polygon[]): void => {
+      lastShadowBumpAt =
+        typeof performance !== "undefined" ? performance.now() : Date.now();
+      lastShadowPolyCount = polys.length;
+      shadowCasterPolygons.value = polys;
+    };
     watch(
       polygons,
       (polys) => {
         const follow = sceneCtx?.value.shadow?.followAnimation ?? false;
         const topologyChanged = polys.length !== lastShadowPolyCount;
         if (lastShadowPolyCount >= 0 && !follow && !topologyChanged) return;
-        lastShadowPolyCount = polys.length;
-        shadowCasterPolygons.value = polys;
+        // Same-topology followAnimation deforms are throttled to
+        // ANIMATION_SHADOW_MS, leading + trailing edge (mirrors vanilla
+        // maybeEmitAnimationShadow): inside a window the latest pose is
+        // parked and bumped once the window elapses, so a paused animation
+        // still lands its final pose. First bump and topology changes are
+        // immediate.
+        if (lastShadowPolyCount >= 0 && follow && !topologyChanged) {
+          const now =
+            typeof performance !== "undefined" ? performance.now() : Date.now();
+          const elapsed = now - lastShadowBumpAt;
+          if (elapsed < ANIMATION_SHADOW_MS) {
+            pendingShadowPolygons = polys;
+            if (shadowTrailingTimer === null) {
+              shadowTrailingTimer = setTimeout(() => {
+                shadowTrailingTimer = null;
+                const pending = pendingShadowPolygons;
+                pendingShadowPolygons = null;
+                if (pending) bumpShadowCasterPolygons(pending);
+              }, ANIMATION_SHADOW_MS - elapsed);
+            }
+            return;
+          }
+        }
+        if (shadowTrailingTimer !== null) {
+          clearTimeout(shadowTrailingTimer);
+          shadowTrailingTimer = null;
+        }
+        pendingShadowPolygons = null;
+        bumpShadowCasterPolygons(polys);
       },
       { immediate: true },
     );
+    onBeforeUnmount(() => {
+      if (shadowTrailingTimer !== null) {
+        clearTimeout(shadowTrailingTimer);
+        shadowTrailingTimer = null;
+      }
+      pendingShadowPolygons = null;
+    });
 
     // Register this mesh with the shadow registry when castShadow=true in
     // either lighting mode — the scene needs caster polygons (with their

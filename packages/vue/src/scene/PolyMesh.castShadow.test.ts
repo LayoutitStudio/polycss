@@ -10,12 +10,14 @@
  *   - toggling castShadow reactively adds/removes shadows
  *   - textured polygons ALSO cast shadows
  */
-import { describe, it, expect, afterEach } from "vitest";
-import { createApp, h, nextTick, ref } from "vue";
+import { describe, it, expect, afterEach, vi } from "vitest";
+import { createApp, defineComponent, h, inject, nextTick, ref, shallowRef } from "vue";
+import type { ComputedRef } from "vue";
 import { PolyCamera } from "../camera/PolyCamera";
 import { PolyScene } from "./PolyScene";
 import { PolyMesh } from "./PolyMesh";
-import type { Polygon } from "@layoutit/polycss-core";
+import { PolySceneContextKey, type PolySceneContextValue } from "./sceneContext";
+import type { Polygon, Vec3 } from "@layoutit/polycss-core";
 
 const TRIANGLE: Polygon = {
   vertices: [
@@ -52,6 +54,13 @@ const DYNAMIC_SCENE_PROPS = {
     color: "#ffffff",
     intensity: 1,
   },
+};
+
+// Ground-fallback shadows require a real, nonzero-intensity directional light
+// (no implicit default sun), so baked-mode shadow tests pass one explicitly.
+const BAKED_SCENE_PROPS = {
+  textureLighting: "baked" as const,
+  directionalLight: DYNAMIC_SCENE_PROPS.directionalLight,
 };
 
 function mount(
@@ -130,7 +139,7 @@ describe("PolyMesh (Vue) — castShadow", () => {
     // nextTick lets the scene's watchEffect derive groundCssZ from the
     // child's registration before the shadow nodes recompute.
     const { container } = mount(
-      { textureLighting: "baked" },
+      BAKED_SCENE_PROPS,
       { polygons: [TRIANGLE], castShadow: true },
     );
     await nextTick();
@@ -229,6 +238,105 @@ describe("PolyMesh (Vue) — castShadow", () => {
     await nextTick();
     await nextTick();
     expect(container.querySelectorAll(".polycss-shadow").length).toBe(1);
+  });
+
+  it("no directional light → no ground-fallback shadow (no phantom default-sun shadow)", async () => {
+    // Same gate as the receiver-face path: a scene with no lights at all
+    // must not draw a ground shadow from an implicit default sun.
+    const { container } = mount(
+      { textureLighting: "baked" },
+      { polygons: [TRIANGLE], castShadow: true },
+    );
+    await nextTick();
+    await nextTick();
+    expect(container.querySelectorAll(".polycss-shadow").length).toBe(0);
+  });
+
+  it("zero-intensity directional light → no ground-fallback shadow", async () => {
+    const { container } = mount(
+      {
+        textureLighting: "baked",
+        directionalLight: { direction: [0.4, -0.7, 0.59] as Vec3, intensity: 0 },
+      },
+      { polygons: [TRIANGLE], castShadow: true },
+    );
+    await nextTick();
+    await nextTick();
+    expect(container.querySelectorAll(".polycss-shadow").length).toBe(0);
+  });
+
+  it("followAnimation same-topology deforms throttle caster geometry bumps (~12fps) with a trailing emit", async () => {
+    vi.useFakeTimers();
+    try {
+      const container = document.createElement("div");
+      document.body.appendChild(container);
+      const polys = shallowRef<Polygon[]>([TRIANGLE]);
+      let ctx: ComputedRef<PolySceneContextValue> | null = null;
+      const Probe = defineComponent({
+        setup() {
+          ctx = inject(PolySceneContextKey, null);
+          return () => null;
+        },
+      });
+      const app = createApp({
+        setup() {
+          return () =>
+            h(PolyCamera, {}, {
+              default: () =>
+                h(
+                  PolyScene,
+                  { ...DYNAMIC_SCENE_PROPS, shadow: { followAnimation: true } },
+                  {
+                    default: () => [
+                      h(PolyMesh, { polygons: polys.value, castShadow: true }),
+                      h(Probe),
+                    ],
+                  },
+                ),
+            });
+        },
+      });
+      app.mount(container);
+      await nextTick();
+      await nextTick();
+      const registry = ctx!.value.shadowRegistry;
+      expect(registry).toBeTruthy();
+      const registeredPolygons = (): Polygon[] => registry!.getEntries()[0]!().polygons;
+      // The registry serves the mesh's prepared copy — track identity across
+      // bumps rather than comparing against the raw prop array.
+      const initialRegistered = registeredPolygons();
+      const deform = (dz: number): Polygon[] => [
+        {
+          ...TRIANGLE,
+          vertices: TRIANGLE.vertices.map(([x, y, z]) => [x, y, z + dz] as Vec3),
+        },
+      ];
+      // Rapid same-topology deforms inside the 80ms window: parked, the
+      // registry still serves the pre-deform geometry (no downstream bump).
+      polys.value = deform(0.1);
+      await nextTick();
+      await nextTick();
+      polys.value = deform(0.2);
+      await nextTick();
+      await nextTick();
+      polys.value = deform(0.3);
+      await nextTick();
+      await nextTick();
+      expect(registeredPolygons()).toBe(initialRegistered);
+      // Trailing edge: once the window elapses, exactly the LAST parked pose
+      // lands (a paused animation is never stale).
+      vi.advanceTimersByTime(200);
+      await nextTick();
+      await nextTick();
+      const trailing = registeredPolygons();
+      expect(trailing).not.toBe(initialRegistered);
+      const zs = trailing.flatMap((p) => p.vertices.map((v) => v[2]));
+      expect(zs.length).toBeGreaterThan(0);
+      for (const z of zs) expect(z).toBeCloseTo(0.3, 9);
+      app.unmount();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("--clx/--cly/--clz are set on the scene element in dynamic mode", () => {

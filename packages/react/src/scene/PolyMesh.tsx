@@ -88,7 +88,7 @@ import {
   useTextureAtlas,
 } from "./atlas";
 import { createPortal } from "react-dom";
-import { usePolySceneContext } from "./sceneContext";
+import { usePolySceneContext, type ShadowCasterRegistration } from "./sceneContext";
 import { PolyCameraContext } from "../camera/context";
 import { createPolyVoxelRenderer, type PolyVoxelRenderer } from "./voxelRenderer";
 import {
@@ -137,6 +137,14 @@ const reactParametricCasterCache = new WeakMap<CasterPolyItem[], ParametricCaste
  *  keyed on polygon-array identity with the option set as the inner key.
  *  Mirrors vanilla createPolyScene's shared dedup cache. */
 const reactDedupDropCache = new WeakMap<readonly Polygon[], Map<string, ReadonlySet<number>>>();
+
+// Animated-shadow throttle: with `shadow.followAnimation`, same-topology
+// deforms re-register the caster (→ receiver re-emit) at most this often
+// (~12fps), leading + trailing edge. Mirrors vanilla createPolyScene's
+// ANIMATION_SHADOW_MS / maybeEmitAnimationShadow semantics: the last deform
+// inside a window is deferred and still lands once the window elapses, so a
+// paused animation never leaves a stale shadow.
+const ANIMATION_SHADOW_MS = 80;
 function cachedOverlappingPolygonDuplicates(
   polygons: Polygon[],
   options: {
@@ -848,9 +856,17 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
   // with a low parametric `definition`). Mirrors vanilla `setPolygons`.
   const shadowCasterRegisteredRef = useRef(false);
   const lastShadowPolyCountRef = useRef(-1);
+  const lastShadowRegisterAtRef = useRef(0);
+  const shadowTrailingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingShadowRegistrationRef = useRef<ShadowCasterRegistration | null>(null);
   useEffect(() => {
     if (!sceneRegisterShadowCaster || !castShadow) return;
     return () => {
+      if (shadowTrailingTimerRef.current !== null) {
+        clearTimeout(shadowTrailingTimerRef.current);
+        shadowTrailingTimerRef.current = null;
+      }
+      pendingShadowRegistrationRef.current = null;
       sceneRegisterShadowCaster(meshIdRef.current, null);
       shadowCasterRegisteredRef.current = false;
       lastShadowPolyCountRef.current = -1;
@@ -863,16 +879,48 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
     // Freeze: a same-topology deform with followAnimation off keeps the last
     // registered pose (no re-emit). No cleanup here, so this never unregisters.
     if (shadowCasterRegisteredRef.current && !followAnimation && !topologyChanged) return;
-    lastShadowPolyCountRef.current = polygons.length;
-    shadowCasterRegisteredRef.current = true;
-    sceneRegisterShadowCaster(meshIdRef.current, {
+    const registration: ShadowCasterRegistration = {
       polygons,
       position: position ?? [0, 0, 0],
       scale,
       rotation,
       renderedPolygonIndices,
       shadowDefinition,
-    });
+    };
+    // Same-topology followAnimation deforms are throttled to
+    // ANIMATION_SHADOW_MS, leading + trailing edge (mirrors vanilla
+    // maybeEmitAnimationShadow): inside a window the latest pose is parked and
+    // registered once the window elapses, so a paused animation still lands
+    // its final pose. First registration and topology changes are immediate.
+    if (shadowCasterRegisteredRef.current && followAnimation && !topologyChanged) {
+      const now = typeof performance !== "undefined" ? performance.now() : Date.now();
+      const elapsed = now - lastShadowRegisterAtRef.current;
+      if (elapsed < ANIMATION_SHADOW_MS) {
+        pendingShadowRegistrationRef.current = registration;
+        if (shadowTrailingTimerRef.current === null) {
+          shadowTrailingTimerRef.current = setTimeout(() => {
+            shadowTrailingTimerRef.current = null;
+            const pending = pendingShadowRegistrationRef.current;
+            pendingShadowRegistrationRef.current = null;
+            if (!pending) return;
+            lastShadowRegisterAtRef.current =
+              typeof performance !== "undefined" ? performance.now() : Date.now();
+            sceneRegisterShadowCaster(meshIdRef.current, pending);
+          }, ANIMATION_SHADOW_MS - elapsed);
+        }
+        return;
+      }
+    }
+    if (shadowTrailingTimerRef.current !== null) {
+      clearTimeout(shadowTrailingTimerRef.current);
+      shadowTrailingTimerRef.current = null;
+    }
+    pendingShadowRegistrationRef.current = null;
+    lastShadowPolyCountRef.current = polygons.length;
+    shadowCasterRegisteredRef.current = true;
+    lastShadowRegisterAtRef.current =
+      typeof performance !== "undefined" ? performance.now() : Date.now();
+    sceneRegisterShadowCaster(meshIdRef.current, registration);
   }, [sceneRegisterShadowCaster, castShadow, polygons, position, scale, rotation, renderedPolygonIndices, shadowDefinition, sceneCtx?.shadow]);
 
   // Mirror receiveShadow registration so the scene knows whether at least
@@ -902,12 +950,16 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
     // ground-shadow fallback so the receiver paints the only shadow pass.
     if (sceneHasReceiver) return null;
     if (bakedShadowGroundCssZ === null) return null;
+    // Three.js parity (same gate as the receiver-face path): only a real,
+    // nonzero-intensity directional light casts a ground shadow. A scene with
+    // no lights must not draw a phantom shadow from an implicit default sun.
+    if (!sceneDirectionalLight?.direction || (sceneDirectionalLight.intensity ?? 1) <= 0) {
+      return null;
+    }
 
     // World→CSS axis swap so the light direction matches the CSS-frame
     // vertex projection below (vertices are × BASE_TILE with v[1]→x, v[0]→y).
-    const userGroundLightDir = sceneDirectionalLight?.direction
-      ?? ([0.4, -0.7, 0.59] as Vec3);
-    const lightDir = worldDirectionToCss(userGroundLightDir);
+    const lightDir = worldDirectionToCss(sceneDirectionalLight.direction);
 
     // Project shadows into the MESH WRAPPER's local frame so that the
     // SVG, which is rendered as a child of `.polycss-mesh` and inherits

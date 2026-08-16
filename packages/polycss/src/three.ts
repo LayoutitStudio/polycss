@@ -94,6 +94,15 @@ export interface PolyThreeMeshMount {
   transform?: PolyMeshTransform;
 }
 
+/**
+ * Options for `mountPolyThreeScene`. Inherits every `PolySceneOptions` field
+ * except `camera` (replaced by the Three-like camera below).
+ *
+ * Meshes are added with `merge: false` — intentionally the opposite of
+ * `scene.add` / `<PolyMesh>` (which default `merge: true`). The Three-parity
+ * bridge must not restructure geometry: polygons authored against the
+ * Three-like surface render exactly as converted, with no coplanar merging.
+ */
 export interface MountPolyThreeSceneOptions extends Omit<PolySceneOptions, "camera"> {
   camera: PerspectiveCamera | OrthographicCamera;
   cameraOptions?: PolyPerspectiveCameraFromThreeOptions | PolyOrthographicCameraFromThreeOptions;
@@ -128,6 +137,9 @@ export function mountPolyThreeScene(
     camera,
   });
 
+  // `merge: false` is intentional and differs from `scene.add`'s default
+  // (`merge: true`): Three-parity exactness — the bridge must not
+  // restructure geometry it was handed. See MountPolyThreeSceneOptions.
   if (meshes) {
     for (const mesh of meshes) {
       scene.add(parseResultFromPolygons(mesh.polygons), {

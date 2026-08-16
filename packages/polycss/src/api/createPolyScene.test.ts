@@ -2270,6 +2270,61 @@ describe("createPolyScene", () => {
       expect((d.match(/Z/g) || []).length).toBe(1);
     });
 
+    it("followAnimation throttles stable-topology animated-shadow re-emits to one per 80ms window with a trailing emit", () => {
+      // The throttle governs the stable-DOM animation path (skeletal
+      // deforms), where applyStableTopologyUpdate short-circuits renderEntry
+      // — the only shadow emitter there is maybeEmitAnimationShadow. Full
+      // re-render setPolygons paths always re-emit via emitShadowLeaves.
+      vi.useFakeTimers();
+      try {
+        scene = makeScene(host, {
+          ...bakedOpts,
+          shadow: { followAnimation: true },
+        });
+        scene.add(makeParseResult([floor()]), { receiveShadow: true });
+        const caster = scene.add(makeParseResult([backTriangle()]), {
+          castShadow: true,
+          merge: false,
+          stableDom: true,
+        });
+        // The receiver-face shadow path `d` is normalized to the shadow's own
+        // bbox, so a pure caster translation shows up in the SVG transform.
+        const readShadowTransform = (): string =>
+          (host.querySelector(".polycss-shadow") as HTMLElement | null)?.style.transform ?? "";
+        const t0 = readShadowTransform();
+        expect(t0).not.toBe("");
+        const shifted = (dx: number): Polygon[] => [
+          {
+            ...backTriangle(),
+            vertices: backTriangle().vertices.map(
+              ([x, y, z]) => [x + dx, y, z] as [number, number, number],
+            ),
+          },
+        ];
+        const deform = (dx: number): void =>
+          caster.setPolygons(shifted(dx), { merge: false, stableDom: true });
+        // Rapid same-topology stable deforms inside the 80ms window (fake
+        // timers freeze the clock): all parked, the emitted shadow stays at
+        // the last emitted pose.
+        deform(0.5);
+        deform(1.0);
+        deform(1.5);
+        expect(readShadowTransform()).toBe(t0);
+        // Trailing edge: once the window elapses, one re-emit lands and it
+        // reflects the LAST pose (a paused animation is never stale).
+        vi.advanceTimersByTime(200);
+        const tTrailing = readShadowTransform();
+        expect(tTrailing).not.toBe("");
+        expect(tTrailing).not.toBe(t0);
+        // And it matches a fresh emit of the same pose (latest geometry).
+        vi.advanceTimersByTime(200);
+        deform(1.5);
+        expect(readShadowTransform()).toBe(tTrailing);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
     it("clips low-angle shadow path coordinates to the receiver face SVG box", () => {
       // Receiver-face SVGs are sized to the receiver's planar bbox and
       // every projected shadow polygon is clipped against the receiver's
