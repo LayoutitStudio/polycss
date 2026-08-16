@@ -43,6 +43,12 @@ jobs:
       - name: Check website skill copy
         run: pnpm check:skill
 
+      - name: Check package boundaries
+        run: pnpm check:boundaries
+
+      - name: Check mirrored renderer copies
+        run: pnpm check:mirrors
+
       - name: Run tests
         run: pnpm test
 
@@ -57,6 +63,10 @@ jobs:
 
       - name: Build packages (DTS + JS)
         run: pnpm build:packages
+
+      - name: Typecheck packages
+        # After build:packages — react/vue/morph resolve sibling types from dist.
+        run: pnpm typecheck
 
       - name: Certify Morph package
         run: pnpm --filter @layoutit/polycss-morph test:package

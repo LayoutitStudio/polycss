@@ -50,6 +50,7 @@
   },
   "scripts": {
     "build": "tsup",
+    "typecheck": "tsc --noEmit -p tsconfig.typecheck.json",
     "test": "vitest run",
     "test:package": "node scripts/certify-package.mjs",
     "test:package:registry": "node scripts/certify-package.mjs --registry-dependencies",
