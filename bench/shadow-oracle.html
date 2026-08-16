@@ -1459,6 +1459,53 @@
       autoCenterLabel.appendChild(document.createTextNode("Auto-center (PolyCSS only)"));
       p.appendChild(autoCenterLabel);
 
+      // Parametric shadow controls — same knobs the gallery exposes
+      // (parametric on/off, definition, pixel style), mirroring the
+      // ?pm=/&def=/&style= URL params so both entry points stay in sync.
+      const parametricLabel = document.createElement("label");
+      parametricLabel.style.cssText = "display:flex; gap:6px; align-items:center; margin: 0 0 8px;";
+      const parametricCheck = document.createElement("input");
+      parametricCheck.type = "checkbox";
+      parametricCheck.checked = !!S.shadow.parametric;
+      parametricCheck.addEventListener("change", () => {
+        S.shadow.parametric = parametricCheck.checked;
+        update(true);
+      });
+      parametricLabel.appendChild(parametricCheck);
+      parametricLabel.appendChild(document.createTextNode("Parametric shadow"));
+      p.appendChild(parametricLabel);
+
+      const pixelStyleLabel = document.createElement("label");
+      pixelStyleLabel.style.cssText = "display:flex; gap:6px; align-items:center; margin: 0 0 8px;";
+      const pixelStyleCheck = document.createElement("input");
+      pixelStyleCheck.type = "checkbox";
+      pixelStyleCheck.checked = S.shadow.style === "pixel";
+      pixelStyleCheck.addEventListener("change", () => {
+        S.shadow.style = pixelStyleCheck.checked ? "pixel" : "vector";
+        update(true);
+      });
+      pixelStyleLabel.appendChild(pixelStyleCheck);
+      pixelStyleLabel.appendChild(document.createTextNode("Pixel style"));
+      p.appendChild(pixelStyleLabel);
+
+      const defRow = document.createElement("label");
+      defRow.style.cssText = "display:flex; gap:6px; align-items:center; margin: 0 0 8px;";
+      defRow.appendChild(document.createTextNode("Shadow def."));
+      const defInput = document.createElement("input");
+      defInput.type = "range"; defInput.min = "4"; defInput.max = "96"; defInput.step = "1";
+      defInput.value = String(S.shadow.definition);
+      defInput.style.flex = "1";
+      const defVal = document.createElement("span");
+      defVal.className = "val"; defVal.textContent = String(S.shadow.definition);
+      defInput.addEventListener("input", () => {
+        S.shadow.definition = Number(defInput.value);
+        defVal.textContent = defInput.value;
+        update(true);
+      });
+      defRow.appendChild(defInput);
+      defRow.appendChild(defVal);
+      p.appendChild(defRow);
+
       // Mesh + lighting dropdowns
       const meshSec = document.createElement("div");
       meshSec.className = "sec";

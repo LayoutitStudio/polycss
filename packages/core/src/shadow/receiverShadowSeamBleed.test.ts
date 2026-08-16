@@ -183,4 +183,38 @@ describe("detectMemberSharedEdges", () => {
     const a: Array<[number, number]> = [[0, 0], [1, 0], [1, 1], [0, 1]];
     expect(detectMemberSharedEdges([a])).toEqual([undefined]);
   });
+
+  it("T-junction: edge abutting the middle of a longer edge → both shared", () => {
+    // A is a 4-wide square; B is a 1-wide square sitting against the middle
+    // of A's right edge (x=4, y∈[1..2]). No shared endpoints — the exact
+    // pass finds nothing; the collinear-overlap pass must flag A's edge 1
+    // ((4,0)→(4,4)) and B's edge 3 ((4,2)→(4,1)).
+    const a: Array<[number, number]> = [[0, 0], [4, 0], [4, 4], [0, 4]];
+    const b: Array<[number, number]> = [[4, 1], [5, 1], [5, 2], [4, 2]];
+    const shared = detectMemberSharedEdges([a, b]);
+    expect(shared[0]).toEqual(new Set([1]));
+    expect(shared[1]).toEqual(new Set([3]));
+  });
+
+  it("collinear but NON-overlapping ranges (corner continuation / gap) → not shared", () => {
+    // B's left edge lies on A's right-edge LINE but the parameter ranges
+    // don't overlap: B spans y∈[5..6] beyond A's y∈[0..4]. Also covers the
+    // corner-continuation case (touching at a single point has zero overlap
+    // length, below OVERLAP_EPS).
+    const a: Array<[number, number]> = [[0, 0], [4, 0], [4, 4], [0, 4]];
+    const b: Array<[number, number]> = [[4, 5], [5, 5], [5, 6], [4, 6]];
+    const shared = detectMemberSharedEdges([a, b]);
+    expect(shared[0]).toBeUndefined();
+    expect(shared[1]).toBeUndefined();
+  });
+
+  it("near-parallel but offset beyond epsilon → not shared", () => {
+    // B's left edge runs parallel to A's right edge but 1 UV px away —
+    // far past PERP_EPS (0.25), so it's a genuinely separate boundary.
+    const a: Array<[number, number]> = [[0, 0], [4, 0], [4, 4], [0, 4]];
+    const b: Array<[number, number]> = [[5, 1], [6, 1], [6, 2], [5, 2]];
+    const shared = detectMemberSharedEdges([a, b]);
+    expect(shared[0]).toBeUndefined();
+    expect(shared[1]).toBeUndefined();
+  });
 });
