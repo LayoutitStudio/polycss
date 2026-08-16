@@ -343,7 +343,8 @@ export {
   PROJECTIVE_QUAD_MAX_WEIGHT_RATIO,
   PROJECTIVE_QUAD_BLEED,
   DEFAULT_SEAM_BLEED,
-  resolveBleedRatio,
+  resolveSeamBleedPx,
+  seamBleedPrimitiveRatio,
 } from "./atlas/constants";
 export type {
   RGB,
@@ -415,7 +416,6 @@ export {
 export {
   buildTextureEdgeRepairSets,
   resolveSeamBleed,
-  normalizedSeamBleed,
   safePlanSeamBleedAmount,
   computePlanSeamBleedEdgeAmounts,
   seamBleedAmountArray,

@@ -1,11 +1,10 @@
 import type { Polygon } from "@layoutit/polycss-core";
 import {
   buildSeamBleedPolygonEdges,
-  DEFAULT_SEAM_BLEED,
   DEFAULT_TILE,
   DEFAULT_MATRIX_DECIMALS,
   BASIS_EPS,
-  resolveBleedRatio,
+  resolveSeamBleedPx,
 } from "@layoutit/polycss-core";
 import type {
   SolidTrianglePlan,
@@ -36,18 +35,22 @@ import { stableTriangleMatrixDecimals } from "@layoutit/polycss-core";
 import { applyPolygonDataAttrs, hasPolygonDataAttrs } from "./emit";
 import { resolveSolidTrianglePrimitive } from "./strategy";
 
-// See renderPolygons.ts. `options.seamBleed` is interpreted as a ratio.
+// See renderPolygons.ts: `options.seamBleed` is the raw public option and
+// core resolves it (`resolveSeamBleedPx` / `seamBleedPrimitiveRatio`).
 const SOLID_TRIANGLE_BORDER_WIDTH = "0 48px 96px 48px";
 
 type RenderTextureAtlasOptionsWithSeams = RenderTextureAtlasOptions & {
-  seamBleed?: number;
+  seamBleed?: import("@layoutit/polycss-core").PolySeamBleed;
   seamEdges?: Set<number>;
 };
 
 function buildStableTriangleSeamEdges(
   polygons: Polygon[],
-  options: RenderTextureAtlasOptions,
+  options: RenderTextureAtlasOptionsWithSeams,
 ): Map<number, Set<number>> | null {
+  // A resolved overscan of 0 disables the shared-edge bleed entirely, so
+  // skip the O(edges) seam-map build (mirrors React/Vue).
+  if (resolveSeamBleedPx(options.seamBleed) <= 0) return null;
   return buildSeamBleedPolygonEdges(polygons, {
     tileSize: options.tileSize,
     layerElevation: options.layerElevation,
@@ -61,19 +64,9 @@ function stableTriangleSeamOptions(
   seamBleedEdges: Map<number, Set<number>> | null,
   options: RenderTextureAtlasOptionsWithSeams,
 ): RenderTextureAtlasOptionsWithSeams {
-  // `options.seamBleed` is the ratio (0..1). Resolve to absolute px for
-  // the shared-edge bleed AND stash the ratio in `bleedRatio` so the
-  // SOLID_TRIANGLE_BLEED fallback inside solidTrianglePlan is scaled too.
-  const ratio = resolveBleedRatio(options.seamBleed);
-  const bleed = DEFAULT_SEAM_BLEED * ratio;
-  const baseOut = { ...options, bleedRatio: ratio };
-  return seamBleedEdges && bleed > 0
-    ? {
-        ...baseOut,
-        seamBleed: seamBleedEdges.has(index) ? bleed : undefined,
-        seamEdges: seamBleedEdges.get(index),
-      }
-    : baseOut;
+  return seamBleedEdges
+    ? { ...options, seamEdges: seamBleedEdges.get(index) }
+    : options;
 }
 
 export function stableTriangleColorState(options: InternalRenderTextureAtlasOptions): StableTriangleColorState {

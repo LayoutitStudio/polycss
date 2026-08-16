@@ -4,10 +4,11 @@
  * Mirrors PolyCSS's solidPaintDefaults.test.ts.
  * Imports from the React-local copy so drift surfaces immediately.
  */
-import { describe, it, expect } from "vitest";
-import type { Polygon } from "@layoutit/polycss-core";
-import { computeTextureAtlasPlanPublic } from "@layoutit/polycss-core";
+import { afterEach, describe, it, expect } from "vitest";
+import type { Polygon, ProjectiveQuadGuardGlobal } from "@layoutit/polycss-core";
+import { computeTextureAtlasPlanPublic, DEFAULT_SEAM_BLEED } from "@layoutit/polycss-core";
 import { getSolidPaintDefaultsFromPlans } from "./detection";
+import { computeTextureAtlasPlan } from "./paintDefaults";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -102,5 +103,62 @@ describe("getSolidPaintDefaultsFromPlans — plan-array variant", () => {
       makeDoc(),
     );
     expect(defaults.paintColor).toBe(majorityDefaults.paintColor);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: unified seamBleed semantics through the local computeTextureAtlasPlan
+// wrapper (raw option resolved in core + vanilla-parity projective guards)
+// ---------------------------------------------------------------------------
+
+describe("computeTextureAtlasPlan — unified seamBleed semantics", () => {
+  const SEAM_RECT: Polygon = {
+    vertices: [[0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0]],
+    color: "#ff0000",
+  };
+  const LONE_QUAD: Polygon = {
+    vertices: [[0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 3, 0]],
+    color: "#00ff00",
+  };
+  const seamEdges = new Set([1]);
+
+  afterEach(() => {
+    delete (window as Window & ProjectiveQuadGuardGlobal).__polycssProjectiveQuadGuards;
+  });
+
+  it("'auto' now yields the full 1.5px shared-edge overscan (was none)", () => {
+    const plan = computeTextureAtlasPlan(SEAM_RECT, 0, { seamBleed: "auto", seamEdges });
+    expect(plan?.seamBleedEdgeAmounts?.get(1)).toBe(DEFAULT_SEAM_BLEED);
+    expect(plan?.bleedRatio).toBe(1);
+  });
+
+  it("numbers are raw px: above the default uncapped, 0 disables everything", () => {
+    const raised = computeTextureAtlasPlan(SEAM_RECT, 0, { seamBleed: 3, seamEdges });
+    expect(raised?.seamBleedEdgeAmounts?.get(1)).toBe(3);
+    expect(raised?.bleedRatio).toBe(1);
+    const disabled = computeTextureAtlasPlan(SEAM_RECT, 0, { seamBleed: 0, seamEdges });
+    expect(disabled?.seamBleedEdgeAmounts).toBeUndefined();
+    expect(disabled?.bleedRatio).toBe(0);
+  });
+
+  it("sub-1.5 numbers scale primitive bleeds by px / 1.5 (was clamp(v,0,1))", () => {
+    const plan = computeTextureAtlasPlan(SEAM_RECT, 0, { seamBleed: 0.5, seamEdges });
+    expect(plan?.seamBleedEdgeAmounts?.get(1)).toBe(0.5);
+    expect(plan?.bleedRatio).toBeCloseTo(0.5 / 1.5, 10);
+  });
+
+  it("scales the projective-quad guard bleed by seamBleed (was fixed 0.6)", () => {
+    const full = computeTextureAtlasPlan(LONE_QUAD, 0, {});
+    const none = computeTextureAtlasPlan(LONE_QUAD, 0, { seamBleed: 0 });
+    expect(full?.projectiveMatrix).toBeTruthy();
+    expect(none?.projectiveMatrix).toBeTruthy();
+    expect(none?.projectiveMatrix).not.toEqual(full?.projectiveMatrix);
+  });
+
+  it("honors the window.__polycssProjectiveQuadGuards debug override (was ignored)", () => {
+    const none = computeTextureAtlasPlan(LONE_QUAD, 0, { seamBleed: 0 });
+    (window as Window & ProjectiveQuadGuardGlobal).__polycssProjectiveQuadGuards = { bleed: 0 };
+    const overridden = computeTextureAtlasPlan(LONE_QUAD, 0, {});
+    expect(overridden?.projectiveMatrix).toEqual(none?.projectiveMatrix);
   });
 });

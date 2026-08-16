@@ -44,6 +44,7 @@ import {
   computeMergedReceiverShadows,
   computeSceneBbox,
   DEFAULT_SEAM_BLEED,
+  resolveSeamBleedPx,
   ensureCcw2D,
   findOverlappingPolygonDuplicates,
   inverseRotateVec3,
@@ -211,7 +212,7 @@ export interface PolyMeshProps extends TransformProps, InteractionProps {
   textureBackend?: PolyTextureBackend;
   /** Default texture projection request. Defaults to scene context, then "affine". */
   textureProjection?: PolyTextureProjection;
-  /** Solid seam overscan. `"auto"` computes a fitted per-edge amount from the polygon plan. */
+  /** Solid seam overscan in CSS px (no upper clamp; each edge is still fitted to the polygon plan). `"auto"`/omitted = the 1.5px default; `0` disables every bleed; sub-1.5 values also shrink per-strategy primitive bleeds proportionally. */
   seamBleed?: PolySeamBleed;
   /**
    * Hold the whole previous frame (geometry + texture) until the next atlas is
@@ -735,11 +736,10 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
     () => {
       if (renderPolygon || directVoxelEnabled) return [];
       const repairEdges = buildTextureEdgeRepairSets(polygons);
-      const seamBleedEdges = effectiveSeamBleed === "auto" || (
-        typeof effectiveSeamBleed === "number" &&
-        Number.isFinite(effectiveSeamBleed) &&
-        effectiveSeamBleed > 0
-      )
+      // Core owns seamBleed resolution (resolveSeamBleedPx): "auto"/undefined
+      // → the 1.5px default, numbers are absolute px. Skip the seam-edge map
+      // only when the resolved overscan is 0.
+      const seamBleedEdges = resolveSeamBleedPx(effectiveSeamBleed) > 0
         ? buildSeamBleedPolygonEdges(polygons, {
             directionalLight: bakedDirectional,
             ambientLight: effectiveAmbient,
@@ -762,7 +762,7 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
           directionalLight: bakedDirectional,
           pointLights: bakedPointLights,
           ambientLight: effectiveAmbient,
-          seamBleed: seamBleedEdges?.has(i) ? effectiveSeamBleed : undefined,
+          seamBleed: effectiveSeamBleed,
           seamEdges: seamBleedEdges?.get(i),
           textureEdgeRepairEdges: repairEdges[i],
           lightOccludedPolyIndices,

@@ -17,12 +17,12 @@ import type {
 } from "./types";
 import {
   ASYNC_RENDER_BUDGET_MS,
-  DEFAULT_SEAM_BLEED,
   DEFAULT_TILE,
   PROJECTIVE_QUAD_DENOM_EPS,
   PROJECTIVE_QUAD_MAX_WEIGHT_RATIO,
   PROJECTIVE_QUAD_BLEED,
-  resolveBleedRatio,
+  resolveSeamBleedPx,
+  seamBleedPrimitiveRatio,
 } from "@layoutit/polycss-core";
 import {
   buildBasisHints,
@@ -78,20 +78,17 @@ import {
 } from "./stableTriangle";
 import { stableTriangleMatrixDecimals } from "@layoutit/polycss-core";
 
-// `options.seamBleed` is interpreted as a RATIO 0..1 that scales the
-// per-strategy bleed defaults. The shared-edge seam-bleed below uses
-// `DEFAULT_SEAM_BLEED * ratio` as its absolute value in CSS px.
-//
-// LIMITATION (v1): the other per-strategy bleeds (BORDER_SHAPE_BLEED,
-// SOLID_TRIANGLE_BLEED, TEXTURE_TRIANGLE_BLEED, PROJECTIVE_QUAD_BLEED)
-// don't yet receive the ratio. They live in core functions without
-// options access; threading the ratio through them is a bigger refactor.
-// Until then, `seamBleed: 0` disables ONLY the shared-edge overscan —
-// per-strategy bleeds still apply per their constants in
-// core/atlas/constants.ts.
+// `options.seamBleed` is the raw public option (`number | "auto" |
+// undefined`) and passes straight through to core plan construction,
+// which owns the resolution: `resolveSeamBleedPx` yields the absolute
+// shared-edge overscan in CSS px (default 1.5) and
+// `seamBleedPrimitiveRatio` scales the per-strategy primitive bleeds
+// (SOLID_TRIANGLE_BLEED, BORDER_SHAPE_BLEED, TEXTURE_TRIANGLE_BLEED,
+// PROJECTIVE_QUAD_BLEED). The helpers below only attach the detected
+// per-polygon seam-edge sets.
 
 type RenderTextureAtlasOptionsWithSeams = RenderTextureAtlasOptions & {
-  seamBleed?: number;
+  seamBleed?: import("@layoutit/polycss-core").PolySeamBleed;
   seamEdges?: Set<number>;
 };
 
@@ -109,23 +106,20 @@ function seamTriangleOptions(
   plan: TextureAtlasPlan,
   options: RenderTextureAtlasOptionsWithSeams,
 ): RenderTextureAtlasOptionsWithSeams {
-  // `options.seamBleed` is the public ratio (0..1, default 1). Resolve
-  // to an absolute CSS px value by multiplying the default constant.
-  // ratio === 0 → no shared-edge overscan (Three.js-parity testing).
-  // Also stash the ratio in `bleedRatio` so downstream plan construction
-  // can scale its per-strategy fallbacks (SOLID_TRIANGLE_BLEED, etc).
-  const ratio = resolveBleedRatio(options.seamBleed);
-  const bleed = DEFAULT_SEAM_BLEED * ratio;
-  const baseOut = { ...options, bleedRatio: ratio };
-  return plan.seamBleedEdges?.size && bleed > 0
-    ? { ...baseOut, seamBleed: bleed, seamEdges: plan.seamBleedEdges }
-    : { ...baseOut, seamBleed: undefined, seamEdges: undefined };
+  // Raw `options.seamBleed` passes through — core resolves it. Only the
+  // seam-edge set detected on the atlas plan is attached here.
+  return plan.seamBleedEdges?.size
+    ? { ...options, seamEdges: plan.seamBleedEdges }
+    : { ...options, seamEdges: undefined };
 }
 
 function buildRenderSeamBleedEdges(
   polygons: Polygon[],
-  options: RenderTextureAtlasOptions,
+  options: RenderTextureAtlasOptionsWithSeams,
 ): Map<number, Set<number>> | null {
+  // A resolved overscan of 0 disables the shared-edge bleed entirely, so
+  // skip the O(edges) seam-map build (mirrors React/Vue).
+  if (resolveSeamBleedPx(options.seamBleed) <= 0) return null;
   return buildSeamBleedPolygonEdges(polygons, {
     tileSize: options.tileSize,
     layerElevation: options.layerElevation,
@@ -139,16 +133,18 @@ function seamAtlasOptions(
   seamBleedEdges: Map<number, Set<number>> | null,
   options: RenderTextureAtlasOptionsWithSeams,
 ): RenderTextureAtlasOptionsWithSeams {
-  const ratio = resolveBleedRatio(options.seamBleed);
-  const bleed = DEFAULT_SEAM_BLEED * ratio;
-  const baseOut = { ...options, bleedRatio: ratio };
-  return seamBleedEdges && bleed > 0
-    ? {
-        ...baseOut,
-        seamBleed: seamBleedEdges.has(index) ? bleed : undefined,
-        seamEdges: seamBleedEdges.get(index),
-      }
-    : baseOut;
+  return seamBleedEdges
+    ? { ...options, seamEdges: seamBleedEdges.get(index) }
+    : options;
+}
+
+// Default projective-quad guard bleed, scaled by the seamBleed-derived
+// primitive ratio. resolveProjectiveQuadGuards merges these UNDER the
+// `window.__polycssProjectiveQuadGuards` debug override.
+function projectiveQuadGuardDefaults(
+  options: RenderTextureAtlasOptionsWithSeams,
+): { bleed: number } {
+  return { bleed: PROJECTIVE_QUAD_BLEED * seamBleedPrimitiveRatio(options.seamBleed) };
 }
 
 export function getSolidPaintDefaults(
@@ -158,7 +154,7 @@ export function getSolidPaintDefaults(
   const doc = options.doc ?? (typeof document !== "undefined" ? document : null);
   if (!doc) return {};
   const basisHints = buildBasisHints(polygons, options);
-  const projectiveQuadGuards = resolveProjectiveQuadGuards(doc);
+  const projectiveQuadGuards = resolveProjectiveQuadGuards(doc, projectiveQuadGuardDefaults(options));
   const plans = polygons.map((polygon, index) =>
     computeTextureAtlasPlan(polygon, index, options, projectiveQuadGuards, basisHints[index])
   );
@@ -189,7 +185,7 @@ export function renderPolygonsWithTextureAtlas(
   const useCornerShapeSolid = !disabled.has("i") && cornerShapeSupported(doc);
   const useBorderShape = !disabled.has("i") && borderShapeSupported(doc);
   const basisHints = buildBasisHints(polygons, options);
-  const projectiveQuadGuards = resolveProjectiveQuadGuards(doc);
+  const projectiveQuadGuards = resolveProjectiveQuadGuards(doc, projectiveQuadGuardDefaults(options));
   const seamBleedEdges = buildRenderSeamBleedEdges(polygons, options);
   const plans = polygons.map((polygon, index) =>
     computeTextureAtlasPlan(
@@ -355,7 +351,7 @@ export async function renderPolygonsWithTextureAtlasAsync(
   if (shouldCancel()) return { rendered: [], solidPaintDefaults: {}, dispose: () => {} };
 
   const basisHints = buildBasisHints(polygons, options);
-  const projectiveQuadGuards = resolveProjectiveQuadGuards(doc);
+  const projectiveQuadGuards = resolveProjectiveQuadGuards(doc, projectiveQuadGuardDefaults(options));
   const seamBleedEdges = buildRenderSeamBleedEdges(polygons, options);
   let batchStarted = performance.now();
   const plans: Array<TextureAtlasPlan | null> = new Array(polygons.length);
@@ -629,7 +625,7 @@ export function updatePolygonsWithStableTopology(
   const useBorderShape = !!doc && !disabled.has("i") && borderShapeSupported(doc);
   // Resolve the per-strategy ratio once so projective-quad / corner-shape
   // checks below all read from the same value as the plan stamping.
-  const bleedRatio = resolveBleedRatio(internalOptions.seamBleed);
+  const bleedRatio = seamBleedPrimitiveRatio(internalOptions.seamBleed);
   // Pass the resolved bleed as an explicit override so resolveProjectiveQuadGuards
   // (which has its own fallback path) returns the scaled value too.
   const projectiveQuadGuards = doc

@@ -14,6 +14,7 @@ import type {
 import {
   BASE_TILE,
   DEFAULT_SEAM_BLEED,
+  resolveSeamBleedPx,
   parseHexColor,
   resolvePolyTextureLeafGeometry,
   worldDirectionToCss,
@@ -83,7 +84,7 @@ export interface PolySceneProps extends TransformProps {
   textureBackend?: PolyTextureBackend;
   /** Default texture projection request. Defaults to "affine". */
   textureProjection?: PolyTextureProjection;
-  /** Solid seam overscan. `"auto"` computes a fitted per-edge amount from the polygon plan. */
+  /** Solid seam overscan in CSS px (no upper clamp; each edge is still fitted to the polygon plan). `"auto"`/omitted = the 1.5px default; `0` disables every bleed; sub-1.5 values also shrink per-strategy primitive bleeds proportionally. */
   seamBleed?: PolySeamBleed;
   /**
    * Render strategy overrides. Use `{ disable: ["u"] }` to force solid
@@ -267,11 +268,10 @@ function PolySceneInner({
   const textureAtlasPlans = useMemo(
     () => {
       const repairEdges = buildTextureEdgeRepairSets(polygons);
-      const seamBleedEdges = seamBleed === "auto" || (
-        typeof seamBleed === "number" &&
-        Number.isFinite(seamBleed) &&
-        seamBleed > 0
-      )
+      // Core owns seamBleed resolution (resolveSeamBleedPx): "auto"/undefined
+      // → the 1.5px default, numbers are absolute px. Skip the seam-edge map
+      // only when the resolved overscan is 0.
+      const seamBleedEdges = resolveSeamBleedPx(seamBleed) > 0
         ? buildSeamBleedPolygonEdges(polygons, {
             tileSize: polyContext.tileSize,
             layerElevation: polyContext.layerElevation,
@@ -281,7 +281,7 @@ function PolySceneInner({
         : null;
       return polygons.map((p, i) => computeTextureAtlasPlan(p, i, {
         ...polyContext,
-        seamBleed: seamBleedEdges?.has(i) ? seamBleed : undefined,
+        seamBleed,
         seamEdges: seamBleedEdges?.get(i),
         textureEdgeRepairEdges: repairEdges[i],
       }));

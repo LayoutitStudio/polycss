@@ -11,7 +11,6 @@
     "strict": true,
     "skipLibCheck": true,
     "outDir": "dist",
-    "rootDir": "src",
     "paths": {
       "@layoutit/polycss-core": ["../core/src/index.ts"],
       "@layoutit/polycss-core/three": ["../core/src/three/index.ts"]

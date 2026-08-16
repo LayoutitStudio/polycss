@@ -43,6 +43,7 @@ import {
   computeMergedReceiverShadows,
   computeSceneBbox,
   DEFAULT_SEAM_BLEED,
+  resolveSeamBleedPx,
   ensureCcw2D,
   inverseRotateVec3,
   findOverlappingPolygonDuplicates,
@@ -191,7 +192,7 @@ export interface PolyMeshProps extends InteractionProps {
   textureBackend?: PolyTextureBackend;
   /** Default texture projection request. Defaults to scene context, then "affine". */
   textureProjection?: PolyTextureProjection;
-  /** Solid seam overscan. `"auto"` computes a fitted per-edge amount from the polygon plan. */
+  /** Solid seam overscan in CSS px (no upper clamp; each edge is still fitted to the polygon plan). `"auto"`/omitted = the 1.5px default; `0` disables every bleed; sub-1.5 values also shrink per-strategy primitive bleeds proportionally. */
   seamBleed?: PolySeamBleed;
   /**
    * Hold the previous frame until the next atlas is decoded, then swap
@@ -472,11 +473,10 @@ export const PolyMesh = defineComponent({
     const textureAtlasPlans = computed(() => {
       if (!atlasAutoRender || directVoxelEnabled.value) return [];
       const repairEdges = buildTextureEdgeRepairSets(polygons.value);
-      const seamBleedEdges = atlasSeamBleed.value === "auto" || (
-        typeof atlasSeamBleed.value === "number" &&
-        Number.isFinite(atlasSeamBleed.value) &&
-        atlasSeamBleed.value > 0
-      )
+      // Core owns seamBleed resolution (resolveSeamBleedPx): "auto"/undefined
+      // → the 1.5px default, numbers are absolute px. Skip the seam-edge map
+      // only when the resolved overscan is 0.
+      const seamBleedEdges = resolveSeamBleedPx(atlasSeamBleed.value) > 0
         ? buildSeamBleedPolygonEdges(polygons.value, {
             directionalLight: bakedDirectional.value,
             ambientLight: atlasAmbient.value,
@@ -498,7 +498,7 @@ export const PolyMesh = defineComponent({
             directionalLight: bakedDirectional.value,
             pointLights: bakedPointLights.value,
             ambientLight: atlasAmbient.value,
-            seamBleed: seamBleedEdges?.has(i) ? atlasSeamBleed.value : undefined,
+            seamBleed: atlasSeamBleed.value,
             seamEdges: seamBleedEdges?.get(i),
             textureEdgeRepairEdges: repairEdges[i],
             lightOccludedPolyIndices,

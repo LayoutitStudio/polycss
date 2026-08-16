@@ -34,6 +34,7 @@ import type {
 } from "@layoutit/polycss-core";
 import {
   DEFAULT_SEAM_BLEED,
+  resolveSeamBleedPx,
   parseHexColor,
   resolvePolyTextureLeafGeometry,
   worldDirectionToCss,
@@ -90,7 +91,7 @@ export interface PolySceneProps {
   textureBackend?: PolyTextureBackend;
   /** Default texture projection request. Defaults to "affine". */
   textureProjection?: PolyTextureProjection;
-  /** Solid seam overscan. `"auto"` computes a fitted per-edge amount from the polygon plan. */
+  /** Solid seam overscan in CSS px (no upper clamp; each edge is still fitted to the polygon plan). `"auto"`/omitted = the 1.5px default; `0` disables every bleed; sub-1.5 values also shrink per-strategy primitive bleeds proportionally. */
   seamBleed?: PolySeamBleed;
   /** Opt out of specific render strategies. Disabled strategies fall through the chain (b→i→s, u→i→s, i→s). `<s>` cannot be disabled. */
   strategies?: PolyRenderStrategiesOption;
@@ -327,11 +328,10 @@ export const PolyScene = defineComponent({
       const pointLightsForAtlas = dynamic ? undefined : props.pointLights;
       const repairEdges = buildTextureEdgeRepairSets(sceneResult.value.polygons);
       const seamBleed = props.seamBleed ?? DEFAULT_SEAM_BLEED;
-      const seamBleedEdges = seamBleed === "auto" || (
-        typeof seamBleed === "number" &&
-        Number.isFinite(seamBleed) &&
-        seamBleed > 0
-      )
+      // Core owns seamBleed resolution (resolveSeamBleedPx): "auto"/undefined
+      // → the 1.5px default, numbers are absolute px. Skip the seam-edge map
+      // only when the resolved overscan is 0.
+      const seamBleedEdges = resolveSeamBleedPx(seamBleed) > 0
         ? buildSeamBleedPolygonEdges(sceneResult.value.polygons, {
             tileSize: polyContext.value.tileSize,
             layerElevation: polyContext.value.layerElevation,
@@ -346,7 +346,7 @@ export const PolyScene = defineComponent({
           directionalLight: directionalForAtlas,
           pointLights: pointLightsForAtlas,
           ambientLight: ambientForAtlas,
-          seamBleed: seamBleedEdges?.has(i) ? seamBleed : undefined,
+          seamBleed,
           seamEdges: seamBleedEdges?.get(i),
           textureEdgeRepairEdges: repairEdges[i],
         })

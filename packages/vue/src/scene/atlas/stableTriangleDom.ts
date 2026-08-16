@@ -18,6 +18,7 @@ import {
   parseHex,
   quantizeCssColor,
   rgbToHex,
+  seamBleedPrimitiveRatio,
   stepRgbToward,
 } from "@layoutit/polycss-core";
 import { resolveSolidTrianglePrimitive } from "./detection";
@@ -143,7 +144,15 @@ function computeStableTriangleDomStyle(
 
   const leftExtent = Math.max(0, Math.min(baseLength, apexXproj));
   const rightExtent = Math.max(0, baseLength - leftExtent);
-  const expanded = offsetStableTrianglePoints(leftExtent, rightExtent, height, SOLID_TRIANGLE_BLEED);
+  // Scale the primitive overscan by the seamBleed-derived ratio — mirrors
+  // core solidTrianglePlan (options.seamBleed=0 disables it, sub-default
+  // values shrink it proportionally).
+  const expanded = offsetStableTrianglePoints(
+    leftExtent,
+    rightExtent,
+    height,
+    SOLID_TRIANGLE_BLEED * seamBleedPrimitiveRatio(options.seamBleed),
+  );
   const apex2x = expanded[0], apex2y = expanded[1];
   const baseLeft2x = expanded[2], baseLeft2y = expanded[3];
   const baseRight2x = expanded[4], baseRight2y = expanded[5];

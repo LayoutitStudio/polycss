@@ -22,7 +22,8 @@ import {
   PROJECTIVE_QUAD_MAX_WEIGHT_RATIO,
   PROJECTIVE_QUAD_BLEED,
   SOLID_QUAD_CANONICAL_SIZE,
-  resolveBleedRatio,
+  resolveSeamBleedPx,
+  seamBleedPrimitiveRatio,
 } from "./constants";
 import type {
   TextureAtlasPlan,
@@ -55,7 +56,6 @@ import {
   computePlanSeamBleedEdgeAmounts,
   computeSeamBleedInsets,
   seamBleedAmountArray,
-  normalizedSeamBleed,
 } from "./edgeRepair";
 import { resolvePolyTextureUrl } from "./textureSource";
 
@@ -821,7 +821,7 @@ export function computeTextureAtlasPlan(
     normal[0], normal[1], normal[2], 0,
     tx, ty, tz, 1,
   ]);
-  const seamBleedRequest = normalizedSeamBleed(internalOptions.seamBleed);
+  const seamBleedRequest = resolveSeamBleedPx(internalOptions.seamBleed);
   const seamBleedEdgeAmounts = computePlanSeamBleedEdgeAmounts(
     screenPts,
     internalOptions.seamEdges ?? basisHint?.seamEdges,
@@ -913,7 +913,7 @@ export function computeTextureAtlasPlan(
     // expand, etc.) all read the same value from the plan instead of
     // each having to thread `options.seamBleed` through their own
     // function-parameter chains.
-    bleedRatio: resolveBleedRatio(internalOptions.seamBleed),
+    bleedRatio: seamBleedPrimitiveRatio(internalOptions.seamBleed),
     normal,
     textureTint,
     shadedColor,

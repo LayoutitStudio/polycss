@@ -268,7 +268,7 @@ describe("drawTexturedAtlasEntry — textured-triangle clip bleed", () => {
   }
 
   it("scales the clip expansion by entry.bleedRatio (seamBleed=0 disables it)", () => {
-    // bleedRatio is stamped from resolveBleedRatio(options.seamBleed); the
+    // bleedRatio is stamped from seamBleedPrimitiveRatio(options.seamBleed); the
     // drifted copy ignored it and always expanded by the full bleed.
     expect(tracedPoints(triangleClipEntry(0))).toEqual(expectedPoints(0));
     expect(tracedPoints(triangleClipEntry(0.5))).toEqual(expectedPoints(0.5));

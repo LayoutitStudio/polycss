@@ -46,12 +46,6 @@ export function resolveSeamBleed(value: unknown, fallback: number): number {
     : fallback;
 }
 
-export function normalizedSeamBleed(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isFinite(value) && value > 0
-    ? value
-    : undefined;
-}
-
 export function safePlanSeamBleedAmount(
   screenPts: number[],
   edgeIndex: number,
@@ -107,9 +101,10 @@ export function safePlanSeamBleedAmount(
 export function computePlanSeamBleedEdgeAmounts(
   screenPts: number[],
   seamEdges: ReadonlySet<number> | undefined,
-  seamBleed: number | undefined,
+  /** Resolved absolute overscan in CSS px (see `resolveSeamBleedPx`). */
+  seamBleed: number,
 ): Map<number, number> | undefined {
-  if (!seamEdges?.size || seamBleed === undefined) return undefined;
+  if (!seamEdges?.size || seamBleed <= 0) return undefined;
   const amounts = new Map<number, number>();
   for (const edgeIndex of seamEdges) {
     const amount = safePlanSeamBleedAmount(screenPts, edgeIndex, seamBleed);

@@ -88,14 +88,17 @@ function stableTriangleEdgeAmounts(
 ): number[] | null {
   const seamEdges = entry.seamBleedEdges;
   if (!seamEdges?.size) return null;
+  // entry.bleedRatio scales the SOLID_TRIANGLE_BLEED fallback so
+  // options.seamBleed=0 disables it (mirrors core solidTrianglePlan).
+  const triangleBleed = SOLID_TRIANGLE_BLEED * (entry.bleedRatio ?? 1);
   const seamAmount = entry.seamBleed === undefined
-    ? SOLID_TRIANGLE_BLEED
+    ? triangleBleed
     : entry.seamBleed;
   const edgePairs: Array<[number, number]> = [[c, a], [a, b], [b, c]];
   return edgePairs.map(([from, to], localEdgeIndex) => {
     const edgeIndex = triangleEdgeIndexForPair(from, to);
     const requested = edgeIndex !== undefined && seamEdges.has(edgeIndex)
-      ? entry.seamBleedEdgeAmounts?.get(edgeIndex) ?? resolveSeamBleed(seamAmount, SOLID_TRIANGLE_BLEED)
+      ? entry.seamBleedEdgeAmounts?.get(edgeIndex) ?? resolveSeamBleed(seamAmount, triangleBleed)
       : 0;
     return safePlanSeamBleedAmount(screenPts, localEdgeIndex, requested);
   });
@@ -225,7 +228,7 @@ export function solidTriangleStyle(
         left,
         right,
         height,
-        resolveSeamBleed(entry.seamBleed, SOLID_TRIANGLE_BLEED),
+        resolveSeamBleed(entry.seamBleed, SOLID_TRIANGLE_BLEED * (entry.bleedRatio ?? 1)),
       );
   const apex2: Vec2 = [expanded[0], expanded[1]];
   const baseLeft2: Vec2 = [expanded[2], expanded[3]];
