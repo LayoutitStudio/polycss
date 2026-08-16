@@ -38,14 +38,6 @@ export const IDENTICAL_GROUPS = [
     ],
   },
   {
-    name: "render-stats (×3)",
-    files: [
-      "packages/polycss/src/render/renderStats.ts",
-      "packages/react/src/renderStats.ts",
-      "packages/vue/src/renderStats.ts",
-    ],
-  },
-  {
     name: "atlas buildAtlasPages (react↔vue)",
     files: [
       "packages/react/src/scene/atlas/buildAtlasPages.ts",
