@@ -13,7 +13,9 @@
  */
 import { build } from "esbuild";
 import { createServer } from "node:http";
+import { mkdtempSync, rmSync } from "node:fs";
 import { readFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
@@ -127,7 +129,10 @@ async function probeScene(page, url, { settleMs = 1200, mountTimeoutMs = 15000 }
 }
 
 export async function verifyCandidates(candidates, { headed = false, settleMs } = {}) {
-  const bundleDir = resolve(here, ".generated");
+  // Unique per invocation. A shared `.generated/<agent>__<track>__<task>.js`
+  // meant two concurrent runs with the same key raced on one file and both
+  // graded whichever bundle won.
+  const bundleDir = mkdtempSync(join(tmpdir(), "polycss-skill-bundles-"));
   const built = [];
 
   for (const candidate of candidates) {
@@ -151,7 +156,7 @@ export async function verifyCandidates(candidates, { headed = false, settleMs } 
   });
 
   try {
-    const page = await browser.newPage({ viewport: { width: 1000, height: 700 } });
+    let page = await browser.newPage({ viewport: { width: 1000, height: 700 } });
     const results = [];
 
     for (const candidate of built) {
@@ -173,7 +178,31 @@ export async function verifyCandidates(candidates, { headed = false, settleMs } 
       const url = `${server.origin}/harness/index.html?bundle=${encodeURIComponent(
         `/bundles/${candidate.key}.js`,
       )}`;
-      const probe = await probeScene(page, url, { settleMs });
+      // A candidate is untrusted code. One that breaks the probe — or the page
+      // itself — used to reject the whole verifier, so every later candidate
+      // went ungraded. Failures become a failed row and the page is rebuilt.
+      let probe;
+      try {
+        probe = await probeScene(page, url, { settleMs });
+      } catch (error) {
+        results.push({
+          ...candidate,
+          probe: null,
+          checks: checksFor(candidate).map((check) => ({
+            id: check.id,
+            describe: check.describe,
+            pass: false,
+            reason: `grading failed: ${String(error.message ?? error).split("\n")[0]}`,
+          })),
+        });
+        try {
+          await page.close();
+        } catch {
+          /* already gone */
+        }
+        page = await browser.newPage({ viewport: { width: 1000, height: 700 } });
+        continue;
+      }
       const ctx = { ...probe, source: candidate.source };
 
       const checks = checksFor(candidate).map((check) => {
@@ -198,5 +227,6 @@ export async function verifyCandidates(candidates, { headed = false, settleMs } 
   } finally {
     await browser.close();
     await server.close();
+    rmSync(bundleDir, { recursive: true, force: true });
   }
 }
