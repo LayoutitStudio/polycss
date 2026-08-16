@@ -245,6 +245,7 @@ Each visible polygon is emitted as one leaf element; the renderer chooses the le
 | `@layoutit/polycss-react` | React components, hooks, controls, and core re-exports. |
 | `@layoutit/polycss-vue` | Vue 3 components, composables, controls, and core re-exports. |
 | `@layoutit/polycss-morph` | Prepared-model loading, retained DOM animation, morph targets, skinning, and playback. |
+| `@layoutit/polycss-skills` | `npx @layoutit/polycss-skills` — installs the PolyCSS agent skill into `.claude/skills` or `.agents/skills`. |
 | `@layoutit/polycss-domformat` | Private MIT-licensed producer-neutral `domformat@0` runtime for canonical JSON plus digest-bound sibling resources; conformance and specifications stay repository-side. Not published. |
 <!-- polycss:shared:packages:end -->
 
@@ -264,6 +265,24 @@ external direct-versus-canonical animated proof with
 `pnpm gallery:domformat:prove --output /absolute/path`; it requires exact
 retained DOM and computed paint semantics and reports bounded subpixel
 Chromium compositor differences.
+
+## Coding Agents
+
+PolyCSS ships an agent skill: an entry-point `SKILL.md` plus a folder of
+reference docs covering authoring invariants, scene setup, lighting, shadows,
+textures, animation, performance, Three.js parity, and troubleshooting.
+
+```bash
+npx @layoutit/polycss-skills
+```
+
+It installs into `.claude/skills/polycss/` and `.agents/skills/polycss/`,
+detecting whichever your project already uses. Upgrades are content-hashed, so
+re-running it refreshes the shipped docs and leaves your edits alone.
+
+The same content is served at [polycss.com/skill.md](https://polycss.com/skill.md),
+with the reference docs under `polycss.com/skill/docs/`, for agents that can
+fetch a URL but not run a command.
 
 <!-- polycss:shared:showcase:start -->
 ## Made with PolyCSS

@@ -29,6 +29,7 @@ const targets = [
   "packages/domformat/README.md",
   "packages/fonts/README.md",
   "packages/morph/README.md",
+  "packages/skills/README.md",
 ];
 
 const checkOnly = process.argv.includes("--check");

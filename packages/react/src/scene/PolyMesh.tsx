@@ -59,6 +59,7 @@ import {
   type CameraCullRotation,
   type EdgeOwners,
   type ReceiverCasterInput,
+  POLY_DEFAULT_SHADOW_LIFT,
 } from "@layoutit/polycss-core";
 import type { TransformProps } from "../shapes/types";
 import { usePolyMesh, type UseMeshOptions } from "./useMesh";
@@ -1027,7 +1028,7 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
     const runDirectionalShadow =
       !!sceneDirectionalLight?.direction && (sceneDirectionalLight.intensity ?? 1) > 0;
     const hasShadowPoints = shadowPointIndices.length > 0;
-    const shadowLift = sceneShadow?.lift ?? 0.001;
+    const shadowLift = sceneShadow?.lift ?? POLY_DEFAULT_SHADOW_LIFT;
     const planes = prepareReceiverFacePlanes(
       polygons,
       position ?? [0, 0, 0],

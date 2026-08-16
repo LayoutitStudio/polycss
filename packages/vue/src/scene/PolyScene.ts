@@ -37,6 +37,7 @@ import {
   parseHexColor,
   resolvePolyTextureLeafGeometry,
   worldDirectionToCss,
+  POLY_DEFAULT_SHADOW_LIFT,
 } from "@layoutit/polycss-core";
 import { PolyCameraContextKey } from "../camera";
 import { usePolySceneContext } from "./useSceneContext";
@@ -449,7 +450,7 @@ export const PolyScene = defineComponent({
         if (groundCssZ.value !== null) groundCssZ.value = null;
         return;
       }
-      const lift = props.shadow?.lift ?? 0.05;
+      const lift = props.shadow?.lift ?? POLY_DEFAULT_SHADOW_LIFT;
       const next = (minWorldZ + lift) * DEFAULT_TILE;
       if (groundCssZ.value !== next) groundCssZ.value = next;
       if (!el) return;

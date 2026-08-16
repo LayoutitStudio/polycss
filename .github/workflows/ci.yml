@@ -40,6 +40,9 @@ jobs:
       - name: Check README shared blocks
         run: pnpm check:readmes
 
+      - name: Check website skill copy
+        run: pnpm check:skill
+
       - name: Run tests
         run: pnpm test
 

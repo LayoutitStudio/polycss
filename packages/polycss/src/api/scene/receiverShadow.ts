@@ -22,6 +22,7 @@ import {
   type ReceiverCasterInput,
   type ReceiverFacePlane,
   type Vec3,
+  POLY_DEFAULT_SHADOW_LIFT,
 } from "@layoutit/polycss-core";
 import { ensureShadowRoot } from "./shadowSvg";
 import { meshShadowId } from "./shadowCache";
@@ -140,7 +141,7 @@ export function emitReceiverShadows(
   const hasTexture = receiverEntry.polygons.some((p) => p.texture !== undefined);
   const receiverScale = meshScaleVec3(receiverEntry.handle.transform.scale);
   const rbboxCss = receiverEntry.bboxCenterCss;
-  const cacheShadowLift = options.shadow?.lift ?? 0.001;
+  const cacheShadowLift = options.shadow?.lift ?? POLY_DEFAULT_SHADOW_LIFT;
   const cacheKey = `${receiverEntry.polygons.length}|${receiverDedupDrop.size}|${rpos.join(",")}|${rrot.join(",")}|${receiverScale.join(",")}|${rbboxCss ? rbboxCss.join(",") : "n"}|${cacheShadowLift}`;
   let cachedPlanes = receiverShadowCache.get(receiverEntry) as ReceiverFacePlane[] | undefined;
   if (cachedPlanes === undefined || receiverShadowCacheKey.get(receiverEntry) !== cacheKey) {

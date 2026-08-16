@@ -34,6 +34,7 @@ import {
   cornerShapeGeometryForPlan,
   resolvePolyTextureLeafGeometry,
   worldDirectionalLightToCss,
+  POLY_DEFAULT_SHADOW_LIFT,
 } from "@layoutit/polycss-core";
 import {
   BASE_TILE,
@@ -682,7 +683,7 @@ export const PolyMesh = defineComponent({
       const runDirectionalShadow =
         !!ctx?.directionalLight?.direction && (ctx.directionalLight.intensity ?? 1) > 0;
       const hasShadowPoints = shadowPointIndices.length > 0;
-      const shadowLift = ctx?.shadow?.lift ?? 0.001;
+      const shadowLift = ctx?.shadow?.lift ?? POLY_DEFAULT_SHADOW_LIFT;
       const planes = prepareReceiverFacePlanes(
         polygons.value,
         props.position ?? [0, 0, 0],

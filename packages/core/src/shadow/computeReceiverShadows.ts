@@ -335,6 +335,22 @@ export function prepareCasterPolyItems(
 }
 
 /**
+ * Default clearance between a receiver face and the shadow painted on it, in
+ * world units.
+ *
+ * Single source of truth on purpose: this default was previously written out at
+ * seven call sites across the three renderers, and two of them drifted to
+ * `0.001` — small enough that the receiver painted over its own shadow, so
+ * `castShadow` + `receiveShadow` emitted paths that darkened nothing.
+ *
+ * Note this is a WORLD-unit value while the depth conflict it must win is
+ * resolved in device pixels, so it still fails below roughly `zoom: 1`. That
+ * limitation is documented for callers; fixing it needs projection-aware
+ * clearance.
+ */
+export const POLY_DEFAULT_SHADOW_LIFT = 0.05;
+
+/**
  * Build ReceiverFacePlane[] for a receiver mesh. Pure: groups coplanar
  * polygons, computes (u,v) basis + outline, applies interior occlusion cull
  * (drops face planes hidden behind a parallel face plane within wall-

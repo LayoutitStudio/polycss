@@ -6,14 +6,57 @@ description: Build PolyCSS scenes that render 3D meshes, primitive shapes, or cu
 # PolyCSS — DOM 3D Rendering
 
 PolyCSS renders 3D polygon meshes as real DOM elements transformed with CSS
-`matrix3d(...)`. It supports OBJ/MTL, STL, glTF/GLB, VOX, generated primitives,
-colors, textures, dynamic lighting, shadows, controls, selection, animation, and
-per-polygon interaction.
+`matrix3d(...)`. No WebGL, no canvas-per-frame. It supports OBJ/MTL, STL,
+glTF/GLB, VOX, generated primitives, colors, textures, dynamic lighting,
+shadows, controls, selection, animation, and per-polygon interaction.
 
 Use native PolyCSS when authoring PolyCSS-first scenes. Use the Three.js parity
 API when porting Three.js code or generating code from Three-shaped examples.
 
-## Native Imports
+## Reference docs
+
+Read the file that matches the task before writing non-trivial code.
+
+| File | Read it when |
+|---|---|
+| [docs/authoring-polygons.md](/skill/docs/authoring-polygons.md) | **Generating `Polygon[]` by hand.** Winding, color format, coplanarity, the optimizer. Silent-failure rules. |
+| [docs/scenes-and-cameras.md](/skill/docs/scenes-and-cameras.md) | Setting up a scene, camera props, scene options, custom elements, coordinates. |
+| [docs/shapes-and-primitives.md](/skill/docs/shapes-and-primitives.md) | Boxes, spheres, planes, Platonic solids, raw polygon generators. |
+| [docs/loading-models.md](/skill/docs/loading-models.md) | `loadMesh`, `<PolyMesh src>`, OBJ/MTL/STL/glTF/GLB/VOX, parse options. |
+| [docs/lighting.md](/skill/docs/lighting.md) | Directional/ambient/point lights, baked vs dynamic, rebaking. |
+| [docs/shadows.md](/skill/docs/shadows.md) | `castShadow`, `receiveShadow`, parametric shadows, renderer differences. |
+| [docs/textures.md](/skill/docs/textures.md) | UV textures, the atlas pipeline, texture quality, presentation options. |
+| [docs/controls-and-interaction.md](/skill/docs/controls-and-interaction.md) | Orbit/map/first-person controls, selection, transform gizmos, click handlers. |
+| [docs/animation.md](/skill/docs/animation.md) | Skeletal clips from glTF/GLB, `usePolyAnimation`, stable DOM. |
+| [docs/performance.md](/skill/docs/performance.md) | Leaf counts, render strategies, atlas memory, voxel fast paths. |
+| [docs/three-parity.md](/skill/docs/three-parity.md) | Porting Three.js scenes through the `*/three` subpaths. |
+| [docs/troubleshooting.md](/skill/docs/troubleshooting.md) | **Something renders wrong.** Symptom → cause table. |
+| [docs/api-index.md](/skill/docs/api-index.md) | "Does this export exist?" Package-by-package export inventory. |
+
+## Packages
+
+| Package | Use |
+|---|---|
+| `@layoutit/polycss` | Vanilla + custom elements. Re-exports all of core. |
+| `@layoutit/polycss-react` | React components and hooks. Re-exports core. |
+| `@layoutit/polycss-vue` | Vue 3 mirror of React. Re-exports core. |
+| `@layoutit/polycss-core` | Pure math and parsers, zero browser globals (Node, workers). |
+| `@layoutit/polycss-fonts` | Text → extruded 3D `Polygon[]`. |
+| `@layoutit/polycss-morph` | Prepared models with retained DOM, morphs, skinning, playback. |
+
+React and Vue depend on `core` only, so **do not import renderer or component
+APIs from `@layoutit/polycss` in a React or Vue app** — use the framework
+package, and take anything it does not re-export from `@layoutit/polycss-core`.
+
+The one documented exception is `exportPolySceneSnapshot`, which lives only in
+`@layoutit/polycss` because it is browser DOM serialization rather than
+component API; React and Vue callers import it from there and pass the rendered
+element. See [docs/api-index.md](/skill/docs/api-index.md).
+
+The public API is mirrored between React and Vue: same names, same defaults,
+idiomatic differences only (refs vs reactives).
+
+## Imports
 
 ```ts
 import {
@@ -36,22 +79,10 @@ import {
   PolyGround,
   PolyOrbitControls,
   Poly,
-} from "@layoutit/polycss-react";
+} from "@layoutit/polycss-react"; // or "@layoutit/polycss-vue"
 ```
 
-```ts
-import {
-  PolyCamera,
-  PolyPerspectiveCamera,
-  PolyScene,
-  PolyMesh,
-  PolyGround,
-  PolyOrbitControls,
-  Poly,
-} from "@layoutit/polycss-vue";
-```
-
-## Native Conventions
+## Conventions
 
 - Coordinates are PolyCSS world space `[x, y, z]` with **+Z up**. World Y maps
   to CSS X (screen-right at identity rotation) and world X to CSS Y
@@ -62,12 +93,24 @@ import {
   clamp to `0.1`–`10` by default). `BASE_TILE` (50) is the world-unit → CSS px
   factor; you need it when converting world units to raw CSS pixels yourself —
   e.g. `<poly-iframe width>` mounts a document `width × 50` px wide.
-- `PolyCamera` / `createPolyCamera` are orthographic by default.
-- Use `PolyPerspectiveCamera` / `createPolyPerspectiveCamera` for perspective.
+- `PolyCamera` / `createPolyCamera` are **orthographic** by default (this
+  deliberately diverges from three.js). Use `PolyPerspectiveCamera` /
+  `createPolyPerspectiveCamera` for depth foreshortening.
+- The camera is the **outer** node; the scene nests inside it. CSS `perspective`
+  only applies to descendants.
+- **Do not infer names from a prefix rule.** `Poly` prefixing is a convention
+  for newer renderer-facing components, hooks and types — not a description of
+  the export inventory. Plenty of public names have no prefix: `loadMesh`,
+  `parseObj` / `parseStl` / `parseGltf` / `parseVox`, every `*Polygons`
+  generator, `BASE_TILE`, `LoopOnce` / `LoopRepeat` / `LoopPingPong`, the
+  generic math types (`Vec2`, `Vec3`, `Polygon`), and the vanilla factories
+  `createSelect` and `createTransformControls`. The `*/three` subpaths use
+  Three-compatible names deliberately. Check
+  [docs/api-index.md](/skill/docs/api-index.md) rather than guessing.
 
-## Authoring Polygons — read before generating geometry
+## Authoring polygons — the five silent failures
 
-A `Polygon` is a plain object. `vertices` is the only required field.
+A `Polygon` is a plain object; `vertices` is the only required field.
 
 ```ts
 interface Polygon {
@@ -76,97 +119,30 @@ interface Polygon {
   texture?: string;                      // image URL
   uvs?: [number, number][];              // one per vertex
   material?: PolyMaterial;               // shared material; material.texture wins over `texture`
-  textureImageSource?: PolyTextureImageSource;    // source image metadata; needs texturePresentation.backend="image" (advanced)
-  texturePresentation?: PolyTexturePresentation;  // per-polygon texture overrides (advanced)
   data?: Record<string, string | number | boolean>;  // → data-* attributes
 }
 ```
 
-Fields not listed here (`textureWrap`, `textureTriangles`, `doubleSided`, …) are
-parser-internal — do not author them.
+These constraints fail with **no throw and no console warning**:
 
-How much cleanup you get for free varies by parser and by entry point:
+1. **Winding decides visibility.** Vertex order sets the normal by the
+   right-hand rule (`(v1-v0) × (v2-v0)`), and PolyCSS backface-culls every leaf.
+   Wind counter-clockwise as seen from the side you want to look at.
+2. **`color` is not a full CSS color.** Only `#rgb`, `#rrggbb`, `rgb()`, and
+   `rgba()` parse. `"tomato"`, `hsl()`, and `color()` render **white**.
+3. **Non-triangular polygons must be coplanar**, or they are flattened onto
+   their average plane and crack against their neighbours. Triangles are safe.
+4. **The optimizer rewrites geometry by default** (`merge: true`,
+   `meshResolution: "lossy"`). Pass `{ merge: false }` to render your array
+   as authored.
+5. **Degenerate polygons vanish silently** — under 3 vertices, zero area, or a
+   degenerate first edge.
 
-- **Winding:** STL repairs it from connectivity; `.vox` is correct by
-  construction; **OBJ and glTF preserve source winding as-is**. All parsers
-  fit to target size and normalize into PolyCSS Z-up coordinates. The axis
-  transform is per-format: OBJ and glTF apply a cyclic `(x,y,z) → (z,x,y)`
-  permutation (never a y↔z swap, so handedness is preserved); STL defaults to
-  identity axes; `.vox` is already Z-up.
-- **Validation:** only React/Vue `<PolyScene polygons>` runs
-  `normalizePolygons` (drops degenerates, strips mismatched `uvs`, replaces bad
-  colors with `#cccccc`, fan-triangulates non-coplanar n-gons) — and its
-  warnings are never surfaced. `scene.add(...)`, `<PolyMesh polygons>`,
-  `<Poly>`, and `<poly-polygon>` do **not** normalize.
+Read [docs/authoring-polygons.md](/skill/docs/authoring-polygons.md) in full before
+generating geometry — it covers per-parser winding behaviour, which entry points
+normalize, and the exact optimizer thresholds.
 
-So for hand-authored polygons these constraints fail *silently* — no throw, no
-console warning:
-
-**1. Winding decides visibility.** Vertex order sets the face normal by the
-right-hand rule (`(v1-v0) × (v2-v0)`), and PolyCSS backface-culls every leaf. A
-reversed face is invisible from the side you meant to show, and shades from the
-flipped normal — typically ambient-only, since the directional term clamps at
-zero (it darkens, it does not invert). Shadows differ by path: React/Vue's ground fallback
-projects every polygon regardless of orientation, but the `receiveShadow` path
-(vanilla's only mechanism) light-back-face-culls casters, so a reversed open
-face can lose its shadow too. Wind counter-clockwise as seen from the side you want to look at.
-
-```ts
-// Faces +Z (up) — visible from above.
-{ vertices: [[0,0,0], [1,0,0], [1,1,0], [0,1,0]], color: "#d8d2c7" }
-// Same quad reversed — faces -Z, invisible from above.
-{ vertices: [[0,0,0], [0,1,0], [1,1,0], [1,0,0]], color: "#d8d2c7" }
-```
-
-Corollaries: solids wind outward but rooms/interiors wind inward; mirroring or
-negative scale reverses handedness and requires reversing winding; reversing
-vertices requires reversing `uvs` in the same order. `doubleSided` is
-importer-internal and is **not** a render-time flag — it will not make a face
-visible from behind.
-
-*Diagnostic rule:* a single-sided face disappearing when the camera moves behind
-it is correct behavior, not a bug. The winding symptom is a surface missing or
-flickering **from the viewpoint it was built to be seen from** — it exists in
-the data, its neighbours render, but it only shows from the opposite side. Then
-inspect winding and normal before touching culling, lighting, or camera code.
-
-**2. `color` is not a full CSS color.** Only `#rgb`, `#rrggbb`, `rgb()`, and
-`rgba()` parse. Named colors (`"tomato"`), `hsl()`, and `color()` fail silently
-— rendering **white**, or `#cccccc` on the normalizing `<PolyScene polygons>`
-path.
-
-**3. Non-triangular polygons must be coplanar.** On every path except
-`<PolyScene polygons>`, a non-planar n-gon is flattened onto its average plane,
-opening cracks against its neighbours; `<PolyScene polygons>` instead
-fan-triangulates it, silently changing topology. Triangles are always safe.
-
-**4. The optimizer rewrites geometry by default.** `merge` defaults to `true`
-and `meshResolution` to `"lossy"`: coincident faces within `0.05` world units
-are deduped, interior faces culled, and lossy merging starts at `0.35` world
-units of plane displacement / `0.04` boundary / `15°` — but that is not the
-ceiling: the optimizer also tries aggressive `30°`, `45°`, and `60°` variants
-(the widest at `0.06` boundary), accepted on a material render-cost win. The
-degree values are angular thresholds; the displacement budgets are absolute
-world units. None are configurable. Dedupe and interior culling count as exact
-reductions and still run under `meshResolution: "lossless"` — with one
-parse-time exception: STL parse results force the lossless optimizer *and* pass
-`skipInteriorCull`, but that protection does not survive into the renderer's own
-pass, which culls again unless you set `merge: false`. `merge: false` renders
-the array you pass
-untouched, but only on `scene.add(...)` and `<PolyMesh polygons>` — it does not
-exist on `<PolyScene polygons>` (always normalized + merged) or `<poly-mesh>`,
-and it cannot undo `loadMesh`'s own parse-time optimization. There is no
-exact-as-authored path for file geometry — the parsers normalize (fit to
-`targetSize` `60`, origin reposition, per-format axis normalization, rounding,
-fan-triangulation; STL repairs winding; `.vox` greedy-meshes quads). To preserve
-the *direct parser output* from renderer optimization, call
-`parseObj`/`parseStl`/`parseGltf`/`parseVox` directly and add with
-`merge: false`.
-
-**5. Degenerate polygons vanish silently** — under 3 vertices, zero area, or a
-degenerate first edge produces no leaf and no console output.
-
-## Building a Scene
+## Minimal scene
 
 Vanilla:
 
@@ -191,8 +167,8 @@ React (Vue mirrors this with kebab-case props):
 
 ```tsx
 <PolyCamera rotX={65} rotY={45}>
-  <PolyOrbitControls drag wheel />
   <PolyScene textureLighting="dynamic" ambientLight={{ intensity: 0.35 }}>
+    <PolyOrbitControls drag wheel />
     <PolyMesh src="/model.glb" autoCenter castShadow />
     <PolyGround size={8} />
     {polygons.map((p, i) => <Poly key={i} {...p} onClick={() => select(i)} />)}
@@ -200,210 +176,30 @@ React (Vue mirrors this with kebab-case props):
 </PolyCamera>
 ```
 
-**Primitives.** Vanilla `createPolyBox`, `createPolyPlane`, `createPolySphere`,
-`createPolyCylinder`, `createPolyCone`, `createPolyTorus`, `createPolyRing`, and
-the Platonic solids (`createPolyTetrahedron`, `createPolyOctahedron`,
-`createPolyIcosahedron`, `createPolyDodecahedron`). Core exports the matching
-`*Polygons` generators (`boxPolygons`, `spherePolygons`, …) that return raw
-`Polygon[]`.
+Custom elements (no build step):
 
-**Loading.** `loadMesh(url, opts)` handles `.obj` (+ `mtlUrl`), `.stl`, `.gltf`,
-`.glb`, and `.vox`, and returns a `ParseResult` you pass to `scene.add(...)`.
-In React/Vue use `<PolyMesh src>` or the `usePolyMesh` hook/composable.
+```html
+<script type="module" src="https://esm.sh/@layoutit/polycss/elements"></script>
 
-**Controls.** Vanilla `createPolyOrbitControls`, `createPolyMapControls`,
-`createPolyFirstPersonControls`, `createTransformControls`, `createSelect`.
-React/Vue: `<PolyOrbitControls>`, `<PolyMapControls>`,
-`<PolyFirstPersonControls>`, `<PolyTransformControls>`, `<PolySelect>` with
-`usePolySelect` / `usePolySelectionApi`.
-
-**Animation.** `usePolyAnimation` (React/Vue) drives imported skeletal clips.
-Animated meshes need stable triangle topology: vanilla passes
-`scene.add(mesh, { merge: false, stableDom: true })`; React/Vue pass
-`merge={false}` — there is no `stableDom` prop, leaf identity across
-same-topology frames is handled internally.
-
-## Lighting
-
-The scene takes one `directionalLight`, one `ambientLight`, and optional
-`pointLights`. Directional `direction` is the vector from the surface *toward*
-the light; it is normalized internally, so it need not be unit length. Point
-lights are direction-only (no distance falloff) and shade flat per face.
-
-Two modes, set via `textureLighting`:
-
-- **`"baked"`** (default) — Lambert is computed on the CPU and multiplied into
-  inline colors and atlas pixels. Best fidelity; supports point lights. Moving a
-  light needs a rebake. **Vanilla does not auto-rebake** on a
-  `setOptions({ directionalLight })` — call `mesh.rebakeAtlas()` explicitly
-  (typically debounced to drag-end). React/Vue re-render and *do* auto-rebake.
-- **`"dynamic"`** — lighting resolves in CSS `calc()` from scene-root custom
-  properties. Moving a light is a few CSS variable writes, zero JS, no atlas
-  redraw. **Point lights are ignored entirely in dynamic mode** — not for
-  shading, not for shadows.
-
-Prefer `"dynamic"` for live/animated lights; prefer `"baked"` for point lights,
-maximum fidelity, and Three.js parity.
-
-## Shadows
-
-Cast shadows are CPU-projected SVG surfaces, not render-strategy leaves. Mark
-casters with `castShadow` and receivers with `receiveShadow`; they work in both
-lighting modes (dynamic mode is directional-only).
-
-```ts
-scene.add(model, { castShadow: true });
-scene.add(floor, { receiveShadow: true });
-scene.setOptions({ shadow: { color: "#000000", opacity: 0.3, parametric: true, definition: 32 } });
+<poly-camera rot-x="65" rot-y="45">
+  <poly-scene>
+    <poly-orbit-controls drag wheel></poly-orbit-controls>
+    <poly-mesh src="/model.glb"></poly-mesh>
+  </poly-scene>
+</poly-camera>
 ```
 
-- **Receivers differ by renderer.** Vanilla has no ground fallback: a
-  `castShadow` mesh draws nothing until some mesh has `receiveShadow: true`, so
-  `scene.add(floor, { receiveShadow: true })` is required (the snippet above
-  does this). React/Vue additionally project onto the scene ground plane
-  automatically when no receiver exists — that is what `<PolyGround>` relies on
-  (it has **no** `receiveShadow` prop) — and drop that fallback as soon as any
-  receiver exists.
-- `shadow.parametric: true` casts a low-resolution coverage silhouette per
-  caster instead of full geometry — far cheaper. `definition` (default `16`)
-  is the detail knob; `<PolyMesh shadowDefinition>` overrides it per mesh.
-- `shadow.style: "vector" | "pixel"` — `"pixel"` gives blocky/voxel shadows.
-- `shadow.followAnimation` — animated casters freeze their shadow by default;
-  opt in to track the pose.
-- `shadow.dragDefinition` is **vanilla only** (progressive refinement during a
-  light drag). React/Vue get the same effect by lowering `definition` in state.
+## Rules of thumb
 
-## Other Packages
+- **Polygon count is the dominant cost.** One visible polygon = one DOM leaf,
+  one `matrix3d`, one paint. Halving polygon count beats every other
+  optimisation.
+- **Never run a `requestAnimationFrame` loop to update many leaves.** Camera,
+  mesh, and light motion are single-ancestor CSS updates. If you find yourself
+  writing a per-frame loop over polygons, you are fighting the engine.
+- **Prefer `textureLighting: "dynamic"`** for live or animated lights (zero JS
+  per light change). Prefer `"baked"` for point lights and maximum fidelity.
+- **`scene.destroy()` and `result.dispose()`** release atlas blob URLs. The mesh
+  element and `usePolyMesh` do it for you.
 
-- **`@layoutit/polycss-fonts`** — text → extruded 3D `Polygon[]`.
-  `textPolygons(font, text, { depth, profile })` for basic extrusion,
-  `composeText(...)` for the full multi-line/warp composer, plus
-  `loadGoogleFont` / `listGoogleFonts`. Framework-agnostic.
-- **`@layoutit/polycss-morph`** — prepared models with retained DOM.
-  `@layoutit/polycss-morph/prepare` is Node-only authoring;
-  `loadPolyMorphPackage` + `mountPolyMorphModel` run in the browser. The caller
-  owns timing; morph does not schedule frames.
-- **`@layoutit/polycss-core`** — pure math/parsers with zero browser globals,
-  for Node build steps and workers.
-
-## Three.js Parity Imports
-
-Use these when the scene is described in Three.js terms:
-
-```ts
-import {
-  PerspectiveCamera,
-  OrthographicCamera,
-  Object3D,
-  Vector3,
-  DirectionalLight,
-  PointLight,
-  AmbientLight,
-  transformPolygonsToPoly,
-  mountPolyThreeScene,
-} from "@layoutit/polycss/three";
-```
-
-React:
-
-```tsx
-import {
-  PolyThreePerspectiveCamera,
-  PolyThreeOrthographicCamera,
-  PolyThreeMesh,
-  DirectionalLight,
-} from "@layoutit/polycss-react/three";
-```
-
-Vue:
-
-```ts
-import {
-  PolyThreePerspectiveCamera,
-  PolyThreeOrthographicCamera,
-  PolyThreeMesh,
-  DirectionalLight,
-} from "@layoutit/polycss-vue/three";
-```
-
-## Three.js Parity Conventions
-
-- Coordinates are Three/Y-up authoring space.
-- Object rotations are radians, XYZ Euler.
-- Cameras are `PerspectiveCamera(fov, aspect, near, far)` or
-  `OrthographicCamera(left, right, top, bottom, near, far)`.
-- Frame with `camera.position.set(...)` and `camera.lookAt(...)`.
-- Directional lights use the Three.js source vector, `light.target.position` → `light.position`.
-- Geometry converts internally with the right-handed axis map `[x, -z, y]`, so
-  winding and Lambert lighting stay correct.
-- `mountPolyThreeScene(...)` defaults to baked lighting for Three parity.
-  Use `textureLighting: "dynamic"` only when live CSS light changes matter more
-  than strict conformance.
-
-## React Parity Example
-
-```tsx
-import { PolyScene } from "@layoutit/polycss-react";
-import {
-  DirectionalLight,
-  PolyThreeMesh,
-  PolyThreePerspectiveCamera,
-} from "@layoutit/polycss-react/three";
-
-const sun = new DirectionalLight("#ffffff", 1);
-sun.position.set(3, 5, 4);
-sun.target.position.set(0, 0, 0);
-
-export function App() {
-  return (
-    <PolyThreePerspectiveCamera
-      fov={50}
-      aspect={16 / 9}
-      position={[3, 2, 5]}
-      lookAt={[0, 0, 0]}
-    >
-      <PolyScene
-        ambientLight={{ intensity: 0.35 }}
-        directionalLight={sun.toPolyDirectionalLight()}
-      >
-        <PolyThreeMesh
-          src="/models/cube.glb"
-          position={[0, 0.5, 0]}
-          rotation={[0, Math.PI / 4, 0]}
-        />
-      </PolyScene>
-    </PolyThreePerspectiveCamera>
-  );
-}
-```
-
-## Vanilla Parity Example
-
-```ts
-import {
-  Object3D,
-  PerspectiveCamera,
-  boxPolygons,
-  mountPolyThreeScene,
-  transformPolygonsToPoly,
-} from "@layoutit/polycss/three";
-
-const camera = new PerspectiveCamera(50, 16 / 9, 0.1, 100);
-camera.position.set(3, 2, 5);
-camera.lookAt(0, 0, 0);
-
-const object = new Object3D();
-object.rotation.set(0, Math.PI / 4, 0);
-
-mountPolyThreeScene(document.querySelector("#scene")!, {
-  camera,
-  cameraOptions: { viewportHeight: 420 },
-  polygons: transformPolygonsToPoly(
-    boxPolygons({ size: 1, color: "#66aaff" }),
-    object,
-  ),
-});
-```
-
-Full docs: https://polycss.com/api/three-parity
-Authoring reference: https://polycss.com/core-concepts#authoring-polygons
+Full documentation: https://polycss.com

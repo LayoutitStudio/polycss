@@ -27,3 +27,7 @@ website/.baseline-shots/
 # chrome-trace skill raw output
 chrome-trace.json
 /tmp/*.trace.json
+
+# skill evaluation scratch
+eval/skill/.work/
+eval/skill/.generated/
