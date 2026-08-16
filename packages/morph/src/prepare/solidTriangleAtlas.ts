@@ -1,11 +1,11 @@
 import { deflateSync } from "node:zlib";
 import {
   computeTextureAtlasPlanPublic,
-  packTextureAtlasPlansWithScale,
+  packTextureAtlasPlansWithScaleCore,
   type PackedTextureAtlasEntry,
   type Polygon,
   type TextureAtlasPlan,
-} from "@layoutit/polycss";
+} from "@layoutit/polycss-core";
 import type {
   PolyMorphMat4,
   PolyMorphRenderFallback,
@@ -354,10 +354,11 @@ export function buildPolyMorphSolidTriangleAtlas(
   inputs: readonly PolyMorphTriangleAtlasInput[],
 ): PolyMorphTriangleAtlas {
   const plans = createPlans(inputs, buildSeamEdges(inputs));
-  const { packed, atlasScale } = packTextureAtlasPlansWithScale(
+  // Core variant: Node has no document, so device class is fixed desktop.
+  const { packed, atlasScale } = packTextureAtlasPlansWithScaleCore(
     plans,
     1,
-    null,
+    false,
     "local",
   );
   if (atlasScale !== 1) {

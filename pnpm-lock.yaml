@@ -172,6 +172,9 @@ importers:
       '@layoutit/polycss':
         specifier: workspace:^
         version: link:../polycss
+      '@layoutit/polycss-core':
+        specifier: workspace:^
+        version: link:../core
     devDependencies:
       '@types/node':
         specifier: ^25.0.0

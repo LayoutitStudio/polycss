@@ -31,11 +31,11 @@ export interface PolyPerspectiveCameraFromThreeOptions extends PolyCameraFromThr
 
 export type PolyOrthographicCameraFromThreeOptions = PolyCameraFromThreeOptions;
 
-export interface PolyPerspectiveCameraOptionsFromThree extends CameraState {
+export interface PolyPerspectiveCameraStateFromThree extends CameraState {
   perspective: number;
 }
 
-export type PolyOrthographicCameraOptionsFromThree = CameraState;
+export type PolyOrthographicCameraStateFromThree = CameraState;
 
 export class Vector3 {
   x: number;
@@ -195,7 +195,7 @@ export class PerspectiveCamera extends Object3D {
     this.far = far;
   }
 
-  toPolyCameraState(options: PolyPerspectiveCameraFromThreeOptions = {}): PolyPerspectiveCameraOptionsFromThree {
+  toPolyCameraState(options: PolyPerspectiveCameraFromThreeOptions = {}): PolyPerspectiveCameraStateFromThree {
     const perspective = options.perspective ?? perspectiveFromFov(
       this.fov,
       options.viewportHeight ?? DEFAULT_VIEWPORT_HEIGHT,
@@ -230,7 +230,7 @@ export class OrthographicCamera extends Object3D {
     this.far = far;
   }
 
-  toPolyCameraState(options: PolyOrthographicCameraFromThreeOptions = {}): PolyOrthographicCameraOptionsFromThree {
+  toPolyCameraState(options: PolyOrthographicCameraFromThreeOptions = {}): PolyOrthographicCameraStateFromThree {
     const frustumHeight = Math.abs(this.top - this.bottom) || 1;
     const zoom = options.zoom ?? (((options.viewportHeight ?? DEFAULT_VIEWPORT_HEIGHT) / frustumHeight) * this.zoom);
     return cameraStateFromObject(this, zoom);

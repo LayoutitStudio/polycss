@@ -3,8 +3,8 @@
  * Must be used inside a <PolyCamera>.
  *
  * Renders a polycss-scene wrapper containing all polygons and children.
- * Transform (position/scale/rotation) compose with PolyCamera's camera
- * transform via CSS preserve-3d nested DOM.
+ * Camera state (perspective, rotation, zoom) lives on the wrapping camera
+ * component; mesh transforms live on PolyMesh.
  */
 import {
   defineComponent,
@@ -70,10 +70,6 @@ import {
 export interface PolySceneProps {
   polygons?: Polygon[];
   centerPolygons?: Polygon[];
-  perspective?: number;
-  rotX?: number;
-  rotY?: number;
-  zoom?: number;
   directionalLight?: PolyDirectionalLight;
   pointLights?: PolyPointLight[];
   ambientLight?: PolyAmbientLight;
@@ -112,13 +108,6 @@ export interface PolySceneProps {
    */
   shadow?: PolyShadowOptions;
   class?: string;
-  // TransformProps
-  position?: Vec3;
-  scale?: number | Vec3;
-  rotation?: Vec3;
-  // Debug
-  debugShowLabels?: boolean;
-  debugShowBackfaces?: boolean;
 }
 
 export const PolyScene = defineComponent({
@@ -127,10 +116,6 @@ export const PolyScene = defineComponent({
   props: {
     polygons: { type: Array as PropType<Polygon[]>, default: undefined },
     centerPolygons: { type: Array as PropType<Polygon[]>, default: undefined },
-    perspective: { type: Number },
-    rotX: { type: Number },
-    rotY: { type: Number },
-    zoom: { type: Number },
     directionalLight: {
       type: Object as PropType<PolyDirectionalLight>,
       default: undefined,
@@ -157,14 +142,6 @@ export const PolyScene = defineComponent({
     autoCenter: { type: Boolean, default: false },
     shadow: { type: Object as PropType<PolyShadowOptions>, default: undefined },
     class: { type: String },
-    position: { type: Array as unknown as PropType<Vec3>, default: undefined },
-    scale: {
-      type: [Number, Array] as unknown as PropType<number | Vec3>,
-      default: undefined,
-    },
-    rotation: { type: Array as unknown as PropType<Vec3>, default: undefined },
-    debugShowLabels: { type: Boolean },
-    debugShowBackfaces: { type: Boolean },
   },
   setup(props, { slots, attrs }) {
     const cameraCtx = inject(PolyCameraContextKey);
@@ -259,27 +236,12 @@ export const PolyScene = defineComponent({
       }
     });
 
-    // Retain the debug class for external tooling. The atlas renderer no
-    // longer emits separate backface elements.
-    watch(
-      () => props.debugShowBackfaces,
-      (val) => {
-        const el = sceneElLocalRef.value;
-        if (!el) return;
-        el.classList.toggle("polycss-debug-show-backfaces", !!val);
-      }
-    );
-
     const inputPolygons = computed(() => props.polygons ?? []);
     const centerInputPolygons = computed(() => props.centerPolygons ?? null);
 
-    const sceneContextOptions = computed(() => ({
-      directionalLight: props.directionalLight,
-    }));
-
-    const sceneResult = usePolySceneContext(inputPolygons, sceneContextOptions);
+    const sceneResult = usePolySceneContext(inputPolygons);
     const centerPolygons = computed(() => centerInputPolygons.value ?? inputPolygons.value);
-    const centerSceneResult = usePolySceneContext(centerPolygons, sceneContextOptions);
+    const centerSceneResult = usePolySceneContext(centerPolygons);
 
     // Scene transform is applied imperatively via applyTransformDirect, not via
     // Vue's reactive style binding. The sceneStyle computed previously read

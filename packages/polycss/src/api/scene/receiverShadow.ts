@@ -44,11 +44,10 @@ interface MountedFace {
   /** Last applied matrix3d string — only re-set on change to dodge style work. */
   matrixCss: string;
 }
-// Mounts are namespaced per light so a directional pass and one pass per
-// shadow-casting point light can coexist on the same receiver mesh without
-// colliding on faceIndex. Outer key: a per-light identity ("" = directional,
-// "p0".."pN" = point lights). Inner key: faceIndex.
-const mountedFacesByMesh = new WeakMap<MeshEntry, Map<string, Map<number, MountedFace>>>();
+// One mounted-face registry per receiver mesh, keyed by faceIndex. All light
+// passes for a face merge into ONE SVG (see computeMergedReceiverShadows),
+// so there is no per-light namespace to keep.
+const mountedFacesByMesh = new WeakMap<MeshEntry, Map<number, MountedFace>>();
 
 /** Cached shared-edge adjacency per mesh. Invalidated when the polygon
  *  array reference changes (cheap identity check, no deep diff). */
@@ -76,30 +75,20 @@ interface ParametricCasterCacheEntry {
 }
 const parametricCasterCache = new WeakMap<CasterPolyItem[], ParametricCasterCacheEntry>();
 
-function lightMapFor(entry: MeshEntry): Map<string, Map<number, MountedFace>> {
+function mountedFacesFor(entry: MeshEntry): Map<number, MountedFace> {
   let m = mountedFacesByMesh.get(entry);
   if (!m) { m = new Map(); mountedFacesByMesh.set(entry, m); }
   return m;
 }
 
-function mountedFacesFor(entry: MeshEntry, lightKey: string): Map<number, MountedFace> {
-  const byLight = lightMapFor(entry);
-  let m = byLight.get(lightKey);
-  if (!m) { m = new Map(); byLight.set(lightKey, m); }
-  return m;
-}
-
-/** Detach + clear every mounted face across every light namespace for a mesh. */
+/** Detach + clear every mounted face for a mesh. */
 function detachAllFaces(entry: MeshEntry): void {
-  const byLight = mountedFacesByMesh.get(entry);
-  if (!byLight) return;
-  for (const faces of byLight.values()) {
-    for (const face of faces.values()) {
-      if (face.svg && face.svg.parentNode) face.svg.parentNode.removeChild(face.svg);
-    }
-    faces.clear();
+  const faces = mountedFacesByMesh.get(entry);
+  if (!faces) return;
+  for (const face of faces.values()) {
+    if (face.svg && face.svg.parentNode) face.svg.parentNode.removeChild(face.svg);
   }
-  byLight.clear();
+  faces.clear();
 }
 
 /**
@@ -326,7 +315,7 @@ export function emitReceiverShadows(
     shadow: { color: options.shadow?.color, opacity, maxExtend: options.shadow?.maxExtend },
   });
 
-  const mounted = mountedFacesFor(receiverEntry, "m");
+  const mounted = mountedFacesFor(receiverEntry);
   const seen = new Set<number>();
   const wantDebug = !!options.debugShadowAttrs;
   const shadowRoot = ensureShadowRoot(ctx.shadowSvgState, ctx.doc, ctx.sceneEl);

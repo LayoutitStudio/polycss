@@ -19,7 +19,7 @@ import { createRoot } from "react-dom/client";
 import { PolyCamera } from "../camera/PolyCamera";
 import { PolyScene } from "./PolyScene";
 import { PolyMesh } from "./PolyMesh";
-import { usePolySceneContext, type ShadowCasterRegistration } from "./sceneContext";
+import { useSceneContextValue, type ShadowCasterRegistration } from "./sceneContext";
 import type { Polygon, Vec3 } from "@layoutit/polycss-core";
 
 const TRIANGLE: Polygon = {
@@ -256,7 +256,7 @@ describe("PolyMesh — castShadow", () => {
       let version = -1;
       let casters: Map<symbol, ShadowCasterRegistration> | undefined;
       function Probe(): null {
-        const ctx = usePolySceneContext();
+        const ctx = useSceneContextValue();
         version = ctx?.shadowCastersVersion ?? -1;
         casters = ctx?.shadowCasters;
         return null;

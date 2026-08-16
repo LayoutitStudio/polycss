@@ -28,7 +28,7 @@ export type {
   PolyMeshProps,
   PolyIframeProps,
   PolyGroundProps,
-  UseSceneContextOptions,
+  PolyShadowOptions,
   UseSceneContextResult,
   UseMeshResult,
   UseMeshOptions,

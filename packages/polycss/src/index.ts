@@ -17,6 +17,7 @@ export type {
   PolyMeshHandle,
   PolyMeshTransform,
   PolySceneOptions,
+  PolyShadowOptions,
 } from "./api/createPolyScene";
 export {
   buildPolyMeshTransform,

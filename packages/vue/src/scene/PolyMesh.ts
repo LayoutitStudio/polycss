@@ -51,7 +51,7 @@ import {
   renderTextureProjectiveSolidPoly,
   renderTextureTrianglePoly,
 } from "./atlas";
-import { usePolySceneContext } from "./sceneContext";
+import { useSceneContextValue } from "./sceneContext";
 import { PolyCameraContextKey } from "../camera";
 import { type InteractionProps, type PolyEventHandler } from "./events";
 import { useMeshGeometry } from "./mesh/useMeshGeometry";
@@ -75,6 +75,14 @@ export interface PolyMeshProps extends InteractionProps {
    */
   mtl?: string;
   polygons?: Polygon[];
+  /** Optional `parseResult.voxelSource` companion for `.vox` meshes. When
+   *  set alongside `polygons`, the direct voxel renderer fast path activates
+   *  — emitting one `<b>` per visible voxel quad inside `.polycss-voxel-face`
+   *  wrappers (matches vanilla's `scene.add(parseResult)` behaviour).
+   *  Callers fetching via core's `loadMesh()` pass `parseResult.voxelSource`
+   *  here so the fast path engages; callers fetching via PolyMesh's `src`
+   *  prop get the same data wired through `useMesh` automatically. */
+  voxelSource?: import("@layoutit/polycss-core").ParseResult["voxelSource"];
   autoCenter?: boolean;
   textureLighting?: PolyTextureLightingMode;
   /** Atlas bitmap budget and CSS sprite size. `"auto"` (default) uses a
@@ -115,6 +123,12 @@ export interface PolyMeshProps extends InteractionProps {
    * receiver exists. Defaults to `false`.
    */
   receiveShadow?: boolean;
+  /**
+   * Per-mesh parametric-shadow detail, overriding the scene's
+   * `shadow.definition` for this mesh's cast/self shadow. Only used when the
+   * scene's `shadow.parametric` is true. Unset → inherit the scene definition.
+   */
+  shadowDefinition?: number;
   /** Apply mesh optimization (coplanar merge + interior cull) before
    *  rendering. Defaults to `true` — matches vanilla `scene.add`. Set
    *  `false` for helper meshes whose geometry shouldn't be merged. */
@@ -195,7 +209,7 @@ export const PolyMesh = defineComponent({
     // helper polygons (e.g. light marker octahedron) participate in the
     // scene's dynamic mode instead of getting overpainted by the scene's
     // global CSS rule with default normals.
-    const sceneCtx = usePolySceneContext();
+    const sceneCtx = useSceneContextValue();
     // Camera ctx — referenced by both event synthesis and the receiver-
     // shadow back-face cull. Declared early so the shadow computed can
     // close over it.

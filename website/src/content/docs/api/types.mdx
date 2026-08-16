@@ -350,40 +350,44 @@ interface PolySceneOptions {
   seamBleed?: PolySeamBleed;
   strategies?: PolyRenderStrategiesOption;
   autoCenter?: boolean;
-  shadow?: {
-    /** Default: "#000000". */
-    color?: string;
-    /** 0..1. Default: 0.25. */
-    opacity?: number;
-    /** World units the shadow is lifted off its receiver to avoid z-fighting.
-     *  Default 0.05 for the ground-plane fallback, 0.001 for `receiveShadow`
-     *  meshes. */
-    lift?: number;
-    /** Max CSS px the shadow may extend past the mesh footprint. Default: 2000. */
-    maxExtend?: number;
-    /** Cast one low-resolution coverage silhouette per caster instead of
-     *  projecting full geometry. Default: false. */
-    parametric?: boolean;
-    /** Parametric silhouette detail. Default: 16. Overridden per mesh by
-     *  `PolyMeshTransform.shadowDefinition`. */
-    definition?: number;
-    /** Progressive refinement: definition used while the directional light is
-     *  actively being dragged, then a debounced pass re-emits at full
-     *  `definition`. Vanilla `createPolyScene` only. Unset → no progressive pass. */
-    dragDefinition?: number;
-    /** "vector" (default) traces a smooth concave contour; "pixel"
-     *  greedy-meshes the coverage into blocky rectangles. */
-    style?: "vector" | "pixel";
-    /** Re-emit shadows while a mesh animates instead of freezing at the last
-     *  pose. Default false. Vanilla throttles the re-emit internally (~12fps);
-     *  React/Vue re-emit on every polygon change — pair with a low parametric
-     *  `definition`. */
-    followAnimation?: boolean;
-  };
+  shadow?: PolyShadowOptions;
   /** Emit `data-poly-shadow-*` attribution attributes on every shadow SVG and
    *  path, for DevTools inspection. Vanilla `createPolyScene` only.
    *  Default: false. */
   debugShadowAttrs?: boolean;
+}
+
+/** Exported by all three renderer packages under the same name. The React and
+ *  Vue variants omit the vanilla-only `dragDefinition`. */
+interface PolyShadowOptions {
+  /** Default: "#000000". */
+  color?: string;
+  /** 0..1. Default: 0.25. */
+  opacity?: number;
+  /** World units the shadow is lifted off its receiver to avoid z-fighting.
+   *  Default 0.05 for the ground-plane fallback, 0.001 for `receiveShadow`
+   *  meshes. */
+  lift?: number;
+  /** Max CSS px the shadow may extend past the mesh footprint. Default: 2000. */
+  maxExtend?: number;
+  /** Cast one low-resolution coverage silhouette per caster instead of
+   *  projecting full geometry. Default: false. */
+  parametric?: boolean;
+  /** Parametric silhouette detail. Default: 16. Overridden per mesh by
+   *  `PolyMeshTransform.shadowDefinition`. */
+  definition?: number;
+  /** Progressive refinement: definition used while the directional light is
+   *  actively being dragged, then a debounced pass re-emits at full
+   *  `definition`. Vanilla `createPolyScene` only. Unset → no progressive pass. */
+  dragDefinition?: number;
+  /** "vector" (default) traces a smooth concave contour; "pixel"
+   *  greedy-meshes the coverage into blocky rectangles. */
+  style?: "vector" | "pixel";
+  /** Re-emit shadows while a mesh animates instead of freezing at the last
+   *  pose. Default false. Vanilla throttles the re-emit internally (~12fps);
+   *  React/Vue re-emit on every polygon change — pair with a low parametric
+   *  `definition`. */
+  followAnimation?: boolean;
 }
 
 interface PolyMeshTransform {
@@ -463,7 +467,7 @@ Runtime selection helpers are exported from the framework packages: `findPolyMes
 - Component props: `PolyCameraProps`, `PolyOrthographicCameraProps`, `PolyPerspectiveCameraProps`, `PolySceneProps`, `PolyMeshProps`, `PolyGroundProps`, `PolyProps`, `PolyBoxProps`, `PolyPlaneProps`, `PolyRingProps`, `PolyOctahedronProps`, `PolySphereProps`, `PolyTetrahedronProps`, `PolyIcosahedronProps`, `PolyDodecahedronProps`, `PolyCylinderProps`, `PolyConeProps`, `PolyTorusProps`, `PolyAxesHelperProps`, `PolyDirectionalLightHelperProps`.
 - Control and selection props: `PolyOrbitControlsProps`, `PolyMapControlsProps`, `PolyTransformControlsProps`, `PolySelectProps`, `PolyControlsAnimateOptions`, `PolyOrbitControlsCamera`, `PolyMapControlsCamera`. `PolyFirstPersonControlsOptions`, `PolyFirstPersonControlsHandle`. **React only:** `PolyFirstPersonControlsProps`, `PolyControlsCamera`.
 - **Vanilla only** — exported from `@layoutit/polycss`, NOT from the framework packages: `PolyControlsBaseOptions`, `PolyControlsHandle`, `PolyControlsChangeEvent`, `PolyControlsInteractionEvent`, `PolyControlsEvent`, `PolyControlsListener`, `PolyOrbitControlsOptions`, `PolyOrbitControlsHandle`, `PolyMapControlsOptions`, `PolyMapControlsHandle`, `PolyTransformControlsOptions`, `PolyTransformControlsHandle`, `PolySelectOptions`, `PolySelectionHandle`, `PolyShapeResult`, `PolySceneSnapshotErrorCode`.
-- Hooks, events, and contexts: `UseCameraOptions`, `UseCameraResult`, `UseSceneContextOptions`, `UseSceneContextResult`, `UseMeshOptions`, `UseMeshResult`, `UsePolyAnimationResult`, `PolyPointerEvent`, `PolyMouseEvent`, `PolyWheelEvent`, `PolyEventHandler`, `InteractionProps`, `PolySelectionApi`, `PolyCameraContext`, `PolyCameraContextValue`.
+- Hooks, events, and contexts: `UseCameraOptions`, `UseCameraResult`, `UseSceneContextResult`, `UseMeshOptions`, `UseMeshResult`, `UsePolyAnimationResult`, `PolyPointerEvent`, `PolyMouseEvent`, `PolyWheelEvent`, `PolyEventHandler`, `InteractionProps`, `PolyShadowOptions`, `PolySelectionApi`, `PolyCameraContext`, `PolyCameraContextValue`.
 - Utility types: `PolyTransformControlsObject`, `PolyTransformControlsObjectChangeEvent`. **React only:** `TransformProps`, `DOMPassthroughProps`.
 
 </details>

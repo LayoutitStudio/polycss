@@ -2,7 +2,7 @@ import {
   computeSolidTrianglePlanFromCssPoints,
   SOLID_TRIANGLE_CANONICAL_SIZE,
   type Polygon,
-} from "@layoutit/polycss";
+} from "@layoutit/polycss-core";
 import {
   POLY_MORPH_MODEL_SCHEMA,
   validatePolyMorphModel,

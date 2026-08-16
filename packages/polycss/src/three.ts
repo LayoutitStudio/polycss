@@ -40,9 +40,9 @@ export {
 export type {
   PolyCameraFromThreeOptions,
   PolyOrthographicCameraFromThreeOptions,
-  PolyOrthographicCameraOptionsFromThree,
+  PolyOrthographicCameraStateFromThree,
   PolyPerspectiveCameraFromThreeOptions,
-  PolyPerspectiveCameraOptionsFromThree,
+  PolyPerspectiveCameraStateFromThree,
   Vector3Tuple,
 } from "@layoutit/polycss-core/three";
 

@@ -40,7 +40,7 @@ export interface ShadowCasterRegistration {
   shadowDefinition?: number;
 }
 
-export interface ShadowOptions {
+export interface PolyShadowOptions {
   color?: string;
   opacity?: number;
   /**
@@ -96,7 +96,7 @@ export interface PolySceneContextValue {
   textureImageRendering?: PolyTextureImageRendering;
   textureBackend?: PolyTextureBackend;
   textureProjection?: PolyTextureProjection;
-  shadow?: ShadowOptions;
+  shadow?: PolyShadowOptions;
   /**
    * Called by PolyMesh to register/unregister itself as a shadow caster.
    * Pass `null` to deregister (castShadow flipped off or unmount).
@@ -136,6 +136,6 @@ export interface PolySceneContextValue {
 
 export const PolySceneContext = createContext<PolySceneContextValue | null>(null);
 
-export function usePolySceneContext(): PolySceneContextValue | null {
+export function useSceneContextValue(): PolySceneContextValue | null {
   return useContext(PolySceneContext);
 }

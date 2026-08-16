@@ -50,7 +50,7 @@ import {
   TextureTrianglePoly,
 } from "./atlas";
 import { createPortal } from "react-dom";
-import { usePolySceneContext } from "./sceneContext";
+import { useSceneContextValue } from "./sceneContext";
 import { PolyCameraContext } from "../camera/context";
 import type { InteractionProps, PolyMeshHandle } from "./events";
 import { useMeshGeometry } from "./mesh/useMeshGeometry";
@@ -224,7 +224,7 @@ export const PolyMesh = forwardRef<PolyMeshHandle, PolyMeshProps>(function PolyM
   const transform = buildPolyMeshTransform({ position, scale, rotation });
 
   const cameraCtx = useContext(PolyCameraContext);
-  const sceneCtx = usePolySceneContext();
+  const sceneCtx = useSceneContextValue();
 
   const lighting = useMeshLighting({
     sceneCtx,

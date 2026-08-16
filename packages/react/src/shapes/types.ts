@@ -105,7 +105,6 @@ export interface PolyProps extends TransformProps, DOMPassthroughProps {
     textureImageRendering?: PolyTextureImageRendering;
     textureBackend?: PolyTextureBackend;
     textureProjection?: PolyTextureProjection;
-    debugShowBackfaces?: boolean;
     [key: string]: unknown;
   };
   /** Textured polygon lighting mode. Defaults to scene context, then "baked". */

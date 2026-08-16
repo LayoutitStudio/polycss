@@ -1,14 +1,9 @@
 import { useMemo } from "react";
 import type {
   Polygon,
-  PolyDirectionalLight,
   Vec3,
 } from "@layoutit/polycss-core";
 import { buildSceneContext, mergePolygons } from "@layoutit/polycss-core";
-
-export interface UseSceneContextOptions {
-  directionalLight?: PolyDirectionalLight;
-}
 
 export interface UseSceneContextResult {
   polygons: Polygon[];
@@ -20,14 +15,9 @@ export interface UseSceneContextResult {
  *   normalizePolygons → mergePolygons by default → bbox compute.
  *
  * Returns the processed polygons + the scene-wide axis-aligned bbox. Memoized
- * on input identity + the few options that affect output.
+ * on input identity.
  */
-export function usePolySceneContext(
-  polygons: Polygon[],
-  options: UseSceneContextOptions
-): UseSceneContextResult {
-  const { directionalLight: _directionalLight } = options;
-
+export function usePolySceneContext(polygons: Polygon[]): UseSceneContextResult {
   return useMemo(() => {
     // Normalize first via buildSceneContext (it runs normalizePolygons),
     // then merge. Merge runs AFTER normalize so it sees a clean polygon

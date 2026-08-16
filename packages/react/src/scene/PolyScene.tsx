@@ -20,11 +20,10 @@ import {
   worldDirectionToCss,
   POLY_DEFAULT_SHADOW_LIFT,
 } from "@layoutit/polycss-core";
-import type { ShadowCasterRegistration, ShadowOptions } from "./sceneContext";
+import type { ShadowCasterRegistration, PolyShadowOptions } from "./sceneContext";
 import { useCameraContext } from "../camera/context";
 import { usePolySceneContext } from "./useSceneContext";
 import { injectPolyBaseStyles } from "../styles/styles";
-import type { TransformProps } from "../shapes/types";
 import {
   buildSeamBleedPolygonEdges,
   buildTextureEdgeRepairSets,
@@ -43,7 +42,7 @@ import {
 } from "./atlas";
 import { PolySceneContext } from "./sceneContext";
 
-export interface PolySceneProps extends TransformProps {
+export interface PolySceneProps {
   /** Polygons to render. Composes additively with `children`. */
   polygons?: Polygon[];
   /**
@@ -60,10 +59,6 @@ export interface PolySceneProps extends TransformProps {
    * PolyMesh's own `autoCenter`.
    */
   centerPolygons?: Polygon[];
-  perspective?: number;
-  rotX?: number;
-  rotY?: number;
-  zoom?: number;
   directionalLight?: PolyDirectionalLight;
   /** Point lights (world-space positions). Direction-only per-face Lambert,
    *  baked-mode only. */
@@ -111,23 +106,15 @@ export interface PolySceneProps extends TransformProps {
    * ground, or mesh geometry changes. Defaults:
    * `{ color: "#000000", opacity: 0.25, lift: 0.05, maxExtend: 2000 }`.
    */
-  shadow?: ShadowOptions;
+  shadow?: PolyShadowOptions;
   className?: string;
   style?: CSSProperties;
   children?: ReactNode;
-
-  // Debug toggles retained for external tooling.
-  debugShowLabels?: boolean;
-  debugShowBackfaces?: boolean;
 }
 
 function PolySceneInner({
   polygons: polygonsProp,
   centerPolygons: centerPolygonsProp,
-  perspective: _perspective,
-  rotX: _rotX,
-  rotY: _rotY,
-  zoom: _zoom,
   directionalLight,
   pointLights,
   ambientLight,
@@ -144,11 +131,6 @@ function PolySceneInner({
   className,
   style,
   children,
-  position: _position,
-  scale: _scale,
-  rotation: _rotation,
-  debugShowLabels: _debugShowLabels,
-  debugShowBackfaces,
 }: PolySceneProps) {
   const { store, sceneElRef, applyTransformDirect } = useCameraContext();
   const [sceneEl, setSceneEl] = useState<HTMLDivElement | null>(null);
@@ -160,14 +142,6 @@ function PolySceneInner({
     },
     [sceneElRef]
   );
-
-  // Retain the debug class for external tooling. The atlas renderer no longer
-  // emits separate backface elements.
-  useEffect(() => {
-    const el = sceneElRef.current;
-    if (!el) return;
-    el.classList.toggle("polycss-debug-show-backfaces", !!debugShowBackfaces);
-  }, [debugShowBackfaces, sceneElRef]);
 
   // Inject base styles once
   const injectedRef = useRef(false);
@@ -193,9 +167,7 @@ function PolySceneInner({
   );
 
   // Run mesh post-processing pipeline (normalize + automatic merge).
-  const { polygons, sceneBbox: renderSceneBbox } = usePolySceneContext(inputPolygons, {
-    directionalLight,
-  });
+  const { polygons, sceneBbox: renderSceneBbox } = usePolySceneContext(inputPolygons);
 
   // Bbox for autoCenter: prefer centerPolygons (if provided) over the render
   // polygon bbox. centerPolygons are NOT normalized/merged here — they're used
@@ -203,7 +175,6 @@ function PolySceneInner({
   // raw merged polygons, not normalized ones, for its centerWrapper calc).
   const { sceneBbox: centerSceneBbox } = usePolySceneContext(
     centerInputPolygons ?? inputPolygons,
-    { directionalLight },
   );
   const sceneBbox = centerInputPolygons ? centerSceneBbox : renderSceneBbox;
 

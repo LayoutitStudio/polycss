@@ -136,6 +136,6 @@ export const PolySceneContextKey: InjectionKey<ComputedRef<PolySceneContextValue
   "polycss/scene-context",
 );
 
-export function usePolySceneContext(): ComputedRef<PolySceneContextValue> | null {
+export function useSceneContextValue(): ComputedRef<PolySceneContextValue> | null {
   return inject(PolySceneContextKey, null);
 }

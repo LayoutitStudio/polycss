@@ -6,6 +6,7 @@ import {
 import type {
   LoadMeshOptions,
   MeshResolution,
+  ParseResult,
   Polygon,
   PolyTextureBackend,
   PolyTextureImageRendering,
@@ -20,10 +21,15 @@ import {
 } from "@layoutit/polycss-core/three";
 import type { Vector3Tuple } from "@layoutit/polycss-core/three";
 import { PolyMesh } from "../scene/PolyMesh";
+import type { PolyMeshProps } from "../scene/PolyMesh";
 import { usePolyMesh } from "../scene/useMesh";
+import type { PolyEventHandler } from "../scene/events";
+import type { TextureQuality, PolySeamBleed } from "../scene/atlas";
 
-export interface PolyThreeMeshProps {
-  id?: string;
+export interface PolyThreeMeshProps extends Omit<
+  PolyMeshProps,
+  "polygons" | "src" | "mtl" | "position" | "rotation" | "scale" | "autoCenter" | "parseOptions" | "meshResolution"
+> {
   object?: Object3D;
   polygons?: Polygon[];
   src?: string;
@@ -32,18 +38,8 @@ export interface PolyThreeMeshProps {
   rotation?: Vector3Tuple;
   scale?: number | Vector3Tuple;
   autoCenter?: boolean;
-  textureLighting?: PolyTextureLightingMode;
-  textureQuality?: number | "auto";
-  textureLeafSizing?: PolyTextureLeafSizing;
-  textureImageRendering?: PolyTextureImageRendering;
-  textureBackend?: PolyTextureBackend;
-  textureProjection?: PolyTextureProjection;
-  castShadow?: boolean;
-  receiveShadow?: boolean;
-  merge?: boolean;
-  meshResolution?: MeshResolution;
   parseOptions?: LoadMeshOptions;
-  class?: string;
+  meshResolution?: PolyMeshProps["meshResolution"];
   style?: CSSProperties | string;
 }
 
@@ -89,6 +85,7 @@ export const PolyThreeMesh = defineComponent({
     id: { type: String, default: undefined },
     object: { type: Object as PropType<Object3D>, default: undefined },
     polygons: { type: Array as PropType<Polygon[]>, default: undefined },
+    voxelSource: { type: Object as PropType<ParseResult["voxelSource"]>, default: undefined },
     src: { type: String, default: undefined },
     mtl: { type: String, default: undefined },
     position: { type: Array as unknown as PropType<Vector3Tuple>, default: undefined },
@@ -96,18 +93,34 @@ export const PolyThreeMesh = defineComponent({
     scale: { type: [Number, Array] as unknown as PropType<number | Vector3Tuple>, default: undefined },
     autoCenter: { type: Boolean, default: false },
     textureLighting: { type: String as PropType<PolyTextureLightingMode>, default: undefined },
-    textureQuality: { type: [Number, String] as PropType<number | "auto">, default: undefined },
+    textureQuality: { type: [Number, String] as PropType<TextureQuality>, default: undefined },
     textureLeafSizing: { type: String as PropType<PolyTextureLeafSizing>, default: undefined },
     textureImageRendering: { type: String as PropType<PolyTextureImageRendering>, default: undefined },
     textureBackend: { type: String as PropType<PolyTextureBackend>, default: undefined },
     textureProjection: { type: String as PropType<PolyTextureProjection>, default: undefined },
+    seamBleed: { type: [Number, String] as PropType<PolySeamBleed>, default: undefined },
+    atomicAtlas: { type: Boolean, default: false },
+    onFrameReady: { type: Function as PropType<() => void>, default: undefined },
     castShadow: { type: Boolean, default: false },
     receiveShadow: { type: Boolean, default: false },
+    shadowDefinition: { type: Number, default: undefined },
     merge: { type: Boolean, default: true },
     meshResolution: { type: String as PropType<MeshResolution>, default: undefined },
     parseOptions: { type: Object as PropType<LoadMeshOptions>, default: undefined },
     class: { type: String, default: undefined },
     style: { type: [Object, String] as PropType<CSSProperties | string>, default: undefined },
+    onClick: { type: Function as PropType<PolyEventHandler<MouseEvent>>, default: undefined },
+    onContextMenu: { type: Function as PropType<PolyEventHandler<MouseEvent>>, default: undefined },
+    onDoubleClick: { type: Function as PropType<PolyEventHandler<MouseEvent>>, default: undefined },
+    onWheel: { type: Function as PropType<PolyEventHandler<WheelEvent>>, default: undefined },
+    onPointerDown: { type: Function as PropType<PolyEventHandler<PointerEvent>>, default: undefined },
+    onPointerUp: { type: Function as PropType<PolyEventHandler<PointerEvent>>, default: undefined },
+    onPointerMove: { type: Function as PropType<PolyEventHandler<PointerEvent>>, default: undefined },
+    onPointerOver: { type: Function as PropType<PolyEventHandler<PointerEvent>>, default: undefined },
+    onPointerOut: { type: Function as PropType<PolyEventHandler<PointerEvent>>, default: undefined },
+    onPointerEnter: { type: Function as PropType<PolyEventHandler<PointerEvent>>, default: undefined },
+    onPointerLeave: { type: Function as PropType<PolyEventHandler<PointerEvent>>, default: undefined },
+    onPointerCancel: { type: Function as PropType<PolyEventHandler<PointerEvent>>, default: undefined },
   },
   setup(props, { attrs, slots }) {
     const objectRef = shallowRef<Object3D>(props.object ?? new Object3D());
@@ -147,6 +160,7 @@ export const PolyThreeMesh = defineComponent({
         ...attrs,
         id: props.id,
         polygons: polyPolygons.value,
+        voxelSource: props.voxelSource,
         autoCenter: false,
         textureLighting: props.textureLighting,
         textureQuality: props.textureQuality,
@@ -154,12 +168,28 @@ export const PolyThreeMesh = defineComponent({
         textureImageRendering: props.textureImageRendering,
         textureBackend: props.textureBackend,
         textureProjection: props.textureProjection,
+        seamBleed: props.seamBleed,
+        atomicAtlas: props.atomicAtlas,
+        onFrameReady: props.onFrameReady,
         castShadow: props.castShadow,
         receiveShadow: props.receiveShadow,
+        shadowDefinition: props.shadowDefinition,
         merge: props.merge,
         meshResolution: props.meshResolution,
         class: props.class,
         style: props.style,
+        onClick: props.onClick,
+        onContextMenu: props.onContextMenu,
+        onDoubleClick: props.onDoubleClick,
+        onWheel: props.onWheel,
+        onPointerDown: props.onPointerDown,
+        onPointerUp: props.onPointerUp,
+        onPointerMove: props.onPointerMove,
+        onPointerOver: props.onPointerOver,
+        onPointerOut: props.onPointerOut,
+        onPointerEnter: props.onPointerEnter,
+        onPointerLeave: props.onPointerLeave,
+        onPointerCancel: props.onPointerCancel,
       }, slots);
     };
   },

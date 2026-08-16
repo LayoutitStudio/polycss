@@ -339,20 +339,6 @@ describe("Poly (Vue) — dynamic lighting", () => {
   });
 });
 
-describe("Poly (Vue) — debug backfaces", () => {
-  it("does not render SVG debug overlays", () => {
-    const container = renderPoly({
-      vertices: FLAT_TRIANGLE,
-      context: {
-        ...DEFAULT_CONTEXT,
-        debugShowBackfaces: true,
-      },
-    });
-    expect(container.querySelector("svg")).toBeNull();
-    expect(container.querySelector(".polycss-debug-backface")).toBeNull();
-  });
-});
-
 describe("Poly (Vue) — transform props", () => {
   it("renders a wrapper div when position is provided", () => {
     const container = renderPoly({

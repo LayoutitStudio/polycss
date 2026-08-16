@@ -131,6 +131,7 @@ export type {
   PolyMeshTransform,
   PolySceneHandle,
   PolySceneOptions,
+  PolyShadowOptions,
 } from "./scene/types";
 
 function normalizeSceneOptions<T extends Partial<Omit<PolySceneOptions, "camera">>>(options: T): T {

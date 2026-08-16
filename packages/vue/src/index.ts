@@ -21,7 +21,7 @@ export type { PolyIframeProps } from "./scene";
 export { PolyGround } from "./scene";
 export type { PolyGroundProps } from "./scene";
 export { usePolySceneContext } from "./scene";
-export type { UseSceneContextOptions, UseSceneContextResult } from "./scene";
+export type { PolyShadowOptions, UseSceneContextResult } from "./scene";
 export { usePolyMesh } from "./scene";
 export type { UseMeshOptions, UseMeshResult } from "./scene";
 export { usePolyMaterial } from "./scene/usePolyMaterial";
