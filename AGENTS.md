@@ -319,14 +319,26 @@ paints in Chromium** — never the agent's prose.
 Two design rules that are load-bearing:
 
 - **Workspaces live outside the repository** (`$TMPDIR`). Inside it, an agent
-  walks up out of its workspace and reads this monorepo — measured, on the
-  no-skill control track.
-- **The `three` track is a control, never a reference.** Same model, same task,
-  no skill, separate workspace. The two tracks are graded independently against
-  the same visual criteria; PolyCSS output is never diffed against a Three.js
-  render. It exists to separate "the skill is inadequate" from "this task is
-  hard for this model", and it has repeatedly proved the grader wrong rather
-  than the agent.
+  walks up out of its workspace and reads this monorepo — measured, on a
+  no-skill track.
+- **Three tracks, and only one is a control.** `polycss` is the intervention;
+  `polycss-noskill` is the CONTROL (same library, task, contract and prompt,
+  skill withheld), so `polycss` minus `polycss-noskill` is the skill's effect;
+  `three` is an EXTERNAL BASELINE, not a control — it swaps the library, API and
+  authoring contract at the same time as it removes the skill, so that delta
+  conflates the skill with library familiarity. It earns its place by answering
+  "is this task hard for this model at all?" and by calibrating the graders, and
+  it has repeatedly proved a grader wrong rather than an agent.
+- **Both PolyCSS tracks get byte-identical prompts.** Whether the agent
+  discovers the project-local skill IS the intervention; telling it one exists
+  is not. An earlier version cued the intervention only, and measured the files
+  plus the cue.
+- **Track is the outer loop and skill-less tracks run first**, so no control
+  executes while an installed skill exists on disk. Track order is therefore
+  fixed, which confounds wall-clock comparisons — treat timing as a fixed-order
+  observation, never as an effect of the skill.
+- Tracks are graded independently and never diffed against each other; no
+  track's output is a reference image for another.
 
 Grade on painted pixels, not DOM boxes: every leaf except `<b>` is
 `backface-visibility: hidden`, so a reversed face keeps its bounding rect while

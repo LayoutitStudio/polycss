@@ -22,7 +22,7 @@ pnpm eval:selftest                           # prove the graders can fail
 For each (agent, task) pair:
 
 1. **Isolate.** A fresh directory outside the repository gets
-   `npx polycss-skills --agent all` and a `TASK.md`, and nothing else.
+   `npx @layoutit/polycss-skills --agent all` and a `TASK.md`, and nothing else.
 2. **Run the agent** non-interactively in that directory. The task asks for one
    file, `scene.mjs`, exporting `mount(host)`.
 3. **Build** it with esbuild, aliasing `@layoutit/polycss` to workspace source.
