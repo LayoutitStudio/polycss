@@ -10,7 +10,7 @@ Chromium** — not what the agent said it did.
 ```bash
 pnpm eval:skill --agent oracle --track all   # reference solutions (must be 100%)
 pnpm eval:skill --agent claude --track polycss,polycss-noskill   # the real control
-pnpm eval:skill --agent claude --track all   # one agent, both tracks, all tasks
+pnpm eval:skill --agent claude --track all   # one agent, all three tracks
 pnpm eval:skill --agent all --track all --keep --json out.json
 pnpm eval:skill --task 03-cube-with-shadow --agent claude,codex
 pnpm eval:skill --agent claude --reuse --run r1   # re-grade only; never calls an agent
@@ -39,6 +39,13 @@ For each (agent, task) pair:
 | `polycss` | The intervention — PolyCSS with the skill installed. |
 | `polycss-noskill` | The **control**. Same library, task and contract; skill withheld. `polycss` minus this is the skill's effect. |
 | `three` | An external **baseline**, not a control. |
+
+Track order is fixed: skill-less tracks always run first, so no control ever
+executes while an installed skill exists on disk. That buys isolation at the
+cost of confounding *timing* — every control runs before its intervention, so
+cache warming, rate limits and provider variation are inseparable from any
+duration difference. Treat wall-clock deltas as a fixed-order observation, not
+an effect of the skill. Only the per-check scores are comparable.
 
 The Three.js track changes the library, its API and its authoring contract at
 the same time as it removes the skill, so a polycss-vs-three delta conflates the
@@ -143,9 +150,12 @@ failed to say something, said it somewhere the agent did not look, or the agent
 ignored it. The first two are fixable in `packages/skills/skill/`.
 
 Use `--keep` to leave the workspaces under `$TMPDIR/polycss-skill-eval/<run>`
-and read what the agent actually wrote. Runs are namespaced by `--run <id>`
-(default `current`) so a later run cannot wipe evidence you kept, and
-concurrent runs do not collide.
+and read what the agent actually wrote. Runs are namespaced by `--run <id>` so a later
+run cannot wipe evidence you kept, and concurrent runs do not collide.
+
+Run ids are random by default (`run-a1b2c3d4`) and printed at the top of the
+run, so nothing can overwrite anything; `--reuse` therefore requires an explicit
+`--run <id>`.
 
 `--reuse` re-grades a kept run and **never invokes an agent**: a case with no
 `scene.mjs` is skipped and reported, not re-run. That is how to iterate on a
