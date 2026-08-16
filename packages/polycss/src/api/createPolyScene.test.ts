@@ -2261,7 +2261,19 @@ describe("createPolyScene", () => {
       const paths = shadow.querySelectorAll("path");
       expect(paths.length).toBe(1);
       const path = paths[0]!;
-      expect(path.getAttribute("opacity")).toBe("0.2500");
+      // Solid single-pass faces paint the PRE-BLENDED colour opaquely
+      // (blend(lit, shadowed, shadow.opacity)) instead of the shadowed
+      // colour at fractional alpha: visually identical where nothing
+      // overlaps, but idempotent under overlap, which is what lets crease
+      // edges bleed without double-darkening the seam.
+      expect(path.getAttribute("opacity")).toBeNull();
+      expect(path.getAttribute("fill")).toMatch(/^rgb\(\d+,\d+,\d+\)$/);
+      const [, pr, pg, pb] = path.getAttribute("fill")!.match(/(\d+),(\d+),(\d+)/)!;
+      // Between fully lit and fully shadowed — not the raw shadow colour.
+      expect(Number(pr)).toBeGreaterThan(0);
+      expect(Number(pr)).toBeLessThan(204);
+      expect(pg).toBe(pr);
+      expect(pb).toBe(pr);
       expect(path.getAttribute("fill-rule")).toBe("nonzero");
       const d = path.getAttribute("d") || "";
       // Triangle (3 verts) → one M, two Ls, one Z.

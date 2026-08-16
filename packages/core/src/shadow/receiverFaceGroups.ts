@@ -256,6 +256,93 @@ export function planarEdgesShareLine(A: PlanarEdge, B: PlanarEdge): boolean {
   return Math.min(A.len, bMax) - Math.max(0, bMin) > RECEIVER_EDGE_OVERLAP_EPS;
 }
 
+/** A 3D world-frame edge, precomputed for the CREASE-adjacency predicate.
+ *  Built by {@link spatialEdge}. Crease neighbours live on DIFFERENT face
+ *  planes, so they are not coplanar and the 2D {@link planarEdgesShareLine}
+ *  predicate does not apply — the shared line has to be found in world space. */
+export type SpatialEdge = {
+  ax: number; ay: number; az: number;
+  bx: number; by: number; bz: number;
+  dx: number; dy: number; dz: number;
+  minX: number; maxX: number;
+  minY: number; maxY: number;
+  minZ: number; maxZ: number;
+  len: number;
+};
+
+/** Broad phase for {@link spatialEdgesShareLine}: two edges on a common line
+ *  within `RECEIVER_EDGE_PERP_EPS` necessarily have AABBs overlapping within
+ *  that same slack, so this rejects non-neighbours before the four
+ *  perpendicular-distance evaluations. Pure optimization — it can never
+ *  reject a pair the predicate would have accepted. */
+export function spatialEdgeBoundsOverlap(A: SpatialEdge, B: SpatialEdge): boolean {
+  const e = RECEIVER_EDGE_PERP_EPS;
+  return !(
+    A.minX > B.maxX + e || B.minX > A.maxX + e ||
+    A.minY > B.maxY + e || B.minY > A.maxY + e ||
+    A.minZ > B.maxZ + e || B.minZ > A.maxZ + e
+  );
+}
+
+/** Precompute a {@link SpatialEdge}. Returns `null` for degenerate edges
+ *  shorter than {@link RECEIVER_EDGE_OVERLAP_EPS}. */
+export function spatialEdge(a: Vec3, b: Vec3): SpatialEdge | null {
+  const ex = b[0] - a[0], ey = b[1] - a[1], ez = b[2] - a[2];
+  const len = Math.hypot(ex, ey, ez);
+  if (len <= RECEIVER_EDGE_OVERLAP_EPS) return null;
+  return {
+    ax: a[0], ay: a[1], az: a[2],
+    bx: b[0], by: b[1], bz: b[2],
+    dx: ex / len, dy: ey / len, dz: ez / len,
+    minX: Math.min(a[0], b[0]), maxX: Math.max(a[0], b[0]),
+    minY: Math.min(a[1], b[1]), maxY: Math.max(a[1], b[1]),
+    minZ: Math.min(a[2], b[2]), maxZ: Math.max(a[2], b[2]),
+    len,
+  };
+}
+
+function perpDistToSpatialLine(E: SpatialEdge, px: number, py: number, pz: number): number {
+  const rx = px - E.ax, ry = py - E.ay, rz = pz - E.az;
+  // |r × d| with d already unit → perpendicular distance to the line.
+  return Math.hypot(
+    ry * E.dz - rz * E.dy,
+    rz * E.dx - rx * E.dz,
+    rx * E.dy - ry * E.dx,
+  );
+}
+
+/**
+ * World-space sibling of {@link planarEdgesShareLine}: two 3D edges are
+ * adjacent when they lie on the same infinite line within
+ * `RECEIVER_EDGE_PERP_EPS` and their projections onto that line overlap by
+ * more than `RECEIVER_EDGE_OVERLAP_EPS`. Same tolerances, same both-directions
+ * collinearity check — only the dimensionality differs.
+ *
+ * This is the geometric test for a CREASE: an edge whose neighbouring surface
+ * belongs to a different (non-coplanar) receiver face group. Those two groups
+ * emit separate shadow SVGs whose antialiased clip edges meet exactly at the
+ * crease and do not sum to full coverage, which is the hairline-crack class
+ * this predicate exists to find.
+ */
+export function spatialEdgesShareLine(A: SpatialEdge, B: SpatialEdge): boolean {
+  if (A.minX > B.maxX + RECEIVER_EDGE_PERP_EPS || B.minX > A.maxX + RECEIVER_EDGE_PERP_EPS) {
+    return false;
+  }
+  if (
+    perpDistToSpatialLine(A, B.ax, B.ay, B.az) > RECEIVER_EDGE_PERP_EPS ||
+    perpDistToSpatialLine(A, B.bx, B.by, B.bz) > RECEIVER_EDGE_PERP_EPS
+  ) return false;
+  if (
+    perpDistToSpatialLine(B, A.ax, A.ay, A.az) > RECEIVER_EDGE_PERP_EPS ||
+    perpDistToSpatialLine(B, A.bx, A.by, A.bz) > RECEIVER_EDGE_PERP_EPS
+  ) return false;
+  const t0 = (B.ax - A.ax) * A.dx + (B.ay - A.ay) * A.dy + (B.az - A.az) * A.dz;
+  const t1 = (B.bx - A.ax) * A.dx + (B.by - A.ay) * A.dy + (B.bz - A.az) * A.dz;
+  const bMin = Math.min(t0, t1);
+  const bMax = Math.max(t0, t1);
+  return Math.min(A.len, bMax) - Math.max(0, bMin) > RECEIVER_EDGE_OVERLAP_EPS;
+}
+
 /**
  * Detect edges shared between DIFFERENT member polygons of one face group,
  * in the group's (u, v) space. Two passes: an exact endpoint-pair hash at the

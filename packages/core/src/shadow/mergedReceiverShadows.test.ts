@@ -54,9 +54,14 @@ describe("computeMergedReceiverShadows", () => {
     expect(f.baseD).toBeNull();
     expect(f.layers.length).toBe(1);
     expect(f.layers[0]!.multiply).toBe(false);
-    // Single solid layer carries the shadow strength on the path, SVG at 1.
     expect(f.svgOpacity).toBe(1);
-    expect(f.layers[0]!.opacity).toBeCloseTo(0.25, 4);
+    // A single-pass SOLID face emits the PRE-BLENDED color at alpha 1, not the
+    // shadowed color at `shadow.opacity`. Same pixel over the lit receiver
+    // (blend is exact, antialiased edges included), but idempotent under
+    // overlap — which is what lets clips bleed across a crease into the
+    // neighbouring face's separate SVG without double-darkening.
+    expect(f.layers[0]!.opacity).toBe(1);
+    expect(f.layers[0]!.fill).toMatch(/^rgb\(/);
   });
 
   it("directional + shadow-casting point light → merged face: base + multiply layers", () => {

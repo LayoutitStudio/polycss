@@ -24,8 +24,13 @@ import { ensureCcw2D } from "./projection";
 import {
   groupReceiverFaceGroups,
   meshScaleVec3,
+  RECEIVER_EDGE_PERP_EPS,
+  spatialEdge,
+  spatialEdgeBoundsOverlap,
+  spatialEdgesShareLine,
   worldCssForMesh,
   worldPositionToCss,
+  type SpatialEdge,
 } from "./receiverFaceGroups";
 import {
   buildEdgeOwners as buildEdgeOwnersHelper,
@@ -86,6 +91,14 @@ export interface ReceiverFacePlane {
    *  of the same group (see `ReceiverPlaneGroup.memberSharedEdges`). Drives
    *  the member-clip seam bleed. */
   memberSharedEdges: Array<ReadonlySet<number> | undefined>;
+  /** Parallel to `memberPolysUv`: CCW edge indices whose neighbouring surface
+   *  is a member of a DIFFERENT (non-coplanar) face group — a CREASE. Those
+   *  two groups emit separate SVGs, so their antialiased clip edges abut at
+   *  the crease without summing to full coverage. Unioned with
+   *  `memberSharedEdges` at clip-expansion time so one pass bleeds both
+   *  classes. Filled by `prepareReceiverFacePlanes` after the occlusion cull;
+   *  edges already in `memberSharedEdges` are skipped (already bled). */
+  memberCreaseEdges: Array<ReadonlySet<number> | undefined>;
   minU: number;
   minV: number;
   width: number;
@@ -247,6 +260,14 @@ export interface ReceiverShadowFaceSpec<T = unknown> {
    *  (NOT offset by the tight bbox). The multi-light merge re-bases these to a
    *  shared per-face bbox so all lights' shadows live in one SVG. */
   facePolysUv: Array<Array<[number, number]>>;
+  /** True when this face's painted receiver color is exactly `fullLitFill`,
+   *  so a single-pass shadow can be emitted as the PRE-BLENDED color at alpha
+   *  1 instead of the shadowed color at `opacity` (identical pixel, but
+   *  idempotent under overlap). Requires a solid receiver AND every member
+   *  polygon of the group sharing one base color — a group is formed by plane
+   *  + adjacency, not material, so a multi-colored coplanar group's members
+   *  do NOT all paint `fullLitFill` and pre-blending them would shift color. */
+  preblendEligible: boolean;
 }
 
 /**
@@ -430,6 +451,7 @@ export function prepareReceiverFacePlanes(
     const matrixCss = `matrix3d(${m.map((x) => x.toFixed(4)).join(",")})`;
     return {
       O, n, u, v, outlineUv, memberPolysUv, memberPolyIndices, memberSharedEdges,
+      memberCreaseEdges: memberPolysUv.map(() => undefined),
       minU, minV, width, height, matrixCss, faceIndex, lift,
     };
   });
@@ -484,7 +506,177 @@ export function prepareReceiverFacePlanes(
     }
   }
   planes = planes.filter((_, i) => !occluded.has(i));
+  fillCrossGroupCreaseEdges(planes);
   return planes;
+}
+
+/**
+ * Fill each plane's `memberCreaseEdges`: member edges whose neighbouring
+ * surface belongs to a DIFFERENT face plane. On imported architecture (the
+ * castle) this is the dominant receiver-edge class — merlon face vs merlon top
+ * vs wall — and each group's shadow SVG stops exactly at the crease with an
+ * antialiased edge, so two abutting layers leave a pale hairline.
+ *
+ * Members are stored in per-plane (u, v); lifting them back to world space
+ * (`O + u·uᵤ + v·uᵥ`) is exact, since they were projected from world onto that
+ * plane. Two passes mirroring `detectMemberSharedEdges`: an exact quantized
+ * endpoint-pair hash, then a collinear-overlap pass over a uniform spatial
+ * hash for T-junctions where a crease neighbour covers only part of the edge.
+ * Edges already in `memberSharedEdges` are excluded up front — they are
+ * interior to their group and already bled, so a crease mark could not change
+ * their clip expansion. The 2D
+ * `planarEdgesShareLine` predicate cannot be reused here because crease
+ * neighbours are by definition not coplanar — `spatialEdgesShareLine` is its
+ * world-space sibling with the same tolerances.
+ *
+ * Runs AFTER the occlusion cull so hidden interior planes cannot mark a
+ * visible plane's edge as a crease.
+ */
+function fillCrossGroupCreaseEdges(planes: ReceiverFacePlane[]): void {
+  if (planes.length < 2) return;
+  type Ref = SpatialEdge & { plane: number; member: number; edge: number };
+  const refs: Ref[] = [];
+  for (let pi = 0; pi < planes.length; pi++) {
+    const plane = planes[pi]!;
+    const { O, u, v } = plane;
+    for (let mi = 0; mi < plane.memberPolysUv.length; mi++) {
+      const poly = plane.memberPolysUv[mi]!;
+      if (poly.length < 3) continue;
+      const shared = plane.memberSharedEdges[mi];
+      const world: Vec3[] = poly.map(([pu, pv]) => [
+        O[0] + pu * u[0] + pv * v[0],
+        O[1] + pu * u[1] + pv * v[1],
+        O[2] + pu * u[2] + pv * v[2],
+      ]);
+      for (let e = 0; e < poly.length; e++) {
+        // Already bled as a within-group seam — adding it to the crease set
+        // could not change the clip expansion, so keep it out of the sweep.
+        if (shared?.has(e)) continue;
+        const built = spatialEdge(world[e]!, world[(e + 1) % poly.length]!);
+        if (built) refs.push({ ...built, plane: pi, member: mi, edge: e });
+      }
+    }
+  }
+  if (refs.length < 2) return;
+
+  const marked: Array<Set<number> | undefined>[] = planes.map((p) =>
+    p.memberPolysUv.map(() => undefined),
+  );
+  const mark = (r: Ref): void => {
+    const perPlane = marked[r.plane]!;
+    let set = perPlane[r.member];
+    if (!set) { set = new Set(); perPlane[r.member] = set; }
+    set.add(r.edge);
+  };
+  const isMarked = (r: Ref): boolean => !!marked[r.plane]![r.member]?.has(r.edge);
+
+  const QUANT = 1000;
+  const ptKey = (x: number, y: number, z: number): string =>
+    `${Math.round(x * QUANT)},${Math.round(y * QUANT)},${Math.round(z * QUANT)}`;
+  const owners = new Map<string, Ref[]>();
+  for (const r of refs) {
+    const ka = ptKey(r.ax, r.ay, r.az);
+    const kb = ptKey(r.bx, r.by, r.bz);
+    const key = ka < kb ? `${ka}|${kb}` : `${kb}|${ka}`;
+    let list = owners.get(key);
+    if (!list) { list = []; owners.set(key, list); }
+    list.push(r);
+  }
+  for (const list of owners.values()) {
+    if (list.length < 2) continue;
+    let crossPlane = false;
+    for (let i = 1; i < list.length; i++) {
+      if (list[i]!.plane !== list[0]!.plane) { crossPlane = true; break; }
+    }
+    if (!crossPlane) continue;
+    for (const r of list) mark(r);
+  }
+
+  // Collinear-overlap pass for crease T-JUNCTIONS: a member edge lying along
+  // part of a neighbouring surface's longer edge, which the exact endpoint-pair
+  // hash above cannot see. Creases are LOCAL in world space, so candidates come
+  // from a uniform spatial hash rather than a linear sweep — on the coliseum a
+  // minX sweep still visited 2.1M pairs (94% of edges are already matched by
+  // the exact pass, so almost every visit was wasted), which dominated the
+  // whole preparation.
+  //
+  // Cell hash collisions merely widen a bucket; the geometric predicate still
+  // decides, so they cost time and never correctness. Edges whose padded AABB
+  // spans more cells than CELL_CAP go in `oversized` and are tested against
+  // everything, which keeps a few long edges from exploding the grid.
+  const EPS = RECEIVER_EDGE_PERP_EPS;
+  let lenSum = 0;
+  for (const r of refs) lenSum += r.len;
+  const cell = Math.max(2 * EPS, lenSum / refs.length);
+  const CELL_CAP = 32;
+  const cellKey = (ix: number, iy: number, iz: number): number =>
+    (Math.imul(ix, 73856093) ^ Math.imul(iy, 19349663) ^ Math.imul(iz, 83492791)) | 0;
+  const grid = new Map<number, number[]>();
+  const oversized: number[] = [];
+  const cellRange = (r: Ref) => ({
+    x0: Math.floor((r.minX - EPS) / cell), x1: Math.floor((r.maxX + EPS) / cell),
+    y0: Math.floor((r.minY - EPS) / cell), y1: Math.floor((r.maxY + EPS) / cell),
+    z0: Math.floor((r.minZ - EPS) / cell), z1: Math.floor((r.maxZ + EPS) / cell),
+  });
+  for (let i = 0; i < refs.length; i++) {
+    const c = cellRange(refs[i]!);
+    const span = (c.x1 - c.x0 + 1) * (c.y1 - c.y0 + 1) * (c.z1 - c.z0 + 1);
+    if (span > CELL_CAP) { oversized.push(i); continue; }
+    for (let ix = c.x0; ix <= c.x1; ix++) {
+      for (let iy = c.y0; iy <= c.y1; iy++) {
+        for (let iz = c.z0; iz <= c.z1; iz++) {
+          const k = cellKey(ix, iy, iz);
+          let bucket = grid.get(k);
+          if (!bucket) { bucket = []; grid.set(k, bucket); }
+          bucket.push(i);
+        }
+      }
+    }
+  }
+  // Stamp so a pair sharing several cells is only evaluated once.
+  const stamp = new Int32Array(refs.length).fill(-1);
+  const test = (i: number, j: number): void => {
+    const A = refs[i]!, B = refs[j]!;
+    if (A.plane === B.plane) return;
+    if (isMarked(A) && isMarked(B)) return;
+    if (!spatialEdgeBoundsOverlap(A, B)) return;
+    if (!spatialEdgesShareLine(A, B)) return;
+    mark(A);
+    mark(B);
+  };
+  // Only edges the exact pass left UNMATCHED need querying: a pair whose two
+  // edges are both already marked is skipped by `test`, and every pair with an
+  // unmatched member is reached from that member's own query. On the coliseum
+  // that is ~600 queries instead of ~10600.
+  for (let i = 0; i < refs.length; i++) {
+    if (isMarked(refs[i]!)) continue;
+    const c = cellRange(refs[i]!);
+    const span = (c.x1 - c.x0 + 1) * (c.y1 - c.y0 + 1) * (c.z1 - c.z0 + 1);
+    if (span > CELL_CAP) continue;
+    for (let ix = c.x0; ix <= c.x1; ix++) {
+      for (let iy = c.y0; iy <= c.y1; iy++) {
+        for (let iz = c.z0; iz <= c.z1; iz++) {
+          const bucket = grid.get(cellKey(ix, iy, iz));
+          if (!bucket) continue;
+          for (const j of bucket) {
+            if (j === i || stamp[j] === i) continue;
+            stamp[j] = i;
+            test(i, j);
+          }
+        }
+      }
+    }
+  }
+  for (const i of oversized) {
+    for (let j = 0; j < refs.length; j++) {
+      if (j === i) continue;
+      test(i, j);
+    }
+  }
+
+  for (let pi = 0; pi < planes.length; pi++) {
+    planes[pi]!.memberCreaseEdges = marked[pi]!;
+  }
 }
 
 /** Input for `computeReceiverShadowFaces`. */
@@ -526,6 +718,13 @@ export interface ComputeReceiverShadowFacesInput<T = unknown> {
   directionalLight?: PolyDirectionalLight;
   /** Scene shadow options. */
   shadow?: { color?: string; opacity?: number; maxExtend?: number };
+  /** Also bleed member clip outlines along CREASE edges (neighbour in a
+   *  different, non-coplanar face group). Cross-group bleed makes shadow
+   *  regions OVERLAP between two SVGs, which only composites correctly when
+   *  the caller paints the pre-blended color opaque (see
+   *  `computeMergedReceiverShadows`) — so it is opt-in and additionally gated
+   *  per face on `preblendEligible`. */
+  creaseBleed?: boolean;
 }
 
 /**
@@ -539,7 +738,7 @@ export function computeReceiverShadowFaces<T = unknown>(
   const {
     receiverPlanes, receiverPolygons, receiverHasTexture, casters,
     lightDir, lightPos, allPointLights, thisPointIndex,
-    cameraRot, ambientLight, directionalLight, shadow,
+    cameraRot, ambientLight, directionalLight, shadow, creaseBleed,
   } = input;
 
   const llen = Math.hypot(lightDir[0], lightDir[1], lightDir[2]) || 1;
@@ -858,6 +1057,19 @@ export function computeReceiverShadowFaces<T = unknown>(
     // mesh sit a few degrees apart (culled as sub-pixel slivers); a faceted
     // occluder across a hard edge is far more angled (kept as a real shadow).
     const SEAM_COPLANAR_TOL = 0.94;
+    // A face group is formed by plane + adjacency, never by material, so its
+    // members may carry different base colors. `fullLitFill` is computed from
+    // member[0]'s color only — it equals the painted receiver for every member
+    // ONLY when the group is single-colored. That equality is what makes the
+    // opaque pre-blend a pixel-identity, so both it and the crease bleed it
+    // enables are gated on it.
+    let preblendEligible = !receiverHasTexture;
+    if (preblendEligible) {
+      const firstColor = receiverPolygons[group.memberPolyIndices[0] ?? 0]?.color;
+      for (const idx of group.memberPolyIndices) {
+        if (receiverPolygons[idx]?.color !== firstColor) { preblendEligible = false; break; }
+      }
+    }
     // Member clip polygons with seam bleed: each member's CCW outline is
     // expanded outward by SHADOW_CLIP_SEAM_BLEED along the edges it SHARES
     // with another member of this group (non-shared edges stay put), so the
@@ -869,15 +1081,29 @@ export function computeReceiverShadowFaces<T = unknown>(
     // `offsetConvexPolygonPointsByEdgeAmounts` returns the input unchanged
     // for non-convex/degenerate outlines — the unexpanded member is the
     // fallback in every failure mode.
+    //
+    // CREASE edges (neighbour in a different, non-coplanar group) are unioned
+    // into the same expansion when `applyCreaseBleed` holds. Those two groups
+    // are separate SVGs, so their expanded clips OVERLAP rather than landing in
+    // one nonzero path — safe only because the caller then paints the
+    // pre-blended color opaque (idempotent under overlap). True boundary /
+    // silhouette edges (no neighbour at all) are never in either set, so the
+    // shadow can never be pushed off the model's outline.
+    const applyCreaseBleed = creaseBleed === true && preblendEligible;
     const memberClipsUv: Array<Array<[number, number]>> = group.memberPolysUv.map(
       (memberPoly, mi) => {
         const ccw = ensureCcw2D(memberPoly);
         const shared = group.memberSharedEdges[mi];
-        if (!shared || shared.size === 0 || ccw.length < 3) return ccw;
+        const crease = applyCreaseBleed ? group.memberCreaseEdges[mi] : undefined;
+        const sharedCount = shared?.size ?? 0;
+        const creaseCount = crease?.size ?? 0;
+        if ((sharedCount === 0 && creaseCount === 0) || ccw.length < 3) return ccw;
         const flat: number[] = [];
         for (const p of ccw) flat.push(p[0], p[1]);
         const amounts = ccw.map((_, e) =>
-          shared.has(e) ? safePlanSeamBleedAmount(flat, e, SHADOW_CLIP_SEAM_BLEED) : 0,
+          shared?.has(e) || crease?.has(e)
+            ? safePlanSeamBleedAmount(flat, e, SHADOW_CLIP_SEAM_BLEED)
+            : 0,
         );
         let any = false;
         for (const a of amounts) if (a > 0) { any = true; break; }
@@ -1263,6 +1489,7 @@ export function computeReceiverShadowFaces<T = unknown>(
       paths,
       fullLitFill,
       facePolysUv,
+      preblendEligible,
     });
   }
 
@@ -1345,6 +1572,35 @@ function shadowMultiplyFactor(remaining: string, full: string): string {
   return `rgb(${f(0)},${f(1)},${f(2)})`;
 }
 
+/**
+ * `blend(litFaceColor, shadowedColor, opacity)` in sRGB — the exact pixel an
+ * SVG path of `fill` at `opacity` produces over a receiver painted `base`.
+ *
+ * Emitting THIS opaque is pixel-identical to the alpha version, edges
+ * included: at antialiased coverage `c` the alpha version gives
+ * `base·(1 − o·c) + fill·o·c`, and painting the pre-blend at coverage `c`
+ * gives `base·(1 − c) + (base·(1 − o) + fill·o)·c` — the same expression.
+ * What changes is OVERLAP: two overlapping opaque paints of one color are that
+ * color, where two overlapping alpha paints darken twice. That idempotence is
+ * what lets a face's clip bleed across a crease into its neighbour's SVG.
+ *
+ * Returns `null` when either color is not a plain hex (a translucent receiver
+ * makes `shadePolygon` return `rgba(...)`, whose alpha the blend cannot
+ * represent) — the caller then keeps the alpha form.
+ */
+function blendShadowOverLitBase(base: string, fill: string, opacity: number): string | null {
+  const b = parseHexColor(base);
+  const f = parseHexColor(fill);
+  if (!b || !f || b.alpha !== 1 || f.alpha !== 1) return null;
+  const o = Math.max(0, Math.min(1, opacity));
+  const mix = (i: number): number => {
+    const bc = b.rgb[i] ?? 0;
+    const fc = f.rgb[i] ?? 0;
+    return Math.max(0, Math.min(255, Math.round(bc + (fc - bc) * o)));
+  };
+  return `rgb(${mix(0)},${mix(1)},${mix(2)})`;
+}
+
 /** Build an `M…L…Z` path from face-(u,v) polygons offset to (minU, minV). */
 function polysToPathD(
   polys: ReadonlyArray<ReadonlyArray<readonly [number, number]>>,
@@ -1382,21 +1638,43 @@ export function computeMergedReceiverShadows<T = unknown>(
   for (const pl of receiverPlanes) planeByFace.set(pl.faceIndex, pl);
 
   type Layer = { polys: Array<Array<[number, number]>>; fill: string; opacity: number };
-  type FaceAgg = { memberPolyIndices: number[]; base: string; solid: boolean; layers: Layer[] };
+  type FaceAgg = {
+    memberPolyIndices: number[];
+    base: string;
+    solid: boolean;
+    preblendEligible: boolean;
+    layers: Layer[];
+  };
   const perFace = new Map<number, FaceAgg>();
+
+  // Crease bleed is only safe where the opaque pre-blend applies, and the
+  // pre-blend only applies to a SINGLE-pass solid face. With more than one
+  // light pass a face may aggregate two layers and take the base + multiply
+  // path, whose layers do NOT compose across separate SVGs and are not
+  // idempotent — so multi-light receivers keep today's geometry and behavior
+  // exactly. Gating on the pass count (rather than per-face layer count) is
+  // required because the clips are built during the passes, before the
+  // per-face layer count is known.
+  const creaseBleed = !receiverHasTexture && (runDirectional ? 1 : 0) + pointPasses.length === 1;
 
   const runPass = (lightPos: Vec3 | undefined, thisPointIndex: number | undefined): void => {
     const specs = computeReceiverShadowFaces<T>({
       receiverPlanes, receiverPolygons, receiverHasTexture, casters,
       lightDir, lightPos, allPointLights, thisPointIndex,
-      cameraRot, ambientLight, directionalLight, shadow,
+      cameraRot, ambientLight, directionalLight, shadow, creaseBleed,
     });
     for (const spec of specs) {
       if (spec.facePolysUv.length === 0) continue;
       const solid = spec.fullLitFill !== "";
       let agg = perFace.get(spec.faceIndex);
       if (!agg) {
-        agg = { memberPolyIndices: spec.memberPolyIndices, base: spec.fullLitFill, solid, layers: [] };
+        agg = {
+          memberPolyIndices: spec.memberPolyIndices,
+          base: spec.fullLitFill,
+          solid,
+          preblendEligible: spec.preblendEligible,
+          layers: [],
+        };
         perFace.set(spec.faceIndex, agg);
       }
       agg.layers.push({ polys: spec.facePolysUv, fill: spec.fill, opacity: spec.opacity });
@@ -1448,12 +1726,19 @@ export function computeMergedReceiverShadows<T = unknown>(
         });
       }
     } else {
+      // Single-pass SOLID face: emit the pre-blended color opaque so
+      // overlapping crease bleed is idempotent (see blendShadowOverLitBase).
+      // Textured receivers have a per-pixel base — there is no lit color to
+      // blend against — so they keep the shadow color at its own alpha.
       for (const layer of agg.layers) {
+        const preblend = agg.solid && agg.preblendEligible && agg.layers.length === 1
+          ? blendShadowOverLitBase(agg.base, layer.fill, layer.opacity)
+          : null;
         layers.push({
           d: polysToPathD(layer.polys, minU, minV),
-          fill: layer.fill,
+          fill: preblend ?? layer.fill,
           multiply: false,
-          opacity: layer.opacity,
+          opacity: preblend ? 1 : layer.opacity,
         });
       }
     }
