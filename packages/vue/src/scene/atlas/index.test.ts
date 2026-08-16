@@ -191,7 +191,7 @@ describe("useTextureAtlas (auto textureQuality)", () => {
       removeEventListener: () => {},
     }));
 
-    let result!: { pageBytes: number; pageCount: number };
+    let result!: { pageBytes: number; pageCount: number; atlasCanonicalSize: number | null };
     const scope = effectScope();
     scope.run(() => {
       const polygons = ref<Polygon[]>(buildSixFaceCrateScene());

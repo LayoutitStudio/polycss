@@ -155,7 +155,7 @@ function renderMeshWithChildren(
         React.createElement(
           PolyScene,
           {},
-          React.createElement(PolyMesh, props, children)
+          React.createElement(PolyMesh, { ...props, children })
         )
       )
     )

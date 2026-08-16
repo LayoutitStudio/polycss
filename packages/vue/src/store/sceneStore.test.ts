@@ -3,11 +3,11 @@ import { createSceneStore } from "./sceneStore";
 import type { CameraState } from "@layoutit/polycss-core";
 
 const INITIAL: CameraState = {
-  zoom: 1,
-  pan: 0,
-  tilt: 0,
+  target: [0, 0, 0],
   rotX: 0,
   rotY: 0,
+  zoom: 1,
+  distance: 0,
 };
 
 describe("createSceneStore", () => {
@@ -35,7 +35,7 @@ describe("createSceneStore", () => {
     store.subscribe(l1);
     store.subscribe(l2);
 
-    store.setState({ cameraState: { ...INITIAL, pan: 5 } });
+    store.setState({ cameraState: { ...INITIAL, distance: 5 } });
     expect(l1).toHaveBeenCalledOnce();
     expect(l2).toHaveBeenCalledOnce();
   });
@@ -60,13 +60,13 @@ describe("createSceneStore", () => {
     store.subscribe(listener);
 
     const mockHandle = {
-      state: { ...INITIAL, zoom: 5, tilt: 10 },
+      state: { ...INITIAL, zoom: 5, rotX: 10 },
     } as unknown as Parameters<typeof store.updateCameraFromRef>[0];
 
     const result = store.updateCameraFromRef(mockHandle);
     expect(result).toBe(true);
     expect(store.getState().cameraState.zoom).toBe(5);
-    expect(store.getState().cameraState.tilt).toBe(10);
+    expect(store.getState().cameraState.rotX).toBe(10);
     expect(listener).toHaveBeenCalledOnce();
   });
 
@@ -82,6 +82,6 @@ describe("createSceneStore", () => {
 
   it("subscribe with zero listeners: setState does not throw", () => {
     const store = createSceneStore(INITIAL);
-    expect(() => store.setState({ cameraState: { ...INITIAL, pan: 99 } })).not.toThrow();
+    expect(() => store.setState({ cameraState: { ...INITIAL, distance: 99 } })).not.toThrow();
   });
 });

@@ -2223,8 +2223,10 @@ describe("renderPoly — data attributes and lighting", () => {
       directionalLight: {
         direction: [0, -1, 0],
         color: "#ff8800",
-        ambientColor: "#334455",
-        ambient: 0.3,
+      },
+      ambientLight: {
+        color: "#334455",
+        intensity: 0.3,
       },
     })!;
     expect(result.element.style.transform).toContain("matrix3d(");

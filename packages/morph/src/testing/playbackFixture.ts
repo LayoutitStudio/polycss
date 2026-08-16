@@ -1,23 +1,26 @@
-import type { PolyMorphMat4, PolyMorphModel } from "../contracts/index.js";
+import type { PolyMorphMat4 } from "../contracts/index.js";
 import {
   clonePolyMorphFixture,
   createPolyMorphModelFixture,
   POLY_MORPH_IDENTITY_MATRIX,
+  polyMorphIdentityMatrix,
+  type PolyMorphPlaybackModelFixture,
 } from "./modelFixture.js";
+import type { PolyMorphDeepMutable } from "./mutable.js";
 
 export function polyMorphTranslation(
   x: number,
   y: number,
   z: number,
-): PolyMorphMat4 {
-  const matrix = [...POLY_MORPH_IDENTITY_MATRIX] as number[];
+): PolyMorphDeepMutable<PolyMorphMat4> {
+  const matrix = polyMorphIdentityMatrix();
   matrix[12] = x;
   matrix[13] = y;
   matrix[14] = z;
-  return matrix as unknown as PolyMorphMat4;
+  return matrix;
 }
 
-export function createPolyMorphPlaybackFixture(): PolyMorphModel {
+export function createPolyMorphPlaybackFixture(): PolyMorphPlaybackModelFixture {
   const fixture = clonePolyMorphFixture(createPolyMorphModelFixture("prepared-playback"));
   fixture.topology.vertices.push(
     [3, 0, 0],
@@ -55,7 +58,7 @@ export function createPolyMorphPlaybackFixture(): PolyMorphModel {
     strategy: "solid-triangle",
     width: 32,
     height: 32,
-    matrix: POLY_MORPH_IDENTITY_MATRIX,
+    matrix: [...POLY_MORPH_IDENTITY_MATRIX],
     atlas: null,
     fallback: null,
   });
@@ -86,14 +89,14 @@ export function createPolyMorphPlaybackFixture(): PolyMorphModel {
       },
       {
         timeMs: 750,
-        modelMatrix: POLY_MORPH_IDENTITY_MATRIX,
+        modelMatrix: [...POLY_MORPH_IDENTITY_MATRIX],
         shapes: [{
           shapeId: "gem",
-          matrix: POLY_MORPH_IDENTITY_MATRIX,
+          matrix: [...POLY_MORPH_IDENTITY_MATRIX],
         }],
         leaves: [{
           leafId: "gem-panel-leaf",
-          matrix: POLY_MORPH_IDENTITY_MATRIX,
+          matrix: [...POLY_MORPH_IDENTITY_MATRIX],
           visible: true,
           opacity: 1,
           atlasRow: 0,

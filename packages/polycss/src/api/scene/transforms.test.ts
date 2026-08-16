@@ -56,7 +56,7 @@ describe("worldDirectionalLightToCss", () => {
   });
   it("returns input unchanged when undefined or missing direction", () => {
     expect(worldDirectionalLightToCss(undefined)).toBeUndefined();
-    const noDir = { color: "#fff" };
+    const noDir: { direction?: [number, number, number]; color: string } = { color: "#fff" };
     expect(worldDirectionalLightToCss(noDir)).toBe(noDir);
   });
 });

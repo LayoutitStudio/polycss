@@ -4,7 +4,18 @@ import {
   collectPolyRenderStats,
   collectPolyTextureReadiness,
   queryPolyLeaves,
+  type PolyRenderStatsElement,
 } from "./renderStats";
+
+// Core typechecks with lib: ES2020 (no DOM globals) by design; the happy-dom
+// test environment provides a real document at runtime. Declare only the
+// structural surface this test touches.
+interface TestElement extends PolyRenderStatsElement {
+  innerHTML: string;
+  className: string;
+  querySelector(selectors: string): TestElement | null;
+}
+declare const document: { createElement(tagName: string): TestElement };
 
 describe("collectPolyRenderStats", () => {
   it("returns an empty snapshot for a missing root", () => {

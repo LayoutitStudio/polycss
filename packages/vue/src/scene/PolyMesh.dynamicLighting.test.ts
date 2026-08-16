@@ -10,7 +10,7 @@ import { createApp, h, nextTick, ref } from "vue";
 import { PolyCamera } from "../camera/PolyCamera";
 import { PolyScene } from "./PolyScene";
 import { PolyMesh } from "./PolyMesh";
-import type { Polygon, DirectionalLight } from "@layoutit/polycss-core";
+import type { Polygon, PolyDirectionalLight } from "@layoutit/polycss-core";
 import { inverseRotateVec3 } from "@layoutit/polycss-core";
 
 const TRIANGLE: Polygon = {
@@ -22,7 +22,7 @@ const TRIANGLE: Polygon = {
   color: "#ff0000",
 };
 
-const DYNAMIC_LIGHT: DirectionalLight = {
+const DYNAMIC_LIGHT: PolyDirectionalLight = {
   direction: [1, 0, 0],
   color: "#ffffff",
   intensity: 1,

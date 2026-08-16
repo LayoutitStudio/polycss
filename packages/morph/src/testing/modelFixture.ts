@@ -1,9 +1,13 @@
 import {
   POLY_MORPH_MODEL_SCHEMA,
+  type PolyMorphJointDeformation,
   type PolyMorphMat4,
   type PolyMorphModel,
+  type PolyMorphPlayback,
   type PolyMorphProfile,
+  type PolyMorphRegionDeformation,
 } from "../contracts/index.js";
+import type { PolyMorphDeepMutable } from "./mutable.js";
 
 export const POLY_MORPH_IDENTITY_MATRIX: PolyMorphMat4 = [
   1, 0, 0, 0,
@@ -12,10 +16,47 @@ export const POLY_MORPH_IDENTITY_MATRIX: PolyMorphMat4 = [
   0, 0, 0, 1,
 ];
 
-export function clonePolyMorphFixture<T>(value: T): T {
-  return JSON.parse(JSON.stringify(value)) as T;
+// Fresh mutable identity matrix for tests that write individual cells.
+// (Spreading the readonly constant widens to number[], losing the tuple.)
+export function polyMorphIdentityMatrix(): PolyMorphDeepMutable<PolyMorphMat4> {
+  return [
+    1, 0, 0, 0,
+    0, 1, 0, 0,
+    0, 0, 1, 0,
+    0, 0, 0, 1,
+  ];
 }
 
+export function clonePolyMorphFixture<T>(value: T): PolyMorphDeepMutable<T> {
+  return JSON.parse(JSON.stringify(value)) as PolyMorphDeepMutable<T>;
+}
+
+// Profile-narrowed fixture shapes so tests can probe the profile-specific
+// deformation/playback sections without re-narrowing the union at every site.
+export interface PolyMorphRegionModelFixture extends PolyMorphModel {
+  readonly deformation: PolyMorphRegionDeformation;
+}
+
+export interface PolyMorphJointModelFixture extends PolyMorphModel {
+  readonly deformation: PolyMorphJointDeformation;
+}
+
+export interface PolyMorphPlaybackModelFixture extends PolyMorphModel {
+  readonly playback: PolyMorphPlayback;
+}
+
+export function createPolyMorphModelFixture(
+  profile: "morph-regions",
+): PolyMorphRegionModelFixture;
+export function createPolyMorphModelFixture(
+  profile: "joint-skin",
+): PolyMorphJointModelFixture;
+export function createPolyMorphModelFixture(
+  profile: "prepared-playback",
+): PolyMorphPlaybackModelFixture;
+export function createPolyMorphModelFixture(
+  profile?: PolyMorphProfile,
+): PolyMorphModel;
 export function createPolyMorphModelFixture(
   profile: PolyMorphProfile = "static-prepared",
 ): PolyMorphModel {

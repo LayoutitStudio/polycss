@@ -5,14 +5,11 @@ import React, { act } from "react";
 import { createRoot } from "react-dom/client";
 
 const DEFAULT_CAMERA: CameraState = {
-  zoom: 1,
+  target: [0, 0, 0],
   rotX: 30,
   rotY: 45,
-  panX: 0,
-  panY: 0,
-  tilt: 0,
-  depthOffset: 0,
-  projection: "isometric",
+  zoom: 1,
+  distance: 0,
 };
 
 describe("createSceneStore", () => {

@@ -26,6 +26,7 @@ function makeHandle(el: HTMLDivElement, id?: string): PolyMeshHandle {
     setPolygons: () => {},
     rebakeAtlas: () => {},
     updatePolygon: () => {},
+    whenTexturesReady: () => Promise.resolve(),
   };
 }
 

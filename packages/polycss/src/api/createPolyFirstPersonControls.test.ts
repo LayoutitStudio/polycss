@@ -68,7 +68,7 @@ describe("createPolyFirstPersonControls", () => {
     controls = null;
     installManualRaf();
     // Stub pointer-lock APIs (jsdom doesn't implement them).
-    host.requestPointerLock = vi.fn(() => fakePointerLock(host, true));
+    host.requestPointerLock = vi.fn(() => fakePointerLock(host, true)) as unknown as typeof host.requestPointerLock;
     document.exitPointerLock = vi.fn(() => fakePointerLock(host, false));
   });
 

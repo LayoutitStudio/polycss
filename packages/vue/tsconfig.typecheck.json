@@ -6,5 +6,7 @@
     "declaration": false,
     "declarationMap": false
   },
-  "exclude": ["dist", "**/*.test.ts", "**/*.test.tsx"]
+  "exclude": [
+    "dist"
+  ]
 }

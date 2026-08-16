@@ -7,9 +7,6 @@
     "declarationMap": false
   },
   "exclude": [
-    "dist",
-    "**/*.test.ts",
-    "**/*.test.tsx",
-    "src/testing"
+    "dist"
   ]
 }

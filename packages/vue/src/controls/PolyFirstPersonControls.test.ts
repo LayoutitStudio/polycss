@@ -54,7 +54,7 @@ function shimPointerLock(): void {
   HTMLElement.prototype.requestPointerLock = function (this: HTMLElement) {
     (document as unknown as Record<string, unknown>).pointerLockElement = this;
     document.dispatchEvent(new Event("pointerlockchange"));
-  };
+  } as unknown as typeof HTMLElement.prototype.requestPointerLock;
   document.exitPointerLock = function () {
     (document as unknown as Record<string, unknown>).pointerLockElement = null;
     document.dispatchEvent(new Event("pointerlockchange"));

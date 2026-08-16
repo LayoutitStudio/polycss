@@ -22,6 +22,7 @@ import {
   type PolyMorphGltfDocument,
   type PolyMorphPrepareConfig,
 } from "./types.js";
+import { mutable } from "../testing/mutable.js";
 
 const roots: string[] = [];
 
@@ -376,7 +377,7 @@ describe("preparePolyMorphModel", () => {
       "manifest.json",
       "model.json",
     ]);
-    expect(first.writeOrder.at(-1)).toBe("manifest.json");
+    expect(first.writeOrder[first.writeOrder.length - 1]).toBe("manifest.json");
     expect((await readdir(firstRoot)).sort()).toEqual([
       "assets",
       "manifest.json",
@@ -440,7 +441,7 @@ describe("preparePolyMorphModel", () => {
       configPath,
       outputRoot,
       check: true,
-    })).rejects.toMatchObject<Partial<PolyMorphPrepareError>>({ code: "drift" });
+    })).rejects.toMatchObject({ code: "drift" });
 
     const repaired = await preparePolyMorphModel({ configPath, outputRoot });
     expect(repaired.changed).toBe(true);
@@ -455,7 +456,7 @@ describe("preparePolyMorphModel", () => {
       configPath,
       outputRoot,
       check: true,
-    })).rejects.toMatchObject<Partial<PolyMorphPrepareError>>({ code: "drift" });
+    })).rejects.toMatchObject({ code: "drift" });
   });
 
   it("leaves the prior package untouched when source preparation fails", async () => {
@@ -487,7 +488,7 @@ describe("preparePolyMorphModel", () => {
     await expect(preparePolyMorphModel({
       configPath,
       outputRoot: join(root, "package"),
-    })).rejects.toMatchObject<Partial<PolyMorphPrepareError>>({
+    })).rejects.toMatchObject({
       code: "invalid-config",
       path: "$",
     });
@@ -536,7 +537,7 @@ describe("compilePolyMorphSource", () => {
   });
 
   it("preserves front-face winding through reflective authoring transforms", async () => {
-    const config = mixedSizeConfig();
+    const config = mutable(mixedSizeConfig());
     config.transform.signs = [-1, 1, 1];
     const compiled = await compilePolyMorphSource(mixedSizeSource(), config);
     expect(compiled.model.topology.polygons[0]!.vertexIndices).toEqual([0, 2, 1]);
@@ -588,7 +589,8 @@ describe("prepare config validation", () => {
       code: "invalid-config",
       path: "$.schema",
       mutate: (config) => {
-        config.schema = "polycss-morph.prepare@2";
+        // Deliberately out-of-contract schema revision.
+        (config as { schema: string }).schema = "polycss-morph.prepare@2";
       },
     },
     {
@@ -1069,7 +1071,7 @@ describe("loadPolyMorphGltf", () => {
 
   it.each(invalidGltfCases)("rejects $name", async ({ name, code, mutate }) => {
     const root = await temporaryRoot();
-    const sourcePath = await writeEmbeddedGltf(root, name.replaceAll(" ", "-"), mutate);
+    const sourcePath = await writeEmbeddedGltf(root, name.replace(/ /g, "-"), mutate);
     await expectPrepareRejection(loadPolyMorphGltf(sourcePath), code);
   });
 

@@ -1,13 +1,11 @@
 import {
-  type PolyMorphModel,
-} from "../contracts/index.js";
-import {
   clonePolyMorphFixture,
   createPolyMorphModelFixture,
   POLY_MORPH_IDENTITY_MATRIX,
+  type PolyMorphRegionModelFixture,
 } from "./modelFixture.js";
 
-export function createPolyMorphRuntimeFixture(): PolyMorphModel {
+export function createPolyMorphRuntimeFixture(): PolyMorphRegionModelFixture {
   const fixture = clonePolyMorphFixture(createPolyMorphModelFixture("morph-regions"));
   fixture.capabilities = [
     "animation",
@@ -40,7 +38,7 @@ export function createPolyMorphRuntimeFixture(): PolyMorphModel {
     strategy: "solid-triangle",
     width: 32,
     height: 32,
-    matrix: POLY_MORPH_IDENTITY_MATRIX,
+    matrix: [...POLY_MORPH_IDENTITY_MATRIX],
     atlas: null,
     fallback: null,
   });

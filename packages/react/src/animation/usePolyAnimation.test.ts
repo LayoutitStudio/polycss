@@ -284,7 +284,6 @@ describe("usePolyAnimation — actions proxy", () => {
     const ctrl = makeController(clips);
     const target = makeTarget();
     const harness = renderHarness({ clips, controller: ctrl, root: target });
-    // @ts-expect-error - intentionally accessing unknown key
     expect(harness.result.actions["nonexistent"]).toBeUndefined();
   });
 });

@@ -26,7 +26,7 @@ const QUAD: Polygon = {
 
 function captureSceneContext(
   polygons: Polygon[],
-  options: Parameters<typeof useSceneContext>[1]["value"] = {}
+  options: Parameters<typeof usePolySceneContext>[1]["value"] = {}
 ): UseSceneContextResult {
   let captured!: UseSceneContextResult;
   const container = document.createElement("div");
@@ -89,7 +89,7 @@ describe("useSceneContext", () => {
   it("returns a reactive computed ref that updates when polygons change", () => {
     const polygonsRef = ref<Polygon[]>([TRIANGLE]);
     const optionsRef = computed(() => ({}));
-    let capturedRef: ReturnType<typeof useSceneContext> | null = null;
+    let capturedRef: ReturnType<typeof usePolySceneContext> | null = null;
 
     const container = document.createElement("div");
     const app = createApp({
