@@ -82,9 +82,12 @@ as plain relative paths, and a symlink anywhere *inside* the destination — a
 managed file or one of its parent directories — is refused rather than written
 through, so nothing outside can be created or deleted.
 
-The destination root itself is followed if it is a symlink, because a shared
-skills directory is a reasonable layout. If you do not want that, pass an
-explicit `--dir`.
+An auto-detected destination is confined to your project: if `.claude/skills`
+(or any parent) is a symlink pointing outside it, the install is refused rather
+than followed, so a repository cannot redirect it somewhere else.
+
+Installing outside the project is opt-in — pass `--dir <path>` or `--global`
+and that boundary is lifted, because you named the destination yourself.
 
 ## Fetching instead of installing
 

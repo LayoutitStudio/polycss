@@ -98,8 +98,15 @@ import {
   `createPolyPerspectiveCamera` for depth foreshortening.
 - The camera is the **outer** node; the scene nests inside it. CSS `perspective`
   only applies to descendants.
-- Every public export is `Poly`-prefixed, except generic math types (`Vec2`,
-  `Vec3`, `Polygon`, `PolyMaterial`) and the `*/three` subpaths.
+- **Do not infer names from a prefix rule.** `Poly` prefixing is a convention
+  for newer renderer-facing components, hooks and types — not a description of
+  the export inventory. Plenty of public names have no prefix: `loadMesh`,
+  `parseObj` / `parseStl` / `parseGltf` / `parseVox`, every `*Polygons`
+  generator, `BASE_TILE`, `LoopOnce` / `LoopRepeat` / `LoopPingPong`, the
+  generic math types (`Vec2`, `Vec3`, `Polygon`), and the vanilla factories
+  `createSelect` and `createTransformControls`. The `*/three` subpaths use
+  Three-compatible names deliberately. Check
+  [docs/api-index.md](/skill/docs/api-index.md) rather than guessing.
 
 ## Authoring polygons — the five silent failures
 
