@@ -91,8 +91,6 @@ export interface SceneOptionsState {
   shadowFollowAnimation: boolean;
   /** Shadow strength 0..1 — the engine's `shadow.opacity`. */
   shadowOpacity: number;
-  /** Shadow fill color as a CSS hex string — the engine's `shadow.color`. */
-  shadowColor: string;
   showGround: boolean;
   groundColor: string;
   fpvLook: boolean;

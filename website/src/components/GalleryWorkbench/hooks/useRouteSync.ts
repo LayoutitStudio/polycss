@@ -47,7 +47,6 @@ interface SerializedGallerySceneOptions {
   sst?: SceneOptionsState["shadowStyle"];
   sfa?: boolean;
   so?: number;
-  sc?: string;
   ground?: boolean;
   gc?: string;
   fl?: boolean;
@@ -112,7 +111,6 @@ const COMPACT_KEY_BY_OPTION: Record<SerializedGallerySceneOptionKey, string> = {
   sst: "H",
   sfa: "I",
   so: "N",
-  sc: "Q",
   ground: "g",
   gc: "G",
   fl: "L",
@@ -142,7 +140,13 @@ const DOTTED_COMPACT_OPTION_BY_KEY: Record<string, SerializedGallerySceneOptionK
   iy: "fiy",
   rd: "frd",
 };
-const COLOR_OPTIONS = new Set<SerializedGallerySceneOptionKey>(["kc", "amc", "gc", "sc"]);
+const COLOR_OPTIONS = new Set<SerializedGallerySceneOptionKey>(["kc", "amc", "gc"]);
+
+/** Packed-stream keys that no longer map to an option but still appear in
+ *  saved scene URLs. Value = payload character count to skip. `Q` was the
+ *  shadow-color control (a 5-char packed color), removed because
+ *  `shadow.color` is a no-op on the gallery's solid receivers. */
+const RETIRED_PACKED_KEY_WIDTHS: Record<string, number> = { Q: 5 };
 
 function isColorOption(key: SerializedGallerySceneOptionKey): boolean {
   return COLOR_OPTIONS.has(key);
@@ -298,7 +302,6 @@ function sceneOptionsPayload(
   addString(out, "sst", options.shadowStyle, defaults.shadowStyle);
   addBoolean(out, "sfa", options.shadowFollowAnimation, defaults.shadowFollowAnimation);
   addNumber(out, "so", options.shadowOpacity, defaults.shadowOpacity);
-  addString(out, "sc", options.shadowColor, defaults.shadowColor);
   addBoolean(out, "ground", options.showGround, defaults.showGround);
   addString(out, "gc", options.groundColor, defaults.groundColor);
   addBoolean(out, "fl", options.fpvLook, defaults.fpvLook);
@@ -530,7 +533,6 @@ function sceneOptionsFromPayload(o: SerializedGallerySceneOptions): Partial<Scen
     ...(isShadowStyle(o.sst) ? { shadowStyle: o.sst } : null),
     ...(isBoolean(o.sfa) ? { shadowFollowAnimation: o.sfa } : null),
     ...(isFiniteNumber(o.so) ? { shadowOpacity: o.so } : null),
-    ...(isHexColor(o.sc) ? { shadowColor: o.sc.toLowerCase() } : null),
     ...(isBoolean(o.ground) ? { showGround: o.ground } : null),
     ...(isHexColor(o.gc) ? { groundColor: o.gc.toLowerCase() } : null),
     ...(isBoolean(o.fl) ? { fpvLook: o.fl } : null),
@@ -655,9 +657,18 @@ function decodePackedCompactRouteSceneOptions(routeValue: string): Partial<Scene
   const payload: SerializedGallerySceneOptions = {};
   let index = COMPACT_SCENE_VERSION.length;
   while (index < routeValue.length) {
-    const optionKey = COMPACT_OPTION_BY_KEY[routeValue[index]];
+    const compactKey = routeValue[index];
+    const optionKey = COMPACT_OPTION_BY_KEY[compactKey];
     index += 1;
-    if (!optionKey) return null;
+    if (!optionKey) {
+      // The packed form is a positional stream, so a retired key cannot just
+      // be skipped — its payload has to be consumed too or every option after
+      // it decodes against the wrong offset and the whole scene is dropped.
+      const retiredWidth = RETIRED_PACKED_KEY_WIDTHS[compactKey];
+      if (retiredWidth === undefined) return null;
+      index += retiredWidth;
+      continue;
+    }
     const decoded = readPackedValue(optionKey, routeValue, index);
     if (!decoded) return null;
     (payload as Record<string, unknown>)[optionKey] = decoded.value;

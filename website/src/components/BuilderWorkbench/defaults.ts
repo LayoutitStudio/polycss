@@ -56,7 +56,6 @@ export const DEFAULT_SCENE: SceneOptionsState = {
   shadowStyle: "vector",
   shadowFollowAnimation: false,
   shadowOpacity: 0.25,
-  shadowColor: "#000000",
   showGround: true,
   groundColor: "#7d848e",
   fpvLook: true,

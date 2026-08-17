@@ -20,7 +20,6 @@ export interface LightingFolderInputs {
   shadowStyle: "vector" | "pixel";
   shadowFollowAnimation: boolean;
   shadowOpacity: number;
-  shadowColor: string;
   showGround: boolean;
   groundColor: string;
   showLight: boolean;
@@ -39,7 +38,6 @@ export interface LightingFolderInputs {
     shadowStyle?: "vector" | "pixel";
     shadowFollowAnimation?: boolean;
     shadowOpacity?: number;
-    shadowColor?: string;
     showGround?: boolean;
     groundColor?: string;
     showLight?: boolean;
@@ -62,7 +60,6 @@ export function useLightingFolder(parent: GUI | null, inputs: LightingFolderInpu
     shadowStyle,
     shadowFollowAnimation,
     shadowOpacity,
-    shadowColor,
     showGround,
     groundColor,
     showLight,
@@ -106,22 +103,29 @@ export function useLightingFolder(parent: GUI | null, inputs: LightingFolderInpu
   useToggle(folder, "Parametric shadow", shadowParametric, (value) =>
     onUpdateScene({ shadowParametric: value }),
   );
-  useSlider(
+  const shadowDefinitionControl = useSlider(
     folder,
     "Shadow def.",
     { min: 3, max: 96, step: 1 },
     shadowDefinition,
     (value) => onUpdateScene({ shadowDefinition: value }),
   );
-  useToggle(folder, "Pixel shadow", shadowStyle === "pixel", (value) =>
+  const shadowStyleControl = useToggle(folder, "Pixel shadow", shadowStyle === "pixel", (value) =>
     onUpdateScene({ shadowStyle: value ? "pixel" : "vector" }),
   );
-  // Shading of the shadow itself (engine `shadow.opacity` / `shadow.color`),
-  // separate from the geometry knobs above.
+  // The engine reads `shadow.definition` and `shadow.style` only inside the
+  // parametric branch of the receiver-shadow builder, so both are literal
+  // no-ops while `Parametric shadow` is off. Grey them out rather than let
+  // the user toggle a control that changes nothing.
+  useEffect(() => {
+    shadowDefinitionControl?.setEnabled(shadowParametric);
+    shadowStyleControl?.setEnabled(shadowParametric);
+  }, [shadowDefinitionControl, shadowStyleControl, shadowParametric]);
+  // Shading of the shadow itself (engine `shadow.opacity`), separate from
+  // the geometry knobs above.
   useSlider(folder, "Shadow strength", { min: 0, max: 1, step: 0.01 }, shadowOpacity, (value) =>
     onUpdateScene({ shadowOpacity: value }),
   );
-  useColor(folder, "Shadow color", shadowColor, (value) => onUpdateScene({ shadowColor: value }));
   useToggle(folder, "Animate shadow", shadowFollowAnimation, (value) =>
     onUpdateScene({ shadowFollowAnimation: value }),
   );
