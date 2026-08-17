@@ -583,6 +583,7 @@ export function largePagedDescriptorClosure(built, {
   binding.parameters.frameCount = frameCount;
   binding.targets.leaves = [];
   packet.leafCount = 0;
+  packet.timeline = { introTicks: 0, loopTicks: 1, frames: [1] };
   const templateRecord = document.resources.resources.find((record) => record.kind === "state-page" && record.codec === "polycss-paged-playback-page@0");
   const templateDescriptor = packet.pages[0];
   let startFrame = 1;
@@ -1194,7 +1195,7 @@ export async function syntheticPagedVariantsInput(encoding = "identity", ranges 
         initial: { frame: 1, classIndicesBase64: base64Integers([0], 2) },
         pages,
         lookaheadPages: 1,
-        maxResidentPages: 4,
+        maxResidentPages: 5,
       },
     },
   });
@@ -1255,7 +1256,7 @@ export async function syntheticPagedPlaybackInput({ encoding = "identity", varia
     initial: { sourceFrame: packet.initial.sourceFrame, appearance: packet.initial.appearance },
     pages: pageEntries,
     lookaheadPages: 1,
-    maxResidentPages: variants ? 8 : 4,
+    maxResidentPages: variants ? 10 : 5,
   } };
   binding.interpreter = "polycss-paged-playback@0";
   input.meta.capabilities = [
@@ -1271,7 +1272,7 @@ export async function syntheticPagedPlaybackInput({ encoding = "identity", varia
     "prepared-surface-lighting",
   ];
   input.meta.conformance.executable[input.meta.conformance.executable.indexOf("playback")] = "paged-playback";
-  if (variants) input.state.channels.find((channel) => channel.codec === "polycss-paged-variants@0").data.packet.maxResidentPages = 8;
+  if (variants) input.state.channels.find((channel) => channel.codec === "polycss-paged-variants@0").data.packet.maxResidentPages = 10;
   return input;
 }
 
@@ -1338,7 +1339,7 @@ export async function syntheticPagedProfileTimelinesWithoutInteractionInput() {
   input.meta.capabilities = input.meta.capabilities.filter((capability) => capability !== "prepared-pointer-grab-interaction");
   input.meta.conformance.executable = input.meta.conformance.executable.filter((role) => role !== "pointer-grab-interaction");
   input.meta.initialExperience = "animation";
-  input.state.channels.find((channel) => channel.codec === "polycss-paged-variants@0").data.packet.maxResidentPages = 3;
+  input.state.channels.find((channel) => channel.codec === "polycss-paged-variants@0").data.packet.maxResidentPages = 4;
   return input;
 }
 

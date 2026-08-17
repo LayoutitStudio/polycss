@@ -71,6 +71,9 @@ These are the complete browser exports. URL loading fetches the JSON document
 and its digest-bound, document-relative, same-origin sibling files with
 credentials omitted and redirects rejected. Direct byte loading requires a
 logical-id `externalResources` map or a trusted `loadExternalResource` callback.
+State pages are never accepted eagerly in the map; they must come from the
+callback so declared-size checks and bounded residency happen before the
+runtime copies or validates page bytes.
 
 Mounting follows:
 

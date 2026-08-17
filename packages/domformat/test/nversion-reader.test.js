@@ -179,7 +179,7 @@ async function assertIndependentReadersAccept(input, prefix) {
   }
 }
 
-async function assertIndependentReadersReject(input, prefix, mutateDocument) {
+async function assertIndependentReadersReject(input, prefix, mutateDocument, expectedCode) {
   const directory = await mkdtemp(join(tmpdir(), prefix));
   try {
     const built = buildDom(input);
@@ -187,8 +187,8 @@ async function assertIndependentReadersReject(input, prefix, mutateDocument) {
     mutateDocument(document);
     const bytes = encodeCanonicalJson(document);
     const externalResources = builtExternalResources(built);
-    assert.throws(() => readDom(bytes, { externalResources, requireResources: true }), undefined, `${prefix} production`);
-    await assert.rejects(readDomNVersion(bytes, { externalResources }), NVersionError, `${prefix} N-version`);
+    assert.throws(() => readDom(bytes, { externalResources, requireResources: true }), expectedCode ? (error) => error?.code === expectedCode : undefined, `${prefix} production`);
+    await assert.rejects(readDomNVersion(bytes, { externalResources }), expectedCode ? (error) => error instanceof NVersionError && error.code === expectedCode : NVersionError, `${prefix} N-version`);
     const model = join(directory, "model.json");
     await writeFile(model, bytes);
     for (const record of document.resources.resources) {
@@ -198,10 +198,18 @@ async function assertIndependentReadersReject(input, prefix, mutateDocument) {
     }
     const python = runPython([pythonReader, "validate", model]);
     assert.equal(python.status, 1, `${prefix} Python: ${python.stdout}\n${python.stderr}`);
+    if (expectedCode) assert.match(`${python.stdout}\n${python.stderr}`, new RegExp(`: ${expectedCode}:`, "u"), `${prefix} Python error code`);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
 }
+
+test("all readers distinguish an unclosed compositor cycle from sink ownership", async () => {
+  await assertIndependentReadersReject(await syntheticCompositorTimingInput(), "domformat-compositor-open-cycle-", (document) => {
+    const cycle = document.state.channels.find((channel) => channel.codec === "polycss-compositor-timing-prepared@0").data.packet.targets.find((target) => target.kind === "cycle");
+    cycle.keyframes.at(-1).transformIndex = 1;
+  }, "INVALID_COMPOSITOR_TIMING_STATE");
+});
 
 test("production, N-version, and Python readers accept reduced executable closures", async () => {
   for (const [name, createInput] of [
@@ -458,6 +466,12 @@ test("production, N-version, and Python readers reject each new contract boundar
         { profileId: "mobile", introTicks: 0, loopTicks: 2, frames: [1, 3] },
       ];
     }],
+    ["playback-timeline-frame-span", syntheticProfileTimelinesInput, (document) => {
+      document.bindings.channels.find((channel) => channel.interpreter === "polycss-playback@0").parameters.frameCount = 20;
+      const packet = document.state.channels.find((channel) => channel.codec === "polycss-playback-packed@0").data.packet;
+      packet.timeline = { introTicks: 0, loopTicks: 20, frames: Array.from({ length: 20 }, (_, index) => index + 1) };
+      packet.profileTimelines[0].frames = [1, 10];
+    }],
     ["prepared-bank-incomplete-pair", syntheticPreparedBanksInput, (document) => {
       delete document.state.channels.find((channel) => channel.codec === "polycss-playback-packed@0").data.packet.initialBankId;
     }],
@@ -492,7 +506,7 @@ test("production, N-version, and Python readers reject each new contract boundar
       document.tree.nodes[0].styles.transform = "\u0001";
     }],
   ];
-  for (const [name, createInput, mutate] of cases) await assertIndependentReadersReject(await createInput(), `domformat-${name}-`, mutate);
+  for (const [name, createInput, mutate] of cases) await assertIndependentReadersReject(await createInput(), `domformat-${name}-`, mutate, name === "playback-timeline-frame-span" ? "TIMELINE_LIMIT" : undefined);
 });
 
 test("Python rejects booleans for every codec packet version", async () => {

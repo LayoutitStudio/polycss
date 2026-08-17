@@ -834,13 +834,18 @@ export async function mountConformanceDom(result, host, options = {}) {
         assertPublished();
         invariant(mode === "animation", "INVALID_EXPERIENCE_MODE", "Prepared banks can be selected only in animation mode.");
         const frame = playback.bankEntryFrame(id);
-        await pagedState?.ensureFrame(frame);
-        const nextFrame = publishEffects(playback.selectBank(id));
-        pagedState?.setActiveFramePin(nextFrame);
-        reschedule?.();
-        pagedState?.resetPreload(nextFrame);
-        interaction?.invalidatePublication();
-        return nextFrame;
+        try {
+          await pagedState?.ensureFrame(frame);
+          const nextFrame = publishEffects(playback.selectBank(id));
+          pagedState?.setActiveFramePin(nextFrame);
+          reschedule?.();
+          pagedState?.resetPreload(nextFrame);
+          interaction?.invalidatePublication();
+          return nextFrame;
+        } catch (error) {
+          if (error?.code !== "OPERATION_ABORTED") cleanup();
+          throw error;
+        }
       },
       stepInteraction,
       setInput(id, value) {

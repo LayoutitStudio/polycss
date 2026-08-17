@@ -106,14 +106,17 @@ active bank-entry pin to another target entry. Only the currently active entry
 is pinned after a successful handoff; declared inactive banks do not occupy the
 resident window.
 
-Before requesting a decoded page, the viewer removes stale unprotected pages,
-reserves capacity, and checks the validation peak. Validation decodes integer
+Before requesting a decoded page, the viewer reserves capacity, evicts only
+the unprotected LRU pages needed for that capacity, and checks the validation
+peak. The currently published page remains protected until replacement state
+commits. Validation decodes integer
 columns directly to typed arrays and accounts loader/canonical bytes, bounded
 UTF-16 JSON representations, parsed/final reference slots, final typed/string
 materialization, resident pages, and canonical live rows. A failure restores
 the previous resource ids and LRU order under the same ceiling without
 retaining evicted page objects. A superseding generation owns and verifies its
-new exact desired window; the stale generation rejects without publication.
+new desired window while preserving the published page; the stale generation
+rejects without publication.
 
 Mount verifies only the pages containing the initial row and every fixed pin
 while detached. Playback initial appearance and page row must exactly equal

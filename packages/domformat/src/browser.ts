@@ -372,7 +372,6 @@ export async function readDomBrowser(value: DomBytes, options: DomBrowserReadOpt
   const document = envelope as unknown as DomDocument;
   const variantClasses = preparedVariantClassTokens(document.state);
   const resourceBytes = new Map<string, Uint8Array>();
-  const providedStatePages = new Map<string, Uint8Array>();
   const provided = options.externalResources;
   const loader = options.loadExternalResource;
   invariant(provided === undefined || provided instanceof Map, "INVALID_EXTERNAL_RESOURCES", "externalResources must be a Map keyed by logical resource id.");
@@ -380,18 +379,20 @@ export async function readDomBrowser(value: DomBytes, options: DomBrowserReadOpt
   if (provided instanceof Map) {
     const declared = new Set(document.resources.resources.map((record) => record.id));
     for (const id of provided.keys()) invariant(declared.has(id), "UNEXPECTED_EXTERNAL_RESOURCE", `External resource ${String(id)} is not declared by this document.`);
-    for (const record of document.resources.resources) {
-      if (record.kind !== "state-page" || !provided.has(record.id)) continue;
-      providedStatePages.set(record.id, externalBytes(provided.get(record.id), `Resource ${record.id}`).slice());
+    for (const record of document.resources.resources) if (record.kind === "state-page") {
+      invariant(!provided.has(record.id), "INVALID_EXTERNAL_RESOURCES", `State page ${record.id} must be supplied lazily by loadExternalResource.`);
     }
   }
+  invariant(document.resources.resources.every((record) => record.kind !== "state-page") || typeof loader === "function", "MISSING_EXTERNAL_RESOURCE", "Browser state pages require a trusted lazy loader.");
   for (const record of document.resources.resources) {
     if (record.kind === "state-page") continue;
     throwIfAborted(options.signal);
     const loaded = provided?.get(record.id) ?? await loader?.(record, options.signal);
     throwIfAborted(options.signal);
     invariant(loaded !== undefined, "MISSING_EXTERNAL_RESOURCE", `External resource ${record.id} is missing.`);
-    resourceBytes.set(record.id, externalBytes(loaded, `Resource ${record.id}`).slice());
+    const bytes = externalBytes(loaded, `Resource ${record.id}`);
+    invariant(bytes.length === record.byteLength, "RESOURCE_SIZE_MISMATCH", `Resource ${record.id} byte length does not match RCRD.`);
+    resourceBytes.set(record.id, bytes.slice());
   }
   for (const record of document.resources.resources) {
     if (record.kind === "state-page") continue;
@@ -406,11 +407,12 @@ export async function readDomBrowser(value: DomBytes, options: DomBrowserReadOpt
   const loadStatePage: StatePageBytesLoader = async (record, signal) => {
     invariant(record.kind === "state-page", "INVALID_STATE_PAGE_RESOURCE", `Resource ${record.id} is not a state page.`);
     throwIfAborted(signal);
-    const loaded = providedStatePages.get(record.id) ?? await loader?.(record, signal);
+    const loaded = await loader?.(record, signal);
     throwIfAborted(signal);
     invariant(loaded !== undefined, "MISSING_EXTERNAL_RESOURCE", `External resource ${record.id} is missing.`);
-    const encoded = externalBytes(loaded, `Resource ${record.id}`).slice();
-    invariant(encoded.length === record.byteLength, "RESOURCE_SIZE_MISMATCH", `Resource ${record.id} byte length does not match RCRD.`);
+    const source = externalBytes(loaded, `Resource ${record.id}`);
+    invariant(source.length === record.byteLength, "RESOURCE_SIZE_MISMATCH", `Resource ${record.id} byte length does not match RCRD.`);
+    const encoded = source.slice();
     invariant(await sha256Hex(encoded) === record.digest.value, "RESOURCE_DIGEST_MISMATCH", `Resource ${record.id} integrity failed.`);
     validateResourceBytes(record, encoded, validated.limits);
     return decodeBrowserStatePage(record, encoded, signal);
@@ -802,11 +804,16 @@ function createMountedRuntime(owner: MountRuntimeOwner): DomMountRuntime {
       invariant(owner.mode === "animation", "INVALID_EXPERIENCE_MODE", "Prepared banks can be selected only in animation mode.");
       const playback = mountedRuntime(owner).preparedPlayback;
       const frame = playback.bankEntryFrame(id);
-      await owner.pagedState?.ensureFrame(frame);
-      const nextFrame = selectPlaybackBank(owner, id);
-      owner.reschedule?.();
-      owner.pagedState?.resetPreload(nextFrame);
-      return nextFrame;
+      try {
+        await owner.pagedState?.ensureFrame(frame);
+        const nextFrame = selectPlaybackBank(owner, id);
+        owner.reschedule?.();
+        owner.pagedState?.resetPreload(nextFrame);
+        return nextFrame;
+      } catch (error) {
+        if ((error as { code?: string })?.code !== "OPERATION_ABORTED") cleanupMount(owner);
+        throw error;
+      }
     },
     setMode(next: DomExperienceMode) {
       return setRuntimeMode(owner, next);

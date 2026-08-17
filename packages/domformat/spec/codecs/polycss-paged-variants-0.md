@@ -99,8 +99,9 @@ experience. This keeps synchronous `setMode("interaction")`
 resource-independent after publication.
 
 After attachment, the viewer maintains one document-wide resident map for
-paged variants and optional paged playback. It protects each channel's current
-page plus declared cyclic lookahead pages, the playback-initial pin, and the
+paged variants and optional paged playback. During replacement it protects
+each channel's published page as well as the target current page, declared
+cyclic lookahead pages, playback-initial pin, active prepared-bank pin, and
 interaction pin when present. Both channels declare the same ceiling and a
 publication is ready only when their conjunction is resident.
 Before fetching, decompressing, parsing, or materializing a nonresident page,
@@ -116,11 +117,11 @@ Eviction never removes a page protected by the current desired window or either
 fixed pin. If no slot can be made without evicting a protected page,
 loading fails with `STATE_PAGE_RESIDENCY_LIMIT`; a viewer MUST NOT transiently
 over-admit and repair the excess afterward.
-Validation computes the distinct union for every possible current page of its
-cyclic current-plus-lookahead window and the page containing playback's initial
-source frame, plus the interaction entry page when present. `maxResidentPages`
-MUST be at least the largest such union. Overlapping pins or window entries
-count once.
+Validation computes the distinct union for every possible target page of its
+cyclic current-plus-lookahead window and fixed pins, plus a conservative
+published-page transfer allowance for every channel that has pages outside
+that union. `maxResidentPages` MUST be at least the largest such transfer
+window. Overlapping pins or window entries count once.
 
 An adjacent publication within one page applies only that frame's sparse
 segment. Same-frame publication reconstructs and republishes the canonical row.

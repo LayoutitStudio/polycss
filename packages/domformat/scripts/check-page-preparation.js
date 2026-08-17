@@ -27,8 +27,8 @@ const TRACE_CATEGORIES = [
 ].join(",");
 const UINT32_MAX = 0xffffffff;
 const workloads = Object.freeze([
-  Object.freeze({ id: "electropaint", leafCount: 40, framesPerPage: 500, pageCount: 7, lookaheadPages: 4, maxResidentPages: 6 }),
-  Object.freeze({ id: "gravity-well", leafCount: 1_984, framesPerPage: 1, pageCount: 4, lookaheadPages: 1, maxResidentPages: 3 }),
+  Object.freeze({ id: "electropaint", leafCount: 40, framesPerPage: 500, pageCount: 7, lookaheadPages: 4, maxResidentPages: 7 }),
+  Object.freeze({ id: "gravity-well", leafCount: 1_984, framesPerPage: 1, pageCount: 4, lookaheadPages: 1, maxResidentPages: 4 }),
 ]);
 const paths = Object.freeze([
   Object.freeze({ id: "reference", page: "/viewer/index.html", suffix: "" }),

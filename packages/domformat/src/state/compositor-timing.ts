@@ -95,7 +95,10 @@ export function createPolycssCompositorTiming(
     },
     after(kind: PublicationKind, _tick: number) {
       invariant(!destroyed, "MOUNT_DESTROYED", "Compositor timing runtime is destroyed.");
-      if (initialized && kind !== "advance") restore();
+      if (initialized && kind !== "advance") {
+        for (const [index, target] of packet.targets.entries()) if (target.kind === "transition") nodes[index].getBoundingClientRect();
+        restore();
+      }
     },
     publishInitial(tick: number) {
       invariant(!destroyed, "MOUNT_DESTROYED", "Compositor timing runtime is destroyed.");

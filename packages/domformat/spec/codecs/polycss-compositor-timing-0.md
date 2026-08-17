@@ -28,7 +28,8 @@ The viewer owns the physical timing objects. A cycle becomes one linear WAAPI
 animation with canonical offsets and no per-tick JavaScript transform writes.
 A transition becomes one viewer-authored linear `transform` transition. Initial
 publication, public seek, restart, catch-up, pause, nonsequential jump, and loop
-wrap disable interpolation, synchronously publish the exact prepared state, set
-the cycle time, and then restore timing. Interaction mode pauses cycles and
+wrap disable interpolation, synchronously publish the exact prepared state,
+force style resolution for every transition target while interpolation remains
+disabled, set the cycle time, and only then restore timing. Interaction mode pauses cycles and
 disables transitions. Destroy cancels every timing object and clears viewer
 transition state.

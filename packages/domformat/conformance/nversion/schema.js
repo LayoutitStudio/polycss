@@ -599,6 +599,12 @@ function samePlaybackTimeline(left, right, profile = false) {
       || (left.deadlineMicros !== undefined && right.deadlineMicros !== undefined && exactEqualArray(left.deadlineMicros, right.deadlineMicros)));
 }
 
+function validateTimelineFrameSpans(frames, introTicks, frameCount, label) {
+  const distance = (from, to) => (to - from + frameCount) % frameCount;
+  require(frames.slice(1).every((frame, index) => distance(frames[index], frame) <= 8), "TIMELINE_LIMIT", `${label} advances too many source frames in one logical tick.`);
+  require(distance(frames.at(-1), frames[introTicks]) <= 8, "TIMELINE_LIMIT", `${label} loop seam advances too many source frames in one logical tick.`);
+}
+
 function validatePlaybackBanks(packet, initial, parameters, validateTimeline, timeline, timelineTickCount, limits, code, label) {
   const hasInitialBankId = Object.hasOwn(packet, "initialBankId");
   const hasBanks = Object.hasOwn(packet, "banks");
@@ -706,6 +712,7 @@ function validatePlayback(state, binding, inputs, limits) {
     require(Number.isSafeInteger(timeline.introTicks) && timeline.introTicks >= 0 && Number.isSafeInteger(timeline.loopTicks) && timeline.loopTicks > 0, "TIMELINE_LIMIT", `${label} ranges are invalid.`);
     integerArray(timeline.frames, limits.maxTimelineTicks, "TIMELINE_LIMIT", `${label} frames`, { minimum: 1, upper: parameters.frameCount });
     require(timeline.frames.length === timeline.introTicks + timeline.loopTicks && timeline.frames[0] === entryFrame, "TIMELINE_LIMIT", `${label} coverage or entry frame is invalid.`);
+    validateTimelineFrameSpans(timeline.frames, timeline.introTicks, parameters.frameCount, label);
     if (timeline.deadlineMicros !== undefined) {
       integerArray(timeline.deadlineMicros, limits.maxTimelineTicks + 1, "TIMELINE_LIMIT", `${label} deadlines`, { minimum: 0 });
       require(timeline.deadlineMicros.length === timeline.frames.length + 1 && timeline.deadlineMicros[0] === 0 && timeline.deadlineMicros.every((deadline, index) => index === 0 || deadline > timeline.deadlineMicros[index - 1]), "TIMELINE_LIMIT", `${label} deadlines are incomplete or unordered.`);
@@ -848,6 +855,7 @@ function validatePagedPlayback(state, binding, inputs, limits) {
     require(Number.isSafeInteger(timeline.introTicks) && timeline.introTicks >= 0 && Number.isSafeInteger(timeline.loopTicks) && timeline.loopTicks > 0, "TIMELINE_LIMIT", `${label} ranges are invalid.`);
     integerArray(timeline.frames, limits.maxTimelineTicks, "TIMELINE_LIMIT", `${label} frames`, { minimum: 1, upper: parameters.frameCount });
     require(timeline.frames.length === timeline.introTicks + timeline.loopTicks && timeline.frames[0] === entryFrame, "TIMELINE_LIMIT", `${label} coverage or entry frame is invalid.`);
+    validateTimelineFrameSpans(timeline.frames, timeline.introTicks, parameters.frameCount, label);
     if (timeline.deadlineMicros !== undefined) {
       integerArray(timeline.deadlineMicros, limits.maxTimelineTicks + 1, "TIMELINE_LIMIT", `${label} deadlines`, { minimum: 0 });
       require(timeline.deadlineMicros.length === timeline.frames.length + 1 && timeline.deadlineMicros[0] === 0 && timeline.deadlineMicros.every((deadline, index) => index === 0 || deadline > timeline.deadlineMicros[index - 1]), "TIMELINE_LIMIT", `${label} deadlines are incomplete or unordered.`);
@@ -1658,7 +1666,8 @@ function requiredDocumentStateResidency(packets, pinnedFrames, activeFramePins =
       const resources = new Set();
       const pins = activeFramePin === undefined ? pinnedFrames : [...pinnedFrames, activeFramePin];
       for (const packet of packets) for (const resource of desiredPageResources(packet, frame, pins)) resources.add(resource);
-      required = Math.max(required, resources.size);
+      const publishedTransfer = packets.filter((packet) => packet.pages.some((page) => !resources.has(page.resource))).length;
+      required = Math.max(required, resources.size + publishedTransfer);
     }
   }
   return required;
@@ -1720,7 +1729,8 @@ function validateCompositorTiming(state, binding, playback, inputs, limits) {
         require(Number.isSafeInteger(row.tick) && row.tick > previous && row.tick <= target.durationTicks && Number.isSafeInteger(row.transformIndex) && row.transformIndex >= 0 && row.transformIndex < playback.packet.transforms.count, "INVALID_COMPOSITOR_TIMING_STATE", `Compositor keyframe ${index} is invalid.`);
         previous = row.tick;
       }
-      require(target.keyframes[0].tick === 0 && target.keyframes.at(-1).tick === target.durationTicks && target.keyframes[0].transformIndex === target.keyframes.at(-1).transformIndex && playback.packet.frameRows.every((row) => row[2] === -1), "TARGET_OWNERSHIP_CONFLICT", `Compositor cycle ${targetIndex} is not closed or races playback.`);
+      require(target.keyframes[0].tick === 0 && target.keyframes.at(-1).tick === target.durationTicks && target.keyframes[0].transformIndex === target.keyframes.at(-1).transformIndex, "INVALID_COMPOSITOR_TIMING_STATE", `Compositor cycle ${targetIndex} is not exactly closed.`);
+      require(playback.packet.frameRows.every((row) => row[2] === -1), "TARGET_OWNERSHIP_CONFLICT", `Compositor cycle ${targetIndex} races playback.`);
       keyframes += target.keyframes.length;
     } else {
       exactObject(target, ["kind", "owner", "index", "durationTicks"], "INVALID_COMPOSITOR_TIMING_STATE", `Compositor transition ${targetIndex}`);

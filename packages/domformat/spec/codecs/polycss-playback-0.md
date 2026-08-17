@@ -132,7 +132,10 @@ an empty `leafFit` array and MAY omit `polycss-surface@0` entirely.
 
 `frames.length` is exactly `introTicks + loopTicks`, `loopTicks` is positive,
 and every entry is in `1..frameCount`. `frames[0]` equals the initial source
-frame. For nonnegative tick:
+frame. Consecutive entries and the final-to-loop-start seam may repeat a source
+frame or advance at most eight source frames cyclically. This bounds sparse
+row reconstruction during one logical tick while retaining prepared slowdown
+and source-frame skipping. For nonnegative tick:
 
 ```text
 index = tick < frames.length

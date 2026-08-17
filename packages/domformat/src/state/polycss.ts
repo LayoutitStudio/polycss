@@ -1343,12 +1343,16 @@ export function createPolycssPlayback(
       if (publish) options.compositorTiming?.after(target === 1 ? "wrap" : "advance", tick);
     }
     else if (publish) seekTo(target, false);
+    else if (packet.kind === "paged") {
+      const staged = stageFrame(target);
+      options.pagedState!.commit(staged, false);
+      applyStage(staged, false, dirtyShapes, dirtyLeaves, dirtyProfileLeaves);
+    }
     else {
       let next = sourceFrame;
       while (next !== target) {
         next = next === playbackParameters.frameCount ? 1 : next + 1;
         const staged = stageFrame(next);
-        if (packet.kind === "paged") options.pagedState!.commit(staged, false);
         applyStage(staged, false, dirtyShapes, dirtyLeaves, dirtyProfileLeaves);
       }
     }

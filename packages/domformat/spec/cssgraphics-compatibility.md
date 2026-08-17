@@ -103,5 +103,5 @@ It also contains `cssGraphicsTiming` for the same 21 pairs. The source-size page
 trace is reproduced separately with:
 
 ```sh
-node --import tsx packages/domformat/scripts/check-page-preparation.js
+pnpm --filter @layoutit/polycss-domformat test:page-preparation
 ```

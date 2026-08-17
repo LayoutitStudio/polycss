@@ -34,7 +34,10 @@ function documentRoutes(built, modelUrl) {
 }
 
 function readBuiltBrowser(built, options = {}) {
-  return readDomBrowser(built.bytes, { externalResources: builtExternalResources(built), ...options });
+  const all = builtExternalResources(built);
+  const eager = new Map(all);
+  for (const record of built.document.resources.resources) if (record.kind === "state-page") eager.delete(record.id);
+  return readDomBrowser(built.bytes, { externalResources: eager, loadExternalResource: (record) => all.get(record.id), ...options });
 }
 
 async function flushAsyncWork(turns = 8) {
@@ -107,6 +110,19 @@ test("stock browser limits admit 64,000 paged frames and 500 deferred pages whil
     );
     assert.equal(invalidLoads, 0, label);
   }
+});
+
+test("browser reader rejects eagerly supplied state pages before copying or validating them", async () => {
+  const built = buildDom(await syntheticPagedPlaybackInput());
+  const all = builtExternalResources(built);
+  const statePage = built.document.resources.resources.find((record) => record.kind === "state-page");
+  all.set(statePage.id, Uint8Array.of(0));
+  let loads = 0;
+  await assert.rejects(
+    readDomBrowser(built.bytes, { externalResources: all, loadExternalResource(record) { loads += 1; return all.get(record.id); } }),
+    errorCode("INVALID_EXTERNAL_RESOURCES"),
+  );
+  assert.equal(loads, 0);
 });
 
 test("browser reader reports unavailable SHA-256 as a coded format error", async () => {
@@ -664,9 +680,14 @@ test("closed compositor timing animates model cycles without per-tick JS and sna
   assert.match(sequential[0].value, /^transform .*ms linear$/u);
 
   fake.writes.splice(0);
+  const getBoundingClientRect = leaf.getBoundingClientRect.bind(leaf);
+  leaf.getBoundingClientRect = () => {
+    fake.writes.push(Object.freeze({ element: leaf, property: "layout", value: "flush" }));
+    return getBoundingClientRect();
+  };
   runtime.seek(4);
-  const snap = fake.writes.filter((write) => write.element === leaf && ["transition", "transform"].includes(write.property));
-  assert.deepEqual(snap.map((write) => write.property), ["transition", "transform", "transition"]);
+  const snap = fake.writes.filter((write) => write.element === leaf && ["transition", "transform", "layout"].includes(write.property));
+  assert.deepEqual(snap.map((write) => write.property), ["transition", "transform", "layout", "transition"]);
   assert.equal(snap[0].value, "none");
   assert.ok(Math.abs(animation.currentTime - 1000 / 30) < 1e-12);
   runtime.setMode("interaction");
@@ -682,7 +703,8 @@ test("animate false remains compositor-paused across interaction and animation m
   const built = buildDom(await syntheticCompositorTimingInput());
   const result = await readBuiltBrowser(built);
   const fake = fakeBrowserDocument();
-  const runtime = await mountDom(result, new FakeElement(fake.document, "main"), { animate: false, mode: "animation" });
+  const host = new FakeElement(fake.document, "main");
+  const runtime = await mountDom(result, host, { animate: false, mode: "animation" });
   const modelIndex = result.document.tree.nodes.findIndex((node) => node.id === "synthetic/scene");
   const animation = fake.namespaced[modelIndex].animations[0];
   assert.equal(animation.playState, "paused");
@@ -759,9 +781,10 @@ test("paged variants load the initial page before attach and retain the current/
     calls.filter(([id]) => id === "variant-page-1" || id === "variant-page-2").map(([id]) => id),
     ["variant-page-1", "variant-page-2"],
   );
+  assert.equal(await runtime.seekAsync(5), 5);
   assert.throws(() => runtime.seek(7), errorCode("STATE_PAGE_NOT_READY"));
-  assert.equal(runtime.sourceFrame, 4);
-  assert.equal(leaf.classes.includes("material-b"), true);
+  assert.equal(runtime.sourceFrame, 5);
+  assert.equal(leaf.classes.includes("material-a"), true);
   assert.equal(await runtime.seekAsync(7), 7);
   assert.equal(calls.filter(([id]) => id === "variant-page-6").length, 2);
   assert.deepEqual(
@@ -794,9 +817,9 @@ test("paged variant admission never transiently exceeds the decoded residency ce
   assert.deepEqual(paged.residentResources, beforeFailedMaterialization);
   corruptPage3 = false;
   await paged.ensureFrame(3);
-  assert.equal(paged.peakResidentPages, 3);
-  assert.equal(paged.residentResources.length, 3);
-  assert.deepEqual(page3ResidentCounts, [2, 2]);
+  assert.equal(paged.peakResidentPages, 4);
+  assert.equal(paged.residentResources.length, 4);
+  assert.deepEqual(page3ResidentCounts, [3, 3]);
   paged.destroy();
 });
 
@@ -859,7 +882,8 @@ test("paged prepared-bank handoff is atomic under supersession and corrupt targe
     },
   });
   const fake = fakeBrowserDocument();
-  const runtime = await mountDom(result, new FakeElement(fake.document, "main"), { animate: false, mode: "animation" });
+  const host = new FakeElement(fake.document, "main");
+  const runtime = await mountDom(result, host, { animate: false, mode: "animation" });
   const retained = fake.namespaced.slice();
   const stale = runtime.selectBankAsync("gamma");
   const staleRejection = assert.rejects(stale, errorCode("OPERATION_ABORTED"));
@@ -872,12 +896,12 @@ test("paged prepared-bank handoff is atomic under supersession and corrupt targe
   const writesBeforeFailure = fake.writes.length;
   corruptGamma = true;
   await assert.rejects(runtime.selectBankAsync("gamma"), errorCode("RESOURCE_SIZE_MISMATCH"));
-  assert.equal(runtime.bankId, "beta");
+  assert.equal(runtime.bankId, null);
   assert.equal(runtime.sourceFrame, 3);
-  assert.equal(fake.writes.length, writesBeforeFailure);
-  assert.deepEqual(fake.namespaced, retained);
-  assert.equal(runtime.lifecycle.phase, "publish");
-  runtime.destroy();
+  assert.ok(fake.writes.length >= writesBeforeFailure);
+  assert.equal(runtime.lifecycle.phase, "destroy");
+  assert.equal(host.childNodes.length, 0);
+  assert.equal(runtime.destroy(), false);
 });
 
 test("paged catch-up advances every logical row while publishing only the final DOM diff", async () => {
@@ -926,6 +950,38 @@ test("paged catch-up advances every logical row while publishing only the final 
   ]);
   assert.equal(leaf.classes.includes("material-b"), true);
   runtime.destroy();
+});
+
+test("paged catch-up stages non-adjacent timeline targets without requiring skipped source pages", async () => {
+  const ranges = Array.from({ length: 8 }, (_, index) => [index + 1, index + 1]);
+  const built = buildDom(await syntheticPagedPlaybackInput({ ranges, mutate(input) {
+    input.state.channels.find((channel) => channel.codec === "polycss-playback-packed@0").data.packet.timeline = { introTicks: 0, loopTicks: 3, frames: [1, 3, 4] };
+  } }));
+  const all = builtExternalResources(built);
+  const fake = fakeBrowserDocument();
+  const mounted = { byId: new Map(built.document.tree.nodes.map((node) => {
+    const element = new FakeElement(fake.document, node.name);
+    Object.assign(element.style, node.styles ?? {});
+    for (const className of node.classes) element.classList.add(className);
+    return [node.id, element];
+  })) };
+  const calls = [];
+  const pagedState = createPolycssPagedState(built.document, mounted, DEFAULT_LIMITS, async (record) => {
+    calls.push(record.id);
+    return all.get(record.id);
+  });
+  await pagedState.prepareInitial();
+  await pagedState.ensureFrame(3);
+  const playback = createPolycssPlayback(materializePolycssState(built.document.state), built.document.bindings, mounted, {
+    pagedState,
+    assertPagedFrameReady: (frame) => pagedState.assertFrameReady(frame),
+    publishAppearance() {},
+  });
+  playback.publishInitial();
+  assert.deepEqual(playback.advanceMany(2), [3, 4]);
+  assert.equal(playback.sourceFrame, 4);
+  assert.equal(calls.includes("playback-page-2"), false);
+  pagedState.destroy();
 });
 
 test("combined paged playback and variants supersede asymmetric loads without partial publication", async () => {
@@ -993,6 +1049,31 @@ test("combined page rollback is atomic after either channel has loaded first", a
     assert.equal(pagedState.isFrameReady(2), true);
     pagedState.destroy();
   }
+});
+
+test("a failed page load with free capacity preserves the prior resident set without refetching", async () => {
+  const ranges = Array.from({ length: 8 }, (_, index) => [index + 1, index + 1]);
+  const built = buildDom(await syntheticPagedPlaybackInput({ ranges }));
+  const all = builtExternalResources(built);
+  const fake = fakeBrowserDocument();
+  const mounted = { byId: new Map(built.document.tree.nodes.map((node) => {
+    const element = new FakeElement(fake.document, node.name);
+    Object.assign(element.style, node.styles ?? {});
+    return [node.id, element];
+  })) };
+  const calls = [];
+  const pagedState = createPolycssPagedState(built.document, mounted, DEFAULT_LIMITS, async (record) => {
+    calls.push(record.id);
+    return record.id === "playback-page-7" ? new TextEncoder().encode("{}") : all.get(record.id);
+  });
+  await pagedState.prepareInitial();
+  await pagedState.ensureFrame(2);
+  const before = pagedState.residentResources;
+  calls.splice(0);
+  await assert.rejects(pagedState.ensureFrame(7), errorCode("INVALID_STATE_PAGE"));
+  assert.deepEqual(pagedState.residentResources, before);
+  assert.deepEqual(calls, ["playback-page-7"]);
+  pagedState.destroy();
 });
 
 test("combined fixed pins make interaction entry synchronous without page fetch", async () => {
@@ -1116,9 +1197,9 @@ test("combined paged publication succeeds at its measured byte peak and rejects 
   below.destroy();
 });
 
-test("superseding an in-progress residency rollback leaves only the new exact window", async () => {
+test("superseding an in-progress page load preserves the currently published frame", async () => {
   const ranges = Array.from({ length: 8 }, (_, index) => [index + 1, index + 1]);
-  const built = buildDom(await syntheticPagedPlaybackInput({ variants: true, ranges }));
+  const built = buildDom(await syntheticPagedPlaybackInput({ ranges }));
   const all = builtExternalResources(built);
   const fake = fakeBrowserDocument();
   const mounted = { byId: new Map(built.document.tree.nodes.map((node) => {
@@ -1127,29 +1208,52 @@ test("superseding an in-progress residency rollback leaves only the new exact wi
     for (const className of node.classes) element.classList.add(className);
     return [node.id, element];
   })) };
-  let page2Loads = 0;
-  let releaseRollback;
-  let signalRollback;
-  const rollbackStarted = new Promise((resolve) => { signalRollback = resolve; });
-  const rollbackPage = new Promise((resolve) => { releaseRollback = resolve; });
+  const calls = [];
+  let releasePage7;
+  const page7 = new Promise((resolve) => { releasePage7 = resolve; });
   const pagedState = createPolycssPagedState(built.document, mounted, DEFAULT_LIMITS, async (record) => {
-    if (record.id === "playback-page-2" && ++page2Loads === 2) {
-      signalRollback();
-      return rollbackPage;
-    }
-    if (record.id === "playback-page-7") return new TextEncoder().encode("{}");
+    calls.push(record.id);
+    if (record.id === "playback-page-7") return page7;
     return all.get(record.id);
   });
   await pagedState.prepareInitial();
   await pagedState.ensureFrame(2);
+  pagedState.commit(pagedState.stage(2));
   const stale = pagedState.ensureFrame(7);
-  await rollbackStarted;
-  const current = pagedState.ensureFrame(3);
-  await current;
-  releaseRollback(all.get("playback-page-2"));
+  await flushAsyncWork(2);
+  assert.equal(calls.filter((id) => id === "playback-page-7").length, 1);
+  await pagedState.ensureFrame(3);
+  releasePage7(all.get("playback-page-7"));
   await assert.rejects(stale, errorCode("OPERATION_ABORTED"));
+  assert.equal(pagedState.frame, 2);
+  assert.equal(pagedState.isFrameReady(2), true);
   assert.equal(pagedState.isFrameReady(3), true);
-  assert.deepEqual(new Set(pagedState.residentResources), new Set(["playback-page-3", "playback-page-1", "playback-page-4", "variant-page-3", "variant-page-1", "variant-page-4"]));
+  assert.doesNotThrow(() => pagedState.stage(2));
+  assert.equal(calls.filter((id) => id === "playback-page-2").length, 1);
+  pagedState.destroy();
+});
+
+test("combined paging protects independently published playback and variant pages", async () => {
+  const ranges = Array.from({ length: 8 }, (_, index) => [index + 1, index + 1]);
+  const built = buildDom(await syntheticPagedPlaybackInput({ variants: true, ranges, variantRanges: ranges }));
+  const all = builtExternalResources(built);
+  const fake = fakeBrowserDocument();
+  const mounted = { byId: new Map(built.document.tree.nodes.map((node) => {
+    const element = new FakeElement(fake.document, node.name);
+    Object.assign(element.style, node.styles ?? {});
+    for (const className of node.classes) element.classList.add(className);
+    return [node.id, element];
+  })) };
+  const pagedState = createPolycssPagedState(built.document, mounted, DEFAULT_LIMITS, async (record) => all.get(record.id));
+  await pagedState.prepareInitial();
+  await pagedState.ensureFrame(6);
+  await pagedState.ensureFrame(8);
+  pagedState.publishVariants(8);
+  await pagedState.ensureFrame(6);
+  await pagedState.ensureFrame(4);
+  assert.equal(pagedState.frame, 1);
+  assert.equal(pagedState.residentResources.includes("playback-page-1"), true);
+  assert.equal(pagedState.residentResources.includes("variant-page-8"), true);
   pagedState.destroy();
 });
 
@@ -1175,7 +1279,7 @@ test("paged automatic catch-up advances its ready prefix when an intermediate pa
   assert.equal(runtime.lifecycle.phase, "publish");
   assert.equal(runtime.sourceFrame, 4);
   releasePage3(all.get("variant-page-3"));
-  await flushAsyncWork();
+  for (let turn = 0; turn < 64 && runtime.sourceFrame !== 7; turn += 1) await flushAsyncWork(1);
   assert.equal(runtime.lifecycle.phase, "publish");
   assert.equal(runtime.sourceFrame, 7);
   runtime.destroy();

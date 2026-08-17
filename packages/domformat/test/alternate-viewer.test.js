@@ -257,6 +257,22 @@ test("alternate and public viewers select retained prepared banks identically", 
   }
 });
 
+test("alternate and public async bank integrity failures tear down identically", async () => {
+  const value = await mountedPair(await syntheticPagedPreparedBanksInput(), {
+    mode: "animation",
+    loadStatePage(_path, record, _signal, resources) {
+      return record.id === "variant-page-3" ? new TextEncoder().encode("{}") : resources.get(record.id);
+    },
+  });
+  await assert.rejects(value.referenceRuntime.selectBankAsync("gamma"), (error) => error?.code === "RESOURCE_SIZE_MISMATCH");
+  await assert.rejects(value.alternateRuntime.selectBankAsync("gamma"), (error) => error?.code === "RESOURCE_SIZE_MISMATCH");
+  assert.equal(value.referenceRuntime.lifecycle.phase, "destroy");
+  assert.equal(value.alternateRuntime.lifecycle.phase, "destroy");
+  assert.deepEqual(value.referencePhases, value.alternatePhases);
+  assert.equal(value.referenceHost.childNodes.length, 0);
+  assert.equal(value.alternateHost.childNodes.length, 0);
+});
+
 test("alternate and public viewers agree on deferred paged variants, readiness, refetch, and CSS closure", async () => {
   const value = await mountedPair(await syntheticEvictingPagedVariantsInput("gzip"), { mode: "animation" });
   const leafIndex = value.result.document.tree.nodes.findIndex((node) => node.id === "synthetic/leaf");
@@ -288,6 +304,8 @@ test("alternate and public viewers agree on deferred paged variants, readiness, 
   assert.equal(await value.referenceRuntime.seekAsync(4), 4);
   assert.equal(await value.alternateRuntime.seekAsync(4), 4);
   assertEquivalent(value, "paged bounded-window refetch");
+  assert.equal(await value.referenceRuntime.seekAsync(5), 5);
+  assert.equal(await value.alternateRuntime.seekAsync(5), 5);
   assert.throws(() => value.referenceRuntime.seek(7), (error) => error?.code === "STATE_PAGE_NOT_READY");
   assert.throws(() => value.alternateRuntime.seek(7), (error) => error?.code === "STATE_PAGE_NOT_READY");
   assert.equal(await value.referenceRuntime.seekAsync(7), 7);
@@ -747,6 +765,8 @@ test("alternate and public viewers replace a stale page wait before responsive r
 
   assert.equal(await value.referenceRuntime.seekAsync(5), 5);
   assert.equal(await value.alternateRuntime.seekAsync(5), 5);
+  assert.equal(await value.referenceRuntime.seekAsync(7), 7);
+  assert.equal(await value.alternateRuntime.seekAsync(7), 7);
   await flushAsyncWork();
   delayPageTwo = true;
   assert.equal(value.referenceRuntime.seek(1), 1);

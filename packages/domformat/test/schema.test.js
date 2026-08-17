@@ -287,6 +287,12 @@ test("validates bounded playback timelines selected by static-presentation profi
     ["duplicate id", (input) => { const rows = input.state.channels.find((channel) => channel.id === "playback").data.packet.profileTimelines; rows.push(copy(rows[0])); }, "INVALID_PLAYBACK_STATE"],
     ["unknown presentation id", (input) => { input.state.channels.find((channel) => channel.id === "playback").data.packet.profileTimelines[0].profileId = "phone"; }, "INVALID_PLAYBACK_STATE"],
     ["initial frame mismatch", (input) => { input.state.channels.find((channel) => channel.id === "playback").data.packet.profileTimelines[0].frames[0] = 2; }, "TIMELINE_LIMIT"],
+    ["excessive source-frame span", (input) => {
+      const playback = input.state.channels.find((channel) => channel.id === "playback").data.packet;
+      const parameters = input.bindings.channels.find((channel) => channel.interpreter === "polycss-playback@0").parameters;
+      parameters.frameCount = 20;
+      playback.profileTimelines[0].frames = [1, 10];
+    }, "TIMELINE_LIMIT"],
     ["presentation order mismatch", (input) => {
       input.state.channels.find((channel) => channel.id === "playback").data.packet.profileTimelines = [
         { profileId: "desktop", introTicks: 0, loopTicks: 2, frames: [1, 2] },

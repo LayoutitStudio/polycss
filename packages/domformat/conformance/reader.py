@@ -1435,6 +1435,12 @@ def validate_playback_contract(state_channel: dict, binding: dict,
         require(len(timeline_frames) == intro_ticks + loop_ticks and timeline_frames
                 and timeline_frames[0] == entry_frame,
                 "TIMELINE_LIMIT", f"{label} coverage is invalid")
+        def frame_distance(source: int, target: int) -> int:
+            return (target - source + frame_count) % frame_count
+        require(all(frame_distance(timeline_frames[index - 1], timeline_frames[index]) <= 8
+                    for index in range(1, len(timeline_frames)))
+                and frame_distance(timeline_frames[-1], timeline_frames[intro_ticks]) <= 8,
+                "TIMELINE_LIMIT", f"{label} advances too many source frames in one logical tick")
         if "deadlineMicros" in timeline:
             deadlines = integer_array(timeline["deadlineMicros"], limits["timeline_ticks"] + 1,
                                       "TIMELINE_LIMIT", f"{label} deadlines", 0)
@@ -1677,6 +1683,12 @@ def validate_paged_playback_contract(state_channel: dict, binding: dict,
                                "TIMELINE_LIMIT", f"{label} frames", 1, frame_count)
         require(len(frames) == intro + loop and frames and frames[0] == entry_frame,
                 "TIMELINE_LIMIT", f"{label} coverage is invalid")
+        def frame_distance(source: int, target: int) -> int:
+            return (target - source + frame_count) % frame_count
+        require(all(frame_distance(frames[index - 1], frames[index]) <= 8
+                    for index in range(1, len(frames)))
+                and frame_distance(frames[-1], frames[intro]) <= 8,
+                "TIMELINE_LIMIT", f"{label} advances too many source frames in one logical tick")
         if "deadlineMicros" in timeline:
             deadlines = integer_array(timeline["deadlineMicros"], limits["timeline_ticks"] + 1,
                                       "TIMELINE_LIMIT", f"{label} deadlines", 0)
@@ -2350,7 +2362,11 @@ def required_document_state_residency(packets: list[dict], pinned_frames: list[i
                 else [*pinned_frames, active_frame_pin]
             for packet in packets:
                 resources.update(desired_page_resources(packet, frame, pins))
-            required = max(required, len(resources))
+            published_transfer = sum(
+                1 for packet in packets
+                if any(page["resource"] not in resources for page in packet["pages"])
+            )
+            required = max(required, len(resources) + published_transfer)
     return required
 
 
@@ -2494,9 +2510,10 @@ def validate_compositor_timing_contract(state_channel: dict, binding: dict,
                         "INVALID_COMPOSITOR_TIMING_STATE", "Compositor keyframe is invalid")
                 previous = tick
             require(keyframes[0]["tick"] == 0 and keyframes[-1]["tick"] == duration
-                    and keyframes[0]["transformIndex"] == keyframes[-1]["transformIndex"]
-                    and all(row[2] == -1 for row in playback_packet["frameRows"]),
-                    "TARGET_OWNERSHIP_CONFLICT", "Compositor cycle is not closed or races playback")
+                    and keyframes[0]["transformIndex"] == keyframes[-1]["transformIndex"],
+                    "INVALID_COMPOSITOR_TIMING_STATE", "Compositor cycle is not exactly closed")
+            require(all(row[2] == -1 for row in playback_packet["frameRows"]),
+                    "TARGET_OWNERSHIP_CONFLICT", "Compositor cycle races playback")
             keyframe_count += len(keyframes)
         else:
             target = strict_keys(target, {"kind", "owner", "index", "durationTicks"},

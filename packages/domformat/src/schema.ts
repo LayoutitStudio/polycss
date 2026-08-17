@@ -1000,6 +1000,14 @@ interface PlaybackBank {
   readonly profileTimelines?: readonly PlaybackProfileTimeline[];
 }
 
+const MAX_TIMELINE_FRAME_SPAN = 8;
+
+function validateTimelineFrameSpans(frames: readonly number[], introTicks: number, frameCount: number, label: string): void {
+  const distance = (from: number, to: number): number => (to - from + frameCount) % frameCount;
+  invariant(frames.slice(1).every((frame, index) => distance(frames[index], frame) <= MAX_TIMELINE_FRAME_SPAN), "TIMELINE_LIMIT", `${label} advances too many source frames in one logical tick.`);
+  invariant(distance(frames.at(-1)!, frames[introTicks]) <= MAX_TIMELINE_FRAME_SPAN, "TIMELINE_LIMIT", `${label} loop seam advances too many source frames in one logical tick.`);
+}
+
 function samePlaybackTimeline(left: PlaybackTimeline, right: PlaybackTimeline, profile: boolean): boolean {
   const leftProfile = left as PlaybackProfileTimeline;
   const rightProfile = right as PlaybackProfileTimeline;
@@ -1105,6 +1113,7 @@ function validatePlaybackContract(
     invariant(Number.isSafeInteger(timeline.introTicks) && timeline.introTicks >= 0 && Number.isSafeInteger(timeline.loopTicks) && timeline.loopTicks > 0, "TIMELINE_LIMIT", `${label} ranges are invalid.`);
     const frames = integerArray(timeline.frames, limits.maxTimelineTicks, "TIMELINE_LIMIT", `${label} frames`, { minimum: 1, upper: parameters.frameCount });
     invariant(frames.length === timeline.introTicks + timeline.loopTicks && frames[0] === entryFrame, "TIMELINE_LIMIT", `${label} does not exactly cover its intro and loop or entry frame.`);
+    validateTimelineFrameSpans(frames, timeline.introTicks, parameters.frameCount, label);
     if (timeline.deadlineMicros !== undefined) {
       const deadlines = integerArray(timeline.deadlineMicros, limits.maxTimelineTicks + 1, "TIMELINE_LIMIT", `${label} deadlines`, { minimum: 0 });
       invariant(deadlines.length === frames.length + 1 && deadlines[0] === 0, "TIMELINE_LIMIT", `${label} deadlines do not exactly cover its ticks.`);
@@ -1318,6 +1327,7 @@ function validatePagedPlaybackContract(
     invariant(Number.isSafeInteger(timeline.introTicks) && timeline.introTicks >= 0 && Number.isSafeInteger(timeline.loopTicks) && timeline.loopTicks > 0, "TIMELINE_LIMIT", `${label} ranges are invalid.`);
     const frames = integerArray(timeline.frames, limits.maxTimelineTicks, "TIMELINE_LIMIT", `${label} frames`, { minimum: 1, upper: parameters.frameCount });
     invariant(frames.length === timeline.introTicks + timeline.loopTicks && frames[0] === entryFrame, "TIMELINE_LIMIT", `${label} does not exactly cover its intro and loop or entry frame.`);
+    validateTimelineFrameSpans(frames, timeline.introTicks, parameters.frameCount, label);
     if (timeline.deadlineMicros !== undefined) {
       const deadlines = integerArray(timeline.deadlineMicros, limits.maxTimelineTicks + 1, "TIMELINE_LIMIT", `${label} deadlines`, { minimum: 0 });
       invariant(deadlines.length === frames.length + 1 && deadlines[0] === 0, "TIMELINE_LIMIT", `${label} deadlines do not exactly cover its ticks.`);
@@ -1959,7 +1969,8 @@ function requiredDocumentStateResidency(
       const resources = new Set<string>();
       const pins = activeFramePin === undefined ? pinnedFrames : [...pinnedFrames, activeFramePin];
       for (const packet of packets) for (const resource of desiredPageResources(packet, frame, pins)) resources.add(resource);
-      required = Math.max(required, resources.size);
+      const publishedTransfer = packets.filter((packet) => packet.pages.some((page) => !resources.has(page.resource))).length;
+      required = Math.max(required, resources.size + publishedTransfer);
     }
   }
   return required;

@@ -210,16 +210,19 @@ viewer-owned surface; restores prior container children/focus attributes; and
 revokes every object URL. Keyboard listeners are application-container-local.
 
 Paged playback and variants share one generation, resident map, LRU order, and
-byte ceiling. Admission removes stale unprotected pages and reserves a slot
-before requesting decoded bytes. The ceiling includes resident materialized
+byte ceiling. Browser state pages must be supplied by the lazy resource loader,
+never the eager resource map. Admission evicts unprotected LRU pages only when
+capacity requires it and reserves a slot before requesting decoded bytes. The
+currently published page of every channel remains protected throughout a
+replacement transaction. The ceiling includes resident materialized
 columns, canonical live rows, and the fixed JSON validation peak: loader plus
 canonical bytes, four bounded UTF-16 representations, parsed/final reference
 slots, and direct typed destinations. Integer columns never become boxed
 number arrays; playback transforms are canonical `matrix3d(...)` strings with
 identity represented only by `null`. A failed unsuperseded transaction restores
 only prior resource ids under the same ceiling; it never retains evicted page
-objects. Supersession owns the surviving exact window and publishes nothing
-from the stale generation.
+objects. Supersession owns the surviving desired window, keeps the published
+frame resident, and publishes nothing from the stale generation.
 A mount follows the profile's strict `validate → construct → bind → initialize
 → publish → destroy` lifecycle. No live runtime is returned before publication.
 A failure in any phase rolls back every completed phase, restores the embedding

@@ -242,6 +242,8 @@ export function createPolycssPagedState(
       return current;
     });
     for (const pin of new Set([...fixedPins, activeFramePin])) for (const packet of packets) resources.add(pageAt(packet, pin).resource);
+    if (playback && currentPlayback) resources.add(pageAt(playback.packet, currentPlayback.frame).resource);
+    if (variants) resources.add(pageAt(variants.packet, variantFrame).resource);
     if (includeLookahead) for (let offset = 1; offset <= Math.max(...packets.map((packet) => packet.lookaheadPages)); offset += 1) {
       for (let index = 0; index < packets.length; index += 1) {
         const packet = packets[index];
@@ -285,7 +287,6 @@ export function createPolycssPagedState(
   const loadWindow = async (frame: number, signal?: AbortSignal, includeLookahead = true): Promise<void> => {
     const desired = desiredResources(frame, includeLookahead);
     const protectedResources = new Set(desired);
-    for (const resource of [...resident.keys()]) if (!protectedResources.has(resource)) resident.delete(resource);
     for (const resource of desired) await loadPage(resource, protectedResources, signal);
   };
   const startRequest = () => {

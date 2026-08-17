@@ -442,6 +442,8 @@ async function pagedStateProof(browser, url, label) {
       const frame8 = { frame: globalThis.domformatProof.sourceFrame, classes: [...leaf.classList] };
       await globalThis.domformatProof.seekAsync(4);
       const frame4 = { frame: globalThis.domformatProof.sourceFrame, classes: [...leaf.classList] };
+      await globalThis.domformatProof.seekAsync(5);
+      const frame5 = { frame: globalThis.domformatProof.sourceFrame, classes: [...leaf.classList] };
       await globalThis.domformatProof.seekAsync(8);
       const revisitedFrame8 = { frame: globalThis.domformatProof.sourceFrame, classes: [...leaf.classList] };
       await globalThis.domformatProof.seekAsync(1);
@@ -450,13 +452,14 @@ async function pagedStateProof(browser, url, label) {
         initial,
         frame8,
         frame4,
+        frame5,
         revisitedFrame8,
         revisitedFrame1: { frame: globalThis.domformatProof.sourceFrame, classes: [...leaf.classList] },
       };
     });
     const counts = Object.fromEntries([...new Set(requests)].map((name) => [name, requests.filter((candidate) => candidate === name).length]));
-    invariant(publication.sameNode && publication.initial.frame === 1 && publication.initial.classes.includes("material-a") && publication.frame8.frame === 8 && publication.frame8.classes.includes("material-b") && publication.frame4.frame === 4 && publication.frame4.classes.includes("material-b") && publication.revisitedFrame8.frame === 8 && publication.revisitedFrame8.classes.includes("material-b") && publication.revisitedFrame1.frame === 1 && publication.revisitedFrame1.classes.includes("material-a"), "BROWSER_RELEASE_PAGED_STATE", `${label} did not retain one target while publishing requested pages.`);
-    invariant(counts["variant-page-1.json"] === 1 && counts["variant-page-2.json"] === 1 && counts["variant-page-3.json"] === 1 && counts["variant-page-4.json"] === 1 && counts["variant-page-6.json"] === 2, "BROWSER_RELEASE_PAGED_STATE", `${label} request log does not prove bounded nonpinned eviction with a pinned playback-initial page (${JSON.stringify(counts)}).`);
+    invariant(publication.sameNode && publication.initial.frame === 1 && publication.initial.classes.includes("material-a") && publication.frame8.frame === 8 && publication.frame8.classes.includes("material-b") && publication.frame4.frame === 4 && publication.frame4.classes.includes("material-b") && publication.frame5.frame === 5 && publication.frame5.classes.includes("material-a") && publication.revisitedFrame8.frame === 8 && publication.revisitedFrame8.classes.includes("material-b") && publication.revisitedFrame1.frame === 1 && publication.revisitedFrame1.classes.includes("material-a"), "BROWSER_RELEASE_PAGED_STATE", `${label} did not retain one target while publishing requested pages.`);
+    invariant(counts["variant-page-1.json"] === 1 && counts["variant-page-2.json"] === 1 && counts["variant-page-3.json"] === 1 && counts["variant-page-4.json"] === 1 && counts["variant-page-5.json"] === 1 && counts["variant-page-6.json"] === 2, "BROWSER_RELEASE_PAGED_STATE", `${label} request log does not prove bounded nonpinned eviction with a pinned playback-initial page (${JSON.stringify(counts)}).`);
     return Object.freeze({ label, requests, counts, publication });
   });
 }
@@ -728,19 +731,23 @@ async function compositorTimingProof(browser, url, label, animate) {
     });
     const seek = await page.evaluate(() => {
       const model = document.querySelector(".scene");
+      const leaf = document.querySelector('[data-domformat-node="2"]');
       const animation = model.getAnimations()[0];
       const identity = model;
       globalThis.domformatProof.seek(4);
+      const inlineMatrix = new DOMMatrixReadOnly(leaf.style.transform).toFloat64Array();
+      const computedMatrix = new DOMMatrixReadOnly(getComputedStyle(leaf).transform).toFloat64Array();
       return {
         sameModel: document.querySelector(".scene") === identity,
         frame: globalThis.domformatProof.sourceFrame,
         playState: animation.playState,
         currentTime: Number(animation.currentTime),
-        leafTransition: document.querySelector('[data-domformat-node="2"]').style.transition,
+        leafTransition: leaf.style.transition,
+        snapDelta: Math.max(...inlineMatrix.map((value, index) => Math.abs(value - computedMatrix[index]))),
       };
     });
     const logicalTick = seek.currentTime / (1000 / 30);
-    invariant(beforeSeek.animationCount === 1 && seek.sameModel && seek.frame === 4 && Math.abs(logicalTick - Math.round(logicalTick)) < 0.01, "BROWSER_RELEASE_COMPOSITOR", `${label} did not snap retained WAAPI time to a prepared logical tick (${seek.currentTime}).`);
+    invariant(beforeSeek.animationCount === 1 && seek.sameModel && seek.frame === 4 && Math.abs(logicalTick - Math.round(logicalTick)) < 0.01 && seek.snapDelta < 1e-6, "BROWSER_RELEASE_COMPOSITOR", `${label} did not snap retained compositor state to the prepared logical tick (${JSON.stringify(seek)}).`);
     if (animate) {
       invariant(beforeSeek.frame !== initialFrame && seek.playState === "running" && seek.leafTransition !== "none", "BROWSER_RELEASE_COMPOSITOR", `${label} did not keep logical playback and compositor timing active.`);
     } else {
@@ -933,7 +940,7 @@ function cssGraphicsTimingProbe(contract) {
   if (contract.id === "3dpipes" || contract.id === "electropaint") return { stallMs: 50, expectedFrame: 2 };
   if (contract.id === "maze") return { stallMs: 60, expectedFrame: 2 };
   if (contract.id === "menger") return { stallMs: 80, expectedFrame: 3 };
-  if (contract.id === "solitaire") return { stallMs: 110, expectedFrame: 3 };
+  if (contract.id === "solitaire") return { stallMs: 140, expectedFrame: 3 };
   return { stallMs: 80, expectedFrame: 2 };
 }
 

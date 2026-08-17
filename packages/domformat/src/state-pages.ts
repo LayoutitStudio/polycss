@@ -381,18 +381,30 @@ async function yieldPlaybackPageValidation(signal?: AbortSignal): Promise<void> 
   invariant(!signal?.aborted, "OPERATION_ABORTED", "State-page validation was aborted.");
   const scheduler = globalThis as typeof globalThis & Readonly<{
     requestIdleCallback?: (callback: () => void, options?: Readonly<{ timeout: number }>) => number;
+    cancelIdleCallback?: (handle: number) => void;
   }>;
   await new Promise<void>((resolve) => {
     let resolved = false;
+    let cancelPending: (() => void) | undefined;
     const done = (): void => {
       if (resolved) return;
       resolved = true;
-      signal?.removeEventListener("abort", done);
+      cancelPending = undefined;
+      signal?.removeEventListener("abort", abort);
       resolve();
     };
-    signal?.addEventListener("abort", done, { once: true });
-    if (scheduler.requestIdleCallback) scheduler.requestIdleCallback(done, { timeout: 16 });
-    else setTimeout(done, 0);
+    const abort = (): void => {
+      cancelPending?.();
+      done();
+    };
+    signal?.addEventListener("abort", abort, { once: true });
+    if (scheduler.requestIdleCallback) {
+      const handle = scheduler.requestIdleCallback(done, { timeout: 16 });
+      cancelPending = () => scheduler.cancelIdleCallback?.(handle);
+    } else {
+      const handle = setTimeout(done, 0);
+      cancelPending = () => clearTimeout(handle);
+    }
   });
   invariant(!signal?.aborted, "OPERATION_ABORTED", "State-page validation was aborted.");
 }
