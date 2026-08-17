@@ -75,7 +75,7 @@ export const SHADOW_CLIP_SEAM_BLEED = 0.75;
  * so it never caps the per-edge member bleed. The pre-clip runs BEFORE the
  * per-member clips, so at the stored 0.5 px outline a crease sitting on the
  * group hull (91% of the castle's) kept only 0.5 px of its granted 0.75 px.
- * Applied ONLY where crease bleed is active, because the stored outline also
+ * Applied ONLY where a crease edge was actually bled, because the stored outline also
  * sizes the face plane's matrix and box — widening that unconditionally moves
  * emitted geometry on multi-light and textured receivers, which get no crease
  * bleed at all. The group hull is not the surface boundary (the member clips
@@ -112,14 +112,19 @@ export interface ReceiverFacePlane {
    *  of the same group (see `ReceiverPlaneGroup.memberSharedEdges`). Drives
    *  the member-clip seam bleed. */
   memberSharedEdges: Array<ReadonlySet<number> | undefined>;
-  /** Parallel to `memberPolysUv`: CCW edge indices whose neighbouring surface
-   *  is a member of a DIFFERENT (non-coplanar) face group — a CREASE. Those
-   *  two groups emit separate SVGs, so their antialiased clip edges abut at
-   *  the crease without summing to full coverage. Unioned with
-   *  `memberSharedEdges` at clip-expansion time so one pass bleeds both
-   *  classes. Filled by `prepareReceiverFacePlanes` after the occlusion cull;
-   *  edges already in `memberSharedEdges` are skipped (already bled). */
-  memberCreaseEdges: Array<ReadonlySet<number> | undefined>;
+  /** Parallel to `memberPolysUv`: CCW edge index → the normals of the
+   *  neighbouring surfaces that belong to a DIFFERENT (non-coplanar) face
+   *  group — a CREASE. Those two groups emit separate SVGs, so their
+   *  antialiased clip edges abut at the crease without summing to full
+   *  coverage. Unioned with `memberSharedEdges` at clip-expansion time so one
+   *  pass bleeds both classes. Filled by `prepareReceiverFacePlanes` after the
+   *  occlusion cull; edges already in `memberSharedEdges` are skipped
+   *  (already bled).
+   *
+   *  The neighbour normals are kept — not just the edge index — because the
+   *  bleed is only safe where the neighbour actually renders on the far side
+   *  of the crease. See `creaseBleedsIntoNeighbour`. */
+  memberCreaseEdges: Array<ReadonlyMap<number, Vec3[]> | undefined>;
   minU: number;
   minV: number;
   width: number;
@@ -586,15 +591,18 @@ function fillCrossGroupCreaseEdges(planes: ReceiverFacePlane[]): void {
   }
   if (refs.length < 2) return;
 
-  const marked: Array<Set<number> | undefined>[] = planes.map((p) =>
+  const marked: Array<Map<number, Vec3[]> | undefined>[] = planes.map((p) =>
     p.memberPolysUv.map(() => undefined),
   );
-  const mark = (r: Ref): void => {
+  const mark = (r: Ref, neighbourPlane: number): void => {
     if (r.pre) return;
     const perPlane = marked[r.plane]!;
-    let set = perPlane[r.member];
-    if (!set) { set = new Set(); perPlane[r.member] = set; }
-    set.add(r.edge);
+    let map = perPlane[r.member];
+    if (!map) { map = new Map(); perPlane[r.member] = map; }
+    const n = planes[neighbourPlane]!.n;
+    const existing = map.get(r.edge);
+    if (!existing) { map.set(r.edge, [n]); return; }
+    if (!existing.includes(n)) existing.push(n);
   };
   const isMarked = (r: Ref): boolean =>
     r.pre || !!marked[r.plane]![r.member]?.has(r.edge);
@@ -618,7 +626,11 @@ function fillCrossGroupCreaseEdges(planes: ReceiverFacePlane[]): void {
       if (list[i]!.plane !== list[0]!.plane) { crossPlane = true; break; }
     }
     if (!crossPlane) continue;
-    for (const r of list) mark(r);
+    for (const r of list) {
+      for (const other of list) {
+        if (other.plane !== r.plane) mark(r, other.plane);
+      }
+    }
   }
 
   // Collinear-overlap pass for crease T-JUNCTIONS: a member edge lying along
@@ -670,8 +682,8 @@ function fillCrossGroupCreaseEdges(planes: ReceiverFacePlane[]): void {
     if (isMarked(A) && isMarked(B)) return;
     if (!spatialEdgeBoundsOverlap(A, B)) return;
     if (!spatialEdgesShareLine(A, B)) return;
-    mark(A);
-    mark(B);
+    mark(A, B.plane);
+    mark(B, A.plane);
   };
   // Only edges the exact pass left UNMATCHED need querying: a pair whose two
   // edges are both already marked is skipped by `test`, and every pair with an
@@ -1112,24 +1124,26 @@ export function computeReceiverShadowFaces<T = unknown>(
     // into the same expansion when `applyCreaseBleed` holds. Those two groups
     // are separate SVGs, so their expanded clips OVERLAP rather than landing in
     // one nonzero path — safe only because the caller then paints the
-    // pre-blended color opaque (idempotent under overlap). True boundary /
-    // silhouette edges (no neighbour at all) are never in either set, so the
-    // shadow can never be pushed off the model's outline.
+    // pre-blended color opaque (idempotent under overlap).
+    //
+    // A crease is bled only when the neighbour across it FACES THE CAMERA. The
+    // expansion runs outward in the expanding face's OWN plane, so it lands on
+    // the neighbour only while the neighbour is drawn on the far side of the
+    // crease; at a crease that lies on the camera silhouette (neighbour
+    // back-facing) the same expansion hangs in free space past the model's
+    // outline. On a closed mesh EVERY edge has a neighbour, so "has a
+    // neighbour" alone does not imply "not a silhouette edge" — measured as a
+    // 0.5 CSS px dark fringe outside the outline on a cube at every camera
+    // angle once the solid leaves' own `seamBleed` overscan was removed. A
+    // silhouette crease also has no abutting SVG to seam against, so skipping
+    // it costs nothing.
     const applyCreaseBleed = creaseBleed === true && preblendEligible;
-    // Widen the PRE-CLIP copy of the group hull so it cannot cap a bled member
-    // edge (see CLIP_OUTLINE_EXTRA). Only on the crease-bleed path: everywhere
-    // else the stored outline must be used verbatim or multi-light and textured
-    // receivers would shift. The stored `outlineUv` — and therefore the face
-    // plane's box and matrix — is never touched either way.
-    const clipOutlineUv = applyCreaseBleed && CLIP_OUTLINE_EXTRA > 0
-      ? expandConvexHullOutward(outlineUv, CLIP_OUTLINE_EXTRA)
-      : outlineUv;
-    const clipPad = clipOutlineUv === outlineUv ? 0 : CLIP_OUTLINE_EXTRA;
-    // Projection prefilter bounds. Padded with the clip widening so a caster
-    // whose footprint only reaches into the bled margin is not rejected here.
-    const fMinU = minU - clipPad, fMinV = minV - clipPad;
-    const fMaxU = group.minU + width + clipPad;
-    const fMaxV = group.minV + height + clipPad;
+    const creaseBleedsIntoNeighbour = (normals: Vec3[] | undefined): boolean => {
+      if (!normals) return false;
+      for (const nn of normals) if (normalFacesCamera(nn, cameraOnlyRot)) return true;
+      return false;
+    };
+    let anyCreaseBled = false;
     const memberClipsUv: Array<Array<[number, number]>> = group.memberPolysUv.map(
       (memberPoly, mi) => {
         const ccw = ensureCcw2D(memberPoly);
@@ -1140,16 +1154,20 @@ export function computeReceiverShadowFaces<T = unknown>(
         if ((sharedCount === 0 && creaseCount === 0) || ccw.length < 3) return ccw;
         const flat: number[] = [];
         for (const p of ccw) flat.push(p[0], p[1]);
-        const amounts = ccw.map((_, e) =>
-          shared?.has(e) || crease?.has(e)
-            ? safePlanSeamBleedAmount(flat, e, SHADOW_CLIP_SEAM_BLEED)
-            : 0,
-        );
+        let bledCrease = false;
+        const amounts = ccw.map((_, e) => {
+          const isCrease = creaseBleedsIntoNeighbour(crease?.get(e));
+          if (!shared?.has(e) && !isCrease) return 0;
+          const amount = safePlanSeamBleedAmount(flat, e, SHADOW_CLIP_SEAM_BLEED);
+          if (amount > 0 && isCrease) bledCrease = true;
+          return amount;
+        });
         let any = false;
         for (const a of amounts) if (a > 0) { any = true; break; }
         if (!any) return ccw;
         const expanded = offsetConvexPolygonPointsByEdgeAmounts(flat, amounts);
         if (expanded === flat || expanded.length !== flat.length) return ccw;
+        if (bledCrease) anyCreaseBled = true;
         const out2: Array<[number, number]> = [];
         for (let i = 0; i < expanded.length; i += 2) {
           out2.push([expanded[i]!, expanded[i + 1]!]);
@@ -1157,6 +1175,21 @@ export function computeReceiverShadowFaces<T = unknown>(
         return out2;
       },
     );
+    // Widen the PRE-CLIP copy of the group hull so it cannot cap a bled member
+    // edge (see CLIP_OUTLINE_EXTRA). Only where a crease edge was actually
+    // bled: everywhere else the stored outline must be used verbatim or
+    // multi-light and textured receivers would shift. Within-group shared edges
+    // are interior to the hull and never need it. The stored `outlineUv` — and
+    // therefore the face plane's box and matrix — is never touched either way.
+    const clipOutlineUv = anyCreaseBled && CLIP_OUTLINE_EXTRA > 0
+      ? expandConvexHullOutward(outlineUv, CLIP_OUTLINE_EXTRA)
+      : outlineUv;
+    const clipPad = clipOutlineUv === outlineUv ? 0 : CLIP_OUTLINE_EXTRA;
+    // Projection prefilter bounds. Padded with the clip widening so a caster
+    // whose footprint only reaches into the bled margin is not rejected here.
+    const fMinU = minU - clipPad, fMinV = minV - clipPad;
+    const fMaxU = group.minU + width + clipPad;
+    const fMaxV = group.minV + height + clipPad;
     for (let casterIdx = 0; casterIdx < casters.length; casterIdx++) {
       const casterEntry = casters[casterIdx]!;
       const sharedEdgeMap = casterEntry.selfShadowEdgeMap;

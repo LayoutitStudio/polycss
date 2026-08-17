@@ -353,3 +353,111 @@ describe("crease detection survives a non-planar member quad", () => {
     expect(grew).toBeGreaterThan(0);
   });
 });
+
+// ─── Convex corner: the crease bleed must respect the camera silhouette ──
+//
+// The L above is a CONCAVE corner: expanding the floor's clip past the crease
+// runs into the wall, so the overshoot is always covered. A CONVEX corner (the
+// outside edge of a box) folds the two faces AWAY from each other, so the same
+// expansion leaves the solid entirely wherever the neighbour is not drawn on
+// the far side of the crease.
+//
+// Both faces camera-facing → the expansion lands on the neighbour (the seam it
+// exists to close). Neighbour back-facing → the crease IS the camera
+// silhouette, the neighbour emits no SVG to seam against, and the expansion
+// would paint outside the model's outline. Measured headlessly on a cube
+// (bench/crease-wing.html): before this gate, ~0.5 CSS px of opaque shadow sat
+// outside the silhouette at every one of 8 camera angles once the solid leaves'
+// own `seamBleed` overscan stopped covering it.
+describe("convex crease vs camera silhouette", () => {
+  // Top face at z = 0 and a side face hanging DOWN from its y = 2 edge: the
+  // two normals (+z, +y) point away from each other — a convex 90° corner.
+  const top: Polygon = {
+    vertices: [[-2, -2, 0], [2, -2, 0], [2, 2, 0], [-2, 2, 0]],
+    color: "#888888",
+  };
+  const side: Polygon = {
+    vertices: [[2, 2, -3], [-2, 2, -3], [-2, 2, 0], [2, 2, 0]],
+    color: "#888888",
+  };
+  const convexPolys = [top, side];
+  // Light tilted toward +y so BOTH faces are lit.
+  const convexWorldLight: Vec3 = [0, 0.5, 0.87];
+  const convexCssLight: Vec3 = [convexWorldLight[1], convexWorldLight[0], convexWorldLight[2]];
+  // Slab above the top face; its shadow band reaches the y = 2 crease.
+  const convexCaster: Polygon = {
+    vertices: [[-1, 1, 1], [-1, 3, 1], [1, 3, 1], [1, 1, 1]],
+    color: "#00ff00",
+  };
+
+  function convexAreas(
+    cam: { rotX: number; rotY: number },
+    creaseBleed: boolean,
+  ): Map<number, number> {
+    const receiverPlanes = prepareReceiverFacePlanes(
+      convexPolys, [0, 0, 0], 1, new Set(), 0.05, null,
+    );
+    const items = prepareCasterPolyItems([convexCaster], [0, 0, 0], 1, () => true, null);
+    const specs = computeReceiverShadowFaces({
+      receiverPlanes,
+      receiverPolygons: convexPolys,
+      receiverHasTexture: false,
+      casters: [{ id: "c", items, casterPolygonCount: 1 }],
+      lightDir: convexCssLight,
+      cameraRot: cam,
+      ambientLight,
+      directionalLight: { direction: convexWorldLight, intensity: 1 },
+      shadow: { opacity: 0.25 },
+      creaseBleed,
+    });
+    const out = new Map<number, number>();
+    for (const spec of specs) {
+      out.set(spec.faceIndex, spec.facePolysUv.reduce((t, p) => t + polygonArea(p), 0));
+    }
+    return out;
+  }
+
+  // Camera azimuths are picked by what they can SEE, asserted below through the
+  // emitted spec count, so the test does not depend on the rotation convention.
+  const BOTH_VISIBLE = { rotX: 55, rotY: 20 };
+  const SIDE_HIDDEN = { rotX: 55, rotY: 200 };
+
+  it("still marks the convex crease on both members", () => {
+    const planes = prepareReceiverFacePlanes(
+      convexPolys, [0, 0, 0], 1, new Set(), 0.05, null,
+    );
+    expect(planes.length).toBe(2);
+    for (const plane of planes) {
+      const crease = plane.memberCreaseEdges[0];
+      expect(crease?.size).toBe(1);
+      // The neighbour's normal is kept alongside the edge — that is what the
+      // camera-silhouette gate reads.
+      const normals = [...crease!.values()][0]!;
+      expect(normals.length).toBe(1);
+      expect(Math.hypot(...normals[0]!)).toBeCloseTo(1, 6);
+    }
+  });
+
+  it("bleeds the convex crease while the neighbour faces the camera", () => {
+    const off = convexAreas(BOTH_VISIBLE, false);
+    const on = convexAreas(BOTH_VISIBLE, true);
+    expect(off.size).toBe(2); // precondition: both faces are drawn
+    let grew = 0;
+    for (const [faceIndex, offArea] of off) {
+      if ((on.get(faceIndex) ?? 0) > offArea + 1e-6) grew++;
+    }
+    expect(grew).toBeGreaterThan(0);
+  });
+
+  it("does not bleed a convex crease that is the camera silhouette", () => {
+    const off = convexAreas(SIDE_HIDDEN, false);
+    const on = convexAreas(SIDE_HIDDEN, true);
+    // Precondition: only the top face is drawn, so its y = 2 crease is the
+    // silhouette — there is no neighbouring SVG to seam against.
+    expect(off.size).toBe(1);
+    expect([...on.keys()]).toEqual([...off.keys()]);
+    for (const [faceIndex, offArea] of off) {
+      expect(on.get(faceIndex)).toBeCloseTo(offArea, 9);
+    }
+  });
+});
