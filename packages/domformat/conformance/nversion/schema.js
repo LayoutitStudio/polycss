@@ -14,46 +14,78 @@ const ATTRIBUTES = new Set(["alt", "aria-hidden", "class", "decoding", "draggabl
 const NODE_STYLES = new Set(`backgroundColor backgroundPosition backgroundPositionY backgroundRepeat backgroundSize borderBottomLeftRadius borderBottomRightRadius borderShape borderTopLeftRadius borderTopRightRadius color cornerBottomLeftShape cornerBottomRightShape cornerTopLeftShape cornerTopRightShape height left objectFit objectPosition opacity perspective perspectiveOrigin position top transform transformOrigin transformStyle visibility width`.split(" "));
 const MOUNT_STYLES = new Set(["backgroundColor", "backgroundPosition", "backgroundRepeat", "backgroundSize", "position"]);
 const INLINE_FUNCTIONS = new Set(`abs acos asin atan atan2 calc clamp color color-mix cos exp hsl hsla hwb hypot lab lch linear-gradient log matrix matrix3d max min mod oklab oklch polygon pow radial-gradient rem rgb rgba rotate rotate3d rotatex rotatey rotatez round scale scale3d scalex scaley scalez sign sin skew skewx skewy sqrt tan translate translate3d translatex translatey translatez`.split(" "));
-const VIEWER_ATTRIBUTES = new Set(["data-domformat-instance", "data-domformat-mount-surface"]);
+const VIEWER_ATTRIBUTES = new Set(["data-domformat-instance", "data-domformat-mount-surface", "data-domformat-node"]);
+const VARIANT_EFFECT_PROPERTIES = Object.freeze({
+  backgroundColor: "style.backgroundColor",
+  backgroundPositionX: "style.backgroundPositionX",
+  color: "style.color",
+  display: "style.display",
+  outlineColor: "style.outlineColor",
+});
 const CODECS = new Map([
+  ["polycss-compositor-timing@0", "polycss-compositor-timing-prepared@0"],
   ["polycss-effects@0", "polycss-effects-prepared@0"],
+  ["polycss-orbit-input@0", "polycss-orbit-input-prepared@0"],
+  ["polycss-paged-playback@0", "polycss-paged-playback@0"],
+  ["polycss-paged-variants@0", "polycss-paged-variants@0"],
   ["polycss-playback@0", "polycss-playback-packed@0"],
   ["polycss-pointer-grab@0", "polycss-pointer-grab-prepared@0"],
   ["polycss-surface@0", "polycss-surface-packed@0"],
   ["polycss-variants@0", "polycss-variants-packed@0"],
+  ["polycss-viewport-profiles@0", "polycss-viewport-profiles-packed@0"],
   ["static-presentation@0", "static-presentation@0"],
 ]);
 const INPUTS = Object.freeze({
+  "polycss-compositor-timing@0": ["time.source-frame", "time.tick"],
   "polycss-effects@0": ["interaction.grab-active", "interaction.grab-x", "interaction.grab-y", "interaction.grab-z", "time.source-frame"],
+  "polycss-orbit-input@0": ["orbit.pitch", "orbit.yaw", "orbit.zoom"],
+  "polycss-paged-playback@0": ["time.tick"],
+  "polycss-paged-variants@0": ["time.source-frame"],
   "polycss-playback@0": ["time.tick"],
   "polycss-pointer-grab@0": ["axis.x", "axis.y", "button.hold", "pointer.positioned", "pointer.pressed", "pointer.x", "pointer.y"],
   "polycss-surface@0": ["time.source-frame"],
   "polycss-variants@0": ["time.source-frame"],
+  "polycss-viewport-profiles@0": ["viewport.height", "viewport.width"],
   "static-presentation@0": ["viewport.height", "viewport.width"],
 });
 const SINKS = Object.freeze({
+  "polycss-compositor-timing@0": ["style.transform"],
   "polycss-effects@0": ["style.backgroundPosition", "style.opacity", "style.transform", "style.visibility"],
+  "polycss-orbit-input@0": ["style.backgroundPosition", "style.transform"],
+  "polycss-paged-playback@0": ["style.transform", "style.visibility"],
+  "polycss-paged-variants@0": null,
   "polycss-playback@0": ["style.transform", "style.visibility"],
   "polycss-pointer-grab@0": ["style.transform", "style.visibility"],
   "polycss-surface@0": null,
-  "polycss-variants@0": ["class.prepared"],
+  "polycss-variants@0": null,
+  "polycss-viewport-profiles@0": ["style.transform", "style.visibility"],
   "static-presentation@0": null,
 });
 const BASE_CAPABILITIES = ["css-semantic-closure", "deterministic-json", "explicit-retained-tree", "logical-assets"];
 const CAPABILITY_ORDER = [
   ["polycss-effects@0", "prepared-particle-effects"],
+  ["polycss-compositor-timing@0", "prepared-compositor-timing"],
+  ["polycss-orbit-input@0", "prepared-orbit-input"],
+  ["polycss-paged-playback@0", "prepared-playback"],
+  ["polycss-paged-variants@0", "prepared-variants"],
   ["polycss-pointer-grab@0", "prepared-pointer-grab-interaction"],
   ["polycss-playback@0", "prepared-playback"],
   ["polycss-surface@0", "prepared-surface-lighting"],
   ["polycss-variants@0", "prepared-variants"],
+  ["polycss-viewport-profiles@0", "prepared-viewport-profiles"],
 ];
 const CONFORMANCE_ORDER = [
   ["polycss-effects@0", "particle-effects"],
+  ["polycss-compositor-timing@0", "compositor-timing"],
+  ["polycss-orbit-input@0", "orbit-input"],
+  ["polycss-paged-variants@0", "paged-variants"],
+  ["polycss-paged-playback@0", "paged-playback"],
   ["polycss-playback@0", "playback"],
   ["polycss-pointer-grab@0", "pointer-grab-interaction"],
   ["static-presentation@0", "presentation"],
   ["polycss-surface@0", "surface-lighting"],
   ["polycss-variants@0", "variants"],
+  ["polycss-viewport-profiles@0", "viewport-profiles"],
 ];
 
 function exactObject(value, allowed, code, label, required = allowed) {
@@ -88,6 +120,31 @@ function finiteF32(value) {
 function finiteF32Array(value, length, code, label) {
   require(Array.isArray(value) && value.length === length && value.every(finiteF32), code, `${label} must contain ${length} finite binary32 values.`);
   return value;
+}
+
+function gcd(left, right) {
+  let a = left;
+  let b = right;
+  while (b !== 0) [a, b] = [b, a % b];
+  return a;
+}
+
+function validateTickCadence(parameters, code, label) {
+  const hasRate = Object.hasOwn(parameters, "tickRateHz");
+  const hasInterval = Object.hasOwn(parameters, "tickIntervalUs");
+  require(hasRate !== hasInterval, code, `${label} must declare exactly one cadence.`);
+  if (hasRate) {
+    require(typeof parameters.tickRateHz === "number" && Number.isFinite(parameters.tickRateHz) && parameters.tickRateHz >= 1 && parameters.tickRateHz <= 240, code, `${label} tickRateHz is invalid.`);
+    return;
+  }
+  const interval = parameters.tickIntervalUs;
+  require(Array.isArray(interval) && interval.length === 2 && interval.every((value) => Number.isSafeInteger(value) && value > 0), code, `${label} tickIntervalUs is invalid.`);
+  require(interval[0] / interval[1] >= 1_000_000 / 240 && interval[0] / interval[1] <= 1_000_000 && gcd(interval[0], interval[1]) === 1, code, `${label} tickIntervalUs is invalid or noncanonical.`);
+}
+
+function sameTickCadence(left, right) {
+  if (Object.hasOwn(left, "tickRateHz") || Object.hasOwn(right, "tickRateHz")) return left.tickRateHz === right.tickRateHz;
+  return left.tickIntervalUs?.[0] === right.tickIntervalUs?.[0] && left.tickIntervalUs?.[1] === right.tickIntervalUs?.[1];
 }
 
 function multiplyF32Matrices(left, right) {
@@ -247,6 +304,14 @@ function base64Integers(value, width, maximum, code, label) {
   });
 }
 
+function base64Float64(value, maximum, code, label) {
+  const bytes = base64Integers(value, 1, maximum * 8, code, label);
+  require(bytes.length % 8 === 0 && bytes.length / 8 <= maximum, code, `${label} is truncated or excessive.`);
+  const input = Uint8Array.from(bytes);
+  const view = new DataView(input.buffer);
+  return Array.from({ length: bytes.length / 8 }, (_, index) => view.getFloat64(index * 8, true));
+}
+
 function cumulativeReferences(deltas, count, code, label) {
   integerArray(deltas, count, code, label);
   require(deltas.length === count, code, `${label} cardinality differs from its declaration.`);
@@ -271,6 +336,7 @@ function stableId(value, label) {
 
 function safeStyle(value, label) {
   require(typeof value === "string" && value.length <= 4096, "INVALID_STYLE_VALUE", `${label} is not a bounded string.`);
+  require(!/[\u0000-\u0008\u000b\u000e-\u001f\u007f]/u.test(value), "INVALID_STYLE_VALUE", `${label} contains a forbidden control character.`);
   const lower = value.toLowerCase();
   require(!/[\\;{}]/u.test(value) && !value.includes("/*") && !value.includes("*/") && !value.includes("--") && !lower.includes("url(") && !lower.includes("javascript:") && !lower.includes("expression(") && !lower.includes("@import") && !lower.includes("!important"), "UNSAFE_STYLE_VALUE", `${label} contains unsafe CSS.`);
   let quote = "";
@@ -316,14 +382,14 @@ function resourceStyles(value, records, label) {
 }
 
 function validateMeta(meta) {
-  exactObject(meta, ["format", "profile", "title", "generator", "capabilities", "optionalCapabilities", "initialExperience", "conformance", "counts", "sourceArtifact"], "INVALID_META", "META", ["format", "profile", "title", "generator", "capabilities", "conformance"]);
+  exactObject(meta, ["format", "profile", "title", "generator", "capabilities", "optionalCapabilities", "initialExperience", "conformance", "counts", "artifacts", "claims"], "INVALID_META", "META", ["format", "profile", "title", "generator", "capabilities", "conformance"]);
   require(meta.format === "domformat@0", "UNSUPPORTED_FORMAT", "META format is unsupported.");
   require(meta.profile === "polycss-3d@0", "UNSUPPORTED_PROFILE", "META profile is unsupported.");
   require(typeof meta.title === "string" && [...meta.title].length > 0 && [...meta.title].length <= 256, "INVALID_TITLE", "META title is invalid.");
   exactObject(meta.generator, ["name", "version"], "INVALID_META", "META generator");
   require(typeof meta.generator.name === "string" && GENERATOR_NAME.test(meta.generator.name) && typeof meta.generator.version === "string" && GENERATOR_VERSION.test(meta.generator.version), "INVALID_META", "META generator identity is invalid.");
   uniqueArray(meta.capabilities, 128, "INVALID_META", "META capabilities", (value) => typeof value === "string" && SHORT_TOKEN.test(value));
-  for (const capability of meta.capabilities) require([...BASE_CAPABILITIES, ...CAPABILITY_ORDER.map(([, value]) => value)].includes(capability), "UNSUPPORTED_REQUIRED_CAPABILITY", `Required capability ${capability} is unknown.`);
+  for (const capability of meta.capabilities) require([...BASE_CAPABILITIES, "prepared-paged-state", ...CAPABILITY_ORDER.map(([, value]) => value)].includes(capability), "UNSUPPORTED_REQUIRED_CAPABILITY", `Required capability ${capability} is unknown.`);
   if (meta.optionalCapabilities !== undefined) {
     uniqueArray(meta.optionalCapabilities, 128, "INVALID_META", "META optional capabilities", (value) => typeof value === "string" && SHORT_TOKEN.test(value));
     require(meta.optionalCapabilities.every((value, index) => !meta.capabilities.includes(value) && (index === 0 || meta.optionalCapabilities[index - 1] < value)), "INVALID_META", "META optional capabilities overlap or are unsorted.");
@@ -337,11 +403,38 @@ function validateMeta(meta) {
     exactObject(meta.counts, ["nodes", "shapes", "leaves", "sourceFrames"], "INVALID_META", "META counts", []);
     require(Object.values(meta.counts).every((value) => Number.isSafeInteger(value) && value >= 0), "INVALID_META", "META counts are invalid.");
   }
-  if (meta.sourceArtifact !== undefined) {
-    exactObject(meta.sourceArtifact, ["byteLength", "decodedByteLength", "digest", "status"], "INVALID_META", "META source artifact");
-    require(Number.isSafeInteger(meta.sourceArtifact.byteLength) && meta.sourceArtifact.byteLength >= 0 && Number.isSafeInteger(meta.sourceArtifact.decodedByteLength) && meta.sourceArtifact.decodedByteLength >= 0 && typeof meta.sourceArtifact.status === "string" && /^[a-z0-9][a-z0-9-]*$/u.test(meta.sourceArtifact.status), "INVALID_META", "META source artifact is invalid.");
-    exactObject(meta.sourceArtifact.digest, ["algorithm", "value"], "INVALID_META", "META source digest");
-    require(meta.sourceArtifact.digest.algorithm === "sha256" && SHA256.test(meta.sourceArtifact.digest.value), "INVALID_META", "META source digest is invalid.");
+  const artifactIds = new Set();
+  if (meta.artifacts !== undefined) {
+    require(Array.isArray(meta.artifacts) && meta.artifacts.length > 0 && meta.artifacts.length <= 64, "INVALID_META", "META artifacts are invalid.");
+    let previous = "";
+    for (const [index, artifact] of meta.artifacts.entries()) {
+      exactObject(artifact, ["id", "role", "byteLength", "decodedByteLength", "digest"], "INVALID_META", `META artifact ${index}`);
+      require(typeof artifact.id === "string" && SHORT_TOKEN.test(artifact.id) && artifact.id > previous, "INVALID_META", "META artifacts are not canonically ordered.");
+      previous = artifact.id;
+      artifactIds.add(artifact.id);
+      require(typeof artifact.role === "string" && SHORT_TOKEN.test(artifact.role), "INVALID_META", `META artifact ${artifact.id} role is invalid.`);
+      require(Number.isSafeInteger(artifact.byteLength) && artifact.byteLength >= 0 && Number.isSafeInteger(artifact.decodedByteLength) && artifact.decodedByteLength >= 0, "INVALID_META", `META artifact ${artifact.id} sizes are invalid.`);
+      exactObject(artifact.digest, ["algorithm", "value"], "INVALID_META", `META artifact ${artifact.id} digest`);
+      require(artifact.digest.algorithm === "sha256" && SHA256.test(artifact.digest.value), "INVALID_META", `META artifact ${artifact.id} digest is invalid.`);
+    }
+  }
+  if (meta.claims !== undefined) {
+    require(Array.isArray(meta.claims) && meta.claims.length > 0 && meta.claims.length <= 128 && artifactIds.size > 0, "INVALID_META", "META claims are invalid.");
+    const kinds = new Set(["license", "locator", "qualification", "redistribution", "revision"]);
+    let previous = "";
+    for (const [index, claim] of meta.claims.entries()) {
+      exactObject(claim, ["artifact", "kind", "value"], "INVALID_META", `META claim ${index}`);
+      const key = `${claim.artifact}\0${claim.kind}`;
+      require(artifactIds.has(claim.artifact) && kinds.has(claim.kind) && key > previous, "INVALID_META", "META claims are not canonically ordered.");
+      previous = key;
+      require(typeof claim.value === "string" && [...claim.value].length > 0 && [...claim.value].length <= 512 && !/[\u0000-\u001f\u007f]/u.test(claim.value), "INVALID_META", "META claim value is invalid.");
+      require(!/^(?:\/|\\|[A-Za-z]:[\\/]|file:)/u.test(claim.value) && !/(?:\/Users\/|\/home\/|\\Users\\)/u.test(claim.value), "META_LOCAL_PATH", "META claim leaks a local path.");
+      if (claim.kind === "locator") {
+        let locator;
+        try { locator = new URL(claim.value); } catch { require(false, "INVALID_META", "META locator is not an absolute URL."); }
+        require(locator.protocol === "https:" && !locator.username && !locator.password && !locator.hash, "INVALID_META", "META locator is unsafe.");
+      }
+    }
   }
 }
 
@@ -497,6 +590,60 @@ function validateStateAndBindings(state, bindings, nodeIds, limits) {
   return { states, channels, inputs, interpreters };
 }
 
+function samePlaybackTimeline(left, right, profile = false) {
+  return (!profile || left.profileId === right.profileId)
+    && left.introTicks === right.introTicks
+    && left.loopTicks === right.loopTicks
+    && exactEqualArray(left.frames, right.frames)
+    && ((left.deadlineMicros === undefined && right.deadlineMicros === undefined)
+      || (left.deadlineMicros !== undefined && right.deadlineMicros !== undefined && exactEqualArray(left.deadlineMicros, right.deadlineMicros)));
+}
+
+function validatePlaybackBanks(packet, initial, parameters, validateTimeline, timeline, timelineTickCount, limits, code, label) {
+  const hasInitialBankId = Object.hasOwn(packet, "initialBankId");
+  const hasBanks = Object.hasOwn(packet, "banks");
+  require(hasInitialBankId === hasBanks, code, `${label} initialBankId and banks must be declared together.`);
+  if (!hasBanks) return timelineTickCount;
+  const initialBankId = stableId(packet.initialBankId, `${label} initial bank id`);
+  require(Array.isArray(packet.banks) && packet.banks.length > 0 && packet.banks.length <= 64, code, `${label} banks are missing or excessive.`);
+  const bankIds = new Set();
+  const entryFrames = new Set();
+  let previousBankId = "";
+  let initialBank;
+  for (const [bankIndex, value] of packet.banks.entries()) {
+    const bank = exactObject(value, ["id", "entryFrame", "timeline", "profileTimelines"], code, `${label} bank ${bankIndex}`, ["id", "entryFrame", "timeline"]);
+    const id = stableId(bank.id, `${label} bank ${bankIndex} id`);
+    require(id > previousBankId, code, `${label} banks must be ordered by id without duplicates.`);
+    previousBankId = id;
+    bankIds.add(id);
+    require(Number.isSafeInteger(bank.entryFrame) && bank.entryFrame >= 1 && bank.entryFrame <= parameters.frameCount && !entryFrames.has(bank.entryFrame), code, `${label} bank ${id} entry frame is invalid or duplicated.`);
+    entryFrames.add(bank.entryFrame);
+    const bankTimeline = validateTimeline(bank.timeline, `${label} bank ${id} timeline`, false, bank.entryFrame);
+    timelineTickCount += bankTimeline.frames.length;
+    let bankProfiles;
+    if (bank.profileTimelines !== undefined) {
+      require(Array.isArray(bank.profileTimelines) && bank.profileTimelines.length > 0 && bank.profileTimelines.length <= 16, code, `${label} bank ${id} profile timelines are missing or excessive.`);
+      bankProfiles = [];
+      const profileIds = new Set();
+      for (const [profileIndex, value] of bank.profileTimelines.entries()) {
+        const profileTimeline = validateTimeline(value, `${label} bank ${id} profile timeline ${profileIndex}`, true, bank.entryFrame);
+        require(!profileIds.has(profileTimeline.profileId), code, `${label} bank ${id} profile timeline id ${profileTimeline.profileId} is duplicated.`);
+        profileIds.add(profileTimeline.profileId);
+        bankProfiles.push(profileTimeline);
+        timelineTickCount += profileTimeline.frames.length;
+      }
+    }
+    require(timelineTickCount <= limits.maxTimelineTicks, "TIMELINE_LIMIT", `${label} bank timelines exceed the aggregate tick limit.`);
+    if (id === initialBankId) initialBank = { ...bank, timeline: bankTimeline, ...(bankProfiles === undefined ? {} : { profileTimelines: bankProfiles }) };
+  }
+  require(bankIds.has(initialBankId) && initialBank?.entryFrame === initial.sourceFrame, code, `${label} initial bank is missing or does not own the canonical initial frame.`);
+  require(samePlaybackTimeline(initialBank.timeline, timeline), code, `${label} initial bank timeline does not match the canonical top-level timeline.`);
+  const topProfiles = packet.profileTimelines ?? [];
+  const initialProfiles = initialBank.profileTimelines ?? [];
+  require(initialProfiles.length === topProfiles.length && initialProfiles.every((profile, index) => samePlaybackTimeline(profile, topProfiles[index], true)), code, `${label} initial bank profile timelines do not match the canonical top-level profile timelines.`);
+  return timelineTickCount;
+}
+
 function validatePlayback(state, binding, inputs, limits) {
   const tick = inputs.get("time.tick");
   require(tick?.type === "uint" && !Object.hasOwn(tick, "default"), "INVALID_PLAYBACK_BINDING", "Playback time.tick must be an un-defaulted uint.");
@@ -504,13 +651,16 @@ function validatePlayback(state, binding, inputs, limits) {
   stableId(targets.model, "Playback model target");
   uniqueTargets(targets.shapes, "Playback shape");
   uniqueTargets(targets.leaves, "Playback leaf");
-  const parameters = exactObject(binding.parameters, ["frameCount", "baseSceneTransform", "tickRateHz"], "INVALID_PLAYBACK_BINDING", "Playback parameters");
+  const parameterFields = ["frameCount", "baseSceneTransform", "tickRateHz", "tickIntervalUs", "catchUpPolicy"];
+  const parameters = exactObject(binding.parameters, parameterFields, "INVALID_PLAYBACK_BINDING", "Playback parameters", ["frameCount", "baseSceneTransform"]);
   require(Number.isSafeInteger(parameters.frameCount) && parameters.frameCount > 0 && parameters.frameCount <= limits.maxFrames, "FRAME_CARDINALITY_MISMATCH", "Playback frameCount is invalid or excessive.");
-  require(parameters.tickRateHz === 30, "INVALID_PLAYBACK_BINDING", "Playback tickRateHz must be 30.");
+  validateTickCadence(parameters, "INVALID_PLAYBACK_BINDING", "Playback");
+  require(parameters.catchUpPolicy === undefined || ["bounded", "single-step", "elapsed"].includes(parameters.catchUpPolicy), "INVALID_PLAYBACK_BINDING", "Playback catchUpPolicy is invalid.");
   safeStyle(parameters.baseSceneTransform, "Playback base scene transform");
 
   exactObject(state.data, ["packet", "leafFit"], "INVALID_PLAYBACK_STATE", "Playback state");
-  const packet = exactObject(state.data.packet, ["version", "layout", "shapeCount", "leafCount", "appearances", "timeline", "initial", "frameRows", "shapeChanges", "leafChanges", "transforms"], "INVALID_PLAYBACK_STATE", "Playback packet");
+  const packetFields = ["version", "layout", "shapeCount", "leafCount", "appearances", "timeline", "profileTimelines", "initialBankId", "banks", "initial", "frameRows", "shapeChanges", "leafChanges", "transforms"];
+  const packet = exactObject(state.data.packet, packetFields, "INVALID_PLAYBACK_STATE", "Playback packet", packetFields.filter((field) => !["profileTimelines", "initialBankId", "banks"].includes(field)));
   require(packet.version === 0 && packet.layout === "delta-component-streams@0", "INVALID_PLAYBACK_STATE", "Playback version/layout is invalid.");
   require(Number.isSafeInteger(packet.shapeCount) && packet.shapeCount >= 0 && packet.shapeCount <= limits.maxNodes, "TARGET_CARDINALITY_MISMATCH", "Playback shapeCount is invalid.");
   require(Number.isSafeInteger(packet.leafCount) && packet.leafCount >= 0 && packet.leafCount <= Math.min(limits.maxNodes, 65_536), "TARGET_CARDINALITY_MISMATCH", "Playback leafCount is invalid.");
@@ -549,10 +699,34 @@ function validatePlayback(state, binding, inputs, limits) {
   const initialLeafTransforms = cumulativeReferences(initialLeaves.transforms, packet.leafCount, "INVALID_PLAYBACK_STATE", "Playback initial leaf transforms");
   require([...initialShapeTransforms, ...initialLeafTransforms].every((index) => index < transforms.count), "INVALID_PLAYBACK_STATE", "Playback initial state references an absent transform.");
 
-  const timeline = exactObject(packet.timeline, ["introTicks", "loopTicks", "frames"], "INVALID_PLAYBACK_STATE", "Playback timeline");
-  require(Number.isSafeInteger(timeline.introTicks) && timeline.introTicks >= 0 && Number.isSafeInteger(timeline.loopTicks) && timeline.loopTicks > 0, "TIMELINE_LIMIT", "Playback timeline ranges are invalid.");
-  integerArray(timeline.frames, limits.maxTimelineTicks, "TIMELINE_LIMIT", "Playback timeline frames", { minimum: 1, upper: parameters.frameCount });
-  require(timeline.frames.length === timeline.introTicks + timeline.loopTicks && timeline.frames[0] === initial.sourceFrame, "TIMELINE_LIMIT", "Playback timeline coverage or initial frame is invalid.");
+  const validateTimeline = (value, label, profile, entryFrame = initial.sourceFrame) => {
+    const required = profile ? ["profileId", "introTicks", "loopTicks", "frames"] : ["introTicks", "loopTicks", "frames"];
+    const timeline = exactObject(value, [...required, "deadlineMicros"], "INVALID_PLAYBACK_STATE", label, required);
+    if (profile) stableId(timeline.profileId, `${label} profile id`);
+    require(Number.isSafeInteger(timeline.introTicks) && timeline.introTicks >= 0 && Number.isSafeInteger(timeline.loopTicks) && timeline.loopTicks > 0, "TIMELINE_LIMIT", `${label} ranges are invalid.`);
+    integerArray(timeline.frames, limits.maxTimelineTicks, "TIMELINE_LIMIT", `${label} frames`, { minimum: 1, upper: parameters.frameCount });
+    require(timeline.frames.length === timeline.introTicks + timeline.loopTicks && timeline.frames[0] === entryFrame, "TIMELINE_LIMIT", `${label} coverage or entry frame is invalid.`);
+    if (timeline.deadlineMicros !== undefined) {
+      integerArray(timeline.deadlineMicros, limits.maxTimelineTicks + 1, "TIMELINE_LIMIT", `${label} deadlines`, { minimum: 0 });
+      require(timeline.deadlineMicros.length === timeline.frames.length + 1 && timeline.deadlineMicros[0] === 0 && timeline.deadlineMicros.every((deadline, index) => index === 0 || deadline > timeline.deadlineMicros[index - 1]), "TIMELINE_LIMIT", `${label} deadlines are incomplete or unordered.`);
+      require(timeline.deadlineMicros.every((deadline, index) => index === 0 || deadline - timeline.deadlineMicros[index - 1] <= 2_147_483_647_000), "TIMELINE_LIMIT", `${label} deadline interval exceeds the browser timer bound.`);
+    }
+    return timeline;
+  };
+  const timeline = validateTimeline(packet.timeline, "Playback timeline", false);
+  let timelineTickCount = timeline.frames.length;
+  if (packet.profileTimelines !== undefined) {
+    require(Array.isArray(packet.profileTimelines) && packet.profileTimelines.length > 0 && packet.profileTimelines.length <= 16, "INVALID_PLAYBACK_STATE", "Playback profile timelines are missing or excessive.");
+    const profileIds = new Set();
+    for (const [index, value] of packet.profileTimelines.entries()) {
+      const profileTimeline = validateTimeline(value, `Playback profile timeline ${index}`, true);
+      require(!profileIds.has(profileTimeline.profileId), "INVALID_PLAYBACK_STATE", `Playback profile timeline id ${profileTimeline.profileId} is duplicated.`);
+      profileIds.add(profileTimeline.profileId);
+      timelineTickCount += profileTimeline.frames.length;
+      require(timelineTickCount <= limits.maxTimelineTicks, "TIMELINE_LIMIT", "Playback baseline and profile timelines exceed the aggregate tick limit.");
+    }
+  }
+  timelineTickCount = validatePlaybackBanks(packet, initial, parameters, validateTimeline, timeline, timelineTickCount, limits, "INVALID_PLAYBACK_STATE", "Playback");
 
   const shapeChanges = exactObject(packet.shapeChanges, ["sources", "transforms", "visibility"], "INVALID_PLAYBACK_STATE", "Playback shape changes");
   const leafChanges = exactObject(packet.leafChanges, ["sources", "transforms"], "INVALID_PLAYBACK_STATE", "Playback leaf changes");
@@ -634,6 +808,86 @@ function validatePlayback(state, binding, inputs, limits) {
   return packet;
 }
 
+function validatePagedPlayback(state, binding, inputs, limits) {
+  const tick = inputs.get("time.tick");
+  require(tick?.type === "uint" && !Object.hasOwn(tick, "default"), "INVALID_PLAYBACK_BINDING", "Paged playback time.tick must be an un-defaulted uint.");
+  const targets = exactObject(binding.targets, ["model", "shapes", "leaves"], "INVALID_PLAYBACK_BINDING", "Paged playback targets");
+  stableId(targets.model, "Paged playback model target");
+  uniqueTargets(targets.shapes, "Paged playback shape");
+  uniqueTargets(targets.leaves, "Paged playback leaf");
+  const parameterFields = ["frameCount", "baseSceneTransform", "tickRateHz", "tickIntervalUs", "catchUpPolicy"];
+  const parameters = exactObject(binding.parameters, parameterFields, "INVALID_PLAYBACK_BINDING", "Paged playback parameters", ["frameCount", "baseSceneTransform"]);
+  require(Number.isSafeInteger(parameters.frameCount) && parameters.frameCount > 0 && parameters.frameCount <= limits.maxPagedFrames, "FRAME_CARDINALITY_MISMATCH", "Paged playback frameCount is invalid or excessive.");
+  validateTickCadence(parameters, "INVALID_PLAYBACK_BINDING", "Paged playback");
+  require(parameters.catchUpPolicy === undefined || ["bounded", "single-step", "elapsed"].includes(parameters.catchUpPolicy), "INVALID_PLAYBACK_BINDING", "Paged playback catchUpPolicy is invalid.");
+  safeStyle(parameters.baseSceneTransform, "Paged playback base scene transform");
+
+  exactObject(state.data, ["packet"], "INVALID_PAGED_PLAYBACK_STATE", "Paged playback state");
+  const packet = exactObject(state.data.packet, ["version", "shapeCount", "leafCount", "appearances", "timeline", "profileTimelines", "initialBankId", "banks", "initial", "pages", "lookaheadPages", "maxResidentPages"], "INVALID_PAGED_PLAYBACK_STATE", "Paged playback packet", ["version", "shapeCount", "leafCount", "appearances", "timeline", "initial", "pages", "lookaheadPages", "maxResidentPages"]);
+  require(packet.version === 0, "INVALID_PAGED_PLAYBACK_STATE", "Paged playback version must be zero.");
+  require(Number.isSafeInteger(packet.shapeCount) && packet.shapeCount >= 0 && packet.shapeCount <= limits.maxNodes, "TARGET_CARDINALITY_MISMATCH", "Paged playback shapeCount is invalid.");
+  require(Number.isSafeInteger(packet.leafCount) && packet.leafCount >= 0 && packet.leafCount <= Math.min(limits.maxNodes, 65_536), "TARGET_CARDINALITY_MISMATCH", "Paged playback leafCount is invalid.");
+  require(packet.shapeCount === targets.shapes.length && packet.leafCount === targets.leaves.length, "TARGET_CARDINALITY_MISMATCH", "Paged playback target counts disagree.");
+
+  require(Array.isArray(packet.appearances) && packet.appearances.length > 0 && packet.appearances.length <= limits.maxFrames, "INVALID_PAGED_PLAYBACK_STATE", "Paged playback appearances are invalid or excessive.");
+  const appearanceIds = new Set();
+  for (const [index, appearance] of packet.appearances.entries()) {
+    require(Array.isArray(appearance) && appearance.length === 3, "INVALID_PAGED_PLAYBACK_STATE", `Paged playback appearance ${index} is malformed.`);
+    const id = stableId(appearance[0], `Paged playback appearance ${index} id`);
+    require(!appearanceIds.has(id) && finiteF32(appearance[1]) && appearance[1] > 0 && finiteF32(appearance[2]), "INVALID_PAGED_PLAYBACK_STATE", `Paged playback appearance ${index} is invalid.`);
+    appearanceIds.add(id);
+  }
+  const initial = exactObject(packet.initial, ["sourceFrame", "appearance"], "INVALID_PAGED_PLAYBACK_STATE", "Paged playback initial state");
+  require(Number.isSafeInteger(initial.sourceFrame) && initial.sourceFrame >= 1 && initial.sourceFrame <= parameters.frameCount, "FRAME_CARDINALITY_MISMATCH", "Paged playback initial source frame is invalid.");
+  require(Number.isSafeInteger(initial.appearance) && initial.appearance >= 0 && initial.appearance < packet.appearances.length, "INVALID_PAGED_PLAYBACK_STATE", "Paged playback initial appearance is invalid.");
+
+  const validateTimeline = (value, label, profile, entryFrame = initial.sourceFrame) => {
+    const required = profile ? ["profileId", "introTicks", "loopTicks", "frames"] : ["introTicks", "loopTicks", "frames"];
+    const timeline = exactObject(value, [...required, "deadlineMicros"], "INVALID_PAGED_PLAYBACK_STATE", label, required);
+    if (profile) stableId(timeline.profileId, `${label} profile id`);
+    require(Number.isSafeInteger(timeline.introTicks) && timeline.introTicks >= 0 && Number.isSafeInteger(timeline.loopTicks) && timeline.loopTicks > 0, "TIMELINE_LIMIT", `${label} ranges are invalid.`);
+    integerArray(timeline.frames, limits.maxTimelineTicks, "TIMELINE_LIMIT", `${label} frames`, { minimum: 1, upper: parameters.frameCount });
+    require(timeline.frames.length === timeline.introTicks + timeline.loopTicks && timeline.frames[0] === entryFrame, "TIMELINE_LIMIT", `${label} coverage or entry frame is invalid.`);
+    if (timeline.deadlineMicros !== undefined) {
+      integerArray(timeline.deadlineMicros, limits.maxTimelineTicks + 1, "TIMELINE_LIMIT", `${label} deadlines`, { minimum: 0 });
+      require(timeline.deadlineMicros.length === timeline.frames.length + 1 && timeline.deadlineMicros[0] === 0 && timeline.deadlineMicros.every((deadline, index) => index === 0 || deadline > timeline.deadlineMicros[index - 1]), "TIMELINE_LIMIT", `${label} deadlines are incomplete or unordered.`);
+      require(timeline.deadlineMicros.every((deadline, index) => index === 0 || deadline - timeline.deadlineMicros[index - 1] <= 2_147_483_647_000), "TIMELINE_LIMIT", `${label} deadline interval exceeds the browser timer bound.`);
+    }
+    return timeline;
+  };
+  let timelineTickCount = validateTimeline(packet.timeline, "Paged playback timeline", false).frames.length;
+  if (packet.profileTimelines !== undefined) {
+    require(Array.isArray(packet.profileTimelines) && packet.profileTimelines.length > 0 && packet.profileTimelines.length <= 16, "INVALID_PAGED_PLAYBACK_STATE", "Paged playback profile timelines are missing or excessive.");
+    const profileIds = new Set();
+    for (const [index, value] of packet.profileTimelines.entries()) {
+      const profileTimeline = validateTimeline(value, `Paged playback profile timeline ${index}`, true);
+      require(!profileIds.has(profileTimeline.profileId), "INVALID_PAGED_PLAYBACK_STATE", `Paged playback profile timeline id ${profileTimeline.profileId} is duplicated.`);
+      profileIds.add(profileTimeline.profileId);
+      timelineTickCount += profileTimeline.frames.length;
+      require(timelineTickCount <= limits.maxTimelineTicks, "TIMELINE_LIMIT", "Paged playback baseline and profile timelines exceed the aggregate tick limit.");
+    }
+  }
+  timelineTickCount = validatePlaybackBanks(packet, initial, parameters, validateTimeline, packet.timeline, timelineTickCount, limits, "INVALID_PAGED_PLAYBACK_STATE", "Paged playback");
+
+  require(Number.isSafeInteger(packet.lookaheadPages) && packet.lookaheadPages >= 1 && packet.lookaheadPages <= 4 && Number.isSafeInteger(packet.maxResidentPages) && packet.maxResidentPages >= packet.lookaheadPages + 1 && packet.maxResidentPages <= 16, "STATE_PAGE_RESIDENCY_LIMIT", "Paged playback residency is invalid.");
+  require(Array.isArray(packet.pages) && packet.pages.length > 0 && packet.pages.length <= limits.maxStatePages, "STATE_PAGE_COVERAGE_MISMATCH", "Paged playback descriptors are missing or excessive.");
+  const resources = new Set();
+  let expectedFrame = 1;
+  for (const [index, page] of packet.pages.entries()) {
+    exactObject(page, ["resource", "startFrame", "endFrame", "transformCount", "shapeChangeCount", "leafChangeCount", "materializedByteLength"], "INVALID_PAGED_PLAYBACK_STATE", `Paged playback descriptor ${index}`);
+    assertResourceId(page.resource, `Paged playback descriptor ${index} resource`);
+    require(!resources.has(page.resource) && page.startFrame === expectedFrame && Number.isSafeInteger(page.endFrame) && page.endFrame >= page.startFrame && page.endFrame <= parameters.frameCount, "STATE_PAGE_COVERAGE_MISMATCH", `Paged playback descriptor ${index} is invalid or noncontiguous.`);
+    require(page.endFrame - page.startFrame + 1 <= limits.maxStatePageFrames, "STATE_PAGE_COVERAGE_MISMATCH", `Paged playback descriptor ${index} exceeds the per-page frame limit.`);
+    require(Number.isSafeInteger(page.transformCount) && page.transformCount > 0 && page.transformCount <= limits.maxPreparedTransforms, "TRANSFORM_ALLOCATION_LIMIT", `Paged playback descriptor ${index} transform count is invalid or excessive.`);
+    require(Number.isSafeInteger(page.shapeChangeCount) && page.shapeChangeCount >= 0 && page.shapeChangeCount <= limits.maxPreparedChanges && Number.isSafeInteger(page.leafChangeCount) && page.leafChangeCount >= 0 && page.leafChangeCount <= limits.maxPreparedChanges, "STATE_CHANGE_LIMIT", `Paged playback descriptor ${index} change count is invalid or excessive.`);
+    require(Number.isSafeInteger(page.materializedByteLength) && page.materializedByteLength > 0 && page.materializedByteLength <= limits.maxDecodedInputBytes, "STATE_PAGE_RESIDENCY_LIMIT", `Paged playback descriptor ${index} materialized size is invalid or excessive.`);
+    resources.add(page.resource);
+    expectedFrame = page.endFrame + 1;
+  }
+  require(expectedFrame === parameters.frameCount + 1, "STATE_PAGE_COVERAGE_MISMATCH", "Paged playback descriptors do not cover the playback frame range exactly.");
+  return { ...packet, frameCount: parameters.frameCount };
+}
+
 function surfaceStateAt(sourceFrames, frameIndex) {
   let lower = 0;
   let upper = sourceFrames.length;
@@ -658,15 +912,29 @@ function validateSurface(state, binding, playback, inputs, limits) {
   require(packet.version === 0 && packet.frameCount === playback.binding.parameters.frameCount, "FRAME_CARDINALITY_MISMATCH", "Surface version/frameCount differs from playback.");
   const surface = exactObject(packet.surface, ["faces", "statePacking"], "INVALID_SURFACE_STATE", "Surface table");
   require(Array.isArray(surface.faces) && surface.faces.length === playback.packet.leafCount, "TARGET_CARDINALITY_MISMATCH", "Surface faces differ from playback leaves.");
-  const packing = exactObject(surface.statePacking, ["stateCount", "sourceFrameDeltas", "backgroundPositions"], "INVALID_SURFACE_STATE", "Surface state packing", ["stateCount", "sourceFrameDeltas"]);
+  const packing = exactObject(surface.statePacking, ["stateCount", "sourceFrameDeltas", "positionDictionary", "positionIndicesBase64"], "INVALID_SURFACE_STATE", "Surface state packing", ["stateCount", "sourceFrameDeltas"]);
   require(Number.isSafeInteger(packing.stateCount) && packing.stateCount >= 0 && packing.stateCount <= limits.maxPreparedStates, "SURFACE_STATE_LIMIT", "Surface state count is invalid or excessive.");
   integerArray(packing.sourceFrameDeltas, limits.maxPreparedStates, "SURFACE_STATE_LIMIT", "Surface source-frame deltas", { minimum: 0, upper: packet.frameCount - 1 });
   require(packing.sourceFrameDeltas.length === packing.stateCount, "STATE_COLUMN_MISMATCH", "Surface source-frame deltas differ from stateCount.");
-  const preparedPositions = Object.hasOwn(packing, "backgroundPositions");
+  const hasPositionDictionary = Object.hasOwn(packing, "positionDictionary");
+  const hasPositionIndices = Object.hasOwn(packing, "positionIndicesBase64");
+  require(hasPositionDictionary === hasPositionIndices, "INVALID_SURFACE_STATE", "Surface prepared position dictionary and indices must appear together.");
+  const preparedPositions = hasPositionDictionary;
   exactArray(binding.sinks, [preparedPositions ? "style.backgroundPosition" : "style.backgroundPositionY", "style.visibility"], "INVALID_SURFACE_BINDING", "Surface sinks");
   if (preparedPositions) {
-    require(Array.isArray(packing.backgroundPositions) && packing.backgroundPositions.length === packing.stateCount, "STATE_COLUMN_MISMATCH", "Surface prepared positions differ from stateCount.");
-    packing.backgroundPositions.forEach((position, index) => safeStyle(position, `Surface prepared position ${index}`));
+    require(Array.isArray(packing.positionDictionary) && packing.positionDictionary.length > 0 && packing.positionDictionary.length <= Math.min(packing.stateCount, 65_535), "SURFACE_STATE_LIMIT", "Surface position dictionary is missing or excessive.");
+    let previousX = Number.MIN_SAFE_INTEGER;
+    let previousY = Number.MIN_SAFE_INTEGER;
+    packing.positionDictionary.forEach((position, index) => {
+      require(Array.isArray(position) && position.length === 2 && position.every((coordinate) => Number.isSafeInteger(coordinate) && !Object.is(coordinate, -0) && coordinate >= -0x80000000 && coordinate <= 0x7fffffff), "INVALID_SURFACE_STATE", `Surface position dictionary row ${index} is invalid.`);
+      const [x, y] = position;
+      require(index === 0 || x > previousX || (x === previousX && y > previousY), "INVALID_SURFACE_STATE", "Surface position dictionary is not strictly lexicographically sorted.");
+      previousX = x;
+      previousY = y;
+    });
+    const positionIndices = base64Integers(packing.positionIndicesBase64, 2, limits.maxPreparedStates, "INVALID_SURFACE_STATE", "Surface position indices");
+    require(positionIndices.length === packing.stateCount && positionIndices.every((index) => index < packing.positionDictionary.length), "STATE_COLUMN_MISMATCH", "Surface position indices do not match the state table or dictionary.");
+    require(new Set(positionIndices).size === packing.positionDictionary.length, "INVALID_SURFACE_STATE", "Surface position dictionary contains an unreferenced row.");
   }
   const faceIds = new Set();
   const sourceFramesByFace = [];
@@ -743,18 +1011,7 @@ function validateSurface(state, binding, playback, inputs, limits) {
   const visibilityFaces = base64Integers(visibilitySequential.faceIndicesBase64, 2, limits.maxPreparedChanges, "INVALID_SURFACE_STATE", "Surface visibility faces");
   require(visibilityOffsets.length === packet.frameCount + 1 && visibilityOffsets[0] === 0 && visibilityOffsets.at(-1) === visibilityFaces.length && visibilityOffsets.every((offset, index) => index === 0 || visibilityOffsets[index - 1] <= offset), "STATE_COLUMN_MISMATCH", "Surface visibility offsets are invalid.");
   for (let frame = 0; frame < packet.frameCount; frame += 1) for (let cursor = visibilityOffsets[frame]; cursor < visibilityOffsets[frame + 1]; cursor += 1) require(visibilityFaces[cursor] < playback.packet.leafCount && (cursor === visibilityOffsets[frame] || visibilityFaces[cursor - 1] < visibilityFaces[cursor]), "INVALID_SURFACE_STATE", `Surface visibility segment ${frame} is invalid.`);
-  require(playback.packet.leafCount * packet.frameCount <= limits.maxVisibilityCells, "VISIBILITY_ALLOCATION_LIMIT", "Surface visibility allocation is excessive.");
-  const visibilityRows = new Uint8Array(playback.packet.leafCount * packet.frameCount);
-  for (let index = 0; index < playback.packet.leafCount; index += 1) visibilityRows[index] = (initialBits[index >> 3] >> (index & 7)) & 1;
-  for (let targetFrame = 2; targetFrame <= packet.frameCount; targetFrame += 1) {
-    const previousOffset = (targetFrame - 2) * playback.packet.leafCount;
-    const targetOffset = (targetFrame - 1) * playback.packet.leafCount;
-    visibilityRows.copyWithin(targetOffset, previousOffset, previousOffset + playback.packet.leafCount);
-    for (let cursor = visibilityOffsets[targetFrame - 1]; cursor < visibilityOffsets[targetFrame]; cursor += 1) visibilityRows[targetOffset + visibilityFaces[cursor]] ^= 1;
-  }
-  const wrapped = visibilityRows.slice((packet.frameCount - 1) * playback.packet.leafCount);
-  for (let cursor = visibilityOffsets[0]; cursor < visibilityOffsets[1]; cursor += 1) wrapped[visibilityFaces[cursor]] ^= 1;
-  require(wrapped.every((value, index) => value === visibilityRows[index]), "SURFACE_TRANSITION_MISMATCH", "Surface visibility wrap does not reproduce frame 1.");
+  const initialVisibility = Uint8Array.from({ length: playback.packet.leafCount }, (_, index) => (initialBits[index >> 3] >> (index & 7)) & 1);
   require(Array.isArray(visibility.nonInteractiveJumps) && visibility.nonInteractiveJumps.length <= packet.frameCount, "INVALID_SURFACE_STATE", "Surface visibility jumps are invalid or excessive.");
   const visibilityPairs = new Set();
   const visibilityJumps = new Map();
@@ -769,15 +1026,13 @@ function validateSurface(state, binding, playback, inputs, limits) {
   }
   require([...jumpPairs].every((pair) => visibilityPairs.has(pair)) && [...visibilityPairs].every((pair) => jumpPairs.has(pair)), "INVALID_SURFACE_STATE", "Surface lighting and visibility jump pairs differ.");
 
-  const expectedTransition = (fromFrame, toFrame) => {
-    const fromOffset = (fromFrame - 1) * playback.packet.leafCount;
-    const toOffset = (toFrame - 1) * playback.packet.leafCount;
+  const expectedTransition = (fromFrame, toFrame, fromVisibility, toVisibility) => {
     const changedVisibility = [];
     const changedFaces = [];
     const changedStates = [];
     for (let face = 0; face < playback.packet.leafCount; face += 1) {
-      const fromVisible = visibilityRows[fromOffset + face];
-      const toVisible = visibilityRows[toOffset + face];
+      const fromVisible = fromVisibility[face];
+      const toVisible = toVisibility[face];
       if (fromVisible !== toVisible) changedVisibility.push(face);
       const fromState = surfaceStateAt(sourceFramesByFace[face], fromFrame - 1);
       const toState = surfaceStateAt(sourceFramesByFace[face], toFrame - 1);
@@ -785,17 +1040,32 @@ function validateSurface(state, binding, playback, inputs, limits) {
     }
     return { changedVisibility, changedFaces, changedStates };
   };
-  for (let toFrame = 1; toFrame <= packet.frameCount; toFrame += 1) {
-    const fromFrame = toFrame === 1 ? packet.frameCount : toFrame - 1;
-    const expected = expectedTransition(fromFrame, toFrame);
+  const endpointFrames = new Set();
+  for (const pair of jumpPairs) for (const frame of pair.split(">").map(Number)) endpointFrames.add(frame);
+  require(endpointFrames.size * Math.max(1, playback.packet.leafCount) <= limits.maxVisibilityCells, "VISIBILITY_ALLOCATION_LIMIT", "Surface jump endpoint visibility rows exceed the allocation limit.");
+  const endpointRows = new Map();
+  if (endpointFrames.has(1)) endpointRows.set(1, initialVisibility.slice());
+  let previousVisibility = initialVisibility.slice();
+  for (let toFrame = 2; toFrame <= packet.frameCount; toFrame += 1) {
+    const nextVisibility = previousVisibility.slice();
+    for (let cursor = visibilityOffsets[toFrame - 1]; cursor < visibilityOffsets[toFrame]; cursor += 1) nextVisibility[visibilityFaces[cursor]] ^= 1;
+    const expected = expectedTransition(toFrame - 1, toFrame, previousVisibility, nextVisibility);
     const actualLighting = lightingSegments[toFrame - 1];
     const actualVisibility = visibilityFaces.slice(visibilityOffsets[toFrame - 1], visibilityOffsets[toFrame]);
-    require(exactEqualArray(actualLighting.faces, expected.changedFaces) && exactEqualArray(actualLighting.states, expected.changedStates), "SURFACE_TRANSITION_MISMATCH", `Surface lighting transition ${fromFrame}>${toFrame} is not closed.`);
-    require(exactEqualArray(actualVisibility, expected.changedVisibility), "SURFACE_TRANSITION_MISMATCH", `Surface visibility transition ${fromFrame}>${toFrame} is not closed.`);
+    require(exactEqualArray(actualLighting.faces, expected.changedFaces) && exactEqualArray(actualLighting.states, expected.changedStates), "SURFACE_TRANSITION_MISMATCH", `Surface lighting transition ${toFrame - 1}>${toFrame} is not closed.`);
+    require(exactEqualArray(actualVisibility, expected.changedVisibility), "SURFACE_TRANSITION_MISMATCH", `Surface visibility transition ${toFrame - 1}>${toFrame} is not closed.`);
+    previousVisibility = nextVisibility;
+    if (endpointFrames.has(toFrame)) endpointRows.set(toFrame, nextVisibility.slice());
   }
+  const wrapped = previousVisibility.slice();
+  for (let cursor = visibilityOffsets[0]; cursor < visibilityOffsets[1]; cursor += 1) wrapped[visibilityFaces[cursor]] ^= 1;
+  require(wrapped.every((value, index) => value === initialVisibility[index]), "SURFACE_TRANSITION_MISMATCH", "Surface visibility wrap does not reproduce frame 1.");
+  const wrapExpected = expectedTransition(packet.frameCount, 1, previousVisibility, initialVisibility);
+  require(exactEqualArray(lightingSegments[0].faces, wrapExpected.changedFaces) && exactEqualArray(lightingSegments[0].states, wrapExpected.changedStates), "SURFACE_TRANSITION_MISMATCH", `Surface lighting transition ${packet.frameCount}>1 is not closed.`);
+  require(exactEqualArray(visibilityFaces.slice(visibilityOffsets[0], visibilityOffsets[1]), wrapExpected.changedVisibility), "SURFACE_TRANSITION_MISMATCH", `Surface visibility transition ${packet.frameCount}>1 is not closed.`);
   for (const pair of jumpPairs) {
     const [fromFrame, toFrame] = pair.split(">").map(Number);
-    const expected = expectedTransition(fromFrame, toFrame);
+    const expected = expectedTransition(fromFrame, toFrame, endpointRows.get(fromFrame), endpointRows.get(toFrame));
     const lighting = lightingJumps.get(pair);
     require(exactEqualArray(lighting.faces, expected.changedFaces) && exactEqualArray(lighting.states, expected.changedStates), "SURFACE_JUMP_MISMATCH", `Surface lighting jump ${pair} contradicts target state.`);
     require(exactEqualArray(visibilityJumps.get(pair), expected.changedVisibility), "SURFACE_JUMP_MISMATCH", `Surface visibility jump ${pair} contradicts target state.`);
@@ -809,9 +1079,9 @@ function validatePresentation(state, binding, records, inputs) {
   require(viewportHeight?.type === "float" && viewportWidth?.type === "float" && !Object.hasOwn(viewportHeight, "default") && !Object.hasOwn(viewportWidth, "default"), "INVALID_PRESENTATION_BINDING", "Presentation viewport inputs must be un-defaulted floats.");
   exactObject(state.data, ["packet"], "INVALID_PRESENTATION_STATE", "Presentation state");
   const packet = exactObject(state.data.packet, ["version", "camera", "background"], "INVALID_PRESENTATION_STATE", "Presentation packet", ["version", "camera"]);
-  exactObject(packet.camera, ["baseSceneTransform", "fitWidth", "fitHeight", "sourceWidth", "sourceHeight", "perspective"], "INVALID_PRESENTATION_STATE", "Presentation camera");
+  exactObject(packet.camera, ["baseSceneTransform", "fitWidth", "fitHeight", "sourceWidth", "sourceHeight", "perspective", "profileSelection", "profiles"], "INVALID_PRESENTATION_STATE", "Presentation camera", ["baseSceneTransform", "fitWidth", "fitHeight", "sourceWidth", "sourceHeight", "perspective"]);
   exactObject(binding.targets, ["host", "camera", "cursorLayer", "cursorStates"], "INVALID_PRESENTATION_BINDING", "Presentation targets", ["host", "camera"]);
-  exactObject(binding.parameters, ["fitWidth", "fitHeight", "sourceWidth", "sourceHeight"], "INVALID_PRESENTATION_BINDING", "Presentation parameters");
+  exactObject(binding.parameters, ["fitWidth", "fitHeight", "sourceWidth", "sourceHeight", "profileSelection", "profiles"], "INVALID_PRESENTATION_BINDING", "Presentation parameters", ["fitWidth", "fitHeight", "sourceWidth", "sourceHeight"]);
   stableId(binding.targets.camera, "Presentation camera target");
   const hasCursorLayer = Object.hasOwn(binding.targets, "cursorLayer");
   const hasCursorStates = Object.hasOwn(binding.targets, "cursorStates");
@@ -825,6 +1095,37 @@ function validatePresentation(state, binding, records, inputs) {
   }
   require(packet.version === 0 && binding.targets.host === "$host" && ["fitWidth", "fitHeight", "sourceWidth", "sourceHeight"].every((name) => Number.isSafeInteger(packet.camera[name]) && packet.camera[name] > 0 && packet.camera[name] === binding.parameters[name]) && typeof packet.camera.perspective === "number" && Number.isFinite(packet.camera.perspective) && packet.camera.perspective > 0, "INVALID_PRESENTATION_STATE", "Presentation packet/binding is invalid.");
   safeStyle(packet.camera.baseSceneTransform, "Presentation base scene transform");
+  const validateProfiles = (profiles, selection, code, label) => {
+    if (profiles === undefined) {
+      require(selection === undefined, code, `${label} selection requires profiles.`);
+      return undefined;
+    }
+    require(selection === "viewport-width" || selection === "landscape-first-portrait-width", code, `${label} selection is unsupported.`);
+    require(Array.isArray(profiles) && profiles.length > 0 && profiles.length <= 16, code, `${label} are missing or excessive.`);
+    require(selection !== "landscape-first-portrait-width" || profiles.length >= 2, code, `${label} landscape-first selection requires a landscape row and at least one portrait row.`);
+    const ids = new Set();
+    let maximum = 0;
+    for (const [index, profile] of profiles.entries()) {
+      exactObject(profile, ["id", "maxViewportWidth", "fit", "quarterTurns", "bounds", "safeInset", "bias"], code, `${label} ${index}`, ["id", "fit", "quarterTurns", "bounds", "safeInset", "bias"]);
+      const id = stableId(profile.id, `${label} ${index} id`);
+      require(!ids.has(id), code, `${label} ids are duplicated.`);
+      ids.add(id);
+      const landscape = selection === "landscape-first-portrait-width" && index === 0;
+      if (landscape || index === profiles.length - 1) require(!Object.hasOwn(profile, "maxViewportWidth"), code, `${label} ${landscape ? "landscape" : "final"} profile must be unbounded.`);
+      else {
+        require(Number.isSafeInteger(profile.maxViewportWidth) && profile.maxViewportWidth > maximum && profile.maxViewportWidth <= 1_000_000, code, `${label} breakpoints are invalid.`);
+        maximum = profile.maxViewportWidth;
+      }
+      require((profile.fit === "contain" || profile.fit === "cover") && Number.isSafeInteger(profile.quarterTurns) && profile.quarterTurns >= 0 && profile.quarterTurns <= 3, code, `${label} fit or rotation is invalid.`);
+      require(Array.isArray(profile.bounds) && profile.bounds.length === 4 && profile.bounds.every((value) => typeof value === "number" && Number.isFinite(value) && Math.abs(value) <= 1_000_000) && profile.bounds[2] > profile.bounds[0] && profile.bounds[3] > profile.bounds[1], code, `${label} bounds are invalid.`);
+      require(typeof profile.safeInset === "number" && Number.isFinite(profile.safeInset) && profile.safeInset >= 0 && profile.safeInset <= 1_000_000 && Array.isArray(profile.bias) && profile.bias.length === 2 && profile.bias.every((value) => typeof value === "number" && Number.isFinite(value) && value >= -1 && value <= 1), code, `${label} inset or bias is invalid.`);
+    }
+    return profiles;
+  };
+  const stateProfiles = validateProfiles(packet.camera.profiles, packet.camera.profileSelection, "INVALID_PRESENTATION_STATE", "Presentation camera profiles");
+  const bindingProfiles = validateProfiles(binding.parameters.profiles, binding.parameters.profileSelection, "INVALID_PRESENTATION_BINDING", "Presentation binding profiles");
+  require(packet.camera.profileSelection === binding.parameters.profileSelection, "INVALID_PRESENTATION_STATE", "Presentation profile selection differs between state and binding.");
+  require((stateProfiles === undefined && bindingProfiles === undefined) || (stateProfiles && bindingProfiles && JSON.stringify(stateProfiles) === JSON.stringify(bindingProfiles)), "INVALID_PRESENTATION_STATE", "Presentation profiles differ between state and binding.");
   const hasBackground = Object.hasOwn(packet, "background");
   if (hasBackground) {
     exactObject(packet.background, ["resource", "opacity", "position", "repeat", "size"], "INVALID_PRESENTATION_STATE", "Presentation background");
@@ -839,6 +1140,23 @@ function validatePresentation(state, binding, records, inputs) {
     "style.width",
   ], "INVALID_PRESENTATION_BINDING", "Presentation sinks");
   return packet;
+}
+
+function validatePlaybackProfileTimelineClosure(playbackPacket, presentationPacket) {
+  const timelineGroups = [playbackPacket.profileTimelines, ...(playbackPacket.banks?.map((bank) => bank.profileTimelines) ?? [])].filter(Boolean);
+  if (timelineGroups.length === 0) return;
+  const profiles = presentationPacket.camera.profiles;
+  require(profiles, "MISSING_POLYCSS_CHANNEL", "Playback profile timelines require static-presentation profiles.");
+  const profileIndices = new Map(profiles.map((profile, index) => [profile.id, index]));
+  for (const timelines of timelineGroups) {
+    let previousIndex = -1;
+    for (const timeline of timelines) {
+      const profileIndex = profileIndices.get(timeline.profileId);
+      require(profileIndex !== undefined, "INVALID_PLAYBACK_STATE", `Playback profile timeline ${timeline.profileId} has no static-presentation profile.`);
+      require(profileIndex > previousIndex, "INVALID_PLAYBACK_STATE", "Playback profile timelines do not follow static-presentation profile order.");
+      previousIndex = profileIndex;
+    }
+  }
 }
 
 function validateEffects(state, binding, playback, inputs, limits) {
@@ -919,13 +1237,14 @@ function validateInteraction(state, binding, playback, presentation, inputs, lim
   const packet = exactObject(state.data.packet, ["version", "arithmetic", "input", "animator", "source", "triangle", "objects", "shapes", "leaves", "controls"], "INVALID_INTERACTION_STATE", "Interaction packet");
   exactObject(binding.targets, ["shapes", "leaves", "cursorLayer", "cursorStates"], "INVALID_INTERACTION_BINDING", "Interaction targets");
   exactObject(binding.targets.cursorStates, ["open", "closed"], "INVALID_INTERACTION_BINDING", "Interaction cursor states");
-  exactObject(binding.parameters, ["initialFrame", "tickRateHz"], "INVALID_INTERACTION_BINDING", "Interaction parameters");
+  exactObject(binding.parameters, ["initialFrame", "tickRateHz", "tickIntervalUs"], "INVALID_INTERACTION_BINDING", "Interaction parameters", ["initialFrame"]);
+  validateTickCadence(binding.parameters, "INVALID_INTERACTION_BINDING", "Interaction");
   uniqueTargets(binding.targets.shapes, "Interaction shape");
   uniqueTargets(binding.targets.leaves, "Interaction leaf");
   stableId(binding.targets.cursorLayer, "Interaction cursor layer");
   stableId(binding.targets.cursorStates.open, "Interaction open cursor");
   stableId(binding.targets.cursorStates.closed, "Interaction closed cursor");
-  require(binding.targets.cursorStates.open !== binding.targets.cursorStates.closed && binding.parameters.tickRateHz === 30, "INVALID_INTERACTION_BINDING", "Interaction cursor or timing binding is invalid.");
+  require(binding.targets.cursorStates.open !== binding.targets.cursorStates.closed, "INVALID_INTERACTION_BINDING", "Interaction cursor binding is invalid.");
   const defaultInputs = [
     ["axis.x", "float", 0],
     ["axis.y", "float", 0],
@@ -1027,7 +1346,7 @@ function validateInteraction(state, binding, playback, presentation, inputs, lim
       && Number.isSafeInteger(leaf.seamEdgeMask) && leaf.seamEdgeMask >= 0 && leaf.seamEdgeMask <= 7
       && Number.isSafeInteger(leaf.width) && leaf.width > 0
       && Number.isSafeInteger(leaf.height) && leaf.height > 0, "INVALID_INTERACTION_STATE", `Interaction leaf ${index} is invalid.`);
-    if (playback) require(playback.state.data.leafFit[index].canonicalSize === 32, "INTERACTION_TARGET_MISMATCH", `Interaction leaf ${index} does not match playback's fixed triangle basis.`);
+    if (playback?.kind === "inline") require(playback.state.data.leafFit[index].canonicalSize === 32, "INTERACTION_TARGET_MISMATCH", `Interaction leaf ${index} does not match playback's fixed triangle basis.`);
   }
 
   require(Array.isArray(packet.controls) && packet.controls.length > 0 && packet.controls.length <= limits.maxInteractionControls, "INTERACTION_STATE_LIMIT", "Interaction controls are missing or excessive.");
@@ -1142,7 +1461,7 @@ function validateTargetOwnership(channels, limits) {
       for (const target of targetsOf(channel)) require(!owned.has(target), "TARGET_OWNERSHIP_CONFLICT", `Effects target ${target} is also owned by ${channel.interpreter}.`);
     }
   }
-  const playback = byInterpreter.get("polycss-playback@0");
+  const playback = byInterpreter.get("polycss-playback@0") ?? byInterpreter.get("polycss-paged-playback@0");
   const presentation = byInterpreter.get("static-presentation@0");
   if (playback && presentation) {
     const owned = targetsOf(playback);
@@ -1153,6 +1472,11 @@ function validateTargetOwnership(channels, limits) {
 function validateInitialSurfaceClosure(packet, playback, tree) {
   const packed = Uint8Array.from(globalThis.atob(packet.visibility.initialVisibleBitsBase64), (character) => character.charCodeAt(0));
   const targetFrame = packet.transitions.initialFrame - 1;
+  const positionDictionary = packet.surface.statePacking.positionDictionary;
+  const positionIndices = positionDictionary
+    ? base64Integers(packet.surface.statePacking.positionIndicesBase64, 2, packet.surface.statePacking.stateCount, "INVALID_SURFACE_STATE", "Surface position indices")
+    : undefined;
+  const coordinate = (value) => value === 0 ? "0" : `${value}px`;
   for (const [index, target] of playback.binding.targets.leaves.entries()) {
     const node = tree.byId.get(target);
     const expectedVisibility = ((packed[index >> 3] >> (index & 7)) & 1) === 1 ? "visible" : "hidden";
@@ -1167,27 +1491,82 @@ function validateInitialSurfaceClosure(packet, playback, tree) {
       selectedFrame = sourceFrame;
       selectedState = local;
     }
-    const prepared = packet.surface.statePacking.backgroundPositions;
-    const actual = prepared ? node.styles.backgroundPosition : node.styles.backgroundPositionY;
-    const expected = prepared ? prepared[face.stateOffset + selectedState] : selectedFrame === 0 ? "0" : `${-selectedFrame * face.leafHeight}px`;
-    require(prepared ? actual === expected : selectedFrame === 0 ? actual === undefined || actual === "0" || actual === "0px" || actual === "0%" : actual === expected, "SURFACE_TREE_MISMATCH", `Surface leaf ${index} initial atlas position differs from TREE.`);
+    const actual = positionDictionary ? node.styles.backgroundPosition : node.styles.backgroundPositionY;
+    const expected = positionDictionary
+      ? positionDictionary[positionIndices[face.stateOffset + selectedState]].map(coordinate).join(" ")
+      : selectedFrame === 0 ? "0" : `${-selectedFrame * face.leafHeight}px`;
+    require(positionDictionary ? actual === expected : selectedFrame === 0 ? actual === undefined || actual === "0" || actual === "0px" || actual === "0%" : actual === expected, "SURFACE_TREE_MISMATCH", `Surface leaf ${index} initial atlas position differs from TREE.`);
   }
 }
 
-function validateVariants(state, binding, playback, inputs, tree, limits) {
+function validateVariants(state, binding, playback, inputs, tree, limits, surfaceBinding) {
   const sourceFrame = inputs.get("time.source-frame");
   require(sourceFrame?.type === "uint" && !Object.hasOwn(sourceFrame, "default"), "INVALID_VARIANT_BINDING", "Variant time.source-frame must be an un-defaulted uint.");
   require(!Object.hasOwn(binding, "parameters"), "INVALID_VARIANT_BINDING", "Variant binding has no parameters.");
-  const targets = exactObject(binding.targets, ["nodes"], "INVALID_VARIANT_BINDING", "Variant targets");
+  const targets = exactObject(binding.targets, ["effectNodes", "nodes"], "INVALID_VARIANT_BINDING", "Variant targets");
   uniqueTargets(targets.nodes, "Variant node");
+  uniqueTargets(targets.effectNodes, "Variant effect node");
   require(targets.nodes.length > 0 && targets.nodes.length <= 65_535, "TARGET_CARDINALITY_MISMATCH", "Variant target count is invalid.");
+  require(targets.effectNodes.length < 65_535, "TARGET_CARDINALITY_MISMATCH", "Variant effect target count is invalid.");
 
   exactObject(state.data, ["packet"], "INVALID_VARIANT_STATE", "Variant state");
-  const packet = exactObject(state.data.packet, ["version", "frameCount", "classes", "initial", "sequential", "nonInteractiveJumps"], "INVALID_VARIANT_STATE", "Variant packet");
+  const packet = exactObject(state.data.packet, ["version", "frameCount", "classes", "effects", "initial", "sequential", "nonInteractiveJumps"], "INVALID_VARIANT_STATE", "Variant packet");
   require(packet.version === 0 && packet.frameCount === playback.binding.parameters.frameCount, "FRAME_CARDINALITY_MISMATCH", "Variant version/frameCount differs from playback.");
   require(targets.nodes.length * packet.frameCount <= limits.maxVisibilityCells, "VARIANT_STATE_LIMIT", "Prepared variant state matrix is excessive.");
   require(Array.isArray(packet.classes) && packet.classes.length > 0 && packet.classes.length < 65_535 && packet.classes.length <= limits.maxPreparedStates, "VARIANT_STATE_LIMIT", "Prepared variant classes are invalid or excessive.");
   packet.classes.forEach((token, index) => require(typeof token === "string" && CLASS.test(token) && (index === 0 || packet.classes[index - 1] < token), "INVALID_VARIANT_STATE", `Prepared variant class ${index} is invalid or noncanonical.`));
+  require(Array.isArray(packet.effects) && packet.effects.length > 0 && packet.effects.length <= limits.maxPreparedChanges, "VARIANT_EFFECT_LIMIT", "Prepared variant effect table is missing or excessive.");
+  const effectClasses = new Set();
+  const ownership = new Map();
+  let previousEffect = "";
+  const treeNodes = [...tree.byId.values()];
+  const sinks = new Set(["class.prepared"]);
+  for (const [index, effect] of packet.effects.entries()) {
+    exactObject(effect, ["classIndex", "ownerIndex", "styles", "targetIndex"], "INVALID_VARIANT_EFFECT", `Variant effect ${index}`);
+    require(Number.isSafeInteger(effect.classIndex) && effect.classIndex >= 0 && effect.classIndex < packet.classes.length, "INVALID_VARIANT_EFFECT", `Variant effect ${index} class is invalid.`);
+    require(Number.isSafeInteger(effect.ownerIndex) && effect.ownerIndex >= 0 && effect.ownerIndex < targets.nodes.length, "INVALID_VARIANT_EFFECT", `Variant effect ${index} owner is invalid.`);
+    require(Number.isSafeInteger(effect.targetIndex) && (effect.targetIndex === 65_535 || (effect.targetIndex >= 0 && effect.targetIndex < targets.effectNodes.length)), "INVALID_VARIANT_EFFECT", `Variant effect ${index} target is invalid.`);
+    const key = `${String(effect.classIndex).padStart(5, "0")}:${String(effect.ownerIndex).padStart(5, "0")}:${String(effect.targetIndex).padStart(5, "0")}`;
+    require(key > previousEffect, "INVALID_VARIANT_EFFECT", "Variant effects are not unique and canonical.");
+    previousEffect = key;
+    effectClasses.add(effect.classIndex);
+    const ownerId = targets.nodes[effect.ownerIndex];
+    const ownerNode = tree.byId.get(ownerId);
+    const targetId = effect.targetIndex === 65_535 ? ownerId : targets.effectNodes[effect.targetIndex];
+    const targetNode = tree.byId.get(targetId);
+    if (effect.targetIndex !== 65_535) {
+      let parent = targetNode.parent;
+      let descendant = false;
+      while (parent >= 0) {
+        if (parent === ownerNode.index) { descendant = true; break; }
+        parent = treeNodes[parent].parent;
+      }
+      require(descendant, "INVALID_VARIANT_EFFECT", `Variant effect ${index} target is not below its owner.`);
+    }
+    exactObject(effect.styles, Object.keys(VARIANT_EFFECT_PROPERTIES), "INVALID_VARIANT_EFFECT", `Variant effect ${index} styles`, []);
+    const entries = Object.entries(effect.styles);
+    require(entries.length > 0 && entries.length <= Object.keys(VARIANT_EFFECT_PROPERTIES).length, "INVALID_VARIANT_EFFECT", `Variant effect ${index} styles are empty or excessive.`);
+    for (const [property, value] of entries) {
+      require(Object.hasOwn(VARIANT_EFFECT_PROPERTIES, property) && typeof value === "string" && value.length > 0, "INVALID_VARIANT_EFFECT", `Variant effect ${index} style ${property} is invalid.`);
+      safeStyle(value, `Variant effect ${index} style ${property}`);
+      if (property === "display") require(value === "block" || value === "none", "INVALID_VARIANT_EFFECT", `Variant effect ${index} display is unsupported.`);
+      if (property === "backgroundPositionX") require(/^(?:0|-?[1-9][0-9]*px)$/u.test(value), "INVALID_VARIANT_EFFECT", `Variant effect ${index} backgroundPositionX is noncanonical.`);
+      const conflicts = property === "backgroundPositionX" ? ["backgroundPosition", "backgroundPositionX"] : [property];
+      require(!conflicts.some((name) => Object.hasOwn(targetNode.styles ?? {}, name)), "VARIANT_TREE_MISMATCH", `Variant effect ${index} is shadowed by TREE inline state.`);
+      const sink = VARIANT_EFFECT_PROPERTIES[property];
+      if (sink === "style.backgroundPositionX" && surfaceBinding?.sinks.includes("style.backgroundPosition")) {
+        const surfaceTargets = new Set(collectTargets(surfaceBinding.targets, limits.maxNodes + 1, limits.maxTreeDepth));
+        require(!surfaceTargets.has(targetId), "TARGET_OWNERSHIP_CONFLICT", `Variant effect ${index} conflicts with full prepared surface ownership.`);
+      }
+      sinks.add(sink);
+      const ownershipKey = `${targetId}\0${sink}`;
+      require(!ownership.has(ownershipKey) || ownership.get(ownershipKey) === effect.ownerIndex, "TARGET_OWNERSHIP_CONFLICT", `Variant effect ${index} has multiple owners.`);
+      ownership.set(ownershipKey, effect.ownerIndex);
+    }
+  }
+  require(effectClasses.size === packet.classes.length, "INVALID_VARIANT_EFFECT", "Every variant class must declare an effect.");
+  exactArray(binding.sinks, [...sinks].sort(), "INVALID_VARIANT_BINDING", "Variant sinks");
+  const variantClasses = new Set(packet.classes);
   const validClass = (value) => value === 65_535 || value < packet.classes.length;
 
   const initial = exactObject(packet.initial, ["frame", "classIndicesBase64"], "INVALID_VARIANT_STATE", "Variant initial state");
@@ -1195,7 +1574,7 @@ function validateVariants(state, binding, playback, inputs, tree, limits) {
   const initialIndices = base64Integers(initial.classIndicesBase64, 2, targets.nodes.length, "INVALID_VARIANT_STATE", "Variant initial classes");
   require(initialIndices.length === targets.nodes.length && initialIndices.every(validClass), "INVALID_VARIANT_STATE", "Variant initial classes are invalid.");
   for (const [index, target] of targets.nodes.entries()) {
-    const active = (tree.byId.get(target)?.classes ?? []).filter((token) => packet.classes.includes(token));
+    const active = (tree.byId.get(target)?.classes ?? []).filter((token) => variantClasses.has(token));
     const expected = initialIndices[index] === 65_535 ? [] : [packet.classes[initialIndices[index]]];
     require(exactEqualArray(active, expected), "VARIANT_TREE_MISMATCH", `Variant node ${index} initial class differs from TREE.`);
   }
@@ -1217,18 +1596,10 @@ function validateVariants(state, binding, playback, inputs, tree, limits) {
       previous = target;
     }
   };
-  const rows = [initialIndices.slice()];
-  const current = initialIndices.slice();
-  for (let frame = 2; frame <= packet.frameCount; frame += 1) {
-    applySegment(current, frame - 1, `Variant transition ${frame - 1}>${frame}`);
-    rows.push(current.slice());
-  }
-  const wrapped = current.slice();
-  applySegment(wrapped, 0, `Variant transition ${packet.frameCount}>1`);
-  require(exactEqualArray(wrapped, initialIndices), "VARIANT_TRANSITION_MISMATCH", "Variant wrap transition does not reproduce frame 1.");
-
   require(Array.isArray(packet.nonInteractiveJumps) && packet.nonInteractiveJumps.length <= packet.frameCount, "INVALID_VARIANT_STATE", "Variant jumps are invalid or excessive.");
   const pairs = new Set();
+  const jumpEndpoints = new Set();
+  const decodedJumps = [];
   for (const [index, jump] of packet.nonInteractiveJumps.entries()) {
     exactObject(jump, ["fromFrame", "toFrame", "targetIndicesBase64", "classIndicesBase64"], "INVALID_VARIANT_STATE", `Variant jump ${index}`);
     require(Number.isSafeInteger(jump.fromFrame) && jump.fromFrame >= 1 && jump.fromFrame <= packet.frameCount && Number.isSafeInteger(jump.toFrame) && jump.toFrame >= 1 && jump.toFrame <= packet.frameCount && jump.fromFrame !== jump.toFrame, "INVALID_VARIANT_STATE", `Variant jump ${index} frames are invalid.`);
@@ -1238,28 +1609,308 @@ function validateVariants(state, binding, playback, inputs, tree, limits) {
     const jumpTargets = base64Integers(jump.targetIndicesBase64, 2, targets.nodes.length, "INVALID_VARIANT_STATE", `Variant jump ${index} targets`);
     const jumpClasses = base64Integers(jump.classIndicesBase64, 2, targets.nodes.length, "INVALID_VARIANT_STATE", `Variant jump ${index} classes`);
     require(jumpTargets.length === jumpClasses.length && jumpTargets.every((target, cursor) => target < targets.nodes.length && (cursor === 0 || jumpTargets[cursor - 1] < target) && validClass(jumpClasses[cursor])), "INVALID_VARIANT_STATE", `Variant jump ${index} rows are invalid.`);
+    jumpEndpoints.add(jump.fromFrame);
+    jumpEndpoints.add(jump.toFrame);
+    decodedJumps.push({ pair, fromFrame: jump.fromFrame, toFrame: jump.toFrame, targets: jumpTargets, classes: jumpClasses });
+  }
+  const endpointRows = new Map();
+  if (jumpEndpoints.has(1)) endpointRows.set(1, initialIndices);
+  const current = initialIndices.slice();
+  for (let frame = 2; frame <= packet.frameCount; frame += 1) {
+    applySegment(current, frame - 1, `Variant transition ${frame - 1}>${frame}`);
+    if (jumpEndpoints.has(frame)) endpointRows.set(frame, current.slice());
+  }
+  applySegment(current, 0, `Variant transition ${packet.frameCount}>1`);
+  require(exactEqualArray(current, initialIndices), "VARIANT_TRANSITION_MISMATCH", "Variant wrap transition does not reproduce frame 1.");
+  for (const jump of decodedJumps) {
     const expectedTargets = [];
     const expectedClasses = [];
-    for (let target = 0; target < targets.nodes.length; target += 1) if (rows[jump.fromFrame - 1][target] !== rows[jump.toFrame - 1][target]) {
+    const from = endpointRows.get(jump.fromFrame);
+    const to = endpointRows.get(jump.toFrame);
+    for (let target = 0; target < targets.nodes.length; target += 1) if (from[target] !== to[target]) {
       expectedTargets.push(target);
-      expectedClasses.push(rows[jump.toFrame - 1][target]);
+      expectedClasses.push(to[target]);
     }
-    require(exactEqualArray(jumpTargets, expectedTargets) && exactEqualArray(jumpClasses, expectedClasses), "VARIANT_JUMP_MISMATCH", `Variant jump ${pair} contradicts canonical target state.`);
+    require(exactEqualArray(jump.targets, expectedTargets) && exactEqualArray(jump.classes, expectedClasses), "VARIANT_JUMP_MISMATCH", `Variant jump ${jump.pair} contradicts canonical target state.`);
   }
   return packet;
 }
 
+function desiredPageResources(packet, frame, pinnedFrames) {
+  const current = packet.pages.findIndex((page) => frame >= page.startFrame && frame <= page.endFrame);
+  require(current >= 0, "STATE_PAGE_COVERAGE_MISMATCH", `Prepared frame ${frame} has no state page descriptor.`);
+  const resources = new Set([packet.pages[current].resource]);
+  for (const pinnedFrame of pinnedFrames) {
+    const page = packet.pages.find((descriptor) => pinnedFrame >= descriptor.startFrame && pinnedFrame <= descriptor.endFrame);
+    require(page, "STATE_PAGE_COVERAGE_MISMATCH", `Pinned prepared frame ${pinnedFrame} has no state page descriptor.`);
+    resources.add(page.resource);
+  }
+  for (let offset = 1; offset <= packet.lookaheadPages; offset += 1) resources.add(packet.pages[(current + offset) % packet.pages.length].resource);
+  return resources;
+}
+
+function requiredDocumentStateResidency(packets, pinnedFrames, activeFramePins = []) {
+  let required = 0;
+  const candidateFrames = [...new Set(packets.flatMap((packet) => packet.pages.map((page) => page.startFrame)))];
+  const candidatePins = activeFramePins.length === 0 ? [undefined] : activeFramePins;
+  for (const frame of candidateFrames) {
+    for (const activeFramePin of candidatePins) {
+      const resources = new Set();
+      const pins = activeFramePin === undefined ? pinnedFrames : [...pinnedFrames, activeFramePin];
+      for (const packet of packets) for (const resource of desiredPageResources(packet, frame, pins)) resources.add(resource);
+      required = Math.max(required, resources.size);
+    }
+  }
+  return required;
+}
+
+function validatePagedVariants(state, binding, playback, inputs, tree, limits, surfaceBinding) {
+  exactObject(state.data, ["packet"], "INVALID_PAGED_VARIANT_STATE", "Paged variant state");
+  const packet = exactObject(state.data.packet, ["version", "frameCount", "classes", "effects", "initial", "pages", "lookaheadPages", "maxResidentPages"], "INVALID_PAGED_VARIANT_STATE", "Paged variant packet");
+  require(packet.version === 0 && Number.isSafeInteger(packet.frameCount) && packet.frameCount > 0 && packet.frameCount === playback.binding.parameters.frameCount, "STATE_PAGE_COVERAGE_MISMATCH", "Paged variant frame count differs from playback.");
+  const zero = globalThis.btoa("\0".repeat((packet.frameCount + 1) * 4));
+  validateVariants({ ...state, data: { packet: { version: 0, frameCount: packet.frameCount, classes: packet.classes, effects: packet.effects, initial: packet.initial, sequential: { offsetsBase64: zero, targetIndicesBase64: "", classIndicesBase64: "" }, nonInteractiveJumps: [] } } }, binding, playback, inputs, tree, limits, surfaceBinding);
+  require(Number.isSafeInteger(packet.lookaheadPages) && packet.lookaheadPages >= 1 && packet.lookaheadPages <= 4 && Number.isSafeInteger(packet.maxResidentPages) && packet.maxResidentPages >= packet.lookaheadPages + 1 && packet.maxResidentPages <= 16, "STATE_PAGE_RESIDENCY_LIMIT", "Paged variant residency is invalid.");
+  require(Array.isArray(packet.pages) && packet.pages.length > 0 && packet.pages.length <= limits.maxStatePages, "STATE_PAGE_COVERAGE_MISMATCH", "Paged variant descriptors are missing or excessive.");
+  const resources = new Set();
+  let expected = 1;
+  for (const [index, page] of packet.pages.entries()) {
+    exactObject(page, ["resource", "startFrame", "endFrame", "changeCount", "materializedByteLength"], "INVALID_PAGED_VARIANT_STATE", `Paged variant descriptor ${index}`);
+    assertResourceId(page.resource, `Paged variant descriptor ${index} resource`);
+    require(!resources.has(page.resource) && page.startFrame === expected && Number.isSafeInteger(page.endFrame) && page.endFrame >= page.startFrame && page.endFrame <= packet.frameCount, "STATE_PAGE_COVERAGE_MISMATCH", `Paged variant descriptor ${index} is invalid or noncontiguous.`);
+    require(page.endFrame - page.startFrame + 1 <= limits.maxStatePageFrames, "STATE_PAGE_COVERAGE_MISMATCH", `Paged variant descriptor ${index} exceeds the per-page frame limit.`);
+    require(Number.isSafeInteger(page.changeCount) && page.changeCount >= 0 && page.changeCount <= limits.maxPreparedChanges, "STATE_CHANGE_LIMIT", `Paged variant descriptor ${index} change count is invalid or excessive.`);
+    require(Number.isSafeInteger(page.materializedByteLength) && page.materializedByteLength > 0 && page.materializedByteLength <= limits.maxDecodedInputBytes, "STATE_PAGE_RESIDENCY_LIMIT", `Paged variant descriptor ${index} materialized size is invalid or excessive.`);
+    resources.add(page.resource);
+    expected = page.endFrame + 1;
+  }
+  require(expected === packet.frameCount + 1, "STATE_PAGE_COVERAGE_MISMATCH", "Paged variant descriptors do not cover playback exactly.");
+  return packet;
+}
+
+function validateCompositorTiming(state, binding, playback, inputs, limits) {
+  const sourceFrame = inputs.get("time.source-frame");
+  const tick = inputs.get("time.tick");
+  require(sourceFrame?.type === "uint" && tick?.type === "uint" && !Object.hasOwn(sourceFrame, "default") && !Object.hasOwn(tick, "default"), "INVALID_COMPOSITOR_TIMING_BINDING", "Compositor timing inputs must be un-defaulted uints.");
+  exactObject(binding.targets, ["nodes"], "INVALID_COMPOSITOR_TIMING_BINDING", "Compositor timing targets");
+  uniqueTargets(binding.targets.nodes, "Compositor timing");
+  exactObject(binding.parameters, ["frameCount", "tickRateHz", "tickIntervalUs"], "INVALID_COMPOSITOR_TIMING_BINDING", "Compositor timing parameters", ["frameCount"]);
+  validateTickCadence(binding.parameters, "INVALID_COMPOSITOR_TIMING_BINDING", "Compositor timing");
+  require(binding.parameters.frameCount === playback.binding.parameters.frameCount && sameTickCadence(binding.parameters, playback.binding.parameters), "INVALID_COMPOSITOR_TIMING_BINDING", "Compositor timing cadence differs from playback.");
+  require([
+    playback.packet.timeline,
+    ...(playback.packet.profileTimelines ?? []),
+    ...(playback.packet.banks?.flatMap((bank) => [bank.timeline, ...(bank.profileTimelines ?? [])]) ?? []),
+  ].every((timeline) => timeline.deadlineMicros === undefined), "INVALID_COMPOSITOR_TIMING_BINDING", "Compositor timing requires fixed playback cadence.");
+  exactObject(state.data, ["packet"], "INVALID_COMPOSITOR_TIMING_STATE", "Compositor timing state");
+  const packet = exactObject(state.data.packet, ["version", "timing", "targets"], "INVALID_COMPOSITOR_TIMING_STATE", "Compositor timing packet");
+  require(packet.version === 0 && packet.timing === "linear" && Array.isArray(packet.targets) && packet.targets.length > 0 && packet.targets.length <= Math.min(limits.maxNodes, 1024), "INVALID_COMPOSITOR_TIMING_STATE", "Compositor timing packet is invalid or excessive.");
+  require(packet.targets.length === binding.targets.nodes.length, "TARGET_CARDINALITY_MISMATCH", "Compositor timing target counts differ.");
+  let keyframes = 0;
+  for (const [targetIndex, target] of packet.targets.entries()) {
+    require(target && typeof target === "object" && !Array.isArray(target), "INVALID_COMPOSITOR_TIMING_STATE", `Compositor target ${targetIndex} is invalid.`);
+    const expectedNode = target.owner === "model" ? (target.index === 0 ? playback.binding.targets.model : undefined) : target.owner === "shape" ? playback.binding.targets.shapes[target.index] : target.owner === "leaf" ? playback.binding.targets.leaves[target.index] : undefined;
+    require(expectedNode === binding.targets.nodes[targetIndex], "INVALID_COMPOSITOR_TIMING_BINDING", `Compositor target ${targetIndex} is not its playback owner.`);
+    if (target.kind === "cycle") {
+      exactObject(target, ["kind", "owner", "index", "durationTicks", "iterations", "closure", "keyframes"], "INVALID_COMPOSITOR_TIMING_STATE", `Compositor cycle ${targetIndex}`);
+      require(target.owner === "model" && target.index === 0 && target.iterations === "infinite" && target.closure === "closed" && Number.isSafeInteger(target.durationTicks) && target.durationTicks >= 2 && target.durationTicks <= limits.maxTimelineTicks && Array.isArray(target.keyframes) && target.keyframes.length >= 3 && target.keyframes.length <= 256, "INVALID_COMPOSITOR_TIMING_STATE", `Compositor cycle ${targetIndex} is invalid.`);
+      let previous = -1;
+      for (const [index, row] of target.keyframes.entries()) {
+        exactObject(row, ["tick", "transformIndex"], "INVALID_COMPOSITOR_TIMING_STATE", `Compositor keyframe ${index}`);
+        require(Number.isSafeInteger(row.tick) && row.tick > previous && row.tick <= target.durationTicks && Number.isSafeInteger(row.transformIndex) && row.transformIndex >= 0 && row.transformIndex < playback.packet.transforms.count, "INVALID_COMPOSITOR_TIMING_STATE", `Compositor keyframe ${index} is invalid.`);
+        previous = row.tick;
+      }
+      require(target.keyframes[0].tick === 0 && target.keyframes.at(-1).tick === target.durationTicks && target.keyframes[0].transformIndex === target.keyframes.at(-1).transformIndex && playback.packet.frameRows.every((row) => row[2] === -1), "TARGET_OWNERSHIP_CONFLICT", `Compositor cycle ${targetIndex} is not closed or races playback.`);
+      keyframes += target.keyframes.length;
+    } else {
+      exactObject(target, ["kind", "owner", "index", "durationTicks"], "INVALID_COMPOSITOR_TIMING_STATE", `Compositor transition ${targetIndex}`);
+      require(target.kind === "transition" && Number.isSafeInteger(target.durationTicks) && target.durationTicks >= 1 && target.durationTicks <= 8, "INVALID_COMPOSITOR_TIMING_STATE", `Compositor transition ${targetIndex} is invalid.`);
+    }
+  }
+  require(keyframes <= 4096, "COMPOSITOR_TIMING_LIMIT", "Compositor keyframes are excessive.");
+}
+
+function validateViewportProfiles(state, binding, playback, presentation, inputs, limits) {
+  for (const id of ["viewport.height", "viewport.width"]) require(inputs.get(id)?.type === "float" && !Object.hasOwn(inputs.get(id), "default"), "INVALID_VIEWPORT_PROFILE_BINDING", "Viewport profile inputs must be un-defaulted floats.");
+  require(!Object.hasOwn(binding, "parameters"), "INVALID_VIEWPORT_PROFILE_BINDING", "Viewport profiles have no parameters.");
+  exactObject(binding.targets, ["leaves"], "INVALID_VIEWPORT_PROFILE_BINDING", "Viewport profile targets");
+  uniqueTargets(binding.targets.leaves, "Viewport profile leaf");
+  require(exactEqualArray(binding.targets.leaves, playback.binding.targets.leaves), "TARGET_CARDINALITY_MISMATCH", "Viewport profile leaves differ from playback.");
+  exactObject(state.data, ["packet"], "INVALID_VIEWPORT_PROFILE_STATE", "Viewport profile state");
+  const packet = exactObject(state.data.packet, ["version", "selection", "transforms", "profiles"], "INVALID_VIEWPORT_PROFILE_STATE", "Viewport profile packet");
+  require(packet.version === 0, "INVALID_VIEWPORT_PROFILE_STATE", "Viewport profile version must be zero.");
+  exactObject(packet.selection, ["mode"], "INVALID_VIEWPORT_PROFILE_STATE", "Viewport profile selection");
+  require(packet.selection.mode === "presentation-profile" || packet.selection.mode === "smallest-covering", "INVALID_VIEWPORT_PROFILE_STATE", "Viewport profile selection is unsupported.");
+  require(Array.isArray(packet.transforms) && packet.transforms.length < 65_535 && packet.transforms.length <= limits.maxPreparedTransforms, "TRANSFORM_ALLOCATION_LIMIT", "Viewport transform dictionary is excessive.");
+  let previousTransform;
+  for (const transform of packet.transforms) {
+    require(Array.isArray(transform) && transform.length === 12 && transform.every((value) => typeof value === "number" && Number.isFinite(value)), "INVALID_VIEWPORT_PROFILE_STATE", "Viewport transform is invalid.");
+    if (previousTransform) {
+      const difference = transform.findIndex((value, index) => value !== previousTransform[index]);
+      require(difference >= 0 && transform[difference] > previousTransform[difference], "INVALID_VIEWPORT_PROFILE_STATE", "Viewport transforms are not lexicographically sorted.");
+    }
+    previousTransform = transform;
+  }
+  require(Array.isArray(packet.profiles) && packet.profiles.length > 0 && packet.profiles.length <= 256 && packet.profiles.length * Math.max(1, playback.packet.leafCount) <= limits.maxVisibilityCells, "VIEWPORT_PROFILE_LIMIT", "Viewport profiles are missing or excessive.");
+  const presentationProfiles = presentation.packet.camera.profiles;
+  if (packet.selection.mode === "presentation-profile") require(presentationProfiles && packet.profiles.length === presentationProfiles.length, "INVALID_VIEWPORT_PROFILE_STATE", "Viewport profiles differ from presentation profiles.");
+  const ids = new Set();
+  const referenced = new Set();
+  let previousKey;
+  let visibilityChangeCount = 0;
+  let responsiveCoefficientCount = 0;
+  for (const [index, profile] of packet.profiles.entries()) {
+    exactObject(profile, ["id", "width", "height", "transformIndicesBase64", "visibleBitsBase64", "visibilityChanges", "responsiveAffine"], "INVALID_VIEWPORT_PROFILE_STATE", `Viewport profile ${index}`, ["id", "transformIndicesBase64", "visibleBitsBase64"]);
+    const id = stableId(profile.id, `Viewport profile ${index} id`);
+    require(!ids.has(id), "INVALID_VIEWPORT_PROFILE_STATE", "Viewport profile ids are duplicated.");
+    ids.add(id);
+    if (packet.selection.mode === "presentation-profile") require(!Object.hasOwn(profile, "width") && !Object.hasOwn(profile, "height") && id === presentationProfiles[index].id, "INVALID_VIEWPORT_PROFILE_STATE", `Viewport profile ${index} differs from presentation order.`);
+    else {
+      require(Number.isSafeInteger(profile.width) && profile.width > 0 && profile.width <= 1_000_000 && Number.isSafeInteger(profile.height) && profile.height > 0 && profile.height <= 1_000_000, "INVALID_VIEWPORT_PROFILE_STATE", `Viewport profile ${index} dimensions are invalid.`);
+      const key = [profile.width * profile.height, profile.width + profile.height, profile.width, profile.height];
+      if (previousKey) { const difference = key.findIndex((value, cursor) => value !== previousKey[cursor]); require(difference >= 0 && key[difference] > previousKey[difference], "INVALID_VIEWPORT_PROFILE_STATE", "Viewport covering profiles are not sorted."); }
+      previousKey = key;
+    }
+    const transforms = base64Integers(profile.transformIndicesBase64, 2, playback.packet.leafCount, "INVALID_VIEWPORT_PROFILE_STATE", `Viewport profile ${index} transforms`);
+    require(transforms.length === playback.packet.leafCount && transforms.every((value) => value === 65_535 || value < packet.transforms.length), "STATE_COLUMN_MISMATCH", `Viewport profile ${index} transforms are invalid.`);
+    transforms.forEach((value) => { if (value !== 65_535) referenced.add(value); });
+    const bits = base64Integers(profile.visibleBitsBase64, 1, Math.ceil(playback.packet.leafCount / 8), "INVALID_VIEWPORT_PROFILE_STATE", `Viewport profile ${index} visibility`);
+    require(bits.length === Math.ceil(playback.packet.leafCount / 8) && (playback.packet.leafCount % 8 === 0 || bits.length === 0 || (bits.at(-1) >> (playback.packet.leafCount % 8)) === 0), "STATE_COLUMN_MISMATCH", `Viewport profile ${index} visibility is invalid.`);
+    if (profile.visibilityChanges !== undefined) {
+      exactObject(profile.visibilityChanges, ["offsetsBase64", "leafIndicesBase64"], "INVALID_VIEWPORT_PROFILE_STATE", `Viewport profile ${index} visibility changes`);
+      const frameCount = playback.binding.parameters.frameCount;
+      const offsets = base64Integers(profile.visibilityChanges.offsetsBase64, 4, frameCount + 1, "INVALID_VIEWPORT_PROFILE_STATE", `Viewport profile ${index} visibility offsets`);
+      const leaves = base64Integers(profile.visibilityChanges.leafIndicesBase64, 2, limits.maxPreparedChanges, "INVALID_VIEWPORT_PROFILE_STATE", `Viewport profile ${index} visibility leaves`);
+      require(offsets.length === frameCount + 1 && offsets[0] === 0 && offsets.at(-1) === leaves.length && offsets.every((offset, cursor) => cursor === 0 || offset >= offsets[cursor - 1]), "STATE_COLUMN_MISMATCH", `Viewport profile ${index} visibility offsets are invalid.`);
+      for (let frame = 0; frame < frameCount; frame += 1) {
+        let previousLeaf = -1;
+        for (let cursor = offsets[frame]; cursor < offsets[frame + 1]; cursor += 1) {
+          require(leaves[cursor] < playback.packet.leafCount && leaves[cursor] > previousLeaf, "INVALID_VIEWPORT_PROFILE_STATE", `Viewport profile ${index} visibility frame is unsorted or out of range.`);
+          previousLeaf = leaves[cursor];
+        }
+      }
+      visibilityChangeCount += leaves.length;
+      require(Number.isSafeInteger(visibilityChangeCount) && visibilityChangeCount <= limits.maxPreparedChanges, "VIEWPORT_PROFILE_LIMIT", "Viewport profile visibility changes are excessive.");
+      const reconstructed = Uint8Array.from({ length: playback.packet.leafCount }, (_, leaf) => (bits[leaf >> 3] >> (leaf & 7)) & 1);
+      for (let frame = 1; frame < frameCount; frame += 1) for (let cursor = offsets[frame]; cursor < offsets[frame + 1]; cursor += 1) reconstructed[leaves[cursor]] ^= 1;
+      for (let cursor = offsets[0]; cursor < offsets[1]; cursor += 1) reconstructed[leaves[cursor]] ^= 1;
+      require(reconstructed.every((visible, leaf) => visible === ((bits[leaf >> 3] >> (leaf & 7)) & 1)), "INVALID_VIEWPORT_PROFILE_STATE", `Viewport profile ${index} visibility cycle does not close.`);
+    }
+    if (profile.responsiveAffine !== undefined) {
+      exactObject(profile.responsiveAffine, ["scale", "presentBitsBase64", "coefficientsBase64"], "INVALID_VIEWPORT_PROFILE_STATE", `Viewport profile ${index} responsive affine`);
+      exactObject(profile.responsiveAffine.scale, ["baseWidth", "baseHeight", "multiplier", "max"], "INVALID_VIEWPORT_PROFILE_STATE", `Viewport profile ${index} responsive affine scale`, ["baseWidth", "baseHeight", "multiplier"]);
+      for (const key of ["baseWidth", "baseHeight", "multiplier"]) require(typeof profile.responsiveAffine.scale[key] === "number" && Number.isFinite(profile.responsiveAffine.scale[key]) && profile.responsiveAffine.scale[key] > 0 && profile.responsiveAffine.scale[key] <= 1_000_000, "INVALID_VIEWPORT_PROFILE_STATE", `Viewport profile ${index} responsive affine scale is invalid.`);
+      if (Object.hasOwn(profile.responsiveAffine.scale, "max")) require(typeof profile.responsiveAffine.scale.max === "number" && Number.isFinite(profile.responsiveAffine.scale.max) && profile.responsiveAffine.scale.max > 0 && profile.responsiveAffine.scale.max <= 1_000_000, "INVALID_VIEWPORT_PROFILE_STATE", `Viewport profile ${index} responsive affine maximum is invalid.`);
+      const present = base64Integers(profile.responsiveAffine.presentBitsBase64, 1, Math.ceil(playback.packet.leafCount / 8), "INVALID_VIEWPORT_PROFILE_STATE", `Viewport profile ${index} responsive affine presence`);
+      require(present.length === Math.ceil(playback.packet.leafCount / 8) && (playback.packet.leafCount % 8 === 0 || present.length === 0 || (present.at(-1) >> (playback.packet.leafCount % 8)) === 0), "STATE_COLUMN_MISMATCH", `Viewport profile ${index} responsive affine presence is invalid.`);
+      const presentCount = Array.from({ length: playback.packet.leafCount }, (_, leaf) => (present[leaf >> 3] >> (leaf & 7)) & 1).reduce((sum, value) => sum + value, 0);
+      require(presentCount > 0, "INVALID_VIEWPORT_PROFILE_STATE", `Viewport profile ${index} responsive affine has no targets.`);
+      const coefficientCount = presentCount * 16;
+      responsiveCoefficientCount += coefficientCount;
+      require(Number.isSafeInteger(responsiveCoefficientCount) && responsiveCoefficientCount <= limits.maxPreparedStates, "VIEWPORT_PROFILE_LIMIT", "Viewport profile responsive coefficients are excessive.");
+      const coefficients = base64Float64(profile.responsiveAffine.coefficientsBase64, coefficientCount, "INVALID_VIEWPORT_PROFILE_STATE", `Viewport profile ${index} responsive affine coefficients`);
+      require(coefficients.length === coefficientCount && coefficients.every((value) => Number.isFinite(value) && !Object.is(value, -0) && Math.abs(value) <= 1_000_000_000), "INVALID_VIEWPORT_PROFILE_STATE", `Viewport profile ${index} responsive affine coefficients are invalid.`);
+    }
+  }
+  require(referenced.size === packet.transforms.length, "INVALID_VIEWPORT_PROFILE_STATE", "Viewport transform dictionary contains an unreferenced row.");
+}
+
+function validateOrbit(state, binding, presentation, inputs, tree, limits) {
+  require(presentation, "MISSING_POLYCSS_CHANNEL", "Prepared orbit requires static presentation.");
+  require(!Object.hasOwn(binding, "parameters"), "INVALID_ORBIT_BINDING", "Prepared orbit has no parameters.");
+  const targets = exactObject(binding.targets, ["model", "leaves"], "INVALID_ORBIT_BINDING", "Prepared orbit targets");
+  stableId(targets.model, "Prepared orbit model");
+  uniqueTargets(targets.leaves, "Prepared orbit leaf");
+  require(targets.leaves.length > 0 && targets.leaves.length < 65_535 && !targets.leaves.includes(targets.model), "TARGET_CARDINALITY_MISMATCH", "Prepared orbit targets are invalid.");
+  exactObject(state.data, ["packet"], "INVALID_ORBIT_STATE", "Prepared orbit state");
+  const packet = exactObject(state.data.packet, ["version", "initial", "ranges", "model", "surface"], "INVALID_ORBIT_STATE", "Prepared orbit packet");
+  require(packet.version === 0, "INVALID_ORBIT_STATE", "Prepared orbit version must be zero.");
+  exactObject(packet.initial, ["pitch", "yaw", "zoom"], "INVALID_ORBIT_STATE", "Prepared orbit initial inputs");
+  exactObject(packet.ranges, ["pitch", "yaw", "zoom"], "INVALID_ORBIT_STATE", "Prepared orbit ranges");
+  for (const name of ["pitch", "yaw", "zoom"]) {
+    const range = packet.ranges[name];
+    require(Array.isArray(range) && range.length === 2 && range.every((value) => typeof value === "number" && Number.isFinite(value)) && range[0] < range[1] && typeof packet.initial[name] === "number" && Number.isFinite(packet.initial[name]) && packet.initial[name] >= range[0] && packet.initial[name] <= range[1] && inputs.get(`orbit.${name}`)?.type === "float" && inputs.get(`orbit.${name}`).default === packet.initial[name], "INVALID_ORBIT_STATE", `Prepared orbit ${name} contract is invalid.`);
+  }
+  require(packet.ranges.pitch[0] >= -90 && packet.ranges.pitch[1] <= 90 && packet.ranges.yaw[0] >= -360 && packet.ranges.yaw[1] <= 360 && packet.ranges.zoom[0] > 0 && packet.ranges.zoom[1] <= 16, "INVALID_ORBIT_STATE", "Prepared orbit ranges exceed the interpreter domain.");
+  exactObject(packet.model, ["translation", "scale"], "INVALID_ORBIT_STATE", "Prepared orbit model");
+  require(Array.isArray(packet.model.translation) && packet.model.translation.length === 3 && packet.model.translation.every((value) => typeof value === "number" && Number.isFinite(value) && Math.abs(value) <= 1_000_000) && Array.isArray(packet.model.scale) && packet.model.scale.length === 3 && packet.model.scale.every((value) => typeof value === "number" && Number.isFinite(value) && value > 0 && value <= 16), "INVALID_ORBIT_STATE", "Prepared orbit model values are invalid.");
+  const number = (value) => Object.is(value, -0) ? "0" : String(value);
+  const expectedTransform = `translate3d(${packet.model.translation.map(number).join("px, ")}px) rotateX(${number(packet.initial.pitch)}deg) rotateY(${number(packet.initial.yaw)}deg) scale3d(${packet.model.scale.map((value) => number(value * packet.initial.zoom)).join(", ")})`;
+  require(tree.byId.get(targets.model)?.styles?.transform === expectedTransform, "ORBIT_TREE_MISMATCH", "Prepared orbit model transform differs from TREE.");
+  const surface = exactObject(packet.surface, ["stateCount", "positionDictionary", "initialPositionIndicesBase64", "transitions"], "INVALID_ORBIT_STATE", "Prepared orbit surface");
+  require(Number.isSafeInteger(surface.stateCount) && surface.stateCount >= 2 && surface.stateCount <= 360 && Math.round((((packet.initial.yaw % 360) + 360) % 360) * surface.stateCount / 360) % surface.stateCount === 0, "ORBIT_STATE_LIMIT", "Prepared orbit state count or initial yaw is invalid.");
+  require(Array.isArray(surface.positionDictionary) && surface.positionDictionary.length > 0 && surface.positionDictionary.length < 65_535 && surface.positionDictionary.length <= limits.maxPreparedStates, "ORBIT_STATE_LIMIT", "Prepared orbit position dictionary is invalid or excessive.");
+  let previous;
+  for (const position of surface.positionDictionary) {
+    require(Array.isArray(position) && position.length === 2 && position.every((value) => Number.isSafeInteger(value) && !Object.is(value, -0) && value >= -0x7fffffff && value <= 0x7fffffff), "INVALID_ORBIT_STATE", "Prepared orbit position is invalid.");
+    if (previous) require(position[0] > previous[0] || position[0] === previous[0] && position[1] > previous[1], "INVALID_ORBIT_STATE", "Prepared orbit positions are not sorted.");
+    previous = position;
+  }
+  const initial = base64Integers(surface.initialPositionIndicesBase64, 2, targets.leaves.length, "INVALID_ORBIT_STATE", "Prepared orbit initial positions");
+  require(initial.length === targets.leaves.length && initial.every((value) => value < surface.positionDictionary.length), "STATE_COLUMN_MISMATCH", "Prepared orbit initial positions are invalid.");
+  const positionText = (position) => position.map((value) => value === 0 ? "0" : `${value}px`).join(" ");
+  for (let index = 0; index < targets.leaves.length; index += 1) require(tree.byId.get(targets.leaves[index])?.styles?.backgroundPosition === positionText(surface.positionDictionary[initial[index]]), "ORBIT_TREE_MISMATCH", `Prepared orbit leaf ${index} differs from TREE.`);
+  const transitions = exactObject(surface.transitions, ["offsetsBase64", "leafIndicesBase64", "forwardPositionIndicesBase64", "backwardPositionIndicesBase64"], "INVALID_ORBIT_STATE", "Prepared orbit transitions");
+  const offsets = base64Integers(transitions.offsetsBase64, 4, surface.stateCount + 1, "INVALID_ORBIT_STATE", "Prepared orbit offsets");
+  require(offsets.length === surface.stateCount + 1 && offsets[0] === 0 && offsets.every((value, index) => index === 0 || value >= offsets[index - 1]) && offsets.at(-1) <= limits.maxPreparedChanges, "INVALID_ORBIT_STATE", "Prepared orbit offsets are invalid.");
+  const count = offsets.at(-1);
+  const leaves = base64Integers(transitions.leafIndicesBase64, 2, count, "INVALID_ORBIT_STATE", "Prepared orbit leaves");
+  const forward = base64Integers(transitions.forwardPositionIndicesBase64, 2, count, "INVALID_ORBIT_STATE", "Prepared orbit forward positions");
+  const backward = base64Integers(transitions.backwardPositionIndicesBase64, 2, count, "INVALID_ORBIT_STATE", "Prepared orbit backward positions");
+  require(leaves.length === count && forward.length === count && backward.length === count, "STATE_COLUMN_MISMATCH", "Prepared orbit transition columns differ.");
+  require(surface.stateCount * targets.leaves.length <= limits.maxVisibilityCells, "ORBIT_STATE_LIMIT", "Prepared orbit canonical rows exceed their allocation limit.");
+  const referenced = new Set(initial);
+  const apply = (row, edge, values) => {
+    let previousLeaf = -1;
+    for (let cursor = offsets[edge]; cursor < offsets[edge + 1]; cursor += 1) {
+      require(leaves[cursor] > previousLeaf && leaves[cursor] < targets.leaves.length && forward[cursor] < surface.positionDictionary.length && backward[cursor] < surface.positionDictionary.length && row[leaves[cursor]] !== values[cursor], "INVALID_ORBIT_STATE", `Prepared orbit edge ${edge} is invalid.`);
+      row[leaves[cursor]] = values[cursor];
+      previousLeaf = leaves[cursor];
+      referenced.add(forward[cursor]); referenced.add(backward[cursor]);
+    }
+  };
+  let row = initial.slice();
+  for (let stateIndex = 1; stateIndex < surface.stateCount; stateIndex += 1) {
+    const previous = row.slice();
+    apply(row, stateIndex, forward);
+    const reverse = row.slice();
+    apply(reverse, stateIndex, backward);
+    require(exactEqualArray(reverse, previous), "ORBIT_TRANSITION_MISMATCH", `Prepared orbit backward edge ${stateIndex} is invalid.`);
+  }
+  const finalRow = row.slice();
+  apply(row, 0, forward);
+  require(exactEqualArray(row, initial), "ORBIT_TRANSITION_MISMATCH", "Prepared orbit forward cycle does not close.");
+  const reverse = row.slice();
+  apply(reverse, 0, backward);
+  require(exactEqualArray(reverse, finalRow), "ORBIT_TRANSITION_MISMATCH", "Prepared orbit backward edge 0 is invalid.");
+  require(referenced.size === surface.positionDictionary.length, "INVALID_ORBIT_STATE", "Prepared orbit dictionary contains an unreferenced row.");
+}
+
 function validateCodecClosure(document, context, tree, records, limits) {
   const byInterpreter = new Map([...context.channels.values()].map((binding) => [binding.interpreter, { binding, state: context.states.get(binding.state) }]));
+  require(!(byInterpreter.has("polycss-playback@0") && byInterpreter.has("polycss-paged-playback@0")), "TARGET_OWNERSHIP_CONFLICT", "Inline and paged playback are mutually exclusive.");
   let playback = null;
   if (byInterpreter.has("polycss-playback@0")) {
     const value = byInterpreter.get("polycss-playback@0");
-    playback = { ...value, packet: validatePlayback(value.state, value.binding, context.inputs, limits) };
+    playback = { ...value, kind: "inline", packet: validatePlayback(value.state, value.binding, context.inputs, limits) };
+  } else if (byInterpreter.has("polycss-paged-playback@0")) {
+    const value = byInterpreter.get("polycss-paged-playback@0");
+    playback = { ...value, kind: "paged", packet: validatePagedPlayback(value.state, value.binding, context.inputs, limits) };
   }
   let presentation = null;
   if (byInterpreter.has("static-presentation@0")) {
     const value = byInterpreter.get("static-presentation@0");
     presentation = { ...value, packet: validatePresentation(value.state, value.binding, records, context.inputs) };
+  }
+  if (playback && (playback.packet.profileTimelines !== undefined || playback.packet.banks?.some((bank) => bank.profileTimelines !== undefined))) {
+    require(presentation, "MISSING_POLYCSS_CHANNEL", "Playback profile timelines require static presentation.");
+    validatePlaybackProfileTimelineClosure(playback.packet, presentation.packet);
+  }
+  if (byInterpreter.has("polycss-compositor-timing@0")) {
+    require(playback, "MISSING_POLYCSS_CHANNEL", "Compositor timing requires executable playback.");
+    require(playback.kind === "inline", "TARGET_OWNERSHIP_CONFLICT", "Compositor timing version 0 cannot reference page-local playback transforms.");
+    const value = byInterpreter.get("polycss-compositor-timing@0");
+    validateCompositorTiming(value.state, value.binding, playback, context.inputs, limits);
   }
   let surface = null;
   if (byInterpreter.has("polycss-surface@0")) {
@@ -1271,11 +1922,26 @@ function validateCodecClosure(document, context, tree, records, limits) {
   if (byInterpreter.has("polycss-variants@0")) {
     require(playback, "MISSING_POLYCSS_CHANNEL", "Prepared variants require executable playback.");
     const value = byInterpreter.get("polycss-variants@0");
-    validateVariants(value.state, value.binding, playback, context.inputs, tree, limits);
+    validateVariants(value.state, value.binding, playback, context.inputs, tree, limits, surface?.binding);
+  }
+  let pagedVariants = null;
+  if (byInterpreter.has("polycss-paged-variants@0")) {
+    require(playback, "MISSING_POLYCSS_CHANNEL", "Paged variants require executable playback.");
+    require(!byInterpreter.has("polycss-variants@0"), "TARGET_OWNERSHIP_CONFLICT", "Inline and paged variants cannot race class ownership.");
+    const value = byInterpreter.get("polycss-paged-variants@0");
+    pagedVariants = { ...value, packet: validatePagedVariants(value.state, value.binding, playback, context.inputs, tree, limits, surface?.binding) };
+  }
+  const pagedPackets = [playback?.kind === "paged" ? playback.packet : null, pagedVariants?.packet].filter(Boolean);
+  if (pagedPackets.length > 0) {
+    const sharedCeiling = pagedPackets[0].maxResidentPages;
+    const bankEntryFrames = playback.packet.banks?.map((bank) => bank.entryFrame) ?? [];
+    require(pagedPackets.every((packet) => packet.maxResidentPages === sharedCeiling), "STATE_PAGE_RESIDENCY_LIMIT", "Every paged state channel must declare the same document-wide resident-page ceiling.");
+    require(sharedCeiling >= requiredDocumentStateResidency(pagedPackets, [playback.packet.initial.sourceFrame], bankEntryFrames), "STATE_PAGE_RESIDENCY_LIMIT", "Paged state channels cannot satisfy the combined lookahead, fixed-pin, and prepared-bank transfer window within the document-wide resident-page ceiling.");
   }
   let effects = null;
   if (byInterpreter.has("polycss-effects@0")) {
     require(playback, "MISSING_POLYCSS_CHANNEL", "Prepared effects require executable playback.");
+    require(playback.binding.parameters.catchUpPolicy !== "elapsed", "INVALID_EFFECTS_BINDING", "Prepared effects do not support collapsed elapsed catch-up.");
     const value = byInterpreter.get("polycss-effects@0");
     effects = { ...value, packet: validateEffects(value.state, value.binding, playback, context.inputs, limits) };
   }
@@ -1283,7 +1949,21 @@ function validateCodecClosure(document, context, tree, records, limits) {
     require(playback && presentation && effects, "MISSING_POLYCSS_CHANNEL", "Prepared pointer interaction requires playback, presentation, and effects.");
     const value = byInterpreter.get("polycss-pointer-grab@0");
     validateInteraction(value.state, value.binding, playback, presentation, context.inputs, limits);
-    require(value.binding.parameters.tickRateHz === playback.binding.parameters.tickRateHz, "INVALID_INTERACTION_BINDING", "Interaction and playback tick rates differ.");
+    require(sameTickCadence(value.binding.parameters, playback.binding.parameters) && playback.binding.parameters.catchUpPolicy !== "elapsed", "INVALID_INTERACTION_BINDING", "Interaction and playback timing is incompatible.");
+    if (pagedPackets.length > 0) {
+      const requiredResidentPages = requiredDocumentStateResidency(pagedPackets, [playback.packet.initial.sourceFrame, value.binding.parameters.initialFrame], playback.packet.banks?.map((bank) => bank.entryFrame) ?? []);
+      require(pagedPackets[0].maxResidentPages >= requiredResidentPages, "STATE_PAGE_RESIDENCY_LIMIT", "Paged state with interaction must reserve the playback and interaction entry pages in addition to every combined cyclic lookahead window.");
+    }
+  }
+  if (byInterpreter.has("polycss-orbit-input@0")) {
+    require(!playback, "TARGET_OWNERSHIP_CONFLICT", "Prepared orbit version 0 cannot race playback.");
+    const value = byInterpreter.get("polycss-orbit-input@0");
+    validateOrbit(value.state, value.binding, presentation, context.inputs, tree, limits);
+  }
+  if (byInterpreter.has("polycss-viewport-profiles@0")) {
+    require(playback && presentation, "MISSING_POLYCSS_CHANNEL", "Viewport profiles require playback and presentation.");
+    const value = byInterpreter.get("polycss-viewport-profiles@0");
+    validateViewportProfiles(value.state, value.binding, playback, presentation, context.inputs, limits);
   }
   validateTargetOwnership(context.channels, limits);
   if (surface) validateInitialSurfaceClosure(surface.packet, playback, tree);
@@ -1298,7 +1978,10 @@ function validateCodecClosure(document, context, tree, records, limits) {
     }
     const camera = tree.byId.get(binding.targets.camera);
     require(camera?.styles?.perspective === `${packet.camera.perspective}px` && camera.styles.perspectiveOrigin === `${packet.camera.sourceWidth / 2}px ${packet.camera.sourceHeight / 2}px` && camera.styles.position === "relative" && camera.styles.width === `${packet.camera.sourceWidth}px` && camera.styles.height === `${packet.camera.sourceHeight}px` && camera.styles.transformOrigin === undefined && camera.styles.transformStyle === undefined, "PRESENTATION_TREE_MISMATCH", "Presentation camera does not match TREE.");
-    if (playback) require(playback.binding.parameters.baseSceneTransform === packet.camera.baseSceneTransform && tree.byId.get(playback.binding.targets.model)?.styles?.transform === packet.camera.baseSceneTransform, "PRESENTATION_TREE_MISMATCH", "Presentation scene transform differs from playback/TREE.");
+    if (playback) {
+      require(playback.binding.parameters.baseSceneTransform === packet.camera.baseSceneTransform, "PRESENTATION_TREE_MISMATCH", "Presentation scene transform differs from playback.");
+      if (playback.kind === "inline") require(tree.byId.get(playback.binding.targets.model)?.styles?.transform === packet.camera.baseSceneTransform, "PRESENTATION_TREE_MISMATCH", "Presentation scene transform differs from playback/TREE.");
+    }
     const interaction = byInterpreter.get("polycss-pointer-grab@0");
     if (interaction) require(Object.hasOwn(binding.targets, "cursorLayer") && Object.hasOwn(binding.targets, "cursorStates") && interaction.binding.targets.cursorLayer === binding.targets.cursorLayer && interaction.binding.targets.cursorStates.open === binding.targets.cursorStates.open && interaction.binding.targets.cursorStates.closed === binding.targets.cursorStates.closed, "PRESENTATION_TREE_MISMATCH", "Presentation and interaction cursor targets differ.");
   }
@@ -1308,7 +1991,16 @@ function validateCodecClosure(document, context, tree, records, limits) {
     if (playback) for (const [name, value] of [["shapes", playback.binding.targets.shapes.length], ["leaves", playback.binding.targets.leaves.length], ["sourceFrames", playback.binding.parameters.frameCount]]) if (Object.hasOwn(document.meta.counts, name)) require(document.meta.counts[name] === value, "META_COUNT_MISMATCH", `META ${name} count is inaccurate.`);
   }
 
-  const expectedCapabilities = [...BASE_CAPABILITIES, ...CAPABILITY_ORDER.filter(([interpreter]) => context.interpreters.has(interpreter)).map(([, capability]) => capability)];
+  const expectedCapabilities = [...BASE_CAPABILITIES];
+  let includedPagedState = false;
+  for (const [interpreter, capability] of CAPABILITY_ORDER) {
+    if (!context.interpreters.has(interpreter)) continue;
+    if ((interpreter === "polycss-paged-playback@0" || interpreter === "polycss-paged-variants@0") && !includedPagedState) {
+      expectedCapabilities.push("prepared-paged-state");
+      includedPagedState = true;
+    }
+    expectedCapabilities.push(capability);
+  }
   exactArray(document.meta.capabilities, expectedCapabilities, "CAPABILITY_CLOSURE_MISMATCH", "META capabilities");
   const expectedConformance = ["retained-tree", ...CONFORMANCE_ORDER.filter(([interpreter]) => context.interpreters.has(interpreter)).map(([, role]) => role)];
   exactArray(document.meta.conformance.executable, expectedConformance, "CONFORMANCE_CLOSURE_MISMATCH", "META conformance");
@@ -1326,6 +2018,56 @@ function validateCodecClosure(document, context, tree, records, limits) {
     for (const token of binding.assetTokens) used.add(token.resource);
   }
   if (presentation?.packet.background) used.add(presentation.packet.background.resource);
+  const paged = byInterpreter.get("polycss-paged-variants@0");
+  if (paged) for (const page of paged.state.data.packet.pages) {
+    require(records.get(page.resource)?.kind === "state-page" && records.get(page.resource)?.codec === "polycss-paged-variants-page@0", "RESOURCE_ROLE_MISMATCH", `Paged variant resource ${page.resource} is not a matching state page.`);
+    used.add(page.resource);
+  }
+  const pagedPlayback = byInterpreter.get("polycss-paged-playback@0");
+  if (pagedPlayback) for (const page of pagedPlayback.state.data.packet.pages) {
+    require(records.get(page.resource)?.kind === "state-page" && records.get(page.resource)?.codec === "polycss-paged-playback-page@0", "RESOURCE_ROLE_MISMATCH", `Paged playback resource ${page.resource} is not a matching state page.`);
+    used.add(page.resource);
+  }
+  if (pagedPackets.length > 0) {
+    const materializedBytes = new Map();
+    for (const packet of pagedPackets) for (const page of packet.pages) materializedBytes.set(page.resource, page.materializedByteLength);
+    const interaction = byInterpreter.get("polycss-pointer-grab@0");
+    const pins = [playback.packet.initial.sourceFrame, interaction?.binding.parameters.initialFrame].filter((frame) => frame !== undefined);
+    const playbackPacket = pagedPlayback?.state.data.packet ?? null;
+    const variantTargetCount = paged?.binding.targets.nodes.length ?? 0;
+    const retainedLiveCeiling = (playbackPacket
+      ? Math.max(...playbackPacket.pages.map((page) => page.materializedByteLength + 16 + (playbackPacket.shapeCount + playbackPacket.leafCount) * 8 + playbackPacket.shapeCount))
+      : 0) + variantTargetCount * 4;
+    require(Number.isSafeInteger(retainedLiveCeiling), "STATE_PAGE_RESIDENCY_LIMIT", "Paged state retained live-row accounting overflowed.");
+    let peakBytes = 0;
+    for (let frame = 1; frame <= playback.binding.parameters.frameCount; frame += 1) {
+      const desired = new Set();
+      for (const packet of pagedPackets) for (const resource of desiredPageResources(packet, frame, pins)) desired.add(resource);
+      let residentBytes = 0;
+      for (const resource of desired) {
+        const materialized = materializedBytes.get(resource);
+        residentBytes += materialized;
+        require(Number.isSafeInteger(residentBytes), "STATE_PAGE_RESIDENCY_LIMIT", "Paged state byte accounting overflowed.");
+      }
+      const playbackCurrent = playbackPacket?.pages.find((page) => frame >= page.startFrame && frame <= page.endFrame);
+      const publicationWorkspace = (playbackCurrent
+        ? playbackCurrent.materializedByteLength + 16
+          + (playbackPacket.shapeCount + playbackPacket.leafCount) * 8 + playbackPacket.shapeCount
+          + (playbackPacket.shapeCount + playbackPacket.leafCount) * 12 + playbackPacket.shapeCount
+        : 0) + variantTargetCount * 4;
+      require(Number.isSafeInteger(publicationWorkspace), "STATE_PAGE_RESIDENCY_LIMIT", "Paged state publication workspace accounting overflowed.");
+      peakBytes = Math.max(peakBytes, residentBytes + retainedLiveCeiling + publicationWorkspace);
+      for (const resource of desired) {
+        const record = records.get(resource);
+        const materialized = materializedBytes.get(resource);
+        require(record?.kind === "state-page" && Number.isSafeInteger(record.decodedByteLength), "RESOURCE_ROLE_MISMATCH", `Paged state resource ${resource} is not a bounded state page.`);
+        const validationPeak = residentBytes - materialized + record.decodedByteLength * 10 + materialized * 2 + retainedLiveCeiling;
+        require(Number.isSafeInteger(validationPeak), "STATE_PAGE_RESIDENCY_LIMIT", "Paged state validation byte accounting overflowed.");
+        peakBytes = Math.max(peakBytes, validationPeak);
+      }
+    }
+    require(peakBytes <= limits.maxDecodedInputBytes, "STATE_PAGE_RESIDENCY_LIMIT", "Paged state decoded, materialized, and live-row window exceeds the document-wide decoded byte ceiling.");
+  }
   require(records.size === used.size && [...records.keys()].every((id) => used.has(id)), "UNUSED_RESOURCE", "RCRD contains an unreachable resource.");
 }
 

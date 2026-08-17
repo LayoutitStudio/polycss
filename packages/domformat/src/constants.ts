@@ -15,8 +15,10 @@ export const DEFAULT_LIMITS = Object.freeze({
   maxClassesPerNode: 32,
   maxStylesPerNode: 64,
   maxResources: 2048,
+  maxStatePages: 512,
   maxResourceBytes: 64 * 1024 * 1024,
   maxAggregateResourceBytes: 128 * 1024 * 1024,
+  maxAggregateStatePageBytes: 128 * 1024 * 1024,
   maxCssBytes: 16 * 1024 * 1024,
   maxCssRules: 8192,
   maxCssSelectors: 32_768,
@@ -32,11 +34,13 @@ export const DEFAULT_LIMITS = Object.freeze({
   maxBindingChannels: 128,
   maxBindingInputs: 256,
   maxFrames: 10_000,
+  maxPagedFrames: 64_000,
+  maxStatePageFrames: 10_000,
   maxTimelineTicks: 1_000_000,
   maxPreparedTransforms: 2_000_000,
   maxPreparedStates: 2_000_000,
   maxPreparedChanges: 4_000_000,
-  // Surface validation revisits this matrix; this is a CPU budget as well as an allocation ceiling.
+  // Explicit dense contracts use this as both a CPU and allocation ceiling.
   maxVisibilityCells: 8 * 1024 * 1024,
   maxEffectParticles: 10_000,
   maxEffectSpawnTuples: 1_000_000,
@@ -69,7 +73,7 @@ export function jsonStructureLimits(limits: DomLimits = DEFAULT_LIMITS): DomJson
   const maxArrayItems = Math.min(decodedItemCeiling, Math.max(
     limits.maxNodes,
     cappedProduct(limits.maxNodes, 16),
-    limits.maxResources,
+    cappedProduct(Math.max(limits.maxResources, limits.maxStatePages), 2),
     limits.maxStateChannels,
     limits.maxBindingChannels,
     limits.maxBindingInputs,
@@ -89,7 +93,7 @@ export function jsonStructureLimits(limits: DomLimits = DEFAULT_LIMITS): DomJson
   ));
   const maxObjectMembers = Math.min(
     Math.floor(limits.maxAggregateDecodedBytes / 4) + 1,
-    Math.max(128, limits.maxResources, limits.maxAttributesPerNode, limits.maxStylesPerNode),
+    Math.max(128, limits.maxResources, limits.maxStatePages, limits.maxAttributesPerNode, limits.maxStylesPerNode),
   );
   return Object.freeze({ maxArrayItems, maxObjectMembers, maxKeyCodeUnits: 256 });
 }

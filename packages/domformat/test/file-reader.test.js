@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { readDomFile } from "../src/reader.js";
 import { buildDom } from "../src/writer.js";
-import { errorCode, projectRoot, syntheticInput } from "./helpers.js";
+import { errorCode, projectRoot, syntheticInput, syntheticPagedVariantsInput } from "./helpers.js";
 
 async function writeSplitPackage(root, built, overrides = new Map()) {
   const packageDirectory = join(root, "package");
@@ -21,6 +21,21 @@ async function writeSplitPackage(root, built, overrides = new Map()) {
   }
   return { model, packageDirectory };
 }
+
+test("file reader verifies identity and gzip state pages before returning the package", async () => {
+  for (const encoding of ["identity", "gzip"]) {
+    const directory = await mkdtemp(join(tmpdir(), `domformat-state-page-${encoding}-`));
+    try {
+      const built = buildDom(await syntheticPagedVariantsInput(encoding));
+      const { model } = await writeSplitPackage(directory, built);
+      const read = await readDomFile(model, { requireResources: true });
+      assert.equal(read.externalMissing.length, 0);
+      assert.equal(read.document.resources.resources.filter((record) => record.kind === "state-page").length, 4);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  }
+});
 
 test("file reader rejects an oversized package from metadata before parsing", async () => {
   const directory = await mkdtemp(join(tmpdir(), "domformat-file-limit-"));

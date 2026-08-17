@@ -3,7 +3,8 @@ import { rewriteCss, validateCssClosure } from "./css.js";
 import { invariant } from "./errors.js";
 import { crc32 } from "./crc32.js";
 import type { DomLimits } from "./constants.js";
-import type { DomResourceCatalog, DomResourceRecord, DomStylesheetBinding } from "./public-types.js";
+import type { CssValidationPolicy } from "./css.js";
+import type { DomResourceCatalog, DomResourceRecord, DomStatePageCodec, DomStylesheetBinding } from "./public-types.js";
 
 const RESOURCE_ID = /^[a-z][a-z0-9._-]{0,63}$/u;
 const SHA256 = /^[0-9a-f]{64}$/u;
@@ -12,7 +13,12 @@ const WINDOWS_DEVICE = /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])$/u;
 const SUPPORTED_MEDIA_TYPES = new Set([
   "image/png",
   "image/webp",
+  "application/vnd.layoutit.domformat-state-page+json",
   "text/css;charset=utf-8",
+]);
+const SUPPORTED_STATE_PAGE_CODECS: ReadonlySet<DomStatePageCodec> = new Set([
+  "polycss-paged-playback-page@0",
+  "polycss-paged-variants-page@0",
 ]);
 
 const arrayBufferByteLength = Object.getOwnPropertyDescriptor(ArrayBuffer.prototype, "byteLength")?.get;
@@ -69,30 +75,44 @@ export function validateResourceCatalog(catalog: unknown, limits: DomLimits): Se
   knownRecordKeys(catalogRecord, new Set(["version", "resources"]), "INVALID_RESOURCES", "RCRD");
   invariant(catalogRecord.version === 0, "UNSUPPORTED_RESOURCE_SCHEMA", "RCRD schema version must be 0.");
   invariant(Array.isArray(catalogRecord.resources), "INVALID_RESOURCES", "RCRD.resources must be an array.");
-  invariant(catalogRecord.resources.length <= limits.maxResources, "RESOURCE_COUNT_LIMIT", `Resource count exceeds ${limits.maxResources}.`);
+  invariant(catalogRecord.resources.length <= limits.maxResources + limits.maxStatePages, "RESOURCE_COUNT_LIMIT", "Resource count exceeds the combined eager and state-page ceilings.");
   const ids = new Set<string>();
   const externalPaths = new Set<string>();
   let previousId = "";
-  let aggregateBytes = 0;
+  let eagerResources = 0;
+  let statePages = 0;
+  let aggregateEagerBytes = 0;
+  let aggregateStatePageBytes = 0;
   let aggregateImagePixels = 0;
+  let aggregateDecodedStateBytes = 0;
   for (const [index, value] of catalogRecord.resources.entries()) {
     const record = plainRecord(value, "INVALID_RESOURCE", `Resource ${index}`);
-    knownRecordKeys(record, new Set(["id", "kind", "mediaType", "byteLength", "dimensions", "digest", "path"]), "INVALID_RESOURCE", `Resource ${index}`);
+    knownRecordKeys(record, new Set(["id", "kind", "mediaType", "byteLength", "dimensions", "digest", "path", "encoding", "decodedByteLength", "decodedDigest", "codec"]), "INVALID_RESOURCE", `Resource ${index}`);
     const id = assertResourceId(record.id, `Resource ${index} id`);
     invariant(id > previousId, "RESOURCE_ORDER", "Resource records must be sorted by id.");
     previousId = id;
     ids.add(id);
-    invariant(record.kind === "stylesheet" || record.kind === "image", "INVALID_RESOURCE_KIND", `Resource ${id} has invalid kind ${record.kind}.`);
+    invariant(record.kind === "stylesheet" || record.kind === "image" || record.kind === "state-page", "INVALID_RESOURCE_KIND", `Resource ${id} has invalid kind ${record.kind}.`);
     invariant(typeof record.mediaType === "string" && SUPPORTED_MEDIA_TYPES.has(record.mediaType), "UNSUPPORTED_MEDIA_TYPE", `Resource ${id} has unsupported media type ${String(record.mediaType)}.`);
     invariant(
       (record.kind === "stylesheet" && record.mediaType === "text/css;charset=utf-8")
-      || (record.kind === "image" && record.mediaType.startsWith("image/")),
+      || (record.kind === "image" && record.mediaType.startsWith("image/"))
+      || (record.kind === "state-page" && record.mediaType === "application/vnd.layoutit.domformat-state-page+json"),
       "RESOURCE_KIND_MEDIA_MISMATCH",
       `Resource ${id} kind and media type disagree.`,
     );
     invariant(typeof record.byteLength === "number" && Number.isSafeInteger(record.byteLength) && record.byteLength >= 0 && record.byteLength <= limits.maxResourceBytes, "INVALID_RESOURCE_SIZE", `Resource ${id} has invalid or excessive byteLength.`);
-    aggregateBytes += record.byteLength;
-    invariant(aggregateBytes <= limits.maxAggregateResourceBytes, "AGGREGATE_RESOURCE_LIMIT", "Aggregate resource bytes exceed their limit.");
+    if (record.kind === "state-page") {
+      statePages += 1;
+      aggregateStatePageBytes += record.byteLength;
+      invariant(statePages <= limits.maxStatePages, "RESOURCE_COUNT_LIMIT", "State-page resource count exceeds its limit.");
+      invariant(aggregateStatePageBytes <= limits.maxAggregateStatePageBytes, "AGGREGATE_RESOURCE_LIMIT", "Aggregate encoded state-page bytes exceed their limit.");
+    } else {
+      eagerResources += 1;
+      aggregateEagerBytes += record.byteLength;
+      invariant(eagerResources <= limits.maxResources, "RESOURCE_COUNT_LIMIT", "Eager resource count exceeds its limit.");
+      invariant(aggregateEagerBytes <= limits.maxAggregateResourceBytes, "AGGREGATE_RESOURCE_LIMIT", "Aggregate eager resource bytes exceed their limit.");
+    }
     if (record.kind === "image") {
       const dimensions = plainRecord(record.dimensions, "INVALID_RESOURCE_DIMENSIONS", `Resource ${id} dimensions`);
       knownRecordKeys(dimensions, new Set(["width", "height"]), "INVALID_RESOURCE_DIMENSIONS", `Resource ${id} dimensions`);
@@ -121,6 +141,20 @@ export function validateResourceCatalog(catalog: unknown, limits: DomLimits): Se
     const digest = plainRecord(record.digest, "INVALID_RESOURCE_DIGEST", `Resource ${id} digest`);
     knownRecordKeys(digest, new Set(["algorithm", "value"]), "INVALID_RESOURCE_DIGEST", `Resource ${id} digest`);
     invariant(digest.algorithm === "sha256" && typeof digest.value === "string" && SHA256.test(digest.value), "INVALID_RESOURCE_DIGEST", `Resource ${id} needs a lowercase SHA-256 digest.`);
+    if (record.kind === "state-page") {
+      invariant(record.encoding === "identity" || record.encoding === "gzip", "INVALID_STATE_PAGE_RESOURCE", `State page ${id} encoding is unsupported.`);
+      const decodedByteLength = record.decodedByteLength;
+      invariant(typeof decodedByteLength === "number" && Number.isSafeInteger(decodedByteLength) && decodedByteLength >= 0 && decodedByteLength <= limits.maxResourceBytes, "INVALID_STATE_PAGE_RESOURCE", `State page ${id} decoded length is invalid or excessive.`);
+      aggregateDecodedStateBytes += decodedByteLength;
+      invariant(aggregateDecodedStateBytes <= limits.maxAggregateDecodedBytes, "AGGREGATE_DECODED_LIMIT", "Decoded state-page bytes exceed their aggregate limit.");
+      const decodedDigest = plainRecord(record.decodedDigest, "INVALID_STATE_PAGE_RESOURCE", `State page ${id} decoded digest`);
+      knownRecordKeys(decodedDigest, new Set(["algorithm", "value"]), "INVALID_STATE_PAGE_RESOURCE", `State page ${id} decoded digest`);
+      invariant(decodedDigest.algorithm === "sha256" && typeof decodedDigest.value === "string" && SHA256.test(decodedDigest.value), "INVALID_STATE_PAGE_RESOURCE", `State page ${id} decoded digest is invalid.`);
+      invariant(typeof record.codec === "string" && SUPPORTED_STATE_PAGE_CODECS.has(record.codec as DomStatePageCodec), "INVALID_STATE_PAGE_RESOURCE", `State page ${id} codec is unsupported.`);
+      if (record.encoding === "identity") invariant(record.byteLength === decodedByteLength && digest.value === decodedDigest.value, "INVALID_STATE_PAGE_RESOURCE", `Identity state page ${id} encoded and decoded identities differ.`);
+    } else {
+      invariant(record.encoding === undefined && record.decodedByteLength === undefined && record.decodedDigest === undefined && record.codec === undefined, "INVALID_RESOURCE", `Non-state resource ${id} declares state-page fields.`);
+    }
     const resourcePath = assertSafeRelativePath(record.path, `Resource ${id} path`);
     const portablePath = resourcePath.toLowerCase();
     invariant(!externalPaths.has(portablePath), "DUPLICATE_RESOURCE_PATH", `External resource path ${resourcePath} has a case-insensitive alias.`);
@@ -291,10 +325,12 @@ export function validateResourceBytes(record: DomResourceRecord, bytes: Uint8Arr
       "IMAGE_DIMENSION_LIMIT",
       `Resource ${record.id} exceeds image dimension limits.`,
     );
+  } else if (record.kind === "state-page") {
+    invariant(record.encoding === "identity" || (bytes.length >= 2 && bytes[0] === 0x1f && bytes[1] === 0x8b), "STATE_PAGE_DECODE_FAILED", `State page ${record.id} encoding does not match its bytes.`);
   }
 }
 
-export function validateCssBytes(bytes: Uint8Array, binding: DomStylesheetBinding, resources: ReadonlySet<string>, limits: DomLimits): string {
+export function validateCssBytes(bytes: Uint8Array, binding: DomStylesheetBinding, resources: ReadonlySet<string>, limits: DomLimits, policy?: CssValidationPolicy): string {
   invariant(bytes.length <= limits.maxCssBytes, "CSS_SIZE_LIMIT", `Stylesheet exceeds ${limits.maxCssBytes} bytes.`);
   let css: string;
   try {
@@ -303,7 +339,7 @@ export function validateCssBytes(bytes: Uint8Array, binding: DomStylesheetBindin
     invariant(false, "MALFORMED_UTF8", `Stylesheet ${binding.id} is not valid UTF-8.`);
   }
   invariant(css.charCodeAt(0) !== 0xfeff, "MALFORMED_UTF8", `Stylesheet ${binding.id} begins with a byte-order mark.`);
-  validateCssClosure(css, binding, resources, limits);
+  validateCssClosure(css, binding, resources, limits, policy);
   return css;
 }
 

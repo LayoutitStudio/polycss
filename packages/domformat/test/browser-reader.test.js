@@ -6,14 +6,23 @@ import vm from "node:vm";
 import { mountDom, readDomBrowser, readDomBrowserUrl } from "../src/browser.js";
 import { createInteractionInput } from "../src/browser-input.js";
 import { decodeJson, encodeCanonicalJson } from "../src/canonical-json.js";
+import { DEFAULT_LIMITS } from "../src/constants.js";
+import { createPolycssPagedState } from "../src/state/paged-state.js";
+import { createPolycssPlayback, materializePolycssState } from "../src/state/polycss.js";
 import { createStaticPresentation } from "../src/state/presentation.js";
 import { buildDom } from "../src/writer.js";
-import { builtExternalResources, errorCode, syntheticAnimationWithoutEffectsInput, syntheticInput, syntheticStaticPresentationInput, syntheticPolycssInput } from "./helpers.js";
+import { builtExternalResources, errorCode, largePagedDescriptorClosure, syntheticAdapterTechniquesInput, syntheticAnimationWithoutEffectsInput, syntheticAspectProfileTimelinesInput, syntheticCompositorTimingInput, syntheticEvictingPagedVariantsInput, syntheticExecutableInteractionInput, syntheticInput, syntheticOrbitInput, syntheticPagedPlaybackInput, syntheticPagedPreparedBanksInput, syntheticPreparedBanksInput, syntheticPagedProfileTimelinesWithoutInteractionInput, syntheticPagedVariantsInput, syntheticProfileTimelinesInput, syntheticResponsivePresentationInput, syntheticStaticPresentationInput, syntheticPolycssInput, syntheticViewportProfilesInput } from "./helpers.js";
 import { dispatch, FakeElement, fakeBrowserDocument } from "./fake-browser.js";
 
 function foreignArrayBuffer(bytes) {
   const context = vm.createContext({ values: [...bytes] });
   return vm.runInContext("Uint8Array.from(values).buffer", context);
+}
+
+function base64Integers(values, width) {
+  const bytes = new Uint8Array(values.length * width);
+  for (let index = 0; index < values.length; index += 1) for (let byte = 0; byte < width; byte += 1) bytes[index * width + byte] = Math.floor(values[index] / 2 ** (byte * 8)) & 255;
+  return Buffer.from(bytes).toString("base64");
 }
 
 function documentRoutes(built, modelUrl) {
@@ -26,6 +35,10 @@ function documentRoutes(built, modelUrl) {
 
 function readBuiltBrowser(built, options = {}) {
   return readDomBrowser(built.bytes, { externalResources: builtExternalResources(built), ...options });
+}
+
+async function flushAsyncWork(turns = 8) {
+  for (let turn = 0; turn < turns; turn += 1) await new Promise((resolve) => setImmediate(resolve));
 }
 
 function routeFetch(routes, calls = []) {
@@ -60,6 +73,40 @@ test("browser reader accepts model and sibling ArrayBuffers from another realm",
   const externalResources = new Map([...builtExternalResources(built)].map(([id, bytes]) => [id, foreignArrayBuffer(bytes)]));
   const result = await readDomBrowser(foreignArrayBuffer(built.bytes), { externalResources });
   assert.equal(result.resourceBytes.size, 2);
+});
+
+test("stock browser limits admit 64,000 paged frames and 500 deferred pages while oversized closures fail before resource loading", async () => {
+  const built = buildDom(await syntheticPagedPlaybackInput());
+  const accepted = largePagedDescriptorClosure(built);
+  let loads = 0;
+  const result = await readDomBrowser(accepted.bytes, {
+    externalResources: accepted.eagerResources,
+    loadExternalResource() { loads += 1; throw new Error("Descriptor validation must not load state pages."); },
+  });
+  assert.equal(loads, 0);
+  assert.equal(result.document.resources.resources.filter((record) => record.kind === "state-page").length, 500);
+  assert.equal(result.document.bindings.channels.find((channel) => channel.interpreter === "polycss-paged-playback@0").parameters.frameCount, 64_000);
+
+  const cases = [
+    ["state-page count", { pageCount: 513 }, "RESOURCE_COUNT_LIMIT"],
+    ["paged frame count", { frameCount: 64_001 }, "FRAME_CARDINALITY_MISMATCH"],
+    ["per-page frame count", { pageCount: 6 }, "STATE_PAGE_COVERAGE_MISMATCH"],
+    ["aggregate encoded page bytes", { encodedByteLength: 300 * 1024 }, "AGGREGATE_RESOURCE_LIMIT"],
+    ["resident materialized byte product", { materializedByteLength: 27 * 1024 * 1024 }, "STATE_PAGE_RESIDENCY_LIMIT"],
+  ];
+  for (const [label, options, code] of cases) {
+    const closure = largePagedDescriptorClosure(built, options);
+    let invalidLoads = 0;
+    await assert.rejects(
+      readDomBrowser(closure.bytes, {
+        externalResources: closure.eagerResources,
+        loadExternalResource() { invalidLoads += 1; throw new Error("Invalid descriptors must fail before resource loading."); },
+      }),
+      errorCode(code),
+      label,
+    );
+    assert.equal(invalidLoads, 0, label);
+  }
 });
 
 test("browser reader reports unavailable SHA-256 as a coded format error", async () => {
@@ -311,6 +358,252 @@ test("mount publishes a static presentation without playback, effects, input lis
   runtime.destroy();
 });
 
+test("responsive presentation switches prepared orientation exactly at its viewport breakpoint", async () => {
+  const built = buildDom(await syntheticResponsivePresentationInput());
+  const result = await readBuiltBrowser(built);
+  const { document, observers, namespaced } = fakeBrowserDocument();
+  const host = new FakeElement(document, "main");
+  const runtime = await mountDom(result, host);
+  const mountSurface = host.childNodes[0];
+  const cameraIndex = result.document.tree.nodes.findIndex((node) => node.id === "synthetic-polycss/camera");
+  const camera = namespaced[cameraIndex];
+  const identity = camera;
+
+  assert.equal(camera.style.transform, "rotate(90deg) scale(0.933333)");
+  mountSurface.clientWidth = 599;
+  observers[0].callback();
+  assert.equal(camera.style.left, "139.5px");
+  assert.equal(camera.style.transform, "rotate(90deg) scale(0.933333)");
+
+  mountSurface.clientWidth = 600;
+  observers[0].callback();
+  assert.equal(camera.style.left, "140px");
+  assert.equal(camera.style.top, "0px");
+  assert.equal(camera.style.transform, "");
+  assert.equal(namespaced[cameraIndex], identity);
+  runtime.destroy();
+});
+
+test("viewport profiles switch same-topology leaf layout and catch up paint before reveal", async () => {
+  const built = buildDom(await syntheticViewportProfilesInput());
+  const result = await readBuiltBrowser(built);
+  const { document, observers, namespaced, writes } = fakeBrowserDocument();
+  const host = new FakeElement(document, "main");
+  const runtime = await mountDom(result, host, { animate: false, mode: "animation" });
+  const mountSurface = host.childNodes[0];
+  const leafIndex = result.document.tree.nodes.findIndex((node) => node.id === "synthetic/leaf");
+  const eyeLeafIndex = result.document.tree.nodes.findIndex((node) => node.id === "synthetic/eye-leaf");
+  const leaf = namespaced[leafIndex];
+  const eyeLeaf = namespaced[eyeLeafIndex];
+  const identity = leaf;
+
+  assert.equal(leaf.style.visibility, "hidden");
+  assert.match(eyeLeaf.style.transform, /,10,0,0,1\)$/u);
+  runtime.seek(2);
+  writes.splice(0);
+  mountSurface.clientWidth = 600;
+  observers[0].callback();
+
+  assert.equal(namespaced[leafIndex], identity);
+  assert.equal(leaf.style.backgroundPositionY, "-32px");
+  assert.equal(leaf.style.visibility, "visible");
+  assert.deepEqual(
+    writes.filter((write) => write.element === leaf && ["transform", "backgroundPositionY", "visibility"].includes(write.property)).map((write) => write.property),
+    ["transform", "backgroundPositionY", "visibility"],
+  );
+
+  writes.splice(0);
+  mountSurface.clientWidth = 620;
+  observers[0].callback();
+  assert.deepEqual(writes.filter((write) => write.element === leaf || write.element === eyeLeaf), []);
+  runtime.destroy();
+});
+
+test("responsive playback timelines restart before animation reveal and survive interaction mode", async () => {
+  const built = buildDom(await syntheticProfileTimelinesInput());
+  const result = await readBuiltBrowser(built);
+  const browser = fakeBrowserDocument();
+  const host = new FakeElement(browser.document, "main");
+  const runtime = await mountDom(result, host, { animate: true, mode: "animation" });
+  const mountSurface = host.childNodes[0];
+
+  browser.frame(0);
+  browser.frame(34);
+  assert.equal(runtime.sourceFrame, 3, "the initial mobile profile is selected before first publication");
+  assert.equal(runtime.setMode("interaction"), "interaction");
+  assert.equal(runtime.sourceFrame, 3);
+  mountSurface.clientWidth = 600;
+  browser.observers[0].callback();
+  assert.equal(runtime.sourceFrame, 3, "profile selection does not overwrite interaction state");
+
+  assert.equal(runtime.setMode("animation"), "animation");
+  assert.equal(runtime.sourceFrame, 1, "animation re-entry restarts the selected desktop timeline");
+  browser.frame(68);
+  assert.equal(runtime.sourceFrame, 2, "desktop falls back to the required baseline timeline");
+
+  mountSurface.clientWidth = 599;
+  browser.observers[0].callback();
+  assert.equal(runtime.sourceFrame, 1, "changed animation profile restarts before viewport publication");
+  browser.frame(102);
+  assert.equal(runtime.sourceFrame, 3, "the selected mobile override drives animation after restart");
+  assert.equal(runtime.mode, "animation");
+  runtime.destroy();
+});
+
+test("landscape-first profile timelines select before publication and preserve interaction state", async () => {
+  const built = buildDom(await syntheticAspectProfileTimelinesInput());
+  const result = await readBuiltBrowser(built);
+  const browser = fakeBrowserDocument();
+  const host = new FakeElement(browser.document, "main");
+  const runtime = await mountDom(result, host, { animate: true, mode: "animation" });
+  const surface = host.childNodes[0];
+
+  browser.frame(0);
+  browser.frame(34);
+  assert.equal(runtime.sourceFrame, 2, "320x240 landscape starts on the baseline timeline");
+  const baselineDeadline = [...browser.timers.values()][0].due;
+  surface.clientWidth = 600;
+  surface.clientHeight = 800;
+  browser.observers[0].callback();
+  assert.equal(runtime.sourceFrame, 2, "portrait baseline bands do not restart an unchanged timeline");
+  assert.equal([...browser.timers.values()][0].due, baselineDeadline, "an unchanged timeline keeps its scheduler deadline");
+  assert.equal(runtime.setMode("interaction"), "interaction");
+  assert.equal(runtime.sourceFrame, 3);
+  surface.clientWidth = 240;
+  surface.clientHeight = 320;
+  browser.observers[0].callback();
+  assert.equal(runtime.sourceFrame, 3, "portrait phone selection preserves interaction publication");
+
+  assert.equal(runtime.setMode("animation"), "animation");
+  assert.equal(runtime.sourceFrame, 1, "animation re-entry restarts the selected phone timeline");
+  browser.frame(68);
+  assert.equal(runtime.sourceFrame, 3, "phone profile uses its prepared override");
+
+  surface.clientWidth = 320;
+  surface.clientHeight = 240;
+  browser.observers[0].callback();
+  assert.equal(runtime.sourceFrame, 1, "landscape profile change restarts before reveal");
+  browser.frame(102);
+  assert.equal(runtime.sourceFrame, 2, "landscape returns to the baseline timeline");
+  runtime.destroy();
+});
+
+test("landscape-first profile changes preserve animate:false through interaction round trips", async () => {
+  const built = buildDom(await syntheticAspectProfileTimelinesInput());
+  const result = await readBuiltBrowser(built);
+  const browser = fakeBrowserDocument();
+  const host = new FakeElement(browser.document, "main");
+  const runtime = await mountDom(result, host, { animate: false, mode: "animation" });
+  const surface = host.childNodes[0];
+
+  assert.equal(runtime.seek(2), 2);
+  surface.clientWidth = 240;
+  surface.clientHeight = 320;
+  browser.observers[0].callback();
+  assert.equal(runtime.sourceFrame, 1, "phone timeline change synchronously restarts the prepared initial frame");
+  assert.equal(browser.timers.size, 0);
+  assert.equal(browser.raf.size, 0);
+  browser.frame(1000);
+  assert.equal(runtime.sourceFrame, 1, "responsive selection does not enable scheduling");
+
+  assert.equal(runtime.setMode("interaction"), "interaction");
+  assert.equal(runtime.sourceFrame, 3);
+  surface.clientWidth = 320;
+  surface.clientHeight = 240;
+  browser.observers[0].callback();
+  assert.equal(runtime.sourceFrame, 3, "landscape selection preserves interaction publication");
+  assert.equal(runtime.setMode("animation"), "animation");
+  assert.equal(runtime.sourceFrame, 1);
+  browser.frame(2000);
+  assert.equal(runtime.sourceFrame, 1, "animation re-entry preserves animate:false");
+  runtime.destroy();
+});
+
+test("responsive restart without interaction keeps the playback initial page resident after disjoint lookahead", async () => {
+  const built = buildDom(await syntheticPagedProfileTimelinesWithoutInteractionInput());
+  const result = await readBuiltBrowser(built);
+  const browser = fakeBrowserDocument();
+  const host = new FakeElement(browser.document, "main");
+  const runtime = await mountDom(result, host, { animate: true, mode: "animation" });
+  const mountSurface = host.childNodes[0];
+
+  assert.equal(await runtime.seekAsync(5), 5);
+  await flushAsyncWork();
+  mountSurface.clientWidth = 600;
+  browser.observers[0].callback();
+  assert.equal(runtime.sourceFrame, 1, "the profile restart publishes from the pinned initial page");
+  await flushAsyncWork();
+  browser.frame(0);
+  browser.frame(34);
+  assert.equal(runtime.sourceFrame, 2);
+  runtime.destroy();
+});
+
+test("smallest-covering viewport profiles select the first fitting prepared row", async () => {
+  const built = buildDom(await syntheticViewportProfilesInput("smallest-covering"));
+  const result = await readBuiltBrowser(built);
+  const { document, observers, namespaced, writes } = fakeBrowserDocument();
+  const host = new FakeElement(document, "main");
+  const runtime = await mountDom(result, host, { animate: false, mode: "animation" });
+  const mountSurface = host.childNodes[0];
+  const leafIndex = result.document.tree.nodes.findIndex((node) => node.id === "synthetic/leaf");
+  const leaf = namespaced[leafIndex];
+  assert.equal(leaf.style.visibility, "hidden");
+
+  mountSurface.clientWidth = 500;
+  mountSurface.clientHeight = 400;
+  observers[0].callback();
+  assert.equal(leaf.style.visibility, "visible");
+  writes.splice(0);
+  mountSurface.clientWidth = 550;
+  observers[0].callback();
+  assert.deepEqual(writes.filter((write) => write.element === leaf), []);
+  runtime.destroy();
+});
+
+test("typed orbit input clamps model controls and coalesces cyclic prepared surface writes", async () => {
+  const built = buildDom(await syntheticOrbitInput());
+  const result = await readBuiltBrowser(built);
+  const { document, namespaced, writes } = fakeBrowserDocument();
+  const host = new FakeElement(document, "main");
+  const runtime = await mountDom(result, host, { animate: false });
+  const modelIndex = result.document.tree.nodes.findIndex((node) => node.id === "synthetic-polycss/model");
+  const leafIndex = result.document.tree.nodes.findIndex((node) => node.id === "synthetic-polycss/leaf");
+  const model = namespaced[modelIndex];
+  const leaf = namespaced[leafIndex];
+  const identities = [model, leaf];
+  assert.equal(leaf.style.backgroundPosition, "0 0");
+
+  writes.splice(0);
+  assert.equal(runtime.setInput("orbit.yaw", 90), 90);
+  assert.match(model.style.transform, /rotateY\(90deg\)/u);
+  assert.equal(leaf.style.backgroundPosition, "0 -480px");
+  assert.deepEqual(writes.filter((write) => write.element === leaf), [
+    { element: leaf, property: "backgroundPosition", value: "0 -480px" },
+  ]);
+
+  writes.splice(0);
+  assert.equal(runtime.setInput("orbit.pitch", 100), 28);
+  assert.match(model.style.transform, /rotateX\(28deg\)/u);
+  assert.equal(runtime.setInput("orbit.zoom", 0), 0.5);
+  assert.match(model.style.transform, /scale3d\(0\.5, 0\.516, 0\.5\)/u);
+  assert.throws(() => runtime.setInput("orbit.roll", 1), errorCode("UNKNOWN_EXTERNAL_INPUT"));
+  assert.throws(() => runtime.setInput("orbit.yaw", Number.NaN), errorCode("INVALID_EXTERNAL_INPUT"));
+  assert.equal(namespaced[modelIndex], identities[0]);
+  assert.equal(namespaced[leafIndex], identities[1]);
+  runtime.destroy();
+  assert.throws(() => runtime.setInput("orbit.yaw", 0), errorCode("MOUNT_DESTROYED"));
+});
+
+test("documents without external input reject the closed runtime operation", async () => {
+  const built = buildDom(await syntheticStaticPresentationInput());
+  const result = await readBuiltBrowser(built);
+  const { document } = fakeBrowserDocument();
+  const runtime = await mountDom(result, new FakeElement(document, "main"), { animate: false });
+  assert.throws(() => runtime.setInput("orbit.yaw", 0), errorCode("UNKNOWN_EXTERNAL_INPUT"));
+  runtime.destroy();
+});
+
 test("mount runs prepared animation without an effects interpreter", async () => {
   const built = buildDom(await syntheticAnimationWithoutEffectsInput());
   const result = await readBuiltBrowser(built);
@@ -320,6 +613,666 @@ test("mount runs prepared animation without an effects interpreter", async () =>
   assert.equal(runtime.sourceFrame, 1);
   assert.equal(runtime.seek(1), 1);
   runtime.destroy();
+});
+
+test("prepared playback sleeps on an owned deadline timer instead of polling display frames", async () => {
+  const built = buildDom(await syntheticExecutableInteractionInput());
+  const result = await readBuiltBrowser(built);
+  const fake = fakeBrowserDocument();
+  const runtime = await mountDom(result, new FakeElement(fake.document, "main"), { mode: "animation" });
+  assert.equal(fake.timers.size, 1);
+  assert.equal(fake.raf.size, 0);
+  for (const timestamp of [8, 16, 24, 32]) {
+    assert.equal(fake.advance(timestamp), 0);
+    assert.equal(fake.raf.size, 0);
+  }
+  assert.equal(fake.advance(33), 1);
+  assert.equal(fake.timers.size, 1);
+  assert.equal(fake.raf.size, 0);
+  for (const timestamp of [40, 48, 56, 64]) assert.equal(fake.advance(timestamp), 0);
+  assert.equal(fake.advance(66), 1);
+  assert.equal(fake.timers.size, 1);
+  runtime.setMode("interaction");
+  assert.equal(fake.timers.size, 1);
+  assert.equal(fake.raf.size, 0);
+  runtime.destroy();
+  assert.equal(fake.timers.size, 0);
+  assert.equal(fake.raf.size, 0);
+});
+
+test("closed compositor timing animates model cycles without per-tick JS and snaps nonsequential publication", async () => {
+  const built = buildDom(await syntheticCompositorTimingInput());
+  const result = await readBuiltBrowser(built);
+  const fake = fakeBrowserDocument();
+  const runtime = await mountDom(result, new FakeElement(fake.document, "main"), { mode: "animation" });
+  const modelIndex = result.document.tree.nodes.findIndex((node) => node.id === "synthetic/scene");
+  const leafIndex = result.document.tree.nodes.findIndex((node) => node.id === "synthetic/leaf");
+  const model = fake.namespaced[modelIndex];
+  const leaf = fake.namespaced[leafIndex];
+  assert.equal(model.animations.length, 1);
+  const animation = model.animations[0];
+  assert.equal(animation.options.easing, "linear");
+  assert.equal(animation.options.iterations, Infinity);
+  assert.equal(animation.keyframes.length, 3);
+  assert.equal(animation.playState, "running");
+
+  fake.writes.splice(0);
+  fake.advance(33);
+  assert.deepEqual(fake.writes.filter((write) => write.element === model && write.property === "transform"), []);
+  const sequential = fake.writes.filter((write) => write.element === leaf && ["transition", "transform"].includes(write.property));
+  assert.deepEqual(sequential.map((write) => write.property), ["transition", "transform"]);
+  assert.match(sequential[0].value, /^transform .*ms linear$/u);
+
+  fake.writes.splice(0);
+  runtime.seek(4);
+  const snap = fake.writes.filter((write) => write.element === leaf && ["transition", "transform"].includes(write.property));
+  assert.deepEqual(snap.map((write) => write.property), ["transition", "transform", "transition"]);
+  assert.equal(snap[0].value, "none");
+  assert.ok(Math.abs(animation.currentTime - 1000 / 30) < 1e-12);
+  runtime.setMode("interaction");
+  assert.equal(animation.playState, "paused");
+  runtime.setMode("animation");
+  assert.equal(animation.playState, "running");
+  assert.equal(animation.currentTime, 0);
+  runtime.destroy();
+  assert.equal(animation.playState, "idle");
+});
+
+test("animate false remains compositor-paused across interaction and animation modes", async () => {
+  const built = buildDom(await syntheticCompositorTimingInput());
+  const result = await readBuiltBrowser(built);
+  const fake = fakeBrowserDocument();
+  const runtime = await mountDom(result, new FakeElement(fake.document, "main"), { animate: false, mode: "animation" });
+  const modelIndex = result.document.tree.nodes.findIndex((node) => node.id === "synthetic/scene");
+  const animation = fake.namespaced[modelIndex].animations[0];
+  assert.equal(animation.playState, "paused");
+  assert.equal(fake.timers.size, 0);
+
+  runtime.setMode("interaction");
+  runtime.setMode("animation");
+  assert.equal(animation.playState, "paused");
+  assert.equal(animation.currentTime, 0);
+  assert.equal(fake.timers.size, 0);
+  assert.equal(fake.raf.size, 0);
+  runtime.destroy();
+  assert.equal(animation.playState, "idle");
+});
+
+test("mount materializes exact declared descendant variant effects", async () => {
+  const input = await syntheticAdapterTechniquesInput();
+  const leaf = input.tree.nodes.find((node) => node.id === "synthetic-polycss/leaf");
+  const owner = input.tree.nodes.find((node) => node.id === "synthetic-polycss/model");
+  leaf.classes = leaf.classes.filter((token) => !token.startsWith("material-"));
+  owner.classes.push("material-a");
+  const binding = input.bindings.channels.find((channel) => channel.id === "variants");
+  binding.targets = { effectNodes: [leaf.id], nodes: [owner.id] };
+  const packet = input.state.channels.find((channel) => channel.id === "variants").data.packet;
+  for (const effect of packet.effects) effect.targetIndex = 0;
+
+  const built = buildDom(input);
+  const result = await readBuiltBrowser(built);
+  const { document, namespaced } = fakeBrowserDocument();
+  const host = new FakeElement(document, "main");
+  const runtime = await mountDom(result, host, { animate: false });
+  const variantStyle = document.head.childNodes.find((element) => element.dataset.domformatStylesheet === "prepared-variants");
+  assert.ok(variantStyle);
+  assert.match(variantStyle.textContent, new RegExp(`\\[data-domformat-node="${owner.index}"\\]\\.material-a \\[data-domformat-node="${leaf.index}"\\]\\{color:#f00\\}`, "u"));
+  assert.equal(namespaced[owner.index].getAttribute("data-domformat-node"), String(owner.index));
+  assert.equal(namespaced[leaf.index].getAttribute("data-domformat-node"), String(leaf.index));
+  assert.deepEqual(namespaced[owner.index].classes, [...owner.classes]);
+  runtime.seek(2);
+  assert.deepEqual(namespaced[owner.index].classes, owner.classes.map((token) => token === "material-a" ? "material-b" : token));
+  runtime.destroy();
+});
+
+test("paged variants load the initial page before attach and retain the current/lookahead window plus fixed pins", async () => {
+  const built = buildDom(await syntheticEvictingPagedVariantsInput());
+  const all = builtExternalResources(built);
+  const eager = new Map(all);
+  for (const record of built.document.resources.resources) if (record.kind === "state-page") eager.delete(record.id);
+  const calls = [];
+  const result = await readDomBrowser(built.bytes, {
+    externalResources: eager,
+    async loadExternalResource(record, signal) {
+      calls.push([record.id, signal]);
+      return all.get(record.id);
+    },
+  });
+  assert.deepEqual(calls, []);
+  assert.equal(result.resourceBytes.size, eager.size);
+
+  const { document, namespaced } = fakeBrowserDocument();
+  const host = new FakeElement(document, "main");
+  const runtime = await mountDom(result, host, { animate: false });
+  const leafIndex = result.document.tree.nodes.findIndex((node) => node.id === "synthetic/leaf");
+  const leaf = namespaced[leafIndex];
+  assert.equal(calls[0][0], "variant-page-1");
+  assert.equal(leaf.classes.includes("material-a"), true);
+  await flushAsyncWork();
+  assert.deepEqual(calls.map(([id]) => id), ["variant-page-1", "variant-page-2", "variant-page-3"]);
+
+  assert.equal(await runtime.seekAsync(7), 7);
+  assert.equal(leaf.classes.includes("material-a"), true);
+  assert.equal(await runtime.seekAsync(4), 4);
+  assert.equal(leaf.classes.includes("material-b"), true);
+  assert.deepEqual(
+    calls.filter(([id]) => id === "variant-page-1" || id === "variant-page-2").map(([id]) => id),
+    ["variant-page-1", "variant-page-2"],
+  );
+  assert.throws(() => runtime.seek(7), errorCode("STATE_PAGE_NOT_READY"));
+  assert.equal(runtime.sourceFrame, 4);
+  assert.equal(leaf.classes.includes("material-b"), true);
+  assert.equal(await runtime.seekAsync(7), 7);
+  assert.equal(calls.filter(([id]) => id === "variant-page-6").length, 2);
+  assert.deepEqual(
+    calls.filter(([id]) => id === "variant-page-1" || id === "variant-page-2").map(([id]) => id),
+    ["variant-page-1", "variant-page-2"],
+  );
+  runtime.destroy();
+});
+
+test("paged variant admission never transiently exceeds the decoded residency ceiling", async () => {
+  const built = buildDom(await syntheticEvictingPagedVariantsInput());
+  const all = builtExternalResources(built);
+  const fake = fakeBrowserDocument();
+  const mounted = {
+    byId: new Map(built.document.tree.nodes.map((node) => [node.id, new FakeElement(fake.document, node.name)])),
+  };
+  let corruptPage3 = false;
+  const page3ResidentCounts = [];
+  let paged;
+  paged = createPolycssPagedState(built.document, mounted, DEFAULT_LIMITS, async (record) => {
+    if (record.id === "variant-page-3") page3ResidentCounts.push(paged.residentResources.length);
+    return corruptPage3 && record.id === "variant-page-3" ? new TextEncoder().encode("{}") : all.get(record.id);
+  });
+  assert.ok(paged);
+  await paged.prepareInitial();
+  await paged.ensureFrame(7);
+  const beforeFailedMaterialization = paged.residentResources;
+  corruptPage3 = true;
+  await assert.rejects(paged.ensureFrame(3), errorCode("INVALID_STATE_PAGE"));
+  assert.deepEqual(paged.residentResources, beforeFailedMaterialization);
+  corruptPage3 = false;
+  await paged.ensureFrame(3);
+  assert.equal(paged.peakResidentPages, 3);
+  assert.equal(paged.residentResources.length, 3);
+  assert.deepEqual(page3ResidentCounts, [2, 2]);
+  paged.destroy();
+});
+
+test("paged playback preserves exact random, boundary, wrap, and cross-channel publication", async () => {
+  const ranges = Array.from({ length: 8 }, (_, index) => [index + 1, index + 1]);
+  const built = buildDom(await syntheticPagedPlaybackInput({ variants: true, ranges }));
+  const all = builtExternalResources(built);
+  const eager = new Map(all);
+  for (const record of built.document.resources.resources) if (record.kind === "state-page") eager.delete(record.id);
+  const result = await readDomBrowser(built.bytes, { externalResources: eager, loadExternalResource: (record) => all.get(record.id) });
+  const browser = fakeBrowserDocument();
+  const runtime = await mountDom(result, new FakeElement(browser.document, "main"), { animate: false, mode: "animation" });
+  assert.equal(await runtime.seekAsync(5), 5);
+  assert.equal(await runtime.seekAsync(6), 6);
+  assert.equal(await runtime.seekAsync(8), 8);
+  assert.equal(runtime.seek(1), 1);
+  const leafIndex = result.document.tree.nodes.findIndex((node) => node.id === "synthetic/leaf");
+  assert.equal(browser.namespaced[leafIndex].classes.includes("material-a"), true);
+  assert.equal(await runtime.seekAsync(7), 7);
+  assert.equal(browser.namespaced[leafIndex].classes.includes("material-b"), false);
+  assert.equal(runtime.lifecycle.phase, "publish");
+  runtime.destroy();
+});
+
+test("public prepared-bank selection keeps one retained topology and restarts the selected canonical timeline", async () => {
+  const built = buildDom(await syntheticPreparedBanksInput());
+  const result = await readDomBrowser(built.bytes, { externalResources: builtExternalResources(built) });
+  const fake = fakeBrowserDocument();
+  const runtime = await mountDom(result, new FakeElement(fake.document, "main"), { animate: false, mode: "animation" });
+  const retained = fake.namespaced.slice();
+  assert.equal(runtime.bankId, "alpha");
+  assert.equal(runtime.selectBank("beta"), 3);
+  assert.equal(runtime.bankId, "beta");
+  assert.equal(runtime.sourceFrame, 3);
+  assert.deepEqual(fake.namespaced, retained);
+  assert.equal(runtime.setMode("interaction"), "interaction");
+  assert.throws(() => runtime.selectBank("gamma"), errorCode("INVALID_EXPERIENCE_MODE"));
+  assert.equal(runtime.setMode("animation"), "animation");
+  assert.equal(runtime.bankId, "beta");
+  assert.equal(runtime.sourceFrame, 3);
+  assert.deepEqual(fake.namespaced, retained);
+  runtime.destroy();
+});
+
+test("paged prepared-bank handoff is atomic under supersession and corrupt target pages", async () => {
+  const ranges = Array.from({ length: 8 }, (_, index) => [index + 1, index + 1]);
+  const built = buildDom(await syntheticPagedPreparedBanksInput({ variants: true, ranges }));
+  const all = builtExternalResources(built);
+  const eager = new Map(all);
+  for (const record of built.document.resources.resources) if (record.kind === "state-page") eager.delete(record.id);
+  let releaseGamma;
+  const gammaGate = new Promise((resolve) => { releaseGamma = resolve; });
+  let corruptGamma = false;
+  const result = await readDomBrowser(built.bytes, {
+    externalResources: eager,
+    loadExternalResource(record) {
+      if (record.id === "playback-page-5" && !corruptGamma) return gammaGate;
+      if (record.id === "variant-page-5" && corruptGamma) return new TextEncoder().encode("{}");
+      return all.get(record.id);
+    },
+  });
+  const fake = fakeBrowserDocument();
+  const runtime = await mountDom(result, new FakeElement(fake.document, "main"), { animate: false, mode: "animation" });
+  const retained = fake.namespaced.slice();
+  const stale = runtime.selectBankAsync("gamma");
+  const staleRejection = assert.rejects(stale, errorCode("OPERATION_ABORTED"));
+  assert.equal(await runtime.selectBankAsync("beta"), 3);
+  assert.equal(runtime.bankId, "beta");
+  assert.equal(runtime.sourceFrame, 3);
+  assert.deepEqual(fake.namespaced, retained);
+  releaseGamma(all.get("playback-page-5"));
+  await staleRejection;
+  const writesBeforeFailure = fake.writes.length;
+  corruptGamma = true;
+  await assert.rejects(runtime.selectBankAsync("gamma"), errorCode("RESOURCE_SIZE_MISMATCH"));
+  assert.equal(runtime.bankId, "beta");
+  assert.equal(runtime.sourceFrame, 3);
+  assert.equal(fake.writes.length, writesBeforeFailure);
+  assert.deepEqual(fake.namespaced, retained);
+  assert.equal(runtime.lifecycle.phase, "publish");
+  runtime.destroy();
+});
+
+test("paged catch-up advances every logical row while publishing only the final DOM diff", async () => {
+  const built = buildDom(await syntheticPagedPlaybackInput({ variants: true, mutate(input) {
+    const playback = input.state.channels.find((channel) => channel.codec === "polycss-playback-packed@0").data.packet;
+    playback.transforms.count = 6;
+    playback.transforms.groups[1].empty = [0];
+    const changed = [1, 0, 0, 0, 1, 0, 0, 0, 1, 10, 0, 0];
+    playback.transforms.groups[1].columns = changed.map((value) => [value]);
+    playback.shapeChanges = { sources: [0, 0], transforms: [1, 4], visibility: [1, 0] };
+    playback.frameRows[0][3] = 0;
+    playback.frameRows[0][4] = 1;
+    playback.frameRows[3][3] = 1;
+    playback.frameRows[3][4] = 1;
+    const surface = input.state.channels.find((channel) => channel.codec === "polycss-surface-packed@0").data.packet;
+    surface.surface.faces[0].stateCount = 2;
+    surface.surface.faces[1].stateOffset = 2;
+    surface.surface.statePacking.stateCount = 3;
+    surface.surface.statePacking.sourceFrameDeltas = [0, 3, 0];
+    surface.transitions.sequential = {
+      offsetsBase64: base64Integers([0, 1, 1, 1, 2, 2, 2, 2, 2], 4),
+      faceIndexDeltas: [0, 0],
+      stateIndexDeltas: [0, 1],
+    };
+  } }));
+  const all = builtExternalResources(built);
+  const eager = new Map(all);
+  for (const record of built.document.resources.resources) if (record.kind === "state-page") eager.delete(record.id);
+  const result = await readDomBrowser(built.bytes, { externalResources: eager, loadExternalResource: (record) => all.get(record.id) });
+  const fake = fakeBrowserDocument();
+  const runtime = await mountDom(result, new FakeElement(fake.document, "main"), { animate: true, mode: "animation" });
+  fake.frame(0);
+  fake.writes.splice(0);
+  fake.frame(100);
+  assert.equal(runtime.sourceFrame, 4);
+  const leafIndex = result.document.tree.nodes.findIndex((node) => node.id === "synthetic/leaf");
+  const shapeIndex = result.document.tree.nodes.findIndex((node) => node.id === "synthetic/shape");
+  const leaf = fake.namespaced[leafIndex];
+  const shape = fake.namespaced[shapeIndex];
+  assert.deepEqual(fake.writes.filter((write) => write.element === leaf || write.element === shape).map((write) => [write.element === leaf ? "leaf" : "shape", write.property]), [
+    ["leaf", "class:remove"],
+    ["leaf", "class:add"],
+    ["shape", "transform"],
+    ["leaf", "backgroundPositionY"],
+    ["shape", "visibility"],
+  ]);
+  assert.equal(leaf.classes.includes("material-b"), true);
+  runtime.destroy();
+});
+
+test("combined paged playback and variants supersede asymmetric loads without partial publication", async () => {
+  const ranges = Array.from({ length: 8 }, (_, index) => [index + 1, index + 1]);
+  const built = buildDom(await syntheticPagedPlaybackInput({ variants: true, ranges }));
+  const all = builtExternalResources(built);
+  const eager = new Map(all);
+  for (const record of built.document.resources.resources) if (record.kind === "state-page") eager.delete(record.id);
+  let releasePlayback7;
+  const playback7 = new Promise((resolve) => { releasePlayback7 = resolve; });
+  const result = await readDomBrowser(built.bytes, {
+    externalResources: eager,
+    loadExternalResource: (record) => record.id === "playback-page-7" ? playback7 : all.get(record.id),
+  });
+  const fake = fakeBrowserDocument();
+  const runtime = await mountDom(result, new FakeElement(fake.document, "main"), { animate: false, mode: "animation" });
+  const leafIndex = result.document.tree.nodes.findIndex((node) => node.id === "synthetic/leaf");
+  const leaf = fake.namespaced[leafIndex];
+  const stale = runtime.seekAsync(7);
+  const staleRejection = assert.rejects(stale, errorCode("OPERATION_ABORTED"));
+  assert.equal(await runtime.seekAsync(3), 3);
+  assert.equal(runtime.sourceFrame, 3);
+  assert.equal(leaf.classes.includes("material-a"), true);
+  releasePlayback7(all.get("playback-page-7"));
+  await staleRejection;
+  assert.equal(runtime.sourceFrame, 3);
+  assert.equal(runtime.lifecycle.phase, "publish");
+  runtime.destroy();
+});
+
+test("combined page rollback is atomic after either channel has loaded first", async () => {
+  const oneFrame = Array.from({ length: 8 }, (_, index) => [index + 1, index + 1]);
+  const broad = [[1, 4], [5, 8]];
+  for (const scenario of [
+    { ranges: oneFrame, variantRanges: broad, partial: "playback-page-2", failure: "variant-page-2" },
+    { ranges: broad, variantRanges: oneFrame, partial: "variant-page-2", failure: "playback-page-2" },
+  ]) {
+    const built = buildDom(await syntheticPagedPlaybackInput({ variants: true, ranges: scenario.ranges, variantRanges: scenario.variantRanges }));
+    const all = builtExternalResources(built);
+    const fake = fakeBrowserDocument();
+    const mounted = { byId: new Map(built.document.tree.nodes.map((node) => {
+      const element = new FakeElement(fake.document, node.name);
+      Object.assign(element.style, node.styles ?? {});
+      for (const className of node.classes) element.classList.add(className);
+      return [node.id, element];
+    })) };
+    const calls = [];
+    let corrupt = true;
+    const pagedState = createPolycssPagedState(built.document, mounted, DEFAULT_LIMITS, async (record) => {
+      calls.push(record.id);
+      return corrupt && record.id === scenario.failure ? new TextEncoder().encode("{}") : all.get(record.id);
+    });
+    await pagedState.prepareInitial();
+    const before = pagedState.residentResources;
+    calls.splice(0);
+    await assert.rejects(pagedState.ensureFrame(2), errorCode("INVALID_STATE_PAGE"));
+    assert.ok(calls.indexOf(scenario.partial) >= 0 && calls.indexOf(scenario.partial) < calls.indexOf(scenario.failure));
+    assert.deepEqual(pagedState.residentResources, before);
+    assert.equal(pagedState.peakResidentPages, before.length + 2);
+    assert.ok(pagedState.peakDecodedBytes > 0);
+    assert.ok(pagedState.peakMaterializedBytes > 0);
+    assert.ok(pagedState.peakDocumentStateBytes <= DEFAULT_LIMITS.maxAggregateDecodedBytes);
+    corrupt = false;
+    await pagedState.ensureFrame(2);
+    assert.equal(pagedState.isFrameReady(2), true);
+    pagedState.destroy();
+  }
+});
+
+test("combined fixed pins make interaction entry synchronous without page fetch", async () => {
+  const ranges = Array.from({ length: 8 }, (_, index) => [index + 1, index + 1]);
+  const input = await syntheticPagedPlaybackInput({ variants: true, ranges });
+  input.state.channels.find((channel) => channel.codec === "polycss-pointer-grab-prepared@0").data.packet.animator.eyeFrame = 7;
+  input.bindings.channels.find((channel) => channel.interpreter === "polycss-pointer-grab@0").parameters.initialFrame = 7;
+  const built = buildDom(input);
+  const all = builtExternalResources(built);
+  const eager = new Map(all);
+  for (const record of built.document.resources.resources) if (record.kind === "state-page") eager.delete(record.id);
+  const calls = [];
+  const result = await readDomBrowser(built.bytes, { externalResources: eager, loadExternalResource(record) { calls.push(record.id); return all.get(record.id); } });
+  const fake = fakeBrowserDocument();
+  const runtime = await mountDom(result, new FakeElement(fake.document, "main"), { animate: false, mode: "animation" });
+  const before = calls.length;
+  assert.equal(runtime.setMode("interaction"), "interaction");
+  assert.equal(runtime.sourceFrame, 7);
+  assert.equal(calls.length, before);
+  runtime.destroy();
+});
+
+test("same-frame paged seek restores canonical variants after an interaction surface frame", async () => {
+  const built = buildDom(await syntheticPagedPlaybackInput({ variants: true }));
+  const all = builtExternalResources(built);
+  const fake = fakeBrowserDocument();
+  const byId = new Map(built.document.tree.nodes.map((node) => {
+    const element = new FakeElement(fake.document, node.name);
+    Object.assign(element.style, node.styles ?? {});
+    for (const className of node.classes) element.classList.add(className);
+    return [node.id, element];
+  }));
+  const mounted = { byId };
+  const pagedState = createPolycssPagedState(built.document, mounted, DEFAULT_LIMITS, async (record) => all.get(record.id));
+  await pagedState.prepareInitial();
+  const playback = createPolycssPlayback(materializePolycssState(built.document.state), built.document.bindings, mounted, {
+    pagedState,
+    assertPagedFrameReady: (frame) => pagedState.assertFrameReady(frame),
+    publishAppearance() {},
+  });
+  playback.publishInitial();
+  const leaf = byId.get("synthetic/leaf");
+  assert.equal(leaf.classes.includes("material-a"), true);
+  playback.applySurfaceFrame(2);
+  assert.equal(leaf.classes.includes("material-b"), true);
+  assert.equal(playback.sourceFrame, 1);
+  playback.seek(1);
+  assert.equal(leaf.classes.includes("material-a"), true);
+  assert.equal(leaf.classes.includes("material-b"), false);
+  pagedState.destroy();
+});
+
+test("document-wide page workspace ceiling rejects before fetching or materializing", async () => {
+  const built = buildDom(await syntheticPagedPlaybackInput({ variants: true }));
+  const fake = fakeBrowserDocument();
+  const mounted = { byId: new Map(built.document.tree.nodes.map((node) => {
+    const element = new FakeElement(fake.document, node.name);
+    Object.assign(element.style, node.styles ?? {});
+    return [node.id, element];
+  })) };
+  let loads = 0;
+  const pagedState = createPolycssPagedState(built.document, mounted, { ...DEFAULT_LIMITS, maxAggregateDecodedBytes: 1 }, async () => { loads += 1; return new Uint8Array(); });
+  await assert.rejects(pagedState.prepareInitial(), errorCode("STATE_PAGE_RESIDENCY_LIMIT"));
+  assert.equal(loads, 0);
+  assert.equal(pagedState.residentResources.length, 0);
+  pagedState.destroy();
+});
+
+test("already-aborted page requests reject even when the complete target window is resident", async () => {
+  const built = buildDom(await syntheticPagedPlaybackInput({ variants: true }));
+  const all = builtExternalResources(built);
+  const fake = fakeBrowserDocument();
+  const mounted = { byId: new Map(built.document.tree.nodes.map((node) => {
+    const element = new FakeElement(fake.document, node.name);
+    Object.assign(element.style, node.styles ?? {});
+    return [node.id, element];
+  })) };
+  const pagedState = createPolycssPagedState(built.document, mounted, DEFAULT_LIMITS, async (record) => all.get(record.id));
+  await pagedState.prepareInitial();
+  const before = pagedState.residentResources;
+  const controller = new AbortController();
+  controller.abort();
+  await assert.rejects(pagedState.ensureFrame(1, controller.signal), errorCode("OPERATION_ABORTED"));
+  await assert.rejects(pagedState.prepareInitial(controller.signal), errorCode("OPERATION_ABORTED"));
+  assert.deepEqual(pagedState.residentResources, before);
+  pagedState.destroy();
+});
+
+test("combined paged publication succeeds at its measured byte peak and rejects one byte below it", async () => {
+  const built = buildDom(await syntheticPagedPlaybackInput({ variants: true }));
+  const all = builtExternalResources(built);
+  const create = (limit) => {
+    const fake = fakeBrowserDocument();
+    const mounted = { byId: new Map(built.document.tree.nodes.map((node) => {
+      const element = new FakeElement(fake.document, node.name);
+      Object.assign(element.style, node.styles ?? {});
+      for (const className of node.classes) element.classList.add(className);
+      return [node.id, element];
+    })) };
+    return createPolycssPagedState(built.document, mounted, { ...DEFAULT_LIMITS, maxAggregateDecodedBytes: limit }, async (record) => all.get(record.id));
+  };
+  const exercise = async (pagedState) => {
+    await pagedState.prepareInitial();
+    await pagedState.ensureFrame(2);
+    pagedState.commit(pagedState.stage(2));
+  };
+  const baseline = create(DEFAULT_LIMITS.maxAggregateDecodedBytes);
+  await exercise(baseline);
+  const peak = baseline.peakDocumentStateBytes;
+  assert.ok(peak > 0 && peak < DEFAULT_LIMITS.maxAggregateDecodedBytes);
+  baseline.destroy();
+
+  const exact = create(peak);
+  await exercise(exact);
+  assert.equal(exact.peakDocumentStateBytes, peak);
+  exact.destroy();
+
+  const below = create(peak - 1);
+  await assert.rejects(exercise(below), errorCode("STATE_PAGE_RESIDENCY_LIMIT"));
+  assert.equal(below.peakDocumentStateBytes, peak);
+  below.destroy();
+});
+
+test("superseding an in-progress residency rollback leaves only the new exact window", async () => {
+  const ranges = Array.from({ length: 8 }, (_, index) => [index + 1, index + 1]);
+  const built = buildDom(await syntheticPagedPlaybackInput({ variants: true, ranges }));
+  const all = builtExternalResources(built);
+  const fake = fakeBrowserDocument();
+  const mounted = { byId: new Map(built.document.tree.nodes.map((node) => {
+    const element = new FakeElement(fake.document, node.name);
+    Object.assign(element.style, node.styles ?? {});
+    for (const className of node.classes) element.classList.add(className);
+    return [node.id, element];
+  })) };
+  let page2Loads = 0;
+  let releaseRollback;
+  let signalRollback;
+  const rollbackStarted = new Promise((resolve) => { signalRollback = resolve; });
+  const rollbackPage = new Promise((resolve) => { releaseRollback = resolve; });
+  const pagedState = createPolycssPagedState(built.document, mounted, DEFAULT_LIMITS, async (record) => {
+    if (record.id === "playback-page-2" && ++page2Loads === 2) {
+      signalRollback();
+      return rollbackPage;
+    }
+    if (record.id === "playback-page-7") return new TextEncoder().encode("{}");
+    return all.get(record.id);
+  });
+  await pagedState.prepareInitial();
+  await pagedState.ensureFrame(2);
+  const stale = pagedState.ensureFrame(7);
+  await rollbackStarted;
+  const current = pagedState.ensureFrame(3);
+  await current;
+  releaseRollback(all.get("playback-page-2"));
+  await assert.rejects(stale, errorCode("OPERATION_ABORTED"));
+  assert.equal(pagedState.isFrameReady(3), true);
+  assert.deepEqual(new Set(pagedState.residentResources), new Set(["playback-page-3", "playback-page-1", "playback-page-4", "variant-page-3", "variant-page-1", "variant-page-4"]));
+  pagedState.destroy();
+});
+
+test("paged automatic catch-up advances its ready prefix when an intermediate page is absent but the final page is resident", async () => {
+  const built = buildDom(await syntheticPagedVariantsInput());
+  const all = builtExternalResources(built);
+  const eager = new Map(all);
+  for (const record of built.document.resources.resources) if (record.kind === "state-page") eager.delete(record.id);
+  let releasePage3;
+  const page3 = new Promise((resolve) => { releasePage3 = resolve; });
+  const result = await readDomBrowser(built.bytes, {
+    externalResources: eager,
+    loadExternalResource: (record) => record.id === "variant-page-3" ? page3 : all.get(record.id),
+  });
+  const browser = fakeBrowserDocument();
+  const runtime = await mountDom(result, new FakeElement(browser.document, "main"), { animate: true, mode: "animation" });
+  browser.frame(0);
+  await flushAsyncWork();
+  assert.equal(await runtime.seekAsync(7), 7);
+  assert.equal(runtime.seek(1), 1);
+  browser.frame(0);
+  browser.frame(200);
+  assert.equal(runtime.lifecycle.phase, "publish");
+  assert.equal(runtime.sourceFrame, 4);
+  releasePage3(all.get("variant-page-3"));
+  await flushAsyncWork();
+  assert.equal(runtime.lifecycle.phase, "publish");
+  assert.equal(runtime.sourceFrame, 7);
+  runtime.destroy();
+});
+
+test("paged interaction backpressures at a page boundary before mutating or destroying the runtime", async () => {
+  const input = await syntheticPagedVariantsInput();
+  input.state.channels.find((channel) => channel.codec === "polycss-pointer-grab-prepared@0").data.packet.animator.eyeStillTicks = 1;
+  const built = buildDom(input);
+  const all = builtExternalResources(built);
+  const eager = new Map(all);
+  for (const record of built.document.resources.resources) if (record.kind === "state-page") eager.delete(record.id);
+  const result = await readDomBrowser(built.bytes, {
+    externalResources: eager,
+    loadExternalResource: (record) => all.get(record.id),
+  });
+  const browser = fakeBrowserDocument();
+  const host = new FakeElement(browser.document, "main");
+  const runtime = await mountDom(result, host, { animate: true, mode: "animation" });
+  assert.equal(runtime.setMode("interaction"), "interaction");
+  browser.frame(0);
+  assert.doesNotThrow(() => browser.frame(267));
+  assert.equal(runtime.lifecycle.phase, "publish");
+  await flushAsyncWork();
+  assert.equal(runtime.lifecycle.phase, "publish");
+  const leafIndex = result.document.tree.nodes.findIndex((node) => node.id === "synthetic/leaf");
+  assert.equal(browser.namespaced[leafIndex].classes.includes("material-b"), true);
+  runtime.destroy();
+});
+
+test("paged variants pin the fixed interaction page so a synchronous mode switch remains available", async () => {
+  const input = await syntheticPagedVariantsInput();
+  input.state.channels.find((channel) => channel.codec === "polycss-pointer-grab-prepared@0").data.packet.animator.eyeFrame = 7;
+  input.bindings.channels.find((channel) => channel.interpreter === "polycss-pointer-grab@0").parameters.initialFrame = 7;
+  const built = buildDom(input);
+  const all = builtExternalResources(built);
+  const eager = new Map(all);
+  for (const record of built.document.resources.resources) if (record.kind === "state-page") eager.delete(record.id);
+  const calls = [];
+  const result = await readDomBrowser(built.bytes, {
+    externalResources: eager,
+    loadExternalResource(record) {
+      calls.push(record.id);
+      return all.get(record.id);
+    },
+  });
+  const { document } = fakeBrowserDocument();
+  const runtime = await mountDom(result, new FakeElement(document, "main"), { animate: false, mode: "animation" });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(calls.slice(0, 3), ["variant-page-1", "variant-page-4", "variant-page-2"]);
+  assert.equal(await runtime.seekAsync(3), 3);
+  const callsBeforeSwitch = calls.length;
+  assert.equal(runtime.setMode("interaction"), "interaction");
+  assert.equal(runtime.sourceFrame, 7);
+  assert.equal(runtime.lifecycle.phase, "publish");
+  assert.equal(calls.length, callsBeforeSwitch);
+  runtime.destroy();
+});
+
+test("paged variant requests cancel stale generations and fail closed on late page corruption", async () => {
+  const built = buildDom(await syntheticPagedVariantsInput("gzip"));
+  const all = builtExternalResources(built);
+  const eager = new Map(all);
+  for (const record of built.document.resources.resources) if (record.kind === "state-page") eager.delete(record.id);
+  let releasePage4;
+  const page4 = new Promise((resolve) => { releasePage4 = resolve; });
+  const result = await readDomBrowser(built.bytes, {
+    externalResources: eager,
+    loadExternalResource(record) {
+      return record.id === "variant-page-4" ? page4 : all.get(record.id);
+    },
+  });
+  const firstBrowser = fakeBrowserDocument();
+  const runtime = await mountDom(result, new FakeElement(firstBrowser.document, "main"), { animate: false });
+  await new Promise((resolve) => setImmediate(resolve));
+  const stale = runtime.seekAsync(7);
+  const staleRejection = assert.rejects(stale, errorCode("OPERATION_ABORTED"));
+  assert.equal(await runtime.seekAsync(1), 1);
+  releasePage4(all.get("variant-page-4"));
+  await staleRejection;
+  assert.equal(runtime.sourceFrame, 1);
+  assert.equal(runtime.destroy(), true);
+
+  const corrupt = new Map(all);
+  const bytes = corrupt.get("variant-page-4").slice();
+  bytes[bytes.length - 1] ^= 1;
+  corrupt.set("variant-page-4", bytes);
+  const corruptEager = new Map(corrupt);
+  for (const record of built.document.resources.resources) if (record.kind === "state-page") corruptEager.delete(record.id);
+  const corruptResult = await readDomBrowser(built.bytes, {
+    externalResources: corruptEager,
+    loadExternalResource: (record) => corrupt.get(record.id),
+  });
+  const secondBrowser = fakeBrowserDocument();
+  const corruptRuntime = await mountDom(corruptResult, new FakeElement(secondBrowser.document, "main"), { animate: false });
+  await assert.rejects(corruptRuntime.seekAsync(7), errorCode("RESOURCE_DIGEST_MISMATCH"));
+  assert.equal(corruptRuntime.lifecycle.phase, "destroy");
 });
 
 test("mount preserves the browser reader's explicitly raised CSS rule limit", async () => {
@@ -352,7 +1305,7 @@ test("successful mount retains identities and idempotent destroy restores the ho
     onLifecyclePhase: (phase) => phases.push(phase),
   });
   assert.deepEqual(phases, ["validate", "construct", "bind", "initialize", "publish"]);
-  assert.deepEqual(Object.keys(runtime), ["lifecycle", "mode", "sourceFrame", "seek", "setMode", "destroy"]);
+  assert.deepEqual(Object.keys(runtime), ["lifecycle", "mode", "sourceFrame", "bankId", "seek", "seekAsync", "selectBank", "selectBankAsync", "setMode", "setInput", "destroy"]);
   assert.equal(runtime.lifecycle.phase, "publish");
   assert.deepEqual(runtime.lifecycle.history, phases);
   assert.equal(runtime.mode, "animation");
@@ -836,4 +1789,132 @@ test("pointer mapping inverts the current presentation appearance", () => {
   dispatch(host, "pointermove", { clientX: 160, clientY: 130 });
   assert.deepEqual(input.sample().pointer, { x: 160, y: 120 });
   input.destroy();
+});
+
+test("landscape-first presentation selects landscape before strict portrait width bands", () => {
+  const { document } = fakeBrowserDocument();
+  const host = new FakeElement(document, "main");
+  const camera = new FakeElement(document, "div");
+  const row = (id, maxViewportWidth) => ({
+    id,
+    ...(maxViewportWidth === undefined ? {} : { maxViewportWidth }),
+    fit: "contain",
+    quarterTurns: 0,
+    bounds: [0, 0, 320, 240],
+    safeInset: 0,
+    bias: [0, 0],
+  });
+  const presentation = createStaticPresentation({
+    channels: [{
+      id: "presentation",
+      interpreter: "static-presentation@0",
+      parameters: {
+        fitHeight: 240,
+        fitWidth: 320,
+        sourceHeight: 240,
+        sourceWidth: 320,
+        profileSelection: "landscape-first-portrait-width",
+        profiles: [row("landscape"), row("phone", 520), row("portrait-720", 720), row("portrait-920", 920), row("portrait-wide")],
+      },
+      targets: { camera: "camera" },
+    }],
+  }, { host, byId: new Map([["camera", camera]]) });
+
+  for (const [width, height, expected] of [
+    [320, 240, "landscape"],
+    [240, 320, "phone"],
+    [519, 600, "phone"],
+    [520, 600, "portrait-720"],
+    [719, 800, "portrait-720"],
+    [720, 800, "portrait-920"],
+    [919, 1000, "portrait-920"],
+    [920, 1000, "portrait-wide"],
+    [600, 600, "portrait-720"],
+  ]) {
+    host.clientWidth = width;
+    host.clientHeight = height;
+    presentation.resize();
+    assert.equal(presentation.profileId, expected, `${width}x${height}`);
+  }
+});
+
+test("prepared quarter-turn and cover profiles preserve exact forward and inverse mapping", () => {
+  const { document } = fakeBrowserDocument();
+  const host = new FakeElement(document, "main");
+  const camera = new FakeElement(document, "div");
+  const mobile = {
+    id: "mobile",
+    fit: "contain",
+    quarterTurns: 1,
+    bounds: [40, -40, 280, 280],
+    safeInset: 8,
+    bias: [0, -0.06],
+  };
+  const presentation = createStaticPresentation({
+    channels: [{
+      id: "presentation",
+      interpreter: "static-presentation@0",
+      parameters: { fitHeight: 240, fitWidth: 320, sourceHeight: 240, sourceWidth: 320, profileSelection: "viewport-width", profiles: [mobile] },
+      targets: { camera: "camera" },
+    }],
+  }, { host, byId: new Map([["camera", camera]]) });
+  presentation.resize();
+  assert.equal(presentation.profileId, "mobile");
+  const mobilePoint = presentation.viewportPoint(40, -40, 320, 240);
+  assert.deepEqual(mobilePoint, { x: 160 + 160 * (224 / 240), y: 120 - 120 * (224 / 240), scale: 224 / 240 });
+  assert.deepEqual(presentation.sourcePoint(mobilePoint.x, mobilePoint.y, 320, 240), { x: 40, y: -40 });
+
+  const input = createInteractionInput(host, host, presentation);
+  input.setEnabled(true);
+  dispatch(host, "pointermove", { clientX: mobilePoint.x, clientY: mobilePoint.y });
+  assert.deepEqual(input.sample().pointer, { x: 40, y: -40 });
+  input.destroy();
+
+  const offOriginCamera = new FakeElement(document, "div");
+  const offOrigin = createStaticPresentation({
+    channels: [{
+      id: "presentation",
+      interpreter: "static-presentation@0",
+      parameters: {
+        fitHeight: 240,
+        fitWidth: 320,
+        sourceHeight: 240,
+        sourceWidth: 320,
+        profileSelection: "viewport-width",
+        profiles: [{ id: "off-origin", fit: "contain", quarterTurns: 1, bounds: [0, 0, 100, 50], safeInset: 0, bias: [0, 0] }],
+      },
+      targets: { camera: "off-origin-camera" },
+    }],
+  }, { host, byId: new Map([["off-origin-camera", offOriginCamera]]) });
+  offOrigin.resize();
+  assert.equal(offOriginCamera.style.left, "-228px");
+  assert.equal(offOriginCamera.style.top, "264px");
+  assert.equal(offOriginCamera.style.transform, "rotate(90deg) scale(2.4)");
+  assert.deepEqual(offOrigin.viewportPoint(0, 0, 320, 240), { x: 220, y: 0, scale: 2.4 });
+  assert.deepEqual(offOrigin.viewportPoint(100, 50, 320, 240), { x: 100, y: 240, scale: 2.4 });
+  assert.deepEqual(offOrigin.sourcePoint(160, 120, 320, 240), { x: 50, y: 25 });
+
+  const coverCamera = new FakeElement(document, "div");
+  const coverHost = new FakeElement(document, "main");
+  coverHost.clientHeight = 320;
+  const cover = createStaticPresentation({
+    channels: [{
+      id: "presentation",
+      interpreter: "static-presentation@0",
+      parameters: {
+        fitHeight: 240,
+        fitWidth: 320,
+        sourceHeight: 240,
+        sourceWidth: 320,
+        profileSelection: "viewport-width",
+        profiles: [{ id: "cover", fit: "cover", quarterTurns: 0, bounds: [0, 0, 320, 240], safeInset: 0, bias: [0, 0] }],
+      },
+      targets: { camera: "cover-camera" },
+    }],
+  }, { host: coverHost, byId: new Map([["cover-camera", coverCamera]]) });
+  cover.resize();
+  assert.equal(cover.profileId, "cover");
+  assert.equal(coverCamera.style.transform, "scale(1.333333)");
+  assert.equal(coverCamera.style.left, "0px");
+  assert.equal(coverCamera.style.top, "40px");
 });

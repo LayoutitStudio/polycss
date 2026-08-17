@@ -26,8 +26,13 @@ leaves  leafCount stable nodes in source order
 ```
 
 Its sinks are exactly `style.transform` and `style.visibility`. Parameters are
-`frameCount`, fixed `tickRateHz: 30`, and the safe CSS
-`baseSceneTransform`. `time.tick` has type `uint`.
+`frameCount`, the safe CSS `baseSceneTransform`, exactly one cadence, and an
+optional catch-up policy. A simple cadence is finite `tickRateHz` in `1..240`.
+An exact cadence is reduced positive-integer
+`tickIntervalUs: [numerator, denominator]`, also bounded to `1..240` Hz; its
+logical interval is `numerator / denominator` microseconds. `catchUpPolicy` is
+`bounded`, `single-step`, or `elapsed` and defaults to `bounded`. `time.tick`
+has type `uint`.
 
 ## State data
 
@@ -44,7 +49,10 @@ layout        delta-component-streams@0
 shapeCount    target cardinality
 leafCount     target cardinality, at most 65,536
 appearances   [id, scale, translateY][]
-timeline      {introTicks, loopTicks, frames}
+timeline      {introTicks, loopTicks, frames, deadlineMicros?}
+profileTimelines  optional ordered {profileId,introTicks,loopTicks,frames,deadlineMicros?}[]
+initialBankId  optional selected prepared-bank id
+banks         optional ordered {id,entryFrame,timeline,profileTimelines?}[]
 initial       initial source/model/shape/leaf state
 frameRows     one directly indexed row per source frame
 shapeChanges  delta-coded shape/transform columns plus visibility
@@ -133,17 +141,74 @@ index = tick < frames.length
 sourceFrame = frames[index]
 ```
 
+`deadlineMicros`, when present, has exactly `frames.length + 1` safe-integer
+entries, begins at zero, and is strictly increasing. Entry `i` is the elapsed
+microsecond deadline for logical tick `i`; the final entry is the deadline for
+wrapping from the final loop row back to its loop start. After the intro, the
+deadline span from `introTicks` through the final entry repeats with the loop.
+Every adjacent interval fits the browser timer's signed 32-bit millisecond
+bound. When absent, every deadline uses the binding cadence.
+
+`timeline` is always present and is the fallback schedule. Optional
+`profileTimelines` contains 1..16 unique overrides keyed to ids in the
+`static-presentation@0` profile bank. It MAY cover only a subset of presentation
+profiles; an uncovered profile uses `timeline`. Rows follow presentation-profile
+order, and every row independently satisfies the same range, exact-length, and
+initial-source-frame rules as the baseline. The baseline and all override frame
+and deadline arrays together fit the timeline-tick allocation limit. Each
+selected timeline may provide its own closed deadlines; otherwise it uses the
+binding cadence.
+
+The presentation profile is selected before initial playback publication. A
+resize that changes the selected schedule while animation is active first
+restarts playback at logical tick 0 and the initial source frame, then applies
+and reveals the new viewport profile. Selecting another presentation profile
+that resolves to the same baseline schedule does not restart. While interaction
+is active, profile selection changes only the schedule that will be used later;
+it does not overwrite interaction state. Returning to animation performs the
+ordinary restart using that selected schedule. This behavior also applies when
+automatic scheduling was disabled with `animate: false`.
+
+## Prepared banks
+
+`initialBankId` and `banks` either both occur or both are absent. The bank table
+contains 1..64 rows in strictly increasing id order. Ids and entry frames are
+unique. Every entry frame is in `1..frameCount`; the bank's baseline and every
+profile timeline begin at that entry. Timeline rows obey the same closed frame,
+deadline, and aggregate tick limits as the top-level schedules. The selected
+initial bank's entry equals `initial.sourceFrame`, and its baseline and profile
+timelines exactly equal the top-level fallback schedules.
+
+The host may call `selectBank(id)` only in animation mode. It resets logical
+tick to zero and atomically publishes the selected entry's playback, prepared
+class, surface/address, effects, and profile visibility state without replacing
+targets. `selectBankAsync(id)` first verifies the complete paged window and then
+performs the same publication; failure or supersession publishes neither bank.
+Unknown ids fail closed. Random, shuffle, catalog, playlist, and fetch-choice
+policy are host concerns and are not document inputs.
+
 The controller begins at tick 0. `advance()` increments tick, resolves the
 target source frame, and performs a sequential update or seek. The reference
-mount scheduler accounts for one logical tick every `1000 / tickRateHz`
-milliseconds and carries its deadline forward by that fixed interval, so a
-dropped browser animation frame does not permanently slow playback. A callback
-with one due tick publishes synchronously. Up to eight due ticks are normal
-catch-up: animation evaluates every tick and every distinct prepared-effects
-source frame in order but MAY publish only the final retained state, while
-interaction steps and publishes each tick separately. More than eight due
-ticks is a suspension: the scheduler discards the stale backlog, advances one
-tick, and resets its next deadline from the current callback timestamp.
+mount sleeps until the next binding-cadence or selected-timeline deadline and
+requests one paint-aligned callback only when due. A callback with one due tick
+publishes synchronously. Catch-up is selected once by the binding:
+
+- `bounded` carries deadlines forward, evaluates up to eight due logical ticks
+  and every distinct prepared-effects source frame in order, but MAY publish
+  only the final retained state. More than eight due ticks is suspension: it
+  advances one tick and resets the deadline from the callback timestamp.
+- `single-step` advances at most one logical tick for every due callback and
+  always resets the next deadline from that callback timestamp. It never drains
+  backlog.
+- `elapsed` resolves the final logical tick directly from all elapsed closed
+  deadlines, reconstructs and publishes only that final prepared retained
+  state, and carries the exact deadline origin forward. Intermediate effects
+  are not simulated. This policy is animation-only and is rejected when
+  prepared effects or pointer interaction is present.
+
+Interaction publishes every drained `bounded` tick separately. Explicit public
+seek and restart reset the scheduler origin without changing the selected
+timing contract.
 
 ## Publication
 
@@ -207,7 +272,8 @@ tick to zero.
 ## Validation boundary
 
 The validator rejects unknown fields, bad versions/layouts, noncanonical input
-or sink sets, target/count mismatch, invalid appearances/timeline, nonpartitioned
+or sink sets, target/count mismatch, invalid appearances/timelines, missing,
+unknown, duplicated, or out-of-order presentation-profile references, nonpartitioned
 frame ranges, malformed delta references, transform aliases across incompatible
 owners, unowned transforms, group/column/scale mismatch, unsafe CSS values, and
 all configured allocation excess before transform materialization.

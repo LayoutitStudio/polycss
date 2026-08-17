@@ -7,7 +7,10 @@ import { readCappedFile } from "./file-io.js";
 import { sha256Hex } from "./hash.js";
 import { assertSafeRelativePath, byteView, validateCssBytes, validateResourceBytes } from "./resources.js";
 import { validateDocumentInternal } from "./schema.js";
+import { preparedVariantClassTokens } from "./variant-effects.js";
 import { assertRealDescendantComponents, assertRealDirectory } from "./path-security.js";
+import { decodeStatePageNode } from "./state-page-node.js";
+import { validateDecodedStatePages } from "./state-pages.js";
 import type { DomLimits } from "./constants.js";
 import type { DomBytes, DomDocument, DomReadFileOptions, DomReadOptions, DomReadResult, DomTransport } from "./public-types.js";
 
@@ -60,6 +63,7 @@ function verifyResourceBytes(
   resourceBytes: ReadonlyMap<string, Uint8Array>,
   validated: ReturnType<typeof validateDocumentInternal>,
 ): string[] {
+  const variantClasses = preparedVariantClassTokens(document.state);
   const externalMissing: string[] = [];
   for (const record of document.resources.resources) {
     const bytes = resourceBytes.get(record.id);
@@ -73,9 +77,23 @@ function verifyResourceBytes(
   }
   for (const binding of document.cssBinding.stylesheets) {
     const bytes = resourceBytes.get(binding.resource);
-    if (bytes) validateCssBytes(bytes, binding, validated.resourceIds, validated.limits);
+    if (bytes) validateCssBytes(bytes, binding, validated.resourceIds, validated.limits, { forbiddenClassTokens: variantClasses });
   }
   return externalMissing;
+}
+
+function verifyStatePageContents(
+  document: DomDocument,
+  resourceBytes: ReadonlyMap<string, Uint8Array>,
+  limits: DomLimits,
+): void {
+  const decoded = new Map<string, Uint8Array>();
+  for (const record of document.resources.resources) {
+    if (record.kind !== "state-page") continue;
+    const encoded = resourceBytes.get(record.id);
+    if (encoded) decoded.set(record.id, decodeStatePageNode(record, encoded));
+  }
+  validateDecodedStatePages(document, decoded, limits);
 }
 
 function readDomInternal(value: unknown, options: DomReadOptions = {}) {
@@ -95,6 +113,7 @@ function readDomInternal(value: unknown, options: DomReadOptions = {}) {
     }
   }
   const externalMissing = verifyResourceBytes(document, resourceBytes, validated);
+  verifyStatePageContents(document, resourceBytes, validated.limits);
   if (options.requireResources) invariant(externalMissing.length === 0, "MISSING_EXTERNAL_RESOURCE", `External resources are missing: ${externalMissing.join(", ")}.`);
   deepFreezeJson(document);
   const result = Object.freeze({ transport, document, resourceBytes, externalMissing: Object.freeze(externalMissing) });
@@ -154,6 +173,7 @@ async function readDomFileInternal(path: string, options: DomReadFileOptions = {
     }
   }
   const externalMissing = verifyResourceBytes(initial.document, externalResources, validated);
+  verifyStatePageContents(initial.document, externalResources, validated.limits);
   if (options.requireResources ?? true) invariant(externalMissing.length === 0, "MISSING_EXTERNAL_RESOURCE", `External resources are missing: ${externalMissing.join(", ")}.`);
   return Object.freeze({
     ...initial,

@@ -11,7 +11,22 @@ import { buildDom } from "../src/writer.js";
 import { invariant } from "../src/errors.js";
 import { crc32 } from "../src/crc32.js";
 import { loadManifest } from "../src/manifest.js";
-import { syntheticAdapterTechniquesInput } from "../test/helpers.js";
+import { CSSGRAPHICS_REVISION, STABLE_CSSGRAPHICS_BROWSER_CONTRACTS } from "../test/cssgraphics-contracts.js";
+import {
+  syntheticAdapterTechniquesInput,
+  syntheticAspectProfileTimelinesInput,
+  syntheticCompositorTimingInput,
+  syntheticCssGraphicsDemoInput,
+  syntheticDynamicViewportProfilesInput,
+  syntheticEvictingPagedVariantsInput,
+  syntheticExactTimingInput,
+  syntheticOrbitInput,
+  syntheticPagedPlaybackChangesInput,
+  syntheticPagedPreparedBanksInput,
+  syntheticPagedProfileTimelinesWithoutInteractionInput,
+  syntheticProfileTimelinesInput,
+  syntheticViewportProfilesInput,
+} from "../test/helpers.js";
 
 const execFileAsync = promisify(execFile);
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
@@ -48,15 +63,18 @@ async function availableBrowser() {
   invariant(false, "MISSING_RELEASE_BROWSER", "A Chromium-family browser is required for the real-browser release gate. Set DOMFORMAT_BROWSER to its executable path.");
 }
 
-function serve(explicitFiles, runtimeRoot) {
+function serve(explicitFiles, runtimeRoot, runtimeRequests) {
   return createServer(async (request, response) => {
     try {
       const pathname = decodeURIComponent(new URL(request.url, "http://127.0.0.1").pathname);
       const explicit = explicitFiles.get(pathname);
-      const sourceRoot = pathname === "/dist/browser.js" ? runtimeRoot : root;
+      invariant(!pathname.startsWith("/src/") && !pathname.startsWith("/packages/domformat/"), "WORKSPACE_RUNTIME_IMPORT", `Browser smoke requested workspace runtime path ${pathname}.`);
+      const installedRuntimeRequest = pathname.startsWith("/dist/");
+      const sourceRoot = installedRuntimeRequest ? runtimeRoot : root;
       const target = explicit ?? resolve(sourceRoot, `.${pathname}`);
       invariant(explicit !== undefined || target.startsWith(`${sourceRoot}${sep}`), "UNSAFE_TEST_PATH", "Browser smoke request escaped its fixture root.");
       const bytes = await readFile(target);
+      if (installedRuntimeRequest) runtimeRequests.push(Object.freeze({ pathname, target }));
       response.writeHead(200, {
         "cache-control": "no-store",
         "content-length": bytes.length,
@@ -115,7 +133,7 @@ async function withBrowserPage(browser, dimensions, label, action) {
   return result;
 }
 
-async function waitForPublication(page, url, label, diagnostics, expectedPaintResources) {
+async function waitForPublication(page, url, label, diagnostics, expectedPaintResources, paintBarrier = true) {
   let waitError;
   try {
     await page.goto(url, { waitUntil: "load", timeout: 20_000 });
@@ -171,6 +189,7 @@ async function waitForPublication(page, url, label, diagnostics, expectedPaintRe
   });
   invariant(resources.count === expectedPaintResources, "BROWSER_RELEASE_PAINT", `${label} exposed ${resources.count} blob-backed paint resources instead of ${expectedPaintResources}.`);
   invariant(resources.decoded, "BROWSER_RELEASE_PAINT", `${label} did not decode ${resources.count} paint resources (${resources.error}).`);
+  if (!paintBarrier) return;
   const paint = await page.evaluate(() => new Promise((resolvePaint) => {
     const timeout = setTimeout(() => resolvePaint(false), 2_000);
     requestAnimationFrame(() => requestAnimationFrame(() => {
@@ -370,13 +389,18 @@ async function preparedTechniqueProof(browser, url, label) {
   return withBrowserPage(browser, { width: 320, height: 240 }, label, async (page, diagnostics) => {
     await waitForPublication(page, url, label, diagnostics, 1);
     const proof = await page.evaluate(async () => {
-      const leaf = document.querySelector("i.leaf");
+      const leaf = document.querySelector('[data-domformat-node="2"]');
       const before = {
         address: leaf?.style.backgroundPosition,
         classes: [...(leaf?.classList ?? [])],
         color: leaf ? getComputedStyle(leaf).color : "",
+        visibility: leaf?.style.visibility,
       };
+      const observer = new MutationObserver(() => {});
+      observer.observe(leaf, { attributes: true, attributeOldValue: true, attributeFilter: ["class", "style"] });
       globalThis.domformatProof.seek(2);
+      const mutations = observer.takeRecords().map((record) => ({ attribute: record.attributeName, oldValue: record.oldValue }));
+      observer.disconnect();
       await new Promise((resolvePaint) => requestAnimationFrame(() => requestAnimationFrame(resolvePaint)));
       const current = document.querySelector("i.leaf");
       return {
@@ -386,14 +410,552 @@ async function preparedTechniqueProof(browser, url, label) {
           address: current?.style.backgroundPosition,
           classes: [...(current?.classList ?? [])],
           color: current ? getComputedStyle(current).color : "",
+          visibility: current?.style.visibility,
         },
+        mutations,
       };
     });
     invariant(proof.sameNode, "BROWSER_RELEASE_MOUNT", `${label} replaced the retained variant target.`);
-    invariant(proof.before.address === "0px 0px" && proof.before.classes.includes("material-a") && proof.before.color === "rgb(255, 0, 0)", "BROWSER_RELEASE_MOUNT", `${label} did not publish the prepared initial variant/address.`);
-    invariant(proof.after.address === "-16px -16px" && proof.after.classes.includes("material-b") && !proof.after.classes.includes("material-a") && proof.after.color === "rgb(0, 255, 0)", "BROWSER_RELEASE_MOUNT", `${label} did not publish the prepared noninitial variant/address.`);
+    invariant(proof.before.address === "0px 0px" && proof.before.classes.includes("material-a") && proof.before.color === "rgb(255, 0, 0)" && proof.before.visibility === "hidden", "BROWSER_RELEASE_MOUNT", `${label} did not publish the prepared hidden initial variant/address.`);
+    invariant(proof.after.address === "-16px -16px" && proof.after.classes.includes("material-b") && !proof.after.classes.includes("material-a") && proof.after.color === "rgb(0, 255, 0)" && proof.after.visibility === "visible", "BROWSER_RELEASE_MOUNT", `${label} did not publish the prepared noninitial variant/address/reveal.`);
+    invariant(proof.mutations.length === 4 && proof.mutations[0].attribute === "class" && proof.mutations[1].attribute === "class" && proof.mutations[2].attribute === "style" && proof.mutations[3].attribute === "style", "BROWSER_RELEASE_MOUNT", `${label} did not publish class, address, then reveal in order.`);
+    invariant(proof.mutations[2].oldValue?.includes("background-position: 0px 0px") && proof.mutations[2].oldValue?.includes("visibility: hidden") && proof.mutations[3].oldValue?.includes("background-position: -16px -16px") && proof.mutations[3].oldValue?.includes("visibility: hidden"), "BROWSER_RELEASE_MOUNT", `${label} exposed the retained leaf before its prepared address was current.`);
     return proof;
   });
+}
+
+async function pagedStateProof(browser, url, label) {
+  return withBrowserPage(browser, { width: 320, height: 240 }, label, async (page, diagnostics) => {
+    const requests = [];
+    page.on("request", (request) => {
+      const pathname = new URL(request.url()).pathname;
+      if (pathname.startsWith("/paged/state/")) requests.push(pathname.split("/").at(-1));
+    });
+    await waitForPublication(page, url, label, diagnostics, 1);
+    await page.waitForTimeout(50);
+    invariant(requests.join(",") === "variant-page-1.json,variant-page-2.json", "BROWSER_RELEASE_PAGED_STATE", `${label} did not lazily request only its initial/current-lookahead window (${requests.join(",")}).`);
+    const publication = await page.evaluate(async () => {
+      const leaf = document.querySelector('[data-domformat-node="2"]');
+      const identity = leaf;
+      const initial = { frame: globalThis.domformatProof.sourceFrame, classes: [...leaf.classList] };
+      await globalThis.domformatProof.seekAsync(8);
+      const frame8 = { frame: globalThis.domformatProof.sourceFrame, classes: [...leaf.classList] };
+      await globalThis.domformatProof.seekAsync(4);
+      const frame4 = { frame: globalThis.domformatProof.sourceFrame, classes: [...leaf.classList] };
+      await globalThis.domformatProof.seekAsync(8);
+      const revisitedFrame8 = { frame: globalThis.domformatProof.sourceFrame, classes: [...leaf.classList] };
+      await globalThis.domformatProof.seekAsync(1);
+      return {
+        sameNode: document.querySelector('[data-domformat-node="2"]') === identity,
+        initial,
+        frame8,
+        frame4,
+        revisitedFrame8,
+        revisitedFrame1: { frame: globalThis.domformatProof.sourceFrame, classes: [...leaf.classList] },
+      };
+    });
+    const counts = Object.fromEntries([...new Set(requests)].map((name) => [name, requests.filter((candidate) => candidate === name).length]));
+    invariant(publication.sameNode && publication.initial.frame === 1 && publication.initial.classes.includes("material-a") && publication.frame8.frame === 8 && publication.frame8.classes.includes("material-b") && publication.frame4.frame === 4 && publication.frame4.classes.includes("material-b") && publication.revisitedFrame8.frame === 8 && publication.revisitedFrame8.classes.includes("material-b") && publication.revisitedFrame1.frame === 1 && publication.revisitedFrame1.classes.includes("material-a"), "BROWSER_RELEASE_PAGED_STATE", `${label} did not retain one target while publishing requested pages.`);
+    invariant(counts["variant-page-1.json"] === 1 && counts["variant-page-2.json"] === 1 && counts["variant-page-3.json"] === 1 && counts["variant-page-4.json"] === 1 && counts["variant-page-6.json"] === 2, "BROWSER_RELEASE_PAGED_STATE", `${label} request log does not prove bounded nonpinned eviction with a pinned playback-initial page (${JSON.stringify(counts)}).`);
+    return Object.freeze({ label, requests, counts, publication });
+  });
+}
+
+async function combinedPagedStateProof(browser, url, label) {
+  return withBrowserPage(browser, { width: 320, height: 240 }, label, async (page, diagnostics) => {
+    const requests = [];
+    page.on("request", (request) => {
+      const pathname = new URL(request.url()).pathname;
+      if (pathname.startsWith("/paged-combined/state/")) requests.push(pathname.split("/").at(-1));
+    });
+    await waitForPublication(page, url, label, diagnostics, 1);
+    await page.waitForTimeout(50);
+    const independentReader = label.includes("nversion");
+    invariant(new Set(requests).size === (independentReader ? 5 : 4)
+      && requests.includes("playback-page-1.json") && requests.includes("playback-page-2.json")
+      && requests.includes("variant-page-1.json") && requests.includes("variant-page-2.json")
+      && (!independentReader || requests.includes("playback-page-4.json")),
+    "BROWSER_RELEASE_PAGED_STATE", `${label} did not lazily load the exact combined current/lookahead window (${requests.join(",")}).`);
+    const publication = await page.evaluate(async () => {
+      const shape = document.querySelector('[data-domformat-node="1"]');
+      const leaf = document.querySelector('[data-domformat-node="2"]');
+      const identity = leaf;
+      const read = () => ({
+        sourceFrame: globalThis.domformatProof.sourceFrame,
+        classes: [...leaf.classList],
+        shapeTransform: shape.style.transform,
+        shapeVisibility: shape.style.visibility,
+        leafTransform: leaf.style.transform,
+      });
+      const initial = read();
+      await globalThis.domformatProof.seekAsync(8);
+      const frame8 = read();
+      await globalThis.domformatProof.seekAsync(4);
+      const frame4 = read();
+      await globalThis.domformatProof.seekAsync(5);
+      const frame5 = read();
+      await globalThis.domformatProof.seekAsync(1);
+      return {
+        sameLeaf: document.querySelector('[data-domformat-node="2"]') === identity,
+        leafCount: globalThis.domformatProof.leaves,
+        initial,
+        frame8,
+        frame4,
+        frame5,
+        frame1: read(),
+      };
+    });
+    invariant(publication.sameLeaf && publication.leafCount === 2
+      && publication.initial.sourceFrame === 1 && publication.initial.classes.includes("material-a")
+      && publication.frame8.sourceFrame === 8 && publication.frame8.classes.includes("material-b")
+      && publication.frame4.sourceFrame === 4 && publication.frame4.classes.includes("material-b")
+      && publication.frame5.sourceFrame === 5
+      && publication.frame1.sourceFrame === 1 && publication.frame1.classes.includes("material-a")
+      && publication.initial.shapeVisibility === "visible" && publication.frame4.shapeVisibility === "hidden"
+      && publication.frame4.shapeTransform !== publication.initial.shapeTransform
+      && publication.frame8.shapeTransform === publication.frame4.shapeTransform
+      && publication.frame4.leafTransform === publication.initial.leafTransform
+      && publication.frame5.leafTransform !== publication.initial.leafTransform
+      && publication.frame8.leafTransform === publication.frame5.leafTransform
+      && publication.frame1.shapeVisibility === "visible"
+      && publication.frame1.shapeTransform === publication.initial.shapeTransform
+      && publication.frame1.leafTransform === publication.initial.leafTransform,
+    "BROWSER_RELEASE_PAGED_STATE", `${label} did not atomically publish combined playback and variant seeks (${JSON.stringify(publication)}).`);
+    invariant(requests.some((name) => name === "playback-page-4.json") && requests.some((name) => name === "variant-page-4.json")
+      && requests.some((name) => name === "playback-page-3.json") && requests.some((name) => name === "variant-page-3.json"),
+    "BROWSER_RELEASE_PAGED_STATE", `${label} did not request both channel pages for lazy random seeks (${requests.join(",")}).`);
+    return Object.freeze({ label, requests, publication });
+  });
+}
+
+async function viewportProfileProof(browser, url, label) {
+  return withBrowserPage(browser, { width: 320, height: 240 }, label, async (page, diagnostics) => {
+    await waitForPublication(page, url, label, diagnostics, 1);
+    const initial = await page.evaluate(() => {
+      const camera = document.querySelector(".camera");
+      const leaf = document.querySelector('[data-domformat-node="2"]');
+      globalThis.__domformatProfileNodes = { camera, leaf };
+      globalThis.domformatProof.seek(2);
+      return { cameraTransform: camera.style.transform, leafVisibility: leaf.style.visibility };
+    });
+    await page.setViewportSize({ width: 640, height: 480 });
+    await page.evaluate(() => new Promise((resolvePaint) => requestAnimationFrame(() => requestAnimationFrame(resolvePaint))));
+    const desktop = await page.evaluate(() => {
+      const { camera, leaf } = globalThis.__domformatProfileNodes;
+      return {
+        sameCamera: document.querySelector(".camera") === camera,
+        sameLeaf: document.querySelector('[data-domformat-node="2"]') === leaf,
+        cameraTransform: camera.style.transform,
+        leafVisibility: leaf.style.visibility,
+        leafAddress: leaf.style.backgroundPositionY,
+      };
+    });
+    invariant(initial.cameraTransform.includes("rotate(90deg)") && initial.leafVisibility === "hidden", "BROWSER_RELEASE_VIEWPORT", `${label} did not publish the mobile root/per-leaf profile.`);
+    invariant(desktop.sameCamera && desktop.sameLeaf && !desktop.cameraTransform.includes("rotate(90deg)") && desktop.leafVisibility === "visible" && desktop.leafAddress === "-32px", "BROWSER_RELEASE_VIEWPORT", `${label} did not retain and reveal the desktop root/per-leaf profile.`);
+    return Object.freeze({ label, initial, desktop });
+  });
+}
+
+async function dynamicViewportProfileProof(browser, url, label) {
+  return withBrowserPage(browser, { width: 320, height: 240 }, label, async (page, diagnostics) => {
+    await waitForPublication(page, url, label, diagnostics, 1);
+    const mobile = await page.evaluate(() => {
+      const leaf = document.querySelector('[data-domformat-node="2"]');
+      globalThis.__domformatDynamicProfileLeaf = leaf;
+      const initial = leaf.style.visibility;
+      globalThis.domformatProof.seek(2);
+      return { initial, frame2: leaf.style.visibility };
+    });
+    await page.setViewportSize({ width: 640, height: 480 });
+    await page.evaluate(() => new Promise((resolvePaint) => requestAnimationFrame(() => requestAnimationFrame(resolvePaint))));
+    const desktop = await page.evaluate(() => {
+      const leaf = globalThis.__domformatDynamicProfileLeaf;
+      const matrix = new DOMMatrix(leaf.style.transform);
+      return { sameLeaf: document.querySelector('[data-domformat-node="2"]') === leaf, matrix: [matrix.a, matrix.b, matrix.c, matrix.d, matrix.e, matrix.f] };
+    });
+    await page.setViewportSize({ width: 800, height: 600 });
+    await page.evaluate(() => new Promise((resolvePaint) => requestAnimationFrame(() => requestAnimationFrame(resolvePaint))));
+    const resized = await page.evaluate(() => {
+      const leaf = globalThis.__domformatDynamicProfileLeaf;
+      const matrix = new DOMMatrix(leaf.style.transform);
+      return { sameLeaf: document.querySelector('[data-domformat-node="2"]') === leaf, matrix: [matrix.a, matrix.b, matrix.c, matrix.d, matrix.e, matrix.f] };
+    });
+    invariant(mobile.initial === "hidden" && mobile.frame2 === "visible", "BROWSER_RELEASE_VIEWPORT", `${label} did not publish profile-specific source-frame visibility (${JSON.stringify(mobile)}).`);
+    invariant(desktop.sameLeaf && JSON.stringify(desktop.matrix) === JSON.stringify([0, 2, -3, 0, 68, 107]), "BROWSER_RELEASE_VIEWPORT", `${label} did not publish the capped 640x480 responsive affine row (${JSON.stringify(desktop)}).`);
+    invariant(resized.sameLeaf && JSON.stringify(resized.matrix) === JSON.stringify([0, 2, -3, 0, 84, 131]), "BROWSER_RELEASE_VIEWPORT", `${label} did not recompute the same-profile 800x600 affine row (${JSON.stringify(resized)}).`);
+    return Object.freeze({ label, mobile, desktop, resized });
+  });
+}
+
+async function profileTimelineProof(browser, url, label) {
+  return withBrowserPage(browser, { width: 320, height: 240 }, label, async (page, diagnostics) => {
+    await waitForPublication(page, url, label, diagnostics, 1);
+    await page.waitForFunction(() => globalThis.domformatProof.sourceFrame === 3);
+    const interaction = await page.evaluate(() => ({
+      mode: globalThis.domformatProof.setMode("interaction"),
+      sourceFrame: globalThis.domformatProof.sourceFrame,
+    }));
+    await page.setViewportSize({ width: 640, height: 480 });
+    await page.evaluate(() => new Promise((resolvePaint) => requestAnimationFrame(() => requestAnimationFrame(resolvePaint))));
+    const preserved = await page.evaluate(() => ({ mode: globalThis.domformatProof.mode, sourceFrame: globalThis.domformatProof.sourceFrame }));
+    const reentry = await page.evaluate(() => ({
+      mode: globalThis.domformatProof.setMode("animation"),
+      sourceFrame: globalThis.domformatProof.sourceFrame,
+    }));
+    await page.waitForFunction(() => globalThis.domformatProof.sourceFrame === 2);
+    const desktop = await page.evaluate(() => ({ mode: globalThis.domformatProof.mode, sourceFrame: globalThis.domformatProof.sourceFrame }));
+    invariant(interaction.mode === "interaction" && interaction.sourceFrame === 3 && preserved.mode === "interaction" && preserved.sourceFrame === 3, "BROWSER_RELEASE_PROFILE_TIMELINE", `${label} overwrote interaction state during profile selection.`);
+    invariant(reentry.mode === "animation" && reentry.sourceFrame === 1 && desktop.mode === "animation" && desktop.sourceFrame === 2, "BROWSER_RELEASE_PROFILE_TIMELINE", `${label} did not restart and execute the selected baseline schedule.`);
+    return Object.freeze({ label, interaction, preserved, reentry, desktop });
+  });
+}
+
+async function aspectProfileTimelineProof(browser, url, label) {
+  return withBrowserPage(browser, { width: 320, height: 240 }, label, async (page, diagnostics) => {
+    await waitForPublication(page, url, label, diagnostics, 1);
+    await page.waitForFunction(() => globalThis.domformatProof.sourceFrame === 2);
+    const landscape = await page.evaluate(() => {
+      const camera = document.querySelector(".camera");
+      const leaf = document.querySelector('[data-domformat-node="2"]');
+      globalThis.__domformatAspectNodes = { camera, leaf };
+      return { sourceFrame: globalThis.domformatProof.sourceFrame, cameraTransform: camera.style.transform, leafVisibility: leaf.style.visibility };
+    });
+    const interaction = await page.evaluate(() => ({ mode: globalThis.domformatProof.setMode("interaction"), sourceFrame: globalThis.domformatProof.sourceFrame }));
+    await page.setViewportSize({ width: 240, height: 320 });
+    await page.evaluate(() => new Promise((resolvePaint) => requestAnimationFrame(() => requestAnimationFrame(resolvePaint))));
+    const preserved = await page.evaluate(() => {
+      const { camera, leaf } = globalThis.__domformatAspectNodes;
+      return {
+        mode: globalThis.domformatProof.mode,
+        sourceFrame: globalThis.domformatProof.sourceFrame,
+        sameCamera: document.querySelector(".camera") === camera,
+        sameLeaf: document.querySelector('[data-domformat-node="2"]') === leaf,
+        cameraTransform: camera.style.transform,
+        leafVisibility: leaf.style.visibility,
+      };
+    });
+    const reentry = await page.evaluate(() => ({ mode: globalThis.domformatProof.setMode("animation"), sourceFrame: globalThis.domformatProof.sourceFrame }));
+    await page.waitForFunction(() => globalThis.domformatProof.sourceFrame === 3);
+    const phone = await page.evaluate(() => ({ mode: globalThis.domformatProof.mode, sourceFrame: globalThis.domformatProof.sourceFrame }));
+    invariant(landscape.sourceFrame === 2 && !landscape.cameraTransform.includes("rotate(90deg)") && landscape.leafVisibility === "visible", "BROWSER_RELEASE_PROFILE_TIMELINE", `${label} did not select the 320x240 landscape baseline before publication.`);
+    invariant(interaction.mode === "interaction" && interaction.sourceFrame === 3 && preserved.mode === "interaction" && preserved.sourceFrame === 3 && preserved.sameCamera && preserved.sameLeaf && preserved.cameraTransform.includes("rotate(90deg)") && preserved.leafVisibility === "hidden", "BROWSER_RELEASE_PROFILE_TIMELINE", `${label} did not select the portrait phone presentation while preserving interaction state.`);
+    invariant(reentry.mode === "animation" && reentry.sourceFrame === 1 && phone.mode === "animation" && phone.sourceFrame === 3, "BROWSER_RELEASE_PROFILE_TIMELINE", `${label} did not restart and execute the portrait phone schedule.`);
+    return Object.freeze({ label, landscape, interaction, preserved, reentry, phone });
+  });
+}
+
+async function pinnedProfileRestartProof(browser, url, label) {
+  return withBrowserPage(browser, { width: 320, height: 240 }, label, async (page, diagnostics) => {
+    const requests = [];
+    page.on("request", (request) => {
+      const pathname = new URL(request.url()).pathname;
+      if (pathname.startsWith("/paged-profile/state/")) requests.push(pathname.split("/").at(-1));
+    });
+    await waitForPublication(page, url, label, diagnostics, 1);
+    await page.evaluate(() => globalThis.domformatProof.seekAsync(5));
+    await page.setViewportSize({ width: 640, height: 480 });
+    await page.evaluate(() => new Promise((resolvePaint) => requestAnimationFrame(() => requestAnimationFrame(resolvePaint))));
+    const publication = await page.evaluate(() => ({
+      lifecycle: globalThis.domformatProof.lifecycle.phase,
+      sourceFrame: globalThis.domformatProof.sourceFrame,
+    }));
+    invariant(publication.lifecycle === "publish" && publication.sourceFrame === 1, "BROWSER_RELEASE_PROFILE_TIMELINE", `${label} could not restart from the pinned playback-initial page.`);
+    invariant(requests.filter((name) => name === "variant-page-1.json").length === 1, "BROWSER_RELEASE_PROFILE_TIMELINE", `${label} refetched its supposedly pinned playback-initial page.`);
+    return Object.freeze({ label, requests, publication });
+  });
+}
+
+async function preparedBankProof(browser, url, label) {
+  return withBrowserPage(browser, { width: 320, height: 240 }, label, async (page, diagnostics) => {
+    await waitForPublication(page, url, label, diagnostics, 1);
+    const proof = await page.evaluate(async () => {
+      const model = document.querySelector(".scene");
+      const leaf = document.querySelector('[data-domformat-node="2"]');
+      const initial = { bankId: globalThis.domformatProof.bankId, sourceFrame: globalThis.domformatProof.sourceFrame };
+      await globalThis.domformatProof.selectBankAsync("beta");
+      const beta = { bankId: globalThis.domformatProof.bankId, sourceFrame: globalThis.domformatProof.sourceFrame, sameModel: document.querySelector(".scene") === model, sameLeaf: document.querySelector('[data-domformat-node="2"]') === leaf };
+      await globalThis.domformatProof.selectBankAsync("gamma");
+      const gamma = { bankId: globalThis.domformatProof.bankId, sourceFrame: globalThis.domformatProof.sourceFrame, sameModel: document.querySelector(".scene") === model, sameLeaf: document.querySelector('[data-domformat-node="2"]') === leaf };
+      globalThis.domformatProof.setMode("interaction");
+      let interactionError = null;
+      try { globalThis.domformatProof.selectBank("alpha"); } catch (error) { interactionError = error?.code ?? String(error); }
+      globalThis.domformatProof.setMode("animation");
+      const reentry = { bankId: globalThis.domformatProof.bankId, sourceFrame: globalThis.domformatProof.sourceFrame, sameModel: document.querySelector(".scene") === model, sameLeaf: document.querySelector('[data-domformat-node="2"]') === leaf };
+      return { initial, beta, gamma, interactionError, reentry };
+    });
+    invariant(proof.initial.bankId === "alpha" && proof.initial.sourceFrame === 1, "BROWSER_RELEASE_BANK", `${label} did not publish the canonical initial bank.`);
+    invariant(proof.beta.bankId === "beta" && proof.beta.sourceFrame === 3 && proof.beta.sameModel && proof.beta.sameLeaf, "BROWSER_RELEASE_BANK", `${label} did not atomically publish retained beta bank state.`);
+    invariant(proof.gamma.bankId === "gamma" && proof.gamma.sourceFrame === 5 && proof.gamma.sameModel && proof.gamma.sameLeaf, "BROWSER_RELEASE_BANK", `${label} did not atomically publish retained gamma bank state.`);
+    invariant(proof.interactionError === "INVALID_EXPERIENCE_MODE" && proof.reentry.bankId === "gamma" && proof.reentry.sourceFrame === 5 && proof.reentry.sameModel && proof.reentry.sameLeaf, "BROWSER_RELEASE_BANK", `${label} did not preserve host-policy and selected-bank restart boundaries.`);
+    return Object.freeze({ label, ...proof });
+  });
+}
+
+async function orbitInputProof(browser, url, label) {
+  return withBrowserPage(browser, { width: 320, height: 240 }, label, async (page, diagnostics) => {
+    await waitForPublication(page, url, label, diagnostics, 1);
+    const proof = await page.evaluate(() => {
+      const model = document.querySelector(".scene");
+      const leaf = document.querySelector('[data-domformat-node="2"]');
+      const identity = { model, leaf };
+      const yaw = globalThis.domformatProof.setInput("orbit.yaw", 90);
+      const pitch = globalThis.domformatProof.setInput("orbit.pitch", 100);
+      const zoom = globalThis.domformatProof.setInput("orbit.zoom", 0);
+      return {
+        sameModel: document.querySelector(".scene") === identity.model,
+        sameLeaf: document.querySelector('[data-domformat-node="2"]') === identity.leaf,
+        yaw,
+        pitch,
+        zoom,
+        modelTransform: model.style.transform,
+        leafAddress: leaf.style.backgroundPosition,
+      };
+    });
+    invariant(proof.sameModel && proof.sameLeaf && proof.yaw === 90 && proof.pitch === 28 && proof.zoom === 0.5, "BROWSER_RELEASE_ORBIT", `${label} did not clamp orbit input on retained nodes.`);
+    invariant(proof.modelTransform.includes("rotateX(28deg)") && proof.modelTransform.includes("rotateY(90deg)") && proof.modelTransform.includes("scale3d(0.5, 0.516, 0.5)") && proof.leafAddress === "0px -480px", "BROWSER_RELEASE_ORBIT", `${label} did not publish prepared orbit transform/address state (${JSON.stringify(proof)}).`);
+    return Object.freeze({ label, ...proof });
+  });
+}
+
+async function compositorTimingProof(browser, url, label, animate) {
+  return withBrowserPage(browser, { width: 320, height: 240 }, label, async (page, diagnostics) => {
+    await waitForPublication(page, url, label, diagnostics, 1);
+    const initialFrame = await page.evaluate(() => globalThis.domformatProof.sourceFrame);
+    await page.waitForTimeout(160);
+    const beforeSeek = await page.evaluate(() => {
+      const animation = document.querySelector(".scene").getAnimations()[0];
+      return { frame: globalThis.domformatProof.sourceFrame, animationCount: document.querySelector(".scene").getAnimations().length, playState: animation?.playState, currentTime: Number(animation?.currentTime) };
+    });
+    const seek = await page.evaluate(() => {
+      const model = document.querySelector(".scene");
+      const animation = model.getAnimations()[0];
+      const identity = model;
+      globalThis.domformatProof.seek(4);
+      return {
+        sameModel: document.querySelector(".scene") === identity,
+        frame: globalThis.domformatProof.sourceFrame,
+        playState: animation.playState,
+        currentTime: Number(animation.currentTime),
+        leafTransition: document.querySelector('[data-domformat-node="2"]').style.transition,
+      };
+    });
+    const logicalTick = seek.currentTime / (1000 / 30);
+    invariant(beforeSeek.animationCount === 1 && seek.sameModel && seek.frame === 4 && Math.abs(logicalTick - Math.round(logicalTick)) < 0.01, "BROWSER_RELEASE_COMPOSITOR", `${label} did not snap retained WAAPI time to a prepared logical tick (${seek.currentTime}).`);
+    if (animate) {
+      invariant(beforeSeek.frame !== initialFrame && seek.playState === "running" && seek.leafTransition !== "none", "BROWSER_RELEASE_COMPOSITOR", `${label} did not keep logical playback and compositor timing active.`);
+    } else {
+      invariant(beforeSeek.frame === initialFrame && beforeSeek.playState === "paused" && seek.playState === "paused" && seek.leafTransition === "none", "BROWSER_RELEASE_ANIMATE_FALSE", `${label} advanced or resumed compositor state despite animate:false.`);
+    }
+    return Object.freeze({ label, animate, initialFrame, beforeSeek, seek });
+  });
+}
+
+async function exactTimingProof(browser, url, label, stallMs, expectedFrame, forcePrequeued = false) {
+  return withBrowserPage(browser, { width: 320, height: 240 }, label, async (page, diagnostics) => {
+    await page.addInitScript(() => {
+      const nativeRequestAnimationFrame = window.requestAnimationFrame.bind(window);
+      const nativeCancelAnimationFrame = window.cancelAnimationFrame.bind(window);
+      const queued = new Map();
+      let nextQueuedId = -1;
+      let released = false;
+      window.requestAnimationFrame = (callback) => {
+        if (released) return nativeRequestAnimationFrame(callback);
+        const id = nextQueuedId;
+        nextQueuedId -= 1;
+        queued.set(id, callback);
+        return id;
+      };
+      window.cancelAnimationFrame = (id) => {
+        if (!queued.delete(id)) nativeCancelAnimationFrame(id);
+      };
+      globalThis.__domformatTimingGate = Object.freeze({
+        get queuedCount() { return queued.size; },
+        release() {
+          if (released) return;
+          released = true;
+          for (const callback of queued.values()) window.requestAnimationFrame(callback);
+          queued.clear();
+        },
+      });
+    });
+    await waitForPublication(page, url, label, diagnostics, 1, false);
+    if (forcePrequeued) {
+      await page.evaluate(() => globalThis.domformatProof.seek(1));
+      await page.waitForTimeout(50);
+      const queuedCount = await page.evaluate(() => globalThis.__domformatTimingGate.queuedCount);
+      invariant(queuedCount > 0, "BROWSER_RELEASE_TIMING", `${label} did not force a startup scheduler callback into the pre-release queue.`);
+    }
+    const proof = await page.evaluate(async ({ duration, resetBeforeStall }) => {
+      const leaf = document.querySelector('[data-domformat-node="2"]');
+      if (!leaf) throw new Error("The timing proof did not mount its retained leaf.");
+      let settled = false;
+      let rejectPublication;
+      let resolvePublication;
+      let timeout;
+      const firstPublication = new Promise((resolveFirst, rejectFirst) => {
+        resolvePublication = resolveFirst;
+        rejectPublication = rejectFirst;
+        timeout = setTimeout(() => {
+          settled = true;
+          rejectFirst(new Error("The first post-stall scheduler publication did not occur."));
+        }, 2_000);
+      });
+      const nativeRequestAnimationFrame = window.requestAnimationFrame.bind(window);
+      window.requestAnimationFrame = (callback) => nativeRequestAnimationFrame((timestamp) => {
+        try {
+          callback(timestamp);
+        } catch (error) {
+          if (!settled) {
+            settled = true;
+            clearTimeout(timeout);
+            rejectPublication(error);
+          }
+          return;
+        }
+        if (settled || globalThis.domformatProof.sourceFrame === 1) return;
+        settled = true;
+        clearTimeout(timeout);
+        const result = {
+          sourceFrame: globalThis.domformatProof.sourceFrame,
+          sameLeaf: document.querySelector('[data-domformat-node="2"]') === leaf,
+        };
+        globalThis.domformatProof.destroy();
+        resolvePublication(result);
+      });
+      if (resetBeforeStall) globalThis.domformatProof.seek(1);
+      const start = performance.now();
+      while (performance.now() - start < duration) {}
+      globalThis.__domformatTimingGate.release();
+      return firstPublication;
+    }, { duration: stallMs, resetBeforeStall: !forcePrequeued });
+    invariant(proof.sourceFrame === expectedFrame && proof.sameLeaf, "BROWSER_RELEASE_TIMING", `${label} first post-stall publication was frame ${proof.sourceFrame}, expected ${expectedFrame}, or replaced retained identity.`);
+    return Object.freeze({ label, stallMs, prequeued: forcePrequeued, ...proof });
+  });
+}
+
+async function cssGraphicsDemoProof(browser, url, contract, implementation) {
+  const label = `${contract.label} ${implementation} compatibility`;
+  return withBrowserPage(browser, { width: 320, height: 240 }, label, async (page, diagnostics) => {
+    await waitForPublication(page, url, label, diagnostics, 1);
+    const initial = await page.evaluate(() => {
+      const model = document.querySelector(".scene");
+      const leaf = document.querySelector('[data-domformat-node="2"]');
+      globalThis.__cssGraphicsCompatibilityNodes = { model, leaf };
+      return {
+        sourceFrame: globalThis.domformatProof.sourceFrame,
+        bankId: globalThis.domformatProof.bankId,
+        lifecycle: globalThis.domformatProof.lifecycle.phase,
+        className: leaf.className,
+        color: getComputedStyle(leaf).color,
+        transform: leaf.style.transform,
+        visibility: leaf.style.visibility,
+        address: leaf.style.backgroundPosition || leaf.style.backgroundPositionY,
+        modelTransform: model.style.transform,
+        shapeTransform: document.querySelector('[data-domformat-node="1"]')?.style.transform ?? "",
+        cameraTransform: document.querySelector(".camera").style.transform,
+      };
+    });
+    const sought = await page.evaluate(async () => {
+      await globalThis.domformatProof.seekAsync(2);
+      const leaf = globalThis.__cssGraphicsCompatibilityNodes.leaf;
+      return {
+        sourceFrame: globalThis.domformatProof.sourceFrame,
+        bankId: globalThis.domformatProof.bankId,
+        className: leaf.className,
+        color: getComputedStyle(leaf).color,
+        transform: leaf.style.transform,
+        visibility: leaf.style.visibility,
+        address: leaf.style.backgroundPosition || leaf.style.backgroundPositionY,
+        modelTransform: globalThis.__cssGraphicsCompatibilityNodes.model.style.transform,
+        shapeTransform: document.querySelector('[data-domformat-node="1"]')?.style.transform ?? "",
+      };
+    });
+    let selected = null;
+    if (contract.techniques.includes("prepared-banks")) {
+      selected = await page.evaluate(async () => {
+        await globalThis.domformatProof.selectBankAsync("beta");
+        const leaf = globalThis.__cssGraphicsCompatibilityNodes.leaf;
+        return { bankId: globalThis.domformatProof.bankId, sourceFrame: globalThis.domformatProof.sourceFrame, className: leaf.className, color: getComputedStyle(leaf).color, transform: leaf.style.transform, visibility: leaf.style.visibility, address: leaf.style.backgroundPosition || leaf.style.backgroundPositionY, modelTransform: globalThis.__cssGraphicsCompatibilityNodes.model.style.transform, shapeTransform: document.querySelector('[data-domformat-node="1"]')?.style.transform ?? "" };
+      });
+    }
+    const responsiveViewport = contract.id === "solitaire" ? { width: 800, height: 600 } : { width: 640, height: 480 };
+    await page.setViewportSize(responsiveViewport);
+    await page.evaluate(() => new Promise((resolvePaint) => requestAnimationFrame(() => requestAnimationFrame(resolvePaint))));
+    const final = await page.evaluate(() => {
+      const { model, leaf } = globalThis.__cssGraphicsCompatibilityNodes;
+      return {
+        sameModel: document.querySelector(".scene") === model,
+        sameLeaf: document.querySelector('[data-domformat-node="2"]') === leaf,
+        sourceFrame: globalThis.domformatProof.sourceFrame,
+        bankId: globalThis.domformatProof.bankId,
+        lifecycle: globalThis.domformatProof.lifecycle.phase,
+        className: leaf.className,
+        color: getComputedStyle(leaf).color,
+        transform: leaf.style.transform,
+        visibility: leaf.style.visibility,
+        address: leaf.style.backgroundPosition || leaf.style.backgroundPositionY,
+        modelTransform: model.style.transform,
+        shapeTransform: document.querySelector('[data-domformat-node="1"]')?.style.transform ?? "",
+        cameraTransform: document.querySelector(".camera").style.transform,
+        animationCount: model.getAnimations().length,
+      };
+    });
+    const changed = (left, right) => ["className", "color", "transform", "visibility", "address", "modelTransform", "shapeTransform"].some((key) => left[key] !== right[key]);
+    assertCssGraphicsSnapshot(initial, contract.expected.initial, `${label} initial`);
+    assertCssGraphicsSnapshot(sought, contract.expected.sought, `${label} sought`);
+    assertCssGraphicsSnapshot(selected, contract.expected.selected, `${label} selected`);
+    assertCssGraphicsSnapshot(final, contract.expected.final, `${label} final`);
+    invariant(initial.sourceFrame === 1 && initial.lifecycle === "publish", "BROWSER_RELEASE_CSSGRAPHICS", `${label} did not publish its canonical source state.`);
+    invariant(sought.sourceFrame === 2 && changed(initial, sought), "BROWSER_RELEASE_CSSGRAPHICS", `${label} did not publish an observable next prepared source state (${JSON.stringify({ initial, sought })}).`);
+    invariant(final.sameModel && final.sameLeaf && final.lifecycle === "publish", "BROWSER_RELEASE_CSSGRAPHICS", `${label} replaced retained identity or left the publication lifecycle.`);
+    if (selected) invariant(selected.bankId === "beta" && selected.sourceFrame === 3 && changed(sought, selected) && final.bankId === "beta", "BROWSER_RELEASE_CSSGRAPHICS", `${label} did not publish and retain its host-selected prepared bank across responsive publication (${JSON.stringify({ sought, selected, finalBankId: final.bankId })}).`);
+    if (contract.techniques.includes("responsive-profiles")) invariant(final.cameraTransform !== initial.cameraTransform || changed(selected ?? sought, final), "BROWSER_RELEASE_CSSGRAPHICS", `${label} did not publish its responsive presentation/profile state.`);
+    if (contract.techniques.includes("profile-frame-visibility")) invariant(initial.visibility !== sought.visibility, "BROWSER_RELEASE_CSSGRAPHICS", `${label} did not publish sparse profile-frame visibility.`);
+    if (contract.techniques.includes("responsive-affine")) invariant(final.transform.startsWith("matrix(") && final.transform !== (selected ?? sought).transform, "BROWSER_RELEASE_CSSGRAPHICS", `${label} did not publish the responsive affine transform (${JSON.stringify({ before: (selected ?? sought).transform, final: final.transform, camera: final.cameraTransform })}).`);
+    if (contract.id === "menger") invariant(sought.address !== initial.address && sought.address.trim().split(/\s+/u).length === 2, "BROWSER_RELEASE_CSSGRAPHICS", `${label} did not publish a full two-axis atlas address (${JSON.stringify({ initial: initial.address, sought: sought.address })}).`);
+    if (contract.techniques.includes("prepared-variants") || contract.techniques.includes("paged-variants")) invariant(initial.className !== sought.className, "BROWSER_RELEASE_CSSGRAPHICS", `${label} did not publish prepared variant state.`);
+    if (contract.techniques.includes("compositor-timing")) invariant(final.animationCount === 1, "BROWSER_RELEASE_CSSGRAPHICS", `${label} did not retain its typed compositor timeline.`);
+    return Object.freeze({
+      adapter: contract.id,
+      revision: CSSGRAPHICS_REVISION,
+      implementation,
+      cadence: contract.cadence,
+      techniques: contract.techniques,
+      initial,
+      sought,
+      selected,
+      final,
+    });
+  });
+}
+
+function cssGraphicsTimingProbe(contract) {
+  if (contract.id === "3dpipes" || contract.id === "electropaint") return { stallMs: 50, expectedFrame: 2 };
+  if (contract.id === "maze") return { stallMs: 60, expectedFrame: 2 };
+  if (contract.id === "menger") return { stallMs: 80, expectedFrame: 3 };
+  if (contract.id === "solitaire") return { stallMs: 110, expectedFrame: 3 };
+  return { stallMs: 80, expectedFrame: 2 };
+}
+
+function assertCssGraphicsSnapshot(actual, expected, label) {
+  if (!expected) return;
+  for (const [key, value] of Object.entries(expected)) invariant(actual?.[key] === value, "BROWSER_RELEASE_CSSGRAPHICS", `${label} ${key} was ${JSON.stringify(actual?.[key])}, expected ${JSON.stringify(value)}.`);
+}
+
+async function writeFixture(slug, input) {
+  const built = buildDom(await input);
+  const directory = join(temporary, slug);
+  await mkdir(directory);
+  const model = join(directory, "model.json");
+  await writeFile(model, built.bytes);
+  const routes = new Map([[`/${slug}/model.json`, model]]);
+  for (const [relative, bytes] of built.externalResources) {
+    const target = join(directory, ...relative.split("/"));
+    await mkdir(resolve(target, ".."), { recursive: true });
+    await writeFile(target, bytes);
+    routes.set(`/${slug}/${relative}`, target);
+  }
+  return Object.freeze({ built, model, routes });
 }
 
 try {
@@ -419,15 +981,28 @@ try {
     await writeFile(target, bytes);
   }
 
-  const techniqueBuilt = buildDom(await syntheticAdapterTechniquesInput());
-  const techniqueRoot = join(temporary, "techniques");
-  await mkdir(techniqueRoot);
-  const techniqueModel = join(techniqueRoot, "model.json");
-  await writeFile(techniqueModel, techniqueBuilt.bytes);
-  for (const [relative, bytes] of techniqueBuilt.externalResources) {
-    const target = join(techniqueRoot, ...relative.split("/"));
-    await mkdir(resolve(target, ".."), { recursive: true });
-    await writeFile(target, bytes);
+  const techniques = await writeFixture("techniques", syntheticAdapterTechniquesInput());
+  const paged = await writeFixture("paged", syntheticEvictingPagedVariantsInput());
+  const pagedCombinedInput = await syntheticPagedPlaybackChangesInput();
+  delete pagedCombinedInput.meta.counts;
+  const pagedCombined = await writeFixture("paged-combined", pagedCombinedInput);
+  const viewport = await writeFixture("viewport", syntheticViewportProfilesInput());
+  const dynamicViewport = await writeFixture("dynamic-viewport", syntheticDynamicViewportProfilesInput());
+  const profileTimeline = await writeFixture("profile-timeline", syntheticProfileTimelinesInput());
+  const aspectProfileTimeline = await writeFixture("aspect-profile-timeline", syntheticAspectProfileTimelinesInput());
+  const pagedProfile = await writeFixture("paged-profile", syntheticPagedProfileTimelinesWithoutInteractionInput());
+  const preparedBanks = await writeFixture("prepared-banks", syntheticPagedPreparedBanksInput());
+  const orbit = await writeFixture("orbit", syntheticOrbitInput());
+  const compositor = await writeFixture("compositor", syntheticCompositorTimingInput());
+  const exactSingle = await writeFixture("exact-single", syntheticExactTimingInput({ tickIntervalUs: [100_000, 1] }));
+  const elapsedInput = await syntheticExactTimingInput({ catchUpPolicy: "elapsed", tickIntervalUs: [100_000, 1], deadlineMicros: [0, 80_000, 200_000, 300_000] });
+  const elapsedPacket = elapsedInput.state.channels.find((channel) => channel.codec === "polycss-playback-packed@0").data.packet;
+  elapsedPacket.timeline.loopTicks = 3;
+  elapsedPacket.timeline.frames = [1, 1, 2];
+  const exactElapsed = await writeFixture("exact-elapsed", elapsedInput);
+  const cssGraphicsFixtures = new Map();
+  for (const contract of STABLE_CSSGRAPHICS_BROWSER_CONTRACTS) {
+    cssGraphicsFixtures.set(contract.id, await writeFixture(`cssgraphics-${contract.id}`, syntheticCssGraphicsDemoInput(contract.id)));
   }
 
   const producerPath = resolve(root, "conformance/producer.py");
@@ -439,17 +1014,19 @@ try {
   const producerSummary = JSON.parse(producerRun.stdout);
   invariant(producerSummary.codecs === 5 && producerSummary.nodes === 11 && producerSummary.resources === 2, "BROWSER_RELEASE_PRODUCER", "Independent producer emitted an unexpected contract.");
 
-  server = serve(new Map([
+  const runtimeRequests = [];
+  const explicitFiles = new Map([
     ["/model.json", modelPath],
     ["/model.css", join(temporary, "model.css")],
     ["/assets/checker.png", join(temporary, "assets", "checker.png")],
-    ["/techniques/model.json", techniqueModel],
-    ["/techniques/model.css", join(techniqueRoot, "model.css")],
-    ["/techniques/assets/checker.png", join(techniqueRoot, "assets", "checker.png")],
     ["/independent/model.json", pythonModel],
     ["/independent/independent.css", join(pythonRoot, "independent.css")],
     ["/independent/assets/independent-checker.png", join(pythonRoot, "assets", "independent-checker.png")],
-  ]), installedRuntime);
+  ]);
+  for (const fixture of [techniques, paged, pagedCombined, viewport, dynamicViewport, profileTimeline, aspectProfileTimeline, pagedProfile, preparedBanks, orbit, compositor, exactSingle, exactElapsed, ...cssGraphicsFixtures.values()]) {
+    for (const [pathname, target] of fixture.routes) explicitFiles.set(pathname, target);
+  }
+  server = serve(explicitFiles, installedRuntime, runtimeRequests);
   await new Promise((resolveListen, reject) => {
     server.once("error", reject);
     server.listen(0, "127.0.0.1", resolveListen);
@@ -470,13 +1047,68 @@ try {
   preparedTechniques.push(await preparedTechniqueProof(launchedBrowser, `${origin}/viewer/index.html?model=%2Ftechniques%2Fmodel.json&animate=0`, "prepared techniques reference viewer"));
   preparedTechniques.push(await preparedTechniqueProof(launchedBrowser, `${origin}/viewer/index.html?model=%2Ftechniques%2Fmodel.json&animate=0&implementation=conformance`, "prepared techniques alternate mount"));
   preparedTechniques.push(await preparedTechniqueProof(launchedBrowser, `${origin}/test/nversion-viewer.html?model=%2Ftechniques%2Fmodel.json&animate=0`, "prepared techniques N-version path"));
+  const paths = [
+    { id: "reference", page: "/viewer/index.html", suffix: "" },
+    { id: "conformance", page: "/viewer/index.html", suffix: "&implementation=conformance" },
+    { id: "nversion", page: "/test/nversion-viewer.html", suffix: "" },
+  ];
+  const pagedState = [];
+  const combinedPagedState = [];
+  const viewportProfiles = [];
+  const dynamicViewportProfiles = [];
+  const profileTimelines = [];
+  const aspectProfileTimelines = [];
+  const preparedBankHandoffs = [];
+  const pinnedProfileRestarts = [];
+  const orbitInput = [];
+  const compositorTiming = [];
+  const exactTiming = [];
+  const cssGraphicsCompatibility = [];
+  const cssGraphicsTiming = [];
+  for (const path of paths) {
+    const viewerUrl = (fixture, animate) => `${origin}${path.page}?model=%2F${fixture}%2Fmodel.json&animate=${animate ? "1" : "0"}&mode=animation${path.suffix}`;
+    pagedState.push(await pagedStateProof(launchedBrowser, viewerUrl("paged", false), `paged state ${path.id} path`));
+    combinedPagedState.push(await combinedPagedStateProof(launchedBrowser, viewerUrl("paged-combined", false), `combined paged state ${path.id} path`));
+    viewportProfiles.push(await viewportProfileProof(launchedBrowser, viewerUrl("viewport", false), `viewport profiles ${path.id} path`));
+    dynamicViewportProfiles.push(await dynamicViewportProfileProof(launchedBrowser, viewerUrl("dynamic-viewport", false), `dynamic viewport profiles ${path.id} path`));
+    profileTimelines.push(await profileTimelineProof(launchedBrowser, viewerUrl("profile-timeline", true), `profile timelines ${path.id} path`));
+    aspectProfileTimelines.push(await aspectProfileTimelineProof(launchedBrowser, viewerUrl("aspect-profile-timeline", true), `aspect profile timelines ${path.id} path`));
+    pinnedProfileRestarts.push(await pinnedProfileRestartProof(launchedBrowser, viewerUrl("paged-profile", false), `pinned profile restart ${path.id} path`));
+    preparedBankHandoffs.push(await preparedBankProof(launchedBrowser, viewerUrl("prepared-banks", false), `prepared bank handoff ${path.id} path`));
+    orbitInput.push(await orbitInputProof(launchedBrowser, viewerUrl("orbit", false), `orbit input ${path.id} path`));
+    compositorTiming.push(await compositorTimingProof(launchedBrowser, viewerUrl("compositor", true), `compositor timing ${path.id} path`, true));
+    compositorTiming.push(await compositorTimingProof(launchedBrowser, viewerUrl("compositor", false), `compositor animate:false ${path.id} path`, false));
+    exactTiming.push(await exactTimingProof(launchedBrowser, viewerUrl("exact-single", true), `exact single-step timing ${path.id} path`, 350, 2));
+    exactTiming.push(await exactTimingProof(launchedBrowser, viewerUrl("exact-elapsed", true), `explicit elapsed timing ${path.id} path`, 210, 2));
+    exactTiming.push(await exactTimingProof(launchedBrowser, viewerUrl("cssgraphics-3dpipes", true), `forced prequeued scheduler timing ${path.id} path`, 0, 2, true));
+    for (const contract of STABLE_CSSGRAPHICS_BROWSER_CONTRACTS) {
+      cssGraphicsCompatibility.push(await cssGraphicsDemoProof(launchedBrowser, viewerUrl(`cssgraphics-${contract.id}`, false), contract, path.id));
+      const timing = cssGraphicsTimingProbe(contract);
+      cssGraphicsTiming.push(await exactTimingProof(launchedBrowser, viewerUrl(`cssgraphics-${contract.id}`, true), `${contract.label} exact timing ${path.id} path`, timing.stallMs, timing.expectedFrame));
+    }
+  }
+  invariant(runtimeRequests.length > 1 && runtimeRequests.every(({ target }) => target.startsWith(`${join(installedRuntime, "dist")}${sep}`)), "WORKSPACE_RUNTIME_IMPORT", "Browser smoke did not resolve every runtime module from the clean-installed tarball.");
   process.stdout.write(`${JSON.stringify({
     browser: browserExecutable,
     browserVersion: launchedBrowser.version(),
     fixtures: proofs,
     independentProducer: producerSummary,
     preparedTechniques,
+    pagedState,
+    combinedPagedState,
+    viewportProfiles,
+    dynamicViewportProfiles,
+    profileTimelines,
+    aspectProfileTimelines,
+    preparedBankHandoffs,
+    pinnedProfileRestarts,
+    orbitInput,
+    compositorTiming,
+    exactTiming,
+    cssGraphicsCompatibility,
+    cssGraphicsTiming,
     browserRuntime: "clean-installed npm tarball",
+    browserRuntimeModules: [...new Set(runtimeRequests.map(({ pathname }) => pathname))].sort(),
     alternateMountModelPixelsIdentical: proofs.every((proof) => proof.alternateMountModelPixelsIdentical),
     alternateMountMaximumChannelDelta: Math.max(...proofs.map((proof) => proof.alternateMountMaximumChannelDelta)),
     nVersionProbeModelPixelsIdentical: proofs.every((proof) => proof.nVersionProbeModelPixelsIdentical),

@@ -8,7 +8,9 @@
   "types": "./dist/index.d.ts",
   "files": [
     "bin/",
-    "dist/",
+    "dist/**/*.js",
+    "!dist/public-types.js",
+    "dist/{browser,constants,errors,index,public-types,reader,writer}.d.ts",
     "LICENSE",
     "README.md"
   ],
@@ -26,7 +28,7 @@
     }
   },
   "scripts": {
-    "build": "tsup",
+    "build": "tsup && tsc --emitDeclarationOnly -p tsconfig.json",
     "test": "npm run check && npm run build && node --import tsx --test test/*.test.js",
     "test:coverage": "npm run check && npm run build && node --import tsx --experimental-test-coverage --test-coverage-include=\"src/**/*.ts\" --test-coverage-lines=90 --test-coverage-branches=85 --test-coverage-functions=90 --test test/*.test.js",
     "test:browser": "npm run build && node scripts/run-browser-check.js",
@@ -41,6 +43,7 @@
   "devDependencies": {
     "@types/node": "^25.0.0",
     "playwright": "1.58.2",
+    "terser": "5.44.0",
     "tsup": "^8.0.1",
     "tsx": "^4.20.6",
     "typescript": "^5.3.3"

@@ -1,4 +1,5 @@
 import { invariant } from "./errors.js";
+import { DOMFORMAT_NODE_ATTRIBUTE } from "./variant-effects.js";
 import type { DomDocument, DomTree, DomTreeNode } from "./public-types.js";
 
 type ResourceStyleBinding = NonNullable<DomTreeNode["resourceStyles"]>[string];
@@ -68,6 +69,7 @@ export function instantiateTree(
   const byId = new Map<string, HTMLElement>();
   for (const node of tree.nodes) {
     const element = document.createElementNS(node.namespace, node.name) as HTMLElement;
+    element.setAttribute(DOMFORMAT_NODE_ATTRIBUTE, String(node.index));
     if (node.classes?.length) element.classList.add(...node.classes);
     if (node.attributes) {
       for (const [name, value] of Object.entries(node.attributes)) {

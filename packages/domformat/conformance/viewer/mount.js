@@ -1,10 +1,17 @@
-import { createInteractionInput } from "../../dist/browser-input.js";
-import { invariant } from "../../dist/errors.js";
-import { createLifecycle } from "../../dist/lifecycle.js";
-import { createPolycssEffects } from "../../dist/state/effects.js";
-import { createPolycssInteraction } from "../../dist/state/interaction.js";
-import { createPolycssPlayback, materializePolycssState } from "../../dist/state/polycss.js";
-import { createStaticPresentation } from "../../dist/state/presentation.js";
+import {
+  createInteractionInput,
+  createLifecycle,
+  createPolycssCompositorTiming,
+  createPolycssEffects,
+  createPolycssInteraction,
+  createPolycssOrbitInput,
+  createPolycssPagedState,
+  createPolycssPlayback,
+  createStaticPresentation,
+  DEFAULT_LIMITS,
+  invariant,
+  materializePolycssState,
+} from "../../dist/internal-conformance.js";
 
 const MAX_CATCH_UP_TICKS = 8;
 
@@ -21,10 +28,14 @@ const KNOWN_CAPABILITIES = new Set([
   "explicit-retained-tree",
   "logical-assets",
   "prepared-particle-effects",
+  "prepared-compositor-timing",
+  "prepared-orbit-input",
+  "prepared-paged-state",
   "prepared-playback",
   "prepared-pointer-grab-interaction",
   "prepared-surface-lighting",
   "prepared-variants",
+  "prepared-viewport-profiles",
 ]);
 const BOUNDARY_STYLES = Object.freeze({
   display: "block",
@@ -55,7 +66,7 @@ const SNAPSHOT_STYLE_PROPERTIES = Object.freeze([
   "height", "inset", "isolation", "left", "margin", "maxWidth", "objectFit",
   "objectPosition", "opacity", "overflow", "padding", "perspective", "perspectiveOrigin",
   "pointerEvents", "position", "top", "transform", "transformOrigin", "transformStyle",
-  "visibility", "width", "zIndex",
+  "transition", "visibility", "width", "zIndex",
 ]);
 let scopeSequence = 0;
 
@@ -112,6 +123,7 @@ function constructTree(ownerDocument, surface, tree) {
   const byId = new Map();
   for (const node of tree.nodes) {
     const element = ownerDocument.createElementNS(node.namespace, node.name);
+    element.setAttribute("data-domformat-node", String(node.index));
     if (node.classes?.length) element.classList.add(...node.classes);
     for (const [name, value] of Object.entries(node.attributes ?? {})) element.setAttribute(name, value);
     styleMap(element, node.styles);
@@ -120,6 +132,69 @@ function constructTree(ownerDocument, surface, tree) {
     byId.set(node.id, element);
   }
   return Object.freeze({ host: surface, tree, elements: Object.freeze(elements), byId });
+}
+
+const VARIANT_EFFECT_CSS_PROPERTIES = Object.freeze({
+  backgroundColor: "background-color",
+  backgroundPositionX: "background-position-x",
+  color: "color",
+  display: "display",
+  outlineColor: "outline-color",
+});
+
+function preparedVariantCss(document, runtimeSelector) {
+  const state = document.state.channels.find((channel) => channel.codec === "polycss-variants-packed@0" || channel.codec === "polycss-paged-variants@0");
+  if (!state) return "";
+  const interpreter = state.codec === "polycss-paged-variants@0" ? "polycss-paged-variants@0" : "polycss-variants@0";
+  const binding = document.bindings.channels.find((channel) => channel.interpreter === interpreter);
+  invariant(binding, "MISSING_POLYCSS_BINDING", "Prepared variants require a binding.");
+  const packet = state.data.packet;
+  const byId = new Map(document.tree.nodes.map((node) => [node.id, node]));
+  return packet.effects.map((effect) => {
+    const owner = byId.get(binding.targets.nodes[effect.ownerIndex]);
+    const target = effect.targetIndex === 0xffff ? owner : byId.get(binding.targets.effectNodes[effect.targetIndex]);
+    invariant(owner && target, "INVALID_VARIANT_EFFECT", "Prepared variant effect target is absent.");
+    const ownerSelector = `[data-domformat-node="${owner.index}"].${packet.classes[effect.classIndex]}`;
+    const selector = target === owner ? ownerSelector : `${ownerSelector} [data-domformat-node="${target.index}"]`;
+    const declarations = Object.entries(effect.styles).map(([property, value]) => `${VARIANT_EFFECT_CSS_PROPERTIES[property]}:${value}`);
+    return `${runtimeSelector} ${selector}{${declarations.join(";")}}`;
+  }).join("\n");
+}
+
+async function decodeStatePage(record, encoded, signal) {
+  invariant(record.kind === "state-page" && record.decodedByteLength !== undefined && record.decodedDigest, "INVALID_STATE_PAGE_RESOURCE", `Resource ${record.id} is not a complete state page.`);
+  aborted(signal);
+  if (record.encoding === "identity") return encoded.slice();
+  const DecompressionStreamClass = globalThis.DecompressionStream;
+  invariant(typeof DecompressionStreamClass === "function", "MISSING_BROWSER_API", "Gzip state pages require DecompressionStream support.");
+  let reader;
+  try {
+    reader = new Blob([encoded]).stream().pipeThrough(new DecompressionStreamClass("gzip")).getReader();
+    const chunks = [];
+    let length = 0;
+    while (true) {
+      aborted(signal);
+      const { done, value } = await reader.read();
+      if (done) break;
+      const chunk = bytes(value, `Decoded state page ${record.id}`);
+      length += chunk.length;
+      invariant(length <= record.decodedByteLength, "STATE_PAGE_DECODED_SIZE_MISMATCH", `State page ${record.id} exceeds its declared decoded length.`);
+      chunks.push(chunk.slice());
+    }
+    invariant(length === record.decodedByteLength, "STATE_PAGE_DECODED_SIZE_MISMATCH", `State page ${record.id} decoded length does not match RCRD.`);
+    const decoded = new Uint8Array(length);
+    let offset = 0;
+    for (const chunk of chunks) {
+      decoded.set(chunk, offset);
+      offset += chunk.length;
+    }
+    invariant(await digestHex(decoded) === record.decodedDigest.value, "STATE_PAGE_DECODED_DIGEST_MISMATCH", `State page ${record.id} decoded digest does not match RCRD.`);
+    return decoded;
+  } catch (error) {
+    try { await reader?.cancel(); } catch {}
+    if (error?.name === "DomFormatError") throw error;
+    invariant(false, "STATE_PAGE_DECODE_FAILED", `State page ${record.id} gzip decoding failed.`);
+  }
 }
 
 function bindResources(mounted, urls) {
@@ -343,23 +418,37 @@ export async function mountConformanceDom(result, host, options = {}) {
   let playback = null;
   let effects = null;
   let interaction = null;
+  let orbit = null;
+  let pagedState = null;
+  let compositorTiming = null;
   let input = null;
   let resizeObserver = null;
   let request = null;
+  let timer = null;
+  let reschedule = null;
   let mode = null;
+  const animateEnabled = options.animate !== false;
   const urls = new Map();
   const styles = [];
 
   const cleanup = () => {
     if (phases.phase === "destroy") return false;
     const attempt = (operation) => { try { operation?.(); } catch {} };
+    if (timer !== null) attempt(() => win?.clearTimeout(timer));
     if (request !== null) attempt(() => win?.cancelAnimationFrame(request));
+    timer = null;
     request = null;
     attempt(() => resizeObserver?.disconnect());
     attempt(() => input?.destroy());
     attempt(() => interaction?.destroy());
     attempt(() => effects?.destroy());
+    attempt(() => orbit?.destroy());
+    attempt(() => pagedState?.destroy());
+    attempt(() => compositorTiming?.destroy());
     interaction = null;
+    orbit = null;
+    pagedState = null;
+    compositorTiming = null;
     for (const element of styles) attempt(() => element.remove());
     for (const url of urls.values()) attempt(() => urlApi?.revokeObjectURL(url));
     if (hostMutated) attempt(restoreHost);
@@ -383,8 +472,11 @@ export async function mountConformanceDom(result, host, options = {}) {
     const interpreters = new Set(document.bindings.channels.map((channel) => channel.interpreter));
     invariant(REQUIRED_INTERPRETERS.every((name) => interpreters.has(name)), "UNSUPPORTED_MOUNT_CONTRACT", "Executable static presentation is required.");
     if (mode === "interaction") invariant(interpreters.has("polycss-pointer-grab@0"), "UNSUPPORTED_MOUNT_CONTRACT", "Interaction mode requires the pointer-grab interpreter.");
-    invariant(resourceBytes.size === document.resources.resources.length, "RESOURCE_CARDINALITY_MISMATCH", "Resource count differs from RCRD.");
+    const eagerRecords = document.resources.resources.filter((record) => record.kind !== "state-page");
+    invariant(eagerRecords.every((record) => resourceBytes.has(record.id)), "RESOURCE_CARDINALITY_MISMATCH", "An eager resource is absent from the reader result.");
+    invariant([...resourceBytes.keys()].every((id) => document.resources.resources.some((record) => record.id === id)), "RESOURCE_CARDINALITY_MISMATCH", "The reader result contains an undeclared resource.");
     for (const record of document.resources.resources) {
+      if (record.kind === "state-page") continue;
       const value = resourceBytes.get(record.id);
       invariant(value && value.byteLength === record.byteLength, "RESOURCE_SIZE_MISMATCH", `Resource ${record.id} has the wrong length.`);
       invariant(await digestHex(value) === record.digest.value, "RESOURCE_DIGEST_MISMATCH", `Resource ${record.id} has the wrong digest.`);
@@ -406,7 +498,7 @@ export async function mountConformanceDom(result, host, options = {}) {
     phases.advance("construct");
 
     for (const record of document.resources.resources) {
-      if (record.kind !== "stylesheet") urls.set(record.id, urlApi.createObjectURL(new BlobClass([resourceBytes.get(record.id)], { type: record.mediaType })));
+      if (record.kind === "image") urls.set(record.id, urlApi.createObjectURL(new BlobClass([resourceBytes.get(record.id)], { type: record.mediaType })));
     }
     await decodeImages(document, resourceBytes, win, BlobClass, options.signal);
     aborted(options.signal);
@@ -420,19 +512,67 @@ export async function mountConformanceDom(result, host, options = {}) {
       ownerDocument.head.appendChild(element);
       styles.push(element);
     }
+    const variantCss = preparedVariantCss(document, runtimeSelector);
+    if (variantCss) {
+      const element = ownerDocument.createElement("style");
+      element.dataset.domformatStylesheet = "prepared-variants";
+      element.textContent = variantCss;
+      ownerDocument.head.appendChild(element);
+      styles.push(element);
+    }
     boundTargets = bindChannels(document.bindings, mounted);
     phases.advance("bind");
 
     const materialized = materializePolycssState(document.state);
     presentationRuntime = createStaticPresentation(document.bindings, mounted, { ...options, boundTargets });
+    const loadStatePage = async (record, signal) => {
+      aborted(signal);
+      if (typeof result.loadStatePage === "function") return result.loadStatePage(record, signal);
+      const loaded = await options.loadStatePage?.(record, signal);
+      aborted(signal);
+      invariant(loaded !== undefined, "MISSING_EXTERNAL_RESOURCE", `State page ${record.id} is unavailable.`);
+      const encoded = bytes(loaded, `State page ${record.id}`).slice();
+      invariant(encoded.length === record.byteLength, "RESOURCE_SIZE_MISMATCH", `State page ${record.id} has the wrong encoded length.`);
+      invariant(await digestHex(encoded) === record.digest.value, "RESOURCE_DIGEST_MISMATCH", `State page ${record.id} has the wrong encoded digest.`);
+      return decodeStatePage(record, encoded, signal);
+    };
+    pagedState = createPolycssPagedState(document, mounted, DEFAULT_LIMITS, loadStatePage, {
+      boundTargets,
+      onLateFailure: cleanup,
+    });
+    await pagedState?.prepareInitial(options.signal);
+    compositorTiming = createPolycssCompositorTiming(document.state, document.bindings, materialized, mounted, { boundTargets });
     playback = createPolycssPlayback(materialized, document.bindings, mounted, {
       ...options,
       boundTargets,
       publishAppearance: presentationRuntime.publishAppearance,
+      pagedState,
+      assertPagedFrameReady: (frame) => pagedState?.assertFrameReady(frame),
+      compositorTiming,
     });
     effects = interpreters.has("polycss-effects@0")
       ? createPolycssEffects(materialized, document.bindings, mounted, { boundTargets })
       : null;
+    const publishEffects = (frame, selected = null) => {
+      if (selected) effects?.publish(frame, selected);
+      else if (effects && effects.sourceFrame !== frame) effects.publish(frame);
+      return frame;
+    };
+    const applyResponsivePlaybackProfile = () => {
+      presentationRuntime.resize();
+      const changed = playback.selectProfileTimeline(presentationRuntime.profileId);
+      if (changed && mode === "animation") {
+        const frame = publishEffects(playback.restart());
+        reschedule?.();
+        pagedState?.resetPreload(frame);
+      }
+      playback.applyViewportProfile(
+        surface.clientWidth || options.viewportWidth || presentationRuntime.sourceWidth,
+        surface.clientHeight || options.viewportHeight || presentationRuntime.sourceHeight,
+        presentationRuntime.profileId,
+      );
+    };
+    orbit = createPolycssOrbitInput(document.state, document.bindings, mounted, { boundTargets });
     input = interpreters.has("polycss-pointer-grab@0")
       ? createInteractionInput(host, surface, presentationRuntime, options)
       : null;
@@ -446,15 +586,28 @@ export async function mountConformanceDom(result, host, options = {}) {
     resizeObserver = typeof ResizeObserverClass === "function"
       ? new ResizeObserverClass(() => {
           if (phases.history.at(-1) !== "publish") return;
-          try { presentationRuntime.resize(); } catch { cleanup(); }
+          try {
+            applyResponsivePlaybackProfile();
+          } catch { cleanup(); }
         })
       : null;
     phases.advance("initialize");
     phases.begin("publish");
 
+    presentationRuntime.resize();
+    playback.selectProfileTimeline(presentationRuntime.profileId);
     playback.publishInitial();
+    compositorTiming?.publishInitial(playback.tick);
+    compositorTiming?.setActive(mode === "animation" && animateEnabled);
+    orbit?.publishInitial();
+    playback.applyViewportProfile(
+      surface.clientWidth || options.viewportWidth || presentationRuntime.sourceWidth,
+      surface.clientHeight || options.viewportHeight || presentationRuntime.sourceHeight,
+      presentationRuntime.profileId,
+    );
     if (mode === "interaction") {
       const binding = document.bindings.channels.find((channel) => channel.interpreter === "polycss-pointer-grab@0");
+      pagedState?.assertFrameReady(binding.parameters.initialFrame);
       playback.seek(binding.parameters.initialFrame);
       input?.setEnabled(true);
     } else input?.setEnabled(false);
@@ -466,14 +619,10 @@ export async function mountConformanceDom(result, host, options = {}) {
     hostMutated = true;
     if (interpreters.has("polycss-pointer-grab@0") && !host.hasAttribute("tabindex")) host.setAttribute("tabindex", "0");
     host.replaceChildren(surface);
-    presentationRuntime.resize();
+    pagedState?.preloadAfter(playback.sourceFrame);
+    applyResponsivePlaybackProfile();
     resizeObserver?.observe(host);
 
-    const publishEffects = (frame, selected = null) => {
-      if (selected) effects?.publish(frame, selected);
-      else if (effects && effects.sourceFrame !== frame) effects.publish(frame);
-      return frame;
-    };
     const publishEffectFrames = (frames) => {
       effects?.publishMany(frames);
       return frames.at(-1);
@@ -481,39 +630,156 @@ export async function mountConformanceDom(result, host, options = {}) {
     const stepInteraction = (sample = input?.sample()) => {
       assertPublished();
       invariant(interaction, "INVALID_EXPERIENCE_MODE", "Interaction mode is not active.");
+      pagedState?.assertFrameReady(interaction.inspect().sourceFrame);
       const frame = interaction.step(sample);
       publishEffects(frame.sourceFrame, frame.selectedId && frame.selectedMatrix
         ? { active: true, x: frame.selectedMatrix[12], y: frame.selectedMatrix[13], z: frame.selectedMatrix[14] }
         : { active: false, x: 0, y: 0, z: 0 });
+      pagedState?.preloadAfter(frame.sourceFrame);
       return frame;
     };
-    const playbackBinding = document.bindings.channels.find((channel) => channel.interpreter === "polycss-playback@0");
-    if (options.animate !== false && playbackBinding) {
-      invariant(typeof win.requestAnimationFrame === "function" && typeof win.cancelAnimationFrame === "function", "MISSING_BROWSER_API", "Animation-frame support is required.");
-      const tickMs = 1000 / playbackBinding.parameters.tickRateHz;
-      let nextTick = null;
+    const playbackBinding = document.bindings.channels.find((channel) => channel.interpreter === "polycss-playback@0" || channel.interpreter === "polycss-paged-playback@0");
+    if (animateEnabled && playbackBinding) {
+      invariant(
+        typeof win.requestAnimationFrame === "function"
+        && typeof win.cancelAnimationFrame === "function"
+        && typeof win.setTimeout === "function"
+        && typeof win.clearTimeout === "function",
+        "MISSING_BROWSER_API",
+        "Deadline timers and animation-frame support are required.",
+      );
+      const now = () => win.performance?.now?.() ?? globalThis.performance.now();
+      let clockOrigin = now();
+      let pageWait = null;
+      const cancelScheduled = () => {
+        if (timer !== null) win.clearTimeout(timer);
+        if (request !== null) win.cancelAnimationFrame(request);
+        timer = null;
+        request = null;
+      };
+      const schedule = () => {
+        if (phases.phase === "destroy" || pageWait || timer !== null || request !== null) return;
+        timer = win.setTimeout(() => {
+          timer = null;
+          if (phases.phase !== "destroy") request = win.requestAnimationFrame(loop);
+        }, Math.max(0, clockOrigin + playback.tickSpan(1) - now() - 1));
+      };
+      const waitForPage = (frame, resume) => {
+        invariant(pagedState && !pagedState.isFrameReady(frame), "INVALID_PLAYBACK_PUBLICATION", "Paged playback wait requires a nonresident target frame.");
+        const wait = pagedState.ensureFrame(frame);
+        pageWait = wait;
+        void wait.then(() => {
+          if (pageWait !== wait || phases.phase === "destroy") return;
+          pageWait = null;
+          try {
+            resume();
+          } catch {
+            cleanup();
+            return;
+          }
+          if (phases.phase !== "destroy") {
+            clockOrigin = now();
+            schedule();
+          }
+        }, (error) => {
+          if (pageWait !== wait || phases.phase === "destroy") return;
+          pageWait = null;
+          if (error?.code !== "OPERATION_ABORTED") cleanup();
+        });
+      };
+      const drainPlaybackCatchUp = (count) => {
+        let ready = count;
+        if (pagedState) {
+          ready = 0;
+          while (ready < count && pagedState.isFrameReady(playback.frameAfter(ready + 1))) ready += 1;
+        }
+        if (ready === 1) {
+          const frame = publishEffects(playback.advance());
+          pagedState?.preloadAfter(frame);
+        } else if (ready > 1) {
+          const frame = publishEffectFrames(playback.advanceMany(ready));
+          pagedState?.preloadAfter(frame);
+        }
+        const remaining = count - ready;
+        if (remaining === 0) return;
+        const frame = playback.frameAfter(1);
+        const tick = playback.tick;
+        const sourceFrame = playback.sourceFrame;
+        waitForPage(frame, () => {
+          if (mode === "animation" && playback.tick === tick && playback.sourceFrame === sourceFrame) drainPlaybackCatchUp(remaining);
+        });
+      };
+      const drainPlaybackCollapsed = (count) => {
+        const frame = playback.frameAfter(count);
+        if (pagedState && !pagedState.isFrameReady(frame)) {
+          const tick = playback.tick;
+          const sourceFrame = playback.sourceFrame;
+          waitForPage(frame, () => {
+            if (mode === "animation" && playback.tick === tick && playback.sourceFrame === sourceFrame) drainPlaybackCollapsed(count);
+          });
+          return;
+        }
+        const nextFrame = publishEffects(playback.advanceCollapsed(count));
+        pagedState?.preloadAfter(nextFrame);
+      };
+      const drainInteractionCatchUp = (count) => {
+        let remaining = count;
+        while (remaining > 0) {
+          invariant(interaction, "INVALID_EXPERIENCE_MODE", "Interaction mode is not active.");
+          const activeInteraction = interaction;
+          const frame = activeInteraction.inspect().sourceFrame;
+          if (pagedState && !pagedState.isFrameReady(frame)) {
+            const ticks = activeInteraction.ticks;
+            waitForPage(frame, () => {
+              if (mode === "interaction" && interaction === activeInteraction && activeInteraction.ticks === ticks) drainInteractionCatchUp(remaining);
+            });
+            return;
+          }
+          stepInteraction();
+          remaining -= 1;
+        }
+      };
       const loop = (timestamp) => {
+        request = null;
         if (phases.phase === "destroy") return;
         try {
-          if (nextTick === null) nextTick = timestamp + tickMs;
-          else {
-            let due = timestamp < nextTick - 0.5 ? 0 : Math.floor((timestamp - nextTick + 0.5) / tickMs) + 1;
-            if (due > MAX_CATCH_UP_TICKS) {
-              due = 1;
-              nextTick = timestamp + tickMs;
-            } else nextTick += due * tickMs;
-            if (mode === "interaction") {
-              for (let index = 0; index < due; index += 1) stepInteraction();
-            } else if (due === 1) publishEffects(playback.advance());
-            else if (due > 1) publishEffectFrames(playback.advanceMany(due));
+          const policy = playbackBinding.parameters.catchUpPolicy ?? "bounded";
+          const maximum = policy === "elapsed" ? Number.MAX_SAFE_INTEGER - playback.tick : MAX_CATCH_UP_TICKS + 1;
+          let due = playback.ticksWithin(Math.max(0, timestamp - clockOrigin + 0.5), maximum);
+          let resetClock = false;
+          if (policy === "single-step" && due > 0) {
+            due = 1;
+            resetClock = true;
+          } else if (policy === "bounded" && due > MAX_CATCH_UP_TICKS) {
+            due = 1;
+            resetClock = true;
           }
+          const elapsed = due > 0 ? playback.tickSpan(due) : 0;
+          if (mode === "interaction") {
+            drainInteractionCatchUp(due);
+            if (pageWait) return;
+          } else if (due > 0) {
+            if (policy === "elapsed") drainPlaybackCollapsed(due);
+            else drainPlaybackCatchUp(due);
+            if (pageWait) return;
+          }
+          if (due > 0) clockOrigin = resetClock ? timestamp : clockOrigin + elapsed;
         } catch (error) {
           cleanup();
           throw error;
         }
-        if (phases.phase !== "destroy") request = win.requestAnimationFrame(loop);
+        schedule();
       };
-      request = win.requestAnimationFrame(loop);
+      reschedule = () => {
+        if (pageWait) {
+          pageWait = null;
+          pagedState?.cancelPending();
+        }
+        cancelScheduled();
+        clockOrigin = now();
+        schedule();
+      };
+      schedule();
     }
     phases.advance("publish");
 
@@ -521,14 +787,67 @@ export async function mountConformanceDom(result, host, options = {}) {
       lifecycle: phases.view,
       get mode() { return mode; },
       get sourceFrame() { assertPublished(); return playback.sourceFrame; },
-      advance() { assertPublished(); invariant(mode === "animation", "INVALID_EXPERIENCE_MODE", "Animation mode is not active."); return publishEffects(playback.advance()); },
+      get bankId() { assertPublished(); return playback.bankId; },
+      advance() {
+        assertPublished();
+        invariant(mode === "animation", "INVALID_EXPERIENCE_MODE", "Animation mode is not active.");
+        const frame = publishEffects(playback.advance());
+        pagedState?.preloadAfter(frame);
+        return frame;
+      },
       seek(frame) {
         assertPublished();
+        pagedState?.assertFrameReady(frame);
         const nextFrame = publishEffects(playback.seek(frame));
+        reschedule?.();
+        pagedState?.preloadAfter(nextFrame);
+        interaction?.invalidatePublication();
+        return nextFrame;
+      },
+      async seekAsync(frame) {
+        assertPublished();
+        try {
+          await pagedState?.ensureFrame(frame);
+          const nextFrame = publishEffects(playback.seek(frame));
+          reschedule?.();
+          pagedState?.preloadAfter(nextFrame);
+          interaction?.invalidatePublication();
+          return nextFrame;
+        } catch (error) {
+          if (error?.code !== "OPERATION_ABORTED") cleanup();
+          throw error;
+        }
+      },
+      selectBank(id) {
+        assertPublished();
+        invariant(mode === "animation", "INVALID_EXPERIENCE_MODE", "Prepared banks can be selected only in animation mode.");
+        const frame = playback.bankEntryFrame(id);
+        pagedState?.assertFrameReady(frame);
+        const nextFrame = publishEffects(playback.selectBank(id));
+        pagedState?.setActiveFramePin(nextFrame);
+        reschedule?.();
+        pagedState?.resetPreload(nextFrame);
+        interaction?.invalidatePublication();
+        return nextFrame;
+      },
+      async selectBankAsync(id) {
+        assertPublished();
+        invariant(mode === "animation", "INVALID_EXPERIENCE_MODE", "Prepared banks can be selected only in animation mode.");
+        const frame = playback.bankEntryFrame(id);
+        await pagedState?.ensureFrame(frame);
+        const nextFrame = publishEffects(playback.selectBank(id));
+        pagedState?.setActiveFramePin(nextFrame);
+        reschedule?.();
+        pagedState?.resetPreload(nextFrame);
         interaction?.invalidatePublication();
         return nextFrame;
       },
       stepInteraction,
+      setInput(id, value) {
+        assertPublished();
+        invariant(orbit, "UNKNOWN_EXTERNAL_INPUT", `External input ${String(id)} is unsupported by this document.`);
+        return orbit.setInput(id, value);
+      },
       snapshot() { assertPublished(); return snapshotTree(mounted, urls); },
       node(id) { assertPublished(); return mounted.byId.get(id); },
       setMode(next) {
@@ -558,6 +877,9 @@ export async function mountConformanceDom(result, host, options = {}) {
             publishEffects(playback.restart(modified.shapeIndices, modified.leafIndices));
           }
           mode = next;
+          compositorTiming?.setActive(next === "animation" && animateEnabled);
+          reschedule?.();
+          pagedState?.resetPreload(playback.sourceFrame);
           return mode;
         } catch (error) {
           cleanup();

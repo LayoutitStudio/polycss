@@ -170,7 +170,7 @@ function sameValue(left, right) {
 async function verifySourceClosure(entry, preset, document) {
   if (!preset.url) {
     exactKeys(entry.source, ["polygons"], `Catalog model ${preset.id} source`);
-    requireCondition(document.meta.sourceArtifact === undefined, `${preset.id} primitive unexpectedly declares a source artifact.`);
+    requireCondition(document.meta.artifacts === undefined, `${preset.id} primitive unexpectedly declares source artifacts.`);
     return;
   }
 
@@ -208,7 +208,14 @@ async function verifySourceClosure(entry, preset, document) {
     digest: entry.source.digest,
     status: entry.source.status,
   }), `Catalog model ${preset.id} primary source identity is stale.`);
-  requireCondition(sameValue(document.meta.sourceArtifact, sourceIdentity), `${preset.id} wire source artifact is not bound to the current primary source.`);
+  const wireArtifacts = entry.source.artifacts.map((artifact, index) => ({
+    id: `source-${String(index).padStart(3, "0")}`,
+    role: artifact.role,
+    byteLength: artifact.byteLength,
+    decodedByteLength: artifact.byteLength,
+    digest: artifact.digest,
+  }));
+  requireCondition(sameValue(document.meta.artifacts, wireArtifacts), `${preset.id} wire source artifacts do not bind the complete source closure.`);
 }
 
 function verifyGalleryDocumentStructure(entry, document) {

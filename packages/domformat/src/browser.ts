@@ -10,11 +10,15 @@ import {
   validateResourceBytes,
 } from "./resources.js";
 import { applyInitialResources, instantiateTree } from "./retained-dom.js";
+import { materializeVariantEffectsCss, preparedVariantClassTokens } from "./variant-effects.js";
 import { createLifecycle } from "./lifecycle.js";
 import { createInteractionInput } from "./browser-input.js";
 import { createPolycssEffects } from "./state/effects.js";
 import { createPolycssInteraction } from "./state/interaction.js";
 import { createPolycssPlayback, materializePolycssState } from "./state/polycss.js";
+import { createPolycssOrbitInput, type PolycssOrbitInput } from "./state/orbit.js";
+import { createPolycssPagedState, type PolycssPagedState, type StatePageBytesLoader } from "./state/paged-state.js";
+import { createPolycssCompositorTiming, type PolycssCompositorTiming } from "./state/compositor-timing.js";
 import { createStaticPresentation } from "./state/presentation.js";
 import type {
   DomBrowserReadOptions,
@@ -22,6 +26,7 @@ import type {
   DomBrowserUrlOptions,
   DomBytes,
   DomDocument,
+  DomExternalInputId,
   DomExperienceMode,
   DomLimitOverrides,
   DomMountOptions,
@@ -45,6 +50,7 @@ interface ValidatedBrowserResult {
   readonly document: DomDocument;
   readonly limits: DomLimits;
   readonly resourceBytes: ReadonlyMap<string, Uint8Array>;
+  readonly loadStatePage: StatePageBytesLoader;
 }
 
 interface RuntimeScope {
@@ -122,9 +128,15 @@ interface MountRuntimeOwner {
   input: InteractionInput | null;
   resizeObserver: ResizeObserver | null;
   request: number | null;
+  timer: number | null;
+  reschedule: (() => void) | null;
   mode: DomExperienceMode;
+  animateEnabled: boolean;
   destroyedSourceFrame: number;
   interaction: PolycssInteraction | null;
+  orbit: PolycssOrbitInput | null;
+  pagedState: PolycssPagedState | null;
+  compositorTiming: PolycssCompositorTiming | null;
   reservedHost: HTMLElement | null;
   presentation: StaticPresentation | null;
   interactionViewport: Readonly<{ viewportWidth?: number; viewportHeight?: number }> | null;
@@ -139,12 +151,16 @@ const BROWSER_DEFAULT_LIMITS = Object.freeze({
   maxAggregateDecodedBytes: 32 * 1024 * 1024,
   maxNodes: 10_000,
   maxResources: 64,
+  maxStatePages: 512,
   maxResourceBytes: 8 * 1024 * 1024,
   maxAggregateResourceBytes: 16 * 1024 * 1024,
+  maxAggregateStatePageBytes: 32 * 1024 * 1024,
   maxImagePixels: 16 * 1024 * 1024,
   maxAggregateImagePixels: 16 * 1024 * 1024,
   maxCssBytes: 1024 * 1024,
   maxFrames: 2_000,
+  maxPagedFrames: 64_000,
+  maxStatePageFrames: 2_000,
   maxTimelineTicks: 200_000,
   maxPreparedTransforms: 500_000,
   maxPreparedStates: 500_000,
@@ -189,6 +205,36 @@ async function sha256Hex(bytes: Uint8Array): Promise<string> {
     return [...digest].map((value) => value.toString(16).padStart(2, "0")).join("");
   } catch (error) {
     fail("RESOURCE_DIGEST_FAILED", "Browser SHA-256 verification failed.", { cause: String(error) });
+  }
+}
+
+async function decodeBrowserStatePage(record: DomResourceRecord, encoded: Uint8Array, signal?: AbortSignal): Promise<Uint8Array> {
+  invariant(record.kind === "state-page" && record.decodedByteLength !== undefined && record.decodedDigest, "INVALID_STATE_PAGE_RESOURCE", `Resource ${record.id} is not a complete state page.`);
+  if (record.encoding === "identity") return encoded;
+  const DecompressionStreamClass = globalThis.DecompressionStream;
+  invariant(typeof DecompressionStreamClass === "function", "MISSING_BROWSER_API", "Gzip state pages require DecompressionStream support.");
+  let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+  try {
+    const stream = new Blob([browserBufferView(encoded)]).stream().pipeThrough(new DecompressionStreamClass("gzip"));
+    reader = stream.getReader() as ReadableStreamDefaultReader<Uint8Array>;
+    const decoded = new Uint8Array(record.decodedByteLength);
+    let length = 0;
+    while (true) {
+      throwIfAborted(signal);
+      const { done, value } = await reader.read();
+      if (done) break;
+      const chunk = externalBytes(value, `Decoded state page ${record.id}`);
+      length += chunk.length;
+      invariant(length <= record.decodedByteLength, "STATE_PAGE_DECODED_SIZE_MISMATCH", `State page ${record.id} exceeds its declared decoded length.`);
+      decoded.set(chunk, length - chunk.length);
+    }
+    invariant(length === record.decodedByteLength, "STATE_PAGE_DECODED_SIZE_MISMATCH", `State page ${record.id} decoded length does not match RCRD.`);
+    invariant(await sha256Hex(decoded) === record.decodedDigest.value, "STATE_PAGE_DECODED_DIGEST_MISMATCH", `State page ${record.id} decoded digest does not match RCRD.`);
+    return decoded;
+  } catch (error) {
+    try { await reader?.cancel(); } catch {}
+    if ((error as { name?: string })?.name === "DomFormatError") throw error;
+    fail("STATE_PAGE_DECODE_FAILED", `State page ${record.id} gzip decoding failed.`, { cause: String(error) });
   }
 }
 
@@ -324,7 +370,9 @@ export async function readDomBrowser(value: DomBytes, options: DomBrowserReadOpt
   const envelope = browserDocumentEnvelope(parsed);
   const validated = validateDocumentInternal(envelope, { limits });
   const document = envelope as unknown as DomDocument;
+  const variantClasses = preparedVariantClassTokens(document.state);
   const resourceBytes = new Map<string, Uint8Array>();
+  const providedStatePages = new Map<string, Uint8Array>();
   const provided = options.externalResources;
   const loader = options.loadExternalResource;
   invariant(provided === undefined || provided instanceof Map, "INVALID_EXTERNAL_RESOURCES", "externalResources must be a Map keyed by logical resource id.");
@@ -332,15 +380,21 @@ export async function readDomBrowser(value: DomBytes, options: DomBrowserReadOpt
   if (provided instanceof Map) {
     const declared = new Set(document.resources.resources.map((record) => record.id));
     for (const id of provided.keys()) invariant(declared.has(id), "UNEXPECTED_EXTERNAL_RESOURCE", `External resource ${String(id)} is not declared by this document.`);
+    for (const record of document.resources.resources) {
+      if (record.kind !== "state-page" || !provided.has(record.id)) continue;
+      providedStatePages.set(record.id, externalBytes(provided.get(record.id), `Resource ${record.id}`).slice());
+    }
   }
   for (const record of document.resources.resources) {
+    if (record.kind === "state-page") continue;
     throwIfAborted(options.signal);
-    const loaded = provided?.get(record.id) ?? await loader?.(record);
+    const loaded = provided?.get(record.id) ?? await loader?.(record, options.signal);
     throwIfAborted(options.signal);
     invariant(loaded !== undefined, "MISSING_EXTERNAL_RESOURCE", `External resource ${record.id} is missing.`);
     resourceBytes.set(record.id, externalBytes(loaded, `Resource ${record.id}`).slice());
   }
   for (const record of document.resources.resources) {
+    if (record.kind === "state-page") continue;
     throwIfAborted(options.signal);
     const bytes = resourceBytes.get(record.id);
     invariant(bytes, "MISSING_EXTERNAL_RESOURCE", `External resource ${record.id} is missing.`);
@@ -349,13 +403,25 @@ export async function readDomBrowser(value: DomBytes, options: DomBrowserReadOpt
     throwIfAborted(options.signal);
     validateResourceBytes(record, bytes, validated.limits);
   }
+  const loadStatePage: StatePageBytesLoader = async (record, signal) => {
+    invariant(record.kind === "state-page", "INVALID_STATE_PAGE_RESOURCE", `Resource ${record.id} is not a state page.`);
+    throwIfAborted(signal);
+    const loaded = providedStatePages.get(record.id) ?? await loader?.(record, signal);
+    throwIfAborted(signal);
+    invariant(loaded !== undefined, "MISSING_EXTERNAL_RESOURCE", `External resource ${record.id} is missing.`);
+    const encoded = externalBytes(loaded, `Resource ${record.id}`).slice();
+    invariant(encoded.length === record.byteLength, "RESOURCE_SIZE_MISMATCH", `Resource ${record.id} byte length does not match RCRD.`);
+    invariant(await sha256Hex(encoded) === record.digest.value, "RESOURCE_DIGEST_MISMATCH", `Resource ${record.id} integrity failed.`);
+    validateResourceBytes(record, encoded, validated.limits);
+    return decodeBrowserStatePage(record, encoded, signal);
+  };
   for (const binding of document.cssBinding.stylesheets) {
-    validateCssBytes(requiredResourceBytes(resourceBytes, binding.resource), binding, validated.resourceIds, validated.limits);
+    validateCssBytes(requiredResourceBytes(resourceBytes, binding.resource), binding, validated.resourceIds, validated.limits, { forbiddenClassTokens: variantClasses });
   }
   deepFreezeJson(document);
   const publicResourceBytes = new Map<string, Uint8Array>([...resourceBytes].map(([id, bytes]) => [id, bytes.slice()]));
   const result: DomBrowserReadResult = Object.freeze({ transport, document, resourceBytes: publicResourceBytes });
-  validatedBrowserResults.set(result, Object.freeze({ document, limits: validated.limits, resourceBytes }));
+  validatedBrowserResults.set(result, Object.freeze({ document, limits: validated.limits, resourceBytes, loadStatePage }));
   return result;
 }
 
@@ -374,7 +440,7 @@ export async function readDomBrowserUrl(modelUrl: string | URL, options: DomBrow
     mismatchCode: "TOTAL_LENGTH_MISMATCH",
     signal: options.signal,
   });
-  const defaultLoader = async (record: DomResourceRecord): Promise<Uint8Array> => {
+  const defaultLoader = async (record: DomResourceRecord, signal?: AbortSignal): Promise<Uint8Array> => {
     const relative = assertSafeRelativePath(record.path, `Resource ${record.id} path`);
     const resourceUrl = new URL(relative, resolvedModel);
     invariant(resourceUrl.origin === resolvedModel.origin && !resourceUrl.username && !resourceUrl.password, "UNSAFE_RESOURCE_URL", `Resource ${record.id} escapes the model origin.`);
@@ -385,7 +451,7 @@ export async function readDomBrowserUrl(modelUrl: string | URL, options: DomBrow
       limit: record.byteLength,
       limitCode: "RESOURCE_SIZE_MISMATCH",
       mismatchCode: "RESOURCE_SIZE_MISMATCH",
-      signal: options.signal,
+      signal: signal ?? options.signal,
     });
   };
   return readDomBrowser(modelBytes, {
@@ -502,6 +568,10 @@ function cleanupMount(owner: MountRuntimeOwner): boolean {
   const request = owner.request;
   if (request !== null) attempt(() => owner.win?.cancelAnimationFrame(request));
   owner.request = null;
+  const timer = owner.timer;
+  if (timer !== null) attempt(() => owner.win?.clearTimeout(timer));
+  owner.timer = null;
+  owner.reschedule = null;
   attempt(() => owner.resizeObserver?.disconnect());
   owner.resizeObserver = null;
   attempt(() => owner.input?.destroy());
@@ -510,6 +580,12 @@ function cleanupMount(owner: MountRuntimeOwner): boolean {
   owner.interaction = null;
   attempt(() => owner.effects?.destroy());
   owner.effects = null;
+  attempt(() => owner.orbit?.destroy());
+  owner.orbit = null;
+  attempt(() => owner.pagedState?.destroy());
+  owner.pagedState = null;
+  attempt(() => owner.compositorTiming?.destroy());
+  owner.compositorTiming = null;
   if (owner.runtimeState) owner.destroyedSourceFrame = owner.runtimeState.preparedPlayback.sourceFrame;
   owner.runtimeState = null;
   owner.presentation = null;
@@ -549,8 +625,32 @@ function publishPlaybackFrame(owner: MountRuntimeOwner, frame: number): number {
   return frame;
 }
 
+function applyResponsivePlaybackProfile(
+  owner: MountRuntimeOwner,
+  mountSurface: HTMLElement,
+  options: DomMountOptions,
+): void {
+  const presentation = owner.presentation;
+  invariant(presentation, "MISSING_POLYCSS_BINDING", "Static presentation is not mounted.");
+  presentation.resize();
+  const playback = requireRuntimeState(owner).preparedPlayback;
+  const changed = playback.selectProfileTimeline(presentation.profileId);
+  if (changed && owner.mode === "animation") {
+    const frame = publishPlaybackFrame(owner, playback.restart());
+    owner.reschedule?.();
+    owner.pagedState?.resetPreload(frame);
+  }
+  playback.applyViewportProfile(
+    mountSurface.clientWidth || options.viewportWidth || presentation.sourceWidth,
+    mountSurface.clientHeight || options.viewportHeight || presentation.sourceHeight,
+    presentation.profileId,
+  );
+}
+
 function advancePlayback(owner: MountRuntimeOwner): number {
-  return publishPlaybackFrame(owner, mountedRuntime(owner).preparedPlayback.advance());
+  const frame = publishPlaybackFrame(owner, mountedRuntime(owner).preparedPlayback.advance());
+  owner.pagedState?.preloadAfter(frame);
+  return frame;
 }
 
 function advancePlaybackMany(owner: MountRuntimeOwner, count: number): number {
@@ -558,11 +658,26 @@ function advancePlaybackMany(owner: MountRuntimeOwner, count: number): number {
   owner.effects?.publishMany(frames);
   const latest = frames.at(-1);
   invariant(latest !== undefined, "INVALID_PLAYBACK_PUBLICATION", "Prepared playback produced no catch-up frame.");
+  owner.pagedState?.preloadAfter(latest);
   return latest;
+}
+
+function advancePlaybackCollapsed(owner: MountRuntimeOwner, count: number): number {
+  const frame = publishPlaybackFrame(owner, mountedRuntime(owner).preparedPlayback.advanceCollapsed(count));
+  owner.pagedState?.preloadAfter(frame);
+  return frame;
 }
 
 function seekPlayback(owner: MountRuntimeOwner, frame: number): number {
   return publishPlaybackFrame(owner, mountedRuntime(owner).preparedPlayback.seek(frame));
+}
+
+function selectPlaybackBank(owner: MountRuntimeOwner, id: string): number {
+  invariant(owner.mode === "animation", "INVALID_EXPERIENCE_MODE", "Prepared banks can be selected only in animation mode.");
+  const frame = publishPlaybackFrame(owner, mountedRuntime(owner).preparedPlayback.selectBank(id));
+  owner.pagedState?.setActiveFramePin(frame);
+  owner.interaction?.invalidatePublication();
+  return frame;
 }
 
 function makeInteraction(owner: MountRuntimeOwner): Readonly<{ initialFrame: number; interpreter: PolycssInteraction }> {
@@ -599,10 +714,12 @@ function stepInteraction(owner: MountRuntimeOwner, sample?: InteractionSample) {
   assertMounted(owner);
   invariant(owner.interaction, "INVALID_EXPERIENCE_MODE", "Interaction mode is not active.");
   invariant(owner.input, "INVALID_EXPERIENCE_MODE", "Interaction input is not mounted.");
+  owner.pagedState?.assertFrameReady(owner.interaction.inspect().sourceFrame);
   const frame = owner.interaction.step(sample ?? owner.input.sample());
   owner.effects?.publish(frame.sourceFrame, frame.selectedId && frame.selectedMatrix
     ? { active: true, x: frame.selectedMatrix[12], y: frame.selectedMatrix[13], z: frame.selectedMatrix[14] }
     : { active: false, x: 0, y: 0, z: 0 });
+  owner.pagedState?.preloadAfter(frame.sourceFrame);
   return frame;
 }
 
@@ -624,6 +741,9 @@ function setRuntimeMode(owner: MountRuntimeOwner, next: DomExperienceMode): DomE
       if (owner.effects && owner.effects.sourceFrame !== sourceFrame) owner.effects.publish(sourceFrame);
     }
     owner.mode = next;
+    owner.compositorTiming?.setActive(next === "animation" && owner.animateEnabled);
+    owner.reschedule?.();
+    owner.pagedState?.resetPreload(mountedRuntime(owner).preparedPlayback.sourceFrame);
     return owner.mode;
   } catch (error) {
     cleanupMount(owner);
@@ -640,13 +760,66 @@ function createMountedRuntime(owner: MountRuntimeOwner): DomMountRuntime {
         ? owner.destroyedSourceFrame
         : mountedRuntime(owner).preparedPlayback.sourceFrame;
     },
+    get bankId() {
+      return owner.lifecycle.isDestroyed()
+        ? null
+        : mountedRuntime(owner).preparedPlayback.bankId;
+    },
     seek(frame: number) {
+      owner.pagedState?.assertFrameReady(frame);
       const nextFrame = seekPlayback(owner, frame);
+      owner.reschedule?.();
+      owner.pagedState?.preloadAfter(nextFrame);
       owner.interaction?.invalidatePublication();
+      return nextFrame;
+    },
+    async seekAsync(frame: number) {
+      assertMounted(owner);
+      try {
+        await owner.pagedState?.ensureFrame(frame);
+        const nextFrame = seekPlayback(owner, frame);
+        owner.reschedule?.();
+        owner.pagedState?.preloadAfter(nextFrame);
+        owner.interaction?.invalidatePublication();
+        return nextFrame;
+      } catch (error) {
+        if ((error as { code?: string })?.code !== "OPERATION_ABORTED") cleanupMount(owner);
+        throw error;
+      }
+    },
+    selectBank(id: string) {
+      assertMounted(owner);
+      const playback = mountedRuntime(owner).preparedPlayback;
+      const frame = playback.bankEntryFrame(id);
+      owner.pagedState?.assertFrameReady(frame);
+      const nextFrame = selectPlaybackBank(owner, id);
+      owner.reschedule?.();
+      owner.pagedState?.resetPreload(nextFrame);
+      return nextFrame;
+    },
+    async selectBankAsync(id: string) {
+      assertMounted(owner);
+      invariant(owner.mode === "animation", "INVALID_EXPERIENCE_MODE", "Prepared banks can be selected only in animation mode.");
+      const playback = mountedRuntime(owner).preparedPlayback;
+      const frame = playback.bankEntryFrame(id);
+      await owner.pagedState?.ensureFrame(frame);
+      const nextFrame = selectPlaybackBank(owner, id);
+      owner.reschedule?.();
+      owner.pagedState?.resetPreload(nextFrame);
       return nextFrame;
     },
     setMode(next: DomExperienceMode) {
       return setRuntimeMode(owner, next);
+    },
+    setInput(id: DomExternalInputId, value: number) {
+      assertMounted(owner);
+      invariant(owner.orbit, "UNKNOWN_EXTERNAL_INPUT", `External input ${String(id)} is unsupported by this document.`);
+      try {
+        return owner.orbit.setInput(id, value);
+      } catch (error) {
+        if ((error as { code?: string })?.code === "MOUNT_DESTROYED") cleanupMount(owner);
+        throw error;
+      }
     },
     destroy() {
       return cleanupMount(owner);
@@ -674,9 +847,15 @@ export async function mountDom(
     input: null,
     resizeObserver: null,
     request: null,
+    timer: null,
+    reschedule: null,
     mode: "animation",
+    animateEnabled: options.animate !== false,
     destroyedSourceFrame: 0,
     interaction: null,
+    orbit: null,
+    pagedState: null,
+    compositorTiming: null,
     reservedHost: null,
     presentation: null,
     interactionViewport: null,
@@ -704,13 +883,15 @@ export async function mountDom(
     owner.urlApi = RuntimeUrl;
 
     const mountValidation = validateDocumentInternal(packageDocument, { limits: validated.limits });
+    const variantClasses = preparedVariantClassTokens(packageDocument.state);
     throwIfAborted(options.signal);
     const interpreters = new Set(packageDocument.bindings.channels.map((channel) => channel.interpreter));
     invariant(interpreters.has("static-presentation@0"), "UNSUPPORTED_MOUNT_CONTRACT", "mountDom requires executable static presentation.");
     if (owner.mode === "interaction") invariant(interpreters.has("polycss-pointer-grab@0"), "UNSUPPORTED_MOUNT_CONTRACT", "The interaction experience requires an executable pointer interaction channel.");
     invariant(packageResources instanceof Map, "LIFECYCLE_PRECONDITION", "The validated browser result has no private resource snapshot.");
-    invariant(packageResources.size === packageDocument.resources.resources.length, "RESOURCE_CARDINALITY_MISMATCH", "Mounted resource count does not match RCRD.");
+    invariant(packageResources.size === packageDocument.resources.resources.filter((record) => record.kind !== "state-page").length, "RESOURCE_CARDINALITY_MISMATCH", "Mounted eager resource count does not match RCRD.");
     for (const record of packageDocument.resources.resources) {
+      if (record.kind === "state-page") continue;
       const bytes = externalBytes(packageResources.get(record.id), `Resource ${record.id}`);
       invariant(bytes.length === record.byteLength, "RESOURCE_SIZE_MISMATCH", `Resource ${record.id} byte length does not match RCRD.`);
       invariant(await sha256Hex(bytes) === record.digest.value, "RESOURCE_DIGEST_MISMATCH", `Resource ${record.id} integrity failed before mounting.`);
@@ -718,7 +899,7 @@ export async function mountDom(
       validateResourceBytes(record, bytes, mountValidation.limits);
     }
     for (const binding of packageDocument.cssBinding.stylesheets) {
-      validateCssBytes(requiredResourceBytes(packageResources, binding.resource), binding, mountValidation.resourceIds, mountValidation.limits);
+      validateCssBytes(requiredResourceBytes(packageResources, binding.resource), binding, mountValidation.resourceIds, mountValidation.limits, { forbiddenClassTokens: variantClasses });
     }
     lifecycle.advance("validate");
 
@@ -731,7 +912,7 @@ export async function mountDom(
     lifecycle.advance("construct");
 
     for (const record of packageDocument.resources.resources) {
-      if (record.kind === "stylesheet") continue;
+      if (record.kind !== "image") continue;
       owner.urls.set(record.id, RuntimeUrl.createObjectURL(new RuntimeBlob([Uint8Array.from(requiredResourceBytes(packageResources, record.id))], { type: record.mediaType })));
     }
     await decodeImageResources(packageDocument, packageResources, browserWindow, RuntimeBlob, options.signal);
@@ -745,16 +926,33 @@ export async function mountDom(
       ownerDocument.head.appendChild(element);
       owner.styles.push(element);
     }
+    const variantCss = materializeVariantEffectsCss(packageDocument, isolation.selector);
+    if (variantCss) {
+      const element = ownerDocument.createElement("style");
+      element.dataset.domformatStylesheet = "prepared-variants";
+      element.textContent = variantCss;
+      ownerDocument.head.appendChild(element);
+      owner.styles.push(element);
+    }
     const mountedTargets = bindMountedChannels(packageDocument.bindings, mounted);
     lifecycle.advance("bind");
 
     const materialized = materializePolycssState(packageDocument.state);
     throwIfAborted(options.signal);
     const presentationController = createStaticPresentation(packageDocument.bindings, mounted, { ...options, boundTargets: mountedTargets });
+    owner.pagedState = createPolycssPagedState(packageDocument, mounted, mountValidation.limits, validated.loadStatePage, {
+      boundTargets: mountedTargets,
+      onLateFailure: () => cleanupMount(owner),
+    });
+    await owner.pagedState?.prepareInitial(options.signal);
+    owner.compositorTiming = createPolycssCompositorTiming(packageDocument.state, packageDocument.bindings, materialized, mounted, { boundTargets: mountedTargets });
     const preparedPlayback = createPolycssPlayback(materialized, packageDocument.bindings, mounted, {
       ...options,
       boundTargets: mountedTargets,
       publishAppearance: presentationController.publishAppearance,
+      pagedState: owner.pagedState,
+      assertPagedFrameReady: (frame) => owner.pagedState?.assertFrameReady(frame),
+      compositorTiming: owner.compositorTiming,
     });
     owner.runtimeState = Object.freeze({
       bindings: packageDocument.bindings,
@@ -766,13 +964,16 @@ export async function mountDom(
     owner.effects = interpreters.has("polycss-effects@0")
       ? createPolycssEffects(materialized, packageDocument.bindings, mounted, { boundTargets: mountedTargets })
       : null;
+    owner.orbit = createPolycssOrbitInput(packageDocument.state, packageDocument.bindings, mounted, { boundTargets: mountedTargets });
     owner.presentation = presentationController;
     owner.input = interpreters.has("polycss-pointer-grab@0") ? createInteractionInput(host, mountSurface, owner.presentation, options) : null;
     const ResizeObserverClass = browserWindow.ResizeObserver;
     owner.resizeObserver = typeof ResizeObserverClass === "function"
       ? new ResizeObserverClass(() => {
           if (lifecycle.history.at(-1) !== "publish") return;
-          try { presentationController.resize(); } catch (error) {
+          try {
+            applyResponsivePlaybackProfile(owner, mountSurface, options);
+          } catch (error) {
             cleanupMount(owner);
             throw error;
           }
@@ -788,9 +989,20 @@ export async function mountDom(
     lifecycle.advance("initialize");
     lifecycle.begin("publish");
 
+    presentationController.resize();
+    preparedPlayback.selectProfileTimeline(presentationController.profileId);
     preparedPlayback.publishInitial();
+    owner.compositorTiming?.publishInitial(preparedPlayback.tick);
+    owner.compositorTiming?.setActive(owner.mode === "animation" && owner.animateEnabled);
+    owner.orbit?.publishInitial();
+    preparedPlayback.applyViewportProfile(
+      mountSurface.clientWidth || options.viewportWidth || presentationController.sourceWidth,
+      mountSurface.clientHeight || options.viewportHeight || presentationController.sourceHeight,
+      presentationController.profileId,
+    );
     if (owner.mode === "interaction") {
       invariant(interactionParameters, "MISSING_POLYCSS_BINDING", "Executable pointer interaction parameters are required.");
+      owner.pagedState?.assertFrameReady(interactionParameters.initialFrame);
       preparedPlayback.seek(interactionParameters.initialFrame);
       owner.input?.setEnabled(true);
     } else owner.input?.setEnabled(false);
@@ -803,37 +1015,152 @@ export async function mountDom(
     owner.hostMutated = true;
     if (interpreters.has("polycss-pointer-grab@0") && !host.hasAttribute("tabindex")) host.setAttribute("tabindex", "0");
     host.replaceChildren(mountSurface);
-    presentationController.resize();
+    owner.pagedState?.preloadAfter(preparedPlayback.sourceFrame);
+    applyResponsivePlaybackProfile(owner, mountSurface, options);
     owner.resizeObserver?.observe(host);
-    const playbackBinding = packageDocument.bindings.channels.find((channel) => channel.interpreter === "polycss-playback@0");
-    if (options.animate !== false && playbackBinding) {
+    const playbackBinding = packageDocument.bindings.channels.find((channel) => channel.interpreter === "polycss-playback@0" || channel.interpreter === "polycss-paged-playback@0");
+    if (owner.animateEnabled && playbackBinding) {
       const playbackParameters = playbackBinding.parameters as unknown as PlaybackParameters | undefined;
       invariant(playbackParameters, "MISSING_POLYCSS_BINDING", "Executable playback parameters are required.");
-      invariant(typeof browserWindow.requestAnimationFrame === "function" && typeof browserWindow.cancelAnimationFrame === "function", "MISSING_BROWSER_API", "Animation-frame support is required for animated mounting.");
-      const tickMs = 1000 / playbackParameters.tickRateHz;
-      let nextTick: number | null = null;
+      invariant(
+        typeof browserWindow.requestAnimationFrame === "function"
+        && typeof browserWindow.cancelAnimationFrame === "function"
+        && typeof browserWindow.setTimeout === "function"
+        && typeof browserWindow.clearTimeout === "function",
+        "MISSING_BROWSER_API",
+        "Deadline timers and animation-frame support are required for animated mounting.",
+      );
+      const now = (): number => browserWindow.performance?.now?.() ?? globalThis.performance.now();
+      let clockOrigin = now();
+      let pageWait: Promise<void> | null = null;
+      const cancelScheduled = (): void => {
+        if (owner.timer !== null) browserWindow.clearTimeout(owner.timer);
+        if (owner.request !== null) browserWindow.cancelAnimationFrame(owner.request);
+        owner.timer = null;
+        owner.request = null;
+      };
+      const schedule = (): void => {
+        if (lifecycle.isDestroyed() || pageWait || owner.timer !== null || owner.request !== null) return;
+        const delay = Math.max(0, clockOrigin + preparedPlayback.tickSpan(1) - now() - 1);
+        owner.timer = browserWindow.setTimeout(() => {
+          owner.timer = null;
+          if (!lifecycle.isDestroyed()) owner.request = browserWindow.requestAnimationFrame(loop);
+        }, delay);
+      };
+      const waitForPage = (frame: number, resume: () => void): void => {
+        const pagedState = owner.pagedState;
+        invariant(pagedState && !pagedState.isFrameReady(frame), "INVALID_PLAYBACK_PUBLICATION", "Paged playback wait requires a nonresident target frame.");
+        const wait = pagedState.ensureFrame(frame);
+        pageWait = wait;
+        void wait.then(() => {
+          if (pageWait !== wait || lifecycle.isDestroyed()) return;
+          pageWait = null;
+          try {
+            resume();
+          } catch {
+            cleanupMount(owner);
+            return;
+          }
+          if (!lifecycle.isDestroyed()) {
+            clockOrigin = now();
+            schedule();
+          }
+        }, (error: unknown) => {
+          if (pageWait !== wait || lifecycle.isDestroyed()) return;
+          pageWait = null;
+          if ((error as { code?: string })?.code !== "OPERATION_ABORTED") cleanupMount(owner);
+        });
+      };
+      const drainPlaybackCatchUp = (count: number): void => {
+        const playback = mountedRuntime(owner).preparedPlayback;
+        let ready = count;
+        if (owner.pagedState) {
+          ready = 0;
+          while (ready < count && owner.pagedState.isFrameReady(playback.frameAfter(ready + 1))) ready += 1;
+        }
+        if (ready === 1) advancePlayback(owner);
+        else if (ready > 1) advancePlaybackMany(owner, ready);
+        const remaining = count - ready;
+        if (remaining === 0) return;
+        const frame = playback.frameAfter(1);
+        const tick = playback.tick;
+        const sourceFrame = playback.sourceFrame;
+        waitForPage(frame, () => {
+          if (owner.mode === "animation" && playback.tick === tick && playback.sourceFrame === sourceFrame) drainPlaybackCatchUp(remaining);
+        });
+      };
+      const drainPlaybackCollapsed = (count: number): void => {
+        const playback = mountedRuntime(owner).preparedPlayback;
+        const frame = playback.frameAfter(count);
+        if (owner.pagedState && !owner.pagedState.isFrameReady(frame)) {
+          const tick = playback.tick;
+          const sourceFrame = playback.sourceFrame;
+          waitForPage(frame, () => {
+            if (owner.mode === "animation" && playback.tick === tick && playback.sourceFrame === sourceFrame) drainPlaybackCollapsed(count);
+          });
+          return;
+        }
+        advancePlaybackCollapsed(owner, count);
+      };
+      const drainInteractionCatchUp = (count: number): void => {
+        let remaining = count;
+        while (remaining > 0) {
+          const interaction = owner.interaction;
+          invariant(interaction, "INVALID_EXPERIENCE_MODE", "Interaction mode is not active.");
+          const frame = interaction.inspect().sourceFrame;
+          if (owner.pagedState && !owner.pagedState.isFrameReady(frame)) {
+            const ticks = interaction.ticks;
+            waitForPage(frame, () => {
+              if (owner.mode === "interaction" && owner.interaction === interaction && interaction.ticks === ticks) drainInteractionCatchUp(remaining);
+            });
+            return;
+          }
+          stepInteraction(owner);
+          remaining -= 1;
+        }
+      };
       const loop = (timestamp: number): void => {
+        owner.request = null;
         if (lifecycle.isDestroyed()) return;
         try {
-          if (nextTick === null) nextTick = timestamp + tickMs;
-          else {
-            let due = timestamp < nextTick - 0.5 ? 0 : Math.floor((timestamp - nextTick + 0.5) / tickMs) + 1;
-            if (due > MAX_CATCH_UP_TICKS) {
-              due = 1;
-              nextTick = timestamp + tickMs;
-            } else nextTick += due * tickMs;
-            if (owner.mode === "interaction") {
-              for (let index = 0; index < due; index += 1) stepInteraction(owner);
-            } else if (due === 1) advancePlayback(owner);
-            else if (due > 1) advancePlaybackMany(owner, due);
+          const playback = mountedRuntime(owner).preparedPlayback;
+          const policy = playbackParameters.catchUpPolicy ?? "bounded";
+          const maximum = policy === "elapsed" ? Number.MAX_SAFE_INTEGER - playback.tick : MAX_CATCH_UP_TICKS + 1;
+          let due = playback.ticksWithin(Math.max(0, timestamp - clockOrigin + 0.5), maximum);
+          let resetClock = false;
+          if (policy === "single-step" && due > 0) {
+            due = 1;
+            resetClock = true;
+          } else if (policy === "bounded" && due > MAX_CATCH_UP_TICKS) {
+            due = 1;
+            resetClock = true;
           }
+          const elapsed = due > 0 ? playback.tickSpan(due) : 0;
+          if (owner.mode === "interaction") {
+            drainInteractionCatchUp(due);
+            if (pageWait) return;
+          } else if (due > 0) {
+            if (policy === "elapsed") drainPlaybackCollapsed(due);
+            else drainPlaybackCatchUp(due);
+            if (pageWait) return;
+          }
+          if (due > 0) clockOrigin = resetClock ? timestamp : clockOrigin + elapsed;
         } catch (error) {
           cleanupMount(owner);
           throw error;
         }
-        if (!lifecycle.isDestroyed()) owner.request = browserWindow.requestAnimationFrame(loop);
+        schedule();
       };
-      owner.request = browserWindow.requestAnimationFrame(loop);
+      owner.reschedule = () => {
+        if (pageWait) {
+          pageWait = null;
+          owner.pagedState?.cancelPending();
+        }
+        cancelScheduled();
+        clockOrigin = now();
+        schedule();
+      };
+      schedule();
     }
     lifecycle.advance("publish");
     return createMountedRuntime(owner);
