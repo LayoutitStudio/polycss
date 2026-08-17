@@ -205,57 +205,167 @@ test("lane parity passes when nothing in the set changed", () => {
   assert.deepEqual(waived, []);
 });
 
-test("an unscoped waiver excuses the set and carries the reason", () => {
+test("an unscoped waiver no longer excuses the set", () => {
   const { failures, waived } = checkLaneParity(
     LANE_SETS,
     ["packages/react/src/scene/x.ts"],
     { s: { reason: "vanilla has no equivalent", files: null } },
   );
-  assert.deepEqual(failures, []);
-  assert.equal(waived.length, 1);
-  assert.equal(waived[0].reason, "vanilla has no equivalent");
+  assert.deepEqual(waived, []);
+  assert.equal(failures.length, 1);
+  assert.match(failures[0].note, /not scoped to specific files/);
 });
 
-test("a file-scoped waiver excuses only the files it names", () => {
-  const waivers = {
-    s: { reason: "react caught up", files: ["packages/react/src/scene/x.ts"] },
-  };
-  assert.deepEqual(
-    checkLaneParity(LANE_SETS, ["packages/react/src/scene/x.ts"], waivers)
-      .failures,
-    [],
+test("a waiver without expectedLanes does not apply", () => {
+  const { failures, waived } = checkLaneParity(
+    LANE_SETS,
+    ["packages/react/src/scene/x.ts"],
+    { s: { reason: "r", files: ["packages/react/src/scene/x.ts"] } },
   );
+  assert.deepEqual(waived, []);
+  assert.equal(failures.length, 1);
+  assert.match(failures[0].note, /expectedLanes/);
+});
 
-  const other = checkLaneParity(
+test("a file-scoped waiver excuses exactly the files it names", () => {
+  const waivers = {
+    s: {
+      reason: "react caught up",
+      files: ["packages/react/src/scene/x.ts"],
+      expectedLanes: ["react"],
+    },
+  };
+  const covered = checkLaneParity(
+    LANE_SETS,
+    ["packages/react/src/scene/x.ts"],
+    waivers,
+  );
+  assert.deepEqual(covered.failures, []);
+  assert.equal(covered.waived.length, 1);
+  assert.deepEqual(covered.waived[0].expectedLanes, ["react"]);
+});
+
+test("a divergence outside the waived files still fails", () => {
+  const sets = [
+    {
+      name: "s",
+      hint: "mirror it",
+      files: [
+        ...LANE_SETS[0].files,
+        "packages/react/src/scene/y.ts",
+        "packages/vue/src/scene/y.ts",
+      ],
+    },
+  ];
+  const waivers = {
+    s: {
+      reason: "react caught up",
+      files: ["packages/react/src/scene/x.ts"],
+      expectedLanes: ["react"],
+    },
+  };
+  const result = checkLaneParity(
+    sets,
+    ["packages/react/src/scene/x.ts", "packages/react/src/scene/y.ts"],
+    waivers,
+  );
+  assert.deepEqual(result.waived, []);
+  assert.equal(result.failures.length, 1);
+  assert.deepEqual(result.failures[0].changedFiles, [
+    "packages/react/src/scene/y.ts",
+  ]);
+  assert.match(result.failures[0].note, /does not name these diverging files/);
+});
+
+test("a lane pattern the waiver did not record still fails", () => {
+  const waivers = {
+    s: {
+      reason: "react+vue caught up to vanilla",
+      files: [
+        "packages/react/src/scene/x.ts",
+        "packages/vue/src/scene/x.ts",
+      ],
+      expectedLanes: ["react", "vue"],
+    },
+  };
+  const both = checkLaneParity(
     LANE_SETS,
     ["packages/react/src/scene/x.ts", "packages/vue/src/scene/x.ts"],
     waivers,
   );
-  assert.equal(other.failures.length, 1);
-  assert.deepEqual(other.failures[0].changed, ["vue"]);
-  assert.match(other.failures[0].note, /does not cover/);
+  assert.deepEqual(both.failures, []);
+  assert.equal(both.waived.length, 1);
+
+  // Same set, same waived files — but only ONE of the two lanes moved this
+  // time. The waiver documented a different divergence and must not apply.
+  const vueAlone = checkLaneParity(
+    LANE_SETS,
+    ["packages/vue/src/scene/x.ts"],
+    waivers,
+  );
+  assert.deepEqual(vueAlone.waived, []);
+  assert.equal(vueAlone.failures.length, 1);
+  assert.match(vueAlone.failures[0].note, /records changed lane\(s\) react, vue/);
+  assert.match(vueAlone.failures[0].note, /touched vue/);
 });
 
-test("waivers reject empty or malformed reasons", () => {
+test("waivers must be objects scoped to files with expected lanes", () => {
+  const scoped = (extra) =>
+    JSON.stringify({ s: { reason: "ok", files: ["a"], ...extra } });
   const root = makeRepo({
+    "bare.json": JSON.stringify({ s: "whole set, forever" }),
     "empty.json": JSON.stringify({ s: "   " }),
-    "bad.json": JSON.stringify({ s: { files: ["a"] } }),
-    "badfiles.json": JSON.stringify({ s: { reason: "ok", files: [7] } }),
-    "good.json": JSON.stringify({ s: "because", t: { reason: "why", files: ["a"] } }),
+    "noreason.json": JSON.stringify({ s: { files: ["a"], expectedLanes: ["vue"] } }),
+    "nofiles.json": JSON.stringify({ s: { reason: "ok", expectedLanes: ["vue"] } }),
+    "emptyfiles.json": JSON.stringify({
+      s: { reason: "ok", files: [], expectedLanes: ["vue"] },
+    }),
+    "badfiles.json": JSON.stringify({
+      s: { reason: "ok", files: [7], expectedLanes: ["vue"] },
+    }),
+    "nolanes.json": scoped({}),
+    "badlane.json": scoped({ expectedLanes: ["svelte"] }),
+    "good.json": JSON.stringify({
+      s: { reason: "why", files: ["a"], expectedLanes: ["react", "vue"] },
+    }),
   });
-  assert.match(loadWaivers(resolve(root, "empty.json")).errors[0], /empty reason/);
-  assert.match(loadWaivers(resolve(root, "bad.json")).errors[0], /non-empty/);
-  assert.match(loadWaivers(resolve(root, "badfiles.json")).errors[0], /string-array/);
+  const errorOf = (name) => loadWaivers(resolve(root, name)).errors[0];
+
+  assert.match(errorOf("bare.json"), /unscoped whole-set waiver/);
+  assert.match(errorOf("empty.json"), /unscoped whole-set waiver/);
+  assert.match(errorOf("noreason.json"), /empty or missing "reason"/);
+  assert.match(errorOf("nofiles.json"), /not scoped to specific files/);
+  assert.match(errorOf("emptyfiles.json"), /not scoped to specific files/);
+  assert.match(errorOf("badfiles.json"), /not scoped to specific files/);
+  assert.match(errorOf("nolanes.json"), /no "expectedLanes"/);
+  assert.match(errorOf("badlane.json"), /unknown lane\(s\) svelte/);
 
   const good = loadWaivers(resolve(root, "good.json"));
   assert.deepEqual(good.errors, []);
-  assert.equal(good.waivers.s.reason, "because");
-  assert.deepEqual(good.waivers.t.files, ["a"]);
+  assert.equal(good.waivers.s.reason, "why");
+  assert.deepEqual(good.waivers.s.files, ["a"]);
+  assert.deepEqual(good.waivers.s.expectedLanes, ["react", "vue"]);
 
   assert.deepEqual(loadWaivers(resolve(root, "absent.json")), {
     waivers: {},
     errors: [],
   });
+  cleanup(root);
+});
+
+test("a bare-string waiver fails the run with a validation error", () => {
+  const root = makeGitRepo();
+  edit(root, "packages/react/src/scene/x.ts", "react v2\n");
+  writeFileSync(
+    resolve(root, ".github", "mirror-waivers.json"),
+    `${JSON.stringify({ s: "react is catching up to vanilla" }, null, 2)}\n`,
+  );
+  assert.equal(runFixture(root, ["--update"]).code, 0);
+
+  const result = runFixture(root);
+  assert.equal(result.code, 1);
+  assert.match(result.err, /invalid mirror waivers/);
+  assert.match(result.err, /unscoped whole-set waiver/);
   cleanup(root);
 });
 
@@ -268,9 +378,10 @@ test("base resolution prefers --base, then GITHUB_BASE_REF, then merge-base", ()
     source: "--base origin/main",
   });
   assert.match(
-    resolveBaseRef(root, ["--base", "nope/nope"], {}).reason,
+    resolveBaseRef(root, ["--base", "nope/nope"], {}).error,
     /cannot be resolved/,
   );
+  assert.match(resolveBaseRef(root, ["--base"], {}).error, /without a ref/);
   assert.deepEqual(resolveBaseRef(root, [], { GITHUB_BASE_REF: "main" }), {
     base: head,
     source: "origin/main",
@@ -279,7 +390,7 @@ test("base resolution prefers --base, then GITHUB_BASE_REF, then merge-base", ()
   cleanup(root);
 });
 
-test("an unresolvable base skips the lane check with a visible warning", () => {
+test("a local run with no base and no remote skips loudly and exits 0", () => {
   const root = makeRepo(LANE_FILES);
   mkdirSync(resolve(root, ".github"), { recursive: true });
 
@@ -291,7 +402,54 @@ test("an unresolvable base skips the lane check with a visible warning", () => {
   const result = runFixture(root);
   assert.equal(result.code, 0);
   assert.match(result.out, /MIRROR LANE CHECK SKIPPED/);
+  assert.match(result.out, /NOT ENFORCED/);
   assert.match(result.out, /fetch-depth: 0/);
+  assert.match(result.out, /--require-base/);
+  cleanup(root);
+});
+
+test("an explicitly requested base that cannot be resolved is an error", () => {
+  const root = makeGitRepo();
+  assert.equal(runFixture(root, ["--update"]).code, 0);
+
+  const result = runFixture(root, ["--base", "does-not-exist"]);
+  assert.equal(result.code, 1, "an unresolvable --base must never skip");
+  assert.match(result.err, /lane check could not run/);
+  assert.match(result.err, /does-not-exist/);
+  assert.doesNotMatch(result.out, /SKIPPED/);
+  cleanup(root);
+});
+
+test("--require-base turns an unresolvable base into an error", () => {
+  const root = makeRepo(LANE_FILES);
+  mkdirSync(resolve(root, ".github"), { recursive: true });
+  assert.equal(runFixture(root, ["--update"]).code, 0);
+
+  assert.match(resolveBaseRef(root, ["--require-base"], {}).error, /no base ref/);
+
+  const result = runFixture(root, ["--require-base"]);
+  assert.equal(result.code, 1);
+  assert.match(result.err, /lane check could not run/);
+  assert.doesNotMatch(result.out, /SKIPPED/);
+  cleanup(root);
+});
+
+test("a git diff failure against a resolved base is an error, not a skip", () => {
+  const root = makeGitRepo();
+  assert.equal(runFixture(root, ["--update"]).code, 0);
+  const head = git(root, ["rev-parse", "HEAD"]);
+  const tree = git(root, ["rev-parse", "HEAD^{tree}"]);
+  // The commit still resolves, but its tree is gone: `git diff` fails while
+  // the base ref verifies. That must fail, not silently pass.
+  rmSync(resolve(root, ".git", "objects", tree.slice(0, 2), tree.slice(2)), {
+    force: true,
+  });
+
+  assert.equal(resolveBaseRef(root, ["--base", head], {}).base, head);
+  const result = runFixture(root, ["--base", head]);
+  assert.equal(result.code, 1);
+  assert.match(result.err, /git diff.*failed/s);
+  assert.doesNotMatch(result.out, /SKIPPED/);
   cleanup(root);
 });
 
@@ -345,7 +503,17 @@ test("end to end: a waived set passes and echoes the reason loudly", () => {
   edit(root, "packages/react/src/scene/x.ts", "react v2\n");
   writeFileSync(
     resolve(root, ".github", "mirror-waivers.json"),
-    `${JSON.stringify({ s: "react is catching up to vanilla" }, null, 2)}\n`,
+    `${JSON.stringify(
+      {
+        s: {
+          reason: "react is catching up to vanilla",
+          files: ["packages/react/src/scene/x.ts"],
+          expectedLanes: ["react"],
+        },
+      },
+      null,
+      2,
+    )}\n`,
   );
   assert.equal(runFixture(root, ["--update"]).code, 0);
 
@@ -353,6 +521,36 @@ test("end to end: a waived set passes and echoes the reason loudly", () => {
   assert.equal(result.code, 0);
   assert.match(result.out, /MIRROR WAIVER APPLIED: set "s"/);
   assert.match(result.out, /react is catching up to vanilla/);
+  assert.match(result.out, /scoped to packages\/react\/src\/scene\/x\.ts/);
+  cleanup(root);
+});
+
+test("end to end: a waiver does not cover a later, different divergence", () => {
+  const root = makeGitRepo();
+  writeFileSync(
+    resolve(root, ".github", "mirror-waivers.json"),
+    `${JSON.stringify(
+      {
+        s: {
+          reason: "react is catching up to vanilla",
+          files: ["packages/react/src/scene/x.ts"],
+          expectedLanes: ["react"],
+        },
+      },
+      null,
+      2,
+    )}\n`,
+  );
+  // The next PR changes vue alone. Same set, same stale waiver, different
+  // divergence — it must fail.
+  edit(root, "packages/vue/src/scene/x.ts", "vue v2\n");
+  assert.equal(runFixture(root, ["--update"]).code, 0);
+
+  const result = runFixture(root);
+  assert.equal(result.code, 1);
+  assert.doesNotMatch(result.out, /MIRROR WAIVER APPLIED/);
+  assert.match(result.err, /lanes changed unevenly/);
+  assert.match(result.err, /records changed lane\(s\) react/);
   cleanup(root);
 });
 
@@ -364,7 +562,20 @@ test("--update never creates or refreshes waivers", () => {
   assert.equal(runFixture(root, ["--update"]).code, 0);
   assert.equal(existsSync(waiverPath), false, "--update must not author a waiver");
 
-  writeFileSync(waiverPath, `${JSON.stringify({ s: "declared" }, null, 2)}\n`);
+  writeFileSync(
+    waiverPath,
+    `${JSON.stringify(
+      {
+        s: {
+          reason: "declared",
+          files: ["packages/react/src/scene/x.ts"],
+          expectedLanes: ["react"],
+        },
+      },
+      null,
+      2,
+    )}\n`,
+  );
   const before = readFileSync(waiverPath, "utf8");
   edit(root, "packages/vue/src/scene/x.ts", "vue v2\n");
   assert.equal(runFixture(root, ["--update"]).code, 0);
@@ -377,7 +588,17 @@ test("a waiver naming an unknown set fails", () => {
   assert.equal(runFixture(root, ["--update"]).code, 0);
   writeFileSync(
     resolve(root, ".github", "mirror-waivers.json"),
-    `${JSON.stringify({ "does-not-exist": "stale" }, null, 2)}\n`,
+    `${JSON.stringify(
+      {
+        "does-not-exist": {
+          reason: "stale",
+          files: ["packages/react/src/scene/x.ts"],
+          expectedLanes: ["react"],
+        },
+      },
+      null,
+      2,
+    )}\n`,
   );
   const result = runFixture(root);
   assert.equal(result.code, 1);
@@ -385,15 +606,74 @@ test("a waiver naming an unknown set fails", () => {
   cleanup(root);
 });
 
-test("committed waivers are valid and name real sets", () => {
+test("committed waivers are valid, scoped, and name real sets", () => {
   const repoRoot = resolve(import.meta.dirname, "..", "..");
   const { waivers, errors } = loadWaivers(
     resolve(repoRoot, ".github", "mirror-waivers.json"),
   );
   assert.deepEqual(errors, []);
-  const names = new Set(SYNC_SETS.map((set) => set.name));
-  for (const name of Object.keys(waivers)) {
-    assert.equal(names.has(name), true, `unknown waived set: ${name}`);
-    assert.equal(waivers[name].reason.length > 0, true);
+  const setsByName = new Map(SYNC_SETS.map((set) => [set.name, set]));
+  for (const [name, waiver] of Object.entries(waivers)) {
+    const set = setsByName.get(name);
+    assert.notEqual(set, undefined, `unknown waived set: ${name}`);
+    assert.equal(waiver.reason.length > 0, true);
+    assert.equal(waiver.files.length > 0, true, `waiver "${name}" is unscoped`);
+    for (const file of waiver.files) {
+      assert.equal(
+        set.files.includes(file),
+        true,
+        `waiver "${name}" names ${file}, which is not in the set`,
+      );
+    }
+    for (const lane of waiver.expectedLanes) {
+      assert.equal(
+        set.files.some((file) => resolveLane(file) === lane),
+        true,
+        `waiver "${name}" expects lane ${lane}, which the set has no files in`,
+      );
+    }
   }
+});
+
+test("mesh-modules covers every react↔vue scene/mesh pair on both lanes", () => {
+  const set = SYNC_SETS.find((entry) => entry.name === "mesh-modules");
+  assert.notEqual(set, undefined, "the mesh-modules sync set must exist");
+
+  const lanes = partitionLanes(set.files);
+  assert.deepEqual([...lanes.keys()].sort(), ["react", "vue"]);
+
+  const basename = (file) => file.split("/").pop().replace(/\.tsx?$/, "");
+  assert.deepEqual(
+    lanes.get("react").map(basename).sort(),
+    lanes.get("vue").map(basename).sort(),
+    "every react hook under scene/mesh must have its vue counterpart listed",
+  );
+  assert.equal(
+    lanes.get("react").some((file) => file.endsWith("useReceiverShadows.tsx")),
+    true,
+  );
+});
+
+test("mesh-modules: a one-lane edit fails even after re-pinning", () => {
+  const meshSet = SYNC_SETS.find((entry) => entry.name === "mesh-modules");
+  const root = makeGitRepo(
+    Object.fromEntries(meshSet.files.map((file) => [file, `${file} v1\n`])),
+  );
+  const sets = [meshSet];
+  const withMeshSet = { sets };
+
+  assert.equal(runFixture(root, ["--update"], withMeshSet).code, 0);
+  assert.equal(runFixture(root, [], withMeshSet).code, 0, "clean tree passes");
+
+  const reactFile = "packages/react/src/scene/mesh/useReceiverShadows.tsx";
+  edit(root, reactFile, "react receiver shadows v2\n");
+  assert.equal(runFixture(root, ["--update"], withMeshSet).code, 0);
+
+  const result = runFixture(root, [], withMeshSet);
+  assert.equal(result.code, 1, "a vue-less react mesh change must fail");
+  assert.match(result.err, /set: mesh-modules/);
+  assert.match(result.err, /changed lane\(s\):\s+react/);
+  assert.match(result.err, /unchanged lane\(s\):\s+vue/);
+  assert.match(result.err, new RegExp(reactFile.replace(/\//g, "\\/")));
+  cleanup(root);
 });

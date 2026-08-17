@@ -4,6 +4,7 @@
     "files": [
       "packages/react/src/scene/voxelRenderer.ts",
       "packages/vue/src/scene/voxelRenderer.ts"
-    ]
+    ],
+    "expectedLanes": ["react", "vue"]
   }
 }

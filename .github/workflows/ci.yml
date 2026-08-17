@@ -21,7 +21,7 @@ jobs:
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
         with:
           # check:mirrors needs history to merge-base against the PR's base ref;
-          # a shallow clone makes the lane-parity check skip itself.
+          # it runs with --require-base, so a shallow clone fails the job.
           fetch-depth: 0
 
       - name: Set up pnpm
@@ -51,7 +51,9 @@ jobs:
         run: pnpm check:boundaries
 
       - name: Check mirrored renderer copies
-        run: pnpm check:mirrors
+        # --require-base: a base ref that cannot be resolved must fail the job,
+        # never silently skip lane parity (fetch-depth: 0 above supplies it).
+        run: pnpm check:mirrors --require-base
 
       - name: Run tests
         run: pnpm test

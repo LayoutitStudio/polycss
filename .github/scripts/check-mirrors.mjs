@@ -27,7 +27,14 @@
  *   .github/mirror-waivers.json, which `--update` never writes, so a waiver
  *   is always visible in the PR diff.
  *
- * Run: `node .github/scripts/check-mirrors.mjs [--update] [--base <ref>]`
+ * The lane check must not be able to disable itself. An explicit `--base` that
+ * does not resolve, and a `git diff` that fails once a base HAS resolved, are
+ * hard errors. `--require-base` (used by CI) turns "no base resolvable at all"
+ * into an error too. The only surviving skip is a local developer run with no
+ * `--base`, no GITHUB_BASE_REF and no origin/main, and it shouts.
+ *
+ * Run: `node .github/scripts/check-mirrors.mjs [--update] [--base <ref>]
+ *       [--require-base]`
  */
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -152,6 +159,37 @@ export const SYNC_SETS = [
       "packages/vue/src/scene/voxelRenderer.ts",
     ],
   },
+  // Deliberately two lanes only. The vanilla counterparts in
+  // packages/polycss/src/api/scene/* are not per-file copies of these
+  // composables — they are an imperative orchestration split (mountSync,
+  // shadowOrchestrator, shadowCache) with no 1:1 mapping to a hook. Listing
+  // them as a third lane would fire on every vanilla-only refactor.
+  {
+    name: "mesh-modules",
+    hint:
+      "The React hooks and Vue composables under scene/mesh/ are mirrored " +
+      "pairs (AGENTS.md → Cross-package discipline). They hold the shadow " +
+      "caches, receiver/caster registration, the followAnimation throttle, " +
+      "atlas and stable-DOM state — a fix in one lane must land in the other.",
+    files: [
+      "packages/react/src/scene/mesh/useGroundShadow.tsx",
+      "packages/react/src/scene/mesh/useMeshAtlas.ts",
+      "packages/react/src/scene/mesh/useMeshEvents.ts",
+      "packages/react/src/scene/mesh/useMeshGeometry.ts",
+      "packages/react/src/scene/mesh/useMeshLighting.ts",
+      "packages/react/src/scene/mesh/useReceiverShadows.tsx",
+      "packages/react/src/scene/mesh/useStableDom.ts",
+      "packages/react/src/scene/mesh/useVoxelFastPath.ts",
+      "packages/vue/src/scene/mesh/useGroundShadow.ts",
+      "packages/vue/src/scene/mesh/useMeshAtlas.ts",
+      "packages/vue/src/scene/mesh/useMeshEvents.ts",
+      "packages/vue/src/scene/mesh/useMeshGeometry.ts",
+      "packages/vue/src/scene/mesh/useMeshLighting.ts",
+      "packages/vue/src/scene/mesh/useReceiverShadows.ts",
+      "packages/vue/src/scene/mesh/useStableDom.ts",
+      "packages/vue/src/scene/mesh/useVoxelFastPath.ts",
+    ],
+  },
   {
     name: "base-styles",
     hint:
@@ -250,21 +288,25 @@ const verifyRef = (root, ref) => git(root, ["rev-parse", "--verify", `${ref}^{co
 
 /**
  * Base resolution order: --base <ref> → origin/$GITHUB_BASE_REF → merge-base
- * with origin/main → origin/main. A checkout that resolves none of these
- * (shallow clone, no remote) SKIPS the lane check loudly instead of passing.
+ * with origin/main → origin/main.
+ *
+ * Returns `{ base, source }`, `{ error }` (hard failure), or `{ skip, reason }`.
+ * An explicitly requested `--base` that does not resolve is an ERROR — the
+ * author asked for a specific comparison and did not get it, so passing would
+ * be a lie. With `--require-base`, failing to resolve any base is an error too;
+ * CI passes that flag so the pipeline can never silently drop lane parity.
  */
 export function resolveBaseRef(root, argv = [], env = process.env) {
   const flagIndex = argv.indexOf("--base");
   if (flagIndex !== -1) {
     const ref = argv[flagIndex + 1];
     if (!ref || ref.startsWith("--")) {
-      return { skip: true, reason: "--base was passed without a ref" };
+      return { error: "--base was passed without a ref" };
     }
     const resolved = verifyRef(root, ref);
     if (!resolved) {
       return {
-        skip: true,
-        reason: `--base ref "${ref}" cannot be resolved in this checkout`,
+        error: `--base ref "${ref}" cannot be resolved in this checkout`,
       };
     }
     return { base: resolved, source: `--base ${ref}` };
@@ -282,13 +324,12 @@ export function resolveBaseRef(root, argv = [], env = process.env) {
   const originMain = verifyRef(root, "origin/main");
   if (originMain) return { base: originMain, source: "origin/main" };
 
-  return {
-    skip: true,
-    reason:
-      "no base ref could be resolved (no --base, no usable GITHUB_BASE_REF, " +
-      "no origin/main). Shallow clone or missing remote? CI must check out " +
-      "with fetch-depth: 0.",
-  };
+  const reason =
+    "no base ref could be resolved (no --base, no usable GITHUB_BASE_REF, " +
+    "no origin/main). Shallow clone or missing remote? CI must check out " +
+    "with fetch-depth: 0.";
+  if (argv.includes("--require-base")) return { error: reason };
+  return { skip: true, reason };
 }
 
 /** Repo-relative paths changed between `base` and the working tree. */
@@ -315,10 +356,27 @@ export function partitionLanes(files) {
   return lanes;
 }
 
+const SCOPE_HELP =
+  'every waiver must be an object with a non-empty "reason", a non-empty ' +
+  '"files" array naming the exact diverging files, and a non-empty ' +
+  '"expectedLanes" array naming the lanes that changed (' +
+  `${RENDERER_LANES.join(", ")})`;
+
+const isStringArray = (value) =>
+  Array.isArray(value) &&
+  value.length > 0 &&
+  value.every((entry) => typeof entry === "string" && entry.trim().length > 0);
+
 /**
- * A waiver is `"<set>": "<reason>"` or
- * `"<set>": { "reason": "...", "files": ["..."] }`. An empty reason is an
- * error, not a waiver — the point is that the divergence is explained.
+ * A waiver is
+ * `"<set>": { "reason": "...", "files": ["..."], "expectedLanes": ["..."] }`.
+ *
+ * All three fields are mandatory. Whole-set waivers (a bare reason string, or
+ * an object without `files`) are rejected: they never expire, cover files that
+ * did not exist when they were written, and silently excuse any future
+ * divergence in the set. `files` pins WHICH files may diverge and
+ * `expectedLanes` pins the SHAPE of the divergence, so a waiver written for
+ * "react+vue changed, polycss did not" cannot later cover "vue changed alone".
  */
 export function loadWaivers(waiverPath) {
   if (!existsSync(waiverPath)) return { waivers: {}, errors: [] };
@@ -335,46 +393,69 @@ export function loadWaivers(waiverPath) {
   const errors = [];
   for (const [name, value] of Object.entries(raw)) {
     if (typeof value === "string") {
-      if (value.trim().length === 0) {
-        errors.push(`waiver "${name}" has an empty reason`);
-        continue;
-      }
-      waivers[name] = { reason: value.trim(), files: null };
+      errors.push(
+        `waiver "${name}" is an unscoped whole-set waiver (a bare reason ` +
+          `string). Scope it: ${SCOPE_HELP}.`,
+      );
       continue;
     }
-    if (
-      value &&
-      typeof value === "object" &&
-      !Array.isArray(value) &&
-      typeof value.reason === "string" &&
-      value.reason.trim().length > 0
-    ) {
-      const files = value.files;
-      if (
-        files !== undefined &&
-        (!Array.isArray(files) || files.some((f) => typeof f !== "string"))
-      ) {
-        errors.push(`waiver "${name}" has a non string-array "files"`);
-        continue;
-      }
-      waivers[name] = {
-        reason: value.reason.trim(),
-        files: Array.isArray(files) && files.length > 0 ? files : null,
-      };
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      errors.push(`waiver "${name}" must be an object — ${SCOPE_HELP}.`);
       continue;
     }
-    errors.push(
-      `waiver "${name}" must be a non-empty reason string, or an object with a ` +
-        "non-empty \"reason\" (and optional \"files\")",
+    if (typeof value.reason !== "string" || value.reason.trim().length === 0) {
+      errors.push(`waiver "${name}" has an empty or missing "reason"`);
+      continue;
+    }
+    if (!isStringArray(value.files)) {
+      errors.push(
+        `waiver "${name}" is not scoped to specific files. Add a non-empty ` +
+          '"files" array naming the exact files that diverge — unscoped ' +
+          "whole-set waivers excuse future divergence forever.",
+      );
+      continue;
+    }
+    if (!isStringArray(value.expectedLanes)) {
+      errors.push(
+        `waiver "${name}" has no "expectedLanes". Record the lanes that ` +
+          `changed (e.g. ["react", "vue"]) so the waiver stops applying when ` +
+          "a different lane pattern shows up.",
+      );
+      continue;
+    }
+    const unknownLanes = value.expectedLanes.filter(
+      (lane) => !RENDERER_LANES.includes(lane),
     );
+    if (unknownLanes.length > 0) {
+      errors.push(
+        `waiver "${name}" names unknown lane(s) ${unknownLanes.join(", ")} in ` +
+          `"expectedLanes" (known lanes: ${RENDERER_LANES.join(", ")})`,
+      );
+      continue;
+    }
+    waivers[name] = {
+      reason: value.reason.trim(),
+      files: value.files,
+      expectedLanes: value.expectedLanes,
+    };
   }
   return { waivers, errors };
 }
 
+const sameSet = (a, b) => {
+  const left = [...a].sort();
+  const right = [...b].sort();
+  return (
+    left.length === right.length && left.every((entry, i) => entry === right[i])
+  );
+};
+
 /**
- * Fails when a set's renderer lanes changed unevenly. Waived sets are
- * reported rather than failed; a file-scoped waiver only excuses the files it
- * names, so any other uneven change in the same set still fails.
+ * Fails when a set's renderer lanes changed unevenly. A waiver excuses the
+ * divergence only when BOTH of its records still describe reality: every
+ * diverging file is named in `files`, and the lanes that changed are exactly
+ * `expectedLanes`. Anything else — an extra diverging file, a different lane
+ * pattern — fails, so a waiver cannot outlive the divergence it documented.
  */
 export function checkLaneParity(sets, changedFiles, waivers = {}) {
   const changed = new Set(changedFiles);
@@ -418,37 +499,73 @@ export function checkLaneParity(sets, changedFiles, waivers = {}) {
       continue;
     }
 
-    if (!waiver.files) {
-      waived.push({
+    if (!Array.isArray(waiver.files) || waiver.files.length === 0) {
+      failures.push({
         set: set.name,
-        reason: waiver.reason,
-        files: null,
         changed: raw.changedLanes,
         unchanged: raw.unchangedLanes,
+        changedFiles: touchedFiles(raw, null),
+        hint: set.hint,
+        note:
+          "the waiver for this set is not scoped to specific files; unscoped " +
+          'whole-set waivers are rejected — add a "files" list',
       });
       continue;
     }
 
-    const scoped = classify(new Set(waiver.files));
-    if (!isUneven(scoped)) {
-      waived.push({
+    if (!Array.isArray(waiver.expectedLanes) || waiver.expectedLanes.length === 0) {
+      failures.push({
         set: set.name,
-        reason: waiver.reason,
-        files: waiver.files,
         changed: raw.changedLanes,
         unchanged: raw.unchangedLanes,
+        changedFiles: touchedFiles(raw, null),
+        hint: set.hint,
+        note: 'the waiver for this set records no "expectedLanes"',
       });
       continue;
     }
-    failures.push({
+
+    if (!sameSet(waiver.expectedLanes, raw.changedLanes)) {
+      failures.push({
+        set: set.name,
+        changed: raw.changedLanes,
+        unchanged: raw.unchangedLanes,
+        changedFiles: touchedFiles(raw, null),
+        hint: set.hint,
+        note:
+          `the waiver records changed lane(s) ${[...waiver.expectedLanes].sort().join(", ")} ` +
+          `but this change touched ${[...raw.changedLanes].sort().join(", ")}; ` +
+          "a waiver only excuses the exact divergence it documented",
+      });
+      continue;
+    }
+
+    const waivedFiles = new Set(waiver.files);
+    const uncovered = touchedFiles(raw, null).filter(
+      (file) => !waivedFiles.has(file),
+    );
+    if (uncovered.length > 0) {
+      const scoped = classify(waivedFiles);
+      failures.push({
+        set: set.name,
+        changed: scoped.changedLanes,
+        unchanged: scoped.unchangedLanes,
+        changedFiles: uncovered,
+        hint: set.hint,
+        note:
+          "a file-scoped waiver exists for this set but does not name these " +
+          "diverging files",
+      });
+      continue;
+    }
+
+    waived.push({
       set: set.name,
-      changed: scoped.changedLanes,
-      unchanged: scoped.unchangedLanes,
-      changedFiles: touchedFiles(scoped, new Set(waiver.files)),
-      hint: set.hint,
-      note:
-        "a file-scoped waiver exists for this set but does not cover these " +
-        "changes",
+      reason: waiver.reason,
+      files: waiver.files,
+      expectedLanes: waiver.expectedLanes,
+      changed: raw.changedLanes,
+      unchanged: raw.unchangedLanes,
     });
   }
 
@@ -531,14 +648,29 @@ export function run(argv = [], options = {}) {
   }
 
   const base = resolveBaseRef(root, argv, env);
-  if (base.skip) {
-    log(`MIRROR LANE CHECK SKIPPED: ${base.reason}`);
+  if (base.error) {
+    failed = true;
+    err(`Mirror check failed — the lane check could not run: ${base.error}\n`);
+    err(
+      "The lane check is not allowed to disable itself. Pass a resolvable " +
+        "`--base <ref>`, or drop `--require-base` only for local runs where " +
+        "skipping is acceptable.\n",
+    );
+  } else if (base.skip) {
+    log(
+      "!!! MIRROR LANE CHECK SKIPPED — RENDERER LANE PARITY IS NOT ENFORCED " +
+        `IN THIS RUN !!!\n  ${base.reason}\n  This skip is for local runs ` +
+        "only; CI runs `pnpm check:mirrors --require-base`, which turns it " +
+        "into a failure.",
+    );
   } else {
     const changedFiles = changedFilesSince(root, base.base);
     if (changedFiles === null) {
-      log(
-        "MIRROR LANE CHECK SKIPPED: `git diff` against " +
-          `${base.source} failed in this checkout.`,
+      failed = true;
+      err(
+        "Mirror check failed — `git diff` against " +
+          `${base.source} failed in this checkout, so lane parity could not ` +
+          "be evaluated.\n",
       );
     } else {
       const { failures, waived } = checkLaneParity(sets, changedFiles, waivers);
@@ -547,7 +679,7 @@ export function run(argv = [], options = {}) {
           `MIRROR WAIVER APPLIED: set "${entry.set}" — changed lane(s) ` +
             `${entry.changed.join(", ")}, unchanged lane(s) ` +
             `${entry.unchanged.join(", ")}` +
-            (entry.files ? ` (scoped to ${entry.files.join(", ")})` : "") +
+            ` (scoped to ${entry.files.join(", ")})` +
             `\n  reason: ${entry.reason}`,
         );
       }
@@ -568,7 +700,9 @@ export function run(argv = [], options = {}) {
         }
         err(
           "Mirror the change into every renderer lane, or declare the " +
-            "divergence in .github/mirror-waivers.json with a reason " +
+            "divergence in .github/mirror-waivers.json as " +
+            '{ "reason": "...", "files": [the exact diverging files], ' +
+            '"expectedLanes": [the lanes that changed] } ' +
             "(re-pinning mirror-lock.json does NOT satisfy this check).",
         );
       }
