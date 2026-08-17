@@ -4,21 +4,42 @@ import { buildDom } from "../src/writer.js";
 import { crc32 } from "../src/crc32.js";
 import { materializeCss } from "../src/resources.js";
 import { cssScopeAttribute } from "../src/css.js";
+import { decodeJson, encodeCanonicalJson } from "../src/canonical-json.js";
 import { validateDocument } from "../src/schema.js";
 import {
   errorCode,
+  syntheticAdapterTechniquesInput,
+  syntheticAspectProfileTimelinesInput,
+  syntheticCompositorTimingInput,
+  syntheticDynamicViewportProfilesInput,
   syntheticAnimationWithoutEffectsInput,
   syntheticEffectsWithoutPlaybackInput,
   syntheticEmptySurfaceInput,
+  syntheticExactTimingInput,
+  syntheticExecutableInteractionInput,
   syntheticInput,
+  syntheticOrbitInput,
+  syntheticPagedVariantsInput,
+  syntheticPagedPlaybackInput,
   syntheticPlaybackWithoutSurfaceInput,
   syntheticPolycssInput,
+  syntheticProfileTimelinesInput,
+  syntheticResponsivePresentationInput,
   syntheticStaticPresentationInput,
   syntheticTwoFramePolycssInput,
+  syntheticViewportProfilesInput,
 } from "./helpers.js";
 
 function copy(value) {
   return globalThis.structuredClone(value);
+}
+
+function packedIntegers(values, width) {
+  const bytes = new Uint8Array(values.length * width);
+  for (let index = 0; index < values.length; index += 1) {
+    for (let byte = 0; byte < width; byte += 1) bytes[index * width + byte] = Math.floor(values[index] / 2 ** (byte * 8)) & 255;
+  }
+  return Buffer.from(bytes).toString("base64");
 }
 
 function insertPngChunk(bytes, type, payload) {
@@ -99,6 +120,350 @@ test("accepts static presentation, animation without effects, and leafless playb
     syntheticAnimationWithoutEffectsInput(),
     syntheticPlaybackWithoutSurfaceInput(),
   ])) assert.doesNotThrow(() => buildDom(input));
+});
+
+test("validates closed paged variant coverage, residency, and page payloads", async () => {
+  for (const encoding of ["identity", "gzip"]) {
+    const input = await syntheticPagedVariantsInput(encoding);
+    assert.doesNotThrow(() => buildDom(input));
+  }
+  const base = await syntheticPagedVariantsInput();
+  const packet = base.state.channels.find((channel) => channel.codec === "polycss-paged-variants@0").data.packet;
+  const cases = [
+    ["gap", (input) => { input.state.channels.find((channel) => channel.codec === "polycss-paged-variants@0").data.packet.pages[1].startFrame += 1; }, "STATE_PAGE_COVERAGE_MISMATCH"],
+    ["overlap", (input) => { input.state.channels.find((channel) => channel.codec === "polycss-paged-variants@0").data.packet.pages[1].startFrame -= 1; }, "STATE_PAGE_COVERAGE_MISMATCH"],
+    ["duplicate", (input) => { const value = input.state.channels.find((channel) => channel.codec === "polycss-paged-variants@0").data.packet.pages; value[1].resource = value[0].resource; }, "INVALID_PAGED_VARIANT_STATE"],
+    ["lookahead", (input) => { input.state.channels.find((channel) => channel.codec === "polycss-paged-variants@0").data.packet.lookaheadPages = 5; }, "STATE_PAGE_RESIDENCY_LIMIT"],
+    ["resident", (input) => { input.state.channels.find((channel) => channel.codec === "polycss-paged-variants@0").data.packet.maxResidentPages = 1; }, "STATE_PAGE_RESIDENCY_LIMIT"],
+    ["disjoint playback and interaction reserves", (input) => { input.state.channels.find((channel) => channel.codec === "polycss-paged-variants@0").data.packet.maxResidentPages = 3; }, "STATE_PAGE_RESIDENCY_LIMIT"],
+    ["unsafe frame count", (input) => { input.state.channels.find((channel) => channel.codec === "polycss-paged-variants@0").data.packet.frameCount = Number.MAX_SAFE_INTEGER; }, "STATE_PAGE_COVERAGE_MISMATCH"],
+  ];
+  for (const [label, mutate, code] of cases) {
+    const input = copy(base);
+    mutate(input);
+    assert.throws(() => buildDom(input), errorCode(code), label);
+  }
+  assert.equal(packet.pages.length, 4);
+
+  const wrongCodec = copy(base);
+  wrongCodec.resourceInputs.find((resource) => resource.kind === "state-page").codec = "custom@0";
+  assert.throws(() => buildDom(wrongCodec), errorCode("INVALID_STATE_PAGE_RESOURCE"));
+  const noncanonical = copy(base);
+  const firstPage = noncanonical.resourceInputs.find((resource) => resource.kind === "state-page");
+  firstPage.bytes = Uint8Array.from([...firstPage.bytes, 0x20]);
+  assert.throws(() => buildDom(noncanonical), errorCode("NONCANONICAL_STATE_PAGE"));
+});
+
+test("validates closed paged playback pages, canonical transforms, and exclusive ownership", async () => {
+  for (const encoding of ["identity", "gzip"]) {
+    const input = await syntheticPagedPlaybackInput({ encoding, variants: true });
+    assert.doesNotThrow(() => buildDom(input));
+  }
+
+  const base = await syntheticPagedPlaybackInput();
+  const explicitIdentity = copy(base);
+  const identityPage = explicitIdentity.resourceInputs.find((resource) => resource.id === "playback-page-1");
+  const identityPayload = decodeJson(identityPage.bytes);
+  const identityIndex = identityPayload.transforms.findIndex((transform) => transform === null);
+  assert.notEqual(identityIndex, -1);
+  identityPayload.transforms[identityIndex] = "matrix3d(1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1)";
+  identityPage.bytes = encodeCanonicalJson(identityPayload);
+  assert.throws(() => buildDom(explicitIdentity), errorCode("INVALID_STATE_PAGE"));
+
+  const fraction = copy(base);
+  const fractionalTransform = "matrix3d(0.333333,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1)";
+  const fractionPacket = fraction.state.channels.find((channel) => channel.codec === "polycss-paged-playback@0").data.packet;
+  for (const descriptor of fractionPacket.pages) {
+    const resource = fraction.resourceInputs.find((entry) => entry.id === descriptor.resource);
+    const payload = decodeJson(resource.bytes);
+    const index = payload.keyframe.modelTransform;
+    assert.equal(payload.transforms[index], null);
+    payload.transforms[index] = fractionalTransform;
+    descriptor.materializedByteLength += fractionalTransform.length * 2;
+    resource.bytes = encodeCanonicalJson(payload);
+  }
+  const fractionBinding = fraction.bindings.channels.find((channel) => channel.interpreter === "polycss-paged-playback@0");
+  fraction.tree.nodes.find((node) => node.id === fractionBinding.targets.model).styles.transform = `${fractionBinding.parameters.baseSceneTransform} ${fractionalTransform}`;
+  assert.doesNotThrow(() => buildDom(fraction));
+  const initialMismatch = copy(fraction);
+  initialMismatch.tree.nodes.find((node) => node.id === fractionBinding.targets.model).styles.transform = fractionBinding.parameters.baseSceneTransform;
+  assert.throws(() => buildDom(initialMismatch), errorCode("STATE_PAGE_INITIAL_MISMATCH"));
+
+  const overprecision = copy(fraction);
+  const precisionPage = overprecision.resourceInputs.find((resource) => resource.id === "playback-page-1");
+  const precisionPayload = decodeJson(precisionPage.bytes);
+  const transformIndex = precisionPayload.transforms.findIndex((transform) => transform === fractionalTransform);
+  assert.notEqual(transformIndex, -1);
+  precisionPayload.transforms[transformIndex] = precisionPayload.transforms[transformIndex].replace("0.333333", "0.3333331");
+  precisionPage.bytes = encodeCanonicalJson(precisionPayload);
+  assert.throws(() => buildDom(overprecision), errorCode("INVALID_STATE_PAGE"));
+
+  const inline = await syntheticExecutableInteractionInput();
+  const mixed = copy(base);
+  const inlineState = inline.state.channels.find((channel) => channel.codec === "polycss-playback-packed@0");
+  const inlineBinding = inline.bindings.channels.find((channel) => channel.interpreter === "polycss-playback@0");
+  inlineState.id = "inline-playback";
+  inlineBinding.id = "inline-playback";
+  inlineBinding.state = "inline-playback";
+  mixed.state.channels.push(inlineState);
+  mixed.bindings.channels.push(inlineBinding);
+  mixed.state.channels.sort((left, right) => left.id.localeCompare(right.id));
+  mixed.bindings.channels.sort((left, right) => left.id.localeCompare(right.id));
+  assert.throws(() => buildDom(mixed), errorCode("TARGET_OWNERSHIP_CONFLICT"));
+
+  const compositorSource = await syntheticCompositorTimingInput();
+  const compositor = copy(base);
+  compositor.state.channels.push(compositorSource.state.channels.find((channel) => channel.codec === "polycss-compositor-timing-prepared@0"));
+  compositor.bindings.channels.push(compositorSource.bindings.channels.find((channel) => channel.interpreter === "polycss-compositor-timing@0"));
+  compositor.state.channels.sort((left, right) => left.id.localeCompare(right.id));
+  compositor.bindings.channels.sort((left, right) => left.id.localeCompare(right.id));
+  assert.throws(() => buildDom(compositor), errorCode("TARGET_OWNERSHIP_CONFLICT"));
+
+  const presentationOverlap = copy(base);
+  const pagedBinding = presentationOverlap.bindings.channels.find((channel) => channel.interpreter === "polycss-paged-playback@0");
+  presentationOverlap.bindings.channels.find((channel) => channel.interpreter === "static-presentation@0").targets.camera = pagedBinding.targets.model;
+  assert.throws(() => buildDom(presentationOverlap), errorCode("TARGET_OWNERSHIP_CONFLICT"));
+});
+
+test("validates closed responsive root presentation profiles", async () => {
+  const base = await syntheticResponsivePresentationInput();
+  assert.doesNotThrow(() => buildDom(base));
+
+  const cover = copy(base);
+  const coverProfiles = [{ id: "cover", fit: "cover", quarterTurns: 0, bounds: [0, 0, 320, 240], safeInset: 0, bias: [0, 0] }];
+  cover.state.channels[0].data.packet.camera.profiles = copy(coverProfiles);
+  cover.bindings.channels[0].parameters.profiles = copy(coverProfiles);
+  assert.doesNotThrow(() => buildDom(cover));
+
+  const aspect = await syntheticAspectProfileTimelinesInput();
+  assert.doesNotThrow(() => buildDom(aspect));
+
+  for (const [label, mutate, code] of [
+    ["profile mismatch", (input) => { input.state.channels[0].data.packet.camera.profiles[0].bias[1] = 0; }, "INVALID_PRESENTATION_STATE"],
+    ["bounded final profile", (input) => { input.bindings.channels[0].parameters.profiles[1].maxViewportWidth = 900; }, "INVALID_PRESENTATION_BINDING"],
+    ["unbounded nonfinal profile", (input) => { delete input.bindings.channels[0].parameters.profiles[0].maxViewportWidth; }, "INVALID_PRESENTATION_BINDING"],
+    ["unsupported capped fit", (input) => { input.bindings.channels[0].parameters.profiles[0].fit = "capped-contain"; }, "INVALID_PRESENTATION_BINDING"],
+    ["invalid prepared bounds", (input) => { input.bindings.channels[0].parameters.profiles[0].bounds = [0, 0, 0, 1]; }, "INVALID_PRESENTATION_BINDING"],
+    ["invalid quarter turn", (input) => { input.bindings.channels[0].parameters.profiles[0].quarterTurns = 4; }, "INVALID_PRESENTATION_BINDING"],
+    ["profiles without selector", (input) => { delete input.bindings.channels[0].parameters.profileSelection; }, "INVALID_PRESENTATION_BINDING"],
+    ["selector without profiles", (input) => { delete input.bindings.channels[0].parameters.profiles; }, "INVALID_PRESENTATION_BINDING"],
+    ["null profiles", (input) => { input.bindings.channels[0].parameters.profiles = null; }, "INVALID_PRESENTATION_BINDING"],
+    ["null selector", (input) => { input.bindings.channels[0].parameters.profileSelection = null; }, "INVALID_PRESENTATION_BINDING"],
+    ["unsupported selector", (input) => { input.bindings.channels[0].parameters.profileSelection = "media-query"; }, "INVALID_PRESENTATION_BINDING"],
+  ]) {
+    const invalid = copy(base);
+    mutate(invalid);
+    assert.throws(() => buildDom(invalid), errorCode(code), label);
+  }
+
+
+  for (const [label, mutate] of [
+    ["bounded landscape row", (input) => { input.bindings.channels.find((channel) => channel.id === "presentation").parameters.profiles[0].maxViewportWidth = 519; }],
+    ["unbounded nonfinal portrait row", (input) => { delete input.bindings.channels.find((channel) => channel.id === "presentation").parameters.profiles[1].maxViewportWidth; }],
+    ["non-increasing portrait maxima", (input) => { input.bindings.channels.find((channel) => channel.id === "presentation").parameters.profiles[2].maxViewportWidth = 500; }],
+    ["bounded final portrait row", (input) => { input.bindings.channels.find((channel) => channel.id === "presentation").parameters.profiles.at(-1).maxViewportWidth = 1000; }],
+    ["single-row landscape-first bank", (input) => { const parameters = input.bindings.channels.find((channel) => channel.id === "presentation").parameters; parameters.profiles = [parameters.profiles[0]]; }],
+  ]) {
+    const invalid = copy(aspect);
+    mutate(invalid);
+    assert.throws(() => buildDom(invalid), errorCode("INVALID_PRESENTATION_BINDING"), label);
+  }
+
+  const mismatchedSelector = copy(base);
+  const camera = mismatchedSelector.state.channels[0].data.packet.camera;
+  camera.profileSelection = "landscape-first-portrait-width";
+  camera.profiles = copy(aspect.state.channels.find((channel) => channel.id === "presentation").data.packet.camera.profiles);
+  assert.throws(() => buildDom(mismatchedSelector), errorCode("INVALID_PRESENTATION_STATE"), "camera and binding selectors differ");
+});
+
+test("validates bounded playback timelines selected by static-presentation profile", async () => {
+  const base = await syntheticProfileTimelinesInput();
+  assert.doesNotThrow(() => buildDom(base));
+  assert.throws(() => buildDom(copy(base), { limits: { maxTimelineTicks: 9 } }), errorCode("TIMELINE_LIMIT"), "aggregate baseline and override budget");
+
+  const cases = [
+    ["unknown field", (input) => { input.state.channels.find((channel) => channel.id === "playback").data.packet.profileTimelines[0].tickRateHz = 24; }, "INVALID_PLAYBACK_STATE"],
+    ["empty bank", (input) => { input.state.channels.find((channel) => channel.id === "playback").data.packet.profileTimelines = []; }, "INVALID_PLAYBACK_STATE"],
+    ["duplicate id", (input) => { const rows = input.state.channels.find((channel) => channel.id === "playback").data.packet.profileTimelines; rows.push(copy(rows[0])); }, "INVALID_PLAYBACK_STATE"],
+    ["unknown presentation id", (input) => { input.state.channels.find((channel) => channel.id === "playback").data.packet.profileTimelines[0].profileId = "phone"; }, "INVALID_PLAYBACK_STATE"],
+    ["initial frame mismatch", (input) => { input.state.channels.find((channel) => channel.id === "playback").data.packet.profileTimelines[0].frames[0] = 2; }, "TIMELINE_LIMIT"],
+    ["excessive source-frame span", (input) => {
+      const playback = input.state.channels.find((channel) => channel.id === "playback").data.packet;
+      const parameters = input.bindings.channels.find((channel) => channel.interpreter === "polycss-playback@0").parameters;
+      parameters.frameCount = 20;
+      playback.profileTimelines[0].frames = [1, 10];
+    }, "TIMELINE_LIMIT"],
+    ["presentation order mismatch", (input) => {
+      input.state.channels.find((channel) => channel.id === "playback").data.packet.profileTimelines = [
+        { profileId: "desktop", introTicks: 0, loopTicks: 2, frames: [1, 2] },
+        { profileId: "mobile", introTicks: 0, loopTicks: 2, frames: [1, 3] },
+      ];
+    }, "INVALID_PLAYBACK_STATE"],
+    ["missing presentation profile bank", (input) => {
+      delete input.state.channels.find((channel) => channel.id === "presentation").data.packet.camera.profiles;
+      delete input.state.channels.find((channel) => channel.id === "presentation").data.packet.camera.profileSelection;
+      delete input.bindings.channels.find((channel) => channel.id === "presentation").parameters.profiles;
+      delete input.bindings.channels.find((channel) => channel.id === "presentation").parameters.profileSelection;
+    }, "MISSING_POLYCSS_CHANNEL"],
+    ["missing presentation", (input) => {
+      input.state.channels = input.state.channels.filter((channel) => channel.id !== "presentation");
+      input.bindings.channels = input.bindings.channels.filter((channel) => channel.id !== "presentation");
+      input.meta.conformance.executable = input.meta.conformance.executable.filter((role) => role !== "presentation");
+    }, "MISSING_POLYCSS_CHANNEL"],
+  ];
+  for (const [label, mutate, code] of cases) {
+    const invalid = copy(base);
+    mutate(invalid);
+    assert.throws(() => buildDom(invalid), errorCode(code), label);
+  }
+});
+
+test("validates bounded same-topology viewport profile banks", async () => {
+  const base = await syntheticViewportProfilesInput();
+  assert.doesNotThrow(() => buildDom(base));
+  const validCovering = await syntheticViewportProfilesInput("smallest-covering");
+  assert.doesNotThrow(() => buildDom(validCovering));
+
+  const cases = [
+    ["unsupported selection", (input) => { input.state.channels.find((channel) => channel.id === "viewport-profiles").data.packet.selection.mode = "media-query"; }, "INVALID_VIEWPORT_PROFILE_STATE"],
+    ["target mismatch", (input) => { input.bindings.channels.find((channel) => channel.id === "viewport-profiles").targets.leaves.reverse(); }, "TARGET_CARDINALITY_MISMATCH"],
+    ["bad matrix", (input) => { input.state.channels.find((channel) => channel.id === "viewport-profiles").data.packet.transforms[0].pop(); }, "INVALID_VIEWPORT_PROFILE_STATE"],
+    ["truncated transforms", (input) => { input.state.channels.find((channel) => channel.id === "viewport-profiles").data.packet.profiles[0].transformIndicesBase64 = packedIntegers([0], 2); }, "STATE_COLUMN_MISMATCH"],
+    ["nonzero unused visibility bits", (input) => { input.state.channels.find((channel) => channel.id === "viewport-profiles").data.packet.profiles[0].visibleBitsBase64 = Buffer.from([0x82]).toString("base64"); }, "INVALID_VIEWPORT_PROFILE_STATE"],
+    ["presentation profile mismatch", (input) => { input.state.channels.find((channel) => channel.id === "viewport-profiles").data.packet.profiles[0].id = "phone"; }, "INVALID_VIEWPORT_PROFILE_STATE"],
+    ["unreferenced transform", (input) => { input.state.channels.find((channel) => channel.id === "viewport-profiles").data.packet.profiles[0].transformIndicesBase64 = packedIntegers([0xffff, 0xffff], 2); }, "INVALID_VIEWPORT_PROFILE_STATE"],
+  ];
+  for (const [label, mutate, code] of cases) {
+    const invalid = copy(base);
+    mutate(invalid);
+    assert.throws(() => buildDom(invalid), errorCode(code), label);
+  }
+
+  const covering = await syntheticViewportProfilesInput("smallest-covering");
+  covering.state.channels.find((channel) => channel.id === "viewport-profiles").data.packet.profiles.reverse();
+  assert.throws(() => buildDom(covering), errorCode("INVALID_VIEWPORT_PROFILE_STATE"), "noncanonical smallest-covering order");
+
+  const missingPresentation = copy(base);
+  missingPresentation.state.channels = missingPresentation.state.channels.filter((channel) => channel.id !== "presentation");
+  missingPresentation.bindings.channels = missingPresentation.bindings.channels.filter((channel) => channel.id !== "presentation");
+  missingPresentation.meta.conformance.executable = missingPresentation.meta.conformance.executable.filter((role) => role !== "presentation");
+  assert.throws(() => buildDom(missingPresentation), errorCode("MISSING_POLYCSS_CHANNEL"));
+});
+
+test("validates sparse profile-frame visibility and closed responsive affine rows", async () => {
+  const base = await syntheticDynamicViewportProfilesInput();
+  assert.doesNotThrow(() => buildDom(base));
+  const cases = [
+    ["open visibility cycle", (profile) => {
+      profile.visibilityChanges.offsetsBase64 = packedIntegers([0, 0, 1, 1, 1, 1, 1, 1, 1], 4);
+      profile.visibilityChanges.leafIndicesBase64 = packedIntegers([0], 2);
+    }, "INVALID_VIEWPORT_PROFILE_STATE"],
+    ["unsorted visibility row", (profile) => {
+      profile.visibilityChanges.offsetsBase64 = packedIntegers([0, 0, 2, 2, 2, 2, 2, 2, 4], 4);
+      profile.visibilityChanges.leafIndicesBase64 = packedIntegers([1, 0, 1, 0], 2);
+    }, "INVALID_VIEWPORT_PROFILE_STATE"],
+    ["zero affine scale", (_profile, desktop) => { desktop.responsiveAffine.scale.multiplier = 0; }, "INVALID_VIEWPORT_PROFILE_STATE"],
+    ["truncated affine coefficients", (_profile, desktop) => { desktop.responsiveAffine.coefficientsBase64 = ""; }, "INVALID_VIEWPORT_PROFILE_STATE"],
+    ["empty affine target set", (_profile, desktop) => { desktop.responsiveAffine.presentBitsBase64 = Buffer.from([0]).toString("base64"); }, "INVALID_VIEWPORT_PROFILE_STATE"],
+  ];
+  for (const [label, mutate, code] of cases) {
+    const invalid = copy(base);
+    const profiles = invalid.state.channels.find((channel) => channel.id === "viewport-profiles").data.packet.profiles;
+    mutate(profiles[0], profiles[1]);
+    assert.throws(() => buildDom(invalid), errorCode(code), label);
+  }
+});
+
+test("validates fixed typed orbit input and closed cyclic surface rows", async () => {
+  const base = await syntheticOrbitInput();
+  assert.doesNotThrow(() => buildDom(base));
+  assert.throws(() => buildDom(copy(base), { limits: { maxVisibilityCells: 119 } }), errorCode("ORBIT_STATE_LIMIT"));
+  const cases = [
+    ["boolean packet version", (input) => { input.state.channels[0].data.packet.version = false; }, "INVALID_ORBIT_STATE"],
+    ["input default mismatch", (input) => { input.bindings.inputs.find((definition) => definition.id === "orbit.pitch").default = 1; }, "INVALID_ORBIT_BINDING"],
+    ["unbounded pitch", (input) => { input.state.channels[0].data.packet.ranges.pitch[0] = -91; }, "INVALID_ORBIT_STATE"],
+    ["model TREE mismatch", (input) => { input.tree.nodes.find((node) => node.id === "synthetic-polycss/model").styles.transform = "none"; }, "ORBIT_TREE_MISMATCH"],
+    ["leaf TREE mismatch", (input) => { input.tree.nodes.find((node) => node.id === "synthetic-polycss/leaf").styles.backgroundPosition = "0 -16px"; }, "ORBIT_TREE_MISMATCH"],
+    ["truncated initial row", (input) => { input.state.channels[0].data.packet.surface.initialPositionIndicesBase64 = ""; }, "STATE_COLUMN_MISMATCH"],
+    ["forward row out of range", (input) => { input.state.channels[0].data.packet.surface.transitions.forwardPositionIndicesBase64 = packedIntegers(new Array(120).fill(120), 2); }, "STATE_COLUMN_MISMATCH"],
+    ["backward contradiction", (input) => {
+      const packet = input.state.channels[0].data.packet.surface.transitions;
+      const values = Array.from({ length: 120 }, (_, state) => 119 - state);
+      packet.backwardPositionIndicesBase64 = packedIntegers(values, 2);
+    }, "INVALID_ORBIT_STATE"],
+  ];
+  for (const [label, mutate, code] of cases) {
+    const invalid = copy(base);
+    mutate(invalid);
+    assert.throws(() => buildDom(invalid), errorCode(code), label);
+  }
+});
+
+test("validates closed linear compositor cycles and prepared transform transitions", async () => {
+  const base = await syntheticCompositorTimingInput();
+  assert.doesNotThrow(() => buildDom(base));
+  const cases = [
+    ["easing", (input) => { input.state.channels.find((channel) => channel.codec === "polycss-compositor-timing-prepared@0").data.packet.timing = "ease"; }, "INVALID_COMPOSITOR_TIMING_STATE"],
+    ["open cycle", (input) => { input.state.channels.find((channel) => channel.codec === "polycss-compositor-timing-prepared@0").data.packet.targets[0].keyframes[2].transformIndex = 3; }, "INVALID_COMPOSITOR_TIMING_STATE"],
+    ["arbitrary keyframe CSS", (input) => { input.state.channels.find((channel) => channel.codec === "polycss-compositor-timing-prepared@0").data.packet.targets[0].keyframes[1].transform = "rotate(1deg)"; }, "INVALID_COMPOSITOR_TIMING_STATE"],
+    ["wrong owner", (input) => { input.bindings.channels.find((channel) => channel.interpreter === "polycss-compositor-timing@0").targets.nodes[1] = "synthetic/eye-leaf"; }, "INVALID_COMPOSITOR_TIMING_BINDING"],
+    ["excess transition", (input) => { input.state.channels.find((channel) => channel.codec === "polycss-compositor-timing-prepared@0").data.packet.targets[1].durationTicks = 9; }, "INVALID_COMPOSITOR_TIMING_STATE"],
+    ["model race", (input) => { input.state.channels.find((channel) => channel.codec === "polycss-playback-packed@0").data.packet.frameRows[1][2] = 0; }, "TARGET_OWNERSHIP_CONFLICT"],
+  ];
+  for (const [label, mutate, code] of cases) {
+    const input = copy(base);
+    mutate(input);
+    assert.throws(() => buildDom(input), errorCode(code), label);
+  }
+});
+
+test("validates exact rational cadence, explicit deadlines, and closed catch-up policies", async () => {
+  const exact = await syntheticExactTimingInput();
+  assert.doesNotThrow(() => buildDom(exact));
+  const explicit = await syntheticExactTimingInput({ catchUpPolicy: "elapsed", deadlineMicros: [0, 20_000, 50_000] });
+  assert.doesNotThrow(() => buildDom(explicit));
+  const cases = [
+    ["missing cadence", (input) => { delete input.bindings.channels.find((channel) => channel.interpreter === "polycss-playback@0").parameters.tickIntervalUs; }, "INVALID_PLAYBACK_BINDING"],
+    ["duplicate cadence", (input) => { input.bindings.channels.find((channel) => channel.interpreter === "polycss-playback@0").parameters.tickRateHz = 30; }, "INVALID_PLAYBACK_BINDING"],
+    ["unreduced cadence", (input) => { input.bindings.channels.find((channel) => channel.interpreter === "polycss-playback@0").parameters.tickIntervalUs = [60_000, 2]; }, "INVALID_PLAYBACK_BINDING"],
+    ["unknown catch-up", (input) => { input.bindings.channels.find((channel) => channel.interpreter === "polycss-playback@0").parameters.catchUpPolicy = "all"; }, "INVALID_PLAYBACK_BINDING"],
+    ["truncated deadlines", (input) => { input.state.channels.find((channel) => channel.codec === "polycss-playback-packed@0").data.packet.timeline.deadlineMicros.pop(); }, "TIMELINE_LIMIT"],
+    ["unordered deadlines", (input) => { input.state.channels.find((channel) => channel.codec === "polycss-playback-packed@0").data.packet.timeline.deadlineMicros[2] = 20_000; }, "TIMELINE_LIMIT"],
+  ];
+  for (const [label, mutate, code] of cases) {
+    const input = copy(explicit);
+    mutate(input);
+    assert.throws(() => buildDom(input), errorCode(code), label);
+  }
+  const historyDependentEffects = await syntheticTwoFramePolycssInput();
+  historyDependentEffects.bindings.channels.find((channel) => channel.interpreter === "polycss-playback@0").parameters.catchUpPolicy = "elapsed";
+  assert.throws(() => buildDom(historyDependentEffects), errorCode("INVALID_EFFECTS_BINDING"));
+
+  const interaction = await syntheticExecutableInteractionInput();
+  const interactionPlayback = interaction.bindings.channels.find((channel) => channel.interpreter === "polycss-playback@0").parameters;
+  const interactionTiming = interaction.bindings.channels.find((channel) => channel.interpreter === "polycss-pointer-grab@0").parameters;
+  delete interactionPlayback.tickRateHz;
+  delete interactionTiming.tickRateHz;
+  interactionPlayback.tickIntervalUs = [50_000, 3];
+  interactionPlayback.catchUpPolicy = "single-step";
+  interactionTiming.tickIntervalUs = [50_000, 3];
+  assert.doesNotThrow(() => buildDom(interaction));
+  interactionTiming.tickIntervalUs = [30_000, 1];
+  assert.throws(() => buildDom(interaction), errorCode("INVALID_INTERACTION_BINDING"));
+
+  const compositor = await syntheticCompositorTimingInput();
+  const compositorPlayback = compositor.bindings.channels.find((channel) => channel.interpreter === "polycss-playback@0").parameters;
+  const compositorTiming = compositor.bindings.channels.find((channel) => channel.interpreter === "polycss-compositor-timing@0").parameters;
+  const compositorInteraction = compositor.bindings.channels.find((channel) => channel.interpreter === "polycss-pointer-grab@0").parameters;
+  delete compositorPlayback.tickRateHz;
+  delete compositorTiming.tickRateHz;
+  delete compositorInteraction.tickRateHz;
+  compositorPlayback.tickIntervalUs = [30_000, 1];
+  compositorTiming.tickIntervalUs = [30_000, 1];
+  compositorInteraction.tickIntervalUs = [30_000, 1];
+  assert.doesNotThrow(() => buildDom(compositor));
+  compositor.state.channels.find((channel) => channel.codec === "polycss-playback-packed@0").data.packet.timeline.deadlineMicros = [0, 30_000, 60_000, 90_000, 120_000, 150_000, 180_000, 210_000, 240_000];
+  assert.throws(() => buildDom(compositor), errorCode("INVALID_COMPOSITOR_TIMING_BINDING"));
 });
 
 test("rejects missing playback tick rate and incomplete optional presentation groups", async () => {
@@ -289,6 +654,38 @@ test("META fails unknown required capabilities and safely ignores unknown option
   assert.throws(() => validateDocument(declaredOnly), errorCode("CONFORMANCE_CLOSURE_MISMATCH"));
 });
 
+test("META binds canonically ordered artifact identities while inert claims grant no authority", async () => {
+  const input = await syntheticInput();
+  input.meta.artifacts = [
+    { id: "config", role: "configuration", byteLength: 83, decodedByteLength: 83, digest: { algorithm: "sha256", value: "1".repeat(64) } },
+    { id: "model", role: "primary", byteLength: 4096, decodedByteLength: 8192, digest: { algorithm: "sha256", value: "2".repeat(64) } },
+  ];
+  input.meta.claims = [
+    { artifact: "config", kind: "license", value: "MIT" },
+    { artifact: "config", kind: "qualification", value: "source-verified" },
+    { artifact: "model", kind: "locator", value: "https://example.test/source/model.bin" },
+    { artifact: "model", kind: "qualification", value: "native-parity-unqualified" },
+    { artifact: "model", kind: "revision", value: "abc123" },
+  ];
+  assert.doesNotThrow(() => buildDom(input));
+  const cases = [
+    ["legacy singleton", (value) => { value.meta.sourceArtifact = value.meta.artifacts[0]; }, "INVALID_META"],
+    ["status mixed into identity", (value) => { value.meta.artifacts[0].status = "source-verified"; }, "INVALID_META"],
+    ["artifact order", (value) => { value.meta.artifacts.reverse(); }, "INVALID_META"],
+    ["duplicate claim", (value) => { value.meta.claims[3] = structuredClone(value.meta.claims[2]); }, "INVALID_META"],
+    ["unknown artifact", (value) => { value.meta.claims[0].artifact = "missing"; }, "INVALID_META"],
+    ["local POSIX path", (value) => { value.meta.claims[2].value = "/Users/example/model.bin"; }, "META_LOCAL_PATH"],
+    ["local Windows path", (value) => { value.meta.claims[2].value = "C:\\Users\\example\\model.bin"; }, "META_LOCAL_PATH"],
+    ["credentialed locator", (value) => { value.meta.claims[2].value = "https://user:pass@example.test/model.bin"; }, "INVALID_META"],
+    ["claim resource authority", (value) => { value.meta.claims[2].value = "dom-asset:checker"; }, "INVALID_META"],
+  ];
+  for (const [label, mutate, code] of cases) {
+    const value = copy(input);
+    mutate(value);
+    assert.throws(() => buildDom(value), errorCode(code), label);
+  }
+});
+
 test("rejects unknown tree fields and codec/interpreter mismatches", async () => {
   const input = await syntheticInput();
   const unknown = copy(input);
@@ -437,6 +834,78 @@ test("cross-checks initial surface bits and atlas state against retained TREE st
   assert.throws(() => buildDom(atlas), errorCode("SURFACE_TREE_MISMATCH"));
 });
 
+test("validates prepared two-axis surface addresses and sparse class variants", async () => {
+  const base = await syntheticAdapterTechniquesInput();
+  assert.doesNotThrow(() => buildDom(base));
+
+  const wrongSurfaceSink = copy(base);
+  wrongSurfaceSink.bindings.channels.find((channel) => channel.id === "surface").sinks = ["style.backgroundPositionY", "style.visibility"];
+  assert.throws(() => buildDom(wrongSurfaceSink), errorCode("INVALID_SURFACE_BINDING"));
+
+  const legacyPosition = copy(base);
+  legacyPosition.state.channels.find((channel) => channel.id === "surface").data.packet.surface.statePacking.backgroundPositions = ["0 0", "rgb(0 0 0)"];
+  assert.throws(() => buildDom(legacyPosition), errorCode("INVALID_SURFACE_STATE"));
+
+  for (const [label, mutate, code = "INVALID_SURFACE_STATE"] of [
+    ["missing packed indices", (packing) => { delete packing.positionIndicesBase64; }],
+    ["missing dictionary", (packing) => { delete packing.positionDictionary; }],
+    ["fractional coordinate", (packing) => { packing.positionDictionary[0][0] = -0.5; }],
+    ["out-of-range coordinate", (packing) => { packing.positionDictionary[1][0] = 0x80000000; }],
+    ["unsorted dictionary", (packing) => { packing.positionDictionary.reverse(); }],
+    ["duplicate dictionary", (packing) => { packing.positionDictionary[1] = [-16, -16]; }],
+    ["unreferenced dictionary row", (packing) => { packing.positionIndicesBase64 = packedIntegers([0, 0], 2); }],
+    ["out-of-range dictionary index", (packing) => { packing.positionIndicesBase64 = packedIntegers([1, 2], 2); }, "STATE_COLUMN_MISMATCH"],
+    ["truncated state indices", (packing) => { packing.positionIndicesBase64 = packedIntegers([1], 2); }, "STATE_COLUMN_MISMATCH"],
+  ]) {
+    const invalid = copy(base);
+    const packing = invalid.state.channels.find((channel) => channel.id === "surface").data.packet.surface.statePacking;
+    mutate(packing);
+    assert.throws(() => buildDom(invalid), errorCode(code), label);
+  }
+
+  const negativeZero = structuredClone(buildDom(base).document);
+  negativeZero.state.channels.find((channel) => channel.id === "surface").data.packet.surface.statePacking.positionDictionary[1][0] = -0;
+  assert.throws(() => validateDocument(negativeZero), errorCode("INVALID_SURFACE_STATE"), "negative zero coordinate");
+
+  const wrongInitialClass = copy(base);
+  wrongInitialClass.tree.nodes.find((node) => node.id === "synthetic-polycss/leaf").classes = ["leaf", "material-b"];
+  assert.throws(() => buildDom(wrongInitialClass), errorCode("VARIANT_TREE_MISMATCH"));
+
+  const noOpTransition = copy(base);
+  noOpTransition.state.channels.find((channel) => channel.id === "variants").data.packet.sequential.classIndicesBase64 = "AAAAAA==";
+  assert.throws(() => buildDom(noOpTransition), errorCode("INVALID_VARIANT_STATE"));
+
+  const declaredOutline = copy(base);
+  const outlinePacket = declaredOutline.state.channels.find((channel) => channel.id === "variants").data.packet;
+  outlinePacket.effects[0].styles.outlineColor = "#f88";
+  outlinePacket.effects[1].styles.outlineColor = "#8f8";
+  declaredOutline.bindings.channels.find((channel) => channel.id === "variants").sinks.push("style.outlineColor");
+  assert.doesNotThrow(() => buildDom(declaredOutline));
+
+  const stylesheetOverride = copy(base);
+  const stylesheet = stylesheetOverride.resourceInputs.find((resource) => resource.id === "model-css");
+  stylesheet.bytes = new TextEncoder().encode(`${new TextDecoder().decode(stylesheet.bytes)}\n[data-domformat-root="synthetic-polycss"] .material-a *{visibility:hidden}`);
+  assert.throws(() => buildDom(stylesheetOverride), errorCode("UNDECLARED_VARIANT_EFFECT"));
+
+  const important = copy(base);
+  const importantCss = important.resourceInputs.find((resource) => resource.id === "model-css");
+  importantCss.bytes = new TextEncoder().encode(`${new TextDecoder().decode(importantCss.bytes)}\n[data-domformat-root="synthetic-polycss"] .leaf{color:red !important}`);
+  assert.throws(() => buildDom(important), errorCode("UNSAFE_CSS_IMPORTANT"));
+
+  const undeclaredProperty = copy(base);
+  undeclaredProperty.state.channels.find((channel) => channel.id === "variants").data.packet.effects[0].styles.transform = "none";
+  assert.throws(() => buildDom(undeclaredProperty), errorCode("INVALID_VARIANT_EFFECT"));
+
+  const incompleteSinks = copy(base);
+  incompleteSinks.bindings.channels.find((channel) => channel.id === "variants").sinks = ["class.prepared"];
+  assert.throws(() => buildDom(incompleteSinks), errorCode("INVALID_VARIANT_BINDING"));
+
+  const escapedTarget = copy(base);
+  escapedTarget.bindings.channels.find((channel) => channel.id === "variants").targets.effectNodes = ["synthetic-polycss/camera"];
+  escapedTarget.state.channels.find((channel) => channel.id === "variants").data.packet.effects[0].targetIndex = 0;
+  assert.throws(() => buildDom(escapedTarget), errorCode("INVALID_VARIANT_EFFECT"));
+});
+
 test("surface transitions and jumps must reproduce the canonical target frame", async () => {
   const base = await syntheticTwoFramePolycssInput();
   assert.doesNotThrow(() => buildDom(base));
@@ -455,6 +924,25 @@ test("surface transitions and jumps must reproduce the canonical target frame", 
   }];
   packet.visibility.nonInteractiveJumps = [{ fromFrame: 1, toFrame: 2, faceIndicesBase64: "" }];
   assert.throws(() => buildDom(jump), errorCode("SURFACE_JUMP_MISMATCH"));
+});
+
+test("surface visibility validation retains only declared jump endpoints", async () => {
+  const base = await syntheticPagedPlaybackInput();
+  assert.doesNotThrow(() => buildDom(base, { limits: { maxVisibilityCells: 1 } }));
+
+  const jump = copy(base);
+  const packet = jump.state.channels.find((channel) => channel.id === "surface").data.packet;
+  packet.transitions.nonInteractiveJumps = [{
+    fromFrame: 1,
+    toFrame: 2,
+    faceIndicesBase64: "",
+    stateIndicesBase64: "",
+  }];
+  packet.visibility.nonInteractiveJumps = [{ fromFrame: 1, toFrame: 2, faceIndicesBase64: "" }];
+  assert.throws(
+    () => buildDom(jump, { limits: { maxVisibilityCells: 1 } }),
+    errorCode("VISIBILITY_ALLOCATION_LIMIT"),
+  );
 });
 
 test("closed inputs, binary32 publication, and target ownership fail before runtime", async () => {

@@ -18,8 +18,10 @@ const DEFAULT_LIMITS = Object.freeze({
   maxClassesPerNode: 32,
   maxStylesPerNode: 64,
   maxResources: 64,
+  maxStatePages: 512,
   maxResourceBytes: 8 * 1024 * 1024,
   maxAggregateResourceBytes: 16 * 1024 * 1024,
+  maxAggregateStatePageBytes: 32 * 1024 * 1024,
   maxImageWidth: 16_384,
   maxImageHeight: 16_384,
   maxImagePixels: 16 * 1024 * 1024,
@@ -34,6 +36,8 @@ const DEFAULT_LIMITS = Object.freeze({
   maxBindingChannels: 128,
   maxBindingInputs: 256,
   maxFrames: 2_000,
+  maxPagedFrames: 64_000,
+  maxStatePageFrames: 2_000,
   maxTimelineTicks: 200_000,
   maxPreparedTransforms: 500_000,
   maxPreparedStates: 500_000,
@@ -63,7 +67,18 @@ function byteView(value, label) {
   require(false, "INVALID_INPUT_BYTES", `${label} is not a byte buffer.`);
 }
 
-async function readResponse(response, maximum, label) {
+function deepFreezeJson(value) {
+  if (!value || typeof value !== "object" || Object.isFrozen(value)) return value;
+  for (const child of Object.values(value)) deepFreezeJson(child);
+  return Object.freeze(value);
+}
+
+function notAborted(signal, label) {
+  require(!signal?.aborted, "OPERATION_ABORTED", `${label} request was aborted.`);
+}
+
+async function readResponse(response, maximum, label, signal) {
+  notAborted(signal, label);
   require(response?.ok && response.type !== "opaqueredirect", "RESOURCE_FETCH_FAILED", `${label} response failed.`);
   const declared = response.headers.get("content-length");
   if (declared !== null) require(/^\d+$/u.test(declared) && Number(declared) <= maximum, "RESPONSE_SIZE_LIMIT", `${label} Content-Length exceeds its limit.`);
@@ -73,6 +88,7 @@ async function readResponse(response, maximum, label) {
   let total = 0;
   try {
     while (true) {
+      notAborted(signal, label);
       const { done, value } = await reader.read();
       if (done) break;
       total += value.byteLength;
@@ -80,6 +96,9 @@ async function readResponse(response, maximum, label) {
       chunks.push(value);
     }
   } finally {
+    if (signal?.aborted) {
+      try { await reader.cancel(); } catch {}
+    }
     try { reader.releaseLock(); } catch {}
   }
   const output = new Uint8Array(total);
@@ -88,11 +107,12 @@ async function readResponse(response, maximum, label) {
   return output;
 }
 
-function result(document, resourceBytes, transport) {
+function result(document, resourceBytes, loadStatePage, transport) {
   const inspection = new Map([...resourceBytes].map(([id, bytes]) => [id, bytes.slice()]));
   return Object.freeze({
     document,
     resourceBytes: inspection,
+    loadStatePage,
     transport: Object.freeze({
       encoding: transport.encoding,
       fileBytes: transport.fileBytes,
@@ -107,7 +127,8 @@ export async function readDomNVersion(input, options = {}) {
   const transport = await decodeTransport(byteView(input, "domformat package"), active);
   const envelope = parseJsonBytes(transport.bytes, active);
   const validated = validateNVersionDocument(envelope, active);
-  const resourceBytes = await verifyResources(envelope, validated.records, options, active);
+  deepFreezeJson(envelope);
+  const resources = await verifyResources(envelope, validated.records, options, active);
   const document = Object.freeze({
     meta: envelope.meta,
     tree: envelope.tree,
@@ -116,7 +137,7 @@ export async function readDomNVersion(input, options = {}) {
     bindings: envelope.bindings,
     resources: envelope.resources,
   });
-  return result(document, resourceBytes, transport);
+  return result(document, resources.resourceBytes, resources.loadStatePage, transport);
 }
 
 export async function readDomNVersionUrl(value, options = {}) {
@@ -126,14 +147,15 @@ export async function readDomNVersionUrl(value, options = {}) {
   const fetcher = options.fetch ?? globalThis.fetch;
   require(typeof fetcher === "function", "MISSING_BROWSER_API", "N-version URL reading requires fetch.");
   const response = await fetcher(url, { credentials: "omit", redirect: "error", signal: options.signal });
-  const modelBytes = await readResponse(response, active.maxFileBytes, "Model");
+  const modelBytes = await readResponse(response, active.maxFileBytes, "Model", options.signal);
   return readDomNVersion(modelBytes, {
     limits: active,
-    loadResource: async (record) => {
+    signal: options.signal,
+    loadResource: async (record, signal) => {
       const resourceUrl = new URL(record.path, url);
       require(resourceUrl.origin === url.origin && !resourceUrl.username && !resourceUrl.password, "UNSAFE_RESOURCE_URL", `Resource ${record.id} escapes the package origin.`);
-      const resourceResponse = await fetcher(resourceUrl, { credentials: "omit", redirect: "error", signal: options.signal });
-      return readResponse(resourceResponse, record.byteLength, `Resource ${record.id}`);
+      const resourceResponse = await fetcher(resourceUrl, { credentials: "omit", redirect: "error", signal: signal ?? options.signal });
+      return readResponse(resourceResponse, record.byteLength, `Resource ${record.id}`, signal ?? options.signal);
     },
   });
 }

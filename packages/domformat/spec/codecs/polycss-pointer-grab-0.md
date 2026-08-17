@@ -25,7 +25,9 @@ distinct open/closed cursor nodes. Shape and leaf arrays exactly equal
 playback's target arrays in the same order. Presentation source
 width/height exactly equal its source viewport. Sinks are
 exactly `style.transform` and `style.visibility`. Parameters are `initialFrame`
-and `tickRateHz: 30`, which MUST equal playback's closed `tickRateHz`.
+and exactly the same `tickRateHz` or reduced `tickIntervalUs` representation as
+playback. Pointer interaction rejects playback's collapsed `elapsed` catch-up;
+it needs each admitted logical input/spring tick.
 Pointer interaction requires playback, presentation with cursor targets, and
 effects; those companion contracts are not optional in an interactive closure.
 The three input types are closed to `boolean`, finite `float`, and nonnegative

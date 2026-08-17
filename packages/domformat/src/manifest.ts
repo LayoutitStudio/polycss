@@ -104,10 +104,13 @@ export async function loadManifest(
   for (const key of Object.keys(envelope)) {
     invariant(["meta", "tree", "cssBinding", "state", "bindings", "resources"].includes(key), "MANIFEST", `Manifest contains unsupported field ${key}.`);
   }
-  invariant(Array.isArray(envelope.resources) && envelope.resources.length <= limits.maxResources, "MANIFEST", "Manifest resources must be a bounded array.");
+  invariant(Array.isArray(envelope.resources) && envelope.resources.length <= limits.maxResources + limits.maxStatePages, "MANIFEST", "Manifest resources must fit the combined eager and state-page ceilings.");
+  const manifestStatePages = envelope.resources.filter((entry) => entry && typeof entry === "object" && !Array.isArray(entry) && (entry as Record<string, unknown>).kind === "state-page").length;
+  invariant(manifestStatePages <= limits.maxStatePages && envelope.resources.length - manifestStatePages <= limits.maxResources, "MANIFEST", "Manifest resources exceed the eager or state-page count limit.");
   const aggregateSections = { bytes: 0 };
   const resourceInputs: Array<Record<string, unknown> & { bytes: Uint8Array }> = [];
-  let aggregateBytes = 0;
+  let aggregateEagerBytes = 0;
+  let aggregateStatePageBytes = 0;
   for (const value of envelope.resources) {
     invariant(value && typeof value === "object" && !Array.isArray(value), "MANIFEST", "Manifest resource entries require a source path.");
     const resource = value as Record<string, unknown>;
@@ -115,15 +118,19 @@ export async function loadManifest(
     for (const key of Object.keys(resource)) {
       invariant(["id", "kind", "mediaType", "path", "source"].includes(key), "MANIFEST", `Manifest resource ${resource.id ?? "<missing>"} contains unsupported field ${key}.`);
     }
-    const remaining = limits.maxAggregateResourceBytes - aggregateBytes;
+    const statePage = resource.kind === "state-page";
+    const aggregateBytes = statePage ? aggregateStatePageBytes : aggregateEagerBytes;
+    const aggregateLimit = statePage ? limits.maxAggregateStatePageBytes : limits.maxAggregateResourceBytes;
+    const remaining = aggregateLimit - aggregateBytes;
     const loaded = await readManifestReference(base, resource.source, {
       label: `Resource source ${resource.id ?? "<missing>"}`,
       maximum: Math.min(limits.maxResourceBytes, remaining),
       limitCode: remaining < limits.maxResourceBytes ? "AGGREGATE_RESOURCE_LIMIT" : "RESOURCE_SIZE_LIMIT",
       mismatchCode: "RESOURCE_SIZE_MISMATCH",
     });
-    aggregateBytes += loaded.bytes.length;
-    invariant(aggregateBytes <= limits.maxAggregateResourceBytes, "AGGREGATE_RESOURCE_LIMIT", "Manifest resources exceed their aggregate byte limit.");
+    if (statePage) aggregateStatePageBytes += loaded.bytes.length;
+    else aggregateEagerBytes += loaded.bytes.length;
+    invariant((statePage ? aggregateStatePageBytes : aggregateEagerBytes) <= aggregateLimit, "AGGREGATE_RESOURCE_LIMIT", `Manifest ${statePage ? "state-page" : "eager"} resources exceed their aggregate byte limit.`);
     resourceInputs.push({
       id: resource.id,
       kind: resource.kind,

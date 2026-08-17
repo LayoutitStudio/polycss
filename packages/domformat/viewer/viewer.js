@@ -8,6 +8,38 @@ const paintProof = parameters.get("proof") === "1";
 let runtime = null;
 let comparisonRuntime = null;
 
+async function loadConformanceStatePage(record, signal) {
+  const packageUrl = new URL(modelUrl, location.href);
+  const resourceUrl = new URL(record.path, packageUrl);
+  if (resourceUrl.origin !== packageUrl.origin || resourceUrl.username || resourceUrl.password) throw new Error(`State page ${record.id} escapes the package origin.`);
+  const response = await fetch(resourceUrl, { cache: "no-store", credentials: "omit", redirect: "error", signal });
+  if (!response.ok || !response.body) throw new Error(`State page ${record.id} request failed.`);
+  const declared = response.headers.get("content-length");
+  if (declared !== null && (!/^\d+$/u.test(declared) || Number(declared) !== record.byteLength)) throw new Error(`State page ${record.id} has the wrong Content-Length.`);
+  const reader = response.body.getReader();
+  const chunks = [];
+  let length = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      length += value.byteLength;
+      if (length > record.byteLength) throw new Error(`State page ${record.id} exceeds its declared length.`);
+      chunks.push(value);
+    }
+  } finally {
+    try { reader.releaseLock(); } catch {}
+  }
+  if (length !== record.byteLength) throw new Error(`State page ${record.id} has the wrong length.`);
+  const output = new Uint8Array(length);
+  let offset = 0;
+  for (const chunk of chunks) {
+    output.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return output;
+}
+
 if (comparison || paintProof) status.hidden = true;
 
 try {
@@ -25,6 +57,7 @@ try {
     ...(parameters.has("mode") ? { mode: parameters.get("mode") } : {}),
     viewportWidth: comparison ? innerWidth / 2 : innerWidth,
     viewportHeight: innerHeight,
+    loadStatePage: loadConformanceStatePage,
   };
   if (comparison) {
     host.style.width = "50%";
@@ -48,15 +81,20 @@ try {
       viewportWidth: innerWidth / 2,
     });
   }
-  const playback = result.document.bindings.channels.find((channel) => channel.interpreter === "polycss-playback@0");
-  if (!playback) throw new Error("The package has no executable polycss-playback@0 binding.");
+  const playback = result.document.bindings.channels.find((channel) => channel.interpreter === "polycss-playback@0" || channel.interpreter === "polycss-paged-playback@0");
   if (parameters.has("frame")) {
     const frame = Number(parameters.get("frame"));
     if (!Number.isSafeInteger(frame)) throw new Error("The requested proof frame is invalid.");
-    runtime.seek(frame);
-    comparisonRuntime?.seek(frame);
+    if (typeof runtime.seekAsync === "function") await runtime.seekAsync(frame);
+    else runtime.seek(frame);
+    if (comparisonRuntime) {
+      if (typeof comparisonRuntime.seekAsync === "function") await comparisonRuntime.seekAsync(frame);
+      else comparisonRuntime.seek(frame);
+    }
   }
-  const leaves = playback.targets.leaves.length;
+  const leaves = playback?.targets.leaves.length
+    ?? result.document.meta.counts?.leaves
+    ?? result.document.tree.nodes.filter((node) => !result.document.tree.nodes.some((candidate) => candidate.parent === node.index)).length;
   document.documentElement.dataset.domformatSourceFrame = String(runtime.sourceFrame);
   document.documentElement.dataset.domformatReady = "";
   globalThis.domformatProof = Object.freeze({
@@ -71,13 +109,39 @@ try {
     get lifecycle() { return runtime.lifecycle; },
     get mode() { return runtime.mode; },
     get sourceFrame() { return runtime.sourceFrame; },
+    get bankId() { return runtime.bankId; },
     seek(frame) {
       const value = runtime.seek(frame);
       comparisonRuntime?.seek(frame);
       document.documentElement.dataset.domformatSourceFrame = String(value);
       return value;
     },
+    async seekAsync(frame) {
+      const value = typeof runtime.seekAsync === "function" ? await runtime.seekAsync(frame) : runtime.seek(frame);
+      if (comparisonRuntime) {
+        if (typeof comparisonRuntime.seekAsync === "function") await comparisonRuntime.seekAsync(frame);
+        else comparisonRuntime.seek(frame);
+      }
+      document.documentElement.dataset.domformatSourceFrame = String(value);
+      return value;
+    },
+    selectBank(id) {
+      const value = runtime.selectBank(id);
+      comparisonRuntime?.selectBank(id);
+      document.documentElement.dataset.domformatSourceFrame = String(value);
+      return value;
+    },
+    async selectBankAsync(id) {
+      const value = typeof runtime.selectBankAsync === "function" ? await runtime.selectBankAsync(id) : runtime.selectBank(id);
+      if (comparisonRuntime) {
+        if (typeof comparisonRuntime.selectBankAsync === "function") await comparisonRuntime.selectBankAsync(id);
+        else comparisonRuntime.selectBank(id);
+      }
+      document.documentElement.dataset.domformatSourceFrame = String(value);
+      return value;
+    },
     setMode(mode) { return runtime.setMode(mode); },
+    setInput(id, value) { return runtime.setInput(id, value); },
     destroy() {
       runtime.destroy();
       comparisonRuntime?.destroy();

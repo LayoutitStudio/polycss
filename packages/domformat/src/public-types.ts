@@ -11,6 +11,25 @@ import type { DomLimitOverrides as LimitOverrides } from "./constants.js";
 export type DomLimitOverrides = LimitOverrides;
 export type DomBytes = ArrayBuffer | ArrayBufferView;
 export type DomResourceInputBytes = string | DomBytes;
+export type DomStatePageCodec = "polycss-paged-playback-page@0" | "polycss-paged-variants-page@0";
+
+export interface DomPagedPlaybackPageDescriptor {
+  readonly resource: string;
+  readonly startFrame: number;
+  readonly endFrame: number;
+  readonly transformCount: number;
+  readonly shapeChangeCount: number;
+  readonly leafChangeCount: number;
+  readonly materializedByteLength: number;
+}
+
+export interface DomPagedVariantPageDescriptor {
+  readonly resource: string;
+  readonly startFrame: number;
+  readonly endFrame: number;
+  readonly changeCount: number;
+  readonly materializedByteLength: number;
+}
 
 export interface DomMeta {
   readonly format: "domformat@0";
@@ -30,12 +49,18 @@ export interface DomMeta {
     leaves?: number;
     sourceFrames?: number;
   }>;
-  readonly sourceArtifact?: Readonly<{
+  readonly artifacts?: readonly Readonly<{
+    id: string;
+    role: string;
     byteLength: number;
     decodedByteLength: number;
     digest: Readonly<{ algorithm: "sha256"; value: string }>;
-    status: string;
-  }>;
+  }>[];
+  readonly claims?: readonly Readonly<{
+    artifact: string;
+    kind: "license" | "locator" | "qualification" | "redistribution" | "revision";
+    value: string;
+  }>[];
 }
 
 export interface DomTreeNode {
@@ -121,12 +146,16 @@ export interface DomBindings {
 
 export interface DomResourceRecord {
   readonly id: string;
-  readonly kind: "stylesheet" | "image";
+  readonly kind: "stylesheet" | "image" | "state-page";
   readonly mediaType: string;
   readonly byteLength: number;
   readonly digest: Readonly<{ algorithm: "sha256"; value: string }>;
   readonly path: string;
   readonly dimensions?: Readonly<{ width: number; height: number }>;
+  readonly encoding?: "identity" | "gzip";
+  readonly decodedByteLength?: number;
+  readonly decodedDigest?: Readonly<{ algorithm: "sha256"; value: string }>;
+  readonly codec?: DomStatePageCodec;
 }
 
 export interface DomResourceCatalog {
@@ -151,10 +180,12 @@ export interface DomWriterInput {
   readonly bindings: DomBindings;
   readonly resourceInputs: readonly Readonly<{
     id: string;
-    kind: "stylesheet" | "image";
+    kind: "stylesheet" | "image" | "state-page";
     mediaType: string;
     path: string;
     bytes: DomResourceInputBytes;
+    encoding?: "identity" | "gzip";
+    codec?: DomStatePageCodec;
   }>[];
 }
 
@@ -196,7 +227,7 @@ export interface DomBrowserReadOptions {
   readonly limits?: DomLimitOverrides;
   readonly signal?: AbortSignal;
   readonly externalResources?: Map<string, DomBytes>;
-  readonly loadExternalResource?: (record: DomResourceRecord) => DomBytes | Promise<DomBytes>;
+  readonly loadExternalResource?: (record: DomResourceRecord, signal?: AbortSignal) => DomBytes | Promise<DomBytes>;
 }
 
 export interface DomBrowserUrlOptions extends DomBrowserReadOptions {
@@ -206,6 +237,7 @@ export interface DomBrowserUrlOptions extends DomBrowserReadOptions {
 
 export type DomLifecyclePhase = "validate" | "construct" | "bind" | "initialize" | "publish" | "destroy";
 export type DomExperienceMode = "animation" | "interaction";
+export type DomExternalInputId = "orbit.pitch" | "orbit.yaw" | "orbit.zoom";
 
 export interface DomMountOptions {
   readonly animate?: boolean;
@@ -223,7 +255,12 @@ export interface DomMountRuntime {
   }>;
   readonly mode: DomExperienceMode;
   readonly sourceFrame: number;
+  readonly bankId: string | null;
   seek(frame: number): number;
+  seekAsync(frame: number): Promise<number>;
+  selectBank(id: string): number;
+  selectBankAsync(id: string): Promise<number>;
+  setInput(id: DomExternalInputId, value: number): number;
   setMode(mode: DomExperienceMode): DomExperienceMode;
   destroy(): boolean;
 }

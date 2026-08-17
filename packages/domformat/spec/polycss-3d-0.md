@@ -62,8 +62,10 @@ Supported mount attributes are `alt`, `aria-hidden`, `class`, `decoding`,
 attributes use the same vocabulary except that `class` is forbidden because
 node classes have the single canonical `classes` field. Values are at most
 1024 code units. Event attributes, `srcdoc`, and a literal `style` attribute are
-forbidden. `data-domformat-instance` and `data-domformat-mount-surface` are
-reserved to the viewer and are forbidden on the mount and every package node.
+forbidden. `data-domformat-instance`, `data-domformat-mount-surface`, and
+`data-domformat-node` are reserved to the viewer and are forbidden on the
+mount and every package node. The last is assigned only to retained nodes for
+validated prepared-variant effect selectors.
 TREE stable ids are binding keys only and are not copied into the global DOM
 `id` namespace.
 
@@ -150,9 +152,10 @@ An image resource is one static PNG or WebP image. Animated PNG (`acTL`,
 state and MUST be represented by a declared prepared channel.
 
 Every `RCRD` entry MUST be reachable from `TREE` resource attributes/styles,
-`CSSB` stylesheet/token bindings, or the prepared presentation background.
-Unused resource records are invalid. Version 0 has no generic binary resource
-kind.
+`CSSB` stylesheet/token bindings, the prepared presentation background, or an
+exact `polycss-paged-variants@0` page descriptor. Unused resource records are
+invalid. Version 0 has one typed state-page kind for that fixed codec and no
+generic binary resource kind.
 
 ## 4. CSSB version 0
 
@@ -173,7 +176,8 @@ The scope name matches `[a-z0-9-]{1,64}` and its value matches
 
 The alpha CSS grammar is deliberately fail-closed. It accepts only flat
 qualified rules. Backslash escapes, comments, CDO/CDC tokens, at-rules, nested
-rules, custom properties, `behavior`, and `-moz-binding` are invalid. Every
+rules, priority annotations (`!important` or any other `!` token), custom
+properties, `behavior`, and `-moz-binding` are invalid. Every
 selector in a comma list MUST begin with the exact declared scope. A sibling or
 column combinator immediately after that scope is invalid because it could
 select outside the mount; descendant and child selection remain inside it.
@@ -218,6 +222,12 @@ Strings in any other allowed function do not grant network access.
 Function identifiers MUST immediately precede `(`; whitespace-separated
 function-like sequences are invalid rather than skipped by the scanner.
 
+When prepared variants are present, a package stylesheet selector may not
+mention any token from the prepared class table. The viewer materializes the
+validated exact owner/target/property graph described by
+`polycss-variants@0`; package CSS cannot attach undeclared effects to those
+dynamic tokens.
+
 After validation and resource verification, a viewer allocates a unique safe
 `data-domformat-instance` value on the viewer-owned mount surface. In one span-based pass it replaces
 only initial selector scope spans with that instance selector and replaces only
@@ -235,10 +245,16 @@ unique. Version 0 knows these codecs:
 
 | State codec | Matching interpreter | Status |
 |---|---|---|
+| `polycss-compositor-timing-prepared@0` | `polycss-compositor-timing@0` | executable |
 | `polycss-effects-prepared@0` | `polycss-effects@0` | executable |
+| `polycss-orbit-input-prepared@0` | `polycss-orbit-input@0` | executable |
+| `polycss-paged-playback@0` | `polycss-paged-playback@0` | executable |
+| `polycss-paged-variants@0` | `polycss-paged-variants@0` | executable |
 | `polycss-playback-packed@0` | `polycss-playback@0` | executable |
 | `polycss-pointer-grab-prepared@0` | `polycss-pointer-grab@0` | executable |
 | `polycss-surface-packed@0` | `polycss-surface@0` | executable |
+| `polycss-variants-packed@0` | `polycss-variants@0` | executable |
+| `polycss-viewport-profiles-packed@0` | `polycss-viewport-profiles@0` | executable |
 | `static-presentation@0` | `static-presentation@0` | executable |
 
 Unknown codecs are invalid in profile version 0. Codec data is declarative and
@@ -275,21 +291,31 @@ refers to an existing `TREE` id, except the literal `$host`. A binding cannot
 contain more target strings than all retained node ids plus `$host`; malformed
 scalar leaves are invalid rather than ignored. Codec-specific node arrays do
 not permit `$host`. Cross-channel reuse of a target is allowed only where codec
-semantics explicitly coordinate it (for example playback, surface, and
-interaction share leaf targets).
+semantics explicitly coordinate it (for example playback, surface, variants,
+and interaction may share targets while owning different sinks).
 
-Surface and interaction shape/leaf arrays exactly equal playback's arrays in
+Surface, viewport-profile, and interaction shape/leaf arrays exactly equal playback's arrays in
 the same order. A surface requires playback, while leafless playback MAY omit
-surface. Effects targets are disjoint from all other channels. Presentation
-targets other than `$host` are disjoint from playback; its optional cursor
+surface. Inline and paged playback are mutually exclusive. Paged playback owns
+final canonical model/shape/leaf transform strings and shape visibility in
+typed state pages; compositor timing version 0 cannot reference those
+page-local dictionaries. Inline and paged variants each require playback, are mutually
+exclusive, and may target any nonempty ordered subset of retained nodes.
+Viewport profiles additionally require static presentation
+and compose their transform/visibility sinks inside playback. Effects targets are disjoint from all other channels.
+Playback profile timelines also require static-presentation profiles. Their ids
+are unique, follow presentation order, and select only the logical schedule;
+they do not add sinks or change the fixed playback cadence.
+Presentation targets other than `$host` are disjoint from playback; its optional cursor
 targets exactly match interaction when interaction is present. These ownership
 rules prevent two unrelated interpreters from racing the same sink.
 
 The complete sink vocabulary is:
 
 ```text
-style.backgroundPosition style.backgroundPositionY style.height style.left
-style.opacity style.top style.transform style.visibility style.width
+class.prepared style.backgroundColor style.backgroundPosition style.backgroundPositionX
+style.backgroundPositionY style.color style.display style.height style.left style.opacity
+style.outlineColor style.top style.transform style.visibility style.width
 ```
 
 A binding does not grant general DOM access. An interpreter MUST write only its
@@ -308,8 +334,26 @@ Validation occurs before state materialization or DOM construction and includes:
 - codec-specific input order, input types/defaults, parameters, and sink order;
 - playback/surface frame-count and leaf-count agreement when surface is
   present, and required surface closure for nonempty playback leaves;
+- exact baseline and profile-timeline coverage, aggregate tick allocation,
+  initial-frame closure, and ordered static-presentation profile references;
 - exact semantic equivalence of every prepared sequential surface transition
   and declared jump to its canonical target frame;
+- exact prepared-variant initial TREE closure, sparse transition closure,
+  declared jump equivalence, descendant relation, stylesheet-token exclusion,
+  and target/property sink closure;
+- exact paged playback and paged-variant initial TREE/effect closure, unique contiguous page
+  coverage of the playback range, typed resource reachability, bounded
+  document-wide lookahead/residency including playback-initial and
+  interaction-entry pins, and canonical page-local keyframe/sparse transition
+  closure;
+- exact viewport-profile leaf order, packed row width, transform dictionary
+  closure, closed sparse profile-frame visibility, bounded responsive-affine
+  coefficient rows, and deterministic presentation-profile or
+  smallest-covering order;
+- exact typed orbit defaults/ranges, initial TREE closure, and bidirectional
+  cyclic sparse-surface closure;
+- exact closed compositor target ownership, transform-index closure, bounded
+  linear key times/durations, and cycle closure;
 - cross-channel target ownership and interaction/playback target-order closure;
 - effects/playback frame-count agreement for every effects channel, and
   effects/interaction/playback agreement for pointer interaction.
@@ -324,7 +368,8 @@ implementing every executable interpreter, but an executable viewer MUST reject
 any required interpreter it does not implement before construction.
 
 The reference `mountDom` implementation requires presentation and implements
-the optional playback, surface, effects, and pointer channels according to the
+the optional inline or paged playback, surface, inline or paged variants, compositor timing,
+orbit input, viewport profiles, effects, and pointer channels according to the
 validated closure. A presentation-only mount publishes source frame `1`, has
 no scheduler, and accepts only `seek(1)`.
 
@@ -334,11 +379,25 @@ All physical prepared-state publications are synchronous writes to existing
 targets. Automatic playback MAY retain the latest logical transform for a
 paint-hidden leaf without assigning that transform to its DOM target, as
 defined by `polycss-playback@0`. It MUST flush that transform before any reveal.
-Public `seek(frame)` is a synchronization barrier: before it returns, every
-retained leaf's physical transform equals its logical prepared transform,
-including for a same-frame seek. Viewer input adapters translate trusted host
-events into standardized `BIND` inputs; they do not expose package data to
-event handler compilation.
+Public `seek(frame)` is a synchronization barrier for resident state: before it returns, every
+retained leaf's physical transform and the prepared variant/surface channels
+equal the requested canonical source-frame state, including for a same-frame
+seek after interaction changed only the surface frame. A paged package's
+synchronous seek to a nonresident page fails before mutation. Its
+`seekAsync(frame)` verifies the target page window first, then provides the same
+synchronous publication barrier. Viewer input adapters
+translate trusted host events into standardized `BIND` inputs; they do not
+expose package data to event handler compilation.
+
+For a source-frame publication, prepared variants are applied before prepared
+transforms, prepared atlas addresses, and visibility, in that order. A node
+therefore receives its target material/class, prepared transform, and atlas
+address before a reveal can paint it. Hidden
+address changes remain dirty and are flushed before a surface or
+interaction-forced reveal. Variant publication removes only
+the previously active class from the packet's declared class table and adds at
+most one target class; all structural TREE classes and node identities remain
+unchanged.
 
 The only conforming lifecycle order is:
 
@@ -349,10 +408,12 @@ validate → construct → bind → initialize → publish → destroy
 No phase may be skipped, repeated, or entered out of order. The observable
 precondition and postcondition of each phase are:
 
-1. **validate** — precondition: complete JSON document bytes and every required
-   sibling resource are available under active limits; postcondition: transport,
-   closed schemas, versions, capabilities, references, CSS, media signatures,
-   sizes, digests, and allocation products have passed, with no DOM mutation.
+1. **validate** — precondition: complete JSON document bytes and every eager
+   stylesheet/image sibling are available under active limits; postcondition:
+   transport, closed schemas, versions, capabilities, references, eager-resource
+   bytes, CSS, media signatures, sizes, digests, typed state-page descriptors,
+   and allocation products have passed, with no DOM mutation. Deferred
+   state-page bytes are not fetched in this phase.
 2. **construct** — precondition: validation passed; postcondition: a detached
    viewer-owned mount surface and exact parent-before-child `TREE` nodes exist,
    stable ids resolve to those same node objects, the embedding host is
@@ -363,20 +424,24 @@ precondition and postcondition of each phase are:
    retained as the already-constructed node object. This postcondition holds
    before the bind phase is observable. No prepared update has been published.
 4. **initialize** — precondition: bindings completed; postcondition: bounded
-   state has been materialized, fixed interpreters and input adapters exist, and
-   observers may be allocated but are not active. Initialization MUST NOT start
-   clocks, accept input, or publish prepared state.
+   state has been materialized, the pages containing the initial playback frame
+   and any fixed interaction entry have passed encoded/decoded identity and
+   canonical payload validation, fixed
+   interpreters and input adapters exist, and observers may be allocated but
+   are not active. Initialization MUST NOT start clocks, accept input, publish
+   prepared state, or attach the detached surface.
 5. **publish** — precondition: initialization completed; postcondition: every
    prepared initial sink has authoritatively overwritten detached TREE
    placeholders, the surface is atomically attached to the embedding host, the
    declared initial state/frame and experience are visible, owned input and
-   observers are enabled, optional scheduling has begun, and runtime operations
-   may be called.
+   observers are enabled, optional deadline scheduling and deferred page
+   lookahead have begun, and runtime operations may be called.
 6. **destroy** — may follow successful publication or any failed phase. It
-   cancels scheduling and pointer capture, disconnects listeners/observers,
-   destroys interpreter state, removes owned styles and the mount surface,
-   revokes object URLs, and restores the embedding container. A second or later
-   destroy is a no-op, and publication operations thereafter fail.
+   cancels deadline/frame scheduling, state-page generations and pointer
+   capture, disconnects listeners/observers, destroys interpreter state, removes
+   owned styles and the mount surface, revokes object URLs, and restores the
+   embedding container. A second or later destroy is a no-op, and publication
+   operations thereafter fail.
 
 Phase completion is observable only after its postcondition holds. If any
 operation or phase observer fails, the viewer MUST transactionally clean up all
@@ -386,19 +451,43 @@ host attachment, input/observer enablement, and optional scheduler installation
 have all succeeded.
 The reference mount runtime exposes a read-only current phase and completed
 phase history for verification. It also exposes the current prepared source
-frame and a bounded `seek(frame)` operation after publication. Its public
-controller does not expose raw node maps, input adapters, prepared channels, or
-profile interpreter instances.
+frame, optional prepared-bank id, bounded `seek(frame)`/`seekAsync(frame)` and
+`selectBank(id)`/`selectBankAsync(id)` operations, experience-mode switching,
+and the fixed external-input operation after publication. Its public controller
+does not expose raw node maps, input adapters, prepared channels, catalog or
+shuffle policy, or profile interpreter instances.
 
-When playback is present, the reference scheduler derives its interval from
-the closed playback binding `tickRateHz`; version 0 fixes that value to 30. It
-normally carries the deadline forward by that interval. One due animation tick
-publishes synchronously. A callback with at most eight due ticks evaluates each
-tick and distinct prepared-effects source-frame transition in order but MAY
-publish only the final retained state; interaction publishes each such tick
-separately. More than eight due ticks is treated as a suspended clock: stale
-ticks are discarded, one tick is advanced, and the deadline resets from the
-current callback timestamp.
+When playback is present, the reference scheduler derives timing from exactly
+one bounded `tickRateHz` or reduced rational `tickIntervalUs`, overridden by a
+selected timeline's closed cumulative `deadlineMicros` when present. It sleeps
+on one owned deadline timer, then requests one paint-aligned animation frame
+only when a tick is due. One due animation tick publishes synchronously. The
+binding selects `bounded` catch-up (up to eight ordered ticks and effects
+transitions, then one suspension tick), `single-step` deadline reset, or
+animation-only `elapsed` reconstruction directly to the final due retained
+state. Prepared effects and interaction require ordered tick simulation and
+therefore reject collapsed elapsed catch-up.
+
+The viewer resolves the static-presentation profile before initial playback
+publication. Playback uses that profile's prepared timeline override or the
+required baseline. A later animation profile change restarts logical tick and
+source frame to their initial values before viewport-profile reveal. Profile
+changes during interaction preserve the interaction publication; animation
+re-entry restarts the newly selected schedule. Version 0 does not vary cadence
+by profile.
+
+The static-presentation bank declares either `viewport-width` selection or
+`landscape-first-portrait-width` selection. The latter chooses row zero only
+when `width > height`; square and portrait viewports use the remaining strict
+width bands. The selection is a fixed numeric partition, not a media-query or
+host-policy callback. Changing profile id without changing the resolved
+playback timeline does not reset logical tick or the scheduler deadline.
+The selected same-topology viewport row may update visibility sparsely with the
+current source frame and may evaluate its closed affine coefficient form from
+viewport width, height, and one bounded fit scale. These updates occur only on
+source publication or resize/profile change; they do not run a render loop or
+evaluate package expressions. Prepared transform and address state is current
+before any profile visibility reveal.
 
 Keyboard input listeners are attached to the mount, not the global window, and
 therefore act only while events target or bubble through that mount. A viewer
@@ -410,8 +499,9 @@ sample without mapping cancellation-event coordinates. Only a matching primary
 `pointerup` contributes its final coordinates.
 
 A mount controller owns every inserted stylesheet, object URL, event listener,
-animation-frame request, and resize observer. Aborted URL loads MUST cancel
-active response reads and MUST NOT construct partial DOM. The browser viewer
+deadline timer, animation-frame request, state-page request generation, and
+resize observer. Aborted URL loads MUST cancel active response reads and MUST
+NOT construct partial DOM. The browser viewer
 MUST decode every declared image and confirm its dimensions before publication;
 decode failure rolls back the mount.
 
@@ -420,7 +510,13 @@ decode failure rolls back the mount.
 The normative executable codec contracts are:
 
 - [`codecs/polycss-playback-0.md`](./codecs/polycss-playback-0.md)
+- [`codecs/polycss-compositor-timing-0.md`](./codecs/polycss-compositor-timing-0.md)
+- [`codecs/polycss-orbit-input-0.md`](./codecs/polycss-orbit-input-0.md)
+- [`codecs/polycss-paged-playback-0.md`](./codecs/polycss-paged-playback-0.md)
+- [`codecs/polycss-paged-variants-0.md`](./codecs/polycss-paged-variants-0.md)
 - [`codecs/polycss-surface-0.md`](./codecs/polycss-surface-0.md)
+- [`codecs/polycss-variants-0.md`](./codecs/polycss-variants-0.md)
+- [`codecs/polycss-viewport-profiles-0.md`](./codecs/polycss-viewport-profiles-0.md)
 - [`codecs/static-presentation-0.md`](./codecs/static-presentation-0.md)
 - [`codecs/polycss-effects-0.md`](./codecs/polycss-effects-0.md)
 - [`codecs/polycss-pointer-grab-0.md`](./codecs/polycss-pointer-grab-0.md)

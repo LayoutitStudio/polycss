@@ -22,9 +22,10 @@ decompress them. Format/profile identity is confirmed only after bounded JSON
 decoding and schema validation of `meta`.
 
 The physical input length is the JSON document length. Version 0 has no second
-length field, custom chunk framing, compression layer, or container. File or
-response length, JSON structure ceilings, semantic limits, and resource
-declarations provide the relevant bounds.
+document length field, custom transport framing, compression layer, or
+container. Typed sibling state pages described in section 7 are resources, not
+document transport chunks. File or response length, JSON structure ceilings,
+semantic limits, and resource declarations provide the relevant bounds.
 
 ## 3. JSON rules
 
@@ -109,8 +110,15 @@ These optional fields are defined:
   `animation`;
 - `counts`: optional nonnegative integer counts that MUST match the
   corresponding tree or executable playback cardinality;
-- `sourceArtifact`: optional producer provenance with exact compressed/decoded
-  lengths, SHA-256, and a short status.
+- `artifacts`: one to 64 strictly id-sorted source identities. Each record has a
+  stable short `id`, structural `role`, encoded and decoded byte lengths, and
+  SHA-256. These fields establish exact byte identity only; qualification belongs
+  in an inert claim.
+- `claims`: one to 128 optional inert statements, strictly sorted by artifact id
+  then kind. A claim references an artifact and has one of `license`, `locator`,
+  `qualification`, `redistribution`, or `revision`. Locators are credential-free
+  fragment-free HTTPS URLs. Claims cannot contain control characters or local
+  absolute paths and never authorize loading, execution, trust, or rights.
 
 The `@0` suffix in `format` and `profile`, together with each semantic section's
 `version: 0`, is the complete version declaration; META has no redundant numeric
@@ -118,8 +126,9 @@ version. The known required capability vocabulary is:
 
 ```text
 css-semantic-closure deterministic-json explicit-retained-tree logical-assets
-prepared-particle-effects prepared-pointer-grab-interaction prepared-playback
-prepared-surface-lighting
+prepared-particle-effects prepared-compositor-timing prepared-orbit-input
+prepared-paged-state prepared-pointer-grab-interaction prepared-playback
+prepared-surface-lighting prepared-variants prepared-viewport-profiles
 ```
 
 An unknown required capability is fatal. Unknown optional capabilities are
@@ -130,20 +139,26 @@ the four base capabilities shown above, in that order, then append the
 capability for each present interpreter in this order:
 
 ```text
-polycss-effects@0 polycss-pointer-grab@0 polycss-playback@0 polycss-surface@0
+polycss-effects@0 polycss-compositor-timing@0 polycss-orbit-input@0
+polycss-paged-playback@0 polycss-paged-variants@0 polycss-pointer-grab@0 polycss-playback@0
+polycss-surface@0 polycss-variants@0 polycss-viewport-profiles@0
 ```
 
 `conformance.executable` begins with `retained-tree`, then appends the role for
 each present interpreter in this order:
 
 ```text
-particle-effects playback pointer-grab-interaction presentation surface-lighting
+particle-effects compositor-timing orbit-input paged-variants paged-playback playback
+pointer-grab-interaction presentation surface-lighting variants viewport-profiles
 ```
 
-The corresponding interpreter order is `polycss-effects@0`,
-`polycss-playback@0`, `polycss-pointer-grab@0`, `static-presentation@0`, then
-`polycss-surface@0`. Omitted interpreters omit their capability or role without
-reordering the remaining entries. `declaredOnly` MUST be empty.
+The corresponding role order is `polycss-effects@0`,
+`polycss-compositor-timing@0`, `polycss-orbit-input@0`,
+`polycss-paged-variants@0`, `polycss-paged-playback@0`, `polycss-playback@0`,
+`polycss-pointer-grab@0`, `static-presentation@0`, `polycss-surface@0`,
+`polycss-variants@0`, then `polycss-viewport-profiles@0`. Omitted interpreters
+omit their capability or role without reordering the remaining entries.
+`declaredOnly` MUST be empty.
 `initialExperience: "interaction"` requires the
 `prepared-pointer-grab-interaction` capability and an executable matching
 binding. Codec packets carry their own fixed initial state/frame declarations;
@@ -164,7 +179,8 @@ resource has its own digest.
 - `bindings` declares sorted inputs and binds every state channel exactly once
   to a fixed viewer interpreter, stable targets, and whitelisted DOM sinks.
 - `resources` contains sorted logical resources with kind, media type, exact
-  byte length, SHA-256, image dimensions where applicable, and sibling path.
+  encoded byte length, SHA-256, image dimensions or decoded state-page identity
+  where applicable, and sibling path.
 
 `spec/polycss-3d-0.md` and `spec/codecs/` define the closed schemas and
 cross-section invariants.
@@ -174,21 +190,43 @@ cross-section invariants.
 A resource record has:
 
 ```text
-id          [a-z][a-z0-9._-]{0,63}
-kind        stylesheet | image
-mediaType   one exact profile-approved media type
-byteLength  nonnegative safe integer
-digest      {algorithm:"sha256",value:<64 lowercase hex>}
-dimensions  {width,height}, required only for images
-path        validated portable relative POSIX path
+id                 [a-z][a-z0-9._-]{0,63}
+kind               stylesheet | image | state-page
+mediaType          one exact profile-approved media type
+byteLength         nonnegative safe integer encoded length
+digest             {algorithm:"sha256",value:<64 lowercase hex>} for encoded bytes
+dimensions         {width,height}, required only for images
+encoding           identity | gzip, required only for state pages
+decodedByteLength  exact decoded length, required only for state pages
+decodedDigest      exact decoded SHA-256, required only for state pages
+codec              polycss-paged-playback-page@0 | polycss-paged-variants-page@0,
+                   required only for state pages
+path               validated portable relative POSIX path
 ```
 
-Version 0 media types are `text/css;charset=utf-8`, `image/png`, and
-`image/webp`, paired with the corresponding kind. Resource ids are unique and
-strictly sorted. Every resource
-MUST be reachable from the tree, CSS binding, or prepared presentation state.
-Bytes MUST match length, digest, media signature, and dimensions before DOM
-construction or object-URL creation.
+Version 0 media types are `text/css;charset=utf-8`, `image/png`, `image/webp`,
+and `application/vnd.layoutit.domformat-state-page+json`, paired with the
+corresponding kind. Resource ids are unique and strictly sorted. Every resource
+MUST be reachable from the tree, CSS binding, prepared presentation state, or
+one of the fixed paged playback/variant channels. A state page is never a generic binary/custom
+codec facility. Its decoded bytes are canonical JSON for exactly the declared
+codec and page range.
+
+Eager stylesheet/image resources and typed state-page resources have separate
+count and aggregate encoded-byte ceilings. Raising the state-page descriptor
+ceiling therefore does not admit additional eager assets. Paged playback has a
+separate total-frame ceiling, while every descriptor and decoded page remains
+subject to the smaller per-page frame ceiling.
+
+Stylesheet and image bytes MUST match length, digest, media structure, and
+dimensions before DOM construction or object-URL creation. State-page record
+shape, coverage, reachability, encoded/decoded aggregate ceilings, and identity
+relationships validate with the document. The initial page MUST additionally
+match encoded and decoded identity and its canonical codec payload before host
+attachment. A deferred page MUST pass those same checks before it can become
+resident or affect publication. For `identity`, encoded and decoded length and
+digest are exactly equal. Gzip is allowed only as the record's page encoding;
+decoded output is capped at `decodedByteLength` during decompression.
 
 `path` is a portable relative POSIX path of at most 240 bytes. It has one or more segments,
 each matching `[A-Za-z0-9][A-Za-z0-9._-]*`. Absolute paths, backslashes, empty
@@ -219,8 +257,9 @@ Resources and named channels are sorted by their declared ids.
 
 Version 0 does not define arbitrary extension fields, scripting, custom
 interpreters, custom elements, network resources, arbitrary HTML, text nodes,
-signatures, publisher authentication, media-type registration, or a general
-expression language. SHA-256 records provide byte identity, not authenticity.
+signatures, publisher authentication, media-type registration, generic binary
+resources, generic compression, or a general expression language. SHA-256
+records provide byte identity, not authenticity.
 
 In particular, version 0 rejects JavaScript-like expressions including
 `Math.random()`, arbitrary executable code, XPath or any general expression

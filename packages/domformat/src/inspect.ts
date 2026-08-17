@@ -27,6 +27,18 @@ interface PlaybackPacketSummarySource {
   readonly transforms: Readonly<{ count: number }>;
 }
 
+interface PagedPlaybackPacketSummarySource {
+  readonly shapeCount: number;
+  readonly leafCount: number;
+  readonly pages: readonly Readonly<{
+    endFrame: number;
+    transformCount: number;
+    shapeChangeCount: number;
+    leafChangeCount: number;
+    materializedByteLength: number;
+  }>[];
+}
+
 function stateDetails(channel: DomStateChannel): Record<string, number> | undefined {
   const packet = channel.data.packet;
   if (channel.codec === "polycss-effects-prepared@0" && packet) {
@@ -60,6 +72,19 @@ function stateDetails(channel: DomStateChannel): Record<string, number> | undefi
       transforms: prepared.transforms.count,
     };
   }
+  if (channel.codec === "polycss-paged-playback@0" && packet) {
+    const prepared = packet as unknown as PagedPlaybackPacketSummarySource;
+    return {
+      frames: prepared.pages.at(-1)?.endFrame ?? 0,
+      shapes: prepared.shapeCount,
+      leaves: prepared.leafCount,
+      pages: prepared.pages.length,
+      transforms: prepared.pages.reduce((sum, page) => sum + page.transformCount, 0),
+      shapeChanges: prepared.pages.reduce((sum, page) => sum + page.shapeChangeCount, 0),
+      leafChanges: prepared.pages.reduce((sum, page) => sum + page.leafChangeCount, 0),
+      materializedBytes: prepared.pages.reduce((sum, page) => sum + page.materializedByteLength, 0),
+    };
+  }
   return undefined;
 }
 
@@ -82,6 +107,12 @@ export function inspection(result: DomReadResult) {
     bytes: record.byteLength,
     dimensions: record.dimensions,
     digest: record.digest.value,
+    ...(record.kind === "state-page" ? {
+      codec: record.codec,
+      encoding: record.encoding,
+      decodedBytes: record.decodedByteLength,
+      decodedDigest: record.decodedDigest?.value,
+    } : {}),
     path: record.path,
     verified: !externalMissing.includes(record.id),
   }));

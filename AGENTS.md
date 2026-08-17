@@ -16,7 +16,7 @@ Monorepo layout (pnpm workspaces):
 | `packages/vue` | `@layoutit/polycss-vue` | Vue 3 mirror of the React package. Owns its own copy of atlas rasterisation. Depends on `core` only. |
 | `packages/fonts` | `@layoutit/polycss-fonts` | Fonts + text → extruded 3D `Polygon[]`. Hand-written TrueType (`glyf`) reader + extruder (flat/round/bevel profiles) + Google Fonts loader. Framework-agnostic (returns `Polygon[]`, no React/Vue mirror needed). Depends on `core` + `earcut`. |
 | `packages/morph` | `@layoutit/polycss-morph` | Framework-agnostic prepared-model contracts, deterministic Node preparation, browser loading, retained DOM mounting, sparse deformation, controls, springs, animation, joint skinning, and prepared playback. The browser entry uses public `@layoutit/polycss` APIs; Node-only preparation lives at `@layoutit/polycss-morph/prepare`. No React/Vue mirrors. |
-| `packages/domformat` | `@layoutit/polycss-domformat` | Private strict-TypeScript `domformat@0` writer, reader, validator, CLI, and browser mount with repository-side conformance. Owns the producer-neutral wire contract; producer lowering stays in producer packages. Runtime installs contain unbundled ESM and declarations but exclude certification material. Not published. |
+| `packages/domformat` | `@layoutit/polycss-domformat` | Private strict-TypeScript `domformat@0` writer, reader, validator, CLI, and browser mount with repository-side conformance. Its closed retained-DOM runtime includes sparse playback/surface/variants, typed atlas positions, responsive prepared presentation/layout/timeline profiles, host-selected prepared-bank handoff, fixed orbit input, one bounded digest-bound page lifecycle shared by paged transform/visibility playback and paged variants, and compositor-owned linear transform timing. It owns the producer-neutral wire contract; producer lowering and product input policy stay in producer/host packages. Runtime installs contain code-split ESM and declarations but exclude certification material. Not published. |
 | `packages/skills` | `@layoutit/polycss-skills` | Zero-dependency `npx` installer for the PolyCSS agent skill. Owns `skill/SKILL.md` + `skill/docs/*.md` — the source of truth for what agents are told about PolyCSS. No renderer code, no runtime dependency on any other package. |
 | `website` | `@layoutit/polycss-website` | Astro + Starlight docs site. Not published. |
 | `examples/{html,vanilla,react,vue,fontcss}` | private | Per-framework Vite apps demonstrating the minimal usage for each renderer (`fontcss` demos `@layoutit/polycss-fonts`). Workspace members so they resolve to local `workspace:^` packages. Not published. |
@@ -97,7 +97,7 @@ This is the load-bearing constraint behind the whole engine. **JavaScript should
 
 The renderer exception is imported skeletal animation. glTF/GLB skinning changes each polygon independently, so the vanilla stable-DOM animation path samples the active clip in JS, keeps the leaf set mounted, caches baked stable-triangle transform frames, and pins each mounted triangle's baked color while transforms animate. Recomputing Lambert from every deformed low-poly face normal creates visible color pumping, so color refresh is internal opt-in rather than the default animation behavior. On WebKit/Safari, where stable CSS triangles fall through to solid atlas `<s>` leaves, same-topology animation updates keep the existing atlas elements and bitmap URLs mounted, cache transform frames once warmed, and hide briefly degenerate atlas triangles only until the next valid frame. That optimized path is the default; do not add a user-facing "baseline vs optimized" toggle or maintain a legacy slow path in product UI.
 
-The domformat reference mount has one separate, closed exception: it may schedule its validated fixed-rate prepared playback and interaction tables. That scheduler may write only declared sinks on the retained targets, never reconstruct topology or evaluate producer code, expressions, renderer internals, or network resources, and is disabled by `animate: false`. Normal catch-up is bounded to eight due ticks: every due logical animation tick and distinct prepared-effect transition in that window is evaluated in order, but one browser callback may publish only their final retained-DOM state; interaction publishes each such tick separately because input, cursor, grab, and spring state are observable. A larger gap is treated as suspension, discards the stale backlog, advances one tick, and resets the deadline. The one-tick path and public operations remain synchronous. This is a reference implementation of an already-lowered wire profile, not a PolyCSS renderer loop.
+The domformat reference mount has one separate, closed exception: it may schedule validated prepared playback and interaction tables. The scheduler sleeps on a deadline timer and requests one paint-aligned animation frame only when a bounded-rate, exact rational-microsecond, or prepared timeline deadline is due; it does not poll display frames continuously. It may write only declared sinks on retained targets, never reconstruct topology or evaluate producer code, expressions, renderer internals, or arbitrary network resources, and is disabled by `animate: false`. The binding selects bounded catch-up (up to eight ordered ticks, then one suspension tick), single-step deadline reset, or animation-only collapsed elapsed reconstruction. Prepared effects and interaction simulate every admitted tick because their state is history-dependent, so they cannot use collapsed elapsed catch-up. Closed compositor timing may instead give a retained model cycle to viewer-owned WAAPI or add viewer-owned linear transform transitions for fixed cadence only; seek, catch-up, restart, pause, and wrap synchronously snap prepared state. This is a reference implementation of an already-lowered wire profile, not a PolyCSS renderer loop.
 
 | Where JS runs | Where JS does NOT run |
 |---|---|
@@ -173,11 +173,47 @@ alias for Morph packages and does not depend on Morph or renderer internals.
 - Producers emit the closed writer manifest natively. Source parsing,
   preparation, lowering, and product adapters remain in producer packages.
 - The only physical form is canonical `.json` plus digest-bound external
-  sibling resource files. There is no `.dom` packet, gzip transport, embedded
-  payload, archive, or alternate packaging mode.
+  sibling resource files. There is no `.dom` packet, gzip document transport,
+  embedded payload, archive, or alternate packaging mode. One fixed typed
+  state-page resource kind may use bounded gzip with exact encoded and decoded
+  identities; this is not a generic binary/custom-codec facility.
 - Mounting follows `validate → construct → bind → initialize → publish →
-  destroy`, with rollback on partial failure and idempotent teardown.
-- The package is authored in strict TypeScript, built as unbundled ESM plus
+  destroy`, with rollback on partial failure and idempotent teardown. Eager
+  CSS/images verify before construction; initial and fixed-interaction state
+  pages verify before attachment; playback-initial, interaction-entry, and the
+  current prepared-bank entry remain pinned beside deferred current/lookahead
+  pages under an exact hard resident window. Inactive bank entries are not all
+  retained. Sync
+  nonresident seek fails without mutation and
+  `seekAsync` cancels stale generations before exact publication.
+- Runtime publication preserves sparse prepared tables and retained identity.
+  Variant class/effect ownership is explicit, packed full atlas positions are
+  typed signed-pixel dictionary entries, catch-up coalesces only touched
+  targets, and class/transform/address writes complete before reveal.
+- Root presentation profiles are bounded numeric width breakpoints or one
+  landscape-first row followed by portrait width bands, with prepared
+  contain/cover bounds and optional quarter-turns. Same-topology
+  viewport profiles may override leaf transform/visibility, carry sparse
+  profile-by-source-frame visibility, and evaluate the closed prepared
+  viewport-affine coefficient form only on resize/profile change. Playback keeps a
+  required baseline timeline and may select ordered bounded overrides by those
+  root profile ids; all use the binding's bounded rate, exact rational interval,
+  or prepared deadline schedule. Selection precedes initial
+  publication. Only an animation schedule identity change restarts logical
+  tick zero and the initial one-based source frame before viewport reveal;
+  presentation-only band changes preserve the current deadline. Interaction state survives profile changes until
+  animation re-entry restarts the selected schedule. The typed orbit
+  operation exposes only finite clamped pitch/yaw/zoom and prepared cyclic
+  address rows; pointer/wheel/inertia/camera-widget policy stays in the host.
+- An optional finite prepared-bank table maps host-selected stable ids to
+  canonical entry frames and schedules over the same retained topology. Sync
+  selection requires residency; async selection verifies the complete
+  cross-channel window before atomic publication. Random, shuffle, catalog,
+  playlist, and fetch-choice policy stay in the host.
+- META may bind multiple exact byte-identity artifacts. Separately inert,
+  bounded claims never grant fetching, execution, trust, authenticity, or
+  rights authority.
+- The package is authored in strict TypeScript, built as code-split ESM plus
   declarations with tsup, `private`, and MIT-licensed. Workspace test/build
   commands include it; public version-bump and npm-publish automation must not.
   Public Node and browser signatures describe the closed document, resource,

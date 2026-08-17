@@ -3,6 +3,9 @@ import { canonicalBase64DecodedLength } from "./base64.js";
 import { cssScopeAttribute } from "./css.js";
 import { invariant } from "./errors.js";
 import { assertResourceId, validateResourceCatalog } from "./resources.js";
+import { NO_VARIANT_EFFECT_TARGET, VARIANT_EFFECT_PROPERTIES, type VariantEffectProperty } from "./variant-effects.js";
+import { formatOrbitModelTransform, formatOrbitPosition } from "./state/orbit.js";
+import { pagedPlaybackLiveRowCeiling, pagedPlaybackPublicationWorkspaceBytes, pagedVariantPublicationWorkspaceBytes, pagedVariantRetainedRowsBytes, statePageValidationWorkspaceBytes } from "./state-pages.js";
 import type { DomLimits } from "./constants.js";
 import type {
   DomBindingChannel,
@@ -33,9 +36,14 @@ const KNOWN_REQUIRED_CAPABILITIES = new Set([
   "explicit-retained-tree",
   "logical-assets",
   "prepared-particle-effects",
+  "prepared-orbit-input",
+  "prepared-paged-state",
+  "prepared-compositor-timing",
   "prepared-playback",
   "prepared-pointer-grab-interaction",
   "prepared-surface-lighting",
+  "prepared-variants",
+  "prepared-viewport-profiles",
 ]);
 const BASE_REQUIRED_CAPABILITIES = Object.freeze([
   "css-semantic-closure",
@@ -45,31 +53,55 @@ const BASE_REQUIRED_CAPABILITIES = Object.freeze([
 ]);
 const CAPABILITY_BY_INTERPRETER: Readonly<Record<string, string>> = Object.freeze({
   "polycss-effects@0": "prepared-particle-effects",
+  "polycss-compositor-timing@0": "prepared-compositor-timing",
+  "polycss-orbit-input@0": "prepared-orbit-input",
+  "polycss-paged-variants@0": "prepared-variants",
+  "polycss-paged-playback@0": "prepared-playback",
   "polycss-playback@0": "prepared-playback",
   "polycss-pointer-grab@0": "prepared-pointer-grab-interaction",
   "polycss-surface@0": "prepared-surface-lighting",
+  "polycss-variants@0": "prepared-variants",
+  "polycss-viewport-profiles@0": "prepared-viewport-profiles",
 });
 const CONFORMANCE_BY_INTERPRETER: Readonly<Record<string, string>> = Object.freeze({
   "polycss-effects@0": "particle-effects",
+  "polycss-compositor-timing@0": "compositor-timing",
+  "polycss-orbit-input@0": "orbit-input",
+  "polycss-paged-variants@0": "paged-variants",
+  "polycss-paged-playback@0": "paged-playback",
   "polycss-playback@0": "playback",
   "polycss-pointer-grab@0": "pointer-grab-interaction",
   "polycss-surface@0": "surface-lighting",
+  "polycss-variants@0": "variants",
+  "polycss-viewport-profiles@0": "viewport-profiles",
   "static-presentation@0": "presentation",
 });
 const CAPABILITY_INTERPRETER_ORDER: readonly string[] = Object.freeze([
   "polycss-effects@0",
+  "polycss-compositor-timing@0",
+  "polycss-orbit-input@0",
+  "polycss-paged-playback@0",
+  "polycss-paged-variants@0",
   "polycss-pointer-grab@0",
   "polycss-playback@0",
   "polycss-surface@0",
+  "polycss-variants@0",
+  "polycss-viewport-profiles@0",
 ]);
 const CONFORMANCE_INTERPRETER_ORDER: readonly string[] = Object.freeze([
   "polycss-effects@0",
+  "polycss-compositor-timing@0",
+  "polycss-orbit-input@0",
+  "polycss-paged-variants@0",
+  "polycss-paged-playback@0",
   "polycss-playback@0",
   "polycss-pointer-grab@0",
   "static-presentation@0",
   "polycss-surface@0",
+  "polycss-variants@0",
+  "polycss-viewport-profiles@0",
 ]);
-const VIEWER_OWNED_ATTRIBUTES = new Set(["data-domformat-instance", "data-domformat-mount-surface"]);
+const VIEWER_OWNED_ATTRIBUTES = new Set(["data-domformat-instance", "data-domformat-mount-surface", "data-domformat-node"]);
 const ALLOWED_ELEMENTS = new Set(["b", "div", "i", "img", "s", "span", "u"]);
 const ALLOWED_ATTRIBUTES = new Set(["alt", "aria-hidden", "class", "decoding", "draggable", "height", "role", "width"]);
 const ALLOWED_RESOURCE_ATTRIBUTES = new Set(["src"]);
@@ -113,32 +145,56 @@ const ALLOWED_MOUNT_STYLES = new Set([
 ]);
 const ALLOWED_RESOURCE_STYLES = new Set(["backgroundImage"]);
 const ALLOWED_CODECS = new Set([
+  "polycss-compositor-timing-prepared@0",
   "polycss-effects-prepared@0",
+  "polycss-orbit-input-prepared@0",
+  "polycss-paged-variants@0",
+  "polycss-paged-playback@0",
   "polycss-playback-packed@0",
   "polycss-pointer-grab-prepared@0",
   "polycss-surface-packed@0",
+  "polycss-variants-packed@0",
+  "polycss-viewport-profiles-packed@0",
   "static-presentation@0",
 ]);
 const ALLOWED_INTERPRETERS = new Set([
+  "polycss-compositor-timing@0",
   "polycss-effects@0",
+  "polycss-orbit-input@0",
+  "polycss-paged-variants@0",
+  "polycss-paged-playback@0",
   "polycss-playback@0",
   "polycss-pointer-grab@0",
   "polycss-surface@0",
+  "polycss-variants@0",
+  "polycss-viewport-profiles@0",
   "static-presentation@0",
 ]);
 const INTERPRETER_CODECS: Readonly<Record<string, string>> = Object.freeze({
   "polycss-effects@0": "polycss-effects-prepared@0",
+  "polycss-compositor-timing@0": "polycss-compositor-timing-prepared@0",
+  "polycss-orbit-input@0": "polycss-orbit-input-prepared@0",
+  "polycss-paged-variants@0": "polycss-paged-variants@0",
+  "polycss-paged-playback@0": "polycss-paged-playback@0",
   "polycss-playback@0": "polycss-playback-packed@0",
   "polycss-pointer-grab@0": "polycss-pointer-grab-prepared@0",
   "polycss-surface@0": "polycss-surface-packed@0",
+  "polycss-variants@0": "polycss-variants-packed@0",
+  "polycss-viewport-profiles@0": "polycss-viewport-profiles-packed@0",
   "static-presentation@0": "static-presentation@0",
 });
 const ALLOWED_SINKS = new Set([
+  "class.prepared",
+  "style.backgroundColor",
   "style.backgroundPosition",
+  "style.backgroundPositionX",
   "style.backgroundPositionY",
+  "style.color",
+  "style.display",
   "style.height",
   "style.left",
   "style.opacity",
+  "style.outlineColor",
   "style.top",
   "style.transform",
   "style.visibility",
@@ -530,7 +586,7 @@ function validateBindingTargetOwnership(bindingChannels: ReadonlyMap<string, Dom
       for (const target of targetsOf(channel)) invariant(!owned.has(target), "TARGET_OWNERSHIP_CONFLICT", `Effect target ${target} is also owned by ${channel.interpreter}.`);
     }
   }
-  const playback = byInterpreter.get("polycss-playback@0");
+  const playback = byInterpreter.get("polycss-playback@0") ?? byInterpreter.get("polycss-paged-playback@0");
   const presentation = byInterpreter.get("static-presentation@0");
   if (playback && presentation) {
     const playbackTargets = targetsOf(playback);
@@ -755,6 +811,22 @@ function base64Integers(value: unknown, width: number, maximum: number, code: st
   });
 }
 
+function base64Float64(value: unknown, maximum: number, code: string, label: string): number[] {
+  const width = 8;
+  const decodedLength = canonicalBase64DecodedLength(value, label, code);
+  invariant(typeof value === "string" && decodedLength % width === 0 && decodedLength / width <= maximum, code, `${label} is truncated or excessive.`);
+  let binary;
+  try {
+    binary = globalThis.atob(value);
+  } catch {
+    invariant(false, code, `${label} is not valid base64.`);
+  }
+  invariant(binary.length === decodedLength, code, `${label} has a noncanonical decoded length.`);
+  const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
+  const view = new DataView(bytes.buffer);
+  return Array.from({ length: decodedLength / width }, (_, index) => view.getFloat64(index * width, true));
+}
+
 function exactArray(value: unknown, expected: readonly unknown[], code: string, message: string): void {
   invariant(Array.isArray(value) && value.length === expected.length && value.every((entry, index) => entry === expected[index]), code, message);
 }
@@ -779,7 +851,40 @@ interface PlaybackTargets {
 export interface PlaybackParameters {
   readonly baseSceneTransform: string;
   readonly frameCount: number;
-  readonly tickRateHz: number;
+  readonly tickRateHz?: number;
+  readonly tickIntervalUs?: readonly [number, number];
+  readonly catchUpPolicy?: "bounded" | "single-step" | "elapsed";
+}
+
+interface TickCadenceParameters {
+  readonly tickRateHz?: number;
+  readonly tickIntervalUs?: readonly [number, number];
+}
+
+function greatestCommonDivisor(left: number, right: number): number {
+  let a = left;
+  let b = right;
+  while (b !== 0) [a, b] = [b, a % b];
+  return a;
+}
+
+function validateTickCadence(parameters: TickCadenceParameters, code: string, label: string): void {
+  const hasRate = Object.hasOwn(parameters, "tickRateHz");
+  const hasInterval = Object.hasOwn(parameters, "tickIntervalUs");
+  invariant(hasRate !== hasInterval, code, `${label} must declare exactly one cadence.`);
+  if (hasRate) {
+    invariant(typeof parameters.tickRateHz === "number" && Number.isFinite(parameters.tickRateHz) && parameters.tickRateHz >= 1 && parameters.tickRateHz <= 240, code, `${label} tickRateHz is invalid.`);
+    return;
+  }
+  const interval = parameters.tickIntervalUs;
+  invariant(Array.isArray(interval) && interval.length === 2 && interval.every((value) => Number.isSafeInteger(value) && value > 0), code, `${label} tickIntervalUs is invalid.`);
+  invariant(interval[0] / interval[1] >= 1_000_000 / 240 && interval[0] / interval[1] <= 1_000_000, code, `${label} tickIntervalUs is outside the 1..240 Hz bound.`);
+  invariant(greatestCommonDivisor(interval[0], interval[1]) === 1, code, `${label} tickIntervalUs must be reduced.`);
+}
+
+function sameTickCadence(left: TickCadenceParameters, right: TickCadenceParameters): boolean {
+  if (Object.hasOwn(left, "tickRateHz") || Object.hasOwn(right, "tickRateHz")) return left.tickRateHz === right.tickRateHz;
+  return left.tickIntervalUs?.[0] === right.tickIntervalUs?.[0] && left.tickIntervalUs?.[1] === right.tickIntervalUs?.[1];
 }
 
 interface PlaybackTransformGroup {
@@ -796,12 +901,57 @@ interface PlaybackPacket {
   readonly leafCount: number;
   readonly appearances: readonly (readonly unknown[])[];
   readonly timeline: unknown;
+  readonly profileTimelines?: readonly unknown[];
+  readonly initialBankId?: string;
+  readonly banks?: readonly PlaybackBank[];
   readonly initial: PlaybackInitial;
   readonly frameRows: readonly (readonly number[])[];
   readonly shapeChanges: unknown;
   readonly leafChanges: unknown;
   readonly transforms: unknown;
 }
+
+interface PagedPlaybackDescriptor {
+  readonly resource: string;
+  readonly startFrame: number;
+  readonly endFrame: number;
+  readonly transformCount: number;
+  readonly shapeChangeCount: number;
+  readonly leafChangeCount: number;
+  readonly materializedByteLength: number;
+}
+
+interface PagedPlaybackPacket {
+  readonly version: number;
+  readonly shapeCount: number;
+  readonly leafCount: number;
+  readonly appearances: readonly (readonly unknown[])[];
+  readonly timeline: unknown;
+  readonly profileTimelines?: readonly unknown[];
+  readonly initialBankId?: string;
+  readonly banks?: readonly PlaybackBank[];
+  readonly initial: Readonly<{ sourceFrame: number; appearance: number }>;
+  readonly pages: readonly PagedPlaybackDescriptor[];
+  readonly lookaheadPages: number;
+  readonly maxResidentPages: number;
+}
+
+interface ValidatedPlaybackBase {
+  readonly kind: "inline" | "paged";
+  readonly frameCount: number;
+  readonly shapeCount: number;
+  readonly leafCount: number;
+  readonly appearances: readonly (readonly unknown[])[];
+  readonly timeline: unknown;
+  readonly profileTimelines?: readonly unknown[];
+  readonly initialBankId?: string;
+  readonly banks?: readonly PlaybackBank[];
+  readonly initial: Readonly<{ sourceFrame: number; appearance: number }>;
+}
+
+type ValidatedInlinePlayback = PlaybackPacket & ValidatedPlaybackBase & { readonly kind: "inline" };
+type ValidatedPagedPlayback = PagedPlaybackPacket & ValidatedPlaybackBase & { readonly kind: "paged" };
+type ValidatedPlayback = ValidatedInlinePlayback | ValidatedPagedPlayback;
 
 interface PlaybackData {
   readonly packet: unknown;
@@ -836,6 +986,38 @@ interface PlaybackTimeline {
   readonly introTicks: number;
   readonly loopTicks: number;
   readonly frames: unknown;
+  readonly deadlineMicros?: unknown;
+}
+
+interface PlaybackProfileTimeline extends PlaybackTimeline {
+  readonly profileId: string;
+}
+
+interface PlaybackBank {
+  readonly id: string;
+  readonly entryFrame: number;
+  readonly timeline: PlaybackTimeline;
+  readonly profileTimelines?: readonly PlaybackProfileTimeline[];
+}
+
+const MAX_TIMELINE_FRAME_SPAN = 8;
+
+function validateTimelineFrameSpans(frames: readonly number[], introTicks: number, frameCount: number, label: string): void {
+  const distance = (from: number, to: number): number => (to - from + frameCount) % frameCount;
+  invariant(frames.slice(1).every((frame, index) => distance(frames[index], frame) <= MAX_TIMELINE_FRAME_SPAN), "TIMELINE_LIMIT", `${label} advances too many source frames in one logical tick.`);
+  invariant(distance(frames.at(-1)!, frames[introTicks]) <= MAX_TIMELINE_FRAME_SPAN, "TIMELINE_LIMIT", `${label} loop seam advances too many source frames in one logical tick.`);
+}
+
+function samePlaybackTimeline(left: PlaybackTimeline, right: PlaybackTimeline, profile: boolean): boolean {
+  const leftProfile = left as PlaybackProfileTimeline;
+  const rightProfile = right as PlaybackProfileTimeline;
+  return (!profile || leftProfile.profileId === rightProfile.profileId)
+    && left.introTicks === right.introTicks
+    && left.loopTicks === right.loopTicks
+    && sameArray(left.frames as readonly number[], right.frames as readonly number[])
+    && ((left.deadlineMicros === undefined && right.deadlineMicros === undefined)
+      || (left.deadlineMicros !== undefined && right.deadlineMicros !== undefined
+        && sameArray(left.deadlineMicros as readonly number[], right.deadlineMicros as readonly number[])));
 }
 
 interface PlaybackShapeChanges {
@@ -854,7 +1036,7 @@ function validatePlaybackContract(
   playbackBinding: DomBindingChannel,
   bindingInputs: ReadonlyMap<string, DomBindingInput>,
   limits: DomLimits,
-): PlaybackPacket {
+): ValidatedInlinePlayback {
   invariant(playbackBinding.status === "executable", "INVALID_PLAYBACK_BINDING", "polycss-playback@0 must be executable.");
   exactArray(playbackBinding.inputs, ["time.tick"], "INVALID_PLAYBACK_BINDING", "polycss-playback@0 inputs are incomplete or noncanonical.");
   const tickInput = bindingInputs.get("time.tick");
@@ -866,15 +1048,16 @@ function validatePlaybackContract(
   uniqueTargets(targets.shapes, "Playback shape");
   uniqueTargets(targets.leaves, "Playback leaf");
   const parameters = plainObject<PlaybackParameters>(playbackBinding.parameters, "INVALID_PLAYBACK_BINDING", "Playback parameters");
-  knownKeys(parameters, new Set(["baseSceneTransform", "frameCount", "tickRateHz"]), "INVALID_PLAYBACK_BINDING", "Playback parameters");
+  knownKeys(parameters, new Set(["baseSceneTransform", "frameCount", "tickRateHz", "tickIntervalUs", "catchUpPolicy"]), "INVALID_PLAYBACK_BINDING", "Playback parameters");
   safeStyleValue(parameters.baseSceneTransform, "Playback base scene transform");
   invariant(Number.isSafeInteger(parameters.frameCount) && parameters.frameCount > 0 && parameters.frameCount <= limits.maxFrames, "FRAME_CARDINALITY_MISMATCH", "Playback frameCount is invalid or excessive.");
-  invariant(parameters.tickRateHz === 30, "INVALID_PLAYBACK_BINDING", "polycss-playback@0 tickRateHz must be 30.");
+  validateTickCadence(parameters, "INVALID_PLAYBACK_BINDING", "Playback");
+  invariant(parameters.catchUpPolicy === undefined || parameters.catchUpPolicy === "bounded" || parameters.catchUpPolicy === "single-step" || parameters.catchUpPolicy === "elapsed", "INVALID_PLAYBACK_BINDING", "Playback catchUpPolicy is invalid.");
 
   const data = plainObject<PlaybackData>(playbackState.data, "INVALID_PLAYBACK_STATE", "Playback state data");
   knownKeys(data, new Set(["packet", "leafFit"]), "INVALID_PLAYBACK_STATE", "Playback state data");
   const packet = plainObject<PlaybackPacket>(data.packet, "INVALID_PLAYBACK_STATE", "Playback packet");
-  knownKeys(packet, new Set(["version", "layout", "shapeCount", "leafCount", "appearances", "timeline", "initial", "frameRows", "shapeChanges", "leafChanges", "transforms"]), "INVALID_PLAYBACK_STATE", "Playback packet");
+  knownKeys(packet, new Set(["version", "layout", "shapeCount", "leafCount", "appearances", "timeline", "profileTimelines", "initialBankId", "banks", "initial", "frameRows", "shapeChanges", "leafChanges", "transforms"]), "INVALID_PLAYBACK_STATE", "Playback packet");
   invariant(packet.version === 0 && packet.layout === "delta-component-streams@0", "INVALID_PLAYBACK_STATE", "Playback packet version or layout is unsupported.");
   invariant(Number.isSafeInteger(packet.shapeCount) && packet.shapeCount >= 0 && packet.shapeCount <= limits.maxNodes, "TARGET_CARDINALITY_MISMATCH", "Playback shapeCount is invalid or excessive.");
   invariant(Number.isSafeInteger(packet.leafCount) && packet.leafCount >= 0 && packet.leafCount <= Math.min(limits.maxNodes, 0x10000), "TARGET_CARDINALITY_MISMATCH", "Playback leafCount is invalid or excessive for the uint16 surface codec.");
@@ -920,11 +1103,82 @@ function validatePlaybackContract(
   const initialLeafTransforms = cumulativeReferences(initialLeaves.transforms, packet.leafCount, "INVALID_PLAYBACK_STATE", "Playback initial leaf transforms");
   invariant([...initialShapeTransforms, ...initialLeafTransforms].every((index) => index < transformTable.count), "INVALID_PLAYBACK_STATE", "Playback initial state references a missing transform.");
 
-  const timeline = plainObject<PlaybackTimeline>(packet.timeline, "INVALID_PLAYBACK_STATE", "Playback timeline");
-  knownKeys(timeline, new Set(["introTicks", "loopTicks", "frames"]), "INVALID_PLAYBACK_STATE", "Playback timeline");
-  invariant(Number.isSafeInteger(timeline.introTicks) && timeline.introTicks >= 0 && Number.isSafeInteger(timeline.loopTicks) && timeline.loopTicks > 0, "TIMELINE_LIMIT", "Playback timeline ranges are invalid.");
-  const timelineFrames = integerArray(timeline.frames, limits.maxTimelineTicks, "TIMELINE_LIMIT", "Playback timeline frames", { minimum: 1, upper: parameters.frameCount });
-  invariant(timelineFrames.length === timeline.introTicks + timeline.loopTicks && timelineFrames[0] === initial.sourceFrame, "TIMELINE_LIMIT", "Playback timeline does not exactly cover its intro and loop or initial frame.");
+  const validateTimeline = (value: unknown, label: string, profile: boolean, entryFrame = initial.sourceFrame): PlaybackTimeline | PlaybackProfileTimeline => {
+    const timeline = plainObject<PlaybackTimeline | PlaybackProfileTimeline>(value, "INVALID_PLAYBACK_STATE", label);
+    const requiredFields = profile ? ["profileId", "introTicks", "loopTicks", "frames"] : ["introTicks", "loopTicks", "frames"];
+    const fields = [...requiredFields, "deadlineMicros"];
+    knownKeys(timeline, new Set(fields), "INVALID_PLAYBACK_STATE", label);
+    invariant(requiredFields.every((field) => Object.hasOwn(timeline, field)), "INVALID_PLAYBACK_STATE", `${label} is incomplete.`);
+    if (profile) stableId((timeline as PlaybackProfileTimeline).profileId, `${label} profile id`);
+    invariant(Number.isSafeInteger(timeline.introTicks) && timeline.introTicks >= 0 && Number.isSafeInteger(timeline.loopTicks) && timeline.loopTicks > 0, "TIMELINE_LIMIT", `${label} ranges are invalid.`);
+    const frames = integerArray(timeline.frames, limits.maxTimelineTicks, "TIMELINE_LIMIT", `${label} frames`, { minimum: 1, upper: parameters.frameCount });
+    invariant(frames.length === timeline.introTicks + timeline.loopTicks && frames[0] === entryFrame, "TIMELINE_LIMIT", `${label} does not exactly cover its intro and loop or entry frame.`);
+    validateTimelineFrameSpans(frames, timeline.introTicks, parameters.frameCount, label);
+    if (timeline.deadlineMicros !== undefined) {
+      const deadlines = integerArray(timeline.deadlineMicros, limits.maxTimelineTicks + 1, "TIMELINE_LIMIT", `${label} deadlines`, { minimum: 0 });
+      invariant(deadlines.length === frames.length + 1 && deadlines[0] === 0, "TIMELINE_LIMIT", `${label} deadlines do not exactly cover its ticks.`);
+      invariant(deadlines.every((deadline, index) => index === 0 || deadline > deadlines[index - 1]), "TIMELINE_LIMIT", `${label} deadlines must be strictly increasing.`);
+      invariant(deadlines.every((deadline, index) => index === 0 || deadline - deadlines[index - 1] <= 2_147_483_647_000), "TIMELINE_LIMIT", `${label} deadline interval exceeds the browser timer bound.`);
+    }
+    return timeline;
+  };
+  const timeline = validateTimeline(packet.timeline, "Playback timeline", false);
+  let timelineTickCount = (timeline.frames as readonly number[]).length;
+  if (packet.profileTimelines !== undefined) {
+    invariant(Array.isArray(packet.profileTimelines) && packet.profileTimelines.length > 0 && packet.profileTimelines.length <= 16, "INVALID_PLAYBACK_STATE", "Playback profile timelines are missing or excessive.");
+    const profileIds = new Set<string>();
+    for (const [index, value] of packet.profileTimelines.entries()) {
+      const profileTimeline = validateTimeline(value, `Playback profile timeline ${index}`, true) as PlaybackProfileTimeline;
+      invariant(!profileIds.has(profileTimeline.profileId), "INVALID_PLAYBACK_STATE", `Playback profile timeline id ${profileTimeline.profileId} is duplicated.`);
+      profileIds.add(profileTimeline.profileId);
+      timelineTickCount += (profileTimeline.frames as readonly number[]).length;
+      invariant(timelineTickCount <= limits.maxTimelineTicks, "TIMELINE_LIMIT", "Playback baseline and profile timelines exceed the aggregate tick limit.");
+    }
+  }
+  const hasInitialBankId = Object.hasOwn(packet, "initialBankId");
+  const hasBanks = Object.hasOwn(packet, "banks");
+  invariant(hasInitialBankId === hasBanks, "INVALID_PLAYBACK_STATE", "Playback initialBankId and banks must be declared together.");
+  if (hasBanks) {
+    const initialBankId = stableId(packet.initialBankId, "Playback initial bank id");
+    invariant(Array.isArray(packet.banks) && packet.banks.length > 0 && packet.banks.length <= 64, "INVALID_PLAYBACK_STATE", "Playback banks are missing or excessive.");
+    const bankIds = new Set<string>();
+    const entryFrames = new Set<number>();
+    let previousBankId = "";
+    let initialBank: PlaybackBank | undefined;
+    for (const [bankIndex, value] of packet.banks.entries()) {
+      const bank = plainObject<PlaybackBank>(value, "INVALID_PLAYBACK_STATE", `Playback bank ${bankIndex}`);
+      knownKeys(bank, new Set(["id", "entryFrame", "timeline", "profileTimelines"]), "INVALID_PLAYBACK_STATE", `Playback bank ${bankIndex}`);
+      const id = stableId(bank.id, `Playback bank ${bankIndex} id`);
+      invariant(id > previousBankId, "INVALID_PLAYBACK_STATE", "Playback banks must be ordered by id without duplicates.");
+      previousBankId = id;
+      bankIds.add(id);
+      invariant(Number.isSafeInteger(bank.entryFrame) && bank.entryFrame >= 1 && bank.entryFrame <= parameters.frameCount && !entryFrames.has(bank.entryFrame), "INVALID_PLAYBACK_STATE", `Playback bank ${id} entry frame is invalid or duplicated.`);
+      entryFrames.add(bank.entryFrame);
+      const bankTimeline = validateTimeline(bank.timeline, `Playback bank ${id} timeline`, false, bank.entryFrame) as PlaybackTimeline;
+      timelineTickCount += (bankTimeline.frames as readonly number[]).length;
+      let bankProfiles: readonly PlaybackProfileTimeline[] | undefined;
+      if (bank.profileTimelines !== undefined) {
+        invariant(Array.isArray(bank.profileTimelines) && bank.profileTimelines.length > 0 && bank.profileTimelines.length <= 16, "INVALID_PLAYBACK_STATE", `Playback bank ${id} profile timelines are missing or excessive.`);
+        const profiles: PlaybackProfileTimeline[] = [];
+        const profileIds = new Set<string>();
+        for (const [profileIndex, profileValue] of bank.profileTimelines.entries()) {
+          const profileTimeline = validateTimeline(profileValue, `Playback bank ${id} profile timeline ${profileIndex}`, true, bank.entryFrame) as PlaybackProfileTimeline;
+          invariant(!profileIds.has(profileTimeline.profileId), "INVALID_PLAYBACK_STATE", `Playback bank ${id} profile timeline id ${profileTimeline.profileId} is duplicated.`);
+          profileIds.add(profileTimeline.profileId);
+          profiles.push(profileTimeline);
+          timelineTickCount += (profileTimeline.frames as readonly number[]).length;
+        }
+        bankProfiles = profiles;
+      }
+      invariant(timelineTickCount <= limits.maxTimelineTicks, "TIMELINE_LIMIT", "Playback bank timelines exceed the aggregate tick limit.");
+      if (id === initialBankId) initialBank = { id, entryFrame: bank.entryFrame, timeline: bankTimeline, ...(bankProfiles === undefined ? {} : { profileTimelines: bankProfiles }) };
+    }
+    invariant(bankIds.has(initialBankId) && initialBank?.entryFrame === initial.sourceFrame, "INVALID_PLAYBACK_STATE", "Playback initial bank is missing or does not own the canonical initial frame.");
+    invariant(samePlaybackTimeline(initialBank.timeline, timeline as PlaybackTimeline, false), "INVALID_PLAYBACK_STATE", "Playback initial bank timeline does not match the canonical top-level timeline.");
+    const topProfiles = (packet.profileTimelines ?? []) as readonly PlaybackProfileTimeline[];
+    const initialProfiles = initialBank.profileTimelines ?? [];
+    invariant(initialProfiles.length === topProfiles.length && initialProfiles.every((profile, index) => samePlaybackTimeline(profile, topProfiles[index], true)), "INVALID_PLAYBACK_STATE", "Playback initial bank profile timelines do not match the canonical top-level profile timelines.");
+  }
 
   const shapeChanges = plainObject<PlaybackShapeChanges>(packet.shapeChanges, "INVALID_PLAYBACK_STATE", "Playback shape changes");
   knownKeys(shapeChanges, new Set(["sources", "transforms", "visibility"]), "INVALID_PLAYBACK_STATE", "Playback shape changes");
@@ -1014,7 +1268,153 @@ function validatePlaybackContract(
       }
     }
   }
-  return packet;
+  return { ...packet, kind: "inline", frameCount: parameters.frameCount };
+}
+
+function validatePagedPlaybackContract(
+  playbackState: DomStateChannel,
+  playbackBinding: DomBindingChannel,
+  bindingInputs: ReadonlyMap<string, DomBindingInput>,
+  limits: DomLimits,
+): ValidatedPagedPlayback {
+  invariant(playbackBinding.status === "executable", "INVALID_PLAYBACK_BINDING", "polycss-paged-playback@0 must be executable.");
+  exactArray(playbackBinding.inputs, ["time.tick"], "INVALID_PLAYBACK_BINDING", "polycss-paged-playback@0 inputs are incomplete or noncanonical.");
+  const tickInput = bindingInputs.get("time.tick");
+  invariant(tickInput?.type === "uint" && !Object.hasOwn(tickInput, "default"), "INVALID_PLAYBACK_BINDING", "Paged playback input time.tick must have type uint and no package default.");
+  exactArray(playbackBinding.sinks, ["style.transform", "style.visibility"], "INVALID_PLAYBACK_BINDING", "polycss-paged-playback@0 sinks are incomplete or noncanonical.");
+  const targets = plainObject<PlaybackTargets>(playbackBinding.targets, "INVALID_PLAYBACK_BINDING", "Paged playback targets");
+  knownKeys(targets, new Set(["model", "shapes", "leaves"]), "INVALID_PLAYBACK_BINDING", "Paged playback targets");
+  stableId(targets.model, "Paged playback model target");
+  uniqueTargets(targets.shapes, "Paged playback shape");
+  uniqueTargets(targets.leaves, "Paged playback leaf");
+  const parameters = plainObject<PlaybackParameters>(playbackBinding.parameters, "INVALID_PLAYBACK_BINDING", "Paged playback parameters");
+  knownKeys(parameters, new Set(["baseSceneTransform", "frameCount", "tickRateHz", "tickIntervalUs", "catchUpPolicy"]), "INVALID_PLAYBACK_BINDING", "Paged playback parameters");
+  safeStyleValue(parameters.baseSceneTransform, "Paged playback base scene transform");
+  invariant(Number.isSafeInteger(parameters.frameCount) && parameters.frameCount > 0 && parameters.frameCount <= limits.maxPagedFrames, "FRAME_CARDINALITY_MISMATCH", "Paged playback frameCount is invalid or excessive.");
+  validateTickCadence(parameters, "INVALID_PLAYBACK_BINDING", "Paged playback");
+  invariant(parameters.catchUpPolicy === undefined || parameters.catchUpPolicy === "bounded" || parameters.catchUpPolicy === "single-step" || parameters.catchUpPolicy === "elapsed", "INVALID_PLAYBACK_BINDING", "Paged playback catchUpPolicy is invalid.");
+
+  const data = plainObject<{ readonly packet: unknown }>(playbackState.data, "INVALID_PAGED_PLAYBACK_STATE", "Paged playback state data");
+  knownKeys(data, new Set(["packet"]), "INVALID_PAGED_PLAYBACK_STATE", "Paged playback state data");
+  const packet = plainObject<PagedPlaybackPacket>(data.packet, "INVALID_PAGED_PLAYBACK_STATE", "Paged playback packet");
+  knownKeys(packet, new Set(["version", "shapeCount", "leafCount", "appearances", "timeline", "profileTimelines", "initialBankId", "banks", "initial", "pages", "lookaheadPages", "maxResidentPages"]), "INVALID_PAGED_PLAYBACK_STATE", "Paged playback packet");
+  invariant(packet.version === 0, "INVALID_PAGED_PLAYBACK_STATE", "Paged playback packet version must be 0.");
+  invariant(Number.isSafeInteger(packet.shapeCount) && packet.shapeCount >= 0 && packet.shapeCount <= limits.maxNodes, "TARGET_CARDINALITY_MISMATCH", "Paged playback shapeCount is invalid or excessive.");
+  invariant(Number.isSafeInteger(packet.leafCount) && packet.leafCount >= 0 && packet.leafCount <= Math.min(limits.maxNodes, 0x10000), "TARGET_CARDINALITY_MISMATCH", "Paged playback leafCount is invalid or excessive.");
+  invariant(targets.shapes.length === packet.shapeCount && targets.leaves.length === packet.leafCount, "TARGET_CARDINALITY_MISMATCH", "Paged playback targets do not match declared counts.");
+
+  invariant(Array.isArray(packet.appearances) && packet.appearances.length > 0 && packet.appearances.length <= limits.maxFrames, "INVALID_PAGED_PLAYBACK_STATE", "Paged playback appearances are missing or excessive.");
+  const appearanceIds = new Set<string>();
+  for (const [index, appearance] of packet.appearances.entries()) {
+    invariant(Array.isArray(appearance) && appearance.length === 3, "INVALID_PAGED_PLAYBACK_STATE", `Paged playback appearance ${index} is malformed.`);
+    const id = stableId(appearance[0], `Paged playback appearance ${index} id`);
+    invariant(!appearanceIds.has(id), "INVALID_PAGED_PLAYBACK_STATE", `Paged playback appearance id ${id} is duplicated.`);
+    appearanceIds.add(id);
+    invariant(finiteF32(appearance[1]) && appearance[1] > 0 && finiteF32(appearance[2]), "INVALID_PAGED_PLAYBACK_STATE", `Paged playback appearance ${index} has invalid binary32 scale or translation.`);
+  }
+  const initial = plainObject<{ readonly sourceFrame: number; readonly appearance: number }>(packet.initial, "INVALID_PAGED_PLAYBACK_STATE", "Paged playback initial state");
+  knownKeys(initial, new Set(["sourceFrame", "appearance"]), "INVALID_PAGED_PLAYBACK_STATE", "Paged playback initial state");
+  invariant(Number.isSafeInteger(initial.sourceFrame) && initial.sourceFrame >= 1 && initial.sourceFrame <= parameters.frameCount, "FRAME_CARDINALITY_MISMATCH", "Paged playback initial source frame is invalid.");
+  invariant(Number.isSafeInteger(initial.appearance) && initial.appearance >= 0 && initial.appearance < packet.appearances.length, "INVALID_PAGED_PLAYBACK_STATE", "Paged playback initial appearance is invalid.");
+
+  const validateTimeline = (value: unknown, label: string, profile: boolean, entryFrame = initial.sourceFrame): PlaybackTimeline | PlaybackProfileTimeline => {
+    const timeline = plainObject<PlaybackTimeline | PlaybackProfileTimeline>(value, "INVALID_PAGED_PLAYBACK_STATE", label);
+    const requiredFields = profile ? ["profileId", "introTicks", "loopTicks", "frames"] : ["introTicks", "loopTicks", "frames"];
+    const fields = [...requiredFields, "deadlineMicros"];
+    knownKeys(timeline, new Set(fields), "INVALID_PAGED_PLAYBACK_STATE", label);
+    invariant(requiredFields.every((field) => Object.hasOwn(timeline, field)), "INVALID_PAGED_PLAYBACK_STATE", `${label} is incomplete.`);
+    if (profile) stableId((timeline as PlaybackProfileTimeline).profileId, `${label} profile id`);
+    invariant(Number.isSafeInteger(timeline.introTicks) && timeline.introTicks >= 0 && Number.isSafeInteger(timeline.loopTicks) && timeline.loopTicks > 0, "TIMELINE_LIMIT", `${label} ranges are invalid.`);
+    const frames = integerArray(timeline.frames, limits.maxTimelineTicks, "TIMELINE_LIMIT", `${label} frames`, { minimum: 1, upper: parameters.frameCount });
+    invariant(frames.length === timeline.introTicks + timeline.loopTicks && frames[0] === entryFrame, "TIMELINE_LIMIT", `${label} does not exactly cover its intro and loop or entry frame.`);
+    validateTimelineFrameSpans(frames, timeline.introTicks, parameters.frameCount, label);
+    if (timeline.deadlineMicros !== undefined) {
+      const deadlines = integerArray(timeline.deadlineMicros, limits.maxTimelineTicks + 1, "TIMELINE_LIMIT", `${label} deadlines`, { minimum: 0 });
+      invariant(deadlines.length === frames.length + 1 && deadlines[0] === 0, "TIMELINE_LIMIT", `${label} deadlines do not exactly cover its ticks.`);
+      invariant(deadlines.every((deadline, index) => index === 0 || deadline > deadlines[index - 1]), "TIMELINE_LIMIT", `${label} deadlines must be strictly increasing.`);
+      invariant(deadlines.every((deadline, index) => index === 0 || deadline - deadlines[index - 1] <= 2_147_483_647_000), "TIMELINE_LIMIT", `${label} deadline interval exceeds the browser timer bound.`);
+    }
+    return timeline;
+  };
+  let tickCount = (validateTimeline(packet.timeline, "Paged playback timeline", false).frames as readonly number[]).length;
+  if (packet.profileTimelines !== undefined) {
+    invariant(Array.isArray(packet.profileTimelines) && packet.profileTimelines.length > 0 && packet.profileTimelines.length <= 16, "INVALID_PAGED_PLAYBACK_STATE", "Paged playback profile timelines are missing or excessive.");
+    const profileIds = new Set<string>();
+    for (const [index, value] of packet.profileTimelines.entries()) {
+      const timeline = validateTimeline(value, `Paged playback profile timeline ${index}`, true) as PlaybackProfileTimeline;
+      invariant(!profileIds.has(timeline.profileId), "INVALID_PAGED_PLAYBACK_STATE", `Paged playback profile timeline id ${timeline.profileId} is duplicated.`);
+      profileIds.add(timeline.profileId);
+      tickCount += (timeline.frames as readonly number[]).length;
+      invariant(tickCount <= limits.maxTimelineTicks, "TIMELINE_LIMIT", "Paged playback baseline and profile timelines exceed the aggregate tick limit.");
+    }
+  }
+  const hasInitialBankId = Object.hasOwn(packet, "initialBankId");
+  const hasBanks = Object.hasOwn(packet, "banks");
+  invariant(hasInitialBankId === hasBanks, "INVALID_PAGED_PLAYBACK_STATE", "Paged playback initialBankId and banks must be declared together.");
+  if (hasBanks) {
+    const initialBankId = stableId(packet.initialBankId, "Paged playback initial bank id");
+    invariant(Array.isArray(packet.banks) && packet.banks.length > 0 && packet.banks.length <= 64, "INVALID_PAGED_PLAYBACK_STATE", "Paged playback banks are missing or excessive.");
+    const bankIds = new Set<string>();
+    const entryFrames = new Set<number>();
+    let previousBankId = "";
+    let initialBank: PlaybackBank | undefined;
+    for (const [bankIndex, value] of packet.banks.entries()) {
+      const bank = plainObject<PlaybackBank>(value, "INVALID_PAGED_PLAYBACK_STATE", `Paged playback bank ${bankIndex}`);
+      knownKeys(bank, new Set(["id", "entryFrame", "timeline", "profileTimelines"]), "INVALID_PAGED_PLAYBACK_STATE", `Paged playback bank ${bankIndex}`);
+      const id = stableId(bank.id, `Paged playback bank ${bankIndex} id`);
+      invariant(id > previousBankId, "INVALID_PAGED_PLAYBACK_STATE", "Paged playback banks must be ordered by id without duplicates.");
+      previousBankId = id;
+      bankIds.add(id);
+      invariant(Number.isSafeInteger(bank.entryFrame) && bank.entryFrame >= 1 && bank.entryFrame <= parameters.frameCount && !entryFrames.has(bank.entryFrame), "INVALID_PAGED_PLAYBACK_STATE", `Paged playback bank ${id} entry frame is invalid or duplicated.`);
+      entryFrames.add(bank.entryFrame);
+      const bankTimeline = validateTimeline(bank.timeline, `Paged playback bank ${id} timeline`, false, bank.entryFrame) as PlaybackTimeline;
+      tickCount += (bankTimeline.frames as readonly number[]).length;
+      let bankProfiles: readonly PlaybackProfileTimeline[] | undefined;
+      if (bank.profileTimelines !== undefined) {
+        invariant(Array.isArray(bank.profileTimelines) && bank.profileTimelines.length > 0 && bank.profileTimelines.length <= 16, "INVALID_PAGED_PLAYBACK_STATE", `Paged playback bank ${id} profile timelines are missing or excessive.`);
+        const profiles: PlaybackProfileTimeline[] = [];
+        const profileIds = new Set<string>();
+        for (const [profileIndex, profileValue] of bank.profileTimelines.entries()) {
+          const profileTimeline = validateTimeline(profileValue, `Paged playback bank ${id} profile timeline ${profileIndex}`, true, bank.entryFrame) as PlaybackProfileTimeline;
+          invariant(!profileIds.has(profileTimeline.profileId), "INVALID_PAGED_PLAYBACK_STATE", `Paged playback bank ${id} profile timeline id ${profileTimeline.profileId} is duplicated.`);
+          profileIds.add(profileTimeline.profileId);
+          profiles.push(profileTimeline);
+          tickCount += (profileTimeline.frames as readonly number[]).length;
+        }
+        bankProfiles = profiles;
+      }
+      invariant(tickCount <= limits.maxTimelineTicks, "TIMELINE_LIMIT", "Paged playback bank timelines exceed the aggregate tick limit.");
+      if (id === initialBankId) initialBank = { id, entryFrame: bank.entryFrame, timeline: bankTimeline, ...(bankProfiles === undefined ? {} : { profileTimelines: bankProfiles }) };
+    }
+    invariant(bankIds.has(initialBankId) && initialBank?.entryFrame === initial.sourceFrame, "INVALID_PAGED_PLAYBACK_STATE", "Paged playback initial bank is missing or does not own the canonical initial frame.");
+    const topTimeline = packet.timeline as PlaybackTimeline;
+    invariant(samePlaybackTimeline(initialBank.timeline, topTimeline, false), "INVALID_PAGED_PLAYBACK_STATE", "Paged playback initial bank timeline does not match the canonical top-level timeline.");
+    const topProfiles = (packet.profileTimelines ?? []) as readonly PlaybackProfileTimeline[];
+    const initialProfiles = initialBank.profileTimelines ?? [];
+    invariant(initialProfiles.length === topProfiles.length && initialProfiles.every((profile, index) => samePlaybackTimeline(profile, topProfiles[index], true)), "INVALID_PAGED_PLAYBACK_STATE", "Paged playback initial bank profile timelines do not match the canonical top-level profile timelines.");
+  }
+
+  invariant(Number.isSafeInteger(packet.lookaheadPages) && packet.lookaheadPages >= 1 && packet.lookaheadPages <= 4, "STATE_PAGE_RESIDENCY_LIMIT", "Paged playback lookahead is invalid or excessive.");
+  invariant(Number.isSafeInteger(packet.maxResidentPages) && packet.maxResidentPages >= packet.lookaheadPages + 1 && packet.maxResidentPages <= 16, "STATE_PAGE_RESIDENCY_LIMIT", "Paged playback resident-page ceiling is invalid or excessive.");
+  invariant(Array.isArray(packet.pages) && packet.pages.length > 0 && packet.pages.length <= limits.maxStatePages, "STATE_PAGE_COVERAGE_MISMATCH", "Paged playback descriptors are missing or excessive.");
+  const resources = new Set<string>();
+  let expectedFrame = 1;
+  for (const [index, descriptorValue] of packet.pages.entries()) {
+    const descriptor = plainObject<PagedPlaybackDescriptor>(descriptorValue, "INVALID_PAGED_PLAYBACK_STATE", `Paged playback descriptor ${index}`);
+    knownKeys(descriptor, new Set(["resource", "startFrame", "endFrame", "transformCount", "shapeChangeCount", "leafChangeCount", "materializedByteLength"]), "INVALID_PAGED_PLAYBACK_STATE", `Paged playback descriptor ${index}`);
+    const resource = assertResourceId(descriptor.resource, `Paged playback descriptor ${index} resource`);
+    invariant(!resources.has(resource), "INVALID_PAGED_PLAYBACK_STATE", `Paged playback resource ${resource} is duplicated.`);
+    resources.add(resource);
+    invariant(descriptor.startFrame === expectedFrame && Number.isSafeInteger(descriptor.endFrame) && descriptor.endFrame >= descriptor.startFrame && descriptor.endFrame <= parameters.frameCount, "STATE_PAGE_COVERAGE_MISMATCH", `Paged playback descriptor ${index} does not provide contiguous frame coverage.`);
+    invariant(descriptor.endFrame - descriptor.startFrame + 1 <= limits.maxStatePageFrames, "STATE_PAGE_COVERAGE_MISMATCH", `Paged playback descriptor ${index} exceeds the per-page frame limit.`);
+    expectedFrame = descriptor.endFrame + 1;
+    invariant(Number.isSafeInteger(descriptor.transformCount) && descriptor.transformCount > 0 && descriptor.transformCount <= limits.maxPreparedTransforms, "TRANSFORM_ALLOCATION_LIMIT", `Paged playback descriptor ${index} transform count is invalid or excessive.`);
+    invariant(Number.isSafeInteger(descriptor.shapeChangeCount) && descriptor.shapeChangeCount >= 0 && descriptor.shapeChangeCount <= limits.maxPreparedChanges, "STATE_CHANGE_LIMIT", `Paged playback descriptor ${index} shape change count is invalid or excessive.`);
+    invariant(Number.isSafeInteger(descriptor.leafChangeCount) && descriptor.leafChangeCount >= 0 && descriptor.leafChangeCount <= limits.maxPreparedChanges, "STATE_CHANGE_LIMIT", `Paged playback descriptor ${index} leaf change count is invalid or excessive.`);
+    invariant(Number.isSafeInteger(descriptor.materializedByteLength) && descriptor.materializedByteLength > 0 && descriptor.materializedByteLength <= limits.maxAggregateDecodedBytes, "STATE_PAGE_RESIDENCY_LIMIT", `Paged playback descriptor ${index} materialized byte length is invalid or excessive.`);
+  }
+  invariant(expectedFrame === parameters.frameCount + 1, "STATE_PAGE_COVERAGE_MISMATCH", "Paged playback descriptors do not cover the playback frame range exactly.");
+  return { ...packet, kind: "paged", frameCount: parameters.frameCount };
 }
 
 interface SurfaceTargets {
@@ -1033,6 +1433,8 @@ interface SurfaceFace {
 interface SurfacePacking {
   readonly stateCount: number;
   readonly sourceFrameDeltas: readonly number[];
+  readonly positionDictionary?: readonly (readonly [number, number])[];
+  readonly positionIndicesBase64?: unknown;
 }
 
 interface SurfaceTable {
@@ -1088,7 +1490,7 @@ interface SurfacePacket {
 function validateSurfaceContract(
   surfaceState: DomStateChannel,
   surfaceBinding: DomBindingChannel,
-  playbackPacket: PlaybackPacket,
+  playbackPacket: ValidatedPlayback,
   playbackBinding: DomBindingChannel,
   bindingInputs: ReadonlyMap<string, DomBindingInput>,
   limits: DomLimits,
@@ -1097,7 +1499,6 @@ function validateSurfaceContract(
   exactArray(surfaceBinding.inputs, ["time.source-frame"], "INVALID_SURFACE_BINDING", "polycss-surface@0 inputs are incomplete or noncanonical.");
   const sourceFrameInput = bindingInputs.get("time.source-frame");
   invariant(sourceFrameInput?.type === "uint" && !Object.hasOwn(sourceFrameInput, "default"), "INVALID_SURFACE_BINDING", "Surface input time.source-frame must have type uint and no package default.");
-  exactArray(surfaceBinding.sinks, ["style.backgroundPositionY", "style.visibility"], "INVALID_SURFACE_BINDING", "polycss-surface@0 sinks are incomplete or noncanonical.");
   invariant(!Object.hasOwn(surfaceBinding, "parameters"), "INVALID_SURFACE_BINDING", "polycss-surface@0 has no binding parameters.");
   const targets = plainObject<SurfaceTargets>(surfaceBinding.targets, "INVALID_SURFACE_BINDING", "Surface targets");
   knownKeys(targets, new Set(["leaves"]), "INVALID_SURFACE_BINDING", "Surface targets");
@@ -1115,10 +1516,35 @@ function validateSurfaceContract(
   knownKeys(surface, new Set(["faces", "statePacking"]), "INVALID_SURFACE_STATE", "Surface table");
   invariant(Array.isArray(surface.faces) && surface.faces.length === playbackPacket.leafCount, "TARGET_CARDINALITY_MISMATCH", "Surface faces do not match playback leafCount.");
   const packing = plainObject<SurfacePacking>(surface.statePacking, "INVALID_SURFACE_STATE", "Surface state packing");
-  knownKeys(packing, new Set(["stateCount", "sourceFrameDeltas"]), "INVALID_SURFACE_STATE", "Surface state packing");
+  knownKeys(packing, new Set(["stateCount", "sourceFrameDeltas", "positionDictionary", "positionIndicesBase64"]), "INVALID_SURFACE_STATE", "Surface state packing");
   invariant(Number.isSafeInteger(packing.stateCount) && packing.stateCount >= 0 && packing.stateCount <= limits.maxPreparedStates, "SURFACE_STATE_LIMIT", "Surface state count is invalid or excessive.");
   integerArray(packing.sourceFrameDeltas, limits.maxPreparedStates, "SURFACE_STATE_LIMIT", "Surface source-frame deltas", { minimum: 0, upper: packet.frameCount - 1 });
   invariant(packing.sourceFrameDeltas.length === packing.stateCount, "STATE_COLUMN_MISMATCH", "Surface source-frame deltas do not match stateCount.");
+  const hasPositionDictionary = Object.hasOwn(packing, "positionDictionary");
+  const hasPositionIndices = Object.hasOwn(packing, "positionIndicesBase64");
+  invariant(hasPositionDictionary === hasPositionIndices, "INVALID_SURFACE_STATE", "Surface prepared position dictionary and indices must appear together.");
+  const preparedPositions = hasPositionDictionary;
+  exactArray(
+    surfaceBinding.sinks,
+    [preparedPositions ? "style.backgroundPosition" : "style.backgroundPositionY", "style.visibility"],
+    "INVALID_SURFACE_BINDING",
+    "polycss-surface@0 sinks are incomplete or noncanonical.",
+  );
+  if (preparedPositions) {
+    invariant(Array.isArray(packing.positionDictionary) && packing.positionDictionary.length > 0 && packing.positionDictionary.length <= Math.min(packing.stateCount, 0xffff), "SURFACE_STATE_LIMIT", "Surface position dictionary is missing or excessive.");
+    let previousX = Number.MIN_SAFE_INTEGER;
+    let previousY = Number.MIN_SAFE_INTEGER;
+    for (const [index, position] of packing.positionDictionary.entries()) {
+      invariant(Array.isArray(position) && position.length === 2 && position.every((coordinate) => Number.isSafeInteger(coordinate) && !Object.is(coordinate, -0) && coordinate >= -0x80000000 && coordinate <= 0x7fffffff), "INVALID_SURFACE_STATE", `Surface position dictionary row ${index} is invalid.`);
+      const [x, y] = position;
+      invariant(index === 0 || x > previousX || (x === previousX && y > previousY), "INVALID_SURFACE_STATE", "Surface position dictionary is not strictly lexicographically sorted.");
+      previousX = x;
+      previousY = y;
+    }
+    const positionIndices = base64Integers(packing.positionIndicesBase64, 2, limits.maxPreparedStates, "INVALID_SURFACE_STATE", "Surface position indices");
+    invariant(positionIndices.length === packing.stateCount && positionIndices.every((index) => index < packing.positionDictionary!.length), "STATE_COLUMN_MISMATCH", "Surface position indices do not match the state table or dictionary.");
+    invariant(new Set(positionIndices).size === packing.positionDictionary.length, "INVALID_SURFACE_STATE", "Surface position dictionary contains an unreferenced row.");
+  }
   const faceIds = new Set<string>();
   const sourceFramesByFace: number[][] = [];
   let stateOffset = 0;
@@ -1202,20 +1628,7 @@ function validateSurfaceContract(
   for (let frame = 0; frame < packet.frameCount; frame += 1) {
     for (let cursor = visibilityOffsets[frame]; cursor < visibilityOffsets[frame + 1]; cursor += 1) invariant(visibilityFaces[cursor] < playbackPacket.leafCount && (cursor === visibilityOffsets[frame] || visibilityFaces[cursor - 1] < visibilityFaces[cursor]), "INVALID_SURFACE_STATE", `Surface visibility segment ${frame} is invalid.`);
   }
-  const visibilityCells = playbackPacket.leafCount * packet.frameCount;
-  const visibilityRows = new Uint8Array(visibilityCells);
-  for (let index = 0; index < playbackPacket.leafCount; index += 1) visibilityRows[index] = (initialBits[index >> 3] >> (index & 7)) & 1;
-  for (let targetFrame = 2; targetFrame <= packet.frameCount; targetFrame += 1) {
-    const previousOffset = (targetFrame - 2) * playbackPacket.leafCount;
-    const targetOffset = (targetFrame - 1) * playbackPacket.leafCount;
-    visibilityRows.copyWithin(targetOffset, previousOffset, previousOffset + playbackPacket.leafCount);
-    for (let cursor = visibilityOffsets[targetFrame - 1]; cursor < visibilityOffsets[targetFrame]; cursor += 1) visibilityRows[targetOffset + visibilityFaces[cursor]] ^= 1;
-  }
-  if (packet.frameCount > 0) {
-    const wrapped = visibilityRows.slice((packet.frameCount - 1) * playbackPacket.leafCount);
-    for (let cursor = visibilityOffsets[0]; cursor < visibilityOffsets[1]; cursor += 1) wrapped[visibilityFaces[cursor]] ^= 1;
-    invariant(wrapped.every((value, index) => value === visibilityRows[index]), "SURFACE_TRANSITION_MISMATCH", "Surface visibility wrap transition does not reproduce frame 1.");
-  }
+  const initialVisibility = Uint8Array.from({ length: playbackPacket.leafCount }, (_, index) => (initialBits[index >> 3] >> (index & 7)) & 1);
   invariant(Array.isArray(visibility.nonInteractiveJumps) && visibility.nonInteractiveJumps.length <= packet.frameCount, "INVALID_SURFACE_STATE", "Surface visibility jumps are invalid or excessive.");
   const visibilityPairs = new Set<string>();
   const visibilityJumps = new Map<string, number[]>();
@@ -1231,15 +1644,13 @@ function validateSurfaceContract(
   }
   invariant([...jumpPairs].every((pair) => visibilityPairs.has(pair)) && [...visibilityPairs].every((pair) => jumpPairs.has(pair)), "INVALID_SURFACE_STATE", "Surface lighting and visibility jump pairs differ.");
 
-  const expectedTransition = (fromFrame: number, toFrame: number) => {
-    const fromOffset = (fromFrame - 1) * playbackPacket.leafCount;
-    const toOffset = (toFrame - 1) * playbackPacket.leafCount;
+  const expectedTransition = (fromFrame: number, toFrame: number, fromVisibility: Uint8Array, toVisibility: Uint8Array) => {
     const changedVisibility: number[] = [];
     const changedFaces: number[] = [];
     const changedStates: number[] = [];
     for (let face = 0; face < playbackPacket.leafCount; face += 1) {
-      const fromVisible = visibilityRows[fromOffset + face];
-      const toVisible = visibilityRows[toOffset + face];
+      const fromVisible = fromVisibility[face];
+      const toVisible = toVisibility[face];
       if (fromVisible !== toVisible) changedVisibility.push(face);
       const fromState = surfaceStateAt(sourceFramesByFace[face], fromFrame - 1);
       const toState = surfaceStateAt(sourceFramesByFace[face], toFrame - 1);
@@ -1250,24 +1661,604 @@ function validateSurfaceContract(
     }
     return { changedVisibility, changedFaces, changedStates };
   };
-  for (let toFrame = 1; toFrame <= packet.frameCount; toFrame += 1) {
-    const fromFrame = toFrame === 1 ? packet.frameCount : toFrame - 1;
-    const expected = expectedTransition(fromFrame, toFrame);
+  const endpointFrames = new Set<number>();
+  for (const pair of jumpPairs) for (const frame of pair.split(">").map(Number)) endpointFrames.add(frame);
+  invariant(endpointFrames.size * Math.max(1, playbackPacket.leafCount) <= limits.maxVisibilityCells, "VISIBILITY_ALLOCATION_LIMIT", "Surface jump endpoint visibility rows exceed the allocation limit.");
+  const endpointRows = new Map<number, Uint8Array>();
+  if (endpointFrames.has(1)) endpointRows.set(1, initialVisibility.slice());
+  let previousVisibility = initialVisibility.slice();
+  for (let toFrame = 2; toFrame <= packet.frameCount; toFrame += 1) {
+    const nextVisibility = previousVisibility.slice();
+    for (let cursor = visibilityOffsets[toFrame - 1]; cursor < visibilityOffsets[toFrame]; cursor += 1) nextVisibility[visibilityFaces[cursor]] ^= 1;
+    const expected = expectedTransition(toFrame - 1, toFrame, previousVisibility, nextVisibility);
     const actualLighting = lightingSegments[toFrame - 1];
     const visibilityStart = visibilityOffsets[toFrame - 1];
     const actualVisibility = visibilityFaces.slice(visibilityStart, visibilityOffsets[toFrame]);
-    invariant(sameArray(actualLighting.faces, expected.changedFaces) && sameArray(actualLighting.states, expected.changedStates), "SURFACE_TRANSITION_MISMATCH", `Surface lighting transition ${fromFrame}>${toFrame} is not semantically closed.`);
-    invariant(sameArray(actualVisibility, expected.changedVisibility), "SURFACE_TRANSITION_MISMATCH", `Surface visibility transition ${fromFrame}>${toFrame} is not semantically closed.`);
+    invariant(sameArray(actualLighting.faces, expected.changedFaces) && sameArray(actualLighting.states, expected.changedStates), "SURFACE_TRANSITION_MISMATCH", `Surface lighting transition ${toFrame - 1}>${toFrame} is not semantically closed.`);
+    invariant(sameArray(actualVisibility, expected.changedVisibility), "SURFACE_TRANSITION_MISMATCH", `Surface visibility transition ${toFrame - 1}>${toFrame} is not semantically closed.`);
+    previousVisibility = nextVisibility;
+    if (endpointFrames.has(toFrame)) endpointRows.set(toFrame, nextVisibility.slice());
   }
+  const wrappedVisibility = previousVisibility.slice();
+  for (let cursor = visibilityOffsets[0]; cursor < visibilityOffsets[1]; cursor += 1) wrappedVisibility[visibilityFaces[cursor]] ^= 1;
+  invariant(wrappedVisibility.every((value, index) => value === initialVisibility[index]), "SURFACE_TRANSITION_MISMATCH", "Surface visibility wrap transition does not reproduce frame 1.");
+  const wrapExpected = expectedTransition(packet.frameCount, 1, previousVisibility, initialVisibility);
+  invariant(sameArray(lightingSegments[0].faces, wrapExpected.changedFaces) && sameArray(lightingSegments[0].states, wrapExpected.changedStates), "SURFACE_TRANSITION_MISMATCH", `Surface lighting transition ${packet.frameCount}>1 is not semantically closed.`);
+  invariant(sameArray(visibilityFaces.slice(visibilityOffsets[0], visibilityOffsets[1]), wrapExpected.changedVisibility), "SURFACE_TRANSITION_MISMATCH", `Surface visibility transition ${packet.frameCount}>1 is not semantically closed.`);
   for (const pair of jumpPairs) {
     const [fromFrame, toFrame] = pair.split(">").map(Number);
-    const expected = expectedTransition(fromFrame, toFrame);
+    const fromVisibility = endpointRows.get(fromFrame);
+    const toVisibility = endpointRows.get(toFrame);
+    invariant(fromVisibility && toVisibility, "SURFACE_JUMP_MISMATCH", `Surface jump ${pair} visibility endpoints are unavailable.`);
+    const expected = expectedTransition(fromFrame, toFrame, fromVisibility, toVisibility);
     const actualLighting = lightingJumps.get(pair);
     const actualVisibility = visibilityJumps.get(pair);
     invariant(actualLighting && actualVisibility, "SURFACE_JUMP_MISMATCH", `Surface jump ${pair} is incomplete.`);
     invariant(sameArray(actualLighting.faces, expected.changedFaces) && sameArray(actualLighting.states, expected.changedStates), "SURFACE_JUMP_MISMATCH", `Surface lighting jump ${pair} contradicts canonical target state.`);
     invariant(sameArray(actualVisibility, expected.changedVisibility), "SURFACE_JUMP_MISMATCH", `Surface visibility jump ${pair} contradicts canonical target state.`);
   }
+  return packet;
+}
+
+const NO_PREPARED_VARIANT = 0xffff;
+
+interface VariantTargets {
+  readonly nodes: readonly string[];
+  readonly effectNodes: readonly string[];
+}
+
+interface VariantEffect {
+  readonly classIndex: number;
+  readonly ownerIndex: number;
+  readonly targetIndex: number;
+  readonly styles: Readonly<Record<string, unknown>>;
+}
+
+interface VariantInitial {
+  readonly frame: number;
+  readonly classIndicesBase64: unknown;
+}
+
+interface VariantSequential {
+  readonly offsetsBase64: unknown;
+  readonly targetIndicesBase64: unknown;
+  readonly classIndicesBase64: unknown;
+}
+
+interface VariantJump {
+  readonly fromFrame: number;
+  readonly toFrame: number;
+  readonly targetIndicesBase64: unknown;
+  readonly classIndicesBase64: unknown;
+}
+
+interface VariantPacket {
+  readonly version: number;
+  readonly frameCount: number;
+  readonly classes: readonly string[];
+  readonly effects: readonly VariantEffect[];
+  readonly initial: VariantInitial;
+  readonly sequential: VariantSequential;
+  readonly nonInteractiveJumps: readonly VariantJump[];
+}
+
+function validVariantIndex(value: number, classCount: number): boolean {
+  return value === NO_PREPARED_VARIANT || value < classCount;
+}
+
+function validateVariantsContract(
+  variantState: DomStateChannel,
+  variantBinding: DomBindingChannel,
+  playbackPacket: ValidatedPlayback,
+  playbackBinding: DomBindingChannel,
+  bindingInputs: ReadonlyMap<string, DomBindingInput>,
+  tree: ValidatedTree,
+  limits: DomLimits,
+  surfaceBinding?: DomBindingChannel,
+): VariantPacket {
+  invariant(variantBinding.status === "executable", "INVALID_VARIANT_BINDING", "polycss-variants@0 must be executable.");
+  exactArray(variantBinding.inputs, ["time.source-frame"], "INVALID_VARIANT_BINDING", "polycss-variants@0 inputs are incomplete or noncanonical.");
+  const sourceFrameInput = bindingInputs.get("time.source-frame");
+  invariant(sourceFrameInput?.type === "uint" && !Object.hasOwn(sourceFrameInput, "default"), "INVALID_VARIANT_BINDING", "Variant input time.source-frame must have type uint and no package default.");
+  invariant(!Object.hasOwn(variantBinding, "parameters"), "INVALID_VARIANT_BINDING", "polycss-variants@0 has no binding parameters.");
+  const targets = plainObject<VariantTargets>(variantBinding.targets, "INVALID_VARIANT_BINDING", "Variant targets");
+  knownKeys(targets, new Set(["effectNodes", "nodes"]), "INVALID_VARIANT_BINDING", "Variant targets");
+  uniqueTargets(targets.nodes, "Variant node");
+  uniqueTargets(targets.effectNodes, "Variant effect node");
+  invariant(targets.nodes.length > 0 && targets.nodes.length <= 0xffff, "TARGET_CARDINALITY_MISMATCH", "Variant targets must contain between 1 and 65535 nodes.");
+  invariant(targets.effectNodes.length < NO_VARIANT_EFFECT_TARGET, "TARGET_CARDINALITY_MISMATCH", "Variant effect targets must fit uint16 indices.");
+
+  const data = plainObject(variantState.data, "INVALID_VARIANT_STATE", "Variant state data");
+  knownKeys(data, new Set(["packet"]), "INVALID_VARIANT_STATE", "Variant state data");
+  const packet = plainObject<VariantPacket>(data.packet, "INVALID_VARIANT_STATE", "Variant packet");
+  knownKeys(packet, new Set(["version", "frameCount", "classes", "effects", "initial", "sequential", "nonInteractiveJumps"]), "INVALID_VARIANT_STATE", "Variant packet");
+  const playbackParameters = plainObject<PlaybackParameters>(playbackBinding.parameters, "INVALID_PLAYBACK_BINDING", "Playback parameters");
+  invariant(packet.version === 0 && packet.frameCount === playbackParameters.frameCount, "FRAME_CARDINALITY_MISMATCH", "Variant packet version or frameCount is invalid.");
+  invariant(targets.nodes.length * packet.frameCount <= limits.maxVisibilityCells, "VARIANT_STATE_LIMIT", "Prepared variant state matrix is excessive.");
+  invariant(Array.isArray(packet.classes) && packet.classes.length > 0 && packet.classes.length < NO_PREPARED_VARIANT && packet.classes.length <= limits.maxPreparedStates, "VARIANT_STATE_LIMIT", "Prepared variant class table is missing or excessive.");
+  let previousClass = "";
+  for (const [index, token] of packet.classes.entries()) {
+    invariant(typeof token === "string" && CLASS_TOKEN.test(token) && token > previousClass, "INVALID_VARIANT_STATE", `Prepared variant class ${index} is invalid or noncanonical.`);
+    previousClass = token;
+  }
+  const variantClasses = new Set(packet.classes);
+
+  invariant(Array.isArray(packet.effects) && packet.effects.length > 0 && packet.effects.length <= limits.maxPreparedChanges, "VARIANT_EFFECT_LIMIT", "Prepared variant effect table is missing or excessive.");
+  const effectClasses = new Set<number>();
+  const effectOwnership = new Map<string, number>();
+  let previousEffectKey = "";
+  for (const [index, effect] of packet.effects.entries()) {
+    plainObject(effect, "INVALID_VARIANT_EFFECT", `Variant effect ${index}`);
+    knownKeys(effect, new Set(["classIndex", "ownerIndex", "styles", "targetIndex"]), "INVALID_VARIANT_EFFECT", `Variant effect ${index}`);
+    invariant(Number.isSafeInteger(effect.classIndex) && effect.classIndex >= 0 && effect.classIndex < packet.classes.length, "INVALID_VARIANT_EFFECT", `Variant effect ${index} class index is invalid.`);
+    invariant(Number.isSafeInteger(effect.ownerIndex) && effect.ownerIndex >= 0 && effect.ownerIndex < targets.nodes.length, "INVALID_VARIANT_EFFECT", `Variant effect ${index} owner index is invalid.`);
+    invariant(Number.isSafeInteger(effect.targetIndex) && (effect.targetIndex === NO_VARIANT_EFFECT_TARGET || (effect.targetIndex >= 0 && effect.targetIndex < targets.effectNodes.length)), "INVALID_VARIANT_EFFECT", `Variant effect ${index} target index is invalid.`);
+    const effectKey = `${String(effect.classIndex).padStart(5, "0")}:${String(effect.ownerIndex).padStart(5, "0")}:${String(effect.targetIndex).padStart(5, "0")}`;
+    invariant(effectKey > previousEffectKey, "INVALID_VARIANT_EFFECT", "Variant effects must be unique and sorted by class, owner, and target index.");
+    previousEffectKey = effectKey;
+    effectClasses.add(effect.classIndex);
+
+    const ownerId = targets.nodes[effect.ownerIndex];
+    const ownerNode = tree.nodesById.get(ownerId)!;
+    const targetId = effect.targetIndex === NO_VARIANT_EFFECT_TARGET ? ownerId : targets.effectNodes[effect.targetIndex];
+    const targetNode = tree.nodesById.get(targetId)!;
+    if (effect.targetIndex !== NO_VARIANT_EFFECT_TARGET) {
+      const nodes = [...tree.nodesById.values()];
+      let parent = targetNode.parent;
+      let descendant = false;
+      while (parent >= 0) {
+        if (parent === ownerNode.index) {
+          descendant = true;
+          break;
+        }
+        parent = nodes[parent].parent;
+      }
+      invariant(descendant, "INVALID_VARIANT_EFFECT", `Variant effect ${index} target is not retained below its owner.`);
+    }
+
+    const styles = plainObject<Record<string, unknown>>(effect.styles, "INVALID_VARIANT_EFFECT", `Variant effect ${index} styles`);
+    const entries = Object.entries(styles);
+    invariant(entries.length > 0 && entries.length <= Object.keys(VARIANT_EFFECT_PROPERTIES).length, "INVALID_VARIANT_EFFECT", `Variant effect ${index} styles are empty or excessive.`);
+    for (const [property, value] of entries) {
+      invariant(Object.hasOwn(VARIANT_EFFECT_PROPERTIES, property), "INVALID_VARIANT_EFFECT", `Variant effect ${index} style ${property} is unsupported.`);
+      invariant(typeof value === "string" && value.length > 0, "INVALID_VARIANT_EFFECT", `Variant effect ${index} style ${property} is empty.`);
+      safeStyleValue(value, `Variant effect ${index} style ${property}`);
+      if (property === "display") invariant(value === "block" || value === "none", "INVALID_VARIANT_EFFECT", `Variant effect ${index} display is unsupported.`);
+      if (property === "backgroundPositionX") invariant(/^(?:0|-?[1-9][0-9]*px)$/u.test(value), "INVALID_VARIANT_EFFECT", `Variant effect ${index} backgroundPositionX is not a canonical signed-pixel offset.`);
+      const conflicts = property === "backgroundPositionX" ? ["backgroundPosition", "backgroundPositionX"] : [property];
+      invariant(!conflicts.some((name) => Object.hasOwn(targetNode.styles ?? {}, name)), "VARIANT_TREE_MISMATCH", `Variant effect ${index} style ${property} is shadowed by TREE inline state.`);
+      const sink = VARIANT_EFFECT_PROPERTIES[property as VariantEffectProperty].sink;
+      if (sink === "style.backgroundPositionX" && surfaceBinding?.sinks.includes("style.backgroundPosition")) {
+        const surfaceTargets = collectTargets(surfaceBinding.targets, [], limits.maxNodes + 1, "polycss-surface@0 targets", limits.maxTreeDepth);
+        invariant(!surfaceTargets.includes(targetId), "TARGET_OWNERSHIP_CONFLICT", `Variant effect target ${targetId} background-position-x conflicts with full prepared surface ownership.`);
+      }
+      const ownershipKey = `${targetId}\u0000${sink}`;
+      const owner = effectOwnership.get(ownershipKey);
+      invariant(owner === undefined || owner === effect.ownerIndex, "TARGET_OWNERSHIP_CONFLICT", `Variant effect target ${targetId} sink ${sink} has multiple class owners.`);
+      effectOwnership.set(ownershipKey, effect.ownerIndex);
+    }
+  }
+  invariant(effectClasses.size === packet.classes.length, "INVALID_VARIANT_EFFECT", "Every prepared variant class must declare at least one effect.");
+  const expectedVariantSinks = ["class.prepared", ...new Set(packet.effects.flatMap((effect) => Object.keys(effect.styles).map((property) => VARIANT_EFFECT_PROPERTIES[property as VariantEffectProperty].sink)))].sort();
+  exactArray(variantBinding.sinks, expectedVariantSinks, "INVALID_VARIANT_BINDING", "polycss-variants@0 sinks are incomplete or noncanonical.");
+
+  const initial = plainObject<VariantInitial>(packet.initial, "INVALID_VARIANT_STATE", "Variant initial state");
+  knownKeys(initial, new Set(["frame", "classIndicesBase64"]), "INVALID_VARIANT_STATE", "Variant initial state");
+  invariant(initial.frame === 1 && initial.frame === playbackPacket.initial.sourceFrame, "FRAME_CARDINALITY_MISMATCH", "Variant initial frame must be frame 1 and match playback.");
+  const initialIndices = base64Integers(initial.classIndicesBase64, 2, targets.nodes.length, "INVALID_VARIANT_STATE", "Variant initial class indices");
+  invariant(initialIndices.length === targets.nodes.length && initialIndices.every((value) => validVariantIndex(value, packet.classes.length)), "INVALID_VARIANT_STATE", "Variant initial class indices are invalid.");
+  for (const [index, target] of targets.nodes.entries()) {
+    const structural = tree.nodesById.get(target)?.classes ?? [];
+    const active = structural.filter((token) => variantClasses.has(token));
+    const expected = initialIndices[index] === NO_PREPARED_VARIANT ? [] : [packet.classes[initialIndices[index]]];
+    invariant(sameArray(active, expected), "VARIANT_TREE_MISMATCH", `Variant node ${index} initial class does not match TREE.`);
+  }
+
+  const sequential = plainObject<VariantSequential>(packet.sequential, "INVALID_VARIANT_STATE", "Variant sequential transitions");
+  knownKeys(sequential, new Set(["offsetsBase64", "targetIndicesBase64", "classIndicesBase64"]), "INVALID_VARIANT_STATE", "Variant sequential transitions");
+  const offsets = base64Integers(sequential.offsetsBase64, 4, packet.frameCount + 1, "INVALID_VARIANT_STATE", "Variant transition offsets");
+  const targetIndices = base64Integers(sequential.targetIndicesBase64, 2, limits.maxPreparedChanges, "VARIANT_STATE_LIMIT", "Variant transition targets");
+  const classIndices = base64Integers(sequential.classIndicesBase64, 2, limits.maxPreparedChanges, "VARIANT_STATE_LIMIT", "Variant transition classes");
+  invariant(offsets.length === packet.frameCount + 1 && offsets[0] === 0 && offsets.at(-1) === targetIndices.length && offsets.every((offset, index) => index === 0 || offsets[index - 1] <= offset), "STATE_COLUMN_MISMATCH", "Variant transition offsets are invalid.");
+  invariant(targetIndices.length === classIndices.length, "STATE_COLUMN_MISMATCH", "Variant transition columns have unequal lengths.");
+  const applySegment = (row: number[], segment: number, label: string): void => {
+    let previousTarget = -1;
+    for (let cursor = offsets[segment]; cursor < offsets[segment + 1]; cursor += 1) {
+      const target = targetIndices[cursor];
+      const classIndex = classIndices[cursor];
+      invariant(target < targets.nodes.length && target > previousTarget && validVariantIndex(classIndex, packet.classes.length), "INVALID_VARIANT_STATE", `${label} is invalid.`);
+      invariant(row[target] !== classIndex, "INVALID_VARIANT_STATE", `${label} contains a no-op class change.`);
+      row[target] = classIndex;
+      previousTarget = target;
+    }
+  };
+  invariant(Array.isArray(packet.nonInteractiveJumps) && packet.nonInteractiveJumps.length <= packet.frameCount, "INVALID_VARIANT_STATE", "Variant jumps are invalid or excessive.");
+  const jumpPairs = new Set<string>();
+  const jumpEndpoints = new Set<number>();
+  const decodedJumps: Array<{ readonly pair: string; readonly fromFrame: number; readonly toFrame: number; readonly targets: number[]; readonly classes: number[] }> = [];
+  for (const [index, jump] of packet.nonInteractiveJumps.entries()) {
+    plainObject(jump, "INVALID_VARIANT_STATE", `Variant jump ${index}`);
+    knownKeys(jump, new Set(["fromFrame", "toFrame", "targetIndicesBase64", "classIndicesBase64"]), "INVALID_VARIANT_STATE", `Variant jump ${index}`);
+    invariant(Number.isSafeInteger(jump.fromFrame) && jump.fromFrame >= 1 && jump.fromFrame <= packet.frameCount && Number.isSafeInteger(jump.toFrame) && jump.toFrame >= 1 && jump.toFrame <= packet.frameCount && jump.fromFrame !== jump.toFrame, "INVALID_VARIANT_STATE", `Variant jump ${index} frames are invalid.`);
+    const pair = `${jump.fromFrame}>${jump.toFrame}`;
+    invariant(!jumpPairs.has(pair), "INVALID_VARIANT_STATE", `Variant jump ${pair} is duplicated.`);
+    jumpPairs.add(pair);
+    const jumpTargets = base64Integers(jump.targetIndicesBase64, 2, targets.nodes.length, "INVALID_VARIANT_STATE", `Variant jump ${index} targets`);
+    const jumpClasses = base64Integers(jump.classIndicesBase64, 2, targets.nodes.length, "INVALID_VARIANT_STATE", `Variant jump ${index} classes`);
+    invariant(jumpTargets.length === jumpClasses.length && jumpTargets.every((target, cursor) => target < targets.nodes.length && (cursor === 0 || jumpTargets[cursor - 1] < target) && validVariantIndex(jumpClasses[cursor], packet.classes.length)), "INVALID_VARIANT_STATE", `Variant jump ${index} rows are invalid.`);
+    jumpEndpoints.add(jump.fromFrame);
+    jumpEndpoints.add(jump.toFrame);
+    decodedJumps.push({ pair, fromFrame: jump.fromFrame, toFrame: jump.toFrame, targets: jumpTargets, classes: jumpClasses });
+  }
+
+  const endpointRows = new Map<number, readonly number[]>();
+  if (jumpEndpoints.has(1)) endpointRows.set(1, initialIndices);
+  const current = initialIndices.slice();
+  for (let frame = 2; frame <= packet.frameCount; frame += 1) {
+    applySegment(current, frame - 1, `Variant transition ${frame - 1}>${frame}`);
+    if (jumpEndpoints.has(frame)) endpointRows.set(frame, current.slice());
+  }
+  applySegment(current, 0, `Variant transition ${packet.frameCount}>1`);
+  invariant(sameArray(current, initialIndices), "VARIANT_TRANSITION_MISMATCH", "Variant wrap transition does not reproduce frame 1.");
+
+  for (const jump of decodedJumps) {
+    const expectedTargets: number[] = [];
+    const expectedClasses: number[] = [];
+    const from = endpointRows.get(jump.fromFrame)!;
+    const to = endpointRows.get(jump.toFrame)!;
+    for (let target = 0; target < targets.nodes.length; target += 1) {
+      if (from[target] === to[target]) continue;
+      expectedTargets.push(target);
+      expectedClasses.push(to[target]);
+    }
+    invariant(sameArray(jump.targets, expectedTargets) && sameArray(jump.classes, expectedClasses), "VARIANT_JUMP_MISMATCH", `Variant jump ${jump.pair} contradicts canonical target state.`);
+  }
+  return packet;
+}
+
+interface PagedVariantDescriptor {
+  readonly resource: string;
+  readonly startFrame: number;
+  readonly endFrame: number;
+  readonly changeCount: number;
+  readonly materializedByteLength: number;
+}
+
+interface PagedVariantPacket {
+  readonly version: number;
+  readonly frameCount: number;
+  readonly classes: readonly string[];
+  readonly effects: readonly VariantEffect[];
+  readonly initial: VariantInitial;
+  readonly pages: readonly PagedVariantDescriptor[];
+  readonly lookaheadPages: number;
+  readonly maxResidentPages: number;
+}
+
+type StatePageWindowPacket = Readonly<{
+  pages: readonly Readonly<{ resource: string; startFrame: number; endFrame: number }>[];
+  lookaheadPages: number;
+  maxResidentPages: number;
+}>;
+
+function pageResourceAt(packet: StatePageWindowPacket, frame: number): string {
+  const descriptor = packet.pages.find((page) => frame >= page.startFrame && frame <= page.endFrame);
+  invariant(descriptor, "STATE_PAGE_COVERAGE_MISMATCH", `Prepared frame ${frame} has no state page descriptor.`);
+  return descriptor.resource;
+}
+
+function desiredPageResources(packet: StatePageWindowPacket, frame: number, pinnedFrames: readonly number[]): Set<string> {
+  const current = packet.pages.findIndex((page) => frame >= page.startFrame && frame <= page.endFrame);
+  invariant(current >= 0, "STATE_PAGE_COVERAGE_MISMATCH", `Prepared frame ${frame} has no state page descriptor.`);
+  const resources = new Set<string>([packet.pages[current].resource]);
+  for (const pinnedFrame of pinnedFrames) resources.add(pageResourceAt(packet, pinnedFrame));
+  for (let offset = 1; offset <= packet.lookaheadPages; offset += 1) resources.add(packet.pages[(current + offset) % packet.pages.length].resource);
+  return resources;
+}
+
+function requiredDocumentStateResidency(
+  packets: readonly StatePageWindowPacket[],
+  pinnedFrames: readonly number[],
+  activeFramePins: readonly number[] = [],
+): number {
+  let required = 0;
+  const candidateFrames = [...new Set(packets.flatMap((packet) => packet.pages.map((page) => page.startFrame)))];
+  const candidatePins = activeFramePins.length === 0 ? [undefined] : activeFramePins;
+  for (const frame of candidateFrames) {
+    for (const activeFramePin of candidatePins) {
+      const resources = new Set<string>();
+      const pins = activeFramePin === undefined ? pinnedFrames : [...pinnedFrames, activeFramePin];
+      for (const packet of packets) for (const resource of desiredPageResources(packet, frame, pins)) resources.add(resource);
+      const publishedTransfer = packets.filter((packet) => packet.pages.some((page) => !resources.has(page.resource))).length;
+      required = Math.max(required, resources.size + publishedTransfer);
+    }
+  }
+  return required;
+}
+
+function validatePagedVariantsContract(
+  pagedState: DomStateChannel,
+  pagedBinding: DomBindingChannel,
+  playbackPacket: ValidatedPlayback,
+  playbackBinding: DomBindingChannel,
+  bindingInputs: ReadonlyMap<string, DomBindingInput>,
+  tree: ValidatedTree,
+  limits: DomLimits,
+  surfaceBinding?: DomBindingChannel,
+): PagedVariantPacket {
+  const data = plainObject(pagedState.data, "INVALID_PAGED_VARIANT_STATE", "Paged variant state data");
+  knownKeys(data, new Set(["packet"]), "INVALID_PAGED_VARIANT_STATE", "Paged variant state data");
+  const packet = plainObject<PagedVariantPacket>(data.packet, "INVALID_PAGED_VARIANT_STATE", "Paged variant packet");
+  knownKeys(packet, new Set(["version", "frameCount", "classes", "effects", "initial", "pages", "lookaheadPages", "maxResidentPages"]), "INVALID_PAGED_VARIANT_STATE", "Paged variant packet");
+  invariant(packet.version === 0, "INVALID_PAGED_VARIANT_STATE", "Paged variant packet version must be 0.");
+  invariant(
+    Number.isSafeInteger(packet.frameCount)
+    && packet.frameCount > 0
+    && packet.frameCount <= limits.maxPagedFrames
+    && packet.frameCount === playbackPacket.frameCount,
+    "STATE_PAGE_COVERAGE_MISMATCH",
+    "Paged variant frame count must equal the prepared playback frame count.",
+  );
+
+  const zeroOffsets = globalThis.btoa("\0".repeat((packet.frameCount + 1) * 4));
+  validateVariantsContract({
+    ...pagedState,
+    data: {
+      packet: {
+        version: packet.version,
+        frameCount: packet.frameCount,
+        classes: packet.classes,
+        effects: packet.effects,
+        initial: packet.initial,
+        sequential: { offsetsBase64: zeroOffsets, targetIndicesBase64: "", classIndicesBase64: "" },
+        nonInteractiveJumps: [],
+      },
+    },
+  } as unknown as DomStateChannel, pagedBinding, playbackPacket, playbackBinding, bindingInputs, tree, limits, surfaceBinding);
+
+  invariant(Number.isSafeInteger(packet.lookaheadPages) && packet.lookaheadPages >= 1 && packet.lookaheadPages <= 4, "STATE_PAGE_RESIDENCY_LIMIT", "Paged variant lookahead is invalid or excessive.");
+  invariant(Number.isSafeInteger(packet.maxResidentPages) && packet.maxResidentPages >= packet.lookaheadPages + 1 && packet.maxResidentPages <= 16, "STATE_PAGE_RESIDENCY_LIMIT", "Paged variant resident-page ceiling is invalid or excessive.");
+  invariant(Array.isArray(packet.pages) && packet.pages.length > 0 && packet.pages.length <= limits.maxStatePages, "STATE_PAGE_COVERAGE_MISMATCH", "Paged variant descriptors are missing or excessive.");
+  const resources = new Set<string>();
+  let expectedFrame = 1;
+  for (const [index, value] of packet.pages.entries()) {
+    const page = plainObject<PagedVariantDescriptor>(value, "INVALID_PAGED_VARIANT_STATE", `Paged variant descriptor ${index}`);
+    knownKeys(page, new Set(["resource", "startFrame", "endFrame", "changeCount", "materializedByteLength"]), "INVALID_PAGED_VARIANT_STATE", `Paged variant descriptor ${index}`);
+    const resource = assertResourceId(page.resource, `Paged variant descriptor ${index} resource`);
+    invariant(!resources.has(resource), "INVALID_PAGED_VARIANT_STATE", `Paged variant resource ${resource} is duplicated.`);
+    resources.add(resource);
+    invariant(page.startFrame === expectedFrame && Number.isSafeInteger(page.endFrame) && page.endFrame >= page.startFrame && page.endFrame <= packet.frameCount, "STATE_PAGE_COVERAGE_MISMATCH", `Paged variant descriptor ${index} does not provide contiguous frame coverage.`);
+    invariant(page.endFrame - page.startFrame + 1 <= limits.maxStatePageFrames, "STATE_PAGE_COVERAGE_MISMATCH", `Paged variant descriptor ${index} exceeds the per-page frame limit.`);
+    invariant(Number.isSafeInteger(page.changeCount) && page.changeCount >= 0 && page.changeCount <= limits.maxPreparedChanges, "STATE_CHANGE_LIMIT", `Paged variant descriptor ${index} change count is invalid or excessive.`);
+    invariant(Number.isSafeInteger(page.materializedByteLength) && page.materializedByteLength > 0 && page.materializedByteLength <= limits.maxAggregateDecodedBytes, "STATE_PAGE_RESIDENCY_LIMIT", `Paged variant descriptor ${index} materialized byte length is invalid or excessive.`);
+    expectedFrame = page.endFrame + 1;
+  }
+  invariant(expectedFrame === packet.frameCount + 1, "STATE_PAGE_COVERAGE_MISMATCH", "Paged variant descriptors do not cover the playback frame range exactly.");
+  return packet;
+}
+
+interface OrbitTargets {
+  readonly model: string;
+  readonly leaves: readonly string[];
+}
+
+interface CompositorTimelineTarget {
+  readonly kind: "cycle" | "transition";
+  readonly owner: "model" | "shape" | "leaf";
+  readonly index: number;
+  readonly durationTicks: number;
+  readonly iterations?: "infinite";
+  readonly closure?: "closed";
+  readonly keyframes?: readonly Readonly<{ tick: number; transformIndex: number }>[];
+}
+
+interface CompositorTimingPacket {
+  readonly version: number;
+  readonly timing: "linear";
+  readonly targets: readonly CompositorTimelineTarget[];
+}
+
+function validateCompositorTimingContract(
+  state: DomStateChannel,
+  binding: DomBindingChannel,
+  playbackPacket: PlaybackPacket,
+  playbackBinding: DomBindingChannel,
+  bindingInputs: ReadonlyMap<string, DomBindingInput>,
+  limits: DomLimits,
+): void {
+  const data = plainObject(state.data, "INVALID_COMPOSITOR_TIMING_STATE", "Compositor timing state data");
+  knownKeys(data, new Set(["packet"]), "INVALID_COMPOSITOR_TIMING_STATE", "Compositor timing state data");
+  const packet = plainObject<CompositorTimingPacket>(data.packet, "INVALID_COMPOSITOR_TIMING_STATE", "Compositor timing packet");
+  knownKeys(packet, new Set(["version", "timing", "targets"]), "INVALID_COMPOSITOR_TIMING_STATE", "Compositor timing packet");
+  invariant(packet.version === 0 && packet.timing === "linear", "INVALID_COMPOSITOR_TIMING_STATE", "Compositor timing version or easing is unsupported.");
+  invariant(Array.isArray(packet.targets) && packet.targets.length > 0 && packet.targets.length <= Math.min(limits.maxNodes, 1024), "COMPOSITOR_TIMING_LIMIT", "Compositor timing targets are missing or excessive.");
+  invariant(binding.status === "executable", "INVALID_COMPOSITOR_TIMING_BINDING", "polycss-compositor-timing@0 must be executable.");
+  exactArray(binding.inputs, ["time.source-frame", "time.tick"], "INVALID_COMPOSITOR_TIMING_BINDING", "Compositor timing inputs are incomplete or noncanonical.");
+  for (const id of binding.inputs) invariant(bindingInputs.get(id)?.type === "uint" && !Object.hasOwn(bindingInputs.get(id)!, "default"), "INVALID_COMPOSITOR_TIMING_BINDING", `Compositor timing input ${id} must be an un-defaulted uint.`);
+  exactArray(binding.sinks, ["style.transform"], "INVALID_COMPOSITOR_TIMING_BINDING", "Compositor timing owns only prepared transform timing.");
+  const parameters = plainObject<TickCadenceParameters & { readonly frameCount: number }>(binding.parameters, "INVALID_COMPOSITOR_TIMING_BINDING", "Compositor timing parameters");
+  knownKeys(parameters, new Set(["frameCount", "tickRateHz", "tickIntervalUs"]), "INVALID_COMPOSITOR_TIMING_BINDING", "Compositor timing parameters");
+  validateTickCadence(parameters, "INVALID_COMPOSITOR_TIMING_BINDING", "Compositor timing");
+  const playbackParameters = playbackBinding.parameters as unknown as PlaybackParameters;
+  invariant(parameters.frameCount === playbackParameters.frameCount && sameTickCadence(parameters, playbackParameters), "INVALID_COMPOSITOR_TIMING_BINDING", "Compositor timing cadence must equal playback cadence.");
+  const timelines = [
+    playbackPacket.timeline,
+    ...(playbackPacket.profileTimelines ?? []),
+    ...(playbackPacket.banks?.flatMap((bank) => [bank.timeline, ...(bank.profileTimelines ?? [])]) ?? []),
+  ] as PlaybackTimeline[];
+  invariant(timelines.every((timeline) => timeline.deadlineMicros === undefined), "INVALID_COMPOSITOR_TIMING_BINDING", "Compositor timing requires fixed playback cadence.");
+  const timingTargets = plainObject<{ readonly nodes: readonly string[] }>(binding.targets, "INVALID_COMPOSITOR_TIMING_BINDING", "Compositor timing targets");
+  knownKeys(timingTargets, new Set(["nodes"]), "INVALID_COMPOSITOR_TIMING_BINDING", "Compositor timing targets");
+  uniqueTargets(timingTargets.nodes, "Compositor timing");
+  invariant(timingTargets.nodes.length === packet.targets.length, "TARGET_CARDINALITY_MISMATCH", "Compositor timing state and targets differ in length.");
+  const playbackTargets = playbackBinding.targets as unknown as PlaybackTargets;
+  const transformCount = (playbackPacket.transforms as PlaybackTransformTable).count;
+  let keyframeCount = 0;
+  for (const [targetIndex, value] of packet.targets.entries()) {
+    const target = plainObject<CompositorTimelineTarget>(value, "INVALID_COMPOSITOR_TIMING_STATE", `Compositor timing target ${targetIndex}`);
+    const expectedNode = target.owner === "model"
+      ? (target.index === 0 ? playbackTargets.model : undefined)
+      : target.owner === "shape"
+        ? playbackTargets.shapes[target.index]
+        : target.owner === "leaf"
+          ? playbackTargets.leaves[target.index]
+          : undefined;
+    invariant(expectedNode === timingTargets.nodes[targetIndex], "INVALID_COMPOSITOR_TIMING_BINDING", `Compositor timing target ${targetIndex} is not the declared playback owner.`);
+    if (target.kind === "cycle") {
+      knownKeys(target, new Set(["kind", "owner", "index", "durationTicks", "iterations", "closure", "keyframes"]), "INVALID_COMPOSITOR_TIMING_STATE", `Compositor cycle ${targetIndex}`);
+      invariant(target.owner === "model" && target.index === 0 && target.iterations === "infinite" && target.closure === "closed", "INVALID_COMPOSITOR_TIMING_STATE", `Compositor cycle ${targetIndex} must be a closed retained-model cycle.`);
+      invariant(Number.isSafeInteger(target.durationTicks) && target.durationTicks >= 2 && target.durationTicks <= limits.maxTimelineTicks, "COMPOSITOR_TIMING_LIMIT", `Compositor cycle ${targetIndex} duration is invalid or excessive.`);
+      invariant(Array.isArray(target.keyframes) && target.keyframes.length >= 3 && target.keyframes.length <= 256, "COMPOSITOR_TIMING_LIMIT", `Compositor cycle ${targetIndex} keyframes are invalid or excessive.`);
+      let previousTick = -1;
+      let firstTransform = -1;
+      let lastTransform = -1;
+      for (const [keyframeIndex, rowValue] of target.keyframes.entries()) {
+        const row = plainObject<{ readonly tick: number; readonly transformIndex: number }>(rowValue, "INVALID_COMPOSITOR_TIMING_STATE", `Compositor cycle ${targetIndex} keyframe ${keyframeIndex}`);
+        knownKeys(row, new Set(["tick", "transformIndex"]), "INVALID_COMPOSITOR_TIMING_STATE", `Compositor cycle ${targetIndex} keyframe ${keyframeIndex}`);
+        invariant(Number.isSafeInteger(row.tick) && row.tick > previousTick && row.tick >= 0 && row.tick <= target.durationTicks && Number.isSafeInteger(row.transformIndex) && row.transformIndex >= 0 && row.transformIndex < transformCount, "INVALID_COMPOSITOR_TIMING_STATE", `Compositor cycle ${targetIndex} keyframe ${keyframeIndex} is invalid.`);
+        previousTick = row.tick;
+        if (keyframeIndex === 0) firstTransform = row.transformIndex;
+        lastTransform = row.transformIndex;
+      }
+      invariant(target.keyframes[0].tick === 0 && target.keyframes.at(-1)!.tick === target.durationTicks && firstTransform === lastTransform, "INVALID_COMPOSITOR_TIMING_STATE", `Compositor cycle ${targetIndex} is not exactly closed.`);
+      invariant(playbackPacket.frameRows.every((row) => row[2] === -1), "TARGET_OWNERSHIP_CONFLICT", "A compositor model cycle cannot race playback model transform rows.");
+      keyframeCount += target.keyframes.length;
+    } else {
+      knownKeys(target, new Set(["kind", "owner", "index", "durationTicks"]), "INVALID_COMPOSITOR_TIMING_STATE", `Compositor transition ${targetIndex}`);
+      invariant(target.kind === "transition" && Number.isSafeInteger(target.durationTicks) && target.durationTicks >= 1 && target.durationTicks <= 8, "INVALID_COMPOSITOR_TIMING_STATE", `Compositor transition ${targetIndex} duration is invalid.`);
+    }
+  }
+  invariant(keyframeCount <= 4096, "COMPOSITOR_TIMING_LIMIT", "Compositor timing keyframes are excessive.");
+}
+
+interface OrbitPacket {
+  readonly version: number;
+  readonly initial: Readonly<{ pitch: number; yaw: number; zoom: number }>;
+  readonly ranges: Readonly<{
+    pitch: readonly number[];
+    yaw: readonly number[];
+    zoom: readonly number[];
+  }>;
+  readonly model: Readonly<{ translation: readonly number[]; scale: readonly number[] }>;
+  readonly surface: Readonly<{
+    stateCount: number;
+    positionDictionary: readonly (readonly number[])[];
+    initialPositionIndicesBase64: unknown;
+    transitions: Readonly<{
+      offsetsBase64: unknown;
+      leafIndicesBase64: unknown;
+      forwardPositionIndicesBase64: unknown;
+      backwardPositionIndicesBase64: unknown;
+    }>;
+  }>;
+}
+
+function validateOrbitInputContract(
+  orbitState: DomStateChannel,
+  orbitBinding: DomBindingChannel,
+  bindingInputs: ReadonlyMap<string, DomBindingInput>,
+  tree: ValidatedTree,
+  limits: DomLimits,
+): OrbitPacket {
+  invariant(orbitBinding.status === "executable", "INVALID_ORBIT_BINDING", "polycss-orbit-input@0 must be executable.");
+  exactArray(orbitBinding.inputs, ["orbit.pitch", "orbit.yaw", "orbit.zoom"], "INVALID_ORBIT_BINDING", "Prepared orbit inputs are incomplete or noncanonical.");
+  invariant(!Object.hasOwn(orbitBinding, "parameters"), "INVALID_ORBIT_BINDING", "polycss-orbit-input@0 has no binding parameters.");
+  const targets = plainObject<OrbitTargets>(orbitBinding.targets, "INVALID_ORBIT_BINDING", "Prepared orbit targets");
+  knownKeys(targets, new Set(["model", "leaves"]), "INVALID_ORBIT_BINDING", "Prepared orbit targets");
+  stableId(targets.model, "Prepared orbit model target");
+  uniqueTargets(targets.leaves, "Prepared orbit leaf");
+  invariant(targets.leaves.length > 0 && targets.leaves.length < 0xffff && !targets.leaves.includes(targets.model), "TARGET_CARDINALITY_MISMATCH", "Prepared orbit leaves must be nonempty, bounded, and distinct from the model.");
+  exactArray(orbitBinding.sinks, ["style.backgroundPosition", "style.transform"], "INVALID_ORBIT_BINDING", "Prepared orbit sinks are incomplete or noncanonical.");
+
+  const data = plainObject(orbitState.data, "INVALID_ORBIT_STATE", "Prepared orbit state data");
+  knownKeys(data, new Set(["packet"]), "INVALID_ORBIT_STATE", "Prepared orbit state data");
+  const packet = plainObject<OrbitPacket>(data.packet, "INVALID_ORBIT_STATE", "Prepared orbit packet");
+  knownKeys(packet, new Set(["version", "initial", "ranges", "model", "surface"]), "INVALID_ORBIT_STATE", "Prepared orbit packet");
+  invariant(packet.version === 0, "INVALID_ORBIT_STATE", "Prepared orbit packet version must be 0.");
+  const initial = plainObject<OrbitPacket["initial"]>(packet.initial, "INVALID_ORBIT_STATE", "Prepared orbit initial input");
+  knownKeys(initial, new Set(["pitch", "yaw", "zoom"]), "INVALID_ORBIT_STATE", "Prepared orbit initial input");
+  const ranges = plainObject<OrbitPacket["ranges"]>(packet.ranges, "INVALID_ORBIT_STATE", "Prepared orbit ranges");
+  knownKeys(ranges, new Set(["pitch", "yaw", "zoom"]), "INVALID_ORBIT_STATE", "Prepared orbit ranges");
+  for (const id of ["pitch", "yaw", "zoom"] as const) {
+    const range = ranges[id];
+    invariant(Array.isArray(range) && range.length === 2 && range.every((value) => typeof value === "number" && Number.isFinite(value)) && range[0] < range[1], "INVALID_ORBIT_STATE", `Prepared orbit ${id} range is invalid.`);
+    invariant(typeof initial[id] === "number" && Number.isFinite(initial[id]) && initial[id] >= range[0] && initial[id] <= range[1], "INVALID_ORBIT_STATE", `Prepared orbit initial ${id} is outside its range.`);
+    const input = bindingInputs.get(`orbit.${id}`);
+    invariant(input?.type === "float" && input.default === initial[id], "INVALID_ORBIT_BINDING", `Prepared orbit input orbit.${id} must be a float defaulting to its initial value.`);
+  }
+  invariant(ranges.pitch[0] >= -90 && ranges.pitch[1] <= 90 && ranges.yaw[0] >= -360 && ranges.yaw[1] <= 360 && ranges.zoom[0] > 0 && ranges.zoom[1] <= 16, "INVALID_ORBIT_STATE", "Prepared orbit ranges exceed the fixed interpreter domain.");
+
+  const model = plainObject<OrbitPacket["model"]>(packet.model, "INVALID_ORBIT_STATE", "Prepared orbit model");
+  knownKeys(model, new Set(["translation", "scale"]), "INVALID_ORBIT_STATE", "Prepared orbit model");
+  invariant(Array.isArray(model.translation) && model.translation.length === 3 && model.translation.every((value) => typeof value === "number" && Number.isFinite(value) && Math.abs(value) <= 1_000_000), "INVALID_ORBIT_STATE", "Prepared orbit translation is invalid.");
+  invariant(Array.isArray(model.scale) && model.scale.length === 3 && model.scale.every((value) => typeof value === "number" && Number.isFinite(value) && value > 0 && value <= 16), "INVALID_ORBIT_STATE", "Prepared orbit scale is invalid.");
+  const modelNode = tree.nodesById.get(targets.model);
+  invariant(modelNode?.styles?.transform === formatOrbitModelTransform(model as Parameters<typeof formatOrbitModelTransform>[0], initial.pitch, initial.yaw, initial.zoom), "ORBIT_TREE_MISMATCH", "Prepared orbit initial model transform does not match TREE.");
+
+  const surface = plainObject<OrbitPacket["surface"]>(packet.surface, "INVALID_ORBIT_STATE", "Prepared orbit surface");
+  knownKeys(surface, new Set(["stateCount", "positionDictionary", "initialPositionIndicesBase64", "transitions"]), "INVALID_ORBIT_STATE", "Prepared orbit surface");
+  invariant(Number.isSafeInteger(surface.stateCount) && surface.stateCount >= 2 && surface.stateCount <= 360, "ORBIT_STATE_LIMIT", "Prepared orbit state count is invalid or excessive.");
+  const normalizedInitialYaw = ((initial.yaw % 360) + 360) % 360;
+  invariant(Math.round(normalizedInitialYaw * surface.stateCount / 360) % surface.stateCount === 0, "INVALID_ORBIT_STATE", "Prepared orbit initial yaw must select surface state zero.");
+  invariant(Array.isArray(surface.positionDictionary) && surface.positionDictionary.length > 0 && surface.positionDictionary.length < 0xffff && surface.positionDictionary.length <= limits.maxPreparedStates, "ORBIT_STATE_LIMIT", "Prepared orbit position dictionary is missing or excessive.");
+  let previousPosition: readonly number[] | undefined;
+  for (const [index, position] of surface.positionDictionary.entries()) {
+    invariant(Array.isArray(position) && position.length === 2 && position.every((value) => Number.isSafeInteger(value) && value >= -0x7fffffff && value <= 0x7fffffff && !Object.is(value, -0)), "INVALID_ORBIT_STATE", `Prepared orbit position ${index} is invalid.`);
+    if (previousPosition) invariant(position[0] > previousPosition[0] || position[0] === previousPosition[0] && position[1] > previousPosition[1], "INVALID_ORBIT_STATE", "Prepared orbit position dictionary is not strictly sorted.");
+    previousPosition = position;
+  }
+  const initialPositions = base64Integers(surface.initialPositionIndicesBase64, 2, targets.leaves.length, "INVALID_ORBIT_STATE", "Prepared orbit initial positions");
+  invariant(initialPositions.length === targets.leaves.length && initialPositions.every((value) => value < surface.positionDictionary.length), "STATE_COLUMN_MISMATCH", "Prepared orbit initial position row is invalid.");
+  for (let index = 0; index < targets.leaves.length; index += 1) {
+    const leaf = tree.nodesById.get(targets.leaves[index]);
+    invariant(leaf?.styles?.backgroundPosition === formatOrbitPosition(surface.positionDictionary[initialPositions[index]]), "ORBIT_TREE_MISMATCH", `Prepared orbit leaf ${index} initial position does not match TREE.`);
+  }
+
+  const transitions = plainObject<OrbitPacket["surface"]["transitions"]>(surface.transitions, "INVALID_ORBIT_STATE", "Prepared orbit transitions");
+  knownKeys(transitions, new Set(["offsetsBase64", "leafIndicesBase64", "forwardPositionIndicesBase64", "backwardPositionIndicesBase64"]), "INVALID_ORBIT_STATE", "Prepared orbit transitions");
+  const offsets = base64Integers(transitions.offsetsBase64, 4, surface.stateCount + 1, "INVALID_ORBIT_STATE", "Prepared orbit transition offsets");
+  invariant(offsets.length === surface.stateCount + 1 && offsets[0] === 0 && offsets.every((value, index) => index === 0 || value >= offsets[index - 1]), "INVALID_ORBIT_STATE", "Prepared orbit transition offsets are invalid.");
+  const changeCount = offsets.at(-1)!;
+  invariant(changeCount <= limits.maxPreparedChanges, "STATE_CHANGE_LIMIT", "Prepared orbit transitions are excessive.");
+  const transitionLeaves = base64Integers(transitions.leafIndicesBase64, 2, changeCount, "INVALID_ORBIT_STATE", "Prepared orbit transition leaves");
+  const forwardPositions = base64Integers(transitions.forwardPositionIndicesBase64, 2, changeCount, "INVALID_ORBIT_STATE", "Prepared orbit forward positions");
+  const backwardPositions = base64Integers(transitions.backwardPositionIndicesBase64, 2, changeCount, "INVALID_ORBIT_STATE", "Prepared orbit backward positions");
+  invariant(transitionLeaves.length === changeCount && forwardPositions.length === changeCount && backwardPositions.length === changeCount, "STATE_COLUMN_MISMATCH", "Prepared orbit transition columns are incomplete.");
+  invariant(surface.stateCount * targets.leaves.length <= limits.maxVisibilityCells, "ORBIT_STATE_LIMIT", "Prepared orbit canonical rows exceed their allocation limit.");
+  const referencedPositions = new Set(initialPositions);
+  for (let edge = 0; edge < surface.stateCount; edge += 1) {
+    let previousLeaf = -1;
+    for (let cursor = offsets[edge]; cursor < offsets[edge + 1]; cursor += 1) {
+      const leaf = transitionLeaves[cursor];
+      invariant(leaf > previousLeaf && leaf < targets.leaves.length, "INVALID_ORBIT_STATE", `Prepared orbit edge ${edge} leaves are not strictly sorted.`);
+      invariant(forwardPositions[cursor] < surface.positionDictionary.length && backwardPositions[cursor] < surface.positionDictionary.length, "STATE_COLUMN_MISMATCH", `Prepared orbit edge ${edge} position is out of range.`);
+      referencedPositions.add(forwardPositions[cursor]);
+      referencedPositions.add(backwardPositions[cursor]);
+      previousLeaf = leaf;
+    }
+  }
+  const applyEdge = (row: number[], edge: number, values: readonly number[]): void => {
+    for (let cursor = offsets[edge]; cursor < offsets[edge + 1]; cursor += 1) {
+      const leaf = transitionLeaves[cursor];
+      invariant(row[leaf] !== values[cursor], "INVALID_ORBIT_STATE", `Prepared orbit edge ${edge} contains a no-op row.`);
+      row[leaf] = values[cursor];
+    }
+  };
+  let row = initialPositions.slice();
+  for (let state = 1; state < surface.stateCount; state += 1) {
+    const previous = row.slice();
+    applyEdge(row, state, forwardPositions);
+    const backward = row.slice();
+    applyEdge(backward, state, backwardPositions);
+    invariant(sameArray(backward, previous), "ORBIT_TRANSITION_MISMATCH", `Prepared orbit backward edge ${state} contradicts its canonical row.`);
+  }
+  const finalRow = row.slice();
+  applyEdge(row, 0, forwardPositions);
+  invariant(sameArray(row, initialPositions), "ORBIT_TRANSITION_MISMATCH", "Prepared orbit forward cycle does not close to its initial row.");
+  const backward = row.slice();
+  applyEdge(backward, 0, backwardPositions);
+  invariant(sameArray(backward, finalRow), "ORBIT_TRANSITION_MISMATCH", "Prepared orbit backward edge 0 contradicts its canonical row.");
+  invariant(referencedPositions.size === surface.positionDictionary.length, "INVALID_ORBIT_STATE", "Prepared orbit position dictionary contains an unreferenced row.");
   return packet;
 }
 
@@ -1283,6 +2274,20 @@ export interface PresentationParameters {
   readonly fitWidth: number;
   readonly sourceHeight: number;
   readonly sourceWidth: number;
+  readonly profileSelection?: PresentationProfileSelection;
+  readonly profiles?: readonly PresentationProfile[];
+}
+
+type PresentationProfileSelection = "viewport-width" | "landscape-first-portrait-width";
+
+interface PresentationProfile {
+  readonly id: string;
+  readonly maxViewportWidth?: number;
+  readonly fit: "contain" | "cover";
+  readonly quarterTurns: number;
+  readonly bounds: readonly number[];
+  readonly safeInset: number;
+  readonly bias: readonly number[];
 }
 
 interface PresentationCamera extends PresentationParameters {
@@ -1331,9 +2336,42 @@ function validatePresentationContract(
     invariant(cursorStates.open !== cursorStates.closed, "INVALID_PRESENTATION_BINDING", "Presentation cursor states must be distinct.");
   }
   const parameters = plainObject<PresentationParameters>(presentationBinding.parameters, "INVALID_PRESENTATION_BINDING", "Presentation parameters");
-  knownKeys(parameters, new Set(["fitHeight", "fitWidth", "sourceHeight", "sourceWidth"]), "INVALID_PRESENTATION_BINDING", "Presentation parameters");
-  const dimensionKeys: readonly (keyof PresentationParameters)[] = ["fitHeight", "fitWidth", "sourceHeight", "sourceWidth"];
+  knownKeys(parameters, new Set(["fitHeight", "fitWidth", "sourceHeight", "sourceWidth", "profileSelection", "profiles"]), "INVALID_PRESENTATION_BINDING", "Presentation parameters");
+  const dimensionKeys = ["fitHeight", "fitWidth", "sourceHeight", "sourceWidth"] as const;
   invariant(dimensionKeys.every((key) => Number.isSafeInteger(parameters[key]) && parameters[key] > 0), "INVALID_PRESENTATION_BINDING", "Presentation dimensions are invalid.");
+
+  const validateProfiles = (value: unknown, selection: unknown, label: string, code: "INVALID_PRESENTATION_BINDING" | "INVALID_PRESENTATION_STATE"): readonly PresentationProfile[] | undefined => {
+    if (value === undefined) {
+      invariant(selection === undefined, code, `${label} selection requires profiles.`);
+      return undefined;
+    }
+    invariant(selection === "viewport-width" || selection === "landscape-first-portrait-width", code, `${label} selection is unsupported.`);
+    invariant(Array.isArray(value) && value.length > 0 && value.length <= 16, code, `${label} are missing or excessive.`);
+    invariant(selection !== "landscape-first-portrait-width" || value.length >= 2, code, `${label} landscape-first selection requires a landscape row and at least one portrait row.`);
+    let previousMaximum = 0;
+    const ids = new Set<string>();
+    for (const [index, profileValue] of value.entries()) {
+      const profile = plainObject<PresentationProfile>(profileValue, code, `${label} ${index}`);
+      knownKeys(profile, new Set(["id", "maxViewportWidth", "fit", "quarterTurns", "bounds", "safeInset", "bias"]), code, `${label} ${index}`);
+      const id = stableId(profile.id, `${label} ${index} id`);
+      invariant(!ids.has(id), code, `${label} id ${id} is duplicated.`);
+      ids.add(id);
+      const landscape = selection === "landscape-first-portrait-width" && index === 0;
+      const final = index === value.length - 1;
+      if (landscape || final) invariant(!Object.hasOwn(profile, "maxViewportWidth"), code, `${label} ${landscape ? "landscape" : "final"} profile must be unbounded.`);
+      else {
+        invariant(Number.isSafeInteger(profile.maxViewportWidth) && profile.maxViewportWidth! > previousMaximum && profile.maxViewportWidth! <= 1_000_000, code, `${label} breakpoints are invalid or noncanonical.`);
+        previousMaximum = profile.maxViewportWidth!;
+      }
+      invariant(profile.fit === "contain" || profile.fit === "cover", code, `${label} ${index} fit is unsupported.`);
+      invariant(Number.isSafeInteger(profile.quarterTurns) && profile.quarterTurns >= 0 && profile.quarterTurns <= 3, code, `${label} ${index} quarter turn is invalid.`);
+      invariant(Array.isArray(profile.bounds) && profile.bounds.length === 4 && profile.bounds.every((entry) => typeof entry === "number" && Number.isFinite(entry) && Math.abs(entry) <= 1_000_000) && profile.bounds[2] > profile.bounds[0] && profile.bounds[3] > profile.bounds[1], code, `${label} ${index} projection bounds are invalid.`);
+      invariant(typeof profile.safeInset === "number" && Number.isFinite(profile.safeInset) && profile.safeInset >= 0 && profile.safeInset <= 1_000_000, code, `${label} ${index} safe inset is invalid.`);
+      invariant(Array.isArray(profile.bias) && profile.bias.length === 2 && profile.bias.every((entry) => typeof entry === "number" && Number.isFinite(entry) && entry >= -1 && entry <= 1), code, `${label} ${index} bias is invalid.`);
+    }
+    return value as readonly PresentationProfile[];
+  };
+  const parameterProfiles = validateProfiles(parameters.profiles, parameters.profileSelection, "Presentation binding profiles", "INVALID_PRESENTATION_BINDING");
 
   const data = plainObject(presentationState.data, "INVALID_PRESENTATION_STATE", "Presentation state data");
   knownKeys(data, new Set(["packet"]), "INVALID_PRESENTATION_STATE", "Presentation state data");
@@ -1341,9 +2379,24 @@ function validatePresentationContract(
   knownKeys(packet, new Set(["version", "camera", "background"]), "INVALID_PRESENTATION_STATE", "Presentation packet");
   invariant(packet.version === 0, "INVALID_PRESENTATION_STATE", "Presentation packet version must be 0.");
   const camera = plainObject<PresentationCamera>(packet.camera, "INVALID_PRESENTATION_STATE", "Presentation camera");
-  knownKeys(camera, new Set(["baseSceneTransform", "fitHeight", "fitWidth", "perspective", "sourceHeight", "sourceWidth"]), "INVALID_PRESENTATION_STATE", "Presentation camera");
+  knownKeys(camera, new Set(["baseSceneTransform", "fitHeight", "fitWidth", "perspective", "profileSelection", "profiles", "sourceHeight", "sourceWidth"]), "INVALID_PRESENTATION_STATE", "Presentation camera");
   safeStyleValue(camera.baseSceneTransform, "Presentation base scene transform");
   invariant(typeof camera.perspective === "number" && Number.isFinite(camera.perspective) && camera.perspective > 0 && dimensionKeys.every((key) => camera[key] === parameters[key]), "INVALID_PRESENTATION_STATE", "Presentation camera values do not match binding parameters.");
+  const cameraProfiles = validateProfiles(camera.profiles, camera.profileSelection, "Presentation camera profiles", "INVALID_PRESENTATION_STATE");
+  invariant(camera.profileSelection === parameters.profileSelection, "INVALID_PRESENTATION_STATE", "Presentation camera profile selection does not match binding parameters.");
+  const matchingProfiles = cameraProfiles === undefined && parameterProfiles === undefined || Boolean(cameraProfiles && parameterProfiles
+    && cameraProfiles.length === parameterProfiles.length
+    && cameraProfiles.every((profile, index) => {
+      const parameter = parameterProfiles[index];
+      return profile.id === parameter.id
+        && profile.maxViewportWidth === parameter.maxViewportWidth
+        && profile.fit === parameter.fit
+        && profile.quarterTurns === parameter.quarterTurns
+        && profile.safeInset === parameter.safeInset
+        && sameArray(profile.bounds, parameter.bounds)
+        && sameArray(profile.bias, parameter.bias);
+    }));
+  invariant(matchingProfiles, "INVALID_PRESENTATION_STATE", "Presentation camera profiles do not match binding parameters.");
   if (Object.hasOwn(packet, "background")) {
     const background = plainObject<PresentationBackground>(packet.background, "INVALID_PRESENTATION_STATE", "Presentation background");
     knownKeys(background, new Set(["resource", "opacity", "position", "repeat", "size"]), "INVALID_PRESENTATION_STATE", "Presentation background");
@@ -1362,6 +2415,186 @@ function validatePresentationContract(
     "style.width",
   ];
   exactArray(presentationBinding.sinks, expectedSinks, "INVALID_PRESENTATION_BINDING", "static-presentation@0 sinks are incomplete or noncanonical.");
+  return packet;
+}
+
+function validatePlaybackProfileTimelineClosure(
+  playbackPacket: ValidatedPlayback,
+  presentationPacket: PresentationPacket,
+): void {
+  const timelineGroups = [playbackPacket.profileTimelines, ...(playbackPacket.banks?.map((bank) => bank.profileTimelines) ?? [])].filter((group): group is readonly unknown[] => group !== undefined);
+  if (timelineGroups.length === 0) return;
+  const profiles = presentationPacket.camera.profiles;
+  invariant(profiles, "MISSING_POLYCSS_CHANNEL", "Playback profile timelines require static-presentation profiles.");
+  const profileIndices = new Map(profiles.map((profile, index): [string, number] => [profile.id, index]));
+  for (const timelines of timelineGroups) {
+    let previousIndex = -1;
+    for (const value of timelines) {
+      const timeline = value as PlaybackProfileTimeline;
+      const profileIndex = profileIndices.get(timeline.profileId);
+      invariant(profileIndex !== undefined, "INVALID_PLAYBACK_STATE", `Playback profile timeline ${timeline.profileId} has no static-presentation profile.`);
+      invariant(profileIndex > previousIndex, "INVALID_PLAYBACK_STATE", "Playback profile timelines do not follow static-presentation profile order.");
+      previousIndex = profileIndex;
+    }
+  }
+}
+
+interface ViewportProfileTargets {
+  readonly leaves: readonly string[];
+}
+
+interface ViewportProfileSelection {
+  readonly mode: "presentation-profile" | "smallest-covering";
+}
+
+interface ViewportProfileRow {
+  readonly id: string;
+  readonly width?: number;
+  readonly height?: number;
+  readonly transformIndicesBase64: unknown;
+  readonly visibleBitsBase64: unknown;
+  readonly visibilityChanges?: Readonly<{
+    offsetsBase64: unknown;
+    leafIndicesBase64: unknown;
+  }>;
+  readonly responsiveAffine?: Readonly<{
+    scale: Readonly<{
+      baseWidth: number;
+      baseHeight: number;
+      multiplier: number;
+      max?: number;
+    }>;
+    presentBitsBase64: unknown;
+    coefficientsBase64: unknown;
+  }>;
+}
+
+interface ViewportProfilesPacket {
+  readonly version: number;
+  readonly selection: ViewportProfileSelection;
+  readonly transforms: readonly (readonly number[])[];
+  readonly profiles: readonly ViewportProfileRow[];
+}
+
+function validateViewportProfilesContract(
+  profileState: DomStateChannel,
+  profileBinding: DomBindingChannel,
+  playbackPacket: ValidatedPlayback,
+  playbackBinding: DomBindingChannel,
+  presentationPacket: PresentationPacket,
+  bindingInputs: ReadonlyMap<string, DomBindingInput>,
+  limits: DomLimits,
+): ViewportProfilesPacket {
+  invariant(profileBinding.status === "executable", "INVALID_VIEWPORT_PROFILE_BINDING", "polycss-viewport-profiles@0 must be executable.");
+  exactArray(profileBinding.inputs, ["viewport.height", "viewport.width"], "INVALID_VIEWPORT_PROFILE_BINDING", "Viewport profile inputs are incomplete or noncanonical.");
+  const viewportHeight = bindingInputs.get("viewport.height");
+  const viewportWidth = bindingInputs.get("viewport.width");
+  invariant(viewportHeight?.type === "float" && viewportWidth?.type === "float" && !Object.hasOwn(viewportHeight, "default") && !Object.hasOwn(viewportWidth, "default"), "INVALID_VIEWPORT_PROFILE_BINDING", "Viewport profile inputs must be un-defaulted floats.");
+  invariant(!Object.hasOwn(profileBinding, "parameters"), "INVALID_VIEWPORT_PROFILE_BINDING", "polycss-viewport-profiles@0 has no binding parameters.");
+  const targets = plainObject<ViewportProfileTargets>(profileBinding.targets, "INVALID_VIEWPORT_PROFILE_BINDING", "Viewport profile targets");
+  knownKeys(targets, new Set(["leaves"]), "INVALID_VIEWPORT_PROFILE_BINDING", "Viewport profile targets");
+  uniqueTargets(targets.leaves, "Viewport profile leaf");
+  const playbackTargets = plainObject<PlaybackTargets>(playbackBinding.targets, "INVALID_PLAYBACK_BINDING", "Playback targets");
+  invariant(targets.leaves.length === playbackPacket.leafCount && sameArray(targets.leaves, playbackTargets.leaves), "TARGET_CARDINALITY_MISMATCH", "Viewport profile leaves must exactly match playback leaves.");
+  exactArray(profileBinding.sinks, ["style.transform", "style.visibility"], "INVALID_VIEWPORT_PROFILE_BINDING", "Viewport profile sinks are incomplete or noncanonical.");
+
+  const data = plainObject(profileState.data, "INVALID_VIEWPORT_PROFILE_STATE", "Viewport profile state data");
+  knownKeys(data, new Set(["packet"]), "INVALID_VIEWPORT_PROFILE_STATE", "Viewport profile state data");
+  const packet = plainObject<ViewportProfilesPacket>(data.packet, "INVALID_VIEWPORT_PROFILE_STATE", "Viewport profiles packet");
+  knownKeys(packet, new Set(["version", "selection", "transforms", "profiles"]), "INVALID_VIEWPORT_PROFILE_STATE", "Viewport profiles packet");
+  invariant(packet.version === 0, "INVALID_VIEWPORT_PROFILE_STATE", "Viewport profiles packet version must be 0.");
+  const selection = plainObject<ViewportProfileSelection>(packet.selection, "INVALID_VIEWPORT_PROFILE_STATE", "Viewport profile selection");
+  knownKeys(selection, new Set(["mode"]), "INVALID_VIEWPORT_PROFILE_STATE", "Viewport profile selection");
+  invariant(selection.mode === "presentation-profile" || selection.mode === "smallest-covering", "INVALID_VIEWPORT_PROFILE_STATE", "Viewport profile selection mode is unsupported.");
+
+  invariant(Array.isArray(packet.transforms) && packet.transforms.length < 0xffff && packet.transforms.length <= limits.maxPreparedTransforms, "TRANSFORM_ALLOCATION_LIMIT", "Viewport profile transform dictionary is excessive.");
+  let previousTransform: readonly number[] | undefined;
+  for (const [index, transform] of packet.transforms.entries()) {
+    invariant(Array.isArray(transform) && transform.length === 12 && transform.every((value) => typeof value === "number" && Number.isFinite(value)), "INVALID_VIEWPORT_PROFILE_STATE", `Viewport profile transform ${index} is invalid.`);
+    if (previousTransform) {
+      let comparison = 0;
+      for (let component = 0; component < 12 && comparison === 0; component += 1) comparison = transform[component] - previousTransform[component];
+      invariant(comparison > 0, "INVALID_VIEWPORT_PROFILE_STATE", "Viewport profile transform dictionary is not strictly lexicographically sorted.");
+    }
+    previousTransform = transform;
+  }
+
+  invariant(Array.isArray(packet.profiles) && packet.profiles.length > 0 && packet.profiles.length <= 256 && packet.profiles.length * Math.max(1, playbackPacket.leafCount) <= limits.maxVisibilityCells, "VIEWPORT_PROFILE_LIMIT", "Viewport profile table is missing or excessive.");
+  const presentationProfiles = presentationPacket.camera.profiles;
+  if (selection.mode === "presentation-profile") invariant(presentationProfiles && packet.profiles.length === presentationProfiles.length, "INVALID_VIEWPORT_PROFILE_STATE", "Viewport profiles do not match responsive presentation profiles.");
+  const ids = new Set<string>();
+  const referencedTransforms = new Set<number>();
+  let previousCoveringKey: readonly number[] | undefined;
+  let visibilityChangeCount = 0;
+  let responsiveCoefficientCount = 0;
+  for (const [index, profileValue] of packet.profiles.entries()) {
+    const profile = plainObject<ViewportProfileRow>(profileValue, "INVALID_VIEWPORT_PROFILE_STATE", `Viewport profile ${index}`);
+    knownKeys(profile, new Set(["id", "width", "height", "transformIndicesBase64", "visibleBitsBase64", "visibilityChanges", "responsiveAffine"]), "INVALID_VIEWPORT_PROFILE_STATE", `Viewport profile ${index}`);
+    const id = stableId(profile.id, `Viewport profile ${index} id`);
+    invariant(!ids.has(id), "INVALID_VIEWPORT_PROFILE_STATE", `Viewport profile id ${id} is duplicated.`);
+    ids.add(id);
+    if (selection.mode === "presentation-profile") {
+      invariant(!Object.hasOwn(profile, "width") && !Object.hasOwn(profile, "height") && id === presentationProfiles![index].id, "INVALID_VIEWPORT_PROFILE_STATE", `Viewport profile ${index} does not match presentation selection order.`);
+    } else {
+      invariant(Number.isSafeInteger(profile.width) && profile.width! > 0 && profile.width! <= 1_000_000 && Number.isSafeInteger(profile.height) && profile.height! > 0 && profile.height! <= 1_000_000, "INVALID_VIEWPORT_PROFILE_STATE", `Viewport profile ${index} covering dimensions are invalid.`);
+      const key = [profile.width! * profile.height!, profile.width! + profile.height!, profile.width!, profile.height!];
+      if (previousCoveringKey) {
+        let comparison = 0;
+        for (let component = 0; component < key.length && comparison === 0; component += 1) comparison = key[component] - previousCoveringKey[component];
+        invariant(comparison > 0, "INVALID_VIEWPORT_PROFILE_STATE", "Smallest-covering viewport profiles are not canonically sorted.");
+      }
+      previousCoveringKey = key;
+    }
+    const transformIndices = base64Integers(profile.transformIndicesBase64, 2, playbackPacket.leafCount, "INVALID_VIEWPORT_PROFILE_STATE", `Viewport profile ${index} transform indices`);
+    invariant(transformIndices.length === playbackPacket.leafCount && transformIndices.every((transform) => transform === 0xffff || transform < packet.transforms.length), "STATE_COLUMN_MISMATCH", `Viewport profile ${index} transform row is invalid.`);
+    for (const transform of transformIndices) if (transform !== 0xffff) referencedTransforms.add(transform);
+    const visibleBits = base64Integers(profile.visibleBitsBase64, 1, Math.ceil(playbackPacket.leafCount / 8), "INVALID_VIEWPORT_PROFILE_STATE", `Viewport profile ${index} visibility bits`);
+    invariant(visibleBits.length === Math.ceil(playbackPacket.leafCount / 8), "STATE_COLUMN_MISMATCH", `Viewport profile ${index} visibility row is truncated.`);
+    if (playbackPacket.leafCount % 8 !== 0 && visibleBits.length > 0) invariant((visibleBits.at(-1)! >> (playbackPacket.leafCount % 8)) === 0, "INVALID_VIEWPORT_PROFILE_STATE", `Viewport profile ${index} visibility row has nonzero unused bits.`);
+    if (profile.visibilityChanges !== undefined) {
+      const changes = plainObject(profile.visibilityChanges, "INVALID_VIEWPORT_PROFILE_STATE", `Viewport profile ${index} visibility changes`);
+      knownKeys(changes, new Set(["offsetsBase64", "leafIndicesBase64"]), "INVALID_VIEWPORT_PROFILE_STATE", `Viewport profile ${index} visibility changes`);
+      invariant(Object.hasOwn(changes, "offsetsBase64") && Object.hasOwn(changes, "leafIndicesBase64"), "INVALID_VIEWPORT_PROFILE_STATE", `Viewport profile ${index} visibility changes are incomplete.`);
+      const frameCount = (playbackBinding.parameters as unknown as PlaybackParameters).frameCount;
+      const offsets = base64Integers(changes.offsetsBase64, 4, frameCount + 1, "INVALID_VIEWPORT_PROFILE_STATE", `Viewport profile ${index} visibility offsets`);
+      const leafIndices = base64Integers(changes.leafIndicesBase64, 2, limits.maxPreparedChanges, "INVALID_VIEWPORT_PROFILE_STATE", `Viewport profile ${index} visibility leaves`);
+      invariant(offsets.length === frameCount + 1 && offsets[0] === 0 && offsets.at(-1) === leafIndices.length && offsets.every((offset, cursor) => cursor === 0 || offset >= offsets[cursor - 1]), "STATE_COLUMN_MISMATCH", `Viewport profile ${index} visibility offsets are invalid.`);
+      for (let frame = 0; frame < frameCount; frame += 1) {
+        let previousLeaf = -1;
+        for (let cursor = offsets[frame]; cursor < offsets[frame + 1]; cursor += 1) {
+          const leaf = leafIndices[cursor];
+          invariant(leaf < playbackPacket.leafCount && leaf > previousLeaf, "INVALID_VIEWPORT_PROFILE_STATE", `Viewport profile ${index} visibility frame ${frame + 1} is unsorted or out of range.`);
+          previousLeaf = leaf;
+        }
+      }
+      visibilityChangeCount += leafIndices.length;
+      invariant(Number.isSafeInteger(visibilityChangeCount) && visibilityChangeCount <= limits.maxPreparedChanges, "VIEWPORT_PROFILE_LIMIT", "Viewport profile visibility changes are excessive.");
+      const reconstructed = Uint8Array.from({ length: playbackPacket.leafCount }, (_, leaf) => (visibleBits[leaf >> 3] >> (leaf & 7)) & 1);
+      for (let frame = 1; frame < frameCount; frame += 1) for (let cursor = offsets[frame]; cursor < offsets[frame + 1]; cursor += 1) reconstructed[leafIndices[cursor]] ^= 1;
+      for (let cursor = offsets[0]; cursor < offsets[1]; cursor += 1) reconstructed[leafIndices[cursor]] ^= 1;
+      invariant(reconstructed.every((visible, leaf) => visible === ((visibleBits[leaf >> 3] >> (leaf & 7)) & 1)), "INVALID_VIEWPORT_PROFILE_STATE", `Viewport profile ${index} visibility cycle does not close.`);
+    }
+    if (profile.responsiveAffine !== undefined) {
+      const affine = plainObject(profile.responsiveAffine, "INVALID_VIEWPORT_PROFILE_STATE", `Viewport profile ${index} responsive affine`);
+      knownKeys(affine, new Set(["scale", "presentBitsBase64", "coefficientsBase64"]), "INVALID_VIEWPORT_PROFILE_STATE", `Viewport profile ${index} responsive affine`);
+      invariant(Object.hasOwn(affine, "scale") && Object.hasOwn(affine, "presentBitsBase64") && Object.hasOwn(affine, "coefficientsBase64"), "INVALID_VIEWPORT_PROFILE_STATE", `Viewport profile ${index} responsive affine is incomplete.`);
+      const scale = plainObject(affine.scale, "INVALID_VIEWPORT_PROFILE_STATE", `Viewport profile ${index} responsive affine scale`);
+      knownKeys(scale, new Set(["baseWidth", "baseHeight", "multiplier", "max"]), "INVALID_VIEWPORT_PROFILE_STATE", `Viewport profile ${index} responsive affine scale`);
+      for (const key of ["baseWidth", "baseHeight", "multiplier"] as const) invariant(typeof scale[key] === "number" && Number.isFinite(scale[key]) && scale[key] > 0 && scale[key] <= 1_000_000, "INVALID_VIEWPORT_PROFILE_STATE", `Viewport profile ${index} responsive affine scale is invalid.`);
+      if (Object.hasOwn(scale, "max")) invariant(typeof scale.max === "number" && Number.isFinite(scale.max) && scale.max! > 0 && scale.max! <= 1_000_000, "INVALID_VIEWPORT_PROFILE_STATE", `Viewport profile ${index} responsive affine maximum is invalid.`);
+      const presentBits = base64Integers(affine.presentBitsBase64, 1, Math.ceil(playbackPacket.leafCount / 8), "INVALID_VIEWPORT_PROFILE_STATE", `Viewport profile ${index} responsive affine presence`);
+      invariant(presentBits.length === Math.ceil(playbackPacket.leafCount / 8), "STATE_COLUMN_MISMATCH", `Viewport profile ${index} responsive affine presence is truncated.`);
+      if (playbackPacket.leafCount % 8 !== 0 && presentBits.length > 0) invariant((presentBits.at(-1)! >> (playbackPacket.leafCount % 8)) === 0, "INVALID_VIEWPORT_PROFILE_STATE", `Viewport profile ${index} responsive affine presence has nonzero unused bits.`);
+      const presentCount = Array.from({ length: playbackPacket.leafCount }, (_, leaf) => (presentBits[leaf >> 3] >> (leaf & 7)) & 1).reduce((sum, present) => sum + present, 0);
+      invariant(presentCount > 0, "INVALID_VIEWPORT_PROFILE_STATE", `Viewport profile ${index} responsive affine has no targets.`);
+      const coefficientCount = presentCount * 16;
+      responsiveCoefficientCount += coefficientCount;
+      invariant(Number.isSafeInteger(responsiveCoefficientCount) && responsiveCoefficientCount <= limits.maxPreparedStates, "VIEWPORT_PROFILE_LIMIT", "Viewport profile responsive coefficients are excessive.");
+      const coefficients = base64Float64(affine.coefficientsBase64, coefficientCount, "INVALID_VIEWPORT_PROFILE_STATE", `Viewport profile ${index} responsive affine coefficients`);
+      invariant(coefficients.length === coefficientCount && coefficients.every((value) => Number.isFinite(value) && !Object.is(value, -0) && Math.abs(value) <= 1_000_000_000), "INVALID_VIEWPORT_PROFILE_STATE", `Viewport profile ${index} responsive affine coefficients are invalid.`);
+    }
+  }
+  invariant(referencedTransforms.size === packet.transforms.length, "INVALID_VIEWPORT_PROFILE_STATE", "Viewport profile transform dictionary contains an unreferenced row.");
   return packet;
 }
 
@@ -1422,7 +2655,8 @@ export interface InteractionTargets {
 
 export interface InteractionParameters {
   readonly initialFrame: number;
-  readonly tickRateHz: number;
+  readonly tickRateHz?: number;
+  readonly tickIntervalUs?: readonly [number, number];
 }
 
 export interface InteractionInputContract {
@@ -1543,6 +2777,11 @@ function validateInitialSurfaceClosure(packet: SurfacePacket, playbackBinding: D
   const playbackTargets = plainObject<PlaybackTargets>(playbackBinding.targets, "INVALID_PLAYBACK_BINDING", "Playback targets");
   const packed = base64Integers(packet.visibility.initialVisibleBitsBase64, 1, Math.ceil(playbackTargets.leaves.length / 8), "INVALID_SURFACE_STATE", "Surface initial visibility bitset");
   const targetFrame = packet.transitions.initialFrame - 1;
+  const positionDictionary = packet.surface.statePacking.positionDictionary;
+  const positionIndices = positionDictionary
+    ? base64Integers(packet.surface.statePacking.positionIndicesBase64, 2, packet.surface.statePacking.stateCount, "INVALID_SURFACE_STATE", "Surface position indices")
+    : undefined;
+  const coordinate = (value: number): string => value === 0 ? "0" : `${value}px`;
   for (const [index, target] of playbackTargets.leaves.entries()) {
     const node = tree.nodesById.get(target);
     const expectedVisibility = ((packed[index >> 3] >> (index & 7)) & 1) === 1 ? "visible" : "hidden";
@@ -1550,16 +2789,22 @@ function validateInitialSurfaceClosure(packet: SurfacePacket, playbackBinding: D
     const face = packet.surface.faces[index];
     let sourceFrame = 0;
     let selectedFrame = 0;
+    let selectedState = 0;
     for (let local = 0; local < face.stateCount; local += 1) {
       sourceFrame += packet.surface.statePacking.sourceFrameDeltas[face.stateOffset + local];
       if (sourceFrame > targetFrame) break;
       selectedFrame = sourceFrame;
+      selectedState = local;
     }
-    const expectedPosition = selectedFrame === 0 ? "0" : `${-selectedFrame * face.leafHeight}px`;
-    const actualPosition = node.styles.backgroundPositionY;
-    const matchesInitialCssPosition = selectedFrame === 0
-      ? actualPosition === undefined || actualPosition === "0" || actualPosition === "0px" || actualPosition === "0%"
-      : actualPosition === expectedPosition;
+    const expectedPosition = positionDictionary && positionIndices
+      ? positionDictionary[positionIndices[face.stateOffset + selectedState]].map(coordinate).join(" ")
+      : selectedFrame === 0 ? "0" : `${-selectedFrame * face.leafHeight}px`;
+    const actualPosition = positionDictionary ? node.styles.backgroundPosition : node.styles.backgroundPositionY;
+    const matchesInitialCssPosition = positionDictionary
+      ? actualPosition === expectedPosition
+      : selectedFrame === 0
+        ? actualPosition === undefined || actualPosition === "0" || actualPosition === "0px" || actualPosition === "0%"
+        : actualPosition === expectedPosition;
     invariant(matchesInitialCssPosition, "SURFACE_TREE_MISMATCH", `Surface leaf ${index} initial atlas position does not match TREE.`);
   }
 }
@@ -1571,29 +2816,90 @@ function validatePolycssChannelInvariants(
   tree: ValidatedTree,
   limits: DomLimits,
 ): void {
-  const playbackState = [...stateChannels.values()].find((channel) => channel.codec === "polycss-playback-packed@0");
+  const inlinePlaybackState = [...stateChannels.values()].find((channel) => channel.codec === "polycss-playback-packed@0");
+  const pagedPlaybackState = [...stateChannels.values()].find((channel) => channel.codec === "polycss-paged-playback@0");
+  const compositorState = [...stateChannels.values()].find((channel) => channel.codec === "polycss-compositor-timing-prepared@0");
+  const orbitState = [...stateChannels.values()].find((channel) => channel.codec === "polycss-orbit-input-prepared@0");
   const surfaceState = [...stateChannels.values()].find((channel) => channel.codec === "polycss-surface-packed@0");
-  const playbackBinding = [...bindingChannels.values()].find((channel) => channel.interpreter === "polycss-playback@0");
+  const variantState = [...stateChannels.values()].find((channel) => channel.codec === "polycss-variants-packed@0");
+  const pagedVariantState = [...stateChannels.values()].find((channel) => channel.codec === "polycss-paged-variants@0");
+  const viewportProfileState = [...stateChannels.values()].find((channel) => channel.codec === "polycss-viewport-profiles-packed@0");
+  const inlinePlaybackBinding = [...bindingChannels.values()].find((channel) => channel.interpreter === "polycss-playback@0");
+  const pagedPlaybackBinding = [...bindingChannels.values()].find((channel) => channel.interpreter === "polycss-paged-playback@0");
+  const compositorBinding = [...bindingChannels.values()].find((channel) => channel.interpreter === "polycss-compositor-timing@0");
+  const orbitBinding = [...bindingChannels.values()].find((channel) => channel.interpreter === "polycss-orbit-input@0");
   const surfaceBinding = [...bindingChannels.values()].find((channel) => channel.interpreter === "polycss-surface@0");
-  invariant(Boolean(playbackState) === Boolean(playbackBinding), "MISSING_POLYCSS_CHANNEL", "Playback state and binding must appear together.");
+  const variantBinding = [...bindingChannels.values()].find((channel) => channel.interpreter === "polycss-variants@0");
+  const pagedVariantBinding = [...bindingChannels.values()].find((channel) => channel.interpreter === "polycss-paged-variants@0");
+  const viewportProfileBinding = [...bindingChannels.values()].find((channel) => channel.interpreter === "polycss-viewport-profiles@0");
+  invariant(Boolean(inlinePlaybackState) === Boolean(inlinePlaybackBinding), "MISSING_POLYCSS_CHANNEL", "Inline playback state and binding must appear together.");
+  invariant(Boolean(pagedPlaybackState) === Boolean(pagedPlaybackBinding), "MISSING_POLYCSS_CHANNEL", "Paged playback state and binding must appear together.");
+  invariant(!(inlinePlaybackBinding && pagedPlaybackBinding), "TARGET_OWNERSHIP_CONFLICT", "Inline and paged playback are mutually exclusive.");
+  const playbackState = inlinePlaybackState ?? pagedPlaybackState;
+  const playbackBinding = inlinePlaybackBinding ?? pagedPlaybackBinding;
+  invariant(Boolean(compositorState) === Boolean(compositorBinding), "MISSING_POLYCSS_CHANNEL", "Compositor timing state and binding must appear together.");
+  invariant(Boolean(orbitState) === Boolean(orbitBinding), "MISSING_POLYCSS_CHANNEL", "Prepared orbit state and binding must appear together.");
   invariant(Boolean(surfaceState) === Boolean(surfaceBinding), "MISSING_POLYCSS_CHANNEL", "Surface state and binding must appear together.");
-  let playbackPacket: PlaybackPacket | undefined;
+  invariant(Boolean(variantState) === Boolean(variantBinding), "MISSING_POLYCSS_CHANNEL", "Variant state and binding must appear together.");
+  invariant(Boolean(pagedVariantState) === Boolean(pagedVariantBinding), "MISSING_POLYCSS_CHANNEL", "Paged variant state and binding must appear together.");
+  invariant(!(variantBinding && pagedVariantBinding), "TARGET_OWNERSHIP_CONFLICT", "Inline and paged prepared variants cannot race class ownership.");
+  invariant(Boolean(viewportProfileState) === Boolean(viewportProfileBinding), "MISSING_POLYCSS_CHANNEL", "Viewport profile state and binding must appear together.");
+  let playbackPacket: ValidatedPlayback | undefined;
+  let pagedPlaybackPacket: ValidatedPagedPlayback | undefined;
+  let pagedVariantPacket: PagedVariantPacket | undefined;
   if (playbackBinding) {
     invariant(playbackState, "MISSING_POLYCSS_CHANNEL", "Playback state and binding must appear together.");
-    playbackPacket = validatePlaybackContract(playbackState, playbackBinding, bindingInputs, limits);
+    playbackPacket = inlinePlaybackBinding
+      ? validatePlaybackContract(playbackState, playbackBinding, bindingInputs, limits)
+      : validatePagedPlaybackContract(playbackState, playbackBinding, bindingInputs, limits);
+    if (playbackPacket.kind === "paged") pagedPlaybackPacket = playbackPacket;
+  }
+  if (compositorBinding) {
+    invariant(compositorState && playbackPacket && playbackBinding, "MISSING_POLYCSS_CHANNEL", "Compositor timing requires executable playback.");
+    invariant(playbackPacket.kind === "inline", "TARGET_OWNERSHIP_CONFLICT", "Compositor timing version 0 cannot reference page-local playback transforms.");
+    validateCompositorTimingContract(compositorState, compositorBinding, playbackPacket, playbackBinding, bindingInputs, limits);
   }
   if (surfaceBinding) {
     invariant(surfaceState && playbackPacket && playbackBinding, "MISSING_POLYCSS_CHANNEL", "Prepared surface requires executable playback.");
     const surfacePacket = validateSurfaceContract(surfaceState, surfaceBinding, playbackPacket, playbackBinding, bindingInputs, limits);
     validateInitialSurfaceClosure(surfacePacket, playbackBinding, tree);
   }
+  if (variantBinding) {
+    invariant(variantState && playbackPacket && playbackBinding, "MISSING_POLYCSS_CHANNEL", "Prepared variants require executable playback.");
+    validateVariantsContract(variantState, variantBinding, playbackPacket, playbackBinding, bindingInputs, tree, limits, surfaceBinding);
+  }
+  if (pagedVariantBinding) {
+    invariant(pagedVariantState && playbackPacket && playbackBinding, "MISSING_POLYCSS_CHANNEL", "Paged prepared variants require executable playback.");
+    pagedVariantPacket = validatePagedVariantsContract(pagedVariantState, pagedVariantBinding, playbackPacket, playbackBinding, bindingInputs, tree, limits, surfaceBinding);
+  }
+  const pagedPackets = [pagedPlaybackPacket, pagedVariantPacket].filter((packet): packet is ValidatedPagedPlayback | PagedVariantPacket => Boolean(packet));
+  if (pagedPackets.length > 0) {
+    const sharedCeiling = pagedPackets[0].maxResidentPages;
+    const bankEntryFrames = playbackPacket?.banks?.map((bank) => bank.entryFrame) ?? [];
+    invariant(pagedPackets.every((packet) => packet.maxResidentPages === sharedCeiling), "STATE_PAGE_RESIDENCY_LIMIT", "Every paged state channel must declare the same document-wide resident-page ceiling.");
+    invariant(playbackPacket && sharedCeiling >= requiredDocumentStateResidency(pagedPackets, [playbackPacket.initial.sourceFrame], bankEntryFrames), "STATE_PAGE_RESIDENCY_LIMIT", "Paged state channels cannot satisfy the combined lookahead, fixed-pin, and prepared-bank transfer window within the document-wide resident-page ceiling.");
+  }
   if (playbackPacket && playbackPacket.leafCount > 0) invariant(surfaceBinding, "MISSING_POLYCSS_CHANNEL", "Playback with leaf targets requires prepared surface state and binding.");
 
   const presentationState = [...stateChannels.values()].find((channel) => channel.codec === "static-presentation@0");
   const presentationBinding = [...bindingChannels.values()].find((channel) => channel.interpreter === "static-presentation@0");
+  let presentationPacket: PresentationPacket | undefined;
   if (presentationState || presentationBinding) {
     invariant(presentationState && presentationBinding, "MISSING_POLYCSS_CHANNEL", "Presentation state and binding must appear together.");
-    validatePresentationContract(presentationState, presentationBinding, bindingInputs);
+    presentationPacket = validatePresentationContract(presentationState, presentationBinding, bindingInputs);
+  }
+  if (playbackPacket && (playbackPacket.profileTimelines !== undefined || playbackPacket.banks?.some((bank) => bank.profileTimelines !== undefined))) {
+    invariant(presentationPacket, "MISSING_POLYCSS_CHANNEL", "Playback profile timelines require static presentation.");
+    validatePlaybackProfileTimelineClosure(playbackPacket, presentationPacket);
+  }
+  if (orbitBinding) {
+    invariant(orbitState && presentationPacket, "MISSING_POLYCSS_CHANNEL", "Prepared orbit input requires static presentation.");
+    invariant(!playbackBinding, "TARGET_OWNERSHIP_CONFLICT", "Prepared orbit input version 0 cannot race playback model or surface sinks.");
+    validateOrbitInputContract(orbitState, orbitBinding, bindingInputs, tree, limits);
+  }
+  if (viewportProfileBinding) {
+    invariant(viewportProfileState && playbackPacket && playbackBinding && presentationPacket, "MISSING_POLYCSS_CHANNEL", "Viewport profiles require executable playback and static presentation.");
+    validateViewportProfilesContract(viewportProfileState, viewportProfileBinding, playbackPacket, playbackBinding, presentationPacket, bindingInputs, limits);
   }
 
   const effectsState = [...stateChannels.values()].find((channel) => channel.codec === "polycss-effects-prepared@0");
@@ -1601,6 +2907,7 @@ function validatePolycssChannelInvariants(
   if (effectsState || effectsBinding) {
     invariant(effectsState && effectsBinding, "MISSING_POLYCSS_CHANNEL", "Prepared effects state and binding must appear together.");
     invariant(playbackBinding, "MISSING_POLYCSS_CHANNEL", "Prepared effects require executable playback.");
+    invariant((playbackBinding.parameters as unknown as PlaybackParameters).catchUpPolicy !== "elapsed", "INVALID_EFFECTS_BINDING", "Prepared effects do not support collapsed elapsed catch-up.");
     const data = plainObject(effectsState.data, "INVALID_EFFECTS_STATE", "Prepared effects state data");
     knownKeys(data, new Set(["packet"]), "INVALID_EFFECTS_STATE", "Prepared effects state data");
     const packet = plainObject<EffectsPacket>(data.packet, "INVALID_EFFECTS_STATE", "Prepared effects packet");
@@ -1734,7 +3041,7 @@ function validatePolycssChannelInvariants(
     uniqueTargets(targets.shapes, "Interaction shape");
     uniqueTargets(targets.leaves, "Interaction leaf");
     const playbackTargets = plainObject<PlaybackTargets>(playbackBinding.targets, "INVALID_PLAYBACK_BINDING", "Playback targets");
-    const playbackData = plainObject<PlaybackData>(playbackState.data, "INVALID_PLAYBACK_STATE", "Playback state data");
+    const playbackData = inlinePlaybackState ? plainObject<PlaybackData>(inlinePlaybackState.data, "INVALID_PLAYBACK_STATE", "Playback state data") : null;
     invariant(sameArray(targets.shapes, playbackTargets.shapes) && sameArray(targets.leaves, playbackTargets.leaves), "INTERACTION_TARGET_MISMATCH", "Interaction shape and leaf targets must exactly match playback target order.");
     stableId(targets.cursorLayer, "Interaction cursor layer");
     const cursorStates = plainObject<{ readonly open: string; readonly closed: string }>(targets.cursorStates, "INVALID_INTERACTION_BINDING", "Interaction cursor states");
@@ -1743,10 +3050,11 @@ function validatePolycssChannelInvariants(
     stableId(cursorStates.closed, "Interaction closed cursor target");
     invariant(cursorStates.open !== cursorStates.closed, "INVALID_INTERACTION_BINDING", "Interaction cursor state targets must be distinct.");
     const parameters = plainObject<InteractionParameters>(interactionBinding.parameters, "INVALID_INTERACTION_BINDING", "Prepared interaction parameters");
-    knownKeys(parameters, new Set(["initialFrame", "tickRateHz"]), "INVALID_INTERACTION_BINDING", "Prepared interaction parameters");
-    invariant(parameters.tickRateHz === 30, "INVALID_INTERACTION_BINDING", "polycss-pointer-grab@0 tickRateHz must be 30.");
+    knownKeys(parameters, new Set(["initialFrame", "tickRateHz", "tickIntervalUs"]), "INVALID_INTERACTION_BINDING", "Prepared interaction parameters");
+    validateTickCadence(parameters, "INVALID_INTERACTION_BINDING", "Interaction");
     const playbackParameters = plainObject<PlaybackParameters>(playbackBinding.parameters, "INVALID_PLAYBACK_BINDING", "Playback parameters");
-    invariant(parameters.tickRateHz === playbackParameters.tickRateHz, "INVALID_INTERACTION_BINDING", "Interaction and playback tick rates must match.");
+    invariant(sameTickCadence(parameters, playbackParameters), "INVALID_INTERACTION_BINDING", "Interaction and playback cadences must match.");
+    invariant(playbackParameters.catchUpPolicy !== "elapsed", "INVALID_INTERACTION_BINDING", "Prepared interaction does not support collapsed elapsed catch-up.");
 
     const data = plainObject(interactionState.data, "INVALID_INTERACTION_STATE", "Prepared interaction state data");
     knownKeys(data, new Set(["packet"]), "INVALID_INTERACTION_STATE", "Prepared interaction state data");
@@ -1791,6 +3099,10 @@ function validatePolycssChannelInvariants(
       && animator.sleepEndFrame > 0 && animator.sleepEndFrame <= playbackFrameCount && animator.wakeStartFrame > 0 && animator.wakeStartFrame <= playbackFrameCount
       && animator.convergeStillTicks > 0 && animator.eyeStillTicks > 0, "INVALID_INTERACTION_STATE", "Prepared interaction animator timing is invalid.");
     invariant(parameters.initialFrame === animator.eyeFrame, "INVALID_INTERACTION_BINDING", "Interaction binding initialFrame does not match the animator eye frame.");
+    if (pagedPackets.length > 0) {
+      const requiredResidentPages = requiredDocumentStateResidency(pagedPackets, [playbackPacket!.initial.sourceFrame, parameters.initialFrame], playbackPacket!.banks?.map((bank) => bank.entryFrame) ?? []);
+      invariant(pagedPackets[0].maxResidentPages >= requiredResidentPages, "STATE_PAGE_RESIDENCY_LIMIT", "Paged state with interaction must reserve playback and interaction entry pages in addition to every combined cyclic lookahead window.");
+    }
 
     const source = plainObject<InteractionSource>(packet.source, "INVALID_INTERACTION_STATE", "Prepared interaction source contract");
     knownKeys(source, new Set(["cameraViewMatrix", "cameraWorldPosition", "inverseCameraMatrix", "projection", "displacementMagnitude", "eyeGain", "eyeMaximumOffset", "spring"]), "INVALID_INTERACTION_STATE", "Prepared interaction source contract");
@@ -1844,8 +3156,10 @@ function validatePolycssChannelInvariants(
         && Number.isSafeInteger(leaf.seamEdgeMask) && leaf.seamEdgeMask >= 0 && leaf.seamEdgeMask <= 7
         && Number.isSafeInteger(leaf.width) && leaf.width > 0
         && Number.isSafeInteger(leaf.height) && leaf.height > 0, "INVALID_INTERACTION_STATE", `Interaction leaf plan ${index} dimensions or update settings are invalid.`);
-      const playbackFit = plainObject<{ readonly canonicalSize: number }>(playbackData.leafFit[index], "INVALID_PLAYBACK_STATE", `Playback leaf-fit row ${index}`);
-      invariant(playbackFit.canonicalSize === TRIANGLE_CANONICAL_SIZE, "INTERACTION_TARGET_MISMATCH", `Interaction leaf plan ${index} does not match playback's fixed triangle basis.`);
+      if (playbackData) {
+        const playbackFit = plainObject<{ readonly canonicalSize: number }>(playbackData.leafFit[index], "INVALID_PLAYBACK_STATE", `Playback leaf-fit row ${index}`);
+        invariant(playbackFit.canonicalSize === TRIANGLE_CANONICAL_SIZE, "INTERACTION_TARGET_MISMATCH", `Interaction leaf plan ${index} does not match playback's fixed triangle basis.`);
+      }
     }
 
     invariant(Array.isArray(packet.controls) && packet.controls.length > 0 && packet.controls.length <= limits.maxInteractionControls, "INTERACTION_STATE_LIMIT", "Prepared interaction controls are missing or excessive.");
@@ -1980,7 +3294,7 @@ function validatePolycssChannelInvariants(
 
 function validateMeta(meta: DomMeta): DomMeta {
   plainObject(meta, "INVALID_META", "META");
-  knownKeys(meta, new Set(["format", "profile", "title", "generator", "capabilities", "optionalCapabilities", "initialExperience", "conformance", "counts", "sourceArtifact"]), "INVALID_META", "META");
+  knownKeys(meta, new Set(["format", "profile", "title", "generator", "capabilities", "optionalCapabilities", "initialExperience", "conformance", "counts", "artifacts", "claims"]), "INVALID_META", "META");
   invariant(meta.format === FORMAT_ID, "UNSUPPORTED_FORMAT", `META format must be ${FORMAT_ID}.`);
   invariant(meta.profile === PROFILE_ID, "UNSUPPORTED_PROFILE", `META profile must be ${PROFILE_ID}.`);
   const titleLength = typeof meta.title === "string" ? boundedCodePointLength(meta.title, 256) : 0;
@@ -2011,13 +3325,42 @@ function validateMeta(meta: DomMeta): DomMeta {
     knownKeys(counts, new Set(["nodes", "shapes", "leaves", "sourceFrames"]), "INVALID_META", "META counts");
     invariant(Object.values(counts).every((value) => typeof value === "number" && Number.isSafeInteger(value) && value >= 0), "INVALID_META", "META counts contain an invalid value.");
   }
-  if (meta.sourceArtifact !== undefined) {
-    const source = plainObject<NonNullable<DomMeta["sourceArtifact"]>>(meta.sourceArtifact, "INVALID_META", "META sourceArtifact");
-    knownKeys(source, new Set(["byteLength", "decodedByteLength", "digest", "status"]), "INVALID_META", "META sourceArtifact");
-    invariant(Number.isSafeInteger(source.byteLength) && source.byteLength >= 0 && Number.isSafeInteger(source.decodedByteLength) && source.decodedByteLength >= 0 && typeof source.status === "string" && source.status.length > 0 && source.status.length <= 128 && /^[a-z0-9][a-z0-9-]*$/u.test(source.status), "INVALID_META", "META sourceArtifact sizes or status are invalid.");
-    const digest = plainObject<NonNullable<DomMeta["sourceArtifact"]>["digest"]>(source.digest, "INVALID_META", "META sourceArtifact digest");
-    knownKeys(digest, new Set(["algorithm", "value"]), "INVALID_META", "META sourceArtifact digest");
-    invariant(digest.algorithm === "sha256" && typeof digest.value === "string" && SHA256.test(digest.value), "INVALID_META", "META sourceArtifact digest is invalid.");
+  const artifactIds = new Set<string>();
+  if (meta.artifacts !== undefined) {
+    invariant(Array.isArray(meta.artifacts) && meta.artifacts.length > 0 && meta.artifacts.length <= 64, "INVALID_META", "META artifacts are missing or excessive.");
+    let previous = "";
+    for (const [index, value] of meta.artifacts.entries()) {
+      const artifact = plainObject<NonNullable<DomMeta["artifacts"]>[number]>(value, "INVALID_META", `META artifact ${index}`);
+      knownKeys(artifact, new Set(["id", "role", "byteLength", "decodedByteLength", "digest"]), "INVALID_META", `META artifact ${index}`);
+      invariant(typeof artifact.id === "string" && SHORT_TOKEN.test(artifact.id) && artifact.id > previous, "INVALID_META", "META artifacts must have unique stable ids in canonical order.");
+      previous = artifact.id;
+      artifactIds.add(artifact.id);
+      invariant(typeof artifact.role === "string" && SHORT_TOKEN.test(artifact.role), "INVALID_META", `META artifact ${artifact.id} role is invalid.`);
+      invariant(Number.isSafeInteger(artifact.byteLength) && artifact.byteLength >= 0 && Number.isSafeInteger(artifact.decodedByteLength) && artifact.decodedByteLength >= 0, "INVALID_META", `META artifact ${artifact.id} sizes are invalid.`);
+      const digest = plainObject<typeof artifact.digest>(artifact.digest, "INVALID_META", `META artifact ${artifact.id} digest`);
+      knownKeys(digest, new Set(["algorithm", "value"]), "INVALID_META", `META artifact ${artifact.id} digest`);
+      invariant(digest.algorithm === "sha256" && typeof digest.value === "string" && SHA256.test(digest.value), "INVALID_META", `META artifact ${artifact.id} digest is invalid.`);
+    }
+  }
+  if (meta.claims !== undefined) {
+    invariant(Array.isArray(meta.claims) && meta.claims.length > 0 && meta.claims.length <= 128 && artifactIds.size > 0, "INVALID_META", "META inert claims require a bounded artifact list.");
+    const kinds = new Set(["license", "locator", "qualification", "redistribution", "revision"]);
+    let previous = "";
+    for (const [index, value] of meta.claims.entries()) {
+      const claim = plainObject<NonNullable<DomMeta["claims"]>[number]>(value, "INVALID_META", `META claim ${index}`);
+      knownKeys(claim, new Set(["artifact", "kind", "value"]), "INVALID_META", `META claim ${index}`);
+      const key = `${claim.artifact}\0${claim.kind}`;
+      invariant(typeof claim.artifact === "string" && artifactIds.has(claim.artifact) && typeof claim.kind === "string" && kinds.has(claim.kind) && key > previous, "INVALID_META", "META claims must reference artifacts and be in canonical artifact/kind order.");
+      previous = key;
+      const length = typeof claim.value === "string" ? boundedCodePointLength(claim.value, 512) : 0;
+      invariant(length > 0 && length <= 512 && !/[\u0000-\u001f\u007f]/u.test(claim.value), "INVALID_META", `META claim ${claim.artifact}/${claim.kind} value is invalid.`);
+      invariant(!/^(?:\/|\\|[A-Za-z]:[\\/]|file:)/u.test(claim.value) && !/(?:\/Users\/|\/home\/|\\Users\\)/u.test(claim.value), "META_LOCAL_PATH", `META claim ${claim.artifact}/${claim.kind} leaks a local path.`);
+      if (claim.kind === "locator") {
+        let locator: URL;
+        try { locator = new URL(claim.value); } catch { invariant(false, "INVALID_META", `META artifact ${claim.artifact} locator is not an absolute URL.`); }
+        invariant(locator.protocol === "https:" && !locator.username && !locator.password && !locator.hash, "INVALID_META", `META artifact ${claim.artifact} locator must be credential-free HTTPS without a fragment.`);
+      }
+    }
   }
   return meta;
 }
@@ -2047,11 +3390,12 @@ function validatePresentationClosure(document: DomDocument, tree: ValidatedTree,
     && camera.styles.height === `${packet.camera.sourceHeight}px`
     && camera.styles.transformOrigin === undefined
     && camera.styles.transformStyle === undefined, "PRESENTATION_TREE_MISMATCH", "Presentation camera packet does not match TREE camera styles.");
-  const playback = document.bindings.channels.find((channel) => channel.interpreter === "polycss-playback@0");
+  const playback = document.bindings.channels.find((channel) => channel.interpreter === "polycss-playback@0" || channel.interpreter === "polycss-paged-playback@0");
   if (playback) {
     const playbackParameters = playback.parameters as unknown as PlaybackParameters;
     const playbackTargets = playback.targets as unknown as PlaybackTargets;
-    invariant(playbackParameters.baseSceneTransform === packet.camera.baseSceneTransform && tree.nodesById.get(playbackTargets.model)?.styles?.transform === packet.camera.baseSceneTransform, "PRESENTATION_TREE_MISMATCH", "Presentation base scene transform does not match playback/TREE.");
+    invariant(playbackParameters.baseSceneTransform === packet.camera.baseSceneTransform, "PRESENTATION_TREE_MISMATCH", "Presentation base scene transform does not match playback.");
+    if (playback.interpreter === "polycss-playback@0") invariant(tree.nodesById.get(playbackTargets.model)?.styles?.transform === packet.camera.baseSceneTransform, "PRESENTATION_TREE_MISMATCH", "Presentation base scene transform does not match TREE.");
   }
   const interaction = document.bindings.channels.find((channel) => channel.interpreter === "polycss-pointer-grab@0");
   if (interaction) {
@@ -2063,7 +3407,7 @@ function validatePresentationClosure(document: DomDocument, tree: ValidatedTree,
   }
 }
 
-function validateResourceClosure(document: DomDocument, resources: ReadonlyMap<string, DomResourceRecord>): void {
+function validateResourceClosure(document: DomDocument, resources: ReadonlyMap<string, DomResourceRecord>, limits: DomLimits): void {
   const used = new Set<string>();
   for (const binding of document.cssBinding.stylesheets) {
     used.add(binding.resource);
@@ -2077,6 +3421,79 @@ function validateResourceClosure(document: DomDocument, resources: ReadonlyMap<s
   const presentation = document.state.channels.find((channel) => channel.codec === "static-presentation@0");
   const presentationPacket = presentation?.data.packet as unknown as PresentationPacket | undefined;
   if (presentationPacket?.background) used.add(presentationPacket.background.resource);
+  const pagedVariants = document.state.channels.find((channel) => channel.codec === "polycss-paged-variants@0");
+  if (pagedVariants) {
+    const packet = (pagedVariants.data as unknown as { readonly packet: PagedVariantPacket }).packet;
+    for (const page of packet.pages) {
+      const resource = resources.get(page.resource);
+      invariant(resource?.kind === "state-page" && resource.codec === "polycss-paged-variants-page@0", "RESOURCE_ROLE_MISMATCH", `Paged variant resource ${page.resource} is not a matching state page.`);
+      used.add(page.resource);
+    }
+  }
+  const pagedPlayback = document.state.channels.find((channel) => channel.codec === "polycss-paged-playback@0");
+  if (pagedPlayback) {
+    const packet = (pagedPlayback.data as unknown as { readonly packet: PagedPlaybackPacket }).packet;
+    for (const page of packet.pages) {
+      const resource = resources.get(page.resource);
+      invariant(resource?.kind === "state-page" && resource.codec === "polycss-paged-playback-page@0", "RESOURCE_ROLE_MISMATCH", `Paged playback resource ${page.resource} is not a matching state page.`);
+      used.add(page.resource);
+    }
+  }
+  const pagedPackets: StatePageWindowPacket[] = [];
+  const materializedBytes = new Map<string, number>();
+  if (pagedVariants) {
+    const packet = (pagedVariants.data as unknown as { readonly packet: PagedVariantPacket }).packet;
+    pagedPackets.push(packet);
+    for (const page of packet.pages) materializedBytes.set(page.resource, page.materializedByteLength);
+  }
+  if (pagedPlayback) {
+    const packet = (pagedPlayback.data as unknown as { readonly packet: PagedPlaybackPacket }).packet;
+    pagedPackets.push(packet);
+    for (const page of packet.pages) materializedBytes.set(page.resource, page.materializedByteLength);
+  }
+  if (pagedPackets.length > 0) {
+    const playback = document.bindings.channels.find((channel) => channel.interpreter === "polycss-playback@0" || channel.interpreter === "polycss-paged-playback@0");
+    const frameCount = (playback?.parameters as PlaybackParameters | undefined)?.frameCount;
+    const playbackState = document.state.channels.find((channel) => channel.codec === "polycss-playback-packed@0" || channel.codec === "polycss-paged-playback@0");
+    const initialFrame = (playbackState?.data.packet as { readonly initial?: { readonly sourceFrame?: number } } | undefined)?.initial?.sourceFrame;
+    const interaction = document.bindings.channels.find((channel) => channel.interpreter === "polycss-pointer-grab@0");
+    const interactionFrame = (interaction?.parameters as { readonly initialFrame?: number } | undefined)?.initialFrame;
+    invariant(Number.isSafeInteger(frameCount) && Number.isSafeInteger(initialFrame), "STATE_PAGE_COVERAGE_MISMATCH", "Paged state requires an exact playback frame range and initial frame.");
+    const pins = [initialFrame!, interactionFrame].filter((frame): frame is number => frame !== undefined);
+    const playbackPacket = pagedPlayback ? (pagedPlayback.data as unknown as { readonly packet: PagedPlaybackPacket }).packet : null;
+    const variantTargetCount = pagedVariants
+      ? ((document.bindings.channels.find((channel) => channel.interpreter === "polycss-paged-variants@0")!.targets as unknown as { readonly nodes: readonly string[] }).nodes.length)
+      : 0;
+    const retainedLiveCeiling = (playbackPacket
+      ? Math.max(...playbackPacket.pages.map((page) => pagedPlaybackLiveRowCeiling(page.materializedByteLength, playbackPacket.shapeCount, playbackPacket.leafCount)))
+      : 0) + pagedVariantRetainedRowsBytes(variantTargetCount);
+    let peakBytes = 0;
+    for (let frame = 1; frame <= frameCount!; frame += 1) {
+      const desired = new Set<string>();
+      for (const packet of pagedPackets) for (const resource of desiredPageResources(packet, frame, pins)) desired.add(resource);
+      let residentBytes = 0;
+      for (const resource of desired) {
+        const record = resources.get(resource);
+        const materialized = materializedBytes.get(resource)!;
+        invariant(record?.kind === "state-page" && Number.isSafeInteger(record.decodedByteLength), "RESOURCE_ROLE_MISMATCH", `Paged state resource ${resource} is not a bounded state page.`);
+        residentBytes += materialized;
+        invariant(Number.isSafeInteger(residentBytes), "STATE_PAGE_RESIDENCY_LIMIT", "Paged state byte accounting overflowed.");
+      }
+      const playbackCurrent = playbackPacket?.pages.find((page) => frame >= page.startFrame && frame <= page.endFrame);
+      const publicationWorkspace = (playbackCurrent
+        ? pagedPlaybackPublicationWorkspaceBytes(playbackCurrent.materializedByteLength, playbackPacket!.shapeCount, playbackPacket!.leafCount)
+        : 0) + pagedVariantPublicationWorkspaceBytes(variantTargetCount);
+      peakBytes = Math.max(peakBytes, residentBytes + retainedLiveCeiling + publicationWorkspace);
+      for (const resource of desired) {
+        const record = resources.get(resource)!;
+        const materialized = materializedBytes.get(resource)!;
+        const validationPeak = residentBytes - materialized + statePageValidationWorkspaceBytes(record.decodedByteLength!, materialized) + retainedLiveCeiling;
+        invariant(Number.isSafeInteger(validationPeak), "STATE_PAGE_RESIDENCY_LIMIT", "Paged state validation byte accounting overflowed.");
+        peakBytes = Math.max(peakBytes, validationPeak);
+      }
+    }
+    invariant(peakBytes <= limits.maxAggregateDecodedBytes, "STATE_PAGE_RESIDENCY_LIMIT", "Paged state decoded, materialized, and live-row window exceeds the document-wide decoded byte ceiling.");
+  }
   for (const id of resources.keys()) invariant(used.has(id), "UNUSED_RESOURCE", `Resource ${id} is not reachable from the retained-DOM contract.`);
 }
 
@@ -2086,7 +3503,7 @@ function validateDeclaredCounts(meta: DomMeta, document: DomDocument, bindingCha
   if (Object.hasOwn(counts, "nodes")) {
     invariant(counts.nodes === document.tree.nodes.length, "META_COUNT_MISMATCH", "META node count does not match TREE.");
   }
-  const playback = [...bindingChannels.values()].find((channel) => channel.interpreter === "polycss-playback@0");
+  const playback = [...bindingChannels.values()].find((channel) => channel.interpreter === "polycss-playback@0" || channel.interpreter === "polycss-paged-playback@0");
   const playbackTargets = playback?.targets as unknown as PlaybackTargets | undefined;
   const playbackParameters = playback?.parameters as unknown as PlaybackParameters | undefined;
   const declared: Array<readonly [keyof typeof counts, number | undefined]> = [
@@ -2110,7 +3527,9 @@ function validateMetadataClosure(meta: DomMeta, bindingChannels: ReadonlyMap<str
   const interpreters = new Set([...bindingChannels.values()].map((channel) => channel.interpreter));
   const capabilities = [...BASE_REQUIRED_CAPABILITIES];
   for (const interpreter of CAPABILITY_INTERPRETER_ORDER) {
-    if (interpreters.has(interpreter)) capabilities.push(CAPABILITY_BY_INTERPRETER[interpreter]);
+    if ((interpreter === "polycss-paged-playback@0" || interpreter === "polycss-paged-variants@0") && interpreters.has(interpreter) && !capabilities.includes("prepared-paged-state")) capabilities.push("prepared-paged-state");
+    const capability = CAPABILITY_BY_INTERPRETER[interpreter];
+    if (interpreters.has(interpreter) && !capabilities.includes(capability)) capabilities.push(capability);
   }
   exactArray(meta.capabilities, capabilities, "CAPABILITY_CLOSURE_MISMATCH", "META required capabilities do not exactly describe the executable contract.");
 
@@ -2147,7 +3566,7 @@ export function validateDocumentInternal(
   const bindingInputs = new Map<string, DomBindingInput>(validatedDocument.bindings.inputs.map((input) => [input.id, input]));
   validatePolycssChannelInvariants(stateChannels, bindingChannels, bindingInputs, tree, limits);
   validatePresentationClosure(validatedDocument, tree, resourceMap);
-  validateResourceClosure(validatedDocument, resourceMap);
+  validateResourceClosure(validatedDocument, resourceMap, limits);
   validateDeclaredCounts(meta, validatedDocument, bindingChannels);
   validateInitialExperience(meta, bindingChannels);
   validateMetadataClosure(meta, bindingChannels);
