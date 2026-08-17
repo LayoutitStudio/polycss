@@ -2261,17 +2261,19 @@ describe("createPolyScene", () => {
       const paths = shadow.querySelectorAll("path");
       expect(paths.length).toBe(1);
       const path = paths[0]!;
-      // Solid single-pass faces paint the PRE-BLENDED colour opaquely
-      // (blend(lit, shadowed, shadow.opacity)) instead of the shadowed
-      // colour at fractional alpha: visually identical where nothing
-      // overlaps, but idempotent under overlap, which is what lets crease
-      // edges bleed without double-darkening the seam.
-      expect(path.getAttribute("opacity")).toBeNull();
-      expect(path.getAttribute("fill")).toMatch(/^rgb\(\d+,\d+,\d+\)$/);
-      const [, pr, pg, pb] = path.getAttribute("fill")!.match(/(\d+),(\d+),(\d+)/)!;
-      // Between fully lit and fully shadowed — not the raw shadow colour.
-      expect(Number(pr)).toBeGreaterThan(0);
-      expect(Number(pr)).toBeLessThan(204);
+      // A lone floor face has no crease to bleed across, so it keeps the
+      // shadowed colour at `shadow.opacity`. (A face that DOES bleed a crease
+      // switches to the opaque pre-blend — same pixel over the lit receiver,
+      // but idempotent where the two faces' expanded clips overlap.)
+      expect(Number(path.getAttribute("opacity"))).toBeCloseTo(0.25, 6);
+      expect(path.getAttribute("fill")).toMatch(/^#[0-9a-f]{6}$/);
+      const [pr, pg, pb] = path.getAttribute("fill")!
+        .match(/^#(..)(..)(..)$/)!
+        .slice(1)
+        .map((h) => parseInt(h, 16)) as [number, number, number];
+      // The ambient-only receiver colour: darker than the lit floor, not black.
+      expect(pr).toBeGreaterThan(0);
+      expect(pr).toBeLessThan(204);
       expect(pg).toBe(pr);
       expect(pb).toBe(pr);
       expect(path.getAttribute("fill-rule")).toBe("nonzero");

@@ -132,17 +132,17 @@ describe("cross-group crease adjacency", () => {
       // bleeding those would push shadow off the model's silhouette into the
       // background, so they must stay out of the set.
       expect(plane.memberPolysUv.length).toBe(1);
-      const crease = plane.memberCreaseEdges[0];
+      const crease = plane.memberCreaseEdges![0];
       expect(crease).toBeDefined();
       expect(crease!.size).toBe(1);
-      expect(plane.memberSharedEdges[0]).toBeUndefined();
+      expect(plane.memberSharedEdges?.[0]).toBeUndefined();
     }
   });
 
   it("a lone receiver face has no crease edges at all", () => {
     const planes = prepareReceiverFacePlanes([floor], [0, 0, 0], 1, new Set(), 0.05, null);
     expect(planes.length).toBe(1);
-    expect(planes[0]!.memberCreaseEdges.every((s) => s === undefined)).toBe(true);
+    expect(planes[0]!.memberCreaseEdges!.every((s) => s === undefined)).toBe(true);
   });
 
   it("crease neighbours across a T-junction still match", () => {
@@ -158,7 +158,7 @@ describe("cross-group crease adjacency", () => {
     );
     expect(planes.length).toBe(2);
     for (const plane of planes) {
-      expect(plane.memberCreaseEdges[0]?.size).toBe(1);
+      expect(plane.memberCreaseEdges?.[0]?.size).toBe(1);
     }
   });
 });
@@ -331,14 +331,14 @@ describe("crease detection survives a non-planar member quad", () => {
     // The quad really is non-planar: its group projection would move vertices.
     const wallPlane = planes.find((p) => p.memberPolyIndices.includes(1))!;
     const { O, n } = wallPlane;
-    const offsets = wallPlane.memberPolysWorld[0]!.map(
+    const offsets = wallPlane.memberPolysWorld![0]!.map(
       (w) => (w[0] - O[0]) * n[0] + (w[1] - O[1]) * n[1] + (w[2] - O[2]) * n[2],
     );
     expect(Math.max(...offsets.map(Math.abs))).toBeGreaterThan(0.25);
 
     // Every plane must have found the crease it shares with the other plane.
     for (const plane of planes) {
-      const marked = plane.memberCreaseEdges.some((s) => (s?.size ?? 0) > 0);
+      const marked = plane.memberCreaseEdges!.some((s) => (s?.size ?? 0) > 0);
       expect(marked).toBe(true);
     }
   });
@@ -428,7 +428,7 @@ describe("convex crease vs camera silhouette", () => {
     );
     expect(planes.length).toBe(2);
     for (const plane of planes) {
-      const crease = plane.memberCreaseEdges[0];
+      const crease = plane.memberCreaseEdges![0];
       expect(crease?.size).toBe(1);
       // The neighbour's normal is kept alongside the edge — that is what the
       // camera-silhouette gate reads.
@@ -458,6 +458,189 @@ describe("convex crease vs camera silhouette", () => {
     expect([...on.keys()]).toEqual([...off.keys()]);
     for (const [faceIndex, offArea] of off) {
       expect(on.get(faceIndex)).toBeCloseTo(offArea, 9);
+    }
+  });
+});
+
+// ─── The bleed decision and the pre-blend outcome must agree ─────────────
+//
+// Expanding a member clip is only safe because the caller then paints an
+// OPAQUE pre-blend, which is idempotent where two faces' expanded clips
+// overlap. `blendShadowOverLitBase` cannot represent every pre-blend: a
+// translucent receiver shades to `rgba(...)`, and the emission then falls back
+// to `fill` at fractional alpha. Expanded clips at fractional alpha
+// double-darken across the crease — the exact failure the design prevents. So
+// eligibility is decided from the resolved colors, BEFORE the clips are built.
+describe("translucent receiver", () => {
+  const tFloor: Polygon = { ...floor, color: "rgba(136,136,136,0.5)" };
+  const tWall: Polygon = { ...wall, color: "rgba(136,136,136,0.5)" };
+  const translucent = [tFloor, tWall];
+
+  it("shades to a color the pre-blend cannot represent", () => {
+    const { receiverPlanes, casters } = setup(translucent);
+    const specs = computeReceiverShadowFaces({
+      receiverPlanes, receiverPolygons: translucent, receiverHasTexture: false,
+      casters, lightDir: cssLight, cameraRot, ambientLight, directionalLight,
+      shadow: { opacity: 0.25 }, creaseBleed: true,
+    });
+    expect(specs.length).toBeGreaterThan(0);
+    for (const spec of specs) {
+      expect(spec.fullLitFill.startsWith("rgba")).toBe(true);
+      expect(parseHexColor(spec.fullLitFill)).toBeNull();
+      expect(spec.preblendEligible).toBe(false);
+      expect(spec.creaseBled).toBe(false);
+    }
+  });
+
+  it("never emits expanded clips at fractional alpha", () => {
+    const faces = mergedFaces(translucent, { opacity: 0.25 });
+    expect(faces.length).toBeGreaterThan(0);
+    const reference = specAreas(translucent, { creaseBleed: false });
+    for (const face of faces) {
+      // Fractional alpha is fine — as long as the geometry was NOT expanded.
+      expect(face.layers.length).toBe(1);
+      const layer = face.layers[0]!;
+      expect(layer.opacity).toBeCloseTo(0.25, 6);
+      expectAreaUnchanged(pathArea(layer.d), reference.get(face.faceIndex)!);
+    }
+  });
+});
+
+// ─── The pre-blend base is per-GROUP; the leaves are shaded per-POLYGON ──
+//
+// A face group admits member normals up to RECEIVER_NORMAL_TOL (~2.5°) apart,
+// but `fullLitFill` is one color computed from the group plane. Where the
+// members' own Lambert terms disagree, the opaque pre-blend is NOT the pixel
+// the alpha form produced (residual `(leaf − fullLit)·(1 − opacity)`, measured
+// up to 11/255 at opacity 0.25 for a bright base under a grazing light), so
+// eligibility is checked against every member's own shading.
+describe("group with non-uniform member normals", () => {
+  // Triangle fan around an apex at the local origin: every member's plane
+  // offset is 0 regardless of tilt, so RECEIVER_OFFSET_TOL cannot separate
+  // them, and consecutive rim heights fan the normals apart inside the group
+  // normal tolerance.
+  const fan: Polygon[] = [];
+  {
+    const R = 2, N = 6, RAMP = 0.0018;
+    const rim: Vec3[] = [];
+    // Rim points 0 and 1 stay at z = 0, so member 0's rim edge lies exactly on
+    // the wall's bottom edge and the group really does own a crease to bleed.
+    for (let i = 0; i <= N; i++) {
+      rim.push([-R + (2 * R * i) / N, R, i <= 1 ? 0 : -RAMP * (i - 1) * (i - 1)]);
+    }
+    for (let i = 0; i < N; i++) {
+      fan.push({ vertices: [[0, 0, 0], rim[i + 1]!, rim[i]!], color: "#888888" });
+    }
+  }
+  const fanScene = [...fan, wall];
+
+  it("really is one group with members whose normals differ", () => {
+    const planes = prepareReceiverFacePlanes(fanScene, [0, 0, 0], 1, new Set(), 0.05, null);
+    const fanPlane = planes.find((p) => p.memberPolyIndices.length > 1);
+    expect(fanPlane).toBeDefined();
+    expect(fanPlane!.memberPolyIndices.length).toBe(fan.length);
+    // Member normals span a real angle — not float noise — yet all grouped.
+    const spread = fanPlane!.memberPolysWorld!.map((ws) => {
+      const [a, b, c] = [ws[0]!, ws[1]!, ws[2]!];
+      const e1 = [b[0] - a[0], b[1] - a[1], b[2] - a[2]] as Vec3;
+      const e2 = [c[0] - a[0], c[1] - a[1], c[2] - a[2]] as Vec3;
+      const nx = e1[1] * e2[2] - e1[2] * e2[1];
+      const ny = e1[2] * e2[0] - e1[0] * e2[2];
+      const nz = e1[0] * e2[1] - e1[1] * e2[0];
+      const l = Math.hypot(nx, ny, nz) || 1;
+      const n = fanPlane!.n;
+      return Math.abs((nx / l) * n[0] + (ny / l) * n[1] + (nz / l) * n[2]);
+    });
+    expect(Math.min(...spread)).toBeLessThan(1 - 1e-5);
+  });
+
+  // A bright base under a low ambient is where the residual is largest: the
+  // Lambert term then moves fastest per degree of normal difference. Measured
+  // analytically over the admissible spread, the worst case is 11/255 at
+  // opacity 0.25 — five times the threshold this was judged against.
+  //
+  // The light is tilted along +x, the axis these normals actually fan out on.
+  // A light perpendicular to that axis moves the dot only to second order, the
+  // members quantize back to one color, and the gate then accepts the group —
+  // correctly, because in that configuration the pre-blend really is identical.
+  const grazeWorld: Vec3 = [0.7071, 0, 0.7071];
+  const grazeCss: Vec3 = [grazeWorld[1], grazeWorld[0], grazeWorld[2]];
+  const grazeAmb = { intensity: 0.05 };
+  const grazeDir = { direction: grazeWorld, intensity: 1 };
+
+  function grazeSpecs(polys: readonly Polygon[], creaseBleed: boolean) {
+    const { receiverPlanes, casters } = setup(polys);
+    return computeReceiverShadowFaces({
+      receiverPlanes, receiverPolygons: polys, receiverHasTexture: false,
+      casters, lightDir: grazeCss, cameraRot, ambientLight: grazeAmb,
+      directionalLight: grazeDir, shadow: { opacity: 0.25, maxExtend: 1e6 },
+      creaseBleed,
+    });
+  }
+
+  it("is not pre-blend eligible and keeps unexpanded clips", () => {
+    const bright = fanScene.map((p) => ({ ...p, color: "#ffffff" }));
+    const specs = grazeSpecs(bright, true);
+    const fanSpec = specs.find((s) => s.memberPolyIndices.length > 1);
+    expect(fanSpec).toBeDefined();
+    // Precondition: this group DOES own a crease — it is the pre-blend, not a
+    // missing neighbour, that suppresses the bleed.
+    const planes = prepareReceiverFacePlanes(bright, [0, 0, 0], 1, new Set(), 0.05, null);
+    const fanPlane = planes.find((p) => p.memberPolyIndices.length > 1)!;
+    expect(fanPlane.memberCreaseEdges!.some((c) => (c?.size ?? 0) > 0)).toBe(true);
+    expect(fanSpec!.preblendEligible).toBe(false);
+    expect(fanSpec!.creaseBled).toBe(false);
+    const off = grazeSpecs(bright, false).find((s) => s.faceIndex === fanSpec!.faceIndex)!;
+    expect(fanSpec!.facePolysUv.reduce((t, p) => t + polygonArea(p), 0))
+      .toBe(off.facePolysUv.reduce((t, p) => t + polygonArea(p), 0));
+  });
+
+  it("a group whose members share one normal stays eligible", () => {
+    // Same construction with a flat rim: one plane, many members, one normal —
+    // eligible even under the grazing light that rejects the fanned one.
+    const flat: Polygon[] = [];
+    const R = 2, N = 6;
+    for (let i = 0; i < N; i++) {
+      flat.push({
+        vertices: [
+          [0, 0, 0],
+          [-R + (2 * R * (i + 1)) / N, R, 0],
+          [-R + (2 * R * i) / N, R, 0],
+        ],
+        color: "#ffffff",
+      });
+    }
+    const specs = grazeSpecs([...flat, { ...wall, color: "#ffffff" }], true);
+    const flatSpec = specs.find((s) => s.memberPolyIndices.length > 1);
+    expect(flatSpec).toBeDefined();
+    expect(flatSpec!.preblendEligible).toBe(true);
+    expect(flatSpec!.creaseBled).toBe(true);
+  });
+});
+
+// ─── The opaque form is paid only where it buys the seam fix ─────────────
+//
+// On the surface the pre-blend is pixel-identical to the alpha form. OFF the
+// surface it is not: `shadow.lift` floats the SVG above its face, and at
+// grazing angles that parallax hangs part of the card past the silhouette,
+// where opaque paint deviates from the backdrop ~4× as much as 25% alpha did
+// (measured headlessly on bench/crease-wing.html). So a face that did not bleed
+// a crease keeps the alpha form.
+describe("pre-blend is gated on an actual crease bleed", () => {
+  it("a lone face with no crease keeps the shadowed color at its own alpha", () => {
+    const faces = mergedFaces([floor], { opacity: 0.25 });
+    expect(faces.length).toBe(1);
+    const layer = faces[0]!.layers[0]!;
+    expect(layer.opacity).toBeCloseTo(0.25, 6);
+    expect(layer.multiply).toBe(false);
+  });
+
+  it("a bled crease face emits the opaque pre-blend", () => {
+    const faces = mergedFaces([floor, wall], { opacity: 0.25 });
+    expect(faces.length).toBe(2);
+    for (const face of faces) {
+      expect(face.layers[0]!.opacity).toBe(1);
+      expect(face.layers[0]!.fill).toMatch(/^rgb\(/);
     }
   });
 });
