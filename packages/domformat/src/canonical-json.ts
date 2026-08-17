@@ -130,6 +130,14 @@ export function encodeCanonicalJson(value: unknown, structureLimits: DomJsonStru
   return new TextEncoder().encode(serializeCanonical(canonical));
 }
 
+export function* encodeCanonicalJsonSteps(value: unknown, structureLimits: DomJsonStructureLimits = DEFAULT_JSON_STRUCTURE_LIMITS): Generator<void, Uint8Array> {
+  const canonical = normalize(value, "$", 0, new Set<object>(), structureLimits);
+  yield;
+  const text = serializeCanonical(canonical);
+  yield;
+  return new TextEncoder().encode(text);
+}
+
 function decodeUtf8(bytes: Uint8Array, label: string): string {
   try {
     // Preserve a leading BOM so the lexical parser rejects it instead of
@@ -148,18 +156,34 @@ interface JsonPreflightOptions {
   readonly allowNegativeZero?: boolean;
 }
 
-function preflightJson(text: string, label: string, options: JsonPreflightOptions = {}): void {
+function* preflightJsonSteps(text: string, label: string, options: JsonPreflightOptions = {}): Generator<void, void> {
   const structureLimits = options.structureLimits ?? DEFAULT_JSON_STRUCTURE_LIMITS;
   const numberPattern = /-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?/uy;
   let offset = 0;
-  const whitespace = () => {
-    while (offset < text.length && (text[offset] === " " || text[offset] === "\t" || text[offset] === "\n" || text[offset] === "\r")) offset += 1;
+  let valuesSinceYield = 0;
+  const checkpoint = function* (): Generator<void, void> {
+    valuesSinceYield += 1;
+    if (valuesSinceYield < 256) return;
+    valuesSinceYield = 0;
+    yield;
+  };
+  const whitespace = function* (): Generator<void, void> {
+    let scanned = 0;
+    while (offset < text.length && (text[offset] === " " || text[offset] === "\t" || text[offset] === "\n" || text[offset] === "\r")) {
+      offset += 1;
+      scanned += 1;
+      if (scanned === 4096) {
+        scanned = 0;
+        yield;
+      }
+    }
   };
   const malformed = (message: string): never => fail("MALFORMED_JSON", `${label} ${message}`);
-  const string = (maximumCodeUnits?: number): string => {
+  const string = function* (maximumCodeUnits?: number): Generator<void, string> {
     const start = offset;
     if (text[offset] !== '"') malformed(`has an invalid string at character ${offset}.`);
     offset += 1;
+    let scanned = 0;
     while (offset < text.length) {
       const code = text.charCodeAt(offset);
       if (code === 0x22) {
@@ -190,6 +214,11 @@ function preflightJson(text: string, label: string, options: JsonPreflightOption
         }
       }
       offset += 1;
+      scanned += 1;
+      if (scanned === 4096) {
+        scanned = 0;
+        yield;
+      }
     }
     return malformed("contains an unterminated string.");
   };
@@ -206,15 +235,16 @@ function preflightJson(text: string, label: string, options: JsonPreflightOption
     if (!text.startsWith(value, offset)) malformed(`has an invalid token at character ${offset}.`);
     offset += value.length;
   };
-  const value = (depth: number): void => {
+  const value = function* (depth: number): Generator<void, void> {
     invariant(depth <= MAX_CANONICAL_DEPTH, "JSON_DEPTH", `${label} nesting is too deep.`);
-    whitespace();
+    yield* checkpoint();
+    yield* whitespace();
     const token = text[offset];
     if (token === '"') {
-      string();
+      yield* string();
     } else if (token === "{") {
       offset += 1;
-      whitespace();
+      yield* whitespace();
       const keys = new Set<string>();
       let members = 0;
       if (text[offset] === "}") {
@@ -222,17 +252,17 @@ function preflightJson(text: string, label: string, options: JsonPreflightOption
         return;
       }
       while (true) {
-        whitespace();
-        const key = string(structureLimits.maxKeyCodeUnits ?? 256).normalize("NFC");
+        yield* whitespace();
+        const key = (yield* string(structureLimits.maxKeyCodeUnits ?? 256)).normalize("NFC");
         members += 1;
         invariant(members <= structureLimits.maxObjectMembers, "JSON_OBJECT_LIMIT", `${label} object has too many members.`);
         invariant(!keys.has(key), "DUPLICATE_NORMALIZED_KEY", `${label} contains duplicate object key ${JSON.stringify(key)}.`);
         keys.add(key);
-        whitespace();
+        yield* whitespace();
         if (text[offset] !== ":") malformed(`is missing ':' after an object key at character ${offset}.`);
         offset += 1;
-        value(depth + 1);
-        whitespace();
+        yield* value(depth + 1);
+        yield* whitespace();
         if (text[offset] === "}") {
           offset += 1;
           return;
@@ -242,7 +272,7 @@ function preflightJson(text: string, label: string, options: JsonPreflightOption
       }
     } else if (token === "[") {
       offset += 1;
-      whitespace();
+      yield* whitespace();
       let items = 0;
       if (text[offset] === "]") {
         offset += 1;
@@ -251,8 +281,8 @@ function preflightJson(text: string, label: string, options: JsonPreflightOption
       while (true) {
         items += 1;
         invariant(items <= structureLimits.maxArrayItems, "JSON_ARRAY_LIMIT", `${label} array has too many items.`);
-        value(depth + 1);
-        whitespace();
+        yield* value(depth + 1);
+        yield* whitespace();
         if (text[offset] === "]") {
           offset += 1;
           return;
@@ -270,10 +300,16 @@ function preflightJson(text: string, label: string, options: JsonPreflightOption
       number();
     }
   };
-  whitespace();
-  value(0);
-  whitespace();
+  yield* whitespace();
+  yield* value(0);
+  yield* whitespace();
   invariant(offset === text.length, "MALFORMED_JSON", `${label} has trailing non-whitespace data.`);
+}
+
+function preflightJson(text: string, label: string, options: JsonPreflightOptions = {}): void {
+  const validation = preflightJsonSteps(text, label, options);
+  let result = validation.next();
+  while (!result.done) result = validation.next();
 }
 
 export function decodeJson(bytes: Uint8Array, label = "JSON document", structureLimits: DomJsonStructureLimits = DEFAULT_JSON_STRUCTURE_LIMITS): unknown {
@@ -281,6 +317,20 @@ export function decodeJson(bytes: Uint8Array, label = "JSON document", structure
   preflightJson(text, label, { structureLimits });
   try {
     return JSON.parse(text);
+  } catch (error) {
+    fail("MALFORMED_JSON", `${label} is not valid JSON.`, { cause: String(error) });
+  }
+}
+
+export function* decodeJsonSteps(bytes: Uint8Array, label = "JSON document", structureLimits: DomJsonStructureLimits = DEFAULT_JSON_STRUCTURE_LIMITS): Generator<void, unknown> {
+  const text = decodeUtf8(bytes, label);
+  yield;
+  yield* preflightJsonSteps(text, label, { structureLimits });
+  yield;
+  try {
+    const parsed = JSON.parse(text);
+    yield;
+    return parsed;
   } catch (error) {
     fail("MALFORMED_JSON", `${label} is not valid JSON.`, { cause: String(error) });
   }

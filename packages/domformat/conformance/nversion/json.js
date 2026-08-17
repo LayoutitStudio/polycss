@@ -150,7 +150,7 @@ function freeze(value) {
   return Object.freeze(value);
 }
 
-export function parseJsonBytes(bytes, limits, label = "domformat JSON") {
+export function decodeJsonText(bytes, label = "domformat JSON") {
   let text;
   try {
     text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes);
@@ -158,7 +158,15 @@ export function parseJsonBytes(bytes, limits, label = "domformat JSON") {
     throw new NVersionError("MALFORMED_UTF8", `${label} is not strict UTF-8.`);
   }
   require(text.charCodeAt(0) !== 0xfeff, "MALFORMED_UTF8", `${label} begins with a byte-order mark.`);
-  return freeze(new Parser(text, limits, label).parse());
+  return text;
+}
+
+export function parseJsonText(text, limits, label = "domformat JSON") {
+  return new Parser(text, limits, label).parse();
+}
+
+export function parseJsonBytes(bytes, limits, label = "domformat JSON") {
+  return freeze(parseJsonText(decodeJsonText(bytes, label), limits, label));
 }
 
 export async function decodeTransport(input, limits) {

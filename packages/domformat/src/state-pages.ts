@@ -1,5 +1,5 @@
 import { canonicalBase64DecodedLength } from "./base64.js";
-import { decodeJson, encodeCanonicalJson } from "./canonical-json.js";
+import { decodeJson, decodeJsonSteps, encodeCanonicalJson, encodeCanonicalJsonSteps } from "./canonical-json.js";
 import { jsonStructureLimits } from "./constants.js";
 import { invariant } from "./errors.js";
 import { cssNumber } from "./state/numeric.js";
@@ -229,9 +229,8 @@ function* playbackPageValidationSteps(
     sliceLimit = PLAYBACK_VALIDATION_SLICE_OPERATIONS;
     return true;
   };
-  const parsed = decodeJson(decodedBytes, `State page ${expected.resource}`, jsonStructureLimits(limits));
-  yield;
-  const canonical = encodeCanonicalJson(parsed, jsonStructureLimits(limits));
+  const parsed = yield* decodeJsonSteps(decodedBytes, `State page ${expected.resource}`, jsonStructureLimits(limits));
+  const canonical = yield* encodeCanonicalJsonSteps(parsed, jsonStructureLimits(limits));
   yield;
   invariant(sameBytes(decodedBytes, canonical), "NONCANONICAL_STATE_PAGE", `State page ${expected.resource} is not canonical JSON.`);
   const page = plain(parsed, `State page ${expected.resource}`);
