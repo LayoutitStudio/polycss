@@ -365,8 +365,8 @@ interface PolyShadowOptions {
   /** 0..1. Default: 0.25. */
   opacity?: number;
   /** World units the shadow is lifted off its receiver to avoid z-fighting.
-   *  Default 0.05 for the ground-plane fallback, 0.001 for `receiveShadow`
-   *  meshes. */
+   *  Defaults to `POLY_DEFAULT_SHADOW_LIFT` (0.05) on both the ground-plane
+   *  fallback and the `receiveShadow` face path, in all three renderers. */
   lift?: number;
   /** Max CSS px the shadow may extend past the mesh footprint. Default: 2000. */
   maxExtend?: number;
@@ -384,9 +384,9 @@ interface PolyShadowOptions {
    *  greedy-meshes the coverage into blocky rectangles. */
   style?: "vector" | "pixel";
   /** Re-emit shadows while a mesh animates instead of freezing at the last
-   *  pose. Default false. Vanilla throttles the re-emit internally (~12fps);
-   *  React/Vue re-emit on every polygon change — pair with a low parametric
-   *  `definition`. */
+   *  pose. Default false. All three renderers throttle the re-emit to the same
+   *  80 ms window (~12fps, leading + trailing edge) — pair with a low
+   *  parametric `definition`. */
   followAnimation?: boolean;
 }
 

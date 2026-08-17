@@ -114,10 +114,14 @@ clearance between a receiver face and the shadow painted on it).
 
 ## Diagnostics and DOM helpers
 
-Renderer packages only — these touch the DOM, so **none of them are in `core`**.
+`collectPolyRenderStats`, `collectPolyTextureReadiness`, and `queryPolyLeaves`
+live in `@layoutit/polycss-core` — they read a DOM subtree structurally, with no
+browser globals — and are re-exported by all three renderers. Only
+`injectPolyBaseStyles` is renderer-only.
 
-From `@layoutit/polycss`, `-react` and `-vue`: `collectPolyRenderStats`,
-`collectPolyTextureReadiness`, `queryPolyLeaves`, `injectPolyBaseStyles`.
+From `@layoutit/polycss-core`, `@layoutit/polycss`, `-react` and `-vue`:
+`collectPolyRenderStats`, `collectPolyTextureReadiness`, `queryPolyLeaves`.
+From the renderer packages only: `injectPolyBaseStyles`.
 
 React and Vue only: `findPolyMeshHandle`, `pointInMeshElement`,
 `findMeshUnderPoint`. Vanilla has no exported equivalent.
@@ -151,12 +155,13 @@ Texture: `PolyTextureLightingMode`, `PolyTextureLeafSizing`,
 Camera: `PolyCameraProjection`, `PolyCameraSnapshot`, `PolyCameraSnapshotStats`.
 
 Scene/mesh: `PolyMeshTransformInput`, `PolySceneTransformInput` (all packages);
+`PolyShadowOptions` (the `shadow` option/prop type — renderer packages only);
 `PolyMeshHandle` (renderer packages only — not in `core`); `PolySceneOptions`,
 `PolySceneHandle`, `PolyMeshTransform` (vanilla — React/Vue use component prop
 types such as `PolySceneProps` and `PolyMeshProps` instead).
 
 Render: `PolyRenderStrategy`, `PolyRenderStrategiesOption` (all packages);
-`PolyRenderStats` and `PolyLeafInfo` (renderer packages only — not in `core`);
+`PolyRenderStats` and `PolyLeafInfo` (all packages, including `core`);
 `TextureQuality` (core and `@layoutit/polycss`).
 
 Parse options: `LoadMeshOptions`, `ObjParseOptions`, `StlParseOptions`,

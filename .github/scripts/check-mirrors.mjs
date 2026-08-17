@@ -6,27 +6,36 @@
  * A fix in one copy MUST land in the others — historically that rule lived
  * only in a PR checklist, and it failed silently (unmirrored fixes shipped).
  *
- * Two enforcement modes:
+ * Three enforcement modes:
  *
- * - IDENTICAL groups: files that must stay byte-for-byte equal (the
- *   react↔vue clones, and the renderStats trio). Any divergence fails.
+ * - IDENTICAL groups: files that must stay byte-for-byte equal (the react↔vue
+ *   clones). Any divergence fails.
  *
  * - SYNC sets: files that mirror each other *semantically* but not textually
  *   (vanilla↔react/vue). Their content hashes are pinned in
  *   .github/mirror-lock.json. Editing any file in a set fails CI until the
- *   author re-pins with `pnpm check:mirrors --update` — a deliberate
- *   speed bump that forces the "did I mirror this into the other two
- *   renderers?" question at the moment the answer is cheap.
+ *   author re-pins with `pnpm check:mirrors --update`. The lock proves the
+ *   tree matches what was reviewed; on its own it does NOT prove the change
+ *   was mirrored, because `--update` regenerates it from the current tree.
  *
- * Run: `node .github/scripts/check-mirrors.mjs [--update]`
+ * - LANE PARITY: the part that actually enforces mirroring. Each sync set is
+ *   partitioned into renderer lanes (packages/polycss, packages/react,
+ *   packages/vue) and compared against a base ref. If one lane changed and
+ *   another lane in the same set did not, the check fails — re-pinning the
+ *   lock cannot launder it, because the lock is not consulted here.
+ *   Intentional per-renderer divergence is declared in
+ *   .github/mirror-waivers.json, which `--update` never writes, so a waiver
+ *   is always visible in the PR diff.
+ *
+ * Run: `node .github/scripts/check-mirrors.mjs [--update] [--base <ref>]`
  */
+import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
-const lockPath = resolve(repoRoot, ".github", "mirror-lock.json");
 
 /** Files that must be byte-identical. First entry is the reference copy. */
 export const IDENTICAL_GROUPS = [
@@ -98,6 +107,7 @@ export const IDENTICAL_GROUPS = [
 /**
  * Semantically-mirrored sets whose copies are structurally different.
  * Hashes are pinned in mirror-lock.json; any edit requires --update.
+ * Lane parity (below) is what proves the edit reached every renderer.
  */
 export const SYNC_SETS = [
   {
@@ -155,6 +165,9 @@ export const SYNC_SETS = [
     ],
   },
 ];
+
+/** Renderer packages that form the parity lanes. */
+export const RENDERER_LANES = ["polycss", "react", "vue"];
 
 const sha256 = (buf) => createHash("sha256").update(buf).digest("hex");
 
@@ -227,58 +240,347 @@ export function checkSyncSets(root, sets, lock) {
   return failures;
 }
 
-function main() {
-  const update = process.argv.includes("--update");
+function git(root, args) {
+  const result = spawnSync("git", args, { cwd: root, encoding: "utf8" });
+  if (result.error || result.status !== 0) return null;
+  return result.stdout.trim();
+}
 
-  const identicalFailures = checkIdenticalGroups(repoRoot, IDENTICAL_GROUPS);
-  if (identicalFailures.length > 0) {
-    console.error("Mirror check failed — byte-identical copies diverged:\n");
-    for (const failure of identicalFailures) {
-      console.error(`  ${failure.group}\n    ${failure.reason}\n`);
+const verifyRef = (root, ref) => git(root, ["rev-parse", "--verify", `${ref}^{commit}`]);
+
+/**
+ * Base resolution order: --base <ref> → origin/$GITHUB_BASE_REF → merge-base
+ * with origin/main → origin/main. A checkout that resolves none of these
+ * (shallow clone, no remote) SKIPS the lane check loudly instead of passing.
+ */
+export function resolveBaseRef(root, argv = [], env = process.env) {
+  const flagIndex = argv.indexOf("--base");
+  if (flagIndex !== -1) {
+    const ref = argv[flagIndex + 1];
+    if (!ref || ref.startsWith("--")) {
+      return { skip: true, reason: "--base was passed without a ref" };
     }
-    console.error(
+    const resolved = verifyRef(root, ref);
+    if (!resolved) {
+      return {
+        skip: true,
+        reason: `--base ref "${ref}" cannot be resolved in this checkout`,
+      };
+    }
+    return { base: resolved, source: `--base ${ref}` };
+  }
+
+  if (env.GITHUB_BASE_REF) {
+    const ref = `origin/${env.GITHUB_BASE_REF}`;
+    const resolved = verifyRef(root, ref);
+    if (resolved) return { base: resolved, source: ref };
+  }
+
+  const mergeBase = git(root, ["merge-base", "HEAD", "origin/main"]);
+  if (mergeBase) return { base: mergeBase, source: "merge-base(HEAD, origin/main)" };
+
+  const originMain = verifyRef(root, "origin/main");
+  if (originMain) return { base: originMain, source: "origin/main" };
+
+  return {
+    skip: true,
+    reason:
+      "no base ref could be resolved (no --base, no usable GITHUB_BASE_REF, " +
+      "no origin/main). Shallow clone or missing remote? CI must check out " +
+      "with fetch-depth: 0.",
+  };
+}
+
+/** Repo-relative paths changed between `base` and the working tree. */
+export function changedFilesSince(root, base) {
+  const out = git(root, ["diff", "--name-only", base, "--"]);
+  if (out === null) return null;
+  return out.length === 0 ? [] : out.split("\n").filter(Boolean);
+}
+
+export function resolveLane(file) {
+  const match = /^packages\/([^/]+)\//.exec(file);
+  if (!match) return null;
+  return RENDERER_LANES.includes(match[1]) ? match[1] : null;
+}
+
+export function partitionLanes(files) {
+  const lanes = new Map();
+  for (const file of files) {
+    const lane = resolveLane(file);
+    if (!lane) continue;
+    if (!lanes.has(lane)) lanes.set(lane, []);
+    lanes.get(lane).push(file);
+  }
+  return lanes;
+}
+
+/**
+ * A waiver is `"<set>": "<reason>"` or
+ * `"<set>": { "reason": "...", "files": ["..."] }`. An empty reason is an
+ * error, not a waiver — the point is that the divergence is explained.
+ */
+export function loadWaivers(waiverPath) {
+  if (!existsSync(waiverPath)) return { waivers: {}, errors: [] };
+  let raw;
+  try {
+    raw = JSON.parse(readFileSync(waiverPath, "utf8"));
+  } catch (error) {
+    return { waivers: {}, errors: [`mirror-waivers.json is not valid JSON: ${error.message}`] };
+  }
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return { waivers: {}, errors: ["mirror-waivers.json must be a JSON object"] };
+  }
+  const waivers = {};
+  const errors = [];
+  for (const [name, value] of Object.entries(raw)) {
+    if (typeof value === "string") {
+      if (value.trim().length === 0) {
+        errors.push(`waiver "${name}" has an empty reason`);
+        continue;
+      }
+      waivers[name] = { reason: value.trim(), files: null };
+      continue;
+    }
+    if (
+      value &&
+      typeof value === "object" &&
+      !Array.isArray(value) &&
+      typeof value.reason === "string" &&
+      value.reason.trim().length > 0
+    ) {
+      const files = value.files;
+      if (
+        files !== undefined &&
+        (!Array.isArray(files) || files.some((f) => typeof f !== "string"))
+      ) {
+        errors.push(`waiver "${name}" has a non string-array "files"`);
+        continue;
+      }
+      waivers[name] = {
+        reason: value.reason.trim(),
+        files: Array.isArray(files) && files.length > 0 ? files : null,
+      };
+      continue;
+    }
+    errors.push(
+      `waiver "${name}" must be a non-empty reason string, or an object with a ` +
+        "non-empty \"reason\" (and optional \"files\")",
+    );
+  }
+  return { waivers, errors };
+}
+
+/**
+ * Fails when a set's renderer lanes changed unevenly. Waived sets are
+ * reported rather than failed; a file-scoped waiver only excuses the files it
+ * names, so any other uneven change in the same set still fails.
+ */
+export function checkLaneParity(sets, changedFiles, waivers = {}) {
+  const changed = new Set(changedFiles);
+  const failures = [];
+  const waived = [];
+
+  for (const set of sets) {
+    const lanes = partitionLanes(set.files);
+    if (lanes.size < 2) continue;
+
+    const classify = (exclude) => {
+      const changedLanes = [];
+      const unchangedLanes = [];
+      for (const [lane, files] of lanes) {
+        const touched = files.some(
+          (file) => changed.has(file) && !exclude?.has(file),
+        );
+        (touched ? changedLanes : unchangedLanes).push(lane);
+      }
+      return { changedLanes, unchangedLanes };
+    };
+    const isUneven = (r) => r.changedLanes.length > 0 && r.unchangedLanes.length > 0;
+
+    const touchedFiles = (result, exclude) =>
+      result.changedLanes.flatMap((lane) =>
+        lanes.get(lane).filter((file) => changed.has(file) && !exclude?.has(file)),
+      );
+
+    const raw = classify(null);
+    if (!isUneven(raw)) continue;
+
+    const waiver = waivers[set.name];
+    if (!waiver) {
+      failures.push({
+        set: set.name,
+        changed: raw.changedLanes,
+        unchanged: raw.unchangedLanes,
+        changedFiles: touchedFiles(raw, null),
+        hint: set.hint,
+      });
+      continue;
+    }
+
+    if (!waiver.files) {
+      waived.push({
+        set: set.name,
+        reason: waiver.reason,
+        files: null,
+        changed: raw.changedLanes,
+        unchanged: raw.unchangedLanes,
+      });
+      continue;
+    }
+
+    const scoped = classify(new Set(waiver.files));
+    if (!isUneven(scoped)) {
+      waived.push({
+        set: set.name,
+        reason: waiver.reason,
+        files: waiver.files,
+        changed: raw.changedLanes,
+        unchanged: raw.unchangedLanes,
+      });
+      continue;
+    }
+    failures.push({
+      set: set.name,
+      changed: scoped.changedLanes,
+      unchanged: scoped.unchangedLanes,
+      changedFiles: touchedFiles(scoped, new Set(waiver.files)),
+      hint: set.hint,
+      note:
+        "a file-scoped waiver exists for this set but does not cover these " +
+        "changes",
+    });
+  }
+
+  return { failures, waived };
+}
+
+export function run(argv = [], options = {}) {
+  const root = options.root ?? repoRoot;
+  const groups = options.groups ?? IDENTICAL_GROUPS;
+  const sets = options.sets ?? SYNC_SETS;
+  const lockPath = options.lockPath ?? resolve(root, ".github", "mirror-lock.json");
+  const waiverPath =
+    options.waiverPath ?? resolve(root, ".github", "mirror-waivers.json");
+  const env = options.env ?? process.env;
+  const log = options.log ?? console.log;
+  const err = options.error ?? console.error;
+
+  const identicalFailures = checkIdenticalGroups(root, groups);
+  if (identicalFailures.length > 0) {
+    err("Mirror check failed — byte-identical copies diverged:\n");
+    for (const failure of identicalFailures) {
+      err(`  ${failure.group}\n    ${failure.reason}\n`);
+    }
+    err(
       "These copies must stay byte-for-byte equal. Apply the same change to " +
         "every file in the group (AGENTS.md → Renderer-owned browser glue).",
     );
-    process.exit(1);
+    return 1;
   }
 
-  if (update) {
-    const lock = computeSyncHashes(repoRoot, SYNC_SETS);
+  if (argv.includes("--update")) {
+    // Deliberately never touches mirror-waivers.json: a waiver must be an
+    // explicit, reviewable edit in the PR diff.
+    const lock = computeSyncHashes(root, sets);
     writeFileSync(lockPath, `${JSON.stringify(lock, null, 2)}\n`);
-    console.log(`Pinned ${SYNC_SETS.length} mirror sets to ${lockPath}`);
-    return;
+    log(`Pinned ${sets.length} mirror sets to ${lockPath}`);
+    return 0;
   }
+
+  let failed = false;
 
   if (!existsSync(lockPath)) {
-    console.error(
-      `Missing ${lockPath}. Run \`pnpm check:mirrors --update\` and commit it.`,
-    );
-    process.exit(1);
-  }
-  const lock = JSON.parse(readFileSync(lockPath, "utf8"));
-  const syncFailures = checkSyncSets(repoRoot, SYNC_SETS, lock);
-  if (syncFailures.length > 0) {
-    console.error("Mirror check failed — pinned mirror sets changed:\n");
-    for (const failure of syncFailures) {
-      console.error(`  set: ${failure.set}`);
-      for (const file of failure.files ?? []) console.error(`    changed: ${file}`);
-      for (const file of failure.stale ?? []) console.error(`    stale pin: ${file}`);
-      if (failure.hint) console.error(`    ${failure.hint}`);
-      console.error("");
+    err(`Missing ${lockPath}. Run \`pnpm check:mirrors --update\` and commit it.`);
+    failed = true;
+  } else {
+    const lock = JSON.parse(readFileSync(lockPath, "utf8"));
+    const syncFailures = checkSyncSets(root, sets, lock);
+    if (syncFailures.length > 0) {
+      failed = true;
+      err("Mirror check failed — pinned mirror sets changed:\n");
+      for (const failure of syncFailures) {
+        err(`  set: ${failure.set}`);
+        for (const file of failure.files ?? []) err(`    changed: ${file}`);
+        for (const file of failure.stale ?? []) err(`    stale pin: ${file}`);
+        if (failure.hint) err(`    ${failure.hint}`);
+        err("");
+      }
+      err(
+        "If the change is already mirrored into every renderer copy, re-pin " +
+          "with `pnpm check:mirrors --update` and commit mirror-lock.json.",
+      );
     }
-    console.error(
-      "If the change is already mirrored into every renderer copy (or is an " +
-        "intentional per-renderer divergence documented in AGENTS.md), re-pin " +
-        "with `pnpm check:mirrors --update` and commit mirror-lock.json.",
-    );
-    process.exit(1);
   }
 
-  console.log("Mirror check passed.");
+  const { waivers, errors: waiverErrors } = loadWaivers(waiverPath);
+  if (waiverErrors.length > 0) {
+    failed = true;
+    err("Mirror check failed — invalid mirror waivers:\n");
+    for (const message of waiverErrors) err(`  ${message}`);
+    err("");
+  }
+  const setNames = new Set(sets.map((set) => set.name));
+  const unknownWaivers = Object.keys(waivers).filter((name) => !setNames.has(name));
+  if (unknownWaivers.length > 0) {
+    failed = true;
+    err(
+      "Mirror check failed — waivers name sets that do not exist: " +
+        `${unknownWaivers.join(", ")}\n`,
+    );
+  }
+
+  const base = resolveBaseRef(root, argv, env);
+  if (base.skip) {
+    log(`MIRROR LANE CHECK SKIPPED: ${base.reason}`);
+  } else {
+    const changedFiles = changedFilesSince(root, base.base);
+    if (changedFiles === null) {
+      log(
+        "MIRROR LANE CHECK SKIPPED: `git diff` against " +
+          `${base.source} failed in this checkout.`,
+      );
+    } else {
+      const { failures, waived } = checkLaneParity(sets, changedFiles, waivers);
+      for (const entry of waived) {
+        log(
+          `MIRROR WAIVER APPLIED: set "${entry.set}" — changed lane(s) ` +
+            `${entry.changed.join(", ")}, unchanged lane(s) ` +
+            `${entry.unchanged.join(", ")}` +
+            (entry.files ? ` (scoped to ${entry.files.join(", ")})` : "") +
+            `\n  reason: ${entry.reason}`,
+        );
+      }
+      if (failures.length > 0) {
+        failed = true;
+        err(
+          "Mirror check failed — renderer lanes changed unevenly against " +
+            `${base.source}:\n`,
+        );
+        for (const failure of failures) {
+          err(`  set: ${failure.set}`);
+          err(`    changed lane(s):   ${failure.changed.join(", ")}`);
+          err(`    unchanged lane(s): ${failure.unchanged.join(", ")}`);
+          for (const file of failure.changedFiles ?? []) err(`    changed: ${file}`);
+          if (failure.note) err(`    ${failure.note}`);
+          if (failure.hint) err(`    ${failure.hint}`);
+          err("");
+        }
+        err(
+          "Mirror the change into every renderer lane, or declare the " +
+            "divergence in .github/mirror-waivers.json with a reason " +
+            "(re-pinning mirror-lock.json does NOT satisfy this check).",
+        );
+      }
+    }
+  }
+
+  if (failed) return 1;
+  log("Mirror check passed.");
+  return 0;
 }
 
 const isDirectRun =
   process.argv[1] &&
   resolve(process.argv[1]) === fileURLToPath(import.meta.url);
-if (isDirectRun) main();
+if (isDirectRun) process.exit(run(process.argv.slice(2)));

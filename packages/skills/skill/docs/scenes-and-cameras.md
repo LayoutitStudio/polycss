@@ -59,18 +59,20 @@ attributes (kebab-case).
 | `textureImageRendering` | `"auto" \| "pixelated"` | `"auto"` | |
 | `textureBackend` | `"auto" \| "atlas" \| "image"` | `"auto"` | `"auto"` always resolves to the atlas today; direct image leaves need explicit `"image"`. |
 | `textureProjection` | `"affine" \| "projective"` | `"affine"` | |
-| `seamBleed` | `number \| "auto"` | `1.5` | Overscan on shared solid seams. **Semantics differ by renderer** — see below. |
+| `seamBleed` | `number \| "auto"` | `1.5` | Shared-solid-seam overscan in CSS px. Identical in all three renderers — see below. |
 | `strategies` | `{ disable?: ("b"\|"i"\|"u")[] }` | none | Diagnostics. `<s>` cannot be disabled. |
 | `autoCenter` | `boolean` | `false` | Rotate around content bbox center instead of world origin. Polygon data is not mutated. Meshes opt out with `excludeFromAutoCenter`. |
 | `centerPolygons` | `Polygon[]` | none | **Framework only.** bbox source for `autoCenter` when polygons live in child meshes. |
 | `shadow` | object | see [shadows.md](shadows.md) | |
 | `polygons` | `Polygon[]` | none | **Framework only.** Composes with children. Note: this is the only path that runs `normalizePolygons`. |
 
-`seamBleed` caveat: only the numeric default `1.5` behaves identically across
-renderers. Vanilla clamps a number to `0..1` and multiplies the `1.5` px
-default; React/Vue pass the raw number through. `"auto"` resolves to the full
-`1.5` px in vanilla but produces **no** shared-edge overscan in React/Vue.
-Prefer leaving it alone.
+`seamBleed` is an absolute CSS-pixel request, resolved by core
+(`resolveSeamBleedPx`) identically in vanilla, React, and Vue. `undefined` and
+`"auto"` both give the `1.5` px default; a finite number ≥ 0 is used as-is with
+no upper clamp (the per-edge geometric fit still bounds each edge); negative or
+non-finite values fall back to the default. The same option scales the
+per-strategy primitive bleeds by `clamp(px / 1.5, 0, 1)`, so `0` disables every
+bleed and sub-`1.5` values shrink them proportionally.
 
 ## Mesh transforms
 

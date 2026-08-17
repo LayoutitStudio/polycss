@@ -87,8 +87,8 @@ geometry is unchanged, only low-alpha atlas pixels at shared edges are filled
 from nearby opaque texels.
 
 Solid (untextured) shared edges use `seamBleed` instead — see
-[scenes-and-cameras.md](scenes-and-cameras.md) for the renderer divergence. The
-numeric default `1.5` is the only value that behaves identically everywhere.
+[scenes-and-cameras.md](scenes-and-cameras.md). Its semantics are owned by core
+and identical in all three renderers.
 
 ## Readiness
 

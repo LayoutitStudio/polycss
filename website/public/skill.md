@@ -167,7 +167,11 @@ React (Vue mirrors this with kebab-case props):
 
 ```tsx
 <PolyCamera rotX={65} rotY={45}>
-  <PolyScene textureLighting="dynamic" ambientLight={{ intensity: 0.35 }}>
+  <PolyScene
+    textureLighting="dynamic"
+    ambientLight={{ intensity: 0.35 }}
+    directionalLight={{ direction: [0.5, -0.6, 0.7], intensity: 1 }}
+  >
     <PolyOrbitControls drag wheel />
     <PolyMesh src="/model.glb" autoCenter castShadow />
     <PolyGround size={8} />

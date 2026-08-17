@@ -142,9 +142,8 @@ the wrapper's local origin, so rotation and scale pivot at the visible center.
 
 - `usePolyCamera(options)` — create and drive the scene camera store from camera
   options; returns the camera store plus scene/camera element refs.
-- `usePolySceneContext(polygons, options)` — run the scene pipeline (normalize +
-  merge) over a reactive polygon list; returns a ref of
-  `{ polygons, sceneBbox }`.
+- `usePolySceneContext(polygons)` — run the scene pipeline (normalize + merge)
+  over a reactive polygon list; returns a ref of `{ polygons, sceneBbox }`.
 - `usePolyMesh` — load a mesh imperatively; exposes polygons, voxel source,
   loading, error, and warnings as reactive state.
 - `usePolyMaterial` — resolve material state for a mesh.

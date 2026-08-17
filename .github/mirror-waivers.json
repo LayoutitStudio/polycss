@@ -1,0 +1,9 @@
+{
+  "voxel-renderer": {
+    "reason": "React/Vue caught up to a fix packages/polycss already carried: their camera-cull item ordering still used raw rotateVec3 for the mesh rotation, while the vanilla copy already used rotateVec3InWrapperCssFrame. Only the two lagging lanes changed, so the lanes converged rather than diverged.",
+    "files": [
+      "packages/react/src/scene/voxelRenderer.ts",
+      "packages/vue/src/scene/voxelRenderer.ts"
+    ]
+  }
+}

@@ -19,6 +19,10 @@ jobs:
     steps:
       - name: Check out
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          # check:mirrors needs history to merge-base against the PR's base ref;
+          # a shallow clone makes the lane-parity check skip itself.
+          fetch-depth: 0
 
       - name: Set up pnpm
         uses: pnpm/action-setup@a7487c7e89a18df4991f7f222e4898a00d66ddda

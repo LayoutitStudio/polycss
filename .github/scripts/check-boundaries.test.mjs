@@ -1,7 +1,41 @@
 import assert from "node:assert/strict";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
 import test from "node:test";
 
-import { extractSpecifiers } from "./check-boundaries.mjs";
+import {
+  MANIFEST_DEPENDENCY_FIELDS,
+  PACKAGE_RULES,
+  checkManifestDependencies,
+  extractSpecifiers,
+  runChecks,
+} from "./check-boundaries.mjs";
+
+function makeRepo(files) {
+  const root = mkdtempSync(join(tmpdir(), "boundary-check-"));
+  for (const [rel, content] of Object.entries(files)) {
+    const abs = resolve(root, rel);
+    mkdirSync(dirname(abs), { recursive: true });
+    writeFileSync(
+      abs,
+      typeof content === "string" ? content : `${JSON.stringify(content, null, 2)}\n`,
+    );
+  }
+  return root;
+}
+
+/** Every configured package needs a manifest, so fixtures must supply one. */
+function withManifests(files, extra = {}) {
+  const out = { ...files };
+  for (const pkg of Object.keys(PACKAGE_RULES)) {
+    const path = `packages/${pkg}/package.json`;
+    if (!(path in out)) out[path] = extra[pkg] ?? { name: pkg };
+  }
+  return out;
+}
+
+const cleanup = (root) => rmSync(root, { recursive: true, force: true });
 
 test("extracts static import specifiers", () => {
   const source = `
@@ -33,4 +67,156 @@ const legacy = require("earcut");
 test("does not treat property access named import as a specifier", () => {
   const source = `const x = foo.import("not-an-import");`;
   assert.deepEqual(extractSpecifiers(source), []);
+});
+
+test("manifest check rejects a forbidden dependency in every shipped field", () => {
+  for (const field of MANIFEST_DEPENDENCY_FIELDS) {
+    const violations = checkManifestDependencies(
+      { name: "react", [field]: { "@layoutit/polycss": "workspace:^" } },
+      "react",
+      PACKAGE_RULES.react,
+    );
+    assert.equal(violations.length, 1, field);
+    assert.match(violations[0], new RegExp(`disallowed ${field} entry`));
+    assert.match(violations[0], /@layoutit\/polycss"/);
+  }
+});
+
+test("manifest check accepts allowed dependencies and ignores devDependencies", () => {
+  const violations = checkManifestDependencies(
+    {
+      name: "react",
+      dependencies: { "@layoutit/polycss-core": "workspace:^" },
+      peerDependencies: { react: "^19", "react-dom": "^19" },
+      devDependencies: { vitest: "^3", "happy-dom": "^15" },
+    },
+    "react",
+    PACKAGE_RULES.react,
+  );
+  assert.deepEqual(violations, []);
+});
+
+test("a react package depending on @layoutit/polycss fails end to end", () => {
+  const root = makeRepo(
+    withManifests(
+      { "packages/react/src/index.ts": "export const a = 1;\n" },
+      {
+        react: {
+          name: "@layoutit/polycss-react",
+          dependencies: {
+            "@layoutit/polycss-core": "workspace:^",
+            "@layoutit/polycss": "workspace:^",
+          },
+        },
+      },
+    ),
+  );
+  const violations = runChecks(root);
+  assert.equal(violations.length, 1);
+  assert.match(
+    violations[0],
+    /packages\/react\/package\.json: disallowed dependencies entry "@layoutit\/polycss"/,
+  );
+  cleanup(root);
+});
+
+test("a clean set of manifests and sources passes", () => {
+  const root = makeRepo(
+    withManifests(
+      {
+        "packages/react/src/index.ts":
+          'import { Vec3 } from "@layoutit/polycss-core";\nexport { Vec3 };\n',
+      },
+      {
+        react: {
+          name: "@layoutit/polycss-react",
+          dependencies: { "@layoutit/polycss-core": "workspace:^" },
+          peerDependencies: { react: "^19", "react-dom": "^19" },
+        },
+      },
+    ),
+  );
+  assert.deepEqual(runChecks(root), []);
+  cleanup(root);
+});
+
+test("a missing manifest is a violation", () => {
+  const files = withManifests({});
+  delete files["packages/core/package.json"];
+  const root = makeRepo(files);
+  const violations = runChecks(root);
+  assert.deepEqual(violations, ["packages/core/package.json: missing manifest"]);
+  cleanup(root);
+});
+
+test("an .mjs import violation is caught", () => {
+  const root = makeRepo(
+    withManifests({
+      "packages/skills/src/install.mjs":
+        'import { cp } from "node:fs/promises";\nimport { PolyScene } from "@layoutit/polycss";\ncp; PolyScene;\n',
+    }),
+  );
+  const violations = runChecks(root);
+  assert.equal(violations.length, 1);
+  assert.match(
+    violations[0],
+    /packages\/skills\/src\/install\.mjs: disallowed dependency "@layoutit\/polycss"/,
+  );
+  cleanup(root);
+});
+
+test("the skills CLI may use node builtins in src and bin", () => {
+  const root = makeRepo(
+    withManifests({
+      "packages/skills/src/install.mjs":
+        'import { cp } from "node:fs/promises";\nexport { cp };\n',
+      "packages/skills/bin/polycss-skills.mjs":
+        'import { install } from "../src/install.mjs";\nimport { argv } from "node:process";\ninstall(argv);\n',
+    }),
+  );
+  assert.deepEqual(runChecks(root), []);
+  cleanup(root);
+});
+
+test("a .js deep import outside packages/ is caught", () => {
+  const root = makeRepo(
+    withManifests({
+      "bench/thing.mjs":
+        'import { plan } from "@layoutit/polycss-core/src/atlas/plan";\nplan();\n',
+    }),
+  );
+  const violations = runChecks(root);
+  assert.equal(violations.length, 1);
+  assert.match(violations[0], /bench\/thing\.mjs: deep import into a package's src/);
+  cleanup(root);
+});
+
+test("generated and built output is not scanned", () => {
+  const bad = 'import { x } from "@layoutit/polycss";\nx;\n';
+  const root = makeRepo(
+    withManifests({
+      "packages/react/dist/index.js": bad,
+      "packages/react/src/.generated/thing.mjs": bad,
+      "bench/.generated/entry.mjs": bad,
+    }),
+  );
+  assert.deepEqual(runChecks(root), []);
+  cleanup(root);
+});
+
+test("node builtins stay forbidden in the renderer packages", () => {
+  const root = makeRepo(
+    withManifests({
+      "packages/vue/src/index.ts": 'import { readFileSync } from "node:fs";\nreadFileSync;\n',
+    }),
+  );
+  const violations = runChecks(root);
+  assert.equal(violations.length, 1);
+  assert.match(violations[0], /node builtin not allowed here: "node:fs"/);
+  cleanup(root);
+});
+
+test("the real repo manifests satisfy the dependency table", () => {
+  const repoRoot = resolve(import.meta.dirname, "..", "..");
+  assert.deepEqual(runChecks(repoRoot), []);
 });
