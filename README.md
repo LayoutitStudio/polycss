@@ -145,21 +145,6 @@ const frame = deformation.sample({
 mounted.apply({ leaves: frame.leafUpdates });
 ```
 
-Morph supports `static-prepared`, `morph-regions`, `joint-skin`, and
-`prepared-playback` profiles. It does not own an animation scheduler: callers
-sample controls, springs, clips, skinning, or playback and pass only changed
-rows to `mounted.apply(...)`. Mounted leaf identity stays stable, and runtime
-updates do not rebuild topology or redraw prepared image resources.
-Prepared playback uses a two-phase sample: apply `sample.update`, then call
-`runtime.commit(sample)` only after the retained mount accepts the update.
-
-Morph chooses the triangle paint path once when it mounts. It uses
-`corner-shape` where available, a larger CSS border triangle in Firefox, and
-prepared alpha-atlas pages in WebKit/Safari. Every polygon receives a slice
-sized to its local-2D bounding rect. Mount creates object URLs from the
-already-verified package bytes, selects the fallback once, and revokes those
-URLs at teardown; it never refetches, generates, or redraws the atlas.
-
 See the [PolyCSS Morph guide](https://polycss.com/guides/morph/), including the
 interactive cube-to-sphere example.
 
@@ -235,36 +220,7 @@ Each visible polygon is emitted as one leaf element; the renderer chooses the le
 - `<i>` clips solid polygons with `border-shape: polygon(...)` when the browser supports it.
 - `<s>` maps a packed texture-atlas slice with `background-image`, and is the fallback for textured or unsupported shapes.
 
-<!-- polycss:shared:packages:start -->
-## Packages
 
-| Package | Description |
-|---|---|
-| `@layoutit/polycss-core` | Pure math, parsers, lighting, camera helpers, mesh optimization. Zero browser globals. |
-| `@layoutit/polycss` | Vanilla custom elements and imperative `createPolyScene` API. |
-| `@layoutit/polycss-react` | React components, hooks, controls, and core re-exports. |
-| `@layoutit/polycss-vue` | Vue 3 components, composables, controls, and core re-exports. |
-| `@layoutit/polycss-morph` | Prepared-model loading, retained DOM animation, morph targets, skinning, and playback. |
-| `@layoutit/polycss-skills` | `npx @layoutit/polycss-skills` — installs the PolyCSS agent skill into `.claude/skills` or `.agents/skills`. |
-| `@layoutit/polycss-domformat` | Private MIT-licensed producer-neutral `domformat@0` runtime for canonical JSON plus digest-bound sibling resources; conformance and specifications stay repository-side. Not published. |
-<!-- polycss:shared:packages:end -->
-
-The website-owned producer also carries a deterministic canonical JSON snapshot
-of every Gallery model at `website/gallery-domformat-corpus/`, with digest-bound
-CSS and image siblings. Its catalog pins the 640×640 Playwright Chromium
-strategy environment, including engine version, device scale, media queries,
-CSS feature branches, and per-model leaf-strategy counts; it does not claim
-cross-engine strategy topology. Static models are presentation-only. Animated
-models add the Gallery-selected preferred clip sampled at a fixed 30 Hz. The
-corpus is a website asset, not package payload.
-Regenerate it with `pnpm gallery:domformat`, verify exact Gallery inventory and
-sibling-resource closure with `pnpm gallery:domformat:verify`, and run an
-independent byte-for-byte regeneration check with
-`pnpm gallery:domformat:verify:fresh`. Produce an
-external direct-versus-canonical animated proof with
-`pnpm gallery:domformat:prove --output /absolute/path`; it requires exact
-retained DOM and computed paint semantics and reports bounded subpixel
-Chromium compositor differences.
 
 ## Coding Agents
 
