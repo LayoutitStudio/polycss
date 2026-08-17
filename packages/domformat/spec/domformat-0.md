@@ -119,7 +119,7 @@ version. The known required capability vocabulary is:
 ```text
 css-semantic-closure deterministic-json explicit-retained-tree logical-assets
 prepared-particle-effects prepared-pointer-grab-interaction prepared-playback
-prepared-surface-lighting
+prepared-surface-lighting prepared-variants
 ```
 
 An unknown required capability is fatal. Unknown optional capabilities are
@@ -131,19 +131,21 @@ capability for each present interpreter in this order:
 
 ```text
 polycss-effects@0 polycss-pointer-grab@0 polycss-playback@0 polycss-surface@0
+polycss-variants@0
 ```
 
 `conformance.executable` begins with `retained-tree`, then appends the role for
 each present interpreter in this order:
 
 ```text
-particle-effects playback pointer-grab-interaction presentation surface-lighting
+particle-effects playback pointer-grab-interaction presentation surface-lighting variants
 ```
 
 The corresponding interpreter order is `polycss-effects@0`,
 `polycss-playback@0`, `polycss-pointer-grab@0`, `static-presentation@0`, then
-`polycss-surface@0`. Omitted interpreters omit their capability or role without
-reordering the remaining entries. `declaredOnly` MUST be empty.
+`polycss-surface@0`, then `polycss-variants@0`. Omitted interpreters omit their
+capability or role without reordering the remaining entries. `declaredOnly`
+MUST be empty.
 `initialExperience: "interaction"` requires the
 `prepared-pointer-grab-interaction` capability and an executable matching
 binding. Codec packets carry their own fixed initial state/frame declarations;

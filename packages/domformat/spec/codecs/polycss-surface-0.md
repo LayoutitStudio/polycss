@@ -5,7 +5,7 @@ Status: experimental executable codec/interpreter pair for `domformat@0` and
 
 ## Purpose
 
-This codec publishes prepared texture-atlas Y positions and composed leaf
+This codec publishes prepared texture-atlas positions and composed leaf
 visibility for each playback source frame. It does not discover materials,
 sample lighting, pack atlases, scan topology, or create nodes at runtime.
 
@@ -13,9 +13,10 @@ sample lighting, pack atlases, scan topology, or create nodes at runtime.
 
 The binding is executable, consumes exactly the `uint` input
 `time.source-frame`, targets a unique ordered `leaves` array, and declares
-exactly `style.backgroundPositionY` and `style.visibility`. It has no
-parameters. Its targets exactly equal the playback leaf targets in the same
-order.
+one of two exact sink pairs: `style.backgroundPositionY` plus
+`style.visibility` for derived vertical strips, or `style.backgroundPosition`
+plus `style.visibility` for prepared two-axis addresses. It has no parameters.
+Its targets exactly equal the playback leaf targets in the same order.
 
 The state is `{ "packet": ... }`. Packet `version` is 0 and `frameCount`
 equals playback's binding frame count.
@@ -39,8 +40,18 @@ delta is exactly zero and each later delta is positive. Cumulative frames stay
 within `0..frameCount-1`. A face's local state index is the last state whose
 cumulative source frame is at most the zero-based requested frame.
 
-The prepared CSS Y position for a state is `0` when its cumulative source frame
-is zero, otherwise `-(sourceFrame * leafHeight)px`.
+When `surface.statePacking.backgroundPositions` is absent, the prepared CSS Y
+position for a state is `0` when its cumulative source frame is zero, otherwise
+`-(sourceFrame * leafHeight)px`. The binding uses
+`style.backgroundPositionY`.
+
+When `backgroundPositions` is present, it contains exactly `stateCount` safe
+CSS values parallel to `sourceFrameDeltas`. Each value is the producer-authored
+full atlas address, such as `-128px -64px`; the binding instead uses
+`style.backgroundPosition`. This mode admits prepared states at arbitrary atlas
+coordinates without runtime coordinate reconstruction. Paired prepared-variant
+classes may also select another atlas image. URLs, declarations, custom
+properties, and other unsafe CSS value forms remain forbidden.
 
 ## Sequential lighting transitions
 
@@ -116,8 +127,8 @@ AND NOT interactionDegenerate[i]
 ```
 
 Write `visible` or `hidden` only when the value changes. For each lighting row,
-skip a currently surface-hidden face; otherwise write its prepared
-`backgroundPositionY` and remember its applied local state. This separates
+skip a currently surface-hidden face; otherwise write its selected prepared
+background-position sink and remember its applied local state. This separates
 prepared culling, interaction safety visibility, and triangle degeneracy
 without duplicating visibility in the playback packet.
 

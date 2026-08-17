@@ -36,6 +36,7 @@ const KNOWN_REQUIRED_CAPABILITIES = new Set([
   "prepared-playback",
   "prepared-pointer-grab-interaction",
   "prepared-surface-lighting",
+  "prepared-variants",
 ]);
 const BASE_REQUIRED_CAPABILITIES = Object.freeze([
   "css-semantic-closure",
@@ -48,12 +49,14 @@ const CAPABILITY_BY_INTERPRETER: Readonly<Record<string, string>> = Object.freez
   "polycss-playback@0": "prepared-playback",
   "polycss-pointer-grab@0": "prepared-pointer-grab-interaction",
   "polycss-surface@0": "prepared-surface-lighting",
+  "polycss-variants@0": "prepared-variants",
 });
 const CONFORMANCE_BY_INTERPRETER: Readonly<Record<string, string>> = Object.freeze({
   "polycss-effects@0": "particle-effects",
   "polycss-playback@0": "playback",
   "polycss-pointer-grab@0": "pointer-grab-interaction",
   "polycss-surface@0": "surface-lighting",
+  "polycss-variants@0": "variants",
   "static-presentation@0": "presentation",
 });
 const CAPABILITY_INTERPRETER_ORDER: readonly string[] = Object.freeze([
@@ -61,6 +64,7 @@ const CAPABILITY_INTERPRETER_ORDER: readonly string[] = Object.freeze([
   "polycss-pointer-grab@0",
   "polycss-playback@0",
   "polycss-surface@0",
+  "polycss-variants@0",
 ]);
 const CONFORMANCE_INTERPRETER_ORDER: readonly string[] = Object.freeze([
   "polycss-effects@0",
@@ -68,6 +72,7 @@ const CONFORMANCE_INTERPRETER_ORDER: readonly string[] = Object.freeze([
   "polycss-pointer-grab@0",
   "static-presentation@0",
   "polycss-surface@0",
+  "polycss-variants@0",
 ]);
 const VIEWER_OWNED_ATTRIBUTES = new Set(["data-domformat-instance", "data-domformat-mount-surface"]);
 const ALLOWED_ELEMENTS = new Set(["b", "div", "i", "img", "s", "span", "u"]);
@@ -117,6 +122,7 @@ const ALLOWED_CODECS = new Set([
   "polycss-playback-packed@0",
   "polycss-pointer-grab-prepared@0",
   "polycss-surface-packed@0",
+  "polycss-variants-packed@0",
   "static-presentation@0",
 ]);
 const ALLOWED_INTERPRETERS = new Set([
@@ -124,6 +130,7 @@ const ALLOWED_INTERPRETERS = new Set([
   "polycss-playback@0",
   "polycss-pointer-grab@0",
   "polycss-surface@0",
+  "polycss-variants@0",
   "static-presentation@0",
 ]);
 const INTERPRETER_CODECS: Readonly<Record<string, string>> = Object.freeze({
@@ -131,9 +138,11 @@ const INTERPRETER_CODECS: Readonly<Record<string, string>> = Object.freeze({
   "polycss-playback@0": "polycss-playback-packed@0",
   "polycss-pointer-grab@0": "polycss-pointer-grab-prepared@0",
   "polycss-surface@0": "polycss-surface-packed@0",
+  "polycss-variants@0": "polycss-variants-packed@0",
   "static-presentation@0": "static-presentation@0",
 });
 const ALLOWED_SINKS = new Set([
+  "class.prepared",
   "style.backgroundPosition",
   "style.backgroundPositionY",
   "style.height",
@@ -1033,6 +1042,7 @@ interface SurfaceFace {
 interface SurfacePacking {
   readonly stateCount: number;
   readonly sourceFrameDeltas: readonly number[];
+  readonly backgroundPositions?: readonly string[];
 }
 
 interface SurfaceTable {
@@ -1097,7 +1107,6 @@ function validateSurfaceContract(
   exactArray(surfaceBinding.inputs, ["time.source-frame"], "INVALID_SURFACE_BINDING", "polycss-surface@0 inputs are incomplete or noncanonical.");
   const sourceFrameInput = bindingInputs.get("time.source-frame");
   invariant(sourceFrameInput?.type === "uint" && !Object.hasOwn(sourceFrameInput, "default"), "INVALID_SURFACE_BINDING", "Surface input time.source-frame must have type uint and no package default.");
-  exactArray(surfaceBinding.sinks, ["style.backgroundPositionY", "style.visibility"], "INVALID_SURFACE_BINDING", "polycss-surface@0 sinks are incomplete or noncanonical.");
   invariant(!Object.hasOwn(surfaceBinding, "parameters"), "INVALID_SURFACE_BINDING", "polycss-surface@0 has no binding parameters.");
   const targets = plainObject<SurfaceTargets>(surfaceBinding.targets, "INVALID_SURFACE_BINDING", "Surface targets");
   knownKeys(targets, new Set(["leaves"]), "INVALID_SURFACE_BINDING", "Surface targets");
@@ -1115,10 +1124,21 @@ function validateSurfaceContract(
   knownKeys(surface, new Set(["faces", "statePacking"]), "INVALID_SURFACE_STATE", "Surface table");
   invariant(Array.isArray(surface.faces) && surface.faces.length === playbackPacket.leafCount, "TARGET_CARDINALITY_MISMATCH", "Surface faces do not match playback leafCount.");
   const packing = plainObject<SurfacePacking>(surface.statePacking, "INVALID_SURFACE_STATE", "Surface state packing");
-  knownKeys(packing, new Set(["stateCount", "sourceFrameDeltas"]), "INVALID_SURFACE_STATE", "Surface state packing");
+  knownKeys(packing, new Set(["stateCount", "sourceFrameDeltas", "backgroundPositions"]), "INVALID_SURFACE_STATE", "Surface state packing");
   invariant(Number.isSafeInteger(packing.stateCount) && packing.stateCount >= 0 && packing.stateCount <= limits.maxPreparedStates, "SURFACE_STATE_LIMIT", "Surface state count is invalid or excessive.");
   integerArray(packing.sourceFrameDeltas, limits.maxPreparedStates, "SURFACE_STATE_LIMIT", "Surface source-frame deltas", { minimum: 0, upper: packet.frameCount - 1 });
   invariant(packing.sourceFrameDeltas.length === packing.stateCount, "STATE_COLUMN_MISMATCH", "Surface source-frame deltas do not match stateCount.");
+  const preparedPositions = Object.hasOwn(packing, "backgroundPositions");
+  exactArray(
+    surfaceBinding.sinks,
+    [preparedPositions ? "style.backgroundPosition" : "style.backgroundPositionY", "style.visibility"],
+    "INVALID_SURFACE_BINDING",
+    "polycss-surface@0 sinks are incomplete or noncanonical.",
+  );
+  if (preparedPositions) {
+    invariant(Array.isArray(packing.backgroundPositions) && packing.backgroundPositions.length === packing.stateCount, "STATE_COLUMN_MISMATCH", "Surface prepared positions do not match stateCount.");
+    for (const [index, position] of packing.backgroundPositions.entries()) safeStyleValue(position, `Surface prepared position ${index}`);
+  }
   const faceIds = new Set<string>();
   const sourceFramesByFace: number[][] = [];
   let stateOffset = 0;
@@ -1267,6 +1287,143 @@ function validateSurfaceContract(
     invariant(actualLighting && actualVisibility, "SURFACE_JUMP_MISMATCH", `Surface jump ${pair} is incomplete.`);
     invariant(sameArray(actualLighting.faces, expected.changedFaces) && sameArray(actualLighting.states, expected.changedStates), "SURFACE_JUMP_MISMATCH", `Surface lighting jump ${pair} contradicts canonical target state.`);
     invariant(sameArray(actualVisibility, expected.changedVisibility), "SURFACE_JUMP_MISMATCH", `Surface visibility jump ${pair} contradicts canonical target state.`);
+  }
+  return packet;
+}
+
+const NO_PREPARED_VARIANT = 0xffff;
+
+interface VariantTargets {
+  readonly nodes: readonly string[];
+}
+
+interface VariantInitial {
+  readonly frame: number;
+  readonly classIndicesBase64: unknown;
+}
+
+interface VariantSequential {
+  readonly offsetsBase64: unknown;
+  readonly targetIndicesBase64: unknown;
+  readonly classIndicesBase64: unknown;
+}
+
+interface VariantJump {
+  readonly fromFrame: number;
+  readonly toFrame: number;
+  readonly targetIndicesBase64: unknown;
+  readonly classIndicesBase64: unknown;
+}
+
+interface VariantPacket {
+  readonly version: number;
+  readonly frameCount: number;
+  readonly classes: readonly string[];
+  readonly initial: VariantInitial;
+  readonly sequential: VariantSequential;
+  readonly nonInteractiveJumps: readonly VariantJump[];
+}
+
+function validVariantIndex(value: number, classCount: number): boolean {
+  return value === NO_PREPARED_VARIANT || value < classCount;
+}
+
+function validateVariantsContract(
+  variantState: DomStateChannel,
+  variantBinding: DomBindingChannel,
+  playbackPacket: PlaybackPacket,
+  playbackBinding: DomBindingChannel,
+  bindingInputs: ReadonlyMap<string, DomBindingInput>,
+  tree: ValidatedTree,
+  limits: DomLimits,
+): VariantPacket {
+  invariant(variantBinding.status === "executable", "INVALID_VARIANT_BINDING", "polycss-variants@0 must be executable.");
+  exactArray(variantBinding.inputs, ["time.source-frame"], "INVALID_VARIANT_BINDING", "polycss-variants@0 inputs are incomplete or noncanonical.");
+  const sourceFrameInput = bindingInputs.get("time.source-frame");
+  invariant(sourceFrameInput?.type === "uint" && !Object.hasOwn(sourceFrameInput, "default"), "INVALID_VARIANT_BINDING", "Variant input time.source-frame must have type uint and no package default.");
+  exactArray(variantBinding.sinks, ["class.prepared"], "INVALID_VARIANT_BINDING", "polycss-variants@0 sinks are incomplete or noncanonical.");
+  invariant(!Object.hasOwn(variantBinding, "parameters"), "INVALID_VARIANT_BINDING", "polycss-variants@0 has no binding parameters.");
+  const targets = plainObject<VariantTargets>(variantBinding.targets, "INVALID_VARIANT_BINDING", "Variant targets");
+  knownKeys(targets, new Set(["nodes"]), "INVALID_VARIANT_BINDING", "Variant targets");
+  uniqueTargets(targets.nodes, "Variant node");
+  invariant(targets.nodes.length > 0 && targets.nodes.length <= 0xffff, "TARGET_CARDINALITY_MISMATCH", "Variant targets must contain between 1 and 65535 nodes.");
+
+  const data = plainObject(variantState.data, "INVALID_VARIANT_STATE", "Variant state data");
+  knownKeys(data, new Set(["packet"]), "INVALID_VARIANT_STATE", "Variant state data");
+  const packet = plainObject<VariantPacket>(data.packet, "INVALID_VARIANT_STATE", "Variant packet");
+  knownKeys(packet, new Set(["version", "frameCount", "classes", "initial", "sequential", "nonInteractiveJumps"]), "INVALID_VARIANT_STATE", "Variant packet");
+  const playbackParameters = plainObject<PlaybackParameters>(playbackBinding.parameters, "INVALID_PLAYBACK_BINDING", "Playback parameters");
+  invariant(packet.version === 0 && packet.frameCount === playbackParameters.frameCount, "FRAME_CARDINALITY_MISMATCH", "Variant packet version or frameCount is invalid.");
+  invariant(targets.nodes.length * packet.frameCount <= limits.maxVisibilityCells, "VARIANT_STATE_LIMIT", "Prepared variant state matrix is excessive.");
+  invariant(Array.isArray(packet.classes) && packet.classes.length > 0 && packet.classes.length < NO_PREPARED_VARIANT && packet.classes.length <= limits.maxPreparedStates, "VARIANT_STATE_LIMIT", "Prepared variant class table is missing or excessive.");
+  let previousClass = "";
+  for (const [index, token] of packet.classes.entries()) {
+    invariant(typeof token === "string" && CLASS_TOKEN.test(token) && token > previousClass, "INVALID_VARIANT_STATE", `Prepared variant class ${index} is invalid or noncanonical.`);
+    previousClass = token;
+  }
+
+  const initial = plainObject<VariantInitial>(packet.initial, "INVALID_VARIANT_STATE", "Variant initial state");
+  knownKeys(initial, new Set(["frame", "classIndicesBase64"]), "INVALID_VARIANT_STATE", "Variant initial state");
+  invariant(initial.frame === 1 && initial.frame === playbackPacket.initial.sourceFrame, "FRAME_CARDINALITY_MISMATCH", "Variant initial frame must be frame 1 and match playback.");
+  const initialIndices = base64Integers(initial.classIndicesBase64, 2, targets.nodes.length, "INVALID_VARIANT_STATE", "Variant initial class indices");
+  invariant(initialIndices.length === targets.nodes.length && initialIndices.every((value) => validVariantIndex(value, packet.classes.length)), "INVALID_VARIANT_STATE", "Variant initial class indices are invalid.");
+  for (const [index, target] of targets.nodes.entries()) {
+    const structural = tree.nodesById.get(target)?.classes ?? [];
+    const active = structural.filter((token) => packet.classes.includes(token));
+    const expected = initialIndices[index] === NO_PREPARED_VARIANT ? [] : [packet.classes[initialIndices[index]]];
+    invariant(sameArray(active, expected), "VARIANT_TREE_MISMATCH", `Variant node ${index} initial class does not match TREE.`);
+  }
+
+  const sequential = plainObject<VariantSequential>(packet.sequential, "INVALID_VARIANT_STATE", "Variant sequential transitions");
+  knownKeys(sequential, new Set(["offsetsBase64", "targetIndicesBase64", "classIndicesBase64"]), "INVALID_VARIANT_STATE", "Variant sequential transitions");
+  const offsets = base64Integers(sequential.offsetsBase64, 4, packet.frameCount + 1, "INVALID_VARIANT_STATE", "Variant transition offsets");
+  const targetIndices = base64Integers(sequential.targetIndicesBase64, 2, limits.maxPreparedChanges, "VARIANT_STATE_LIMIT", "Variant transition targets");
+  const classIndices = base64Integers(sequential.classIndicesBase64, 2, limits.maxPreparedChanges, "VARIANT_STATE_LIMIT", "Variant transition classes");
+  invariant(offsets.length === packet.frameCount + 1 && offsets[0] === 0 && offsets.at(-1) === targetIndices.length && offsets.every((offset, index) => index === 0 || offsets[index - 1] <= offset), "STATE_COLUMN_MISMATCH", "Variant transition offsets are invalid.");
+  invariant(targetIndices.length === classIndices.length, "STATE_COLUMN_MISMATCH", "Variant transition columns have unequal lengths.");
+  const applySegment = (row: number[], segment: number, label: string): void => {
+    let previousTarget = -1;
+    for (let cursor = offsets[segment]; cursor < offsets[segment + 1]; cursor += 1) {
+      const target = targetIndices[cursor];
+      const classIndex = classIndices[cursor];
+      invariant(target < targets.nodes.length && target > previousTarget && validVariantIndex(classIndex, packet.classes.length), "INVALID_VARIANT_STATE", `${label} is invalid.`);
+      invariant(row[target] !== classIndex, "INVALID_VARIANT_STATE", `${label} contains a no-op class change.`);
+      row[target] = classIndex;
+      previousTarget = target;
+    }
+  };
+  const rows: number[][] = [initialIndices.slice()];
+  const current = initialIndices.slice();
+  for (let frame = 2; frame <= packet.frameCount; frame += 1) {
+    applySegment(current, frame - 1, `Variant transition ${frame - 1}>${frame}`);
+    rows.push(current.slice());
+  }
+  const wrapped = current.slice();
+  applySegment(wrapped, 0, `Variant transition ${packet.frameCount}>1`);
+  invariant(sameArray(wrapped, initialIndices), "VARIANT_TRANSITION_MISMATCH", "Variant wrap transition does not reproduce frame 1.");
+
+  invariant(Array.isArray(packet.nonInteractiveJumps) && packet.nonInteractiveJumps.length <= packet.frameCount, "INVALID_VARIANT_STATE", "Variant jumps are invalid or excessive.");
+  const jumpPairs = new Set<string>();
+  for (const [index, jump] of packet.nonInteractiveJumps.entries()) {
+    plainObject(jump, "INVALID_VARIANT_STATE", `Variant jump ${index}`);
+    knownKeys(jump, new Set(["fromFrame", "toFrame", "targetIndicesBase64", "classIndicesBase64"]), "INVALID_VARIANT_STATE", `Variant jump ${index}`);
+    invariant(Number.isSafeInteger(jump.fromFrame) && jump.fromFrame >= 1 && jump.fromFrame <= packet.frameCount && Number.isSafeInteger(jump.toFrame) && jump.toFrame >= 1 && jump.toFrame <= packet.frameCount && jump.fromFrame !== jump.toFrame, "INVALID_VARIANT_STATE", `Variant jump ${index} frames are invalid.`);
+    const pair = `${jump.fromFrame}>${jump.toFrame}`;
+    invariant(!jumpPairs.has(pair), "INVALID_VARIANT_STATE", `Variant jump ${pair} is duplicated.`);
+    jumpPairs.add(pair);
+    const jumpTargets = base64Integers(jump.targetIndicesBase64, 2, targets.nodes.length, "INVALID_VARIANT_STATE", `Variant jump ${index} targets`);
+    const jumpClasses = base64Integers(jump.classIndicesBase64, 2, targets.nodes.length, "INVALID_VARIANT_STATE", `Variant jump ${index} classes`);
+    invariant(jumpTargets.length === jumpClasses.length && jumpTargets.every((target, cursor) => target < targets.nodes.length && (cursor === 0 || jumpTargets[cursor - 1] < target) && validVariantIndex(jumpClasses[cursor], packet.classes.length)), "INVALID_VARIANT_STATE", `Variant jump ${index} rows are invalid.`);
+    const expectedTargets: number[] = [];
+    const expectedClasses: number[] = [];
+    const from = rows[jump.fromFrame - 1];
+    const to = rows[jump.toFrame - 1];
+    for (let target = 0; target < targets.nodes.length; target += 1) {
+      if (from[target] === to[target]) continue;
+      expectedTargets.push(target);
+      expectedClasses.push(to[target]);
+    }
+    invariant(sameArray(jumpTargets, expectedTargets) && sameArray(jumpClasses, expectedClasses), "VARIANT_JUMP_MISMATCH", `Variant jump ${pair} contradicts canonical target state.`);
   }
   return packet;
 }
@@ -1550,16 +1707,23 @@ function validateInitialSurfaceClosure(packet: SurfacePacket, playbackBinding: D
     const face = packet.surface.faces[index];
     let sourceFrame = 0;
     let selectedFrame = 0;
+    let selectedState = 0;
     for (let local = 0; local < face.stateCount; local += 1) {
       sourceFrame += packet.surface.statePacking.sourceFrameDeltas[face.stateOffset + local];
       if (sourceFrame > targetFrame) break;
       selectedFrame = sourceFrame;
+      selectedState = local;
     }
-    const expectedPosition = selectedFrame === 0 ? "0" : `${-selectedFrame * face.leafHeight}px`;
-    const actualPosition = node.styles.backgroundPositionY;
-    const matchesInitialCssPosition = selectedFrame === 0
-      ? actualPosition === undefined || actualPosition === "0" || actualPosition === "0px" || actualPosition === "0%"
-      : actualPosition === expectedPosition;
+    const preparedPositions = packet.surface.statePacking.backgroundPositions;
+    const expectedPosition = preparedPositions
+      ? preparedPositions[face.stateOffset + selectedState]
+      : selectedFrame === 0 ? "0" : `${-selectedFrame * face.leafHeight}px`;
+    const actualPosition = preparedPositions ? node.styles.backgroundPosition : node.styles.backgroundPositionY;
+    const matchesInitialCssPosition = preparedPositions
+      ? actualPosition === expectedPosition
+      : selectedFrame === 0
+        ? actualPosition === undefined || actualPosition === "0" || actualPosition === "0px" || actualPosition === "0%"
+        : actualPosition === expectedPosition;
     invariant(matchesInitialCssPosition, "SURFACE_TREE_MISMATCH", `Surface leaf ${index} initial atlas position does not match TREE.`);
   }
 }
@@ -1573,10 +1737,13 @@ function validatePolycssChannelInvariants(
 ): void {
   const playbackState = [...stateChannels.values()].find((channel) => channel.codec === "polycss-playback-packed@0");
   const surfaceState = [...stateChannels.values()].find((channel) => channel.codec === "polycss-surface-packed@0");
+  const variantState = [...stateChannels.values()].find((channel) => channel.codec === "polycss-variants-packed@0");
   const playbackBinding = [...bindingChannels.values()].find((channel) => channel.interpreter === "polycss-playback@0");
   const surfaceBinding = [...bindingChannels.values()].find((channel) => channel.interpreter === "polycss-surface@0");
+  const variantBinding = [...bindingChannels.values()].find((channel) => channel.interpreter === "polycss-variants@0");
   invariant(Boolean(playbackState) === Boolean(playbackBinding), "MISSING_POLYCSS_CHANNEL", "Playback state and binding must appear together.");
   invariant(Boolean(surfaceState) === Boolean(surfaceBinding), "MISSING_POLYCSS_CHANNEL", "Surface state and binding must appear together.");
+  invariant(Boolean(variantState) === Boolean(variantBinding), "MISSING_POLYCSS_CHANNEL", "Variant state and binding must appear together.");
   let playbackPacket: PlaybackPacket | undefined;
   if (playbackBinding) {
     invariant(playbackState, "MISSING_POLYCSS_CHANNEL", "Playback state and binding must appear together.");
@@ -1586,6 +1753,10 @@ function validatePolycssChannelInvariants(
     invariant(surfaceState && playbackPacket && playbackBinding, "MISSING_POLYCSS_CHANNEL", "Prepared surface requires executable playback.");
     const surfacePacket = validateSurfaceContract(surfaceState, surfaceBinding, playbackPacket, playbackBinding, bindingInputs, limits);
     validateInitialSurfaceClosure(surfacePacket, playbackBinding, tree);
+  }
+  if (variantBinding) {
+    invariant(variantState && playbackPacket && playbackBinding, "MISSING_POLYCSS_CHANNEL", "Prepared variants require executable playback.");
+    validateVariantsContract(variantState, variantBinding, playbackPacket, playbackBinding, bindingInputs, tree, limits);
   }
   if (playbackPacket && playbackPacket.leafCount > 0) invariant(surfaceBinding, "MISSING_POLYCSS_CHANNEL", "Playback with leaf targets requires prepared surface state and binding.");
 

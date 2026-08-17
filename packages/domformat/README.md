@@ -93,6 +93,13 @@ Automatic playback may defer transforms for paint-hidden leaves; `seek(frame)`
 is the synchronous barrier that publishes every current prepared transform
 before returning, including for a same-frame seek.
 
+Prepared surfaces support both the compact vertical-strip atlas schedule and
+producer-authored full `x y` atlas positions. The optional prepared-variant
+channel changes one declared class token per target from validated sparse frame
+tables, preserving structural classes and retained node identity. Both are
+published before a target is revealed; neither runs producer code or rebuilds
+DOM.
+
 ## Contract and security
 
 The top-level JSON object has exactly six members: `meta`, `tree`,

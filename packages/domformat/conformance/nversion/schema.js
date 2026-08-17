@@ -20,6 +20,7 @@ const CODECS = new Map([
   ["polycss-playback@0", "polycss-playback-packed@0"],
   ["polycss-pointer-grab@0", "polycss-pointer-grab-prepared@0"],
   ["polycss-surface@0", "polycss-surface-packed@0"],
+  ["polycss-variants@0", "polycss-variants-packed@0"],
   ["static-presentation@0", "static-presentation@0"],
 ]);
 const INPUTS = Object.freeze({
@@ -27,13 +28,15 @@ const INPUTS = Object.freeze({
   "polycss-playback@0": ["time.tick"],
   "polycss-pointer-grab@0": ["axis.x", "axis.y", "button.hold", "pointer.positioned", "pointer.pressed", "pointer.x", "pointer.y"],
   "polycss-surface@0": ["time.source-frame"],
+  "polycss-variants@0": ["time.source-frame"],
   "static-presentation@0": ["viewport.height", "viewport.width"],
 });
 const SINKS = Object.freeze({
   "polycss-effects@0": ["style.backgroundPosition", "style.opacity", "style.transform", "style.visibility"],
   "polycss-playback@0": ["style.transform", "style.visibility"],
   "polycss-pointer-grab@0": ["style.transform", "style.visibility"],
-  "polycss-surface@0": ["style.backgroundPositionY", "style.visibility"],
+  "polycss-surface@0": null,
+  "polycss-variants@0": ["class.prepared"],
   "static-presentation@0": null,
 });
 const BASE_CAPABILITIES = ["css-semantic-closure", "deterministic-json", "explicit-retained-tree", "logical-assets"];
@@ -42,6 +45,7 @@ const CAPABILITY_ORDER = [
   ["polycss-pointer-grab@0", "prepared-pointer-grab-interaction"],
   ["polycss-playback@0", "prepared-playback"],
   ["polycss-surface@0", "prepared-surface-lighting"],
+  ["polycss-variants@0", "prepared-variants"],
 ];
 const CONFORMANCE_ORDER = [
   ["polycss-effects@0", "particle-effects"],
@@ -49,6 +53,7 @@ const CONFORMANCE_ORDER = [
   ["polycss-pointer-grab@0", "pointer-grab-interaction"],
   ["static-presentation@0", "presentation"],
   ["polycss-surface@0", "surface-lighting"],
+  ["polycss-variants@0", "variants"],
 ];
 
 function exactObject(value, allowed, code, label, required = allowed) {
@@ -653,10 +658,16 @@ function validateSurface(state, binding, playback, inputs, limits) {
   require(packet.version === 0 && packet.frameCount === playback.binding.parameters.frameCount, "FRAME_CARDINALITY_MISMATCH", "Surface version/frameCount differs from playback.");
   const surface = exactObject(packet.surface, ["faces", "statePacking"], "INVALID_SURFACE_STATE", "Surface table");
   require(Array.isArray(surface.faces) && surface.faces.length === playback.packet.leafCount, "TARGET_CARDINALITY_MISMATCH", "Surface faces differ from playback leaves.");
-  const packing = exactObject(surface.statePacking, ["stateCount", "sourceFrameDeltas"], "INVALID_SURFACE_STATE", "Surface state packing");
+  const packing = exactObject(surface.statePacking, ["stateCount", "sourceFrameDeltas", "backgroundPositions"], "INVALID_SURFACE_STATE", "Surface state packing", ["stateCount", "sourceFrameDeltas"]);
   require(Number.isSafeInteger(packing.stateCount) && packing.stateCount >= 0 && packing.stateCount <= limits.maxPreparedStates, "SURFACE_STATE_LIMIT", "Surface state count is invalid or excessive.");
   integerArray(packing.sourceFrameDeltas, limits.maxPreparedStates, "SURFACE_STATE_LIMIT", "Surface source-frame deltas", { minimum: 0, upper: packet.frameCount - 1 });
   require(packing.sourceFrameDeltas.length === packing.stateCount, "STATE_COLUMN_MISMATCH", "Surface source-frame deltas differ from stateCount.");
+  const preparedPositions = Object.hasOwn(packing, "backgroundPositions");
+  exactArray(binding.sinks, [preparedPositions ? "style.backgroundPosition" : "style.backgroundPositionY", "style.visibility"], "INVALID_SURFACE_BINDING", "Surface sinks");
+  if (preparedPositions) {
+    require(Array.isArray(packing.backgroundPositions) && packing.backgroundPositions.length === packing.stateCount, "STATE_COLUMN_MISMATCH", "Surface prepared positions differ from stateCount.");
+    packing.backgroundPositions.forEach((position, index) => safeStyle(position, `Surface prepared position ${index}`));
+  }
   const faceIds = new Set();
   const sourceFramesByFace = [];
   let stateOffset = 0;
@@ -1149,15 +1160,93 @@ function validateInitialSurfaceClosure(packet, playback, tree) {
     const face = packet.surface.faces[index];
     let sourceFrame = 0;
     let selectedFrame = 0;
+    let selectedState = 0;
     for (let local = 0; local < face.stateCount; local += 1) {
       sourceFrame += packet.surface.statePacking.sourceFrameDeltas[face.stateOffset + local];
       if (sourceFrame > targetFrame) break;
       selectedFrame = sourceFrame;
+      selectedState = local;
     }
-    const actual = node.styles.backgroundPositionY;
-    const expected = selectedFrame === 0 ? "0" : `${-selectedFrame * face.leafHeight}px`;
-    require(selectedFrame === 0 ? actual === undefined || actual === "0" || actual === "0px" || actual === "0%" : actual === expected, "SURFACE_TREE_MISMATCH", `Surface leaf ${index} initial atlas position differs from TREE.`);
+    const prepared = packet.surface.statePacking.backgroundPositions;
+    const actual = prepared ? node.styles.backgroundPosition : node.styles.backgroundPositionY;
+    const expected = prepared ? prepared[face.stateOffset + selectedState] : selectedFrame === 0 ? "0" : `${-selectedFrame * face.leafHeight}px`;
+    require(prepared ? actual === expected : selectedFrame === 0 ? actual === undefined || actual === "0" || actual === "0px" || actual === "0%" : actual === expected, "SURFACE_TREE_MISMATCH", `Surface leaf ${index} initial atlas position differs from TREE.`);
   }
+}
+
+function validateVariants(state, binding, playback, inputs, tree, limits) {
+  const sourceFrame = inputs.get("time.source-frame");
+  require(sourceFrame?.type === "uint" && !Object.hasOwn(sourceFrame, "default"), "INVALID_VARIANT_BINDING", "Variant time.source-frame must be an un-defaulted uint.");
+  require(!Object.hasOwn(binding, "parameters"), "INVALID_VARIANT_BINDING", "Variant binding has no parameters.");
+  const targets = exactObject(binding.targets, ["nodes"], "INVALID_VARIANT_BINDING", "Variant targets");
+  uniqueTargets(targets.nodes, "Variant node");
+  require(targets.nodes.length > 0 && targets.nodes.length <= 65_535, "TARGET_CARDINALITY_MISMATCH", "Variant target count is invalid.");
+
+  exactObject(state.data, ["packet"], "INVALID_VARIANT_STATE", "Variant state");
+  const packet = exactObject(state.data.packet, ["version", "frameCount", "classes", "initial", "sequential", "nonInteractiveJumps"], "INVALID_VARIANT_STATE", "Variant packet");
+  require(packet.version === 0 && packet.frameCount === playback.binding.parameters.frameCount, "FRAME_CARDINALITY_MISMATCH", "Variant version/frameCount differs from playback.");
+  require(targets.nodes.length * packet.frameCount <= limits.maxVisibilityCells, "VARIANT_STATE_LIMIT", "Prepared variant state matrix is excessive.");
+  require(Array.isArray(packet.classes) && packet.classes.length > 0 && packet.classes.length < 65_535 && packet.classes.length <= limits.maxPreparedStates, "VARIANT_STATE_LIMIT", "Prepared variant classes are invalid or excessive.");
+  packet.classes.forEach((token, index) => require(typeof token === "string" && CLASS.test(token) && (index === 0 || packet.classes[index - 1] < token), "INVALID_VARIANT_STATE", `Prepared variant class ${index} is invalid or noncanonical.`));
+  const validClass = (value) => value === 65_535 || value < packet.classes.length;
+
+  const initial = exactObject(packet.initial, ["frame", "classIndicesBase64"], "INVALID_VARIANT_STATE", "Variant initial state");
+  require(initial.frame === 1 && initial.frame === playback.packet.initial.sourceFrame, "FRAME_CARDINALITY_MISMATCH", "Variant initial frame differs from playback frame 1.");
+  const initialIndices = base64Integers(initial.classIndicesBase64, 2, targets.nodes.length, "INVALID_VARIANT_STATE", "Variant initial classes");
+  require(initialIndices.length === targets.nodes.length && initialIndices.every(validClass), "INVALID_VARIANT_STATE", "Variant initial classes are invalid.");
+  for (const [index, target] of targets.nodes.entries()) {
+    const active = (tree.byId.get(target)?.classes ?? []).filter((token) => packet.classes.includes(token));
+    const expected = initialIndices[index] === 65_535 ? [] : [packet.classes[initialIndices[index]]];
+    require(exactEqualArray(active, expected), "VARIANT_TREE_MISMATCH", `Variant node ${index} initial class differs from TREE.`);
+  }
+
+  const sequential = exactObject(packet.sequential, ["offsetsBase64", "targetIndicesBase64", "classIndicesBase64"], "INVALID_VARIANT_STATE", "Variant sequential transitions");
+  const offsets = base64Integers(sequential.offsetsBase64, 4, packet.frameCount + 1, "INVALID_VARIANT_STATE", "Variant offsets");
+  const targetIndices = base64Integers(sequential.targetIndicesBase64, 2, limits.maxPreparedChanges, "VARIANT_STATE_LIMIT", "Variant targets");
+  const classIndices = base64Integers(sequential.classIndicesBase64, 2, limits.maxPreparedChanges, "VARIANT_STATE_LIMIT", "Variant classes");
+  require(offsets.length === packet.frameCount + 1 && offsets[0] === 0 && offsets.at(-1) === targetIndices.length && offsets.every((offset, index) => index === 0 || offsets[index - 1] <= offset), "STATE_COLUMN_MISMATCH", "Variant offsets are invalid.");
+  require(targetIndices.length === classIndices.length, "STATE_COLUMN_MISMATCH", "Variant transition columns differ in length.");
+  const applySegment = (row, segment, label) => {
+    let previous = -1;
+    for (let cursor = offsets[segment]; cursor < offsets[segment + 1]; cursor += 1) {
+      const target = targetIndices[cursor];
+      const classIndex = classIndices[cursor];
+      require(target < targets.nodes.length && target > previous && validClass(classIndex), "INVALID_VARIANT_STATE", `${label} is invalid.`);
+      require(row[target] !== classIndex, "INVALID_VARIANT_STATE", `${label} contains a no-op.`);
+      row[target] = classIndex;
+      previous = target;
+    }
+  };
+  const rows = [initialIndices.slice()];
+  const current = initialIndices.slice();
+  for (let frame = 2; frame <= packet.frameCount; frame += 1) {
+    applySegment(current, frame - 1, `Variant transition ${frame - 1}>${frame}`);
+    rows.push(current.slice());
+  }
+  const wrapped = current.slice();
+  applySegment(wrapped, 0, `Variant transition ${packet.frameCount}>1`);
+  require(exactEqualArray(wrapped, initialIndices), "VARIANT_TRANSITION_MISMATCH", "Variant wrap transition does not reproduce frame 1.");
+
+  require(Array.isArray(packet.nonInteractiveJumps) && packet.nonInteractiveJumps.length <= packet.frameCount, "INVALID_VARIANT_STATE", "Variant jumps are invalid or excessive.");
+  const pairs = new Set();
+  for (const [index, jump] of packet.nonInteractiveJumps.entries()) {
+    exactObject(jump, ["fromFrame", "toFrame", "targetIndicesBase64", "classIndicesBase64"], "INVALID_VARIANT_STATE", `Variant jump ${index}`);
+    require(Number.isSafeInteger(jump.fromFrame) && jump.fromFrame >= 1 && jump.fromFrame <= packet.frameCount && Number.isSafeInteger(jump.toFrame) && jump.toFrame >= 1 && jump.toFrame <= packet.frameCount && jump.fromFrame !== jump.toFrame, "INVALID_VARIANT_STATE", `Variant jump ${index} frames are invalid.`);
+    const pair = `${jump.fromFrame}>${jump.toFrame}`;
+    require(!pairs.has(pair), "INVALID_VARIANT_STATE", `Variant jump ${pair} is duplicated.`);
+    pairs.add(pair);
+    const jumpTargets = base64Integers(jump.targetIndicesBase64, 2, targets.nodes.length, "INVALID_VARIANT_STATE", `Variant jump ${index} targets`);
+    const jumpClasses = base64Integers(jump.classIndicesBase64, 2, targets.nodes.length, "INVALID_VARIANT_STATE", `Variant jump ${index} classes`);
+    require(jumpTargets.length === jumpClasses.length && jumpTargets.every((target, cursor) => target < targets.nodes.length && (cursor === 0 || jumpTargets[cursor - 1] < target) && validClass(jumpClasses[cursor])), "INVALID_VARIANT_STATE", `Variant jump ${index} rows are invalid.`);
+    const expectedTargets = [];
+    const expectedClasses = [];
+    for (let target = 0; target < targets.nodes.length; target += 1) if (rows[jump.fromFrame - 1][target] !== rows[jump.toFrame - 1][target]) {
+      expectedTargets.push(target);
+      expectedClasses.push(rows[jump.toFrame - 1][target]);
+    }
+    require(exactEqualArray(jumpTargets, expectedTargets) && exactEqualArray(jumpClasses, expectedClasses), "VARIANT_JUMP_MISMATCH", `Variant jump ${pair} contradicts canonical target state.`);
+  }
+  return packet;
 }
 
 function validateCodecClosure(document, context, tree, records, limits) {
@@ -1179,6 +1268,11 @@ function validateCodecClosure(document, context, tree, records, limits) {
     surface = { ...value, packet: validateSurface(value.state, value.binding, playback, context.inputs, limits) };
   }
   if (playback?.packet.leafCount > 0) require(surface, "MISSING_POLYCSS_CHANNEL", "Playback with leaf targets requires prepared surface state and binding.");
+  if (byInterpreter.has("polycss-variants@0")) {
+    require(playback, "MISSING_POLYCSS_CHANNEL", "Prepared variants require executable playback.");
+    const value = byInterpreter.get("polycss-variants@0");
+    validateVariants(value.state, value.binding, playback, context.inputs, tree, limits);
+  }
   let effects = null;
   if (byInterpreter.has("polycss-effects@0")) {
     require(playback, "MISSING_POLYCSS_CHANNEL", "Prepared effects require executable playback.");

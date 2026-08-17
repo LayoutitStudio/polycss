@@ -30,6 +30,7 @@ function createFixture(options = {}) {
   const visibilityOffsets = options.visibilityOffsets ?? [0, 1, 1, 1, 2];
   const initialVisibleBits = options.initiallyHidden === "both" ? 0 : 2;
   const zeroOffsets = base64Integers(new Array(frameCount + 1).fill(0), 4);
+  const lightingOffsets = base64Integers(options.lightingOffsets ?? new Array(frameCount + 1).fill(0), 4);
   const materialized = {
     playback: {
       shapeCount: 0,
@@ -73,15 +74,16 @@ function createFixture(options = {}) {
         statePacking: {
           stateCount: 2,
           sourceFramesBase64: base64Integers([0, 0], 2),
-          backgroundPositionYs: ["0px", "0px"],
+          positionProperty: "backgroundPositionY",
+          positions: ["0px", "0px"],
         },
       },
       transitions: {
         initialFrame: 1,
         sequential: {
-          offsetsBase64: zeroOffsets,
-          faceIndicesBase64: "",
-          stateIndicesBase64: "",
+          offsetsBase64: lightingOffsets,
+          faceIndicesBase64: base64Integers(options.lightingFaces ?? [], 2),
+          stateIndicesBase64: base64Integers(options.lightingStates ?? [], 2),
         },
         nonInteractiveJumps: [],
       },
@@ -135,6 +137,19 @@ test("playback defers hidden transforms and flushes the latest value before reve
       ["leaf:0", "visibility", "visible"],
     ]);
     assert.deepEqual(leaves, identities);
+  });
+
+  test("playback publishes a prepared atlas address before revealing its retained leaf", () => {
+    const { playback, writes } = createFixture({
+      visibilityOffsets: [0, 0, 1, 1, 2],
+      lightingOffsets: [0, 0, 1, 1, 1],
+      lightingFaces: [0],
+      lightingStates: [0],
+    });
+    playback.seek(2);
+    const address = writes.findIndex(([id, property]) => id === "leaf:0" && property === "backgroundPositionY");
+    const reveal = writes.findIndex(([id, property, value]) => id === "leaf:0" && property === "visibility" && value === "visible");
+    assert.ok(address >= 0 && reveal > address);
   });
 
   test("public same-frame seek synchronizes dirty hidden transforms once in target order", () => {

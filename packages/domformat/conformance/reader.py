@@ -32,6 +32,7 @@ STATE_INTERPRETERS = {
     "polycss-playback-packed@0": "polycss-playback@0",
     "polycss-pointer-grab-prepared@0": "polycss-pointer-grab@0",
     "polycss-surface-packed@0": "polycss-surface@0",
+    "polycss-variants-packed@0": "polycss-variants@0",
     "static-presentation@0": "static-presentation@0",
 }
 KNOWN_REQUIRED_CAPABILITIES = {
@@ -43,6 +44,7 @@ KNOWN_REQUIRED_CAPABILITIES = {
     "prepared-playback",
     "prepared-pointer-grab-interaction",
     "prepared-surface-lighting",
+    "prepared-variants",
 }
 ALLOWED_ELEMENTS = {"b", "div", "i", "img", "s", "span", "u"}
 ALLOWED_ATTRIBUTES = {
@@ -65,7 +67,7 @@ ALLOWED_MOUNT_STYLES = {
     "backgroundSize", "position",
 }
 ALLOWED_SINKS = {
-    "style.backgroundPosition", "style.backgroundPositionY", "style.height",
+    "class.prepared", "style.backgroundPosition", "style.backgroundPositionY", "style.height",
     "style.left", "style.opacity", "style.top", "style.transform",
     "style.visibility", "style.width",
 }
@@ -80,6 +82,7 @@ CAPABILITY_INTERPRETER_ORDER = [
     ("polycss-pointer-grab@0", "prepared-pointer-grab-interaction"),
     ("polycss-playback@0", "prepared-playback"),
     ("polycss-surface@0", "prepared-surface-lighting"),
+    ("polycss-variants@0", "prepared-variants"),
 ]
 CONFORMANCE_INTERPRETER_ORDER = [
     ("polycss-effects@0", "particle-effects"),
@@ -87,6 +90,7 @@ CONFORMANCE_INTERPRETER_ORDER = [
     ("polycss-pointer-grab@0", "pointer-grab-interaction"),
     ("static-presentation@0", "presentation"),
     ("polycss-surface@0", "surface-lighting"),
+    ("polycss-variants@0", "variants"),
 ]
 INLINE_SAFE_FUNCTIONS = frozenset("""
 abs acos asin atan atan2 calc clamp color color-mix cos exp hsl hsla hwb hypot
@@ -1332,8 +1336,6 @@ def validate_surface_contract(state_channel: dict, binding: dict,
     require(source_frame_input.get("type") == "uint" and "default" not in source_frame_input,
             "INVALID_SURFACE_BINDING",
             "Surface time.source-frame input must be uint without a package default")
-    exact_array(binding.get("sinks"), ["style.backgroundPositionY", "style.visibility"],
-                "INVALID_SURFACE_BINDING", "Surface sinks are incomplete or noncanonical")
     require("parameters" not in binding, "INVALID_SURFACE_BINDING",
             "Surface binding must not declare parameters")
     targets = strict_keys(binding.get("targets"), {"leaves"},
@@ -1366,9 +1368,9 @@ def validate_surface_contract(state_channel: dict, binding: dict,
     faces = surface.get("faces")
     require(isinstance(faces, list) and len(faces) == leaf_count,
             "TARGET_CARDINALITY_MISMATCH", "Surface faces do not match leafCount")
-    packing = strict_keys(surface.get("statePacking"), {"stateCount", "sourceFrameDeltas"},
+    packing = strict_keys(surface.get("statePacking"), {"stateCount", "sourceFrameDeltas", "backgroundPositions"},
                           code, "surface state packing")
-    require(set(packing) == {"stateCount", "sourceFrameDeltas"}, code,
+    require({"stateCount", "sourceFrameDeltas"}.issubset(packing), code,
             "Surface state packing is incomplete")
     state_count = as_int(packing.get("stateCount"), "SURFACE_STATE_LIMIT",
                          "surface stateCount")
@@ -1379,6 +1381,17 @@ def validate_surface_contract(state_channel: dict, binding: dict,
                                   "surface source-frame deltas", 0, max(0, frame_count - 1))
     require(len(source_deltas) == state_count, "STATE_COLUMN_MISMATCH",
             "Surface source-frame deltas do not match stateCount")
+    prepared_positions = "backgroundPositions" in packing
+    exact_array(binding.get("sinks"),
+                ["style.backgroundPosition" if prepared_positions else "style.backgroundPositionY",
+                 "style.visibility"],
+                "INVALID_SURFACE_BINDING", "Surface sinks are incomplete or noncanonical")
+    if prepared_positions:
+        positions = packing.get("backgroundPositions")
+        require(isinstance(positions, list) and len(positions) == state_count,
+                "STATE_COLUMN_MISMATCH", "Surface prepared positions do not match stateCount")
+        for index, position in enumerate(positions):
+            safe_style(position, f"Surface prepared position {index}")
     face_ids, state_offset = set(), 0
     source_frames_by_face: list[list[int]] = []
     for index, face in enumerate(faces):
@@ -1635,6 +1648,144 @@ def validate_surface_contract(state_channel: dict, binding: dict,
         require(visibility_jump_rows[pair] == expected_visibility,
                 "SURFACE_JUMP_MISMATCH",
                 f"Surface visibility jump {pair} contradicts canonical target state")
+    return packet
+
+
+def validate_variants_contract(state_channel: dict, binding: dict,
+                               playback_packet: dict, playback_binding: dict,
+                               binding_inputs: dict[str, dict],
+                               limits: dict[str, int]) -> dict:
+    code = "INVALID_VARIANT_STATE"
+    exact_array(binding.get("inputs"), ["time.source-frame"],
+                "INVALID_VARIANT_BINDING", "Variant inputs are incomplete or noncanonical")
+    source_frame_input = binding_inputs.get("time.source-frame", {})
+    require(source_frame_input.get("type") == "uint" and "default" not in source_frame_input,
+            "INVALID_VARIANT_BINDING",
+            "Variant time.source-frame input must be uint without a package default")
+    exact_array(binding.get("sinks"), ["class.prepared"],
+                "INVALID_VARIANT_BINDING", "Variant sinks are incomplete or noncanonical")
+    require("parameters" not in binding, "INVALID_VARIANT_BINDING",
+            "Variant binding must not declare parameters")
+    targets = strict_keys(binding.get("targets"), {"nodes"},
+                          "INVALID_VARIANT_BINDING", "variant targets")
+    require(set(targets) == {"nodes"}, "INVALID_VARIANT_BINDING",
+            "Variant targets are incomplete")
+    nodes = unique_targets(targets.get("nodes"), min(limits["nodes"], 0xffff),
+                           "INVALID_VARIANT_BINDING", "variant node")
+    require(nodes, "TARGET_CARDINALITY_MISMATCH", "Variant targets are empty")
+
+    data = strict_keys(state_channel.get("data"), {"packet"}, code, "variant state data")
+    require(set(data) == {"packet"}, code, "Variant state data is incomplete")
+    packet = strict_keys(data.get("packet"),
+                         {"version", "frameCount", "classes", "initial", "sequential",
+                          "nonInteractiveJumps"}, code, "variant packet")
+    require(set(packet) == {"version", "frameCount", "classes", "initial", "sequential",
+                            "nonInteractiveJumps"}, code, "Variant packet is incomplete")
+    frame_count = int(playback_binding["parameters"]["frameCount"])
+    require(packet.get("version") == 0 and packet.get("frameCount") == frame_count,
+            "FRAME_CARDINALITY_MISMATCH", "Variant version or frameCount is invalid")
+    require(len(nodes) * frame_count <= limits["visibility_cells"],
+            "VARIANT_STATE_LIMIT", "Prepared variant state matrix is excessive")
+    classes = packet.get("classes")
+    require(isinstance(classes, list) and 0 < len(classes) < 0xffff
+            and len(classes) <= limits["prepared_states"],
+            "VARIANT_STATE_LIMIT", "Prepared variant class table is invalid or excessive")
+    for index, token in enumerate(classes):
+        require(isinstance(token, str)
+                and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_-]{0,63}", token)
+                and (index == 0 or classes[index - 1] < token), code,
+                f"Prepared variant class {index} is invalid or noncanonical")
+
+    initial = strict_keys(packet.get("initial"), {"frame", "classIndicesBase64"},
+                          code, "variant initial state")
+    require(set(initial) == {"frame", "classIndicesBase64"}, code,
+            "Variant initial state is incomplete")
+    require(initial.get("frame") == 1
+            and initial.get("frame") == playback_packet["initial"]["sourceFrame"],
+            "FRAME_CARDINALITY_MISMATCH",
+            "Variant initial frame must be frame 1 and match playback")
+    initial_indices = base64_integers(initial.get("classIndicesBase64"), 2, len(nodes),
+                                      code, "variant initial classes")
+    valid_class = lambda value: value == 0xffff or value < len(classes)
+    require(len(initial_indices) == len(nodes) and all(map(valid_class, initial_indices)),
+            code, "Variant initial classes are invalid")
+
+    sequential = strict_keys(packet.get("sequential"),
+                             {"offsetsBase64", "targetIndicesBase64", "classIndicesBase64"},
+                             code, "variant sequential transitions")
+    require(set(sequential) == {"offsetsBase64", "targetIndicesBase64", "classIndicesBase64"},
+            code, "Variant sequential transitions are incomplete")
+    offsets = base64_integers(sequential.get("offsetsBase64"), 4, frame_count + 1,
+                              code, "variant transition offsets")
+    target_indices = base64_integers(sequential.get("targetIndicesBase64"), 2,
+                                     limits["prepared_changes"],
+                                     "VARIANT_STATE_LIMIT", "variant transition targets")
+    class_indices = base64_integers(sequential.get("classIndicesBase64"), 2,
+                                    limits["prepared_changes"],
+                                    "VARIANT_STATE_LIMIT", "variant transition classes")
+    require(len(offsets) == frame_count + 1 and offsets[0] == 0
+            and offsets[-1] == len(target_indices)
+            and all(offsets[index - 1] <= value
+                    for index, value in enumerate(offsets) if index > 0),
+            "STATE_COLUMN_MISMATCH", "Variant transition offsets are invalid")
+    require(len(target_indices) == len(class_indices), "STATE_COLUMN_MISMATCH",
+            "Variant transition columns have unequal lengths")
+
+    def apply_segment(row: list[int], segment: int, label: str) -> None:
+        previous = -1
+        for cursor in range(offsets[segment], offsets[segment + 1]):
+            target, class_index = target_indices[cursor], class_indices[cursor]
+            require(target < len(nodes) and target > previous and valid_class(class_index),
+                    code, f"{label} is invalid")
+            require(row[target] != class_index, code, f"{label} contains a no-op")
+            row[target] = class_index
+            previous = target
+
+    rows = [list(initial_indices)]
+    current = list(initial_indices)
+    for frame in range(2, frame_count + 1):
+        apply_segment(current, frame - 1, f"Variant transition {frame - 1}>{frame}")
+        rows.append(list(current))
+    wrapped = list(current)
+    apply_segment(wrapped, 0, f"Variant transition {frame_count}>1")
+    require(wrapped == initial_indices, "VARIANT_TRANSITION_MISMATCH",
+            "Variant wrap transition does not reproduce frame 1")
+
+    jumps = packet.get("nonInteractiveJumps")
+    require(isinstance(jumps, list) and len(jumps) <= frame_count, code,
+            "Variant jumps are invalid or excessive")
+    pairs = set()
+    for index, jump in enumerate(jumps):
+        jump = strict_keys(jump,
+                           {"fromFrame", "toFrame", "targetIndicesBase64", "classIndicesBase64"},
+                           code, f"variant jump {index}")
+        require(set(jump) == {"fromFrame", "toFrame", "targetIndicesBase64", "classIndicesBase64"},
+                code, f"Variant jump {index} is incomplete")
+        from_frame = as_int(jump.get("fromFrame"), code, f"variant jump {index} fromFrame", 1)
+        to_frame = as_int(jump.get("toFrame"), code, f"variant jump {index} toFrame", 1)
+        pair = f"{from_frame}>{to_frame}"
+        require(from_frame <= frame_count and to_frame <= frame_count
+                and from_frame != to_frame and pair not in pairs,
+                code, f"Variant jump {index} frames are invalid or duplicated")
+        pairs.add(pair)
+        jump_targets = base64_integers(jump.get("targetIndicesBase64"), 2, len(nodes),
+                                       code, f"variant jump {index} targets")
+        jump_classes = base64_integers(jump.get("classIndicesBase64"), 2, len(nodes),
+                                       code, f"variant jump {index} classes")
+        require(len(jump_targets) == len(jump_classes)
+                and all(target < len(nodes)
+                        and (cursor == 0 or jump_targets[cursor - 1] < target)
+                        and valid_class(jump_classes[cursor])
+                        for cursor, target in enumerate(jump_targets)), code,
+                f"Variant jump {index} rows are invalid")
+        expected_targets, expected_classes = [], []
+        for target in range(len(nodes)):
+            if rows[from_frame - 1][target] != rows[to_frame - 1][target]:
+                expected_targets.append(target)
+                expected_classes.append(rows[to_frame - 1][target])
+        require(jump_targets == expected_targets and jump_classes == expected_classes,
+                "VARIANT_JUMP_MISMATCH",
+                f"Variant jump {pair} contradicts canonical target state")
     return packet
 
 
@@ -2426,15 +2577,18 @@ def validate_state_bindings(state: Any, bindings: Any, node_ids: set[str], limit
             ["style.transform", "style.visibility"],
             {"shapes", "leaves", "cursorLayer", "cursorStates"}, {"initialFrame", "tickRateHz"}),
         "polycss-surface@0": (
-            ["time.source-frame"], ["style.backgroundPositionY", "style.visibility"],
+            ["time.source-frame"], None,
             {"leaves"}, None),
+        "polycss-variants@0": (
+            ["time.source-frame"], ["class.prepared"],
+            {"nodes"}, None),
     }
     for interpreter, (expected_inputs, expected_sinks, target_keys, parameter_keys) in binding_contracts.items():
         binding = by_interpreter.get(interpreter)
         if binding is None:
             continue
         require(binding["status"] == "executable" and binding["inputs"] == expected_inputs
-                and binding["sinks"] == expected_sinks,
+                and (expected_sinks is None or binding["sinks"] == expected_sinks),
                 "INVALID_CODEC_BINDING", f"{interpreter} input, sink, or status contract is invalid")
         targets = strict_keys(binding["targets"], target_keys, "INVALID_CODEC_BINDING", f"{interpreter} targets")
         require(set(targets) == target_keys, "INVALID_CODEC_BINDING", f"{interpreter} targets are incomplete")
@@ -2446,12 +2600,16 @@ def validate_state_bindings(state: Any, bindings: Any, node_ids: set[str], limit
 
     playback_state = by_codec.get("polycss-playback-packed@0")
     surface_state = by_codec.get("polycss-surface-packed@0")
+    variant_state = by_codec.get("polycss-variants-packed@0")
     playback_binding = by_interpreter.get("polycss-playback@0")
     surface_binding = by_interpreter.get("polycss-surface@0")
+    variant_binding = by_interpreter.get("polycss-variants@0")
     require((playback_state is None) == (playback_binding is None),
             "MISSING_POLYCSS_CHANNEL", "Playback state and binding must appear together")
     require((surface_state is None) == (surface_binding is None),
             "MISSING_POLYCSS_CHANNEL", "Surface state and binding must appear together")
+    require((variant_state is None) == (variant_binding is None),
+            "MISSING_POLYCSS_CHANNEL", "Variant state and binding must appear together")
     playback_packet = None
     if playback_binding is not None:
         playback_packet = validate_playback_contract(
@@ -2464,6 +2622,11 @@ def validate_state_bindings(state: Any, bindings: Any, node_ids: set[str], limit
     if playback_packet is not None and playback_packet["leafCount"] > 0:
         require(surface_binding is not None, "MISSING_POLYCSS_CHANNEL",
                 "Playback with leaf targets requires prepared surface state and binding")
+    if variant_binding is not None:
+        require(playback_packet is not None, "MISSING_POLYCSS_CHANNEL",
+                "Prepared variants require executable playback")
+        validate_variants_contract(variant_state, variant_binding, playback_packet,
+                                   playback_binding, input_map, limits)
 
     effects_state = by_codec.get("polycss-effects-prepared@0")
     effects_binding = by_interpreter.get("polycss-effects@0")
@@ -2556,18 +2719,44 @@ def validate_initial_surface_closure(document: dict[str, Any], nodes: list[dict]
                 f"Surface leaf {index} initial visibility does not match TREE")
         face = packet["surface"]["faces"][index]
         source_frame = selected_frame = 0
+        selected_state = 0
         for local in range(int(face["stateCount"])):
             source_frame += packing["sourceFrameDeltas"][int(face["stateOffset"]) + local]
             if source_frame > target_frame:
                 break
             selected_frame = source_frame
-        actual = node.get("styles", {}).get("backgroundPositionY")
-        if selected_frame == 0:
+            selected_state = local
+        prepared = packing.get("backgroundPositions")
+        actual = node.get("styles", {}).get(
+            "backgroundPosition" if prepared is not None else "backgroundPositionY")
+        if prepared is not None:
+            matches = actual == prepared[int(face["stateOffset"]) + selected_state]
+        elif selected_frame == 0:
             matches = actual is None or actual in ("0", "0px", "0%")
         else:
             matches = actual == f"{-selected_frame * face['leafHeight']}px"
         require(matches, "SURFACE_TREE_MISMATCH",
                 f"Surface leaf {index} initial atlas position does not match TREE")
+
+
+def validate_initial_variant_closure(document: dict[str, Any], nodes: list[dict]) -> None:
+    state = next((channel for channel in document["state"]["channels"]
+                  if channel["codec"] == "polycss-variants-packed@0"), None)
+    binding = next((channel for channel in document["bindings"]["channels"]
+                    if channel["interpreter"] == "polycss-variants@0"), None)
+    if state is None or binding is None:
+        return
+    packet = state["data"]["packet"]
+    initial = base64_integers(packet["initial"]["classIndicesBase64"], 2,
+                              len(binding["targets"]["nodes"]),
+                              "INVALID_VARIANT_STATE", "variant initial classes")
+    by_id = {node["id"]: node for node in nodes}
+    classes = packet["classes"]
+    for index, target in enumerate(binding["targets"]["nodes"]):
+        active = [token for token in by_id[target].get("classes", []) if token in classes]
+        expected = [] if initial[index] == 0xffff else [classes[initial[index]]]
+        require(active == expected, "VARIANT_TREE_MISMATCH",
+                f"Variant node {index} initial class does not match TREE")
 
 
 def validate_presentation_closure(document: dict[str, Any], nodes: list[dict],
@@ -3128,6 +3317,7 @@ def read_dom(path: Path, require_resources: bool = True) -> dict[str, Any]:
             token_names.add(entry["token"])
     state_channels, binding_channels = validate_state_bindings(document["state"], document["bindings"], node_ids, limits)
     validate_initial_surface_closure(document, nodes)
+    validate_initial_variant_closure(document, nodes)
     validate_presentation_closure(document, nodes, resource_map)
     interpreters = {channel["interpreter"] for channel in binding_channels}
     expected_capabilities = list(BASE_REQUIRED_CAPABILITIES)

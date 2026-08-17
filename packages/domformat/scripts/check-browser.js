@@ -11,6 +11,7 @@ import { buildDom } from "../src/writer.js";
 import { invariant } from "../src/errors.js";
 import { crc32 } from "../src/crc32.js";
 import { loadManifest } from "../src/manifest.js";
+import { syntheticAdapterTechniquesInput } from "../test/helpers.js";
 
 const execFileAsync = promisify(execFile);
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
@@ -365,6 +366,36 @@ async function browserFixtureProof(browser, origin, modelUrl, slug, nodes, leave
   });
 }
 
+async function preparedTechniqueProof(browser, url, label) {
+  return withBrowserPage(browser, { width: 320, height: 240 }, label, async (page, diagnostics) => {
+    await waitForPublication(page, url, label, diagnostics, 1);
+    const proof = await page.evaluate(async () => {
+      const leaf = document.querySelector("i.leaf");
+      const before = {
+        address: leaf?.style.backgroundPosition,
+        classes: [...(leaf?.classList ?? [])],
+        color: leaf ? getComputedStyle(leaf).color : "",
+      };
+      globalThis.domformatProof.seek(2);
+      await new Promise((resolvePaint) => requestAnimationFrame(() => requestAnimationFrame(resolvePaint)));
+      const current = document.querySelector("i.leaf");
+      return {
+        sameNode: current === leaf,
+        before,
+        after: {
+          address: current?.style.backgroundPosition,
+          classes: [...(current?.classList ?? [])],
+          color: current ? getComputedStyle(current).color : "",
+        },
+      };
+    });
+    invariant(proof.sameNode, "BROWSER_RELEASE_MOUNT", `${label} replaced the retained variant target.`);
+    invariant(proof.before.address === "0px 0px" && proof.before.classes.includes("material-a") && proof.before.color === "rgb(255, 0, 0)", "BROWSER_RELEASE_MOUNT", `${label} did not publish the prepared initial variant/address.`);
+    invariant(proof.after.address === "-16px -16px" && proof.after.classes.includes("material-b") && !proof.after.classes.includes("material-a") && proof.after.color === "rgb(0, 255, 0)", "BROWSER_RELEASE_MOUNT", `${label} did not publish the prepared noninitial variant/address.`);
+    return proof;
+  });
+}
+
 try {
   const npm = process.platform === "win32" ? "npm.cmd" : "npm";
   const packRoot = join(temporary, "pack");
@@ -388,6 +419,17 @@ try {
     await writeFile(target, bytes);
   }
 
+  const techniqueBuilt = buildDom(await syntheticAdapterTechniquesInput());
+  const techniqueRoot = join(temporary, "techniques");
+  await mkdir(techniqueRoot);
+  const techniqueModel = join(techniqueRoot, "model.json");
+  await writeFile(techniqueModel, techniqueBuilt.bytes);
+  for (const [relative, bytes] of techniqueBuilt.externalResources) {
+    const target = join(techniqueRoot, ...relative.split("/"));
+    await mkdir(resolve(target, ".."), { recursive: true });
+    await writeFile(target, bytes);
+  }
+
   const producerPath = resolve(root, "conformance/producer.py");
   const python = process.platform === "win32" ? "python" : "python3";
   const pythonRoot = join(temporary, "independent");
@@ -401,6 +443,9 @@ try {
     ["/model.json", modelPath],
     ["/model.css", join(temporary, "model.css")],
     ["/assets/checker.png", join(temporary, "assets", "checker.png")],
+    ["/techniques/model.json", techniqueModel],
+    ["/techniques/model.css", join(techniqueRoot, "model.css")],
+    ["/techniques/assets/checker.png", join(techniqueRoot, "assets", "checker.png")],
     ["/independent/model.json", pythonModel],
     ["/independent/independent.css", join(pythonRoot, "independent.css")],
     ["/independent/assets/independent-checker.png", join(pythonRoot, "assets", "independent-checker.png")],
@@ -421,11 +466,16 @@ try {
   const proofs = [];
   proofs.push(await browserFixtureProof(launchedBrowser, origin, "/model.json", "reference-writer-json", 8, 1, "i", 1));
   proofs.push(await browserFixtureProof(launchedBrowser, origin, "/independent/model.json", "independent-producer-json", 11, 2, "u", 2));
+  const preparedTechniques = [];
+  preparedTechniques.push(await preparedTechniqueProof(launchedBrowser, `${origin}/viewer/index.html?model=%2Ftechniques%2Fmodel.json&animate=0`, "prepared techniques reference viewer"));
+  preparedTechniques.push(await preparedTechniqueProof(launchedBrowser, `${origin}/viewer/index.html?model=%2Ftechniques%2Fmodel.json&animate=0&implementation=conformance`, "prepared techniques alternate mount"));
+  preparedTechniques.push(await preparedTechniqueProof(launchedBrowser, `${origin}/test/nversion-viewer.html?model=%2Ftechniques%2Fmodel.json&animate=0`, "prepared techniques N-version path"));
   process.stdout.write(`${JSON.stringify({
     browser: browserExecutable,
     browserVersion: launchedBrowser.version(),
     fixtures: proofs,
     independentProducer: producerSummary,
+    preparedTechniques,
     browserRuntime: "clean-installed npm tarball",
     alternateMountModelPixelsIdentical: proofs.every((proof) => proof.alternateMountModelPixelsIdentical),
     alternateMountMaximumChannelDelta: Math.max(...proofs.map((proof) => proof.alternateMountMaximumChannelDelta)),

@@ -8,6 +8,7 @@ import { mountConformanceDom } from "../conformance/viewer/mount.js";
 import {
   builtExternalResources,
   projectRoot,
+  syntheticAdapterTechniquesInput,
   syntheticExecutableInteractionInput,
   syntheticHiddenPlaybackInput,
   syntheticPolycssInput,
@@ -249,6 +250,31 @@ test("alternate and public viewers publish identical ordered animation transitio
     normalizedWrites(value.result, value.referenceHost, value.reference),
     "frame 2 to 1 write order",
   );
+  value.referenceRuntime.destroy();
+  value.alternateRuntime.destroy();
+});
+
+test("prepared atlas addresses and class variants publish without replacing retained nodes", async () => {
+  const value = await mountedPair(await syntheticAdapterTechniquesInput());
+  const referenceLeaf = value.reference.namespaced[2];
+  const alternateLeaf = value.alternateRuntime.node("synthetic-polycss/leaf");
+  const identities = [referenceLeaf, alternateLeaf];
+
+  assert.equal(referenceLeaf.style.backgroundPosition, "0px 0px");
+  assert.deepEqual(referenceLeaf.classes, ["leaf", "material-a"]);
+  value.referenceRuntime.seek(2);
+  value.alternateRuntime.seek(2);
+  assert.equal(value.reference.namespaced[2], identities[0]);
+  assert.equal(value.alternateRuntime.node("synthetic-polycss/leaf"), identities[1]);
+  assert.equal(referenceLeaf.style.backgroundPosition, "-16px -16px");
+  assert.deepEqual(referenceLeaf.classes, ["leaf", "material-b"]);
+  assertEquivalent(value, "prepared adapter techniques frame 2");
+
+  value.referenceRuntime.seek(1);
+  value.alternateRuntime.seek(1);
+  assert.equal(referenceLeaf.style.backgroundPosition, "0px 0px");
+  assert.deepEqual(referenceLeaf.classes, ["leaf", "material-a"]);
+  assertEquivalent(value, "prepared adapter techniques wrap");
   value.referenceRuntime.destroy();
   value.alternateRuntime.destroy();
 });

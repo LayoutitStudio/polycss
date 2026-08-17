@@ -396,6 +396,54 @@ export async function syntheticTwoFramePolycssInput() {
   return input;
 }
 
+export async function syntheticAdapterTechniquesInput() {
+  const input = await syntheticTwoFramePolycssInput();
+  const leaf = input.tree.nodes.find((node) => node.id === "synthetic-polycss/leaf");
+  leaf.classes.push("material-a");
+  delete leaf.styles.backgroundPositionY;
+  leaf.styles.backgroundPosition = "0px 0px";
+
+  const surface = input.state.channels.find((channel) => channel.codec === "polycss-surface-packed@0").data.packet;
+  surface.surface.statePacking.backgroundPositions = ["0px 0px", "-16px -16px"];
+  const surfaceBinding = input.bindings.channels.find((channel) => channel.interpreter === "polycss-surface@0");
+  surfaceBinding.sinks = ["style.backgroundPosition", "style.visibility"];
+
+  input.state.channels.push({
+    id: "variants",
+    codec: "polycss-variants-packed@0",
+    data: {
+      packet: {
+        version: 0,
+        frameCount: 2,
+        classes: ["material-a", "material-b"],
+        initial: { frame: 1, classIndicesBase64: base64Integers([0], 2) },
+        sequential: {
+          offsetsBase64: base64Integers([0, 1, 2], 4),
+          targetIndicesBase64: base64Integers([0, 0], 2),
+          classIndicesBase64: base64Integers([0, 1], 2),
+        },
+        nonInteractiveJumps: [],
+      },
+    },
+  });
+  input.bindings.channels.push({
+    id: "variants",
+    state: "variants",
+    interpreter: "polycss-variants@0",
+    status: "executable",
+    inputs: ["time.source-frame"],
+    targets: { nodes: ["synthetic-polycss/leaf"] },
+    sinks: ["class.prepared"],
+  });
+  input.meta.capabilities.push("prepared-variants");
+  input.meta.conformance.executable.push("variants");
+
+  const stylesheet = input.resourceInputs.find((resource) => resource.id === "model-css");
+  const source = new TextDecoder().decode(stylesheet.bytes);
+  stylesheet.bytes = new TextEncoder().encode(`${source}\n[data-domformat-root="synthetic-polycss"] .material-a { color: #f00; }\n[data-domformat-root="synthetic-polycss"] .material-b { color: #0f0; }\n`);
+  return input;
+}
+
 export async function syntheticHiddenPlaybackInput() {
   const input = await syntheticExecutableInteractionInput();
   const playback = input.state.channels.find((channel) => channel.codec === "polycss-playback-packed@0").data.packet;

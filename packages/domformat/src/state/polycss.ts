@@ -29,7 +29,11 @@ interface VisibilityJump {
 interface SurfaceWirePacket {
   readonly surface: Readonly<{
     faces: readonly SurfaceFace[];
-    statePacking: Readonly<{ stateCount: number; sourceFrameDeltas: readonly number[] }>;
+    statePacking: Readonly<{
+      stateCount: number;
+      sourceFrameDeltas: readonly number[];
+      backgroundPositions?: readonly string[];
+    }>;
   }>;
   readonly transitions: Readonly<{
     initialFrame: number;
@@ -54,7 +58,8 @@ interface ExpandedLighting {
     statePacking: Readonly<{
       stateCount: number;
       sourceFramesBase64: string;
-      backgroundPositionYs: readonly string[];
+      positionProperty: "backgroundPosition" | "backgroundPositionY";
+      positions: readonly string[];
     }>;
   }>;
   readonly transitions: Readonly<{
@@ -136,11 +141,36 @@ interface WirePlaybackData {
   readonly leafFit: readonly Readonly<{ canonicalSize: number }>[];
 }
 
+interface WireVariantPacket {
+  readonly version: number;
+  readonly frameCount: number;
+  readonly classes: readonly string[];
+  readonly initial: Readonly<{ frame: number; classIndicesBase64: string }>;
+  readonly sequential: Readonly<{
+    offsetsBase64: string;
+    targetIndicesBase64: string;
+    classIndicesBase64: string;
+  }>;
+  readonly nonInteractiveJumps: readonly Readonly<{
+    fromFrame: number;
+    toFrame: number;
+    targetIndicesBase64: string;
+    classIndicesBase64: string;
+  }>[];
+}
+
+interface ExpandedVariantPacket {
+  readonly frameCount: number;
+  readonly classes: readonly string[];
+  readonly rows: readonly Uint16Array[];
+}
+
 export interface MaterializedPolycssState {
   readonly channels: Map<string, DomStateChannel>;
   readonly lighting: ExpandedLighting | null;
   readonly playback: ExpandedPlaybackPacket | null;
   readonly surface: Readonly<Record<string, unknown>> | null;
+  readonly variants: ExpandedVariantPacket | null;
 }
 
 function bytes(value: string): Uint8Array {
@@ -187,14 +217,16 @@ function expandLighting(section: Readonly<Record<string, unknown>>): ExpandedLig
   const surface = contract.surface;
   const packing = surface.statePacking;
   const sourceFrames = new Array<number>(packing.stateCount);
-  const positions = new Array<string>(packing.stateCount);
+  const positions = packing.backgroundPositions
+    ? [...packing.backgroundPositions]
+    : new Array<string>(packing.stateCount);
   for (const face of surface.faces) {
     let frame = 0;
     for (let local = 0; local < face.stateCount; local += 1) {
       const index = face.stateOffset + local;
       frame += packing.sourceFrameDeltas[index];
       sourceFrames[index] = frame;
-      positions[index] = `${frame === 0 ? 0 : -frame * face.leafHeight}px`;
+      if (!packing.backgroundPositions) positions[index] = `${frame === 0 ? 0 : -frame * face.leafHeight}px`;
     }
   }
   const sequential = contract.transitions.sequential;
@@ -217,7 +249,8 @@ function expandLighting(section: Readonly<Record<string, unknown>>): ExpandedLig
       statePacking: {
         stateCount: packing.stateCount,
         sourceFramesBase64: toBase64(sourceFrames, 2),
-        backgroundPositionYs: positions,
+        positionProperty: packing.backgroundPositions ? "backgroundPosition" : "backgroundPositionY",
+        positions,
       },
     },
     transitions: {
@@ -238,7 +271,7 @@ function emptyLighting(frameCount: number): ExpandedLighting {
   return {
     surface: {
       faces: [],
-      statePacking: { stateCount: 0, sourceFramesBase64: "", backgroundPositionYs: [] },
+      statePacking: { stateCount: 0, sourceFramesBase64: "", positionProperty: "backgroundPositionY", positions: [] },
     },
     transitions: {
       initialFrame: 1,
@@ -413,6 +446,22 @@ function expandPlayback(data: WirePlaybackData, lighting: ExpandedLighting): Exp
   };
 }
 
+function expandVariants(section: Readonly<Record<string, unknown>>): ExpandedVariantPacket {
+  const packet = section.packet as unknown as WireVariantPacket;
+  const initial = uint16(packet.initial.classIndicesBase64);
+  const offsets = uint32(packet.sequential.offsetsBase64);
+  const targets = uint16(packet.sequential.targetIndicesBase64);
+  const classes = uint16(packet.sequential.classIndicesBase64);
+  invariant(offsets.length === packet.frameCount + 1 && targets.length === classes.length, "TRUNCATED_VARIANTS", "Prepared variant transitions are incomplete.");
+  const rows: Uint16Array[] = [initial.slice()];
+  const current = initial.slice();
+  for (let frame = 2; frame <= packet.frameCount; frame += 1) {
+    for (let cursor = offsets[frame - 1]; cursor < offsets[frame]; cursor += 1) current[targets[cursor]] = classes[cursor];
+    rows.push(current.slice());
+  }
+  return Object.freeze({ frameCount: packet.frameCount, classes: Object.freeze([...packet.classes]), rows: Object.freeze(rows) });
+}
+
 interface VisibilityState {
   readonly rows: Uint8Array[];
   readonly sequentialOffsets: Uint32Array;
@@ -443,6 +492,7 @@ interface LightingFace extends SurfaceFace {
 
 interface LightingState {
   readonly faces: LightingFace[];
+  readonly positionProperty: "backgroundPosition" | "backgroundPositionY";
   readonly positions: readonly string[];
   readonly sequentialOffsets: Uint32Array;
   readonly sequentialFaces: Uint16Array;
@@ -453,7 +503,7 @@ interface LightingState {
 function lightingState(lighting: ExpandedLighting): LightingState {
   const packing = lighting.surface.statePacking;
   const sourceFrames = uint16(packing.sourceFramesBase64);
-  invariant(sourceFrames.length === packing.stateCount && packing.backgroundPositionYs.length === packing.stateCount, "TRUNCATED_LIGHTING", "Lighting states are incomplete.");
+  invariant(sourceFrames.length === packing.stateCount && packing.positions.length === packing.stateCount, "TRUNCATED_LIGHTING", "Lighting states are incomplete.");
   const faces = lighting.surface.faces.map((face) => ({
     ...face,
     sourceFrames: sourceFrames.subarray(face.stateOffset, face.stateOffset + face.stateCount),
@@ -465,7 +515,8 @@ function lightingState(lighting: ExpandedLighting): LightingState {
   }]));
   return {
     faces,
-    positions: packing.backgroundPositionYs,
+    positionProperty: packing.positionProperty,
+    positions: packing.positions,
     sequentialOffsets: uint32(sequential.offsetsBase64),
     sequentialFaces: uint16(sequential.faceIndicesBase64),
     sequentialStates: uint16(sequential.stateIndicesBase64),
@@ -488,14 +539,18 @@ export function materializePolycssState(state: DomState): MaterializedPolycssSta
   const channels = new Map<string, DomStateChannel>(state.channels.map((channel): [string, DomStateChannel] => [channel.id, channel]));
   const surfaceChannel = [...channels.values()].find((channel) => channel.codec === "polycss-surface-packed@0");
   const playbackChannel = [...channels.values()].find((channel) => channel.codec === "polycss-playback-packed@0");
-  if (!playbackChannel) return Object.freeze({ channels, lighting: null, playback: null, surface: null });
+  const variantChannel = [...channels.values()].find((channel) => channel.codec === "polycss-variants-packed@0");
+  if (!playbackChannel) return Object.freeze({ channels, lighting: null, playback: null, surface: null, variants: null });
   const playbackData = playbackChannel.data as unknown as WirePlaybackData;
   invariant(surfaceChannel || playbackData.packet.leafCount === 0, "MISSING_POLYCSS_CHANNEL", "Prepared playback leaves require a surface channel.");
   const lighting = surfaceChannel
     ? expandLighting(surfaceChannel.data)
     : emptyLighting(playbackData.packet.frameRows.length);
   const playback = expandPlayback(playbackData, lighting);
-  return Object.freeze({ channels, lighting, playback, surface: surfaceChannel?.data ?? null });
+  const variants = variantChannel
+    ? expandVariants(variantChannel.data)
+    : null;
+  return Object.freeze({ channels, lighting, playback, surface: surfaceChannel?.data ?? null, variants });
 }
 
 function timelineFrame(packet: ExpandedPlaybackPacket, tick: number): number {
@@ -583,6 +638,8 @@ type BoundPlaybackTargets = Readonly<{
   leaves?: readonly HTMLElement[];
 }>;
 
+type BoundVariantTargets = Readonly<{ nodes?: readonly HTMLElement[] }>;
+
 export function createPolycssPlayback(
   materialized: MaterializedPolycssState,
   bindings: DomBindings,
@@ -598,7 +655,9 @@ export function createPolycssPlayback(
   if (!playbackBinding) return createStaticPlayback(publishAppearance);
   const packet = materialized.playback;
   const surfaceBinding = bindings.channels.find((channel) => channel.interpreter === "polycss-surface@0");
+  const variantBinding = bindings.channels.find((channel) => channel.interpreter === "polycss-variants@0");
   invariant(packet && materialized.lighting && (surfaceBinding || packet.leafCount === 0), "MISSING_POLYCSS_BINDING", "Executable playback leaves require a surface binding.");
+  invariant(Boolean(variantBinding) === Boolean(materialized.variants), "MISSING_POLYCSS_BINDING", "Executable prepared variants require matching state and binding channels.");
   const playbackTargets = playbackBinding.targets as unknown as PlaybackTargets;
   const playbackParameters = playbackBinding.parameters as unknown as PlaybackParameters;
   const bound = options.boundTargets?.get(playbackBinding.id)?.targets as BoundPlaybackTargets | undefined;
@@ -608,6 +667,14 @@ export function createPolycssPlayback(
   invariant(scene && shapeTargets.every(Boolean) && leafTargets.every(Boolean), "MISSING_TARGET_NODE", "Playback target nodes are not mounted.");
   const shapes = shapeTargets as readonly HTMLElement[];
   const leaves = leafTargets as readonly HTMLElement[];
+  const variantIds = variantBinding ? (variantBinding.targets as unknown as { readonly nodes: readonly string[] }).nodes : [];
+  const variantBound = variantBinding ? options.boundTargets?.get(variantBinding.id)?.targets as BoundVariantTargets | undefined : undefined;
+  const variantTargets = variantBound?.nodes ?? variantIds.map((id) => mounted.byId.get(id));
+  invariant(variantTargets.every(Boolean), "MISSING_TARGET_NODE", "Prepared variant target nodes are not mounted.");
+  const variants = materialized.variants;
+  const variantNodes = variantTargets as readonly HTMLElement[];
+  const appliedVariants = variants?.rows[0].slice() ?? new Uint16Array(0);
+  let variantFrame = variants ? 1 : 0;
   const baseSceneTransform = playbackParameters.baseSceneTransform;
   const shapeTransforms = new Uint32Array(packet.shapeCount);
   const shapeVisibility = new Uint8Array(packet.shapeCount);
@@ -669,12 +736,27 @@ export function createPolycssPlayback(
     if (leaves[index].style.visibility !== next) leaves[index].style.visibility = next;
   };
 
+  const applyVariants = (frame: number): void => {
+    if (!variants || frame === variantFrame) return;
+    const next = variants.rows[frame - 1];
+    invariant(next?.length === variantNodes.length, "INVALID_VARIANT_PUBLICATION", `Prepared variants have no state for frame ${frame}.`);
+    for (let index = 0; index < next.length; index += 1) {
+      const previous = appliedVariants[index];
+      const value = next[index];
+      if (previous === value) continue;
+      if (previous !== 0xffff) variantNodes[index].classList.remove(variants.classes[previous]);
+      if (value !== 0xffff) variantNodes[index].classList.add(variants.classes[value]);
+      appliedVariants[index] = value;
+    }
+    variantFrame = frame;
+  };
+
   const publishSurfaceState = (frame: number): void => {
     for (let index = 0; index < leaves.length; index += 1) {
       const face = light.faces[index];
       const state = stateAt(face, frame - 1);
       invariant(state >= 0 && state < face.stateCount, "INVALID_SURFACE_PUBLICATION", `Prepared surface leaf ${index} has no state for frame ${frame}.`);
-      leaves[index].style.backgroundPositionY = light.positions[face.stateOffset + state];
+      leaves[index].style[light.positionProperty] = light.positions[face.stateOffset + state];
       appliedStates[index] = state;
       writeVisibility(index);
     }
@@ -698,7 +780,6 @@ export function createPolycssPlayback(
     }
     for (const index of changed) {
       visible[index] ^= 1;
-      writeVisibility(index);
     }
     const jump = sequential ? undefined : light.jumps.get(`${surfaceFrame}>${nextFrame}`);
     let faceIndices: Uint16Array;
@@ -733,9 +814,10 @@ export function createPolycssPlayback(
       if (visible[index] !== 1) continue;
       const face = light.faces[index];
       const state = stateIndices[cursor];
-      leaves[index].style.backgroundPositionY = light.positions[face.stateOffset + state];
+      leaves[index].style[light.positionProperty] = light.positions[face.stateOffset + state];
       appliedStates[index] = state;
     }
+    for (const index of changed) writeVisibility(index);
     surfaceFrame = nextFrame;
   };
 
@@ -773,7 +855,10 @@ export function createPolycssPlayback(
       dirtyLeaves?.add(leaf);
       if (publish) publishOrDeferPreparedLeafTransform(leaf);
     }
-    if (publish) applySurface(nextFrame);
+    if (publish) {
+      applyVariants(nextFrame);
+      applySurface(nextFrame);
+    }
     sourceFrame = nextFrame;
   };
 
@@ -798,6 +883,7 @@ export function createPolycssPlayback(
         else publishOrDeferPreparedLeafTransform(index);
       }
       if (synchronize) synchronizePreparedLeafTransforms();
+      applyVariants(target);
       applySurface(target);
       sourceFrame = target;
     }
@@ -842,6 +928,7 @@ export function createPolycssPlayback(
       if (shapes[index].style.visibility !== nextVisibility) shapes[index].style.visibility = nextVisibility;
     }
     for (const index of [...dirtyLeaves].sort((left, right) => left - right)) publishOrDeferPreparedLeafTransform(index);
+    applyVariants(sourceFrame);
     applySurface(sourceFrame);
     return Object.freeze(frames);
   };
@@ -888,6 +975,7 @@ export function createPolycssPlayback(
         shapes[index].style.visibility = shapeVisibility[index] === 1 ? "visible" : "hidden";
       }
       for (let index = 0; index < leaves.length; index += 1) writePreparedLeafTransform(index);
+      applyVariants(sourceFrame);
       publishSurfaceState(sourceFrame);
       applyAppearance();
       initialPublished = true;
@@ -907,6 +995,7 @@ export function createPolycssPlayback(
     },
     applySurfaceFrame(nextFrame: number) {
       invariant(Number.isSafeInteger(nextFrame) && nextFrame >= 1 && nextFrame <= playbackParameters.frameCount, "FRAME_RANGE", `Prepared surface frame ${nextFrame} is out of range.`);
+      applyVariants(nextFrame);
       applySurface(nextFrame);
       return nextFrame;
     },

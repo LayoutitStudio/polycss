@@ -25,7 +25,12 @@ export class FakeElement {
     });
     this.dataset = {};
     this.classes = [];
-    this.classList = { add: (...tokens) => { this.classes.push(...tokens); } };
+    this.classList = {
+      add: (...tokens) => {
+        for (const token of tokens) if (!this.classes.includes(token)) this.classes.push(token);
+      },
+      remove: (...tokens) => { this.classes = this.classes.filter((token) => !tokens.includes(token)); },
+    };
     this.listeners = new Map();
     this.listenerSequence = 0;
     this.capturedPointers = new Set();

@@ -7,6 +7,7 @@ import { cssScopeAttribute } from "../src/css.js";
 import { validateDocument } from "../src/schema.js";
 import {
   errorCode,
+  syntheticAdapterTechniquesInput,
   syntheticAnimationWithoutEffectsInput,
   syntheticEffectsWithoutPlaybackInput,
   syntheticEmptySurfaceInput,
@@ -435,6 +436,27 @@ test("cross-checks initial surface bits and atlas state against retained TREE st
   const atlas = copy(base);
   atlas.tree.nodes.find((node) => node.id === "synthetic-polycss/leaf").styles.backgroundPositionY = "-1px";
   assert.throws(() => buildDom(atlas), errorCode("SURFACE_TREE_MISMATCH"));
+});
+
+test("validates prepared two-axis surface addresses and sparse class variants", async () => {
+  const base = await syntheticAdapterTechniquesInput();
+  assert.doesNotThrow(() => buildDom(base));
+
+  const wrongSurfaceSink = copy(base);
+  wrongSurfaceSink.bindings.channels.find((channel) => channel.id === "surface").sinks = ["style.backgroundPositionY", "style.visibility"];
+  assert.throws(() => buildDom(wrongSurfaceSink), errorCode("INVALID_SURFACE_BINDING"));
+
+  const unsafePosition = copy(base);
+  unsafePosition.state.channels.find((channel) => channel.id === "surface").data.packet.surface.statePacking.backgroundPositions[1] = "url(https://example.com/x)";
+  assert.throws(() => buildDom(unsafePosition), errorCode("UNSAFE_STYLE_VALUE"));
+
+  const wrongInitialClass = copy(base);
+  wrongInitialClass.tree.nodes.find((node) => node.id === "synthetic-polycss/leaf").classes = ["leaf", "material-b"];
+  assert.throws(() => buildDom(wrongInitialClass), errorCode("VARIANT_TREE_MISMATCH"));
+
+  const noOpTransition = copy(base);
+  noOpTransition.state.channels.find((channel) => channel.id === "variants").data.packet.sequential.classIndicesBase64 = "AAAAAA==";
+  assert.throws(() => buildDom(noOpTransition), errorCode("INVALID_VARIANT_STATE"));
 });
 
 test("surface transitions and jumps must reproduce the canonical target frame", async () => {

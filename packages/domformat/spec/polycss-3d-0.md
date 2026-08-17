@@ -239,6 +239,7 @@ unique. Version 0 knows these codecs:
 | `polycss-playback-packed@0` | `polycss-playback@0` | executable |
 | `polycss-pointer-grab-prepared@0` | `polycss-pointer-grab@0` | executable |
 | `polycss-surface-packed@0` | `polycss-surface@0` | executable |
+| `polycss-variants-packed@0` | `polycss-variants@0` | executable |
 | `static-presentation@0` | `static-presentation@0` | executable |
 
 Unknown codecs are invalid in profile version 0. Codec data is declarative and
@@ -275,20 +276,21 @@ refers to an existing `TREE` id, except the literal `$host`. A binding cannot
 contain more target strings than all retained node ids plus `$host`; malformed
 scalar leaves are invalid rather than ignored. Codec-specific node arrays do
 not permit `$host`. Cross-channel reuse of a target is allowed only where codec
-semantics explicitly coordinate it (for example playback, surface, and
-interaction share leaf targets).
+semantics explicitly coordinate it (for example playback, surface, variants,
+and interaction may share targets while owning different sinks).
 
 Surface and interaction shape/leaf arrays exactly equal playback's arrays in
 the same order. A surface requires playback, while leafless playback MAY omit
-surface. Effects targets are disjoint from all other channels. Presentation
-targets other than `$host` are disjoint from playback; its optional cursor
+surface. Variants require playback but may target any nonempty ordered subset
+of retained nodes. Effects targets are disjoint from all other channels.
+Presentation targets other than `$host` are disjoint from playback; its optional cursor
 targets exactly match interaction when interaction is present. These ownership
 rules prevent two unrelated interpreters from racing the same sink.
 
 The complete sink vocabulary is:
 
 ```text
-style.backgroundPosition style.backgroundPositionY style.height style.left
+class.prepared style.backgroundPosition style.backgroundPositionY style.height style.left
 style.opacity style.top style.transform style.visibility style.width
 ```
 
@@ -310,6 +312,8 @@ Validation occurs before state materialization or DOM construction and includes:
   present, and required surface closure for nonempty playback leaves;
 - exact semantic equivalence of every prepared sequential surface transition
   and declared jump to its canonical target frame;
+- exact prepared-variant initial TREE closure, sparse transition closure, and
+  declared jump equivalence;
 - cross-channel target ownership and interaction/playback target-order closure;
 - effects/playback frame-count agreement for every effects channel, and
   effects/interaction/playback agreement for pointer interaction.
@@ -324,7 +328,7 @@ implementing every executable interpreter, but an executable viewer MUST reject
 any required interpreter it does not implement before construction.
 
 The reference `mountDom` implementation requires presentation and implements
-the optional playback, surface, effects, and pointer channels according to the
+the optional playback, surface, variants, effects, and pointer channels according to the
 validated closure. A presentation-only mount publishes source frame `1`, has
 no scheduler, and accepts only `seek(1)`.
 
@@ -339,6 +343,13 @@ retained leaf's physical transform equals its logical prepared transform,
 including for a same-frame seek. Viewer input adapters translate trusted host
 events into standardized `BIND` inputs; they do not expose package data to
 event handler compilation.
+
+For a source-frame publication, prepared variants are applied before prepared
+surface visibility. A node therefore receives its target material/class and
+atlas address before a reveal can paint it. Variant publication removes only
+the previously active class from the packet's declared class table and adds at
+most one target class; all structural TREE classes and node identities remain
+unchanged.
 
 The only conforming lifecycle order is:
 
@@ -421,6 +432,7 @@ The normative executable codec contracts are:
 
 - [`codecs/polycss-playback-0.md`](./codecs/polycss-playback-0.md)
 - [`codecs/polycss-surface-0.md`](./codecs/polycss-surface-0.md)
+- [`codecs/polycss-variants-0.md`](./codecs/polycss-variants-0.md)
 - [`codecs/static-presentation-0.md`](./codecs/static-presentation-0.md)
 - [`codecs/polycss-effects-0.md`](./codecs/polycss-effects-0.md)
 - [`codecs/polycss-pointer-grab-0.md`](./codecs/polycss-pointer-grab-0.md)

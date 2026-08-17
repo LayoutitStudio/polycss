@@ -24,6 +24,7 @@ const KNOWN_CAPABILITIES = new Set([
   "prepared-playback",
   "prepared-pointer-grab-interaction",
   "prepared-surface-lighting",
+  "prepared-variants",
 ]);
 const BOUNDARY_STYLES = Object.freeze({
   display: "block",

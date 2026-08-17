@@ -14,6 +14,7 @@ import { readDomNVersion } from "../conformance/nversion/reader.js";
 import { validateStylesheet } from "../conformance/nversion/resources.js";
 import {
   builtExternalResources,
+  syntheticAdapterTechniquesInput,
   syntheticEmptySurfaceInput,
   syntheticExecutableInteractionInput,
   syntheticPlaybackWithoutSurfaceInput,
@@ -137,6 +138,13 @@ test("production, N-version, and Python readers accept reduced executable closur
   ]) {
     await assertIndependentReadersAccept(await createInput(), `domformat-${name.replaceAll(" ", "-")}-`);
   }
+});
+
+test("production, N-version, and Python readers accept prepared adapter techniques", async () => {
+  await assertIndependentReadersAccept(
+    await syntheticAdapterTechniquesInput(),
+    "domformat-adapter-techniques-",
+  );
 });
 
 test("production, N-version, and Python readers reject a null optional presentation background", async () => {

@@ -48,7 +48,8 @@ A reader rejects at least:
   and executable legacy constructs;
 - codec table/cardinality/range errors, malformed codec base64, invalid
   binary32 values, non-finite derived binary32 operations, out-of-range direct
-  frame indices, contradictory prepared transition/jump accelerators, or
+  frame indices, unsafe prepared atlas positions, contradictory prepared
+  surface/variant transition or jump accelerators, or
   allocations beyond limits.
 
 Disk readers inspect regular-file metadata and limits before allocation, read
@@ -109,6 +110,7 @@ Implementations MAY expose stricter limits. The reference alpha defaults are:
 | prepared surface states | 2,000,000 |
 | prepared changes | 4,000,000 per bounded column |
 | visibility cells (`leaves * frames`) | 8 Mi |
+| prepared variant cells (`targets * frames`) | shared 8 Mi cell ceiling |
 | effect particles | 10,000 |
 | effect spawn tuples | 1,000,000 |
 | interaction controls | 256 |
