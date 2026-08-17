@@ -419,6 +419,7 @@ export async function validatePagedPlaybackPageBytesAsync(
   signal?: AbortSignal,
 ): Promise<DecodedPagedPlaybackPage> {
   const validation = playbackPageValidationSteps(decodedBytes, expected, shapeCount, leafCount, appearanceCount, limits);
+  await yieldPlaybackPageValidation(signal);
   let result = validation.next();
   while (!result.done) {
     await yieldPlaybackPageValidation(signal);

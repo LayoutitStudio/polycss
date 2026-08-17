@@ -117,6 +117,14 @@ async function flushAsyncWork(turns = 8) {
   for (let turn = 0; turn < turns; turn += 1) await new Promise((resolve) => setImmediate(resolve));
 }
 
+async function waitForAsyncWork(predicate, turns = 128) {
+  for (let turn = 0; turn < turns; turn += 1) {
+    if (predicate()) return;
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  assert.equal(predicate(), true, "asynchronous work did not settle within the bounded wait");
+}
+
 async function mountedPair(input, options = {}) {
   const built = buildDom(input);
   const externalResources = builtExternalResources(built);
@@ -370,7 +378,7 @@ test("alternate and public viewers advance only the ready catch-up prefix when a
   assert.equal(value.alternateRuntime.lifecycle.phase, "publish");
   assert.equal(value.referenceRuntime.sourceFrame, 4);
   assert.equal(value.alternateRuntime.sourceFrame, 4);
-  await flushAsyncWork();
+  await waitForAsyncWork(() => value.referenceRuntime.sourceFrame === 7 && value.alternateRuntime.sourceFrame === 7);
   assert.equal(value.referenceRuntime.sourceFrame, 7);
   assert.equal(value.alternateRuntime.sourceFrame, 7);
   assertEquivalent(value, "paged automatic catch-up ready prefix");
