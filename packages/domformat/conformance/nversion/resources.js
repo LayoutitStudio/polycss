@@ -630,8 +630,13 @@ async function validateStatePage(document, record, decoded, limits, signal) {
   const descriptor = state.data.packet.pages.find((page) => page.resource === record.id);
   require(descriptor, "UNEXPECTED_STATE_PAGE", `State page ${record.id} is not referenced by its matching channel.`);
   if (record.codec === "polycss-paged-playback-page@0") await yieldPlaybackPageValidation(signal);
+  const decodedText = new TextDecoder().decode(decoded);
+  if (record.codec === "polycss-paged-playback-page@0") await yieldPlaybackPageValidation(signal);
   const page = parseJsonBytes(decoded, limits, `State page ${record.id}`);
-  require(new TextDecoder().decode(decoded) === canonicalJson(page), "NONCANONICAL_STATE_PAGE", `State page ${record.id} is not canonical JSON.`);
+  if (record.codec === "polycss-paged-playback-page@0") await yieldPlaybackPageValidation(signal);
+  const canonical = canonicalJson(page);
+  if (record.codec === "polycss-paged-playback-page@0") await yieldPlaybackPageValidation(signal);
+  require(decodedText === canonical, "NONCANONICAL_STATE_PAGE", `State page ${record.id} is not canonical JSON.`);
   return record.codec === "polycss-paged-variants-page@0"
     ? validateVariantStatePage(document, record, descriptor, state, binding, page, limits)
     : await validatePlaybackStatePage(record, descriptor, state, page, limits, signal);

@@ -548,9 +548,11 @@ test("responsive restart without interaction keeps the playback initial page res
   mountSurface.clientWidth = 600;
   browser.observers[0].callback();
   assert.equal(runtime.sourceFrame, 1, "the profile restart publishes from the pinned initial page");
-  await flushAsyncWork();
   browser.frame(0);
-  browser.frame(34);
+  for (let turn = 0; turn < 128 && runtime.sourceFrame !== 2; turn += 1) {
+    await flushAsyncWork(1);
+    browser.frame(34);
+  }
   assert.equal(runtime.sourceFrame, 2);
   runtime.destroy();
 });

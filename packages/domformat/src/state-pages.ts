@@ -229,7 +229,12 @@ function* playbackPageValidationSteps(
     sliceLimit = PLAYBACK_VALIDATION_SLICE_OPERATIONS;
     return true;
   };
-  const page = canonicalPage(decodedBytes, expected.resource, limits);
+  const parsed = decodeJson(decodedBytes, `State page ${expected.resource}`, jsonStructureLimits(limits));
+  yield;
+  const canonical = encodeCanonicalJson(parsed, jsonStructureLimits(limits));
+  yield;
+  invariant(sameBytes(decodedBytes, canonical), "NONCANONICAL_STATE_PAGE", `State page ${expected.resource} is not canonical JSON.`);
+  const page = plain(parsed, `State page ${expected.resource}`);
   keys(page, ["version", "codec", "channel", "startFrame", "endFrame", "transforms", "keyframe", "sequential"], `State page ${expected.resource}`);
   invariant(page.version === 0 && page.codec === "polycss-paged-playback-page@0" && page.channel === expected.channel, "INVALID_STATE_PAGE", `State page ${expected.resource} identity is invalid.`);
   invariant(page.startFrame === expected.startFrame && page.endFrame === expected.endFrame, "STATE_PAGE_COVERAGE_MISMATCH", `State page ${expected.resource} coverage disagrees with its descriptor.`);
