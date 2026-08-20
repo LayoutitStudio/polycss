@@ -304,6 +304,7 @@ export {
   prepareCasterEdgeOwners,
   prepareCasterPolyItems,
   prepareReceiverFacePlanes,
+  receiverShadowCameraSignature,
   POLY_DEFAULT_SHADOW_LIFT,
   SHADOW_CLIP_SEAM_BLEED,
 } from "./shadow/computeReceiverShadows";

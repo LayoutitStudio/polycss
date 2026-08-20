@@ -1,12 +1,16 @@
 /**
  * Receiver-shadow performance-parity tests — pin the memoization contract
- * that brings React in line with vanilla (see AGENTS.md "camera orbit is
- * free — shadows ride the scene transform; only light/geometry changes
- * re-emit"):
+ * that brings React in line with vanilla:
  *
- *  - camera-only changes cause ZERO receiver-shadow pipeline work
- *    (no prepareCasterPolyItems / buildParametricCasterOverride /
- *    computeMergedReceiverShadows calls);
+ *  - a camera move that crosses NO receiver-face visibility boundary causes
+ *    ZERO receiver-shadow pipeline work (no prepareCasterPolyItems /
+ *    buildParametricCasterOverride / computeMergedReceiverShadows calls);
+ *  - a camera move that DOES cross one re-emits, because the output depends
+ *    on it: back-facing receiver faces are culled and creases bleed only
+ *    toward camera-facing neighbours. The gate is the visibility signature,
+ *    so the pipeline runs on boundary crossings — never per frame, and never
+ *    "not at all" (which left stale geometry that popped on the next
+ *    unrelated change). Mirrors vanilla's `syncShadowsForCameraChange`;
  *  - caster items are cached per (polygons identity + transform) and
  *    reused across re-emits (vanilla `casterItemsCache` parity);
  *  - the parametric override is built once per caster per self/cross
@@ -56,6 +60,22 @@ function floorPolygons(yOffset = 0): Polygon[] {
       color: "#888888",
     },
   ];
+}
+
+/** A closed box: six faces spanning all six axis directions, so an orbit is
+ *  guaranteed to cross camera-facing boundaries (unlike a lone floor plane). */
+function boxPolygons(): Polygon[] {
+  const H = 2;
+  return ([
+    [[-H, -H, H], [H, -H, H], [H, H, H], [-H, H, H]],
+    [[H, -H, -H], [H, H, -H], [H, H, H], [H, -H, H]],
+    [[H, H, -H], [-H, H, -H], [-H, H, H], [H, H, H]],
+    [[-H, -H, -H], [-H, -H, H], [-H, H, H], [-H, H, -H]],
+    [[-H, -H, -H], [H, -H, -H], [H, -H, H], [-H, -H, H]],
+    [[-H, -H, -H], [-H, H, -H], [H, H, -H], [H, -H, -H]],
+  ] as Array<Array<[number, number, number]>>).map((vertices) => ({
+    vertices, color: "#888888",
+  }));
 }
 
 function casterPolygons(): Polygon[] {
@@ -120,7 +140,7 @@ afterEach(() => {
 });
 
 describe("PolyMesh — receiver-shadow memoization parity", () => {
-  it("camera-only changes cause zero receiver-shadow pipeline calls", async () => {
+  it("camera moves that cross no visibility boundary cause zero pipeline calls", async () => {
     const caster = casterPolygons();
     const floor = floorPolygons();
     mountScene(
@@ -153,10 +173,42 @@ describe("PolyMesh — receiver-shadow memoization parity", () => {
     }
     await flushReactWork();
 
-    // Zero additional pipeline work — shadows ride the scene transform.
+    // Zero additional pipeline work: a single floor plane never changes its
+    // camera facing, so the visibility signature is constant through the orbit.
     expect(casterItemsSpy.mock.calls.length).toBe(casterItemCalls);
     expect(overrideSpy.mock.calls.length).toBe(overrideCalls);
     expect(mergeSpy.mock.calls.length).toBe(mergeCalls);
+  });
+
+  it("re-emits when a camera move crosses a visibility boundary", async () => {
+    // A box receiver: its faces DO change camera facing, so an orbit must
+    // re-emit or the shadows go stale and pop on the next unrelated change.
+    const caster = casterPolygons();
+    const box = boxPolygons();
+    mountScene(
+      <>
+        <PolyMesh polygons={caster} castShadow />
+        <PolyMesh polygons={box} receiveShadow />
+      </>,
+      { textureLighting: "baked", directionalLight: LIGHT_A },
+    );
+    await flushReactWork();
+    const mergeCalls = mergeSpy.mock.calls.length;
+    expect(mergeCalls).toBeGreaterThan(0);
+
+    const store = capturedStore!;
+    act(() => {
+      const state = store.getState().cameraState;
+      store.setState({ cameraState: { ...state, rotY: state.rotY + 180 } });
+    });
+    await flushReactWork();
+    expect(mergeSpy.mock.calls.length).toBeGreaterThan(mergeCalls);
+
+    // …and it settles: re-notifying with the same camera does no more work.
+    const settled = mergeSpy.mock.calls.length;
+    act(() => { store.notifyAll(); });
+    await flushReactWork();
+    expect(mergeSpy.mock.calls.length).toBe(settled);
   });
 
   it("caster items are cached across re-emits with unchanged polygons + transform", async () => {

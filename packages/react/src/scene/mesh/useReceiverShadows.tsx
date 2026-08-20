@@ -4,7 +4,7 @@
  * receiver-face shadow SVG computation. Extracted verbatim from
  * PolyMesh.tsx.
  */
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import type { Polygon, Vec3 } from "@layoutit/polycss-core";
 import {
@@ -16,12 +16,14 @@ import {
   prepareCasterEdgeOwners,
   prepareCasterPolyItems,
   prepareReceiverFacePlanes,
+  receiverShadowCameraSignature,
   worldDirectionToCss,
   worldPositionToCss,
   type CameraCullRotation,
   type CasterPolyItem,
   type EdgeOwners,
   type ReceiverCasterInput,
+  type ReceiverFacePlane,
 } from "@layoutit/polycss-core";
 import type { PolyTextureLightingMode } from "@layoutit/polycss-core";
 import type { PolyCameraContextValue } from "../../camera/context";
@@ -273,11 +275,47 @@ export function useReceiverShadows({
   const shadowCastersVersion = sceneCtx?.shadowCastersVersion ?? 0;
   const sceneShadow = sceneCtx?.shadow;
   const sceneDirectionalLight = sceneCtx?.directionalLight;
-  // NO camera subscription here — receiver shadows do not re-emit on camera
-  // motion (they ride the scene transform). The receiver-face back-face cull
-  // reads the camera state at emit time (light/geometry/registration change)
-  // and may go stale during an orbit — the same deliberate trade vanilla
-  // makes in emitSceneShadows (shadows are not re-emitted from applyCamera).
+  const shadowLift = sceneShadow?.lift ?? POLY_DEFAULT_SHADOW_LIFT;
+
+  // Receiver face planes, hoisted out of the shadow memo: the camera
+  // visibility signature below is computed from them on every camera event, so
+  // they must exist independently of an emit. Invariant under light and caster
+  // changes — only this mesh's geometry and transform rebuild them.
+  const receiverPlanes = useMemo<ReceiverFacePlane[] | null>(() => {
+    if (!receiveShadow) return null;
+    const planes = prepareReceiverFacePlanes(
+      polygons, position ?? [0, 0, 0], scale, new Set(), shadowLift, rotation,
+    );
+    return planes.length > 0 ? planes : null;
+  }, [receiveShadow, polygons, position, scale, rotation, shadowLift]);
+
+  // Camera subscription, GATED ON A VISIBILITY SIGNATURE — not a per-frame
+  // recompute. Receiver shadows are camera-dependent in both geometry (a
+  // back-facing receiver face is culled) and paint (a crease bleeds only
+  // toward a camera-facing neighbour, which also flips the face between the
+  // opaque pre-blend and the alpha form), so leaving them frozen through an
+  // orbit shows stale geometry that pops on the next unrelated change. The
+  // signature is one facing bit per face plane: it changes only when the
+  // camera crosses a boundary, so the expensive pipeline below re-runs then
+  // and only then. Mirrors vanilla's `syncShadowsForCameraChange`.
+  const cameraStore = cameraCtx?.store;
+  const [cameraShadowKey, setCameraShadowKey] = useState("");
+  useEffect(() => {
+    if (!receiverPlanes || !cameraStore) {
+      setCameraShadowKey("");
+      return;
+    }
+    const read = (): string => {
+      const cs = cameraStore.getState().cameraState;
+      return receiverShadowCameraSignature(receiverPlanes, { rotX: cs.rotX, rotY: cs.rotY });
+    };
+    setCameraShadowKey(read());
+    return cameraStore.subscribe(() => {
+      const next = read();
+      setCameraShadowKey((prev) => (prev === next ? prev : next));
+    });
+  }, [receiverPlanes, cameraStore]);
+
   // Cached shared-edge adjacency for the self-shadow seam cull. Polygon
   // identity is the bust key (re-built when geometry changes).
   const selfShadowEdgeMap = useMemo(
@@ -285,7 +323,7 @@ export function useReceiverShadows({
     [polygons, receiveShadow],
   );
   const receiverShadowSvgs = useMemo<ReactNode>(() => {
-    if (!receiveShadow) return null;
+    if (!receiveShadow || !receiverPlanes) return null;
     if (!shadowCasters || shadowCasters.size === 0) return null;
     // Caster vertices and receiver plane both live in the CSS axis-swap
     // frame after worldCssForMesh; the light direction must be in the
@@ -315,16 +353,7 @@ export function useReceiverShadows({
     const runDirectionalShadow =
       !!sceneDirectionalLight?.direction && (sceneDirectionalLight.intensity ?? 1) > 0;
     const hasShadowPoints = shadowPointIndices.length > 0;
-    const shadowLift = sceneShadow?.lift ?? POLY_DEFAULT_SHADOW_LIFT;
-    const planes = prepareReceiverFacePlanes(
-      polygons,
-      position ?? [0, 0, 0],
-      scale,
-      new Set(),
-      shadowLift,
-      rotation,
-    );
-    if (planes.length === 0) return null;
+    const planes = receiverPlanes;
     const casterInputs: ReceiverCasterInput<symbol>[] = [];
     for (const [casterId, data] of shadowCasters) {
       // Shared bust key for the caster-items + edge-owners caches — the
@@ -425,10 +454,10 @@ export function useReceiverShadows({
         overridePointSilhouettes,
       });
     }
-    // Camera state captured at EMIT time (light/geometry/registration
-    // change) for the receiver-face back-face cull — never a reactive
-    // dependency. It may go stale during an orbit; vanilla makes the same
-    // trade (shadows ride the scene transform, camera motion is free).
+    // Camera state read live. `cameraShadowKey` is a dependency of this memo,
+    // so an orbit that crosses a receiver-face visibility boundary re-runs the
+    // pipeline with the state below already updated; an orbit that does not
+    // cross one cannot change the output and does not re-run it.
     const cameraState = cameraCtx?.store.getState().cameraState;
     const cameraRot: CameraCullRotation = {
       rotX: cameraState?.rotX ?? 65,
@@ -495,7 +524,7 @@ export function useReceiverShadows({
         ))}
       </>
     );
-  }, [receiveShadow, shadowCasters, shadowCastersVersion, polygons, position, scale, rotation, sceneDirectionalLight, sceneCtx?.pointLights, effectiveTextureLighting, sceneShadow, sceneCtx?.ambientLight, cameraCtx?.store, selfShadowEdgeMap]);
+  }, [receiveShadow, receiverPlanes, cameraShadowKey, shadowCasters, shadowCastersVersion, polygons, position, scale, rotation, sceneDirectionalLight, sceneCtx?.pointLights, effectiveTextureLighting, sceneShadow, sceneCtx?.ambientLight, cameraCtx?.store, selfShadowEdgeMap]);
 
   return { receiverShadowSvgs };
 }

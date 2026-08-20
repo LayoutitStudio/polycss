@@ -16,12 +16,14 @@ import {
   prepareCasterEdgeOwners,
   prepareCasterPolyItems,
   prepareReceiverFacePlanes,
+  receiverShadowCameraSignature,
   worldDirectionToCss,
   worldPositionToCss,
   type CameraCullRotation,
   type CasterPolyItem,
   type EdgeOwners,
   type ReceiverCasterInput,
+  type ReceiverFacePlane,
 } from "@layoutit/polycss-core";
 import type { PolyCameraContextValue } from "../../camera/context";
 import type { PolySceneContextValue } from "../sceneContext";
@@ -130,8 +132,70 @@ export function useReceiverShadows({
     props.receiveShadow ? buildSharedEdgeMap(polygons.value) : undefined,
   );
 
+  // Receiver face planes, hoisted out of the shadow computed: the camera
+  // visibility signature below is computed from them on every camera event, so
+  // they must exist independently of an emit. Invariant under light and caster
+  // changes — only this mesh's geometry and transform rebuild them.
+  const receiverPlanes = computed<ReceiverFacePlane[] | null>(() => {
+    if (!props.receiveShadow) return null;
+    const lift = sceneCtx?.value?.shadow?.lift ?? POLY_DEFAULT_SHADOW_LIFT;
+    const planes = prepareReceiverFacePlanes(
+      polygons.value,
+      props.position ?? [0, 0, 0],
+      props.scale,
+      new Set(),
+      lift,
+      props.rotation,
+    );
+    return planes.length > 0 ? planes : null;
+  });
+
+  // Camera subscription, GATED ON A VISIBILITY SIGNATURE — not a per-frame
+  // recompute. Receiver shadows are camera-dependent in both geometry (a
+  // back-facing receiver face is culled) and paint (a crease bleeds only
+  // toward a camera-facing neighbour, which also flips the face between the
+  // opaque pre-blend and the alpha form), so leaving them frozen through an
+  // orbit shows stale geometry that pops on the next unrelated change. The
+  // signature is one facing bit per face plane: it changes only when the
+  // camera crosses a boundary, so the expensive pipeline below re-runs then
+  // and only then. Mirrors vanilla's `syncShadowsForCameraChange` and React's
+  // `cameraShadowKey`. The camera store is not a Vue reactive source, so the
+  // signature is mirrored into a ref the shadow computed depends on.
+  const cameraShadowKey = shallowRef("");
+  let unsubscribeCameraShadow: (() => void) | null = null;
+  watch(
+    receiverPlanes,
+    (planes) => {
+      unsubscribeCameraShadow?.();
+      unsubscribeCameraShadow = null;
+      const store = cameraCtx?.store;
+      if (!planes || !store) {
+        cameraShadowKey.value = "";
+        return;
+      }
+      const read = (): string => {
+        const cs = store.getState().cameraState;
+        return receiverShadowCameraSignature(planes, { rotX: cs.rotX, rotY: cs.rotY });
+      };
+      cameraShadowKey.value = read();
+      unsubscribeCameraShadow = store.subscribe(() => {
+        const next = read();
+        if (cameraShadowKey.value !== next) cameraShadowKey.value = next;
+      });
+    },
+    { immediate: true },
+  );
+  onBeforeUnmount(() => {
+    unsubscribeCameraShadow?.();
+    unsubscribeCameraShadow = null;
+  });
+
   const receiverShadowSvgs = computed<VNode[]>(() => {
     if (!props.receiveShadow) return [];
+    // Registers the camera dependency: an orbit that crosses a receiver-face
+    // visibility boundary re-runs this pipeline, one that does not cannot
+    // change its output and does not.
+    void cameraShadowKey.value;
     const ctx = sceneCtx?.value;
     const registry = ctx?.shadowRegistry;
     if (!registry) return [];
@@ -164,16 +228,8 @@ export function useReceiverShadows({
     const runDirectionalShadow =
       !!ctx?.directionalLight?.direction && (ctx.directionalLight.intensity ?? 1) > 0;
     const hasShadowPoints = shadowPointIndices.length > 0;
-    const shadowLift = ctx?.shadow?.lift ?? POLY_DEFAULT_SHADOW_LIFT;
-    const planes = prepareReceiverFacePlanes(
-      polygons.value,
-      props.position ?? [0, 0, 0],
-      props.scale,
-      new Set(),
-      shadowLift,
-      props.rotation,
-    );
-    if (planes.length === 0) return [];
+    const planes = receiverPlanes.value;
+    if (!planes) return [];
     const casterInputs: ReceiverCasterInput<symbol>[] = [];
     let i = 0;
     const cachedSelfMap = selfShadowEdgeMap.value;
@@ -274,10 +330,8 @@ export function useReceiverShadows({
         overridePointSilhouettes,
       });
     }
-    // Camera state captured at EMIT time (light/geometry/registration
-    // change) for the receiver-face back-face cull — never a reactive
-    // dependency. It may go stale during an orbit; vanilla makes the same
-    // trade (shadows ride the scene transform, camera motion is free).
+    // Camera state read live; `cameraShadowKey` above is what makes this
+    // computed re-run when the camera crosses a visibility boundary.
     const cameraState = cameraCtx?.store.getState().cameraState;
     const cameraRot: CameraCullRotation = {
       rotX: cameraState?.rotX ?? 65,

@@ -25,12 +25,14 @@ vi.mock("@layoutit/polycss-core", async (importOriginal) => {
     prepareCasterPolyItems: vi.fn(mod.prepareCasterPolyItems),
     buildParametricCasterOverride: vi.fn(mod.buildParametricCasterOverride),
     findOverlappingPolygonDuplicates: vi.fn(mod.findOverlappingPolygonDuplicates),
+    computeMergedReceiverShadows: vi.fn(mod.computeMergedReceiverShadows),
   };
 });
 
 const casterItemsSpy = vi.mocked(core.prepareCasterPolyItems);
 const overrideSpy = vi.mocked(core.buildParametricCasterOverride);
 const dedupSpy = vi.mocked(core.findOverlappingPolygonDuplicates);
+const mergeSpy = vi.mocked(core.computeMergedReceiverShadows);
 
 function makeParseResult(polygons: Polygon[]): ParseResult {
   return {
@@ -136,5 +138,116 @@ describe("emitReceiverShadows — per-caster caches", () => {
 
     expect(casterItemsSpy.mock.calls.length).toBe(casterItemCalls);
     expect(dedupSpy.mock.calls.length).toBe(dedupCalls);
+  });
+});
+
+// Receiver-shadow output depends on the camera: back-facing receiver faces are
+// culled, and a crease bleeds only toward a camera-facing neighbour (which also
+// flips that face between the opaque pre-blend and the alpha form). Left
+// frozen, an orbit shows stale geometry that pops on the next unrelated change.
+// Re-emitting every frame is the other failure — so the gate is the visibility
+// SIGNATURE. Mirrored by the React/Vue camera-signature subscriptions.
+describe("applyCamera — signature-gated shadow re-emit", () => {
+  let host: HTMLElement;
+  let scene: PolySceneHandle | null = null;
+
+  beforeEach(() => {
+    host = document.createElement("div");
+    document.body.appendChild(host);
+  });
+
+  afterEach(() => {
+    scene?.destroy();
+    scene = null;
+    host.remove();
+    vi.clearAllMocks();
+  });
+
+  function boxReceiver(): Polygon[] {
+    const H = 2;
+    return ([
+      [[-H, -H, H], [H, -H, H], [H, H, H], [-H, H, H]],
+      [[H, -H, -H], [H, H, -H], [H, H, H], [H, -H, H]],
+      [[H, H, -H], [-H, H, -H], [-H, H, H], [H, H, H]],
+      [[-H, -H, -H], [-H, -H, H], [-H, H, H], [-H, H, -H]],
+      [[-H, -H, -H], [H, -H, -H], [H, -H, H], [-H, -H, H]],
+      [[-H, -H, -H], [-H, H, -H], [H, H, -H], [H, -H, -H]],
+    ] as Array<Array<[number, number, number]>>).map((vertices) => ({
+      vertices, color: "#888888",
+    })) as Polygon[];
+  }
+
+  /** A slab just above the box that OVERHANGS its −y edge. LIGHT_A comes from
+   *  −y, so shadows fall toward +y: the overhang is what puts shadow on the −y
+   *  side face as well as the top. Two faces with different normals receiving
+   *  is what makes the visible SET camera-dependent — the whole point here. */
+  function hoveringCaster(): Polygon {
+    return {
+      vertices: [[-1.5, -4, 2.5], [-1.5, 0, 2.5], [1.5, 0, 2.5], [1.5, -4, 2.5]],
+      color: "#ff0000",
+    } as Polygon;
+  }
+
+  function build(): void {
+    scene = createPolyScene(host, {
+      camera: createPolyOrthographicCamera({ rotX: 55, rotY: 20 }),
+      textureLighting: "baked",
+      directionalLight: LIGHT_A,
+      autoCenter: false,
+      debugShadowAttrs: true,
+    });
+    scene.add(makeParseResult([hoveringCaster()]), { castShadow: true, merge: false });
+    scene.add(makeParseResult(boxReceiver()), { receiveShadow: true, merge: false });
+  }
+
+  /** Face indices whose shadow SVG is currently painted. */
+  function visibleFaces(): number[] {
+    const svgs = host.querySelectorAll<SVGElement>("svg.polycss-shadow-receiver");
+    return Array.from(svgs)
+      .filter((s) => s.style.display !== "none")
+      .map((s) => Number(s.getAttribute("data-poly-shadow-receiver-face")))
+      .sort((a, b) => a - b);
+  }
+
+  it("does not re-emit when the camera crosses no facing boundary", () => {
+    build();
+    const before = mergeSpy.mock.calls.length;
+    expect(before).toBeGreaterThan(0);
+    for (const rotY of [20.25, 20.5, 20.75, 21]) {
+      scene!.camera.update({ rotY });
+      scene!.applyCamera();
+    }
+    expect(mergeSpy.mock.calls.length).toBe(before);
+  });
+
+  it("re-emits once when the camera crosses one", () => {
+    build();
+    const before = mergeSpy.mock.calls.length;
+    scene!.camera.update({ rotY: 200 });
+    scene!.applyCamera();
+    expect(mergeSpy.mock.calls.length).toBeGreaterThan(before);
+
+    // …and settles: re-applying the same camera does no further work.
+    const after = mergeSpy.mock.calls.length;
+    scene!.applyCamera();
+    expect(mergeSpy.mock.calls.length).toBe(after);
+  });
+
+  it("emits geometry for the new camera, not the old one", () => {
+    build();
+    // From the front only the top face's shadow is drawn; the −y side face
+    // catches the overhang's shadow but is turned away from the camera.
+    const front = visibleFaces();
+    expect(front).toEqual([0]);
+
+    scene!.camera.update({ rotY: 200 });
+    scene!.applyCamera();
+    const back = visibleFaces();
+    expect(back).not.toEqual(front);
+
+    // The reviewer's repro: an unrelated light-driven rebuild must NOT change
+    // what the orbit already shows — that difference is the visible pop.
+    scene!.setOptions({ directionalLight: { ...LIGHT_A, intensity: 0.999 } });
+    expect(visibleFaces()).toEqual(back);
   });
 });

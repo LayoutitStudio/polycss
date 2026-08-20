@@ -86,6 +86,11 @@ export interface SceneContext {
   /** H3 light-quantize short-circuit: the quantized light key of the last
    *  emitted shadow frame, or null when the cache is invalidated. */
   lastEmittedShadowLightKey: string | null;
+  /** Camera visibility signature of the last emitted shadow frame: which
+   *  receiver faces were camera-facing (see `receiverShadowCameraSignature`).
+   *  Shadow geometry and paint both depend on it, so a camera move re-emits
+   *  when it changes — on boundary crossings only, never per frame. */
+  lastEmittedShadowCameraKey: string | null;
   /** Progressive-refinement debounce: re-emits at full `shadow.definition`
    *  once a light drag settles. Cleared on destroy. */
   shadowRefineTimer: ReturnType<typeof setTimeout> | null;
@@ -126,6 +131,7 @@ export function createSceneContext(input: {
     casterItemsCacheKey: new Map(),
     shadowDragActive: false,
     lastEmittedShadowLightKey: null,
+    lastEmittedShadowCameraKey: null,
     shadowRefineTimer: null,
     lastAnimationShadowEmit: 0,
     animationShadowTrailingTimer: null,

@@ -25,8 +25,25 @@ const caster: Polygon = {
   vertices: [[-1, 1.8, 1], [1, 1.8, 1], [1, 0, 1], [-1, 0, 1]],
   color: "#00ff00",
 };
-const worldLight: Vec3 = [0, -0.5, 0.87];
+// The fixture light sits on the corner BISECTOR of the L: the floor (+z) and
+// the wall (−y) then take the SAME Lambert term, resolve to the same lit color,
+// and therefore to the same opaque pre-blend. That equality is exactly what
+// licenses a crease bleed — two overlapping opaque paints are idempotent only
+// when they are the same color. Fixtures that want the opposite use
+// `unevenWorldLight` below.
+const worldLight: Vec3 = [0, -Math.SQRT1_2, Math.SQRT1_2];
 const cssLight: Vec3 = [worldLight[1], worldLight[0], worldLight[2]];
+// Tilted off the bisector: floor and wall are both lit, but by different
+// amounts, so their pre-blends differ (measured #595959 vs #4b4b4b → rgb(79…)
+// vs rgb(69…)). Neither may bleed into the other.
+const unevenWorldLight: Vec3 = [0, -0.5, 0.87];
+const unevenCssLight: Vec3 = [unevenWorldLight[1], unevenWorldLight[0], unevenWorldLight[2]];
+const unevenDirectionalLight = { direction: unevenWorldLight, intensity: 1 };
+// Straight down: the floor is fully lit, the wall is exactly edge-on and emits
+// no layer at all — the "no abutting shadow to fuse with" case.
+const verticalWorldLight: Vec3 = [0, 0, 1];
+const verticalCssLight: Vec3 = [verticalWorldLight[1], verticalWorldLight[0], verticalWorldLight[2]];
+const verticalDirectionalLight = { direction: verticalWorldLight, intensity: 1 };
 const cameraRot = { rotX: 60, rotY: 200 };
 const ambientLight = { intensity: 0.4 };
 const directionalLight = { direction: worldLight, intensity: 1 };
@@ -51,7 +68,13 @@ function polygonArea(poly: ReadonlyArray<readonly [number, number]>): number {
 /** Total clipped-shadow area a pass emits per receiver face. */
 function specAreas(
   receiverPolygons: readonly Polygon[],
-  opts: { creaseBleed: boolean; receiverHasTexture?: boolean; opacity?: number },
+  opts: {
+    creaseBleed: boolean;
+    receiverHasTexture?: boolean;
+    opacity?: number;
+    lightDir?: Vec3;
+    dirLight?: { direction: Vec3; intensity: number };
+  },
 ): Map<number, number> {
   const { receiverPlanes, casters } = setup(receiverPolygons);
   const specs = computeReceiverShadowFaces({
@@ -59,10 +82,10 @@ function specAreas(
     receiverPolygons,
     receiverHasTexture: opts.receiverHasTexture ?? false,
     casters,
-    lightDir: cssLight,
+    lightDir: opts.lightDir ?? cssLight,
     cameraRot,
     ambientLight,
-    directionalLight,
+    directionalLight: opts.dirLight ?? directionalLight,
     shadow: { opacity: opts.opacity ?? 0.25 },
     creaseBleed: opts.creaseBleed,
   });
@@ -381,8 +404,10 @@ describe("convex crease vs camera silhouette", () => {
     color: "#888888",
   };
   const convexPolys = [top, side];
-  // Light tilted toward +y so BOTH faces are lit.
-  const convexWorldLight: Vec3 = [0, 0.5, 0.87];
+  // On the corner's bisector, so BOTH faces are lit by the same amount and
+  // resolve to the same opaque pre-blend — the configuration where fusing the
+  // two SVGs across the crease is sound.
+  const convexWorldLight: Vec3 = [0, Math.SQRT1_2, Math.SQRT1_2];
   const convexCssLight: Vec3 = [convexWorldLight[1], convexWorldLight[0], convexWorldLight[2]];
   // Slab above the top face; its shadow band reaches the y = 2 crease.
   const convexCaster: Polygon = {
@@ -393,6 +418,7 @@ describe("convex crease vs camera silhouette", () => {
   function convexAreas(
     cam: { rotX: number; rotY: number },
     creaseBleed: boolean,
+    light: { world: Vec3; css: Vec3 } = { world: convexWorldLight, css: convexCssLight },
   ): Map<number, number> {
     const receiverPlanes = prepareReceiverFacePlanes(
       convexPolys, [0, 0, 0], 1, new Set(), 0.05, null,
@@ -403,10 +429,10 @@ describe("convex crease vs camera silhouette", () => {
       receiverPolygons: convexPolys,
       receiverHasTexture: false,
       casters: [{ id: "c", items, casterPolygonCount: 1 }],
-      lightDir: convexCssLight,
+      lightDir: light.css,
       cameraRot: cam,
       ambientLight,
-      directionalLight: { direction: convexWorldLight, intensity: 1 },
+      directionalLight: { direction: light.world, intensity: 1 },
       shadow: { opacity: 0.25 },
       creaseBleed,
     });
@@ -430,11 +456,17 @@ describe("convex crease vs camera silhouette", () => {
     for (const plane of planes) {
       const crease = plane.memberCreaseEdges![0];
       expect(crease?.size).toBe(1);
-      // The neighbour's normal is kept alongside the edge — that is what the
-      // camera-silhouette gate reads.
-      const normals = [...crease!.values()][0]!;
-      expect(normals.length).toBe(1);
-      expect(Math.hypot(...normals[0]!)).toBeCloseTo(1, 6);
+      // The neighbouring PLANE INDEX is kept alongside the edge — identity, not
+      // just a normal, because the bleed gate has to ask that neighbour whether
+      // it emits a compatible layer in this pass.
+      const neighbours = [...crease!.values()][0]!;
+      expect(neighbours.length).toBe(1);
+      const other = planes[neighbours[0]!];
+      expect(other).toBeDefined();
+      expect(other).not.toBe(plane);
+      // …and the relation is symmetric, which is what "bleeds back" reads.
+      expect(plane.creaseNeighbourPlanes!.has(neighbours[0]!)).toBe(true);
+      expect(other!.creaseNeighbourPlanes!.has(planes.indexOf(plane))).toBe(true);
     }
   });
 
@@ -614,7 +646,12 @@ describe("group with non-uniform member normals", () => {
     const flatSpec = specs.find((s) => s.memberPolyIndices.length > 1);
     expect(flatSpec).toBeDefined();
     expect(flatSpec!.preblendEligible).toBe(true);
-    expect(flatSpec!.creaseBled).toBe(true);
+    // Eligible, but it still does not bleed here: the wall is exactly edge-on
+    // to the grazing light (n·L = 0), so it emits no layer for this pass and
+    // there is no abutting shadow to fuse with. Eligibility is a property of
+    // THIS face; the bleed additionally needs a compatible neighbour.
+    expect(specs.some((s) => s.memberPolyIndices.includes(flat.length))).toBe(false);
+    expect(flatSpec!.creaseBled).toBe(false);
   });
 });
 
@@ -642,5 +679,123 @@ describe("pre-blend is gated on an actual crease bleed", () => {
       expect(face.layers[0]!.opacity).toBe(1);
       expect(face.layers[0]!.fill).toMatch(/^rgb\(/);
     }
+  });
+});
+
+// ─── A crease may only bleed into a COMPATIBLE abutting shadow ───────────
+//
+// Camera-facing is necessary but nowhere near sufficient. Two further things
+// have to be true of the neighbour across the crease, and each was observed
+// violated in production geometry:
+//
+//  (i) it must EMIT a layer in this pass. A face the light cannot reach emits
+//      no SVG, so expanding into it paints shadow onto lit surface with nothing
+//      to fuse with.
+// (ii) its resolved paint must MATCH. Each face's opaque pre-blend derives from
+//      its own lit color, and crease neighbours are non-coplanar by
+//      construction — so the two colors usually differ, and overlapping two
+//      different opaque fills is not idempotent. It simply paints one over the
+//      other: a seam of the wrong color, whichever SVG happens to be on top.
+describe("crease neighbour must emit a compatible layer", () => {
+  it("does not bleed toward a neighbour that emits no layer in this pass", () => {
+    const specs = computeReceiverShadowFaces({
+      ...setup([floor, wall]),
+      receiverPolygons: [floor, wall],
+      receiverHasTexture: false,
+      lightDir: verticalCssLight,
+      cameraRot,
+      ambientLight,
+      directionalLight: verticalDirectionalLight,
+      shadow: { opacity: 0.25 },
+      creaseBleed: true,
+    });
+    // The wall is edge-on to a vertical light: only the floor emits.
+    expect(specs.length).toBe(1);
+    const floorSpec = specs[0]!;
+    expect(floorSpec.memberPolyIndices).toEqual([0]);
+    // Precondition: the floor owns the crease and is otherwise free to bleed —
+    // the missing neighbour is the only thing stopping it.
+    const planes = prepareReceiverFacePlanes([floor, wall], [0, 0, 0], 1, new Set(), 0.05, null);
+    const floorPlane = planes.find((p) => p.memberPolyIndices.includes(0))!;
+    expect(floorPlane.memberCreaseEdges!.some((c) => (c?.size ?? 0) > 0)).toBe(true);
+    expect(floorSpec.preblendEligible).toBe(true);
+    expect(floorSpec.creaseBled).toBe(false);
+    // …and the emitted geometry is the unbled one.
+    const reference = specAreas([floor, wall], {
+      creaseBleed: false, lightDir: verticalCssLight, dirLight: verticalDirectionalLight,
+    });
+    expect(floorSpec.facePolysUv.reduce((t, p) => t + polygonArea(p), 0))
+      .toBe(reference.get(floorSpec.faceIndex));
+  });
+
+  it("does not bleed between two faces whose lit colors differ", () => {
+    const specs = computeReceiverShadowFaces({
+      ...setup([floor, wall]),
+      receiverPolygons: [floor, wall],
+      receiverHasTexture: false,
+      lightDir: unevenCssLight,
+      cameraRot,
+      ambientLight,
+      directionalLight: unevenDirectionalLight,
+      shadow: { opacity: 0.25 },
+      creaseBleed: true,
+    });
+    // Preconditions: both faces are drawn, both are individually pre-blend
+    // eligible, and each owns the crease — only the color mismatch differs.
+    expect(specs.length).toBe(2);
+    for (const spec of specs) expect(spec.preblendEligible).toBe(true);
+    const lit = specs.map((s) => s.fullLitFill);
+    expect(lit[0]).not.toBe(lit[1]);
+    for (const spec of specs) expect(spec.creaseBled).toBe(false);
+
+    // Geometry stays exactly the unbled reference on both faces.
+    const reference = specAreas([floor, wall], {
+      creaseBleed: false, lightDir: unevenCssLight, dirLight: unevenDirectionalLight,
+    });
+    for (const spec of specs) {
+      expect(spec.facePolysUv.reduce((t, p) => t + polygonArea(p), 0))
+        .toBe(reference.get(spec.faceIndex));
+    }
+
+    // …and because nothing bled, neither face takes the opaque form — so two
+    // DIFFERENT opaque fills can never overlap at the crease.
+    const faces = computeMergedReceiverShadows({
+      ...setup([floor, wall]),
+      receiverPolygons: [floor, wall],
+      receiverHasTexture: false,
+      lightDir: unevenCssLight,
+      runDirectional: true,
+      pointPasses: [],
+      allPointLights: [],
+      cameraRot,
+      ambientLight,
+      directionalLight: unevenDirectionalLight,
+      shadow: { opacity: 0.25 },
+    });
+    expect(faces.length).toBe(2);
+    for (const face of faces) {
+      expect(face.layers.length).toBe(1);
+      expect(face.layers[0]!.opacity).toBeCloseTo(0.25, 6);
+    }
+  });
+
+  it("bleeds once the same two faces are lit equally", () => {
+    // The positive control for the test above: same geometry, same camera, same
+    // caster — only the light moves onto the corner bisector, which makes the
+    // two lit colors (and so the two pre-blends) identical.
+    const specs = computeReceiverShadowFaces({
+      ...setup([floor, wall]),
+      receiverPolygons: [floor, wall],
+      receiverHasTexture: false,
+      lightDir: cssLight,
+      cameraRot,
+      ambientLight,
+      directionalLight,
+      shadow: { opacity: 0.25 },
+      creaseBleed: true,
+    });
+    expect(specs.length).toBe(2);
+    expect(specs[0]!.fullLitFill).toBe(specs[1]!.fullLitFill);
+    for (const spec of specs) expect(spec.creaseBled).toBe(true);
   });
 });

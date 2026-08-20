@@ -7,8 +7,12 @@
  * Extracted verbatim from createPolyScene.ts; the mutable emit state
  * (`lastEmittedShadowLightKey`, the two timers) lives on the SceneContext.
  */
-import type { Polygon, Vec3 } from "@layoutit/polycss-core";
-import { findOverlappingPolygonDuplicates, POLY_DEFAULT_SHADOW_LIFT } from "@layoutit/polycss-core";
+import type { CameraCullRotation, Polygon, ReceiverFacePlane, Vec3 } from "@layoutit/polycss-core";
+import {
+  findOverlappingPolygonDuplicates,
+  receiverShadowCameraSignature,
+  POLY_DEFAULT_SHADOW_LIFT,
+} from "@layoutit/polycss-core";
 import {
   DEFAULT_TILE,
   worldDirectionToCss,
@@ -104,6 +108,59 @@ export function quantizeLightDirKey(d: Vec3 | undefined): string | null {
 
 export function invalidateShadowLightCache(ctx: SceneContext): void {
   ctx.lastEmittedShadowLightKey = null;
+}
+
+/**
+ * Signature of every camera-dependent decision in the scene's receiver
+ * shadows: which receiver faces are camera-facing, which in turn also decides
+ * which creases may bleed (and therefore whether a face paints its opaque
+ * pre-blend or its alpha form). Folded into the emit short-circuit key so a
+ * camera move re-emits exactly when it crosses a facing boundary — not on
+ * every frame, and not never.
+ *
+ * Reads the CACHED face planes: a receiver whose planes have not been prepared
+ * yet gets a `?` sentinel, which forces the emit that prepares them.
+ */
+function receiverCameraSignature(
+  ctx: SceneContext,
+  lights: { lightDir?: Vec3 | null; pointLightPositions?: Vec3[] },
+): string {
+  let out = "";
+  for (const receiver of ctx.meshes) {
+    if (receiver.disposed || !receiver.receiveShadow) continue;
+    const planes = ctx.receiverShadowCache.get(receiver) as ReceiverFacePlane[] | undefined;
+    if (!planes) { out += "?"; continue; }
+    const cameraRot: CameraCullRotation = {
+      rotX: ctx.camera.state.rotX,
+      rotY: ctx.camera.state.rotY,
+      meshRotation: receiver.handle.transform.rotation,
+    };
+    out += `${receiverShadowCameraSignature(planes, cameraRot, lights)};`;
+  }
+  return out;
+}
+
+/**
+ * Camera-move entry point. The receiver-shadow pipeline is camera-dependent
+ * (back-facing receiver faces are culled, and a crease only bleeds toward a
+ * camera-facing neighbour), so shadows left frozen through an orbit go stale
+ * and then visibly pop on the next unrelated light or geometry change. Re-emit
+ * only when the visibility signature changes — expensive work runs on boundary
+ * crossings, not per pointermove.
+ */
+export function syncShadowsForCameraChange(ctx: SceneContext): void {
+  if (ctx.lastEmittedShadowLightKey === null) return;
+  let hasCaster = false;
+  let hasReceiver = false;
+  for (const m of ctx.meshes) {
+    if (m.disposed) continue;
+    if (m.castShadow) hasCaster = true;
+    if (m.receiveShadow) hasReceiver = true;
+  }
+  if (!hasCaster || !hasReceiver) return;
+  // The signature comparison itself lives in emitSceneShadows' short-circuit,
+  // so an unchanged camera costs one plane sweep and returns.
+  emitSceneShadows(ctx);
 }
 
 // Refreshes scene-level shadow SVGs for both lighting modes. Callers pass the
@@ -203,7 +260,17 @@ export function emitSceneShadows(
     .map((p) => `${Math.round(p[0])},${Math.round(p[1])},${Math.round(p[2])}`)
     .join(";");
   const lightKey = dirKey === null && pointKey === "" ? null : `${dirKey ?? ""}|${pointKey}`;
-  if (lightKey !== null && lightKey === ctx.lastEmittedShadowLightKey) return;
+  // The camera participates in receiver-shadow GEOMETRY (back-facing receiver
+  // faces are culled) and PAINT (a crease bleeds only toward a camera-facing
+  // neighbour, which also flips that face between the opaque pre-blend and the
+  // alpha form), so it belongs in the short-circuit next to the light.
+  const signatureLights = {
+    lightDir: runDirectionalShadow ? lightDir : null,
+    pointLightPositions: cssPointPositions,
+  };
+  const cameraKey = receiverCameraSignature(ctx, signatureLights);
+  if (lightKey !== null && lightKey === ctx.lastEmittedShadowLightKey
+    && cameraKey === ctx.lastEmittedShadowCameraKey) return;
 
   // Per-caster shadow dedup (independent meshes can't dedup against
   // each other). Computed once per caster, reused across surfaces.
@@ -286,6 +353,9 @@ export function emitSceneShadows(
     });
   }
   ctx.lastEmittedShadowLightKey = lightKey;
+  // Recomputed AFTER the emit: this pass may have prepared face planes that
+  // were absent (and stood in as `?`) when the key was checked above.
+  ctx.lastEmittedShadowCameraKey = receiverCameraSignature(ctx, signatureLights);
 }
 
 // Recomputes the shadow ground plane from the minimum world-Z across all

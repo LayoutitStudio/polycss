@@ -114,6 +114,7 @@ import {
   invalidateShadowLightCache,
   maybeEmitAnimationShadow,
   recomputeShadowGround,
+  syncShadowsForCameraChange,
 } from "./scene/shadowOrchestrator";
 import type {
   InternalPolyMeshHandle,
@@ -1234,6 +1235,10 @@ export function createPolyScene(
     applyCameraStyle(cameraEl, currentOptions);
     applySceneCameraTransform(sceneEl);
     for (const entry of meshes) syncMountedRenderedForCameraChange(ctx, entry);
+    // Receiver shadows are camera-dependent (face culling + crease bleed), so
+    // they must not ride an orbit frozen. Signature-gated: this costs one
+    // per-plane facing sweep unless the camera crossed a visibility boundary.
+    syncShadowsForCameraChange(ctx);
   }
 
   function listMeshes(): readonly PolyMeshHandle[] {

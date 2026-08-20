@@ -116,22 +116,33 @@ export interface ReceiverFacePlane {
    *  of the same group (see `ReceiverPlaneGroup.memberSharedEdges`). Drives
    *  the member-clip seam bleed. Optional — absent means no seam bleed. */
   memberSharedEdges?: Array<ReadonlySet<number> | undefined>;
-  /** Parallel to `memberPolysUv`: CCW edge index → the normals of the
-   *  neighbouring surfaces that belong to a DIFFERENT (non-coplanar) face
-   *  group — a CREASE. Those two groups emit separate SVGs, so their
-   *  antialiased clip edges abut at the crease without summing to full
-   *  coverage. Unioned with `memberSharedEdges` at clip-expansion time so one
-   *  pass bleeds both classes. Filled by `prepareReceiverFacePlanes` after the
-   *  occlusion cull; edges already in `memberSharedEdges` are skipped
-   *  (already bled).
+  /** Parallel to `memberPolysUv`: CCW edge index → the INDICES (into the same
+   *  `ReceiverFacePlane[]`) of the neighbouring face planes across a CREASE —
+   *  a neighbouring surface belonging to a DIFFERENT, non-coplanar face group.
+   *  Those two groups emit separate SVGs, so their antialiased clip edges abut
+   *  at the crease without summing to full coverage. Unioned with
+   *  `memberSharedEdges` at clip-expansion time so one pass bleeds both
+   *  classes. Filled by `prepareReceiverFacePlanes` after the occlusion cull;
+   *  edges already in `memberSharedEdges` are skipped (already bled).
    *
-   *  The neighbour normals are kept — not just the edge index — because the
-   *  bleed is only safe where the neighbour actually renders on the far side
-   *  of the crease. See `creaseBleedsIntoNeighbour`.
+   *  Plane INDICES are kept — not just the edge index, and not just the
+   *  neighbour's normal — because bleeding across a crease is only safe when
+   *  the neighbour on the far side actually paints an abutting, compatible
+   *  shadow layer in this same pass. Answering that needs the neighbour's
+   *  identity (its facing, its emission, its resolved fill), which a bare
+   *  normal cannot supply. Indices are valid only for the array the planes
+   *  were prepared as: callers pass `prepareReceiverFacePlanes`' result
+   *  through unfiltered and unreordered.
    *
    *  Optional, and filled in place by `prepareReceiverFacePlanes`; absent
    *  means no crease bleed. */
-  memberCreaseEdges?: Array<ReadonlyMap<number, Vec3[]> | undefined>;
+  memberCreaseEdges?: Array<ReadonlyMap<number, number[]> | undefined>;
+  /** Every plane index this plane marks a crease edge toward, unioned across
+   *  members. Lets the bleed test ask "does the neighbour bleed BACK at me?"
+   *  in O(1) — a one-sided bleed would paint an opaque pre-blend over a
+   *  neighbour still painting at alpha, which double-darkens the overlap
+   *  depending on SVG paint order. Filled alongside `memberCreaseEdges`. */
+  creaseNeighbourPlanes?: ReadonlySet<number>;
   minU: number;
   minV: number;
   width: number;
@@ -615,18 +626,19 @@ function fillCrossGroupCreaseEdges(planes: ReceiverFacePlane[]): void {
   }
   if (refs.length < 2) return;
 
-  const marked: Array<Map<number, Vec3[]> | undefined>[] = planes.map((p) =>
+  const marked: Array<Map<number, number[]> | undefined>[] = planes.map((p) =>
     p.memberPolysUv.map(() => undefined),
   );
+  const neighbourPlanes: Array<Set<number>> = planes.map(() => new Set<number>());
   const mark = (r: Ref, neighbourPlane: number): void => {
     if (r.pre) return;
     const perPlane = marked[r.plane]!;
     let map = perPlane[r.member];
     if (!map) { map = new Map(); perPlane[r.member] = map; }
-    const n = planes[neighbourPlane]!.n;
+    neighbourPlanes[r.plane]!.add(neighbourPlane);
     const existing = map.get(r.edge);
-    if (!existing) { map.set(r.edge, [n]); return; }
-    if (!existing.includes(n)) existing.push(n);
+    if (!existing) { map.set(r.edge, [neighbourPlane]); return; }
+    if (!existing.includes(neighbourPlane)) existing.push(neighbourPlane);
   };
   const isMarked = (r: Ref): boolean =>
     r.pre || !!marked[r.plane]![r.member]?.has(r.edge);
@@ -741,7 +753,87 @@ function fillCrossGroupCreaseEdges(planes: ReceiverFacePlane[]): void {
 
   for (let pi = 0; pi < planes.length; pi++) {
     planes[pi]!.memberCreaseEdges = marked[pi]!;
+    planes[pi]!.creaseNeighbourPlanes = neighbourPlanes[pi]!;
   }
+}
+
+/** The pass lights a camera signature is computed against. Omitting it makes
+ *  the signature conservative (every plane contributes a bit). */
+export interface ReceiverShadowSignatureLights {
+  /** Directional to-source vector in CSS frame; omitted/null when the
+   *  directional pass does not run. */
+  lightDir?: Vec3 | null;
+  /** CSS-frame positions of the shadow-casting point lights. */
+  pointLightPositions?: ReadonlyArray<Vec3>;
+}
+
+/** Mirrors the per-plane `L·n` gate the passes themselves apply (point lights
+ *  use the to-source direction at the face origin, exactly as `dirAt(O)` does),
+ *  so a plane is dropped from the signature only when every pass would reject
+ *  it anyway. */
+function planeReceivesAnyLight(
+  plane: ReceiverFacePlane,
+  lights: ReceiverShadowSignatureLights,
+): boolean {
+  const n = plane.n;
+  const dir = lights.lightDir;
+  if (dir) {
+    const len = Math.hypot(dir[0], dir[1], dir[2]) || 1;
+    if ((dir[0] * n[0] + dir[1] * n[1] + dir[2] * n[2]) / len > 1e-6) return true;
+  }
+  for (const p of lights.pointLightPositions ?? []) {
+    const O = plane.O;
+    const dx = p[0] - O[0], dy = p[1] - O[1], dz = p[2] - O[2];
+    const len = Math.hypot(dx, dy, dz) || 1;
+    if ((dx * n[0] + dy * n[1] + dz * n[2]) / len > 1e-6) return true;
+  }
+  return false;
+}
+
+/**
+ * Compact signature of every CAMERA-dependent decision in a receiver's shadow
+ * output. Two camera orientations with the same signature produce byte-
+ * identical shadow SVGs for that receiver; a different signature means the
+ * camera has crossed a facing boundary and the shadows must be re-emitted.
+ *
+ * The camera enters the pipeline at exactly one predicate — is this face plane
+ * turned toward the camera — read twice: once to decide whether the face paints
+ * at all, and once per crease to decide whether the neighbour on the far side
+ * is drawn there (`qualifiesCrease` condition 1). Both reduce to the same
+ * per-plane boolean, so the whole camera dependence is the bit vector of
+ * `normalFacesCamera` over the receiver's planes. Packing it base-32 keeps the
+ * key short enough to compare as a string on every camera frame.
+ *
+ * Mesh rotation is deliberately NOT folded in: the plane normals are already in
+ * world frame, and a mesh transform change rebuilds the planes (and re-emits)
+ * through its own cache key. This mirrors the per-mesh voxel DOM cull's
+ * `cameraCullVisibleSignature` — recompute on boundary crossings, not per frame.
+ */
+export function receiverShadowCameraSignature(
+  planes: readonly ReceiverFacePlane[],
+  cameraRot: CameraCullRotation,
+  lights?: ReceiverShadowSignatureLights,
+): string {
+  const cameraOnlyRot: CameraCullRotation = { rotX: cameraRot.rotX, rotY: cameraRot.rotY };
+  let out = "";
+  let acc = 0;
+  let bits = 0;
+  for (const plane of planes) {
+    // A plane no light can reach fails the `L·n` test in every pass, so it
+    // emits nothing and cannot qualify as a crease neighbour at ANY camera
+    // angle. Its facing bit could never change the output, and including it
+    // would invent boundary crossings that re-emit the scene for nothing.
+    if (lights && !planeReceivesAnyLight(plane, lights)) continue;
+    acc = (acc << 1) | (normalFacesCamera(plane.n, cameraOnlyRot) ? 1 : 0);
+    bits += 1;
+    if (bits === 5) {
+      out += acc.toString(32);
+      acc = 0;
+      bits = 0;
+    }
+  }
+  if (bits > 0) out += (acc << (5 - bits)).toString(32);
+  return out;
 }
 
 /** Input for `computeReceiverShadowFaces`. */
@@ -1003,17 +1095,45 @@ export function computeReceiverShadowFaces<T = unknown>(
   // visible receiver faces (the abrupt cliff at e.g. orz=-61 on the
   // flight model where ~10 face planes vanished together).
   const cameraOnlyRot: CameraCullRotation = { rotX: cameraRot.rotX, rotY: cameraRot.rotY };
-  for (const group of receiverPlanes) {
-    const { O, n, u, v, outlineUv, minU, minV, width, height } = group;
-    // Back-facing receiver face → can't receive light → skip. For point
+
+  // ── Per-plane shading facts ─────────────────────────────────────────────
+  // Resolved for EVERY plane up front, not lazily inside the projection loop,
+  // because a crease bleed on plane A is a statement about plane B: it may only
+  // expand into a neighbour that is itself lit, camera-facing, and painting the
+  // very same resolved colour (see `qualifiesCrease`). That question has to be
+  // answerable for B before A's clips are built. Everything here is O(members)
+  // arithmetic — no projection, no clipping — so computing it for planes that
+  // later emit nothing is cheap.
+  interface PlaneShading {
+    /** Face is turned toward this pass's light (can receive it at all). */
+    lit: boolean;
+    /** Face is turned toward the camera. SVGs don't honor CSS
+     *  backface-visibility reliably, so a back-of-camera face must not paint. */
+    camFacing: boolean;
+    effOp: number;
+    fillColor: string;
+    fullLitFill: string;
+    preblendEligible: boolean;
+    /** The opaque colour this face paints when it bleeds a crease, or null when
+     *  the pre-blend is ineligible or unrepresentable. Two faces may only bleed
+     *  into each other when these are equal — overlap of two DIFFERENT opaque
+     *  colours is not idempotent, it just paints one over the other. */
+    preblendPaint: string | null;
+  }
+  const UNLIT_SHADING: PlaneShading = {
+    lit: false, camFacing: false, effOp: 0, fillColor: "",
+    fullLitFill: "", preblendEligible: false, preblendPaint: null,
+  };
+
+  const shadingForPlane = (group: ReceiverFacePlane): PlaneShading => {
+    const { O, n, u, v, outlineUv } = group;
+    // Back-facing receiver face → can't receive light → no shadow. For point
     // lights the representative direction is the to-source vector at the
     // face origin.
     const faceDir = dirAt(O);
     const Ldotn = faceDir[0] * n[0] + faceDir[1] * n[1] + faceDir[2] * n[2];
-    if (Ldotn <= 1e-6) continue;
-    // Camera back-face cull. SVGs don't honor CSS backface-visibility
-    // reliably, so a back-of-camera receiver-face SVG would still paint.
-    if (!normalFacesCamera(n, cameraOnlyRot)) continue;
+    if (Ldotn <= 1e-6) return UNLIT_SHADING;
+    if (!normalFacesCamera(n, cameraOnlyRot)) return UNLIT_SHADING;
 
     // Per-face light scalars for the SHADED shadow color. `dirDot` is the
     // directional Lambert term (always vs the directional vector, not the
@@ -1046,6 +1166,114 @@ export function computeReceiverShadowFaces<T = unknown>(
         pointTotalScale += (pl.intensity ?? 1) * dot;
       }
     }
+
+    // Intensity removed by THIS pass (the blocked light) and the scene total.
+    const thisScale = isDirPass
+      ? dirIntensity * dirDot
+      : (allPointLights?.[thisPointIndex ?? -1]?.intensity ?? 1) * (pointDots[thisPointIndex ?? -1] ?? 0);
+    const totalScale = dirIntensity * dirDot + pointTotalScale + Math.max(0, ambIntensity);
+
+    // Per-group opacity for textured receivers. The shadow leaves the receiver
+    // lit by everything EXCEPT this pass's light: shadow_linear =
+    // lit_linear × remaining/total. A black overlay at sRGB opacity o gives
+    // lit_srgb × (1 − o), so o = 1 − (remaining/total)^(1/2.4). For a lone
+    // directional light remaining = ambient, matching the previous formula.
+    let effOp = opacity;
+    if (receiverHasTexture) {
+      if (totalScale > 0) {
+        const remainingRatio = Math.max(0, (totalScale - thisScale) / totalScale);
+        effOp = opacity * (1 - Math.pow(remainingRatio, 1 / 2.4));
+      } else {
+        effOp = 0;
+      }
+    }
+
+    // Per-face shadow tint. Each receiver face uses ITS OWN polygon color
+    // (one material per coplanar group). The fill is the receiver lit by
+    // every light EXCEPT this pass's blocked light — so a region shadowed
+    // from one colored light still shows the others' color. A lone
+    // directional light → remaining = ambient only (unchanged from before).
+    const groupPolyIdx = group.memberPolyIndices[0] ?? 0;
+    const groupColor = receiverPolygons[groupPolyIdx]?.color ?? "#cccccc";
+    const remDirScale = isDirPass ? 0 : dirIntensity * dirDot;
+    const remPointContribs: { color: string; scale: number }[] = [];
+    if (allPointLights) {
+      for (let k = 0; k < allPointLights.length; k++) {
+        if (isPoint && k === thisPointIndex) continue;
+        const dot = pointDots[k] ?? 0;
+        if (dot <= 0) continue;
+        const pl = allPointLights[k]!;
+        remPointContribs.push({ color: pl.color ?? "#ffffff", scale: (pl.intensity ?? 1) * dot });
+      }
+    }
+    const fillColor = receiverHasTexture
+      ? userShadowColor
+      : shadePolygon(groupColor, remDirScale, dirColor, ambColor, ambIntensity, remPointContribs);
+
+    // Full-lit face color C (every light) for the multi-light merge — callers
+    // multiply C by each pass's `fill/C` so overlapping shadows composite to
+    // the both-blocked color. Empty for textured (per-pixel base).
+    const fullPointContribs: { color: string; scale: number }[] = [];
+    if (allPointLights) {
+      for (let k = 0; k < allPointLights.length; k++) {
+        const dot = pointDots[k] ?? 0;
+        if (dot <= 0) continue;
+        const pl = allPointLights[k]!;
+        fullPointContribs.push({ color: pl.color ?? "#ffffff", scale: (pl.intensity ?? 1) * dot });
+      }
+    }
+    const fullLitFill = receiverHasTexture
+      ? ""
+      : shadePolygon(groupColor, dirIntensity * dirDot, dirColor, ambColor, ambIntensity, fullPointContribs);
+
+    // A face group is formed by plane + adjacency, never by material and never
+    // by exact normal: `fullLitFill` uses member[0]'s color and the GROUP
+    // plane's Lambert term, while each leaf is baked from its OWN normal (and,
+    // under point lights, its own centroid). The opaque pre-blend is a pixel
+    // identity only where those agree for every member, so that is checked
+    // directly rather than assumed — and the pre-blend must additionally be
+    // representable at all.
+    const preblend = receiverHasTexture ? null : blendShadowOverLitBase(fullLitFill, fillColor, effOp);
+    const preblendEligible = !receiverHasTexture
+      && groupMembersShareLitColor(
+        group, receiverPolygons, fullLitFill,
+        [Lx, Ly, Lz], dirIntensity, dirColor, ambColor, ambIntensity, allPointLights,
+      )
+      && preblend !== null;
+    return {
+      lit: true,
+      camFacing: true,
+      effOp,
+      fillColor,
+      fullLitFill,
+      preblendEligible,
+      preblendPaint: preblendEligible ? preblend : null,
+    };
+  };
+
+  const shadingByPlane: PlaneShading[] = receiverPlanes.map(shadingForPlane);
+
+  /**
+   * One receiver face's spec, or null when the face paints nothing.
+   *
+   * `allowedCreaseNeighbours` is the set of neighbouring PLANE INDICES this
+   * face may bleed its member clips into; null disables crease bleed entirely.
+   * The caller resolves it (see the two-phase driver below) because it depends
+   * on whether those neighbours emit a layer in this same pass.
+   */
+  const computePlaneSpec = (
+    group: ReceiverFacePlane,
+    planeIdx: number,
+    allowedCreaseNeighbours: ReadonlySet<number> | null,
+  ): ReceiverShadowFaceSpec<T> | null => {
+    const shading = shadingByPlane[planeIdx]!;
+    if (!shading.lit || !shading.camFacing) return null;
+    const { effOp, fillColor, fullLitFill, preblendEligible } = shading;
+    const { O, n, u, v, outlineUv, minU, minV, width, height } = group;
+    // Denominator of the directional projection (to-source · face normal),
+    // known positive here because `shading.lit` already passed.
+    const faceDir = dirAt(O);
+    const Ldotn = faceDir[0] * n[0] + faceDir[1] * n[1] + faceDir[2] * n[2];
 
     const planeDist = (w: Vec3): number =>
       (w[0] - O[0]) * n[0] + (w[1] - O[1]) * n[1] + (w[2] - O[2]) * n[2];
@@ -1119,87 +1347,6 @@ export function computeReceiverShadowFaces<T = unknown>(
     // mesh sit a few degrees apart (culled as sub-pixel slivers); a faceted
     // occluder across a hard edge is far more angled (kept as a real shadow).
     const SEAM_COPLANAR_TOL = 0.94;
-    // ── Per-face colors ──────────────────────────────────────────────────
-    // Resolved BEFORE the clips are built: the crease bleed expands clip
-    // geometry only where the caller will then paint an opaque pre-blend, and
-    // that decision needs the final colors. Deciding it afterwards let a
-    // silently-failing pre-blend (translucent receiver → `rgba(...)`, which
-    // `blendShadowOverLitBase` cannot represent) emit EXPANDED clips at
-    // fractional alpha, which double-darkens exactly where the design relies
-    // on idempotence.
-
-    // Intensity removed by THIS pass (the blocked light) and the scene total.
-    const thisScale = isDirPass
-      ? dirIntensity * dirDot
-      : (allPointLights?.[thisPointIndex ?? -1]?.intensity ?? 1) * (pointDots[thisPointIndex ?? -1] ?? 0);
-    const totalScale = dirIntensity * dirDot + pointTotalScale + Math.max(0, ambIntensity);
-
-    // Per-group opacity for textured receivers. The shadow leaves the receiver
-    // lit by everything EXCEPT this pass's light: shadow_linear =
-    // lit_linear × remaining/total. A black overlay at sRGB opacity o gives
-    // lit_srgb × (1 − o), so o = 1 − (remaining/total)^(1/2.4). For a lone
-    // directional light remaining = ambient, matching the previous formula.
-    let effOp = opacity;
-    if (receiverHasTexture) {
-      if (totalScale > 0) {
-        const remainingRatio = Math.max(0, (totalScale - thisScale) / totalScale);
-        effOp = opacity * (1 - Math.pow(remainingRatio, 1 / 2.4));
-      } else {
-        effOp = 0;
-      }
-    }
-
-    // Per-face shadow tint. Each receiver face uses ITS OWN polygon color
-    // (one material per coplanar group). The fill is the receiver lit by
-    // every light EXCEPT this pass's blocked light — so a region shadowed
-    // from one colored light still shows the others' color. A lone
-    // directional light → remaining = ambient only (unchanged from before).
-    const groupPolyIdx = group.memberPolyIndices[0] ?? 0;
-    const groupColor = receiverPolygons[groupPolyIdx]?.color ?? "#cccccc";
-    const remDirScale = isDirPass ? 0 : dirIntensity * dirDot;
-    const remPointContribs: { color: string; scale: number }[] = [];
-    if (allPointLights) {
-      for (let k = 0; k < allPointLights.length; k++) {
-        if (isPoint && k === thisPointIndex) continue;
-        const dot = pointDots[k] ?? 0;
-        if (dot <= 0) continue;
-        const pl = allPointLights[k]!;
-        remPointContribs.push({ color: pl.color ?? "#ffffff", scale: (pl.intensity ?? 1) * dot });
-      }
-    }
-    const fillColor = receiverHasTexture
-      ? userShadowColor
-      : shadePolygon(groupColor, remDirScale, dirColor, ambColor, ambIntensity, remPointContribs);
-
-    // Full-lit face color C (every light) for the multi-light merge — callers
-    // multiply C by each pass's `fill/C` so overlapping shadows composite to
-    // the both-blocked color. Empty for textured (per-pixel base).
-    const fullPointContribs: { color: string; scale: number }[] = [];
-    if (allPointLights) {
-      for (let k = 0; k < allPointLights.length; k++) {
-        const dot = pointDots[k] ?? 0;
-        if (dot <= 0) continue;
-        const pl = allPointLights[k]!;
-        fullPointContribs.push({ color: pl.color ?? "#ffffff", scale: (pl.intensity ?? 1) * dot });
-      }
-    }
-    const fullLitFill = receiverHasTexture
-      ? ""
-      : shadePolygon(groupColor, dirIntensity * dirDot, dirColor, ambColor, ambIntensity, fullPointContribs);
-
-    // A face group is formed by plane + adjacency, never by material and never
-    // by exact normal: `fullLitFill` uses member[0]'s color and the GROUP
-    // plane's Lambert term, while each leaf is baked from its OWN normal (and,
-    // under point lights, its own centroid). The opaque pre-blend is a pixel
-    // identity only where those agree for every member, so that is checked
-    // directly rather than assumed — and the pre-blend must additionally be
-    // representable at all (see above).
-    const preblendEligible = !receiverHasTexture
-      && groupMembersShareLitColor(
-        group, receiverPolygons, fullLitFill,
-        [Lx, Ly, Lz], dirIntensity, dirColor, ambColor, ambIntensity, allPointLights,
-      )
-      && blendShadowOverLitBase(fullLitFill, fillColor, effOp) !== null;
     // Member clip polygons with seam bleed: each member's CCW outline is
     // expanded outward by SHADOW_CLIP_SEAM_BLEED along the edges it SHARES
     // with another member of this group (non-shared edges stay put), so the
@@ -1218,21 +1365,15 @@ export function computeReceiverShadowFaces<T = unknown>(
     // one nonzero path — safe only because the caller then paints the
     // pre-blended color opaque (idempotent under overlap).
     //
-    // A crease is bled only when the neighbour across it FACES THE CAMERA. The
-    // expansion runs outward in the expanding face's OWN plane, so it lands on
-    // the neighbour only while the neighbour is drawn on the far side of the
-    // crease; at a crease that lies on the camera silhouette (neighbour
-    // back-facing) the same expansion hangs in free space past the model's
-    // outline. On a closed mesh EVERY edge has a neighbour, so "has a
-    // neighbour" alone does not imply "not a silhouette edge" — measured as a
-    // 0.5 CSS px dark fringe outside the outline on a cube at every camera
-    // angle once the solid leaves' own `seamBleed` overscan was removed. A
-    // silhouette crease also has no abutting SVG to seam against, so skipping
-    // it costs nothing.
-    const applyCreaseBleed = creaseBleed === true && preblendEligible;
-    const creaseBleedsIntoNeighbour = (normals: Vec3[] | undefined): boolean => {
-      if (!normals) return false;
-      for (const nn of normals) if (normalFacesCamera(nn, cameraOnlyRot)) return true;
+    // Which crease edges may bleed is decided by the caller, per neighbouring
+    // PLANE, and handed down as `allowedCreaseNeighbours` — see
+    // `qualifiesCrease` for the three conditions a neighbour must meet
+    // (camera-facing, emits an abutting layer in this pass, paints the same
+    // resolved colour).
+    const applyCreaseBleed = allowedCreaseNeighbours !== null;
+    const creaseBleedsIntoNeighbour = (neighbours: number[] | undefined): boolean => {
+      if (!neighbours || !allowedCreaseNeighbours) return false;
+      for (const b of neighbours) if (allowedCreaseNeighbours.has(b)) return true;
       return false;
     };
     let anyCreaseBled = false;
@@ -1517,7 +1658,7 @@ export function computeReceiverShadowFaces<T = unknown>(
       }
     }
 
-    if (totalClipped === 0 || !(width > 0) || !(height > 0)) continue;
+    if (totalClipped === 0 || !(width > 0) || !(height > 0)) return null;
 
     // Tight shadow-content bbox in (u, v). The receiver face outline can be
     // huge (e.g. a 17500×17500 CSS-px floor at world units × BASE_TILE), but
@@ -1554,7 +1695,7 @@ export function computeReceiverShadowFaces<T = unknown>(
     if (shMaxV > minV + height + clipPad) shMaxV = minV + height + clipPad;
     const tightW = shMaxU - shMinU;
     const tightH = shMaxV - shMinV;
-    if (!(tightW > 0) || !(tightH > 0)) continue;
+    if (!(tightW > 0) || !(tightH > 0)) return null;
 
     // matrix3d for the tight SVG: O + shMinU*u + shMinV*v + lift*n
     const liftN = group.lift;
@@ -1584,7 +1725,7 @@ export function computeReceiverShadowFaces<T = unknown>(
       paths.push({ casterId: entry.id, d, casterPolygonIndices: entry.subPolygonIndices });
     }
 
-    out.push({
+    return {
       faceIndex: group.faceIndex,
       memberPolyIndices: group.memberPolyIndices,
       matrixCss: tightMatrixCss,
@@ -1597,9 +1738,76 @@ export function computeReceiverShadowFaces<T = unknown>(
       facePolysUv,
       preblendEligible,
       creaseBled: anyCreaseBled,
-    });
+    };
+  };
+
+  // ── Two-phase crease resolution ─────────────────────────────────────────
+  // Phase 1 computes every face WITHOUT crease bleed. That answers, for each
+  // plane, the question phase 2 needs: does this face emit a layer in this
+  // pass at all? Emission is crease-independent in the direction that matters
+  // — a bleed only ever GROWS a member clip, so a face that paints nothing
+  // unexpanded paints nothing expanded either.
+  //
+  // Phase 2 re-runs only the planes that have at least one qualifying crease
+  // neighbour. On a receiver where nothing qualifies (the common case: crease
+  // neighbours are non-coplanar, so their Lambert terms and therefore their
+  // resolved colours differ) phase 2 does no work at all.
+  const specs: Array<ReceiverShadowFaceSpec<T> | null> =
+    receiverPlanes.map((group, i) => computePlaneSpec(group, i, null));
+
+  if (creaseBleed === true) {
+    /**
+     * May plane `a` bleed a member clip across a crease into plane `b`?
+     *
+     * 1. `b` must FACE THE CAMERA. The expansion runs outward in a's own
+     *    plane, so it lands on b only while b is drawn on the far side of the
+     *    crease; at a crease on the camera silhouette the same expansion hangs
+     *    in free space past the model's outline (measured as a 0.5 CSS px dark
+     *    fringe outside a cube's outline). On a closed mesh EVERY edge has a
+     *    neighbour, so "has a neighbour" alone never implies "not a silhouette
+     *    edge".
+     * 2. `b` must EMIT a layer in this pass. A camera-facing neighbour is not
+     *    necessarily a shadowed one: under a vertical light a side face fails
+     *    the L·n test and emits no SVG at all, and the top face bleeding its
+     *    crease then paints shadow into empty space with nothing to fuse with.
+     * 3. Both must paint the SAME resolved opaque colour. The bleed's whole
+     *    licence is that overlapping opaque paints of ONE colour are
+     *    idempotent. Each face's pre-blend derives from its own lit colour, and
+     *    crease neighbours are by construction non-coplanar — so their colours
+     *    usually differ, and overlapping two different opaque fills is not
+     *    idempotent, it just paints one over the other: a seam of the wrong
+     *    colour. Requiring equality is what makes the overlap sound.
+     * 4. `b` must bleed BACK toward `a`. A one-sided bleed puts a's opaque
+     *    pre-blend over a neighbour still painting at alpha, and the composite
+     *    then depends on SVG paint order (b-over-a double-darkens).
+     */
+    const qualifiesCrease = (a: number, b: number): boolean => {
+      const sa = shadingByPlane[a];
+      const sb = shadingByPlane[b];
+      if (!sa || !sb) return false;
+      if (!sb.lit || !sb.camFacing) return false;
+      if (sa.preblendPaint === null || sb.preblendPaint === null) return false;
+      if (sa.preblendPaint !== sb.preblendPaint) return false;
+      return receiverPlanes[b]?.creaseNeighbourPlanes?.has(a) === true;
+    };
+
+    for (let a = 0; a < receiverPlanes.length; a++) {
+      if (specs[a] === null) continue;
+      const group = receiverPlanes[a]!;
+      const candidates = group.creaseNeighbourPlanes;
+      if (!candidates || candidates.size === 0) continue;
+      const allowed = new Set<number>();
+      for (const b of candidates) {
+        if (specs[b] === null || specs[b] === undefined) continue;
+        if (qualifiesCrease(a, b)) allowed.add(b);
+      }
+      if (allowed.size === 0) continue;
+      const bled = computePlaneSpec(group, a, allowed);
+      if (bled) specs[a] = bled;
+    }
   }
 
+  for (const spec of specs) if (spec) out.push(spec);
   return out;
 }
 
