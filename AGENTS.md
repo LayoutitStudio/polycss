@@ -407,6 +407,7 @@ scenes differently and that is not a defect.
 
 ## Style / process
 
+- Keep the root and package READMEs concise: installation, minimal usage, and links to the website docs. Do not duplicate package inventories, renderer internals, Morph runtime details, Gallery/domformat certification procedures, or other guide/reference material already covered by the docs.
 - No time estimates in planning docs ("2 days", "1 hour" etc.). This is agentic engineering, not human team scheduling.
 - Prune superseded content from long planning docs as you go — don't just append.
 - No half-finished features, no speculative abstractions, no defensive code for cases that can't happen.
