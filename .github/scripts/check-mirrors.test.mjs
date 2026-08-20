@@ -15,10 +15,13 @@ import test from "node:test";
 import {
   IDENTICAL_GROUPS,
   SYNC_SETS,
+  baseFileHash,
+  bindWaivers,
   checkIdenticalGroups,
   checkLaneParity,
   checkSyncSets,
   computeSyncHashes,
+  derivePairs,
   loadWaivers,
   partitionLanes,
   resolveBaseRef,
@@ -87,6 +90,24 @@ function runFixture(root, argv = [], overrides = {}) {
 
 const edit = (root, rel, content) => writeFileSync(resolve(root, rel), content);
 const cleanup = (root) => rmSync(root, { recursive: true, force: true });
+
+/**
+ * A waiver bound to the fixture's base commit. Every waiver must pin the
+ * waived files' base content, so tests build it from the real hasher.
+ */
+function waiverEntry(root, { reason, files, expectedLanes }) {
+  const baseHashes = {};
+  for (const file of files) {
+    baseHashes[file] = baseFileHash(root, "origin/main", file);
+  }
+  return { reason, files, expectedLanes, baseHashes };
+}
+
+const writeWaivers = (root, entries) =>
+  writeFileSync(
+    resolve(root, ".github", "mirror-waivers.json"),
+    `${JSON.stringify(entries, null, 2)}\n`,
+  );
 
 test("identical groups pass when all copies match", () => {
   const root = makeRepo({ "a/x.ts": "same", "b/x.ts": "same" });
@@ -501,20 +522,13 @@ test("end to end: an unchanged set passes without a waiver", () => {
 test("end to end: a waived set passes and echoes the reason loudly", () => {
   const root = makeGitRepo();
   edit(root, "packages/react/src/scene/x.ts", "react v2\n");
-  writeFileSync(
-    resolve(root, ".github", "mirror-waivers.json"),
-    `${JSON.stringify(
-      {
-        s: {
-          reason: "react is catching up to vanilla",
-          files: ["packages/react/src/scene/x.ts"],
-          expectedLanes: ["react"],
-        },
-      },
-      null,
-      2,
-    )}\n`,
-  );
+  writeWaivers(root, {
+    s: waiverEntry(root, {
+      reason: "react is catching up to vanilla",
+      files: ["packages/react/src/scene/x.ts"],
+      expectedLanes: ["react"],
+    }),
+  });
   assert.equal(runFixture(root, ["--update"]).code, 0);
 
   const result = runFixture(root);
@@ -527,20 +541,13 @@ test("end to end: a waived set passes and echoes the reason loudly", () => {
 
 test("end to end: a waiver does not cover a later, different divergence", () => {
   const root = makeGitRepo();
-  writeFileSync(
-    resolve(root, ".github", "mirror-waivers.json"),
-    `${JSON.stringify(
-      {
-        s: {
-          reason: "react is catching up to vanilla",
-          files: ["packages/react/src/scene/x.ts"],
-          expectedLanes: ["react"],
-        },
-      },
-      null,
-      2,
-    )}\n`,
-  );
+  writeWaivers(root, {
+    s: waiverEntry(root, {
+      reason: "react is catching up to vanilla",
+      files: ["packages/react/src/scene/x.ts"],
+      expectedLanes: ["react"],
+    }),
+  });
   // The next PR changes vue alone. Same set, same stale waiver, different
   // divergence — it must fail.
   edit(root, "packages/vue/src/scene/x.ts", "vue v2\n");
@@ -562,20 +569,13 @@ test("--update never creates or refreshes waivers", () => {
   assert.equal(runFixture(root, ["--update"]).code, 0);
   assert.equal(existsSync(waiverPath), false, "--update must not author a waiver");
 
-  writeFileSync(
-    waiverPath,
-    `${JSON.stringify(
-      {
-        s: {
-          reason: "declared",
-          files: ["packages/react/src/scene/x.ts"],
-          expectedLanes: ["react"],
-        },
-      },
-      null,
-      2,
-    )}\n`,
-  );
+  writeWaivers(root, {
+    s: waiverEntry(root, {
+      reason: "declared",
+      files: ["packages/react/src/scene/x.ts"],
+      expectedLanes: ["react"],
+    }),
+  });
   const before = readFileSync(waiverPath, "utf8");
   edit(root, "packages/vue/src/scene/x.ts", "vue v2\n");
   assert.equal(runFixture(root, ["--update"]).code, 0);
@@ -676,4 +676,206 @@ test("mesh-modules: a one-lane edit fails even after re-pinning", () => {
   assert.match(result.err, /unchanged lane\(s\):\s+vue/);
   assert.match(result.err, new RegExp(reactFile.replace(/\//g, "\\/")));
   cleanup(root);
+});
+
+test("pairing is declared per set, not inferred across every lane", () => {
+  for (const set of SYNC_SETS) {
+    assert.equal(
+      Array.isArray(set.pairLanes) && set.pairLanes.length > 0,
+      true,
+      `set "${set.name}" must declare pairLanes`,
+    );
+  }
+  const atlas = SYNC_SETS.find((entry) => entry.name === "atlas-pipeline");
+  assert.deepEqual(atlas.pairLanes, ["react", "vue"]);
+  for (const pair of derivePairs(atlas.files, atlas.pairLanes)) {
+    assert.deepEqual([...pair.lanes.keys()].sort(), ["react", "vue"]);
+  }
+});
+
+test("atlas-pipeline does not pair the vanilla lane by file name", () => {
+  // Real change from this PR: React/Vue mirrored the projective-quad guard
+  // default into paintDefaults.ts, while vanilla carries the same semantics in
+  // plan.ts. Pairing that lane by basename reports mirrored work as diverged.
+  const atlas = SYNC_SETS.find((entry) => entry.name === "atlas-pipeline");
+  const { failures } = checkLaneParity(
+    [atlas],
+    [
+      "packages/react/src/scene/atlas/paintDefaults.ts",
+      "packages/vue/src/scene/atlas/paintDefaults.ts",
+      "packages/polycss/src/render/atlas/plan.ts",
+    ],
+  );
+  assert.deepEqual(failures, []);
+});
+
+test("mesh-modules: unrelated one-lane edits in each lane do not cancel out", () => {
+  // The reported bypass: set-wide lane parity sees both lanes "touched" and
+  // passes, though neither edit was mirrored.
+  const meshSet = SYNC_SETS.find((entry) => entry.name === "mesh-modules");
+  const { failures } = checkLaneParity(
+    [meshSet],
+    [
+      "packages/react/src/scene/mesh/useReceiverShadows.tsx",
+      "packages/vue/src/scene/mesh/useMeshEvents.ts",
+    ],
+  );
+  assert.equal(failures.length, 2);
+  assert.deepEqual(
+    failures.map((failure) => failure.pair).sort(),
+    ["useMeshEvents", "useReceiverShadows"],
+  );
+});
+
+test("mesh-modules: a correctly mirrored pair passes", () => {
+  const meshSet = SYNC_SETS.find((entry) => entry.name === "mesh-modules");
+  const { failures, waived } = checkLaneParity(
+    [meshSet],
+    [
+      "packages/react/src/scene/mesh/useReceiverShadows.tsx",
+      "packages/vue/src/scene/mesh/useReceiverShadows.ts",
+    ],
+  );
+  assert.deepEqual(failures, []);
+  assert.deepEqual(waived, []);
+});
+
+test("mesh-modules: a one-lane edit fails even once both lanes are touched", () => {
+  // useMeshAtlas is mirrored properly, so both lanes are already "touched";
+  // the useStableDom straggler must still be caught.
+  const meshSet = SYNC_SETS.find((entry) => entry.name === "mesh-modules");
+  const { failures } = checkLaneParity(
+    [meshSet],
+    [
+      "packages/react/src/scene/mesh/useMeshAtlas.ts",
+      "packages/vue/src/scene/mesh/useMeshAtlas.ts",
+      "packages/react/src/scene/mesh/useStableDom.ts",
+    ],
+  );
+  assert.equal(failures.length, 1);
+  assert.equal(failures[0].pair, "useStableDom");
+  assert.deepEqual(failures[0].changed, ["react"]);
+  assert.deepEqual(failures[0].unchanged, ["vue"]);
+});
+
+test("baseHashes must be a hash map covering only the waived files", () => {
+  const entry = (baseHashes) =>
+    JSON.stringify({
+      s: { reason: "r", files: ["a"], expectedLanes: ["vue"], baseHashes },
+    });
+  const root = makeRepo({
+    "notobj.json": entry("nope"),
+    "badhash.json": entry({ a: "zz" }),
+    "extra.json": entry({ a: "0".repeat(64), b: "1".repeat(64) }),
+    "ok.json": entry({ a: "<absent>" }),
+  });
+  const errorOf = (name) => loadWaivers(resolve(root, name)).errors[0];
+
+  assert.match(errorOf("notobj.json"), /not an object mapping/);
+  assert.match(errorOf("badhash.json"), /malformed "baseHashes"/);
+  assert.match(errorOf("extra.json"), /not in its "files" list/);
+  assert.deepEqual(loadWaivers(resolve(root, "ok.json")).errors, []);
+  cleanup(root);
+});
+
+test("a waiver already merged at the base ref no longer applies", () => {
+  const root = makeGitRepo();
+  const entry = waiverEntry(root, {
+    reason: "reviewed once, last month",
+    files: ["packages/react/src/scene/x.ts"],
+    expectedLanes: ["react"],
+  });
+  writeWaivers(root, { s: entry });
+  git(root, ["add", "."]);
+  git(root, ["commit", "--quiet", "-m", "merge the waiver"]);
+  git(root, ["update-ref", "refs/remotes/origin/main", "HEAD"]);
+
+  const base = git(root, ["rev-parse", "origin/main"]);
+  const { applicable, rejections } = bindWaivers(root, base, { s: entry });
+  assert.deepEqual(applicable, {});
+  assert.match(rejections.get("s").reason, /identical to the one already at the base ref/);
+  assert.match(rejections.get("s").reason, /does not carry over to later work/);
+  cleanup(root);
+});
+
+test("a waiver binds to the base content it names", () => {
+  const root = makeGitRepo();
+  const base = git(root, ["rev-parse", "origin/main"]);
+  const file = "packages/react/src/scene/x.ts";
+  const fresh = waiverEntry(root, {
+    reason: "declared for this diff",
+    files: [file],
+    expectedLanes: ["react"],
+  });
+
+  const bound = bindWaivers(root, base, { s: fresh });
+  assert.deepEqual(Object.keys(bound.applicable), ["s"]);
+  assert.equal(bound.rejections.size, 0);
+
+  const { baseHashes, ...withoutHashes } = fresh;
+  const missing = bindWaivers(root, base, { s: withoutHashes });
+  assert.deepEqual(missing.applicable, {});
+  assert.match(missing.rejections.get("s").reason, /no "baseHashes"/);
+  assert.equal(missing.rejections.get("s").expectedHashes[file], baseHashes[file]);
+
+  const wrong = bindWaivers(root, base, {
+    s: { ...fresh, baseHashes: { [file]: "0".repeat(64) } },
+  });
+  assert.deepEqual(wrong.applicable, {});
+  assert.match(wrong.rejections.get("s").reason, /no longer match the waived files/);
+
+  assert.equal(baseFileHash(root, base, "packages/nope/gone.ts"), "<absent>");
+  cleanup(root);
+});
+
+test("end to end: a merged waiver does not authorize the next PR's divergence", () => {
+  const root = makeGitRepo();
+  const files = ["packages/react/src/scene/x.ts", "packages/vue/src/scene/x.ts"];
+
+  // The divergence and its waiver are reviewed, merged, and now sit on main.
+  edit(root, files[0], "react v2\n");
+  edit(root, files[1], "vue v2\n");
+  writeWaivers(root, {
+    s: waiverEntry(root, {
+      reason: "react+vue caught up to vanilla",
+      files,
+      expectedLanes: ["react", "vue"],
+    }),
+  });
+  assert.equal(runFixture(root, ["--update"]).code, 0);
+  git(root, ["add", "."]);
+  git(root, ["commit", "--quiet", "-m", "merged divergence + waiver"]);
+  git(root, ["update-ref", "refs/remotes/origin/main", "HEAD"]);
+
+  // A follow-up PR changes the same files in the same lane pattern and never
+  // opens mirror-waivers.json. That is new, unreviewed divergence.
+  edit(root, files[0], "react v3\n");
+  edit(root, files[1], "vue v3\n");
+  assert.equal(runFixture(root, ["--update"]).code, 0);
+
+  const result = runFixture(root, ["--require-base"]);
+  assert.equal(result.code, 1, "a merged waiver must not excuse later work");
+  assert.doesNotMatch(result.out, /MIRROR WAIVER APPLIED/);
+  assert.match(result.err, /WAIVER REJECTED/);
+  assert.match(result.err, /does not carry over to later work/);
+  assert.match(result.err, /Re-justify it with a FRESH entry/);
+  assert.match(result.err, /"baseHashes"/);
+  cleanup(root);
+});
+
+test("committed waivers pin the base content of every file they name", () => {
+  const repoRoot = resolve(import.meta.dirname, "..", "..");
+  const { waivers } = loadWaivers(
+    resolve(repoRoot, ".github", "mirror-waivers.json"),
+  );
+  for (const [name, waiver] of Object.entries(waivers)) {
+    assert.notEqual(waiver.baseHashes, undefined, `waiver "${name}" has no baseHashes`);
+    for (const file of waiver.files) {
+      assert.match(
+        waiver.baseHashes[file] ?? "",
+        /^([0-9a-f]{64}|<absent>)$/,
+        `waiver "${name}" does not pin ${file}`,
+      );
+    }
+  }
 });

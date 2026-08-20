@@ -9,6 +9,7 @@ import {
   PACKAGE_RULES,
   checkManifestDependencies,
   extractSpecifiers,
+  resolveDependencyTarget,
   runChecks,
 } from "./check-boundaries.mjs";
 
@@ -219,4 +220,110 @@ test("node builtins stay forbidden in the renderer packages", () => {
 test("the real repo manifests satisfy the dependency table", () => {
   const repoRoot = resolve(import.meta.dirname, "..", "..");
   assert.deepEqual(runChecks(repoRoot), []);
+});
+
+test("dependency targets resolve through alias and protocol forms", () => {
+  const target = (spec, options) =>
+    resolveDependencyTarget("@layoutit/polycss-core", spec, options);
+
+  assert.equal(target("workspace:^").name, "@layoutit/polycss-core");
+  assert.equal(target("workspace:*").name, "@layoutit/polycss-core");
+  assert.equal(target("^0.2.0").name, "@layoutit/polycss-core");
+  assert.equal(target("npm:@layoutit/polycss@0.2.0").name, "@layoutit/polycss");
+  assert.equal(target("npm:evil").name, "evil");
+  assert.equal(target("workspace:@layoutit/polycss@*").name, "@layoutit/polycss");
+  assert.equal(target("workspace:other@*").name, "other");
+  assert.match(target("link:../nope").unresolved, /could not be read/);
+});
+
+test("an npm alias to a forbidden package is caught", () => {
+  const root = makeRepo(
+    withManifests(
+      {},
+      {
+        react: {
+          name: "@layoutit/polycss-react",
+          // Allowed KEY, forbidden install target.
+          dependencies: { "@layoutit/polycss-core": "npm:@layoutit/polycss@0.2.0" },
+        },
+      },
+    ),
+  );
+  const violations = runChecks(root);
+  assert.equal(violations.length, 1);
+  assert.match(
+    violations[0],
+    /resolves to disallowed package "@layoutit\/polycss" via npm alias/,
+  );
+  cleanup(root);
+});
+
+test("a link:/file: dependency is validated against the package it points at", () => {
+  for (const protocol of ["link", "file"]) {
+    const root = makeRepo(
+      withManifests(
+        {},
+        {
+          react: {
+            name: "@layoutit/polycss-react",
+            dependencies: { "@layoutit/polycss-core": `${protocol}:../polycss` },
+          },
+          polycss: { name: "@layoutit/polycss" },
+        },
+      ),
+    );
+    const violations = runChecks(root);
+    assert.equal(violations.length, 1, protocol);
+    assert.match(
+      violations[0],
+      new RegExp(
+        `resolves to disallowed package "@layoutit/polycss" via ${protocol}: target`,
+      ),
+    );
+    cleanup(root);
+  }
+});
+
+test("a local dependency whose target cannot be read is not assumed allowed", () => {
+  const root = makeRepo(
+    withManifests(
+      {},
+      {
+        react: {
+          name: "@layoutit/polycss-react",
+          dependencies: { "@layoutit/polycss-core": "link:../nowhere" },
+        },
+      },
+    ),
+  );
+  const violations = runChecks(root);
+  assert.equal(violations.length, 1);
+  assert.match(violations[0], /could not be read, so the allow-list cannot be applied/);
+  cleanup(root);
+});
+
+test("workspace ranges and aliases onto allowed packages still pass", () => {
+  const root = makeRepo(
+    withManifests(
+      {},
+      {
+        react: {
+          name: "@layoutit/polycss-react",
+          dependencies: { "@layoutit/polycss-core": "workspace:^" },
+          peerDependencies: { react: "^19", "react-dom": "^19" },
+        },
+        vue: {
+          name: "@layoutit/polycss-vue",
+          // An alias is fine as long as it lands inside the allow-list.
+          dependencies: { "@layoutit/polycss-core": "npm:@layoutit/polycss-core@0.2.0" },
+        },
+        fonts: {
+          name: "@layoutit/polycss-fonts",
+          dependencies: { "@layoutit/polycss-core": "workspace:*", earcut: "^3" },
+        },
+      },
+    ),
+  );
+  assert.deepEqual(runChecks(root), []);
+  cleanup(root);
 });

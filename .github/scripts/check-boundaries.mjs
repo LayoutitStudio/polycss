@@ -13,7 +13,10 @@
  * The rules are applied to BOTH the source imports and the package manifest:
  * a package whose `dependencies` / `optionalDependencies` / `peerDependencies`
  * name something outside its allow-list fails even if no source file imports
- * it yet. (`devDependencies` are tooling and are not constrained.)
+ * it yet. (`devDependencies` are tooling and are not constrained.) Manifest
+ * checking resolves the dependency VALUE — `npm:` aliases, `link:`/`file:`/
+ * `portal:` local paths, `workspace:` aliases — because the key is not the
+ * package that gets installed.
  *
  * Also forbids, everywhere in the repo, deep imports into another package's
  * src (e.g. `@layoutit/polycss-core/src/...` or `../../packages/x/src/...`)
@@ -103,19 +106,106 @@ export function extractSpecifiers(source) {
 const isRelative = (spec) => spec.startsWith(".");
 const isTestFile = (file) => /\.test\.(ts|tsx|mts|cts|mjs|cjs|js)$/.test(file);
 
+/** `<name>` or `<name>@<range>`, scoped names included. */
+function splitNameAtRange(spec) {
+  if (!spec) return null;
+  const at = spec.startsWith("@") ? spec.indexOf("@", 1) : spec.indexOf("@");
+  const name = at === -1 ? spec : spec.slice(0, at);
+  return name.length > 0 ? name : null;
+}
+
+function readLocalPackageName(packageDir, relPath) {
+  if (!packageDir) return null;
+  const manifestPath = resolve(packageDir, relPath, "package.json");
+  if (!existsSync(manifestPath)) return null;
+  try {
+    const parsed = JSON.parse(readFileSync(manifestPath, "utf8"));
+    return typeof parsed?.name === "string" && parsed.name.length > 0
+      ? parsed.name
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The manifest KEY is not the package that gets installed. `npm:` aliases,
+ * `link:`/`file:`/`portal:` local paths and `workspace:<name>@<range>` aliases
+ * all mount a DIFFERENT package under the declared key, so
+ * `"@layoutit/polycss-core": "npm:@layoutit/polycss@0.2.0"` would pass a
+ * key-only allow-list while installing the forbidden graph. The allow-list is
+ * therefore applied to the resolved target, not the key.
+ *
+ * A local path whose target cannot be read is `unresolved` rather than
+ * allowed: an unverifiable target is not a permitted one.
+ */
+export function resolveDependencyTarget(name, spec, options = {}) {
+  if (typeof spec !== "string") return { name };
+  const value = spec.trim();
+
+  if (value.startsWith("npm:")) {
+    const target = splitNameAtRange(value.slice("npm:".length));
+    return target
+      ? { name: target, via: `npm alias "${value}"` }
+      : { unresolved: `has an unparseable npm alias "${value}"` };
+  }
+
+  const local = /^(link|file|portal):(.*)$/.exec(value);
+  if (local) {
+    const target = readLocalPackageName(options.packageDir, local[2]);
+    return target
+      ? { name: target, via: `${local[1]}: target ${local[2]}` }
+      : {
+          unresolved:
+            `points at local target "${value}", whose package.json name ` +
+            "could not be read",
+        };
+  }
+
+  if (value.startsWith("workspace:")) {
+    const rest = value.slice("workspace:".length);
+    // `workspace:^`, `workspace:*`, `workspace:1.2.3` keep the key; only the
+    // `workspace:<other-name>@<range>` alias form retargets it.
+    if (/^[@a-zA-Z]/.test(rest) && rest.includes("@", 1)) {
+      const target = splitNameAtRange(rest);
+      if (target) return { name: target, via: `workspace alias "${value}"` };
+    }
+    return { name };
+  }
+
+  return { name };
+}
+
 /**
  * The manifest is the other half of the boundary: an unused-but-declared
  * dependency still ships to npm and still puts the package on the wrong graph.
  */
-export function checkManifestDependencies(manifest, pkg, rules) {
+export function checkManifestDependencies(manifest, pkg, rules, options = {}) {
   const violations = [];
   for (const field of MANIFEST_DEPENDENCY_FIELDS) {
     const declared = manifest?.[field];
     if (!declared || typeof declared !== "object") continue;
-    for (const name of Object.keys(declared)) {
+    for (const [name, spec] of Object.entries(declared)) {
       if (!rules.allow.includes(name)) {
         violations.push(
           `packages/${pkg}/package.json: disallowed ${field} entry "${name}"`,
+        );
+        continue;
+      }
+      const resolved = resolveDependencyTarget(name, spec, {
+        packageDir: options.packageDir,
+      });
+      if (resolved.unresolved) {
+        violations.push(
+          `packages/${pkg}/package.json: ${field} entry "${name}" ` +
+            `${resolved.unresolved}, so the allow-list cannot be applied`,
+        );
+        continue;
+      }
+      if (resolved.name !== name && !rules.allow.includes(resolved.name)) {
+        violations.push(
+          `packages/${pkg}/package.json: ${field} entry "${name}" resolves to ` +
+            `disallowed package "${resolved.name}" via ${resolved.via}`,
         );
       }
     }
@@ -138,7 +228,11 @@ function checkPackageManifest(root, pkg, rules, violations) {
     );
     return;
   }
-  violations.push(...checkManifestDependencies(manifest, pkg, rules));
+  violations.push(
+    ...checkManifestDependencies(manifest, pkg, rules, {
+      packageDir: resolve(root, "packages", pkg),
+    }),
+  );
 }
 
 function checkPackage(root, pkg, rules, violations) {

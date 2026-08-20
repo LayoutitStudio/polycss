@@ -5,6 +5,10 @@
       "packages/react/src/scene/voxelRenderer.ts",
       "packages/vue/src/scene/voxelRenderer.ts"
     ],
-    "expectedLanes": ["react", "vue"]
+    "expectedLanes": ["react", "vue"],
+    "baseHashes": {
+      "packages/react/src/scene/voxelRenderer.ts": "1e40b8ab2e39865e89eb6c2c0bc307c56dff3945935c367071525159fd4dfd0c",
+      "packages/vue/src/scene/voxelRenderer.ts": "1e40b8ab2e39865e89eb6c2c0bc307c56dff3945935c367071525159fd4dfd0c"
+    }
   }
 }
