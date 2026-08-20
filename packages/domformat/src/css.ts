@@ -74,6 +74,10 @@ interface CssAnalysis {
   readonly urls: readonly CssUrlSpan[];
 }
 
+export interface CssValidationPolicy {
+  readonly forbiddenClassTokens?: ReadonlySet<string>;
+}
+
 function isWhitespace(character: string | undefined): boolean {
   return character !== undefined && WHITESPACE.test(character);
 }
@@ -88,10 +92,26 @@ function assertAlphaCharacters(css: string): void {
   invariant(!css.includes("\\"), "UNSAFE_CSS_ESCAPE", "Stylesheet escapes are forbidden by polycss-3d@0.");
   invariant(!css.includes("/*") && !css.includes("*/"), "UNSAFE_CSS_COMMENT", "Stylesheet comments are forbidden by polycss-3d@0.");
   invariant(!css.includes("@"), "UNSAFE_CSS", "Stylesheet at-rules are forbidden by polycss-3d@0.");
+  invariant(!css.includes("!"), "UNSAFE_CSS_IMPORTANT", "Stylesheet priority annotations are forbidden by polycss-3d@0.");
   invariant(!css.includes("<!--") && !css.includes("-->"), "UNSAFE_CSS", "Stylesheet CDO/CDC tokens are forbidden.");
   for (let index = 0; index < css.length; index += 1) {
     const code = css.charCodeAt(index);
     invariant(code >= 0x20 || code === 0x09 || code === 0x0a || code === 0x0c || code === 0x0d, "UNSAFE_CSS_CONTROL", "Stylesheet contains a forbidden control character.");
+  }
+}
+
+function assertNoForbiddenClassToken(selector: string, forbidden: ReadonlySet<string> | undefined): void {
+  if (!forbidden?.size) return;
+  for (const token of forbidden) {
+    let start = selector.indexOf(token);
+    while (start >= 0) {
+      const before = selector[start - 1];
+      const after = selector[start + token.length];
+      if (!before?.match(IDENT_CONTINUE) && !after?.match(IDENT_CONTINUE)) {
+        invariant(false, "UNDECLARED_VARIANT_EFFECT", `Stylesheet selector mentions prepared variant token ${token}; dynamic effects must use the variant effect table.`);
+      }
+      start = selector.indexOf(token, start + token.length);
+    }
   }
 }
 
@@ -335,7 +355,7 @@ export function cssScopeAttribute(scope: unknown): Readonly<{ name: `data-${stri
   return Object.freeze({ name: `data-${match[1]}`, value: match[2] });
 }
 
-function analyzeCss(css: string, binding: DomStylesheetBinding, limits: DomLimits): CssAnalysis {
+function analyzeCss(css: string, binding: DomStylesheetBinding, limits: DomLimits, policy?: CssValidationPolicy): CssAnalysis {
   assertAlphaCharacters(css);
   cssScopeAttribute(binding.scope);
   const rules = parseRules(css, limits);
@@ -347,6 +367,7 @@ function analyzeCss(css: string, binding: DomStylesheetBinding, limits: DomLimit
       const selector = css.slice(range.start, range.end);
       invariant(UTF8.encode(selector).length <= limits.maxCssSelectorBytes, "CSS_SELECTOR_LIMIT", `Stylesheet selector exceeds ${limits.maxCssSelectorBytes} bytes.`);
       assertScopedSelector(selector, binding.scope);
+      assertNoForbiddenClassToken(selector, policy?.forbiddenClassTokens);
       state.scopeSpans.push({ start: range.start, end: range.start + binding.scope.length });
       state.selectors += 1;
       invariant(state.selectors <= limits.maxCssSelectors, "CSS_SELECTOR_LIMIT", `Stylesheet exceeds ${limits.maxCssSelectors} selectors.`);
@@ -379,8 +400,8 @@ function analyzeCss(css: string, binding: DomStylesheetBinding, limits: DomLimit
   });
 }
 
-export function validateCssClosure(css: string, binding: DomStylesheetBinding, resources: ReadonlySet<string>, limits: DomLimits): CssAnalysis {
-  const analysis = analyzeCss(css, binding, limits);
+export function validateCssClosure(css: string, binding: DomStylesheetBinding, resources: ReadonlySet<string>, limits: DomLimits, policy?: CssValidationPolicy): CssAnalysis {
+  const analysis = analyzeCss(css, binding, limits, policy);
   const tokenMap = new Map<string, string>(binding.assetTokens.map((entry) => [entry.token, entry.resource]));
   const seen = new Set<string>();
   for (const url of analysis.urls) {

@@ -629,7 +629,15 @@ async function buildCapture(capture, consumedSourcePaths) {
       counts: playback
         ? { nodes: nodes.length, shapes: playback.shapeCount, leaves: 0, sourceFrames: playback.frameCount }
         : { nodes: nodes.length },
-      ...(source ? { sourceArtifact: source } : {}),
+      ...(source ? {
+        artifacts: sourceArtifacts.map((artifact, index) => ({
+          id: `source-${String(index).padStart(3, "0")}`,
+          role: artifact.role,
+          byteLength: artifact.byteLength,
+          decodedByteLength: artifact.byteLength,
+          digest: artifact.digest,
+        })),
+      } : {}),
     },
     tree: {
       version: 0,

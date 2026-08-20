@@ -5,7 +5,7 @@ Status: experimental executable codec/interpreter pair for `domformat@0` and
 
 ## Purpose
 
-This codec publishes prepared texture-atlas Y positions and composed leaf
+This codec publishes prepared texture-atlas positions and composed leaf
 visibility for each playback source frame. It does not discover materials,
 sample lighting, pack atlases, scan topology, or create nodes at runtime.
 
@@ -13,9 +13,10 @@ sample lighting, pack atlases, scan topology, or create nodes at runtime.
 
 The binding is executable, consumes exactly the `uint` input
 `time.source-frame`, targets a unique ordered `leaves` array, and declares
-exactly `style.backgroundPositionY` and `style.visibility`. It has no
-parameters. Its targets exactly equal the playback leaf targets in the same
-order.
+one of two exact sink pairs: `style.backgroundPositionY` plus
+`style.visibility` for derived vertical strips, or `style.backgroundPosition`
+plus `style.visibility` for prepared two-axis addresses. It has no parameters.
+Its targets exactly equal the playback leaf targets in the same order.
 
 The state is `{ "packet": ... }`. Packet `version` is 0 and `frameCount`
 equals playback's binding frame count.
@@ -34,13 +35,31 @@ leafHeight   positive fitted leaf height
 ```
 
 The state ranges partition `surface.statePacking.sourceFrameDeltas`, whose
-length is exactly `stateCount`. For each face, begin `sourceFrame = 0`; its first
+length is exactly `stateCount`. For each face, begin with zero-based
+source-frame offset `0` (the public source frame minus one); its first
 delta is exactly zero and each later delta is positive. Cumulative frames stay
 within `0..frameCount-1`. A face's local state index is the last state whose
-cumulative source frame is at most the zero-based requested frame.
+cumulative source-frame offset is at most the requested public source frame
+minus one.
 
-The prepared CSS Y position for a state is `0` when its cumulative source frame
-is zero, otherwise `-(sourceFrame * leafHeight)px`.
+When `surface.statePacking.positionDictionary` and
+`positionIndicesBase64` are absent, the prepared CSS Y
+position for a state is `0` when its cumulative source-frame offset is zero,
+otherwise `-(sourceFrameOffset * leafHeight)px`. The binding uses
+`style.backgroundPositionY`.
+
+Prepared two-axis mode declares both fields. `positionDictionary` is a nonempty,
+strictly lexicographically sorted array of unique `[x,y]` signed 32-bit integer
+pixel coordinates with at most 65,535 rows. `positionIndicesBase64` is canonical
+little-endian uint16 with exactly one in-range dictionary index per prepared
+state, parallel to `sourceFrameDeltas`; every dictionary row is referenced.
+The binding uses `style.backgroundPosition`. Materialization formats each
+dictionary coordinate once: zero is `0`, every nonzero value is `<integer>px`,
+and the two axes are separated by one ASCII space. It retains the packed state
+indices instead of expanding repeated strings. This mode admits arbitrary
+prepared atlas coordinates while making identifiers, functions, missing axes,
+extra axes, and alternate zero spellings structurally impossible. Paired
+prepared-variant classes may also select another atlas image.
 
 ## Sequential lighting transitions
 
@@ -78,9 +97,14 @@ bits are zero.
 Sequential visibility contains canonical base64 little-endian uint32 offsets
 and uint16 face indices. Offsets has `frameCount + 1` entries and partitions the
 face array. Each segment is strictly increasing. Starting from the initial
-bitset, XOR each listed face to obtain the target frame row. A reader may
-precompute all rows only when `leafCount * frameCount` is within the visibility
-allocation limit.
+bitset, XOR each listed face to obtain the target frame row. Materialization
+retains one current visibility bitset plus the decoded sparse offsets/faces; it
+does not expand a leaf-by-frame visibility matrix.
+Validation uses one rolling current row. When declared jumps require arbitrary
+canonical endpoints, it retains only the distinct endpoint rows and rejects
+their endpoint-count times leaf-count product above the visibility-cell limit.
+Documents without jumps therefore use O(`leafCount`) visibility-row working
+memory regardless of `frameCount`.
 
 ## Noninteractive jumps
 
@@ -96,10 +120,10 @@ sequential transition. Matching lengths and in-range indices are insufficient:
 a syntactically valid accelerator that contradicts its target frame is invalid.
 
 Jumps are optional accelerators. When a requested nonsequential pair is absent,
-the viewer derives the exact target by comparing the precomputed visibility row
-and by binary-searching each currently visible face's state schedule. The
-fallback is semantically identical, so jump presence is packaging/runtime cost,
-not an implicit adapter rule.
+the viewer walks at most one bounded sequential cycle, XORs only listed
+visibility faces, and retains only the last prepared address for each listed
+surface face. The fallback is semantically identical, so jump presence is
+packaging/runtime cost, not an implicit adapter rule.
 
 ## Publication and visibility composition
 
@@ -116,16 +140,24 @@ AND NOT interactionDegenerate[i]
 ```
 
 Write `visible` or `hidden` only when the value changes. For each lighting row,
-skip a currently surface-hidden face; otherwise write its prepared
-`backgroundPositionY` and remember its applied local state. This separates
+write its selected prepared background-position sink when the face is paint
+visible; otherwise retain a dirty prepared-address marker. Before any later
+surface or interaction-forced reveal, flush the current prepared transform and
+address, in that order, before writing `visibility:visible`. A forced-visible
+face remains address-current while its surface state advances, including when a
+surface-hidden to surface-hidden transition has no lighting row. Multi-frame
+catch-up coalesces the union of sparse visibility and address targets, then
+publishes each target's final state at most once in ascending target order. This separates
 prepared culling, interaction safety visibility, and triangle degeneracy
 without duplicating visibility in the playback packet.
 
-Initial surface visibility is declared on the same leaf nodes in `TREE`.
-Initial nonzero background positions are declared explicitly. A zero position
-MAY be omitted because the CSS initial value of `background-position-y` is
-semantically zero; if present it MUST be `0`, `0px`, or `0%`. The packet's
-initial frame and state schedules MUST agree with those styles as a
+Initial surface visibility is declared on the same leaf nodes in `TREE`. In
+derived vertical-strip mode, an initial zero `background-position-y` MAY be
+omitted because the CSS initial value is semantically zero; if present it MUST
+be `0`, `0px`, or `0%`. An initial nonzero derived value is explicit. In
+prepared two-axis mode, `background-position` is always explicit and exactly
+equals the materialized canonical dictionary value, including `0 0`. The
+packet's initial frame and state schedules MUST agree with those styles as a
 cross-section invariant.
 
 ## Validation boundary
@@ -136,3 +168,6 @@ or noncanonical base64, truncated/wrong-width integer tables, bad offsets,
 unsorted or out-of-range faces/states, mismatched jump pairs, nonzero unused
 visibility bits, semantically incomplete or contradictory sequential/jump rows,
 and configured state/change/visibility allocation excess.
+Prepared two-axis mode additionally rejects a missing dictionary/index mate,
+negative zero, noninteger or out-of-range coordinates, unsorted/duplicate or
+unreferenced dictionary rows, and truncated or out-of-range packed indices.

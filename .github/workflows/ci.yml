@@ -119,6 +119,11 @@ jobs:
           DOMFORMAT_BROWSER_NO_SANDBOX: "1"
         run: pnpm --filter @layoutit/polycss-domformat test:browser
 
+      - name: Certify bounded domformat page preparation
+        env:
+          DOMFORMAT_BROWSER_NO_SANDBOX: "1"
+        run: pnpm --filter @layoutit/polycss-domformat test:page-preparation
+
   certify-gallery-domformat-corpus:
     # Gallery assets are byte-bound to this Chromium/sharp runner; changing it requires corpus regeneration.
     runs-on: macos-15

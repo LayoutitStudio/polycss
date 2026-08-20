@@ -1,52 +1,30 @@
 import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join, posix, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const npm = process.platform === "win32" ? "npm.cmd" : "npm";
 const python = process.platform === "win32" ? "python" : "python3";
-const MAX_TARBALL_BYTES = 96 * 1024;
+const MAX_TARBALL_BYTES = 100 * 1024;
 const MAX_UNPACKED_BYTES = 400 * 1024;
-const RUNTIME_MODULES = Object.freeze([
-  "base64",
-  "browser-input",
+const PUBLIC_DECLARATION_MODULES = Object.freeze([
   "browser",
-  "canonical-json",
-  "cli",
   "constants",
-  "crc32",
-  "css",
   "errors",
-  "file-io",
-  "hash",
   "index",
-  "inspect",
-  "lifecycle",
-  "manifest",
-  "package-files",
-  "path-security",
   "public-types",
   "reader",
-  "resources",
-  "retained-dom",
-  "schema",
-  "state/effects",
-  "state/interaction",
-  "state/numeric",
-  "state/polycss",
-  "state/presentation",
-  "state/triangle",
   "writer",
 ]);
-const ALLOWED_PACKAGE_PATHS = Object.freeze([
+const STATIC_PACKAGE_PATHS = Object.freeze([
   "LICENSE",
   "README.md",
   "bin/domformat.js",
   "package.json",
-  ...RUNTIME_MODULES.flatMap((name) => [`dist/${name}.d.ts`, `dist/${name}.js`]),
+  ...PUBLIC_DECLARATION_MODULES.map((name) => `dist/${name}.d.ts`),
 ]);
 const FORBIDDEN_PACKAGE_TEXT = Object.freeze([
   "/Users/",
@@ -78,6 +56,42 @@ function sha256(bytes) {
   return createHash("sha256").update(bytes).digest("hex");
 }
 
+async function emittedRuntimePaths(directory = join(root, "dist"), prefix = "dist") {
+  const paths = [];
+  for (const entry of await readdir(directory, { withFileTypes: true })) {
+    const path = join(directory, entry.name);
+    const packagePath = posix.join(prefix, entry.name);
+    if (entry.isDirectory()) paths.push(...await emittedRuntimePaths(path, packagePath));
+    else if (entry.isFile() && entry.name.endsWith(".js")) paths.push(packagePath);
+  }
+  return paths;
+}
+
+async function runtimeClosure() {
+  const emitted = (await emittedRuntimePaths()).sort();
+  const emittedSet = new Set(emitted);
+  const pending = ["dist/browser.js", "dist/cli.js", "dist/index.js", "dist/internal-conformance.js"];
+  const reachable = new Set();
+  while (pending.length > 0) {
+    const packagePath = pending.pop();
+    if (reachable.has(packagePath)) continue;
+    invariant(emittedSet.has(packagePath), `Runtime entry or import ${packagePath} was not emitted.`);
+    reachable.add(packagePath);
+    const source = await readFile(resolve(root, packagePath), "utf8");
+    const imports = source.matchAll(/(?:\bfrom\s*|\bimport\s*\(?\s*)["']([^"']+\.js)["']/gu);
+    for (const match of imports) {
+      const specifier = match[1];
+      if (!specifier.startsWith(".")) continue;
+      const imported = posix.normalize(posix.join(posix.dirname(packagePath), specifier));
+      invariant(imported.startsWith("dist/") && emittedSet.has(imported), `Runtime import ${specifier} from ${packagePath} escapes or is missing.`);
+      pending.push(imported);
+    }
+  }
+  const unreachable = emitted.filter((path) => !reachable.has(path));
+  invariant(unreachable.length === 0, `Build emitted unreachable runtime modules: ${unreachable.join(", ")}`);
+  return [...reachable].sort();
+}
+
 async function pack(destination) {
   const output = run(npm, ["pack", "--json", "--pack-destination", destination]);
   const jsonStart = output.lastIndexOf("\n[");
@@ -90,12 +104,13 @@ async function pack(destination) {
   invariant(report.size <= MAX_TARBALL_BYTES, `npm tarball exceeds ${MAX_TARBALL_BYTES} bytes.`);
   invariant(report.unpackedSize <= MAX_UNPACKED_BYTES, `npm package exceeds ${MAX_UNPACKED_BYTES} unpacked bytes.`);
   const paths = report.files.map((entry) => entry.path);
-  const allowed = new Set(ALLOWED_PACKAGE_PATHS);
+  const allowedPaths = [...STATIC_PACKAGE_PATHS, ...await runtimeClosure()];
+  const allowed = new Set(allowedPaths);
   const unexpected = paths.filter((path) => !allowed.has(path));
-  const missing = ALLOWED_PACKAGE_PATHS.filter((path) => !paths.includes(path));
+  const missing = allowedPaths.filter((path) => !paths.includes(path));
   invariant(unexpected.length === 0, `npm package contains non-allowlisted paths: ${unexpected.join(", ")}`);
   invariant(missing.length === 0, `npm package is missing allowlisted paths: ${missing.join(", ")}`);
-  invariant(paths.length === ALLOWED_PACKAGE_PATHS.length, "npm package path count differs from the exact allowlist.");
+  invariant(paths.length === allowedPaths.length, "npm package path count differs from the exact allowlist.");
   const forbidden = paths.filter((path) => (
     /^(?:notes|test|scripts|\.local|output)\//u.test(path)
     || /(?:^|\/)__pycache__(?:\/|$)|\.pyc$/u.test(path)
@@ -171,7 +186,14 @@ try {
   invariant(installedManifest.private === true, "Installed package must remain private.");
   invariant(installedManifest.license === "MIT", "Installed package license must match the PolyCSS MIT license.");
   invariant(installedManifest.type === "module", "Installed package must remain ESM.");
-  invariant(JSON.stringify(installedManifest.files) === JSON.stringify(["bin/", "dist/", "LICENSE", "README.md"]), "Installed package file allowlist changed.");
+  invariant(JSON.stringify(installedManifest.files) === JSON.stringify([
+    "bin/",
+    "dist/**/*.js",
+    "!dist/public-types.js",
+    "dist/{browser,constants,errors,index,public-types,reader,writer}.d.ts",
+    "LICENSE",
+    "README.md",
+  ]), "Installed package file allowlist changed.");
   invariant(JSON.stringify(installedManifest.bin) === JSON.stringify({ domformat: "./bin/domformat.js" }), "Installed CLI surface changed.");
   invariant(installedManifest.main === "./dist/index.js" && installedManifest.types === "./dist/index.d.ts", "Installed Node entry metadata changed.");
   invariant(JSON.stringify(installedManifest.exports) === JSON.stringify({

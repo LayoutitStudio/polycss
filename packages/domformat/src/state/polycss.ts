@@ -2,6 +2,8 @@ import { invariant } from "../errors.js";
 import { cssNumber } from "./numeric.js";
 import type { DomBindingChannel, DomBindings, DomState, DomStateChannel } from "../public-types.js";
 import type { MountedTree } from "../retained-dom.js";
+import type { PagedPlaybackStage, PagedStateStage, PolycssPagedState } from "./paged-state.js";
+import type { PolycssCompositorTiming } from "./compositor-timing.js";
 
 const MATRIX_WIDTH = 12;
 const SOURCE_MILLI_FACTOR = 1e3;
@@ -29,7 +31,12 @@ interface VisibilityJump {
 interface SurfaceWirePacket {
   readonly surface: Readonly<{
     faces: readonly SurfaceFace[];
-    statePacking: Readonly<{ stateCount: number; sourceFrameDeltas: readonly number[] }>;
+    statePacking: Readonly<{
+      stateCount: number;
+      sourceFrameDeltas: readonly number[];
+      positionDictionary?: readonly (readonly [number, number])[];
+      positionIndicesBase64?: string;
+    }>;
   }>;
   readonly transitions: Readonly<{
     initialFrame: number;
@@ -54,7 +61,9 @@ interface ExpandedLighting {
     statePacking: Readonly<{
       stateCount: number;
       sourceFramesBase64: string;
-      backgroundPositionYs: readonly string[];
+      positionProperty: "backgroundPosition" | "backgroundPositionY";
+      positions: readonly string[];
+      positionIndicesBase64?: string;
     }>;
   }>;
   readonly transitions: Readonly<{
@@ -100,11 +109,32 @@ interface TransformTable {
   readonly groups: readonly TransformGroup[];
 }
 
+interface PlaybackTimeline {
+  readonly frames: readonly number[];
+  readonly introTicks: number;
+  readonly loopTicks: number;
+  readonly deadlineMicros?: readonly number[];
+}
+
+interface PlaybackProfileTimeline extends PlaybackTimeline {
+  readonly profileId: string;
+}
+
+interface PlaybackBank {
+  readonly id: string;
+  readonly entryFrame: number;
+  readonly timeline: PlaybackTimeline;
+  readonly profileTimelines?: readonly PlaybackProfileTimeline[];
+}
+
 interface WirePlaybackPacket {
   readonly shapeCount: number;
   readonly leafCount: number;
   readonly appearances: readonly Appearance[];
-  readonly timeline: Readonly<{ frames: readonly number[]; introTicks: number; loopTicks: number }>;
+  readonly timeline: PlaybackTimeline;
+  readonly profileTimelines?: readonly PlaybackProfileTimeline[];
+  readonly initialBankId?: string;
+  readonly banks?: readonly PlaybackBank[];
   readonly initial: Readonly<{
     sourceFrame: number;
     appearance: number;
@@ -118,7 +148,31 @@ interface WirePlaybackPacket {
   readonly transforms: TransformTable;
 }
 
+interface WirePagedPlaybackPacket {
+  readonly version: 0;
+  readonly shapeCount: number;
+  readonly leafCount: number;
+  readonly appearances: readonly Appearance[];
+  readonly timeline: PlaybackTimeline;
+  readonly profileTimelines?: readonly PlaybackProfileTimeline[];
+  readonly initialBankId?: string;
+  readonly banks?: readonly PlaybackBank[];
+  readonly initial: Readonly<{ sourceFrame: number; appearance: number }>;
+  readonly pages: readonly Readonly<{
+    resource: string;
+    startFrame: number;
+    endFrame: number;
+    transformCount: number;
+    shapeChangeCount: number;
+    leafChangeCount: number;
+    materializedByteLength: number;
+  }>[];
+  readonly lookaheadPages: number;
+  readonly maxResidentPages: number;
+}
+
 interface ExpandedPlaybackPacket extends Omit<WirePlaybackPacket, "initial" | "shapeChanges" | "leafChanges" | "transforms"> {
+  readonly kind: "inline";
   readonly initial: Readonly<{
     sourceFrame: number;
     appearance: number;
@@ -131,16 +185,100 @@ interface ExpandedPlaybackPacket extends Omit<WirePlaybackPacket, "initial" | "s
   readonly transforms: readonly string[];
 }
 
+export interface ExpandedPagedPlaybackPacket extends WirePagedPlaybackPacket {
+  readonly kind: "paged";
+}
+
 interface WirePlaybackData {
   readonly packet: WirePlaybackPacket;
   readonly leafFit: readonly Readonly<{ canonicalSize: number }>[];
 }
 
+interface WireVariantPacket {
+  readonly version: number;
+  readonly frameCount: number;
+  readonly classes: readonly string[];
+  readonly initial: Readonly<{ frame: number; classIndicesBase64: string }>;
+  readonly sequential: Readonly<{
+    offsetsBase64: string;
+    targetIndicesBase64: string;
+    classIndicesBase64: string;
+  }>;
+  readonly nonInteractiveJumps: readonly Readonly<{
+    fromFrame: number;
+    toFrame: number;
+    targetIndicesBase64: string;
+    classIndicesBase64: string;
+  }>[];
+}
+
+interface ExpandedVariantPacket {
+  readonly frameCount: number;
+  readonly classes: readonly string[];
+  readonly initial: Uint16Array;
+  readonly sequentialOffsets: Uint32Array;
+  readonly sequentialTargets: Uint16Array;
+  readonly sequentialClasses: Uint16Array;
+  readonly jumps: ReadonlyMap<string, Readonly<{ targets: Uint16Array; classes: Uint16Array }>>;
+}
+
+interface WireViewportProfile {
+  readonly id: string;
+  readonly width?: number;
+  readonly height?: number;
+  readonly transformIndicesBase64: string;
+  readonly visibleBitsBase64: string;
+  readonly visibilityChanges?: Readonly<{
+    offsetsBase64: string;
+    leafIndicesBase64: string;
+  }>;
+  readonly responsiveAffine?: Readonly<{
+    scale: Readonly<{
+      baseWidth: number;
+      baseHeight: number;
+      multiplier: number;
+      max?: number;
+    }>;
+    presentBitsBase64: string;
+    coefficientsBase64: string;
+  }>;
+}
+
+interface WireViewportProfilesPacket {
+  readonly version: number;
+  readonly selection: Readonly<{ mode: "presentation-profile" | "smallest-covering" }>;
+  readonly transforms: readonly (readonly number[])[];
+  readonly profiles: readonly WireViewportProfile[];
+}
+
+interface ExpandedViewportProfile {
+  readonly id: string;
+  readonly width?: number;
+  readonly height?: number;
+  readonly transformIndices: Uint16Array;
+  readonly visible: Uint8Array;
+  readonly visibilityOffsets: Uint32Array | null;
+  readonly visibilityLeaves: Uint16Array | null;
+  readonly responsiveAffine: Readonly<{
+    scale: Readonly<{ baseWidth: number; baseHeight: number; multiplier: number; max?: number }>;
+    present: Uint8Array;
+    coefficients: Float64Array;
+  }> | null;
+}
+
+interface ExpandedViewportProfiles {
+  readonly selectionMode: "presentation-profile" | "smallest-covering";
+  readonly transforms: readonly string[];
+  readonly profiles: readonly ExpandedViewportProfile[];
+}
+
 export interface MaterializedPolycssState {
   readonly channels: Map<string, DomStateChannel>;
   readonly lighting: ExpandedLighting | null;
-  readonly playback: ExpandedPlaybackPacket | null;
+  readonly playback: ExpandedPlaybackPacket | ExpandedPagedPlaybackPacket | null;
   readonly surface: Readonly<Record<string, unknown>> | null;
+  readonly variants: ExpandedVariantPacket | null;
+  readonly viewportProfiles: ExpandedViewportProfiles | null;
 }
 
 function bytes(value: string): Uint8Array {
@@ -176,6 +314,13 @@ function uint32(value: string): Uint32Array {
   return Uint32Array.from(fromBase64(value, 4));
 }
 
+function float64(value: string): Float64Array {
+  const input = bytes(value);
+  invariant(input.length % 8 === 0, "TRUNCATED_STATE_TABLE", "Base64 float table is truncated.");
+  const view = new DataView(input.buffer, input.byteOffset, input.byteLength);
+  return Float64Array.from({ length: input.length / 8 }, (_, index) => view.getFloat64(index * 8, true));
+}
+
 function bitset(value: string, count: number): Uint8Array {
   const packed = bytes(value);
   invariant(packed.length === Math.ceil(count / 8), "TRUNCATED_STATE_TABLE", "Visibility bitset is truncated.");
@@ -187,14 +332,17 @@ function expandLighting(section: Readonly<Record<string, unknown>>): ExpandedLig
   const surface = contract.surface;
   const packing = surface.statePacking;
   const sourceFrames = new Array<number>(packing.stateCount);
-  const positions = new Array<string>(packing.stateCount);
+  const coordinate = (value: number): string => value === 0 ? "0" : `${value}px`;
+  const positions = packing.positionDictionary
+    ? packing.positionDictionary.map((position) => position.map(coordinate).join(" "))
+    : new Array<string>(packing.stateCount);
   for (const face of surface.faces) {
     let frame = 0;
     for (let local = 0; local < face.stateCount; local += 1) {
       const index = face.stateOffset + local;
       frame += packing.sourceFrameDeltas[index];
       sourceFrames[index] = frame;
-      positions[index] = `${frame === 0 ? 0 : -frame * face.leafHeight}px`;
+      if (!packing.positionDictionary) positions[index] = `${frame === 0 ? 0 : -frame * face.leafHeight}px`;
     }
   }
   const sequential = contract.transitions.sequential;
@@ -217,7 +365,9 @@ function expandLighting(section: Readonly<Record<string, unknown>>): ExpandedLig
       statePacking: {
         stateCount: packing.stateCount,
         sourceFramesBase64: toBase64(sourceFrames, 2),
-        backgroundPositionYs: positions,
+        positionProperty: packing.positionDictionary ? "backgroundPosition" : "backgroundPositionY",
+        positions,
+        ...(packing.positionIndicesBase64 === undefined ? {} : { positionIndicesBase64: packing.positionIndicesBase64 }),
       },
     },
     transitions: {
@@ -238,7 +388,7 @@ function emptyLighting(frameCount: number): ExpandedLighting {
   return {
     surface: {
       faces: [],
-      statePacking: { stateCount: 0, sourceFramesBase64: "", backgroundPositionYs: [] },
+      statePacking: { stateCount: 0, sourceFramesBase64: "", positionProperty: "backgroundPositionY", positions: [] },
     },
     transitions: {
       initialFrame: 1,
@@ -318,6 +468,28 @@ function transformGroups(packet: Omit<ExpandedPlaybackPacket, "transforms">, cou
 function matrix(values: readonly number[]): string {
   invariant(values.length === MATRIX_WIDTH && values.every(Number.isFinite), "INVALID_PLAYBACK_PUBLICATION", "Prepared playback matrix contains a non-finite component.");
   return `matrix3d(${[values[0], values[1], values[2], 0, values[3], values[4], values[5], 0, values[6], values[7], values[8], 0, values[9], values[10], values[11], 1].join(",")})`;
+}
+
+function expandViewportProfiles(section: Readonly<Record<string, unknown>>, leafCount: number): ExpandedViewportProfiles {
+  const packet = section.packet as unknown as WireViewportProfilesPacket;
+  return Object.freeze({
+    selectionMode: packet.selection.mode,
+    transforms: Object.freeze(packet.transforms.map(matrix)),
+    profiles: Object.freeze(packet.profiles.map((profile) => Object.freeze({
+      id: profile.id,
+      ...(profile.width === undefined ? {} : { width: profile.width }),
+      ...(profile.height === undefined ? {} : { height: profile.height }),
+      transformIndices: uint16(profile.transformIndicesBase64),
+      visible: bitset(profile.visibleBitsBase64, leafCount),
+      visibilityOffsets: profile.visibilityChanges ? uint32(profile.visibilityChanges.offsetsBase64) : null,
+      visibilityLeaves: profile.visibilityChanges ? uint16(profile.visibilityChanges.leafIndicesBase64) : null,
+      responsiveAffine: profile.responsiveAffine ? Object.freeze({
+        scale: Object.freeze({ ...profile.responsiveAffine.scale }),
+        present: bitset(profile.responsiveAffine.presentBitsBase64, leafCount),
+        coefficients: float64(profile.responsiveAffine.coefficientsBase64),
+      }) : null,
+    }))),
+  });
 }
 
 function milli(value: number): string {
@@ -403,18 +575,45 @@ function expandPlayback(data: WirePlaybackData, lighting: ExpandedLighting): Exp
   };
   const packet: Omit<ExpandedPlaybackPacket, "transforms"> = {
     ...raw,
+    kind: "inline",
     initial,
     shapeChanges: expandChanges(raw.shapeChanges, raw.frameRows, 4, true),
     leafChanges: expandChanges(raw.leafChanges, raw.frameRows, 6, false),
   };
   return {
     ...packet,
+    kind: "inline",
     transforms: expandTransforms(raw.transforms, packet, data.leafFit, lighting.surface.faces),
   };
 }
 
+function expandVariants(section: Readonly<Record<string, unknown>>): ExpandedVariantPacket {
+  const packet = section.packet as unknown as WireVariantPacket;
+  const initial = uint16(packet.initial.classIndicesBase64);
+  const offsets = uint32(packet.sequential.offsetsBase64);
+  const targets = uint16(packet.sequential.targetIndicesBase64);
+  const classes = uint16(packet.sequential.classIndicesBase64);
+  invariant(offsets.length === packet.frameCount + 1 && targets.length === classes.length, "TRUNCATED_VARIANTS", "Prepared variant transitions are incomplete.");
+  const jumps = new Map<string, Readonly<{ targets: Uint16Array; classes: Uint16Array }>>();
+  for (const jump of packet.nonInteractiveJumps) {
+    const jumpTargets = uint16(jump.targetIndicesBase64);
+    const jumpClasses = uint16(jump.classIndicesBase64);
+    invariant(jumpTargets.length === jumpClasses.length, "TRUNCATED_VARIANTS", `Prepared variant jump ${jump.fromFrame}>${jump.toFrame} is incomplete.`);
+    jumps.set(`${jump.fromFrame}>${jump.toFrame}`, Object.freeze({ targets: jumpTargets, classes: jumpClasses }));
+  }
+  return Object.freeze({
+    frameCount: packet.frameCount,
+    classes: Object.freeze([...packet.classes]),
+    initial,
+    sequentialOffsets: offsets,
+    sequentialTargets: targets,
+    sequentialClasses: classes,
+    jumps,
+  });
+}
+
 interface VisibilityState {
-  readonly rows: Uint8Array[];
+  readonly initial: Uint8Array;
   readonly sequentialOffsets: Uint32Array;
   readonly sequentialFaces: Uint16Array;
   readonly jumps: Map<string, Uint16Array>;
@@ -426,15 +625,8 @@ function visibilityState(lighting: ExpandedLighting, leafCount: number, frameCou
   const sequentialOffsets = uint32(schedule.sequential.offsetsBase64);
   const sequentialFaces = uint16(schedule.sequential.faceIndicesBase64);
   invariant(sequentialOffsets.length === frameCount + 1, "TRUNCATED_VISIBILITY", "Visibility offsets do not cover the prepared frame range.");
-  const current = initial.slice();
-  const rows: Uint8Array[] = [current.slice()];
-  for (let targetFrame = 2; targetFrame <= frameCount; targetFrame += 1) {
-    const transition = targetFrame - 1;
-    for (const index of sequentialFaces.subarray(sequentialOffsets[transition], sequentialOffsets[transition + 1])) current[index] ^= 1;
-    rows.push(current.slice());
-  }
   const jumps = new Map<string, Uint16Array>(schedule.nonInteractiveJumps.map((jump): [string, Uint16Array] => [`${jump.fromFrame}>${jump.toFrame}`, uint16(jump.faceIndicesBase64)]));
-  return { rows, sequentialOffsets, sequentialFaces, jumps };
+  return { initial, sequentialOffsets, sequentialFaces, jumps };
 }
 
 interface LightingFace extends SurfaceFace {
@@ -443,7 +635,9 @@ interface LightingFace extends SurfaceFace {
 
 interface LightingState {
   readonly faces: LightingFace[];
+  readonly positionProperty: "backgroundPosition" | "backgroundPositionY";
   readonly positions: readonly string[];
+  readonly positionIndices: Uint16Array | null;
   readonly sequentialOffsets: Uint32Array;
   readonly sequentialFaces: Uint16Array;
   readonly sequentialStates: Uint16Array;
@@ -453,7 +647,8 @@ interface LightingState {
 function lightingState(lighting: ExpandedLighting): LightingState {
   const packing = lighting.surface.statePacking;
   const sourceFrames = uint16(packing.sourceFramesBase64);
-  invariant(sourceFrames.length === packing.stateCount && packing.backgroundPositionYs.length === packing.stateCount, "TRUNCATED_LIGHTING", "Lighting states are incomplete.");
+  const positionIndices = packing.positionIndicesBase64 === undefined ? null : uint16(packing.positionIndicesBase64);
+  invariant(sourceFrames.length === packing.stateCount && (positionIndices === null ? packing.positions.length === packing.stateCount : positionIndices.length === packing.stateCount), "TRUNCATED_LIGHTING", "Lighting states are incomplete.");
   const faces = lighting.surface.faces.map((face) => ({
     ...face,
     sourceFrames: sourceFrames.subarray(face.stateOffset, face.stateOffset + face.stateCount),
@@ -465,7 +660,9 @@ function lightingState(lighting: ExpandedLighting): LightingState {
   }]));
   return {
     faces,
-    positions: packing.backgroundPositionYs,
+    positionProperty: packing.positionProperty,
+    positions: packing.positions,
+    positionIndices,
     sequentialOffsets: uint32(sequential.offsetsBase64),
     sequentialFaces: uint16(sequential.faceIndicesBase64),
     sequentialStates: uint16(sequential.stateIndicesBase64),
@@ -488,21 +685,52 @@ export function materializePolycssState(state: DomState): MaterializedPolycssSta
   const channels = new Map<string, DomStateChannel>(state.channels.map((channel): [string, DomStateChannel] => [channel.id, channel]));
   const surfaceChannel = [...channels.values()].find((channel) => channel.codec === "polycss-surface-packed@0");
   const playbackChannel = [...channels.values()].find((channel) => channel.codec === "polycss-playback-packed@0");
-  if (!playbackChannel) return Object.freeze({ channels, lighting: null, playback: null, surface: null });
-  const playbackData = playbackChannel.data as unknown as WirePlaybackData;
-  invariant(surfaceChannel || playbackData.packet.leafCount === 0, "MISSING_POLYCSS_CHANNEL", "Prepared playback leaves require a surface channel.");
+  const pagedPlaybackChannel = [...channels.values()].find((channel) => channel.codec === "polycss-paged-playback@0");
+  const variantChannel = [...channels.values()].find((channel) => channel.codec === "polycss-variants-packed@0");
+  const viewportProfileChannel = [...channels.values()].find((channel) => channel.codec === "polycss-viewport-profiles-packed@0");
+  if (!playbackChannel && !pagedPlaybackChannel) return Object.freeze({ channels, lighting: null, playback: null, surface: null, variants: null, viewportProfiles: null });
+  const playbackData = playbackChannel?.data as unknown as WirePlaybackData | undefined;
+  const pagedPacket = (pagedPlaybackChannel?.data as unknown as { readonly packet: WirePagedPlaybackPacket } | undefined)?.packet;
+  const rawPacket = playbackData?.packet ?? pagedPacket!;
+  invariant(surfaceChannel || rawPacket.leafCount === 0, "MISSING_POLYCSS_CHANNEL", "Prepared playback leaves require a surface channel.");
   const lighting = surfaceChannel
     ? expandLighting(surfaceChannel.data)
-    : emptyLighting(playbackData.packet.frameRows.length);
-  const playback = expandPlayback(playbackData, lighting);
-  return Object.freeze({ channels, lighting, playback, surface: surfaceChannel?.data ?? null });
+    : emptyLighting(playbackData?.packet.frameRows.length ?? pagedPacket!.pages.at(-1)!.endFrame);
+  const playback = playbackData ? expandPlayback(playbackData, lighting) : Object.freeze({ ...pagedPacket!, kind: "paged" as const });
+  const variants = variantChannel
+    ? expandVariants(variantChannel.data)
+    : null;
+  const viewportProfiles = viewportProfileChannel
+    ? expandViewportProfiles(viewportProfileChannel.data, playback.leafCount)
+    : null;
+  return Object.freeze({ channels, lighting, playback, surface: surfaceChannel?.data ?? null, variants, viewportProfiles });
 }
 
-function timelineFrame(packet: ExpandedPlaybackPacket, tick: number): number {
-  const index = tick < packet.timeline.frames.length
+function timelineFrame(timeline: PlaybackTimeline, tick: number): number {
+  const index = tick < timeline.frames.length
     ? tick
-    : packet.timeline.introTicks + (tick - packet.timeline.introTicks) % packet.timeline.loopTicks;
-  return packet.timeline.frames[index];
+    : timeline.introTicks + (tick - timeline.introTicks) % timeline.loopTicks;
+  return timeline.frames[index];
+}
+
+function fixedTickIntervalMs(parameters: PlaybackParameters): number {
+  return parameters.tickIntervalUs
+    ? parameters.tickIntervalUs[0] / parameters.tickIntervalUs[1] / 1000
+    : 1000 / parameters.tickRateHz!;
+}
+
+function timelineDeadlineMicros(timeline: PlaybackTimeline, tick: number): number {
+  const deadlines = timeline.deadlineMicros;
+  invariant(deadlines && Number.isSafeInteger(tick) && tick >= 0, "INVALID_PLAYBACK_PUBLICATION", "Prepared playback deadline tick is invalid.");
+  if (tick < deadlines.length) return deadlines[tick];
+  const loopStart = timeline.introTicks;
+  const loopOffset = tick - loopStart;
+  const cycles = Math.floor(loopOffset / timeline.loopTicks);
+  const remainder = loopOffset % timeline.loopTicks;
+  const loopDuration = deadlines.at(-1)! - deadlines[loopStart];
+  const result = deadlines[loopStart] + cycles * loopDuration + deadlines[loopStart + remainder] - deadlines[loopStart];
+  invariant(Number.isSafeInteger(result), "INVALID_PLAYBACK_PUBLICATION", "Prepared playback deadline tick exceeds the safe integer range.");
+  return result;
 }
 
 function loadTriples(source: readonly number[], transforms: Uint32Array, visibility: Uint8Array): void {
@@ -519,12 +747,21 @@ function loadPairs(source: readonly number[], transforms: Uint32Array): void {
 export interface PolycssPlayback {
   readonly tick: number;
   readonly sourceFrame: number;
+  readonly bankId: string | null;
+  tickSpan(count: number): number;
+  ticksWithin(elapsedMs: number, maximum?: number): number;
+  frameAfter(count: number): number;
   publishInitial(): number;
   advance(): number;
   advanceMany(count: number): readonly number[];
+  advanceCollapsed(count: number): number;
   seek(frame: number): number;
+  bankEntryFrame(id: string): number;
+  selectBank(id: string): number;
   restart(shapeIndices?: readonly number[], leafIndices?: readonly number[]): number;
+  selectProfileTimeline(presentationProfileId: string | null): boolean;
   applySurfaceFrame(frame: number): number;
+  applyViewportProfile(width: number, height: number, presentationProfileId: string | null): string | null;
   forceVisible(indices: Iterable<number>): void;
   applyInteractionLeaf(index: number, transform: string | null): void;
   restoreInteraction(shapeIndices: readonly number[], leafIndices: readonly number[]): void;
@@ -539,6 +776,19 @@ function createStaticPlayback(publishAppearance: (appearance: Appearance) => voi
   return Object.freeze({
     get tick() { return 0; },
     get sourceFrame() { return 1; },
+    get bankId() { return null; },
+    tickSpan(count: number) {
+      invariant(Number.isSafeInteger(count) && count >= 1, "INVALID_PLAYBACK_PUBLICATION", "Static playback timing count must be a positive integer.");
+      return count * (1000 / 30);
+    },
+    ticksWithin(elapsedMs: number, maximum = Number.MAX_SAFE_INTEGER) {
+      invariant(Number.isFinite(elapsedMs) && elapsedMs >= 0 && Number.isSafeInteger(maximum) && maximum >= 1, "INVALID_PLAYBACK_PUBLICATION", "Static playback elapsed timing is invalid.");
+      return Math.min(maximum, Math.floor(elapsedMs / (1000 / 30)));
+    },
+    frameAfter(count: number) {
+      invariant(Number.isSafeInteger(count) && count >= 1, "INVALID_PLAYBACK_PUBLICATION", "Static playback preview count must be a positive integer.");
+      return 1;
+    },
     publishInitial() {
       if (!initialPublished) {
         publishAppearance(["default", 1, 0]);
@@ -551,9 +801,27 @@ function createStaticPlayback(publishAppearance: (appearance: Appearance) => voi
       invariant(Number.isSafeInteger(count) && count >= 1, "INVALID_PLAYBACK_PUBLICATION", "Static playback catch-up count must be a positive integer.");
       return Object.freeze(new Array<number>(count).fill(1));
     },
+    advanceCollapsed(count: number) {
+      invariant(Number.isSafeInteger(count) && count >= 1, "INVALID_PLAYBACK_PUBLICATION", "Static playback collapsed count must be a positive integer.");
+      return 1;
+    },
     seek,
+    bankEntryFrame(id: string) {
+      invariant(false, "UNKNOWN_PREPARED_BANK", `Prepared bank ${String(id)} is unsupported by this document.`);
+    },
+    selectBank(id: string) {
+      invariant(false, "UNKNOWN_PREPARED_BANK", `Prepared bank ${String(id)} is unsupported by this document.`);
+    },
     restart() { return 1; },
+    selectProfileTimeline(presentationProfileId: string | null) {
+      invariant(presentationProfileId === null || typeof presentationProfileId === "string", "INVALID_PLAYBACK_PUBLICATION", "Static presentation profile id is invalid.");
+      return false;
+    },
     applySurfaceFrame: seek,
+    applyViewportProfile(width: number, height: number, presentationProfileId: string | null) {
+      invariant(Number.isFinite(width) && width >= 0 && Number.isFinite(height) && height >= 0 && (presentationProfileId === null || typeof presentationProfileId === "string"), "INVALID_VIEWPORT_PROFILE_PUBLICATION", "Static presentation viewport profile input is invalid.");
+      return null;
+    },
     forceVisible(indices: Iterable<number>) {
       invariant(indices && [...indices].length === 0, "INVALID_INTERACTION_PUBLICATION", "Static presentation has no visibility targets.");
     },
@@ -575,6 +843,8 @@ interface PlaybackTargets {
 interface PlaybackParameters {
   readonly baseSceneTransform: string;
   readonly frameCount: number;
+  readonly tickRateHz?: number;
+  readonly tickIntervalUs?: readonly [number, number];
 }
 
 type BoundPlaybackTargets = Readonly<{
@@ -583,6 +853,8 @@ type BoundPlaybackTargets = Readonly<{
   leaves?: readonly HTMLElement[];
 }>;
 
+type BoundVariantTargets = Readonly<{ nodes?: readonly HTMLElement[] }>;
+
 export function createPolycssPlayback(
   materialized: MaterializedPolycssState,
   bindings: DomBindings,
@@ -590,15 +862,25 @@ export function createPolycssPlayback(
   options: {
     readonly publishAppearance?: (appearance: Appearance) => void;
     readonly boundTargets?: ReadonlyMap<string, Readonly<{ targets: unknown }>>;
+    readonly pagedState?: PolycssPagedState | null;
+    readonly assertPagedFrameReady?: (frame: number) => void;
+    readonly compositorTiming?: PolycssCompositorTiming | null;
   } = {},
 ): PolycssPlayback {
   const publishAppearance = options.publishAppearance;
   invariant(typeof publishAppearance === "function", "MISSING_PRESENTATION_PUBLISHER", "Playback requires the static presentation publisher.");
-  const playbackBinding = bindings.channels.find((channel) => channel.interpreter === "polycss-playback@0");
+  const playbackBinding = bindings.channels.find((channel) => channel.interpreter === "polycss-playback@0" || channel.interpreter === "polycss-paged-playback@0");
   if (!playbackBinding) return createStaticPlayback(publishAppearance);
   const packet = materialized.playback;
   const surfaceBinding = bindings.channels.find((channel) => channel.interpreter === "polycss-surface@0");
-  invariant(packet && materialized.lighting && (surfaceBinding || packet.leafCount === 0), "MISSING_POLYCSS_BINDING", "Executable playback leaves require a surface binding.");
+  const variantBinding = bindings.channels.find((channel) => channel.interpreter === "polycss-variants@0");
+  const pagedVariantBinding = bindings.channels.find((channel) => channel.interpreter === "polycss-paged-variants@0");
+  const viewportProfileBinding = bindings.channels.find((channel) => channel.interpreter === "polycss-viewport-profiles@0");
+  invariant(packet && materialized.lighting && (surfaceBinding || packet.leafCount === 0), "MISSING_POLYCSS_BINDING", "Executable playback requires its materialized state and surface binding.");
+  invariant((packet.kind === "paged") === Boolean(options.pagedState?.hasPlayback), "MISSING_POLYCSS_BINDING", "Executable paged playback requires the document page coordinator.");
+  invariant(Boolean(variantBinding) === Boolean(materialized.variants), "MISSING_POLYCSS_BINDING", "Executable prepared variants require matching state and binding channels.");
+  invariant(Boolean(pagedVariantBinding) === Boolean(options.pagedState?.hasVariants), "MISSING_POLYCSS_BINDING", "Executable paged variants require a prepared page runtime.");
+  invariant(Boolean(viewportProfileBinding) === Boolean(materialized.viewportProfiles), "MISSING_POLYCSS_BINDING", "Executable viewport profiles require matching state and binding channels.");
   const playbackTargets = playbackBinding.targets as unknown as PlaybackTargets;
   const playbackParameters = playbackBinding.parameters as unknown as PlaybackParameters;
   const bound = options.boundTargets?.get(playbackBinding.id)?.targets as BoundPlaybackTargets | undefined;
@@ -608,40 +890,152 @@ export function createPolycssPlayback(
   invariant(scene && shapeTargets.every(Boolean) && leafTargets.every(Boolean), "MISSING_TARGET_NODE", "Playback target nodes are not mounted.");
   const shapes = shapeTargets as readonly HTMLElement[];
   const leaves = leafTargets as readonly HTMLElement[];
+  const variantIds = variantBinding ? (variantBinding.targets as unknown as { readonly nodes: readonly string[] }).nodes : [];
+  const variantBound = variantBinding ? options.boundTargets?.get(variantBinding.id)?.targets as BoundVariantTargets | undefined : undefined;
+  const variantTargets = variantBound?.nodes ?? variantIds.map((id) => mounted.byId.get(id));
+  invariant(variantTargets.every(Boolean), "MISSING_TARGET_NODE", "Prepared variant target nodes are not mounted.");
+  const variants = materialized.variants;
+  const variantNodes = variantTargets as readonly HTMLElement[];
+  const appliedVariants = variants?.initial.slice() ?? new Uint16Array(0);
+  let variantFrame = variants ? 1 : 0;
   const baseSceneTransform = playbackParameters.baseSceneTransform;
-  const shapeTransforms = new Uint32Array(packet.shapeCount);
+  const shapeTransforms = new Array<string>(packet.shapeCount);
   const shapeVisibility = new Uint8Array(packet.shapeCount);
-  const leafTransforms = new Uint32Array(packet.leafCount);
+  const leafTransforms = new Array<string>(packet.leafCount);
   const dirtyHiddenTransforms = new Uint8Array(packet.leafCount);
   const interactionTransforms = new Uint8Array(packet.leafCount);
-  loadTriples(packet.initial.shapes, shapeTransforms, shapeVisibility);
-  loadPairs(packet.initial.leaves, leafTransforms);
+  const profileTransformOverrides = new Uint16Array(packet.leafCount);
+  profileTransformOverrides.fill(0xffff);
+  const profileResponsiveTransforms = new Array<string | null>(packet.leafCount).fill(null);
+  const profileVisible = new Uint8Array(packet.leafCount);
+  profileVisible.fill(1);
+  const pagedInitial = packet.kind === "paged" ? options.pagedState?.initialPlayback : null;
+  if (packet.kind === "inline") {
+    for (let offset = 0; offset < packet.initial.shapes.length; offset += 3) {
+      shapeTransforms[packet.initial.shapes[offset]] = packet.transforms[packet.initial.shapes[offset + 1]];
+      shapeVisibility[packet.initial.shapes[offset]] = packet.initial.shapes[offset + 2];
+    }
+    for (let offset = 0; offset < packet.initial.leaves.length; offset += 2) leafTransforms[packet.initial.leaves[offset]] = packet.transforms[packet.initial.leaves[offset + 1]];
+  } else {
+    invariant(pagedInitial && pagedInitial.shapeTransforms.length === packet.shapeCount && pagedInitial.leafTransforms.length === packet.leafCount, "STATE_PAGE_NOT_READY", "Paged playback initial canonical row is unavailable.");
+    for (let index = 0; index < packet.shapeCount; index += 1) { shapeTransforms[index] = pagedInitial.shapeTransforms[index]; shapeVisibility[index] = pagedInitial.shapeVisibility[index]; }
+    for (let index = 0; index < packet.leafCount; index += 1) leafTransforms[index] = pagedInitial.leafTransforms[index];
+  }
   const visibility = visibilityState(materialized.lighting, packet.leafCount, playbackParameters.frameCount);
   const light = lightingState(materialized.lighting);
-  const visible = visibility.rows[0].slice();
+  const visible = visibility.initial.slice();
   const forced = new Uint8Array(packet.leafCount);
   const degenerate = new Uint8Array(packet.leafCount);
   const appliedStates = new Uint16Array(packet.leafCount);
+  const dirtySurfaceStates = new Uint8Array(packet.leafCount);
   let currentForced = new Uint16Array(0);
   let sourceFrame = packet.initial.sourceFrame;
   let surfaceFrame = packet.initial.sourceFrame;
   let appearanceIndex = packet.initial.appearance;
-  let modelTransform = packet.initial.modelTransform;
+  let modelTransform = packet.kind === "inline" ? packet.transforms[packet.initial.modelTransform] : pagedInitial!.modelTransform;
   let tick = 0;
   let initialPublished = false;
+  let selectedViewportProfile = -2;
+  let selectedViewportWidth = -1;
+  let selectedViewportHeight = -1;
+  let profileVisibilityFrame = packet.initial.sourceFrame;
+  const banks = new Map(packet.banks?.map((bank): [string, PlaybackBank] => [bank.id, bank]) ?? []);
+  let activeBank = packet.initialBankId === undefined ? null : banks.get(packet.initialBankId) ?? null;
+  let selectedTimelineProfileId: string | null = null;
+  const timelineFor = (bank: PlaybackBank | null, profileId: string | null): PlaybackTimeline => {
+    const baseline = bank?.timeline ?? packet.timeline;
+    const profiles = bank?.profileTimelines ?? packet.profileTimelines;
+    return profileId === null ? baseline : profiles?.find((timeline) => timeline.profileId === profileId) ?? baseline;
+  };
+  let activeTimeline: PlaybackTimeline = timelineFor(activeBank, null);
 
   const applyAppearance = () => publishAppearance(packet.appearances[appearanceIndex]);
 
   const writeModel = () => {
-    const transform = packet.transforms[modelTransform];
-    const next = transform === "" ? baseSceneTransform : `${baseSceneTransform} ${transform}`;
+    const next = modelTransform === "" ? baseSceneTransform : `${baseSceneTransform} ${modelTransform}`;
     if (scene.style.transform !== next) scene.style.transform = next;
   };
 
-  const isPaintVisible = (index: number): boolean => (visible[index] === 1 || forced[index] === 1) && degenerate[index] === 0;
+  const isPaintVisible = (index: number): boolean => ((visible[index] === 1 && profileVisible[index] === 1) || forced[index] === 1) && degenerate[index] === 0;
+
+  const preparedLeafTransform = (index: number): string => {
+    const responsive = profileResponsiveTransforms[index];
+    if (responsive !== null) return responsive;
+    const override = profileTransformOverrides[index];
+    return override === 0xffff ? leafTransforms[index] : materialized.viewportProfiles!.transforms[override];
+  };
+
+  const profileVisibilityAt = (profile: ExpandedViewportProfile, frame: number): Uint8Array => {
+    const result = profile.visible.slice();
+    const offsets = profile.visibilityOffsets;
+    const targets = profile.visibilityLeaves;
+    if (!offsets || !targets) return result;
+    for (let next = 2; next <= frame; next += 1) {
+      for (let cursor = offsets[next - 1]; cursor < offsets[next]; cursor += 1) result[targets[cursor]] ^= 1;
+    }
+    return result;
+  };
+
+  const stageProfileVisibility = (frame: number): number[] => {
+    const profile = selectedViewportProfile < 0 ? null : materialized.viewportProfiles!.profiles[selectedViewportProfile];
+    if (!profile) {
+      profileVisibilityFrame = frame;
+      return [];
+    }
+    const changed: number[] = [];
+    const offsets = profile.visibilityOffsets;
+    const targets = profile.visibilityLeaves;
+    if (offsets && targets && frame === (profileVisibilityFrame === playbackParameters.frameCount ? 1 : profileVisibilityFrame + 1)) {
+      for (let cursor = offsets[frame - 1]; cursor < offsets[frame]; cursor += 1) {
+        const leaf = targets[cursor];
+        profileVisible[leaf] ^= 1;
+        changed.push(leaf);
+      }
+    } else {
+      const next = profileVisibilityAt(profile, frame);
+      for (let leaf = 0; leaf < packet.leafCount; leaf += 1) {
+        if (profileVisible[leaf] === next[leaf]) continue;
+        profileVisible[leaf] = next[leaf];
+        changed.push(leaf);
+      }
+    }
+    profileVisibilityFrame = frame;
+    return changed;
+  };
+
+  const roundedAffine = (value: number): string => {
+    const rounded = Math.round(value * 1_000_000) / 1_000_000;
+    return String(Object.is(rounded, -0) ? 0 : rounded);
+  };
+
+  const responsiveAffineTransforms = (profile: ExpandedViewportProfile | null, width: number, height: number): (string | null)[] => {
+    const affine = profile?.responsiveAffine;
+    if (!affine) return new Array<string | null>(packet.leafCount).fill(null);
+    const rawScale = affine.scale.multiplier * Math.min(width / affine.scale.baseWidth, height / affine.scale.baseHeight);
+    const scale = affine.scale.max === undefined ? rawScale : Math.min(affine.scale.max, rawScale);
+    const result = new Array<string | null>(packet.leafCount).fill(null);
+    let cursor = 0;
+    for (let leaf = 0; leaf < packet.leafCount; leaf += 1) {
+      if (affine.present[leaf] === 0) continue;
+      const coefficients = affine.coefficients.subarray(cursor, cursor + 16);
+      const values = [
+        coefficients[0] + coefficients[1] * scale,
+        coefficients[2] + coefficients[3] * scale,
+        coefficients[4] + coefficients[5] * scale,
+        coefficients[6] + coefficients[7] * scale,
+        coefficients[8] + coefficients[9] * width + coefficients[10] * height + coefficients[11] * scale,
+        coefficients[12] + coefficients[13] * width + coefficients[14] * height + coefficients[15] * scale,
+      ];
+      invariant(values.every(Number.isFinite), "INVALID_VIEWPORT_PROFILE_PUBLICATION", "Responsive affine publication produced a non-finite matrix component.");
+      result[leaf] = `matrix(${values.map(roundedAffine).join(",")})`;
+      cursor += 16;
+    }
+    invariant(cursor === affine.coefficients.length, "INVALID_VIEWPORT_PROFILE_PUBLICATION", "Responsive affine coefficients are incomplete.");
+    return result;
+  };
 
   const writePreparedLeafTransform = (index: number): void => {
-    leaves[index].style.transform = packet.transforms[leafTransforms[index]];
+    leaves[index].style.transform = preparedLeafTransform(index);
     dirtyHiddenTransforms[index] = 0;
     interactionTransforms[index] = 0;
   };
@@ -662,11 +1056,74 @@ export function createPolycssPlayback(
     }
   };
 
-  const writeVisibility = (index: number): void => {
+  const writePreparedSurfaceState = (index: number, state: number): void => {
+    const face = light.faces[index];
+    const packedState = face.stateOffset + state;
+    const positionIndex = light.positionIndices?.[packedState] ?? packedState;
+    leaves[index].style[light.positionProperty] = light.positions[positionIndex];
+    appliedStates[index] = state;
+    dirtySurfaceStates[index] = 0;
+  };
+
+  const flushPreparedSurfaceState = (index: number, frame: number): void => {
+    const face = light.faces[index];
+    const state = stateAt(face, frame - 1);
+    invariant(state >= 0 && state < face.stateCount, "INVALID_SURFACE_PUBLICATION", `Prepared surface leaf ${index} has no state for frame ${frame}.`);
+    if (dirtySurfaceStates[index] === 1 || appliedStates[index] !== state) writePreparedSurfaceState(index, state);
+  };
+
+  const writeVisibility = (index: number, frame = surfaceFrame): void => {
     const paintVisible = isPaintVisible(index);
     const next = paintVisible ? "visible" : "hidden";
-    if (paintVisible) flushPreparedLeafTransform(index);
+    if (paintVisible) {
+      if (interactionTransforms[index] === 0) flushPreparedLeafTransform(index);
+      flushPreparedSurfaceState(index, frame);
+    }
     if (leaves[index].style.visibility !== next) leaves[index].style.visibility = next;
+  };
+
+  const applyVariants = (frame: number): void => {
+    if (options.pagedState) {
+      options.pagedState.publishVariants(frame);
+      variantFrame = frame;
+      return;
+    }
+    if (!variants || frame === variantFrame) return;
+    const applyChanges = (targets: Uint16Array, classes: Uint16Array, start = 0, end = targets.length): void => {
+      invariant(end <= targets.length && end <= classes.length, "INVALID_VARIANT_PUBLICATION", `Prepared variants have an incomplete state for frame ${frame}.`);
+      for (let cursor = start; cursor < end; cursor += 1) {
+        const index = targets[cursor];
+        const value = classes[cursor];
+        const previous = appliedVariants[index];
+        if (previous === value) continue;
+        if (previous !== 0xffff) variantNodes[index].classList.remove(variants.classes[previous]);
+        if (value !== 0xffff) variantNodes[index].classList.add(variants.classes[value]);
+        appliedVariants[index] = value;
+      }
+    };
+    const sequentialFrame = variantFrame === variants.frameCount ? 1 : variantFrame + 1;
+    if (frame === sequentialFrame) {
+      const start = variants.sequentialOffsets[frame - 1];
+      const end = variants.sequentialOffsets[frame];
+      applyChanges(variants.sequentialTargets, variants.sequentialClasses, start, end);
+    } else {
+      const jump = variants.jumps.get(`${variantFrame}>${frame}`);
+      if (jump) applyChanges(jump.targets, jump.classes);
+      else {
+        const pending = new Map<number, number>();
+        let nextFrame = variantFrame;
+        while (nextFrame !== frame) {
+          nextFrame = nextFrame === variants.frameCount ? 1 : nextFrame + 1;
+          const start = variants.sequentialOffsets[nextFrame - 1];
+          const end = variants.sequentialOffsets[nextFrame];
+          for (let cursor = start; cursor < end; cursor += 1) pending.set(variants.sequentialTargets[cursor], variants.sequentialClasses[cursor]);
+        }
+        const targets = Uint16Array.from([...pending.keys()].sort((left, right) => left - right));
+        const classes = Uint16Array.from(targets, (target) => pending.get(target)!);
+        applyChanges(targets, classes);
+      }
+    }
+    variantFrame = frame;
   };
 
   const publishSurfaceState = (frame: number): void => {
@@ -674,9 +1131,8 @@ export function createPolycssPlayback(
       const face = light.faces[index];
       const state = stateAt(face, frame - 1);
       invariant(state >= 0 && state < face.stateCount, "INVALID_SURFACE_PUBLICATION", `Prepared surface leaf ${index} has no state for frame ${frame}.`);
-      leaves[index].style.backgroundPositionY = light.positions[face.stateOffset + state];
-      appliedStates[index] = state;
-      writeVisibility(index);
+      writePreparedSurfaceState(index, state);
+      writeVisibility(index, frame);
     }
     surfaceFrame = frame;
   };
@@ -685,140 +1141,219 @@ export function createPolycssPlayback(
     if (nextFrame === surfaceFrame) return;
     const frameCount = playbackParameters.frameCount;
     const sequential = nextFrame === (surfaceFrame === frameCount ? 1 : surfaceFrame + 1);
-    let changed = sequential
-      ? visibility.sequentialFaces.subarray(visibility.sequentialOffsets[nextFrame - 1], visibility.sequentialOffsets[nextFrame])
-      : visibility.jumps.get(`${surfaceFrame}>${nextFrame}`);
-    if (!changed) {
-      const target = visibility.rows[nextFrame - 1];
-      const changedIndices: number[] = [];
-      for (let index = 0; index < target.length; index += 1) {
-        if (target[index] !== visible[index]) changedIndices.push(index);
-      }
-      changed = Uint16Array.from(changedIndices);
-    }
-    for (const index of changed) {
-      visible[index] ^= 1;
-      writeVisibility(index);
-    }
     const jump = sequential ? undefined : light.jumps.get(`${surfaceFrame}>${nextFrame}`);
-    let faceIndices: Uint16Array;
-    let stateIndices: Uint16Array;
-    let start = 0;
-    let end;
-    if (sequential) {
-      faceIndices = light.sequentialFaces;
-      stateIndices = light.sequentialStates;
-      start = light.sequentialOffsets[nextFrame - 1];
-      end = light.sequentialOffsets[nextFrame];
-    } else if (jump) {
-      faceIndices = jump.faces;
-      stateIndices = jump.states;
-      end = faceIndices.length;
-    } else {
-      const changedFaces: number[] = [];
-      const changedStates: number[] = [];
-      for (let index = 0; index < light.faces.length; index += 1) {
-        if (visible[index] !== 1) continue;
-        const state = stateAt(light.faces[index], nextFrame - 1);
-        if (appliedStates[index] === state) continue;
-        changedFaces.push(index);
-        changedStates.push(state);
+    const visibilityJump = sequential ? undefined : visibility.jumps.get(`${surfaceFrame}>${nextFrame}`);
+    const changedVisibility = new Set<number>();
+    const changedSurface = new Map<number, number>();
+    const applyVisibilitySegment = (segment: number): void => {
+      for (let cursor = visibility.sequentialOffsets[segment]; cursor < visibility.sequentialOffsets[segment + 1]; cursor += 1) {
+        const index = visibility.sequentialFaces[cursor];
+        visible[index] ^= 1;
+        changedVisibility.add(index);
       }
-      faceIndices = Uint16Array.from(changedFaces);
-      stateIndices = Uint16Array.from(changedStates);
-      end = faceIndices.length;
+    };
+    const applySurfaceSegment = (segment: number): void => {
+      for (let cursor = light.sequentialOffsets[segment]; cursor < light.sequentialOffsets[segment + 1]; cursor += 1) {
+        changedSurface.set(light.sequentialFaces[cursor], light.sequentialStates[cursor]);
+      }
+    };
+    if (sequential) {
+      applyVisibilitySegment(nextFrame - 1);
+      applySurfaceSegment(nextFrame - 1);
+    } else if (jump && visibilityJump) {
+      for (const index of visibilityJump) {
+        visible[index] ^= 1;
+        changedVisibility.add(index);
+      }
+      for (let cursor = 0; cursor < jump.faces.length; cursor += 1) changedSurface.set(jump.faces[cursor], jump.states[cursor]);
+    } else {
+      let frame = surfaceFrame;
+      while (frame !== nextFrame) {
+        frame = frame === frameCount ? 1 : frame + 1;
+        applyVisibilitySegment(frame - 1);
+        applySurfaceSegment(frame - 1);
+      }
     }
-    for (let cursor = start; cursor < end; cursor += 1) {
-      const index = faceIndices[cursor];
-      if (visible[index] !== 1) continue;
+    for (const index of currentForced) changedSurface.set(index, stateAt(light.faces[index], nextFrame - 1));
+    for (const index of [...changedSurface.keys()].sort((left, right) => left - right)) {
       const face = light.faces[index];
-      const state = stateIndices[cursor];
-      leaves[index].style.backgroundPositionY = light.positions[face.stateOffset + state];
-      appliedStates[index] = state;
+      const state = changedSurface.get(index)!;
+      invariant(state >= 0 && state < face.stateCount, "INVALID_SURFACE_PUBLICATION", `Prepared surface leaf ${index} has no state for frame ${nextFrame}.`);
+      if (isPaintVisible(index) && (appliedStates[index] !== state || dirtySurfaceStates[index] === 1)) writePreparedSurfaceState(index, state);
+      else if (!isPaintVisible(index)) dirtySurfaceStates[index] = appliedStates[index] === state ? 0 : 1;
     }
+    for (const index of [...changedVisibility].sort((left, right) => left - right)) writeVisibility(index, nextFrame);
     surfaceFrame = nextFrame;
   };
 
-  const row = (frame: number): readonly number[] => {
-    const value = packet.frameRows[frame - 1];
-    invariant(value?.[0] === frame, "FRAME_INDEX_MISMATCH", `Prepared playback frame ${frame} is not directly indexed.`);
-    return value;
+  const stageFrame = (frame: number, includePagedVariants = true): PagedStateStage => {
+    if (packet.kind === "paged") return options.pagedState!.stage(frame, true);
+    const row = packet.frameRows[frame - 1];
+    invariant(row?.[0] === frame, "FRAME_INDEX_MISMATCH", `Prepared playback frame ${frame} is not directly indexed.`);
+    const shapeTargets = new Uint32Array(row[4]);
+    const stagedShapeTransforms = new Array<string>(row[4]);
+    const stagedShapeVisibility = new Uint8Array(row[4]);
+    for (let index = 0; index < row[4]; index += 1) {
+      const base = (row[3] + index) * 3;
+      shapeTargets[index] = packet.shapeChanges[base];
+      stagedShapeTransforms[index] = packet.transforms[packet.shapeChanges[base + 1]];
+      stagedShapeVisibility[index] = packet.shapeChanges[base + 2];
+    }
+    const leafTargets = new Uint32Array(row[6]);
+    const stagedLeafTransforms = new Array<string>(row[6]);
+    for (let index = 0; index < row[6]; index += 1) {
+      const base = (row[5] + index) * 2;
+      leafTargets[index] = packet.leafChanges[base];
+      stagedLeafTransforms[index] = packet.transforms[packet.leafChanges[base + 1]];
+    }
+    const playbackStage: PagedPlaybackStage = Object.freeze({ frame, complete: false, appearance: row[1], ...(row[2] === -1 ? {} : { modelTransform: packet.transforms[row[2]] }), shapeTargets, shapeTransforms: Object.freeze(stagedShapeTransforms), shapeVisibility: stagedShapeVisibility, leafTargets, leafTransforms: Object.freeze(stagedLeafTransforms) });
+    return Object.freeze({ frame, playback: playbackStage, variants: includePagedVariants ? options.pagedState?.stage(frame, false).variants ?? null : null });
   };
 
-  const applyRow = (next: readonly number[], publish: boolean, dirtyShapes?: Set<number>, dirtyLeaves?: Set<number>): void => {
-    const nextFrame = next[0];
-    if (next[1] !== appearanceIndex) {
-      appearanceIndex = next[1];
+  const applyStage = (staged: PagedStateStage, publish: boolean, dirtyShapes?: Set<number>, dirtyLeaves?: Set<number>, dirtyProfileLeaves?: Set<number>): void => {
+    const next = staged.playback;
+    invariant(next, "INVALID_PLAYBACK_PUBLICATION", `Prepared playback frame ${staged.frame} has no transform stage.`);
+    if (publish && options.pagedState) options.pagedState.commit(packet.kind === "paged" ? staged : Object.freeze({ frame: staged.frame, playback: null, variants: staged.variants }));
+    const nextFrame = next.frame;
+    if (next.appearance !== appearanceIndex) {
+      appearanceIndex = next.appearance;
       if (publish) applyAppearance();
     }
-    if (next[2] !== -1) {
-      modelTransform = next[2];
+    if (next.modelTransform !== undefined) {
+      modelTransform = next.modelTransform;
       if (publish) writeModel();
     }
-    for (let index = 0; index < next[4]; index += 1) {
-      const base = (next[3] + index) * 3;
-      const shape = packet.shapeChanges[base];
-      shapeTransforms[shape] = packet.shapeChanges[base + 1];
-      shapeVisibility[shape] = packet.shapeChanges[base + 2];
+    for (let index = 0; index < next.shapeTargets.length; index += 1) {
+      const shape = next.shapeTargets[index];
+      shapeTransforms[shape] = next.shapeTransforms[index];
+      shapeVisibility[shape] = next.shapeVisibility[index];
       dirtyShapes?.add(shape);
-      if (publish) {
-        shapes[shape].style.transform = packet.transforms[shapeTransforms[shape]];
-        shapes[shape].style.visibility = shapeVisibility[shape] === 1 ? "visible" : "hidden";
-      }
+      if (publish) shapes[shape].style.transform = shapeTransforms[shape];
     }
-    for (let index = 0; index < next[6]; index += 1) {
-      const base = (next[5] + index) * 2;
-      const leaf = packet.leafChanges[base];
-      leafTransforms[leaf] = packet.leafChanges[base + 1];
+    for (let index = 0; index < next.leafTargets.length; index += 1) {
+      const leaf = next.leafTargets[index];
+      leafTransforms[leaf] = next.leafTransforms[index];
       dirtyLeaves?.add(leaf);
       if (publish) publishOrDeferPreparedLeafTransform(leaf);
     }
-    if (publish) applySurface(nextFrame);
+    const profileVisibilityChanges = stageProfileVisibility(nextFrame);
+    for (const leaf of profileVisibilityChanges) dirtyProfileLeaves?.add(leaf);
+    if (publish) {
+      if (!options.pagedState) applyVariants(nextFrame);
+      applySurface(nextFrame);
+      for (const leaf of profileVisibilityChanges) writeVisibility(leaf, nextFrame);
+      for (const shape of next.shapeTargets) shapes[shape].style.visibility = shapeVisibility[shape] === 1 ? "visible" : "hidden";
+    }
     sourceFrame = nextFrame;
   };
 
-  const seekTo = (target: number, synchronize: boolean): number => {
+  const seekTo = (
+    target: number,
+    synchronize: boolean,
+    publicationKind: "seek" | "restart" | null = "seek",
+    publicationTick = tick,
+  ): number => {
     invariant(Number.isSafeInteger(target) && target >= 1 && target <= playbackParameters.frameCount, "FRAME_RANGE", `Prepared playback frame ${target} is out of range.`);
+    options.assertPagedFrameReady?.(target);
+    const preflight = options.pagedState?.stage(target, packet.kind === "paged" && target !== sourceFrame);
+    const dirtyProfileLeaves = new Set<number>();
+    if (publicationKind) options.compositorTiming?.before(publicationKind, publicationTick);
     if (target !== sourceFrame) {
       const dirtyShapes = new Set<number>();
       const dirtyLeaves = new Set<number>();
-      let next = sourceFrame;
-      while (next !== target) {
-        next = next === playbackParameters.frameCount ? 1 : next + 1;
-        applyRow(row(next), false, dirtyShapes, dirtyLeaves);
+      let pagedStage: PagedStateStage | undefined = preflight;
+      if (packet.kind === "paged") {
+        invariant(pagedStage?.playback, "INVALID_PLAYBACK_PUBLICATION", `Paged playback frame ${target} has no staged transform row.`);
+        applyStage(pagedStage, false, dirtyShapes, dirtyLeaves, dirtyProfileLeaves);
+      } else {
+        let next = sourceFrame;
+        while (next !== target) {
+          next = next === playbackParameters.frameCount ? 1 : next + 1;
+          applyStage(stageFrame(next, false), false, dirtyShapes, dirtyLeaves, dirtyProfileLeaves);
+        }
       }
+      if (pagedStage) options.pagedState!.commit(packet.kind === "paged" ? pagedStage : Object.freeze({ frame: target, playback: null, variants: pagedStage.variants }));
       writeModel();
       applyAppearance();
       for (const index of [...dirtyShapes].sort((left, right) => left - right)) {
-        shapes[index].style.transform = packet.transforms[shapeTransforms[index]];
+        shapes[index].style.transform = shapeTransforms[index];
         shapes[index].style.visibility = shapeVisibility[index] === 1 ? "visible" : "hidden";
       }
       for (const index of [...dirtyLeaves].sort((left, right) => left - right)) {
         if (synchronize) dirtyHiddenTransforms[index] = 1;
         else publishOrDeferPreparedLeafTransform(index);
       }
-      if (synchronize) synchronizePreparedLeafTransforms();
-      applySurface(target);
       sourceFrame = target;
     }
+    else if (preflight) options.pagedState!.commit(Object.freeze({ frame: target, playback: null, variants: preflight.variants }));
     if (synchronize) synchronizePreparedLeafTransforms();
+    if (packet.kind === "inline" && !options.pagedState) applyVariants(target);
+    const profileVisibilityChanges = stageProfileVisibility(target);
+    applySurface(target);
+    for (const index of new Set([...dirtyProfileLeaves, ...profileVisibilityChanges])) writeVisibility(index, target);
+    if (publicationKind) options.compositorTiming?.after(publicationKind, publicationTick);
     return target;
   };
 
   const seek = (target: number): number => seekTo(target, true);
 
-  const advanceOne = (publish: boolean, dirtyShapes?: Set<number>, dirtyLeaves?: Set<number>): number => {
-    tick += 1;
-    const target = timelineFrame(packet, tick);
+  const tickSpan = (count: number): number => {
+    invariant(Number.isSafeInteger(count) && count >= 1 && Number.isSafeInteger(tick + count), "INVALID_PLAYBACK_PUBLICATION", "Prepared playback timing count is invalid.");
+    if (!activeTimeline.deadlineMicros) return count * fixedTickIntervalMs(playbackParameters);
+    return (timelineDeadlineMicros(activeTimeline, tick + count) - timelineDeadlineMicros(activeTimeline, tick)) / 1000;
+  };
+
+  const ticksWithin = (elapsedMs: number, maximum = Number.MAX_SAFE_INTEGER): number => {
+    invariant(Number.isFinite(elapsedMs) && elapsedMs >= 0 && Number.isSafeInteger(maximum) && maximum >= 1, "INVALID_PLAYBACK_PUBLICATION", "Prepared playback elapsed timing is invalid.");
+    const safeMaximum = Math.min(maximum, Number.MAX_SAFE_INTEGER - tick);
+    if (safeMaximum < 1 || tickSpan(1) > elapsedMs) return 0;
+    if (!activeTimeline.deadlineMicros) return Math.min(safeMaximum, Math.floor(elapsedMs / fixedTickIntervalMs(playbackParameters)));
+    let lower = 1;
+    let upper = 1;
+    while (upper < safeMaximum && tickSpan(upper) <= elapsedMs) {
+      lower = upper;
+      upper = Math.min(safeMaximum, upper * 2);
+    }
+    if (lower === upper || tickSpan(upper) <= elapsedMs) return upper;
+    while (lower + 1 < upper) {
+      const middle = lower + Math.floor((upper - lower) / 2);
+      if (tickSpan(middle) <= elapsedMs) lower = middle;
+      else upper = middle;
+    }
+    return lower;
+  };
+
+  const frameAfter = (count: number): number => {
+    invariant(Number.isSafeInteger(count) && count >= 1, "INVALID_PLAYBACK_PUBLICATION", "Prepared playback preview count must be a positive integer.");
+    return timelineFrame(activeTimeline, tick + count);
+  };
+
+  const advanceOne = (publish: boolean, dirtyShapes?: Set<number>, dirtyLeaves?: Set<number>, dirtyProfileLeaves?: Set<number>): number => {
+    const nextTick = tick + 1;
+    const target = timelineFrame(activeTimeline, nextTick);
+    options.assertPagedFrameReady?.(target);
+    tick = nextTick;
     if (target === sourceFrame) return target;
     const expected = sourceFrame === playbackParameters.frameCount ? 1 : sourceFrame + 1;
-    if (target === expected) applyRow(row(target), publish, dirtyShapes, dirtyLeaves);
+    if (target === expected) {
+      if (publish) options.compositorTiming?.before(target === 1 ? "wrap" : "advance", tick);
+      const staged = stageFrame(target);
+      if (!publish && packet.kind === "paged") options.pagedState!.commit(staged, false);
+      applyStage(staged, publish, dirtyShapes, dirtyLeaves, dirtyProfileLeaves);
+      if (publish) options.compositorTiming?.after(target === 1 ? "wrap" : "advance", tick);
+    }
     else if (publish) seekTo(target, false);
+    else if (packet.kind === "paged") {
+      const staged = stageFrame(target);
+      options.pagedState!.commit(staged, false);
+      applyStage(staged, false, dirtyShapes, dirtyLeaves, dirtyProfileLeaves);
+    }
     else {
       let next = sourceFrame;
       while (next !== target) {
         next = next === playbackParameters.frameCount ? 1 : next + 1;
-        applyRow(row(next), false, dirtyShapes, dirtyLeaves);
+        const staged = stageFrame(next);
+        applyStage(staged, false, dirtyShapes, dirtyLeaves, dirtyProfileLeaves);
       }
     }
     return target;
@@ -826,24 +1361,45 @@ export function createPolycssPlayback(
 
   const advanceMany = (count: number): readonly number[] => {
     invariant(Number.isSafeInteger(count) && count >= 1, "INVALID_PLAYBACK_PUBLICATION", "Prepared playback catch-up count must be a positive integer.");
+    for (let offset = 1; offset <= count; offset += 1) options.assertPagedFrameReady?.(frameAfter(offset));
     if (count === 1) return Object.freeze([advanceOne(true)]);
+    const catchupTick = tick + count;
+    options.compositorTiming?.before("catch-up", catchupTick);
     const initialAppearance = appearanceIndex;
     const initialModelTransform = modelTransform;
     const dirtyShapes = new Set<number>();
     const dirtyLeaves = new Set<number>();
+    const dirtyProfileLeaves = new Set<number>();
     const frames: number[] = [];
-    for (let index = 0; index < count; index += 1) frames.push(advanceOne(false, dirtyShapes, dirtyLeaves));
+    for (let index = 0; index < count; index += 1) frames.push(advanceOne(false, dirtyShapes, dirtyLeaves, dirtyProfileLeaves));
+    applyVariants(sourceFrame);
     if (modelTransform !== initialModelTransform) writeModel();
     if (appearanceIndex !== initialAppearance) applyAppearance();
     for (const index of [...dirtyShapes].sort((left, right) => left - right)) {
-      const transform = packet.transforms[shapeTransforms[index]];
-      const nextVisibility = shapeVisibility[index] === 1 ? "visible" : "hidden";
+      const transform = shapeTransforms[index];
       if (shapes[index].style.transform !== transform) shapes[index].style.transform = transform;
-      if (shapes[index].style.visibility !== nextVisibility) shapes[index].style.visibility = nextVisibility;
     }
     for (const index of [...dirtyLeaves].sort((left, right) => left - right)) publishOrDeferPreparedLeafTransform(index);
     applySurface(sourceFrame);
+    for (const index of [...dirtyProfileLeaves].sort((left, right) => left - right)) writeVisibility(index, sourceFrame);
+    for (const index of [...dirtyShapes].sort((left, right) => left - right)) {
+      const nextVisibility = shapeVisibility[index] === 1 ? "visible" : "hidden";
+      if (shapes[index].style.visibility !== nextVisibility) shapes[index].style.visibility = nextVisibility;
+    }
+    options.compositorTiming?.after("catch-up", tick);
     return Object.freeze(frames);
+  };
+
+  const advanceCollapsed = (count: number): number => {
+    invariant(Number.isSafeInteger(count) && count >= 1 && Number.isSafeInteger(tick + count), "INVALID_PLAYBACK_PUBLICATION", "Prepared playback collapsed count is invalid.");
+    const nextTick = tick + count;
+    const target = timelineFrame(activeTimeline, nextTick);
+    options.assertPagedFrameReady?.(target);
+    options.compositorTiming?.before("catch-up", nextTick);
+    tick = nextTick;
+    seekTo(target, false, null, nextTick);
+    options.compositorTiming?.after("catch-up", tick);
+    return target;
   };
 
   const forceVisible = (indices: Iterable<number>): void => {
@@ -863,10 +1419,48 @@ export function createPolycssPlayback(
     currentForced = Uint16Array.from(nextIndices);
   };
 
+  const applyViewportProfile = (width: number, height: number, presentationProfileId: string | null): string | null => {
+    invariant(Number.isFinite(width) && width >= 0 && width <= 1_000_000 && Number.isFinite(height) && height >= 0 && height <= 1_000_000 && (presentationProfileId === null || typeof presentationProfileId === "string"), "INVALID_VIEWPORT_PROFILE_PUBLICATION", "Viewport profile input is invalid.");
+    const viewportProfiles = materialized.viewportProfiles;
+    if (!viewportProfiles) return null;
+    let selected = -1;
+    if (viewportProfiles.selectionMode === "presentation-profile") {
+      selected = viewportProfiles.profiles.findIndex((profile) => profile.id === presentationProfileId);
+      invariant(selected >= 0, "INVALID_VIEWPORT_PROFILE_PUBLICATION", `Presentation profile ${presentationProfileId ?? "<none>"} has no prepared target profile.`);
+    } else {
+      selected = viewportProfiles.profiles.findIndex((profile) => profile.width! >= width && profile.height! >= height);
+    }
+    const selectedProfile = selected < 0 ? null : viewportProfiles.profiles[selected];
+    if (selected === selectedViewportProfile && (!selectedProfile?.responsiveAffine || width === selectedViewportWidth && height === selectedViewportHeight)) return selectedProfile?.id ?? null;
+    const profile = selectedProfile;
+    const nextProfileVisible = profile ? profileVisibilityAt(profile, sourceFrame) : new Uint8Array(packet.leafCount).fill(1);
+    const nextResponsiveTransforms = responsiveAffineTransforms(profile, width, height);
+    for (let index = 0; index < packet.leafCount; index += 1) {
+      const wasPaintVisible = isPaintVisible(index);
+      const nextVisible = nextProfileVisible[index];
+      const nextTransform = profile?.transformIndices[index] ?? 0xffff;
+      profileVisible[index] = nextVisible;
+      const paintVisible = isPaintVisible(index);
+      if (wasPaintVisible && !paintVisible) writeVisibility(index);
+      if (profileTransformOverrides[index] !== nextTransform || profileResponsiveTransforms[index] !== nextResponsiveTransforms[index]) {
+        profileTransformOverrides[index] = nextTransform;
+        profileResponsiveTransforms[index] = nextResponsiveTransforms[index];
+        if (paintVisible && interactionTransforms[index] === 0) writePreparedLeafTransform(index);
+        else dirtyHiddenTransforms[index] = 1;
+      }
+      if (!wasPaintVisible && paintVisible) writeVisibility(index);
+    }
+    selectedViewportProfile = selected;
+    selectedViewportWidth = width;
+    selectedViewportHeight = height;
+    profileVisibilityFrame = sourceFrame;
+    return profile?.id ?? null;
+  };
+
   const restoreInteraction = (shapeIndices: readonly number[], leafIndices: readonly number[]): void => {
     for (const index of shapeIndices) {
       invariant(Number.isSafeInteger(index) && index >= 0 && index < packet.shapeCount, "INVALID_INTERACTION_PUBLICATION", `Interaction shape ${index} is out of range.`);
-      shapes[index].style.transform = packet.transforms[shapeTransforms[index]];
+      shapes[index].style.transform = shapeTransforms[index];
       shapes[index].style.visibility = shapeVisibility[index] === 1 ? "visible" : "hidden";
     }
     for (const index of leafIndices) {
@@ -880,44 +1474,97 @@ export function createPolycssPlayback(
   return Object.freeze({
     get tick() { return tick; },
     get sourceFrame() { return sourceFrame; },
+    get bankId() { return activeBank?.id ?? null; },
+    tickSpan,
+    ticksWithin,
+    frameAfter,
     publishInitial() {
       if (initialPublished) return sourceFrame;
+      options.compositorTiming?.before("initial", tick);
       writeModel();
       for (let index = 0; index < shapes.length; index += 1) {
-        shapes[index].style.transform = packet.transforms[shapeTransforms[index]];
+        shapes[index].style.transform = shapeTransforms[index];
         shapes[index].style.visibility = shapeVisibility[index] === 1 ? "visible" : "hidden";
       }
       for (let index = 0; index < leaves.length; index += 1) writePreparedLeafTransform(index);
+      applyVariants(sourceFrame);
       publishSurfaceState(sourceFrame);
       applyAppearance();
       initialPublished = true;
+      options.compositorTiming?.after("initial", tick);
       return sourceFrame;
     },
     advance() {
       return advanceOne(true);
     },
     advanceMany,
+    advanceCollapsed,
     seek,
+    bankEntryFrame(id: string) {
+      invariant(typeof id === "string" && id.length > 0, "UNKNOWN_PREPARED_BANK", "Prepared bank id is invalid.");
+      const bank = banks.get(id);
+      invariant(bank, "UNKNOWN_PREPARED_BANK", `Prepared bank ${id} is not declared by this document.`);
+      return bank.entryFrame;
+    },
+    selectBank(id: string) {
+      invariant(typeof id === "string" && id.length > 0, "UNKNOWN_PREPARED_BANK", "Prepared bank id is invalid.");
+      const bank = banks.get(id);
+      invariant(bank, "UNKNOWN_PREPARED_BANK", `Prepared bank ${id} is not declared by this document.`);
+      options.assertPagedFrameReady?.(bank.entryFrame);
+      const previousBank = activeBank;
+      const previousTimeline = activeTimeline;
+      const previousTick = tick;
+      activeBank = bank;
+      activeTimeline = timelineFor(bank, selectedTimelineProfileId);
+      try {
+        tick = 0;
+        return seekTo(bank.entryFrame, true, "restart", 0);
+      } catch (error) {
+        activeBank = previousBank;
+        activeTimeline = previousTimeline;
+        tick = previousTick;
+        throw error;
+      }
+    },
     restart(shapeIndices = [], leafIndices = []) {
-      seek(packet.initial.sourceFrame);
+      options.compositorTiming?.before("restart", 0);
+      seekTo(activeBank?.entryFrame ?? packet.initial.sourceFrame, true, null, 0);
       restoreInteraction(shapeIndices, leafIndices);
       forceVisible(new Uint16Array(0));
       tick = 0;
+      options.compositorTiming?.after("restart", tick);
       return sourceFrame;
+    },
+    selectProfileTimeline(presentationProfileId: string | null) {
+      invariant(presentationProfileId === null || typeof presentationProfileId === "string", "INVALID_PLAYBACK_PUBLICATION", "Presentation profile id is invalid.");
+      selectedTimelineProfileId = presentationProfileId;
+      const next = timelineFor(activeBank, presentationProfileId);
+      if (next === activeTimeline) return false;
+      activeTimeline = next;
+      return true;
     },
     applySurfaceFrame(nextFrame: number) {
       invariant(Number.isSafeInteger(nextFrame) && nextFrame >= 1 && nextFrame <= playbackParameters.frameCount, "FRAME_RANGE", `Prepared surface frame ${nextFrame} is out of range.`);
+      options.assertPagedFrameReady?.(nextFrame);
+      const staged = options.pagedState ? options.pagedState.stage(nextFrame, false) : null;
+      if (staged) options.pagedState!.commit(staged);
+      else applyVariants(nextFrame);
+      const profileVisibilityChanges = stageProfileVisibility(nextFrame);
       applySurface(nextFrame);
+      for (const leaf of profileVisibilityChanges) writeVisibility(leaf, nextFrame);
       return nextFrame;
     },
+    applyViewportProfile,
     forceVisible,
     applyInteractionLeaf(index: number, transform: string | null) {
       invariant(Number.isSafeInteger(index) && index >= 0 && index < packet.leafCount, "INVALID_INTERACTION_PUBLICATION", `Interaction leaf ${index} is out of range.`);
       invariant(transform === null || typeof transform === "string", "INVALID_INTERACTION_PUBLICATION", `Interaction leaf ${index} transform is invalid.`);
       degenerate[index] = transform === null ? 1 : 0;
+      if (transform !== null) {
+        if (leaves[index].style.transform !== transform) leaves[index].style.transform = transform;
+        interactionTransforms[index] = leaves[index].style.transform === preparedLeafTransform(index) ? 0 : 1;
+      }
       writeVisibility(index);
-      if (transform !== null && leaves[index].style.transform !== transform) leaves[index].style.transform = transform;
-      interactionTransforms[index] = leaves[index].style.transform === packet.transforms[leafTransforms[index]] ? 0 : 1;
     },
     restoreInteraction,
   });

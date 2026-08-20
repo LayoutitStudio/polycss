@@ -9,9 +9,12 @@ CSS closure, and state/binding graph.  It does not execute PolyCSS codecs.
 from __future__ import annotations
 
 import argparse
+from array import array
 import base64
 import binascii
 import hashlib
+import gzip
+import io
 import json
 import math
 import os
@@ -28,10 +31,16 @@ DOCUMENT_FIELDS = ("meta", "tree", "cssBinding", "state", "bindings", "resources
 BASE64_CHARACTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
 BASE64_ALPHABET = frozenset(BASE64_CHARACTERS)
 STATE_INTERPRETERS = {
+    "polycss-compositor-timing-prepared@0": "polycss-compositor-timing@0",
     "polycss-effects-prepared@0": "polycss-effects@0",
+    "polycss-orbit-input-prepared@0": "polycss-orbit-input@0",
+    "polycss-paged-playback@0": "polycss-paged-playback@0",
+    "polycss-paged-variants@0": "polycss-paged-variants@0",
     "polycss-playback-packed@0": "polycss-playback@0",
     "polycss-pointer-grab-prepared@0": "polycss-pointer-grab@0",
     "polycss-surface-packed@0": "polycss-surface@0",
+    "polycss-variants-packed@0": "polycss-variants@0",
+    "polycss-viewport-profiles-packed@0": "polycss-viewport-profiles@0",
     "static-presentation@0": "static-presentation@0",
 }
 KNOWN_REQUIRED_CAPABILITIES = {
@@ -40,9 +49,14 @@ KNOWN_REQUIRED_CAPABILITIES = {
     "explicit-retained-tree",
     "logical-assets",
     "prepared-particle-effects",
+    "prepared-compositor-timing",
+    "prepared-orbit-input",
+    "prepared-paged-state",
     "prepared-playback",
     "prepared-pointer-grab-interaction",
     "prepared-surface-lighting",
+    "prepared-variants",
+    "prepared-viewport-profiles",
 }
 ALLOWED_ELEMENTS = {"b", "div", "i", "img", "s", "span", "u"}
 ALLOWED_ATTRIBUTES = {
@@ -65,11 +79,20 @@ ALLOWED_MOUNT_STYLES = {
     "backgroundSize", "position",
 }
 ALLOWED_SINKS = {
-    "style.backgroundPosition", "style.backgroundPositionY", "style.height",
-    "style.left", "style.opacity", "style.top", "style.transform",
+    "class.prepared", "style.backgroundColor", "style.backgroundPosition", "style.backgroundPositionX",
+    "style.backgroundPositionY", "style.color", "style.display", "style.height",
+    "style.left", "style.opacity", "style.outlineColor", "style.top", "style.transform",
     "style.visibility", "style.width",
 }
+VARIANT_EFFECT_PROPERTIES = {
+    "backgroundColor": "style.backgroundColor",
+    "backgroundPositionX": "style.backgroundPositionX",
+    "color": "style.color",
+    "display": "style.display",
+    "outlineColor": "style.outlineColor",
+}
 MEDIA_TYPES = {
+    "application/vnd.layoutit.domformat-state-page+json",
     "image/png", "image/webp", "text/css;charset=utf-8",
 }
 BASE_REQUIRED_CAPABILITIES = [
@@ -77,16 +100,28 @@ BASE_REQUIRED_CAPABILITIES = [
 ]
 CAPABILITY_INTERPRETER_ORDER = [
     ("polycss-effects@0", "prepared-particle-effects"),
+    ("polycss-compositor-timing@0", "prepared-compositor-timing"),
+    ("polycss-orbit-input@0", "prepared-orbit-input"),
+    ("polycss-paged-playback@0", "prepared-playback"),
+    ("polycss-paged-variants@0", "prepared-variants"),
     ("polycss-pointer-grab@0", "prepared-pointer-grab-interaction"),
     ("polycss-playback@0", "prepared-playback"),
     ("polycss-surface@0", "prepared-surface-lighting"),
+    ("polycss-variants@0", "prepared-variants"),
+    ("polycss-viewport-profiles@0", "prepared-viewport-profiles"),
 ]
 CONFORMANCE_INTERPRETER_ORDER = [
     ("polycss-effects@0", "particle-effects"),
+    ("polycss-compositor-timing@0", "compositor-timing"),
+    ("polycss-orbit-input@0", "orbit-input"),
+    ("polycss-paged-variants@0", "paged-variants"),
+    ("polycss-paged-playback@0", "paged-playback"),
     ("polycss-playback@0", "playback"),
     ("polycss-pointer-grab@0", "pointer-grab-interaction"),
     ("static-presentation@0", "presentation"),
     ("polycss-surface@0", "surface-lighting"),
+    ("polycss-variants@0", "variants"),
+    ("polycss-viewport-profiles@0", "viewport-profiles"),
 ]
 INLINE_SAFE_FUNCTIONS = frozenset("""
 abs acos asin atan atan2 calc clamp color color-mix cos exp hsl hsla hwb hypot
@@ -101,8 +136,10 @@ DEFAULT_LIMITS = {
     "nodes": 250_000,
     "depth": 64,
     "resources": 2048,
+    "state_pages": 512,
     "resource": 64 * 1024 * 1024,
     "resource_total": 128 * 1024 * 1024,
+    "state_page_bytes_total": 128 * 1024 * 1024,
     "css": 16 * 1024 * 1024,
     "css_rules": 8192,
     "css_selectors": 32_768,
@@ -112,6 +149,8 @@ DEFAULT_LIMITS = {
     "css_asset_tokens": 2048,
     "binding_inputs": 256,
     "frames": 10_000,
+    "paged_frames": 64_000,
+    "state_page_frames": 10_000,
     "timeline_ticks": 1_000_000,
     "prepared_transforms": 2_000_000,
     "prepared_states": 2_000_000,
@@ -132,7 +171,7 @@ JSON_MAX_ARRAY_ITEMS = min(
     DEFAULT_LIMITS["decoded_total"] // 2 + 1,
     max(
         DEFAULT_LIMITS["nodes"] * 16,
-        DEFAULT_LIMITS["resources"],
+        max(DEFAULT_LIMITS["resources"], DEFAULT_LIMITS["state_pages"]) * 2,
         DEFAULT_LIMITS["frames"] * 3,
         DEFAULT_LIMITS["timeline_ticks"],
         DEFAULT_LIMITS["prepared_transforms"],
@@ -149,7 +188,7 @@ JSON_MAX_ARRAY_ITEMS = min(
 )
 JSON_MAX_OBJECT_MEMBERS = min(
     DEFAULT_LIMITS["decoded_total"] // 4 + 1,
-    max(128, DEFAULT_LIMITS["resources"]),
+    max(128, DEFAULT_LIMITS["resources"], DEFAULT_LIMITS["state_pages"]),
 )
 JSON_MAX_KEY_CODE_UNITS = 256
 JSON_STRUCTURE = re.compile(r'["\[\]{}]')
@@ -304,6 +343,32 @@ def cumulative_references(value: Any, count: int, code: str, label: str) -> list
     return result
 
 
+def validate_tick_cadence(parameters: dict, code: str, label: str) -> None:
+    has_rate = "tickRateHz" in parameters
+    has_interval = "tickIntervalUs" in parameters
+    require(has_rate != has_interval, code, f"{label} must declare exactly one cadence")
+    if has_rate:
+        rate = parameters.get("tickRateHz")
+        require(not isinstance(rate, bool) and isinstance(rate, (int, float))
+                and math.isfinite(rate) and 1 <= rate <= 240,
+                code, f"{label} tickRateHz is invalid")
+        return
+    interval = parameters.get("tickIntervalUs")
+    require(isinstance(interval, list) and len(interval) == 2
+            and all(is_safe_int(value, 1) for value in interval),
+            code, f"{label} tickIntervalUs is invalid")
+    numerator, denominator = int(interval[0]), int(interval[1])
+    require(1_000_000 / 240 <= numerator / denominator <= 1_000_000
+            and math.gcd(numerator, denominator) == 1,
+            code, f"{label} tickIntervalUs is invalid or noncanonical")
+
+
+def same_tick_cadence(left: dict, right: dict) -> bool:
+    if "tickRateHz" in left or "tickRateHz" in right:
+        return left.get("tickRateHz") == right.get("tickRateHz")
+    return left.get("tickIntervalUs") == right.get("tickIntervalUs")
+
+
 def finite_f32(value: Any) -> bool:
     if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
         return False
@@ -435,6 +500,22 @@ def base64_integers(value: Any, width: int, maximum_count: int,
             code, f"{label} is not canonical base64")
     return [int.from_bytes(payload[offset:offset + width], "little")
             for offset in range(0, len(payload), width)]
+
+
+def base64_float64(value: Any, maximum_count: int,
+                   code: str, label: str) -> list[float]:
+    decoded_length = canonical_base64_decoded_length(value, label, code)
+    require(decoded_length % 8 == 0 and decoded_length // 8 <= maximum_count,
+            code, f"{label} is truncated or excessive")
+    try:
+        payload = base64.b64decode(value, validate=True)
+    except (binascii.Error, ValueError) as error:
+        raise DomError(code, f"{label} is not valid base64") from error
+    require(len(payload) == decoded_length
+            and base64.b64encode(payload).decode("ascii") == value,
+            code, f"{label} is not canonical base64")
+    return [struct.unpack_from("<d", payload, offset)[0]
+            for offset in range(0, len(payload), 8)]
 
 
 def exact_array(value: Any, expected: list[Any], code: str, message: str) -> None:
@@ -801,7 +882,7 @@ def reject_symlink_components(base: Path, relative: str, code: str, label: str) 
 def validate_meta(meta: Any) -> None:
     meta = strict_keys(meta, {"format", "profile", "title", "generator",
                               "capabilities", "optionalCapabilities", "initialExperience",
-                              "conformance", "counts", "sourceArtifact"},
+                              "conformance", "counts", "artifacts", "claims"},
                        "INVALID_META", "META")
     require(meta.get("format") == "domformat@0", "UNSUPPORTED_FORMAT", "Unsupported format")
     require(meta.get("profile") == "polycss-3d@0", "UNSUPPORTED_PROFILE", "Unsupported profile")
@@ -847,17 +928,51 @@ def validate_meta(meta: Any) -> None:
         counts = strict_keys(counts, {"nodes", "shapes", "leaves", "sourceFrames"}, "INVALID_META", "counts")
         for key, value in counts.items():
             as_int(value, "INVALID_META", f"counts.{key}")
-    source = meta.get("sourceArtifact")
-    if source is not None:
-        source = strict_keys(source, {"byteLength", "decodedByteLength", "digest", "status"}, "INVALID_META", "sourceArtifact")
-        as_int(source.get("byteLength"), "INVALID_META", "sourceArtifact.byteLength")
-        as_int(source.get("decodedByteLength"), "INVALID_META", "sourceArtifact.decodedByteLength")
-        require(isinstance(source.get("status"), str) and re.fullmatch(r"[a-z0-9][a-z0-9-]{0,127}", source["status"]),
-                "INVALID_META", "Invalid sourceArtifact status")
-        digest = strict_keys(source.get("digest"), {"algorithm", "value"}, "INVALID_META", "sourceArtifact.digest")
-        require(digest.get("algorithm") == "sha256" and isinstance(digest.get("value"), str)
-                and re.fullmatch(r"[0-9a-f]{64}", digest["value"]),
-                "INVALID_META", "Invalid sourceArtifact digest")
+    artifact_ids: set[str] = set()
+    artifacts = meta.get("artifacts")
+    if artifacts is not None:
+        require(isinstance(artifacts, list) and 0 < len(artifacts) <= 64,
+                "INVALID_META", "Invalid artifacts")
+        previous = ""
+        for index, artifact in enumerate(artifacts):
+            artifact = strict_keys(artifact, {"id", "role", "byteLength", "decodedByteLength", "digest"},
+                                   "INVALID_META", f"artifact {index}")
+            aid = artifact.get("id")
+            require(isinstance(aid, str) and re.fullmatch(r"[a-z][a-z0-9-]{0,63}", aid)
+                    and aid > previous, "INVALID_META", "Artifacts are not canonically ordered")
+            previous = aid
+            artifact_ids.add(aid)
+            require(isinstance(artifact.get("role"), str) and re.fullmatch(r"[a-z][a-z0-9-]{0,63}", artifact["role"]),
+                    "INVALID_META", "Invalid artifact role")
+            as_int(artifact.get("byteLength"), "INVALID_META", "artifact.byteLength")
+            as_int(artifact.get("decodedByteLength"), "INVALID_META", "artifact.decodedByteLength")
+            digest = strict_keys(artifact.get("digest"), {"algorithm", "value"}, "INVALID_META", "artifact.digest")
+            require(digest.get("algorithm") == "sha256" and isinstance(digest.get("value"), str)
+                    and re.fullmatch(r"[0-9a-f]{64}", digest["value"]), "INVALID_META", "Invalid artifact digest")
+    claims = meta.get("claims")
+    if claims is not None:
+        require(isinstance(claims, list) and 0 < len(claims) <= 128 and artifact_ids,
+                "INVALID_META", "Invalid claims")
+        kinds = {"license", "locator", "qualification", "redistribution", "revision"}
+        previous = ""
+        for index, claim in enumerate(claims):
+            claim = strict_keys(claim, {"artifact", "kind", "value"}, "INVALID_META", f"claim {index}")
+            key = f"{claim.get('artifact')}\0{claim.get('kind')}"
+            require(claim.get("artifact") in artifact_ids and claim.get("kind") in kinds and key > previous,
+                    "INVALID_META", "Claims are not canonically ordered")
+            previous = key
+            value = claim.get("value")
+            require(isinstance(value, str) and 0 < len(value) <= 512
+                    and not re.search(r"[\x00-\x1f\x7f]", value), "INVALID_META", "Invalid claim value")
+            require(not re.match(r"^(?:/|\\|[A-Za-z]:[\\/]|file:)", value)
+                    and not re.search(r"(?:/Users/|/home/|\\Users\\)", value),
+                    "META_LOCAL_PATH", "Claim leaks a local path")
+            if claim.get("kind") == "locator":
+                from urllib.parse import urlsplit
+                locator = urlsplit(value)
+                require(locator.scheme == "https" and locator.netloc and locator.username is None
+                        and locator.password is None and not locator.fragment,
+                        "INVALID_META", "Unsafe artifact locator")
 
 
 def validate_resources(catalog: Any, limits: dict[str, int]) -> tuple[list[dict], dict[str, dict]]:
@@ -865,25 +980,40 @@ def validate_resources(catalog: Any, limits: dict[str, int]) -> tuple[list[dict]
     require(as_int(catalog.get("version"), "UNSUPPORTED_RESOURCE_SCHEMA", "RCRD version") == 0,
             "UNSUPPORTED_RESOURCE_SCHEMA", "RCRD version must be zero")
     records = catalog.get("resources")
-    require(isinstance(records, list) and len(records) <= limits["resources"],
-            "RESOURCE_COUNT_LIMIT", "Resource count is invalid")
-    by_id, previous, total, total_image_pixels, external_paths = {}, "", 0, 0, set()
+    require(isinstance(records, list) and len(records) <= limits["resources"] + limits["state_pages"],
+            "RESOURCE_COUNT_LIMIT", "Resource count exceeds the combined eager and state-page ceilings")
+    by_id, previous, eager_resources, state_pages = {}, "", 0, 0
+    eager_bytes, state_page_bytes, total_image_pixels, total_decoded_state, external_paths = 0, 0, 0, 0, set()
     for index, record in enumerate(records):
-        record = strict_keys(record, {"id", "kind", "mediaType", "byteLength", "dimensions", "digest", "path"},
+        record = strict_keys(record, {"id", "kind", "mediaType", "byteLength", "dimensions", "digest", "path",
+                                      "encoding", "decodedByteLength", "decodedDigest", "codec"},
                              "INVALID_RESOURCE", f"resource {index}")
         rid = resource_id(record.get("id"), f"resource {index} id")
         require(rid > previous and rid not in by_id, "RESOURCE_ORDER", "Resources are not strictly sorted")
         previous = rid
         kind, media = record.get("kind"), record.get("mediaType")
-        require(kind in ("stylesheet", "image") and media in MEDIA_TYPES,
+        require(kind in ("stylesheet", "image", "state-page") and media in MEDIA_TYPES,
                 "UNSUPPORTED_MEDIA_TYPE", f"Resource {rid} kind/media is invalid")
         require((kind == "stylesheet" and media == "text/css;charset=utf-8")
-                or (kind == "image" and media.startswith("image/")),
+                or (kind == "image" and media.startswith("image/"))
+                or (kind == "state-page" and media == "application/vnd.layoutit.domformat-state-page+json"),
                 "RESOURCE_KIND_MEDIA_MISMATCH", f"Resource {rid} kind/media mismatch")
         size = as_int(record.get("byteLength"), "INVALID_RESOURCE_SIZE", f"resource {rid} size")
         require(size <= limits["resource"], "INVALID_RESOURCE_SIZE", f"Resource {rid} is too large")
-        total += size
-        require(total <= limits["resource_total"], "AGGREGATE_RESOURCE_LIMIT", "Resources are too large")
+        if kind == "state-page":
+            state_pages += 1
+            state_page_bytes += size
+            require(state_pages <= limits["state_pages"], "RESOURCE_COUNT_LIMIT",
+                    "State-page resource count is excessive")
+            require(state_page_bytes <= limits["state_page_bytes_total"],
+                    "AGGREGATE_RESOURCE_LIMIT", "Encoded state pages are too large")
+        else:
+            eager_resources += 1
+            eager_bytes += size
+            require(eager_resources <= limits["resources"], "RESOURCE_COUNT_LIMIT",
+                    "Eager resource count is excessive")
+            require(eager_bytes <= limits["resource_total"], "AGGREGATE_RESOURCE_LIMIT",
+                    "Eager resources are too large")
         if kind == "image":
             dimensions = strict_keys(record.get("dimensions"), {"width", "height"},
                                      "INVALID_RESOURCE_DIMENSIONS", f"resource {rid} dimensions")
@@ -900,6 +1030,31 @@ def validate_resources(catalog: Any, limits: dict[str, int]) -> tuple[list[dict]
         require(digest.get("algorithm") == "sha256" and isinstance(digest.get("value"), str)
                 and re.fullmatch(r"[0-9a-f]{64}", digest["value"]),
                 "INVALID_RESOURCE_DIGEST", f"Resource {rid} digest is invalid")
+        if kind == "state-page":
+            require(record.get("encoding") in ("identity", "gzip"), "INVALID_STATE_PAGE_RESOURCE",
+                    f"State page {rid} encoding is invalid")
+            decoded_size = as_int(record.get("decodedByteLength"), "INVALID_STATE_PAGE_RESOURCE",
+                                  f"state page {rid} decoded size")
+            require(decoded_size <= limits["resource"], "INVALID_STATE_PAGE_RESOURCE",
+                    f"State page {rid} decoded size is excessive")
+            total_decoded_state += decoded_size
+            require(total_decoded_state <= limits["decoded_total"], "AGGREGATE_DECODED_LIMIT",
+                    "Decoded state pages are excessive")
+            decoded_digest = strict_keys(record.get("decodedDigest"), {"algorithm", "value"},
+                                         "INVALID_STATE_PAGE_RESOURCE", f"state page {rid} decoded digest")
+            require(decoded_digest.get("algorithm") == "sha256"
+                    and isinstance(decoded_digest.get("value"), str)
+                    and re.fullmatch(r"[0-9a-f]{64}", decoded_digest["value"]),
+                    "INVALID_STATE_PAGE_RESOURCE", f"State page {rid} decoded digest is invalid")
+            require(record.get("codec") in ("polycss-paged-variants-page@0",
+                                             "polycss-paged-playback-page@0"),
+                    "INVALID_STATE_PAGE_RESOURCE", f"State page {rid} codec is invalid")
+            if record["encoding"] == "identity":
+                require(size == decoded_size and digest["value"] == decoded_digest["value"],
+                        "INVALID_STATE_PAGE_RESOURCE", f"Identity state page {rid} identities differ")
+        else:
+            require(all(name not in record for name in ("encoding", "decodedByteLength", "decodedDigest", "codec")),
+                    "INVALID_RESOURCE", f"Non-state resource {rid} has state-page fields")
         path = safe_path(record.get("path"), f"resource {rid} path")
         portable_path = path.lower()
         require(portable_path not in external_paths, "DUPLICATE_RESOURCE_PATH",
@@ -925,7 +1080,7 @@ def validate_tree(tree: Any, resources: dict[str, dict], limits: dict[str, int])
         require(isinstance(entry, list) and len(entry) == 2 and all(isinstance(x, str) for x in entry),
                 "INVALID_MOUNT", "Mount attribute row is invalid")
         name, value = entry
-        require(name not in ("data-domformat-instance", "data-domformat-mount-surface")
+        require(name not in ("data-domformat-instance", "data-domformat-mount-surface", "data-domformat-node")
                 and (name in ALLOWED_ATTRIBUTES or re.fullmatch(r"data-[a-z][a-z0-9._:-]{0,63}", name))
                 and name not in names and len(value) <= 1024,
                 "UNSAFE_ATTRIBUTE", f"Mount attribute {name} is invalid")
@@ -964,7 +1119,7 @@ def validate_tree(tree: Any, resources: dict[str, dict], limits: dict[str, int])
         require(isinstance(attrs, dict) and len(attrs) <= 32, "INVALID_ATTRIBUTES", f"Node {nid} attributes invalid")
         for name, value in attrs.items():
             require(not name.lower().startswith("on")
-                    and name not in ("class", "srcdoc", "style", "data-domformat-instance", "data-domformat-mount-surface")
+                    and name not in ("class", "srcdoc", "style", "data-domformat-instance", "data-domformat-mount-surface", "data-domformat-node")
                     and (name in ALLOWED_ATTRIBUTES or re.fullmatch(r"data-[a-z][a-z0-9._:-]{0,63}", name))
                     and isinstance(value, str) and len(value) <= 1024,
                     "UNSAFE_ATTRIBUTE", f"Node {nid} attribute {name} is invalid")
@@ -1045,6 +1200,90 @@ def collect_targets(value: Any, output: list[str], maximum: int, label: str,
             stack.append((item, depth + 1))
 
 
+def same_playback_timeline(left: dict, right: dict, profile: bool = False) -> bool:
+    return ((not profile or left.get("profileId") == right.get("profileId"))
+            and left.get("introTicks") == right.get("introTicks")
+            and left.get("loopTicks") == right.get("loopTicks")
+            and left.get("frames") == right.get("frames")
+            and left.get("deadlineMicros") == right.get("deadlineMicros")
+            and ("deadlineMicros" in left) == ("deadlineMicros" in right))
+
+
+def validate_playback_banks(packet: dict, initial_source: int, frame_count: int,
+                            validate_timeline: Any, timeline: dict,
+                            timeline_tick_count: int, limits: dict[str, int],
+                            code: str, label: str) -> int:
+    has_initial_bank = "initialBankId" in packet
+    has_banks = "banks" in packet
+    require(has_initial_bank == has_banks, code,
+            f"{label} initialBankId and banks must be declared together")
+    if not has_banks:
+        return timeline_tick_count
+    initial_bank_id = stable_id(packet.get("initialBankId"), f"{label} initial bank id")
+    banks = packet.get("banks")
+    require(isinstance(banks, list) and 0 < len(banks) <= 64, code,
+            f"{label} banks are missing or excessive")
+    bank_ids: set[str] = set()
+    entry_frames: set[int] = set()
+    previous_bank_id = ""
+    initial_bank: dict | None = None
+    for bank_index, value in enumerate(banks):
+        bank = strict_keys(value, {"id", "entryFrame", "timeline", "profileTimelines"},
+                           code, f"{label} bank {bank_index}")
+        require({"id", "entryFrame", "timeline"} <= set(bank), code,
+                f"{label} bank {bank_index} is incomplete")
+        bank_id = stable_id(bank.get("id"), f"{label} bank {bank_index} id")
+        require(bank_id > previous_bank_id, code,
+                f"{label} banks must be ordered by id without duplicates")
+        previous_bank_id = bank_id
+        bank_ids.add(bank_id)
+        entry_frame = as_int(bank.get("entryFrame"), code,
+                             f"{label} bank {bank_id} entry frame", 1)
+        require(entry_frame <= frame_count and entry_frame not in entry_frames, code,
+                f"{label} bank {bank_id} entry frame is invalid or duplicated")
+        entry_frames.add(entry_frame)
+        bank_timeline = validate_timeline(bank.get("timeline"),
+                                          f"{label} bank {bank_id} timeline",
+                                          False, entry_frame)
+        timeline_tick_count += len(bank_timeline["frames"])
+        bank_profiles = None
+        if "profileTimelines" in bank:
+            values = bank["profileTimelines"]
+            require(isinstance(values, list) and 0 < len(values) <= 16, code,
+                    f"{label} bank {bank_id} profile timelines are missing or excessive")
+            bank_profiles = []
+            profile_ids: set[str] = set()
+            for profile_index, profile_value in enumerate(values):
+                profile = validate_timeline(
+                    profile_value,
+                    f"{label} bank {bank_id} profile timeline {profile_index}",
+                    True, entry_frame)
+                profile_id = profile["profileId"]
+                require(profile_id not in profile_ids, code,
+                        f"{label} bank {bank_id} profile timeline id {profile_id} is duplicated")
+                profile_ids.add(profile_id)
+                bank_profiles.append(profile)
+                timeline_tick_count += len(profile["frames"])
+        require(timeline_tick_count <= limits["timeline_ticks"], "TIMELINE_LIMIT",
+                f"{label} bank timelines exceed the aggregate tick limit")
+        if bank_id == initial_bank_id:
+            initial_bank = {**bank, "timeline": bank_timeline}
+            if bank_profiles is not None:
+                initial_bank["profileTimelines"] = bank_profiles
+    require(initial_bank_id in bank_ids and initial_bank is not None
+            and initial_bank["entryFrame"] == initial_source, code,
+            f"{label} initial bank is missing or does not own the canonical initial frame")
+    require(same_playback_timeline(initial_bank["timeline"], timeline), code,
+            f"{label} initial bank timeline does not match the canonical top-level timeline")
+    top_profiles = packet.get("profileTimelines", [])
+    initial_profiles = initial_bank.get("profileTimelines", [])
+    require(len(initial_profiles) == len(top_profiles)
+            and all(same_playback_timeline(profile, top_profiles[index], True)
+                    for index, profile in enumerate(initial_profiles)), code,
+            f"{label} initial bank profile timelines do not match the canonical top-level profile timelines")
+    return timeline_tick_count
+
+
 def validate_playback_contract(state_channel: dict, binding: dict,
                                binding_inputs: dict[str, dict],
                                limits: dict[str, int]) -> dict:
@@ -1066,30 +1305,32 @@ def validate_playback_contract(state_channel: dict, binding: dict,
                             "INVALID_PLAYBACK_BINDING", "playback shape")
     leaves = unique_targets(targets.get("leaves"), min(limits["nodes"], 0x10000),
                             "INVALID_PLAYBACK_BINDING", "playback leaf")
-    parameters = strict_keys(binding.get("parameters"), {"baseSceneTransform", "frameCount", "tickRateHz"},
+    parameters = strict_keys(binding.get("parameters"), {"baseSceneTransform", "frameCount", "tickRateHz", "tickIntervalUs", "catchUpPolicy"},
                              "INVALID_PLAYBACK_BINDING", "playback parameters")
-    require(set(parameters) == {"baseSceneTransform", "frameCount", "tickRateHz"},
+    require({"baseSceneTransform", "frameCount"} <= set(parameters),
             "INVALID_PLAYBACK_BINDING", "Playback parameters are incomplete")
     safe_style(parameters.get("baseSceneTransform"), "Playback base scene transform")
     frame_count = as_int(parameters.get("frameCount"), "FRAME_CARDINALITY_MISMATCH",
                          "playback frameCount", 1)
     require(frame_count <= limits["frames"], "FRAME_CARDINALITY_MISMATCH",
             "Playback frameCount is excessive")
-    require(parameters.get("tickRateHz") == 30, "INVALID_PLAYBACK_BINDING",
-            "Playback tickRateHz must be 30")
+    validate_tick_cadence(parameters, "INVALID_PLAYBACK_BINDING", "Playback")
+    require(parameters.get("catchUpPolicy") in (None, "bounded", "single-step", "elapsed"),
+            "INVALID_PLAYBACK_BINDING", "Playback catchUpPolicy is invalid")
 
     data = strict_keys(state_channel.get("data"), {"packet", "leafFit"}, code,
                        "playback state data")
     require(set(data) == {"packet", "leafFit"}, code, "Playback state data is incomplete")
     packet = strict_keys(data.get("packet"), {
         "version", "layout", "shapeCount", "leafCount", "appearances", "timeline",
-        "initial", "frameRows", "shapeChanges", "leafChanges", "transforms",
+        "profileTimelines", "initialBankId", "banks", "initial", "frameRows", "shapeChanges", "leafChanges", "transforms",
     }, code, "playback packet")
-    require(set(packet) == {
+    require(set(packet) - {"profileTimelines", "initialBankId", "banks"} == {
         "version", "layout", "shapeCount", "leafCount", "appearances", "timeline",
         "initial", "frameRows", "shapeChanges", "leafChanges", "transforms",
     }, code, "Playback packet is incomplete")
-    require(packet.get("version") == 0 and packet.get("layout") == "delta-component-streams@0",
+    require(as_int(packet.get("version"), code, "playback version") == 0
+            and packet.get("layout") == "delta-component-streams@0",
             code, "Playback packet version or layout is unsupported")
     shape_count = as_int(packet.get("shapeCount"), "TARGET_CARDINALITY_MISMATCH",
                          "playback shapeCount")
@@ -1176,19 +1417,60 @@ def validate_playback_contract(state_channel: dict, binding: dict,
                 for index in initial_shape_transforms + initial_leaf_transforms),
             code, "Playback initial state references a missing transform")
 
-    timeline = strict_keys(packet.get("timeline"), {"introTicks", "loopTicks", "frames"},
-                           code, "playback timeline")
-    require(set(timeline) == {"introTicks", "loopTicks", "frames"}, code,
-            "Playback timeline is incomplete")
-    intro_ticks = as_int(timeline.get("introTicks"), "TIMELINE_LIMIT",
-                         "playback introTicks")
-    loop_ticks = as_int(timeline.get("loopTicks"), "TIMELINE_LIMIT",
-                        "playback loopTicks", 1)
-    timeline_frames = integer_array(timeline.get("frames"), limits["timeline_ticks"],
-                                    "TIMELINE_LIMIT", "playback timeline frames", 1, frame_count)
-    require(len(timeline_frames) == intro_ticks + loop_ticks and timeline_frames
-            and timeline_frames[0] == initial_source,
-            "TIMELINE_LIMIT", "Playback timeline coverage is invalid")
+    def validate_timeline(value: Any, label: str, profile: bool,
+                          entry_frame: int = initial_source) -> dict:
+        fields = {"introTicks", "loopTicks", "frames"}
+        if profile:
+            fields.add("profileId")
+        timeline = strict_keys(value, fields | {"deadlineMicros"}, code, label)
+        require(fields <= set(timeline), code, f"{label} is incomplete")
+        if profile:
+            stable_id(timeline.get("profileId"), f"{label} profile id")
+        intro_ticks = as_int(timeline.get("introTicks"), "TIMELINE_LIMIT",
+                             f"{label} introTicks")
+        loop_ticks = as_int(timeline.get("loopTicks"), "TIMELINE_LIMIT",
+                            f"{label} loopTicks", 1)
+        timeline_frames = integer_array(timeline.get("frames"), limits["timeline_ticks"],
+                                        "TIMELINE_LIMIT", f"{label} frames", 1, frame_count)
+        require(len(timeline_frames) == intro_ticks + loop_ticks and timeline_frames
+                and timeline_frames[0] == entry_frame,
+                "TIMELINE_LIMIT", f"{label} coverage is invalid")
+        def frame_distance(source: int, target: int) -> int:
+            return (target - source + frame_count) % frame_count
+        require(all(frame_distance(timeline_frames[index - 1], timeline_frames[index]) <= 8
+                    for index in range(1, len(timeline_frames)))
+                and frame_distance(timeline_frames[-1], timeline_frames[intro_ticks]) <= 8,
+                "TIMELINE_LIMIT", f"{label} advances too many source frames in one logical tick")
+        if "deadlineMicros" in timeline:
+            deadlines = integer_array(timeline["deadlineMicros"], limits["timeline_ticks"] + 1,
+                                      "TIMELINE_LIMIT", f"{label} deadlines", 0)
+            require(len(deadlines) == len(timeline_frames) + 1 and deadlines[0] == 0
+                    and all(deadlines[index] > deadlines[index - 1]
+                            and deadlines[index] - deadlines[index - 1] <= 2_147_483_647_000
+                            for index in range(1, len(deadlines))),
+                    "TIMELINE_LIMIT", f"{label} deadlines are incomplete or unordered")
+        return timeline
+
+    timeline = validate_timeline(packet.get("timeline"), "Playback timeline", False)
+    timeline_tick_count = len(timeline["frames"])
+    if "profileTimelines" in packet:
+        profile_timelines = packet["profileTimelines"]
+        require(isinstance(profile_timelines, list) and 0 < len(profile_timelines) <= 16,
+                code, "Playback profile timelines are missing or excessive")
+        profile_ids = set()
+        for index, value in enumerate(profile_timelines):
+            profile_timeline = validate_timeline(
+                value, f"Playback profile timeline {index}", True)
+            profile_id = profile_timeline["profileId"]
+            require(profile_id not in profile_ids, code,
+                    f"Playback profile timeline id {profile_id} is duplicated")
+            profile_ids.add(profile_id)
+            timeline_tick_count += len(profile_timeline["frames"])
+            require(timeline_tick_count <= limits["timeline_ticks"], "TIMELINE_LIMIT",
+                    "Playback baseline and profile timelines exceed the aggregate tick limit")
+    timeline_tick_count = validate_playback_banks(
+        packet, initial_source, frame_count, validate_timeline, timeline,
+        timeline_tick_count, limits, code, "Playback")
 
     shape_changes = strict_keys(packet.get("shapeChanges"),
                                 {"sources", "transforms", "visibility"}, code,
@@ -1321,6 +1603,159 @@ def validate_playback_contract(state_channel: dict, binding: dict,
     return packet
 
 
+def validate_paged_playback_contract(state_channel: dict, binding: dict,
+                                      binding_inputs: dict[str, dict],
+                                      limits: dict[str, int]) -> dict:
+    code = "INVALID_PAGED_PLAYBACK_STATE"
+    tick = binding_inputs.get("time.tick", {})
+    require(tick.get("type") == "uint" and "default" not in tick,
+            "INVALID_PLAYBACK_BINDING", "Paged playback time.tick must be an un-defaulted uint")
+    targets = strict_keys(binding.get("targets"), {"model", "shapes", "leaves"},
+                          "INVALID_PLAYBACK_BINDING", "paged playback targets")
+    require(set(targets) == {"model", "shapes", "leaves"}, "INVALID_PLAYBACK_BINDING",
+            "Paged playback targets are incomplete")
+    stable_id(targets.get("model"), "paged playback model target")
+    shapes = unique_targets(targets.get("shapes"), limits["nodes"],
+                            "INVALID_PLAYBACK_BINDING", "paged playback shape")
+    leaves = unique_targets(targets.get("leaves"), min(limits["nodes"], 0x10000),
+                            "INVALID_PLAYBACK_BINDING", "paged playback leaf")
+    parameters = strict_keys(binding.get("parameters"),
+                             {"baseSceneTransform", "frameCount", "tickRateHz", "tickIntervalUs", "catchUpPolicy"},
+                             "INVALID_PLAYBACK_BINDING", "paged playback parameters")
+    require({"baseSceneTransform", "frameCount"} <= set(parameters),
+            "INVALID_PLAYBACK_BINDING", "Paged playback parameters are incomplete")
+    safe_style(parameters.get("baseSceneTransform"), "Paged playback base scene transform")
+    frame_count = as_int(parameters.get("frameCount"), "FRAME_CARDINALITY_MISMATCH",
+                         "paged playback frameCount", 1)
+    require(frame_count <= limits["paged_frames"], "FRAME_CARDINALITY_MISMATCH",
+            "Paged playback frame count is invalid")
+    validate_tick_cadence(parameters, "INVALID_PLAYBACK_BINDING", "Paged playback")
+    require(parameters.get("catchUpPolicy") in (None, "bounded", "single-step", "elapsed"),
+            "INVALID_PLAYBACK_BINDING", "Paged playback catchUpPolicy is invalid")
+    data = strict_keys(state_channel.get("data"), {"packet"}, code, "paged playback state")
+    require(set(data) == {"packet"}, code, "Paged playback state is incomplete")
+    packet_fields = {"version", "shapeCount", "leafCount", "appearances", "timeline",
+                     "profileTimelines", "initialBankId", "banks", "initial", "pages", "lookaheadPages", "maxResidentPages"}
+    packet = strict_keys(data.get("packet"), packet_fields, code, "paged playback packet")
+    require(set(packet) - {"profileTimelines", "initialBankId", "banks"}
+            == packet_fields - {"profileTimelines", "initialBankId", "banks"},
+            code, "Paged playback packet is incomplete")
+    require(as_int(packet.get("version"), code, "paged playback version") == 0,
+            code, "Paged playback version must be zero")
+    shape_count = as_int(packet.get("shapeCount"), "TARGET_CARDINALITY_MISMATCH",
+                         "paged playback shapeCount")
+    leaf_count = as_int(packet.get("leafCount"), "TARGET_CARDINALITY_MISMATCH",
+                        "paged playback leafCount")
+    require(shape_count <= limits["nodes"] and leaf_count <= min(limits["nodes"], 0x10000)
+            and len(shapes) == shape_count and len(leaves) == leaf_count,
+            "TARGET_CARDINALITY_MISMATCH", "Paged playback targets do not match declared counts")
+    appearances = packet.get("appearances")
+    require(isinstance(appearances, list) and 0 < len(appearances) <= limits["frames"],
+            code, "Paged playback appearances are missing or excessive")
+    appearance_ids = set()
+    for index, appearance in enumerate(appearances):
+        require(isinstance(appearance, list) and len(appearance) == 3,
+                code, f"Paged playback appearance {index} is malformed")
+        aid = stable_id(appearance[0], f"paged playback appearance {index} id")
+        require(aid not in appearance_ids and finite_f32(appearance[1]) and appearance[1] > 0
+                and finite_f32(appearance[2]), code,
+                f"Paged playback appearance {index} is invalid")
+        appearance_ids.add(aid)
+    initial = strict_keys(packet.get("initial"), {"sourceFrame", "appearance"}, code,
+                          "paged playback initial")
+    initial_frame = as_int(initial.get("sourceFrame"), "FRAME_CARDINALITY_MISMATCH",
+                           "paged playback initial frame", 1)
+    initial_appearance = as_int(initial.get("appearance"), code,
+                                "paged playback initial appearance")
+    require(initial_frame <= frame_count and initial_appearance < len(appearances), code,
+            "Paged playback initial state is invalid")
+
+    def validate_timeline(value: Any, label: str, profile: bool,
+                          entry_frame: int = initial_frame) -> dict:
+        fields = {"introTicks", "loopTicks", "frames"} | ({"profileId"} if profile else set())
+        timeline = strict_keys(value, fields | {"deadlineMicros"}, code, label)
+        require(fields <= set(timeline), code, f"{label} is incomplete")
+        if profile:
+            stable_id(timeline.get("profileId"), f"{label} profile id")
+        intro = as_int(timeline.get("introTicks"), "TIMELINE_LIMIT", f"{label} introTicks")
+        loop = as_int(timeline.get("loopTicks"), "TIMELINE_LIMIT", f"{label} loopTicks", 1)
+        frames = integer_array(timeline.get("frames"), limits["timeline_ticks"],
+                               "TIMELINE_LIMIT", f"{label} frames", 1, frame_count)
+        require(len(frames) == intro + loop and frames and frames[0] == entry_frame,
+                "TIMELINE_LIMIT", f"{label} coverage is invalid")
+        def frame_distance(source: int, target: int) -> int:
+            return (target - source + frame_count) % frame_count
+        require(all(frame_distance(frames[index - 1], frames[index]) <= 8
+                    for index in range(1, len(frames)))
+                and frame_distance(frames[-1], frames[intro]) <= 8,
+                "TIMELINE_LIMIT", f"{label} advances too many source frames in one logical tick")
+        if "deadlineMicros" in timeline:
+            deadlines = integer_array(timeline["deadlineMicros"], limits["timeline_ticks"] + 1,
+                                      "TIMELINE_LIMIT", f"{label} deadlines", 0)
+            require(len(deadlines) == len(frames) + 1 and deadlines[0] == 0
+                    and all(deadlines[index] > deadlines[index - 1]
+                            and deadlines[index] - deadlines[index - 1] <= 2_147_483_647_000
+                            for index in range(1, len(deadlines))),
+                    "TIMELINE_LIMIT", f"{label} deadlines are incomplete or unordered")
+        return timeline
+
+    timeline = validate_timeline(packet.get("timeline"), "Paged playback timeline", False)
+    ticks = len(timeline["frames"])
+    if "profileTimelines" in packet:
+        profiles = packet["profileTimelines"]
+        require(isinstance(profiles, list) and 0 < len(profiles) <= 16, code,
+                "Paged playback profile timelines are missing or excessive")
+        profile_ids = set()
+        for index, value in enumerate(profiles):
+            timeline = validate_timeline(value, f"Paged playback profile timeline {index}", True)
+            require(timeline["profileId"] not in profile_ids, code,
+                    "Paged playback profile timeline id is duplicated")
+            profile_ids.add(timeline["profileId"])
+            ticks += len(timeline["frames"])
+            require(ticks <= limits["timeline_ticks"], "TIMELINE_LIMIT",
+                    "Paged playback timelines exceed the aggregate tick limit")
+    ticks = validate_playback_banks(
+        packet, initial_frame, frame_count, validate_timeline, timeline,
+        ticks, limits, code, "Paged playback")
+    lookahead = as_int(packet.get("lookaheadPages"), "STATE_PAGE_RESIDENCY_LIMIT",
+                       "paged playback lookahead", 1)
+    resident = as_int(packet.get("maxResidentPages"), "STATE_PAGE_RESIDENCY_LIMIT",
+                      "paged playback residency", 1)
+    require(lookahead <= 4 and lookahead + 1 <= resident <= 16,
+            "STATE_PAGE_RESIDENCY_LIMIT", "Paged playback residency is invalid")
+    pages = packet.get("pages")
+    require(isinstance(pages, list) and 0 < len(pages) <= limits["state_pages"],
+            "STATE_PAGE_COVERAGE_MISMATCH", "Paged playback pages are missing or excessive")
+    resources, expected = set(), 1
+    fields = {"resource", "startFrame", "endFrame", "transformCount", "shapeChangeCount",
+              "leafChangeCount", "materializedByteLength"}
+    for index, page in enumerate(pages):
+        page = strict_keys(page, fields, code, f"paged playback page {index}")
+        require(set(page) == fields, code, f"Paged playback page {index} is incomplete")
+        resource = resource_id(page.get("resource"), f"paged playback page {index} resource")
+        start = as_int(page.get("startFrame"), "STATE_PAGE_COVERAGE_MISMATCH", "page start", 1)
+        end = as_int(page.get("endFrame"), "STATE_PAGE_COVERAGE_MISMATCH", "page end", 1)
+        transforms = as_int(page.get("transformCount"), "TRANSFORM_ALLOCATION_LIMIT", "page transforms", 1)
+        shape_changes = as_int(page.get("shapeChangeCount"), "STATE_CHANGE_LIMIT", "page shape changes")
+        leaf_changes = as_int(page.get("leafChangeCount"), "STATE_CHANGE_LIMIT", "page leaf changes")
+        materialized = as_int(page.get("materializedByteLength"), "STATE_PAGE_RESIDENCY_LIMIT",
+                              "page materialized bytes", 1)
+        require(resource not in resources and start == expected and start <= end <= frame_count,
+                "STATE_PAGE_COVERAGE_MISMATCH", f"Paged playback page {index} is noncontiguous")
+        require(end - start + 1 <= limits["state_page_frames"],
+                "STATE_PAGE_COVERAGE_MISMATCH",
+                f"Paged playback page {index} exceeds the per-page frame limit")
+        require(transforms <= limits["prepared_transforms"]
+                and shape_changes <= limits["prepared_changes"]
+                and leaf_changes <= limits["prepared_changes"]
+                and materialized <= limits["decoded_total"], "STATE_PAGE_TABLE_LIMIT",
+                f"Paged playback page {index} tables are excessive")
+        resources.add(resource); expected = end + 1
+    require(expected == frame_count + 1, "STATE_PAGE_COVERAGE_MISMATCH",
+            "Paged playback pages do not cover playback exactly")
+    return packet
+
+
 def validate_surface_contract(state_channel: dict, binding: dict,
                               playback_packet: dict, playback_binding: dict,
                               binding_inputs: dict[str, dict],
@@ -1332,8 +1767,6 @@ def validate_surface_contract(state_channel: dict, binding: dict,
     require(source_frame_input.get("type") == "uint" and "default" not in source_frame_input,
             "INVALID_SURFACE_BINDING",
             "Surface time.source-frame input must be uint without a package default")
-    exact_array(binding.get("sinks"), ["style.backgroundPositionY", "style.visibility"],
-                "INVALID_SURFACE_BINDING", "Surface sinks are incomplete or noncanonical")
     require("parameters" not in binding, "INVALID_SURFACE_BINDING",
             "Surface binding must not declare parameters")
     targets = strict_keys(binding.get("targets"), {"leaves"},
@@ -1356,7 +1789,8 @@ def validate_surface_contract(state_channel: dict, binding: dict,
     require(set(packet) == {"version", "frameCount", "surface", "transitions", "visibility"},
             code, "Surface packet is incomplete")
     frame_count = int(playback_binding["parameters"]["frameCount"])
-    require(packet.get("version") == 0 and packet.get("frameCount") == frame_count,
+    require(as_int(packet.get("version"), "FRAME_CARDINALITY_MISMATCH", "surface version") == 0
+            and packet.get("frameCount") == frame_count,
             "FRAME_CARDINALITY_MISMATCH", "Surface version or frameCount is invalid")
 
     surface = strict_keys(packet.get("surface"), {"faces", "statePacking"},
@@ -1366,9 +1800,9 @@ def validate_surface_contract(state_channel: dict, binding: dict,
     faces = surface.get("faces")
     require(isinstance(faces, list) and len(faces) == leaf_count,
             "TARGET_CARDINALITY_MISMATCH", "Surface faces do not match leafCount")
-    packing = strict_keys(surface.get("statePacking"), {"stateCount", "sourceFrameDeltas"},
+    packing = strict_keys(surface.get("statePacking"), {"stateCount", "sourceFrameDeltas", "positionDictionary", "positionIndicesBase64"},
                           code, "surface state packing")
-    require(set(packing) == {"stateCount", "sourceFrameDeltas"}, code,
+    require({"stateCount", "sourceFrameDeltas"}.issubset(packing), code,
             "Surface state packing is incomplete")
     state_count = as_int(packing.get("stateCount"), "SURFACE_STATE_LIMIT",
                          "surface stateCount")
@@ -1379,6 +1813,42 @@ def validate_surface_contract(state_channel: dict, binding: dict,
                                   "surface source-frame deltas", 0, max(0, frame_count - 1))
     require(len(source_deltas) == state_count, "STATE_COLUMN_MISMATCH",
             "Surface source-frame deltas do not match stateCount")
+    has_position_dictionary = "positionDictionary" in packing
+    has_position_indices = "positionIndicesBase64" in packing
+    require(has_position_dictionary == has_position_indices, code,
+            "Surface prepared position dictionary and indices must appear together")
+    prepared_positions = has_position_dictionary
+    exact_array(binding.get("sinks"),
+                ["style.backgroundPosition" if prepared_positions else "style.backgroundPositionY",
+                 "style.visibility"],
+                "INVALID_SURFACE_BINDING", "Surface sinks are incomplete or noncanonical")
+    if prepared_positions:
+        dictionary = packing.get("positionDictionary")
+        require(isinstance(dictionary, list) and 0 < len(dictionary)
+                <= min(state_count, 0xffff), "SURFACE_STATE_LIMIT",
+                "Surface position dictionary is missing or excessive")
+        previous: tuple[int, int] | None = None
+        for index, position in enumerate(dictionary):
+            require(isinstance(position, list) and len(position) == 2
+                    and all(is_safe_int(coordinate, -0x80000000, 0x7fffffff)
+                            and not (isinstance(coordinate, float)
+                                     and coordinate == 0
+                                     and math.copysign(1.0, coordinate) < 0)
+                            for coordinate in position), code,
+                    f"Surface position dictionary row {index} is invalid")
+            current = (int(position[0]), int(position[1]))
+            require(previous is None or current > previous, code,
+                    "Surface position dictionary is not strictly lexicographically sorted")
+            previous = current
+        position_indices = base64_integers(packing.get("positionIndicesBase64"), 2,
+                                           limits["prepared_states"], code,
+                                           "surface position indices")
+        require(len(position_indices) == state_count
+                and all(position < len(dictionary) for position in position_indices),
+                "STATE_COLUMN_MISMATCH",
+                "Surface position indices do not match the state table or dictionary")
+        require(len(set(position_indices)) == len(dictionary), code,
+                "Surface position dictionary contains an unreferenced row")
     face_ids, state_offset = set(), 0
     source_frames_by_face: list[list[int]] = []
     for index, face in enumerate(faces):
@@ -1534,24 +2004,9 @@ def validate_surface_contract(state_channel: dict, binding: dict,
                     and (cursor == visibility_offsets[frame]
                          or visibility_faces[cursor - 1] < visibility_faces[cursor]),
                     code, f"Surface visibility segment {frame} is invalid")
-    visibility_rows = bytearray(leaf_count * frame_count)
-    for face_index in range(leaf_count):
-        visibility_rows[face_index] = ((initial_bits[face_index >> 3]
-                                        >> (face_index & 7)) & 1)
-    for target_frame in range(2, frame_count + 1):
-        previous_offset = (target_frame - 2) * leaf_count
-        target_offset = (target_frame - 1) * leaf_count
-        visibility_rows[target_offset:target_offset + leaf_count] = \
-            visibility_rows[previous_offset:previous_offset + leaf_count]
-        for cursor in range(visibility_offsets[target_frame - 1],
-                            visibility_offsets[target_frame]):
-            visibility_rows[target_offset + visibility_faces[cursor]] ^= 1
-    if frame_count > 0:
-        wrapped = bytearray(visibility_rows[(frame_count - 1) * leaf_count:])
-        for cursor in range(visibility_offsets[0], visibility_offsets[1]):
-            wrapped[visibility_faces[cursor]] ^= 1
-        require(wrapped == visibility_rows[:leaf_count], "SURFACE_TRANSITION_MISMATCH",
-                "Surface visibility wrap transition does not reproduce frame 1")
+    initial_visibility = bytearray((initial_bits[face_index >> 3]
+                                    >> (face_index & 7)) & 1
+                                   for face_index in range(leaf_count))
     visibility_jumps = visibility.get("nonInteractiveJumps")
     require(isinstance(visibility_jumps, list) and len(visibility_jumps) <= frame_count,
             code, "Surface visibility jumps are invalid or excessive")
@@ -1592,16 +2047,15 @@ def validate_surface_contract(state_channel: dict, binding: dict,
                 upper = middle
         return lower - 1
 
-    def expected_transition(from_frame: int, to_frame: int) \
+    def expected_transition(from_frame: int, to_frame: int,
+                            from_visibility: bytearray, to_visibility: bytearray) \
             -> tuple[list[int], list[int], list[int]]:
-        from_offset = (from_frame - 1) * leaf_count
-        to_offset = (to_frame - 1) * leaf_count
         changed_visibility: list[int] = []
         changed_faces: list[int] = []
         changed_states: list[int] = []
         for face_index in range(leaf_count):
-            from_visible = visibility_rows[from_offset + face_index]
-            to_visible = visibility_rows[to_offset + face_index]
+            from_visible = from_visibility[face_index]
+            to_visible = to_visibility[face_index]
             if from_visible != to_visible:
                 changed_visibility.append(face_index)
             from_state = state_at(source_frames_by_face[face_index], from_frame - 1)
@@ -1611,23 +2065,52 @@ def validate_surface_contract(state_channel: dict, binding: dict,
                 changed_states.append(to_state)
         return changed_visibility, changed_faces, changed_states
 
-    for to_frame in range(1, frame_count + 1):
-        from_frame = frame_count if to_frame == 1 else to_frame - 1
+    endpoint_frames = {int(frame) for pair in jump_pairs for frame in pair.split(">")}
+    require(len(endpoint_frames) * max(1, leaf_count) <= limits["visibility_cells"],
+            "VISIBILITY_ALLOCATION_LIMIT",
+            "Surface jump endpoint visibility rows exceed the allocation limit")
+    endpoint_rows: dict[int, bytearray] = {}
+    if 1 in endpoint_frames:
+        endpoint_rows[1] = bytearray(initial_visibility)
+    previous_visibility = bytearray(initial_visibility)
+    for to_frame in range(2, frame_count + 1):
+        next_visibility = bytearray(previous_visibility)
+        for cursor in range(visibility_offsets[to_frame - 1], visibility_offsets[to_frame]):
+            next_visibility[visibility_faces[cursor]] ^= 1
         expected_visibility, expected_faces, expected_states = \
-            expected_transition(from_frame, to_frame)
+            expected_transition(to_frame - 1, to_frame,
+                                previous_visibility, next_visibility)
         actual_faces, actual_states = lighting_segments[to_frame - 1]
         actual_visibility = visibility_faces[
             visibility_offsets[to_frame - 1]:visibility_offsets[to_frame]]
         require(actual_faces == expected_faces and actual_states == expected_states,
                 "SURFACE_TRANSITION_MISMATCH",
-                f"Surface lighting transition {from_frame}>{to_frame} is not closed")
+                f"Surface lighting transition {to_frame - 1}>{to_frame} is not closed")
         require(actual_visibility == expected_visibility,
                 "SURFACE_TRANSITION_MISMATCH",
-                f"Surface visibility transition {from_frame}>{to_frame} is not closed")
+                f"Surface visibility transition {to_frame - 1}>{to_frame} is not closed")
+        previous_visibility = next_visibility
+        if to_frame in endpoint_frames:
+            endpoint_rows[to_frame] = bytearray(next_visibility)
+    wrapped = bytearray(previous_visibility)
+    for cursor in range(visibility_offsets[0], visibility_offsets[1]):
+        wrapped[visibility_faces[cursor]] ^= 1
+    require(wrapped == initial_visibility, "SURFACE_TRANSITION_MISMATCH",
+            "Surface visibility wrap transition does not reproduce frame 1")
+    expected_visibility, expected_faces, expected_states = expected_transition(
+        frame_count, 1, previous_visibility, initial_visibility)
+    actual_faces, actual_states = lighting_segments[0]
+    require(actual_faces == expected_faces and actual_states == expected_states,
+            "SURFACE_TRANSITION_MISMATCH",
+            f"Surface lighting transition {frame_count}>1 is not closed")
+    require(visibility_faces[visibility_offsets[0]:visibility_offsets[1]]
+            == expected_visibility, "SURFACE_TRANSITION_MISMATCH",
+            f"Surface visibility transition {frame_count}>1 is not closed")
     for pair in jump_pairs:
         from_frame, to_frame = (int(value) for value in pair.split(">"))
         expected_visibility, expected_faces, expected_states = \
-            expected_transition(from_frame, to_frame)
+            expected_transition(from_frame, to_frame,
+                                endpoint_rows[from_frame], endpoint_rows[to_frame])
         actual_faces, actual_states = lighting_jumps[pair]
         require(actual_faces == expected_faces and actual_states == expected_states,
                 "SURFACE_JUMP_MISMATCH",
@@ -1636,6 +2119,728 @@ def validate_surface_contract(state_channel: dict, binding: dict,
                 "SURFACE_JUMP_MISMATCH",
                 f"Surface visibility jump {pair} contradicts canonical target state")
     return packet
+
+
+def validate_variants_contract(state_channel: dict, binding: dict,
+                               playback_packet: dict, playback_binding: dict,
+                               binding_inputs: dict[str, dict],
+                               limits: dict[str, int], tree_nodes: list[dict],
+                               surface_binding: dict | None) -> dict:
+    code = "INVALID_VARIANT_STATE"
+    exact_array(binding.get("inputs"), ["time.source-frame"],
+                "INVALID_VARIANT_BINDING", "Variant inputs are incomplete or noncanonical")
+    source_frame_input = binding_inputs.get("time.source-frame", {})
+    require(source_frame_input.get("type") == "uint" and "default" not in source_frame_input,
+            "INVALID_VARIANT_BINDING",
+            "Variant time.source-frame input must be uint without a package default")
+    require("parameters" not in binding, "INVALID_VARIANT_BINDING",
+            "Variant binding must not declare parameters")
+    targets = strict_keys(binding.get("targets"), {"effectNodes", "nodes"},
+                          "INVALID_VARIANT_BINDING", "variant targets")
+    require(set(targets) == {"effectNodes", "nodes"}, "INVALID_VARIANT_BINDING",
+            "Variant targets are incomplete")
+    nodes = unique_targets(targets.get("nodes"), min(limits["nodes"], 0xffff),
+                           "INVALID_VARIANT_BINDING", "variant node")
+    effect_nodes = unique_targets(targets.get("effectNodes"), min(limits["nodes"], 0xfffe),
+                                  "INVALID_VARIANT_BINDING", "variant effect node")
+    require(nodes, "TARGET_CARDINALITY_MISMATCH", "Variant targets are empty")
+
+    data = strict_keys(state_channel.get("data"), {"packet"}, code, "variant state data")
+    require(set(data) == {"packet"}, code, "Variant state data is incomplete")
+    packet = strict_keys(data.get("packet"),
+                         {"version", "frameCount", "classes", "effects", "initial", "sequential",
+                          "nonInteractiveJumps"}, code, "variant packet")
+    require(set(packet) == {"version", "frameCount", "classes", "effects", "initial", "sequential",
+                            "nonInteractiveJumps"}, code, "Variant packet is incomplete")
+    frame_count = int(playback_binding["parameters"]["frameCount"])
+    require(as_int(packet.get("version"), "FRAME_CARDINALITY_MISMATCH", "variant version") == 0
+            and packet.get("frameCount") == frame_count,
+            "FRAME_CARDINALITY_MISMATCH", "Variant version or frameCount is invalid")
+    require(len(nodes) * frame_count <= limits["visibility_cells"],
+            "VARIANT_STATE_LIMIT", "Prepared variant state matrix is excessive")
+    classes = packet.get("classes")
+    require(isinstance(classes, list) and 0 < len(classes) < 0xffff
+            and len(classes) <= limits["prepared_states"],
+            "VARIANT_STATE_LIMIT", "Prepared variant class table is invalid or excessive")
+    for index, token in enumerate(classes):
+        require(isinstance(token, str)
+                and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_-]{0,63}", token)
+                and (index == 0 or classes[index - 1] < token), code,
+                f"Prepared variant class {index} is invalid or noncanonical")
+
+    effects = packet.get("effects")
+    require(isinstance(effects, list) and 0 < len(effects) <= limits["prepared_changes"],
+            "VARIANT_EFFECT_LIMIT", "Prepared variant effect table is missing or excessive")
+    nodes_by_id = {node["id"]: node for node in tree_nodes}
+    effect_classes, ownership, sinks, previous_effect = set(), {}, {"class.prepared"}, ""
+    for index, effect in enumerate(effects):
+        effect = strict_keys(effect, {"classIndex", "ownerIndex", "styles", "targetIndex"},
+                             "INVALID_VARIANT_EFFECT", f"variant effect {index}")
+        class_index = as_int(effect.get("classIndex"), "INVALID_VARIANT_EFFECT", f"variant effect {index} class")
+        owner_index = as_int(effect.get("ownerIndex"), "INVALID_VARIANT_EFFECT", f"variant effect {index} owner")
+        target_index = as_int(effect.get("targetIndex"), "INVALID_VARIANT_EFFECT", f"variant effect {index} target")
+        require(class_index < len(classes) and owner_index < len(nodes)
+                and (target_index == 0xffff or target_index < len(effect_nodes)),
+                "INVALID_VARIANT_EFFECT", f"Variant effect {index} indices are invalid")
+        effect_key = f"{class_index:05d}:{owner_index:05d}:{target_index:05d}"
+        require(effect_key > previous_effect, "INVALID_VARIANT_EFFECT",
+                "Variant effects are not unique and canonical")
+        previous_effect = effect_key
+        effect_classes.add(class_index)
+        owner_id = nodes[owner_index]
+        owner_node = nodes_by_id[owner_id]
+        target_id = owner_id if target_index == 0xffff else effect_nodes[target_index]
+        target_node = nodes_by_id[target_id]
+        if target_index != 0xffff:
+            parent, descendant = target_node["parent"], False
+            while parent >= 0:
+                if parent == owner_node["index"]:
+                    descendant = True
+                    break
+                parent = tree_nodes[parent]["parent"]
+            require(descendant, "INVALID_VARIANT_EFFECT",
+                    f"Variant effect {index} target is not below its owner")
+        styles = strict_keys(effect.get("styles"), set(VARIANT_EFFECT_PROPERTIES),
+                             "INVALID_VARIANT_EFFECT", f"variant effect {index} styles")
+        require(0 < len(styles) <= len(VARIANT_EFFECT_PROPERTIES), "INVALID_VARIANT_EFFECT",
+                f"Variant effect {index} styles are empty or excessive")
+        for property_name, value in styles.items():
+            require(property_name in VARIANT_EFFECT_PROPERTIES and isinstance(value, str) and value,
+                    "INVALID_VARIANT_EFFECT", f"Variant effect {index} style is invalid")
+            safe_style(value, f"Variant effect {index} style {property_name}")
+            if property_name == "display":
+                require(value in ("block", "none"), "INVALID_VARIANT_EFFECT",
+                        f"Variant effect {index} display is unsupported")
+            if property_name == "backgroundPositionX":
+                require(re.fullmatch(r"(?:0|-?[1-9][0-9]*px)", value) is not None,
+                        "INVALID_VARIANT_EFFECT", f"Variant effect {index} position is noncanonical")
+            conflicts = ("backgroundPosition", "backgroundPositionX") if property_name == "backgroundPositionX" else (property_name,)
+            require(not any(name in target_node.get("styles", {}) for name in conflicts),
+                    "VARIANT_TREE_MISMATCH", f"Variant effect {index} is shadowed by TREE inline state")
+            sink = VARIANT_EFFECT_PROPERTIES[property_name]
+            if (sink == "style.backgroundPositionX" and surface_binding is not None
+                    and "style.backgroundPosition" in surface_binding["sinks"]):
+                surface_targets: list[str] = []
+                collect_targets(surface_binding["targets"], surface_targets, limits["nodes"] + 1,
+                                "surface targets", limits["depth"])
+                require(target_id not in surface_targets, "TARGET_OWNERSHIP_CONFLICT",
+                        f"Variant effect {index} conflicts with full prepared surface ownership")
+            sinks.add(sink)
+            ownership_key = (target_id, sink)
+            require(ownership_key not in ownership or ownership[ownership_key] == owner_index,
+                    "TARGET_OWNERSHIP_CONFLICT", f"Variant effect {index} has multiple owners")
+            ownership[ownership_key] = owner_index
+    require(len(effect_classes) == len(classes), "INVALID_VARIANT_EFFECT",
+            "Every prepared variant class must declare an effect")
+    exact_array(binding.get("sinks"), sorted(sinks), "INVALID_VARIANT_BINDING",
+                "Variant sinks are incomplete or noncanonical")
+
+    initial = strict_keys(packet.get("initial"), {"frame", "classIndicesBase64"},
+                          code, "variant initial state")
+    require(set(initial) == {"frame", "classIndicesBase64"}, code,
+            "Variant initial state is incomplete")
+    require(initial.get("frame") == 1
+            and initial.get("frame") == playback_packet["initial"]["sourceFrame"],
+            "FRAME_CARDINALITY_MISMATCH",
+            "Variant initial frame must be frame 1 and match playback")
+    initial_indices = base64_integers(initial.get("classIndicesBase64"), 2, len(nodes),
+                                      code, "variant initial classes")
+    valid_class = lambda value: value == 0xffff or value < len(classes)
+    require(len(initial_indices) == len(nodes) and all(map(valid_class, initial_indices)),
+            code, "Variant initial classes are invalid")
+
+    sequential = strict_keys(packet.get("sequential"),
+                             {"offsetsBase64", "targetIndicesBase64", "classIndicesBase64"},
+                             code, "variant sequential transitions")
+    require(set(sequential) == {"offsetsBase64", "targetIndicesBase64", "classIndicesBase64"},
+            code, "Variant sequential transitions are incomplete")
+    offsets = base64_integers(sequential.get("offsetsBase64"), 4, frame_count + 1,
+                              code, "variant transition offsets")
+    target_indices = base64_integers(sequential.get("targetIndicesBase64"), 2,
+                                     limits["prepared_changes"],
+                                     "VARIANT_STATE_LIMIT", "variant transition targets")
+    class_indices = base64_integers(sequential.get("classIndicesBase64"), 2,
+                                    limits["prepared_changes"],
+                                    "VARIANT_STATE_LIMIT", "variant transition classes")
+    require(len(offsets) == frame_count + 1 and offsets[0] == 0
+            and offsets[-1] == len(target_indices)
+            and all(offsets[index - 1] <= value
+                    for index, value in enumerate(offsets) if index > 0),
+            "STATE_COLUMN_MISMATCH", "Variant transition offsets are invalid")
+    require(len(target_indices) == len(class_indices), "STATE_COLUMN_MISMATCH",
+            "Variant transition columns have unequal lengths")
+
+    def apply_segment(row: list[int], segment: int, label: str) -> None:
+        previous = -1
+        for cursor in range(offsets[segment], offsets[segment + 1]):
+            target, class_index = target_indices[cursor], class_indices[cursor]
+            require(target < len(nodes) and target > previous and valid_class(class_index),
+                    code, f"{label} is invalid")
+            require(row[target] != class_index, code, f"{label} contains a no-op")
+            row[target] = class_index
+            previous = target
+
+    jumps = packet.get("nonInteractiveJumps")
+    require(isinstance(jumps, list) and len(jumps) <= frame_count, code,
+            "Variant jumps are invalid or excessive")
+    pairs, jump_endpoints, decoded_jumps = set(), set(), []
+    for index, jump in enumerate(jumps):
+        jump = strict_keys(jump,
+                           {"fromFrame", "toFrame", "targetIndicesBase64", "classIndicesBase64"},
+                           code, f"variant jump {index}")
+        require(set(jump) == {"fromFrame", "toFrame", "targetIndicesBase64", "classIndicesBase64"},
+                code, f"Variant jump {index} is incomplete")
+        from_frame = as_int(jump.get("fromFrame"), code, f"variant jump {index} fromFrame", 1)
+        to_frame = as_int(jump.get("toFrame"), code, f"variant jump {index} toFrame", 1)
+        pair = f"{from_frame}>{to_frame}"
+        require(from_frame <= frame_count and to_frame <= frame_count
+                and from_frame != to_frame and pair not in pairs,
+                code, f"Variant jump {index} frames are invalid or duplicated")
+        pairs.add(pair)
+        jump_targets = base64_integers(jump.get("targetIndicesBase64"), 2, len(nodes),
+                                       code, f"variant jump {index} targets")
+        jump_classes = base64_integers(jump.get("classIndicesBase64"), 2, len(nodes),
+                                       code, f"variant jump {index} classes")
+        require(len(jump_targets) == len(jump_classes)
+                and all(target < len(nodes)
+                        and (cursor == 0 or jump_targets[cursor - 1] < target)
+                        and valid_class(jump_classes[cursor])
+                        for cursor, target in enumerate(jump_targets)), code,
+                f"Variant jump {index} rows are invalid")
+        jump_endpoints.update((from_frame, to_frame))
+        decoded_jumps.append((pair, from_frame, to_frame, jump_targets, jump_classes))
+
+    endpoint_rows = {1: initial_indices} if 1 in jump_endpoints else {}
+    current = list(initial_indices)
+    for frame in range(2, frame_count + 1):
+        apply_segment(current, frame - 1, f"Variant transition {frame - 1}>{frame}")
+        if frame in jump_endpoints:
+            endpoint_rows[frame] = list(current)
+    apply_segment(current, 0, f"Variant transition {frame_count}>1")
+    require(current == initial_indices, "VARIANT_TRANSITION_MISMATCH",
+            "Variant wrap transition does not reproduce frame 1")
+
+    for pair, from_frame, to_frame, jump_targets, jump_classes in decoded_jumps:
+        expected_targets, expected_classes = [], []
+        for target in range(len(nodes)):
+            if endpoint_rows[from_frame][target] != endpoint_rows[to_frame][target]:
+                expected_targets.append(target)
+                expected_classes.append(endpoint_rows[to_frame][target])
+        require(jump_targets == expected_targets and jump_classes == expected_classes,
+                "VARIANT_JUMP_MISMATCH",
+                f"Variant jump {pair} contradicts canonical target state")
+    return packet
+
+
+def desired_page_resources(packet: dict, frame: int, pinned_frames: list[int]) -> set[str]:
+    current = next((index for index, page in enumerate(packet["pages"])
+                    if page["startFrame"] <= frame <= page["endFrame"]), -1)
+    require(current >= 0, "STATE_PAGE_COVERAGE_MISMATCH",
+            f"Prepared frame {frame} has no state page descriptor")
+    resources = {packet["pages"][current]["resource"]}
+    for pinned_frame in pinned_frames:
+        page = next((page for page in packet["pages"]
+                     if page["startFrame"] <= pinned_frame <= page["endFrame"]), None)
+        require(page is not None, "STATE_PAGE_COVERAGE_MISMATCH",
+                f"Pinned prepared frame {pinned_frame} has no state page descriptor")
+        resources.add(page["resource"])
+    for offset in range(1, int(packet["lookaheadPages"]) + 1):
+        resources.add(packet["pages"][(current + offset) % len(packet["pages"])]["resource"])
+    return resources
+
+
+def required_document_state_residency(packets: list[dict], pinned_frames: list[int],
+                                      active_frame_pins: list[int] | None = None) -> int:
+    required = 0
+    candidate_frames = sorted({page["startFrame"] for packet in packets
+                               for page in packet["pages"]})
+    candidate_pins: list[int | None] = active_frame_pins or [None]
+    for frame in candidate_frames:
+        for active_frame_pin in candidate_pins:
+            resources: set[str] = set()
+            pins = pinned_frames if active_frame_pin is None \
+                else [*pinned_frames, active_frame_pin]
+            for packet in packets:
+                resources.update(desired_page_resources(packet, frame, pins))
+            published_transfer = sum(
+                1 for packet in packets
+                if any(page["resource"] not in resources for page in packet["pages"])
+            )
+            required = max(required, len(resources) + published_transfer)
+    return required
+
+
+def validate_paged_variants_contract(state_channel: dict, binding: dict,
+                                     playback_packet: dict, playback_binding: dict,
+                                     binding_inputs: dict[str, dict], limits: dict[str, int],
+                                     tree_nodes: list[dict], surface_binding: dict | None) -> dict:
+    data = strict_keys(state_channel.get("data"), {"packet"},
+                       "INVALID_PAGED_VARIANT_STATE", "paged variant state")
+    packet = strict_keys(data.get("packet"), {"version", "frameCount", "classes", "effects",
+                         "initial", "pages", "lookaheadPages", "maxResidentPages"},
+                         "INVALID_PAGED_VARIANT_STATE", "paged variant packet")
+    require(set(data) == {"packet"} and set(packet) == {"version", "frameCount", "classes",
+            "effects", "initial", "pages", "lookaheadPages", "maxResidentPages"},
+            "INVALID_PAGED_VARIANT_STATE", "Paged variant packet is incomplete")
+    frame_count = as_int(packet.get("frameCount"), "STATE_PAGE_COVERAGE_MISMATCH",
+                         "paged variant frameCount", 1)
+    require(as_int(packet.get("version"), "INVALID_PAGED_VARIANT_STATE",
+                   "paged variant version") == 0
+            and frame_count == playback_binding["parameters"]["frameCount"],
+            "STATE_PAGE_COVERAGE_MISMATCH", "Paged variant frame count differs from playback")
+    zero_offsets = base64.b64encode(bytes((frame_count + 1) * 4)).decode("ascii")
+    validate_variants_contract(
+        {**state_channel, "data": {"packet": {
+            "version": 0, "frameCount": frame_count, "classes": packet.get("classes"),
+            "effects": packet.get("effects"), "initial": packet.get("initial"),
+            "sequential": {"offsetsBase64": zero_offsets, "targetIndicesBase64": "",
+                           "classIndicesBase64": ""}, "nonInteractiveJumps": []}}},
+        binding, playback_packet, playback_binding, binding_inputs, limits,
+        tree_nodes, surface_binding)
+    lookahead = as_int(packet.get("lookaheadPages"), "STATE_PAGE_RESIDENCY_LIMIT",
+                       "paged variant lookahead", 1)
+    resident = as_int(packet.get("maxResidentPages"), "STATE_PAGE_RESIDENCY_LIMIT",
+                      "paged variant residency", 1)
+    require(lookahead <= 4 and lookahead + 1 <= resident <= 16,
+            "STATE_PAGE_RESIDENCY_LIMIT", "Paged variant residency is invalid")
+    pages = packet.get("pages")
+    require(isinstance(pages, list) and 0 < len(pages) <= limits["state_pages"],
+            "STATE_PAGE_COVERAGE_MISMATCH", "Paged variant pages are missing or excessive")
+    resources, expected = set(), 1
+    for index, page in enumerate(pages):
+        page = strict_keys(page, {"resource", "startFrame", "endFrame", "changeCount",
+                          "materializedByteLength"},
+                           "INVALID_PAGED_VARIANT_STATE", f"paged variant page {index}")
+        require(set(page) == {"resource", "startFrame", "endFrame", "changeCount",
+                "materializedByteLength"}, "INVALID_PAGED_VARIANT_STATE",
+                f"Paged variant page {index} is incomplete")
+        resource = resource_id(page.get("resource"), f"paged variant page {index} resource")
+        start = as_int(page.get("startFrame"), "STATE_PAGE_COVERAGE_MISMATCH",
+                       f"paged variant page {index} start", 1)
+        end = as_int(page.get("endFrame"), "STATE_PAGE_COVERAGE_MISMATCH",
+                     f"paged variant page {index} end", 1)
+        require(resource not in resources and start == expected and start <= end <= frame_count,
+                "STATE_PAGE_COVERAGE_MISMATCH", f"Paged variant page {index} is noncontiguous")
+        require(end - start + 1 <= limits["state_page_frames"],
+                "STATE_PAGE_COVERAGE_MISMATCH",
+                f"Paged variant page {index} exceeds the per-page frame limit")
+        changes = as_int(page.get("changeCount"), "STATE_CHANGE_LIMIT",
+                         f"paged variant page {index} changes")
+        materialized = as_int(page.get("materializedByteLength"), "STATE_PAGE_RESIDENCY_LIMIT",
+                              f"paged variant page {index} materialized bytes", 1)
+        require(changes <= limits["prepared_changes"] and materialized <= limits["decoded_total"],
+                "STATE_PAGE_TABLE_LIMIT", f"Paged variant page {index} is excessive")
+        resources.add(resource)
+        expected = end + 1
+    require(expected == frame_count + 1, "STATE_PAGE_COVERAGE_MISMATCH",
+            "Paged variant pages do not cover playback exactly")
+    return packet
+
+
+def validate_compositor_timing_contract(state_channel: dict, binding: dict,
+                                        playback_packet: dict, playback_binding: dict,
+                                        binding_inputs: dict[str, dict],
+                                        limits: dict[str, int]) -> None:
+    for input_id in ("time.source-frame", "time.tick"):
+        definition = binding_inputs.get(input_id, {})
+        require(definition.get("type") == "uint" and "default" not in definition,
+                "INVALID_COMPOSITOR_TIMING_BINDING",
+                "Compositor timing inputs must be un-defaulted uints")
+    targets = strict_keys(binding.get("targets"), {"nodes"},
+                          "INVALID_COMPOSITOR_TIMING_BINDING", "compositor targets")
+    nodes = unique_targets(targets.get("nodes"), min(limits["nodes"], 1024),
+                           "INVALID_COMPOSITOR_TIMING_BINDING", "compositor node")
+    parameters = strict_keys(binding.get("parameters"), {"frameCount", "tickRateHz", "tickIntervalUs"},
+                             "INVALID_COMPOSITOR_TIMING_BINDING", "compositor parameters")
+    validate_tick_cadence(parameters, "INVALID_COMPOSITOR_TIMING_BINDING", "Compositor timing")
+    require(parameters.get("frameCount") == playback_binding["parameters"]["frameCount"]
+            and same_tick_cadence(parameters, playback_binding["parameters"]),
+            "INVALID_COMPOSITOR_TIMING_BINDING", "Compositor cadence differs from playback")
+    bank_timelines = [timeline for bank in playback_packet.get("banks", [])
+                      for timeline in [bank["timeline"], *bank.get("profileTimelines", [])]]
+    require(all("deadlineMicros" not in timeline for timeline in
+                [playback_packet["timeline"], *playback_packet.get("profileTimelines", []),
+                 *bank_timelines]),
+            "INVALID_COMPOSITOR_TIMING_BINDING",
+            "Compositor timing requires fixed playback cadence")
+    data = strict_keys(state_channel.get("data"), {"packet"},
+                       "INVALID_COMPOSITOR_TIMING_STATE", "compositor state")
+    packet = strict_keys(data.get("packet"), {"version", "timing", "targets"},
+                         "INVALID_COMPOSITOR_TIMING_STATE", "compositor packet")
+    packet_targets = packet.get("targets")
+    require(as_int(packet.get("version"), "INVALID_COMPOSITOR_TIMING_STATE",
+                   "compositor version") == 0 and packet.get("timing") == "linear"
+            and isinstance(packet_targets, list) and 0 < len(packet_targets) <= min(limits["nodes"], 1024)
+            and len(packet_targets) == len(nodes), "INVALID_COMPOSITOR_TIMING_STATE",
+            "Compositor timing packet is invalid")
+    playback_targets, keyframe_count = playback_binding["targets"], 0
+    transform_count = as_int(playback_packet["transforms"]["count"],
+                             "INVALID_COMPOSITOR_TIMING_STATE", "playback transform count", 1)
+    for target_index, target in enumerate(packet_targets):
+        require(isinstance(target, dict), "INVALID_COMPOSITOR_TIMING_STATE",
+                f"Compositor target {target_index} is invalid")
+        owner, index = target.get("owner"), target.get("index")
+        expected = playback_targets["model"] if owner == "model" and index == 0 else None
+        if owner == "shape" and is_safe_int(index, 0, len(playback_targets["shapes"]) - 1):
+            expected = playback_targets["shapes"][int(index)]
+        if owner == "leaf" and is_safe_int(index, 0, len(playback_targets["leaves"]) - 1):
+            expected = playback_targets["leaves"][int(index)]
+        require(expected == nodes[target_index], "INVALID_COMPOSITOR_TIMING_BINDING",
+                f"Compositor target {target_index} is not its playback owner")
+        if target.get("kind") == "cycle":
+            target = strict_keys(target, {"kind", "owner", "index", "durationTicks", "iterations",
+                                         "closure", "keyframes"}, "INVALID_COMPOSITOR_TIMING_STATE",
+                                 f"compositor cycle {target_index}")
+            duration = as_int(target.get("durationTicks"), "INVALID_COMPOSITOR_TIMING_STATE",
+                              "compositor duration", 2)
+            keyframes = target.get("keyframes")
+            require(owner == "model" and index == 0 and target.get("iterations") == "infinite"
+                    and target.get("closure") == "closed" and duration <= limits["timeline_ticks"]
+                    and isinstance(keyframes, list) and 3 <= len(keyframes) <= 256,
+                    "INVALID_COMPOSITOR_TIMING_STATE", "Compositor cycle is invalid")
+            previous = -1
+            for keyframe_index, row in enumerate(keyframes):
+                row = strict_keys(row, {"tick", "transformIndex"},
+                                  "INVALID_COMPOSITOR_TIMING_STATE", "compositor keyframe")
+                tick = as_int(row.get("tick"), "INVALID_COMPOSITOR_TIMING_STATE",
+                              "compositor keyframe tick")
+                transform = as_int(row.get("transformIndex"), "INVALID_COMPOSITOR_TIMING_STATE",
+                                   "compositor keyframe transform")
+                require(previous < tick <= duration and transform < transform_count,
+                        "INVALID_COMPOSITOR_TIMING_STATE", "Compositor keyframe is invalid")
+                previous = tick
+            require(keyframes[0]["tick"] == 0 and keyframes[-1]["tick"] == duration
+                    and keyframes[0]["transformIndex"] == keyframes[-1]["transformIndex"],
+                    "INVALID_COMPOSITOR_TIMING_STATE", "Compositor cycle is not exactly closed")
+            require(all(row[2] == -1 for row in playback_packet["frameRows"]),
+                    "TARGET_OWNERSHIP_CONFLICT", "Compositor cycle races playback")
+            keyframe_count += len(keyframes)
+        else:
+            target = strict_keys(target, {"kind", "owner", "index", "durationTicks"},
+                                 "INVALID_COMPOSITOR_TIMING_STATE", "compositor transition")
+            require(target.get("kind") == "transition"
+                    and 1 <= as_int(target.get("durationTicks"), "INVALID_COMPOSITOR_TIMING_STATE",
+                                   "compositor transition duration", 1) <= 8,
+                    "INVALID_COMPOSITOR_TIMING_STATE", "Compositor transition is invalid")
+    require(keyframe_count <= 4096, "COMPOSITOR_TIMING_LIMIT", "Compositor keyframes are excessive")
+
+
+def validate_viewport_profiles_contract(state_channel: dict, binding: dict,
+                                        playback_packet: dict, playback_binding: dict,
+                                        presentation_packet: dict,
+                                        binding_inputs: dict[str, dict],
+                                        limits: dict[str, int]) -> None:
+    leaf_count = int(playback_packet["leafCount"])
+    for input_id in ("viewport.height", "viewport.width"):
+        definition = binding_inputs.get(input_id, {})
+        require(definition.get("type") == "float" and "default" not in definition,
+                "INVALID_VIEWPORT_PROFILE_BINDING",
+                "Viewport profile inputs must be un-defaulted floats")
+    require("parameters" not in binding, "INVALID_VIEWPORT_PROFILE_BINDING",
+            "Viewport profiles have no parameters")
+    targets = strict_keys(binding.get("targets"), {"leaves"},
+                          "INVALID_VIEWPORT_PROFILE_BINDING", "viewport profile targets")
+    leaves = unique_targets(targets.get("leaves"), limits["nodes"],
+                            "INVALID_VIEWPORT_PROFILE_BINDING", "viewport profile leaf")
+    require(leaves == playback_binding["targets"]["leaves"], "TARGET_CARDINALITY_MISMATCH",
+            "Viewport profile leaves differ from playback")
+    data = strict_keys(state_channel.get("data"), {"packet"},
+                       "INVALID_VIEWPORT_PROFILE_STATE", "viewport profile state")
+    packet = strict_keys(data.get("packet"), {"version", "selection", "transforms", "profiles"},
+                         "INVALID_VIEWPORT_PROFILE_STATE", "viewport profile packet")
+    require(as_int(packet.get("version"), "INVALID_VIEWPORT_PROFILE_STATE",
+                   "viewport profile version") == 0,
+            "INVALID_VIEWPORT_PROFILE_STATE", "Viewport profile version must be zero")
+    selection = strict_keys(packet.get("selection"), {"mode"},
+                            "INVALID_VIEWPORT_PROFILE_STATE", "viewport profile selection")
+    mode = selection.get("mode")
+    require(mode in ("presentation-profile", "smallest-covering"),
+            "INVALID_VIEWPORT_PROFILE_STATE", "Viewport profile selection is unsupported")
+    transforms = packet.get("transforms")
+    require(isinstance(transforms, list) and len(transforms) < 0xffff
+            and len(transforms) <= limits["prepared_transforms"], "TRANSFORM_ALLOCATION_LIMIT",
+            "Viewport transforms are excessive")
+    previous = None
+    for transform in transforms:
+        require(isinstance(transform, list) and len(transform) == 12
+                and all(not isinstance(value, bool) and isinstance(value, (int, float))
+                        and math.isfinite(value) for value in transform),
+                "INVALID_VIEWPORT_PROFILE_STATE", "Viewport transform is invalid")
+        if previous is not None:
+            require(tuple(transform) > tuple(previous), "INVALID_VIEWPORT_PROFILE_STATE",
+                    "Viewport transforms are not lexicographically sorted")
+        previous = transform
+    profiles = packet.get("profiles")
+    require(isinstance(profiles, list) and 0 < len(profiles) <= 256
+            and len(profiles) * max(1, leaf_count) <= limits["visibility_cells"],
+            "VIEWPORT_PROFILE_LIMIT", "Viewport profiles are missing or excessive")
+    presentation_profiles = presentation_packet["camera"].get("profiles")
+    if mode == "presentation-profile":
+        require(isinstance(presentation_profiles, list)
+                and len(profiles) == len(presentation_profiles),
+                "INVALID_VIEWPORT_PROFILE_STATE",
+                "Viewport profiles differ from presentation profiles")
+    ids, referenced, previous_key = set(), set(), None
+    visibility_change_count, responsive_coefficient_count = 0, 0
+    for index, profile in enumerate(profiles):
+        profile = strict_keys(profile, {"id", "width", "height", "transformIndicesBase64",
+                                       "visibleBitsBase64", "visibilityChanges", "responsiveAffine"}, "INVALID_VIEWPORT_PROFILE_STATE",
+                              f"viewport profile {index}")
+        require({"id", "transformIndicesBase64", "visibleBitsBase64"}.issubset(profile),
+                "INVALID_VIEWPORT_PROFILE_STATE", "Viewport profile is incomplete")
+        profile_id = stable_id(profile.get("id"), f"viewport profile {index} id")
+        require(profile_id not in ids, "INVALID_VIEWPORT_PROFILE_STATE",
+                "Viewport profile ids are duplicated")
+        ids.add(profile_id)
+        if mode == "presentation-profile":
+            require("width" not in profile and "height" not in profile
+                    and profile_id == presentation_profiles[index]["id"],
+                    "INVALID_VIEWPORT_PROFILE_STATE",
+                    "Viewport profile differs from presentation order")
+        else:
+            width = as_int(profile.get("width"), "INVALID_VIEWPORT_PROFILE_STATE",
+                           "viewport profile width", 1)
+            height = as_int(profile.get("height"), "INVALID_VIEWPORT_PROFILE_STATE",
+                            "viewport profile height", 1)
+            require(width <= 1_000_000 and height <= 1_000_000,
+                    "INVALID_VIEWPORT_PROFILE_STATE", "Viewport dimensions are excessive")
+            key = (width * height, width + height, width, height)
+            require(previous_key is None or key > previous_key,
+                    "INVALID_VIEWPORT_PROFILE_STATE", "Viewport covering profiles are unsorted")
+            previous_key = key
+        transform_indices = base64_integers(profile.get("transformIndicesBase64"), 2,
+                                            leaf_count,
+                                            "INVALID_VIEWPORT_PROFILE_STATE", "viewport transforms")
+        require(len(transform_indices) == leaf_count
+                and all(value == 0xffff or value < len(transforms) for value in transform_indices),
+                "STATE_COLUMN_MISMATCH", "Viewport transform row is invalid")
+        referenced.update(value for value in transform_indices if value != 0xffff)
+        bits = base64_integers(profile.get("visibleBitsBase64"), 1,
+                               math.ceil(leaf_count / 8),
+                               "INVALID_VIEWPORT_PROFILE_STATE", "viewport visibility")
+        require(len(bits) == math.ceil(leaf_count / 8)
+                and (leaf_count % 8 == 0 or not bits
+                     or bits[-1] >> (leaf_count % 8) == 0),
+                "STATE_COLUMN_MISMATCH", "Viewport visibility row is invalid")
+        if "visibilityChanges" in profile:
+            changes = strict_keys(profile["visibilityChanges"],
+                                  {"offsetsBase64", "leafIndicesBase64"},
+                                  "INVALID_VIEWPORT_PROFILE_STATE", "viewport visibility changes")
+            require({"offsetsBase64", "leafIndicesBase64"}.issubset(changes),
+                    "INVALID_VIEWPORT_PROFILE_STATE", "Viewport visibility changes are incomplete")
+            frame_count = as_int(playback_binding["parameters"].get("frameCount"),
+                                 "INVALID_VIEWPORT_PROFILE_STATE", "viewport frame count", 1)
+            offsets = base64_integers(changes["offsetsBase64"], 4, frame_count + 1,
+                                      "INVALID_VIEWPORT_PROFILE_STATE", "viewport visibility offsets")
+            change_leaves = base64_integers(changes["leafIndicesBase64"], 2,
+                                            limits["prepared_changes"],
+                                            "INVALID_VIEWPORT_PROFILE_STATE", "viewport visibility leaves")
+            require(len(offsets) == frame_count + 1 and offsets[0] == 0
+                    and offsets[-1] == len(change_leaves)
+                    and all(offsets[cursor] >= offsets[cursor - 1]
+                            for cursor in range(1, len(offsets))),
+                    "STATE_COLUMN_MISMATCH", "Viewport visibility offsets are invalid")
+            for frame in range(frame_count):
+                row = change_leaves[offsets[frame]:offsets[frame + 1]]
+                require(all(0 <= leaf < leaf_count for leaf in row)
+                        and all(row[cursor] > row[cursor - 1]
+                                for cursor in range(1, len(row))),
+                        "INVALID_VIEWPORT_PROFILE_STATE",
+                        "Viewport visibility row is unsorted or out of range")
+            visibility_change_count += len(change_leaves)
+            require(visibility_change_count <= limits["prepared_changes"],
+                    "VIEWPORT_PROFILE_LIMIT", "Viewport visibility changes are excessive")
+            reconstructed = [(bits[leaf >> 3] >> (leaf & 7)) & 1
+                             for leaf in range(leaf_count)]
+            for frame in range(1, frame_count):
+                for cursor in range(offsets[frame], offsets[frame + 1]):
+                    reconstructed[change_leaves[cursor]] ^= 1
+            for cursor in range(offsets[0], offsets[1]):
+                reconstructed[change_leaves[cursor]] ^= 1
+            require(all(value == ((bits[leaf >> 3] >> (leaf & 7)) & 1)
+                        for leaf, value in enumerate(reconstructed)),
+                    "INVALID_VIEWPORT_PROFILE_STATE", "Viewport visibility cycle does not close")
+        if "responsiveAffine" in profile:
+            affine = strict_keys(profile["responsiveAffine"],
+                                 {"scale", "presentBitsBase64", "coefficientsBase64"},
+                                 "INVALID_VIEWPORT_PROFILE_STATE", "viewport responsive affine")
+            require({"scale", "presentBitsBase64", "coefficientsBase64"}.issubset(affine),
+                    "INVALID_VIEWPORT_PROFILE_STATE", "Viewport responsive affine is incomplete")
+            scale = strict_keys(affine["scale"], {"baseWidth", "baseHeight", "multiplier", "max"},
+                                "INVALID_VIEWPORT_PROFILE_STATE", "viewport responsive affine scale")
+            require({"baseWidth", "baseHeight", "multiplier"}.issubset(scale),
+                    "INVALID_VIEWPORT_PROFILE_STATE", "Viewport responsive affine scale is incomplete")
+            require(all(not isinstance(scale[key], bool) and isinstance(scale[key], (int, float))
+                        and math.isfinite(scale[key]) and 0 < scale[key] <= 1_000_000
+                        for key in ("baseWidth", "baseHeight", "multiplier"))
+                    and ("max" not in scale or (not isinstance(scale["max"], bool)
+                         and isinstance(scale["max"], (int, float)) and math.isfinite(scale["max"])
+                         and 0 < scale["max"] <= 1_000_000)),
+                    "INVALID_VIEWPORT_PROFILE_STATE", "Viewport responsive affine scale is invalid")
+            present = base64_integers(affine["presentBitsBase64"], 1,
+                                      math.ceil(leaf_count / 8),
+                                      "INVALID_VIEWPORT_PROFILE_STATE", "viewport responsive presence")
+            require(len(present) == math.ceil(leaf_count / 8)
+                    and (leaf_count % 8 == 0 or not present
+                         or present[-1] >> (leaf_count % 8) == 0),
+                    "STATE_COLUMN_MISMATCH", "Viewport responsive presence is invalid")
+            present_count = sum((present[leaf >> 3] >> (leaf & 7)) & 1
+                                for leaf in range(leaf_count))
+            require(present_count > 0, "INVALID_VIEWPORT_PROFILE_STATE",
+                    "Viewport responsive affine has no targets")
+            coefficient_count = present_count * 16
+            responsive_coefficient_count += coefficient_count
+            require(responsive_coefficient_count <= limits["prepared_states"],
+                    "VIEWPORT_PROFILE_LIMIT", "Viewport responsive coefficients are excessive")
+            coefficients = base64_float64(affine["coefficientsBase64"], coefficient_count,
+                                          "INVALID_VIEWPORT_PROFILE_STATE", "viewport responsive coefficients")
+            require(len(coefficients) == coefficient_count
+                    and all(math.isfinite(value)
+                            and not (value == 0 and math.copysign(1, value) < 0)
+                            for value in coefficients)
+                    and all(abs(value) <= 1_000_000_000 for value in coefficients),
+                    "INVALID_VIEWPORT_PROFILE_STATE", "Viewport responsive coefficients are invalid")
+    require(len(referenced) == len(transforms), "INVALID_VIEWPORT_PROFILE_STATE",
+            "Viewport transform dictionary contains an unreferenced row")
+
+
+def validate_orbit_contract(state_channel: dict, binding: dict,
+                            presentation_packet: dict | None,
+                            binding_inputs: dict[str, dict], tree_nodes: list[dict],
+                            limits: dict[str, int]) -> None:
+    require(presentation_packet is not None, "MISSING_POLYCSS_CHANNEL",
+            "Prepared orbit requires presentation")
+    require("parameters" not in binding, "INVALID_ORBIT_BINDING",
+            "Prepared orbit has no parameters")
+    targets = strict_keys(binding.get("targets"), {"model", "leaves"},
+                          "INVALID_ORBIT_BINDING", "orbit targets")
+    model_target = stable_id(targets.get("model"), "orbit model target")
+    leaves = unique_targets(targets.get("leaves"), min(limits["nodes"], 0xfffe),
+                            "INVALID_ORBIT_BINDING", "orbit leaf")
+    require(leaves and model_target not in leaves, "TARGET_CARDINALITY_MISMATCH",
+            "Prepared orbit targets are invalid")
+    data = strict_keys(state_channel.get("data"), {"packet"},
+                       "INVALID_ORBIT_STATE", "orbit state")
+    packet = strict_keys(data.get("packet"), {"version", "initial", "ranges", "model", "surface"},
+                         "INVALID_ORBIT_STATE", "orbit packet")
+    require(as_int(packet.get("version"), "INVALID_ORBIT_STATE", "orbit version") == 0,
+            "INVALID_ORBIT_STATE", "Prepared orbit version must be zero")
+    initial = strict_keys(packet.get("initial"), {"pitch", "yaw", "zoom"},
+                          "INVALID_ORBIT_STATE", "orbit initial inputs")
+    ranges = strict_keys(packet.get("ranges"), {"pitch", "yaw", "zoom"},
+                         "INVALID_ORBIT_STATE", "orbit ranges")
+    for name in ("pitch", "yaw", "zoom"):
+        domain, value = ranges.get(name), initial.get(name)
+        require(isinstance(domain, list) and len(domain) == 2
+                and all(not isinstance(item, bool) and isinstance(item, (int, float))
+                        and math.isfinite(item) for item in domain)
+                and domain[0] < domain[1]
+                and not isinstance(value, bool) and isinstance(value, (int, float))
+                and math.isfinite(value) and domain[0] <= value <= domain[1]
+                and binding_inputs.get(f"orbit.{name}", {}).get("type") == "float"
+                and binding_inputs[f"orbit.{name}"].get("default") == value,
+                "INVALID_ORBIT_STATE", f"Prepared orbit {name} contract is invalid")
+    require(ranges["pitch"][0] >= -90 and ranges["pitch"][1] <= 90
+            and ranges["yaw"][0] >= -360 and ranges["yaw"][1] <= 360
+            and ranges["zoom"][0] > 0 and ranges["zoom"][1] <= 16,
+            "INVALID_ORBIT_STATE", "Prepared orbit ranges exceed the interpreter domain")
+    model = strict_keys(packet.get("model"), {"translation", "scale"},
+                        "INVALID_ORBIT_STATE", "orbit model")
+    require(isinstance(model.get("translation"), list) and len(model["translation"]) == 3
+            and all(not isinstance(value, bool) and isinstance(value, (int, float))
+                    and math.isfinite(value) and abs(value) <= 1_000_000 for value in model["translation"])
+            and isinstance(model.get("scale"), list) and len(model["scale"]) == 3
+            and all(not isinstance(value, bool) and isinstance(value, (int, float))
+                    and math.isfinite(value) and 0 < value <= 16 for value in model["scale"]),
+            "INVALID_ORBIT_STATE", "Prepared orbit model is invalid")
+    by_id = {node["id"]: node for node in tree_nodes}
+    translation = ", ".join(f"{css_number(value)}px" for value in model["translation"])
+    scale = ", ".join(css_number(value * initial["zoom"]) for value in model["scale"])
+    transform = (f"translate3d({translation}) rotateX({css_number(initial['pitch'])}deg) "
+                 f"rotateY({css_number(initial['yaw'])}deg) scale3d({scale})")
+    require(by_id[model_target].get("styles", {}).get("transform") == transform,
+            "ORBIT_TREE_MISMATCH", "Prepared orbit model differs from TREE")
+    surface = strict_keys(packet.get("surface"), {"stateCount", "positionDictionary",
+                          "initialPositionIndicesBase64", "transitions"},
+                          "INVALID_ORBIT_STATE", "orbit surface")
+    state_count = as_int(surface.get("stateCount"), "ORBIT_STATE_LIMIT", "orbit stateCount", 2)
+    require(state_count <= 360
+            and round(((initial["yaw"] % 360) + 360) % 360 * state_count / 360) % state_count == 0,
+            "ORBIT_STATE_LIMIT", "Prepared orbit state count or initial yaw is invalid")
+    positions = surface.get("positionDictionary")
+    require(isinstance(positions, list) and 0 < len(positions) < 0xffff
+            and len(positions) <= limits["prepared_states"], "ORBIT_STATE_LIMIT",
+            "Prepared orbit positions are invalid or excessive")
+    previous = None
+    for position in positions:
+        require(isinstance(position, list) and len(position) == 2
+                and all(is_safe_int(value, -0x7fffffff, 0x7fffffff)
+                        and not (isinstance(value, float) and value == 0 and math.copysign(1, value) < 0)
+                        for value in position), "INVALID_ORBIT_STATE", "Prepared orbit position is invalid")
+        require(previous is None or tuple(position) > tuple(previous), "INVALID_ORBIT_STATE",
+                "Prepared orbit positions are not sorted")
+        previous = position
+    current = base64_integers(surface.get("initialPositionIndicesBase64"), 2, len(leaves),
+                              "INVALID_ORBIT_STATE", "orbit initial positions")
+    require(len(current) == len(leaves) and all(value < len(positions) for value in current),
+            "STATE_COLUMN_MISMATCH", "Prepared orbit initial positions are invalid")
+    position_text = lambda position: " ".join("0" if value == 0 else f"{value}px" for value in position)
+    for index, leaf in enumerate(leaves):
+        require(by_id[leaf].get("styles", {}).get("backgroundPosition")
+                == position_text(positions[current[index]]), "ORBIT_TREE_MISMATCH",
+                f"Prepared orbit leaf {index} differs from TREE")
+    transitions = strict_keys(surface.get("transitions"), {"offsetsBase64", "leafIndicesBase64",
+                              "forwardPositionIndicesBase64", "backwardPositionIndicesBase64"},
+                              "INVALID_ORBIT_STATE", "orbit transitions")
+    offsets = base64_integers(transitions.get("offsetsBase64"), 4, state_count + 1,
+                              "INVALID_ORBIT_STATE", "orbit offsets")
+    require(len(offsets) == state_count + 1 and offsets[0] == 0
+            and all(offsets[index - 1] <= value for index, value in enumerate(offsets) if index)
+            and offsets[-1] <= limits["prepared_changes"], "INVALID_ORBIT_STATE",
+            "Prepared orbit offsets are invalid")
+    change_count = offsets[-1]
+    transition_leaves = base64_integers(transitions.get("leafIndicesBase64"), 2, change_count,
+                                        "INVALID_ORBIT_STATE", "orbit transition leaves")
+    forward = base64_integers(transitions.get("forwardPositionIndicesBase64"), 2, change_count,
+                              "INVALID_ORBIT_STATE", "orbit forward positions")
+    backward = base64_integers(transitions.get("backwardPositionIndicesBase64"), 2, change_count,
+                               "INVALID_ORBIT_STATE", "orbit backward positions")
+    require(len(transition_leaves) == len(forward) == len(backward) == change_count,
+            "STATE_COLUMN_MISMATCH", "Prepared orbit transition columns differ")
+    require(state_count * len(leaves) <= limits["visibility_cells"],
+            "ORBIT_STATE_LIMIT", "Prepared orbit canonical rows exceed their allocation limit")
+    referenced = set(current)
+
+    def apply_edge(row: list[int], edge: int, values: list[int]) -> None:
+        previous_leaf = -1
+        for cursor in range(offsets[edge], offsets[edge + 1]):
+            leaf = transition_leaves[cursor]
+            require(previous_leaf < leaf < len(leaves)
+                    and forward[cursor] < len(positions) and backward[cursor] < len(positions)
+                    and row[leaf] != values[cursor], "INVALID_ORBIT_STATE",
+                    f"Prepared orbit edge {edge} is invalid")
+            row[leaf] = values[cursor]
+            previous_leaf = leaf
+            referenced.update((forward[cursor], backward[cursor]))
+
+    row = list(current)
+    for state_index in range(1, state_count):
+        previous = list(row)
+        apply_edge(row, state_index, forward)
+        reverse = list(row)
+        apply_edge(reverse, state_index, backward)
+        require(reverse == previous, "ORBIT_TRANSITION_MISMATCH",
+                f"Prepared orbit backward edge {state_index} is invalid")
+    final_row = list(row)
+    apply_edge(row, 0, forward)
+    require(row == current, "ORBIT_TRANSITION_MISMATCH",
+            "Prepared orbit forward cycle does not close")
+    reverse = list(row)
+    apply_edge(reverse, 0, backward)
+    require(reverse == final_row, "ORBIT_TRANSITION_MISMATCH",
+            "Prepared orbit backward edge 0 is invalid")
+    require(len(referenced) == len(positions), "INVALID_ORBIT_STATE",
+            "Prepared orbit position dictionary contains an unreferenced row")
 
 
 def validate_effects_contract(state_channel: dict, binding: dict,
@@ -1689,7 +2894,7 @@ def validate_effects_contract(state_channel: dict, binding: dict,
     require(set(packet) == {"version", "arithmetic", "frameCount", "biases", "particle",
                             "spawnStream", "stars", "emitters"}, code,
             "Prepared effects packet is incomplete")
-    require(packet.get("version") == 0
+    require(as_int(packet.get("version"), code, "effects version") == 0
             and packet.get("arithmetic") == "ieee754-f32-per-operation", code,
             "Prepared effects version or arithmetic is unsupported")
     frame_count = as_int(packet.get("frameCount"), "EFFECT_STATE_LIMIT",
@@ -1855,24 +3060,83 @@ def validate_presentation_contract(state_channel: dict, binding: dict,
         require(opened != closed, "INVALID_PRESENTATION_BINDING",
                 "Presentation cursor states must be distinct")
     parameters = strict_keys(binding.get("parameters"),
-                             {"fitHeight", "fitWidth", "sourceHeight", "sourceWidth"},
+                             {"fitHeight", "fitWidth", "sourceHeight", "sourceWidth",
+                              "profileSelection", "profiles"},
                              "INVALID_PRESENTATION_BINDING", "presentation parameters")
-    require(set(parameters) == {"fitHeight", "fitWidth", "sourceHeight", "sourceWidth"}
-            and all(is_safe_int(parameters[key], 1) for key in parameters),
+    require({"fitHeight", "fitWidth", "sourceHeight", "sourceWidth"}.issubset(parameters)
+            and all(is_safe_int(parameters[key], 1)
+                    for key in ("fitHeight", "fitWidth", "sourceHeight", "sourceWidth")),
             "INVALID_PRESENTATION_BINDING", "Presentation dimensions are invalid")
+
+    missing_profile_field = object()
+
+    def profiles(value: Any, selection: Any, code: str, label: str) -> list[dict] | None:
+        if value is missing_profile_field:
+            require(selection is missing_profile_field, code, f"{label} selection requires profiles")
+            return None
+        require(selection in ("viewport-width", "landscape-first-portrait-width"), code,
+                f"{label} selection is unsupported")
+        require(isinstance(value, list) and 0 < len(value) <= 16, code,
+                f"{label} are missing or excessive")
+        require(selection != "landscape-first-portrait-width" or len(value) >= 2, code,
+                f"{label} landscape-first selection requires a landscape row and at least one portrait row")
+        ids, maximum = set(), 0
+        for index, profile in enumerate(value):
+            profile = strict_keys(profile, {"id", "maxViewportWidth", "fit", "quarterTurns",
+                                            "bounds", "safeInset", "bias"}, code,
+                                  f"{label} {index}")
+            require({"id", "fit", "quarterTurns", "bounds", "safeInset", "bias"}.issubset(profile),
+                    code, f"{label} {index} is incomplete")
+            profile_id = stable_id(profile.get("id"), f"{label} {index} id")
+            require(profile_id not in ids, code, f"{label} ids are duplicated")
+            ids.add(profile_id)
+            landscape = selection == "landscape-first-portrait-width" and index == 0
+            if landscape or index == len(value) - 1:
+                require("maxViewportWidth" not in profile, code,
+                        f"{label} {'landscape' if landscape else 'final'} profile must be unbounded")
+            else:
+                width = as_int(profile.get("maxViewportWidth"), code,
+                               f"{label} breakpoint", 1)
+                require(maximum < width <= 1_000_000, code,
+                        f"{label} breakpoints are noncanonical")
+                maximum = width
+            require(profile.get("fit") in ("contain", "cover")
+                    and is_safe_int(profile.get("quarterTurns"), 0, 3), code,
+                    f"{label} fit or rotation is invalid")
+            bounds = profile.get("bounds")
+            require(isinstance(bounds, list) and len(bounds) == 4
+                    and all(not isinstance(item, bool) and isinstance(item, (int, float))
+                            and math.isfinite(item) and abs(item) <= 1_000_000 for item in bounds)
+                    and bounds[2] > bounds[0] and bounds[3] > bounds[1], code,
+                    f"{label} bounds are invalid")
+            inset, bias = profile.get("safeInset"), profile.get("bias")
+            require(not isinstance(inset, bool) and isinstance(inset, (int, float))
+                    and math.isfinite(inset) and 0 <= inset <= 1_000_000
+                    and isinstance(bias, list) and len(bias) == 2
+                    and all(not isinstance(item, bool) and isinstance(item, (int, float))
+                            and math.isfinite(item) and -1 <= item <= 1 for item in bias), code,
+                    f"{label} inset or bias is invalid")
+        return value
+
+    parameter_selection = parameters.get("profileSelection", missing_profile_field)
+    parameter_profiles = profiles(parameters.get("profiles", missing_profile_field), parameter_selection,
+                                  "INVALID_PRESENTATION_BINDING",
+                                  "Presentation binding profiles")
 
     data = strict_keys(state_channel.get("data"), {"packet"},
                        "INVALID_PRESENTATION_STATE", "presentation state data")
     packet = strict_keys(data.get("packet"), {"version", "camera", "background"},
                          "INVALID_PRESENTATION_STATE", "presentation packet")
     require(set(data) == {"packet"} and {"version", "camera"}.issubset(packet)
-            and packet.get("version") == 0, "INVALID_PRESENTATION_STATE",
+            and as_int(packet.get("version"), "INVALID_PRESENTATION_STATE", "presentation version") == 0,
+            "INVALID_PRESENTATION_STATE",
             "Presentation state is incomplete or unsupported")
     camera = strict_keys(packet.get("camera"), {"baseSceneTransform", "fitHeight",
-                         "fitWidth", "perspective", "sourceHeight", "sourceWidth"},
+                         "fitWidth", "perspective", "sourceHeight", "sourceWidth",
+                         "profileSelection", "profiles"},
                          "INVALID_PRESENTATION_STATE", "presentation camera")
-    require(set(camera) == {"baseSceneTransform", "fitHeight", "fitWidth", "perspective",
-                            "sourceHeight", "sourceWidth"}, "INVALID_PRESENTATION_STATE",
+    require({"baseSceneTransform", "fitHeight", "fitWidth", "perspective",
+             "sourceHeight", "sourceWidth"}.issubset(camera), "INVALID_PRESENTATION_STATE",
             "Presentation camera is incomplete")
     safe_style(camera.get("baseSceneTransform"), "Presentation base scene transform")
     require(not isinstance(camera.get("perspective"), bool)
@@ -1882,6 +3146,15 @@ def validate_presentation_contract(state_channel: dict, binding: dict,
                     for key in ("fitHeight", "fitWidth", "sourceHeight", "sourceWidth")),
             "INVALID_PRESENTATION_STATE",
             "Presentation camera values do not match parameters")
+    camera_selection = camera.get("profileSelection", missing_profile_field)
+    camera_profiles = profiles(camera.get("profiles", missing_profile_field), camera_selection,
+                               "INVALID_PRESENTATION_STATE",
+                               "Presentation camera profiles")
+    require(camera_selection == parameter_selection,
+            "INVALID_PRESENTATION_STATE",
+            "Presentation profile selection differs between state and binding")
+    require(camera_profiles == parameter_profiles, "INVALID_PRESENTATION_STATE",
+            "Presentation profiles differ between state and binding")
     background = packet.get("background")
     if "background" in packet:
         require(background is not None, "INVALID_PRESENTATION_STATE",
@@ -1905,6 +3178,30 @@ def validate_presentation_contract(state_channel: dict, binding: dict,
     exact_array(binding.get("sinks"), expected_sinks, "INVALID_PRESENTATION_BINDING",
                 "Presentation sinks are incomplete or noncanonical")
     return packet
+
+
+def validate_playback_profile_timeline_closure(playback_packet: dict,
+                                               presentation_packet: dict) -> None:
+    timeline_groups = ([playback_packet["profileTimelines"]]
+                       if "profileTimelines" in playback_packet else [])
+    timeline_groups.extend(bank["profileTimelines"] for bank in playback_packet.get("banks", [])
+                           if "profileTimelines" in bank)
+    if not timeline_groups:
+        return
+    profiles = presentation_packet["camera"].get("profiles")
+    require(profiles is not None, "MISSING_POLYCSS_CHANNEL",
+            "Playback profile timelines require static-presentation profiles")
+    profile_indices = {profile["id"]: index for index, profile in enumerate(profiles)}
+    for timelines in timeline_groups:
+        previous_index = -1
+        for timeline in timelines:
+            profile_id = timeline["profileId"]
+            require(profile_id in profile_indices, "INVALID_PLAYBACK_STATE",
+                    f"Playback profile timeline {profile_id} has no static-presentation profile")
+            profile_index = profile_indices[profile_id]
+            require(profile_index > previous_index, "INVALID_PLAYBACK_STATE",
+                    "Playback profile timelines do not follow static-presentation profile order")
+            previous_index = profile_index
 
 
 def validate_interaction_contract(state_channel: dict, binding: dict,
@@ -1952,11 +3249,11 @@ def validate_interaction_contract(state_channel: dict, binding: dict,
     opened = stable_id(cursor_states.get("open"), "interaction open cursor target")
     closed = stable_id(cursor_states.get("closed"), "interaction closed cursor target")
     require(opened != closed, binding_code, "Interaction cursor states must be distinct")
-    parameters = strict_keys(binding.get("parameters"), {"initialFrame", "tickRateHz"},
+    parameters = strict_keys(binding.get("parameters"), {"initialFrame", "tickRateHz", "tickIntervalUs"},
                              binding_code, "interaction parameters")
-    require(set(parameters) == {"initialFrame", "tickRateHz"}
-            and parameters.get("tickRateHz") == 30, binding_code,
+    require("initialFrame" in parameters, binding_code,
             "Interaction parameters are incomplete or unsupported")
+    validate_tick_cadence(parameters, binding_code, "Interaction")
 
     data = strict_keys(state_channel.get("data"), {"packet"}, state_code,
                        "interaction state data")
@@ -1966,7 +3263,7 @@ def validate_interaction_contract(state_channel: dict, binding: dict,
     require(set(data) == {"packet"}
             and set(packet) == {"version", "arithmetic", "input", "animator", "source",
                                 "triangle", "objects", "shapes", "leaves", "controls"}
-            and packet.get("version") == 0
+            and as_int(packet.get("version"), state_code, "interaction version") == 0
             and packet.get("arithmetic") == "ieee754-f32-per-operation", state_code,
             "Interaction packet is incomplete or unsupported")
 
@@ -2153,9 +3450,10 @@ def validate_interaction_contract(state_channel: dict, binding: dict,
                 and is_safe_int(leaf.get("width"), 1)
                 and is_safe_int(leaf.get("height"), 1), state_code,
                 f"Interaction leaf {index} is invalid")
-        require(playback_state["data"]["leafFit"][index]["canonicalSize"] == 32,
-                "INTERACTION_TARGET_MISMATCH",
-                f"Interaction leaf {index} does not match playback's fixed triangle basis")
+        if playback_state is not None:
+            require(playback_state["data"]["leafFit"][index]["canonicalSize"] == 32,
+                    "INTERACTION_TARGET_MISMATCH",
+                    f"Interaction leaf {index} does not match playback's fixed triangle basis")
 
     controls = packet.get("controls")
     require(isinstance(controls, list) and 0 < len(controls) <= limits["interaction_controls"],
@@ -2333,7 +3631,7 @@ def validate_interaction_contract(state_channel: dict, binding: dict,
     return packet
 
 
-def validate_state_bindings(state: Any, bindings: Any, node_ids: set[str], limits: dict[str, int]) -> tuple[list[dict], list[dict]]:
+def validate_state_bindings(state: Any, bindings: Any, node_ids: set[str], limits: dict[str, int], tree_nodes: list[dict]) -> tuple[list[dict], list[dict]]:
     state = strict_keys(state, {"version", "channels"}, "INVALID_STATE", "STAT")
     require(as_int(state.get("version"), "UNSUPPORTED_STATE_SCHEMA", "STAT version") == 0,
             "UNSUPPORTED_STATE_SCHEMA", "STAT version must be zero")
@@ -2414,19 +3712,39 @@ def validate_state_bindings(state: Any, bindings: Any, node_ids: set[str], limit
     by_codec = {channel["codec"]: channel for channel in channels}
     by_interpreter = {channel["interpreter"]: channel for channel in binding_channels}
     binding_contracts = {
+        "polycss-compositor-timing@0": (
+            ["time.source-frame", "time.tick"], ["style.transform"],
+            {"nodes"}, {"frameCount", "tickRateHz", "tickIntervalUs"}),
         "polycss-effects@0": (
             ["interaction.grab-active", "interaction.grab-x", "interaction.grab-y", "interaction.grab-z", "time.source-frame"],
             ["style.backgroundPosition", "style.opacity", "style.transform", "style.visibility"],
             {"stars", "emitters"}, {"frameCount"}),
         "polycss-playback@0": (
             ["time.tick"], ["style.transform", "style.visibility"],
-            {"model", "shapes", "leaves"}, {"baseSceneTransform", "frameCount", "tickRateHz"}),
+            {"model", "shapes", "leaves"}, {"baseSceneTransform", "frameCount", "tickRateHz", "tickIntervalUs", "catchUpPolicy"}),
+        "polycss-paged-playback@0": (
+            ["time.tick"], ["style.transform", "style.visibility"],
+            {"model", "shapes", "leaves"}, {"baseSceneTransform", "frameCount", "tickRateHz", "tickIntervalUs", "catchUpPolicy"}),
         "polycss-pointer-grab@0": (
             ["axis.x", "axis.y", "button.hold", "pointer.positioned", "pointer.pressed", "pointer.x", "pointer.y"],
             ["style.transform", "style.visibility"],
-            {"shapes", "leaves", "cursorLayer", "cursorStates"}, {"initialFrame", "tickRateHz"}),
+            {"shapes", "leaves", "cursorLayer", "cursorStates"}, {"initialFrame", "tickRateHz", "tickIntervalUs"}),
         "polycss-surface@0": (
-            ["time.source-frame"], ["style.backgroundPositionY", "style.visibility"],
+            ["time.source-frame"], None,
+            {"leaves"}, None),
+        "polycss-variants@0": (
+            ["time.source-frame"], None,
+            {"effectNodes", "nodes"}, None),
+        "polycss-paged-variants@0": (
+            ["time.source-frame"], None,
+            {"effectNodes", "nodes"}, None),
+        "polycss-orbit-input@0": (
+            ["orbit.pitch", "orbit.yaw", "orbit.zoom"],
+            ["style.backgroundPosition", "style.transform"],
+            {"model", "leaves"}, None),
+        "polycss-viewport-profiles@0": (
+            ["viewport.height", "viewport.width"],
+            ["style.transform", "style.visibility"],
             {"leaves"}, None),
     }
     for interpreter, (expected_inputs, expected_sinks, target_keys, parameter_keys) in binding_contracts.items():
@@ -2434,7 +3752,7 @@ def validate_state_bindings(state: Any, bindings: Any, node_ids: set[str], limit
         if binding is None:
             continue
         require(binding["status"] == "executable" and binding["inputs"] == expected_inputs
-                and binding["sinks"] == expected_sinks,
+                and (expected_sinks is None or binding["sinks"] == expected_sinks),
                 "INVALID_CODEC_BINDING", f"{interpreter} input, sink, or status contract is invalid")
         targets = strict_keys(binding["targets"], target_keys, "INVALID_CODEC_BINDING", f"{interpreter} targets")
         require(set(targets) == target_keys, "INVALID_CODEC_BINDING", f"{interpreter} targets are incomplete")
@@ -2442,28 +3760,96 @@ def validate_state_bindings(state: Any, bindings: Any, node_ids: set[str], limit
             require("parameters" not in binding, "INVALID_CODEC_BINDING", f"{interpreter} has no parameters")
         else:
             parameters = strict_keys(binding.get("parameters"), parameter_keys, "INVALID_CODEC_BINDING", f"{interpreter} parameters")
-            require(set(parameters) == parameter_keys, "INVALID_CODEC_BINDING", f"{interpreter} parameters are incomplete")
+            timing_required = {
+                "polycss-compositor-timing@0": {"frameCount"},
+                "polycss-playback@0": {"baseSceneTransform", "frameCount"},
+                "polycss-paged-playback@0": {"baseSceneTransform", "frameCount"},
+                "polycss-pointer-grab@0": {"initialFrame"},
+            }
+            require(timing_required.get(interpreter, parameter_keys) <= set(parameters),
+                    "INVALID_CODEC_BINDING", f"{interpreter} parameters are incomplete")
 
-    playback_state = by_codec.get("polycss-playback-packed@0")
+    inline_playback_state = by_codec.get("polycss-playback-packed@0")
+    paged_playback_state = by_codec.get("polycss-paged-playback@0")
     surface_state = by_codec.get("polycss-surface-packed@0")
-    playback_binding = by_interpreter.get("polycss-playback@0")
+    variant_state = by_codec.get("polycss-variants-packed@0")
+    paged_variant_state = by_codec.get("polycss-paged-variants@0")
+    compositor_state = by_codec.get("polycss-compositor-timing-prepared@0")
+    orbit_state = by_codec.get("polycss-orbit-input-prepared@0")
+    viewport_state = by_codec.get("polycss-viewport-profiles-packed@0")
+    inline_playback_binding = by_interpreter.get("polycss-playback@0")
+    paged_playback_binding = by_interpreter.get("polycss-paged-playback@0")
+    playback_state = inline_playback_state or paged_playback_state
+    playback_binding = inline_playback_binding or paged_playback_binding
     surface_binding = by_interpreter.get("polycss-surface@0")
-    require((playback_state is None) == (playback_binding is None),
+    variant_binding = by_interpreter.get("polycss-variants@0")
+    paged_variant_binding = by_interpreter.get("polycss-paged-variants@0")
+    compositor_binding = by_interpreter.get("polycss-compositor-timing@0")
+    orbit_binding = by_interpreter.get("polycss-orbit-input@0")
+    viewport_binding = by_interpreter.get("polycss-viewport-profiles@0")
+    require((inline_playback_state is None) == (inline_playback_binding is None)
+            and (paged_playback_state is None) == (paged_playback_binding is None),
             "MISSING_POLYCSS_CHANNEL", "Playback state and binding must appear together")
+    require(not (inline_playback_binding and paged_playback_binding),
+            "TARGET_OWNERSHIP_CONFLICT", "Inline and paged playback are mutually exclusive")
     require((surface_state is None) == (surface_binding is None),
             "MISSING_POLYCSS_CHANNEL", "Surface state and binding must appear together")
+    require((variant_state is None) == (variant_binding is None),
+            "MISSING_POLYCSS_CHANNEL", "Variant state and binding must appear together")
+    require((paged_variant_state is None) == (paged_variant_binding is None)
+            and (compositor_state is None) == (compositor_binding is None)
+            and (orbit_state is None) == (orbit_binding is None)
+            and (viewport_state is None) == (viewport_binding is None),
+            "MISSING_POLYCSS_CHANNEL", "New prepared state and binding channels must appear together")
+    require(not (variant_binding and paged_variant_binding), "TARGET_OWNERSHIP_CONFLICT",
+            "Inline and paged variants cannot race class ownership")
     playback_packet = None
     if playback_binding is not None:
-        playback_packet = validate_playback_contract(
+        playback_packet = (validate_playback_contract(
             playback_state, playback_binding, input_map, limits)
+            if inline_playback_binding is not None else validate_paged_playback_contract(
+                playback_state, playback_binding, input_map, limits))
     if surface_binding is not None:
         require(playback_packet is not None, "MISSING_POLYCSS_CHANNEL",
                 "Prepared surface requires executable playback")
         validate_surface_contract(surface_state, surface_binding, playback_packet,
                                   playback_binding, input_map, limits)
+    if compositor_binding is not None:
+        require(playback_packet is not None, "MISSING_POLYCSS_CHANNEL",
+                "Compositor timing requires executable playback")
+        require(inline_playback_binding is not None, "TARGET_OWNERSHIP_CONFLICT",
+                "Compositor timing version 0 cannot reference page-local playback transforms")
+        validate_compositor_timing_contract(compositor_state, compositor_binding,
+                                            playback_packet, playback_binding,
+                                            input_map, limits)
     if playback_packet is not None and playback_packet["leafCount"] > 0:
         require(surface_binding is not None, "MISSING_POLYCSS_CHANNEL",
                 "Playback with leaf targets requires prepared surface state and binding")
+    if variant_binding is not None:
+        require(playback_packet is not None, "MISSING_POLYCSS_CHANNEL",
+                "Prepared variants require executable playback")
+        validate_variants_contract(variant_state, variant_binding, playback_packet,
+                                   playback_binding, input_map, limits, tree_nodes, surface_binding)
+    paged_variant_packet = None
+    if paged_variant_binding is not None:
+        require(playback_packet is not None, "MISSING_POLYCSS_CHANNEL",
+                "Paged variants require executable playback")
+        paged_variant_packet = validate_paged_variants_contract(
+            paged_variant_state, paged_variant_binding, playback_packet,
+            playback_binding, input_map, limits, tree_nodes, surface_binding)
+    paged_packets = [packet for packet in (playback_packet if paged_playback_binding else None,
+                                           paged_variant_packet) if packet is not None]
+    if paged_packets:
+        ceiling = paged_packets[0]["maxResidentPages"]
+        bank_entry_frames = [bank["entryFrame"] for bank in playback_packet.get("banks", [])]
+        require(all(packet["maxResidentPages"] == ceiling for packet in paged_packets),
+                "STATE_PAGE_RESIDENCY_LIMIT",
+                "Every paged state channel must declare the same resident-page ceiling")
+        require(ceiling >= required_document_state_residency(
+                    paged_packets, [playback_packet["initial"]["sourceFrame"]],
+                    bank_entry_frames),
+                "STATE_PAGE_RESIDENCY_LIMIT",
+                "Paged state channels cannot satisfy the combined lookahead, fixed-pin, and prepared-bank transfer window")
 
     effects_state = by_codec.get("polycss-effects-prepared@0")
     effects_binding = by_interpreter.get("polycss-effects@0")
@@ -2473,16 +3859,39 @@ def validate_state_bindings(state: Any, bindings: Any, node_ids: set[str], limit
                 "Effects state and binding must appear together")
         require(playback_binding is not None, "MISSING_POLYCSS_CHANNEL",
                 "Prepared effects require executable playback")
+        require(playback_binding["parameters"].get("catchUpPolicy") != "elapsed",
+                "INVALID_EFFECTS_BINDING",
+                "Prepared effects do not support collapsed elapsed catch-up")
         validate_effects_contract(effects_state, effects_binding, input_map,
                                   playback_binding, limits)
 
     presentation_state = by_codec.get("static-presentation@0")
     presentation_binding = by_interpreter.get("static-presentation@0")
+    presentation_packet = None
     if presentation_state or presentation_binding:
         require(presentation_state is not None and presentation_binding is not None,
                 "MISSING_POLYCSS_CHANNEL",
                 "Presentation state and binding must appear together")
-        validate_presentation_contract(presentation_state, presentation_binding, input_map)
+        presentation_packet = validate_presentation_contract(presentation_state, presentation_binding, input_map)
+
+    if (playback_packet is not None
+            and ("profileTimelines" in playback_packet
+                 or any("profileTimelines" in bank for bank in playback_packet.get("banks", [])))):
+        require(presentation_packet is not None, "MISSING_POLYCSS_CHANNEL",
+                "Playback profile timelines require static presentation")
+        validate_playback_profile_timeline_closure(playback_packet, presentation_packet)
+
+    if orbit_binding is not None:
+        require(playback_binding is None, "TARGET_OWNERSHIP_CONFLICT",
+                "Prepared orbit version 0 cannot race playback")
+        validate_orbit_contract(orbit_state, orbit_binding, presentation_packet,
+                                input_map, tree_nodes, limits)
+    if viewport_binding is not None:
+        require(playback_packet is not None and presentation_packet is not None,
+                "MISSING_POLYCSS_CHANNEL", "Viewport profiles require playback and presentation")
+        validate_viewport_profiles_contract(viewport_state, viewport_binding,
+                                            playback_packet, playback_binding,
+                                            presentation_packet, input_map, limits)
 
     interaction_state = by_codec.get("polycss-pointer-grab-prepared@0")
     interaction_binding = by_interpreter.get("polycss-pointer-grab@0")
@@ -2494,12 +3903,21 @@ def validate_state_bindings(state: Any, bindings: Any, node_ids: set[str], limit
                 and effects_binding is not None, "MISSING_POLYCSS_CHANNEL",
                 "Prepared pointer interaction requires playback, presentation, and effects")
         validate_interaction_contract(interaction_state, interaction_binding, input_map,
-                                      playback_state, playback_binding,
+                                      inline_playback_state, playback_binding,
                                       presentation_binding, limits)
-        require(interaction_binding["parameters"]["tickRateHz"]
-                == playback_binding["parameters"]["tickRateHz"],
+        require(same_tick_cadence(interaction_binding["parameters"], playback_binding["parameters"])
+                and playback_binding["parameters"].get("catchUpPolicy") != "elapsed",
                 "INVALID_INTERACTION_BINDING",
-                "Interaction and playback tick rates must match")
+                "Interaction and playback timing is incompatible")
+        if paged_packets:
+            required_resident_pages = required_document_state_residency(
+                paged_packets,
+                [playback_packet["initial"]["sourceFrame"],
+                 interaction_binding["parameters"]["initialFrame"]],
+                [bank["entryFrame"] for bank in playback_packet.get("banks", [])])
+            require(paged_packets[0]["maxResidentPages"] >= required_resident_pages,
+                    "STATE_PAGE_RESIDENCY_LIMIT",
+                    "Paged state with interaction must reserve both entry pages and every combined cyclic lookahead window")
 
     def target_set(binding: dict) -> set[str]:
         values: list[str] = []
@@ -2534,7 +3952,8 @@ def validate_initial_surface_closure(document: dict[str, Any], nodes: list[dict]
     state = next((channel for channel in document["state"]["channels"]
                   if channel["codec"] == "polycss-surface-packed@0"), None)
     binding = next((channel for channel in document["bindings"]["channels"]
-                    if channel["interpreter"] == "polycss-playback@0"), None)
+                    if channel["interpreter"] in ("polycss-playback@0",
+                                                   "polycss-paged-playback@0")), None)
     if state is None or binding is None:
         return
     packet = state["data"]["packet"]
@@ -2547,6 +3966,16 @@ def validate_initial_surface_closure(document: dict[str, Any], nodes: list[dict]
     by_id = {node["id"]: node for node in nodes}
     target_frame = packet["transitions"]["initialFrame"] - 1
     packing = packet["surface"]["statePacking"]
+    position_dictionary = packing.get("positionDictionary")
+    position_indices = (base64_integers(packing.get("positionIndicesBase64"), 2,
+                                        int(packing["stateCount"]),
+                                        "INVALID_SURFACE_STATE",
+                                        "surface position indices")
+                        if position_dictionary is not None else None)
+
+    def coordinate(value: int) -> str:
+        return "0" if value == 0 else f"{value}px"
+
     for index, target in enumerate(binding["targets"]["leaves"]):
         node = by_id[target]
         expected_visibility = ("visible"
@@ -2556,18 +3985,46 @@ def validate_initial_surface_closure(document: dict[str, Any], nodes: list[dict]
                 f"Surface leaf {index} initial visibility does not match TREE")
         face = packet["surface"]["faces"][index]
         source_frame = selected_frame = 0
+        selected_state = 0
         for local in range(int(face["stateCount"])):
             source_frame += packing["sourceFrameDeltas"][int(face["stateOffset"]) + local]
             if source_frame > target_frame:
                 break
             selected_frame = source_frame
-        actual = node.get("styles", {}).get("backgroundPositionY")
-        if selected_frame == 0:
+            selected_state = local
+        actual = node.get("styles", {}).get(
+            "backgroundPosition" if position_dictionary is not None else "backgroundPositionY")
+        if position_dictionary is not None and position_indices is not None:
+            position = position_dictionary[
+                position_indices[int(face["stateOffset"]) + selected_state]]
+            matches = actual == " ".join(coordinate(int(value)) for value in position)
+        elif selected_frame == 0:
             matches = actual is None or actual in ("0", "0px", "0%")
         else:
             matches = actual == f"{-selected_frame * face['leafHeight']}px"
         require(matches, "SURFACE_TREE_MISMATCH",
                 f"Surface leaf {index} initial atlas position does not match TREE")
+
+
+def validate_initial_variant_closure(document: dict[str, Any], nodes: list[dict]) -> None:
+    state = next((channel for channel in document["state"]["channels"]
+                  if channel["codec"] in ("polycss-variants-packed@0", "polycss-paged-variants@0")), None)
+    binding = next((channel for channel in document["bindings"]["channels"]
+                    if channel["interpreter"] in ("polycss-variants@0", "polycss-paged-variants@0")), None)
+    if state is None or binding is None:
+        return
+    packet = state["data"]["packet"]
+    initial = base64_integers(packet["initial"]["classIndicesBase64"], 2,
+                              len(binding["targets"]["nodes"]),
+                              "INVALID_VARIANT_STATE", "variant initial classes")
+    by_id = {node["id"]: node for node in nodes}
+    classes = packet["classes"]
+    class_set = set(classes)
+    for index, target in enumerate(binding["targets"]["nodes"]):
+        active = [token for token in by_id[target].get("classes", []) if token in class_set]
+        expected = [] if initial[index] == 0xffff else [classes[initial[index]]]
+        require(active == expected, "VARIANT_TREE_MISMATCH",
+                f"Variant node {index} initial class does not match TREE")
 
 
 def validate_presentation_closure(document: dict[str, Any], nodes: list[dict],
@@ -2620,12 +4077,15 @@ def validate_presentation_closure(document: dict[str, Any], nodes: list[dict],
             "PRESENTATION_TREE_MISMATCH",
             "Presentation camera does not match TREE styles")
     playback = next((channel for channel in document["bindings"]["channels"]
-                     if channel["interpreter"] == "polycss-playback@0"), None)
+                     if channel["interpreter"] in ("polycss-playback@0",
+                                                    "polycss-paged-playback@0")), None)
     if playback is not None:
-        require(playback["parameters"]["baseSceneTransform"] == camera["baseSceneTransform"]
-                and by_id.get(playback["targets"]["model"], {}).get("styles", {}).get("transform")
-                == camera["baseSceneTransform"], "PRESENTATION_TREE_MISMATCH",
-                "Presentation transform does not match playback and TREE")
+        require(playback["parameters"]["baseSceneTransform"] == camera["baseSceneTransform"],
+                "PRESENTATION_TREE_MISMATCH", "Presentation transform does not match playback")
+        if playback["interpreter"] == "polycss-playback@0":
+            require(by_id.get(playback["targets"]["model"], {}).get("styles", {}).get("transform")
+                    == camera["baseSceneTransform"], "PRESENTATION_TREE_MISMATCH",
+                    "Presentation transform does not match playback TREE")
     interaction = next((channel for channel in document["bindings"]["channels"]
                         if channel["interpreter"] == "polycss-pointer-grab@0"), None)
     if interaction is not None:
@@ -2634,6 +4094,385 @@ def validate_presentation_closure(document: dict[str, Any], nodes: list[dict],
                 and interaction["targets"]["cursorStates"] == binding["targets"]["cursorStates"],
                 "PRESENTATION_TREE_MISMATCH",
                 "Presentation and interaction cursor targets differ")
+
+
+def state_page_integers(value: Any, width: int, maximum_count: int, label: str) -> array:
+    decoded_length = canonical_base64_decoded_length(value, label, "INVALID_STATE_PAGE")
+    require(decoded_length % width == 0 and decoded_length // width <= maximum_count,
+            "INVALID_STATE_PAGE", f"{label} is truncated or excessive")
+    try:
+        payload = base64.b64decode(value, validate=True)
+    except (binascii.Error, ValueError) as error:
+        raise DomError("INVALID_STATE_PAGE", f"{label} is not valid base64") from error
+    require(len(payload) == decoded_length and base64.b64encode(payload).decode("ascii") == value,
+            "INVALID_STATE_PAGE", f"{label} is not canonical base64")
+    values = array({1: "B", 2: "H", 4: "I"}[width])
+    require(values.itemsize == width, "INVALID_STATE_PAGE", f"{label} has unsupported host width")
+    values.frombytes(payload)
+    if sys.byteorder != "little" and width > 1:
+        values.byteswap()
+    return values
+
+
+def state_page_bitset(value: Any, count: int, label: str) -> array:
+    count = int(count)
+    packed = state_page_integers(value, 1, math.ceil(count / 8), label)
+    require(len(packed) == math.ceil(count / 8), "STATE_COLUMN_MISMATCH",
+            f"{label} is truncated")
+    if count % 8 and packed:
+        require(packed[-1] >> (count % 8) == 0, "INVALID_STATE_PAGE",
+                f"{label} has nonzero unused bits")
+    output = array("B", [0]) * count
+    for index in range(count):
+        output[index] = (packed[index >> 3] >> (index & 7)) & 1
+    return output
+
+
+def state_page_matrix(value: str, label: str) -> str:
+    require(isinstance(value, str) and value.startswith("matrix3d(") and value.endswith(")"),
+            "INVALID_STATE_PAGE", f"{label} is not a matrix3d transform")
+    tokens = value[9:-1].split(",")
+    require(len(tokens) == 16, "INVALID_STATE_PAGE",
+            f"{label} must contain sixteen matrix3d components")
+    components = []
+    for token in tokens:
+        try:
+            number = float(token)
+        except ValueError as error:
+            raise DomError("INVALID_STATE_PAGE", f"{label} contains a nonnumeric component") from error
+        require(token and token == ecma_number(number), "INVALID_STATE_PAGE",
+                f"{label} contains a noncanonical CSS number")
+        component = f32(number)
+        rounded = math.floor(component * 1_000_000 + 0.5) / 1_000_000
+        require(math.isfinite(component) and token == ecma_number(0.0 if rounded == 0 else rounded),
+                "INVALID_STATE_PAGE", f"{label} contains a noncanonical binary32 component")
+        components.append(component)
+    require(components[3] == components[7] == components[11] == 0 and components[15] == 1,
+            "INVALID_STATE_PAGE", f"{label} is not an affine prepared matrix")
+    require(value != "matrix3d(1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1)",
+            "INVALID_STATE_PAGE", f"{label} must encode identity as null")
+    return value
+
+
+def validate_state_page_payload(document: dict[str, Any], record: dict,
+                                decoded: bytes, limits: dict[str, int]) -> dict:
+    owner = ("polycss-paged-variants@0" if record["codec"] == "polycss-paged-variants-page@0"
+             else "polycss-paged-playback@0")
+    state = next((channel for channel in document["state"]["channels"]
+                  if channel["codec"] == owner), None)
+    binding = next((channel for channel in document["bindings"]["channels"]
+                    if channel["interpreter"] == owner), None)
+    require(state is not None and binding is not None, "UNEXPECTED_STATE_PAGE",
+            f"State page {record['id']} has no matching paged channel")
+    packet = state["data"]["packet"]
+    descriptor = next((entry for entry in packet["pages"] if entry["resource"] == record["id"]), None)
+    require(descriptor is not None, "UNEXPECTED_STATE_PAGE",
+            f"State page {record['id']} is not referenced by its matching channel")
+    page = parse_canonical_json(decoded, f"state page {record['id']}")
+    common = {"version", "codec", "channel", "startFrame", "endFrame"}
+    fields = (common | {"keyframeClassIndicesBase64", "sequential"}
+              if owner == "polycss-paged-variants@0"
+              else common | {"transforms", "keyframe", "sequential"})
+    page = strict_keys(page, fields, "INVALID_STATE_PAGE", f"state page {record['id']}")
+    require(set(page) == fields and as_int(page.get("version"), "INVALID_STATE_PAGE",
+            "state page version") == 0 and page.get("codec") == record["codec"]
+            and page.get("channel") == state["id"], "INVALID_STATE_PAGE",
+            f"State page {record['id']} identity or fields are invalid")
+    start = int(as_int(page.get("startFrame"), "STATE_PAGE_COVERAGE_MISMATCH", "state page start", 1))
+    end = int(as_int(page.get("endFrame"), "STATE_PAGE_COVERAGE_MISMATCH", "state page end", 1))
+    require(start == descriptor["startFrame"] and end == descriptor["endFrame"],
+            "STATE_PAGE_COVERAGE_MISMATCH", f"State page {record['id']} coverage differs")
+    frame_count = end - start + 1
+    require(0 < frame_count <= limits["state_page_frames"], "STATE_PAGE_COVERAGE_MISMATCH",
+            f"State page {record['id']} coverage is invalid")
+    if owner == "polycss-paged-variants@0":
+        target_count = len(binding["targets"]["nodes"])
+        keyframe = state_page_integers(page.get("keyframeClassIndicesBase64"), 2, target_count,
+                                       "state page keyframe")
+        require(len(keyframe) == target_count and all(value == 0xffff or value < len(packet["classes"])
+                                                       for value in keyframe),
+                "STATE_COLUMN_MISMATCH", f"State page {record['id']} keyframe is invalid")
+        transitions = strict_keys(page.get("sequential"), {"offsetsBase64", "targetIndicesBase64",
+                                  "classIndicesBase64"}, "INVALID_STATE_PAGE",
+                                  "state page transitions")
+        offsets = state_page_integers(transitions.get("offsetsBase64"), 4, frame_count + 1,
+                                      "state page offsets")
+        targets = state_page_integers(transitions.get("targetIndicesBase64"), 2,
+                                      limits["prepared_changes"], "state page targets")
+        classes = state_page_integers(transitions.get("classIndicesBase64"), 2,
+                                      limits["prepared_changes"], "state page classes")
+        require(len(offsets) == frame_count + 1 and offsets[0] == offsets[1] == 0
+                and offsets[-1] == len(targets) == len(classes) == descriptor["changeCount"]
+                and all(offsets[index - 1] <= value for index, value in enumerate(offsets) if index),
+                "STATE_COLUMN_MISMATCH", f"State page {record['id']} columns are invalid")
+        row = array("H", keyframe)
+        for local_frame in range(1, frame_count):
+            previous = -1
+            for cursor in range(offsets[local_frame], offsets[local_frame + 1]):
+                target, class_index = targets[cursor], classes[cursor]
+                require(previous < target < target_count
+                        and (class_index == 0xffff or class_index < len(packet["classes"]))
+                        and row[target] != class_index, "INVALID_STATE_PAGE",
+                        f"State page {record['id']} transition is invalid")
+                row[target] = class_index; previous = target
+        materialized = target_count * 2 + (frame_count + 1) * 4 + len(targets) * 4
+        require(materialized == descriptor["materializedByteLength"],
+                "STATE_PAGE_MATERIALIZED_SIZE_MISMATCH",
+                f"State page {record['id']} materialized size differs")
+        return {"resource": record["id"], "codec": record["codec"], "channel": state["id"],
+                "startFrame": start, "endFrame": end, "materializedByteLength": materialized,
+                "keyframe": keyframe, "offsets": offsets, "targets": targets, "classes": classes}
+
+    transforms_value = page.get("transforms")
+    require(isinstance(transforms_value, list) and len(transforms_value) == descriptor["transformCount"]
+            and 0 < len(transforms_value) <= limits["prepared_transforms"],
+            "TRANSFORM_ALLOCATION_LIMIT", f"State page {record['id']} transforms are invalid")
+    transforms: list[str] = []
+    for index, value in enumerate(transforms_value):
+        require(value is None or isinstance(value, str), "INVALID_STATE_PAGE",
+                f"State page {record['id']} transform {index} is invalid")
+        transforms.append("" if value is None else state_page_matrix(
+            value, f"State page {record['id']} transform {index}"))
+    key = strict_keys(page.get("keyframe"), {"appearance", "modelTransform",
+                      "shapeTransformIndicesBase64", "shapeVisibilityBitsBase64",
+                      "leafTransformIndicesBase64"}, "INVALID_STATE_PAGE", "state page keyframe")
+    appearance = int(as_int(key.get("appearance"), "INVALID_STATE_PAGE", "keyframe appearance"))
+    model = int(as_int(key.get("modelTransform"), "INVALID_STATE_PAGE", "keyframe model"))
+    require(appearance < len(packet["appearances"]) and model < len(transforms),
+            "INVALID_STATE_PAGE", f"State page {record['id']} keyframe is invalid")
+    shape_key = state_page_integers(key.get("shapeTransformIndicesBase64"), 4,
+                                    packet["shapeCount"], "keyframe shape transforms")
+    visibility_key = state_page_bitset(key.get("shapeVisibilityBitsBase64"),
+                                       packet["shapeCount"], "keyframe shape visibility")
+    leaf_key = state_page_integers(key.get("leafTransformIndicesBase64"), 4,
+                                   packet["leafCount"], "keyframe leaf transforms")
+    require(len(shape_key) == packet["shapeCount"] and len(leaf_key) == packet["leafCount"]
+            and all(value < len(transforms) for value in shape_key)
+            and all(value < len(transforms) for value in leaf_key), "STATE_COLUMN_MISMATCH",
+            f"State page {record['id']} keyframe columns are invalid")
+    sequential_fields = {"appearanceIndicesBase64", "modelTransformIndicesBase64",
+                         "shapeOffsetsBase64", "shapeTargetIndicesBase64",
+                         "shapeTransformIndicesBase64", "shapeVisibilityBase64",
+                         "leafOffsetsBase64", "leafTargetIndicesBase64",
+                         "leafTransformIndicesBase64"}
+    sequential = strict_keys(page.get("sequential"), sequential_fields,
+                             "INVALID_STATE_PAGE", "state page sequential transitions")
+    require(set(sequential) == sequential_fields, "INVALID_STATE_PAGE",
+            "State page sequential fields are incomplete")
+    appearances = state_page_integers(sequential.get("appearanceIndicesBase64"), 2,
+                                      frame_count, "state page appearances")
+    models = state_page_integers(sequential.get("modelTransformIndicesBase64"), 4,
+                                 frame_count, "state page models")
+    shape_offsets = state_page_integers(sequential.get("shapeOffsetsBase64"), 4,
+                                        frame_count + 1, "state page shape offsets")
+    shape_targets = state_page_integers(sequential.get("shapeTargetIndicesBase64"), 4,
+                                        limits["prepared_changes"], "state page shape targets")
+    shape_transforms = state_page_integers(sequential.get("shapeTransformIndicesBase64"), 4,
+                                           limits["prepared_changes"], "state page shape transforms")
+    shape_visibility = state_page_integers(sequential.get("shapeVisibilityBase64"), 1,
+                                           limits["prepared_changes"], "state page shape visibility")
+    leaf_offsets = state_page_integers(sequential.get("leafOffsetsBase64"), 4,
+                                       frame_count + 1, "state page leaf offsets")
+    leaf_targets = state_page_integers(sequential.get("leafTargetIndicesBase64"), 4,
+                                       limits["prepared_changes"], "state page leaf targets")
+    leaf_transforms = state_page_integers(sequential.get("leafTransformIndicesBase64"), 4,
+                                          limits["prepared_changes"], "state page leaf transforms")
+    require(len(appearances) == len(models) == frame_count and appearances[0] == appearance
+            and all(value < len(packet["appearances"]) for value in appearances)
+            and all(value == 0xffffffff or value < len(transforms) for value in models),
+            "STATE_COLUMN_MISMATCH", f"State page {record['id']} dense columns are invalid")
+    require(len(shape_offsets) == len(leaf_offsets) == frame_count + 1
+            and shape_offsets[0] == leaf_offsets[0] == 0
+            and shape_offsets[-1] == len(shape_targets) == len(shape_transforms) == len(shape_visibility)
+            == descriptor["shapeChangeCount"]
+            and leaf_offsets[-1] == len(leaf_targets) == len(leaf_transforms)
+            == descriptor["leafChangeCount"]
+            and all(shape_offsets[index - 1] <= value for index, value in enumerate(shape_offsets) if index)
+            and all(leaf_offsets[index - 1] <= value for index, value in enumerate(leaf_offsets) if index),
+            "STATE_COLUMN_MISMATCH", f"State page {record['id']} sparse columns are invalid")
+    owners: dict[int, str] = {}
+    values: dict[tuple[str, str], int] = {}
+    next_first = 0
+
+    def claim(index: int, owner_name: str, label: str) -> None:
+        nonlocal next_first
+        require(0 <= index < len(transforms), "INVALID_STATE_PAGE", f"{label} is missing")
+        prior = owners.get(index)
+        if prior is None:
+            require(index == next_first, "TRANSFORM_GROUP_MISMATCH",
+                    f"{label} violates canonical first-use order")
+            owners[index] = owner_name; next_first += 1
+        else:
+            require(prior == owner_name, "TRANSFORM_GROUP_MISMATCH",
+                    f"{label} aliases incompatible owners")
+        value_key = (owner_name, transforms[index])
+        require(value_key not in values or values[value_key] == index, "TRANSFORM_GROUP_MISMATCH",
+                f"{label} duplicates an owner-domain transform")
+        values[value_key] = index
+
+    claim(model, "model", "keyframe model")
+    for index, transform in enumerate(shape_key): claim(transform, "shape", f"keyframe shape {index}")
+    for index, transform in enumerate(leaf_key): claim(transform, f"leaf:{index}", f"keyframe leaf {index}")
+    current_model = model
+    current_shapes, current_visibility, current_leaves = array("I", shape_key), array("B", visibility_key), array("I", leaf_key)
+    for local in range(frame_count):
+        changed_model = models[local]
+        if changed_model != 0xffffffff:
+            claim(changed_model, "model", f"frame {start + local} model")
+            if local:
+                require(changed_model != current_model, "INVALID_STATE_PAGE", "No-op model transition")
+                current_model = changed_model
+        previous = -1
+        for cursor in range(shape_offsets[local], shape_offsets[local + 1]):
+            target, transform, visible = shape_targets[cursor], shape_transforms[cursor], shape_visibility[cursor]
+            require(previous < target < packet["shapeCount"] and visible <= 1,
+                    "INVALID_STATE_PAGE", "Invalid shape transition")
+            claim(transform, "shape", f"frame {start + local} shape {target}")
+            if local:
+                require(current_shapes[target] != transform or current_visibility[target] != visible,
+                        "INVALID_STATE_PAGE", "No-op shape transition")
+                current_shapes[target] = transform; current_visibility[target] = visible
+            previous = target
+        previous = -1
+        for cursor in range(leaf_offsets[local], leaf_offsets[local + 1]):
+            target, transform = leaf_targets[cursor], leaf_transforms[cursor]
+            require(previous < target < packet["leafCount"], "INVALID_STATE_PAGE",
+                    "Invalid leaf transition")
+            claim(transform, f"leaf:{target}", f"frame {start + local} leaf {target}")
+            if local:
+                require(current_leaves[target] != transform, "INVALID_STATE_PAGE", "No-op leaf transition")
+                current_leaves[target] = transform
+            previous = target
+    require(len(owners) == len(transforms), "TRANSFORM_GROUP_MISMATCH",
+            f"State page {record['id']} has an unreferenced transform")
+    transform_bytes = sum(8 + len(value) * 2 for value in transforms)
+    materialized = (transform_bytes + len(shape_key) * 4 + len(visibility_key) + len(leaf_key) * 4
+                    + len(appearances) * 2 + len(models) * 4 + len(shape_offsets) * 4
+                    + len(shape_targets) * 4 + len(shape_transforms) * 4 + len(shape_visibility)
+                    + len(leaf_offsets) * 4 + len(leaf_targets) * 4 + len(leaf_transforms) * 4)
+    require(materialized == descriptor["materializedByteLength"],
+            "STATE_PAGE_MATERIALIZED_SIZE_MISMATCH",
+            f"State page {record['id']} materialized size differs")
+    return {"resource": record["id"], "codec": record["codec"], "channel": state["id"],
+            "startFrame": start, "endFrame": end, "materializedByteLength": materialized,
+            "transforms": transforms,
+            "keyframe": {"appearance": appearance, "modelTransform": model,
+                         "shapeTransforms": shape_key, "shapeVisibility": visibility_key,
+                         "leafTransforms": leaf_key}, "appearances": appearances,
+            "modelTransforms": models, "shapeOffsets": shape_offsets,
+            "shapeTargets": shape_targets, "shapeTransforms": shape_transforms,
+            "shapeVisibility": shape_visibility, "leafOffsets": leaf_offsets,
+            "leafTargets": leaf_targets, "leafTransforms": leaf_transforms}
+
+
+def variant_page_row(page: dict, frame: int) -> array:
+    row = array("H", page["keyframe"])
+    for local in range(1, int(frame) - page["startFrame"] + 1):
+        for cursor in range(page["offsets"][local], page["offsets"][local + 1]):
+            row[page["targets"][cursor]] = page["classes"][cursor]
+    return row
+
+
+def playback_page_row(page: dict, local_frame: int) -> dict:
+    local_frame = int(local_frame)
+    key = page["keyframe"]
+    appearance = key["appearance"]
+    model = page["transforms"][key["modelTransform"]]
+    shapes = [page["transforms"][index] for index in key["shapeTransforms"]]
+    visibility = array("B", key["shapeVisibility"])
+    leaves = [page["transforms"][index] for index in key["leafTransforms"]]
+    for local in range(1, local_frame + 1):
+        appearance = page["appearances"][local]
+        if page["modelTransforms"][local] != 0xffffffff:
+            model = page["transforms"][page["modelTransforms"][local]]
+        for cursor in range(page["shapeOffsets"][local], page["shapeOffsets"][local + 1]):
+            target = page["shapeTargets"][cursor]
+            shapes[target] = page["transforms"][page["shapeTransforms"][cursor]]
+            visibility[target] = page["shapeVisibility"][cursor]
+        for cursor in range(page["leafOffsets"][local], page["leafOffsets"][local + 1]):
+            target = page["leafTargets"][cursor]
+            leaves[target] = page["transforms"][page["leafTransforms"][cursor]]
+    return {"appearance": appearance, "modelTransform": model, "shapeTransforms": shapes,
+            "shapeVisibility": visibility, "leafTransforms": leaves}
+
+
+def validate_paged_playback_boundary(previous: dict, target: dict) -> None:
+    source = playback_page_row(previous, previous["endFrame"] - previous["startFrame"])
+    final = playback_page_row(target, 0)
+    require(target["appearances"][0] == final["appearance"], "STATE_PAGE_BOUNDARY_MISMATCH",
+            "Paged playback boundary appearance differs from keyframe")
+    expected_model = 0xffffffff if source["modelTransform"] == final["modelTransform"] else target["keyframe"]["modelTransform"]
+    require(target["modelTransforms"][0] == expected_model, "STATE_PAGE_BOUNDARY_MISMATCH",
+            "Paged playback boundary model delta is incomplete or excessive")
+    expected_shapes = [index for index in range(len(final["shapeTransforms"]))
+                       if source["shapeTransforms"][index] != final["shapeTransforms"][index]
+                       or source["shapeVisibility"][index] != final["shapeVisibility"][index]]
+    actual_shapes = list(target["shapeTargets"][target["shapeOffsets"][0]:target["shapeOffsets"][1]])
+    require(actual_shapes == expected_shapes, "STATE_PAGE_BOUNDARY_MISMATCH",
+            "Paged playback boundary shape targets are incomplete or excessive")
+    for cursor in range(target["shapeOffsets"][0], target["shapeOffsets"][1]):
+        shape = target["shapeTargets"][cursor]
+        require(target["transforms"][target["shapeTransforms"][cursor]] == final["shapeTransforms"][shape]
+                and target["shapeVisibility"][cursor] == final["shapeVisibility"][shape],
+                "STATE_PAGE_BOUNDARY_MISMATCH", "Paged playback boundary shape differs")
+    expected_leaves = [index for index in range(len(final["leafTransforms"]))
+                       if source["leafTransforms"][index] != final["leafTransforms"][index]]
+    actual_leaves = list(target["leafTargets"][target["leafOffsets"][0]:target["leafOffsets"][1]])
+    require(actual_leaves == expected_leaves, "STATE_PAGE_BOUNDARY_MISMATCH",
+            "Paged playback boundary leaf targets are incomplete or excessive")
+    for cursor in range(target["leafOffsets"][0], target["leafOffsets"][1]):
+        leaf = target["leafTargets"][cursor]
+        require(target["transforms"][target["leafTransforms"][cursor]] == final["leafTransforms"][leaf],
+                "STATE_PAGE_BOUNDARY_MISMATCH", "Paged playback boundary leaf differs")
+
+
+def validate_decoded_state_page_closure(document: dict[str, Any], decoded_pages: dict[str, dict]) -> None:
+    nodes = {node["id"]: node for node in document["tree"]["nodes"]}
+    variant_state = next((channel for channel in document["state"]["channels"]
+                          if channel["codec"] == "polycss-paged-variants@0"), None)
+    if variant_state is not None:
+        packet = variant_state["data"]["packet"]
+        descriptor = next(page for page in packet["pages"]
+                          if page["startFrame"] <= packet["initial"]["frame"] <= page["endFrame"])
+        page = decoded_pages.get(descriptor["resource"])
+        if page is not None:
+            binding = next(channel for channel in document["bindings"]["channels"]
+                           if channel["interpreter"] == "polycss-paged-variants@0")
+            expected = state_page_integers(packet["initial"]["classIndicesBase64"], 2,
+                                           len(binding["targets"]["nodes"]), "variant initial row")
+            require(variant_page_row(page, packet["initial"]["frame"]) == expected,
+                    "STATE_PAGE_INITIAL_MISMATCH", "Paged variant initial page differs from shell")
+    playback_state = next((channel for channel in document["state"]["channels"]
+                           if channel["codec"] == "polycss-paged-playback@0"), None)
+    if playback_state is None:
+        return
+    packet = playback_state["data"]["packet"]
+    pages = [decoded_pages.get(descriptor["resource"]) for descriptor in packet["pages"]]
+    if all(page is not None for page in pages):
+        for index, page in enumerate(pages):
+            validate_paged_playback_boundary(pages[index - 1], page)
+    descriptor = next(page for page in packet["pages"]
+                      if page["startFrame"] <= packet["initial"]["sourceFrame"] <= page["endFrame"])
+    page = decoded_pages.get(descriptor["resource"])
+    if page is None:
+        return
+    initial = playback_page_row(page, packet["initial"]["sourceFrame"] - page["startFrame"])
+    require(initial["appearance"] == packet["initial"]["appearance"],
+            "STATE_PAGE_INITIAL_MISMATCH", "Paged playback initial appearance differs from shell")
+    binding = next(channel for channel in document["bindings"]["channels"]
+                   if channel["interpreter"] == "polycss-paged-playback@0")
+    expected_model = (binding["parameters"]["baseSceneTransform"] if not initial["modelTransform"]
+                      else f"{binding['parameters']['baseSceneTransform']} {initial['modelTransform']}")
+    require(nodes[binding["targets"]["model"]].get("styles", {}).get("transform") == expected_model,
+            "STATE_PAGE_INITIAL_MISMATCH", "Paged playback initial model differs from TREE")
+    for index, target in enumerate(binding["targets"]["shapes"]):
+        styles = nodes[target].get("styles", {})
+        require(styles.get("transform") == initial["shapeTransforms"][index]
+                and styles.get("visibility") == ("visible" if initial["shapeVisibility"][index] else "hidden"),
+                "STATE_PAGE_INITIAL_MISMATCH", f"Paged playback initial shape {index} differs from TREE")
+    for index, target in enumerate(binding["targets"]["leaves"]):
+        require(nodes[target].get("styles", {}).get("transform") == initial["leafTransforms"][index],
+                "STATE_PAGE_INITIAL_MISMATCH", f"Paged playback initial leaf {index} differs from TREE")
 
 
 CSS_WHITESPACE = "\t\n\f\r "
@@ -2885,7 +4724,8 @@ def scan_css_functions(css: str, start: int, end: int,
             index = open_paren + 1
 
 
-def validate_css(payload: bytes, binding: dict, resources: dict[str, dict], limits: dict[str, int]) -> None:
+def validate_css(payload: bytes, binding: dict, resources: dict[str, dict], limits: dict[str, int],
+                 forbidden_class_tokens: set[str] | None = None) -> None:
     require(len(payload) <= limits["css"], "CSS_SIZE_LIMIT", "CSS is too large")
     try:
         css = payload.decode("utf-8", "strict")
@@ -2897,6 +4737,8 @@ def validate_css(payload: bytes, binding: dict, resources: dict[str, dict], limi
     require("/*" not in css and "*/" not in css, "UNSAFE_CSS_COMMENT", "Stylesheet comments are forbidden")
     require("@" not in css and "<!--" not in css and "-->" not in css,
             "UNSAFE_CSS", "Stylesheet at-rules and CDO/CDC tokens are forbidden")
+    require("!" not in css, "UNSAFE_CSS_IMPORTANT",
+            "Stylesheet priority annotations are forbidden")
     require(all(ord(ch) >= 0x20 or ch in "\t\n\f\r" for ch in css),
             "UNSAFE_CSS_CONTROL", "Stylesheet contains a forbidden control")
     counters: dict[str, Any] = {"functions": 0, "urls": [], "selectors": 0, "declarations": 0}
@@ -2907,7 +4749,16 @@ def validate_css(payload: bytes, binding: dict, resources: dict[str, dict], limi
             require(start < end, "MALFORMED_CSS_SELECTOR", "Stylesheet selector is empty")
             require(len(css[start:end].encode("utf-8")) <= limits["css_selector_bytes"],
                     "CSS_SELECTOR_LIMIT", "Stylesheet selector is too long")
-            assert_scoped_selector(css[start:end], scope)
+            selector = css[start:end]
+            assert_scoped_selector(selector, scope)
+            for token in forbidden_class_tokens or set():
+                for match in re.finditer(re.escape(token), selector):
+                    before = selector[match.start() - 1] if match.start() > 0 else ""
+                    after = selector[match.end()] if match.end() < len(selector) else ""
+                    require((before and re.fullmatch(r"[A-Za-z0-9_-]", before))
+                            or (after and re.fullmatch(r"[A-Za-z0-9_-]", after)),
+                            "UNDECLARED_VARIANT_EFFECT",
+                            f"Stylesheet selector mentions prepared variant token {token}")
             counters["selectors"] += 1
             require(counters["selectors"] <= limits["css_selectors"], "CSS_SELECTOR_LIMIT",
                     "Stylesheet has too many selectors")
@@ -3126,13 +4977,21 @@ def read_dom(path: Path, require_resources: bool = True) -> dict[str, Any]:
             require(entry.get("resource") in resource_map and resource_map[entry["resource"]]["kind"] == "image",
                     "MISSING_CSS_ASSET", "CSS token image resource invalid")
             token_names.add(entry["token"])
-    state_channels, binding_channels = validate_state_bindings(document["state"], document["bindings"], node_ids, limits)
+    state_channels, binding_channels = validate_state_bindings(document["state"], document["bindings"], node_ids, limits, nodes)
     validate_initial_surface_closure(document, nodes)
+    validate_initial_variant_closure(document, nodes)
     validate_presentation_closure(document, nodes, resource_map)
     interpreters = {channel["interpreter"] for channel in binding_channels}
     expected_capabilities = list(BASE_REQUIRED_CAPABILITIES)
-    expected_capabilities.extend(capability for interpreter, capability in CAPABILITY_INTERPRETER_ORDER
-                                 if interpreter in interpreters)
+    included_paged_state = False
+    for interpreter, capability in CAPABILITY_INTERPRETER_ORDER:
+        if interpreter not in interpreters:
+            continue
+        if interpreter in ("polycss-paged-playback@0", "polycss-paged-variants@0") \
+                and not included_paged_state:
+            expected_capabilities.append("prepared-paged-state")
+            included_paged_state = True
+        expected_capabilities.append(capability)
     require(document["meta"]["capabilities"] == expected_capabilities,
             "CAPABILITY_CLOSURE_MISMATCH", "META required capabilities do not match executable interpreters")
     expected_conformance = ["retained-tree"]
@@ -3154,7 +5013,8 @@ def read_dom(path: Path, require_resources: bool = True) -> dict[str, Any]:
             require(as_int(counts["nodes"], "META_COUNT_MISMATCH", "META node count") == len(nodes),
                     "META_COUNT_MISMATCH", "META node count does not match TREE")
         playback = next((channel for channel in binding_channels
-                         if channel["interpreter"] == "polycss-playback@0"), None)
+                         if channel["interpreter"] in ("polycss-playback@0",
+                                                       "polycss-paged-playback@0")), None)
         actual_counts = {"shapes": None, "leaves": None, "sourceFrames": None}
         if playback is not None:
             targets = playback["targets"]
@@ -3184,6 +5044,75 @@ def read_dom(path: Path, require_resources: bool = True) -> dict[str, Any]:
     presentation = next((channel for channel in state_channels if channel["codec"] == "static-presentation@0"), None)
     if presentation is not None and presentation["data"]["packet"].get("background") is not None:
         used_resources.add(presentation["data"]["packet"]["background"].get("resource"))
+    paged_variants = next((channel for channel in state_channels
+                           if channel["codec"] == "polycss-paged-variants@0"), None)
+    if paged_variants is not None:
+        for page in paged_variants["data"]["packet"]["pages"]:
+            resource = resource_map.get(page["resource"])
+            require(resource is not None and resource["kind"] == "state-page"
+                    and resource["codec"] == "polycss-paged-variants-page@0",
+                    "RESOURCE_ROLE_MISMATCH", "Paged variant resource is not a matching state page")
+            used_resources.add(page["resource"])
+    paged_playback = next((channel for channel in state_channels
+                           if channel["codec"] == "polycss-paged-playback@0"), None)
+    if paged_playback is not None:
+        for page in paged_playback["data"]["packet"]["pages"]:
+            resource = resource_map.get(page["resource"])
+            require(resource is not None and resource["kind"] == "state-page"
+                    and resource["codec"] == "polycss-paged-playback-page@0",
+                    "RESOURCE_ROLE_MISMATCH", "Paged playback resource is not a matching state page")
+            used_resources.add(page["resource"])
+    paged_packets = [channel["data"]["packet"] for channel in (paged_playback, paged_variants)
+                     if channel is not None]
+    if paged_packets:
+        playback_binding = next(channel for channel in binding_channels
+                                if channel["interpreter"] in ("polycss-playback@0",
+                                                              "polycss-paged-playback@0"))
+        playback_state = next(channel for channel in state_channels
+                              if channel["codec"] in ("polycss-playback-packed@0",
+                                                      "polycss-paged-playback@0"))
+        interaction = next((channel for channel in binding_channels
+                            if channel["interpreter"] == "polycss-pointer-grab@0"), None)
+        pins = [playback_state["data"]["packet"]["initial"]["sourceFrame"]]
+        if interaction is not None:
+            pins.append(interaction["parameters"]["initialFrame"])
+        materialized = {page["resource"]: page["materializedByteLength"]
+                        for packet in paged_packets for page in packet["pages"]}
+        playback_packet = paged_playback["data"]["packet"] if paged_playback is not None else None
+        variant_target_count = 0
+        if paged_variants is not None:
+            variant_binding = next(channel for channel in binding_channels
+                                   if channel["interpreter"] == "polycss-paged-variants@0")
+            variant_target_count = len(variant_binding["targets"]["nodes"])
+        retained_live = variant_target_count * 4
+        if playback_packet is not None:
+            shape_count = int(playback_packet["shapeCount"])
+            leaf_count = int(playback_packet["leafCount"])
+            retained_live += max(int(page["materializedByteLength"]) + 16
+                                 + (shape_count + leaf_count) * 8 + shape_count
+                                 for page in playback_packet["pages"])
+        peak = 0
+        for frame in range(1, int(playback_binding["parameters"]["frameCount"]) + 1):
+            desired: set[str] = set()
+            for packet in paged_packets:
+                desired.update(desired_page_resources(packet, frame, pins))
+            resident = sum(int(materialized[resource]) for resource in desired)
+            publication_workspace = variant_target_count * 4
+            if playback_packet is not None:
+                current = next(page for page in playback_packet["pages"]
+                               if page["startFrame"] <= frame <= page["endFrame"])
+                publication_workspace += (int(current["materializedByteLength"]) + 16
+                                          + (shape_count + leaf_count) * 8 + shape_count
+                                          + (shape_count + leaf_count) * 12 + shape_count)
+            peak = max(peak, resident + retained_live + publication_workspace)
+            for resource in desired:
+                record = resource_map[resource]
+                validation_peak = (resident - int(materialized[resource])
+                                   + int(record["decodedByteLength"]) * 10
+                                   + int(materialized[resource]) * 2 + retained_live)
+                peak = max(peak, validation_peak)
+        require(peak <= limits["decoded_total"], "STATE_PAGE_RESIDENCY_LIMIT",
+                "Paged state validation and resident window exceeds decoded byte ceiling")
     require(used_resources == set(resource_map), "UNUSED_RESOURCE",
             "Every resource must be reachable from TREE, CSSB, or prepared presentation state")
     resource_bytes: dict[str, bytes] = {}
@@ -3213,6 +5142,7 @@ def read_dom(path: Path, require_resources: bool = True) -> dict[str, Any]:
                 resource_bytes[record["id"]] = payload
             except OSError as error:
                 raise DomError("MISSING_EXTERNAL_RESOURCE", f"Cannot read resource {record['id']}: {error}") from error
+    decoded_state_pages: dict[str, dict] = {}
     for record in records:
         payload = resource_bytes.get(record["id"])
         if payload is None:
@@ -3226,10 +5156,37 @@ def read_dom(path: Path, require_resources: bool = True) -> dict[str, Any]:
             require(width == as_int(record["dimensions"]["width"], "IMAGE_DIMENSION_MISMATCH", "width")
                     and height == as_int(record["dimensions"]["height"], "IMAGE_DIMENSION_MISMATCH", "height"),
                     "IMAGE_DIMENSION_MISMATCH", f"Resource {record['id']} dimensions mismatch")
+        elif record["kind"] == "state-page":
+            decoded_length = int(record["decodedByteLength"])
+            require(record["encoding"] == "identity"
+                    or (len(payload) >= 2 and payload[:2] == b"\x1f\x8b"),
+                    "STATE_PAGE_DECODE_FAILED", f"State page {record['id']} encoding differs")
+            if record["encoding"] == "identity":
+                decoded = payload
+            else:
+                try:
+                    with gzip.GzipFile(fileobj=io.BytesIO(payload), mode="rb") as archive:
+                        decoded = archive.read(decoded_length + 1)
+                except (OSError, EOFError) as error:
+                    raise DomError("STATE_PAGE_DECODE_FAILED",
+                                   f"State page {record['id']} gzip decode failed") from error
+            require(len(decoded) == decoded_length,
+                    "STATE_PAGE_DECODED_SIZE_MISMATCH",
+                    f"State page {record['id']} decoded length differs")
+            require(hashlib.sha256(decoded).hexdigest() == record["decodedDigest"]["value"],
+                    "STATE_PAGE_DECODED_DIGEST_MISMATCH",
+                    f"State page {record['id']} decoded digest differs")
+            decoded_state_pages[record["id"]] = validate_state_page_payload(
+                document, record, decoded, limits)
+    validate_decoded_state_page_closure(document, decoded_state_pages)
+    variant_channel = next((channel for channel in document["state"]["channels"]
+                            if channel["codec"] in ("polycss-variants-packed@0",
+                                                    "polycss-paged-variants@0")), None)
+    forbidden_class_tokens = set(variant_channel["data"]["packet"]["classes"]) if variant_channel else set()
     for binding in stylesheets:
         payload = resource_bytes.get(binding["resource"])
         if payload is not None:
-            validate_css(payload, binding, resource_map, limits)
+            validate_css(payload, binding, resource_map, limits, forbidden_class_tokens)
     if require_resources:
         require(len(resource_bytes) == len(records), "MISSING_EXTERNAL_RESOURCE", "External resources missing")
     plan_rows = [[node["id"], int(node["parent"]), int(node["sibling"]), node["namespace"], node["name"]]

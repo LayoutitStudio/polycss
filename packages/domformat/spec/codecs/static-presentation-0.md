@@ -25,7 +25,36 @@ fitHeight           positive integer fit height
 sourceWidth         positive integer source viewport width
 sourceHeight        positive integer source viewport height
 perspective         positive finite CSS pixel distance
+profileSelection    optional closed profile selector
+profiles            optional bounded prepared responsive profile array
 ```
+
+`profileSelection` and `profiles` MUST appear together or both be absent. When
+present, `profiles` contains 1..16 records in selector order. Every
+record declares a unique stable `id`, `fit` (`contain` or `cover`),
+`quarterTurns` in `0..3`, finite prepared projection `bounds`
+`[minX,minY,maxX,maxY]`, a nonnegative finite `safeInset`, and finite viewport
+`bias` `[x,y]` in `-1..1`. The selector is one of:
+
+- `viewport-width`: all but the final record declare a positive, strictly
+  increasing integer `maxViewportWidth`; the final record omits it. The viewer
+  selects the first row for which `width < maxViewportWidth`, or the final row.
+- `landscape-first-portrait-width`: there are at least two records. Record zero
+  is the unconditional landscape row and omits `maxViewportWidth`. A viewport
+  with `width > height` selects it. Square and portrait viewports select among
+  records 1..N-1 by the same strict, increasing width-band rule; the final
+  portrait record omits `maxViewportWidth`.
+
+Every maximum is at most 1,000,000. The fixed comparisons use only the numeric
+layout width and height. There are no media-query strings, CSS orientation or
+user-agent predicates, expressions, capped-fit modes, or geometry-bound
+derivation.
+
+The same stable profile ids MAY key optional prepared playback-timeline
+overrides. Static presentation still owns only camera fit and mapping sinks; it
+does not own playback cadence or source-frame publication. A playback override
+bank without presentation profiles, or with an unknown/out-of-order profile
+id, is invalid.
 
 When present, background fields are:
 
@@ -49,12 +78,12 @@ cursorLayer   optional stable cursor owner
 cursorStates  optional distinct stable open/closed cursor image nodes
 ```
 
-Parameters repeat `fitWidth`, `fitHeight`, `sourceWidth`, and `sourceHeight` and
-MUST equal the packet. Declared sinks always include `height`, `left`, `top`,
-`transform`, and `width`. `visibility` appears exactly when the cursor target
-pair is present. Background is immutable initial `TREE` state, not an
-interpreter sink. The cursor layer and cursor states MUST be declared together,
-and pointer interaction requires them.
+Parameters repeat `fitWidth`, `fitHeight`, `sourceWidth`, `sourceHeight`, and
+the optional `profileSelection` plus prepared profiles and MUST equal the packet. Declared sinks always
+include `height`, `left`, `top`, `transform`, and `width`. `visibility` appears
+exactly when the cursor target pair is present. Background is immutable initial
+`TREE` state, not an interpreter sink. The cursor layer and cursor states MUST
+be declared together, and pointer interaction requires them.
 
 ## Initial retained contract
 
@@ -115,6 +144,33 @@ only `seek(1)`. The identity fit clears the camera's inline `transform`
 property instead of publishing `transform: none`, leaving renderer base CSS in
 control.
 
+With profiles, fitting uses the selected prepared bound width and height after
+subtracting twice `safeInset`. `contain` selects the smaller axis scale and
+clamps the biased visual center inside the safe inset when possible; `cover`
+selects the larger scale and permits cropping. Bias is a fraction of the host
+width/height. Appearance scale and vertical source translation compose with the
+selected fit. The camera transform is the prepared quarter-turn rotation
+followed by scale. Prepared bounds are relative to the camera's CSS transform
+origin, so camera left/top are solved from the bound center without inspecting
+descendant geometry.
+
+Profile selection runs before fitting. Moving between profile ids that resolve
+to the same playback timeline changes presentation/viewport rows without
+resetting playback tick or its scheduler deadline. Only a change in active
+timeline identity restarts animation.
+
+Forward cursor mapping applies the same scale and quarter-turn around the
+camera transform origin; input mapping applies its exact inverse. Near-integer
+floating residue is canonically snapped, including negative zero. Resize and
+breakpoint changes mutate only the declared camera sinks and retain the same
+TREE nodes.
+
+Before initial playback publication and on every resize, the viewer resolves
+the root presentation profile first. If that changes the active animation
+schedule, playback restarts to logical tick 0 and its initial source frame
+before the new viewport profile may reveal leaves. Interaction state is not
+reset by resize; animation re-entry uses the most recently selected schedule.
+
 The playback scene transform is the packet's `baseSceneTransform` alone for an
 empty prepared model transform, or that base followed by one space and the
 prepared model transform.
@@ -131,5 +187,6 @@ targets.
 
 Unknown packet/target/parameter fields, unsafe CSS values, nonpositive
 dimensions/perspective, resource-role mismatch, packet/binding/TREE mismatch,
-noncanonical inputs/sinks, or missing/distinctness violations are fatal before
-mounting.
+noncanonical inputs/sinks, malformed or nonmatching profiles, missing selector
+or final unbounded coverage, unsupported fit/profile selection, or missing/distinctness
+violations are fatal before mounting.

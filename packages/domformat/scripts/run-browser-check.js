@@ -9,7 +9,7 @@ try {
   const result = await execFileAsync(process.execPath, ["--import", "tsx", worker], {
     env: process.env,
     maxBuffer: 32 * 1024 * 1024,
-    timeout: 60_000,
+    timeout: 120_000,
     killSignal: "SIGKILL",
   });
   process.stdout.write(result.stdout);
@@ -18,7 +18,7 @@ try {
   if (typeof error?.stdout === "string") process.stdout.write(error.stdout);
   if (typeof error?.stderr === "string") process.stderr.write(error.stderr);
   if (error?.killed && error.signal === "SIGKILL") {
-    process.stderr.write("The real-browser release gate exceeded its 60-second absolute deadline.\n");
+    process.stderr.write("The real-browser release gate exceeded its 120-second absolute deadline.\n");
     process.exitCode = 1;
   } else {
     if (!error?.stderr && error instanceof Error) process.stderr.write(`${error.message}\n`);

@@ -25,10 +25,26 @@ export class FakeElement {
     });
     this.dataset = {};
     this.classes = [];
-    this.classList = { add: (...tokens) => { this.classes.push(...tokens); } };
+    this.classList = {
+      add: (...tokens) => {
+        for (const token of tokens) {
+          if (this.classes.includes(token)) continue;
+          this.classes.push(token);
+          ownerDocument?.writes?.push(Object.freeze({ element: this, property: "class:add", value: String(token) }));
+        }
+      },
+      remove: (...tokens) => {
+        for (const token of tokens) {
+          if (!this.classes.includes(token)) continue;
+          this.classes = this.classes.filter((entry) => entry !== token);
+          ownerDocument?.writes?.push(Object.freeze({ element: this, property: "class:remove", value: String(token) }));
+        }
+      },
+    };
     this.listeners = new Map();
     this.listenerSequence = 0;
     this.capturedPointers = new Set();
+    this.animations = [];
     this.clientWidth = 320;
     this.clientHeight = 240;
   }
@@ -59,6 +75,19 @@ export class FakeElement {
   setPointerCapture(pointerId) { this.capturedPointers.add(pointerId); }
   hasPointerCapture(pointerId) { return this.capturedPointers.has(pointerId); }
   releasePointerCapture(pointerId) { this.capturedPointers.delete(pointerId); }
+  animate(keyframes, options) {
+    const animation = {
+      keyframes,
+      options,
+      currentTime: 0,
+      playState: "running",
+      cancel() { this.playState = "idle"; },
+      pause() { this.playState = "paused"; },
+      play() { this.playState = "running"; },
+    };
+    this.animations.push(animation);
+    return animation;
+  }
   remove() {
     if (!this.parentNode) return;
     const index = this.parentNode.childNodes.indexOf(this);
@@ -74,7 +103,10 @@ export function fakeBrowserDocument() {
   const namespaced = [];
   const writes = [];
   const raf = new Map();
+  const timers = new Map();
   let rafSequence = 1;
+  let timerSequence = 1;
+  let clock = 0;
   class FakeResizeObserver {
     constructor(callback) {
       this.callback = callback;
@@ -96,7 +128,7 @@ export function fakeBrowserDocument() {
       },
       revokeObjectURL(value) { urls.revoked.push(value); },
     },
-    performance: { now: () => 1 },
+    performance: { now: () => clock },
     Element: FakeElement,
     HTMLInputElement: class extends FakeElement {},
     HTMLTextAreaElement: class extends FakeElement {},
@@ -113,6 +145,12 @@ export function fakeBrowserDocument() {
       return id;
     },
     cancelAnimationFrame(id) { raf.delete(id); },
+    setTimeout(callback, delay = 0) {
+      const id = timerSequence++;
+      timers.set(id, { callback, delay, due: clock + Math.max(0, Number(delay) || 0) });
+      return id;
+    },
+    clearTimeout(id) { timers.delete(id); },
     listeners: windowListeners,
     addEventListener(name, listener) {
       if (!windowListeners.has(name)) windowListeners.set(name, new Set());
@@ -131,13 +169,21 @@ export function fakeBrowserDocument() {
     },
   };
   document.head = new FakeElement(document, "head");
-  const frame = (timestamp) => {
+  const run = (timestamp, forceTimers) => {
+    clock = timestamp;
+    const pendingTimers = [...timers.entries()].filter(([, timer]) => forceTimers || timer.due <= timestamp);
+    for (const [id, timer] of pendingTimers) {
+      timers.delete(id);
+      timer.callback();
+    }
     const callbacks = [...raf.values()];
     raf.clear();
     for (const callback of callbacks) callback(timestamp);
     return callbacks.length;
   };
-  return { document, win, urls, observers, bitmaps, namespaced, writes, raf, frame };
+  const frame = (timestamp) => run(timestamp, true);
+  const advance = (timestamp) => run(timestamp, false);
+  return { document, win, urls, observers, bitmaps, namespaced, writes, raf, timers, frame, advance };
 }
 
 export function dispatch(element, name, values = {}) {
