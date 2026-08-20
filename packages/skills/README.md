@@ -96,20 +96,6 @@ The same content is served at
 under `polycss.com/skill/docs/`. Use that when an agent can fetch a URL but
 cannot run a command.
 
-<!-- polycss:shared:packages:start -->
-## Packages
-
-| Package | Description |
-|---|---|
-| `@layoutit/polycss-core` | Pure math, parsers, lighting, camera helpers, mesh optimization. Zero browser globals. |
-| `@layoutit/polycss` | Vanilla custom elements and imperative `createPolyScene` API. |
-| `@layoutit/polycss-react` | React components, hooks, controls, and core re-exports. |
-| `@layoutit/polycss-vue` | Vue 3 components, composables, controls, and core re-exports. |
-| `@layoutit/polycss-morph` | Prepared-model loading, retained DOM animation, morph targets, skinning, and playback. |
-| `@layoutit/polycss-skills` | `npx @layoutit/polycss-skills` — installs the PolyCSS agent skill into `.claude/skills` or `.agents/skills`. |
-| `@layoutit/polycss-domformat` | Private MIT-licensed producer-neutral `domformat@0` runtime for canonical JSON plus digest-bound sibling resources; conformance and specifications stay repository-side. Not published. |
-<!-- polycss:shared:packages:end -->
-
 <!-- polycss:shared:license:start -->
 ## License
 
