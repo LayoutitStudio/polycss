@@ -30,6 +30,8 @@ export interface PolycssPublicationDiagnostics {
   playbackCanonicalReconstructions: number;
   playbackCanonicalShapeVisits: number;
   playbackCanonicalLeafVisits: number;
+  playbackBoundaryShapeVisits: number;
+  playbackBoundaryLeafVisits: number;
   playbackPublicationShapeVisits: number;
   playbackPublicationLeafVisits: number;
   variantCanonicalReconstructions: number;
@@ -46,6 +48,8 @@ export function createPolycssPublicationDiagnostics(): PolycssPublicationDiagnos
     playbackCanonicalReconstructions: 0,
     playbackCanonicalShapeVisits: 0,
     playbackCanonicalLeafVisits: 0,
+    playbackBoundaryShapeVisits: 0,
+    playbackBoundaryLeafVisits: 0,
     playbackPublicationShapeVisits: 0,
     playbackPublicationLeafVisits: 0,
     variantCanonicalReconstructions: 0,
@@ -400,6 +404,10 @@ export function createPolycssPagedState(
     if (currentPlayback && frame === expected) {
       const local = frame - page.startFrame;
       if (local === 0) {
+        if (options.diagnostics) {
+          options.diagnostics.playbackBoundaryShapeVisits += page.keyframe.shapeTransforms.length + page.shapeOffsets[1] - page.shapeOffsets[0];
+          options.diagnostics.playbackBoundaryLeafVisits += page.keyframe.leafTransforms.length + page.leafOffsets[1] - page.leafOffsets[0];
+        }
         validatePagedPlaybackBoundaryFromCanonical(currentPlayback, page);
       }
       return playbackSparseStage(page, frame, local);

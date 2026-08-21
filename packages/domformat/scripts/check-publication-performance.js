@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
 import { once } from "node:events";
 import { createWriteStream } from "node:fs";
 import { createServer } from "node:http";
@@ -22,10 +23,11 @@ const configuredRuntimePackage = JSON.parse(await readFile(join(configuredRuntim
 const runtimeRoot = configuredRuntimePackage.name === "@layoutit/polycss-domformat" ? configuredRuntimeRoot : join(configuredRuntimeRoot, "packages/domformat");
 const label = process.env.DOMFORMAT_TRACE_LABEL ?? "after";
 const diagnosticsEnabled = process.env.DOMFORMAT_TRACE_DIAGNOSTICS === "1" || (process.env.DOMFORMAT_TRACE_DIAGNOSTICS !== "0" && runtimeRoot === root);
-const guardedSourceFiles = Object.freeze({ pagedFile: "src/state/paged-state.ts", polycssFile: "src/state/polycss.ts" });
+const guardedSourceFiles = Object.freeze({ pagedFile: "src/state/paged-state.ts", polycssFile: "src/state/polycss.ts", statePagesFile: "src/state-pages.ts" });
 const sequentialPagedSourceGuard = auditSequentialPagedPublicationSources({
   pagedSource: await readFile(join(runtimeRoot, guardedSourceFiles.pagedFile), "utf8"),
   polycssSource: await readFile(join(runtimeRoot, guardedSourceFiles.polycssFile), "utf8"),
+  statePagesSource: await readFile(join(runtimeRoot, guardedSourceFiles.statePagesFile), "utf8"),
   ...guardedSourceFiles,
 });
 const allocationEvidence = Object.freeze({
@@ -34,7 +36,7 @@ const allocationEvidence = Object.freeze({
   forbiddenSourceFormSites: sequentialPagedSourceGuard.violations.length,
   forbiddenSourceFormSitesByScope: Object.freeze(Object.fromEntries(sequentialPagedSourceGuard.scopes.map((scope) => [scope, sequentialPagedSourceGuard.violations.filter((entry) => entry.scope === scope).length]))),
 });
-if (allocationEvidence.enforced) invariant(allocationEvidence.pass, "PUBLICATION_ALLOCATION_GUARD", `Sequential paged publication reintroduced forbidden materialization/collection/sort/closure work: ${JSON.stringify({ missingScopes: allocationEvidence.missingScopes, violations: allocationEvidence.violations })}.`);
+if (allocationEvidence.enforced) invariant(allocationEvidence.pass, "PUBLICATION_ALLOCATION_GUARD", `Guarded publication scopes reintroduced forbidden source forms: ${JSON.stringify({ missingScopes: allocationEvidence.missingScopes, violations: allocationEvidence.violations })}.`);
 const outputRoot = resolve(workspaceRoot, "bench/results/domformat-publication", label);
 const temporary = await mkdtemp(join(tmpdir(), "domformat-publication-"));
 const durationMs = Number(process.env.DOMFORMAT_PUBLICATION_DURATION_MS ?? 42_000);
@@ -52,9 +54,31 @@ const workloads = Object.freeze([
   Object.freeze({ id: "solitaire", leafCount: 1_952, denseTransformCount: 0, sparseTransformStart: 0, sparseTransformPool: 32, sparseTransformCount: 32, surfaceChangeCount: 0, visibilityChangeCount: 32, variantChangeCount: 0 }),
   Object.freeze({ id: "gravity-well", leafCount: 1_984, denseTransformCount: 0, sparseTransformStart: 0, sparseTransformPool: 40, sparseTransformCount: 40, surfaceChangeCount: 0, visibilityChangeCount: 0, variantChangeCount: 40 }),
 ]);
+const cssgraphicsSourceManifest = Object.freeze({
+  revision: "083532aa66599f1ff4618b987ccc5df462631996",
+  files: Object.freeze([
+    Object.freeze({ path: "src/adapters/cloth/src/csscloth/client.mjs", blob: "5b0260a306e48b09fd927570683d500262ce9026" }),
+    Object.freeze({ path: "src/adapters/cloth/src/shared/csscloth/morphShadowPatch.mjs", blob: "2cfe9778159a0757eae8cbcffc99ba3afbecdff7" }),
+    Object.freeze({ path: "src/adapters/gravitywell/src/cssgravitywell/preparedPlayback.mjs", blob: "b97e8c638d5d24528084c2dbf4052129162c2596" }),
+    Object.freeze({ path: "src/adapters/solitaire/src/csssolitaire/preparedPlayback.mjs", blob: "8da516167305a1a653523ef3cad4e5c5ee11ac3b" }),
+  ]),
+});
 
 let server;
 let browser;
+
+async function cssgraphicsProvenance() {
+  const configuredRoot = process.env.DOMFORMAT_CSSGRAPHICS_ROOT;
+  if (!configuredRoot) return Object.freeze({ ...cssgraphicsSourceManifest, verifiedByTraceRun: false, root: null });
+  const sourceRoot = resolve(configuredRoot);
+  const revision = (await execFileAsync("git", ["rev-parse", `${cssgraphicsSourceManifest.revision}^{commit}`], { cwd: sourceRoot, maxBuffer: 1024 * 1024, timeout: 10_000 })).stdout.trim();
+  invariant(revision === cssgraphicsSourceManifest.revision, "PUBLICATION_ADAPTER_PROVENANCE", "cssGraphics source revision does not match the pinned publication workload provenance.");
+  for (const file of cssgraphicsSourceManifest.files) {
+    const blob = (await execFileAsync("git", ["rev-parse", `${revision}:${file.path}`], { cwd: sourceRoot, maxBuffer: 1024 * 1024, timeout: 10_000 })).stdout.trim();
+    invariant(blob === file.blob, "PUBLICATION_ADAPTER_PROVENANCE", `cssGraphics source ${file.path} does not match the pinned publication workload provenance.`);
+  }
+  return Object.freeze({ ...cssgraphicsSourceManifest, verifiedByTraceRun: true, root: sourceRoot });
+}
 
 function contentType(pathname) {
   if (pathname.endsWith(".html")) return "text/html;charset=utf-8";
@@ -400,18 +424,21 @@ async function collectDiagnostics(context, origin) {
   page.on("console", (message) => { if (message.type() === "error") errors.push(message.text()); });
   await page.goto(`${origin}/diagnostics.html`, { waitUntil: "load", timeout: 120_000 });
   await page.waitForFunction(() => [...document.querySelectorAll("iframe")].every((frame) => frame.contentDocument?.documentElement.hasAttribute("data-domformat-ready")), undefined, { timeout: 120_000 });
-  await page.evaluate(() => {
+  const starts = await page.evaluate(() => {
+    const values = [];
     for (const frame of document.querySelectorAll("iframe")) {
       const win = frame.contentWindow;
       win.__publicationLeaves = [...win.document.querySelectorAll("[data-domformat-node]")];
       for (const key of Object.keys(win.domformatProof.diagnostics)) win.domformatProof.diagnostics[key] = 0;
+      values.push({ id: frame.dataset.workload, startFrame: win.domformatProof.sourceFrame });
     }
+    return values;
   });
-  await page.waitForFunction((minimumFrame) => [...document.querySelectorAll("iframe")].every((frame) => frame.contentWindow.domformatProof.sourceFrame >= minimumFrame), framesPerPage * 2 + 1, { timeout: 60_000 });
-  const evidence = await page.evaluate(() => [...document.querySelectorAll("iframe")].map((frame) => {
+  await page.waitForFunction(({ startById, minimumAdvances }) => [...document.querySelectorAll("iframe")].every((frame) => frame.contentWindow.domformatProof.sourceFrame >= startById[frame.dataset.workload] + minimumAdvances), { startById: Object.fromEntries(starts.map((entry) => [entry.id, entry.startFrame])), minimumAdvances: framesPerPage * 2 }, { timeout: 60_000 });
+  const evidence = await page.evaluate((startById) => [...document.querySelectorAll("iframe")].map((frame) => {
     const win = frame.contentWindow;
-    return { id: frame.dataset.workload, endFrame: win.domformatProof.sourceFrame, diagnostics: { ...win.domformatProof.diagnostics }, stableIdentity: win.__publicationLeaves.every((leaf) => leaf.isConnected && leaf.ownerDocument === win.document) };
-  }));
+    return { id: frame.dataset.workload, startFrame: startById[frame.dataset.workload], endFrame: win.domformatProof.sourceFrame, diagnostics: { ...win.domformatProof.diagnostics }, stableIdentity: win.__publicationLeaves.every((leaf) => leaf.isConnected && leaf.ownerDocument === win.document) };
+  }), Object.fromEntries(starts.map((entry) => [entry.id, entry.startFrame])));
   invariant(errors.length === 0 && evidence.every((entry) => entry.stableIdentity), "PUBLICATION_DIAGNOSTIC_FAILURE", `Publication diagnostic pass failed (${errors.join("; ")}).`);
   await page.close();
   return evidence;
@@ -436,9 +463,14 @@ async function writeRawTrace(path, events) {
   await once(output, "close");
 }
 
-function baselineDiagnostics(workload, endFrame) {
-  const advances = endFrame - 1;
-  const boundaries = Math.floor(advances / framesPerPage);
+function pageBoundariesCrossed(startFrame, endFrame) {
+  invariant(endFrame >= startFrame, "PUBLICATION_DIAGNOSTIC_WINDOW", "Publication diagnostic window wrapped unexpectedly.");
+  return Math.max(0, Math.floor((endFrame - 1) / framesPerPage) - Math.floor((startFrame - 1) / framesPerPage));
+}
+
+function baselineDiagnostics(workload, startFrame, endFrame) {
+  const advances = endFrame - startFrame;
+  const boundaries = pageBoundariesCrossed(startFrame, endFrame);
   const playbackVisits = advances * (workload.denseTransformCount + workload.sparseTransformCount);
   return {
     playbackCanonicalReconstructions: advances,
@@ -446,6 +478,8 @@ function baselineDiagnostics(workload, endFrame) {
     playbackCanonicalLeafVisits: advances * workload.leafCount,
     playbackPublicationShapeVisits: 0,
     playbackPublicationLeafVisits: playbackVisits,
+    playbackBoundaryShapeVisits: boundaries * 3,
+    playbackBoundaryLeafVisits: boundaries * (workload.leafCount * 2 + (workload.denseTransformCount + workload.sparseTransformCount) * 3),
     variantCanonicalReconstructions: workload.variantChangeCount > 0 ? boundaries : 0,
     variantLogicalTargetVisits: workload.variantChangeCount > 0 ? boundaries * workload.leafCount + (advances - boundaries) * workload.variantChangeCount : 0,
     variantComparisonTargetVisits: workload.variantChangeCount > 0 ? advances * workload.leafCount : 0,
@@ -490,15 +524,20 @@ function summarizeTrace(events, startPerf, endPerf, evidence) {
 }
 
 function markdown(report) {
-  const diagnosticRows = report.workloads.map((entry) => `| ${entry.id} | ${entry.startFrame} | ${entry.endFrame} | ${entry.pageBoundariesCrossed} | ${entry.visitEvidenceProvenance} | ${entry.diagnostics.playbackPublicationLeafVisits} | ${entry.diagnostics.variantComparisonTargetVisits} | ${entry.diagnostics.surfaceLightingTargetVisits} | ${entry.diagnostics.surfaceVisibilityTargetVisits} | ${entry.diagnostics.playbackCanonicalReconstructions + entry.diagnostics.variantCanonicalReconstructions + entry.diagnostics.surfaceFullReconstructions} |`);
+  const diagnosticRows = report.workloads.map((entry) => `| ${entry.id} | ${entry.traceEndFrame} | ${entry.tracePageBoundariesCrossed} | ${entry.visitStartFrame} | ${entry.visitEndFrame} | ${entry.visitPageBoundariesCrossed} | ${entry.visitEvidenceProvenance} | ${entry.diagnostics.playbackPublicationLeafVisits} | ${(entry.diagnostics.playbackBoundaryShapeVisits ?? 0) + (entry.diagnostics.playbackBoundaryLeafVisits ?? 0)} | ${entry.diagnostics.variantComparisonTargetVisits} | ${entry.diagnostics.surfaceLightingTargetVisits} | ${entry.diagnostics.surfaceVisibilityTargetVisits} | ${entry.diagnostics.playbackCanonicalReconstructions + entry.diagnostics.variantCanonicalReconstructions + entry.diagnostics.surfaceFullReconstructions} |`);
   const allocation = report.allocationEvidence;
-  return `# DOMFormat prepared publication trace (${report.label})\n\nRuntime root: \`${report.runtimeRoot}\`\n\nBrowser: ${report.browserVersion}\n\nDuration: ${report.trace.durationMs.toFixed(3)} ms\n\n| Max main task | Max RAF gap | Cadence p50 | Cadence p95 | Page-preparation max |\n|---:|---:|---:|---:|---:|\n| ${report.trace.mainThread.maxTaskMs.toFixed(3)} ms | ${report.trace.cadence.maxPresentationGapMs.toFixed(3)} ms | ${report.trace.cadence.p50Ms.toFixed(3)} ms | ${report.trace.cadence.p95Ms.toFixed(3)} ms | ${report.trace.pagePreparation.maxTaskMs.toFixed(3)} ms |\n\n| Published adapter workload | Trace start | Trace end | Page boundaries | Visit evidence | Playback leaf visits | Variant compares | Surface visits | Visibility visits | Full reconstructions |\n|---|---:|---:|---:|---|---:|---:|---:|---:|---:|\n${diagnosticRows.join("\n")}\n\n## Sequential paged allocation evidence\n\nThe bounded TypeScript source guard found ${allocation.forbiddenSourceFormSites} forbidden source-form site(s) across the sequential paged staging/publication closure. Guard enforced: ${allocation.enforced ? "yes" : "no (historical comparison runtime)"}. Paged dispatch precedes inline materialization: ${allocation.pagedDispatchBeforeInlineMaterialization ? "yes" : "no"}. Missing guarded scopes: ${allocation.missingScopes.length}.\n\nThis is not a general JavaScript heap-allocation measurement. It rejects typed/ordinary \`slice()\`, \`Array.from()\`, array/typed-array constructors, generic array literals, spread-array clones, Set/Map construction, sorting, and nested closures in the guarded sequential paged publication closure while leaving explicit complete-row reconstruction branches legal.\n\nThe timing window is uninstrumented. Candidate-runtime target visits come from a separate instrumented post-trace browser pass. Historical-runtime target visits are deterministic workload estimates, not collected diagnostics. Each workload records its provenance in \`visitEvidenceProvenance\`; retained identities are checked in both browser passes when the instrumented pass runs. Flowerbox is intentionally excluded; the workloads are based on published Cloth, Solitaire, and Gravity Well adapters at cssGraphics ${report.cssgraphicsRevision}.\n`;
+  const provenance = report.cssgraphicsProvenance;
+  return `# DOMFormat prepared publication trace (${report.label})\n\nRuntime root: \`${report.runtimeRoot}\`\n\nRuntime revision: \`${report.runtimeGitRevision}\` (dirty: ${report.runtimeGitDirty ? "yes" : "no"})\n\nPacked tarball SHA-256: \`${report.packedTarballSha256}\`\n\nBrowser: ${report.browserVersion}\n\nDuration: ${report.trace.durationMs.toFixed(3)} ms\n\n| Max main task | Max RAF gap | Cadence p50 | Cadence p95 | Page-preparation max |\n|---:|---:|---:|---:|---:|\n| ${report.trace.mainThread.maxTaskMs.toFixed(3)} ms | ${report.trace.cadence.maxPresentationGapMs.toFixed(3)} ms | ${report.trace.cadence.p50Ms.toFixed(3)} ms | ${report.trace.cadence.p95Ms.toFixed(3)} ms | ${report.trace.pagePreparation.maxTaskMs.toFixed(3)} ms |\n\n| Synthetic adapter-shaped workload | Trace end | Trace boundaries | Visit start | Visit end | Visit boundaries | Visit evidence | Sparse playback leaf visits | Boundary validation visits | Variant compares | Surface visits | Visibility visits | Full reconstructions |\n|---|---:|---:|---:|---:|---:|---|---:|---:|---:|---:|---:|---:|\n${diagnosticRows.join("\n")}\n\nVisit counters cover transitions after **Visit start** through **Visit end**, not necessarily the independently timed trace window. Raw visit totals from different endpoints must not be compared without normalization. \`diagnosticStartFrame\` and \`diagnosticEndFrame\` are retained in JSON when visits came from the separate instrumented pass.\n\n## Bounded publication source-form evidence\n\nThe bounded TypeScript source guard found ${allocation.forbiddenSourceFormSites} forbidden source-form site(s) in its ${allocation.scopes.length} named guarded scopes. Guard enforced: ${allocation.enforced ? "yes" : "no (historical comparison runtime)"}. Paged dispatch precedes inline materialization: ${allocation.pagedDispatchBeforeInlineMaterialization ? "yes" : "no"}. Page-boundary validation call present: ${allocation.pageBoundaryValidationCalled ? "yes" : "no"}. Missing guarded scopes: ${allocation.missingScopes.length}.\n\nThis is not a general JavaScript heap-allocation measurement and does not traverse the call graph. It rejects typed/ordinary \`slice()\`, \`Array.from()\`, array/typed-array constructors, generic array literals, spread-array clones, Set/Map construction, sorting, and nested closures only in the named guarded scopes; explicit complete-row reconstruction branches remain outside the sparse-range claim.\n\nThe timing window is uninstrumented. Candidate-runtime target visits come from a separate instrumented post-trace browser pass. Historical-runtime target visits are deterministic workload estimates, not collected diagnostics. Retained identities are checked in both browser passes when the instrumented pass runs. Flowerbox is intentionally excluded. These are synthetic workloads manually modeled on published Cloth, Solitaire, and Gravity Well techniques, not executions of those adapters. The pinned cssGraphics source manifest is \`${provenance.revision}\` (${provenance.verifiedByTraceRun ? "verified by this trace run" : "not verified by this trace run"}); exact file paths and Git blob ids are recorded in \`cssgraphicsProvenance.files\`.\n`;
 }
 
 try {
   invariant(Number.isFinite(durationMs) && durationMs >= 40_000, "PUBLICATION_TRACE_DURATION", "The publication trace must run for at least 40 seconds.");
   await mkdir(outputRoot, { recursive: true });
   const routes = await writeFixtures();
+  const runtimeGitRevision = (await execFileAsync("git", ["rev-parse", "HEAD"], { cwd: runtimeRoot, maxBuffer: 1024 * 1024, timeout: 10_000 })).stdout.trim();
+  const runtimeGitDirty = (await execFileAsync("git", ["status", "--porcelain"], { cwd: runtimeRoot, maxBuffer: 32 * 1024 * 1024, timeout: 10_000 })).stdout.trim().length > 0;
+  invariant(/^[0-9a-f]{40}$/u.test(runtimeGitRevision), "PUBLICATION_RUNTIME_IDENTITY", "Publication runtime git revision is unavailable.");
+  const adapterProvenance = await cssgraphicsProvenance();
   const npm = process.platform === "win32" ? "npm.cmd" : "npm";
   const packRoot = join(temporary, "pack");
   const installRoot = join(temporary, "install");
@@ -507,7 +546,9 @@ try {
   const packed = await execFileAsync(npm, ["pack", "--json", "--pack-destination", packRoot], { cwd: runtimeRoot, maxBuffer: 32 * 1024 * 1024, timeout: 120_000 });
   const reportStart = packed.stdout.lastIndexOf("\n[");
   const packReports = JSON.parse(reportStart === -1 ? packed.stdout : packed.stdout.slice(reportStart + 1));
-  await execFileAsync(npm, ["install", "--prefix", installRoot, "--no-audit", "--no-fund", join(packRoot, packReports[0].filename)], { maxBuffer: 32 * 1024 * 1024, timeout: 120_000 });
+  const packedTarball = join(packRoot, packReports[0].filename);
+  const packedTarballSha256 = createHash("sha256").update(await readFile(packedTarball)).digest("hex");
+  await execFileAsync(npm, ["install", "--prefix", installRoot, "--no-audit", "--no-fund", packedTarball], { maxBuffer: 32 * 1024 * 1024, timeout: 120_000 });
   const installedRuntime = join(installRoot, "node_modules", "@layoutit", "polycss-domformat");
   server = serve(routes, installedRuntime);
   await new Promise((resolveListen, rejectListen) => { server.once("error", rejectListen); server.listen(0, "127.0.0.1", resolveListen); });
@@ -559,12 +600,27 @@ try {
   const resultWorkloads = evidence.workloads.map((entry) => {
     const workload = workloads.find((candidate) => candidate.id === entry.id);
     const diagnostic = diagnosticsByWorkload.get(entry.id);
-    return { ...entry, diagnostics: visitDiagnostics(diagnostic?.diagnostics ?? baselineDiagnostics(workload, entry.endFrame)), visitEvidenceProvenance: diagnostic ? "separate-instrumented-browser-pass" : "deterministic-workload-estimate", diagnosticEndFrame: diagnostic?.endFrame ?? null, startFrame: 1, pageBoundariesCrossed: Math.max(0, Math.floor((entry.endFrame - 1) / framesPerPage)) };
+    const visitStartFrame = diagnostic?.startFrame ?? 1;
+    const visitEndFrame = diagnostic?.endFrame ?? entry.endFrame;
+    return {
+      id: entry.id,
+      stableIdentity: entry.stableIdentity,
+      traceEndFrame: entry.endFrame,
+      tracePageBoundariesCrossed: pageBoundariesCrossed(1, entry.endFrame),
+      diagnosticStartFrame: diagnostic?.startFrame ?? null,
+      diagnosticEndFrame: diagnostic?.endFrame ?? null,
+      visitStartFrame,
+      visitEndFrame,
+      visitWindowMatchesTrace: visitStartFrame === 1 && visitEndFrame === entry.endFrame,
+      visitPageBoundariesCrossed: pageBoundariesCrossed(visitStartFrame, visitEndFrame),
+      visitEvidenceProvenance: diagnostic ? "separate-instrumented-browser-pass" : "deterministic-workload-estimate",
+      diagnostics: visitDiagnostics(diagnostic?.diagnostics ?? baselineDiagnostics(workload, visitStartFrame, visitEndFrame)),
+    };
   });
-  invariant(resultWorkloads.every((entry) => entry.pageBoundariesCrossed >= 2), "PUBLICATION_BOUNDARY_COVERAGE", "Every publication workload must cross at least two page boundaries.");
+  invariant(resultWorkloads.every((entry) => entry.tracePageBoundariesCrossed >= 2 && entry.visitPageBoundariesCrossed >= 2), "PUBLICATION_BOUNDARY_COVERAGE", "Every publication timing and visit-evidence window must cross at least two page boundaries.");
   const rawTrace = join(outputRoot, "publication.trace.json");
   await writeRawTrace(rawTrace, events);
-  const report = { label, runtimeRoot, diagnosticsEnabled, timingInstrumented: false, allocationEvidence, cssgraphicsRevision: "083532aa66599f1ff4618b987ccc5df462631996", browserVersion: browser.version(), durationMs, framesPerPage, frameCount, maximumMainThreadTaskMs: maximumTaskMs, packedTarballBytes: packReports[0].size, trace, workloads: resultWorkloads, rawTrace };
+  const report = { label, runtimeRoot, runtimeGitRevision, runtimeGitDirty, packedTarballSha256, diagnosticsEnabled, timingInstrumented: false, allocationEvidence, cssgraphicsProvenance: adapterProvenance, browserVersion: browser.version(), durationMs, framesPerPage, frameCount, maximumMainThreadTaskMs: maximumTaskMs, packedTarballBytes: packReports[0].size, trace, workloads: resultWorkloads, rawTrace };
   await writeFile(join(outputRoot, "report.json"), `${JSON.stringify(report, null, 2)}\n`);
   await writeFile(join(outputRoot, "report.md"), markdown(report));
   process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);

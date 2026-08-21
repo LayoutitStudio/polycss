@@ -116,9 +116,10 @@ function pagedDispatchGuard(sourceFile) {
     && /return\s+options\.pagedState!?\.stage\(frame,\s*true\)/u.test(text));
 }
 
-export function auditSequentialPagedPublicationSources({ pagedSource, polycssSource, pagedFile = "src/state/paged-state.ts", polycssFile = "src/state/polycss.ts" }) {
+export function auditSequentialPagedPublicationSources({ pagedSource, polycssSource, statePagesSource, pagedFile = "src/state/paged-state.ts", polycssFile = "src/state/polycss.ts", statePagesFile = "src/state-pages.ts" }) {
   const paged = ts.createSourceFile(pagedFile, pagedSource, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
   const polycss = ts.createSourceFile(polycssFile, polycssSource, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  const statePages = ts.createSourceFile(statePagesFile, statePagesSource, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
   const playbackSparseStage = namedFunction(paged, "playbackSparseStage");
   const stagePlayback = namedFunction(paged, "stagePlayback");
   const stageVariants = namedFunction(paged, "stageVariants");
@@ -129,13 +130,16 @@ export function auditSequentialPagedPublicationSources({ pagedSource, polycssSou
   const publishSurfaceRangeWithForced = optionalNamedFunction(polycss, "publishSurfaceRangeWithForced");
   const applySurface = namedFunction(polycss, "applySurface");
   const stageProfileVisibility = namedFunction(polycss, "stageProfileVisibility");
+  const validatePagedPlaybackBoundaryFromCanonical = namedFunction(statePages, "validatePagedPlaybackBoundaryFromCanonical");
   const stagePlaybackSequential = branchWithCondition(paged, stagePlayback, /frame\s*===\s*expected|frame\s*===\s*\(.*expected/u, "stagePlayback sequential branch");
   const stageVariantsSequential = branchWithCondition(paged, stageVariants, /frame\s*===\s*expected/u, "stageVariants sequential branch");
+  const pageBoundaryValidationCalled = /validatePagedPlaybackBoundaryFromCanonical\s*\(/u.test(stagePlaybackSequential.getText(paged));
   const applyStageRange = optionalBranchWithCondition(polycss, applyStage, /next\.kind\s*===\s*["']range["']/u);
   const missingScopes = [
     ...(installActiveStage ? [] : ["installActiveStage"]),
     ...(applyStageRange ? [] : ["applyStage:range"]),
     ...(publishSurfaceRangeWithForced ? [] : ["publishSurfaceRangeWithForced"]),
+    ...(pageBoundaryValidationCalled ? [] : ["validatePagedPlaybackBoundaryFromCanonical:call-site"]),
   ];
   const violations = [
     ...auditNode(paged, playbackSparseStage.body, "playbackSparseStage"),
@@ -148,19 +152,21 @@ export function auditSequentialPagedPublicationSources({ pagedSource, polycssSou
     ...(publishSurfaceRangeWithForced ? auditNode(polycss, publishSurfaceRangeWithForced.body, "publishSurfaceRangeWithForced") : []),
     ...auditNode(polycss, applySurface.body, "applySurface"),
     ...auditNode(polycss, stageProfileVisibility.body, "stageProfileVisibility"),
+    ...auditNode(statePages, validatePagedPlaybackBoundaryFromCanonical.body, "validatePagedPlaybackBoundaryFromCanonical"),
   ];
   const pagedDispatchBeforeInlineMaterialization = pagedDispatchGuard(polycss);
   return Object.freeze({
-    schema: "domformat-sequential-paged-source-guard@0",
+    schema: "domformat-sequential-paged-source-guard@1",
     method: "typescript-ast-bounded-forbidden-form-guard",
     measuredHeapAllocations: false,
-    files: Object.freeze([pagedFile, polycssFile]),
-    scopes: FORBIDDEN_SCOPE_NAMES,
+    files: Object.freeze([pagedFile, polycssFile, statePagesFile]),
+    scopes: Object.freeze([...FORBIDDEN_SCOPE_NAMES, "validatePagedPlaybackBoundaryFromCanonical"]),
     forbiddenOperations: Object.freeze(["slice-copy", "array-from-copy", "array-constructor", "array-literal", "spread-array-clone", "set-map-constructor", "sort-call", "nested-closure"]),
     pagedDispatchBeforeInlineMaterialization,
+    pageBoundaryValidationCalled,
     missingScopes: Object.freeze(missingScopes),
     violations: Object.freeze(violations),
     pass: pagedDispatchBeforeInlineMaterialization && missingScopes.length === 0 && violations.length === 0,
-    limitation: "This bounded source guard rejects array/range materialization, array literals, nested closures, Set/Map construction, and sorting in the selected sequential paged publication closure; it is not a general JavaScript heap-allocation measurement.",
+    limitation: "This bounded source guard rejects selected source forms only in the named guarded scopes. It does not traverse the call graph and is not a general JavaScript heap-allocation measurement.",
   });
 }

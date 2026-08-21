@@ -464,27 +464,39 @@ function playbackRow(page: DecodedPagedPlaybackPage, localFrame: number): Canoni
 }
 
 export function validatePagedPlaybackBoundaryFromCanonical(from: CanonicalPlaybackRow, target: DecodedPagedPlaybackPage): void {
-  const to = playbackRow(target, 0);
-  invariant(target.appearances[0] === to.appearance, "STATE_PAGE_BOUNDARY_MISMATCH", `State page ${target.channel}/${target.startFrame} boundary appearance disagrees with its keyframe.`);
-  const expectedModel = from.modelTransform === to.modelTransform ? 0xffffffff : target.keyframe.modelTransform;
+  invariant(target.appearances[0] === target.keyframe.appearance, "STATE_PAGE_BOUNDARY_MISMATCH", `State page ${target.channel}/${target.startFrame} boundary appearance disagrees with its keyframe.`);
+  const keyframeModelTransform = target.transforms[target.keyframe.modelTransform];
+  const expectedModel = from.modelTransform === keyframeModelTransform ? 0xffffffff : target.keyframe.modelTransform;
   invariant(target.modelTransforms[0] === expectedModel, "STATE_PAGE_BOUNDARY_MISMATCH", `State page ${target.channel}/${target.startFrame} boundary model delta is incomplete or excessive.`);
-  const expectedShapes: number[] = [];
-  for (let index = 0; index < to.shapeTransforms.length; index += 1) {
-    if (from.shapeTransforms[index] !== to.shapeTransforms[index] || from.shapeVisibility[index] !== to.shapeVisibility[index]) expectedShapes.push(index);
+  const shapeStart = target.shapeOffsets[0];
+  const shapeEnd = target.shapeOffsets[1];
+  let shapeCursor = shapeStart;
+  for (let shape = 0; shape < target.keyframe.shapeTransforms.length; shape += 1) {
+    const keyframeTransform = target.transforms[target.keyframe.shapeTransforms[shape]];
+    const changed = from.shapeTransforms[shape] !== keyframeTransform || from.shapeVisibility[shape] !== target.keyframe.shapeVisibility[shape];
+    const declared = shapeCursor < shapeEnd && target.shapeTargets[shapeCursor] === shape;
+    invariant(declared === changed, "STATE_PAGE_BOUNDARY_MISMATCH", `State page ${target.channel}/${target.startFrame} boundary shape targets are incomplete or excessive.`);
+    if (declared) shapeCursor += 1;
   }
-  const actualShapes = [...target.shapeTargets.subarray(target.shapeOffsets[0], target.shapeOffsets[1])];
-  invariant(actualShapes.length === expectedShapes.length && actualShapes.every((value, index) => value === expectedShapes[index]), "STATE_PAGE_BOUNDARY_MISMATCH", `State page ${target.channel}/${target.startFrame} boundary shape targets are incomplete or excessive.`);
-  for (let cursor = target.shapeOffsets[0]; cursor < target.shapeOffsets[1]; cursor += 1) {
+  invariant(shapeCursor === shapeEnd, "STATE_PAGE_BOUNDARY_MISMATCH", `State page ${target.channel}/${target.startFrame} boundary shape targets are incomplete or excessive.`);
+  for (let cursor = shapeStart; cursor < shapeEnd; cursor += 1) {
     const shape = target.shapeTargets[cursor];
-    invariant(target.transforms[target.shapeTransforms[cursor]] === to.shapeTransforms[shape] && target.shapeVisibility[cursor] === to.shapeVisibility[shape], "STATE_PAGE_BOUNDARY_MISMATCH", `State page ${target.channel}/${target.startFrame} boundary shape ${shape} disagrees with its keyframe.`);
+    invariant(target.transforms[target.shapeTransforms[cursor]] === target.transforms[target.keyframe.shapeTransforms[shape]] && target.shapeVisibility[cursor] === target.keyframe.shapeVisibility[shape], "STATE_PAGE_BOUNDARY_MISMATCH", `State page ${target.channel}/${target.startFrame} boundary shape ${shape} disagrees with its keyframe.`);
   }
-  const expectedLeaves: number[] = [];
-  for (let index = 0; index < to.leafTransforms.length; index += 1) if (from.leafTransforms[index] !== to.leafTransforms[index]) expectedLeaves.push(index);
-  const actualLeaves = [...target.leafTargets.subarray(target.leafOffsets[0], target.leafOffsets[1])];
-  invariant(actualLeaves.length === expectedLeaves.length && actualLeaves.every((value, index) => value === expectedLeaves[index]), "STATE_PAGE_BOUNDARY_MISMATCH", `State page ${target.channel}/${target.startFrame} boundary leaf targets are incomplete or excessive.`);
-  for (let cursor = target.leafOffsets[0]; cursor < target.leafOffsets[1]; cursor += 1) {
+  const leafStart = target.leafOffsets[0];
+  const leafEnd = target.leafOffsets[1];
+  let leafCursor = leafStart;
+  for (let leaf = 0; leaf < target.keyframe.leafTransforms.length; leaf += 1) {
+    const keyframeTransform = target.transforms[target.keyframe.leafTransforms[leaf]];
+    const changed = from.leafTransforms[leaf] !== keyframeTransform;
+    const declared = leafCursor < leafEnd && target.leafTargets[leafCursor] === leaf;
+    invariant(declared === changed, "STATE_PAGE_BOUNDARY_MISMATCH", `State page ${target.channel}/${target.startFrame} boundary leaf targets are incomplete or excessive.`);
+    if (declared) leafCursor += 1;
+  }
+  invariant(leafCursor === leafEnd, "STATE_PAGE_BOUNDARY_MISMATCH", `State page ${target.channel}/${target.startFrame} boundary leaf targets are incomplete or excessive.`);
+  for (let cursor = leafStart; cursor < leafEnd; cursor += 1) {
     const leaf = target.leafTargets[cursor];
-    invariant(target.transforms[target.leafTransforms[cursor]] === to.leafTransforms[leaf], "STATE_PAGE_BOUNDARY_MISMATCH", `State page ${target.channel}/${target.startFrame} boundary leaf ${leaf} disagrees with its keyframe.`);
+    invariant(target.transforms[target.leafTransforms[cursor]] === target.transforms[target.keyframe.leafTransforms[leaf]], "STATE_PAGE_BOUNDARY_MISMATCH", `State page ${target.channel}/${target.startFrame} boundary leaf ${leaf} disagrees with its keyframe.`);
   }
 }
 

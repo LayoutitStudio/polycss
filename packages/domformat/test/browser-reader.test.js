@@ -47,6 +47,26 @@ function withoutSequentialRangeCopies(callback) {
   }
 }
 
+function withoutPlaybackBoundaryAllocations(callback) {
+  const originalArrayFrom = Array.from;
+  const typedArrays = [Uint8Array, Uint16Array, Uint32Array];
+  const originalSlices = typedArrays.map((constructor) => constructor.prototype.slice);
+  const originalUint32Subarray = Uint32Array.prototype.subarray;
+  const originalUint32Iterator = Uint32Array.prototype[Symbol.iterator];
+  Array.from = () => { throw new Error("playback boundary validation called Array.from"); };
+  Uint32Array.prototype.subarray = () => { throw new Error("playback boundary validation created a target subarray"); };
+  Uint32Array.prototype[Symbol.iterator] = () => { throw new Error("playback boundary validation spread a target range"); };
+  for (const constructor of typedArrays) constructor.prototype.slice = () => { throw new Error("playback boundary validation sliced a typed range"); };
+  try {
+    return callback();
+  } finally {
+    Array.from = originalArrayFrom;
+    Uint32Array.prototype.subarray = originalUint32Subarray;
+    Uint32Array.prototype[Symbol.iterator] = originalUint32Iterator;
+    for (let index = 0; index < typedArrays.length; index += 1) typedArrays[index].prototype.slice = originalSlices[index];
+  }
+}
+
 function documentRoutes(built, modelUrl) {
   const routes = new Map([[modelUrl, built.bytes]]);
   for (const record of built.document.resources.resources) {
@@ -968,6 +988,8 @@ test("paged playback mutates sparse canonical rows in place and visits every dec
   assert.equal(sparse.diagnostics.playbackCanonicalReconstructions, 0);
   assert.equal(sparse.diagnostics.playbackCanonicalShapeVisits, 1);
   assert.equal(sparse.diagnostics.playbackCanonicalLeafVisits, 0);
+  assert.equal(sparse.diagnostics.playbackBoundaryShapeVisits, 0);
+  assert.equal(sparse.diagnostics.playbackBoundaryLeafVisits, 0);
   assert.equal(sparse.diagnostics.playbackPublicationShapeVisits, 1);
   assert.equal(sparse.diagnostics.playbackPublicationLeafVisits, 0);
   sparse.pagedState.destroy();
@@ -1009,8 +1031,11 @@ test("paged playback mutates sparse canonical rows in place and visits every dec
   const wrapShapeRow = wrapCanonical.shapeTransforms;
   const wrapLeafRow = wrapCanonical.leafTransforms;
   resetPublicationDiagnostics(dense.diagnostics);
-  const wrap = dense.pagedState.stage(1);
+  const wrap = withoutPlaybackBoundaryAllocations(() => dense.pagedState.stage(1));
   assert.equal(wrap.playback.kind, "range");
+  const densePacket = dense.built.document.state.channels.find((channel) => channel.codec === "polycss-paged-playback@0").data.packet;
+  assert.equal(dense.diagnostics.playbackBoundaryShapeVisits, densePacket.shapeCount + wrap.playback.shapeEnd - wrap.playback.shapeStart);
+  assert.equal(dense.diagnostics.playbackBoundaryLeafVisits, densePacket.leafCount + wrap.playback.leafEnd - wrap.playback.leafStart);
   dense.pagedState.commit(wrap);
   assert.equal(dense.pagedState.initialPlayback, wrapCanonical);
   assert.equal(dense.pagedState.initialPlayback.shapeTransforms, wrapShapeRow);
@@ -1019,6 +1044,36 @@ test("paged playback mutates sparse canonical rows in place and visits every dec
   assert.equal(dense.diagnostics.playbackCanonicalShapeVisits, 2);
   assert.equal(dense.diagnostics.playbackCanonicalLeafVisits, 2);
   dense.pagedState.destroy();
+});
+
+test("cross-page playback boundary validation avoids target-sized temporary rows and ranges", async () => {
+  const built = buildDom(await syntheticPagedPlaybackChangesInput({ variants: false }));
+  const all = builtExternalResources(built);
+  const fake = fakeBrowserDocument();
+  const mounted = { byId: new Map(built.document.tree.nodes.map((node) => {
+    const element = new FakeElement(fake.document, node.name);
+    Object.assign(element.style, node.styles ?? {});
+    return [node.id, element];
+  })) };
+  const diagnostics = createPolycssPublicationDiagnostics();
+  const pagedState = createPolycssPagedState(built.document, mounted, DEFAULT_LIMITS, async (record) => all.get(record.id), { diagnostics });
+  await pagedState.prepareInitial();
+  await pagedState.ensureFrame(2);
+  resetPublicationDiagnostics(diagnostics);
+  const withinPage = pagedState.stage(2);
+  assert.equal(diagnostics.playbackBoundaryShapeVisits, 0);
+  assert.equal(diagnostics.playbackBoundaryLeafVisits, 0);
+  pagedState.commit(withinPage);
+  resetPublicationDiagnostics(diagnostics);
+  await pagedState.ensureFrame(3);
+  const staged = withoutPlaybackBoundaryAllocations(() => pagedState.stage(3));
+  assert.equal(staged.playback.kind, "range");
+  const packet = built.document.state.channels.find((channel) => channel.codec === "polycss-paged-playback@0").data.packet;
+  assert.equal(diagnostics.playbackBoundaryShapeVisits, packet.shapeCount + staged.playback.shapeEnd - staged.playback.shapeStart);
+  assert.equal(diagnostics.playbackBoundaryLeafVisits, packet.leafCount + staged.playback.leafEnd - staged.playback.leafStart);
+  pagedState.commit(staged);
+  assert.equal(pagedState.frame, 3);
+  pagedState.destroy();
 });
 
 test("paged playback preserves exact random, boundary, wrap, and cross-channel publication", async () => {
