@@ -44,6 +44,28 @@ async function flushAsyncWork(turns = 8) {
   for (let turn = 0; turn < turns; turn += 1) await new Promise((resolve) => setImmediate(resolve));
 }
 
+// A mounted scheduler skips schedule() while a paged wait is pending, so the first window timer it
+// arms after a page lands is the runtime's own signal that automatic catch-up finished draining.
+// Counting event-loop turns instead would race that signal: a turn spin costs microseconds while the
+// resume path waits on a libuv-threadpool SHA-256 digest of every loaded state page.
+function whenSchedulerRearms(fake, message) {
+  const schedule = fake.win.setTimeout;
+  return new Promise((resolve, reject) => {
+    const guard = setTimeout(() => { fake.win.setTimeout = schedule; reject(new Error(message)); }, 30_000);
+    guard.unref?.();
+    fake.win.setTimeout = (callback, delay) => {
+      fake.win.setTimeout = schedule;
+      clearTimeout(guard);
+      resolve();
+      return schedule(callback, delay);
+    };
+  });
+}
+
+async function waitForScheduledWork(fake, predicate, message) {
+  while (!predicate()) await whenSchedulerRearms(fake, message);
+}
+
 function routeFetch(routes, calls = []) {
   return async (input, options) => {
     const url = String(input);
@@ -549,10 +571,8 @@ test("responsive restart without interaction keeps the playback initial page res
   browser.observers[0].callback();
   assert.equal(runtime.sourceFrame, 1, "the profile restart publishes from the pinned initial page");
   browser.frame(0);
-  for (let turn = 0; turn < 128 && runtime.sourceFrame !== 2; turn += 1) {
-    await flushAsyncWork(1);
-    browser.frame(34);
-  }
+  browser.frame(34);
+  await waitForScheduledWork(browser, () => runtime.sourceFrame === 2, "The restarted profile never advanced past its pinned initial page.");
   assert.equal(runtime.sourceFrame, 2);
   runtime.destroy();
 });
@@ -1281,7 +1301,7 @@ test("paged automatic catch-up advances its ready prefix when an intermediate pa
   assert.equal(runtime.lifecycle.phase, "publish");
   assert.equal(runtime.sourceFrame, 4);
   releasePage3(all.get("variant-page-3"));
-  for (let turn = 0; turn < 64 && runtime.sourceFrame !== 7; turn += 1) await flushAsyncWork(1);
+  await waitForScheduledWork(browser, () => runtime.sourceFrame === 7, "Automatic catch-up never resumed after the absent page became resident.");
   assert.equal(runtime.lifecycle.phase, "publish");
   assert.equal(runtime.sourceFrame, 7);
   runtime.destroy();

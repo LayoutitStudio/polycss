@@ -117,12 +117,26 @@ async function flushAsyncWork(turns = 8) {
   for (let turn = 0; turn < turns; turn += 1) await new Promise((resolve) => setImmediate(resolve));
 }
 
-async function waitForAsyncWork(predicate, turns = 128) {
-  for (let turn = 0; turn < turns; turn += 1) {
-    if (predicate()) return;
-    await new Promise((resolve) => setImmediate(resolve));
-  }
-  assert.equal(predicate(), true, "asynchronous work did not settle within the bounded wait");
+// Both shells skip schedule() while a paged wait is pending, so the first window timer a shell arms
+// after a page lands is its own signal that automatic catch-up finished draining. Counting
+// event-loop turns instead would race that signal: a turn spin costs microseconds while the resume
+// path waits on a libuv-threadpool SHA-256 digest of every loaded state page.
+function whenSchedulerRearms(fake, message) {
+  const schedule = fake.win.setTimeout;
+  return new Promise((resolve, reject) => {
+    const guard = setTimeout(() => { fake.win.setTimeout = schedule; reject(new Error(message)); }, 30_000);
+    guard.unref?.();
+    fake.win.setTimeout = (callback, delay) => {
+      fake.win.setTimeout = schedule;
+      clearTimeout(guard);
+      resolve();
+      return schedule(callback, delay);
+    };
+  });
+}
+
+async function waitForScheduledWork(fake, predicate, message) {
+  while (!predicate()) await whenSchedulerRearms(fake, message);
 }
 
 async function mountedPair(input, options = {}) {
@@ -378,7 +392,8 @@ test("alternate and public viewers advance only the ready catch-up prefix when a
   assert.equal(value.alternateRuntime.lifecycle.phase, "publish");
   assert.equal(value.referenceRuntime.sourceFrame, 4);
   assert.equal(value.alternateRuntime.sourceFrame, 4);
-  await waitForAsyncWork(() => value.referenceRuntime.sourceFrame === 7 && value.alternateRuntime.sourceFrame === 7);
+  await waitForScheduledWork(value.reference, () => value.referenceRuntime.sourceFrame === 7, "The reference viewer never resumed its ready catch-up prefix.");
+  await waitForScheduledWork(value.alternate, () => value.alternateRuntime.sourceFrame === 7, "The alternate viewer never resumed its ready catch-up prefix.");
   assert.equal(value.referenceRuntime.sourceFrame, 7);
   assert.equal(value.alternateRuntime.sourceFrame, 7);
   assertEquivalent(value, "paged automatic catch-up ready prefix");
