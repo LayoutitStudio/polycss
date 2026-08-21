@@ -330,7 +330,7 @@ test("a lane pattern the waiver did not record still fails", () => {
   assert.deepEqual(vueAlone.waived, []);
   assert.equal(vueAlone.failures.length, 1);
   assert.match(vueAlone.failures[0].note, /records changed lane\(s\) react, vue/);
-  assert.match(vueAlone.failures[0].note, /touched vue/);
+  assert.match(vueAlone.failures[0].note, /divergence is in lane\(s\) vue/);
 });
 
 test("waivers must be objects scoped to files with expected lanes", () => {
@@ -1139,4 +1139,272 @@ test("the committed sync sets are structurally valid against this repo", () => {
   const repoRoot = resolve(import.meta.dirname, "..", "..");
   assert.deepEqual(checkSetDeclarations(repoRoot, SYNC_SETS), []);
   assert.deepEqual(checkCounterparts(repoRoot, SYNC_SETS), []);
+});
+
+const CROSS_FILES = {
+  "packages/polycss/src/render/x/mono.ts": "vanilla mono v1\n",
+  "packages/polycss/src/render/x/solo.ts": "vanilla solo v1\n",
+  "packages/react/src/scene/x/left.ts": "react left v1\n",
+  "packages/react/src/scene/x/right.ts": "react right v1\n",
+  "packages/vue/src/scene/x/left.ts": "vue left v1\n",
+  "packages/vue/src/scene/x/right.ts": "vue right v1\n",
+};
+
+/** One vanilla file mirrored by TWO framework files — a 1:many correspondence. */
+const crossSet = (overrides = {}) => ({
+  name: "cross",
+  hint: "mirror it",
+  laneRoots: [
+    "packages/polycss/src/render/x",
+    "packages/react/src/scene/x",
+    "packages/vue/src/scene/x",
+  ],
+  files: [
+    "packages/polycss/src/render/x/mono.ts",
+    "packages/react/src/scene/x/left.ts",
+    "packages/react/src/scene/x/right.ts",
+    "packages/vue/src/scene/x/left.ts",
+    "packages/vue/src/scene/x/right.ts",
+  ],
+  crossLaneGroups: [
+    {
+      name: "mono",
+      files: [
+        "packages/polycss/src/render/x/mono.ts",
+        "packages/react/src/scene/x/left.ts",
+        "packages/react/src/scene/x/right.ts",
+        "packages/vue/src/scene/x/left.ts",
+        "packages/vue/src/scene/x/right.ts",
+      ],
+    },
+  ],
+  unmirrored: {
+    "packages/polycss/src/render/x/solo.ts": "vanilla-only, no counterpart",
+  },
+  ...overrides,
+});
+
+test("a complete cross-lane table validates against the tree", () => {
+  const root = makeRepo(CROSS_FILES);
+  assert.deepEqual(checkSetDeclarations(root, [crossSet()]), []);
+  cleanup(root);
+});
+
+test("a member left out of every cross-lane group fails", () => {
+  const root = makeRepo(CROSS_FILES);
+  const failures = checkSetDeclarations(root, [
+    crossSet({
+      crossLaneGroups: [
+        {
+          name: "mono",
+          files: [
+            "packages/polycss/src/render/x/mono.ts",
+            "packages/react/src/scene/x/left.ts",
+            "packages/vue/src/scene/x/left.ts",
+          ],
+        },
+      ],
+    }),
+  ]);
+  const reasons = reasonsOf(failures);
+  assert.match(reasons, /right\.ts" is a member of a set that declares/);
+  assert.match(reasons, /belongs to none of them/);
+  cleanup(root);
+});
+
+test("a cross-lane group may only relate files the set declares", () => {
+  const root = makeRepo(CROSS_FILES);
+  const failures = checkSetDeclarations(root, [
+    crossSet({
+      crossLaneGroups: [
+        {
+          name: "mono",
+          files: [
+            ...crossSet().crossLaneGroups[0].files,
+            "packages/polycss/src/render/x/solo.ts",
+          ],
+        },
+      ],
+    }),
+  ]);
+  assert.match(reasonsOf(failures), /names "[^"]*solo\.ts", which is not a declared member/);
+  cleanup(root);
+});
+
+test("a file may not sit in two cross-lane groups", () => {
+  const root = makeRepo(CROSS_FILES);
+  const failures = checkSetDeclarations(root, [
+    crossSet({
+      crossLaneGroups: [
+        ...crossSet().crossLaneGroups,
+        {
+          name: "second",
+          files: [
+            "packages/polycss/src/render/x/mono.ts",
+            "packages/react/src/scene/x/left.ts",
+            "packages/vue/src/scene/x/left.ts",
+          ],
+        },
+      ],
+    }),
+  ]);
+  assert.match(reasonsOf(failures), /is in cross-lane groups "mono" and "second"/);
+  cleanup(root);
+});
+
+test("a cross-lane group that does not cross lanes enforces nothing and fails", () => {
+  const root = makeRepo(CROSS_FILES);
+  const failures = checkSetDeclarations(root, [
+    crossSet({
+      files: [...crossSet().files, "packages/polycss/src/render/x/solo.ts"],
+      unmirrored: {},
+      crossLaneGroups: [
+        ...crossSet().crossLaneGroups,
+        { name: "solo", files: ["packages/polycss/src/render/x/solo.ts"] },
+      ],
+    }),
+  ]);
+  assert.match(reasonsOf(failures), /group "solo" spans lane\(s\) polycss/);
+  cleanup(root);
+});
+
+test("cross-lane groups enforce 1:many correspondence in both directions", () => {
+  const set = crossSet();
+  const vanillaAlone = checkLaneParity(
+    [set],
+    ["packages/polycss/src/render/x/mono.ts"],
+  );
+  assert.equal(vanillaAlone.failures.length, 1);
+  assert.equal(vanillaAlone.failures[0].pair, "mono");
+  assert.deepEqual(vanillaAlone.failures[0].changed, ["polycss"]);
+
+  const frameworkAlone = checkLaneParity(
+    [set],
+    [
+      "packages/react/src/scene/x/right.ts",
+      "packages/vue/src/scene/x/right.ts",
+    ],
+  );
+  assert.equal(frameworkAlone.failures.length, 1);
+  assert.deepEqual(frameworkAlone.failures[0].unchanged, ["polycss"]);
+
+  // Any file per lane satisfies the group: it is one semantic unit, and which
+  // of the framework files carries the mirror is a per-change detail.
+  const mirrored = checkLaneParity(
+    [set],
+    [
+      "packages/polycss/src/render/x/mono.ts",
+      "packages/react/src/scene/x/right.ts",
+      "packages/vue/src/scene/x/right.ts",
+    ],
+  );
+  assert.deepEqual(mirrored.failures, []);
+});
+
+test("atlas-pipeline maps every member into exactly one cross-lane group", () => {
+  const atlas = SYNC_SETS.find((entry) => entry.name === "atlas-pipeline");
+  const seen = new Map();
+  for (const group of atlas.crossLaneGroups) {
+    const lanes = new Set();
+    for (const file of group.files) {
+      assert.ok(!seen.has(file), `${file} is in two groups`);
+      seen.set(file, group.name);
+      assert.ok(atlas.files.includes(file), `${file} is not a set member`);
+      lanes.add(resolveLane(file));
+    }
+    assert.deepEqual([...lanes].sort(), ["polycss", "react", "vue"], group.name);
+  }
+  assert.deepEqual(
+    atlas.files.filter((file) => !seen.has(file)),
+    [],
+    "every atlas member must be grouped",
+  );
+});
+
+test("atlas-pipeline: a vanilla-only change is not excused by an unrelated framework pair", () => {
+  // The exact bypass a fourth review round demonstrated: editing vanilla
+  // strategy.ts alone passed as long as SOME other vanilla-lane file moved —
+  // here the correctly-paired React+Vue rasterisation edit supplies it. With
+  // the mapping declared, both halves fail on their own group.
+  const atlas = SYNC_SETS.find((entry) => entry.name === "atlas-pipeline");
+  const { failures } = checkLaneParity(
+    [atlas],
+    [
+      "packages/polycss/src/render/atlas/strategy.ts",
+      "packages/react/src/scene/atlas/buildAtlasPages.ts",
+      "packages/vue/src/scene/atlas/buildAtlasPages.ts",
+    ],
+  );
+  assert.deepEqual(
+    failures.map((failure) => failure.pair).sort(),
+    ["capability-detection-and-plan-filtering", "rasterisation"],
+  );
+  for (const failure of failures) assert.equal(failure.group, true);
+});
+
+test("atlas-pipeline: the same vanilla change mirrored into its real counterparts passes", () => {
+  const atlas = SYNC_SETS.find((entry) => entry.name === "atlas-pipeline");
+  const { failures } = checkLaneParity(
+    [atlas],
+    [
+      "packages/polycss/src/render/atlas/strategy.ts",
+      "packages/react/src/scene/atlas/detection.ts",
+      "packages/vue/src/scene/atlas/detection.ts",
+    ],
+  );
+  assert.deepEqual(failures, []);
+});
+
+test("a waiver matches the lanes of the diverging GROUP, not of the whole set", () => {
+  const set = crossSet();
+  const changed = [
+    // The set's other lane work: mono + left are mirrored three ways, so at
+    // set scope all three lanes are touched. Only the `right` pair diverges.
+    "packages/polycss/src/render/x/mono.ts",
+    "packages/react/src/scene/x/left.ts",
+    "packages/vue/src/scene/x/left.ts",
+  ];
+  const split = crossSet({
+    crossLaneGroups: [
+      {
+        name: "mono",
+        files: [
+          "packages/polycss/src/render/x/mono.ts",
+          "packages/react/src/scene/x/left.ts",
+          "packages/vue/src/scene/x/left.ts",
+        ],
+      },
+      {
+        name: "right",
+        files: [
+          "packages/polycss/src/render/x/solo.ts",
+          "packages/react/src/scene/x/right.ts",
+          "packages/vue/src/scene/x/right.ts",
+        ],
+      },
+    ],
+    files: [...crossSet().files, "packages/polycss/src/render/x/solo.ts"],
+    unmirrored: {},
+  });
+  const diverging = [
+    ...changed,
+    "packages/react/src/scene/x/right.ts",
+    "packages/vue/src/scene/x/right.ts",
+  ];
+  const unwaived = checkLaneParity([split], diverging);
+  assert.equal(unwaived.failures.length, 1);
+  assert.equal(unwaived.failures[0].pair, "right");
+
+  const waived = checkLaneParity([split], diverging, {
+    cross: {
+      reason: "react/vue caught up to vanilla",
+      files: [
+        "packages/react/src/scene/x/right.ts",
+        "packages/vue/src/scene/x/right.ts",
+      ],
+      expectedLanes: ["react", "vue"],
+    },
+  });
+  assert.deepEqual(waived.failures, []);
+  assert.deepEqual(waived.waived[0].expectedLanes, ["react", "vue"]);
 });

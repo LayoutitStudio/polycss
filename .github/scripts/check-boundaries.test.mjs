@@ -70,6 +70,143 @@ test("does not treat property access named import as a specifier", () => {
   assert.deepEqual(extractSpecifiers(source), []);
 });
 
+test("extracts specifiers separated from their keyword by comments", () => {
+  assert.deepEqual(
+    extractSpecifiers('import { x } from /* c */ "@layoutit/polycss";'),
+    ["@layoutit/polycss"],
+  );
+  assert.deepEqual(extractSpecifiers('import/* c */("@layoutit/polycss")'), [
+    "@layoutit/polycss",
+  ]);
+  assert.deepEqual(
+    extractSpecifiers('import /* a */ * /* b */ as ns from // c\n"deep";'),
+    ["deep"],
+  );
+  assert.deepEqual(extractSpecifiers('require(/* webpack */ "earcut")'), [
+    "earcut",
+  ]);
+});
+
+test("extracts a substitution-free template specifier and ignores an interpolated one", () => {
+  assert.deepEqual(
+    extractSpecifiers("const m = await import(`@layoutit/polycss`);"),
+    ["@layoutit/polycss"],
+  );
+  assert.deepEqual(
+    extractSpecifiers("const m = await import(`@layoutit/${name}`);"),
+    [],
+  );
+  assert.deepEqual(
+    extractSpecifiers("const m = await import(`a${ { b: `${c}` } }d`);"),
+    [],
+  );
+});
+
+test("extracts multiline import statements", () => {
+  const source = `
+import {
+  a,
+  b,
+}
+  from
+  "@layoutit/polycss-core";
+export
+  *
+  from
+  "./barrel";
+`;
+  assert.deepEqual(extractSpecifiers(source), [
+    "@layoutit/polycss-core",
+    "./barrel",
+  ]);
+});
+
+test("`from` is still a legal binding name", () => {
+  assert.deepEqual(extractSpecifiers('import { from } from "named-from";'), [
+    "named-from",
+  ]);
+  assert.deepEqual(
+    extractSpecifiers('import { from as f } from "renamed-from";'),
+    ["renamed-from"],
+  );
+});
+
+test("import attributes do not hide the specifier", () => {
+  assert.deepEqual(
+    extractSpecifiers('const m = await import("./data.json", { with: { type: "json" } });'),
+    ["./data.json"],
+  );
+});
+
+test("does not extract import-shaped text that is not code", () => {
+  const cases = [
+    '// import "@layoutit/polycss";',
+    '/* import "@layoutit/polycss"; */\n/** export * from "@layoutit/polycss"; */',
+    'const s = " import x from \'@layoutit/polycss\' ";',
+    'const t = `\nimport y from "@layoutit/polycss";\n`;',
+    'const re = / import "@layoutit\\/polycss" /;',
+  ];
+  for (const source of cases) {
+    assert.deepEqual(extractSpecifiers(source), [], source);
+  }
+});
+
+test("division and JSX do not derail the lexer", () => {
+  const source = `
+const half = width / 2;
+const ratio = (a + b) / c / d;
+export function Cell() {
+  return <p className="it's fine">{width / 2}</p>;
+}
+import { Vec3 } from "@layoutit/polycss-core";
+`;
+  assert.deepEqual(extractSpecifiers(source), ["@layoutit/polycss-core"]);
+});
+
+test("a forbidden import hidden behind a comment is still a violation", () => {
+  const root = makeRepo(
+    withManifests(
+      {
+        "packages/react/src/sneak.ts":
+          'import { createPolyScene } from /* not a comment escape */ "@layoutit/polycss";\n',
+      },
+      {
+        react: {
+          name: "@layoutit/polycss-react",
+          dependencies: { "@layoutit/polycss-core": "workspace:^" },
+        },
+      },
+    ),
+  );
+  const violations = runChecks(root);
+  assert.equal(violations.length, 1);
+  assert.match(
+    violations[0],
+    /sneak\.ts: disallowed dependency "@layoutit\/polycss"/,
+  );
+  cleanup(root);
+});
+
+test("a commented-out forbidden import is not a violation", () => {
+  const root = makeRepo(
+    withManifests(
+      {
+        "packages/react/src/clean.ts":
+          '// import { createPolyScene } from "@layoutit/polycss";\n' +
+          'const doc = `import "@layoutit/polycss";`;\nexport { doc };\n',
+      },
+      {
+        react: {
+          name: "@layoutit/polycss-react",
+          dependencies: { "@layoutit/polycss-core": "workspace:^" },
+        },
+      },
+    ),
+  );
+  assert.deepEqual(runChecks(root), []);
+  cleanup(root);
+});
+
 test("manifest check rejects a forbidden dependency in every shipped field", () => {
   for (const field of MANIFEST_DEPENDENCY_FIELDS) {
     const violations = checkManifestDependencies(

@@ -10,7 +10,6 @@
     "packages/polycss/src/render/atlas/solidTrianglePlan.ts": "386c3cff4a9e6848af2584f9cabef92ba623bf6ef78ab64bed59024add643e95",
     "packages/polycss/src/render/atlas/stableTriangle.ts": "ba780fcf1177a8ec338a67e8900ee2d4032cc2a6e731329782b01107e79f1463",
     "packages/polycss/src/render/atlas/strategy.ts": "890b9487272c469f3c3dfd8f9a9fc7b66b403a9200ac27ca2698b6c19bf82605",
-    "packages/polycss/src/render/atlas/types.ts": "3ccda1855741fce7d7d4c9073b77151552460824bab4c03aa8a674a0b7288b07",
     "packages/react/src/scene/atlas/atlasPoly.tsx": "35ea8fcdbc068e5f867e5d8bac59300e73700a7d91310fc5db53ffb81f5e6297",
     "packages/react/src/scene/atlas/borderShape.tsx": "011a549b7a135238317c0235a387539529cc44315cd210846d98fc8e886ba5ec",
     "packages/react/src/scene/atlas/buildAtlasPages.ts": "5ca0059c936d3948fd91f8888acb3f19534e327075367528517879f85ee4a3e1",

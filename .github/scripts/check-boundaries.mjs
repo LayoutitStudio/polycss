@@ -75,8 +75,6 @@ export const DEEP_IMPORT_ALLOWLIST = new Set([
 ]);
 
 const SOURCE_RE = /\.(ts|tsx|mts|cts|mjs|cjs|js)$/;
-const IMPORT_RE =
-  /(?:^|\s)(?:import|export)\s+(?:[^"'`]*?\s+from\s+)?["']([^"']+)["']|(?:^|[^.\w])(?:import|require)\s*\(\s*["']([^"']+)["']\s*\)/gm;
 
 /** Build output and vendored trees are never authored source. */
 const SKIPPED_DIRS = new Set([
@@ -97,11 +95,259 @@ function* walk(dir) {
   }
 }
 
+/**
+ * Keywords after which a `/` starts a regex literal rather than a division.
+ * Everything else that can END an expression (identifier, number, string,
+ * `)`, `]`, `}`, `++`, `--`) means division.
+ */
+const REGEX_PRECEDING_KEYWORDS = new Set([
+  "await",
+  "case",
+  "delete",
+  "do",
+  "else",
+  "in",
+  "instanceof",
+  "new",
+  "of",
+  "return",
+  "throw",
+  "typeof",
+  "void",
+  "yield",
+]);
+
+const NO_REGEX_AFTER_PUNCT = new Set([")", "]", "}", "++", "--", "/regex/"]);
+
+const isIdentStart = (ch) => /[A-Za-z_$]/.test(ch);
+const isIdentPart = (ch) => /[A-Za-z0-9_$]/.test(ch);
+const isDigit = (ch) => ch >= "0" && ch <= "9";
+
+function regexAllowedAfter(prev) {
+  if (!prev) return true;
+  if (prev.type === "name") return REGEX_PRECEDING_KEYWORDS.has(prev.value);
+  if (prev.type === "punct") return !NO_REGEX_AFTER_PUNCT.has(prev.value);
+  return false;
+}
+
+/**
+ * A single-pass lexer over JS/TS/TSX source.
+ *
+ * It exists because pattern-matching raw source for imports is wrong in both
+ * directions: a regex misses valid forms (`from /* c *\/ "x"`, an interpolation-
+ * free template specifier, an `import` split across lines) and matches text that
+ * is not code (a commented-out import, an import-shaped string). Tokenising once
+ * removes both classes of error.
+ *
+ * Tokens are only what the specifier scanner needs: `name`, `punct`, `string`
+ * (with `static` marking a literal value — a template WITH `${}` is a token but
+ * not a static specifier), and `number`. Comments produce no tokens at all.
+ *
+ * Two deliberate recovery rules keep a mis-lex from swallowing real code: a
+ * quoted string and a regex literal may never span a newline (JS forbids it),
+ * so on hitting one we rewind to just after the opening delimiter and continue
+ * in code mode. That matters for TSX, where JSX text (`It's`) and closing tags
+ * (`</div>`) otherwise look like an open quote and an open regex.
+ */
+function tokenize(source) {
+  const tokens = [];
+  const templates = [];
+  const push = (type, value, extra) =>
+    tokens.push({ type, value, ...(extra ?? {}) });
+  const last = () => tokens[tokens.length - 1];
+  let i = 0;
+
+  const readTemplateChunk = (start) => {
+    const context = templates[templates.length - 1];
+    let j = start;
+    while (j < source.length) {
+      const ch = source[j];
+      if (ch === "\\") {
+        context.raw += source[j + 1] ?? "";
+        j += 2;
+        continue;
+      }
+      if (ch === "`") {
+        templates.pop();
+        push("string", context.raw, { static: !context.hasSubstitution });
+        return j + 1;
+      }
+      if (ch === "$" && source[j + 1] === "{") {
+        context.hasSubstitution = true;
+        context.braceDepth = 0;
+        return j + 2;
+      }
+      context.raw += ch;
+      j += 1;
+    }
+    // Unterminated template: nothing left to lex.
+    templates.pop();
+    return source.length;
+  };
+
+  while (i < source.length) {
+    const ch = source[i];
+
+    if (ch === "/" && source[i + 1] === "/") {
+      const nl = source.indexOf("\n", i);
+      i = nl === -1 ? source.length : nl;
+      continue;
+    }
+    if (ch === "/" && source[i + 1] === "*") {
+      const end = source.indexOf("*/", i + 2);
+      i = end === -1 ? source.length : end + 2;
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      let j = i + 1;
+      let value = "";
+      let closed = false;
+      while (j < source.length) {
+        const c = source[j];
+        if (c === "\\") {
+          value += source[j + 1] ?? "";
+          j += 2;
+          continue;
+        }
+        if (c === "\n") break;
+        if (c === ch) {
+          closed = true;
+          break;
+        }
+        value += c;
+        j += 1;
+      }
+      if (closed) {
+        push("string", value, { static: true });
+        i = j + 1;
+      } else {
+        i += 1;
+      }
+      continue;
+    }
+    if (ch === "`") {
+      templates.push({ raw: "", hasSubstitution: false, braceDepth: 0 });
+      i = readTemplateChunk(i + 1);
+      continue;
+    }
+    if (ch === "/" && regexAllowedAfter(last())) {
+      let j = i + 1;
+      let inClass = false;
+      let closed = false;
+      while (j < source.length) {
+        const c = source[j];
+        if (c === "\\") {
+          j += 2;
+          continue;
+        }
+        if (c === "\n") break;
+        if (c === "[") inClass = true;
+        else if (c === "]") inClass = false;
+        else if (c === "/" && !inClass) {
+          closed = true;
+          break;
+        }
+        j += 1;
+      }
+      if (closed) {
+        while (j + 1 < source.length && isIdentPart(source[j + 1])) j += 1;
+        push("punct", "/regex/");
+        i = j + 1;
+      } else {
+        push("punct", "/");
+        i += 1;
+      }
+      continue;
+    }
+    if (isIdentStart(ch)) {
+      let j = i + 1;
+      while (j < source.length && isIdentPart(source[j])) j += 1;
+      push("name", source.slice(i, j));
+      i = j;
+      continue;
+    }
+    if (isDigit(ch)) {
+      let j = i + 1;
+      while (j < source.length && /[0-9a-zA-Z_.]/.test(source[j])) j += 1;
+      push("number", source.slice(i, j));
+      i = j;
+      continue;
+    }
+    if (ch === "{" && templates.length > 0) {
+      templates[templates.length - 1].braceDepth += 1;
+    } else if (ch === "}" && templates.length > 0) {
+      const context = templates[templates.length - 1];
+      if (context.braceDepth === 0) {
+        i = readTemplateChunk(i + 1);
+        continue;
+      }
+      context.braceDepth -= 1;
+    }
+    if (/\s/.test(ch)) {
+      i += 1;
+      continue;
+    }
+    if ((ch === "+" || ch === "-") && source[i + 1] === ch) {
+      push("punct", ch + ch);
+      i += 2;
+      continue;
+    }
+    push("punct", ch);
+    i += 1;
+  }
+  return tokens;
+}
+
+const isStaticString = (token) =>
+  token !== undefined && token.type === "string" && token.static === true;
+
+const isKeywordAt = (tokens, index, value) => {
+  const token = tokens[index];
+  if (!token || token.type !== "name" || token.value !== value) return false;
+  const prev = tokens[index - 1];
+  return !(prev && prev.type === "punct" && prev.value === ".");
+};
+
+/**
+ * Every module specifier a file references: static `import`/`export … from`,
+ * bare side-effect `import "x"`, dynamic `import("x")` and `require("x")`.
+ *
+ * Non-static specifiers (a template with `${}`, a variable) are ignored rather
+ * than being an error — they carry no name this checker could rule on.
+ */
 export function extractSpecifiers(source) {
+  const tokens = tokenize(source);
   const specifiers = [];
-  for (const match of source.matchAll(IMPORT_RE)) {
-    const spec = match[1] ?? match[2];
-    if (spec) specifiers.push(spec);
+  for (let i = 0; i < tokens.length; i += 1) {
+    const isImport = isKeywordAt(tokens, i, "import");
+    const isExport = isKeywordAt(tokens, i, "export");
+    if (!isImport && !isExport && !isKeywordAt(tokens, i, "require")) continue;
+
+    const next = tokens[i + 1];
+    if (!isExport && next?.type === "punct" && next.value === "(") {
+      // `import("x")` / `require("x")`; extra args (import attributes) are fine.
+      if (isStaticString(tokens[i + 2])) specifiers.push(tokens[i + 2].value);
+      continue;
+    }
+    if (!isImport && !isExport) continue;
+    if (isImport && isStaticString(next)) {
+      specifiers.push(next.value);
+      continue;
+    }
+    // `import`/`export` … `from` "x", possibly spanning lines. `from` is a
+    // legal binding name (`import { from } from "x"`), so only a `from`
+    // followed by a static string ends the scan.
+    for (let j = i + 1; j < tokens.length; j += 1) {
+      const token = tokens[j];
+      if (token.type === "punct" && token.value === ";") break;
+      if (isKeywordAt(tokens, j, "import") || isKeywordAt(tokens, j, "export")) {
+        break;
+      }
+      if (isKeywordAt(tokens, j, "from") && isStaticString(tokens[j + 1])) {
+        specifiers.push(tokens[j + 1].value);
+        break;
+      }
+    }
   }
   return specifiers;
 }

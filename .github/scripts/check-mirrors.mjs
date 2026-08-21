@@ -156,6 +156,13 @@ export const IDENTICAL_GROUPS = [
  *                 mirrored directory in one lane without being noticed.
  *  - `rootMatch`  optional basename filter for a `laneRoots` entry that also
  *                 holds unrelated files.
+ *  - `crossLaneGroups`
+ *                 the explicit semantic mapping for lanes whose files do not
+ *                 correspond by name. Each group names, per lane, the file(s)
+ *                 implementing one unit; if any of them changed, every lane in
+ *                 that group must have changed. A set that declares groups must
+ *                 place EVERY member in exactly one of them (see
+ *                 checkSetDeclarations), so the table cannot go partial.
  *  - `unmirrored` explicit, annotated exemptions from the two structural
  *                 rules: a file under a mirrored root that is genuinely
  *                 lane-local and has no counterpart. Each entry is debt and
@@ -166,8 +173,140 @@ export const SYNC_SETS = [
     name: "atlas-pipeline",
     // react↔vue only: the vanilla lane splits this work into different files
     // (plan.ts, strategy.ts, renderPolygons.ts), so its same-named members are
-    // not per-file counterparts. See derivePairs.
+    // not per-file counterparts. See derivePairs. The vanilla↔framework
+    // correspondence is declared explicitly in `crossLaneGroups` below.
     pairLanes: ["react", "vue"],
+    /**
+     * The explicit vanilla↔framework mapping. Same-name pairing cannot express
+     * this lane: the vanilla copy splits and merges the work differently, and
+     * two of the shared basenames are FALSE friends. Each group was derived by
+     * reading the files; the evidence is on each entry.
+     */
+    crossLaneGroups: [
+      {
+        name: "rasterisation",
+        // Same 15 exports in the same order (TEXTURE_IMAGE_CACHE …
+        // buildAtlasPages); the framework header names rasterise.ts as source.
+        files: [
+          "packages/polycss/src/render/atlas/rasterise.ts",
+          "packages/react/src/scene/atlas/buildAtlasPages.ts",
+          "packages/vue/src/scene/atlas/buildAtlasPages.ts",
+        ],
+      },
+      {
+        name: "capability-detection-and-plan-filtering",
+        // detection.ts is a verbatim copy of strategy.ts's capability half
+        // (isBorderShapeSupported, resolveSolidTrianglePrimitive,
+        // projectiveQuadSupported …); filterPlans.ts is strategy.ts's
+        // filterAtlasPlans split into its own file, same 7-arg signature.
+        files: [
+          "packages/polycss/src/render/atlas/strategy.ts",
+          "packages/react/src/scene/atlas/detection.ts",
+          "packages/react/src/scene/atlas/filterPlans.ts",
+          "packages/vue/src/scene/atlas/detection.ts",
+          "packages/vue/src/scene/atlas/filterPlans.ts",
+        ],
+      },
+      {
+        name: "packing",
+        // Genuine same-name counterparts: identical isMobileDocument and
+        // packTextureAtlasPlansWithScale wrappers over the core packer.
+        files: [
+          "packages/polycss/src/render/atlas/packing.ts",
+          "packages/react/src/scene/atlas/packing.ts",
+          "packages/vue/src/scene/atlas/packing.ts",
+        ],
+      },
+      {
+        name: "leaf-emission-and-solid-paint",
+        // 1:many. vanilla emit.ts owns every create*Element; the framework
+        // splits them per component (createAtlasElement ↔ TextureAtlasPoly,
+        // createProjectiveSolidElement ↔ TextureProjectiveSolidPoly,
+        // createSolidElement + createBorderShapeSolidElement ↔ the one
+        // TextureBorderShapePoly that branches fullRect → <b> else <i>).
+        // vanilla paintDefaults.ts is the paint half: cornerShapeSolid's
+        // formatPaintCss is a transcription of formatInitialSolidPaintStyle,
+        // and borderShape/projectiveSolid inline the same --pn*/--ps* logic.
+        files: [
+          "packages/polycss/src/render/atlas/emit.ts",
+          "packages/polycss/src/render/atlas/paintDefaults.ts",
+          "packages/react/src/scene/atlas/atlasPoly.tsx",
+          "packages/react/src/scene/atlas/borderShape.tsx",
+          "packages/react/src/scene/atlas/cornerShapeSolid.tsx",
+          "packages/react/src/scene/atlas/projectiveSolid.tsx",
+          "packages/vue/src/scene/atlas/atlasPoly.ts",
+          "packages/vue/src/scene/atlas/borderShape.ts",
+          "packages/vue/src/scene/atlas/cornerShapeSolid.ts",
+          "packages/vue/src/scene/atlas/projectiveSolid.ts",
+        ],
+      },
+      {
+        name: "solid-triangle-leaf",
+        // many:many, and deliberately NOT split finer. The plan/style/DOM cut
+        // falls in a different place per lane: vanilla keeps triangle ELEMENT
+        // creation (createSolidTriangleElement) in stableTriangle.ts while the
+        // framework puts it in triangle.tsx, and vanilla's
+        // SOLID_TRIANGLE_BORDER_WIDTH ("0 48px 96px 48px") lives in
+        // stableTriangle.ts against the framework's solidTriangleStyle.ts.
+        // Pairing those files 1:1 would fail correctly-mirrored work.
+        files: [
+          "packages/polycss/src/render/atlas/solidTrianglePlan.ts",
+          "packages/polycss/src/render/atlas/stableTriangle.ts",
+          "packages/react/src/scene/atlas/solidTriangleStyle.ts",
+          "packages/react/src/scene/atlas/stableTriangleDom.ts",
+          "packages/react/src/scene/atlas/triangle.tsx",
+          "packages/vue/src/scene/atlas/solidTriangleStyle.ts",
+          "packages/vue/src/scene/atlas/stableTriangleDom.ts",
+          "packages/vue/src/scene/atlas/triangle.ts",
+        ],
+      },
+      {
+        name: "plan-construction-and-orchestration",
+        // many:many, and the merge is load-bearing rather than lazy. Both
+        // sides run plans → filterAtlasPlans → packTextureAtlasPlansWithScale
+        // → buildAtlasPages and own the blob-URL lifecycle, but the
+        // projective-quad guard defaults sit on DIFFERENT sides of each lane's
+        // file split: vanilla resolves them in `renderPolygons.ts`
+        // (projectiveQuadGuardDefaults) through the thin `plan.ts` wrapper,
+        // while the framework inlines the identical resolution into
+        // `paintDefaults.ts`'s computeTextureAtlasPlan ("Mirrors vanilla's
+        // resolveProjectiveQuadGuards wrapper"). Splitting plan construction
+        // out would fail correctly-mirrored guard work, as the seam-bleed
+        // change on this branch demonstrates.
+        //
+        // FALSE FRIEND, worth naming: the framework `paintDefaults.ts` mirrors
+        // vanilla `plan.ts`/`renderPolygons.ts`, NOT vanilla `paintDefaults.ts`
+        // (which is inline-style paint — see leaf-emission-and-solid-paint).
+        //
+        // Partial by construction: the framework's leaf DISPATCH half lives in
+        // PolyMesh.tsx, outside this set's roots, so a dispatch-only change is
+        // not covered here.
+        files: [
+          "packages/polycss/src/render/atlas/plan.ts",
+          "packages/polycss/src/render/atlas/renderPolygons.ts",
+          "packages/react/src/scene/atlas/paintDefaults.ts",
+          "packages/react/src/scene/atlas/useTextureAtlas.ts",
+          "packages/vue/src/scene/atlas/paintDefaults.ts",
+          "packages/vue/src/scene/atlas/useTextureAtlas.ts",
+        ],
+      },
+      {
+        name: "barrel",
+        // All three re-export the same core types plus their own surface.
+        files: [
+          "packages/polycss/src/render/atlas/index.ts",
+          "packages/react/src/scene/atlas/index.tsx",
+          "packages/vue/src/scene/atlas/index.ts",
+        ],
+      },
+    ],
+    unmirrored: {
+      "packages/polycss/src/render/atlas/types.ts":
+        "the imperative render contract (RenderTextureAtlasOptions, " +
+        "SolidTriangleElement, RenderedPoly). React/Vue have no imperative " +
+        "render call: they take option types from core and declare props " +
+        "inline, so no framework file is a translation of this one.",
+    },
     laneRoots: [
       "packages/polycss/src/render/atlas",
       "packages/react/src/scene/atlas",
@@ -187,7 +326,6 @@ export const SYNC_SETS = [
       "packages/polycss/src/render/atlas/solidTrianglePlan.ts",
       "packages/polycss/src/render/atlas/stableTriangle.ts",
       "packages/polycss/src/render/atlas/strategy.ts",
-      "packages/polycss/src/render/atlas/types.ts",
       "packages/react/src/scene/atlas/atlasPoly.tsx",
       "packages/react/src/scene/atlas/borderShape.tsx",
       "packages/react/src/scene/atlas/buildAtlasPages.ts",
@@ -477,6 +615,61 @@ export function checkSetDeclarations(root, sets) {
       }
     }
 
+    if (set.crossLaneGroups) {
+      const seenNames = new Set();
+      const grouped = new Map();
+      for (const group of set.crossLaneGroups) {
+        const name = typeof group?.name === "string" ? group.name.trim() : "";
+        if (name.length === 0) {
+          add("declares a cross-lane group with no name");
+          continue;
+        }
+        if (seenNames.has(name)) {
+          add(`declares two cross-lane groups named "${name}"`);
+        }
+        seenNames.add(name);
+        const groupFiles = group.files ?? [];
+        const lanes = new Set();
+        for (const file of groupFiles) {
+          if (!files.includes(file)) {
+            add(
+              `cross-lane group "${name}" names "${file}", which is not a ` +
+                "declared member of the set. The mapping may only relate " +
+                "files the set already tracks.",
+            );
+          }
+          if (grouped.has(file)) {
+            add(
+              `"${file}" is in cross-lane groups "${grouped.get(file)}" and ` +
+                `"${name}". A file belongs to exactly one semantic group.`,
+            );
+          }
+          grouped.set(file, name);
+          const lane = resolveLane(file);
+          if (lane) lanes.add(lane);
+        }
+        if (lanes.size < 2) {
+          add(
+            `cross-lane group "${name}" spans lane(s) ` +
+              `${[...lanes].join(", ") || "none"}; a group that does not cross ` +
+              "lanes enforces nothing — declare its files in `unmirrored` " +
+              "instead, with the reason they are lane-local.",
+          );
+        }
+      }
+      // The table is only worth trusting if it is TOTAL: a member left out of
+      // every group would silently fall back to the coarse set-wide lane check,
+      // which is the bypass this mapping exists to close.
+      for (const file of files) {
+        if (grouped.has(file)) continue;
+        add(
+          `"${file}" is a member of a set that declares cross-lane groups but ` +
+            "belongs to none of them. Add it to the group that mirrors it, or " +
+            "move it to `unmirrored` with the reason it has no counterpart.",
+        );
+      }
+    }
+
     const { found, missingRoots } = listLaneRootFiles(root, set);
     for (const laneRoot of missingRoots) {
       add(`declares mirror root "${laneRoot}", which is not a directory`);
@@ -683,11 +876,10 @@ const pairKey = (file) => file.split("/").pop().replace(/\.[^.]+$/, "");
  * paired lane, keep the set-wide lane treatment, which still fires when such a
  * file is the only thing that moved.
  *
- * The residual gap is deliberate and worth stating: an unmirrored vanilla↔
- * React/Vue atlas fix is caught only while no OTHER file in the vanilla lane
- * changed. Closing it needs a real per-file mapping for that set, which does
- * not exist today; inventing one produces false failures on correctly mirrored
- * work, which is strictly worse than the set-wide check.
+ * The vanilla↔framework direction is NOT left to the set-wide check. It is
+ * declared file-by-file in `crossLaneGroups` (see `deriveCrossLaneGroups`),
+ * which expresses the 1:many and many:many correspondences that basename
+ * pairing cannot, and is validated against the tree so it cannot rot.
  */
 export function derivePairs(files, pairLanes) {
   const allowed = pairLanes ? new Set(pairLanes) : null;
@@ -707,6 +899,33 @@ export function derivePairs(files, pairLanes) {
     if (lanes.size > 1) pairs.push({ key, lanes });
   }
   return pairs;
+}
+
+/**
+ * The declared vanilla↔framework correspondence, in the same shape as a pair so
+ * lane parity can treat both identically.
+ *
+ * A group is a SEMANTIC unit, not a filename: it names, per lane, the file(s)
+ * that implement one piece of the pipeline. Relationships are 1:1, 1:many or
+ * many:many as the code actually is. Lane parity then requires that if any file
+ * in a group changed, every lane represented in that group changed — which is
+ * what makes a one-renderer fix fail even when some OTHER file in its lane
+ * moved in the same diff. `checkSetDeclarations` keeps the table honest against
+ * the tree, so it cannot rot into a rubber stamp.
+ */
+export function deriveCrossLaneGroups(set) {
+  const groups = [];
+  for (const group of set.crossLaneGroups ?? []) {
+    const lanes = new Map();
+    for (const file of group.files ?? []) {
+      const lane = resolveLane(file);
+      if (!lane) continue;
+      if (!lanes.has(lane)) lanes.set(lane, []);
+      lanes.get(lane).push(file);
+    }
+    if (lanes.size > 1) groups.push({ key: group.name, lanes, group: true });
+  }
+  return groups;
 }
 
 const SCOPE_HELP =
@@ -1009,19 +1228,25 @@ export function checkLaneParity(sets, changedFiles, waivers = {}) {
     const divergences = [];
     const reportedFiles = new Set();
 
-    for (const pair of derivePairs(set.files, set.pairLanes)) {
-      const result = classify(pair.lanes, null);
+    const units = [
+      ...deriveCrossLaneGroups(set),
+      ...derivePairs(set.files, set.pairLanes),
+    ];
+    for (const unit of units) {
+      const result = classify(unit.lanes, null);
       if (!isUneven(result)) continue;
       for (const file of result.files) reportedFiles.add(file);
+      const kind = unit.group ? "declared semantic group" : "mirrored pair";
       divergences.push({
         set: set.name,
-        pair: pair.key,
+        pair: unit.key,
+        group: Boolean(unit.group),
         changed: result.changedLanes,
         unchanged: result.unchangedLanes,
         changedFiles: result.files,
         hint: set.hint,
         note:
-          `"${pair.key}" is a mirrored pair: lane(s) ` +
+          `"${unit.key}" is a ${kind}: lane(s) ` +
           `${result.changedLanes.join(", ")} changed it and lane(s) ` +
           `${result.unchangedLanes.join(", ")} did not`,
       });
@@ -1057,6 +1282,18 @@ export function checkLaneParity(sets, changedFiles, waivers = {}) {
         note: entry.note ? `${entry.note}; ${note}` : note,
       }));
 
+    // `expectedLanes` pins the shape of the divergence being excused, so it is
+    // compared against the lanes that actually diverged — the union over the
+    // reported units — not the set-wide lane summary. Those coincide for a
+    // set-scope divergence; they do NOT for a group-scope one, where the rest
+    // of the set can be perfectly mirrored while one semantic unit is not.
+    const divergedLanes = [
+      ...new Set(divergences.flatMap((entry) => entry.changed)),
+    ];
+    const divergedUnchanged = [
+      ...new Set(divergences.flatMap((entry) => entry.unchanged)),
+    ];
+
     const waiver = waivers[set.name];
     if (!waiver) {
       failures.push(...divergences);
@@ -1080,11 +1317,11 @@ export function checkLaneParity(sets, changedFiles, waivers = {}) {
       continue;
     }
 
-    if (!sameSet(waiver.expectedLanes, laneResult.changedLanes)) {
+    if (!sameSet(waiver.expectedLanes, divergedLanes)) {
       failures.push(
         ...withNote(
           `the waiver records changed lane(s) ${[...waiver.expectedLanes].sort().join(", ")} ` +
-            `but this change touched ${[...laneResult.changedLanes].sort().join(", ")}; ` +
+            `but the divergence is in lane(s) ${[...divergedLanes].sort().join(", ")}; ` +
             "a waiver only excuses the exact divergence it documented",
         ),
       );
@@ -1113,8 +1350,8 @@ export function checkLaneParity(sets, changedFiles, waivers = {}) {
       reason: waiver.reason,
       files: waiver.files,
       expectedLanes: waiver.expectedLanes,
-      changed: laneResult.changedLanes,
-      unchanged: laneResult.unchangedLanes,
+      changed: divergedLanes,
+      unchanged: divergedUnchanged,
     });
   }
 
@@ -1284,7 +1521,12 @@ export function run(argv = [], options = {}) {
         const explained = new Set();
         for (const failure of failures) {
           err(`  set: ${failure.set}`);
-          if (failure.pair) err(`    mirrored pair: ${failure.pair}`);
+          if (failure.pair) {
+            err(
+              `    ${failure.group ? "semantic group" : "mirrored pair"}: ` +
+                `${failure.pair}`,
+            );
+          }
           err(`    changed lane(s):   ${failure.changed.join(", ")}`);
           err(`    unchanged lane(s): ${failure.unchanged.join(", ")}`);
           for (const file of failure.changedFiles ?? []) err(`    changed: ${file}`);
