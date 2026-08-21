@@ -97,6 +97,26 @@ const LIGHT_A: PolyDirectionalLight = {
   color: "#ffffff",
   intensity: 1,
 };
+/** Straight down: only a +z face can receive it. */
+const LIGHT_DOWN: PolyDirectionalLight = {
+  direction: [0, 0, 1],
+  color: "#ffffff",
+  intensity: 1,
+};
+/** Clears the box top (z = 2) so its shadow lands on the top face. */
+function highCaster(): Polygon[] {
+  return [
+    {
+      vertices: [
+        [0, 0, 5],
+        [1, 0, 5],
+        [0, 1, 5],
+      ],
+      color: "#ff0000",
+    },
+  ];
+}
+
 const LIGHT_B: PolyDirectionalLight = {
   direction: [0.6, -0.5, 0.62],
   color: "#ffffff",
@@ -283,5 +303,35 @@ describe("PolyMesh (Vue) — receiver-shadow memoization parity", () => {
     light.value = LIGHT_B;
     await flushWork();
     expect(dedupSpy.mock.calls.length).toBe(1);
+  });
+  it("ignores an unlit plane's horizon crossing, exactly as vanilla does", async () => {
+    // Straight-down light: only the box's top face can receive it. Every side
+    // face fails `L·n` in every pass, so it emits nothing at ANY camera angle
+    // and its facing bit must not enter the signature — otherwise an orbit
+    // that only crosses those planes' horizons re-emits the whole pipeline for
+    // an output that cannot change. Vanilla passes `signatureLights`; React and
+    // Vue omitted it, so they churned where vanilla did not.
+    const caster = highCaster();
+    const box = boxPolygons();
+    mountScene(
+      [
+        { polygons: caster, castShadow: true },
+        { polygons: box, receiveShadow: true },
+      ],
+      { textureLighting: "baked", directionalLight: LIGHT_DOWN },
+    );
+    await flushWork();
+    const mergeCalls = mergeSpy.mock.calls.length;
+    expect(mergeCalls).toBeGreaterThan(0);
+
+    // The same orbit the test above proves DOES cross a boundary under a
+    // tilted light — here every plane it crosses is unlit.
+    const store = capturedStore!;
+    for (const delta of [90, 90, 90, 90]) {
+      const state = store.getState().cameraState;
+      store.setState({ cameraState: { ...state, rotY: state.rotY + delta } });
+      await flushWork();
+    }
+    expect(mergeSpy.mock.calls.length).toBe(mergeCalls);
   });
 });

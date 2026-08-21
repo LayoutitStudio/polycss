@@ -24,6 +24,7 @@ import {
   type EdgeOwners,
   type ReceiverCasterInput,
   type ReceiverFacePlane,
+  type ReceiverShadowSignatureLights,
 } from "@layoutit/polycss-core";
 import type { PolyCameraContextValue } from "../../camera/context";
 import type { PolySceneContextValue } from "../sceneContext";
@@ -161,11 +162,34 @@ export function useReceiverShadows({
   // and only then. Mirrors vanilla's `syncShadowsForCameraChange` and React's
   // `cameraShadowKey`. The camera store is not a Vue reactive source, so the
   // signature is mirrored into a ref the shadow computed depends on.
+  // The passes' own light gate, mirrored for the signature (vanilla's
+  // `signatureLights` in shadowOrchestrator, React's `signatureLights`). A
+  // plane no pass can light emits nothing at ANY camera angle, so letting its
+  // facing bit into the key invents boundary crossings and re-runs the whole
+  // pipeline for nothing.
+  const signatureLights = computed<ReceiverShadowSignatureLights>(() => {
+    const ctx = sceneCtx?.value;
+    const dir = ctx?.directionalLight;
+    const runDirectional = !!dir?.direction && (dir.intensity ?? 1) > 0;
+    // Point lights are baked-mode only, exactly as in the emit below.
+    const points = atlasTextureLighting.value === "dynamic" ? [] : (ctx?.pointLights ?? []);
+    return {
+      lightDir: runDirectional ? worldDirectionToCss(dir!.direction!) : null,
+      pointLightPositions: points
+        .filter((pl) => pl.castShadow)
+        .map((pl) => worldPositionToCss(pl.position)),
+    };
+  });
+  // Watched by CONTENT, not by the computed's object identity: `sceneCtx` is
+  // itself a computed that hands back a fresh value whenever any scene prop
+  // changes, so identity would resubscribe the camera listener far more often
+  // than the lights actually move. Mirrors React's `signatureLightsKey`.
+  const signatureLightsKey = computed(() => JSON.stringify(signatureLights.value));
   const cameraShadowKey = shallowRef("");
   let unsubscribeCameraShadow: (() => void) | null = null;
   watch(
-    receiverPlanes,
-    (planes) => {
+    [receiverPlanes, signatureLightsKey] as const,
+    ([planes]) => {
       unsubscribeCameraShadow?.();
       unsubscribeCameraShadow = null;
       const store = cameraCtx?.store;
@@ -175,7 +199,9 @@ export function useReceiverShadows({
       }
       const read = (): string => {
         const cs = store.getState().cameraState;
-        return receiverShadowCameraSignature(planes, { rotX: cs.rotX, rotY: cs.rotY });
+        return receiverShadowCameraSignature(
+          planes, { rotX: cs.rotX, rotY: cs.rotY }, signatureLights.value,
+        );
       };
       cameraShadowKey.value = read();
       unsubscribeCameraShadow = store.subscribe(() => {

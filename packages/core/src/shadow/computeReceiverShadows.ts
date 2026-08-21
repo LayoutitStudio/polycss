@@ -592,11 +592,17 @@ export function prepareReceiverFacePlanes(
  * Two passes mirroring `detectMemberSharedEdges`: an exact quantized
  * endpoint-pair hash, then a collinear-overlap pass over a uniform spatial
  * hash for T-junctions where a crease neighbour covers only part of the edge.
- * Edges already in `memberSharedEdges` stay in the candidate pool but are
- * pre-marked: marking them again could not change their own clip expansion
- * (both sets union into one), yet they are still the only neighbour some
- * crease edge on another plane has, so dropping them outright hid those
- * creases. The 2D `planarEdgesShareLine` predicate cannot be reused here
+ * Edges already in `memberSharedEdges` stay in the candidate pool AND record
+ * their crease neighbours like any other edge. Doing so cannot change their own
+ * clip expansion — an edge gets one bleed amount whether it is shared, crease,
+ * or both — but the mark is also what flips the face to its opaque pre-blend
+ * (`creaseBled`), and that is required for soundness: when a wall's bottom edge
+ * lands on a seam interior to a floor group, the wall's opaque bleed overlaps a
+ * floor still painting at alpha unless the floor is marked too, and the
+ * composite then depends on SVG paint order. It is also the direction
+ * `qualifiesCrease` condition 4 reads, so suppressing the mark made BOTH sides
+ * refuse to bleed and the hairline came back. The 2D `planarEdgesShareLine`
+ * predicate cannot be reused here
  * because crease neighbours are by definition not coplanar —
  * `spatialEdgesShareLine` is its world-space sibling with the same tolerances.
  *
@@ -617,9 +623,10 @@ function fillCrossGroupCreaseEdges(planes: ReceiverFacePlane[]): void {
       const shared = plane.memberSharedEdges?.[mi];
       for (let e = 0; e < world.length; e++) {
         const built = spatialEdge(world[e]!, world[(e + 1) % world.length]!);
-        // `pre` = already bled as a within-group seam. Such an edge needs no
-        // crease mark of its own, but must stay a candidate so it can supply
-        // the neighbour that marks a crease edge on another plane.
+        // `pre` = already bled as a within-group seam. It still records crease
+        // neighbours (see the header); `pre` only means the collinear pass need
+        // not spend a query initiating from it, since its bleed amount is
+        // already decided and the other side of any T-junction queries it.
         if (built) refs.push({ ...built, plane: pi, member: mi, edge: e, pre: !!shared?.has(e) });
       }
     }
@@ -631,7 +638,6 @@ function fillCrossGroupCreaseEdges(planes: ReceiverFacePlane[]): void {
   );
   const neighbourPlanes: Array<Set<number>> = planes.map(() => new Set<number>());
   const mark = (r: Ref, neighbourPlane: number): void => {
-    if (r.pre) return;
     const perPlane = marked[r.plane]!;
     let map = perPlane[r.member];
     if (!map) { map = new Map(); perPlane[r.member] = map; }
@@ -802,11 +808,17 @@ function planeReceivesAnyLight(
  * is drawn there (`qualifiesCrease` condition 1). Both reduce to the same
  * per-plane boolean, so the whole camera dependence is the bit vector of
  * `normalFacesCamera` over the receiver's planes. Packing it base-32 keeps the
- * key short enough to compare as a string on every camera frame.
+ * key short enough to compare as a string on every camera frame; the count of
+ * CONTRIBUTING planes prefixes the packed bits because the final group is
+ * zero-padded to five, so without it an all-back-facing 2-plane receiver and an
+ * all-back-facing 5-plane one both read "0" and a plane-set change between them
+ * would be missed.
  *
- * Mesh rotation is deliberately NOT folded in: the plane normals are already in
- * world frame, and a mesh transform change rebuilds the planes (and re-emits)
- * through its own cache key. This mirrors the per-mesh voxel DOM cull's
+ * Mesh rotation is deliberately NOT folded in — the plane normals are already
+ * in world frame, so `normalFacesCamera` must not re-apply it. That makes the
+ * signature meaningless against planes built for a different mesh rotation, so
+ * the CALLER must rebuild its planes (and re-emit) whenever the mesh transform
+ * changes, before comparing keys. Mirrors the per-mesh voxel DOM cull's
  * `cameraCullVisibleSignature` — recompute on boundary crossings, not per frame.
  */
 export function receiverShadowCameraSignature(
@@ -818,6 +830,7 @@ export function receiverShadowCameraSignature(
   let out = "";
   let acc = 0;
   let bits = 0;
+  let contributing = 0;
   for (const plane of planes) {
     // A plane no light can reach fails the `L·n` test in every pass, so it
     // emits nothing and cannot qualify as a crease neighbour at ANY camera
@@ -826,6 +839,7 @@ export function receiverShadowCameraSignature(
     if (lights && !planeReceivesAnyLight(plane, lights)) continue;
     acc = (acc << 1) | (normalFacesCamera(plane.n, cameraOnlyRot) ? 1 : 0);
     bits += 1;
+    contributing += 1;
     if (bits === 5) {
       out += acc.toString(32);
       acc = 0;
@@ -833,7 +847,7 @@ export function receiverShadowCameraSignature(
     }
   }
   if (bits > 0) out += (acc << (5 - bits)).toString(32);
-  return out;
+  return `${contributing.toString(32)}:${out}`;
 }
 
 /** Input for `computeReceiverShadowFaces`. */

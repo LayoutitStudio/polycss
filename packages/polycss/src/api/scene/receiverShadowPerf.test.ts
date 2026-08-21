@@ -233,6 +233,86 @@ describe("applyCamera — signature-gated shadow re-emit", () => {
     expect(mergeSpy.mock.calls.length).toBe(after);
   });
 
+  // A receiver whose normals are NOT the six axis directions, so it is not
+  // camera-DOM-cullable. That matters: an axis-aligned box takes the voxel cull
+  // path on rotation, which remounts and re-emits shadows as a side effect and
+  // hides the bug. Every ordinary imported receiver looks like this one.
+  const RECEIVER_ROTATION: [number, number, number] = [0, 0, 60];
+  function tiltedReceiver(): Polygon[] {
+    const r = (30 * Math.PI) / 180, c = Math.cos(r), s = Math.sin(r);
+    return boxReceiver().map((p) => ({
+      ...p,
+      vertices: p.vertices.map(([x, y, z]) => [x * c - y * s, x * s + y * c, z]),
+    })) as Polygon[];
+  }
+  /** Painted receiver shadow faces + the size of each path, as one key. */
+  function shadowFingerprint(target: HTMLElement): string {
+    return Array.from(target.querySelectorAll<SVGElement>("svg.polycss-shadow-receiver"))
+      .filter((s) => s.style.display !== "none")
+      .map((s) => `${s.getAttribute("data-poly-shadow-receiver-face")}:`
+        + `${(s.querySelector("path")?.getAttribute("d") ?? "").length}`)
+      .sort()
+      .join("|");
+  }
+  function buildTilted(target: HTMLElement, rotY: number, rotateAfterBuild: boolean) {
+    const built = createPolyScene(target, {
+      camera: createPolyOrthographicCamera({ rotX: 55, rotY: rotateAfterBuild ? 20 : rotY }),
+      textureLighting: "baked",
+      directionalLight: LIGHT_A,
+      autoCenter: false,
+      debugShadowAttrs: true,
+    });
+    built.add(makeParseResult([hoveringCaster()]), { castShadow: true, merge: false });
+    built.add(makeParseResult(tiltedReceiver()), {
+      receiveShadow: true,
+      merge: false,
+      ...(rotateAfterBuild ? {} : { rotation: RECEIVER_ROTATION }),
+    });
+    if (rotateAfterBuild) {
+      built.meshes()[1]!.setTransform({ rotation: RECEIVER_ROTATION });
+      built.camera.update({ rotY });
+      built.applyCamera();
+    }
+    return built;
+  }
+
+  it("re-emits when a receiver rotates", () => {
+    const target = document.createElement("div");
+    document.body.appendChild(target);
+    const rotated = buildTilted(target, 20, false);
+    const before = mergeSpy.mock.calls.length;
+    expect(before).toBeGreaterThan(0);
+    // Rotation moves every face plane, so it belongs in the re-emit gate next
+    // to position and scale. Skipping it also left the camera short-circuit in
+    // emitSceneShadows comparing against identity-pose cached planes — the
+    // rotation-aware plane cache key lives one level down, inside
+    // emitReceiverShadows, and never gets consulted.
+    rotated.meshes()[1]!.setTransform({ rotation: [0, 0, 25] });
+    expect(mergeSpy.mock.calls.length).toBeGreaterThan(before);
+    rotated.destroy();
+    target.remove();
+  });
+
+  it("renders the same shadows whether the rotation was applied before or after the build", () => {
+    // The oracle for the stale-plane failure: rotating at runtime must land on
+    // exactly what a scene authored at that rotation shows. Sampled across a
+    // full orbit — with the rotation left out of the gate, 9 of these 36
+    // angles disagreed, including rotY 20, where the camera never moves at all.
+    for (let rotY = 0; rotY < 360; rotY += 10) {
+      const liveHost = document.createElement("div");
+      const authoredHost = document.createElement("div");
+      document.body.appendChild(liveHost);
+      document.body.appendChild(authoredHost);
+      const live = buildTilted(liveHost, rotY, true);
+      const authored = buildTilted(authoredHost, rotY, false);
+      expect(shadowFingerprint(liveHost), `rotY=${rotY}`).toBe(shadowFingerprint(authoredHost));
+      live.destroy();
+      authored.destroy();
+      liveHost.remove();
+      authoredHost.remove();
+    }
+  });
+
   it("emits geometry for the new camera, not the old one", () => {
     build();
     // From the front only the top face's shadow is drawn; the −y side face

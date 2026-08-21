@@ -799,3 +799,85 @@ describe("crease neighbour must emit a compatible layer", () => {
     for (const spec of specs) expect(spec.creaseBled).toBe(true);
   });
 });
+
+describe("crease reciprocity across a within-group seam", () => {
+  // The floor is GROUPED FROM TWO coplanar quads meeting at y = 2, and the wall
+  // stands on that very edge — the tessellated / greedy-merged architecture
+  // case (interior partition on a subdivided floor), which the one-member-per-
+  // plane L fixture above cannot reach. The floor's y = 2 edge is therefore
+  // BOTH a within-group seam and the wall's crease neighbour. Suppressing the
+  // crease mark on an already-seam-bled edge left the floor with no record of
+  // the wall, and `qualifiesCrease`'s reciprocity condition then refused BOTH
+  // sides — no bleed, and the pale hairline the pass exists to close returned.
+  const floorNear: Polygon = {
+    vertices: [[-2, -2, 0], [2, -2, 0], [2, 2, 0], [-2, 2, 0]],
+    color: "#888888",
+  };
+  const floorFar: Polygon = {
+    vertices: [[-2, 2, 0], [2, 2, 0], [2, 6, 0], [-2, 6, 0]],
+    color: "#888888",
+  };
+  const split = [floorNear, floorFar, wall];
+  const splitPlanes = () =>
+    prepareReceiverFacePlanes(split, [0, 0, 0], 1, new Set(), 0.05, null);
+  /** CSS frame swaps world x/y, so the floor is the plane with n ≈ +z. */
+  const isFloor = (n: Vec3) => Math.abs(n[2]) > 0.5;
+
+  it("groups the two coplanar quads into one plane with a shared seam", () => {
+    const planes = splitPlanes();
+    expect(planes.length).toBe(2);
+    const floorPlane = planes.find((p) => isFloor(p.n))!;
+    expect(floorPlane.memberPolysUv.length).toBe(2);
+    const seamed = floorPlane.memberSharedEdges!.filter((s) => (s?.size ?? 0) > 0);
+    expect(seamed.length).toBe(2);
+  });
+
+  it("records the crease in BOTH directions even though the floor edge is pre-bled", () => {
+    const planes = splitPlanes();
+    const floorIdx = planes.findIndex((p) => isFloor(p.n));
+    const wallIdx = 1 - floorIdx;
+    // Wall → floor: the direction the exact endpoint hash always recorded.
+    expect(planes[wallIdx]!.creaseNeighbourPlanes?.has(floorIdx)).toBe(true);
+    // Floor → wall: the reverse mark. Without it `qualifiesCrease(wall, floor)`
+    // is false and the wall silently refuses to bleed.
+    expect(planes[floorIdx]!.creaseNeighbourPlanes?.has(wallIdx)).toBe(true);
+    // The mark lands on the seam edge itself, and does not invent a second one.
+    const creaseEdges = planes[floorIdx]!.memberCreaseEdges!;
+    let creaseMarks = 0;
+    for (let mi = 0; mi < creaseEdges.length; mi++) {
+      for (const [edge] of creaseEdges[mi] ?? []) {
+        expect(planes[floorIdx]!.memberSharedEdges?.[mi]?.has(edge)).toBe(true);
+        creaseMarks++;
+      }
+    }
+    expect(creaseMarks).toBe(2);
+  });
+
+  it("bleeds the wall's crease, and takes the opaque form on both faces", () => {
+    const specs = computeReceiverShadowFaces({
+      ...setup(split),
+      receiverPolygons: split,
+      receiverHasTexture: false,
+      lightDir: cssLight,
+      cameraRot,
+      ambientLight,
+      directionalLight,
+      shadow: { opacity: 0.25 },
+      creaseBleed: true,
+    });
+    expect(specs.length).toBe(2);
+    // Same bisector light as the L fixture: floor and wall resolve to the same
+    // lit colour, so the overlap of their opaque pre-blends is idempotent.
+    expect(specs[0]!.fullLitFill).toBe(specs[1]!.fullLitFill);
+    for (const spec of specs) expect(spec.creaseBled).toBe(true);
+  });
+
+  it("grows the wall's clipped shadow area versus the unbled reference", () => {
+    const off = specAreas(split, { creaseBleed: false });
+    const on = specAreas(split, { creaseBleed: true });
+    const planes = splitPlanes();
+    const wallFace = planes.findIndex((p) => !isFloor(p.n));
+    expect(off.get(wallFace)).toBeGreaterThan(0);
+    expect(on.get(wallFace)!).toBeGreaterThan(off.get(wallFace)!);
+  });
+});

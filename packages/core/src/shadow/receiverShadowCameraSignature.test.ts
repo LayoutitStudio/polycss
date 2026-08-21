@@ -115,6 +115,29 @@ describe("receiverShadowCameraSignature", () => {
     expect(withPoint.length).toBeGreaterThanOrEqual(dirOnly.length);
   });
 
+  it("cannot collide across different plane counts", () => {
+    // The final bit group is zero-padded to five, so the packed bits alone are
+    // ambiguous: every all-back-facing receiver of 1..5 planes packs to "0".
+    // The contributing-plane count has to be part of the key, or a plane-set
+    // change between two such states reads as "camera unchanged" and the
+    // receiver keeps its stale SVGs.
+    const cam = { rotX: 55, rotY: 20 };
+    const seen = new Map<string, number>();
+    const all = planesFor(boxPolys());
+    for (let n = 1; n <= all.length; n++) {
+      // Back-facing subsets only, so the packed bits are all zero.
+      const backFacing = all.filter((p) => {
+        const bare = receiverShadowCameraSignature([p], cam);
+        return bare.endsWith("0");
+      }).slice(0, n);
+      if (backFacing.length !== n) continue;
+      const key = receiverShadowCameraSignature(backFacing, cam);
+      expect(seen.has(key)).toBe(false);
+      seen.set(key, n);
+    }
+    expect(seen.size).toBeGreaterThan(1);
+  });
+
   it("is conservative when no lights are supplied", () => {
     // Without light information every plane contributes a bit — a signature
     // that over-reports crossings is safe; one that under-reports is not.

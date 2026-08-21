@@ -24,6 +24,7 @@ import {
   type EdgeOwners,
   type ReceiverCasterInput,
   type ReceiverFacePlane,
+  type ReceiverShadowSignatureLights,
 } from "@layoutit/polycss-core";
 import type { PolyTextureLightingMode } from "@layoutit/polycss-core";
 import type { PolyCameraContextValue } from "../../camera/context";
@@ -74,6 +75,19 @@ const reactDedupDropCache = new WeakMap<readonly Polygon[], Map<string, Readonly
 // inside a window is deferred and still lands once the window elapses, so a
 // paused animation never leaves a stale shadow.
 const ANIMATION_SHADOW_MS = 80;
+
+/** The receiver's camera-visibility key, or "" when it cannot have one yet.
+ *  Module-scope so the state seed and the subscription read the same thing. */
+function readCameraShadowKey(
+  planes: ReceiverFacePlane[] | null,
+  store: PolyCameraContextValue["store"] | undefined,
+  lights: ReceiverShadowSignatureLights,
+): string {
+  if (!planes || !store) return "";
+  const cs = store.getState().cameraState;
+  return receiverShadowCameraSignature(planes, { rotX: cs.rotX, rotY: cs.rotY }, lights);
+}
+
 export function cachedOverlappingPolygonDuplicates(
   polygons: Polygon[],
   options: {
@@ -299,22 +313,51 @@ export function useReceiverShadows({
   // camera crosses a boundary, so the expensive pipeline below re-runs then
   // and only then. Mirrors vanilla's `syncShadowsForCameraChange`.
   const cameraStore = cameraCtx?.store;
-  const [cameraShadowKey, setCameraShadowKey] = useState("");
+  // The passes' own light gate, mirrored for the signature (vanilla's
+  // `signatureLights` in shadowOrchestrator). A plane no pass can light emits
+  // nothing at ANY camera angle, so letting its facing bit into the key invents
+  // boundary crossings and re-emits the whole pipeline for nothing.
+  const scenePointLights = sceneCtx?.pointLights;
+  const runDirectionalForSignature =
+    !!sceneDirectionalLight?.direction && (sceneDirectionalLight.intensity ?? 1) > 0;
+  // Point lights are baked-mode only, exactly as in the emit below.
+  const signaturePoints = effectiveTextureLighting === "dynamic" ? [] : (scenePointLights ?? []);
+  const nextSignatureLights: ReceiverShadowSignatureLights = {
+    lightDir: runDirectionalForSignature
+      ? worldDirectionToCss(sceneDirectionalLight!.direction!)
+      : null,
+    pointLightPositions: signaturePoints
+      .filter((pl) => pl.castShadow)
+      .map((pl) => worldPositionToCss(pl.position)),
+  };
+  // Memoized on the CONTENT, not on the light props' identity: a caller writing
+  // `directionalLight={{ ... }}` inline hands us a fresh object every render,
+  // and identity deps would then resubscribe the camera listener every render.
+  const signatureLightsKey = JSON.stringify(nextSignatureLights);
+  const signatureLights = useMemo(
+    () => nextSignatureLights,
+    [signatureLightsKey],
+  );
+  // Seeded from the store rather than "": starting at a key that is never true
+  // made the first render compute the whole receiver-shadow memo below against
+  // it and throw the result away (measured: the pipeline ran twice on a
+  // receiver mounting into a settled scene, once after).
+  const [cameraShadowKey, setCameraShadowKey] = useState(
+    () => readCameraShadowKey(receiverPlanes, cameraStore, signatureLights),
+  );
   useEffect(() => {
     if (!receiverPlanes || !cameraStore) {
       setCameraShadowKey("");
       return;
     }
-    const read = (): string => {
-      const cs = cameraStore.getState().cameraState;
-      return receiverShadowCameraSignature(receiverPlanes, { rotX: cs.rotX, rotY: cs.rotY });
-    };
+    const read = (): string =>
+      readCameraShadowKey(receiverPlanes, cameraStore, signatureLights);
     setCameraShadowKey(read());
     return cameraStore.subscribe(() => {
       const next = read();
       setCameraShadowKey((prev) => (prev === next ? prev : next));
     });
-  }, [receiverPlanes, cameraStore]);
+  }, [receiverPlanes, cameraStore, signatureLights]);
 
   // Cached shared-edge adjacency for the self-shadow seam cull. Polygon
   // identity is the bust key (re-built when geometry changes).

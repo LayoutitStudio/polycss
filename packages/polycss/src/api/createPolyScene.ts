@@ -1019,12 +1019,18 @@ export function createPolyScene(
           invalidateShadowLightCache(ctx);
           emitSceneShadows(ctx);
         }
-        // Position / scale change: shadow geometry depends on world-space
-        // coords AND the mesh's wrapper scale (which pivots from the
-        // bbox center). Non-shadow helpers (e.g. the light helper) must
-        // not overwrite transient preview shadows with the committed
-        // light, so the gate is on castShadow || receiveShadow.
-        if ((t.position !== undefined || t.scale !== undefined) && (entry.castShadow || entry.receiveShadow)) {
+        // Position / rotation / scale change: shadow geometry depends on
+        // world-space coords AND the mesh's wrapper scale (which pivots from
+        // the bbox center). Rotation belongs here too — it moves every caster
+        // vertex and every receiver face plane, and the camera-visibility
+        // short-circuit in emitSceneShadows reads the CACHED planes, so
+        // skipping the re-emit leaves that gate comparing rotated camera state
+        // against identity-pose normals (stale SVGs across a later orbit).
+        // Non-shadow helpers (e.g. the light helper) must not overwrite
+        // transient preview shadows with the committed light, so the gate is
+        // on castShadow || receiveShadow.
+        if ((t.position !== undefined || t.rotation !== undefined || t.scale !== undefined)
+          && (entry.castShadow || entry.receiveShadow)) {
           recomputeShadowGround(ctx);
           invalidateShadowLightCache(ctx);
           emitSceneShadows(ctx);

@@ -130,10 +130,14 @@ function receiverCameraSignature(
     if (receiver.disposed || !receiver.receiveShadow) continue;
     const planes = ctx.receiverShadowCache.get(receiver) as ReceiverFacePlane[] | undefined;
     if (!planes) { out += "?"; continue; }
+    // Camera rotation only: `plane.n` is already in world frame (the plane
+    // build applies the mesh rotation), so handing `meshRotation` down would be
+    // dead weight at best — the signature strips it — and a second application
+    // at worst. A mesh rotation change instead rebuilds the planes and re-emits
+    // through `setTransform`, which is what makes this key valid to compare.
     const cameraRot: CameraCullRotation = {
       rotX: ctx.camera.state.rotX,
       rotY: ctx.camera.state.rotY,
-      meshRotation: receiver.handle.transform.rotation,
     };
     out += `${receiverShadowCameraSignature(planes, cameraRot, lights)};`;
   }

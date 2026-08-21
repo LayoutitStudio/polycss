@@ -96,6 +96,26 @@ const LIGHT_A = {
   color: "#ffffff",
   intensity: 1,
 };
+/** Straight down: only a +z face can receive it. */
+const LIGHT_DOWN = {
+  direction: [0, 0, 1] as [number, number, number],
+  color: "#ffffff",
+  intensity: 1,
+};
+/** Clears the box top (z = 2) so its shadow lands on the top face. */
+function highCaster(): Polygon[] {
+  return [
+    {
+      vertices: [
+        [0, 0, 5],
+        [1, 0, 5],
+        [0, 1, 5],
+      ],
+      color: "#ff0000",
+    },
+  ];
+}
+
 const LIGHT_B = {
   direction: [0.6, -0.5, 0.62] as [number, number, number],
   color: "#ffffff",
@@ -286,5 +306,70 @@ describe("PolyMesh — receiver-shadow memoization parity", () => {
     );
     await flushReactWork();
     expect(dedupSpy.mock.calls.length).toBe(1);
+  });
+  it("ignores an unlit plane's horizon crossing, exactly as vanilla does", async () => {
+    // Straight-down light: only the box's top face can receive it. Every side
+    // face fails `L·n` in every pass, so it emits nothing at ANY camera angle
+    // and its facing bit must not enter the signature — otherwise an orbit
+    // that only crosses those planes' horizons re-emits the whole pipeline for
+    // an output that cannot change. Vanilla passes `signatureLights`; React and
+    // Vue omitted it, so they churned where vanilla did not.
+    const caster = highCaster();
+    const box = boxPolygons();
+    mountScene(
+      <>
+        <PolyMesh polygons={caster} castShadow />
+        <PolyMesh polygons={box} receiveShadow />
+      </>,
+      { textureLighting: "baked", directionalLight: LIGHT_DOWN },
+    );
+    await flushReactWork();
+    const mergeCalls = mergeSpy.mock.calls.length;
+    expect(mergeCalls).toBeGreaterThan(0);
+
+    // The same orbit the test above proves DOES cross a boundary under a
+    // tilted light — here every plane it crosses is unlit.
+    const store = capturedStore!;
+    for (const delta of [90, 90, 90, 90]) {
+      act(() => {
+        const state = store.getState().cameraState;
+        store.setState({ cameraState: { ...state, rotY: state.rotY + delta } });
+      });
+    }
+    await flushReactWork();
+    expect(mergeSpy.mock.calls.length).toBe(mergeCalls);
+  });
+
+  it("runs the receiver pipeline once when a receiver mounts into a settled scene", async () => {
+    // The camera signature used to start at "" and be corrected by an effect,
+    // so the first render computed the whole receiver-shadow memo against a key
+    // that was never true, then threw it away. Seeding the state from the
+    // camera store makes the first render the only one. (Commit counts are
+    // unchanged either way — the wasted work is the pipeline, not the render.)
+    const caster = casterPolygons();
+    const floorA = floorPolygons(0);
+    const floorB = floorPolygons(30);
+    // A receiver is already present, so the second receiver's arrival does not
+    // flip the scene's has-receiver state and re-register the caster.
+    const { render } = mountScene(
+      <>
+        <PolyMesh polygons={caster} castShadow />
+        <PolyMesh polygons={floorA} receiveShadow />
+      </>,
+      { textureLighting: "baked", directionalLight: LIGHT_A },
+    );
+    await flushReactWork();
+    mergeSpy.mockClear();
+
+    render(
+      { textureLighting: "baked", directionalLight: LIGHT_A },
+      <>
+        <PolyMesh polygons={caster} castShadow />
+        <PolyMesh polygons={floorA} receiveShadow />
+        <PolyMesh polygons={floorB} receiveShadow />
+      </>,
+    );
+    await flushReactWork();
+    expect(mergeSpy.mock.calls.length).toBe(1);
   });
 });

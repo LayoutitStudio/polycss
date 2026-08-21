@@ -318,6 +318,7 @@ export type {
   ReceiverFacePlane,
   ReceiverShadowFaceSpec,
   ReceiverShadowPath,
+  ReceiverShadowSignatureLights,
 } from "./shadow/computeReceiverShadows";
 export {
   buildEdgeOwners,
