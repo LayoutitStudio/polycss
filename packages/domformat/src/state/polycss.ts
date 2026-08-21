@@ -2,7 +2,7 @@ import { invariant } from "../errors.js";
 import { cssNumber } from "./numeric.js";
 import type { DomBindingChannel, DomBindings, DomState, DomStateChannel } from "../public-types.js";
 import type { MountedTree } from "../retained-dom.js";
-import type { PagedPlaybackStage, PagedStateStage, PolycssPagedState } from "./paged-state.js";
+import type { PagedPlaybackStage, PagedStateStage, PolycssPagedState, PolycssPublicationDiagnostics } from "./paged-state.js";
 import type { PolycssCompositorTiming } from "./compositor-timing.js";
 
 const MATRIX_WIDTH = 12;
@@ -865,6 +865,7 @@ export function createPolycssPlayback(
     readonly pagedState?: PolycssPagedState | null;
     readonly assertPagedFrameReady?: (frame: number) => void;
     readonly compositorTiming?: PolycssCompositorTiming | null;
+    readonly diagnostics?: PolycssPublicationDiagnostics;
   } = {},
 ): PolycssPlayback {
   const publishAppearance = options.publishAppearance;
@@ -909,6 +910,7 @@ export function createPolycssPlayback(
   const profileResponsiveTransforms = new Array<string | null>(packet.leafCount).fill(null);
   const profileVisible = new Uint8Array(packet.leafCount);
   profileVisible.fill(1);
+  const profileVisibilityDirty = new Uint16Array(packet.leafCount);
   const pagedInitial = packet.kind === "paged" ? options.pagedState?.initialPlayback : null;
   if (packet.kind === "inline") {
     for (let offset = 0; offset < packet.initial.shapes.length; offset += 3) {
@@ -928,6 +930,11 @@ export function createPolycssPlayback(
   const degenerate = new Uint8Array(packet.leafCount);
   const appliedStates = new Uint16Array(packet.leafCount);
   const dirtySurfaceStates = new Uint8Array(packet.leafCount);
+  const surfaceScratchStates = new Uint16Array(packet.leafCount);
+  const surfaceDirtyFlags = new Uint8Array(packet.leafCount);
+  const surfaceDirtyIndices = new Uint16Array(packet.leafCount);
+  const visibilityDirtyFlags = new Uint8Array(packet.leafCount);
+  const visibilityDirtyIndices = new Uint16Array(packet.leafCount);
   let currentForced = new Uint16Array(0);
   let sourceFrame = packet.initial.sourceFrame;
   let surfaceFrame = packet.initial.sourceFrame;
@@ -976,27 +983,27 @@ export function createPolycssPlayback(
     return result;
   };
 
-  const stageProfileVisibility = (frame: number): number[] => {
+  const stageProfileVisibility = (frame: number): number => {
     const profile = selectedViewportProfile < 0 ? null : materialized.viewportProfiles!.profiles[selectedViewportProfile];
     if (!profile) {
       profileVisibilityFrame = frame;
-      return [];
+      return 0;
     }
-    const changed: number[] = [];
+    let changed = 0;
     const offsets = profile.visibilityOffsets;
     const targets = profile.visibilityLeaves;
     if (offsets && targets && frame === (profileVisibilityFrame === playbackParameters.frameCount ? 1 : profileVisibilityFrame + 1)) {
       for (let cursor = offsets[frame - 1]; cursor < offsets[frame]; cursor += 1) {
         const leaf = targets[cursor];
         profileVisible[leaf] ^= 1;
-        changed.push(leaf);
+        profileVisibilityDirty[changed++] = leaf;
       }
     } else {
       const next = profileVisibilityAt(profile, frame);
       for (let leaf = 0; leaf < packet.leafCount; leaf += 1) {
         if (profileVisible[leaf] === next[leaf]) continue;
         profileVisible[leaf] = next[leaf];
-        changed.push(leaf);
+        profileVisibilityDirty[changed++] = leaf;
       }
     }
     profileVisibilityFrame = frame;
@@ -1127,6 +1134,11 @@ export function createPolycssPlayback(
   };
 
   const publishSurfaceState = (frame: number): void => {
+    if (options.diagnostics) {
+      options.diagnostics.surfaceFullReconstructions += 1;
+      options.diagnostics.surfaceLightingTargetVisits += leaves.length;
+      options.diagnostics.surfaceVisibilityTargetVisits += leaves.length;
+    }
     for (let index = 0; index < leaves.length; index += 1) {
       const face = light.faces[index];
       const state = stateAt(face, frame - 1);
@@ -1137,52 +1149,102 @@ export function createPolycssPlayback(
     surfaceFrame = frame;
   };
 
+  const publishSurfaceTarget = (index: number, state: number, frame: number): void => {
+    const face = light.faces[index];
+    invariant(state >= 0 && state < face.stateCount, "INVALID_SURFACE_PUBLICATION", `Prepared surface leaf ${index} has no state for frame ${frame}.`);
+    if (isPaintVisible(index) && (appliedStates[index] !== state || dirtySurfaceStates[index] === 1)) writePreparedSurfaceState(index, state);
+    else if (!isPaintVisible(index)) dirtySurfaceStates[index] = appliedStates[index] === state ? 0 : 1;
+  };
+
+  const publishSurfaceRangeWithForced = (faces: Uint16Array, states: Uint16Array, start: number, end: number, frame: number): void => {
+    let cursor = start;
+    let forcedCursor = 0;
+    while (cursor < end || forcedCursor < currentForced.length) {
+      const scheduled = cursor < end ? faces[cursor] : 0xffff;
+      const forcedIndex = forcedCursor < currentForced.length ? currentForced[forcedCursor] : 0xffff;
+      let index: number;
+      let state: number;
+      if (scheduled < forcedIndex) {
+        index = scheduled;
+        state = states[cursor++];
+      } else if (forcedIndex < scheduled) {
+        index = forcedIndex;
+        state = stateAt(light.faces[index], frame - 1);
+        forcedCursor += 1;
+      } else {
+        index = scheduled;
+        state = states[cursor++];
+        forcedCursor += 1;
+      }
+      if (options.diagnostics) options.diagnostics.surfaceLightingTargetVisits += 1;
+      publishSurfaceTarget(index, state, frame);
+    }
+  };
+
+  const markSurfaceSegment = (segment: number): void => {
+    for (let cursor = light.sequentialOffsets[segment]; cursor < light.sequentialOffsets[segment + 1]; cursor += 1) {
+      const index = light.sequentialFaces[cursor];
+      surfaceScratchStates[index] = light.sequentialStates[cursor];
+      surfaceDirtyFlags[index] = 1;
+    }
+  };
+
+  const toggleVisibilitySegment = (segment: number, markDirty: boolean): void => {
+    for (let cursor = visibility.sequentialOffsets[segment]; cursor < visibility.sequentialOffsets[segment + 1]; cursor += 1) {
+      const index = visibility.sequentialFaces[cursor];
+      visible[index] ^= 1;
+      if (markDirty) visibilityDirtyFlags[index] = 1;
+    }
+  };
+
   const applySurface = (nextFrame: number): void => {
     if (nextFrame === surfaceFrame) return;
     const frameCount = playbackParameters.frameCount;
     const sequential = nextFrame === (surfaceFrame === frameCount ? 1 : surfaceFrame + 1);
     const jump = sequential ? undefined : light.jumps.get(`${surfaceFrame}>${nextFrame}`);
     const visibilityJump = sequential ? undefined : visibility.jumps.get(`${surfaceFrame}>${nextFrame}`);
-    const changedVisibility = new Set<number>();
-    const changedSurface = new Map<number, number>();
-    const applyVisibilitySegment = (segment: number): void => {
-      for (let cursor = visibility.sequentialOffsets[segment]; cursor < visibility.sequentialOffsets[segment + 1]; cursor += 1) {
-        const index = visibility.sequentialFaces[cursor];
-        visible[index] ^= 1;
-        changedVisibility.add(index);
-      }
-    };
-    const applySurfaceSegment = (segment: number): void => {
-      for (let cursor = light.sequentialOffsets[segment]; cursor < light.sequentialOffsets[segment + 1]; cursor += 1) {
-        changedSurface.set(light.sequentialFaces[cursor], light.sequentialStates[cursor]);
-      }
-    };
     if (sequential) {
-      applyVisibilitySegment(nextFrame - 1);
-      applySurfaceSegment(nextFrame - 1);
+      const visibilityStart = visibility.sequentialOffsets[nextFrame - 1];
+      const visibilityEnd = visibility.sequentialOffsets[nextFrame];
+      toggleVisibilitySegment(nextFrame - 1, false);
+      publishSurfaceRangeWithForced(light.sequentialFaces, light.sequentialStates, light.sequentialOffsets[nextFrame - 1], light.sequentialOffsets[nextFrame], nextFrame);
+      if (options.diagnostics) options.diagnostics.surfaceVisibilityTargetVisits += visibilityEnd - visibilityStart;
+      for (let cursor = visibilityStart; cursor < visibilityEnd; cursor += 1) writeVisibility(visibility.sequentialFaces[cursor], nextFrame);
     } else if (jump && visibilityJump) {
       for (const index of visibilityJump) {
         visible[index] ^= 1;
-        changedVisibility.add(index);
       }
-      for (let cursor = 0; cursor < jump.faces.length; cursor += 1) changedSurface.set(jump.faces[cursor], jump.states[cursor]);
+      publishSurfaceRangeWithForced(jump.faces, jump.states, 0, jump.faces.length, nextFrame);
+      if (options.diagnostics) options.diagnostics.surfaceVisibilityTargetVisits += visibilityJump.length;
+      for (const index of visibilityJump) writeVisibility(index, nextFrame);
     } else {
+      if (options.diagnostics) options.diagnostics.surfaceFullReconstructions += 1;
       let frame = surfaceFrame;
       while (frame !== nextFrame) {
         frame = frame === frameCount ? 1 : frame + 1;
-        applyVisibilitySegment(frame - 1);
-        applySurfaceSegment(frame - 1);
+        toggleVisibilitySegment(frame - 1, true);
+        markSurfaceSegment(frame - 1);
       }
+      for (const index of currentForced) {
+        surfaceScratchStates[index] = stateAt(light.faces[index], nextFrame - 1);
+        surfaceDirtyFlags[index] = 1;
+      }
+      let surfaceDirtyCount = 0;
+      let visibilityDirtyCount = 0;
+      for (let index = 0; index < packet.leafCount; index += 1) {
+        if (surfaceDirtyFlags[index] === 1) { surfaceDirtyFlags[index] = 0; surfaceDirtyIndices[surfaceDirtyCount++] = index; }
+        if (visibilityDirtyFlags[index] === 1) { visibilityDirtyFlags[index] = 0; visibilityDirtyIndices[visibilityDirtyCount++] = index; }
+      }
+      if (options.diagnostics) {
+        options.diagnostics.surfaceLightingTargetVisits += surfaceDirtyCount;
+        options.diagnostics.surfaceVisibilityTargetVisits += visibilityDirtyCount;
+      }
+      for (let cursor = 0; cursor < surfaceDirtyCount; cursor += 1) {
+        const index = surfaceDirtyIndices[cursor];
+        publishSurfaceTarget(index, surfaceScratchStates[index], nextFrame);
+      }
+      for (let cursor = 0; cursor < visibilityDirtyCount; cursor += 1) writeVisibility(visibilityDirtyIndices[cursor], nextFrame);
     }
-    for (const index of currentForced) changedSurface.set(index, stateAt(light.faces[index], nextFrame - 1));
-    for (const index of [...changedSurface.keys()].sort((left, right) => left - right)) {
-      const face = light.faces[index];
-      const state = changedSurface.get(index)!;
-      invariant(state >= 0 && state < face.stateCount, "INVALID_SURFACE_PUBLICATION", `Prepared surface leaf ${index} has no state for frame ${nextFrame}.`);
-      if (isPaintVisible(index) && (appliedStates[index] !== state || dirtySurfaceStates[index] === 1)) writePreparedSurfaceState(index, state);
-      else if (!isPaintVisible(index)) dirtySurfaceStates[index] = appliedStates[index] === state ? 0 : 1;
-    }
-    for (const index of [...changedVisibility].sort((left, right) => left - right)) writeVisibility(index, nextFrame);
     surfaceFrame = nextFrame;
   };
 
@@ -1206,7 +1268,7 @@ export function createPolycssPlayback(
       leafTargets[index] = packet.leafChanges[base];
       stagedLeafTransforms[index] = packet.transforms[packet.leafChanges[base + 1]];
     }
-    const playbackStage: PagedPlaybackStage = Object.freeze({ frame, complete: false, appearance: row[1], ...(row[2] === -1 ? {} : { modelTransform: packet.transforms[row[2]] }), shapeTargets, shapeTransforms: Object.freeze(stagedShapeTransforms), shapeVisibility: stagedShapeVisibility, leafTargets, leafTransforms: Object.freeze(stagedLeafTransforms) });
+    const playbackStage: PagedPlaybackStage = Object.freeze({ frame, kind: "materialized", appearance: row[1], ...(row[2] === -1 ? {} : { modelTransform: packet.transforms[row[2]] }), shapeTargets, shapeTransforms: Object.freeze(stagedShapeTransforms), shapeVisibility: stagedShapeVisibility, leafTargets, leafTransforms: Object.freeze(stagedLeafTransforms) });
     return Object.freeze({ frame, playback: playbackStage, variants: includePagedVariants ? options.pagedState?.stage(frame, false).variants ?? null : null });
   };
 
@@ -1223,26 +1285,78 @@ export function createPolycssPlayback(
       modelTransform = next.modelTransform;
       if (publish) writeModel();
     }
-    for (let index = 0; index < next.shapeTargets.length; index += 1) {
-      const shape = next.shapeTargets[index];
-      shapeTransforms[shape] = next.shapeTransforms[index];
-      shapeVisibility[shape] = next.shapeVisibility[index];
-      dirtyShapes?.add(shape);
-      if (publish) shapes[shape].style.transform = shapeTransforms[shape];
+    if (next.kind === "range") {
+      if (options.diagnostics) {
+        options.diagnostics.playbackPublicationShapeVisits += next.shapeEnd - next.shapeStart;
+        options.diagnostics.playbackPublicationLeafVisits += next.leafEnd - next.leafStart;
+      }
+      for (let cursor = next.shapeStart; cursor < next.shapeEnd; cursor += 1) {
+        const shape = next.page.shapeTargets[cursor];
+        shapeTransforms[shape] = next.page.transforms[next.page.shapeTransforms[cursor]];
+        shapeVisibility[shape] = next.page.shapeVisibility[cursor];
+        dirtyShapes?.add(shape);
+        if (publish) shapes[shape].style.transform = shapeTransforms[shape];
+      }
+      for (let cursor = next.leafStart; cursor < next.leafEnd; cursor += 1) {
+        const leaf = next.page.leafTargets[cursor];
+        leafTransforms[leaf] = next.page.transforms[next.page.leafTransforms[cursor]];
+        dirtyLeaves?.add(leaf);
+        if (publish) publishOrDeferPreparedLeafTransform(leaf);
+      }
+    } else if (next.kind === "complete") {
+      if (options.diagnostics) {
+        options.diagnostics.playbackPublicationShapeVisits += next.shapeTransforms.length;
+        options.diagnostics.playbackPublicationLeafVisits += next.leafTransforms.length;
+      }
+      for (let shape = 0; shape < next.shapeTransforms.length; shape += 1) {
+        shapeTransforms[shape] = next.shapeTransforms[shape];
+        shapeVisibility[shape] = next.shapeVisibility[shape];
+        dirtyShapes?.add(shape);
+        if (publish) shapes[shape].style.transform = shapeTransforms[shape];
+      }
+      for (let leaf = 0; leaf < next.leafTransforms.length; leaf += 1) {
+        leafTransforms[leaf] = next.leafTransforms[leaf];
+        dirtyLeaves?.add(leaf);
+        if (publish) publishOrDeferPreparedLeafTransform(leaf);
+      }
+    } else {
+      if (options.diagnostics) {
+        options.diagnostics.playbackPublicationShapeVisits += next.shapeTargets.length;
+        options.diagnostics.playbackPublicationLeafVisits += next.leafTargets.length;
+      }
+      for (let index = 0; index < next.shapeTargets.length; index += 1) {
+        const shape = next.shapeTargets[index];
+        shapeTransforms[shape] = next.shapeTransforms[index];
+        shapeVisibility[shape] = next.shapeVisibility[index];
+        dirtyShapes?.add(shape);
+        if (publish) shapes[shape].style.transform = shapeTransforms[shape];
+      }
+      for (let index = 0; index < next.leafTargets.length; index += 1) {
+        const leaf = next.leafTargets[index];
+        leafTransforms[leaf] = next.leafTransforms[index];
+        dirtyLeaves?.add(leaf);
+        if (publish) publishOrDeferPreparedLeafTransform(leaf);
+      }
     }
-    for (let index = 0; index < next.leafTargets.length; index += 1) {
-      const leaf = next.leafTargets[index];
-      leafTransforms[leaf] = next.leafTransforms[index];
-      dirtyLeaves?.add(leaf);
-      if (publish) publishOrDeferPreparedLeafTransform(leaf);
-    }
-    const profileVisibilityChanges = stageProfileVisibility(nextFrame);
-    for (const leaf of profileVisibilityChanges) dirtyProfileLeaves?.add(leaf);
+    const profileVisibilityChangeCount = stageProfileVisibility(nextFrame);
+    for (let cursor = 0; cursor < profileVisibilityChangeCount; cursor += 1) dirtyProfileLeaves?.add(profileVisibilityDirty[cursor]);
     if (publish) {
       if (!options.pagedState) applyVariants(nextFrame);
       applySurface(nextFrame);
-      for (const leaf of profileVisibilityChanges) writeVisibility(leaf, nextFrame);
-      for (const shape of next.shapeTargets) shapes[shape].style.visibility = shapeVisibility[shape] === 1 ? "visible" : "hidden";
+      for (let cursor = 0; cursor < profileVisibilityChangeCount; cursor += 1) writeVisibility(profileVisibilityDirty[cursor], nextFrame);
+      if (next.kind === "range") {
+        for (let cursor = next.shapeStart; cursor < next.shapeEnd; cursor += 1) {
+          const shape = next.page.shapeTargets[cursor];
+          shapes[shape].style.visibility = shapeVisibility[shape] === 1 ? "visible" : "hidden";
+        }
+      } else if (next.kind === "complete") {
+        for (let shape = 0; shape < next.shapeTransforms.length; shape += 1) shapes[shape].style.visibility = shapeVisibility[shape] === 1 ? "visible" : "hidden";
+      } else {
+        for (let cursor = 0; cursor < next.shapeTargets.length; cursor += 1) {
+          const shape = next.shapeTargets[cursor];
+          shapes[shape].style.visibility = shapeVisibility[shape] === 1 ? "visible" : "hidden";
+        }
+      }
     }
     sourceFrame = nextFrame;
   };
@@ -1288,9 +1402,10 @@ export function createPolycssPlayback(
     else if (preflight) options.pagedState!.commit(Object.freeze({ frame: target, playback: null, variants: preflight.variants }));
     if (synchronize) synchronizePreparedLeafTransforms();
     if (packet.kind === "inline" && !options.pagedState) applyVariants(target);
-    const profileVisibilityChanges = stageProfileVisibility(target);
+    const profileVisibilityChangeCount = stageProfileVisibility(target);
     applySurface(target);
-    for (const index of new Set([...dirtyProfileLeaves, ...profileVisibilityChanges])) writeVisibility(index, target);
+    for (let cursor = 0; cursor < profileVisibilityChangeCount; cursor += 1) dirtyProfileLeaves.add(profileVisibilityDirty[cursor]);
+    for (const index of dirtyProfileLeaves) writeVisibility(index, target);
     if (publicationKind) options.compositorTiming?.after(publicationKind, publicationTick);
     return target;
   };
@@ -1411,6 +1526,7 @@ export function createPolycssPlayback(
       if (next[index] === 0) nextIndices.push(index);
       next[index] = 1;
     }
+    nextIndices.sort((left, right) => left - right);
     const changed = new Set([...currentForced, ...nextIndices]);
     for (const index of changed) {
       forced[index] = next[index];
@@ -1549,9 +1665,9 @@ export function createPolycssPlayback(
       const staged = options.pagedState ? options.pagedState.stage(nextFrame, false) : null;
       if (staged) options.pagedState!.commit(staged);
       else applyVariants(nextFrame);
-      const profileVisibilityChanges = stageProfileVisibility(nextFrame);
+      const profileVisibilityChangeCount = stageProfileVisibility(nextFrame);
       applySurface(nextFrame);
-      for (const leaf of profileVisibilityChanges) writeVisibility(leaf, nextFrame);
+      for (let cursor = 0; cursor < profileVisibilityChangeCount; cursor += 1) writeVisibility(profileVisibilityDirty[cursor], nextFrame);
       return nextFrame;
     },
     applyViewportProfile,

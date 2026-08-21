@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createPolycssPlayback } from "../src/state/polycss.js";
+import { createPolycssPublicationDiagnostics } from "../src/state/paged-state.js";
 
 function base64Integers(values, width) {
   const bytes = new Uint8Array(values.length * width);
@@ -175,12 +176,44 @@ function createFixture(options = {}) {
   if (options.variants) bindings.channels.push({ id: "variants", interpreter: "polycss-variants@0", targets: { nodes: [leaves[0].id] } });
   if (options.viewportProfiles) bindings.channels.push({ id: "viewport-profiles", interpreter: "polycss-viewport-profiles@0", targets: { leaves: leaves.map((leaf) => leaf.id) } });
   const mounted = { byId: new Map([[model.id, model], ...leaves.map((leaf) => [leaf.id, leaf])]) };
-  const playback = createPolycssPlayback(materialized, bindings, mounted, { publishAppearance() {} });
+  const playback = createPolycssPlayback(materialized, bindings, mounted, { publishAppearance() {}, diagnostics: options.diagnostics });
   playback.publishInitial();
   if (options.viewportProfiles) playback.applyViewportProfile(320, 240, "mobile");
   writes.splice(0);
   return { leaves, playback, writes };
 }
+
+test("sequential surface publication visits only scheduled lighting and visibility targets", () => {
+  const diagnostics = createPolycssPublicationDiagnostics();
+  const { playback } = createFixture({
+    diagnostics,
+    initialVisibleBits: 3,
+    visibilityOffsets: [0, 0, 1, 1, 2],
+    lightingOffsets: [0, 0, 1, 1, 1],
+    lightingFaces: [0],
+    lightingStates: [1],
+    surfaceFaces: [
+      { stateOffset: 0, stateCount: 2 },
+      { stateOffset: 2, stateCount: 1 },
+    ],
+    surfaceSourceFrames: [0, 1, 0],
+    surfacePositions: ["0px", "-16px", "0px"],
+  });
+  for (const key of Object.keys(diagnostics)) diagnostics[key] = 0;
+  const OriginalMap = globalThis.Map;
+  const OriginalSet = globalThis.Set;
+  globalThis.Map = class extends OriginalMap { constructor() { throw new Error("sequential surface publication allocated a Map"); } };
+  globalThis.Set = class extends OriginalSet { constructor() { throw new Error("sequential surface publication allocated a Set"); } };
+  try {
+    assert.equal(playback.applySurfaceFrame(2), 2);
+  } finally {
+    globalThis.Map = OriginalMap;
+    globalThis.Set = OriginalSet;
+  }
+  assert.equal(diagnostics.surfaceLightingTargetVisits, 1);
+  assert.equal(diagnostics.surfaceVisibilityTargetVisits, 1);
+  assert.equal(diagnostics.surfaceFullReconstructions, 0);
+});
 
 test("profile timeline selection uses prepared overrides with canonical baseline fallback", () => {
   const { playback } = createFixture({

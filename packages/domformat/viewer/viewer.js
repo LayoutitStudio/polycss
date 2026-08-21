@@ -5,6 +5,7 @@ const modelUrl = parameters.get("model");
 const implementation = parameters.get("implementation") ?? "reference";
 const comparison = parameters.get("compare");
 const paintProof = parameters.get("proof") === "1";
+const publicationDiagnostics = parameters.get("diagnostics") === "1";
 let runtime = null;
 let comparisonRuntime = null;
 
@@ -47,6 +48,9 @@ try {
   if (implementation !== "reference" && implementation !== "conformance") throw new Error(`Unsupported viewer implementation ${implementation}.`);
   if (comparison && comparison !== "conformance") throw new Error(`Unsupported viewer comparison ${comparison}.`);
   const production = await import("../dist/browser.js");
+  const diagnostics = publicationDiagnostics
+    ? (await import("../dist/internal-conformance.js")).createPolycssPublicationDiagnostics()
+    : null;
   const conformanceMount = implementation === "conformance" || comparison
     ? (await import("../conformance/viewer/mount.js")).mountConformanceDom
     : null;
@@ -58,6 +62,7 @@ try {
     viewportWidth: comparison ? innerWidth / 2 : innerWidth,
     viewportHeight: innerHeight,
     loadStatePage: loadConformanceStatePage,
+    ...(diagnostics ? { diagnostics } : {}),
   };
   if (comparison) {
     host.style.width = "50%";
@@ -110,6 +115,7 @@ try {
     get mode() { return runtime.mode; },
     get sourceFrame() { return runtime.sourceFrame; },
     get bankId() { return runtime.bankId; },
+    get diagnostics() { return diagnostics; },
     seek(frame) {
       const value = runtime.seek(frame);
       comparisonRuntime?.seek(frame);

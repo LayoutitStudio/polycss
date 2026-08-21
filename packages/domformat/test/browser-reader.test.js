@@ -7,11 +7,11 @@ import { mountDom, readDomBrowser, readDomBrowserUrl } from "../src/browser.js";
 import { createInteractionInput } from "../src/browser-input.js";
 import { decodeJson, encodeCanonicalJson } from "../src/canonical-json.js";
 import { DEFAULT_LIMITS } from "../src/constants.js";
-import { createPolycssPagedState } from "../src/state/paged-state.js";
+import { createPolycssPagedState, createPolycssPublicationDiagnostics } from "../src/state/paged-state.js";
 import { createPolycssPlayback, materializePolycssState } from "../src/state/polycss.js";
 import { createStaticPresentation } from "../src/state/presentation.js";
 import { buildDom } from "../src/writer.js";
-import { builtExternalResources, errorCode, largePagedDescriptorClosure, syntheticAdapterTechniquesInput, syntheticAnimationWithoutEffectsInput, syntheticAspectProfileTimelinesInput, syntheticCompositorTimingInput, syntheticEvictingPagedVariantsInput, syntheticExecutableInteractionInput, syntheticInput, syntheticOrbitInput, syntheticPagedPlaybackInput, syntheticPagedPreparedBanksInput, syntheticPreparedBanksInput, syntheticPagedProfileTimelinesWithoutInteractionInput, syntheticPagedVariantsInput, syntheticProfileTimelinesInput, syntheticResponsivePresentationInput, syntheticStaticPresentationInput, syntheticPolycssInput, syntheticViewportProfilesInput } from "./helpers.js";
+import { builtExternalResources, errorCode, largePagedDescriptorClosure, syntheticAdapterTechniquesInput, syntheticAnimationWithoutEffectsInput, syntheticAspectProfileTimelinesInput, syntheticCompositorTimingInput, syntheticEvictingPagedVariantsInput, syntheticExecutableInteractionInput, syntheticInput, syntheticOrbitInput, syntheticPagedPlaybackChangesInput, syntheticPagedPlaybackInput, syntheticPagedPreparedBanksInput, syntheticPreparedBanksInput, syntheticPagedProfileTimelinesWithoutInteractionInput, syntheticPagedVariantsInput, syntheticProfileTimelinesInput, syntheticResponsivePresentationInput, syntheticStaticPresentationInput, syntheticPolycssInput, syntheticViewportProfilesInput } from "./helpers.js";
 import { dispatch, FakeElement, fakeBrowserDocument } from "./fake-browser.js";
 
 function foreignArrayBuffer(bytes) {
@@ -23,6 +23,24 @@ function base64Integers(values, width) {
   const bytes = new Uint8Array(values.length * width);
   for (let index = 0; index < values.length; index += 1) for (let byte = 0; byte < width; byte += 1) bytes[index * width + byte] = Math.floor(values[index] / 2 ** (byte * 8)) & 255;
   return Buffer.from(bytes).toString("base64");
+}
+
+function resetPublicationDiagnostics(diagnostics) {
+  for (const key of Object.keys(diagnostics)) diagnostics[key] = 0;
+}
+
+function withoutSequentialRangeCopies(callback) {
+  const originalArrayFrom = Array.from;
+  const typedArrays = [Uint8Array, Uint16Array, Uint32Array];
+  const originalSlices = typedArrays.map((constructor) => constructor.prototype.slice);
+  Array.from = () => { throw new Error("sequential staging called Array.from"); };
+  for (const constructor of typedArrays) constructor.prototype.slice = () => { throw new Error("sequential staging sliced a typed range"); };
+  try {
+    return callback();
+  } finally {
+    Array.from = originalArrayFrom;
+    for (let index = 0; index < typedArrays.length; index += 1) typedArrays[index].prototype.slice = originalSlices[index];
+  }
 }
 
 function documentRoutes(built, modelUrl) {
@@ -823,6 +841,181 @@ test("paged variant admission never transiently exceeds the decoded residency ce
   assert.equal(paged.residentResources.length, 4);
   assert.deepEqual(page3ResidentCounts, [3, 3]);
   paged.destroy();
+});
+
+test("sequential paged variants compare only their resident typed target range", async () => {
+  const targetCount = 1_984;
+  const target = 937;
+  const keyframe = new Array(targetCount).fill(0);
+  const payload = {
+    version: 0,
+    codec: "polycss-paged-variants-page@0",
+    channel: "variants",
+    startFrame: 1,
+    endFrame: 3,
+    keyframeClassIndicesBase64: base64Integers(keyframe, 2),
+    sequential: {
+      offsetsBase64: base64Integers([0, 0, 1, 2], 4),
+      targetIndicesBase64: base64Integers([target, target + 1], 2),
+      classIndicesBase64: base64Integers([1, 1], 2),
+    },
+  };
+  const bytes = encodeCanonicalJson(payload);
+  const materializedByteLength = targetCount * 2 + 16 + 8;
+  const ids = Array.from({ length: targetCount }, (_, index) => `variant:${index}`);
+  const fake = fakeBrowserDocument();
+  const nodes = ids.map((id) => {
+    const node = new FakeElement(fake.document, "s");
+    node.classList.add("class-a");
+    return [id, node];
+  });
+  fake.writes.splice(0);
+  const document = {
+    state: { channels: [{ id: "variants", codec: "polycss-paged-variants@0", data: { packet: {
+      frameCount: 3,
+      classes: ["class-a", "class-b"],
+      initial: { frame: 1, classIndicesBase64: base64Integers(keyframe, 2) },
+      pages: [{ resource: "variants-page", startFrame: 1, endFrame: 3, changeCount: 2, materializedByteLength }],
+      lookaheadPages: 1,
+      maxResidentPages: 2,
+    } } }] },
+    bindings: { channels: [{ id: "variants", state: "variants", interpreter: "polycss-paged-variants@0", targets: { nodes: ids } }] },
+    resources: { resources: [{ id: "variants-page", kind: "state-page", decodedByteLength: bytes.length }] },
+  };
+  const diagnostics = createPolycssPublicationDiagnostics();
+  const pagedState = createPolycssPagedState(document, { byId: new Map(nodes) }, DEFAULT_LIMITS, async () => bytes, { diagnostics });
+  await pagedState.prepareInitial();
+  resetPublicationDiagnostics(diagnostics);
+
+  const staged = withoutSequentialRangeCopies(() => pagedState.stage(2, false));
+  assert.equal(staged.variants.kind, "range");
+  assert.equal(Object.hasOwn(staged.variants, "targets"), false);
+  assert.equal(Object.hasOwn(staged.variants, "classes"), false);
+  assert.ok(ArrayBuffer.isView(staged.variants.page.targets));
+  assert.equal(pagedState.stage(2, false).variants.page, staged.variants.page);
+  withoutSequentialRangeCopies(() => pagedState.commit(staged));
+  assert.equal(diagnostics.variantLogicalTargetVisits, 1);
+  assert.equal(diagnostics.variantComparisonTargetVisits, 1);
+  assert.equal(diagnostics.variantCanonicalReconstructions, 0);
+  assert.equal(diagnostics.variantDomWrites, 2);
+  assert.equal(diagnostics.sequentialTargetSizedAllocations, 0);
+  assert.deepEqual(fake.writes.map((write) => [write.element === nodes[target][1] ? target : -1, write.property]), [[target, "class:remove"], [target, "class:add"]]);
+
+  resetPublicationDiagnostics(diagnostics);
+  fake.writes.splice(0);
+  pagedState.publishVariants(2);
+  assert.equal(diagnostics.variantCanonicalReconstructions, 1);
+  assert.equal(diagnostics.variantLogicalTargetVisits, targetCount);
+  assert.equal(diagnostics.variantComparisonTargetVisits, targetCount);
+  assert.deepEqual(fake.writes, []);
+
+  resetPublicationDiagnostics(diagnostics);
+  pagedState.publishVariants(1);
+  assert.equal(diagnostics.variantCanonicalReconstructions, 1);
+  assert.equal(diagnostics.variantComparisonTargetVisits, targetCount);
+  assert.deepEqual(nodes[target][1].classes, ["class-a"]);
+  pagedState.destroy();
+});
+
+test("paged playback mutates sparse canonical rows in place and visits every declared dense target", async () => {
+  const exercise = async (input) => {
+    const built = buildDom(await input);
+    const all = builtExternalResources(built);
+    const fake = fakeBrowserDocument();
+    const mounted = { byId: new Map(built.document.tree.nodes.map((node) => {
+      const element = new FakeElement(fake.document, node.name);
+      Object.assign(element.style, node.styles ?? {});
+      for (const className of node.classes) element.classList.add(className);
+      return [node.id, element];
+    })) };
+    const diagnostics = createPolycssPublicationDiagnostics();
+    const pagedState = createPolycssPagedState(built.document, mounted, DEFAULT_LIMITS, async (record) => all.get(record.id), { diagnostics });
+    await pagedState.prepareInitial();
+    const playback = createPolycssPlayback(materializePolycssState(built.document.state), built.document.bindings, mounted, {
+      publishAppearance() {},
+      pagedState,
+      assertPagedFrameReady: (frame) => pagedState.assertFrameReady(frame),
+      diagnostics,
+    });
+    playback.publishInitial();
+    return { built, diagnostics, fake, mounted, pagedState, playback };
+  };
+
+  const sparse = await exercise(syntheticPagedPlaybackChangesInput({ variants: false }));
+  await sparse.pagedState.ensureFrame(2);
+  sparse.playback.advance();
+  await sparse.pagedState.ensureFrame(3);
+  sparse.playback.advance();
+  const sparseCanonical = sparse.pagedState.initialPlayback;
+  const sparseShapeRow = sparseCanonical.shapeTransforms;
+  const sparseVisibilityRow = sparseCanonical.shapeVisibility;
+  const sparseLeafRow = sparseCanonical.leafTransforms;
+  resetPublicationDiagnostics(sparse.diagnostics);
+  const sparseStage = withoutSequentialRangeCopies(() => sparse.pagedState.stage(4));
+  assert.equal(sparseStage.playback.kind, "range");
+  for (const property of ["shapeTargets", "shapeTransforms", "shapeVisibility", "leafTargets", "leafTransforms"]) assert.equal(Object.hasOwn(sparseStage.playback, property), false);
+  withoutSequentialRangeCopies(() => sparse.playback.advance());
+  assert.equal(sparse.playback.sourceFrame, 4);
+  assert.equal(sparse.pagedState.initialPlayback, sparseCanonical);
+  assert.equal(sparse.pagedState.initialPlayback.shapeTransforms, sparseShapeRow);
+  assert.equal(sparse.pagedState.initialPlayback.shapeVisibility, sparseVisibilityRow);
+  assert.equal(sparse.pagedState.initialPlayback.leafTransforms, sparseLeafRow);
+  assert.equal(sparse.diagnostics.playbackCanonicalReconstructions, 0);
+  assert.equal(sparse.diagnostics.playbackCanonicalShapeVisits, 1);
+  assert.equal(sparse.diagnostics.playbackCanonicalLeafVisits, 0);
+  assert.equal(sparse.diagnostics.playbackPublicationShapeVisits, 1);
+  assert.equal(sparse.diagnostics.playbackPublicationLeafVisits, 0);
+  assert.equal(sparse.diagnostics.sequentialTargetSizedAllocations, 0);
+  sparse.pagedState.destroy();
+
+  const denseInput = syntheticPagedPlaybackInput({ ranges: [[1, 8]], mutate(input) {
+    const packet = input.state.channels.find((channel) => channel.codec === "polycss-playback-packed@0").data.packet;
+    packet.transforms.count = 9;
+    const changed = [1, 0, 0, 0, 1, 0, 0, 0, 1, 10, 0, 0];
+    for (const group of [packet.transforms.groups[1], packet.transforms.groups[2]]) group.columns = changed.map((value) => [value]);
+    for (const group of [packet.transforms.groups[3], packet.transforms.groups[4]]) group.columns.forEach((column, component) => column.push(component === 9 ? 10_000 : column[0]));
+    packet.shapeChanges = { sources: [0, 1], transforms: [5, 1], visibility: [0, 0] };
+    packet.frameRows[1][3] = 0;
+    packet.frameRows[1][4] = 2;
+    packet.leafChanges = { sources: [0, 1], transforms: [7, 1] };
+    packet.frameRows[1][5] = 0;
+    packet.frameRows[1][6] = 2;
+  } });
+  const dense = await exercise(denseInput);
+  const retained = [...dense.mounted.byId.values()];
+  resetPublicationDiagnostics(dense.diagnostics);
+  dense.playback.advance();
+  assert.equal(dense.diagnostics.playbackCanonicalReconstructions, 0);
+  assert.equal(dense.diagnostics.playbackCanonicalShapeVisits, 2);
+  assert.equal(dense.diagnostics.playbackCanonicalLeafVisits, 2);
+  assert.equal(dense.diagnostics.playbackPublicationShapeVisits, 2);
+  assert.equal(dense.diagnostics.playbackPublicationLeafVisits, 2);
+  assert.equal(dense.diagnostics.sequentialTargetSizedAllocations, 0);
+  assert.deepEqual([...dense.mounted.byId.values()], retained);
+
+  resetPublicationDiagnostics(dense.diagnostics);
+  dense.playback.seek(6);
+  assert.equal(dense.diagnostics.playbackCanonicalReconstructions, 1);
+  assert.equal(dense.diagnostics.playbackCanonicalShapeVisits, 2);
+  assert.equal(dense.diagnostics.playbackCanonicalLeafVisits, 2);
+  assert.equal(dense.diagnostics.playbackPublicationShapeVisits, 2);
+  assert.equal(dense.diagnostics.playbackPublicationLeafVisits, 2);
+
+  dense.pagedState.commit(dense.pagedState.stage(8));
+  const wrapCanonical = dense.pagedState.initialPlayback;
+  const wrapShapeRow = wrapCanonical.shapeTransforms;
+  const wrapLeafRow = wrapCanonical.leafTransforms;
+  resetPublicationDiagnostics(dense.diagnostics);
+  const wrap = dense.pagedState.stage(1);
+  assert.equal(wrap.playback.kind, "range");
+  dense.pagedState.commit(wrap);
+  assert.equal(dense.pagedState.initialPlayback, wrapCanonical);
+  assert.equal(dense.pagedState.initialPlayback.shapeTransforms, wrapShapeRow);
+  assert.equal(dense.pagedState.initialPlayback.leafTransforms, wrapLeafRow);
+  assert.equal(dense.diagnostics.playbackCanonicalReconstructions, 0);
+  assert.equal(dense.diagnostics.playbackCanonicalShapeVisits, 2);
+  assert.equal(dense.diagnostics.playbackCanonicalLeafVisits, 2);
+  dense.pagedState.destroy();
 });
 
 test("paged playback preserves exact random, boundary, wrap, and cross-channel publication", async () => {
