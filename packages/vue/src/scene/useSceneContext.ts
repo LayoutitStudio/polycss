@@ -1,11 +1,7 @@
 import { computed } from "vue";
 import type { Ref } from "vue";
-import type { Polygon, PolyDirectionalLight, Vec3 } from "@layoutit/polycss-core";
+import type { Polygon, Vec3 } from "@layoutit/polycss-core";
 import { buildSceneContext, mergePolygons } from "@layoutit/polycss-core";
-
-export interface UseSceneContextOptions {
-  directionalLight?: PolyDirectionalLight;
-}
 
 export interface UseSceneContextResult {
   polygons: Polygon[];
@@ -17,15 +13,12 @@ export interface UseSceneContextResult {
  *   normalizePolygons → mergePolygons by default → bbox compute.
  *
  * Returns a Ref to the processed polygons + the scene-wide axis-aligned bbox.
- * Recomputes when `polygons` or relevant options change.
+ * Recomputes when `polygons` changes.
  */
 export function usePolySceneContext(
   polygons: Ref<Polygon[]>,
-  options: Ref<UseSceneContextOptions>
 ): Ref<UseSceneContextResult> {
   return computed(() => {
-    const { directionalLight: _directionalLight } = options.value;
-
     const built = buildSceneContext({ polygons: polygons.value });
     const finalPolygons = mergePolygons(built.context.polygons);
 

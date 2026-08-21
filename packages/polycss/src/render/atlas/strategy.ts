@@ -14,10 +14,18 @@ import type {
   TextureAtlasPlan,
   PolyRenderStrategy,
   PolyRenderStrategiesOption,
+  PolyTextureBackend,
+  PolyTextureImageRendering,
+  PolyTextureProjection,
   SolidPaintDefaults,
   RGB,
 } from "@layoutit/polycss-core";
-import { parseHex, rgbKey } from "@layoutit/polycss-core";
+import {
+  parseHex,
+  rgbKey,
+  PROJECTIVE_QUAD_BLEED,
+  seamBleedPrimitiveRatio,
+} from "@layoutit/polycss-core";
 import {
   isFullRectBasis,
   computeTextureAtlasPlan,
@@ -193,12 +201,19 @@ export function filterAtlasPlans(
   textureLighting: PolyTextureLightingMode,
   disabled: ReadonlySet<PolyRenderStrategy>,
   doc?: Document | null,
+  textureBackend?: PolyTextureBackend,
+  textureImageRendering?: PolyTextureImageRendering,
+  textureProjection?: PolyTextureProjection,
 ): Array<TextureAtlasPlan | null> {
   const resolvedDoc = doc ?? (typeof document !== "undefined" ? document : null);
   return filterAtlasPlansCore(plans, textureLighting, disabled, {
     solidTriangleSupported: isSolidTriangleSupported(doc),
     projectiveQuadSupported: resolvedDoc ? projectiveQuadSupported(resolvedDoc) : true,
     borderShapeSupported: isBorderShapeSupported(doc),
+    cornerShapeSupported: resolvedDoc ? cornerShapeSupported(resolvedDoc) : false,
+    textureBackend,
+    textureImageRendering,
+    textureProjection,
   });
 }
 
@@ -210,7 +225,11 @@ export function getSolidPaintDefaults(
   const doc = options.doc ?? (typeof document !== "undefined" ? document : null);
   if (!doc) return {};
   const basisHints = buildBasisHints(polygons, options);
-  const projectiveQuadGuards = resolveProjectiveQuadGuards(doc);
+  const projectiveQuadGuards = resolveProjectiveQuadGuards(doc, {
+    bleed: PROJECTIVE_QUAD_BLEED * seamBleedPrimitiveRatio(
+      (options as import("./types.ts").InternalRenderTextureAtlasOptions).seamBleed,
+    ),
+  });
   const plans = polygons.map((polygon, index) =>
     computeTextureAtlasPlan(polygon, index, options, projectiveQuadGuards, basisHints[index])
   );

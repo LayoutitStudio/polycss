@@ -5,7 +5,7 @@ import type {
   PolyTextureLightingMode,
   SolidPaintDefaults,
 } from "@layoutit/polycss-core";
-import { parseHex, rgbKey } from "./solidTriangleStyle";
+import { parseHex, rgbKey } from "@layoutit/polycss-core";
 
 export function renderTextureProjectiveSolidPoly({
   entry,
@@ -35,22 +35,22 @@ export function renderTextureProjectiveSolidPoly({
     // Baked: always emit per-leaf shaded color (vanilla commit 0423777).
     color: dynamic ? undefined : entry.shadedColor,
     pointerEvents: pointerEvents === "none" ? "none" : undefined,
-    ...(dynamic && !useDefaultDynamicColor
+    // Dynamic mode always needs the surface normal — the @property initial
+    // value is (0,0,1), so a leaf that skipped these vars would be lit as if
+    // facing +Z. Only the base-color vars may fall back to the scene-level
+    // dominant dynamic color.
+    ...(dynamic
       ? {
           "--pnx": entry.normal[0].toFixed(4),
           "--pny": entry.normal[1].toFixed(4),
           "--pnz": entry.normal[2].toFixed(4),
-          "--psr": (base.r / 255).toFixed(4),
-          "--psg": (base.g / 255).toFixed(4),
-          "--psb": (base.b / 255).toFixed(4),
+          ...(useDefaultDynamicColor ? null : {
+            "--psr": (base.r / 255).toFixed(4),
+            "--psg": (base.g / 255).toFixed(4),
+            "--psb": (base.b / 255).toFixed(4),
+          }),
         }
-      : dynamic
-        ? {
-            "--pnx": entry.normal[0].toFixed(4),
-            "--pny": entry.normal[1].toFixed(4),
-            "--pnz": entry.normal[2].toFixed(4),
-          }
-        : null),
+      : null),
     ...styleProp,
   };
 

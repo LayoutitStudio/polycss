@@ -4,6 +4,7 @@ import type { CSSProperties } from "react";
 import type {
   TextureAtlasPlan,
   PolyTextureLightingMode,
+  PolyRenderStrategiesOption,
   SolidPaintDefaults,
 } from "@layoutit/polycss-core";
 import { solidTriangleStyle } from "./solidTriangleStyle";
@@ -17,6 +18,8 @@ export const TextureTrianglePoly = memo(function TextureTrianglePoly({
   domAttrs,
   domEventHandlers,
   pointerEvents = "auto",
+  doc,
+  strategies,
 }: {
   entry: TextureAtlasPlan;
   textureLighting: PolyTextureLightingMode;
@@ -26,8 +29,10 @@ export const TextureTrianglePoly = memo(function TextureTrianglePoly({
   domAttrs?: Record<string, unknown>;
   domEventHandlers?: React.DOMAttributes<Element>;
   pointerEvents?: "auto" | "none";
+  doc?: Document | null;
+  strategies?: PolyRenderStrategiesOption;
 }) {
-  const triangleStyle = solidTriangleStyle(entry, textureLighting, pointerEvents, solidPaintDefaults);
+  const triangleStyle = solidTriangleStyle(entry, textureLighting, pointerEvents, solidPaintDefaults, doc, strategies);
   if (!triangleStyle) return null;
 
   const dataAttrs = entry.polygon.data

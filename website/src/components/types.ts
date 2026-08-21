@@ -89,6 +89,8 @@ export interface SceneOptionsState {
   /** Re-emit shadows while a mesh animates so the shadow follows the pose
    *  (throttled; best with parametric). */
   shadowFollowAnimation: boolean;
+  /** Shadow strength 0..1 — the engine's `shadow.opacity`. */
+  shadowOpacity: number;
   showGround: boolean;
   groundColor: string;
   fpvLook: boolean;

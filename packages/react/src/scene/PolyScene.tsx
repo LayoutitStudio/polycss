@@ -14,16 +14,16 @@ import type {
 import {
   BASE_TILE,
   DEFAULT_SEAM_BLEED,
+  resolveSeamBleedPx,
   parseHexColor,
   resolvePolyTextureLeafGeometry,
   worldDirectionToCss,
   POLY_DEFAULT_SHADOW_LIFT,
 } from "@layoutit/polycss-core";
-import type { ShadowCasterRegistration, ShadowOptions } from "./sceneContext";
+import type { ShadowCasterRegistration, PolyShadowOptions } from "./sceneContext";
 import { useCameraContext } from "../camera/context";
 import { usePolySceneContext } from "./useSceneContext";
 import { injectPolyBaseStyles } from "../styles/styles";
-import type { TransformProps } from "../shapes/types";
 import {
   buildSeamBleedPolygonEdges,
   buildTextureEdgeRepairSets,
@@ -42,7 +42,7 @@ import {
 } from "./atlas";
 import { PolySceneContext } from "./sceneContext";
 
-export interface PolySceneProps extends TransformProps {
+export interface PolySceneProps {
   /** Polygons to render. Composes additively with `children`. */
   polygons?: Polygon[];
   /**
@@ -59,10 +59,6 @@ export interface PolySceneProps extends TransformProps {
    * PolyMesh's own `autoCenter`.
    */
   centerPolygons?: Polygon[];
-  perspective?: number;
-  rotX?: number;
-  rotY?: number;
-  zoom?: number;
   directionalLight?: PolyDirectionalLight;
   /** Point lights (world-space positions). Direction-only per-face Lambert,
    *  baked-mode only. */
@@ -83,7 +79,7 @@ export interface PolySceneProps extends TransformProps {
   textureBackend?: PolyTextureBackend;
   /** Default texture projection request. Defaults to "affine". */
   textureProjection?: PolyTextureProjection;
-  /** Solid seam overscan. `"auto"` computes a fitted per-edge amount from the polygon plan. */
+  /** Solid seam overscan in CSS px (no upper clamp; each edge is still fitted to the polygon plan). `"auto"`/omitted = the 1.5px default; `0` disables every bleed; sub-1.5 values also shrink per-strategy primitive bleeds proportionally. */
   seamBleed?: PolySeamBleed;
   /**
    * Render strategy overrides. Use `{ disable: ["u"] }` to force solid
@@ -93,13 +89,15 @@ export interface PolySceneProps extends TransformProps {
    */
   strategies?: PolyRenderStrategiesOption;
   /**
-   * When `true`, rotation pivots around the mesh's bbox center instead of
-   * world (0,0,0). Polygon data is not mutated — the scene element's
-   * `transform-origin` is moved to the bbox center in CSS. Equivalent to
-   * setting Three.js's `OrbitControls.target` to the mesh centroid. Off
-   * by default to match Three.js: meshes load at their authored origin
-   * unless the user opts in. Use this for loaded OBJ/GLB assets whose
-   * origin is at a corner / feet / arbitrary point.
+   * When `true`, rotation pivots around the bbox center of all centerable
+   * meshes instead of world (0,0,0). Polygon data is not mutated and no DOM
+   * wrapper is added — the bbox-center offset is folded into the scene
+   * camera transform alongside `target` (the camera orbits
+   * `target + offset`). Equivalent to setting Three.js's
+   * `OrbitControls.target` to the mesh centroid. Off by default to match
+   * Three.js: meshes load at their authored origin unless the user opts in.
+   * Use this for loaded OBJ/GLB assets whose origin is at a corner / feet /
+   * arbitrary point. Same mechanism in all three renderers.
    */
   autoCenter?: boolean;
   /**
@@ -108,23 +106,15 @@ export interface PolySceneProps extends TransformProps {
    * ground, or mesh geometry changes. Defaults:
    * `{ color: "#000000", opacity: 0.25, lift: 0.05, maxExtend: 2000 }`.
    */
-  shadow?: ShadowOptions;
+  shadow?: PolyShadowOptions;
   className?: string;
   style?: CSSProperties;
   children?: ReactNode;
-
-  // Debug toggles retained for external tooling.
-  debugShowLabels?: boolean;
-  debugShowBackfaces?: boolean;
 }
 
 function PolySceneInner({
   polygons: polygonsProp,
   centerPolygons: centerPolygonsProp,
-  perspective: _perspective,
-  rotX: _rotX,
-  rotY: _rotY,
-  zoom: _zoom,
   directionalLight,
   pointLights,
   ambientLight,
@@ -141,11 +131,6 @@ function PolySceneInner({
   className,
   style,
   children,
-  position: _position,
-  scale: _scale,
-  rotation: _rotation,
-  debugShowLabels: _debugShowLabels,
-  debugShowBackfaces,
 }: PolySceneProps) {
   const { store, sceneElRef, applyTransformDirect } = useCameraContext();
   const [sceneEl, setSceneEl] = useState<HTMLDivElement | null>(null);
@@ -157,14 +142,6 @@ function PolySceneInner({
     },
     [sceneElRef]
   );
-
-  // Retain the debug class for external tooling. The atlas renderer no longer
-  // emits separate backface elements.
-  useEffect(() => {
-    const el = sceneElRef.current;
-    if (!el) return;
-    el.classList.toggle("polycss-debug-show-backfaces", !!debugShowBackfaces);
-  }, [debugShowBackfaces, sceneElRef]);
 
   // Inject base styles once
   const injectedRef = useRef(false);
@@ -190,9 +167,7 @@ function PolySceneInner({
   );
 
   // Run mesh post-processing pipeline (normalize + automatic merge).
-  const { polygons, sceneBbox: renderSceneBbox } = usePolySceneContext(inputPolygons, {
-    directionalLight,
-  });
+  const { polygons, sceneBbox: renderSceneBbox } = usePolySceneContext(inputPolygons);
 
   // Bbox for autoCenter: prefer centerPolygons (if provided) over the render
   // polygon bbox. centerPolygons are NOT normalized/merged here — they're used
@@ -200,7 +175,6 @@ function PolySceneInner({
   // raw merged polygons, not normalized ones, for its centerWrapper calc).
   const { sceneBbox: centerSceneBbox } = usePolySceneContext(
     centerInputPolygons ?? inputPolygons,
-    { directionalLight },
   );
   const sceneBbox = centerInputPolygons ? centerSceneBbox : renderSceneBbox;
 
@@ -267,11 +241,10 @@ function PolySceneInner({
   const textureAtlasPlans = useMemo(
     () => {
       const repairEdges = buildTextureEdgeRepairSets(polygons);
-      const seamBleedEdges = seamBleed === "auto" || (
-        typeof seamBleed === "number" &&
-        Number.isFinite(seamBleed) &&
-        seamBleed > 0
-      )
+      // Core owns seamBleed resolution (resolveSeamBleedPx): "auto"/undefined
+      // → the 1.5px default, numbers are absolute px. Skip the seam-edge map
+      // only when the resolved overscan is 0.
+      const seamBleedEdges = resolveSeamBleedPx(seamBleed) > 0
         ? buildSeamBleedPolygonEdges(polygons, {
             tileSize: polyContext.tileSize,
             layerElevation: polyContext.layerElevation,
@@ -281,7 +254,7 @@ function PolySceneInner({
         : null;
       return polygons.map((p, i) => computeTextureAtlasPlan(p, i, {
         ...polyContext,
-        seamBleed: seamBleedEdges?.has(i) ? seamBleed : undefined,
+        seamBleed,
         seamEdges: seamBleedEdges?.get(i),
         textureEdgeRepairEdges: repairEdges[i],
       }));
@@ -352,6 +325,27 @@ function PolySceneInner({
     };
   }, [textureLighting, directionalLight, ambientLight]);
 
+  // Field-wise stable shadow identity. An inline `shadow={{...}}` object is a
+  // fresh identity on every parent render; keying the registration callback
+  // and scene context on it would recreate registerShadowCaster each render,
+  // forcing every PolyMesh caster through an unregister/re-register cycle
+  // that bypasses the followAnimation throttle. Only a real field change
+  // produces a new identity here.
+  const stableShadow = useMemo<PolyShadowOptions | undefined>(
+    () => shadow,
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- identity keyed on the option fields, not the object
+    [
+      shadow?.color,
+      shadow?.opacity,
+      shadow?.lift,
+      shadow?.maxExtend,
+      shadow?.parametric,
+      shadow?.definition,
+      shadow?.style,
+      shadow?.followAnimation,
+    ],
+  );
+
   // Shadow caster registry. PolyMesh children call registerShadowCaster when
   // their castShadow prop or polygon list changes. The scene accumulates the
   // full caster transforms, derives the ground-plane CSS-Z, and mirrors it
@@ -378,9 +372,9 @@ function PolySceneInner({
       }
     }
     if (!Number.isFinite(minWorldZ)) return null;
-    const lift = shadow?.lift ?? POLY_DEFAULT_SHADOW_LIFT;
+    const lift = stableShadow?.lift ?? POLY_DEFAULT_SHADOW_LIFT;
     return (minWorldZ + lift) * BASE_TILE;
-  }, [shadow]);
+  }, [stableShadow]);
 
   const registerShadowCaster = useCallback((meshId: symbol, data: ShadowCasterRegistration | null) => {
     if (data === null) {
@@ -477,6 +471,8 @@ function PolySceneInner({
           key={plan.index}
           entry={plan}
           textureLighting={textureLighting}
+          doc={sceneEl?.ownerDocument}
+          strategies={strategies}
         />
       );
     }
@@ -503,7 +499,7 @@ function PolySceneInner({
       textureImageRendering,
       textureBackend,
       textureProjection,
-      shadow,
+      shadow: stableShadow,
       registerShadowCaster,
       registerShadowReceiver,
       shadowCasters: shadowCastersRef.current,
@@ -512,7 +508,7 @@ function PolySceneInner({
       groundCssZ,
       sceneEl,
     }),
-    [textureLighting, directionalLight, pointLights, ambientLight, strategies, seamBleed, textureLeafSizing, textureImageRendering, textureBackend, textureProjection, shadow, registerShadowCaster, registerShadowReceiver, shadowCastersVersion, hasShadowReceiver, groundCssZ, sceneEl],
+    [textureLighting, directionalLight, pointLights, ambientLight, strategies, seamBleed, textureLeafSizing, textureImageRendering, textureBackend, textureProjection, stableShadow, registerShadowCaster, registerShadowReceiver, shadowCastersVersion, hasShadowReceiver, groundCssZ, sceneEl],
   );
 
   return (

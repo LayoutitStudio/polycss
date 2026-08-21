@@ -45,6 +45,8 @@ function makeHandle(el: HTMLElement, id = "test"): PolyMeshHandle {
     getPolygons: () => [] as Polygon[],
     setPolygons: () => {},
     rebakeAtlas: () => {},
+    updatePolygon: () => {},
+    whenTexturesReady: () => Promise.resolve(),
   };
 }
 

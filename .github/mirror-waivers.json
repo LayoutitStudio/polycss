@@ -1,0 +1,30 @@
+{
+  "voxel-renderer": {
+    "reason": "React/Vue caught up to a fix packages/polycss already carried: their camera-cull item ordering still used raw rotateVec3 for the mesh rotation, while the vanilla copy already used rotateVec3InWrapperCssFrame. Only the two lagging lanes changed, so the lanes converged rather than diverged.",
+    "files": [
+      "packages/react/src/scene/voxelRenderer.ts",
+      "packages/vue/src/scene/voxelRenderer.ts"
+    ],
+    "expectedLanes": ["react", "vue"],
+    "baseHashes": {
+      "packages/react/src/scene/voxelRenderer.ts": "1e40b8ab2e39865e89eb6c2c0bc307c56dff3945935c367071525159fd4dfd0c",
+      "packages/vue/src/scene/voxelRenderer.ts": "1e40b8ab2e39865e89eb6c2c0bc307c56dff3945935c367071525159fd4dfd0c"
+    }
+  },
+  "atlas-pipeline": {
+    "reason": "React/Vue caught up to behaviour packages/polycss already carried, surfaced by the new leaf-emission-and-solid-paint cross-lane group. Two convergences, no vanilla counterpart to write: (1) borderShape/projectiveSolid now emit --pnx/--pny/--pnz whenever the scene is dynamic instead of only when the leaf also carries base-color vars — vanilla emit.ts already emitted the surface-normal vars unconditionally, including in baked mode; (2) parseHex/rgbKey are now imported from @layoutit/polycss-core rather than re-exported through solidTriangleStyle, which vanilla never did. Only the two lagging lanes changed, so the lanes converged rather than diverged.",
+    "files": [
+      "packages/react/src/scene/atlas/borderShape.tsx",
+      "packages/react/src/scene/atlas/projectiveSolid.tsx",
+      "packages/vue/src/scene/atlas/borderShape.ts",
+      "packages/vue/src/scene/atlas/projectiveSolid.ts"
+    ],
+    "expectedLanes": ["react", "vue"],
+    "baseHashes": {
+      "packages/react/src/scene/atlas/borderShape.tsx": "97135bc769d783e26be045f2ff6281822f5f06a0377dc0a99febcd8927ddcfbb",
+      "packages/react/src/scene/atlas/projectiveSolid.tsx": "8c46accb81b9d557ffe9f6fe3bbb06a6140192ec70bf50f16d26b61d0d665b86",
+      "packages/vue/src/scene/atlas/borderShape.ts": "fb2c1536066920be637babe977ccadda92ea5029d433a1fe2a8dcb0858ddb2c3",
+      "packages/vue/src/scene/atlas/projectiveSolid.ts": "024b3d5a3384770feb4ae9ecbf6f6ec5695dfd077f685aa14112ce772692190c"
+    }
+  }
+}

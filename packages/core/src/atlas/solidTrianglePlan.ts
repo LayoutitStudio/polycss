@@ -11,6 +11,8 @@ import {
   SOLID_TRIANGLE_BLEED,
   SOLID_TRIANGLE_CANONICAL_SIZE,
   SOLID_TRIANGLE_LARGE_BORDER_CANONICAL_SIZE,
+  resolveSeamBleedPx,
+  seamBleedPrimitiveRatio,
 } from "./constants";
 import type {
   SolidTrianglePlan,
@@ -35,10 +37,7 @@ import {
   stableTriangleMatrixDecimals,
 } from "./solidTriangle";
 import { computePointContribs } from "./plan";
-import {
-  resolveSeamBleed,
-  safePlanSeamBleedAmount,
-} from "./edgeRepair";
+import { safePlanSeamBleedAmount } from "./edgeRepair";
 import { formatAffineMatrix3dTransformScalars } from "./matrix";
 
 function triangleEdgeIndexForPair(a: number, b: number): number | undefined {
@@ -50,14 +49,13 @@ function triangleEdgeIndexForPair(a: number, b: number): number | undefined {
 function stableTriangleEdgeAmounts(
   seamEdges: ReadonlySet<number> | undefined,
   seamBleed: InternalSolidTrianglePlanOptions["seamBleed"],
-  fallback: number,
   a: number,
   b: number,
   c: number,
   screenPts: number[],
 ): number[] | null {
   if (!seamEdges?.size) return null;
-  const seamAmount = resolveSeamBleed(seamBleed, fallback);
+  const seamAmount = resolveSeamBleedPx(seamBleed);
   const edgePairs: Array<[number, number]> = [[c, a], [a, b], [b, c]];
   return edgePairs.map(([from, to], localEdgeIndex) => {
     const edgeIndex = triangleEdgeIndexForPair(from, to);
@@ -353,14 +351,14 @@ export function computeSolidTrianglePlanFromCssPoints(
   const left = Math.max(0, Math.min(baseLength, apexX));
   const right = Math.max(0, baseLength - left);
   const screenPts = [left, 0, 0, height, left + right, height];
-  // Scale the SOLID_TRIANGLE_BLEED fallback by the bleed ratio (default
-  // 1) so options.seamBleed=0 disables this overscan as well, not just
-  // the shared-edge one.
-  const triangleBleedFallback = SOLID_TRIANGLE_BLEED * (internalOptions.bleedRatio ?? 1);
+  // Scale the SOLID_TRIANGLE_BLEED primitive overscan by the derived
+  // ratio so options.seamBleed=0 disables it as well, not just the
+  // shared-edge one, and sub-default values shrink it proportionally.
+  const triangleBleed =
+    SOLID_TRIANGLE_BLEED * seamBleedPrimitiveRatio(internalOptions.seamBleed);
   const edgeAmounts = stableTriangleEdgeAmounts(
     internalOptions.seamEdges,
     internalOptions.seamBleed,
-    triangleBleedFallback,
     a,
     b,
     c,
@@ -368,12 +366,7 @@ export function computeSolidTrianglePlanFromCssPoints(
   );
   const expanded = edgeAmounts
     ? offsetConvexPolygonPointsByEdgeAmounts(screenPts, edgeAmounts)
-    : offsetStableTrianglePoints(
-        left,
-        right,
-        height,
-        resolveSeamBleed(internalOptions.seamBleed, triangleBleedFallback),
-      );
+    : offsetStableTrianglePoints(left, right, height, triangleBleed);
   const apex2x = expanded[0];
   const apex2y = expanded[1];
   const baseLeft2x = expanded[2];

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { ref, computed } from "vue";
+import { ref } from "vue";
 import { createApp, h } from "vue";
 import { usePolySceneContext } from "./useSceneContext";
 import type { UseSceneContextResult } from "./useSceneContext";
@@ -24,17 +24,13 @@ const QUAD: Polygon = {
   color: "#00ff00",
 };
 
-function captureSceneContext(
-  polygons: Polygon[],
-  options: Parameters<typeof useSceneContext>[1]["value"] = {}
-): UseSceneContextResult {
+function captureSceneContext(polygons: Polygon[]): UseSceneContextResult {
   let captured!: UseSceneContextResult;
   const container = document.createElement("div");
   const polygonsRef = ref<Polygon[]>(polygons);
-  const optionsRef = computed(() => options);
   const app = createApp({
     setup() {
-      const result = usePolySceneContext(polygonsRef, optionsRef);
+      const result = usePolySceneContext(polygonsRef);
       captured = result.value;
       return () => h("div");
     },
@@ -88,13 +84,12 @@ describe("useSceneContext", () => {
 
   it("returns a reactive computed ref that updates when polygons change", () => {
     const polygonsRef = ref<Polygon[]>([TRIANGLE]);
-    const optionsRef = computed(() => ({}));
-    let capturedRef: ReturnType<typeof useSceneContext> | null = null;
+    let capturedRef: ReturnType<typeof usePolySceneContext> | null = null;
 
     const container = document.createElement("div");
     const app = createApp({
       setup() {
-        capturedRef = usePolySceneContext(polygonsRef, optionsRef);
+        capturedRef = usePolySceneContext(polygonsRef);
         return () => h("div");
       },
     });

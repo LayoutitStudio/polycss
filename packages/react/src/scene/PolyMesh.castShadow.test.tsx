@@ -13,13 +13,14 @@
  *  - --clx/--cly/--clz are set on the scene element in dynamic mode
  *  - --clx/--cly/--clz are removed when lighting switches to baked
  */
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
 import React, { act } from "react";
 import { createRoot } from "react-dom/client";
 import { PolyCamera } from "../camera/PolyCamera";
 import { PolyScene } from "./PolyScene";
 import { PolyMesh } from "./PolyMesh";
-import type { Polygon } from "@layoutit/polycss-core";
+import { useSceneContextValue, type ShadowCasterRegistration } from "./sceneContext";
+import type { Polygon, Vec3 } from "@layoutit/polycss-core";
 
 const TRIANGLE: Polygon = {
   vertices: [
@@ -57,6 +58,13 @@ const DYN_SCENE_PROPS = {
     color: "#ffffff",
     intensity: 1,
   },
+};
+
+// Ground-fallback shadows require a real, nonzero-intensity directional light
+// (no implicit default sun), so baked-mode shadow tests pass one explicitly.
+const BAKED_SCENE_PROPS = {
+  textureLighting: "baked" as const,
+  directionalLight: DYN_SCENE_PROPS.directionalLight,
 };
 
 function renderScene(
@@ -123,12 +131,27 @@ describe("PolyMesh — castShadow", () => {
     expect(shadows[0]!.tagName.toLowerCase()).toBe("svg");
   });
 
+  it("castShadow with a custom polygon renderer emits no ground shadow", () => {
+    // A render-prop mesh owns its own leaves; the ground-shadow fallback
+    // projects renderer-owned geometry and would not match the custom
+    // output, so it is suppressed (mirrored by Vue's polygon slot gate).
+    const { container } = renderScene(
+      { textureLighting: "baked" },
+      {
+        polygons: [TRIANGLE],
+        castShadow: true,
+        children: (polygon: Polygon, index: number) => <b key={index} data-custom={String(index)} />,
+      },
+    );
+    expect(container.querySelectorAll(".polycss-shadow").length).toBe(0);
+  });
+
   it("castShadow in baked mode emits a single <svg> shadow per mesh with one compound <path>", () => {
     // Baked mode concatenates every casting polygon's projected outline
     // into ONE compound `d` (M…L…Z subpaths) rendered under
     // fill-rule=nonzero — one <path> per mesh regardless of polygon count.
     const { container } = renderScene(
-      { textureLighting: "baked" },
+      BAKED_SCENE_PROPS,
       { polygons: [TRIANGLE], castShadow: true },
     );
     const shadows = container.querySelectorAll(".polycss-shadow");
@@ -185,7 +208,7 @@ describe("PolyMesh — castShadow", () => {
     expect(before.tagName.toLowerCase()).toBe("svg");
     expect(before.style.transform).toMatch(/^translate3d\(/);
 
-    rerender(root, { textureLighting: "baked" }, { polygons: [TRIANGLE], castShadow: true });
+    rerender(root, BAKED_SCENE_PROPS, { polygons: [TRIANGLE], castShadow: true });
     const after = container.querySelector(".polycss-shadow") as SVGSVGElement;
     expect(after).not.toBeNull();
     expect(after.tagName.toLowerCase()).toBe("svg");
@@ -201,6 +224,203 @@ describe("PolyMesh — castShadow", () => {
     });
     await flushReactWork();
     expect(container.querySelectorAll(".polycss-shadow").length).toBe(1);
+  });
+
+  it("no directional light → no ground-fallback shadow (no phantom default-sun shadow)", () => {
+    // Same gate as the receiver-face path: a scene with no lights at all
+    // must not draw a ground shadow from an implicit default sun.
+    const { container } = renderScene(
+      { textureLighting: "baked" },
+      { polygons: [TRIANGLE], castShadow: true },
+    );
+    expect(container.querySelectorAll(".polycss-shadow").length).toBe(0);
+  });
+
+  it("zero-intensity directional light → no ground-fallback shadow", () => {
+    const { container } = renderScene(
+      {
+        textureLighting: "baked",
+        directionalLight: { direction: [0.4, -0.7, 0.59] as Vec3, intensity: 0 },
+      },
+      { polygons: [TRIANGLE], castShadow: true },
+    );
+    expect(container.querySelectorAll(".polycss-shadow").length).toBe(0);
+  });
+
+  it("followAnimation same-topology deforms throttle caster re-registration (~12fps) with a trailing emit", () => {
+    vi.useFakeTimers();
+    try {
+      const container = document.createElement("div");
+      document.body.appendChild(container);
+      const root = createRoot(container);
+      let version = -1;
+      let casters: Map<symbol, ShadowCasterRegistration> | undefined;
+      function Probe(): null {
+        const ctx = useSceneContextValue();
+        version = ctx?.shadowCastersVersion ?? -1;
+        casters = ctx?.shadowCasters;
+        return null;
+      }
+      const deform = (dz: number): Polygon[] => [
+        {
+          ...TRIANGLE,
+          vertices: TRIANGLE.vertices.map(
+            ([x, y, z]) => [x, y, z + dz] as Vec3,
+          ),
+        },
+      ];
+      // Stable shadow-options identity across renders. (Not required for the
+      // throttle anymore — the scene keys its shadow identity field-wise, see
+      // the fresh-but-equal inline object test below — just the simplest form.)
+      const shadowOptions = { followAnimation: true };
+      const renderWith = (polys: Polygon[]): void => {
+        act(() =>
+          root.render(
+            <PolyCamera>
+              <PolyScene {...DYN_SCENE_PROPS} shadow={shadowOptions}>
+                <PolyMesh polygons={polys} castShadow />
+                <Probe />
+              </PolyScene>
+            </PolyCamera>,
+          ),
+        );
+      };
+      renderWith([TRIANGLE]);
+      const v0 = version;
+      expect(v0).toBeGreaterThanOrEqual(0);
+      // Rapid same-topology deforms inside the 80ms window: parked, no
+      // downstream registration bump.
+      renderWith(deform(0.1));
+      renderWith(deform(0.2));
+      renderWith(deform(0.3));
+      expect(version).toBe(v0);
+      // Trailing edge: once the window elapses, exactly one bump lands and it
+      // carries the LAST parked pose (a paused animation is never stale).
+      act(() => {
+        vi.advanceTimersByTime(200);
+      });
+      expect(version).toBe(v0 + 1);
+      const registered = casters ? Array.from(casters.values()) : [];
+      expect(registered.length).toBe(1);
+      // The registered geometry is the prepared copy of the LAST pose
+      // (z offset 0.3), not one of the earlier parked deforms.
+      const zs = registered[0]!.polygons.flatMap((p) => p.vertices.map((v) => v[2]));
+      expect(zs.length).toBeGreaterThan(0);
+      for (const z of zs) expect(z).toBeCloseTo(0.3, 9);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("fresh-but-equal inline shadow objects do not defeat the followAnimation throttle", () => {
+    // Regression: `shadow={{ followAnimation: true }}` written inline is a new
+    // object identity every parent render. That used to recreate the scene's
+    // registerShadowCaster callback, unregister/re-register the caster per
+    // render, and reset the throttle — every deform looked like a first
+    // registration. The scene now keys its shadow identity on the option
+    // FIELDS, so the ~80ms throttle must hold.
+    vi.useFakeTimers();
+    try {
+      const container = document.createElement("div");
+      document.body.appendChild(container);
+      const root = createRoot(container);
+      let version = -1;
+      function Probe(): null {
+        const ctx = useSceneContextValue();
+        version = ctx?.shadowCastersVersion ?? -1;
+        return null;
+      }
+      const deform = (dz: number): Polygon[] => [
+        {
+          ...TRIANGLE,
+          vertices: TRIANGLE.vertices.map(
+            ([x, y, z]) => [x, y, z + dz] as Vec3,
+          ),
+        },
+      ];
+      const renderWith = (polys: Polygon[]): void => {
+        act(() =>
+          root.render(
+            <PolyCamera>
+              {/* INLINE shadow object — fresh-but-equal identity per render. */}
+              <PolyScene {...DYN_SCENE_PROPS} shadow={{ followAnimation: true }}>
+                <PolyMesh polygons={polys} castShadow />
+                <Probe />
+              </PolyScene>
+            </PolyCamera>,
+          ),
+        );
+      };
+      renderWith([TRIANGLE]);
+      const v0 = version;
+      expect(v0).toBeGreaterThanOrEqual(0);
+      // Rapid same-topology deforms inside the 80ms window: parked — the
+      // fresh shadow identity must not force a re-registration per render.
+      renderWith(deform(0.1));
+      renderWith(deform(0.2));
+      renderWith(deform(0.3));
+      expect(version).toBe(v0);
+      // Exactly one trailing bump once the window elapses.
+      act(() => {
+        vi.advanceTimersByTime(200);
+      });
+      expect(version).toBe(v0 + 1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("disabling followAnimation cancels a pending trailing shadow re-registration", () => {
+    // Regression: the trailing timer captured followAnimation at queue time
+    // and fired even after the option was turned off — the freeze semantics
+    // must win at fire time.
+    vi.useFakeTimers();
+    try {
+      const container = document.createElement("div");
+      document.body.appendChild(container);
+      const root = createRoot(container);
+      let version = -1;
+      function Probe(): null {
+        const ctx = useSceneContextValue();
+        version = ctx?.shadowCastersVersion ?? -1;
+        return null;
+      }
+      const deform = (dz: number): Polygon[] => [
+        {
+          ...TRIANGLE,
+          vertices: TRIANGLE.vertices.map(
+            ([x, y, z]) => [x, y, z + dz] as Vec3,
+          ),
+        },
+      ];
+      const renderWith = (polys: Polygon[], followAnimation: boolean): void => {
+        act(() =>
+          root.render(
+            <PolyCamera>
+              <PolyScene {...DYN_SCENE_PROPS} shadow={{ followAnimation }}>
+                <PolyMesh polygons={polys} castShadow />
+                <Probe />
+              </PolyScene>
+            </PolyCamera>,
+          ),
+        );
+      };
+      renderWith([TRIANGLE], true);
+      const v0 = version;
+      expect(v0).toBeGreaterThanOrEqual(0);
+      // Park a trailing update inside the 80ms window…
+      renderWith(deform(0.1), true);
+      expect(version).toBe(v0);
+      // …then disable followAnimation before the window elapses.
+      renderWith(deform(0.1), false);
+      act(() => {
+        vi.advanceTimersByTime(200);
+      });
+      // No registration bump: the pending trailing emit was cancelled.
+      expect(version).toBe(v0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("--clx/--cly/--clz are set on the scene element in dynamic mode", () => {

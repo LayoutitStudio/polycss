@@ -54,9 +54,15 @@ describe("computeMergedReceiverShadows", () => {
     expect(f.baseD).toBeNull();
     expect(f.layers.length).toBe(1);
     expect(f.layers[0]!.multiply).toBe(false);
-    // Single solid layer carries the shadow strength on the path, SVG at 1.
     expect(f.svgOpacity).toBe(1);
-    expect(f.layers[0]!.opacity).toBeCloseTo(0.25, 4);
+    // A lone floor has no crease to bleed across, so it keeps the shadowed
+    // color at `shadow.opacity`. The opaque PRE-BLEND is reserved for faces
+    // whose clip actually expanded into a neighbouring face's separate SVG
+    // (where alpha would double-darken); it is pixel-identical on the surface
+    // but much more visible where `shadow.lift` parallax hangs it off the
+    // surface at grazing angles.
+    expect(f.layers[0]!.opacity).toBeCloseTo(0.25, 6);
+    expect(f.layers[0]!.fill).toMatch(/^#|^rgb\(/);
   });
 
   it("directional + shadow-casting point light → merged face: base + multiply layers", () => {

@@ -13,6 +13,7 @@ import {
   clampChannel,
   formatColor
 } from "./color";
+import { DEFAULT_LIGHT_DIR } from "../atlas/constants";
 
 export type { ParsedColor };
 
@@ -49,8 +50,10 @@ export function shadeColor(base: string, delta: number): string {
   return formatColor({ rgb, alpha: parsed.alpha });
 }
 
+// Default sun shared with the atlas pipeline (`DEFAULT_LIGHT_DIR`) so core
+// has ONE default light direction everywhere.
 const DEFAULT_DIRECTIONAL: Required<PolyDirectionalLight> = {
-  direction: [0, 0, 1],
+  direction: DEFAULT_LIGHT_DIR,
   color: "#ffffff",
   intensity: 1,
 };
@@ -82,8 +85,9 @@ function tintChannel(base: number, tintHex: string, channel: 0 | 1 | 2): number 
  *   final = baseColor × tint
  *
  * Pass `directional` and/or `ambient` undefined to fall back to defaults
- * (top-down white directional with intensity 1, white ambient with
- * intensity 0.4) — useful for static SSR/validator renders.
+ * (white directional along the atlas pipeline's `DEFAULT_LIGHT_DIR` with
+ * intensity 1, white ambient with intensity 0.4) — useful for static
+ * SSR/validator renders.
  */
 export function computeShapeLighting(
   normal: Vec3,

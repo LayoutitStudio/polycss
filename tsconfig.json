@@ -8,14 +8,6 @@
     "skipLibCheck": true,
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true,
-    "baseUrl": ".",
-    "paths": {
-      "@polycss-core/*": ["packages/core/src/*"]
-    }
-  },
-  "references": [
-    { "path": "packages/core" },
-    { "path": "packages/html" },
-    { "path": "packages/react" }
-  ]
+    "baseUrl": "."
+  }
 }

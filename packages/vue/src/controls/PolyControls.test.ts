@@ -7,6 +7,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { createApp, defineComponent, h, inject, nextTick, ref, type App } from "vue";
+import { applyPan } from "@layoutit/polycss-core";
 import type { CameraHandle } from "@layoutit/polycss-core";
 import { PolyCamera } from "../camera/PolyCamera";
 import { PolyScene } from "../scene/PolyScene";
@@ -189,6 +190,23 @@ describe("PolyOrbitControls (Vue)", () => {
     dispatchPointer(cameraEl, "pointerup", { x: 0, y: 60 });
     // dY = -40 / 4 = -10. rotX = 95 - (-10) = 105.
     expect(mounted.cameraRef.value.state.rotX).toBeCloseTo(105, 1);
+  });
+
+  it("Shift+left pan matches core applyPan (React parity), including rotX > 90° under yaw", () => {
+    // Pins the fix for the old local pan math, which negated rotY in its
+    // rotation and clamped cos(rotX) without preserving its sign.
+    mounted = mount({}, { rotX: 120, rotY: 45, zoom: 1 });
+    const cameraEl = findCameraEl(mounted.container);
+    const expected = applyPan(60, -25, 1, 120, 45);
+    dispatchPointer(cameraEl, "pointerdown", { x: 100, y: 100 });
+    dispatchPointer(cameraEl, "pointermove", { x: 160, y: 75, shiftKey: true });
+    dispatchPointer(cameraEl, "pointerup", { x: 160, y: 75 });
+    const target = mounted.cameraRef.value.state.target;
+    // Camera state quantizes target to 2 decimals — precision 1 still pins
+    // parity (the old bug flipped the sign of the yaw-coupled terms).
+    expect(target[0]).toBeCloseTo(expected.targetD0, 1);
+    expect(target[1]).toBeCloseTo(expected.targetD1, 1);
+    expect(target[2]).toBe(0);
   });
 
   it("invert as a number multiplies sensitivity", () => {
@@ -471,6 +489,15 @@ describe("PolyOrbitControls (Vue)", () => {
       expect(mounted.cameraRef.value.state.distance).toBe(10);
     });
 
+    it("default maxDistance is Infinity (three.js OrbitControls parity) — no implicit clamp", () => {
+      mounted = mount({ dolly: true }, { zoom: 1 });
+      const cameraEl = findCameraEl(mounted.container);
+      // deltaY 100000 → ×3 scroll amp × DOLLY_STEP 0.05 = 15000px, past the
+      // old 5000 default clamp.
+      dispatchWheel(cameraEl, 100000);
+      expect(mounted.cameraRef.value.state.distance).toBe(15000);
+    });
+
     it("dolly is clamped by minDistance (cannot go below 0)", () => {
       mounted = mount({ dolly: true, minDistance: 0 }, { zoom: 1 });
       const cameraEl = findCameraEl(mounted.container);
@@ -604,6 +631,20 @@ describe("PolyMapControls (Vue)", () => {
     // target should have changed
     const target = mounted.cameraRef.value.state.target;
     expect(target[0] !== 0 || target[1] !== 0).toBe(true);
+  });
+
+  it("left-drag pan matches core applyPan (React parity) under camera yaw", () => {
+    mounted = mountMap({ rotY: 45, rotX: 65, zoom: 1 });
+    const cameraEl = findCameraEl(mounted.container);
+    const expected = applyPan(100, 0, 1, 65, 45);
+    dispatchPointer(cameraEl, "pointerdown", { x: 100, y: 100 });
+    dispatchPointer(cameraEl, "pointermove", { x: 200, y: 100 });
+    dispatchPointer(cameraEl, "pointerup", { x: 200, y: 100 });
+    const target = mounted.cameraRef.value.state.target;
+    // Camera state quantizes target to 2 decimals — precision 1 still pins
+    // parity (the old bug flipped the sign of the yaw-coupled terms).
+    expect(target[0]).toBeCloseTo(expected.targetD0, 1);
+    expect(target[1]).toBeCloseTo(expected.targetD1, 1);
   });
 
   it("Shift+left-drag orbits rotX without a vertical clamp", () => {

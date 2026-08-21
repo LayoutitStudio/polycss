@@ -352,7 +352,7 @@ describe("browser package loading", () => {
 
   it("enforces streamed and array-buffer byte limits", async () => {
     const fixture = await createLoadFixture();
-    const streamedFetch = (async () => new Response(fixture.builtCatalog.bytes)) as typeof fetch;
+    const streamedFetch = (async () => new Response(new Uint8Array(fixture.builtCatalog.bytes))) as typeof fetch;
     await expectPackageCode(
       loadPolyMorphCatalog(BASE_URL, {
         fetchImpl: streamedFetch,

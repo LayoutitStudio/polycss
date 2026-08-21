@@ -294,8 +294,8 @@ export function drawTexturedAtlasEntry(
     const imgH = srcImg.naturalHeight || srcImg.height || 1;
     for (const triangle of entry.textureTriangles) {
       // entry.bleedRatio is stamped by computeTextureAtlasPlan from
-      // resolveBleedRatio(options.seamBleed). The textured-triangle clip
-      // expansion scales by it so options.seamBleed=0 fully disables it.
+      // seamBleedPrimitiveRatio(options.seamBleed). The textured-triangle
+      // clip expansion scales by it so options.seamBleed=0 fully disables it.
       const clipPts = expandClipPoints(triangle.screenPts, TEXTURE_TRIANGLE_BLEED * (entry.bleedRatio ?? 1));
       ctx.save();
       setCssTransform(ctx, atlasScale);

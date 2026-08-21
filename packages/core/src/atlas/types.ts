@@ -62,7 +62,8 @@ export interface TextureAtlasPlan {
   seamBleedEdgeAmounts?: Map<number, number>;
   seamBleedInsets?: SeamBleedInsets;
   /** Resolved per-strategy bleed multiplier (0..1, default 1). Populated
-   *  at plan construction from `options.seamBleed` via `resolveBleedRatio`.
+   *  at plan construction from `options.seamBleed` via
+   *  `seamBleedPrimitiveRatio` (`clamp(resolvedPx / DEFAULT_SEAM_BLEED, 0, 1)`).
    *  Downstream emitters (borderShapeGeometryForPlan, projective-quad
    *  rasteriser, etc.) read this and multiply their hardcoded per-strategy
    *  bleed constants by it. Single knob for "scale down all my bleeds". */
@@ -330,11 +331,6 @@ export interface SolidTrianglePlanOptions {
   strategies?: PolyRenderStrategiesOption;
   seamBleed?: PolySeamBleed;
   seamEdges?: Set<number>;
-  /** Per-strategy bleed multiplier (0..1, default 1). Scales the
-   *  hardcoded SOLID_TRIANGLE_BLEED used as the seamBleed fallback when
-   *  no shared-edge bleed is present. Populated upstream from
-   *  `resolveBleedRatio(publicOptions.seamBleed)`. */
-  bleedRatio?: number;
   /**
    * Indices (into the polygon array being planned) of polygons that the
    * directional light cannot physically reach because another polygon of

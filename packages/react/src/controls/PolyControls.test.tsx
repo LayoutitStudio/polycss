@@ -206,6 +206,17 @@ describe("PolyOrbitControls", () => {
     expect(sceneEl.style.transform).toContain("translateZ(-10px)");
   });
 
+  it("default maxDistance is Infinity (three.js OrbitControls parity) — no implicit clamp", () => {
+    root = createRoot(container);
+    act(() => root.render(orbitTree({ dolly: true }, { zoom: 1 })));
+    const cameraEl = findCameraEl(container);
+    // deltaY 100000 → ×3 scroll amp × DOLLY_STEP 0.05 = 15000px, past the
+    // old 5000 default clamp.
+    dispatchWheel(cameraEl, 100000);
+    const sceneEl = findSceneEl(container);
+    expect(sceneEl.style.transform).toContain("translateZ(-15000px)");
+  });
+
   // ── Animate ─────────────────────────────────────────────────────────────
   it("animate queues an rAF tick", () => {
     root = createRoot(container);

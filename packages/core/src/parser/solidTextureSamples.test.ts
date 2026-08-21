@@ -53,7 +53,10 @@ function texturedTriangle(vertices: Polygon["vertices"]): Polygon {
     color: "#000000",
     texture: "texture.png",
     uvs,
-    textureTriangles: [{ uvs: [uvs[0], uvs[1], uvs[2]] }],
+    textureTriangles: [{
+      vertices: [vertices[0], vertices[1], vertices[2]],
+      uvs: [uvs[0], uvs[1], uvs[2]],
+    }],
   };
 }
 
@@ -63,7 +66,10 @@ function pointSampledTexturedTriangle(vertices: Polygon["vertices"], uv: [number
     color: "#000000",
     texture: "texture.png",
     uvs: [uv, uv, uv],
-    textureTriangles: [{ uvs: [uv, uv, uv] }],
+    textureTriangles: [{
+      vertices: [vertices[0], vertices[1], vertices[2]],
+      uvs: [uv, uv, uv],
+    }],
   };
 }
 
@@ -193,7 +199,10 @@ describe("bakeSolidTextureSamples", () => {
       texture: "texture.png",
       textureWrap: { s: "repeat", t: "repeat" },
       uvs: [uv, uv, uv],
-      textureTriangles: [{ uvs: [uv, uv, uv] }],
+      textureTriangles: [{
+        vertices: [[0, 0, 0], [1, 0, 0], [0, 1, 0]],
+        uvs: [uv, uv, uv],
+      }],
     };
     const result: ParseResult = {
       polygons: [polygon],
@@ -218,7 +227,10 @@ describe("bakeSolidTextureSamples", () => {
       texture: "texture.png",
       textureAlphaMode: "opaque",
       uvs: [uv, uv, uv],
-      textureTriangles: [{ uvs: [uv, uv, uv] }],
+      textureTriangles: [{
+        vertices: [[0, 0, 0], [1, 0, 0], [0, 1, 0]],
+        uvs: [uv, uv, uv],
+      }],
     };
     const result: ParseResult = {
       polygons: [polygon],
@@ -245,7 +257,10 @@ describe("bakeSolidTextureSamples", () => {
       texture: "texture.png",
       textureAlphaMode: "opaque",
       uvs: [[0.25, 0.5], [0.75, 0.5], [0.75, 0.5]],
-      textureTriangles: [{ uvs: [[0.25, 0.5], [0.75, 0.5], [0.75, 0.5]] }],
+      textureTriangles: [{
+        vertices: [[0, 0, 0], [1, 0, 0], [0, 1, 0]],
+        uvs: [[0.25, 0.5], [0.75, 0.5], [0.75, 0.5]],
+      }],
     };
     const result: ParseResult = {
       polygons: [polygon],

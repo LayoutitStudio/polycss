@@ -4,6 +4,7 @@ import {
   clonePolyMorphFixture,
   createPolyMorphModelFixture,
   POLY_MORPH_IDENTITY_MATRIX,
+  polyMorphIdentityMatrix,
 } from "../testing/modelFixture.js";
 import {
   mountPolyMorphModel,
@@ -35,7 +36,7 @@ function overrideUserAgent(value: string): () => void {
   });
   return () => {
     if (prior) Object.defineProperty(navigator, "userAgent", prior);
-    else delete (navigator as Navigator & { userAgent?: string }).userAgent;
+    else delete (navigator as { userAgent?: string }).userAgent;
   };
 }
 
@@ -54,7 +55,7 @@ function createTwoLeafFixture() {
   });
   fixture.render.shapes.push({
     id: "accent",
-    matrix: POLY_MORPH_IDENTITY_MATRIX,
+    matrix: [...POLY_MORPH_IDENTITY_MATRIX],
   });
   fixture.render.leaves.push({
     id: "accent-panel-leaf",
@@ -64,7 +65,7 @@ function createTwoLeafFixture() {
     strategy: "solid-quad",
     width: 64,
     height: 64,
-    matrix: POLY_MORPH_IDENTITY_MATRIX,
+    matrix: [...POLY_MORPH_IDENTITY_MATRIX],
     atlas: null,
     fallback: null,
   });
@@ -84,9 +85,9 @@ function createSolidQuadFixture() {
 }
 
 function projectiveMatrix() {
-  const value = [...POLY_MORPH_IDENTITY_MATRIX] as number[];
+  const value = polyMorphIdentityMatrix();
   value[3] = 0.25 / 64;
-  return value as typeof POLY_MORPH_IDENTITY_MATRIX;
+  return value;
 }
 
 const SAFARI_UA =
@@ -180,7 +181,7 @@ describe("mountPolyMorphModel", () => {
       const h = -40 / 10_040;
       leaf.width = size;
       leaf.height = size;
-      const value = [...POLY_MORPH_IDENTITY_MATRIX] as number[];
+      const value = polyMorphIdentityMatrix();
       value[5] = 1 + h;
       value[7] = h / size;
       const mounted = mountPolyMorphModel(host, fixture);
@@ -341,7 +342,7 @@ describe("mountPolyMorphModel", () => {
       fixture.render.leaves[1]!.fallback = {
         width: 11,
         height: 9,
-        matrixFromLeaf: POLY_MORPH_IDENTITY_MATRIX,
+        matrixFromLeaf: [...POLY_MORPH_IDENTITY_MATRIX],
         atlas: {
           resourcePath: "assets/solid-triangles-001.png",
           x: 1,
@@ -378,7 +379,7 @@ describe("mountPolyMorphModel", () => {
         element.style.height,
       ])).toEqual([["7px", "5px"], ["11px", "9px"]]);
       expect(document.defaultView!.URL.createObjectURL).toHaveBeenCalledTimes(2);
-      const translated = [...POLY_MORPH_IDENTITY_MATRIX] as number[];
+      const translated = polyMorphIdentityMatrix();
       translated[12] = 10;
       expect(mounted.apply({
         leaves: [{
@@ -455,7 +456,7 @@ describe("mountPolyMorphModel", () => {
     const untouched = mounted.leafHandles.get("accent-panel-leaf")!.element;
     const targetIdentity = target;
     const untouchedTransform = untouched.style.transform;
-    const translated = [...POLY_MORPH_IDENTITY_MATRIX] as number[];
+    const translated = polyMorphIdentityMatrix();
     translated[12] = 12;
 
     const first = mounted.apply({
@@ -503,7 +504,7 @@ describe("mountPolyMorphModel", () => {
 
   it("applies model and shape matrices without visiting leaves", () => {
     const mounted = mountPolyMorphModel(host, createTwoLeafFixture());
-    const translated = [...POLY_MORPH_IDENTITY_MATRIX] as number[];
+    const translated = polyMorphIdentityMatrix();
     translated[13] = 8;
     const result = mounted.apply({
       modelMatrix: translated as typeof POLY_MORPH_IDENTITY_MATRIX,
@@ -567,13 +568,13 @@ describe("mountPolyMorphModel", () => {
 
     const mounted = mountPolyMorphModel(host, createTwoLeafFixture());
     expect(() => mounted.apply({
-      shapes: [{ shapeId: "missing-shape", matrix: POLY_MORPH_IDENTITY_MATRIX }],
+      shapes: [{ shapeId: "missing-shape", matrix: [...POLY_MORPH_IDENTITY_MATRIX] }],
     })).toThrowError(PolyMorphRenderError);
     expect(() => mounted.apply({
       leaves: [{ leafId: "missing-leaf", visible: false }],
     })).toThrowError(PolyMorphRenderError);
 
-    const translated = [...POLY_MORPH_IDENTITY_MATRIX] as number[];
+    const translated = polyMorphIdentityMatrix();
     translated[12] = 9;
     const accent = mounted.leafHandles.get("accent-panel-leaf")!.element;
     const before = accent.style.transform;

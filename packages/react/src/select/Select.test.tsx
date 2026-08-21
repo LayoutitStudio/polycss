@@ -270,7 +270,7 @@ describe("<PolySelect> + usePolySelect", () => {
         <PolyScene>
           <PolySelect
             multiple
-            filter={filter as (m: import("../scene/events").PolyMeshHandle[]) => import("../scene/events").PolyMeshHandle[]}
+            filter={filter as unknown as (m: import("../scene/events").PolyMeshHandle[]) => import("../scene/events").PolyMeshHandle[]}
             onChange={onChange}
           >
             <PolyMesh id="a" polygons={[TRIANGLE]} />
@@ -304,6 +304,7 @@ describe("<PolySelect> handleClick fallback (no PolyCamera)", () => {
       setPolygons: () => {},
       rebakeAtlas: () => {},
       updatePolygon: () => {},
+      whenTexturesReady: () => Promise.resolve(),
     };
   }
 

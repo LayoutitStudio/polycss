@@ -19,6 +19,10 @@ jobs:
     steps:
       - name: Check out
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          # check:mirrors needs history to merge-base against the PR's base ref;
+          # it runs with --require-base, so a shallow clone fails the job.
+          fetch-depth: 0
 
       - name: Set up pnpm
         uses: pnpm/action-setup@a7487c7e89a18df4991f7f222e4898a00d66ddda
@@ -43,6 +47,14 @@ jobs:
       - name: Check website skill copy
         run: pnpm check:skill
 
+      - name: Check package boundaries
+        run: pnpm check:boundaries
+
+      - name: Check mirrored renderer copies
+        # --require-base: a base ref that cannot be resolved must fail the job,
+        # never silently skip lane parity (fetch-depth: 0 above supplies it).
+        run: pnpm check:mirrors --require-base
+
       - name: Run tests
         run: pnpm test
 
@@ -57,6 +69,10 @@ jobs:
 
       - name: Build packages (DTS + JS)
         run: pnpm build:packages
+
+      - name: Typecheck packages
+        # After build:packages — react/vue/morph resolve sibling types from dist.
+        run: pnpm typecheck
 
       - name: Certify Morph package
         run: pnpm --filter @layoutit/polycss-morph test:package

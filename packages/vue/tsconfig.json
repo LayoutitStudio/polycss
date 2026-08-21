@@ -11,11 +11,7 @@
     "strict": true,
     "skipLibCheck": true,
     "outDir": "dist",
-    "rootDir": "src",
-    "composite": true
+    "rootDir": "src"
   },
-  "include": ["src/**/*.ts"],
-  "references": [
-    { "path": "../core" }
-  ]
+  "include": ["src/**/*.ts"]
 }

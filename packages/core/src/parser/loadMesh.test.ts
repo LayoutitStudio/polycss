@@ -312,7 +312,7 @@ describe("loadMesh", () => {
       expect(result.polygons.length).toBeGreaterThan(0);
       expect(result.polygons.every((polygon) => polygon.texture === undefined)).toBe(true);
       expect(result.polygons.every((polygon) => polygon.uvs === undefined)).toBe(true);
-      expect(result.polygons.every((polygon) => /^#[0-9a-f]{6}$/.test(polygon.color))).toBe(true);
+      expect(result.polygons.every((polygon) => /^#[0-9a-f]{6}$/.test(polygon.color ?? ""))).toBe(true);
     });
 
     it("bakes smooth low-detail swatch gradients into solid polygons by default", async () => {
@@ -399,7 +399,7 @@ describe("loadMesh", () => {
       expect(result.polygons.length).toBeGreaterThan(0);
       expect(result.polygons.every((polygon) => polygon.texture === undefined)).toBe(true);
       expect(result.polygons.every((polygon) => polygon.uvs === undefined)).toBe(true);
-      expect(result.polygons.every((polygon) => /^#[0-9a-f]{6}$/.test(polygon.color))).toBe(true);
+      expect(result.polygons.every((polygon) => /^#[0-9a-f]{6}$/.test(polygon.color ?? ""))).toBe(true);
     });
 
     it("bakes dominant swatch samples with a single neighboring texel", async () => {

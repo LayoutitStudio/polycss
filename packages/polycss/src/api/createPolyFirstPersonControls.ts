@@ -11,7 +11,20 @@
  */
 
 import type { PolySceneHandle } from "./createPolyScene";
-import { BASE_TILE } from "@layoutit/polycss-core";
+import {
+  BASE_TILE,
+  FIRST_PERSON_DEFAULTS,
+  JUMP_KEYS,
+  CROUCH_KEYS,
+  forwardDir,
+  isFpvKey,
+  resolveFirstPersonOptions,
+  stepFirstPersonPhysics,
+} from "@layoutit/polycss-core";
+import type {
+  PolyFirstPersonControlsOptions,
+  PolyFirstPersonResolvedOptions,
+} from "@layoutit/polycss-core";
 import {
   makeListenerRegistry,
   makeCameraSnapshot,
@@ -27,94 +40,7 @@ export type {
   PolyControlsListener,
 } from "./controls/common";
 
-export interface PolyFirstPersonControlsOptions {
-  /** Master switch. When `false`, all sub-controls are inert. Default: `true`. */
-  enabled?: boolean;
-  /** Pointer-lock mouselook (rotX = pitch, rotY = yaw). Default: `true`. */
-  lookEnabled?: boolean;
-  /** WASD / arrow-key planar movement on world XY. Default: `true`. */
-  moveEnabled?: boolean;
-  /** Space-bar parametric jump arc on world Z. Default: `true`. */
-  jumpEnabled?: boolean;
-  /** Ctrl crouch (lowers eye height while held). Default: `true`. */
-  crouchEnabled?: boolean;
-  /** Mouselook sensitivity in degrees per pixel. Default: `0.15`. */
-  lookSensitivity?: number;
-  /** Invert vertical mouselook. Default: `false`. */
-  invertY?: boolean;
-  /** Movement speed in world units per second. Default: `5`. */
-  moveSpeed?: number;
-  /** Initial vertical velocity for a jump, world units per second. Default: `7`. */
-  jumpVelocity?: number;
-  /** Gravity acceleration in world units per second squared. Default: `18`. */
-  gravity?: number;
-  /** Standing eye height above the ground plane (target.z). Default: `1.7`. */
-  eyeHeight?: number;
-  /** Eye height while crouching. Default: `1`. */
-  crouchHeight?: number;
-  /** World Z of the ground plane the player walks on. Default: `0`. */
-  groundZ?: number;
-  /** Min pitch (rotX) angle. Default: `5`. */
-  minPitch?: number;
-  /** Max pitch (rotX) angle. Default: `175`. */
-  maxPitch?: number;
-}
-
-interface ResolvedOptions {
-  enabled: boolean;
-  lookEnabled: boolean;
-  moveEnabled: boolean;
-  jumpEnabled: boolean;
-  crouchEnabled: boolean;
-  lookSensitivity: number;
-  invertY: boolean;
-  moveSpeed: number;
-  jumpVelocity: number;
-  gravity: number;
-  eyeHeight: number;
-  crouchHeight: number;
-  groundZ: number;
-  minPitch: number;
-  maxPitch: number;
-}
-
-const DEFAULTS: ResolvedOptions = {
-  enabled: true,
-  lookEnabled: true,
-  moveEnabled: true,
-  jumpEnabled: true,
-  crouchEnabled: true,
-  lookSensitivity: 0.15,
-  invertY: false,
-  moveSpeed: 5,
-  jumpVelocity: 7,
-  gravity: 18,
-  eyeHeight: 1.7,
-  crouchHeight: 1,
-  groundZ: 0,
-  minPitch: 5,
-  maxPitch: 175,
-};
-
-function resolveOptions(base: ResolvedOptions, partial: PolyFirstPersonControlsOptions): ResolvedOptions {
-  return {
-    enabled: partial.enabled ?? base.enabled,
-    lookEnabled: partial.lookEnabled ?? base.lookEnabled,
-    moveEnabled: partial.moveEnabled ?? base.moveEnabled,
-    jumpEnabled: partial.jumpEnabled ?? base.jumpEnabled,
-    crouchEnabled: partial.crouchEnabled ?? base.crouchEnabled,
-    lookSensitivity: partial.lookSensitivity ?? base.lookSensitivity,
-    invertY: partial.invertY ?? base.invertY,
-    moveSpeed: partial.moveSpeed ?? base.moveSpeed,
-    jumpVelocity: partial.jumpVelocity ?? base.jumpVelocity,
-    gravity: partial.gravity ?? base.gravity,
-    eyeHeight: partial.eyeHeight ?? base.eyeHeight,
-    crouchHeight: partial.crouchHeight ?? base.crouchHeight,
-    groundZ: partial.groundZ ?? base.groundZ,
-    minPitch: partial.minPitch ?? base.minPitch,
-    maxPitch: partial.maxPitch ?? base.maxPitch,
-  };
-}
+export type { PolyFirstPersonControlsOptions } from "@layoutit/polycss-core";
 
 export interface PolyFirstPersonControlsHandle {
   update(partial: PolyFirstPersonControlsOptions): void;
@@ -154,18 +80,11 @@ export interface PolyFirstPersonControlsHandle {
   ): boolean;
 }
 
-const FORWARD_KEYS = new Set(["KeyW", "ArrowUp"]);
-const BACK_KEYS = new Set(["KeyS", "ArrowDown"]);
-const LEFT_KEYS = new Set(["KeyA", "ArrowLeft"]);
-const RIGHT_KEYS = new Set(["KeyD", "ArrowRight"]);
-const JUMP_KEYS = new Set(["Space"]);
-const CROUCH_KEYS = new Set(["ControlLeft", "ControlRight"]);
-
 export function createPolyFirstPersonControls(
   scene: PolySceneHandle,
   options: PolyFirstPersonControlsOptions = {},
 ): PolyFirstPersonControlsHandle {
-  let opts: ResolvedOptions = resolveOptions(DEFAULTS, options);
+  let opts: PolyFirstPersonResolvedOptions = resolveFirstPersonOptions(FIRST_PERSON_DEFAULTS, options);
   const host = scene.host;
   // The camera wrapper carries CSS `perspective` — FPV class must live here
   // so `.polycss-fpv-host` overrides the wrapper's inline perspective value.
@@ -201,19 +120,6 @@ export function createPolyFirstPersonControls(
   // which is camera position with distance=0 — that's orbit-style and reads
   // as "the camera circles a point in front of itself" when you mouselook.
   let cameraOrigin: [number, number, number] = [0, 0, opts.groundZ + opts.eyeHeight];
-
-  function forwardDir(rotX: number, rotY: number): [number, number, number] {
-    const rx = (rotX * Math.PI) / 180;
-    const ry = (rotY * Math.PI) / 180;
-    // Derived from PolyCSS's scene transform inverse: the world direction
-    // that maps to CSS -Z (into the screen) under `rotateX(rotX) rotate(rotY)`
-    // + the axis swap (worldY→CSS X, worldX→CSS Y).
-    return [
-      -Math.sin(rx) * Math.cos(ry),
-      -Math.sin(rx) * Math.sin(ry),
-      -Math.cos(rx),
-    ];
-  }
 
   function lookOffset(): number {
     // Distance from camera origin to derived target in world units. For the
@@ -307,14 +213,6 @@ export function createPolyFirstPersonControls(
   };
 
   // ── Keyboard ─────────────────────────────────────────────────────────────
-  const isFpvKey = (code: string): boolean =>
-    FORWARD_KEYS.has(code) ||
-    BACK_KEYS.has(code) ||
-    LEFT_KEYS.has(code) ||
-    RIGHT_KEYS.has(code) ||
-    JUMP_KEYS.has(code) ||
-    CROUCH_KEYS.has(code);
-
   const onKeyDown = (e: KeyboardEvent): void => {
     if (!opts.enabled || stopped) return;
     if (!isFpvKey(e.code)) return;
@@ -357,60 +255,21 @@ export function createPolyFirstPersonControls(
     lastTime = now;
 
     if (opts.enabled) {
-      let dirty = false;
       const cameraState = scene.camera.state;
+      const res = stepFirstPersonPhysics(
+        { origin: cameraOrigin, verticalVel, jumpOffset },
+        keysHeld,
+        cameraState.rotY ?? 0,
+        dt,
+        opts,
+      );
+      cameraOrigin[0] = res.origin[0];
+      cameraOrigin[1] = res.origin[1];
+      cameraOrigin[2] = res.origin[2];
+      verticalVel = res.verticalVel;
+      jumpOffset = res.jumpOffset;
 
-      // ── Move (horizontal): WASD walks the camera origin on the XY plane. ──
-      if (opts.moveEnabled) {
-        let mf = 0; // forward axis
-        let mr = 0; // right axis
-        for (const code of keysHeld) {
-          if (FORWARD_KEYS.has(code)) mf += 1;
-          else if (BACK_KEYS.has(code)) mf -= 1;
-          else if (RIGHT_KEYS.has(code)) mr += 1;
-          else if (LEFT_KEYS.has(code)) mr -= 1;
-        }
-        if (mf !== 0 || mr !== 0) {
-          const rotY = cameraState.rotY ?? 0;
-          const r = (rotY * Math.PI) / 180;
-          // Horizontal forward (yaw projection onto world XY), independent of
-          // pitch — matches three.js PointerLockControls.moveForward which
-          // crosses camera.up with camera.right to drop the vertical
-          // component. WASD always walks the floor, never flies.
-          const fx = -Math.cos(r);
-          const fy = -Math.sin(r);
-          const rx = -Math.sin(r);
-          const ry = Math.cos(r);
-          const len = Math.hypot(mf, mr) || 1;
-          const step = opts.moveSpeed * dt;
-          cameraOrigin[0] += ((fx * mf + rx * mr) / len) * step;
-          cameraOrigin[1] += ((fy * mf + ry * mr) / len) * step;
-          dirty = true;
-        }
-      }
-
-      // ── Vertical: jump + gravity + crouch (mutates cameraOrigin.z). ──
-      const crouched = opts.crouchEnabled
-        && (keysHeld.has("ControlLeft") || keysHeld.has("ControlRight"));
-      const baseHeight = crouched ? opts.crouchHeight : opts.eyeHeight;
-      if (opts.jumpEnabled && (verticalVel !== 0 || jumpOffset > 0)) {
-        verticalVel -= opts.gravity * dt;
-        jumpOffset += verticalVel * dt;
-        if (jumpOffset <= 0) {
-          jumpOffset = 0;
-          verticalVel = 0;
-        }
-      } else if (!opts.jumpEnabled) {
-        jumpOffset = 0;
-        verticalVel = 0;
-      }
-      const originZ = opts.groundZ + baseHeight + jumpOffset;
-      if (Math.abs(cameraOrigin[2] - originZ) > 1e-4) {
-        cameraOrigin[2] = originZ;
-        dirty = true;
-      }
-
-      if (dirty) {
+      if (res.dirty) {
         // Re-derive target from the new origin so PolyCSS's perspective viewer
         // tracks the camera. Without this, walking forward would move
         // `cameraOrigin` but target would stay put, and the visible center
@@ -491,7 +350,7 @@ export function createPolyFirstPersonControls(
   function update(partial: PolyFirstPersonControlsOptions): void {
     const prevHeight = opts.eyeHeight;
     const prevGround = opts.groundZ;
-    opts = resolveOptions(opts, partial);
+    opts = resolveFirstPersonOptions(opts, partial);
     if (!stopped) host.style.cursor = opts.lookEnabled ? "crosshair" : "";
     if (opts.eyeHeight !== prevHeight || opts.groundZ !== prevGround) {
       // Re-snap the camera's vertical position when the floor or standing

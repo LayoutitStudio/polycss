@@ -124,7 +124,7 @@ function mockFetchVox(): void {
 
 function renderMesh(
   meshProps: Record<string, unknown> = {},
-  slots: Record<string, () => VNode | VNode[]> = {},
+  slots: Record<string, (...args: never[]) => VNode | VNode[]> = {},
   sceneProps: Record<string, unknown> = {},
 ): { container: HTMLElement; app: ReturnType<typeof createApp> } {
   const container = document.createElement("div");

@@ -79,6 +79,25 @@ export interface SceneContext {
    *  projector uses `shadow.dragDefinition` instead of full `definition`.
    *  Cleared for the debounced full-quality refine. */
   shadowDragActive: boolean;
+
+  // Shadow-orchestrator state (see ./shadowOrchestrator). Originally `let`
+  // bindings inside the createPolyScene closure; hoisted here so the
+  // extracted emit/throttle helpers can read AND write them.
+  /** H3 light-quantize short-circuit: the quantized light key of the last
+   *  emitted shadow frame, or null when the cache is invalidated. */
+  lastEmittedShadowLightKey: string | null;
+  /** Camera visibility signature of the last emitted shadow frame: which
+   *  receiver faces were camera-facing (see `receiverShadowCameraSignature`).
+   *  Shadow geometry and paint both depend on it, so a camera move re-emits
+   *  when it changes — on boundary crossings only, never per frame. */
+  lastEmittedShadowCameraKey: string | null;
+  /** Progressive-refinement debounce: re-emits at full `shadow.definition`
+   *  once a light drag settles. Cleared on destroy. */
+  shadowRefineTimer: ReturnType<typeof setTimeout> | null;
+  /** Timestamp of the last animated-shadow emit (throttle window start). */
+  lastAnimationShadowEmit: number;
+  /** Trailing-edge timer for the animated-shadow throttle. */
+  animationShadowTrailingTimer: ReturnType<typeof setTimeout> | null;
 }
 
 /** Build a fresh SceneContext for a new scene. The mutable containers
@@ -111,5 +130,10 @@ export function createSceneContext(input: {
     casterItemsCache: new Map(),
     casterItemsCacheKey: new Map(),
     shadowDragActive: false,
+    lastEmittedShadowLightKey: null,
+    lastEmittedShadowCameraKey: null,
+    shadowRefineTimer: null,
+    lastAnimationShadowEmit: 0,
+    animationShadowTrailingTimer: null,
   };
 }

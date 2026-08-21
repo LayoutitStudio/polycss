@@ -5,7 +5,7 @@ import {
   SOLID_TRIANGLE_CANONICAL_SIZE,
   type Polygon,
   type SolidTriangleBasis,
-} from "@layoutit/polycss";
+} from "@layoutit/polycss-core";
 import {
   validatePolyMorphModel,
   type PolyMorphMat4,

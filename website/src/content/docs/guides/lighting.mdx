@@ -221,7 +221,7 @@ scene.setOptions({ shadow: { parametric: true, definition: 32 } });
 - **`style: "vector" | "pixel"`** — `"vector"` (default) traces a smooth concave contour; `"pixel"` greedy-meshes the coverage into blocky **voxel** rectangles, where `definition` becomes the pixel-grid resolution (lower → chunkier). Holes (courtyards, an arena) come through in both.
 - **Point lights** are supported — each casting point light gets its own radial silhouette.
 - **`dragDefinition`** *(vanilla `createPolyScene` only)* — progressive refinement. While the directional light is being dragged the shadow renders at this lower definition for a smooth drag, then a debounced pass re-emits at full `definition` once the light settles. React/Vue get the same effect by lowering `definition` in component state during a drag.
-- **`followAnimation`** — by default a deforming/animated caster's shadow **freezes** at the last pose (re-projecting it every frame is expensive). Set `followAnimation: true` to make the shadow track the animation; pair it with `parametric` + a modest `definition` so the per-frame reprojection stays cheap.
+- **`followAnimation`** — by default a deforming/animated caster's shadow **freezes** at the last pose (re-projecting it every frame is expensive). Set `followAnimation: true` to make the shadow track the animation; pair it with `parametric` + a modest `definition` so each reprojection stays cheap. All three renderers throttle the follow re-emit to the same 80 ms window (~12fps, leading + trailing edge), so a paused animation still lands its final pose.
 
 ## Live & animated lights
 

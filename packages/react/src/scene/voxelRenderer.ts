@@ -14,6 +14,7 @@ import {
   PROJECTIVE_QUAD_BLEED,
   resolveProjectiveQuadGuards,
   rotateVec3,
+  rotateVec3InWrapperCssFrame,
   shadePolygon,
   SOLID_QUAD_CANONICAL_SIZE,
 } from "@layoutit/polycss-core";
@@ -563,7 +564,9 @@ function projectedPoint(item: DirectMatrixItem, rotation: CameraCullRotation): {
   let center = itemCenter(item);
   const meshRotation = rotation.meshRotation;
   if (meshRotation) {
-    center = rotateVec3(center, meshRotation[0] ?? 0, meshRotation[1] ?? 0, meshRotation[2] ?? 0);
+    // Match the wrapper's actual CSS rotation (world↔CSS conjugation) so
+    // item-ordering uses the same projected positions the browser composites.
+    center = rotateVec3InWrapperCssFrame(center, meshRotation);
   }
   const [x, y] = rotateVec3(center, rotation.rotX, 0, rotation.rotY);
   return { x, y };

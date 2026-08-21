@@ -3,8 +3,8 @@
  * Must be used inside a <PolyCamera>.
  *
  * Renders a polycss-scene wrapper containing all polygons and children.
- * Transform (position/scale/rotation) compose with PolyCamera's camera
- * transform via CSS preserve-3d nested DOM.
+ * Camera state (perspective, rotation, zoom) lives on the wrapping camera
+ * component; mesh transforms live on PolyMesh.
  */
 import {
   defineComponent,
@@ -34,6 +34,7 @@ import type {
 } from "@layoutit/polycss-core";
 import {
   DEFAULT_SEAM_BLEED,
+  resolveSeamBleedPx,
   parseHexColor,
   resolvePolyTextureLeafGeometry,
   worldDirectionToCss,
@@ -69,10 +70,6 @@ import {
 export interface PolySceneProps {
   polygons?: Polygon[];
   centerPolygons?: Polygon[];
-  perspective?: number;
-  rotX?: number;
-  rotY?: number;
-  zoom?: number;
   directionalLight?: PolyDirectionalLight;
   pointLights?: PolyPointLight[];
   ambientLight?: PolyAmbientLight;
@@ -90,15 +87,17 @@ export interface PolySceneProps {
   textureBackend?: PolyTextureBackend;
   /** Default texture projection request. Defaults to "affine". */
   textureProjection?: PolyTextureProjection;
-  /** Solid seam overscan. `"auto"` computes a fitted per-edge amount from the polygon plan. */
+  /** Solid seam overscan in CSS px (no upper clamp; each edge is still fitted to the polygon plan). `"auto"`/omitted = the 1.5px default; `0` disables every bleed; sub-1.5 values also shrink per-strategy primitive bleeds proportionally. */
   seamBleed?: PolySeamBleed;
   /** Opt out of specific render strategies. Disabled strategies fall through the chain (b→i→s, u→i→s, i→s). `<s>` cannot be disabled. */
   strategies?: PolyRenderStrategiesOption;
   /**
-   * When `true`, rotation pivots around the mesh's bbox center instead of
-   * world (0,0,0). Polygon data is not mutated — a wrapper div translates
-   * the polygons so the bbox center coincides with the scene anchor (0,0,0).
-   * Mirrors React's PolyScene autoCenter prop.
+   * When `true`, rotation pivots around the bbox center of all centerable
+   * meshes instead of world (0,0,0). Polygon data is not mutated and no DOM
+   * wrapper is added — the bbox-center offset is folded into the scene
+   * camera transform alongside `target` (the camera orbits
+   * `target + offset`). Mirrors React's PolyScene autoCenter prop; same
+   * mechanism in all three renderers.
    */
   autoCenter?: boolean;
   /**
@@ -109,13 +108,6 @@ export interface PolySceneProps {
    */
   shadow?: PolyShadowOptions;
   class?: string;
-  // TransformProps
-  position?: Vec3;
-  scale?: number | Vec3;
-  rotation?: Vec3;
-  // Debug
-  debugShowLabels?: boolean;
-  debugShowBackfaces?: boolean;
 }
 
 export const PolyScene = defineComponent({
@@ -124,10 +116,6 @@ export const PolyScene = defineComponent({
   props: {
     polygons: { type: Array as PropType<Polygon[]>, default: undefined },
     centerPolygons: { type: Array as PropType<Polygon[]>, default: undefined },
-    perspective: { type: Number },
-    rotX: { type: Number },
-    rotY: { type: Number },
-    zoom: { type: Number },
     directionalLight: {
       type: Object as PropType<PolyDirectionalLight>,
       default: undefined,
@@ -154,14 +142,6 @@ export const PolyScene = defineComponent({
     autoCenter: { type: Boolean, default: false },
     shadow: { type: Object as PropType<PolyShadowOptions>, default: undefined },
     class: { type: String },
-    position: { type: Array as unknown as PropType<Vec3>, default: undefined },
-    scale: {
-      type: [Number, Array] as unknown as PropType<number | Vec3>,
-      default: undefined,
-    },
-    rotation: { type: Array as unknown as PropType<Vec3>, default: undefined },
-    debugShowLabels: { type: Boolean },
-    debugShowBackfaces: { type: Boolean },
   },
   setup(props, { slots, attrs }) {
     const cameraCtx = inject(PolyCameraContextKey);
@@ -216,6 +196,34 @@ export const PolyScene = defineComponent({
 
     const sceneElLocalRef = ref<HTMLElement | null>(null);
 
+    // Field-wise stable shadow identity. An inline `:shadow="{...}"` binding
+    // is a fresh object identity on every parent render; letting it flow into
+    // the context computed would invalidate `sceneCtxValue` — and every
+    // receiver's shadow-emit computed — per render even when nothing changed.
+    // Only a real field change replaces the provided object.
+    let lastShadow: PolyShadowOptions | undefined;
+    let lastShadowKey: string | undefined;
+    const stableShadow = computed<PolyShadowOptions | undefined>(() => {
+      const next = props.shadow;
+      const key = next
+        ? [
+            next.color,
+            next.opacity,
+            next.lift,
+            next.maxExtend,
+            next.parametric,
+            next.definition,
+            next.style,
+            next.followAnimation,
+          ].map((v) => String(v)).join("|")
+        : undefined;
+      if (key !== lastShadowKey) {
+        lastShadowKey = key;
+        lastShadow = next;
+      }
+      return lastShadow;
+    });
+
     // Propagate scene-level rendering options to descendants (PolyMesh /
     // helpers) so they pick up the same dynamic mode + lights as the
     // scene. Without this, a helper PolyMesh would default to baked
@@ -232,7 +240,7 @@ export const PolyScene = defineComponent({
       textureImageRendering: props.textureImageRendering,
       textureBackend: props.textureBackend,
       textureProjection: props.textureProjection,
-      shadow: props.shadow,
+      shadow: stableShadow.value,
       shadowRegistry,
       receiverRegistry,
       groundCssZ: groundCssZ.value,
@@ -256,27 +264,12 @@ export const PolyScene = defineComponent({
       }
     });
 
-    // Retain the debug class for external tooling. The atlas renderer no
-    // longer emits separate backface elements.
-    watch(
-      () => props.debugShowBackfaces,
-      (val) => {
-        const el = sceneElLocalRef.value;
-        if (!el) return;
-        el.classList.toggle("polycss-debug-show-backfaces", !!val);
-      }
-    );
-
     const inputPolygons = computed(() => props.polygons ?? []);
     const centerInputPolygons = computed(() => props.centerPolygons ?? null);
 
-    const sceneContextOptions = computed(() => ({
-      directionalLight: props.directionalLight,
-    }));
-
-    const sceneResult = usePolySceneContext(inputPolygons, sceneContextOptions);
+    const sceneResult = usePolySceneContext(inputPolygons);
     const centerPolygons = computed(() => centerInputPolygons.value ?? inputPolygons.value);
-    const centerSceneResult = usePolySceneContext(centerPolygons, sceneContextOptions);
+    const centerSceneResult = usePolySceneContext(centerPolygons);
 
     // Scene transform is applied imperatively via applyTransformDirect, not via
     // Vue's reactive style binding. The sceneStyle computed previously read
@@ -327,11 +320,10 @@ export const PolyScene = defineComponent({
       const pointLightsForAtlas = dynamic ? undefined : props.pointLights;
       const repairEdges = buildTextureEdgeRepairSets(sceneResult.value.polygons);
       const seamBleed = props.seamBleed ?? DEFAULT_SEAM_BLEED;
-      const seamBleedEdges = seamBleed === "auto" || (
-        typeof seamBleed === "number" &&
-        Number.isFinite(seamBleed) &&
-        seamBleed > 0
-      )
+      // Core owns seamBleed resolution (resolveSeamBleedPx): "auto"/undefined
+      // → the 1.5px default, numbers are absolute px. Skip the seam-edge map
+      // only when the resolved overscan is 0.
+      const seamBleedEdges = resolveSeamBleedPx(seamBleed) > 0
         ? buildSeamBleedPolygonEdges(sceneResult.value.polygons, {
             tileSize: polyContext.value.tileSize,
             layerElevation: polyContext.value.layerElevation,
@@ -346,7 +338,7 @@ export const PolyScene = defineComponent({
           directionalLight: directionalForAtlas,
           pointLights: pointLightsForAtlas,
           ambientLight: ambientForAtlas,
-          seamBleed: seamBleedEdges?.has(i) ? seamBleed : undefined,
+          seamBleed,
           seamEdges: seamBleedEdges?.get(i),
           textureEdgeRepairEdges: repairEdges[i],
         })
@@ -450,7 +442,7 @@ export const PolyScene = defineComponent({
         if (groundCssZ.value !== null) groundCssZ.value = null;
         return;
       }
-      const lift = props.shadow?.lift ?? POLY_DEFAULT_SHADOW_LIFT;
+      const lift = stableShadow.value?.lift ?? POLY_DEFAULT_SHADOW_LIFT;
       const next = (minWorldZ + lift) * DEFAULT_TILE;
       if (groundCssZ.value !== next) groundCssZ.value = next;
       if (!el) return;
@@ -521,6 +513,8 @@ export const PolyScene = defineComponent({
           return renderTextureTrianglePoly({
             entry: plan,
             textureLighting: ctx.textureLighting ?? "baked",
+            doc: sceneElLocalRef.value?.ownerDocument,
+            strategies: props.strategies,
           });
         }
         if (textureAtlas.useProjectiveQuad.value && isProjectiveQuadPlan(plan)) {

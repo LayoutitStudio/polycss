@@ -141,7 +141,6 @@ export interface PolyContext {
   textureImageRendering?: PolyTextureImageRendering;
   textureBackend?: PolyTextureBackend;
   textureProjection?: PolyTextureProjection;
-  debugShowBackfaces?: boolean;
   [key: string]: unknown;
 }
 

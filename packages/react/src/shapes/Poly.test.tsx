@@ -436,20 +436,6 @@ describe("Poly — dynamic lighting", () => {
   });
 });
 
-describe("Poly — debug backfaces", () => {
-  it("does not render SVG debug overlays", () => {
-    const container = renderPoly({
-      vertices: FLAT_TRIANGLE_VERTS,
-      context: {
-        ...DEFAULT_CONTEXT,
-        debugShowBackfaces: true,
-      },
-    });
-    expect(container.querySelector("svg")).toBeNull();
-    expect(container.querySelector(".polycss-debug-backface")).toBeNull();
-  });
-});
-
 describe("Poly — transform props", () => {
   it("renders a wrapper div when position is provided", () => {
     const container = renderPoly({

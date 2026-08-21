@@ -8,12 +8,11 @@
  * `createPolyMapControls` instead.
  */
 
-import { BASE_TILE } from "@layoutit/polycss-core";
+import { applyOrbit, applyPan } from "@layoutit/polycss-core";
 import type { PolySceneHandle } from "./createPolyScene";
 import {
   BASE_DEFAULTS,
   resolveOptions,
-  invertFactor,
   makeListenerRegistry,
   makeCameraSnapshot,
   makeWheelHandler,
@@ -88,22 +87,16 @@ export function createPolyOrbitControls(
     const dx = e.clientX - pointer.x;
     const dy = e.clientY - pointer.y;
     pointer = { x: e.clientX, y: e.clientY };
-    const f = invertFactor(opts.invert);
-    const dX = (dx / 4) * f;
-    const dY = (dy / 4) * f;
     const cameraState = scene.camera.state;
     if (e.shiftKey) {
       // Shift+left-drag pans (slippy-map semantics)
-      const rotX = cameraState.rotX ?? 65;
-      const rotY = cameraState.rotY ?? 45;
-      const z = Math.max(0.01, cameraState.zoom ?? 1);
-      const cosRotXRaw = Math.cos((rotX * Math.PI) / 180);
-      const cosRotX = cosRotXRaw >= 0 ? Math.max(0.1, cosRotXRaw) : Math.min(-0.1, cosRotXRaw);
-      const cZ = Math.cos((rotY * Math.PI) / 180);
-      const sZ = Math.sin((rotY * Math.PI) / 180);
-      const k = z * BASE_TILE;
-      const targetD0 =  (dx * sZ - dy * cZ / cosRotX) / k;
-      const targetD1 = -(dx * cZ + dy * sZ / cosRotX) / k;
+      const { targetD0, targetD1 } = applyPan(
+        dx,
+        dy,
+        cameraState.zoom ?? 1,
+        cameraState.rotX ?? 65,
+        cameraState.rotY ?? 45,
+      );
       const t = cameraState.target ?? [0, 0, 0];
       scene.camera.update({ target: [t[0] + targetD0, t[1] + targetD1, t[2]] });
     } else {
@@ -116,9 +109,8 @@ export function createPolyOrbitControls(
       // user drag the camera into that back-facing region (visible in the
       // gallery as "the ground disappears when I rotate up"); stop at 89
       // so the floor stays visible at the steepest practical tilt.
-      const rotX = Math.max(0, Math.min(89, (cameraState.rotX ?? 65) - dY));
-      const rotY = ((((cameraState.rotY ?? 45) - dX) % 360) + 360) % 360;
-      scene.camera.update({ rotX, rotY });
+      const next = applyOrbit(dx, dy, cameraState.rotX ?? 65, cameraState.rotY ?? 45, opts.invert);
+      scene.camera.update({ rotX: Math.max(0, Math.min(89, next.rotX)), rotY: next.rotY });
     }
     scene.applyCamera();
     emitChange(snapshot);

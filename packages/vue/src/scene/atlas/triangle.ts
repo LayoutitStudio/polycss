@@ -3,6 +3,7 @@ import type { CSSProperties, VNode } from "vue";
 import type {
   TextureAtlasPlan,
   PolyTextureLightingMode,
+  PolyRenderStrategiesOption,
   SolidPaintDefaults,
 } from "@layoutit/polycss-core";
 import { solidTriangleStyle } from "./solidTriangleStyle";
@@ -15,6 +16,8 @@ export function renderTextureTrianglePoly({
   style: styleProp,
   domAttrs,
   pointerEvents = "auto",
+  doc,
+  strategies,
 }: {
   entry: TextureAtlasPlan;
   textureLighting: PolyTextureLightingMode;
@@ -23,8 +26,10 @@ export function renderTextureTrianglePoly({
   style?: CSSProperties;
   domAttrs?: Record<string, unknown>;
   pointerEvents?: "auto" | "none";
+  doc?: Document | null;
+  strategies?: PolyRenderStrategiesOption;
 }): VNode | null {
-  const triangleStyle = solidTriangleStyle(entry, textureLighting, pointerEvents, solidPaintDefaults);
+  const triangleStyle = solidTriangleStyle(entry, textureLighting, pointerEvents, solidPaintDefaults, doc, strategies);
   if (!triangleStyle) return null;
 
   const dataAttrs = entry.polygon.data

@@ -10,7 +10,13 @@ export default defineConfig({
   splitting: false,
   sourcemap: false,
   clean: true,
+  minify: true,
   target: "es2020",
   tsconfig: "tsconfig.build.json",
-  external: ["react", "react-dom"],
+  external: [
+    "react",
+    "react-dom",
+    "@layoutit/polycss-core",
+    "@layoutit/polycss-core/three",
+  ],
 });

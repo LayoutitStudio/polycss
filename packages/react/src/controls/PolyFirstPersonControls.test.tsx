@@ -248,9 +248,8 @@ describe("PolyFirstPersonControls", () => {
     it("setOrigin places origin and target lies exactly origin + lookDir * (perspective/tile)", () => {
       const ref = createRef<PolyFirstPersonControlsHandle>();
       root = createRoot(container);
-      // Force a known perspective on the camera so lookOffset is deterministic.
       act(() => root.render(
-        <PolyCamera perspective={2000} rotX={90} rotY={0}>
+        <PolyCamera rotX={90} rotY={0}>
           <PolyScene>
             <PolyFirstPersonControls ref={ref} />
           </PolyScene>

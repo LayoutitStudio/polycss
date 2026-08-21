@@ -150,7 +150,7 @@ function directionalLight(intensity: number) {
   };
 }
 
-function affineMatrix(element: HTMLElement): number[] {
+function affineMatrix(element: { style: { transform: string } }): number[] {
   const match = /^matrix3d\(([^)]+)\)$/u.exec(element.style.transform);
   if (!match) throw new Error(`Animated Gallery leaf lacks matrix3d(): ${element.style.transform}`);
   const matrix = match[1].split(",").map(Number);

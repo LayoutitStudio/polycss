@@ -254,7 +254,7 @@ type PolySeamBleedEdges =
 
 `TextureQuality` controls atlas bitmap budget and CSS sprite size. `PolySeamBleed` controls solid-primitive overscan for detected shared seam edges.
 
-Renderer semantics for `PolySeamBleed` currently diverge: vanilla `createPolyScene` treats a number as a `0..1` ratio of the built-in `1.5` px default and resolves `"auto"` to the full `1.5` px, while React/Vue treat a number as the requested CSS-pixel amount and treat an explicit `"auto"` as no shared-edge overscan at all (atlas planning accepts numeric amounts only; per-strategy primitive bleeds are unaffected). The numeric default `1.5` behaves identically everywhere.
+`PolySeamBleed` semantics are identical across all three renderers: a number is the requested shared-edge overscan in CSS px (no upper clamp; each edge is still fitted to what the polygon plan can safely absorb), and `"auto"` or omitting the option resolves to the built-in `1.5` px default. The same value scales the per-strategy primitive bleeds by `clamp(value / 1.5, 0, 1)` — `0` disables every bleed.
 
 ---
 
@@ -346,44 +346,48 @@ interface PolySceneOptions {
   textureBackend?: PolyTextureBackend;
   /** Default texture projection request. Defaults to "affine". */
   textureProjection?: PolyTextureProjection;
-  /** Shared-edge solid overscan. See `PolySeamBleed` above for cross-renderer semantics. */
+  /** Shared-edge solid overscan in CSS px; "auto" = the 1.5px default. See `PolySeamBleed` above. */
   seamBleed?: PolySeamBleed;
   strategies?: PolyRenderStrategiesOption;
   autoCenter?: boolean;
-  shadow?: {
-    /** Default: "#000000". */
-    color?: string;
-    /** 0..1. Default: 0.25. */
-    opacity?: number;
-    /** World units the shadow is lifted off its receiver to avoid z-fighting.
-     *  Default 0.05 for the ground-plane fallback, 0.001 for `receiveShadow`
-     *  meshes. */
-    lift?: number;
-    /** Max CSS px the shadow may extend past the mesh footprint. Default: 2000. */
-    maxExtend?: number;
-    /** Cast one low-resolution coverage silhouette per caster instead of
-     *  projecting full geometry. Default: false. */
-    parametric?: boolean;
-    /** Parametric silhouette detail. Default: 16. Overridden per mesh by
-     *  `PolyMeshTransform.shadowDefinition`. */
-    definition?: number;
-    /** Progressive refinement: definition used while the directional light is
-     *  actively being dragged, then a debounced pass re-emits at full
-     *  `definition`. Vanilla `createPolyScene` only. Unset → no progressive pass. */
-    dragDefinition?: number;
-    /** "vector" (default) traces a smooth concave contour; "pixel"
-     *  greedy-meshes the coverage into blocky rectangles. */
-    style?: "vector" | "pixel";
-    /** Re-emit shadows while a mesh animates instead of freezing at the last
-     *  pose. Default false. Vanilla throttles the re-emit internally (~12fps);
-     *  React/Vue re-emit on every polygon change — pair with a low parametric
-     *  `definition`. */
-    followAnimation?: boolean;
-  };
+  shadow?: PolyShadowOptions;
   /** Emit `data-poly-shadow-*` attribution attributes on every shadow SVG and
    *  path, for DevTools inspection. Vanilla `createPolyScene` only.
    *  Default: false. */
   debugShadowAttrs?: boolean;
+}
+
+/** Exported by all three renderer packages under the same name. The React and
+ *  Vue variants omit the vanilla-only `dragDefinition`. */
+interface PolyShadowOptions {
+  /** Default: "#000000". */
+  color?: string;
+  /** 0..1. Default: 0.25. */
+  opacity?: number;
+  /** World units the shadow is lifted off its receiver to avoid z-fighting.
+   *  Defaults to `POLY_DEFAULT_SHADOW_LIFT` (0.05) on both the ground-plane
+   *  fallback and the `receiveShadow` face path, in all three renderers. */
+  lift?: number;
+  /** Max CSS px the shadow may extend past the mesh footprint. Default: 2000. */
+  maxExtend?: number;
+  /** Cast one low-resolution coverage silhouette per caster instead of
+   *  projecting full geometry. Default: false. */
+  parametric?: boolean;
+  /** Parametric silhouette detail. Default: 16. Overridden per mesh by
+   *  `PolyMeshTransform.shadowDefinition`. */
+  definition?: number;
+  /** Progressive refinement: definition used while the directional light is
+   *  actively being dragged, then a debounced pass re-emits at full
+   *  `definition`. Vanilla `createPolyScene` only. Unset → no progressive pass. */
+  dragDefinition?: number;
+  /** "vector" (default) traces a smooth concave contour; "pixel"
+   *  greedy-meshes the coverage into blocky rectangles. */
+  style?: "vector" | "pixel";
+  /** Re-emit shadows while a mesh animates instead of freezing at the last
+   *  pose. Default false. All three renderers throttle the re-emit to the same
+   *  80 ms window (~12fps, leading + trailing edge) — pair with a low
+   *  parametric `definition`. */
+  followAnimation?: boolean;
 }
 
 interface PolyMeshTransform {
@@ -463,7 +467,7 @@ Runtime selection helpers are exported from the framework packages: `findPolyMes
 - Component props: `PolyCameraProps`, `PolyOrthographicCameraProps`, `PolyPerspectiveCameraProps`, `PolySceneProps`, `PolyMeshProps`, `PolyGroundProps`, `PolyProps`, `PolyBoxProps`, `PolyPlaneProps`, `PolyRingProps`, `PolyOctahedronProps`, `PolySphereProps`, `PolyTetrahedronProps`, `PolyIcosahedronProps`, `PolyDodecahedronProps`, `PolyCylinderProps`, `PolyConeProps`, `PolyTorusProps`, `PolyAxesHelperProps`, `PolyDirectionalLightHelperProps`.
 - Control and selection props: `PolyOrbitControlsProps`, `PolyMapControlsProps`, `PolyTransformControlsProps`, `PolySelectProps`, `PolyControlsAnimateOptions`, `PolyOrbitControlsCamera`, `PolyMapControlsCamera`. `PolyFirstPersonControlsOptions`, `PolyFirstPersonControlsHandle`. **React only:** `PolyFirstPersonControlsProps`, `PolyControlsCamera`.
 - **Vanilla only** — exported from `@layoutit/polycss`, NOT from the framework packages: `PolyControlsBaseOptions`, `PolyControlsHandle`, `PolyControlsChangeEvent`, `PolyControlsInteractionEvent`, `PolyControlsEvent`, `PolyControlsListener`, `PolyOrbitControlsOptions`, `PolyOrbitControlsHandle`, `PolyMapControlsOptions`, `PolyMapControlsHandle`, `PolyTransformControlsOptions`, `PolyTransformControlsHandle`, `PolySelectOptions`, `PolySelectionHandle`, `PolyShapeResult`, `PolySceneSnapshotErrorCode`.
-- Hooks, events, and contexts: `UseCameraOptions`, `UseCameraResult`, `UseSceneContextOptions`, `UseSceneContextResult`, `UseMeshOptions`, `UseMeshResult`, `UsePolyAnimationResult`, `PolyPointerEvent`, `PolyMouseEvent`, `PolyWheelEvent`, `PolyEventHandler`, `InteractionProps`, `PolySelectionApi`, `PolyCameraContext`, `PolyCameraContextValue`.
+- Hooks, events, and contexts: `UseCameraOptions`, `UseCameraResult`, `UseSceneContextResult`, `UseMeshOptions`, `UseMeshResult`, `UsePolyAnimationResult`, `PolyPointerEvent`, `PolyMouseEvent`, `PolyWheelEvent`, `PolyEventHandler`, `InteractionProps`, `PolyShadowOptions`, `PolySelectionApi`, `PolyCameraContext`, `PolyCameraContextValue`.
 - Utility types: `PolyTransformControlsObject`, `PolyTransformControlsObjectChangeEvent`. **React only:** `TransformProps`, `DOMPassthroughProps`.
 
 </details>

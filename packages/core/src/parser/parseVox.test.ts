@@ -355,7 +355,7 @@ describe("parseVox — minimal synthetic buffer", () => {
         { x: 0, y: 1, z: 0, colorIndex: 37 },
       ],
     );
-    const result = parseVox(buf, { targetSize: 2, gridShift: 0 });
+    const result = parseVox(buf, { targetSize: 2 });
     expect(result.voxelSource?.cells).toEqual([
       { x: 1, y: 0, z: 0, color: "#ffffff" },
       { x: 0, y: 0, z: 0, color: "#ccffff" },

@@ -1,10 +1,10 @@
-import type { PolyMorphModel } from "../contracts/index.js";
 import {
   clonePolyMorphFixture,
   createPolyMorphModelFixture,
+  type PolyMorphJointModelFixture,
 } from "./modelFixture.js";
 
-export function createPolyMorphSkinningFixture(): PolyMorphModel {
+export function createPolyMorphSkinningFixture(): PolyMorphJointModelFixture {
   const fixture = clonePolyMorphFixture(createPolyMorphModelFixture("joint-skin"));
   fixture.capabilities = [
     "animation",

@@ -19,6 +19,7 @@ is simply wrong or absent. Work the symptom table before adding instrumentation.
 | Shadow still absent with a caster, a receiver and a light | Camera `zoom` below ~1 (the default is `0.65`). `shadow.lift` is in world units and scales with the camera, so it stops clearing the receiver. Raise `shadow.lift` to `0.2`, or the zoom to `1`. |
 | Shadow is hidden behind the object casting it | The light is nearly parallel to the view direction. Move it to one side so the shadow falls where the camera can see it. |
 | Shadow works in React but not vanilla | Same cause — React/Vue have the ground-plane fallback, vanilla does not. |
+| No shadow in React/Vue with a caster but no receiver | The ground fallback needs a real `directionalLight` with nonzero `intensity` on `<PolyScene>`. There is no implicit default sun. |
 | Shadow vanished when you added a floor in React/Vue | Adding any receiver disables the ground fallback. Set `receiveShadow` on that floor. |
 | Point lights do nothing | `textureLighting: "dynamic"` ignores `pointLights` entirely — shading and shadows. Switch to `"baked"`. |
 | Moving the light doesn't change the surface (vanilla) | Baked mode does not auto-rebake on a `directionalLight` change. Call `mesh.rebakeAtlas()`, typically at drag-end. Shadows still move; the lit surface does not. |

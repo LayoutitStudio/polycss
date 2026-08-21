@@ -55,6 +55,16 @@
     #panel .row > .val { text-align: right; font-variant-numeric: tabular-nums; }
     #panel .row > input[type=range] { width: 100%; }
     #panel .info { font-size: 11px; color: #64748b; line-height: 1.4; margin: 8px 0 12px; padding: 8px; background: #fff; border: 1px solid #e2e8f0; border-radius: 4px; }
+    /* Permanent capture-state badge under "Compare now". The true-pixel diff
+       needs a getDisplayMedia tab stream; when the picker is dismissed the
+       oracle silently degrades to html-to-image, which cannot rasterise the
+       3D-transformed shadow SVGs. A transient status line let that pass
+       unnoticed, so the state stays on screen instead. */
+    #panel .capbadge { font-family: ui-monospace, monospace; font-size: 10px; line-height: 1.5; margin: 0 0 6px; padding: 4px 6px; border: 1px solid #e2e8f0; border-radius: 3px; background: #fff; }
+    #panel .capbadge.ok   { color: #15803d; border-color: #bbf7d0; background: #f0fdf4; }
+    #panel .capbadge.warn { color: #b45309; border-color: #fde68a; background: #fffbeb; }
+    #panel .capbadge.bad  { color: #b91c1c; border-color: #fecaca; background: #fef2f2; }
+    #panel .capbadge .last { color: #64748b; }
   </style>
 </head>
 <body>
@@ -152,7 +162,11 @@
       floor: { size: 20, color: "#cbd5e1" },
       dir:   { x: qn("dx", 1), y: qn("dy", 0.5), z: qn("dz", 1), intensity: qn("di", 1), color: qs("dc", "#ffffff") },
       amb:   { intensity: qn("ai", 0.3), color: qs("ac", "#ffffff") },
-      shadow:{ opacity: qn("so", 1.0) },
+      // Parametric-shadow knobs, mirroring shadow-parity.html: ?pm=1 turns
+      // on the parametric approximation (defaults to exact), ?def= sets its
+      // coverage resolution, ?style= picks "vector" | "pixel".
+      shadow:{ opacity: qn("so", 1.0), parametric: qs("pm", "0") === "1",
+               definition: qn("def", 24), style: qs("style", "vector") },
       cam:   { rotX: qn("rx", 30), rotY: qn("ry", 0), zoom: qn("z", 60) },
       // "Shadows only" mode: hide all caster + floor base color so only the
       // shadow elements remain visible. Lets you compare shadow geometry
@@ -205,7 +219,9 @@
       // visible gap between the caster's base and where the shadow starts
       // on the floor. The bench's floor + cube are separate meshes, no
       // z-fight risk that the default lift was protecting against.
-      shadow: { color: "#000000", opacity: S.shadow.opacity, lift: 0 },
+      shadow: { color: "#000000", opacity: S.shadow.opacity, lift: 0,
+                parametric: S.shadow.parametric, definition: S.shadow.definition,
+                style: S.shadow.style },
       textureLighting: S.lighting,
       // Full-quality atlas — no global shrink-to-fit cap. Default "auto"
       // shrinks the whole atlas to ~2048px / 16MB which pixelates large
@@ -953,7 +969,9 @@
         },
         ambientLight: { color: S.amb.color, intensity: S.amb.intensity },
         textureLighting: S.lighting,
-        shadow: { color: "#000000", opacity: S.shadow.opacity, lift: shadowLift },
+        shadow: { color: "#000000", opacity: S.shadow.opacity, lift: shadowLift,
+                  parametric: S.shadow.parametric, definition: S.shadow.definition,
+                  style: S.shadow.style },
         autoCenter: S.autoCenter,
       });
       // Baked mode stores lit colors in atlas pixels → light change requires
@@ -1293,7 +1311,11 @@
       info.className = "info";
       info.innerHTML = "Same numbers → both engines. <br/>" +
         "Convention: +Z up, +X right, +Y forward. <br/>" +
-        "Crosshair = world origin (0,0,0).";
+        "Crosshair = world origin (0,0,0). <br/>" +
+        "\"Compare now\" prompts to share THIS TAB — shadows only diff " +
+        "correctly with the tab stream. <br/>" +
+        "URL: ?pm=1 parametric shadows (default exact), " +
+        "&def=24 definition, &style=vector|pixel.";
       p.appendChild(info);
 
       // Copy-state button: dump every slider/dropdown value as a sharable
@@ -1337,6 +1359,9 @@
         if (!S.floorVisible) q.set("fv", "0");
         if (!S.floorReceives) q.set("fr", "0");
         if (S.autoCenter) q.set("ax", "1");
+        if (S.shadow.parametric) q.set("pm", "1");
+        if (S.shadow.definition !== 24) q.set("def", String(S.shadow.definition));
+        if (S.shadow.style !== "vector") q.set("style", S.shadow.style);
         if (oracleLumaTolerance !== 18) q.set("tol", String(oracleLumaTolerance));
         const url = location.origin + location.pathname + "?" + q.toString();
         try { await navigator.clipboard.writeText(url); copyBtn.textContent = "Copied ✓"; }
@@ -1445,6 +1470,53 @@
       autoCenterLabel.appendChild(autoCenterCheck);
       autoCenterLabel.appendChild(document.createTextNode("Auto-center (PolyCSS only)"));
       p.appendChild(autoCenterLabel);
+
+      // Parametric shadow controls — same knobs the gallery exposes
+      // (parametric on/off, definition, pixel style), mirroring the
+      // ?pm=/&def=/&style= URL params so both entry points stay in sync.
+      const parametricLabel = document.createElement("label");
+      parametricLabel.style.cssText = "display:flex; gap:6px; align-items:center; margin: 0 0 8px;";
+      const parametricCheck = document.createElement("input");
+      parametricCheck.type = "checkbox";
+      parametricCheck.checked = !!S.shadow.parametric;
+      parametricCheck.addEventListener("change", () => {
+        S.shadow.parametric = parametricCheck.checked;
+        update(true);
+      });
+      parametricLabel.appendChild(parametricCheck);
+      parametricLabel.appendChild(document.createTextNode("Parametric shadow"));
+      p.appendChild(parametricLabel);
+
+      const pixelStyleLabel = document.createElement("label");
+      pixelStyleLabel.style.cssText = "display:flex; gap:6px; align-items:center; margin: 0 0 8px;";
+      const pixelStyleCheck = document.createElement("input");
+      pixelStyleCheck.type = "checkbox";
+      pixelStyleCheck.checked = S.shadow.style === "pixel";
+      pixelStyleCheck.addEventListener("change", () => {
+        S.shadow.style = pixelStyleCheck.checked ? "pixel" : "vector";
+        update(true);
+      });
+      pixelStyleLabel.appendChild(pixelStyleCheck);
+      pixelStyleLabel.appendChild(document.createTextNode("Pixel style"));
+      p.appendChild(pixelStyleLabel);
+
+      const defRow = document.createElement("label");
+      defRow.style.cssText = "display:flex; gap:6px; align-items:center; margin: 0 0 8px;";
+      defRow.appendChild(document.createTextNode("Shadow def."));
+      const defInput = document.createElement("input");
+      defInput.type = "range"; defInput.min = "4"; defInput.max = "96"; defInput.step = "1";
+      defInput.value = String(S.shadow.definition);
+      defInput.style.flex = "1";
+      const defVal = document.createElement("span");
+      defVal.className = "val"; defVal.textContent = String(S.shadow.definition);
+      defInput.addEventListener("input", () => {
+        S.shadow.definition = Number(defInput.value);
+        defVal.textContent = defInput.value;
+        update(true);
+      });
+      defRow.appendChild(defInput);
+      defRow.appendChild(defVal);
+      p.appendChild(defRow);
 
       // Mesh + lighting dropdowns
       const meshSec = document.createElement("div");
@@ -1862,6 +1934,33 @@
     oracleCompareBtn.type = "button";
     oracleCompareBtn.textContent = "Compare now";
     oracleCompareBtn.style.cssText = "margin: 0 0 4px; padding: 6px 10px; font: inherit; background:#0f172a; color:#f8fafc; border:1px solid #1e293b; border-radius:4px; cursor:pointer; width:100%;";
+
+    // ── Capture-state badge ─────────────────────────────────────────────
+    // Permanent (not a transient status): the diff is only trustworthy when
+    // the frame came from a tab-capture stream or an injected screenshot, and
+    // the failure mode — user dismisses the share picker → html-to-image →
+    // empty shadow diff — is otherwise invisible.
+    const CAPTURE_FALLBACK = "html-to-image(⚠ shadows dropped)";
+    // "fallback" = no live stream (never acquired, or ended) | "tab-stream" |
+    // "denied" = the share picker was dismissed / rejected.
+    let oracleCaptureState = "fallback";
+    let oracleLastCaptureMode = null;
+    const oracleCaptureBadge = document.createElement("div");
+    oracleCaptureBadge.className = "capbadge warn";
+    oracleCaptureBadge.title =
+      "Compare now asks to share THIS TAB. Only the tab stream (or an injected " +
+      "headless screenshot) captures 3D-transformed shadow SVGs.";
+    function renderCaptureBadge() {
+      let cls = "warn";
+      let line = "capture: html-to-image (shadows unreliable)";
+      if (oracleCaptureState === "tab-stream") { cls = "ok"; line = "capture: tab-stream ✓"; }
+      else if (oracleCaptureState === "denied") { cls = "bad"; line = "capture: denied — click to retry"; }
+      oracleCaptureBadge.className = "capbadge " + cls;
+      oracleCaptureBadge.innerHTML =
+        `${line}<br/><span class="last">last: ${oracleLastCaptureMode ?? "—"}</span>`;
+    }
+    renderCaptureBadge();
+
     // Tolerance row — luma units 0..120 covers "pixel-perfect" through
     // "ignore any tint smaller than half the mesh's lit range".
     const oracleTolRow = document.createElement("div");
@@ -1895,7 +1994,8 @@
     const panelEl = document.getElementById("panel");
     panelEl.insertBefore(oracleSec, panelEl.firstChild?.nextSibling ?? null);
     panelEl.insertBefore(oracleCompareBtn, oracleSec.nextSibling);
-    panelEl.insertBefore(oracleTolRow, oracleCompareBtn.nextSibling);
+    panelEl.insertBefore(oracleCaptureBadge, oracleCompareBtn.nextSibling);
+    panelEl.insertBefore(oracleTolRow, oracleCaptureBadge.nextSibling);
     panelEl.insertBefore(oracleThumbsWrap, oracleTolRow.nextSibling);
     panelEl.insertBefore(oracleStatus, oracleThumbsWrap.nextSibling);
     panelEl.insertBefore(oracleResults, oracleStatus.nextSibling);
@@ -2024,8 +2124,16 @@
     // visible warning) when tab capture is denied/unavailable.
     let _capStream = null, _capTrack = null, _capImageCapture = null, _capCropped = false;
     async function ensureTabCapture() {
-      if (_capTrack && _capTrack.readyState === "live") return true;
-      if (!navigator.mediaDevices?.getDisplayMedia) return false;
+      if (_capTrack && _capTrack.readyState === "live") {
+        oracleCaptureState = "tab-stream";
+        renderCaptureBadge();
+        return true;
+      }
+      if (!navigator.mediaDevices?.getDisplayMedia) {
+        oracleCaptureState = "fallback";
+        renderCaptureBadge();
+        return false;
+      }
       try {
         _capStream = await navigator.mediaDevices.getDisplayMedia({
           video: { frameRate: 12 }, audio: false, preferCurrentTab: true,
@@ -2042,12 +2150,59 @@
           } catch (e) { console.warn("[oracle] cropTo failed, will crop manually", e); }
         }
         _capImageCapture = window.ImageCapture ? new ImageCapture(_capTrack) : null;
-        _capTrack.addEventListener("ended", () => { _capTrack = null; _capImageCapture = null; });
+        _capTrack.addEventListener("ended", () => {
+          _capTrack = null; _capImageCapture = null;
+          // Sharing stopped: the next compare would silently use html-to-image.
+          oracleCaptureState = "fallback";
+          renderCaptureBadge();
+        });
+        oracleCaptureState = "tab-stream";
+        renderCaptureBadge();
         return true;
       } catch (e) {
         console.warn("[oracle] tab capture denied/unavailable", e);
+        oracleCaptureState = "denied";
+        renderCaptureBadge();
         return false;
       }
+    }
+    // Paint an unmistakable "these pixels are not real" panel over a
+    // diagnostic canvas. Without it, a dismissed share picker leaves the DIFF
+    // and MISCLASSIFIED panes visually empty, which reads as "the engines
+    // agree" — the exact opposite of the truth.
+    function paintCanvasNotice(ctx, canvas, lines) {
+      if (!canvas.width || !canvas.height) return;
+      const dpr = window.devicePixelRatio || 1;
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.fillStyle = "rgba(15,23,42,0.94)";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      const cx = canvas.width / 2;
+      const cy = canvas.height / 2;
+      const step = 22 * dpr;
+      const top = cy - ((lines.length - 1) * step) / 2;
+      lines.forEach((text, i) => {
+        const head = i === 0;
+        ctx.font = `${head ? 600 : 400} ${(head ? 15 : 12) * dpr}px ui-monospace, monospace`;
+        ctx.fillStyle = head ? "#fca5a5" : "#cbd5e1";
+        ctx.fillText(text, cx, top + i * step);
+      });
+    }
+    // Both diagnostic panes, whenever the compare could not use real pixels.
+    function paintCaptureNotice() {
+      const head = oracleCaptureState === "denied"
+        ? "tab capture denied — diff unavailable"
+        : "no tab capture — diff unavailable";
+      paintCanvasNotice(diffCtx, diffCanvas, [
+        head,
+        're-click Compare now and choose "This tab"',
+        "html-to-image cannot capture 3D shadow SVGs",
+      ]);
+      paintCanvasNotice(missesCtx, missesCanvas, [
+        "no tab capture — attribution unavailable",
+        're-click Compare now and choose "This tab"',
+      ]);
     }
     // Grab one real frame and return W×H ImageData of #poly-host, or null.
     async function grabRealPolyPx(W, H) {
@@ -2209,6 +2364,9 @@
       // outlines on the render.
       setMismatchOutlines([]);
       setCasterOutlines([]);
+      // Declared outside the try so the finally can repaint the "not real
+      // pixels" notice over whatever the fallback diff drew.
+      let captureMode = null;
       try {
         oracleStatus.textContent = "Snapshotting…";
         const hostRect = polyHost.getBoundingClientRect();
@@ -2247,7 +2405,7 @@
         // give the compositor one rAF to present the hidden state first.
         await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
         let polyPx = opts?.polyPx ?? null;
-        let captureMode = polyPx ? "injected" : null;
+        captureMode = polyPx ? "injected" : null;
         if (!polyPx) {
           polyPx = await grabRealPolyPx(W, H);
           if (polyPx) captureMode = "tab-capture";
@@ -2260,8 +2418,10 @@
             width: W, height: H, pixelRatio: 1, cacheBust: false,
           });
           polyPx = polyCanvas.getContext("2d").getImageData(0, 0, W, H).data;
-          captureMode = "html-to-image(⚠ shadows dropped)";
+          captureMode = CAPTURE_FALLBACK;
         }
+        oracleLastCaptureMode = captureMode;
+        renderCaptureBadge();
         if (myToken !== oracleRunToken) return;
         // Re-expose a polyCanvas-shaped surface for the thumbnail below.
         const polyThumbSrc = (() => {
@@ -2617,6 +2777,9 @@
         threeLightHelper.visible = true;
         threeLightLine.visible = true;
         renderer.render(threeScene, camera);
+        // The html-to-image frame has no 3D shadow SVGs in it, so the diff it
+        // produced is not evidence of anything — cover it with the reason.
+        if (captureMode === CAPTURE_FALLBACK) paintCaptureNotice();
         oracleBusy = false;
         if (oracleQueued) { oracleQueued = false; setTimeout(compareFrame, 50); }
       }
@@ -2628,7 +2791,13 @@
     // appears once per session and the stream is reused after.
     oracleCompareBtn.addEventListener("click", async () => {
       const ok = await ensureTabCapture();
-      if (!ok) oracleStatus.textContent = "⚠ tab capture denied — falling back to html-to-image (shadows unreliable)";
+      if (!ok) {
+        oracleStatus.textContent = "⚠ tab capture denied — falling back to html-to-image (shadows unreliable)";
+        // Say so on the canvases immediately: the fallback compare below takes
+        // seconds, and a blank DIFF pane during it reads as "no disagreement".
+        resizeOracleCanvases();
+        paintCaptureNotice();
+      }
       await compareFrame();
     });
 

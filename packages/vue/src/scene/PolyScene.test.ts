@@ -335,24 +335,6 @@ describe("PolyScene (Vue) — autoCenter", () => {
   });
 });
 
-describe("PolyScene (Vue) — debugShowBackfaces", () => {
-  afterEach(() => {
-    vi.restoreAllMocks();
-    document.body.innerHTML = "";
-  });
-
-  it("does not render SVG debug overlays when debugShowBackfaces=true", async () => {
-    const { container } = renderScene({
-      polygons: [TRIANGLE],
-      debugShowBackfaces: true,
-    });
-    await nextTick();
-    const debugFaces = container.querySelectorAll(".polycss-debug-backface");
-    expect(debugFaces.length).toBe(0);
-    expect(container.querySelector("svg")).toBeNull();
-  });
-});
-
 describe("PolyScene (Vue) — automatic merge", () => {
   afterEach(() => {
     vi.restoreAllMocks();

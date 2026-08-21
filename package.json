@@ -28,6 +28,9 @@
     "check:skill": "node .github/scripts/sync-skill-docs.mjs --check",
     "eval:skill": "node eval/skill/run.mjs",
     "eval:selftest": "node eval/skill/selftest.mjs",
+    "check:boundaries": "node .github/scripts/check-boundaries.mjs",
+    "check:mirrors": "node .github/scripts/check-mirrors.mjs",
+    "typecheck": "pnpm --filter './packages/*' -r --if-present typecheck",
     "test:scripts": "node --test .github/scripts/*.test.mjs",
     "publish:all": "pnpm sync:readmes && pnpm --filter './packages/*' --filter '!@layoutit/polycss-domformat' -r publish --access public",
     "dev:website": "pnpm --filter @layoutit/polycss-website dev",
@@ -52,7 +55,13 @@
     "compat-hunter": "pnpm --filter @layoutit/polycss-core build && node .agents/skills/compat-hunter/scripts/compat-hunter.mjs",
     "bench:seams": "pnpm --filter @layoutit/polycss-core build && node bench/seam-gap-bench.mjs",
     "bench:seams:render": "pnpm --filter @layoutit/polycss-core build && node bench/seam-gap-bench.mjs --render",
-    "bench:visual": "node bench/build.mjs && node bench/perf-visual.mjs"
+    "bench:visual": "node bench/build.mjs && node bench/perf-visual.mjs",
+    "bench:shadow-timing": "pnpm --filter @layoutit/polycss-core build && node bench/shadow-timing-bench.mjs",
+    "bench:vox-import": "pnpm --filter @layoutit/polycss-core build && node bench/vox-import-bench.mjs",
+    "bench:shadow-rubric": "node bench/build.mjs && node bench/shadow-rubric.mjs",
+    "bench:shadow-diff": "node bench/build.mjs && node bench/shadow-diff.mjs",
+    "bench:gltf-simplifier": "pnpm --filter @layoutit/polycss-core build && node bench/gltf-simplifier-corpus-bench.mjs",
+    "bench:nonvoxel-rotation": "node bench/build.mjs && node bench/nonvoxel-rotation-bench.mjs"
   },
   "pnpm": {
     "onlyBuiltDependencies": [

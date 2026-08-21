@@ -40,7 +40,9 @@ export interface RenderTextureAtlasOptions {
 }
 
 export interface InternalRenderTextureAtlasOptions extends RenderTextureAtlasOptions {
-  seamBleed?: number;
+  /** Raw public seam-bleed option; core resolves it via `resolveSeamBleedPx`
+   *  (absolute px) and `seamBleedPrimitiveRatio` (primitive-bleed scale). */
+  seamBleed?: import("@layoutit/polycss-core").PolySeamBleed;
   seamEdges?: Set<number>;
   computeSolidPaintDefaults?: boolean;
   skipDynamicNormalVars?: boolean;

@@ -2,7 +2,7 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import { ref, computed, nextTick } from "vue";
 import { createApp, h } from "vue";
 import { usePolyAnimation } from "./usePolyAnimation";
-import type { UsePolyAnimationResultVueVue } from "./usePolyAnimation";
+import type { UsePolyAnimationResultVue } from "./usePolyAnimation";
 import type {
   PolyAnimationTarget,
   PolyAnimationClip,

@@ -55,7 +55,7 @@ export interface PolySceneOptions {
   textureBackend?: PolyTextureBackend;
   /** Default texture projection request. Defaults to "affine". */
   textureProjection?: PolyTextureProjection;
-  /** Solid seam overscan. `"auto"` computes a fitted per-edge amount from the polygon plan. */
+  /** Solid seam overscan in CSS px (no upper clamp; each edge is still fitted to the polygon plan). `"auto"`/omitted = the 1.5px default; `0` disables every bleed; sub-1.5 values also shrink per-strategy primitive bleeds proportionally. */
   seamBleed?: PolySeamBleed;
   /**
    * Skip specific render-strategy tags. Polygons that would normally use a
@@ -64,86 +64,22 @@ export interface PolySceneOptions {
    */
   strategies?: PolyRenderStrategiesOption;
   /**
-   * When `true`, rotation pivots around the union bbox of all added meshes
-   * instead of world (0,0,0). Implemented as a camera-target offset, not a DOM
-   * wrapper — polygon data is not mutated. Updates whenever a mesh is added/removed
-   * or `setOptions` is called. Mirrors React's `<PolyScene autoCenter>`.
+   * When `true`, rotation pivots around the union bbox center of all added
+   * meshes instead of world (0,0,0). Implemented as an offset folded into the
+   * scene-root transform alongside the camera target — no DOM wrapper, no
+   * `transform-origin` change, and polygon data is not mutated. Recomputed
+   * whenever a mesh is added/removed or `setOptions` is called. Mirrors
+   * React/Vue `<PolyScene autoCenter>` (same mechanism in all three
+   * renderers).
    */
   autoCenter?: boolean;
   /**
    * Shadow appearance for meshes with `castShadow: true`. Both lighting
    * modes use the same CPU-projected SVG path; dynamic-mode shadows are
-   * directional-only. Defaults: `{ color: "#000000", opacity: 0.25, lift: 0.05, maxExtend: 2000 }`.
+   * directional-only. Defaults: `{ color: "#000000", opacity: 0.25,
+   * lift: 0.05, maxExtend: 2000 }`.
    */
-  shadow?: {
-    /** Shadow color as a CSS hex string. Default: `"#000000"`. */
-    color?: string;
-    /** Shadow opacity 0..1. Default: `0.25`. */
-    opacity?: number;
-    /**
-     * Raises the shadow plane slightly above the model bbox floor along
-     * +Z (Z up) so it sits on top of a receiver mesh placed at the bbox
-     * bottom, rather than below it where the receiver would occlude the
-     * shadow. In world units. Default: `0.05`.
-     */
-    lift?: number;
-    /**
-     * Maximum CSS pixels the shadow may extend beyond the mesh's
-     * footprint (the no-shear silhouette directly under the mesh). The
-     * footprint area is always preserved; only the sheared tail at low
-     * light elevations is truncated. Default: `2000`.
-     *
-     * **Trade-off:** larger values give longer shadows but the SVG
-     * backing store grows quadratically with this value, which can
-     * cause repaint flicker at extreme low-elevation angles. Pass a
-     * very large number (e.g. `Infinity`) to disable the cap entirely.
-     */
-    maxExtend?: number;
-    /**
-     * Experimental: cast a single low-resolution parametric **silhouette**
-     * outline per caster instead of projecting its full geometry. Lighter DOM
-     * + cheaper projection, at the cost of an approximate (convex) outline.
-     * Casts onto every receiver through the normal pipeline. Default: `false`.
-     */
-    parametric?: boolean;
-    /**
-     * Parametric-shadow detail: the max number of points in the silhouette
-     * outline. Lower → blobbier + lighter; higher → closer to the exact convex
-     * outline. Only used when `parametric` is true. Default: `16`.
-     *
-     * Can be overridden per mesh via `PolyMeshTransform.shadowDefinition`.
-     */
-    definition?: number;
-    /**
-     * Progressive refinement: the definition used WHILE the directional light
-     * is actively changing (a drag). When set (and `parametric` is true), each
-     * light-direction change emits at `min(definition, dragDefinition)` for a
-     * laggless drag, then a debounced pass re-emits at full `definition` once
-     * the light settles — mirroring the atlas-rebake-at-rest escape hatch.
-     * Self-shadow recompute is O(faces × bands), so dropping detail during
-     * motion is the only way to keep a complex mesh smooth. Unset → no
-     * progressive pass (every change renders at full `definition`).
-     */
-    dragDefinition?: number;
-    /**
-     * Parametric-shadow render style (only used when `parametric` is true):
-     * - `"vector"` (default) — smooth concave contour outline.
-     * - `"pixel"` — the coverage is greedy-meshed into axis-aligned rectangles,
-     *   giving a blocky/voxel shadow. Holes (courtyards, the coliseum arena)
-     *   come free as absent cells. `definition` is the pixel-grid resolution
-     *   (lower → chunkier); the block size is the aesthetic.
-     */
-    style?: "vector" | "pixel";
-    /**
-     * Re-emit shadows while a mesh is animating (skeletal/GLB deformation), so
-     * the shadow follows the pose instead of freezing at the rest pose. Each
-     * `setPolygons` from the animation loop triggers a re-projection, throttled
-     * internally (~12fps) so it stays affordable. Strongly recommended only
-     * with `parametric: true` (a low-res silhouette is cheap to reproject every
-     * few frames; the exact path is not). Default: `false`.
-     */
-    followAnimation?: boolean;
-  };
+  shadow?: PolyShadowOptions;
   /**
    * When `true`, emit `data-poly-shadow-*` attribution attributes on every
    * shadow SVG and path (type, receiver mesh id, receiver face index,
@@ -153,6 +89,84 @@ export interface PolySceneOptions {
    * scenes ship a cleaner DOM and avoid serializing per-frame JSON.
    */
   debugShadowAttrs?: boolean;
+}
+
+/**
+ * Shadow appearance + parametric-shadow options for `PolySceneOptions.shadow`.
+ * Mirrored by the React and Vue `PolyShadowOptions`; `dragDefinition` is
+ * vanilla-only (progressive light-drag refinement is a `createPolyScene`
+ * orchestration concern — declarative renderers lower `definition` in app
+ * state instead).
+ */
+export interface PolyShadowOptions {
+  /** Shadow color as a CSS hex string. Default: `"#000000"`. */
+  color?: string;
+  /** Shadow opacity 0..1. Default: `0.25`. */
+  opacity?: number;
+  /**
+   * Raises the shadow plane slightly above the model bbox floor along
+   * +Z (Z up) so it sits on top of a receiver mesh placed at the bbox
+   * bottom, rather than below it where the receiver would occlude the
+   * shadow. In world units. Defaults to `POLY_DEFAULT_SHADOW_LIFT`
+   * (`0.05`) on both the ground-plane and receiver-face paths.
+   */
+  lift?: number;
+  /**
+   * Maximum CSS pixels the shadow may extend beyond the mesh's
+   * footprint (the no-shear silhouette directly under the mesh). The
+   * footprint area is always preserved; only the sheared tail at low
+   * light elevations is truncated. Default: `2000`.
+   *
+   * **Trade-off:** larger values give longer shadows but the SVG
+   * backing store grows quadratically with this value, which can
+   * cause repaint flicker at extreme low-elevation angles. Pass a
+   * very large number (e.g. `Infinity`) to disable the cap entirely.
+   */
+  maxExtend?: number;
+  /**
+   * Experimental: cast a single low-resolution parametric **silhouette**
+   * outline per caster instead of projecting its full geometry. Lighter DOM
+   * + cheaper projection, at the cost of an approximate (convex) outline.
+   * Casts onto every receiver through the normal pipeline. Default: `false`.
+   */
+  parametric?: boolean;
+  /**
+   * Parametric-shadow detail: the max number of points in the silhouette
+   * outline. Lower → blobbier + lighter; higher → closer to the exact convex
+   * outline. Only used when `parametric` is true. Default: `16`.
+   *
+   * Can be overridden per mesh via `PolyMeshTransform.shadowDefinition`.
+   */
+  definition?: number;
+  /**
+   * Progressive refinement: the definition used WHILE the directional light
+   * is actively changing (a drag). When set (and `parametric` is true), each
+   * light-direction change emits at `min(definition, dragDefinition)` for a
+   * laggless drag, then a debounced pass re-emits at full `definition` once
+   * the light settles — mirroring the atlas-rebake-at-rest escape hatch.
+   * Self-shadow recompute is O(faces × bands), so dropping detail during
+   * motion is the only way to keep a complex mesh smooth. Unset → no
+   * progressive pass (every change renders at full `definition`).
+   */
+  dragDefinition?: number;
+  /**
+   * Parametric-shadow render style (only used when `parametric` is true):
+   * - `"vector"` (default) — smooth concave contour outline.
+   * - `"pixel"` — the coverage is greedy-meshed into axis-aligned rectangles,
+   *   giving a blocky/voxel shadow. Holes (courtyards, the coliseum arena)
+   *   come free as absent cells. `definition` is the pixel-grid resolution
+   *   (lower → chunkier); the block size is the aesthetic.
+   */
+  style?: "vector" | "pixel";
+  /**
+   * Re-emit shadows while a mesh is animating (skeletal/GLB deformation), so
+   * the shadow follows the pose instead of freezing at the rest pose. Each
+   * `setPolygons` from the animation loop triggers a re-projection, throttled
+   * internally (~12fps) so it stays affordable. Strongly recommended only
+   * with `parametric: true` (a low-res silhouette is cheap to reproject every
+   * few frames; the exact path is not). Default: `false`.
+   */
+  followAnimation?: boolean;
 }
 
 export interface PolyMeshTransform {

@@ -13,6 +13,7 @@ import {
   type TextureAtlasResult,
 } from "./index";
 import type { Polygon } from "@layoutit/polycss-core";
+import { computeSolidTriangleColorPlanFromNormal } from "@layoutit/polycss-core";
 
 const originalMatchMedia = window.matchMedia;
 const originalUserAgent = window.navigator.userAgent;
@@ -288,5 +289,51 @@ describe("useTextureAtlas", () => {
 
     const explicit = renderAtlas(plans, 1);
     expect(explicit.entries[0]?.atlasCanonicalSize).toBe(64);
+  });
+});
+
+describe("updateStableTriangleDom — strategies + point lights (vanilla parity)", () => {
+  const TRI: Polygon = {
+    vertices: [[0, 0, 0], [1, 0, 0], [0, 1, 0]],
+    color: "#808080",
+  };
+  const DIRECTIONAL = { direction: [0, 0, 1] as [number, number, number], color: "#ffffff", intensity: 1 };
+  const AMBIENT = { color: "#ffffff", intensity: 0.4 };
+  const POINT_LIGHTS = [{ position: [0, 0, 5] as [number, number, number], color: "#ff0000", intensity: 3 }];
+
+  function runUpdate(options: Parameters<typeof updateStableTriangleDom>[2]): { handled: boolean; leaf: HTMLElement } {
+    const root = document.createElement("div");
+    const leaf = document.createElement("u");
+    root.append(leaf);
+    return { handled: updateStableTriangleDom(root, [TRI], options), leaf };
+  }
+
+  it("rejects the fast path when strategies disable u (mirrors vanilla's gate)", () => {
+    stubCornerTriangleSupported();
+    expect(runUpdate({}).handled).toBe(true);
+    expect(runUpdate({ strategies: { disable: ["u"] } }).handled).toBe(false);
+  });
+
+  it("folds point-light contributions into the baked solid-triangle color", () => {
+    stubCornerTriangleSupported();
+    const lit = runUpdate({ directionalLight: DIRECTIONAL, ambientLight: AMBIENT, pointLights: POINT_LIGHTS });
+    const unlit = runUpdate({ directionalLight: DIRECTIONAL, ambientLight: AMBIENT });
+    expect(lit.handled).toBe(true);
+    expect(unlit.handled).toBe(true);
+    expect(lit.leaf.style.color).not.toBe(unlit.leaf.style.color);
+
+    // Exact parity with core's color plan — the same plumbing vanilla's
+    // computeSolidTrianglePlanFromCssPoints path uses. Normal for TRI in the
+    // CSS frame is (0, 0, 1).
+    const expected = computeSolidTriangleColorPlanFromNormal(TRI, 0, 0, 0, 1, {
+      directionalLight: DIRECTIONAL,
+      ambientLight: AMBIENT,
+      pointLights: POINT_LIGHTS,
+      tileSize: 50,
+      layerElevation: 50,
+    }, true).bakedColor!;
+    const probe = document.createElement("u");
+    probe.style.color = expected;
+    expect(lit.leaf.style.color).toBe(probe.style.color);
   });
 });

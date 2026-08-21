@@ -26,22 +26,17 @@ const QUAD: Polygon = {
 
 function UseSceneContextHarness({
   polygons,
-  options,
   onResult,
 }: {
   polygons: Polygon[];
-  options: Parameters<typeof usePolySceneContext>[1];
   onResult: (result: UseSceneContextResult) => void;
 }) {
-  const result = usePolySceneContext(polygons, options);
+  const result = usePolySceneContext(polygons);
   onResult(result);
   return null;
 }
 
-function captureHook(
-  polygons: Polygon[],
-  options: Parameters<typeof usePolySceneContext>[1] = {}
-): UseSceneContextResult {
+function captureHook(polygons: Polygon[]): UseSceneContextResult {
   let captured: UseSceneContextResult | null = null;
   const container = document.createElement("div");
   const root = createRoot(container);
@@ -49,7 +44,6 @@ function captureHook(
     root.render(
       React.createElement(UseSceneContextHarness, {
         polygons,
-        options,
         onResult: (r) => {
           captured = r;
         },

@@ -44,6 +44,52 @@ async function flushAsyncWork(turns = 8) {
   for (let turn = 0; turn < turns; turn += 1) await new Promise((resolve) => setImmediate(resolve));
 }
 
+// A mounted scheduler skips schedule() while a paged wait is pending, so the first window timer it
+// arms after a page lands is the runtime's own signal that automatic catch-up finished draining.
+// Counting event-loop turns instead would race that signal: a turn spin costs microseconds while the
+// resume path waits on a libuv-threadpool SHA-256 digest of every loaded state page.
+function whenSchedulerRearms(fake, message) {
+  const schedule = fake.win.setTimeout;
+  return new Promise((resolve, reject) => {
+    const guard = setTimeout(() => { fake.win.setTimeout = schedule; reject(new Error(message)); }, 30_000);
+    guard.unref?.();
+    fake.win.setTimeout = (callback, delay) => {
+      fake.win.setTimeout = schedule;
+      clearTimeout(guard);
+      resolve();
+      return schedule(callback, delay);
+    };
+  });
+}
+
+async function waitForScheduledWork(fake, predicate, message) {
+  while (!predicate()) await whenSchedulerRearms(fake, message);
+}
+
+// A page load only becomes observable once the runtime actually calls its loader, and the runtime
+// reaches that call behind a libuv-threadpool SHA-256 digest of the page it verified first.
+// Load-count assertions therefore wait on the loader itself; a fixed spin of event-loop turns
+// settles in microseconds and would race that wall-clock work.
+function createLoadSignal() {
+  let notify = null;
+  return {
+    record() {
+      const resume = notify;
+      notify = null;
+      resume?.();
+    },
+    async until(predicate, message) {
+      while (!predicate()) {
+        await new Promise((resolve, reject) => {
+          const guard = setTimeout(() => { notify = null; reject(new Error(message)); }, 30_000);
+          guard.unref?.();
+          notify = () => { clearTimeout(guard); resolve(); };
+        });
+      }
+    },
+  };
+}
+
 function routeFetch(routes, calls = []) {
   return async (input, options) => {
     const url = String(input);
@@ -549,10 +595,8 @@ test("responsive restart without interaction keeps the playback initial page res
   browser.observers[0].callback();
   assert.equal(runtime.sourceFrame, 1, "the profile restart publishes from the pinned initial page");
   browser.frame(0);
-  for (let turn = 0; turn < 128 && runtime.sourceFrame !== 2; turn += 1) {
-    await flushAsyncWork(1);
-    browser.frame(34);
-  }
+  browser.frame(34);
+  await waitForScheduledWork(browser, () => runtime.sourceFrame === 2, "The restarted profile never advanced past its pinned initial page.");
   assert.equal(runtime.sourceFrame, 2);
   runtime.destroy();
 });
@@ -755,10 +799,12 @@ test("paged variants load the initial page before attach and retain the current/
   const eager = new Map(all);
   for (const record of built.document.resources.resources) if (record.kind === "state-page") eager.delete(record.id);
   const calls = [];
+  const loads = createLoadSignal();
   const result = await readDomBrowser(built.bytes, {
     externalResources: eager,
     async loadExternalResource(record, signal) {
       calls.push([record.id, signal]);
+      loads.record();
       return all.get(record.id);
     },
   });
@@ -772,7 +818,7 @@ test("paged variants load the initial page before attach and retain the current/
   const leaf = namespaced[leafIndex];
   assert.equal(calls[0][0], "variant-page-1");
   assert.equal(leaf.classes.includes("material-a"), true);
-  await flushAsyncWork();
+  await loads.until(() => calls.length >= 3, "The mount never started its retained lookahead page loads.");
   assert.deepEqual(calls.map(([id]) => id), ["variant-page-1", "variant-page-2", "variant-page-3"]);
 
   assert.equal(await runtime.seekAsync(7), 7);
@@ -1211,10 +1257,12 @@ test("superseding an in-progress page load preserves the currently published fra
     return [node.id, element];
   })) };
   const calls = [];
+  const loads = createLoadSignal();
   let releasePage7;
   const page7 = new Promise((resolve) => { releasePage7 = resolve; });
   const pagedState = createPolycssPagedState(built.document, mounted, DEFAULT_LIMITS, async (record) => {
     calls.push(record.id);
+    loads.record();
     if (record.id === "playback-page-7") return page7;
     return all.get(record.id);
   });
@@ -1222,7 +1270,7 @@ test("superseding an in-progress page load preserves the currently published fra
   await pagedState.ensureFrame(2);
   pagedState.commit(pagedState.stage(2));
   const stale = pagedState.ensureFrame(7);
-  await flushAsyncWork(2);
+  await loads.until(() => calls.includes("playback-page-7"), "The superseded frame never started its page load.");
   assert.equal(calls.filter((id) => id === "playback-page-7").length, 1);
   await pagedState.ensureFrame(3);
   releasePage7(all.get("playback-page-7"));
@@ -1281,7 +1329,7 @@ test("paged automatic catch-up advances its ready prefix when an intermediate pa
   assert.equal(runtime.lifecycle.phase, "publish");
   assert.equal(runtime.sourceFrame, 4);
   releasePage3(all.get("variant-page-3"));
-  for (let turn = 0; turn < 64 && runtime.sourceFrame !== 7; turn += 1) await flushAsyncWork(1);
+  await waitForScheduledWork(browser, () => runtime.sourceFrame === 7, "Automatic catch-up never resumed after the absent page became resident.");
   assert.equal(runtime.lifecycle.phase, "publish");
   assert.equal(runtime.sourceFrame, 7);
   runtime.destroy();
@@ -1305,9 +1353,9 @@ test("paged interaction backpressures at a page boundary before mutating or dest
   browser.frame(0);
   assert.doesNotThrow(() => browser.frame(267));
   assert.equal(runtime.lifecycle.phase, "publish");
-  await flushAsyncWork();
-  assert.equal(runtime.lifecycle.phase, "publish");
   const leafIndex = result.document.tree.nodes.findIndex((node) => node.id === "synthetic/leaf");
+  await waitForScheduledWork(browser, () => browser.namespaced[leafIndex].classes.includes("material-b"), "The runtime never resumed past its paged animator boundary.");
+  assert.equal(runtime.lifecycle.phase, "publish");
   assert.equal(browser.namespaced[leafIndex].classes.includes("material-b"), true);
   runtime.destroy();
 });
@@ -1321,16 +1369,18 @@ test("paged variants pin the fixed interaction page so a synchronous mode switch
   const eager = new Map(all);
   for (const record of built.document.resources.resources) if (record.kind === "state-page") eager.delete(record.id);
   const calls = [];
+  const loads = createLoadSignal();
   const result = await readDomBrowser(built.bytes, {
     externalResources: eager,
     loadExternalResource(record) {
       calls.push(record.id);
+      loads.record();
       return all.get(record.id);
     },
   });
   const { document } = fakeBrowserDocument();
   const runtime = await mountDom(result, new FakeElement(document, "main"), { animate: false, mode: "animation" });
-  await new Promise((resolve) => setImmediate(resolve));
+  await loads.until(() => calls.length >= 3, "The mount never started its pinned and lookahead page loads.");
   assert.deepEqual(calls.slice(0, 3), ["variant-page-1", "variant-page-4", "variant-page-2"]);
   assert.equal(await runtime.seekAsync(3), 3);
   const callsBeforeSwitch = calls.length;
@@ -1356,6 +1406,8 @@ test("paged variant requests cancel stale generations and fail closed on late pa
   });
   const firstBrowser = fakeBrowserDocument();
   const runtime = await mountDom(result, new FakeElement(firstBrowser.document, "main"), { animate: false });
+  // Not a load-count gate: variant-page-4 is requested by the stale seek below, not by the mount.
+  // Nothing here is asserted against threadpool work — this only lets the mount's own lookahead settle.
   await new Promise((resolve) => setImmediate(resolve));
   const stale = runtime.seekAsync(7);
   const staleRejection = assert.rejects(stale, errorCode("OPERATION_ABORTED"));

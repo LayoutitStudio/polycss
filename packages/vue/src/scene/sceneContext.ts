@@ -39,6 +39,11 @@ export interface ShadowCasterRegistration {
 export interface PolyShadowOptions {
   color?: string;
   opacity?: number;
+  /**
+   * Raises the shadow plane along +Z (world units) so it clears the surface
+   * beneath it. Defaults to `POLY_DEFAULT_SHADOW_LIFT` (`0.05`) on both the
+   * ground-plane fallback path and the receiver-face (`receiveShadow`) path.
+   */
   lift?: number;
   /**
    * Maximum CSS pixels the shadow may extend beyond the mesh's
@@ -130,6 +135,6 @@ export const PolySceneContextKey: InjectionKey<ComputedRef<PolySceneContextValue
   "polycss/scene-context",
 );
 
-export function usePolySceneContext(): ComputedRef<PolySceneContextValue> | null {
+export function useSceneContextValue(): ComputedRef<PolySceneContextValue> | null {
   return inject(PolySceneContextKey, null);
 }

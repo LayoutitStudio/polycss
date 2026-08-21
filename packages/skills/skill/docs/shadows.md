@@ -25,7 +25,9 @@ scene.setOptions({
   ```
 
 - **React/Vue additionally project onto a per-mesh ground plane** when a caster
-  has no receiver, and drop that fallback as soon as any receiver exists. This
+  has no receiver, and drop that fallback as soon as any receiver exists. It
+  also needs a real `directionalLight` with nonzero `intensity` — the same gate
+  as the receiver path, so a scene with no lights draws no phantom shadow. This
   is what `<PolyGround>` relies on — `PolyGround` has **no** `receiveShadow`
   prop.
 
@@ -136,8 +138,10 @@ Levers for smooth interaction:
 
 A caster's shadow **freezes** during a same-topology deform by default —
 re-projecting every frame is expensive. `shadow.followAnimation: true` opts into
-tracking the pose; pair it with a low parametric `definition`. Topology changes
-(different polygon count) always re-emit regardless.
+tracking the pose; pair it with a low parametric `definition`. All three
+renderers throttle the follow re-emit to the same 80 ms window (~12fps, leading
++ trailing edge, so a paused animation still lands its final pose). Topology
+changes (different polygon count) always re-emit regardless.
 
 ## Notes
 

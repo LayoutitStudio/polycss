@@ -117,12 +117,50 @@ async function flushAsyncWork(turns = 8) {
   for (let turn = 0; turn < turns; turn += 1) await new Promise((resolve) => setImmediate(resolve));
 }
 
-async function waitForAsyncWork(predicate, turns = 128) {
-  for (let turn = 0; turn < turns; turn += 1) {
-    if (predicate()) return;
-    await new Promise((resolve) => setImmediate(resolve));
-  }
-  assert.equal(predicate(), true, "asynchronous work did not settle within the bounded wait");
+// Both shells skip schedule() while a paged wait is pending, so the first window timer a shell arms
+// after a page lands is its own signal that automatic catch-up finished draining. Counting
+// event-loop turns instead would race that signal: a turn spin costs microseconds while the resume
+// path waits on a libuv-threadpool SHA-256 digest of every loaded state page.
+function whenSchedulerRearms(fake, message) {
+  const schedule = fake.win.setTimeout;
+  return new Promise((resolve, reject) => {
+    const guard = setTimeout(() => { fake.win.setTimeout = schedule; reject(new Error(message)); }, 30_000);
+    guard.unref?.();
+    fake.win.setTimeout = (callback, delay) => {
+      fake.win.setTimeout = schedule;
+      clearTimeout(guard);
+      resolve();
+      return schedule(callback, delay);
+    };
+  });
+}
+
+async function waitForScheduledWork(fake, predicate, message) {
+  while (!predicate()) await whenSchedulerRearms(fake, message);
+}
+
+// A page load only becomes observable once a shell actually calls its loader, and a shell reaches
+// that call behind a libuv-threadpool SHA-256 digest of the page it verified first. Load-count
+// assertions therefore wait on the loader itself; a fixed spin of event-loop turns settles in
+// microseconds and would race that wall-clock work.
+function createLoadSignal() {
+  let notify = null;
+  return {
+    record() {
+      const resume = notify;
+      notify = null;
+      resume?.();
+    },
+    async until(predicate, message) {
+      while (!predicate()) {
+        await new Promise((resolve, reject) => {
+          const guard = setTimeout(() => { notify = null; reject(new Error(message)); }, 30_000);
+          guard.unref?.();
+          notify = () => { clearTimeout(guard); resolve(); };
+        });
+      }
+    },
+  };
 }
 
 async function mountedPair(input, options = {}) {
@@ -136,13 +174,16 @@ async function mountedPair(input, options = {}) {
   const alternatePhases = [];
   const referencePageLoads = [];
   const alternatePageLoads = [];
+  const loads = createLoadSignal();
   const eagerResources = new Map(externalResources);
   for (const record of built.document.resources.resources) if (record.kind === "state-page") eagerResources.delete(record.id);
   const result = await readDomBrowser(built.bytes, {
     externalResources: eagerResources,
     loadExternalResource(record, signal) {
       referencePageLoads.push([record.id, signal, referenceHost.childNodes.length]);
-      return options.loadStatePage?.("reference", record, signal, externalResources) ?? externalResources.get(record.id);
+      const loaded = options.loadStatePage?.("reference", record, signal, externalResources) ?? externalResources.get(record.id);
+      loads.record();
+      return loaded;
     },
   });
   const referenceRuntime = await mountDom(result, referenceHost, {
@@ -155,7 +196,9 @@ async function mountedPair(input, options = {}) {
     mode: options.mode,
     loadStatePage(record, signal) {
       alternatePageLoads.push([record.id, signal, alternateHost.childNodes.length]);
-      return options.loadStatePage?.("alternate", record, signal, externalResources) ?? externalResources.get(record.id);
+      const loaded = options.loadStatePage?.("alternate", record, signal, externalResources) ?? externalResources.get(record.id);
+      loads.record();
+      return loaded;
     },
     onLifecyclePhase: (phase) => alternatePhases.push(phase),
   });
@@ -171,6 +214,7 @@ async function mountedPair(input, options = {}) {
     alternatePageLoads,
     referenceRuntime,
     alternateRuntime,
+    whenLoaded: loads.until,
   };
 }
 
@@ -295,7 +339,7 @@ test("alternate and public viewers agree on deferred paged variants, readiness, 
   assertEquivalent(value, "paged initial readiness");
   const initialSourceFrame = value.referenceRuntime.sourceFrame;
   assert.equal(value.alternateRuntime.sourceFrame, initialSourceFrame);
-  await flushAsyncWork();
+  await value.whenLoaded(() => value.alternatePageLoads.length >= 2, "The alternate viewer never started its lookahead page load.");
   assert.deepEqual(value.alternatePageLoads.map(([id]) => id), ["variant-page-1", "variant-page-2"]);
 
   clearWrites(value.reference, value.alternate);
@@ -378,7 +422,8 @@ test("alternate and public viewers advance only the ready catch-up prefix when a
   assert.equal(value.alternateRuntime.lifecycle.phase, "publish");
   assert.equal(value.referenceRuntime.sourceFrame, 4);
   assert.equal(value.alternateRuntime.sourceFrame, 4);
-  await waitForAsyncWork(() => value.referenceRuntime.sourceFrame === 7 && value.alternateRuntime.sourceFrame === 7);
+  await waitForScheduledWork(value.reference, () => value.referenceRuntime.sourceFrame === 7, "The reference viewer never resumed its ready catch-up prefix.");
+  await waitForScheduledWork(value.alternate, () => value.alternateRuntime.sourceFrame === 7, "The alternate viewer never resumed its ready catch-up prefix.");
   assert.equal(value.referenceRuntime.sourceFrame, 7);
   assert.equal(value.alternateRuntime.sourceFrame, 7);
   assertEquivalent(value, "paged automatic catch-up ready prefix");
@@ -398,10 +443,11 @@ test("alternate and public interaction schedulers wait at paged animator boundar
   assert.doesNotThrow(() => value.alternate.frame(267));
   assert.equal(value.referenceRuntime.lifecycle.phase, "publish");
   assert.equal(value.alternateRuntime.lifecycle.phase, "publish");
-  await flushAsyncWork();
+  const leafIndex = value.result.document.tree.nodes.findIndex((node) => node.id === "synthetic/leaf");
+  await waitForScheduledWork(value.reference, () => value.reference.namespaced[leafIndex].classes.includes("material-b"), "The reference viewer never resumed past its paged animator boundary.");
+  await waitForScheduledWork(value.alternate, () => value.alternateRuntime.node("synthetic/leaf").classes.includes("material-b"), "The alternate viewer never resumed past its paged animator boundary.");
   assert.equal(value.referenceRuntime.lifecycle.phase, "publish");
   assert.equal(value.alternateRuntime.lifecycle.phase, "publish");
-  const leafIndex = value.result.document.tree.nodes.findIndex((node) => node.id === "synthetic/leaf");
   assert.equal(value.reference.namespaced[leafIndex].classes.includes("material-b"), true);
   assert.equal(value.alternateRuntime.node("synthetic/leaf").classes.includes("material-b"), true);
   assertEquivalent(value, "paged interaction boundary readiness");
@@ -779,10 +825,10 @@ test("alternate and public viewers replace a stale page wait before responsive r
   delayPageTwo = true;
   assert.equal(value.referenceRuntime.seek(1), 1);
   assert.equal(value.alternateRuntime.seek(1), 1);
-  await flushAsyncWork();
+  await value.whenLoaded(() => pending.reference.length >= 1 && pending.alternate.length >= 1, "A viewer never started its opportunistic preload after seeking back.");
   value.reference.frame(34);
   value.alternate.frame(34);
-  await flushAsyncWork();
+  await value.whenLoaded(() => pending.reference.length >= 2 && pending.alternate.length >= 2, "A viewer never started both its opportunistic preload and its scheduler wait generation.");
   assert.equal(pending.reference.length, 2);
   assert.equal(pending.alternate.length, 2);
 
@@ -792,18 +838,18 @@ test("alternate and public viewers replace a stale page wait before responsive r
   }
   value.reference.observers[0].callback();
   value.alternate.observers[0].callback();
-  await flushAsyncWork();
   for (const path of ["reference", "alternate"]) {
+    await value.whenLoaded(() => pending[path].length >= 3, `${path} never started its replacement preload`);
     assert.equal(pending[path].length, 3, `${path} starts one replacement preload`);
     assert.equal(pending[path][0].signal.aborted, true, `${path} cancels the superseded opportunistic preload`);
     assert.equal(pending[path][1].signal.aborted, true, `${path} cancels the stale scheduler wait generation`);
     assert.equal(pending[path][2].signal.aborted, false, `${path} keeps the post-reschedule preload live`);
     pending[path][2].resolve();
   }
-  await flushAsyncWork();
   value.reference.frame(68);
   value.alternate.frame(68);
-  await flushAsyncWork();
+  await waitForScheduledWork(value.reference, () => value.referenceRuntime.sourceFrame === 3, "The reference viewer never published the replacement preload frame.");
+  await waitForScheduledWork(value.alternate, () => value.alternateRuntime.sourceFrame === 3, "The alternate viewer never published the replacement preload frame.");
   assert.equal(value.referenceRuntime.lifecycle.phase, "publish");
   assert.equal(value.alternateRuntime.lifecycle.phase, "publish");
   assert.equal(value.referenceRuntime.sourceFrame, 3);

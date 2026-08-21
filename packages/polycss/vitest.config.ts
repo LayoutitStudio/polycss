@@ -3,6 +3,10 @@ import { resolve } from "path";
 
 export default defineConfig({
   test: {
+    // Bound the worker pool: vitest defaults to one worker per CPU core,
+    // which on many-core machines costs ~0.5-1 GB RSS per worker and can
+    // exhaust RAM when several suites run concurrently (agents, CI matrix).
+    maxWorkers: 8,
     environment: "happy-dom",
     include: ["src/**/*.test.ts", "tests/**/*.test.ts"],
     coverage: {

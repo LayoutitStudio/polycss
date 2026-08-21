@@ -150,7 +150,7 @@ describe("simplifyTriangleMeshPolygons", () => {
   });
 
   it("keeps textured polygons out of the collapse graph", () => {
-    const source = grid(10).map((polygon) => ({
+    const source = grid(10).map((polygon): Polygon => ({
       ...polygon,
       texture: "/texture.png",
       uvs: [[0, 0], [1, 0], [1, 1]],

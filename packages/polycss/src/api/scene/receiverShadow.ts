@@ -31,6 +31,26 @@ import type { MeshEntry } from "./internalTypes";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 
+/**
+ * Opt-in per-phase shadow timing sink for `bench/shadow-trace.html`. The bench
+ * page sets `globalThis.__shTime = { coverage: 0, merge: 0, dom: 0 }` before a
+ * sweep and reads the accumulated milliseconds back via its `timing()` HUD
+ * hook. Strictly inert in production: when the global is absent every call
+ * site pays one property read and skips the `performance.now()` pair.
+ */
+interface ShadowPhaseTiming {
+  /** buildParametricCasterOverride — coverage mask + contour trace. */
+  coverage: number;
+  /** computeMergedReceiverShadows — projection + per-face pass merge. */
+  merge: number;
+  /** SVG mount/update — path re-emission + style writes. */
+  dom: number;
+}
+
+function shTime(): ShadowPhaseTiming | undefined {
+  return (globalThis as { __shTime?: ShadowPhaseTiming }).__shTime;
+}
+
 
 /** Mounted SVG state per receiver face. Kept in a separate WeakMap so the
  *  core ReceiverFacePlane stays pure data. */
@@ -44,11 +64,10 @@ interface MountedFace {
   /** Last applied matrix3d string — only re-set on change to dodge style work. */
   matrixCss: string;
 }
-// Mounts are namespaced per light so a directional pass and one pass per
-// shadow-casting point light can coexist on the same receiver mesh without
-// colliding on faceIndex. Outer key: a per-light identity ("" = directional,
-// "p0".."pN" = point lights). Inner key: faceIndex.
-const mountedFacesByMesh = new WeakMap<MeshEntry, Map<string, Map<number, MountedFace>>>();
+// One mounted-face registry per receiver mesh, keyed by faceIndex. All light
+// passes for a face merge into ONE SVG (see computeMergedReceiverShadows),
+// so there is no per-light namespace to keep.
+const mountedFacesByMesh = new WeakMap<MeshEntry, Map<number, MountedFace>>();
 
 /** Cached shared-edge adjacency per mesh. Invalidated when the polygon
  *  array reference changes (cheap identity check, no deep diff). */
@@ -62,30 +81,48 @@ const sharedEdgeMapCacheKey = new WeakMap<MeshEntry, readonly unknown[]>();
 const edgeOwnersCache = new WeakMap<MeshEntry, ReadonlyMap<string, EdgeOwners>>();
 const edgeOwnersCacheKey = new WeakMap<MeshEntry, string>();
 
-function lightMapFor(entry: MeshEntry): Map<string, Map<number, MountedFace>> {
+/** Per-caster parametric override cache, keyed on the cached CasterPolyItem[]
+ *  identity (which already busts on polygon/transform changes via
+ *  `casterItemsCacheKey`). The override depends only on the caster's world
+ *  vertices + light configuration + definition/style + the self/cross flag,
+ *  NOT on the receiver — so one caster needs at most two variants shared
+ *  across every receiver in an emit. `worldVerts` hoists the previously
+ *  per-call `cached.map((item) => item.wv)` allocation. */
+interface ParametricCasterCacheEntry {
+  worldVerts: Vec3[][];
+  self?: { key: string; result: ReturnType<typeof buildParametricCasterOverride> };
+  cross?: { key: string; result: ReturnType<typeof buildParametricCasterOverride> };
+}
+const parametricCasterCache = new WeakMap<CasterPolyItem[], ParametricCasterCacheEntry>();
+
+/**
+ * Drop the module-scope caster geometry caches for one mesh. The edge-owner
+ * cache's bust key (polygon count + transform + bbox center) and the
+ * shared-edge map's array-identity key can both survive an in-place polygon
+ * edit, so any path that invalidates `casterItemsCache` for a geometry change
+ * must drop these too (wired through `clearCasterItemsCache`).
+ */
+export function clearCasterGeometryCaches(entry: MeshEntry): void {
+  edgeOwnersCache.delete(entry);
+  edgeOwnersCacheKey.delete(entry);
+  sharedEdgeMapCache.delete(entry);
+  sharedEdgeMapCacheKey.delete(entry);
+}
+
+function mountedFacesFor(entry: MeshEntry): Map<number, MountedFace> {
   let m = mountedFacesByMesh.get(entry);
   if (!m) { m = new Map(); mountedFacesByMesh.set(entry, m); }
   return m;
 }
 
-function mountedFacesFor(entry: MeshEntry, lightKey: string): Map<number, MountedFace> {
-  const byLight = lightMapFor(entry);
-  let m = byLight.get(lightKey);
-  if (!m) { m = new Map(); byLight.set(lightKey, m); }
-  return m;
-}
-
-/** Detach + clear every mounted face across every light namespace for a mesh. */
+/** Detach + clear every mounted face for a mesh. */
 function detachAllFaces(entry: MeshEntry): void {
-  const byLight = mountedFacesByMesh.get(entry);
-  if (!byLight) return;
-  for (const faces of byLight.values()) {
-    for (const face of faces.values()) {
-      if (face.svg && face.svg.parentNode) face.svg.parentNode.removeChild(face.svg);
-    }
-    faces.clear();
+  const faces = mountedFacesByMesh.get(entry);
+  if (!faces) return;
+  for (const face of faces.values()) {
+    if (face.svg && face.svg.parentNode) face.svg.parentNode.removeChild(face.svg);
   }
-  byLight.clear();
+  faces.clear();
 }
 
 /**
@@ -114,11 +151,9 @@ export function disposeAllReceiverShadowMounts(ctx: SceneContext): void {
 export function emitReceiverShadows(
   ctx: SceneContext,
   casters: MeshEntry[],
-  dedupByCaster: Map<MeshEntry, Set<number>>,
   receiverEntry: MeshEntry,
   receiverDedupDrop: Set<number>,
   lightDir: Vec3,
-  _r: number, _g: number, _b: number,
   opacity: number,
   /** Every light's shadow pass for this receiver. All of a face's passes are
    *  merged into ONE SVG so overlapping shadows composite correctly (the base
@@ -246,16 +281,39 @@ export function emitReceiverShadows(
       const def = ctx.shadowDragActive
         ? Math.min(baseDef, options.shadow.dragDefinition ?? baseDef)
         : baseDef;
-      const result = buildParametricCasterOverride({
-        polysWorldVerts: cached.map((item) => item.wv),
-        lightDir,
-        definition: def,
-        isSelf: caster === receiverEntry,
-        style: options.shadow.style,
-        pointLights: passes.points.map((pt) => ({ position: pt.lightPos, index: pt.index })),
-      });
-      overrideSilhouette = result.overrideSilhouette;
-      overridePointSilhouettes = result.overridePointSilhouettes;
+      const isSelf = caster === receiverEntry;
+      // Cache the built override per caster-items identity + parameter key.
+      // Receivers only differ through `isSelf`, so the same caster reuses one
+      // cross-mesh variant across every receiver and one self variant on
+      // itself instead of re-rasterising per (receiver × caster).
+      const paramKey =
+        `${def}|${options.shadow.style ?? "vector"}|` +
+        `${lightDir[0]},${lightDir[1]},${lightDir[2]}|` +
+        passes.points.map((pt) => `${pt.index}:${pt.lightPos[0]},${pt.lightPos[1]},${pt.lightPos[2]}`).join(";");
+      let paramEntry = parametricCasterCache.get(cached);
+      if (!paramEntry) {
+        paramEntry = { worldVerts: cached.map((item) => item.wv) };
+        parametricCasterCache.set(cached, paramEntry);
+      }
+      const variantKey = isSelf ? "self" : "cross";
+      let variant = paramEntry[variantKey];
+      if (!variant || variant.key !== paramKey) {
+        const timing = shTime();
+        const t0 = timing ? performance.now() : 0;
+        const result = buildParametricCasterOverride({
+          polysWorldVerts: paramEntry.worldVerts,
+          lightDir,
+          definition: def,
+          isSelf,
+          style: options.shadow.style,
+          pointLights: passes.points.map((pt) => ({ position: pt.lightPos, index: pt.index })),
+        });
+        if (timing) timing.coverage += performance.now() - t0;
+        variant = { key: paramKey, result };
+        paramEntry[variantKey] = variant;
+      }
+      overrideSilhouette = variant.result.overrideSilhouette;
+      overridePointSilhouettes = variant.result.overridePointSilhouettes;
     }
     casterInputs.push({
       id: caster,
@@ -277,6 +335,8 @@ export function emitReceiverShadows(
   // Shared core merge: run every light pass for this receiver and aggregate
   // each face's passes into one SVG descriptor (single light → one path;
   // multi-light solid → base + per-light multiply layers for correct overlap).
+  const timing = shTime();
+  const tMerge0 = timing ? performance.now() : 0;
   const faces = computeMergedReceiverShadows<MeshEntry>({
     receiverPlanes: cachedPlanes,
     receiverPolygons: receiverEntry.polygons,
@@ -291,8 +351,10 @@ export function emitReceiverShadows(
     directionalLight: options.directionalLight,
     shadow: { color: options.shadow?.color, opacity, maxExtend: options.shadow?.maxExtend },
   });
+  if (timing) timing.merge += performance.now() - tMerge0;
 
-  const mounted = mountedFacesFor(receiverEntry, "m");
+  const tDom0 = timing ? performance.now() : 0;
+  const mounted = mountedFacesFor(receiverEntry);
   const seen = new Set<number>();
   const wantDebug = !!options.debugShadowAttrs;
   const shadowRoot = ensureShadowRoot(ctx.shadowSvgState, ctx.doc, ctx.sceneEl);
@@ -347,6 +409,7 @@ export function emitReceiverShadows(
       face.visible = false;
     }
   }
+  if (timing) timing.dom += performance.now() - tDom0;
 }
 
 function makeShadowPath(

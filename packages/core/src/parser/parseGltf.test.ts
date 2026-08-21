@@ -1316,7 +1316,6 @@ describe("parseGltf", () => {
       const result = parseGltf(buildGlb({ doc, binData: bin }), {
         upAxis: "z",
         targetSize: 10,
-        gridShift: 0,
       });
 
       expect(result.polygons).toHaveLength(1);
@@ -1362,7 +1361,6 @@ describe("parseGltf", () => {
       const result = parseGltf(buildGlb({ doc, binData: bin }), {
         upAxis: "z",
         targetSize: 10,
-        gridShift: 0,
       });
 
       expect(result.polygons).toHaveLength(1);
@@ -1905,7 +1903,7 @@ describe("parseGltf", () => {
         buffers: [{ byteLength: bin.length }],
       };
       const glb = buildGlb({ doc, binData: bin });
-      const result = parseGltf(glb, { upAxis: "z", targetSize: 10, gridShift: 0 });
+      const result = parseGltf(glb, { upAxis: "z", targetSize: 10 });
 
       expect(result.polygons).toHaveLength(1);
       expect(result.polygons[0].vertices).toEqual([[0, 0, 0], [10, 0, 0], [0, 5, 0]]);

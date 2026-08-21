@@ -14,43 +14,25 @@
  * Click the scene to acquire pointer-lock; Escape releases it.
  */
 import { useEffect, useRef, useImperativeHandle, forwardRef } from "react";
-import { BASE_TILE } from "@layoutit/polycss-core";
+import {
+  BASE_TILE,
+  CROUCH_KEYS,
+  FIRST_PERSON_DEFAULTS,
+  JUMP_KEYS,
+  forwardDir,
+  isFpvKey,
+  resolveFirstPersonOptions,
+  stepFirstPersonPhysics,
+} from "@layoutit/polycss-core";
+import type {
+  PolyFirstPersonControlsOptions,
+  PolyFirstPersonResolvedOptions,
+} from "@layoutit/polycss-core";
 import { useCameraContext } from "../camera/context";
 
 // ── Public types (mirror vanilla names/shapes) ───────────────────────────────
 
-export interface PolyFirstPersonControlsOptions {
-  /** Master switch. When `false`, all sub-controls are inert. Default: `true`. */
-  enabled?: boolean;
-  /** Pointer-lock mouselook (rotX = pitch, rotY = yaw). Default: `true`. */
-  lookEnabled?: boolean;
-  /** WASD / arrow-key planar movement on world XY. Default: `true`. */
-  moveEnabled?: boolean;
-  /** Space-bar parametric jump arc on world Z. Default: `true`. */
-  jumpEnabled?: boolean;
-  /** Ctrl crouch (lowers eye height while held). Default: `true`. */
-  crouchEnabled?: boolean;
-  /** Mouselook sensitivity in degrees per pixel. Default: `0.15`. */
-  lookSensitivity?: number;
-  /** Invert vertical mouselook. Default: `false`. */
-  invertY?: boolean;
-  /** Movement speed in world units per second. Default: `5`. */
-  moveSpeed?: number;
-  /** Initial vertical velocity for a jump, world units per second. Default: `7`. */
-  jumpVelocity?: number;
-  /** Gravity acceleration in world units per second squared. Default: `18`. */
-  gravity?: number;
-  /** Standing eye height above the ground plane. Default: `1.7`. */
-  eyeHeight?: number;
-  /** Eye height while crouching. Default: `1`. */
-  crouchHeight?: number;
-  /** World Z of the ground plane the player walks on. Default: `0`. */
-  groundZ?: number;
-  /** Min pitch (rotX) angle in degrees. Default: `5`. */
-  minPitch?: number;
-  /** Max pitch (rotX) angle in degrees. Default: `175`. */
-  maxPitch?: number;
-}
+export type { PolyFirstPersonControlsOptions } from "@layoutit/polycss-core";
 
 export interface PolyFirstPersonControlsHandle {
   update(partial: PolyFirstPersonControlsOptions): void;
@@ -85,84 +67,6 @@ export interface PolyFirstPersonControlsProps extends PolyFirstPersonControlsOpt
   onInteractionStart?: () => void;
   /** Called when pointer-lock is released (interaction ends). */
   onInteractionEnd?: () => void;
-}
-
-// ── Defaults ─────────────────────────────────────────────────────────────────
-
-interface ResolvedOptions {
-  enabled: boolean;
-  lookEnabled: boolean;
-  moveEnabled: boolean;
-  jumpEnabled: boolean;
-  crouchEnabled: boolean;
-  lookSensitivity: number;
-  invertY: boolean;
-  moveSpeed: number;
-  jumpVelocity: number;
-  gravity: number;
-  eyeHeight: number;
-  crouchHeight: number;
-  groundZ: number;
-  minPitch: number;
-  maxPitch: number;
-}
-
-const DEFAULTS: ResolvedOptions = {
-  enabled: true,
-  lookEnabled: true,
-  moveEnabled: true,
-  jumpEnabled: true,
-  crouchEnabled: true,
-  lookSensitivity: 0.15,
-  invertY: false,
-  moveSpeed: 5,
-  jumpVelocity: 7,
-  gravity: 18,
-  eyeHeight: 1.7,
-  crouchHeight: 1,
-  groundZ: 0,
-  minPitch: 5,
-  maxPitch: 175,
-};
-
-function resolveOptions(base: ResolvedOptions, partial: PolyFirstPersonControlsOptions): ResolvedOptions {
-  return {
-    enabled: partial.enabled ?? base.enabled,
-    lookEnabled: partial.lookEnabled ?? base.lookEnabled,
-    moveEnabled: partial.moveEnabled ?? base.moveEnabled,
-    jumpEnabled: partial.jumpEnabled ?? base.jumpEnabled,
-    crouchEnabled: partial.crouchEnabled ?? base.crouchEnabled,
-    lookSensitivity: partial.lookSensitivity ?? base.lookSensitivity,
-    invertY: partial.invertY ?? base.invertY,
-    moveSpeed: partial.moveSpeed ?? base.moveSpeed,
-    jumpVelocity: partial.jumpVelocity ?? base.jumpVelocity,
-    gravity: partial.gravity ?? base.gravity,
-    eyeHeight: partial.eyeHeight ?? base.eyeHeight,
-    crouchHeight: partial.crouchHeight ?? base.crouchHeight,
-    groundZ: partial.groundZ ?? base.groundZ,
-    minPitch: partial.minPitch ?? base.minPitch,
-    maxPitch: partial.maxPitch ?? base.maxPitch,
-  };
-}
-
-// ── Key sets ──────────────────────────────────────────────────────────────────
-
-const FORWARD_KEYS = new Set(["KeyW", "ArrowUp"]);
-const BACK_KEYS = new Set(["KeyS", "ArrowDown"]);
-const LEFT_KEYS = new Set(["KeyA", "ArrowLeft"]);
-const RIGHT_KEYS = new Set(["KeyD", "ArrowRight"]);
-const JUMP_KEYS = new Set(["Space"]);
-const CROUCH_KEYS = new Set(["ControlLeft", "ControlRight"]);
-
-function isFpvKey(code: string): boolean {
-  return (
-    FORWARD_KEYS.has(code) ||
-    BACK_KEYS.has(code) ||
-    LEFT_KEYS.has(code) ||
-    RIGHT_KEYS.has(code) ||
-    JUMP_KEYS.has(code) ||
-    CROUCH_KEYS.has(code)
-  );
 }
 
 // ── Listener registry ─────────────────────────────────────────────────────────
@@ -207,7 +111,9 @@ export const PolyFirstPersonControls = forwardRef<
 
   // Options are kept in a ref so the RAF tick always reads the latest
   // values without requiring an effect dependency on every option.
-  const optsRef = useRef<ResolvedOptions>(resolveOptions(DEFAULTS, props));
+  const optsRef = useRef<PolyFirstPersonResolvedOptions>(
+    resolveFirstPersonOptions(FIRST_PERSON_DEFAULTS, props),
+  );
 
   // Camera origin (eye position in world coords).
   const cameraOriginRef = useRef<[number, number, number]>([0, 0, 0]);
@@ -238,7 +144,7 @@ export const PolyFirstPersonControls = forwardRef<
   useImperativeHandle(ref, () => ({
     update(partial: PolyFirstPersonControlsOptions): void {
       const prev = optsRef.current;
-      optsRef.current = resolveOptions(prev, partial);
+      optsRef.current = resolveFirstPersonOptions(prev, partial);
       if (!stoppedRef.current) {
         const host = cameraElRef.current;
         if (host) host.style.cursor = optsRef.current.lookEnabled ? "crosshair" : "";
@@ -310,16 +216,6 @@ export const PolyFirstPersonControls = forwardRef<
 
   // ── Helpers ────────────────────────────────────────────────────────────────
 
-  function forwardDir(rotX: number, rotY: number): [number, number, number] {
-    const rx = (rotX * Math.PI) / 180;
-    const ry = (rotY * Math.PI) / 180;
-    return [
-      -Math.sin(rx) * Math.cos(ry),
-      -Math.sin(rx) * Math.sin(ry),
-      -Math.cos(rx),
-    ];
-  }
-
   function lookOffset(): number {
     const host = cameraElRef.current;
     const perspStr = host ? getComputedStyle(host).perspective : "";
@@ -354,54 +250,23 @@ export const PolyFirstPersonControls = forwardRef<
 
     const opts = optsRef.current;
     if (opts.enabled) {
-      let dirty = false;
       const s = cameraRef.current.state;
       const o = cameraOriginRef.current;
 
-      // Horizontal movement
-      if (opts.moveEnabled) {
-        let mf = 0, mr = 0;
-        for (const code of keysHeldRef.current) {
-          if (FORWARD_KEYS.has(code)) mf += 1;
-          else if (BACK_KEYS.has(code)) mf -= 1;
-          else if (RIGHT_KEYS.has(code)) mr += 1;
-          else if (LEFT_KEYS.has(code)) mr -= 1;
-        }
-        if (mf !== 0 || mr !== 0) {
-          const rotY = s.rotY ?? 0;
-          const r = (rotY * Math.PI) / 180;
-          const fx = -Math.cos(r), fy = -Math.sin(r);
-          const rx = -Math.sin(r), ry = Math.cos(r);
-          const len = Math.hypot(mf, mr) || 1;
-          const step = opts.moveSpeed * dt;
-          o[0] += ((fx * mf + rx * mr) / len) * step;
-          o[1] += ((fy * mf + ry * mr) / len) * step;
-          dirty = true;
-        }
-      }
+      const res = stepFirstPersonPhysics(
+        { origin: o, verticalVel: verticalVelRef.current, jumpOffset: jumpOffsetRef.current },
+        keysHeldRef.current,
+        s.rotY ?? 0,
+        dt,
+        opts,
+      );
+      o[0] = res.origin[0];
+      o[1] = res.origin[1];
+      o[2] = res.origin[2];
+      verticalVelRef.current = res.verticalVel;
+      jumpOffsetRef.current = res.jumpOffset;
 
-      // Vertical (jump + gravity + crouch)
-      const crouched = opts.crouchEnabled &&
-        (keysHeldRef.current.has("ControlLeft") || keysHeldRef.current.has("ControlRight"));
-      const baseHeight = crouched ? opts.crouchHeight : opts.eyeHeight;
-      if (opts.jumpEnabled && (verticalVelRef.current !== 0 || jumpOffsetRef.current > 0)) {
-        verticalVelRef.current -= opts.gravity * dt;
-        jumpOffsetRef.current += verticalVelRef.current * dt;
-        if (jumpOffsetRef.current <= 0) {
-          jumpOffsetRef.current = 0;
-          verticalVelRef.current = 0;
-        }
-      } else if (!opts.jumpEnabled) {
-        jumpOffsetRef.current = 0;
-        verticalVelRef.current = 0;
-      }
-      const originZ = opts.groundZ + baseHeight + jumpOffsetRef.current;
-      if (Math.abs(o[2] - originZ) > 1e-4) {
-        o[2] = originZ;
-        dirty = true;
-      }
-
-      if (dirty) {
+      if (res.dirty) {
         const t = deriveTarget();
         const handle = cameraRef.current;
         handle.update({ target: t });
@@ -582,7 +447,7 @@ export const PolyFirstPersonControls = forwardRef<
   // ── Prop-change effect — forwards updates without destroying controls ────────
 
   useEffect(() => {
-    optsRef.current = resolveOptions(optsRef.current, props);
+    optsRef.current = resolveFirstPersonOptions(optsRef.current, props);
     const host = cameraElRef.current;
     if (host && !stoppedRef.current) {
       host.style.cursor = optsRef.current.lookEnabled ? "crosshair" : "";

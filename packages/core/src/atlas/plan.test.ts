@@ -13,6 +13,11 @@ import {
   resolveProjectiveQuadGuards,
   computeProjectiveQuadCoefficients,
 } from "./plan";
+import {
+  DEFAULT_SEAM_BLEED,
+  resolveSeamBleedPx,
+  seamBleedPrimitiveRatio,
+} from "./constants";
 
 // ---------------------------------------------------------------------------
 // Helpers / shared fixtures
@@ -463,5 +468,81 @@ describe("buildBasisHints — cross-polygon basis optimization", () => {
     // At least one of the hints should be defined (when the axis saves pixel area)
     // The optimization only triggers when it genuinely improves the basis
     expect(hints.length).toBe(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: unified seamBleed semantics (resolveSeamBleedPx / seamBleedPrimitiveRatio)
+// ---------------------------------------------------------------------------
+
+describe("seamBleed resolution — resolveSeamBleedPx / seamBleedPrimitiveRatio", () => {
+  it("resolves undefined/'auto'/invalid to the DEFAULT_SEAM_BLEED px", () => {
+    expect(resolveSeamBleedPx(undefined)).toBe(DEFAULT_SEAM_BLEED);
+    expect(resolveSeamBleedPx("auto")).toBe(DEFAULT_SEAM_BLEED);
+    expect(resolveSeamBleedPx(-1)).toBe(DEFAULT_SEAM_BLEED);
+    expect(resolveSeamBleedPx(Number.NaN)).toBe(DEFAULT_SEAM_BLEED);
+    expect(resolveSeamBleedPx(Number.POSITIVE_INFINITY)).toBe(DEFAULT_SEAM_BLEED);
+  });
+
+  it("treats finite numbers ≥ 0 as absolute px with no upper clamp", () => {
+    expect(resolveSeamBleedPx(0)).toBe(0);
+    expect(resolveSeamBleedPx(0.5)).toBe(0.5);
+    expect(resolveSeamBleedPx(1)).toBe(1);
+    expect(resolveSeamBleedPx(1.5)).toBe(1.5);
+    expect(resolveSeamBleedPx(3)).toBe(3);
+  });
+
+  it("derives the primitive-bleed ratio as clamp(px / DEFAULT_SEAM_BLEED, 0, 1)", () => {
+    expect(seamBleedPrimitiveRatio(undefined)).toBe(1);
+    expect(seamBleedPrimitiveRatio("auto")).toBe(1);
+    expect(seamBleedPrimitiveRatio(0)).toBe(0);
+    expect(seamBleedPrimitiveRatio(0.5)).toBeCloseTo(0.5 / 1.5, 10);
+    expect(seamBleedPrimitiveRatio(0.75)).toBeCloseTo(0.5, 10);
+    expect(seamBleedPrimitiveRatio(1.5)).toBe(1);
+    expect(seamBleedPrimitiveRatio(3)).toBe(1);
+  });
+});
+
+describe("atlas plan — seamBleed stamping (raw option resolved in core)", () => {
+  const seamEdges = new Set([0]);
+
+  function planFor(seamBleed?: number | "auto") {
+    const plan = computeTextureAtlasPlanPublic(FLAT_RECT, 0, { seamBleed, seamEdges });
+    expect(plan).not.toBeNull();
+    return plan!;
+  }
+
+  it("'auto' and undefined yield the full default 1.5px shared-edge overscan", () => {
+    for (const value of [undefined, "auto"] as const) {
+      const plan = planFor(value);
+      expect(plan.seamBleedEdgeAmounts?.get(0)).toBe(DEFAULT_SEAM_BLEED);
+      expect(plan.bleedRatio).toBe(1);
+    }
+  });
+
+  it("numbers above the default are honored as raw px (no 1.5 clamp)", () => {
+    const plan = planFor(3);
+    expect(plan.seamBleedEdgeAmounts?.get(0)).toBe(3);
+    expect(plan.bleedRatio).toBe(1);
+  });
+
+  it("0 disables the shared-edge overscan and every primitive bleed", () => {
+    const plan = planFor(0);
+    expect(plan.seamBleedEdgeAmounts).toBeUndefined();
+    expect(plan.seamBleedEdges).toBeUndefined();
+    expect(plan.bleedRatio).toBe(0);
+  });
+
+  it("sub-default numbers scale primitive bleeds by px / DEFAULT_SEAM_BLEED", () => {
+    const plan = planFor(0.5);
+    expect(plan.seamBleedEdgeAmounts?.get(0)).toBe(0.5);
+    expect(plan.bleedRatio).toBeCloseTo(0.5 / 1.5, 10);
+  });
+
+  it("large requests are still bounded per edge by the geometric fit", () => {
+    // FLAT_RECT with tile 50 → the fit clamp for the 100px edge is 25px
+    // (half the 50px opposite-edge clearance).
+    const plan = planFor(1000);
+    expect(plan.seamBleedEdgeAmounts?.get(0)).toBe(25);
   });
 });

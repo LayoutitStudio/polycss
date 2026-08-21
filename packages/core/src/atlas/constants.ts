@@ -40,9 +40,10 @@ export const SEAM_LIGHT_EPS = 0.01;
 // Each strategy has its own value because the visible artifact at each
 // strategy's rasterised edge is different (border-shape clip is sharper
 // than projective-quad antialias, etc.). The configurable `seamBleed`
-// scene option overrides DEFAULT_SEAM_BLEED at runtime but does NOT
-// affect the per-strategy values — those are baked into each emit path
-// to mask its own rasterisation artifacts.
+// scene option sets the absolute shared-seam overscan px directly and
+// scales the per-strategy values through `seamBleedPrimitiveRatio`
+// (0 disables them, sub-default values shrink them proportionally,
+// values at or above DEFAULT_SEAM_BLEED keep them at full strength).
 //
 // To adjust any of these, change the value HERE — both the core path
 // and the polycss render path import from this file (no duplicates).
@@ -69,16 +70,32 @@ export const CORNER_SHAPE_DUPLICATE_EPS = 0.2;
 export const PROJECTIVE_QUAD_DENOM_EPS = 0.05;
 export const PROJECTIVE_QUAD_MAX_WEIGHT_RATIO = 256;
 export const PROJECTIVE_QUAD_BLEED = 0.6;
-// Configurable default. Currently treated as RATIO in [0..1] applied to
-// every bleed in this file: `options.seamBleed ?? 1` × per-strategy
-// constant. 0 = no bleed anywhere; 1 = full default bleed.
+// Default absolute shared-seam overscan in CSS px. The public `seamBleed`
+// option overrides it with another absolute px request; see
+// `resolveSeamBleedPx` / `seamBleedPrimitiveRatio` for the two derived
+// values every renderer consumes.
 export const DEFAULT_SEAM_BLEED = 1.5;
 
-/** Clamp the `seamBleed` ratio. `undefined` → 1 (full default), 0 → no
- *  bleed, values outside [0,1] are clamped. Single source of truth for
- *  how the public ratio maps to per-strategy bleed multipliers. */
-export function resolveBleedRatio(seamBleed: number | "auto" | undefined): number {
-  if (seamBleed === undefined || seamBleed === "auto") return 1;
-  if (!Number.isFinite(seamBleed)) return 1;
-  return Math.max(0, Math.min(1, seamBleed));
+/** Resolve the public `seamBleed` option (`number | "auto" | undefined`)
+ *  to the ABSOLUTE shared-seam overscan in CSS px. `undefined`/`"auto"`
+ *  → DEFAULT_SEAM_BLEED. A finite number ≥ 0 is used as-is — no upper
+ *  clamp; the per-edge geometric fit (`safePlanSeamBleedAmount`) still
+ *  bounds what each edge can absorb. Negative/non-finite → default.
+ *  Single source of truth: renderers pass the raw option through and
+ *  core resolves it here. */
+export function resolveSeamBleedPx(seamBleed: number | "auto" | undefined): number {
+  if (typeof seamBleed === "number" && Number.isFinite(seamBleed) && seamBleed >= 0) {
+    return seamBleed;
+  }
+  return DEFAULT_SEAM_BLEED;
+}
+
+/** Per-strategy primitive-bleed multiplier derived from the resolved seam
+ *  bleed: `clamp(resolvedPx / DEFAULT_SEAM_BLEED, 0, 1)`. `seamBleed: 0`
+ *  disables every bleed, values in (0, DEFAULT_SEAM_BLEED) proportionally
+ *  scale the per-strategy constants (SOLID_TRIANGLE_BLEED, BORDER_SHAPE_BLEED,
+ *  TEXTURE_TRIANGLE_BLEED, PROJECTIVE_QUAD_BLEED), and ≥ DEFAULT_SEAM_BLEED
+ *  keeps them at full strength. */
+export function seamBleedPrimitiveRatio(seamBleed: number | "auto" | undefined): number {
+  return Math.min(1, resolveSeamBleedPx(seamBleed) / DEFAULT_SEAM_BLEED);
 }

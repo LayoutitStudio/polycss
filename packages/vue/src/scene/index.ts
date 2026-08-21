@@ -7,6 +7,7 @@ export type { PolyIframeProps } from "./PolyIframe";
 export { PolyGround } from "./PolyGround";
 export type { PolyGroundProps } from "./PolyGround";
 export { usePolySceneContext } from "./useSceneContext";
-export type { UseSceneContextOptions, UseSceneContextResult } from "./useSceneContext";
+export type { UseSceneContextResult } from "./useSceneContext";
+export type { PolyShadowOptions } from "./sceneContext";
 export { usePolyMesh } from "./useMesh";
 export type { UseMeshOptions, UseMeshResult } from "./useMesh";

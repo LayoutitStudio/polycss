@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { createApp, h } from "vue";
+import { createApp, h, type Component } from "vue";
 import { Poly } from "./Poly";
 import type { PolyContext } from "./Poly";
 
@@ -39,7 +39,9 @@ function renderPoly(props: Record<string, unknown>): HTMLElement {
   const app = createApp({
     setup() {
       return () =>
-        h(Poly, {
+        // Widen to an untyped Component: this harness deliberately feeds
+        // arbitrary prop records, including invalid ones.
+        h(Poly as Component, {
           context: DEFAULT_CONTEXT,
           color: "#cccccc",
           ...props,
@@ -334,20 +336,6 @@ describe("Poly (Vue) — dynamic lighting", () => {
     expect(poly.style.backgroundBlendMode).toBe("");
     expect(poly.style.getPropertyValue("--pnx")).toBe("");
     expect(poly.getAttribute("style") ?? "").not.toContain("mask-image");
-  });
-});
-
-describe("Poly (Vue) — debug backfaces", () => {
-  it("does not render SVG debug overlays", () => {
-    const container = renderPoly({
-      vertices: FLAT_TRIANGLE,
-      context: {
-        ...DEFAULT_CONTEXT,
-        debugShowBackfaces: true,
-      },
-    });
-    expect(container.querySelector("svg")).toBeNull();
-    expect(container.querySelector(".polycss-debug-backface")).toBeNull();
   });
 });
 

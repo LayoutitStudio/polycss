@@ -579,8 +579,8 @@ describe("<PolyTransformControls>", () => {
       // Fire pointerdown directly on a gizmo child — the fallback should skip it
       if (gizmoEl) {
         act(() => {
-          cameraEl.dispatchEvent(
-            new PointerEvent("pointerdown", { bubbles: true, target: gizmoEl, clientX: 0, clientY: 0, pointerId: 1 }),
+          gizmoEl.dispatchEvent(
+            new PointerEvent("pointerdown", { bubbles: true, clientX: 0, clientY: 0, pointerId: 1 }),
           );
         });
       }

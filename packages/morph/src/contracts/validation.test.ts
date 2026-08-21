@@ -6,6 +6,7 @@ import {
   isPolyMorphResourcePath,
   PolyMorphContractError,
   validatePolyMorphModel,
+  type PolyMorphModel,
 } from "./index.js";
 import {
   clonePolyMorphFixture,
@@ -82,7 +83,7 @@ describe("validatePolyMorphModel", () => {
     fallback.render.leaves[0]!.fallback = {
       width: 7,
       height: 5,
-      matrixFromLeaf: POLY_MORPH_IDENTITY_MATRIX,
+      matrixFromLeaf: [...POLY_MORPH_IDENTITY_MATRIX],
       atlas: {
         resourcePath: "../solid-triangle.png",
         x: 0,
@@ -101,7 +102,7 @@ describe("validatePolyMorphModel", () => {
     fixture.render.leaves[0]!.fallback = {
       width: 7,
       height: 5,
-      matrixFromLeaf: POLY_MORPH_IDENTITY_MATRIX,
+      matrixFromLeaf: [...POLY_MORPH_IDENTITY_MATRIX],
       atlas: {
         resourcePath: "assets/solid-triangles-000.png",
         x: 1,
@@ -188,11 +189,17 @@ describe("validatePolyMorphModel", () => {
   });
 
   it("requires profile-specific sections and capabilities", () => {
-    const mismatched = clonePolyMorphFixture(createPolyMorphModelFixture("morph-regions"));
+    // Widen the profile-narrowed fixtures: these corruptions deliberately
+    // break the profile-specific shape to exercise profile-mismatch.
+    const mismatched = clonePolyMorphFixture<PolyMorphModel>(
+      createPolyMorphModelFixture("morph-regions"),
+    );
     mismatched.deformation = { kind: "none" };
     expectCode(mismatched, "profile-mismatch");
 
-    const missingPlayback = clonePolyMorphFixture(createPolyMorphModelFixture("prepared-playback"));
+    const missingPlayback = clonePolyMorphFixture<PolyMorphModel>(
+      createPolyMorphModelFixture("prepared-playback"),
+    );
     missingPlayback.playback = null;
     expectCode(missingPlayback, "profile-mismatch");
 
@@ -269,12 +276,12 @@ describe("validatePolyMorphModel", () => {
     const fixture = clonePolyMorphFixture(createPolyMorphModelFixture("prepared-playback"));
     fixture.playback!.frames.push({
       timeMs: 500,
-      modelMatrix: POLY_MORPH_IDENTITY_MATRIX,
-      shapes: [{ shapeId: "gem", matrix: POLY_MORPH_IDENTITY_MATRIX }],
+      modelMatrix: [...POLY_MORPH_IDENTITY_MATRIX],
+      shapes: [{ shapeId: "gem", matrix: [...POLY_MORPH_IDENTITY_MATRIX] }],
       leaves: [
         {
           leafId: "gem-panel-leaf",
-          matrix: POLY_MORPH_IDENTITY_MATRIX,
+          matrix: [...POLY_MORPH_IDENTITY_MATRIX],
           visible: null,
           opacity: 0.5,
           atlasRow: 1,

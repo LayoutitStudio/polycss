@@ -2261,13 +2261,142 @@ describe("createPolyScene", () => {
       const paths = shadow.querySelectorAll("path");
       expect(paths.length).toBe(1);
       const path = paths[0]!;
-      expect(path.getAttribute("opacity")).toBe("0.2500");
+      // A lone floor face has no crease to bleed across, so it keeps the
+      // shadowed colour at `shadow.opacity`. (A face that DOES bleed a crease
+      // switches to the opaque pre-blend — same pixel over the lit receiver,
+      // but idempotent where the two faces' expanded clips overlap.)
+      expect(Number(path.getAttribute("opacity"))).toBeCloseTo(0.25, 6);
+      expect(path.getAttribute("fill")).toMatch(/^#[0-9a-f]{6}$/);
+      const [pr, pg, pb] = path.getAttribute("fill")!
+        .match(/^#(..)(..)(..)$/)!
+        .slice(1)
+        .map((h) => parseInt(h, 16)) as [number, number, number];
+      // The ambient-only receiver colour: darker than the lit floor, not black.
+      expect(pr).toBeGreaterThan(0);
+      expect(pr).toBeLessThan(204);
+      expect(pg).toBe(pr);
+      expect(pb).toBe(pr);
       expect(path.getAttribute("fill-rule")).toBe("nonzero");
       const d = path.getAttribute("d") || "";
       // Triangle (3 verts) → one M, two Ls, one Z.
       expect((d.match(/M/g) || []).length).toBe(1);
       expect((d.match(/L/g) || []).length).toBe(2);
       expect((d.match(/Z/g) || []).length).toBe(1);
+    });
+
+    it("followAnimation throttles stable-topology animated-shadow re-emits to one per 80ms window with a trailing emit", () => {
+      // The throttle governs the stable-DOM animation path (skeletal
+      // deforms), where applyStableTopologyUpdate short-circuits renderEntry
+      // — the only shadow emitter there is maybeEmitAnimationShadow. Full
+      // re-render setPolygons paths always re-emit via emitShadowLeaves.
+      vi.useFakeTimers();
+      try {
+        scene = makeScene(host, {
+          ...bakedOpts,
+          shadow: { followAnimation: true },
+        });
+        scene.add(makeParseResult([floor()]), { receiveShadow: true });
+        const caster = scene.add(makeParseResult([backTriangle()]), {
+          castShadow: true,
+          merge: false,
+          stableDom: true,
+        });
+        // The receiver-face shadow path `d` is normalized to the shadow's own
+        // bbox, so a pure caster translation shows up in the SVG transform.
+        const readShadowTransform = (): string =>
+          (host.querySelector(".polycss-shadow") as HTMLElement | null)?.style.transform ?? "";
+        const t0 = readShadowTransform();
+        expect(t0).not.toBe("");
+        const shifted = (dx: number): Polygon[] => [
+          {
+            ...backTriangle(),
+            vertices: backTriangle().vertices.map(
+              ([x, y, z]) => [x + dx, y, z] as [number, number, number],
+            ),
+          },
+        ];
+        const deform = (dx: number): void =>
+          caster.setPolygons(shifted(dx), { merge: false, stableDom: true });
+        // Rapid same-topology stable deforms inside the 80ms window (fake
+        // timers freeze the clock): all parked, the emitted shadow stays at
+        // the last emitted pose.
+        deform(0.5);
+        deform(1.0);
+        deform(1.5);
+        expect(readShadowTransform()).toBe(t0);
+        // Trailing edge: once the window elapses, one re-emit lands and it
+        // reflects the LAST pose (a paused animation is never stale).
+        vi.advanceTimersByTime(200);
+        const tTrailing = readShadowTransform();
+        expect(tTrailing).not.toBe("");
+        expect(tTrailing).not.toBe(t0);
+        // And it matches a fresh emit of the same pose (latest geometry).
+        vi.advanceTimersByTime(200);
+        deform(1.5);
+        expect(readShadowTransform()).toBe(tTrailing);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("updatePolygon vertex edits bust the shadow caches so subsequent emits use the moved geometry", () => {
+      // Regression: updatePolygon mutated entry.polygons in place, so the
+      // caster-items / receiver-plane / overlap-dedup / edge-owner caches
+      // (whose bust keys all survive a same-count, same-transform vertex
+      // edit) kept serving the pre-edit geometry to every later shadow emit.
+      scene = makeScene(host, bakedOpts);
+      scene.add(makeParseResult([floor()]), { receiveShadow: true });
+      const caster = scene.add(makeParseResult([backTriangle()]), {
+        castShadow: true,
+        merge: false,
+      });
+      // The path `d` is normalized to the shadow's own bbox, so capture the
+      // SVG transform alongside it — a moved caster shows up in either.
+      const readShadowD = (root: HTMLElement = host): string => {
+        const svg = root.querySelector(".polycss-shadow") as SVGSVGElement | null;
+        const d = svg?.querySelector("path")?.getAttribute("d") ?? "";
+        return d === "" ? "" : `${svg!.style.transform}|${d}`;
+      };
+      const d0 = readShadowD();
+      expect(d0).not.toBe("");
+      // Move ONE vertex so the caster's shape (not just its position) changes.
+      const movedVertices = backTriangle().vertices.map(
+        ([x, y, z], i) => (i === 2 ? [x + 2, y, z] : [x, y, z]) as [number, number, number],
+      );
+      caster.updatePolygon(0, { vertices: movedVertices });
+      // The re-render emit must reflect the moved vertex, not the cached
+      // pre-edit caster items.
+      const d1 = readShadowD();
+      expect(d1).not.toBe("");
+      expect(d1).not.toBe(d0);
+      // A light change after the edit must also project the moved geometry —
+      // byte-identical to a fresh scene built with the moved polygon.
+      const newLight = {
+        direction: [0.1, -0.8, 0.59] as [number, number, number],
+        color: "#ffffff",
+        intensity: 1,
+      };
+      scene.setOptions({ directionalLight: newLight });
+      const d2 = readShadowD();
+      expect(d2).not.toBe("");
+
+      const refHost = document.createElement("div");
+      document.body.appendChild(refHost);
+      try {
+        const refScene = makeScene(refHost, { ...bakedOpts, directionalLight: newLight });
+        try {
+          refScene.add(makeParseResult([floor()]), { receiveShadow: true });
+          refScene.add(
+            makeParseResult([{ ...backTriangle(), vertices: movedVertices }]),
+            { castShadow: true, merge: false },
+          );
+          expect(d2).toBe(readShadowD(refHost));
+        } finally {
+          refScene.destroy();
+        }
+      } finally {
+        refHost.remove();
+      }
     });
 
     it("clips low-angle shadow path coordinates to the receiver face SVG box", () => {

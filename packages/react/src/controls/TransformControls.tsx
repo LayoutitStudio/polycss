@@ -35,14 +35,41 @@ import {
   type RefObject,
 } from "react";
 import {
+  ALPHA_DRAGGING,
+  ALPHA_HOVER,
+  ALPHA_IDLE,
+  ARROW_SPECS,
+  HEAD_HALF_THICKNESS_RATIO,
+  HEAD_LENGTH_RATIO,
+  PLANE_HALF_SIZE_RATIO,
+  PLANE_OFFSET_RATIO,
+  PLANE_SPECS,
+  RING_HALF_THICKNESS_RATIO,
+  RING_QUAD_OUTER_RATIO,
+  RING_RADIUS_RATIO,
+  RING_SPECS,
+  SCENE_TILE_SIZE,
+  SCREEN_AXIS_DEAD_ZONE_SQ,
+  SHAFT_HALF_THICKNESS_RATIO,
+  WORLD_AXIS_FOR_CSS,
   arrowPolygons,
   DEFAULT_CAMERA_STATE,
   eulerXYZFromQuat,
+  gizmoCenterForMesh,
+  gizmoLengthForMesh,
+  isAxisBackFacing,
   planePolygons,
   quatFromAxisAngle,
   quatFromEulerXYZ,
   quatMultiply,
   ringQuadPolygons,
+  screenPlaneDet,
+  snap,
+  solveAxisDragDelta,
+  solvePlaneDragDeltas,
+  unwrapAngleDelta,
+  userAxisLetterOf,
+  withAlpha,
   type Polygon,
   type Vec3,
 } from "@layoutit/polycss-core";
@@ -55,136 +82,6 @@ import { createSceneStore, useStoreSelector } from "../store/sceneStore";
 // PolyTransformControls is rendered outside a PolyCamera. We always pass a
 // store to useStoreSelector; this one never changes, so it never re-renders.
 const FALLBACK_CAMERA_STORE = createSceneStore(DEFAULT_CAMERA_STATE);
-
-// Three.js convention: X red, Y green, Z blue. Kept identical so muscle
-// memory carries over.
-const COLOR_X = "#ff3653";
-const COLOR_Y = "#8adb00";
-const COLOR_Z = "#2c8fff";
-
-// Alpha applied to the base colors at idle / hover / dragging states.
-// Translucency is baked into each polygon's color (rgba) rather than a
-// CSS `opacity` on the gizmo wrapper — `opacity` creates a flattened
-// stacking context, which would collapse the arrow's 3D depth into a
-// single 2D image and break the way the cuboid + pyramid compose with
-// the rest of the scene. Per-polygon rgba leaves the 3D pipeline alone.
-const ALPHA_IDLE = 0.6;
-const ALPHA_HOVER = 0.8;
-const ALPHA_DRAGGING = 1.0;
-
-/** Convert a `#rrggbb` color to `rgba(r, g, b, a)`. Falls back to the
- *  input string unchanged if it doesn't look like a 6-digit hex. */
-function withAlpha(hex: string, alpha: number): string {
-  const m = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex);
-  if (!m) return hex;
-  const r = parseInt(m[1], 16);
-  const g = parseInt(m[2], 16);
-  const b = parseInt(m[3], 16);
-  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
-}
-
-// PolyScene's default `tileSize` (50 px / world unit). Polygon vertex
-// coords are world units; the scene renderer multiplies by tileSize to
-// place them in scene-CSS pixel space.
-const SCENE_TILE_SIZE = 50;
-
-// Fallback shaft length (in scene-CSS px) used only when the target
-// mesh has no polygons to bbox-derive from.
-const FALLBACK_SHAFT_LENGTH = 60;
-
-// Shaft length as a fraction of the mesh's largest bbox extent. ~60%
-// makes arrows clearly stick out of the silhouette without dwarfing it.
-const SHAFT_LENGTH_RATIO = 0.6;
-
-// Arrow visual proportions — fractions of the shaft length, expressed
-// as HALF-extents (the value passed to arrowPolygons is `…HalfThickness`).
-// Shaft full-width = 2.5% of length, matching <PolyAxesHelper>'s
-// `thickness=0.025` so the gizmo arrows visually weigh the same as
-// the axes overlay. Heads are ~3× wider than the shaft so the 3D
-// pyramid reads as a clear arrowhead at any size.
-const SHAFT_HALF_THICKNESS_RATIO = 0.0125;  // → 2.5% full
-const HEAD_LENGTH_RATIO = 0.15;
-const HEAD_HALF_THICKNESS_RATIO = 0.04;     // → 8% full
-
-// Rotate-mode rings. Radius matches the arrow length so translate /
-// rotate gizmos look the same scale; thickness is similar to a shaft
-// so each ring reads as a thin band, not a disc.
-const RING_RADIUS_RATIO = 1.0;
-// Visible band half-width relative to mid-radius. Drives ONLY the CSS mask;
-// the click target (quad bbox) is sized by RING_QUAD_OUTER_RATIO so we can
-// show a thin ring without shrinking the hit footprint.
-const RING_HALF_THICKNESS_RATIO = 0.02;
-// Outer radius of the ring's quad polygon as a multiple of mid-radius. The
-// quad's bbox IS the click target. 1.04 leaves a 2% margin past the visible
-// ring's outer edge while keeping the prior hit footprint.
-const RING_QUAD_OUTER_RATIO = 1.04;
-
-// Plane handle proportions (translate-mode planar drag). Small square at
-// the corner between two axis arrows — sits inside the arrow tips so it
-// doesn't compete with single-axis hits on the shaft.
-const PLANE_HALF_SIZE_RATIO = 0.1;
-const PLANE_OFFSET_RATIO = 0.25;
-
-// Squared length (in screen-px-per-scene-px) below which the axis is
-// considered edge-on — its on-screen projection is too short for stable
-// dragging. 0.0001 ≈ scene must shrink an axis-unit to ≥ 0.01 screen
-// pixels for drags to engage; below that, a 1-pixel pointer drag would
-// produce 100+ scene-px of mesh movement.
-const SCREEN_AXIS_DEAD_ZONE_SQ = 0.0001;
-
-/** Return the largest bbox extent of `polygons` in scene-CSS pixels. */
-function gizmoLengthForMesh(polygons: Polygon[]): number {
-  if (polygons.length === 0) return FALLBACK_SHAFT_LENGTH;
-  let minX = Infinity, minY = Infinity, minZ = Infinity;
-  let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
-  for (const poly of polygons) {
-    for (const v of poly.vertices) {
-      if (v[0] < minX) minX = v[0];
-      if (v[0] > maxX) maxX = v[0];
-      if (v[1] < minY) minY = v[1];
-      if (v[1] > maxY) maxY = v[1];
-      if (v[2] < minZ) minZ = v[2];
-      if (v[2] > maxZ) maxZ = v[2];
-    }
-  }
-  if (!Number.isFinite(minX)) return FALLBACK_SHAFT_LENGTH;
-  const extent = Math.max(maxX - minX, maxY - minY, maxZ - minZ);
-  return extent * SCENE_TILE_SIZE * SHAFT_LENGTH_RATIO;
-}
-
-/**
- * Return the bbox center of `polygons` in scene-CSS pixels, mapped via the
- * standard PolyCSS world→CSS axis remap (vertex[1]→CSS X, vertex[0]→CSS Y,
- * vertex[2]→CSS Z).
- *
- * Used to offset the gizmo wrapper so it sits at the mesh's visual center
- * rather than at its wrapper origin. When the mesh's vertices live at their
- * native positions (PolyMesh.autoCenter unset, e.g. when PolyScene's
- * autoCenter is doing the centering) the wrapper origin is OFFSET from the
- * visible mesh by -bboxCenter; without this compensation the gizmo would
- * sit where world (0,0,0) ends up on screen, not on the mesh.
- */
-function gizmoCenterForMesh(polygons: Polygon[]): Vec3 {
-  if (polygons.length === 0) return [0, 0, 0];
-  let minX = Infinity, minY = Infinity, minZ = Infinity;
-  let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
-  for (const poly of polygons) {
-    for (const v of poly.vertices) {
-      if (v[0] < minX) minX = v[0];
-      if (v[0] > maxX) maxX = v[0];
-      if (v[1] < minY) minY = v[1];
-      if (v[1] > maxY) maxY = v[1];
-      if (v[2] < minZ) minZ = v[2];
-      if (v[2] > maxZ) maxZ = v[2];
-    }
-  }
-  if (!Number.isFinite(minX)) return [0, 0, 0];
-  return [
-    ((minY + maxY) / 2) * SCENE_TILE_SIZE,
-    ((minX + maxX) / 2) * SCENE_TILE_SIZE,
-    ((minZ + maxZ) / 2) * SCENE_TILE_SIZE,
-  ];
-}
 
 /** Optional ref-or-direct binding to a target mesh. */
 export type PolyTransformControlsObject =
@@ -244,93 +141,6 @@ function resolveObject(o: PolyTransformControlsObject): PolyMeshHandle | null {
   if (typeof o === "object" && "current" in o) return o.current ?? null;
   return o as PolyMeshHandle;
 }
-
-function snap(value: number, step: number | null | undefined): number {
-  if (!step || step <= 0) return value;
-  return Math.round(value / step) * step;
-}
-
-/** Six signed-axis directions to render as arrows.
- *
- * `cssAxis` is the CSS-pixel direction the arrow points in (0=x
- * horizontal, 1=y vertical, 2=z depth) — that's both the direction the
- * user sees the arrow and the direction `<PolyMesh position>` deltas
- * apply along, since position is in scene-CSS pixels.
- *
- * PolyCSS's world→CSS remap (core/src/scene/polygonGeometry.ts) sends
- * world-Y → CSS-x and world-X → CSS-y, so to draw an arrow visually
- * along CSS-x we have to feed `arrowPolygons` axis=1 (world-Y), and
- * vice versa. `WORLD_AXIS_FOR_CSS` is that lookup — used only when
- * generating the polygon geometry. Everything else (probe, drag math,
- * position deltas) operates in CSS coords directly.
- */
-const WORLD_AXIS_FOR_CSS: Record<0 | 1 | 2, 0 | 1 | 2> = { 0: 1, 1: 0, 2: 2 };
-
-const ARROW_SPECS: Array<{ cssAxis: 0 | 1 | 2; sign: 1 | -1; key: string; color: string }> = [
-  { cssAxis: 0, sign:  1, key:  "x", color: COLOR_X },
-  { cssAxis: 0, sign: -1, key: "-x", color: COLOR_X },
-  { cssAxis: 1, sign:  1, key:  "y", color: COLOR_Y },
-  { cssAxis: 1, sign: -1, key: "-y", color: COLOR_Y },
-  { cssAxis: 2, sign:  1, key:  "z", color: COLOR_Z },
-  { cssAxis: 2, sign: -1, key: "-z", color: COLOR_Z },
-];
-
-/** Three rotate-mode rings, one per user-axis. `cssAxis` is the
- *  rotation axis in CSS coords (matches `<PolyMesh rotation>`'s Vec3
- *  index, which corresponds directly to rotateX / rotateY / rotateZ).
- *  The ring lies in the plane perpendicular to that axis. */
-const RING_SPECS: Array<{ cssAxis: 0 | 1 | 2; key: string; color: string }> = [
-  { cssAxis: 0, key: "x", color: COLOR_X },
-  { cssAxis: 1, key: "y", color: COLOR_Y },
-  { cssAxis: 2, key: "z", color: COLOR_Z },
-];
-
-/** Resolve a user-facing axis letter from an ARROW_SPECS key. */
-function userAxisLetterOf(key: string): "x" | "y" | "z" {
-  const last = key.replace("-", "")[0];
-  return last as "x" | "y" | "z";
-}
-
-
-/** True when the signed CSS-space axis points AWAY from the viewer after
- *  the scene's rotateZ(rotY) · rotateX(rotX) transform. Used to drop the
- *  shaft on back-facing translate arrows so the gizmo silhouette stays
- *  clean — both halves of a pair otherwise share a shaft volume at the
- *  gizmo origin and overdraw. */
-function isAxisBackFacing(
-  cssAxis: 0 | 1 | 2,
-  sign: 1 | -1,
-  rotXDeg: number,
-  rotYDeg: number,
-): boolean {
-  const rx = (rotXDeg * Math.PI) / 180;
-  const ry = (rotYDeg * Math.PI) / 180;
-  const a: [number, number, number] = [0, 0, 0];
-  a[cssAxis] = sign;
-  const bx = a[0] * Math.cos(ry) - a[1] * Math.sin(ry);
-  const by = a[0] * Math.sin(ry) + a[1] * Math.cos(ry);
-  const bz = a[2];
-  const cz = by * Math.sin(rx) + bz * Math.cos(rx);
-  void bx;
-  return cz < 0;
-}
-
-/** Three plane specs (translate mode — planar drag). `perpAxis` is the
- *  axis perpendicular to the plane (the one the drag does NOT move along);
- *  `axisA` and `axisB` are the two CSS axes the drag DOES update. */
-// Plane color = perpendicular axis color: XY plane → blue (Z), XZ → green
-// (Y), YZ → red (X). "The axis you can't drag along is this color."
-const PLANE_SPECS: Array<{
-  perpAxis: 0 | 1 | 2;
-  axisA: 0 | 1 | 2;
-  axisB: 0 | 1 | 2;
-  key: "xy" | "xz" | "yz";
-  color: string;
-}> = [
-  { perpAxis: 2, axisA: 0, axisB: 1, key: "xy", color: COLOR_Z },
-  { perpAxis: 1, axisA: 0, axisB: 2, key: "xz", color: COLOR_Y },
-  { perpAxis: 0, axisA: 1, axisB: 2, key: "yz", color: COLOR_X },
-];
 
 interface DragOptions {
   /** CSS axis index this arrow drives (0=x, 1=y, 2=z). The probe is
@@ -401,7 +211,7 @@ function startAxisDrag(opts: DragOptions): void {
   const handleMove = (ev: PointerEvent): void => {
     const dx = ev.clientX - startClientX;
     const dy = ev.clientY - startClientY;
-    let t = (dx * screenAxisX + dy * screenAxisY) / screenAxisLenSq;
+    let t = solveAxisDragDelta(dx, dy, screenAxisX, screenAxisY);
     t = snap(t, translationSnap);
     const newPos: Vec3 = [
       startPos[0] + t * axisVec[0],
@@ -498,7 +308,7 @@ function startPlaneDrag(opts: PlaneDragOptions): void {
   }
   const pA = probe(axisAVec);
   const pB = probe(axisBVec);
-  const det = pA.x * pB.y - pB.x * pA.y;
+  const det = screenPlaneDet(pA, pB);
   if (Math.abs(det) < SCREEN_AXIS_DEAD_ZONE_SQ) return;
 
   const startPos = target.getPosition() ?? ([0, 0, 0] as Vec3);
@@ -508,8 +318,7 @@ function startPlaneDrag(opts: PlaneDragOptions): void {
   const handleMove = (ev: PointerEvent): void => {
     const dx = ev.clientX - startClientX;
     const dy = ev.clientY - startClientY;
-    let tA = (pB.y * dx - pB.x * dy) / det;
-    let tB = (-pA.y * dx + pA.x * dy) / det;
+    let { tA, tB } = solvePlaneDragDeltas(dx, dy, pA, pB, det);
     if (translationSnap !== null) {
       tA = Math.round(tA / translationSnap) * translationSnap;
       tB = Math.round(tB / translationSnap) * translationSnap;
@@ -603,11 +412,8 @@ function startRingDrag(opts: RingDragOptions): void {
   const qStart = quatFromEulerXYZ(startRotation);
   const handleMove = (ev: PointerEvent): void => {
     const a = Math.atan2(ev.clientY - centerY, ev.clientX - centerX);
-    let d = a - lastAngle;
     // Unwrap so a drag that crosses the ±π boundary doesn't jump by 2π.
-    if (d > Math.PI) d -= 2 * Math.PI;
-    else if (d < -Math.PI) d += 2 * Math.PI;
-    cumulative += d;
+    cumulative += unwrapAngleDelta(a, lastAngle);
     lastAngle = a;
     let degrees = (cumulative * 180) / Math.PI;
     degrees = snap(degrees, rotationSnap);

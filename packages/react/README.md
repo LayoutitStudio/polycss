@@ -130,8 +130,8 @@ the wrapper's local origin, so rotation and scale pivot at the visible center.
 - `usePolyCamera(options)` — create and drive the scene camera store from camera
   options; returns `{ store, cameraRef, sceneElRef, cameraElRef,
   applyTransformDirect }`.
-- `usePolySceneContext(polygons, { directionalLight })` — run the scene pipeline
-  (normalize + merge) over a polygon list; returns `{ polygons, sceneBbox }`.
+- `usePolySceneContext(polygons)` — run the scene pipeline (normalize + merge)
+  over a polygon list; returns `{ polygons, sceneBbox }`.
 - `usePolyMesh` — load a mesh imperatively; returns `{ polygons, voxelSource,
   loading, error, warnings, dispose }`, where `error` is an `Error | null`.
 - `usePolyMaterial` — resolve material state for a mesh.

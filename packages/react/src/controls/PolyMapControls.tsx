@@ -16,7 +16,8 @@
 import { useEffect, useRef } from "react";
 import { useCameraContext } from "../camera/context";
 import {
-  buildOrbitControls,
+  orbitCamera,
+  panCamera,
   type SharedControlsProps,
   type PolyControlsCamera,
 } from "./sharedControls";
@@ -33,7 +34,7 @@ export function PolyMapControls({
   minZoom = 0.1,
   maxZoom = 10,
   minDistance = 0,
-  maxDistance = 5000,
+  maxDistance = Infinity,
   animate = false,
   onChange,
   onInteractionStart,
@@ -129,10 +130,10 @@ export function PolyMapControls({
       const handle = cameraRef.current;
       if (e.shiftKey) {
         // Shift+left = orbit
-        buildOrbitControls.applyOrbit(dx, dy, handle.state, handle, invertRef.current);
+        orbitCamera(dx, dy, handle, invertRef.current);
       } else {
         // Left = pan (map convention)
-        buildOrbitControls.applyPan(dx, dy, handle.state, handle, invertRef.current);
+        panCamera(dx, dy, handle);
       }
       applyTransformDirect();
       store.updateCameraFromRef(handle);
@@ -165,7 +166,7 @@ export function PolyMapControls({
       const dy = e.clientY - rightPointer.y;
       rightPointer = { x: e.clientX, y: e.clientY };
       const handle = cameraRef.current;
-      buildOrbitControls.applyOrbit(dx, dy, handle.state, handle, invertRef.current);
+      orbitCamera(dx, dy, handle, invertRef.current);
       applyTransformDirect();
       store.updateCameraFromRef(handle);
       fireChange();

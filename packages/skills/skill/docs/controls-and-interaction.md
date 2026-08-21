@@ -32,7 +32,7 @@ Transform controls differ by renderer, and this catches people:
 | `invert` | `boolean \| number` | `false` | `true` reverses; a number scales sensitivity (negative inverts). |
 | `minZoom` / `maxZoom` | `number` | `0.1` / `10` | Zoom clamps. |
 | `dolly` | `boolean` | `false` | Wheel drives `distance` instead of `zoom`. |
-| `minDistance` / `maxDistance` | `number` | `0` / see note | Dolly clamps. **`maxDistance` defaults differ:** vanilla is `Infinity`, React/Vue is `5000`. Set it explicitly if it matters. |
+| `minDistance` / `maxDistance` | `number` | `0` / `Infinity` | Dolly clamps. Identical in all three renderers (three.js `OrbitControls` parity), for both orbit and map controls. |
 | `animate` | `false \| { speed?, axis?, pauseOnInteraction? }` | `false` | Autorotate. |
 
 `animate` fields: `speed` (default `0.3`, degrees per 60 Hz-equivalent frame ≈
