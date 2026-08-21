@@ -911,7 +911,7 @@ export function createPolycssPlayback(
   const profileVisible = new Uint8Array(packet.leafCount);
   profileVisible.fill(1);
   const profileVisibilityDirty = new Uint16Array(packet.leafCount);
-  const pagedInitial = packet.kind === "paged" ? options.pagedState?.initialPlayback : null;
+  const pagedInitial = packet.kind === "paged" ? options.pagedState?.canonicalPlayback : null;
   if (packet.kind === "inline") {
     for (let offset = 0; offset < packet.initial.shapes.length; offset += 3) {
       shapeTransforms[packet.initial.shapes[offset]] = packet.transforms[packet.initial.shapes[offset + 1]];
@@ -938,6 +938,7 @@ export function createPolycssPlayback(
   let currentForced = new Uint16Array(0);
   let sourceFrame = packet.initial.sourceFrame;
   let surfaceFrame = packet.initial.sourceFrame;
+  let pendingSurfaceFrame = 0;
   let appearanceIndex = packet.initial.appearance;
   let modelTransform = packet.kind === "inline" ? packet.transforms[packet.initial.modelTransform] : pagedInitial!.modelTransform;
   let tick = 0;
@@ -1189,16 +1190,19 @@ export function createPolycssPlayback(
     }
   };
 
-  const toggleVisibilitySegment = (segment: number, markDirty: boolean): void => {
+  const toggleVisibilitySegment = (segment: number, markDirty: boolean, toggle = true): void => {
     for (let cursor = visibility.sequentialOffsets[segment]; cursor < visibility.sequentialOffsets[segment + 1]; cursor += 1) {
       const index = visibility.sequentialFaces[cursor];
-      visible[index] ^= 1;
+      if (toggle) visible[index] ^= 1;
       if (markDirty) visibilityDirtyFlags[index] = 1;
     }
   };
 
   const applySurface = (nextFrame: number): void => {
     if (nextFrame === surfaceFrame) return;
+    const retrying = pendingSurfaceFrame === nextFrame;
+    invariant(pendingSurfaceFrame === 0 || retrying, "INVALID_SURFACE_PUBLICATION", "A failed prepared surface frame must be retried before another frame.");
+    pendingSurfaceFrame = nextFrame;
     const frameCount = playbackParameters.frameCount;
     const sequential = nextFrame === (surfaceFrame === frameCount ? 1 : surfaceFrame + 1);
     const jump = sequential ? undefined : light.jumps.get(`${surfaceFrame}>${nextFrame}`);
@@ -1206,14 +1210,12 @@ export function createPolycssPlayback(
     if (sequential) {
       const visibilityStart = visibility.sequentialOffsets[nextFrame - 1];
       const visibilityEnd = visibility.sequentialOffsets[nextFrame];
-      toggleVisibilitySegment(nextFrame - 1, false);
+      toggleVisibilitySegment(nextFrame - 1, false, !retrying);
       publishSurfaceRangeWithForced(light.sequentialFaces, light.sequentialStates, light.sequentialOffsets[nextFrame - 1], light.sequentialOffsets[nextFrame], nextFrame);
       if (options.diagnostics) options.diagnostics.surfaceVisibilityTargetVisits += visibilityEnd - visibilityStart;
       for (let cursor = visibilityStart; cursor < visibilityEnd; cursor += 1) writeVisibility(visibility.sequentialFaces[cursor], nextFrame);
     } else if (jump && visibilityJump) {
-      for (const index of visibilityJump) {
-        visible[index] ^= 1;
-      }
+      if (!retrying) for (const index of visibilityJump) visible[index] ^= 1;
       publishSurfaceRangeWithForced(jump.faces, jump.states, 0, jump.faces.length, nextFrame);
       if (options.diagnostics) options.diagnostics.surfaceVisibilityTargetVisits += visibilityJump.length;
       for (const index of visibilityJump) writeVisibility(index, nextFrame);
@@ -1222,7 +1224,7 @@ export function createPolycssPlayback(
       let frame = surfaceFrame;
       while (frame !== nextFrame) {
         frame = frame === frameCount ? 1 : frame + 1;
-        toggleVisibilitySegment(frame - 1, true);
+        toggleVisibilitySegment(frame - 1, true, !retrying);
         markSurfaceSegment(frame - 1);
       }
       for (const index of currentForced) {
@@ -1246,6 +1248,7 @@ export function createPolycssPlayback(
       for (let cursor = 0; cursor < visibilityDirtyCount; cursor += 1) writeVisibility(visibilityDirtyIndices[cursor], nextFrame);
     }
     surfaceFrame = nextFrame;
+    pendingSurfaceFrame = 0;
   };
 
   const stageFrame = (frame: number, includePagedVariants = true): PagedStateStage => {
@@ -1272,7 +1275,7 @@ export function createPolycssPlayback(
     return Object.freeze({ frame, playback: playbackStage, variants: includePagedVariants ? options.pagedState?.stage(frame, false).variants ?? null : null });
   };
 
-  const applyStage = (staged: PagedStateStage, publish: boolean, dirtyShapes?: Set<number>, dirtyLeaves?: Set<number>, dirtyProfileLeaves?: Set<number>): void => {
+  const applyStage = (staged: PagedStateStage, publish: boolean, dirtyShapes?: Set<number>, dirtyLeaves?: Set<number>, dirtyProfileLeaves?: Set<number>, advanceSourceFrame = true): void => {
     const next = staged.playback;
     invariant(next, "INVALID_PLAYBACK_PUBLICATION", `Prepared playback frame ${staged.frame} has no transform stage.`);
     if (publish && options.pagedState) options.pagedState.commit(packet.kind === "paged" ? staged : Object.freeze({ frame: staged.frame, playback: null, variants: staged.variants }));
@@ -1358,7 +1361,7 @@ export function createPolycssPlayback(
         }
       }
     }
-    sourceFrame = nextFrame;
+    if (advanceSourceFrame) sourceFrame = nextFrame;
   };
 
   const seekTo = (
@@ -1378,7 +1381,7 @@ export function createPolycssPlayback(
       let pagedStage: PagedStateStage | undefined = preflight;
       if (packet.kind === "paged") {
         invariant(pagedStage?.playback, "INVALID_PLAYBACK_PUBLICATION", `Paged playback frame ${target} has no staged transform row.`);
-        applyStage(pagedStage, false, dirtyShapes, dirtyLeaves, dirtyProfileLeaves);
+        applyStage(pagedStage, false, dirtyShapes, dirtyLeaves, dirtyProfileLeaves, false);
       } else {
         let next = sourceFrame;
         while (next !== target) {

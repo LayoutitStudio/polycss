@@ -2,16 +2,25 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import { auditSequentialPagedPublicationSources } from "../scripts/publication-allocation-guard.js";
+import { assertSingleCycleTraceDuration, publicationFrameAdvances, publicationPageBoundariesCrossed } from "../scripts/publication-trace-window.js";
 
 const pagedPath = new URL("../src/state/paged-state.ts", import.meta.url);
 const polycssPath = new URL("../src/state/polycss.ts", import.meta.url);
 const statePagesPath = new URL("../src/state-pages.ts", import.meta.url);
 const publicationReportPath = new URL("../scripts/check-publication-performance.js", import.meta.url);
-const [pagedSource, polycssSource, statePagesSource, publicationReportSource] = await Promise.all([
+const browserPath = new URL("../src/browser.ts", import.meta.url);
+const viewerPath = new URL("../viewer/viewer.js", import.meta.url);
+const diagnosticViewerPath = new URL("../scripts/publication-diagnostics-viewer.js", import.meta.url);
+const packagePath = new URL("../package.json", import.meta.url);
+const [pagedSource, polycssSource, statePagesSource, publicationReportSource, browserSource, viewerSource, diagnosticViewerSource, packageSource] = await Promise.all([
   readFile(pagedPath, "utf8"),
   readFile(polycssPath, "utf8"),
   readFile(statePagesPath, "utf8"),
   readFile(publicationReportPath, "utf8"),
+  readFile(browserPath, "utf8"),
+  readFile(viewerPath, "utf8"),
+  readFile(diagnosticViewerPath, "utf8"),
+  readFile(packagePath, "utf8"),
 ]);
 
 function audit(overrides = {}) {
@@ -139,11 +148,14 @@ test("sequential paged publication guard directly audits page-boundary validatio
 });
 
 test("publication report keeps timing and visit windows distinct and identity-bound", () => {
+  assert.match(publicationReportSource, /traceStartFrame: entry\.startFrame/u);
   assert.match(publicationReportSource, /traceEndFrame: entry\.endFrame/u);
-  assert.match(publicationReportSource, /const visitStartFrame = diagnostic\?\.startFrame \?\? 1/u);
+  assert.match(publicationReportSource, /const visitStartFrame = diagnostic\?\.startFrame \?\? entry\.startFrame/u);
   assert.match(publicationReportSource, /const visitEndFrame = diagnostic\?\.endFrame \?\? entry\.endFrame/u);
+  assert.match(publicationReportSource, /tracePageBoundariesCrossed: pageBoundariesCrossed\(entry\.startFrame, entry\.endFrame\)/u);
   assert.match(publicationReportSource, /visitPageBoundariesCrossed: pageBoundariesCrossed\(visitStartFrame, visitEndFrame\)/u);
-  assert.match(publicationReportSource, /startFrame: win\.domformatProof\.sourceFrame/u);
+  assert.match(publicationReportSource, /startFrame: frame\.contentWindow\.domformatProof\.sourceFrame/u);
+  assert.match(publicationReportSource, /startFrame: win\.domformatDiagnosticProof\.sourceFrame/u);
   assert.match(publicationReportSource, /minimumAdvances: framesPerPage \* 2/u);
   assert.match(publicationReportSource, /Raw visit totals from different endpoints must not be compared without normalization/u);
   assert.match(publicationReportSource, /runtimeGitRevision/u);
@@ -152,6 +164,36 @@ test("publication report keeps timing and visit windows distinct and identity-bo
   assert.match(publicationReportSource, /playbackBoundaryShapeVisits: boundaries \* 3/u);
   assert.match(publicationReportSource, /playbackBoundaryLeafVisits: boundaries \* \(workload\.leafCount \* 2 \+ \(workload\.denseTransformCount \+ workload\.sparseTransformCount\) \* 3\)/u);
   assert.match(publicationReportSource, /DOMFORMAT_CSSGRAPHICS_ROOT/u);
-  assert.match(publicationReportSource, /verifiedByTraceRun/u);
+  assert.match(publicationReportSource, /manifestVerified/u);
+  assert.doesNotMatch(publicationReportSource, /verifiedByTraceRun/u);
   assert.match(publicationReportSource, /8da516167305a1a653523ef3cad4e5c5ee11ac3b/u);
+});
+
+test("publication trace windows count one cyclic wrap and reject ambiguous multi-cycle durations", () => {
+  assert.equal(publicationFrameAdvances(1, 1_261, 1_440), 1_260);
+  assert.equal(publicationPageBoundariesCrossed(1, 1_261, 1_440, 60), 21);
+  assert.equal(publicationFrameAdvances(1_400, 100, 1_440), 140);
+  assert.equal(publicationPageBoundariesCrossed(1_400, 100, 1_440, 60), 2);
+  assert.doesNotThrow(() => assertSingleCycleTraceDuration(42_000, 1_440, 30));
+  assert.doesNotThrow(() => assertSingleCycleTraceDuration(45_000, 1_440, 30));
+  assert.throws(() => assertSingleCycleTraceDuration(45_001, 1_440, 30), (error) => error?.code === "PUBLICATION_TRACE_DURATION");
+});
+
+test("publication diagnostics stay outside production mount and shipped viewer surfaces", () => {
+  assert.doesNotMatch(browserSource, /PolycssPublicationDiagnostics|readonly diagnostics\?|\bdiagnostics,/u);
+  assert.doesNotMatch(viewerSource, /diagnostics|internal-conformance/u);
+  assert.match(diagnosticViewerSource, /createPolycssPublicationDiagnostics/u);
+  assert.match(diagnosticViewerSource, /mountConformanceDom/u);
+  assert.match(diagnosticViewerSource, /domformatDiagnosticProof/u);
+  assert.doesNotMatch(JSON.stringify(JSON.parse(packageSource).exports), /internal-conformance/u);
+});
+
+test("publication trace flushes marks, preserves raw evidence, and gates only page preparation", () => {
+  assert.match(publicationReportSource, /requestAnimationFrame\(\(\) => requestAnimationFrame/u);
+  assert.match(publicationReportSource, /performance\.mark\("domformat-publication:flush"\)/u);
+  assert.match(publicationReportSource, /await writeRawTrace\(rawTrace, events\);[\s\S]*summarizeTrace/u);
+  assert.match(publicationReportSource, /pagePreparationTaskMaxMs: maximumTaskMs/u);
+  assert.match(publicationReportSource, /mainThreadTaskMaxMs: null/u);
+  assert.doesNotMatch(publicationReportSource, /invariant\(trace\.mainThread\.maxTaskMs/u);
+  assert.match(publicationReportSource, /invariant\(trace\.pagePreparation\.maxTaskMs <= maximumTaskMs/u);
 });

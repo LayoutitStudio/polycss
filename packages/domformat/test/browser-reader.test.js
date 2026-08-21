@@ -929,15 +929,16 @@ test("sequential paged variants compare only their resident typed target range",
   resetPublicationDiagnostics(diagnostics);
   fake.writes.splice(0);
   pagedState.publishVariants(2);
-  assert.equal(diagnostics.variantCanonicalReconstructions, 1);
-  assert.equal(diagnostics.variantLogicalTargetVisits, targetCount);
+  assert.equal(diagnostics.variantCanonicalReconstructions, 0);
+  assert.equal(diagnostics.variantLogicalTargetVisits, 0);
   assert.equal(diagnostics.variantComparisonTargetVisits, targetCount);
   assert.deepEqual(fake.writes, []);
 
   resetPublicationDiagnostics(diagnostics);
   pagedState.publishVariants(1);
-  assert.equal(diagnostics.variantCanonicalReconstructions, 1);
-  assert.equal(diagnostics.variantComparisonTargetVisits, targetCount);
+  assert.equal(diagnostics.variantCanonicalReconstructions, 1, "page-start publication must retain an immutable complete stage");
+  assert.equal(diagnostics.variantLogicalTargetVisits, targetCount);
+  assert.equal(diagnostics.variantComparisonTargetVisits, targetCount, "page-start complete publication must compare the full published row");
   assert.deepEqual(nodes[target][1].classes, ["class-a"]);
   pagedState.destroy();
 });
@@ -971,7 +972,7 @@ test("paged playback mutates sparse canonical rows in place and visits every dec
   sparse.playback.advance();
   await sparse.pagedState.ensureFrame(3);
   sparse.playback.advance();
-  const sparseCanonical = sparse.pagedState.initialPlayback;
+  const sparseCanonical = sparse.pagedState.canonicalPlayback;
   const sparseShapeRow = sparseCanonical.shapeTransforms;
   const sparseVisibilityRow = sparseCanonical.shapeVisibility;
   const sparseLeafRow = sparseCanonical.leafTransforms;
@@ -981,10 +982,10 @@ test("paged playback mutates sparse canonical rows in place and visits every dec
   for (const property of ["shapeTargets", "shapeTransforms", "shapeVisibility", "leafTargets", "leafTransforms"]) assert.equal(Object.hasOwn(sparseStage.playback, property), false);
   withoutSequentialRangeCopies(() => sparse.playback.advance());
   assert.equal(sparse.playback.sourceFrame, 4);
-  assert.equal(sparse.pagedState.initialPlayback, sparseCanonical);
-  assert.equal(sparse.pagedState.initialPlayback.shapeTransforms, sparseShapeRow);
-  assert.equal(sparse.pagedState.initialPlayback.shapeVisibility, sparseVisibilityRow);
-  assert.equal(sparse.pagedState.initialPlayback.leafTransforms, sparseLeafRow);
+  assert.equal(sparse.pagedState.canonicalPlayback, sparseCanonical);
+  assert.equal(sparse.pagedState.canonicalPlayback.shapeTransforms, sparseShapeRow);
+  assert.equal(sparse.pagedState.canonicalPlayback.shapeVisibility, sparseVisibilityRow);
+  assert.equal(sparse.pagedState.canonicalPlayback.leafTransforms, sparseLeafRow);
   assert.equal(sparse.diagnostics.playbackCanonicalReconstructions, 0);
   assert.equal(sparse.diagnostics.playbackCanonicalShapeVisits, 1);
   assert.equal(sparse.diagnostics.playbackCanonicalLeafVisits, 0);
@@ -1027,7 +1028,7 @@ test("paged playback mutates sparse canonical rows in place and visits every dec
   assert.equal(dense.diagnostics.playbackPublicationLeafVisits, 2);
 
   dense.pagedState.commit(dense.pagedState.stage(8));
-  const wrapCanonical = dense.pagedState.initialPlayback;
+  const wrapCanonical = dense.pagedState.canonicalPlayback;
   const wrapShapeRow = wrapCanonical.shapeTransforms;
   const wrapLeafRow = wrapCanonical.leafTransforms;
   resetPublicationDiagnostics(dense.diagnostics);
@@ -1037,9 +1038,9 @@ test("paged playback mutates sparse canonical rows in place and visits every dec
   assert.equal(dense.diagnostics.playbackBoundaryShapeVisits, densePacket.shapeCount + wrap.playback.shapeEnd - wrap.playback.shapeStart);
   assert.equal(dense.diagnostics.playbackBoundaryLeafVisits, densePacket.leafCount + wrap.playback.leafEnd - wrap.playback.leafStart);
   dense.pagedState.commit(wrap);
-  assert.equal(dense.pagedState.initialPlayback, wrapCanonical);
-  assert.equal(dense.pagedState.initialPlayback.shapeTransforms, wrapShapeRow);
-  assert.equal(dense.pagedState.initialPlayback.leafTransforms, wrapLeafRow);
+  assert.equal(dense.pagedState.canonicalPlayback, wrapCanonical);
+  assert.equal(dense.pagedState.canonicalPlayback.shapeTransforms, wrapShapeRow);
+  assert.equal(dense.pagedState.canonicalPlayback.leafTransforms, wrapLeafRow);
   assert.equal(dense.diagnostics.playbackCanonicalReconstructions, 0);
   assert.equal(dense.diagnostics.playbackCanonicalShapeVisits, 2);
   assert.equal(dense.diagnostics.playbackCanonicalLeafVisits, 2);
@@ -1472,6 +1473,241 @@ test("document-wide page workspace ceiling rejects before fetching or materializ
   assert.equal(loads, 0);
   assert.equal(pagedState.residentResources.length, 0);
   pagedState.destroy();
+});
+
+test("paged residency accounting rejects before eviction or fetch", async () => {
+  const built = buildDom(await syntheticEvictingPagedVariantsInput());
+  const all = builtExternalResources(built);
+  const fake = fakeBrowserDocument();
+  const mounted = { byId: new Map(built.document.tree.nodes.map((node) => [node.id, new FakeElement(fake.document, node.name)])) };
+  const limits = { ...DEFAULT_LIMITS };
+  const calls = [];
+  const pagedState = createPolycssPagedState(built.document, mounted, limits, async (record) => {
+    calls.push(record.id);
+    return all.get(record.id);
+  });
+  await pagedState.prepareInitial();
+  await pagedState.ensureFrame(7);
+  const before = pagedState.residentResources;
+  const callsBefore = calls.length;
+  limits.maxAggregateDecodedBytes = 1;
+  await assert.rejects(pagedState.ensureFrame(3), errorCode("STATE_PAGE_RESIDENCY_LIMIT"));
+  assert.deepEqual(pagedState.residentResources, before);
+  assert.equal(calls.length, callsBefore);
+  limits.maxAggregateDecodedBytes = DEFAULT_LIMITS.maxAggregateDecodedBytes;
+  await pagedState.ensureFrame(3);
+  pagedState.destroy();
+});
+
+test("nonuniform complete publication preflights materialization and projected live bytes atomically", async () => {
+  const built = buildDom(await syntheticPagedPlaybackChangesInput({ variants: true }));
+  const all = builtExternalResources(built);
+  const fake = fakeBrowserDocument();
+  const mounted = { byId: new Map(built.document.tree.nodes.map((node) => {
+    const element = new FakeElement(fake.document, node.name);
+    Object.assign(element.style, node.styles ?? {});
+    for (const className of node.classes) element.classList.add(className);
+    return [node.id, element];
+  })) };
+  const limits = { ...DEFAULT_LIMITS };
+  const pagedState = createPolycssPagedState(built.document, mounted, limits, async (record) => all.get(record.id));
+  await pagedState.prepareInitial();
+  await pagedState.ensureFrame(4);
+  const packet = built.document.state.channels.find((channel) => channel.codec === "polycss-paged-playback@0").data.packet;
+  assert.ok(new Set(packet.pages.map((page) => page.materializedByteLength)).size > 1);
+
+  limits.maxAggregateDecodedBytes = 1;
+  const originalArrayFrom = Array.from;
+  let materialized = false;
+  let stageError;
+  Array.from = () => { materialized = true; throw new Error("complete row materialized before workspace admission"); };
+  try { pagedState.stage(4); } catch (error) { stageError = error; } finally { Array.from = originalArrayFrom; }
+  assert.throws(() => { throw stageError; }, errorCode("STATE_PAGE_RESIDENCY_LIMIT"));
+  assert.equal(materialized, false);
+
+  limits.maxAggregateDecodedBytes = DEFAULT_LIMITS.maxAggregateDecodedBytes;
+  const staged = pagedState.stage(4);
+  assert.equal(staged.playback.kind, "complete");
+  assert.equal(staged.variants.kind, "complete");
+  const canonical = pagedState.canonicalPlayback;
+  const shapeTransforms = [...canonical.shapeTransforms];
+  const shapeVisibility = [...canonical.shapeVisibility];
+  const leafTransforms = [...canonical.leafTransforms];
+  const classes = [...mounted.byId.get("synthetic/leaf").classes];
+  fake.writes.splice(0);
+  limits.maxAggregateDecodedBytes = 1;
+  assert.throws(() => pagedState.commit(staged), errorCode("STATE_PAGE_RESIDENCY_LIMIT"));
+  assert.equal(pagedState.frame, 1);
+  assert.equal(pagedState.canonicalPlayback, canonical);
+  assert.deepEqual(canonical.shapeTransforms, shapeTransforms);
+  assert.deepEqual([...canonical.shapeVisibility], shapeVisibility);
+  assert.deepEqual(canonical.leafTransforms, leafTransforms);
+  assert.deepEqual(mounted.byId.get("synthetic/leaf").classes, classes);
+  assert.deepEqual(fake.writes, []);
+
+  limits.maxAggregateDecodedBytes = DEFAULT_LIMITS.maxAggregateDecodedBytes;
+  assert.throws(() => pagedState.commit(staged), errorCode("INVALID_PLAYBACK_PUBLICATION"));
+  assert.equal(pagedState.commit(pagedState.stage(4)), 4);
+  pagedState.destroy();
+});
+
+test("failed paged seek keeps its source frame retryable until commit succeeds", async () => {
+  const built = buildDom(await syntheticPagedPlaybackChangesInput({ variants: false }));
+  const all = builtExternalResources(built);
+  const fake = fakeBrowserDocument();
+  const mounted = { byId: new Map(built.document.tree.nodes.map((node) => {
+    const element = new FakeElement(fake.document, node.name);
+    Object.assign(element.style, node.styles ?? {});
+    for (const className of node.classes) element.classList.add(className);
+    return [node.id, element];
+  })) };
+  const limits = { ...DEFAULT_LIMITS };
+  const pagedState = createPolycssPagedState(built.document, mounted, limits, async (record) => all.get(record.id));
+  await pagedState.prepareInitial();
+  await pagedState.ensureFrame(4);
+  let failCommit = false;
+  const playback = createPolycssPlayback(materializePolycssState(built.document.state), built.document.bindings, mounted, {
+    publishAppearance() {},
+    pagedState,
+    assertPagedFrameReady: (frame) => pagedState.assertFrameReady(frame),
+    compositorTiming: {
+      before(kind) {
+        if (kind === "seek" && failCommit) {
+          limits.maxAggregateDecodedBytes = 1;
+          failCommit = false;
+        }
+      },
+      after() {},
+    },
+  });
+  playback.publishInitial();
+  const leaf = mounted.byId.get("synthetic/leaf");
+  const initialTransform = leaf.style.transform;
+  fake.writes.splice(0);
+  failCommit = true;
+
+  assert.throws(() => playback.seek(4), errorCode("STATE_PAGE_RESIDENCY_LIMIT"));
+  assert.equal(playback.sourceFrame, 1);
+  assert.equal(pagedState.frame, 1);
+  assert.equal(leaf.style.transform, initialTransform);
+  assert.deepEqual(fake.writes, []);
+
+  limits.maxAggregateDecodedBytes = DEFAULT_LIMITS.maxAggregateDecodedBytes;
+  assert.equal(playback.seek(4), 4);
+  assert.equal(playback.sourceFrame, 4);
+  assert.equal(pagedState.frame, 4);
+  assert.equal(leaf.style.transform, pagedState.canonicalPlayback.leafTransforms[0]);
+  pagedState.destroy();
+});
+
+test("nonuniform runtime playback pages reject a larger next live row before canonical mutation", async () => {
+  const shapeCount = 2_048;
+  const identity = "matrix3d(1,0,0,0,0,1,0,0,0,0,1,0,1,0,0,1)";
+  const components = new Array(16).fill("123456.789063");
+  components[3] = "0";
+  components[7] = "0";
+  components[11] = "0";
+  components[15] = "1";
+  const largeTransform = `matrix3d(${components.join(",")})`;
+  const shapeIndices = new Array(shapeCount).fill(1);
+  const shapeTargets = Array.from({ length: shapeCount }, (_, index) => index);
+  const visibilityBits = Buffer.from(new Uint8Array(shapeCount / 8).fill(0xff)).toString("base64");
+  const page = (frame, transform, changed) => {
+    const changeCount = changed ? shapeCount : 0;
+    const payload = {
+      version: 0,
+      codec: "polycss-paged-playback-page@0",
+      channel: "playback",
+      startFrame: frame,
+      endFrame: frame,
+      transforms: [null, transform],
+      keyframe: {
+        appearance: 0,
+        modelTransform: 0,
+        shapeTransformIndicesBase64: base64Integers(shapeIndices, 4),
+        shapeVisibilityBitsBase64: visibilityBits,
+        leafTransformIndicesBase64: "",
+      },
+      sequential: {
+        appearanceIndicesBase64: base64Integers([0], 2),
+        modelTransformIndicesBase64: base64Integers([0xffffffff], 4),
+        shapeOffsetsBase64: base64Integers([0, changeCount], 4),
+        shapeTargetIndicesBase64: base64Integers(changed ? shapeTargets : [], 4),
+        shapeTransformIndicesBase64: base64Integers(changed ? shapeIndices : [], 4),
+        shapeVisibilityBase64: base64Integers(changed ? new Array(shapeCount).fill(1) : [], 1),
+        leafOffsetsBase64: base64Integers([0, 0], 4),
+        leafTargetIndicesBase64: "",
+        leafTransformIndicesBase64: "",
+      },
+    };
+    const bytes = encodeCanonicalJson(payload);
+    const transformBytes = 16 + transform.length * 2;
+    const materializedByteLength = transformBytes + shapeCount * 5 + changeCount * 9 + 22;
+    return { bytes, descriptor: { resource: `page-${frame}`, startFrame: frame, endFrame: frame, transformCount: 2, shapeChangeCount: changeCount, leafChangeCount: 0, materializedByteLength } };
+  };
+  const pages = [page(1, identity, false), page(2, largeTransform, true)];
+  assert.notEqual(pages[0].descriptor.materializedByteLength, pages[1].descriptor.materializedByteLength);
+  const document = {
+    state: { channels: [{ id: "playback", codec: "polycss-paged-playback@0", data: { packet: {
+      shapeCount,
+      leafCount: 0,
+      appearances: [["default", 0, 0]],
+      initial: { sourceFrame: 1, appearance: 0 },
+      pages: pages.map(({ descriptor }) => descriptor),
+      lookaheadPages: 1,
+      maxResidentPages: 2,
+    } } }] },
+    bindings: { channels: [{
+      id: "playback",
+      state: "playback",
+      interpreter: "polycss-paged-playback@0",
+      parameters: { baseSceneTransform: identity },
+      targets: { model: "model", shapes: shapeTargets.map((index) => `shape-${index}`), leaves: [] },
+    }] },
+    resources: { resources: pages.map(({ bytes, descriptor }) => ({ id: descriptor.resource, kind: "state-page", decodedByteLength: bytes.length })) },
+  };
+  const bytesByResource = new Map(pages.map(({ bytes, descriptor }) => [descriptor.resource, bytes]));
+  const create = (limit) => {
+    const fake = fakeBrowserDocument();
+    const model = new FakeElement(fake.document, "main");
+    model.style.transform = identity;
+    const entries = [["model", model]];
+    for (const index of shapeTargets) {
+      const shape = new FakeElement(fake.document, "i");
+      shape.style.transform = identity;
+      shape.style.visibility = "visible";
+      entries.push([`shape-${index}`, shape]);
+    }
+    const pagedState = createPolycssPagedState(document, { byId: new Map(entries) }, { ...DEFAULT_LIMITS, maxAggregateDecodedBytes: limit }, async (record) => bytesByResource.get(record.id));
+    return { fake, pagedState };
+  };
+  const prepare = async (runtime) => {
+    await runtime.prepareInitial();
+    await runtime.ensureFrame(2);
+    return runtime.stage(2);
+  };
+
+  const baseline = create(DEFAULT_LIMITS.maxAggregateDecodedBytes);
+  const baselineStage = await prepare(baseline.pagedState);
+  assert.equal(baselineStage.playback.kind, "range");
+  const admittedPeak = baseline.pagedState.peakDocumentStateBytes;
+  baseline.pagedState.commit(baselineStage);
+  const projectedPeak = baseline.pagedState.peakDocumentStateBytes;
+  assert.ok(projectedPeak > admittedPeak);
+  baseline.pagedState.destroy();
+
+  const rejected = create(projectedPeak - 1);
+  const rejectedStage = await prepare(rejected.pagedState);
+  const canonical = rejected.pagedState.canonicalPlayback;
+  const shapeRow = canonical.shapeTransforms;
+  rejected.fake.writes.splice(0);
+  assert.throws(() => rejected.pagedState.commit(rejectedStage), errorCode("STATE_PAGE_RESIDENCY_LIMIT"));
+  assert.equal(rejected.pagedState.frame, 1);
+  assert.equal(rejected.pagedState.canonicalPlayback, canonical);
+  assert.equal(canonical.shapeTransforms, shapeRow);
+  assert.equal(canonical.shapeTransforms[0], identity);
+  assert.deepEqual(rejected.fake.writes, []);
+  rejected.pagedState.destroy();
 });
 
 test("already-aborted page requests reject even when the complete target window is resident", async () => {

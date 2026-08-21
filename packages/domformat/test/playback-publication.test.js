@@ -488,6 +488,48 @@ test("playback defers hidden transforms and flushes the latest value before reve
     ]);
   });
 
+  test("surface publication retry does not invert an already-staged visibility transition", () => {
+    const { leaves, playback, writes } = createFixture({
+      initialVisibleBits: 2,
+      visibilityOffsets: [0, 0, 1, 1, 1],
+      lightingOffsets: [0, 0, 1, 1, 1],
+      lightingFaces: [0],
+      lightingStates: [1],
+      surfaceFaces: [
+        { stateOffset: 0, stateCount: 2 },
+        { stateOffset: 2, stateCount: 1 },
+      ],
+      surfaceSourceFrames: [0, 1, 0],
+      surfacePositions: ["0px", "-16px", "0px"],
+    });
+    const style = { ...leaves[0].style };
+    let failAddressWrite = true;
+    leaves[0].style = new Proxy(style, {
+      set(styles, property, value) {
+        const outcome = failAddressWrite && property === "backgroundPositionY" ? "throw" : "set";
+        writes.push(["leaf:0", String(property), String(value), outcome]);
+        if (outcome === "throw") {
+          failAddressWrite = false;
+          throw new Error("injected address failure");
+        }
+        styles[property] = value;
+        return true;
+      },
+    });
+    writes.splice(0);
+
+    assert.throws(() => playback.applySurfaceFrame(2), /injected address failure/u);
+    assert.deepEqual(writes, [["leaf:0", "backgroundPositionY", "-16px", "throw"]]);
+    writes.splice(0);
+
+    assert.equal(playback.applySurfaceFrame(2), 2);
+    assert.deepEqual(writes, [
+      ["leaf:0", "backgroundPositionY", "-16px", "set"],
+      ["leaf:0", "visibility", "visible", "set"],
+    ]);
+    assert.equal(leaves[0].style.visibility, "visible");
+  });
+
   test("skipped variant frames coalesce each touched target to one final class write", () => {
     const { leaves, playback, writes } = createFixture({ variants: true, initialVisibleBits: 3 });
     const identity = leaves[0];
@@ -551,6 +593,46 @@ test("playback defers hidden transforms and flushes the latest value before reve
     assert.deepEqual(writes.filter(([id, property]) => id === "leaf:0" && property === "backgroundPositionY"), [
       ["leaf:0", "backgroundPositionY", "-16px"],
     ]);
+  });
+
+  test("randomized forced-visible histories match a fresh canonical surface publication", () => {
+    const fixture = () => createFixture({
+      initialVisibleBits: 2,
+      visibilityOffsets: [0, 1, 1, 2, 2],
+      lightingOffsets: [0, 1, 1, 3, 4],
+      lightingFaces: [1, 0, 1, 0],
+      lightingStates: [0, 2, 1, 3],
+      surfaceFaces: [
+        { stateOffset: 0, stateCount: 4 },
+        { stateOffset: 4, stateCount: 2 },
+      ],
+      surfaceSourceFrames: [0, 1, 2, 3, 0, 2],
+      surfacePositions: ["0px", "-16px", "-32px", "-48px", "0px", "-16px"],
+    });
+    const actual = fixture();
+    let frame = 1;
+    let forced = [];
+    let random = 0x5eed1234;
+    for (let step = 0; step < 128; step += 1) {
+      random = (Math.imul(random, 1664525) + 1013904223) >>> 0;
+      if ((random & 1) === 0) {
+        frame = (random >>> 8) % 4 + 1;
+        actual.playback.applySurfaceFrame(frame);
+      } else {
+        forced = (random & 2) === 0 ? [] : [0];
+        actual.playback.forceVisible(forced);
+      }
+
+      const expected = fixture();
+      expected.playback.forceVisible(forced);
+      expected.playback.applySurfaceFrame(frame);
+      for (let leaf = 0; leaf < actual.leaves.length; leaf += 1) {
+        assert.equal(actual.leaves[leaf].style.visibility, expected.leaves[leaf].style.visibility, `step ${step} leaf ${leaf} visibility`);
+        if (actual.leaves[leaf].style.visibility === "visible") {
+          assert.equal(actual.leaves[leaf].style.backgroundPositionY, expected.leaves[leaf].style.backgroundPositionY, `step ${step} leaf ${leaf} address`);
+        }
+      }
+    }
   });
 
   test("forced reveal flushes a deferred address after its transform and before visibility", () => {

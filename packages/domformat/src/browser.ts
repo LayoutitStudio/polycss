@@ -17,7 +17,7 @@ import { createPolycssEffects } from "./state/effects.js";
 import { createPolycssInteraction } from "./state/interaction.js";
 import { createPolycssPlayback, materializePolycssState } from "./state/polycss.js";
 import { createPolycssOrbitInput, type PolycssOrbitInput } from "./state/orbit.js";
-import { createPolycssPagedState, type PolycssPagedState, type PolycssPublicationDiagnostics, type StatePageBytesLoader } from "./state/paged-state.js";
+import { createPolycssPagedState, type PolycssPagedState, type StatePageBytesLoader } from "./state/paged-state.js";
 import { createPolycssCompositorTiming, type PolycssCompositorTiming } from "./state/compositor-timing.js";
 import { createStaticPresentation } from "./state/presentation.js";
 import type {
@@ -840,7 +840,6 @@ export async function mountDom(
   host: HTMLElement,
   options: DomMountOptions = {},
 ): Promise<DomMountRuntime> {
-  const diagnostics = (options as DomMountOptions & { readonly diagnostics?: PolycssPublicationDiagnostics }).diagnostics;
   const lifecycle = createLifecycle(options.onLifecyclePhase);
   const owner: MountRuntimeOwner = {
     lifecycle,
@@ -951,7 +950,6 @@ export async function mountDom(
     owner.pagedState = createPolycssPagedState(packageDocument, mounted, mountValidation.limits, validated.loadStatePage, {
       boundTargets: mountedTargets,
       onLateFailure: () => cleanupMount(owner),
-      diagnostics,
     });
     await owner.pagedState?.prepareInitial(options.signal);
     owner.compositorTiming = createPolycssCompositorTiming(packageDocument.state, packageDocument.bindings, materialized, mounted, { boundTargets: mountedTargets });
@@ -962,7 +960,6 @@ export async function mountDom(
       pagedState: owner.pagedState,
       assertPagedFrameReady: (frame) => owner.pagedState?.assertFrameReady(frame),
       compositorTiming: owner.compositorTiming,
-      diagnostics,
     });
     owner.runtimeState = Object.freeze({
       bindings: packageDocument.bindings,
