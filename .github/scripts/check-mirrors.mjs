@@ -27,6 +27,24 @@
  *   unrelated one-lane edits mark both lanes touched and pass. Re-pinning the
  *   lock cannot launder either check, because the lock is not consulted here.
  *
+ * - SET STRUCTURE: lane parity can only compare files that exist and are
+ *   declared, so it is blind to the two ways a mirror pair is broken WITHOUT a
+ *   one-sided edit — adding a new module to one lane (no counterpart exists, so
+ *   no pair is formed) and deleting a counterpart (a deletion reads as a
+ *   "change" in `git diff --name-only`, so both lanes look touched). The
+ *   structure check runs off the FILESYSTEM, before the lock and before the
+ *   base ref, and is therefore immune to both: every file under a set's
+ *   `laneRoots` must be declared, every declared file must exist, and every
+ *   pair key must be present in every one of the set's `pairLanes`. It also
+ *   validates the declaration itself, so a `pairLanes` naming a lane the set
+ *   has no files in fails loudly instead of silently disabling pairing.
+ *
+ * What lane parity does NOT prove: that two changes are the SAME change. Both
+ * sides moving satisfies it even when the edits are unrelated. The mechanical
+ * part — both sides changed, both still exist, neither side is a pure deletion
+ * or a one-lane addition — is enforced here; semantic equivalence is a review
+ * responsibility. See AGENTS.md → "Mirror enforcement".
+ *
  *   Intentional per-renderer divergence is declared in
  *   .github/mirror-waivers.json, which `--update` never writes. Each waiver
  *   authorizes ONE reviewed divergence: it must differ from the entry at the
@@ -44,8 +62,14 @@
  */
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import {
+  existsSync,
+  readFileSync,
+  readdirSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
+import { dirname, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -121,6 +145,21 @@ export const IDENTICAL_GROUPS = [
  * Semantically-mirrored sets whose copies are structurally different.
  * Hashes are pinned in mirror-lock.json; any edit requires --update.
  * Lane parity (below) is what proves the edit reached every renderer.
+ *
+ * Set fields:
+ *  - `files`      the mirrored members: lock-pinned, lane-parity checked, and
+ *                 counterpart-checked across `pairLanes`.
+ *  - `pairLanes`  the lanes whose same-named files are true per-file
+ *                 counterparts. Declared, never inferred (see derivePairs).
+ *  - `laneRoots`  directories the set OWNS. Every non-test source file under
+ *                 them must be declared, so a new module cannot join a
+ *                 mirrored directory in one lane without being noticed.
+ *  - `rootMatch`  optional basename filter for a `laneRoots` entry that also
+ *                 holds unrelated files.
+ *  - `unmirrored` explicit, annotated exemptions from the two structural
+ *                 rules: a file under a mirrored root that is genuinely
+ *                 lane-local and has no counterpart. Each entry is debt and
+ *                 must name a reason.
  */
 export const SYNC_SETS = [
   {
@@ -129,11 +168,17 @@ export const SYNC_SETS = [
     // (plan.ts, strategy.ts, renderPolygons.ts), so its same-named members are
     // not per-file counterparts. See derivePairs.
     pairLanes: ["react", "vue"],
+    laneRoots: [
+      "packages/polycss/src/render/atlas",
+      "packages/react/src/scene/atlas",
+      "packages/vue/src/scene/atlas",
+    ],
     hint:
       "The canvas atlas pipeline is copied per renderer (AGENTS.md). A change " +
       "to any of these files must be mirrored into the other two renderers.",
     files: [
       "packages/polycss/src/render/atlas/emit.ts",
+      "packages/polycss/src/render/atlas/index.ts",
       "packages/polycss/src/render/atlas/packing.ts",
       "packages/polycss/src/render/atlas/paintDefaults.ts",
       "packages/polycss/src/render/atlas/plan.ts",
@@ -142,26 +187,49 @@ export const SYNC_SETS = [
       "packages/polycss/src/render/atlas/solidTrianglePlan.ts",
       "packages/polycss/src/render/atlas/stableTriangle.ts",
       "packages/polycss/src/render/atlas/strategy.ts",
+      "packages/polycss/src/render/atlas/types.ts",
+      "packages/react/src/scene/atlas/atlasPoly.tsx",
+      "packages/react/src/scene/atlas/borderShape.tsx",
       "packages/react/src/scene/atlas/buildAtlasPages.ts",
+      "packages/react/src/scene/atlas/cornerShapeSolid.tsx",
       "packages/react/src/scene/atlas/detection.ts",
       "packages/react/src/scene/atlas/filterPlans.ts",
+      "packages/react/src/scene/atlas/index.tsx",
       "packages/react/src/scene/atlas/packing.ts",
       "packages/react/src/scene/atlas/paintDefaults.ts",
+      "packages/react/src/scene/atlas/projectiveSolid.tsx",
       "packages/react/src/scene/atlas/solidTriangleStyle.ts",
       "packages/react/src/scene/atlas/stableTriangleDom.ts",
+      "packages/react/src/scene/atlas/triangle.tsx",
+      "packages/react/src/scene/atlas/useTextureAtlas.ts",
+      "packages/vue/src/scene/atlas/atlasPoly.ts",
+      "packages/vue/src/scene/atlas/borderShape.ts",
       "packages/vue/src/scene/atlas/buildAtlasPages.ts",
+      "packages/vue/src/scene/atlas/cornerShapeSolid.ts",
       "packages/vue/src/scene/atlas/detection.ts",
       "packages/vue/src/scene/atlas/filterPlans.ts",
+      "packages/vue/src/scene/atlas/index.ts",
       "packages/vue/src/scene/atlas/packing.ts",
       "packages/vue/src/scene/atlas/paintDefaults.ts",
+      "packages/vue/src/scene/atlas/projectiveSolid.ts",
       "packages/vue/src/scene/atlas/solidTriangleStyle.ts",
       "packages/vue/src/scene/atlas/stableTriangleDom.ts",
+      "packages/vue/src/scene/atlas/triangle.ts",
+      "packages/vue/src/scene/atlas/useTextureAtlas.ts",
     ],
   },
   {
     name: "voxel-renderer",
     // One file per renderer, same name, genuine per-file copies.
     pairLanes: ["polycss", "react", "vue"],
+    // The voxel renderer shares its directory with unrelated modules, so the
+    // roots are filtered to the `voxel*` basenames the set owns.
+    laneRoots: [
+      "packages/polycss/src/render",
+      "packages/react/src/scene",
+      "packages/vue/src/scene",
+    ],
+    rootMatch: /^voxel/,
     hint:
       "The direct voxel renderer is copied per renderer (AGENTS.md). A change " +
       "to one copy must land in the other two in the same PR.",
@@ -180,6 +248,10 @@ export const SYNC_SETS = [
     name: "mesh-modules",
     // Exact 1:1 hook↔composable counterparts, differing only in extension.
     pairLanes: ["react", "vue"],
+    laneRoots: [
+      "packages/react/src/scene/mesh",
+      "packages/vue/src/scene/mesh",
+    ],
     hint:
       "The React hooks and Vue composables under scene/mesh/ are mirrored " +
       "pairs (AGENTS.md → Cross-package discipline). They hold the shadow " +
@@ -208,6 +280,11 @@ export const SYNC_SETS = [
     name: "base-styles",
     // One styles.ts per renderer, same name, genuine per-file copies.
     pairLanes: ["polycss", "react", "vue"],
+    laneRoots: [
+      "packages/polycss/src/styles",
+      "packages/react/src/styles",
+      "packages/vue/src/styles",
+    ],
     hint:
       "The injected .polycss-scene/.polycss-camera base styles exist per " +
       "renderer. CSS rules must cover every emitted tag for both lighting " +
@@ -217,6 +294,14 @@ export const SYNC_SETS = [
       "packages/react/src/styles/styles.ts",
       "packages/vue/src/styles/styles.ts",
     ],
+    unmirrored: {
+      "packages/react/src/styles/index.ts":
+        "Framework-local barrel. The vanilla lane has no styles/ barrel — it " +
+        "re-exports styles.ts from its own api surface — so there is no third " +
+        "counterpart to pair this against.",
+      "packages/vue/src/styles/index.ts":
+        "Framework-local barrel; same reason as the React one.",
+    },
   },
 ];
 
@@ -249,6 +334,208 @@ export function checkIdenticalGroups(root, groups) {
         reason:
           `copies diverged from ${reference.file}: ` +
           diverged.map((d) => d.file).join(", "),
+      });
+    }
+  }
+  return failures;
+}
+
+/** Source extensions a mirrored root can hold. */
+const MIRROR_SOURCE_RE = /\.(ts|tsx|mts|cts|mjs|cjs|js)$/;
+
+/**
+ * Co-located tests are excluded from discovery. Their names diverge across
+ * lanes on purpose (`colorResolver.behavior.test.tsx` ↔ `colorResolver.test.ts`)
+ * and mirroring test edits file-for-file produces false failures on ordinary
+ * per-lane coverage work. Stated as a limitation in AGENTS.md rather than
+ * papered over: a test-only file added to one lane is not caught here.
+ */
+export const isMirrorTestFile = (file) =>
+  /\.(test|spec)\.[^.]+$/.test(file.split("/").pop());
+
+const DISCOVERY_SKIPPED_DIRS = new Set([
+  "node_modules",
+  "dist",
+  ".generated",
+  "coverage",
+  "build",
+]);
+
+function* walkSourceFiles(dir) {
+  for (const entry of readdirSync(dir)) {
+    if (DISCOVERY_SKIPPED_DIRS.has(entry)) continue;
+    const abs = resolve(dir, entry);
+    if (statSync(abs).isDirectory()) yield* walkSourceFiles(abs);
+    else if (MIRROR_SOURCE_RE.test(entry)) yield abs;
+  }
+}
+
+/**
+ * Non-test source files that live under a set's `laneRoots`. This is the only
+ * part of the check that reads the tree instead of the declaration, and it is
+ * what makes a one-lane ADDITION visible: a brand-new module has no
+ * counterpart, so no pair exists to compare, and lane parity cannot see it.
+ */
+export function listLaneRootFiles(root, set) {
+  const found = [];
+  const missingRoots = [];
+  for (const laneRoot of set.laneRoots ?? []) {
+    const abs = resolve(root, laneRoot);
+    if (!existsSync(abs) || !statSync(abs).isDirectory()) {
+      missingRoots.push(laneRoot);
+      continue;
+    }
+    for (const file of walkSourceFiles(abs)) {
+      const rel = relative(root, file).split(sep).join("/");
+      const base = rel.split("/").pop();
+      if (isMirrorTestFile(rel)) continue;
+      if (set.rootMatch && !set.rootMatch.test(base)) continue;
+      found.push(rel);
+    }
+  }
+  return { found: found.sort(), missingRoots };
+}
+
+/**
+ * Validates a set's DECLARATION against the tree, before the lock and before
+ * any base ref is resolved. Three bypasses close here:
+ *
+ *  - a declared file that no longer exists. `--update` would otherwise pin
+ *    `"<missing>"` and the set would pass forever, so deleting a counterpart
+ *    while editing the other lane laundered cleanly through a re-pin.
+ *  - a file under a mirrored root that is declared nowhere. A new module added
+ *    to one lane forms no pair, so lane parity never sees it.
+ *  - a `pairLanes` that does not match the files in the set. A lane named
+ *    there but owning no file silently contributes nothing to pairing, so a
+ *    typo disables the strongest check in the script without any signal.
+ *
+ * `unmirrored` is the escape hatch, and it is held to the same standard: an
+ * exemption must name a reason and must still point at a real file, so the
+ * list cannot accumulate entries for files that no longer exist.
+ */
+export function checkSetDeclarations(root, sets) {
+  const failures = [];
+  for (const set of sets) {
+    const add = (reason) => failures.push({ set: set.name, reason });
+    const files = set.files ?? [];
+    const unmirrored = set.unmirrored ?? {};
+
+    for (const file of files) {
+      if (!existsSync(resolve(root, file))) {
+        add(
+          `declared member "${file}" does not exist. A mirrored file may not ` +
+            "be deleted from one lane alone — remove every lane's copy and " +
+            "the whole declaration, or restore it.",
+        );
+      }
+      if (!resolveLane(file)) {
+        add(
+          `declared member "${file}" is not inside a renderer lane ` +
+            `(${RENDERER_LANES.join(", ")}), so it can never be lane-checked`,
+        );
+      }
+    }
+
+    for (const [file, reason] of Object.entries(unmirrored)) {
+      if (typeof reason !== "string" || reason.trim().length === 0) {
+        add(`unmirrored exemption "${file}" has no reason`);
+      }
+      if (files.includes(file)) {
+        add(`"${file}" is declared both as a mirrored member and as unmirrored`);
+      }
+      if (!existsSync(resolve(root, file))) {
+        add(
+          `unmirrored exemption "${file}" no longer exists; delete the stale ` +
+            "entry so the exemption list stays honest",
+        );
+      }
+    }
+
+    if (set.pairLanes) {
+      const unknown = set.pairLanes.filter(
+        (lane) => !RENDERER_LANES.includes(lane),
+      );
+      if (unknown.length > 0) {
+        add(
+          `declares unknown pair lane(s) ${unknown.join(", ")} ` +
+            `(known lanes: ${RENDERER_LANES.join(", ")})`,
+        );
+      }
+      if (set.pairLanes.length < 2) {
+        add('declares fewer than two "pairLanes", so nothing can be paired');
+      }
+      const byLane = partitionLanes(files);
+      for (const lane of set.pairLanes) {
+        if (!RENDERER_LANES.includes(lane)) continue;
+        if ((byLane.get(lane) ?? []).length === 0) {
+          add(
+            `declares pair lane "${lane}" but no file in the set belongs to ` +
+              "it, so that lane pairs nothing. Fix the lane list or add its " +
+              "files.",
+          );
+        }
+      }
+    }
+
+    const { found, missingRoots } = listLaneRootFiles(root, set);
+    for (const laneRoot of missingRoots) {
+      add(`declares mirror root "${laneRoot}", which is not a directory`);
+    }
+    const declared = new Set([...files, ...Object.keys(unmirrored)]);
+    for (const file of found) {
+      if (declared.has(file)) continue;
+      add(
+        `"${file}" lives under a mirrored root but is declared nowhere. Add ` +
+          "it (and its counterpart in every pair lane) to the set's `files`, " +
+          "or declare it in `unmirrored` with the reason it is lane-local.",
+      );
+    }
+  }
+  return failures;
+}
+
+/**
+ * Every pair key must be present in EVERY one of a set's `pairLanes`. Lane
+ * parity compares a pair only when both members are declared, so a key that
+ * exists in one lane and not the other is invisible to it — which is exactly
+ * the shape of a one-lane addition, a one-lane rename, and a counterpart
+ * deletion that was tidied out of the declaration.
+ */
+export function checkCounterparts(root, sets) {
+  const failures = [];
+  for (const set of sets) {
+    const pairLanes = (set.pairLanes ?? []).filter((lane) =>
+      RENDERER_LANES.includes(lane),
+    );
+    if (pairLanes.length < 2) continue;
+    const lanes = new Set(pairLanes);
+
+    const byKey = new Map();
+    for (const file of set.files ?? []) {
+      const lane = resolveLane(file);
+      if (!lane || !lanes.has(lane)) continue;
+      const key = pairKey(file);
+      if (!byKey.has(key)) byKey.set(key, new Map());
+      const laneMap = byKey.get(key);
+      if (!laneMap.has(lane)) laneMap.set(lane, []);
+      laneMap.get(lane).push(file);
+    }
+
+    for (const [key, laneMap] of byKey) {
+      const missing = pairLanes.filter((lane) => !laneMap.has(lane));
+      if (missing.length === 0) continue;
+      failures.push({
+        set: set.name,
+        key,
+        present: [...laneMap.keys()],
+        missing,
+        files: [...laneMap.values()].flat(),
+        hint: set.hint,
+        reason:
+          `mirrored file "${key}" exists in lane(s) ` +
+          `${[...laneMap.keys()].join(", ")} but has no counterpart in ` +
+          `${missing.join(", ")}. Every pair lane must carry the module, or ` +
+          "the set must not claim it as a pair.",
       });
     }
   }
@@ -854,6 +1141,33 @@ export function run(argv = [], options = {}) {
     err(
       "These copies must stay byte-for-byte equal. Apply the same change to " +
         "every file in the group (AGENTS.md → Renderer-owned browser glue).",
+    );
+    return 1;
+  }
+
+  // Before the lock and before the base ref: the lock cannot pin away a
+  // missing file, and `--update` cannot launder a broken declaration.
+  const declarationFailures = checkSetDeclarations(root, sets);
+  const counterpartFailures = checkCounterparts(root, sets);
+  if (declarationFailures.length > 0 || counterpartFailures.length > 0) {
+    err("Mirror check failed — mirrored set structure is broken:\n");
+    for (const failure of declarationFailures) {
+      err(`  set: ${failure.set}\n    ${failure.reason}\n`);
+    }
+    for (const failure of counterpartFailures) {
+      err(`  set: ${failure.set}`);
+      err(`    mirrored pair: ${failure.key}`);
+      err(`    present in:    ${failure.present.join(", ")}`);
+      err(`    missing from:  ${failure.missing.join(", ")}`);
+      for (const file of failure.files) err(`    declared: ${file}`);
+      err(`    ${failure.reason}`);
+      if (failure.hint) err(`    ${failure.hint}`);
+      err("");
+    }
+    err(
+      "These are filesystem facts, not diff facts: re-pinning " +
+        "mirror-lock.json and mirror-waivers.json do not apply here " +
+        "(AGENTS.md → Renderer-owned browser glue).",
     );
     return 1;
   }

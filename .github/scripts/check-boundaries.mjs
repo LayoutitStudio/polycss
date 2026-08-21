@@ -15,8 +15,11 @@
  * name something outside its allow-list fails even if no source file imports
  * it yet. (`devDependencies` are tooling and are not constrained.) Manifest
  * checking resolves the dependency VALUE — `npm:` aliases, `link:`/`file:`/
- * `portal:` local paths, `workspace:` aliases — because the key is not the
- * package that gets installed.
+ * `portal:` local paths, `workspace:` aliases and `workspace:` relative paths
+ * — because the key is not the package that gets installed. Specifier forms
+ * whose target cannot be determined from the repo (`catalog:`, git specs,
+ * tarball URLs, `jsr:`, unknown protocols) are reported as violations rather
+ * than falling back to the key, since falling back to the key IS the bypass.
  *
  * Also forbids, everywhere in the repo, deep imports into another package's
  * src (e.g. `@layoutit/polycss-core/src/...` or `../../packages/x/src/...`)
@@ -129,19 +132,69 @@ function readLocalPackageName(packageDir, relPath) {
 }
 
 /**
+ * A `workspace:` / `link:` target that is a path rather than a package name.
+ * `workspace:../polycss` and `workspace:packages/polycss` both mount a
+ * different local package under the declared key; only a leading `@` marks a
+ * scoped package NAME rather than a path.
+ */
+const isLocalPathSpec = (rest) =>
+  rest.startsWith(".") ||
+  rest.startsWith("/") ||
+  rest.startsWith("~/") ||
+  (rest.includes("/") && !rest.startsWith("@"));
+
+/**
+ * A bare semver range or range operator, which leaves the key as the installed
+ * package: `^`, `*`, `~`, `1.2.3`, `^0.2.0`, `>=1 <2`, `1.x`. Anything else
+ * after `workspace:` is a package name — with or without an `@range` suffix.
+ */
+const isVersionRange = (rest) => /^[\s*^~><=v\d.|xX+-]+$/.test(rest);
+
+/** Specifier protocols whose install target this checker cannot determine. */
+const UNRESOLVABLE_PROTOCOLS = new Map([
+  [
+    "catalog",
+    "is a pnpm catalog reference whose target lives in pnpm-workspace.yaml",
+  ],
+  [
+    "jsr",
+    "is a JSR specifier, which installs under a rewritten npm name (@jsr/…)",
+  ],
+  ["git", "is a git specifier, whose installed package name is in the repo"],
+  ["github", "is a git specifier, whose installed package name is in the repo"],
+  ["gitlab", "is a git specifier, whose installed package name is in the repo"],
+  [
+    "bitbucket",
+    "is a git specifier, whose installed package name is in the repo",
+  ],
+  ["gist", "is a git specifier, whose installed package name is in the repo"],
+  ["http", "is a remote tarball, whose package name is inside the tarball"],
+  ["https", "is a remote tarball, whose package name is inside the tarball"],
+]);
+
+/**
  * The manifest KEY is not the package that gets installed. `npm:` aliases,
- * `link:`/`file:`/`portal:` local paths and `workspace:<name>@<range>` aliases
- * all mount a DIFFERENT package under the declared key, so
- * `"@layoutit/polycss-core": "npm:@layoutit/polycss@0.2.0"` would pass a
- * key-only allow-list while installing the forbidden graph. The allow-list is
- * therefore applied to the resolved target, not the key.
+ * `link:`/`file:`/`portal:` local paths, `workspace:<name>[@<range>]` aliases
+ * and `workspace:<path>` targets all mount a DIFFERENT package under the
+ * declared key, so `"@layoutit/polycss-core": "npm:@layoutit/polycss@0.2.0"`
+ * would pass a key-only allow-list while installing the forbidden graph. The
+ * allow-list is therefore applied to the resolved target, not the key.
  *
- * A local path whose target cannot be read is `unresolved` rather than
- * allowed: an unverifiable target is not a permitted one.
+ * Anything this function cannot resolve is `unresolved`, which the caller
+ * turns into a violation. That is deliberate: an unverifiable target is not a
+ * permitted one, and the alternative — falling back to the key — is precisely
+ * the bypass. Catalog references, git specs and tarball URLs therefore FAIL
+ * with an explanation rather than passing; a package that needs one must
+ * declare it in a form the checker can see through.
  */
 export function resolveDependencyTarget(name, spec, options = {}) {
-  if (typeof spec !== "string") return { name };
+  if (typeof spec !== "string") {
+    return { unresolved: "has a non-string version specifier" };
+  }
   const value = spec.trim();
+  if (value.length === 0) {
+    return { unresolved: "has an empty version specifier" };
+  }
 
   if (value.startsWith("npm:")) {
     const target = splitNameAtRange(value.slice("npm:".length));
@@ -164,13 +217,47 @@ export function resolveDependencyTarget(name, spec, options = {}) {
 
   if (value.startsWith("workspace:")) {
     const rest = value.slice("workspace:".length);
-    // `workspace:^`, `workspace:*`, `workspace:1.2.3` keep the key; only the
-    // `workspace:<other-name>@<range>` alias form retargets it.
-    if (/^[@a-zA-Z]/.test(rest) && rest.includes("@", 1)) {
-      const target = splitNameAtRange(rest);
-      if (target) return { name: target, via: `workspace alias "${value}"` };
+    if (rest.length === 0) {
+      return { unresolved: 'has an empty "workspace:" specifier' };
     }
-    return { name };
+    if (isLocalPathSpec(rest)) {
+      const target = readLocalPackageName(options.packageDir, rest);
+      return target
+        ? { name: target, via: `workspace path target ${rest}` }
+        : {
+            unresolved:
+              `points at workspace path "${value}", whose package.json name ` +
+              "could not be read",
+          };
+    }
+    // `workspace:^`, `workspace:*`, `workspace:1.2.3` keep the key; every
+    // other form names a package, whether or not it carries an `@range`.
+    if (isVersionRange(rest)) return { name };
+    const target = splitNameAtRange(rest);
+    return target
+      ? { name: target, via: `workspace alias "${value}"` }
+      : { unresolved: `has an unparseable workspace alias "${value}"` };
+  }
+
+  const protocol = /^([a-zA-Z][a-zA-Z0-9+.-]*):/.exec(value);
+  if (protocol) {
+    const base = protocol[1].toLowerCase().split("+")[0];
+    const known = UNRESOLVABLE_PROTOCOLS.get(base);
+    return {
+      unresolved: known
+        ? `${known}, so the installed package cannot be verified here`
+        : `uses an unrecognised specifier protocol "${protocol[1]}:"`,
+    };
+  }
+
+  // npm's `owner/repo` shorthand is a git dependency. A semver range or a
+  // dist-tag never contains a slash, so this is unambiguous.
+  if (value.includes("/")) {
+    return {
+      unresolved:
+        `looks like a git shorthand ("${value}"), whose installed package ` +
+        "name is inside the repository",
+    };
   }
 
   return { name };

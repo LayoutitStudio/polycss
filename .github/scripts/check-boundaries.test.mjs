@@ -327,3 +327,126 @@ test("workspace ranges and aliases onto allowed packages still pass", () => {
   assert.deepEqual(runChecks(root), []);
   cleanup(root);
 });
+
+test("a workspace: relative path resolves to the package it points at", () => {
+  const root = makeRepo(
+    withManifests(
+      {},
+      {
+        react: {
+          name: "@layoutit/polycss-react",
+          // Allowed KEY, forbidden install target, and no `@range` anywhere
+          // for the alias parser to notice.
+          dependencies: { "@layoutit/polycss-core": "workspace:../polycss" },
+        },
+        polycss: { name: "@layoutit/polycss" },
+      },
+    ),
+  );
+  const violations = runChecks(root);
+  assert.equal(violations.length, 1);
+  assert.match(
+    violations[0],
+    /resolves to disallowed package "@layoutit\/polycss" via workspace path target/,
+  );
+  cleanup(root);
+});
+
+test("an un-versioned workspace alias is resolved, not treated as a range", () => {
+  for (const spec of ["workspace:@layoutit/polycss", "workspace:@layoutit/polycss@*"]) {
+    const root = makeRepo(
+      withManifests(
+        {},
+        {
+          vue: {
+            name: "@layoutit/polycss-vue",
+            dependencies: { "@layoutit/polycss-core": spec },
+          },
+        },
+      ),
+    );
+    const violations = runChecks(root);
+    assert.equal(violations.length, 1, spec);
+    assert.match(
+      violations[0],
+      /resolves to disallowed package "@layoutit\/polycss" via workspace alias/,
+      spec,
+    );
+    cleanup(root);
+  }
+});
+
+test("a workspace path that cannot be read is not assumed allowed", () => {
+  const root = makeRepo(
+    withManifests(
+      {},
+      {
+        react: {
+          name: "@layoutit/polycss-react",
+          dependencies: { "@layoutit/polycss-core": "workspace:../nowhere" },
+        },
+      },
+    ),
+  );
+  const violations = runChecks(root);
+  assert.equal(violations.length, 1);
+  assert.match(violations[0], /whose package.json name could not be read/);
+  cleanup(root);
+});
+
+test("specifier forms with an undeterminable target fail instead of passing", () => {
+  const unresolvable = [
+    ["catalog:", /pnpm catalog reference/],
+    ["catalog:default", /pnpm catalog reference/],
+    ["jsr:@layoutit/polycss", /JSR specifier/],
+    ["github:layoutit/polycss", /git specifier/],
+    ["git+https://github.com/layoutit/polycss.git", /git specifier/],
+    ["git+ssh://git@github.com/layoutit/polycss.git", /git specifier/],
+    ["https://example.com/polycss-0.1.0.tgz", /remote tarball/],
+    ["layoutit/polycss", /git shorthand/],
+    ["layoutit/polycss#v1", /git shorthand/],
+    ["mystery:whatever", /unrecognised specifier protocol/],
+    ["workspace:", /empty "workspace:" specifier/],
+    ["", /empty version specifier/],
+    [42, /non-string version specifier/],
+  ];
+  for (const [spec, pattern] of unresolvable) {
+    const resolved = resolveDependencyTarget("@layoutit/polycss-core", spec, {});
+    assert.equal(resolved.name, undefined, `${spec} must not resolve to a name`);
+    assert.match(resolved.unresolved, pattern, String(spec));
+
+    // And the resolver's verdict must reach the manifest check as a violation,
+    // even though the KEY itself is allow-listed.
+    const violations = checkManifestDependencies(
+      { dependencies: { "@layoutit/polycss-core": spec } },
+      "react",
+      PACKAGE_RULES.react,
+      {},
+    );
+    assert.equal(violations.length, 1, String(spec));
+    assert.match(violations[0], /so the allow-list cannot be applied/, String(spec));
+  }
+});
+
+test("plain ranges, dist-tags and workspace ranges keep the declared key", () => {
+  const keep = [
+    "^0.2.0",
+    "0.2.0",
+    "*",
+    ">=1.0.0 <2.0.0",
+    "1.x",
+    "latest",
+    "next",
+    "workspace:^",
+    "workspace:*",
+    "workspace:~",
+    "workspace:1.2.3",
+    "workspace:^1.2.3",
+    "workspace:>=1.0.0 <2.0.0",
+  ];
+  for (const spec of keep) {
+    const resolved = resolveDependencyTarget("@layoutit/polycss-core", spec, {});
+    assert.equal(resolved.name, "@layoutit/polycss-core", spec);
+    assert.equal(resolved.unresolved, undefined, spec);
+  }
+});

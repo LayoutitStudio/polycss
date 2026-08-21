@@ -17,11 +17,14 @@ import {
   SYNC_SETS,
   baseFileHash,
   bindWaivers,
+  checkCounterparts,
   checkIdenticalGroups,
   checkLaneParity,
+  checkSetDeclarations,
   checkSyncSets,
   computeSyncHashes,
   derivePairs,
+  listLaneRootFiles,
   loadWaivers,
   partitionLanes,
   resolveBaseRef,
@@ -878,4 +881,262 @@ test("committed waivers pin the base content of every file they name", () => {
       );
     }
   }
+});
+
+/* --- set structure: declaration, discovery, counterparts ----------------- */
+
+const MESH_FILES = {
+  "packages/react/src/scene/mesh/useA.tsx": "react a v1\n",
+  "packages/react/src/scene/mesh/useB.ts": "react b v1\n",
+  "packages/react/src/scene/mesh/useA.test.tsx": "react a test\n",
+  "packages/vue/src/scene/mesh/useA.ts": "vue a v1\n",
+  "packages/vue/src/scene/mesh/useB.ts": "vue b v1\n",
+};
+
+const meshSet = (overrides = {}) => ({
+  name: "mesh",
+  hint: "mirror it",
+  pairLanes: ["react", "vue"],
+  laneRoots: ["packages/react/src/scene/mesh", "packages/vue/src/scene/mesh"],
+  files: [
+    "packages/react/src/scene/mesh/useA.tsx",
+    "packages/react/src/scene/mesh/useB.ts",
+    "packages/vue/src/scene/mesh/useA.ts",
+    "packages/vue/src/scene/mesh/useB.ts",
+  ],
+  ...overrides,
+});
+
+const runMesh = (root, argv, sets) =>
+  runFixture(root, argv, { sets: sets ?? [meshSet()] });
+
+const reasonsOf = (failures) => failures.map((failure) => failure.reason).join("\n");
+
+test("lane roots discover non-test sources and honour rootMatch", () => {
+  const root = makeRepo(MESH_FILES);
+  const { found, missingRoots } = listLaneRootFiles(root, meshSet());
+  assert.deepEqual(missingRoots, []);
+  assert.deepEqual(found, [
+    "packages/react/src/scene/mesh/useA.tsx",
+    "packages/react/src/scene/mesh/useB.ts",
+    "packages/vue/src/scene/mesh/useA.ts",
+    "packages/vue/src/scene/mesh/useB.ts",
+  ]);
+
+  const filtered = listLaneRootFiles(root, meshSet({ rootMatch: /^useA/ }));
+  assert.deepEqual(filtered.found, [
+    "packages/react/src/scene/mesh/useA.tsx",
+    "packages/vue/src/scene/mesh/useA.ts",
+  ]);
+  cleanup(root);
+});
+
+test("a missing lane root is a declaration error", () => {
+  const root = makeRepo(MESH_FILES);
+  const failures = checkSetDeclarations(root, [
+    meshSet({ laneRoots: ["packages/react/src/scene/nope"] }),
+  ]);
+  assert.match(reasonsOf(failures), /is not a directory/);
+  cleanup(root);
+});
+
+test("a file under a mirrored root that is declared nowhere fails", () => {
+  const root = makeRepo({
+    ...MESH_FILES,
+    "packages/react/src/scene/mesh/useNew.ts": "react only\n",
+  });
+  const failures = checkSetDeclarations(root, [meshSet()]);
+  assert.equal(failures.length, 1);
+  assert.match(failures[0].reason, /useNew\.ts" lives under a mirrored root/);
+
+  // Declaring it as unmirrored (with a reason) is the reviewed escape hatch.
+  const exempted = checkSetDeclarations(root, [
+    meshSet({
+      unmirrored: {
+        "packages/react/src/scene/mesh/useNew.ts": "react-only for now",
+      },
+    }),
+  ]);
+  assert.deepEqual(exempted, []);
+  cleanup(root);
+});
+
+test("an unmirrored exemption must be honest: reason, existence, exclusivity", () => {
+  const root = makeRepo(MESH_FILES);
+  const failures = checkSetDeclarations(root, [
+    meshSet({
+      unmirrored: {
+        "packages/react/src/scene/mesh/useA.tsx": "also a mirrored member",
+        "packages/vue/src/scene/mesh/gone.ts": "deleted long ago",
+        "packages/react/src/scene/mesh/useB.ts": "   ",
+      },
+    }),
+  ]);
+  const reasons = reasonsOf(failures);
+  assert.match(reasons, /declared both as a mirrored member and as unmirrored/);
+  assert.match(reasons, /no longer exists; delete the stale entry/);
+  assert.match(reasons, /has no reason/);
+  cleanup(root);
+});
+
+test("a declared member that no longer exists fails before the lock is read", () => {
+  const root = makeRepo(MESH_FILES);
+  rmSync(resolve(root, "packages/vue/src/scene/mesh/useA.ts"));
+  const failures = checkSetDeclarations(root, [meshSet()]);
+  assert.equal(failures.length, 1);
+  assert.match(failures[0].reason, /may not be deleted from one lane alone/);
+  cleanup(root);
+});
+
+test("pairLanes is validated against the files actually in the set", () => {
+  const root = makeRepo(MESH_FILES);
+  const unknown = checkSetDeclarations(root, [
+    meshSet({ pairLanes: ["react", "svelte"] }),
+  ]);
+  assert.match(reasonsOf(unknown), /unknown pair lane\(s\) svelte/);
+
+  const empty = checkSetDeclarations(root, [
+    meshSet({ pairLanes: ["react", "vue", "polycss"] }),
+  ]);
+  assert.match(
+    reasonsOf(empty),
+    /declares pair lane "polycss" but no file in the set belongs to it/,
+  );
+
+  const single = checkSetDeclarations(root, [meshSet({ pairLanes: ["react"] })]);
+  assert.match(reasonsOf(single), /fewer than two "pairLanes"/);
+  cleanup(root);
+});
+
+test("a pair key present in one lane only has no counterpart and fails", () => {
+  const root = makeRepo({
+    ...MESH_FILES,
+    "packages/react/src/scene/mesh/useNew.ts": "react only\n",
+  });
+  const failures = checkCounterparts(root, [
+    meshSet({
+      files: [...meshSet().files, "packages/react/src/scene/mesh/useNew.ts"],
+    }),
+  ]);
+  assert.equal(failures.length, 1);
+  assert.equal(failures[0].key, "useNew");
+  assert.deepEqual(failures[0].present, ["react"]);
+  assert.deepEqual(failures[0].missing, ["vue"]);
+  assert.match(failures[0].reason, /has no counterpart in vue/);
+  cleanup(root);
+});
+
+test("counterparts pair across extensions and pass when both lanes carry them", () => {
+  const root = makeRepo(MESH_FILES);
+  assert.deepEqual(checkCounterparts(root, [meshSet()]), []);
+  cleanup(root);
+});
+
+test("end to end: a new module added to one lane only fails", () => {
+  const root = makeGitRepo(MESH_FILES);
+  assert.equal(runMesh(root, ["--update"]).code, 0);
+
+  // A legitimately mirrored pair edit, so BOTH lanes read as touched and the
+  // lane-parity check is satisfied...
+  edit(root, "packages/react/src/scene/mesh/useA.tsx", "react a v2\n");
+  edit(root, "packages/vue/src/scene/mesh/useA.ts", "vue a v2\n");
+  // ...while an unmirrored new module rides along in the React lane.
+  writeFileSync(
+    resolve(root, "packages/react/src/scene/mesh/useNew.ts"),
+    "react only\n",
+  );
+  assert.equal(runMesh(root, ["--update"]).code, 1, "--update must not launder it");
+
+  const result = runMesh(root, ["--require-base"]);
+  assert.equal(result.code, 1);
+  assert.match(result.err, /mirrored set structure is broken/);
+  assert.match(result.err, /useNew\.ts" lives under a mirrored root/);
+  cleanup(root);
+});
+
+test("end to end: deleting a counterpart while editing the other lane fails", () => {
+  const root = makeGitRepo(MESH_FILES);
+  assert.equal(runMesh(root, ["--update"]).code, 0);
+
+  // A deletion is a "change" in `git diff --name-only`, so both lanes look
+  // touched and lane parity alone passes.
+  edit(root, "packages/react/src/scene/mesh/useA.tsx", "react a v2\n");
+  rmSync(resolve(root, "packages/vue/src/scene/mesh/useA.ts"));
+  runMesh(root, ["--update"]);
+
+  const result = runMesh(root, ["--require-base"]);
+  assert.equal(result.code, 1);
+  assert.match(result.err, /may not be deleted from one lane alone/);
+  cleanup(root);
+});
+
+test("end to end: a counterpart deleted from disk AND declaration still fails", () => {
+  const root = makeGitRepo(MESH_FILES);
+  const trimmed = meshSet({
+    files: meshSet().files.filter(
+      (file) => file !== "packages/vue/src/scene/mesh/useA.ts",
+    ),
+  });
+  rmSync(resolve(root, "packages/vue/src/scene/mesh/useA.ts"));
+  edit(root, "packages/react/src/scene/mesh/useA.tsx", "react a v2\n");
+  runMesh(root, ["--update"], [trimmed]);
+
+  const result = runMesh(root, ["--require-base"], [trimmed]);
+  assert.equal(result.code, 1);
+  assert.match(result.err, /has no counterpart in vue/);
+  cleanup(root);
+});
+
+test("end to end: a one-lane rename fails even when both lanes were touched", () => {
+  const root = makeGitRepo(MESH_FILES);
+  assert.equal(runMesh(root, ["--update"]).code, 0);
+
+  const renamed = meshSet({
+    files: [
+      "packages/react/src/scene/mesh/useA.tsx",
+      "packages/react/src/scene/mesh/useBRenamed.ts",
+      "packages/vue/src/scene/mesh/useA.ts",
+      "packages/vue/src/scene/mesh/useB.ts",
+    ],
+  });
+  writeFileSync(
+    resolve(root, "packages/react/src/scene/mesh/useBRenamed.ts"),
+    "react b v1\n",
+  );
+  rmSync(resolve(root, "packages/react/src/scene/mesh/useB.ts"));
+  edit(root, "packages/react/src/scene/mesh/useA.tsx", "react a v2\n");
+  edit(root, "packages/vue/src/scene/mesh/useA.ts", "vue a v2\n");
+  runMesh(root, ["--update"], [renamed]);
+
+  const result = runMesh(root, ["--require-base"], [renamed]);
+  assert.equal(result.code, 1);
+  assert.match(result.err, /useBRenamed/);
+  cleanup(root);
+});
+
+test("end to end: a correctly mirrored addition passes", () => {
+  const root = makeGitRepo(MESH_FILES);
+  assert.equal(runMesh(root, ["--update"]).code, 0);
+
+  const grown = meshSet({
+    files: [
+      ...meshSet().files,
+      "packages/react/src/scene/mesh/useNew.tsx",
+      "packages/vue/src/scene/mesh/useNew.ts",
+    ],
+  });
+  writeFileSync(
+    resolve(root, "packages/react/src/scene/mesh/useNew.tsx"),
+    "react new\n",
+  );
+  writeFileSync(resolve(root, "packages/vue/src/scene/mesh/useNew.ts"), "vue new\n");
+  assert.equal(runMesh(root, ["--update"], [grown]).code, 0);
+  assert.equal(runMesh(root, ["--require-base"], [grown]).code, 0);
+  cleanup(root);
+});
+
+test("the committed sync sets are structurally valid against this repo", () => {
+  const repoRoot = resolve(import.meta.dirname, "..", "..");
+  assert.deepEqual(checkSetDeclarations(repoRoot, SYNC_SETS), []);
+  assert.deepEqual(checkCounterparts(repoRoot, SYNC_SETS), []);
 });
