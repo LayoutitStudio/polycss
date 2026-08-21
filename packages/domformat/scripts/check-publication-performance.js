@@ -327,9 +327,11 @@ async function writeFixtures() {
       routes.set(`/${workload.id}/${relative}`, target);
     }
   }
-  const suite = join(temporary, "suite.html");
-  await writeFile(suite, `<!doctype html><meta charset="utf-8"><style>html,body{margin:0}iframe{width:33.333vw;height:100vh;border:0}</style>${workloads.map((workload) => `<iframe data-workload="${workload.id}" src="/viewer/index.html?model=%2F${workload.id}%2Fmodel.json&animate=1&mode=animation${diagnosticsEnabled ? "&diagnostics=1" : ""}"></iframe>`).join("")}`);
-  routes.set("/suite.html", suite);
+  for (const [pathname, withDiagnostics] of [["suite.html", false], ["diagnostics.html", true]]) {
+    const suite = join(temporary, pathname);
+    await writeFile(suite, `<!doctype html><meta charset="utf-8"><style>html,body{margin:0}iframe{width:33.333vw;height:100vh;border:0}</style>${workloads.map((workload) => `<iframe data-workload="${workload.id}" src="/viewer/index.html?model=%2F${workload.id}%2Fmodel.json&animate=1&mode=animation${withDiagnostics ? "&diagnostics=1" : ""}"></iframe>`).join("")}`);
+    routes.set(`/${pathname}`, suite);
+  }
   return routes;
 }
 
@@ -374,6 +376,31 @@ async function startTrace(cdp) {
 
 async function stopTrace(cdp) {
   await new Promise(async (resolveTrace) => { cdp.once("Tracing.tracingComplete", resolveTrace); await cdp.send("Tracing.end"); });
+}
+
+async function collectDiagnostics(context, origin) {
+  if (!diagnosticsEnabled) return null;
+  const page = await context.newPage();
+  const errors = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  page.on("console", (message) => { if (message.type() === "error") errors.push(message.text()); });
+  await page.goto(`${origin}/diagnostics.html`, { waitUntil: "load", timeout: 120_000 });
+  await page.waitForFunction(() => [...document.querySelectorAll("iframe")].every((frame) => frame.contentDocument?.documentElement.hasAttribute("data-domformat-ready")), undefined, { timeout: 120_000 });
+  await page.evaluate(() => {
+    for (const frame of document.querySelectorAll("iframe")) {
+      const win = frame.contentWindow;
+      win.__publicationLeaves = [...win.document.querySelectorAll("[data-domformat-node]")];
+      for (const key of Object.keys(win.domformatProof.diagnostics)) win.domformatProof.diagnostics[key] = 0;
+    }
+  });
+  await page.waitForFunction((minimumFrame) => [...document.querySelectorAll("iframe")].every((frame) => frame.contentWindow.domformatProof.sourceFrame >= minimumFrame), framesPerPage * 2 + 1, { timeout: 60_000 });
+  const evidence = await page.evaluate(() => [...document.querySelectorAll("iframe")].map((frame) => {
+    const win = frame.contentWindow;
+    return { id: frame.dataset.workload, endFrame: win.domformatProof.sourceFrame, diagnostics: { ...win.domformatProof.diagnostics }, stableIdentity: win.__publicationLeaves.every((leaf) => leaf.isConnected && leaf.ownerDocument === win.document) };
+  }));
+  invariant(errors.length === 0 && evidence.every((entry) => entry.stableIdentity), "PUBLICATION_DIAGNOSTIC_FAILURE", `Publication diagnostic pass failed (${errors.join("; ")}).`);
+  await page.close();
+  return evidence;
 }
 
 function percentile(values, ratio) {
@@ -446,7 +473,7 @@ function summarizeTrace(events, startPerf, endPerf, evidence) {
 
 function markdown(report) {
   const diagnosticRows = report.workloads.map((entry) => `| ${entry.id} | ${entry.startFrame} | ${entry.endFrame} | ${entry.pageBoundariesCrossed} | ${entry.diagnostics.playbackPublicationLeafVisits} | ${entry.diagnostics.variantComparisonTargetVisits} | ${entry.diagnostics.surfaceLightingTargetVisits} | ${entry.diagnostics.surfaceVisibilityTargetVisits} | ${entry.diagnostics.playbackCanonicalReconstructions + entry.diagnostics.variantCanonicalReconstructions + entry.diagnostics.surfaceFullReconstructions} |`);
-  return `# DOMFormat prepared publication trace (${report.label})\n\nRuntime root: \`${report.runtimeRoot}\`\n\nBrowser: ${report.browserVersion}\n\nDuration: ${report.trace.durationMs.toFixed(3)} ms\n\n| Max main task | Max RAF gap | Cadence p50 | Cadence p95 | Page-preparation max |\n|---:|---:|---:|---:|---:|\n| ${report.trace.mainThread.maxTaskMs.toFixed(3)} ms | ${report.trace.cadence.maxPresentationGapMs.toFixed(3)} ms | ${report.trace.cadence.p50Ms.toFixed(3)} ms | ${report.trace.cadence.p95Ms.toFixed(3)} ms | ${report.trace.pagePreparation.maxTaskMs.toFixed(3)} ms |\n\n| Published adapter workload | Start | End | Page boundaries | Playback leaf visits | Variant compares | Surface visits | Visibility visits | Full reconstructions |\n|---|---:|---:|---:|---:|---:|---:|---:|---:|\n${diagnosticRows.join("\n")}\n\nThe retained identities were checked before and after the trace. Flowerbox is intentionally excluded; the workloads are based on published Cloth, Solitaire, and Gravity Well adapters at cssGraphics ${report.cssgraphicsRevision}.\n`;
+  return `# DOMFormat prepared publication trace (${report.label})\n\nRuntime root: \`${report.runtimeRoot}\`\n\nBrowser: ${report.browserVersion}\n\nDuration: ${report.trace.durationMs.toFixed(3)} ms\n\n| Max main task | Max RAF gap | Cadence p50 | Cadence p95 | Page-preparation max |\n|---:|---:|---:|---:|---:|\n| ${report.trace.mainThread.maxTaskMs.toFixed(3)} ms | ${report.trace.cadence.maxPresentationGapMs.toFixed(3)} ms | ${report.trace.cadence.p50Ms.toFixed(3)} ms | ${report.trace.cadence.p95Ms.toFixed(3)} ms | ${report.trace.pagePreparation.maxTaskMs.toFixed(3)} ms |\n\n| Published adapter workload | Start | End | Page boundaries | Playback leaf visits | Variant compares | Surface visits | Visibility visits | Full reconstructions |\n|---|---:|---:|---:|---:|---:|---:|---:|---:|\n${diagnosticRows.join("\n")}\n\nThe 42-second timing window is uninstrumented. Target visits are collected in a separate post-trace diagnostic pass, and retained identities are checked in both passes. Flowerbox is intentionally excluded; the workloads are based on published Cloth, Solitaire, and Gravity Well adapters at cssGraphics ${report.cssgraphicsRevision}.\n`;
 }
 
 try {
@@ -475,7 +502,8 @@ try {
   page.on("pageerror", (error) => errors.push(error.message));
   page.on("console", (message) => { if (message.type() === "error") errors.push(message.text()); });
   await page.addInitScript(browserInstrumentation);
-  await page.goto(`http://127.0.0.1:${address.port}/suite.html`, { waitUntil: "load", timeout: 120_000 });
+  const origin = `http://127.0.0.1:${address.port}`;
+  await page.goto(`${origin}/suite.html`, { waitUntil: "load", timeout: 120_000 });
   try {
     await page.waitForFunction(() => [...document.querySelectorAll("iframe")].every((frame) => frame.contentDocument?.documentElement.hasAttribute("data-domformat-ready")), undefined, { timeout: 120_000 });
   } catch (error) {
@@ -485,7 +513,6 @@ try {
     for (const frame of document.querySelectorAll("iframe")) {
       const win = frame.contentWindow;
       win.__publicationLeaves = [...win.document.querySelectorAll("[data-domformat-node]")];
-      if (win.domformatProof.diagnostics) for (const key of Object.keys(win.domformatProof.diagnostics)) win.domformatProof.diagnostics[key] = 0;
     }
     globalThis.__domformatPublicationTrace.raf.length = 0;
   });
@@ -507,15 +534,19 @@ try {
   const trace = summarizeTrace(events, startPerf, endPerf, evidence);
   invariant(trace.mainThread.maxTaskMs <= maximumTaskMs, "PAGE_PREPARATION_LONG_TASK", `Publication trace main-thread task reached ${trace.mainThread.maxTaskMs} ms, above ${maximumTaskMs} ms.`);
   invariant(trace.pagePreparation.maxTaskMs <= maximumTaskMs, "PAGE_PREPARATION_LONG_TASK", `Publication trace page preparation reached ${trace.pagePreparation.maxTaskMs} ms, above ${maximumTaskMs} ms.`);
+  await page.close();
+  const diagnosticEvidence = await collectDiagnostics(context, origin);
+  const diagnosticsByWorkload = new Map((diagnosticEvidence ?? []).map((entry) => [entry.id, entry]));
   const resultWorkloads = evidence.workloads.map((entry) => {
     const workload = workloads.find((candidate) => candidate.id === entry.id);
-    return { ...entry, diagnostics: entry.diagnostics ?? baselineDiagnostics(workload, entry.endFrame), startFrame: 1, pageBoundariesCrossed: Math.max(0, Math.floor((entry.endFrame - 1) / framesPerPage)) };
+    const diagnostic = diagnosticsByWorkload.get(entry.id);
+    return { ...entry, diagnostics: diagnostic?.diagnostics ?? baselineDiagnostics(workload, entry.endFrame), diagnosticEndFrame: diagnostic?.endFrame ?? null, startFrame: 1, pageBoundariesCrossed: Math.max(0, Math.floor((entry.endFrame - 1) / framesPerPage)) };
   });
   invariant(resultWorkloads.every((entry) => entry.pageBoundariesCrossed >= 2), "PUBLICATION_BOUNDARY_COVERAGE", "Every publication workload must cross at least two page boundaries.");
   if (diagnosticsEnabled) invariant(resultWorkloads.every((entry) => entry.diagnostics.sequentialTargetSizedAllocations === 0), "PUBLICATION_ALLOCATION", "Sequential publication reported a target-sized allocation.");
   const rawTrace = join(outputRoot, "publication.trace.json");
   await writeRawTrace(rawTrace, events);
-  const report = { label, runtimeRoot, diagnosticsEnabled, cssgraphicsRevision: "083532aa66599f1ff4618b987ccc5df462631996", browserVersion: browser.version(), durationMs, framesPerPage, frameCount, maximumMainThreadTaskMs: maximumTaskMs, packedTarballBytes: packReports[0].size, trace, workloads: resultWorkloads, rawTrace };
+  const report = { label, runtimeRoot, diagnosticsEnabled, timingInstrumented: false, cssgraphicsRevision: "083532aa66599f1ff4618b987ccc5df462631996", browserVersion: browser.version(), durationMs, framesPerPage, frameCount, maximumMainThreadTaskMs: maximumTaskMs, packedTarballBytes: packReports[0].size, trace, workloads: resultWorkloads, rawTrace };
   await writeFile(join(outputRoot, "report.json"), `${JSON.stringify(report, null, 2)}\n`);
   await writeFile(join(outputRoot, "report.md"), markdown(report));
   process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
