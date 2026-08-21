@@ -311,7 +311,11 @@ describe("applyCamera — signature-gated shadow re-emit", () => {
       liveHost.remove();
       authoredHost.remove();
     }
-  });
+    // 72 scene builds: fast locally (~150ms) but the default 5s budget is not
+    // enough on a contended CI runner, where happy-dom setup alone costs ~100s
+    // for this package. The sweep is the oracle for the stale-plane bug, so it
+    // keeps its full resolution and takes an explicit budget instead.
+  }, 60_000);
 
   it("emits geometry for the new camera, not the old one", () => {
     build();
