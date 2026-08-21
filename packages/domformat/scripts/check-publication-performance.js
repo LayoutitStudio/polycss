@@ -12,6 +12,7 @@ import { encodeCanonicalJson } from "../src/canonical-json.js";
 import { invariant } from "../src/errors.js";
 import { buildDom } from "../src/writer.js";
 import { syntheticExecutableInteractionInput } from "../test/helpers.js";
+import { auditSequentialPagedPublicationSources } from "./publication-allocation-guard.js";
 
 const execFileAsync = promisify(execFile);
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
@@ -21,6 +22,19 @@ const configuredRuntimePackage = JSON.parse(await readFile(join(configuredRuntim
 const runtimeRoot = configuredRuntimePackage.name === "@layoutit/polycss-domformat" ? configuredRuntimeRoot : join(configuredRuntimeRoot, "packages/domformat");
 const label = process.env.DOMFORMAT_TRACE_LABEL ?? "after";
 const diagnosticsEnabled = process.env.DOMFORMAT_TRACE_DIAGNOSTICS === "1" || (process.env.DOMFORMAT_TRACE_DIAGNOSTICS !== "0" && runtimeRoot === root);
+const guardedSourceFiles = Object.freeze({ pagedFile: "src/state/paged-state.ts", polycssFile: "src/state/polycss.ts" });
+const sequentialPagedSourceGuard = auditSequentialPagedPublicationSources({
+  pagedSource: await readFile(join(runtimeRoot, guardedSourceFiles.pagedFile), "utf8"),
+  polycssSource: await readFile(join(runtimeRoot, guardedSourceFiles.polycssFile), "utf8"),
+  ...guardedSourceFiles,
+});
+const allocationEvidence = Object.freeze({
+  ...sequentialPagedSourceGuard,
+  enforced: runtimeRoot === root,
+  forbiddenSourceFormSites: sequentialPagedSourceGuard.violations.length,
+  forbiddenSourceFormSitesByScope: Object.freeze(Object.fromEntries(sequentialPagedSourceGuard.scopes.map((scope) => [scope, sequentialPagedSourceGuard.violations.filter((entry) => entry.scope === scope).length]))),
+});
+if (allocationEvidence.enforced) invariant(allocationEvidence.pass, "PUBLICATION_ALLOCATION_GUARD", `Sequential paged publication reintroduced forbidden materialization/collection/sort/closure work: ${JSON.stringify({ missingScopes: allocationEvidence.missingScopes, violations: allocationEvidence.violations })}.`);
 const outputRoot = resolve(workspaceRoot, "bench/results/domformat-publication", label);
 const temporary = await mkdtemp(join(tmpdir(), "domformat-publication-"));
 const durationMs = Number(process.env.DOMFORMAT_PUBLICATION_DURATION_MS ?? 42_000);
@@ -439,8 +453,12 @@ function baselineDiagnostics(workload, endFrame) {
     surfaceFullReconstructions: 0,
     surfaceLightingTargetVisits: advances * workload.surfaceChangeCount,
     surfaceVisibilityTargetVisits: advances * workload.visibilityChangeCount,
-    sequentialTargetSizedAllocations: advances * 3,
   };
+}
+
+function visitDiagnostics(value) {
+  const { sequentialTargetSizedAllocations: _unsupportedPermanentZeroCounter, ...visits } = value;
+  return visits;
 }
 
 function summarizeTrace(events, startPerf, endPerf, evidence) {
@@ -472,8 +490,9 @@ function summarizeTrace(events, startPerf, endPerf, evidence) {
 }
 
 function markdown(report) {
-  const diagnosticRows = report.workloads.map((entry) => `| ${entry.id} | ${entry.startFrame} | ${entry.endFrame} | ${entry.pageBoundariesCrossed} | ${entry.diagnostics.playbackPublicationLeafVisits} | ${entry.diagnostics.variantComparisonTargetVisits} | ${entry.diagnostics.surfaceLightingTargetVisits} | ${entry.diagnostics.surfaceVisibilityTargetVisits} | ${entry.diagnostics.playbackCanonicalReconstructions + entry.diagnostics.variantCanonicalReconstructions + entry.diagnostics.surfaceFullReconstructions} |`);
-  return `# DOMFormat prepared publication trace (${report.label})\n\nRuntime root: \`${report.runtimeRoot}\`\n\nBrowser: ${report.browserVersion}\n\nDuration: ${report.trace.durationMs.toFixed(3)} ms\n\n| Max main task | Max RAF gap | Cadence p50 | Cadence p95 | Page-preparation max |\n|---:|---:|---:|---:|---:|\n| ${report.trace.mainThread.maxTaskMs.toFixed(3)} ms | ${report.trace.cadence.maxPresentationGapMs.toFixed(3)} ms | ${report.trace.cadence.p50Ms.toFixed(3)} ms | ${report.trace.cadence.p95Ms.toFixed(3)} ms | ${report.trace.pagePreparation.maxTaskMs.toFixed(3)} ms |\n\n| Published adapter workload | Start | End | Page boundaries | Playback leaf visits | Variant compares | Surface visits | Visibility visits | Full reconstructions |\n|---|---:|---:|---:|---:|---:|---:|---:|---:|\n${diagnosticRows.join("\n")}\n\nThe 42-second timing window is uninstrumented. Target visits are collected in a separate post-trace diagnostic pass, and retained identities are checked in both passes. Flowerbox is intentionally excluded; the workloads are based on published Cloth, Solitaire, and Gravity Well adapters at cssGraphics ${report.cssgraphicsRevision}.\n`;
+  const diagnosticRows = report.workloads.map((entry) => `| ${entry.id} | ${entry.startFrame} | ${entry.endFrame} | ${entry.pageBoundariesCrossed} | ${entry.visitEvidenceProvenance} | ${entry.diagnostics.playbackPublicationLeafVisits} | ${entry.diagnostics.variantComparisonTargetVisits} | ${entry.diagnostics.surfaceLightingTargetVisits} | ${entry.diagnostics.surfaceVisibilityTargetVisits} | ${entry.diagnostics.playbackCanonicalReconstructions + entry.diagnostics.variantCanonicalReconstructions + entry.diagnostics.surfaceFullReconstructions} |`);
+  const allocation = report.allocationEvidence;
+  return `# DOMFormat prepared publication trace (${report.label})\n\nRuntime root: \`${report.runtimeRoot}\`\n\nBrowser: ${report.browserVersion}\n\nDuration: ${report.trace.durationMs.toFixed(3)} ms\n\n| Max main task | Max RAF gap | Cadence p50 | Cadence p95 | Page-preparation max |\n|---:|---:|---:|---:|---:|\n| ${report.trace.mainThread.maxTaskMs.toFixed(3)} ms | ${report.trace.cadence.maxPresentationGapMs.toFixed(3)} ms | ${report.trace.cadence.p50Ms.toFixed(3)} ms | ${report.trace.cadence.p95Ms.toFixed(3)} ms | ${report.trace.pagePreparation.maxTaskMs.toFixed(3)} ms |\n\n| Published adapter workload | Trace start | Trace end | Page boundaries | Visit evidence | Playback leaf visits | Variant compares | Surface visits | Visibility visits | Full reconstructions |\n|---|---:|---:|---:|---|---:|---:|---:|---:|---:|\n${diagnosticRows.join("\n")}\n\n## Sequential paged allocation evidence\n\nThe bounded TypeScript source guard found ${allocation.forbiddenSourceFormSites} forbidden source-form site(s) across the sequential paged staging/publication closure. Guard enforced: ${allocation.enforced ? "yes" : "no (historical comparison runtime)"}. Paged dispatch precedes inline materialization: ${allocation.pagedDispatchBeforeInlineMaterialization ? "yes" : "no"}. Missing guarded scopes: ${allocation.missingScopes.length}.\n\nThis is not a general JavaScript heap-allocation measurement. It rejects typed/ordinary \`slice()\`, \`Array.from()\`, array/typed-array constructors, generic array literals, spread-array clones, Set/Map construction, sorting, and nested closures in the guarded sequential paged publication closure while leaving explicit complete-row reconstruction branches legal.\n\nThe timing window is uninstrumented. Candidate-runtime target visits come from a separate instrumented post-trace browser pass. Historical-runtime target visits are deterministic workload estimates, not collected diagnostics. Each workload records its provenance in \`visitEvidenceProvenance\`; retained identities are checked in both browser passes when the instrumented pass runs. Flowerbox is intentionally excluded; the workloads are based on published Cloth, Solitaire, and Gravity Well adapters at cssGraphics ${report.cssgraphicsRevision}.\n`;
 }
 
 try {
@@ -540,13 +559,12 @@ try {
   const resultWorkloads = evidence.workloads.map((entry) => {
     const workload = workloads.find((candidate) => candidate.id === entry.id);
     const diagnostic = diagnosticsByWorkload.get(entry.id);
-    return { ...entry, diagnostics: diagnostic?.diagnostics ?? baselineDiagnostics(workload, entry.endFrame), diagnosticEndFrame: diagnostic?.endFrame ?? null, startFrame: 1, pageBoundariesCrossed: Math.max(0, Math.floor((entry.endFrame - 1) / framesPerPage)) };
+    return { ...entry, diagnostics: visitDiagnostics(diagnostic?.diagnostics ?? baselineDiagnostics(workload, entry.endFrame)), visitEvidenceProvenance: diagnostic ? "separate-instrumented-browser-pass" : "deterministic-workload-estimate", diagnosticEndFrame: diagnostic?.endFrame ?? null, startFrame: 1, pageBoundariesCrossed: Math.max(0, Math.floor((entry.endFrame - 1) / framesPerPage)) };
   });
   invariant(resultWorkloads.every((entry) => entry.pageBoundariesCrossed >= 2), "PUBLICATION_BOUNDARY_COVERAGE", "Every publication workload must cross at least two page boundaries.");
-  if (diagnosticsEnabled) invariant(resultWorkloads.every((entry) => entry.diagnostics.sequentialTargetSizedAllocations === 0), "PUBLICATION_ALLOCATION", "Sequential publication reported a target-sized allocation.");
   const rawTrace = join(outputRoot, "publication.trace.json");
   await writeRawTrace(rawTrace, events);
-  const report = { label, runtimeRoot, diagnosticsEnabled, timingInstrumented: false, cssgraphicsRevision: "083532aa66599f1ff4618b987ccc5df462631996", browserVersion: browser.version(), durationMs, framesPerPage, frameCount, maximumMainThreadTaskMs: maximumTaskMs, packedTarballBytes: packReports[0].size, trace, workloads: resultWorkloads, rawTrace };
+  const report = { label, runtimeRoot, diagnosticsEnabled, timingInstrumented: false, allocationEvidence, cssgraphicsRevision: "083532aa66599f1ff4618b987ccc5df462631996", browserVersion: browser.version(), durationMs, framesPerPage, frameCount, maximumMainThreadTaskMs: maximumTaskMs, packedTarballBytes: packReports[0].size, trace, workloads: resultWorkloads, rawTrace };
   await writeFile(join(outputRoot, "report.json"), `${JSON.stringify(report, null, 2)}\n`);
   await writeFile(join(outputRoot, "report.md"), markdown(report));
   process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);

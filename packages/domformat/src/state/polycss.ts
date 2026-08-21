@@ -1160,8 +1160,8 @@ export function createPolycssPlayback(
     let cursor = start;
     let forcedCursor = 0;
     while (cursor < end || forcedCursor < currentForced.length) {
-      const scheduled = cursor < end ? faces[cursor] : 0xffff;
-      const forcedIndex = forcedCursor < currentForced.length ? currentForced[forcedCursor] : 0xffff;
+      const scheduled = cursor < end ? faces[cursor] : 0x10000;
+      const forcedIndex = forcedCursor < currentForced.length ? currentForced[forcedCursor] : 0x10000;
       let index: number;
       let state: number;
       if (scheduled < forcedIndex) {

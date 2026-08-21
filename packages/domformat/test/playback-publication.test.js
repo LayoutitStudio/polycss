@@ -215,6 +215,88 @@ test("sequential surface publication visits only scheduled lighting and visibili
   assert.equal(diagnostics.surfaceFullReconstructions, 0);
 });
 
+test("sequential surface publication supports a forced uint16-maximum leaf outside the scheduled range", () => {
+  const leafCount = 0x10000;
+  const diagnostics = createPolycssPublicationDiagnostics();
+  const writes = [];
+  const classList = { add() {}, remove() {} };
+  const model = { id: "model", style: {}, classList };
+  const leaves = Array.from({ length: leafCount }, (_, index) => ({ id: `leaf:${index}`, style: {}, classList }));
+  leaves[0xffff].style = new Proxy({}, {
+    set(styles, property, value) {
+      styles[property] = value;
+      writes.push([String(property), String(value)]);
+      return true;
+    },
+  });
+  const initialLeaves = new Uint32Array(leafCount * 2);
+  const surfaceFaces = new Array(leafCount);
+  for (let index = 0; index < leafCount; index += 1) {
+    initialLeaves[index * 2] = index;
+    initialLeaves[index * 2 + 1] = 1;
+    surfaceFaces[index] = { stateOffset: index, stateCount: index === 0xffff ? 2 : 1 };
+  }
+  const sourceFrames = new Uint16Array(leafCount + 1);
+  sourceFrames[0x10000] = 1;
+  const offsets = base64Integers([0, 0, 0], 4);
+  const materialized = {
+    playback: {
+      kind: "inline",
+      shapeCount: 0,
+      leafCount,
+      appearances: [["default", 1, 0]],
+      timeline: { introTicks: 0, loopTicks: 2, frames: [1, 2] },
+      initial: { sourceFrame: 1, appearance: 0, modelTransform: 0, shapes: [], leaves: initialLeaves },
+      frameRows: [[1, 0, -1, 0, 0, 0, 0], [2, 0, -1, 0, 0, 0, 0]],
+      shapeChanges: [],
+      leafChanges: [],
+      transforms: ["", "leaf-transform"],
+    },
+    lighting: {
+      surface: {
+        faces: surfaceFaces,
+        statePacking: {
+          stateCount: leafCount + 1,
+          sourceFramesBase64: base64Integers(sourceFrames, 2),
+          positionProperty: "backgroundPositionY",
+          positions: [...new Array(leafCount).fill("0px"), "-16px"],
+        },
+      },
+      transitions: {
+        initialFrame: 1,
+        sequential: { offsetsBase64: offsets, faceIndicesBase64: "", stateIndicesBase64: "" },
+        nonInteractiveJumps: [],
+      },
+      visibilityCulling: {
+        initialFrame: 1,
+        initialVisibleBitsBase64: Buffer.alloc(leafCount / 8).toString("base64"),
+        sequential: { offsetsBase64: offsets, faceIndicesBase64: "" },
+        nonInteractiveJumps: [],
+      },
+    },
+  };
+  const leafIds = leaves.map((leaf) => leaf.id);
+  const bindings = {
+    channels: [
+      { id: "playback", interpreter: "polycss-playback@0", targets: { model: model.id, shapes: [], leaves: leafIds }, parameters: { baseSceneTransform: "", frameCount: 2, tickRateHz: 30 } },
+      { id: "surface", interpreter: "polycss-surface@0", targets: { leaves: leafIds } },
+    ],
+  };
+  const mounted = { byId: new Map([[model.id, model], ...leaves.map((leaf) => [leaf.id, leaf])]) };
+  const playback = createPolycssPlayback(materialized, bindings, mounted, { publishAppearance() {}, diagnostics });
+  playback.publishInitial();
+  playback.forceVisible([0xffff]);
+  for (const key of Object.keys(diagnostics)) diagnostics[key] = 0;
+  writes.splice(0);
+
+  assert.equal(playback.advance(), 2);
+  assert.deepEqual(writes, [["backgroundPositionY", "-16px"]]);
+  assert.equal(leaves[0xffff].style.visibility, "visible");
+  assert.equal(diagnostics.surfaceLightingTargetVisits, 1);
+  assert.equal(diagnostics.surfaceVisibilityTargetVisits, 0);
+  assert.equal(diagnostics.surfaceFullReconstructions, 0);
+});
+
 test("profile timeline selection uses prepared overrides with canonical baseline fallback", () => {
   const { playback } = createFixture({
     profileTimelines: [
