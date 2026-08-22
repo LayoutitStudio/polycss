@@ -344,11 +344,11 @@ export function createPolycssPagedState(
     const materialized = addBytes(addBytes(addBytes(residentBytes, transientMaterialized, "Paged state materialization"), incomingMaterialized, "Paged state materialization"), activeStageBytes, "Paged state materialization");
     const total = addBytes(addBytes(addBytes(addBytes(decoded, residentBytes, "Paged state aggregate"), transientMaterialized, "Paged state aggregate"), activeStageBytes, "Paged state aggregate"), retainedLiveBytes, "Paged state aggregate");
     invariant(Number.isSafeInteger(residentPages) && residentPages >= 0, "STATE_PAGE_RESIDENCY_LIMIT", "Paged state resident-page accounting overflowed.");
+    invariant(total <= limits.maxAggregateDecodedBytes, "STATE_PAGE_RESIDENCY_LIMIT", "Paged state validation, materialization, residency, and live rows exceed the document-wide byte ceiling.");
     peakResidentPages = Math.max(peakResidentPages, residentPages);
     peakDecodedBytes = Math.max(peakDecodedBytes, decoded);
     peakMaterializedBytes = Math.max(peakMaterializedBytes, materialized);
     peakDocumentStateBytes = Math.max(peakDocumentStateBytes, total);
-    invariant(total <= limits.maxAggregateDecodedBytes, "STATE_PAGE_RESIDENCY_LIMIT", "Paged state validation, materialization, residency, and live rows exceed the document-wide byte ceiling.");
   };
   const desiredResources = (frame: number, includeLookahead = true): string[] => {
     const resources = new Set<string>();

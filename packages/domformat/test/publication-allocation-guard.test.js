@@ -97,6 +97,27 @@ test("sequential paged publication guard rejects target arrays in the applyStage
   assert.ok(result.violations.some((entry) => entry.scope === "applyStage:range" && entry.operation === "array-constructor"));
 });
 
+for (const [scope, sourceName] of [
+  ["publishVariantTarget", "pagedSource"],
+  ["publishStageShapeVisibility", "polycssSource"],
+  ["publishSurfaceTarget", "polycssSource"],
+]) {
+  test(`sequential paged publication guard rejects Set construction in ${scope}`, () => {
+    const source = sourceName === "pagedSource" ? pagedSource : polycssSource;
+    const mutated = injectIntoFunction(source, scope, "void new Set();");
+    const result = audit({ [sourceName]: mutated });
+    assert.equal(result.pass, false);
+    assert.ok(result.violations.some((entry) => entry.scope === scope && entry.operation === "set-map-constructor"));
+  });
+}
+
+test("sequential paged publication guard fails closed when an adjacent helper is renamed", () => {
+  const mutated = polycssSource.replace("const publishStageShapeVisibility = (", "const renamedStageShapeVisibility = (");
+  const result = audit({ polycssSource: mutated });
+  assert.equal(result.pass, false);
+  assert.ok(result.missingScopes.includes("publishStageShapeVisibility"));
+});
+
 test("sequential paged publication guard rejects sorting in forced surface range publication", () => {
   const mutated = injectIntoFunction(polycssSource, "publishSurfaceRangeWithForced", "void [start, end].sort();");
   const result = audit({ polycssSource: mutated });
@@ -188,12 +209,16 @@ test("publication diagnostics stay outside production mount and shipped viewer s
   assert.doesNotMatch(JSON.stringify(JSON.parse(packageSource).exports), /internal-conformance/u);
 });
 
-test("publication trace flushes marks, preserves raw evidence, and gates only page preparation", () => {
+test("publication trace binds lossless capture, raw preservation, and the page-preparation policy", () => {
   assert.match(publicationReportSource, /requestAnimationFrame\(\(\) => requestAnimationFrame/u);
   assert.match(publicationReportSource, /performance\.mark\("domformat-publication:flush"\)/u);
-  assert.match(publicationReportSource, /await writeRawTrace\(rawTrace, events\);[\s\S]*summarizeTrace/u);
-  assert.match(publicationReportSource, /pagePreparationTaskMaxMs: maximumTaskMs/u);
-  assert.match(publicationReportSource, /mainThreadTaskMaxMs: null/u);
-  assert.doesNotMatch(publicationReportSource, /invariant\(trace\.mainThread\.maxTaskMs/u);
-  assert.match(publicationReportSource, /invariant\(trace\.pagePreparation\.maxTaskMs <= maximumTaskMs/u);
+  assert.match(publicationReportSource, /cdp\.send\("Tracing\.start", PUBLICATION_TRACE_START_CONFIG\)/u);
+  assert.match(publicationReportSource, /catch \(error\) \{[\s\S]*traceCompletion = await stopTrace\(cdp\)[\s\S]*writeRawTrace\(rawTrace, events, traceCompletion\)/u);
+  assert.match(publicationReportSource, /writeRawTrace\(rawTrace, events, traceCompletion\);[\s\S]*assertPublicationTraceComplete\(traceCompletion\)[\s\S]*summarizeTrace/u);
+  assert.match(publicationReportSource, /assertPublicationTraceComplete\(traceCompletion\)/u);
+  assert.match(publicationReportSource, /assertPublicationPagePreparationGate\(trace\)/u);
+  assert.match(publicationReportSource, /pagePreparationTaskMaxMs: PUBLICATION_PAGE_PREPARATION_MAX_TASK_MS/u);
+  assert.match(publicationReportSource, /General RunTask, cadence, and relative-speed observations have no hard gate/u);
+  assert.match(publicationReportSource, /attribution: PUBLICATION_PAGE_PREPARATION_ATTRIBUTION/u);
+  assert.match(publicationReportSource, /idleCallbackCount: idle\.length/u);
 });

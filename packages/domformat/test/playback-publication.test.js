@@ -36,9 +36,27 @@ function target(id, writes) {
   return element;
 }
 
+function failNextStyleWrite(element, writes, failedProperty = "backgroundPositionY") {
+  const style = { ...element.style };
+  let armed = true;
+  element.style = new Proxy(style, {
+    set(styles, property, value) {
+      const outcome = armed && property === failedProperty ? "throw" : "set";
+      writes.push([element.id, String(property), String(value), outcome]);
+      if (outcome === "throw") {
+        armed = false;
+        throw new Error(`injected ${String(property)} failure`);
+      }
+      styles[property] = value;
+      return true;
+    },
+  });
+}
+
 function createFixture(options = {}) {
   const writes = [];
   const model = target("model", writes);
+  const shapes = Array.from({ length: options.shapeCount ?? 0 }, (_, index) => target(`shape:${index}`, writes));
   const leaves = [target("leaf:0", writes), target("leaf:1", writes)];
   const frameCount = 4;
   const visibilityOffsets = options.visibilityOffsets ?? [0, 1, 1, 1, 2];
@@ -54,7 +72,7 @@ function createFixture(options = {}) {
   const materialized = {
     playback: {
       kind: "inline",
-      shapeCount: 0,
+      shapeCount: shapes.length,
       leafCount: 2,
       appearances: [["default", 1, 0]],
       timeline: {
@@ -69,7 +87,7 @@ function createFixture(options = {}) {
         sourceFrame: 1,
         appearance: 0,
         modelTransform: 0,
-        shapes: [],
+        shapes: options.initialShapes ?? [],
         leaves: [0, 1, 1, 4],
       },
       frameRows: options.frameRows ?? [
@@ -78,9 +96,9 @@ function createFixture(options = {}) {
         [3, 0, -1, 0, 0, 2, 1],
         [4, 0, -1, 0, 0, 3, 0],
       ],
-      shapeChanges: [],
+      shapeChanges: options.shapeChanges ?? [],
       leafChanges: options.leafChanges ?? [0, 2, 1, 5, 0, 3],
-      transforms: [
+      transforms: options.transforms ?? [
         "",
         "leaf-0-frame-1",
         "leaf-0-frame-2",
@@ -108,19 +126,36 @@ function createFixture(options = {}) {
           faceIndicesBase64: base64Integers(options.lightingFaces ?? [], 2),
           stateIndicesBase64: base64Integers(options.lightingStates ?? [], 2),
         },
-        nonInteractiveJumps: [],
+        nonInteractiveJumps: options.lightingJumps ?? [],
       },
       visibilityCulling: {
         initialFrame: 1,
         initialVisibleBitsBase64: Buffer.from([initialVisibleBits]).toString("base64"),
         sequential: {
           offsetsBase64: base64Integers(visibilityOffsets, 4),
-          faceIndicesBase64: base64Integers([0, 0], 2),
+          faceIndicesBase64: base64Integers(options.visibilityFaces ?? [0, 0], 2),
         },
-        nonInteractiveJumps: [],
+        nonInteractiveJumps: options.visibilityJumps ?? [],
       },
     },
   };
+  if (options.pagedPlayback) {
+    materialized.playback = {
+      kind: "paged",
+      shapeCount: shapes.length,
+      leafCount: 2,
+      appearances: [["default", 1, 0]],
+      timeline: {
+        introTicks: 0,
+        loopTicks: options.timeline?.length ?? frameCount,
+        frames: options.timeline ?? [1, 2, 3, 4],
+      },
+      profileTimelines: options.profileTimelines,
+      initialBankId: options.initialBankId,
+      banks: options.banks,
+      initial: { sourceFrame: 1, appearance: 0 },
+    };
+  }
   if (options.variants) {
     leaves[0].classes.push("material-a");
     materialized.variants = {
@@ -140,10 +175,12 @@ function createFixture(options = {}) {
       profiles: [
         {
           id: "mobile",
-          transformIndices: Uint16Array.of(0, 0),
+          transformIndices: options.profileTransformIndices ?? Uint16Array.of(0, 0),
           visible: Uint8Array.of(0, 1),
           visibilityOffsets: options.dynamicViewportProfiles ? Uint32Array.of(0, 1, 2, 2, 2) : null,
-          visibilityLeaves: options.dynamicViewportProfiles ? Uint16Array.of(0, 0) : null,
+          visibilityLeaves: options.dynamicViewportProfiles
+            ? options.profileVisibilityLeaves ?? Uint16Array.of(0, 0)
+            : null,
           responsiveAffine: null,
         },
         {
@@ -163,8 +200,8 @@ function createFixture(options = {}) {
   }
   const playbackBinding = {
     id: "playback",
-    interpreter: "polycss-playback@0",
-    targets: { model: "model", shapes: [], leaves: leaves.map((leaf) => leaf.id) },
+    interpreter: options.pagedPlayback ? "polycss-paged-playback@0" : "polycss-playback@0",
+    targets: { model: "model", shapes: shapes.map((shape) => shape.id), leaves: leaves.map((leaf) => leaf.id) },
     parameters: { baseSceneTransform: "base-scene", frameCount, tickRateHz: 30 },
   };
   const bindings = {
@@ -174,13 +211,56 @@ function createFixture(options = {}) {
     ],
   };
   if (options.variants) bindings.channels.push({ id: "variants", interpreter: "polycss-variants@0", targets: { nodes: [leaves[0].id] } });
+  if (options.pagedState?.hasVariants) bindings.channels.push({ id: "paged-variants", interpreter: "polycss-paged-variants@0", targets: { effectNodes: [], nodes: [] } });
   if (options.viewportProfiles) bindings.channels.push({ id: "viewport-profiles", interpreter: "polycss-viewport-profiles@0", targets: { leaves: leaves.map((leaf) => leaf.id) } });
-  const mounted = { byId: new Map([[model.id, model], ...leaves.map((leaf) => [leaf.id, leaf])]) };
-  const playback = createPolycssPlayback(materialized, bindings, mounted, { publishAppearance() {}, diagnostics: options.diagnostics });
+  const mounted = { byId: new Map([[model.id, model], ...shapes.map((shape) => [shape.id, shape]), ...leaves.map((leaf) => [leaf.id, leaf])]) };
+  const playback = createPolycssPlayback(materialized, bindings, mounted, { publishAppearance() {}, diagnostics: options.diagnostics, pagedState: options.pagedState });
   playback.publishInitial();
   if (options.viewportProfiles) playback.applyViewportProfile(320, 240, "mobile");
   writes.splice(0);
-  return { leaves, playback, writes };
+  return { leaves, model, playback, shapes, writes };
+}
+
+function pagedStateFixture({ hasPlayback, hasVariants, onCommit }) {
+  const canonicalPlayback = hasPlayback ? {
+    frame: 1,
+    appearance: 0,
+    modelTransform: "",
+    shapeTransforms: [],
+    shapeVisibility: new Uint8Array(0),
+    leafTransforms: ["leaf-0-frame-1", "leaf-1-frame-1"],
+  } : null;
+  const playbackStage = (frame) => ({
+    frame,
+    kind: "materialized",
+    appearance: 0,
+    shapeTargets: new Uint32Array(0),
+    shapeTransforms: [],
+    shapeVisibility: new Uint8Array(0),
+    leafTargets: frame === 2 ? Uint32Array.of(0, 1) : frame === 3 ? Uint32Array.of(0) : new Uint32Array(0),
+    leafTransforms: frame === 2 ? ["leaf-0-frame-2", "leaf-1-frame-2"] : frame === 3 ? ["leaf-0-frame-3"] : [],
+  });
+  return {
+    hasPlayback,
+    hasVariants,
+    canonicalPlayback,
+    stage(frame, includePlayback = true) {
+      return {
+        frame,
+        playback: hasPlayback && includePlayback ? playbackStage(frame) : null,
+        variants: hasVariants ? { frame, kind: "complete", row: Uint16Array.of(frame & 1) } : null,
+      };
+    },
+    commit(stage, publishVariants = true) {
+      onCommit?.(stage, publishVariants);
+      if (stage.playback) {
+        canonicalPlayback.frame = stage.frame;
+        for (let index = 0; index < stage.playback.leafTargets.length; index += 1) canonicalPlayback.leafTransforms[stage.playback.leafTargets[index]] = stage.playback.leafTransforms[index];
+      }
+      return stage.frame;
+    },
+    publishVariants(frame) { return frame; },
+  };
 }
 
 test("sequential surface publication visits only scheduled lighting and visibility targets", () => {
@@ -350,6 +430,170 @@ test("host-selected prepared banks restart canonical timelines without replacing
   assert.throws(() => playback.selectBank("missing"), { code: "UNKNOWN_PREPARED_BANK" });
 });
 
+test("paged seek commits before engine-local playback and preserves the old frame on commit failure", () => {
+  let playback;
+  let rejectCommit = true;
+  const observations = [];
+  const pagedState = pagedStateFixture({
+    hasPlayback: true,
+    hasVariants: false,
+    onCommit(stage) {
+      observations.push({ frame: stage.frame, sourceFrame: playback.sourceFrame });
+      if (rejectCommit) throw new Error("injected page commit failure");
+    },
+  });
+  const fixture = createFixture({ pagedPlayback: true, pagedState, initialVisibleBits: 3, visibilityOffsets: [0, 0, 0, 0, 0] });
+  playback = fixture.playback;
+
+  assert.throws(() => playback.seek(2), /injected page commit failure/u);
+  assert.deepEqual(observations, [{ frame: 2, sourceFrame: 1 }]);
+  assert.equal(playback.sourceFrame, 1);
+  fixture.writes.splice(0);
+  playback.restoreInteraction([], [0]);
+  assert.equal(fixture.leaves[0].style.transform, "leaf-0-frame-1");
+
+  rejectCommit = false;
+  assert.equal(playback.seek(2), 2);
+  assert.equal(fixture.leaves[0].style.transform, "leaf-0-frame-2");
+});
+
+test("failed paged advance and collapsed advance retain their prior tick and frame", () => {
+  for (const [label, invoke, expectedFrame] of [
+    ["advance", (playback) => playback.advance(), 2],
+    ["collapsed advance", (playback) => playback.advanceCollapsed(2), 3],
+  ]) {
+    let rejectCommit = true;
+    const pagedState = pagedStateFixture({
+      hasPlayback: true,
+      hasVariants: false,
+      onCommit() {
+        if (rejectCommit) throw new Error(`injected ${label} commit failure`);
+      },
+    });
+    const { leaves, playback } = createFixture({ pagedPlayback: true, pagedState, initialVisibleBits: 3, visibilityOffsets: [0, 0, 0, 0, 0] });
+
+    assert.throws(() => invoke(playback), new RegExp(`injected ${label} commit failure`, "u"));
+    assert.equal(playback.sourceFrame, 1);
+    assert.equal(playback.tick, 0);
+    playback.restoreInteraction([], [0]);
+    assert.equal(leaves[0].style.transform, "leaf-0-frame-1");
+
+    rejectCommit = false;
+    assert.equal(invoke(playback), expectedFrame);
+    assert.equal(playback.sourceFrame, expectedFrame);
+    assert.equal(playback.tick, label === "advance" ? 1 : 2);
+  }
+});
+
+test("inline seek commits paged variants before local playback and stages profile visibility once afterward", () => {
+  let playback;
+  let rejectCommit = true;
+  let profileTargetReads = 0;
+  const profileVisibilityLeaves = new Proxy([0, 0], {
+    get(values, property) {
+      if (property === "1") profileTargetReads += 1;
+      return Reflect.get(values, property);
+    },
+  });
+  const observations = [];
+  const pagedState = pagedStateFixture({
+    hasPlayback: false,
+    hasVariants: true,
+    onCommit(stage) {
+      observations.push({ frame: stage.frame, sourceFrame: playback.sourceFrame, profileTargetReads });
+      if (rejectCommit) throw new Error("injected variant commit failure");
+    },
+  });
+  const fixture = createFixture({
+    pagedState,
+    viewportProfiles: true,
+    dynamicViewportProfiles: true,
+    profileVisibilityLeaves,
+    initialVisibleBits: 3,
+    visibilityOffsets: [0, 0, 0, 0, 0],
+  });
+  playback = fixture.playback;
+
+  assert.throws(() => playback.seek(2), /injected variant commit failure/u);
+  assert.deepEqual(observations, [{ frame: 2, sourceFrame: 1, profileTargetReads: 0 }]);
+  assert.equal(playback.sourceFrame, 1);
+  assert.equal(profileTargetReads, 0);
+
+  rejectCommit = false;
+  assert.equal(playback.seek(2), 2);
+  assert.equal(profileTargetReads, 1);
+  assert.equal(fixture.leaves[0].style.transform, "profile-transform");
+  assert.equal(fixture.leaves[0].style.visibility, "visible");
+});
+
+test("failed paged bank entry leaves the prior bank, timeline, frame, tick, and transforms coherent", () => {
+  const banks = [
+    { id: "alpha", entryFrame: 1, timeline: { introTicks: 0, loopTicks: 2, frames: [1, 2] } },
+    { id: "beta", entryFrame: 3, timeline: { introTicks: 0, loopTicks: 1, frames: [3] } },
+  ];
+  let rejectCommit = true;
+  const pagedState = pagedStateFixture({
+    hasPlayback: true,
+    hasVariants: false,
+    onCommit() {
+      if (rejectCommit) throw new Error("injected bank commit failure");
+    },
+  });
+  const { leaves, playback } = createFixture({ pagedPlayback: true, pagedState, initialBankId: "alpha", banks, timeline: [1, 2], initialVisibleBits: 3, visibilityOffsets: [0, 0, 0, 0, 0] });
+
+  assert.throws(() => playback.selectBank("beta"), /injected bank commit failure/u);
+  assert.equal(playback.bankId, "alpha");
+  assert.equal(playback.sourceFrame, 1);
+  assert.equal(playback.tick, 0);
+  playback.restoreInteraction([], [0]);
+  assert.equal(leaves[0].style.transform, "leaf-0-frame-1");
+
+  rejectCommit = false;
+  assert.equal(playback.advance(), 2);
+  assert.equal(playback.bankId, "alpha");
+  assert.equal(leaves[0].style.transform, "leaf-0-frame-2");
+});
+
+test("post-commit bank surface failure retains the committed bank and recovers its entry frame", () => {
+  const banks = [
+    { id: "alpha", entryFrame: 1, timeline: { introTicks: 0, loopTicks: 1, frames: [1] } },
+    { id: "beta", entryFrame: 3, timeline: { introTicks: 0, loopTicks: 1, frames: [3] } },
+  ];
+  const pagedState = pagedStateFixture({ hasPlayback: true, hasVariants: false });
+  const { leaves, playback, writes } = createFixture({
+    pagedPlayback: true,
+    pagedState,
+    initialBankId: "alpha",
+    banks,
+    timeline: [1],
+    initialVisibleBits: 3,
+    visibilityOffsets: [0, 0, 0, 0, 0],
+    lightingOffsets: [0, 0, 0, 1, 1],
+    lightingFaces: [0],
+    lightingStates: [1],
+    surfaceFaces: [
+      { stateOffset: 0, stateCount: 2 },
+      { stateOffset: 2, stateCount: 1 },
+    ],
+    surfaceSourceFrames: [0, 2, 0],
+    surfacePositions: ["0px", "-16px", "0px"],
+  });
+  failNextStyleWrite(leaves[0], writes);
+  writes.splice(0);
+
+  assert.throws(() => playback.selectBank("beta"), /injected backgroundPositionY failure/u);
+  assert.equal(playback.bankId, "beta");
+  assert.equal(playback.sourceFrame, 3);
+  assert.equal(playback.tick, 0);
+  assert.equal(leaves[0].style.transform, "leaf-0-frame-3");
+
+  assert.equal(playback.restart(), 3);
+  assert.equal(playback.bankId, "beta");
+  assert.equal(playback.sourceFrame, 3);
+  assert.equal(leaves[0].style.backgroundPositionY, "-16px");
+  assert.equal(leaves[0].style.visibility, "visible");
+});
+
 test("viewport profile publication composes transforms and visibility with the reveal barrier", () => {
   const { leaves, playback, writes } = createFixture({
     viewportProfiles: true,
@@ -459,6 +703,32 @@ test("playback defers hidden transforms and flushes the latest value before reve
     assert.ok(address >= 0 && reveal > address);
   });
 
+  test("frame publication orders classes, transforms, atlas addresses, and visibility", () => {
+    const { playback, writes } = createFixture({
+      variants: true,
+      initialVisibleBits: 2,
+      visibilityOffsets: [0, 0, 1, 1, 1],
+      lightingOffsets: [0, 0, 1, 1, 1],
+      lightingFaces: [0],
+      lightingStates: [1],
+      surfaceFaces: [
+        { stateOffset: 0, stateCount: 2 },
+        { stateOffset: 2, stateCount: 1 },
+      ],
+      surfaceSourceFrames: [0, 1, 0],
+      surfacePositions: ["0px", "-16px", "0px"],
+    });
+
+    assert.equal(playback.advance(), 2);
+    assert.deepEqual(writes.filter(([id]) => id === "leaf:0"), [
+      ["leaf:0", "class:remove", "material-a"],
+      ["leaf:0", "class:add", "material-b"],
+      ["leaf:0", "transform", "leaf-0-frame-2"],
+      ["leaf:0", "backgroundPositionY", "-16px"],
+      ["leaf:0", "visibility", "visible"],
+    ]);
+  });
+
   test("same-frame seek restores canonical variant and surface state", () => {
     const { leaves, playback, writes } = createFixture({
       variants: true,
@@ -527,6 +797,183 @@ test("playback defers hidden transforms and flushes the latest value before reve
       ["leaf:0", "backgroundPositionY", "-16px", "set"],
       ["leaf:0", "visibility", "visible", "set"],
     ]);
+    assert.equal(leaves[0].style.visibility, "visible");
+  });
+
+  test("failed advance keeps the committed frame and the next advance repairs partial surface DOM", () => {
+    const diagnostics = createPolycssPublicationDiagnostics();
+    const { leaves, playback, writes } = createFixture({
+      diagnostics,
+      initialVisibleBits: 2,
+      visibilityOffsets: [0, 0, 1, 2, 2],
+      lightingOffsets: [0, 0, 1, 2, 2],
+      lightingFaces: [0, 0],
+      lightingStates: [1, 2],
+      surfaceFaces: [
+        { stateOffset: 0, stateCount: 3 },
+        { stateOffset: 3, stateCount: 1 },
+      ],
+      surfaceSourceFrames: [0, 1, 2, 0],
+      surfacePositions: ["0px", "-16px", "-32px", "0px"],
+    });
+    failNextStyleWrite(leaves[0], writes);
+    writes.splice(0);
+    diagnostics.surfaceFullReconstructions = 0;
+    diagnostics.surfaceLightingTargetVisits = 0;
+    diagnostics.surfaceVisibilityTargetVisits = 0;
+
+    assert.throws(() => playback.advance(), /injected backgroundPositionY failure/u);
+    assert.equal(playback.sourceFrame, 2);
+    assert.equal(playback.tick, 1);
+
+    assert.equal(playback.advance(), 3);
+    assert.equal(playback.sourceFrame, 3);
+    assert.equal(playback.tick, 2);
+    assert.equal(leaves[0].style.visibility, "hidden");
+    playback.forceVisible([0]);
+    assert.equal(leaves[0].style.backgroundPositionY, "-32px");
+    assert.equal(leaves[0].style.visibility, "visible");
+    assert.equal(diagnostics.surfaceFullReconstructions, 1);
+    assert.equal(diagnostics.surfaceLightingTargetVisits, 3);
+    assert.equal(diagnostics.surfaceVisibilityTargetVisits, 2);
+  });
+
+  test("a held timeline frame repairs pending surface publication before returning", () => {
+    const { leaves, playback, writes } = createFixture({
+      timeline: [1, 2, 2, 3],
+      viewportProfiles: true,
+      dynamicViewportProfiles: true,
+      profileTransformIndices: Uint16Array.of(0xffff, 0xffff),
+      initialVisibleBits: 3,
+      visibilityOffsets: [0, 0, 0, 0, 0],
+      lightingOffsets: [0, 0, 1, 1, 1],
+      lightingFaces: [0],
+      lightingStates: [1],
+      surfaceFaces: [
+        { stateOffset: 0, stateCount: 2 },
+        { stateOffset: 2, stateCount: 1 },
+      ],
+      surfaceSourceFrames: [0, 1, 0],
+      surfacePositions: ["0px", "-16px", "0px"],
+    });
+    failNextStyleWrite(leaves[0], writes);
+    writes.splice(0);
+
+    assert.throws(() => playback.advance(), /injected backgroundPositionY failure/u);
+    assert.equal(playback.sourceFrame, 2);
+    assert.equal(playback.tick, 1);
+    assert.deepEqual(writes.filter(([id]) => id === "leaf:0"), [
+      ["leaf:0", "transform", "leaf-0-frame-2", "set"],
+      ["leaf:0", "backgroundPositionY", "-16px", "throw"],
+    ]);
+
+    writes.splice(0);
+    assert.equal(playback.advance(), 2);
+    assert.equal(playback.sourceFrame, 2);
+    assert.equal(playback.tick, 2);
+    assert.deepEqual(writes, [
+      ["leaf:0", "backgroundPositionY", "-16px", "set"],
+      ["leaf:0", "visibility", "visible", "set"],
+    ]);
+    assert.equal(leaves[0].style.backgroundPositionY, "-16px");
+    assert.equal(leaves[0].style.visibility, "visible");
+  });
+
+  for (const [label, recover] of [
+    ["same-frame seek", (playback) => playback.seek(2)],
+    ["later-frame advance", (playback) => playback.advance()],
+  ]) test(`surface failure preserves deferred shape visibility for ${label} recovery`, () => {
+    const transforms = [
+      "",
+      "leaf-0-frame-1",
+      "leaf-0-frame-2",
+      "leaf-0-frame-3",
+      "leaf-1-frame-1",
+      "leaf-1-frame-2",
+      "shape-frame-1",
+      "shape-frame-2",
+    ];
+    const { leaves, playback, shapes, writes } = createFixture({
+      shapeCount: 1,
+      initialShapes: [0, 6, 0],
+      shapeChanges: [0, 7, 1],
+      transforms,
+      frameRows: [
+        [1, 0, -1, 0, 0, 0, 0],
+        [2, 0, -1, 0, 1, 0, 2],
+        [3, 0, -1, 1, 0, 2, 1],
+        [4, 0, -1, 1, 0, 3, 0],
+      ],
+      initialVisibleBits: 3,
+      visibilityOffsets: [0, 0, 0, 0, 0],
+      lightingOffsets: [0, 0, 1, 1, 1],
+      lightingFaces: [0],
+      lightingStates: [1],
+      surfaceFaces: [
+        { stateOffset: 0, stateCount: 2 },
+        { stateOffset: 2, stateCount: 1 },
+      ],
+      surfaceSourceFrames: [0, 1, 0],
+      surfacePositions: ["0px", "-16px", "0px"],
+    });
+    failNextStyleWrite(leaves[0], writes);
+    writes.splice(0);
+
+    assert.throws(() => playback.advance(), /injected backgroundPositionY failure/u);
+    assert.equal(playback.sourceFrame, 2);
+    assert.equal(shapes[0].style.transform, "shape-frame-2");
+    assert.equal(shapes[0].style.visibility, "hidden");
+
+    writes.splice(0);
+    const recoveredFrame = recover(playback);
+    assert.equal(recoveredFrame, label === "same-frame seek" ? 2 : 3);
+    assert.equal(shapes[0].style.visibility, "visible");
+    assert.deepEqual(writes.filter(([id, property]) => (id === "leaf:0" && property === "backgroundPositionY") || (id === "shape:0" && property === "visibility")), [
+      ["leaf:0", "backgroundPositionY", "-16px", "set"],
+      ["shape:0", "visibility", "visible"],
+    ]);
+  });
+
+  for (const [label, jumps] of [
+    ["multi-segment fallback", {}],
+    ["declared jump", {
+      lightingJumps: [{ fromFrame: 1, toFrame: 4, faceIndicesBase64: base64Integers([0], 2), stateIndicesBase64: base64Integers([3], 2) }],
+      visibilityJumps: [{ fromFrame: 1, toFrame: 4, faceIndicesBase64: base64Integers([0], 2) }],
+    }],
+  ]) test(`failed ${label} surface seek can recover directly to another frame and seek back`, () => {
+    const { leaves, playback, writes } = createFixture({
+      initialVisibleBits: 2,
+      visibilityOffsets: [0, 1, 2, 3, 4],
+      visibilityFaces: [0, 0, 0, 0],
+      lightingOffsets: [0, 1, 2, 3, 4],
+      lightingFaces: [0, 0, 0, 0],
+      lightingStates: [0, 1, 2, 3],
+      surfaceFaces: [
+        { stateOffset: 0, stateCount: 4 },
+        { stateOffset: 4, stateCount: 1 },
+      ],
+      surfaceSourceFrames: [0, 1, 2, 3, 0],
+      surfacePositions: ["0px", "-16px", "-32px", "-48px", "0px"],
+      ...jumps,
+    });
+    failNextStyleWrite(leaves[0], writes);
+    writes.splice(0);
+
+    assert.throws(() => playback.seek(4), /injected backgroundPositionY failure/u);
+    assert.equal(playback.sourceFrame, 4);
+
+    assert.equal(playback.applySurfaceFrame(3), 3);
+    assert.equal(leaves[0].style.visibility, "hidden");
+    playback.forceVisible([0]);
+    assert.equal(leaves[0].style.backgroundPositionY, "-32px");
+    assert.equal(leaves[0].style.visibility, "visible");
+    playback.forceVisible([]);
+    assert.equal(leaves[0].style.visibility, "hidden");
+
+    assert.equal(playback.seek(1), 1);
+    assert.equal(leaves[0].style.visibility, "hidden");
+    playback.forceVisible([0]);
+    assert.equal(leaves[0].style.backgroundPositionY, "0px");
     assert.equal(leaves[0].style.visibility, "visible");
   });
 
@@ -754,6 +1201,115 @@ test("playback defers hidden transforms and flushes the latest value before reve
     restored.writes.splice(0);
     restored.playback.forceVisible([0]);
     assert.deepEqual(restored.writes, [["leaf:0", "visibility", "visible"]]);
+  });
+
+  test("advanceMany publishes its committed prefix coherently before an intermediate commit failure", () => {
+    let rejectFrame3 = true;
+    let variantLeaf = null;
+    let variantFrame = 1;
+    let variantValue = 0;
+    const canonicalPlayback = {
+      frame: 1,
+      appearance: 0,
+      modelTransform: "",
+      shapeTransforms: ["shape-frame-1"],
+      shapeVisibility: Uint8Array.of(0),
+      leafTransforms: ["leaf-0-frame-1", "leaf-1-frame-1"],
+    };
+    const playbackStage = (frame) => ({
+      frame,
+      kind: "materialized",
+      appearance: 0,
+      ...(frame === 2 ? { modelTransform: "model-frame-2" } : {}),
+      shapeTargets: frame === 2 ? Uint32Array.of(0) : new Uint32Array(0),
+      shapeTransforms: frame === 2 ? ["shape-frame-2"] : [],
+      shapeVisibility: frame === 2 ? Uint8Array.of(1) : new Uint8Array(0),
+      leafTargets: frame === 2 ? Uint32Array.of(0, 1) : new Uint32Array(0),
+      leafTransforms: frame === 2 ? ["leaf-0-frame-2", "leaf-1-frame-2"] : [],
+    });
+    const publishVariants = (frame) => {
+      assert.equal(frame, variantFrame);
+      if (!variantLeaf || variantValue === 0) return frame;
+      variantLeaf.classList.remove("material-a");
+      variantLeaf.classList.add("material-b");
+      return frame;
+    };
+    const pagedState = {
+      hasPlayback: true,
+      hasVariants: true,
+      canonicalPlayback,
+      stage(frame, includePlayback = true) {
+        return { frame, playback: includePlayback ? playbackStage(frame) : null, variants: { frame, kind: "complete", row: Uint16Array.of(frame === 1 ? 0 : 1) } };
+      },
+      commit(stage, publish = true) {
+        if (stage.frame === 3 && rejectFrame3) throw new Error("injected frame 3 commit failure");
+        if (stage.playback) {
+          const next = stage.playback;
+          canonicalPlayback.frame = stage.frame;
+          if (next.modelTransform !== undefined) canonicalPlayback.modelTransform = next.modelTransform;
+          for (let index = 0; index < next.shapeTargets.length; index += 1) {
+            const targetIndex = next.shapeTargets[index];
+            canonicalPlayback.shapeTransforms[targetIndex] = next.shapeTransforms[index];
+            canonicalPlayback.shapeVisibility[targetIndex] = next.shapeVisibility[index];
+          }
+          for (let index = 0; index < next.leafTargets.length; index += 1) canonicalPlayback.leafTransforms[next.leafTargets[index]] = next.leafTransforms[index];
+        }
+        variantFrame = stage.frame;
+        variantValue = stage.frame === 1 ? 0 : 1;
+        if (publish) publishVariants(stage.frame);
+        return stage.frame;
+      },
+      publishVariants,
+    };
+    const fixture = createFixture({
+      pagedPlayback: true,
+      pagedState,
+      shapeCount: 1,
+      viewportProfiles: true,
+      dynamicViewportProfiles: true,
+      profileTransformIndices: Uint16Array.of(0xffff, 0xffff),
+      initialVisibleBits: 2,
+      visibilityOffsets: [0, 0, 1, 1, 1],
+      lightingOffsets: [0, 0, 1, 1, 1],
+      lightingFaces: [0],
+      lightingStates: [1],
+      surfaceFaces: [
+        { stateOffset: 0, stateCount: 2 },
+        { stateOffset: 2, stateCount: 1 },
+      ],
+      surfaceSourceFrames: [0, 1, 0],
+      surfacePositions: ["0px", "-16px", "0px"],
+    });
+    variantLeaf = fixture.leaves[0];
+    variantLeaf.classes.push("material-a");
+    fixture.writes.splice(0);
+
+    assert.throws(() => fixture.playback.advanceMany(3), /injected frame 3 commit failure/u);
+    assert.equal(fixture.playback.sourceFrame, 2);
+    assert.equal(fixture.playback.tick, 1);
+    assert.equal(canonicalPlayback.frame, 2);
+    assert.deepEqual(fixture.writes, [
+      ["leaf:0", "class:remove", "material-a"],
+      ["leaf:0", "class:add", "material-b"],
+      ["model", "transform", "base-scene model-frame-2"],
+      ["shape:0", "transform", "shape-frame-2"],
+      ["leaf:1", "transform", "leaf-1-frame-2"],
+      ["leaf:0", "transform", "leaf-0-frame-2"],
+      ["leaf:0", "backgroundPositionY", "-16px"],
+      ["leaf:0", "visibility", "visible"],
+      ["shape:0", "visibility", "visible"],
+    ]);
+
+    rejectFrame3 = false;
+    fixture.writes.splice(0);
+    assert.deepEqual(fixture.playback.advanceMany(2), [3, 4]);
+    assert.equal(fixture.playback.sourceFrame, 4);
+    assert.equal(fixture.playback.tick, 3);
+    assert.equal(fixture.leaves[0].style.transform, "leaf-0-frame-2");
+    assert.equal(fixture.leaves[1].style.transform, "leaf-1-frame-2");
+    assert.equal(fixture.shapes[0].style.transform, "shape-frame-2");
+    assert.equal(fixture.shapes[0].style.visibility, "visible");
+    assert.deepEqual(fixture.leaves[0].classes, ["material-b"]);
   });
 
   test("playback catch-up advances every tick and publishes only the final paint state", () => {

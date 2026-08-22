@@ -6,8 +6,11 @@ const FORBIDDEN_SCOPE_NAMES = Object.freeze([
   "stageVariants:sequential",
   "applyPlaybackStage:range",
   "applyVariantStage:range",
+  "publishVariantTarget",
   "installActiveStage",
   "applyStage:range",
+  "publishStageShapeVisibility",
+  "publishSurfaceTarget",
   "publishSurfaceRangeWithForced",
   "applySurface",
   "stageProfileVisibility",
@@ -125,8 +128,11 @@ export function auditSequentialPagedPublicationSources({ pagedSource, polycssSou
   const stageVariants = namedFunction(paged, "stageVariants");
   const applyPlaybackStage = namedFunction(paged, "applyPlaybackStage");
   const applyVariantStage = namedFunction(paged, "applyVariantStage");
+  const publishVariantTarget = optionalNamedFunction(paged, "publishVariantTarget");
   const installActiveStage = optionalNamedFunction(paged, "installActiveStage");
   const applyStage = namedFunction(polycss, "applyStage");
+  const publishStageShapeVisibility = optionalNamedFunction(polycss, "publishStageShapeVisibility");
+  const publishSurfaceTarget = optionalNamedFunction(polycss, "publishSurfaceTarget");
   const publishSurfaceRangeWithForced = optionalNamedFunction(polycss, "publishSurfaceRangeWithForced");
   const applySurface = namedFunction(polycss, "applySurface");
   const stageProfileVisibility = namedFunction(polycss, "stageProfileVisibility");
@@ -136,8 +142,11 @@ export function auditSequentialPagedPublicationSources({ pagedSource, polycssSou
   const pageBoundaryValidationCalled = /validatePagedPlaybackBoundaryFromCanonical\s*\(/u.test(stagePlaybackSequential.getText(paged));
   const applyStageRange = optionalBranchWithCondition(polycss, applyStage, /next\.kind\s*===\s*["']range["']/u);
   const missingScopes = [
+    ...(publishVariantTarget ? [] : ["publishVariantTarget"]),
     ...(installActiveStage ? [] : ["installActiveStage"]),
     ...(applyStageRange ? [] : ["applyStage:range"]),
+    ...(publishStageShapeVisibility ? [] : ["publishStageShapeVisibility"]),
+    ...(publishSurfaceTarget ? [] : ["publishSurfaceTarget"]),
     ...(publishSurfaceRangeWithForced ? [] : ["publishSurfaceRangeWithForced"]),
     ...(pageBoundaryValidationCalled ? [] : ["validatePagedPlaybackBoundaryFromCanonical:call-site"]),
   ];
@@ -147,8 +156,11 @@ export function auditSequentialPagedPublicationSources({ pagedSource, polycssSou
     ...auditNode(paged, stageVariantsSequential, "stageVariants:sequential"),
     ...auditNode(paged, applyPlaybackStage.body, "applyPlaybackStage:range", completeBranches(paged, applyPlaybackStage)),
     ...auditNode(paged, applyVariantStage.body, "applyVariantStage:range", completeBranches(paged, applyVariantStage)),
+    ...(publishVariantTarget ? auditNode(paged, publishVariantTarget.body, "publishVariantTarget") : []),
     ...(installActiveStage ? auditNode(paged, installActiveStage.body, "installActiveStage") : []),
     ...(applyStageRange ? auditNode(polycss, applyStageRange, "applyStage:range") : []),
+    ...(publishStageShapeVisibility ? auditNode(polycss, publishStageShapeVisibility.body, "publishStageShapeVisibility") : []),
+    ...(publishSurfaceTarget ? auditNode(polycss, publishSurfaceTarget.body, "publishSurfaceTarget") : []),
     ...(publishSurfaceRangeWithForced ? auditNode(polycss, publishSurfaceRangeWithForced.body, "publishSurfaceRangeWithForced") : []),
     ...auditNode(polycss, applySurface.body, "applySurface"),
     ...auditNode(polycss, stageProfileVisibility.body, "stageProfileVisibility"),

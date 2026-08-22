@@ -14,6 +14,13 @@ import { invariant } from "../src/errors.js";
 import { buildDom } from "../src/writer.js";
 import { syntheticExecutableInteractionInput } from "../test/helpers.js";
 import { auditSequentialPagedPublicationSources } from "./publication-allocation-guard.js";
+import {
+  assertPublicationPagePreparationGate,
+  assertPublicationTraceComplete,
+  PUBLICATION_PAGE_PREPARATION_ATTRIBUTION,
+  PUBLICATION_PAGE_PREPARATION_MAX_TASK_MS,
+  PUBLICATION_TRACE_START_CONFIG,
+} from "./publication-trace-policy.js";
 import { assertSingleCycleTraceDuration, publicationFrameAdvances, publicationPageBoundariesCrossed } from "./publication-trace-window.js";
 
 const execFileAsync = promisify(execFile);
@@ -41,11 +48,10 @@ if (allocationEvidence.enforced) invariant(allocationEvidence.pass, "PUBLICATION
 const outputRoot = resolve(workspaceRoot, "bench/results/domformat-publication", label);
 const temporary = await mkdtemp(join(tmpdir(), "domformat-publication-"));
 const durationMs = Number(process.env.DOMFORMAT_PUBLICATION_DURATION_MS ?? 42_000);
-const maximumTaskMs = 50;
 const tracePostFlushSettleMs = 100;
 const regressionThresholds = Object.freeze({
   mainThreadTaskMaxMs: null,
-  pagePreparationTaskMaxMs: maximumTaskMs,
+  pagePreparationTaskMaxMs: PUBLICATION_PAGE_PREPARATION_MAX_TASK_MS,
   basis: "The 50 ms ceiling remains enforced for page-preparation tasks. General RunTask, cadence, and relative-speed observations have no hard gate without attribution or a repeated-run noise distribution.",
   cadenceGate: null,
   relativeSpeedGate: null,
@@ -54,11 +60,6 @@ const frameCount = 1_440;
 const framesPerPage = 60;
 const pageCount = frameCount / framesPerPage;
 const tickRateHz = 30;
-const traceCategories = [
-  "blink.user_timing",
-  "devtools.timeline",
-  "disabled-by-default-devtools.timeline",
-].join(",");
 const workloads = Object.freeze([
   Object.freeze({ id: "cloth", leafCount: 251, denseTransformCount: 200, sparseTransformStart: 200, sparseTransformPool: 51, sparseTransformCount: 17, surfaceChangeCount: 40, visibilityChangeCount: 51, variantChangeCount: 0 }),
   Object.freeze({ id: "solitaire", leafCount: 1_952, denseTransformCount: 0, sparseTransformStart: 0, sparseTransformPool: 32, sparseTransformCount: 32, surfaceChangeCount: 0, visibilityChangeCount: 32, variantChangeCount: 0 }),
@@ -434,14 +435,15 @@ const browserInstrumentation = () => {
 async function startTrace(cdp) {
   const events = [];
   cdp.on("Tracing.dataCollected", (payload) => { if (Array.isArray(payload.value)) events.push(...payload.value); });
-  await cdp.send("Tracing.start", { transferMode: "ReportEvents", categories: traceCategories });
+  await cdp.send("Tracing.start", PUBLICATION_TRACE_START_CONFIG);
   return events;
 }
 
 async function stopTrace(cdp) {
   const complete = once(cdp, "Tracing.tracingComplete");
   await cdp.send("Tracing.end");
-  await complete;
+  const [completion] = await complete;
+  return completion;
 }
 
 async function settleTraceEnd(page) {
@@ -490,9 +492,9 @@ function percentile(values, ratio) {
 
 function fixed(value) { return Number(value.toFixed(3)); }
 
-async function writeRawTrace(path, events) {
+async function writeRawTrace(path, events, traceCompletion) {
   const output = createWriteStream(path);
-  output.write('{"traceEvents":[');
+  output.write(`{"domformatCapture":${JSON.stringify({ startConfig: PUBLICATION_TRACE_START_CONFIG, tracingComplete: traceCompletion ?? null })},"traceEvents":[`);
   for (let start = 0; start < events.length; start += 256) {
     const chunk = events.slice(start, start + 256).map((event) => JSON.stringify(event)).join(",");
     if (!output.write(`${start === 0 ? "" : ","}${chunk}`)) await once(output, "drain");
@@ -560,7 +562,7 @@ function summarizeTrace(events, startPerf, endPerf, evidence) {
     marks: { start: "domformat-publication:start", end: "domformat-publication:end", flush: "domformat-publication:flush", endToFlushMs: fixed((flush.ts - end.ts) / 1_000), postFlushSettleMs: tracePostFlushSettleMs },
     mainThread: { taskCount: tasks.length, maxTaskMs: fixed(Math.max(0, ...taskDurations)), p95TaskMs: fixed(percentile(taskDurations, 0.95)), longTaskObserverCount: observedLongTasks.length },
     cadence: { sampleCount: rafGaps.length, p50Ms: fixed(percentile(rafGaps, 0.5)), p95Ms: fixed(percentile(rafGaps, 0.95)), maxPresentationGapMs: fixed(Math.max(0, ...rafGaps)), gapsOver50Ms: dropped.length },
-    pagePreparation: { taskCount: pageTasks.length, maxTaskMs: fixed(Math.max(0, ...pageDurations)), p95TaskMs: fixed(percentile(pageDurations, 0.95)) },
+    pagePreparation: { attribution: PUBLICATION_PAGE_PREPARATION_ATTRIBUTION, idleCallbackCount: idle.length, taskCount: pageTasks.length, maxTaskMs: fixed(Math.max(0, ...pageDurations)), p95TaskMs: fixed(percentile(pageDurations, 0.95)) },
     remainingDroppedFrameCauses: { gapsOver50Ms: dropped.length, topMainThreadEvents: topEvents },
   };
 }
@@ -569,7 +571,7 @@ function markdown(report) {
   const diagnosticRows = report.workloads.map((entry) => `| ${entry.id} | ${entry.traceStartFrame} | ${entry.traceEndFrame} | ${entry.tracePageBoundariesCrossed} | ${entry.visitStartFrame} | ${entry.visitEndFrame} | ${entry.visitPageBoundariesCrossed} | ${entry.visitEvidenceProvenance} | ${entry.diagnostics.playbackPublicationLeafVisits} | ${(entry.diagnostics.playbackBoundaryShapeVisits ?? 0) + (entry.diagnostics.playbackBoundaryLeafVisits ?? 0)} | ${entry.diagnostics.variantComparisonTargetVisits} | ${entry.diagnostics.surfaceLightingTargetVisits} | ${entry.diagnostics.surfaceVisibilityTargetVisits} | ${entry.diagnostics.playbackCanonicalReconstructions + entry.diagnostics.variantCanonicalReconstructions + entry.diagnostics.surfaceFullReconstructions} |`);
   const allocation = report.allocationEvidence;
   const provenance = report.cssgraphicsProvenance;
-  return `# DOMFormat prepared publication trace (${report.label})\n\nRuntime root: \`${report.runtimeRoot}\`\n\nRuntime revision: \`${report.runtimeGitRevision}\` (dirty: ${report.runtimeGitDirty ? "yes" : "no"})\n\nPacked tarball SHA-256: \`${report.packedTarballSha256}\`\n\nBrowser: ${report.browserVersion}\n\nTrace-marker duration: ${report.trace.durationMs.toFixed(3)} ms (requested: ${report.requestedDurationMs} ms)\n\nTrace end was followed by two animation frames and a zero-delay task; the \`${report.trace.marks.flush}\` user-timing mark arrived ${report.trace.marks.endToFlushMs.toFixed(3)} ms after the end mark, followed by a ${report.trace.marks.postFlushSettleMs} ms settle before \`Tracing.end\`. The raw trace is written before trace interpretation or threshold checks so failed evidence remains inspectable.\n\n| Max main task | Max RAF gap | Cadence p50 | Cadence p95 | Page-preparation max |\n|---:|---:|---:|---:|---:|\n| ${report.trace.mainThread.maxTaskMs.toFixed(3)} ms | ${report.trace.cadence.maxPresentationGapMs.toFixed(3)} ms | ${report.trace.cadence.p50Ms.toFixed(3)} ms | ${report.trace.cadence.p95Ms.toFixed(3)} ms | ${report.trace.pagePreparation.maxTaskMs.toFixed(3)} ms |\n\nThe only enforced timing threshold is ${report.regressionThresholds.pagePreparationTaskMaxMs} ms for page-preparation tasks, preserving the browser Long Tasks boundary. General \`RunTask\`, RAF cadence, and relative-speed values are reported observations, not gates: they include unattributed browser/compositor work, and this single headless run is not a noise-calibrated regression distribution.\n\n| Synthetic publication stress fixture | Trace start | Trace end | Trace boundaries | Visit start | Visit end | Visit boundaries | Visit evidence | Sparse playback leaf visits | Boundary validation visits | Variant compares | Surface visits | Visibility visits | Full reconstructions |\n|---|---:|---:|---:|---:|---:|---:|---|---:|---:|---:|---:|---:|---:|\n${diagnosticRows.join("\n")}\n\nTrace and visit boundaries are computed from their captured start frames, including a cyclic final-to-first transition. Visit counters cover transitions after **Visit start** through **Visit end**, not necessarily the independently timed trace window. Raw visit totals from different endpoints must not be compared without normalization. \`diagnosticStartFrame\` and \`diagnosticEndFrame\` are retained in JSON when visits came from the separate repo-internal conformance pass. That pass uses package-internal diagnostics and is not the timed production viewer path.\n\n## Bounded publication source-form evidence\n\nThe bounded TypeScript source guard found ${allocation.forbiddenSourceFormSites} forbidden source-form site(s) in its ${allocation.scopes.length} named guarded scopes. Guard enforced: ${allocation.enforced ? "yes" : "no (historical comparison runtime)"}. Paged dispatch precedes inline materialization: ${allocation.pagedDispatchBeforeInlineMaterialization ? "yes" : "no"}. Page-boundary validation call present: ${allocation.pageBoundaryValidationCalled ? "yes" : "no"}. Missing guarded scopes: ${allocation.missingScopes.length}.\n\nThis is not a general JavaScript heap-allocation measurement and does not traverse the call graph. It rejects typed/ordinary \`slice()\`, \`Array.from()\`, array/typed-array constructors, generic array literals, spread-array clones, Set/Map construction, sorting, and nested closures only in the named guarded scopes; explicit complete-row reconstruction branches remain outside the sparse-range claim.\n\nThe timing window uses the production browser mount with no diagnostics. Candidate-runtime target visits come from a separate repo-internal conformance pass. Historical-runtime target visits are deterministic workload estimates, not collected diagnostics. Retained identities are checked in both browser passes when the internal pass runs. Flowerbox is intentionally excluded. These are synthetic stress fixtures whose dimensions were selected with reference to the pinned Cloth, Solitaire, and Gravity Well sources; they do not execute adapter code and do not establish adapter behavior or performance parity. The pinned cssGraphics source manifest is \`${provenance.revision}\`; manifest verification: ${provenance.verification}. Exact file paths and Git blob ids are recorded in \`cssgraphicsProvenance.files\`.\n`;
+  return `# DOMFormat prepared publication trace (${report.label})\n\nRuntime root: \`${report.runtimeRoot}\`\n\nRuntime revision: \`${report.runtimeGitRevision}\` (dirty: ${report.runtimeGitDirty ? "yes" : "no"})\n\nPacked tarball SHA-256: \`${report.packedTarballSha256}\`\n\nBrowser: ${report.browserVersion}\n\nTrace capture: \`${report.traceCapture.startConfig.traceConfig.recordMode}\` across ${report.traceCapture.startConfig.traceConfig.includedCategories.length} categories; data loss reported: ${report.traceCapture.dataLossOccurred ? "yes" : "no"}; ${report.traceCapture.eventCount} raw events.\n\nTrace-marker duration: ${report.trace.durationMs.toFixed(3)} ms (requested: ${report.requestedDurationMs} ms)\n\nTrace end was followed by two animation frames and a zero-delay task; the \`${report.trace.marks.flush}\` user-timing mark arrived ${report.trace.marks.endToFlushMs.toFixed(3)} ms after the end mark, followed by a ${report.trace.marks.postFlushSettleMs} ms settle before \`Tracing.end\`. The raw trace is written before trace interpretation, data-loss validation, or threshold checks so failed evidence remains inspectable.\n\n| Max main task | Max RAF gap | Cadence p50 | Cadence p95 | Page-preparation max |\n|---:|---:|---:|---:|---:|\n| ${report.trace.mainThread.maxTaskMs.toFixed(3)} ms | ${report.trace.cadence.maxPresentationGapMs.toFixed(3)} ms | ${report.trace.cadence.p50Ms.toFixed(3)} ms | ${report.trace.cadence.p95Ms.toFixed(3)} ms | ${report.trace.pagePreparation.maxTaskMs.toFixed(3)} ms |\n\nThe only enforced timing threshold is ${report.regressionThresholds.pagePreparationTaskMaxMs} ms for page-preparation tasks, preserving the browser Long Tasks boundary. It is bound to ${report.trace.pagePreparation.taskCount} renderer task(s) containing ${report.trace.pagePreparation.idleCallbackCount} \`FireIdleCallback\` event(s); zero attribution fails instead of passing with a synthetic zero. General \`RunTask\`, RAF cadence, and relative-speed values are reported observations, not gates: they include unattributed browser/compositor work, and this single headless run is not a noise-calibrated regression distribution.\n\n| Synthetic publication stress fixture | Trace start | Trace end | Trace boundaries | Visit start | Visit end | Visit boundaries | Visit evidence | Sparse playback leaf visits | Boundary validation visits | Variant compares | Surface visits | Visibility visits | Full reconstructions |\n|---|---:|---:|---:|---:|---:|---:|---|---:|---:|---:|---:|---:|---:|\n${diagnosticRows.join("\n")}\n\nTrace and visit boundaries are computed from their captured start frames, including a cyclic final-to-first transition. Visit counters cover transitions after **Visit start** through **Visit end**, not necessarily the independently timed trace window. Raw visit totals from different endpoints must not be compared without normalization. \`diagnosticStartFrame\` and \`diagnosticEndFrame\` are retained in JSON when visits came from the separate repo-internal conformance pass. That pass uses package-internal diagnostics and is not the timed production viewer path.\n\n## Bounded publication source-form evidence\n\nThe bounded TypeScript source guard found ${allocation.forbiddenSourceFormSites} forbidden source-form site(s) in its ${allocation.scopes.length} named guarded scopes. Guard enforced: ${allocation.enforced ? "yes" : "no (historical comparison runtime)"}. Paged dispatch precedes inline materialization: ${allocation.pagedDispatchBeforeInlineMaterialization ? "yes" : "no"}. Page-boundary validation call present: ${allocation.pageBoundaryValidationCalled ? "yes" : "no"}. Missing guarded scopes: ${allocation.missingScopes.length}.\n\nThis is not a general JavaScript heap-allocation measurement and does not traverse the call graph. It rejects typed/ordinary \`slice()\`, \`Array.from()\`, array/typed-array constructors, generic array literals, spread-array clones, Set/Map construction, sorting, and nested closures only in the named guarded scopes; explicit complete-row reconstruction branches remain outside the sparse-range claim.\n\nThe timing window uses the production browser mount with no diagnostics. Candidate-runtime target visits come from a separate repo-internal conformance pass. Historical-runtime target visits are deterministic workload estimates, not collected diagnostics. Retained identities are checked in both browser passes when the internal pass runs. Flowerbox is intentionally excluded. These are synthetic stress fixtures whose dimensions were selected with reference to the pinned Cloth, Solitaire, and Gravity Well sources; they do not execute adapter code and do not establish adapter behavior or performance parity. The pinned cssGraphics source manifest is \`${provenance.revision}\`; manifest verification: ${provenance.verification}. Exact file paths and Git blob ids are recorded in \`cssgraphicsProvenance.files\`.\n`;
 }
 
 try {
@@ -621,6 +623,7 @@ try {
   const cdp = await context.newCDPSession(page);
   const events = await startTrace(cdp);
   let traceActive = true;
+  let traceCompletion;
   let startPerf;
   let evidence;
   try {
@@ -650,26 +653,27 @@ try {
       };
     }, startEvidence.workloads);
     await settleTraceEnd(page);
-    await stopTrace(cdp);
+    traceCompletion = await stopTrace(cdp);
     traceActive = false;
   } catch (error) {
     if (traceActive) {
-      try { await stopTrace(cdp); } catch {}
+      try { traceCompletion = await stopTrace(cdp); } catch {}
       traceActive = false;
     }
     try {
-      await writeRawTrace(rawTrace, events);
+      await writeRawTrace(rawTrace, events, traceCompletion);
       process.stderr.write(`Publication trace failed; raw trace preserved at ${rawTrace}.\n`);
     } catch (preservationError) {
       throw new AggregateError([error, preservationError], "Publication trace failed and its raw events could not be preserved.");
     }
     throw error;
   }
-  await writeRawTrace(rawTrace, events);
+  await writeRawTrace(rawTrace, events, traceCompletion);
+  assertPublicationTraceComplete(traceCompletion);
   assertSingleCycleTraceDuration(evidence.endPerf - startPerf, frameCount, tickRateHz);
   invariant(errors.length === 0 && evidence.workloads.every((entry) => entry.stableIdentity), "PUBLICATION_TRACE_FAILURE", `Publication trace failed (${errors.join("; ")}).`);
   const trace = summarizeTrace(events, startPerf, evidence.endPerf, evidence);
-  invariant(trace.pagePreparation.maxTaskMs <= maximumTaskMs, "PAGE_PREPARATION_LONG_TASK", `Publication trace page preparation reached ${trace.pagePreparation.maxTaskMs} ms, above ${maximumTaskMs} ms.`);
+  assertPublicationPagePreparationGate(trace);
   await page.close();
   const diagnosticEvidence = await collectDiagnostics(context, origin);
   const diagnosticsByWorkload = new Map((diagnosticEvidence ?? []).map((entry) => [entry.id, entry]));
@@ -695,7 +699,7 @@ try {
     };
   });
   invariant(resultWorkloads.every((entry) => entry.tracePageBoundariesCrossed >= 2 && entry.visitPageBoundariesCrossed >= 2), "PUBLICATION_BOUNDARY_COVERAGE", "Every publication timing and visit-evidence window must cross at least two page boundaries.");
-  const report = { label, runtimeRoot, runtimeGitRevision, runtimeGitDirty, packedTarballSha256, diagnosticsEnabled, timingInstrumented: false, regressionThresholds, allocationEvidence, cssgraphicsProvenance: adapterProvenance, browserVersion: browser.version(), requestedDurationMs: durationMs, framesPerPage, frameCount, packedTarballBytes: packReports[0].size, trace, workloads: resultWorkloads, rawTrace };
+  const report = { label, runtimeRoot, runtimeGitRevision, runtimeGitDirty, packedTarballSha256, diagnosticsEnabled, timingInstrumented: false, traceCapture: { startConfig: PUBLICATION_TRACE_START_CONFIG, dataLossOccurred: traceCompletion.dataLossOccurred, eventCount: events.length }, regressionThresholds, allocationEvidence, cssgraphicsProvenance: adapterProvenance, browserVersion: browser.version(), requestedDurationMs: durationMs, framesPerPage, frameCount, packedTarballBytes: packReports[0].size, trace, workloads: resultWorkloads, rawTrace };
   await writeFile(join(outputRoot, "report.json"), `${JSON.stringify(report, null, 2)}\n`);
   await writeFile(join(outputRoot, "report.md"), markdown(report));
   process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);

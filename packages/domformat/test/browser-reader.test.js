@@ -30,6 +30,15 @@ function resetPublicationDiagnostics(diagnostics) {
   for (const key of Object.keys(diagnostics)) diagnostics[key] = 0;
 }
 
+function pagedStatePeaks(pagedState) {
+  return {
+    residentPages: pagedState.peakResidentPages,
+    decodedBytes: pagedState.peakDecodedBytes,
+    materializedBytes: pagedState.peakMaterializedBytes,
+    documentStateBytes: pagedState.peakDocumentStateBytes,
+  };
+}
+
 function withoutSequentialRangeCopies(callback) {
   const originalArrayFrom = Array.from;
   const OriginalSet = globalThis.Set;
@@ -1472,6 +1481,7 @@ test("document-wide page workspace ceiling rejects before fetching or materializ
   await assert.rejects(pagedState.prepareInitial(), errorCode("STATE_PAGE_RESIDENCY_LIMIT"));
   assert.equal(loads, 0);
   assert.equal(pagedState.residentResources.length, 0);
+  assert.deepEqual(pagedStatePeaks(pagedState), { residentPages: 0, decodedBytes: 0, materializedBytes: 0, documentStateBytes: 0 });
   pagedState.destroy();
 });
 
@@ -1489,10 +1499,12 @@ test("paged residency accounting rejects before eviction or fetch", async () => 
   await pagedState.prepareInitial();
   await pagedState.ensureFrame(7);
   const before = pagedState.residentResources;
+  const peaksBefore = pagedStatePeaks(pagedState);
   const callsBefore = calls.length;
   limits.maxAggregateDecodedBytes = 1;
   await assert.rejects(pagedState.ensureFrame(3), errorCode("STATE_PAGE_RESIDENCY_LIMIT"));
   assert.deepEqual(pagedState.residentResources, before);
+  assert.deepEqual(pagedStatePeaks(pagedState), peaksBefore);
   assert.equal(calls.length, callsBefore);
   limits.maxAggregateDecodedBytes = DEFAULT_LIMITS.maxAggregateDecodedBytes;
   await pagedState.ensureFrame(3);
@@ -1517,6 +1529,7 @@ test("nonuniform complete publication preflights materialization and projected l
   assert.ok(new Set(packet.pages.map((page) => page.materializedByteLength)).size > 1);
 
   limits.maxAggregateDecodedBytes = 1;
+  const peaksBeforeStageRejection = pagedStatePeaks(pagedState);
   const originalArrayFrom = Array.from;
   let materialized = false;
   let stageError;
@@ -1524,6 +1537,7 @@ test("nonuniform complete publication preflights materialization and projected l
   try { pagedState.stage(4); } catch (error) { stageError = error; } finally { Array.from = originalArrayFrom; }
   assert.throws(() => { throw stageError; }, errorCode("STATE_PAGE_RESIDENCY_LIMIT"));
   assert.equal(materialized, false);
+  assert.deepEqual(pagedStatePeaks(pagedState), peaksBeforeStageRejection);
 
   limits.maxAggregateDecodedBytes = DEFAULT_LIMITS.maxAggregateDecodedBytes;
   const staged = pagedState.stage(4);
@@ -1536,6 +1550,7 @@ test("nonuniform complete publication preflights materialization and projected l
   const classes = [...mounted.byId.get("synthetic/leaf").classes];
   fake.writes.splice(0);
   limits.maxAggregateDecodedBytes = 1;
+  const peaksBeforeCommitRejection = pagedStatePeaks(pagedState);
   assert.throws(() => pagedState.commit(staged), errorCode("STATE_PAGE_RESIDENCY_LIMIT"));
   assert.equal(pagedState.frame, 1);
   assert.equal(pagedState.canonicalPlayback, canonical);
@@ -1544,6 +1559,7 @@ test("nonuniform complete publication preflights materialization and projected l
   assert.deepEqual(canonical.leafTransforms, leafTransforms);
   assert.deepEqual(mounted.byId.get("synthetic/leaf").classes, classes);
   assert.deepEqual(fake.writes, []);
+  assert.deepEqual(pagedStatePeaks(pagedState), peaksBeforeCommitRejection);
 
   limits.maxAggregateDecodedBytes = DEFAULT_LIMITS.maxAggregateDecodedBytes;
   assert.throws(() => pagedState.commit(staged), errorCode("INVALID_PLAYBACK_PUBLICATION"));
@@ -1700,6 +1716,7 @@ test("nonuniform runtime playback pages reject a larger next live row before can
   const rejectedStage = await prepare(rejected.pagedState);
   const canonical = rejected.pagedState.canonicalPlayback;
   const shapeRow = canonical.shapeTransforms;
+  const peaksBeforeCommitRejection = pagedStatePeaks(rejected.pagedState);
   rejected.fake.writes.splice(0);
   assert.throws(() => rejected.pagedState.commit(rejectedStage), errorCode("STATE_PAGE_RESIDENCY_LIMIT"));
   assert.equal(rejected.pagedState.frame, 1);
@@ -1707,6 +1724,7 @@ test("nonuniform runtime playback pages reject a larger next live row before can
   assert.equal(canonical.shapeTransforms, shapeRow);
   assert.equal(canonical.shapeTransforms[0], identity);
   assert.deepEqual(rejected.fake.writes, []);
+  assert.deepEqual(pagedStatePeaks(rejected.pagedState), peaksBeforeCommitRejection);
   rejected.pagedState.destroy();
 });
 
@@ -1761,7 +1779,7 @@ test("combined paged publication succeeds at its measured byte peak and rejects 
 
   const below = create(peak - 1);
   await assert.rejects(exercise(below), errorCode("STATE_PAGE_RESIDENCY_LIMIT"));
-  assert.equal(below.peakDocumentStateBytes, peak);
+  assert.ok(below.peakDocumentStateBytes <= peak - 1);
   below.destroy();
 });
 
