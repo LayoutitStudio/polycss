@@ -32,7 +32,7 @@
     "test": "npm run check && npm run build && node --import tsx --test test/*.test.js",
     "test:coverage": "npm run check && npm run build && node --import tsx --experimental-test-coverage --test-coverage-include=\"src/**/*.ts\" --test-coverage-lines=90 --test-coverage-branches=85 --test-coverage-functions=90 --test test/*.test.js",
     "test:browser": "npm run build && node scripts/run-browser-check.js",
-    "test:page-preparation": "node --import tsx scripts/check-page-preparation.js",
+    "test:page-preparation": "node --import tsx scripts/check-page-preparation.js && node --import tsx scripts/check-publication-performance.js",
     "check": "npm run typecheck && node --check conformance/viewer/*.js && node --check scripts/*.js && node --check viewer/*.js",
     "check:nversion": "node --check conformance/nversion/*.js && node --check test/nversion-viewer.js",
     "conformance": "python3 -B conformance/run_corpus.py && python3 -B conformance/check_canonical.py && python3 -B conformance/check_css.py",

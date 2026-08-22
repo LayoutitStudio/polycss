@@ -26,9 +26,67 @@ interface PagedVariantPacket {
 type PagePacket = Pick<PagedPlaybackPacket | PagedVariantPacket, "pages" | "lookaheadPages" | "maxResidentPages">;
 type StatePageBytesLoader = (record: DomResourceRecord, signal?: AbortSignal) => Promise<Uint8Array>;
 
-export interface PagedPlaybackStage {
+export interface PolycssPublicationDiagnostics {
+  playbackCanonicalReconstructions: number;
+  playbackCanonicalShapeVisits: number;
+  playbackCanonicalLeafVisits: number;
+  playbackBoundaryShapeVisits: number;
+  playbackBoundaryLeafVisits: number;
+  playbackPublicationShapeVisits: number;
+  playbackPublicationLeafVisits: number;
+  variantCanonicalReconstructions: number;
+  variantLogicalTargetVisits: number;
+  variantComparisonTargetVisits: number;
+  variantDomWrites: number;
+  surfaceFullReconstructions: number;
+  surfaceLightingTargetVisits: number;
+  surfaceVisibilityTargetVisits: number;
+}
+
+export function createPolycssPublicationDiagnostics(): PolycssPublicationDiagnostics {
+  return {
+    playbackCanonicalReconstructions: 0,
+    playbackCanonicalShapeVisits: 0,
+    playbackCanonicalLeafVisits: 0,
+    playbackBoundaryShapeVisits: 0,
+    playbackBoundaryLeafVisits: 0,
+    playbackPublicationShapeVisits: 0,
+    playbackPublicationLeafVisits: 0,
+    variantCanonicalReconstructions: 0,
+    variantLogicalTargetVisits: 0,
+    variantComparisonTargetVisits: 0,
+    variantDomWrites: 0,
+    surfaceFullReconstructions: 0,
+    surfaceLightingTargetVisits: 0,
+    surfaceVisibilityTargetVisits: 0,
+  };
+}
+
+interface PagedPlaybackRangeStage {
   readonly frame: number;
-  readonly complete: boolean;
+  readonly kind: "range";
+  readonly appearance: number;
+  readonly modelTransform?: string;
+  readonly page: DecodedPagedPlaybackPage;
+  readonly shapeStart: number;
+  readonly shapeEnd: number;
+  readonly leafStart: number;
+  readonly leafEnd: number;
+}
+
+interface PagedPlaybackCompleteStage {
+  readonly frame: number;
+  readonly kind: "complete";
+  readonly appearance: number;
+  readonly modelTransform: string;
+  readonly shapeTransforms: string[];
+  readonly shapeVisibility: Uint8Array;
+  readonly leafTransforms: string[];
+}
+
+export interface PagedPlaybackMaterializedStage {
+  readonly frame: number;
+  readonly kind: "materialized";
   readonly appearance: number;
   readonly modelTransform?: string;
   readonly shapeTargets: Uint32Array;
@@ -38,12 +96,23 @@ export interface PagedPlaybackStage {
   readonly leafTransforms: readonly string[];
 }
 
-export interface PagedVariantStage {
+export type PagedPlaybackStage = PagedPlaybackRangeStage | PagedPlaybackCompleteStage | PagedPlaybackMaterializedStage;
+
+interface PagedVariantRangeStage {
   readonly frame: number;
-  readonly complete: boolean;
-  readonly targets: Uint16Array;
-  readonly classes: Uint16Array;
+  readonly kind: "range";
+  readonly page: DecodedPagedVariantPage;
+  readonly start: number;
+  readonly end: number;
 }
+
+interface PagedVariantCompleteStage {
+  readonly frame: number;
+  readonly kind: "complete";
+  readonly row: Uint16Array;
+}
+
+export type PagedVariantStage = PagedVariantRangeStage | PagedVariantCompleteStage;
 
 export interface PagedStateStage {
   readonly frame: number;
@@ -52,12 +121,12 @@ export interface PagedStateStage {
 }
 
 export interface PagedPlaybackCanonical {
-  readonly frame: number;
-  readonly appearance: number;
-  readonly modelTransform: string;
-  readonly shapeTransforms: readonly string[];
-  readonly shapeVisibility: Uint8Array;
-  readonly leafTransforms: readonly string[];
+  frame: number;
+  appearance: number;
+  modelTransform: string;
+  shapeTransforms: string[];
+  shapeVisibility: Uint8Array;
+  leafTransforms: string[];
 }
 
 export interface PolycssPagedState {
@@ -70,7 +139,7 @@ export interface PolycssPagedState {
   readonly peakDocumentStateBytes: number;
   readonly frame: number;
   readonly activeFramePin: number;
-  readonly initialPlayback: PagedPlaybackCanonical | null;
+  readonly canonicalPlayback: PagedPlaybackCanonical | null;
   prepareInitial(signal?: AbortSignal): Promise<void>;
   ensureFrame(frame: number, signal?: AbortSignal): Promise<void>;
   isFrameReady(frame: number): boolean;
@@ -109,15 +178,32 @@ function contract<T>(document: DomDocument, codec: string, interpreter: string):
   return Object.freeze({ state, binding, packet: (state.data as unknown as { readonly packet: T }).packet });
 }
 
-function transformLiveBytes(playback: PagedPlaybackCanonical | null, variants: Uint16Array | null, publishedVariants: Uint16Array | null): number {
-  if (!playback) return (variants?.byteLength ?? 0) + (publishedVariants?.byteLength ?? 0);
-  let total = 8 + playback.modelTransform.length * 2 + playback.shapeVisibility.byteLength + (variants?.byteLength ?? 0) + (publishedVariants?.byteLength ?? 0);
-  for (const transform of playback.shapeTransforms) total += 8 + transform.length * 2;
-  for (const transform of playback.leafTransforms) total += 8 + transform.length * 2;
+function transformBytes(transform: string): number {
+  const value = 8 + transform.length * 2;
+  invariant(Number.isSafeInteger(value), "STATE_PAGE_RESIDENCY_LIMIT", "Paged playback transform byte accounting overflowed.");
+  return value;
+}
+
+function addBytes(left: number, right: number, label: string): number {
+  const value = left + right;
+  invariant(Number.isSafeInteger(value) && value >= 0, "STATE_PAGE_RESIDENCY_LIMIT", `${label} byte accounting overflowed.`);
+  return value;
+}
+
+function replaceTransformBytes(total: number, previous: string, next: string): number {
+  const retained = total - transformBytes(previous);
+  invariant(Number.isSafeInteger(retained) && retained >= 0, "STATE_PAGE_RESIDENCY_LIMIT", "Paged playback live-row byte accounting underflowed.");
+  return addBytes(retained, transformBytes(next), "Paged playback live-row");
+}
+
+function playbackLiveBytes(playback: PagedPlaybackCanonical): number {
+  let total = addBytes(transformBytes(playback.modelTransform), playback.shapeVisibility.byteLength, "Paged playback live-row");
+  for (const transform of playback.shapeTransforms) total = addBytes(total, transformBytes(transform), "Paged playback live-row");
+  for (const transform of playback.leafTransforms) total = addBytes(total, transformBytes(transform), "Paged playback live-row");
   return total;
 }
 
-function playbackCanonical(page: DecodedPagedPlaybackPage, frame: number): PagedPlaybackCanonical {
+function playbackCanonical(page: DecodedPagedPlaybackPage, frame: number, diagnostics?: PolycssPublicationDiagnostics): PagedPlaybackCanonical {
   const localTarget = frame - page.startFrame;
   let appearance = page.keyframe.appearance;
   let modelTransform = page.transforms[page.keyframe.modelTransform];
@@ -137,12 +223,17 @@ function playbackCanonical(page: DecodedPagedPlaybackPage, frame: number): Paged
       leafTransforms[target] = page.transforms[page.leafTransforms[cursor]];
     }
   }
-  return Object.freeze({ frame, appearance, modelTransform, shapeTransforms: Object.freeze(shapeTransforms), shapeVisibility, leafTransforms: Object.freeze(leafTransforms) });
+  if (diagnostics) {
+    diagnostics.playbackCanonicalReconstructions += 1;
+    diagnostics.playbackCanonicalShapeVisits += shapeTransforms.length;
+    diagnostics.playbackCanonicalLeafVisits += leafTransforms.length;
+  }
+  return { frame, appearance, modelTransform, shapeTransforms, shapeVisibility, leafTransforms };
 }
 
-function playbackFullStage(page: DecodedPagedPlaybackPage, frame: number): PagedPlaybackStage {
-  const row = playbackCanonical(page, frame);
-  return Object.freeze({ frame, complete: true, appearance: row.appearance, modelTransform: row.modelTransform, shapeTargets: Uint32Array.from({ length: row.shapeTransforms.length }, (_, index) => index), shapeTransforms: row.shapeTransforms, shapeVisibility: row.shapeVisibility, leafTargets: Uint32Array.from({ length: row.leafTransforms.length }, (_, index) => index), leafTransforms: row.leafTransforms });
+function playbackFullStage(page: DecodedPagedPlaybackPage, frame: number, diagnostics?: PolycssPublicationDiagnostics): PagedPlaybackStage {
+  const row = playbackCanonical(page, frame, diagnostics);
+  return Object.freeze({ frame, kind: "complete", appearance: row.appearance, modelTransform: row.modelTransform, shapeTransforms: row.shapeTransforms, shapeVisibility: row.shapeVisibility, leafTransforms: row.leafTransforms });
 }
 
 function playbackSparseStage(page: DecodedPagedPlaybackPage, frame: number, local: number): PagedPlaybackStage {
@@ -153,20 +244,21 @@ function playbackSparseStage(page: DecodedPagedPlaybackPage, frame: number, loca
   const leafEnd = page.leafOffsets[local + 1];
   return Object.freeze({
     frame,
-    complete: false,
+    kind: "range",
     appearance: page.appearances[local],
     ...(model === 0xffffffff ? {} : { modelTransform: page.transforms[model] }),
-    shapeTargets: page.shapeTargets.slice(shapeStart, shapeEnd),
-    shapeTransforms: Object.freeze(Array.from(page.shapeTransforms.subarray(shapeStart, shapeEnd), (index) => page.transforms[index])),
-    shapeVisibility: page.shapeVisibility.slice(shapeStart, shapeEnd),
-    leafTargets: page.leafTargets.slice(leafStart, leafEnd),
-    leafTransforms: Object.freeze(Array.from(page.leafTransforms.subarray(leafStart, leafEnd), (index) => page.transforms[index])),
+    page,
+    shapeStart,
+    shapeEnd,
+    leafStart,
+    leafEnd,
   });
 }
 
-function variantRow(page: DecodedPagedVariantPage, frame: number): Uint16Array {
+function variantRow(page: DecodedPagedVariantPage, frame: number, diagnostics?: PolycssPublicationDiagnostics): Uint16Array {
   const row = page.keyframe.slice();
   for (let local = 1; local <= frame - page.startFrame; local += 1) for (let cursor = page.offsets[local]; cursor < page.offsets[local + 1]; cursor += 1) row[page.targets[cursor]] = page.classes[cursor];
+  if (diagnostics) diagnostics.variantCanonicalReconstructions += 1;
   return row;
 }
 
@@ -175,7 +267,7 @@ export function createPolycssPagedState(
   mounted: MountedTree,
   limits: DomLimits,
   load: StatePageBytesLoader,
-  options: { readonly boundTargets?: ReadonlyMap<string, Readonly<{ targets: unknown }>>; readonly onLateFailure?: (error: unknown) => void } = {},
+  options: { readonly boundTargets?: ReadonlyMap<string, Readonly<{ targets: unknown }>>; readonly onLateFailure?: (error: unknown) => void; readonly diagnostics?: PolycssPublicationDiagnostics } = {},
 ): PolycssPagedState | null {
   const playback = contract<PagedPlaybackPacket>(document, "polycss-paged-playback@0", "polycss-paged-playback@0");
   const variants = contract<PagedVariantPacket>(document, "polycss-paged-variants@0", "polycss-paged-variants@0");
@@ -209,8 +301,15 @@ export function createPolycssPagedState(
   };
   let currentVariants = variants ? uint16(variants.packet.initial.classIndicesBase64) : null;
   let publishedVariants = currentVariants?.slice() ?? null;
+  let variantsSynchronized = true;
   let variantFrame = variants?.packet.initial.frame ?? playbackInitial;
   let currentPlayback: PagedPlaybackCanonical | null = null;
+  let currentPlaybackBytes = 0;
+  const variantLiveBytes = addBytes(currentVariants?.byteLength ?? 0, publishedVariants?.byteLength ?? 0, "Paged variant retained-row");
+  let activeStage: PagedStateStage | null = null;
+  let activePlaybackStageResource: string | null = null;
+  let activeVariantStageResource: string | null = null;
+  let activeStageBytes = 0;
   let resident = new Map<string, DecodedStatePage>();
   let controller: AbortController | null = null;
   let generation = 0;
@@ -220,18 +319,36 @@ export function createPolycssPagedState(
   let peakMaterializedBytes = 0;
   let peakDocumentStateBytes = 0;
 
-  const liveBytes = () => transformLiveBytes(currentPlayback, currentVariants, publishedVariants);
-  const residentMaterialized = () => [...resident.values()].reduce((total, page) => total + page.materializedByteLength, 0);
-  const measure = (validationBytes = 0, transientMaterialized = 0, incomingPage = false, incomingMaterialized = 0): void => {
+  const liveBytes = () => addBytes(currentPlaybackBytes, variantLiveBytes, "Paged state live-row");
+  const residentMaterialized = (excluded?: ReadonlySet<string>): number => {
+    let total = 0;
+    for (const [resource, page] of resident) if (!excluded?.has(resource)) total = addBytes(total, page.materializedByteLength, "Paged state residency");
+    return total;
+  };
+  const measure = ({
+    validationBytes = 0,
+    transientMaterialized = 0,
+    incomingMaterialized = 0,
+    residentBytes = residentMaterialized(),
+    residentPages = resident.size,
+    retainedLiveBytes = liveBytes(),
+  }: {
+    readonly validationBytes?: number;
+    readonly transientMaterialized?: number;
+    readonly incomingMaterialized?: number;
+    readonly residentBytes?: number;
+    readonly residentPages?: number;
+    readonly retainedLiveBytes?: number;
+  } = {}): void => {
     const decoded = validationBytes;
-    const residentBytes = residentMaterialized();
-    const materialized = residentBytes + transientMaterialized + incomingMaterialized;
-    const total = decoded + residentBytes + transientMaterialized + liveBytes();
-    peakResidentPages = Math.max(peakResidentPages, resident.size + (incomingPage ? 1 : 0));
+    const materialized = addBytes(addBytes(addBytes(residentBytes, transientMaterialized, "Paged state materialization"), incomingMaterialized, "Paged state materialization"), activeStageBytes, "Paged state materialization");
+    const total = addBytes(addBytes(addBytes(addBytes(decoded, residentBytes, "Paged state aggregate"), transientMaterialized, "Paged state aggregate"), activeStageBytes, "Paged state aggregate"), retainedLiveBytes, "Paged state aggregate");
+    invariant(Number.isSafeInteger(residentPages) && residentPages >= 0, "STATE_PAGE_RESIDENCY_LIMIT", "Paged state resident-page accounting overflowed.");
+    invariant(total <= limits.maxAggregateDecodedBytes, "STATE_PAGE_RESIDENCY_LIMIT", "Paged state validation, materialization, residency, and live rows exceed the document-wide byte ceiling.");
+    peakResidentPages = Math.max(peakResidentPages, residentPages);
     peakDecodedBytes = Math.max(peakDecodedBytes, decoded);
     peakMaterializedBytes = Math.max(peakMaterializedBytes, materialized);
     peakDocumentStateBytes = Math.max(peakDocumentStateBytes, total);
-    invariant(total <= limits.maxAggregateDecodedBytes, "STATE_PAGE_RESIDENCY_LIMIT", "Paged state validation, materialization, residency, and live rows exceed the document-wide byte ceiling.");
   };
   const desiredResources = (frame: number, includeLookahead = true): string[] => {
     const resources = new Set<string>();
@@ -244,6 +361,8 @@ export function createPolycssPagedState(
     for (const pin of new Set([...fixedPins, activeFramePin])) for (const packet of packets) resources.add(pageAt(packet, pin).resource);
     if (playback && currentPlayback) resources.add(pageAt(playback.packet, currentPlayback.frame).resource);
     if (variants) resources.add(pageAt(variants.packet, variantFrame).resource);
+    if (activePlaybackStageResource) resources.add(activePlaybackStageResource);
+    if (activeVariantStageResource) resources.add(activeVariantStageResource);
     if (includeLookahead) for (let offset = 1; offset <= Math.max(...packets.map((packet) => packet.lookaheadPages)); offset += 1) {
       for (let index = 0; index < packets.length; index += 1) {
         const packet = packets[index];
@@ -257,16 +376,24 @@ export function createPolycssPagedState(
   const loadPage = async (resource: string, protectedResources: ReadonlySet<string>, signal?: AbortSignal): Promise<DecodedStatePage> => {
     const cached = resident.get(resource);
     if (cached) { touch(resource, cached); return cached; }
-    while (resident.size >= maxResidentPages) {
-      const candidate = [...resident.keys()].find((entry) => !protectedResources.has(entry));
-      invariant(candidate, "STATE_PAGE_RESIDENCY_LIMIT", "Paged state cannot reserve capacity without evicting a protected page.");
-      resident.delete(candidate);
+    const evictions: string[] = [];
+    for (const candidate of resident.keys()) {
+      if (resident.size - evictions.length < maxResidentPages) break;
+      if (!protectedResources.has(candidate)) evictions.push(candidate);
     }
+    invariant(resident.size - evictions.length < maxResidentPages, "STATE_PAGE_RESIDENCY_LIMIT", "Paged state cannot reserve capacity without evicting a protected page.");
     const owner = descriptors.get(resource);
     const record = records.get(resource);
     invariant(owner && record?.kind === "state-page" && record.decodedByteLength !== undefined, "MISSING_EXTERNAL_RESOURCE", `State page ${resource} is undeclared.`);
     const validationBytes = statePageValidationWorkspaceBytes(record.decodedByteLength, owner.descriptor.materializedByteLength);
-    measure(validationBytes, 0, true, owner.descriptor.materializedByteLength);
+    const excluded = new Set(evictions);
+    measure({
+      validationBytes,
+      incomingMaterialized: owner.descriptor.materializedByteLength,
+      residentBytes: residentMaterialized(excluded),
+      residentPages: resident.size - evictions.length + 1,
+    });
+    for (const candidate of evictions) resident.delete(candidate);
     let bytes: Uint8Array;
     try {
       bytes = await load(record, signal);
@@ -280,8 +407,6 @@ export function createPolycssPagedState(
       : validatePagedVariantPageBytes(bytes, { ...(owner.descriptor as DomPagedVariantPageDescriptor), channel: owner.channel }, variantNodes.length, variants!.packet.classes.length, limits);
     invariant(!destroyed && !signal?.aborted, "OPERATION_ABORTED", `State page ${resource} request was aborted.`);
     touch(resource, page);
-    measure();
-    invariant(resident.size <= maxResidentPages, "STATE_PAGE_RESIDENCY_LIMIT", "Paged state residency exceeded its document-wide page ceiling.");
     return page;
   };
   const loadWindow = async (frame: number, signal?: AbortSignal, includeLookahead = true): Promise<void> => {
@@ -314,10 +439,14 @@ export function createPolycssPagedState(
       const local = frame - page.startFrame;
       if (local === 0) {
         validatePagedPlaybackBoundaryFromCanonical(currentPlayback, page);
+        if (options.diagnostics) {
+          options.diagnostics.playbackBoundaryShapeVisits += page.keyframe.shapeTransforms.length + page.shapeOffsets[1] - page.shapeOffsets[0];
+          options.diagnostics.playbackBoundaryLeafVisits += page.keyframe.leafTransforms.length + page.leafOffsets[1] - page.leafOffsets[0];
+        }
       }
       return playbackSparseStage(page, frame, local);
     }
-    return playbackFullStage(page, frame);
+    return playbackFullStage(page, frame, options.diagnostics);
   };
   const stageVariants = (frame: number): PagedVariantStage | null => {
     if (!variants) return null;
@@ -325,53 +454,143 @@ export function createPolycssPagedState(
     const expected = variantFrame === variants.packet.frameCount ? 1 : variantFrame + 1;
     if (frame === expected && frame > page.startFrame) {
       const local = frame - page.startFrame;
-      return Object.freeze({ frame, complete: false, targets: page.targets.slice(page.offsets[local], page.offsets[local + 1]), classes: page.classes.slice(page.offsets[local], page.offsets[local + 1]) });
+      return Object.freeze({ frame, kind: "range", page, start: page.offsets[local], end: page.offsets[local + 1] });
     }
-    const row = variantRow(page, frame);
-    return Object.freeze({ frame, complete: true, targets: Uint16Array.from({ length: row.length }, (_, index) => index), classes: row });
+    return Object.freeze({ frame, kind: "complete", row: variantRow(page, frame, options.diagnostics) });
+  };
+  const playbackStageWorkspace = (frame: number, includePlayback: boolean): number => {
+    if (!playback || !includePlayback) return 0;
+    const page = playbackPage(frame);
+    const expected = currentPlayback ? (currentPlayback.frame === playback.packet.pages.at(-1)!.endFrame ? 1 : currentPlayback.frame + 1) : -1;
+    return currentPlayback && frame === expected
+      ? 0
+      : pagedPlaybackPublicationWorkspaceBytes(page.materializedByteLength, playback.packet.shapeCount, playback.packet.leafCount);
+  };
+  const variantStageWorkspace = (frame: number): number => {
+    if (!variants) return 0;
+    const page = variantPage(frame);
+    const expected = variantFrame === variants.packet.frameCount ? 1 : variantFrame + 1;
+    return frame === expected && frame > page.startFrame ? 0 : pagedVariantPublicationWorkspaceBytes(variantNodes.length);
+  };
+  const publishVariantTarget = (index: number, value: number): void => {
+    invariant(publishedVariants && variants, "INVALID_VARIANT_PUBLICATION", "Paged variant row has no owner.");
+    const previous = publishedVariants[index];
+    if (previous === value) return;
+    if (previous !== 0xffff) { variantNodes[index].classList.remove(variants.packet.classes[previous]); if (options.diagnostics) options.diagnostics.variantDomWrites += 1; }
+    if (value !== 0xffff) { variantNodes[index].classList.add(variants.packet.classes[value]); if (options.diagnostics) options.diagnostics.variantDomWrites += 1; }
+    publishedVariants[index] = value;
   };
   const publishVariantRow = (): void => {
     invariant(currentVariants && publishedVariants && variants, "INVALID_VARIANT_PUBLICATION", "Paged variant row has no owner.");
+    if (options.diagnostics) options.diagnostics.variantComparisonTargetVisits += currentVariants.length;
     for (let index = 0; index < currentVariants.length; index += 1) {
       const value = currentVariants[index];
-      const previous = publishedVariants[index];
-      if (previous === value) continue;
-      if (previous !== 0xffff) variantNodes[index].classList.remove(variants.packet.classes[previous]);
-      if (value !== 0xffff) variantNodes[index].classList.add(variants.packet.classes[value]);
-      publishedVariants[index] = value;
+      publishVariantTarget(index, value);
     }
+    variantsSynchronized = true;
   };
   const applyVariantStage = (stage: PagedVariantStage, publish: boolean): void => {
     invariant(currentVariants && variants, "INVALID_VARIANT_PUBLICATION", "Paged variant stage has no owner.");
-    for (let cursor = 0; cursor < stage.targets.length; cursor += 1) {
-      const index = stage.targets[cursor];
-      const value = stage.classes[cursor];
-      const previous = currentVariants[index];
-      if (previous === value) continue;
-      currentVariants[index] = value;
+    if (stage.kind === "complete") {
+      if (options.diagnostics) options.diagnostics.variantLogicalTargetVisits += stage.row.length;
+      currentVariants.set(stage.row);
+    } else {
+      if (options.diagnostics) options.diagnostics.variantLogicalTargetVisits += stage.end - stage.start;
+      for (let cursor = stage.start; cursor < stage.end; cursor += 1) {
+        const index = stage.page.targets[cursor];
+        const value = stage.page.classes[cursor];
+        currentVariants[index] = value;
+      }
     }
     variantFrame = stage.frame;
-    if (publish) publishVariantRow();
+    if (!publish) { variantsSynchronized = false; return; }
+    if (stage.kind === "complete" || !variantsSynchronized) { publishVariantRow(); return; }
+    if (options.diagnostics) options.diagnostics.variantComparisonTargetVisits += stage.end - stage.start;
+    for (let cursor = stage.start; cursor < stage.end; cursor += 1) {
+      const index = stage.page.targets[cursor];
+      publishVariantTarget(index, currentVariants[index]);
+    }
   };
-  const applyPlaybackStage = (stage: PagedPlaybackStage): void => {
+  const playbackBytesAfterStage = (stage: PagedPlaybackStage): number => {
     invariant(playback, "INVALID_PLAYBACK_PUBLICATION", "Paged playback stage has no owner.");
-    if (!currentPlayback || stage.complete) {
-      invariant(stage.modelTransform !== undefined && stage.shapeTargets.length === playback.packet.shapeCount && stage.leafTargets.length === playback.packet.leafCount, "INVALID_PLAYBACK_PUBLICATION", "Complete paged playback stage is incomplete.");
-      currentPlayback = Object.freeze({ frame: stage.frame, appearance: stage.appearance, modelTransform: stage.modelTransform, shapeTransforms: Object.freeze([...stage.shapeTransforms]), shapeVisibility: stage.shapeVisibility.slice(), leafTransforms: Object.freeze([...stage.leafTransforms]) });
+    if (stage.kind === "complete") {
+      invariant(stage.shapeTransforms.length === playback.packet.shapeCount && stage.shapeVisibility.length === playback.packet.shapeCount && stage.leafTransforms.length === playback.packet.leafCount, "INVALID_PLAYBACK_PUBLICATION", "Complete paged playback stage is incomplete.");
+      return playbackLiveBytes(stage);
+    }
+    invariant(currentPlayback && stage.kind === "range", "INVALID_PLAYBACK_PUBLICATION", "Paged playback sparse stage is invalid.");
+    let total = currentPlaybackBytes;
+    if (stage.modelTransform !== undefined) total = replaceTransformBytes(total, currentPlayback.modelTransform, stage.modelTransform);
+    for (let cursor = stage.shapeStart; cursor < stage.shapeEnd; cursor += 1) {
+      const target = stage.page.shapeTargets[cursor];
+      total = replaceTransformBytes(total, currentPlayback.shapeTransforms[target], stage.page.transforms[stage.page.shapeTransforms[cursor]]);
+    }
+    for (let cursor = stage.leafStart; cursor < stage.leafEnd; cursor += 1) {
+      const target = stage.page.leafTargets[cursor];
+      total = replaceTransformBytes(total, currentPlayback.leafTransforms[target], stage.page.transforms[stage.page.leafTransforms[cursor]]);
+    }
+    return total;
+  };
+  const applyPlaybackStage = (stage: PagedPlaybackStage, nextPlaybackBytes: number): void => {
+    invariant(playback, "INVALID_PLAYBACK_PUBLICATION", "Paged playback stage has no owner.");
+    if (stage.kind === "complete") {
+      if (!currentPlayback) {
+        currentPlayback = { frame: stage.frame, appearance: stage.appearance, modelTransform: stage.modelTransform, shapeTransforms: [...stage.shapeTransforms], shapeVisibility: stage.shapeVisibility.slice(), leafTransforms: [...stage.leafTransforms] };
+      } else {
+        currentPlayback.frame = stage.frame;
+        currentPlayback.appearance = stage.appearance;
+        currentPlayback.modelTransform = stage.modelTransform;
+        for (let index = 0; index < stage.shapeTransforms.length; index += 1) currentPlayback.shapeTransforms[index] = stage.shapeTransforms[index];
+        currentPlayback.shapeVisibility.set(stage.shapeVisibility);
+        for (let index = 0; index < stage.leafTransforms.length; index += 1) currentPlayback.leafTransforms[index] = stage.leafTransforms[index];
+      }
+      currentPlaybackBytes = nextPlaybackBytes;
       return;
     }
-    const shapeTransforms = [...currentPlayback.shapeTransforms];
-    const shapeVisibility = currentPlayback.shapeVisibility.slice();
-    const leafTransforms = [...currentPlayback.leafTransforms];
-    for (let cursor = 0; cursor < stage.shapeTargets.length; cursor += 1) { const target = stage.shapeTargets[cursor]; shapeTransforms[target] = stage.shapeTransforms[cursor]; shapeVisibility[target] = stage.shapeVisibility[cursor]; }
-    for (let cursor = 0; cursor < stage.leafTargets.length; cursor += 1) leafTransforms[stage.leafTargets[cursor]] = stage.leafTransforms[cursor];
-    currentPlayback = Object.freeze({ frame: stage.frame, appearance: stage.appearance, modelTransform: stage.modelTransform ?? currentPlayback.modelTransform, shapeTransforms: Object.freeze(shapeTransforms), shapeVisibility, leafTransforms: Object.freeze(leafTransforms) });
+    invariant(currentPlayback && stage.kind === "range", "INVALID_PLAYBACK_PUBLICATION", "Paged playback sparse stage is invalid.");
+    currentPlayback.frame = stage.frame;
+    currentPlayback.appearance = stage.appearance;
+    if (stage.modelTransform !== undefined) {
+      currentPlayback.modelTransform = stage.modelTransform;
+    }
+    if (options.diagnostics) {
+      options.diagnostics.playbackCanonicalShapeVisits += stage.shapeEnd - stage.shapeStart;
+      options.diagnostics.playbackCanonicalLeafVisits += stage.leafEnd - stage.leafStart;
+    }
+    for (let cursor = stage.shapeStart; cursor < stage.shapeEnd; cursor += 1) {
+      const target = stage.page.shapeTargets[cursor];
+      const transform = stage.page.transforms[stage.page.shapeTransforms[cursor]];
+      currentPlayback.shapeTransforms[target] = transform;
+      currentPlayback.shapeVisibility[target] = stage.page.shapeVisibility[cursor];
+    }
+    for (let cursor = stage.leafStart; cursor < stage.leafEnd; cursor += 1) {
+      const target = stage.page.leafTargets[cursor];
+      const transform = stage.page.transforms[stage.page.leafTransforms[cursor]];
+      currentPlayback.leafTransforms[target] = transform;
+    }
+    currentPlaybackBytes = nextPlaybackBytes;
   };
+  const discardActiveStage = (): void => {
+    activeStage = null;
+    activePlaybackStageResource = null;
+    activeVariantStageResource = null;
+    activeStageBytes = 0;
+  };
+  const installActiveStage = (stage: PagedStateStage): PagedStateStage => {
+    // Range stages borrow resident typed columns, so their page pins must survive until synchronous commit or failure cleanup.
+    activeStage = stage;
+    activePlaybackStageResource = stage.playback?.kind === "range" ? pageAt(playback!.packet, stage.frame).resource : null;
+    activeVariantStageResource = stage.variants?.kind === "range" ? pageAt(variants!.packet, stage.frame).resource : null;
+    return stage;
+  };
+  const isActiveStage = (stage: PagedStateStage): boolean => Boolean(activeStage
+    && stage.frame === activeStage.frame
+    && stage.playback === activeStage.playback
+    && stage.variants === activeStage.variants);
 
   return Object.freeze({
     get hasPlayback() { return Boolean(playback); }, get hasVariants() { return Boolean(variants); },
     get residentResources() { return Object.freeze([...resident.keys()]); }, get peakResidentPages() { return peakResidentPages; }, get peakDecodedBytes() { return peakDecodedBytes; }, get peakMaterializedBytes() { return peakMaterializedBytes; }, get peakDocumentStateBytes() { return peakDocumentStateBytes; },
-    get frame() { return currentPlayback?.frame ?? variantFrame; }, get activeFramePin() { return activeFramePin; }, get initialPlayback() { return currentPlayback; },
+    get frame() { return currentPlayback?.frame ?? variantFrame; }, get activeFramePin() { return activeFramePin; }, get canonicalPlayback() { return currentPlayback; },
     async prepareInitial(signal?: AbortSignal) {
       invariant(!signal?.aborted, "OPERATION_ABORTED", "Paged state initial request was aborted.");
       const request = startRequest();
@@ -380,23 +599,32 @@ export function createPolycssPagedState(
       try {
         await loadWindow(playbackInitial, request.signal, false);
         invariant(request.id === generation && !request.signal.aborted, "OPERATION_ABORTED", "Paged state initial request was superseded.");
+        const initialPlaybackPage = playback ? playbackPage(playback.packet.initial.sourceFrame) : null;
+        const initialWorkspace = addBytes(
+          initialPlaybackPage && playback ? pagedPlaybackLiveRowCeiling(initialPlaybackPage.materializedByteLength, playback.packet.shapeCount, playback.packet.leafCount) : 0,
+          variants ? pagedVariantPublicationWorkspaceBytes(variantNodes.length) : 0,
+          "Paged state initial publication",
+        );
+        measure({ transientMaterialized: initialWorkspace });
+        let preparedPlayback: PagedPlaybackCanonical | null = null;
         if (playback) {
-          const initialPage = playbackPage(playback.packet.initial.sourceFrame);
-          measure(0, pagedPlaybackLiveRowCeiling(initialPage.materializedByteLength, playback.packet.shapeCount, playback.packet.leafCount));
-          const initial = playbackCanonical(initialPage, playback.packet.initial.sourceFrame);
+          const initial = playbackCanonical(initialPlaybackPage!, playback.packet.initial.sourceFrame, options.diagnostics);
           invariant(initial.appearance === playback.packet.initial.appearance, "STATE_PAGE_INITIAL_MISMATCH", "Paged playback initial page disagrees with its shell appearance.");
           const base = (playback.binding.parameters as unknown as { readonly baseSceneTransform: string }).baseSceneTransform;
           const expectedModel = initial.modelTransform === "" ? base : `${base} ${initial.modelTransform}`;
           invariant(playbackModel!.style.transform === cssTransform(expectedModel), "STATE_PAGE_INITIAL_MISMATCH", "Paged playback initial model transform disagrees with TREE.");
           for (let index = 0; index < playbackShapes.length; index += 1) invariant(playbackShapes[index].style.transform === cssTransform(initial.shapeTransforms[index]) && playbackShapes[index].style.visibility === (initial.shapeVisibility[index] === 1 ? "visible" : "hidden"), "STATE_PAGE_INITIAL_MISMATCH", `Paged playback initial shape ${index} disagrees with TREE.`);
           for (let index = 0; index < playbackLeaves.length; index += 1) invariant(playbackLeaves[index].style.transform === cssTransform(initial.leafTransforms[index]), "STATE_PAGE_INITIAL_MISMATCH", `Paged playback initial leaf ${index} disagrees with TREE.`);
-          currentPlayback = initial;
+          preparedPlayback = initial;
         }
         if (variants) {
-          const initial = variantRow(variantPage(variants.packet.initial.frame), variants.packet.initial.frame);
+          const initial = variantRow(variantPage(variants.packet.initial.frame), variants.packet.initial.frame, options.diagnostics);
           invariant(initial.length === currentVariants!.length && initial.every((value, index) => value === currentVariants![index]), "STATE_PAGE_INITIAL_MISMATCH", "Paged variant initial page disagrees with its shell/TREE row.");
         }
-        measure();
+        if (preparedPlayback) {
+          currentPlaybackBytes = playbackLiveBytes(preparedPlayback);
+          currentPlayback = preparedPlayback;
+        }
       } finally { signal?.removeEventListener("abort", abort); }
     },
     async ensureFrame(frame: number, signal?: AbortSignal) {
@@ -435,19 +663,48 @@ export function createPolycssPagedState(
     assertFrameReady(frame: number) { invariant(ready(frame), "STATE_PAGE_NOT_READY", `Every paged state channel must be resident before frame ${frame} publication.`); },
     stage(frame: number, includePlayback = true) {
       invariant(ready(frame), "STATE_PAGE_NOT_READY", `Every paged state channel must be resident before frame ${frame} staging.`);
-      const playbackWorkspace = includePlayback && playback
-        ? pagedPlaybackPublicationWorkspaceBytes(playbackPage(frame).materializedByteLength, playback.packet.shapeCount, playback.packet.leafCount)
-        : 0;
-      measure(0, playbackWorkspace + pagedVariantPublicationWorkspaceBytes(variantNodes.length));
-      return Object.freeze({ frame, playback: includePlayback ? stagePlayback(frame) : null, variants: stageVariants(frame) });
+      discardActiveStage();
+      try {
+        activeStageBytes = addBytes(playbackStageWorkspace(frame, includePlayback), variantStageWorkspace(frame), "Paged state publication workspace");
+        measure();
+        const playbackStage = includePlayback ? stagePlayback(frame) : null;
+        const variantStage = stageVariants(frame);
+        return installActiveStage(Object.freeze({ frame, playback: playbackStage, variants: variantStage }));
+      } catch (error) {
+        discardActiveStage();
+        throw error;
+      }
     },
-    commit(stage: PagedStateStage, publishVariants = true) { if (stage.playback) applyPlaybackStage(stage.playback); if (stage.variants) applyVariantStage(stage.variants, publishVariants); else if (publishVariants && variants) publishVariantRow(); measure(); return stage.frame; },
-    publishVariants(frame: number) { invariant(ready(frame), "STATE_PAGE_NOT_READY", `Every paged state channel must be resident before frame ${frame} variant publication.`); measure(0, pagedVariantPublicationWorkspaceBytes(variantNodes.length)); const staged = Object.freeze({ frame, playback: null, variants: stageVariants(frame) }); if (staged.variants) applyVariantStage(staged.variants, true); measure(); return frame; },
+    commit(stage: PagedStateStage, publishVariants = true) {
+      invariant(isActiveStage(stage), "INVALID_PLAYBACK_PUBLICATION", "Paged state commit does not own the active staged row.");
+      try {
+        const nextPlaybackBytes = stage.playback ? playbackBytesAfterStage(stage.playback) : currentPlaybackBytes;
+        measure({ retainedLiveBytes: addBytes(nextPlaybackBytes, variantLiveBytes, "Paged state projected live-row") });
+        if (stage.playback) applyPlaybackStage(stage.playback, nextPlaybackBytes);
+        if (stage.variants) applyVariantStage(stage.variants, publishVariants);
+        else if (publishVariants && variants) publishVariantRow();
+        return stage.frame;
+      } finally { discardActiveStage(); }
+    },
+    publishVariants(frame: number) {
+      invariant(ready(frame), "STATE_PAGE_NOT_READY", `Every paged state channel must be resident before frame ${frame} variant publication.`);
+      discardActiveStage();
+      if (variants && frame === variantFrame) {
+        measure();
+        publishVariantRow();
+        return frame;
+      }
+      const workspace = variantStageWorkspace(frame);
+      measure({ transientMaterialized: workspace });
+      const variantStage = stageVariants(frame);
+      if (variantStage) applyVariantStage(variantStage, true);
+      return frame;
+    },
     setActiveFramePin(frame: number) { invariant(Number.isSafeInteger(frame) && frame >= 1 && ready(frame), "STATE_PAGE_NOT_READY", `Prepared bank entry frame ${frame} must be resident before it can be pinned.`); activeFramePin = frame; },
     preloadAfter(frame: number) { const request = startRequest(); void loadWindow(frame, request.signal).catch((error) => { if (!destroyed && request.id === generation && !request.signal.aborted) options.onLateFailure?.(error); }); },
     cancelPending() { controller?.abort(); controller = null; generation += 1; },
     resetPreload(frame: number) { controller?.abort(); controller = null; generation += 1; const request = startRequest(); void loadWindow(frame, request.signal).catch((error) => { if (!destroyed && request.id === generation && !request.signal.aborted) options.onLateFailure?.(error); }); },
-    destroy() { if (destroyed) return false; destroyed = true; controller?.abort(); controller = null; generation += 1; resident.clear(); currentPlayback = null; currentVariants = null; publishedVariants = null; return true; },
+    destroy() { if (destroyed) return false; destroyed = true; controller?.abort(); controller = null; generation += 1; discardActiveStage(); resident.clear(); currentPlayback = null; currentPlaybackBytes = 0; currentVariants = null; publishedVariants = null; return true; },
   });
 }
 

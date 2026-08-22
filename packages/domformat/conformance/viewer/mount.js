@@ -539,6 +539,7 @@ export async function mountConformanceDom(result, host, options = {}) {
     pagedState = createPolycssPagedState(document, mounted, DEFAULT_LIMITS, loadStatePage, {
       boundTargets,
       onLateFailure: cleanup,
+      diagnostics: options.diagnostics,
     });
     await pagedState?.prepareInitial(options.signal);
     compositorTiming = createPolycssCompositorTiming(document.state, document.bindings, materialized, mounted, { boundTargets });
@@ -549,6 +550,7 @@ export async function mountConformanceDom(result, host, options = {}) {
       pagedState,
       assertPagedFrameReady: (frame) => pagedState?.assertFrameReady(frame),
       compositorTiming,
+      diagnostics: options.diagnostics,
     });
     effects = interpreters.has("polycss-effects@0")
       ? createPolycssEffects(materialized, document.bindings, mounted, { boundTargets })
