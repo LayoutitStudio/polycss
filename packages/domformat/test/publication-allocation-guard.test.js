@@ -101,6 +101,10 @@ for (const [scope, sourceName] of [
   ["publishVariantTarget", "pagedSource"],
   ["publishStageShapeVisibility", "polycssSource"],
   ["publishSurfaceTarget", "polycssSource"],
+  ["recoverSurface", "polycssSource"],
+  ["recoverPendingTransforms", "polycssSource"],
+  ["publishProfileVisibility", "polycssSource"],
+  ["publishRecoveredShapeVisibility", "polycssSource"],
 ]) {
   test(`sequential paged publication guard rejects Set construction in ${scope}`, () => {
     const source = sourceName === "pagedSource" ? pagedSource : polycssSource;
@@ -218,7 +222,7 @@ test("publication trace binds lossless capture, raw preservation, and the page-p
   assert.match(publicationReportSource, /assertPublicationTraceComplete\(traceCompletion\)/u);
   assert.match(publicationReportSource, /assertPublicationPagePreparationGate\(trace\)/u);
   assert.match(publicationReportSource, /pagePreparationTaskMaxMs: PUBLICATION_PAGE_PREPARATION_MAX_TASK_MS/u);
-  assert.match(publicationReportSource, /General RunTask, cadence, and relative-speed observations have no hard gate/u);
+  assert.match(publicationReportSource, /General renderer scheduler tasks, cadence, and relative-speed observations have no hard gate/u);
   assert.match(publicationReportSource, /attribution: PUBLICATION_PAGE_PREPARATION_ATTRIBUTION/u);
   assert.match(publicationReportSource, /idleCallbackCount: idle\.length/u);
 });

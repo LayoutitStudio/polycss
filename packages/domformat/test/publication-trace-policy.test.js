@@ -3,6 +3,7 @@ import { test } from "node:test";
 import {
   assertPublicationPagePreparationGate,
   assertPublicationTraceComplete,
+  PUBLICATION_MAIN_TASK_EVENT,
   PUBLICATION_PAGE_PREPARATION_ATTRIBUTION,
   PUBLICATION_PAGE_PREPARATION_MAX_TASK_MS,
   PUBLICATION_TRACE_START_CONFIG,
@@ -16,10 +17,11 @@ test("publication tracing records as much as possible with the bounded category 
       includedCategories: [
         "blink.user_timing",
         "devtools.timeline",
-        "disabled-by-default-devtools.timeline",
+        "toplevel",
       ],
     },
   });
+  assert.equal(PUBLICATION_MAIN_TASK_EVENT, "ThreadControllerImpl::RunTask");
 });
 
 test("publication trace completion rejects reported or unknown data loss", () => {

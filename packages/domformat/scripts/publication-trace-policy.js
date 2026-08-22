@@ -1,7 +1,8 @@
 import { invariant } from "../src/errors.js";
 
 export const PUBLICATION_PAGE_PREPARATION_MAX_TASK_MS = 50;
-export const PUBLICATION_PAGE_PREPARATION_ATTRIBUTION = "RunTask containing FireIdleCallback";
+export const PUBLICATION_MAIN_TASK_EVENT = "ThreadControllerImpl::RunTask";
+export const PUBLICATION_PAGE_PREPARATION_ATTRIBUTION = `${PUBLICATION_MAIN_TASK_EVENT} containing FireIdleCallback`;
 export const PUBLICATION_TRACE_START_CONFIG = Object.freeze({
   transferMode: "ReportEvents",
   traceConfig: Object.freeze({
@@ -9,7 +10,7 @@ export const PUBLICATION_TRACE_START_CONFIG = Object.freeze({
     includedCategories: Object.freeze([
       "blink.user_timing",
       "devtools.timeline",
-      "disabled-by-default-devtools.timeline",
+      "toplevel",
     ]),
   }),
 });

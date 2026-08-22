@@ -74,7 +74,7 @@ function createFixture(options = {}) {
       kind: "inline",
       shapeCount: shapes.length,
       leafCount: 2,
-      appearances: [["default", 1, 0]],
+      appearances: options.appearances ?? [["default", 1, 0]],
       timeline: {
         introTicks: 0,
         loopTicks: options.timeline?.length ?? frameCount,
@@ -144,7 +144,7 @@ function createFixture(options = {}) {
       kind: "paged",
       shapeCount: shapes.length,
       leafCount: 2,
-      appearances: [["default", 1, 0]],
+      appearances: options.appearances ?? [["default", 1, 0]],
       timeline: {
         introTicks: 0,
         loopTicks: options.timeline?.length ?? frameCount,
@@ -214,7 +214,7 @@ function createFixture(options = {}) {
   if (options.pagedState?.hasVariants) bindings.channels.push({ id: "paged-variants", interpreter: "polycss-paged-variants@0", targets: { effectNodes: [], nodes: [] } });
   if (options.viewportProfiles) bindings.channels.push({ id: "viewport-profiles", interpreter: "polycss-viewport-profiles@0", targets: { leaves: leaves.map((leaf) => leaf.id) } });
   const mounted = { byId: new Map([[model.id, model], ...shapes.map((shape) => [shape.id, shape]), ...leaves.map((leaf) => [leaf.id, leaf])]) };
-  const playback = createPolycssPlayback(materialized, bindings, mounted, { publishAppearance() {}, diagnostics: options.diagnostics, pagedState: options.pagedState });
+  const playback = createPolycssPlayback(materialized, bindings, mounted, { publishAppearance: options.publishAppearance ?? (() => {}), diagnostics: options.diagnostics, pagedState: options.pagedState });
   playback.publishInitial();
   if (options.viewportProfiles) playback.applyViewportProfile(320, 240, "mobile");
   writes.splice(0);
@@ -729,6 +729,110 @@ test("playback defers hidden transforms and flushes the latest value before reve
     ]);
   });
 
+  test("same-frame seek retries appearance and every skipped transform after a paint failure", () => {
+    let rejectAppearance = true;
+    const appearanceAttempts = [];
+    const fixture = createFixture({
+      appearances: [["frame-1", 1, 0], ["frame-2", 1, 0]],
+      frameRows: [
+        [1, 0, -1, 0, 0, 0, 0],
+        [2, 1, -1, 0, 0, 0, 2],
+        [3, 1, -1, 0, 0, 2, 1],
+        [4, 1, -1, 0, 0, 3, 0],
+      ],
+      initialVisibleBits: 3,
+      visibilityOffsets: [0, 0, 0, 0, 0],
+      viewportProfiles: true,
+      dynamicViewportProfiles: true,
+      profileTransformIndices: Uint16Array.of(0xffff, 0xffff),
+      publishAppearance(appearance) {
+        appearanceAttempts.push(appearance[0]);
+        if (appearance[0] === "frame-2" && rejectAppearance) {
+          rejectAppearance = false;
+          throw new Error("injected appearance failure");
+        }
+      },
+    });
+    const identities = [...fixture.leaves];
+
+    assert.throws(() => fixture.playback.seek(2), /injected appearance failure/u);
+    assert.equal(fixture.playback.sourceFrame, 2);
+    assert.equal(fixture.leaves[0].style.transform, "leaf-0-frame-1");
+    assert.equal(fixture.leaves[1].style.transform, "leaf-1-frame-1");
+    assert.equal(fixture.leaves[0].style.visibility, "hidden");
+
+    assert.equal(fixture.playback.seek(2), 2);
+    assert.deepEqual(appearanceAttempts, ["frame-1", "frame-2", "frame-2"]);
+    assert.equal(fixture.leaves[0].style.transform, "leaf-0-frame-2");
+    assert.equal(fixture.leaves[1].style.transform, "leaf-1-frame-2");
+    assert.equal(fixture.leaves[0].style.visibility, "visible");
+    assert.deepEqual(fixture.leaves, identities);
+  });
+
+  test("same-frame seek retries the complete declared transform set after a transform write fails", () => {
+    const fixture = createFixture();
+    const identities = [...fixture.leaves];
+    failNextStyleWrite(fixture.leaves[0], fixture.writes, "transform");
+
+    assert.throws(() => fixture.playback.seek(2), /injected transform failure/u);
+    assert.equal(fixture.playback.sourceFrame, 2);
+    assert.equal(fixture.leaves[0].style.transform, "leaf-0-frame-1");
+    assert.equal(fixture.leaves[1].style.transform, "leaf-1-frame-1");
+
+    fixture.writes.splice(0);
+    assert.equal(fixture.playback.seek(2), 2);
+    assert.equal(fixture.leaves[0].style.transform, "leaf-0-frame-2");
+    assert.equal(fixture.leaves[1].style.transform, "leaf-1-frame-2");
+    assert.deepEqual(fixture.writes.filter(([, property]) => property === "transform"), [
+      ["leaf:0", "transform", "leaf-0-frame-2", "set"],
+      ["leaf:1", "transform", "leaf-1-frame-2"],
+    ]);
+    assert.deepEqual(fixture.leaves, identities);
+  });
+
+  test("same-frame seek retries a model transform after its style write fails", () => {
+    const fixture = createFixture({
+      frameRows: [
+        [1, 0, -1, 0, 0, 0, 0],
+        [2, 0, 6, 0, 0, 0, 0],
+        [3, 0, -1, 0, 0, 0, 0],
+        [4, 0, -1, 0, 0, 0, 0],
+      ],
+      transforms: [
+        "",
+        "leaf-0-frame-1",
+        "leaf-0-frame-2",
+        "leaf-0-frame-3",
+        "leaf-1-frame-1",
+        "leaf-1-frame-2",
+        "model-frame-2",
+      ],
+    });
+    failNextStyleWrite(fixture.model, fixture.writes, "transform");
+
+    assert.throws(() => fixture.playback.seek(2), /injected transform failure/u);
+    assert.equal(fixture.playback.sourceFrame, 2);
+    assert.equal(fixture.model.style.transform, "base-scene");
+
+    assert.equal(fixture.playback.seek(2), 2);
+    assert.equal(fixture.model.style.transform, "base-scene model-frame-2");
+  });
+
+  test("the next advance repairs skipped transforms from a failed committed frame", () => {
+    const fixture = createFixture({ initialVisibleBits: 3, visibilityOffsets: [0, 0, 0, 0, 0] });
+    failNextStyleWrite(fixture.leaves[0], fixture.writes, "transform");
+
+    assert.throws(() => fixture.playback.advance(), /injected transform failure/u);
+    assert.equal(fixture.playback.sourceFrame, 2);
+    assert.equal(fixture.playback.tick, 1);
+
+    assert.equal(fixture.playback.advance(), 3);
+    assert.equal(fixture.playback.sourceFrame, 3);
+    assert.equal(fixture.playback.tick, 2);
+    assert.equal(fixture.leaves[0].style.transform, "leaf-0-frame-3");
+    assert.equal(fixture.leaves[1].style.transform, "leaf-1-frame-2");
+  });
+
   test("same-frame seek restores canonical variant and surface state", () => {
     const { leaves, playback, writes } = createFixture({
       variants: true,
@@ -1183,6 +1287,40 @@ test("playback defers hidden transforms and flushes the latest value before reve
     assert.deepEqual(writes, [["leaf:0", "visibility", "hidden"]]);
   });
 
+  test("restart validates every interaction index before changing playback or DOM state", () => {
+    const fixture = createFixture({ initialVisibleBits: 3, visibilityOffsets: [0, 0, 0, 0, 0] });
+    assert.equal(fixture.playback.advance(), 2);
+    fixture.writes.splice(0);
+
+    assert.throws(() => fixture.playback.restart([], [0, 2]), (error) => error?.code === "INVALID_INTERACTION_PUBLICATION");
+    assert.equal(fixture.playback.sourceFrame, 2);
+    assert.equal(fixture.playback.tick, 1);
+    assert.deepEqual(fixture.writes, []);
+    assert.equal(fixture.leaves[0].style.transform, "leaf-0-frame-2");
+    assert.equal(fixture.leaves[1].style.transform, "leaf-1-frame-2");
+  });
+
+  test("a post-commit restart paint failure keeps the restarted tick and remains retryable", () => {
+    let rejectRestartAppearance = false;
+    const fixture = createFixture({
+      publishAppearance() {
+        if (rejectRestartAppearance) {
+          rejectRestartAppearance = false;
+          throw new Error("injected restart appearance failure");
+        }
+      },
+    });
+    assert.equal(fixture.playback.advance(), 2);
+    assert.equal(fixture.playback.tick, 1);
+    rejectRestartAppearance = true;
+
+    assert.throws(() => fixture.playback.restart(), /injected restart appearance failure/u);
+    assert.equal(fixture.playback.sourceFrame, 1);
+    assert.equal(fixture.playback.tick, 0);
+    assert.equal(fixture.playback.restart(), 1);
+    assert.equal(fixture.playback.tick, 0);
+  });
+
   test("forced reveal flushes prepared state and restore clears hidden dirt", () => {
     const forced = createFixture();
     assert.equal(forced.playback.advance(), 2);
@@ -1310,6 +1448,27 @@ test("playback defers hidden transforms and flushes the latest value before reve
     assert.equal(fixture.shapes[0].style.transform, "shape-frame-2");
     assert.equal(fixture.shapes[0].style.visibility, "visible");
     assert.deepEqual(fixture.leaves[0].classes, ["material-b"]);
+  });
+
+  test("a catch-up failure plus publication recovery failure stays in the DomFormatError taxonomy", () => {
+    const commitFailure = new Error("injected frame 3 commit failure");
+    const pagedState = pagedStateFixture({
+      hasPlayback: true,
+      hasVariants: false,
+      onCommit(stage) {
+        if (stage.frame === 3) throw commitFailure;
+      },
+    });
+    const fixture = createFixture({ pagedPlayback: true, pagedState });
+    failNextStyleWrite(fixture.leaves[1], fixture.writes, "transform");
+
+    assert.throws(() => fixture.playback.advanceMany(2), (error) => {
+      assert.equal(error?.name, "DomFormatError");
+      assert.equal(error?.code, "PLAYBACK_PUBLICATION_RECOVERY_FAILED");
+      assert.equal(error?.details?.publicationError, commitFailure);
+      assert.match(String(error?.details?.recoveryError), /injected transform failure/u);
+      return true;
+    });
   });
 
   test("playback catch-up advances every tick and publishes only the final paint state", () => {

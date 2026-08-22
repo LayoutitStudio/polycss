@@ -14,6 +14,10 @@ const FORBIDDEN_SCOPE_NAMES = Object.freeze([
   "publishSurfaceRangeWithForced",
   "applySurface",
   "stageProfileVisibility",
+  "recoverSurface",
+  "recoverPendingTransforms",
+  "publishProfileVisibility",
+  "publishRecoveredShapeVisibility",
 ]);
 
 function optionalNamedFunction(sourceFile, name) {
@@ -136,6 +140,10 @@ export function auditSequentialPagedPublicationSources({ pagedSource, polycssSou
   const publishSurfaceRangeWithForced = optionalNamedFunction(polycss, "publishSurfaceRangeWithForced");
   const applySurface = namedFunction(polycss, "applySurface");
   const stageProfileVisibility = namedFunction(polycss, "stageProfileVisibility");
+  const recoverSurface = optionalNamedFunction(polycss, "recoverSurface");
+  const recoverPendingTransforms = optionalNamedFunction(polycss, "recoverPendingTransforms");
+  const publishProfileVisibility = optionalNamedFunction(polycss, "publishProfileVisibility");
+  const publishRecoveredShapeVisibility = optionalNamedFunction(polycss, "publishRecoveredShapeVisibility");
   const validatePagedPlaybackBoundaryFromCanonical = namedFunction(statePages, "validatePagedPlaybackBoundaryFromCanonical");
   const stagePlaybackSequential = branchWithCondition(paged, stagePlayback, /frame\s*===\s*expected|frame\s*===\s*\(.*expected/u, "stagePlayback sequential branch");
   const stageVariantsSequential = branchWithCondition(paged, stageVariants, /frame\s*===\s*expected/u, "stageVariants sequential branch");
@@ -148,6 +156,10 @@ export function auditSequentialPagedPublicationSources({ pagedSource, polycssSou
     ...(publishStageShapeVisibility ? [] : ["publishStageShapeVisibility"]),
     ...(publishSurfaceTarget ? [] : ["publishSurfaceTarget"]),
     ...(publishSurfaceRangeWithForced ? [] : ["publishSurfaceRangeWithForced"]),
+    ...(recoverSurface ? [] : ["recoverSurface"]),
+    ...(recoverPendingTransforms ? [] : ["recoverPendingTransforms"]),
+    ...(publishProfileVisibility ? [] : ["publishProfileVisibility"]),
+    ...(publishRecoveredShapeVisibility ? [] : ["publishRecoveredShapeVisibility"]),
     ...(pageBoundaryValidationCalled ? [] : ["validatePagedPlaybackBoundaryFromCanonical:call-site"]),
   ];
   const violations = [
@@ -164,6 +176,10 @@ export function auditSequentialPagedPublicationSources({ pagedSource, polycssSou
     ...(publishSurfaceRangeWithForced ? auditNode(polycss, publishSurfaceRangeWithForced.body, "publishSurfaceRangeWithForced") : []),
     ...auditNode(polycss, applySurface.body, "applySurface"),
     ...auditNode(polycss, stageProfileVisibility.body, "stageProfileVisibility"),
+    ...(recoverSurface ? auditNode(polycss, recoverSurface.body, "recoverSurface") : []),
+    ...(recoverPendingTransforms ? auditNode(polycss, recoverPendingTransforms.body, "recoverPendingTransforms") : []),
+    ...(publishProfileVisibility ? auditNode(polycss, publishProfileVisibility.body, "publishProfileVisibility") : []),
+    ...(publishRecoveredShapeVisibility ? auditNode(polycss, publishRecoveredShapeVisibility.body, "publishRecoveredShapeVisibility") : []),
     ...auditNode(statePages, validatePagedPlaybackBoundaryFromCanonical.body, "validatePagedPlaybackBoundaryFromCanonical"),
   ];
   const pagedDispatchBeforeInlineMaterialization = pagedDispatchGuard(polycss);
