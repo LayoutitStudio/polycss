@@ -4,6 +4,7 @@ import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
 import sitemap from '@astrojs/sitemap';
 import react from '@astrojs/react';
+import { googleAnalyticsBootstrap } from './src/googleAnalytics.mjs';
 
 /** @param {string} path */
 const repoPath = (path) => fileURLToPath(new URL(path, import.meta.url));
@@ -55,9 +56,8 @@ export default defineConfig({
       favicon: '/favicon.ico',
       head: [
         // Google Analytics (gtag.js) — covers all Starlight docs pages; custom
-        // pages render the same tag via src/components/Analytics.astro.
-        { tag: 'script', attrs: { async: true, src: 'https://www.googletagmanager.com/gtag/js?id=G-XV72TXWTM5' } },
-        { tag: 'script', content: "window.dataLayer = window.dataLayer || [];\nfunction gtag(){dataLayer.push(arguments);}\ngtag('js', new Date());\ngtag('config', 'G-XV72TXWTM5');" },
+        // pages render the same bootstrap via src/components/Analytics.astro.
+        { tag: 'script', content: googleAnalyticsBootstrap },
         { tag: 'meta', attrs: { property: 'og:image', content: 'https://polycss.com/polycss-github.png' } },
         { tag: 'meta', attrs: { property: 'og:image:width', content: '1280' } },
         { tag: 'meta', attrs: { property: 'og:image:height', content: '640' } },
