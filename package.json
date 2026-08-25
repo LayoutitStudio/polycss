@@ -20,7 +20,7 @@
   "scripts": {
     "build": "pnpm -r --if-present build",
     "build:packages": "pnpm --filter './packages/*' -r build",
-    "test": "pnpm --filter './packages/*' -r --if-present test",
+    "test": "pnpm --filter './packages/*' -r --if-present test && pnpm --filter @layoutit/polycss-website test:analytics",
     "test:coverage": "pnpm --filter './packages/*' -r --if-present test:coverage",
     "sync:readmes": "node .github/scripts/sync-package-readmes.mjs",
     "sync:skill": "node .github/scripts/sync-skill-docs.mjs",
